@@ -85,7 +85,8 @@ let dashboard_fleet_composite_json ~(config : Workspace.config) () : Yojson.Safe
      rebuild cycle (RFC-0029 §3 non-goal), so it does not re-introduce
      projection-staleness drift. *)
   let cache_key =
-    Printf.sprintf "dashboard:fleet-composite:%s" config.base_path
+    Server_dashboard_http_keeper_api_types.fleet_composite_cache_key
+      ~base_path:config.base_path
   in
   Dashboard_cache.get_or_compute cache_key
     ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s

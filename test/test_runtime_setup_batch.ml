@@ -73,6 +73,38 @@ let test_batch () = fixture (fun base runtime binary spec original ->
   ignore (get (apply base binary specs ids next false));
   (* Existing identities must not append the provider/model definitions again. *)
   Alcotest.check Alcotest.string "idempotent connection definitions" (after ^ "\n# native lane writer fixture\n") (text runtime))
+(* With the workspace's running server as the writer (RFC-0482 §3.2), the save
+   is decided against the text it holds, staged here and published by
+   [commit]; this process writes no file. *)
+let test_configure_text_publishes_through_commit () = fixture (fun base runtime binary spec original ->
+  fake base binary "pass";
+  let specs = [spec "new-a"] in
+  let ids = List.map (fun s -> (Runtime_setup_spec.render s).runtime_id) specs in
+  let published = ref [] in
+  let commit text =
+    published := text :: !published;
+    Ok { Batch.source_revision = "server-revision"; order = "server-order";
+         durability = Runtime.Durable; lock_warnings = [] }
+  in
+  let receipt =
+    get (Batch.configure_text ~binary ~original_text:original
+           ~expected_revision:(Batch.revision_of_text original) ~specs ~runtime_ids:ids
+           ~default_runtime_id:(List.hd ids) ~verify:false ~commit ())
+  in
+  Alcotest.check Alcotest.int "one publication" 1 (List.length !published);
+  Alcotest.check Alcotest.bool "the published text keeps the text it started from" true
+    (String.starts_with ~prefix:original (List.hd !published));
+  Alcotest.check Alcotest.string "this process writes no file" original (text runtime);
+  Alcotest.check Alcotest.string "the receipt is the commit's" "server-revision" receipt.commit.source_revision;
+  match
+    Batch.configure_text ~binary ~original_text:(original ^ "\n# written meanwhile\n")
+      ~expected_revision:(Batch.revision_of_text original) ~specs ~runtime_ids:ids
+      ~default_runtime_id:(List.hd ids) ~verify:false
+      ~commit:(fun _ -> Alcotest.fail "a text that moved reached the commit") ()
+  with
+  | Error Batch.Changed_configuration -> ()
+  | Error error -> Alcotest.failf "a text that moved: %s" (Batch.error_message error)
+  | Ok _ -> Alcotest.fail "a text that moved since the inventory was saved")
 let test_account_model_variants () = fixture (fun base runtime binary _spec _original ->
   fake base binary "pass";
   let spec home model context = Runtime_setup_spec.of_json (`Assoc [
@@ -348,7 +380,7 @@ let test_verification_report () = fixture (fun base _runtime binary spec _origin
     | Ok _
     | Error (Batch.Invalid_selection | Invalid_configuration | Changed_configuration | Configuration_unavailable
             | Child_not_started _ | Validation_failed _ | Commit_refused _ | Verification_failed _
-            | Verification_unreadable _ | Write_failed _ | Lock_unavailable) -> false in
+            | Verification_unreadable _ | Write_failed _ | Lock_unavailable | Commit_unobserved _) -> false in
   Alcotest.check Alcotest.bool "verified status with a failure attached is refused" true
     (unreadable "print(report(a[3],failure={'code':'timed_out','message':'late','detail':None}))");
   Alcotest.check Alcotest.bool "a key the writer never writes is refused" true
@@ -626,6 +658,7 @@ let () = Alcotest.run "runtime setup batch" ["workspace",[
   Alcotest.test_case "native batch reuses custom account" `Quick test_custom_account_new_model;
   Alcotest.test_case "an error summary is one line and names the signal" `Quick test_error_summary_is_one_line;
   Alcotest.test_case "ordered multi-selection and existing bytes" `Quick test_batch;
+  Alcotest.test_case "a save through the running server publishes by its commit" `Quick test_configure_text_publishes_through_commit;
   Alcotest.test_case "the saved account is live in the registry without a restart" `Quick test_save_publishes_the_registry;
   Alcotest.test_case "account model variants survive save and inventory" `Quick test_account_model_variants;
   Alcotest.test_case "preserve named default lane and candidate order" `Quick test_named_default_lane;

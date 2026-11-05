@@ -38,19 +38,6 @@ let to_yojson = function
 
 let of_yojson json = Result.bind (Keeper_continuation_channel.of_yojson json) (of_continuation ?imessage_destination:None)
 
-let matches_continuation route channel =
-  match route, channel with
-  | Telegram a, Keeper_continuation_channel.Telegram b ->
-    a.bot_user_id=b.bot_user_id && a.chat_id=b.chat_id && a.message_thread_id=b.message_thread_id
-    && a.direct_messages_topic_id=b.direct_messages_topic_id && a.reply_to_message_id=b.reply_to_message_id
-    && a.user_id=b.user_id
-  | Imessage a, Keeper_continuation_channel.Imessage b ->
-    a.chat_identifier=b.chat_identifier && b.chat_guid=Some a.chat_guid && a.user_id=b.user_id
-  | (Telegram _ | Imessage _), (Keeper_continuation_channel.Dashboard _
-      | Keeper_continuation_channel.Discord _ | Keeper_continuation_channel.Slack _
-      | Keeper_continuation_channel.Telegram _ | Keeper_continuation_channel.Imessage _
-      | Keeper_continuation_channel.Keeper _ | Keeper_continuation_channel.Unrouted _) -> false
-
 let surface = function
   | Telegram r -> Keeper_telegram_coordinates.surface ~bot_user_id:r.bot_user_id ~chat_id:r.chat_id
       ~message_thread_id:r.message_thread_id ~direct_messages_topic_id:r.direct_messages_topic_id

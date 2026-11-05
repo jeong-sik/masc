@@ -1,0 +1,87 @@
+(* HIGH-RISK-UNREVIEWED: this module reads what the boot judgment of the account
+   mode decides on. Reading a file that is there as absent boots a rolled-back
+   multi-account installation as a single user. *)
+
+(** What the boot reads for {!Authz_boot_mode.judge}, and what it does with the
+    answer (multi-account plan, A2 scope).
+
+    It reads three things: the [account_mode] member and the other fields of
+    [config.json], the authorization log ([authz.jsonl]), and the external store
+    that the install record names. A file that is not there and a file that is
+    there and cannot be read are different answers. Every read happens on each
+    boot, so a base path that was restored to before its bootstrap is noticed
+    even when the config no longer asks for [Multi_account] (design 5.1, row 2).
+
+    The log and the store are opened only when their file is there
+    ({!Authz_presence}). Opening one ({!Authz_log.open_at_start},
+    {!Authz_external_store.open_at_start}) cuts a last line that never ended
+    and keeps a lock file next to it; a base path that has neither file gets no
+    directory and no lock file. A missing store is absent (design 8.4), and so
+    is a store whose directory is missing. A dangling symbolic link on the way
+    to either file is not: it makes the file unreadable. A pending intent of the store is judged, not
+    settled: {!Authz_high_water.judge} reads a promotion and an abort the same
+    way whether their entries were written or not (design 8.2-2, 8.2-3).
+
+    The install record is read on every boot, and a config directory that fails
+    its owner test ({!Authz_install_record}) refuses the boot even when no
+    record is there: whoever can write that directory could have removed the
+    record of a base path that was then restored to before its bootstrap.
+
+    The boot calls {!boot} once, after it holds the BasePath lease and inside an
+    Eio event loop, because the zones of the log and the store are
+    [Eio.Mutex]es. [config_dir] is {!Env_config_core.masc_config_dir_opt}. *)
+
+(** The [account_mode] member of a [config.json] that parsed as JSON. A value
+    that is not an object has no member. A member that appears twice is
+    {!Authz_boot_mode.Unknown_value}, whatever the two values are. *)
+val requested_of_json : Yojson.Safe.t -> Authz_boot_mode.requested
+
+(** What [config.json] under [base_path] asks for, and its other fields as the
+    full decoder reads them. A missing file asks for nothing and has the
+    default settings. A file that cannot be read, or is not JSON, asks for
+    nothing and has unreadable settings; a warning goes to the log. A JSON
+    object gives its member even when the full decoder refuses its other
+    fields. *)
+val read_config : base_path:string -> Authz_boot_mode.requested * Authz_boot_mode.settings
+
+(** The mode that the last mode event of the log made, and the external
+    high-water mark. *)
+val read_log_and_store
+  :  base_path:string
+  -> config_dir:string option
+  -> Authz_boot_mode.log_mode * Authz_boot_mode.high_water
+
+val input
+  :  base_path:string
+  -> config_dir:string option
+  -> anonymous_mutations:bool
+  -> Authz_boot_mode.input
+
+(** Why a boot does not go on. [Multi_account] before activation needs the
+    host-local bootstrap, which this server does not have yet. [Multi_account]
+    after activation needs the account layers that serve it; booting it without
+    them would serve multi-owned records with the behavior of a single user. *)
+type stop =
+  | Refuse of Authz_boot_mode.refusal * Authz_boot_mode.refusal list
+  | Multi_account_not_activatable
+  | Multi_account_not_served of Authz_boot_mode.mode
+
+(** What the boot does. Only a single user boots. *)
+type decision =
+  | Boot_single_user
+  | Stop of stop
+
+val decide : Authz_boot_mode.input -> decision
+
+(** One line per reason, the first apart, so a stop always has a reason. A
+    {!Multi_account_not_served} stop also says what the high-water mark found
+    when it is not a match. *)
+val messages : Authz_boot_mode.input -> stop -> string * string list
+
+(** {!input}, {!decide} and {!messages} in one call: [Ok ()] for a single-user
+    boot, and the messages of the stop otherwise. *)
+val boot
+  :  base_path:string
+  -> config_dir:string option
+  -> anonymous_mutations:bool
+  -> (unit, string * string list) result

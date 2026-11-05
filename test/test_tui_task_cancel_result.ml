@@ -15,7 +15,7 @@ let identity base : Masc.Tui_decode.server_identity =
   {sid_version="0.24.0";sid_binary_commit="task-cancel-resource";sid_binary_commit_age_s=None; sid_runtime_instance_id = None;
    sid_base_path=Masc.Tui_decode.Canonical_path.of_path (Unix.realpath base);sid_masc_root=Masc.Tui_decode.Canonical_path.of_path (Unix.realpath (Filename.concat base ".masc"));
    sid_executable_in_worktree=None;sid_state_ready=Some true;sid_uptime=None;
-   sid_sse_clients=None;sid_gc=None;sid_scheduler=None}
+   sid_sse_clients=None;sid_gc=None;sid_scheduler=None;sid_operator_action=None}
 let handshake ~id ~method_ params = Yojson.Safe.to_string
   (`Assoc ["jsonrpc",`String "2.0";"id",`Int id;"method",`String method_;"params",params])
 let tool_result ~request_id response =
@@ -845,10 +845,6 @@ let test_original_history_and_historical_evidence env () = Eio.Switch.run @@ fun
   Eio_context.with_turn_switch sw @@ fun () ->
   let state=creation_state base workspace in
   let original,task_id=retained_actual_creation state call ~workspace ~request_id:"original-proof-history" in
-  (* [with_server] leaves its own Task claimed by [owner], and claiming refuses an
-     agent that already holds an active Task (workspace/workspace_task_claim.ml,
-     [held_tasks_refusal_message]). Working the created Task through a second
-     agent keeps the fixture on the allowed path instead of tripping that rule. *)
   let proof_owner=owner ^ "-proof" in
   let first,second=actual_proof_submissions config ~owner:proof_owner ~task_id in
   (* Archive the actually approved Task; only age its terminal fixture time. *)

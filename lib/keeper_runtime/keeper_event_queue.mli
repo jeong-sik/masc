@@ -89,7 +89,7 @@ type board_stimulus = {
   content : string;
   hearth : string option;
   updated_at : float option;
-  audience : board_audience option;
+  audience : board_audience;
 }
 (** Typed board-signal payload carried end-to-end (RFC-0020).
 
@@ -101,9 +101,8 @@ type board_stimulus = {
 
     The [audience] is the event-time audience the producer pinned to this
     event alongside its content, so Drain-side matching judges the event, not
-    the post's current audience. [None] is a legacy row written before
-    pinning (explicit unknown, never a default): audience-dependent judgments
-    refuse it at drain instead of re-reading the current post. *)
+    the post's current audience. Decoding a row without an [audience] is an
+    error. *)
 
 type stimulus_payload =
   | Board_signal of board_stimulus
@@ -461,10 +460,6 @@ val dequeue : t -> (stimulus * t) option
 (** [dequeue q] removes and returns the front of [q], or [None] when
     empty. The Policy Layer must call this at the start of every
     [emit] turn to honour the KeeperEventQueue [TurnDequeue] action. *)
-
-val remove_by_post_id : post_id -> t -> stimulus list * t
-(** Remove all stimuli whose [post_id] matches the argument, returning the
-    removed stimuli in FIFO order plus the remaining queue. *)
 
 val contains : t -> stimulus -> bool
 (** [contains q s] is [true] when some stimulus already in [q] compares equal

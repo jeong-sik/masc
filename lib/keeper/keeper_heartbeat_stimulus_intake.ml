@@ -68,8 +68,6 @@ let event_queue_intake_error_to_string = function
 
 let event_queue_intake_error_reason_label = function
   | Pending_selection_failed _ -> "event_queue_selection_failed"
-  | Board_unavailable { error = Board.Read_audience_not_pinned _; _ } ->
-    "event_queue_board_audience_unavailable"
   | Board_unavailable { error = Board.Read_source_unavailable _; _ } ->
     "event_queue_board_source_unavailable"
   | Board_unavailable { error = (Board.Read_invalid_id _ | Board.Read_post_not_found _
@@ -95,8 +93,7 @@ let classify_pending_board_event_result = function
   | Ok events_opt -> Stimulus_consumed (Option.to_list events_opt)
   | Error (unavailable : Keeper_world_observation_board_signal.board_unavailable) ->
     (match unavailable.error with
-     | Board.Read_audience_not_pinned _ | Board.Read_source_unavailable _ ->
-       Stimulus_board_unavailable unavailable
+     | Board.Read_source_unavailable _ -> Stimulus_board_unavailable unavailable
      | Board.Read_invalid_id _ | Board.Read_post_not_found _ | Board.Read_comment_not_found _ ->
        Stimulus_consumed [])
 ;;
@@ -156,7 +153,7 @@ let pending_board_events_of_stimulus_result ~base_path ~meta_after_triage stim =
       ();
     let disposition =
       match unavailable.error with
-      | Board.Read_audience_not_pinned _ | Board.Read_source_unavailable _ -> "retaining"
+      | Board.Read_source_unavailable _ -> "retaining"
       | Board.Read_invalid_id _ | Board.Read_post_not_found _ | Board.Read_comment_not_found _ ->
         "consuming"
     in
@@ -712,10 +709,43 @@ let reconcile_spent_selection
                 | Ok () -> Ok Spent_grant_replay_acknowledged)))
      | Ok
          { request
+         ; state = Keeper_approval_queue_result.Resolution_consumed
+         ; replay_outcome = None
+         ; operator_settlement = Some _
+         ; _
+         } ->
+       (* #26191: the operator terminally settled a grant whose replay outcome
+          stayed absent after a restart. The settlement is durable before
+          this point (recorded with an fsynced sidecar), so retiring the
+          wake here preserves the repair-record-before-ACK ordering. There
+          is no replay outcome to project and no continuation turn to wait
+          for — the operator's judgement is the terminal fact. *)
+       (match
+          Keeper_approval_queue.ensure_resolution_chat_projection
+            ~base_path:config.Workspace_utils.base_path
+            ~keeper_name
+            ~approval_id
+            ~tool_name:(Some request.tool_name)
+            ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+        with
+        | Error message -> Error ("approval resolution projection failed: " ^ message)
+        | Ok () ->
+          (match
+             Keeper_registry_event_queue.ack_pending_result
+               ~base_path:config.Workspace_utils.base_path
+               keeper_name
+               ~selection
+           with
+           | Error message ->
+             Error ("operator-settled grant ack failed: " ^ message)
+           | Ok () -> Ok Spent_grant_replay_acknowledged))
+     | Ok
+         { request
          ; state =
              ( Keeper_approval_queue_result.Resolution_unconsumed
              | Keeper_approval_queue_result.Resolution_consumed )
          ; replay_outcome = None
+         ; operator_settlement = (None | Some _)
          ; _
          }
      | Ok
@@ -859,8 +889,7 @@ let same_source_scope left right = match left,right with
       left.ao_origin_id=right.ao_origin_id && left.ao_source=right.ao_source
       && left.ao_channel=right.ao_channel
 
-let heartbeat_event_intake_with_priority
-      ~priority_sources
+let heartbeat_event_intake
       ~ctx
       ~meta_after_triage
       ~pending_board_events
@@ -1251,12 +1280,11 @@ let heartbeat_event_intake_with_priority
   in
   let ( queued_observations
       , consumed_selections
-      , intake_frontier
       , first_withdrawn
       , hard_error )
     =
     match
-      Keeper_registry_event_queue.pending_frontier_result
+      Keeper_registry_event_queue.pending_selections_result
         ~base_path
         keeper_name
     with
@@ -1265,25 +1293,19 @@ let heartbeat_event_intake_with_priority
         "turn entry: event queue selection failed keeper=%s: %s"
         keeper_name
         message;
-      [], [], Keeper_event_queue_state.unobserved_frontier, None
+      [], [], None
       , Some (None, Pending_selection_failed message)
-    | Ok (frontier, pending) ->
-      (* Revalidate against this actual intake snapshot. A withdrawn or reinserted
-         source never borrows the old handoff's admission preference. *)
-      let preferred, rest = List.partition (fun source ->
-        List.exists (Keeper_event_queue_state.same_entry source) priority_sources) pending in
-      let batch = ready_batch (preferred @ rest) in
+    | Ok pending ->
+      let batch = ready_batch pending in
       let observations, selections, withdrawn, error =
         consume_batch batch
       in
       ( observations
       , selections
-      , frontier
       , withdrawn
       , Option.map (fun (selection, error) -> Some selection, error) error )
   in
-  let source_batch = Keeper_heartbeat_source_batch.of_intake
-    ~frontier:intake_frontier ~admitted:consumed_selections in
+  let source_batch = Keeper_heartbeat_source_batch.of_selections consumed_selections in
   let diagnostic_selection =
     match hard_error, first_withdrawn with
     | Some (Some selection, _), _ -> Some selection
@@ -1362,7 +1384,3 @@ let heartbeat_event_intake_with_priority
   ; event_queue_triggers
   }
 ;;
-
-let heartbeat_event_intake ~ctx ~meta_after_triage ~pending_board_events =
-  heartbeat_event_intake_with_priority ~priority_sources:[]
-    ~ctx ~meta_after_triage ~pending_board_events

@@ -333,11 +333,7 @@ let recover_owned_task_to_todo_r
         (fun (candidate : task) ->
            if String.equal candidate.id task_id
            then
-             { candidate with
-               task_status = Masc_domain.Todo
-             ; reclaim_policy = None
-             ; do_not_reclaim_reason = None
-             }
+             { candidate with task_status = Masc_domain.Todo }
            else candidate)
         backlog.tasks
     in
@@ -480,7 +476,6 @@ let release_unroutable_rejected_task_r
               ; reason = Some reason
               ; next_step = Some "Any agent may claim this task and answer the rejection"
               ; failure_mode = None
-              ; reclaim_policy = Some Masc_domain.Allow_reclaim
               ; evidence_refs = []
               ; updated_at = Some (Masc_domain.now_iso ())
               ; updated_by = Some actor
@@ -542,15 +537,8 @@ type claim_next_result = Masc_domain.claim_next_result =
       ; title : string
       ; priority : int
       ; message : string
-      ; scope_widened : bool
       }
   | Claim_next_no_unclaimed
-  | Claim_next_no_eligible of
-      { excluded_count : int
-      ; scope_excluded_count : int
-      ; explicit_excluded_count : int
-      ; claim_pool_candidate_count : int
-      }
   | Claim_next_error of string
 
 let link_task_execution_artifacts_r

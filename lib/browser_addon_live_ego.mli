@@ -47,15 +47,15 @@ val end_session : session -> unit
     cannot start fails this worker's start, as the owned BiDi Firefox does,
     except when the space is configured by name and a read-only listing
     confirms a user-owned space with that name. Then the space is untouched
-    and Ego is published as unavailable.
+    and Ego is published as unavailable. A connection whose bound Space ego
+    no longer lists ends after that answer and is published as missing; a
+    clientId-less take_over then opens a Space configured by name again,
+    never one configured by number.
     Screenshots pass through a private directory this run creates and
     removes. Downloads its agent pages start are saved under [downloads],
-    the worker's download folder, and published through [owner]. [input_store]
-    is the host-selected workspace Lane store, never the ephemeral socket or
-    download directory. Managed Ego attachment must retain/restore Input there;
-    missing/unwritable authority never falls back to volatile state. *)
+    the worker's download folder, and published through [owner]. *)
 val run : ?on_lane_ended:(unit -> unit) -> env:Eio_unix.Stdenv.base -> owner:Browser_addon_owner.t ->
-  input_store:Lane_addon_store.t -> downloads:string ->
+  downloads:string ->
   Browser_configuration.live_ego -> (unit -> unit) -> unit
 (** [on_lane_ended] runs when a recovery cycle fails after the run started:
     the owner is already retired and the lane cannot re-serve, so the worker

@@ -129,9 +129,6 @@ let body_lines ~cols ~goal_lines (task : Masc_domain.task) =
     @ some_lines "predecessor" task.predecessor_task_id
     @ some_lines "operation" task.execution_links.operation_id
     @ some_lines "session" task.execution_links.session_id
-    @ some_lines "reclaim policy"
-        (Option.map Masc_domain.task_reclaim_policy_to_string task.reclaim_policy)
-    @ some_lines "do not reclaim" task.do_not_reclaim_reason
     @ List.concat_map
         (fun skill ->
           labeled_lines "skill" (Yojson.Safe.to_string (Skill_reference.to_yojson skill)))
@@ -158,9 +155,6 @@ let body_lines ~cols ~goal_lines (task : Masc_domain.task) =
             else labeled_lines "handoff" handoff.Masc_domain.summary)
          @ some_lines "next" handoff.Masc_domain.next_step
          @ some_lines "failure" handoff.Masc_domain.failure_mode
-         @ some_lines "handoff reclaim policy"
-             (Option.map Masc_domain.task_reclaim_policy_to_string
-                handoff.Masc_domain.reclaim_policy)
          @ some_lines "handoff updated" handoff.Masc_domain.updated_at
          @ some_lines "handoff updater" handoff.Masc_domain.updated_by
          @ list_lines "evidence" handoff.Masc_domain.evidence_refs)
@@ -168,8 +162,7 @@ let body_lines ~cols ~goal_lines (task : Masc_domain.task) =
     match task.contract with
     | None -> []
     | Some contract ->
-        (if contract.Masc_domain.strict then [ "  contract strict" ] else [])
-        @ list_lines "done-when" contract.Masc_domain.completion_contract
+        list_lines "done-when" contract.Masc_domain.completion_contract
         @ list_lines "evidence" contract.Masc_domain.required_evidence
         @ list_lines "inspection evidence" contract.Masc_domain.inspect_gate_evidence
         @ list_lines "verification evidence" contract.Masc_domain.verify_gate_evidence

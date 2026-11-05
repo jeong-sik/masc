@@ -6,7 +6,6 @@ let runtime health name : Decode.keeper_runtime =
   { kr_name = name
   ; kr_identity = Ok { k_trace_id = "trace-" ^ name; k_created_at = "2026-01-01T00:00:00Z"; k_updated_at = "2026-01-01T00:00:00Z" }
   ; kr_portrait = Decode.Unavailable "test"
-  ; kr_candle_balance_milli = None
   ; kr_candle_account_revision = Ok None
   ; kr_health = health
   ; kr_paused = false
@@ -95,7 +94,7 @@ let async_request ?(ownership = Decode.Async_runtime_owned) phase id : Decode.as
   ; ar_submitted_by = "test"
   ; ar_keeper_name = "row"
   ; ar_phase = phase
-  ; ar_elapsed_sec = Some 1.
+  ; ar_submitted_at = 1.
   ; ar_ownership = ownership
   }
 
@@ -199,6 +198,22 @@ let test_streaming_keeps_async_and_schedule_badges () =
     (List.mem Model.Badge_schedule badges);
   Alcotest.(check bool) "an observation failure stays a secondary badge" true
     (List.mem Model.Badge_read_error badges)
+
+let test_quota_spent_wait_has_its_own_badge () =
+  let value =
+    row
+      ~waiting:(waiting
+        ~items:[ waiting_item ~source:Model.Waiting_source_runtime_quota_spent ~producer:Model.Wake_keeper_supervisor () ]
+        "row")
+      "row"
+  in
+  let badges = Model.badges_of_row value in
+  Alcotest.(check bool) "a Keeper whose every candidate spent its quota is marked" true
+    (List.mem Model.Badge_quota_spent badges);
+  Alcotest.(check bool) "the wait is not read as a read error" false
+    (List.mem Model.Badge_read_error badges);
+  Alcotest.(check bool) "the wait is not read as a schedule" false
+    (List.mem Model.Badge_schedule badges)
 
 let test_delegate_and_verification_remain_distinct_badges () =
   let value =
@@ -310,16 +325,17 @@ let test_a_submitter_is_found_by_assignee () =
     ; task_with_status "task-open" Masc_domain.Todo
     ]
   in
+  let holders = Model.verification_holders tasks in
   Alcotest.(check bool) "the assignee of an awaiting task holds one" true
-    (Model.holds_awaiting_verification ~keeper_name:"alpha" tasks);
+    (Model.holds_awaiting_verification holders ~keeper_name:"alpha");
   Alcotest.(check bool) "an assignee whose task is still in progress does not" false
-    (Model.holds_awaiting_verification ~keeper_name:"beta" tasks);
+    (Model.holds_awaiting_verification holders ~keeper_name:"beta");
   Alcotest.(check bool) "an assignee whose task is done does not" false
-    (Model.holds_awaiting_verification ~keeper_name:"gamma" tasks);
+    (Model.holds_awaiting_verification holders ~keeper_name:"gamma");
   Alcotest.(check bool) "a Keeper without a task does not" false
-    (Model.holds_awaiting_verification ~keeper_name:"delta" tasks);
+    (Model.holds_awaiting_verification holders ~keeper_name:"delta");
   Alcotest.(check bool) "an empty task list holds none" false
-    (Model.holds_awaiting_verification ~keeper_name:"alpha" [])
+    (Model.holds_awaiting_verification (Model.verification_holders []) ~keeper_name:"alpha")
 
 let test_a_submitter_without_a_current_task_waits_for_its_verdict () =
   let submitter =
@@ -362,6 +378,7 @@ let () =
         ; Alcotest.test_case "priority order" `Quick test_priority_orders_attention_activity_waiting_then_inactive
         ; Alcotest.test_case "recent and name ordering" `Quick test_recent_and_name_have_deterministic_ties
         ; Alcotest.test_case "streaming keeps async and schedule badges" `Quick test_streaming_keeps_async_and_schedule_badges
+        ; Alcotest.test_case "quota spent wait badge" `Quick test_quota_spent_wait_has_its_own_badge
         ; Alcotest.test_case "delegate and verification badges" `Quick test_delegate_and_verification_remain_distinct_badges
         ; Alcotest.test_case "unobserved is not idle" `Quick test_unobserved_is_not_idle
         ; Alcotest.test_case "paused and offline hide stale activity" `Quick test_paused_and_offline_hide_stale_activity

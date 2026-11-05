@@ -1070,8 +1070,7 @@ let test_worker_support_tracks_each_exact_assignee_across_renders () =
     { id; title = id; description = ""; task_status; priority = 3; files = []
     ; created_at = stamp; created_by = None; predecessor_task_id = None
     ; contract = None; execution_links = Types.no_execution_links
-    ; handoff_context = None; cycle_count = 0; reclaim_policy = None
-    ; do_not_reclaim_reason = None; skills = []
+    ; handoff_context = None; cycle_count = 0; skills = []
     }
   in
   let claimed assignee = Types.Claimed { assignee; claimed_at = stamp } in

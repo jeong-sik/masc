@@ -406,6 +406,16 @@ let effective_meta_result ~base_path (meta : keeper_meta) : (keeper_meta, string
 (* A keeper's runtime is assigned in runtime.toml ([[runtime.assignments]],
    the sole SSOT), keyed by keeper name. An unassigned keeper uses the default
    runtime. The id is opaque here; only the AGENT_CORE adapter parses it. *)
+(* The same route as [runtime_id_of_meta], or [None] while no runtime is
+   loaded, for a reader that must not fail then. *)
+let runtime_route_of_keeper_name keeper_name =
+  match Runtime.runtime_id_for_keeper keeper_name with
+  | Some runtime_id when String.trim runtime_id <> "" -> Some (String.trim runtime_id)
+  | Some _ | None ->
+    let route, _, _ = Runtime.get_default_route_and_runtimes () in
+    route
+;;
+
 let runtime_id_of_meta (meta : keeper_meta) =
   match Runtime.runtime_id_for_keeper meta.name with
   | Some runtime_id when String.trim runtime_id <> "" -> String.trim runtime_id

@@ -416,10 +416,12 @@ let declared_capabilities_override_of_model_spec
        (match
           runtime_caps.declared_thinking_control_format,
           runtime_caps.reasoning_streaming_format,
-          runtime_caps.max_output_tokens
+          runtime_caps.max_output_tokens,
+          runtime_caps.accepted_reasoning_efforts
         with
-        | None, None, None -> None
-        | thinking_control_format, reasoning_streaming_format, max_output_tokens ->
+        | None, None, None, None -> None
+        | thinking_control_format, reasoning_streaming_format, max_output_tokens,
+          accepted_reasoning_efforts ->
           Some
             { catalog_caps with
               max_output_tokens =
@@ -430,6 +432,10 @@ let declared_capabilities_override_of_model_spec
                 (match thinking_control_format with
                  | Some format -> agent_core_thinking_control_format format
                  | None -> catalog_caps.thinking_control_format)
+            ; accepted_reasoning_efforts =
+                (match accepted_reasoning_efforts with
+                 | Some _ -> accepted_reasoning_efforts
+                 | None -> catalog_caps.accepted_reasoning_efforts)
             ; reasoning_streaming_format =
                 Option.value
                   reasoning_streaming_format
@@ -468,6 +474,10 @@ let declared_capabilities_override_of_model_spec
          ; supports_reasoning = Option.value spec.thinking_support ~default:base.supports_reasoning
          ; thinking_control_format =
              agent_core_thinking_control_format caps.thinking_control_format
+         ; accepted_reasoning_efforts =
+             (match caps.accepted_reasoning_efforts with
+              | Some _ as declared -> declared
+              | None -> base.accepted_reasoning_efforts)
          ; reasoning_streaming_format =
              Option.value
                caps.reasoning_streaming_format

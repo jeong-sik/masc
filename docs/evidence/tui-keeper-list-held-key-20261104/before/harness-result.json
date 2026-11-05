@@ -1,0 +1,62 @@
+{
+ "schema": "masc.tui.pty_observation.v1",
+ "binary": "/Users/dancer/.local/bin/masc-tui",
+ "started_at": "2026-11-04T01:38:46.704186+00:00",
+ "scenario": "keepers",
+ "rows": 55,
+ "cols": 200,
+ "load_before": [
+  252.9287109375,
+  309.33837890625,
+  267.701171875
+ ],
+ "load_after": [
+  250.23291015625,
+  306.87939453125,
+  267.3134765625
+ ],
+ "same_runtime": true,
+ "same_binary": true,
+ "binary_sha256_before": "2b9945509eebe317594a5f449d264239a8946e64639e3421747a4033e4648b26",
+ "observed_surfaces": [
+  "keeper-list",
+  "overview"
+ ],
+ "terminal_profile": {
+  "TERM": "xterm-256color",
+  "TERM_PROGRAM": "ghostty",
+  "MASC_TUI_SYNC": null,
+  "MASC_TUI_KITTY_KEYBOARD": null,
+  "MASC_TUI_TITLE": null
+ },
+ "phases": [
+  {
+   "name": "keepers down",
+   "completed": true,
+   "key_writes": 40,
+   "next_output_samples": 40,
+   "keys_without_later_output": 0,
+   "output_chunks": 75,
+   "output_bytes": 55208,
+   "next_pty_output_ms": {
+    "p50": 59.786500001791865,
+    "p95": 205.09387500351295,
+    "max": 251.96500000311062
+   }
+  },
+  {
+   "name": "keepers up",
+   "completed": true,
+   "key_writes": 40,
+   "next_output_samples": 40,
+   "keys_without_later_output": 0,
+   "output_chunks": 80,
+   "output_bytes": 56491,
+   "next_pty_output_ms": {
+    "p50": 34.664500009967014,
+    "p95": 184.63758399593644,
+    "max": 216.5647919755429
+   }
+  }
+ ]
+}

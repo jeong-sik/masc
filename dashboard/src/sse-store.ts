@@ -62,6 +62,7 @@ import {
   SSE_APPROVAL_PENDING_EVENT,
   SSE_APPROVAL_RESOLVED_EVENT,
   SSE_APPROVAL_SUMMARY_UPDATED_EVENT,
+  SSE_APPROVAL_RULES_CHANGED_EVENT,
 } from './schemas/sse'
 import { route } from './router'
 import { routeWantsRefreshTarget, type RouteRefreshTarget } from './refresh-scope'
@@ -259,6 +260,7 @@ const SIMPLE_ROUTES: Record<string, SimpleRoute> = {
   post_voted:           { target: 'board' },
   comment_voted:        { target: 'board' },
   reaction_changed:     { target: 'board' },
+  post_changed:         { target: 'board' },
   // Observatory activity telemetry
   activity:             { target: 'activity', debounceMs: SSE_ACTIVITY_DEBOUNCE_MS },
   // Fusion run registry — emitted by lib/fusion/fusion_sink.ml broadcast_run_status.
@@ -696,6 +698,7 @@ export function routeServerPushEvent(event: SSEEvent): void {
     event.type === SSE_APPROVAL_PENDING_EVENT
     || event.type === SSE_APPROVAL_RESOLVED_EVENT
     || event.type === SSE_APPROVAL_SUMMARY_UPDATED_EVENT
+    || event.type === SSE_APPROVAL_RULES_CHANGED_EVENT
 
   if (
     (event.type === SSE_APPROVAL_PENDING_EVENT

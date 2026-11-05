@@ -21,6 +21,21 @@ module Queue_registry = Masc.Keeper_registry_event_queue
 module Event_queue = Keeper_event_queue
 module WO = Masc.Keeper_world_observation
 
+(* The production peek, read back as the exact pending selection. *)
+let select_ready ~now ~ready state =
+  Option.bind (Keeper_event_queue_state.peek_when ~now ~ready state) (fun source ->
+    List.find_opt
+      (fun (selection : Keeper_event_queue_state.pending_selection) ->
+         Keeper_event_queue.stimulus_identity_equal selection.source source)
+      (Keeper_event_queue_state.pending_selections state))
+;;
+
+(* The production loader with the production peek. *)
+let select_queue_entry ~base_path ~keeper_name ~now ~ready =
+  Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name
+  |> Result.map (select_ready ~now ~ready)
+;;
+
 let asker = "alpha"
 let delegate = "beta"
 let operation_id = "kmsg-0001"
@@ -549,7 +564,7 @@ let answer_is_selected_before_ambient_backlog () =
            urgency=Normal;arrived_at;
            payload=Board_signal
              {kind=Post_created;author="other-keeper";title="ambient";
-              content="unrelated Board activity";hearth=None;updated_at=None;audience=Some Keeper_event_queue.Audience_discoverable}}) in
+              content="unrelated Board activity";hearth=None;updated_at=None;audience=Keeper_event_queue.Audience_discoverable}}) in
         (match Keeper_event_queue_persistence.update_result ~base_path ~keeper_name:asker
             (fun queue -> List.fold_left Event_queue.enqueue queue (prior::ambient)) with
          | Ok () -> () | Error detail -> fail detail);
@@ -571,7 +586,7 @@ let answer_is_selected_before_ambient_backlog () =
              (List.map (fun (s : Keeper_event_queue_state.pending_selection) -> s.source.post_id) rest)
          | _ -> fail "durable queue lost the answer or ambient work");
         let ready (source : Event_queue.stimulus) = source.post_id<>prior.post_id in
-        match Keeper_event_queue_persistence.select_when_result ~base_path ~keeper_name:asker
+        match select_queue_entry ~base_path ~keeper_name:asker
             ~now:(Unix.gettimeofday ()) ~ready with
         | Ok (Some selection) ->
           (match selection.Keeper_event_queue_state.source.payload with

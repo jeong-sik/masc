@@ -4,7 +4,7 @@
     explicit logging actually emit the expected log messages when triggered.
 
     Coverage (tool_task only):
-    - done transition on nonexistent task → "[Task]" marker
+    - transition on nonexistent task → "[Task]" marker
     - cancel transition on nonexistent task → "[Task]" marker
     - no metric row is recorded without a real start time
 
@@ -97,23 +97,22 @@ let with_test_workspace f =
     (fun () -> f config)
 
 (* ============================================================
-   tool_task: done transition on nonexistent task → "[task]" on stderr
+   tool_task: transition on nonexistent task → "[task]" on stderr
    ============================================================ *)
 
-(** handle_done with a task_id that does not exist.
-    Workspace.transition_task_r returns Error (TaskNotFound ...) and
-    the notification path fires the [task] eprintf. *)
-let test_tool_task_done_nonexistent_logs () =
+(** A transition on a task_id that does not exist is refused and the
+    refusal is logged with the [Task] prefix. *)
+let test_tool_task_transition_nonexistent_logs () =
   with_test_workspace @@ fun config ->
   let ctx : Tool_task.context = { config; agent_name = "test-agent"; sw = None } in
   let args = `Assoc [
     ("task_id", `String "task-does-not-exist-xyz");
-    ("notes", `String "");
+    ("action", `String "start");
   ] in
   let output = capture_stderr (fun () ->
-    ignore (Tool_task.handle_done ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx args)
+    ignore (Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:(Tool_timing.start ()) ctx args)
   ) in
-  check bool "stderr contains [Task] prefix for done on missing task"
+  check bool "stderr contains [Task] prefix for a transition on a missing task"
     true (str_contains output "[Task]")
 
 (* A Todo task carries no start time, so cancelling it has no duration to
@@ -172,8 +171,8 @@ let test_tool_task_cancel_nonexistent_logs () =
 let () =
   run "Error logging coverage (PR #466)" [
     "tool_task", [
-      test_case "done on missing task logs [task]"
-        `Quick test_tool_task_done_nonexistent_logs;
+      test_case "transition on missing task logs [task]"
+        `Quick test_tool_task_transition_nonexistent_logs;
       test_case "cancel on missing task logs [task]"
         `Quick test_tool_task_cancel_nonexistent_logs;
       test_case "no metric row without a real start time"

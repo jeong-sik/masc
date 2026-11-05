@@ -6,10 +6,7 @@ type finalized = {
 }
 
 let stop_reason_suppresses_visible_response = function
-  | Runtime_agent.Yielded_to_operation_queued _
-  | Runtime_agent.Yielded_to_durable_stimulus _
-  | Runtime_agent.Yielded_after_repeated_tool_call _
-  | Runtime_agent.Yielded_after_repeated_assistant_text _ ->
+  | Runtime_agent.Yielded_to_durable_stimulus _ ->
     true
   | Runtime_agent.Completed _
   | Runtime_agent.InputRequired _ ->

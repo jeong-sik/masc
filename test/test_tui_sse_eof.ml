@@ -35,7 +35,7 @@ let identity workspace : Masc.Tui_decode.server_identity =
   ; sid_uptime = None
   ; sid_sse_clients = None
   ; sid_gc = None
-  ; sid_scheduler = None
+  ; sid_scheduler = None; sid_operator_action = None
   }
 
 exception Stop_dashboard_route

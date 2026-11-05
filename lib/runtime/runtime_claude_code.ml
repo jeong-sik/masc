@@ -206,10 +206,6 @@ type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_
       }
 
 type host_stop = Runtime_official_client_tool.host_stop =
-  | Repeated_tool_call of
-      { tool_name : string
-      ; repeated_count : int
-      }
   | Terminal_tool_boundary of
       { tool_name : string
       ; outcome : terminal_boundary_outcome
@@ -441,11 +437,6 @@ let error_to_string = function
   | Turn_failed detail -> "Claude Code turn failed: " ^ detail
   | Turn_failed_with_observation { detail; _ } ->
     "Claude Code turn failed: " ^ detail
-  | Stopped_by_host { stop = Repeated_tool_call { tool_name; repeated_count }; _ } ->
-    Printf.sprintf
-      "Claude Code stopped after repeated tool call: tool=%s count=%d"
-      tool_name
-      repeated_count
   | Stopped_by_host { stop = Terminal_tool_boundary { tool_name; _ }; _ } ->
     Printf.sprintf "Claude Code stopped at terminal tool boundary: tool=%s" tool_name
   | Quota_blocked
@@ -700,10 +691,8 @@ let read_subscription ~mgr ~cwd config =
      writes the result to a file instead of passing it inline. It is written
      only for a tool whose result MASC bounds ([Bounded_bytes]), with that
      bound: UTF-8 characters never outnumber their bytes, so the byte
-     ceiling is a safe character count. An attached-service
-     result reaches the wire as the service returned it
-     ([Keeper_identity_tools.tool_result_of_call]), so it is [Unbounded] and
-     keeps the client's own threshold.
+     ceiling is a safe character count. A tool declared [Unbounded] keeps
+     the client's own threshold.
 
    A tool with neither is sent as it was before, with no [_meta]. *)
 let dynamic_tool_meta (tool : dynamic_tool) =
@@ -972,6 +961,22 @@ let handle_control_request
     Error (Unsupported_control_request unsupported)
 ;;
 
+(* Claude Code withdraws a control request it sent when the call behind it is
+   aborted, for example an MCP tool call it stopped waiting for. Every
+   [handle_control_request] branch that lets the turn go on has already written
+   its control response, and the loops read the next frame only after it
+   returns, so the request named here was answered and nothing is left to
+   cancel. Like the official SDK host, MASC writes nothing back for it. *)
+let observe_control_cancel_request fields =
+  let* request_id =
+    required_string "control cancel request" "request_id" fields
+  in
+  Log.Runtime_agent.info
+    "Claude Code withdrew control request %s after MASC answered it"
+    request_id;
+  Ok ()
+;;
+
 (* The candidate boundary and strict decoder share the producer's field set. *)
 let agent_retry_fields =
   [ "type"; "tool_use_id"; "tool_name"; "parent_tool_use_id"
@@ -1039,6 +1044,7 @@ let api_retry_observation_candidate fields =
 type frame_kind =
   | Frame_control_request
   | Frame_control_response
+  | Frame_control_cancel_request
   | Frame_stream_event
   | Frame_assistant
   | Frame_rate_limit_event
@@ -1052,6 +1058,7 @@ type frame_kind =
 let frame_kind_of_tag = function
   | "control_request" -> Frame_control_request
   | "control_response" -> Frame_control_response
+  | "control_cancel_request" -> Frame_control_cancel_request
   | "stream_event" -> Frame_stream_event
   | "assistant" -> Frame_assistant
   | "rate_limit_event" -> Frame_rate_limit_event
@@ -1066,6 +1073,7 @@ let frame_kind_of_tag = function
 let frame_kind_to_tag = function
   | Frame_control_request -> "control_request"
   | Frame_control_response -> "control_response"
+  | Frame_control_cancel_request -> "control_cancel_request"
   | Frame_stream_event -> "stream_event"
   | Frame_assistant -> "assistant"
   | Frame_rate_limit_event -> "rate_limit_event"
@@ -1109,6 +1117,7 @@ let parse_wire_line line =
             task_observation_candidate fields || api_retry_observation_candidate fields
           | Frame_control_request
           | Frame_control_response
+          | Frame_control_cancel_request
           | Frame_stream_event
           | Frame_assistant
           | Frame_rate_limit_event
@@ -1186,6 +1195,10 @@ let rec await_initialize io ~mcp_session ~tools ~tool_call_count ~assistant_usag
         ~on_stream_event
         fields
     in
+    await_initialize
+      io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~request_id ~on_stream_event
+  | Frame_control_cancel_request ->
+    let* () = observe_control_cancel_request fields in
     await_initialize
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~request_id ~on_stream_event
   | Frame_system | Frame_rate_limit_event | Frame_command_lifecycle ->
@@ -2396,6 +2409,14 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
         ~on_stream_event
         fields
     in
+    await_terminal
+      io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
+      ~subscription ~resumed
+      ~rate_limit ~assistant_model ~assistant_texts ~on_terminal_received ~on_turn_started
+      ~native_tool_calls ~native_tool_attempted ~on_stream_event ~input_observer ~partial_stream ~stream_started
+      ~response_emitted
+  | Frame_control_cancel_request ->
+    let* () = observe_control_cancel_request fields in
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed

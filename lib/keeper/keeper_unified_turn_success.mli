@@ -21,14 +21,6 @@ module For_testing : sig
     -> updated_meta:Keeper_meta_contract.keeper_meta
     -> Keeper_agent_run.run_result
     -> unit
-
-  type cycle_post_action =
-    | Assign_task
-    | Empty_queue_sleep
-
-  val post_action_of_channel
-    :  Keeper_world_observation.keeper_cycle_channel
-    -> cycle_post_action
 end
 
 type handle_result =
@@ -51,6 +43,10 @@ val handle
      (* Every attempt's readings, from the same settlement: the turn's
         resolution is the one its result reports, and the rest is spend
         beside it. *)
+  -> settled_start:Keeper_unsettled_spend.settled_start option
+     (* From the same settlement. Handed to
+        [Keeper_unsettled_spend.record_committed] when the Owner commit holds
+        and every reading the turn holds has a resolved row in the file. *)
   -> Keeper_execution_outcome.t
   -> handle_result
 (** Common success terminal pipeline for both direct chat and autonomous

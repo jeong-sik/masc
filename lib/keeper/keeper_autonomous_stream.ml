@@ -78,8 +78,9 @@ let create ~base_path ~keeper_name ~turn_ref = Eio.Cancel.protect (fun () ->
       mutex = Eio.Mutex.create ();
       stream = Open {bridge = Bridge.empty_state ~generation:content_generation ()} }
   in
-  Option.iter (fun _ -> with_current (fun () ->
-    Hashtbl.replace current_turns (base_path, keeper_name) turn_ref)) events;
+  Option.iter (fun _ ->
+    with_current (fun () -> Hashtbl.replace current_turns (base_path, keeper_name) turn_ref);
+    Keeper_turn_broadcast.changed ~base_path ~keeper_name) events;
   Option.iter (fun events ->
     Events.publish events (Events.Text_message_start { message_id = run_id ^ ":assistant"; role = Events.Assistant })) events;
   t)
@@ -189,11 +190,14 @@ let finish t ending =
     Fun.protect ~finally:(fun () ->
       t.stream <- Closed;
       Option.iter Events.close t.events;
-      with_current (fun () ->
+      let removed = with_current (fun () ->
         match Hashtbl.find_opt current_turns (t.base_path, t.keeper_name) with
         | Some turn_ref when Ids.Turn_ref.equal turn_ref t.turn_ref ->
-            Hashtbl.remove current_turns (t.base_path, t.keeper_name)
-        | Some _ | None -> ())) (fun () ->
+            Hashtbl.remove current_turns (t.base_path, t.keeper_name);
+            true
+        | Some _ | None -> false) in
+      if removed then
+        Keeper_turn_broadcast.changed ~base_path:t.base_path ~keeper_name:t.keeper_name) (fun () ->
       flush t stream;
       (match ending with
        | Completed {reply; turn_outcome} ->

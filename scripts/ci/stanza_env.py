@@ -264,6 +264,98 @@ def collect_literal_deps(form, suite_dir: str) -> list[str]:
     return [dep for item in form for dep in collect_literal_deps(item, suite_dir)]
 
 
+def collect_rule_alias_deps(text: str, alias: str, suite_dir: str) -> list[str] | None:
+    """Literal deps of a `(rule (alias ALIAS) (deps ...) ...)` form.
+
+    A Python suite is declared as a rule whose alias the runner builds, so the
+    run happens inside Dune's action. Building `@ALIAS` from a cold cache
+    compiles the rule's deps, which for the PTY lanes includes a Cargo and an
+    OCaml binary. `suite_env` reads `(test ...)` stanzas only, so it answers
+    "no stanza declares this suite" for these aliases and the runner cannot
+    prepare them ahead of the suite budget. This reads the rule instead.
+
+    Only the (deps ...) of the rule carrying this alias is read, so a sibling
+    rule in the same dune file donates nothing. None means this text declares
+    no such alias; an empty list means it does and the rule needs nothing built.
+    """
+
+    def alias_targets(form, wanted: str) -> bool:
+        for field in form[1:]:
+            if isinstance(field, list) and field and field[0] == "alias":
+                names = [
+                    item for item in field[1:] if isinstance(item, str)
+                ]
+                if not names and len(field) > 1 and isinstance(field[1], list):
+                    # (alias (name NAME)) is the long spelling.
+                    names = [
+                        item[1]
+                        for item in field[1:]
+                        if isinstance(item, list)
+                        and item
+                        and item[0] == "name"
+                        and len(item) > 1
+                        and isinstance(item[1], str)
+                    ]
+                if wanted in names:
+                    return True
+        return False
+
+    for form in parse(tokenize(text)):
+        if not isinstance(form, list) or not form or form[0] != "rule":
+            continue
+        if not alias_targets(form, alias):
+            continue
+        deps = collect_literal_deps(
+            [field for field in form[1:] if isinstance(field, list) and field and field[0] == "deps"],
+            suite_dir,
+        )
+        # %{exe:PATH} inside the action is a build target as well, and six
+        # rules declare no (deps ...) at all -- they name only the executable
+        # the action runs. Without these the alias still compiles inside the
+        # budget, which is the outcome this reader exists to prevent.
+        for path in _exe_targets(form):
+            target = literal_target(path, suite_dir)
+            if target is not None and target not in deps:
+                deps.append(target)
+        return deps
+    return None
+
+
+def rule_alias_deps(suite: str, suite_dir: str = DEFAULT_SUITE_DIR) -> list[str]:
+    """Find the rule that declares runtest-SUITE anywhere the dune file includes.
+
+    A per-suite include is read first, then the dune file with every literal
+    include it pulls in -- an alias rule is often declared in a shared include
+    rather than in a file named after the suite.
+    """
+    path = os.path.join(stanza_dir(suite_dir), f"{suite}.inc")
+    sources: list[tuple[str, bool]] = []
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as handle:
+            sources.append((handle.read(), True))
+    root = os.path.join(REPO_ROOT, suite_dir, "dune")
+    if os.path.exists(root):
+        sources.extend(included_stanza_sources(root))
+    for text, _own in sources:
+        deps = collect_rule_alias_deps(text, f"runtest-{suite}", suite_dir)
+        if deps is not None:
+            return deps
+    return []
+
+
+def _exe_targets(form) -> list[str]:
+    """Paths named by %{exe:PATH} anywhere in a form."""
+    found: list[str] = []
+    if isinstance(form, str):
+        for match in re.finditer(r"%\{exe:([^}]+)\}", form):
+            found.append(match.group(1))
+        return found
+    if isinstance(form, list):
+        for item in form:
+            found.extend(_exe_targets(item))
+    return found
+
+
 def resolve(key: str, value: str, *, allow_dependency_values: bool = True) -> tuple[str, str | None]:
     """(value for env, dune target to build first).
 
@@ -460,12 +552,19 @@ def main(argv: list[str]) -> int:
         args = args[2:]
     want_deps = len(args) == 2 and args[0] == "--deps"
     want_action_alias = len(args) == 2 and args[0] == "--action-alias"
-    if not (len(args) == 1 or want_deps or want_action_alias):
+    want_alias_deps = len(args) == 2 and args[0] == "--alias-deps"
+    if not (len(args) == 1 or want_deps or want_action_alias or want_alias_deps):
         print(__doc__, file=sys.stderr)
         return 2
-    suite = args[1] if want_deps or want_action_alias else args[0]
+    suite = args[1] if (want_deps or want_action_alias or want_alias_deps) else args[0]
     try:
         text, own_file = stanza_text(suite, suite_dir)
+        if want_alias_deps:
+            # Same normalisation as --deps: a stanza writes paths relative to
+            # its own directory, dune build takes targets from the repo root.
+            for dep in rule_alias_deps(suite, suite_dir):
+                print(os.path.normpath(os.path.join(suite_dir, dep)))
+            return 0
         if want_action_alias:
             for form in parse(tokenize(text)):
                 if not (isinstance(form, list) and form

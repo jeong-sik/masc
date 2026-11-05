@@ -454,6 +454,30 @@ let test_float_settings_reach_their_boot_consumers_exactly () =
       exact "search cache TTL" 123456789.0 (Env_config_runtime.Tools.web_search_cache_ttl_sec ())))
 ;;
 
+(* RFC-0482 §3.2: a command that saves through the running server edits the
+   text the server answered, by the same rules as a local write. *)
+let test_the_text_edit_writes_what_apply_writes () =
+  let change key value =
+    match S.parse ~key ~value with
+    | Ok change -> change
+    | Error error -> fail (S.error_message error)
+  in
+  let changes = [ change "heartbeat.interval_sec" "45"; change "autonomous.enabled" "false" ] in
+  (match S.edit_text changes with_tables with
+   | Error error -> fail (S.error_message error)
+   | Ok edited ->
+     check bool "the operator's note stays" true
+       (List.mem "# 2026-10-01: measured on the fleet, do not lower." (String.split_on_char '\n' edited));
+     check bool "the interval is written" true
+       (List.mem "interval_sec = 45" (String.split_on_char '\n' edited));
+     (match S.edit_text changes edited with
+      | Ok again -> check string "a second edit leaves the text as it is" edited again
+      | Error error -> fail (S.error_message error)));
+  match S.edit_text [ change "autonomous.enabled" "false"; change "autonomous.enabled" "true" ] with_tables with
+  | Ok _ -> fail "a key given twice was edited"
+  | Error (S.Conflicting_changes _) -> ()
+  | Error error -> fail ("refused for another reason: " ^ S.error_message error)
+
 let () =
   run
     "Runtime_setting_set"
@@ -466,6 +490,10 @@ let () =
         ; test_case "a value of the wrong kind is refused" `Quick
             test_a_value_of_the_wrong_kind_is_refused
         ; test_case "text may be empty" `Quick test_text_may_be_empty
+        ] )
+    ; ( "text edit"
+      , [ test_case "the text edit writes what apply writes" `Quick
+            test_the_text_edit_writes_what_apply_writes
         ] )
     ; ( "write"
       , [ test_case "a new table is appended and nothing else moves" `Quick

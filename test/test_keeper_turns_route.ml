@@ -314,7 +314,7 @@ let test_owned_turn_survives_bound_read_refusal_and_recovery () =
     let finished, finish = Eio.Promise.create () in
     Eio.Fiber.fork ~sw (fun () ->
       let outcome = Keeper_owner.run_maintenance_if_idle owner (fun () ->
-        let writer = Some (Keeper_turn_preview.reset ~keeper_name:name
+        let writer = Some (Keeper_turn_preview.reset ~base_path:config.base_path ~keeper_name:name
           ~execution_scope:None ~turn_ref:(Some original) ~now:0.
           ~redaction:Keeper_secret_redaction.empty) in
         Keeper_turn_preview.with_preparation ~writer ~turn_ref:(Some original)
@@ -330,7 +330,7 @@ let test_owned_turn_survives_bound_read_refusal_and_recovery () =
       ; sid_base_path=Tui_decode.Canonical_path.of_path (Unix.realpath config.base_path);
         sid_masc_root=Tui_decode.Canonical_path.of_path (Unix.realpath (Workspace.masc_dir config))
       ; sid_executable_in_worktree=None; sid_state_ready=Some true
-      ; sid_uptime=None; sid_sse_clients=None; sid_gc=None; sid_scheduler=None } in
+      ; sid_uptime=None; sid_sse_clients=None; sid_gc=None; sid_scheduler=None;sid_operator_action=None } in
     let served = ref state in
     let host = "localhost" and port = 8935 in
     let kept_reads = Masc_tui_kept_reads.create () in

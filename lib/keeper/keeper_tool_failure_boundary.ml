@@ -14,7 +14,6 @@ let of_handler (handler : Keeper_tool_descriptor.runtime_handler) =
      is the same shape of loss Execute has. *)
   | Keeper_tool_descriptor.Tool_lane_addon _
   | Keeper_tool_descriptor.Tool_execute
-  | Keeper_tool_descriptor.Tool_browser_act
   | Keeper_tool_descriptor.Tool_browser_instruct
   | Keeper_tool_descriptor.Tool_keeper_spawn_dispatch
   (* An unconfirmed owned-job launch may have started its process. A failed
@@ -39,6 +38,14 @@ let of_handler (handler : Keeper_tool_descriptor.runtime_handler) =
   | Keeper_tool_descriptor.Tool_memory_retract
   | Keeper_tool_descriptor.Tool_memory_write ->
     Failure_returns_to_model
+  (* A failed browser-level action (tabs, history, dialogs, upload, cookies,
+     emulation, request blocking, Space hand-off) goes back to the model with
+     the browser's answer: refused before any effect, a partial effect with
+     the tab's receipt, or an unknown outcome with no receipt. Either way the
+     model can read the tabs with BrowserRead before another step. Failures
+     of page input through BrowserInteract and navigation through BrowserGoto
+     also go back to the model. *)
+  | Keeper_tool_descriptor.Tool_browser_act -> Failure_returns_to_model
   (* A Skill publish only creates: the editor refuses an existing package, so
      a repeat after a written-but-unpublished SKILL.md commits nothing and
      answers package_already_exists. The result names the reference that was

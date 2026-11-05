@@ -1,7 +1,7 @@
 
 (** Tool_task - Core task CRUD operations *)
 
-type context = {
+type context = Tool_task_handlers.context = {
   config: Workspace_core.config;
   agent_name: string;
   sw: Eio.Switch.t option;
@@ -23,8 +23,6 @@ val handle_batch_add_tasks :
   Tool_result.result
 val handle_claim : tool_name:string -> start_time:Tool_timing.started -> context -> Yojson.Safe.t -> Tool_result.result
 val handle_claim_next : tool_name:string -> start_time:Tool_timing.started -> context -> Yojson.Safe.t -> Tool_result.result
-val handle_done :
-  tool_name:string -> start_time:Tool_timing.started -> context -> Yojson.Safe.t -> Tool_result.result
 val handle_transition :
   tool_name:string -> start_time:Tool_timing.started -> context -> Yojson.Safe.t -> Tool_result.result
 val task_history_events_json :
@@ -45,15 +43,13 @@ val dispatch_for_keeper :
   args:Yojson.Safe.t ->
   Tool_result.result option
 
-(** [build_claim_observation_payload ~now ~agent_name ~task_id ~scope_widened]
+(** [build_claim_observation_payload ~now ~agent_name ~task_id]
     builds the downstream collaboration-observation fragment for a successful
-    [keeper_task_claim] write/readback result. [scope_widened] records whether
-    the claim widened the agent's goal scope. MASC uses a central workspace
+    [keeper_task_claim] write/readback result. MASC uses a central workspace
     store here, so CRDT-specific [logical_clock] and [convergence_delay_ms]
     are left null. *)
 val build_claim_observation_payload :
   now:float ->
   agent_name:string ->
   task_id:string ->
-  scope_widened:bool ->
   Yojson.Safe.t

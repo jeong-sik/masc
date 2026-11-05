@@ -76,7 +76,8 @@ let codex_failure_status = function
   | Spawn_failed _ | Process_exited _ -> "cli_unavailable"
   | Subscription_required _ -> "login_required"
   | Timeout _ -> "timeout"
-  | Protocol_error _ | Rpc_error _ | Unsupported_server_request _ ->
+  | Protocol_error _ | Rpc_error _ | Unsupported_server_request _
+  | Account_read_failed _ ->
     "protocol_error"
   | Turn_input_write_failed _
   | Reasoning_effort_admission_failed _

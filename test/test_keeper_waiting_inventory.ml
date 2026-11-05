@@ -401,7 +401,7 @@ let test_event_queue_pending_rows_carry_operator_visible_fields () =
           ; content = sensitive_content
           ; hearth = None
           ; updated_at = None
-          ; audience = Some (Keeper_event_queue.Audience_targets [keeper_name])
+          ; audience = Keeper_event_queue.Audience_targets [keeper_name]
           }
           : Keeper_event_queue.board_stimulus))
   in
@@ -689,6 +689,157 @@ let save_text path text =
   match Fs_compat.save_file_atomic path text with
   | Ok () -> ()
   | Error err -> fail ("save_file_atomic failed: " ^ err)
+;;
+
+(* RFC-0484 §3.1: a running Keeper whose every candidate has spent its quota
+   window. The two providers carry no credential, so each has its own quota
+   scope ([Runtime_quota_window.scope_of_credential] falls back to the
+   provider id) and one can be spent without the other. *)
+let quota_runtime_toml =
+  {|
+[runtime]
+default = "primary.test_model"
+
+[runtime.lanes.quota-lane]
+candidates = [ "primary.test_model", "fallback.test_model" ]
+
+[runtime.assignments]
+"quota-keeper" = "quota-lane"
+
+[providers.primary]
+display-name = "Primary Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[providers.fallback]
+display-name = "Fallback Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:2"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 200000
+tools-support = true
+streaming = true
+
+[primary.test_model]
+is-default = true
+max-concurrent = 1
+
+[fallback.test_model]
+max-concurrent = 1
+|}
+;;
+
+let with_quota_runtime f =
+  let snapshot = Runtime.For_testing.snapshot () in
+  let path = Filename.temp_file "keeper_waiting_inventory_runtime_" ".toml" in
+  Runtime_quota_window.reset_for_testing ();
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime_quota_window.reset_for_testing ();
+      Runtime.For_testing.restore snapshot;
+      try Sys.remove path with Sys_error _ -> ())
+    (fun () ->
+       save_text path quota_runtime_toml;
+       match Runtime.init_default ~config_path:path with
+       | Ok () -> f ()
+       | Error e -> fail ("Runtime.init_default failed: " ^ e))
+;;
+
+let spend_quota runtime_id ~resets_at =
+  match Runtime.get_runtime_by_id runtime_id with
+  | None -> fail ("runtime not loaded: " ^ runtime_id)
+  | Some runtime ->
+    Runtime_quota_window.note_exhausted
+      ~scope:(Runtime_instance.quota_scope_of_runtime runtime)
+      ~resets_at
+;;
+
+let with_running_keeper config keeper_name f =
+  ensure_keeper config keeper_name;
+  let meta = keeper_meta_exn config keeper_name in
+  Keeper_registry.For_testing.clear ();
+  Fun.protect
+    ~finally:(fun () -> Keeper_registry.For_testing.clear ())
+    (fun () ->
+       ignore
+         (Keeper_registry.For_testing.register
+            ~base_path:config.Workspace_utils_backend_setup.base_path
+            keeper_name
+            meta);
+       f ())
+;;
+
+let quota_spent_rows json keeper_name =
+  match find_keeper json keeper_name with
+  | None -> fail "keeper row missing"
+  | Some keeper ->
+    U.(keeper |> member "waiting_on" |> to_list)
+    |> List.filter (fun row ->
+      String.equal "runtime_quota_spent" (json_string_member "source" row))
+;;
+
+let health_action_reasons health =
+  U.(health |> member "operator_action_reasons" |> to_list |> filter_string)
+;;
+
+let test_every_candidate_spent_waits_for_the_earliest_reset () =
+  with_workspace
+  @@ fun config ->
+  with_quota_runtime
+  @@ fun () ->
+  let keeper_name = "quota-keeper" in
+  with_running_keeper config keeper_name
+  @@ fun () ->
+  let now = Unix.gettimeofday () in
+  let earlier = now +. 3600. in
+  let later = now +. 7200. in
+  spend_quota "primary.test_model" ~resets_at:later;
+  spend_quota "fallback.test_model" ~resets_at:earlier;
+  let json = Server_keeper_waiting_inventory.dashboard_json config in
+  (match quota_spent_rows json keeper_name with
+   | [ row ] ->
+     check string "the row names the route" "quota-lane" (json_string_member "waiting_on" row);
+     check (float 0.001) "the Keeper can dispatch again at the earliest stated reset" earlier
+       U.(row |> member "due_at" |> to_number);
+     check string "the operator can move it to a route with quota left"
+       "assign_a_route_with_open_quota" (json_string_member "next_action" row);
+     check string "its own supervisor wakes it at the reset" "keeper_supervisor"
+       (json_string_member "wake_producer" row);
+     check int "both spent candidates are listed" 2
+       (List.length U.(row |> member "detail" |> member "candidates" |> to_list))
+   | rows -> failf "expected one quota spent row, got %d" (List.length rows));
+  let health = Server_keeper_waiting_inventory.health_json config in
+  check string "the fleet is degraded while a Keeper cannot dispatch" "degraded"
+    (json_string_member "status" health);
+  check bool "the operator is asked to act" true
+    (json_bool_member "operator_action_required" health);
+  check bool "the reason counts the waiting Keepers" true
+    (List.mem "runtime_quota_spent=1" (health_action_reasons health))
+;;
+
+let test_quota_spent_needs_every_candidate_and_a_running_keeper () =
+  with_workspace
+  @@ fun config ->
+  with_quota_runtime
+  @@ fun () ->
+  let keeper_name = "quota-keeper" in
+  let now = Unix.gettimeofday () in
+  with_running_keeper config keeper_name (fun () ->
+    spend_quota "primary.test_model" ~resets_at:(now +. 3600.);
+    let json = Server_keeper_waiting_inventory.dashboard_json config in
+    check int "one open candidate is a route the Keeper still uses" 0
+      (List.length (quota_spent_rows json keeper_name));
+    check bool "and asks nothing of the operator" false
+      (List.mem "runtime_quota_spent=1"
+         (health_action_reasons (Server_keeper_waiting_inventory.health_json config))));
+  spend_quota "fallback.test_model" ~resets_at:(now +. 3600.);
+  (* [with_running_keeper] cleared the registry on the way out: the Keeper is
+     configured and every candidate is spent, but the server is not running it. *)
+  let json = Server_keeper_waiting_inventory.dashboard_json config in
+  check int "a Keeper the server does not run does not dispatch" 0
+    (List.length (quota_spent_rows json keeper_name))
 ;;
 
 let pending_confirm_fixture ()
@@ -1233,6 +1384,10 @@ let () =
         ; test_case "nonlive keeper has no current execution" `Quick test_nonlive_keeper_has_no_current_execution
         ; test_case "live turn keeper is busy without waiting rows" `Quick
             test_live_turn_keeper_is_busy_without_waiting_rows
+        ; test_case "every candidate spent waits for the earliest reset" `Quick
+            test_every_candidate_spent_waits_for_the_earliest_reset
+        ; test_case "quota spent needs every candidate and a running keeper" `Quick
+            test_quota_spent_needs_every_candidate_and_a_running_keeper
         ; test_case "corrupt schedule ledger is read_error" `Quick
             test_corrupt_schedule_ledger_is_read_error
         ; test_case "keeper name discovery failure is read_error" `Quick

@@ -183,14 +183,12 @@ let make_task ?(handoff_context = None) ~task_status () : Masc_domain.task =
     contract = None;
     handoff_context;
     cycle_count = 0;
-    reclaim_policy = None;
     execution_links = Masc_domain.no_execution_links;
-    do_not_reclaim_reason = None;
     skills = [];
   }
 
 let user_message ?turn_decision ?current_task ?active_goal_summaries
-    ?previous_turn_stop observation =
+    observation =
   let turn_decision =
     Option.value
       turn_decision
@@ -203,49 +201,9 @@ let user_message ?turn_decision ?current_task ?active_goal_summaries
   in
   let { Prompt.world_state = user; _ } =
     Prompt.build_prompt ~turn_decision
-      ?previous_turn_stop ~current_task ?active_goal_summaries ~observation ()
+      ~current_task ?active_goal_summaries ~observation ()
   in
   user
-
-(* --- Previous turn stop: the loop guard's reason reaches the next turn --- *)
-
-(* The live shape from 2026-09-01: one live keeper ended 259 of 361
-   turns on the same repeated Jira query and repeated it next turn. The line
-   has to name the tool and the count, because that is what the model can
-   match against its own history. *)
-let test_repeated_tool_call_stop_is_named_in_the_next_prompt () =
-  let body =
-    user_message
-      ~previous_turn_stop:
-        (Masc.Keeper_turn_checkpoint_reason.Repeated_tool_call
-           { tool_name = "atlassian_searchJiraIssuesUsingJql"; repeated_count = 3 })
-      base_observation
-  in
-  check bool "the section that carries wake reasons carries the stop" true
-    (contains ~needle:"### Autonomous Trigger" body);
-  check bool "the tool is named" true
-    (contains ~needle:"`atlassian_searchJiraIssuesUsingJql` was called 3 times" body);
-  check bool "the model is told the result did not change" true
-    (contains ~needle:"returned the same result" body)
-;;
-
-let test_repeated_text_stop_is_named_in_the_next_prompt () =
-  let body =
-    user_message
-      ~previous_turn_stop:
-        (Masc.Keeper_turn_checkpoint_reason.Repeated_assistant_text
-           { repeated_count = 3 })
-      base_observation
-  in
-  check bool "the repeated-message count is named" true
-    (contains ~needle:"wrote the same message 3 times" body)
-;;
-
-let test_no_previous_stop_renders_no_line () =
-  let body = user_message base_observation in
-  check bool "a completed or first turn says nothing about a previous stop" false
-    (contains ~needle:"- Previous turn:" body)
-;;
 
 (* --- Own Recent Actions: arguments ride on refusals --- *)
 
@@ -554,7 +512,6 @@ let test_current_task_section_renders () =
              reason = None;
              next_step = Some "wire parser to store";
              failure_mode = None;
-             reclaim_policy = None;
              evidence_refs = [];
              updated_at = None;
              updated_by = None;
@@ -753,7 +710,6 @@ let test_direct_turn_reuses_current_task_context () =
              reason = None;
              next_step = Some "answer with the current parser status";
              failure_mode = None;
-             reclaim_policy = None;
              evidence_refs = [];
              updated_at = None;
              updated_by = None;
@@ -1125,19 +1081,16 @@ let test_threaded_stimulus_decision_renders_wake_reason () =
   check bool "bootstrap reason listed" true
     (contains ~needle:"bootstrap" threaded)
 
-let test_bootstrap_stimulus_keeps_reactive_post_action () =
+let test_bootstrap_stimulus_keeps_reactive_channel () =
   let decision =
     WO.keeper_cycle_decision
       ~event_queue_triggers:[ WO.Bootstrap_stimulus ]
       ~meta
       base_observation
   in
-  match
-    Masc.Keeper_unified_turn_success.For_testing.post_action_of_channel
-      decision.WO.channel
-  with
-  | Masc.Keeper_unified_turn_success.For_testing.Assign_task -> ()
-  | Masc.Keeper_unified_turn_success.For_testing.Empty_queue_sleep ->
+  match decision.WO.channel with
+  | WO.Reactive -> ()
+  | WO.Scheduled_autonomous ->
     Alcotest.fail
       "bootstrap stimulus must not be reclassified from reactive to scheduled"
 
@@ -1283,7 +1236,7 @@ let test_submitted_task_heading_does_not_claim_a_hold () =
     (contains ~needle:"Current Task (held by you)" user);
   check bool "the heading states what it is instead" true
     (contains
-       ~needle:"### Current Task (submitted for verification; it does not hold your claim)"
+       ~needle:"### Current Task (submitted for verification)"
        user);
   check bool "the row still carries the task" true
     (contains ~needle:"- task-42 — Wire the wake-turn context" user);
@@ -1712,8 +1665,8 @@ let () =
         [
           test_case "stimulus decision renders wake reason" `Quick
             test_threaded_stimulus_decision_renders_wake_reason;
-          test_case "bootstrap keeps reactive post-action" `Quick
-            test_bootstrap_stimulus_keeps_reactive_post_action;
+          test_case "bootstrap keeps the reactive channel" `Quick
+            test_bootstrap_stimulus_keeps_reactive_channel;
           test_case "preview invents no wake reason" `Quick
             test_preview_does_not_invent_wake_reason;
         ] );
@@ -1756,15 +1709,6 @@ let () =
             test_goal_heading_counts_what_the_block_lists;
           test_case "no summaries renders no layer" `Quick
             test_no_summaries_renders_no_goal_layer;
-        ] );
-      ( "previous turn stop reaches the next prompt",
-        [
-          test_case "a repeated tool call is named with its count" `Quick
-            test_repeated_tool_call_stop_is_named_in_the_next_prompt;
-          test_case "repeated assistant text is named with its count" `Quick
-            test_repeated_text_stop_is_named_in_the_next_prompt;
-          test_case "no previous stop renders no line" `Quick
-            test_no_previous_stop_renders_no_line;
         ] );
       ( "backlog task identities",
         [

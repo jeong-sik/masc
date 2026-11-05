@@ -95,6 +95,67 @@ let roster_of_reading ~errors ~rows ~truncated ~total =
   in
   prepare_roster source
 
+(* One Keeper's row as [GET /api/v1/gate/keepers?name=] answers it
+   (RFC-0481 §3.1). *)
+type row_reading =
+  | Row of Decode.keeper_runtime
+  | Row_invalid of string
+  | No_row
+
+let row_reading_of_reading ~keeper_name ~rows ~errors =
+  match rows, errors with
+  | [ (row : Decode.keeper_runtime) ], [] when String.equal row.kr_name keeper_name -> Ok (Row row)
+  | [], [ (name, detail) ] when String.equal name keeper_name -> Ok (Row_invalid detail)
+  | [], [] -> Ok No_row
+  | _ :: _, _ | [], _ :: _ ->
+    Error (Printf.sprintf "the row read for %s answered %d rows and %d errors for other names"
+             keeper_name (List.length rows) (List.length errors))
+
+let replace_row roster ~keeper_name reading =
+  let by_name left right = String.compare left right in
+  let splice observed errors =
+    let observed =
+      List.filter (fun (row : Decode.keeper_runtime) -> not (String.equal row.kr_name keeper_name))
+        observed
+    in
+    let errors = List.filter (fun (name, _) -> not (String.equal name keeper_name)) errors in
+    let observed, errors =
+      match reading with
+      | Row row ->
+        ( List.sort (fun (left : Decode.keeper_runtime) (right : Decode.keeper_runtime) ->
+              by_name left.kr_name right.kr_name)
+            (row :: observed)
+        , errors )
+      | Row_invalid detail ->
+        observed, List.sort (fun (left, _) (right, _) -> by_name left right) ((keeper_name, detail) :: errors)
+      | No_row -> observed, errors
+    in
+    prepare_roster
+      (match errors with
+       | [] -> Roster_complete observed
+       | _ :: _ -> Roster_invalid { observed; errors; complete = true })
+  in
+  (* Only a complete roster can take one row: a clamped or unread one does not
+     say where the row belongs or what else is missing. *)
+  match roster.source with
+  | Roster_complete observed -> Some (splice observed [])
+  | Roster_invalid { observed; errors; complete = true } -> Some (splice observed errors)
+  | Roster_unobserved | Roster_partial _ | Roster_invalid { complete = false; _ } -> None
+
+let starting_up_until (row : Decode.keeper_runtime) =
+  match
+    Decode.keeper_health_reading row.kr_health, row.kr_next_action, row.kr_identity
+  with
+  | (Decode.Health_running | Decode.Health_idle), Some Status.Probe, Ok identity -> (
+      match Workspace_resilience.Time.parse_iso8601_opt identity.Decode.k_created_at with
+      | Some created when created > 0.0 -> Some (created +. Status.agent_staleness_threshold_s)
+      | Some _ | None -> None)
+  | (Decode.Health_running | Decode.Health_idle), Some Status.Probe, Error _
+  | (Decode.Health_running | Decode.Health_idle), Some (Status.Recover | Status.Direct_message), _
+  | (Decode.Health_running | Decode.Health_idle), None, _
+  | (Decode.Health_failing | Decode.Health_offline), _, _ ->
+    None
+
 type roster_failure =
   | Roster_unauthorized of Masc_tui_credential.server_reason
   | Roster_unreachable of string
@@ -161,28 +222,6 @@ let health_label reading =
   | Unobserved -> "unread"
   | Absent -> "absent"
   | Present runtime -> Decode.keeper_health_to_string runtime.Decode.kr_health
-
-(* The roster header's tally, counted with the same function that labels the
-   status column so the header and the column cannot disagree. Counting the
-   label itself removes the second spelling of the same reading rather than
-   keeping it in step by hand. *)
-let tally_by label_of readings =
-  List.fold_left
-    (fun counts reading ->
-      let label = label_of reading in
-      let rec bump = function
-        | [] -> [ (label, 1) ]
-        | (name, n) :: rest when String.equal name label -> (name, n + 1) :: rest
-        | entry :: rest -> entry :: bump rest
-      in
-      bump counts)
-    []
-    readings
-
-(* Counted with [health_label] because that is the word the status column now
-   shows. The header and the column are one reading drawn twice; whichever
-   function labels the column has to be the one that counts it. *)
-let health_tally readings = tally_by health_label readings
 
 type action =
   | Pause

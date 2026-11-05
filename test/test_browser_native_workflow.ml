@@ -36,7 +36,7 @@ let stopped label expected = function
 let refused label decoded = check bool label true (Result.is_error decoded)
 let not_released index answer = `Unconfirmed (Rel.Step_not_released {index;answer})
 (* [None] is the one answer that releases. *)
-let kind_of = function Rel.Receipt_without_dialog|Rel.Native_window_tail _ -> None | Rel.Unreleased kind -> Some kind
+let kind_of = function Rel.Receipt_without_dialog|Rel.Native_window_tail _|Rel.Refused_before_press _ -> None | Rel.Unreleased kind -> Some kind
 (* The only way to get a releasing answer is to read a receipt the SDK declares. *)
 let clean = Rel.answer_of_json (obj [])
 (* Receipts that release nothing, with the kind the decoder must name for each. *)
@@ -623,6 +623,79 @@ let release_is_judged_from_declared_answers () =
     check bool "one unreleased answer withholds the release" true
       (seen_input (Rel.judge [0,answer])=not_released 0 kind))
     [Rel.Receipt_with_dialog;Rel.Void_answer;Rel.Undeclared_answer;Rel.Never_returned]
+(* An SDK error is a refusal before the press only when its declared name and kind say so. *)
+let a_refusal_before_the_press_holds_nothing () =
+  let refusal kind = obj ["name",str "ElementResolutionError";"kind",str kind] in
+  let refused gesture value = match Rel.answer_of_refusal gesture value with
+    | Rel.Refused_before_press resolution -> Some resolution
+    | Rel.Receipt_without_dialog | Rel.Native_window_tail _ | Rel.Unreleased _ -> None in
+  List.iter (fun gesture ->
+    check bool "a permanent target refusal is read" true (refused gesture (refusal "permanent")=Some Rel.Permanent);
+    check bool "a transient target refusal is read" true (refused gesture (refusal "transient")=Some Rel.Transient))
+    [Rel.Click;Rel.Double_click;Rel.Drag_and_drop];
+  List.iter (fun (label,value) ->
+    check bool (label ^ " is no answer") true
+      (Rel.answer_of_refusal Rel.Click value=Rel.of_unreleased Rel.Never_returned))
+    ["another error name",obj ["name",str "TimeoutError";"kind",str "transient"];
+     "an undeclared kind",obj ["name",str "ElementResolutionError";"kind",str "fatal"];
+     "a missing kind",obj ["name",str "ElementResolutionError";"kind",`Null];
+     "an extra member",obj ["name",str "ElementResolutionError";"kind",str "permanent";"message",str "x"];
+     "a repeated member",`Assoc ["name",str "ElementResolutionError";"name",str "ElementResolutionError"];
+     "no error object",`Null];
+  let permanent=Rel.answer_of_refusal Rel.Click (refusal "permanent") in
+  check bool "a lone refusal leaves nothing to release" true (seen_input (Rel.judge [0,permanent])=`No_hold);
+  check bool "a refusal adds no evidence beside released steps" true
+    (seen_input (Rel.judge [0,clean;1,permanent])=`Released [0]);
+  check bool "a refusal does not hide a later unreleased step" true
+    (seen_input (Rel.judge [0,permanent;1,Rel.of_unreleased Rel.Void_answer])=not_released 1 Rel.Void_answer);
+  check bool "a refusal beside a receipt for the same step is contradictory" true
+    (seen_input (Rel.judge [0,permanent;0,clean])=not_released 0 Rel.Conflicting_evidence);
+  check bool "a receipt beside a refusal for the same step is contradictory" true
+    (seen_input (Rel.judge [0,clean;0,permanent])=not_released 0 Rel.Conflicting_evidence)
+(* The workflow script marks a holding step held before calling it; the judge reads the thrown error. *)
+let a_workflow_step_refused_before_its_press_holds_nothing () =
+  let module U=Yojson.Safe.Util in
+  let thrown name kind = obj ["name",str name;"kind",str kind] in
+  let failed index method_ value =
+    obj ["index",`Int index;"method",str method_;"message",str "Locator matched 8 elements";"thrown",value] in
+  let stopped_alone method_ value = obj (unreleased (result ~started:true ~completed_effect:false ~completed:[]
+    ~failure:(failed 0 method_ value))) in
+  List.iter (fun (method_,args) ->
+    let alone=request [step method_ args] in
+    (match R.decode ~windows:None alone (stopped_alone method_ (thrown "ElementResolutionError" "permanent")) with
+     | Ok (R.Stopped {input;receipt;refused_before_press;_}) ->
+       check bool (method_ ^ ": a refused step leaves nothing to release") true (seen_input input=`No_hold);
+       check bool (method_ ^ ": the refusal is typed on the outcome") true (refused_before_press=Some Rel.Permanent);
+       let failure=U.member "failure" receipt in
+       check string (method_ ^ ": the SDK kind is public") "permanent"
+         (U.to_string (U.member "kind" (U.member "refusedBeforePress" failure)));
+       check bool (method_ ^ ": the raw thrown error is not public") true (U.member "thrown" failure=`Null)
+     | Ok (R.Completed _) -> fail (method_ ^ ": a refused step was called complete")
+     | Error message -> fail (method_ ^ ": " ^ message));
+    stopped (method_ ^ ": a refusal after a released click keeps that release") (`Released [0])
+      (R.decode ~windows:None (request [click;step method_ args])
+         (obj (unreleased (result ~started:true ~completed_effect:true ~completed:[clicked 0]
+            ~failure:(failed 1 method_ (thrown "ElementResolutionError" "transient"))))));
+    stopped (method_ ^ ": another SDK error stays held") (not_released 0 Rel.Never_returned)
+      (R.decode ~windows:None alone (stopped_alone method_ (thrown "TimeoutError" "transient"))))
+    ["click",["selector",str "#source"];"dblclick",["selector",str "#source"];
+     "dragAndDrop",["selector",str "#source";"destination",str "#target"]];
+  let identity=obj ["spaceId",`Int 51;"label",str "p1";"targetId",str "T1";"openedBy",str "agent"] in
+  let popup=step "clickAndWaitForPopup" ["selector",str "a[target=_blank]";"popupOptions",obj ["timeout",`Int 0]] in
+  (match R.decode ~windows:None (request [popup;step "fill" ["selector",str "input";"text",str "child"]])
+      (obj (("pages",obj ["source",identity;"current",identity;"transitions",`List []])
+        ::unreleased (result ~started:true ~completed_effect:false ~completed:[]
+          ~failure:(failed 0 "clickAndWaitForPopup" (thrown "ElementResolutionError" "transient"))))) with
+   | Ok (R.Stopped {input;refused_before_press;_}) ->
+     check bool "a refused popup trigger leaves nothing to release" true (seen_input input=`No_hold);
+     check bool "a refused popup trigger is typed on the outcome" true (refused_before_press=Some Rel.Transient)
+   | Ok (R.Completed _) -> fail "a refused popup trigger was called complete"
+   | Error message -> fail ("refused popup trigger: " ^ message));
+  List.iter (fun (method_,args) ->
+    stopped (method_ ^ ": the same SDK error does not release this step") (not_released 0 Rel.Never_returned)
+      (R.decode ~windows:None (request [step method_ args])
+         (stopped_alone method_ (thrown "ElementResolutionError" "permanent"))))
+    ["press",["selector",str "#editor";"key",str "Enter"];"mouse.click",["x",`Int 10;"y",`Int 20]]
 (* A failed step can be reported twice: by its receipt and by the failure label that names a dialog. *)
 let a_step_answered_twice_counts_once () =
   let dialog=Rel.of_unreleased Rel.Receipt_with_dialog in
@@ -857,6 +930,8 @@ let () = if Array.length Sys.argv=2 && Sys.argv.(1)="--receipt-contract" then
   test_case "an initial URL failure holds nothing" `Quick an_initial_url_failure_holds_nothing;
   test_case "a workflow that never held input has nothing to release" `Quick a_workflow_that_never_held_input_has_nothing_to_release;
   test_case "release is judged from the answers the SDK declared" `Quick release_is_judged_from_declared_answers;
+  test_case "a refusal before the press holds nothing" `Quick a_refusal_before_the_press_holds_nothing;
+  test_case "a workflow step refused before its press holds nothing" `Quick a_workflow_step_refused_before_its_press_holds_nothing;
   test_case "a step answered twice counts once" `Quick a_step_answered_twice_counts_once;
   test_case "a failure label must match its position" `Quick a_failure_label_must_match_its_position;
   test_case "malformed execution never proves success" `Quick malformed_receipts]]

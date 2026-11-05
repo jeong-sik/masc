@@ -12,19 +12,14 @@ type t =
   | Error of { reason : string }
 
 and no_progress_reason =
-  | No_eligible_tasks of claim_scope_exclusions
   | Resource_conflict of { resource : string }
   | No_work_available
-
-and claim_scope_exclusions = {
-  scope_excluded_count : int;
-}
 
 (** JSON serialization for telemetry and trace surfaces. *)
 val to_json : t -> Yojson.Safe.t
 
-(** JSON deserialization from tool output embedding. Missing or malformed
-    no-eligible exclusion fields return [None]. *)
+(** JSON deserialization from tool output embedding. Malformed input
+    returns [None]. *)
 val of_json : Yojson.Safe.t -> t option
 
 (** Is this typed outcome a no-progress signal ([No_progress _] or [Error _])?

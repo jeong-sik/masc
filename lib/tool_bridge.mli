@@ -142,7 +142,12 @@ val to_agent_core_typed_result :
 val params_of_json_schema : Yojson.Safe.t -> Agent_core.Types.tool_param list
 (** Convert a MASC [input_schema] with the AGENT_CORE schema-conversion SSOT.
     Raises [Invalid_argument] when a property type is missing, unsupported, or
-    ambiguous; no local default or union-member selection is applied. *)
+    ambiguous; no local default or union-member selection is applied.
+
+    A property that declares non-empty [oneOf] or [anyOf] alternatives and no
+    [type] is the one exception: it is deliberately absent from the returned
+    parameters (the wire schema keeps it verbatim) instead of raising. A [type]
+    array listing several types is still refused. *)
 
 (** {1 AGENT_CORE Tool.t Creation} *)
 

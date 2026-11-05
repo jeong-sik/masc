@@ -1,7 +1,5 @@
 open Alcotest
 open Masc
-module Preparation = Masc_test_deps.Board_test_preparation
-
 module Fs = Keeper_volume_filesystem
 module Watch = Keeper_volume_filesystem_watch
 module Sweep = Server_keeper_volume_maintenance
@@ -129,7 +127,6 @@ let test_running_sweep_does_not_mutate_volumes () =
       check string "workspace config stays in the isolated fixture"
         (Unix.realpath base) (Unix.realpath config.base_path);
       ignore (Workspace.init config ~agent_name:None : string);
-      Preparation.prepare ~base_path:base ~action:Preparation.Bootstrap;
       Fs_compat.mkdir_p keepers_dir;
       let work_keeper = "volume-observe-work" in
       let build_keeper = "volume-observe-build" in

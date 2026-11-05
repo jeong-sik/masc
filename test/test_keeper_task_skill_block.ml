@@ -50,8 +50,6 @@ let task ~skills : Domain.task =
   ; execution_links = Domain.no_execution_links
   ; handoff_context = None
   ; cycle_count = 0
-  ; reclaim_policy = None
-  ; do_not_reclaim_reason = None
   ; skills
   }
 ;;

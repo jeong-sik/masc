@@ -29,11 +29,17 @@ let with_workspace run =
     remove_tree path)
     (fun () -> run config abandoned (Eio.Stdenv.process_mgr env))
 
+(* The fixture is written as stored state, so the audit ledger holds only
+   the events the drop under test produces. *)
 let create config =
-  match Goal_store.upsert_goal config ~title:"Preserve cancellation audit"
-    ~metric:"cancelled Goals with audit" ~target_value:"1" () with
-  | Ok (goal, _) -> goal
-  | Error error -> fail (Goal_store.write_error_to_string error)
+  let now = Masc_domain.now_iso () in
+  let goal = { Goal_store.id = "goal-drop-delivery"; criterion_revision = "fixture-criterion";
+    title = "Preserve cancellation audit"; metric = Some "cancelled Goals with audit";
+    target_value = Some "1"; due_date = None; priority = 3; phase = Goal_phase.Executing;
+    last_review_note = None; last_review_at = None; created_at = now; updated_at = now } in
+  Goal_store.write_state config
+    { version = 1; updated_at = now; goals = [goal]; pending_events = []; pending_notifications = [] };
+  goal
 
 let drop config ?note goal_id =
   let ctx : Masc.Workspace_types.context = {config; agent_name="operator"} in
@@ -89,8 +95,6 @@ let test_repeat_repairs_audit () = with_workspace @@ fun config abandoned _ ->
   let goal = create config in
   obstruct_audit config;
   let response = drop config ~note:"operator cancellation" goal.id |> success in
-  check bool "uninitialized Task store is reported unread" true
-    Yojson.Safe.Util.(response |> member "tasks" |> member "unread" <> `Null);
   let event_id = committed_pending config goal response in
   check int "verifier cancellation notified once" 1 !abandoned;
   restore_audit config;
@@ -126,6 +130,10 @@ let test_failed_commit_has_no_effect () = with_workspace @@ fun config abandoned
   let goal = create config in
   let path = Goal_store.goals_path config in
   let before = Fs_compat.load_file path in
+  (* Take the Goal lock once so its lock file exists before the directory
+     turns read-only; the drop then fails at its state write. *)
+  (match Goal_store.transact_goal config ~goal_id:goal.id (fun current -> Ok (current, ())) with
+   | Ok _ -> () | Error error -> fail (Goal_store.write_error_to_string error));
   let directory = Filename.dirname path in
   Unix.chmod directory 0o500;
   let result = Fun.protect ~finally:(fun () -> Unix.chmod directory 0o700)

@@ -40,5 +40,9 @@ val failed : retry_s:float -> max_retry_s:float -> now:float -> t -> t
 (** The read that began last failed. The wait is [retry_s] after the first
     failure and doubles with each failure in a row, up to [max_retry_s]. *)
 
+val abandoned : t -> t
+(** The read that began last never ran, so it answered nothing. What it was
+    to read is owed again, and the failures in a row are kept. *)
+
 val due : now:float -> t -> bool
 (** Whether a read should start now, when the surface is able to read. *)

@@ -219,11 +219,14 @@ let test_actions_hide_what_says_nothing_a_row_can_act_on () =
     ; agent_core ~kind:Observer.Telemetry "analyst"
     ; heartbeat "bandleader"
     ; Observer.Keeper_composite_changed { keeper = "largo"; at = 100. }
-    ; Observer.Snapshot "execution_snapshot"
+    ; Observer.Keeper_metrics_appended { keeper = "largo"; at = 100. }
+    ; Observer.Snapshot (Observer.Unread_projection "operator_snapshot")
     ; settled "largo"
     ; Observer.Keeper_chat_appended { keeper = "lane-smith"; connector = Some "agent"; at = 100. }
     ; Observer.Other "brand_new_push"
-    ; Observer.Internal_agent_runs_changed
+    ; Observer.Internal_agent_runs_changed Masc.Internal_agent_runs_event.Exact_lane
+    ; Observer.Workspace_store_changed Observer.Schedule_store
+    ; Observer.Workspace_store_changed Observer.Goal_projection
     ; Observer.Keeper_chat_stream_frame
         { keeper = "test-keeper"; operation_id = "op"; seq = None
         ; frame = Some "TEXT_MESSAGE_CONTENT"; at = 100. }
@@ -238,7 +241,7 @@ let test_actions_hide_what_says_nothing_a_row_can_act_on () =
   in
   check int "actions keeps the call, the settlement, the chat, and the unknown" 4
     (under Acting.Actions);
-  check int "everything keeps all twelve" 12 (under Acting.Everything);
+  check int "everything keeps all fifteen" 15 (under Acting.Everything);
   check bool "an event this build was not taught always draws" true
     (Acting.visible Acting.Actions (Observer.Other "brand_new"))
 
@@ -249,21 +252,21 @@ let test_actions_hide_what_says_nothing_a_row_can_act_on () =
    Keeper turn. It is a server push: the everything scope shows it, the two
    that show what a keeper did do not. *)
 let test_the_internal_runs_push_is_not_a_keepers_act () =
-  let push = Observer.Internal_agent_runs_changed in
+  let push = Observer.Internal_agent_runs_changed Masc.Internal_agent_runs_event.Exact_lane in
   check bool "turns does not draw it" false (Acting.visible Acting.Turns push);
   check bool "actions does not draw it" false (Acting.visible Acting.Actions push);
   check bool "everything does" true (Acting.visible Acting.Everything push);
   let row = Acting.row_of_event ~at:100. ~duration_ms:None push in
   check bool "it is drawn quiet, not with the look-here mark" true
     (row.Acting.glyph = Acting.Quiet);
-  check string "and it says what changed" "a run registry changed"
+  check string "and it says which registry changed" "the exact_lane run registry changed"
     row.Acting.detail;
-  let schedule_push = Observer.Schedule_store_invalidated in
+  let schedule_push = Observer.Workspace_store_changed Observer.Schedule_store in
   check bool "schedule changes are not keeper actions" false
     (Acting.visible Acting.Actions schedule_push);
   check bool "schedule changes remain visible under everything" true
     (Acting.visible Acting.Everything schedule_push);
-  let confirm_push = Observer.Pending_confirm_invalidated in
+  let confirm_push = Observer.Workspace_store_changed Observer.Pending_confirms in
   check bool "pending confirmation changes are not keeper actions" false
     (Acting.visible Acting.Actions confirm_push);
   check bool "pending confirmation changes remain visible under everything" true
@@ -549,8 +552,10 @@ let test_every_row_wears_the_clock_the_feed_ordered_it_by () =
        check bool (name ^ " wears the arrival clock") true
          (Float.equal (at_of event) received))
     [ ("an unknown type", Observer.Other "brand_new_push")
-    ; ("the internal runs push", Observer.Internal_agent_runs_changed)
-    ; ("a snapshot", Observer.Snapshot "execution_snapshot")
+    ; ( "the internal runs push"
+      , Observer.Internal_agent_runs_changed Masc.Internal_agent_runs_event.Verification )
+    ; ("the schedules push", Observer.Workspace_store_changed Observer.Schedule_store)
+    ; ("a snapshot", Observer.Snapshot (Observer.Unread_projection "operator_snapshot"))
       (* These two carried a clock of their own before, and it is no longer
          what the row shows -- the row shows the order it sits in. *)
     ; ("a settlement", settled "largo")
@@ -1087,7 +1092,9 @@ let test_measuring_reads_what_the_row_draws () =
       , lane_resource ~detail:"No such image" Lane_events.Acquire_failed )
     ; ("a removed container", lane_resource Lane_events.Release_confirmed)
     ; ("a heartbeat", heartbeat "keeper-one")
-    ; ("a registry push", Observer.Internal_agent_runs_changed)
+    ; ( "a registry push"
+      , Observer.Internal_agent_runs_changed Masc.Internal_agent_runs_event.Exact_lane )
+    ; ("a schedules push", Observer.Workspace_store_changed Observer.Schedule_store)
     ];
   (* The dividing case: the drawn row names the keeper, and that is not the
      name [row_of_entry] gives it. Drawing without the rename would leave the

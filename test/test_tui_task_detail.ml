@@ -27,8 +27,6 @@ let domain_task ~id ~(status : Masc_domain.task_status) () :
   ; execution_links = Masc_domain.no_execution_links
   ; handoff_context = None
   ; cycle_count = 0
-  ; reclaim_policy = None
-  ; do_not_reclaim_reason = None
   ; skills = []
   }
 

@@ -118,8 +118,6 @@ include Tool_task_completion_review
 
 include Tool_task_args
 
-include Tool_task_contract_gate
-
 (* Handlers *)
 
 type task_skill_authoring_error =
@@ -689,18 +687,6 @@ let handle_claim ~tool_name ~start_time ctx args =
    | Error e -> task_log_warn ~task_id "task claim failed for %s: %s" task_id (Masc_domain.masc_error_to_string e));
   result_to_response ~tool_name ~start_time result
 
-let no_eligible_diagnostics_json =
-  Tool_task_no_eligible.no_eligible_diagnostics_json
-let no_eligible_exclusion_summary =
-  Tool_task_no_eligible.no_eligible_exclusion_summary
-
-let format_no_eligible ctx ~excluded_count ~scope_excluded_count =
-  ignore ctx;
-  Printf.sprintf
-    "No eligible tasks available (blocked/excluded: %d). %s"
-    excluded_count
-    (no_eligible_exclusion_summary ~scope_excluded_count)
-
 let handle_claim_next ~tool_name ~start_time ctx _args =
   (* #18965 — removed [is_agent_session_bound] hard gate (same rationale as
      [handle_claim] above).  Workspace.claim_next_r operates on
@@ -708,39 +694,14 @@ let handle_claim_next ~tool_name ~start_time ctx _args =
      agents_dir. *)
   let result = Workspace.claim_next_r ctx.config ~agent_name:ctx.agent_name () in
   match result with
-  | Workspace.Claim_next_claimed { message; task_id; scope_widened; _ } ->
+  | Workspace.Claim_next_claimed { message; task_id; _ } ->
     sync_owner_current_task_binding ctx;
     sync_planning_current_task_with_owned_task ctx;
     append_claim_observation message ~now:(Time_compat.now ())
-      ~agent_name:ctx.agent_name ~task_id ~scope_widened
+      ~agent_name:ctx.agent_name ~task_id
     |> Tool_result.ok ~tool_name ~start_time
   | Workspace.Claim_next_no_unclaimed ->
     Tool_result.ok ~tool_name ~start_time "No unclaimed tasks available"
-  | Workspace.Claim_next_no_eligible
-      { excluded_count
-      ; scope_excluded_count
-      ; explicit_excluded_count
-      ; claim_pool_candidate_count
-      } ->
-    let message =
-      format_no_eligible
-        ctx
-        ~excluded_count
-        ~scope_excluded_count
-    in
-    let diagnostics =
-      no_eligible_diagnostics_json
-        ~excluded_count
-        ~scope_excluded_count
-        ~explicit_excluded_count
-        ~claim_pool_candidate_count
-    in
-    (* Build the structured payload directly so message and diagnostics
-       remain first-class typed fields. *)
-    let data =
-      `Assoc [ "message", `String message; "diagnostics", diagnostics ]
-    in
-    Tool_result.make_ok ~tool_name ~start_time ~data ()
   | Workspace.Claim_next_error e ->
     (* RFC-0189: Claim_next_error wraps workspace-side reasons like
        "no claimable task", "agent not allowed", "permission denied"

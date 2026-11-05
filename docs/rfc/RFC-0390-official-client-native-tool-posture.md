@@ -51,9 +51,11 @@ native = "read"   # "none" | "read" | "full"
 
 | 단계 | 뜻 | Claude Code | Codex | Antigravity |
 |---|---|---|---|---|
-| `none` | 읽기·효과 전부 masc 도구로만 | `--tools ""` (현행) | **선언 불가** — admission 에서 typed 거부 | **선언 불가** — admission 에서 typed 거부 |
-| `read` | 네이티브 읽기 허용, 효과는 masc 도구로만 | `--tools "Read,Glob,Grep"` | `:read-only` (현행) | `--mode plan` + `--sandbox` (현행) |
+| `none` | 읽기·효과 전부 masc 도구로만 | `--tools "ToolSearch"` (현행) | **선언 불가** — admission 에서 typed 거부 | **선언 불가** — admission 에서 typed 거부 |
+| `read` | 네이티브 읽기 허용, 효과는 masc 도구로만 | `--tools "Read,Glob,Grep,ToolSearch"` | `:read-only` (현행) | `--mode plan` + `--sandbox` (현행) |
 | `full` | 네이티브 효과까지 허용 | `--tools "default"` | `:workspace` | `--mode accept-edits` + `--sandbox` 유지 |
+
+`ToolSearch` 는 Claude Code 가 masc 도구 설명을 이름으로 찾아오는 내장 도구다. 로컬 상태를 읽지 않고 네트워크에도 나가지 않으므로 `none`·`read` 의 뜻은 그대로다. 이 이름을 빼면 CLI 는 masc 도구 설명 전부를 요청마다 그대로 보낸다 (`runtime_native_tools.ml` `claude_code_schema_lookup_tool_name`).
 
 - 키가 없으면 **각 런타임의 현행 자세 유지** (Claude Code = `none`,
   Codex = `read`, Antigravity = `read`). 기본값을 하나로 통일하면

@@ -29,7 +29,7 @@ let identity base : Masc.Tui_decode.server_identity =
   {sid_version="0.24.0";sid_binary_commit="evidence-resource";sid_binary_commit_age_s=None; sid_runtime_instance_id = None;
    sid_base_path=Masc.Tui_decode.Canonical_path.of_path (Unix.realpath base);sid_masc_root=Masc.Tui_decode.Canonical_path.of_path (Unix.realpath (Filename.concat base ".masc"));
    sid_executable_in_worktree=None;sid_state_ready=Some true;sid_uptime=None;
-   sid_sse_clients=None;sid_gc=None;sid_scheduler=None}
+   sid_sse_clients=None;sid_gc=None;sid_scheduler=None;sid_operator_action=None}
 let packet base verification_id =
   let body = Store.persist_binary_body ~base_path:base ~request_id:verification_id ~index:0 bytes in
   check bool "original image body was actually filed" true (Option.is_some body);

@@ -187,3 +187,9 @@ let of_file path =
   | Error detail -> Error detail
   | Ok toml -> parse toml
   | exception Otoml.Duplicate_key detail -> Error detail
+
+let of_text text =
+  match Otoml.Parser.from_string_result text with
+  | Error detail -> Error detail
+  | Ok toml -> parse toml
+  | exception Otoml.Duplicate_key detail -> Error detail

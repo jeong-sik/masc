@@ -60,6 +60,7 @@ const LANE_SOURCE_LABELS: Record<DashboardKeeperWaitingSource, string> = {
   schedule_waiting: '예약 실행',
   owner_shutdown: '종료 정리',
   operator_pending_confirm: '운영자 확인',
+  runtime_quota_spent: '한도 소진',
   read_error: '읽기 오류',
   observation_unavailable: '관측 불가',
 }
@@ -73,6 +74,7 @@ const LANE_SOURCE_GRAPH_COLORS: Record<DashboardKeeperWaitingSource, string> = {
   schedule_waiting: 'var(--status-warn)',
   owner_shutdown: 'var(--color-fg-muted)',
   operator_pending_confirm: 'var(--status-warn)',
+  runtime_quota_spent: 'var(--color-danger)',
   read_error: 'var(--color-danger)',
   observation_unavailable: 'var(--color-danger)',
 }
@@ -100,6 +102,7 @@ const LANE_SOURCE_STAGE: Record<DashboardKeeperWaitingSource, LaneStage> = {
   schedule_waiting: 'schedule',
   owner_shutdown: 'keeper',
   operator_pending_confirm: 'operator',
+  runtime_quota_spent: 'keeper',
   read_error: 'queue',
   observation_unavailable: 'operator',
 }

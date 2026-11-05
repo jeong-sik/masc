@@ -153,7 +153,7 @@ MASC의 현재 canonical front door는 3가지다.
 가장 기본적인 경로. project scope, task backlog, worktree, heartbeat를 다룬다.
 
 - **대상**: repo-local coding workspace collaboration
-- **핵심 도구**: `masc_start`, `masc_status`, `masc_transition`, `masc_plan_set_task`, `masc_heartbeat`
+- **핵심 도구**: `masc_start`, `masc_status`, `masc_transition`, `masc_heartbeat`
 - **설명**: 여러 에이전트가 같은 repo에서 충돌 없이 일하도록 namespace/task/worktree truth를 유지한다.
 
 ### 7.2 Keeper Runtime

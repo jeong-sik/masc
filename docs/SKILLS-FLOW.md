@@ -194,9 +194,13 @@ unavailable로 표시한다. 이름-only fallback은 없다. 본문은 매 턴 p
 (`masc.skill-snapshot/v1`, `lib/skill_snapshot`)과 snapshot의 모든 entry를 대상으로 한
 exact surface를 함께 투영한다. shadow entry도 빠지지 않는다. join key는
 source/package/name/content revision 전체이며,
-instruction/composition/unavailable과 typed projection diagnostics를 표시한다. 사용 증거는
-별도 session activation ledger의 exact activation/delivery/action 기록에서 읽는다. 이름,
-tool prefix, 최근 로그 행 수로 사용 횟수를 재구성하지 않는다.
+instruction/composition/unavailable과 typed projection diagnostics를 표시한다. 이 응답은
+activation ledger 를 읽지 않는다. 사용 증거는 Keeper 마다
+`GET /api/v1/keepers/skill-usage?keeper=` 가 그 Keeper 의 지금 session activation ledger
+에서 exact activation/delivery/action 기록을 세어 돌려주고, TUI Usage 화면과 Monitor ›
+Skills 가 reference 로 이 catalog 에 붙인다(RFC-0483). 두 답은 따로 읽어서, TUI 는 이
+catalog 읽기에 없는 revision 의 행을 따로 보여 준다. 이름, tool prefix, 최근 로그 행
+수로 사용 횟수를 재구성하지 않는다.
 
 같은 projection은 각 Skill의 실행 유도 방식, 실제 plan schedule의 node/batch/최대 병렬
 폭, async 여부, 정적 read-only 판정, 본문/discovery/tool-schema 바이트를 `profile`로

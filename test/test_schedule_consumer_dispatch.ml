@@ -12,6 +12,40 @@ module Keeper_registry_event_queue = struct
   ;;
 end
 
+(* Withdraw one queued source through the production exact-selection ACK. *)
+let ack_queued_post_id ~base_path ~keeper_name ~post_id =
+  match Keeper_event_queue_persistence.pending_selections_result ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok selections ->
+    (match
+       List.filter
+         (fun (selection : Keeper_event_queue_state.pending_selection) ->
+            String.equal selection.source.post_id post_id)
+         selections
+     with
+     | [ selection ] ->
+       Keeper_event_queue_persistence.ack_pending_result
+         ~after_commit:(Keeper_event_queue_cells.publish ~base_path keeper_name)
+         ~base_path ~keeper_name ~selection ()
+     | [] -> Error ("no queued source " ^ post_id)
+     | _ :: _ :: _ -> Error ("queued source repeated " ^ post_id))
+;;
+
+(* The production peek, read back as the exact pending selection. *)
+let select_ready ~now ~ready state =
+  Option.bind (Keeper_event_queue_state.peek_when ~now ~ready state) (fun source ->
+    List.find_opt
+      (fun (selection : Keeper_event_queue_state.pending_selection) ->
+         Keeper_event_queue.stimulus_identity_equal selection.source source)
+      (Keeper_event_queue_state.pending_selections state))
+;;
+
+(* The production loader with the production peek. *)
+let select_queue_entry ~base_path ~keeper_name ~now ~ready =
+  Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name
+  |> Result.map (select_ready ~now ~ready)
+;;
+
 (* Fixture tick for create and modify: the runner's floor tick, below every
    interval these fixtures declare, so the runner-tick check never refuses one
    of them. *)
@@ -114,8 +148,6 @@ let with_workspace f =
   Unix.putenv "MASC_TEST_ALLOW_HOME_BASE_PATH" "1";
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Masc_test_deps.Board_test_preparation.prepare ~base_path:dir
-    ~action:Masc_test_deps.Board_test_preparation.Bootstrap;
   Result.get_ok (Board_dispatch.init_jsonl
     ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:Recipient_lookup.none_declared ());
@@ -322,25 +354,6 @@ let test_keeper_wake_receipt_decoder_rejects_noncanonical_shapes () =
   (match Server_schedule_consumers.dispatch_receipt_of_detail (`Assoc canonical) with
    | Ok _ -> ()
    | Error detail -> fail ("canonical receipt rejected: " ^ detail));
-  let failed_terminal =
-    canonical
-    |> set_receipt_field "occurrence_status" (`String "already_failed")
-    |> set_receipt_field "activation_status" (`String "not_required")
-    |> set_receipt_field "activation_reason" `Null
-    |> set_receipt_field "activation_detail" `Null
-  in
-  (match
-     Server_schedule_consumers.dispatch_receipt_of_detail (`Assoc failed_terminal)
-   with
-   | Ok
-       (Server_schedule_consumers.Keeper_wake_enqueued
-          { occurrence_status =
-              Server_schedule_consumers.Keeper_wake_already_failed
-          ; _
-          }) ->
-     ()
-   | Ok _ -> fail "already_failed receipt decoded to another terminal state"
-   | Error detail -> fail ("already_failed receipt rejected: " ^ detail));
   let reject label fields =
     match Server_schedule_consumers.dispatch_receipt_of_detail (`Assoc fields) with
     | Error _ -> ()
@@ -514,7 +527,7 @@ let single_occurrence_id (result : Schedule_runner.tick_result) =
 
 let pending_selection_exn ~base_path ~keeper_name =
   match
-    Keeper_event_queue_persistence.select_when_result
+    select_queue_entry
       ~base_path
       ~keeper_name
       ~now:(Unix.gettimeofday ())
@@ -1016,23 +1029,13 @@ let test_recurring_wake_supersedes_the_earlier_pending_occurrence () =
     (List.map (fun (stimulus : Keeper_event_queue.stimulus) -> stimulus.post_id) queued)
 ;;
 
-(* The two turn-end terminals: the one a completed turn runs for each entry it
-   was given, and the one a failed attempt commits. *)
+(* The terminal a completed turn runs for each entry it was given. *)
 let complete_turn ~base_path ~keeper_name ~applied_at selection =
   Keeper_registry_event_queue.terminalize_pending_turn_completed_result
     ~base_path
     keeper_name
     ~applied_at
     ~selection
-;;
-
-let fail_turn ~base_path ~keeper_name ~applied_at selection =
-  Keeper_registry_event_queue.terminalize_pending_turn_attempt_result
-    ~base_path
-    keeper_name
-    ~applied_at
-    ~selection
-    ~detail:"the turn failed before its ACK"
 ;;
 
 let check_turn_acked label = function
@@ -1120,7 +1123,7 @@ let test_supersede_withdraws_the_wake_a_failed_turn_left_pending () =
     (Keeper_registry_event_queue.snapshot ~base_path keeper_name
      |> Keeper_event_queue.to_list
      |> List.map (fun (stimulus : Keeper_event_queue.stimulus) -> stimulus.post_id));
-  fail_turn ~base_path ~keeper_name ~applied_at:262.0 failed_selection
+  complete_turn ~base_path ~keeper_name ~applied_at:262.0 failed_selection
   |> check_turn_terminal_finds_withdrawn ~base_path ~keeper_name;
   pending_selection_exn ~base_path ~keeper_name
   |> complete_turn ~base_path ~keeper_name ~applied_at:263.0
@@ -1254,12 +1257,11 @@ let test_reused_schedule_id_does_not_match_pruned_terminal_receipt () =
   in
   let first_selection = pending_selection_exn ~base_path ~keeper_name in
   (match
-     Keeper_registry_event_queue.terminalize_pending_turn_attempt_result
+     Keeper_registry_event_queue.terminalize_pending_turn_completed_result
        ~base_path
        keeper_name
        ~applied_at:202.0
        ~selection:first_selection
-       ~detail:"first schedule occurrence completed"
    with
    | Ok
        (Keeper_registry_event_queue.Turn_source_acked
@@ -1457,7 +1459,7 @@ let test_schedule_cancel_tool_withdraws_the_queued_wake_and_stores_the_cancellat
        check string "the stored reason" reason cancellation.reason)
 ;;
 
-type dashboard_drain_transition = Completed | Failed | Cancelled | Transferred
+type dashboard_drain_transition = Completed | Cancelled | Transferred
 
 let test_dashboard_drain_committed_before_projection transition () =
   with_workspace @@ fun config ->
@@ -1469,7 +1471,6 @@ let test_dashboard_drain_committed_before_projection transition () =
   let selection = pending_selection_exn ~base_path ~keeper_name in
   let label, pending_status, projected_status = match transition with
     | Completed -> "completed", "terminal_projection_pending", "matched_terminal_completed"
-    | Failed -> "failed", "terminal_projection_pending", "matched_terminal_failed"
     | Cancelled -> "cancelled", "terminal_projection_pending", "matched_terminal_cancelled"
     | Transferred -> "transferred", "transfer_projection_pending", "matched_pending"
   in
@@ -1512,10 +1513,6 @@ let test_dashboard_drain_committed_before_projection transition () =
     | Completed ->
       Keeper_event_queue_persistence.terminalize_pending_turn_completed_result
         ~after_commit ~base_path ~keeper_name ~applied_at:202.0 ~selection () |> require_terminal
-    | Failed ->
-      Keeper_event_queue_persistence.terminalize_pending_turn_attempt_result
-        ~after_commit ~base_path ~keeper_name ~applied_at:202.0 ~selection
-        ~detail:"controlled failed attempt" () |> require_terminal
     | Cancelled ->
       let cancellation : Keeper_event_queue_persistence.accepted_cancellation =
         { source = selection.source; source_incarnation = selection.admitted_revision
@@ -1544,7 +1541,7 @@ let test_dashboard_drain_committed_before_projection transition () =
       | Ok Keeper_event_queue_recovery.Transition_converged -> ()
       | Ok _ -> fail "transfer did not converge"
       | Error error -> fail (Keeper_event_queue_recovery.projection_error_to_string error))
-   | Completed | Failed | Cancelled ->
+   | Completed | Cancelled ->
      (match Keeper_reaction_ledger.project_event_queue_transition_outbox_result
          ~base_path ~keeper_name ~expected_transition_id:receipt.transition_id with
       | Ok () -> () | Error detail -> fail detail));
@@ -1743,7 +1740,7 @@ let test_retirement_cancel_withdraws_the_wake_a_failed_turn_left_pending () =
   check int "retirement withdraws the failed turn's wake" 0
     (Keeper_registry_event_queue.snapshot ~base_path keeper_name
      |> Keeper_event_queue.length);
-  fail_turn ~base_path ~keeper_name ~applied_at:202.0 selection
+  complete_turn ~base_path ~keeper_name ~applied_at:202.0 selection
   |> check_turn_terminal_finds_withdrawn ~base_path ~keeper_name;
   match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
   | None -> fail "cancelled schedule missing"
@@ -2839,7 +2836,7 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
         | Error detail -> fail detail
       in
       let selection =
-        Keeper_event_queue_state.select_when
+        select_ready
           ~now:(Unix.gettimeofday ())
           ~ready:(fun _ -> true)
           pending_state
@@ -2872,7 +2869,7 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
           (Filename.concat
              (Common.keepers_runtime_dir_of_base ~base_path)
              keeper_name)
-          "event-queue-transitions-v9.jsonl"
+          "event-queue-transitions-v10.jsonl"
       in
       check bool "cancellation WAL survives until projection" true
         (Sys.file_exists transition_wal_path
@@ -2898,12 +2895,10 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
       (* Withdraw the interleaved stimulus so the assertions below still measure
          what the cancelled retry produced rather than what this probe added. *)
       (match
-         Keeper_registry_event_queue.drop_by_post_id
-           ~base_path
-           keeper_name
+         ack_queued_post_id ~base_path ~keeper_name
            ~post_id:interleaved_stimulus.post_id
        with
-       | Ok _ -> ()
+       | Ok () -> ()
        | Error message -> fail ("interleaved stimulus drop failed: " ^ message));
       (match
          Keeper_event_queue_recovery.project_owner_result ~base_path ~keeper_name
@@ -2999,12 +2994,11 @@ let test_terminal_retry_repairs_missing_stimulus_ledger () =
   let selection = pending_selection_exn ~base_path ~keeper_name in
   let original_stimulus = selection.source in
   (match
-     Keeper_registry_event_queue.terminalize_pending_turn_attempt_result
+     Keeper_registry_event_queue.terminalize_pending_turn_completed_result
        ~base_path
        keeper_name
        ~applied_at:201.5
        ~selection
-       ~detail:"terminal before schedule retry"
    with
    | Ok
        (Keeper_registry_event_queue.Turn_source_acked
@@ -3033,12 +3027,11 @@ let test_terminal_retry_repairs_missing_stimulus_ledger () =
   Keeper_registry_event_queue.enqueue ~base_path keeper_name later_stimulus;
   let later_selection = pending_selection_exn ~base_path ~keeper_name in
   (match
-     Keeper_registry_event_queue.terminalize_pending_turn_attempt_result
+     Keeper_registry_event_queue.terminalize_pending_turn_completed_result
        ~base_path
        keeper_name
        ~applied_at:201.8
        ~selection:later_selection
-       ~detail:"later terminal displaces schedule retry into compact history"
    with
    | Ok
        (Keeper_registry_event_queue.Turn_source_acked
@@ -3058,7 +3051,7 @@ let test_terminal_retry_repairs_missing_stimulus_ledger () =
      Keeper_reaction_ledger.schedule_occurrence_receipt_result
        ~base_path ~keeper_name ~occurrence_id:stimulus_id
    with
-   | Ok (Some { kind = Keeper_event_queue_state.Projected_turn_attempt_terminal; _ }) -> ()
+   | Ok (Some { kind = Keeper_event_queue_state.Projected_turn_completed; _ }) -> ()
    | Ok (Some _) | Ok None -> fail "older terminal did not leave an exact-id witness"
    | Error detail -> fail detail);
   let conflicting_wake, conflicting_stimulus =
@@ -3101,12 +3094,12 @@ let test_terminal_retry_repairs_missing_stimulus_ledger () =
      ; detail = Some detail
      ; _
      } ->
-     check string "retry observes terminal failure" "already_failed"
+     check string "retry observes terminal completion" "already_acked"
        Yojson.Safe.Util.(detail |> member "occurrence_status" |> to_string);
      check string "terminal retry needs no activation" "not_required"
        Yojson.Safe.Util.(detail |> member "activation_status" |> to_string)
    | dispatch ->
-     failf "terminal retry did not preserve the failed disposition: %s / %s"
+     failf "terminal retry did not preserve the completed disposition: %s / %s"
        (Schedule_runner.dispatch_status_to_string dispatch.status)
        (match dispatch.error with Some e -> e | None -> "-"));
   check int "terminal retry enqueues no second occurrence" 0
@@ -3176,12 +3169,11 @@ let test_terminal_retry_requires_acceptance_commit () =
   mkdir_p ledger_path;
   let selection = pending_selection_exn ~base_path ~keeper_name in
   (match
-     Keeper_registry_event_queue.terminalize_pending_turn_attempt_result
+     Keeper_registry_event_queue.terminalize_pending_turn_completed_result
        ~base_path
        keeper_name
        ~applied_at:201.5
        ~selection
-       ~detail:"terminal acceptance evidence"
    with
    | Ok
        (Keeper_registry_event_queue.Turn_source_acked
@@ -3533,14 +3525,9 @@ let test_keeper_wake_queue_evidence_rejects_stale_occurrence () =
   ignore (persist_keeper_meta config keeper_name : Keeper_meta_contract.keeper_meta);
   let request = create_keeper_wake_schedule config in
   let occurrence_id = tick_ok config ~now:201.0 |> single_occurrence_id in
-  (match
-     Keeper_registry_event_queue.drop_by_post_id
-       ~base_path
-       keeper_name
-       ~post_id:occurrence_id
-   with
+  (match ack_queued_post_id ~base_path ~keeper_name ~post_id:occurrence_id with
    | Error message -> fail ("drop failed: " ^ message)
-   | Ok removed -> check int "removed current occurrence" 1 (List.length removed));
+   | Ok () -> ());
   let stale_payload_json =
     `Assoc
       [ "kind", `String "masc.keeper_wake"
@@ -3940,7 +3927,7 @@ let test_a_runner_tick_refreshes_the_cached_schedule_list () =
   Schedule_runner_status.reset_for_test ();
   Fun.protect
     ~finally:(fun () ->
-      Server_dashboard_http_core_cache.invalidate_scheduled_automation config;
+      Server_dashboard_http_core_cache.invalidate_scheduled_automation ~base_path:config.base_path;
       Schedule_runner_status.reset_for_test ())
   @@ fun () ->
   let state =
@@ -4042,7 +4029,7 @@ let test_startup_recovery_retries_before_admitting_dispatch () =
   Unix.mkdir staging 0o755;
   Schedule_runner_status.reset_for_test ();
   Fun.protect ~finally:(fun () ->
-    Server_dashboard_http_core_cache.invalidate_scheduled_automation config;
+    Server_dashboard_http_core_cache.invalidate_scheduled_automation ~base_path:config.base_path;
     Schedule_runner_status.reset_for_test ()) @@ fun () ->
   ignore (recovery_cached_status config);
   let state = Server_bootstrap_maintenance.run_schedule_runner_tick
@@ -4098,7 +4085,7 @@ let test_recovery_success_survives_a_normal_tick_crash () =
   Unix.rmdir staging; Sys.remove snapshot;
   Schedule_runner_status.reset_for_test ();
   Fun.protect ~finally:(fun () ->
-    Server_dashboard_http_core_cache.invalidate_scheduled_automation config;
+    Server_dashboard_http_core_cache.invalidate_scheduled_automation ~base_path:config.base_path;
     Schedule_runner_status.reset_for_test ()) @@ fun () ->
   let at_normal_tick = ref true in
   let clock () =
@@ -4172,7 +4159,7 @@ let check_maintenance_retains_failed_settlement ~clock_failure =
   Schedule_runner_status.reset_for_test ();
   Fun.protect ~finally:(fun () ->
     if Sys.file_exists staging && Sys.is_directory staging then Unix.rmdir staging;
-    Server_dashboard_http_core_cache.invalidate_scheduled_automation config;
+    Server_dashboard_http_core_cache.invalidate_scheduled_automation ~base_path:config.base_path;
     Schedule_runner_status.reset_for_test ()) @@ fun () ->
   let state = Server_bootstrap_maintenance.run_schedule_runner_tick ~clock config
       ~state:Server_bootstrap_maintenance.initial_schedule_runner_state in
@@ -4898,8 +4885,6 @@ let () =
             test_dashboard_resolver_refreshes_target_observed_before_transfer
         ; test_case "dashboard observes committed completion before projection" `Quick
             (test_dashboard_drain_committed_before_projection Completed)
-        ; test_case "dashboard observes committed failure before projection" `Quick
-            (test_dashboard_drain_committed_before_projection Failed)
         ; test_case "dashboard observes committed cancellation before projection" `Quick
             (test_dashboard_drain_committed_before_projection Cancelled)
         ; test_case "dashboard observes committed transfer before projection" `Quick

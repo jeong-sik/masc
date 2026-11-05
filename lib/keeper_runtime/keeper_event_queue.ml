@@ -57,7 +57,7 @@ type board_stimulus = {
   content : string;
   hearth : string option;
   updated_at : float option;
-  audience : board_audience option;
+  audience : board_audience;
 }
 
 type stimulus_payload =
@@ -1028,14 +1028,6 @@ let dequeue (queue : t) : (stimulus * t) option =
      | [] -> None
      | s :: rest -> Some (s, { front = rest; back_rev = []; length = queue.length - 1 }))
 
-let remove_by_post_id post_id queue =
-  let removed, kept =
-    queue
-    |> to_list
-    |> List.partition (fun stimulus -> String.equal stimulus.post_id post_id)
-  in
-  removed, of_list kept
-
 (* Scans both halves of the queue directly instead of rebuilding it through
    repeated [dequeue], so membership stays allocation-free. *)
 let contains (queue : t) (stimulus : stimulus) : bool =
@@ -1249,10 +1241,8 @@ let board_stimulus_fields board =
   ; "content", `String board.content
   ; "hearth", option_json (fun value -> `String value) board.hearth
   ; "updated_at_unix", option_json (fun value -> `Float value) board.updated_at
+  ; "audience", board_audience_to_yojson board.audience
   ]
-  @ (match board.audience with
-     | None -> []
-     | Some audience -> [ "audience", board_audience_to_yojson audience ])
   @
   match board.kind with
   | Post_created -> []
@@ -1504,11 +1494,9 @@ let payload_of_yojson json =
     let* kind =
       match board_kind with
       | "post_updated" ->
-        let has_audience = List.mem_assoc "audience" fields in
         let expected =
           ([ "kind"; "board_kind"; "author"; "title"; "content";
-             "hearth"; "updated_at_unix"; "content_updated_at" ]
-           @ (if has_audience then [ "audience" ] else [])
+             "hearth"; "updated_at_unix"; "audience"; "content_updated_at" ]
            @ if kind = "board_attention" then [ "candidate_id" ] else [])
         in
         let* () = exact_fields ~context ~expected fields in
@@ -1516,11 +1504,9 @@ let payload_of_yojson json =
         if Float.is_finite content_updated_at then Ok (Post_updated {content_updated_at})
         else Error (context ^ ".content_updated_at must be finite")
       | "comment_added" ->
-        let has_audience = List.mem_assoc "audience" fields in
         let expected =
           ([ "kind"; "board_kind"; "author"; "title"; "content";
-             "hearth"; "updated_at_unix"; "comment_id"; "parent_id" ]
-           @ (if has_audience then [ "audience" ] else [])
+             "hearth"; "updated_at_unix"; "audience"; "comment_id"; "parent_id" ]
            @ if kind = "board_attention" then [ "candidate_id" ] else [])
         in
         let* () = exact_fields ~context ~expected fields in
@@ -1562,11 +1548,8 @@ let payload_of_yojson json =
     let* hearth = optional_string_field ~context "hearth" fields in
     let* updated_at = optional_float_field ~context "updated_at_unix" fields in
     let* audience =
-      match optional_field "audience" fields with
-      | None -> Ok None
-      | Some json ->
-        let* parsed = board_audience_of_yojson ~context json in
-        Ok (Some parsed)
+      let* json = required_field ~context "audience" fields in
+      board_audience_of_yojson ~context json
     in
     Ok { kind; author; title; content; hearth; updated_at; audience }
   in

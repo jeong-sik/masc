@@ -183,7 +183,7 @@ let resolve_direct_turn_runtime_id ~meta ~resume_lane ~gate_resume =
   | Some checkpoint -> Ok checkpoint.runtime_id
   | None -> match resume_lane with
     | None -> resolve_turn_runtime_id meta
-    | Some lane -> Ok lane.Keeper_turn_driver.next_runtime_id
+    | Some lane -> Ok (Keeper_turn_driver.resumed_head lane)
 
 module For_testing = struct
   let resolve_direct_turn_runtime_id = resolve_direct_turn_runtime_id
@@ -613,7 +613,7 @@ let run_keeper_invocation_turn_admitted_inner
                could not see its own in-progress work or handoff. Keep this
                as fresh per-turn context, exactly like the unified wake lane;
                it is deliberately not written to conversation history. *)
-            let preview = Keeper_turn_preview.reset ~keeper_name:meta.name
+            let preview = Keeper_turn_preview.reset ~base_path:ctx.config.base_path ~keeper_name:meta.name
               ~execution_scope:(Some (Keeper_repetition_scope.Execution.scope repetition_execution))
               ~turn_ref:(Some turn_ref)
               ~now:(Time_compat.now ())
@@ -853,11 +853,6 @@ let run_keeper_invocation_turn_admitted_inner
                                           Keeper_input_speaker.Official_client_resume
                                       | None -> input_speaker)
 		                                ~turn_kind:Turn_record.Direct
-                                ~yield_requested:(fun () ->
-                                  Keeper_chat_yield_request.request
-                                    ~turn:(Keeper_chat_yield_request.Direct operation_id)
-                                    ~base_path:ctx.config.base_path
-                                    ~keeper_name:meta.name)
                                 ~repetition_execution
 		                                ~skill_snapshot
 			                                ~task_skill_selection
@@ -893,6 +888,7 @@ let run_keeper_invocation_turn_admitted_inner
                       ~keeper_turn_id
                       ~before:meta
                       ~attempt_spend:settlement.Keeper_agent_run.spend
+                      ~settled_start:settlement.Keeper_agent_run.settled_start
                       (Keeper_turn_spend_commit.count_turn meta)
                   with
                   | Ok (_ : Keeper_meta_contract.keeper_meta) -> ()
@@ -1045,6 +1041,7 @@ let run_keeper_invocation_turn_admitted_inner
                     ~degraded_retry_deferred:settlement.Keeper_agent_run.degraded_retry_deferred
                     ~keeper_turn_id
                     ~spend:settlement.Keeper_agent_run.spend
+                    ~settled_start:settlement.Keeper_agent_run.settled_start
                     execution_outcome
                 with
                 | Keeper_unified_turn_success.Completed updated_meta -> updated_meta
@@ -1058,8 +1055,7 @@ let run_keeper_invocation_turn_admitted_inner
                   let* _ = Keeper_owner_registry.defer_direct_input_wait
                       ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id ~request |> owner in
                   Ok ()
-                | Runtime_agent.Completed _ | Yielded_to_operation_queued _ | Yielded_to_durable_stimulus _
-                | Yielded_after_repeated_tool_call _ | Yielded_after_repeated_assistant_text _ ->
+                | Runtime_agent.Completed _ | Yielded_to_durable_stimulus _ ->
                 if checkpoint_yield then
                   match result.checkpoint with
                   | Some checkpoint -> Keeper_direct_checkpoint_continuation.defer

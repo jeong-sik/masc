@@ -1,6 +1,21 @@
 open Alcotest
 open Masc
 
+(* The production peek, read back as the exact pending selection. *)
+let select_ready ~now ~ready state =
+  Option.bind (Keeper_event_queue_state.peek_when ~now ~ready state) (fun source ->
+    List.find_opt
+      (fun (selection : Keeper_event_queue_state.pending_selection) ->
+         Keeper_event_queue.stimulus_identity_equal selection.source source)
+      (Keeper_event_queue_state.pending_selections state))
+;;
+
+(* The production loader with the production peek. *)
+let select_queue_entry ~base_path ~keeper_name ~now ~ready =
+  Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name
+  |> Result.map (select_ready ~now ~ready)
+;;
+
 let init_result =
   {|{"id":1,"result":{"userAgent":"fixture/0.147.0","codexHome":"/tmp/codex","platformFamily":"unix","platformOs":"linux"}}|}
 ;;
@@ -387,7 +402,7 @@ let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_to
     ?(developer_context = []) ?developer_instructions ?context_window ?(cwd = "/tmp")
     ?(timeout_s = 2.0) ?admission_timeout_s ?(no_turn_deadline = false)
     ?on_thread_ready ?on_thread_ready_delay_s ?on_turn_started_delay_s ?on_stream_event
-    ?on_prompt_sent ?on_context_submission ?on_context_submission_delay_s ?on_reasoning_effort_resolved ?await_handoff ?on_undelivered_tool_result ?(prompt = "Return the fixture marker")
+    ?on_prompt_sent ?on_context_submission ?on_context_submission_delay_s ?on_reasoning_effort_resolved ?on_undelivered_tool_result ?(prompt = "Return the fixture marker")
     ?(images = []) ?output_schema ?(native = Runtime_native_tools.codex_default) path =
   let observer_failure = ref None in
   let on_stream_event = Option.map (fun callback event ->
@@ -451,7 +466,6 @@ let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_to
         Option.iter (Eio.Time.sleep clock) on_context_submission_delay_s;
         Option.iter (fun callback -> callback event) on_context_submission)
       ?on_reasoning_effort_resolved
-      ?await_handoff
       config
       ~prompt
       ~images)) in
@@ -516,11 +530,10 @@ let test_concurrent_tool_does_not_block_status () =
           (List.rev !order))
 ;;
 
-let test_concurrent_tool_stops_keep_authoritative_outcome ?(scheduling_handoff = false) ~first ~second
+let test_concurrent_tool_stops_keep_authoritative_outcome ~first ~second
     ~(expected : Runtime_codex_app_server.host_stop option) () =
   let second_started, signal_second_started = Eio.Promise.create () in
   let first_written, signal_first_written = Eio.Promise.create () in
-  let handoff_ready, signal_handoff_ready = Eio.Promise.create () in
   let effects = ref [] and responses = ref [] in
   let tool = dispatch_tool
     ~execution_mode:(fun _ -> Agent_core.Tool_contract.Concurrent)
@@ -529,7 +542,6 @@ let test_concurrent_tool_stops_keep_authoritative_outcome ?(scheduling_handoff =
       let stop =
         if call_id = "call-1" then begin
           Eio.Promise.await second_started;
-          if scheduling_handoff then Eio.Promise.await handoff_ready;
           first
         end else begin
           Eio.Promise.resolve signal_second_started ();
@@ -548,12 +560,8 @@ let test_concurrent_tool_stops_keep_authoritative_outcome ?(scheduling_handoff =
     [init_result; account_chatgpt; thread_result; turn_result;
      dispatch_request 1 1; dispatch_request 2 2; item_completed; turn_completed]
     (fun path ->
-      before_fixture_terminal path (if scheduling_handoff then 3 else 2);
-      let await_handoff = if not scheduling_handoff then None else Some (fun () ->
-        Eio.Promise.await second_started;
-        Eio.Promise.resolve signal_handoff_ready ();
-        true) in
-      let actual = run_fixture ?await_handoff ~dynamic_tools:[tool] path in
+      before_fixture_terminal path 2;
+      let actual = run_fixture ~dynamic_tools:[tool] path in
       check (list string) "both admitted tool handlers run once" ["call-1"; "call-2"]
         (List.rev !effects);
       check (list string) "both original responses are written once" ["call-1"; "call-2"]
@@ -573,7 +581,6 @@ let test_concurrent_tool_stops_keep_authoritative_outcome ?(scheduling_handoff =
            Ok {Runtime_agent.stop_reason = Completed _; _} -> ()
          | Terminal_tool_boundary {outcome = Durable_stimulus_deferred; _},
            Ok {Runtime_agent.stop_reason = Yielded_to_durable_stimulus _; _} -> ()
-         | Repeated_tool_call _, Ok {Runtime_agent.stop_reason = Yielded_after_repeated_tool_call _; _} -> ()
          | _ -> fail "the actual Keeper consumer received the wrong authoritative outcome");
         check bool "the exact authoritative stop is preserved" true (actual = expected)
       | _, Error error -> fail (Runtime_codex_app_server.error_to_string error)
@@ -603,41 +610,11 @@ let test_concurrent_tool_stop_orderings () =
   test_concurrent_tool_stops_keep_authoritative_outcome ~first:None ~second:None ~expected:None ()
 ;;
 
-let concurrent_handoff_stop_scenarios () =
-  let deferred : Runtime_codex_app_server.host_stop =
-    Terminal_tool_boundary {tool_name="masc_probe";outcome=Durable_stimulus_deferred} in
-  let completed : Runtime_codex_app_server.host_stop =
-    Terminal_tool_boundary {tool_name="masc_probe";outcome=Terminal_completed} in
-  let repeated : Runtime_codex_app_server.host_stop =
-    Repeated_tool_call {tool_name="masc_probe";repeated_count=2} in
-  let scenario first second expected = Some first, Some second, Some expected in
-  [ scenario deferred completed completed; scenario completed deferred completed
-  ; scenario repeated completed completed; scenario completed repeated completed
-  ; scenario deferred deferred deferred
-  ; None, Some completed, None ]
-  @ List.concat_map (fun effect_disposition ->
-      let failed : Runtime_codex_app_server.host_stop =
-        Terminal_tool_boundary {tool_name="masc_probe";outcome=Terminal_failed
-          {failure_class=Tool_result.Runtime_failure;effect_disposition;
-           detail=Keeper_terminal_effect_detail.Tool_failed
-             {internal_tool_name="masc_probe";message="original handoff peer failure"}}} in
-      [scenario completed failed failed; scenario failed completed failed])
-      [Tool_result.Proven_pre_effect; Proven_post_effect; Effect_outcome_unknown]
-;;
-
-let test_concurrent_handoff_stops_keep_authoritative_outcome () =
-  List.iter (fun (first, second, expected) ->
-    test_concurrent_tool_stops_keep_authoritative_outcome
-      ~scheduling_handoff:true ~first ~second ~expected ())
-    (concurrent_handoff_stop_scenarios ())
-;;
-
 let outer_protocol_drain_scenarios () =
   let open Runtime_codex_app_server in
   let stops : Runtime_codex_app_server.host_stop list =
     [ Terminal_tool_boundary {tool_name="masc_probe";outcome=Terminal_completed}
-    ; Terminal_tool_boundary {tool_name="masc_probe";outcome=Durable_stimulus_deferred}
-    ; Repeated_tool_call {tool_name="masc_probe";repeated_count=2} ]
+    ; Terminal_tool_boundary {tool_name="masc_probe";outcome=Durable_stimulus_deferred} ]
     @ List.map (fun effect_disposition ->
         Runtime_codex_app_server.Terminal_tool_boundary
           {tool_name="masc_probe";outcome=Terminal_failed
@@ -1129,7 +1106,7 @@ let check_context_fragments raw event =
     | `String "thread/inject_items" ->
       member "items" params |> to_list
       |> List.mapi (fun index value -> "injected_item",`Int index,value)
-    | `String "turn/start" | `String "turn/steer" ->
+    | `String "turn/start" ->
       member "input" params |> to_list
       |> List.mapi (fun index value -> index,value)
       |> List.filter_map (fun (index,value) ->
@@ -1196,178 +1173,11 @@ let captured_frame submission lines =
     && (member "method" json <> `Null) = wants_request) lines
 ;;
 
-let test_scheduling_handoff_preserves_active_protocol ?(terminal_second = false) () =
-  List.iter (fun acceptance ->
-    let capture_path = Filename.temp_file "codex-handoff-" ".jsonl" in
-    Fun.protect ~finally:(fun () -> Sys.remove capture_path) (fun () ->
-      let calls = ref 0 in
-      let observed = ref [] in
-      let ready, signal = Eio.Promise.create () in
-      let tool : Runtime_codex_app_server.dynamic_tool =
-        { name = "masc_probe"; description = "Observe an effect exactly once"
-        ; input_schema = `Assoc ["type", `String "object"]
-        ; loading = Runtime_official_client_tool.On_demand
-        ; result_bound = Runtime_official_client_tool.Unbounded
-        ; execution_mode = (fun _ -> Agent_core.Tool_contract.Serial)
-        ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
-        ; call = (fun ~call_id:_ _ -> incr calls;
-            if !calls = 1 then (Eio.Promise.resolve signal (); Eio.Fiber.yield ());
-            { success = true; content = "effect persisted";
-              content_blocks = None;
-              on_response_sent = None; abort_turn = if terminal_second && !calls = 2 then
-                Some (Runtime_codex_app_server.Terminal_tool_boundary
-                  { tool_name = "masc_probe"; outcome = Terminal_completed })
-                else None }) } in
-      let second_tool =
-        {|{"id":"tool-request-2","method":"item/tool/call","params":{"threadId":"thread-1","turnId":"turn-1","callId":"call-2","tool":"masc_probe","arguments":{}}}|} in
-      let third_tool =
-        {|{"id":"tool-request-3","method":"item/tool/call","params":{"threadId":"thread-1","turnId":"turn-1","callId":"call-3","tool":"masc_probe","arguments":{}}}|} in
-      let reply = match acceptance with
-        | Some true -> Some {|{"id":6,"result":{"turnId":"turn-1"}}|}
-        | Some false -> Some {|{"id":6,"error":{"code":-32600,"message":"turn no longer steerable"}}|}
-        | None -> None in
-      with_fixture ~await_dynamic_tools:false ([init_result; account_chatgpt; thread_result; turn_result;
-        tool_call_request; second_tool]
-        @ (if terminal_second then [third_tool] else [])
-        @ [agent_message_delta] @ Option.to_list reply @ [item_completed; turn_completed]) (fun path ->
-          let original = In_channel.with_open_bin path In_channel.input_all in
-          let reply_line = "printf '%s\\n' " ^ shell_quote (Option.value reply ~default:item_completed) in
-          let capture = "IFS= read -r result\nprintf '%s\\n' \"$result\" >> "
-            ^ shell_quote capture_path ^ "\n" in
-          let instrumented = original |> String.split_on_char '\n'
-            |> List.concat_map (fun line -> if line = reply_line
-              then [capture ^ capture ^ capture ^ (if terminal_second then capture else ""); line] else [line])
-            |> String.concat "\n" in
-          Out_channel.with_open_bin path (fun out -> output_string out instrumented);
-          match run_fixture ~dynamic_tools:[tool] ~await_handoff:(fun () -> Eio.Promise.await ready; true)
-              ~on_context_submission:(fun event -> observed := event :: !observed) path with
-          | Error error -> fail (Runtime_codex_app_server.error_to_string error)
-          | Ok result ->
-            let expected_handoff = match acceptance with
-              | Some true -> Runtime_codex_app_server.Handoff_accepted
-              | Some false -> Runtime_codex_app_server.Handoff_rejected
-              | None -> Runtime_codex_app_server.Handoff_pending in
-            check bool "terminal carries scheduling disposition" true
-              (result.scheduling_handoff = expected_handoff);
-            check int "concurrent tool frames survive steer response" 2 !calls;
-            check string "natural terminal survives handoff" "MASC_SUBSCRIPTION_OK" result.text);
-      let rows = In_channel.with_open_bin capture_path In_channel.input_lines
-        |> List.map Yojson.Safe.from_string in
-      let open Yojson.Safe.Util in
-      (match rows with
-      | first_result :: steer :: second_result :: rest ->
-        check string "first effect returned before steering" "tool-request-1"
-          (first_result |> member "id" |> to_string);
-        check string "uses active-turn steering" "turn/steer"
-          (steer |> member "method" |> to_string);
-        check string "pins exact active turn" "turn-1"
-          (steer |> member "params" |> member "expectedTurnId" |> to_string);
-        check string "second effect returned while steering pending" "tool-request-2"
-          (second_result |> member "id" |> to_string);
-        (match terminal_second, rest with
-         | false, [] -> ()
-         | true, [denied] ->
-           check string "post-terminal request receives its own rejection" "tool-request-3"
-             (denied |> member "id" |> to_string);
-           check bool "post-terminal effect is refused while vendor settles" false
-             (denied |> member "result" |> member "success" |> to_bool)
-         | _ -> fail "unexpected protocol writes after terminal effect")
-      | _ -> fail "expected tool result, scheduling steer, and second tool result");
-      (* Tool results and the steer carry model context written after
-         turn/start. Each is recorded from its send site with the id as written:
-         MASC's own number for the steer, the app-server's JSON id for a result. *)
-      let lines = In_channel.with_open_bin capture_path In_channel.input_lines in
-      let late = List.rev !observed |> List.filter (fun (event : Runtime_codex_app_server.context_submission) ->
-        match event.method_ with
-        | Turn_steer | Dynamic_tool_response -> true
-        | Thread_start | Thread_resume | Thread_inject_items | Turn_start -> false) in
-      check (list string) "every tool result and the steer is a recorded context frame"
-        (List.map (fun line -> match member "method" (Yojson.Safe.from_string line) with
-           | `String method_ -> method_ | _ -> "item/tool/call") lines)
-        (List.map (fun (event : Runtime_codex_app_server.context_submission) ->
-           Runtime_codex_app_server.context_submission_method_label event.method_) late);
-      List.iter2 (fun (event : Runtime_codex_app_server.context_submission) line ->
-        let json = Runtime_codex_app_server.context_submission_to_json event in
-        let written = Yojson.Safe.from_string line in
-        check string "recorded frame is the captured line" line (captured_frame json lines);
-        check bool "recorded id is the written JSON-RPC id as is" true
-          (member "request_id" json = member "id" written);
-        check string "frame kind follows the written shape"
-          (if member "method" written = `Null then "response" else "request")
-          (member "frame" json |> to_string);
-        check (option string) "late frames name the active thread" (Some "thread-1") event.thread_id;
-        check int "byte count is the written line" (String.length line) event.write.bytes;
-        check string "SHA binds the written line"
-          Agent_core_sha256.(digest_string line |> to_hex) event.write.sha256;
-        check_context_fragments line json) late lines))
-    (if terminal_second then [Some true; None] else [Some true; Some false; None])
-;;
-
-let test_scheduling_handoff_wakes_idle_before_first_tool () =
-  let capture_path = Filename.temp_file "codex-idle-handoff-" ".jsonl" in
-  let progress, signal_progress = Eio.Promise.create () in
-  let progress_signaled = ref false in
-  Fun.protect ~finally:(fun () -> Sys.remove capture_path) (fun () ->
-    with_fixture [init_result; account_chatgpt; thread_result; turn_result;
-      agent_message_delta; item_completed; turn_completed] (fun path ->
-      let original = In_channel.with_open_bin path In_channel.input_all in
-      let terminal = "printf '%s\\n' " ^ shell_quote item_completed in
-      let wait_for_steer =
-        "IFS= read -r steer\nprintf '%s\\n' \"$steer\" > " ^ shell_quote capture_path
-        ^ "\nprintf '%s\\n' "
-        ^ shell_quote {|{"id":6,"result":{"turnId":"turn-1"}}|} in
-      let instrumented = original |> String.split_on_char '\n'
-        |> List.concat_map (fun line ->
-          if line = terminal then [wait_for_steer; line] else [line])
-        |> String.concat "\n" in
-      Out_channel.with_open_bin path (fun out -> output_string out instrumented);
-      let on_stream_event = function
-        | Runtime_codex_app_server.Text_delta _ when not !progress_signaled ->
-          progress_signaled := true;
-          Eio.Promise.resolve signal_progress ()
-        | _ -> ()
-      in
-      let await_handoff () =
-        Eio.Promise.await progress;
-        (* Let the consumer enter its next receive. The fixture emits no more
-           provider frames until it receives the scheduling notice, so a
-           progress-boundary-only queue check cannot complete this turn. *)
-        Eio.Fiber.yield ();
-        true
-      in
-      match run_fixture ~on_stream_event ~await_handoff path with
-      | Error error -> fail (Runtime_codex_app_server.error_to_string error)
-      | Ok result ->
-        check int "no tool required to wake idle turn" 0 result.dynamic_tool_calls;
-        let request = In_channel.with_open_bin capture_path In_channel.input_all
-          |> Yojson.Safe.from_string in
-        check string "idle transport receives scheduling steer" "turn/steer"
-          Yojson.Safe.Util.(request |> member "method" |> to_string)))
-;;
-
-let test_scheduling_handoff_waiter_released_at_terminal () =
-  let waiting, _resolve_waiting = Eio.Promise.create () in
-  let subscribed = ref false in
-  let released = ref false in
-  with_fixture [init_result; account_chatgpt; thread_result; turn_result;
-    item_completed; turn_completed] (fun path ->
-    let await_handoff () =
-      subscribed := true;
-      Fun.protect ~finally:(fun () -> released := true)
-        (fun () -> Eio.Promise.await waiting)
-    in
-    match run_fixture ~await_handoff path with
-    | Error error -> fail (Runtime_codex_app_server.error_to_string error)
-    | Ok _ ->
-      check bool "waiter subscribed" true !subscribed;
-      check bool "terminal unregisters waiter" true !released)
-;;
-
 let test_dynamic_tool_abort_stops_the_provider_loop () =
   let response_writes = ref 0 in
   let tool : Runtime_codex_app_server.dynamic_tool =
     { name = "masc_probe"
-    ; description = "Abort a repeated provider loop"
+    ; description = "Abort the provider loop"
     ; input_schema = `Assoc [ "type", `String "object" ]
     ; loading = Runtime_official_client_tool.On_demand
     ; result_bound = Runtime_official_client_tool.Unbounded
@@ -1381,8 +1191,8 @@ let test_dynamic_tool_abort_stops_the_provider_loop () =
           ; on_response_sent = Some (fun () -> incr response_writes)
           ; abort_turn =
               Some
-                (Repeated_tool_call
-                   { tool_name = "masc_probe"; repeated_count = 3 })
+                (Terminal_tool_boundary
+                   { tool_name = "masc_probe"; outcome = Terminal_completed })
           })
     }
   in
@@ -1392,10 +1202,9 @@ let test_dynamic_tool_abort_stops_the_provider_loop () =
       match run_fixture ~dynamic_tools:[ tool ] path with
       | Error
           (Runtime_codex_app_server.Stopped_by_host
-            (Repeated_tool_call { tool_name; repeated_count })) ->
+            (Terminal_tool_boundary { tool_name; _ })) ->
         check int "host stop follows complete response write" 1 !response_writes;
-        check string "tool" "masc_probe" tool_name;
-        check int "repeat count" 3 repeated_count
+        check string "tool" "masc_probe" tool_name
       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
       | Ok _ -> fail "dynamic tool abort did not stop the Codex turn")
 ;;
@@ -5798,7 +5607,7 @@ let test_tool_outbox_acknowledges_only_its_snapshot () =
     | _ -> fail "ACK deleted a receipt outside its original snapshot")
 ;;
 
-let test_blank_completion_rejected_without_losing_session () =
+let test_blank_completion_completes_and_keeps_session () =
   let blank_item =
     {|{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"agentMessage","id":"blank","text":"","phase":"final_answer"}}}|} in
   let empty_terminal =
@@ -5815,13 +5624,11 @@ let test_blank_completion_rejected_without_losing_session () =
     Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
       with_fixture (handshake @ frames) (fun cli_path ->
         (match run_keeper_turn ~base_path ~cli_path ~model:"gpt-fixture"
-            ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress () with
+            ~accept:Keeper_tooling.Response.accepts_response () with
+         | Ok _ -> ()
          | Error error ->
-             (match Keeper_internal_error.classify_masc_internal_error error with
-              | Some (Keeper_internal_error.Accept_rejected _) -> ()
-              | _ -> fail ("blank completion was not an acceptance rejection: "
-                           ^ Agent_core.Error.to_string error))
-         | Ok _ -> fail "blank completion was accepted as progress");
+           fail ("a blank completion did not complete the turn: "
+                 ^ Agent_core.Error.to_string error));
         let module Store = Keeper_official_client_session_store in
         let binding = match Store.load ~base_path ~keeper_name:"codex-fixture" with
           | Ok (Some binding) -> binding
@@ -5834,22 +5641,17 @@ let test_blank_completion_rejected_without_losing_session () =
         | Ok {previous_settlement = Some {session_id = "thread-1"; _}; _} -> ()
         | _ -> fail "next turn would abandon the resumable thread")))
     [[blank_terminal]; [blank_item; empty_terminal]; [narration; empty_terminal]];
-  (* After a native command the same rejection is fenced: the command was an
-     attempted effect, so the turn is not replayed. *)
+  (* After a native command the turn completes the same way. *)
   let base_path = temp_workspace "masc-codex-commentary-settlement-" in
   Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
     with_fixture (handshake @ [narration; native_command_started; native_command_completed;
                                empty_terminal]) (fun cli_path ->
       (match run_keeper_turn ~base_path ~cli_path ~model:"gpt-fixture"
-          ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress () with
+          ~accept:Keeper_tooling.Response.accepts_response () with
+       | Ok _ -> ()
        | Error error ->
-           (match Keeper_internal_error.classify_masc_internal_error error with
-            | Some (Keeper_internal_error.Provider_attempt_effect_fenced
-                { cause = Fenced_masc (Accept_rejected
-                    { reason_kind = Some Accept_no_usable_progress; _ }); _ }) -> ()
-            | _ -> fail ("commentary after a native command was not a fenced no-progress \
-                          rejection: " ^ Agent_core.Error.to_string error))
-       | Ok _ -> fail "commentary after a native command was accepted as the reply");
+         fail ("commentary after a native command did not complete the turn: "
+               ^ Agent_core.Error.to_string error));
       match Keeper_official_client_session_store.load ~base_path ~keeper_name:"codex-fixture" |> Result.map_error Keeper_official_client_session_store.read_error_to_string with
       | Ok (Some { phase = Settled { session_id = "thread-1"; turn_id = "turn-1" }; _ }) -> ()
       | Ok _ -> fail "commentary after a native command lost its settled session"
@@ -7770,9 +7572,9 @@ let test_dashboard_official_client_recovery_projection_and_resolution () =
         | Error detail -> fail detail);
        let selection =
          match
-           Keeper_registry_event_queue.select_when_result
+           select_queue_entry
              ~base_path
-             keeper_name
+             ~keeper_name
              ~now:(Unix.gettimeofday ())
              ~ready:(fun _ -> true)
          with
@@ -7792,10 +7594,9 @@ let test_dashboard_official_client_recovery_projection_and_resolution () =
             | Error _ -> ()
             | Ok _ -> fail "provider-rejected official-client turn completed");
        (match
-          Keeper_registry_event_queue.validate_pending_selection_result
-            ~base_path
-            keeper_name
-            ~selection
+          Result.bind
+            (Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name)
+            (Keeper_event_queue_state.validate_pending_selection ~selection)
         with
         | Ok () -> ()
         | Error detail -> fail detail);
@@ -7945,9 +7746,9 @@ let test_dashboard_official_client_recovery_projection_and_resolution () =
           |> to_string);
        let selected_after_resolution =
          match
-           Keeper_registry_event_queue.select_when_result
+           select_queue_entry
              ~base_path
-             keeper_name
+             ~keeper_name
              ~now:(Unix.gettimeofday ())
              ~ready:(fun _ -> true)
          with
@@ -8111,6 +7912,146 @@ let test_keeper_resumes_persisted_codex_thread () =
        | Error detail -> fail detail
        | Ok None -> fail "resumed Codex binding disappeared"
        | Ok (Some binding) -> check int "stored turns" 2 binding.turn_count)
+;;
+
+let with_settled_codex_thread f =
+  let module Store = Keeper_official_client_session_store in
+  let base_path = temp_workspace "masc-codex-setup-refusal-" in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    with_fixture
+      [ init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed ]
+      (fun cli_path ->
+        match run_keeper_turn ~base_path ~cli_path ~model:"gpt-fixture" () with
+        | Ok result -> check int "seeded completed turn" 1 result.turns
+        | Error error -> fail (Agent_core.Error.to_string error));
+    let load () =
+      match Store.load ~base_path ~keeper_name:"codex-fixture"
+        |> Result.map_error Store.read_error_to_string with
+      | Ok (Some binding) -> binding
+      | Ok None -> fail "the completed native session disappeared"
+      | Error detail -> fail detail
+    in
+    let before = load () in
+    let settled = match before.phase with
+      | Store.Settled settled -> settled
+      | Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _ ->
+        fail "the first real Keeper turn did not settle"
+    in
+    let checkpoint : Keeper_semantic_execution.official_client_checkpoint =
+      { client_kind = Codex; runtime_id = before.runtime_id
+      ; session_id = settled.session_id; turn_id = settled.turn_id
+      ; tool_surface_sha256 = before.tool_surface_sha256
+      ; frame = Keeper_repetition_snapshot.empty }
+    in
+    f ~base_path ~load ~before ~checkpoint)
+;;
+
+let fixture_rpc_refusal id =
+  Printf.sprintf
+    {|{"id":%d,"error":{"code":-32603,"message":"opaque fixture refusal","data":{"fixture":"identical"}}}|}
+    id
+;;
+
+let test_keeper_setup_rpc_refusal_preserves_session ~responses ~methods ~error_type ~detail () =
+  let module Store = Keeper_official_client_session_store in
+  with_settled_codex_thread (fun ~base_path ~load ~before ~checkpoint ->
+    let capture = Filename.concat base_path "setup-refusal.jsonl" in
+    let reports = ref 0 in
+    with_fixture ~capture_path:capture responses (fun cli_path ->
+      match run_keeper_turn ~base_path ~cli_path ~model:"gpt-fixture"
+        ~system_prompt:"Unsent System context from the refused setup attempt."
+        ~on_request_attribution:(fun ~runtime_id:_ ~tools:_ ~transmitted:_ -> incr reports) () with
+      | Error error ->
+        let expected = Agent_core.Error.Provider
+          (Llm_provider.Error.ProviderReportedError
+            { provider = "codex_app_server"; error_type = Some error_type; detail }) in
+        check string "original RPC error remains visible"
+          (Agent_core.Error.to_string expected) (Agent_core.Error.to_string error)
+      | Ok _ -> fail "setup RPC refusal completed a Keeper turn");
+    check (list string) "setup refusal sent no thread, input or tool request" methods
+      (List.map (fun request -> Yojson.Safe.Util.(request |> member "method" |> to_string))
+        (captured_requests capture));
+    check int "setup refusal reports no transmitted input" 0 !reports;
+    let after = load () in
+    check bool "setup refusal preserves the exact settled native turn" true
+      (after.phase = before.phase);
+    check int "setup refusal consumes no provider ordinal" before.turn_count after.turn_count;
+    check bool "unsent changed System context cannot replace acknowledged context" true
+      (after.context_frontier = before.context_frontier);
+    check bool "setup refusal preserves the host's last turn" true
+      (after.host_last_turn = before.host_last_turn);
+    check bool "the original exact-session continuation remains admissible" true
+      (Store.validate_continuation ~checkpoint ~expected:(Some after)
+        ~client_kind:Codex ~runtime_id:before.runtime_id
+        ~tool_surface_sha256:before.tool_surface_sha256 = Ok ());
+    let resumed_capture = Filename.concat base_path "after-setup-refusal.jsonl" in
+    with_fixture ~capture_path:resumed_capture
+      [ init_result; account_chatgpt; thread_result; resumed_turn_result
+      ; resumed_item_completed; resumed_turn_completed ]
+      (fun cli_path ->
+        match run_keeper_turn ~base_path ~cli_path ~model:"gpt-fixture" () with
+        | Error error -> fail (Agent_core.Error.to_string error)
+        | Ok result ->
+          check string "next request actually resumes the original thread" checkpoint.session_id result.session_id;
+          check int "only the next successful turn advances the ordinal" 2 result.turns;
+          check string "resumed response" "MASC_RESUMED_OK" (keeper_response_text result));
+    let open Yojson.Safe.Util in
+    let requests = captured_requests resumed_capture in
+    check (list string) "next wire resumes without a replacement or unsent-context receipt"
+      ["initialize"; "initialized"; "account/read"; "thread/resume"; "turn/start"]
+      (List.map (fun row -> row |> member "method" |> to_string) requests);
+    let resume = List.find (fun row -> member "method" row = `String "thread/resume") requests in
+    check string "resume names the original thread on the wire" checkpoint.session_id
+      (resume |> member "params" |> member "threadId" |> to_string);
+    check int "the next completed ordinal is durable" 2 (load ()).turn_count)
+;;
+
+let test_keeper_resume_rpc_refusal_keeps_fresh_recovery () =
+  let module Store = Keeper_official_client_session_store in
+  with_settled_codex_thread (fun ~base_path ~load ~before ~checkpoint ->
+    let capture = Filename.concat base_path "resume-refusal.jsonl" in
+    with_fixture ~capture_path:capture
+      [init_result; account_chatgpt; fixture_rpc_refusal 3]
+      (fun cli_path ->
+        match run_keeper_turn ~base_path ~cli_path ~model:"gpt-fixture" () with
+        | Error error ->
+          let expected = Agent_core.Error.Provider
+            (Llm_provider.Error.ProviderReportedError
+              { provider = "codex_app_server"; error_type = Some "rpc_error"
+              ; detail = "thread/resume (code -32603): opaque fixture refusal" }) in
+          check string "the same opaque refusal remains a resume RPC error"
+            (Agent_core.Error.to_string expected) (Agent_core.Error.to_string error)
+        | Ok _ -> fail "refused thread/resume completed a Keeper turn");
+    check (list string) "the refused resume really wrote its context request"
+      ["initialize"; "initialized"; "account/read"; "thread/resume"]
+      (List.map (fun request -> Yojson.Safe.Util.(request |> member "method" |> to_string))
+        (captured_requests capture));
+    let after = load () in
+    (match after.phase with
+     | Store.Recovery_required recovery ->
+       check bool "resume refusal retains protocol recovery" true (recovery.failure = Protocol_failed)
+     | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
+       fail "a rejected native thread was restored as resumable");
+    check bool "the refused original continuation remains unavailable" true
+      (Result.is_error (Store.validate_continuation ~checkpoint ~expected:(Some after)
+        ~client_kind:Codex ~runtime_id:before.runtime_id
+        ~tool_surface_sha256:before.tool_surface_sha256));
+    let fresh_capture = Filename.concat base_path "after-resume-refusal.jsonl" in
+    let fresh_responses = List.map
+      (String_util.replace_substring ~needle:"thread-1" ~by:"replacement-thread")
+      [thread_result; turn_result; item_completed; turn_completed] in
+    with_fixture ~capture_path:fresh_capture ([init_result; account_chatgpt] @ fresh_responses)
+      (fun cli_path ->
+        match run_keeper_turn ~base_path ~cli_path ~model:"gpt-fixture" () with
+        | Error error -> fail (Agent_core.Error.to_string error)
+        | Ok result ->
+          check string "resume refusal still recovers into a replacement thread"
+            "replacement-thread" result.session_id;
+          check int "replacement thread starts at its own first turn" 1 result.turns);
+    check (list string) "next wire starts fresh after a rejected resume"
+      ["initialize"; "initialized"; "account/read"; "thread/start"; "turn/start"]
+      (List.map (fun request -> Yojson.Safe.Util.(request |> member "method" |> to_string))
+        (captured_requests fresh_capture)))
 ;;
 
 let test_keeper_resume_sends_changed_working_state_once () =
@@ -8886,61 +8827,6 @@ let run_cost_ledger_turn ?(after_turn = ignore) ~base_path ~trace_id ~cli_path (
     ~cli_path
     ~model:"gpt-fixture"
     ~turn_instructions:None
-;;
-
-(* The production Keeper turn appends the clause its response policy chose to
-   an autonomous wake input. Without a world observation the policy requires
-   progress, so the Codex turn input ends with that clause. *)
-let test_production_wake_input_carries_the_completion_clause () =
-  let base_path = temp_workspace "masc-codex-production-wake-clause-" in
-  let capture_path = Filename.concat base_path "codex-requests.jsonl" in
-  Fun.protect
-    ~finally:(fun () -> cleanup_tree base_path)
-    (fun () ->
-       with_fixture ~capture_path
-         [ init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed ]
-         (fun cli_path ->
-            (match
-               run_production_keeper_turn_as
-                 ~input_speaker:
-                   (Keeper_input_speaker.Host_prompt
-                      (Keeper_input_speaker.Autonomous_wake { answered_asks = [] }))
-                 ~turn_kind:Turn_record.Autonomous
-                 ~write_cost_ledger:false
-                 ~after_turn:ignore
-                 ~dynamic_context_for_tools:None
-                 ~http_fixture:None
-                 ~base_path
-                 ~trace_id:"codex-production-wake-clause"
-                 ~user_message:"Autonomous wake."
-                 ~cli_path
-                 ~model:"gpt-fixture"
-                 ~turn_instructions:None
-             with
-             | Ok _ -> ()
-             | Error error -> fail (Agent_core.Error.to_string error));
-            let clause =
-              match
-                Prompt_registry.render_prompt_template
-                  Prompt_names.keeper_wake_completion_progress_required
-                  []
-              with
-              | Ok text -> text
-              | Error detail -> failf "the clause should render: %s" detail
-            in
-            let open Yojson.Safe.Util in
-            let turn_input =
-              In_channel.with_open_bin capture_path In_channel.input_all
-              |> String.split_on_char '\n'
-              |> List.filter (fun line -> line <> "")
-              |> List.map Yojson.Safe.from_string
-              |> List.find (fun json -> member "method" json = `String "turn/start")
-              |> member "params" |> member "input" |> to_list
-              |> List.filter_map (fun item -> member "text" item |> to_string_option)
-              |> String.concat "\n"
-            in
-            check bool "the Codex turn input ends with the clause" true
-              (String.ends_with ~suffix:clause turn_input)))
 ;;
 
 (* The turn ended on a compaction estimate (8 of 2,709 completed Codex
@@ -9873,6 +9759,39 @@ let test_live_keeper_resumes_official_thread () =
            check int "resumed live turn count" 2 result.turns)
 ;;
 
+(* account/read belongs to the startup handshake and is sent before
+   thread/resume and turn/start. A refusal there touched no session: the
+   run reports its own typed failure and nothing is sent past the refused
+   read, so a settled session's resume information is not this exchange's
+   to revise. (#47706) *)
+let test_account_read_refusal_stops_before_the_thread () =
+  let account_refused =
+    {|{"id":2,"error":{"code":-32000,"message":"account lookup failed"}}|}
+  in
+  let capture = Filename.temp_file "codex-account-refused-" ".jsonl" in
+  Fun.protect ~finally:(fun () -> Sys.remove capture) (fun () ->
+    (* The script template always writes the thread reply; the run never
+       reads it, because the refused account/read ends the handshake. *)
+    with_fixture ~capture_path:capture
+      [init_result; account_refused; thread_result]
+      (fun path ->
+        (match run_fixture path with
+         | Ok _ -> fail "a refused account read still completed a turn"
+         | Error (Runtime_codex_app_server.Account_read_failed
+                    { code; message; _ }) ->
+             check (option int) "the refusal code rides along" (Some (-32000)) code;
+             check string "the refusal message rides along"
+               "account lookup failed" message
+         | Error other ->
+             fail
+               ("account refusal classified as something else: "
+                ^ Runtime_codex_app_server.error_to_string other));
+        let open Yojson.Safe.Util in
+        let requests = captured_requests capture in
+        check (list string) "nothing is sent past the refused account read"
+          ["initialize"; "initialized"; "account/read"]
+          (List.map (fun request -> request |> member "method" |> to_string) requests)))
+
 let test_live_production_keeper_subscription () =
   if Sys.getenv_opt "MASC_CODEX_APP_SERVER_LIVE" <> Some "1"
   then Alcotest.skip ()
@@ -10189,22 +10108,12 @@ let () =
             test_dispatch_validation_is_process_free
         ; test_case "invalid context window is refused before dispatch" `Quick
             test_invalid_context_window_is_process_free
-        ; test_case "scheduling handoff preserves active protocol" `Quick
-            (fun () -> test_scheduling_handoff_preserves_active_protocol ())
-        ; test_case "handoff settles terminal effect without admitting more tools" `Quick
-            (fun () -> test_scheduling_handoff_preserves_active_protocol ~terminal_second:true ())
-        ; test_case "scheduling handoff wakes idle turn before any tool" `Quick
-            test_scheduling_handoff_wakes_idle_before_first_tool
-        ; test_case "scheduling handoff waiter released at terminal" `Quick
-            test_scheduling_handoff_waiter_released_at_terminal
         ; test_case "dynamic tool callback" `Quick
             (fun () -> test_dynamic_tool_callback ())
         ; test_case "concurrent status releases a pending read" `Quick
             test_concurrent_tool_does_not_block_status
         ; test_case "concurrent peer stops preserve authoritative Keeper outcomes" `Quick
             test_concurrent_tool_stop_orderings
-        ; test_case "handoff preserves completed peers in either settlement order" `Quick
-            test_concurrent_handoff_stops_keep_authoritative_outcome
         ; test_case "outer protocol failure survives pending tool drain" `Quick
             test_outer_protocol_error_survives_tool_drain
         ; test_case "serial tool fences concurrent calls" `Quick
@@ -10320,8 +10229,8 @@ let () =
             "Keeper maps official context error to typed core error"
             `Quick
             test_keeper_maps_official_context_error_to_typed_core_error
-        ; test_case "blank completion rejects progress but preserves session" `Quick
-            test_blank_completion_rejected_without_losing_session
+        ; test_case "blank completion completes and keeps the session" `Quick
+            test_blank_completion_completes_and_keeps_session
         ; test_case
             "Keeper does not retry context error after tool effect"
             `Quick
@@ -10377,6 +10286,26 @@ let () =
             `Quick
             test_keeper_resumes_persisted_codex_thread
         ; test_case
+            "Keeper initialize RPC refusal preserves the native session"
+            `Quick
+            (test_keeper_setup_rpc_refusal_preserves_session
+              ~responses:[fixture_rpc_refusal 1; account_chatgpt; thread_result]
+              ~methods:["initialize"]
+              ~error_type:"rpc_error"
+              ~detail:"initialize (code -32603): opaque fixture refusal")
+        ; test_case
+            "Keeper account RPC refusal preserves the native session"
+            `Quick
+            (test_keeper_setup_rpc_refusal_preserves_session
+              ~responses:[init_result; fixture_rpc_refusal 2; thread_result]
+              ~methods:["initialize"; "initialized"; "account/read"]
+              ~error_type:"account_read_failed"
+              ~detail:"Codex app-server RPC account/read failed (code -32603): opaque fixture refusal")
+        ; test_case
+            "Keeper resume RPC refusal keeps fresh recovery"
+            `Quick
+            test_keeper_resume_rpc_refusal_keeps_fresh_recovery
+        ; test_case
             "Keeper Resume sends changed Librarian working state once"
             `Quick
             test_keeper_resume_sends_changed_working_state_once
@@ -10400,10 +10329,6 @@ let () =
             "production Keeper records the newest Codex request context"
             `Quick
             test_production_keeper_records_newest_codex_request_context
-        ; test_case
-            "production wake input carries the completion clause"
-            `Quick
-            test_production_wake_input_carries_the_completion_clause
         ; test_case
             "production Keeper takes a compaction estimate as occupancy"
             `Quick
@@ -10517,6 +10442,10 @@ let () =
             "official Codex history injection"
             `Slow
             test_live_history_injection_subscription
+        ; test_case
+            "account read refusal stops before the thread"
+            `Quick
+            test_account_read_refusal_stops_before_the_thread
         ; test_case
             "Keeper through official Codex app-server"
             `Slow

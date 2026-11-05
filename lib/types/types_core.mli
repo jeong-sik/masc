@@ -74,6 +74,8 @@ type task_action =
   | Claim
   | Start
   | Done_action
+      (** Not parsed from tool input. A verdict that produces Done records its
+          transition observation under this action. *)
   | Cancel
   | Release
   | Submit_for_verification
@@ -188,27 +190,18 @@ type task_execution_links =
 val no_execution_links : task_execution_links
 
 type task_contract =
-  { strict : bool [@default false]
-  ; completion_contract : string list [@default []]
+  { completion_contract : string list [@default []]
   ; required_evidence : string list [@default []]
   ; inspect_gate_evidence : string list [@default []]
   ; verify_gate_evidence : string list [@default []]
   }
 [@@deriving show, yojson { strict = false }, eq]
 
-type task_reclaim_policy =
-  | Allow_reclaim
-  | Block_reclaim
-[@@deriving show, eq]
-
-val task_reclaim_policy_to_string : task_reclaim_policy -> string
-val task_reclaim_policy_of_string : string -> (task_reclaim_policy, string) result
 type task_handoff_context =
   { summary : string [@default ""]
   ; reason : string option [@default None]
   ; next_step : string option [@default None]
   ; failure_mode : string option [@default None]
-  ; reclaim_policy : task_reclaim_policy option [@default None]
   ; evidence_refs : string list [@default []]
   ; updated_at : string option [@default None]
   ; updated_by : string option [@default None]
@@ -220,12 +213,10 @@ type task_handoff_context =
 
 (** The "why" behind a transition that stopped work, from whichever argument
     carried it. [transition_task_r] takes an explicit [reason];
-    [release_task_r] takes none and forwards only a handoff context, which the
-    production release tool requires for a strict release.
+    [release_task_r] takes none and forwards only a handoff context.
     [task_handoff_context.reason] is the same concept under a different
     argument, so it is read when the explicit one is blank, then
-    [task_handoff_context.summary] — which a strict release is rejected
-    without, while [reason] stays optional.
+    [task_handoff_context.summary].
 
     Single definition on purpose: the committed broadcast and the author wake
     both answer "why did this stop", and resolving it separately let them
@@ -254,8 +245,6 @@ type task =
             rewrites what counts as done. *)
   ; handoff_context : task_handoff_context option [@default None]
   ; cycle_count : int [@default 0]
-  ; reclaim_policy : task_reclaim_policy option [@default None]
-  ; do_not_reclaim_reason : string option [@default None]
   ; skills : Skill_reference.t list [@default []]
         (** Exact, immutable Skill references attached at Task creation.
             Source, package, canonical name, and content revision remain one
@@ -289,10 +278,9 @@ type nested_field_outcome =
 
 val nested_field_outcome_is_unreadable : nested_field_outcome -> bool
 
-(** Per-field decode outcome for the two optional nested fields. *)
+(** Per-field decode outcome for the optional nested [handoff_context]. *)
 type task_decode_diagnostics =
   { handoff_context_outcome : nested_field_outcome
-  ; reclaim_policy_outcome : nested_field_outcome
   }
 [@@deriving show, eq]
 
@@ -303,19 +291,13 @@ val task_decode_diagnostics_is_unreadable : task_decode_diagnostics -> bool
 val task_of_yojson_with_diagnostics :
   Yojson.Safe.t -> (task * task_decode_diagnostics, string) result
 
-type task_claim_readiness =
-  | Claim_ready
-
-(** RFC-0323 G-10: the typed reclaim claim gate is retired (#23661 removed
-    the Todo producer, G-10 the Done producer). Claim blocks describe the
-    task-status fact that prevents an agent claim; [reclaim_policy] survives
-    as release/cancel data plumbing. *)
+(** The task-status fact that prevents an agent claim. *)
 type task_claim_block =
   | Claim_block_pending_verdict of { verification_id : string }
   | Claim_block_not_todo of task_status
 
 type task_claim_decision =
-  | Claim_available of task_claim_readiness
+  | Claim_available
   | Claim_unavailable of task_claim_block
 
 val task_claim_decision_for_status :
@@ -329,17 +311,6 @@ val task_claim_decision :
 (** Deterministic claim decision for queue/admission surfaces. An
     [AwaitingVerification] task is unavailable to agents until a completion
     authority commits its verdict. *)
-
-val task_claim_decision_is_available :
-  task -> bool
-
-type task_claim_next_action =
-  | Claim_now
-  | Skip_claim of task_claim_block
-
-val task_claim_next_action :
-  task -> task_claim_next_action
-(** Scheduler-facing claim action. *)
 
 val task_claim_next_action_is_claimable :
   task -> bool
@@ -551,13 +522,6 @@ type claim_next_result =
       ; title : string
       ; priority : int
       ; message : string
-      ; scope_widened : bool
       }
   | Claim_next_no_unclaimed
-  | Claim_next_no_eligible of
-      { excluded_count : int
-      ; scope_excluded_count : int
-      ; explicit_excluded_count : int
-      ; claim_pool_candidate_count : int
-      }
   | Claim_next_error of string

@@ -246,21 +246,29 @@ let checked contents changes =
   updated
 ;;
 
+let edit_text changes contents =
+  match conflicting changes with
+  | Some key -> Error (Conflicting_changes key)
+  | None ->
+    (match checked contents changes with
+     | updated -> Ok updated
+     | exception Refused error -> Error error)
+;;
+
 let apply ~runtime_config_path changes =
   match changes with
   | [] -> Ok false
   | _ :: _ ->
-    (match conflicting changes with
-     | Some key -> Error (Conflicting_changes key)
-     | None ->
-       let changed = ref false in
-       let edit contents =
-         let updated = checked contents changes in
-         changed := not (String.equal contents updated);
-         updated
-       in
-       (match Runtime.edit_config_text ~runtime_config_path edit with
-        | Ok (_ : Runtime.config_commit_receipt) -> Ok !changed
-        | Error detail -> Error (Configuration_rejected detail)
-        | exception Refused error -> Error error))
+    let changed = ref false in
+    let edit contents =
+      match edit_text changes contents with
+      | Ok updated ->
+        changed := not (String.equal contents updated);
+        updated
+      | Error error -> raise (Refused error)
+    in
+    (match Runtime.edit_config_text ~runtime_config_path edit with
+     | Ok (_ : Runtime.config_commit_receipt) -> Ok !changed
+     | Error detail -> Error (Configuration_rejected detail)
+     | exception Refused error -> Error error)
 ;;

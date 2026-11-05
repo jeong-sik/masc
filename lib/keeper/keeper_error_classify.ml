@@ -517,8 +517,9 @@ let recoverable_runtime_failure_reason (err : Agent_core.Error.t) =
          | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _
          | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } -> None)
 
-(** The labelled retry a deferred lane stands for: the runtime the lane names
-    next, and why the failure that deferred it is continuable.
+(** The labelled retry a deferred lane stands for: the runtime the walk that
+    resumes it dispatches first, and why the failure that deferred it is
+    continuable.
     [Deferred_runtime_lane] is the label when that failure carries no
     continuation reason of its own.
 
@@ -533,7 +534,7 @@ let degraded_retry_of_deferred_lane
     | Some reason -> reason
     | None -> Deferred_runtime_lane
   in
-  { next_runtime = lane.next_runtime_id; fallback_reason }
+  { next_runtime = Keeper_turn_driver.resumed_head lane; fallback_reason }
 
 (** [true] only for the typed API-side 400 rejection. Rendered provider text
     carries no recovery authority. *)

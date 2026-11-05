@@ -128,7 +128,8 @@ type http_scoped_surface_results =
   (Masc.Tui_decode.server_identity, string) result http_scoped_surface_readings
 
 type http_surface_results = {
-  http_overview: (overview_snapshot, string) result;
+  http_overview: (overview_snapshot, string) result option;
+      (** [None] when the visible surface did not ask for the briefing. *)
   http_approvals: approval_observation option;
   http_scoped: http_scoped_surface_results;
   (* Mandatory on every refresh: the same endpoint may name a different
@@ -220,6 +221,29 @@ type image_preparation =
 type observer_recovery_origin =
   | Observer_existing_workspace of Masc.Tui_decode.server_identity
   | Observer_initial_workspace of local_workspace_paths
+
+(* The Tools screen's reads, one constructor for all of them: [async_msg]
+   is at OCaml's limit of non-constant constructors. *)
+type tools_read =
+  | Tools_inventory_loaded of
+      { generation : int
+      ; keeper : string option
+      ; result : (Masc.Tui_decode_tools.tool_snapshot, string) result
+      }
+  | Tools_catalog_loaded of
+      { generation : int
+      ; result : (Masc.Tui_decode_tools.skills_catalog, string) result
+      }
+  | Tools_activations_loaded of
+      { generation : int
+      ; keeper : string
+      ; result : (Masc.Tui_decode_tools.skill_activation_projection, string) result
+      }
+  | Tools_usage_loaded of
+      { generation : int
+      ; keeper : string
+      ; result : (Masc.Tui_decode_tools.keeper_skill_usage, string) result
+      }
 
 type async_msg =
   | Chat_search_finished of int * bool * Masc_tui_render_chat.chat_search_plan
@@ -390,11 +414,11 @@ type async_msg =
       * (Masc.Tui_decode.context_observation, string) result
   | Local_keepers_read of local_workspace_request * (Masc_tui_loader.local_keeper_reading, string) result
   | Local_workspace_read of local_workspace_request * (Masc_tui_loader.local_reading, string) result
-  | Lanes_loaded of
-      unit ref * ( Masc.Tui_decode.keeper_lanes_snapshot
-        * Masc.Tui_decode.keeper_secret_projection list,
-        string )
-      result
+  | Keeper_composite_loaded of
+      unit ref * string
+      * ( Masc.Tui_decode.keeper_lane * Masc.Tui_decode.keeper_secret_projection option,
+          string )
+        result
   | Lane_inventory_loaded of
       int * (Masc.Tui_decode_lane_inventory.snapshot, string) result
   | Clients_loaded of
@@ -482,8 +506,7 @@ type async_msg =
     }
   | Runtime_surface_loaded of
       int * (Masc_tui_loader.runtime_surface_load, string) result
-  | Tools_loaded of int * string option * (Masc.Tui_decode_tools.tool_snapshot, string) result
-  | Skills_catalog_loaded of int * (Masc.Tui_decode_tools.skills_catalog, string) result
+  | Tools_read_loaded of tools_read
   | Skill_evidence_loaded of unit ref * string * (Yojson.Safe.t, string) result
   | Tools_async_observation_loaded of int * (Masc.Tui_decode.async_request_observation, string) result
   | Tools_async_detail_loaded of Masc_tui_types.tools_async_detail_request * (Masc.Tui_decode_async_request.reading, string) result
@@ -509,6 +532,12 @@ type async_msg =
       * (Masc_tui_http.tool_approval_answer, string) result
   | Keeper_tool_approvals_loaded of
       Snapshot_read.request * Masc.Tui_decode.server_identity * (Masc.Tui_decode.keeper_tool_approval list, string) result
+  | Asks_reloaded of asks_observation
+      (** The questions read again on their own, after a change or a failure. *)
+  | Keeper_roster_reloaded of keeper_roster_observation
+      (** The whole roster read on its own, after a change or a failure. *)
+  | Keeper_row_reloaded of keeper_row_observation
+      (** One Keeper's row read on its own, after the server named it. *)
   | Listen_prepared of listen_request * (Masc_tui_attachment_action.prepared, string) result
   | Resource_diagram_ready of Masc_tui_resource_diagrams.request * string * Masc_tui_resource_diagrams.claim * (string, string) result
   | Sent_image_ready of {
@@ -599,7 +628,6 @@ type async_msg =
           needs the chat request this path does not have. *)
   | Keeper_chat_dispatch_blocked of Masc_tui_keeper_chat_projection.request * string
   | Keeper_logs_loaded of keeper_log_request * (Masc_tui_metrics_tail.snapshot, string) result
-  | Keeper_execute_loaded of keeper_execute_request * (keeper_execute_reading * float, string) result
   | Keeper_execute_streamed of keeper_execute_follow * keeper_execute_follow_event
   | Keeper_settings_save_changed of keeper_settings_save_request * keeper_settings_save_status * int64
   | Runtime_form_save_changed of runtime_form_save_request * runtime_form_save_status * int64

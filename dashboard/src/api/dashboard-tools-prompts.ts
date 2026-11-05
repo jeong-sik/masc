@@ -14,6 +14,13 @@ import type { TelemetryFreshnessMetadata } from './dashboard-shared'
 import type { DashboardConfigResolution, DashboardRuntimeResolution } from '../types'
 import type { DashboardRuntimeProbeResponse } from './schemas/runtime-probe'
 import { parsePromptAuthoringIssues, type PromptAuthoringIssue } from './schemas/prompt-authoring'
+import {
+  parseToolMetricsSeriesResponse,
+  seriesAnswerMismatch,
+  toolMetricsSeriesQuery,
+  type ToolMetricsSeriesRequest,
+  type ToolMetricsSeriesResponse,
+} from './schemas/tool-metrics-series'
 
 // The activation ledger's wire schema — keeper_skill_activation_ledger.ml
 // writes exactly this tag, and every reader below pins it before trusting
@@ -215,12 +222,12 @@ export interface DashboardScheduledAutomationKeeperQueueEvidence {
   resolved_owner?: string
   transfer_target?: string
   transition_id?: string
-  terminal_outcome?: 'completed' | 'failed' | 'cancelled'
+  terminal_outcome?: 'completed' | 'cancelled'
   terminal_reason?: string | null
   projection_status:
     | 'matched_pending' | 'not_found' | 'read_error' | 'unrecognized_receipt'
     | 'terminal_projection_pending' | 'transfer_projection_pending'
-    | 'matched_terminal_completed' | 'matched_terminal_failed' | 'matched_terminal_cancelled'
+    | 'matched_terminal_completed' | 'matched_terminal_cancelled'
     | 'evidence_invalid' | 'retained_terminal_wake' | 'withdrawn_at_cancel'
   source?: string
   queue?: string
@@ -380,6 +387,7 @@ export type DashboardKeeperWaitingSource =
   | 'schedule_waiting'
   | 'owner_shutdown'
   | 'operator_pending_confirm'
+  | 'runtime_quota_spent'
   | 'read_error'
   | 'observation_unavailable'
 
@@ -392,6 +400,7 @@ export const DASHBOARD_KEEPER_WAITING_SOURCE_VALUES = [
   'schedule_waiting',
   'owner_shutdown',
   'operator_pending_confirm',
+  'runtime_quota_spent',
   'read_error',
   'observation_unavailable',
 ] as const satisfies ReadonlyArray<DashboardKeeperWaitingSource>
@@ -528,7 +537,6 @@ export interface DashboardToolsResponse {
   tool_usage: ToolMetricsResponse
   keeper_waiting_inventory?: DashboardKeeperWaitingInventory
   effective_keeper_surface?: DashboardEffectiveKeeperSurface | null
-  skill_activations?: DashboardSkillActivationProjection | null
 }
 
 export interface DashboardSkillReference {
@@ -596,10 +604,6 @@ export type DashboardEffectiveKeeperSurface =
       keeper_name: string
       reason: string
       detail: string
-    }
-  | {
-      status: 'warming'
-      keeper_name: string
     }
 
 export type DashboardSkillInstructionOrigin =
@@ -908,6 +912,21 @@ export type {
 
 export function fetchToolMetrics(): Promise<ToolMetricsResponse> {
   return get('/api/v1/tool-metrics')
+}
+
+export type { ToolMetricsSeriesRequest }
+
+export async function fetchToolMetricsSeries(
+  request: ToolMetricsSeriesRequest,
+  opts?: AbortableRequestOptions,
+): Promise<ToolMetricsSeriesResponse> {
+  const raw = await get<unknown>(`/api/v1/tool-metrics/series?${toolMetricsSeriesQuery(request)}`, {
+    signal: opts?.signal,
+  })
+  const response = parseToolMetricsSeriesResponse(raw)
+  const mismatch = seriesAnswerMismatch(request, response)
+  if (mismatch !== null) throw new Error(mismatch)
+  return response
 }
 
 export async function fetchDashboardRuntimeProbe(
@@ -2006,7 +2025,6 @@ export async function fetchDashboardTools(opts?: DashboardToolsRequestOptions): 
   const normalizedWaitingInventory = raw.keeper_waiting_inventory
     ? normalizeKeeperWaitingInventory(raw.keeper_waiting_inventory)
     : undefined
-  const normalizedSkillActivations = normalizeSkillActivationProjection(raw.skill_activations)
   return {
     ...raw,
     tool_inventory: {
@@ -2016,10 +2034,32 @@ export async function fetchDashboardTools(opts?: DashboardToolsRequestOptions): 
     ...(normalizedWaitingInventory
       ? { keeper_waiting_inventory: normalizedWaitingInventory }
       : {}),
-    ...(normalizedSkillActivations !== undefined
-      ? { skill_activations: normalizedSkillActivations }
-      : {}),
   }
+}
+
+const KEEPER_SKILL_ACTIVATIONS_SCHEMA = 'masc.keeper-skill-activations/v1'
+
+/** One Keeper's skill activations, read from its own route (RFC-0483). */
+export async function fetchKeeperSkillActivations(
+  keeperName: string,
+  opts?: AbortableRequestOptions,
+): Promise<DashboardSkillActivationProjection> {
+  await ensureDevToken()
+  const raw = await get<unknown>(
+    `/api/v1/keepers/skill-activations?keeper=${encodeURIComponent(keeperName)}`,
+    { signal: opts?.signal },
+  )
+  if (!isRecord(raw) || raw.schema !== KEEPER_SKILL_ACTIVATIONS_SCHEMA) {
+    throw new Error(`skill activations answer is not ${KEEPER_SKILL_ACTIVATIONS_SCHEMA}`)
+  }
+  if (raw.keeper !== keeperName) {
+    throw new Error(`skill activations answer belongs to ${String(raw.keeper)}, not ${keeperName}`)
+  }
+  const projection = normalizeSkillActivationProjection(raw.skill_activations)
+  if (projection === null || projection === undefined) {
+    throw new Error('skill activations answer omitted skill_activations')
+  }
+  return projection
 }
 
 export async function fetchKeeperWaitingInventory(

@@ -57,7 +57,9 @@ type poll_state =
 
 val record_poll_ok : cursor_rowid:int -> unit
 (** Called after each successful poll. Publishes liveness and the cursor that
-    {!status_json} reports. *)
+    {!status_json} reports. This setter and the four below call
+    [Gate_connector_announce.changed] when the value they publish changes,
+    except the cursor, which moves with every poll. *)
 
 val record_poll_error : string -> unit
 (** Called when a poll fails. The connector reports itself disconnected with

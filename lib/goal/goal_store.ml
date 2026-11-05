@@ -28,10 +28,6 @@ type rollup = {
 }
 [@@deriving yojson]
 
-let parse_goal_phase = function
-  | Some s -> Goal_phase.parse s
-  | None -> None
-
 let goals_path config =
   Filename.concat (Workspace_utils.masc_dir config) "goals.json"
 
@@ -369,6 +365,10 @@ let notify_projection_change config =
       Log.Misc.error "goal_store: projection observer failed for %s: %s"
         config.base_path (Printexc.to_string exn)
 
+let projection_source_changed config =
+  Goal_projection_generation.advance ();
+  notify_projection_change config
+
 let write_state_with_effect ~projection_effect config state =
   ensure_dirs config;
   let path = goals_path config in
@@ -600,39 +600,6 @@ let transact_goal ?effects config ~goal_id f =
            | Ok () -> Ok (updated, result)
            | Error detail -> Error (Persist_failed detail)))
 
-type conditional_update =
-  | Goal_updated of goal
-  | Goal_phase_mismatch of Goal_phase.t
-
-let update_goal_if_phase config ~goal_id ~expected_phase f
-    : (conditional_update, write_error) result =
-  Workspace_utils.with_file_lock config (goals_path config)
-    (fun () : (conditional_update, write_error) result ->
-      match load_source config with
-      | Unavailable u -> Error (Store_unavailable u)
-      | Uninitialized -> Error (Goal_not_found goal_id)
-      | Available state ->
-        (match unique_goal_in state.goals goal_id with
-         | Error error -> Error error
-         | Ok None -> Error (Goal_not_found goal_id)
-         | Ok (Some goal) when goal.phase <> expected_phase ->
-           Ok (Goal_phase_mismatch goal.phase)
-         | Ok (Some goal) ->
-           let now = Masc_domain.now_iso () in
-           let updated_goal = f { goal with updated_at = now } in
-           if not (String.equal updated_goal.id goal.id) then
-             Error (Rejected "goal phase update cannot replace goal identity")
-           else
-             let next_state =
-               { state with version = state.version + 1
-               ; updated_at = now
-               ; goals = replace_goal state.goals updated_goal
-               }
-             in
-             (match write_state_result config next_state with
-              | Ok () -> Ok (Goal_updated updated_goal)
-              | Error detail -> Error (Persist_failed detail))))
-
 let delete_goal config ~goal_id : (delete_goal_outcome, delete_goal_error) result =
   Workspace_utils.with_file_lock config (goals_path config)
     (fun () : (delete_goal_outcome, delete_goal_error) result ->
@@ -773,7 +740,7 @@ let append_audit_event config json =
       | (Fs_compat.Private_file_failed (Fs_compat.Incomplete_jsonl_tail | (Fs_compat.Invalid_jsonl_suffix | Fs_compat.Existing_jsonl_refused _ | (Fs_compat.Incomplete_jsonl_tail_truncate_failed _ | (Fs_compat.Negative_expected_end_offset _ | Fs_compat.Durable_jsonl_append_failed _)))) | Fs_compat.Private_file_failed_with_cleanup_failure { error = (Fs_compat.Incomplete_jsonl_tail | (Fs_compat.Invalid_jsonl_suffix | Fs_compat.Existing_jsonl_refused _ | (Fs_compat.Incomplete_jsonl_tail_truncate_failed _ | (Fs_compat.Negative_expected_end_offset _ | Fs_compat.Durable_jsonl_append_failed _))));_} | Fs_compat.Private_file_succeeded _ | Fs_compat.Private_file_succeeded_with_cleanup_failure _) as outcome -> outcome in
     match append expected with
     | Fs_compat.Private_file_succeeded _ ->
-        notify_projection_change config;
+        projection_source_changed config;
         Ok ()
     | Private_file_succeeded_with_cleanup_failure { cleanup_failure; _ } ->
         (* The durable effect committed; the cleanup failure is descriptor
@@ -781,7 +748,7 @@ let append_audit_event config json =
            retry that writes the event twice. *)
         Log.Misc.warn "goal event transaction cleanup failed: %s"
           (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
-        notify_projection_change config;
+        projection_source_changed config;
         Ok ()
     | Private_file_failed error ->
         Error (Fs_compat.private_jsonl_append_error_to_string error)
@@ -855,7 +822,7 @@ let flush_pending_events_locked config =
                 Error (Fs_compat.durable_append_error_to_string error ^ "; "
                        ^ Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure) in
           let* changed = appended in
-          if changed then notify_projection_change config;
+          if changed then projection_source_changed config;
           (match write_state_with_effect ~projection_effect:Projection_unchanged config
                    { state with pending_events = []; version = state.version + 1;
                      updated_at = Masc_domain.now_iso () } with
@@ -950,7 +917,7 @@ let resolve_goal_id = function
 
 type upsert_precondition = Unconditional | Require_absent
 
-let upsert_goal_internal config ?actor ?id ?title ?metric ?target_value ?due_date
+let upsert_goal_with_events config ~actor ?id ?title ?metric ?target_value ?due_date
     ?priority ?(precondition = Unconditional) () =
   let is_new_goal = id = None in
   if is_new_goal && blank_opt title then
@@ -998,18 +965,6 @@ let upsert_goal_internal config ?actor ?id ?title ?metric ?target_value ?due_dat
                         "a non-blank title is required for a new goal \
                          (a goal without a name states no success condition \
                          to hold it to)") in
-                let* () =
-                  match due_date with
-                  | None -> Ok ()
-                  | Some raw ->
-                      (match Ptime.of_float_s (Time_compat.now ()) with
-                       | None -> Ok ()
-                       | Some now ->
-                           if Goal_due.is_overdue ~now (Goal_due.read (Some raw)) then
-                             Error (Rejected (Printf.sprintf
-                               "due_date %S is already past: a goal born \
-                                overdue is unreachable" raw))
-                           else Ok ()) in
                 if blank_opt metric || blank_opt target_value then
                   Error (Rejected
                     "metric and target_value are required for a new goal \
@@ -1025,27 +980,13 @@ let upsert_goal_internal config ?actor ?id ?title ?metric ?target_value ?due_dat
           let goals = match action with
             | `created -> state.goals @ [goal]
             | `updated _ -> replace_goal state.goals goal in
-          let pending = match actor with
-            | None -> []
-            | Some actor -> upsert_event_intents ~actor ~revision goal action in
+          let pending = upsert_event_intents ~actor ~revision goal action in
           Ok {
             next_state =
               { state with version = revision; updated_at = now; goals;
                 pending_events = state.pending_events @ pending };
-            value = goal, action, revision, pending;
+            value = goal, action, pending;
           })
-
-let upsert_goal config ?id ?title ?metric ?target_value ?due_date ?priority () =
-  upsert_goal_internal config ?id ?title ?metric ?target_value ?due_date ?priority ()
-  |> Result.map (fun (goal, action, _, _) -> goal, action)
-
-let upsert_goal_with_revision config ?id ?title ?metric ?target_value ?due_date ?priority () =
-  upsert_goal_internal config ?id ?title ?metric ?target_value ?due_date ?priority ()
-  |> Result.map (fun (goal, action, revision, _) -> goal, action, revision)
-
-let upsert_goal_with_events config ~actor ?id ?title ?metric ?target_value ?due_date ?priority ?precondition () =
-  upsert_goal_internal config ~actor ?id ?title ?metric ?target_value ?due_date ?priority ?precondition ()
-  |> Result.map (fun (goal, action, _, events) -> goal, action, events)
 
 let compute_rollup goals =
   let count predicate =

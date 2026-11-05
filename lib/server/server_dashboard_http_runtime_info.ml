@@ -2238,8 +2238,8 @@ let dashboard_tools_cache_ttl_sec = 30.0
 
 (* The cache holds only what is the same for every viewer: the inventory,
    the usage summary, the resolutions. What is about one Keeper -- its
-   effective surface, its skill activations -- is answered live per request
-   below, so the key names the workspace alone. *)
+   effective surface -- is answered live per request below, so the key names
+   the workspace alone. *)
 let dashboard_tools_cache_key ~base_path = Printf.sprintf "tools:%s" base_path
 
 let dashboard_tools_warming_json () =
@@ -2320,11 +2320,9 @@ let dashboard_tools_http_result ?keeper ?timing (config : Workspace.config) =
     let keeper_waiting_inventory =
       run Tools_compute (fun () -> Server_keeper_waiting_inventory.dashboard_json config)
     in
-    (* Resolved on every request, never from the cache: a Keeper whose
-       metadata does not exist answers [keeper_not_found] here, where the
-       cold-cache placeholder used to answer "warming" for it -- a keeper
-       taken down by an admin shutdown looked, to every single read, like
-       one the server had not looked at yet. *)
+    (* Resolved on every request, never from the cache, so the first read
+       of a Keeper whose metadata does not exist, or no longer exists,
+       answers [keeper_not_found]. *)
     let effective_keeper_surface =
       match keeper with
       | None -> `Null
@@ -2333,21 +2331,12 @@ let dashboard_tools_http_result ?keeper ?timing (config : Workspace.config) =
           Keeper_effective_tool_surface.resolve ~config ~keeper_name
           |> Keeper_effective_tool_surface.to_yojson)
     in
-    let skill_activations =
-      match keeper with
-      | None -> `Null
-      | Some keeper_name ->
-        run Tools_compute (fun () ->
-          Keeper_skill_activation_projection.resolve ~config ~keeper_name
-          |> Keeper_skill_activation_projection.to_yojson)
-    in
     match json with
     | `Assoc fields ->
       `Assoc
         (fields
          @ [ "effective_keeper_surface", effective_keeper_surface
            ; "keeper_waiting_inventory", keeper_waiting_inventory
-           ; "skill_activations", skill_activations
            ])
     | other -> other
   in

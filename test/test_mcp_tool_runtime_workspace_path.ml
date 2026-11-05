@@ -1,5 +1,4 @@
 module Cases = Test_mcp_tool_matrix_cases
-module Preparation = Masc_test_deps.Board_test_preparation
 module Keeper_publication_recovery_availability =
   Masc.Keeper_publication_recovery_availability
 
@@ -194,10 +193,10 @@ let test_masc_start_surfaces_claim_failure_after_task_commit () =
            ~priority:3
            ~description:"");
       ignore
-        (Masc.Workspace.claim_task
+        (Masc.Workspace.claim_task_r
            config
            ~agent_name:fixture.agent_name
-           ~task_id:"task-001");
+           ~task_id:"task-001" ());
       let result =
         Cases.execute_tool
           fixture
@@ -399,7 +398,6 @@ let create_runtime env sw ~base_path =
   (* Independent runtime fixtures must not inherit a prior process's Board. *)
   Masc.Board.reset_global_for_test ();
   Masc.Board_dispatch.reset_for_test ();
-  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   Mcp_eio.create_state_eio
     ~sw
     ~proc_mgr:(Eio.Stdenv.process_mgr env)

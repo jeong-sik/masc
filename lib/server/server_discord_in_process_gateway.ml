@@ -259,11 +259,7 @@ let discord_member_directory_page = function
   | _ -> Error "Discord guild members response is not a list"
 
 let remember_directory_entries ~base_dir ~scope entries =
-  List.iter
-    (fun (id, name) ->
-       Keeper_connector_names.remember ~base_dir ~connector:State.channel ~scope ~id
-         ~name ())
-    entries
+  Keeper_connector_names.remember_many ~base_dir ~connector:State.channel ~scope entries
 
 let discord_recent_message_limit = 100
 let discord_member_page_limit = 1000
@@ -1081,6 +1077,8 @@ let start ~sw ~env ~clock ~state =
           ~sw ~env ~token
           ~intents:default_intents
           ~trigger_policy:current_trigger_policy
+          ~on_phase_change:(fun () ->
+            Gate_connector_announce.changed ~connector_id:State.connector_id)
           ~on_event:(fun ev ->
             let config = Mcp_server.workspace_config state in
             submit_triggered_event

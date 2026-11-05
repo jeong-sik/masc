@@ -38,6 +38,9 @@ let realtime_cache_ttl_s = 15.0
 (** Shared dashboard projection cache TTL — 120 seconds. *)
 let dashboard_projection_cache_ttl_s = 120.0
 
+let planning_cache_prefix = "planning:"
+let planning_cache_key ~base_path = planning_cache_prefix ^ base_path
+
 (* Every cached projection of the board store. A board write drops all of
    them so the SSE-triggered refetch reads the write instead of the
    previous projection for the rest of the TTL. *)
@@ -94,12 +97,18 @@ let with_dashboard_timeout ~clock compute =
 (* The directory the cached state actually lives in, so the cache is
    partitioned exactly like the store it caches. A constant partition once let
    a scope switch serve the previous workspace's projection (#24504). *)
+let cache_partition_of_base_path ~base_path = Common.masc_dir_from_base_path ~base_path
+
 let cache_partition_segment (config : Workspace.config) =
-  Workspace_utils.masc_dir config
+  cache_partition_of_base_path ~base_path:config.base_path
+;;
+
+let partition_cache_key ~partition prefix suffix =
+  Printf.sprintf "%s:%s:%s" prefix partition suffix
 ;;
 
 let dashboard_cache_key (config : Workspace.config) prefix suffix =
-  Printf.sprintf "%s:%s:%s" prefix (cache_partition_segment config) suffix
+  partition_cache_key ~partition:(cache_partition_segment config) prefix suffix
 ;;
 
 let dashboard_query_cache_segment = function
@@ -116,20 +125,26 @@ let dashboard_query_cache_value_json = function
   | None -> `Null
 ;;
 
-let dashboard_query_cache_key config prefix fields =
-  let suffix =
-    `List
-      (List.map
-         (fun (key, value) ->
-           `List [ `String key; dashboard_query_cache_value_json value ])
-         fields)
-    |> Yojson.Safe.to_string
-  in
-  dashboard_cache_key config prefix suffix
+let dashboard_query_cache_suffix fields =
+  `List
+    (List.map
+       (fun (key, value) ->
+         `List [ `String key; dashboard_query_cache_value_json value ])
+       fields)
+  |> Yojson.Safe.to_string
 ;;
 
-let scheduled_automation_cache_key config =
-  dashboard_query_cache_key config "scheduled_automation" []
+let dashboard_query_cache_key config prefix fields =
+  dashboard_cache_key config prefix (dashboard_query_cache_suffix fields)
+;;
+
+(* Keyed by base path rather than config: the schedule store's change observer
+   is handed only the base path of the workspace it wrote. *)
+let scheduled_automation_cache_key ~base_path =
+  partition_cache_key
+    ~partition:(cache_partition_of_base_path ~base_path)
+    "scheduled_automation"
+    (dashboard_query_cache_suffix [])
 ;;
 
 (* The fleet schedule list carries the schedule runner's status and its holds,
@@ -137,8 +152,8 @@ let scheduled_automation_cache_key config =
    alone, the page would keep saying [ok] for that long after a tick failed,
    so the runner loop drops it each time a tick's outcome is on record
    (#38411). *)
-let invalidate_scheduled_automation config =
-  Dashboard_cache.invalidate (scheduled_automation_cache_key config)
+let invalidate_scheduled_automation ~base_path =
+  Dashboard_cache.invalidate (scheduled_automation_cache_key ~base_path)
 ;;
 
 let dashboard_briefing_timeout_s = Env_config_runtime.Dashboard.briefing_timeout_sec

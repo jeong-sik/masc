@@ -149,23 +149,8 @@ type t =
 
 let stop_reason_to_string = function
   | Runtime_agent.Completed _ -> "completed"
-  | Runtime_agent.Yielded_to_operation_queued { turns_used; _ } ->
-    Printf.sprintf "yielded_to_operation_queued:%d" turns_used
   | Runtime_agent.Yielded_to_durable_stimulus { turns_used; _ } ->
     Printf.sprintf "yielded_to_durable_stimulus:%d" turns_used
-  | Runtime_agent.Yielded_after_repeated_tool_call
-      { turns_used; tool_name; repeated_count; _ } ->
-    Printf.sprintf
-      "yielded_after_repeated_tool_call:%d:%s:%d"
-      turns_used
-      tool_name
-      repeated_count
-  | Runtime_agent.Yielded_after_repeated_assistant_text
-      { turns_used; repeated_count; _ } ->
-    Printf.sprintf
-      "yielded_after_repeated_assistant_text:%d:%d"
-      turns_used
-      repeated_count
   | Runtime_agent.InputRequired _ ->
     Keeper_turn_disposition.to_wire Keeper_turn_disposition.Input_required
 ;;
@@ -175,10 +160,7 @@ let stop_reason_to_string = function
 let disposition_of_stop_reason = function
   | Runtime_agent.Completed _ -> Keeper_turn_disposition.Success
   | Runtime_agent.InputRequired _ -> Keeper_turn_disposition.Input_required
-  | Runtime_agent.Yielded_to_operation_queued _
-  | Runtime_agent.Yielded_to_durable_stimulus _
-  | Runtime_agent.Yielded_after_repeated_tool_call _
-  | Runtime_agent.Yielded_after_repeated_assistant_text _ ->
+  | Runtime_agent.Yielded_to_durable_stimulus _ ->
     Keeper_turn_disposition.Checkpoint
 ;;
 

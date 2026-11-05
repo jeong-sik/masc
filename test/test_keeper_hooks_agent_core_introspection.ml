@@ -115,6 +115,39 @@ let test_runtime_active_claims_match_make_hooks () =
       active
       (slot_active slot_name))
 
+(* The before_turn hook runs once per agent-core turn, ahead of that turn's
+   provider request, so the preview shows the wait instead of the tool the
+   previous turn ran. *)
+let test_before_turn_shows_the_provider_wait () =
+  Eio_main.run @@ fun _env ->
+  let keeper_name = "hook-before-turn-keeper" in
+  let writer =
+    Masc.Keeper_turn_preview.reset ~base_path:"hook-before-turn-test" ~execution_scope:None
+      ~turn_ref:None ~keeper_name ~now:1. ~redaction:Masc.Keeper_secret_redaction.empty
+  in
+  Masc.Keeper_turn_preview.note_tool ~writer:(Some writer) ~now:2. "Execute";
+  let base_path = Filename.concat (Filename.get_temp_dir_name ()) "masc-hook-before-turn" in
+  let hooks =
+    Masc.Keeper_hooks_agent_core.make_hooks
+      ~config:(Masc.Workspace.default_config base_path)
+      ~meta_ref:(make_meta_ref keeper_name)
+      ~turn_ctx_cell:(Masc.Keeper_tool_call_log.create_turn_ctx_cell ())
+      ~trace_id:"before-turn-trace"
+      ~keeper_turn_id:1
+      ~preview:writer
+      ()
+  in
+  (match hooks.before_turn with
+   | Some hook ->
+     ignore (hook (Agent_core.Hooks.BeforeTurn { turn = 2; messages = [] }) : Agent_core.Hooks.hook_decision)
+   | None -> fail "make_hooks has no before_turn hook");
+  match Masc.Keeper_turn_preview.current ~keeper_name with
+  | Some preview ->
+    check bool "the turn waits on the provider" true
+      (preview.activity = Masc.Keeper_turn_preview.Awaiting_response);
+    check (option string) "the tool stays the last observed tool" (Some "Execute") preview.last_tool
+  | None -> fail "no preview for a keeper that was reset"
+
 let () =
   Alcotest.run "Keeper_hooks_agent_core_introspection"
     [ ( "slot contract"
@@ -123,5 +156,7 @@ let () =
         ; test_case "slot sources" `Quick test_sources
         ; test_case "make_hooks active claims match runtime record" `Quick
             test_runtime_active_claims_match_make_hooks
+        ; test_case "before_turn shows the provider wait" `Quick
+            test_before_turn_shows_the_provider_wait
         ] )
     ]

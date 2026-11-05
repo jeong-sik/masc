@@ -88,6 +88,7 @@ const QUEUE_SOURCE_GLYPH: Record<DashboardKeeperWaitingSource, string> = {
   schedule_waiting: '○',
   owner_shutdown: '■',
   operator_pending_confirm: '⚿',
+  runtime_quota_spent: '⊘',
   read_error: '!',
   observation_unavailable: '!',
 }

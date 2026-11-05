@@ -297,8 +297,9 @@ let resolve ?goal_space ~required_actions t ~preference verb ~start_time =
             |Browser_lane.Page_native_workflow _|Page_interact _|Page_goto _|Page_elements _
             |Browser_lane.Page_context _|Page_instruct _|Page_locate _|Page_extract _ -> false) ->
       (* The route names no client because the lane has none: the worker
-         that published the user-owned refusal is the target, and it checks
-         its own state again before it claims the Space. A worker that did
+         that published the user-owned refusal or the missing Space is the
+         target, and it checks its own state again before it recovers the
+         Space. A worker that did
          not answer its snapshot does not join this choice: the target is
          the one refuser that did answer, and its own gate re-reads the
          refusal, so an unobserved second refuser can only stay unclaimed
@@ -318,7 +319,7 @@ let resolve ?goal_space ~required_actions t ~preference verb ~start_time =
                 {Browser_selection.route=Browser_lane.Live_route None;reason=Browser_selection.Explicit_browser},
                 served)
           | [] ->
-              refuse "take_over without a clientId reclaims a user-owned ego task space; no live worker reports one"
+              refuse "take_over without a clientId recovers an ego task space a worker reports as user-owned or missing; no live worker reports one"
           | _::_::_ ->
               refuse "more than one live worker reports an unavailable ego task space; inspect the inventory issues"))
     | (Automatic|Exact (Live_route _)),_ | Exact (Automation_route|Stagehand_route),_::_ ->
@@ -490,8 +491,12 @@ let issue ?goal_space ?upload_paths ?(required_actions=[]) t ~preference verb =
   let raw=Mcp_protocol.Mcp_types.tool_result_to_yojson result in
   if result.is_error=Some true then
     let class_,effect_disposition=Lane_addon_tool_result.failure result in
+    let lead=match effect_disposition with
+      | Tool_result.Proven_pre_effect -> "Browser command was refused before any effect. "
+      | Tool_result.Proven_post_effect -> "Browser command failed after part of its effect; inspect its receipt before further input. "
+      | Tool_result.Effect_outcome_unknown -> "Browser command failed and its effect is unknown; inspect its receipt before further input. " in
     fail ?metadata:result._meta ~data:raw ~class_ ~effect_disposition
-      ("Browser command failed; inspect its original receipt before further input. " ^ Agent_core.Mcp.text_of_tool_result result)
+      (lead ^ Agent_core.Mcp.text_of_tool_result result)
   else
   let decode ()=
     let* value=Option.to_result ~none:"browser command lacks structured content" result.structured_content in

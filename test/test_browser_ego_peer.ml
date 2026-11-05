@@ -2,7 +2,6 @@ open Alcotest
 module Peer = Masc.Browser_ego_peer
 module Live = Masc.Browser_live_peer
 module Lane = Browser_lane
-let volatile_input ~space_id:_ = Ok (Masc.Browser_ego_input.create ())
 let obj xs = `Assoc xs
 let str s = `String s
 
@@ -24,7 +23,7 @@ let sent_of ~window_s script =
       | _ -> failwith "the production args envelope must contain a JSON string" in
   { step;args;
     space = (if step="space.status" then Yojson.Safe.Util.member "spaceId" args
-      else Yojson.Safe.from_string (trailing (find "const task = await taskSpace(") ");")); window_s }
+      else Yojson.Safe.from_string (trailing (find "task = await taskSpace(") ");")); window_s }
 
 (* ego writes other lines too, such as its update notice; only the marked line is the answer. *)
 let answered value = Ok ("[ego-browser:notice] an update is available\n" ^ Peer.result_marker
@@ -57,10 +56,10 @@ let no_downloads = {Peer.root = "/nonexistent/masc-ego-downloads"; publish = (fu
 let clock = ref 0.
 let now () = !clock
 
-let opened ?(capture_directory=capture_directory ()) ?(downloads=no_downloads) ?(input=volatile_input) run =
+let opened ?(capture_directory=capture_directory ()) ?(downloads=no_downloads) run =
   let run ~window_s script = let sent = sent_of ~window_s script in
     if sent.step = "space.open" then answered (obj ["spaceId",`Int 51;"name",str "SDK Space";"ownership",str "agent"]) else run sent in
-  match Peer.open_space ~input ~downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory with
+  match Peer.open_space ~downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory with
   | Ok peer -> peer
   | Error detail -> failf "the space did not open: %s" detail
 
@@ -138,7 +137,7 @@ let test_the_space_opens_by_name_and_is_held_by_number () =
     | "space.finish" -> answered (obj ["spaceId",`Int 51;"closedSpace",`Bool true;
         "keptManagedLabels",`List [];"closedManagedLabels",`List [];"preservedUnmanagedCount",`Int 0])
     | other -> failf "unexpected step %s" other in
-  let peer = match Peer.open_space ~input:volatile_input ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+  let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   check int "space number" 51 (Peer.space_id peer);
   check string "attachment matches the configured literal name" "SDK Space" (Peer.space peer).name;
@@ -147,14 +146,14 @@ let test_the_space_opens_by_name_and_is_held_by_number () =
   check (list string) "opened by name, then held by number"
     [ "space.open \"SDK Space\""; "tabs.list 51"; "space.finish 51" ]
     (List.rev_map (fun (step, space) -> step ^ " " ^ Yojson.Safe.to_string space) !spaces);
-  let user = Peer.open_space ~input:volatile_input ~run_native:(fun _ -> Error (Peer.Unstarted "no native command in this fixture")) ~downloads:no_downloads ~now ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) ~space:(Browser_configuration.Named_space "SDK Space")
+  let user = Peer.open_space ~run_native:(fun _ -> Error (Peer.Unstarted "no native command in this fixture")) ~downloads:no_downloads ~now ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) ~space:(Browser_configuration.Named_space "SDK Space")
       ~run:(fun ~window_s:_ _ -> answered (obj ["spaceId",`Int 7;"name",str "SDK Space";"ownership",str "user"])) in
   check bool "a space the operator owns is refused" true (Result.is_error user);
-  let in_use = Peer.open_space ~input:volatile_input ~run_native:(fun _ -> Error (Peer.Unstarted "no native command in this fixture")) ~downloads:no_downloads ~now ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) ~space:(Browser_configuration.Named_space "masc")
+  let in_use = Peer.open_space ~run_native:(fun _ -> Error (Peer.Unstarted "no native command in this fixture")) ~downloads:no_downloads ~now ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) ~space:(Browser_configuration.Named_space "masc")
       ~run:(fun ~window_s:_ _ -> failed "EGO_TASK_SPACE_NAME_IN_USE: masc") in
   check (result reject string) "ego's own refusal is kept" (Error "EGO_TASK_SPACE_NAME_IN_USE: masc") (Result.map ignore in_use);
   List.iter (fun fields ->
-    let result=Peer.open_space ~input:volatile_input ~run_native:(fun _ -> Error (Peer.Unstarted "unused"))
+    let result=Peer.open_space ~run_native:(fun _ -> Error (Peer.Unstarted "unused"))
       ~downloads:no_downloads ~now ~version:"fixture" ~capture_directory:(capture_directory ()) ~space:(Browser_configuration.Named_space "SDK Space")
       ~run:(fun ~window_s:_ script ->
         check string "malformed attachment never dispatches a page operation" "space.open" (sent_of ~window_s:0. script).step;
@@ -198,7 +197,7 @@ let test_the_spaces_of_a_name_are_listed_without_opening_one () =
       "an answer that is not a list", answered `Null ];
   check bool "a failure the frame caught is a listing that failed" true
     (match read (failed "ego lite is not running") with Error (Peer.Spaces_failed _) -> true | Ok _ | Error (Peer.Spaces_malformed _) -> false);
-  let unknown = Peer.open_space ~input:volatile_input ~run_native:(fun _ -> Error (Peer.Unstarted "no native command in this fixture"))
+  let unknown = Peer.open_space ~run_native:(fun _ -> Error (Peer.Unstarted "no native command in this fixture"))
       ~downloads:no_downloads ~now ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) ~space:(Browser_configuration.Named_space "SDK Space")
       ~run:(fun ~window_s:_ _ -> answered (obj ["spaceId",`Int 9;"ownership",str "team"])) in
   check bool "a connection still does not open on an owner masc does not know" true (Result.is_error unknown)
@@ -235,7 +234,7 @@ let test_exact_numeric_space_resume () =
   let calls=ref [] in
   let open_reference reference reply =
     calls:=[];
-    Peer.open_space ~input:volatile_input ~run_native:(fun _ -> Error (Peer.Unstarted "no native action in attachment test"))
+    Peer.open_space ~run_native:(fun _ -> Error (Peer.Unstarted "no native action in attachment test"))
       ~downloads:no_downloads ~now ~version:"fixture" ~capture_directory:(capture_directory ()) ~space:reference
       ~run:(fun ~window_s script ->
         let sent=sent_of ~window_s script in calls:=sent::!calls;
@@ -716,38 +715,6 @@ let test_selector_input_uses_ego_sdk () =
     (failure_kind (dispatch peer Live.Page_interact (interact_args (Lane.Click selector))));
   check int "no automatic replay" (before + 1) (List.length !asked)
 
-let test_durable_intent_failure_never_dispatches_native_input () =
-  let module Input=Masc.Browser_ego_input in
-  List.iter (fun (workflow,raw) ->
-    let record=ref None and writes=ref 0 and native_calls=ref 0 in
-    let input ~space_id =
-      let persistence={Input.read=(fun ()->Ok !record);
-        compare_and_set=(fun ~expected ~replacement->
-          incr writes;
-          if !writes>1 then Error "retained input publication unavailable"
-          else if expected<> !record then Error "writer changed"
-          else (record:=Some replacement;Ok ()));
-        active=(fun ()->true)} in
-      Input.create_persistent ~persistence ~writer:"worker-epoch" ~space_id in
-    let peer=opened ~input (fun sent -> match sent.step with
-      | "tabs.list"->answered tabs
-      | "page.target_input"|"page.native_type"|"page.native_workflow"->incr native_calls;Error (Peer.Unobserved "must not dispatch")
-      | other->failf "unexpected write-ahead fixture step %s" other) in
-    ignore (dispatch peer Live.Tabs_list (obj []));
-    let result=if workflow then dispatch peer Live.Page_native_workflow
-      (obj ["tabId",`Int 1;"expectedUrl",str observed_url;"maxChars",`Int 1000;"steps",`List [
-        if raw then obj ["method",str "keyboard.type";"text",str "a"]
-        else obj ["method",str "click";"selector",str "#send"]]])
-      else dispatch peer Live.Page_interact (interact_args
-        (if raw then Lane.Type_text {document_id="d1";text="a"} else Lane.Click_target (Lane.Target_ref 12))) in
-    check string "refusal comes from durable intent publication" "retained input publication unavailable"
-      (before_effect "failed retained input intent" result);
-    check int "no native holding effect after failed durable write" 0 !native_calls;
-    check int "attachment claim and one intent publication only" 2 !writes;
-    check bool "failed publication leaves input blocked" true
-      (match Peer.input_status peer with Input.Uncertain _->true|Ready _->false))
-      [false,false;true,false;false,true;true,true]
-
 let test_unattestable_raw_input_is_refused_before_effect () =
   let module Input=Masc.Browser_ego_input in
   let calls=ref [] and lose_receipt=ref false in
@@ -800,7 +767,7 @@ let test_invalid_workflow_is_refused_before_any_step () =
     check bool "refusal identifies the malformed later raw step" true
       (contains message "step[1]" && contains message "keyboard.type" && contains message "unexpected");
     check int "even the first fill is never dispatched" before !calls;
-    check bool "preflight never resets existing input" true (Peer.input_status peer=readiness) in
+    check bool "preflight never changes existing input readiness" true (Peer.input_status peer=readiness) in
   refuse (Peer.input_status peer);
   check string "supported original click can still become uncertain" "unknown"
     (failure_kind (dispatch peer Live.Page_native_workflow (args [click])));
@@ -809,7 +776,7 @@ let test_invalid_workflow_is_refused_before_any_step () =
 
 (* Generate private captures with the actual fixed producer and the shared
    documented-native transport stand-in. The Peer must bind the captures to
-   its own freshly persisted intent; no test fabricates a release receipt. *)
+   its own freshly recorded intent; no test fabricates a release receipt. *)
 let raw_capture sent mode =
   let directory=capture_directory () in
   let arguments=Filename.concat directory "arguments.json"
@@ -828,17 +795,15 @@ let raw_capture sent mode =
   | Some row->field "capture" row
   | None->fail "native producer case is absent"
 
-let retained_input record ~space_id =
-  let module Input=Masc.Browser_ego_input in
-  Input.create_persistent ~space_id ~writer:"peer-raw-original" ~persistence:{
-    read=(fun ()->Ok !record);active=(fun ()->true);
-    compare_and_set=(fun ~expected ~replacement->
-      if expected= !record then (record:=Some replacement;Ok ()) else Error "writer changed")}
-
 let public_input_result = function
   | Ok receipt -> "",receipt
   | Error (Live.Observed_failure {message;receipt;_}|Live.Partial_failure {message;receipt;_}) -> message,receipt
   | Error (Live.Before_effect message|Live.Outcome_unknown message) -> message,`Null
+
+(* The readiness [with_input_state] stamps on what leaves the peer. *)
+let reported_readiness peer result = match Peer.with_input_state peer result with
+  | Ok receipt | Error (Live.Observed_failure {receipt;_}|Live.Partial_failure {receipt;_}) -> text (field "inputReadiness" receipt)
+  | Error (Live.Before_effect _|Live.Outcome_unknown _) -> fail "with_input_state left a failure without its receipt"
 
 let private_native_data_stays_private result =
   let message,receipt=public_input_result result in
@@ -846,12 +811,11 @@ let private_native_data_stays_private result =
   List.iter (fun private_value->check bool (private_value ^ " is not public") false (contains public private_value))
     ["PRIVATE_NATIVE_HEADER_SENTINEL";"nativeInputWindow";"bindingName";"worldName";"nonce";"intervalEvents"]
 
-let test_raw_type_uses_exact_retained_window_and_keeps_uncertainty () =
+let test_raw_type_settles_only_its_exact_native_window () =
   let module Input=Masc.Browser_ego_input in
   List.iter (fun (mode,served,settled)->
-    let record=ref None and raw_calls=ref 0 and next_calls=ref 0 and state=ref None in
-    let input ~space_id=Result.map (fun input->state:=Some input;input) (retained_input record ~space_id) in
-    let peer=opened ~input (fun sent->match sent.step with
+    let raw_calls=ref 0 and next_calls=ref 0 and bound=ref None in
+    let peer=opened (fun sent->match sent.step with
       | "tabs.list"->answered tabs
       | "page.native_type"->
         incr raw_calls;
@@ -865,21 +829,22 @@ let test_raw_type_uses_exact_retained_window_and_keeps_uncertainty () =
         check bool "ordinary guard remains the fixed deep active-element guard" true
           (contains (text (field "guard" sent.args)) "shadowRoot"
            && contains (text (field "guard" sent.args)) "documentId");
-        (match !state with
-         | Some input->(match Input.status input with
+        (match !bound with
+         | Some peer->(match Peer.input_status peer with
            | Input.Uncertain pending->
-             check string "native producer uses the published command" pending.command_id
+             check string "native producer uses the recorded command" pending.command_id
                (text (field "commandId" (field "nativeInputWindows" sent.args)));
-             check string "native producer uses the published generation" pending.generation
+             check string "native producer uses the recorded generation" pending.generation
                (text (field "generation" (field "nativeInputWindows" sent.args)))
-           | Ready _->fail "native raw call preceded durable intent")
-         | None->fail "input attachment absent");
+           | Ready _->fail "native raw call preceded the recorded intent")
+         | None->fail "the peer is not bound");
         let capture=raw_capture sent (if mode="cleanup-malformed" then "cleanup" else mode) in
         answered (obj (["capture",capture] @ if mode="cleanup-malformed" then ["nativeError",
           obj ["code",str "EGO_PAGE_DIALOG_OPENED";"private",str "PRIVATE_NATIVE_HEADER_SENTINEL"]] else []))
       | "page.target_input"->incr next_calls;answered (obj ["urlBefore",str observed_url;"receipt",obj [];
           "error",`Null;"tab",obj ["url",str observed_url;"title",str "Slack"]])
       | step->failf "raw typing unexpectedly ran %s" step) in
+    bound:=Some peer;
     ignore (dispatch peer Live.Tabs_list (obj []));
     let prior=Peer.input_status peer in
     let result=Peer.dispatch ~command_id:("ordinary-raw-" ^ mode) peer ~verb:Live.Page_interact
@@ -895,49 +860,39 @@ let test_raw_type_uses_exact_retained_window_and_keeps_uncertainty () =
       check bool "proven-unentered restores exact prior readiness" true (Peer.input_status peer=prior);
       check bool "instrumentation effects are not mislabeled before-effect" true (field "effectStarted" receipt=`Bool true)
     end;
-    check bool "only completed or proven-unentered can admit later input" settled
+    check bool "only completed or proven-unentered input settles" settled
       (match Peer.input_status peer with Input.Ready _->true|Uncertain _->false);
     (match Peer.input_status peer with
      | Input.Uncertain pending->check string "original command remains pending" ("ordinary-raw-" ^ mode) pending.command_id
      | Ready _->());
+    check string "the answer reports where input stands" (if settled then "command_settled" else "release_uncertain")
+      (reported_readiness peer result);
     let next=dispatch peer Live.Page_interact (interact_args (Lane.Click_target (Lane.Target_ref 12))) in
-    check int "no automatic replay or next effect while pending" (if settled then 1 else 0) !next_calls;
-    check string "next input follows actual readiness" (if settled then "served" else "before effect") (failure_kind next);
+    check int "the next input runs once, without replaying the raw input" 1 !next_calls;
+    check string "the next input is served whatever the earlier readiness" "served" (failure_kind next);
     check int "one Peer raw invocation" 1 !raw_calls)
     ["normal","served",true;"cleanup","partial",true;"cleanup-malformed","partial",true;"guard","unknown",true;
      "dialog","unknown",false;"context","unknown",false;"value","unknown",false]
 
-let test_raw_type_stale_writer_unbound_and_private_failures_remain_pending () =
+let test_raw_type_lost_and_private_failures_remain_pending () =
   let module Input=Masc.Browser_ego_input in
   List.iter (fun mode->
-    let record=ref None and calls=ref 0 in
-    let input=if mode="volatile" then volatile_input else retained_input record in
-    let peer=opened ~input (fun sent->match sent.step with
+    let calls=ref 0 in
+    let peer=opened (fun sent->match sent.step with
       | "tabs.list"->answered tabs
       | "page.native_type"->
         incr calls;
         if mode="lost" then Error (Peer.Unobserved "PRIVATE_NATIVE_HEADER_SENTINEL")
-        else if mode="malformed" then answered (obj ["capture",`Null;"private",str "PRIVATE_NATIVE_HEADER_SENTINEL"])
-        else begin
-          let capture=raw_capture sent "normal" in
-          if mode="replaced" then begin
-            let persistence={Input.read=(fun ()->Ok !record);active=(fun ()->true);
-              compare_and_set=(fun ~expected ~replacement->
-                if expected= !record then (record:=Some replacement;Ok ()) else Error "writer changed")} in
-            ignore (match Input.create_persistent ~persistence ~writer:"replacement-peer" ~space_id:51 with
-              | Ok value->value|Error detail->fail detail)
-          end;
-          answered (obj ["capture",capture])
-        end
+        else answered (obj ["capture",`Null;"private",str "PRIVATE_NATIVE_HEADER_SENTINEL"])
       | step->failf "unconfirmed raw input unexpectedly ran %s" step) in
     ignore (dispatch peer Live.Tabs_list (obj []));
     let result=Peer.dispatch ~command_id:("uncertain-" ^ mode) peer ~verb:Live.Page_interact
       (interact_args (Lane.Type_text {document_id="d1";text="a"})) in
-    check string "missing authority/reply or a replaced writer never settles" "unknown" (failure_kind result);
+    check string "a missing reply or capture never settles" "unknown" (failure_kind result);
     private_native_data_stays_private result;
     check bool "original input remains Pending" true
       (match Peer.input_status peer with Input.Uncertain _->true|Ready _->false);
-    check int "no raw replay" 1 !calls) ["volatile";"replaced";"lost";"malformed"]
+    check int "no raw replay" 1 !calls) ["lost";"malformed"]
 
 let test_raw_type_retains_only_strict_native_diagnostics () =
   let module Input=Masc.Browser_ego_input in
@@ -945,8 +900,8 @@ let test_raw_type_retains_only_strict_native_diagnostics () =
     "sessionId",str "actual-native-session";"dialog",obj ["type",str "alert";"message",str "owned dialog"]] in
   let diagnostic=obj diagnostic_fields in
   List.iter (fun (valid,native_error)->
-    let record=ref None and calls=ref 0 in
-    let peer=opened ~input:(retained_input record) (fun sent->match sent.step with
+    let calls=ref 0 in
+    let peer=opened (fun sent->match sent.step with
       | "tabs.list"->answered tabs
       | "page.native_type"->incr calls;answered (obj ["capture",raw_capture sent "guard";"nativeError",native_error])
       | step->failf "native diagnostic unexpectedly dispatched %s" step) in
@@ -972,8 +927,8 @@ let test_raw_type_retains_only_strict_native_diagnostics () =
 let test_workflow_raw_context_is_bound_to_its_actual_pending () =
   let module Input=Masc.Browser_ego_input in
   List.iter (fun mode->
-    let record=ref None and calls=ref 0 in
-    let peer=opened ~input:(retained_input record) (fun sent->match sent.step with
+    let calls=ref 0 in
+    let peer=opened (fun sent->match sent.step with
       | "tabs.list"->answered tabs
       | "page.native_workflow"->
         incr calls;
@@ -1017,7 +972,8 @@ let test_workflow_raw_context_is_bound_to_its_actual_pending () =
     check int "one workflow invocation, never replayed" 1 !calls) ["normal";"dialog";"lost";"malformed"]
 
 (* Native clicks, double-clicks and drags can open a dialog before release.
-   Only their declared receipt without [dialog] lets the next input run. *)
+   Only their declared receipt without [dialog] settles the input; the next
+   input runs either way. *)
 let test_a_target_gesture_settles_only_from_the_receipt_it_returns () =
   let drag = Lane.Drag_to {source=Lane.Selector "#source";destination=Lane.Selector "#destination";via=[];duration_ms=0} in
   List.iter (fun gesture ->
@@ -1035,13 +991,14 @@ let test_a_target_gesture_settles_only_from_the_receipt_it_returns () =
     ignore (dispatch peer Live.Tabs_list (obj []));
     check string (name ^ " answers the gesture") first
       (failure_kind (dispatch peer Live.Page_interact (interact_args gesture)));
+    check bool (name ^ " settles only from a declared receipt") settles
+      (match Peer.input_status peer with
+       | Masc.Browser_ego_input.Ready Masc.Browser_ego_input.Command_settled -> true
+       | Masc.Browser_ego_input.Ready (Masc.Browser_ego_input.Release_uncertain _)
+       | Masc.Browser_ego_input.Uncertain _ -> false);
     let before = List.length !asked in
-    let next = failure_kind (dispatch peer Live.Page_interact (interact_args gesture)) in
-    if settles then check int (name ^ " lets the next input run") (before + 1) (List.length !asked)
-    else begin
-      check string (name ^ " keeps input blocked") "before effect" next;
-      check int (name ^ " runs no script for the blocked input") before (List.length !asked)
-    end)
+    ignore (dispatch peer Live.Page_interact (interact_args gesture));
+    check int (name ^ " lets the next input run") (before + 1) (List.length !asked))
     [ "a receipt object", drag_reply ["receipt",obj [];"error",`Null], "served", true;
       "a receipt that names a dialog", drag_reply ["receipt",obj ["dialog",ego_dialog "confirm" "sure?"];"error",`Null], "served", false;
       "a void receipt", drag_reply ["receipt",`Null;"error",`Null], "unknown", false;
@@ -1067,7 +1024,7 @@ let test_a_target_gesture_settles_only_from_the_receipt_it_returns () =
     [drag; Lane.Click "#source"; Lane.Double_click (Lane.Selector "#source");
      Lane.Click_target (Lane.Target_ref 12); Lane.Double_click_target (Lane.Target_ref 12)]
 
-let test_target_dialog_preserves_original_input_until_operator_reset () =
+let test_target_dialog_keeps_release_uncertain_until_a_clean_receipt () =
   let module Input=Masc.Browser_ego_input in
   let dialog=ego_dialog "alert" "mousedown interrupted" in
   let input_reply receipt = answered (obj ["urlBefore",str observed_url;
@@ -1084,40 +1041,131 @@ let test_target_dialog_preserves_original_input_until_operator_reset () =
     ignore (dispatch peer Live.Tabs_list (obj []));
     let first=Peer.dispatch ~command_id:"original-target-gesture" peer ~verb:Live.Page_interact (interact_args gesture) in
     check string "the original dialog remains a served observation" "served" (failure_kind first);
+    check string "the dialog answer reports release as uncertain" "release_uncertain" (reported_readiness peer first);
     let pending=match Peer.input_status peer with
       | Input.Uncertain pending -> pending
-      | Ready _ -> fail "dialog-interrupted gesture lost its original input ownership" in
+      | Ready _ -> fail "dialog-interrupted gesture lost its original input" in
     check bool "pending input belongs to the original command and Page" true
-      (pending.command_id="original-target-gesture" && pending.tab_id=1 && pending.page_label="p1");
-    check bool "the returned command released only its local running marker" false (Peer.input_busy peer);
+      (pending.command_id="original-target-gesture" && pending.page_label="p1");
     check string "answering the dialog succeeds" "served" (failure_kind (dispatch peer Live.Page_act
       (act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Accept_dialog None}))));
     check bool "answering the dialog preserves the exact pending generation" true
       (Peer.input_status peer=Input.Uncertain pending);
-    let before=List.length !asked in
-    check string "another input is refused before an effect" "before effect"
-      (failure_kind (dispatch peer Live.Page_interact (interact_args gesture)));
-    check int "blocked input sends no native call" before (List.length !asked);
-    check bool "the operator can reset the original pending input" true
-      (Result.is_ok (Peer.assert_input_reset peer ~generation:pending.generation));
-    let reset=Peer.input_status peer in
-    check bool "the operator assertion has distinct provenance" true
-      (match reset with Input.Ready (Input.Operator_reset_asserted _) -> true
-       | Ready Input.Command_settled | Uncertain _ -> false);
     List.iter (fun refused_reply ->
       reply:=refused_reply;
+      let before=List.length !asked in
       check string "input that never starts is refused before an effect" "before effect"
         (failure_kind (dispatch peer Live.Page_interact (interact_args gesture)));
-      check bool "pre-effect refusal restores the original operator provenance" true (Peer.input_status peer=reset))
+      check int "the input runs while release is uncertain" (before + 1) (List.length !asked);
+      check bool "pre-effect refusal restores the earlier uncertain release" true
+        (Peer.input_status peer=Input.Ready (Input.Release_uncertain pending)))
       [refused "observed URL changed"; Error (Peer.Unstarted "no node here")];
     reply:=input_reply (obj []);
-    check string "a new original gesture can complete after operator reset" "served"
-      (failure_kind (dispatch peer Live.Page_interact (interact_args gesture)));
+    let settled=dispatch peer Live.Page_interact (interact_args gesture) in
+    check string "a new original gesture completes" "served" (failure_kind settled);
+    check string "its answer reports command settlement" "command_settled" (reported_readiness peer settled);
     check bool "the SDK clean receipt establishes command settlement" true
       (Peer.input_status peer=Input.Ready Input.Command_settled))
     [Lane.Click "#source"; Lane.Double_click_target (Lane.Target_ref 12)]
 
-let test_chooser_upload_respects_uncertain_pointer_release () =
+(* 2026-11-03: a click on text="dev-frontend" matched 8 elements; the SDK threw
+   ElementResolutionError before any press. *)
+let test_a_gesture_refused_before_its_press_keeps_input () =
+  let module Input=Masc.Browser_ego_input in
+  let refusal name kind = answered (obj ["urlBefore",str observed_url;"receipt",`Null;
+    "error",str "Locator text=\"dev-frontend\" matched 8 elements";"thrown",obj ["name",name;"kind",kind]]) in
+  let reply=ref (refusal (str "ElementResolutionError") (str "permanent")) and asked=ref [] in
+  let peer=opened (fun sent ->
+    asked:=sent.step :: !asked;
+    match sent.step with
+    | "tabs.list" -> answered tabs
+    | "page.target_input" -> !reply
+    | other -> failf "unexpected refused-gesture step %s" other) in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  let drag = Lane.Drag_to {source=Lane.Selector "#source";destination=Lane.Selector "#destination";via=[];duration_ms=0} in
+  List.iter (fun (name, kind, action) ->
+    reply := refusal (str "ElementResolutionError") (str kind);
+    (match dispatch peer Live.Page_interact (interact_args action) with
+     | Error (Live.Observed_failure {disposition=Live.Uncertain;receipt;_}) ->
+       check string (name ^ ": the SDK kind is reported") kind (text (field "kind" (field "refusedBeforePress" receipt)));
+       check string (name ^ ": the answer says the input is free") "command_settled" (text (field "inputReadiness" receipt))
+     | Ok _ | Error _ -> fail (name ^ ": a refused gesture must be an observed failure with an uncertain effect"));
+    check bool (name ^ ": nothing is pending") true (Peer.input_status peer=Input.Ready Input.Command_settled))
+    ["click","permanent",Lane.Click "#channel";
+     "double click","transient",Lane.Double_click (Lane.Selector "#channel");
+     "drag","permanent",drag];
+  reply := refusal (str "TimeoutError") (str "transient");
+  check string "another SDK error stays unknown" "unknown"
+    (failure_kind (dispatch peer Live.Page_interact (interact_args (Lane.Click "#channel"))));
+  let pending_after label =
+    match Peer.input_status peer with
+    | Input.Ready _ -> fail (label ^ ": no input was pending")
+    | Input.Uncertain pending -> pending in
+  let earlier=pending_after "after the unknown error" in
+  reply := refusal (str "ElementResolutionError") (str "permanent");
+  (match dispatch peer Live.Page_interact (interact_args (Lane.Click "#channel")) with
+   | Error (Live.Observed_failure {disposition=Live.Uncertain;receipt;_}) ->
+     check string "a refusal while release is uncertain still reports it" "release_uncertain"
+       (text (field "inputReadiness" receipt))
+   | Ok _ | Error _ -> fail "a refused gesture after an unknown error must be an observed failure with an uncertain effect");
+  check bool "a refusal keeps the earlier uncertain release and its generation" true
+    (match Peer.input_status peer with
+     | Input.Ready (Input.Release_uncertain kept) -> kept.generation=earlier.generation
+     | Input.Ready Input.Command_settled | Input.Uncertain _ -> false);
+  List.iter (fun (label, frame) ->
+    reply := answered (obj frame);
+    check string (label ^ " stays unknown") "unknown"
+      (failure_kind (dispatch peer Live.Page_interact (interact_args (Lane.Click "#channel"))));
+    ignore (pending_after label))
+    ["a frame without the thrown error",
+       ["urlBefore",str observed_url;"receipt",`Null;"error",str "native click failed"];
+     "a refusal beside a receipt",
+       ["urlBefore",str observed_url;"receipt",obj [];"error",str "native click failed";
+        "thrown",obj ["name",str "ElementResolutionError";"kind",str "permanent"]]]
+
+(* What leaves the peer says where input stands, failures included. *)
+let test_every_answer_carries_the_input_state () =
+  let module Input=Masc.Browser_ego_input in
+  let dialog=ego_dialog "alert" "mousedown interrupted" in
+  let input_reply receipt = answered (obj ["urlBefore",str observed_url;
+    "tab",obj ["url",str observed_url;"title",str "Slack"];"receipt",receipt;"error",`Null]) in
+  let reply=ref (input_reply (obj ["dialog",dialog])) in
+  let peer=opened (fun sent -> match sent.step with
+    | "tabs.list" -> answered tabs
+    | "page.target_input" -> !reply
+    | other -> failf "unexpected input-state step %s" other) in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  let gesture=interact_args (Lane.Click "#source") in
+  ignore (dispatch peer Live.Page_interact gesture);
+  check bool "the interrupted gesture left pending input" true
+    (match Peer.input_status peer with Input.Uncertain _ -> true | Input.Ready _ -> false);
+  let receipt_of label = function
+    | Error (Live.Observed_failure {receipt;_} | Live.Partial_failure {receipt;_}) -> receipt
+    | Ok _ | Error (Live.Before_effect _ | Live.Outcome_unknown _) -> fail (label ^ ": no failure receipt") in
+  let held label receipt =
+    check string (label ^ ": readiness") "release_uncertain" (text (field "inputReadiness" receipt)) in
+  (match Peer.with_input_state peer (dispatch peer Live.Page_interact gesture) with
+   | Ok value -> held "the next input" value
+   | Error _ as other -> failf "the next input while release is uncertain was %s" (failure_kind other));
+  let refusal=Peer.with_input_state peer (Error (Live.Before_effect "refused")) in
+  check string "a refusal stays before any effect" "before effect" (failure_kind refusal);
+  held "a refusal" (receipt_of "a refusal" refusal);
+  let unknown=Peer.with_input_state peer (Error (Live.Outcome_unknown "lost answer")) in
+  check string "an unknown outcome stays unknown" "unknown" (failure_kind unknown);
+  held "an unknown outcome" (receipt_of "an unknown outcome" unknown);
+  (match Peer.with_input_state peer (dispatch peer Live.Browser_info (obj [])) with
+   | Ok value -> held "a read while held" value
+   | Error _ -> fail "a read while input is held was not served");
+  let partial=receipt_of "a partial failure"
+    (Peer.with_input_state peer (Error (Live.Partial_failure {tab_id=1;message="partial";receipt=obj ["step",`Int 1]}))) in
+  held "a partial failure" partial;
+  check int "a partial receipt keeps its own fields" 1 (Yojson.Safe.Util.to_int (field "step" partial));
+  reply:=input_reply (obj []);
+  ignore (dispatch peer Live.Page_interact gesture);
+  let after=receipt_of "a failure after a clean receipt" (Peer.with_input_state peer (Error (Live.Before_effect "refused"))) in
+  check string "after a clean receipt the readiness is settled" "command_settled" (text (field "inputReadiness" after))
+
+let test_chooser_upload_runs_after_uncertain_pointer_release () =
   let directory = Unix.realpath (capture_directory ()) in
   let path = Filename.concat directory "owned-upload.txt" in
   Out_channel.with_open_bin path (fun channel -> Out_channel.output_string channel "fixture");
@@ -1130,18 +1178,18 @@ let test_chooser_upload_respects_uncertain_pointer_release () =
       | "tabs.list" -> answered tabs
       | "page.target_input" -> answered (obj ["error",str "input release unconfirmed"])
       | "page.upload" -> answered (obj ["error",`Null;"dialog",`Null;"tab",`Null])
+      | "page.choose_files" -> answered (obj ["error",`Null;"dialog",`Null;"tab",`Null])
       | other -> failf "%s unexpectedly dispatched %s" name other) in
     ignore (dispatch peer Live.Tabs_list (obj []));
     check string (name ^ " leaves release uncertain") "unknown"
       (failure_kind (dispatch peer Live.Page_interact (interact_args drag)));
     let upload target = dispatch peer Live.Page_act
       (act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Upload {target;paths=[path]}})) in
-    let before = List.length !asked in
-    check bool (name ^ " blocks chooser upload before its click") true
-      (String_util.contains_substring
-        (before_effect "chooser upload after uncertain release" (upload (Lane.Action.Chooser_opener "#attach")))
-        "input release is unconfirmed");
-    check int (name ^ " dispatches no chooser SDK script") before (List.length !asked);
+    (match upload (Lane.Action.Chooser_opener "#attach") with
+     | Ok receipt -> check string (name ^ " chooser upload reports release as uncertain") "release_uncertain"
+         (text (field "inputReadiness" receipt))
+     | Error _ as other -> failf "%s chooser upload after uncertain release was %s" name (failure_kind other));
+    check string (name ^ " delegates chooser upload to the SDK") "page.choose_files" (List.hd !asked);
     check string (name ^ " permits upload without pointer input") "served"
       (failure_kind (upload (Lane.Action.File_input "#file")));
     check string (name ^ " delegates file-input upload to SDK") "page.upload" (List.hd !asked)
@@ -1188,7 +1236,7 @@ let test_the_scripts_parse_as_modules () =
     | "page.upload" -> answered (obj ["error",`Null;"dialog",`Null;"tab",`Null])
     | "page.choose_files" -> answered (obj ["error",`Null;"dialog",`Null;"tab",`Null])
     | _ -> page_answer ~label:"p1" (obj ["url",str "u"]) in
-  let peer = match Peer.open_space ~input:volatile_input ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:directory with
+  let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:directory with
     | Ok peer -> peer | Error detail -> fail detail in
   ignore (dispatch peer Live.Tabs_list (obj []));
   List.iter (fun (verb, args) -> ignore (dispatch peer verb args))
@@ -1367,12 +1415,14 @@ let test_the_peer_serves_what_the_lane_table_says () =
    renderer. With [same_url] both entries have one URL, as a pushState to the
    same address makes; [load] is what the load wait does after it notes the
    call. The stand-in prints the CDP calls and waits the script made. *)
-let stand_in ~current ~navigation ~detaches ~same_url ~load = Printf.sprintf {js|
+let stand_in ~current ~navigation ~detaches ~same_url ~load ~stops_in_ms = Printf.sprintf {js|
+const runStopsAt = Date.now() + %d;
 const entries = [{id: 11, url: "https://a.test/", title: "A"}, {id: 12, url: "%s", title: "B"}];
 let current = %d;
 let detached = false;
 const seen = [];
-process.on("exit", () => console.log("seen " + JSON.stringify(seen)));
+const loads = [];
+process.on("exit", () => console.log("seen " + JSON.stringify(seen) + "\nloads " + JSON.stringify(loads)));
 const page = {
   cdp: async (method, params) => {
     seen.push(method);
@@ -1388,14 +1438,14 @@ const page = {
   reload: async () => { seen.push("reload"); },
   info: async () => ({url: entries[current].url, title: entries[current].title, w: 800, h: 600, sx: 0, sy: 0, pw: 800, ph: 600}),
   waitForTimeout: ms => new Promise(resolve => setTimeout(resolve, ms)),
-  waitForLoadState: async () => { seen.push("load at " + current); %s },
+  waitForLoadState: async (state, options) => { seen.push("load at " + current); loads.push({state: state ?? null, options: options ?? null}); %s },
 };
 const taskSpace = async () => ({
   ownership: "agent",
   tabs: async () => [{label: "p1", targetId: "T1", openedBy: "agent", url: entries[current].url, title: entries[current].title}],
   page: () => page,
 });
-|js} (if same_url then "https://a.test/" else "https://b.test/") current navigation detaches load
+|js} stops_in_ms (if same_url then "https://a.test/" else "https://b.test/") current navigation detaches load
 
 let in_node script =
   let directory = capture_directory () in
@@ -1432,7 +1482,7 @@ const taskSpace=async()=>({spaceId:51,ownership:%s,
  }});
 |js} (Yojson.Safe.to_string (str !owner)) in
     output:=in_node (shim^script);Ok !output in
-  let peer=match Peer.open_space ~input:volatile_input ~downloads:no_downloads ~run ~run_native ~now
+  let peer=match Peer.open_space ~downloads:no_downloads ~run ~run_native ~now
       ~space:(Browser_configuration.Named_space "SDK Space") ~version:"fixture" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   ignore(dispatch peer Live.Tabs_list (obj []));
@@ -1499,7 +1549,7 @@ const taskSpace = async () => ({ownership: 'agent',
     | None -> Ok output
     | Some options -> answered (obj ["label",str "p1";"path",str path;
         "before",observed_state;"after",observed_state;"captureOptions",options]) in
-  let peer = match Peer.open_space ~input:volatile_input ~downloads:no_downloads ~run ~run_native ~now
+  let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native ~now
       ~space:(Browser_configuration.Named_space "SDK Space") ~version:"fixture" ~capture_directory:directory with
     | Ok peer -> peer | Error detail -> fail detail in
   ignore (dispatch peer Live.Tabs_list (obj []));
@@ -1559,7 +1609,7 @@ let test_a_snapshot_reads_egos_own_tree () =
       output := in_node (snapshot_stand_in !text ^ script);
       Ok !output
     | other -> failf "unexpected step %s" other in
-  let peer = match Peer.open_space ~input:volatile_input ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+  let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   ignore (dispatch peer Live.Tabs_list (obj []));
   let snapshot ?(tab_id=1) ?(max_chars=1000) scope =
@@ -1645,7 +1695,7 @@ let test_a_snapshot_target_is_found_by_ego_and_checked_first () =
       output := in_node (target_stand_in ~url:!url ~blocked:!blocked ~act:!act ^ script);
       Ok !output
     | other -> failf "unexpected step %s" other in
-  let peer = match Peer.open_space ~input:volatile_input ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+  let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   ignore (dispatch peer Live.Tabs_list (obj []));
   let printed prefix = match List.find_opt (String.starts_with ~prefix) (String.split_on_char '\n' !output) with
@@ -1657,12 +1707,9 @@ let test_a_snapshot_target_is_found_by_ego_and_checked_first () =
     | Ok answer -> Yojson.Safe.to_string answer
     | other -> failf "%s was %s" label (failure_kind other) in
   let click target = on (Lane.Click_target target) in
-  let operator_reset_between_scenarios () =
-    match Peer.input_status peer with
-    | Masc.Browser_ego_input.Uncertain pending ->
-      check bool "the fixture operator confirms reset before another scenario" true
-        (Result.is_ok (Peer.assert_input_reset peer ~generation:pending.generation))
-    | Ready _ -> fail "an interrupted target gesture did not preserve input uncertainty" in
+  let release_stays_uncertain () =
+    check bool "an interrupted target gesture leaves release uncertain" true
+      (match Peer.input_status peer with Masc.Browser_ego_input.Uncertain _ -> true | Ready _ -> false) in
   check string "a ref is clicked by ego once it names one element"
     (Yojson.Safe.to_string (obj ["inputReadiness",str "command_settled";"tabId",`Int 1;"action",str "click";"target",obj ["ref",`Int 12];
       "urlBefore",str observed_url;"url",str observed_url;"title",str "Slack"]))
@@ -1698,7 +1745,7 @@ let test_a_snapshot_target_is_found_by_ego_and_checked_first () =
   check bool "and the tab's row still says where the page is" true
     (contains with_dialog (Printf.sprintf {|"url":%S|} observed_url));
   check string "the page itself is not read after the dialog" {|["info","url","click @3"]|} (seen ());
-  operator_reset_between_scenarios ();
+  release_stays_uncertain ();
   act := "return {};";
   let runs = List.length !asked in
   let refused label result = match result with
@@ -1718,7 +1765,7 @@ let test_a_snapshot_target_is_found_by_ego_and_checked_first () =
   (match click (Lane.Target_text {text="A";exact=true}) with
    | Error (Live.Outcome_unknown detail | Live.Observed_failure {disposition=Live.Uncertain;message=detail;_}) -> check bool "native ambiguity is uncertain" true (contains detail "matched 2 elements")
    | other -> failf "native ambiguity was %s" (failure_kind other));
-  operator_reset_between_scenarios ();
+  release_stays_uncertain ();
   act := {|throw new Error("Target closed");|};
   (match click (Lane.Target_ref 12) with
    | Error (Live.Outcome_unknown detail | Live.Observed_failure {disposition=Live.Uncertain;message=detail;_}) -> check bool "a failed click is unknown and asks for a read" true (contains detail "read tab 1")
@@ -1752,7 +1799,7 @@ const takeOverTaskSpace = async id => { seen.push("takeOver " + id); return {
 |js} (Yojson.Safe.to_string (str ownership)) user_page
 
 let test_native_space_control_wait () =
-  let ownership=ref "agent" and native_failure=ref false and calls=ref 0 and output=ref "" in
+  let ownership=ref "agent" and native_failure=ref false and calls=ref 0 and inputs=ref 0 and output=ref "" in
   let run ~window_s script =
     let sent=sent_of ~window_s script in
     match sent.step with
@@ -1773,10 +1820,10 @@ const taskSpace=async id=>({spaceId:id,name:'SDK Space',ownership:%s,
 |js} (Yojson.Safe.to_string (str !ownership))
         (if !native_failure then "throw new Error('SDK control wait timed out');" else "") in
       output:=in_node (shim ^ script);Ok !output
-    | "page.target_input" -> answered (obj ["urlBefore",str observed_url;
+    | "page.target_input" -> incr inputs;answered (obj ["urlBefore",str observed_url;
         "receipt",obj [];"error",str "native drag interrupted";"tab",obj ["url",str observed_url;"title",str "Slack"]])
     | other -> failf "unexpected control wait step %s" other in
-  let peer=match Peer.open_space ~input:volatile_input ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now
+  let peer=match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now
       ~space:(Browser_configuration.Named_space "SDK Space") ~version:"fixture" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   let wait options=dispatch peer Live.Page_act (obj ["action",str "wait_for_control";"controlOptions",options]) in
@@ -1810,11 +1857,15 @@ const taskSpace=async id=>({spaceId:id,name:'SDK Space',ownership:%s,
   check string "drag first leaves input unconfirmed" "unknown"
     (failure_kind (dispatch peer Live.Page_interact (interact_args drag)));
   let pending=Peer.input_status peer in
-  (match wait (obj []) with Ok _ -> () | Error _ -> fail "control observation was refused after uncertain input");
+  (match wait (obj []) with
+   | Ok value -> check string "control observation reports release as uncertain" "release_uncertain"
+       (text (field "inputReadiness" value))
+   | Error _ -> fail "control observation was refused after uncertain input");
   check bool "control availability preserves the exact pending input" true (Peer.input_status peer=pending);
-  let before= !calls in
-  ignore (before_effect "availability cannot clear uncertain input" (dispatch peer Live.Page_interact (interact_args (Lane.Click "#send"))));
-  check int "no later native input was dispatched" before !calls
+  let before= !inputs in
+  check string "a later input runs while release is uncertain" "unknown"
+    (failure_kind (dispatch peer Live.Page_interact (interact_args (Lane.Click "#send"))));
+  check int "the later input was dispatched once" (before + 1) !inputs
 
 let test_native_page_management () =
   let ownership=ref "agent" and label=ref `Null and sdk_failure=ref false and native_calls=ref 0 and output=ref "" in
@@ -1842,7 +1893,7 @@ const taskSpace=async id=>({spaceId:id,name:'SDK Space',ownership:%s,
     | "page.target_input" -> answered (obj ["urlBefore",str "https://mail.example/";
         "receipt",obj [];"error",str "native drag interrupted";"tab",obj ["url",str "https://mail.example/";"title",str "Mail"]])
     | other -> failf "unexpected Page management step %s" other in
-  let peer=match Peer.open_space ~input:volatile_input ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now
+  let peer=match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now
       ~space:(Browser_configuration.Named_space "SDK Space") ~version:"fixture" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   let act control=dispatch peer Live.Page_act (act_args (Lane.Action.Control control)) in
@@ -1890,9 +1941,16 @@ const taskSpace=async id=>({spaceId:id,name:'SDK Space',ownership:%s,
   let drag=Lane.Drag_to {source=Lane.Selector "@12";destination=Lane.Selector "#target";via=[];duration_ms=0} in
   check string "an interrupted input remains uncertain" "unknown"
     (failure_kind (dispatch peer Live.Page_interact (interact_args ~tab_id:2 drag)));
+  let pending=Peer.input_status peer in
+  check bool "the interrupted input leaves release uncertain" true
+    (match pending with Masc.Browser_ego_input.Uncertain _ -> true | Ready _ -> false);
   let before= !native_calls in
-  ignore (before_effect "management cannot clear uncertain input" (act (Lane.Action.Release_tab 2)));
-  check int "uncertain input never dispatches a lifecycle call" before !native_calls
+  (match act (Lane.Action.Release_tab 2) with
+   | Ok receipt -> check string "management reports release as still uncertain" "release_uncertain"
+       (text (field "inputReadiness" receipt))
+   | Error _ as other -> failf "management after uncertain input was %s" (failure_kind other));
+  check int "management runs while release is uncertain" (before + 1) !native_calls;
+  check bool "management does not clear uncertain input" true (Peer.input_status peer=pending)
 
 let test_adopted_managed_page_uses_native_actions_without_changing_origin () =
   let owner=ref "agent" and label=ref `Null and url=ref "https://fixture.test/mail"
@@ -1941,7 +1999,7 @@ const taskSpace=async reference=>{
     used_labels:=List.map text (Yojson.Safe.Util.to_list (field "usedLabels" state));
     calls:=List.map text (Yojson.Safe.Util.to_list (field "seen" state));
     Ok output in
-  let open_peer ()=match Peer.open_space ~input:volatile_input ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now
+  let open_peer ()=match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now
       ~space:(Browser_configuration.Named_space "SDK Space") ~version:"fixture" ~capture_directory:(capture_directory ()) with
     | Ok peer->peer | Error detail->fail detail in
   let served label=function Ok value->value|other->failf "%s was %s" label (failure_kind other) in
@@ -2006,11 +2064,13 @@ const taskSpace=async reference=>{
   check bool "lost input records an unsettled generation" true
     (match pending with Masc.Browser_ego_input.Uncertain _->true|Ready _->false);
   let before= !scripts in
-  List.iter (fun action->ignore (before_effect "adoption cannot settle uncertain input" (action ())))
-    [(fun ()->interact uncertain (Lane.Fill {selector="#editor";text="changed"}));
-     (fun ()->workflow uncertain);(fun ()->control uncertain (Lane.Action.Release_tab 1))];
-  check int "uncertain input prevents later native commands" before !scripts;
-  check bool "adopted origin never resets pending input" true (Peer.input_status uncertain=pending)
+  List.iter (fun (name,action)->
+    let value=served name (action ()) in
+    check string (name ^ " reports release as still uncertain") "release_uncertain" (text (field "inputReadiness" value)))
+    ["a fill while release is uncertain",(fun ()->interact uncertain (Lane.Fill {selector="#editor";text="changed"}));
+     "a release while release is uncertain",(fun ()->control uncertain (Lane.Action.Release_tab 1))];
+  check int "later native commands run while release is uncertain" (before + 2) !scripts;
+  check bool "adopted origin never changes pending input" true (Peer.input_status uncertain=pending)
 
 let test_the_space_goes_to_the_operator_and_back () =
   let ownership = ref "agent" and user_page = ref {|({spaceId:51,label:"p2",targetId:"T2",openedBy:"agent"})|} and output = ref "" in
@@ -2019,7 +2079,7 @@ let test_the_space_goes_to_the_operator_and_back () =
     match sent.step with
     | "space.open" -> answered (obj ["spaceId",`Int 51;"name",str "SDK Space";"ownership",str !ownership])
     | _ -> output := in_node (control_stand_in ~ownership:!ownership ~user_page:!user_page ^ script); Ok !output in
-  let peer = match Peer.open_space ~input:volatile_input ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+  let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   let seen () = match List.find_opt (String.starts_with ~prefix:"seen ") (String.split_on_char '\n' !output) with
     | Some line -> after ~prefix:"seen " line
@@ -2061,14 +2121,15 @@ let test_the_space_goes_to_the_operator_and_back () =
   check bool "with the agent holding the space, a take-over is refused before any effect" true
     (contains (before_effect "a needless take-over" (act Lane.Action.Take_over)) "already holds");
   check string "and ego is not asked to take it" "[]" (seen ());
-  let open_owned_by owner = Peer.open_space ~input:volatile_input ~run_native:(fun _ -> Error (Peer.Unstarted "no native command in this fixture")) ~downloads:no_downloads ~run:(fun ~window_s:_ _ -> answered (obj ["spaceId",`Int 52;"name",str "SDK Space";"ownership",str owner]))
+  let open_owned_by owner = Peer.open_space ~run_native:(fun _ -> Error (Peer.Unstarted "no native command in this fixture")) ~downloads:no_downloads ~run:(fun ~window_s:_ _ -> answered (obj ["spaceId",`Int 52;"name",str "SDK Space";"ownership",str owner]))
       ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) in
   check bool "a space handed to the operator still opens, so take_over can bring it back" true
     (Result.is_ok (open_owned_by "agentDelegatedToUser"));
   check bool "a space the operator made does not" true (Result.is_error (open_owned_by "user"))
 
 let test_history_moves_one_entry () =
-  let current = ref 1 and navigation = ref "" and detaches = ref false and same_url = ref false and load = ref "" in
+  let current = ref 1 and navigation = ref "" and detaches = ref false and same_url = ref false and load = ref ""
+  and stops_in_ms = ref 10_000 in
   let output = ref "" and steps = ref [] in
   let run ~window_s script =
     let sent = sent_of ~window_s script in
@@ -2080,10 +2141,10 @@ let test_history_moves_one_entry () =
     | "page.history" | "page.reload" ->
       steps := sent :: !steps;
       output := in_node (stand_in ~current:!current ~navigation:!navigation ~detaches:!detaches
-        ~same_url:!same_url ~load:!load ^ script);
+        ~same_url:!same_url ~load:!load ~stops_in_ms:!stops_in_ms ^ script);
       Ok !output
     | other -> failf "unexpected step %s" other in
-  let peer = match Peer.open_space ~input:volatile_input ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+  let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   ignore (dispatch peer Live.Tabs_list (obj []));
   let on_tab ?(tab_id=1) interaction = dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id;frame_path=[];interaction})) in
@@ -2097,6 +2158,25 @@ let test_history_moves_one_entry () =
   check string "and waited for the load once the tab was on it" "load at 0" (List.hd (List.rev (seen ())));
   check bool "back runs within the action window" true ((List.hd !steps).window_s
     < Lane.reply_timeout_sec (Lane.Page_act (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Back})));
+  let load_timeout () = match List.find_opt (String.starts_with ~prefix:"loads ") (String.split_on_char '\n' !output) with
+    | Some line -> Yojson.Safe.Util.(Yojson.Safe.from_string (after ~prefix:"loads " line)
+        |> to_list |> List.hd |> member "options" |> member "timeout" |> to_int)
+    | None -> fail "the stand-in did not say how it waited for the load" in
+  let margin = Yojson.Safe.Util.(member "answerMarginMs" (List.hd !steps).args |> to_int) in
+  let timeout = load_timeout () in
+  check bool "the load wait ends an answer margin before the run is stopped" true
+    (timeout >= 1 && timeout <= !stops_in_ms - margin);
+  stops_in_ms := margin + 200;
+  navigation := "return {};";
+  (match on_tab Lane.Action.Back with
+   | Error (Live.Partial_failure {tab_id; receipt; _}) ->
+     check int "a move that never lands answers for its tab" 1 tab_id;
+     check string "before its run is stopped, with where the tab still is"
+       {|{"inputReadiness":"command_settled","tabId":1,"action":"back","url":"https://b.test/","title":"B"}|}
+       (Yojson.Safe.to_string receipt)
+   | other -> failf "a move that never landed was %s" (failure_kind other));
+  navigation := "";
+  stops_in_ms := 10_000;
   current := 0;
   check string "no earlier page" "tab 1 has no earlier page in its history"
     (before_effect "back from the first entry" (on_tab Lane.Action.Back));
@@ -2140,6 +2220,59 @@ let test_history_moves_one_entry () =
   let before = List.length !steps in
   check string "the operator's tab" "before effect" (failure_kind (on_tab ~tab_id:2 Lane.Action.Back));
   check int "ran no script" before (List.length !steps)
+
+(* ego times its own page.goto and page.reload, and the server sets no
+   deadline on these steps. The stand-in prints the options each call got. *)
+let navigation_stand_in = {js|
+const seen = [];
+let opened = false;
+process.on("exit", () => console.log("seen " + JSON.stringify(seen)));
+const methods = {
+  goto: async (url, options) => { seen.push({call: "goto", options: options ?? null}); },
+  reload: async options => { seen.push({call: "reload", options: options ?? null}); },
+  info: async () => ({url: "https://a.test/", title: "A", w: 800, h: 600, sx: 0, sy: 0, pw: 800, ph: 600}),
+};
+const page = {label: "p1", ...methods};
+const fresh = {label: "p2", ...methods};
+const taskSpace = async () => ({
+  ownership: "agent",
+  tabs: async () => [{label: "p1", targetId: "T1", openedBy: "agent", url: "https://a.test/", title: "A", active: !opened},
+    ...(opened ? [{label: "p2", targetId: "T2", openedBy: "agent", url: "https://a.test/", title: "A", active: true}] : [])],
+  page: label => label === "p2" ? fresh : page,
+  newPage: async () => { opened = true; return fresh; },
+});
+|js}
+
+let test_sdk_timed_navigation_waits_the_reply_window () =
+  let output = ref "" in
+  let run ~window_s script = match (sent_of ~window_s script).step with
+    | "space.open" -> answered (obj ["spaceId",`Int 51;"name",str "SDK Space";"ownership",str "agent"])
+    | "tabs.list" -> answered (`List [tab_row ~label:(str "p1") ~target:"T1" ~title:"A" ~url:"https://a.test/" ~active:true ()])
+    | "page.open" | "page.goto" | "page.reload" -> output := in_node (navigation_stand_in ^ script); Ok !output
+    | other -> failf "unexpected step %s" other in
+  let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now
+      ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+    | Ok peer -> peer | Error detail -> fail detail in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  let seen verb args =
+    (match dispatch peer verb args with
+     | Ok _ -> ()
+     | other -> failf "the step was %s" (failure_kind other));
+    match List.find_opt (String.starts_with ~prefix:"seen ") (String.split_on_char '\n' !output) with
+    | Some line -> Yojson.Safe.to_string (Yojson.Safe.from_string (after ~prefix:"seen " line))
+    | None -> fail "the stand-in did not say what it saw" in
+  let waits call verb =
+    Printf.sprintf {|[{"call":"%s","options":{"timeout":%d}}]|} call
+      (Float.to_int (Lane.reply_timeout_sec verb *. 1000.)) in
+  let reload = Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Reload} in
+  check string "a reload waits the command's reply window"
+    (waits "reload" (Lane.Page_act reload)) (seen Live.Page_act (act_args reload));
+  check string "a move waits the command's reply window"
+    (waits "goto" (Lane.Page_goto {url="https://b.test/";tab_id=Some 1}))
+    (seen Live.Page_goto (obj ["tabId",`Int 1;"url",str "https://b.test/"]));
+  let open_tab = Lane.Action.Open_tab "https://c.test/" in
+  check string "a new tab's first move waits the command's reply window"
+    (waits "goto" (Lane.Page_act open_tab)) (seen Live.Page_act (act_args open_tab))
 
 (* Inventory stays usable when an explicit dialog read fails. Answers use
    native boolean evidence, never a prerequisite metadata read. *)
@@ -2288,7 +2421,7 @@ let test_dialog_scripts_in_node () =
         | Some value -> "page.acceptDialog = page.dismissDialog = async () => " ^ value ^ ";\n" in
       output := in_node (dialog_stand_in ~open_ ~opening ~opens_on ~canned:(canned step) ^ answer ^ script);
       Ok !output in
-  let peer = match Peer.open_space ~input:volatile_input ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+  let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   ignore (dispatch peer Live.Tabs_list (obj []));
   let seen () = match List.find_opt (String.starts_with ~prefix:"seen ") (String.split_on_char '\n' !output) with
@@ -2475,7 +2608,7 @@ let test_the_download_wait_runs_in_node () =
       output := in_node (String.concat "\n" (List.rev (("{\n" ^ script ^ "\n}") :: !program)));
       Ok !output
     | other -> failf "unexpected step %s" other in
-  let peer = match Peer.open_space ~input:volatile_input ~downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+  let peer = match Peer.open_space ~downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   ignore (dispatch peer Live.Tabs_list (obj []));
   let goto () = match dispatch peer Live.Page_goto (obj ["tabId",`Int 1;"url",str "https://example.test/"]) with
@@ -2657,7 +2790,7 @@ let test_the_upload_script_runs_in_node () =
     | "tabs.list" -> answered (`List [tab_row ~label:(str "p1") ~target:"T1" ~title:"Form" ~url:"https://example.test/" ~active:true ()])
     | "page.upload" -> output := in_node (upload_stand_in ~opens:!opens ~fails:!fails ^ script); Ok !output
     | other -> failf "unexpected step %s" other in
-  let peer = match Peer.open_space ~input:volatile_input ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+  let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   ignore (dispatch peer Live.Tabs_list (obj []));
   let seen () = match List.find_opt (String.starts_with ~prefix:"seen ") (String.split_on_char '\n' !output) with
@@ -2776,7 +2909,7 @@ let test_the_chooser_script_runs_in_node () =
       output := in_node (chooser_stand_in ~opens:!opens ~multiple:!multiple ~set:!set ~fails:!fails ~click_fails:!click_fails
         ^ "\n{\n" ^ script ^ "\n}\n" ^ recovery); Ok !output
     | other -> failf "unexpected step %s" other in
-  let peer = match Peer.open_space ~input:volatile_input ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
+  let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   ignore (dispatch peer Live.Tabs_list (obj []));
   let seen () = match List.find_opt (String.starts_with ~prefix:"seen ") (String.split_on_char '\n' !output) with
@@ -2848,7 +2981,7 @@ const taskSpace = async () => ({ownership:'agent',
     | "tabs.list" -> answered tabs
     | "page.native_workflow" -> Ok (in_node (shim ^ script))
     | other -> failf "unexpected envelope fixture step %s" other in
-  let peer=match Peer.open_space ~input:volatile_input ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.)
+  let peer=match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.)
       ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"fixture" ~capture_directory:(capture_directory ()) with
     | Ok value -> value | Error detail -> fail detail in
   ignore (dispatch peer Live.Tabs_list (obj []));
@@ -2903,7 +3036,7 @@ const taskSpace = async () => ({ownership:'agent',
       check string "one native workflow" "page.native_workflow" (sent_of ~window_s:0. script).step;
       output:=in_node (shim ^ script ^ "\nconsole.log('evaluation-calls '+JSON.stringify(seen));");
       Ok !output in
-    let peer=match Peer.open_space ~input:volatile_input ~downloads:no_downloads ~run ~run_native ~now
+    let peer=match Peer.open_space ~downloads:no_downloads ~run ~run_native ~now
         ~space:(Browser_configuration.Named_space "SDK Space") ~version:"fixture" ~capture_directory:(capture_directory ()) with
       | Ok peer -> peer | Error detail -> fail detail in
     ignore (dispatch peer Live.Tabs_list (obj []));
@@ -2977,7 +3110,7 @@ const taskSpace = async () => ({ownership:'agent',
       incr native_calls;
       output:=in_node (shim ^ script ^ "\nconsole.log('dialog-calls '+JSON.stringify(seen));");
       Ok !output in
-    let peer=match Peer.open_space ~input:volatile_input ~downloads:no_downloads ~run ~run_native ~now
+    let peer=match Peer.open_space ~downloads:no_downloads ~run ~run_native ~now
         ~space:(Browser_configuration.Named_space "SDK Space") ~version:"fixture" ~capture_directory:(capture_directory ()) with
       | Ok peer -> peer | Error detail -> fail detail in
     ignore (dispatch peer Live.Tabs_list (obj []));
@@ -3143,7 +3276,7 @@ const AsyncFunction=Object.getPrototypeOf(async function(){}).constructor;
           | `Null|`Bool _|`Int _|`Intlit _|`Float _|`Assoc _|`List _ -> Error (Peer.Unobserved (Yojson.Safe.to_string reply)) in
         let published=ref [] in
         let downloads={Peer.root=download_root;publish=(fun path->published:=path::!published;Broker.publish broker path)} in
-        let peer=ok (Peer.open_space ~input:volatile_input ~downloads ~run ~run_native:(run ~window_s:0.) ~now
+        let peer=ok (Peer.open_space ~downloads ~run ~run_native:(run ~window_s:0.) ~now
           ~space:(Browser_configuration.Named_space "SDK Space") ~version:"fixture" ~capture_directory:capture) in
         let served name=function Ok value->value
           | Error (Live.Before_effect detail|Outcome_unknown detail | Observed_failure {message=detail;_}|Partial_failure {message=detail;_})->failf "%s: %s" name detail in
@@ -3240,7 +3373,7 @@ let test_takeover_receipt_and_native_runner_preserve_pending_input () =
        | `Receipt value->answered value
        | `Lost->Error (Peer.Unobserved "takeover effect ran but response was lost"))
     | step->failf "unexpected native step %s" step in
-  let peer=match Peer.open_space ~input:volatile_input ~downloads:no_downloads ~run ~run_native ~now
+  let peer=match Peer.open_space ~downloads:no_downloads ~run ~run_native ~now
       ~space:(Browser_configuration.Named_space "SDK Space") ~version:"fixture" ~capture_directory:(capture_directory ()) with
     | Ok peer->peer | Error detail->fail detail in
   ignore (dispatch peer Live.Tabs_list (obj []));
@@ -3259,7 +3392,7 @@ let test_takeover_receipt_and_native_runner_preserve_pending_input () =
   check bool "native takeover does not clear original pending input" true (Peer.input_status peer=pending);
   List.iter (fun value->mode:=`Receipt value;
     check string "invalid native DTO is an uncertain effect" "unknown" (failure_kind (take ()));
-    check bool "invalid takeover does not reset input" true (Peer.input_status peer=pending)) malformed;
+    check bool "invalid takeover does not change input readiness" true (Peer.input_status peer=pending)) malformed;
   mode:=`Lost;
   check string "lost native takeover is never replay permission" "unknown" (failure_kind (take ()));
   check bool "lost takeover retains the original pending generation" true (Peer.input_status peer=pending);
@@ -3306,12 +3439,14 @@ let test_native_workflow_pointer_ownership () =
        (Ok _|Error (Live.Before_effect _|Live.Partial_failure _|Live.Outcome_unknown _|Live.Observed_failure {disposition=(Live.Not_started|Live.Uncertain);_})) ->
        fail "workflow input result changed its effect classification");
     (match mode,call [] with
-     | (`Proven|`Before|`Snapshot_failed),Ok _ -> check int "a settled or never-started input permits the next original request" 2 !issued
-     | (`Lost|`Unreleased|`Contradicted|`Unproven),Error (Live.Before_effect _) ->
-       check int "unknown release never dispatches another workflow" 1 !issued
-     | (`Lost|`Unreleased|`Contradicted|`Unproven),Ok _|(`Proven|`Before|`Snapshot_failed),Error _
-     | (`Lost|`Unreleased|`Contradicted|`Unproven),Error (Live.Partial_failure _|Live.Outcome_unknown _ | Live.Observed_failure {disposition=(Live.Not_started|Live.Uncertain);_}) ->
-       fail "native input ownership did not survive the workflow boundary");
+     | (`Proven|`Before|`Snapshot_failed),Ok value ->
+       check int "a settled or never-started input is followed by the next original request" 2 !issued;
+       check string "the next request reports command settlement" "command_settled" (text (field "inputReadiness" value))
+     | (`Lost|`Unreleased|`Contradicted|`Unproven),Ok value ->
+       check int "an unknown release is followed by the next original request" 2 !issued;
+       check string "the next request reports release as uncertain" "release_uncertain" (text (field "inputReadiness" value))
+     | (`Lost|`Unreleased|`Contradicted|`Unproven|`Proven|`Before|`Snapshot_failed),Error _ ->
+       fail "the next workflow after a holding workflow was not served");
     ignore (dispatch peer Live.Tabs_list (obj [])))
       ([`Lost;`Unreleased;`Contradicted;`Unproven] @ (if method_="press" then [`Before] else [])
         @ [`Proven;`Snapshot_failed]))
@@ -3323,8 +3458,8 @@ let test_native_workflow_pointer_ownership () =
      "keyboard.press",["key",str "ControlOrMeta+Enter"];
      "keyboard.paste",["text",str "x"]]
 
-(* A workflow whose holding step is never reached held nothing. It must not turn an operator's reset
-   into a settled command. *)
+(* A workflow whose holding step is never reached held nothing. It must not turn an earlier
+   uncertain release into a settled command. *)
 let test_a_workflow_that_never_held_input_keeps_the_previous_readiness () =
   let module Input=Masc.Browser_ego_input in
   let issued=ref 0 in
@@ -3351,29 +3486,24 @@ let test_a_workflow_that_never_held_input_keeps_the_previous_readiness () =
     (failure_kind (call [obj ["method",str "keyboard.press";"key",str "Enter"]]));
   let pending=match Peer.input_status peer with Input.Uncertain pending -> pending
     | Ready _ -> fail "the key press did not hold the input" in
-  check bool "the operator resets the held input" true
-    (Result.is_ok (Peer.assert_input_reset peer ~generation:pending.generation));
-  let reset=Peer.input_status peer in
-  check bool "the reset is the operator's" true
-    (match reset with Input.Ready (Input.Operator_reset_asserted _) -> true | Ready Input.Command_settled | Uncertain _ -> false);
+  let earlier=Input.Ready (Input.Release_uncertain pending) in
   check string "a fill that fails before the click is unknown" "unknown"
     (failure_kind (call [obj ["method",str "fill";"selector",str "#editor";"text",str "x"];
       obj ["method",str "click";"selector",str "#send"]]));
   check int "the second workflow ran" 2 !issued;
-  check bool "a workflow that never held input leaves the operator's reset in place" true (Peer.input_status peer=reset);
+  check bool "a workflow that never held input restores the earlier uncertain release" true (Peer.input_status peer=earlier);
   check string "insertText completes without acquiring holding-input ownership" "served"
     (failure_kind (call [obj ["method",str "keyboard.insertText";"text",str "literal"]]));
   check int "the nonholding insertion was dispatched once" 3 !issued;
-  check bool "insertText retains the operator's assertion without manufacturing release proof" true
-    (Peer.input_status peer=reset);
+  check bool "insertText keeps the earlier uncertain release without manufacturing release proof" true
+    (Peer.input_status peer=earlier);
   check string "a script that never started is refused before any effect" "before effect"
     (failure_kind (call [obj ["method",str "click";"selector",str "#send"]]));
   check int "the fourth workflow was asked for" 4 !issued;
-  check bool "a script that never started leaves the operator's reset in place" true (Peer.input_status peer=reset)
+  check bool "a script that never started keeps the earlier uncertain release" true (Peer.input_status peer=earlier)
 
-let test_operator_input_recovery () =
+let test_dialog_interrupted_workflow_stays_uncertain_until_a_new_click_settles () =
   let module Input=Masc.Browser_ego_input in
-  let module Operator=Masc.Browser_ego_operator in
   let answer label = function
     | Ok value -> value
     | Error _ as result -> failf "%s: %s" label (failure_kind result) in
@@ -3402,8 +3532,7 @@ let test_operator_input_recovery () =
          let pending=match Peer.input_status peer with Input.Uncertain pending -> pending
            | Ready _ -> fail "nonempty workflow did not acquire input ownership" in
          check bool "the running click holds the original tab's input" true
-           (Peer.input_busy peer && pending.tab_id=1 && pending.page_label="p1"
-             && pending.operation="native_workflow");
+           (pending.page_label="p1");
          input_commands := (pending.command_id,selector) :: !input_commands;
          (match selector with
           | "#dialog" -> answered (obj [
@@ -3443,31 +3572,11 @@ let test_operator_input_recovery () =
   ignore (before_effect "unavailable dialog metadata" (dispatch peer Live.Page_context
     (obj ["tabId",`Int 1;"mode",str "dialog";"framePath",`List []])));
   check bool "failed native read preserves exact pending" true (Peer.input_status peer=Input.Uncertain pending);
-  ignore (before_effect "dialog answer is not input-reset authority" (dispatch peer Live.Page_native_workflow (args [])));
-  let connection:Operator.connection={client_id="original-client";space=Peer.space peer;recovery={
-    status=(fun () -> Peer.input_status peer);busy=(fun () -> Peer.input_busy peer);
-    assert_reset=(fun ~generation -> Peer.assert_input_reset peer ~generation);
-    space_observation=(fun () -> Peer.space_observation peer);
-        space_presence=(fun () -> Peer.space_presence peer)}} in
-  let view=Operator.invoke (Some connection) (obj ["action",str "view";"arguments",obj []]) in
-  let action=Yojson.Safe.Util.(view |> member "actions" |> to_list |> List.hd) in
-  let fields=Yojson.Safe.Util.(action |> member "arguments") in
-  let invoke fields=Operator.invoke (Some connection) (obj ["action",str "assert_input_reset";"arguments",fields]) in
-  let before= !scripts in
-  let replace key value=match fields with `Assoc fields -> obj ((key,str value)::List.remove_assoc key fields)
-    | _ -> fail "form arguments missing" in
-  List.iter (fun fields -> check string "foreign/stale assertion rejected" "not_applied"
-    Yojson.Safe.Util.(invoke fields |> member "outcome" |> to_string))
-    [replace "clientId" "replacement-client";replace "spaceId" "52";replace "generation" "old";replace "confirmation" "go"];
-  check string "human assertion applied" "operator_asserted"
-    Yojson.Safe.Util.(invoke fields |> member "outcome" |> to_string);
-  check string "same assertion is idempotent" "operator_asserted"
-    Yojson.Safe.Util.(invoke fields |> member "outcome" |> to_string);
-  check int "private view/assertions issue no browser scripts" before !scripts;
-  let resumed=answer "continue after explicit operator assertion" (dispatch peer Live.Page_native_workflow (args [])) in
-  check string "resume retains operator provenance, not native release proof" "operator_asserted"
-    Yojson.Safe.Util.(resumed |> member "inputReadiness" |> to_string);
-  let continued=answer "new click after explicit operator assertion"
+  let observed=answer "an observation workflow while release is uncertain" (dispatch peer Live.Page_native_workflow (args [])) in
+  check string "the observation reports release as uncertain" "release_uncertain"
+    Yojson.Safe.Util.(observed |> member "inputReadiness" |> to_string);
+  check bool "an observation workflow leaves the exact pending generation" true (Peer.input_status peer=Input.Uncertain pending);
+  let continued=answer "new click while release is uncertain"
     (Peer.dispatch ~command_id:"continued-input-command" peer ~verb:Live.Page_native_workflow
       (args [obj ["method",str "click";"selector",str "#continue"]])) in
   check bool "the new click returns complete native input settlement" true
@@ -3475,8 +3584,8 @@ let test_operator_input_recovery () =
       && field "effectStarted" continued=`Bool true && field "completedEffect" continued=`Bool true
       && field "inputReleased" continued=`Bool true && field "failure" continued=`Null
       && field "snapshot" continued=str "root\n  button Continue");
-  check bool "new input settles instead of retaining the operator assertion as native proof" true
-    (Peer.input_status peer=Input.Ready Input.Command_settled && not (Peer.input_busy peer)
+  check bool "the new click's receipt settles input" true
+    (Peer.input_status peer=Input.Ready Input.Command_settled
       && field "inputReadiness" continued=str "command_settled");
   check (list (pair string string)) "original click is never replayed; the new command clicks once"
     ["original-input-command","#dialog";"continued-input-command","#continue"] (List.rev !input_commands);
@@ -3530,11 +3639,10 @@ let test_popup_workflow_identity_and_scope () =
    | other -> failf "expected typed popup partial failure, got %s" (failure_kind other));
   (match Peer.input_status peer with
    | Input.Uncertain pending -> check bool "lost multi-Page input is scoped to the original Space without guessing a Page" true
-       (pending.scope=Input.Space_scope && pending.tab_id=1)
+       (pending.scope=Input.Space_scope && pending.page_label="p1")
    | Ready _ -> fail "popup child input was incorrectly released");
-  ignore (before_effect "connection-wide uncertainty blocks new popup input"
-    (dispatch peer Live.Page_native_workflow (args ~tab_id:1 ~expected_url:source_url [popup])));
-  check int "unknown child input was never replayed" 1 !issued
+  ignore (dispatch peer Live.Page_native_workflow (args ~tab_id:1 ~expected_url:source_url [popup]));
+  check int "a new popup input runs once and the unknown child input is not replayed" 2 !issued
 
 let test_popup_workflow_source_binding () =
   let source_url="https://fixture.test/opener" and child_url="https://fixture.test/child" in
@@ -3567,8 +3675,10 @@ let test_popup_workflow_source_binding () =
     (match Peer.input_status peer with
      | Masc.Browser_ego_input.Uncertain _ -> ()
      | Ready _ -> fail "changed source identity incorrectly settled input");
-    ignore (before_effect "source mismatch cannot authorize another input" (dispatch peer Live.Page_native_workflow args));
-    check int "changed-source operation was not replayed" 1 !issued)
+    (match dispatch peer Live.Page_native_workflow args with
+     | Error (Live.Outcome_unknown _) -> ()
+     | other -> failf "a new input on a changed source was %s" (failure_kind other));
+    check int "a new input runs once and the changed-source operation is not replayed" 2 !issued)
     [identity "p1" "replacement";identity ~origin:"unknown" "p1" "T1"];
   let issued=ref 0 and inventories=ref 0 in
   let peer=opened (fun sent -> match sent.step with
@@ -3610,7 +3720,7 @@ const listTaskSpaces=async()=>{seen.push('listTaskSpaces');const row={id:%d,name
       output:=in_node (shim ^ script);Ok !output
     | "space.hand_off" -> answered (obj ["spaceId",`Int 51;"spaceName",str "SDK Space"])
     | other -> failf "unexpected Space status fixture step %s" other in
-  let peer=match Peer.open_space ~input:volatile_input ~run ~run_native:(run ~window_s:0.) ~now
+  let peer=match Peer.open_space ~run ~run_native:(run ~window_s:0.) ~now
     ~space:(Browser_configuration.Existing_space 51) ~version:"fixture"
     ~capture_directory:(capture_directory ()) ~downloads:no_downloads with
     | Ok peer -> peer | Error detail -> fail detail in
@@ -3624,17 +3734,6 @@ const listTaskSpaces=async()=>{seen.push('listTaskSpaces');const row={id:%d,name
   check string "connection attachment identity remains separate" "SDK Space" (Peer.space peer).name;
   check bool "query uses only task metadata" true
     (contains !output "seen [\"listTaskSpaces\"]");
-  let module Operator=Masc.Browser_ego_operator in
-  let connection:Operator.connection={client_id="original-client";space=Peer.space peer;recovery={
-    status=(fun () -> Peer.input_status peer);busy=(fun () -> Peer.input_busy peer);
-    assert_reset=(fun ~generation -> Peer.assert_input_reset peer ~generation);
-    space_observation=(fun () -> Peer.space_observation peer);
-        space_presence=(fun () -> Peer.space_presence peer)}} in
-  let before= !calls in
-  let view=Operator.invoke (Some connection) (obj ["action",str "view";"arguments",obj []]) in
-  check bool "operator form shows the actual native observation" true
-    (contains (text (field "message" view)) "agentDelegatedToUser");
-  check int "form reading never dispatches SDK work" before !calls;
   ownership:="future-native-owner";
   let value=match status () with Ok value -> value | Error _ -> fail "opaque metadata value refused" in
   check string "unfamiliar native ownership is data, not a default decision" !ownership (text (field "ownership" value));
@@ -3660,6 +3759,61 @@ const listTaskSpaces=async()=>{seen.push('listTaskSpaces');const row={id:%d,name
   ignore (dispatch peer Live.Page_act (obj ["action",str "hand_off"]));
   check bool "control changes invalidate cached owner metadata" true (Option.is_none (Peer.space_observation peer))
 
+(* ego lite 0.6.2.5 throws from taskSpace itself for a number it does not
+   list (probed 2026-11-04), with no error code. The production script runs
+   under node with that taskSpace; the body never runs, and one read of
+   ego's list says whether the Space is gone. *)
+let test_a_space_that_did_not_open_is_looked_up_once () =
+  let opens=ref true and listing=ref (`Ids [51]) and lookups=ref [] and output=ref "" in
+  let missing_task_space = "const taskSpace=async id=>{throw new Error('task space not found: '+id);};\n" in
+  let run ~window_s script =
+    let sent=sent_of ~window_s script in
+    match sent.step with
+    | "space.open" -> answered (obj ["spaceId",`Int 51;"name",str "SDK Space";"ownership",str "agent"])
+    | ("tabs.list" | "page.open") when !opens -> if sent.step="tabs.list" then answered tabs
+      else answered (obj ["label",str "p4";"error",`Null;"tab",obj ["url",str "https://slack.com/";"title",str "Slack";"active",`Bool true]])
+    | "tabs.list" | "page.open" -> output:=in_node (missing_task_space ^ script); Ok !output
+    | "space.status" ->
+      lookups:=sent.window_s :: !lookups;
+      check bool "the lookup reads the original numeric Space" true (sent.space=`Int 51);
+      (match !listing with
+       | `Unanswered -> Error (Peer.Unobserved "ego went away")
+       | `Ids ids -> answered (`List (List.map (fun id ->
+           obj ["spaceId",`Int id;"name",str "SDK Space";"ownership",str "agent"]) ids)))
+    | other -> failf "unexpected step %s" other in
+  let peer=match Peer.open_space ~run ~run_native:(run ~window_s:0.) ~now
+    ~space:(Browser_configuration.Named_space "SDK Space") ~version:"fixture"
+    ~capture_directory:(capture_directory ()) ~downloads:no_downloads with
+    | Ok peer -> peer | Error detail -> fail detail in
+  let presence ()=(Peer.space_presence peer).state in
+  let answers ()=List.length (List.filter (String.starts_with ~prefix:Peer.result_marker)
+    (String.split_on_char '\n' !output)) in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  check int "a Space that opened is not looked up" 0 (List.length !lookups);
+  opens:=false;
+  let detail=before_effect "a Space ego still lists" (dispatch peer Live.Tabs_list (obj [])) in
+  check string "a listed Space gives ego's own error back" "task space not found: 51" detail;
+  check int "the script answers once" 1 (answers ());
+  check bool "it says the Space did not open" true (contains !output {|"spaceOpen":"failed"|});
+  check int "one lookup" 1 (List.length !lookups);
+  check bool "the lookup has a read's window" true (List.hd !lookups > 0.);
+  check bool "a listed Space stays present" true (presence ()=Masc.Browser_ego_space_observation.Present);
+  listing:=`Unanswered;
+  let detail=before_effect "an unanswered lookup" (dispatch peer Live.Tabs_list (obj [])) in
+  check bool "an unanswered lookup keeps ego's error" true (String.starts_with ~prefix:"task space not found: 51" detail);
+  check bool "and says presence is unknown, and why" true
+    (contains detail "; Space presence is unknown: " && contains detail "ego went away");
+  check bool "an unanswered lookup leaves the earlier presence" true (presence ()=Masc.Browser_ego_space_observation.Present);
+  listing:=`Ids [52];
+  let detail=before_effect "a Space ego no longer lists" (dispatch peer Live.Tabs_list (obj [])) in
+  check string "a missing Space is named as missing, and nothing replaces it"
+    "the original bound Space is missing from the native inventory; no replacement was opened; this connection ends, and take_over without a clientId asks its worker to open the configured Space again" detail;
+  check bool "the connection's presence is missing" true (presence ()=Masc.Browser_ego_space_observation.Missing);
+  let detail=before_effect "an effect step on a missing Space"
+    (dispatch peer Live.Page_act (act_args (Lane.Action.Open_tab "https://slack.com/"))) in
+  check string "an effect step on it did nothing" "the original bound Space is missing from the native inventory; no replacement was opened; this connection ends, and take_over without a clientId asks its worker to open the configured Space again" detail;
+  check int "each failed open is looked up once" 4 (List.length !lookups)
+
 let test_explicit_completion_is_terminal_and_never_replayed () =
   let scenario reply keep =
     let calls=ref 0 in
@@ -3668,7 +3822,7 @@ let test_explicit_completion_is_terminal_and_never_replayed () =
       | "space.open" -> answered (obj ["spaceId",`Int 51;"name",str "SDK Space";"ownership",str "agent"])
       | "space.finish" -> incr calls; reply sent
       | other -> failf "unexpected post-completion SDK call %s" other in
-    let peer=match Peer.open_space ~input:volatile_input ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now
+    let peer=match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now
         ~space:(Browser_configuration.Existing_space 51) ~version:"fixture" ~capture_directory:(capture_directory ()) with
       | Ok peer -> peer | Error detail -> fail detail in
     check bool "active Space cannot justify retirement deletion" true (Result.is_error (Peer.retirement_settlement peer));
@@ -3786,6 +3940,7 @@ let () =
       test_case "popup workflow preserves Page routing and Space input uncertainty" `Quick test_popup_workflow_identity_and_scope;
       test_case "popup workflow binds the full pre-effect source and fails closed on changed identity" `Quick test_popup_workflow_source_binding;
       test_case "Space status reads native metadata without Page or control effects" `Quick test_native_space_status;
+      test_case "a bound Space that did not open is looked up once, and nothing ran" `Quick test_a_space_that_did_not_open_is_looked_up_once;
       test_case "production workflow envelope preserves special JSON header keys" `Quick test_native_workflow_json_headers;
       test_case "first evaluation timeout preserves unknown native receipt" `Quick test_first_evaluation_timeout_preserves_unknown_native_receipt;
       test_case "native dialog errors retain progress and wire observation" `Quick test_native_dialog_error_keeps_progress_and_wire_observation;
@@ -3794,18 +3949,19 @@ let () =
       test_case "takeover receipts and native runner preserve pending input" `Quick test_takeover_receipt_and_native_runner_preserve_pending_input;
       test_case "saved fetch survives snapshot failure and reaches the download broker" `Quick test_saved_fetch_survives_snapshot_failure_and_reaches_download_broker;
       test_case "unattestable raw inputs refuse before native resolution and preserve pending input" `Quick test_unattestable_raw_input_is_refused_before_effect;
-      test_case "durable intent failure never dispatches target or workflow input" `Quick test_durable_intent_failure_never_dispatches_native_input;
       test_case "a malformed later raw workflow step prevents every earlier effect" `Quick test_invalid_workflow_is_refused_before_any_step;
-      test_case "raw typing settles only its exact retained native window" `Quick test_raw_type_uses_exact_retained_window_and_keeps_uncertainty;
-      test_case "raw typing preserves pending for stale writer, missing authority or private failure" `Quick test_raw_type_stale_writer_unbound_and_private_failures_remain_pending;
+      test_case "raw typing settles only its exact native window" `Quick test_raw_type_settles_only_its_exact_native_window;
+      test_case "raw typing preserves pending for a lost reply or private failure" `Quick test_raw_type_lost_and_private_failures_remain_pending;
       test_case "raw typing retains only strict native diagnostics" `Quick test_raw_type_retains_only_strict_native_diagnostics;
       test_case "workflow raw context uses actual pending and safe public progress" `Quick test_workflow_raw_context_is_bound_to_its_actual_pending;
       test_case "target gestures settle only from their declared receipt" `Quick test_a_target_gesture_settles_only_from_the_receipt_it_returns;
-      test_case "target dialog preserves original input until operator reset" `Quick test_target_dialog_preserves_original_input_until_operator_reset;
-      test_case "operator input assertion resumes the same peer without replay" `Quick test_operator_input_recovery;
+      test_case "target dialog keeps release uncertain until a clean receipt" `Quick test_target_dialog_keeps_release_uncertain_until_a_clean_receipt;
+      test_case "a gesture refused before its press keeps input" `Quick test_a_gesture_refused_before_its_press_keeps_input;
+      test_case "every answer carries the input state" `Quick test_every_answer_carries_the_input_state;
+      test_case "a dialog-interrupted workflow stays uncertain until a new click settles, without replay" `Quick test_dialog_interrupted_workflow_stays_uncertain_until_a_new_click_settles;
       test_case "native workflows retain input ownership after a lost result" `Quick test_native_workflow_pointer_ownership;
       test_case "a workflow that never held input keeps the previous readiness" `Quick test_a_workflow_that_never_held_input_keeps_the_previous_readiness;
-      test_case "chooser upload respects uncertain input release" `Quick test_chooser_upload_respects_uncertain_pointer_release;
+      test_case "chooser upload runs after uncertain input release" `Quick test_chooser_upload_runs_after_uncertain_pointer_release;
       test_case "explicit completion is terminal and never replayed" `Quick test_explicit_completion_is_terminal_and_never_replayed;
       test_case "the space opens by name and is held by number" `Quick test_the_space_opens_by_name_and_is_held_by_number;
       test_case "the spaces of a name are listed without opening one" `Quick test_the_spaces_of_a_name_are_listed_without_opening_one;
@@ -3828,6 +3984,7 @@ let () =
       test_case "native activation retains original Space authority" `Quick test_native_activation_keeps_space_authority;
       test_case "effects answer what happened" `Quick test_effects_answer_what_happened;
       test_case "history moves one entry and waits for it" `Quick test_history_moves_one_entry;
+      test_case "SDK-timed navigation waits the command's reply window" `Quick test_sdk_timed_navigation_waits_the_reply_window;
       test_case "a snapshot reads ego's own tree" `Quick test_a_snapshot_reads_egos_own_tree;
       test_case "dialog inventory and answers do not require info" `Quick test_dialog_inventory_and_answers_do_not_require_info;
       test_case "an input that opens a dialog answers with it" `Quick test_an_input_that_opens_a_dialog_answers_with_it;

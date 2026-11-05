@@ -119,10 +119,7 @@ let prepare_runtime ?(prepare_exact_lane = false) options =
 
 let runtime_stop = function
   | Runtime_agent.Completed _ -> "completed"
-  | Runtime_agent.Yielded_to_operation_queued _ -> "operation_queued"
   | Runtime_agent.Yielded_to_durable_stimulus _ -> "durable_stimulus"
-  | Runtime_agent.Yielded_after_repeated_tool_call _ -> "repeated_tool_call"
-  | Runtime_agent.Yielded_after_repeated_assistant_text _ -> "repeated_assistant_text"
   | Runtime_agent.InputRequired _ -> "input_required"
 
 let generate ~sw ~net ~runtime_id ~provider_cfg (prompt : R.prompt) =
@@ -166,7 +163,7 @@ let generate ~sw ~net ~runtime_id ~provider_cfg (prompt : R.prompt) =
         match result.stop_reason, result.response.stop_reason with
         | Runtime_agent.Completed _, (T.EndTurn | T.StopSequence) -> true
         | (Runtime_agent.Completed _, (T.StopToolUse | (T.MaxTokens | (T.Refusal | (T.ContentFilter | (T.RepetitionTruncation | (T.PauseTurn | (T.Compaction | (T.ContextWindowExceeded | (T.UnmatchedToolCalls | T.Unknown _))))))))))
-        | ((Runtime_agent_context.Yielded_to_operation_queued _ | (Runtime_agent_context.Yielded_to_durable_stimulus _ | (Runtime_agent_context.Yielded_after_repeated_tool_call _ | (Runtime_agent_context.Yielded_after_repeated_assistant_text _ | Runtime_agent_context.InputRequired _)))), _) -> false
+        | ((Runtime_agent_context.Yielded_to_durable_stimulus _ | Runtime_agent_context.InputRequired _), _) -> false
       in
       if complete && String.trim response.text <> "" then
         Ok ({ request = request (); response } : R.generation)

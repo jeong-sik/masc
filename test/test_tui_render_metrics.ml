@@ -85,7 +85,7 @@ let make_keeper ?(paused = false) name : Decode.keeper =
   ; k_name = name
   ; k_paused = paused
   ; k_identity = Ok { k_trace_id = "trace-" ^ name; k_created_at = "2026-09-01T00:00:00Z"; k_updated_at = "2026-09-05T12:00:00Z" }
-  ; k_activity = Some { k_current_task_id = None; k_total_turns = 10; k_total_tokens = 5000; k_total_cost_usd = Result.get_ok (Keeper_cost_coverage.observe Keeper_cost_coverage.empty (Keeper_cost_coverage.Priced 0.05)); k_last_turn_ts = "2026-09-05T12:00:00Z"; k_last_proactive_outcome = None }
+  ; k_activity = Some { k_current_task_id = None; k_total_turns = 10; k_total_tokens = 5000; k_total_cost_usd = Result.get_ok (Keeper_cost_coverage.observe Keeper_cost_coverage.empty (Keeper_cost_coverage.Priced 0.05)); k_last_turn_at = Some 1788609600.; k_last_proactive_outcome = None }
   }
 ;;
 
@@ -180,7 +180,7 @@ let domain_task ~id ~created_at ~status : Masc_domain.task =
     files = []; created_at; created_by = Some "producer";
     predecessor_task_id = None; contract = None;
     execution_links = Masc_domain.no_execution_links; handoff_context = None;
-    cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None; skills = [] }
+    cycle_count = 0; skills = [] }
 
 let test_calculate_kpis_empty () =
   let state = make_state () in
@@ -579,6 +579,7 @@ let test_the_fleet_section_escapes_the_probe_word () =
             ; ssch_stalls = 0
             ; ssch_pool_domains = None
             }
+      ; sid_operator_action = None
       };
   let output = drawn (Render_metrics.render_section_fleet ~cols:90 state) in
   check bool "the probe row carries no escape" false (contains output escape)

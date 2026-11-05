@@ -59,7 +59,7 @@ The command palette is `:`.
 | `[ / ]` | while a detail is open, step to the row before or after it |
 | `c` | in Goal detail, request completion or recovery; press again to submit |
 | `a` | in Goal detail, read the proof; confirm it after it is shown and awaiting confirmation |
-| `x` | in Goal detail, enter a reason and press Enter; drop may cancel linked Tasks observed unclaimed before the drop |
+| `x` | in Goal detail, enter a reason and press Enter |
 | `o` | in Goal detail, press twice to request reopening |
 | `z` | open the selected Goal's Candle payout from the list, or read it again in detail |
 | `Y` | copy the selected goal reference |
@@ -214,7 +214,10 @@ data and paint. A missing finish record remains an unfinished observation.
 | `w` | write a post |
 | `v / V` | press twice to vote: v up, V down; while reading, on the selected comment when the comments have focus, otherwise on the post |
 | `c` | reply (while reading) |
-| `1–9` | read a stored File/Score here; u:source m:Markdown h:HTML y:copy s:save r:retry Esc:post. Other media use their existing action. |
+| `1–9` | preview a stored image or read a stored File/Score here; other media use their existing action |
+| `O` | after selecting a stored image, read it and open or save its verified original |
+| `Ctrl-O` | preview the selected post or comment's Mermaid diagram |
+| `, / .` | choose the previous or next Mermaid diagram in the selected post or comment |
 | `S` | follow the closed post's recorded successor; Esc returns to this post |
 | `[ / ]` | while reading, open the post before or after this one |
 | `s` | cycle hot / trending / recent / updated / discussed |
@@ -391,6 +394,9 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `4` | on the GitHub tab: tick or untick this scope for the next L login |
 | `5` | on the GitHub tab: tick or untick this scope for the next L login |
 | `arrows+enter` | on the Identity tab: connect |
+| `PgUp/PgDn` | on the Identity tab: move the cursor a page; Home/End go to the first and last service |
+| `v` | on the Identity tab: cycle all / attached only / not attached only |
+| `o` | on the Identity tab: cycle attached first / declared order |
 | `T` | on the Identity tab: turn the provider under the cursor on or off |
 | `A` | on the Identity tab: open the app-registration form for it -- it asks for a Client ID |
 | `D D` | on the Identity tab: twice: forget the stored token, drop the tools it attached, and ask the provider to revoke what it still holds |
@@ -502,6 +508,7 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 |---|---|
 | `j/k` | move |
 | `Enter` | the reader takes its own keys: j/k and the page keys scroll it, Home/End reach its ends, [ / ] step asks, Esc goes back |
+| `v` | read decoded top-level Gate string values as bytes, not JSON wire; v or Esc returns |
 | `y / n` | y confirms, n denies the approval under the cursor |
 | `R` | only when the blocked row is safely rearmable |
 | `a` | open the selected question, from a Keeper or a Lane Add-on installation, in its own mode; Esc leaves it |
@@ -751,6 +758,7 @@ count is drawn beyond the available space.
 | `[ / ]` | in Available, older/newer retained original run; in other panes, previous/next Keeper |
 | `c / C` | open $EDITOR on a template for a new Skill; c starts an instruction Skill, C starts a composition Skill |
 | `e` | open the selected SKILL.md in $EDITOR, validate, CAS-save, and publish |
+| `d` | remove the selected published package; press d again on the same row to confirm |
 | `Esc` | return from original Task to request, then request to list; otherwise back to the System surface it hangs off |
 | `r` | refresh the open original Task body/history, original request detail, or Tools list |
 | `Enter` | in async runs, read the selected original request; otherwise load retained evidence for the selected Skill |

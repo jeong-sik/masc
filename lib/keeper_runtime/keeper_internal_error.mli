@@ -99,17 +99,12 @@ type transcript_quarantine_reason =
 (** Which host decision stopped a turn that was already running (RFC-0454 P2).
 
     These stops end the invocation rather than grant a cooperative resume.
-    In particular, a detected loop is not a request to run the same invocation
-    again. The original session and its effect evidence remain authoritative. *)
+    The original session and its effect evidence remain authoritative. *)
 type host_turn_stop =
   | Host_graceful_shutdown
       (** MASC entered graceful shutdown while this turn was live. *)
   | Runtime_reported_interrupt
       (** The runtime reported the turn's own status as interrupted. *)
-  | Repeated_tool_call
-      (** The host detected repeated tool invocations without progress. *)
-  | Repeated_assistant_text
-      (** The host detected repeated assistant responses without progress. *)
 
 val host_turn_stop_to_string : host_turn_stop -> string
 (** MASC's wire spelling. A new arm is a compile error here. *)

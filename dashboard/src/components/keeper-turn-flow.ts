@@ -31,7 +31,6 @@ export function turnToolEvidence(record: FlowRecord, entries: readonly ToolCallE
 
 const receiptLabels: Record<SourceReceiptKind, string> = {
   ack_turn_completed: '턴 완료 후 ACK',
-  ack_turn_attempt_terminal: '실패한 턴 종료 후 ACK',
   ack_fusion_terminal: 'Fusion 종단 ACK', ack_hitl_terminal: 'HITL 종단 ACK',
   cancelled: '취소', transferred: '이관',
 }

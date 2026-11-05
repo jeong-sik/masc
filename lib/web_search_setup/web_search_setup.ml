@@ -359,22 +359,38 @@ let settings_of_doc doc =
   }
 ;;
 
+let observation_of (observation : Runtime.config_observation) =
+  match Keeper_toml_loader.parse_toml observation.source_text with
+  | Error message -> Error (Configuration_unavailable message)
+  | Ok doc ->
+    (match section_problems observation.source_text with
+     | Error message -> Error (Configuration_unavailable message)
+     | Ok problems ->
+       Ok { revision = revision_of observation; settings = settings_of_doc doc; problems })
+;;
+
 let observe ~runtime_config_path =
   match Runtime.load_config_observation ~runtime_config_path () with
   | Error detail -> Error (Configuration_unavailable detail)
-  | Ok observation ->
-    (match Keeper_toml_loader.parse_toml observation.source_text with
-     | Error message -> Error (Configuration_unavailable message)
-     | Ok doc ->
-       (match section_problems observation.source_text with
-        | Error message -> Error (Configuration_unavailable message)
-        | Ok problems ->
-          Ok
-            { revision = revision_of observation
-            ; settings = settings_of_doc doc
-            ; problems
-            }))
+  | Ok observation -> observation_of observation
 ;;
+
+let observe_text ~runtime_config_path text =
+  observation_of (Runtime.config_observation ~path:runtime_config_path text)
+;;
+
+let edit_text changes contents =
+  match conflicting changes with
+  | Some key -> Error (Conflicting_changes key)
+  | None ->
+    (match checked contents changes with
+     | updated -> Ok updated
+     | exception Section_refused message -> Error (Section_invalid message)
+     | exception Unreachable -> Error Table_not_reachable
+     | exception Not_visible key -> Error (Not_read_back key))
+;;
+
+exception Edit_refused of error
 
 let apply ~runtime_config_path ~expected_revision changes =
   match conflicting changes with
@@ -386,7 +402,9 @@ let apply ~runtime_config_path ~expected_revision changes =
       let observation = Runtime.config_observation ~path:runtime_config_path contents in
       if not (String.equal (revision_of observation) expected_revision)
       then raise Revision_changed;
-      checked contents changes
+      match edit_text changes contents with
+      | Ok updated -> updated
+      | Error error -> raise (Edit_refused error)
     in
     (match Runtime.edit_config_text ~runtime_config_path edit with
      (* The revision this write produced, out of the commit itself. A second,
@@ -394,7 +412,5 @@ let apply ~runtime_config_path ~expected_revision changes =
      | Ok receipt -> Ok (revision_of receipt.Runtime.observation)
      | Error detail -> Error (Configuration_rejected detail)
      | exception Revision_changed -> Error Configuration_changed
-     | exception Section_refused message -> Error (Section_invalid message)
-     | exception Unreachable -> Error Table_not_reachable
-     | exception Not_visible key -> Error (Not_read_back key))
+     | exception Edit_refused error -> Error error)
 ;;

@@ -188,8 +188,6 @@ let test_fusion_workspace_admission () =
       let foreign = [ "expected_base_path", [ base ^ "/foreign" ]; "expected_masc_root", [ root ] ] in
       let receipt = Masc.Workspace.read_precondition_admission_header in
       let read path fields = request_with_headers ~token:player ~meth:`GET client (target path fields) in
-      Masc_test_deps.Board_test_preparation.prepare ~base_path:base
-        ~action:Masc_test_deps.Board_test_preparation.Bootstrap;
       Masc.Board.reset_global_for_test ();
       Masc.Board_dispatch.reset_for_test ();
       Result.get_ok (Masc.Board_dispatch.init_jsonl ~base_path:base
@@ -329,10 +327,10 @@ let test_goal_tree_bound_read_bypasses_stale_cache () =
       check int "unbound cache can be primed" 200 code;
       check bool "unbound read does not claim a direct observation" false
         (List.mem Masc.Server_utils.goal_tree_direct_read_header headers);
-      let goal = match Goal_store.upsert_goal config ~title:"after cached tree"
+      let goal = match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"after cached tree"
           ~metric:"measurement" ~target_value:"1" () with
-        | Ok (goal, `created) -> goal
-        | Ok (_, `updated _) -> fail "fixture unexpectedly updated a Goal"
+        | Ok (goal, `created, _) -> goal
+        | Ok (_, `updated _, _) -> fail "fixture unexpectedly updated a Goal"
         | Error error -> fail (Goal_store.write_error_to_string error) in
       let routes = match !captured_routes with Some routes -> routes | None -> fail "missing H1 routes" in
       let authority = match Server_request_authority.of_host_port ~host:"localhost" ~port:8935 with

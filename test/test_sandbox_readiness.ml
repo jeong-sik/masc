@@ -339,8 +339,36 @@ let test_intel_mac_refused_before_probe () =
      | S.Unsupported_host reason ->
        reason = "Apple Container requires Apple Silicon and macOS 26 or newer"
      | _ -> false)
+(* A command that builds nothing, such as the volume GC's listing, asks only
+   whether the host can run Apple Container and whether the service answers.
+   On a host that cannot, no command runs: #48138 ran [container] on Linux and
+   reported the missing command as a runtime failure. *)
+let test_apple_service_without_builder_questions () =
+  let asked = ref [] in
+  let service host responses =
+    asked := [];
+    S.apple_container_service ~host ~run:(fun argv ->
+      asked := !asked @ [argv];
+      run_fixture responses argv)
+  in
+  List.iter (fun host ->
+    check bool "a host without Apple Container is refused" true
+      (match service host [apple_inventory] with S.Unsupported_host _ -> true | _ -> false);
+    check (list (list string)) "no command runs on that host" [] !asked)
+    [S.Linux S.Arm64; S.Linux S.X64; S.Macos {architecture=S.X64; major=26};
+     S.Macos {architecture=S.Arm64; major=25}; S.Unsupported];
+  check bool "an absent container command is a missing prerequisite" true
+    (match service mac [] with S.Missing_prerequisite _ -> true | _ -> false);
+  check bool "a service that does not answer is a failed probe" true
+    (match service mac [fst apple_inventory, Error S.Command_failed] with
+     | S.Probe_failed _ -> true
+     | _ -> false);
+  check bool "an answering service is ready" true (service mac [apple_inventory] = S.Service_ready);
+  check (list (list string)) "the builder is not asked about" [fst apple_inventory] !asked
 let () = run "sandbox readiness" ["selection",[
   test_case "real service reply, not CLI presence" `Quick test_service_not_presence;
+  test_case "Apple service answers without builder questions" `Quick
+    test_apple_service_without_builder_questions;
   test_case "an Intel mac is refused before any service probe" `Quick
     test_intel_mac_refused_before_probe;
   test_case "catalog selection boundary" `Quick test_catalog_selection_boundary;

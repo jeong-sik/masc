@@ -5187,7 +5187,6 @@ let test_keeper_shutdown_recovers_committed_task_receipt () =
         ; reason = Some "Keeper shutdown operation completed lane join"
         ; next_step = Some "A live Keeper may reclaim this task"
         ; failure_mode = None
-        ; reclaim_policy = Some Masc_domain.Allow_reclaim
         ; evidence_refs =
             [ "masc://keeper-shutdown/"
               ^ Shutdown_types.Operation_id.to_string operation_id
@@ -5263,7 +5262,6 @@ let test_keeper_shutdown_release_preserves_task_handoff () =
         ; reason = Some "Yielding turn before backfill"
         ; next_step = Some "Run backfill script on shard 2"
         ; failure_mode = Some "shard_2_lock_timeout"
-        ; reclaim_policy = Some Masc_domain.Allow_reclaim
         ; evidence_refs = [ "masc://artifact/migration-v2" ]
         ; updated_at = Some (Masc_domain.now_iso ())
         ; updated_by = Some "prior-keeper"
@@ -5359,8 +5357,6 @@ let test_keeper_shutdown_release_preserves_task_handoff () =
         check (option string) "preserves task-specific failure_mode"
           (Some "shard_2_lock_timeout")
           handoff.failure_mode;
-        check bool "sets Allow_reclaim policy" true
-          (handoff.reclaim_policy = Some Masc_domain.Allow_reclaim);
         let expected_receipt =
           "masc://keeper-shutdown/"
           ^ Shutdown_types.Operation_id.to_string operation_id

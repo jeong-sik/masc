@@ -17,6 +17,7 @@ type waiting_source = Masc.Tui_decode.waiting_source =
   | Waiting_source_schedule_waiting
   | Waiting_source_owner_shutdown
   | Waiting_source_operator_pending_confirm
+  | Waiting_source_runtime_quota_spent
   | Waiting_source_read_error
   | Waiting_source_observation_unavailable
 
@@ -70,6 +71,7 @@ type badge =
   | Badge_delegate
   | Badge_verification
   | Badge_schedule
+  | Badge_quota_spent
 
 type waiting_reading =
   | Waiting_observed of Masc.Tui_decode.keeper_waiting_row
@@ -155,18 +157,24 @@ let health_reading row =
   Option.map Masc.Tui_decode.keeper_health_reading
     (Masc_tui_keeper_control.health row.reading)
 
+module Names = Set.Make (String)
+
+type verification_holders = Names.t
+
 (* [row.task] follows the producer's current task, and submitting a task clears
    it, so it cannot be relied on to find a task that awaits its verdict. The
    task list keeps that task with the producer as [assignee]. An empty list
-   (backlog unread or failed) gives false. *)
-let holds_awaiting_verification ~keeper_name tasks =
-  List.exists
-    (fun { Masc.Tui_decode.status; _ } ->
+   (backlog unread or failed) holds no one. *)
+let verification_holders tasks =
+  List.fold_left
+    (fun holders { Masc.Tui_decode.status; _ } ->
       match status with
-      | Masc_domain.AwaitingVerification { assignee; _ } -> String.equal assignee keeper_name
+      | Masc_domain.AwaitingVerification { assignee; _ } -> Names.add assignee holders
       | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _
-      | Masc_domain.Done _ | Masc_domain.Cancelled _ -> false)
-    tasks
+      | Masc_domain.Done _ | Masc_domain.Cancelled _ -> holders)
+    Names.empty tasks
+
+let holds_awaiting_verification holders ~keeper_name = Names.mem keeper_name holders
 
 let async_counts requests =
   List.fold_left
@@ -237,16 +245,18 @@ let badges_of_row row =
        Some Badge_verification
      else None)
   ; (if waiting_has_source Waiting_source_schedule_waiting items then Some Badge_schedule else None)
+  ; (if waiting_has_source Waiting_source_runtime_quota_spent items then Some Badge_quota_spent else None)
   ]
   |> List.filter_map Fun.id
 
-let group_of_row row =
-  match primary_activity_of_row row with
+let group_of_activity = function
   | Held_call | Question | Confirmation | Failure -> Attention
   | Preparing | Streaming | Running | Async_working _ | Deferred -> Active
   | Tool_waiting | Model_waiting | Delegate_result | Verifying | External_waiting -> Waiting
   | Idle | Paused | Offline -> Inactive
   | Unknown -> Unobserved
+
+let group_of_row row = group_of_activity (primary_activity_of_row row)
 
 let attention_rank = function
   | Attention -> 0
@@ -283,27 +293,35 @@ let activity_rank = function
   | Verifying -> 12 | External_waiting -> 13 | Idle -> 14 | Paused -> 15
   | Offline -> 16 | Unknown -> 17
 
+(* A row's activity reads all of its waiting items and async requests, so
+   each row is ranked once before sorting and comparisons read the ranks. *)
+type ranked = { row : row; activity : activity; group : attention }
+
+let rank row =
+  let activity = primary_activity_of_row row in
+  { row; activity; group = group_of_activity activity }
+
 let order_rows ~layout ~sort rows =
-  List.stable_sort
+  List.map rank rows
+  |> List.stable_sort
     (fun left right ->
       let group_order =
         match layout with
-        | Grouped -> Int.compare (attention_rank (group_of_row left)) (attention_rank (group_of_row right))
+        | Grouped -> Int.compare (attention_rank left.group) (attention_rank right.group)
         | Compact | Detailed -> 0
       in
       if group_order <> 0 then group_order
       else match sort with
-        | Name -> compare_name left right
-        | Recent -> compare_recent left right
-        | Oldest -> compare_oldest left right
+        | Name -> compare_name left.row right.row
+        | Recent -> compare_recent left.row right.row
+        | Oldest -> compare_oldest left.row right.row
         | Activity ->
-            let order = Int.compare (activity_rank (primary_activity_of_row left))
-                (activity_rank (primary_activity_of_row right)) in
-            if order = 0 then compare_recent left right else order
+            let order = Int.compare (activity_rank left.activity) (activity_rank right.activity) in
+            if order = 0 then compare_recent left.row right.row else order
         | Priority ->
-            let order = Int.compare (attention_rank (group_of_row left)) (attention_rank (group_of_row right)) in
-            if order = 0 then compare_recent left right else order)
-    rows
+            let order = Int.compare (attention_rank left.group) (attention_rank right.group) in
+            if order = 0 then compare_recent left.row right.row else order)
+  |> List.map (fun ranked -> ranked.row)
 
 let group_counts rows =
   List.fold_left

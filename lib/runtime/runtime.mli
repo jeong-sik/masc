@@ -240,7 +240,7 @@ val exact_output_target_source :
     decides which catalog the exact-output registry reads, at boot and on
     every config commit. A blank value names no file. *)
 
-type missing_catalog_model =
+type missing_catalog_model = Runtime_config_projection.missing_catalog_model =
   { runtime_id : string
   ; provider_id : string
   ; provider_label : string
@@ -258,7 +258,7 @@ type missing_catalog_report =
   ; missing_models : missing_catalog_model list
   }
 
-type unavailable_runtime_assignment =
+type unavailable_runtime_assignment = Runtime_config_projection.unavailable_runtime_assignment =
   { keeper_name : string
   ; runtime_id : string
   }
@@ -470,6 +470,15 @@ val catalogue_revision : unit -> int
 val await_catalogue_change : after:int -> int
 (** Wait for a publication newer than [after], without polling. A publication
     that precedes the wait is returned immediately. *)
+
+val config_text_revision : unit -> int
+(** Monotonic revision of the runtime.toml text this process committed. It
+    moves when a committed text becomes visible on disk, a failure after the
+    rename included, and not on catalogue publications that write no text. *)
+
+val await_config_text_change : after:int -> int
+(** Wait for a committed text newer than [after], without polling. One that
+    precedes the wait is returned immediately. *)
 
 val get_default_route_and_runtimes : unit -> string option * t option * t list
 (** The configured default route, its entry runtime and the runtime list from
@@ -902,6 +911,24 @@ val edit_config_text :
     replace, the same receipt. Use this rather than loading the file and
     calling {!save_config_text}, which leaves that gap open. *)
 
+type config_edit =
+  | Config_text_unchanged of
+      { observation : config_observation
+      ; lock_warnings : config_lock_warning list
+      }
+      (** The edit returned the text already stored. The lock warnings are
+          the ones a commit's receipt would have carried. *)
+  | Config_text_committed of config_commit_receipt
+
+val edit_config_text_if_changed :
+  ?runtime_config_path:string ->
+  (string -> string) ->
+  (config_edit, string) result
+(** {!edit_config_text}, except that an edit returning the stored text
+    commits nothing: no write, no publication and no
+    [runtime_config_changed]. The comparison is made under the same write
+    lock as the read. *)
+
 val validate_config_text :
   ?runtime_config_path:string -> string -> (unit, string) result
 (** Run the raw runtime.toml save precondition — TOML parse, ordered Skill
@@ -942,6 +969,23 @@ val set_runtime_default :
 (** Persist [\[runtime\]].default through the runtime.toml SSOT writer,
     validate the resulting config, atomically write it, and refresh the
     in-process runtime cache. *)
+
+val runtime_default_text : runtime_id:string -> string -> (string, string) result
+(** The edit {!set_runtime_default} commits, applied to a runtime.toml text.
+    A command that saves through the running server (RFC-0482 §3.2) applies
+    it to the text the server holds. *)
+
+val first_run_runtime_text :
+  ?fallback_runtime_ids:string list ->
+  ?bind_imp:bool ->
+  runtime_id:string ->
+  string ->
+  (string, string) result
+(** The edit {!set_first_run_runtime} commits, applied to a runtime.toml text,
+    for the same reason as {!runtime_default_text}. [Error] when an id is
+    blank, repeated or spans lines, or names no enabled, materialized runtime
+    of the text, with the model catalog this process loaded. The validation
+    of the whole file is the writer's, on commit. *)
 
 val set_first_run_runtime :
   ?runtime_config_path:string ->

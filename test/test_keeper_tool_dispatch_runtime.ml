@@ -4887,7 +4887,8 @@ let test_a_failed_memory_call_never_ends_the_turn () =
          ; Tool_result.Proven_post_effect
          ; Tool_result.Effect_outcome_unknown
          ])
-    [ "memory write", KTD.Tool_memory_write; "memory retract", KTD.Tool_memory_retract ];
+    [ "memory write", KTD.Tool_memory_write; "memory retract", KTD.Tool_memory_retract
+    ; "browser-level action", KTD.Tool_browser_act ];
   check int
     "an applied file write ends the turn"
     1
@@ -5033,7 +5034,7 @@ let test_cooperative_boundary_result ~with_sink ~fail_sink () =
             Runtime_agent.run_blocks ~sw ~net ~config ~agent_ref:attempt_agent_ref
               ~cooperative_yield_probe:(fun boundary ->
                 observed_boundary := Some boundary;
-                Ok (Runtime_agent.Yield Runtime_agent.Operation_queued))
+                Ok (Runtime_agent.Yield Runtime_agent.Durable_stimulus_waiting))
               [Agent_core.Types.Text "run probe"])
       in
       check int "one actual provider call" 1 provider_calls;
@@ -6790,7 +6791,6 @@ let test_direct_execute_post_effect_artifact_failure_closes_official_client_loop
               ()
             | Some
                 (Masc.Keeper_official_client_host.Terminal_tool_boundary _)
-            | Some Masc.Keeper_official_client_host.Repeated_tool_call _
             | None ->
               fail "direct Execute post-effect failure remained provider-retryable"))
 ;;
@@ -7574,8 +7574,8 @@ value = {surface="dashboard", content="must not run"}
 ;;
 
 (* #36662: the navigation completes (a post effect), then the second node
-   fails with an unknown outcome. Called directly, BrowserInteract hands that
-   failure back to the model and BrowserAct ends the turn
+   fails with an unknown outcome. Called directly, BrowserInteract and
+   BrowserAct hand that failure back to the model
    (Keeper_tool_failure_boundary). The composition does the same, whatever the
    aggregate says. Neither node is read-only, so #35703's read exception
    cannot be what decides. *)
@@ -7659,13 +7659,11 @@ id = "second"
           "proven_post_effect"
           Yojson.Safe.Util.(payload |> member "effect_disposition" |> to_string);
         match second, bundle.terminal_effect_state (), result.abort_turn with
-        | `Interact, Masc.Keeper_tools_agent_core.Terminal_effect_open, None -> ()
+        | (`Interact | `Act), Masc.Keeper_tools_agent_core.Terminal_effect_open, None -> ()
         | `Interact, _, _ ->
           fail "a failed interaction ended the turn though a direct BrowserInteract hands it back"
-        | `Act, Masc.Keeper_tools_agent_core.Terminal_effect_failed _,
-          Some (Masc.Keeper_official_client_host.Terminal_tool_boundary _) -> ()
         | `Act, _, _ ->
-          fail "a failed browser action left the turn open though a direct BrowserAct ends it"))
+          fail "a failed browser action ended the turn though a direct BrowserAct hands it back"))
 ;;
 
 let test_terminal_composition_post_effect_failure_closes_official_client_loop () =
@@ -7782,7 +7780,6 @@ let test_terminal_composition_post_effect_failure_closes_official_client_loop ()
                 tool_name
             | Some
                 (Masc.Keeper_official_client_host.Terminal_tool_boundary _)
-            | Some Masc.Keeper_official_client_host.Repeated_tool_call _
             | None ->
               fail "official-client provider loop remained open after prior effect"))
 ;;
@@ -8223,7 +8220,6 @@ let test_terminal_composition_unknown_write_failure_closes_official_client_loop 
                 tool_name
             | Some
                 (Masc.Keeper_official_client_host.Terminal_tool_boundary _)
-            | Some Masc.Keeper_official_client_host.Repeated_tool_call _
             | None ->
               fail "official-client provider loop remained open after unknown effect"))
 ;;
@@ -9236,7 +9232,7 @@ let composable_output_probes =
               them in front of the schema. Same shape of blind spot that let
               the keeper_tasks_list cursor drift through (masc #33000). *)
            ignore
-             (Goal_store.upsert_goal
+             (Goal_store.upsert_goal_with_events ~actor:"test"
                 config
                 ~title:"composable output probe goal"
                 ~metric:"probes covered"
@@ -10169,10 +10165,16 @@ let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_un
          let continuation = Gate.official_client admission |> Option.get in
          let execution = Masc.Keeper_repetition_scope.Execution.direct_operation operation_id in
          Masc.Keeper_repetition_scope.Execution.resume execution continuation.frame |> require "restore original native scope";
-         let prior = Masc.Keeper_repetition_scope.Execution.prepare execution ~source:original.context
-           ~target:(Agent_core.Context.create ()) |> require "original observations survive stale canonical scope" in
+         let prepared_target = Agent_core.Context.create () in
+         Masc.Keeper_repetition_scope.Execution.prepare execution ~source:original.context
+           ~target:prepared_target |> require "original observations survive stale canonical scope";
+         let prior = Masc.Keeper_repetition_scope.load prepared_target |> require "prepared scope frame"
+           |> fun frame -> Keeper_repetition_snapshot.observations frame
+             ~scope:(Masc.Keeper_repetition_scope.Execution.scope execution)
+           |> require "original scope observations" in
          check bool "prior applied effect remains in original scope" true
-           (List.map (fun (call : Masc.Keeper_agent_result.tool_call_detail) -> call.tool_name) prior = ["Write"]);
+           (List.map (fun (observation : Keeper_repetition_snapshot.observation) ->
+              observation.tool_name) prior = ["Write"]);
          let prepared_prompt = "Finish the original research\n\n[Retained paste correction]\nExact pasted context remains in this turn." in
          let model = Masc.Keeper_gate_replay.compose_model_message ~base_path
            ~user_message:prepared_prompt ~hitl_resolution:(Some (Gate.resolution admission))
@@ -10888,7 +10890,7 @@ let () =
         (test_composition_read_failure_preserves_same_turn ~observe:true ~break_receipt:false ~terminal:false ~unknown_write:true);
       test_case "failed interaction after navigation returns to the model" `Quick
         (test_composition_failure_after_navigation_follows_the_failed_node ~second:`Interact);
-      test_case "failed browser action after navigation closes the loop" `Quick
+      test_case "failed browser action after navigation returns to the model" `Quick
         (test_composition_failure_after_navigation_follows_the_failed_node ~second:`Act);
       test_case "post-effect composition closes official-client loop" `Quick
         test_terminal_composition_post_effect_failure_closes_official_client_loop;

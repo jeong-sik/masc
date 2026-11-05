@@ -107,12 +107,13 @@ let make_tool_bundle_for_descriptors_with_policy
 
      [Store_above] is constructed in exactly one place —
      [Tool_output.default_model_projection] — so matching it here is matching
-     "the descriptor did not choose a projection". A descriptor that did
-     choose one ([keeper.artifact.read] is the only one today) keeps it: its
-     page size answers a different question than the wire ceiling. *)
+     "the tool did not choose a projection". A descriptor that did choose one
+     ([keeper.artifact.read] is the only one today) keeps it: its page size
+     answers a different question than the wire ceiling. An attached tool has
+     no descriptor and takes the default. *)
   let artifact_draft_scope = Keeper_artifact_draft_scope.create ~base_path:config.base_path ~keeper:meta.name in
-  let model_projection_for_call (descriptor : Keeper_tool_descriptor.t) () =
-    match checkpoint_owner (), descriptor.model_output_projection with
+  let model_projection_for_call (declared : Tool_output.model_projection) () =
+    match checkpoint_owner (), declared with
     | Some Runtime_execution.Masc_agent_core, Tool_output.Store_above _ ->
       Tool_output.agent_core_model_projection
     | Some Runtime_execution.Official_client, Tool_output.Store_above _ ->
@@ -480,7 +481,7 @@ let make_tool_bundle_for_descriptors_with_policy
                ~base_path:config.base_path
                ~answer_reader:(fun output_text ->
                  Keeper_tool_answer.answer ~tool_name:model_name ~output_text)
-               ~model_projection:(model_projection_for_call descriptor)
+               ~model_projection:(model_projection_for_call descriptor.model_output_projection)
                ?on_externalization_error
                ~schema
                (fun execution_env input ->
@@ -490,7 +491,7 @@ let make_tool_bundle_for_descriptors_with_policy
                  h
                    ?agent_core_invocation:
                      (Agent_core.Tool.Execution_env.invocation execution_env)
-                   ?result_projection:(Some (model_projection_for_call descriptor ()))
+                   ?result_projection:(Some (model_projection_for_call descriptor.model_output_projection ()))
                    input)
              in
              let ordinary = bridge (make_h ()) in
@@ -684,6 +685,9 @@ let make_tool_bundle_for_descriptors_with_policy
       ?continuation_channel
       ?gate_context:gate_context_provider
       ?gate_grant
+      ~inline_ceiling_bytes:(fun () ->
+        Tool_output.inline_ceiling_bytes
+          (model_projection_for_call Tool_output.default_model_projection ()))
       offered
   in
   (* Attached tools, as schemas. What the lanes that cannot widen a running
@@ -867,12 +871,12 @@ let make_tool_bundle_for_descriptors_with_policy
     | Keeper_tool_descriptor.Tool_masc_local_runtime_dispatch
     | Keeper_tool_descriptor.Tool_analyze_image | Keeper_tool_descriptor.Tool_read_image -> ()) descriptors;
   let result_bounds =
-      (* The bound each built-in result is held to on an official-client lane,
-         read off the projection the bridge applies there: the descriptor's
-         own (see [model_projection_for_call]). Every model name a descriptor
-         answers to crosses the same projection. Composition tools carry the
-         projection chosen by their surface. Attached-service results have no
-         MASC bound and declare nothing. *)
+      (* The bound each result is held to on an official-client lane, read
+         off the projection applied there (see [model_projection_for_call]):
+         a descriptor's own, which every model name it answers to crosses;
+         the projection a composition surface chose; and the default for an
+         attached-service tool, whose answer
+         [Keeper_identity_tools.tool_result_of_call] holds to that ceiling. *)
       List.concat_map
         (fun (descriptor : Keeper_tool_descriptor.t) ->
            let bound =
@@ -891,6 +895,11 @@ let make_tool_bundle_for_descriptors_with_policy
              ( tool.Agent_core.Tool.schema.name
              , Tool_output.inline_ceiling_bytes projection ))
           composition_tools_with_loading
+      @ List.map
+          (fun (tool : Agent_core.Tool.t) ->
+             ( tool.Agent_core.Tool.schema.name
+             , Runtime_execution.claude_code_inline_result_bytes ))
+          identity_agent_tools
   in
   let agent_core_view ~admitted ~deferred listing =
     List.filter admitted always_loaded

@@ -19,6 +19,7 @@ type waiting_source = Masc.Tui_decode.waiting_source =
   | Waiting_source_schedule_waiting
   | Waiting_source_owner_shutdown
   | Waiting_source_operator_pending_confirm
+  | Waiting_source_runtime_quota_spent
   | Waiting_source_read_error
   | Waiting_source_observation_unavailable
 
@@ -74,6 +75,7 @@ type badge =
   | Badge_delegate
   | Badge_verification
   | Badge_schedule
+  | Badge_quota_spent
 
 type waiting_reading =
   | Waiting_observed of Masc.Tui_decode.keeper_waiting_row
@@ -110,11 +112,17 @@ val layout_label : layout -> string
 val sort_label : sort -> string
 val layout_of_string : string -> layout option
 val sort_of_string : string -> sort option
-val holds_awaiting_verification : keeper_name:string -> Masc.Tui_decode.task list -> bool
+type verification_holders
+(** The assignees of tasks that await their verdict, read once from a task
+    list so a roster of keepers can ask about each of them. *)
+
+val verification_holders : Masc.Tui_decode.task list -> verification_holders
+(** An empty list, as when the backlog is unread or failed, holds no one. *)
+
+val holds_awaiting_verification : verification_holders -> keeper_name:string -> bool
 (** Whether [keeper_name] is the assignee of a task that awaits its verdict.
     The row's current task cannot be relied on for this, since submission
-    clears it. An empty list, as when the backlog is unread or failed, gives
-    false. *)
+    clears it. *)
 val primary_activity_of_row : row -> activity
 val badges_of_row : row -> badge list
 val group_of_row : row -> attention

@@ -37,7 +37,9 @@ type keeper_activity = {
   k_total_turns : int;
   k_total_tokens : int;
   k_total_cost_usd : Keeper_cost_coverage.t;
-  k_last_turn_ts : string;
+  k_last_turn_at : float option;
+      (** Unix seconds of the Keeper's last turn as the runtime recorded it;
+          [None] before its first. *)
   k_last_proactive_outcome : Keeper_meta_contract.proactive_cycle_outcome option;
       (** What the last proactive cycle came to, as the contract types it.
           Kept typed so
@@ -541,8 +543,20 @@ type repository_change_scope =
   | Repository_change_project
   | Repository_change_repository of string
 
+(** How the checked-out branch relates to the one it tracks. *)
+type repository_upstream =
+  | Repository_no_upstream
+  | Repository_upstream_gone of string
+      (** Configured, but its ref no longer exists: no counts exist. *)
+  | Repository_tracking of { upstream : string; ahead : int; behind : int }
+
+type repository_branch =
+  | Repository_detached
+  | Repository_on_branch of { name : string; upstream : repository_upstream }
+
 type repository_change_snapshot = {
   rcs_scope : repository_change_scope;
+  rcs_branch : repository_branch;
   rcs_changes : repository_change list;
   rcs_total : int;
 }
@@ -742,7 +756,6 @@ type keeper_runtime = {
           or timestamp does not hide independently valid lifecycle controls.
           The metadata name must agree with [kr_name]. *)
   kr_portrait : keeper_portrait;
-  kr_candle_balance_milli : string option;
   kr_candle_account_revision : (string option, string) result;
   (** [Ok None] is observed Candle-off; [Error] cannot authorize an Item account. *)
   kr_health : keeper_health;
@@ -782,12 +795,20 @@ val keeper_of_runtime : keeper_runtime -> keeper
 (** Project the public row into a remote Keeper. No local metadata, task or
     usage measurements are inferred from the runtime state. *)
 
+(** The roster's Candle reading (RFC-0481 §3.7). A ready reading carries the
+    fold's basis, and the TUI computes balances and supply from it when it
+    draws them. *)
+type candle_reading =
+  | Candle_off
+  | Candle_disabled of string
+  | Candle_ready of Candle_decay_basis.t
+
 val decode_keeper_runtime_list :
-  Yojson.Safe.t -> (keeper_runtime list * (string * string) list * bool * int * (Candle_observation.t, string) result, string) result
+  Yojson.Safe.t -> (keeper_runtime list * (string * string) list * bool * int * (candle_reading, string) result, string) result
 (** Decode the [keepers] array of [GET /api/v1/gate/keepers] into
     [(rows, configuration_errors, truncated, total, candle)]. Explicit metadata errors
     are retained per keeper without discarding readable rows. Malformed Candle
-    fields produce an [Error] observation and withdraw every balance while
+    fields produce an [Error] reading and withdraw every account revision while
     keeping the readable Keeper lifecycle rows. A row whose [status] or lifecycle [phase] is
     outside its typed vocabulary fails the whole reading rather than defaulting, so producer
     drift surfaces as an error instead of a wrong status glyph.
@@ -858,21 +879,11 @@ type keeper_lane = {
   kl_turn_phase : keeper_lane_turn_phase;
   kl_idle_seconds : int;
   kl_last_outcome : keeper_lane_last_outcome option;
-  kl_conditions : keeper_lane_conditions;
+  kl_conditions : keeper_lane_conditions option;
+      (** [None] when the producer sent no phase diagnosis, as it does for a
+          Keeper with no registry entry. A diagnosis that is sent carries all
+          three conditions. *)
 }
-
-type keeper_lanes_snapshot = {
-  kls_generated_at : float;
-  kls_count : int;
-  kls_lanes : keeper_lane list;
-}
-
-val decode_keeper_lanes_snapshot :
-  Yojson.Safe.t -> (keeper_lanes_snapshot, string) result
-(** Decode the fields the Lanes table reads from
-    [GET /api/v1/keepers/composite]. Missing or wrongly typed fields reject
-    the reading; additional producer fields are outside this light
-    projection and do not. *)
 
 (** Read-only standalone LLM lane observation. These rows describe existing
     admission and run registries; they never carry a control action. *)
@@ -1056,13 +1067,10 @@ type keeper_secret_projection = {
   ksp_error : string option;
 }
 
-val decode_keeper_secret_projections :
-  Yojson.Safe.t -> (keeper_secret_projection list, string) result
-(** Read every Keeper's secret projection out of the same
-    [GET /api/v1/keepers/composite] body the Lanes table reads. A snapshot
-    without a [secret_projection] object is skipped rather than rejected:
-    the endpoint serves several screens and a Keeper the producer has not
-    projected yet is absence, not a malformed reading. *)
+val decode_keeper_composite :
+  Yojson.Safe.t -> (keeper_lane * keeper_secret_projection option, string) result
+(** Decode one Keeper's [/api/v1/keepers/<name>/composite] body: its lane row
+    and, when the producer projected one, its secret projection. *)
 
 (** One tool call a keeper is holding for an operator's answer, from
     [GET /api/v1/keepers/tool-approvals]. [kta_asked_at] is the server
@@ -1333,6 +1341,7 @@ type waiting_source =
   | Waiting_source_schedule_waiting
   | Waiting_source_owner_shutdown
   | Waiting_source_operator_pending_confirm
+  | Waiting_source_runtime_quota_spent
   | Waiting_source_read_error
   | Waiting_source_observation_unavailable
 
@@ -1562,6 +1571,12 @@ type server_identity = {
       (** [/health] [gc] quick GC counters and heap sizes. *)
   sid_scheduler : server_scheduler_health option;
       (** [/health] [scheduler] scheduler latency probe distribution and stalls. *)
+  sid_operator_action : string list option;
+      (** [/health] [operator_action_reasons], the server's last full-health
+          rollup (RFC-0484 §3.3). [Some []] when nothing needs the operator.
+          [None] when the probe carries no rollup: an older server, the time
+          before its first snapshot, or a value that is not the rollup's
+          shape. *)
 }
 (** Which server the TUI is talking to, from [/health] or an attested scoped
     Observer response. Fields absent from the latter remain unknown.
@@ -2621,7 +2636,9 @@ type async_request_row =
   ; ar_submitted_by : string
   ; ar_keeper_name : string
   ; ar_phase : async_request_phase
-  ; ar_elapsed_sec : float option
+  ; ar_submitted_at : float
+      (** Epoch seconds. A screen works out the age itself: an age the server
+          worked out stops when the reading is not read again. *)
   ; ar_ownership : async_request_ownership
   }
 

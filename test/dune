@@ -23,6 +23,18 @@
  (name runtest)
  (deps (alias runtest-test_measure_viewport_cadence_bytes)))
 
+(rule
+ (alias runtest-test_measure_tool_efficiency)
+ (deps ../scripts/measure-tool-efficiency.py
+       ../scripts/lib/masc_base_path.py
+       ../scripts/lib/recorded_tool_outcome.py
+       ../scripts/tests/test_measure_tool_efficiency.py)
+ (action (run python3 %{dep:../scripts/tests/test_measure_tool_efficiency.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_measure_tool_efficiency)))
+
 (test
  (name test_tui_board_reader)
  (modules test_tui_board_reader)
@@ -57,6 +69,7 @@
 (include stanzas/test_oidc_id_token_signature.inc)
 (include stanzas/test_keeper_chat_store_announces.inc)
 (include stanzas/test_keeper_memory_journal_announces.inc)
+(include stanzas/test_keeper_composite_cleared_before_announce.inc)
 (include stanzas/test_runtime_blocker_classification.inc)
 (include stanzas/test_runtime_response_identity.inc)
 (include stanzas/test_keeper_sandbox_observation.inc)
@@ -234,6 +247,11 @@
  (modules test_keeper_codex_request_provenance)
  (libraries masc_test_deps))
 
+
+(test
+ (name test_keeper_codex_account_read_recovery)
+ (modules test_keeper_codex_account_read_recovery)
+ (libraries masc_test_deps))
 
 ; Explicit minimal check for the real adapter's asynchronous receipt lifecycle.
 ; The ordinary suite continues to include the complete native context group.
@@ -509,7 +527,6 @@
   test_server_dashboard_http_keeper_tool_lookup
   test_keeper_paused_work_resume_surface
   eval_memory_os_value
-  test_attempt_state
   test_runtime_attempt_fsm
   test_runtime_candidate_backpressure
   test_runtime_quota_window
@@ -569,7 +586,6 @@
   test_inference_utils
   test_auth_ambiguous_lookup_9786
   test_auth_load_credential_of
-  test_keeper_wake_telemetry
   test_dashboard_harness_health
   test_keeper_timing
   test_keeper_noop_backoff
@@ -645,7 +661,6 @@
   test_keeper_surface_read
   test_keeper_surface_presence_prompt
   test_keeper_wake_turn_context
-  test_keeper_last_turn_stop
   test_keeper_unified_verification_surface
   test_keeper_fsm_guard_actions
   test_keeper_callback_hardening
@@ -864,7 +879,6 @@
   test_server_dashboard_http_keeper_tool_lookup
   test_keeper_paused_work_resume_surface
   eval_memory_os_value
-  test_attempt_state
   test_runtime_attempt_fsm
   test_runtime_candidate_backpressure
   test_runtime_quota_window
@@ -924,7 +938,6 @@
   test_inference_utils
   test_auth_ambiguous_lookup_9786
   test_auth_load_credential_of
-  test_keeper_wake_telemetry
   test_dashboard_harness_health
   test_keeper_timing
   test_keeper_noop_backoff
@@ -1000,7 +1013,6 @@
   test_keeper_surface_read
   test_keeper_surface_presence_prompt
   test_keeper_wake_turn_context
-  test_keeper_last_turn_stop
   test_keeper_unified_verification_surface
   test_keeper_fsm_guard_actions
   test_keeper_callback_hardening
@@ -1265,11 +1277,6 @@
  (action
   (setenv MASC_TEST_CHECKPOINT_PURGE_EXE %{dep:../bin/masc_checkpoint_purge.exe}
    (run %{test}))))
-
-(test
- (name test_keeper_yield_observability)
- (modules test_keeper_yield_observability)
- (libraries alcotest astring masc_test_deps))
 
 (test
  (name test_exec_dispatch_file_redirect)
@@ -1676,14 +1683,6 @@
 (test
  (name test_runtime_agent_advanced_outcome)
  (modules test_runtime_agent_advanced_outcome)
- (libraries masc_test_deps))
-
-; A keeper must not be offered its own authored tasks as claimable work —
-; otherwise a routing/report keeper re-triggers on its own output.
-
-(test
- (name test_keeper_self_authored_task_exclusion)
- (modules test_keeper_self_authored_task_exclusion)
  (libraries masc_test_deps))
 
 ; RFC-0267 Phase 1: registry goal_id projection onto the /execution task wire.
@@ -2276,7 +2275,7 @@
 (test
  (name test_server_health_rollup)
  (modules test_server_health_rollup)
- (libraries alcotest masc_server yojson))
+ (libraries alcotest masc masc_server yojson))
 
 ; A rejected keeper boot is only diagnosable from the log line: the sentence
 ; explaining it goes to the HTTP response, which the TUI shows and drops.
@@ -2655,8 +2654,6 @@
 
 ; Executables (benchmarks, distributed tests, tools)
 
-(include stanzas/keeper_argument_quality_cli.inc)
-
 (executable
  (name tool_call_quality_benchmark_cli)
  (modules tool_call_quality_benchmark_cli)
@@ -2764,10 +2761,6 @@
 
 (include stanzas/test_board_posts_source_authority.inc)
 (include stanzas/test_board_posts_preflight.inc)
-(include stanzas/test_board_posts_initialization.inc)
-(include stanzas/test_board_posts_initialization_offline.inc)
-(include stanzas/test_cli_board_posts_initialization.inc)
-(include stanzas/test_board_preparation.inc)
 
 (include stanzas/test_board_snapshot_rows.inc)
 
@@ -2945,6 +2938,7 @@
 
 (include stanzas/test_telemetry_unified_keeper_fan_in.inc)
 (include stanzas/test_tool_metrics_store_concurrent.inc)
+(include stanzas/test_tool_metrics_series.inc)
 
 (include stanzas/test_dated_jsonl_mutex_registry_10372.inc)
 
@@ -3035,8 +3029,32 @@
 (include stanzas/test_tui_observer_session_log.inc)
 (include stanzas/test_tui_approval_readability.inc)
 (include stanzas/test_tui_observer_reopen_revalidate.inc)
+(include stanzas/test_tui_preference.inc)
 (include stanzas/test_tui_chat_owed_history.inc)
 (include stanzas/test_tui_chat_memory_journal_signal.inc)
+(include stanzas/test_tui_keeper_composite_signal.inc)
+(include stanzas/test_tui_planning_goal_signal.inc)
+(include stanzas/test_tui_briefing_on_home.inc)
+(include stanzas/test_tui_keeper_logs_metrics_signal.inc)
+(include stanzas/test_tui_keeper_calls_signal.inc)
+(include stanzas/test_tui_board_post_signal.inc)
+(include stanzas/test_tui_board_list_signal.inc)
+(include stanzas/test_tui_connectors_signal.inc)
+(include stanzas/test_tui_runtime_config_signal.inc)
+(include stanzas/test_tui_gate_snapshot_signal.inc)
+(include stanzas/test_tui_held_calls_and_modes_signal.inc)
+(include stanzas/test_tui_keeper_logs_execute_stream.inc)
+(include stanzas/test_tui_asks_signal.inc)
+(include stanzas/test_tui_async_requests_signal.inc)
+(include stanzas/test_tui_async_detail_signal.inc)
+(include stanzas/test_tui_tools_skill_signal.inc)
+(include stanzas/test_tui_chat_skill_signal.inc)
+(include stanzas/test_tui_pending_confirms_signal.inc)
+(include stanzas/test_tui_workspace_dataset_signal.inc)
+(include stanzas/test_tui_transport_signal.inc)
+(include stanzas/test_tui_schedules_signal.inc)
+(include stanzas/test_tui_keeper_schedules_signal.inc)
+(include stanzas/test_tui_chat_journals_signal.inc)
 (include stanzas/test_tui_waiting_event.inc)
 (include stanzas/test_tui_observer_epoch.inc)
 (include stanzas/test_tui_task_event.inc)
@@ -3273,6 +3291,26 @@
 (include stanzas/test_tool_loading_declarations.inc)
 
 (include stanzas/test_keeper_approval_queue_rules.inc)
+(include stanzas/test_gate_rules_announce.inc)
+(include stanzas/test_keeper_tool_approval_announces.inc)
+(include stanzas/test_operator_asks_announce.inc)
+(include stanzas/test_keeper_async_requests_announce.inc)
+(include stanzas/test_schedules_announce.inc)
+(include stanzas/test_runtime_assignment_announce.inc)
+(include stanzas/test_runtime_config_announce.inc)
+(include stanzas/test_candle_ledger_announce.inc)
+(include stanzas/test_provider_rest_announce.inc)
+(include stanzas/test_turn_preview_announce.inc)
+(include stanzas/test_verification_request_announce.inc)
+(include stanzas/test_skill_catalog_announce.inc)
+(include stanzas/test_lane_addon_exports_announce.inc)
+(include stanzas/test_goal_projection_announce.inc)
+(include stanzas/test_skill_activations_broadcast.inc)
+(include stanzas/test_keeper_skill_activations_read.inc)
+(include stanzas/test_gate_connector_announce.inc)
+(include stanzas/test_repository_catalog_announce.inc)
+(include stanzas/test_keeper_event_queue_announce.inc)
+(include stanzas/test_keeper_metrics_appended_announce.inc)
 
 (include stanzas/test_keeper_approval_queue.inc)
 
@@ -4034,6 +4072,16 @@
  (libraries alcotest masc_tui_owed_read))
 
 (test
+ (name test_tui_roster_owed)
+ (modules test_tui_roster_owed)
+ (libraries alcotest masc_tui_roster_owed))
+
+(test
+ (name test_tui_candle)
+ (modules test_tui_candle)
+ (libraries alcotest masc masc.masc_candle masc_tui_candle ptime))
+
+(test
  (name test_tui_preset_text)
  (modules test_tui_preset_text)
  (libraries
@@ -4127,7 +4175,7 @@
 (test
  (name test_tui_server_identity_refresh)
  (modules test_tui_server_identity_refresh)
- (libraries masc_tui_pick_list masc_tui_presented astring masc.masc_candle masc_tui_pr_ref masc_tui_message_layout masc_tui_frame masc_tui_ansi masc_tui_theme masc_tui_frame_presenter masc_tui_render_schedule masc_tui_render_prim masc_tui_render_repositories masc_tui_queue_layout masc_tui_press masc_tui_hit masc_tui_queue_inspection masc_tui_play_card masc_tui_scroll masc_tui_resource_catalog masc.config masc_tui_runtime_config_snapshot masc_tui_runtime_config_edit masc_tui_runtime_config_receipt masc_tui_model_form masc_tui_model_runtime_table masc_tui_runtime_account_form masc_tui_runtime_config_view masc_tui_keeper_config masc_tui_metrics_tail masc.dated_jsonl masc_tui_ask_projection masc_tui_response_decode masc_tui_kept_reads masc.masc_core masc.masc_types masc.keeper_cost_coverage masc.tool_types masc.runtime masc.sse_wire eio eio_main masc_tui_child_content masc_tui_native_tasks alcotest masc masc.browser_lane masc_tui_lane_subscriptions masc_tui_lane_addons masc_tui_types masc_tui_task_payloads masc_tui_async_protocol masc_tui_context_inspector masc_workspace masc.fs_compat masc_tui_context_state masc_tui_fetched masc_tui_loader masc_tui_overview_tasks masc_tui_task_flow masc_tui_agenda masc_tui_keeper_control masc_tui_keeper_list_model masc_tui_board_detail masc_tui_message_input masc_tui_lane_installer masc_tui_voice_wizard_session masc_tui_account_login masc_tui_composer_projection masc_tui_composer masc.voice_setup masc.voice_wizard unix yojson))
+ (libraries masc_tui_owed_read masc_tui_pick_list masc_tui_presented astring masc.masc_candle masc_tui_pr_ref masc_tui_message_layout masc_tui_frame masc_tui_ansi masc_tui_theme masc_tui_frame_presenter masc_tui_render_schedule masc_tui_render_prim masc_tui_render_repositories masc_tui_queue_layout masc_tui_press masc_tui_hit masc_tui_queue_inspection masc_tui_play_card masc_tui_scroll masc_tui_resource_catalog masc.config masc_tui_runtime_config_snapshot masc_tui_runtime_config_edit masc_tui_runtime_config_receipt masc_tui_model_form masc_tui_model_runtime_table masc_tui_runtime_account_form masc_tui_runtime_config_view masc_tui_keeper_config masc_tui_metrics_tail masc.dated_jsonl masc_tui_ask_projection masc_tui_response_decode masc_tui_kept_reads masc.masc_core masc.masc_types masc.keeper_cost_coverage masc.tool_types masc.runtime masc.sse_wire eio eio_main masc_tui_child_content masc_tui_native_tasks alcotest masc masc.browser_lane masc_tui_lane_subscriptions masc_tui_lane_addons masc_tui_types masc_tui_task_payloads masc_tui_async_protocol masc_tui_context_inspector masc_workspace masc.fs_compat masc_tui_context_state masc_tui_fetched masc_tui_loader masc_tui_overview_tasks masc_tui_task_flow masc_tui_agenda masc_tui_keeper_control masc_tui_keeper_list_model masc_tui_board_detail masc_tui_message_input masc_tui_lane_installer masc_tui_voice_wizard_session masc_tui_account_login masc_tui_composer_projection masc_tui_composer masc.voice_setup masc.voice_wizard unix yojson))
 
 (test
  (name test_tool_transport_prefix)
@@ -4169,7 +4217,7 @@
 (test
  (name test_tui_clipboard)
  (modules test_tui_clipboard)
- (libraries alcotest masc_tui_clipboard))
+ (libraries alcotest masc_tui_clipboard unix))
 
 (test
  (name test_tui_sse_lines)
@@ -4434,6 +4482,7 @@
   masc.string_util
   masc_tui_credential
   masc_tui_keeper_control
+  masc.masc_workspace
   yojson))
 
 (test
@@ -5067,7 +5116,6 @@
 (include stanzas/test_tui_midi.inc)
 (include stanzas/test_tui_attachment_action.inc)
 (include stanzas/test_tui_code_lexer.inc)
-(include stanzas/test_tui_overview_transport_item.inc)
 (include stanzas/test_tui_runtime_account_form.inc)
 (include stanzas/test_tui_memory_recall_form.inc)
 (include stanzas/test_tui_runtime_assignment_label.inc)
@@ -5434,7 +5482,7 @@
 (test
  (name test_tui_loading_notice)
  (modules test_tui_loading_notice)
- (libraries masc.keeper_cost_coverage alcotest masc masc.masc_schedule masc.sse_wire masc_tui_agenda masc_tui_types masc_tui_keeper_sandbox))
+ (libraries masc.keeper_cost_coverage alcotest masc masc.masc_schedule masc.sse_wire masc_tui_agenda masc_tui_owed_read masc_tui_types masc_tui_keeper_sandbox))
 
 (test
  (name test_keeper_composition_async_broker)
@@ -7156,11 +7204,6 @@
  (action
   (run %{exe:../packages/agent_core/bench/schema_wire_bytes_bench.exe})))
 
-(test
- (name test_keeper_informational_checkpoint_ack)
- (modules test_keeper_informational_checkpoint_ack)
- (libraries masc_test_deps exact_output_fixture eio_main unix))
-
 (include stanzas/test_endpoint_mixed_admission.inc)
 
 (include stanzas/test_runtime_model_label_binding.inc)
@@ -7210,6 +7253,11 @@
 (include stanzas/test_authz_log.inc)
 
 (include stanzas/test_authz_install_record.inc)
+
+(include stanzas/test_authz_boot_mode.inc)
+(include stanzas/test_authz_boot_mode_read.inc)
+(include stanzas/test_authz_state.inc)
+(include stanzas/test_authz_zone.inc)
 
 (include stanzas/test_endpoint_process_gate.inc)
 

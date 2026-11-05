@@ -1,0 +1,18 @@
+== layer5-1
+load_before [37.99365234375, 56.15673828125, 63.33740234375]
+  build[keeper-list] frames=247 mean=1.37ms p50=1.20 p95=2.68 p99=4.76 max=8.02
+== layer6-1
+load_before [34.330078125, 54.76904296875, 62.76025390625]
+  build[keeper-list] frames=240 mean=1.34ms p50=1.04 p95=1.97 p99=4.92 max=32.60
+== layer5-2
+load_before [33.02197265625, 54.158203125, 62.49755859375]
+  build[keeper-list] frames=258 mean=1.59ms p50=1.24 p95=3.18 p99=6.76 max=13.43
+== layer6-2
+load_before [31.2822265625, 53.0966796875, 62.02392578125]
+  build[keeper-list] frames=260 mean=1.01ms p50=0.89 p95=1.65 p99=3.11 max=6.80
+== layer5-3
+load_before [29.25732421875, 52.314453125, 61.6953125]
+  build[keeper-list] frames=243 mean=1.88ms p50=1.39 p95=3.79 p99=7.47 max=38.93
+== layer6-3
+load_before [27.13818359375, 51.1015625, 61.15478515625]
+  build[keeper-list] frames=246 mean=1.19ms p50=1.04 p95=2.30 p99=3.46 max=6.30

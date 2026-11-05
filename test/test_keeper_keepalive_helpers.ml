@@ -43,9 +43,6 @@ let with_temp_workspace f =
    backend gets its recipient lookup before the first write. *)
 let with_board_workspace ?(recipient_lookup = every_name_declared) f =
   with_temp_workspace (fun config ->
-    Masc_test_deps.Board_test_preparation.prepare
-      ~base_path:config.Workspace.base_path
-      ~action:Masc_test_deps.Board_test_preparation.Bootstrap;
     Result.get_ok (Board_dispatch.init_jsonl
       ~base_path:config.Workspace.base_path
       ~recipient_lookup ());
@@ -85,9 +82,7 @@ let make_in_progress_task ~id ~assignee : Types.task =
     contract = None;
     handoff_context = None;
     cycle_count = 0;
-    reclaim_policy = None;
     execution_links = Masc_domain.no_execution_links;
-    do_not_reclaim_reason = None;
     skills = [];
   }
 

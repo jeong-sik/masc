@@ -24,10 +24,9 @@ type declared_lane_failure =
    declared-byte refusal. *)
 (* How this lane continues after a failed turn. It restarts its cycle: the next
    cycle is a new turn, and a hint that named the path this one failed on would
-   become [turn_state.deferred_runtime_lane] below, replacing the next cycle's
-   candidates with that single path and taking its failover with it
-   (RFC last-path-resumes-after-progress §3.5). Read by a test, because the
-   only caller of [run] is production.  *)
+   become [turn_state.deferred_runtime_lane] below and start the next cycle on
+   that path again (RFC last-path-resumes-after-progress §3.5). Read by a test,
+   because the only caller of [run] is production.  *)
 let lane_retry_continuation = Keeper_turn_driver.Restart_cycle
 
 (* The paused agent's question is logged cut to this many bytes. *)
@@ -91,8 +90,6 @@ type ctx =
 let run (ctx : ctx)
       ~event_scope
       ~observation_token
-      ~(yield_requested :
-          unit -> (Keeper_agent_run.yield_request option, string) result)
       ~(initial_execution : runtime_execution)
       ~(turn_state : turn_state)
       ~(before_dispatch_authority : unit -> (unit, string) result)
@@ -299,14 +296,6 @@ let run (ctx : ctx)
                  ~on_checkpoint_stage:
                    (Keeper_turn_driver_try_provider.observe_checkpoint_stage
                       checkpoint_progress)
-                   (* This module is the autonomous lane's turn runner
-                      ([Keeper_unified_turn.run_keeper_cycle] → here, only ever
-                      reached via the Keeper Owner child); the chat
-                      lane runs [run_keeper_msg_turn_admitted] on a separate
-                      path. Thus the probe is lane-gated and runs only at AGENT_CORE's
-                      post-tool boundary. Its signals come from the exact chat
-                      receipt and durable-event queues their consumers drain. *)
-                 ~yield_requested
                  ()
             with
             | Eio.Cancel.Cancelled _ as exn ->

@@ -2,7 +2,20 @@
     half-life boundaries without publishing policy, repairing or truncating rows. *)
 type t
 val read : now:(unit -> float) -> base_path:string -> t
+
+type touched =
+  | Every_keeper  (** The half-life moved, so every balance does. *)
+  | Keepers of string list  (** Sorted, without duplicates; may be empty. *)
+
+val keepers_touched : Candle_event.t list -> touched
+(** The Keepers whose balance, equipment or account revision the events
+    change: exactly the Keepers whose account revision reads each event. *)
 val summary : t -> Candle_observation.t
+
+val decay_basis : t -> (Candle_decay_basis.t, string) result option
+(** The ledger folded without the decay to the read time, from the same
+    events as {!summary} and {!balance} (RFC-0481 §3.7), folded when asked.
+    [None] when Candle is off or disabled. *)
 val balance : t -> keeper:string -> string option
 val equipment : t -> keeper:string -> (Keeper_portrait_look.equipment, string) result
 (** Stable digest of the Keeper's durable paid/purchased/equipped facts,

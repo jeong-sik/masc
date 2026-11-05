@@ -190,14 +190,119 @@ If a named test declares a custom `action`, the targeted runner selects Dune's
 nonrecursive `@@DIRECTORY/runtest-NAME` alias instead of the bare executable.
 Dune owns that action's arguments, wrappers, variables and dependencies; the
 runner does not translate them. The selected OCaml executables are built before
-starting the alias timeout. Dune still resolves any additional action dependencies
-inside the timed alias. These per-test aliases have existed since Dune
+starting the alias timeout. For a Python suite declared as
+`(rule (alias runtest-NAME) (deps ...) (action ...))`, the runner reads that
+rule's `(deps ...)` and any `%{exe:...}` its action names, and builds those
+before the alias timeout starts; the alias itself still runs inside the timeout.
+A suite whose body really hangs therefore still ends as `TIMEOUT`, and one whose
+body only needed compiling reaches `Ran N tests` instead of spending the whole
+budget on the build. If the reader fails, the run names the alias, prints the
+reason and falls back to building the alias inside its budget. These per-test
+aliases have existed since Dune
 3.20, below this repository's 3.22 minimum. See the
 [Dune test reference](https://dune.readthedocs.io/en/latest/reference/dune/test.html).
 To check this runner boundary without an OCaml build, run
 `python3 -m unittest discover -s scripts/ci/tests -p test_targeted_stanza_isolation.py -v`.
 Its shell-runner fixture substitutes the build command; it is not a product
 test result. Keep this focused CI self-check separate from product behavior suites.
+
+Reading a run's own log needs a writable cache directory. `gh run view RUN --log`
+writes under `$HOME/.cache/gh`, so on a lane whose home is read-only it fails with
+`mkdir /home/opam/.cache/gh: read-only file system` before fetching anything — an
+error that looks like "the log is unreadable" but is only the cache path. Set
+`XDG_CACHE_HOME` to a writable directory for the read, for example
+`XDG_CACHE_HOME=/tmp/ghcache gh run view RUN --log`. A review that says a log line
+could not be read should name which of the two failed: the fetch or the cache.
+
+Reading one source file needs the same care. The Contents API returns an empty
+`content` with `encoding: "none"` for a file above roughly 1 MB, so
+`gh api .../contents/PATH --jq .content | base64 -d | grep -c SYMBOL` answers
+`0` for a file it never read. `bin/masc_tui.ml` is 2.27 MB (41,703 lines), so
+that path always reports zero there. Read the raw URL or `git show REF:PATH`,
+and quote the input size beside any count — `lines=41703 grep=0` means the
+symbol is absent, `lines=0 grep=0` means the read failed. A count on an empty
+input is not evidence of absence.
+
+Elapsed time is arithmetic, not an impression. Subtract the run's `createdAt`
+from the current UTC time and quote the result; a run started 17:44 was called
+"four and a half hours in" at 18:28, when it was 43 minutes in and still had over
+two hours of its 180 minute timeout left. Three separate judgements — "stalled",
+"past the timeout", "still has 96 minutes" — were built on that misread clock.
+A run's own `createdAt` and `timeout-minutes` give both the elapsed and the
+remaining time; state which one is quoted.
+
+Counting a long `Counter(...)` or argument list by eye is the same mistake in a
+different shape. A failure message listed 17 keys over 98 requests; reading it
+by eye missed `('setup', '/api/v1/dashboard/scheduled-automation'): 5`, and two
+wrong hypotheses were built on "the path is absent". Extracting the keys and
+summing them showed the schedule path present and — scoped to its phase — zero
+after the test cleared its list, which was the actual finding. Parse the
+structure and count it; do not scan it.
+
+A failure count is per framework, and one anchor does not catch both. Alcotest
+prints `2 failures! in 0.027s.` and `[FAIL] name index …`; Python unittest prints
+`^FAILED (failures=N)` and `^FAIL: name`. Counting `^FAIL:` reported 5 or 6 in a
+run whose log held 49 failing test executions. Count the per-framework summary
+line and say whether the number is executions, cases or lines — a suite, an
+execution and a printed line are three different counts of the same log.
+`[FAIL]` rows also repeat when wrapped, so deduplicate before quoting cases.
+Anchor the execution on the `Full test results in .../_tests/NAME'.` line, whose
+closing quote is `'` and not a backtick; pairing backticks reports zero.
+
+A single run's failure count does not say whether the failures belong to that
+head. Compare the failing execution names across two heads before calling any of
+them a regression: two whole-regression runs held 51 and 49 failing executions
+with 48 in common, so 48 were independent of the head and only four differed.
+The 48 common failures are an environment layer, not a code regression. Without
+that comparison, "N fail" reads as a statement about the branch when it is mostly
+a statement about the runner.
+
+Dune runs suites in parallel, so a suite's `Ran N tests` / `Test Successful` line
+is not the line that follows its own invocation. Taking the next result line
+attributes another suite's summary to the one being read: a `test_mcp_server_eio`
+block that failed at `test_mcp_server_eio.ml:3045` was read as
+`Test Successful in 0.014s. 8 tests run.` from a different suite. Pair a summary
+with its suite by the sandbox path (`_build/.sandbox/<hash>/...`) or by a name
+inside the result block, never by adjacency.
+
+A Python traceback lists the outermost caller first, so the frame to cite is the
+last one, not the test function's own line. A failing
+`test_failed_schedule_reads_are_read_again_with_growing_waits` showed
+`line 143, in test_...` (the line that calls `run_schedules`) above
+`line 131, in scenario`, where the `step(...)` wait actually timed out; citing
+`:143` names the caller and the same number in a sibling file can mean something
+else entirely. Cite the innermost frame with its file name.
+
+The innermost frame is often not the line that reads like the cause. A `step(...)`
+wait that timed out ended at `test_tui_schedules_signal.py:128` (`step(`), then
+`test_tui_chat_owed_history.py:230` (`wait_until`), then `:220` (`self.fail`).
+The label string sits on the line after `step(` and is not a frame at all —
+citing `:131` named an argument, not a frame. Quote the call's first line and say
+which frame you mean when the traceback crosses into a helper: the test's own
+line shows the wait that was asked for, the helper's line shows where it failed.
+
+A `.ml` pattern match alone is not the contract. `masc_tui_owed_read.ml` drops
+`retry_at` when a change arrives while waiting, which reads like a discarded
+backoff until the `.mli` says why: "A change while waiting out a failure is read
+now … the failures in a row are kept, so the next failure still waits longer."
+Read the `.mli` before calling a transition a defect — a value the `.ml` discards
+is often one the interface documents as intentionally dropped, and a call that
+looks redundant can be the caller's mistake rather than the callee's.
+
+Search the whole repository before reporting a call site as missing. Grepping one
+file reported "schedules has no `Snapshot_read.settle`" from three hits in
+`bin/masc_tui.ml`, while the two real calls are in `bin/masc_tui_types.ml:17326`
+and `:17371` — a finding that became a P1 task with a repair instruction before it
+was refuted. Use `git grep -n SYMBOL` across the tree; a hit set from one file
+answers only what that file does, not what the module does.
+
+A failure block belongs to one test case, and a suite file holds several. A
+counter read from a failing test was quoted as `changed: 0` and `5 requests`;
+the failing test never calls `set_phase`, so its phase is the default, and the
+`5` came from a sibling test's block in the same artifact — the real count was
+`6`. Before quoting a number out of a log, confirm which test case's block it
+came from, and read the test's own key sequence before treating a phase or a
+count as evidence about it.
 
 The release selection covers Keeper turn interrupt, chat HTTP/delivery identity,
 MCP Task lifecycle and verification submission,

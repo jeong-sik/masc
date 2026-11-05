@@ -48,10 +48,6 @@ type = "object"
 additional_properties = false
 
 [[params.items.params.params]]
-name = "strict"
-type = "boolean"
-
-[[params.items.params.params]]
 name = "completion_contract"
 type = "array"
 items = { type = "string" }

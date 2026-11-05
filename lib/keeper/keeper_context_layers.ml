@@ -10,7 +10,6 @@ type layer_id =
   | Workspace_memory
   | Wiki
   | Lane_updates
-  | Repository_freshness
   | Autonomous_trigger
   | Scheduled_automation
   | Completion_authority
@@ -45,7 +44,6 @@ let ordered =
   ; Workspace_memory
   ; Wiki
   ; Lane_updates
-  ; Repository_freshness
   ; Autonomous_trigger
   ; Scheduled_automation
   ; Completion_authority
@@ -73,18 +71,17 @@ let order_index = function
   | Workspace_memory -> 6
   | Wiki -> 7
   | Lane_updates -> 8
-  | Repository_freshness -> 9
-  | Autonomous_trigger -> 10
-  | Scheduled_automation -> 11
-  | Completion_authority -> 12
-  | Task_cancellations -> 13
-  | Pending_mentions -> 14
-  | Scope_messages -> 15
-  | Own_board_posts -> 16
-  | Board_activity -> 17
-  | Own_recent_actions -> 18
-  | Recent_work -> 19
-  | Fleet_messages -> 20
+  | Autonomous_trigger -> 9
+  | Scheduled_automation -> 10
+  | Completion_authority -> 11
+  | Task_cancellations -> 12
+  | Pending_mentions -> 13
+  | Scope_messages -> 14
+  | Own_board_posts -> 15
+  | Board_activity -> 16
+  | Own_recent_actions -> 17
+  | Recent_work -> 18
+  | Fleet_messages -> 19
 ;;
 
 type unattributed = World_frame | Host_workspace_recall | Direct_turn | Unprojected_input
@@ -160,7 +157,6 @@ let layer_name = function
   | Workspace_memory -> "workspace_memory"
   | Wiki -> "wiki"
   | Lane_updates -> "lane_updates"
-  | Repository_freshness -> "repository_freshness"
   | Autonomous_trigger -> "autonomous_trigger"
   | Scheduled_automation -> "scheduled_automation"
   | Completion_authority -> "completion_authority"
@@ -200,7 +196,7 @@ let source_of_name name =
 let resend_on_resume = function
   | Layer
       ( Active_goals | Goal_observations | Current_task | Approval_authority | Connected_surfaces
-      | Namespace_state | Workspace_memory | Wiki | Lane_updates | Repository_freshness
+      | Namespace_state | Workspace_memory | Wiki | Lane_updates
       | Own_board_posts | Own_recent_actions | Recent_work | Fleet_messages )
   | Unattributed (Host_workspace_recall | Direct_turn | Unprojected_input) ->
     Sent_when_changed

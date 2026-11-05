@@ -20,8 +20,6 @@
 open Alcotest
 
 module Http = Masc.Http_server_eio
-module Preparation = Masc_test_deps.Board_test_preparation
-
 (* Fixture tick for create and modify: the runner's floor tick, below every
    interval these fixtures declare, so the runner-tick check never refuses one
    of them. *)
@@ -264,7 +262,32 @@ let dispatch_json ?meth ?token ~router ~path ~extra_headers ~body () =
   status, Yojson.Safe.from_string body
 ;;
 
+(* [Server_auth.http_auth_strict_enabled] reads these variables, and a shell
+   that exports a public [MASC_HTTP_BASE_URL] (the Cloudflare tunnel a live
+   install runs behind) turns strict auth on by itself. Strict mode refuses the
+   deliberately tokenless same-origin dashboard write these routes must keep
+   serving, so the fixture pins all three to loopback. A variable that was
+   unset cannot be unset again, so it is left empty, which every reader treats
+   as unset (#47727). *)
+let with_loopback_http_environment f =
+  let bindings =
+    [ "MASC_HTTP_AUTH_STRICT", "false"
+    ; "MASC_HOST", "127.0.0.1"
+    ; "MASC_HTTP_BASE_URL", "http://127.0.0.1:8935"
+    ]
+  in
+  let previous = List.map (fun (name, _) -> name, Sys.getenv_opt name) bindings in
+  List.iter (fun (name, value) -> Unix.putenv name value) bindings;
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter
+        (fun (name, old) -> Unix.putenv name (Option.value old ~default:""))
+        previous)
+    f
+;;
+
 let with_authenticated_activity_router ~prefix ~agent_name f =
+  with_loopback_http_environment @@ fun () ->
   let base_path = Filename.temp_dir prefix "" in
   let previous_state = Server_auth.For_testing.snapshot_server_state () in
   Fun.protect
@@ -504,14 +527,14 @@ let test_goal_transition_uses_authenticated_actor () =
   @@ fun ~base_path ~config ~state:_ ~sw:_ ~clock:_ ~router ~token ->
   let goal =
     match
-      Goal_store.upsert_goal config
+      Goal_store.upsert_goal_with_events ~actor:"test" config
         ~title:"Canonical actor transition"
         ~metric:"transition"
         ~target_value:"recorded"
         ()
     with
-    | Ok (goal, `created) -> goal
-    | Ok (_, `updated _) -> fail "goal fixture unexpectedly updated an existing row"
+    | Ok (goal, `created, _) -> goal
+    | Ok (_, `updated _, _) -> fail "goal fixture unexpectedly updated an existing row"
     | Error error -> fail (Goal_store.write_error_to_string error)
   in
   let workspace base root =
@@ -551,11 +574,13 @@ let test_goal_transition_uses_authenticated_actor () =
     |> List.filter_map (fun line ->
            let line = String.trim line in
            if String.equal line "" then None else Some (Yojson.Safe.from_string line))
+    |> List.filter (fun event ->
+           Yojson.Safe.equal (Yojson.Safe.Util.member "event_type" event) (`String "goal_phase"))
   in
   let event =
     match events with
     | [event] -> event
-    | [] | _ :: _ -> fail "goal transition must write one durable event"
+    | [] | _ :: _ -> fail "goal transition must write one durable phase event"
   in
   let open Yojson.Safe.Util in
   check string "goal event id" goal.id (event |> member "goal_id" |> to_string);
@@ -591,7 +616,6 @@ let test_dashboard_delete_preserves_applied_pending_and_refused () =
   with_authenticated_activity_router
     ~prefix:"board-delete-persistence-" ~agent_name:"board-delete-operator"
   @@ fun ~base_path ~config:_ ~state:_ ~sw:_ ~clock:_ ~router ~token ->
-  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   with_board_store ~base_path @@ fun () ->
   let router = Server_dashboard_http_delete_actions.add_delete_action_routes router in
   let create content =
@@ -609,7 +633,9 @@ let test_dashboard_delete_preserves_applied_pending_and_refused () =
   in
   let post_id = create "delete with a failed snapshot" in
   let writes = ref 0 in
-  Masc.Board_dispatch.set_board_write_hook (fun () -> incr writes);
+  Masc.Board_dispatch.set_board_sse_hook (function
+    | Masc.Board_dispatch.Post_changed _ -> incr writes
+    | _ -> ());
   let path = Masc.Board.reactions_path (Masc.Board.global ()) in
   let had_snapshot = Sys.file_exists path in
   let backup = path ^ ".before-delete" in
@@ -629,12 +655,12 @@ let test_dashboard_delete_preserves_applied_pending_and_refused () =
         (receipt |> member "applied" |> to_bool);
       check string "persistence remains pending" "pending"
         (receipt |> member "persistence" |> to_string);
-      check int "applied pending deletion invalidates projections" 1 !writes;
+      check int "applied pending deletion is announced" 1 !writes;
       check bool "post is absent from memory" true
         (Result.is_error (Masc.Board_dispatch.get_post ~post_id));
       let retry_status, _ = delete post_id in
       check int "repeating the applied deletion is a lookup miss" 404 retry_status;
-      check int "refused retry does not invalidate again" 1 !writes);
+      check int "refused retry is not announced again" 1 !writes);
   let store =
     match Masc.Board_dispatch.backend () with Masc.Board_dispatch.Jsonl store -> store
   in
@@ -662,7 +688,6 @@ let test_board_write_routes_reject_foreign_workspace () =
   with_authenticated_activity_router
     ~prefix:"board-write-workspace-" ~agent_name:"workspace-writer"
   @@ fun ~base_path ~config ~state:_ ~sw:_ ~clock:_ ~router ~token ->
-  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   with_board_store ~base_path @@ fun () ->
   let expected root = `Assoc
       [ "base_path", `String (Unix.realpath config.Masc.Workspace.base_path)
@@ -722,7 +747,6 @@ let test_board_post_route_preserves_publication_evidence () =
   with_authenticated_activity_router
     ~prefix:"board-post-publication-" ~agent_name:"publication-operator"
   @@ fun ~base_path ~config ~state:_ ~sw:_ ~clock:_ ~router ~token ->
-  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   with_board_store ~base_path @@ fun () ->
   let open Yojson.Safe.Util in
   let workspace masc_root = `Assoc
@@ -814,7 +838,6 @@ let test_board_write_routes_use_authenticated_actor () =
     ~prefix:"board-write-http-actor-"
     ~agent_name:"credential-owner"
   @@ fun ~base_path ~config:_ ~state:_ ~sw:_ ~clock:_ ~router ~token ->
-  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   with_board_store ~base_path
   @@ fun () ->
   let post_json path fields =
@@ -970,7 +993,6 @@ let test_board_list_route_and_projection_share_the_kept_page () =
     ~prefix:"board-list-kept-"
     ~agent_name:"list-reader"
   @@ fun ~base_path ~config ~state:_ ~sw:_ ~clock:_ ~router ~token ->
-  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   with_board_store ~base_path
   @@ fun () ->
   let post title =
@@ -1033,7 +1055,6 @@ let test_board_list_timeout_cannot_be_not_modified () =
   with_authenticated_activity_router
     ~prefix:"board-list-timeout-" ~agent_name:"timeout-reader"
   @@ fun ~base_path ~config ~state:_ ~sw:_ ~clock:_ ~router ~token ->
-  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   with_board_store ~base_path @@ fun () ->
   (* Publish a builder-produced result through the real cache API. This
      exact route entry includes both the workspace and authenticated actor;
@@ -1077,7 +1098,6 @@ let test_board_http_typed_attachments () =
     ~prefix:"board-http-attachments-"
     ~agent_name:"credential-owner"
   @@ fun ~base_path ~config:_ ~state:_ ~sw:_ ~clock:_ ~router ~token ->
-  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   with_board_store ~base_path
   @@ fun () ->
   let post title extra =
@@ -1149,7 +1169,6 @@ let test_sub_board_routes_use_authenticated_owner () =
     ~prefix:"sub-board-http-owner-"
     ~agent_name:"credential-owner"
   @@ fun ~base_path ~config:_ ~state:_ ~sw:_ ~clock:_ ~router ~token ->
-  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   with_board_store ~base_path
   @@ fun () ->
   let request ?meth path fields =
@@ -1214,7 +1233,6 @@ let test_sub_board_routes_reject_unknown_access () =
     ~prefix:"sub-board-http-access-"
     ~agent_name:"access-owner"
   @@ fun ~base_path ~config:_ ~state:_ ~sw:_ ~clock:_ ~router ~token ->
-  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   with_board_store ~base_path
   @@ fun () ->
   let request ?meth path fields =
@@ -1280,7 +1298,6 @@ let test_sub_board_reads_require_auth_in_strict_mode () =
     ~prefix:"sub-board-http-strict-read-"
     ~agent_name:"strict-reader"
   @@ fun ~base_path ~config:_ ~state:_ ~sw:_ ~clock:_ ~router ~token ->
-  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   with_board_store ~base_path
   @@ fun () ->
   Masc_test_deps.with_process_env "MASC_HTTP_AUTH_STRICT" (Some "1")
@@ -1309,7 +1326,6 @@ let test_board_context_inference_uses_current_owner_contract_and_actor () =
     ~prefix:"board-context-inference-http-actor-"
     ~agent_name:"credential-owner"
   @@ fun ~base_path ~config ~state ~sw ~clock ~router ~token ->
-  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   with_board_store ~base_path
   @@ fun () ->
   let keeper_name = "context-inference-target" in
@@ -1693,7 +1709,6 @@ let test_board_detail_defaults_to_latest_comments_with_older_pages () =
     ~prefix:"board-detail-pages-"
     ~agent_name:"page-reader"
   @@ fun ~base_path ~config:_ ~state:_ ~sw:_ ~clock:_ ~router ~token ->
-  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   with_board_store ~base_path
   @@ fun () ->
   let post =

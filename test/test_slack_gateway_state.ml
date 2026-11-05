@@ -632,6 +632,18 @@ let test_decode_event_unknown_is_ignored_event () =
 
 (* ---------------------------------------------------------------- *)
 
+(* A reader is told about a phase change, not about a new retry inside one
+   (RFC-0480 §3.4). *)
+let test_same_phase_ignores_retry_details () =
+  let pending reason = S.Reconnect_pending { backoff_until_mono = 1.0; reason } in
+  check bool "a new retry reason is the same phase" true
+    (S.same_phase (pending "first") (pending "second"));
+  check bool "connecting is another phase" false (S.same_phase S.Awaiting_hello S.Connected);
+  check bool "another failure reason is another phase" false
+    (S.same_phase (S.Failed "first") (S.Failed "second"));
+  check bool "the same failure is the same phase" true
+    (S.same_phase (S.Failed "first") (S.Failed "first"))
+
 let () =
   run "Slack_gateway_state"
     [ "trigger_policy"
@@ -717,4 +729,8 @@ let () =
         ; test_case "decode unknown -> Ignored_event" `Quick
             test_decode_event_unknown_is_ignored_event
         ]
+    ; ( "same phase"
+      , [ test_case "a new retry reason is the same phase" `Quick
+            test_same_phase_ignores_retry_details
+        ] )
     ]

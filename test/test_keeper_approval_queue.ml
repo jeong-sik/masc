@@ -8,6 +8,21 @@ let () =
   Masc.Prompt_defaults.init ()
 ;;
 
+(* The production peek, read back as the exact pending selection. *)
+let select_ready ~now ~ready state =
+  Option.bind (Keeper_event_queue_state.peek_when ~now ~ready state) (fun source ->
+    List.find_opt
+      (fun (selection : Keeper_event_queue_state.pending_selection) ->
+         Keeper_event_queue.stimulus_identity_equal selection.source source)
+      (Keeper_event_queue_state.pending_selections state))
+;;
+
+(* The production loader with the production peek. *)
+let select_queue_entry ~base_path ~keeper_name ~now ~ready =
+  Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name
+  |> Result.map (select_ready ~now ~ready)
+;;
+
 module AQ = Masc.Keeper_approval_queue
 module Rules = Masc.Keeper_approval_queue_rules
 module Rule_types = Keeper_approval_queue_rules_types
@@ -133,8 +148,23 @@ let pending_entry_exn id =
 
 let drop_resolution ~base_path ~keeper_name resolution =
   let post_id = Keeper_event_queue.hitl_resolution_post_id resolution in
-  match Registry_queue.drop_by_post_id ~base_path keeper_name ~post_id with
-  | Ok _ -> ()
+  let acked =
+    Result.bind
+      (Keeper_event_queue_persistence.pending_selections_result ~base_path ~keeper_name)
+      (fun selections ->
+         match
+           List.find_opt
+             (fun (selection : Keeper_event_queue_state.pending_selection) ->
+                String.equal selection.source.post_id post_id)
+             selections
+         with
+         | None -> Ok ()
+         | Some selection ->
+           Keeper_event_queue_persistence.ack_pending_result
+             ~base_path ~keeper_name ~selection ())
+  in
+  match acked with
+  | Ok () -> ()
   | Error reason -> Alcotest.fail reason
 ;;
 
@@ -400,7 +430,7 @@ let test_pending_origin_projection_and_audit_keep_actual_witness () =
         { post_id = "board-actual-source"; urgency = Normal; arrived_at = 1.0
         ; payload = Board_signal
             { kind = Post_created; author = "author"; title = "request"
-            ; content = "admitted request"; hearth = None; updated_at = None; audience = Some Keeper_event_queue.Audience_discoverable } }
+            ; content = "admitted request"; hearth = None; updated_at = None; audience = Keeper_event_queue.Audience_discoverable } }
       in
       let selections =
         Keeper_event_queue.enqueue Keeper_event_queue.empty board
@@ -485,7 +515,7 @@ let test_mixed_hitl_board_origin_keeps_exact_grant_separate () =
        let board : Keeper_event_queue.stimulus =
          {post_id="board-b"; urgency=Normal; arrived_at=1.0
          ; payload=Board_signal {kind=Post_created; author="author"; title="request"; content="new request"
-           ; hearth=None; updated_at=None; audience = Some Keeper_event_queue.Audience_discoverable}} in
+           ; hearth=None; updated_at=None; audience = Keeper_event_queue.Audience_discoverable}} in
        let hitl = {board with post_id="hitl-a"; payload=Hitl_resolved resolution} in
        let selections stimuli =
          List.fold_left Keeper_event_queue.enqueue Keeper_event_queue.empty stimuli
@@ -2058,9 +2088,17 @@ let test_resolution_is_durable_and_origin_scoped () =
          (Sys.file_exists replay_results_path);
        let replay_results = Yojson.Safe.from_file replay_results_path in
        Alcotest.(check int)
-         "replay sidecar v1"
-         1
+         "replay sidecar v2"
+         2
          (replay_results |> member "version" |> to_int);
+       (* v2 adds the operator settlement rows beside the outcomes; a sidecar
+          with no settlement still carries the empty list (#26191). *)
+       Alcotest.(check bool)
+         "settlements list is present when empty"
+         true
+         (match replay_results |> member "settlements" with
+          | `List [] -> true
+          | _ -> false);
        let replay_outcome_wire =
          replay_results
          |> member "outcomes"
@@ -2598,7 +2636,7 @@ let approve_with_wake ~base_path ~keeper_name ~input =
 let acknowledge_wake ~base_path ~keeper_name =
   let selection =
     match
-      Event_queue_persistence.select_when_result
+      select_queue_entry
         ~base_path
         ~keeper_name
         ~now:(Unix.gettimeofday ())
@@ -2739,6 +2777,127 @@ let test_consumed_delivery_with_queued_wake_survives_a_restart () =
       "wake is still queued"
       true
       (Option.is_some (durable_resolution_opt ~base_path ~keeper_name ~approval_id));
+    drop_resolution ~base_path ~keeper_name resolution)
+;;
+
+(* #26191. The operator settlement is the terminal judgement on a consumed
+   grant whose replay outcome stayed absent after a restart. This pins the
+   fence (keeper, resolution sequence), idempotence by judgement identity,
+   explicit conflicts, and durability across a reinstall. *)
+let test_operator_settlement_is_fenced_idempotent_and_durable () =
+  with_spent_fixture "queue-operator-settlement" (fun ~base_path ~keeper_name ->
+    let input = `Assoc [ "target", `String "operator-settled" ] in
+    let approval_id, resolution = approve_with_wake ~base_path ~keeper_name ~input in
+    consume_grant_exn ~base_path ~keeper_name ~input approval_id;
+    let detail_ref = store_replay_artifact ~base_path "operator found the effect failed" in
+    let module R = Masc.Keeper_approval_queue_result in
+    let settlement_of ?(kind = R.Effect_confirmed_failed detail_ref) ?(settled_at = 0.0)
+          resolution_sequence : R.operator_settlement =
+      { kind
+      ; resolution_sequence
+      ; admitted_revision = 0L
+      ; source_post_id = "wake-row"
+      ; stage = "replay_journal"
+      ; settled_at
+      }
+    in
+    (* The fence mismatch itself reveals the stored sequence, so the test
+       never hard-codes the fixture's sequence numbering. *)
+    let stored_sequence =
+      match
+        AQ.record_operator_settlement
+          ~base_path
+          ~keeper_name
+          ~id:approval_id
+          (settlement_of 9999)
+      with
+      | Error (R.Grant_settlement_fence_mismatch { stored_sequence; _ }) ->
+        stored_sequence
+      | other ->
+        Alcotest.failf
+          "a wrong resolution sequence must be a fence mismatch, got %s"
+          (match other with
+           | Ok _ -> "ok"
+           | Error error -> R.grant_error_to_string error)
+    in
+    (match
+       AQ.record_operator_settlement
+         ~base_path
+         ~keeper_name:"not-this-keeper"
+         ~id:approval_id
+         (settlement_of stored_sequence)
+     with
+     | Error R.Grant_settlement_keeper_mismatch _ -> ()
+     | other ->
+       Alcotest.failf
+         "a wrong keeper must be a keeper mismatch, got %s"
+         (match other with
+          | Ok _ -> "ok"
+          | Error error -> R.grant_error_to_string error));
+    (match
+       AQ.record_operator_settlement
+         ~base_path
+         ~keeper_name
+         ~id:approval_id
+         (settlement_of stored_sequence)
+     with
+     | Ok R.Settlement_recorded -> ()
+     | other ->
+       Alcotest.failf
+         "the first settlement records, got %s"
+         (match other with
+          | Ok _ -> "ok"
+          | Error error -> R.grant_error_to_string error));
+    (* Identical judgement with a fresh clock stays idempotent. *)
+    (match
+       AQ.record_operator_settlement
+         ~base_path
+         ~keeper_name
+         ~id:approval_id
+         (settlement_of stored_sequence ~settled_at:12345.0)
+     with
+     | Ok R.Settlement_already_recorded -> ()
+     | other ->
+       Alcotest.failf
+         "an identical judgement is idempotent, got %s"
+         (match other with
+          | Ok _ -> "ok"
+          | Error error -> R.grant_error_to_string error));
+    (* A different judgement on the same approval is an explicit conflict. *)
+    (match
+       AQ.record_operator_settlement
+         ~base_path
+         ~keeper_name
+         ~id:approval_id
+         (settlement_of stored_sequence ~kind:R.Terminally_abandoned)
+     with
+     | Error (R.Grant_settlement_conflict _) -> ()
+     | other ->
+       Alcotest.failf
+         "a different judgement conflicts, got %s"
+         (match other with
+          | Ok _ -> "ok"
+          | Error error -> R.grant_error_to_string error));
+    (* The settlement is the durable answer the delivery carries: it is
+       visible on the delivery and survives a reinstall. *)
+    (match AQ.approved_resolution_delivery ~base_path ~id:approval_id with
+     | Ok
+         { R.state = R.Resolution_consumed
+         ; replay_outcome = None
+         ; operator_settlement = Some _
+         ; _
+         } -> ()
+     | Ok _ -> Alcotest.fail "the settled delivery lost its settlement or gained an outcome"
+     | Error error -> Alcotest.fail (R.grant_error_to_string error));
+    let report = reinstall_exn ~base_path in
+    Alcotest.(check bool)
+      "reinstall kept the settlement sidecar readable"
+      true
+      (Option.is_none report.replay_projection_error);
+    (match AQ.approved_resolution_delivery ~base_path ~id:approval_id with
+     | Ok { R.operator_settlement = Some _; _ } -> ()
+     | Ok _ -> Alcotest.fail "the settlement did not survive the reinstall"
+     | Error error -> Alcotest.fail (R.grant_error_to_string error));
     drop_resolution ~base_path ~keeper_name resolution)
 ;;
 
@@ -5671,7 +5830,7 @@ let test_observed_delivery_preserves_grant_without_replaying_wake () =
        in
        let selection =
          match
-           Event_queue_persistence.select_when_result
+           select_queue_entry
              ~base_path
              ~keeper_name
              ~now:(Unix.gettimeofday ())
@@ -5783,7 +5942,7 @@ let test_cancelled_delivery_preserves_grant_without_replaying_wake () =
          |> require_some "HITL wake was not durably queued"
        in
        let selection =
-         Event_queue_persistence.select_when_result
+         select_queue_entry
            ~base_path
            ~keeper_name
            ~now:(Unix.gettimeofday ())
@@ -7345,6 +7504,10 @@ let () =
             "consumed delivery with queued wake survives a restart"
             `Quick
             test_consumed_delivery_with_queued_wake_survives_a_restart
+        ; Alcotest.test_case
+            "operator settlement is fenced, idempotent and durable"
+            `Quick
+            test_operator_settlement_is_fenced_idempotent_and_durable
         ; Alcotest.test_case
             "unconsumed delivery without a wake survives and replays"
             `Quick

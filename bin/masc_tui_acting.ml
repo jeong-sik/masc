@@ -66,16 +66,16 @@ let visible filter (event : Observer.event) =
               | Observer.Agent_core_other _ )
           ; _
           } -> true
-      | Observer.Keeper_heartbeat _ | Observer.Keeper_composite_changed _
-      | Observer.Snapshot _
+      | Observer.Keeper_heartbeat _ | Observer.Keeper_composite_changed _ | Observer.Keeper_metrics_appended _
+      | Observer.Snapshot _ | Observer.Execution_snapshot
       (* A reply sends one stream frame per token, and a queue-size change is
          state rather than something a keeper did. Both belong with the
          heartbeat: shown under [Everything], never counted as an action. *)
       | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
-      | Observer.Keeper_waiting_inventory_changed _
+      | Observer.Keeper_waiting_inventory_changed _ | Observer.Keeper_async_requests_changed _ | Observer.Keeper_skill_activations_changed _ | Observer.Keeper_roster_change _ | Observer.Keeper_turn_changed _
       (* A memory journal row follows a memory write whose tool call is
          already its own action row. *)
-      | Observer.Keeper_memory_journal_appended _
+      | Observer.Keeper_memory_journal_appended _ | Observer.Keeper_runtime_journal_appended _
       (* A provider-call observation is identity the fold reads, not
          something a keeper did. *)
       | Observer.Keeper_turn_observation _
@@ -83,9 +83,10 @@ let visible filter (event : Observer.event) =
          deliberation changing stage is something the server reports, not
          something a keeper did. *)
       | Observer.Fusion_run_status _
-      (* A run registry changed. Nothing a keeper did; the frame says only
-         that a reader showing internal runs should fetch them again. *)
-      | Observer.Internal_agent_runs_changed | Observer.Schedule_store_invalidated | Observer.Pending_confirm_invalidated ->
+      (* A run registry or the Board changed. Nothing a keeper did; the
+         frame says only that a reader showing it should fetch it again. *)
+      | Observer.Internal_agent_runs_changed _ | Observer.Workspace_store_changed _ | Observer.Dataset_changed _ | Observer.Gate_connector_changed _ | Observer.Keeper_event_queue_changed _ | Observer.Board_changed _
+      | Observer.Approval_change _ ->
           false
       | Observer.Keeper_tool_call _ | Observer.Keeper_turn_complete _
       | Observer.Keeper_chat_appended _ | Observer.Other _ ->
@@ -116,12 +117,12 @@ let retained_as_action (event : Observer.event) =
   | Observer.Keeper_turn_observation _ -> true
   | Observer.Agent_core _ | Observer.Keeper_heartbeat _
   | Observer.Keeper_tool_call _ | Observer.Keeper_turn_complete _
-  | Observer.Keeper_composite_changed _ | Observer.Keeper_chat_appended _
-  | Observer.Keeper_memory_journal_appended _
+  | Observer.Keeper_composite_changed _ | Observer.Keeper_metrics_appended _ | Observer.Keeper_chat_appended _
+  | Observer.Keeper_memory_journal_appended _ | Observer.Keeper_runtime_journal_appended _
   | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
-  | Observer.Keeper_waiting_inventory_changed _
-  | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed | Observer.Schedule_store_invalidated | Observer.Pending_confirm_invalidated
-  | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Other _ ->
+  | Observer.Keeper_waiting_inventory_changed _ | Observer.Keeper_async_requests_changed _ | Observer.Keeper_skill_activations_changed _ | Observer.Keeper_roster_change _ | Observer.Keeper_turn_changed _
+  | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed _ | Observer.Workspace_store_changed _ | Observer.Dataset_changed _ | Observer.Gate_connector_changed _ | Observer.Keeper_event_queue_changed _ | Observer.Board_changed _ | Observer.Approval_change _
+  | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Execution_snapshot | Observer.Other _ ->
       visible Actions event
 
 let retain ~actions ~quiet ~event_of entries =
@@ -390,6 +391,18 @@ let agent_core_row ~at ~duration_ms (e : Observer.agent_core) =
   ; detail
   }
 
+(* The Keeper a change names, or ["server"] for a change of the whole queue,
+   the rules, a Gate mode or an installation's questions. *)
+let approval_change_keeper = function
+  | Observer.Gate_keeper_settings_changed { keeper }
+  | Observer.Tool_approval_waits_changed { keeper }
+  | Observer.Tool_approval_mode_changed { keeper }
+  | Observer.Keeper_asks_changed { keeper } ->
+      keeper
+  | Observer.Approval_queue_changed | Observer.Approval_rules_changed | Observer.Gate_mode_changed
+  | Observer.Installation_asks_changed _ ->
+      "server"
+
 let keeper_of_event ~traces (event : Observer.event) =
   match event with
   | Observer.Agent_core e -> (
@@ -409,15 +422,24 @@ let keeper_of_event ~traces (event : Observer.event) =
   | Observer.Keeper_turn_complete t -> t.Observer.tc_keeper
   | Observer.Keeper_turn_observation o -> o.Observer.to_keeper
   | Observer.Keeper_composite_changed { keeper; _ }
+  | Observer.Keeper_metrics_appended { keeper; _ }
   | Observer.Keeper_chat_appended { keeper; _ }
   | Observer.Keeper_memory_journal_appended { keeper; _ }
+  | Observer.Keeper_runtime_journal_appended { keeper; _ }
   | Observer.Keeper_chat_stream_frame { keeper; _ }
   | Observer.Keeper_turn_stream_frame { keeper; _ }
   | Observer.Keeper_waiting_inventory_changed { keeper; _ }
+  | Observer.Keeper_async_requests_changed { keeper }
+  | Observer.Keeper_skill_activations_changed { keeper }
+  | Observer.Keeper_event_queue_changed { keeper }
+  | Observer.Keeper_roster_change (Observer.Keeper_row_changed { keeper })
+  | Observer.Keeper_turn_changed { keeper; _ }
   | Observer.Fusion_run_status { keeper; _ } ->
       keeper
-  | Observer.Internal_agent_runs_changed | Observer.Schedule_store_invalidated | Observer.Pending_confirm_invalidated | Observer.Lane_resource _
-  | Observer.Snapshot _ | Observer.Other _ ->
+  | Observer.Approval_change change -> approval_change_keeper change
+  | Observer.Keeper_roster_change Observer.Every_row_changed
+  | Observer.Internal_agent_runs_changed _ | Observer.Workspace_store_changed _ | Observer.Dataset_changed _ | Observer.Gate_connector_changed _ | Observer.Board_changed _ | Observer.Lane_resource _
+  | Observer.Snapshot _ | Observer.Execution_snapshot | Observer.Other _ ->
       "server"
 
 (* The EVENT column's word for any event, the sibling of {!keeper_of_event}
@@ -442,11 +464,19 @@ let label_of_event (event : Observer.event) =
       | None -> if skill then "skill call" else "tool call")
   | Observer.Keeper_turn_complete _ -> "turn done"
   | Observer.Keeper_composite_changed _ -> "composite"
+  | Observer.Keeper_metrics_appended _ -> "metrics"
   | Observer.Keeper_turn_observation _ -> "call"
   | Observer.Keeper_chat_appended _ -> "chat"
   | Observer.Keeper_memory_journal_appended _ -> "memory"
+  | Observer.Keeper_runtime_journal_appended { journal = Observer.Native_tasks_journal; _ } -> "native tasks"
+  | Observer.Keeper_runtime_journal_appended { journal = Observer.Child_content_journal; _ } -> "child content"
   | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _ -> "chat stream"
   | Observer.Keeper_waiting_inventory_changed _ -> "waiting queue"
+  | Observer.Keeper_async_requests_changed _ -> "async requests"
+  | Observer.Keeper_skill_activations_changed _ -> "skill activations"
+  | Observer.Keeper_roster_change _ -> "roster"
+  | Observer.Keeper_turn_changed { change = Observer.Turn_state; _ } -> "turns"
+  | Observer.Keeper_turn_changed { change = Observer.Turn_preview; _ } -> "preview"
   | Observer.Fusion_run_status _ -> "fusion"
   | Observer.Lane_resource resource -> (
       match resource.Observer.lr_lifecycle with
@@ -454,10 +484,28 @@ let label_of_event (event : Observer.event) =
       | Masc.Lane_addon_resource_events.Acquire_failed -> "acquisition failed"
       | Masc.Lane_addon_resource_events.Release_confirmed -> "resource released"
       | Masc.Lane_addon_resource_events.Release_incomplete -> "release unconfirmed")
-  | Observer.Internal_agent_runs_changed -> "internal runs"
-  | Observer.Schedule_store_invalidated -> "schedule"
-  | Observer.Pending_confirm_invalidated -> "pending confirmation"
-  | Observer.Snapshot _ -> "snapshot"
+  | Observer.Internal_agent_runs_changed _ -> "internal runs"
+  | Observer.Workspace_store_changed Observer.Schedule_store -> "schedule"
+  | Observer.Workspace_store_changed Observer.Pending_confirms -> "pending confirmation"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Verification_requests -> "verification"
+  | Observer.Workspace_store_changed Observer.Goal_projection -> "goals"
+  | Observer.Workspace_store_changed Observer.Runtime_config -> "runtime.toml"
+  | Observer.Workspace_store_changed Observer.Skill_catalog -> "skill catalog"
+  | Observer.Workspace_store_changed Observer.Lane_addon_exports -> "lane add-on exports"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Repositories -> "repositories"
+  | Observer.Gate_connector_changed _ -> "connector"
+  | Observer.Keeper_event_queue_changed _ -> "event queue"
+  | Observer.Board_changed _ -> "board"
+  | Observer.Approval_change
+      ( Observer.Approval_queue_changed | Observer.Approval_rules_changed
+      | Observer.Gate_mode_changed | Observer.Gate_keeper_settings_changed _ ) -> "gate"
+  | Observer.Approval_change
+      (Observer.Tool_approval_waits_changed _ | Observer.Tool_approval_mode_changed _) ->
+      "tool approval"
+  | Observer.Approval_change
+      (Observer.Keeper_asks_changed _ | Observer.Installation_asks_changed _) ->
+      "questions"
+  | Observer.Snapshot _ | Observer.Execution_snapshot -> "snapshot"
   | Observer.Other name -> name
 
 let row_of_event ~at ~duration_ms (event : Observer.event) =
@@ -515,7 +563,8 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
           |> List.filter (fun part -> part <> "")
           |> String.concat " \xc2\xb7 "
       }
-  | Observer.Keeper_composite_changed { keeper; _ } ->
+  | Observer.Keeper_composite_changed { keeper; _ }
+  | Observer.Keeper_metrics_appended { keeper; _ } ->
       { at; keeper; glyph = Quiet; label; detail = "" }
   | Observer.Keeper_turn_observation o ->
       { at
@@ -539,8 +588,15 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
       ; detail = Option.value ~default:"" frame
       }
   | Observer.Keeper_turn_stream_frame { keeper; _ }
-  | Observer.Keeper_memory_journal_appended { keeper; _ } ->
+  | Observer.Keeper_memory_journal_appended { keeper; _ }
+  | Observer.Keeper_runtime_journal_appended { keeper; _ }
+  | Observer.Keeper_async_requests_changed { keeper }
+  | Observer.Keeper_skill_activations_changed { keeper }
+  | Observer.Keeper_roster_change (Observer.Keeper_row_changed { keeper })
+  | Observer.Keeper_turn_changed { keeper; _ } ->
       { at; keeper; glyph = Quiet; label; detail = "" }
+  | Observer.Keeper_roster_change Observer.Every_row_changed ->
+      { at; keeper = "server"; glyph = Quiet; label; detail = "" }
   | Observer.Keeper_waiting_inventory_changed { keeper; queue_kind; _ } ->
       { at
       ; keeper
@@ -575,19 +631,61 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
         | None -> resource.Observer.lr_package
       in
       { at; keeper = "server"; glyph; label; detail }
-  | Observer.Internal_agent_runs_changed ->
+  | Observer.Internal_agent_runs_changed registry ->
       { at
       ; keeper = "server"
       ; glyph = Quiet
       ; label
-      ; detail = "a run registry changed"
+      ; detail =
+          "the " ^ Masc.Internal_agent_runs_event.registry_to_wire registry
+          ^ " run registry changed"
       }
-  | Observer.Schedule_store_invalidated ->
+  | Observer.Workspace_store_changed Observer.Schedule_store ->
       { at; keeper = "server"; glyph = Quiet; label; detail = "schedule status may have changed" }
-  | Observer.Pending_confirm_invalidated ->
+  | Observer.Workspace_store_changed Observer.Pending_confirms ->
       { at; keeper = "server"; glyph = Quiet; label; detail = "pending confirmation status may have changed" }
-  | Observer.Snapshot name ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = name }
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Verification_requests ->
+      { at; keeper = "server"; glyph = Quiet; label; detail = "a verification request changed" }
+  | Observer.Workspace_store_changed Observer.Goal_projection ->
+      { at; keeper = "server"; glyph = Quiet; label; detail = "a Goal changed" }
+  | Observer.Workspace_store_changed Observer.Runtime_config ->
+      { at; keeper = "server"; glyph = Quiet; label; detail = "runtime.toml changed" }
+  | Observer.Workspace_store_changed Observer.Skill_catalog ->
+      { at; keeper = "server"; glyph = Quiet; label; detail = "the skill catalog was published" }
+  | Observer.Workspace_store_changed Observer.Lane_addon_exports ->
+      { at; keeper = "server"; glyph = Quiet; label; detail = "a Lane Add-on's exported tools changed" }
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Repositories ->
+      { at; keeper = "server"; glyph = Quiet; label; detail = "the repository catalog changed" }
+  | Observer.Gate_connector_changed { connector } ->
+      { at; keeper = "server"; glyph = Quiet; label; detail = "connector " ^ connector ^ " changed" }
+  | Observer.Keeper_event_queue_changed { keeper } ->
+      { at; keeper; glyph = Quiet; label; detail = "the event queue changed" }
+  | Observer.Board_changed { post_id } ->
+      { at
+      ; keeper = "server"
+      ; glyph = Quiet
+      ; label
+      ; detail = Option.value post_id ~default:"a comment or a reaction changed"
+      }
+  | Observer.Approval_change change ->
+      let detail =
+        match change with
+        | Observer.Approval_queue_changed -> "the approval queue changed"
+        | Observer.Approval_rules_changed -> "the standing rules changed"
+        | Observer.Gate_mode_changed -> "a Gate mode changed"
+        | Observer.Gate_keeper_settings_changed _ -> "the Keeper's Gate settings changed"
+        | Observer.Tool_approval_waits_changed _ -> "a held tool call changed"
+        | Observer.Tool_approval_mode_changed _ -> "the tool approval mode changed"
+        | Observer.Keeper_asks_changed _ -> "the Keeper's questions changed"
+        | Observer.Installation_asks_changed { declaration_id } ->
+            "the questions of " ^ declaration_id ^ " changed"
+      in
+      { at; keeper = approval_change_keeper change; glyph = Quiet; label; detail }
+  | Observer.Snapshot projection ->
+      { at; keeper = "server"; glyph = Quiet; label; detail = Observer.projection_name projection }
+  | Observer.Execution_snapshot ->
+      { at; keeper = "server"; glyph = Quiet; label
+      ; detail = Masc.Dashboard_event_slices.execution_snapshot_type }
   | Observer.Other _ ->
       { at; keeper = "server"; glyph = Attention; label; detail = "" }
 
@@ -761,11 +859,11 @@ let member_of_event (event : Observer.event) =
   (* Identity for the fold's session table, read before members are filed
      ([fold_chunks]); not a member itself. *)
   | Observer.Keeper_turn_observation _
-  | Observer.Keeper_heartbeat _ | Observer.Keeper_composite_changed _
-  | Observer.Keeper_chat_appended _ | Observer.Keeper_memory_journal_appended _
+  | Observer.Keeper_heartbeat _ | Observer.Keeper_composite_changed _ | Observer.Keeper_metrics_appended _
+  | Observer.Keeper_chat_appended _ | Observer.Keeper_memory_journal_appended _ | Observer.Keeper_runtime_journal_appended _
   | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
-  | Observer.Keeper_waiting_inventory_changed _ | Observer.Snapshot _
-  | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed | Observer.Schedule_store_invalidated | Observer.Pending_confirm_invalidated
+  | Observer.Keeper_waiting_inventory_changed _ | Observer.Keeper_async_requests_changed _ | Observer.Keeper_skill_activations_changed _ | Observer.Keeper_roster_change _ | Observer.Keeper_turn_changed _ | Observer.Snapshot _ | Observer.Execution_snapshot
+  | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed _ | Observer.Workspace_store_changed _ | Observer.Dataset_changed _ | Observer.Gate_connector_changed _ | Observer.Keeper_event_queue_changed _ | Observer.Board_changed _ | Observer.Approval_change _
   | Observer.Lane_resource _ | Observer.Other _ ->
       None
 
@@ -935,12 +1033,12 @@ let observation_of_event (event : Observer.event) =
   | Observer.Keeper_turn_observation o -> Some o
   | Observer.Agent_core _ | Observer.Keeper_heartbeat _
   | Observer.Keeper_tool_call _ | Observer.Keeper_turn_complete _
-  | Observer.Keeper_composite_changed _ | Observer.Keeper_chat_appended _
-  | Observer.Keeper_memory_journal_appended _
+  | Observer.Keeper_composite_changed _ | Observer.Keeper_metrics_appended _ | Observer.Keeper_chat_appended _
+  | Observer.Keeper_memory_journal_appended _ | Observer.Keeper_runtime_journal_appended _
   | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
-  | Observer.Keeper_waiting_inventory_changed _
-  | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed | Observer.Schedule_store_invalidated | Observer.Pending_confirm_invalidated
-  | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Other _ ->
+  | Observer.Keeper_waiting_inventory_changed _ | Observer.Keeper_async_requests_changed _ | Observer.Keeper_skill_activations_changed _ | Observer.Keeper_roster_change _ | Observer.Keeper_turn_changed _
+  | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed _ | Observer.Workspace_store_changed _ | Observer.Dataset_changed _ | Observer.Gate_connector_changed _ | Observer.Keeper_event_queue_changed _ | Observer.Board_changed _ | Observer.Approval_change _
+  | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Execution_snapshot | Observer.Other _ ->
       None
 
 (* The agent session's ordinal a member states, if it states one. *)
@@ -1079,11 +1177,11 @@ let lane_fold_key (event : Observer.event) =
       Some (r.Observer.lr_package, r.Observer.lr_lifecycle, r.Observer.lr_detail)
   | Observer.Agent_core _ | Observer.Keeper_heartbeat _
   | Observer.Keeper_tool_call _ | Observer.Keeper_turn_complete _
-  | Observer.Keeper_turn_observation _ | Observer.Keeper_composite_changed _
-  | Observer.Keeper_chat_appended _ | Observer.Keeper_memory_journal_appended _
+  | Observer.Keeper_turn_observation _ | Observer.Keeper_composite_changed _ | Observer.Keeper_metrics_appended _
+  | Observer.Keeper_chat_appended _ | Observer.Keeper_memory_journal_appended _ | Observer.Keeper_runtime_journal_appended _
   | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
-  | Observer.Keeper_waiting_inventory_changed _ | Observer.Fusion_run_status _
-  | Observer.Internal_agent_runs_changed | Observer.Schedule_store_invalidated | Observer.Pending_confirm_invalidated | Observer.Snapshot _
+  | Observer.Keeper_waiting_inventory_changed _ | Observer.Keeper_async_requests_changed _ | Observer.Keeper_skill_activations_changed _ | Observer.Keeper_roster_change _ | Observer.Keeper_turn_changed _ | Observer.Fusion_run_status _
+  | Observer.Internal_agent_runs_changed _ | Observer.Workspace_store_changed _ | Observer.Dataset_changed _ | Observer.Gate_connector_changed _ | Observer.Keeper_event_queue_changed _ | Observer.Board_changed _ | Observer.Approval_change _ | Observer.Snapshot _ | Observer.Execution_snapshot
   | Observer.Other _ ->
       None
 
@@ -1259,12 +1357,12 @@ let duration_of_completion ~before (completed : Observer.agent_core) =
           | Observer.Keeper_heartbeat _
           | Observer.Keeper_tool_call _ | Observer.Keeper_turn_complete _
           | Observer.Keeper_turn_observation _
-          | Observer.Keeper_composite_changed _ | Observer.Keeper_chat_appended _
-          | Observer.Keeper_memory_journal_appended _
+          | Observer.Keeper_composite_changed _ | Observer.Keeper_metrics_appended _ | Observer.Keeper_chat_appended _
+          | Observer.Keeper_memory_journal_appended _ | Observer.Keeper_runtime_journal_appended _
           | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
-          | Observer.Keeper_waiting_inventory_changed _
-          | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed | Observer.Schedule_store_invalidated | Observer.Pending_confirm_invalidated
-          | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Other _ ->
+          | Observer.Keeper_waiting_inventory_changed _ | Observer.Keeper_async_requests_changed _ | Observer.Keeper_skill_activations_changed _ | Observer.Keeper_roster_change _ | Observer.Keeper_turn_changed _
+          | Observer.Fusion_run_status _ | Observer.Internal_agent_runs_changed _ | Observer.Workspace_store_changed _ | Observer.Dataset_changed _ | Observer.Gate_connector_changed _ | Observer.Keeper_event_queue_changed _ | Observer.Board_changed _ | Observer.Approval_change _
+          | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Execution_snapshot | Observer.Other _ ->
               None)
         before
 
@@ -1340,7 +1438,7 @@ let evidence_fields (entry : entry) =
       ; field "Tool use ID" call.kt_tool_use_id
       ; some "Input/output" "producer-redacted observations below; full payload not guaranteed"
       ] @ schedule_fields
-  | (Observer.Internal_agent_runs_changed | Observer.Schedule_store_invalidated | Observer.Pending_confirm_invalidated | Observer.Keeper_heartbeat _ | Observer.Keeper_turn_complete _ | Observer.Keeper_turn_observation _ | Observer.Keeper_composite_changed _ | Observer.Keeper_chat_appended _ | Observer.Keeper_memory_journal_appended _ | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _ | Observer.Keeper_waiting_inventory_changed _ | Observer.Fusion_run_status _ | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Other _) as event -> let row = row_of_event ~at:entry.ae_at ~duration_ms:None event in
+  | (Observer.Internal_agent_runs_changed _ | Observer.Workspace_store_changed _ | Observer.Dataset_changed _ | Observer.Gate_connector_changed _ | Observer.Keeper_event_queue_changed _ | Observer.Board_changed _ | Observer.Approval_change _ | Observer.Keeper_heartbeat _ | Observer.Keeper_turn_complete _ | Observer.Keeper_turn_observation _ | Observer.Keeper_composite_changed _ | Observer.Keeper_metrics_appended _ | Observer.Keeper_chat_appended _ | Observer.Keeper_memory_journal_appended _ | Observer.Keeper_runtime_journal_appended _ | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _ | Observer.Keeper_waiting_inventory_changed _ | Observer.Keeper_async_requests_changed _ | Observer.Keeper_skill_activations_changed _ | Observer.Keeper_roster_change _ | Observer.Keeper_turn_changed _ | Observer.Fusion_run_status _ | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Execution_snapshot | Observer.Other _) as event -> let row = row_of_event ~at:entry.ae_at ~duration_ms:None event in
       [ some "Source" "observer event"
       ; some "Event" row.label
       ; some "Detail" row.detail

@@ -40,7 +40,7 @@ let binding_audit_path () =
 
 (* Slack has no guild concept, so audit events omit guild_id. *)
 let binding_store =
-  Store.create
+  Store.create ~connector_id
     ~binding_store_path ~binding_store_read_path:binding_store_path
     ~binding_audit_path ~binding_audit_read_path:binding_audit_path
     ~guild_id_field:Store.Omit
@@ -114,22 +114,37 @@ let last_ready : ready_info option Atomic.t = Atomic.make None
 let workspace_id : string option Atomic.t = Atomic.make None
 let startup_error : string option Atomic.t = Atomic.make None
 
-let record_startup_error message = Atomic.set startup_error (Some message)
-let clear_startup_error () = Atomic.set startup_error None
+(* A startup error decides whether the connector is available and is its
+   whole error, so a write that changes it tells readers (RFC-0480 §3.4). *)
+let publish_startup_error next =
+  let previous = Atomic.exchange startup_error next in
+  if not (Option.equal String.equal previous next) then
+    Gate_connector_announce.changed ~connector_id
 
+let record_startup_error message = publish_startup_error (Some message)
+let clear_startup_error () = publish_startup_error None
+
+(* A Keeper's channels tab draws the bot and the workspace, so both setters
+   announce (RFC-0480 §3.4). *)
 let record_ready ~bot_user_id =
   Atomic.set last_ready
     (Some
        { ready_bot_user_id = bot_user_id
        ; (* NDT-OK: hello wall-clock is operator-facing telemetry only. *)
-         ready_at = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ()) })
+         ready_at = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ()) });
+  Gate_connector_announce.changed ~connector_id
+
+let publish_workspace_id next =
+  let previous = Atomic.exchange workspace_id next in
+  if not (Option.equal String.equal previous next) then
+    Gate_connector_announce.changed ~connector_id
 
 let record_workspace_id value =
   let value = String.trim value in
-  if not (String.equal value "") then Atomic.set workspace_id (Some value)
+  if not (String.equal value "") then publish_workspace_id (Some value)
 
 let current_workspace_id () = Atomic.get workspace_id
-let clear_workspace_id () = Atomic.set workspace_id None
+let clear_workspace_id () = publish_workspace_id None
 
 (* One reading of the connector, rendered by [status_json] and
    [connector_json] alike so the two views cannot disagree. Values computed

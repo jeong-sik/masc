@@ -223,6 +223,13 @@ type model_capabilities =
   ; thinking_control_format : thinking_control_format
   ; declared_thinking_control_format : thinking_control_format option
       (** Exact TOML presence. [None] preserves an Agent Core catalog value. *)
+  ; accepted_reasoning_efforts : Llm_provider.Reasoning_effort.t list option
+      (** Efforts a categorical reasoning-effort wire accepts from this model,
+          as probed against the operator's own endpoint. The dispatch check
+          refuses an effort until some layer declares this list; the Agent
+          Core catalog carries it for catalogued models, and this field is
+          how a runtime block declares it for a model the catalog does not
+          know. [None] preserves catalog resolution. *)
   ; anthropic_thinking_control : anthropic_thinking_control option
       (** Deployment-declared Anthropic thinking-control policy, for a binding
           the Agent Core catalog answers no policy for (operator-own pattern).
@@ -288,6 +295,11 @@ type model_spec =
   ; capabilities : model_capabilities option
   }
 [@@deriving show, eq]
+
+val thinking_request : model_spec -> bool option
+(** The thinking request a model row asks for: [thinking_support], except
+    [None] on a [reasoning_uncontrolled] row, which sends no thinking control
+    at all. Every request built from a model row reads this. *)
 
 (** {1 Layer 3: Binding} *)
 

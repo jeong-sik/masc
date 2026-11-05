@@ -392,6 +392,24 @@ let same_repository_change_authority left right =
   && String.equal left.rca_path right.rca_path
   && left.rca_context = right.rca_context
 
+(* One short phrase for the checked-out branch: its name and how far it sits
+   from the upstream it tracks. Ref names cannot hold control bytes, but the
+   text is still passed through the terminal-safe filter like every other
+   server string in this title. *)
+let repository_branch_label (branch : Masc.Tui_decode.repository_branch) =
+  match branch with
+  | Masc.Tui_decode.Repository_detached -> "detached HEAD"
+  | Masc.Tui_decode.Repository_on_branch { name; upstream } ->
+      let name = Keeper_chat.terminal_safe_text name in
+      (match upstream with
+       | Masc.Tui_decode.Repository_no_upstream ->
+           Printf.sprintf "%s (no upstream)" name
+       | Masc.Tui_decode.Repository_upstream_gone upstream ->
+           Printf.sprintf "%s (upstream %s gone)" name
+             (Keeper_chat.terminal_safe_text upstream)
+       | Masc.Tui_decode.Repository_tracking { ahead; behind; _ } ->
+           Printf.sprintf "%s ↑%d ↓%d" name ahead behind)
+
 let render_repository_changes (state : state) =
   match state.repository_changes_diff_path with
   | Some path -> render_repository_changes_diff state ~path
@@ -420,7 +438,11 @@ let render_repository_changes (state : state) =
       let title =
         detail_heading ~cols ~lead:(Lead_text " MASC Git Changes — ")
           ~id:scope_name
-          ~after:(Printf.sprintf " (%d)%s" (List.length changes)
+          ~after:(Printf.sprintf " (%d)%s%s" (List.length changes)
+            (match state.repository_changes with
+             | Some snapshot ->
+                 " · " ^ repository_branch_label snapshot.Masc.Tui_decode.rcs_branch
+             | None -> "")
             (if Option.is_some state.repository_changes_error then " · read failed" else ""))
           ~tail:(connection_badge state)
       in

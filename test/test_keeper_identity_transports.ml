@@ -284,8 +284,14 @@ let contains ~needle haystack =
   n = 0 || scan 0
 ;;
 
+(* The model's view of an answer far below the ceiling: nothing is stored. *)
+let small_answer_view answer =
+  Keeper_identity_tools.tool_result_of_call ~base_path:(Filename.get_temp_dir_name ())
+    ~inline_ceiling_bytes:Common.max_tool_result_wire_bytes answer
+;;
+
 let recoverable answer =
-  match Keeper_identity_tools.tool_result_of_call answer with
+  match small_answer_view answer with
   | Ok output -> failf "the call did not fail: %s" output.Agent_core.Types.content
   | Error err -> err.Agent_core.Types.recoverable
 ;;
@@ -326,7 +332,7 @@ let test_a_deadline_on_the_call_itself_is_not_a_blind_retry () =
       "an unknown outcome is not offered for a second send"
       false
       (recoverable answer);
-    (match Keeper_identity_tools.tool_result_of_call answer with
+    (match small_answer_view answer with
      | Error err ->
        check
          bool

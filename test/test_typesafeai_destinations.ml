@@ -94,6 +94,55 @@ let contains haystack needle =
 
 let evaluate ~clock destinations = Client.evaluate ~clock ~destinations ~state ~questions ()
 
+(* RFC-0484 §3.2: each destination keeps its latest outcome for the health
+   section. Each fixture listens on its own port, so the outcomes this test
+   reads are its own whatever other tests asked. *)
+let outcome_of (fixture : fixture) =
+  List.find_map
+    (fun ((asked : Client.destination_id), outcome) ->
+       if String.equal asked.destination_uri fixture.uri then Some outcome else None)
+    (Client.destination_outcomes ())
+;;
+
+let test_each_destination_keeps_its_latest_outcome () =
+  with_env
+  @@ fun ~sw ~net ~clock ->
+  let typesafe = serve ~sw ~net ~respond:(refuses `Payment_required) in
+  let openrouter = serve ~sw ~net ~respond:(answers ~model:"typesafe/jev-1.13") in
+  let first = { Client.endpoint = typesafe.uri; model = "jev-latest"; api_key = "typesafe-key" } in
+  let second =
+    { Client.endpoint = openrouter.uri; model = "~typesafe/jev-latest"; api_key = "openrouter-key" }
+  in
+  (match evaluate ~clock (first, [ second ]) with
+   | Error failure -> Alcotest.fail (Client.failure_to_string failure)
+   | Ok _ -> ());
+  (match outcome_of typesafe with
+   | Some (Client.Refusing { last = Client.Payment_required; last_answer_at = None; _ }) -> ()
+   | Some _ | None -> Alcotest.fail "the 402 destination should be refusing for payment");
+  (match outcome_of openrouter with
+   | Some (Client.Answered _) -> ()
+   | Some (Client.Refusing _) | None -> Alcotest.fail "the answering destination should be answered");
+  (* A refusal after an answer starts a new run of refusals that remembers
+     the answer; an answer after refusals ends the run. *)
+  let calls = ref 0 in
+  let flaky =
+    serve ~sw ~net ~respond:(fun raw ->
+      incr calls;
+      if !calls = 2 then refuses `Unauthorized raw else answers ~model:"jev-latest" raw)
+  in
+  let only = { Client.endpoint = flaky.uri; model = "jev-latest"; api_key = "flaky-key" } in
+  let ask () = ignore (evaluate ~clock (only, [])) in
+  ask ();
+  ask ();
+  (match outcome_of flaky with
+   | Some (Client.Refusing { last = Client.Credential_refused; last_answer_at = Some _; _ }) -> ()
+   | Some _ | None -> Alcotest.fail "a 401 after an answer should refuse for the key and keep the answer");
+  ask ();
+  match outcome_of flaky with
+  | Some (Client.Answered _) -> ()
+  | Some (Client.Refusing _) | None -> Alcotest.fail "an answer should end the refusals"
+;;
+
 let test_second_destination_answers_after_a_capacity_refusal () =
   with_env
   @@ fun ~sw ~net ~clock ->
@@ -253,6 +302,10 @@ let () =
     "typesafeai destinations"
     [ ( "walk"
       , [ Alcotest.test_case
+            "each destination keeps its latest outcome"
+            `Quick
+            test_each_destination_keeps_its_latest_outcome
+        ; Alcotest.test_case
             "the second destination answers after a capacity refusal"
             `Quick
             test_second_destination_answers_after_a_capacity_refusal

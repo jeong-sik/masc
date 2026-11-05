@@ -2,7 +2,6 @@
     through the real source adapter. Only external worker processes are fake. *)
 open Alcotest
 open Masc
-module Preparation = Masc_test_deps.Board_test_preparation
 module Runtime = struct
   include Lane_addon_runtime
   let dispatch ?caller ?access ~config ~operation args =
@@ -702,7 +701,6 @@ let test_native_fusion_report_is_readable_after_detach () =
       reset_board ();
       Fun.protect ~finally:reset_board (fun () ->
         ignore (Workspace.init config ~agent_name:(Some "fixture-operator"));
-        Preparation.prepare ~base_path:root ~action:Preparation.Bootstrap;
         let registry = Fusion_run_registry.global () in
         let run_id = "fusion-chain-" ^ Store.digest root in
         Fusion_run_registry.register_running registry ~run_id ~keeper:"fixture-producer"

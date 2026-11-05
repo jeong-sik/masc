@@ -12,18 +12,12 @@ type laid_out = {
   placement : View.placement option;
 }
 
-type style =
+type style = Masc.Tui_preference.candle =
   | Painted
   | Dotted
 
-let style_of_string = function
-  | "painted" -> Some Painted
-  | "dotted" -> Some Dotted
-  | _ -> None
-
-let string_of_style = function
-  | Painted -> "painted"
-  | Dotted -> "dotted"
+let style_of_string = Masc.Tui_preference.candle_of_string
+let string_of_style = Masc.Tui_preference.candle_to_string
 
 let next_style = function
   | Painted -> Dotted

@@ -510,22 +510,8 @@ let format_current_task_with_heading ?skill_surfaces ~heading
     "\n";
   Buffer.contents buf
 
-(* "held by you" is true of the two statuses that actually hold a claim slot.
-   [Workspace_task.active_owned_task_ids_for_agent] counts [Claimed] and
-   [InProgress] and returns [None] for [AwaitingVerification]; the scheduler
-   states the same rule outright ("AwaitingVerification is still excluded: it is
-   no longer active implementation work for the claimant").
-
-   Under the old single heading a submitted task read as one the Keeper was
-   still holding, and the only visible way out of holding something is to give
-   it up. 10 of 56 cancellations in the live backlog are finished work cancelled
-   with the deliverable written into the cancel reason -- task-032 says
-   "useYupValidationResolver typed properly, tsc passes. Cancelling to free",
-   naming the belief in the act of acting on it. The claim it was freeing itself
-   for was never blocked.
-
-   The heading is the whole fix: no new field, no new line, and the status was
-   already on the row underneath. *)
+(* A submitted Task waits for a verdict, so its heading says that instead of
+   "held by you". The status is on the row underneath. *)
 let format_current_task ?skill_surfaces (task : Masc_domain.task) =
   let heading =
     match task.Masc_domain.task_status with
@@ -1271,41 +1257,6 @@ let backlog_statement_of_observation
     else Backlog_readable_with_rows
 ;;
 
-(* The checkpoint carries the previous turn's calls; it does not carry the
-   reason the runtime ended that turn. Without the reason, a keeper whose turn
-   was cut by the repeated-call guard reads its own three identical calls as
-   unfinished work and makes them again. Measured 2026-09-01 from
-   turn-records: one live keeper ended 259 of 361 turns on the same
-   repeated query, lane-smith 136 of 342, polisher 84 of 424, and each next
-   turn repeated the call. The sentences live under [config/prompts] with the
-   other prompt text and name the tool and the count so the model can match
-   them against its history. A template that fails to render logs and
-   contributes no line: the checkpoint still carries the calls themselves.
-   The three yields that are not loop guards (a queued chat operation, a
-   newer durable stimulus, an awaited approval) explain themselves through
-   the stimulus that follows and render nothing here. *)
-let previous_turn_stop_lines (stop : Keeper_turn_checkpoint_reason.t option) :
-    string list =
-  let line key vars =
-    match String.trim (observation_prose key vars ~fallback:"") with
-    | "" -> []
-    | text -> [ text ]
-  in
-  match stop with
-  | None -> []
-  | Some (Keeper_turn_checkpoint_reason.Repeated_tool_call { tool_name; repeated_count })
-    ->
-      line
-        Prompt_names.keeper_observation_previous_turn_stop_repeated_tool_call
-        [ "tool_name", tool_name; "repeated_count", string_of_int repeated_count ]
-  | Some (Keeper_turn_checkpoint_reason.Repeated_assistant_text { repeated_count }) ->
-      line
-        Prompt_names.keeper_observation_previous_turn_stop_repeated_assistant_text
-        [ "repeated_count", string_of_int repeated_count ]
-  | Some
-      ( Keeper_turn_checkpoint_reason.Operation_queued
-      | Keeper_turn_checkpoint_reason.Durable_stimulus_arrived ) -> []
-
 let format_workspace_memory_observation ?access = function
   | Workspace_memory_ledger.Missing -> None
   | Workspace_memory_ledger.Unavailable _ ->
@@ -1472,7 +1423,6 @@ let format_recent_actions_section ~current_task_id own_recent_actions
 
 let prepare_prompt_internal
     ~(turn_decision : Keeper_world_observation.keeper_cycle_decision option)
-    ?(previous_turn_stop : Keeper_turn_checkpoint_reason.t option)
     ~(current_task : Keeper_world_observation_inputs.current_task_observation)
     ?(task_skill_surfaces :
         (string * Keeper_skill_catalog.exact_surface list) list = [])
@@ -1480,7 +1430,6 @@ let prepare_prompt_internal
     ?(lane_updates = Ok (`List []))
     ?(workspace_memory = Workspace_memory_ledger.Missing)
     ?(wiki_contents = Keeper_wiki_contents.Off)
-    ?(repository_freshness : Keeper_sandbox_control.freshness_row list = [])
     ~(observation : Keeper_world_observation.world_observation)
     () : prepared_prompt
   =
@@ -1514,7 +1463,6 @@ let prepare_prompt_internal
     (match turn_decision with
      | Some decision -> autonomous_trigger_lines ~decision
      | None -> [])
-    @ previous_turn_stop_lines previous_turn_stop
   in
   let current_task_id =
     match current_task with
@@ -1742,9 +1690,9 @@ let prepare_prompt_internal
                 Prompt_names.keeper_world_namespace_state_claimable
                 [ "count", "0" ]
               ^ "\n");
-         (* The difference is exactly two things: a Todo task still holding a
-           verification verdict, and a Todo task this keeper wrote itself. No
-           goal, tool, or keeper scope narrows the claim pool. *)
+         (* The difference is exactly one thing: a Todo task still holding a
+           verification verdict. No goal, tool, or keeper scope narrows the
+           claim pool. *)
          let unclaimed_not_offered =
            max 0 (observation.unclaimed_task_count - claimable_task_count)
          in
@@ -1772,127 +1720,9 @@ let prepare_prompt_internal
             ^ "\n");
          Buffer.add_char ubuf '\n';
          Buffer.contents ubuf)
-    (* Repository freshness — semi-stable standing context: it moves when the
-       keeper commits or upstream advances, not per cycle. Projection only —
-       it states where each checkout stands so the keeper can choose to
-       fetch/rebase; nothing here schedules or forces that work. *)
     | Keeper_context_layers.Lane_updates -> Lane_addon_subscription.render lane_updates
     (* These four layers are assembled from the actual request projection. *)
     | Keeper_context_layers.Workspace_memory | Wiki | Own_recent_actions | Recent_work -> None
-    | Keeper_context_layers.Repository_freshness ->
-      (match repository_freshness with
-       | [] -> None
-       | rows ->
-         (* Measured rows render individually, drifted first — the layer
-            exists to surface drift, and a current checkout is the least
-            actionable line. Unmeasurable rows collapse into one count: a
-            live playground answered 19 of 32 rows with the same
-            budget-exhausted reason (2026-09-01 field probe), and repeating
-            an identical failure line 19 times per turn is noise. *)
-         let measured, unmeasured =
-           List.partition
-             (fun (row : Keeper_sandbox_control.freshness_row) ->
-               match row.Keeper_sandbox_control.row_freshness with
-               | Keeper_sandbox_control.Freshness_unavailable _ -> false
-               | Keeper_sandbox_control.Current _
-               | Keeper_sandbox_control.Stale_ref _
-               | Keeper_sandbox_control.Ahead _
-               | Keeper_sandbox_control.Behind _
-               | Keeper_sandbox_control.Diverged _ -> true)
-             rows
-         in
-         let drift_rank (row : Keeper_sandbox_control.freshness_row) =
-           match row.Keeper_sandbox_control.row_freshness with
-           | Keeper_sandbox_control.Diverged _ -> 0
-           | Keeper_sandbox_control.Behind _ -> 1
-           | Keeper_sandbox_control.Ahead _ -> 2
-           | Keeper_sandbox_control.Stale_ref _ -> 3
-           | Keeper_sandbox_control.Current _ -> 4
-           | Keeper_sandbox_control.Freshness_unavailable _ -> 5
-         in
-         let measured =
-           List.stable_sort
-             (fun left right -> compare (drift_rank left) (drift_rank right))
-             measured
-         in
-         let line (row : Keeper_sandbox_control.freshness_row) =
-           let branch_part =
-             match row.Keeper_sandbox_control.row_branch with
-             | Some branch -> " branch=" ^ branch
-             | None -> ""
-           in
-           let dirty_part =
-             match row.Keeper_sandbox_control.row_changed_files with
-             (* [Some 0] is a clean tree and [None] a failed status probe;
-                neither earns a line of the keeper's attention here — a
-                broken probe already surfaces as [Freshness_unavailable]. *)
-             | Some 0 | None -> ""
-             | Some changed -> Printf.sprintf " dirty_files=%d" changed
-           in
-           let standing =
-             match row.Keeper_sandbox_control.row_freshness with
-             | Keeper_sandbox_control.Current { target_ref; age_s; _ } ->
-               render_fragment
-                 Prompt_names.keeper_context_checkouts_standing_current
-                 [ "target", target_ref; "age", string_of_int age_s ]
-             | Keeper_sandbox_control.Stale_ref { target_ref; last_observed_at_unix; age_s; _ } ->
-               let age = match age_s with
-                 | Some seconds -> Printf.sprintf "%ds ago" seconds
-                 | None -> "age unknown" in
-               let as_of =
-                 match last_observed_at_unix with
-                 | None -> "unknown time"
-                 | Some timestamp ->
-                   let tm = Unix.gmtime (float_of_int timestamp) in
-                   Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d UTC"
-                     (tm.Unix.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
-                     tm.tm_hour tm.tm_min tm.tm_sec
-               in
-               render_fragment
-                 Prompt_names.keeper_context_checkouts_standing_stale_ref
-                 [ "target", target_ref; "as_of", as_of; "age", age ]
-             | Keeper_sandbox_control.Ahead { target_ref; ahead; _ } ->
-               render_fragment
-                 Prompt_names.keeper_context_checkouts_standing_ahead
-                 [ "target", target_ref; "ahead", string_of_int ahead ]
-             | Keeper_sandbox_control.Behind { target_ref; behind; _ } ->
-               render_fragment
-                 Prompt_names.keeper_context_checkouts_standing_behind
-                 [ "target", target_ref; "behind", string_of_int behind ]
-             | Keeper_sandbox_control.Diverged { target_ref; ahead; behind; _ } ->
-               render_fragment
-                 Prompt_names.keeper_context_checkouts_standing_diverged
-                 [ "target", target_ref
-                 ; "behind", string_of_int behind
-                 ; "ahead", string_of_int ahead
-                 ]
-             | Keeper_sandbox_control.Freshness_unavailable reason ->
-               render_fragment
-                 Prompt_names.keeper_context_checkouts_standing_unavailable
-                 [ "reason", reason ]
-           in
-           render_fragment Prompt_names.keeper_context_checkouts_row
-             [ "path", row.Keeper_sandbox_control.row_checkout_path
-             ; "branch", branch_part
-             ; "dirty", dirty_part
-             ; "standing", standing
-             ]
-         in
-         let unmeasured_line =
-           match List.length unmeasured with
-           | 0 -> []
-           | count ->
-             [ render_fragment Prompt_names.keeper_context_checkouts_unmeasured
-                 [ "count", string_of_int count ]
-             ]
-         in
-         Some
-           (render_fragment Prompt_names.keeper_context_checkouts_section
-              [ "count", string_of_int (List.length rows)
-              ; ( "rows"
-                , String.concat "\n" (List.map line measured @ unmeasured_line) )
-              ]
-            ^ "\n\n"))
     (* 4. Autonomous trigger — lower churn than reactive inboxes. *)
     | Keeper_context_layers.Autonomous_trigger ->
       if autonomous_trigger <> [] then
@@ -2059,7 +1889,7 @@ let project_prompt prepared ?workspace_memory_access ?own_recent_actions
     | Own_recent_actions -> own_recent_actions_section
     | Recent_work -> Option.map Keeper_context_layers.prepare_content (format_recent_work recent_work)
     | Active_goals | Goal_observations | Current_task | Approval_authority | Connected_surfaces
-    | Namespace_state | Lane_updates | Repository_freshness | Autonomous_trigger | Scheduled_automation
+    | Namespace_state | Lane_updates | Autonomous_trigger | Scheduled_automation
     | Completion_authority | Task_cancellations | Pending_mentions | Scope_messages
     | Own_board_posts | Board_activity | Fleet_messages ->
       (* Captured and assembled through the same immutable [ordered] keys. *)
@@ -2081,9 +1911,7 @@ let emit_prompt_metrics
      intact; unknown calls are rejected explicitly by typed dispatch. *)
   (* The only caller is the pre-request hook of [run_turn]
      (keeper_run_tools_hooks.ml, [prepare_request_dynamic_context]), for
-     autonomous turns. Its [user_message] is the message [run_turn] sends,
-     after [Keeper_agent_run.with_completion_clause] appended the wake's
-     completion clause, so the [user_message] segment counts that clause. *)
+     autonomous turns. Its [user_message] is the message [run_turn] sends. *)
   (* set_gauge only: a stray inc_counter here used to create this
      (name, labels) cell as Counter first, so the system_prompt series
      kept Counter kind, carried a non-monotonic byte length, and exported
@@ -2121,37 +1949,33 @@ let emit_prompt_metrics
 
 let prepare_prompt
       ~turn_decision
-      ?previous_turn_stop
       ~current_task
       ?task_skill_surfaces
       ?active_goal_summaries
       ?workspace_memory
       ?wiki_contents
       ?lane_updates
-      ?repository_freshness
       ~observation
       ()
   =
   prepare_prompt_internal
     ~turn_decision:(Some turn_decision)
-    ?previous_turn_stop
     ~current_task
     ?task_skill_surfaces
     ?active_goal_summaries
     ?workspace_memory
     ?wiki_contents
     ?lane_updates
-    ?repository_freshness
     ~observation
     ()
 ;;
 
-let build_prompt ~turn_decision ?previous_turn_stop ~current_task ?task_skill_surfaces
+let build_prompt ~turn_decision ~current_task ?task_skill_surfaces
     ?active_goal_summaries ?workspace_memory ?workspace_memory_access ?wiki_contents
-    ?lane_updates ?repository_freshness ?recent_work ~observation () =
-  let prepared = prepare_prompt ~turn_decision ?previous_turn_stop ~current_task
+    ?lane_updates ?recent_work ~observation () =
+  let prepared = prepare_prompt ~turn_decision ~current_task
     ?task_skill_surfaces ?active_goal_summaries ?workspace_memory ?wiki_contents
-    ?lane_updates ?repository_freshness ~observation () in
+    ?lane_updates ~observation () in
   project_prompt prepared ?workspace_memory_access ?recent_work ()
 ;;
 
@@ -2163,7 +1987,6 @@ let build_prompt_preview
       ?workspace_memory_access
       ?wiki_contents
       ?lane_updates
-      ?repository_freshness
       ?recent_work
       ~observation
       ()
@@ -2176,7 +1999,6 @@ let build_prompt_preview
     ?workspace_memory
     ?wiki_contents
     ?lane_updates
-    ?repository_freshness
     ~observation
     () in
   project_prompt prepared ?workspace_memory_access ?recent_work ()

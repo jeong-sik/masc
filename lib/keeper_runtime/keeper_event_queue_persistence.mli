@@ -1,12 +1,12 @@
 (** Durable per-Keeper Event Layer state.
 
     Current writes go to [event-queue-v19.json] with the exact
-    [keeper.event_queue.state.v20] compact-witness schema. The envelope holds
+    [keeper.event_queue.state.v21] compact-witness schema. The envelope holds
     revision, pending stimuli, the latest
     projected transition, an operation-indexed ledger of older projected
     dispositions, at most one unprojected transition, and durable
     accepted-transfer target projections. Only this schema and the
-    [event-queue-transitions-v9.jsonl] WAL are queue authority. Every WAL row
+    [event-queue-transitions-v10.jsonl] WAL are queue authority. Every WAL row
     carries the complete pre-transition state needed for snapshot-independent
     recovery. The WAL accepts at most one row and is retired after projection,
     so its retained size is bounded by one complete state. Serializing that
@@ -27,10 +27,12 @@ val snapshot_filename : string
 
 val transition_wal_filename : string
 
-val install_state_change_observer : (unit -> unit) -> unit
+val install_state_change_observer :
+  (base_path:string -> keeper_name:string -> unit) -> unit
 (** Install the process-wide non-yielding observer invoked after each durable
-    event-queue snapshot or transition-WAL commit. Observer failures are logged
-    and never change the already committed queue result. *)
+    event-queue snapshot or transition-WAL commit, with the workspace and the
+    Keeper whose queue changed. It runs under that queue's owner lock. Observer
+    failures are logged and never change the already committed queue result. *)
 
 type owner_identity
 type owner_identity_error
@@ -78,7 +80,6 @@ type source_terminal_receipt = Keeper_event_queue_state.source_terminal_receipt 
   | Fusion_terminal of Keeper_event_queue.fusion_completion
   | Hitl_terminal of Keeper_event_queue.hitl_resolution
   | Turn_completed
-  | Turn_attempt_terminal of { detail : string }
 
 type accepted_source_terminal = Keeper_event_queue_state.accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
@@ -149,25 +150,6 @@ val peek_when_result :
   ready:(Keeper_event_queue.stimulus -> bool) ->
   (Keeper_event_queue.stimulus option, string) result
 
-val select_when_result :
-  base_path:string ->
-  keeper_name:string ->
-  now:float ->
-  ready:(Keeper_event_queue.stimulus -> bool) ->
-  (Keeper_event_queue_state.pending_selection option, string) result
-
-val pending_frontier_result :
-  base_path:string ->
-  keeper_name:string ->
-  ( Keeper_event_queue_state.frontier
-    * Keeper_event_queue_state.pending_selection list
-  , string )
-  result
-(** {!pending_selections_result} together with the frontier of the very state
-    it was read from. A later arrival is told apart from an entry in the list
-    by {!Keeper_event_queue_state.arrived_since} on this frontier, so no second
-    read can race with the first. *)
-
 val pending_selections_result :
   base_path:string ->
   keeper_name:string ->
@@ -175,12 +157,6 @@ val pending_selections_result :
 (** Read every pending entry with its exact immutable selection authority, in
     queue order. This is the durable admission snapshot used when one Keeper
     turn admits every ready source; it performs no mutation. *)
-
-val validate_pending_selection_result :
-  base_path:string ->
-  keeper_name:string ->
-  selection:Keeper_event_queue_state.pending_selection ->
-  (unit, string) result
 
 val admitted_selection_standing_result :
   base_path:string ->
@@ -197,33 +173,6 @@ val ack_pending_result :
   selection:Keeper_event_queue_state.pending_selection ->
   unit ->
   (unit, string) result
-
-val bind_pending_repetition_scope_result :
-  ?after_commit:(Keeper_event_queue.t -> unit) ->
-  base_path:string ->
-  keeper_name:string ->
-  selections:Keeper_event_queue_state.pending_selection list ->
-  scope:Keeper_execution_scope_id.t ->
-  unit ->
-  (Keeper_event_queue_state.pending_selection list, string) result
-(** Bind under the owner lock with strict snapshot durability. The producer
-    supplies identity once; this function never invents identity or infers a
-    parent from event payloads. Success returns fresh selection authority only
-    after the durable commit. A replay of a binding this process already
-    confirmed writes nothing and does not run [after_commit] again (see
-    {!enqueue_stimulus_once_result}). This is not a complete continuation
-    contract. *)
-
-val note_checkpoint_retention_result :
-  ?after_commit:(Keeper_event_queue.t -> unit) ->
-  base_path:string ->
-  keeper_name:string ->
-  selection:Keeper_event_queue_state.pending_selection ->
-  unit ->
-  (Keeper_event_queue_state.pending_selection * int, string) result
-(** Durably count one checkpoint-yield retention of the selection and return
-    the updated selection with its new count. *)
-
 
 type snapshot_read_error_kind =
   | Invalid_path
@@ -344,13 +293,6 @@ module For_testing : sig
       The writer is used for the first publication and for same-source
       retries until one of its writes is confirmed; a retry after that writes
       nothing. *)
-
-  val bind_pending_repetition_scope_with_confirmation :
-    confirm_snapshot:(string -> Keeper_event_queue_state.t -> (unit, string) result) ->
-    base_path:string -> keeper_name:string ->
-    selections:Keeper_event_queue_state.pending_selection list ->
-    scope:Keeper_execution_scope_id.t -> unit ->
-    (Keeper_event_queue_state.pending_selection list, string) result
 
   val load_state_with_read_interleave
     : after_read:(unit -> unit)
@@ -546,22 +488,6 @@ val ack_pending_source_terminal_result :
 (** Append and fsync the canonical source-bearing ACK transition before
     checkpointing removal of the exact pending source. *)
 
-val terminalize_pending_turn_attempt_result :
-  ?after_commit:(Keeper_event_queue.t -> unit) ->
-  base_path:string ->
-  keeper_name:string ->
-  applied_at:float ->
-  selection:Keeper_event_queue_state.pending_selection ->
-  detail:string ->
-  unit ->
-  (pending_turn_terminal_result, string) result
-(** Atomically construct and commit a source-bearing terminal receipt for one
-    failed admitted turn. The selection carries the exact source incarnation;
-    no caller-provided prose or counter controls admission. An entry another
-    transition removed while the turn ran answers [Turn_selection_withdrawn]
-    under the same lock, and nothing is written
-    ({!Keeper_event_queue_state.pending_turn_selection_withdrawn}). *)
-
 val terminalize_pending_turn_completed_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
@@ -571,8 +497,10 @@ val terminalize_pending_turn_completed_result :
   unit ->
   (pending_turn_terminal_result, string) result
 (** Atomically construct and commit a source-bearing completion receipt for one
-    successful admitted turn, or answer [Turn_selection_withdrawn] like
-    {!terminalize_pending_turn_attempt_result}. *)
+    successful admitted turn. The selection carries the exact source
+    incarnation. An entry another transition removed while the turn ran
+    answers [Turn_selection_withdrawn] under the same lock, and nothing is
+    written ({!Keeper_event_queue_state.pending_turn_selection_withdrawn}). *)
 
 val project_transition_outbox_result :
   append_before_retire:(Keeper_event_queue_state.t -> outbox_entry -> (unit, string) result) ->
@@ -617,16 +545,6 @@ val reprioritize_pending_result :
   (int64, string) result
 (** Source-incarnation-fenced priority change. Unrelated queue mutations do
     not invalidate the selected source. *)
-
-val defer_pending_result :
-  ?after_commit:(Keeper_event_queue.t -> unit) ->
-  base_path:string ->
-  keeper_name:string ->
-  selection:Keeper_event_queue_state.pending_selection ->
-  unit ->
-  (int64, string) result
-(** Durably rotate one exact transiently blocked source to the tail of its
-    current urgency lane. *)
 
 val retain_checkpoint_batch_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
@@ -689,20 +607,6 @@ val project_accepted_transfer_guarded_result :
 
 val persist_snapshot :
   base_path:string -> keeper_name:string -> (unit -> Keeper_event_queue.t) -> unit
-
-val ack_consumed :
-  base_path:string ->
-  keeper_name:string ->
-  Keeper_event_queue.stimulus list ->
-  (unit, string) result
-
-val drop_by_post_id :
-  ?after_commit:(Keeper_event_queue.t -> unit) ->
-  base_path:string ->
-  keeper_name:string ->
-  post_id:string ->
-  unit ->
-  (Keeper_event_queue.stimulus list, string) result
 
 type queue_residence_unknown_reason = Keeper_event_queue_fleet_projection.queue_residence_unknown_reason =
   | First_admission_not_recorded

@@ -134,6 +134,45 @@ let test_clear_current_task_removes_empty_dir () =
   Planning_eio.clear_current_task config;
   check bool "empty directory removed" false (Sys.file_exists path)
 
+(* A config rooted in a directory of its own, so a test that breaks the store
+   leaves the shared temp directory as the other tests expect it. *)
+let make_isolated_config name : Workspace.config =
+  let dir = Filename.concat !temp_dir name in
+  Unix.mkdir dir 0o755;
+  Workspace.default_config dir
+
+let expect_store_failure config ~task_id =
+  match Planning_eio.set_current_task config ~task_id with
+  | Ok () -> fail "expected set_current_task to fail"
+  | Error _ -> ()
+
+(* The directory that should hold the file is a regular file, so nothing can be
+   created under it. The claim chain writes the pointer after the claim has
+   committed, so the failure has to come back as [Error], not as an exception. *)
+let test_set_current_task_reports_masc_dir_that_is_a_file () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let config = make_isolated_config "masc-dir-is-a-file" in
+  Fs_compat.save_file (Workspace_utils.masc_dir config) "not a directory";
+  expect_store_failure config ~task_id:"blocked-task";
+  check (option string) "nothing was written" None
+    (Planning_eio.get_current_task config)
+
+(* An existing directory at the file's path cannot be moved aside because the
+   trash path is a regular file. *)
+let test_set_current_task_reports_trash_that_is_a_file () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let config = make_isolated_config "trash-is-a-file" in
+  let path = current_task_path config in
+  Fs_compat.mkdir_p path;
+  Fs_compat.save_file (Filename.concat path "forensics.txt") "kept";
+  Fs_compat.save_file (trash_dir config) "not a directory";
+  expect_store_failure config ~task_id:"blocked-task";
+  check bool "the directory stays in place" true (Sys.is_directory path);
+  check (option string) "nothing was written over it" None
+    (Planning_eio.get_current_task config)
+
 let () =
   setup ();
   at_exit teardown;
@@ -148,6 +187,10 @@ let () =
             test_set_current_task_quarantines_dir;
           test_case "set_current_task stops when quarantine fails" `Quick
             test_set_current_task_stops_when_quarantine_fails;
+          test_case "set_current_task reports a masc dir that is a file" `Quick
+            test_set_current_task_reports_masc_dir_that_is_a_file;
+          test_case "set_current_task reports a trash path that is a file" `Quick
+            test_set_current_task_reports_trash_that_is_a_file;
           test_case "clear_current_task removes empty dir" `Quick
             test_clear_current_task_removes_empty_dir;
         ] );

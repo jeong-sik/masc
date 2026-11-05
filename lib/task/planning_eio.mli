@@ -13,9 +13,10 @@ val get_current_task : Workspace_core.config -> string option
     id, or [None] when no current task is set. *)
 
 val set_current_task : Workspace_core.config -> task_id:string -> (unit, string) result
-(** [set_current_task config ~task_id] persists the current task
-    id, returning [Error _] when an existing directory cannot be
-    quarantined before the file write. *)
+(** [set_current_task config ~task_id] persists the current task id. It
+    returns [Error _] when the file cannot be written: its directory cannot be
+    created, an existing directory at its path cannot be quarantined, or the
+    write itself fails. *)
 
 val clear_current_task : Workspace_core.config -> unit
 (** [clear_current_task config] removes the persisted current task

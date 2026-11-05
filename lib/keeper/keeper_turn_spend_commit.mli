@@ -23,6 +23,7 @@ val commit
   -> keeper_turn_id:int
   -> before:Keeper_meta_contract.keeper_meta
   -> attempt_spend:Keeper_turn_spend.attempt list
+  -> settled_start:Keeper_unsettled_spend.settled_start option
   -> Keeper_meta_contract.keeper_meta
   -> (Keeper_meta_contract.keeper_meta, error) result
 (** [commit ~config ~keeper_turn_id ~before ~attempt_spend after] resolves
@@ -30,4 +31,7 @@ val commit
     the spend and the cursor it leaves to [after], and commits [after] over
     [before] through the Keeper's Owner. Only a commit that holds writes the
     resolved rows under [keeper_turn_id]; a failed one writes none, so the
-    next turn, resolving from the same cursor, does not count them twice. *)
+    next turn, resolving from the same cursor, does not count them twice.
+    [settled_start] is the turn's own, from its settlement: a commit that
+    holds and writes every row into the file hands it to
+    {!Keeper_unsettled_spend.record_committed}. *)

@@ -20,10 +20,6 @@ type terminal_boundary_outcome =
       }
 
 type host_stop =
-  | Repeated_tool_call of
-      { tool_name : string
-      ; repeated_count : int
-      }
   | Terminal_tool_boundary of
       { tool_name : string
       ; outcome : terminal_boundary_outcome
@@ -72,10 +68,9 @@ type loading =
   | On_demand  (** Only the name is listed; the model loads it by searching. *)
 
 (** How large one result of a dynamic tool can be when it reaches the client.
-    The Keeper tool bundle knows it: a built-in or Skill composition result
-    crosses a {!Tool_output.model_projection} whose inline ceiling is the
-    bound, while an attached-service result reaches the wire as the service
-    returned it. Claude Code reads a bound as
+    The Keeper tool bundle knows it: a built-in, Skill composition or
+    attached-service result is held to the inline ceiling of the
+    {!Tool_output.model_projection} it crosses. Claude Code reads a bound as
     [_meta."anthropic/maxResultSizeChars"] (code.claude.com/docs/en/mcp); the
     ceiling is in bytes and a UTF-8 character is at least one byte, so the same
     number is a safe character count. *)

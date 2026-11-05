@@ -1,9 +1,9 @@
 name = "masc_plan_clear_task"
 title = "Clear Current Task"
 description = """
-Clear your current task assignment without completing it.
+Clear the workspace's current-task marker.
 
-The task's own status does not change. Use when switching to a different task, abandoning work, or resetting session state. To hand a task you hold back to the backlog, use keeper_task_release. To stop it for good, use keeper_task_cancel."""
+The task's own status does not change. A later claim or transition by the caller sets the marker again from the tasks assigned to it. To hand a task you hold back to the backlog, use keeper_task_release. To stop it for good, use keeper_task_cancel."""
 additional_properties = false
 
 

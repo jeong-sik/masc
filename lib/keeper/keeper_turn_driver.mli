@@ -36,13 +36,41 @@ type output_contract = Provider_default | Tool_verdict
     caller owns the typed verdict protocol. *)
 
 
+(** The order {!resumed_runtime_lane} fixed for the walk that resumes a hint,
+    head first. A hint a walk recorded, or one restored from disk, is
+    [Not_resumed]. *)
+type resumed_order =
+  | Not_resumed
+  | Resumed of
+      { head : string
+      ; rest : string list
+      }
+
+(** Where the next walk of a failed turn starts. A walk that cannot retry the
+    turn's input on its next candidate records the candidates of the chain it
+    had not tried ([next_runtime_id], then [later_runtime_ids]) and the runtime
+    whose failure ended it. The next turn walks {!resumed_runtime_lane} of it,
+    not the suffix alone; [resumed] holds that walk's order once it is fixed,
+    and it is not part of the hint. *)
 type deferred_runtime_lane = private
   { assignment_id : string
   ; failed_runtime_id : string
   ; next_runtime_id : string
   ; later_runtime_ids : string list
   ; failure : Agent_core.Error.t
+  ; resumed : resumed_order
   }
+
+(** What a candidate of the walk that resumes a hint is to the chain of turns
+    the hint belongs to. [Untried]: the hint names it, so no turn of the chain
+    attempted it (for a chat operation resumed on the path it failed on, the
+    hint names that path). [Retry_of_tried]: a lane candidate the hint does not
+    name. [Failed_last]: the runtime whose failure recorded the hint. Every
+    candidate of a walk that resumes no hint is [Untried]. *)
+type resumed_member =
+  | Untried
+  | Retry_of_tried
+  | Failed_last
 
 (** The candidate error a runtime walk returned as the lane's error, with the
     candidate that produced it. [origin_runtime_id] can differ from the
@@ -60,6 +88,7 @@ type lane_terminal_error =
   }
 
 val deferred_runtime_ids : deferred_runtime_lane -> string list
+(** The suffix the lane names: [next_runtime_id], then [later_runtime_ids]. *)
 
 (** How the lane that dispatched a turn continues after the turn fails
     (RFC last-path-resumes-after-progress §3.5).
@@ -80,12 +109,24 @@ type runtime_retry_deferral =
   { continuation : failure_continuation
   ; on_deferred : deferred_runtime_lane -> unit
   }
-val quota_ordered_deferred_runtime_lane :
+val resumed_runtime_lane :
   now:float -> deferred_runtime_lane -> deferred_runtime_lane
-(** Apply active quota-window ordering to a frozen deferred suffix while
-    preserving its assignment and failure evidence. Call once before building
-    pre-dispatch execution so prompt shaping and dispatch consume the same
-    selected runtime. *)
+(** The hint with the order of the walk that resumes it fixed in [resumed]:
+    its [Untried] candidates, then the [Retry_of_tried] ones in the order the
+    assignment's current lane declares them, then the [Failed_last] runtime,
+    all ordered by the quota and backpressure demotion that orders the rest of
+    every walk. The hint fields are kept as they are. Call once before
+    building pre-dispatch execution so prompt shaping and dispatch consume the
+    same selected runtime. Resuming a resumed lane orders its hint again. *)
+
+val resumed_walk_ids : deferred_runtime_lane -> string list
+(** The candidates the walk that resumes the hint dispatches, head first: the
+    order {!resumed_runtime_lane} fixed, or, before that, the same candidates
+    without the demotion. *)
+
+val resumed_head : deferred_runtime_lane -> string
+(** The head of {!resumed_walk_ids}: the runtime a turn resuming the hint
+    dispatches first and shapes its request for. *)
 
 (** Whether one runtime path is resting at a given instant
     (RFC-provider-path-rest §3.3). Read from the 429 candidate observation and
@@ -142,7 +183,9 @@ type walk_start = Runtime_candidate_standing.walk_start =
   | Fresh_walk_by of Runtime_candidate_backpressure.recorder
   | Every_mark_demotes
 
-(** A deferred suffix in the order the next turn walks it. *)
+(** The rest of the walk a turn resuming a deferred suffix dispatches
+    ({!resumed_runtime_lane}). A resting suffix path does not hold the turn
+    while a lane candidate that was not told to rest can take it. *)
 val deferred_lane_rest : now:float -> deferred_runtime_lane -> walk_rest
 
 (** The candidates a fresh walk of an assignment dispatches, in [order]: the
@@ -150,11 +193,18 @@ val deferred_lane_rest : now:float -> deferred_runtime_lane -> walk_rest
     resting or exhausted candidate behind its siblings and excludes none.
     Nothing else reorders it: a success leaves no preference behind, so the
     cycle after a failover starts from the declared head again. The walk may
-    still replace the head for an input modality it cannot take (RFC-0265);
-    a turn that failed and deferred its input walks the suffix it deferred
-    instead: the candidates after the one that failed, or, for a chat
-    operation whose last candidate failed after saving tool results, that
-    candidate again. *)
+    still replace the head for an input modality it cannot take (RFC-0265).
+    A turn that failed and deferred its input walks {!resumed_walk_ids}
+    instead. The suffix it deferred only says where that walk starts: the
+    candidates after the one that failed, or, for a chat operation with no
+    untried candidate left when it failed after saving tool results, that
+    candidate again. The walk goes on through the rest of the lane, the
+    runtime that failed placed after the others (demotion still orders all of
+    them), so the walk's last candidate is the end of the lane rather than the
+    end of the suffix. A resumed walk that stops before the end of the lane
+    defers only the [Untried] candidates it did not reach, and nothing when it
+    reached none of them, so each suffix of a chain of deferred turns names
+    fewer candidates than the one before and the chain ends. *)
 type walk_order =
   { lane_id : string
   ; declared : string list
@@ -176,9 +226,16 @@ val assignment_walk_order :
     orders it: {!assignment_walk_order}'s head and its rest. *)
 val assignment_walk_rest : now:float -> string -> walk_rest
 
+val assignment_next_dated_release : now:float -> string -> float option
+(** The earliest time after [now] at which a dated rest on the assignment's
+    fresh walk ends, if any. {!assignment_walk_rest} can change at that time
+    with no write. A rest that ends only when its provider answers has no
+    such time. *)
+
 (** The next dispatch after a failed turn (RFC-provider-path-rest §3.1),
     shared by the heartbeat cycle and the chat lane's deferred retry.
-    A deferred suffix dispatches now when its walk head serves, else waits as {!deferred_lane_rest} says.
+    A deferred suffix dispatches now when the head of its resumed walk
+    serves, else waits as {!deferred_lane_rest} says.
     Without a suffix a multi-candidate assignment uses its fresh walk's rest:
     a serving head returns [None] (ordinary cadence), while a resting head
     waits for that walk's release. A single or unresolved assignment also
@@ -510,6 +567,10 @@ module For_testing : sig
     failure:Agent_core.Error.t ->
     deferred_runtime_lane
 
+  val resumed_member : deferred_runtime_lane -> string -> resumed_member
+  (** What the runtime is to the chain of the hint, as [run_named] reads it
+      for the walk that resumes the hint. *)
+
   val checkpoint_after_attempt :
     ?agent_before_attempt:Agent_core.Agent.t ->
     ?session_id:string -> ?working_context:Yojson.Safe.t ->
@@ -649,6 +710,7 @@ module For_testing : sig
     ?candidate_backpressure_of:('candidate -> Runtime_candidate_backpressure.candidate option) ->
     ?candidate_dispatchable:('candidate -> bool) ->
     ?read_usage_after_account_refusal:('candidate -> unit) ->
+    ?member_of:('candidate -> resumed_member) ->
     walk_owner:walk_owner ->
     runtime_id:string ->
     runtime_id_of:('candidate -> string) ->
@@ -669,8 +731,13 @@ module For_testing : sig
     ('result, Agent_core.Error.t) result
   (** [tool_results_saved] reads whether the attempt that just failed saved
       tool results; without it the walk reads [false]. A [retry_deferral] with
-      [Resume_operation_checkpoint] defers the last candidate to itself only
-      when it reads [true] and the failure's route passes with time. *)
+      [Resume_operation_checkpoint] defers a candidate to itself only when no
+      [Untried] candidate is left to defer to, it reads [true], and the
+      failure's route passes with time. [member_of] says what each candidate
+      is to the chain of the hint the walk resumes; without it every
+      candidate is [Untried], as in a walk that resumes no hint. A walk that
+      stops before its last candidate defers the [Untried] candidates it did
+      not reach, and defers no suffix when it reached none. *)
 
   val observe_checkpoint_stage :
     Keeper_turn_driver_try_provider.checkpoint_progress Atomic.t ->

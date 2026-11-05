@@ -163,6 +163,15 @@ let load_queue_state ~base_path ~keeper_name =
   | Ok state -> state
   | Error detail -> Alcotest.fail detail
 
+(* The production peek, read back as the exact pending selection. *)
+let select_ready ~now ~ready state =
+  Option.bind (Keeper_event_queue_state.peek_when ~now ~ready state) (fun source ->
+    List.find_opt
+      (fun (selection : Keeper_event_queue_state.pending_selection) ->
+         Keeper_event_queue.stimulus_identity_equal selection.source source)
+      (Keeper_event_queue_state.pending_selections state))
+;;
+
 let stage_transfer ~base_path ~from_keeper ~to_keeper ~source ~operation_id =
   let target_meta = persist_event_queue_test_meta ~base_path to_keeper in
   (match
@@ -175,7 +184,7 @@ let stage_transfer ~base_path ~from_keeper ~to_keeper ~source ~operation_id =
    | _ -> Alcotest.fail "failed to seed transfer recovery source");
   let selection =
     load_queue_state ~base_path ~keeper_name:from_keeper
-    |> Keeper_event_queue_state.select_when
+    |> select_ready
          ~now:(Unix.gettimeofday ())
          ~ready:(Keeper_event_queue.stimulus_identity_equal source)
     |> function
@@ -336,7 +345,7 @@ let () =
       ; content = "c"
       ; hearth = None
       ; updated_at = None
-      ; audience = Some Keeper_event_queue.Audience_discoverable
+      ; audience = Keeper_event_queue.Audience_discoverable
       }
   in
 
@@ -355,7 +364,7 @@ let () =
           ; content
           ; hearth = None
           ; updated_at = None
-      ; audience = Some Keeper_event_queue.Audience_discoverable
+      ; audience = Keeper_event_queue.Audience_discoverable
           }
       }
   in
@@ -397,7 +406,7 @@ let () =
       ; content = "body"
       ; hearth = Some "research"
       ; updated_at = Some 5.0
-      ; audience = Some Keeper_event_queue.Audience_thread_participants
+      ; audience = Keeper_event_queue.Audience_thread_participants
       }
   in
   (match
@@ -453,7 +462,7 @@ let () =
       ; content = "body"
       ; hearth = None
       ; updated_at = Some 6.0
-      ; audience = Some Keeper_event_queue.Audience_thread_participants
+      ; audience = Keeper_event_queue.Audience_thread_participants
       }
   in
   (match
@@ -493,11 +502,86 @@ let () =
                 ; "content", `String "body"
                 ; "hearth", `Null
                 ; "updated_at_unix", `Null
+                ; "audience", `Assoc [ "kind", `String "discoverable" ]
                 ] )
           ])
    with
    | Ok _ -> Alcotest.fail "vote_cast without vote payload fields must not decode"
    | Error _ -> ());
+
+  (* A durable Board stimulus carries the audience pinned when it was queued.
+     A row without one does not decode, for every Board event kind and for both
+     stimulus kinds that carry a Board signal. *)
+  let board_stimulus kind : Keeper_event_queue.board_stimulus =
+    { kind
+    ; author = "a"
+    ; title = "t"
+    ; content = "c"
+    ; hearth = None
+    ; updated_at = None
+    ; audience = Audience_discoverable
+    }
+  in
+  List.iter
+    (fun (label, payload_kind, payload) ->
+       let encoded =
+         stimulus_to_yojson
+           { post_id = "p-audience"; urgency = Normal; arrived_at = 8.0; payload }
+       in
+       (match stimulus_of_yojson encoded with
+        | Ok _ -> ()
+        | Error message ->
+          Alcotest.failf "%s with an audience must decode: %s" label message);
+       match
+         stimulus_of_yojson
+           (remove_payload_field ~kind:payload_kind ~field:"audience" encoded)
+       with
+       | Ok _ -> Alcotest.failf "%s without an audience must not decode" label
+       | Error message ->
+         Alcotest.(check bool)
+           (label ^ " refusal names the audience")
+           true
+           (String_util.string_contains_substring ~needle:"audience" message))
+    [ ( "post_created"
+      , "board_signal"
+      , Board_signal (board_stimulus Post_created) )
+    ; ( "post_updated"
+      , "board_signal"
+      , Board_signal (board_stimulus (Post_updated { content_updated_at = 2.0 })) )
+    ; ( "comment_added"
+      , "board_signal"
+      , Board_signal
+          (board_stimulus
+             (Comment_added
+                { comment_id = "c-" ^ String.make 32 'a'; parent_id = None })) )
+    ; ( "reaction_changed"
+      , "board_signal"
+      , Board_signal
+          (board_stimulus
+             (Reaction_changed
+                { target_type = Reaction_comment
+                ; target_id = "c1"
+                ; user_id = "reactor"
+                ; emoji = "x"
+                ; reacted = true
+                })) )
+    ; ( "vote_cast"
+      , "board_signal"
+      , Board_signal
+          (board_stimulus
+             (Vote_cast
+                { target = Vote_on_comment "c1"
+                ; target_author = "poster"
+                ; voter = "peer"
+                ; direction = Vote_up
+                })) )
+    ; ( "board attention"
+      , "board_attention"
+      , Board_attention
+          { candidate_id = "candidate-audience"
+          ; signal = board_stimulus Post_created
+          } )
+    ];
 
   (* RFC-0266: Fusion_completed is a non-board stimulus with its own label. *)
   let fusion_payload () =
@@ -1822,32 +1906,6 @@ let () =
       let only, rest = Option.get (dequeue restored) in
       assert (String.equal only.post_id "bootstrap");
       assert (is_empty rest));
-
-  (* --- A-fix (RFC: keeper-orphan-stimulus-persistence): a consumed stimulus
-         is drained from the current queue state on the genuine-ack path. Here
-         the stimulus lives in event-queue-v19.json, mirroring a bootstrap enqueued
-         by supervisor launch; after ack, [load] must be empty. Without the
-         A-fix this returns length 1 and accumulates across restarts. --- *)
-  let base_path = temp_dir "keeper-event-queue-ack-drains-pending" in
-  Fun.protect
-    ~finally:(fun () -> rm_rf base_path)
-    (fun () ->
-      let keeper_name = "keeper-ack-drains-pending-test" in
-      Keeper_event_queue_persistence.persist
-        ~base_path ~keeper_name (enqueue empty bootstrap_stim);
-      assert (length (Keeper_event_queue_persistence.load ~base_path ~keeper_name) = 1);
-      (* Genuine-ack path drains the acknowledged pending source. *)
-      (match
-         Keeper_event_queue_persistence.ack_consumed
-           ~base_path
-           ~keeper_name
-           [ bootstrap_stim ]
-       with
-       | Ok () -> ()
-       | Error error -> Alcotest.fail ("pending acknowledgement failed: " ^ error));
-      (* Before the A-fix this returned length 1 (pending snapshot untouched);
-         after the fix the pending snapshot is drained. *)
-      assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
 
   (* --- durable fleet summary: health can see pending work and oldest age. --- *)
   let base_path = temp_dir "keeper-event-queue-fleet-summary" in

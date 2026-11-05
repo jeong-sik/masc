@@ -191,42 +191,11 @@ let perform_task_transition
           | Agent_action { agent_name; _ } -> Some agent_name
           | Operator_cancel _ -> task_assignee_of_status task.task_status
         in
-        (* The workspace FSM owns lifecycle and identity invariants. Completion
-           evidence is submitted for an out-of-band authority verdict. *)
-        let* () =
-          (match action, task.task_status with
-          | Masc_domain.Claim, Masc_domain.Todo ->
-            (match
-               active_ownership_conflict_for_claim
-                 config
-                 ~agent_name
-                 ~requested_task_id:task_id
-                 backlog
-             with
-             | None -> Ok ()
-             | Some msg ->
-               Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState msg)))
-          | ( Masc_domain.Claim
-            | Masc_domain.Start
-            | Masc_domain.Done_action
-            | Masc_domain.Cancel
-            | Masc_domain.Release
-            | Masc_domain.Submit_for_verification ),
-            ( Masc_domain.Todo
-            | Masc_domain.Claimed _
-            | Masc_domain.InProgress _
-            | Masc_domain.AwaitingVerification _
-            | Masc_domain.Done _
-            | Masc_domain.Cancelled _ ) -> Ok ())
-        in
         let now = now_iso () in
         let now_ts = Time_compat.now () in
         (* The one sentence a stop states, resolved once from this call's
-           [reason] and [handoff_context]. [reason] is optional on this entry
-           point while [handoff_context.summary] is required for every
-           exit-class action, so a caller that put the whole explanation in the
-           summary — which the tool schema told it to fill — has stated one.
-           The Cancelled record, the transition log row, the message log and
+           [reason] and [handoff_context]: a caller may put the whole
+           explanation in the summary instead of [reason]. The Cancelled record, the transition log row, the message log and
            the activity event all read this value, so the author's wake and
            the log see one sentence.
 
@@ -300,13 +269,6 @@ let perform_task_transition
                         verifier."
                        task_id
                        agent_name)))
-          | Error Workspace_task_lifecycle.Cancel_reason_required ->
-            Error
-              (Masc_domain.Task
-                 (Masc_domain.Task_error.InvalidState
-                    "cancel requires a stated reason: pass reason, or state it in \
-                     handoff_context (summary or reason). The Task's author is \
-                     told that sentence and nothing else"))
           | Error Workspace_task_lifecycle.Invalid_transition ->
             let assignee_hint, actions_hint =
               match task_assignee_of_status task.task_status with
@@ -960,7 +922,6 @@ let commit_verdict_r
                  ; reason = Some reason
                  ; next_step = None
                  ; failure_mode = None
-                 ; reclaim_policy = None
                  ; evidence_refs = []
                  ; updated_at = Some now
                  ; updated_by = Some authority_actor

@@ -6,7 +6,6 @@ type keeper_wake_reaction_ledger_status =
 type keeper_wake_occurrence_status =
   | Keeper_wake_awaiting_ack
   | Keeper_wake_already_acked
-  | Keeper_wake_already_failed
   | Keeper_wake_already_cancelled
 
 type keeper_wake_result_delivery_policy =
@@ -96,7 +95,6 @@ type keeper_wake_acceptance =
   | Wake_required
   | Already_pending of string
   | Already_acked
-  | Already_failed of string
   | Already_cancelled
 
 val accept_keeper_wake_occurrence :
@@ -120,11 +118,6 @@ type resolved_occurrence_disposition =
   | Terminal_completed_at of
       string
       * Keeper_event_queue_state.schedule_occurrence_source
-      * Keeper_event_queue_state.occurrence_terminal_evidence
-  | Terminal_failed_at of
-      string
-      * Keeper_event_queue_state.schedule_occurrence_source
-      * string
       * Keeper_event_queue_state.occurrence_terminal_evidence
   | Terminal_cancelled_at of
       string

@@ -559,6 +559,7 @@ let official_failure_can_advance : Fusion_official_client.failure -> bool = func
     (match error with
      | Subscription_required _ | Spawn_failed _
      | Reasoning_effort_admission_failed _
+     | Account_read_failed _
      | Timeout { turn_accepted = false; _ }
      (* A client that died during initialize, account/read or thread/start
         submitted no turn, so it owes the walk nothing and the declared media
@@ -611,6 +612,7 @@ let official_failure_effect : Fusion_official_client.failure -> Tool_result.fail
   | Claude_admission_failure (Runtime_claude_code.Timeout _) -> Proven_pre_effect
   | Codex_failure (Invalid_config _ | Subscription_required _ | Spawn_failed _
       | Reasoning_effort_admission_failed _
+      | Account_read_failed _
       | Timeout { turn_accepted = false; _ }
       | Context_window_exceeded { tool_effect_attempted = false; _ }) -> Proven_pre_effect
   | Claude_failure (Invalid_config _ | Subscription_required _ | Spawn_failed _
@@ -1019,6 +1021,7 @@ let execution_of_vision_outcome = function
       | Missing_reply | Setup_failure _ | Antigravity_failure _ | Muse_failure _
       | Codex_failure
           ( Invalid_config _ | Spawn_failed _ | Reasoning_effort_admission_failed _
+          | Account_read_failed _
           | Turn_input_write_failed _ | Protocol_error _ | Rpc_error _
           | Unsupported_server_request _ | Context_window_exceeded _ | Turn_failed _
           | Stopped_by_host _ | Turn_interrupted | Runtime_shutting_down

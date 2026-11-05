@@ -12,10 +12,6 @@ type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_
       }
 
 type host_stop = Runtime_official_client_tool.host_stop =
-  | Repeated_tool_call of
-      { tool_name : string
-      ; repeated_count : int
-      }
   | Terminal_tool_boundary of
       { tool_name : string
       ; outcome : terminal_boundary_outcome
@@ -122,10 +118,7 @@ let lifecycle_outcome = function
        Agent_core.Agent_lifecycle_events.Completed response
      | Runtime_agent.InputRequired { request; _ } ->
        Agent_core.Agent_lifecycle_events.Input_required request
-     | Runtime_agent.Yielded_to_operation_queued { turns_used; _ }
-     | Runtime_agent.Yielded_to_durable_stimulus { turns_used; _ }
-     | Runtime_agent.Yielded_after_repeated_tool_call { turns_used; _ }
-     | Runtime_agent.Yielded_after_repeated_assistant_text { turns_used; _ } ->
+     | Runtime_agent.Yielded_to_durable_stimulus { turns_used; _ } ->
        Agent_core.Agent_lifecycle_events.Yielded { turn = turns_used })
 ;;
 
@@ -158,12 +151,11 @@ let host_stop_result
       (Keeper_internal_error.core_error_of_masc_internal_error
          (Keeper_internal_error.Terminal_effect_failed
             { failure_class; effect_disposition; detail }))
-  | ( Repeated_tool_call _
-    | Terminal_tool_boundary
-        { outcome =
-            (Terminal_completed | Durable_stimulus_deferred)
-        ; _
-        } ) ->
+  | Terminal_tool_boundary
+      { outcome =
+          (Terminal_completed | Durable_stimulus_deferred)
+      ; _
+      } ->
     let response : Agent_core.Types.api_response =
       { id = turn_id
       ; model
@@ -179,9 +171,6 @@ let host_stop_result
     in
     let stop_reason =
       match stop with
-      | Repeated_tool_call { tool_name; repeated_count } ->
-        Runtime_agent.Yielded_after_repeated_tool_call
-          { turns_used; provider_turn_ordinal; tool_name; repeated_count }
       | Terminal_tool_boundary { outcome = Terminal_completed; _ } ->
         Runtime_agent.Completed { provider_turn_ordinal }
       | Terminal_tool_boundary { outcome = Durable_stimulus_deferred; _ } ->
@@ -190,8 +179,8 @@ let host_stop_result
     in
     (* masc#31312: this host-stop path was the one producer that returned
        [runtime_observation = None] on a successful or yielded turn, so every
-       tool-boundary stop (completed, deferred stimulus, external effect,
-       repeated tool call) reached the execution receipt as
+       tool-boundary stop (completed, deferred stimulus, external effect)
+       reached the execution receipt as
        [Runtime_not_observed] and the operator disposition fell to
        "unmapped_runtime_state". The vendor loop ran exactly one attempt to
        get here, so record that attempt the same way the in-loop terminal
@@ -1606,11 +1595,7 @@ let masc_observation_sentence masc =
           | Keeper_internal_error.Host_graceful_shutdown ->
             "was running this turn when MASC shut down"
           | Keeper_internal_error.Runtime_reported_interrupt ->
-            "reported this turn as interrupted"
-          | Keeper_internal_error.Repeated_tool_call ->
-            "reported a repeated-tool stop; completed effects were not replayed"
-          | Keeper_internal_error.Repeated_assistant_text ->
-            "reported a repeated-text stop; completed effects were not replayed")
+            "reported this turn as interrupted")
      | Keeper_internal_error.Runtime_connection_closed
          { runtime_id; detail; turn_accepted } ->
        Printf.sprintf
@@ -1965,10 +1950,9 @@ let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_app
             | Some _,
               ( None
               | Some
-                  ( Repeated_tool_call _
-                  | Terminal_tool_boundary
-                      { outcome = Durable_stimulus_deferred | Terminal_failed _; _ }
-                  ) ) -> terminal_boundary
+                  (Terminal_tool_boundary
+                     { outcome = Durable_stimulus_deferred | Terminal_failed _; _ }) ) ->
+              terminal_boundary
           in
           let result =
             match terminal_boundary with
@@ -1977,9 +1961,8 @@ let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_app
                   { outcome = Terminal_failed _; _ } as abort_turn) ->
               { result with success = false; abort_turn = Some abort_turn }
             | Some
-                (( Repeated_tool_call _
-                 | Terminal_tool_boundary
-                     { outcome = Terminal_completed | Durable_stimulus_deferred; _ } )
+                (Terminal_tool_boundary
+                   { outcome = Terminal_completed | Durable_stimulus_deferred; _ }
                  as abort_turn) -> { result with abort_turn = Some abort_turn }
             | None -> result
           in
@@ -2025,16 +2008,15 @@ let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_app
                    })
              in
              match final_result.abort_turn, boundary with
-             | (Some (Repeated_tool_call _), _) | (None, None)
+             | (None, None)
              | (Some (Terminal_tool_boundary _), _) -> final_result
              | None, Some (Terminal_tool_boundary
                  { outcome = Terminal_failed _; _ } as stop) ->
                { final_result with success = false; abort_turn = Some stop }
              | None,
                Some
-                 (( Repeated_tool_call _
-                  | Terminal_tool_boundary
-                      { outcome = Terminal_completed | Durable_stimulus_deferred; _ } )
+                 (Terminal_tool_boundary
+                    { outcome = Terminal_completed | Durable_stimulus_deferred; _ }
                   as stop) -> { final_result with abort_turn = Some stop }) in
           (match !captured_original with
            | Original_unseen -> result
@@ -2058,7 +2040,7 @@ let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_app
                   (* Preserve the producer's authoritative failure. The separate
                      diagnostic records that its original result was also lost. *)
                   result
-                | None | Some (Repeated_tool_call _)
+                | None
                 | Some (Terminal_tool_boundary
                     { outcome = Terminal_completed | Durable_stimulus_deferred; _ }) ->
                   let effect_disposition =

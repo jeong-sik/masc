@@ -2,11 +2,14 @@ module Owner_lock = Keeper_event_queue_owner_lock
 module State = Keeper_event_queue_state
 module Quarantine = Keeper_event_queue_quarantine
 
-let state_change_observer : (unit -> unit) Atomic.t = Atomic.make ignore
+let state_change_observer : (base_path:string -> keeper_name:string -> unit) Atomic.t =
+  Atomic.make (fun ~base_path:_ ~keeper_name:_ -> ())
 let install_state_change_observer observer = Atomic.set state_change_observer observer
 
-let notify_state_change_observer ~keeper_name =
-  try (Atomic.get state_change_observer) () with
+let notify_state_change_observer owner =
+  let base_path = Owner_lock.base_path owner in
+  let keeper_name = Owner_lock.keeper_name owner |> Keeper_id.Keeper_name.to_string in
+  try (Atomic.get state_change_observer) ~base_path ~keeper_name with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     Log.Keeper.warn
@@ -58,7 +61,6 @@ type source_terminal_receipt = State.source_terminal_receipt =
   | Fusion_terminal of Keeper_event_queue.fusion_completion
   | Hitl_terminal of Keeper_event_queue.hitl_resolution
   | Turn_completed
-  | Turn_attempt_terminal of { detail : string }
 
 type accepted_source_terminal = State.accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
@@ -99,7 +101,7 @@ type transfer_projection_result = State.transfer_projection_result =
 
 (* v19 adds [checkpoint_retentions] to every pending entry: a checkpoint-yield
    turn's retention of a Connector_attention wake is durable delivery bookkeeping
-   (see [note_checkpoint_retention_result]), so a restart must not reset it and
+   (see [retain_checkpoint_batch_result]), so a restart must not reset it and
    v18 snapshots cannot supply it. The transition WAL carries a full pre-state,
    so both files hard-cut together; there is no compatibility decoder. *)
 let snapshot_filename = Keeper_event_queue_schema.snapshot_filename
@@ -383,7 +385,7 @@ let save_state_unlocked_with ~save_snapshot owner state =
     (* The atomic writer does not return the written descriptor identity.
        Re-read once before caching; a post-write stat could name a replacement. *)
     forget_snapshot path;
-    notify_state_change_observer ~keeper_name;
+    notify_state_change_observer owner;
     Ok ()
   | Error message ->
     (* The file may be half-written, gone, or untouched -- unknown is not a
@@ -1356,17 +1358,6 @@ let reprioritize_pending_result
     State.reprioritize_pending ~selection ~urgency state)
 ;;
 
-let defer_pending_result
-      ?(after_commit = fun _ -> ())
-      ~base_path
-      ~keeper_name
-      ~selection
-      ()
-  =
-  commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
-    State.defer_pending ~selection state)
-;;
-
 let retain_checkpoint_batch_result
       ?(after_commit = fun _ -> ())
       ~base_path ~keeper_name ~selections () =
@@ -1512,26 +1503,10 @@ let peek_when_result ~base_path ~keeper_name ~now ~ready =
   | Ok state -> Ok (State.peek_when ~now ~ready state)
 ;;
 
-let select_when_result ~base_path ~keeper_name ~now ~ready =
-  match load_state_result ~base_path ~keeper_name with
-  | Error _ as error -> error
-  | Ok state -> Ok (State.select_when ~now ~ready state)
-;;
-
-let pending_frontier_result ~base_path ~keeper_name =
-  match load_state_result ~base_path ~keeper_name with
-  | Error _ as error -> error
-  | Ok state -> Ok (State.frontier state, State.pending_selections state)
-;;
-
 let pending_selections_result ~base_path ~keeper_name =
-  Result.map snd (pending_frontier_result ~base_path ~keeper_name)
-;;
-
-let validate_pending_selection_result ~base_path ~keeper_name ~selection =
   match load_state_result ~base_path ~keeper_name with
   | Error _ as error -> error
-  | Ok state -> State.validate_pending_selection ~selection state
+  | Ok state -> Ok (State.pending_selections state)
 ;;
 
 let admitted_selection_standing_result ~base_path ~keeper_name ~selection =
@@ -1554,28 +1529,6 @@ let ack_pending_with ~before_write
 ;;
 
 let ack_pending_result = ack_pending_with ~before_write:(fun () -> ())
-;;
-
-let note_checkpoint_retention_result
-      ?(after_commit = fun _ -> ())
-      ~base_path
-      ~keeper_name
-      ~selection
-      ()
-  =
-  commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
-    match State.note_checkpoint_retention ~selection state with
-    | Error _ as error -> error
-    | Ok (state, payload) -> Ok (state, payload))
-;;
-
-let bind_pending_repetition_scope_result
-      ?(after_commit = fun _ -> ())
-      ~base_path ~keeper_name ~selections ~scope () =
-  commit_transform ~strict_snapshot_durability:true
-    ~base_path ~keeper_name ~after_commit (fun state ->
-      State.bind_pending_repetition_scope ~selections ~scope state
-      |> Result.map_error State.scope_binding_error_to_string)
 ;;
 
 let commit_transition_unlocked_with
@@ -1634,7 +1587,7 @@ let commit_transition_unlocked_with
                    , pending )))
        in
        let continue_after_wal_commit () =
-         notify_state_change_observer ~keeper_name:(keeper_name_of_owner owner);
+         notify_state_change_observer owner;
          continue_after_commit ()
        in
        before_wal_write ();
@@ -1861,28 +1814,6 @@ let terminalize_pending_turn_result
             (Printexc.to_string exn)))
 ;;
 
-let terminalize_pending_turn_attempt_result
-      ?after_commit
-      ~base_path
-      ~keeper_name
-      ~applied_at
-      ~selection
-      ~detail
-      ()
-  =
-  terminalize_pending_turn_result
-    ?after_commit
-    ~base_path
-    ~keeper_name
-    ~selection
-    ~transition:
-      (State.terminalize_pending_turn_attempt
-         ~applied_at
-         ~selection
-         ~detail)
-    ()
-;;
-
 let terminalize_pending_turn_completed_result
       ?after_commit
       ~base_path
@@ -1945,41 +1876,6 @@ let project_transition_outbox_result
          "event queue transition projection raised keeper=%s: %s"
          keeper_name
          (Printexc.to_string exn))
-;;
-
-let remove_post_ids stimuli state =
-  List.fold_left
-    (fun (removed, state) (stimulus : Keeper_event_queue.stimulus) ->
-       let newly_removed, state = State.remove_by_post_id stimulus.post_id state in
-       Keeper_event_queue.uniq_stimuli (removed @ newly_removed), state)
-    ([], state)
-    stimuli
-;;
-
-let ack_consumed ~base_path ~keeper_name stimuli =
-  commit_transform
-    ~base_path
-    ~keeper_name
-    ~after_commit:(fun _ -> ())
-    (fun state ->
-       let _removed, state = remove_post_ids stimuli state in
-       Ok (state, ()))
-;;
-
-let drop_by_post_id
-      ?(after_commit = fun _ -> ())
-      ~base_path
-      ~keeper_name
-      ~post_id
-      ()
-  =
-  commit_transform
-    ~base_path
-    ~keeper_name
-    ~after_commit
-    (fun state ->
-       let removed, state = State.remove_by_post_id post_id state in
-       Ok (state, removed))
 ;;
 
 type queue_residence_unknown_reason =
@@ -2091,13 +1987,5 @@ module For_testing = struct
     Stdlib.Mutex.protect snapshot_cache_mutex (fun () -> Hashtbl.reset snapshot_cache);
     Atomic.set snapshot_cache_read_counter 0;
     Atomic.set snapshot_cache_hit_counter 0
-  ;;
-  let bind_pending_repetition_scope_with_confirmation
-        ~confirm_snapshot ~base_path ~keeper_name ~selections ~scope () =
-    commit_transform ~confirm_snapshot ~strict_snapshot_durability:true
-      (* See the production wrapper: this fixture observes durability, not mutation delivery. *)
-      ~base_path ~keeper_name ~after_commit:ignore (fun state ->
-        State.bind_pending_repetition_scope ~selections ~scope state
-        |> Result.map_error State.scope_binding_error_to_string)
   ;;
 end

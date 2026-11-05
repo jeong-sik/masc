@@ -349,6 +349,81 @@ let test_status_summary_uses_read_only_git_conventions () =
 	                "sets GIT_OPTIONAL_LOCKS env key" true
 	                (String_util.contains_substring joined "\"GIT_OPTIONAL_LOCKS\"")))
 
+let nul_join records = String.concat "\000" records ^ "\000"
+
+let test_branch_status_reads_tracking_counts () =
+  let output =
+    nul_join
+      [ "# branch.oid 0123"
+      ; "# branch.head feat/x"
+      ; "# branch.upstream origin/feat/x"
+      ; "# branch.ab +3 -1"
+      ; "1 .M N... 100644 100644 100644 aaa bbb lib/a.ml"
+      ]
+  in
+  match Repo_git.branch_status_of_porcelain_v2_z output with
+  | Ok
+      (Repo_git.On_branch
+         { name = "feat/x"
+         ; upstream = Tracking { upstream = "origin/feat/x"; ahead = 3; behind = 1 }
+         }) ->
+      ()
+  | Ok _ -> Alcotest.fail "unexpected branch status"
+  | Error e -> Alcotest.fail ("branch status failed: " ^ e)
+
+let test_branch_status_without_counts_is_not_zero () =
+  let no_upstream = nul_join [ "# branch.oid 0123"; "# branch.head main" ] in
+  let gone =
+    nul_join
+      [ "# branch.oid 0123"; "# branch.head main"; "# branch.upstream origin/main" ]
+  in
+  (match Repo_git.branch_status_of_porcelain_v2_z no_upstream with
+   | Ok (Repo_git.On_branch { name = "main"; upstream = No_upstream }) -> ()
+   | _ -> Alcotest.fail "no upstream header must read as No_upstream");
+  match Repo_git.branch_status_of_porcelain_v2_z gone with
+  | Ok (Repo_git.On_branch { name = "main"; upstream = Upstream_gone "origin/main" }) ->
+      ()
+  | _ -> Alcotest.fail "an upstream without counts must read as Upstream_gone"
+
+let test_branch_status_detached_and_malformed () =
+  (match
+     Repo_git.branch_status_of_porcelain_v2_z
+       (nul_join [ "# branch.oid 0123"; "# branch.head (detached)" ])
+   with
+   | Ok Repo_git.Detached -> ()
+   | _ -> Alcotest.fail "(detached) must read as Detached");
+  let reject label output =
+    Alcotest.(check bool) label true
+      (Result.is_error (Repo_git.branch_status_of_porcelain_v2_z output))
+  in
+  reject "no head header" (nul_join [ "# branch.oid 0123" ]);
+  reject "empty output" "";
+  reject "non-numeric counts"
+    (nul_join
+       [ "# branch.head main"; "# branch.upstream origin/main"; "# branch.ab +x -1" ]);
+  reject "counts in the wrong order"
+    (nul_join
+       [ "# branch.head main"; "# branch.upstream origin/main"; "# branch.ab -1 +1" ])
+
+let test_branch_status_at_reads_a_checkout () =
+  with_temp_dir (fun tmp ->
+      let source = Filename.concat tmp "source" in
+      init_local_repo source;
+      (match run_cmd ~cwd:source [ "git"; "checkout"; "-b"; "branch-status" ] with
+       | Ok () -> ()
+       | Error e -> Alcotest.fail ("git checkout failed: " ^ e));
+      (match Repo_git.branch_status_at ~local_path:source () with
+       | Ok (Repo_git.On_branch { name = "branch-status"; upstream = No_upstream }) -> ()
+       | Ok _ -> Alcotest.fail "a fresh local branch has no upstream"
+       | Error e -> Alcotest.fail ("branch status failed: " ^ e));
+      (match run_cmd ~cwd:source [ "git"; "checkout"; "--detach" ] with
+       | Ok () -> ()
+       | Error e -> Alcotest.fail ("git checkout --detach failed: " ^ e));
+      match Repo_git.branch_status_at ~local_path:source () with
+      | Ok Repo_git.Detached -> ()
+      | Ok _ -> Alcotest.fail "a detached checkout must read as Detached"
+      | Error e -> Alcotest.fail ("branch status failed: " ^ e))
+
 let test_status_files_preserve_paths_and_axes () =
   with_temp_dir (fun tmp ->
       let source = Filename.concat tmp "source" in
@@ -479,6 +554,17 @@ let () =
 	            test_status_summary_uses_read_only_git_conventions;
 	          Alcotest.test_case "lists exact changed paths and axes" `Quick
 	            test_status_files_preserve_paths_and_axes;
+	        ] );
+	      ( "branch_status",
+	        [
+	          Alcotest.test_case "reads tracking counts" `Quick
+	            test_branch_status_reads_tracking_counts;
+	          Alcotest.test_case "missing counts are not zero" `Quick
+	            test_branch_status_without_counts_is_not_zero;
+	          Alcotest.test_case "detached head and malformed headers" `Quick
+	            test_branch_status_detached_and_malformed;
+	          Alcotest.test_case "reads a real checkout" `Quick
+	            test_branch_status_at_reads_a_checkout;
 	        ] );
 	      ( "origin_head_branch",
 	        [

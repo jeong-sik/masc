@@ -8,10 +8,6 @@ type invalid =
   | Verification_pending_verdict
       (** Agent actions cannot resolve an [AwaitingVerification] obligation;
           the completion-authority entry point owns its verdict. *)
-  | Cancel_reason_required
-      (** A cancel without a stated reason. The cancellation ends the Task at
-          once, and the reason is the only thing its author is told — a
-          Cancelled record with no sentence tells that author nothing. *)
   | Current_owner_required of { current_assignee : string }
       (** A held task cannot be changed by another actor. The assignee comes
           from the same status snapshot as the transition decision. *)
@@ -61,14 +57,13 @@ val decide
   -> now:string
   -> notes:string
   -> reason:string option
-      (** The stated reason, [None] when the caller stated none. Any cancel —
-          held or unclaimed — is refused without one. *)
+      (** The stated reason, [None] when the caller stated none. *)
   -> (decision, invalid) result
 
 (** Cancel under an authenticated operator's authority. This decision does not
-    authenticate the caller. It preserves the actual canceller, requires a
-    nonblank reason, accepts all nonterminal states, and leaves Cancelled
-    unchanged. Done cannot be cancelled. Agent [decide] ownership is unchanged. *)
+    authenticate the caller. It preserves the actual canceller, accepts all
+    nonterminal states, and leaves Cancelled unchanged. Done cannot be
+    cancelled. Agent [decide] ownership is unchanged. *)
 val decide_operator_cancel :
   operator_id:string -> task_status:Masc_domain.task_status -> now:string ->
   reason:string option -> (decision, invalid) result

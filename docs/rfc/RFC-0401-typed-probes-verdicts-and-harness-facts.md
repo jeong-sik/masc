@@ -75,7 +75,7 @@ producer keeper 에게 돌아온다. 새 Task 상태는 없다. 타임아웃 게
 ### 2.1 Task contract — `pinned_ref` 와 `probes`
 
 `lib/types/types_core.ml:462` 의 `task_contract` 는 지금
-`strict; completion_contract; required_evidence; inspect_gate_evidence; verify_gate_evidence`
+`completion_contract; required_evidence; inspect_gate_evidence; verify_gate_evidence`
 다. 두 필드를 더한다.
 
 ```ocaml
@@ -159,8 +159,8 @@ type fact = {
   `keeper_chat` 은 operator 대화라 자율 턴의 인자가 없다. 그래서 쓰지 않는다.
 - `location_exists`: `where.symbol` 이 있으면 pinned 체크아웃에서
   `rg -n --fixed-strings <symbol> <path>` 의 exit code, 없으면 `path` 존재 여부.
-- `pinned_ref_drift`: 기존 `freshness_row`(`lib/keeper/keeper_sandbox_control.ml:463`)를
-  `pinned_ref.sha` 기준으로 다시 계산한 값.
+- `pinned_ref_drift`: `Keeper_sandbox_control.checkout_identity_rows` 가 내는
+  `identity_freshness` 를 `pinned_ref.sha` 기준으로 다시 계산한 값.
 
 사실은 검증 요청(`lib/verification.mli:26` 의 `verification_request`)을 만드는
 시점에 시스템이 계산해 요청 스냅샷에 저장한다. keeper 는 계산하지도 제출하지도 않는다.
@@ -204,9 +204,8 @@ artifact 를 거절한다.
 
 ## 5. 브리프 렌더 — 안정 접두사를 깨지 않는다
 
-`pinned_ref` 와 `probes` 는 휘발 밴드에만 그린다. `Repository_freshness` 레이어
-(`lib/keeper/keeper_unified_prompt.ml:1488`)와 같은 자리다. 안정 접두사에는 넣지
-않는다. `goal-brief-keeps-prefix-20260902` 가 keeper 별 캐시 적중 중앙값이
+`pinned_ref` 와 `probes` 는 휘발 밴드(`Keeper_context_layers.ordered` 에서
+`Lane_updates` 뒤)에만 그린다. 안정 접두사에는 넣지 않는다. `goal-brief-keeps-prefix-20260902` 가 keeper 별 캐시 적중 중앙값이
 도입 전 7일 값 아래로 내려가지 않는지 본다(기준선: rondo .35, sangsu .32,
 code-reviewer .39, 캐시를 보고하지 않는 다섯 keeper 는 0).
 

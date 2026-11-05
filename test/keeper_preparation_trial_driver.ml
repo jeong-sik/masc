@@ -302,8 +302,6 @@ let setup ~base ~experiment ~counter ~receipt ~sw ~env =
   let config = Workspace.default_config base in
   ignore (stage Initialize_workspace (fun () ->
     Workspace.init config ~agent_name:(Some "preparation-operator")) : string);
-  Masc_test_deps.Board_test_preparation.prepare ~base_path:base
-    ~action:Masc_test_deps.Board_test_preparation.Bootstrap;
   Masc_test_deps.write_sandbox_image_catalog ~base_path:base ["base","masc-sandbox-base:fixture-owned-job"];
   write (config_path base) skills_config;
   let skill_path = Filename.concat base ".agents/skills/preparation-stdout/SKILL.md" in
@@ -1019,7 +1017,6 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
     Calls.with_commit_observer commit_observer @@ fun () ->
     Keeper_preparation_http_observation.within http_observation @@ fun () ->
     Keeper_heartbeat_loop.run_keepalive_unified_turn
-      ~scheduled_handoff:None ~on_handoff_observed:ignore
       ~wake:Keeper_world_observation.Attention_wake ~ctx ~registry_entry ~meta_after_triage:meta
       ~pending_board_events:[] ~stop:(Atomic.make false) ~proactive_warmup_elapsed:true ~reactive_wake:true
       ~shared_context:(Agent_core.Context.create ()) ~deferred_runtime_lane:None

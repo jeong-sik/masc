@@ -141,7 +141,8 @@ type http_scoped_surface_results =
   (Masc.Tui_decode.server_identity, string) result http_scoped_surface_readings
 
 type http_surface_results = {
-  http_overview: (overview_snapshot, string) result;
+  http_overview: (overview_snapshot, string) result option;
+      (** [None] when the visible surface did not ask for the briefing. *)
   http_approvals: approval_observation option;
   http_scoped: http_scoped_surface_results;
   (* Mandatory on every refresh: the same endpoint may name a different
@@ -233,6 +234,29 @@ type image_preparation =
 type observer_recovery_origin =
   | Observer_existing_workspace of Masc.Tui_decode.server_identity
   | Observer_initial_workspace of local_workspace_paths
+
+(* The Tools screen's reads, one constructor for all of them: [async_msg]
+   is at OCaml's limit of non-constant constructors. *)
+type tools_read =
+  | Tools_inventory_loaded of
+      { generation : int
+      ; keeper : string option
+      ; result : (Masc.Tui_decode_tools.tool_snapshot, string) result
+      }
+  | Tools_catalog_loaded of
+      { generation : int
+      ; result : (Masc.Tui_decode_tools.skills_catalog, string) result
+      }
+  | Tools_activations_loaded of
+      { generation : int
+      ; keeper : string
+      ; result : (Masc.Tui_decode_tools.skill_activation_projection, string) result
+      }
+  | Tools_usage_loaded of
+      { generation : int
+      ; keeper : string
+      ; result : (Masc.Tui_decode_tools.keeper_skill_usage, string) result
+      }
 
 type async_msg =
   | Chat_search_finished of int * bool * Masc_tui_render_chat.chat_search_plan
@@ -400,11 +424,11 @@ type async_msg =
   | Local_keepers_read of local_workspace_request * (Masc_tui_loader.local_keeper_reading, string) result
   | Local_workspace_read of local_workspace_request * (Masc_tui_loader.local_reading, string) result
       (** Optional work/agent observation. Required metadata has its own typed reply. *)
-  | Lanes_loaded of
-      unit ref * ( Masc.Tui_decode.keeper_lanes_snapshot
-        * Masc.Tui_decode.keeper_secret_projection list,
-        string )
-      result
+  | Keeper_composite_loaded of
+      unit ref * string
+      * ( Masc.Tui_decode.keeper_lane * Masc.Tui_decode.keeper_secret_projection option,
+          string )
+        result
   | Lane_inventory_loaded of
       int * (Masc.Tui_decode_lane_inventory.snapshot, string) result
   | Clients_loaded of
@@ -492,8 +516,7 @@ type async_msg =
     }
   | Runtime_surface_loaded of
       int * (Masc_tui_loader.runtime_surface_load, string) result
-  | Tools_loaded of int * string option * (Masc.Tui_decode_tools.tool_snapshot, string) result
-  | Skills_catalog_loaded of int * (Masc.Tui_decode_tools.skills_catalog, string) result
+  | Tools_read_loaded of tools_read
   | Skill_evidence_loaded of unit ref * string * (Yojson.Safe.t, string) result
   | Tools_async_observation_loaded of int * (Masc.Tui_decode.async_request_observation, string) result
   | Tools_async_detail_loaded of Masc_tui_types.tools_async_detail_request * (Masc.Tui_decode_async_request.reading, string) result
@@ -519,6 +542,9 @@ type async_msg =
       * (Masc_tui_http.tool_approval_answer, string) result
   | Keeper_tool_approvals_loaded of
       Snapshot_read.request * Masc.Tui_decode.server_identity * (Masc.Tui_decode.keeper_tool_approval list, string) result
+  | Asks_reloaded of asks_observation
+  | Keeper_roster_reloaded of keeper_roster_observation
+  | Keeper_row_reloaded of keeper_row_observation
   | Listen_prepared of listen_request * (Masc_tui_attachment_action.prepared, string) result
   | Resource_diagram_ready of Masc_tui_resource_diagrams.request * string * Masc_tui_resource_diagrams.claim * (string, string) result
   | Sent_image_ready of {
@@ -609,7 +635,6 @@ type async_msg =
           needs the chat request this path does not have. *)
   | Keeper_chat_dispatch_blocked of Masc_tui_keeper_chat_projection.request * string
   | Keeper_logs_loaded of keeper_log_request * (Masc_tui_metrics_tail.snapshot, string) result
-  | Keeper_execute_loaded of keeper_execute_request * (keeper_execute_reading * float, string) result
   | Keeper_execute_streamed of keeper_execute_follow * keeper_execute_follow_event
   | Keeper_settings_save_changed of keeper_settings_save_request * keeper_settings_save_status * int64
   | Runtime_form_save_changed of runtime_form_save_request * runtime_form_save_status * int64
@@ -920,7 +945,7 @@ end
 
 let rec workspace_message_is_read = function
   | Code_draft_saved _ | Board_attachment_saved _ | Resource_exported _ | Resource_share_changed _ | Verification_evidence_exported _ -> false
-  | (Keeper_logs_loaded _ | Keeper_execute_loaded _ | Keeper_execute_streamed _) -> true
+  | (Keeper_logs_loaded _ | Keeper_execute_streamed _) -> true
   | Chat_search_finished _ -> true
   | Workspace_scoped (_, _, message)
   | Chat_command_read_completed (_, message) -> workspace_message_is_read message
@@ -969,7 +994,7 @@ let rec workspace_message_is_read = function
   | Local_workspace_read _
   | Local_keepers_read _
   | Live_context_loaded _
-  | Lanes_loaded _
+  | Keeper_composite_loaded _
   | Lane_inventory_loaded _
   | Clients_loaded _
   | Lane_runs_loaded _
@@ -1001,13 +1026,13 @@ let rec workspace_message_is_read = function
   | Connectors_status_loaded _
   | Connectors_loaded _
   | Runtime_surface_loaded _
-  | Tools_loaded _
-  | Skills_catalog_loaded _
+  | Tools_read_loaded _
   | Skill_evidence_loaded _
   | Tools_async_observation_loaded _
   | ((Tools_async_detail_loaded _ | Task_document_prepared _) | Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _)
   | Runtime_catalog_loaded _
   | Keeper_tool_approvals_loaded _
+  | Asks_reloaded _ | Keeper_roster_reloaded _ | Keeper_row_reloaded _
   | Approvals_summary_loaded _
   | Listen_prepared _
   | Sent_image_ready _
@@ -1180,7 +1205,7 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Keeper_chat_operation_loaded _ | Keeper_chat_journal_loaded _ | Keeper_native_tasks_loaded _
   | Keeper_preparation_loaded _ | Keeper_child_content_loaded _ | Context_inspector_loaded _
   | Context_inspector_part_loaded _ | Keeper_chat_older_loaded _ | Live_context_loaded _
-  | Local_keepers_read _ | Local_workspace_read _ | Lanes_loaded _ | Lane_inventory_loaded _
+  | Local_keepers_read _ | Local_workspace_read _ | Keeper_composite_loaded _ | Lane_inventory_loaded _
   | Clients_loaded _ | Lane_runs_loaded _ | Lane_run_detail_loaded _
   | Measurement_artifact_loaded _ | Verification_loaded _ | Harness_loaded _
   | Fusion_runs_loaded _ | Fusion_detail_loaded _ | Fusion_historical_detail_loaded _
@@ -1193,12 +1218,12 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Browser_lane_clients_loaded _ | Browser_lane_loaded _ | Browser_lane_action_done _
   | Browser_lane_scene_loaded _ | Browser_lane_follow_loaded _ | Browser_lane_screenshot_ready _
   | Connectors_status_loaded _ | Connectors_loaded _ | Connector_unbind_all_done _
-  | Runtime_surface_loaded _ | Tools_loaded _ | Skills_catalog_loaded _
+  | Runtime_surface_loaded _ | Tools_read_loaded _
   | Skill_evidence_loaded _ | Tools_async_observation_loaded _ | Tools_async_detail_loaded _
   | Task_document_prepared _ | Tools_async_task_body_loaded _
   | Tools_async_task_history_loaded _ | Runtime_lane_slots_written _ | Runtime_catalog_loaded _
   | Runtime_assignment_changed _ | Keeper_chat_approval_answered _
-  | Keeper_tool_approvals_loaded _ | Listen_prepared _ | Resource_diagram_ready _
+  | Keeper_tool_approvals_loaded _ | Asks_reloaded _ | Keeper_roster_reloaded _ | Keeper_row_reloaded _ | Listen_prepared _ | Resource_diagram_ready _
   | Keeper_turns_loaded _ | Keeper_waiting_loaded _
   | Keeper_chat_control_received _ | Gate_snapshot_loaded _ | Gate_approval_resolved _
   | Gate_auto_judge_retried _ | Gate_mode_set _ | Surface_tool_approval_answered _
@@ -1234,7 +1259,7 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Fleet_stream_view _ | Fleet_stream_reader_ended _ | Original_task_read_done _
   | Original_task_history_done _ | Original_task_evidence_done _ | Task_dispatch_completed _
   | Task_creation_read_done _ | Keeper_queue_action_received _
-  | Keeper_execute_loaded _ | Keeper_execute_streamed _ -> false
+  | Keeper_execute_streamed _ -> false
 let workspace_message_admitted state ~authority ~reading message =
   workspace_reply_admitted state ~authority ~reading
     ~kind:(if workspace_message_is_read message
@@ -1326,7 +1351,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _) | Context_inspector_loaded (_, _, _)
     | Context_inspector_part_loaded (_, _)
     | Keeper_chat_older_loaded (_, _, _, _) | Local_workspace_read (_, _) | Local_keepers_read (_, _) | Live_context_loaded (_, _, _)
-    | Lanes_loaded (_, _) | Lane_inventory_loaded (_, _) | Clients_loaded (_, _)
+    | Keeper_composite_loaded (_, _, _) | Lane_inventory_loaded (_, _) | Clients_loaded (_, _)
     | Lane_runs_loaded (_, _, _, _) | Lane_run_detail_loaded (_, _, _)
     | Measurement_artifact_loaded (_, _, _) | Verification_loaded _
     | Harness_loaded _ | Fusion_runs_loaded (_, _)
@@ -1343,12 +1368,12 @@ let retired_operation_observation state ~authority ~reading message =
     | Browser_lane_scene_loaded (_, Error _) | Browser_lane_follow_loaded (_, _)
     | Browser_lane_screenshot_ready _ | Connectors_status_loaded (_, _) | Connectors_loaded (_, _)
     | Connector_unbind_all_done _ | Runtime_surface_loaded (_, _)
-    | Tools_loaded (_, _, _) | Skills_catalog_loaded (_, _)
+    | Tools_read_loaded _
     | Skill_evidence_loaded (_, _, _) | (Tools_async_observation_loaded (_, _) | ((Tools_async_detail_loaded _ | Task_document_prepared _) | Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _))
     | Runtime_lane_slots_written (_, _, _) | Runtime_catalog_loaded (_, _)
     | Runtime_assignment_changed (_, _, _)
     | Keeper_chat_approval_answered (_, _, _, _)
-    | Keeper_tool_approvals_loaded (_, _, _) | Listen_prepared _ | Sent_image_ready _
+    | Keeper_tool_approvals_loaded (_, _, _) | Asks_reloaded _ | Keeper_roster_reloaded _ | Keeper_row_reloaded _ | Listen_prepared _ | Sent_image_ready _
     | Image_render_ready _ | Keeper_turns_loaded _ | Keeper_waiting_loaded _
     | Keeper_chat_control_received (_, _, _) | Gate_snapshot_loaded (_, _, _)
     | Gate_approval_resolved (_, _, _, _, _)
@@ -1356,7 +1381,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Surface_tool_approval_answered (_, _, _, _, _, _)
     | Keeper_gate_settings_loaded _ | Keeper_tool_modes_loaded (_, _)
     | Keeper_tool_mode_set (_, _, _, _) | Keeper_chat_dispatch_blocked (_, _)
-    | (Keeper_logs_loaded _ | Keeper_execute_loaded _ | Keeper_execute_streamed _) | Runtime_form_save_changed _ | Keeper_settings_save_changed _ | Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | Board_publication_done _ | Board_comment_done _
+    | (Keeper_logs_loaded _ | Keeper_execute_streamed _) | Runtime_form_save_changed _ | Keeper_settings_save_changed _ | Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | Board_publication_done _ | Board_comment_done _
     | (Board_vote_done _ | Artifact_check_changed _) | Goal_transition_done _ | Goal_confirmation_submitted _
     | Goal_confirmation_loaded (_, _) | Schedules_loaded (_, _)
     | Schedule_wake_history_loaded (_, _) | Keeper_schedules_loaded (_, _)
@@ -1464,7 +1489,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Keeper_native_tasks_loaded (_, _) | Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _)
   | Context_inspector_loaded (_, _, _)
   | Context_inspector_part_loaded (_, _) | Keeper_chat_older_loaded (_, _, _, _)
-  | Local_workspace_read (_, _) | Local_keepers_read (_, _) | Live_context_loaded (_, _, _) | Lanes_loaded (_, _)
+  | Local_workspace_read (_, _) | Local_keepers_read (_, _) | Live_context_loaded (_, _, _) | Keeper_composite_loaded (_, _, _)
   | Lane_inventory_loaded (_, _) | Clients_loaded (_, _)
   | Lane_runs_loaded (_, _, _, _) | Lane_run_detail_loaded (_, _, _)
   | Measurement_artifact_loaded (_, _, _) | Verification_loaded _
@@ -1481,12 +1506,12 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Browser_lane_loaded (_, _) | Browser_lane_action_done (_, _)
   | Browser_lane_follow_loaded (_, Error _) | Connectors_status_loaded (_, _) | Connectors_loaded (_, _)
   | Connector_unbind_all_done _ | Runtime_surface_loaded (_, _)
-  | Tools_loaded (_, _, _) | Skills_catalog_loaded (_, _)
+  | Tools_read_loaded _
   | Skill_evidence_loaded (_, _, _) | (Tools_async_observation_loaded (_, _) | ((Tools_async_detail_loaded _ | Task_document_prepared _) | Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _))
   | Runtime_lane_slots_written (_, _, _) | Runtime_catalog_loaded (_, _)
   | Runtime_assignment_changed (_, _, _)
   | Keeper_chat_approval_answered (_, _, _, _)
-  | Keeper_tool_approvals_loaded (_, _, _) | Listen_prepared _ | Sent_image_ready _
+  | Keeper_tool_approvals_loaded (_, _, _) | Asks_reloaded _ | Keeper_roster_reloaded _ | Keeper_row_reloaded _ | Listen_prepared _ | Sent_image_ready _
   | Image_render_ready _ | Keeper_turns_loaded _ | Keeper_waiting_loaded _
   | Keeper_chat_control_received (_, _, _) | Gate_snapshot_loaded (_, _, _)
   | Gate_approval_resolved (_, _, _, _, _)
@@ -1494,7 +1519,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Surface_tool_approval_answered (_, _, _, _, _, _)
   | Keeper_gate_settings_loaded _ | Keeper_tool_modes_loaded (_, _)
   | Keeper_tool_mode_set (_, _, _, _) | Keeper_chat_dispatch_blocked (_, _)
-  | (Keeper_logs_loaded _ | Keeper_execute_loaded _ | Keeper_execute_streamed _) | Runtime_form_save_changed _ | Keeper_settings_save_changed _ | Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | Board_publication_done _ | Board_comment_done _ | (Board_vote_done _ | Artifact_check_changed _)
+  | (Keeper_logs_loaded _ | Keeper_execute_streamed _) | Runtime_form_save_changed _ | Keeper_settings_save_changed _ | Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | Board_publication_done _ | Board_comment_done _ | (Board_vote_done _ | Artifact_check_changed _)
   | Goal_transition_done _ | Goal_confirmation_submitted _
   | Goal_confirmation_loaded (_, _) | Schedules_loaded (_, _)
   | Schedule_wake_history_loaded (_, _) | Keeper_schedules_loaded (_, _)

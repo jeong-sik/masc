@@ -36,15 +36,6 @@ type terminal_outcome =
 type handle_result =
   | Completed of Keeper_meta_contract.keeper_meta
 
-type cycle_post_action =
-  | Assign_task
-  | Empty_queue_sleep
-
-let post_action_of_channel = function
-  | Keeper_world_observation.Reactive -> Assign_task
-  | Keeper_world_observation.Scheduled_autonomous -> Empty_queue_sleep
-;;
-
 let acknowledge_pending_messages
       (meta : Keeper_meta_contract.keeper_meta)
       (observation : Keeper_world_observation.world_observation)
@@ -62,10 +53,7 @@ let terminal_outcome_of_result result =
   match result.Keeper_agent_run.stop_reason with
   | Runtime_agent.Completed _ -> Terminal_done
   | Runtime_agent.InputRequired _ -> Terminal_input_required
-  | Runtime_agent.Yielded_to_operation_queued _
-  | Runtime_agent.Yielded_to_durable_stimulus _
-  | Runtime_agent.Yielded_after_repeated_tool_call _
-  | Runtime_agent.Yielded_after_repeated_assistant_text _ ->
+  | Runtime_agent.Yielded_to_durable_stimulus _ ->
     Terminal_checkpoint
 ;;
 
@@ -124,14 +112,6 @@ let append_metrics_snapshot
           ]
         ())
     (fun () ->
-       (match Keeper_execution_outcome.lane execution_outcome with
-        | Keeper_execution_outcome.Direct -> ()
-        | Keeper_execution_outcome.Autonomous _ ->
-          (match post_action_of_channel channel with
-           | Assign_task ->
-             Keeper_turn_helpers.post_assign_task ~channel:channel_tag
-           | Empty_queue_sleep ->
-             Keeper_turn_helpers.post_empty_queue_sleep ~channel:channel_tag));
        KUM.append_metrics_snapshot
          ~config
          ~meta:updated_meta
@@ -263,23 +243,8 @@ let emit_usage_metrics_and_log
   let outcome_str =
     match result.Keeper_agent_run.stop_reason with
     | Runtime_agent.Completed _ -> "completed"
-    | Runtime_agent.Yielded_to_operation_queued { turns_used; _ } ->
-      Printf.sprintf "yielded_to_operation_queued(%d)" turns_used
     | Runtime_agent.Yielded_to_durable_stimulus { turns_used; _ } ->
       Printf.sprintf "yielded_to_durable_stimulus(%d)" turns_used
-    | Runtime_agent.Yielded_after_repeated_tool_call
-        { turns_used; tool_name; repeated_count; _ } ->
-      Printf.sprintf
-        "yielded_after_repeated_tool_call(%d,%s,%d)"
-        turns_used
-        tool_name
-        repeated_count
-    | Runtime_agent.Yielded_after_repeated_assistant_text
-        { turns_used; repeated_count; _ } ->
-      Printf.sprintf
-        "yielded_after_repeated_assistant_text(%d,%d)"
-        turns_used
-        repeated_count
     | Runtime_agent.InputRequired { turns_used; _ } ->
       Printf.sprintf "input_required(%d)" turns_used
   in
@@ -289,13 +254,8 @@ let emit_usage_metrics_and_log
     | Terminal_input_required -> "input_required"
      | Terminal_checkpoint ->
       (match result.stop_reason with
-       | Runtime_agent.Yielded_to_operation_queued _ -> "yielded_to_operation_queued"
        | Runtime_agent.Yielded_to_durable_stimulus _ ->
          "yielded_to_durable_stimulus"
-       | Runtime_agent.Yielded_after_repeated_tool_call _ ->
-         "yielded_after_repeated_tool_call"
-       | Runtime_agent.Yielded_after_repeated_assistant_text _ ->
-         "yielded_after_repeated_assistant_text"
        | Runtime_agent.InputRequired _ -> "input_required"
        | Runtime_agent.Completed _ -> "success")
   in
@@ -392,13 +352,11 @@ let emit_resolved_cost_event
       ~config
       ~meta
       ~keeper_turn_id
-      ~result
+      ~agent_core_turn_ordinal
+      ~(result : Keeper_agent_run.run_result)
       ~(usage_resolution : Keeper_usage_resolution.t)
       ~usage_trust
   =
-  match result.Keeper_agent_run.final_agent_core_turn_ordinal with
-  | None -> ()
-  | Some agent_core_turn_ordinal ->
   let usage, usage_missing =
     match usage_resolution.delta with
     | Some usage -> usage, false
@@ -481,41 +439,12 @@ let reset_turn_failures_for_stop_reason ~config ~updated_meta result =
     then Health.record_success ~agent_name:updated_meta.name
   in
   match result.Keeper_agent_run.stop_reason with
-  | Runtime_agent.Yielded_to_operation_queued { turns_used; _ } ->
-    (* A clean, intentional yield to a queued operation, not a degraded outcome:
-       clear turn-failure state and record health success, like a completed
-       turn. The keeper resumes its own work on the next cycle. *)
-    Log.Keeper.info ~keeper_name:updated_meta.name
-      "yielded autonomous Owner child to a queued operation after %d turn(s), checkpoint \
-       saved — will resume next cycle"
-      turns_used;
-    reset_failure_state ()
   | Runtime_agent.Yielded_to_durable_stimulus { turns_used; _ } ->
     Log.Keeper.info ~keeper_name:updated_meta.name
       "yielded autonomous run for a pending durable stimulus after %d turn(s), \
        checkpoint saved — will resume next cycle"
       turns_used;
     reset_failure_state ()
-  | Runtime_agent.Yielded_after_repeated_tool_call
-      { turns_used; tool_name; repeated_count; _ } ->
-    Log.Keeper.warn ~keeper_name:updated_meta.name
-      "yielded repeated exact tool loop after %d turn(s): tool=%s count=%d; \
-       checkpoint saved — will resume next cycle"
-      turns_used
-      tool_name
-      repeated_count;
-    (* A repeated-tool stop checkpoints progress but is not a successful turn;
-       preserve failure evidence and budgets for the next cycle. *)
-    ()
-  | Runtime_agent.Yielded_after_repeated_assistant_text
-      { turns_used; repeated_count; _ } ->
-    Log.Keeper.warn ~keeper_name:updated_meta.name
-      "yielded repeated assistant text after %d turn(s): count=%d; \
-       checkpoint saved — will resume next cycle"
-      turns_used
-      repeated_count;
-    (* Repeated assistant text is likewise a non-completion stop. *)
-    ()
   | Runtime_agent.InputRequired { turns_used; request } ->
     Log.Keeper.info ~keeper_name:updated_meta.name
       "typed input required after %d turn(s), checkpoint saved request_id=%s"
@@ -543,11 +472,6 @@ module For_testing = struct
       ~updated_meta
 
   let reset_turn_failures_for_stop_reason = reset_turn_failures_for_stop_reason
-  type nonrec cycle_post_action = cycle_post_action =
-    | Assign_task
-    | Empty_queue_sleep
-
-  let post_action_of_channel = post_action_of_channel
 end
 
 let emit_terminal_fsm ~meta ~keeper_turn_id =
@@ -573,6 +497,7 @@ let handle
       ~(degraded_retry_deferred : Keeper_error_classify.degraded_retry option)
       ~keeper_turn_id
       ~(spend : Keeper_turn_spend.attempt list)
+      ~(settled_start : Keeper_unsettled_spend.settled_start option)
       execution_outcome
   =
   (* Named so post-turn work (checkpoint, metrics, memory, projections)
@@ -780,23 +705,53 @@ let handle
     ~total_cost_usd:updated_meta.runtime.usage.total_cost_usd.known_cost_usd;
   (* The spend rows follow the commit that moved the cursor. Written before
      it, a failed commit left rows whose spend the next turn resolved again
-     from the old cursor. *)
-  run_projection KTP.Usage_metrics (fun () ->
-    emit_resolved_cost_event
-      ~config
-      ~meta
-      ~keeper_turn_id
-      ~result
-      ~usage_resolution
-      ~usage_trust);
-  run_projection KTP.Usage_metrics (fun () ->
-    Keeper_turn_spend_ledger.write
-      ~masc_root:(Common.masc_dir_from_base_path ~base_path:config.Workspace.base_path)
-      ~agent_name:meta.name
-      ~task_id:(Option.map Keeper_id.Task_id.to_string meta.current_task_id)
-      ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-      ~keeper_turn_id
-      turn_spend.other_readings);
+     from the old cursor.
+
+     The turn's start goes back only when every reading the turn holds has a
+     resolved row in the file. Otherwise the next execution reads the ledger.
+     That read settles raw rows only above the Keeper's newest resolved row,
+     so a reading whose row failed beside one that landed stays unsettled
+     (#47973). *)
+  let row_written write =
+    let written = ref false in
+    run_projection KTP.Usage_metrics (fun () ->
+      match write () with
+      | Ok () -> written := true
+      | Error (_ : Keeper_hooks_agent_core.append_failure) -> ());
+    !written
+  in
+  let turn_reading_recorded =
+    match result.final_agent_core_turn_ordinal, turn_spend.turn_reading with
+    | Some agent_core_turn_ordinal, (_ : Keeper_turn_spend.resolved option) ->
+      row_written (fun () ->
+        emit_resolved_cost_event
+          ~config
+          ~meta
+          ~keeper_turn_id
+          ~agent_core_turn_ordinal
+          ~result
+          ~usage_resolution
+          ~usage_trust)
+    (* No provider turn ended the run, so no turn row is written. A turn that
+       read nothing leaves nothing to settle. A reading with no row is held
+       only by its raw row, which the next execution's read settles. *)
+    | None, None -> true
+    | None, Some (_ : Keeper_turn_spend.resolved) -> false
+  in
+  let other_readings_recorded =
+    row_written (fun () ->
+      Keeper_turn_spend_ledger.write
+        ~masc_root:(Common.masc_dir_from_base_path ~base_path:config.Workspace.base_path)
+        ~agent_name:meta.name
+        ~task_id:(Option.map Keeper_id.Task_id.to_string meta.current_task_id)
+        ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+        ~keeper_turn_id
+        turn_spend.other_readings)
+  in
+  (match settled_start with
+   | Some start when turn_reading_recorded && other_readings_recorded ->
+     Keeper_unsettled_spend.record_committed start
+   | Some _ | None -> ());
   (* Single source of truth for success-path terminal FSM transitions.
      Completion-contract observations never rewrite a successful runtime turn
      into a failed Keeper lifecycle transition. *)

@@ -75,8 +75,14 @@ val received_marker : string
 val all_outcomes : tool_outcome list
 (** Every outcome, in rollup order. *)
 
-(** Last provider progress observation projected onto its native tool row. *)
-type native_progress =
+(** Last provider progress observation projected onto its native tool row.
+    [output_bytes]: cumulative received output bytes; no raw output.
+    [message]: latest redacted full MCP message; sanitized at render.
+    [provider_elapsed_seconds]: provider report, independent of local
+    elapsed; may decrease. [updated_at]: consumer-supplied event time;
+    normal live input uses SSE time or receipt fallback. [elapsed]: time
+    between observed start and update, if ordered; not provider duration. *)
+type native_progress = Masc_tui_keeper_chat_activity_projection.native_progress =
   { output_bytes : int option (** Cumulative received output bytes; no raw output. *)
   ; message : string option (** Latest redacted full MCP message; sanitized at render. *)
   ; provider_elapsed_seconds : int option (** Provider report, independent of local elapsed; may decrease. *)
@@ -293,7 +299,7 @@ val native_completion_summary : Runtime_native_tools.completion -> string
 (** The ended native steps of one block that share a tool and a provider
     report. The key is what {!native_completion_status} draws: the
     unrecognized-status word is left out, and a result with an error flag is
-    the error report. *)
+    the error report. [status_tool] is the display name of the tool. *)
 type native_status_group =
   { status_tool : string  (** Display name of the tool. *)
   ; status_completion : Runtime_native_tools.completion
@@ -509,20 +515,13 @@ val note_priority_unavailable : t -> unit
 val interrupt : t -> interrupt
 val text : t -> string
 val thinking : t -> string
-
-val thinking_lines : t -> string list
-(** The reasoning trail the pane draws: every non-blank line, in order.
-    Blank lines are dropped because models emit runs of them. Not the
-    last line alone -- reasoning is the only part of a live turn the
-    durable transcript does not keep, so the pane is the one place it can
-    be read. *)
 val tool_calls : t -> tool_activity list
 (** In the order the stream opened them. Unresolved calls in a terminal or
     superseded attempt are [Never_returned]; recorded results are preserved. *)
 val unreadable : t -> unreadable option
 
 (** One stretch of the turn, in arrival order. A tool-call round interleaves
-    reasoning, calls and reply text; {!text}, {!thinking_lines} and
+    reasoning, calls and reply text; {!text}, {!thinking} and
     {!tool_rows} answer the totals, this answers the order, which is what a
     reader follows a long turn by. Tool stretches stay typed; text and
     reasoning strings are terminal-safe. *)

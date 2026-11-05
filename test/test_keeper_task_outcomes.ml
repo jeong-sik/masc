@@ -88,7 +88,7 @@ let test_keeper_broadcast_forwards_typed_cache_signal () =
             ~title:"Terminal cache fixture"
             ~priority:1
             ~description:"");
-       ignore (Masc.Workspace.claim_task config ~agent_name:subject ~task_id:"task-001");
+       ignore (Masc.Workspace.claim_task_r config ~agent_name:subject ~task_id:"task-001" ());
        let backlog = Workspace_backlog.read_backlog_r config |> Result.get_ok in
        let terminal_backlog =
          { backlog with
@@ -1063,7 +1063,8 @@ let rejected_done_typed_outcome ~base_path:_ config meta args =
     Task.handle_keeper_task_tool ~config ~meta ~name:"keeper_task_done" ~args
   in
   let json = Yojson.Safe.from_string payload in
-  check bool "rejected done is not ok" false (json |> U.member "ok" |> U.to_bool);
+  check bool "rejected done is not ok" false
+    (match json |> U.member "ok" with `Bool true -> true | _ -> false);
   Outcome.of_json (json |> U.member "typed_outcome")
 
 let test_done_missing_task_id_emits_typed_error () =
@@ -1139,9 +1140,8 @@ let test_done_failed_transition_emits_typed_error () =
             | Some (Outcome.No_progress _) -> "No_progress"
             | Some (Outcome.Error _) -> "Error"))
 
-let strict_contract : Masc_domain.task_contract =
-  { strict = true
-  ; completion_contract = [ "peer verification required" ]
+let peer_review_contract : Masc_domain.task_contract =
+  { completion_contract = [ "peer verification required" ]
   ; required_evidence = []
   ; inspect_gate_evidence = []
   ; verify_gate_evidence = []
@@ -1163,7 +1163,7 @@ let with_verification_persistence f =
     f
 ;;
 
-let test_strict_done_submits_for_verification () =
+let test_contract_done_submits_for_verification () =
   with_verification_persistence @@ fun () ->
   let base_path = temp_dir () in
   Fun.protect
@@ -1175,7 +1175,7 @@ let test_strict_done_submits_for_verification () =
        ignore
          (Masc.Workspace.add_task
             config
-            ~contract:strict_contract
+            ~contract:peer_review_contract
             ~title:"Evidence-bearing completion"
             ~priority:1
             ~description:"");
@@ -1332,7 +1332,7 @@ let test_default_done_is_terminal () =
           fail ("default completion failed: " ^ execution.raw_output));
        (* [keeper_task_done] submits evidence; it does not end the Task. The
           handler picks [submit_for_verification] unconditionally
-          (keeper_tool_task_runtime.ml), with no strict/advisory branch, and
+          (keeper_tool_task_runtime.ml), and
           [Workspace_task_lifecycle] refuses to resolve an
           [AwaitingVerification] obligation from any agent action. This case
           used to assert the default path was terminal, which stopped being
@@ -1597,11 +1597,6 @@ let test_done_submits_three_rendered_pages () =
    transition read as non-terminal. Bind the real filesystem once, here, so
    every case sees the store it writes to. *)
 
-let contains ~needle haystack =
-  let nl = String.length needle and hl = String.length haystack in
-  let rec go i = i + nl <= hl && (String.sub haystack i nl = needle || go (i + 1)) in
-  nl = 0 || go 0
-
 (* Keeper task payloads are not one shape. A claim reports refusal through
    [typed_outcome] and carries no "ok" at all -- a claimed task deliberately
    omits the field -- while the release path reports through "ok". Read
@@ -1651,72 +1646,35 @@ let with_release_fixture f =
        in
        f call)
 
-(* keeper_task_release exists so a Keeper holding work it cannot finish can go
-   take different work. "release returned ok" on its own does not show that:
-   the claim refusal reads backlog ownership, so the proof is the second claim
-   failing before the release and succeeding after it. Before this tool that
-   second claim stayed refused for the life of the Keeper. *)
-let test_release_frees_the_keeper_to_claim_again () =
+(* A Keeper that holds one task claims another, and releases either one. *)
+let test_keeper_claims_more_work_while_holding_a_task () =
   with_release_fixture (fun call ->
     let claim task_id = call "keeper_task_claim" (`Assoc [ "task_id", `String task_id ]) in
     check bool "first claim succeeds" true (accepted (claim "task-001"));
-    let second = claim "task-002" in
-    check bool "a second claim is refused while the first is held" true (refused second);
-    (* The refusal has to name something the reader can call. It used to name
-       only masc_transition, which the Keeper surface projects away behind
-       keeper_task_claim. *)
-    check
-      bool
-      "the refusal names keeper_task_release"
-      true
-      (contains ~needle:"keeper_task_release" (Yojson.Safe.to_string second));
-    let released =
-      call
-        "keeper_task_release"
-        (`Assoc
-          [ "task_id", `String "task-001"
-          ; "summary", `String "blocked on a checkout this Keeper does not have"
-          ])
-    in
-    check bool "release succeeds" true (accepted released);
-    check
-      bool
-      "the Keeper can claim different work once it has handed the task back"
-      true
-      (accepted (claim "task-002")))
+    check bool "a second claim succeeds while the first is held" true
+      (accepted (claim "task-002"));
+    check bool "release of the first succeeds" true
+      (accepted
+         (call
+            "keeper_task_release"
+            (`Assoc
+              [ "task_id", `String "task-001"
+              ; "summary", `String "blocked on a checkout this Keeper does not have"
+              ]))))
 
-(* The next owner reads the summary and nothing else about where the work
-   stands, so an empty one is refused at the tool rather than stored. *)
-let test_release_without_summary_is_refused () =
+(* A release without a summary hands the task back. *)
+let test_release_without_summary_hands_the_task_back () =
   with_release_fixture (fun call ->
     check
       bool
       "claim succeeds"
       true
       (accepted (call "keeper_task_claim" (`Assoc [ "task_id", `String "task-001" ])));
-    let rejection = call "keeper_task_release" (`Assoc [ "task_id", `String "task-001" ]) in
-    check bool "release without a summary is refused" true (refused rejection);
-    (* Pin the Keeper-vocabulary rejection, not the transition layer's. The
-       transition also refuses an empty handoff_context.summary, so a test
-       that only asked "was it refused" stayed green with this tool's own
-       check deleted -- and the Keeper would then read a message naming
-       handoff_context.summary, a field it never sent. Same reason
-       keeper_task_done enforces its schema locally. *)
     check
       bool
-      "the refusal names the parameter the Keeper actually sent"
+      "release without a summary succeeds"
       true
-      (contains
-         ~needle:"keeper_task_release rejected: summary required"
-         (Yojson.Safe.to_string rejection));
-    (* A refused release must not hand the task back anyway. Re-claiming
-       task-001 is a bad probe -- an owner re-claiming what it holds can
-       succeed -- so ask whether different work is still barred. *)
-    check
-      bool
-      "different work is still barred after the refused release"
-      true
-      (refused (call "keeper_task_claim" (`Assoc [ "task_id", `String "task-002" ]))))
+      (accepted (call "keeper_task_release" (`Assoc [ "task_id", `String "task-001" ]))))
 
 let test_release_sources_reach_the_next_owner () =
   let base_path = temp_dir () in
@@ -1854,19 +1812,19 @@ let () =
             `Quick test_done_failed_transition_emits_typed_error
         ; test_case "submission receipt stays bound across notifications and resubmissions" `Quick
             test_done_receipt_is_bound_to_the_captured_request
-        ; test_case "strict done submits for verification"
-            `Quick test_strict_done_submits_for_verification
+        ; test_case "contract done submits for verification"
+            `Quick test_contract_done_submits_for_verification
         ; test_case "default done submits for verification"
             `Quick test_default_done_is_terminal
         ; test_case
             "done submits three rendered pages"
             `Quick test_done_submits_three_rendered_pages
         ; test_case
-            "release frees the Keeper to claim different work"
-            `Quick test_release_frees_the_keeper_to_claim_again
+            "a Keeper claims more work while holding a task"
+            `Quick test_keeper_claims_more_work_while_holding_a_task
         ; test_case
-            "release without a summary is refused and keeps the task held"
-            `Quick test_release_without_summary_is_refused
+            "release without a summary hands the task back"
+            `Quick test_release_without_summary_hands_the_task_back
         ; test_case "release sources reach the next owner" `Quick
             test_release_sources_reach_the_next_owner
         ; test_case

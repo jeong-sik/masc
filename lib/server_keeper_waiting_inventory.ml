@@ -10,6 +10,7 @@ type waiting_source =
   | Schedule_waiting
   | Owner_shutdown
   | Operator_pending_confirm
+  | Runtime_quota_spent
   | Read_error
   | Observation_unavailable
 [@@deriving enumerate]
@@ -67,6 +68,7 @@ let source_to_string = function
   | Schedule_waiting -> "schedule_waiting"
   | Owner_shutdown -> "owner_shutdown"
   | Operator_pending_confirm -> "operator_pending_confirm"
+  | Runtime_quota_spent -> "runtime_quota_spent"
   | Read_error -> "read_error"
   | Observation_unavailable -> "observation_unavailable"
 ;;
@@ -86,6 +88,7 @@ let all_waiting_sources =
   ; Schedule_waiting
   ; Owner_shutdown
   ; Operator_pending_confirm
+  ; Runtime_quota_spent
   ; Read_error
   ; Observation_unavailable
   ]
@@ -1203,6 +1206,94 @@ let keeper_json ~base_path keeper_name ~busy ~queue_residence rows =
     ]
 ;;
 
+(* One candidate of a Keeper's route whose quota window is spent, with the
+   reset the provider stated, if it stated one. *)
+type spent_candidate =
+  { runtime_id : string
+  ; resets_at : float option
+  }
+
+(* The route's candidates when every one of them has spent its quota window
+   (RFC-0484 §3.1), else [None]. Only the quota window counts: a 429 rest
+   and a failed-attempt mark end by themselves, so a route resting on them is
+   not one the operator has to change. A candidate the runtime table does not
+   resolve says nothing about a quota, so it keeps the route out. *)
+let spent_route_candidates ~now route =
+  match Runtime.resolve_assignment route with
+  | `Unavailable _ | `Missing -> None
+  | `Lane lane ->
+    let rec all_spent acc = function
+      | [] -> Some (List.rev acc)
+      | runtime_id :: rest ->
+        (match Runtime.get_runtime_by_id runtime_id with
+         | None -> None
+         | Some runtime ->
+           let scope = Runtime_instance.quota_scope_of_runtime runtime in
+           if Runtime_quota_window.is_exhausted ~scope ~now
+           then
+             all_spent
+               ({ runtime_id; resets_at = Runtime_quota_window.active_until ~scope ~now } :: acc)
+               rest
+           else None)
+    in
+    (match Runtime_lane.ordered_candidates lane with
+     | [] -> None
+     | candidates -> all_spent [] candidates)
+;;
+
+(* The first stated reset: the Keeper can dispatch again then. A candidate
+   whose provider stated no reset stays spent until it answers, so it adds no
+   time. *)
+let earliest_stated_reset spent =
+  List.fold_left
+    (fun earliest candidate ->
+       match earliest, candidate.resets_at with
+       | None, stated -> stated
+       | Some at, None -> Some at
+       | Some at, Some stated -> Some (Float.min at stated))
+    None
+    spent
+;;
+
+(* A running Keeper whose every candidate has spent its quota waits for the
+   earliest stated reset. The operator can move it to a route with quota left,
+   which is why this row exists. A Keeper the server is not running does not
+   dispatch and is not counted. *)
+let runtime_quota_spent_rows ~now ~base_path keeper_name =
+  if not (Keeper_registry.is_running ~base_path keeper_name)
+  then []
+  else
+    match Keeper_meta_contract.runtime_route_of_keeper_name keeper_name with
+    | None -> []
+    | Some route ->
+      (match spent_route_candidates ~now route with
+       | None -> []
+       | Some spent ->
+         [ { keeper_name = Some keeper_name
+           ; source = Runtime_quota_spent
+           ; waiting_on = route
+           ; what = Printf.sprintf "모든 후보 한도 소진 · %s" route
+           ; wake_producer = Keeper_supervisor
+           ; since = None
+           ; due_at = earliest_stated_reset spent
+           ; next_action = "assign_a_route_with_open_quota"
+           ; detail =
+               `Assoc
+                 [ "route", `String route
+                 ; ( "candidates"
+                   , `List
+                       (List.map
+                          (fun candidate ->
+                             `Assoc
+                               [ "runtime_id", `String candidate.runtime_id
+                               ; "resets_at", unix_iso_json candidate.resets_at
+                               ])
+                          spent) )
+                 ]
+           }
+         ])
+;;
+
 let keeper_rows ~now ~base_path ~pending_approvals ~fusion_runs ~pending_confirms keeper_names =
   keeper_names
   |> List.map (fun keeper_name ->
@@ -1217,6 +1308,7 @@ let keeper_rows ~now ~base_path ~pending_approvals ~fusion_runs ~pending_confirm
       @ external_attention_store_error_rows ~base_path ~keeper_name
       @ fusion_rows keeper_name fusion_runs
       @ pending_confirm_rows [ keeper_name ] pending_confirms
+      @ runtime_quota_spent_rows ~now ~base_path keeper_name
     in
     keeper_name, queue_residence, rows)
 ;;
@@ -1497,6 +1589,15 @@ let health_json_of_snapshot snapshot =
   let read_errors = List.filter (fun row -> row.source = Read_error) rows in
   let observation_errors =
     List.filter (fun row -> row.source = Observation_unavailable) rows in
+  (* Keepers that cannot dispatch until a provider resets. The operator can
+     move them to a route with quota left, so they are an action reason, and
+     the fleet is degraded while they wait (RFC-0484 §3.1). *)
+  let quota_spent = List.filter (fun row -> row.source = Runtime_quota_spent) rows in
+  let quota_spent_reasons =
+    match quota_spent with
+    | [] -> []
+    | _ :: _ -> [ Printf.sprintf "runtime_quota_spent=%d" (List.length quota_spent) ]
+  in
   let schedule_ledger, schedule_known, schedule_reasons =
     schedule_health_observation snapshot.schedule_observation
   in
@@ -1508,6 +1609,7 @@ let health_json_of_snapshot snapshot =
     @ List.map (fun row -> row.waiting_on ^ "_unreadable") read_errors
     @ (if snapshot.pending_confirm_observation_action_required
        then [ "operator_pending_confirm_observer_unavailable" ] else [])
+    @ quota_spent_reasons
     |> List.sort_uniq String.compare
   in
   let reasons =
@@ -1520,6 +1622,11 @@ let health_json_of_snapshot snapshot =
     | _ :: _, _, _ | _, _ :: _, _ | [], [], Error (Corrupt_read_ledger _) -> Health_status.Unavailable
     | [], [], Ok (_, Recovery_mirror _) -> Health_status.Degraded
     | [], [], Ok (_, (Uninitialized | Primary_ledger)) -> Health_status.Ok
+  in
+  let status =
+    match quota_spent with
+    | [] -> status
+    | _ :: _ -> Health_status.max status Health_status.Degraded
   in
   let work_rows =
     List.filter (fun row -> row.source <> Read_error && row.source <> Observation_unavailable) rows in

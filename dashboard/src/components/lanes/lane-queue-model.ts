@@ -270,6 +270,7 @@ const LANE_SOURCE_DEFS: Record<string, LaneSourceDef> = {
   schedule_waiting: { label: '예약 실행', tone: 'warn', stage: 'schedule' },
   owner_shutdown: { label: '종료 정리', tone: 'dim', stage: 'keeper' },
   operator_pending_confirm: { label: '운영자 확인', tone: 'warn', stage: 'operator' },
+  runtime_quota_spent: { label: '한도 소진', tone: 'bad', stage: 'keeper' },
   read_error: { label: '읽기 오류', tone: 'bad', stage: 'queue' },
   observation_unavailable: { label: '관측 불가', tone: 'bad', stage: 'operator' },
 }
@@ -406,7 +407,7 @@ export function waitingDueMinutes(row: DashboardKeeperWaitingRow, nowSec: number
 /* ── 예약 wake 드레인 (dl-* / dm-*) ───────────────────────────────────── */
 
 /** Queue-evidence axis of the drain matrix (design Q_AXIS). */
-export const DRAIN_QUEUE_AXIS = ['matched_pending', 'terminal_projection_pending', 'transfer_projection_pending', 'matched_terminal_completed', 'matched_terminal_failed', 'matched_terminal_cancelled', 'evidence_invalid', 'retained_terminal_wake', 'withdrawn_at_cancel', 'not_found', 'read_error', 'unrecognized_receipt'] as const
+export const DRAIN_QUEUE_AXIS = ['matched_pending', 'terminal_projection_pending', 'transfer_projection_pending', 'matched_terminal_completed', 'matched_terminal_cancelled', 'evidence_invalid', 'retained_terminal_wake', 'withdrawn_at_cancel', 'not_found', 'read_error', 'unrecognized_receipt'] as const
 
 /** Reaction-evidence axis of the drain matrix (design R_AXIS; null = 행 없음). */
 export const DRAIN_REACTION_AXIS: readonly (string | null)[] = [
@@ -420,7 +421,6 @@ export type DrainTone = 'info' | 'ok' | 'bad' | 'warn' | 'dim'
  *  sentence (op, default view) and the wiring explanation (why, dev view). */
 export const DRAIN_PRESENT: Record<QueueDrainState, { label: string; tone: DrainTone; op: string; why: string }> = {
   settling: { label: '처리 반영 중', tone: 'info', op: '종결 또는 이관은 저장됐고 반응 기록 반영을 기다린다', why: 'durable terminal/transfer commit exists; reaction projection pending' },
-  failed: { label: '실행 실패', tone: 'warn', op: '실행 시도가 실패로 종결됐다', why: 'exact durable occurrence has a recorded failed terminal' },
   pending: { label: '큐 대기', tone: 'info', op: '아직 실행되지 않고 차례를 기다리는 중', why: 'wake 가 keeper_event_queue pending 에 있음 — 드레인 대기 중' },
   drained: { label: '완료', tone: 'ok', op: 'keeper 가 받아서 실행했다', why: 'exact durable completion or recorded keeper reaction (consumed_ack / turn_finished / turn_started)' },
   cancelled: { label: '취소됨', tone: 'warn', op: '큐가 취소해서 keeper 턴 없이 끝났다 — 대상 keeper 가 없으면 예약 정의를 지우거나 옮겨야 한다', why: '큐에서 accepted cancellation 으로 빠짐 (owner-absent drain 등) — keeper 반응 없이 종결' },
@@ -478,7 +478,7 @@ export function drainRowOfRequest(
 
 /** Operator sort — actionable verdicts first (design DrainList order). */
 const DRAIN_SORT_ORDER: readonly QueueDrainState[] = [
-  'missed', 'failed', 'cancelled', 'read_error', 'evidence_invalid', 'settling', 'pending', 'indeterminate', 'drained',
+  'missed', 'cancelled', 'read_error', 'evidence_invalid', 'settling', 'pending', 'indeterminate', 'drained',
 ]
 
 export function sortedDrainRows(
@@ -491,7 +491,7 @@ export function sortedDrainRows(
 }
 
 /** Legend entries of the operator drain list (design DrainList footer). */
-export const DRAIN_LEGEND_STATES: readonly QueueDrainState[] = ['missed', 'failed', 'cancelled', 'settling', 'pending', 'read_error', 'drained']
+export const DRAIN_LEGEND_STATES: readonly QueueDrainState[] = ['missed', 'cancelled', 'settling', 'pending', 'read_error', 'drained']
 
 /* ── 라이프사이클 이벤트 (lc-*) ───────────────────────────────────────── */
 

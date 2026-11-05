@@ -58,10 +58,14 @@ let scenario () = Eio_main.run (fun env ->
     check bool "take_over without a client is refused until the lane refused a Space" true
       (pre_effect (send (take_over_route ())));
     let claimed_ids=ref [] in
-    ok (Owner.attach_ego_recovery owner (fun ids ->
-      claimed_ids:=ids; match ids with
-      | [space_id] -> Ok (space_id,"masc-keepers")
-      | _ -> Error "the owner never passes an ambiguous id list"));
+    let reopen=ref (Ok (Owner.Reopening {space="masc-keepers"})) in
+    let recover : Masc.Browser_addon_observation.unavailable -> (Owner.ego_recovered, string) result = function
+      | Masc.Browser_addon_observation.Ego_user_owned_name {ids;_} ->
+        claimed_ids:=ids; (match ids with
+         | [space_id] -> Ok (Owner.Reclaimed {space_id;space_name="masc-keepers"})
+         | _ -> Error "the owner never passes an ambiguous id list")
+      | Ego_space_missing _ -> !reopen in
+    ok (Owner.attach_ego_recovery owner recover);
     check bool "a recovery hook alone does not admit the claim" true
       (pre_effect (send (take_over_route ())));
     ok (Owner.mark_ego_user_owned_name owner ~space:"masc-keepers" ~ids:[7] ~observed_at:1.);
@@ -69,8 +73,10 @@ let scenario () = Eio_main.run (fun env ->
      | W.Issue_result (Ok (B.Answered receipt)) ->
          check (list int) "the claim sees exactly the published Space id" [7] !claimed_ids;
          check bool "the claim receipt names the reclaimed Space" true
-           (receipt=`Assoc ["action",`String "take_over";"spaceId",`Int 7;
-             "spaceName",`String "masc-keepers";"reclaimed",`Bool true])
+           (receipt=`Assoc ["ok",`Bool true;"action",`String "take_over";"spaceId",`Int 7;
+             "spaceName",`String "masc-keepers";"reclaimed",`Bool true]);
+         check bool "the tool reads a reclaim as a success" true
+           (Option.is_none (Masc.Browser_addon_tool.failure_of_reply (W.Issue_result (Ok (B.Answered receipt)))))
      | W.Issue_result (Ok (B.Lane_absent|Timed_out|Refused _|Rejected_before_effect _))
      | W.Issue_result (Error _)|W.Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt|W.Service_refusal _ ->
          check bool "the claim answers with a reclaimed receipt" true false);
@@ -84,15 +90,38 @@ let scenario () = Eio_main.run (fun env ->
     Owner.clear_ego_unavailable owner;
     check bool "a cleared refusal admits no claim" true
       (pre_effect (send (take_over_route ())));
+    (* A missing Space is recovered by opening the configured name again;
+       the answer says so without a Space number it does not have yet. *)
+    ok (Owner.mark_ego_space_missing owner ~space:"masc-keepers" ~space_id:12 ~observed_at:5.);
+    check bool "a second record is not published over a missing Space" true
+      (Result.is_error (Owner.mark_ego_user_owned_name owner ~space:"other" ~ids:[9] ~observed_at:6.));
+    (match send (take_over_route ()) with
+     | W.Issue_result (Ok (B.Answered receipt)) ->
+         check bool "a missing Space is reopened by name" true
+           (receipt=`Assoc ["ok",`Bool true;"action",`String "take_over";"spaceName",`String "masc-keepers";"reopening",`Bool true]);
+         check bool "the tool reads a reopening as a success" true
+           (Option.is_none (Masc.Browser_addon_tool.failure_of_reply (W.Issue_result (Ok (B.Answered receipt)))))
+     | W.Issue_result (Ok (B.Lane_absent|Timed_out|Refused _|Rejected_before_effect _))
+     | W.Issue_result (Error _)|W.Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt|W.Service_refusal _ ->
+         check bool "a missing Space is reopened by name" true false);
+    reopen:=Error "configured by number";
+    check bool "a recovery that cannot reopen is refused" true
+      (pre_effect (send (take_over_route ())));
+    check (list int) "a missing Space never reaches the claim" [7] !claimed_ids;
+    Owner.clear_ego_unavailable owner;
+    List.iter (fun (space,space_id,observed_at) ->
+      check bool "an unreadable missing Space is not published" true
+        (Result.is_error (Owner.mark_ego_space_missing owner ~space ~space_id ~observed_at)))
+      ["",12,1.;"masc",0,1.;"masc",12,(-1.);"masc",12,Float.nan];
     (* One claim at a time: a second while one runs is refused before the
        SDK is asked anything. *)
     ok (Owner.mark_ego_user_owned_name owner ~space:"busy" ~ids:[11] ~observed_at:4.);
     Owner.detach_ego_recovery owner;
     let claimed,claim_entered=Eio.Promise.create () and release,release_claim=Eio.Promise.create () in
-    ok (Owner.attach_ego_recovery owner (fun ids ->
+    ok (Owner.attach_ego_recovery owner (fun _ ->
       ignore (Eio.Promise.try_resolve claim_entered ());
       ignore (Eio.Promise.await release);
-      Ok (11,"busy")));
+      Ok (Owner.Reclaimed {space_id=11;space_name="busy"})));
     let running=Eio.Fiber.fork_promise ~sw (fun () -> send (take_over_route ())) in
     ignore (Eio.Promise.await claimed);
     check bool "a second reclaim while one runs is refused" true
@@ -101,7 +130,7 @@ let scenario () = Eio_main.run (fun env ->
     (match Eio.Promise.await_exn running with
      | W.Issue_result (Ok (B.Answered receipt)) ->
          check bool "the running reclaim answers with a receipt" true
-           (receipt=`Assoc ["action",`String "take_over";"spaceId",`Int 11;
+           (receipt=`Assoc ["ok",`Bool true;"action",`String "take_over";"spaceId",`Int 11;
              "spaceName",`String "busy";"reclaimed",`Bool true])
      | W.Issue_result (Ok (B.Lane_absent|Timed_out|Refused _|Rejected_before_effect _))
      | W.Issue_result (Error _)|W.Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt|W.Service_refusal _ ->

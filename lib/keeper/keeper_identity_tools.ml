@@ -450,21 +450,68 @@ let call_error_to_string = function
   | Mcp { error; _ } -> Mcp_client.error_to_string error
 ;;
 
-let tool_result_of_call answer =
+(* A service's words are as long as the service makes them; MASC's sentence
+   about them is not. When the whole answer is over the lane's inline
+   ceiling, the service's part is stored and named by reference while MASC's
+   sentence stays inline, so what to do next is never behind a reference.
+   Kept whole, an official client spills it to a file under its own
+   configuration directory that no Keeper sandbox can read: one Confluence
+   page came back at 52,480 characters on 2026-11-04 and the Keeper never
+   read it. *)
+let fit_inline ~base_path ~inline_ceiling_bytes ~compose remote =
+  let whole = compose remote in
+  if String.length whole <= inline_ceiling_bytes
+  then Ok whole
+  else
+    (* The whole answer is already over the ceiling, so the service's part is
+       stored whatever its own length. *)
+    Result.map compose
+      (Tool_projection.maybe_externalize ~base_path ~threshold_bytes:0 remote)
+;;
+
+let unstored_reply ~remote (error : Tool_projection.externalization_error) =
+  Printf.sprintf "[the service's %d-byte reply could not be stored: %s]"
+    (String.length remote)
+    (String.trim error.Tool_projection.message)
+;;
+
+let tool_result_of_call ~base_path ~inline_ceiling_bytes answer =
+  let fit = fit_inline ~base_path ~inline_ceiling_bytes in
+  let failed_with ~recoverable ~error_class ~compose remote =
+    match fit ~compose remote with
+    | Ok message -> failed ~recoverable ~error_class message
+    | Error error ->
+      failed ~recoverable ~error_class (compose (unstored_reply ~remote error))
+  in
   match answer with
   | Ok (result : Mcp_client.tool_result) ->
+    let remote = Mcp_client.model_text result in
     if result.Mcp_client.is_error
     then
       (* An error reported by the tool does not prove that no effect occurred. *)
-      failed ~recoverable:false ~error_class:(Some Agent_core.Types.Unknown)
-        (Mcp_client.model_text result ^
-         "\nThe service may have applied an effect; check its state before retrying.")
-    else Ok { Agent_core.Types.content = Mcp_client.model_text result; content_blocks = None; _meta = None }
+      failed_with ~recoverable:false ~error_class:(Some Agent_core.Types.Unknown)
+        ~compose:(fun text ->
+          text ^ "\nThe service may have applied an effect; check its state before retrying.")
+        remote
+    else (
+      match fit ~compose:Fun.id remote with
+      | Ok content ->
+        Ok { Agent_core.Types.content; content_blocks = None; _meta = None }
+      | Error error ->
+        (* The call completed; only the copy for the model is missing. *)
+        failed ~recoverable:false ~error_class:(Some Agent_core.Types.Unknown)
+          (Printf.sprintf
+             "the service completed the call, but its %d-byte answer could not \
+              be stored for you to read (%s); sending the call again repeats any \
+              effect it had"
+             (String.length remote)
+             (String.trim error.Tool_projection.message)))
   | Error (Precondition message) ->
-    failed ~recoverable:false ~error_class:(Some Agent_core.Types.Deterministic)
-      message
+    failed_with ~recoverable:false ~error_class:(Some Agent_core.Types.Deterministic)
+      ~compose:Fun.id message
   | Error (Transient_precondition message) ->
-    failed ~recoverable:true ~error_class:(Some Agent_core.Types.Transient) message
+    failed_with ~recoverable:true ~error_class:(Some Agent_core.Types.Transient)
+      ~compose:Fun.id message
   | Error (Mcp { phase = Tool_call; error = Mcp_client.Unauthorized _ }) ->
     failed ~recoverable:false ~error_class:(Some Agent_core.Types.Unknown)
       "the service returned an authorization error after the request was sent; the effect may have occurred, so check its state before retrying"
@@ -479,8 +526,9 @@ let tool_result_of_call answer =
     failed ~recoverable:false ~error_class:(Some Agent_core.Types.Unknown)
       "the service requires additional input; this operation has not completed and may already have applied effects, so check its state before starting it again"
   | Error (Mcp { error = Mcp_client.Before_tool_call error; _ }) ->
-    failed ~recoverable:true ~error_class:(Some Agent_core.Types.Deterministic)
-      ("the tool request was not sent: " ^ Mcp_client.error_to_string error)
+    failed_with ~recoverable:true ~error_class:(Some Agent_core.Types.Deterministic)
+      ~compose:(fun detail -> "the tool request was not sent: " ^ detail)
+      (Mcp_client.error_to_string error)
   | Error
       (Mcp
          { error =
@@ -499,15 +547,18 @@ let tool_result_of_call answer =
        Use the same transport evidence that replay uses. *)
     (match call_proof_of_call_error call_error with
      | Effect_never_began ->
-       failed ~recoverable:true ~error_class:(Some error_class) detail
+       failed_with ~recoverable:true ~error_class:(Some error_class)
+         ~compose:Fun.id detail
      | Outcome_unknown ->
-       failed
+       failed_with
          ~recoverable:false
          ~error_class:(Some Agent_core.Types.Unknown)
-         (Printf.sprintf
-            "%s; the request may have reached the service, so whether it applied \
-             is unknown: read the service's state before sending it again"
-            detail))
+         ~compose:(fun detail ->
+           Printf.sprintf
+             "%s; the request may have reached the service, so whether it applied \
+              is unknown: read the service's state before sending it again"
+             detail)
+         detail)
 ;;
 
 let store_tokens ~base_path ~keeper_name ~(provider : Provider.t)

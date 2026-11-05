@@ -179,6 +179,15 @@ type attempt_usage =
   | Agent_core_attempt
   | Client_stream_attempt of { reported : bool }
 
+(* A raw row is the ledger's copy of a reading the turn's spend also holds.
+   The commit resolves from the spend, so only an execution that ends without
+   committing needs the row: the next one settles from it. [emit_cost_event]
+   has logged and counted a row that did not land; there is nothing else to
+   undo here. *)
+let raw_row_written = function
+  | Ok () -> ()
+  | Error (Append_declined | Append_raised _) -> ()
+
 (* One usage report an official client sent on its own stream while the
    turn runs ([Runtime_execution.Client_usage_stream]). The row is a raw
    observation under the scope the client reports it in, keyed by the
@@ -204,7 +213,8 @@ let emit_client_usage_report
   match trajectory_acc with
   | None -> ()
   | Some acc ->
-    emit_cost_event
+    raw_row_written
+    @@ emit_cost_event
       ~masc_root:acc.masc_root
       ~agent_name
       ~task_id:acc.task_id
@@ -315,6 +325,10 @@ let make_hooks
       match event with
       | Agent_core.Hooks.BeforeTurn _ ->
         record_progress "agent_core_before_turn";
+        (* Every agent-core turn sends one provider request. Without this the
+           preview kept the previous turn's tool as its activity for the
+           whole wait. *)
+        Keeper_turn_preview.note_request ~writer:preview ~now:(Unix.gettimeofday ());
         Agent_core.Hooks.Continue
       | (Agent_core.Hooks.BeforeTurnParams _ | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.PreToolUse _ | Agent_core.Hooks.PostToolUse _ | Agent_core.Hooks.PostToolUseFailure _ | Agent_core.Hooks.OnStop _ | Agent_core.Hooks.OnError _ | Agent_core.Hooks.OnToolError _) as _event -> Agent_core.Hooks.Continue);
 
@@ -562,7 +576,8 @@ let make_hooks
            (match raw_projection with
             | None -> ()
             | Some usage_projection ->
-              emit_cost_event ~masc_root:acc.masc_root
+              raw_row_written
+              @@ emit_cost_event ~masc_root:acc.masc_root
                 ~agent_name:meta.name ~task_id:acc.task_id
                 ~trace_id ~keeper_turn_id ~agent_core_turn_ordinal:turn ~model
                 ~usage_projection

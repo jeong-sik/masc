@@ -68,7 +68,7 @@ val should_run_turn_after_event_intake :
     Keeper_heartbeat_stimulus_intake.event_queue_intake_error option ->
   bool
 
-type keepalive_scheduling_decision = {
+type keepalive_scheduling_decision = Keeper_heartbeat_loop_scheduling.keepalive_scheduling_decision = {
   turn_decision : Keeper_world_observation.keeper_cycle_decision;
   should_run_turn : bool;
   verdict_reasons : string list;
@@ -82,11 +82,6 @@ val decide_keepalive_scheduling :
   meta:keeper_meta ->
   Keeper_world_observation.world_observation ->
   keepalive_scheduling_decision
-
-val provider_timeout_observation_reasons : string list
-
-val record_provider_timeout_observation :
-  base_path:string -> keeper_name:string -> unit
 
 (** Closed accounting status for one keepalive cycle. Admission busy performs
     no turn accounting, crash accounting, or work-health refresh. *)
@@ -136,10 +131,13 @@ val owner_turn_rejection_cycle_status :
 (** What a failed cycle leaves the next one (RFC-provider-path-rest). A rest
     belongs to the path that received the rate limit or quota answer; the
     keeper waits only while the path it would send next rests.
-    [Continue_on_deferred_lane] names the walk head of the deferred suffix,
-    which is not resting; a pending input runs on it without a sleep. The
-    failed lane is removed before the suffix is recorded, so consecutive
-    immediate cycles walk a finite candidate set and end when it is empty.
+    [Continue_on_deferred_lane] names the head of the walk that resumes the
+    deferred suffix ({!Keeper_turn_driver.resumed_head}), which is not
+    resting; a pending input runs on it without a sleep. A resumed turn leaves
+    a suffix only after attempting a candidate of the suffix it resumed, and
+    that suffix names only the candidates of it the turn did not reach, so
+    consecutive immediate cycles walk a shrinking candidate set and end when
+    it is empty.
     [Wait_for_path_release] sleeps until [release_at]; [waiting_on] names the
     runtime or assignment whose release that is. A wakeup does not cut it
     short (#34653). *)
@@ -267,8 +265,6 @@ val refresh_failure_reason_after_turn :
     function must not re-add inline admission gates: doing so would reinstate
     the consume-before-gate churn that hoisting the decision removed. *)
 val run_keepalive_unified_turn :
-  scheduled_handoff:Keeper_owner.scheduled_turn_handoff option ->
-  on_handoff_observed:(Keeper_owner.scheduled_turn_handoff option -> unit) ->
   wake:Keeper_world_observation.cycle_wake ->
   ctx:'a context ->
   registry_entry:Keeper_registry.registry_entry ->
@@ -283,10 +279,6 @@ val run_keepalive_unified_turn :
   settle_deferred_runtime_lane:
     (Keeper_turn_driver.deferred_runtime_lane option -> unit) ->
   keepalive_turn_outcome
-(** Why the last turn that ran ended before completing is no longer this
-    loop's state: {!Keeper_heartbeat_loop_cycle.run_keeper_cycle} records it
-    into {!Keeper_last_turn_stop} after every cycle it runs, on every lane,
-    and reads it back for the next turn's prompt. *)
 
 val refresh_work_as_heartbeat :
   ctx:'a context ->

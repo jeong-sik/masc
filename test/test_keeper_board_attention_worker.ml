@@ -109,7 +109,7 @@ let candidate ?(id = "candidate-worker") ?(recorded_at = 1.0) () : A.candidate =
   { candidate_id
   ; keeper_name
   ; signal
-  ; audience = Some Masc.Board.Discoverable
+  ; audience = Masc.Board.Discoverable
   ; recorded_at
   ; keeper_context =
       `Assoc

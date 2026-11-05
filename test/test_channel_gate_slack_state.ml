@@ -162,6 +162,26 @@ let test_startup_error_still_offline_with_reason () =
               "invalid Slack trigger policy" (string_field status "error")))))
 ;;
 
+(* A startup error decides availability, so a change of it tells readers and a
+   repeat does not (RFC-0480 §3.4). *)
+let test_a_changed_startup_error_announces_once () =
+  let heard = ref 0 in
+  Gate_connector_announce.install (fun ~connector_id ->
+    if String.equal connector_id Channel_gate_slack_state.connector_id then incr heard);
+  Fun.protect
+    ~finally:(fun () ->
+      Channel_gate_slack_state.clear_startup_error ();
+      Gate_connector_announce.install (fun ~connector_id:_ -> ()))
+  @@ fun () ->
+  Channel_gate_slack_state.clear_startup_error ();
+  let before = !heard in
+  Channel_gate_slack_state.record_startup_error "fixture: app token missing";
+  check int "a new startup error announces" (before + 1) !heard;
+  Channel_gate_slack_state.record_startup_error "fixture: app token missing";
+  check int "the same error again announces nothing" (before + 1) !heard;
+  Channel_gate_slack_state.clear_startup_error ();
+  check int "clearing it announces" (before + 2) !heard
+
 let () =
   run "channel_gate_slack_state"
     [ ( "availability"
@@ -178,6 +198,10 @@ let () =
       , [ test_case
             "status field mirrors the registry export (transport down)" `Quick
             test_connected_field_mirrors_registry_export_when_transport_is_down
+        ] )
+    ; ( "announcements"
+      , [ test_case "a changed startup error announces once" `Quick
+            test_a_changed_startup_error_announces_once
         ] )
     ]
 ;;

@@ -856,8 +856,12 @@ let test_server_startup_refuses_retained_board_workspace () =
           Unix.putenv "MASC_BASE_PATH" base_b;
           let requested = Masc.Workspace.default_config_uncached raw_request in
           let expected = Fs_compat.realpath_lenient (Masc.Workspace.masc_dir requested) in
+          (* Compare the directories the two paths name, not their spelling: the
+             temp root may be reached through a symlink (macOS keeps
+             TMPDIR under /var, a link to /private/var), and the resolver
+             keeps the git root exactly as it found it. *)
           check string "fixture resolves nested request to B checkout"
-            (Unix.realpath base_b) requested.base_path;
+            (Unix.realpath base_b) (Unix.realpath requested.base_path);
           (match Masc.Mcp_server.create_state_eio ~sw
               ~proc_mgr:(Eio.Stdenv.process_mgr env) ~fs:(Eio.Stdenv.fs env)
               ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env)

@@ -670,6 +670,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
           in
           let outcomes_json =
             compute_outcomes_rollup
+              ~base_path:config.base_path
               ~keeper_name:m.name
               ~agent_name:m.name
               ~recent_crash_count

@@ -7,6 +7,7 @@ type issue =
   | Duplicate_client of {client_id:B.client_id; instances:string list}
   | Duplicate_ego_space of {space_id:int; instances:string list}
   | Ego_user_owned_space of {instance_id:string; space:string; observed_at:float}
+  | Ego_space_missing of {instance_id:string; space:string; space_id:int; observed_at:float}
 let issue_message = function
   | Source_unavailable {instance_id;message} | Source_unreadable {instance_id;message}
   | Source_unready {instance_id;message} -> "Browser worker " ^ instance_id ^ ": " ^ message
@@ -18,6 +19,9 @@ let issue_message = function
   | Ego_user_owned_space {instance_id;space;_} ->
       Printf.sprintf "Browser worker %s: ego task space %S is user-owned, so the live ego lane refuses it; take_over reclaims it after the operator asks to continue"
         instance_id space
+  | Ego_space_missing {instance_id;space;space_id;_} ->
+      Printf.sprintf "Browser worker %s: ego no longer lists task space %d (%S), so its connection ended and no replacement was opened; take_over without a clientId asks the worker to open its configured Space again"
+        instance_id space_id space
 let issue_to_json issue =
   let source kind instance_id message = `Assoc ["kind",`String kind;
     "instanceId",`String instance_id;"message",`String message] in
@@ -27,6 +31,8 @@ let issue_to_json issue =
   | Source_unready {instance_id;message} -> source "unready" instance_id message
   | Ego_user_owned_space {instance_id;space;observed_at} -> `Assoc ["kind",`String "ego_user_owned_space";
     "instanceId",`String instance_id;"space",`String space;"observedAt",`Float observed_at]
+  | Ego_space_missing {instance_id;space;space_id;observed_at} -> `Assoc ["kind",`String "ego_space_missing";
+    "instanceId",`String instance_id;"space",`String space;"spaceId",`Int space_id;"observedAt",`Float observed_at]
   | Duplicate_client {client_id;instances} -> `Assoc ["kind",`String "duplicate_client";
       "clientId",`String (B.client_id_to_string client_id);
       "instances",`List (List.map (fun id -> `String id) instances)]
@@ -82,6 +88,17 @@ let issue_of_json value =
         | Some (`Float value) when Float.is_finite value && value >= 0. -> Ok value
         | None|Some _ -> Error "invalid inventory issue observation time" in
       Ok (Ego_user_owned_space {instance_id;space;observed_at})
+  | "ego_space_missing" ->
+      let* ()=exact ["kind";"instanceId";"space";"spaceId";"observedAt"] in
+      let* instance_id=text "instanceId" in
+      let* space=text "space" in
+      let* space_id=match List.assoc_opt "spaceId" fields with
+        | Some (`Int id) when id > 0 -> Ok id
+        | None|Some _ -> Error "invalid inventory issue Space ID" in
+      let* observed_at=match List.assoc_opt "observedAt" fields with
+        | Some (`Float value) when Float.is_finite value && value >= 0. -> Ok value
+        | None|Some _ -> Error "invalid inventory issue observation time" in
+      Ok (Ego_space_missing {instance_id;space;space_id;observed_at})
   | _ -> Error "unknown inventory issue kind"
 
 let issues_of_json = function
@@ -100,14 +117,16 @@ let snapshot (published:Browser_addon_observation.published) : S.snapshot =
 let decide snapshot verb = match S.choose ~verb ~bound:false ~snapshot S.Automatic with
   | Ok selected -> Selected selected | Error error -> Refused error
 let breaks_completeness (issue : issue)=match issue with
-  | Ego_user_owned_space _ -> false
+  | Ego_user_owned_space _ | Ego_space_missing _ -> false
   | Source_unavailable _|Source_unreadable _|Source_unready _|Duplicate_client _|Duplicate_ego_space _ -> true
 let build ~observations ~issues =
   let ego_issues=List.concat_map (fun observation ->
     List.map (fun (unavailable:Browser_addon_observation.unavailable) ->
       match unavailable with
       | Browser_addon_observation.Ego_user_owned_name {space;observed_at} ->
-        Ego_user_owned_space {instance_id=observation.instance_id;space;observed_at})
+        Ego_user_owned_space {instance_id=observation.instance_id;space;observed_at}
+      | Browser_addon_observation.Ego_space_missing {space;space_id;observed_at} ->
+        Ego_space_missing {instance_id=observation.instance_id;space;space_id;observed_at})
       observation.published.unavailable) observations in
   let pairs,issues=List.fold_left (fun (pairs,issues) observation ->
     let rec align acc clients rows = match clients,rows with
@@ -129,7 +148,7 @@ let build ~observations ~issues =
     | Duplicate_ego_space space_id -> Duplicate_ego_space {space_id;instances}) conflicts in
   let issues=issues @ duplicate_issues in
   let pairs=List.filter (fun (_,client,_) -> not (List.exists (Browser_addon_observation.conflicts_with client) conflicts)) pairs in
-  (* A refused ego Space is a lane fact the worker answered completely, not
+  (* A refused or missing ego Space is a lane fact the worker answered completely, not
      a missing observation: it stays listed as an issue but does not make
      the inventory incomplete, so a healthy client of another transport on
      the same worker is still chosen automatically. *)

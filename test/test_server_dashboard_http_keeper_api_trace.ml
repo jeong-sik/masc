@@ -1,6 +1,5 @@
 open Alcotest
 open Masc
-module Preparation = Masc_test_deps.Board_test_preparation
 module Trace = Server_dashboard_http_keeper_api_trace
 module Checkpoints = Server_dashboard_http_keeper_api_checkpoints
 module Runtime_lens_scan = Server_dashboard_http_keeper_runtime_manifest_scan
@@ -1107,7 +1106,6 @@ let test_input_response_http_accepts_only_original_wait ~commit_fault () =
   let module Native=Keeper_native_call in
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Preparation.prepare ~base_path:dir ~action:Preparation.Bootstrap;
   let state=Mcp_server.create_state_eio ~sw
       ~proc_mgr:(Eio.Stdenv.process_mgr env) ~fs:(Eio.Stdenv.fs env)
       ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env)
@@ -1311,7 +1309,6 @@ let test_input_response_http_requires_explicit_exact_proof () =
   if not (Fs_compat.has_fs ()) then Fs_compat.set_fs env#fs;
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Preparation.prepare ~base_path:dir ~action:Preparation.Bootstrap;
   let state=Mcp_server.create_state_eio ~sw
       ~proc_mgr:(Eio.Stdenv.process_mgr env) ~fs:(Eio.Stdenv.fs env)
       ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env)

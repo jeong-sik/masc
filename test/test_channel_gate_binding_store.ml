@@ -30,6 +30,7 @@ let store_for_dir dir ~guild_id_field =
   let binding_path = Filename.concat dir "bindings.json" in
   let audit_path = Filename.concat dir "binding_audit.jsonl" in
   Store.create
+    ~connector_id:"fixture"
     ~binding_store_path:(fun () -> binding_path)
     ~binding_store_read_path:(fun () -> binding_path)
     ~binding_audit_path:(fun () -> audit_path)
@@ -118,6 +119,7 @@ let test_audit_failure_rolls_back_binding_mutation () =
   let binding_path = Filename.concat dir "bindings.json" in
   let store =
     Store.create
+      ~connector_id:"fixture"
       ~binding_store_path:(fun () -> binding_path)
       ~binding_store_read_path:(fun () -> binding_path)
       ~binding_audit_path:(fun () -> dir)
@@ -172,6 +174,7 @@ let test_failed_mutation_cannot_erase_concurrent_success () =
   in
   let store =
     Store.create
+      ~connector_id:"fixture"
       ~binding_store_path:(fun () -> binding_path)
       ~binding_store_read_path:(fun () -> binding_path)
       ~binding_audit_path
@@ -254,6 +257,30 @@ let test_append_and_read_recent_audit () =
   check string "second newest" "rebind"
     (List.nth recent 1 |> U.member "action" |> U.to_string)
 
+(* Every committed change tells the installed observer which connector moved;
+   a rejected one tells nothing (RFC-0480 §3.4). *)
+let test_committed_mutations_announce_their_connector () =
+  with_temp_dir @@ fun dir ->
+  let heard = ref [] in
+  Gate_connector_announce.install (fun ~connector_id -> heard := connector_id :: !heard);
+  Fun.protect ~finally:(fun () -> Gate_connector_announce.install (fun ~connector_id:_ -> ()))
+  @@ fun () ->
+  let store = store_for_dir dir ~guild_id_field:Store.Include_empty in
+  (match Store.bind store ~channel_id:"channel-1" ~keeper_name:"luna" ~actor_name:"dashboard" with
+   | Ok _ -> ()
+   | Error error -> fail (Store.mutation_error_to_string error));
+  check (list string) "a committed bind announces" [ "fixture" ] !heard;
+  (* Unbinding a channel that has no binding is refused inside the durable
+     mutation, after the store was read. *)
+  (match Store.unbind store ~channel_id:"missing" ~actor_name:"dashboard" () with
+   | Ok () -> fail "a missing binding was removed"
+   | Error _ -> ());
+  check (list string) "a refused change announces nothing" [ "fixture" ] !heard;
+  (match Store.unbind store ~channel_id:"channel-1" ~actor_name:"dashboard" () with
+   | Ok () -> ()
+   | Error error -> fail (Store.mutation_error_to_string error));
+  check (list string) "a committed unbind announces" [ "fixture"; "fixture" ] !heard
+
 let () =
   run "channel_gate_binding_store"
     [
@@ -270,6 +297,8 @@ let () =
             test_audit_failure_rolls_back_binding_mutation;
           test_case "failed rollback preserves concurrent success" `Quick
             test_failed_mutation_cannot_erase_concurrent_success;
+          test_case "committed mutations announce their connector" `Quick
+            test_committed_mutations_announce_their_connector;
         ] );
       ( "audit",
         [

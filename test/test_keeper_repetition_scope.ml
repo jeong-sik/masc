@@ -23,7 +23,7 @@ let record state scope call =
   S.record state ~scope observation |> require "record"
 
 let count state scope =
-  Runtime.tool_calls state ~scope |> require "scope observations" |> List.length
+  S.observations state ~scope |> require "scope observations" |> List.length
 
 let checkpoint_restore state =
   let context = Masc.Keeper_context_core.create ~eio:false ~system_prompt:"scope test" in
@@ -53,11 +53,7 @@ let test_a_b_restart_a () =
   let state = S.admit state (S.Fresh a) |> require "readmit A" in
   let state = record state a call in
   check int "resumed A retains its own observations" 3 (count state a);
-  check int "B remains isolated" 1 (count state b);
-  Runtime.tool_calls state ~scope:a |> require "restored evidence"
-  |> List.iter (fun evidence ->
-    check bool "history does not fabricate successful execution" true
-      (evidence.Masc.Keeper_agent_result.execution_outcome = Tool_result.Unknown))
+  check int "B remains isolated" 1 (count state b)
 
 let test_same_fresh_and_two_plus_two () =
   let a = id "duplicate-operation" in
@@ -153,15 +149,16 @@ let test_direct_retry_without_provider_checkpoint () =
   let source = Agent_core.Context.create_sync () in
   let target = Agent_core.Context.create_sync () in
   let execution = Runtime.Execution.direct_operation (operation "direct-a") in
-  let prepare target = Runtime.Execution.prepare execution ~source ~target |> require "attempt" in
-  check int "fresh direct operation excludes prior session calls" 0 (List.length (prepare target));
+  let prepare target =
+    Runtime.Execution.prepare execution ~source ~target |> require "attempt";
+    count (Runtime.load target |> require "prepared projection") (id "direct-a") in
+  check int "fresh direct operation excludes prior session calls" 0 (prepare target);
   Runtime.Execution.observe execution ~target call;
   Runtime.Execution.observe execution ~target call;
   (* The provider returned no checkpoint. Its observations still belong to
      this admitted operation when the direct cascade starts another attempt. *)
   let retry_target = Agent_core.Context.create_sync () in
-  let prior_calls = prepare retry_target in
-  check int "same admitted operation retains two observations" 2 (List.length prior_calls);
+  check int "same admitted operation retains two observations" 2 (prepare retry_target);
   Runtime.Execution.observe execution ~target:retry_target call;
   let restored = Runtime.load retry_target |> require "projected checkpoint" |> checkpoint_restore in
   check int "tool-boundary checkpoint contains all three observations" 3
@@ -170,9 +167,10 @@ let test_direct_retry_without_provider_checkpoint () =
   Runtime.save next_source restored;
   let next_target = Agent_core.Context.create_sync () in
   let next = Runtime.Execution.direct_operation (operation "direct-b") in
-  let next_calls = Runtime.Execution.prepare next ~source:next_source ~target:next_target
-    |> require "new direct operation" in
-  check int "B does not inherit A's repeats" 0 (List.length next_calls);
+  Runtime.Execution.prepare next ~source:next_source ~target:next_target
+    |> require "new direct operation";
+  check int "B does not inherit A's repeats" 0
+    (count (Runtime.load next_target |> require "B prepared projection") (id "direct-b"));
   Runtime.Execution.observe next ~target:next_target call;
   let next_snapshot = Runtime.load next_target |> require "B projection" in
   check int "A evidence is preserved" 3 (count next_snapshot (id "direct-a"));

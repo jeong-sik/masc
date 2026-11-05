@@ -1,4 +1,4 @@
-(** Workspace_task_claim — claim_task, claim_task_r, release/reclaim helpers.
+(** Workspace_task_claim — claim_task_r and claim helpers.
 
     Extracted from Workspace_task to separate claim logic from classification,
     creation, and transitions.  All bindings are re-exported by [Workspace_task]
@@ -9,13 +9,6 @@ include Workspace_utils
 include Workspace_state
 include Workspace_broadcast
 open Workspace_backlog
-
-let clear_reclaim_decision (task : Masc_domain.task) =
-  match task.reclaim_policy with
-  | Some Masc_domain.Block_reclaim -> task
-  | Some Masc_domain.Allow_reclaim | None ->
-    { task with reclaim_policy = None; do_not_reclaim_reason = None }
-;;
 
 let active_owned_task_ids_for_agent config ~agent_name (backlog : Masc_domain.backlog)
   =
@@ -32,57 +25,6 @@ let active_owned_task_ids_for_agent config ~agent_name (backlog : Masc_domain.ba
          | Done _
          | Cancelled _ -> None)
   |> List.sort_uniq String.compare
-;;
-
-let held_task_label (task : Masc_domain.task) =
-  Printf.sprintf "[P%d] %s: %s" task.priority task.id task.title
-;;
-
-(* One constraint, two entry points, one sentence.
-
-   [claim_next] and a claim by task_id refuse the same thing, and they said
-   different things about it. [claim_next] named the route -- the tool, the
-   action, and the field release requires -- while a claim by task_id said
-   "Agent X has task(s) in progress: task-149; task-148 was not claimed." and
-   stopped. The Keeper prompt describes this refusal as one that "names both the
-   Task you hold and how to hand it back", which was true of one path and false
-   of the other.
-
-   The path that said nothing is the one Keepers actually hit: 38 of the week's
-   77 claim rejections, and one agent walked task-145, 146, 148, 150 and 154 in
-   turn while holding task-149 -- the run of refusals the same prompt paragraph
-   predicts. The requested task_id is no longer restated, because the caller
-   passed it. *)
-let held_tasks_refusal_message ~agent_name held_tasks =
-  Printf.sprintf
-    (* Names both surfaces on purpose: a Keeper cannot call [masc_transition]
-       (keeper_tool_descriptor.ml projects it away behind keeper_task_claim),
-       so a message that named only that told the reader to use a tool it
-       could not see. *)
-    "%s already holds %s. Finish it, or hand it back before claiming different \
-     work: keeper_task_release with a summary if you are a Keeper, otherwise \
-     masc_transition action=release with a handoff_context.summary."
-    agent_name
-    (String.concat ", " (List.map held_task_label held_tasks))
-;;
-
-let active_ownership_conflict_for_claim config ~agent_name ~requested_task_id
-    (backlog : Masc_domain.backlog) =
-  let held_ids =
-    active_owned_task_ids_for_agent config ~agent_name backlog
-    |> List.filter (fun task_id -> not (String.equal task_id requested_task_id))
-    |> Task_id_set.of_list
-  in
-  if Task_id_set.is_empty held_ids
-  then None
-  else (
-    match
-      List.filter
-        (fun (task : Masc_domain.task) -> Task_id_set.mem task.id held_ids)
-        backlog.tasks
-    with
-    | [] -> None
-    | held_tasks -> Some (held_tasks_refusal_message ~agent_name held_tasks))
 ;;
 
 let run_post_commit ~task_id ~agent_name ~action label f =
@@ -144,7 +86,7 @@ let emit_auto_start_side_effects config ~agent_name ~task_id ~from_status ~to_st
          ()))
 ;;
 
-(** Result-returning version of claim_task for type-safe error handling. *)
+(** Claim [task_id] for [agent_name]. *)
 let claim_task_with_details_r
       config
       ~agent_name
@@ -168,12 +110,10 @@ let claim_task_with_details_r
     | Ok prepared ->
       let backlog = prepared.backlog in
       (try
-         (* Check role constraint before attempting claim *)
-         let target_task = Task_id_map.find_opt task_id prepared.tasks_by_id in
-         let* task =
-           match target_task with
+         let* () =
+           match Task_id_map.find_opt task_id prepared.tasks_by_id with
            | None -> Error (Masc_domain.Task (Masc_domain.Task_error.NotFound task_id))
-           | Some task -> Ok task
+           | Some _ -> Ok ()
          in
          let duplicate_count =
            List.fold_left
@@ -193,28 +133,6 @@ let claim_task_with_details_r
                         duplicate_count
                         task_id)))
            else Ok ()
-         in
-         (* RFC-0323 G-10: the typed reclaim claim gate is retired — status
-            alone decides claimability ([resolve_claim] below owns it). *)
-         let* () =
-           match task.task_status with
-           | Todo ->
-             (match
-                active_ownership_conflict_for_claim
-                  config
-                  ~agent_name
-                  ~requested_task_id:task_id
-                  backlog
-              with
-              | None -> Ok ()
-              | Some msg ->
-                Error
-                  (Masc_domain.Task (Masc_domain.Task_error.InvalidState msg)))
-           | Claimed _
-           | InProgress _
-           | AwaitingVerification _
-           | Done _
-           | Cancelled _ -> Ok ()
          in
          let now = now_iso () in
          (* fold_left to find+transform in a single pass without mutable refs.
@@ -238,7 +156,6 @@ let claim_task_with_details_r
                       t
                   with
                   | Workspace_task_lifecycle.Worker_claim claimed_status ->
-                    let t = clear_reclaim_decision t in
                     let final_status =
                       if auto_start
                       then Masc_domain.InProgress { assignee = agent_name; started_at = now }
@@ -405,67 +322,4 @@ let claim_task_r config ~agent_name ~task_id ?(auto_start = false) ()
   : string Masc_domain.masc_result
   =
   Result.map snd (claim_task_with_details_r config ~agent_name ~task_id ~auto_start ())
-;;
-
-(** String-returning convenience wrapper over [claim_task_r]. *)
-let claim_task config ~agent_name ~task_id =
-  match claim_task_r config ~agent_name ~task_id () with
-  | Ok message -> message
-  | Error e -> Masc_domain.to_string e
-;;
-
-(** Collect typed release handoff text. Task ownership and orphan
-    reconciliation are enforced by their respective transition services. *)
-let release_handoff_texts (handoff_context : Masc_domain.task_handoff_context option) =
-  let fields =
-    match handoff_context with
-    | None -> []
-    | Some handoff_context ->
-      [ Some handoff_context.summary
-      ; handoff_context.reason
-      ; handoff_context.next_step
-      ; handoff_context.failure_mode
-      ]
-  in
-  List.filter_map
-    (function
-     | None -> None
-     | Some text ->
-       let trimmed = String.trim text in
-       if trimmed = "" then None else Some trimmed)
-    fields
-;;
-
-let release_reclaim_policy (handoff_context : Masc_domain.task_handoff_context option) =
-  match handoff_context with
-  | Some ({ reclaim_policy = Some policy; _ } : Masc_domain.task_handoff_context) ->
-    Some policy
-  | Some ({ reclaim_policy = None; _ } : Masc_domain.task_handoff_context) | None -> None
-;;
-
-let derive_release_do_not_reclaim_reason
-      (task : Masc_domain.task)
-      (handoff_context : Masc_domain.task_handoff_context option)
-  =
-  if release_reclaim_policy handoff_context = Some Masc_domain.Block_reclaim
-  then (
-    match release_handoff_texts handoff_context with
-    | text :: _ -> Some text
-    | [] -> Some "release hard-stop requested")
-  else
-    match task.reclaim_policy with
-    | Some Masc_domain.Block_reclaim -> task.do_not_reclaim_reason
-    | Some Masc_domain.Allow_reclaim | None -> None
-;;
-
-let derive_release_reclaim_policy
-      (task : Masc_domain.task)
-      (handoff_context : Masc_domain.task_handoff_context option)
-  =
-  match release_reclaim_policy handoff_context with
-  | Some policy -> Some policy
-  | None -> (
-    match task.reclaim_policy with
-    | Some Masc_domain.Block_reclaim -> Some Masc_domain.Block_reclaim
-    | Some Masc_domain.Allow_reclaim | None -> None)
 ;;

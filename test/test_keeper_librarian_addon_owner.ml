@@ -1260,10 +1260,10 @@ let test_absorbing_admission_captures_both_context_policies ()=
         let prompts=Yojson.Safe.Util.(member "prompts" guidance |> to_assoc) in
         check bool "both forward context policies are captured" true
           (List.mem_assoc "pair" prompts && List.mem_assoc "observations" prompts);
-        let bad_guidance=`Assoc (("context",`String "pair_only")::Yojson.Safe.Util.to_assoc guidance) in
+        let bad_guidance=`Assoc (("unknown_field",`Bool true)::Yojson.Safe.Util.to_assoc guidance) in
         let request=`Assoc (("guidance",bad_guidance)::List.remove_assoc "guidance" (Yojson.Safe.Util.to_assoc intent.request)) in
         let forged=retain_gate_payload fixture ~owner ~parent:record ~request_id:intent.request_id ~request in
-        check (result unit string) "captured guidance carries no context tag"
+        check (result unit string) "captured guidance with an unknown field is refused"
           (Error "Captured absorption guidance has unknown, duplicate or missing fields")
           (io (fun () -> Gate.validate_payload ~owner ~capture ~parent:record ~record:forged
             ~read:(fun ~scope:_ ~request_id:_ -> fail "a forged guidance must refuse before ancestry")
@@ -1271,7 +1271,7 @@ let test_absorbing_admission_captures_both_context_policies ()=
         let parent=memory_action fixture (fun () -> match Commit.begin_gate ~store:fixture.store ~owner ~capture
           ~record ~gate_root_id:intent.request_id ~authority |> get with
           | Prepared parent -> parent | Reload_original -> fail "new preparation expected") in
-        check json "the selected context is the immutable durable preparation" intent.request
+        check json "the captured guidance is the immutable durable preparation" intent.request
           (match Progress.preparation parent.progress with
            | Some (Preparation_pending intended) -> intended.request
            | None | Some (Preparation_confirmed _) -> fail "pending original preparation expected");
@@ -1295,7 +1295,7 @@ let test_absorbing_admission_captures_both_context_policies ()=
           (if forward_verdict="mergeable" then [true] else [true;false]) !directions;
         let replayed=io (fun () -> Gate.restore_latest_result ~store:fixture.store ~owner
           ~parent_execution:capture ~gate_request_id:gate.request_id |> get) in
-        check json "strict original replay retains the context and result" (Absorb.run_result_to_yojson result)
+        check json "strict original replay returns the same result" (Absorb.run_result_to_yojson result)
           (Absorb.run_result_to_yojson replayed);
         check int "strict replay sends no evaluation" requests (F.post_count jev);
         check int "the original Librarian answer is sent once" 1 (F.post_count fixture.server)))))

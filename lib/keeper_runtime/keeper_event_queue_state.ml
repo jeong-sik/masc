@@ -20,7 +20,6 @@ type schedule_occurrence_state =
   | Occurrence_transfer_projecting_to of string
   | Occurrence_transferred_to of string
   | Occurrence_completed of occurrence_terminal_evidence
-  | Occurrence_failed of string * occurrence_terminal_evidence
   | Occurrence_cancelled of string * occurrence_terminal_evidence
 
 type schedule_occurrence_source =
@@ -64,10 +63,7 @@ let schedule_occurrence_of_receipt ~projecting (receipt : transition_receipt) =
     | Ack_source_terminal terminal ->
       ( terminal.source
       , terminal.source_incarnation
-      , (match terminal.source_receipt with
-         | Turn_attempt_terminal { detail } -> Occurrence_failed (detail, evidence)
-         | Fusion_terminal _ | Hitl_terminal _ | Turn_completed ->
-           Occurrence_completed evidence) )
+      , Occurrence_completed evidence )
   in
   { occurrence_id = source.Keeper_event_queue.post_id
   ; occurrence_source = Full_source source
@@ -83,9 +79,6 @@ let schedule_occurrence_of_witness (witness : projected_disposition_witness) =
       | Projected_cancel _ ->
         Occurrence_cancelled ("projected cancellation", Terminal_evidence_recorded)
       | Projected_transfer { to_keeper; _ } -> Occurrence_transferred_to to_keeper
-      | Projected_turn_attempt_terminal ->
-        Occurrence_failed
-          ("projected turn attempt terminal", Terminal_evidence_recorded)
       | Projected_turn_completed
       | Projected_fusion_terminal
       | Projected_hitl_terminal -> Occurrence_completed Terminal_evidence_recorded

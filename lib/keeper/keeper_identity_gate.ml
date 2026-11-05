@@ -247,6 +247,7 @@ let agent_tool
       ?continuation_channel
       ?gate_context
       ?gate_grant
+      ~inline_ceiling_bytes
       (offered : Keeper_identity_tools.offered_tool)
   =
   let send arguments =
@@ -264,6 +265,8 @@ let agent_tool
   in
   let run_raw arguments =
     Keeper_identity_tools.tool_result_of_call
+      ~base_path:config.Workspace.base_path
+      ~inline_ceiling_bytes:(inline_ceiling_bytes ())
       (send arguments)
   in
   let gated arguments =

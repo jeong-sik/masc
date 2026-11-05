@@ -366,6 +366,10 @@ let cost_event_payload
      ?telemetry
      ()).payload
 
+type append_failure =
+  | Append_declined
+  | Append_raised of string
+
 let emit_cost_event
     ~(masc_root : string)
     ~(agent_name : string)
@@ -389,7 +393,7 @@ let emit_cost_event
     ?(usage_missing : bool = false)
     ?usage_trust
     ?(telemetry : Agent_core.Types.inference_telemetry option)
-    () : unit =
+    () : (unit, append_failure) result =
   let store = Cost_ledger.store_of_masc_root masc_root in
   let assembled =
     assemble_cost_event_payload
@@ -427,12 +431,33 @@ let emit_cost_event
     ();
   record_cost_emit_source assembled.cost_usd_source;
   let entry = assembled.payload in
-  (try Dated_jsonl.append store entry
-   with Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
-        Otel_metric_store.inc_counter
-          Keeper_metrics.(to_string MetricEmitDropped)
-          ~labels:[(label_keeper, agent_name); (label_site, Keeper_metric_emit_dropped_site.(to_label Cost_event_write))]
-          ();
-        Log.Keeper.error "emit_cost_event: failed to write %s: %s"
-          (Dated_jsonl.base_dir store) (Printexc.to_string exn))
+  let dropped detail =
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string MetricEmitDropped)
+      ~labels:[(label_keeper, agent_name); (label_site, Keeper_metric_emit_dropped_site.(to_label Cost_event_write))]
+      ();
+    Log.Keeper.error "emit_cost_event: failed to write %s: %s"
+      (Dated_jsonl.base_dir store) detail
+  in
+  (* The commit notice is what says the row is in the file. A row the append
+     guard declined, or an append that raised before the row landed, is a row
+     the ledger does not have; an exception after it landed (retention
+     pruning) leaves it written. *)
+  let landed = ref false in
+  match
+    Dated_jsonl.append_notifying_commit store entry
+      ~on_committed:(fun () -> landed := true)
+  with
+  | () -> Ok ()
+  | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+  | exception Dated_jsonl.Append_guard_skipped ->
+    dropped "the append guard declined the append";
+    Error Append_declined
+  | exception exn when !landed ->
+    Log.Keeper.warn "emit_cost_event: wrote a row to %s, then: %s"
+      (Dated_jsonl.base_dir store) (Printexc.to_string exn);
+    Ok ()
+  | exception exn ->
+    let detail = Printexc.to_string exn in
+    dropped detail;
+    Error (Append_raised detail)

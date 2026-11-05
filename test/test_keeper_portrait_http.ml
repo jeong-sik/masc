@@ -540,6 +540,50 @@ let test_gate_fresh_roster_bypasses_cache_with_auth_and_workspace () =
           (get ~router ~token:worker ("/api/v1/gate/keepers?" ^ suffix)).status)
         [ "fresh=tru"; "fresh="; "fresh=true&fresh=false"; "fresh" ]))
 
+(* RFC-0481 §3.1: [name] narrows the Gate roster to one Keeper through the
+   same route, so its authentication and Candle projection stay the roster's. *)
+let test_gate_named_roster_reads_one_keeper_with_auth () =
+  Masc_test_deps.with_process_env "MASC_KEEPER_LIST_CACHE_TTL_S" (Some "3600") @@ fun () ->
+  Masc_test_deps.with_process_env "MASC_HTTP_AUTH_STRICT" (Some "1") @@ fun () ->
+  with_router (fun ~config router ->
+    Auth.save_auth_config config.Workspace.base_path
+      { Masc_domain.default_auth_config with enabled = true; require_token = true };
+    let operator = token_for config ~agent_name:"named-roster-operator" Masc_domain.Admin in
+    let worker = token_for config ~agent_name:"named-roster-worker" Masc_domain.Worker in
+    Keeper_tool_surface.For_testing.reset_keeper_list_cache ();
+    Fun.protect ~finally:Keeper_tool_surface.For_testing.reset_keeper_list_cache (fun () ->
+      let url name =
+        "/api/v1/gate/keepers?detailed=true&name="
+        ^ Uri.pct_encode ~component:`Query_value name in
+      let one_row ~token name =
+        let response = get ~router ~token (url name) in
+        check int "authorized named read succeeds" 200 response.status;
+        match Yojson.Safe.Util.(Yojson.Safe.from_string response.body |> member "keepers" |> to_list) with
+        | [ row ] -> row
+        | rows -> failf "expected one row for %s, got %d" name (List.length rows) in
+      check int "the whole roster is read and cached" 200
+        (get ~router ~token:worker "/api/v1/gate/keepers?detailed=true").status;
+      let added = "named-roster-new-keeper" in
+      let meta = require_ok Fun.id
+        (Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String added ])) in
+      require_ok Fun.id (Keeper_meta_store.replace_snapshot config meta);
+      let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path in
+      Fs_compat.mkdir_p keepers_dir;
+      Out_channel.with_open_bin (Filename.concat keepers_dir (added ^ ".toml")) (fun oc ->
+        output_string oc "[keeper]\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\n");
+      let shared = one_row ~token:worker added in
+      check string "the named read answers the Keeper the cached roster predates" added
+        Yojson.Safe.Util.(shared |> member "name" |> to_string);
+      check bool "a shared named read carries no account revision" true
+        (Json_util.assoc_member_opt "candle_account_revision" shared = None);
+      check bool "an operator named read carries the account revision" true
+        (Json_util.assoc_member_opt "candle_account_revision" (one_row ~token:operator added) <> None);
+      check int "a named read still requires a read token" 401 (get ~router (url added)).status;
+      List.iter (fun suffix ->
+        check int ("a malformed name is refused: " ^ suffix) 400
+          (get ~router ~token:worker ("/api/v1/gate/keepers?" ^ suffix)).status)
+        [ "name="; "name"; "name=%20"; "name=a&name=b"; "name=a,b"; "name=a%2Fb"; "name=.." ]))
+
 (* Once HTTP auth is strict the portrait is a read like any other: no token is
    a 401, a token that may read state is a 200, a token that may only play a
    shared machine is refused. *)
@@ -961,27 +1005,31 @@ beanie = %d
        let observed = Some (Browser.Ready account) in
        let untouched = ledger_bytes () in
        check int "starting outfit does not become owned inventory" 0
-         (List.length (Browser.items ~filter:Browser.Owned ~account:observed));
+         (List.length (Browser.items ~filter:Browser.Owned ~account:observed ~balance_milli:None));
        check bool "funded unowned item is offered in can-buy view" true
-         (List.mem item (Browser.items ~filter:Browser.Can_buy ~account:observed));
-       let heads = Browser.items ~filter:(Browser.In_slot Keeper_portrait_item.Head) ~account:observed in
+         (List.mem item (Browser.items ~filter:Browser.Can_buy ~account:observed ~balance_milli:None));
+       let heads = Browser.items ~filter:(Browser.In_slot Keeper_portrait_item.Head) ~account:observed ~balance_milli:None in
        check bool "slot navigation excludes other slots" true
          (List.for_all (fun item -> Keeper_portrait_item.slot item = Keeper_portrait_item.Head) heads);
        check int "page navigation stays within filtered items" (List.length heads - 1)
          (Browser.move ~items:heads ~cursor:0 ~delta:18);
-       (match require_ok Fun.id (Browser.request ~account:observed item) with
+       (match require_ok Fun.id (Browser.request ~account:observed ~balance_milli:None item) with
         | Browser.Buy_and_equip request ->
           check bool "request keeps the selected item" true (request.item = item);
           check int "request caps purchase at the observed price" 200 request.expected_price_milli
         | Browser.Equip _ -> fail "unowned item was treated as owned");
        let empty_wallet = Some (Browser.Ready {account with balance_milli=0}) in
        check bool "unaffordable item is not offered" false
-         (List.mem item (Browser.items ~filter:Browser.Can_buy ~account:empty_wallet));
-       (match Browser.request ~account:empty_wallet item with
+         (List.mem item (Browser.items ~filter:Browser.Can_buy ~account:empty_wallet ~balance_milli:None));
+       (match Browser.request ~account:empty_wallet ~balance_milli:None item with
         | Error _ -> () | Ok _ -> fail "prepared an unaffordable purchase");
+       check bool "a balance that fell below the price no longer offers the item" false
+         (List.mem item (Browser.items ~filter:Browser.Can_buy ~account:observed ~balance_milli:(Some 0)));
+       (match Browser.request ~account:observed ~balance_milli:(Some 0) item with
+        | Error _ -> () | Ok _ -> fail "prepared a purchase the balance now cannot cover");
        check int "unread account does not fabricate inventory" 0
-         (List.length (Browser.items ~filter:Browser.Owned ~account:None));
-       (match Browser.request ~account:None item with
+         (List.length (Browser.items ~filter:Browser.Owned ~account:None ~balance_milli:None));
+       (match Browser.request ~account:None ~balance_milli:None item with
         | Error _ -> () | Ok _ -> fail "unobserved account prepared a purchase");
        check string "browsing and preparing a request do not transact" untouched (ledger_bytes ())
      | Masc_tui_keeper_items.Off | Masc_tui_keeper_items.Disabled _ ->
@@ -1009,10 +1057,10 @@ beanie = %d
        let module Browser = Masc_tui_keeper_items in
        let observed = Some (Browser.Ready account) in
        check bool "purchased item appears in owned inventory" true
-         (List.mem item (Browser.items ~filter:Browser.Owned ~account:observed));
+         (List.mem item (Browser.items ~filter:Browser.Owned ~account:observed ~balance_milli:None));
        check bool "purchased item is excluded from shopping" false
-         (List.mem item (Browser.items ~filter:Browser.Can_buy ~account:observed));
-       (match require_ok Fun.id (Browser.request ~account:observed item) with
+         (List.mem item (Browser.items ~filter:Browser.Can_buy ~account:observed ~balance_milli:None));
+       (match require_ok Fun.id (Browser.request ~account:observed ~balance_milli:None item) with
         | Browser.Equip owned -> check bool "owned request only equips" true (owned = item)
         | Browser.Buy_and_equip _ -> fail "owned request would buy twice")
      | Masc_tui_keeper_items.Off | Masc_tui_keeper_items.Disabled _ ->
@@ -1058,15 +1106,26 @@ beanie = %d
     let roster = public_roster () in
     let runtime_rows, errors, _, _, candle = require_ok Fun.id (Tui_decode.decode_keeper_runtime_list roster) in
     check int "public roster has no metadata error rows" 0 (List.length errors);
+    (* The TUI computes every Candle amount from the roster's decay basis;
+       at the wallet's last event nothing has decayed yet. *)
     (match require_ok Fun.id candle with
-     | Candle_observation.Ready supply ->
-       check string "actual paid amount is issued" "1000" supply.issued_milli;
-       check string "purchase burns only its price" "200" supply.burned_milli;
-       check string "equipping leaves circulating amount unchanged" "800" supply.circulating_milli
-     | Candle_observation.Off | Candle_observation.Disabled _ -> fail "paid ledger observation unavailable");
+     | Tui_decode.Candle_ready ({ Candle_decay_basis.decay = Decaying { keepers; _ }; _ } as basis) -> (
+       match List.assoc_opt keeper keepers with
+       | Some held ->
+         check int "the decay basis holds the wallet from the same ledger reading" 800
+           held.Candle_decay_basis.amount_milli;
+         (match Candle_decay_basis.supply_at basis ~at:held.since with
+          | Ok supply ->
+            check string "actual paid amount is issued" "1000" supply.Candle_balance.issued_milli;
+            check string "purchase burns only its price" "200" supply.burned_milli;
+            check string "equipping leaves circulating amount unchanged" "800" supply.circulating_milli
+          | Error error -> fail (Candle_decay.error_to_string error))
+       | None -> fail "the paid wallet has no decay basis")
+     | Tui_decode.Candle_ready { Candle_decay_basis.decay = No_decaying_balance; _ } ->
+       fail "the paid wallet has no decay basis"
+     | Tui_decode.Candle_off | Tui_decode.Candle_disabled _ -> fail "paid ledger observation unavailable");
     let reading = match runtime_rows with
       | [row] ->
-        check (option string) "remote wallet comes from the same ledger reading" (Some "800") row.Tui_decode.kr_candle_balance_milli;
         row.Tui_decode.kr_portrait
       | _ -> fail "expected one healthy decoded Keeper runtime row" in
     check bool "public roster and real TUI decoder preserve equipped input" true
@@ -1096,11 +1155,10 @@ beanie = %d
       (Tui_decode.decode_keeper_runtime_list (public_roster ())) in
     check int "currency failure does not invent a Keeper metadata error" 0 (List.length errors);
     (match require_ok Fun.id damaged_candle with
-     | Candle_observation.Disabled {reason} -> check bool "ledger error is observable" true (String.length reason > 0)
-     | Candle_observation.Off | Candle_observation.Ready _ -> fail "damaged ledger concealed its failure");
+     | Tui_decode.Candle_disabled reason -> check bool "ledger error is observable" true (String.length reason > 0)
+     | Tui_decode.Candle_off | Tui_decode.Candle_ready _ -> fail "damaged ledger concealed its failure");
     (match runtime_rows, damaged_rows with
      | [before], [row] ->
-       check (option string) "damaged ledger withdraws prior balance" None row.Tui_decode.kr_candle_balance_milli;
        check bool "Keeper lifecycle reading survives currency failure" true
          (before.kr_phase = row.kr_phase && before.kr_health = row.kr_health && before.kr_keepalive_running = row.kr_keepalive_running)
      | _ -> fail "currency failure hid the healthy Keeper");
@@ -1165,6 +1223,8 @@ let () =
       ; test_case "PNG with a strong tag and 304" `Quick test_router_serves_png_with_a_strong_tag
       ; test_case "400 and 404" `Quick test_router_refusals
       ; test_case "Gate operator revisions bypass shared metadata cache" `Quick test_gate_account_revision_uses_current_candle_reading
+      ; test_case "a named Gate roster read keeps auth and Candle projection" `Quick
+          test_gate_named_roster_reads_one_keeper_with_auth
       ; test_case "fresh Gate roster keeps cache, auth and workspace boundaries" `Quick
           test_gate_fresh_roster_bypasses_cache_with_auth_and_workspace
       ; test_case "strict auth needs a read token" `Quick test_router_strict_auth_needs_a_read_token

@@ -2,6 +2,21 @@ open Alcotest
 open Masc
 open Yojson.Safe.Util
 
+(* The production peek, read back as the exact pending selection. *)
+let select_ready ~now ~ready state =
+  Option.bind (Keeper_event_queue_state.peek_when ~now ~ready state) (fun source ->
+    List.find_opt
+      (fun (selection : Keeper_event_queue_state.pending_selection) ->
+         Keeper_event_queue.stimulus_identity_equal selection.source source)
+      (Keeper_event_queue_state.pending_selections state))
+;;
+
+(* The production loader with the production peek. *)
+let select_queue_entry ~base_path ~keeper_name ~now ~ready =
+  Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name
+  |> Result.map (select_ready ~now ~ready)
+;;
+
 let with_temp_base f =
   let base_path = Filename.temp_file "masc-krl-" "" in
   Sys.remove base_path;
@@ -19,7 +34,7 @@ let board_payload ?updated_at ~post_id:(_ : string) () :
     ; content = "Please react"
     ; hearth = None
     ; updated_at
-    ; audience = Some (Keeper_event_queue.Audience_discoverable)
+    ; audience = Keeper_event_queue.Audience_discoverable
     }
 ;;
 
@@ -138,9 +153,10 @@ let read_recent_rows ~base_path ~keeper_name ~limit =
 ;;
 
 let with_state_change_observer observer f =
-  Keeper_reaction_ledger.install_state_change_observer observer;
+  Keeper_reaction_ledger.install_state_change_observer
+    (fun ~base_path:_ ~keeper_name:_ -> observer ());
   Fun.protect
-    ~finally:(fun () -> Keeper_reaction_ledger.install_state_change_observer ignore)
+    ~finally:(fun () -> Keeper_reaction_ledger.install_state_change_observer (fun ~base_path:_ ~keeper_name:_ -> ()))
     f
 ;;
 
@@ -1730,7 +1746,7 @@ let consume_delivery_source ~base_path ~keeper_name source =
   Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name source;
   ignore (Keeper_event_queue_persistence.enqueue_stimulus_if_absent_result
     ~base_path ~keeper_name source |> require_ok "enqueue exact source");
-  let selection = match Keeper_event_queue_persistence.select_when_result
+  let selection = match select_queue_entry
       ~base_path ~keeper_name ~now:(Unix.gettimeofday ()) ~ready:(fun _ -> true)
       |> require_ok "select exact source" with
     | Some selection -> selection | None -> fail "exact source was not selectable" in

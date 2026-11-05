@@ -87,6 +87,39 @@ let schedule_form_row : schedule_row =
 
 (* The wire carries both an encoded target and a display name. When the
    latter is absent, an older server's target stays intact. *)
+(* A queue or reaction write owes the schedule list a read only for a Keeper
+   a drawn row reads: its target, the Keeper its reaction names, the one a
+   transferred occurrence waits with, the one whose queue has yet to record
+   its result, or either end of a transfer not yet recorded. *)
+let test_a_schedule_row_reads_only_its_keepers_queues () =
+  let reads keepers row = Masc_tui_types.schedule_rows_read_queue_of ~keepers [ row ] in
+  Alcotest.(check bool) "its target's queue" true (reads [ "edgar.a.poe" ] schedule_form_row);
+  Alcotest.(check bool) "another Keeper's queue" false
+    (reads [ "someone.else" ] schedule_form_row);
+  Alcotest.(check bool) "the Keeper its reaction names" true
+    (reads [ "reactor" ]
+       { schedule_form_row with
+         sch_payload_keeper_name = None
+       ; sch_reaction_keeper_name = Some "reactor" });
+  Alcotest.(check bool) "the Keeper a transferred occurrence waits with" true
+    (reads [ "holder" ]
+       { schedule_form_row with
+         sch_occurrence =
+           { Masc.Tui_schedule_observation.stage = Queued_at "holder"; due_at_iso = None } });
+  let at stage = { schedule_form_row with
+                   sch_occurrence = { Masc.Tui_schedule_observation.stage; due_at_iso = None } } in
+  Alcotest.(check bool) "the Keeper whose queue has yet to record the result" true
+    (reads [ "resolver" ] (at (Masc.Tui_schedule_observation.Settling "resolver")));
+  let transfer =
+    at (Masc.Tui_schedule_observation.Transferring { owner = "giver"; target = "taker" }) in
+  Alcotest.(check bool) "the Keeper that handed the occurrence over" true
+    (reads [ "giver" ] transfer);
+  Alcotest.(check bool) "the Keeper it was handed to" true (reads [ "taker" ] transfer);
+  Alcotest.(check bool) "a transfer reads no third Keeper's queue" false
+    (reads [ "someone.else" ] transfer);
+  Alcotest.(check bool) "no drawn row" false
+    (Masc_tui_types.schedule_rows_read_queue_of ~keepers:[ "edgar.a.poe" ] [])
+
 let test_schedule_who_uses_the_named_field () =
   let who row = Masc_tui_types.schedule_row_who row in
   Alcotest.(check (option string)) "the bare name wins" (Some "edgar.a.poe")
@@ -350,7 +383,7 @@ let test_keeper_runs_selection_survives_a_shorter_list () =
   ; k_name = name
   ; k_paused = false
   ; k_identity = Ok { k_trace_id = name; k_created_at = "2026-09-07T00:00:00Z"; k_updated_at = "2026-09-07T00:00:00Z" }
-  ; k_activity = Some { k_current_task_id = None; k_total_turns = 0; k_total_tokens = 0; k_total_cost_usd = Keeper_cost_coverage.empty; k_last_turn_ts = ""; k_last_proactive_outcome = None }
+  ; k_activity = Some { k_current_task_id = None; k_total_turns = 0; k_total_tokens = 0; k_total_cost_usd = Keeper_cost_coverage.empty; k_last_turn_at = None; k_last_proactive_outcome = None }
   }
   in
   let run id keeper = `Assoc
@@ -1521,7 +1554,7 @@ let test_keeper_peer_selection_owns_its_observation () =
     sid_base_path = D.Canonical_path.of_path "/owned-workspace";
     sid_masc_root = D.Canonical_path.of_path "/owned-workspace/.masc";
     sid_executable_in_worktree = None; sid_state_ready = Some true; sid_uptime = None;
-    sid_sse_clients = None; sid_gc = None; sid_scheduler = None };
+    sid_sse_clients = None; sid_gc = None; sid_scheduler = None; sid_operator_action = None };
   state.keepers <- [roster_keeper "Alice"; roster_keeper "Bob"];
   let relation operation_id sender : Masc_tui_queue_inspection.peer_relation =
     {operation_id; sender; recipient = "receiver"; reply_to = None} in
@@ -1633,7 +1666,7 @@ let test_observation_updates_preserve_selected_name () =
     ; ar_submitted_by = "test"
     ; ar_keeper_name = name
     ; ar_phase = Tui_decode.Async_running
-    ; ar_elapsed_sec = Some 1.
+    ; ar_submitted_at = 1.
     ; ar_ownership = Tui_decode.Async_runtime_owned
     }
   in
@@ -1695,26 +1728,7 @@ let standalone_snapshot lanes : Tui_decode.standalone_lanes_snapshot =
   ; sls_lanes = lanes
   }
 
-let keeper_lane name : Tui_decode.keeper_lane =
-  { Tui_decode.kl_keeper = name
-  ; kl_phase = Tui_decode.Lane_phase_running
-  ; kl_turn_phase = Tui_decode.Lane_turn_idle
-  ; kl_idle_seconds = 0
-  ; kl_last_outcome = None
-  ; kl_conditions =
-      { Tui_decode.klc_launch_pending = false
-      ; klc_heartbeat_healthy = true
-      ; klc_turn_healthy = true
-      }
-  }
-
-let keeper_snapshot lanes : Tui_decode.keeper_lanes_snapshot =
-  { Tui_decode.kls_generated_at = 0.
-  ; kls_count = List.length lanes
-  ; kls_lanes = lanes
-  }
-
-let lanes_state ?(keepers = [ "alpha"; "beta" ]) () =
+let lanes_state () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   state.view <- Lanes;
   let exact_snapshot = standalone_snapshot four_standalone_lanes in
@@ -1729,7 +1743,6 @@ let lanes_state ?(keepers = [ "alpha"; "beta" ]) () =
   replace_lane_inventory state { Inventory.observed_at=0.; exact_snapshot;
     rows=exact_rows @ [machine]; package_read={directory="/fixture/lane-addons";
       complete=true;owner_present=true;issues=[]} };
-  state.lanes <- Some (keeper_snapshot (List.map keeper_lane keepers));
   state
 
 let test_inventory_selection_keeps_exact_editor_identity () =
@@ -2289,7 +2302,9 @@ let test_acting_evidence_footer_hints_and_help_section () =
   state.acting_detail <-
     Some
       { Masc_tui_acting.ae_at = 1.0
-      ; ae_event = Masc_tui_observer.Internal_agent_runs_changed
+      ; ae_event =
+          Masc_tui_observer.Internal_agent_runs_changed
+            Masc.Internal_agent_runs_event.Exact_lane
       };
   match Masc_tui_keys.help_sections_for_state ~cols:120 state with
   | (title, entries) :: _ ->
@@ -2413,6 +2428,8 @@ let () =
     ; ( "projections"
       , [ Alcotest.test_case "schedule display name uses the named field" `Quick
             test_schedule_who_uses_the_named_field
+        ; Alcotest.test_case "a schedule row reads only its Keepers' queues" `Quick
+            test_a_schedule_row_reads_only_its_keepers_queues
         ; Alcotest.test_case "schedule create form names required fields" `Quick
             test_schedule_create_form_names_the_canonical_required_fields
         ; Alcotest.test_case

@@ -8,11 +8,13 @@ type t =
   ; overall_status_reasons : string list
   }
 
+let operator_field_names =
+  [ "overall_status"; "operator_action_required"; "operator_action_reasons" ]
+;;
+
 let cached_field_names =
-  [
-    "overall_status";
-    "operator_action_required";
-    "operator_action_reasons";
+  operator_field_names
+  @ [
     "overall_status_reasons";
     "keeper_fibers";
     "fd_observation";
@@ -28,6 +30,7 @@ let cached_field_names =
     "keeper_hitl_gate";
     "keeper_event_queue";
     "keeper_waiting_inventory";
+    "typesafeai";
     "keeper_terminal_effect_policy";
     "keeper_observability_artifacts";
     "skill_catalog";

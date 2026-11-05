@@ -382,7 +382,7 @@ let test_task_roundtrip () =
     created_at = "2024-01-01T00:00:00Z";
     created_by = None;
     predecessor_task_id = None;
-    contract = None; execution_links = Masc_domain.no_execution_links; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
+    contract = None; execution_links = Masc_domain.no_execution_links; handoff_context = None; cycle_count = 0;
     skills = [];
   } in
   let json = Masc_domain.task_to_yojson task in
@@ -402,14 +402,14 @@ let test_backlog_roundtrip () =
         created_by = None;
         predecessor_task_id = None;
         skills = [];
-        contract = None; execution_links = Masc_domain.no_execution_links; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None };
+        contract = None; execution_links = Masc_domain.no_execution_links; handoff_context = None; cycle_count = 0 };
       { id = "t2"; title = "Task 2"; description = "Desc 2";
         task_status = Done { assignee = "a"; completed_at = "2024-01-02T00:00:00Z"; notes = None };
         priority = 2; files = []; created_at = "2024-01-01T01:00:00Z";
         created_by = None;
         predecessor_task_id = None;
         skills = [];
-        contract = None; execution_links = Masc_domain.no_execution_links; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None };
+        contract = None; execution_links = Masc_domain.no_execution_links; handoff_context = None; cycle_count = 0 };
     ];
     task_creation_receipts = []; task_deletion_receipts = []; pending_completion_approvals = []; pending_completion_rejections = []; delivered_completion_rejections = [];
     last_updated = "2024-01-02T00:00:00Z";
@@ -492,6 +492,7 @@ let test_auth_config_roundtrip () =
     workspace_secret_hash = Some (String.make 64 'a');
     require_token = true;
     token_expiry_hours = 48;
+    account_mode = None;
   } in
   let json = Masc_domain.auth_config_to_yojson cfg in
   let result = Masc_domain.auth_config_of_yojson json in

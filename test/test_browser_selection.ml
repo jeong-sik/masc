@@ -238,8 +238,8 @@ let test_goal_space_default () =
   Fun.protect ~finally:(fun () -> remove dir) (fun () ->
     let config=Masc.Workspace.default_config dir in
     ignore (Masc.Workspace.init config ~agent_name:(Some "fixture"));
-    let goal title=match Goal_store.upsert_goal config ~title ~metric:"verified" ~target_value:"1" () with
-      | Ok (goal,_) -> goal.id
+    let goal title=match Goal_store.upsert_goal_with_events ~actor:"test" config ~title ~metric:"verified" ~target_value:"1" () with
+      | Ok (goal, _, _) -> goal.id
       | Error error -> fail (Goal_store.write_error_to_string error) in
     let first=goal "first" and second=goal "second" in
     let ok=function Ok value -> value | Error e -> fail (G.error_message e) in
@@ -433,7 +433,27 @@ let test_ego_user_owned_inventory () =
      `List [`Assoc ["kind",`String "ego_user_owned_space";"instanceId",`String "w";"space",`String "s";
        "observedAt",`Float (-1.)]];
      `List [`Assoc ["kind",`String "ego_user_owned_space";"instanceId",`String "w";"space",`String "";
-       "observedAt",`Float 2.]]]
+       "observedAt",`Float 2.]]];
+  (* A connection that ended because ego no longer lists its Space is the
+     same kind of answered lane fact. *)
+  let missing=Masc.Browser_addon_observation.Ego_space_missing
+    {space="masc-keepers";space_id=12;observed_at=1793617161.} in
+  let ended=I.to_json (I.build ~observations:[observation "ego-worker" [] [missing]] ~issues:[]) in
+  let issue=I.Ego_space_missing {instance_id="ego-worker";space="masc-keepers";space_id=12;observed_at=1793617161.} in
+  check bool "a missing Space is reported, not silent" true
+    (I.issues_of_json (member "inventoryIssues" ended)=Ok [issue]);
+  check bool "a missing Space does not make the inventory incomplete" true
+    (member "inventoryComplete" ended=`Bool true);
+  check bool "the issue names the Space, the ended connection and the recovery" true
+    (String.equal (I.issue_message issue)
+       "Browser worker ego-worker: ego no longer lists task space 12 (\"masc-keepers\"), so its connection ended and no replacement was opened; take_over without a clientId asks the worker to open its configured Space again");
+  check bool "missing issue wire round trip" true
+    (I.issues_of_json (I.issues_to_json [issue])=Ok [issue]);
+  let row extra=`List [`Assoc (["kind",`String "ego_space_missing";"instanceId",`String "w";"space",`String "s";
+    "observedAt",`Float 2.] @ extra)] in
+  List.iter (fun value -> check bool "invalid missing issue metadata is refused" true
+    (Result.is_error (I.issues_of_json value)))
+    [row []; row ["spaceId",`Int 0]; row ["spaceId",`String "12"]; row ["spaceId",`Int 12;"ids",`List []]]
 
 let () = run "browser selection" ["policy",[
   test_case "native Space absence is distinct from transport disconnection" `Quick test_space_presence;

@@ -13,12 +13,20 @@ val incarnation : t -> string
 val is_retired : t -> bool
 val mark_ego_user_owned_name : t -> space:string -> ids:int list -> observed_at:float -> (unit, string) result
 (** Publish an observed startup conflict only while this owner serves. *)
+val mark_ego_space_missing : t -> space:string -> space_id:int -> observed_at:float -> (unit, string) result
+(** Publish that ego no longer lists the Space a connection was bound to,
+    only while this owner serves and nothing else is published. *)
 val clear_ego_unavailable : t -> unit
 (** The published ego refusal ended: the Space was claimed or the lane serves again. *)
-val attach_ego_recovery : t -> (int list -> (int * string, string) result) -> (unit, string) result
-(** The live ego backend's claim: it receives the published Space ids and
-    answers with the reclaimed Space id and name. One claim runs at a time;
-    a second while one runs is refused before the SDK is asked anything. *)
+(** What a recovery did: claimed the user-owned Space back, or cleared a
+    missing Space's record and started opening the configured name again;
+    the connection follows on its own either way. *)
+type ego_recovered = Reclaimed of {space_id:int; space_name:string} | Reopening of {space:string}
+val attach_ego_recovery : t ->
+  (Browser_addon_observation.unavailable -> (ego_recovered, string) result) -> (unit, string) result
+(** The live ego backend's recovery: it receives the one published record
+    and answers with what it did. One recovery runs at a time; a second
+    while one runs is refused before the SDK is asked anything. *)
 val detach_ego_recovery : t -> unit
 (** Admission observation only. It grants neither a new poll nor process cleanup
     authority; an owned resource still waits for its original cleanup request. *)
@@ -52,7 +60,12 @@ val attach_extensions : t ->
     (Yojson.Safe.t, Browser_extension_protocol.error) result) -> (unit, string) result
 (** One private executor attached to the already owned Chrome backend. Admission
     is revoked before cleanup. The admission lock is never held during execution. *)
-val attach_live : ?ego_input:Browser_ego_operator.recovery -> t -> client_id:Browser_lane.client_id ->
+type ego_space = {
+  space_observation : unit -> Browser_ego_space_observation.t option;
+  space_presence : unit -> Browser_ego_space_observation.presence;
+}
+(** The ego connection's dated Space reads, published with its client row. *)
+val attach_live : ?ego_space:ego_space -> t -> client_id:Browser_lane.client_id ->
   cleanup:(unit -> (unit, string) result) -> (unit, string) result
 (** Bind cleanup of an already registered exact live client this worker runs,
     a BiDi or an ego connection, one of each at most. Retire revokes its input
@@ -60,11 +73,6 @@ val attach_live : ?ego_input:Browser_ego_operator.recovery -> t -> client_id:Bro
     task space. Existing extension clients grant no browser-process ownership.
     Once attached, the lane holds the client instead of timing its polls; it
     ends only through [disconnect_live] or [revoke]. *)
-val operator_schema : Yojson.Safe.t
-val operator : t -> Yojson.Safe.t -> (Yojson.Safe.t, string) result
-(** Private [lane_operator] port, never exported to models. Its host caller
-    must use the existing operator-credential/incarnation boundary. Only the
-    original connected Ego peer's exact pending generation can be asserted. *)
 val revoke : t -> unit
 (** First retire admission, then wake pending work and retire the owner's client
     IDs. Interrupted issued work has an unknown outcome and is never replayed. *)

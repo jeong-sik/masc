@@ -118,7 +118,6 @@ let keeper_wake_reaction_ledger_status_json_fields = function
 type keeper_wake_occurrence_status =
   | Keeper_wake_awaiting_ack
   | Keeper_wake_already_acked
-  | Keeper_wake_already_failed
   | Keeper_wake_already_cancelled
 
 type keeper_wake_result_delivery_policy =
@@ -142,14 +141,12 @@ let keeper_wake_result_delivery_policy_of_fields fields =
 let keeper_wake_occurrence_status_to_string = function
   | Keeper_wake_awaiting_ack -> "awaiting_ack"
   | Keeper_wake_already_acked -> "already_acked"
-  | Keeper_wake_already_failed -> "already_failed"
   | Keeper_wake_already_cancelled -> "already_cancelled"
 ;;
 
 let keeper_wake_occurrence_status_of_string = function
   | "awaiting_ack" -> Ok Keeper_wake_awaiting_ack
   | "already_acked" -> Ok Keeper_wake_already_acked
-  | "already_failed" -> Ok Keeper_wake_already_failed
   | "already_cancelled" -> Ok Keeper_wake_already_cancelled
   | value -> Error ("unsupported occurrence_status: " ^ value)
 ;;
@@ -328,12 +325,10 @@ let dispatch_receipt_of_detail = function
         | Keeper_wake_awaiting_ack, Keeper_wake_activation_not_required ->
           Error "awaiting_ack occurrence requires an activation outcome"
         | ( Keeper_wake_already_acked
-          | Keeper_wake_already_failed
           | Keeper_wake_already_cancelled ),
           Keeper_wake_activation_not_required ->
           Ok ()
         | ( Keeper_wake_already_acked
-          | Keeper_wake_already_failed
           | Keeper_wake_already_cancelled ),
           _ ->
           Error "terminal occurrence requires activation_status=not_required"
@@ -480,7 +475,6 @@ type keeper_wake_acceptance =
   | Wake_required
   | Already_pending of string
   | Already_acked
-  | Already_failed of string
   | Already_cancelled
 
 let activation_deferred_of_paused_dead = function
@@ -678,11 +672,6 @@ type resolved_occurrence_disposition =
       string
       * Keeper_event_queue_state.schedule_occurrence_source
       * Keeper_event_queue_state.occurrence_terminal_evidence
-  | Terminal_failed_at of
-      string
-      * Keeper_event_queue_state.schedule_occurrence_source
-      * string
-      * Keeper_event_queue_state.occurrence_terminal_evidence
   | Terminal_cancelled_at of
       string
       * Keeper_event_queue_state.schedule_occurrence_source
@@ -710,8 +699,6 @@ let occurrence_state_equal left right =
   | Keeper_event_queue_state.Occurrence_completed left,
     Keeper_event_queue_state.Occurrence_completed right ->
     terminal_evidence_equal left right
-  | Keeper_event_queue_state.Occurrence_failed (left_reason, left_evidence),
-    Keeper_event_queue_state.Occurrence_failed (right_reason, right_evidence)
   | Keeper_event_queue_state.Occurrence_cancelled (left_reason, left_evidence),
     Keeper_event_queue_state.Occurrence_cancelled (right_reason, right_evidence) ->
     String.equal left_reason right_reason
@@ -724,7 +711,6 @@ let occurrence_state_equal left right =
     | Keeper_event_queue_state.Occurrence_transfer_projecting_to _
     | Keeper_event_queue_state.Occurrence_transferred_to _
     | Keeper_event_queue_state.Occurrence_completed _
-    | Keeper_event_queue_state.Occurrence_failed _
     | Keeper_event_queue_state.Occurrence_cancelled _ )
     , _ -> false
 ;;
@@ -812,7 +798,7 @@ let rec resolve_durable_occurrence
         (* A cached target snapshot may predate the transfer commit. *)
         cache := String_map.remove target !cache;
         resolve_target ()
-      | (Pending_at (_, _) | Transfer_projecting_at (_, _, _) | Terminal_completed_at (_, _, _) | Terminal_failed_at (_, _, _, _) | Terminal_cancelled_at (_, _, _, _) | Absent_at _) as disposition -> Ok disposition
+      | (Pending_at (_, _) | Transfer_projecting_at (_, _, _) | Terminal_completed_at (_, _, _) | Terminal_cancelled_at (_, _, _, _) | Absent_at _) as disposition -> Ok disposition
     in
     let disposition_of_occurrence
           (occurrence : Keeper_event_queue_state.schedule_occurrence)
@@ -823,8 +809,6 @@ let rec resolve_durable_occurrence
         Ok (Pending_at (keeper_name, source))
       | Keeper_event_queue_state.Occurrence_completed evidence ->
         Ok (Terminal_completed_at (keeper_name, source, evidence))
-      | Keeper_event_queue_state.Occurrence_failed (reason, evidence) ->
-        Ok (Terminal_failed_at (keeper_name, source, reason, evidence))
       | Keeper_event_queue_state.Occurrence_cancelled (reason, evidence) ->
         Ok (Terminal_cancelled_at (keeper_name, source, reason, evidence))
       | Keeper_event_queue_state.Occurrence_transfer_projecting_to target ->
@@ -859,7 +843,6 @@ let rec resolve_durable_occurrence
 let resolved_occurrence_owner = function
   | Pending_at (owner, _)
   | Terminal_completed_at (owner, _, _)
-  | Terminal_failed_at (owner, _, _, _)
   | Terminal_cancelled_at (owner, _, _, _)
   | Absent_at owner -> owner
   | Transfer_projecting_at (source, _, _) -> source
@@ -976,12 +959,6 @@ let accept_keeper_wake_occurrence
       (Already_pending owner)
   | Ok (Terminal_completed_at (owner, durable_stimulus, evidence)) ->
     accept_terminal ~owner ~durable_stimulus ~evidence Already_acked
-  | Ok (Terminal_failed_at (owner, durable_stimulus, reason, evidence)) ->
-    accept_terminal
-      ~owner
-      ~durable_stimulus
-      ~evidence
-      (Already_failed reason)
   | Ok (Terminal_cancelled_at (owner, durable_stimulus, _, evidence)) ->
     accept_terminal ~owner ~durable_stimulus ~evidence Already_cancelled
   | Ok (Absent_at owner) when not (String.equal owner keeper_name) ->
@@ -1115,7 +1092,7 @@ let dispatch_keeper_wake
      acceptance without it. *)
   let* owner_meta =
     match initial_disposition with
-    | Terminal_completed_at _ | Terminal_failed_at _ | Terminal_cancelled_at _ ->
+    | Terminal_completed_at _ | Terminal_cancelled_at _ ->
       Ok Owner_meta_not_consulted
     | Pending_at _ | Absent_at _ | Transfer_projecting_at _ ->
       read_owner_meta config intake_owner
@@ -1137,20 +1114,19 @@ let dispatch_keeper_wake
       match acceptance with
       | Wake_required | Already_pending _ -> Keeper_wake_awaiting_ack
       | Already_acked -> Keeper_wake_already_acked
-      | Already_failed _ -> Keeper_wake_already_failed
       | Already_cancelled -> Keeper_wake_already_cancelled
     in
     let activation_keeper_name =
       match acceptance with
       | Already_pending owner -> owner
-      | Wake_required | Already_acked | Already_failed _ | Already_cancelled ->
+      | Wake_required | Already_acked | Already_cancelled ->
         keeper_name
     in
     (* [accept_keeper_wake_occurrence] rejects an owner that differs from
        [intake_owner], so [owner_meta] is the activation Keeper's answer. *)
     let* activation_outcome =
       match acceptance, owner_meta with
-      | (Already_acked | Already_failed _ | Already_cancelled), _ ->
+      | (Already_acked | Already_cancelled), _ ->
         Ok Keeper_wake_activation_not_required
       | (Wake_required | Already_pending _), Owner_meta_consulted consulted ->
         Ok
@@ -1211,7 +1187,6 @@ let dispatch_keeper_wake
     | Wake_required
     | Already_pending _
     | Already_acked
-    | Already_failed _
     | Already_cancelled ->
       let* acceptance_commit = commit_acceptance detail in
       Ok (Schedule_runner.Work_accepted { detail; acceptance_commit })

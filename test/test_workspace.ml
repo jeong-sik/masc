@@ -182,12 +182,12 @@ let test_add_and_claim_task () =
   Alcotest.(check bool) "add success" true (contains_check add_result);
 
   (* Claim task *)
-  let claim_result = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
-  Alcotest.(check bool) "claim success" true (contains_check claim_result);
+  let claim_result = Workspace.claim_task_r config ~agent_name:"claude" ~task_id:"task-001" () in
+  Alcotest.(check bool) "claim success" true (Result.is_ok claim_result);
 
   (* Try to claim again - should fail *)
-  let claim2_result = Workspace.claim_task config ~agent_name:"gemini" ~task_id:"task-001" in
-  Alcotest.(check bool) "double claim blocked" true (contains_warning claim2_result);
+  let claim2_result = Workspace.claim_task_r config ~agent_name:"gemini" ~task_id:"task-001" () in
+  Alcotest.(check bool) "double claim blocked" true (Result.is_error claim2_result);
 
   (* Cleanup *)
   let _ = Workspace.reset config in
@@ -282,7 +282,7 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
   in
   let subject = Workspace.resolve_agent_name config "fixture-subject" in
   let _ = Workspace.add_task config ~title:"Terminal task" ~priority:1 ~description:"" in
-  let _ = Workspace.claim_task config ~agent_name:subject ~task_id:"task-001" in
+  let _ = Workspace.claim_task_r config ~agent_name:subject ~task_id:"task-001" () in
   (match
      transition_done_r
        config
@@ -473,7 +473,7 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
   let _ =
     Workspace.add_task config ~title:"Active task" ~priority:1 ~description:""
   in
-  let _ = Workspace.claim_task config ~agent_name:subject ~task_id:"task-002" in
+  let _ = Workspace.claim_task_r config ~agent_name:subject ~task_id:"task-002" () in
   let active_content = "typed signal for a still-active canonical task" in
   let active_result =
     Workspace.broadcast
@@ -676,7 +676,7 @@ let test_complete_without_claim () =
 let test_complete_by_wrong_agent () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:"claude" ~task_id:"task-001" () in
 
     (* Provider_f tries to complete claude's task - should fail *)
     (match transition_done_r config ~agent_name:"gemini" ~task_id:"task-001" ~notes:"" with
@@ -712,14 +712,14 @@ let test_complete_nonexistent_task () =
 
 let test_claim_nonexistent_task () =
   with_test_env (fun config ->
-    let result = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-999" in
-    Alcotest.(check bool) "claim nonexistent" true (contains_error result)
+    let result = Workspace.claim_task_r config ~agent_name:"claude" ~task_id:"task-999" () in
+    Alcotest.(check bool) "claim nonexistent" true (Result.is_error result)
   )
 
 let test_double_complete () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:"claude" ~task_id:"task-001" () in
     let _ = transition_done config ~agent_name:"claude" ~task_id:"task-001" ~notes:"first" in
 
     (* Done is idempotent at the Workspace FSM layer. *)
@@ -812,7 +812,7 @@ let test_priority_boundaries () =
 let test_task_state_after_claim () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"State Test" ~priority:1 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:"claude" ~task_id:"task-001" () in
 
     (* Verify task list shows claimed state *)
     let tasks = Workspace.list_tasks config in
@@ -830,8 +830,8 @@ let test_multiple_tasks_independent () =
 
     (* Claim and complete two tasks independently. Current ownership guards keep
        one active task per agent, so use two agents to isolate task state. *)
-    let _ = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
-    let _ = Workspace.claim_task config ~agent_name:"gemini" ~task_id:"task-002" in
+    let _ = Workspace.claim_task_r config ~agent_name:"claude" ~task_id:"task-001" () in
+    let _ = Workspace.claim_task_r config ~agent_name:"gemini" ~task_id:"task-002" () in
     let start_1 = transition_start config ~agent_name:"claude" ~task_id:"task-001" in
     let start_2 = transition_start config ~agent_name:"gemini" ~task_id:"task-002" in
     Alcotest.(check bool) "start task 001" true (contains_check start_1);
@@ -851,14 +851,14 @@ let test_rapid_claim_sequence () =
     let _ = Workspace.add_task config ~title:"Race" ~priority:1 ~description:"" in
 
     (* Simulate rapid claims from different agents *)
-    let r1 = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
-    let r2 = Workspace.claim_task config ~agent_name:"gemini" ~task_id:"task-001" in
-    let r3 = Workspace.claim_task config ~agent_name:"codex" ~task_id:"task-001" in
+    let r1 = Workspace.claim_task_r config ~agent_name:"claude" ~task_id:"task-001" () in
+    let r2 = Workspace.claim_task_r config ~agent_name:"gemini" ~task_id:"task-001" () in
+    let r3 = Workspace.claim_task_r config ~agent_name:"codex" ~task_id:"task-001" () in
 
     (* Only first should succeed *)
-    Alcotest.(check bool) "first wins" true (contains_check r1);
-    Alcotest.(check bool) "second blocked" true (contains_warning r2);
-    Alcotest.(check bool) "third blocked" true (contains_warning r3)
+    Alcotest.(check bool) "first wins" true (Result.is_ok r1);
+    Alcotest.(check bool) "second blocked" true (Result.is_error r2);
+    Alcotest.(check bool) "third blocked" true (Result.is_error r3)
   )
 
 let test_multiple_agents_multiple_tasks () =
@@ -869,13 +869,13 @@ let test_multiple_agents_multiple_tasks () =
     let _ = Workspace.add_task config ~title:"C" ~priority:3 ~description:"" in
 
     (* Each agent claims different task *)
-    let r1 = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
-    let r2 = Workspace.claim_task config ~agent_name:"gemini" ~task_id:"task-002" in
-    let r3 = Workspace.claim_task config ~agent_name:"codex" ~task_id:"task-003" in
+    let r1 = Workspace.claim_task_r config ~agent_name:"claude" ~task_id:"task-001" () in
+    let r2 = Workspace.claim_task_r config ~agent_name:"gemini" ~task_id:"task-002" () in
+    let r3 = Workspace.claim_task_r config ~agent_name:"codex" ~task_id:"task-003" () in
 
-    Alcotest.(check bool) "claude gets 001" true (contains_check r1);
-    Alcotest.(check bool) "gemini gets 002" true (contains_check r2);
-    Alcotest.(check bool) "codex gets 003" true (contains_check r3);
+    Alcotest.(check bool) "claude gets 001" true (Result.is_ok r1);
+    Alcotest.(check bool) "gemini gets 002" true (Result.is_ok r2);
+    Alcotest.(check bool) "codex gets 003" true (Result.is_ok r3);
 
     (* Each completes their own *)
     let c1 = transition_done config ~agent_name:"claude" ~task_id:"task-001" ~notes:"" in
@@ -942,7 +942,7 @@ let test_event_log_on_claim_done () =
   let config = workspace_config tmp_dir in
   let _ = Workspace.init config ~agent_name:(Some "claude") in
   let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
-  let _ = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
+  let _ = Workspace.claim_task_r config ~agent_name:"claude" ~task_id:"task-001" () in
   let _ = transition_done config ~agent_name:"claude" ~task_id:"task-001" ~notes:"done" in
 
   (* Verify task state via Workspace.read_backlog (backend-agnostic) *)
@@ -1201,23 +1201,23 @@ let test_empty_agent_name_claim () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
     (* Empty agent name should be rejected *)
-    let result = Workspace.claim_task config ~agent_name:"" ~task_id:"task-001" in
-    Alcotest.(check bool) "empty agent rejected" true (contains_error result)
+    let result = Workspace.claim_task_r config ~agent_name:"" ~task_id:"task-001" () in
+    Alcotest.(check bool) "empty agent rejected" true (Result.is_error result)
   )
 
 let test_empty_task_id_claim () =
   with_test_env (fun config ->
     (* Empty task_id should be rejected *)
-    let result = Workspace.claim_task config ~agent_name:"claude" ~task_id:"" in
-    Alcotest.(check bool) "empty task_id rejected" true (contains_error result)
+    let result = Workspace.claim_task_r config ~agent_name:"claude" ~task_id:"" () in
+    Alcotest.(check bool) "empty task_id rejected" true (Result.is_error result)
   )
 
 let test_very_long_agent_name () =
   with_test_env (fun config ->
     let long_name = String.make 100 'x' in
-    let result = Workspace.claim_task config ~agent_name:long_name ~task_id:"task-001" in
+    let result = Workspace.claim_task_r config ~agent_name:long_name ~task_id:"task-001" () in
     (* Should be rejected (max 64 chars) *)
-    Alcotest.(check bool) "long name rejected" true (contains_error result)
+    Alcotest.(check bool) "long name rejected" true (Result.is_error result)
   )
 
 (* ============================================================ *)
@@ -1514,7 +1514,7 @@ let test_approve_completion_credits_assignee () =
       with_verdict_projection_recorders (fun terminal notifications ->
       let _ = Workspace.add_task config ~title:"Parity Task" ~priority:1 ~description:"" in
       let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
-      let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
+      let _ = Workspace.claim_task_r config ~agent_name:test_agent_a ~task_id:"task-001" () in
       let submitted =
         Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
           ~action:Masc_domain.Submit_for_verification ~notes:"evidence attached" ()
@@ -1567,10 +1567,10 @@ let test_operator_rejection_rebinds_producer () =
         ()
     in
     let _ =
-      Workspace.claim_task
+      Workspace.claim_task_r
         config
         ~agent_name:test_agent_a
-        ~task_id:"task-001"
+        ~task_id:"task-001" ()
     in
     let _ =
       Workspace.transition_task_r
@@ -1620,12 +1620,12 @@ let test_operator_rejection_keeps_other_active_task () =
     let _ = Workspace.add_task config ~title:"Rejected Task" ~priority:1 ~description:"" in
     let _ = Workspace.add_task config ~title:"Next Task" ~priority:1 ~description:"" in
     let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
-    let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:test_agent_a ~task_id:"task-001" () in
     let _ =
       Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
         ~action:Masc_domain.Submit_for_verification ~notes:"evidence" ()
     in
-    let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-002" in
+    let _ = Workspace.claim_task_r config ~agent_name:test_agent_a ~task_id:"task-002" () in
     let rejected =
       Workspace.commit_verdict_r config
         ~authority:(Masc_domain.Human_operator { operator_id = "operator-test" })
@@ -1668,12 +1668,7 @@ let test_holder_cancel_ends_the_task () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Stop me" ~priority:1 ~description:"" in
     let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
-    let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
-    let refused =
-      Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
-        ~action:Masc_domain.Cancel ()
-    in
-    Alcotest.(check bool) "a cancel with no reason is refused" true (Result.is_error refused);
+    let _ = Workspace.claim_task_r config ~agent_name:test_agent_a ~task_id:"task-001" () in
     (match
        Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
          ~action:Masc_domain.Cancel ~reason:"the defect no longer reproduces" ()
@@ -1693,7 +1688,7 @@ let test_holder_cancel_of_a_pending_submission_ends_the_task () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Stop me" ~priority:1 ~description:"" in
     let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
-    let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:test_agent_a ~task_id:"task-001" () in
     (match
        Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
          ~action:Masc_domain.Submit_for_verification ~notes:"evidence"
@@ -1733,7 +1728,7 @@ let test_cancel_takes_its_reason_from_the_handoff_summary () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Stop me" ~priority:1 ~description:"" in
     let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
-    let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:test_agent_a ~task_id:"task-001" () in
     (match
        Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
          ~action:Masc_domain.Cancel
@@ -1742,7 +1737,6 @@ let test_cancel_takes_its_reason_from_the_handoff_summary () =
            ; reason = None
            ; next_step = None
            ; failure_mode = None
-           ; reclaim_policy = None
            ; evidence_refs = []
            ; updated_at = None
            ; updated_by = None
@@ -1771,7 +1765,7 @@ let test_operator_cancel_clears_owner_and_is_idempotent () =
   with_test_env (fun config ->
     ignore (Workspace.add_task config ~title:"Operator cancel" ~priority:1 ~description:"");
     ignore (Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] ());
-    ignore (Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001");
+    ignore (Workspace.claim_task_r config ~agent_name:test_agent_a ~task_id:"task-001" ());
     let require_ok = function
       | Ok value -> value
       | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error)
@@ -1825,7 +1819,6 @@ let test_operator_cancel_refuses_invalid_requests_without_write () =
       Alcotest.(check int) "refusal has no write" before.version
         (Workspace.read_backlog config).version)
       [ List.remove_assoc "expected_workspace" fields
-      ; ("reason", `String "   ") :: List.remove_assoc "reason" fields
       ; ("operator_id", `String test_agent_a) :: fields
       ; ("agent_name", `String test_agent_a) :: fields
       ; ("task_id", `String "task-002") :: fields
@@ -1837,11 +1830,11 @@ let test_operator_cancel_pending_submission_refuses_late_verdict () =
   with_test_env (fun config ->
     ignore (Workspace.add_task config ~title:"Withdraw evidence" ~priority:1 ~description:"");
     ignore (Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] ());
-    ignore (Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001");
+    ignore (Workspace.claim_task_r config ~agent_name:test_agent_a ~task_id:"task-001" ());
     (match Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
       ~action:Masc_domain.Submit_for_verification ~notes:"evidence"
       ~handoff_context:{ summary = "owner evidence"; reason = None; next_step = None;
-        failure_mode = None; reclaim_policy = None; evidence_refs = [];
+        failure_mode = None; evidence_refs = [];
         updated_at = Some "2026-10-21T00:00:00Z"; updated_by = Some test_agent_a }
       ~prepare_verification_request:(fun ~task ~assignee ~verification_id ~claim ->
         Verification_protocol.create_submit_request ~config ~task ~assignee ~verification_id ~claim) () with
@@ -1877,10 +1870,10 @@ let test_operator_verdict_boundary_is_reachable () =
         ()
     in
     let _ =
-      Workspace.claim_task
+      Workspace.claim_task_r
         config
         ~agent_name:test_agent_a
-        ~task_id:"task-001"
+        ~task_id:"task-001" ()
     in
     let submitted =
       Workspace.transition_task_r
@@ -1972,7 +1965,7 @@ let test_operator_verdict_on_a_superseded_submission_is_refused () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Resubmitted" ~priority:1 ~description:"" in
     let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
-    let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:test_agent_a ~task_id:"task-001" () in
     let submit notes =
       match
         Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
@@ -2057,7 +2050,7 @@ let test_verdict_rejects_blank_rejection_reason () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Justification Task" ~priority:1 ~description:"" in
     let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
-    let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:test_agent_a ~task_id:"task-001" () in
     let _ =
       Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
         ~action:Masc_domain.Submit_for_verification ~notes:"evidence" ()
@@ -2082,47 +2075,11 @@ let test_verdict_rejects_blank_rejection_reason () =
 
 (* === RFC-0323 G-1 (implements RFC-0308): verification-required done guard === *)
 
-let strict_contract : Masc_domain.task_contract =
-  { strict = true
-  ; completion_contract = [ "deliverable verified by a second agent" ]
-  ; (* Declared up front so the strict evidence precheck is satisfied by the
-       contract itself and direct done reaches the verification-lane guard. *)
-    required_evidence = [ "artifact:deliverable" ]
-  ; inspect_gate_evidence = []
-  ; verify_gate_evidence = []
-  }
-
-let test_strict_task_done_requires_verification_submission () =
-  with_test_env (fun config ->
-    let _ =
-      Workspace.add_task config ~contract:strict_contract ~title:"Strict Task"
-        ~priority:1 ~description:""
-    in
-    let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
-    let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
-    let direct =
-      Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
-        ~action:Masc_domain.Done_action
-        ~notes:"evidence attached"
-        ()
-    in
-    (match direct with
-     | Error e ->
-       Alcotest.(check bool) "error requires verification submission" true
-         (str_contains
-            (Masc_domain.masc_error_to_string e)
-            "must be submitted for verification")
-     | Ok _ -> Alcotest.fail "task bypassed verification submission");
-    Alcotest.(check bool) "task remains nonterminal" true
-      (match find_task config "task-001" with
-       | Some { task_status = Masc_domain.Claimed _; _ } -> true
-       | Some _ | None -> false))
-
 let test_default_task_done_requires_verification_submission () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Default Task" ~priority:1 ~description:"" in
     let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
-    let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:test_agent_a ~task_id:"task-001" () in
     let direct =
       Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
         ~action:Masc_domain.Done_action
@@ -2144,7 +2101,7 @@ let test_audit_orphan_tasks () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Orphan Candidate" ~priority:1 ~description:"" in
     let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
-    let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:test_agent_a ~task_id:"task-001" () in
     (* While agent is active, no orphans *)
     let orphans_before = Workspace.audit_orphan_tasks config in
     Alcotest.(check int) "no orphans while active" 0 (List.length orphans_before);
@@ -2170,7 +2127,7 @@ let test_audit_orphan_awaiting_verification_tasks () =
             ~priority:1 ~description:""
         in
         let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
-        let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
+        let _ = Workspace.claim_task_r config ~agent_name:test_agent_a ~task_id:"task-001" () in
         match
           Workspace.transition_task_r config ~agent_name:test_agent_a
             ~task_id:"task-001" ~action:Masc_domain.Submit_for_verification
@@ -2199,7 +2156,7 @@ let test_audit_orphan_ignores_elapsed_last_seen_for_active_agent () =
     let _ = Workspace.add_task config ~title:"Observed Task" ~priority:1 ~description:"" in
     let agent = "observed-active-agent" in
     let _ = Workspace.bind_session config ~agent_name:agent ~capabilities:[] () in
-    let _ = Workspace.claim_task config ~agent_name:agent ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:agent ~task_id:"task-001" () in
     Workspace.update_local_agent_state config ~agent_name:agent (fun record ->
       { record with last_seen = "2020-01-01T00:00:00Z" });
     let orphans = Workspace.audit_orphan_tasks config in
@@ -2281,7 +2238,7 @@ let test_read_backlog_snapshot_excludes_self_owned_orphan () =
   with_test_env (fun config ->
     let keeper = "keeper-self-filter-agent" in
     let _ = Workspace.bind_session config ~agent_name:keeper ~capabilities:[] () in
-    let _ = Workspace.claim_task config ~agent_name:keeper ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:keeper ~task_id:"task-001" () in
     (* Remove the agent file to simulate a keeper with no active registry record. *)
     let _ = Workspace.end_session config ~agent_name:keeper in
     let meta = keeper_meta_for_self_filter keeper in
@@ -2480,69 +2437,11 @@ let test_read_current_task_preserves_unavailable_and_missing () =
     | Keeper_world_observation_inputs.Current_task_missing _ ->
       Alcotest.fail "unreadable backlog did not remain explicitly unavailable")
 
-let test_self_authored_scoped_task_does_not_hide_peer_work () =
-  with_test_env (fun config ->
-    let keeper = "keeper-goal-filter-agent" in
-    let meta = keeper_meta_for_goal_filter keeper in
-    let _ =
-      Workspace.add_task config ~goal_id:"goal-a" ~created_by:meta.name
-        ~title:"Own goal routing task" ~priority:1 ~description:""
-    in
-    let _ =
-      Workspace.add_task config ~goal_id:"goal-b" ~created_by:"peer-keeper"
-        ~title:"Peer work outside active goal" ~priority:1 ~description:""
-    in
-    let snapshot =
-      Keeper_world_observation_inputs.read_backlog_snapshot ~config ~meta
-    in
-    Alcotest.(check int)
-      "self-authored scoped work does not suppress peer fallback"
-      1
-      (List.length snapshot.claimable_tasks))
-;;
-
-(* The self-authored exclusion must hold through [read_backlog_snapshot], not
-   only in [task_is_self_authored_todo]: dropping the filter clause leaves every
-   predicate-level test green while the feedback loop stays open. Rows are
-   compared against a baseline because the fixture seeds its own tasks. *)
-let test_read_backlog_snapshot_excludes_self_authored_task () =
-  with_test_env (fun config ->
-    let meta = keeper_meta_for_self_filter "keeper-self-filter-agent" in
-    let before = Keeper_world_observation_inputs.read_backlog_snapshot ~config ~meta in
-    let claimable_before = List.length before.claimable_tasks in
-    let _ =
-      Workspace.add_task config ~created_by:meta.name
-        ~title:"self-authored routing task" ~priority:3 ~description:""
-    in
-    let after_self =
-      Keeper_world_observation_inputs.read_backlog_snapshot ~config ~meta
-    in
-    Alcotest.(check int)
-      "a keeper's own task is not offered back to it as claimable"
-      claimable_before
-      (List.length after_self.claimable_tasks);
-    let _ =
-      Workspace.add_task config ~created_by:"peer-keeper"
-        ~title:"peer authored task" ~priority:3 ~description:""
-    in
-    let after_peer =
-      Keeper_world_observation_inputs.read_backlog_snapshot ~config ~meta
-    in
-    Alcotest.(check int)
-      "a peer-authored task is still claimable"
-      (claimable_before + 1)
-      (List.length after_peer.claimable_tasks);
-    Alcotest.(check int)
-      "the unclaimed count still reports both tasks"
-      (after_self.unclaimed_count + 1)
-      after_peer.unclaimed_count
-  )
-
 let test_keeper_tasks_audit_excludes_self_owned_orphan () =
   with_test_env (fun config ->
     let keeper = "keeper-task-audit-self-filter-agent" in
     let _ = Workspace.bind_session config ~agent_name:keeper ~capabilities:[] () in
-    let _ = Workspace.claim_task config ~agent_name:keeper ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:keeper ~task_id:"task-001" () in
     (* Remove the agent file to simulate a keeper with no active registry record. *)
     let _ = Workspace.end_session config ~agent_name:keeper in
     let meta = keeper_meta_for_self_filter keeper in
@@ -2748,7 +2647,7 @@ let test_empty_backlog_stop_signal () =
 let test_no_active_tasks_stop_signal () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Done Task" ~priority:1 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name:"alice" ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:"alice" ~task_id:"task-001" () in
     let _ = transition_done config ~agent_name:"alice" ~task_id:"task-001" ~notes:"done" in
     let result = Workspace.list_tasks config in
     Alcotest.(check string)
@@ -2763,7 +2662,7 @@ let test_no_active_tasks_stop_signal () =
 let test_no_unclaimed_tasks_stop_signal () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Claimed" ~priority:1 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name:"alice" ~task_id:"task-001" in
+    let _ = Workspace.claim_task_r config ~agent_name:"alice" ~task_id:"task-001" () in
     (* The empty claim pool is a typed variant, not a prose signal. *)
     match Workspace.claim_next_r config ~agent_name:"bob" () with
     | Masc_domain.Claim_next_no_unclaimed -> ()
@@ -3618,8 +3517,6 @@ let () =
 
     (* === RFC-0323 G-1: verification-required done guard === *)
     "verification_guard", [
-      Alcotest.test_case "strict task done requires verification submission" `Quick
-        test_strict_task_done_requires_verification_submission;
       Alcotest.test_case "default task done requires verification submission" `Quick
         test_default_task_done_requires_verification_submission;
     ];
@@ -3659,12 +3556,6 @@ let () =
         test_read_backlog_snapshot_preserves_unreadable_observation;
       Alcotest.test_case "read current task preserves unavailable and missing" `Quick
         test_read_current_task_preserves_unavailable_and_missing;
-      Alcotest.test_case "self-authored scoped task does not hide peer work"
-        `Quick
-        test_self_authored_scoped_task_does_not_hide_peer_work;
-      Alcotest.test_case "backlog snapshot excludes self-authored task"
-        `Quick
-        test_read_backlog_snapshot_excludes_self_authored_task;
       Alcotest.test_case "keeper tasks audit excludes self-owned orphan" `Quick
         test_keeper_tasks_audit_excludes_self_owned_orphan;
     ];

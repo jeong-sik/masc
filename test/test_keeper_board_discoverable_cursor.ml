@@ -43,8 +43,6 @@ let with_temp_workspace ?(recipient_lookup = every_name_declared) f =
        ignore (Workspace.init config ~agent_name:None : string);
        Board_dispatch.reset_for_test ();
        Board.reset_global_for_test ();
-       Masc_test_deps.Board_test_preparation.prepare ~base_path
-         ~action:Masc_test_deps.Board_test_preparation.Bootstrap;
        Result.get_ok (Board_dispatch.init_jsonl
          ~base_path
          ~recipient_lookup ());
@@ -745,7 +743,12 @@ let test_unavailable_posts_retain_a_judged_comment () =
   Unix.rename posts held;
   Fun.protect ~finally:(fun () -> if Sys.file_exists held then Unix.rename held posts)
   @@ fun () ->
-  restart ();
+  (* The running store has observed this posts file, so reading it again
+     refuses the source once the file is gone. A restarted store would start
+     an empty Board instead, which is not an unavailable source. *)
+  (match Masc_board_handlers.Board_votes_json.load_persisted_posts (Board.global ()) with
+   | Error _ -> ()
+   | Ok count -> failf "a vanished posts file was admitted with %d rows" count);
   (match Board_dispatch.read_post_for_evidence ~post_id with
    | Error (Board.Read_source_unavailable _) -> ()
    | Error error -> fail (Board.show_board_read_error error)

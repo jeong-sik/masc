@@ -1490,6 +1490,47 @@ let probe_tool call_count : Runtime_claude_code.dynamic_tool =
   }
 ;;
 
+(* Claude Code 2.1.318 withdraws a control request it stopped waiting for with
+   a top-level `control_cancel_request` naming that request's id. The fixture
+   reads each answer before it emits the withdrawal, the order MASC sees when
+   the client gives up while a tool call is still running. The turn must end
+   with its own result frame in both phases, and the withdrawn call must not
+   run again. *)
+let control_cancel_request request_id =
+  Printf.sprintf {|{"type":"control_cancel_request","request_id":"%s"}|} request_id
+;;
+
+let test_a_withdrawn_control_request_does_not_fail_the_turn () =
+  let call_count = ref 0 in
+  with_fixture
+    ~before_initialize_response:
+      [ Emit_and_read mcp_initialize
+      ; Emit mcp_initialized_notification
+      ; Emit (control_cancel_request "mcp-init-1")
+      ]
+    [ Emit_and_read mcp_call
+    ; Emit (control_cancel_request "mcp-call-1")
+    ; Emit assistant
+    ; Emit result
+    ]
+    (fun path ->
+       match run_fixture ~dynamic_tools:[ probe_tool call_count ] path with
+       | Error error -> fail (Runtime_claude_code.error_to_string error)
+       | Ok turn ->
+         check string "turn completes" "MASC_CLAUDE_OK" turn.text;
+         check int "withdrawn tool call ran once" 1 !call_count)
+;;
+
+let test_a_withdrawal_without_its_request_id_fails_closed () =
+  with_fixture
+    [ Emit {|{"type":"control_cancel_request"}|}; Emit assistant; Emit result ]
+    (fun path ->
+       expect_protocol_error
+         ~stage:"control cancel request"
+         ~detail:(Printf.sprintf "missing field %S" "request_id")
+         (run_fixture path))
+;;
+
 (* Producer contract measured in Claude Code 2.1.263: Yct emits the
    optional envelope boolean from isApiErrorMessage, outside message. *)
 let api_error_assistant =
@@ -2060,7 +2101,7 @@ let test_dynamic_tool_abort_stops_the_provider_loop () =
   let response_writes = ref 0 in
   let tool : Runtime_claude_code.dynamic_tool =
     { name = "masc_probe"
-    ; description = "Abort a repeated provider loop"
+    ; description = "Abort the provider loop"
     ; input_schema = `Assoc [ "type", `String "object" ]
     ; loading = Runtime_official_client_tool.On_demand
     ; result_bound = Runtime_official_client_tool.Unbounded
@@ -2074,8 +2115,8 @@ let test_dynamic_tool_abort_stops_the_provider_loop () =
           ; on_response_sent = Some (fun () -> incr response_writes)
           ; abort_turn =
               Some
-                (Repeated_tool_call
-                   { tool_name = "masc_probe"; repeated_count = 3 })
+                (Terminal_tool_boundary
+                   { tool_name = "masc_probe"; outcome = Terminal_completed })
           })
     }
   in
@@ -2089,10 +2130,9 @@ let test_dynamic_tool_abort_stops_the_provider_loop () =
       match run_fixture ~dynamic_tools:[ tool ] path with
       | Error
           (Runtime_claude_code.Stopped_by_host
-            { stop = Repeated_tool_call { tool_name; repeated_count }; _ }) ->
+            { stop = Terminal_tool_boundary { tool_name; _ }; _ }) ->
         check int "host stop follows complete response write" 1 !response_writes;
-        check string "tool" "masc_probe" tool_name;
-        check int "repeat count" 3 repeated_count
+        check string "tool" "masc_probe" tool_name
       | Error error -> fail (Runtime_claude_code.error_to_string error)
       | Ok _ -> fail "dynamic tool abort did not stop the Claude turn")
 ;;
@@ -2105,7 +2145,7 @@ let test_dynamic_tool_abort_stops_the_provider_loop () =
 let test_host_stop_carries_the_newest_request_input () =
   let tool : Runtime_claude_code.dynamic_tool =
     { name = "masc_probe"
-    ; description = "Abort a repeated provider loop"
+    ; description = "Abort the provider loop"
     ; input_schema = `Assoc [ "type", `String "object" ]
     ; loading = Runtime_official_client_tool.On_demand
     ; result_bound = Runtime_official_client_tool.Unbounded
@@ -2119,8 +2159,8 @@ let test_host_stop_carries_the_newest_request_input () =
           ; on_response_sent = None
           ; abort_turn =
               Some
-                (Repeated_tool_call
-                   { tool_name = "masc_probe"; repeated_count = 3 })
+                (Terminal_tool_boundary
+                   { tool_name = "masc_probe"; outcome = Terminal_completed })
           })
     }
   in
@@ -4668,6 +4708,10 @@ let () =
             test_usage_windows_are_reported_without_changing_the_turn
         ; test_case "command_lifecycle frames do not fail the turn" `Quick
             test_command_lifecycle_frames_do_not_fail_the_turn
+        ; test_case "a withdrawn control request does not fail the turn" `Quick
+            test_a_withdrawn_control_request_does_not_fail_the_turn
+        ; test_case "a withdrawal without its request id fails closed" `Quick
+            test_a_withdrawal_without_its_request_id_fails_closed
         ; test_case "unknown frame types fail closed in both phases" `Quick
             test_unknown_frame_types_fail_closed_in_both_phases
         ; test_case "a known frame out of phase is named by its own tag" `Quick

@@ -6,11 +6,17 @@ import type {
   DashboardSkillReference,
 } from '../../api'
 
+// The selected Keeper's surface and activations, already checked to name
+// that Keeper.
+export interface KeeperSkillReceipt {
+  effectiveSurface: DashboardEffectiveKeeperSurface
+  activations: DashboardSkillActivationProjection
+}
+
 interface SkillActivationPanelProps {
   keeperNames: string[]
   selectedKeeper: string | null
-  effectiveSurface: DashboardEffectiveKeeperSurface | null | undefined
-  activations: DashboardSkillActivationProjection | null | undefined
+  receipt: KeeperSkillReceipt | null
   loading: boolean
   error: string | null
   onSelectKeeper: (keeperName: string | null) => void
@@ -71,9 +77,6 @@ function actionIdentityLabel(action: DashboardSkillActivation['actions'][number]
 }
 
 function SurfaceReceipt({ surface }: { surface: DashboardEffectiveKeeperSurface }) {
-  if (surface.status === 'warming') {
-    return html`<div class="text-xs text-[var(--color-fg-muted)]">Keeper surface warming</div>`
-  }
   if (surface.status === 'unavailable') {
     return html`
       <div class="text-xs text-[var(--color-status-bad)]" data-testid="skill-surface-unavailable">
@@ -250,8 +253,7 @@ export function SkillActivationPanel(props: SkillActivationPanelProps) {
   const {
     keeperNames,
     selectedKeeper,
-    effectiveSurface,
-    activations,
+    receipt,
     loading,
     error,
     onSelectKeeper,
@@ -278,18 +280,12 @@ export function SkillActivationPanel(props: SkillActivationPanelProps) {
           ? html`<div class="text-xs text-[var(--color-fg-muted)]">Loading exact Skill receipts…</div>`
           : error
             ? html`<div class="text-xs text-[var(--color-status-bad)]">${error}</div>`
-            : !effectiveSurface
-              ? html`<div class="text-xs text-[var(--color-status-bad)]">
-                  Server response omitted effective_keeper_surface
-                </div>`
-            : !activations
-              ? html`<div class="text-xs text-[var(--color-status-bad)]">
-                  Server response omitted skill_activations
-                </div>`
+            : receipt === null
+              ? html`<div class="text-xs text-[var(--color-fg-muted)]">No Skill receipt read for this Keeper yet.</div>`
             : html`
-                <${SurfaceReceipt} surface=${effectiveSurface} />
+                <${SurfaceReceipt} surface=${receipt.effectiveSurface} />
                 <${ActivationReceipt}
-                  projection=${activations}
+                  projection=${receipt.activations}
                 />
               `}
     </div>

@@ -90,7 +90,6 @@ let with_ws name fn =
   Fun.protect
     ~finally:(fun () ->
       unbind_board ();
-      Masc.Eval_calibration.For_testing.reset_store ();
       Time_compat.clear_clock ();
       cleanup_dir dir)
     (fun () ->
@@ -100,14 +99,6 @@ let with_ws name fn =
          server startup installs; never replace it with a blocking sleep. *)
       Time_compat.set_clock (Eio.Stdenv.clock env);
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      (* The production calibration store is process-wide. Each case owns a
-         different workspace, so bind its store explicitly and reset it only
-         after the case's switch has stopped all completion-authority fibers. *)
-      Masc.Eval_calibration.For_testing.set_store
-        ~base_path:dir;
-      check int "new workspace has no verdicts from earlier cases" 0
-        Yojson.Safe.Util.(Masc.Eval_calibration.calibration_stats ()
-                          |> member "total_verdicts" |> to_int);
       Eio.Switch.run @@ fun sw ->
       let config = Masc.Workspace.default_config dir in
       let meta = make_meta () in
@@ -814,12 +805,6 @@ let test_late_verdict_respects_actual_terminal_authority () =
            | Ok (_::_) | Error _ -> fail "resolved conflict must not reopen on boot recovery");
           check bool "no shared retry batch was armed" false
             (Masc.Completion_authority_agent.For_testing.retry_pending ~task_id:task.id ~verification_id);
-          let stalls = Masc.Board_dispatch.list_posts ~hearth:"verification" ~limit:200 ()
-            |> List.filter (fun (post:Masc.Board.post) -> match post.meta_json with
-              | Some (`Assoc fields) -> List.assoc_opt "type" fields = Some (`String "verification_stalled")
-                  && List.assoc_opt "verification_id" fields = Some (`String verification_id)
-              | Some _ | None -> false) in
-          check int "only an actual nonterminal refusal publishes a stall" (if is_terminal then 0 else 1) (List.length stalls);
           match Workspace.read_task_status_r config ~task_id:task.id with
           | Ok (Some {status;_}) -> check bool "late verdict preserves the operator decision" true
               (match terminal,status with

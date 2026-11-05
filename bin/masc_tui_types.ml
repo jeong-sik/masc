@@ -165,6 +165,9 @@ module Connector_read : sig
   val view : t -> view
   val stage : t -> stage option
   (** [None] means no active read; held demand and failed starts are separate. *)
+  val reading_for : authority:unit ref -> t -> bool
+  (** Whether a read for [authority] is active. A read left from an older
+      authority does not count: {!begin_read} starts a new one beside it. *)
   val begin_read : authority:unit ref -> owner:unit ref -> t -> (t * request) option
   (** [None] shares the active request for this authority. A supplied owner is
       fresh for this attempt; an older authority cannot lend its active slot. *)
@@ -222,6 +225,10 @@ end = struct
     | Pending_status _ -> Some Status_pending
     | Pending_names _ -> Some Names_pending
     | Empty | Held | Not_started _ -> None
+
+  let reading_for ~authority = function
+    | Pending_status (request, _) | Pending_names request -> request.authority == authority
+    | Empty | Held | Not_started _ -> false
 
   let owes_read request follow_up =
     match request.cause, follow_up with
@@ -1136,14 +1143,6 @@ let keeper_chat_mode_labels ~yolo
   chat_mode, Option.map gate_mode_reading_word gate_mode
 ;;
 
-(* Usage coverage can be warming independently of the catalog. Missing time
-   therefore means unavailable, not "never used" -- the latter would claim a
-   lifetime fact from a bounded retained ledger. *)
-let skill_last_used_label = function
-  | Some value when String.trim value <> "" -> value
-  | Some _ | None -> "time unavailable"
-;;
-
 type chat_turn_phase =
   | Turn_input
   | Turn_progress
@@ -1269,6 +1268,62 @@ let no_fusion_retries =
     to one Keeper under one workspace reading; any other drops it. [kho_audit]
     has the owed read recheck child content and native tasks as well, because
     events were lost rather than announced. *)
+(* One Keeper's [/api/v1/keepers/<name>/composite] reading. Info shows its
+   execution row and Secrets its secret projection; a Keeper the producer has
+   not projected has [kcr_secret = None], which Secrets shows as "no
+   projection" rather than as an empty credential set. *)
+type keeper_composite_reading = {
+  kcr_keeper : string;
+  kcr_lane : Tui_decode.keeper_lane;
+  kcr_secret : Tui_decode.keeper_secret_projection option;
+}
+
+(* The composite read the Keeper detail owes, under the detail reading it was
+   owed in (RFC-0480 §3.1). *)
+type keeper_composite_owed = {
+  kco_keeper : string;
+  kco_reading : unit ref;
+  kco_read : Masc_tui_owed_read.t;
+}
+
+(* The tool-call read the Keeper_calls surface owes the selected Keeper. The
+   calls slot is shared with the chat pane, which reads it on its own
+   triggers; this record is the surface's. *)
+type keeper_calls_owed = {
+  kclo_keeper : string;
+  kclo_reading : unit ref;
+  kclo_read : Masc_tui_owed_read.t;
+}
+
+(* The metrics read the logs view and the Info tab owe the selected Keeper.
+   The metrics file is appended by the Keeper's heartbeat and by its finished
+   turn, and each append is announced right after it is written. *)
+type keeper_logs_owed = {
+  klgo_keeper : string;
+  klgo_reading : unit ref;
+  klgo_read : Masc_tui_owed_read.t;
+}
+
+(* The read the schedules of one Keeper owe while the chat pane or the
+   Automation tab draws them. *)
+type keeper_schedules_owed = {
+  kso_keeper : string;
+  kso_read : Masc_tui_owed_read.t;
+}
+
+(* The read one journal of the chat pane's Keeper owes: its native tasks or
+   its child content. *)
+type chat_journal_owed = {
+  cjo_keeper : string;
+  cjo_read : Masc_tui_owed_read.t;
+}
+
+(* The read the open Board post owes. *)
+type board_post_owed = {
+  bpo_post : string;
+  bpo_read : Masc_tui_owed_read.t;
+}
+
 type keeper_history_owed = {
   kho_keeper : string;
   kho_authority : workspace_authority;
@@ -2215,7 +2270,7 @@ type chat_timeline_index =
 let chat_row_yields_a_tie (row : msg_entry) =
   row.me_role = Message_memory || String.equal row.me_request_id ""
 
-let chat_timeline_index ~messages ~visible =
+let build_chat_timeline_index ~messages ~visible =
   let by_request = Hashtbl.create 64 in
   List.iteri
     (fun position (message : msg_entry) ->
@@ -2265,6 +2320,17 @@ let chat_timeline_index ~messages ~visible =
         (fun (_, at) -> match at with None -> true | Some at -> Float.is_finite at)
         cti_visible
   }
+
+let last_chat_timeline_index = ref None
+
+let chat_timeline_index ~messages ~visible =
+  match !last_chat_timeline_index with
+  | Some (previous_messages, previous_visible, index)
+    when previous_messages == messages && previous_visible == visible -> index
+  | Some _ | None ->
+      let index = build_chat_timeline_index ~messages ~visible in
+      last_chat_timeline_index := Some (messages, visible, index);
+      index
 
 (* The first visible row at or after [lower_bound] that a live turn at
    [timeline_at] precedes, or the row count when none. Same walk as
@@ -2468,37 +2534,6 @@ let msg_entries_after_anchor entries anchor =
 ;;
 
 
-
-(** Attention item for the Overview surface *)
-type attention_severity =
-  | Attention_critical
-  | Attention_bad
-  | Attention_warning
-  | Attention_info
-
-(** What an attention item is about. Parsed once at the decode boundary so a
-    reader that joins items to Keepers matches a constructor instead of
-    comparing the wire word. A target the TUI does not join on keeps its wire
-    words as they came. *)
-type attention_target =
-  | Attention_keeper of string
-  | Attention_other of { target_type: string; target_id: string option }
-
-type attention_item = {
-  ai_kind: string;
-  ai_severity: attention_severity;
-  ai_summary: string;
-  ai_target: attention_target;
-  ai_blocker_summary: string option;
-      (** [evidence.runtime_blocker.runtime_blocker_summary] on a Keeper
-          runtime-blocker item: the cause alone, without the Keeper name and
-          class word [ai_summary] wraps it in. [None] on every other item. *)
-  ai_evidence_ts: float option;
-      (** Epoch seconds of the evidence's [log_ts], when the producer stamped
-          one (tool-host failures do). The row's age is drawn from it; items
-          whose producers stamp no time (a paused keeper, a waiting
-          confirmation) carry [None] and show no age. *)
-}
 
 (** Who put a post on the board. Mirrors [Board_types.post_kind]: the wire
     strings are ["direct"], ["automation"] and ["system"].
@@ -3072,6 +3107,29 @@ let chat_schedule_proximity ~now = function
       if today.tm_year = day.tm_year && today.tm_yday = day.tm_yday then Schedule_today
       else Schedule_later
 
+(* The Keepers whose event queue a schedule row reads: its target, the
+   Keeper its reaction names, the one a transferred occurrence waits with,
+   the one whose queue has yet to record its result, and both ends of a
+   transfer not yet recorded. A queue or reaction write for any other Keeper
+   leaves the row as it is. *)
+let schedule_row_queue_keepers row =
+  let holders =
+    match row.sch_occurrence.Tui_schedule_observation.stage with
+    | Tui_schedule_observation.Queued_at owner | Tui_schedule_observation.Settling owner ->
+        [ owner ]
+    | Tui_schedule_observation.Transferring { owner; target } -> [ owner; target ]
+    | Tui_schedule_observation.No_occurrence | Dispatching | Dispatch_failed _ | Queued
+    | Missing | Turn_started | Turn_ended | Consumed | Completed | Cancelled _
+    | Unknown _ ->
+        []
+  in
+  List.filter_map Fun.id [ row.sch_payload_keeper_name; row.sch_reaction_keeper_name ] @ holders
+
+let schedule_rows_read_queue_of ~keepers rows =
+  List.exists
+    (fun row -> List.exists (fun keeper -> List.mem keeper keepers) (schedule_row_queue_keepers row))
+    rows
+
 (* The declaration's next firing and its last delivered occurrence are
    separate clocks. A one-shot marked Succeeded can still be queued. *)
 let chat_schedule_entries ~keeper_name snapshot =
@@ -3086,9 +3144,9 @@ let chat_schedule_entries ~keeper_name snapshot =
     | Error _ -> true in
   let unsettled row =
     match row.sch_occurrence.Tui_schedule_observation.stage with
-    | Queued | Queued_at _ | Missing | Turn_started | Turn_ended | Consumed | Settling | Transferring | Unknown _
+    | Queued | Queued_at _ | Missing | Turn_started | Turn_ended | Consumed | Settling _ | Transferring _ | Unknown _
     | Dispatching -> true
-    | No_occurrence | Dispatch_failed _ | Completed | Failed _ | Cancelled _ -> false in
+    | No_occurrence | Dispatch_failed _ | Completed | Cancelled _ -> false in
   let observed row =
     match row.sch_reaction_latest_at_iso, row.sch_last_wake_started_at_iso with
     | Some at, _ | None, Some at -> Time_codec.parse_rfc3339_opt at
@@ -3100,9 +3158,9 @@ let chat_schedule_entries ~keeper_name snapshot =
              (match Schedule_domain.schedule_status_of_string row.sch_status with
               | Ok Failed -> true
               | Ok (Scheduled | Due | Running | Succeeded | Cancelled | Expired) | Error _ -> false)
-         | Dispatch_failed _ | Completed | Failed _ | Cancelled _ -> true
-         | Dispatching | Queued | Queued_at _ | Missing | Turn_started | Turn_ended | Consumed | Settling
-         | Transferring | Unknown _ -> false)
+         | Dispatch_failed _ | Completed | Cancelled _ -> true
+         | Dispatching | Queued | Queued_at _ | Missing | Turn_started | Turn_ended | Consumed | Settling _
+         | Transferring _ | Unknown _ -> false)
     |> List.stable_sort (fun left right -> Option.compare Float.compare (observed right) (observed left))
     |> List.take 1 in
   let selected = List.filter (fun row -> active row || unsettled row) rows @ latest_result in
@@ -3135,9 +3193,9 @@ type schedule_wake = {
 
 (** The exact-lookup wake history for one schedule instance, newest first.
     [swh_retention_per_schedule] is the store's own ceiling on terminal wakes,
-    which is what stops [swh_count] from reading as a complete history. *)
+    which is what stops the count of [swh_wakes] from reading as a complete
+    history. *)
 type schedule_wake_history = {
-  swh_schedule_id: string;
   swh_wakes: schedule_wake list;
   swh_retention_per_schedule: int;
 }
@@ -3870,15 +3928,11 @@ type provider_history_reading =
 
 type overview_snapshot = {
   ov_workspace_health: workspace_health;
-  ov_keepers: int;  (** [keeper_briefs] plus [keepers_unread] *)
   ov_keeper_listing: Masc.Keeper_snapshot_unread.listing;
       (** The briefing's [keepers_listing]. [Unreadable] means the server
-          could not list the Keeper directory, so [ov_keepers] counts nothing
-          it read rather than an empty fleet (#38120). *)
+          could not list the Keeper directory, so the liveness counts hold
+          nothing it read rather than an empty fleet (#38120). *)
   ov_keeper_liveness: keeper_liveness_counts;
-  ov_mcp_agents: int;  (** [agent_briefs]: MCP clients, not keepers *)
-  ov_attention_items: attention_item list;
-  ov_generated_at: string;
 }
 
 (** Planning projections from [Tui_decode], which owns the current wire
@@ -4143,6 +4197,14 @@ type board_sort =
   | Board_recent
   | Board_updated
   | Board_discussed
+
+(* The server's own order for the same choice; the [tui] table stores that. *)
+let board_sort_order = function
+  | Board_hot -> Masc.Board_dispatch.Hot
+  | Board_trending -> Masc.Board_dispatch.Trending
+  | Board_recent -> Masc.Board_dispatch.Recent
+  | Board_updated -> Masc.Board_dispatch.Updated
+  | Board_discussed -> Masc.Board_dispatch.Discussed
 
 let board_sort_label = function
   | Board_hot -> "hot"
@@ -4464,6 +4526,9 @@ type surface_needs = {
   needs_provider_history : bool;
   needs_overview_goals : bool;
   needs_account_emails : bool;
+  (* The Dashboard briefing ([/api/v1/dashboard/briefing], about 120KB) feeds
+     only the Home Health line. *)
+  needs_overview_briefing : bool;
 }
 
 let nothing =
@@ -4480,6 +4545,7 @@ let nothing =
     needs_provider_history = false;
     needs_overview_goals = false;
     needs_account_emails = false;
+    needs_overview_briefing = false;
   }
 
 (* Each datum is read by the surfaces that draw it, so a refresh spends a
@@ -4510,6 +4576,7 @@ and surface_needs_of_surface : surface -> surface_needs = function
      provider reports; their detail payloads do not belong on this screen. *)
   | Overview ->
       { nothing with needs_operator_approvals = true; needs_asks = true
+      ; needs_overview_briefing = true
       ; needs_keeper_roster = true }
   (* Its rows come from the acting store and the keeper list, neither of which
      is fetched here. *)
@@ -4588,9 +4655,29 @@ let surface_needs_delta ~previous ~next =
       next.needs_overview_goals && not previous.needs_overview_goals
   ; needs_account_emails =
       next.needs_account_emails && not previous.needs_account_emails
+  ; needs_overview_briefing =
+      next.needs_overview_briefing && not previous.needs_overview_briefing
   }
 
 let surface_needs_any needs = needs <> nothing
+
+(* [needs] with [source]'s flag set to [wanted]. *)
+let with_source (needs : surface_needs) (source : Surface_read_source.t) wanted =
+  match source with
+  | Surface_read_source.Transport -> { needs with needs_transport = wanted }
+  | Surface_read_source.Board -> { needs with needs_board = wanted }
+  | Surface_read_source.Planning -> { needs with needs_planning = wanted }
+  | Surface_read_source.System_logs -> { needs with needs_system_logs = wanted }
+  | Surface_read_source.Runtime_quota -> { needs with needs_runtime_quota = wanted }
+  | Surface_read_source.Keeper_usage -> { needs with needs_keeper_usage = wanted }
+  | Surface_read_source.Provider_history -> { needs with needs_provider_history = wanted }
+  | Surface_read_source.Overview_goals -> { needs with needs_overview_goals = wanted }
+  | Surface_read_source.Account_emails -> { needs with needs_account_emails = wanted }
+
+(* The bundle sources a server push re-reads instead of the refresh cadence
+   (RFC-0480 §3.4). A source joins here in the layer that wires its push; the
+   cadence then leaves it out and its read is owed. *)
+let pushed_sources : Surface_read_source.t list = [ Surface_read_source.Transport ]
 
 (* Full and navigation reads can overlap. Each dataset keeps its own latest
    producer, so a late full bundle cannot overwrite a newer navigation read.
@@ -4605,6 +4692,9 @@ module Surface_read_order : sig
   type t
   type request
   val initial : t
+  val sources : surface_needs -> source list
+  (** The sources [needs] wants. *)
+  val source_datasets : source -> dataset list
   val dispatch : kind:kind -> needs:surface_needs -> started_ns:int64 -> t -> t * request
   val take : t -> request -> t * dataset list
   val take_dataset : t -> request -> dataset -> t * bool
@@ -4797,7 +4887,16 @@ type early_asks_observation = {
 type keeper_roster_observation = {
   roster_request: Snapshot_read.request;
   roster_result:
-    (Masc_tui_keeper_control.roster * (Candle_observation.t, string) result,
+    (Masc_tui_keeper_control.roster * (Tui_decode.candle_reading, string) result,
+     Masc_tui_keeper_control.roster_failure) result;
+}
+
+(* One Keeper's roster row, read after the server named it (RFC-0481 §3.3). *)
+type keeper_row_observation = {
+  row_request: Snapshot_read.request;
+  row_keeper: string;
+  row_result:
+    (Masc_tui_keeper_control.row_reading * (Tui_decode.candle_reading, string) result,
      Masc_tui_keeper_control.roster_failure) result;
 }
 
@@ -4855,12 +4954,6 @@ type keeper_execute_stream = {
   kes_command : string;
 }
 
-type keeper_execute_request = {
-  ker_request : keeper_log_key Masc_tui_fetched.request;
-  ker_reading : unit ref;
-  ker_owner : unit ref;
-}
-
 type keeper_execute_reading =
   | Keeper_execute_none
   | Keeper_execute_snapshot of {
@@ -4874,8 +4967,8 @@ type keeper_execute_reading =
       kes_observed_at : float;
     }
 
-(* The Execute output stream the Terminal tab follows. The key says whose
-   output and for which window; [kxf_reading] is the workspace reading the
+(* The Execute output stream the logs view and the Terminal tab follow. The
+   key says whose output and for which window; [kxf_reading] is the workspace reading the
    stream was opened under; [kxf_owner] tells this job from the next one for
    the same key. *)
 type keeper_execute_follow = {
@@ -4906,42 +4999,6 @@ type keeper_execute_follow_event =
   | Execute_stream_down of keeper_execute_failure
       (** The connection ended, or the server refused it. The last reading
           stays on screen, marked stale. *)
-
-(* Decode this observation before it reaches the pane. An incomplete response
-   is unavailable, not an empty log or a claim that the command stopped. *)
-let decode_keeper_execute_output ~keeper json =
-  let open Yojson.Safe.Util in
-  try
-    let observed_keeper = json |> member "keeper" |> to_string in
-    if not (String.equal (String.lowercase_ascii (String.trim keeper)) observed_keeper)
-    then Error "Execute output belongs to another Keeper"
-    else match json |> member "type" |> to_string with
-    | "no_task" -> Ok Keeper_execute_none
-    | "snapshot" ->
-      let option_int = function `Int value -> Some value | `Null -> None | _ -> raise (Type_error ("stream_id", json)) in
-      let option_string = function `String value -> Some value | `Null -> None | _ -> raise (Type_error ("task_id", json)) in
-      let lines = json |> member "lines" |> to_list |> List.map (fun line ->
-        { kel_seq = line |> member "seq" |> to_int;
-          kel_stream_id = option_int (line |> member "stream_id");
-          kel_task_id = option_string (line |> member "task_id");
-          kel_stream = line |> member "stream" |> to_string;
-          kel_text = line |> member "text" |> to_string }) in
-      let active = json |> member "active_streams" |> to_list |> List.map (fun stream ->
-        { kes_id = stream |> member "stream_id" |> to_int;
-          kes_task = option_string (stream |> member "task_id");
-          kes_command = stream |> member "command" |> to_string }) in
-      let observed_at = match json |> member "generated_at" with
-        | `Float value -> value | `Int value -> float_of_int value
-        | _ -> raise (Type_error ("generated_at", json)) in
-      Ok (Keeper_execute_snapshot {
-        kes_lines = lines; kes_active = active;
-        kes_lines_omitted = json |> member "lines_omitted" |> to_int;
-        kes_first_seq = json |> member "first_retained_seq" |> to_int;
-        kes_active_count = json |> member "active_count" |> to_int;
-        kes_closed = json |> member "closed" |> to_bool;
-        kes_status = json |> member "status"; kes_observed_at = observed_at })
-    | _ -> Error "Execute output returned an unknown observation"
-  with Yojson.Safe.Util.Type_error _ -> Error "Execute output response is incomplete or malformed"
 
 (* What the Terminal tab holds still while the reader looks back: the reading
    as it was on screen, with the key it was read for. A reading held for
@@ -5616,7 +5673,7 @@ let config_panes =
     Defaults to [Lang_ko], is stored as [tui].language in runtime.toml, and is
     switchable at runtime via the command palette ([:language]), the System
     sub-navigation bar, or the Themes pane. *)
-type ui_language =
+type ui_language = Masc.Tui_preference.language =
   | Lang_ko
   | Lang_en
 
@@ -5637,15 +5694,8 @@ let next_ui_language = function
 (* The [tui].language spelling in runtime.toml. Unknown values read as [None]
    rather than as a forced default: the caller says the stored value back so
    the operator sees their file did not take. *)
-let ui_language_of_string value =
-  match String.lowercase_ascii (String.trim value) with
-  | "ko" -> Some Lang_ko
-  | "en" -> Some Lang_en
-  | _ -> None
-
-let ui_language_to_string = function
-  | Lang_ko -> "ko"
-  | Lang_en -> "en"
+let ui_language_of_string = Masc.Tui_preference.language_of_string
+let ui_language_to_string = Masc.Tui_preference.language_to_string
 
 let surface_ring_display_label ~lang (surface : surface) fallback =
   match lang with
@@ -5692,7 +5742,63 @@ type tools_pane =
   | Tools_usage
   | Tools_catalog
 
-type tools_read_part = Tools_inventory_read | Tools_catalog_read | Tools_async_read
+type tools_read_part =
+  | Tools_inventory_read
+  | Tools_catalog_read
+  | Tools_activations_read
+  | Tools_usage_read of string  (** One Keeper's usage, named. *)
+  | Tools_async_read
+
+(* What the Activations pane has for the Keeper the Tools screen follows.
+   With no Keeper there is nothing to read, which the pane says instead of
+   "not loaded". *)
+type tools_activations =
+  | Activations_no_keeper
+  | Activations_read of Masc.Tui_decode_tools.skill_activation_projection
+
+(* A failed Activations read, held for the Keeper it was made for. *)
+type activations_failure = { taf_keeper : string; taf_detail : string }
+
+(* Whether the Activations reading, or the failure held without one, belongs
+   to a Keeper other than [selected], or to one while none is selected. *)
+let activations_held_for_another ~selected reading failure =
+  match selected, reading, failure with
+  | Some keeper, Some (Activations_read projection), (Some _ | None) ->
+      not (String.equal (Masc.Tui_decode_tools.skill_activation_keeper projection) keeper)
+  | Some keeper, None, Some failure -> not (String.equal failure.taf_keeper keeper)
+  | Some _, Some Activations_no_keeper, (Some _ | None)
+  | None, Some (Activations_read _), (Some _ | None)
+  | None, (Some Activations_no_keeper | None), Some _ -> true
+  | Some _, None, None
+  | None, (Some Activations_no_keeper | None), None -> false
+
+(* A read for another Keeper than the one its held reading or failure is for
+   starts with no failures behind it: that Keeper's backoff is not this
+   one's. *)
+let start_owed_read ~for_another owed =
+  Masc_tui_owed_read.started
+    (if for_another then Masc_tui_owed_read.changed Masc_tui_owed_read.settled else owed)
+
+(* The inventory failure the Tools screen draws: the one held for [selected].
+   One held for another Keeper waits for the selected Keeper's read, which
+   drops it. *)
+let held_tools_error ~selected ~held_keeper error =
+  match error with
+  | Some _ when Option.equal String.equal held_keeper selected -> error
+  | Some _ | None -> None
+
+(* One Keeper's Usage reading. A failed read keeps the Keeper's last answer
+   beside the failure. *)
+type keeper_skill_usage_reading =
+  | Skill_usage_read of Masc.Tui_decode_tools.keeper_skill_usage
+  | Skill_usage_read_failed of
+      { last : Masc.Tui_decode_tools.keeper_skill_usage option
+      ; detail : string
+      }
+
+let skill_usage_answer = function
+  | Skill_usage_read usage -> Some usage
+  | Skill_usage_read_failed { last; detail = _ } -> last
 
 type tools_async_detail_request =
   { tad_ticket : Masc.Tui_decode_async_request.target Masc_tui_fetched.request
@@ -6422,16 +6528,19 @@ module Browser_lane_view = struct
     | (Idle | No_browser | Failed _), Some _, _ -> Reload_picker
     | (Idle | No_browser | Failed _), None, Some _ -> Close_url_draft_then_open
     | (Idle | No_browser | Failed _), None, None -> Open_browser_list
-  let unavailable_notice t = match t.unavailable with
+  let unavailable_notice t =
+    let reload () = match list_reload t with
+      | Wait_until_idle -> "When ready"
+      | Reload_picker -> "r:list"
+      | Close_url_draft_then_open -> "Esc→b:list"
+      | Open_browser_list -> "b:list" in
+    match t.unavailable with
     | Backends_not_reported | Backends_unavailable [] -> None
     | Backends_unreadable _ -> Some "Browser backend status unreadable; refresh the connection list"
     | Backends_unavailable (Masc.Browser_addon_observation.Ego_user_owned_name _ :: _) ->
-        let reload = match list_reload t with
-          | Wait_until_idle -> "When ready"
-          | Reload_picker -> "r:list"
-          | Close_url_draft_then_open -> "Esc→b:list"
-          | Open_browser_list -> "b:list" in
-        Some (reload ^ " · Ego user-owned at startup (last list); fix, Off→Inactive→On")
+        Some (reload () ^ " · Ego user-owned at startup (last list); fix, Off→Inactive→On")
+    | Backends_unavailable (Masc.Browser_addon_observation.Ego_space_missing _ :: _) ->
+        Some (reload () ^ " · Ego Space gone, connection ended (last list); take_over reopens")
   let prepare_open t =
     match t.selection, t.source with
     | (Bound_automatic | Bound_explicit), (Automation | Stagehand) -> t, Open_session
@@ -8865,19 +8974,20 @@ type home_chat_receipt =
   | Unobserved_chat of { keeper : Keeper_id.Keeper_name.t; detail : string }
   | Unreadable_chat_receipt of string
 
+(* A start-up settings read that failed is read once more when a server is
+   first reached: a server this session starts itself comes up after the
+   start-up read (RFC-0482 §3.1). *)
+type settings_reread =
+  | Reread_settled
+  | Reread_due
+  | Reread_running of (Masc.Tui_preference.settings, string) result Eio.Promise.or_exn
+
 type voice_capture_phase =
   | Voice_calibrating
   | Voice_starting
   | Voice_recording
   | Voice_processing
   | Voice_stopping
-
-type message_draft = {
-  draft_text : string;
-  draft_attachments : Masc_tui_keeper_chat_projection.attachment list;
-  draft_references : Masc_tui_keeper_chat_projection.image_reference list;
-  draft_attachments_since : image_observation option;
-}
 
 
 type agenda_navigation = Agenda_follow_selection | Agenda_read_rows
@@ -9292,10 +9402,20 @@ type state = {
   mutable home_decision_receipt : (home_request * string) option;
   mutable home_decision_inflight : home_request option;
   mutable home_last_chat : home_chat_receipt;
-  home_chat_writer : Masc_tui_chat_visit.t;
+  preference_writer : Masc_tui_preference_writer.t;
+  (* The [tui] picks on their way to the server, in the order they were made. *)
   keeper_preference_writer : Masc_tui_config.keeper_preference_writer;
   credential_preparation : Masc_tui_credential_preparation.t;
-  mutable home_chat_visit : Masc_tui_chat_visit.request option;
+  mutable home_chat_visit : Masc_tui_preference_writer.request option;
+  mutable preference_refusal_said : bool;
+  (* A terminal whose credential may not write runtime.toml is told once,
+     not on every pick. *)
+  preference_read : unit -> (Masc.Tui_preference.settings, string) result;
+  mutable settings_reread : settings_reread;
+  mutable session_picks : Masc.Tui_preference.Key.t list;
+  (* The settings this session has changed itself, through a pick or a
+     session toggle. A settings read that lands later leaves them as they
+     are. *)
   mutable metrics_scroll: int;
   mutable metrics_content_height: int;
   mutable metrics_scroll_card_rows: int option;
@@ -9366,17 +9486,17 @@ type state = {
      mid-turn, and this says which ones, on which lane, for how long. Modal
      like the agenda sheet, and like it the scroll survives only while it
      is open. *)
-  (* Whether footers spell their key hints ([tui].hints_visible at boot,
+  (* Whether footers spell their key hints ([tui].hints_visible when the settings are read,
      [h] on the help sheet for the session). Off leaves "?:help" as the one
      remaining hint -- the door back for the reader who knows the keys. *)
   mutable hints_visible: bool;
   (* Whether the opening screen's help-door line has been retired
-     ([tui].help_hint_shown at boot, written by the first input). The line
+     ([tui].help_hint_shown when the settings are read, written by the first input). The line
      teaches the one key a new reader has none of the context for, and any
      input says the reader is driving now. *)
   mutable help_hint_shown: bool;
   (* Whether a line typed while an earlier one still waits joins that line
-     instead of queueing behind it ([tui].coalesce_queued_input at boot). A
+     instead of queueing behind it ([tui].coalesce_queued_input when the settings are read). A
      queued line has not been sent, so joining two changes what one turn
      receives rather than what a turn in flight sees. *)
   mutable coalesce_queued_input: bool;
@@ -9404,7 +9524,7 @@ type state = {
      when it moves the next accepted request within the priority cohort. *)
   mutable keeper_auto_priority_requests : (string * string list) list;
   (* Whether ^Y ending a voice capture also sends what was heard
-     ([tui].voice_send_on_stop at boot). Off by default: the transcript lands
+     ([voice.stt].send_on_stop when the settings are read). Off by default: the transcript lands
      in the draft either way, and that draft is also where a spoken
      half-sentence waits for typing. *)
   mutable voice_send_on_stop: bool;
@@ -9793,6 +9913,10 @@ type state = {
   mutable runtime_config_generation: int;
   mutable runtime_config_read: [ `Idle | `Loading of bool ];
   (* Loading carries an explicit refresh queued behind the current read. *)
+  mutable runtime_config_owed: Masc_tui_owed_read.t;
+  (* The read runtime.toml owes after the server announced a commit, an
+     arrival or a failed read, while a pane that draws it is on screen
+     (RFC-0482 L4, RFC-0480 §3.1). *)
   mutable runtime_config_status_open: bool;
   mutable runtime_config_status_scroll: int;
   (* The [a] form on the runtime.toml pane, which declares one more account
@@ -9950,13 +10074,17 @@ type state = {
   mutable keeper_roster: Masc_tui_keeper_control.roster;
   mutable keeper_roster_error: string option;
   mutable keeper_roster_read: Snapshot_read.t;
+  mutable keeper_row_read: Snapshot_read.t;
+  (* The rows, or the whole roster, the server said changed and the TUI has
+     not read since (RFC-0481 §3.3). *)
+  mutable keeper_roster_owed: Masc_tui_roster_owed.t;
   mutable local_workspace_read_order: Local_read_order.t;
   mutable local_work_observation: Local_read_observation.t option;
   mutable local_keeper_observation: Local_read_observation.t option;
   mutable local_keeper_read_order: Local_read_order.t;
   mutable local_keeper_read_cancel: (unit ref * (unit -> unit)) option;
   mutable local_work_read_cancel: (unit ref * (unit -> unit)) option;
-  mutable candle_observation: (Candle_observation.t, string) result option;
+  mutable candle_observation: (Tui_decode.candle_reading, string) result option;
   mutable candle_authority_generation : int;
   mutable keeper_action_inflight:
     (string * Masc_tui_keeper_control.action) option;
@@ -10106,17 +10234,53 @@ type state = {
   mutable keeper_calls_keeper: string option;
   mutable keeper_calls_loading: bool;
   mutable keeper_calls_refresh_pending: bool;
+  mutable keeper_calls_owed: keeper_calls_owed option;
+  mutable board_post_owed: board_post_owed option;
+  (* The read the Board list and hearth census owe while the Board is on
+     screen. *)
+  mutable board_list_owed: Masc_tui_owed_read.t;
+  (* The Planning screen's two datasets read again on [goal_projection_changed]
+     and [execution_snapshot]; each keeps its own debt, since one can fail
+     while the other answers. *)
+  mutable planning_owed: Masc_tui_owed_read.t;
+  mutable overview_goals_owed: Masc_tui_owed_read.t;
+  (* The reads the bundle sources in [pushed_sources] owe while their
+     surface is on screen. A source with no entry owes nothing. *)
+  mutable pushed_reads: (Surface_read_source.t * Masc_tui_owed_read.t) list;
+  (* The read the questions to the operator owe on every surface. *)
+  mutable asks_owed: Masc_tui_owed_read.t;
+  (* The read the durable async requests owe while the Keepers list or Tools is on screen. *)
+  mutable async_requests_owed: Masc_tui_owed_read.t;
+  (* The read the confirmations waiting for an operator owe on every surface. *)
+  mutable pending_confirms_owed: Masc_tui_owed_read.t;
+  (* The read the schedule list behind the agenda strip owes on every
+     surface. *)
+  mutable schedules_agenda_owed: Masc_tui_owed_read.t;
+  (* The read the Schedules page owes while it is on screen. *)
+  mutable schedules_page_owed: Masc_tui_owed_read.t;
+  (* The read the schedules of the Keeper the chat pane or the Automation tab
+     draws owe. *)
+  mutable keeper_schedules_owed: keeper_schedules_owed option;
+  (* The reads the native tasks and the child content of the chat pane's
+     Keeper owe. *)
+  mutable chat_native_tasks_owed: chat_journal_owed option;
+  mutable chat_child_content_owed: chat_journal_owed option;
+  (* The read the Gate snapshot owes. *)
+  mutable gate_snapshot_owed: Masc_tui_owed_read.t;
+  (* The reads the held tool calls (Overview, Approvals) and the tool
+     approval modes (Keepers) owe while their surface is on screen. *)
+  mutable held_calls_owed: Masc_tui_owed_read.t;
+  mutable tool_modes_owed: Masc_tui_owed_read.t;
   mutable keeper_calls_generation: int;
   mutable keeper_calls_scroll: int;
   mutable keeper_logs: (keeper_log_key, Metrics_tail.snapshot) Masc_tui_fetched.t;
   mutable keeper_execute_output: (keeper_log_key, keeper_execute_reading * float, keeper_execute_failure) Masc_tui_fetched.source;
-  mutable keeper_execute_read: keeper_execute_request option;
-  mutable keeper_execute_cancel: (unit ref * (unit -> unit)) option;
   mutable keeper_execute_stream: (keeper_execute_follow * (unit -> unit)) option;
   mutable keeper_terminal: keeper_terminal_frozen Masc_tui_execute_terminal.hold;
   mutable keeper_log_read: keeper_log_request option;
   mutable keeper_log_cancel: (unit ref * (unit -> unit)) option;
   mutable keeper_log_refresh_pending: bool;
+  mutable keeper_logs_owed: keeper_logs_owed option;
   mutable log_scroll: int;
   mutable log_wrap_cols: int option;
   mutable live_context: Masc_tui_context_state.t;
@@ -10198,6 +10362,17 @@ type state = {
   mutable keeper_waiting_versions: (string * int) list;
   mutable keeper_turns_error: string option;
   mutable keeper_turns_inflight: bool;
+  (* The turns read owed after a server signal, a revalidation, a resumed
+     authority or a failed read (RFC-0481 §3.4). The answering badge is drawn
+     on every surface, so it is owed whatever is on screen. *)
+  mutable keeper_turns_owed: Masc_tui_owed_read.t;
+  (* Keepers whose running-turn preview changed while no surface drew it,
+     since the last turns read began. Opening a surface that draws one owes
+     the turns a read (RFC-0481 §3.5). *)
+  mutable keeper_previews_unread: string list;
+  (* A failed waiting read, read again after a growing wait (RFC-0481 §3.4).
+     A change is read at once by the waiting read itself. *)
+  mutable keeper_waiting_owed: Masc_tui_owed_read.t;
   mutable keeper_waiting_read: Keeper_waiting_read.t;
   mutable msg_preparation_details: Masc_tui_preparation_details.t;
   mutable keeper_observed_interrupts: observed_interrupt list;
@@ -10223,7 +10398,6 @@ type state = {
   (* The accepted queue belongs to the read authority under which it arrived.
      The last rows may stay visible after that authority is withdrawn. *)
   mutable gate_snapshot_authority: unit ref option;
-  mutable gate_receipt_refresh_pending: bool;
   (* Keepers whose approval gate runs every call unasked. Names only: the
      wire carries (keeper, mode) pairs and [auto] is the absent default, so
      what the pane needs is exactly the yolo set. *)
@@ -10395,7 +10569,6 @@ type state = {
   mutable schedules_agenda: schedule_snapshot option;
   mutable schedules_agenda_error: string option;
   mutable schedules_agenda_read: Snapshot_read.t;
-  mutable schedules_agenda_event_pending: bool;
   mutable schedules_agenda_freshness: Masc_tui_agenda.schedule_freshness;
   mutable schedule_cursor: int;
   mutable schedule_scroll: int;
@@ -10423,10 +10596,10 @@ type state = {
   (* The latest refused create/modify form, kept on the Schedules surface for
      the last-action window. *)
   mutable schedule_form_refusal: schedule_form_refusal option;
-  mutable lanes: Tui_decode.keeper_lanes_snapshot option;
-  mutable keeper_lanes_inflight: bool;
-  mutable keeper_lanes_reread_pending: bool;
-  mutable keeper_lanes_resume: bool;
+  mutable keeper_composite: keeper_composite_reading option;
+  (* The Keeper whose composite read is in flight. *)
+  mutable keeper_composite_inflight: string option;
+  mutable keeper_composite_owed: keeper_composite_owed option;
   mutable lane_inventory: Masc.Tui_decode_lane_inventory.snapshot option;
   mutable lanes_selection: Masc_tui_lane_inventory.identity option;
   mutable standalone_lanes: Tui_decode.standalone_lanes_snapshot option;
@@ -10476,19 +10649,36 @@ type state = {
   mutable lane_run_preflight_details: bool;
   (* A projection of the last rendered payload, not another layout formula. *)
   mutable lane_run_detail_content_height: int;
-  (* Read from the same composite body as [lanes]. A Keeper the producer has
-     not projected is simply absent from this list, which the Secrets tab
-     shows as "no projection" rather than as an empty credential set. *)
-  mutable keeper_secrets: Tui_decode.keeper_secret_projection list;
-  mutable lanes_error: string option;
+  (* The Keeper whose read failed, and why. *)
+  mutable keeper_composite_error: (string * string) option;
   mutable lanes_action_error: string option;
   (* What is waiting on a verdict. Loaded when the surface is opened rather
      than on every refresh: it is a queue an operator visits, not a number the
      other surfaces read. *)
   mutable tools_inventory: Masc.Tui_decode_tools.tool_snapshot option;
   mutable tools_request_generation: int;
+  (* The skills catalog and the Usage answers do not depend on the selected
+     Keeper, so they keep their own generation, which only a new workspace
+     reading moves, and their own reads in flight. *)
+  mutable tools_skill_generation: int;
+  mutable tools_skill_pending: tools_read_part list;
   mutable tools_read_inflight: tools_read_inflight option;
   mutable tools_error: string option;
+  mutable tools_activations: tools_activations option;
+  mutable tools_activations_error: activations_failure option;
+  (* The Usage pane's per-Keeper usage readings, in Keeper name order. A
+     Keeper that left the roster leaves this list at the next read. *)
+  mutable tools_keeper_usage: (string * keeper_skill_usage_reading) list;
+  (* What each Tools part read on a push owes (RFC-0483 §4.3): the skills
+     catalog, the selected Keeper's activations, and each roster Keeper's
+     usage. A roster Keeper with no entry has never been read. *)
+  mutable tools_catalog_owed: Masc_tui_owed_read.t;
+  (* The selected Keeper's tool inventory and effective surface, and the
+     Keeper the reading on screen was read for. *)
+  mutable tools_inventory_owed: Masc_tui_owed_read.t;
+  mutable tools_inventory_keeper: string option;
+  mutable tools_activations_owed: Masc_tui_owed_read.t;
+  mutable tools_usage_owed: (string * Masc_tui_owed_read.t) list;
   mutable skills_catalog: Masc.Tui_decode_tools.skills_catalog option;
   mutable skills_catalog_error: string option;
   mutable tools_scroll: int;
@@ -10517,11 +10707,16 @@ type state = {
   mutable tools_async_detail_open: bool;
   mutable tools_async_detail: (Masc.Tui_decode_async_request.target, Masc.Tui_decode_async_request.reading) Masc_tui_fetched.t;
   mutable tools_async_detail_request: tools_async_detail_request option;
+  (* What the open async request detail owes after its Keeper's requests or
+     execution journal changed. *)
+  mutable tools_async_detail_owed: Masc_tui_owed_read.t;
   mutable tools_async_last_logical: (Masc.Tui_decode_async_request.source * Masc.Tui_decode_async_request.logical_value) option;
   mutable tools_async_task_source: tools_async_task_source option;
   mutable tools_async_task_body: (tools_async_task_source, Masc.Tui_decode_task_inspection.detail) Masc_tui_fetched.t;
   mutable tools_async_task_history: (tools_async_task_source, Masc.Tui_decode_task_inspection.history) Masc_tui_fetched.t;
   mutable tools_async_task_body_request: tools_async_task_request option;
+  (* What the open source Task body owes after a backlog write. *)
+  mutable tools_async_task_owed: Masc_tui_owed_read.t;
   mutable tools_async_task_history_request: tools_async_task_source task_history_request option;
   mutable lane_addons: Masc_tui_lane_addons.t option;
   mutable lane_addons_cached: Masc_tui_lane_addons.t;
@@ -10599,6 +10794,10 @@ type state = {
   mutable repositories: Tui_decode.repository_snapshot option;
   mutable repositories_error: string option;
   mutable repositories_inflight: bool;
+  (* The read the repository list owes after a catalog change, a
+     revalidation or a failed read, while it is on screen (RFC-0480 §3.1). *)
+  mutable repositories_owed: Masc_tui_owed_read.t;
+  mutable connectors_owed: Masc_tui_owed_read.t;
   mutable repositories_scroll: int;
   mutable repositories_cursor: int;
   mutable workspace_activity_repo: string option;
@@ -10891,6 +11090,9 @@ type state = {
   (* A verdict can commit while an older queue read is still in flight. Its
      answer is stale even if it arrives later; discard it and read again. *)
   mutable verification_refresh_after_inflight: bool;
+  (* The read the Verification queue owes after a server change, a
+     revalidation or a failed read, while it is on screen (RFC-0480 §3.1). *)
+  mutable verification_owed: Masc_tui_owed_read.t;
   mutable verification_scroll: int;
   mutable verification_cursor: int;
   (* Which list this surface is reading. The store keeps every submission ever
@@ -11986,8 +12188,9 @@ let take_early_asks_observation (state : state) early =
   then take_asks_observation state early.ea_observation
   else None
 
-let begin_keeper_roster_read (state : state) =
-  let reading, request = Snapshot_read.start ~intent:Snapshot_read.Refresh state.keeper_roster_read in
+(* [Poll] shares a whole read already in flight; [Refresh] owns a new one. *)
+let begin_keeper_roster_read ~intent (state : state) =
+  let reading, request = Snapshot_read.start ~intent state.keeper_roster_read in
   state.keeper_roster_read <- reading;
   request
 
@@ -11997,6 +12200,18 @@ let take_keeper_roster_observation (state : state) observation =
   | Some reading ->
       state.keeper_roster_read <- reading;
       Some observation.roster_result
+
+let begin_keeper_row_read (state : state) =
+  let reading, request = Snapshot_read.start ~intent:Snapshot_read.Refresh state.keeper_row_read in
+  state.keeper_row_read <- reading;
+  request
+
+let take_keeper_row_observation (state : state) observation =
+  match Snapshot_read.settle state.keeper_row_read observation.row_request with
+  | None -> None
+  | Some reading ->
+      state.keeper_row_read <- reading;
+      Some observation.row_result
 
 let take_early_keeper_roster_observation (state : state) early =
   if can_admit_early_http_read state ~ticket:early.er_ticket
@@ -12140,9 +12355,6 @@ let finish_keeper_log_read state request =
 let clear_keeper_logs state =
   state.keeper_logs <- Masc_tui_fetched.clear state.keeper_logs;
   state.keeper_execute_output <- Masc_tui_fetched.clear state.keeper_execute_output;
-  state.keeper_execute_read <- None;
-  Option.iter (fun (_, cancel) -> cancel ()) state.keeper_execute_cancel;
-  state.keeper_execute_cancel <- None;
   state.keeper_log_read <- None;
   state.keeper_log_refresh_pending <- false;
   supersede_keeper_log_read state None
@@ -12150,9 +12362,6 @@ let clear_keeper_logs state =
 let suspend_keeper_logs state =
   state.keeper_logs <- Masc_tui_fetched.suspend state.keeper_logs;
   state.keeper_execute_output <- suspend_keeper_execute state.keeper_execute_output;
-  state.keeper_execute_read <- None;
-  Option.iter (fun (_, cancel) -> cancel ()) state.keeper_execute_cancel;
-  state.keeper_execute_cancel <- None;
   state.keeper_log_read <- None;
   state.keeper_log_refresh_pending <- false;
   supersede_keeper_log_read state None
@@ -12225,9 +12434,10 @@ let take_keeper_log_read state request result =
         clear_keeper_logs state;
         None
 
-(* The Terminal tab reads further back than the logs view does. Following a
-   build means seeing where it began, and a build prints more than 200 rows. *)
-let keeper_terminal_window = 500
+(* The rows of a Keeper's Execute output the logs view and the Terminal tab
+   follow. Following a build means seeing where it began, and a build prints
+   hundreds of rows. *)
+let keeper_execute_window = 500
 
 (* The Keeper detail view on its Terminal tab. *)
 let keeper_terminal_on_screen state =
@@ -12243,51 +12453,8 @@ let keeper_execute_target state =
   | Planning | Schedules | Verification | Harness | Fusion | Repositories | Code
   | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> None
 
-let finish_keeper_execute_read state request =
-  match state.keeper_execute_cancel with
-  | Some (owner, _) when owner == request.ker_owner -> state.keeper_execute_cancel <- None
-  | Some _ | None -> ()
-
-let begin_keeper_execute_read state ~intent ~limit (keeper : keeper) =
-  match state.workspace_identity, keeper_execute_target state with
-  | Workspace_identity_match, Some selected when String.equal selected.k_name keeper.k_name ->
-    let key = keeper_log_key state ~limit keeper in
-    let start = match intent with
-      | Snapshot_read.Poll -> Masc_tui_fetched.start
-      | Snapshot_read.Refresh -> Masc_tui_fetched.refresh in
-    (match start ~equal:keeper_log_equal_key state.keeper_execute_output ~key with
-     | Already_loading -> None
-     | Started (next, ticket) ->
-       Option.iter (fun (_, cancel) -> cancel ()) state.keeper_execute_cancel;
-       state.keeper_execute_cancel <- None;
-       state.keeper_execute_output <- next;
-       let request = { ker_request = ticket; ker_reading = state.workspace_read_authority;
-                       ker_owner = ref () } in
-       state.keeper_execute_read <- Some request;
-       Some request)
-  | (Workspace_identity_match | Workspace_identity_unread | Workspace_identity_mismatch _
-    | Workspace_identity_match_unconfirmed _), (Some _ | None) -> None
-
-let take_keeper_execute_read state request result =
-  if request.ker_reading != state.workspace_read_authority
-     || not (Masc_tui_fetched.is_current ~equal:keeper_log_equal_key
-               state.keeper_execute_output request.ker_request)
-  then false
-  else match state.workspace_identity, keeper_execute_target state with
-    | Workspace_identity_match, Some keeper
-      when let key = Masc_tui_fetched.request_key request.ker_request in
-           keeper_log_equal_key key (keeper_log_key state ~limit:key.klk_limit keeper) ->
-        state.keeper_execute_output <- Masc_tui_fetched.complete ~equal:keeper_log_equal_key
-            state.keeper_execute_output request.ker_request
-            (Result.map_error (fun detail -> Execute_read_failed detail) result);
-        true
-    | (Workspace_identity_match | Workspace_identity_unread | Workspace_identity_mismatch _
-      | Workspace_identity_match_unconfirmed _), (Some _ | None) -> false
-
-(* Settle the Execute output on a result that arrives by itself, such as a
-   reading the stream pushes, rather than as the answer to a request. One
-   request is taken and settled in a step, so the cell reads as a polled answer
-   reads, and a poll still in flight for this key is dropped as older. *)
+(* Settle the Execute output on a reading the stream pushes. One request is
+   taken and settled in a step, so the cell reads as an answered read does. *)
 let settle_keeper_execute state ~key result =
   match Masc_tui_fetched.refresh ~equal:keeper_log_equal_key state.keeper_execute_output ~key with
   | Masc_tui_fetched.Started (next, ticket) ->
@@ -12297,19 +12464,9 @@ let settle_keeper_execute state ~key result =
     (* [refresh] supersedes a request in flight and never answers this. *)
     ()
 
-(* Stop the one-shot read of Execute output, if one is held; whether one was. *)
-let stop_keeper_execute_poll state =
-  let held = Option.is_some state.keeper_execute_read in
-  state.keeper_execute_read <- None;
-  Option.iter (fun (_, cancel) -> cancel ()) state.keeper_execute_cancel;
-  state.keeper_execute_cancel <- None;
-  held
-
-(* Stop following the stream; whether one was running. What the tab drew from
+(* Stop following the stream; whether one was running. What the view drew from
    it stays in the cell. A wait the stream opened and never settled ends with
-   it, but only while the cell still holds the stream's own window: leaving the
-   Terminal for the logs view starts the logs read, which asks for another
-   window of the same cell, before the loop stops the stream. *)
+   it, while the cell still holds the stream's key. *)
 let stop_keeper_execute_stream state =
   match state.keeper_execute_stream with
   | None -> false
@@ -12322,10 +12479,10 @@ let stop_keeper_execute_stream state =
      | Some _ | None -> ());
     true
 
-(* One message of the stream the Terminal tab follows. A message from a job
-   that is no longer the current one, from a reading of the workspace that was
-   left, or for output the tab no longer shows is not what is on screen, and is
-   dropped. *)
+(* One message of the stream the logs view and the Terminal tab follow. A
+   message from a job that is no longer the current one, from a reading of the
+   workspace that was left, or for output no view shows is not what is on
+   screen, and is dropped. *)
 let take_keeper_execute_stream state (stream : keeper_execute_follow) event =
   match state.keeper_execute_stream with
   | Some (current, _)
@@ -12333,9 +12490,8 @@ let take_keeper_execute_stream state (stream : keeper_execute_follow) event =
          && stream.kxf_reading == state.workspace_read_authority ->
     (match state.workspace_identity, keeper_execute_target state with
      | Workspace_identity_match, Some keeper
-       when keeper_terminal_on_screen state
-            && keeper_log_equal_key stream.kxf_key
-                 (keeper_log_key state ~limit:stream.kxf_key.klk_limit keeper) ->
+       when keeper_log_equal_key stream.kxf_key
+              (keeper_log_key state ~limit:stream.kxf_key.klk_limit keeper) ->
        settle_keeper_execute state ~key:stream.kxf_key
          (match event with
           | Execute_stream_reading (reading, observed_at) -> Ok (reading, observed_at)
@@ -12400,31 +12556,20 @@ let move_keeper_terminal state ~by =
 
 (** One keeper as the Keepers surface reads it: durable pause from the
     metadata row, live runtime from the roster. *)
-let keeper_reading (state : state) (keeper : keeper) :
-    Masc_tui_keeper_control.reading =
+let keeper_reading_in roster (keeper : keeper) : Masc_tui_keeper_control.reading =
   { name = keeper.k_name
   ; paused = keeper.k_paused
   ; liveness =
       (match keeper.k_origin with
        | Tui_decode.Declared_keeper _ -> Masc_tui_keeper_control.Absent
        | Persisted_keeper | Remote_keeper ->
-         Masc_tui_keeper_control.liveness_of_roster state.keeper_roster keeper.k_name)
+         Masc_tui_keeper_control.liveness_of_roster roster keeper.k_name)
   }
 
-let keeper_open_question_count state keeper_name =
-  match state.asks_snapshot with
-  | None -> 0
-  | Some snapshot ->
-      List.fold_left
-        (fun count row ->
-          match row.Masc.Tui_decode_asks.ar_asker with
-          | Masc.Tui_decode_asks.Ask_keeper name when String.equal name keeper_name -> count + 1
-          | Masc.Tui_decode_asks.Ask_keeper _ | Masc.Tui_decode_asks.Ask_installation _ -> count)
-        0 snapshot.Masc.Tui_decode_asks.asn_rows
+let keeper_reading (state : state) keeper = keeper_reading_in state.keeper_roster keeper
 
 let keeper_last_turn_at (keeper : keeper) =
-  Option.bind keeper.k_activity (fun activity ->
-    Masc_domain.parse_iso8601_opt activity.Tui_decode.k_last_turn_ts)
+  Option.bind keeper.k_activity (fun activity -> activity.Tui_decode.k_last_turn_at)
 
 let latest_timestamp left right =
   match left, right with
@@ -12445,62 +12590,186 @@ let keeper_activity_at ~turn ~waiting (keeper : keeper) =
          | Some { Tui_decode.kwr_since; _ } -> kwr_since
          | None -> None)
 
-let keeper_list_rows (state : state) : Masc_tui_keeper_list_model.row list =
+module Name_table = Hashtbl.Make (String)
+
+(* A starting size for a per-read name index: room for a roster without
+   resizing. The table grows past it like any Hashtbl. *)
+let name_table_initial_size = 64
+
+(* The first row each name has, as a scan from the front would find it. *)
+let first_row_by_name ~name rows =
+  let table = Name_table.create name_table_initial_size in
+  List.iter
+    (fun row ->
+      let key = name row in
+      if not (Name_table.mem table key) then Name_table.add table key row)
+    rows;
+  table
+
+(* Every row each name has, in list order. *)
+let rows_by_name ~name rows =
+  let table = Name_table.create name_table_initial_size in
+  List.iter
+    (fun row ->
+      let key = name row in
+      Name_table.replace table key
+        (row :: Option.value ~default:[] (Name_table.find_opt table key)))
+    (List.rev rows);
+  table
+
+(* The roster is read several times a frame -- the list, the title, the
+   Activity pane, the footer -- so each source is indexed by name once per
+   read and every Keeper looks its readings up there. *)
+(* Everything the roster rows are made from. The rows read nothing else, so
+   the same inputs give the same rows. *)
+type roster_inputs = {
+  ri_keepers : keeper list;
+  ri_turns : Tui_decode.keeper_turn_row list;
+  ri_waiting : Tui_decode.keeper_waiting_row list;
+  ri_waiting_unverified : string list;
+  ri_waiting_failure : Tui_decode.keeper_waiting_failure option;
+  ri_approvals : Tui_decode.keeper_tool_approval list;
+  ri_tasks : task list;
+  ri_async : Tui_decode.async_request_observation option;
+  ri_asks : Masc.Tui_decode_asks.asks_snapshot option;
+  ri_roster : Masc_tui_keeper_control.roster;
+  ri_layout : Masc_tui_keeper_list_model.layout;
+  ri_sort : Masc_tui_keeper_list_model.sort;
+}
+
+let rows_of_keepers (inputs : roster_inputs) keepers : Masc_tui_keeper_list_model.row list =
+  let turns =
+    first_row_by_name inputs.ri_turns
+      ~name:(fun (row : Tui_decode.keeper_turn_row) -> row.ktr_keeper_name)
+  in
+  let waiting_rows =
+    first_row_by_name inputs.ri_waiting
+      ~name:(fun (row : Tui_decode.keeper_waiting_row) -> row.kwr_keeper_name)
+  in
+  let approvals =
+    first_row_by_name inputs.ri_approvals
+      ~name:(fun (row : Tui_decode.keeper_tool_approval) -> row.kta_keeper)
+  in
+  let current_tasks =
+    let wanted = Name_table.create name_table_initial_size in
+    List.iter
+      (fun (keeper : keeper) ->
+        match keeper.k_activity with
+        | Some { Tui_decode.k_current_task_id = Some task_id; _ } ->
+            Name_table.replace wanted task_id ()
+        | Some { Tui_decode.k_current_task_id = None; _ } | None -> ())
+      keepers;
+    if Name_table.length wanted = 0 then Name_table.create name_table_initial_size
+    else
+      first_row_by_name
+        (List.filter (fun (task : Tui_decode.task) -> Name_table.mem wanted task.id) inputs.ri_tasks)
+        ~name:(fun (task : Tui_decode.task) -> task.id)
+  in
+  let async_rows =
+    match inputs.ri_async with
+    | Some (Tui_decode.Async_ready { requests; _ }) ->
+        rows_by_name requests
+          ~name:(fun (row : Tui_decode.async_request_row) -> row.ar_keeper_name)
+    | Some (Tui_decode.Async_unavailable _) | None -> Name_table.create name_table_initial_size
+  in
+  let question_counts = Name_table.create name_table_initial_size in
+  (match inputs.ri_asks with
+   | None -> ()
+   | Some snapshot ->
+       List.iter
+         (fun row ->
+           match row.Masc.Tui_decode_asks.ar_asker with
+           | Masc.Tui_decode_asks.Ask_keeper name ->
+               Name_table.replace question_counts name
+                 (1 + Option.value ~default:0 (Name_table.find_opt question_counts name))
+           | Masc.Tui_decode_asks.Ask_installation _ -> ())
+         snapshot.Masc.Tui_decode_asks.asn_rows);
+  let verification_holders =
+    Masc_tui_keeper_list_model.verification_holders inputs.ri_tasks
+  in
   List.map
     (fun (keeper : keeper) ->
       let name = keeper.k_name in
       let turn =
-        List.find_map
-          (fun (row : Tui_decode.keeper_turn_row) ->
-            if String.equal row.ktr_keeper_name name then Some row.ktr_state else None)
-          state.keeper_turns
+        Option.map
+          (fun (row : Tui_decode.keeper_turn_row) -> row.ktr_state)
+          (Name_table.find_opt turns name)
       in
-      let observed_waiting =
-        List.find_opt
-          (fun (row : Tui_decode.keeper_waiting_row) -> String.equal row.kwr_keeper_name name)
-          state.keeper_waiting
-      in
+      let observed_waiting = Name_table.find_opt waiting_rows name in
       let waiting, activity_waiting =
-        match List.mem name state.keeper_waiting_unverified,
-              state.keeper_waiting_failure, observed_waiting with
+        match List.mem name inputs.ri_waiting_unverified,
+              inputs.ri_waiting_failure, observed_waiting with
         | true, _, _ | false, Some _, _ -> Masc_tui_keeper_list_model.Waiting_unavailable, None
         | false, None, Some row -> Masc_tui_keeper_list_model.Waiting_observed row, Some row
         | false, None, None -> Masc_tui_keeper_list_model.Waiting_unobserved, None
       in
-      let approval =
-        List.find_opt
-          (fun (row : Tui_decode.keeper_tool_approval) -> String.equal row.kta_keeper name)
-          state.keeper_tool_approvals
-      in
+      let approval = Name_table.find_opt approvals name in
       let task =
         match keeper.k_activity with
         | Some { Tui_decode.k_current_task_id = Some task_id; _ } ->
-            List.find_opt (fun (task : Tui_decode.task) -> String.equal task.id task_id) state.tasks
+            Name_table.find_opt current_tasks task_id
         | Some { Tui_decode.k_current_task_id = None; _ } | None -> None
       in
       let async_requests =
-        match state.tools_async_observation with
-        | Some (Tui_decode.Async_ready { requests; _ }) ->
-            List.filter
-              (fun (row : Tui_decode.async_request_row) -> String.equal row.ar_keeper_name name)
-              requests
-        | Some (Tui_decode.Async_unavailable _) | None -> []
+        Option.value ~default:[] (Name_table.find_opt async_rows name)
       in
       { Masc_tui_keeper_list_model.keeper
-      ; reading = keeper_reading state keeper
+      ; reading = keeper_reading_in inputs.ri_roster keeper
       ; turn
       ; waiting
       ; approval
       ; task
       ; awaiting_verification =
-          Masc_tui_keeper_list_model.holds_awaiting_verification ~keeper_name:name state.tasks
-      ; open_questions = keeper_open_question_count state name
+          Masc_tui_keeper_list_model.holds_awaiting_verification verification_holders
+            ~keeper_name:name
+      ; open_questions =
+          Option.value ~default:0 (Name_table.find_opt question_counts name)
       ; async_requests
       ; last_activity_at = keeper_activity_at ~turn ~waiting:activity_waiting keeper
       })
-    state.keepers
-  |> Masc_tui_keeper_list_model.order_rows ~layout:state.keeper_list_layout
-       ~sort:state.keeper_list_sort
+    keepers
+  |> Masc_tui_keeper_list_model.order_rows ~layout:inputs.ri_layout
+       ~sort:inputs.ri_sort
+
+(* The full pattern makes a new input field a build error here until it is
+   both named (warning 9) and compared (warning 27). The project leaves both
+   warnings off, so they are turned on for this function alone. *)
+let[@warning "+9+27"] same_roster_inputs
+    { ri_keepers; ri_turns; ri_waiting; ri_waiting_unverified; ri_waiting_failure;
+      ri_approvals; ri_tasks; ri_async; ri_asks; ri_roster; ri_layout; ri_sort } b =
+  ri_keepers == b.ri_keepers && ri_turns == b.ri_turns
+  && ri_waiting == b.ri_waiting && ri_waiting_unverified == b.ri_waiting_unverified
+  && ri_waiting_failure == b.ri_waiting_failure && ri_approvals == b.ri_approvals
+  && ri_tasks == b.ri_tasks && ri_async == b.ri_async && ri_asks == b.ri_asks
+  && ri_roster == b.ri_roster && ri_layout = b.ri_layout && ri_sort = b.ri_sort
+
+(* The list, the terminal title, the Activity pane and the footer each ask for
+   the rows in one frame. Every input is an immutable value the state swaps
+   whole, so while each one is still the same value the last answer is the
+   answer. *)
+let last_roster_rows : (roster_inputs * Masc_tui_keeper_list_model.row list) option ref =
+  ref None
+
+let keeper_list_rows (state : state) : Masc_tui_keeper_list_model.row list =
+  let inputs =
+    { ri_keepers = state.keepers; ri_turns = state.keeper_turns
+    ; ri_waiting = state.keeper_waiting; ri_waiting_unverified = state.keeper_waiting_unverified
+    ; ri_waiting_failure = state.keeper_waiting_failure
+    ; ri_approvals = state.keeper_tool_approvals; ri_tasks = state.tasks
+    ; ri_async = state.tools_async_observation; ri_asks = state.asks_snapshot
+    ; ri_roster = state.keeper_roster; ri_layout = state.keeper_list_layout
+    ; ri_sort = state.keeper_list_sort }
+  in
+  match !last_roster_rows with
+  | Some (seen, rows) when same_roster_inputs seen inputs -> rows
+  | Some _ | None ->
+      let rows =
+        match inputs.ri_keepers with
+        | [] -> []
+        | keepers -> rows_of_keepers inputs keepers
+      in
+      last_roster_rows := Some (inputs, rows);
+      rows
 
 let ordered_keepers state =
   List.map (fun row -> row.Masc_tui_keeper_list_model.keeper) (keeper_list_rows state)
@@ -12532,6 +12801,11 @@ let keeper_list_select_name state keeper_name =
 
 let selected_keeper (state : state) =
   List.nth_opt (keepers_for_selection state) state.keeper_cursor
+
+let selected_tools_error (state : state) =
+  held_tools_error
+    ~selected:(Option.map (fun (row : keeper) -> row.k_name) (selected_keeper state))
+    ~held_keeper:state.tools_inventory_keeper state.tools_error
 
 let keeper_preference_unresolved_warnings (state : state) =
   List.filter_map Fun.id
@@ -12690,7 +12964,16 @@ type keeper_waiting_snapshot = {
   kws_pending_controls : string list;
 }
 
-type keeper_waiting_change = Waiting_all | Waiting_keepers of string list
+(* [Waiting_unattributed] is a change the event names no Keeper for (a
+   schedule or a confirmation). The change itself marks no Keeper unverified,
+   so with no read in flight the rows on screen stay until the next read
+   answers. A read already in flight may predate it, so its rows are not
+   taken as current: when it answers, its Keepers read as unverified until
+   the read that follows. *)
+type keeper_waiting_change =
+  | Waiting_all
+  | Waiting_keepers of string list
+  | Waiting_unattributed
 
 let note_keeper_waiting_change state change =
   let names = match change with
@@ -12704,7 +12987,10 @@ let note_keeper_waiting_change state change =
           let version = Option.value ~default:0 (List.assoc_opt name state.keeper_waiting_versions) in
           state.keeper_waiting_versions <- (name, version + 1) ::
             List.remove_assoc name state.keeper_waiting_versions) names;
-        names in
+        names
+    | Waiting_unattributed ->
+        state.keeper_waiting_epoch <- state.keeper_waiting_epoch + 1;
+        [] in
   state.keeper_waiting_unverified <-
     List.sort_uniq String.compare (names @ state.keeper_waiting_unverified);
   state.keeper_waiting_read <- Keeper_waiting_read.note_change state.keeper_waiting_read
@@ -12860,17 +13146,17 @@ let server_authority_ready state =
       && not (Canonical_path.is_empty identity.sid_masc_root)
   | None -> false
 
-(* The key the Terminal tab's stream follows: the Keeper under the cursor, while
-   the tab is on screen for a workspace this terminal confirmed. [None] means no
-   stream should run. *)
-let keeper_terminal_stream_key state =
+(* The key the Execute output stream follows: the Keeper under the cursor, while
+   the logs view or the Terminal tab is on screen for a workspace this terminal
+   confirmed. [None] means no stream should run. *)
+let keeper_execute_stream_key state =
   match state.workspace_identity with
-  | Workspace_identity_match when server_authority_ready state && keeper_terminal_on_screen state ->
-    Option.map (keeper_log_key state ~limit:keeper_terminal_window) (keeper_execute_target state)
+  | Workspace_identity_match when server_authority_ready state ->
+    Option.map (keeper_log_key state ~limit:keeper_execute_window) (keeper_execute_target state)
   | Workspace_identity_match | Workspace_identity_unread | Workspace_identity_mismatch _
   | Workspace_identity_match_unconfirmed _ -> None
 
-(* What the Terminal tab's stream needs on this pass of the loop. A running
+(* What the Execute output stream needs on this pass of the loop. A running
    stream is the right one only if it was opened for this key under the
    workspace reading that is current: a stream opened before the workspace
    changed, or for another Keeper, is not. *)
@@ -12881,7 +13167,7 @@ type keeper_execute_stream_plan =
   | Stream_ends  (** None is wanted and one runs. *)
 
 let plan_keeper_execute_stream state =
-  match keeper_terminal_stream_key state, state.keeper_execute_stream with
+  match keeper_execute_stream_key state, state.keeper_execute_stream with
   | Some key, Some (stream, _)
     when stream.kxf_reading == state.workspace_read_authority
          && keeper_log_equal_key stream.kxf_key key -> Stream_stays
@@ -14184,6 +14470,86 @@ let move_tools_async_selection state delta =
     state.tools_async_selection <- Some target
   end
 
+(* Records one Keeper's Usage read in Keeper name order. A failed read keeps
+   the Keeper's last answer beside the failure. *)
+let record_keeper_skill_usage state ~keeper result =
+  let reading =
+    match result with
+    | Ok usage -> Skill_usage_read usage
+    | Error detail ->
+        Skill_usage_read_failed
+          { last = Option.bind (List.assoc_opt keeper state.tools_keeper_usage) skill_usage_answer
+          ; detail
+          }
+  in
+  state.tools_keeper_usage <-
+    List.sort
+      (fun (left, _) (right, _) -> String.compare left right)
+      ((keeper, reading) :: List.remove_assoc keeper state.tools_keeper_usage)
+
+(* Whether [state.keepers] is the whole roster: read from this workspace,
+   with no error beside it. *)
+let roster_complete state =
+  match state.keepers_error, state.local_keepers with
+  | None, Local_workspace_read -> true
+  | Some _, (Local_workspace_unread | Local_workspace_read | Local_workspace_failed _)
+  | None, (Local_workspace_unread | Local_workspace_failed _) ->
+      false
+
+(* Keeps the Usage readings of the Keepers on the roster. Only a whole roster
+   drops a reading: one not read yet, or read with an error, may lack Keepers
+   that still exist. *)
+let keep_roster_skill_usage state =
+  if roster_complete state then begin
+    let roster = List.map (fun (row : keeper) -> row.k_name) state.keepers in
+    state.tools_keeper_usage <-
+      List.filter (fun (name, _) -> List.mem name roster) state.tools_keeper_usage;
+    state.tools_usage_owed <-
+      List.filter (fun (name, _) -> List.mem name roster) state.tools_usage_owed
+  end
+
+(* What a roster Keeper's Usage answer owes; one never read owes a read. *)
+let keeper_skill_usage_owed state keeper =
+  match List.assoc_opt keeper state.tools_usage_owed with
+  | Some owed -> owed
+  | None -> Masc_tui_owed_read.changed Masc_tui_owed_read.settled
+
+let set_keeper_skill_usage_owed state keeper owed =
+  state.tools_usage_owed <- (keeper, owed) :: List.remove_assoc keeper state.tools_usage_owed
+
+let owe_keeper_skill_usage_read state keeper =
+  set_keeper_skill_usage_owed state keeper
+    (Masc_tui_owed_read.changed (keeper_skill_usage_owed state keeper))
+
+let owe_every_skill_usage_read state =
+  List.iter (fun (row : keeper) -> owe_keeper_skill_usage_read state row.k_name) state.keepers
+
+let owe_tools_catalog_read state =
+  state.tools_catalog_owed <- Masc_tui_owed_read.changed state.tools_catalog_owed
+
+let owe_tools_inventory_read state =
+  state.tools_inventory_owed <- Masc_tui_owed_read.changed state.tools_inventory_owed
+
+let owe_tools_activations_read state =
+  state.tools_activations_owed <- Masc_tui_owed_read.changed state.tools_activations_owed
+
+(* The Tools parts, owed together: arriving on Tools, a refresh, a
+   revalidation and a resumed authority read them all. *)
+let owe_tools_reads state =
+  owe_tools_inventory_read state;
+  owe_tools_catalog_read state;
+  owe_tools_activations_read state;
+  owe_every_skill_usage_read state
+
+(* A Keeper's activation ledger changed: its Usage answer owes a read when it
+   is on the roster, and the Activations pane when it is the selected
+   Keeper. *)
+let owe_skill_activations_read state keeper =
+  if List.exists (fun (row : keeper) -> String.equal row.k_name keeper) state.keepers then
+    owe_keeper_skill_usage_read state keeper;
+  if Option.exists (fun (row : keeper) -> String.equal row.k_name keeper) (selected_keeper state) then
+    owe_tools_activations_read state
+
 let begin_tools_async_detail state ~force =
   match state.tools_async_selection with
   | None -> None
@@ -14196,13 +14562,17 @@ let begin_tools_async_detail state ~force =
       let request = {tad_ticket;tad_reading=state.workspace_read_authority;tad_job=ref ()} in
       state.tools_async_detail_request <- Some request; Some request
 
+(* Whether [request] is the detail read the open selection is waiting on. *)
+let tools_async_detail_current state request =
+  request.tad_reading == state.workspace_read_authority
+  && Option.exists (fun current -> current == request) state.tools_async_detail_request
+  && Option.equal Masc.Tui_decode_async_request.equal_target state.tools_async_selection
+       (Some (Masc_tui_fetched.request_key request.tad_ticket))
+  && Masc_tui_fetched.is_current ~equal:Masc.Tui_decode_async_request.equal_target
+       state.tools_async_detail request.tad_ticket
+
 let complete_tools_async_detail state request result =
-  if request.tad_reading == state.workspace_read_authority
-      && Option.exists (fun current -> current == request) state.tools_async_detail_request
-      && Option.equal Masc.Tui_decode_async_request.equal_target state.tools_async_selection
-          (Some (Masc_tui_fetched.request_key request.tad_ticket))
-      && Masc_tui_fetched.is_current ~equal:Masc.Tui_decode_async_request.equal_target
-          state.tools_async_detail request.tad_ticket then begin
+  if tools_async_detail_current state request then begin
     state.tools_async_detail_request <- None;
     let result = Result.bind result (fun reading ->
       let module Detail = Masc.Tui_decode_async_request in
@@ -14339,6 +14709,9 @@ let suspend_workspace_readings state =
   state.board_census <- Masc_tui_fetched.Absent;
   state.board_listing <- Masc_tui_fetched.Absent;
   state.board_list_reported_error <- None;
+  (* The list is cleared, and resuming the same workspace does not revalidate
+     the Board, so the list is owed. A read in flight keeps its failures. *)
+  state.board_list_owed <- Masc_tui_owed_read.changed state.board_list_owed;
   retire_keeper_message_search state;
   stop_waiting_for_memory_recall_standing state
     "서버 신원 확인이 끊겨서 읽지 못했어요";
@@ -14420,6 +14793,22 @@ let suspend_workspace_readings state =
   state.lane_addons_cached <- suspend_lane state.lane_addons_cached;
   state.lane_addons_reading <- None;
   state.board_detail <- Masc_tui_board_detail.suspend state.board_detail;
+  (* The open post reads again when authority is recovered
+     ([resume_reads_after_authority_change]). *)
+  state.board_post_owed <- None;
+  state.pushed_reads <- [];
+  state.asks_owed <- Masc_tui_owed_read.settled;
+  state.async_requests_owed <- Masc_tui_owed_read.settled;
+  state.pending_confirms_owed <- Masc_tui_owed_read.settled;
+  state.schedules_agenda_owed <- Masc_tui_owed_read.settled;
+  state.schedules_page_owed <- Masc_tui_owed_read.settled;
+  state.keeper_schedules_owed <- None;
+  state.chat_native_tasks_owed <- None;
+  state.chat_child_content_owed <- None;
+  (* Resumed authority reads the Gate again. *)
+  state.gate_snapshot_owed <- Masc_tui_owed_read.settled;
+  state.held_calls_owed <- Masc_tui_owed_read.settled;
+  state.tool_modes_owed <- Masc_tui_owed_read.settled;
   state.acting_pane_changes <- Masc_tui_fetched.suspend state.acting_pane_changes;
   state.acting_pane_changes_loss_followup <- None;
   state.prompts <- Masc_tui_fetched.suspend state.prompts;
@@ -14463,6 +14852,9 @@ let suspend_workspace_readings state =
   retire_asks_read state;
   retire_ask_followup_read state;
   state.keeper_roster_read <- Snapshot_read.invalidate state.keeper_roster_read;
+  state.keeper_row_read <- Snapshot_read.invalidate state.keeper_row_read;
+  (* A resumed authority reads the whole roster again. *)
+  state.keeper_roster_owed <- Masc_tui_roster_owed.settled;
   invalidate_local_source_read state Local_work;
   invalidate_local_source_read state Local_keepers;
   state.gate_snapshot_read <- Snapshot_read.invalidate state.gate_snapshot_read;
@@ -14473,18 +14865,16 @@ let suspend_workspace_readings state =
   (* The Observer is stopped above, so the retained agenda can no longer
      claim to have followed changes until the workspace is confirmed again. *)
   state.schedules_agenda_freshness <- Masc_tui_agenda.Refresh_needed;
-  state.schedules_agenda_event_pending <- true;
   state.keeper_sandbox_logs_inflight <- None;
-  (* A reread queued behind the retired read is satisfied by the replacement
-     read that reconfirmation launches; keep only its demand. *)
-  state.keeper_lanes_resume <-
-    state.keeper_lanes_resume || state.keeper_lanes_inflight || state.keeper_lanes_reread_pending;
-  state.keeper_lanes_inflight <- false;
-  state.keeper_lanes_reread_pending <- false;
+  (* The retired read's owed record belongs to the retired detail reading;
+     the visible tab reads again when the detail is recovered. *)
+  state.keeper_composite_inflight <- None;
+  state.keeper_composite_owed <- None;
   state.connectors_read <- Connector_read.suspend state.connectors_read;
   state.memory_health_inflight <- false;
   suspend_runtime_catalog_read state;
   state.runtime_config_read <- `Idle;
+  state.runtime_config_owed <- Masc_tui_owed_read.settled;
   state.runtime_params_loading <- false;
   state.standalone_lanes_inflight <- false;
   state.standalone_lanes_reread_pending <- false;
@@ -14492,10 +14882,14 @@ let suspend_workspace_readings state =
   state.runtime_surface_force_pending <- false;
   state.clients_surface_inflight <- false;
   state.repositories_inflight <- false;
+  state.repositories_owed <- Masc_tui_owed_read.settled;
   state.tools_read_inflight <- None;
+  state.tools_skill_generation <- state.tools_skill_generation + 1;
+  state.tools_skill_pending <- [];
   state.harness_inflight <- false;
   state.verification_inflight <- false;
   state.verification_refresh_after_inflight <- false;
+  state.verification_owed <- Masc_tui_owed_read.settled;
   state.fusion_detail_inflight <- None;
   state.fusion_detail_reread_pending <- false;
   state.fusion_detail_awaiting_observer <- false;
@@ -14507,6 +14901,9 @@ let suspend_workspace_readings state =
   state.schedule_wake_history_inflight <- None;
   state.keeper_waiting_read <- Keeper_waiting_read.suspend state.keeper_waiting_read;
   state.keeper_turns_inflight <- false;
+  state.keeper_turns_owed <- Masc_tui_owed_read.settled;
+  state.keeper_previews_unread <- [];
+  state.keeper_waiting_owed <- Masc_tui_owed_read.settled;
   state.msg_preparation_details <- Masc_tui_preparation_details.empty;
   state.keeper_calls_loading <- false;
   state.keeper_calls_refresh_pending <- false;
@@ -14857,8 +15254,7 @@ let tools_skill_profiles (state : state) =
       { Masc.Tui_decode_tools.ts_effective =
           ( None
           | Some
-              ( Masc.Tui_decode_tools.Effective_surface_unavailable _
-              | Masc.Tui_decode_tools.Effective_surface_warming _ ) )
+              Masc.Tui_decode_tools.Effective_surface_unavailable _ )
       ; _ }
   | None -> []
 
@@ -15074,16 +15470,25 @@ let release_composer_for_browser_reader (state : state) =
   state.composer_focused <- false;
   withdraw_voice_capture state
 
-(* A Home visit edits this TUI's local config. A Keeper name from a remote or
-   unconfirmed workspace must not become the local workspace's last chat.
-   Keep an earlier admitted visit and its receipt while declining a new one. *)
+let note_session_key (state : state) key =
+  if not (List.mem key state.session_picks) then
+    state.session_picks <- key :: state.session_picks
+
+let note_session_pick state change =
+  note_session_key state (Masc.Tui_preference.key_of_change change)
+
+(* A Home visit becomes this workspace's last chat. A Keeper name from a
+   remote or unconfirmed workspace must not become the local workspace's last
+   chat. Keep an earlier admitted visit and its receipt while declining a new
+   one. *)
 let remember_local_chat_visit (state : state) ~sw keeper =
   match state.workspace_identity, state.server_identity with
   | Workspace_identity_match, Some identity
     when workspace_identity_of_refresh ~local_paths:state.local_workspace_paths
            (Ok identity) = Workspace_identity_match ->
-      let request = Masc_tui_chat_visit.submit state.home_chat_writer
-          ~sw ~base_path:state.local_base_path keeper in
+      let change = Masc.Tui_preference.Chat_visited keeper in
+      note_session_pick state change;
+      let request = Masc_tui_preference_writer.submit state.preference_writer ~sw change in
       state.home_chat_visit <- Some request;
       state.home_last_chat <- Saving_chat keeper;
       true
@@ -15093,18 +15498,25 @@ let remember_local_chat_visit (state : state) ~sw keeper =
 
 (* The latest explicit visit owns the Home receipt. The same name can be
    visited again before an older write settles, so compare the request too. *)
-let accept_chat_visit (state : state) (completion : Masc_tui_chat_visit.completion) =
-  let current = String.equal completion.request.base_path state.local_base_path
-    && Option.exists (Masc_tui_chat_visit.same_request completion.request) state.home_chat_visit in
+let accept_chat_visit (state : state) (completion : Masc_tui_preference_writer.completion) keeper =
+  let current =
+    Option.exists (Masc_tui_preference_writer.same_request completion.request) state.home_chat_visit
+  in
   if current then begin
     state.home_chat_visit <- None;
-    let keeper = completion.request.keeper in
     state.home_last_chat <-
-      match completion.outcome with
-      | Masc_tui_chat_visit.Saved Runtime.Durable -> Recorded_chat keeper
-      | Saved (Runtime.Durability_unconfirmed { detail }) -> Unconfirmed_chat { keeper; detail }
-      | Refused save_error | Not_started save_error -> Session_chat { keeper; save_error }
-      | Unobserved detail -> Unobserved_chat { keeper; detail }
+      (match completion.outcome with
+       | Ok (Masc_tui_preference_writer.Committed { durability = Runtime.Durable; _ })
+       | Ok Masc_tui_preference_writer.Unchanged -> Recorded_chat keeper
+       | Ok (Masc_tui_preference_writer.Committed
+               { durability = Runtime.Durability_unconfirmed { detail }; _ }) ->
+         Unconfirmed_chat { keeper; detail }
+       | Error
+           ( Masc_tui_preference_writer.Refused save_error
+           | Masc_tui_preference_writer.Not_permitted save_error
+           | Masc_tui_preference_writer.Not_started save_error ) ->
+         Session_chat { keeper; save_error }
+       | Error (Masc_tui_preference_writer.Unobserved detail) -> Unobserved_chat { keeper; detail })
   end;
   current
 
@@ -16634,6 +17046,10 @@ let finish_keeper_chat_control state keeper_name ~generation =
   else begin
     let next = advance_keeper_chat_control state keeper_name in
     state.keeper_chat_control_pending <- List.remove_assoc keeper_name state.keeper_chat_control_pending;
+    (* A turns read keeps the old row of a Keeper whose control is pending,
+       and no later write may announce the Keeper again, so the end of the
+       control owes the turns one read. *)
+    state.keeper_turns_owed <- Masc_tui_owed_read.changed state.keeper_turns_owed;
     state.keeper_interactive_waiting <- List.map (fun (name, id, intervention) ->
       let intervention = match intervention with
         | Awaiting_control held when name = keeper_name && held.generation = generation ->
@@ -16843,9 +17259,19 @@ let selected_item_account state =
   | Some keeper, Some (name, (_, account)) when String.equal keeper.k_name name -> Some account
   | (Some _ | None), (Some _ | None) -> None
 
+(* The selected Keeper's balance at this moment, from the roster's Candle
+   basis; the Items account's own balance stands still after it is read. *)
+let selected_item_balance_now state =
+  match state.item_account with
+  | Some (keeper_name, _) ->
+      Masc_tui_candle.balance_milli ~now:(Unix.gettimeofday ()) state.candle_observation
+        ~keeper:keeper_name
+  | None -> None
+
 let item_browser_items state =
   Masc_tui_keeper_items.items ~filter:state.item_filter
     ~account:(selected_item_account state)
+    ~balance_milli:(selected_item_balance_now state)
 
 let selected_browser_item state =
   let items = item_browser_items state in
@@ -16944,15 +17370,25 @@ let apply_schedule_agenda_read state ticket result =
   | None -> ()
   | Some read ->
       state.schedules_agenda_read <- read;
-      (* A change observed during this read means its result may precede the
-         change. Retire it without publishing; the caller starts a successor. *)
-      if not state.schedules_agenda_event_pending then
+      (* A change announced while the read ran means its result may precede
+         the change: it is retired without publishing, and the owed read that
+         follows answers instead. A change no read has answered yet leaves a
+         published list uncertain. *)
+      let overtaken, change_unread =
+        match state.schedules_agenda_owed with
+        | Masc_tui_owed_read.Settled
+        | Masc_tui_owed_read.Reading { changed_since = false; _ } -> false, false
+        | Masc_tui_owed_read.Reading { changed_since = true; _ } -> true, true
+        | Masc_tui_owed_read.Owed _ | Masc_tui_owed_read.Waiting _ -> false, true
+      in
+      if not overtaken then
         (match result with
          | Ok snapshot ->
              state.schedules_agenda <- Some snapshot;
              state.schedules_agenda_error <- None;
              state.schedules_agenda_freshness <-
-               (if schedule_observer_is_scoped state then Masc_tui_agenda.Last_read
+               (if schedule_observer_is_scoped state && not change_unread
+                then Masc_tui_agenda.Last_read
                 else Masc_tui_agenda.Refresh_needed)
          | Error error ->
              state.schedules_agenda_error <- Some error;
@@ -18223,7 +18659,7 @@ let tools_skill_inventory_matches_keeper (state : state) keeper_name =
       String.equal expected ets_keeper_name
   | None, (Some _ | None)
   | Some _, (None | Some {ts_effective=(None | Some
-      (Effective_surface_unavailable _ | Effective_surface_warming _));_}) -> false
+      Effective_surface_unavailable _);_}) -> false
 
 (* Local files, drafts and explicit remote URLs survive peer reconfirmation
    but never a workspace replacement. Peer images retain their exact reading.
@@ -18284,7 +18720,7 @@ let tools_skill_may_be_unread (state : state) (origin : sent_image_read) =
         Skill_reference.equal_identity expected.identity
           profile.Masc.Tui_decode_tools.esp_reference.identity) ets_skill_profiles)
   | Some _, (None | Some {ts_effective=(None | Some
-      (Effective_surface_unavailable _ | Effective_surface_warming _));_})
+      Effective_surface_unavailable _);_})
   | None, (Some _ | None) -> false
 
 (* A displayed observation outlives the request epoch that admitted it. A
@@ -18305,7 +18741,7 @@ let image_cell_origin_for_redraw (state : state) ~workspace (origin : sent_image
         List.exists (fun profile -> Skill_reference.equal expected profile.Masc.Tui_decode_tools.esp_reference)
           ets_skill_profiles
     | Some _, (None | Some {ts_effective=(None | Some
-        (Effective_surface_unavailable _ | Effective_surface_warming _));_}) -> true in
+        Effective_surface_unavailable _);_}) -> true in
   let keeper_changed = match origin.sir_view, origin.sir_skill_reference, selected_keeper state with
     | Tools, Some _, (Some _ | None) ->
         (* As with the Skill cursor, roster reconciliation can move the
@@ -18398,7 +18834,7 @@ let image_cell_source_unconfirmed (state : state) (origin : sent_image_read) =
           Skill_reference.equal expected profile.Masc.Tui_decode_tools.esp_reference)
           (selected_tools_skill_profile state)))
     | Some _, (None | Some {ts_effective=(None | Some
-        (Effective_surface_unavailable _ | Effective_surface_warming _));_}) -> true in
+        Effective_surface_unavailable _);_}) -> true in
   skill_unconfirmed || tools_skill_may_be_unread state origin || match origin.sir_owner with
   | Local_file_image_read _ | Remote_url_image_read _ | Draft_image_read _ -> false
   | Peer_image_read _ ->
@@ -19027,6 +19463,10 @@ let create_state
     ?(tool_visibility = Tools_compact)
     ~workspace
     ?(local_base_path = "")
+    ?(preference_send =
+      fun (_ : Masc.Tui_preference.change) ->
+        Error (Masc_tui_preference_writer.Not_started "This session has no server to store picks"))
+    ?(preference_read = fun () -> Error "This session has no server to read settings from")
     ~port
     ~refresh_interval
     ()
@@ -19042,10 +19482,14 @@ let create_state
   home_decision_receipt = None;
   home_decision_inflight = None;
   home_last_chat = No_chat_receipt;
-  home_chat_writer = Masc_tui_chat_visit.create ();
+  preference_writer = Masc_tui_preference_writer.create ~send:preference_send;
   keeper_preference_writer = Masc_tui_config.create_keeper_preference_writer ();
   credential_preparation = Masc_tui_credential_preparation.create ();
   home_chat_visit = None;
+  preference_refusal_said = false;
+  preference_read;
+  settings_reread = Reread_settled;
+  session_picks = [];
   metrics_scroll = 0;
   metrics_content_height = 0;
   metrics_scroll_card_rows = None;
@@ -19294,6 +19738,7 @@ let create_state
   runtime_config_edits = [];
   runtime_config_generation = 0;
   runtime_config_read = `Idle;
+  runtime_config_owed = Masc_tui_owed_read.settled;
   runtime_config_status_open = false;
   runtime_config_status_scroll = 0;
   runtime_account_form = None;
@@ -19375,6 +19820,8 @@ let create_state
   keeper_roster = Masc_tui_keeper_control.unobserved_roster;
   keeper_roster_error = None;
   keeper_roster_read = Snapshot_read.idle;
+  keeper_row_read = Snapshot_read.idle;
+  keeper_roster_owed = Masc_tui_roster_owed.settled;
   local_workspace_read_order = Local_read_order.idle;
   local_work_observation = None;
   local_keeper_observation = None;
@@ -19456,17 +19903,33 @@ let create_state
   keeper_calls_keeper = None;
   keeper_calls_loading = false;
   keeper_calls_refresh_pending = false;
+  keeper_calls_owed = None;
+  board_post_owed = None;
+  board_list_owed = Masc_tui_owed_read.settled;
+  planning_owed = Masc_tui_owed_read.settled;
+  overview_goals_owed = Masc_tui_owed_read.settled;
+  pushed_reads = [];
+  asks_owed = Masc_tui_owed_read.settled;
+  async_requests_owed = Masc_tui_owed_read.settled;
+  pending_confirms_owed = Masc_tui_owed_read.settled;
+  schedules_agenda_owed = Masc_tui_owed_read.settled;
+  schedules_page_owed = Masc_tui_owed_read.settled;
+  keeper_schedules_owed = None;
+  chat_native_tasks_owed = None;
+  chat_child_content_owed = None;
+  gate_snapshot_owed = Masc_tui_owed_read.settled;
+  held_calls_owed = Masc_tui_owed_read.settled;
+  tool_modes_owed = Masc_tui_owed_read.settled;
   keeper_calls_generation = 0;
   keeper_calls_scroll = 0;
   keeper_logs = Masc_tui_fetched.initial;
   keeper_execute_output = Masc_tui_fetched.initial;
-  keeper_execute_read = None;
-  keeper_execute_cancel = None;
   keeper_execute_stream = None;
   keeper_terminal = Masc_tui_execute_terminal.Following;
   keeper_log_read = None;
   keeper_log_cancel = None;
   keeper_log_refresh_pending = false;
+  keeper_logs_owed = None;
   log_scroll = 0;
   log_wrap_cols = None;
   live_context = Masc_tui_context_state.empty;
@@ -19513,6 +19976,9 @@ let create_state
   keeper_waiting_versions = [];
   keeper_turns_error = None;
   keeper_turns_inflight = false;
+  keeper_turns_owed = Masc_tui_owed_read.settled;
+  keeper_previews_unread = [];
+  keeper_waiting_owed = Masc_tui_owed_read.settled;
   keeper_waiting_read = Keeper_waiting_read.idle;
   msg_preparation_details = Masc_tui_preparation_details.empty;
   keeper_observed_interrupts = [];
@@ -19527,7 +19993,6 @@ let create_state
   gate_snapshot_observed = false;
   gate_snapshot_read = Snapshot_read.idle;
   gate_snapshot_authority = None;
-  gate_receipt_refresh_pending = false;
   keeper_yolo_names = [];
   keeper_tool_modes_observed = false;
   keeper_tool_modes_error = None;
@@ -19606,7 +20071,6 @@ let create_state
   schedules_agenda = None;
   schedules_agenda_error = None;
   schedules_agenda_read = Snapshot_read.idle;
-  schedules_agenda_event_pending = false;
   schedules_agenda_freshness = Masc_tui_agenda.Refresh_needed;
   schedule_cursor = 0;
   schedule_scroll = 0;
@@ -19622,10 +20086,9 @@ let create_state
   schedule_cancel_armed = None;
   schedule_cancel_error = None;
   schedule_form_refusal = None;
-  lanes = None;
-  keeper_lanes_inflight = false;
-  keeper_lanes_reread_pending = false;
-  keeper_lanes_resume = false;
+  keeper_composite = None;
+  keeper_composite_inflight = None;
+  keeper_composite_owed = None;
   lane_inventory = None;
   lanes_selection = None;
   standalone_lanes = None;
@@ -19661,14 +20124,23 @@ let create_state
   lane_run_detail_scroll = 0;
   lane_run_preflight_details = false;
   lane_run_detail_content_height = 0;
-  keeper_secrets = [];
-  lanes_error = None;
+  keeper_composite_error = None;
   lanes_action_error = None;
   system_logs = System_logs_view.empty;
   tools_inventory = None;
   tools_request_generation = 0;
+  tools_skill_generation = 0;
+  tools_skill_pending = [];
   tools_read_inflight = None;
   tools_error = None;
+  tools_activations = None;
+  tools_activations_error = None;
+  tools_keeper_usage = [];
+  tools_catalog_owed = Masc_tui_owed_read.settled;
+  tools_inventory_owed = Masc_tui_owed_read.settled;
+  tools_inventory_keeper = None;
+  tools_activations_owed = Masc_tui_owed_read.settled;
+  tools_usage_owed = [];
   skills_catalog = None;
   skills_catalog_error = None;
   tools_scroll = 0;
@@ -19691,11 +20163,13 @@ let create_state
   tools_async_detail_open = false;
   tools_async_detail = Masc_tui_fetched.initial;
   tools_async_detail_request = None;
+  tools_async_detail_owed = Masc_tui_owed_read.settled;
   tools_async_last_logical = None;
   tools_async_task_source = None;
   tools_async_task_body = Masc_tui_fetched.initial;
   tools_async_task_history = Masc_tui_fetched.initial;
   tools_async_task_body_request = None;
+  tools_async_task_owed = Masc_tui_owed_read.settled;
   tools_async_task_history_request = None;
   lane_addons = None;
   lane_addons_cached = Masc_tui_lane_addons.initial;
@@ -19743,6 +20217,8 @@ let create_state
   repositories = None;
   repositories_error = None;
   repositories_inflight = false;
+  repositories_owed = Masc_tui_owed_read.settled;
+  connectors_owed = Masc_tui_owed_read.settled;
   repositories_scroll = 0;
   repositories_cursor = 0;
   workspace_activity_repo = None;
@@ -19893,6 +20369,7 @@ let create_state
   verification = None;
   verification_error = None;
   verification_inflight = false;
+  verification_owed = Masc_tui_owed_read.settled;
   verification_refresh_after_inflight = false;
   verification_scroll = 0;
   verification_cursor = 0;
@@ -21517,9 +21994,24 @@ let tools_task_forget_frame state = state.tools_task_presented <- None
    the Schedules surface, which is where a schedule without a time is still
    worth seeing; a strip that draws one wake has to draw the one it can say a
    time for. *)
-let agenda (state : state) : Masc_tui_agenda.t =
+(* Everything the agenda strip is made from. The strip reads nothing else, so
+   the same inputs give the same strip. *)
+type agenda_inputs = {
+  ai_schedules : schedule_snapshot option;
+  ai_schedules_error : string option;
+  ai_schedule_freshness : Masc_tui_agenda.schedule_freshness;
+  ai_approvals_observed : bool;
+  ai_approvals_error : string option;
+  ai_approvals : Tui_decode.keeper_tool_approval list;
+  ai_asks : Masc.Tui_decode_asks.asks_snapshot option;
+  ai_asks_error : string option;
+  ai_goals_to_confirm : Masc_tui_agenda.goal_to_confirm Masc_tui_agenda.reading;
+  ai_stalled : Masc_tui_agenda.stalled Masc_tui_agenda.reading;
+}
+
+let agenda_of_inputs (inputs : agenda_inputs) : Masc_tui_agenda.t =
   let scheduled =
-    match state.schedules_agenda, state.schedules_agenda_error with
+    match inputs.ai_schedules, inputs.ai_schedules_error with
     (* A store the server could not read answers with a status other than
        "ok" and no rows; that is a failed read, not an empty schedule. *)
     | Some snapshot, _ when not (String.equal snapshot.scs_status "ok") ->
@@ -21547,7 +22039,7 @@ let agenda (state : state) : Masc_tui_agenda.t =
            snapshot.scs_rows)
   in
   let awaiting =
-    match state.keeper_tool_approvals_observed, state.keeper_tool_approvals_error with
+    match inputs.ai_approvals_observed, inputs.ai_approvals_error with
     | false, Some error ->
       Masc_tui_agenda.Read_failed error
     | false, None -> Masc_tui_agenda.Not_read
@@ -21561,14 +22053,14 @@ let agenda (state : state) : Masc_tui_agenda.t =
               ; asked_at = held.kta_asked_at
               ; timeout_sec = held.kta_timeout_sec
               })
-           state.keeper_tool_approvals)
+           inputs.ai_approvals)
   in
-  (* The same open asks Approvals walks, read on every refresh whatever the
-     view. Kept rows stay on the list through a failed re-read, the way the
-     held calls above do: the asks were open when last seen, and dropping
-     them would say nothing is waiting. *)
+  (* The same open asks Approvals walks, read again on their announcement
+     whatever the view. Kept rows stay on the list through a failed re-read,
+     the way the held calls above do: the asks were open when last seen, and
+     dropping them would say nothing is waiting. *)
   let asking =
-    match state.asks_snapshot, state.asks_error with
+    match inputs.ai_asks, inputs.ai_asks_error with
     | Some snapshot, _ ->
       Masc_tui_agenda.Read
         (List.map
@@ -21586,8 +22078,44 @@ let agenda (state : state) : Masc_tui_agenda.t =
     | None, None -> Masc_tui_agenda.Not_read
   in
   Masc_tui_agenda.project ~scheduled
-    ~scheduled_freshness:state.schedules_agenda_freshness ~awaiting ~asking
-    ~confirming:state.goals_to_confirm ~stalled:state.operator_stalled
+    ~scheduled_freshness:inputs.ai_schedule_freshness ~awaiting ~asking
+    ~confirming:inputs.ai_goals_to_confirm ~stalled:inputs.ai_stalled
+;;
+
+(* As [same_roster_inputs]: a new field fails the build until compared. *)
+let[@warning "+9+27"] same_agenda_inputs
+    { ai_schedules; ai_schedules_error; ai_schedule_freshness; ai_approvals_observed;
+      ai_approvals_error; ai_approvals; ai_asks; ai_asks_error; ai_goals_to_confirm;
+      ai_stalled } b =
+  ai_schedules == b.ai_schedules && ai_schedules_error == b.ai_schedules_error
+  && ai_schedule_freshness = b.ai_schedule_freshness
+  && Bool.equal ai_approvals_observed b.ai_approvals_observed
+  && ai_approvals_error == b.ai_approvals_error && ai_approvals == b.ai_approvals
+  && ai_asks == b.ai_asks && ai_asks_error == b.ai_asks_error
+  && ai_goals_to_confirm == b.ai_goals_to_confirm && ai_stalled == b.ai_stalled
+
+(* Every surface asks how many rows the strip takes, and the strip itself is
+   drawn once more, all in one frame. Its inputs are immutable values the state
+   swaps whole, so while each one is still the same value the last strip is the
+   strip. *)
+let last_agenda : (agenda_inputs * Masc_tui_agenda.t) option ref = ref None
+
+let agenda (state : state) : Masc_tui_agenda.t =
+  let inputs =
+    { ai_schedules = state.schedules_agenda; ai_schedules_error = state.schedules_agenda_error
+    ; ai_schedule_freshness = state.schedules_agenda_freshness
+    ; ai_approvals_observed = state.keeper_tool_approvals_observed
+    ; ai_approvals_error = state.keeper_tool_approvals_error
+    ; ai_approvals = state.keeper_tool_approvals
+    ; ai_asks = state.asks_snapshot; ai_asks_error = state.asks_error
+    ; ai_goals_to_confirm = state.goals_to_confirm; ai_stalled = state.operator_stalled }
+  in
+  match !last_agenda with
+  | Some (seen, strip) when same_agenda_inputs seen inputs -> strip
+  | Some _ | None ->
+      let strip = agenda_of_inputs inputs in
+      last_agenda := Some (inputs, strip);
+      strip
 ;;
 
 (* Rows the agenda strip takes from every surface. Added once, here, rather
@@ -21617,7 +22145,7 @@ let surface_body_rows (state : state) ~terminal_rows =
 
 let tools_scroll_layout state ~count =
   { sc_count = count
-  ; sc_chrome = if Option.is_some state.tools_error then 9 else 7
+  ; sc_chrome = if Option.is_some (selected_tools_error state) then 9 else 7
   ; sc_overflow_takes_row = Option.is_none state.tools_skill_source_picker
   ; sc_preview_keep = None }
 ;;
@@ -25127,10 +25655,9 @@ let keeper_message_schedule_rows state ~now ~max_rows =
               | Turn_ended -> Schedule_pending, "최근 회차 턴 종료 · 결과 확인 중"
               | Consumed -> Schedule_pending, "최근 회차 소비 확인 · 결과 미확인"
               | Completed -> Schedule_settled, "최근 회차 턴 완료"
-              | Failed error -> Schedule_failed, reason "최근 회차 처리 실패" error
               | Cancelled why -> Schedule_settled, reason "최근 회차 취소" why
-              | Settling -> Schedule_pending, "최근 회차 결과 기록 중"
-              | Transferring -> Schedule_pending, "최근 회차 인계 기록 중"
+              | Settling _ -> Schedule_pending, "최근 회차 결과 기록 중"
+              | Transferring _ -> Schedule_pending, "최근 회차 인계 기록 중"
               | Unknown why -> Schedule_pending, plain why in
             let hold = match row.sch_runner_hold with
               | None -> ""
@@ -25152,11 +25679,11 @@ let keeper_message_schedule_rows state ~now ~max_rows =
             (* The last occurrence's time is never labelled as the next firing. *)
             let next = match row.sch_next_due_at_iso, stage with
               | Some at, (Queued | Queued_at _ | Turn_started | Turn_ended | Consumed | Completed
-                         | Failed _ | Cancelled _ | Settling | Transferring) ->
+                         | Cancelled _ | Settling _ | Transferring _) ->
                   " · 다음 예정 " ^ plain at
               | (None | Some _), (No_occurrence | Dispatching | Dispatch_failed _ | Missing | Unknown _)
               | None, (Queued | Queued_at _ | Turn_started | Turn_ended | Consumed | Completed
-                      | Failed _ | Cancelled _ | Settling | Transferring) -> "" in
+                      | Cancelled _ | Settling _ | Transferring _) -> "" in
             tone, occurrence ^ hold ^ " · " ^ plain title ^ " · " ^ clock ^ next in
           let toggle = chat_schedule_toggle_label ^ (if state.msg_schedules_expanded then " 접기" else " 펼치기") in
           match entries with

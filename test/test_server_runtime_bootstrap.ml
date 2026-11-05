@@ -1245,9 +1245,7 @@ let make_task ?(title = "Task") ?(description = "") ~id ~status () : Types.task 
     contract = None;
     handoff_context = None;
     cycle_count = 0;
-    reclaim_policy = None;
     execution_links = Masc_domain.no_execution_links;
-    do_not_reclaim_reason = None;
     skills = [];
   }
 
@@ -1392,7 +1390,7 @@ let test_health_json_surfaces_durable_paused_keepers () =
                   ; content = ""
                   ; hearth = None
                   ; updated_at = None
-                  ; audience = Some (Keeper_event_queue.Audience_discoverable)
+                  ; audience = Keeper_event_queue.Audience_discoverable
                   }
             }
           in
@@ -3873,6 +3871,21 @@ let test_health_response_full_query_uses_snapshot_cache () =
           Alcotest.(check string) "cached health retains waiting inventory"
             "masc.health.keeper_waiting_inventory.v1"
             (refreshed |> member "keeper_waiting_inventory" |> member "schema" |> to_string);
+          (* RFC-0484 §3.3: the probe the TUI reads on every refresh serves
+             the snapshot's operator rollup, the same values the full
+             response carries, without a second copy of any key. *)
+          let probe =
+            Server_routes_http_runtime.make_health_response_json
+              (Httpun.Request.create `GET "/health")
+          in
+          check_unique_object_keys "$" probe;
+          Alcotest.(check string) "the probe is still the probe" "probe"
+            (probe |> member "health_detail" |> to_string);
+          List.iter (fun key ->
+            Alcotest.(check string) ("the probe carries the snapshot's " ^ key)
+              (refreshed |> member key |> Yojson.Safe.to_string)
+              (probe |> member key |> Yojson.Safe.to_string))
+            Server_health_rollup.operator_field_names;
           List.iter (fun listener ->
             let timed = timed_health_body ~listener request in
             Alcotest.(check string) "timed full response retains full detail" "full"

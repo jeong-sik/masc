@@ -93,12 +93,12 @@ Its wire-only values exclude decode time, unlike the initial table.
 
 ## Concrete protocol work
 
-The current MSX TUI poll calls `tick_msx`, advances the shared machine, fetches
-its complete RGB payload and renders it. `Masc_tui_msx.render` starts each
-paint with erase-display, while `place_rgb` transmits anonymous image data.
-This bypasses the retained row presenter's synchronized/differential output.
-An unchanged image is therefore erased and transmitted again as the frame
-counter advances.
+The MSX TUI poll calls `tick_msx`, advances the shared machine, fetches its
+complete RGB payload and renders it. When the geometry and frame size match
+the previous paint, `Masc_tui_msx.render` moves the cursor home instead of
+erasing the display, sends no image when the pixels are byte-equal, and
+otherwise sends `replace_rgb` under a fixed image and placement ID. A layout
+change deletes the image and erases the display.
 
 The next implementation units are:
 

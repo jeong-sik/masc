@@ -150,8 +150,8 @@ stays unrecorded rather than being assigned to a Keeper.
 These readings describe the row's observation time. Retained workers and queued
 or running requests are labelled accordingly; Refresh reads newer observations.
 The readings do not report native Space ownership or window visibility, and a
-returned operation alone does not establish login success. Private operator
-controls and browser handoff remain separate actions.
+returned operation alone does not establish login success. Browser handoff
+remains a separate action.
 
 Authenticated native-host HTTP routes forward polls, results and disconnects to
 this Add-on. They use the served workspace's lane token, even when the process
@@ -312,10 +312,7 @@ current installed runtime. Follow the
 [lifecycle evidence](../../docs/design/browser-addon-lifecycle.md#completion-evidence)
 and [issue #44150](https://github.com/jeong-sik/masc/issues/44150).
 
-An Ego input whose release is uncertain can be resumed on the same connection
-through the installation's private operator controls. After manually checking
-and resetting key/button state in the displayed Space, press the confirmation
-button. It is bound to that pending input generation, sends no browser input and
-is recorded as an operator assertion. Answering a dialog or taking over a Space
-alone does not clear the uncertainty. Original gesture cleanup, visible UI and
-login completion are separate observations.
+An Ego answer reports `inputReadiness: release_uncertain` when an
+input-holding command ended without the SDK declaring its release. Later input
+on the same connection runs; the value is an observation. Original
+gesture cleanup, visible UI and login completion are separate observations.

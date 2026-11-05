@@ -449,24 +449,23 @@ let test_decode_keeper_projects_current_schema () =
         identity.k_updated_at
   | Error err -> Alcotest.fail err
 
-let test_decode_keeper_formats_last_turn_timestamp () =
+let test_decode_keeper_keeps_last_turn_seconds () =
   let timestamp = 1700000000.9 in
   match
     Tui_decode.decode_keeper (current_keeper_json ~last_turn_ts:timestamp ())
   with
   | Ok keeper ->
       let activity = Option.get keeper.k_activity in
-      Alcotest.(check string) "timestamp uses canonical ISO formatter"
-        (Masc_domain.iso8601_of_unix_seconds timestamp)
-        activity.k_last_turn_ts
+      Alcotest.(check (option (float 0.))) "the runtime's seconds are kept as they are"
+        (Some timestamp) activity.k_last_turn_at
   | Error err -> Alcotest.fail err
 
-let test_decode_keeper_zero_last_turn_is_empty () =
+let test_decode_keeper_zero_last_turn_is_none () =
   match Tui_decode.decode_keeper (current_keeper_json ()) with
   | Ok keeper ->
       let activity = Option.get keeper.k_activity in
-      Alcotest.(check string) "zero timestamp becomes empty" ""
-        activity.k_last_turn_ts
+      Alcotest.(check (option (float 0.))) "a zero timestamp is no last turn" None
+        activity.k_last_turn_at
   | Error err -> Alcotest.fail err
 
 let test_terminal_lines_source_mapping () =
@@ -3118,7 +3117,7 @@ let tool_entry_json ?(surfaces = [ "public_mcp" ]) ?(direct = `Bool true) () =
     ; ("surfaces", `List (List.map (fun s -> `String s) surfaces))
     ]
 
-let tool_snapshot_json ?effective ?activations tools =
+let tool_snapshot_json ?effective tools =
   `Assoc
     [ ("generated_at", `String "2026-08-23T09:00:00Z")
     ; ("config_resolution", `Assoc [])
@@ -3132,8 +3131,6 @@ let tool_snapshot_json ?effective ?activations tools =
     ; ("tool_usage", `Assoc [])
     ; ( "effective_keeper_surface"
       , Option.value ~default:`Null effective )
-    ; ( "skill_activations"
-      , Option.value ~default:`Null activations )
     ]
 
 let test_decode_tool_snapshot_reads_the_live_shape () =
@@ -3164,23 +3161,19 @@ let skill_snapshot_json ?(rejections = []) ?(shadows = []) () =
     ; "rejections", `List rejections
     ]
 
-let skill_usage_coverage_json ?(loaded = 1) ?(unavailable = []) () =
-  `Assoc ["ledgers_loaded", `Int loaded;
-          "unavailable", `List (List.map (fun detail -> `String detail) unavailable)]
+(* A reference as the server writes it, with a 64-hex content revision. *)
+let skill_reference_json ?(name = "work-intake") () =
+  `Assoc
+    [ ( "identity",
+        `Assoc
+          [ ("source_id", `String "workspace")
+          ; ("package_id", `String "pkg")
+          ; ("name", `String name)
+          ] )
+    ; ("content_revision", `String (String.make 64 'a'))
+    ]
 
-let skills_catalog_json ?(usage = true) ?(flow = true) () =
-  let usage_json =
-    if usage then
-      `List
-        [ `Assoc
-            [ ("keeper", `String "bravo")
-            ; ("invocations", `Int 12)
-            ; ("deliveries", `Int 12)
-            ; ("actions", `Int 9)
-            ; ("last_used_at", `String "2026-08-28T03:04:05Z")
-            ] ]
-    else `Null
-  in
+let skills_catalog_json ?(flow = true) () =
   let profile_json =
     `Assoc
       [ ( "flow",
@@ -3213,70 +3206,129 @@ let skills_catalog_json ?(usage = true) ?(flow = true) () =
   `Assoc
     [ ("schema", `String "masc.skill-snapshot/v1")
     ; ("state", `String "ready")
-    ; ("usage_coverage", skill_usage_coverage_json ())
     ; ("snapshot", skill_snapshot_json ())
     ; ( "surfaces",
         `List
           [ `Assoc
-              [ ( "reference",
-                  `Assoc
-                    [ ( "identity",
-                        `Assoc
-                            [ ("source_id", `String "workspace")
-                            ; ("package_id", `String "pkg")
-                            ; ("name", `String "work-intake")
-                            ] )
-                    ; ("content_revision", `String "rev1")
-                    ] )
+              [ ("reference", skill_reference_json ())
               ; ("kind", `String "composition")
-              ; ("usage", usage_json)
               ; ("profile", profile_json)
               ] ] )
     ]
 
-(* The discovery roots ride the same response the surfaces do, and the
-   projection dropped them: a Skill that never loaded had nowhere on screen
-   to say which root was looked at, or that the root was not there. *)
-let test_decode_skills_catalog_keeps_usage_scope () =
-  let payload ?(usage = true) coverage =
-    match skills_catalog_json ~usage () with
-    | `Assoc fields -> `Assoc (("usage_coverage", coverage) :: List.remove_assoc "usage_coverage" fields)
-    | _ -> Alcotest.fail "invalid catalog fixture" in
-  let read ?(usage = true) coverage =
-    match Masc.Tui_decode_tools.decode_skills_catalog (payload ~usage coverage) with
-    | Ok catalog -> catalog
-    | Error error -> Alcotest.fail error in
-  let partial = read (skill_usage_coverage_json ~loaded:19
-      ~unavailable:["bravo: metadata unavailable"; "charlie: invalid_ledger"] ()) in
-  (match partial.sc_usage_coverage with
-   | Some coverage ->
-       Alcotest.(check int) "loaded ledgers are observed" 19 coverage.suc_ledgers_loaded;
-       Alcotest.(check (list string)) "unavailable reasons survive unchanged"
-         ["bravo: metadata unavailable"; "charlie: invalid_ledger"] coverage.suc_unavailable
-   | None -> Alcotest.fail "ready response lost coverage");
-  (match partial.sc_surfaces with
-   | [surface] ->
-       (match surface.scs_usage with
-        | [usage] -> Alcotest.(check int) "known invocation count survives partial coverage" 12 usage.su_invocations
-        | _ -> Alcotest.fail "known usage was dropped")
-   | _ -> Alcotest.fail "known surface was dropped");
-  let no_ledgers = read ~usage:false (skill_usage_coverage_json ~loaded:0
-      ~unavailable:["keeper catalog: unavailable"] ()) in
-  (match no_ledgers.sc_usage_coverage with
-   | Some coverage -> Alcotest.(check int) "zero loaded is explicit" 0 coverage.suc_ledgers_loaded
-   | None -> Alcotest.fail "unavailable ledger inventory disappeared");
-  List.iter (fun bad ->
-      match Masc.Tui_decode_tools.decode_skills_catalog (payload bad) with
-      | Error _ -> ()
-      | Ok _ -> Alcotest.fail "malformed coverage must not become an observed zero")
-    [ `Null; skill_usage_coverage_json ~loaded:(-1) ();
-      `Assoc ["ledgers_loaded", `Int 1; "unavailable", `List [`Int 1]] ];
-  match skills_catalog_json () with
-  | `Assoc fields ->
-      (match Masc.Tui_decode_tools.decode_skills_catalog (`Assoc (List.remove_assoc "usage_coverage" fields)) with
-       | Error _ -> ()
-       | Ok _ -> Alcotest.fail "missing coverage was accepted")
-  | _ -> Alcotest.fail "invalid catalog fixture"
+let keeper_skill_usage_json ?(keeper = "bravo") usage =
+  `Assoc
+    [ ("schema", `String "masc.keeper-skill-usage/v1")
+    ; ("keeper", `String keeper)
+    ; ("usage", usage)
+    ]
+
+(* One Keeper's usage answer (RFC-0483): each closed state, read for the
+   Keeper asked about. *)
+let test_decode_keeper_skill_usage_reads_each_state () =
+  let decode usage =
+    match
+      Masc.Tui_decode_tools.decode_keeper_skill_usage ~keeper:"bravo"
+        (keeper_skill_usage_json usage)
+    with
+    | Ok usage -> usage
+    | Error error -> Alcotest.fail error
+  in
+  (match
+     decode
+       (`Assoc
+          [ ("state", `String "ready")
+          ; ( "rows",
+              `List
+                [ `Assoc
+                    [ ("reference", skill_reference_json ())
+                    ; ("invocations", `Int 12)
+                    ; ("deliveries", `Int 12)
+                    ; ("actions", `Int 9)
+                    ; ("last_used_at", `String "2026-08-28T03:04:05Z")
+                    ] ] )
+          ])
+   with
+   | Masc.Tui_decode_tools.Keeper_usage_ready [ row ] ->
+       Alcotest.(check string) "reference name" "work-intake"
+         Skill_reference.(row.Masc.Tui_decode_tools.ksu_reference.identity.name);
+       Alcotest.(check int) "invocations" 12 row.Masc.Tui_decode_tools.ksu_invocations;
+       Alcotest.(check int) "actions" 9 row.Masc.Tui_decode_tools.ksu_actions
+   | _ -> Alcotest.fail "expected one ready row");
+  Alcotest.(check bool) "no session" true
+    (decode (`Assoc [ ("state", `String "no_session") ])
+     = Masc.Tui_decode_tools.Keeper_usage_no_session);
+  Alcotest.(check bool) "no catalog" true
+    (decode (`Assoc [ ("state", `String "no_catalog") ])
+     = Masc.Tui_decode_tools.Keeper_usage_no_catalog);
+  match
+    decode
+      (`Assoc
+         [ ("state", `String "unavailable")
+         ; ("reason", `String "activation_ledger_unreadable")
+         ; ("detail", `String "decode failed")
+         ])
+  with
+  | Masc.Tui_decode_tools.Keeper_usage_unavailable { kua_reason; kua_detail } ->
+      Alcotest.(check string) "reason" "activation_ledger_unreadable" kua_reason;
+      Alcotest.(check string) "detail" "decode failed" kua_detail
+  | _ -> Alcotest.fail "expected unavailable"
+
+let test_decode_keeper_skill_usage_refuses_another_keeper_schema_or_state () =
+  let refused label json =
+    match Masc.Tui_decode_tools.decode_keeper_skill_usage ~keeper:"bravo" json with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.failf "%s was accepted" label
+  in
+  let no_session = `Assoc [ ("state", `String "no_session") ] in
+  refused "another Keeper's answer" (keeper_skill_usage_json ~keeper:"charlie" no_session);
+  refused "another schema"
+    (`Assoc
+       [ ("schema", `String "masc.keeper-skill-activations/v1")
+       ; ("keeper", `String "bravo")
+       ; ("usage", no_session)
+       ]);
+  refused "an unknown state" (keeper_skill_usage_json (`Assoc [ ("state", `String "no_ledger") ]));
+  refused "a negative count"
+    (keeper_skill_usage_json
+       (`Assoc
+          [ ("state", `String "ready")
+          ; ( "rows",
+              `List
+                [ `Assoc
+                    [ ("reference", skill_reference_json ())
+                    ; ("invocations", `Int (-1))
+                    ; ("deliveries", `Int 0)
+                    ; ("actions", `Int 0)
+                    ; ("last_used_at", `String "2026-08-28T03:04:05Z")
+                    ] ] )
+          ]));
+  (* Every object in the answer is closed to the fields its schema names. *)
+  refused "a field outside the answer"
+    (`Assoc
+       [ ("schema", `String "masc.keeper-skill-usage/v1")
+       ; ("keeper", `String "bravo")
+       ; ("usage", no_session)
+       ; ("extra", `Null)
+       ]);
+  refused "a field outside its state"
+    (keeper_skill_usage_json
+       (`Assoc [ ("state", `String "no_session"); ("rows", `List []) ]));
+  refused "a field outside the row"
+    (keeper_skill_usage_json
+       (`Assoc
+          [ ("state", `String "ready")
+          ; ( "rows",
+              `List
+                [ `Assoc
+                    [ ("reference", skill_reference_json ())
+                    ; ("invocations", `Int 1)
+                    ; ("deliveries", `Int 1)
+                    ; ("actions", `Int 0)
+                    ; ("last_used_at", `String "2026-08-28T03:04:05Z")
+                    ; ("keeper", `String "bravo")
+                    ] ] )
+          ]))
 
 (* The async read boundary adds "skills catalog load failed: "; the decoder
    gives only the cause, so the source is named once on screen. *)
@@ -3340,7 +3392,6 @@ let test_decode_skills_catalog_reads_the_discovery_roots () =
     `Assoc
       [ "schema", `String "masc.skill-snapshot/v1"
       ; "state", `String "ready"
-      ; "usage_coverage", skill_usage_coverage_json ()
       ; "snapshot", snapshot
       ; "surfaces", `List []
       ]
@@ -3372,7 +3423,7 @@ let test_decode_skills_catalog_reads_the_discovery_roots () =
      | sources ->
        Alcotest.failf "expected both roots, got %d" (List.length sources))
 
-let test_decode_skills_catalog_reads_usage_and_flow () =
+let test_decode_skills_catalog_reads_reference_and_flow () =
   match Masc.Tui_decode_tools.decode_skills_catalog (skills_catalog_json ()) with
   | Error err -> Alcotest.failf "decode failed: %s" err
   | Ok catalog ->
@@ -3381,19 +3432,13 @@ let test_decode_skills_catalog_reads_usage_and_flow () =
       (match catalog.Masc.Tui_decode_tools.sc_surfaces with
        | [ surface ] ->
            Alcotest.(check string) "skill name" "work-intake"
-             surface.Masc.Tui_decode_tools.scs_name;
+             Skill_reference.(surface.Masc.Tui_decode_tools.scs_reference.identity.name);
            Alcotest.(check string) "kind" "composition"
              surface.Masc.Tui_decode_tools.scs_kind;
-           (match surface.Masc.Tui_decode_tools.scs_usage with
-            | [ row ] ->
-                Alcotest.(check string) "usage keeper" "bravo"
-                  row.Masc.Tui_decode_tools.su_keeper;
-                Alcotest.(check int) "invocations" 12
-                  row.Masc.Tui_decode_tools.su_invocations;
-                Alcotest.(check int) "actions" 9 row.Masc.Tui_decode_tools.su_actions
-            | rows ->
-                Alcotest.failf "expected one usage row, got %d"
-                  (List.length rows));
+           Alcotest.(check string) "exact reference"
+             (Yojson.Safe.to_string (skill_reference_json ()))
+             (Yojson.Safe.to_string
+                (Skill_reference.to_yojson surface.Masc.Tui_decode_tools.scs_reference));
            (match surface.Masc.Tui_decode_tools.scs_flow with
             | Some { Masc.Tui_decode_tools.sf_batches = [ batch ]; _ } ->
                 Alcotest.(check string) "batch mode" "serial"
@@ -3407,19 +3452,17 @@ let test_decode_skills_catalog_reads_usage_and_flow () =
        | surfaces ->
            Alcotest.failf "expected one surface, got %d" (List.length surfaces))
 
-(* The ledger side warms independently of the catalog. Usage may be empty, but
-   the exact surface profile remains the capability authority. *)
-let test_decode_skills_catalog_tolerates_empty_usage_and_flow () =
+(* The exact surface profile is the capability authority even when it
+   declares no flow. *)
+let test_decode_skills_catalog_tolerates_an_empty_flow () =
   match
     Masc.Tui_decode_tools.decode_skills_catalog
-      (skills_catalog_json ~usage:false ~flow:false ())
+      (skills_catalog_json ~flow:false ())
   with
-  | Error err -> Alcotest.failf "decode failed on empty usage/flow: %s" err
+  | Error err -> Alcotest.failf "decode failed on an empty flow: %s" err
   | Ok catalog ->
       (match catalog.Masc.Tui_decode_tools.sc_surfaces with
        | [ surface ] ->
-           Alcotest.(check bool) "usage reads empty" true
-             (surface.Masc.Tui_decode_tools.scs_usage = []);
            Alcotest.(check bool) "flow reads None" true
              (surface.Masc.Tui_decode_tools.scs_flow = None)
        | surfaces ->
@@ -3429,16 +3472,7 @@ let test_decode_skills_catalog_tolerates_empty_usage_and_flow () =
 let test_decode_skills_catalog_rejects_a_wrong_kind_type () =
   let bad_surface =
     `Assoc
-      [ ( "reference",
-          `Assoc
-            [ ( "identity",
-                `Assoc
-                    [ ("source_id", `String "workspace")
-                    ; ("package_id", `String "pkg")
-                    ; ("name", `String "broken")
-                    ] )
-          ; ("content_revision", `String "rev1")
-          ] )
+      [ ("reference", skill_reference_json ~name:"broken" ())
       ; ("kind", `Int 3)
       ]
   in
@@ -3447,7 +3481,6 @@ let test_decode_skills_catalog_rejects_a_wrong_kind_type () =
       (`Assoc
          [ ("schema", `String "masc.skill-snapshot/v1")
          ; ("state", `String "ready")
-    ; ("usage_coverage", skill_usage_coverage_json ())
          ; ("snapshot", skill_snapshot_json ())
          ; ("surfaces", `List [ bad_surface ])
          ])
@@ -3462,7 +3495,6 @@ let test_decode_skills_catalog_keeps_invalid_only_rejections () =
     `Assoc
       [ "schema", `String "masc.skill-snapshot/v1"
       ; "state", `String "ready"
-      ; "usage_coverage", skill_usage_coverage_json ()
       ; "surfaces", `List []
       ; ( "snapshot"
         , skill_snapshot_json
@@ -3526,7 +3558,6 @@ let test_decode_skills_catalog_keeps_shadows () =
     `Assoc
       [ "schema", `String "masc.skill-snapshot/v1"
       ; "state", `String "ready"
-      ; "usage_coverage", skill_usage_coverage_json ()
       ; "snapshot", skill_snapshot_json ~shadows ()
       ; "surfaces", `List []
       ]
@@ -3595,7 +3626,6 @@ let test_decode_skills_catalog_keeps_empty_invalid_identifiers () =
     `Assoc
       [ "schema", `String "masc.skill-snapshot/v1"
       ; "state", `String "ready"
-      ; "usage_coverage", skill_usage_coverage_json ()
       ; "snapshot", skill_snapshot_json ~rejections:[ rejection ] ()
       ; "surfaces", `List []
       ]
@@ -3638,7 +3668,6 @@ let test_decode_skills_catalog_closes_schema_and_state () =
     (`Assoc
        [ "schema", `String "masc.skill-snapshot/v1"
        ; "state", `String "ready"
-      ; "usage_coverage", skill_usage_coverage_json ()
        ; "snapshot", `Assoc [ "rejections", `List [] ]
        ; "surfaces", `List []
        ]);
@@ -3661,7 +3690,6 @@ let test_decode_skills_catalog_closes_schema_and_state () =
     (`Assoc
        [ "schema", `String "masc.skill-snapshot/v1"
        ; "state", `String "ready"
-      ; "usage_coverage", skill_usage_coverage_json ()
        ; ( "snapshot"
          , skill_snapshot_json ~rejections:[ missing_nullable_rejection ] () )
        ; "surfaces", `List []
@@ -4229,6 +4257,16 @@ let skill_activation_projection_json activations =
           ] )
     ]
 
+(* The [GET /api/v1/keepers/skill-activations?keeper=] answer around one
+   projection, decoded for the Keeper it names. *)
+let decode_keeper_activations ~keeper projection =
+  Masc.Tui_decode_tools.decode_keeper_skill_activations ~keeper
+    (`Assoc
+       [ "schema", `String "masc.keeper-skill-activations/v1"
+       ; "keeper", `String keeper
+       ; "skill_activations", projection
+       ])
+
 let test_decode_skill_activations_keeps_exact_receipt_and_origin () =
   let task_invocation =
     `Assoc
@@ -4285,20 +4323,14 @@ let test_decode_skill_activations_keeps_exact_receipt_and_origin () =
           ()
       ]
   in
-  match
-    Masc.Tui_decode_tools.decode_tool_snapshot
-      (tool_snapshot_json ~activations [])
-  with
+  match decode_keeper_activations ~keeper:"codex-mcp-client" activations with
   | Error err -> Alcotest.failf "decode failed: %s" err
   | Ok
-      { Masc.Tui_decode_tools.ts_skill_activations =
-          Some
-            (Masc.Tui_decode_tools.Skill_activations_available
-               { sap_keeper_name
-               ; sap_ledger
-               ; _
-               });
-        _ } ->
+      (Masc.Tui_decode_tools.Skill_activations_available
+         { sap_keeper_name
+         ; sap_ledger
+         ; _
+         }) ->
       let activations =
         Keeper_skill_activation_ledger.activations sap_ledger
       in
@@ -4370,11 +4402,8 @@ let test_decode_skill_activations_keeps_no_session_distinct () =
       ; "keeper_name", `String "idle-keeper"
       ]
   in
-  match Masc.Tui_decode_tools.decode_tool_snapshot (tool_snapshot_json ~activations []) with
-  | Ok
-      { Masc.Tui_decode_tools.ts_skill_activations =
-          Some (Masc.Tui_decode_tools.Skill_activations_no_session { sap_keeper_name });
-        _ } ->
+  match decode_keeper_activations ~keeper:"idle-keeper" activations with
+  | Ok (Masc.Tui_decode_tools.Skill_activations_no_session { sap_keeper_name }) ->
       Alcotest.(check string) "Keeper" "idle-keeper" sap_keeper_name
   | Ok _ -> Alcotest.fail "no_session was not kept distinct"
   | Error err -> Alcotest.failf "decode failed: %s" err
@@ -4388,13 +4417,10 @@ let test_decode_skill_activations_does_not_hide_unavailable () =
       ; "detail", `String "decode failed"
       ]
   in
-  match Masc.Tui_decode_tools.decode_tool_snapshot (tool_snapshot_json ~activations []) with
+  match decode_keeper_activations ~keeper:"broken-keeper" activations with
   | Ok
-      { Masc.Tui_decode_tools.ts_skill_activations =
-          Some
-            (Masc.Tui_decode_tools.Skill_activations_unavailable
-               { sap_reason; sap_detail; _ });
-        _ } ->
+      (Masc.Tui_decode_tools.Skill_activations_unavailable
+         { sap_reason; sap_detail; _ }) ->
       Alcotest.(check string) "reason" "activation_ledger_unreadable" sap_reason;
       Alcotest.(check string) "detail" "decode failed" sap_detail
   | Ok _ -> Alcotest.fail "unavailable activation ledger was hidden"
@@ -4410,25 +4436,72 @@ let test_decode_skill_activations_rejects_cross_session_turn () =
     | other -> other
   in
   let activations = skill_activation_projection_json [ activation ] in
-  match Masc.Tui_decode_tools.decode_tool_snapshot (tool_snapshot_json ~activations []) with
+  match decode_keeper_activations ~keeper:"codex-mcp-client" activations with
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "cross-session activation turn_ref was accepted"
 
-let test_decode_tool_snapshot_requires_both_keeper_projection_fields () =
-  let missing_activations =
+let test_decode_tool_snapshot_requires_the_keeper_surface_field () =
+  let missing_surface =
     match tool_snapshot_json [] with
-    | `Assoc fields -> `Assoc (List.remove_assoc "skill_activations" fields)
+    | `Assoc fields -> `Assoc (List.remove_assoc "effective_keeper_surface" fields)
     | other -> other
   in
-  match Masc.Tui_decode_tools.decode_tool_snapshot missing_activations with
+  match Masc.Tui_decode_tools.decode_tool_snapshot missing_surface with
   | Error _ -> ()
-  | Ok _ -> Alcotest.fail "missing skill_activations field was accepted"
+  | Ok _ -> Alcotest.fail "missing effective_keeper_surface field was accepted"
+
+(* An answer is for the Keeper the pane asked about, under its own schema. *)
+let test_decode_keeper_activations_refuses_another_keeper_or_schema () =
+  let projection = `Assoc [ "status", `String "no_session"; "keeper_name", `String "imp" ] in
+  (match
+     Masc.Tui_decode_tools.decode_keeper_skill_activations ~keeper:"imp"
+       (`Assoc
+          [ "schema", `String "masc.keeper-skill-activations/v1"
+          ; "keeper", `String "other"
+          ; "skill_activations", projection
+          ])
+   with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "an answer for another Keeper was accepted");
+  (match
+     Masc.Tui_decode_tools.decode_keeper_skill_activations ~keeper:"imp"
+       (`Assoc
+          [ "schema", `String "masc.keeper-skill-usage/v1"
+          ; "keeper", `String "imp"
+          ; "skill_activations", projection
+          ])
+   with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "an answer under another schema was accepted");
+  (match
+     Masc.Tui_decode_tools.decode_keeper_skill_activations ~keeper:"imp"
+       (`Assoc
+          [ "schema", `String "masc.keeper-skill-activations/v1"
+          ; "keeper", `String "imp"
+          ; "skill_activations", projection
+          ; "extra", `Null
+          ])
+   with
+   | Error detail ->
+       Alcotest.(check string) "the extra field is named"
+         "skill activations has unexpected field \"extra\"" detail
+   | Ok _ -> Alcotest.fail "an answer with a field outside its schema was accepted");
+  match
+    Masc.Tui_decode_tools.decode_keeper_skill_activations ~keeper:"imp"
+      (`Assoc
+         [ "schema", `String "masc.keeper-skill-activations/v1"
+         ; "keeper", `String "imp"
+         ; "skill_activations", `Assoc [ "status", `String "no_session"; "keeper_name", `String "other" ]
+         ])
+  with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "a projection naming another Keeper was accepted"
 
 let test_decode_async_actions_keeps_original_scope () =
   let ledger = Yojson.Safe.from_file "fixtures/skill-ledger-async-actions.json" in
   let activations = `Assoc ["status",`String "available";"keeper_name",`String "fixture";"ledger",ledger] in
-  match Masc.Tui_decode_tools.decode_tool_snapshot (tool_snapshot_json ~activations []) with
-  | Ok {Masc.Tui_decode_tools.ts_skill_activations=Some (Skill_activations_available {sap_ledger;_});_} ->
+  match decode_keeper_activations ~keeper:"fixture" activations with
+  | Ok (Masc.Tui_decode_tools.Skill_activations_available {sap_ledger;_}) ->
     Alcotest.(check int) "typed action facts survive the TUI data boundary" 3
       (List.length (Keeper_skill_activation_ledger.async_actions sap_ledger));
     Alcotest.(check int) "the original child activation remains distinct" 1
@@ -4466,10 +4539,7 @@ let test_decode_skill_activations_reuses_canonical_ledger_decoder () =
   in
   List.iter
     (fun projection ->
-       match
-         Masc.Tui_decode_tools.decode_tool_snapshot
-           (tool_snapshot_json ~activations:projection [])
-       with
+       match decode_keeper_activations ~keeper:"codex-mcp-client" projection with
        | Error _ -> ()
        | Ok _ -> Alcotest.fail "canonical activation invariant was bypassed")
     [ invalid_time; duplicate; invalid_revision ]
@@ -6328,6 +6398,8 @@ let test_decode_repository_changes_keeps_git_axes () =
             [ ("kind", `String "repository")
             ; ("repository_id", `String "masc")
             ] )
+      ; ( "branch"
+        , `Assoc [ ("head", `String "main"); ("upstream", `Null) ] )
       ; ( "changes"
         , `List
             [ `Assoc
@@ -6345,6 +6417,8 @@ let test_decode_repository_changes_keeps_git_axes () =
   | Error err -> Alcotest.failf "decode failed: %s" err
   | Ok
       { Tui_decode.rcs_scope = Repository_change_repository "masc"
+      ; rcs_branch =
+          Repository_on_branch { name = "main"; upstream = Repository_no_upstream }
       ; rcs_changes = [ row ]
       ; rcs_total = 1
       } ->
@@ -6355,7 +6429,76 @@ let test_decode_repository_changes_keeps_git_axes () =
       Alcotest.(check bool) "not conflicted" false row.rc_conflicted
   | Ok _ -> Alcotest.fail "unexpected repository changes shape"
 
-let test_decode_project_changes_keeps_project_scope () =
+let changes_json_with_branch branch =
+  `Assoc
+    [ ("scope", `Assoc [ ("kind", `String "project") ])
+    ; ("branch", branch)
+    ; ("changes", `List [])
+    ; ("total", `Int 0)
+    ]
+
+let decode_branch branch =
+  Result.map
+    (fun (snapshot : Tui_decode.repository_change_snapshot) -> snapshot.rcs_branch)
+    (Tui_decode.decode_repository_change_snapshot (changes_json_with_branch branch))
+
+let test_decode_changes_branch_tracking_counts () =
+  let branch =
+    `Assoc
+      [ ("head", `String "feat/x")
+      ; ( "upstream"
+        , `Assoc
+            [ ("name", `String "origin/feat/x"); ("ahead", `Int 2); ("behind", `Int 1) ] )
+      ]
+  in
+  match decode_branch branch with
+  | Ok
+      (Tui_decode.Repository_on_branch
+         { name = "feat/x"
+         ; upstream =
+             Repository_tracking { upstream = "origin/feat/x"; ahead = 2; behind = 1 }
+         }) ->
+      ()
+  | Ok _ -> Alcotest.fail "unexpected branch shape"
+  | Error err -> Alcotest.failf "decode failed: %s" err
+
+let test_decode_changes_branch_gone_upstream_has_no_counts () =
+  let branch =
+    `Assoc
+      [ ("head", `String "old")
+      ; ( "upstream"
+        , `Assoc [ ("name", `String "origin/old"); ("ahead", `Null); ("behind", `Null) ] )
+      ]
+  in
+  match decode_branch branch with
+  | Ok
+      (Tui_decode.Repository_on_branch
+         { name = "old"; upstream = Repository_upstream_gone "origin/old" }) ->
+      ()
+  | Ok _ -> Alcotest.fail "gone upstream must not carry counts"
+  | Error err -> Alcotest.failf "decode failed: %s" err
+
+let test_decode_changes_branch_refuses_half_counts () =
+  let half =
+    `Assoc
+      [ ("head", `String "main")
+      ; ( "upstream"
+        , `Assoc [ ("name", `String "origin/main"); ("ahead", `Int 1); ("behind", `Null) ] )
+      ]
+  in
+  let negative =
+    `Assoc
+      [ ("head", `String "main")
+      ; ( "upstream"
+        , `Assoc [ ("name", `String "origin/main"); ("ahead", `Int (-1)); ("behind", `Int 0) ] )
+      ]
+  in
+  Alcotest.(check bool) "one count without the other is an error" true
+    (Result.is_error (decode_branch half));
+  Alcotest.(check bool) "a negative count is an error" true
+    (Result.is_error (decode_branch negative))
+
+let test_decode_changes_requires_branch () =
   let json =
     `Assoc
       [ ("scope", `Assoc [ ("kind", `String "project") ])
@@ -6363,9 +6506,22 @@ let test_decode_project_changes_keeps_project_scope () =
       ; ("total", `Int 0)
       ]
   in
+  Alcotest.(check bool) "a status answer without branch is an error" true
+    (Result.is_error (Tui_decode.decode_repository_change_snapshot json))
+
+let test_decode_project_changes_keeps_project_scope () =
+  let json =
+    `Assoc
+      [ ("scope", `Assoc [ ("kind", `String "project") ])
+      ; ("branch", `Assoc [ ("head", `Null); ("upstream", `Null) ])
+      ; ("changes", `List [])
+      ; ("total", `Int 0)
+      ]
+  in
   match Tui_decode.decode_repository_change_snapshot json with
   | Ok
       { Tui_decode.rcs_scope = Repository_change_project
+      ; rcs_branch = Repository_detached
       ; rcs_changes = []
       ; rcs_total = 0
       } ->
@@ -6395,12 +6551,8 @@ let keeper_lane_json ?(phase = "running") ?(turn_phase = "executing")
     ; "phase_diagnosis", `Assoc [ "conditions", conditions ]
     ]
 
-let keeper_lanes_json lanes =
-  `Assoc
-    [ "generated_at", `Float 1787557669.715736
-    ; "count", `Int (List.length lanes)
-    ; "snapshots", `List lanes
-    ]
+(* The lane row of one Keeper's [/api/v1/keepers/<name>/composite] body. *)
+let decode_lane json = Tui_decode.decode_keeper_composite json |> Result.map fst
 
 (* Every phase the state machine has, through the wire and back.
 
@@ -6428,16 +6580,9 @@ let lane_phase_pairs =
   ]
 
 let decode_one_lane_phase raw =
-  match
-    Tui_decode.decode_keeper_lanes_snapshot
-      (keeper_lanes_json [ keeper_lane_json ~phase:raw "alpha" ])
-  with
+  match decode_lane (keeper_lane_json ~phase:raw "alpha") with
   | Error err -> Alcotest.failf "%s: decode failed: %s" raw err
-  | Ok snapshot -> (
-      match snapshot.Tui_decode.kls_lanes with
-      | [ lane ] -> lane.Tui_decode.kl_phase
-      | lanes ->
-          Alcotest.failf "%s: one lane in, %d out" raw (List.length lanes))
+  | Ok lane -> lane.Tui_decode.kl_phase
 
 let test_every_known_phase_decodes_to_its_own_constructor () =
   Alcotest.(check int)
@@ -6458,7 +6603,7 @@ let test_every_known_phase_decodes_to_its_own_constructor () =
         (Tui_decode.keeper_lane_phase_to_string decoded))
     lane_phase_pairs
 
-let test_decode_keeper_lanes_reads_current_shape_and_keeps_unknown_values () =
+let test_decode_keeper_lane_reads_current_shape_and_keeps_unknown_values () =
   let last_outcome =
     `Assoc
       [ "runtime_state", `String "done"
@@ -6467,75 +6612,71 @@ let test_decode_keeper_lanes_reads_current_shape_and_keeps_unknown_values () =
       ]
   in
   match
-    Tui_decode.decode_keeper_lanes_snapshot
-      (keeper_lanes_json
-         [ keeper_lane_json ~last_outcome "alpha"
-         ; keeper_lane_json ~phase:"future_phase" ~turn_phase:"future_turn"
-             ~conditions:(lane_conditions_json ~turn_healthy:false ()) "beta"
-         ])
+    ( decode_lane (keeper_lane_json ~last_outcome "alpha"),
+      decode_lane
+        (keeper_lane_json ~phase:"future_phase" ~turn_phase:"future_turn"
+           ~conditions:(lane_conditions_json ~turn_healthy:false ()) "beta") )
   with
-  | Error err -> Alcotest.failf "decode failed: %s" err
-  | Ok snapshot ->
-      Alcotest.(check int) "envelope count" 2 snapshot.Tui_decode.kls_count;
-      (match snapshot.Tui_decode.kls_lanes with
-       | [ alpha; beta ] ->
-           Alcotest.(check string) "first keeper" "alpha" alpha.kl_keeper;
-           Alcotest.(check string) "known phase" "running"
-             (Tui_decode.keeper_lane_phase_to_string alpha.kl_phase);
-           Alcotest.(check string) "known turn" "executing"
-             (Tui_decode.keeper_lane_turn_phase_to_string alpha.kl_turn_phase);
-           Alcotest.(check int) "idle seconds" 75 alpha.kl_idle_seconds;
-           (match alpha.kl_last_outcome with
-            | Some outcome ->
-                Alcotest.(check string) "outcome" "done"
-                  outcome.klo_runtime_state;
-                Alcotest.(check (option string)) "runtime id"
-                  (Some "claude_code.opus") outcome.klo_selected_runtime_id;
-                Alcotest.(check (option string)) "model"
-                  (Some "claude-opus-5-5") outcome.klo_selected_model
-            | None -> Alcotest.fail "alpha lost its last outcome");
-           (match beta.kl_phase with
-            | Tui_decode.Lane_phase_unknown raw ->
-                Alcotest.(check string) "unknown phase" "future_phase" raw
-            | _ -> Alcotest.fail "future phase was folded into a known phase");
-           (match beta.kl_turn_phase with
-            | Tui_decode.Lane_turn_unknown raw ->
-                Alcotest.(check string) "unknown turn" "future_turn" raw
-            | _ -> Alcotest.fail "future turn was folded into a known turn");
-           Alcotest.(check bool) "alpha's last turn is healthy" true
-             alpha.kl_conditions.Tui_decode.klc_turn_healthy;
-           Alcotest.(check bool) "beta's last turn failed" false
-             beta.kl_conditions.Tui_decode.klc_turn_healthy;
-           Alcotest.(check bool) "beta's heartbeat is healthy" true
-             beta.kl_conditions.Tui_decode.klc_heartbeat_healthy
-       | lanes ->
-           Alcotest.failf "expected two lane rows, got %d" (List.length lanes))
+  | Error err, _ | _, Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok alpha, Ok beta ->
+      Alcotest.(check string) "first keeper" "alpha" alpha.kl_keeper;
+      Alcotest.(check string) "known phase" "running"
+        (Tui_decode.keeper_lane_phase_to_string alpha.kl_phase);
+      Alcotest.(check string) "known turn" "executing"
+        (Tui_decode.keeper_lane_turn_phase_to_string alpha.kl_turn_phase);
+      Alcotest.(check int) "idle seconds" 75 alpha.kl_idle_seconds;
+      (match alpha.kl_last_outcome with
+       | Some outcome ->
+           Alcotest.(check string) "outcome" "done"
+             outcome.klo_runtime_state;
+           Alcotest.(check (option string)) "runtime id"
+             (Some "claude_code.opus") outcome.klo_selected_runtime_id;
+           Alcotest.(check (option string)) "model"
+             (Some "claude-opus-5-5") outcome.klo_selected_model
+       | None -> Alcotest.fail "alpha lost its last outcome");
+      (match beta.kl_phase with
+       | Tui_decode.Lane_phase_unknown raw ->
+           Alcotest.(check string) "unknown phase" "future_phase" raw
+       | _ -> Alcotest.fail "future phase was folded into a known phase");
+      (match beta.kl_turn_phase with
+       | Tui_decode.Lane_turn_unknown raw ->
+           Alcotest.(check string) "unknown turn" "future_turn" raw
+       | _ -> Alcotest.fail "future turn was folded into a known turn");
+      let condition read (lane : Tui_decode.keeper_lane) =
+        match lane.kl_conditions with
+        | Some conditions -> read conditions
+        | None -> Alcotest.failf "%s lost its phase diagnosis" lane.kl_keeper
+      in
+      Alcotest.(check bool) "alpha's last turn is healthy" true
+        (condition (fun c -> c.Tui_decode.klc_turn_healthy) alpha);
+      Alcotest.(check bool) "beta's last turn failed" false
+        (condition (fun c -> c.Tui_decode.klc_turn_healthy) beta);
+      Alcotest.(check bool) "beta's heartbeat is healthy" true
+        (condition (fun c -> c.Tui_decode.klc_heartbeat_healthy) beta)
 
 (* A Keeper whose turn ended before any runtime was dispatched has a null
    runtime id; a lane that omits the key is refused, so a server that stopped
    sending it is not read as "no runtime was selected". *)
-let test_decode_keeper_lanes_last_outcome_runtime_id_is_required_nullable () =
+let test_decode_keeper_lane_last_outcome_runtime_id_is_required_nullable () =
   let outcome fields = `Assoc ([ "runtime_state", `String "done" ] @ fields) in
   let decode fields =
-    Tui_decode.decode_keeper_lanes_snapshot
-      (keeper_lanes_json
-         [ keeper_lane_json ~last_outcome:(outcome fields) "alpha" ])
+    decode_lane (keeper_lane_json ~last_outcome:(outcome fields) "alpha")
   in
   (match
      decode [ "selected_runtime_id", `Null; "selected_model", `Null ]
    with
    | Error err -> Alcotest.failf "a null runtime id was refused: %s" err
-   | Ok { Tui_decode.kls_lanes = [ { Tui_decode.kl_last_outcome = Some o; _ } ]; _ } ->
+   | Ok { Tui_decode.kl_last_outcome = Some o; _ } ->
        Alcotest.(check (option string)) "null runtime id" None
          o.klo_selected_runtime_id
-   | Ok _ -> Alcotest.fail "expected one lane with an outcome");
+   | Ok _ -> Alcotest.fail "expected a lane with an outcome");
   match decode [ "selected_model", `Null ] with
   | Ok _ -> Alcotest.fail "an outcome without selected_runtime_id decoded"
   | Error detail ->
       Alcotest.(check bool) "error names the missing field" true
         (Astring.String.is_infix ~affix:"selected_runtime_id" detail)
 
-let test_decode_keeper_lanes_requires_the_table_fields () =
+let test_decode_keeper_lane_requires_the_table_fields () =
   let incomplete =
     `Assoc
       [ "keeper", `String "alpha"
@@ -6545,18 +6686,16 @@ let test_decode_keeper_lanes_requires_the_table_fields () =
       ; "phase_diagnosis", `Assoc [ "conditions", lane_conditions_json () ]
       ]
   in
-  match
-    Tui_decode.decode_keeper_lanes_snapshot (keeper_lanes_json [ incomplete ])
-  with
+  match decode_lane incomplete with
   | Ok _ -> Alcotest.fail "a lane without idle_seconds decoded"
   | Error detail ->
       Alcotest.(check bool) "error names the missing field" true
-        (String.starts_with ~prefix:"snapshots[0]: missing required field 'idle_seconds'" detail)
+        (Astring.String.is_infix ~affix:"idle_seconds" detail)
 
 (* A reading of no conditions is not a healthy keeper. Each of the three
    decides what the operations line says about the phase, so a lane without
    one is refused rather than drawn as if the keeper were fine. *)
-let test_decode_keeper_lanes_requires_the_phase_conditions () =
+let test_decode_keeper_lane_requires_the_phase_conditions () =
   List.iter
     (fun field ->
       let conditions =
@@ -6564,10 +6703,7 @@ let test_decode_keeper_lanes_requires_the_phase_conditions () =
         | `Assoc fields -> `Assoc (List.remove_assoc field fields)
         | json -> json
       in
-      match
-        Tui_decode.decode_keeper_lanes_snapshot
-          (keeper_lanes_json [ keeper_lane_json ~conditions "alpha" ])
-      with
+      match decode_lane (keeper_lane_json ~conditions "alpha") with
       | Ok _ -> Alcotest.failf "a lane without %s decoded" field
       | Error detail ->
           Alcotest.(check bool)
@@ -8762,6 +8898,63 @@ let keeper_turns_waiting_json =
         ]
     ]
 
+let keeper_turns_quota_spent_json =
+  `Assoc
+    [ "schema", `String "masc.keeper_turns.v1"
+    ; "waiting_errors", `List []
+    ; "keepers", `List
+        [ `Assoc
+            [ "keeper_name", `String "echo"
+            ; "status", `String "ok"
+            ; "turn", `Null
+            ; "waiting", `Assoc
+                [ "keeper_name", `String "echo"
+                ; "paused", `Bool false
+                ; "state", `String "waiting"
+                ; "waiting_count", `Int 1
+                ; "since", `Null
+                ; "since_iso", `Null
+                ; "due_at", `Float 1794182400.
+                ; "due_at_iso", `String "2026-11-09T00:00:00Z"
+                ; "sources", `Assoc [ "runtime_quota_spent", `Int 1 ]
+                ; "source_next_actions", `Assoc
+                    [ "runtime_quota_spent", `List [ `String "assign_a_route_with_open_quota" ] ]
+                ; "current_execution", `Null
+                ; "waiting_on", `List
+                    [ `Assoc
+                        [ "source", `String "runtime_quota_spent"
+                        ; "waiting_on", `String "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"
+                        ; "what", `String "한도 소진 · ollama_cloud"
+                        ; "wake_producer", `String "keeper_supervisor"
+                        ; "since", `Null
+                        ; "since_iso", `Null
+                        ; "due_at", `Float 1794182400.
+                        ; "due_at_iso", `String "2026-11-09T00:00:00Z"
+                        ; "next_action", `String "assign_a_route_with_open_quota"
+                        ; "detail", `Assoc []
+                        ]
+                    ]
+                ]
+            ]
+        ]
+    ]
+
+let test_decode_keeper_turns_projection_reads_quota_spent_waiting () =
+  match Tui_decode.decode_keeper_turns_projection keeper_turns_quota_spent_json with
+  | Error detail -> Alcotest.fail detail
+  | Ok { waiting = Tui_decode.Keeper_waiting_observed [ waiting ]; _ } ->
+    (match waiting.Tui_decode.kwr_waiting_on with
+     | [ item ] ->
+       Alcotest.(check bool) "quota spent source" true
+         (item.Tui_decode.kwi_source = Tui_decode.Waiting_source_runtime_quota_spent);
+       Alcotest.(check (float 0.001)) "the earliest reset is the due time" 1794182400.
+         (Option.get item.kwi_due_at)
+     | items -> Alcotest.failf "expected one waiting item, got %d" (List.length items))
+  | Ok { waiting = Tui_decode.Keeper_waiting_observed _; _ }
+  | Ok { waiting = Tui_decode.Keeper_waiting_fleet_unreported _; _ }
+  | Ok { waiting = Tui_decode.Keeper_waiting_unavailable _; _ } ->
+    Alcotest.fail "expected one observed waiting row"
+
 let test_decode_keeper_turns_projection_reads_waiting () =
   match Tui_decode.decode_keeper_turns_projection keeper_turns_waiting_json with
   | Error detail -> Alcotest.fail detail
@@ -9893,6 +10086,27 @@ let test_decode_server_identity_reads_a_probe () =
       identity.Tui_decode.sid_binary_commit_age_s;
     Alcotest.(check (option string)) "process identity" (Some "process-a")
       identity.Tui_decode.sid_runtime_instance_id
+
+let test_decode_server_identity_reads_the_operator_rollup () =
+  let with_rollup fields =
+    match health_probe with
+    | `Assoc base -> `Assoc (base @ fields)
+    | _ -> Alcotest.fail "the probe fixture is an object"
+  in
+  let read json =
+    match Tui_decode.decode_server_identity json with
+    | Ok identity -> identity.Tui_decode.sid_operator_action
+    | Error detail -> Alcotest.fail detail
+  in
+  let reason = "typesafeai:payment_required https://api.typesafe.ai/v1/systemone since=2026-11-04T06:45:51Z" in
+  Alcotest.(check (option (list string))) "the reasons when the operator has to act" (Some [ reason ])
+    (read (with_rollup [ "operator_action_required", `Bool true
+                       ; "operator_action_reasons", `List [ `String reason ] ]));
+  Alcotest.(check (option (list string))) "nothing to do is an answer too" (Some [])
+    (read (with_rollup [ "operator_action_required", `Bool false; "operator_action_reasons", `List [] ]));
+  Alcotest.(check (option (list string))) "an older server cannot say" None (read health_probe);
+  Alcotest.(check (option (list string))) "a flag that disagrees with its list is not read" None
+    (read (with_rollup [ "operator_action_required", `Bool true; "operator_action_reasons", `List [] ]))
 
 let test_decode_server_identity_survives_a_bare_health () =
   match Tui_decode.decode_server_identity (`Assoc [ ("status", `String "ok") ]) with
@@ -11504,37 +11718,27 @@ let secret_projection_json ~status ~env_names ~mounts =
       ("error", `Null);
     ]
 
-let snapshots_json entries =
-  `Assoc
-    [ ("generated_at", `Float 1.0);
-      ("count", `Int (List.length entries));
-      ("snapshots",
-       `List
-         (List.map
-            (fun (keeper, projection) ->
-              match projection with
-              | None -> `Assoc [ ("keeper", `String keeper) ]
-              | Some p ->
-                  `Assoc
-                    [ ("keeper", `String keeper); ("secret_projection", p) ])
-            entries));
-    ]
+(* One Keeper's [/api/v1/keepers/<name>/composite] body, carrying
+   [projection] under [secret_projection] when one is given. *)
+let composite_json ?projection keeper =
+  match keeper_lane_json keeper, projection with
+  | `Assoc fields, Some projection ->
+      `Assoc (fields @ [ "secret_projection", projection ])
+  | json, _ -> json
 
 let test_decode_secret_projection_reads_names_not_values () =
   let json =
-    snapshots_json
-      [ ( "marlow",
-          Some
-            (secret_projection_json ~status:"ready"
-               ~env_names:[ "JIRA_API_TOKEN"; "JIRA_BASE_URL"; "JIRA_EMAIL" ]
-               ~mounts:
-                 [ ( "/base/.masc/secrets/marlow/files/app.pem",
-                     "/tmp/masc-runtime/secrets/app.pem" ) ]) );
-      ]
+    composite_json "marlow"
+      ~projection:
+        (secret_projection_json ~status:"ready"
+           ~env_names:[ "JIRA_API_TOKEN"; "JIRA_BASE_URL"; "JIRA_EMAIL" ]
+           ~mounts:
+             [ ( "/base/.masc/secrets/marlow/files/app.pem",
+                 "/tmp/masc-runtime/secrets/app.pem" ) ])
   in
-  match Tui_decode.decode_keeper_secret_projections json with
+  match Tui_decode.decode_keeper_composite json with
   | Error err -> Alcotest.fail err
-  | Ok [ p ] ->
+  | Ok (_, Some p) ->
       Alcotest.(check string) "keeper" "marlow" p.Tui_decode.ksp_keeper;
       Alcotest.(check string) "status" "ready"
         (Tui_decode.keeper_secret_status_to_string p.Tui_decode.ksp_status);
@@ -11544,40 +11748,64 @@ let test_decode_secret_projection_reads_names_not_values () =
       Alcotest.(check (list string)) "container-side mount path"
         [ "/tmp/masc-runtime/secrets/app.pem" ] p.Tui_decode.ksp_file_paths;
       Alcotest.(check bool) "validated" true p.Tui_decode.ksp_values_validated
-  | Ok other ->
-      Alcotest.failf "expected one projection, read %d" (List.length other)
+  | Ok (_, None) -> Alcotest.fail "the projection was dropped"
 
-let test_decode_secret_projection_skips_unprojected_keeper () =
-  let json =
-    snapshots_json
-      [ ("analyst", None);
-        ( "marlow",
-          Some
-            (secret_projection_json ~status:"absent" ~env_names:[] ~mounts:[]) );
-      ]
+(* A Keeper the producer has not projected is absence, not a malformed
+   reading: its row is still read, with no projection. *)
+let test_decode_keeper_composite_without_a_projection_reads_none () =
+  List.iter
+    (fun (label, json) ->
+      match Tui_decode.decode_keeper_composite json with
+      | Error err -> Alcotest.failf "%s: %s" label err
+      | Ok (lane, None) ->
+          Alcotest.(check string) label "analyst" lane.Tui_decode.kl_keeper
+      | Ok (_, Some _) -> Alcotest.failf "%s: a projection appeared" label)
+    [ ("absent", composite_json "analyst");
+      ("null", composite_json "analyst" ~projection:`Null);
+    ]
+
+let test_decode_keeper_composite_reads_its_row_and_projection () =
+  let body =
+    composite_json "alpha"
+      ~projection:(secret_projection_json ~status:"absent" ~env_names:[] ~mounts:[])
   in
-  match Tui_decode.decode_keeper_secret_projections json with
+  match Tui_decode.decode_keeper_composite body with
   | Error err -> Alcotest.fail err
-  | Ok [ p ] ->
-      Alcotest.(check string) "the projected one is read" "marlow"
-        p.Tui_decode.ksp_keeper
-  | Ok other ->
-      Alcotest.failf "expected one projection, read %d" (List.length other)
+  | Ok (lane, Some projection) ->
+      Alcotest.(check string) "the row is the Keeper's" "alpha" lane.Tui_decode.kl_keeper;
+      Alcotest.(check string) "the projection is the Keeper's" "alpha"
+        projection.Tui_decode.ksp_keeper
+  | Ok (_, None) -> Alcotest.fail "the projection was dropped"
+
+(* A Keeper with no registry entry is answered without a phase diagnosis
+   (offline_keeper_composite_json). Its row is still read, with no
+   conditions rather than invented ones. *)
+let test_decode_keeper_composite_reads_an_offline_keeper () =
+  let body =
+    match keeper_lane_json ~phase:"offline" ~turn_phase:"idle" ~idle_seconds:0 "beta" with
+    | `Assoc fields -> `Assoc (List.remove_assoc "phase_diagnosis" fields)
+    | json -> json
+  in
+  match Tui_decode.decode_keeper_composite body with
+  | Error err -> Alcotest.fail err
+  | Ok (lane, None) ->
+      Alcotest.(check bool) "the offline phase is read" true
+        (lane.Tui_decode.kl_phase = Tui_decode.Lane_phase_offline);
+      Alcotest.(check bool) "no conditions are invented" true
+        (Option.is_none lane.Tui_decode.kl_conditions)
+  | Ok (_, Some _) -> Alcotest.fail "a projection appeared from nowhere"
 
 let test_decode_secret_projection_keeps_an_unknown_status () =
   (* Folding a word this reader does not know into [Secret_absent] would tell
      the operator the credential is missing when the producer said something
      else entirely. *)
   let json =
-    snapshots_json
-      [ ( "marlow",
-          Some
-            (secret_projection_json ~status:"quarantined" ~env_names:[]
-               ~mounts:[]) );
-      ]
+    composite_json "marlow"
+      ~projection:
+        (secret_projection_json ~status:"quarantined" ~env_names:[] ~mounts:[])
   in
-  match Tui_decode.decode_keeper_secret_projections json with
-  | Ok [ { Tui_decode.ksp_status = Tui_decode.Secret_status_unknown word; _ } ]
+  match Tui_decode.decode_keeper_composite json with
+  | Ok (_, Some { Tui_decode.ksp_status = Tui_decode.Secret_status_unknown word; _ })
     ->
       Alcotest.(check string) "the producer's word survives" "quarantined" word
   | Ok _ -> Alcotest.fail "an unknown status was folded into a known one"
@@ -11585,22 +11813,15 @@ let test_decode_secret_projection_keeps_an_unknown_status () =
 
 let test_decode_secret_projection_rejects_a_wrong_env_name_type () =
   let json =
-    `Assoc
-      [ ("snapshots",
-         `List
-           [ `Assoc
-               [ ("keeper", `String "marlow");
-                 ("secret_projection",
-                  `Assoc
-                    [ ("status", `String "ready");
-                      ("root", `String "/base/.masc/secrets/marlow");
-                      ("env_names", `List [ `Int 7 ]);
-                    ]);
-               ];
-           ]);
-      ]
+    composite_json "marlow"
+      ~projection:
+        (`Assoc
+          [ ("status", `String "ready");
+            ("root", `String "/base/.masc/secrets/marlow");
+            ("env_names", `List [ `Int 7 ]);
+          ])
   in
-  match Tui_decode.decode_keeper_secret_projections json with
+  match Tui_decode.decode_keeper_composite json with
   | Ok _ -> Alcotest.fail "a non-string env name was accepted"
   | Error _ -> ()
 
@@ -14091,6 +14312,8 @@ let () =
           test_decode_keeper_turns_rejects_unknown_schema
       ; Alcotest.test_case "projection reads canonical waiting" `Quick
           test_decode_keeper_turns_projection_reads_waiting
+      ; Alcotest.test_case "projection reads a quota spent wait" `Quick
+          test_decode_keeper_turns_projection_reads_quota_spent_waiting
       ; Alcotest.test_case "projection keeps waiting unobserved" `Quick
           test_decode_keeper_turns_projection_keeps_waiting_unobserved
       ; Alcotest.test_case "projection accepts an older server" `Quick
@@ -14132,8 +14355,10 @@ let () =
           test_decode_skill_activations_does_not_hide_unavailable;
         Alcotest.test_case "Skill activation rejects cross-session turn" `Quick
           test_decode_skill_activations_rejects_cross_session_turn;
-        Alcotest.test_case "tool snapshot requires Keeper projection fields" `Quick
-          test_decode_tool_snapshot_requires_both_keeper_projection_fields;
+        Alcotest.test_case "tool snapshot requires the Keeper surface field" `Quick
+          test_decode_tool_snapshot_requires_the_keeper_surface_field;
+        Alcotest.test_case "Keeper activations refuse another Keeper or schema" `Quick
+          test_decode_keeper_activations_refuses_another_keeper_or_schema;
         Alcotest.test_case "Skill activation reuses canonical ledger decoder" `Quick
           test_decode_skill_activations_reuses_canonical_ledger_decoder;
         Alcotest.test_case "async actions retain original scope" `Quick test_decode_async_actions_keeps_original_scope;
@@ -14217,19 +14442,27 @@ let () =
           test_decode_memory_facts_rejects_a_shapeless_store;
         Alcotest.test_case "project changes keep project scope" `Quick
           test_decode_project_changes_keeps_project_scope;
+        Alcotest.test_case "changes branch keeps tracking counts" `Quick
+          test_decode_changes_branch_tracking_counts;
+        Alcotest.test_case "changes branch gone upstream has no counts" `Quick
+          test_decode_changes_branch_gone_upstream_has_no_counts;
+        Alcotest.test_case "changes branch refuses half counts" `Quick
+          test_decode_changes_branch_refuses_half_counts;
+        Alcotest.test_case "changes require a branch" `Quick
+          test_decode_changes_requires_branch;
       ] );
-    ( "decode_keeper_lanes",
+    ( "decode_keeper_lane",
       [
         Alcotest.test_case "reads the live shape and keeps unknown values"
           `Quick
-          test_decode_keeper_lanes_reads_current_shape_and_keeps_unknown_values;
+          test_decode_keeper_lane_reads_current_shape_and_keeps_unknown_values;
         Alcotest.test_case "requires the table fields" `Quick
-          test_decode_keeper_lanes_requires_the_table_fields;
+          test_decode_keeper_lane_requires_the_table_fields;
         Alcotest.test_case "last outcome runtime id is required and nullable"
           `Quick
-          test_decode_keeper_lanes_last_outcome_runtime_id_is_required_nullable;
+          test_decode_keeper_lane_last_outcome_runtime_id_is_required_nullable;
         Alcotest.test_case "a lane without its phase conditions is refused" `Quick
-          test_decode_keeper_lanes_requires_the_phase_conditions;
+          test_decode_keeper_lane_requires_the_phase_conditions;
         Alcotest.test_case "every known phase decodes to its own constructor"
           `Quick
           test_every_known_phase_decodes_to_its_own_constructor;
@@ -14396,10 +14629,10 @@ let () =
       [
         Alcotest.test_case "projects current schema" `Quick
           test_decode_keeper_projects_current_schema;
-        Alcotest.test_case "formats last turn timestamp" `Quick
-          test_decode_keeper_formats_last_turn_timestamp;
-        Alcotest.test_case "zero last turn is empty" `Quick
-          test_decode_keeper_zero_last_turn_is_empty;
+        Alcotest.test_case "keeps last turn seconds" `Quick
+          test_decode_keeper_keeps_last_turn_seconds;
+        Alcotest.test_case "zero last turn is none" `Quick
+          test_decode_keeper_zero_last_turn_is_none;
         Alcotest.test_case "rejects retired fields" `Quick
           test_decode_keeper_rejects_retired_fields;
         Alcotest.test_case "preserves dotted metadata name" `Quick
@@ -14665,6 +14898,8 @@ let () =
           test_decode_server_identity_reads_a_probe;
         Alcotest.test_case "survives a bare health" `Quick
           test_decode_server_identity_survives_a_bare_health;
+        Alcotest.test_case "reads the operator rollup" `Quick
+          test_decode_server_identity_reads_the_operator_rollup;
         Alcotest.test_case "takes an integer age" `Quick
           test_decode_server_identity_takes_an_integer_age;
         Alcotest.test_case "reads the worktree verdict" `Quick
@@ -14713,8 +14948,12 @@ let () =
       [
         Alcotest.test_case "reads names, never values" `Quick
           test_decode_secret_projection_reads_names_not_values;
-        Alcotest.test_case "skips a Keeper with no projection" `Quick
-          test_decode_secret_projection_skips_unprojected_keeper;
+        Alcotest.test_case "a Keeper with no projection reads none" `Quick
+          test_decode_keeper_composite_without_a_projection_reads_none;
+        Alcotest.test_case "a Keeper composite reads its row and projection" `Quick
+          test_decode_keeper_composite_reads_its_row_and_projection;
+        Alcotest.test_case "an offline Keeper composite reads without conditions" `Quick
+          test_decode_keeper_composite_reads_an_offline_keeper;
         Alcotest.test_case "keeps an unknown status" `Quick
           test_decode_secret_projection_keeps_an_unknown_status;
         Alcotest.test_case "rejects a wrong env name type" `Quick
@@ -14767,16 +15006,18 @@ let () =
           test_decode_gate_row_missing_id_is_an_error;
       ] );
     ( "skills_catalog",
-      [ Alcotest.test_case "retained usage includes ledger coverage and exact gaps" `Quick
-          test_decode_skills_catalog_keeps_usage_scope;
+      [ Alcotest.test_case "a Keeper's usage reads each closed state" `Quick
+          test_decode_keeper_skill_usage_reads_each_state;
+        Alcotest.test_case "a Keeper's usage refuses another Keeper, schema or state" `Quick
+          test_decode_keeper_skill_usage_refuses_another_keeper_schema_or_state;
         Alcotest.test_case "errors carry only the cause" `Quick
           test_decode_skills_catalog_errors_carry_only_the_cause;
-        Alcotest.test_case "reads usage rows and the execution flow" `Quick
-          test_decode_skills_catalog_reads_usage_and_flow;
+        Alcotest.test_case "reads the exact reference and the execution flow" `Quick
+          test_decode_skills_catalog_reads_reference_and_flow;
         Alcotest.test_case "reads the discovery roots and the config" `Quick
           test_decode_skills_catalog_reads_the_discovery_roots;
-        Alcotest.test_case "keeps the profile while usage and flow are empty" `Quick
-          test_decode_skills_catalog_tolerates_empty_usage_and_flow;
+        Alcotest.test_case "keeps the profile when the flow is empty" `Quick
+          test_decode_skills_catalog_tolerates_an_empty_flow;
         Alcotest.test_case "rejects a non-string kind" `Quick
           test_decode_skills_catalog_rejects_a_wrong_kind_type;
         Alcotest.test_case "keeps invalid-only typed rejections" `Quick

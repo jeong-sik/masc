@@ -116,6 +116,10 @@ val cost_event_payload :
     row's delta came out. [non_cached_input_tokens]
     includes cache creation and is null for missing/invalid input partitions. *)
 
+type append_failure = Keeper_hooks_agent_core_cost_events.append_failure =
+  | Append_declined
+  | Append_raised of string
+
 val emit_cost_event :
   masc_root:string ->
   agent_name:string ->
@@ -138,8 +142,9 @@ val emit_cost_event :
   ?cache_read_input_tokens:int ->
   ?usage_missing:bool ->
   ?usage_trust:Keeper_usage_trust.t ->
-  ?telemetry:Agent_core.Types.inference_telemetry -> unit -> unit
-(** Append a structured cost-ledger event to [costs/YYYY-MM/DD.jsonl]. *)
+  ?telemetry:Agent_core.Types.inference_telemetry -> unit -> (unit, append_failure) result
+(** Append a structured cost-ledger event to [costs/YYYY-MM/DD.jsonl]. [Ok]
+    means the row is in the file; a failure is logged and counted already. *)
 
 type attempt_usage =
   | Agent_core_attempt

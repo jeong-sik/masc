@@ -334,7 +334,7 @@ let test_repeated_browser_input_remains_deliverable () =
         let scope, _, target = prepare_direct_execution () in
         let on_tool_boundary = if with_boundary then
             Some (fun ~tool_name -> Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
-              ~repetition_execution:(Some scope) ~yield_requested:None ~tool_name) else None in
+              ~repetition_execution:(Some scope) ~tool_name) else None in
         let tool, terminal_error = one_dynamic_tool ~active ~runtime_label ~name:"BrowserInteract"
           ?on_tool_boundary
           ~on_result_handoff:(fun ~invocation:_ ~content:_ ->
@@ -361,18 +361,17 @@ let test_scoped_boundary_spans_official_attempts () =
       Scope.Execution.observe execution ~target:previous_target scoped_observation;
       Scope.Execution.observe execution ~target:previous_target scoped_observation;
       let target = Agent_core.Context.create_sync () in
-      let calls = ref (match Scope.Execution.prepare execution ~source ~target with
-        | Ok calls -> calls | Error _ -> fail "next attempt lost scope") in
+      (match Scope.Execution.prepare execution ~source ~target with
+       | Ok () -> () | Error _ -> fail "next attempt lost scope");
       let executions = ref 0 in
       let boundary_calls = ref 0 in
       let tool, terminal_error = one_dynamic_tool ~active ~runtime_label
         ~on_result_handoff:(fun ~invocation:_ ~content:_ ->
-          Scope.Execution.observe execution ~target scoped_observation;
-          calls := scoped_observation :: !calls)
+          Scope.Execution.observe execution ~target scoped_observation)
         ~on_tool_boundary:(fun ~tool_name ->
           incr boundary_calls;
           Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
-            ~repetition_execution:(Some execution) ~yield_requested:None ~tool_name)
+            ~repetition_execution:(Some execution) ~tool_name)
         (fun _ -> incr executions;
           Ok { Agent_core.Types.content = "same-output"; content_blocks = None; _meta = None })
       in
@@ -396,7 +395,7 @@ let test_scoped_boundary_error_stops_immediately () =
             { scoped_observation with input_fingerprint = Some "invalid-hash" })
         ~on_tool_boundary:(fun ~tool_name ->
           Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
-            ~repetition_execution:(Some execution) ~yield_requested:None ~tool_name)
+            ~repetition_execution:(Some execution) ~tool_name)
         (fun _ -> Ok { Agent_core.Types.content = "effect returned"; content_blocks = None; _meta = None })
       in
       let result = tool.call ~call_id:"invalid-scope-observation" (`Assoc []) in
@@ -494,7 +493,8 @@ let test_scoped_boundary_preserves_terminal_priority () =
               Keeper_terminal_effect_detail.Tool_failed
                 { internal_tool_name = "effect"; message = "exact committed effect failure" } })
       ~on_tool_boundary:(fun ~tool_name:_ -> incr checks;
-        Ok (Some (Host.Repeated_tool_call { tool_name = "effect"; repeated_count = 3 })))
+        Ok (Some (Host.Terminal_tool_boundary
+          { tool_name = "effect"; outcome = Durable_stimulus_deferred })))
       (fun _ -> Ok { Agent_core.Types.content = "effect returned"; content_blocks = None; _meta = None })
     in
     let result = tool.call ~call_id:"terminal-priority" (`Assoc []) in
@@ -505,7 +505,7 @@ let test_scoped_boundary_preserves_terminal_priority () =
           detail =
             Keeper_terminal_effect_detail.Tool_failed
               { message = "exact committed effect failure"; _ }; _ }; _ }) -> ()
-    | _ -> fail "repeat stop replaced stronger terminal evidence")
+    | _ -> fail "a deferral stop replaced stronger terminal evidence")
 ;;
 
 let test_explicit_boundary_observes_each_settled_call () =
@@ -548,97 +548,7 @@ let test_dynamic_tool_failures_do_not_invent_a_host_stop () =
     check (option string) "tool result does not synthesize a terminal stop" None !terminal_error)
 ;;
 
-let test_repeated_tool_host_stop_is_a_checkpoint_yield () =
-  let result =
-    match
-      Host.host_stop_result ~provider_turn_ordinal:23
-        ~runtime_id:"official-client-runtime"
-        ~model:"official-client-model"
-        ~session_id:"session-1"
-        ~turn_id:"turn-2"
-        ~turns_used:2
-        ~latency_ms:(Some 1234)
-        ~request_context:None
-        (Repeated_tool_call { tool_name = "masc_probe"; repeated_count = 3 })
-    with
-    | Ok result -> result
-    | Error error -> fail (Agent_core.Error.to_string error)
-  in
-  check string "session" "session-1" result.session_id;
-  check int "turns" 2 result.turns;
-  check bool "no synthetic Agent Core checkpoint" true
-    (Option.is_none result.checkpoint);
-  (* masc#31312: a host stop is one vendor-loop attempt; the receipt
-     classifier reads this observation, and [None] here was what made every
-     host-stopped turn surface as unmapped_runtime_state. *)
-  (match result.runtime_observation with
-   | None -> fail "host stop carried no runtime observation (masc#31312)"
-   | Some observation ->
-     check string "observation runtime" "official-client-runtime"
-       observation.Runtime_observation.runtime_id;
-     check int "observation records one attempt" 1
-       (List.length observation.attempts));
-  match result.stop_reason with
-  | Runtime_agent.Yielded_after_repeated_tool_call
-      { turns_used; tool_name; repeated_count; provider_turn_ordinal } ->
-    check int "typed turns" 2 turns_used;
-    check int "host ordinal is independent of turn count" 23 provider_turn_ordinal;
-    check string "typed tool" "masc_probe" tool_name;
-    check int "typed count" 3 repeated_count
-  | _ -> fail "host stop was not projected as a repeated-tool checkpoint yield"
-;;
-
-(* Official tools settle once before a queued input asks the host loop to
-   checkpoint. Codex's dynamic-call workers inherit the Owner child binding. *)
-let test_queued_input_yields_after_official_tool_handoff () =
-  List.iter (fun runtime_label ->
-    with_active_raw_trace (fun ~path:_ ~active ->
-      let executed = ref 0 and handed_off = ref false and checks = ref 0 in
-      let owner = Keeper_interrupt_token.fresh () in
-      let observation = Keeper_turn_preview_owner.create_turn_observation () in
-      Keeper_turn_preview_owner.with_owner ~interrupt_token:owner ~observation (fun () ->
-        let tool, terminal_error = one_dynamic_tool ~active ~runtime_label ~name:"queued_effect"
-          ~on_result_handoff:(fun ~invocation:_ ~content ->
-            check string "the original result is handed off" "committed once" content;
-            handed_off := true)
-          ~on_tool_boundary:(fun ~tool_name ->
-            Keeper_agent_run.For_testing.official_client_tool_boundary
-              ~repetition_execution:None ~tool_name
-              ~yield_requested:(Some (fun () ->
-                incr checks;
-                check bool "handoff precedes scheduling" true !handed_off;
-                check bool "tool worker inherits the exact Owner token" true
-                  (Option.fold ~none:false ~some:(Keeper_interrupt_token.equal owner)
-                     (Keeper_turn_preview_owner.current ()));
-                Ok (Some { Keeper_agent_run.reason = Operation_queued }))))
-          (fun _ -> incr executed;
-            Ok { Agent_core.Types.content = "committed once"; content_blocks = None; _meta = None }) in
-        Eio.Switch.run (fun sw ->
-          Eio.Fiber.fork ~sw (fun () ->
-            Eio.Fiber.yield ();
-            let result = tool.call ~call_id:"queued-effect-call" (`Assoc []) in
-            check bool "yield preserves tool success" true result.success;
-            check string "yield preserves the result" "committed once" result.content;
-            match result.abort_turn with
-            | Some (Terminal_tool_boundary {tool_name = "queued_effect";
-                outcome = Durable_stimulus_deferred} as stop) ->
-              (match Host.host_stop_result ~runtime_id:runtime_label ~model:"fixture"
-                ~session_id:"original-session" ~turn_id:"original-turn"
-                ~provider_turn_ordinal:23 ~turns_used:4 ~latency_ms:None
-                ~request_context:None stop with
-               | Ok { Runtime_agent.stop_reason = Yielded_to_durable_stimulus
-                   {turns_used = 4; provider_turn_ordinal = 23};
-                   session_id = "original-session"; _ } -> ()
-               | Ok _ -> fail "queued input lost the resumable official checkpoint"
-               | Error error -> fail (Agent_core.Error.to_string error))
-            | _ -> fail "queued input did not yield with its actual tool name"));
-        check int "the effect executes once" 1 !executed;
-        check int "the settled tool has one scheduling decision" 1 !checks;
-        check (option string) "yield is not terminal failure" None !terminal_error)))
-    ["Codex"; "Claude Code"]
-;;
-
-let test_queued_input_preserves_explicit_terminal_outcomes () =
+let test_boundary_preserves_explicit_terminal_outcomes () =
   let module Tools = Keeper_tools_agent_core in
   List.iter (fun terminal -> with_active_raw_trace (fun ~path:_ ~active ->
     let tool, _ = one_dynamic_tool ~active
@@ -646,16 +556,15 @@ let test_queued_input_preserves_explicit_terminal_outcomes () =
       ~terminal_effect_state:(fun () -> terminal)
       ~on_tool_boundary:(fun ~tool_name ->
         Keeper_agent_run.For_testing.official_client_tool_boundary
-          ~repetition_execution:None ~tool_name
-          ~yield_requested:(Some (fun () ->
-            Ok (Some {Keeper_agent_run.reason = Operation_queued}))))
+          ~repetition_execution:None ~tool_name)
       (fun _ -> Ok {Agent_core.Types.content = "settled"; content_blocks = None; _meta = None}) in
-    let result = tool.call ~call_id:"terminal-before-queue" (`Assoc []) in
+    let result = tool.call ~call_id:"terminal-effect" (`Assoc []) in
     match terminal, result.abort_turn with
     | Tools.Terminal_effect_completed _, Some (Terminal_tool_boundary {outcome = Terminal_completed; _})
-    | (Tools.Deferred_tool_result | Tools.External_effect_deferred), Some (Terminal_tool_boundary {outcome = Durable_stimulus_deferred; _}) -> ()
+    | Tools.Deferred_tool_result, Some (Terminal_tool_boundary {outcome = Durable_stimulus_deferred; _}) -> ()
+    | Tools.External_effect_deferred, None -> ()
     | Tools.Terminal_effect_failed _, Some (Terminal_tool_boundary {outcome = Terminal_failed _; _}) -> ()
-    | _ -> fail "queued input replaced an explicit terminal outcome"))
+    | _ -> fail "the boundary replaced an explicit terminal outcome"))
     [ Tools.Terminal_effect_completed
         (Keeper_tool_execution.Surface_post_completed
           (Keeper_surface_post.To_discord {channel_id = "fixture-destination"}))
@@ -679,7 +588,7 @@ let test_settled_official_tool_keeps_turn_running () =
           incr boundary_calls;
           check bool "tool result handed off before boundary decision" true !handed_off;
           Keeper_agent_run.For_testing.official_client_tool_boundary
-            ~repetition_execution:None ~yield_requested:None ~tool_name)
+            ~repetition_execution:None ~tool_name)
         (fun _ ->
           Ok { Agent_core.Types.content = "settled result"; content_blocks = None; _meta = None })
     in
@@ -690,7 +599,7 @@ let test_settled_official_tool_keeps_turn_running () =
     check (option string) "no terminal failure" None !terminal_error;
     match result.abort_turn with
     | None -> ()
-    | Some (Repeated_tool_call _ | Terminal_tool_boundary _) ->
+    | Some (Terminal_tool_boundary _) ->
       fail "the official-client turn stopped after its tool result")
 ;;
 
@@ -739,7 +648,6 @@ let test_terminal_post_effect_failure_aborts_the_official_client_turn () =
               (Terminal_completed | Durable_stimulus_deferred)
           ; _
           })
-    | Some (Repeated_tool_call _)
     | None ->
       fail "post-effect terminal failure did not close the official-client loop")
 ;;
@@ -958,7 +866,6 @@ let test_ordinary_post_effect_failure_aborts_the_official_client_turn () =
           }) ->
       ()
     | Some (Terminal_tool_boundary _)
-    | Some (Repeated_tool_call _)
     | None ->
       fail "ordinary post-effect failure remained provider-retryable")
 ;;
@@ -1009,7 +916,7 @@ let test_terminal_external_deferral_keeps_the_turn_going () =
     let result = tool.call ~call_id:"terminal-deferred" (`Assoc []) in
     match result.abort_turn with
     | None -> ()
-    | Some (Terminal_tool_boundary _ | Repeated_tool_call _) ->
+    | Some (Terminal_tool_boundary _) ->
       fail "a parked external effect ended the turn")
 ;;
 
@@ -1038,7 +945,6 @@ let test_terminal_generic_deferral_keeps_durable_stimulus_stop () =
           { outcome = Durable_stimulus_deferred; tool_name = "effect" }) ->
       ()
     | Some (Terminal_tool_boundary _)
-    | Some (Repeated_tool_call _)
     | None ->
       fail "generic deferral did not retain its durable-stimulus terminal stop")
 ;;
@@ -2625,8 +2531,7 @@ let test_loading_plan_names_the_on_demand_tools () =
 ;;
 
 (* A result bound is declared only for a tool the bundle bounded, with that
-   bound. Everything else -- an attached-service tool above all, whose result
-   reaches the wire as the service returned it -- declares nothing, so the
+   bound. A tool the bundle named no bound for declares nothing, so the
    client keeps its own threshold. *)
 let test_result_bound_follows_the_bundle_bounds () =
   let bound plan name =
@@ -2636,7 +2541,7 @@ let test_result_bound_follows_the_bundle_bounds () =
   in
   let declared =
     Host.Declared
-      { on_demand = [ "attached__search" ]
+      { on_demand = [ "unbounded__search" ]
       ; result_bounds = [ "keeper_task_done", 16384 ]
       }
   in
@@ -2644,8 +2549,8 @@ let test_result_bound_follows_the_bundle_bounds () =
     (bound Host.All_on_demand "keeper_task_done");
   check (option int) "a bounded tool declares its bound" (Some 16384)
     (bound declared "keeper_task_done");
-  check (option int) "an attached-service tool declares no bound" None
-    (bound declared "attached__search")
+  check (option int) "a tool with no bound in the plan declares none" None
+    (bound declared "unbounded__search")
 ;;
 
 let carrier_message text : Agent_core.Types.message =
@@ -3600,14 +3505,8 @@ let () =
             "dynamic tool failures do not invent a host stop"
             `Quick
             test_dynamic_tool_failures_do_not_invent_a_host_stop
-        ; test_case
-            "repeated host stop is a checkpoint yield"
-            `Quick
-            test_repeated_tool_host_stop_is_a_checkpoint_yield
-        ; test_case "queued input yields after official tool result handoff" `Quick
-            test_queued_input_yields_after_official_tool_handoff
-        ; test_case "queued input preserves explicit terminal outcomes" `Quick
-            test_queued_input_preserves_explicit_terminal_outcomes
+        ; test_case "the boundary preserves explicit terminal outcomes" `Quick
+            test_boundary_preserves_explicit_terminal_outcomes
         ; test_case
             "settled official tool keeps turn running"
             `Quick

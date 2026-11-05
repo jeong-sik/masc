@@ -143,7 +143,6 @@ let task_action_of_string s =
   match String.lowercase_ascii s with
   | "claim" -> Ok Claim
   | "start" -> Ok Start
-  | "done" -> Ok Done_action
   | "cancel" -> Ok Cancel
   | "release" -> Ok Release
   | "submit_for_verification" -> Ok Submit_for_verification
@@ -168,9 +167,9 @@ let task_action_to_string = function
   | Release -> "release"
   | Submit_for_verification -> "submit_for_verification"
 
-(** All valid task actions, derived from the ADT (single source of truth). *)
+(** The actions [task_action_of_string] parses. *)
 let all_task_actions =
-  [ Claim; Start; Done_action; Cancel; Release; Submit_for_verification ]
+  [ Claim; Start; Cancel; Release; Submit_for_verification ]
 let valid_task_action_strings = List.map task_action_to_string all_task_actions
 
 (** Provenance carried by a completion verdict. This type separates verdicts
@@ -456,41 +455,18 @@ let no_execution_links = { operation_id = None; session_id = None }
     supplied to the completion authority as task facts. The workspace FSM never
     interprets their prose, counts entries, or derives a completion verdict. *)
 type task_contract = {
-  strict : bool; [@default false]
   completion_contract : string list; [@default []]
   required_evidence : string list; [@default []]
   inspect_gate_evidence : string list; [@default []]
   verify_gate_evidence : string list; [@default []]
 } [@@deriving show, yojson { strict = false }, eq]
 
-(** Handoff context persisted across release/reclaim cycles *)
-type task_reclaim_policy =
-  | Allow_reclaim
-  | Block_reclaim
-[@@deriving show, eq]
-
-let task_reclaim_policy_to_string = function
-  | Allow_reclaim -> "allow_reclaim"
-  | Block_reclaim -> "block_reclaim"
-
-let task_reclaim_policy_of_string = function
-  | "allow_reclaim" -> Ok Allow_reclaim
-  | "block_reclaim" -> Ok Block_reclaim
-  | value -> Error (Printf.sprintf "unknown task_reclaim_policy: %s" value)
-
-let task_reclaim_policy_to_yojson policy =
-  `String (task_reclaim_policy_to_string policy)
-
-let task_reclaim_policy_of_yojson = function
-  | `String value -> task_reclaim_policy_of_string value
-  | _ -> Error "task_reclaim_policy must be a string"
-
+(** Handoff context persisted across release and claim *)
 type task_handoff_context = {
   summary : string; [@default ""]
   reason : string option; [@default None]
   next_step : string option; [@default None]
   failure_mode : string option; [@default None]
-  reclaim_policy : task_reclaim_policy option; [@default None]
   evidence_refs : string list; [@default []]
   updated_at : string option; [@default None]
   updated_by : string option; [@default None]
@@ -499,8 +475,7 @@ type task_handoff_context = {
 (** The "why" behind a transition that stopped work, from whichever argument
     carried it. Two entry points supply it differently: [transition_task_r]
     takes an explicit [reason], while [release_task_r] takes none at all and
-    forwards only a handoff context, which the production release tool requires
-    for a strict release. [task_handoff_context.reason] is the same concept
+    forwards only a handoff context. [task_handoff_context.reason] is the same concept
     under a different argument, so it is read when the explicit one is empty.
 
     Single definition on purpose: the committed broadcast and the author wake
@@ -514,11 +489,8 @@ let stated_reason ~(reason : string option)
     | "" -> None
     | trimmed -> Some trimmed
   in
-  (* [reason] then [summary]. A strict release is rejected without
-     [handoff_context.summary] while [reason] stays optional, so a release
-     whose whole explanation is its summary would otherwise publish a bare
-     "Released <id>" — dropping text the caller was required to supply.
-     [failure_mode] is left out: it classifies, it does not explain. *)
+  (* [reason] then [summary]. [failure_mode] is left out: it classifies, it
+     does not explain. *)
   let from_handoff () =
     match handoff_context with
     | None -> None
@@ -557,53 +529,30 @@ type task = {
   execution_links: task_execution_links; [@default no_execution_links]
   handoff_context: task_handoff_context option; [@default None]
   cycle_count: int; [@default 0]
-  reclaim_policy: task_reclaim_policy option; [@default None]
-  do_not_reclaim_reason: string option; [@default None]
   (* Exact immutable Skill references are Task evidence. Their source,
      package, name, and content revision survive every state transition and do
      not depend on whichever catalog is current when the Task is later read. *)
   skills: Skill_reference.t list; [@default []]
 } [@@deriving show, eq]
 
-(* RFC-0323 G-10: the typed reclaim claim gate is retired. #23661 removed its
-   Todo producer; this change removes the Done producer, so nothing can be
-   blocked-by-reclaim at claim time anymore. Claim blocks now describe the
-   task-status fact that prevents an agent claim. [reclaim_policy] survives as
-   release/cancel data plumbing only (its full retirement is a recorded
-   follow-up decision, RFC-0323 Radius Map). *)
-
-type task_claim_readiness =
-  | Claim_ready
-
 type task_claim_block =
   | Claim_block_pending_verdict of { verification_id : string }
   | Claim_block_not_todo of task_status
 
 type task_claim_decision =
-  | Claim_available of task_claim_readiness
+  | Claim_available
   | Claim_unavailable of task_claim_block
-
-let task_claim_readiness (_task : task) = Claim_ready
-;;
 
 let task_claim_decision_for_status task_status =
   match task_status with
-  | Todo ->
-    (* Todo tasks are always claimable regardless of reclaim_policy.
-       reclaim_policy only gates Done -> re-claim, not Todo -> first claim.
-       task-1869: 6 TaskError fingerprints show coordination-role tasks
-       with Block_reclaim policy were blocked from claiming. *)
-    Claim_available Claim_ready
+  | Todo -> Claim_available
   | AwaitingVerification { verification_id; _ } ->
     (* A pending obligation belongs to the completion-authority lane. No
        Keeper claim can grant verifier authority or inspect it as agent work. *)
     Claim_unavailable (Claim_block_pending_verdict { verification_id })
   | Done _
-  (* RFC-0323: a verified Done is terminal for every actor, regardless of
-     reclaim_policy — re-running completed work creates a NEW task linked via
-     predecessor_task_id. Retires the #23632 Done-reclaim mechanism (which
-     was production-unreachable: creation defaults the policy to None and
-     claiming wipes it). *)
+  (* A verified Done is terminal for every actor: re-running completed work
+     creates a new task linked via predecessor_task_id. *)
   | Claimed _
   | InProgress _
   | Cancelled _ ->
@@ -611,31 +560,13 @@ let task_claim_decision_for_status task_status =
 ;;
 
 let task_claim_decision (task : task) =
-  match task_claim_decision_for_status task.task_status with
-  | Claim_available Claim_ready -> Claim_available (task_claim_readiness task)
-  | Claim_unavailable block -> Claim_unavailable block
-;;
-
-let task_claim_decision_is_available task =
-  match task_claim_decision task with
-  | Claim_available _ -> true
-  | Claim_unavailable _ -> false
-;;
-
-type task_claim_next_action =
-  | Claim_now
-  | Skip_claim of task_claim_block
-
-let task_claim_next_action task =
-  match task_claim_decision task with
-  | Claim_available Claim_ready -> Claim_now
-  | Claim_unavailable block -> Skip_claim block
+  task_claim_decision_for_status task.task_status
 ;;
 
 let task_claim_next_action_is_claimable task =
-  match task_claim_next_action task with
-  | Claim_now -> true
-  | Skip_claim _ -> false
+  match task_claim_decision task with
+  | Claim_available -> true
+  | Claim_unavailable _ -> false
 ;;
 
 (** When the Task last changed state, read from the timestamp its own status
@@ -698,24 +629,13 @@ let task_to_yojson t =
     if t.cycle_count = 0 then with_handoff_context
     else with_handoff_context @ [("cycle_count", `Int t.cycle_count)]
   in
-  let with_reclaim_policy =
-    match t.reclaim_policy with
-    | None -> with_cycle_count
-    | Some policy ->
-        with_cycle_count
-        @ [("reclaim_policy", task_reclaim_policy_to_yojson policy)]
-  in
-  let with_do_not_reclaim = match t.do_not_reclaim_reason with
-    | None -> with_reclaim_policy
-    | Some r -> with_reclaim_policy @ [("do_not_reclaim_reason", `String r)]
-  in
   (* Omitted when the Task declares no Skill. A present value always uses the
      canonical exact-reference wire shape. *)
   let with_skills =
     match t.skills with
-    | [] -> with_do_not_reclaim
+    | [] -> with_cycle_count
     | skills ->
-        with_do_not_reclaim
+        with_cycle_count
         @ [("skills", Skill_reference.list_to_yojson skills)]
   in
   (* Merge status fields into task *)
@@ -753,18 +673,15 @@ let nested_field_outcome_is_unreadable = function
   | Field_unreadable _ -> true
   | Field_absent | Field_decoded -> false
 
-(** Per-field decode outcome for the two nested fields whose corruption the
-    decoder drops instead of propagating ([handoff_context],
-    [reclaim_policy]). *)
+(** Per-field decode outcome for the nested field whose corruption the
+    decoder drops instead of propagating ([handoff_context]). *)
 type task_decode_diagnostics =
   { handoff_context_outcome : nested_field_outcome
-  ; reclaim_policy_outcome : nested_field_outcome
   }
 [@@deriving show, eq]
 
 let task_decode_diagnostics_is_unreadable d =
   nested_field_outcome_is_unreadable d.handoff_context_outcome
-  || nested_field_outcome_is_unreadable d.reclaim_policy_outcome
 
 let task_of_yojson_with_diagnostics json =
   let req key = Json_util.get_string_with_default json ~key ~default:"" in
@@ -830,15 +747,6 @@ let task_of_yojson_with_diagnostics json =
            | Error error -> None, Field_unreadable error)
     in
     let cycle_count = Json_util.get_int json "cycle_count" |> Option.value ~default:0 in
-    let reclaim_policy, reclaim_outcome =
-      match m "reclaim_policy" with
-      | `Null -> None, Field_absent
-      | reclaim_policy_json ->
-          (match task_reclaim_policy_of_yojson reclaim_policy_json with
-           | Ok policy -> Some policy, Field_decoded
-           | Error error -> None, Field_unreadable error)
-    in
-    let do_not_reclaim_reason = opt "do_not_reclaim_reason" in
     match
       skills_result, contract_result, execution_links_result,
       task_status_of_yojson json
@@ -859,13 +767,9 @@ let task_of_yojson_with_diagnostics json =
               execution_links;
               handoff_context;
               cycle_count;
-              reclaim_policy;
-              do_not_reclaim_reason;
               skills;
             },
-            { handoff_context_outcome = handoff_outcome
-            ; reclaim_policy_outcome = reclaim_outcome
-            } )
+            { handoff_context_outcome = handoff_outcome } )
     | Error error, _, _, _ -> Error error
     | _, Error error, _, _ -> Error ("task.contract corrupt: " ^ error)
     | _, _, Error error, _ -> Error ("task.execution_links corrupt: " ^ error)
@@ -1434,17 +1338,6 @@ type claim_next_result =
       title : string;
       priority : int;
       message : string;
-      scope_widened : bool;
-          (** True when goal-scope was widened to all_tasks because no scoped
-              task was admission-eligible (schedule-level fallback). Lets the
-              operator distinguish a scope-overriding claim from an ordinary
-              in-scope claim. *)
     }
   | Claim_next_no_unclaimed
-  | Claim_next_no_eligible of
-      { excluded_count : int
-      ; scope_excluded_count : int
-      ; explicit_excluded_count : int
-      ; claim_pool_candidate_count : int
-      }
   | Claim_next_error of string

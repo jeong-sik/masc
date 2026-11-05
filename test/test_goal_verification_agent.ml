@@ -104,8 +104,6 @@ let with_workspace f =
       rm_rf dir)
     (fun () ->
        let config = Workspace.default_config dir in
-       Masc_test_deps.Board_test_preparation.prepare ~base_path:dir
-         ~action:Masc_test_deps.Board_test_preparation.Bootstrap;
        Board.reset_global_for_test ();
        Board_dispatch.reset_for_test ();
        Result.get_ok (Board_dispatch.init_jsonl ~base_path:dir
@@ -191,7 +189,7 @@ let stored_phase config goal_id =
 ;;
 
 let ledger_record config goal_id =
-  match Goal_verification.get_record config ~goal_id with
+  match Goal_verification.get_record_authoritative config ~goal_id with
   | Ok (Some record) -> record
   | Ok None -> fail ("no ledger row for " ^ goal_id)
   | Error msg -> fail msg
@@ -869,16 +867,13 @@ let test_missing_request_does_not_block_other_goals () =
   let goal_id = create_goal ctx "Wedged goal" in
   (* Model a Verifying Goal whose original proof row is no longer available. *)
   (match
-     Goal_store.update_goal_if_phase config ~goal_id
-       ~expected_phase:Goal_phase.Executing
-       (fun goal -> { goal with Goal_store.phase = Goal_phase.Verifying })
+     Goal_store.transact_goal config ~goal_id
+       (fun goal -> Ok ({ goal with Goal_store.phase = Goal_phase.Verifying }, ()))
    with
-   | Ok (Goal_store.Goal_updated _) -> ()
-   | Ok (Goal_store.Goal_phase_mismatch phase) ->
-     fail ("test setup: goal was not Executing but " ^ Goal_phase.to_string phase)
+   | Ok _ -> ()
    | Error error -> fail (Goal_store.write_error_to_string error));
   (* Creation has not written a ledger row for this Goal. *)
-  (match Goal_verification.get_record config ~goal_id with
+  (match Goal_verification.get_record_authoritative config ~goal_id with
    | Ok None -> ()
    | Ok (Some _) -> fail "test setup: the wedge needs no durable request"
    | Error msg -> fail msg);
@@ -902,7 +897,7 @@ let test_missing_request_does_not_block_other_goals () =
   check string "the uncertain Goal remains verifying" "verifying" (stored_phase config goal_id);
   check string "the independent Goal proceeds" "awaiting_confirmation" (stored_phase config other_goal);
   check (list string) "only the independent review ran" ["verifier-a"] !calls;
-  (match Goal_verification.get_record config ~goal_id with
+  (match Goal_verification.get_record_authoritative config ~goal_id with
    | Ok None -> () | Ok (Some _) -> fail "scan recreated the missing request" | Error msg -> fail msg)
 ;;
 
@@ -1007,7 +1002,7 @@ let strip_criterion_revision path =
    line that starts with the counted literal. Two cycles, two of each. *)
 let test_skipped_scan_records_one_row_and_one_warn_per_cycle () =
   with_workspace @@ fun config ->
-  (match Goal_store.upsert_goal config ~title:"Rows without criterion_revision"
+  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Rows without criterion_revision"
       ~metric:"cases" ~target_value:"1" () with
    | Ok _ -> () | Error error -> fail (Goal_store.write_error_to_string error));
   let path = Goal_store.goals_path config in
@@ -1059,7 +1054,7 @@ let test_healthy_store_scan_records_no_skipped_row () =
 
 let test_scan_preserves_source_failure () =
   with_workspace @@ fun config ->
-  (match Goal_store.upsert_goal config ~title:"Review source"
+  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Review source"
       ~metric:"cases" ~target_value:"1" () with
    | Ok _ -> () | Error error -> fail (Goal_store.write_error_to_string error));
   let path = Goal_store.goals_path config in
@@ -1359,7 +1354,7 @@ let test_a_clean_scan_replaces_the_unreconciled_list () =
      check bool "the server row names the re-arm step" true
        (List.assoc_opt "step" fields = Some (`String "rearm_proof"))
    | _ -> fail "the stuck goal is not marked on the server's planning row");
-  (match Goal_store.upsert_goal config ~id:goal_id ~target_value:"4" () with
+  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~id:goal_id ~target_value:"4" () with
    | Ok _ -> ()
    | Error e -> fail (Goal_store.write_error_to_string e));
   (* The edit takes the request back to Executing; submitting again puts the
@@ -1557,25 +1552,6 @@ let test_reopen_from_verifying_cancels_a_hung_review () =
 let idle_ticks_after_deferral = 10
 let idle_tick_s = 0.02
 
-(* This Goal request's stall notices on the Board, read by the typed
-   metadata the notice itself compares, so posts from sibling tests on the
-   shared hearth cannot move the count. *)
-let goal_stall_posts ~goal_id ~request_id =
-  Board_dispatch.list_posts
-    ~hearth:"verification"
-    ~sort_by:Board_dispatch.Recent
-    ~limit:200
-    ()
-  |> List.filter_map (fun (post : Board.post) ->
-    match post.meta_json with
-    | Some (`Assoc fields)
-      when List.assoc_opt "type" fields = Some (`String "verification_stalled")
-           && List.assoc_opt "goal_id" fields = Some (`String goal_id)
-           && List.assoc_opt "request_id" fields = Some (`String request_id) ->
-      Some (post, fields)
-    | Some _ | None -> None)
-;;
-
 let pending_request_id config goal_id =
   match (ledger_record config goal_id).completion with
   | Goal_verification.Proof_pending { request_id; _ } -> request_id
@@ -1589,7 +1565,7 @@ let retain_daemon_original config store ~title ~priority =
   let module Worker = Goal_verifier_worker in
   let ctx = workspace_ctx config in
   let goal_id = create_goal ctx title in
-  (match Goal_store.upsert_goal config ~id:goal_id ~priority () with
+  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~id:goal_id ~priority () with
    | Ok _ -> () | Error error -> fail (Goal_store.write_error_to_string error));
   ignore (must_succeed "request daemon verification" (transition ctx goal_id "request_complete"));
   let authority = match Verification_authority_tools.create_goal_review ~config ~goal_id with
@@ -1767,7 +1743,7 @@ let test_daemon_drains_healthy_goal_after_four_damaged_originals () =
       (List.length (reviews_of_goal registry damaged_goal))) damaged
 ;;
 
-let test_daemon_announces_an_early_original_failure_once () =
+let test_daemon_shows_an_early_original_failure_until_repair () =
   with_workspace @@ fun config ->
   let module Worker = Goal_verifier_worker in
   let module Registry = Goal_verification_run_registry in
@@ -1775,12 +1751,11 @@ let test_daemon_announces_an_early_original_failure_once () =
   let store = Lane_addon_store.create
     ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
   let goal_id, retained = retain_daemon_original config store
-    ~title:"Damaged original needs an actionable stall notice" ~priority:1 in
+    ~title:"Damaged original shows its failure" ~priority:1 in
   let assert_preserved, restore = corrupt_daemon_original store retained in
   let request_id = pending_request_id config goal_id in
   let original_run = Worker.run_identity retained in
   let calls = ref [] in
-  let stall_posts () = goal_stall_posts ~goal_id ~request_id in
   let reviewer_entered, enter_reviewer = Eio.Promise.create () in
   let may_judge, allow_judgment = Eio.Promise.create () in
   let published, publish = Eio.Promise.create () in
@@ -1810,39 +1785,17 @@ let test_daemon_announces_an_early_original_failure_once () =
             | Ok () -> () | Error `Timeout -> fail (label ^ " did not happen") in
           Goal_verification_agent.start ~sw ~clock ~config;
           (match Eio.Time.with_timeout clock hung_review_wait_s (fun () ->
-             let rec await_notice () =
-               if stall_posts () <> [] then Ok ()
-               else (Eio.Fiber.yield (); await_notice ()) in
-             await_notice ()) with
+             let rec await_failure () =
+               if planning_original_failure config goal_id <> None then Ok ()
+               else (Eio.Time.sleep clock idle_tick_s; await_failure ()) in
+             await_failure ()) with
            | Ok () -> ()
-           | Error `Timeout -> fail "the daemon never published the original-body failure notice");
-          (match stall_posts () with
-           | [(_, fields)] ->
-             let text name = match List.assoc_opt name fields with
-               | Some (`String value) -> value
-               | Some _ | None -> fail ("original-body stall notice lacks " ^ name) in
-             check string "the notice names the Goal subject" "goal_review" (text "subject");
-             check string "the notice names the original-read gate" "Proof_lookup_unavailable" (text "gate");
-             check bool "the notice retains the storage failure detail" true
-               (String_util.contains_substring (text "detail") "original request body does not match its record's digest");
-             (match List.assoc_opt "disposition" fields with
-              | Some json ->
-                (match Verification_protocol.For_testing.stall_disposition_of_json json with
-                 | Some Verification_protocol.No_retry_armed -> ()
-                 | Some (Verification_protocol.Retry_scheduled _
-                        | Verification_protocol.Original_observation_scheduled _
-                        | Verification_protocol.Original_repair_required)
-                 | None ->
-                   fail "a corrupt body cannot authorize automatic reviewer retry")
-              | None -> fail "original-body notice has no typed disposition")
-           | posts -> fail (Printf.sprintf "expected one original-body notice, got %d" (List.length posts)));
+           | Error `Timeout -> fail "the daemon never recorded the original-body failure");
           assert_original_failure_visible config goal_id;
           (* Repeat the real installed wake callback. The damaged body cannot pass
              request_retry, so this does not forge a successful user transition. *)
           (Atomic.get Workspace_hooks.goal_verification_pending_fn) config ~goal_id;
           for _ = 1 to idle_ticks_after_deferral do Eio.Time.sleep clock idle_tick_s done;
-          check int "another wake does not duplicate the same original-body notice" 1
-            (List.length (stall_posts ()));
           check int "the damaged original never dispatches a reviewer" 0 (List.length !calls);
           assert_preserved ();
           check string "the damaged Goal retains its pending request" request_id
@@ -1859,7 +1812,6 @@ let test_daemon_announces_an_early_original_failure_once () =
           ignore (Eio.Promise.try_resolve allow_judgment ());
           await "the repaired original's terminal publication" published)));
   check int "only the repaired request enters the reviewer" 1 (List.length !calls);
-  check int "the historical failure notice remains a single record" 1 (List.length (stall_posts ()));
   check string "the repaired Goal reaches human confirmation" "awaiting_confirmation"
     (stored_phase config goal_id);
   (match (ledger_record config goal_id).completion with
@@ -1962,16 +1914,12 @@ let test_original_failure_projection_is_bound_to_request_and_workspace () =
     (planning_original_failure config goal_id=None)
 ;;
 
-(* A deferral writes no ledger row, so nothing rescans: the Goal would sit in
-   Verifying with nobody told. Tick by tick on the real daemon: the boot scan
-   defers once and the Board gets one stall notice naming the gate and the
-   reason; the idle ticks start no review and post nothing. A Keeper asking
-   again while the lane is still down keeps the same request, so the second
-   deferral is not news and posts nothing (without the repeat check every
-   request_complete would post again, and each post invites the next call).
+(* A deferral writes no ledger row, so nothing rescans. Tick by tick on the
+   real daemon: the boot scan defers once and the idle ticks start no review.
+   A Keeper asking again while the lane is still down keeps the same request.
    Once the lane is back, the next request_complete starts a review that
    commits. *)
-let test_deferred_review_is_announced_and_waits_for_a_request () =
+let test_deferred_review_waits_for_a_request () =
   with_workspace @@ fun config ->
   let ctx = workspace_ctx config in
   let goal_id = create_goal ctx "Verifier lane is down" in
@@ -2020,7 +1968,6 @@ let test_deferred_review_is_announced_and_waits_for_a_request () =
     | Ok () -> ()
     | Error `Timeout -> fail (Printf.sprintf "%s did not happen within %.0fs" label hung_review_wait_s)
   in
-  let stall_posts () = goal_stall_posts ~goal_id ~request_id in
   Fun.protect ~finally:(fun () -> Atomic.set Goal_verification_run_registry.change_observer_fn saved_observer)
     (fun () ->
       Atomic.set Goal_verification_run_registry.change_observer_fn observer;
@@ -2030,46 +1977,6 @@ let test_deferred_review_is_announced_and_waits_for_a_request () =
           Eio.Switch.run (fun sw ->
             Goal_verification_agent.start ~sw ~clock:(Option.get !workspace_clock) ~config;
             await_within "the boot scan's deferral" deferred_once;
-            (* The durable run record precedes scheduling and its Board
-               notice. Wait for that observable side effect, not the earlier
-               registry notification. *)
-            (match Eio.Time.with_timeout (clock ()) hung_review_wait_s (fun () ->
-               let rec await_notice () =
-                 if stall_posts () <> [] then Ok ()
-                 else (Eio.Fiber.yield (); await_notice ()) in
-               await_notice ()) with
-             | Ok () -> ()
-             | Error `Timeout -> fail "deferral notice was not published");
-            (match stall_posts () with
-             | [ (post, fields) ] ->
-               let text name =
-                 match List.assoc_opt name fields with
-                 | Some (`String value) -> value
-                 | Some _ | None -> fail ("stall notice lacks " ^ name) in
-               check string "the notice names a Goal review" "goal_review" (text "subject");
-               check string "the verifier authors the notice"
-                 (Masc_domain.completion_authority_actor Workspace_goals.verifier_authority)
-                 (Board.Agent_id.to_string post.author);
-               check bool "the notice carries the deferral reason" true
-                 (String_util.string_contains_substring
-                    ~needle:"test evaluator unavailable" (text "detail"));
-               (match List.assoc_opt "disposition" fields with
-                | Some disposition ->
-                  (match Verification_protocol.For_testing.stall_disposition_of_json disposition with
-                   | Some Verification_protocol.No_retry_armed -> ()
-                   | Some (Verification_protocol.Retry_scheduled _) ->
-                     fail "the Goal verifier arms no retry"
-                   | Some (Verification_protocol.Original_observation_scheduled _
-                          | Verification_protocol.Original_repair_required) ->
-                     fail "the Goal verifier plans no original-body step"
-                   | None -> fail "the disposition must decode")
-                | None -> fail "stall notice lacks its disposition");
-               check bool "the notice names the forward path" true
-                 (String_util.string_contains_substring
-                    ~needle:"request_complete" post.body)
-             | posts ->
-               fail (Printf.sprintf "expected one stall notice, got %d"
-                       (List.length posts)));
             let original = retained_original () in
             let original_json = Goal_verifier_original.to_json (Goal_verifier_worker.original original) in
             let original_run = Goal_verifier_worker.run_identity original in
@@ -2087,7 +1994,7 @@ let test_deferred_review_is_announced_and_waits_for_a_request () =
             for _ = 1 to idle_ticks_after_deferral do Eio.Time.sleep (clock ()) idle_tick_s done;
             check int "idle ticks start no reviewer call" 1 (List.length !calls);
             check int "one original run remains visible" 1 (List.length (reviews_of_goal registry goal_id));
-            check int "idle ticks post no notice" 1 (List.length (stall_posts ()));
+            check bool "a permanent refusal arms no retry" false (Agent.retry_pending ~goal_id);
             check string "the Goal waits in verifying" "verifying" (stored_phase config goal_id);
             ignore (must_succeed "a request while the lane is still down"
               (transition ctx goal_id "request_complete"));
@@ -2098,31 +2005,26 @@ let test_deferred_review_is_announced_and_waits_for_a_request () =
             (match Lane_addon_request_progress.phase (Goal_verifier_worker.progress (check_same_original ())) with
              | Admission_wait _ -> ()
              | _ -> fail "the permanent config refusal must remain known not dispatched");
-            check int "the same stall is not posted twice" 1 (List.length (stall_posts ()));
             Atomic.set AR.run_llm_reviewer_fn
               (recording_reviewer calls ["verifier-a", Stub_approve "lane back, target met"]);
-            ignore (must_succeed "the request the notice names"
+            ignore (must_succeed "a request after the lane is back"
               (transition ctx goal_id "request_complete"));
             await_within "the requested review's commit" committed;
             ignore (check_same_original ()))));
   check int "each explicit request entered the reviewer exactly once" 3 (List.length !calls);
   check int "all admissions used the one original run" 1 (List.length (reviews_of_goal registry goal_id));
-  check int "the completed worker posted the same stall only once" 1 (List.length (stall_posts ()));
   check string "the requested review committed" "awaiting_confirmation" (stored_phase config goal_id)
 ;;
 
 (* A review that raises ends with the run row [Raised] and the exception
    continues to its isolating owner, which logs and moves on without arming a
-   retry. The Board hears of it the way it hears of a deferral, under the gate
-   the Task verifier uses for the same event, and says no retry is armed
-   (#38679). The outcome observer is the seam outside the evaluator's own
+   retry. The outcome observer is the seam outside the evaluator's own
    exception guard. *)
-let test_raised_review_is_announced () =
+let test_raised_review_ends_raised () =
   with_workspace @@ fun config ->
   let ctx = workspace_ctx config in
   let goal_id = create_goal ctx "Verifier raises" in
   ignore (must_succeed "initial request" (transition ctx goal_id "request_complete"));
-  let request_id = pending_request_id config goal_id in
   let registry = Goal_verification_run_registry.global () in
   let saved_observer = Atomic.get AR.outcome_observer_fn in
   Fun.protect
@@ -2147,36 +2049,7 @@ let test_raised_review_is_announced () =
              ~needle:"outcome observer raised" detail)
       | _ -> fail "the run must end Raised")
    | runs -> fail (Printf.sprintf "expected one run, got %d" (List.length runs)));
-  match goal_stall_posts ~goal_id ~request_id with
-  | [ (post, fields) ] ->
-    let text name =
-      match List.assoc_opt name fields with
-      | Some (`String value) -> value
-      | Some _ | None -> fail ("stall notice lacks " ^ name) in
-    check string "the notice names a Goal review" "goal_review" (text "subject");
-    check string "the notice is keyed by the Raised gate" "Raised" (text "gate");
-    check bool "the notice carries the exception" true
-      (String_util.string_contains_substring
-         ~needle:"outcome observer raised" (text "detail"));
-    (match List.assoc_opt "disposition" fields with
-     | Some disposition ->
-       (match Verification_protocol.For_testing.stall_disposition_of_json disposition with
-        | Some Verification_protocol.No_retry_armed -> ()
-        | Some (Verification_protocol.Retry_scheduled _) ->
-          fail "a raised review arms no retry"
-        | Some (Verification_protocol.Original_observation_scheduled _
-               | Verification_protocol.Original_repair_required) ->
-          fail "a raised review plans no original-body step"
-        | None -> fail "the disposition must decode")
-     | None -> fail "stall notice lacks its disposition");
-    check bool "the notice names the forward path" true
-      (String_util.string_contains_substring ~needle:"request_complete" post.body);
-    check bool "the notice does not promise another review" true
-      (String_util.string_contains_substring
-         ~needle:"Whether a later request_complete starts a new review depends" post.body);
-    check string "the Goal waits in verifying" "verifying" (stored_phase config goal_id)
-  | posts ->
-    fail (Printf.sprintf "expected one stall notice, got %d" (List.length posts))
+  check string "the Goal waits in verifying" "verifying" (stored_phase config goal_id)
 ;;
 
 (* A candidate that refuses with a typed model-absence error (a retired or
@@ -2480,27 +2353,6 @@ tools-support = true
             else (Eio.Time.sleep actual_clock idle_tick_s; until condition)
           in
           await "the retry being armed" (fun () -> until (fun () -> Agent.retry_pending ~goal_id));
-          await "the stall notice" (fun () -> until (fun () -> goal_stall_posts ~goal_id ~request_id <> []));
-          (match goal_stall_posts ~goal_id ~request_id with
-           | [ (_post, fields) ] ->
-             (match List.assoc_opt "disposition" fields with
-              | Some disposition ->
-                (match Verification_protocol.For_testing.stall_disposition_of_json disposition with
-                 | Some (Verification_protocol.Retry_scheduled
-                           { delay = Verification_protocol.Full_interval { seconds } }) ->
-                   check (float 0.001) "the retry is dated at the stated reset" rest_sec seconds
-                 | Some (Verification_protocol.Retry_scheduled
-                           { delay = Verification_protocol.Shared_timer }) ->
-                   fail "the rest-dated retry must name its own delay"
-                 | Some Verification_protocol.No_retry_armed ->
-                   fail "a stated provider rest stopped the Goal review"
-                 | Some (Verification_protocol.Original_observation_scheduled _
-                        | Verification_protocol.Original_repair_required) ->
-                   fail "a stated provider rest must arm a dated retry, not an original-body step"
-                 | None -> fail "the disposition must decode")
-              | None -> fail "stall notice lacks its disposition")
-           | posts ->
-             fail (Printf.sprintf "expected one stall notice, got %d" (List.length posts)));
           check int "one refused review so far" 1 !refusals;
           Atomic.set AR.run_llm_reviewer_fn
             (recording_reviewer
@@ -2738,18 +2590,18 @@ let () =
     ; ( "drain"
       , [ test_case "daemon drains healthy fifth Goal after four damaged originals" `Quick
             test_daemon_drains_healthy_goal_after_four_damaged_originals
-        ; test_case "daemon announces an early original failure once" `Quick
-            test_daemon_announces_an_early_original_failure_once
+        ; test_case "daemon shows an early original failure until repair" `Quick
+            test_daemon_shows_an_early_original_failure_until_repair
         ; test_case "original failure projection binds exact request and workspace" `Quick
             test_original_failure_projection_is_bound_to_request_and_workspace
         ; test_case "wake after deferred persistence survives active scan" `Quick
             (test_wake_after_deferred_persist_survives_active_scan ~same_request:false)
         ; test_case "same-request explicit wake precedes retry timer" `Quick
             (test_wake_after_deferred_persist_survives_active_scan ~same_request:true)
-        ; test_case "deferred review is announced and waits for a request" `Quick
-            test_deferred_review_is_announced_and_waits_for_a_request
-        ; test_case "raised review is announced" `Quick
-            test_raised_review_is_announced
+        ; test_case "deferred review waits for a request" `Quick
+            test_deferred_review_waits_for_a_request
+        ; test_case "raised review ends raised" `Quick
+            test_raised_review_ends_raised
         ; test_case "pending before phase waits for explicit retry" `Quick
             test_pending_before_phase_waits_for_explicit_request
         ; test_case "reopen from verifying cancels a hung review" `Quick

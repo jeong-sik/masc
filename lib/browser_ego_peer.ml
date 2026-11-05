@@ -19,6 +19,11 @@ let window_s verb = Browser_lane.reply_timeout_sec verb -. delivery_margin_s
 (* Every read the server sends waits the same; opening and ending the space
    answer no command and get a read's window too. *)
 let read_window_s = window_s Browser_lane.Tabs_list
+(* page.goto and page.reload wait for the page's load within ego's own bound
+   unless the call names one, and the server sets no deadline on these steps
+   (Browser_lane.ego_reply_policy). They name the command's reply window, the
+   wait the same command has on the extension and BiDi connections. *)
+let navigation_timeout_ms verb = Float.to_int (Browser_lane.reply_timeout_sec verb *. 1000.)
 
 (* The same answers as the BiDi connection: what a page script reads on one
    live connection it reads on the other. ego 0.6.0.16 carried a 3,000,003
@@ -85,20 +90,21 @@ let space t = t.space
 let space_observation t = t.space_observation
 let space_presence t = t.space_presence
 let input_status t = Input.status t.input
-let input_busy t = Input.busy t.input
-let assert_input_reset t ~generation = Input.assert_reset t.input ~generation ~now:(t.now ())
 
 let remember t page = match List.assoc_opt page t.pages with
   | Some id -> id
   | None -> t.next_tab <- t.next_tab + 1; t.pages <- (page, t.next_tab) :: t.pages; t.next_tab
 
 (* A run that ended without an answer, an answer that is not the frame's, a
-   refusal the script made before it acted ([before: true]), and an error
-   thrown at a point the script does not know, caught by the frame. *)
+   refusal the script made before it acted ([before: true]), an error
+   thrown at a point the script does not know, caught by the frame, and the
+   bound Space that did not open ([spaceOpen: "failed"]): taskSpace itself
+   threw, so the body never ran. *)
 type step_failure = Unanswered of run_failure | Unreadable of string | Refused of string | Failed of string
+  | Space_unopened of string
 let step_failure_message = function
   | Unanswered failure -> run_failure_message failure
-  | Unreadable detail | Refused detail | Failed detail -> detail
+  | Unreadable detail | Refused detail | Failed detail | Space_unopened detail -> detail
 
 (* ego's owner of a task space, as a TaskSpace handle and listTaskSpaces
    name it. The agent holds a space it opened until it hands the space to
@@ -146,8 +152,19 @@ let frame ~step ~args lines = String.concat "\n" ([
   "} catch (error) {";
   "  emit({ok: false, error: String(error && error.message || error)});";
   "}" ])
+(* taskSpace is opened apart from the body. When it throws, the answer says
+   so and the body does not run: where the script failed, not ego's words,
+   tells the peer that nothing was done (ego gives this error no code). *)
 let script ~step ~space ~holder ~args body =
-  frame ~step ~args (("  const task = await taskSpace(" ^ Yojson.Safe.to_string space ^ ");") :: held_by holder body)
+  frame ~step ~args ([
+    "  let task, opened = false;";
+    "  try {";
+    "    task = await taskSpace(" ^ Yojson.Safe.to_string space ^ ");";
+    "    opened = true;";
+    "  } catch (error) {";
+    "    emit({ok: false, spaceOpen: \"failed\", error: String(error && error.message || error)});";
+    "  }";
+    "  if (opened) {" ] @ held_by holder body @ [ "  }" ])
 
 (* taskSpace makes the space it does not find, so the spaces are read from
    the list without opening one. Every row is passed on and the name is
@@ -171,10 +188,11 @@ let answer output =
   | [line] ->
     match Yojson.Safe.from_string line with
     | exception Yojson.Json_error _ -> Error (Unreadable "ego-browser nodejs answered unreadable JSON")
-    | json -> match field "ok" json, field "value" json, field "error" json, field "before" json with
-      | Some (`Bool true), Some value, None, None -> Ok value
-      | Some (`Bool false), None, Some (`String error), Some (`Bool true) -> Error (Refused (head error))
-      | Some (`Bool false), None, Some (`String error), None -> Error (Failed (head error))
+    | json -> match field "ok" json, field "value" json, field "error" json, field "before" json, field "spaceOpen" json with
+      | Some (`Bool true), Some value, None, None, None -> Ok value
+      | Some (`Bool false), None, Some (`String error), Some (`Bool true), None -> Error (Refused (head error))
+      | Some (`Bool false), None, Some (`String error), None, None -> Error (Failed (head error))
+      | Some (`Bool false), None, Some (`String error), None, Some (`String "failed") -> Error (Space_unopened (head error))
       | _ -> Error (Unreadable "ego-browser nodejs answered outside its answer frame")
 
 type spaces_failure = Spaces_failed of string | Spaces_malformed of string
@@ -184,7 +202,7 @@ let matching_spaces ~space output =
     (* ego threw inside the frame, for one that could not reach ego lite. *)
     | Error (Failed detail) -> Error (Spaces_failed detail)
     | Error (Unanswered failure) -> Error (Spaces_failed (run_failure_message failure))
-    | Error (Unreadable detail | Refused detail) -> Error (Spaces_malformed detail) in
+    | Error (Unreadable detail | Refused detail | Space_unopened detail) -> Error (Spaces_malformed detail) in
   let row = function
     | `Assoc _ as listed ->
       (match field "spaceId" listed, field "name" listed, field "ownership" listed with
@@ -272,19 +290,57 @@ let asked run ~window_s ~step ~space ~holder ~args body = match run ~window_s (s
 let with_download_root t = function
   | `Assoc fields -> `Assoc (("downloads", str t.downloads.root) :: fields)
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) as args -> args
-let run_step t ~window_s ~step ~args body =
-  asked t.run ~window_s ~step ~space:(`Int t.space.id) ~holder:Agent_holds ~args:(with_download_root t args) body
 let run_native_script t source =
   match t.run_native source with
   | Error failure -> Error (Unanswered failure)
   | Ok output -> answer output
+
+(* ego's task spaces, read for the bound Space alone. Only a list that
+   answered can establish absence; a failed read leaves presence unknown. *)
+let space_status_script ~space_id = frame ~step:"space.status" ~args:(obj ["spaceId",`Int space_id]) [
+  "  const spaces = await listTaskSpaces();";
+  "  emit({ok: true, value: Array.isArray(spaces)";
+  "    ? spaces.map(space => space !== null && typeof space === \"object\"";
+  "        ? {spaceId: space.id, name: space.name, ownership: space.ownership} : space)";
+  "    : spaces});" ]
+let presence_of t listed = match listed with
+  | Ok value -> Browser_ego_space_observation.inventory ~expected_id:t.space.id ~observed_at:(t.now ()) value
+  | Error failure ->
+    {Browser_ego_space_observation.space_id=t.space.id;observed_at=t.now ();
+     state=Unknown (Transport_unavailable (step_failure_message failure))},None
+let space_missing_refused = "the original bound Space is missing from the native inventory; no replacement was opened; this connection ends, and take_over without a clientId asks its worker to open the configured Space again"
+let unknown_presence_message = function
+  | Browser_ego_space_observation.Transport_unavailable detail | Invalid_inventory detail -> "Space presence is unknown: " ^ detail
+  | Ambiguous_inventory -> "Space presence is unknown: the native inventory lists the original ID more than once"
+
+(* A bound Space that did not open is looked up in ego's list once, within a
+   read's window. A list that settles it becomes the connection's presence,
+   as space_status keeps it, so a Space ego no longer lists leaves automatic
+   selection. A list that does not settle it leaves the earlier presence and
+   says why in the answer. The body did not run either way. *)
+let settle_open t = function
+  | Error (Space_unopened detail) ->
+    let listed=match t.run ~window_s:read_window_s (space_status_script ~space_id:t.space.id) with
+      | Error failure -> Error (Unanswered failure)
+      | Ok output -> answer output in
+    let presence,observation=presence_of t listed in
+    let keep ()=t.space_presence <- presence; t.space_observation <- observation in
+    (match presence.state with
+     | Browser_ego_space_observation.Missing -> keep (); Error (Space_unopened space_missing_refused)
+     | Present -> keep (); Error (Space_unopened detail)
+     | Unknown reason -> Error (Space_unopened (detail ^ "; " ^ unknown_presence_message reason)))
+  | (Ok _ | Error (Unanswered _ | Unreadable _ | Refused _ | Failed _)) as answered -> answered
+let run_step t ~window_s ~step ~args body =
+  asked t.run ~window_s ~step ~space:(`Int t.space.id) ~holder:Agent_holds ~args:(with_download_root t args) body
+  |> settle_open t
 let run_native_step t ~step ~args body =
   run_native_script t (script ~step ~space:(`Int t.space.id) ~holder:Agent_holds ~args:(with_download_root t args) body)
+  |> settle_open t
 (* A read has no effect, so however it failed, nothing happened. *)
 let ask t ~step ~args body =
   run_step t ~window_s:read_window_s ~step ~args body |> Result.map_error step_failure_message
 
-let open_space ~input ~run ~run_native ~now ~space ~version ~capture_directory ~downloads =
+let open_space ~run ~run_native ~now ~space ~version ~capture_directory ~downloads =
   let* () = Browser_configuration.validate_ego_space space in
   let reference=match space with Browser_configuration.Named_space name -> str name | Existing_space id -> `Int id in
   let* opened = asked run ~window_s:read_window_s ~step:"space.open" ~space:reference ~holder:Either_holds ~args:`Null
@@ -309,7 +365,7 @@ let open_space ~input ~run ~run_native ~now ~space ~version ~capture_directory ~
   | Some (`String ownership) ->
     (match space_owner_of_wire ownership with
      | Some (Agent_owner | Handed_to_operator) ->
-       let* input=input ~space_id:bound_space.id in
+       let input=Input.create ~space_id:bound_space.id in
        Ok {run; run_native; now; space=bound_space; version; capture_directory; downloads; published = Hashtbl.create 16;
          uploads = Browser_lane.Upload_lease.create_owner ();
          input; finish_state=Active; space_observation=Some observation;
@@ -318,10 +374,12 @@ let open_space ~input ~run ~run_native ~now ~space ~version ~capture_directory ~
        Error (Printf.sprintf "ego task space %s belongs to %s, not to an agent" (Yojson.Safe.to_string reference) ownership))
   | _ -> Error "ego answered the task space without its owner"
 
-let retirement_settlement t = match t.finish_state with
-  | Active -> Error "ego Space retained; connection retirement is not task completion"
-  | Finish_uncertain -> Error "ego Space completion is unconfirmed; preserve files and never replay finish"
-  | Finished {settlement;_} -> settlement
+let retirement_settlement t = match t.finish_state, t.space_presence.state with
+  | Active, Browser_ego_space_observation.Missing ->
+    Error (Printf.sprintf "ego task space %d was gone from ego before its connection ended; its completion is unconfirmed, so its files are kept" t.space.id)
+  | Active, (Present | Unknown _) -> Error "ego Space retained; connection retirement is not task completion"
+  | Finish_uncertain, _ -> Error "ego Space completion is unconfirmed; preserve files and never replay finish"
+  | Finished {settlement;_}, _ -> settlement
 
 (* A page blocked on a JavaScript dialog runs no page script until the
    dialog is answered: ego 0.6.0.16 refuses page.evaluate then, and a move
@@ -676,7 +734,7 @@ let http_url url =
 (* What a failed effect says: refused before it acted, never started, or
    unknown, with what to do about the unknown. *)
 let effect_failure ~unknown = function
-  | Refused detail | Unanswered (Unstarted detail) -> Live.Before_effect detail
+  | Refused detail | Space_unopened detail | Unanswered (Unstarted detail) -> Live.Before_effect detail
   | Unanswered (Exited _ | Signaled _ | Timed_out | Output_exceeded | Unobserved _ as failure) ->
     Live.Outcome_unknown (run_failure_message failure ^ "; " ^ unknown)
   | Unreadable detail | Failed detail -> Live.Outcome_unknown (detail ^ "; " ^ unknown)
@@ -727,7 +785,7 @@ let finish_space t keep =
         "  const receipt = await task.finish({keep: args.keep});\n  emit({ok: true, value: receipt});" with
     | Error failure ->
       (match failure with
-       | Refused _|Unanswered (Unstarted _) -> t.finish_state <- Active
+       | Refused _|Space_unopened _|Unanswered (Unstarted _) -> t.finish_state <- Active
        | Unreadable _|Failed _|Unanswered (Exited _|Signaled _|Timed_out|Output_exceeded|Unobserved _) -> ());
       Error (effect_failure ~unknown failure)
     | Ok value ->
@@ -760,7 +818,8 @@ let tab_fields = function
 let open_tab t url =
   let* () = http_url url in
   let unknown = "a tab may have been opened: list this connection's tabs before opening another" in
-  match run_native_step t ~step:"page.open" ~args:(obj ["url",str url]) (String.concat "\n" [
+  let timeout = navigation_timeout_ms (Browser_lane.Page_act (Browser_lane.Action.Open_tab url)) in
+  match run_native_step t ~step:"page.open" ~args:(obj ["url",str url;"timeoutMs",`Int timeout]) (String.concat "\n" [
       "  const reason = " ^ message ^ ";";
       "  let page;";
       "  let refused = null;";
@@ -771,7 +830,7 @@ let open_tab t url =
       "    args.label = page.label;";
       watch_managed_page;
       "    let failure = null;";
-      "    try { await page.goto(args.url); } catch (error) { failure = reason(error); }";
+      "    try { await page.goto(args.url, {timeout: args.timeoutMs}); } catch (error) { failure = reason(error); }";
       "    const tab = " ^ row_after ^ ";";
       "    emit({ok: true, value: {label: page.label, error: failure, tab: tab === undefined ? null : {url: tab.url, title: tab.title, active: tab.active}}});";
       "  }" ]) with
@@ -821,11 +880,12 @@ let goto t args =
     | Some (`Int id) -> Ok id
     | Some _ | None -> Error (Live.Before_effect "page.goto on an ego connection needs the tabId of a managed Page") in
   let* label = label_of t id in
-  settled ~id ~action:"goto" (run_native_step t ~step:"page.goto" ~args:(obj ["label",str label;"url",str url;"tabId",`Int id]) (String.concat "\n" [
+  let timeout = navigation_timeout_ms (Browser_lane.Page_goto {url; tab_id = Some id}) in
+  settled ~id ~action:"goto" (run_native_step t ~step:"page.goto" ~args:(obj ["label",str label;"url",str url;"tabId",`Int id;"timeoutMs",`Int timeout]) (String.concat "\n" [
       "  const reason = " ^ message ^ ";";
       unblocked_managed_page;
       "    let failure = null;";
-      "    try { await task.page(args.label).goto(args.url); } catch (error) { failure = reason(error); }";
+      "    try { await task.page(args.label).goto(args.url, {timeout: args.timeoutMs}); } catch (error) { failure = reason(error); }";
       moved_page_answer;
       "  }" ]))
 
@@ -848,11 +908,12 @@ let tab_window id interaction =
 
 let reload t id =
   let* label = label_of t id in
-  settled ~id ~action:"reload" (run_native_step t ~step:"page.reload" ~args:(obj ["label",str label;"tabId",`Int id]) (String.concat "\n" [
+  let timeout = navigation_timeout_ms (Browser_lane.Page_act (Browser_lane.Action.On_tab {tab_id = id; frame_path = []; interaction = Browser_lane.Action.Reload})) in
+  settled ~id ~action:"reload" (run_native_step t ~step:"page.reload" ~args:(obj ["label",str label;"tabId",`Int id;"timeoutMs",`Int timeout]) (String.concat "\n" [
       "  const reason = " ^ message ^ ";";
       unblocked_managed_page;
       "    let failure = null;";
-      "    try { await task.page(args.label).reload(); } catch (error) { failure = reason(error); }";
+      "    try { await task.page(args.label).reload({timeout: args.timeoutMs}); } catch (error) { failure = reason(error); }";
       moved_page_answer;
       "  }" ]))
 
@@ -864,13 +925,18 @@ let reload t id =
    while waiting can fail as the page changes renderer (ego lite 0.6.0.16
    answered "Not attached to an active page" once on a move back to
    chrome://new-tab-page/, and the next read was on the entry); such a
-   failure says nothing about the move, so the wait goes on, within the
-   run's window. *)
+   failure says nothing about the move, so the wait goes on. Both waits, for
+   the entry and for its load, end a delivery margin before the run is
+   stopped ([runStopsAt]), so a move that does not land or a load that
+   outlasts the window still answers where the tab is instead of losing the
+   run. The load wait names at least a millisecond, because ego documents its
+   timeout only as a maximum duration and does not say what 0 means. *)
 let history_poll_ms = 50
 let traverse t id ~action ~delta ~side interaction =
   let* label = label_of t id in
   settled ~id ~action (run_step t ~window_s:(tab_window id interaction)
-    ~step:"page.history" ~args:(obj ["label",str label;"tabId",`Int id;"delta",`Int delta;"side",str side;"pollMs",`Int history_poll_ms])
+    ~step:"page.history" ~args:(obj ["label",str label;"tabId",`Int id;"delta",`Int delta;"side",str side;"pollMs",`Int history_poll_ms;
+      "answerMarginMs",`Int (Float.to_int (delivery_margin_s *. 1000.))])
     (String.concat "\n" [
       "  const reason = " ^ message ^ ";";
       unblocked_managed_page;
@@ -887,8 +953,12 @@ let traverse t id ~action ~delta ~side interaction =
       "      try {";
       "        await page.cdp(\"Page.navigateToHistoryEntry\", {entryId: entry.id});";
       "        const landed = async () => { try { return (await page.cdp(\"Page.getNavigationHistory\", {})).currentIndex === target; } catch (error) { return false; } };";
-      "        while (!(await landed())) await page.waitForTimeout(args.pollMs);";
-      "        await page.waitForLoadState();";
+      "        const answerBy = runStopsAt - args.answerMarginMs;";
+      "        while (!(await landed())) {";
+      "          if (Date.now() >= answerBy) throw new Error(\"tab \" + args.tabId + \" did not reach the \" + args.side + \" history entry within its run's window\");";
+      "          await page.waitForTimeout(args.pollMs);";
+      "        }";
+      "        await page.waitForLoadState(undefined, {timeout: Math.max(1, answerBy - Date.now())});";
       "      } catch (error) { failure = reason(error); }";
       moved_page_answer;
       "    }";
@@ -1058,7 +1128,6 @@ let upload t id ~selector ~paths =
    and one process serves this connection, so the run closes a chooser it
    does not fill with setFiles([]), which hands the page nothing. *)
 let choose_files ?actor t id ~opener ~paths =
-  let* () = Input.admit t.input |> Result.map_error (fun detail -> Live.Before_effect detail) in
   let* label = label_of t id in
   let* chosen = chosen_files paths in
   Browser_lane.Upload_lease.claim ~owner:t.uploads ~paths;
@@ -1317,7 +1386,7 @@ let target_input_script = {js|async function nativeTargetInput(page, args) {
     return {before: true, error: "unsupported snapshot target action"};
   await checkUrl();
   if (refusal !== null) return {before: true, error: refusal};
-  let receipt = null, failure = null;
+  let receipt = null, failure = null, thrown = null;
   try {
     switch (args.action) {
       case "click": receipt = await page.click(args.target, {label: args.cursor}); break;
@@ -1331,9 +1400,14 @@ let target_input_script = {js|async function nativeTargetInput(page, args) {
     failure = reason(error);
     // The SDK owns this gesture and its release attempts. mouse.up() can
     // swallow a dialog interruption as void; another release could also
-    // duplicate the SDK's original mouseup. Keep uncertainty on failure.
+    // duplicate the SDK's original mouseup. Never release here. Hand the
+    // error's declared name and kind to the host, which alone judges them.
+    thrown = {
+      name: typeof error?.name === "string" ? error.name : null,
+      kind: typeof error?.kind === "string" ? error.kind : null
+    };
   }
-  return {urlBefore, receipt, error: failure};
+  return {urlBefore, receipt, error: failure, thrown};
 }|js}
 (* An input the SDK showed released is settled. One that was never held keeps the readiness it had. *)
 let settle_input t pending settled = match pending with
@@ -1341,6 +1415,11 @@ let settle_input t pending settled = match pending with
   | Some (pending:Input.pending) -> match settled with
     | Browser_ego_release.No_hold -> Input.not_started t.input ~generation:pending.generation
     | Browser_ego_release.Released proof -> Input.command_settled t.input ~generation:pending.generation proof
+let refusable_gesture = function
+  | Target_click -> Some Browser_ego_release.Click
+  | Target_double_click -> Some Browser_ego_release.Double_click
+  | Target_drag _ -> Some Browser_ego_release.Drag_and_drop
+  | Target_fill _ | Target_hover | Target_select _ -> None
 let native_input t ~id ~label ~cursor ~expected_url ~locator ~reference ~operation =
   let verb, text = match operation with
     | Target_click -> "click", `Null
@@ -1357,7 +1436,7 @@ let native_input t ~id ~label ~cursor ~expected_url ~locator ~reference ~operati
   let holds_button = match operation with
     | Target_click | Target_double_click | Target_drag _ -> true
     | Target_fill _ | Target_hover | Target_select _ -> false in
-  let* pending=if holds_button then Input.begin_holding t.input ~scope:Input.Page_scope ~tab_id:id ~page_label:label ~operation:"native_target_input"
+  let* pending=if holds_button then Input.begin_holding t.input ~scope:Input.Page_scope ~page_label:label
     |> Result.map Option.some |> Result.map_error (fun detail -> Live.Before_effect detail) else Ok None in
   let response = run_native_step t ~step:"page.target_input"
       ~args:(obj ["label",str label;"tabId",`Int id;"expectedUrl",(match expected_url with Some url -> str url | None -> `Null);"target",str locator;
@@ -1375,7 +1454,7 @@ let native_input t ~id ~label ~cursor ~expected_url ~locator ~reference ~operati
         "    }";
         "  }" ]) in
   let* ()=match pending,response with
-    | Some pending,Error (Refused _ | Unanswered (Unstarted _)) ->
+    | Some pending,Error (Refused _ | Space_unopened _ | Unanswered (Unstarted _)) ->
         Input.not_started t.input ~generation:pending.generation |> Result.map_error (fun detail -> Live.Before_effect detail)
     | None,_ | Some _,(Ok _ | Error (Unanswered (Exited _ | Signaled _ | Timed_out | Output_exceeded | Unobserved _) | Failed _ | Unreadable _)) -> Ok () in
   match response with
@@ -1383,7 +1462,28 @@ let native_input t ~id ~label ~cursor ~expected_url ~locator ~reference ~operati
   | Ok value ->
     let outcome detail = Error (Live.Outcome_unknown (detail ^ "; " ^ unknown)) in
     match field "error" value, field "urlBefore" value, field "receipt" value, field "tab" value with
-    | Some (`String error), _, _, _ -> outcome (head error)
+    | Some (`String error), _, _, _ ->
+      (* A gesture the SDK refused before its press holds nothing: the input
+         keeps the readiness it had. Only a frame with no receipt can be such
+         a refusal. The effect stays uncertain, because the SDK may have
+         scrolled the target or, for a double click, finished a first click
+         and its release before it gave up. *)
+      (match pending, refusable_gesture operation, field "receipt" value with
+       | Some _, Some gesture, Some `Null ->
+         (match Browser_ego_release.answer_of_refusal gesture
+                  (Option.value (field "thrown" value) ~default:`Null) with
+          | Browser_ego_release.Refused_before_press resolution as answer ->
+            (match Browser_ego_release.judge [0,answer] with
+             | Browser_ego_release.Settled settled ->
+               let* () = settle_input t pending settled
+                 |> Result.map_error (fun detail -> Live.Outcome_unknown (detail ^ "; " ^ unknown)) in
+               Error (Live.Observed_failure {disposition=Live.Uncertain;message=head error ^ "; " ^ unknown;
+                 receipt=obj (["tabId",`Int id;"action",str verb] @ reference
+                   @ ["refusedBeforePress",obj ["kind",str (Browser_ego_release.resolution_to_wire resolution)]])})
+             | Browser_ego_release.Unconfirmed _ -> outcome (head error))
+          | Browser_ego_release.Receipt_without_dialog | Browser_ego_release.Native_window_tail _
+          | Browser_ego_release.Unreleased _ -> outcome (head error))
+       | (None | Some _), (None | Some _), (None | Some _) -> outcome (head error))
     | Some `Null, Some (`String url_before), Some (`Assoc receipt), Some ((`Null | `Assoc _) as tab) ->
       (* Click, double-click and dragAndDrop settle only from the SDK's receipt read whole. A receipt
          with a member the SDK does not declare is not an answer, so it is read as neither released nor served. *)
@@ -1391,7 +1491,7 @@ let native_input t ~id ~label ~cursor ~expected_url ~locator ~reference ~operati
       let declared = match operation with
         | Target_click | Target_double_click | Target_drag _ ->
           (match answer with
-           | Browser_ego_release.Native_window_tail _
+           | Browser_ego_release.Native_window_tail _ | Browser_ego_release.Refused_before_press _
            | Browser_ego_release.Unreleased (Browser_ego_release.Undeclared_answer
                | Native_window_unconfirmed _ | Conflicting_evidence) ->
              Error "ego answered the input with a receipt the SDK does not declare"
@@ -1479,7 +1579,7 @@ let native_type t ~id ~label ~expected_url ~document_id ~text =
   let before result=Result.map_error (fun message->Live.Before_effect message) result in
   let* source=before (managed_source t ~tab_id:id ~label) in
   let current=window_page source in
-  let* pending=before (Input.begin_holding t.input ~scope:Input.Page_scope ~tab_id:id ~page_label:label ~operation:"native_type_text") in
+  let* pending=before (Input.begin_holding t.input ~scope:Input.Page_scope ~page_label:label) in
   let* context=match Raw_type.prepare ~command_id:pending.command_id ~generation:pending.generation ~source:current ~indices:[0] with
     | Ok context->Ok context
     | Error _ -> let* ()=before (Input.not_started t.input ~generation:pending.generation) in
@@ -1501,6 +1601,9 @@ let native_type t ~id ~label ~expected_url ~document_id ~text =
   | Error (Refused _|Unanswered (Unstarted _)) ->
     let* ()=before (Input.not_started t.input ~generation:pending.generation) in
     Error (Live.Before_effect "native typing was refused before its producer ran")
+  | Error (Space_unopened detail) ->
+    let* ()=before (Input.not_started t.input ~generation:pending.generation) in
+    Error (Live.Before_effect detail)
   | Error (Unreadable _|Failed _|Unanswered (Exited _|Signaled _|Timed_out|Output_exceeded|Unobserved _)) -> Error unknown
   | Ok value ->
     let* fields=match value with
@@ -1554,7 +1657,6 @@ let interact ?actor t args =
   let* label = label_of t id in
   let deadline = command_deadline t (Browser_lane.Page_interact {tab_id = id; frame_path = []; expected_url = request.expected_url; action = request.action}) in
   let input ~expected_url action = Browser_lane.interaction_args ~tab_id:id ~frame_path:[] ~expected_url action in
-  let* () = Input.admit t.input |> Result.map_error (fun detail -> Live.Before_effect detail) in
   let* () = match request.action with
     | Browser_lane.Drag_to {duration_ms;_} when duration_ms <> 0 ->
         Error (Live.Before_effect "ego drag requires durationMs=0; movement timing is not exposed by its mouse API")
@@ -1666,7 +1768,8 @@ let take_over t =
   t.space_observation <- None;
   let unknown = Printf.sprintf "control of original ego Space #%d is unconfirmed; confirm operator control and inspect that same Space; never automatically repeat take_over or select a replacement" t.space.id in
   match run_native_script t (script ~step:"space.take_over" ~space:(`Int t.space.id)
-      ~holder:Operator_holds ~args:(obj ["spaceId",`Int t.space.id]) Browser_ego_takeover.script) with
+      ~holder:Operator_holds ~args:(obj ["spaceId",`Int t.space.id]) Browser_ego_takeover.script)
+        |> settle_open t with
   | Error failure -> Error (effect_failure ~unknown failure)
   | Ok value ->
     let* receipt=Browser_ego_takeover.decode ~expected_id:t.space.id value
@@ -1697,23 +1800,12 @@ let wait_for_control t (options : Browser_lane.Action.control_wait) =
      | (None|Some _),(None|Some _),(None|Some _) -> Error (Live.Before_effect "invalid native control wait observation"))
   | Ok _ -> Error (Live.Before_effect "invalid native control wait observation")
 
-let space_status_script ~space_id = frame ~step:"space.status" ~args:(obj ["spaceId",`Int space_id]) [
-  "  const spaces = await listTaskSpaces();";
-  "  emit({ok: true, value: Array.isArray(spaces)";
-  "    ? spaces.map(space => space !== null && typeof space === \"object\"";
-  "        ? {spaceId: space.id, name: space.name, ownership: space.ownership} : space)";
-  "    : spaces});" ]
-
 let space_status t =
   (* Only an authoritative inventory can establish absence. A failed query
      remains unknown; neither outcome changes the original attachment. *)
   let module Observation=Browser_ego_space_observation in
   t.space_observation <- None;
-  let presence,observation=match run_native_script t (space_status_script ~space_id:t.space.id) with
-    | Ok value -> Observation.inventory ~expected_id:t.space.id ~observed_at:(t.now ()) value
-    | Error failure ->
-      {Observation.space_id=t.space.id;observed_at=t.now ();
-       state=Unknown (Transport_unavailable (step_failure_message failure))},None in
+  let presence,observation=presence_of t (run_native_script t (space_status_script ~space_id:t.space.id)) in
   t.space_presence <- presence;
   t.space_observation <- observation;
   match presence.state,observation with
@@ -1721,9 +1813,8 @@ let space_status t =
     (match Observation.to_json observation with
      | `Assoc fields -> Ok (obj (("action",str "space_status")::fields))
      | _ -> Error (Live.Before_effect "invalid encoded Space observation"))
-  | Missing,None -> Error (Live.Before_effect "the original bound Space is missing from the native inventory; no replacement was opened")
-  | Unknown (Transport_unavailable detail|Invalid_inventory detail),None -> Error (Live.Before_effect ("Space presence is unknown: " ^ detail))
-  | Unknown Ambiguous_inventory,None -> Error (Live.Before_effect "Space presence is unknown: the native inventory lists the original ID more than once")
+  | Missing,None -> Error (Live.Before_effect space_missing_refused)
+  | Unknown reason,None -> Error (Live.Before_effect (unknown_presence_message reason))
   | (Present,None)|((Missing|Unknown _),Some _) -> Error (Live.Before_effect "inconsistent native Space presence observation")
 
 let page_management_script = {js|async (task, args) => {
@@ -1751,7 +1842,6 @@ let page_management_script = {js|async (task, args) => {
 type page_management = Adopt of string option | Release
 let manage_tab t ~tab_id operation =
   let pre message=Error (Live.Before_effect message) in
-  let* ()=Input.admit t.input |> Result.map_error (fun detail -> Live.Before_effect detail) in
   let* previous=match List.find_opt (fun (_,id) -> id=tab_id) t.pages with
     | Some (page,_) -> Ok page
     | None -> pre "browser tab is no longer present; list this connection's tabs" in
@@ -1822,7 +1912,6 @@ let workflow ?actor t args =
     |> Result.map_error (fun reason -> Live.Before_effect (Browser_lane.Native_workflow.unavailable_input_message reason)) in
   let* _ = pre (Browser_page_script.text_cap (Some request.max_chars)) in
   let* label = label_of t request.tab_id in
-  let* () = Input.admit t.input |> Result.map_error (fun detail -> Live.Before_effect detail) in
   let holds_input=List.exists (fun (step : Browser_lane.Native_workflow.step) ->
     Browser_lane.Native_workflow.holds_input step.action) request.steps in
   let raw_indices=List.filter_map (fun (index,(step:Browser_lane.Native_workflow.step)) ->
@@ -1843,7 +1932,7 @@ let workflow ?actor t args =
     | Input.Page_scope,[] -> Ok None
     | Input.Space_scope,_ | Input.Page_scope,(_::_) ->
       pre (managed_source t ~tab_id:request.tab_id ~label) |> Result.map Option.some in
-  let* pending=if holds_input then Input.begin_holding t.input ~scope ~tab_id:request.tab_id ~page_label:label ~operation:"native_workflow"
+  let* pending=if holds_input then Input.begin_holding t.input ~scope ~page_label:label
     |> Result.map Option.some |> Result.map_error (fun detail -> Live.Before_effect detail) else Ok None in
   let* windows=match raw_indices,source,pending with
     | [],_,_ -> Ok None
@@ -1873,11 +1962,12 @@ let workflow ?actor t args =
   match result with
   | Error error ->
     let* ()=match pending,error with
-     | Some pending,(Refused _|Unanswered (Unstarted _)) -> Input.not_started t.input ~generation:pending.generation
+     | Some pending,(Refused _|Space_unopened _|Unanswered (Unstarted _)) -> Input.not_started t.input ~generation:pending.generation
          |> Result.map_error (fun detail -> Live.Before_effect detail)
      | None,_ | Some _,(Unreadable _|Failed _|Unanswered (Exited _|Signaled _|Timed_out|Output_exceeded|Unobserved _)) -> Ok () in
     (match windows,error with
      | Some _,(Refused _|Unanswered (Unstarted _)) -> Error (Live.Before_effect "native workflow was refused before its producer ran")
+     | Some _,Space_unopened detail -> Error (Live.Before_effect detail)
      | Some _,(Unreadable _|Failed _|Unanswered (Exited _|Signaled _|Timed_out|Output_exceeded|Unobserved _)) ->
        Error (Live.Outcome_unknown "native workflow result is unknown; read the same tab before another step; never replay the workflow")
      | None,_ -> Error (effect_failure ~unknown:"native workflow result is unknown; read the same tab before another step; never replay the workflow" error))
@@ -1912,7 +2002,8 @@ let workflow ?actor t args =
       | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Error (unknown "workflow receipt is not an object") in
     match outcome with
     | Browser_ego_workflow.Completed {reply=value;input=_;pages=_} -> receipt_of value
-    | Browser_ego_workflow.Stopped {receipt=value;message=detail;effect_started;completed_effect;input=_;native_error;pages=_} ->
+    | Browser_ego_workflow.Stopped {receipt=value;message=detail;effect_started;completed_effect;input=_;native_error;pages=_;
+        refused_before_press} ->
       let message=head detail ^ "; read the same tab before continuing; never replay the workflow" in
       if completed_effect then
         let* receipt=receipt_of value in Error (Live.Partial_failure {tab_id=current_tab;receipt;message})
@@ -1921,7 +2012,8 @@ let workflow ?actor t args =
           let* receipt=receipt_of value in
           let disposition=if effect_started then Live.Uncertain else Live.Not_started in
           Error (Live.Observed_failure {disposition;message;receipt})
-        | None -> if effect_started && Option.is_some pages then
+        | None -> if effect_started && (Option.is_some pages || Option.is_some refused_before_press) then
+            (* A refused step's receipt carries the SDK kind the caller needs to pick a narrower target. *)
             let* receipt=receipt_of value in Error (Live.Observed_failure {disposition=Live.Uncertain;message;receipt})
           else if effect_started then Error (Live.Outcome_unknown message)
           else Error (Live.Before_effect message)
@@ -1961,7 +2053,7 @@ let dispatch ?command_id ?actor t ~verb args =
   let command_id=match command_id with Some id -> id
     | None -> Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ())) in
   let annotate = function
-    | `Assoc fields -> `Assoc (("inputReadiness",str (Input.provenance t.input)) :: List.remove_assoc "inputReadiness" fields)
+    | `Assoc fields -> `Assoc (("inputReadiness",str (Input.readiness_wire t.input)) :: List.remove_assoc "inputReadiness" fields)
     | value -> value in
   match Input.within_command t.input ~command_id (fun () -> let* ()=admit_after_finish t ~verb args in dispatch_raw ?actor t ~verb args) with
   | Error detail -> Error (Live.Before_effect detail)
@@ -1970,3 +2062,18 @@ let dispatch ?command_id ?actor t ~verb args =
   | Ok (Error (Live.Observed_failure observed)) ->
     Error (Live.Observed_failure {observed with receipt=annotate observed.receipt})
   | Ok (Error (Live.Before_effect _|Outcome_unknown _) as failure) -> failure
+
+(* What leaves the peer. A failure that is only a message becomes the observed
+   failure with the same effect phase, so its receipt can say where input stands. *)
+let with_input_state t result =
+  let stamp = function
+    | `Assoc fields -> `Assoc (("inputReadiness",str (Input.readiness_wire t.input)) :: List.remove_assoc "inputReadiness" fields)
+    | value -> value in
+  match result with
+  | Ok value -> Ok (stamp value)
+  | Error (Live.Before_effect message) ->
+    Error (Live.Observed_failure {disposition=Live.Not_started;message;receipt=stamp (obj [])})
+  | Error (Live.Outcome_unknown message) ->
+    Error (Live.Observed_failure {disposition=Live.Uncertain;message;receipt=stamp (obj [])})
+  | Error (Live.Partial_failure partial) -> Error (Live.Partial_failure {partial with receipt=stamp partial.receipt})
+  | Error (Live.Observed_failure observed) -> Error (Live.Observed_failure {observed with receipt=stamp observed.receipt})

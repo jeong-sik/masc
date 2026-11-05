@@ -5504,13 +5504,6 @@ let test_unbooted_microvm_guest_is_not_booted_and_skips_freshness_scan () =
    | Error (Root_probe_unreachable { reason; _ }) ->
      Alcotest.failf "unexpected Root_probe_unreachable: %s" reason
    | Ok _ -> Alcotest.fail "expected Root_missing for unbooted microvm guest");
-  (match Masc.Keeper_sandbox_control.checkout_freshness_rows ~config ~meta () with
-   | Error (Masc.Keeper_playground_checkouts.Root_missing { root }) ->
-     Alcotest.(check string) "root is keeper playground root" expected_root root
-   | Error scan_err ->
-     Alcotest.failf "unexpected checkout_freshness_rows scan error: %s"
-       (Masc.Keeper_playground_checkouts.scan_error_to_string scan_err)
-   | Ok _ -> Alcotest.fail "expected Root_missing from checkout_freshness_rows");
   Masc.Keeper_turn_sandbox_runtime.For_testing_microvm.mark_microvm_guest_booted
     ~config ~meta ();
   Alcotest.(check bool) "marked booted" true

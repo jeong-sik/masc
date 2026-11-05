@@ -5,15 +5,31 @@ let display_name="Telegram"
 let channel="telegram"
 let binding_store_path = Env_config_telegram.binding_store_path
 let binding_audit_path = Env_config_telegram.binding_audit_path
-let store=Store.create ~binding_store_path ~binding_store_read_path:binding_store_path
+let store=Store.create ~connector_id ~binding_store_path ~binding_store_read_path:binding_store_path
   ~binding_audit_path ~binding_audit_read_path:binding_audit_path ~guild_id_field:Store.Include_empty
 let ( let* )=Result.bind
 
 type poll_state = Not_configured | Starting | Polling of {bot_user_id:int64;next_offset:int64 option} | Degraded of string
 let state=Atomic.make Starting
-let record_not_configured () = Atomic.set state Not_configured
-let record_error detail = Atomic.set state (Degraded detail)
-let record_poll_ok ~bot_user_id ~next_offset = Atomic.set state (Polling {bot_user_id;next_offset})
+
+(* What the connector list draws from the poll state: whether it polls, as
+   which bot, and why not. The offset moves with every poll and is not drawn,
+   so only a change of the rest tells readers (RFC-0480 §3.4). *)
+let same_drawn_state previous next =
+  match previous, next with
+  | Not_configured, Not_configured | Starting, Starting -> true
+  | Polling previous, Polling next -> Int64.equal previous.bot_user_id next.bot_user_id
+  | Degraded previous, Degraded next -> String.equal previous next
+  | (Not_configured | Starting | Polling _ | Degraded _),
+    (Not_configured | Starting | Polling _ | Degraded _) -> false
+
+let publish next =
+  let previous = Atomic.exchange state next in
+  if not (same_drawn_state previous next) then Gate_connector_announce.changed ~connector_id
+
+let record_not_configured () = publish Not_configured
+let record_error detail = publish (Degraded detail)
+let record_poll_ok ~bot_user_id ~next_offset = publish (Polling {bot_user_id;next_offset})
 let connected () = match Atomic.get state with Polling _ -> true | Not_configured | Starting | Degraded _ -> false
 let snapshot ?(audit_limit = 10) () : Channel_gate_connector.snapshot =
   let binding_read =

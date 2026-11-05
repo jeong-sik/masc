@@ -34,13 +34,15 @@ type entry = {
    while both were broadcast. Only one is now (#27664). *)
 let execution_snapshot_type = "execution_snapshot"
 
+let transport_health_snapshot_type = "transport_health_snapshot"
+
 let entries =
   [
     { event_type = "project_snapshot"; slice = "namespace"; whole_projection = true };
     { event_type = execution_snapshot_type; slice = "execution"; whole_projection = true };
     { event_type = "operator_snapshot"; slice = "operator"; whole_projection = true };
     { event_type = "operator_digest"; slice = "operator"; whole_projection = true };
-    { event_type = "transport_health_snapshot"; slice = "transport"; whole_projection = true };
+    { event_type = transport_health_snapshot_type; slice = "transport"; whole_projection = true };
     { event_type = "keeper_composite_changed"; slice = "composite"; whole_projection = false };
   ]
 

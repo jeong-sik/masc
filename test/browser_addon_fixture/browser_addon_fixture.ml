@@ -27,7 +27,6 @@ p=argparse.ArgumentParser()
 p.add_argument("root");p.add_argument("--socket");p.add_argument("--incarnation");p.add_argument("--max-message-bytes")
 p.add_argument("--backend",required=True)
 p.add_argument("--live-ego-command")
-p.add_argument("--ego-input-store")
 space=p.add_mutually_exclusive_group();space.add_argument("--live-ego-space");space.add_argument("--live-ego-space-id")
 a=p.parse_args()
 s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);s.bind(a.socket);s.listen()
@@ -90,37 +89,27 @@ for line in sys.stdin:
 |}
 (* The failure class and effect phase the scripted adapter reports for a
    lane answer, read from the answer as the browser host wrote it. *)
-let answer_result ~lane ~tool_name ~start_time = function
+let answer_result ~lane ~tool_name ~start_time answer =
+  (* The class and effect come from the worker tool's own reading of the
+     reply; only the message is the fixture's. A success without data is a
+     reply the host cannot read. *)
+  let failed ?data message = match Browser_addon_tool.failure_of_reply (W.Issue_result (Ok answer)) with
+    | Some (class_, effect_disposition) ->
+      Tool_result.make_err ~tool_name ~start_time ~class_ ?data ~effect_disposition message
+    | None -> Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Runtime_failure message in
+  match answer with
   | B.Answered (`Assoc fields) ->
     (match List.assoc_opt "ok" fields, List.assoc_opt "data" fields with
      | Some (`Bool true), Some data -> Tool_result.make_ok ~tool_name ~start_time ~data ()
-     | Some (`Bool false), _ ->
-       let message = match List.assoc_opt "error" fields with
+     | Some (`Bool false), data ->
+       failed ?data (match List.assoc_opt "error" fields with
          | Some (`String message) -> message
-         | _ -> "browser backend failed without an error message" in
-       let effect_disposition = match List.assoc_opt "effectPhase" fields with
-         | Some (`String "not_started") -> Tool_result.Proven_pre_effect
-         | Some (`String "partial") -> Tool_result.Proven_post_effect
-         | Some _ | None -> Tool_result.Effect_outcome_unknown in
-       Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Workflow_rejection
-         ?data:(List.assoc_opt "data" fields) ~effect_disposition message
-     | _ -> Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Runtime_failure
-         "invalid browser backend response")
-  | B.Answered _ ->
-    Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Runtime_failure
-      "invalid browser backend response"
-  | B.Lane_absent ->
-    Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Dependency_unavailable
-      ~effect_disposition:Tool_result.Proven_pre_effect
-      (Printf.sprintf "the %s browser lane is absent" (B.Lane_name.to_wire lane))
-  | B.Timed_out ->
-    Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Dependency_unavailable
-      "the browser lane did not answer in time; the dispatched outcome is unknown"
-  | B.Rejected_before_effect reason ->
-    Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Workflow_rejection
-      ~effect_disposition:Tool_result.Proven_pre_effect reason
-  | B.Refused reason ->
-    Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Workflow_rejection reason
+         | _ -> "browser backend failed without an error message")
+     | _ -> failed "invalid browser backend response")
+  | B.Answered _ -> failed "invalid browser backend response"
+  | B.Lane_absent -> failed (Printf.sprintf "the %s browser lane is absent" (B.Lane_name.to_wire lane))
+  | B.Timed_out -> failed "the browser lane did not answer in time; the dispatched outcome is unknown"
+  | B.Rejected_before_effect reason | B.Refused reason -> failed reason
 (* A worker states no browser identity; the host adds the one it chose. *)
 let response ~route verb answer =
   let data=W.reply_to_json (W.Issue_result (Ok answer)) in

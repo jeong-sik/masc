@@ -178,12 +178,27 @@ let agent_credential_of_yojson json =
       expires_at;
     }
 
+type account_mode =
+  | Single_user
+  | Multi_account
+[@@deriving show]
+
+let account_mode_label = function
+  | Single_user -> "Single_user"
+  | Multi_account -> "Multi_account"
+
+let account_mode_of_json = function
+  | `String "Single_user" -> Some Single_user
+  | `String "Multi_account" -> Some Multi_account
+  | _ -> None
+
 (** Auth configuration *)
 type auth_config = {
   enabled: bool;
   workspace_secret_hash: string option; [@default None]
   require_token: bool; [@default true]
   token_expiry_hours: int; [@default 24]
+  account_mode: account_mode option; [@default None]
 } [@@deriving show]
 
 let default_auth_config = {
@@ -191,18 +206,22 @@ let default_auth_config = {
   workspace_secret_hash = None;
   require_token = true;
   token_expiry_hours = 24;
+  account_mode = None;
 }
 
 let auth_config_to_yojson c =
-  `Assoc [
+  `Assoc ([
     ("enabled", `Bool c.enabled);
     ("workspace_secret_hash", Json_util.string_opt_to_json c.workspace_secret_hash);
     ("require_token", `Bool c.require_token);
     ("token_expiry_hours", `Int c.token_expiry_hours);
   ]
+  @ (match c.account_mode with
+     | None -> []
+     | Some mode -> [ ("account_mode", `String (account_mode_label mode)) ]))
 
 let auth_config_field_names =
-  [ "enabled"; "workspace_secret_hash"; "require_token"; "token_expiry_hours" ]
+  [ "enabled"; "workspace_secret_hash"; "require_token"; "token_expiry_hours"; "account_mode" ]
 
 let validate_auth_config_fields = function
   | `Assoc fields ->
@@ -296,7 +315,17 @@ let auth_config_of_yojson json =
   let* require_token = auth_config_bool fields "require_token" ~default:true in
   let* token_expiry_hours = auth_config_int fields "token_expiry_hours" ~default:24 in
   let* token_expiry_hours = validate_token_expiry_hours token_expiry_hours in
-  Ok { enabled; workspace_secret_hash; require_token; token_expiry_hours }
+  let* account_mode =
+    match List.assoc_opt "account_mode" fields with
+    | None -> Ok None
+    | Some json ->
+      (match account_mode_of_json json with
+       | Some mode -> Ok (Some mode)
+       | None ->
+         Error
+           "auth_config_of_yojson: field \"account_mode\" must be the string \"Single_user\" or \"Multi_account\"")
+  in
+  Ok { enabled; workspace_secret_hash; require_token; token_expiry_hours; account_mode }
 
 (** Permission matrix - what each role can do *)
 type permission =

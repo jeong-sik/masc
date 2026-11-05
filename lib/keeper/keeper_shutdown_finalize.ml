@@ -112,10 +112,9 @@ let operation_evidence_ref operation =
 let task_has_operation_receipt operation (task : Masc_domain.task) =
   match task.task_status, task.handoff_context with
   | Masc_domain.Todo, Some handoff ->
-    handoff.reclaim_policy = Some Masc_domain.Allow_reclaim
-    && List.exists
-         (String.equal (operation_evidence_ref operation))
-         handoff.evidence_refs
+    List.exists
+      (String.equal (operation_evidence_ref operation))
+      handoff.evidence_refs
   | Masc_domain.Claimed _, _
   | Masc_domain.InProgress _, _
   | Masc_domain.AwaitingVerification _, _
@@ -189,7 +188,6 @@ let release_handoff_context
     ; reason = Some shutdown_release_reason
     ; next_step = Some shutdown_release_next_step
     ; failure_mode = None
-    ; reclaim_policy = Some Masc_domain.Allow_reclaim
     ; evidence_refs = [ receipt_ref ]
     ; updated_at = Some now
     ; updated_by = Some operation.actor
@@ -209,7 +207,6 @@ let release_handoff_context
     ; reason = Some shutdown_release_reason
     ; next_step
     ; failure_mode = non_empty_trimmed_opt prev.failure_mode
-    ; reclaim_policy = Some Masc_domain.Allow_reclaim
     ; evidence_refs = append_unique_evidence_ref prev.evidence_refs receipt_ref
     ; updated_at = Some now
     ; updated_by = Some operation.actor

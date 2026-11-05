@@ -72,7 +72,10 @@ let with_fixture ?(config = runtime_base) f =
     f { root; runtime; driver; other_driver; browser })
 
 let request ?geckodriver ?browser fixture =
-  { A.runtime_config_path = fixture.runtime; geckodriver; browser }
+  { A.store = Masc.Runtime_table_edit.file_store ~runtime_config_path:fixture.runtime
+  ; geckodriver
+  ; browser
+  }
 
 let found fixture () =
   R.Started { command = fixture.driver; path = fixture.driver; output = "geckodriver 0.0" }

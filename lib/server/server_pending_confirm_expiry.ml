@@ -210,15 +210,22 @@ let read_storage config =
   | exn -> Error (Printexc.to_string exn)
 ;;
 
+(* A reader woken by the publication reads the operator snapshot, which is
+   cached for a while; dropping it first makes that read compute the change
+   (RFC-0480 §3.4). *)
+let invalidate_with ~enqueue ~restore ~base_path =
+  Operator_control_snapshot_cache.invalidate_snapshot_cache ();
+  enqueue ~base_path;
+  restore ~base_path
+;;
+
 let start ~sw ~clock ~mono_clock ~state =
   let publish ~base_path =
     let authority = Sse.runtime_authority_exn ~base_path in
     Sse.broadcast_to_sse_runtime_observers authority Pending_confirm_invalidation_event.json in
   let enqueue = Server_workspace_invalidation.start ~sw ~mono_clock ~publish in
   let restore = Server_routes_http_runtime.invalidate_full_health_snapshot_for_workspace in
-  let invalidate ~base_path =
-    enqueue ~base_path;
-    restore ~base_path in
+  let invalidate ~base_path = invalidate_with ~enqueue ~restore ~base_path in
   start_with ~sw ~clock
     ~sleep_until:(fun ~on_armed at -> Wall_deadline.sleep_until ~on_armed at) ~state
     ~sleep_retry:(Eio.Time.Mono.sleep mono_clock) ~read:read_storage ~invalidate
@@ -226,6 +233,8 @@ let start ~sw ~clock ~mono_clock ~state =
 ;;
 
 module For_testing = struct
+  let invalidate_with = invalidate_with
+
   let start_with_sleep ~sleep_until ~sw ~clock ~state ~read ~invalidate =
     start_with ~sw ~clock
       ~sleep_until:(fun ~on_armed at -> on_armed (); sleep_until at)

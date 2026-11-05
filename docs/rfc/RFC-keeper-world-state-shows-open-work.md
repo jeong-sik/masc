@@ -215,13 +215,13 @@ figma-mcp·wkbl 의 실제 cost 는 재지 않았다.
 |---|---|---|
 | producer | 60초마다 GraphQL 로 읽는 fiber | [사실] `Server_repository_pulls.start` → `refresh` (`lib/server/server_repository_pulls.ml:582`, `:779`). 이 fiber 와 자격 처리는 `masc_server` 에 남는다 |
 | store | 메모리 투영. 재시작하면 비어 있다 | [제안] 타입, `keeper_of_author`, `github_slug_of_remote`, `Atomic` 투영을 `masc` 라이브러리의 새 모듈 `Repository_pulls`(`lib/repository_pulls/`)로 옮긴다. 쓰는 함수는 `Repository_pulls.publish : snapshot -> unit` 하나이고 producer 만 부른다. 읽는 함수는 `Repository_pulls.current : unit -> snapshot` 이다 |
-| 대상 입력 1 | 이 Keeper 의 checkout 과 그 remote | [제안] §4.1. `Keeper_sandbox_control.checkout_freshness_rows` 가 이미 턴마다 도는 checkout 측정(`lib/keeper/keeper_unified_turn.ml:768`)에 remote 한 칸을 더한다 |
+| 대상 입력 1 | 이 Keeper 의 checkout 과 그 remote | [제안] §4.1. 이 Keeper 의 checkout 을 찾고 checkout 마다 `remote.origin.url` 만 읽는 측정을 새로 둔다. 작업 트리 상태(`git status`)는 읽지 않는다 |
 | 대상 입력 2 | 이 Keeper 가 선언한 `watch_repositories` | [제안] §4.1. keeper TOML 을 읽을 때 `Github_slug.t list` 로 파싱되어 profile·meta 에 실린다(`board_interests` 와 같은 길, `lib/keeper/keeper_types_profile_toml_parser.ml:29`, `lib/keeper/keeper_meta_contract.ml:250`). 턴은 이미 받는 meta 에서 읽는다. 턴 중에 따로 읽는 저장소는 없다 |
 | consumer 1 | World State `Pull_requests` 절 | [제안] `Keeper_context_layers.layer_id` 에 variant 추가, `keeper_unified_prompt.ml` 의 `content_of` 에 arm 추가 |
 | consumer 2 | 전체 목록 도구 `keeper_pull_requests_list` | [제안] §4.7 |
 | consumer 3 | 기존 HTTP 두 곳 | [사실] `server_routes_http_routes_repositories.ml:527`, `server_h2_gateway.ml:1249`. [제안] 둘 다 `Repository_pulls.current` 를 읽는다. JSON 은 새 칸과 `unrecognized` 값만 더한다 |
 | consumer 4 | §5 의 깨우기 (S7) | [제안] producer 가 `publish` 한 뒤 같은 snapshot 으로 계산한다 |
-| caller | 턴을 조립하는 곳 | [제안] `lib/keeper/keeper_unified_turn.ml:750-805` 가 `repository_freshness`·`lane_updates` 와 같은 자리에서 `Repository_pulls.current ()` 와 checkout 측정 결과를 `Keeper_unified_prompt.build_prompt` 에 넘긴다. 대시보드 미리보기(`lib/dashboard/dashboard_http_keeper_snapshot.ml:204`)도 같은 두 값을 넘긴다 |
+| caller | 턴을 조립하는 곳 | [제안] `lib/keeper/keeper_unified_turn.ml` 이 `lane_updates` 와 같은 자리에서 `Repository_pulls.current ()` 와 checkout 측정 결과를 `Keeper_unified_prompt.build_prompt` 에 넘긴다. 대시보드 미리보기(`lib/dashboard/dashboard_http_keeper_snapshot.ml:204`)도 같은 두 값을 넘긴다 |
 
 옛 이름 `Server_repository_pulls` 로 타입을 다시 내보내는 별칭은 두지 않는다. facade 위에 facade 를 만들지 않는다.
 
@@ -264,10 +264,8 @@ figma-mcp·wkbl 의 실제 cost 는 재지 않았다.
    (`lib/exec_ssh_protocol/exec_ssh_protocol.ml:105-106`, `lib/exec_shim/exec_shim.ml:74`).
    이 RFC 에서 "커밋한 Keeper"는 이 값이다. PR 을 연 GitHub 계정(`author.login`)은 "PR 계정"이라고 따로 부른다.
 2. **저장소의 묶음 행 — checkout.** 이 Keeper 의 playground 에 그 저장소 checkout 이 있을 때 보인다.
-   - checkout 은 `Keeper_playground_checkouts` 가 찾고 `Keeper_sandbox_control.checkout_freshness_rows` 가 턴마다 잰다.
-   - [사실] 지금 측정 행(`freshness_row`, `lib/keeper/keeper_sandbox_control.mli:65-72`)에는 경로·브랜치·변경 파일 수·upstream 비교만 있다.
-     그 checkout 이 어느 저장소인지는 없다.
-   - [제안] 같은 측정에서 `remote.origin.url` 을 읽어 `row_remote` 칸으로 더한다.
+   - checkout 은 `Keeper_playground_checkouts` 가 찾는다.
+   - [제안] 찾은 checkout 마다 `remote.origin.url` 을 읽어 `row_remote` 칸에 둔다. 작업 트리 상태는 읽지 않는다.
      그 URL 을 기존 `github_slug_of_remote`(RFC-0465 의 정확한 세 표기 파서)로 `owner/repo` 로 바꾸고,
      스냅숏의 `slug` 와 같으면 그 저장소에서 일하는 Keeper 로 본다. 이름이나 경로의 글자를 맞춰 보지 않는다.
 3. **저장소의 묶음 행 — 선언.** keeper TOML 의 `watch_repositories` 에 그 저장소가 있으면 checkout 이 없어도 보인다.
@@ -293,8 +291,8 @@ figma-mcp·wkbl 의 실제 cost 는 재지 않았다.
 | `Ok rows`, 어떤 행의 remote 가 그 저장소 | 그 저장소의 묶음 행을 보인다 |
 | `Ok rows`, 그 저장소 remote 가 없음 | 그 저장소는 자기 PR 줄만 보인다 |
 | `Ok rows`, 어떤 행의 remote 를 못 읽음 | 그 행은 대상 판정에 쓰지 않는다. "remote 를 못 읽은 checkout N개" 한 줄을 쓴다 |
-| `Error (Root_missing _)` | checkout 이 없다. 자기 PR 줄만 보인다. 지금 Repository freshness 가 이 경우를 비어 있음으로 다루는 것과 같다(`keeper_unified_turn.ml:776`) |
-| `Error` 의 나머지(`Root_not_directory`, `Root_unreadable`, `Root_probe_unreachable`) | "checkout 을 읽지 못함: <이유>" 한 줄. 선언한 저장소의 행과 자기 PR 줄은 그대로 보인다. 지금은 이 오류가 로그로만 가고 `[]` 가 된다(`:777-786`). 이 절은 `[]` 가 아니라 `Error` 를 받는다 |
+| `Error (Root_missing _)` | checkout 이 없다. 자기 PR 줄만 보인다 |
+| `Error` 의 나머지(`Root_not_directory`, `Root_unreadable`, `Root_probe_unreachable`) | "checkout 을 읽지 못함: <이유>" 한 줄. 선언한 저장소의 행과 자기 PR 줄은 그대로 보인다. 이 절은 빈 목록이 아니라 `Error` 를 받는다 |
 | 선언한 slug 가 스냅숏의 어느 저장소와도 같지 않음 | "선언한 저장소 <slug> 는 서버가 읽는 저장소 목록에 없음" 한 줄. 오타·대소문자 차이가 조용히 아무것도 안 보이게 되지 않게 한다 |
 | 선언 읽기 실패 | 없다. 선언은 keeper TOML 을 읽을 때 파싱되고, 틀리면 그 keeper 가 로드되지 않는다. 턴 중에 선언을 다시 읽지 않으므로 턴 중 읽기 실패도 없다 |
 
@@ -404,7 +402,6 @@ review·mergeable 이 `Unrecognized` 인 PR 은 2~4 에서 그 칸만 맞지 않
 ### 4.3 순서
 
 [제안] 묶음 순서는 위 `attention` 선언 순서다.
-Repository freshness 가 drift 종류마다 순위를 정해 정렬하는 것(`lib/keeper/keeper_unified_prompt.ml:1886-1897` 의 `drift_rank`)과 같은 모양이다.
 
 묶음 안의 순서는 타입 있는 칸으로만 정한 사전식 순서다. 가중치나 점수를 더하지 않는다.
 
@@ -445,7 +442,7 @@ Task 목록과 달리 여기서는 오래된 것이 먼저다. [사실] 열린 P
   자기 PR 수는 그 Keeper 가 연 PR 수로 묶인다. [사실] 2026-09-27 17:53Z 서버 스냅숏에서 커밋한 Keeper 가 붙은 열린 PR 은 Keeper 당 최대 2개(tui-developer, simplifyer), 합계 7개였다.
 - 묶음 머리에는 "N개 중 k개 보임"을 쓴다. Board Activity·Fleet Messages 머리가 개수를 세는 것과 같다.
   나머지를 읽는 도구 이름(`keeper_pull_requests_list`)은 절 안내 조각에 한 번 적는다. 행을 빼고 "N more" 줄을 따로 붙이지 않는다.
-- 절의 자리(`ordered`)는 `Repository_freshness` 바로 뒤, `Autonomous_trigger` 앞이다.
+- 절의 자리(`ordered`)는 `Lane_updates` 바로 뒤, `Autonomous_trigger` 앞이다.
   60초마다 바뀌므로 자주 안 바뀌는 앞쪽 절들의 prefix cache 를 깨지 않는 자리다.
 
 ### 4.5 "누가 이미 하고 있나"
@@ -680,7 +677,7 @@ TUI 표시 부분은 열린 #38801 이 이미 다른 RFC 로 넘긴다.
 |---|---|---|
 | S1 | `Repository_pulls` 모듈로 타입·`keeper_of_author`·`github_slug_of_remote`·투영을 옮기고 `publish`/`current` 를 둔다. 읽기 fiber·자격은 `masc_server` 에 남긴다. HTTP 두 곳이 `Repository_pulls.current` 를 읽는다. 동작 변화 없음 | 기존 `server_repository_pulls` 테스트가 그대로 통과한다. 두 HTTP 경로의 JSON 이 옮기기 전과 바이트 단위로 같다(기록한 스냅숏 fixture 로 비교) |
 | S2 | GraphQL 에 §3.2 칸을 더하고, 모든 칸의 모르는 값을 `Unrecognized` 로 읽는다 | 실제 응답을 줄여 만든 fixture 가 기대한 타입 행으로 decode 된다. 모르는 check conclusion, `Team` reviewer, `null` actor, `Mannequin` actor 를 넣은 fixture 에서 PR 행이 빠지지 않고 그 칸만 `Unrecognized`·`Actor_absent` 가 된다. 리뷰·리뷰 요청 목록이 잘린 fixture 는 `hasNextPage` 를 그대로 싣는다. PR 본문에 `rateLimit { cost }` 측정값을 적는다 |
-| S3a | checkout 측정 행에 `row_remote` 를 더한다(Docker·Micro_vm 은 호스트, Remote_ssh 는 endpoint probe 가 같이 읽는다) | remote 가 있는 checkout, remote 가 없는 checkout, 읽기 실패 checkout 을 담은 fixture 가 세 가지 값을 낸다. Repository freshness 절 렌더는 바뀌지 않는다 |
+| S3a | checkout 을 찾고 checkout 마다 `row_remote` 를 읽는 측정을 둔다(Docker·Micro_vm 은 호스트, Remote_ssh 는 endpoint probe). 작업 트리 상태는 읽지 않는다 | remote 가 있는 checkout, remote 가 없는 checkout, 읽기 실패 checkout 을 담은 fixture 가 세 가지 값을 낸다. remote_ssh 턴마다 드는 시간을 PR 본문에 적는다 |
 | S3b | `Github_slug.t` 와 `watch_repositories` 칸: TOML 파서·필드 종류 목록·profile·meta·저장 쓰기, config endpoint 허용 칸과 저장 전 파싱, `GET` 응답, TUI 편집 표, 웹 대시보드 패널, `masc_keeper_up` 인자. `github_slug_of_remote` 가 `Github_slug.t` 를 낸다 | 왕복: `watch_repositories = ["jeong-sik/masc", "jeong-sik/masc"]` 를 읽고 저장하면 `["jeong-sik/masc"]` 가 다시 읽힌다. `"jeong-sik"`, `"a/b/c"`, `"jeong-sik/masc.git"`, `" jeong-sik/masc"` 는 각각 그 keeper 파일의 로드 오류이고 오류가 틀린 값을 말한다. 같은 값을 config endpoint 로 보내면 400 이고 저장된 값은 그대로다. TUI·대시보드는 `GET` 의 `workspace.watch_repositories` 를 그린다 |
 | S4 | `layer_id.Pull_requests`, `placement`·순서·상한, `config/prompts/keeper.md` 의 `### world.pull_requests.*` 조각, `keeper_unified_turn.ml` 과 대시보드 미리보기 배선, checkout 으로 대상 고르기 | fixture World State: CI 빨강 PR, CR PR, head 에 리뷰 없는 초록 PR, 옛 head 에만 승인이 있는 PR, CI 가 빨간 draft, 리뷰 목록이 잘리고 본 범위에 현재 head 리뷰가 없는 초록 PR, `Pulls_failed` 저장소, 이 Keeper 가 커밋한 PR 6개(상한보다 많음)를 담은 스냅숏. 확인하는 것은 구조다(묶음 머리의 "N개 중 k개", 행 번호, 순서, `yours`, 실패 줄). 문구는 고정하지 않는다. 자기 PR 6개가 모두 보이고 남의 행은 5개다. 빨간 draft 는 묶음에 들지 않는다. 잘린 리뷰 목록의 PR 은 `Unreviewed_on_head` 에 들지 않고 `Review_history_incomplete` 수로 센다. checkout 도 선언도 없는 Keeper 는 자기 PR 줄만 받는다. checkout 이 없고 `watch_repositories` 에 그 저장소를 적은 Keeper 는 묶음 행을 받는다. checkout 측정이 `Error` 인 Keeper 는 이유 줄, 선언한 저장소의 행, 자기 PR 줄을 받는다. 선언했지만 스냅숏에 없는 slug 는 그 한 줄을 받는다. 새 조각이 모두 그려진다 |
 | S5 | `keeper_pull_requests_list` 도구 | 도구 결과가 같은 스냅숏의 행과 같다. checkout 없는 Keeper 도 모든 행을 읽는다. `Pulls_failed` 는 실패로 돌아온다 |
@@ -766,7 +763,7 @@ D4(깨우기)는 S4 만 배포된 7일의 M3 을 보고 정한다. `Autonomous` 
   main 이 자주 움직인다는 점이 후보다. 재지 않았다.
 - figma-mcp·wkbl 저장소의 쿼리 cost. masc 만 쟀다.
 - 조사 시각에 checkout 이 있던 Keeper 13명 중 누가 masc checkout 을 가졌는지. 캡처에 remote 가 없다. S3a 뒤에야 셀 수 있다.
-- Remote_ssh Keeper 의 checkout remote 를 endpoint probe 가 같은 시간 안에 읽을 수 있는지.
+- Remote_ssh Keeper 의 checkout remote 를 endpoint probe 가 턴마다 얼마 만에 읽는지. [사실] 2026-11-04 에 checkout 마다 `git status` 를 포함한 git 명령 8개를 돌리는 probe 는 remote_ssh 턴마다 중앙값 4.23초, 상위 10% 5.98초였다(제한 5초).
 - `Manual` Keeper 가 event queue 자극으로 깨는지. `Manual` 은 owner 를 되살리지 않는다(`keeper_activation_mode.ml:3`).
   `On_demand` 는 owner 를 되살리므로 자극으로 깬다고 읽었지만, 턴까지 이어지는 경로를 끝까지 따라가지는 않았다.
 - World State 를 읽은 Keeper 가 실제로 PR 을 더 고르는지. 이것은 §9 의 M1·M2 로만 알 수 있다.

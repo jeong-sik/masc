@@ -120,7 +120,7 @@ memprof(`/api/v1/diagnostics/memprof`, 부팅 뒤 10분). 할당 757 GB, major 4
 | 3.8% | `request_of_body` | `original_gate.root_preparation_with` |
 | 2.8% | `request_of_body` | `durable_commit.publish_with` |
 | 2.0% | `request_of_body` | `original_gate.validate_root_preparation` |
-| 2.0% | `request_of_body` | `original_gate.restore_size_evidence` |
+| 2.0% | `request_of_body` | `original_gate.restore_latest_result` |
 | 1.5% | `Keeper_chat_store.provenance_of_line` | `append_lines_once` |
 
 `request_of_body` 는 본문을 읽을 때마다 sha256 전체, `Yojson.Safe.from_string`, `Lane_addon_action.canonical`, `Yojson.Safe.to_string` 후 바이트 비교를 한다. 원본은 digest 로 이름 붙은 바뀌지 않는 데이터인데, 한 pass 안에서 여섯 경로가 같은 본문에 이 일을 각자 다시 한다. macOS `sample` 의 CPU leaf 도 같은 말을 한다: `sha256_do_chunk` 18%, `caml_lex_engine` 17%, `Yojson.Safe.write_string_body` 9%.

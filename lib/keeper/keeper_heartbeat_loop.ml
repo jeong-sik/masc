@@ -11,7 +11,6 @@ open Keeper_meta_store
 open Keeper_types_profile
 open Keeper_memory
 open Keeper_keepalive_signal
-module Observations = Keeper_heartbeat_loop_observations
 module Cycle = Keeper_heartbeat_loop_cycle
 
 (* Presence/identity sync extracted to
@@ -91,14 +90,6 @@ let should_run_turn_after_event_intake
   | Some (Stimulus_intake.Pending_selection_failed _) -> false
 ;;
 
-let provider_timeout_observation_reasons =
-  Observations.provider_timeout_observation_reasons
-;;
-
-let record_provider_timeout_observation =
-  Observations.record_provider_timeout_observation
-;;
-
 (* #10008 fm3: canonical metric name for proactive-scheduler skip
    reasons. Labels: [("keeper", <name>); ("reason", <skip_reason>)]. *)
 let proactive_skip_reason_metric = Keeper_metrics.(to_string ProactiveSkip)
@@ -173,8 +164,10 @@ let owner_turn_rejection_cycle_status
 (* What a failed cycle leaves the next one (RFC-provider-path-rest). A rest
    belongs to the path that received the rate limit or quota answer, so the
    keeper waits only while the path it would send next rests.
-   [Continue_on_deferred_lane]: the walk head of the deferred suffix is not
-   resting, and a pending input runs on it without a sleep.
+   [Continue_on_deferred_lane]: the head of the walk that resumes the deferred
+   suffix is not resting, and a pending input runs on it without a sleep. Each
+   suffix a resumed turn leaves names fewer candidates than the one it resumed,
+   so these cycles end when no candidate is left.
    [Wait_for_path_release]: the sleep lasts until [release_at]; [waiting_on]
    names the runtime or assignment whose release that is. A wakeup does not
    cut the wait short (#34653). *)
@@ -208,7 +201,7 @@ type keepalive_turn_outcome = {
 module Deferred_lane_slot = struct
   module Store = Keeper_deferred_runtime_lane_store
 
-  (* [Held] is a suffix the next cycle walks. [Dispatched] means a dispatch
+  (* [Held] is a suffix the next cycle resumes. [Dispatched] means a dispatch
      consumed it and its cycle has not settled; the file still names the suffix
      that dispatch runs. *)
   type state =
@@ -669,45 +662,18 @@ let batch_disposition_of_cycle_outcome
   : batch_disposition
   =
   match cycle_outcome with
-  | Some (Cycle.Completed completion) ->
-    (match completion.continuation_route with
-     | Keeper_unified_turn.Continuation_route_addressed ->
-       Batch_ack_completed
-     | Keeper_unified_turn.Continuation_route_mismatch
-     | Keeper_unified_turn.Continuation_no_terminal_effect_receipt
-     | Keeper_unified_turn.Continuation_route_not_applicable ->
-       (* A completed turn projected every admitted row and chose its actions
-          with them in view; that is what the queue delivered and what the
-          ack records. Connector attention used to be held back here until an
-          exact reply/ignore receipt existed (#32114), which turned "the
-          keeper read this and did not answer" into a wake reason: the same
-          Discord rows were re-promoted on every wake (sangsu, 17 rows for a
-          day, 3,711 consumption lines on 2026-09-08 and 36 turns in thirty
-          minutes on 2026-09-09, #34655), the same way refusing the board ack
-          replayed one post 297 times (#32277). Whether the keeper answered is
-          not the queue's question, and today no store answers it durably:
-          the ack receipt is [Turn_completed] for every route and the
-          reaction ledger's disposition token is "completed" for every route
-          (#34666). The message itself stays in the external-attention
-          store. *)
-       Batch_ack_completed)
-  | Some
-      (Cycle.Checkpointed
-         { checkpoint_reason =
-             ( Keeper_unified_turn.Durable_stimulus_arrived
-             | Keeper_unified_turn.Repeated_assistant_text _
-             | Keeper_unified_turn.Repeated_tool_call _
-             | Keeper_unified_turn.Operation_queued )
-         ; continuation_route = _
-         ; _
-         }) ->
+  | Some (Cycle.Completed _) ->
+    (* A completed turn projected every admitted row and chose its actions
+       with them in view; that is what the queue delivered and what the ack
+       records. Whether the keeper answered is not the queue's question. The
+       message itself stays in the external-attention store. *)
+    Batch_ack_completed
+  | Some (Cycle.Checkpointed _) ->
     (* The admitted batch is an attention layer, not the continuation store.
-       Every checkpoint reason is produced after at least one model round
-       ran with the admitted attention projected: a newer durable source
-       arrived, the loop guard durably preserved the turn, a tool call was
-       deferred to the Gate, or a chat operation took the slot. On the
-       agent-core lane the checkpoint preserves canonical turn state, while
-       provider-specific dynamic context can remain request-only (in
+       A checkpoint is produced after at least one model round ran with the
+       admitted attention projected and a newer durable source arrived. On
+       the agent-core lane the checkpoint preserves canonical turn state,
+       while provider-specific dynamic context can remain request-only (in
        particular on OpenAI-compatible requests). On an official-client lane
        a session replacement can lose prior context. This delivery ACK is not
        a guarantee that observation text survives in resumed model input.
@@ -905,17 +871,7 @@ let run_cycle_and_settle_lane ~run ~settle ~lane_of_outcome =
     Printexc.raise_with_backtrace exn backtrace
 ;;
 
-let release_scheduled_handoff ~base_path ~keeper_name handoff =
-  Option.iter (fun handoff ->
-    match Keeper_owner_registry.release_scheduled_turn ~base_path ~keeper_name ~handoff with
-    | Ok () -> ()
-    | Error error -> Log.Keeper.warn ~keeper_name
-        "scheduled source slot release failed: %s"
-        (Keeper_owner_registry.command_error_to_string error)) handoff
-
 let run_keepalive_unified_turn
-      ~scheduled_handoff
-      ~on_handoff_observed
       ~wake
       ~(ctx : _ context)
       ~(registry_entry : Keeper_registry.registry_entry)
@@ -936,44 +892,20 @@ let run_keepalive_unified_turn
       | Error detail -> Log.Keeper.warn "Gate continuation reconciliation: %s" detail in
   if not proactive_warmup_elapsed
   then (
-    release_scheduled_handoff ~base_path:ctx.config.base_path
-      ~keeper_name:meta_after_triage.name scheduled_handoff;
     { meta = meta_after_triage
     ; cycle_status = Turn_cycle_completed
     ; stimuli_acked = false
     ; after_failure = None
     })
   else
-    let scheduled_sources = Keeper_scheduled_turn_handoff.pending
-      ~base_path:ctx.config.base_path ~keeper_name:meta_after_triage.name in
-    let scheduled_handoff = match scheduled_sources with
-     | Error detail ->
-       Log.Keeper.error ~keeper_name:meta_after_triage.name
-         "scheduled source handoff read unavailable: %s" detail;
-       scheduled_handoff
-     | Ok sources ->
-       (match Keeper_owner_registry.observe_scheduled_turn
-          ~base_path:ctx.config.base_path ~keeper_name:meta_after_triage.name sources with
-        | Ok observed ->
-          on_handoff_observed observed;
-          observed
-        | Error error ->
-          Log.Keeper.warn ~keeper_name:meta_after_triage.name
-            "scheduled source observation unavailable: %s"
-            (Keeper_owner_registry.command_error_to_string error);
-          scheduled_handoff)
-    in
     match
-      Keeper_owner_registry.run_scheduled_if_idle
-        ~handoff:scheduled_handoff ~sources:scheduled_sources
+      Keeper_owner_registry.run_autonomous_if_idle
         ~base_path:ctx.config.base_path
         ~keeper_name:meta_after_triage.name
         (* Keep the caller's Tool/HTTP observer bindings captured before the
-           Owner forks its child. The Owner supplies priority only at admission. *)
-        (let admitted_sources = ref [] in
-         let captured = Keeper_tool_call_log.capture_commit_observer
+           Owner forks its child. *)
+        (Keeper_tool_call_log.capture_commit_observer
          @@ Llm_provider.Http_request_observer.capture (fun () ->
-           let priority_sources = !admitted_sources in
            Keeper_turn_dispatch_authority.run (fun admission_token ->
     let source_batch = ref Keeper_heartbeat_source_batch.empty in
     let diagnostic_selection = ref None in
@@ -1024,8 +956,7 @@ let run_keepalive_unified_turn
            meta_after_triage.name
            candidate_id);
       let event_intake =
-        Stimulus_intake.heartbeat_event_intake_with_priority
-          ~priority_sources
+        Stimulus_intake.heartbeat_event_intake
           ~ctx
           ~meta_after_triage
           ~pending_board_events
@@ -1404,17 +1335,6 @@ let run_keepalive_unified_turn
        | Continuation_unsettled, _
        | (Continuation_settled_recorded | Continuation_settled_failed _), None ->
          ());
-      (match !cycle_outcome_ref with
-       | Some (Cycle.Failed _)
-       | Some
-           ( Cycle.Completed _
-           | Cycle.Checkpointed _
-           | Cycle.Input_required _
-           | Cycle.Cancelled _
-           | Cycle.Skipped _
-           )
-       | None ->
-         ());
       (* RFC-0377: every entry admitted into this turn (the primary plus any
          Connector_attention batch companions) shares the turn's outcome. A
          turn completion acks all of them; a turn failure applies the same
@@ -1509,8 +1429,7 @@ let run_keepalive_unified_turn
       handle_cycle_exception
         ~registry_entry
         ~meta:meta_after_triage
-        exn)) in
-         fun sources -> admitted_sources := sources; captured ())
+        exn)))
     with
   | Ok (`Ran outcome) -> outcome
   | Ok `Interrupted -> interrupted_cycle_outcome ~meta:meta_after_triage
@@ -1646,10 +1565,6 @@ let run_heartbeat_loop
   let cadence_now () = Monotonic_deadline.elapsed_seconds cadence_clock in
   let periodic_cadence = ref (Keeper_keepalive_signal.Initial_due
       (float_of_int (max 0 proactive_warmup_sec))) in
-  (* Why the last turn that ran ended before completing now lives in
-     [Keeper_last_turn_stop], recorded by the cycle wrapper every lane
-     shares — see the note at [run_fresh_cycle]. *)
-  let captured_handoff = ref None in
   let rec loop () =
     if Atomic.get stop
     then ()
@@ -1658,12 +1573,6 @@ let run_heartbeat_loop
                from monopolizing the Eio scheduler during CPU-bound phases
                (tool filtering, snapshot construction, prompt building). *)
       Eio_guard.fair_yield ();
-      (match Keeper_owner_registry.scheduled_turn_handoff
-         ~base_path:ctx.config.base_path ~keeper_name:m.name with
-       | Ok handoff -> captured_handoff := handoff
-       | Error error -> Log.Keeper.warn ~keeper_name:m.name
-           "scheduled source slot observation failed: %s"
-           (Keeper_owner_registry.command_error_to_string error));
       (* Phase 0: timing markers *)
       let t_presence_start = Time_compat.now () in
       let owner_meta =
@@ -1807,8 +1716,6 @@ let run_heartbeat_loop
         let turn_outcome =
           if not admitted_turn
           then (
-            release_scheduled_handoff ~base_path:ctx.config.base_path
-              ~keeper_name:m.name !captured_handoff;
             { meta = meta_current
             ; cycle_status = Turn_cycle_completed
             ; stimuli_acked = false
@@ -1835,8 +1742,7 @@ let run_heartbeat_loop
                 deferred_runtime_lane
             in
             let r =
-              run_keepalive_unified_turn ~wake ~scheduled_handoff:!captured_handoff
-                ~on_handoff_observed:(fun handoff -> captured_handoff := handoff)
+              run_keepalive_unified_turn ~wake
                 ~ctx
                 ~registry_entry
                 ~meta_after_triage
@@ -2031,26 +1937,7 @@ let run_heartbeat_loop
         then Deferred_lane_slot.invalidate deferred_runtime_lane_slot;
       if Atomic.get stop then () else loop ())
   in
-  Eio.Switch.run (fun sw ->
-    let consumer = ref None in
-    Eio.Switch.on_release sw (fun () ->
-      Option.iter (fun consumer ->
-        match Keeper_owner_registry.end_scheduled_turn_consumer
-          ~base_path:ctx.config.base_path ~keeper_name:m.name ~consumer with
-        | Ok () -> ()
-        | Error error -> Log.Keeper.warn ~keeper_name:m.name
-            "scheduled source consumer release failed: %s"
-            (Keeper_owner_registry.command_error_to_string error)) !consumer);
-    (* Install cleanup before the protected, bounded mailbox registration.
-       Cancellation cannot retire an untracked accepted consumer. *)
-    Eio.Cancel.protect (fun () ->
-      match Keeper_owner_registry.begin_scheduled_turn_consumer
-        ~base_path:ctx.config.base_path ~keeper_name:m.name with
-      | Ok active -> consumer := Some active
-      | Error error ->
-        Log.Keeper.warn ~keeper_name:m.name "scheduled source consumer unavailable: %s"
-          (Keeper_owner_registry.command_error_to_string error));
-    loop ())
+  loop ()
 ;;
 
 module For_testing = struct

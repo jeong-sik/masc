@@ -34,38 +34,6 @@ type raw_trace_sink_outcome =
   | Sink_ready of Agent_core.Raw_trace.t
   | Sink_degraded of Agent_core.Error.t
 
-(** Typed reason for an autonomous Keeper run to release its lane after AGENT_CORE
-    completes a tool boundary. *)
-type durable_stimulus_summary = {
-  pending_count : int;
-  head : Keeper_event_queue.stimulus option;
-  head_age_sec : float;
-  kinds : Keeper_event_queue.stimulus_payload list;
-}
-(** What the turn yielded to. It yields when a row of a kind that may preempt
-    reached the queue after its intake, or when an approved Gate resolution is
-    deliverable; [head] is that row. A yield record without this says only that
-    a yield happened, not what it yielded to — which cannot distinguish healthy
-    cooperation from a keeper that never finishes a turn. *)
-
-type yield_reason =
-  | Operation_queued
-  | Durable_stimulus_waiting of durable_stimulus_summary
-
-type yield_request = {
-  reason : yield_reason;
-}
-
-val durable_stimulus_summary
-  :  now:float
-  -> Keeper_event_queue.t
-  -> durable_stimulus_summary
-(** Project the queue snapshot the yield decision already read. [now] is
-    supplied by the caller so the age is measured against the same clock the
-    decision used. *)
-
-val durable_stimulus_summary_to_string : durable_stimulus_summary -> string
-
 val terminal_effect_boundary_decision
   :  Keeper_tools_agent_core.terminal_effect_state
   -> (Runtime_agent.cooperative_yield_decision, Agent_core.Error.t) result
@@ -83,18 +51,12 @@ module For_testing : sig
     Keeper_tools_agent_core.terminal_effect_state ->
     (Keeper_turn_outcome.t * Keeper_tool_execution.terminal_effect_receipt option,
      Agent_core.Error.t) result
-  val native_tool_boundary :
-    repetition_execution:Keeper_repetition_scope.Execution.t option ->
-    terminal_effect_state:Keeper_tools_agent_core.terminal_effect_state ->
-    yield_requested:(unit -> (yield_request option, string) result) option ->
-    (Runtime_agent.cooperative_yield_decision, Agent_core.Error.t) result
   val tool_boundary_state :
     repetition_execution:Keeper_repetition_scope.Execution.t option ->
     Keeper_tools_agent_core.terminal_effect_state ->
     (Runtime_agent.cooperative_yield_decision, Agent_core.Error.t) result
   val official_client_tool_boundary :
     repetition_execution:Keeper_repetition_scope.Execution.t option ->
-    yield_requested:(unit -> (yield_request option, string) result) option ->
     tool_name:string ->
     (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result
   val registry_progress_on_event
@@ -106,30 +68,6 @@ module For_testing : sig
     :  actual_keeper_tool_names:string list
     -> tool_calls:tool_call_detail list
     -> string list
-
-  val response_policy_for_turn
-    :  turn_kind:Turn_record.turn_kind
-    -> input_speaker:Keeper_input_speaker.t
-    -> world_observation:Keeper_world_observation.world_observation option
-    -> hitl_resolution:Keeper_event_queue.hitl_resolution option
-    -> history_assistant_source:string
-    -> Keeper_tooling.Response.completion_policy
-
-  val with_completion_clause
-    :  input_speaker:Keeper_input_speaker.t
-    -> response_policy:Keeper_tooling.Response.completion_policy
-    -> string
-    -> string
-
-  val normalize_final_response_text
-    :  response_policy:Keeper_tooling.Response.completion_policy
-    -> keeper_name:string
-    -> runtime_id:string
-    -> run_result:Runtime_agent.run_result
-    -> text:string
-    -> tool_names:string list
-    -> unit
-    -> (string, Agent_core.Error.t) result
 
   (** AGENT_CORE raw-trace sink for keeper turns: a fresh per-turn file under
       [Keeper_types_support.keeper_raw_trace_dir]. The dispatch section passes
@@ -157,10 +95,6 @@ module For_testing : sig
     -> meta:Keeper_meta_contract.keeper_meta
     -> Agent_core.Raw_trace.t option
     -> unit
-
-  val runtime_yield_reason
-    :  yield_request
-    -> Runtime_agent.cooperative_yield_reason
 
   val dispatch_after_provider_transcript_admission
     :  messages:Agent_core.Types.message list
@@ -306,11 +240,6 @@ val run_turn
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
   -> ?on_gate_deferred:(string -> unit)
-  -> ?yield_requested:
-       (unit -> (yield_request option, string) result)
-       (* Evaluated after a settled tool result on either runtime path. A
-          direct turn may yield to a newer queued person only with its
-          resumable checkpoint. Snapshot failures remain explicit errors. *)
   -> ?on_checkpoint_stage:(Agent_core.Agent.checkpoint_stage -> unit)
   -> unit
   -> turn_settlement

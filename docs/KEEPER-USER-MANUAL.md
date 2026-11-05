@@ -933,36 +933,16 @@ server; editing them by hand is how you get a state nothing agrees on.
 
 ## Waiting messages during Codex work
 
-When newer original input arrives during a direct Codex operation, MASC asks
-the current turn to preserve its progress and finish. It waits for the vendor
-turn to complete and the conversation to settle, then records a durable
-continuation and moves the original operation behind waiting input. A scheduling
-reply does not mark the original request successful. Its operation ID, input
-and completed work remain attached to the continuation.
+A message that arrives while a direct Codex operation runs waits in the queue.
+MASC does not ask the running turn to stop. The turn finishes on its own, and
+the Owner then starts the waiting message. Use the interrupt controls to stop
+the running turn sooner.
 
-After the waiting input runs, the original operation resumes the latest settled
-turn of the same conversation with an instruction to continue remaining work.
-Queued continuations do not trigger another handoff, so two paused operations
-do not repeatedly yield to one another. Active tools must finish before the
-scheduling notice can be sent; provider cooperation determines the delay.
-
-A host stop caused by repeated tool calls or repeated assistant text is an
-invocation failure, not a scheduling handoff. It records `host_stopped_turn`
-with `repeated_tool_call` or `repeated_assistant_text` and does not automatically
-requeue the same operation. The vendor conversation and completed-effect
-evidence are retained; another provider is not authorized to replay the work.
-New requests can still run. Automatic replanning of the failed operation is
-not part of this continuation protocol.
-
-If a terminal posting tool publishes progress during handoff, its delivery
-receipt remains evidence rather than completing the original operation. MASC
-returns that result, refuses further host tools in the closing turn, and waits
-for vendor completion before retaining the continuation.
-
-The retained continuation survives restart while queued or claimed before
-resume admission. A crash after resume authority has been consumed remains an
-interrupted execution; MASC does not silently replay potentially completed
-effects. A changed conversation or tool surface also requires recovery instead
+A direct operation can also end at a checkpoint instead of an answer, for
+example when a tool result arrives later. The retained continuation survives
+restart while queued or claimed before resume admission. A crash after resume
+authority has been consumed remains an interrupted execution; MASC does not
+silently replay potentially completed effects. A changed conversation or tool surface also requires recovery instead
 of replaying the original input into a new session.
 
 ## Resume a refused counterpart-only history read
@@ -1179,18 +1159,8 @@ not reset its pending deadline or create work by themselves.
 
 ## Scheduled work while a Keeper is busy
 
-A due Keeper wake is requested work. A running conversation must not keep it
-pending merely by continuing to claim the Owner. The active turn finishes its
-current tool boundary and preserves its checkpoint; the Owner then gives the
-exact waiting schedule sources a turn before reclaiming the chat continuation.
-A chat that ends without tools also leaves the next slot for waiting scheduled
-work. This handoff does not interrupt or replay an in-flight tool call.
-
-The handoff is a preference for one turn slot, not completion of the Job. Intake
-rechecks the original pending source identities. A withdrawn or replaced source
-cannot inherit an earlier source's reservation, and stale reservations release
-chat admission. Sources already present in the running turn are not new input.
-Pause, shutdown and unavailable source storage still apply.
+A due Keeper wake waits in the queue until the running turn ends; the next
+turn's intake admits it.
 
 To investigate a delayed Job, inspect the exact schedule lookup at
 `/api/v1/dashboard/scheduled-automation?schedule_id=<id>`:

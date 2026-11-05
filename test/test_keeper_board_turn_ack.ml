@@ -4,8 +4,6 @@
    cycle directly, so the outer heartbeat scheduler and its admission checks
    are outside this test. No sandbox tools are invoked. *)
 open Masc
-module Preparation = Masc_test_deps.Board_test_preparation
-
 (* These tests check how the Board routes a text, not who is declared: every
    name with the shape of a Keeper name stands for itself. *)
 let every_name_declared =
@@ -124,7 +122,6 @@ let run base_path prompt_root =
    | Workspace.FileSystem _ -> ()
    | Workspace.Memory _ -> failwith "probe requires a FileSystem workspace backend");
   ignore (Workspace.init config ~agent_name:(Some "board-probe-operator") : string);
-  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   (* The call ledger is initialized by the server bootstrap, which this probe
      does not run; initialize it to capture the probe's actual tool receipts. *)
   Keeper_tool_call_log.init ~base_path ();
@@ -220,7 +217,6 @@ data: [DONE]
     | _ -> failwith "expected one durable Board stimulus" in
   let shared_context = Agent_core.Context.create () in
   let cycle meta = Keeper_heartbeat_loop.run_keepalive_unified_turn
-      ~scheduled_handoff:None ~on_handoff_observed:ignore
     ~wake:Keeper_world_observation.Attention_wake ~ctx ~registry_entry
     ~meta_after_triage:meta
     ~pending_board_events:[] ~stop:(Atomic.make false) ~proactive_warmup_elapsed:true
@@ -263,11 +259,6 @@ data: [DONE]
     ~base_path ~keeper_name ~operation_id ~source ~input
     |> get Keeper_owner_registry.command_error_to_string in
   require (accepted.queued_count = 1) "person's message was not queued";
-  (match Keeper_chat_yield_request.request
-    ~turn:Keeper_chat_yield_request.Autonomous ~base_path ~keeper_name with
-   | Ok (Some { Keeper_agent_run.reason = Keeper_agent_run.Operation_queued }) -> ()
-   | Ok (Some _) | Ok None | Error _ ->
-     failwith "autonomous turn did not see the waiting person's message");
   (* The earlier queue racer polled once a second and cancelled the provider
      before its first event. This fixture keeps response headers withheld for
      more than three such polls, then lets the original turn finish. *)

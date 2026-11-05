@@ -536,22 +536,29 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
     ~invalidate_full_health_snapshot:
       Server_routes_http_runtime.invalidate_full_health_snapshot
     ();
-  Server_dashboard_http.install_planning_cache_invalidation ();
+  Server_dashboard_http.install_goal_projection_observer ();
+  Server_skill_activations_broadcast.install ~sw;
+  Server_gate_connector_broadcast.install ~sw ~base_path;
   Keeper_registry.install_state_change_observer
     Server_routes_http_runtime.invalidate_full_health_snapshot_for_registry_change;
+  Keeper_registry_broadcast.install_before_composite_changed
+    Server_dashboard_http_keeper_api_types.invalidate_keeper_composite_cache;
+  Keeper_gate_broadcast.install_before_gate_changed
+    Server_dashboard_http.invalidate_gate_snapshots;
   Keeper_waiting_inventory_broadcast.install_health_change_observer
     Server_routes_http_runtime.invalidate_full_health_snapshot_for_workspace;
   Server_schedule_invalidation.start ~sw ~mono_clock;
+  Server_runtime_assignment_broadcast.install ~sw ~base_path;
+  Server_runtime_config_broadcast.install ~sw ~base_path;
+  Server_candle_broadcast.install ();
   Operator_pending_confirm.install_change_observer
     Server_routes_http_runtime.invalidate_full_health_snapshot_for_workspace;
   Keeper_owner.install_state_change_observer
     Server_routes_http_runtime.invalidate_full_health_snapshot;
-  Keeper_reaction_ledger.install_state_change_observer
-    Server_routes_http_runtime.invalidate_full_health_snapshot;
-  Keeper_event_queue_persistence.install_state_change_observer
-    Server_routes_http_runtime.invalidate_full_health_snapshot;
+  Server_keeper_event_queue_broadcast.install ~sw;
   Skill_catalog_snapshot_service.install_publication_observer
-    Server_routes_http_runtime.invalidate_full_health_snapshot;
+    (Server_skill_catalog_broadcast.publication_observer ~base_path
+       ~invalidate_full_health:Server_routes_http_runtime.invalidate_full_health_snapshot);
   let state =
     Mcp_eio.create_state_eio ~sw ~proc_mgr ~fs ~clock
       ~mono_clock ~net
@@ -561,6 +568,9 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
     startup_config_resolution ~base_path |> Config_dir_resolver.to_json
   in
   let config = Mcp_server.workspace_config state in
+  Server_provider_rest_broadcast.install ~sw ~clock ~config;
+  Server_turn_preview_broadcast.install ~sw ~clock;
+  Workspace_dataset_event.install_store_observers ();
   let path_diagnostics =
     Server_base_path_diagnostics.detect
       ?input_base_path
@@ -815,18 +825,18 @@ let initialize_owner_state_blocking
      raise
        (Owner_initialization_failed
           (Run_registry_already_installed `Exact_lane)));
-  let broadcast_internal_agent_runs_changed () =
-    Sse.broadcast (Internal_agent_runs_event.to_json ())
+  let broadcast_internal_agent_runs_changed registry () =
+    Sse.broadcast (Internal_agent_runs_event.to_json registry)
   in
   Atomic.set
     Verification_run_registry.change_observer_fn
-    broadcast_internal_agent_runs_changed;
+    (broadcast_internal_agent_runs_changed Internal_agent_runs_event.Verification);
   Atomic.set
     Goal_verification_run_registry.change_observer_fn
-    broadcast_internal_agent_runs_changed;
+    (broadcast_internal_agent_runs_changed Internal_agent_runs_event.Goal_verification);
   Atomic.set
     Exact_lane_run_registry.change_observer_fn
-    broadcast_internal_agent_runs_changed;
+    (broadcast_internal_agent_runs_changed Internal_agent_runs_event.Exact_lane);
   (* [main_eio] caches the normalized operator input before entering Eio.
      Replace that preflight value with the canonical owner identity before
      [Workspace.default_config_uncached] constructs its backend, otherwise the
@@ -1649,6 +1659,19 @@ let run ~sw ~runtime_sw ~env ~address ~port ~base_path ?input_base_path ?on_read
      raise
        (Env_config_core.Config_error
           (Server_auth.configure_error_to_string error)));
+  (* HIGH-RISK-UNREVIEWED: the account mode is decided here, once per boot,
+     after the BasePath lease and before anything serves (multi-account A2). *)
+  (match
+     Authz_boot_mode_read.boot
+       ~base_path
+       ~config_dir:(Env_config_core.masc_config_dir_opt ())
+       ~anonymous_mutations:(Server_auth_config.allow_anonymous_mutations resolved_auth_config)
+   with
+   | Ok () -> ()
+   | Error (first, rest) ->
+     let message = "the account mode refuses this boot: " ^ String.concat "; " (first :: rest) in
+     Log.Server.error "[FATAL] %s" message;
+     raise (Env_config_core.Config_error message));
   let clock, mono_clock, net, domain_mgr, proc_mgr, fs =
     init_runtime_context env
   in

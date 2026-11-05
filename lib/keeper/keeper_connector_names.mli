@@ -18,7 +18,19 @@ val remember :
   unit ->
   unit
 (** Record a non-blank name for a non-blank id. Repeating the current name does
-    not append another durable row. *)
+    not append another durable row. A new or changed name calls
+    [Gate_connector_announce.changed ~connector_id:connector] after the row is
+    written. *)
+
+val remember_many :
+  base_dir:string ->
+  connector:string ->
+  scope:scope ->
+  (string * string) list ->
+  unit
+(** Record [(id, name)] pairs as {!remember} does, in one append. The
+    connector is announced once when any row was written, so a directory page
+    is one change. *)
 
 val recall :
   base_dir:string -> connector:string -> scope:scope -> id:string -> string option

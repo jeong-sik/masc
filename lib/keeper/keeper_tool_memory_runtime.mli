@@ -91,12 +91,12 @@ val keeper_memory_write_with_outcome
 val memory_write_answer_of_output : string -> Yojson.Safe.t option
 
 (** Current fact stores. The pending admission queue is not a fact store. *)
-type fact_store =
+type fact_store = Keeper_tool_memory_validation.fact_store =
   | Ordinary_current
   | Source_bound_current
 
 (** Which half of a derivation arrived without the other. *)
-type derivation_half =
+type derivation_half = Keeper_tool_memory_validation.derivation_half =
   | Rule_id_without_premise_ids
   | Premise_ids_without_rule_id
 
@@ -105,7 +105,7 @@ type derivation_half =
     new refusal has to say what to change before it can be made.
     {!Keeper_memory_os_types.is_memory_id} stays the single premise grammar;
     this type only records which element broke it and where. *)
-type derivation_rejection =
+type derivation_rejection = Keeper_tool_memory_validation.derivation_rejection =
   | Rule_id_not_a_string
   | Premise_ids_not_an_array
   | Rule_id_blank
@@ -123,7 +123,7 @@ type derivation_rejection =
 (** Result of validating a [keeper_memory_write] call's args. Exposed
     so tests can pin the error_kind taxonomy without constructing a
     [Workspace.config]. *)
-type memory_write_error_kind =
+type memory_write_error_kind = Keeper_tool_memory_validation.memory_write_error_kind =
   | Content_empty
   | Source_path_invalid
   | Source_read_failed of Keeper_memory_source_current.source_read_failure

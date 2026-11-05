@@ -20,6 +20,7 @@ import {
   fetchDashboardGoalsTree,
   fetchDashboardBriefing,
   fetchDashboardTools,
+  fetchKeeperSkillActivations,
   fetchKeeperWaitingInventory,
   parseDashboardKeeperWaitingSource,
   normalizeSkillActivationProjection,
@@ -1335,6 +1336,16 @@ function validSkillActivationProjectionFixture() {
   }
 }
 
+// The [GET /api/v1/keepers/skill-activations?keeper=] answer around one
+// projection, for the Keeper the projection names.
+function keeperActivationsAnswer(projection: { keeper_name: string }): Response {
+  return new Response(JSON.stringify({
+    schema: 'masc.keeper-skill-activations/v1',
+    keeper: projection.keeper_name,
+    skill_activations: projection,
+  }), {status: 200, headers: {'Content-Type': 'application/json'}})
+}
+
 describe('fetchDashboardTools', () => {
   it('requires the original physical execution anchor on composition activations', () => {
     const fixture = validSkillActivationProjectionFixture()
@@ -1355,27 +1366,25 @@ describe('fetchDashboardTools', () => {
 
   it('receives typed SDK results and native starts with verified causal delivery links', async () => {
     const projection = { ...validSkillActivationProjectionFixture(), ledger: sharedAsyncActionLedger }
-    globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({skill_activations: projection}),
-      {status: 200, headers: {'Content-Type': 'application/json'}}))
-    const result = await fetchDashboardTools()
-    expect(result.skill_activations?.status).toBe('available')
-    if (result.skill_activations?.status !== 'available') throw new Error('action ledger unavailable')
-    expect(result.skill_activations.ledger).toEqual(sharedAsyncActionLedger)
-    expect(result.skill_activations.ledger.async_actions.map(action => action.occurrence.kind))
+    const keeper = projection.keeper_name
+    globalThis.fetch = vi.fn().mockResolvedValue(keeperActivationsAnswer(projection))
+    const result = await fetchKeeperSkillActivations(keeper)
+    expect(result.status).toBe('available')
+    if (result.status !== 'available') throw new Error('action ledger unavailable')
+    expect(result.ledger).toEqual(sharedAsyncActionLedger)
+    expect(result.ledger.async_actions.map(action => action.occurrence.kind))
       .toEqual(['sdk_result', 'sdk_result', 'native_started'])
     const invalid = structuredClone(projection)
     invalid.ledger.async_actions[0]!.delivery_sha256 = '1'.repeat(64)
-    globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({skill_activations: invalid}),
-      {status: 200, headers: {'Content-Type': 'application/json'}}))
-    await expect(fetchDashboardTools()).rejects.toThrow('matching inline causal delivery')
+    globalThis.fetch = vi.fn().mockResolvedValue(keeperActivationsAnswer(invalid))
+    await expect(fetchKeeperSkillActivations(keeper)).rejects.toThrow('matching inline causal delivery')
     for (const identity of [{kind: 'call_id', call_id: ' '},
       {kind: 'provider_step', conversation_id: ' ', step_index: 0}]) {
       const invalidIdentity = structuredClone(projection)
       const native = invalidIdentity.ledger.async_actions[2]!
       Object.assign(native.occurrence, {identity})
-      globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({skill_activations: invalidIdentity}),
-        {status: 200, headers: {'Content-Type': 'application/json'}}))
-      await expect(fetchDashboardTools()).rejects.toThrow('blank')
+      globalThis.fetch = vi.fn().mockResolvedValue(keeperActivationsAnswer(invalidIdentity))
+      await expect(fetchKeeperSkillActivations(keeper)).rejects.toThrow('blank')
     }
     const duplicate = structuredClone(projection)
     duplicate.ledger.async_actions.push(structuredClone(duplicate.ledger.async_actions[0]!))
@@ -1384,12 +1393,11 @@ describe('fetchDashboardTools', () => {
 
   it('verifies causal action receipts on supported HTTP origins without SubtleCrypto', async () => {
     const projection = { ...validSkillActivationProjectionFixture(), ledger: sharedAsyncActionLedger }
-    globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({skill_activations: projection}),
-      {status: 200, headers: {'Content-Type': 'application/json'}}))
+    globalThis.fetch = vi.fn().mockResolvedValue(keeperActivationsAnswer(projection))
     vi.stubGlobal('crypto', {})
     try {
-      const result = await fetchDashboardTools()
-      expect(result.skill_activations?.status).toBe('available')
+      const result = await fetchKeeperSkillActivations(projection.keeper_name)
+      expect(result.status).toBe('available')
     } finally { vi.unstubAllGlobals() }
   })
 
@@ -1550,8 +1558,12 @@ describe('fetchDashboardTools', () => {
           never_called_count: 0,
           registered_count: 0,
         },
-        effective_keeper_surface: { status: 'warming', keeper_name: 'keeper/one' },
-        skill_activations: { status: 'no_session', keeper_name: 'keeper/one' },
+        effective_keeper_surface: {
+          status: 'unavailable',
+          keeper_name: 'keeper/one',
+          reason: 'keeper_not_found',
+          detail: 'Keeper metadata does not exist',
+        },
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -1562,10 +1574,37 @@ describe('fetchDashboardTools', () => {
     const result = await fetchDashboardTools({ keeperName: 'keeper/one' })
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/tools?keeper=keeper%2Fone')
-    expect(result.skill_activations).toEqual({
-      status: 'no_session',
+    expect(result.effective_keeper_surface).toEqual({
+      status: 'unavailable',
       keeper_name: 'keeper/one',
+      reason: 'keeper_not_found',
+      detail: 'Keeper metadata does not exist',
     })
+  })
+
+  it('reads a Keeper\'s activations from its own route and refuses another Keeper or schema', async () => {
+    const answer = (body: object) => new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
+    const projection = { status: 'no_session', keeper_name: 'keeper/one' }
+    const fetchMock = vi.fn().mockResolvedValue(answer({
+      schema: 'masc.keeper-skill-activations/v1', keeper: 'keeper/one', skill_activations: projection,
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    expect(await fetchKeeperSkillActivations('keeper/one')).toEqual(projection)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/keepers/skill-activations?keeper=keeper%2Fone')
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(answer({
+      schema: 'masc.keeper-skill-activations/v1', keeper: 'keeper/two', skill_activations: projection,
+    })))
+    await expect(fetchKeeperSkillActivations('keeper/one')).rejects.toThrow('belongs to keeper/two')
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(answer({
+      schema: 'masc.keeper-skill-usage/v1', keeper: 'keeper/one', skill_activations: projection,
+    })))
+    await expect(fetchKeeperSkillActivations('keeper/one')).rejects.toThrow('masc.keeper-skill-activations/v1')
   })
 
   it('parses the owner shutdown source without accepting source drift', () => {
@@ -1573,6 +1612,7 @@ describe('fetchDashboardTools', () => {
     expect(parseDashboardKeeperWaitingSource('chat_operation_queued')).toBe('chat_operation_queued')
     expect(parseDashboardKeeperWaitingSource('chat_operation_running')).toBe('chat_operation_running')
     expect(parseDashboardKeeperWaitingSource('observation_unavailable')).toBe('observation_unavailable')
+    expect(parseDashboardKeeperWaitingSource('runtime_quota_spent')).toBe('runtime_quota_spent')
     expect(parseDashboardKeeperWaitingSource(' owner_shutdown ')).toBeNull()
     expect(parseDashboardKeeperWaitingSource('owner_stopping')).toBeNull()
     expect(parseDashboardKeeperWaitingSource(null)).toBeNull()

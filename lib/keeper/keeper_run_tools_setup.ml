@@ -470,7 +470,6 @@ let prepare_agent_setup
       Keeper_repetition_scope.Execution.prepare execution
         ~source:(Keeper_context_core.agent_core_context_of_context ctx_work)
         ~target:shared_context
-      |> Result.map (fun _prior_observations -> ())
       |> Result.map_error (fun error ->
            Agent_core.Error.Internal (Keeper_repetition_snapshot.error_to_string error))
   in

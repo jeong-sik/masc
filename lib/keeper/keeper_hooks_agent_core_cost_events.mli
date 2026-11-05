@@ -49,6 +49,12 @@ val cost_event_payload
   -> unit
   -> Yojson.Safe.t
 
+(** Why a cost row is not in the ledger. *)
+type append_failure =
+  | Append_declined  (** The ledger's append guard did not run the append. *)
+  | Append_raised of string
+      (** The append raised before the row was in the file; the exception. *)
+
 val emit_cost_event
   :  masc_root:string
   -> agent_name:string
@@ -73,4 +79,7 @@ val emit_cost_event
   -> ?usage_trust:Keeper_usage_trust.t
   -> ?telemetry:Agent_core.Types.inference_telemetry
   -> unit
-  -> unit
+  -> (unit, append_failure) result
+(** Append one cost row. [Ok] means the row is in the ledger file. A failure
+    is also logged and counted here, so a caller only decides what a row the
+    ledger does not have means for it. *)

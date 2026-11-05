@@ -606,6 +606,20 @@ test('dialog or SDK control loss stops the sequence without follow-up reads',asy
  const lost=fixture({fail:'click'});const stopped=await run(lost.page,request([{method:'click',selector:'@4'},{method:'goto',url:destination}]));
  assert.equal(stopped.completed.length,0);assert.deepEqual(lost.calls.map(c=>typeof c==='string'?c:c[0]),['url','click']);
 });
+test('a thrown step hands its declared name and kind to the host without releasing input',async()=>{
+ class ElementResolutionError extends Error {
+  constructor(message,kind){super(message);this.name='ElementResolutionError';this.kind=kind;}
+ }
+ const f=fixture();
+ f.page.click=async(...args)=>{f.calls.push(['click',...args]);throw new ElementResolutionError('Locator @4 matched 8 elements','permanent');};
+ const result=await run(f.page,request([{method:'click',selector:'@4'},{method:'goto',url:destination}]));
+ assert.equal(result.inputReleased,false);
+ assert.equal(result.failure.method,'click');
+ assert.deepEqual(JSON.parse(JSON.stringify(result.failure.thrown)),{name:'ElementResolutionError',kind:'permanent'});
+ const plain=fixture({fail:'click'});
+ const other=await run(plain.page,request([{method:'click',selector:'@4'}]));
+ assert.deepEqual(JSON.parse(JSON.stringify(other.failure.thrown)),{name:'Error',kind:null});
+});
 test('wrong starting URL refuses before input and final snapshot cuts preserve Unicode',async()=>{
  const f=fixture();const wrong=await run(f.page,{...request([{method:'click',selector:'@1'}]),expectedUrl:destination});
  assert.equal(wrong.effectStarted,false);assert.deepEqual(f.calls,['url']);

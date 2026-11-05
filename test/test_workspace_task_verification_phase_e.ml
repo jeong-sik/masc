@@ -19,9 +19,7 @@ let dummy_task ?contract ?handoff_context () : Masc_domain.task =
   ; contract
   ; handoff_context
   ; cycle_count = 0
-  ; reclaim_policy = None
   ; execution_links = Masc_domain.no_execution_links
-  ; do_not_reclaim_reason = None
   ; skills = []
   }
 
@@ -50,8 +48,7 @@ let test_placeholder_like_notes_reach_llm_evidence () =
 
 let test_contracted_task_keeps_requirements_out_of_submitted_refs () =
   let contract : Masc_domain.task_contract =
-    { strict = false
-    ; completion_contract = []
+    { completion_contract = []
     ; required_evidence = [ "test_keeper_lifecycle PASS" ]
     ; inspect_gate_evidence = []
     ; verify_gate_evidence = [ "PR #18810 merged" ]
@@ -72,7 +69,6 @@ let test_handoff_context_evidence_refs_survive_typed () =
     ; reason = None
     ; next_step = None
     ; failure_mode = None
-    ; reclaim_policy = None
     ; evidence_refs = [ "note:see retro"; "note:n/a"; "  " ]
     ; updated_at = None
     ; updated_by = None

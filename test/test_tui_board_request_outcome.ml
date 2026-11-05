@@ -27,7 +27,7 @@ let identity base_path : Masc.Tui_decode.server_identity =
   { sid_version = "test"; sid_binary_commit = "test"; sid_binary_commit_age_s = None; sid_runtime_instance_id = None
   ; sid_base_path = canonical base_path; sid_masc_root = canonical (base_path ^ "/.masc")
   ; sid_executable_in_worktree = None; sid_state_ready = Some true
-  ; sid_uptime = None; sid_sse_clients = None; sid_gc = None; sid_scheduler = None }
+  ; sid_uptime = None; sid_sse_clients = None; sid_gc = None; sid_scheduler = None; sid_operator_action = None }
 
 let noop : Masc.Board_metrics_hooks.observer =
   { observe_persist_lock_acquire_sec = (fun _ -> ())
@@ -74,8 +74,6 @@ let with_fixture run =
       Eio.Switch.run @@ fun sw ->
       Eio_context.with_test_env ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env)
         ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw @@ fun () ->
-      Masc_test_deps.Board_test_preparation.prepare ~base_path
-        ~action:Masc_test_deps.Board_test_preparation.Bootstrap;
       let server = Masc.Mcp_server.For_testing.create_state ~base_path in
       let config = Masc.Mcp_server.workspace_config server in
       ignore (Masc.Workspace.init config ~agent_name:(Some "fixture"));

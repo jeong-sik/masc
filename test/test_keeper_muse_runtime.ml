@@ -433,6 +433,84 @@ let test_error_projection () =
   | error -> failf "final turn failure: %s" (Agent_core.Error.to_string error)
 ;;
 
+(* A non-retryable modelError without quota names its cause only in prose.
+   The account's own model/list says whether the configured model is listed.
+   An omission from the provider's catalog is the reported type; an omission
+   from any other list is detail only. The variant (and so retry and effect
+   handling) stays the modelError one. *)
+let test_model_error_names_a_missing_catalog_model () =
+  let entry model_id : Msp.model_catalog_entry =
+    { model_id; display_label = model_id; provider_id = "meta"; profile_id = None;
+      context_limit = Some 1_000_000; output_limit = None; is_default = false;
+      variants = Msp.Unknown_efforts } in
+  let catalog source models : Msp.model_catalog =
+    { source; provider_id = "meta"; profile_id = None; models } in
+  let model = "muse-spark-1.3" in
+  check bool "a catalog that lists the model says so" true
+    (Adapter.catalog_reading ~model (catalog Msp.Provider_catalog [entry model])
+     = Keeper_muse_runtime.Catalog_lists_model);
+  let empty = Adapter.catalog_reading ~model (catalog Msp.Bundled_catalog []) in
+  check bool "an empty bundled catalog omits it" true
+    (empty = Keeper_muse_runtime.Catalog_omits_model
+               { model; source = Msp.Bundled_catalog; listed = 0 });
+  check bool "another model does not stand in for it" true
+    (Adapter.catalog_reading ~model (catalog Msp.Provider_catalog [entry "muse-spark-1.4"])
+     = Keeper_muse_runtime.Catalog_omits_model
+         { model; source = Msp.Provider_catalog; listed = 1 });
+  let failed ?quota ~retryable kind =
+    Serve.Turn_failed { Msp.kind; message = "not logged in"; retryable; quota } in
+  let final = failed ~retryable:false Msp.Model_error in
+  check (option string) "only a final modelError without quota reads the catalog"
+    (Some model) (Adapter.catalog_checked_model ~configured_model:(Some model) final);
+  check (option string) "no configured model, nothing to look up"
+    None (Adapter.catalog_checked_model ~configured_model:None final);
+  check (option string) "a retryable modelError does not read it"
+    None (Adapter.catalog_checked_model ~configured_model:(Some model)
+            (failed ~retryable:true Msp.Model_error));
+  check (option string) "a typed quota does not read it"
+    None (Adapter.catalog_checked_model ~configured_model:(Some model)
+            (failed ~quota:{Msp.limit_kind = "tierLimit"; resets_at_ms = 1}
+               ~retryable:false Msp.Model_error));
+  check (option string) "another error kind does not read it"
+    None (Adapter.catalog_checked_model ~configured_model:(Some model)
+            (failed ~retryable:false Msp.Step_limit));
+  let reported ?catalog error =
+    match Adapter.runtime_error_to_core_error ?catalog error with
+    | Agent_core.Error.Provider
+        (Llm_provider.Error.ProviderReportedError { provider = "muse_serve"; error_type; detail }) ->
+      error_type, detail
+    | other -> failf "expected a reported provider error: %s" (Agent_core.Error.to_string other) in
+  let provider_omits = Adapter.catalog_reading ~model
+      (catalog Msp.Provider_catalog [entry "muse-spark-1.4"]) in
+  let error_type, detail = reported ~catalog:provider_omits final in
+  check (option string) "the provider's catalog omitting the model is the reported type"
+    (Some "model_not_in_account_catalog") error_type;
+  check bool "the detail keeps the host's words and names the provider catalog" true
+    (String.ends_with ~suffix:
+       "; the account's provider catalog (model count 1) does not list muse-spark-1.3"
+       detail
+     && String.starts_with ~prefix:(Serve.error_to_string final) detail);
+  (* A bundled list is the host's own, not the account's: the omission is a
+     fact for the detail, never the reported type. *)
+  let error_type, detail = reported ~catalog:empty final in
+  check (option string) "another list's omission keeps the host's kind"
+    (Some "modelError") error_type;
+  check bool "and adds the list's source and size to the detail" true
+    (String.ends_with ~suffix:
+       "; the host's model list (bundledCatalog, model count 0) does not list muse-spark-1.3"
+       detail
+     && String.starts_with ~prefix:(Serve.error_to_string final) detail);
+  check (option string) "a listed model keeps the host's kind"
+    (Some "modelError") (fst (reported ~catalog:Keeper_muse_runtime.Catalog_lists_model final));
+  check (option string) "no reading keeps the host's kind"
+    (Some "modelError") (fst (reported final));
+  check (option string) "a reading never relabels another kind"
+    (Some "stepLimit") (fst (reported ~catalog:empty (failed ~retryable:false Msp.Step_limit)));
+  match Adapter.runtime_error_to_core_error ~catalog:empty (failed ~retryable:true Msp.Model_error) with
+  | Agent_core.Error.Provider (Llm_provider.Error.ProviderUnavailable _) -> ()
+  | other -> failf "a retryable modelError stays availability: %s" (Agent_core.Error.to_string other)
+;;
+
 (* Exit 2 and exit 5 refuse the configuration the host was started with, and
    the same configuration exits the same way again: configuration, not a
    dropped connection. Exit 3 is a refused login or settings file. *)
@@ -525,6 +603,7 @@ SCENARIO = FIXTURE.get("scenario", "complete")
 CURSOR = [0]
 VIEW = []
 COUNT_PATH = os.path.join(HERE, "host-turn-count.txt")
+LAST_TURN_PATH = os.path.join(HERE, "host-last-turn.json")
 with open(os.path.join(HERE, "cwd.txt"), "w") as handle:
     handle.write(os.getcwd())
 
@@ -544,10 +623,15 @@ def cursor():
 
 def notify(method, params, visible=True, gap_after=None):
     # Muse's turnCount counts completed turns only: a failed or cancelled
-    # terminal leaves it where it was.
+    # terminal leaves it where it was. Its lastTurn is the last terminal it
+    # folded, whatever it was.
     if method == "turn/completed" and params.get("terminal") == "completed":
         with open(COUNT_PATH, "w") as handle:
             handle.write(str(completed_turns + 1))
+    if method == "turn/completed":
+        with open(LAST_TURN_PATH, "w") as handle:
+            json.dump({key: params[key] for key in ["turnId", "terminal", "error", "reason"]
+                       if key in params}, handle)
     params["viewCursor"] = cursor()
     if method in ["turn/started", "turn/completed", "item/completed", "item/updated", "session/tokenUsage"]:
         position = {"id": "record-" + params["viewCursor"], "sequence": CURSOR[0]}
@@ -629,6 +713,8 @@ if opened["method"] == "session/start":
     completed_turns = 0
     with open(COUNT_PATH, "w") as handle:
         handle.write("0")
+    if os.path.exists(LAST_TURN_PATH):
+        os.remove(LAST_TURN_PATH)
     # The session runs the model the start named, or the host default.
     model = opened["params"].get("modelId") or "muse-fixture-1"
 else:
@@ -651,11 +737,15 @@ else:
 if SCENARIO == "hang_session":
     drain()
 count_key = "start_turn_count" if mode == "start" else "resume_turn_count"
-send({"jsonrpc": "2.0", "id": opened["id"], "result": {"session": {
+opened_result = {"session": {
     "sessionId": SESSION, "status": "idle",
     "turnCount": FIXTURE.get(count_key, completed_turns), "modelId": model,
     "approvalMode": {"mode": "promptUnmatched", "source": "startup", "lastCommandId": None},
-    "workspaceRoot": FIXTURE["workspace_root"]}, "viewCursor": cursor()}})
+    "workspaceRoot": FIXTURE["workspace_root"]}, "viewCursor": cursor()}
+if mode == "resume" and os.path.exists(LAST_TURN_PATH):
+    with open(LAST_TURN_PATH) as handle:
+        opened_result["lastTurn"] = json.load(handle)
+send({"jsonrpc": "2.0", "id": opened["id"], "result": opened_result})
 if mode == "resume":
     approval = read()
     if approval["method"] == "session/setModel":
@@ -1114,24 +1204,21 @@ let run_turn_with ?on_guidance_prepared ?raw_trace ?composed_context ?goal_block
 let run_turn ~base_path ~tool = run_turn_with ~base_path ~tool ()
 
 (* The adapter settles the acknowledged host turn and returns its stop
-   details. The Keeper driver then turns a repetition into a typed failure,
-   so it cannot be accepted as a runnable continuation. *)
-let check_repeated_host_stop run =
+   details. A deferred terminal boundary is a durable-stimulus checkpoint. *)
+let check_deferred_host_stop run =
   (match run.adapter_result with
-   | Ok { Runtime_agent.stop_reason =
-            Runtime_agent.Yielded_after_repeated_tool_call { tool_name; repeated_count; _ }; _ } ->
-     check string "stopped tool" "masc_probe" tool_name;
-     check int "repetition count" 3 repeated_count
-   | Ok _ -> fail "the adapter lost the repeated-tool stop"
+   | Ok { Runtime_agent.stop_reason = Runtime_agent.Yielded_to_durable_stimulus _; _ } -> ()
+   | Ok _ -> fail "the adapter lost the deferred host stop"
    | Error error -> fail (Agent_core.Error.to_string error));
   match run.outcome.result with
-  | Error error ->
-    (match Keeper_internal_error.carried_masc_internal_error error with
-     | Some (Keeper_internal_error.Host_stopped_turn
-         { runtime_id = stopped_runtime; stop = Repeated_tool_call }) ->
-       check string "stopped runtime" runtime_id stopped_runtime
-     | Some _ | None -> failf "the driver lost the typed host stop: %s" (Agent_core.Error.to_string error))
-  | Ok _ -> fail "the driver accepted the repeated-tool stop"
+  | Ok { Runtime_agent.stop_reason = Runtime_agent.Yielded_to_durable_stimulus _; _ } -> ()
+  | Ok _ -> fail "the driver changed the deferred host stop"
+  | Error error -> fail (Agent_core.Error.to_string error)
+;;
+
+let deferred_host_stop ~tool_name:_ =
+  Ok (Some (Keeper_official_client_host.Terminal_tool_boundary
+    { tool_name = "masc_probe"; outcome = Durable_stimulus_deferred }))
 ;;
 
 let read_text path = In_channel.with_open_bin path In_channel.input_all
@@ -1848,22 +1935,6 @@ let check_effect label expected (outcome : Keeper_muse_runtime.attempt_outcome) 
     (Keeper_provider_attempt_effect.to_string outcome.effect_disposition)
 ;;
 
-let check_repeated_stop_rejected ~base_path (run : observed_run) =
-  (match run.outcome.result with
-   | Error error ->
-     (match Keeper_internal_error.classify_masc_internal_error error with
-      | Some (Keeper_internal_error.Host_stopped_turn
-          {runtime_id = observed_runtime; stop = Repeated_tool_call}) ->
-        check string "caller rejection names the runtime" runtime_id observed_runtime
-      | Some _ | None -> failf "repeated stop lost its caller rejection: %s"
-          (Agent_core.Error.to_string error))
-   | Ok _ -> fail "the caller accepted a repeated-tool stop");
-  let retained = Keeper_client_tool_outbox.load ~base_path ~keeper_name
-      |> function Ok retained -> retained | Error detail -> fail detail in
-  check int "rejected stop keeps its completed tool result" 1
-    (List.length (Keeper_client_tool_outbox.receipt_ids retained))
-;;
-
 let started_turn_id ~base_path = read_text (Filename.concat base_path "start-turn-id.txt")
 
 let test_failed_muse_turn_reads_typed_usage_without_replay () =
@@ -2029,15 +2100,12 @@ let test_a_stop_before_the_turn_start_answer_settles () =
     let run =
       run_turn_with
         ~on_stream_event:(function Agent_core.Types.MessageStart _ -> Eio.Fiber.yield () | _ -> ())
-        ~on_official_client_tool_boundary:(fun ~tool_name:_ ->
-          Ok (Some (Keeper_official_client_host.Repeated_tool_call
-            { tool_name = "masc_probe"; repeated_count = 3 })))
+        ~on_official_client_tool_boundary:deferred_host_stop
         ~base_path
         ~tool:(masc_probe_tool (ref `Null))
         ()
     in
-    check_repeated_host_stop run;
-    check_repeated_stop_rejected ~base_path run;
+    check_deferred_host_stop run;
     (match List.rev run.events with
      | Agent_core.Types.MessageStop :: MessageDelta _ :: _ -> ()
      | _ -> fail "settled adapter host stop left its SSE message open");
@@ -2690,8 +2758,7 @@ let test_hook_tool_surface_controls_session_binding () =
 ;;
 
 (* Muse spells a chosen silence as a completed turn with no message item.
-   The runtime settles it with no content block, the shape a wake that allows
-   silence accepts. *)
+   The runtime settles it with no content block, and the turn accepts it. *)
 let test_a_turn_without_a_message_settles_with_no_content () =
   with_scripted_host ~fixture:(scenario "no_message") (fun ~base_path ->
     let run = run_turn ~base_path ~tool:(masc_probe_tool (ref `Null)) in
@@ -2699,13 +2766,8 @@ let test_a_turn_without_a_message_settles_with_no_content () =
     | Error error -> fail (Agent_core.Error.to_string error)
     | Ok result ->
       check int "no content block" 0 (List.length result.response.content);
-      check bool "a quiet final when the wake allows silence" true
-        (Keeper_tooling.Response.quiet_final_shape
-           ~policy:Keeper_tooling.Response.Allow_quiet_final result.response
-         = Some Keeper_tooling.Response.Quiet_no_content);
-      check bool "still no progress when the wake requires it" false
-        (Keeper_tooling.Response.accepts_response
-           ~policy:Keeper_tooling.Response.Require_progress result.response))
+      check bool "silence is a complete response" true
+        (Keeper_tooling.Response.accepts_response result.response))
 ;;
 
 (* Narration the model declared as commentary is not its answer: a turn
@@ -2849,6 +2911,14 @@ let test_capability_refusal_preserves_previous_settlement () =
     | Error error -> fail (Agent_core.Error.to_string error))) [false; true]
 ;;
 
+(* What the scripted host reports as its last ended turn on the next resume. *)
+let write_host_last_turn ~base_path turn_id terminal =
+  write_file ~mode:0o600 (Filename.concat base_path "host-last-turn.json")
+    (Yojson.Safe.to_string (`Assoc ["turnId", `String turn_id; "terminal", `String terminal]))
+;;
+
+let host_ended turn_id ending = Some ({ Store.turn_id; ending } : Store.host_ended_turn)
+
 let test_retry_previous_refuses_an_externally_advanced_session () =
   with_scripted_host (fun ~base_path ->
     let tool = masc_probe_tool (ref `Null) in
@@ -2865,9 +2935,9 @@ let test_retry_previous_refuses_an_externally_advanced_session () =
      | Ok _ -> () | Error _ -> fail "operator could not restore previous settlement");
     check bool "operator selected the earlier settlement" true (settled_phase ~base_path = first);
     (* The prior ambiguous native turn completed outside this local claim. *)
-    write_file ~mode:0o600 (Filename.concat base_path "host-turn-count.txt") "2";
-    write_fixture ~base_path [];
     let old_turn_id = read_text (Filename.concat base_path "resume-turn-id.txt") in
+    write_host_last_turn ~base_path old_turn_id "completed";
+    write_fixture ~base_path [];
     let run = run_turn_with ~base_path ~tool () in
     (match run.outcome.result with
      | Error _ -> () | Ok _ -> fail "advanced retained history accepted duplicate work");
@@ -2877,8 +2947,8 @@ let test_retry_previous_refuses_an_externally_advanced_session () =
     let failure, observed_turn = recovery_row ~base_path in
     check_failure "history mismatch retains recovery" Store.Protocol_failed failure;
     check (option string) "no new host turn was acknowledged" None observed_turn;
-    (* A second Retry_previous expects the same count again, so the host that
-       counted the turn is refused again; the refused claim opened no session
+    (* A second Retry_previous expects the same again, so the host that
+       completed the turn is refused again; the refused claim opened no session
        and changes nothing the retry relies on. Only a fresh session moves the
        keeper on, and the next claim without a decision supersedes the
        refusal with one. *)
@@ -2889,8 +2959,13 @@ let test_retry_previous_refuses_an_externally_advanced_session () =
     (match Store.resolve_recovery ~base_path ~keeper_name ~expected:refused ~recovery_id
        ~resolution:Store.Retry_previous ~resolved_by:"fixture-operator" ~resolved_at:(Time_compat.now ()) with
      | Ok (retried, _) ->
-       check bool "the repeated retry expects the count before the failed turn" true
-         (retried.Store.host_turns = Store.Reported 1)
+       check bool "the repeated retry expects the failed turn uncompleted" true
+         (retried.Store.host_last_turn
+          = Store.Retry_after
+              { reported =
+                  host_ended (read_text (Filename.concat base_path "start-turn-id.txt"))
+                    Store.Host_completed
+              ; failed = Some old_turn_id })
      | Error _ -> fail "operator could not retry again");
     let again = run_turn_with ~base_path ~tool () in
     (match again.outcome.result with
@@ -2906,13 +2981,48 @@ let test_retry_previous_refuses_an_externally_advanced_session () =
      | Error error -> fail (Agent_core.Error.to_string error)))
 ;;
 
-(* A retryable failed terminal is an ending the host reported, and Muse does
-   not count a turn that failed before an answer: on Muse 1.4.11 such a turn
-   resumed with [turnCount] 0, and three live resumes after a retryable
-   failure (2026-10-19 and 2026-10-20) found the host one turn behind a claim
-   ordinal that counted it. A host that reports one more holds a turn MASC
-   never saw end, so the resume is refused before anything is dispatched. *)
-let test_a_host_count_beyond_a_reported_failed_turn_is_refused () =
+(* Retry_previous re-sends the failed turn's work only when the host shows it
+   did not complete: its last turn is still the settled one, or the failed
+   turn ended uncompleted. The retried claim then resumes the same session. *)
+let test_retry_previous_resumes_when_the_failed_turn_did_not_complete () =
+  List.iter (fun (label, failed_turn_ending) -> with_scripted_host (fun ~base_path ->
+    let tool = masc_probe_tool (ref `Null) in
+    let first = settle_first_turn ~base_path ~tool in
+    write_fixture ~base_path (scenario "exit_mid_turn");
+    (match (run_turn_with ~base_path ~tool ()).outcome.result with
+     | Error _ -> () | Ok _ -> fail "interrupted turn completed");
+    let interrupted = Store.load ~base_path ~keeper_name |> Result.get_ok |> Option.get in
+    let recovery_id = match interrupted.phase with
+      | Store.Recovery_required {recovery_id; _} -> recovery_id
+      | _ -> fail "interrupted turn lost recovery evidence" in
+    (match Store.resolve_recovery ~base_path ~keeper_name ~expected:interrupted ~recovery_id
+       ~resolution:Store.Retry_previous ~resolved_by:"fixture-operator"
+       ~resolved_at:(Time_compat.now ()) with
+     | Ok _ -> () | Error _ -> fail "operator could not restore previous settlement");
+    check bool "operator selected the earlier settlement" true (settled_phase ~base_path = first);
+    let failed_turn = read_text (Filename.concat base_path "resume-turn-id.txt") in
+    Option.iter (write_host_last_turn ~base_path failed_turn) failed_turn_ending;
+    write_fixture ~base_path [];
+    let retried = run_turn_with ~base_path ~tool () in
+    (match retried.outcome.result with
+     | Ok result ->
+       check (option bool) (label ^ ": the retry resumes") (Some true) result.session_resumed
+     | Error error -> failf "%s: %s" label (Agent_core.Error.to_string error));
+    check bool (label ^ ": the retried work reached the host") true
+      (retried.transmitted <> []);
+    check (list string) (label ^ ": no session was started again")
+      ["start"; "resume"; "resume"]
+      (read_text (Filename.concat base_path "sessions.log")
+       |> String.split_on_char '\n' |> List.filter (fun line -> line <> ""))))
+    [ "a failed turn the host never ended", None
+    ; "a failed turn the host cancelled", Some "cancelled" ]
+;;
+
+(* A retryable failed terminal is an ending the host reported, so the failed
+   turn is the host's last and the next resume expects exactly it. A host that
+   reports another last turn holds a turn MASC never saw end, so the resume is
+   refused before anything is dispatched. *)
+let test_a_last_turn_other_than_the_reported_failed_one_is_refused () =
   with_scripted_host (fun ~base_path ->
     let tool = masc_probe_tool (ref `Null) in
     ignore (settle_first_turn ~base_path ~tool);
@@ -2921,21 +3031,21 @@ let test_a_host_count_beyond_a_reported_failed_turn_is_refused () =
      | Error (Agent_core.Error.Provider (Llm_provider.Error.ProviderUnavailable _)) -> ()
      | Error error -> failf "retryable failure: %s" (Agent_core.Error.to_string error)
      | Ok _ -> fail "a failed turn cannot succeed");
-    check string "the host did not count the failed turn" "1"
-      (read_text (Filename.concat base_path "host-turn-count.txt"));
+    let failed_turn = read_text (Filename.concat base_path "resume-turn-id.txt") in
     (match Store.load ~base_path ~keeper_name |> Result.map_error Store.read_error_to_string with
      | Ok (Some failed) ->
-       check bool "the failed turn leaves the reported count" true
-         (failed.Store.host_turns = Store.Reported 1)
+       check bool "the failed turn is the host's last, uncompleted" true
+         (failed.Store.host_last_turn
+          = Store.Reported (host_ended failed_turn Store.Host_uncompleted))
      | Ok None -> fail "no session was recorded"
      | Error detail -> fail detail);
-    write_file ~mode:0o600 (Filename.concat base_path "host-turn-count.txt") "2";
+    write_host_last_turn ~base_path "foreign-turn" "completed";
     write_fixture ~base_path [];
     let resumed = run_turn_with ~base_path ~tool () in
     (match resumed.outcome.result with
      | Error (Agent_core.Error.Provider (Llm_provider.Error.ParseError _)) -> ()
      | Error error -> fail (Agent_core.Error.to_string error)
-     | Ok _ -> fail "a count beyond the failed turn was admitted");
+     | Ok _ -> fail "another last turn after the failed turn was admitted");
     check int "no prompt reached the host" 0 (List.length resumed.transmitted);
     let failure, _ = recovery_row ~base_path in
     check_failure "the refused resume needs recovery" Store.Protocol_failed failure)
@@ -2943,14 +3053,15 @@ let test_a_host_count_beyond_a_reported_failed_turn_is_refused () =
 
 (* A host stop settles a turn whose submission the host already holds: it
    took it in durably before acknowledging the turn, MASC never asks it to
-   retract one, and an uncounted turn's submission stays in the history the
-   next request sends (Muse 1.4.11: a turn that failed before any answer
-   resumed with [turnCount] 0, and the next request carried its user
-   message). So the contexts the stopped turn delivered stay held whether
-   the host counted it or not, and the next resume does not send them again;
-   a block sent on every resume still goes out. *)
-let test_a_host_stopped_turns_context_stays_held_whatever_the_host_counted () =
-  List.iter (fun resumed_count -> with_scripted_host (fun ~base_path ->
+   retract one, and an uncompleted turn's submission stays in the history the
+   next request sends (Muse 1.4.11: a turn that failed before any answer was
+   not among the host's completed turns, and the next request carried its
+   user message). Every resume sends the selected current context again, so
+   the next resume redelivers the stopped turn's recall whether the host
+   completed that turn or not, and a block sent on every resume still goes
+   out. *)
+let test_a_host_stopped_turns_context_is_redelivered_however_the_host_ended_it () =
+  List.iter (fun host_completed -> with_scripted_host (fun ~base_path ->
     let tool = masc_probe_tool (ref `Null) in
     let composed = ref None in
     let hooks_for recall =
@@ -2972,27 +3083,25 @@ let test_a_host_stopped_turns_context_stays_held_whatever_the_host_counted () =
      | Error error -> fail (Agent_core.Error.to_string error));
     write_fixture ~base_path (scenario "stop_before_ack");
     let stopped = run "RECALL_SENT_BY_THE_STOPPED_TURN"
-        ~on_official_client_tool_boundary:(fun ~tool_name:_ ->
-          Ok (Some (Keeper_official_client_host.Repeated_tool_call
-            { tool_name = "masc_probe"; repeated_count = 3 }))) in
-    check_repeated_host_stop stopped;
-    check_repeated_stop_rejected ~base_path stopped;
+        ~on_official_client_tool_boundary:deferred_host_stop in
+    check_deferred_host_stop stopped;
     check bool "the stopped turn sent the revised recall" true
       (String_util.contains_substring (resume_prompt ()) "RECALL_SENT_BY_THE_STOPPED_TURN");
-    write_file ~mode:0o600 (Filename.concat base_path "host-turn-count.txt")
-      (string_of_int resumed_count);
+    if host_completed then
+      write_host_last_turn ~base_path
+        (read_text (Filename.concat base_path "resume-turn-id.txt")) "completed";
     write_fixture ~base_path [];
     (match (run "RECALL_SENT_BY_THE_STOPPED_TURN").outcome.result with
      | Ok result -> check (option bool) "the session resumes" (Some true) result.session_resumed
      | Error error -> fail (Agent_core.Error.to_string error));
     let prompt = resume_prompt () in
     check bool
-      (Printf.sprintf "host count %d: the stopped turn's current recall is redelivered"
-         resumed_count)
+      (Printf.sprintf "host completed the stopped turn %b: its current recall is redelivered"
+         host_completed)
       true (String_util.contains_substring prompt "RECALL_SENT_BY_THE_STOPPED_TURN");
     check bool "a block sent on every resume still goes out" true
       (String_util.contains_substring prompt "HOST_STOP_OPERATOR_NOTE")))
-    [1; 2]
+    [false; true]
 ;;
 
 (* A started session must be empty: a host that attaches turns to a fresh
@@ -3097,49 +3206,77 @@ let test_owner_cancellation_after_retryable_terminal_retains_turn () =
 
 (* A host stop settles the turn before the host reports its terminal. A
    durable host may fold its shutdown terminal on reload or may not, so the
-   next resume admits the count from before the stopped turn and the one
-   after it. A count the host could not have reached is still refused. *)
+   next resume admits the last turn from before the stopped turn, or the
+   stopped turn however it ended. A turn MASC never dispatched is still
+   refused. *)
 let test_host_stop_resume_admits_either_ending_of_the_stopped_turn () =
-  List.iter (fun (resumed_count, admitted) ->
+  List.iter (fun (label, host_last_turn, admitted) ->
     with_scripted_host ~fixture:(scenario "stop_before_ack") (fun ~base_path ->
       let tool = masc_probe_tool (ref `Null) in
       let stopped = run_turn_with ~base_path ~tool
-        ~on_official_client_tool_boundary:(fun ~tool_name:_ ->
-          Ok (Some (Keeper_official_client_host.Repeated_tool_call
-            { tool_name = "masc_probe"; repeated_count = 3 }))) () in
-      check_repeated_host_stop stopped;
-      check_repeated_stop_rejected ~base_path stopped;
+        ~on_official_client_tool_boundary:deferred_host_stop () in
+      check_deferred_host_stop stopped;
       let _, _, local_count = settled_turn ~base_path in
       check int "host stop acknowledges one local turn" 1 local_count;
-      check string "fixture emitted no native terminal" "0"
-        (read_text (Filename.concat base_path "host-turn-count.txt"));
-      write_file ~mode:0o600 (Filename.concat base_path "host-turn-count.txt")
-        (string_of_int resumed_count);
+      check bool "fixture emitted no native terminal" false
+        (Sys.file_exists (Filename.concat base_path "host-last-turn.json"));
+      let stopped_turn = read_text (Filename.concat base_path "start-turn-id.txt") in
+      (match host_last_turn with
+       | `No_ended_turn -> ()
+       | `Stopped_turn terminal -> write_host_last_turn ~base_path stopped_turn terminal
+       | `Other_turn turn_id -> write_host_last_turn ~base_path turn_id "completed");
       write_fixture ~base_path [];
       let resumed = run_turn_with ~base_path ~tool () in
       if admitted then (
         match resumed.outcome.result with
         | Ok result ->
-          check (option bool) (Printf.sprintf "host count %d resumes" resumed_count)
-            (Some true) result.session_resumed
+          check (option bool) (label ^ " resumes") (Some true) result.session_resumed
         | Error error -> fail (Agent_core.Error.to_string error))
       else (
         (match resumed.outcome.result with
          | Error (Agent_core.Error.Provider (Llm_provider.Error.ParseError _)) -> ()
          | Error error -> fail (Agent_core.Error.to_string error)
-         | Ok _ -> fail "a host count beyond the stopped turn was admitted");
-        check int "an impossible count dispatches no new turn" 0 (List.length resumed.transmitted);
+         | Ok _ -> failf "%s was admitted" label);
+        check int (label ^ " dispatches no new turn") 0 (List.length resumed.transmitted);
         let failure, _ = recovery_row ~base_path in
         check_failure "native history mismatch requires recovery" Store.Protocol_failed failure)))
-    [0, true; 1, true; 2, false]
+    [ "a host that ended no turn", `No_ended_turn, true
+    ; "a host that completed the stopped turn", `Stopped_turn "completed", true
+    ; "a host that cancelled the stopped turn", `Stopped_turn "cancelled", true
+    ; "a host whose last turn MASC never dispatched", `Other_turn "foreign-turn", false ]
+;;
+
+(* The host counts its completed turns again from each compaction boundary.
+   On 2026-11-04, settled Muse sessions whose turns MASC had seen complete
+   reported 0 or 1 after a compaction, and 20 of the 27 resumes refused on a
+   count since 2026-11-03 followed one (#47993). Their last turn was still the
+   one MASC settled, so the resume names the session by it and continues. *)
+let test_a_resume_after_the_host_counted_again_from_a_compaction_continues () =
+  with_scripted_host ~fixture:["start_compaction", `String "compacted"] (fun ~base_path ->
+    let tool = masc_probe_tool (ref `Null) in
+    ignore (settle_first_turn ~base_path ~tool);
+    let compacted_session, _, _ = settled_turn ~base_path in
+    List.iter (fun recounted ->
+      write_fixture ~base_path ["resume_turn_count", `Int recounted];
+      (match (run_turn_with ~base_path ~tool ()).outcome.result with
+       | Ok result ->
+         check (option bool) (Printf.sprintf "a host that counts %d again resumes" recounted)
+           (Some true) result.session_resumed
+       | Error error -> fail (Agent_core.Error.to_string error)))
+      [0; 1];
+    let resumed_session, _, _ = settled_turn ~base_path in
+    check string "no fresh session replaced the compacted one" compacted_session resumed_session;
+    check (list string) "no session was started again" ["start"; "resume"; "resume"]
+      (read_text (Filename.concat base_path "sessions.log")
+       |> String.split_on_char '\n' |> List.filter (fun line -> line <> "")))
 ;;
 
 (* An owner stop after the host acknowledged the turn ends it without MASC
    seeing its terminal. The host may have completed it (on 2026-10-20 a
-   graceful shutdown cancelled a turn the host then counted) or not, and the
-   next turn resumes the same session either way. *)
-let test_an_owner_stop_after_turn_start_resumes_whatever_the_host_counted () =
-  List.iter (fun host_counted -> with_scripted_host (fun ~base_path ->
+   graceful shutdown cancelled a turn the host then counted as completed) or
+   not, and the next turn resumes the same session either way. *)
+let test_an_owner_stop_after_turn_start_resumes_however_the_host_ended_it () =
+  List.iter (fun host_completed -> with_scripted_host (fun ~base_path ->
     let tool = masc_probe_tool (ref `Null) in
     let settled = settle_first_turn ~base_path ~tool in
     let first_session, _, _ = settled_turn ~base_path in
@@ -3162,16 +3299,21 @@ let test_an_owner_stop_after_turn_start_resumes_whatever_the_host_counted () =
      | () -> fail "the interrupted turn returned"
      | exception exn when Keeper_registry_types.is_operator_interrupt exn -> ());
     check_owner_stop ~base_path ~settled;
+    let first_turn = read_text (Filename.concat base_path "start-turn-id.txt") in
+    let stopped_turn = read_text (Filename.concat base_path "resume-turn-id.txt") in
     (match Store.load ~base_path ~keeper_name |> Result.map_error Store.read_error_to_string with
      | Ok (Some stopped) ->
        check bool "the stopped turn's ending is unobserved" true
-         (stopped.Store.host_turns = Store.Unobserved_after 1)
+         (stopped.Store.host_last_turn
+          = Store.Unobserved_after
+              { reported = host_ended first_turn Store.Host_completed
+              ; dispatched = Some stopped_turn })
      | Ok None -> fail "no session was recorded"
      | Error detail -> fail detail);
-    check string "the stopped turn emitted no terminal" "1"
-      (read_text (Filename.concat base_path "host-turn-count.txt"));
-    if host_counted then
-      write_file ~mode:0o600 (Filename.concat base_path "host-turn-count.txt") "2";
+    check bool "the stopped turn emitted no terminal" true
+      (String_util.contains_substring
+         (read_text (Filename.concat base_path "host-last-turn.json")) first_turn);
+    if host_completed then write_host_last_turn ~base_path stopped_turn "completed";
     write_fixture ~base_path [];
     (match (run_turn_with ~base_path ~tool ()).outcome.result with
      | Ok result ->
@@ -3829,6 +3971,8 @@ let () =
         ; test_case "session refusals start fresh next" `Quick
             test_refusals_of_the_session_start_fresh_next
         ; test_case "error projection" `Quick test_error_projection
+        ; test_case "a modelError names a model missing from the account catalog" `Quick
+            test_model_error_names_a_missing_catalog_model
         ; test_case "documented refusal exits are not dropped connections" `Quick
             test_documented_refusal_exits_are_not_dropped_connections
         ] )
@@ -3871,16 +4015,20 @@ let () =
       , [ test_case "MCP setup failure preserves previous settlement" `Quick test_bridge_setup_failure_preserves_previous_settlement
         ; test_case "capability refusal preserves previous settlement" `Quick test_capability_refusal_preserves_previous_settlement
         ; test_case "retry previous refuses externally advanced session" `Quick test_retry_previous_refuses_an_externally_advanced_session
+        ; test_case "retry previous resumes when the failed turn did not complete" `Quick
+            test_retry_previous_resumes_when_the_failed_turn_did_not_complete
         ; test_case "a non-empty started session is refused" `Quick
             test_nonempty_start_is_refused
         ; test_case "host stop resume admits either ending of the stopped turn" `Quick
             test_host_stop_resume_admits_either_ending_of_the_stopped_turn
-        ; test_case "an owner stop after turn start resumes whatever the host counted" `Quick
-            test_an_owner_stop_after_turn_start_resumes_whatever_the_host_counted
-        ; test_case "a host count beyond a reported failed turn is refused" `Quick
-            test_a_host_count_beyond_a_reported_failed_turn_is_refused
-        ; test_case "a host-stopped turn's context stays held whatever the host counted" `Quick
-            test_a_host_stopped_turns_context_stays_held_whatever_the_host_counted
+        ; test_case "a resume after the host counted again from a compaction continues" `Quick
+            test_a_resume_after_the_host_counted_again_from_a_compaction_continues
+        ; test_case "an owner stop after turn start resumes however the host ended it" `Quick
+            test_an_owner_stop_after_turn_start_resumes_however_the_host_ended_it
+        ; test_case "a last turn other than the reported failed one is refused" `Quick
+            test_a_last_turn_other_than_the_reported_failed_one_is_refused
+        ; test_case "a host-stopped turn's context is redelivered however the host ended it" `Quick
+            test_a_host_stopped_turns_context_is_redelivered_however_the_host_ended_it
         ; test_case "admission timeout releases only undispatched claims" `Quick test_admission_timeout_restores_only_undispatched_claims
         ; test_case "read-only MCP failure preserves effect classification" `Quick test_read_only_mcp_failure_does_not_invent_an_effect
         ; test_case "a host that exits mid-turn leaves recovery" `Quick

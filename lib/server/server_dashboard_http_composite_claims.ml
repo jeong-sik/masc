@@ -40,25 +40,19 @@ type claim_status =
   | Claim_not_observed
   | Claim_log_unavailable
   | Claimed
-  | No_eligible
   | No_unclaimed
   | Claim_error
   | Observed
   | Unknown
-[@@deriving enumerate]
 
 let claim_status_to_wire = function
   | Claim_not_observed -> "not_observed"
   | Claim_log_unavailable -> "tool_log_unavailable"
   | Claimed -> "claimed"
-  | No_eligible -> "no_eligible"
   | No_unclaimed -> "no_unclaimed"
   | Claim_error -> "error"
   | Observed -> "observed"
   | Unknown -> "unknown"
-;;
-
-let claim_status_of_wire s = List.find_opt (fun v -> String.equal (claim_status_to_wire v) s) all_of_claim_status
 ;;
 
 let claimed_task_of_output output =
@@ -80,8 +74,6 @@ let claim_status_of_output ~claimed_task ~recorded_outcome output =
   | Some _, Some _ -> Unknown
   | None, Some outcome ->
     (match Keeper_tool_outcome.of_json outcome with
-     | Some (Keeper_tool_outcome.No_progress
-               { reason = Keeper_tool_outcome.No_eligible_tasks _ }) -> No_eligible
      | Some (Keeper_tool_outcome.No_progress
                { reason = Keeper_tool_outcome.No_work_available }) -> No_unclaimed
      | Some (Keeper_tool_outcome.Error _) -> Claim_error
@@ -237,7 +229,6 @@ let composite_claim_attempt_json ~claim_window ~keeper_name =
       | Claimed -> declared_claimed_task
       | Claim_not_observed
       | Claim_log_unavailable
-      | No_eligible
       | No_unclaimed
       | Claim_error
       | Observed
@@ -415,23 +406,6 @@ let composite_execution_config_blocked execution =
     [ "config_invalid"; "authorization_refused" ]
 ;;
 
-let composite_execution_claim_no_eligible execution =
-  match json_member "claim_attempt" execution with
-  | `Assoc _ as claim_attempt ->
-    (match Option.bind (json_string "status" claim_attempt) claim_status_of_wire with
-     | Some No_eligible -> true
-     | Some
-         ( Claim_not_observed
-         | Claim_log_unavailable
-         | Claimed
-         | No_unclaimed
-         | Claim_error
-         | Observed
-         | Unknown )
-     | None -> false)
-  | _ -> false
-;;
-
 let composite_execution_config_drift execution =
   match json_member "config_drift" execution with
   | `Assoc _ as config_drift ->
@@ -442,8 +416,7 @@ let composite_execution_config_drift execution =
 let keeper_activation_readiness_json = Server_dashboard_fleet_readiness.keeper_activation_readiness_json
 
 let composite_execution_blocked execution =
-  composite_execution_claim_no_eligible execution
-  || (match json_string "terminal_reason_code" execution with
+  (match json_string "terminal_reason_code" execution with
       | Some terminal ->
         not (String.equal terminal "")
         && Keeper_turn_disposition.requires_attention
@@ -560,8 +533,6 @@ let composite_runtime_attention ~snapshot ~execution =
   let execution_reason =
     if not execution_current
     then None
-    else if composite_execution_claim_no_eligible execution
-    then Some "claim_no_eligible"
     else if not blocked
     then None
     else

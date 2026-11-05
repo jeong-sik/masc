@@ -1,6 +1,4 @@
 module Types = Masc_domain
-module Preparation = Masc_test_deps.Board_test_preparation
-
 module Mcp_eio = Masc.Mcp_server_eio
 module Mcp_server = Masc.Mcp_server
 module Config = Masc.Config
@@ -346,7 +344,6 @@ let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
   (* Each matrix fixture models a separate server process and workspace. *)
   Masc.Board.reset_global_for_test ();
   Masc.Board_dispatch.reset_for_test ();
-  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   let state =
     Mcp_eio.create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net
       ~base_path
@@ -404,10 +401,10 @@ let ensure_goal fixture =
   | None ->
       let goal =
         match
-          Goal_store.upsert_goal (Mcp_server.workspace_config fixture.state)
+          Goal_store.upsert_goal_with_events ~actor:"test" (Mcp_server.workspace_config fixture.state)
             ~title:"Tool Matrix Goal" ~metric:"m" ~target_value:"1" ()
         with
-        | Ok (goal, _status) -> goal
+        | Ok (goal, _status, _) -> goal
         | Error err ->
           failwith ("failed to seed tool matrix goal: " ^ Goal_store.write_error_to_string err)
       in

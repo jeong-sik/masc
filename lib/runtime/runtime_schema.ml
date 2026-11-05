@@ -253,6 +253,7 @@ type model_capabilities =
   ; supports_parallel_tool_calls : bool option
   ; thinking_control_format : thinking_control_format
   ; declared_thinking_control_format : thinking_control_format option
+  ; accepted_reasoning_efforts : Llm_provider.Reasoning_effort.t list option
   ; anthropic_thinking_control : anthropic_thinking_control option
   ; reasoning_streaming_format : reasoning_streaming_format option
   ; supports_image_input : bool option
@@ -279,6 +280,7 @@ let model_capabilities_default =
   ; supports_parallel_tool_calls = None
   ; thinking_control_format = No_thinking_control
   ; declared_thinking_control_format = None
+  ; accepted_reasoning_efforts = None
   ; anthropic_thinking_control = None
   ; reasoning_streaming_format = None
   ; supports_image_input = None
@@ -368,6 +370,16 @@ type model_spec =
   ; capabilities : model_capabilities option
   }
 [@@deriving show, eq]
+
+(* [reasoning-uncontrolled] sends no thinking control at all, so the row's
+   [thinking-support] stays a statement about the model and never becomes an
+   enable or disable request. Every request built from a model row reads this,
+   not [thinking_support]. *)
+let thinking_request (model : model_spec) =
+  match model.reasoning_uncontrolled with
+  | true -> None
+  | false -> model.thinking_support
+;;
 
 (** {1 Layer 3: Binding — provider × model} *)
 

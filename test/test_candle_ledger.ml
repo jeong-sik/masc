@@ -191,6 +191,30 @@ let current_payment ~goal_id (stored : Candle_payment.t) =
   |> ok_or_fail
 ;;
 
+(* RFC-0481 §3.2: the server learns of appends through this observer. *)
+let test_appends_are_reported_to_the_observer () =
+  with_base_path @@ fun base_path ->
+  let reported = ref [] in
+  Candle_ledger.install_append_observer (fun ~base_path:observed events ->
+    reported := (observed, List.map (fun (event : E.t) -> E.kind event.body) events) :: !reported);
+  Fun.protect ~finally:(fun () -> Candle_ledger.install_append_observer (fun ~base_path:_ _ -> ()))
+    (fun () ->
+      let granted : E.t =
+        { at = at "2026-09-29T06:00:00Z"
+        ; body = E.Granted { keeper = "alpha"; amount_milli = 1000; reason = "observer" } }
+      in
+      update_ok base_path (fun _ -> Ok ([ granted ], ()));
+      Alcotest.(check (list (pair string (list string)))) "an append is reported once with its events"
+        [ base_path, [ E.kind granted.body ] ] !reported;
+      reported := [];
+      update_ok base_path (fun _ -> Ok ([], ()));
+      Alcotest.(check int) "an empty append reports nothing" 0 (List.length !reported);
+      (match Candle_ledger.update ~base_path (fun _ -> Error "refused") with
+       | Error (Candle_ledger.Refused _) -> ()
+       | Ok () | Error _ -> Alcotest.fail "a refused decision was not refused");
+      Alcotest.(check int) "a refused decision reports nothing" 0 (List.length !reported))
+;;
+
 let test_stored_payments_replay_but_new_appends_require_current_arithmetic () =
   with_base_path @@ fun base_path ->
   let receipts = List.map (fun line -> ok_or_fail (E.of_line line))
@@ -748,6 +772,8 @@ let () =
             test_item_acceptance_seed_contract
         ; Alcotest.test_case "a missing file is an empty ledger" `Quick
             test_a_missing_file_is_an_empty_ledger
+        ; Alcotest.test_case "appends are reported to the observer" `Quick
+            test_appends_are_reported_to_the_observer
         ; Alcotest.test_case "stored credits survive changed rounding; new appends validate" `Quick
             test_stored_payments_replay_but_new_appends_require_current_arithmetic
         ; Alcotest.test_case "stored settlement replays after the candidate rule changes" `Quick

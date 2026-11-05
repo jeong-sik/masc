@@ -131,7 +131,7 @@ let test_skill_image_owner () =
     esp_body_bytes=0; esp_discovery_bytes=0; esp_load_reasons=[]; esp_node_count=0;
     esp_batch_count=0; esp_max_parallelism=0; esp_flow=None; esp_io=Model_orchestrated } in
   let inventory ?(left_out=[]) selected : Tools.tool_snapshot = {
-    ts_tools=[]; ts_count=0; ts_freshness=Settled; ts_skill_activations=None;
+    ts_tools=[]; ts_count=0; ts_freshness=Settled;
     ts_effective=Some (Effective_surface_available {
       ets_keeper_name="keeper-a"; ets_runtime_id="runtime"; ets_official_client_kind="client";
       ets_tool_delivery=Effective_tools_delivered; ets_native_posture=None;
@@ -415,7 +415,7 @@ let board_state post comments =
      sid_base_path=Decode.Canonical_path.of_path "/board-test";
      sid_masc_root=Decode.Canonical_path.of_path "/board-test/.masc";
      sid_executable_in_worktree=None;sid_state_ready=Some true;sid_uptime=None;
-     sid_sse_clients=None;sid_gc=None;sid_scheduler=None} in
+     sid_sse_clients=None;sid_gc=None;sid_scheduler=None;sid_operator_action=None} in
   state.server_identity <- Some identity;
   state.workspace_identity <- Types.Workspace_identity_match;
   state.view <- Types.Board;

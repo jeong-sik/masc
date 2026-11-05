@@ -83,8 +83,8 @@ let stored name =
         ~data:(Some (Tool_output.encode_for_agent_core (Tool_output.Stored reference)))
 
 let test_sent_image_keeps_reference_not_filename () =
-  let image = Preview.in_message ~text:"look"
-      ~attachments:[stored "../../wrong.png"] in
+  let image = Preview.newest (Preview.in_message_previews ~text:"look"
+      ~attachments:[stored "../../wrong.png"]) in
   match Preview.choose_preview ~conversation:image ~staged:[] ~order:Preview.Unordered with
   | Preview.Stored_attachment { name; reference; _ } ->
       check string "name remains a label" "../../wrong.png" name;
@@ -94,7 +94,7 @@ let test_sent_image_keeps_reference_not_filename () =
 let test_missing_and_malformed_payloads_do_not_open_labels () =
   List.iter (fun data ->
     let image = Preview.persisted_attachment ~name:"image-1.png" ~mime:"image/png" ~data in
-    match Preview.in_message ~text:"older.png" ~attachments:[image] with
+    match Preview.newest (Preview.in_message_previews ~text:"older.png" ~attachments:[image]) with
     | Preview.Unavailable_image { name = "image-1.png"; _ } -> ()
     | _ -> fail "unavailable sent image must not turn its label into a path")
     [None; Some "masc://attachment/att/hash"; Some "[masc:blob sha256=../../other]"]
@@ -109,7 +109,7 @@ let test_new_staging_and_new_paths_order_against_sent_images () =
            ~order:Preview.Named_is_newer with
    | Preview.Stored_attachment _ -> ()
    | _ -> fail "new sent image must beat old staging");
-  match Preview.in_message ~text:"newer/path.png" ~attachments:[] with
+  match Preview.newest (Preview.in_message_previews ~text:"newer/path.png" ~attachments:[]) with
   | Preview.Named_path "newer/path.png" -> ()
   | _ -> fail "later message paths remain previewable"
 
@@ -171,19 +171,19 @@ let test_diagram_preview_selection () =
   let source = "pie\n  \"완료\": 8\n  \"대기\": 2" in
   let text = "```mermaid\nflowchart TD\n A --> B\n```\n~~~mermaid\n"
     ^ source ^ "\n~~~\n```mermaid\nunfinished" in
-  let preview = Preview.in_message ~text ~attachments:[] in
+  let preview = Preview.newest (Preview.in_message_previews ~text ~attachments:[]) in
   (match preview with
    | Preview.Output_image { source = Preview.Inline_mermaid actual; _ } ->
        check string "last completed source selected without parsing" source actual
    | _ -> fail "closed chart was not offered to Pele");
-  (match Preview.in_message ~text ~attachments:[Preview.Named_path "capture.png"] with
+  (match Preview.newest (Preview.in_message_previews ~text ~attachments:[Preview.Named_path "capture.png"]) with
    | Preview.Named_path "capture.png" -> ()
    | _ -> fail "diagram displaced an explicit attachment");
   (match Preview.choose_preview ~conversation:preview ~staged:[attachment "draft.png"]
       ~order:Preview.Staged_is_newer with
    | Preview.Staged _ -> ()
    | _ -> fail "diagram displaced a newer staged draft");
-  match Preview.in_message ~text:"```mermaid\npie\n" ~attachments:[] with
+  match Preview.newest (Preview.in_message_previews ~text:"```mermaid\npie\n" ~attachments:[]) with
   | Preview.No_image -> ()
   | _ -> fail "incomplete stream was sent to the renderer"
 

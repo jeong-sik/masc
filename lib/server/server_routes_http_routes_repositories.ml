@@ -323,37 +323,25 @@ let handle_list_branches state id req reqd =
           in
           Http.Response.json_value ~request:req json reqd)
 
-let repository_change_json (change : Repo_git.status_file) =
-  `Assoc
-    [ ("path", `String change.path)
-    ; ("staged", `Bool change.staged)
-    ; ("unstaged", `Bool change.unstaged)
-    ; ("untracked", `Bool change.untracked)
-    ; ("conflicted", `Bool change.conflicted)
-    ]
-
 let handle_list_repository_changes state id req reqd =
   let base_path = base_path_of_state state in
   match Repo_store.find ~base_path id with
   | Error msg -> json_response ~status:`Not_found req reqd (json_error msg)
   | Ok repo ->
       let local_path = Repo_store.local_path ~base_path repo in
-      let repository = { repo with local_path } in
-      (match Repo_git.status_files ~repository () with
+      (match Repo_git.status_snapshot_at ~local_path () with
        | Error msg ->
            json_response ~status:`Internal_server_error req reqd
              (json_error msg)
-       | Ok changes ->
+       | Ok (changes, branch) ->
            Http.Response.json_value ~request:req
-             (`Assoc
-                [ ( "scope"
-                  , `Assoc
-                      [ ("kind", `String "repository")
-                      ; ("repository_id", `String id)
-                      ] )
-                ; ("changes", `List (List.map repository_change_json changes))
-                ; ("total", `Int (List.length changes))
-                ])
+             (Server_git_status_json.snapshot
+                ~scope:
+                  (`Assoc
+                     [ ("kind", `String "repository")
+                     ; ("repository_id", `String id)
+                     ])
+                ~branch ~changes)
              reqd)
 
 let handle_get_repository_path state req reqd =

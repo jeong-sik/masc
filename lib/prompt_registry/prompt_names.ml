@@ -59,14 +59,6 @@ let keeper_observation_current_task_unobservable =
   "keeper.observation.current_task_unobservable"
 ;;
 
-let keeper_observation_previous_turn_stop_repeated_tool_call =
-  "keeper.observation.previous_turn_stop.repeated_tool_call"
-;;
-
-let keeper_observation_previous_turn_stop_repeated_assistant_text =
-  "keeper.observation.previous_turn_stop.repeated_assistant_text"
-;;
-
 let keeper_observation_rejected_digest_heading =
   "keeper.observation.rejected_digest_heading"
 ;;
@@ -176,18 +168,6 @@ let eval_calibration_few_shot_example = "eval.calibration.few_shot.example"
 (* The label a divergence example carries when the human rejected what the
    evaluator approved. *)
 let eval_calibration_few_shot_rejected_label = "eval.calibration.few_shot.rejected_label"
-
-(* Repository checkout freshness — one fragment per line part, so an
-   operator can reword any of them without an OCaml change. *)
-let keeper_context_checkouts_section = "keeper.context.checkouts.section"
-let keeper_context_checkouts_row = "keeper.context.checkouts.row"
-let keeper_context_checkouts_standing_current = "keeper.context.checkouts.standing.current"
-let keeper_context_checkouts_standing_stale_ref = "keeper.context.checkouts.standing.stale_ref"
-let keeper_context_checkouts_standing_ahead = "keeper.context.checkouts.standing.ahead"
-let keeper_context_checkouts_standing_behind = "keeper.context.checkouts.standing.behind"
-let keeper_context_checkouts_standing_diverged = "keeper.context.checkouts.standing.diverged"
-let keeper_context_checkouts_standing_unavailable = "keeper.context.checkouts.standing.unavailable"
-let keeper_context_checkouts_unmeasured = "keeper.context.checkouts.unmeasured"
 
 (* Approval authority — the same split, so the state wording is an
    operator surface rather than an OCaml literal. *)
@@ -387,14 +367,6 @@ let keeper_world_autonomous_trigger_reasons = "keeper.world.autonomous_trigger.r
 
 let keeper_world_autonomous_trigger_since_last =
   "keeper.world.autonomous_trigger.since_last"
-;;
-
-let keeper_wake_completion_quiet_final_allowed =
-  "keeper.wake.completion.quiet_final_allowed"
-;;
-
-let keeper_wake_completion_progress_required =
-  "keeper.wake.completion.progress_required"
 ;;
 
 let keeper_world_scheduled_automation_heading =

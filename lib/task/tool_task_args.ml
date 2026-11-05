@@ -16,8 +16,7 @@ let parse_task_creation_request_id = function
   | _ -> Error "task arguments must be an object"
 
 let task_contract_keys =
-  [ "strict"
-  ; "completion_contract"
+  [ "completion_contract"
   ; "required_evidence"
   ; "inspect_gate_evidence"
   ; "verify_gate_evidence"
@@ -65,8 +64,8 @@ let unknown_args ~valid_keys args =
    a non-empty [reason] or [notes] but forget the nested summary field —
    rejecting the call in that case burned 76/132 masc_transition calls
    on 2026-04-17/18 (see memory/handoff-2026-04-18-masc-tool-failure-
-   investigation.md). Prefer [notes] when present (it's the canonical
-   done-note) then fall back to [reason] (release blocker note). Truncate
+   investigation.md). Prefer [notes] when present then fall back to
+   [reason] (release blocker note). Truncate
    to keep the synthesized summary single-line. *)
 let synthesize_summary_from_siblings args =
   let pick key =
@@ -92,26 +91,18 @@ let synthesize_summary_from_siblings args =
       | Some s -> Some (truncate ~max_len:240 (first_line s))
       | None -> None
 
-(* A transition's [handoff_context.summary] is only meaningful when the
-   action represents a *work-state exit* — the agent is reporting the
-   outcome of work it did. Pure ownership transitions (Claim, Start)
-   have no outcome to summarize yet, so requiring a summary just makes
-   the LLM either invent one (degrading audit signal) or fail the call
-   entirely (the 2026-05-17 production case).
-
-   Exit-class actions:
-     Cancel / Release / Submit_for_verification
-   Actions with no handoff meaning do not require a local summary:
-     Done_action / Claim / Start.
+(* A provided [handoff_context] must carry a summary for Cancel and
+   Submit_for_verification. Release, Done_action, Claim and Start take the
+   context without one.
 
    This split is exhaustive over [Masc_domain.task_action]; adding a
    new variant forces a compile-time decision here, not a runtime
    permissive default. *)
 let transition_action_requires_summary : Masc_domain.task_action -> bool =
   function
-  | Masc_domain.Cancel | Masc_domain.Release | Masc_domain.Submit_for_verification ->
-    true
-  | Masc_domain.Done_action | Masc_domain.Claim | Masc_domain.Start ->
+  | Masc_domain.Cancel | Masc_domain.Submit_for_verification -> true
+  | Masc_domain.Release | Masc_domain.Done_action | Masc_domain.Claim
+  | Masc_domain.Start ->
     false
 
 let parse_handoff_context ~(agent_name : string)
@@ -119,11 +110,8 @@ let parse_handoff_context ~(agent_name : string)
   let summary_required = transition_action_requires_summary action in
   match Json_util.assoc_member_opt "handoff_context" args with
   | None | Some `Null ->
-    (* No handoff_context object provided. For entry-class actions this
-       is the expected shape; for exit-class actions the caller's
-       strict-release / contract checks downstream will surface the
-       missing summary if the task contract demands it. We do not
-       fabricate an empty handoff_context here. *)
+    (* No handoff_context object provided. We do not fabricate an empty
+       handoff_context here. *)
     Ok None
   | Some (`Assoc _ as json) -> (
       match Masc_domain.task_handoff_context_of_yojson json with
@@ -175,25 +163,27 @@ let parse_handoff_context ~(agent_name : string)
                  (Masc_domain.task_action_to_string action)
                  Tool_task_completion_review.note_evidence_ref_form
                  handoff_example_evidence_ref)
-          else if String.equal summary "" then
-            if summary_required then
-              Error
-                (Printf.sprintf
-                   "handoff_context.summary is required for action=%s \
-                    (non-empty string). Example: {\"summary\": \"tests \
-                    green, local proof saved\", \"next_step\": \"wait \
-                    for CI\", \"evidence_refs\": [\"%s\"]}. \
-                    Alternatively pass a non-empty top-level 'notes' or \
-                    'reason' and it will be synthesized into summary \
-                    automatically."
-                   (Masc_domain.task_action_to_string action)
-                   handoff_example_evidence_ref)
-            else
-              (* Entry-class action (claim/start) with an empty
-                 handoff_context object. The summary is meaningless at
-                 work entry; treat the empty context as absent rather
-                 than failing the call. *)
-              Ok None
+          else if String.equal summary "" && summary_required then
+            Error
+              (Printf.sprintf
+                 "handoff_context.summary is required for action=%s \
+                  (non-empty string). Example: {\"summary\": \"tests \
+                  green, local proof saved\", \"next_step\": \"wait \
+                  for CI\", \"evidence_refs\": [\"%s\"]}. \
+                  Alternatively pass a non-empty top-level 'notes' or \
+                  'reason' and it will be synthesized into summary \
+                  automatically."
+                 (Masc_domain.task_action_to_string action)
+                 handoff_example_evidence_ref)
+          else if
+            String.equal summary ""
+            && Option.is_none handoff_context.reason
+            && Option.is_none handoff_context.next_step
+            && Option.is_none handoff_context.failure_mode
+            && handoff_context.evidence_refs = []
+          then
+            (* An empty handoff_context object is the same as none. *)
+            Ok None
           else
             Ok
               (Some

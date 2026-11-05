@@ -254,8 +254,6 @@ let test_autonomous_wake_native_reply () = with_token (fun clock ->
   let native = Native.of_continuation channel |> ok in
   let target = Keeper_surface_post.resolve_target ~surface:"telegram" ~channel_id:None
     ~continuation_channel:channel ~native_reply:native () |> ok in
-  check bool "wake reply addresses original route" true
-    (Keeper_surface_post.matches_continuation_route target channel);
   check bool "cannot retarget the native continuation" true
     (Result.is_error (Keeper_surface_post.resolve_target ~surface:"telegram"
       ~channel_id:(Some "-2000") ~continuation_channel:channel ~native_reply:native ()));
@@ -264,8 +262,10 @@ let test_autonomous_wake_native_reply () = with_token (fun clock ->
   let replay = Keeper_tool_in_process_runtime.connector_post_replay_of_gate_input
     (Yojson.Safe.from_string (Yojson.Safe.to_string input)) |> ok in
   let replay_target = Keeper_tool_in_process_runtime.connector_post_replay_target replay in
+  let delivery_json post_target = Keeper_surface_post.delivery_target_to_yojson
+    (Keeper_surface_post.delivery_target_of_post_target post_target) in
   check bool "Gate replay retains native route" true
-    (Keeper_surface_post.matches_continuation_route replay_target channel);
+    (Yojson.Safe.equal (delivery_json replay_target) (delivery_json target));
   let receipt = Keeper_surface_post.delivery_target_of_post_target replay_target in
   let receipt_json = Keeper_surface_post.delivery_target_to_yojson receipt in
   check bool "completed effect metadata survives its wire" true
@@ -289,8 +289,6 @@ let test_autonomous_wake_native_reply () = with_token (fun clock ->
   Native.send ~clock ~imessage_send:(fun ~chat_guid ~content -> sent:=Some(chat_guid,content);Ok ())
     native ~content:"answer" |> ok;
   check (option (pair string string)) "configured iMessage destination used" (Some ("self-guid","answer")) !sent;
-  check bool "self-chat receipt cannot claim original group was answered" false
-    (Native.matches_continuation native imessage);
   let native_input = `Assoc ["connector",`String "imessage";"channel_id",`String "source";
     "native_route",Native.to_yojson native;"content",`String "answer";"mention_user_ids",`List []] in
   let replay = Keeper_tool_in_process_runtime.connector_post_replay_of_gate_input native_input |> ok in

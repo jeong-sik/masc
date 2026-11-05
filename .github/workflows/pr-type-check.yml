@@ -1,0 +1,75 @@
+name: PR type-check (dune build @check)
+
+# Why this exists: no workflow that runs on `pull_request` executed
+# `dune build @check`. On 2026-11-03 three PRs merged with a green PR-stage
+# check (changelog format only) and each then broke main's type-check:
+# #47672 (e745acf9), #47639 (4845937b), #47661 (804372bf).
+#
+# This is deliberately NOT a required status check. A `paths:` filtered
+# workflow produces no check context for PRs outside the filter, and a
+# required check that never appears blocks those PRs forever.
+on:
+  # workflow_dispatch lets a maintainer re-check a branch on demand, and is the
+  # only way to time this job without opening a throwaway source change.
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - 'lib/**/*.ml'
+      - 'lib/**/*.mli'
+      - 'bin/**/*.ml'
+      - 'bin/**/*.mli'
+      - 'test/**/*.ml'
+      - 'test/**/*.mli'
+      - 'test/**/*.inc'
+      - 'test/**/dune'
+      - '**/dune'
+      - 'dune-project'
+      - '*.opam'
+      - '.github/actions/**'
+      # Include this file so a change to the workflow itself is checked
+      # by the workflow itself; otherwise such a PR gets no check-run.
+      - '.github/workflows/pr-type-check.yml'
+
+permissions:
+  contents: read
+
+# Supersede an older run of the same PR. A PR-stage check has no receipt to
+# protect, so cancelling a stale head is safe and keeps the queue short.
+concurrency:
+  group: pr-type-check-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  type-check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      DUNE_JOBS: '4'
+      DUNE_CACHE: enabled-except-user-rules
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Dune build cache location
+        shell: bash
+        run: echo "DUNE_CACHE_ROOT=$RUNNER_TEMP/masc-dune-cache-pr" >> "$GITHUB_ENV"
+
+      - uses: ./.github/actions/setup-ocaml-toolchain
+      - uses: ./.github/actions/pin-ocaml-deps
+      # Test libraries must resolve: @check compiles the test tree.
+      - uses: ./.github/actions/install-ocaml-deps
+        with:
+          install-flags: --with-test
+
+      - name: Reuse Dune build artifacts
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/masc-dune-cache-pr
+          key: pr-dune-v1-${{ runner.os }}-${{ hashFiles('dune-project', '**/dune', '*.opam') }}-${{ github.sha }}
+          restore-keys: |
+            pr-dune-v1-${{ runner.os }}-${{ hashFiles('dune-project', '**/dune', '*.opam') }}-
+            pr-dune-v1-${{ runner.os }}-
+
+      - name: Type-check the tree (dune build @check)
+        run: opam exec -- dune build --root . @check

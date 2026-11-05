@@ -76,25 +76,14 @@ type checkout_freshness =
       }
   | Freshness_unavailable of string
 
-(** One checkout's freshness projection for the turn context. Read off the
-    same per-checkout probe as {!repository_checkouts_json}, so the tool
-    surface and the turn context can never disagree about the same checkout. *)
-type freshness_row = {
-  row_checkout_path : string;
-      (** Playground-relative path — the cwd the keeper passes to its tools.
-          Basenames collide across a playground; paths do not. *)
-  row_branch : string option;  (** [None] when the branch probe failed. *)
-  row_changed_files : int option;  (** [None] when the status probe failed. *)
-  row_freshness : checkout_freshness;
-}
-
 (** One checkout's identity for a reader of its files. Unlike
-    {!freshness_row} it carries no working-tree status: [git status] runs the
-    repository's configured fsmonitor and can reach a promisor remote, so a
-    verifier reading a producer's checkout does not run it. *)
+    {!repository_checkouts_json} it carries no working-tree status: [git status]
+    runs the repository's configured fsmonitor and can reach a promisor remote,
+    so a verifier reading a producer's checkout does not run it. *)
 type identity_row = {
   identity_checkout_path : string;
-      (** Playground-relative path, as in {!freshness_row}. *)
+      (** Playground-relative path — the cwd the keeper passes to its tools.
+          Basenames collide across a playground; paths do not. *)
   identity_branch : string option;
       (** [None] when the branch probe failed. A detached HEAD answers [Some "HEAD"]. *)
   identity_head : string option;  (** Full HEAD SHA; [None] when the probe failed. *)
@@ -112,18 +101,6 @@ val checkout_identity_rows :
 (** Measure checkouts that a host-side reader already discovered. Reads the
     local clone only: no fetch, no working-tree status. [?inspection_budget_sec]
     bounds the total git subprocess time across the list (default
-    {!Repo_git.inspection_timeout_sec}). *)
-
-val checkout_freshness_rows :
-  ?inspection_budget_sec:float ->
-  config:Workspace.config ->
-  meta:keeper_meta ->
-  unit ->
-  (freshness_row list, Keeper_playground_checkouts.scan_error) result
-(** Measure every discovered checkout for the turn-context freshness layer.
-    [Ok []] means the playground holds no checkout; a failed scan is the
-    typed [scan_error], not an empty list. [?inspection_budget_sec] bounds
-    the total git subprocess time across all checkouts (default
     {!Repo_git.inspection_timeout_sec}). *)
 
 module For_testing : sig

@@ -207,6 +207,11 @@ let load_all ~base_path =
                    | Otoml.TomlArray _ | Otoml.TomlTableArray _) ->
               Error "repositories.toml: repository must be a table"))
 
+let written_observer : (base_path:string -> unit) Atomic.t =
+  Atomic.make (fun ~base_path:_ -> ())
+
+let install_written_observer observer = Atomic.set written_observer observer
+
 let write_all ~base_path (repos : repository list) =
   let path = repos_toml_path base_path in
   let config_dir = Filename.dirname path in
@@ -216,7 +221,9 @@ let write_all ~base_path (repos : repository list) =
   in
   let toml = Otoml.TomlTable [("repository", Otoml.TomlTable repo_entries)] in
   let content = Otoml.Printer.to_string toml in
-  Fs_compat.save_file_atomic_strict path content
+  let saved = Fs_compat.save_file_atomic_strict path content in
+  (Atomic.get written_observer) ~base_path;
+  saved
 
 let with_store_lock ~base_path (f : unit -> ('value, string) result) :
     ('value, string) result =

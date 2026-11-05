@@ -57,11 +57,53 @@ let resolve_native_posture ~base_path ~keeper_name ~required_native_posture =
     ~default:Runtime_native_tools.Native_read ~none_supported:false
 ;;
 
+(* What the account's own [model/list] says about the configured model, read
+   after a non-retryable [modelError] that carries no quota detail. *)
+type catalog_reading =
+  | Catalog_lists_model
+  | Catalog_omits_model of
+      { model : string
+      ; source : Msp.model_catalog_source
+      ; listed : int
+      }
+
+let catalog_reading ~model (catalog : Msp.model_catalog) =
+  if List.exists (fun (entry : Msp.model_catalog_entry) -> String.equal entry.model_id model)
+       catalog.models
+  then Catalog_lists_model
+  else Catalog_omits_model { model; source = catalog.source; listed = List.length catalog.models }
+;;
+
+let model_not_in_account_catalog = "model_not_in_account_catalog"
+
+(* Only a non-retryable [modelError] without quota leaves its cause to prose,
+   so only that failure reads the catalog, and only for a configured model. *)
+let catalog_checked_model ~configured_model (error : Serve.error) =
+  match error with
+  | Serve.Turn_failed { Msp.kind = Msp.Model_error; retryable = false; quota = None; _ } ->
+    configured_model
+  | Serve.Turn_failed { Msp.kind = Msp.Model_error; retryable = true; _ }
+  | Serve.Turn_failed { Msp.kind = Msp.Model_error; quota = Some _; _ }
+  | Serve.Turn_failed
+      { Msp.kind =
+          ( Msp.Step_limit | Msp.Config_error | Msp.Projection_error | Msp.Log_error
+          | Msp.Workflow_launch_error | Msp.Environment_error | Msp.Launch_error
+          | Msp.Auth_required | Msp.Unrecognized_error_kind _ )
+      ; _
+      }
+  | Serve.Invalid_config _ | Serve.Spawn_failed _ | Serve.Turn_input_write_failed _
+  | Serve.Protocol_error _ | Serve.Rpc_error _ | Serve.Capability_not_granted _
+  | Serve.Session_not_durable | Serve.Session_model_mismatch _
+  | Serve.Session_workspace_mismatch _ | Serve.Session_approval_mode_mismatch _
+  | Serve.Auth_required _ | Serve.Turn_cancelled | Serve.Unsupported_server_request _
+  | Serve.Runtime_shutting_down | Serve.Process_exited _ | Serve.Timeout _ -> None
+;;
+
 (* Mirrors the Codex app-server projection where the two clients share a
    shape: an exited process and the host's own interrupt are typed MASC
    values, and an idle stream after [turn/start] was written stays off the
    rotation chain because the host may still be running the turn. *)
-let runtime_error_to_core_error ?(now = Time_compat.now ()) (error : Serve.error) =
+let runtime_error_to_core_error ?(now = Time_compat.now ()) ?catalog (error : Serve.error) =
   match error with
   | Serve.Invalid_config detail -> config_error ~field:provider_name detail
   | Serve.Session_not_durable -> config_error ~field:"session_durability" (Serve.error_to_string error)
@@ -147,12 +189,38 @@ let runtime_error_to_core_error ?(now = Time_compat.now ()) (error : Serve.error
         (Llm_provider.Error.ProviderUnavailable
            { provider = provider_name; detail = Serve.error_to_string error })
     else
+      (* Only the provider's own catalog speaks for the account, so only its
+         omission is the reported type; any other list adds the fact to the
+         detail. The error stays a reported [modelError] for retry and effect
+         handling. *)
+      let error_type, detail =
+        match kind, catalog with
+        | Msp.Model_error, Some (Catalog_omits_model { model; source = Msp.Provider_catalog; listed }) ->
+          ( model_not_in_account_catalog
+          , Printf.sprintf "%s; the account's provider catalog (model count %d) does not list %s"
+              (Serve.error_to_string error) listed model )
+        | Msp.Model_error,
+          Some (Catalog_omits_model
+                  { model
+                  ; source =
+                      ( Msp.Bundled_catalog | Msp.Unresolved_catalog | Msp.Fake_catalog
+                      | Msp.Config_catalog | Msp.Unknown_catalog_source _ ) as source
+                  ; listed }) ->
+          ( Msp.turn_error_kind_to_string kind
+          , Printf.sprintf "%s; the host's model list (%s, model count %d) does not list %s"
+              (Serve.error_to_string error) (Msp.model_catalog_source_to_string source) listed model )
+        | Msp.Model_error, (None | Some Catalog_lists_model)
+        (* [Auth_required] is matched above as an auth error; the alias keeps
+           its constructor in the type. *)
+        | ( Msp.Step_limit | Msp.Config_error | Msp.Projection_error | Msp.Log_error
+          | Msp.Workflow_launch_error | Msp.Environment_error | Msp.Launch_error
+          | Msp.Auth_required | Msp.Unrecognized_error_kind _ ),
+          (None | Some (Catalog_lists_model | Catalog_omits_model _)) ->
+          Msp.turn_error_kind_to_string kind, Serve.error_to_string error
+      in
       Agent_core.Error.Provider
         (Llm_provider.Error.ProviderReportedError
-           { provider = provider_name
-           ; error_type = Some (Msp.turn_error_kind_to_string kind)
-           ; detail = Serve.error_to_string error
-           })
+           { provider = provider_name; error_type = Some error_type; detail })
   | Serve.Turn_cancelled ->
     Keeper_internal_error.core_error_of_masc_internal_error
       (Keeper_internal_error.Host_stopped_turn
@@ -498,6 +566,28 @@ type observed_turn =
   ; turn_id : string
   ; model : string option
   }
+
+(* The session store keeps the host's last ended turn in its own terms; the
+   serve client compares the one [session/resume] reports. *)
+let serve_ended_turn : Session_store.host_ended_turn option -> Serve.ended_turn option =
+  Option.map (fun ({ turn_id; ending } : Session_store.host_ended_turn) ->
+    ({ turn_id
+     ; ending =
+         (match ending with
+          | Session_store.Host_completed -> Serve.Ended_completed
+          | Session_store.Host_uncompleted -> Serve.Ended_uncompleted)
+     } : Serve.ended_turn))
+;;
+
+let store_ended_turn : Serve.ended_turn option -> Session_store.host_ended_turn option =
+  Option.map (fun ({ turn_id; ending } : Serve.ended_turn) ->
+    ({ turn_id
+     ; ending =
+         (match ending with
+          | Serve.Ended_completed -> Session_store.Host_completed
+          | Serve.Ended_uncompleted -> Session_store.Host_uncompleted)
+     } : Session_store.host_ended_turn))
+;;
 
 let compaction_observation_to_json ~runtime_id (compaction : Msp.compaction) =
   let trigger = function
@@ -970,25 +1060,33 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
          session_id
      | Some _, Some _ | None, (Some _ | None) -> ());
     let claim_plan = reconciled_plan in
-    (* The resume is checked against the count the host itself last
-       reported for the session, not against MASC's claim ordinal: the host
-       does not count a failed turn, and a turn MASC stopped watching may
-       have completed or not. *)
+    (* The resume is checked against the last turn the host itself reported
+       for the session, by the id the host gave it, not against MASC's claim
+       ordinal or the host's completed-turn count: the host counts again from
+       each compaction boundary, and a turn MASC stopped watching may have
+       ended either way. *)
     let* session_mode =
       match claim_plan.previous_settlement with
       | None -> Ok Serve.Start
       | Some { session_id; _ } ->
-        (match Session_store.resume_host_turns claim_plan ~expected:stored_session with
-         | Session_store.Reported turns ->
-           Ok (Serve.Resume { session_id; expected_turns = Serve.Exactly turns })
-         | Session_store.Unobserved_after turns ->
-           Ok (Serve.Resume { session_id; expected_turns = Serve.Reported_or_one_more turns })
-         | Session_store.Not_reported ->
-           Error
-             (internal_error
-                (Printf.sprintf
-                   "Muse Code session %s is resumable but records no host turn count"
-                   session_id)))
+        let expected_last_turn =
+          match Session_store.resume_host_last_turn claim_plan ~expected:stored_session with
+          | Session_store.Reported reported ->
+            Ok (Serve.Exactly (serve_ended_turn reported))
+          | Session_store.Unobserved_after { reported; dispatched } ->
+            Ok (Serve.Last_or_dispatched { last = serve_ended_turn reported; dispatched })
+          | Session_store.Retry_after { reported; failed } ->
+            Ok (Serve.Last_or_uncompleted { last = serve_ended_turn reported; failed })
+          | Session_store.Not_reported ->
+            Error
+              (internal_error
+                 (Printf.sprintf
+                    "Muse Code session %s is resumable but records no host last turn"
+                    session_id))
+        in
+        Result.map
+          (fun expected_last_turn -> Serve.Resume { session_id; expected_last_turn })
+          expected_last_turn
     in
     let is_resume = Option.is_some claim_plan.previous_settlement in
     let context_frontier : Session_store.context_frontier =
@@ -1383,15 +1481,15 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
             result.response
       in
       recovery_failure := Session_store.State_persistence_failed;
-      (* The stop ends the turn before the host reports its terminal, so the
-         host's count stays unobserved: live resumes after a host stop have
-         found the turn counted and found it not counted. What the turn
+      (* The stop ends the turn before the host reports its terminal, so how
+         the host ended it stays unobserved: live resumes after a host stop
+         have found the turn completed and found it not. What the turn
          delivered is held either way. The host took the submission in
          durably before it acknowledged the turn, MASC never asks it to
-         retract one, and an uncounted turn's submission stays in the
+         retract one, and an uncompleted turn's submission stays in the
          history the next request sends: on Muse 1.4.11 a turn that failed
-         before any answer resumed with [turnCount] 0, and the next turn's
-         request carried its user message as history. *)
+         before any answer was not among the host's completed turns, and the
+         next turn's request carried its user message as history. *)
       let* settled =
         Session_store.settle_holding
           ~held_context:[]
@@ -1473,7 +1571,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
                     ~session_mode
                     ~mcp_servers
                     ?reasoning_effort
-                    ~on_session_ready:(fun ~session_id ~reported_turns ->
+                    ~on_session_ready:(fun ~session_id ~last_turn ->
                       let* () =
                         update_session "active transition" (fun expected ->
                           Session_store.mark_active_reported
@@ -1481,7 +1579,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
                             ~keeper_name
                             ~expected
                             ~session_id
-                            ~reported_turns
+                            ~last_turn:(store_ended_turn last_turn)
                             ~updated_at:(Time_compat.now ()))
                       in
                       update_session "turn-starting transition" (fun expected ->
@@ -1572,7 +1670,31 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
             then observe_transport_uncertain ();
             recovery_failure := recovery_failure_for_attempt
                 ~current:!recovery_failure ~admission:!admission error;
-            runtime_error_to_core_error error)
+            (* The same bound as the account's usage read; a spent window
+               already explains the failure, as it does for that read. *)
+            let catalog_read_s =
+              Float.min Runtime_provider_usage_read.read_timeout_s client_config.admission_timeout_s in
+            let catalog =
+              match catalog_checked_model ~configured_model:client_config.model error with
+              | Some _ when Runtime_quota_window.is_exhausted ~scope:quota_scope ~now:(Time_compat.now ()) -> None
+              | None -> None
+              | Some model ->
+                (match
+                   Eio.Time.with_timeout_exn clock catalog_read_s (fun () ->
+                     Serve.list_models ~mgr:process_mgr ~clock ~cwd:process_cwd client_config)
+                 with
+                 | Ok listed -> Some (catalog_reading ~model listed)
+                 | Error read_error ->
+                   Log.Keeper.warn ~keeper_name "Muse model catalog not read after model error: %s"
+                     (Serve.error_to_string read_error);
+                   None
+                 | exception Eio.Time.Timeout ->
+                   Log.Keeper.warn ~keeper_name
+                     "Muse model catalog not read after model error: no answer within %.0fs"
+                     catalog_read_s;
+                   None)
+            in
+            runtime_error_to_core_error ?catalog error)
         | `Abort stop -> Ok (`Stopped stop))
     in
     let settle_cancellation exn =
@@ -1625,9 +1747,9 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
           (match stop, !terminal_error with
            | Host.Terminal_tool_boundary _, _
              when Option.is_some on_official_client_tool_boundary -> settle_host_stop stop
-           | (Host.Repeated_tool_call _ | Host.Terminal_tool_boundary _), Some detail ->
+           | Host.Terminal_tool_boundary _, Some detail ->
              Error (internal_error detail)
-           | (Host.Repeated_tool_call _ | Host.Terminal_tool_boundary _), None ->
+           | Host.Terminal_tool_boundary _, None ->
              settle_host_stop stop)
         | Ok (`Completed (turn : Serve.turn_result)) ->
           natural_completion := true;
@@ -1930,6 +2052,8 @@ module For_testing = struct
     List.rev !emitted
   ;;
 
+  let catalog_reading = catalog_reading
+  let catalog_checked_model = catalog_checked_model
   let runtime_error_to_core_error = runtime_error_to_core_error
   let recovery_failure_of_runtime_error = recovery_failure_of_runtime_error
 

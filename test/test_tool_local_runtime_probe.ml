@@ -257,7 +257,65 @@ let test_dispatch_rejects_bounded_knobs_before_authorization () =
      run a probe the caller never asked for. *)
   expect_rejection "wrong-shape probe_runs" [ ("probe_runs", `String "2") ];
   expect_rejection "wrong-shape max_tokens" [ ("max_tokens", `Bool true) ];
+  (* Every other argument follows the same rule: a string where a boolean
+     belongs is refused, not read as the default. *)
+  expect_rejection "wrong-shape run_generate" [ ("run_generate", `String "false") ];
+  expect_rejection "wrong-shape generate_when_unloaded"
+    [ ("generate_when_unloaded", `Int 0) ];
+  expect_rejection "wrong-shape think" [ ("think", `String "no") ];
+  expect_rejection "unknown think_mode" [ ("think_mode", `String "sometimes") ];
+  expect_rejection "wrong-shape think_mode" [ ("think_mode", `Bool true) ];
+  expect_rejection "wrong-shape server_url" [ ("server_url", `Int 11434) ];
+  expect_rejection "wrong-shape model" [ ("model", `List []) ];
+  expect_rejection "wrong-shape prompt" [ ("prompt", `Bool false) ];
+  expect_rejection "wrong-shape keep_alive" [ ("keep_alive", `Int 5) ];
   check int "authorization was not invoked" 0 !authorization_calls
+
+(* Arguments that match their declared types pass the parse and reach the
+   Gate. The stand-in authorizer answers without running the probe. *)
+let test_dispatch_forwards_well_formed_arguments_to_authorization () =
+  let authorization_calls = ref 0 in
+  let authorize_external_effect ~operation ~input:_ ~continue:_ =
+    incr authorization_calls;
+    Tool_result.ok
+      ~tool_name:operation
+      ~start_time:(Tool_timing.start ())
+      {|{"ok":true,"effect":"intercepted"}|}
+  in
+  let context : Masc.Tool_local_runtime_core.context =
+    {
+      config = Masc.Workspace.default_config "/tmp";
+      agent_name = "probe-well-formed-test";
+      authorize_external_effect = Some authorize_external_effect;
+    }
+  in
+  let reaches_authorization label args =
+    match
+      Masc.Tool_local_runtime.dispatch context
+        ~name:"masc_runtime_ollama_probe"
+        ~args:(`Assoc args)
+    with
+    | None -> fail "Ollama probe handler was not selected"
+    | Some result ->
+        check bool (label ^ " was not rejected") false
+          (Tool_result.is_failed result)
+  in
+  reaches_authorization "no arguments" [];
+  reaches_authorization "every argument well-formed"
+    [ ("server_url", `String "http://127.0.0.1:1")
+    ; ("model", `String "probe-model")
+    ; ("prompt", `String "ping")
+    ; ("keep_alive", `String "1m")
+    ; ("probe_runs", `Int 1)
+    ; ("max_tokens", `Int 4)
+    ; ("ps_timeout_sec", `Int 1)
+    ; ("timeout_sec", `Int 3)
+    ; ("think_mode", `String "disabled")
+    ; ("generate_when_unloaded", `Bool false)
+    ; ("run_generate", `Bool false)
+    ];
+  reaches_authorization "think shorthand" [ ("think", `Bool true) ];
+  check int "authorization was invoked once per call" 3 !authorization_calls
 
 let test_normalize_server_url_strips_trailing_slashes () =
   check string "normalizes trailing slash" "http://127.0.0.1:11434"
@@ -570,6 +628,88 @@ let test_runtime_verify_requests_external_effect_authorization () =
   | calls -> failf "expected one authorization request, got %d" (List.length calls)
 ;;
 
+(* A verification that drops an expectation reports success for a check that
+   never ran. An expectation the tool cannot read is refused before the Gate,
+   and one that is not a positive integer is refused rather than rewritten. *)
+let test_dispatch_rejects_unreadable_verify_expectations_before_authorization () =
+  let authorization_calls = ref 0 in
+  let authorize_external_effect ~operation:_ ~input:_ ~continue:_ =
+    incr authorization_calls;
+    fail "unreadable expectation must not reach authorization"
+  in
+  let context : Masc.Tool_local_runtime_core.context =
+    {
+      config = Masc.Workspace.default_config "/tmp";
+      agent_name = "verify-expectation-test";
+      authorize_external_effect = Some authorize_external_effect;
+    }
+  in
+  let expect_rejection label args =
+    match
+      Masc.Tool_local_runtime.dispatch context
+        ~name:"masc_runtime_verify"
+        ~args:(`Assoc args)
+    with
+    | None -> fail "runtime verify handler was not selected"
+    | Some result ->
+        check bool (label ^ " failed") true (Tool_result.is_failed result);
+        check bool
+          (label ^ " is a typed workflow rejection")
+          true
+          (Tool_result.failure_class result = Some Tool_result.Workflow_rejection)
+  in
+  expect_rejection "string expected_slots" [ ("expected_slots", `String "4") ];
+  expect_rejection "zero expected_slots" [ ("expected_slots", `Int 0) ];
+  expect_rejection "negative expected_slots" [ ("expected_slots", `Int (-3)) ];
+  expect_rejection "null expected_slots" [ ("expected_slots", `Null) ];
+  expect_rejection "float expected_ctx" [ ("expected_ctx", `Float 4096.5) ];
+  expect_rejection "zero expected_ctx" [ ("expected_ctx", `Int 0) ];
+  expect_rejection "numeric expected_model" [ ("expected_model", `Int 7) ];
+  expect_rejection "boolean runtime_pool" [ ("runtime_pool", `Bool false) ];
+  check int "authorization was not invoked" 0 !authorization_calls
+
+let test_dispatch_forwards_well_formed_verify_arguments_to_authorization () =
+  let calls = ref [] in
+  let authorize_external_effect ~operation ~input ~continue:_ =
+    calls := input :: !calls;
+    Tool_result.ok
+      ~tool_name:operation
+      ~start_time:(Tool_timing.start ())
+      {|{"ok":true,"effect":"intercepted"}|}
+  in
+  let context : Masc.Tool_local_runtime_core.context =
+    {
+      config = Masc.Workspace.default_config "/tmp";
+      agent_name = "verify-well-formed-test";
+      authorize_external_effect = Some authorize_external_effect;
+    }
+  in
+  let reaches_authorization label args =
+    match
+      Masc.Tool_local_runtime.dispatch context
+        ~name:"masc_runtime_verify"
+        ~args
+    with
+    | None -> fail "runtime verify handler was not selected"
+    | Some result ->
+        check bool (label ^ " was not rejected") false
+          (Tool_result.is_failed result)
+  in
+  let complete =
+    `Assoc
+      [ ("runtime_pool", `String "local-19002")
+      ; ("expected_model", `String "probe-model")
+      ; ("expected_slots", `Int 2)
+      ; ("expected_ctx", `Int 4096)
+      ]
+  in
+  reaches_authorization "no arguments" (`Assoc []);
+  reaches_authorization "every argument well-formed" complete;
+  check int "authorization was invoked once per call" 2 (List.length !calls);
+  check string "authorizer saw the complete input"
+    (Yojson.Safe.to_string complete)
+    (Yojson.Safe.to_string (List.hd !calls))
+
 let () =
   run "tool_local_runtime_probe"
     [
@@ -641,11 +781,20 @@ let () =
           test_case "runtime verify requests external effect authorization" `Quick
             test_runtime_verify_requests_external_effect_authorization;
         ] );
+      ( "verify_expectations",
+        [
+          test_case "unreadable expectations are rejected before authorization" `Quick
+            test_dispatch_rejects_unreadable_verify_expectations_before_authorization;
+          test_case "well-formed arguments reach authorization" `Quick
+            test_dispatch_forwards_well_formed_verify_arguments_to_authorization;
+        ] );
       ( "bounded_knobs",
         [
           test_case "out-of-range knobs are rejected, not rewritten" `Quick
             test_bounded_knobs_are_rejected_not_rewritten;
           test_case "dispatch rejects them before authorization" `Quick
             test_dispatch_rejects_bounded_knobs_before_authorization;
+          test_case "dispatch forwards well-formed arguments to authorization" `Quick
+            test_dispatch_forwards_well_formed_arguments_to_authorization;
         ] );
     ]

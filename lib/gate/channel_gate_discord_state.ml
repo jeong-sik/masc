@@ -43,7 +43,7 @@ let binding_audit_read_path () =
    guild ids, so the constant-empty field is declared at the store level
    instead of resolved per event. *)
 let binding_store =
-  Store.create ~binding_store_path ~binding_store_read_path ~binding_audit_path
+  Store.create ~connector_id ~binding_store_path ~binding_store_read_path ~binding_audit_path
     ~binding_audit_read_path ~guild_id_field:Store.Include_empty
 
 let read_bindings_result () = Store.read_bindings_result binding_store
@@ -147,7 +147,9 @@ let record_ready ~bot_user_id ~bot_user_name ~guild_ids =
          ready_at = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ());
        });
   Atomic.set last_bot_user_name bot_user_name;
-  Atomic.set current_guild_ids_ref guild_ids
+  Atomic.set current_guild_ids_ref guild_ids;
+  (* A Keeper's channels tab draws the bot and its guilds (RFC-0480 §3.4). *)
+  Gate_connector_announce.changed ~connector_id
 
 let current_guild_ids () = Atomic.get current_guild_ids_ref
 
@@ -180,9 +182,12 @@ let directory_observation : directory_observation Atomic.t =
     ; updated_at = None
     }
 
+(* A Keeper's channels tab draws the directory phase, its counts and its
+   errors, so each refresh announces when it starts and when it ends. *)
 let record_directory_refresh_started () =
   let previous = Atomic.get directory_observation in
-  Atomic.set directory_observation { previous with phase = Directory_refreshing }
+  Atomic.set directory_observation { previous with phase = Directory_refreshing };
+  Gate_connector_announce.changed ~connector_id
 
 let record_directory_refresh_finished ~server_count ~channel_count ~person_count
     ~authentication_failed ~permission_denied ~errors =
@@ -203,7 +208,8 @@ let record_directory_refresh_finished ~server_count ~channel_count ~person_count
     ; permission_denied
     ; errors
     ; updated_at = Some (Gate_time_util.iso8601_of_unix (Unix.gettimeofday ()))
-    }
+    };
+  Gate_connector_announce.changed ~connector_id
 
 let directory_phase_label = function
   | Directory_not_started -> "not_started"

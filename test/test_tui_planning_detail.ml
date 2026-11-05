@@ -251,7 +251,7 @@ let confirmation_identity : Masc.Tui_decode.server_identity = {
   sid_uptime = None;
   sid_sse_clients = None;
   sid_gc = None;
-  sid_scheduler = None;
+  sid_scheduler = None; sid_operator_action = None;
 }
 
 let confirmation_workspace = Detail.confirmation_workspace_of_identity confirmation_identity

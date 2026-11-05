@@ -570,7 +570,7 @@ let parse_initialize_result json =
 ;;
 
 let corpus_schema_fingerprint =
-  "sha256:f282ad16e21520d0cda68cb190149b86e2b062eef1dd282749360c05aa3d1082"
+  "sha256:c94c3d1f2f51e6424074b9ec43eac3eedcf532d3dcd77351ec1383a87d3049c6"
 ;;
 
 type session =
@@ -772,6 +772,32 @@ let parse_terminal stage fields =
      | Some reason -> Ok (Terminal_host_died { reason })
      | None -> fail stage "failed terminal carries neither error nor reason")
   | other, _ -> Ok (Unrecognized_terminal other)
+;;
+
+type last_turn =
+  { turn_id : string
+  ; terminal : terminal
+  }
+
+type resumed_session =
+  { session : session
+  ; last_turn : last_turn option
+  }
+
+let parse_session_resume_result json =
+  let stage = "session/resume" in
+  let* session = parse_session_result ~stage json in
+  let* fields = assoc_at stage json in
+  let* last_turn = optional_assoc stage "lastTurn" fields in
+  let* last_turn =
+    match last_turn with
+    | None -> Ok None
+    | Some fields ->
+      let* turn_id = required_string stage "turnId" fields in
+      let* terminal = parse_terminal stage fields in
+      Ok (Some { turn_id; terminal })
+  in
+  Ok { session; last_turn }
 ;;
 
 type item_kind =

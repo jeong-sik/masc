@@ -118,31 +118,23 @@ let entry_equal a b =
   | Aborted_intent _, (Intent_pending _ | Committed _) -> false
 ;;
 
-(* The workspace that a committed change sets up, when the change is a
-   [Fresh_bootstrap]. *)
-let bootstrapped_workspace = function
-  | Change.Mode { event = Change.Fresh_bootstrap; workspace_id } -> Some workspace_id
-  | Change.Mode { event = Change.Off | Change.Reactivate; workspace_id = _ } -> None
-  | Change.Authz { event = _; subject = _ } -> None
-;;
-
 module State = struct
   type t =
     { entries : int
     ; pending : intent option
     ; last_committed : Hash.t option
     ; aborted : intent list  (** Newest first. *)
-    ; workspace_id : Workspace_id.t option
+    ; mode : Authz_mode_state.t  (** What the committed mode changes add up to. *)
     }
 
   let empty =
-    { entries = 0; pending = None; last_committed = None; aborted = []; workspace_id = None }
+    { entries = 0; pending = None; last_committed = None; aborted = []; mode = Authz_mode_state.empty }
   ;;
 
   let pending state = state.pending
   let last_committed state = state.last_committed
   let aborted state = List.rev state.aborted
-  let workspace_id state = state.workspace_id
+  let workspace_id state = Authz_mode_state.workspace state.mode
 end
 
 type violation =
@@ -152,8 +144,7 @@ type violation =
   | Aborted_without_intent
   | Aborted_other_intent
   | Intent_before_bootstrap
-  | Bootstrap_already_committed
-  | Workspace_mismatch
+  | Mode_refused of Authz_mode_state.refusal
 
 let violation_to_string = function
   | Intent_while_pending -> "an intent is already pending"
@@ -161,24 +152,29 @@ let violation_to_string = function
   | Committed_other_digest -> "the hash is not the one that the pending intent named"
   | Aborted_without_intent -> "no intent is pending to abort"
   | Aborted_other_intent -> "it is not the pending intent"
-  | Intent_before_bootstrap -> "only a fresh bootstrap can come before one is committed"
-  | Bootstrap_already_committed -> "a fresh bootstrap is already committed"
-  | Workspace_mismatch -> "the workspace is not the one of the committed bootstrap"
+  | Intent_before_bootstrap -> "an authorization change cannot come before a fresh bootstrap is committed"
+  | Mode_refused refusal -> Authz_mode_state.refusal_to_string refusal
 ;;
 
-(* What an intent may be about, given whether a fresh bootstrap is committed
-   (design 5.1 and 8.4: a store starts with a fresh bootstrap, and the workspace
-   of the committed one is the only valid one). Every pair is named. *)
-let check_change (state : State.t) (change : Change.t) =
-  match state.State.workspace_id, change with
-  | None, Change.Mode { event = Change.Fresh_bootstrap; workspace_id = _ } -> Ok ()
-  | None, Change.Mode { event = Change.Off | Change.Reactivate; workspace_id = _ }
-  | None, Change.Authz { event = _; subject = _ } -> Error Intent_before_bootstrap
-  | Some _, Change.Mode { event = Change.Fresh_bootstrap; workspace_id = _ } ->
-    Error Bootstrap_already_committed
-  | Some bootstrapped, Change.Mode { event = Change.Off | Change.Reactivate; workspace_id } ->
-    if Workspace_id.equal bootstrapped workspace_id then Ok () else Error Workspace_mismatch
-  | Some _, Change.Authz { event = _; subject = _ } -> Ok ()
+(* The mode once a change is committed, or the rule that the change breaks. A
+   mode change follows the order of {!Authz_mode_state.apply}, the rule that
+   the record it becomes in the log is replayed with, so the two files take the
+   same mode events in the same order. An authorization change keeps the mode
+   and needs a committed bootstrap (design 5.1 and 8.4). *)
+let mode_after mode (change : Change.t) =
+  match change with
+  | Change.Mode { event; workspace_id } ->
+    Result.map_error
+      (fun refusal -> Mode_refused refusal)
+      (Authz_mode_state.apply mode { Authz_mode_event.event; workspace_id })
+  | Change.Authz { event = _; subject = _ } ->
+    (match mode with
+     | Authz_mode_state.Not_bootstrapped -> Error Intent_before_bootstrap
+     | Authz_mode_state.Multi_account _ | Authz_mode_state.Off _ -> Ok mode)
+;;
+
+let check_change (state : State.t) change =
+  Result.map (fun (_ : Authz_mode_state.t) -> ()) (mode_after state.State.mode change)
 ;;
 
 (* The rules of the file. [Intent_pending] needs the file to be at rest and a
@@ -204,15 +200,20 @@ let advance (state : State.t) entry : State.t =
   match entry with
   | Intent_pending intent -> { state with State.pending = Some intent }
   | Committed { record_hash } ->
-    let workspace_id =
+    let mode =
       match state.State.pending with
-      | None -> state.State.workspace_id
+      | None -> state.State.mode
       | Some pending ->
-        (match bootstrapped_workspace pending.change with
-         | Some workspace_id -> Some workspace_id
-         | None -> state.State.workspace_id)
+        (* [check] took the pending intent against this mode, and the mode
+           changes only here, once the intent is answered. *)
+        (match mode_after state.State.mode pending.change with
+         | Ok mode -> mode
+         | Error violation ->
+           invalid_arg
+             ("Authz_external_store.advance: the committed intent breaks a rule: "
+              ^ violation_to_string violation))
     in
-    { state with State.pending = None; last_committed = Some record_hash; workspace_id }
+    { state with State.pending = None; last_committed = Some record_hash; mode }
   | Aborted_intent intent ->
     { state with State.pending = None; aborted = intent :: state.State.aborted }
 ;;

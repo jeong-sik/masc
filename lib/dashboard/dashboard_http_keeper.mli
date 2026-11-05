@@ -51,6 +51,7 @@ val running_keeper_count : Workspace.config -> int
 (** {1 Outcomes rollup} *)
 
 val compute_outcomes_rollup :
+  base_path:string ->
   keeper_name:string ->
   agent_name:string ->
   recent_crash_count:int ->

@@ -695,6 +695,14 @@ let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None)
          | Some true -> [ Masc_tui_footer.Server_worktree_binary ]
          | Some false | None -> [])
         @
+        (* The server's rollup, from the probe it serves on every refresh.
+           An older server, or one before its first snapshot, cannot say
+           (None) and draws nothing. *)
+        (match identity.Tui_decode.sid_operator_action with
+         | Some (first :: rest) ->
+           [ Masc_tui_footer.Operator_action { first; count = 1 + List.length rest } ]
+         | Some [] | None -> [])
+        @
         (* This TUI's own embedded commit against the server's: the pair
            that told "restart masc" apart from "the feature is not merged"
            by hand every time. Silent when either side cannot testify. *)
@@ -2235,10 +2243,9 @@ let lexed_span (text, kind) =
     if String.equal style "" then text else style ^ text ^ Ansi.reset
 
 
-(* Compact "how long" text three surfaces share: the Attention panel's item
-   age, the Lanes table's idle column, and the Keeper operations preview --
-   which kept a byte-for-byte copy of this under its own name, 3,600 lines
-   below, until the two were counted. *)
+(* Compact "how long" text the Lanes table's idle column and the Keeper
+   operations preview share -- the preview kept a byte-for-byte copy of this
+   under its own name, 3,600 lines below, until the two were counted. *)
 let keeper_lane_idle_text seconds =
   let seconds = max 0 seconds in
   if seconds < 60 then Printf.sprintf "%ds" seconds
@@ -2788,36 +2795,6 @@ let planning_rollup_rows ~cols (rollup : planning_rollup) =
     let max_cells = max 1 (framed_inner_width cols - 2) in
     Message_layout.pack_clauses ~max_cells (head :: counters)
     |> List.map (fun row -> "  " ^ row)
-
-(* The transport's own readings are on Usage. The Dashboard keeps one item
-   while the outbound queue is under pressure, since that delays what every
-   other row there reports; a steady queue, or no reading, says nothing. *)
-let transport_attention_item (transport : Tui_decode.transport_health option) =
-  let item severity word : Masc_tui_types.attention_item =
-    { ai_kind = "transport_queue_pressure"
-    ; ai_severity = severity
-    ; ai_summary =
-        Printf.sprintf "transport queue pressure %s (m: Usage)" word
-    ; ai_target =
-        Masc_tui_types.Attention_other
-          { target_type = "transport"; target_id = None }
-    ; ai_blocker_summary = None
-    ; ai_evidence_ts = None
-    }
-  in
-  match transport with
-  | None -> None
-  | Some transport -> (
-      let word =
-        Masc.Transport_metrics.queue_pressure_kind_to_string
-          transport.th_queue_pressure
-      in
-      match transport.th_queue_pressure with
-      | Masc.Transport_metrics.Steady -> None
-      | Masc.Transport_metrics.Watch ->
-          Some (item Masc_tui_types.Attention_warning word)
-      | Masc.Transport_metrics.High ->
-          Some (item Masc_tui_types.Attention_bad word))
 
 (* The Backlog counts, each with the mark its Task rows wear. Claimed had no
    mark here while a claimed Task row draws the half circle, so the one count a
@@ -4005,7 +3982,7 @@ let help_lines ~width (state : state) =
      own, so the head of this list is the most relevant thing either way and
      nothing has to look for it by name. *)
   let candle =
-    match Masc_tui_candle.summary_lines state.candle_observation with
+    match Masc_tui_candle.summary_lines ~now:(Unix.gettimeofday ()) state.candle_observation with
     | [] -> []
     | lines ->
       (Ansi.bold ^ "Candle details" ^ Ansi.reset)
@@ -5308,8 +5285,9 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
       if cols >= keeper_split_threshold_cols then
         let left_width = context_split_width cols in
         let cursor =
-          min (max 0 (List.length items - 1))
-            (max 0 state.context_inspector_cursor)
+          Masc_tui_context_inspector.normalized_cursor
+            ~count:(List.length items)
+            state.context_inspector_cursor
         in
         let selected = List.nth_opt items cursor in
         (* The caret names the pane that hears j/k, the way the roster and
@@ -5436,8 +5414,7 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
     | Inspector.Observed (Error detail) ->
         ( Inspector.input_map_rows record None
         , None
-        , [ (Theme.bad ()) ^ "  " ^ Keeper_chat.terminal_safe_text detail
-            ^ Ansi.reset ] )
+        , context_error_lines ~cols ~label:"Exact input unavailable" detail )
   in
   match state.context_inspector_exact with
   | Some index ->
@@ -5521,8 +5498,9 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
       if cols >= keeper_split_threshold_cols then
         let left_width = context_split_width cols in
         let cursor =
-          min (max 0 (List.length rows - 1))
-            (max 0 state.context_inspector_cursor)
+          Masc_tui_context_inspector.normalized_cursor
+            ~count:(List.length rows)
+            state.context_inspector_cursor
         in
         let caret pane = if state.context_inspector_focus = pane then "▸ " else "" in
         let left =
@@ -5570,8 +5548,9 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
             ]
         in
         let cursor =
-          min (max 0 (List.length rows - 1))
-            (max 0 state.context_inspector_cursor)
+          Masc_tui_context_inspector.normalized_cursor
+            ~count:(List.length rows)
+            state.context_inspector_cursor
         in
         let body =
           match mapped (framed_inner_width cols) with
@@ -5681,8 +5660,7 @@ let context_inspector_content_lines ~cols state : context_pane_body =
         @ (match reading.record with
            | Inspector.Pending -> [ Ansi.dim ^ "  Turn record is still loading" ^ Ansi.reset ]
            | Inspector.Observed (Error detail) ->
-               [ (Theme.bad ()) ^ "  Turn record unavailable: "
-                 ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset ]
+               context_error_lines ~cols ~label:"Turn record unavailable" detail
            | Inspector.Observed (Ok exact) ->
                if exact.skipped_rows = 0 then [] else
                  [ Ansi.dim ^ Printf.sprintf "  Exact record found; %d unreadable history rows were encountered"
@@ -5694,9 +5672,11 @@ let context_inspector_content_lines ~cols state : context_pane_body =
         | Split body -> Split { body with common = prefix @ body.common }
       in
       let pending label = Plain ([ Ansi.dim ^ "  " ^ label ^ " is still loading" ^ Ansi.reset ], None) in
-      let unavailable label detail = Plain
-          ([ (Theme.bad ()) ^ "  " ^ label ^ " unavailable: "
-             ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset ], None) in
+      let unavailable label detail =
+        Plain
+          ( context_error_lines ~cols
+              ~label:(label ^ " unavailable") detail
+          , None ) in
       let scale = Option.fold ~none:Masc_tui_token_scale.fleet
           ~some:(fun record -> Masc_tui_token_scale.of_turn ~rows:[ record ] record) record in
       let body = match state.context_inspector_tab with
@@ -5757,9 +5737,8 @@ let context_inspector_content_lines ~cols state : context_pane_body =
                   ~response_parts:(Masc_tui_context_inspector.Observed response) input
             | Error detail ->
                 Plain
-                  ( [ (Theme.bad ()) ^ "  Exact input unavailable: "
-                      ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset
-                    ]
+                  ( context_error_lines ~cols
+                      ~label:"Exact input unavailable" detail
                   , None ))
        | Masc_tui_context_inspector.Input_map ->
            (

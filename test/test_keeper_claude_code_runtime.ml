@@ -2301,31 +2301,18 @@ let test_keeper_does_not_retry_context_error_after_tool_effect () =
                | _ -> "not-in-recovery")))
 ;;
 
-let test_blank_completion_rejected_without_losing_session () =
+let test_blank_completion_completes_and_keeps_session () =
   let base_path = temp_workspace () in
   Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
     with_fixture
       [Emit (assistant ~turn_id:"blank" ""); Emit (result ~turn_id:"blank" "")]
       (fun cli_path ->
         (match run_keeper_turn ~base_path ~cli_path ~goal:"Reply to this request"
-            ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress () with
+            ~accept:Keeper_tooling.Response.accepts_response () with
+         | Ok _ -> ()
          | Error error ->
-             (match Keeper_internal_error.classify_masc_internal_error error with
-              (* Claude's spawned process cannot prove absence of native
-                 effects. The driver fences automatic retry while preserving
-                 the exact typed acceptance cause and the settled session. *)
-              | Some (Keeper_internal_error.Provider_attempt_effect_fenced
-                  { runtime_id = "claude.claude"
-                  ; effect_disposition = Keeper_provider_attempt_effect.Observation_unavailable
-                  ; cause = Keeper_internal_error.Fenced_masc
-                      (Keeper_internal_error.Accept_rejected
-                        { reason_kind = Some Accept_no_usable_progress
-                        ; response_shape = Some Accept_response_blank_text_only
-                        ; stop_reason = Some Agent_core.Types.EndTurn
-                        ; _ }) }) -> ()
-              | _ -> fail ("blank completion was not a fenced blank-progress rejection: "
-                           ^ Agent_core.Error.to_string error))
-         | Ok _ -> fail "blank completion was accepted as progress");
+           fail ("a blank completion did not complete the turn: "
+                 ^ Agent_core.Error.to_string error));
         let module Store = Keeper_official_client_session_store in
         let binding = load_state base_path in
         let settled_session = match binding.phase with
@@ -3857,6 +3844,67 @@ let test_child_journal_received_after_closed_root () =
         (Keeper_autonomous_stream.current ~base_path ~keeper_name=None)))
 ;;
 
+(* Calls [f] with a list that gains the Keeper name of each [event] heard. *)
+let hearing_journal_appends ~event f =
+  let id = Printf.sprintf "runtime-journal-announce-%d" (Unix.getpid ()) in
+  let heard = ref [] in
+  Sse.subscribe_external ~id
+    ~callback:(fun (ev : Sse.external_event) ->
+      match Sse.data_payload_of_frame ev.Sse.ext_frame with
+      | Error Sse.Missing_data_payload -> ()
+      | Ok payload ->
+        (match Yojson.Safe.from_string payload with
+         | `Assoc fields ->
+           (match List.assoc_opt "type" fields, List.assoc_opt "name" fields with
+            | Some (`String kind), Some (`String name) when String.equal kind event ->
+              heard := name :: !heard
+            | _ -> ())
+         | _ -> ()
+         | exception Yojson.Json_error _ -> ()))
+    ();
+  Fun.protect ~finally:(fun () -> Sse.unsubscribe_external id) (fun () -> f heard)
+;;
+
+let test_native_task_journal_announces_each_append () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    let keeper_name = "claude-fixture" in
+    let journal = Task_journal.create ~base_path ~keeper_name
+      ~source:(task_journal_operation "native-announce") ~redact_text:Fun.id in
+    let observe_all () =
+      List.iter (fun (attempt, bound) ->
+        ignore (Task_journal.observe journal ~attempt bound : Task_journal.commit Task_journal.outcome))
+        observations
+    in
+    hearing_journal_appends ~event:Keeper_runtime_journal_broadcast.native_tasks_appended_event
+      (fun heard ->
+        observe_all ();
+        check (list string) "each appended record is announced for its Keeper"
+          (List.map (fun _ -> keeper_name) observations) !heard;
+        heard := [];
+        observe_all ();
+        check (list string) "a replayed record is not announced" [] !heard))
+;;
+
+let test_child_content_journal_announces_each_append () =
+  with_child_journal_observations (fun ~base_path observations ->
+    let keeper_name = "claude-fixture" in
+    let journal = Child_journal.create ~base_path ~keeper_name
+      ~source:(task_journal_operation "child-announce") ~redact_text:Fun.id in
+    let observe_all () =
+      List.iter (fun (attempt, observation) ->
+        ignore (Child_journal.observe journal ~attempt observation : Child_journal.commit Child_journal.outcome))
+        observations
+    in
+    hearing_journal_appends ~event:Keeper_runtime_journal_broadcast.child_content_appended_event
+      (fun heard ->
+        observe_all ();
+        check (list string) "each appended record is announced for its Keeper"
+          (List.map (fun _ -> keeper_name) observations) !heard;
+        heard := [];
+        observe_all ();
+        check (list string) "a replayed record is not announced" [] !heard))
+;;
+
 let test_child_journal_failure_preserves_root () =
   let failures=ref [] in
   with_child_journal_observations
@@ -5318,9 +5366,6 @@ let test_typed_terminal_stop_records_pre_result_turn_identity () =
             (match result.stop_reason with
              | Runtime_agent.Yielded_to_durable_stimulus _ -> ()
              | Runtime_agent.Completed _
-             | Yielded_to_operation_queued _
-             | Yielded_after_repeated_tool_call _
-             | Yielded_after_repeated_assistant_text _
              | InputRequired _ ->
                fail "typed terminal deferral did not settle the host boundary"));
          match (load_state ~keeper_name:"claude-pre-dispatch" base_path).phase with
@@ -5506,22 +5551,104 @@ let test_a_closed_client_connection_is_typed () =
       (Agent_core.Error.to_string other)
 ;;
 
-(* A real partial user-message write must retain uncertainty on timeout. *)
-let test_incomplete_user_write_timeout_fences_retry () =
-  let base_path = temp_workspace () in
-  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+let check_disposition label (expected : Keeper_provider_attempt_effect.t)
+    (attempt : Keeper_claude_code_runtime.attempt_outcome) =
+  check string label
+    (Keeper_provider_attempt_effect.to_string expected)
+    (Keeper_provider_attempt_effect.to_string attempt.effect_disposition);
+  check bool (label ^ ": rotation follows the disposition")
+    (Keeper_provider_attempt_effect.allows_same_turn_retry expected)
+    (Keeper_provider_attempt_effect.allows_same_turn_retry attempt.effect_disposition)
+;;
+
+(* RFC-0390: under [full] the client's own built-ins may act once the prompt
+   is on its way, so a partial user-message write that times out keeps the
+   turn fenced. Under [none] the only effects are MASC handlers, none of which
+   ran, so the same timeout leaves the attempt free to rotate. *)
+let test_incomplete_user_write_timeout_is_fenced_only_when_built_ins_can_act () =
+  let run ?required_native_posture base_path =
     with_fixture ~block_user_write:true [] (fun cli_path ->
-      let attempt = run_direct_attempt ~admission_timeout_s:2.0
+      let attempt = run_direct_attempt ~admission_timeout_s:2.0 ?required_native_posture
           ~base_path ~cli_path ~goal:(String.make (512 * 1024) 'x') ~tools:[] () in
       (match attempt.result with
        | Error (Agent_core.Error.Api (Llm_provider.Retry.Timeout _)) -> ()
        | Error error -> fail (Agent_core.Error.to_string error)
        | Ok _ -> fail "incomplete user-message write unexpectedly completed");
-      check string "unknown delivery is recorded without native task observers"
-        "observation_unavailable"
-        (Keeper_provider_attempt_effect.to_string attempt.effect_disposition);
-      check bool "the driver's effect admission forbids candidate rotation" false
-        (Keeper_provider_attempt_effect.allows_same_turn_retry attempt.effect_disposition)))
+      attempt)
+  in
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    with_fixture_yolo ~base_path ~keeper_name:"claude-pre-dispatch" (fun () ->
+      run ~required_native_posture:Runtime_native_tools.Native_full base_path
+      |> check_disposition "full: unknown delivery is recorded"
+           Keeper_provider_attempt_effect.Observation_unavailable));
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    run base_path
+    |> check_disposition "none: nothing outside MASC could act"
+         Keeper_provider_attempt_effect.No_effect_observed)
+;;
+
+(* Under [none] the stream decides. A read-only MASC call and the granted
+   schema lookup leave the attempt rotatable after the client goes away;
+   response text the operator already received, and a built-in the grant does
+   not name, keep it fenced. Under [full] the closed transport alone fences. *)
+let test_a_closed_transport_is_judged_by_what_the_stream_showed () =
+  let marker_param : Agent_core.Types.tool_param =
+    { name = "marker"; description = "Fixture marker"; param_type = String; required = true }
+  in
+  let read_only_calls = ref 0 in
+  let read_only_tool =
+    Agent_core.Tool.create
+      ~descriptor:
+        (Agent_core.Tool.ordinary_descriptor
+           ~call_effect:(fun _ -> Agent_core.Tool.Read_only)
+           Agent_core.Tool_contract.Serial)
+      ~name:"masc_probe"
+      ~description:"Read one deterministic fixture value"
+      ~parameters:[ marker_param ]
+      (fun _input ->
+        incr read_only_calls;
+        Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
+  in
+  let attempt ?required_native_posture ~tools steps =
+    let base_path = temp_workspace () in
+    Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+      with_fixture (steps @ [ Close_transport ]) (fun cli_path ->
+        let run () =
+          run_direct_attempt ?required_native_posture ~base_path ~cli_path
+            ~goal:"CLOSE_AFTER_STREAM" ~tools ()
+        in
+        let attempt =
+          match required_native_posture with
+          | Some Runtime_native_tools.Native_full ->
+            with_fixture_yolo ~base_path ~keeper_name:"claude-pre-dispatch" run
+          | Some (Runtime_native_tools.Native_none | Runtime_native_tools.Native_read)
+          | None -> run ()
+        in
+        (match attempt.result with
+         | Error _ -> ()
+         | Ok _ -> fail "a closed transport completed the turn");
+        attempt))
+  in
+  attempt ~tools:[ read_only_tool ]
+    [ Emit_and_read mcp_initialize
+    ; Emit_and_read mcp_initialized_notification
+    ; Emit_and_read mcp_list
+    ; Emit_and_read mcp_call
+    ]
+  |> check_disposition "none: a read-only MASC call" Keeper_provider_attempt_effect.No_effect_observed;
+  check int "read-only handler ran" 1 !read_only_calls;
+  attempt ~tools:[]
+    [ Emit (native_tool_call_block ~turn_id:"lookup" ~call_id:"lookup-call" ~tool_name:"ToolSearch") ]
+  |> check_disposition "none: the granted schema lookup" Keeper_provider_attempt_effect.No_effect_observed;
+  attempt ~tools:[]
+    [ Emit (native_tool_call_block ~turn_id:"write" ~call_id:"write-call" ~tool_name:"Write") ]
+  |> check_disposition "none: a built-in outside the grant" Keeper_provider_attempt_effect.Observation_unavailable;
+  attempt ~tools:[] [ Emit (assistant ~turn_id:"partial" "PARTIAL_ANSWER") ]
+  |> check_disposition "none: response text already delivered" Keeper_provider_attempt_effect.Observation_unavailable;
+  attempt ~required_native_posture:Runtime_native_tools.Native_full ~tools:[] []
+  |> check_disposition "full: the closed transport alone" Keeper_provider_attempt_effect.Observation_unavailable
 ;;
 
 (* A one-shot walk over a two-candidate Claude Code lane: the first CLI, then
@@ -5633,8 +5760,10 @@ let test_cut_auth_probe_hands_the_turn_to_the_next_candidate () =
 (* #42212: when a Claude Code child exits before the turn prompt is sent
    ([turn_admitted = false]), no turn was submitted, so [effect_disposition]
    stays [No_effect_observed] and the lane walk rotates to the next candidate.
-   Once the prompt is sent ([turn_admitted = true]), an exit before a terminal
-   result fences the turn with [Observation_unavailable]. *)
+   Under the default [none] posture an exit after the prompt is sent rotates
+   too: nothing outside MASC's handlers could act and none ran. Under [full]
+   the same exit is fenced
+   ([test_a_closed_transport_is_judged_by_what_the_stream_showed]). *)
 let test_exit_before_turn_admission_rotates_to_next_candidate () =
   let base_path = temp_workspace () in
   Fun.protect
@@ -5692,8 +5821,8 @@ let test_exit_before_turn_admission_rotates_to_next_candidate () =
     (fun () ->
        with_fixture [ Close_transport ] (fun post_admission_cli ->
          with_fixture
-           [ Emit (assistant ~turn_id:"turn-never" "NEVER_REACHED")
-           ; Emit (result ~turn_id:"turn-never" "NEVER_REACHED")
+           [ Emit (assistant ~turn_id:"turn-after-exit" "MASC_CLAUDE_POST_ADMISSION_OK")
+           ; Emit (result ~turn_id:"turn-after-exit" "MASC_CLAUDE_POST_ADMISSION_OK")
            ]
            (fun fallback_cli ->
               let attempted, outcome =
@@ -5703,21 +5832,17 @@ let test_exit_before_turn_admission_rotates_to_next_candidate () =
                   ~second_cli:fallback_cli
               in
               check (list string)
-                "post-admission exit fences at first candidate"
-                [ "claude_first.claude" ]
+                "post-admission exit under none rotates to second candidate"
+                [ "claude_first.claude"; "claude_second.claude" ]
                 attempted;
               match outcome with
-              | Ok _ -> fail "post-admission exit rotated and completed"
-              | Error error ->
-                match Keeper_internal_error.classify_masc_internal_error error with
-                | Some
-                    (Keeper_internal_error.Provider_attempt_effect_fenced
-                       { runtime_id = "claude_first.claude"
-                       ; effect_disposition =
-                           Keeper_provider_attempt_effect.Observation_unavailable
-                       ; _
-                       }) -> ()
-                | _ -> fail (Agent_core.Error.to_string error))))
+              | Error error -> fail (Agent_core.Error.to_string error)
+              | Ok selected ->
+                check string "selected fallback candidate"
+                  "claude_second.claude" selected.selected_runtime_id;
+                check string "fallback answer"
+                  "MASC_CLAUDE_POST_ADMISSION_OK"
+                  (keeper_response_text selected.run_result))))
 ;;
 
 (* #39768: an exception nothing in the runtime expected -- here the refused
@@ -5855,7 +5980,6 @@ let agent_core_range ?(turn_start = 0) ~front messages =
      ~history_digest_at:(Runtime_model_input_tail_window.atom_opening_digest messages)
      ~current_turn_results:Keeper_turn_driver_try_provider.Current_turn_verbatim
      ~base_path:""
-     ~demote_before:0
      ~turn_boundary:(Keeper_carried_front.Turn_boundary { end_atom = turn_start })
      messages)
     .Keeper_turn_driver_try_provider.projection
@@ -6700,8 +6824,8 @@ let () =
             test_start_authority_is_user_context_not_standing_system
         ; test_case "actual argument Start and held Resume" `Quick test_actual_start_demotes_arguments_but_resume_keeps_them_held
         ; test_case "settles and resumes" `Quick test_keeper_settles_and_resumes
-        ; test_case "blank completion rejects progress but preserves session" `Quick
-            test_blank_completion_rejected_without_losing_session
+        ; test_case "blank completion completes and keeps the session" `Quick
+            test_blank_completion_completes_and_keeps_session
         ; test_case "resume prompt carries the task reference" `Quick
             test_resume_prompt_carries_the_task_reference
         ; test_case "resume prompt sends only changed blocks" `Quick
@@ -6887,6 +7011,10 @@ let () =
             test_child_journal_received_after_closed_root
         ; test_case "child persistence failure cannot mutate root answer" `Quick
             test_child_journal_failure_preserves_root
+        ; test_case "native task journal announces each append" `Quick
+            test_native_task_journal_announces_each_append
+        ; test_case "child content journal announces each append" `Quick
+            test_child_content_journal_announces_each_append
         ; test_case "native task journal retains authority and exact replay" `Quick
             test_native_task_journal_commit_replay_and_scope
         ; test_case "native task journal serializes writers and distinguishes corruption" `Quick
@@ -6927,8 +7055,10 @@ let () =
             "a closed client connection is typed"
             `Quick
             test_a_closed_client_connection_is_typed
-        ; test_case "incomplete user write timeout fences retry" `Quick
-            test_incomplete_user_write_timeout_fences_retry
+        ; test_case "incomplete user write timeout is fenced only when built-ins can act" `Quick
+            test_incomplete_user_write_timeout_is_fenced_only_when_built_ins_can_act
+        ; test_case "a closed transport is judged by what the stream showed" `Quick
+            test_a_closed_transport_is_judged_by_what_the_stream_showed
         ; test_case
             "a process exit before turn admission rotates to the next lane candidate"
             `Quick

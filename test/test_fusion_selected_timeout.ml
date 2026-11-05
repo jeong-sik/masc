@@ -124,17 +124,35 @@ elif MODE == "muse":
     assert turn["method"] == "turn/start"
     record("turn_received")
     turn_id = turn["params"]["commandId"]
+    # The host certifies a completed turn from its durable history, so it asks
+    # the controlled host for a backward view page once the terminal arrives.
+    # The host retains the events it sent, as a real session does.
+    retained = []
+    def notify(method, params):
+        event = {"method": method, "params": params}
+        if method in ("turn/started", "item/completed"):
+            position = {"id": "timeout-record-%d" % (len(retained) + 1), "sequence": len(retained) + 1}
+            params["sourceRange"] = {"stream": {"kind": "run", "id": "timeout-run"},
+                                     "first": position, "last": position}
+            retained.append(event)
+        send({"jsonrpc": "2.0", **event})
     send({"jsonrpc": "2.0", "id": turn["id"], "result": {"commandId": turn_id,
         "status": "accepted", "turnId": turn_id, "startedNewTurn": True, "disposition": "started"}})
-    send({"jsonrpc": "2.0", "method": "turn/started", "params": {
-        "sessionId": "timeout-session", "turnId": turn_id, "commandId": turn_id, "viewCursor": "v:2"}})
+    notify("turn/started", {
+        "sessionId": "timeout-session", "turnId": turn_id, "commandId": turn_id, "viewCursor": "v:2"})
     pause_after_input()
-    send({"jsonrpc": "2.0", "method": "item/completed", "params": {
+    notify("item/completed", {
         "sessionId": "timeout-session", "viewCursor": "v:3", "item": {"itemId": "m-1", "kind": "agentMessage",
-            "turnId": turn_id, "revision": 1, "status": "completed", "text": ANSWER}}})
-    send({"jsonrpc": "2.0", "method": "turn/completed", "params": {
+            "turnId": turn_id, "revision": 1, "status": "completed", "text": ANSWER}})
+    notify("turn/completed", {
         "sessionId": "timeout-session", "turnId": turn_id, "terminal": "completed", "viewCursor": "v:4", "error": None,
-        "usage": {"inputTokens": 1, "outputTokens": 1, "cachedTokens": 0, "reasoningTokens": 0}}})
+        "usage": {"inputTokens": 1, "outputTokens": 1, "cachedTokens": 0, "reasoningTokens": 0}})
+    for line in sys.stdin:
+        request = json.loads(line)
+        if request.get("method") == "view/page":
+            assert request["params"]["sessionId"] == "timeout-session"
+            assert request["params"]["cursor"] == "v:4" and request["params"]["direction"] == "backward"
+            send({"jsonrpc": "2.0", "id": request["id"], "result": {"events": retained, "nextCursor": None}})
 else:
     raise AssertionError(MODE)
 for line in sys.stdin:

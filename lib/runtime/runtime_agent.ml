@@ -38,19 +38,7 @@ let transport_error_kind_of_exception exn =
 type stop_reason =
   Runtime_agent_context.stop_reason =
   | Completed of { provider_turn_ordinal : int }
-  | Yielded_to_operation_queued of { turns_used : int; provider_turn_ordinal : int }
   | Yielded_to_durable_stimulus of { turns_used : int; provider_turn_ordinal : int }
-  | Yielded_after_repeated_tool_call of
-      { turns_used : int
-      ; provider_turn_ordinal : int
-      ; tool_name : string
-      ; repeated_count : int
-      }
-  | Yielded_after_repeated_assistant_text of
-      { turns_used : int
-      ; provider_turn_ordinal : int
-      ; repeated_count : int
-      }
   | InputRequired of {
       turns_used : int;
       request : Agent_core.Error.input_required;
@@ -58,22 +46,13 @@ type stop_reason =
 
 let final_provider_turn_ordinal = function
   | Completed { provider_turn_ordinal }
-  | Yielded_to_operation_queued { provider_turn_ordinal; _ }
-  | Yielded_to_durable_stimulus { provider_turn_ordinal; _ }
-  | Yielded_after_repeated_tool_call { provider_turn_ordinal; _ }
-  | Yielded_after_repeated_assistant_text { provider_turn_ordinal; _ } ->
+  | Yielded_to_durable_stimulus { provider_turn_ordinal; _ } ->
     Some provider_turn_ordinal
   | InputRequired _ -> None
 ;;
 
 type cooperative_yield_reason =
-  | Operation_queued
   | Durable_stimulus_waiting
-  | Repeated_tool_call of
-      { tool_name : string
-      ; repeated_count : int
-      }
-  | Repeated_assistant_text of { repeated_count : int }
   | Terminal_tool_completed
 
 type cooperative_yield_decision =
@@ -908,14 +887,8 @@ let select_agent_result ~checkpoint ~resume ~build =
   | None -> build ()
 
 let stop_reason_of_cooperative_yield ~provider_turn_ordinal ~turns_used = function
-  | Operation_queued -> Yielded_to_operation_queued { turns_used; provider_turn_ordinal }
   | Durable_stimulus_waiting ->
     Yielded_to_durable_stimulus { turns_used; provider_turn_ordinal }
-  | Repeated_tool_call { tool_name; repeated_count } ->
-    Yielded_after_repeated_tool_call
-      { turns_used; provider_turn_ordinal; tool_name; repeated_count }
-  | Repeated_assistant_text { repeated_count } ->
-    Yielded_after_repeated_assistant_text { turns_used; provider_turn_ordinal; repeated_count }
   (* The provider loop yielded at AGENT_CORE's durable post-tool boundary because
      the typed reply effect already completed. This is successful completion,
      not a continuation checkpoint that should replay on the next cycle. *)
@@ -1014,16 +987,8 @@ let run_duration_ms_since started_at =
 
 let dashboard_status_of_stop_reason = function
   | Completed _ -> Dashboard_agent_core_bridge.Success
-  | Yielded_to_operation_queued _ ->
-      Dashboard_agent_core_bridge.Cancelled { reason = "yielded_to_operation_queued" }
   | Yielded_to_durable_stimulus _ ->
       Dashboard_agent_core_bridge.Cancelled { reason = "yielded_to_durable_stimulus" }
-  | Yielded_after_repeated_tool_call _ ->
-      Dashboard_agent_core_bridge.Cancelled
-        { reason = "yielded_after_repeated_tool_call" }
-  | Yielded_after_repeated_assistant_text _ ->
-      Dashboard_agent_core_bridge.Cancelled
-        { reason = "yielded_after_repeated_assistant_text" }
   | InputRequired _ ->
       Dashboard_agent_core_bridge.Cancelled { reason = "input_required" }
 

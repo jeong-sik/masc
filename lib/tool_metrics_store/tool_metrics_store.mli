@@ -30,6 +30,21 @@ val read_recent :
   unit ->
   (row list, string) result
 
+val read_series :
+  masc_root:string ->
+  window:Tool_metrics_series.window ->
+  ?tool_name:string ->
+  unit ->
+  (Tool_metrics_series.t, string) result
+(** [read_series ~masc_root ~window ()] groups the stored calls inside
+    [window] into its buckets. [tool_name] keeps only that tool's calls.
+    A store that does not exist yet gives a series with no calls.
+
+    It reads on a connection of its own, so it does not wait for the store
+    lock or hold it, and an [insert] on another thread is not delayed by it.
+    A window of a month over a busy store is about 800,000 rows and blocks the
+    calling thread for about a second; run it off the Eio event loop. *)
+
 val summary : masc_root:string -> (summary, string) result
 val row_to_json : row -> Yojson.Safe.t
 val reset_for_testing : unit -> unit

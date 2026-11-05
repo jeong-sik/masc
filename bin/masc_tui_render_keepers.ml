@@ -191,6 +191,7 @@ let keeper_badge_text (badge : Keeper_list_model.badge) =
   | Badge_delegate -> glyph ^ " delegate result"
   | Badge_verification -> glyph ^ " verify"
   | Badge_schedule -> glyph ^ " schedule"
+  | Badge_quota_spent -> glyph ^ " quota spent"
 
 let keeper_task_detail (row : Keeper_list_model.row) =
   match row.task with
@@ -399,7 +400,7 @@ let keeper_lane_lifecycle_text (lane : Tui_decode.keeper_lane) =
   let phase =
     Terminal_text.single_line (Tui_decode.keeper_lane_phase_to_string lane.kl_phase)
   in
-  match keeper_lane_phase_causes lane.kl_conditions with
+  match Option.fold ~none:[] ~some:keeper_lane_phase_causes lane.kl_conditions with
   | [] -> phase
   | causes -> Printf.sprintf "%s (%s)" phase (String.concat ", " causes)
 
@@ -435,43 +436,51 @@ let keeper_last_runtime_text (state : state) = function
 (* Composite execution facts belong to this Keeper's Info pane. Separate
    fields use the pane's wrapped, scrollable rows; a long one-line preview
    beside the list footer silently lost its outcome and runtime target. *)
+(* The composite reading, failure and in-flight read of [keeper_name]; a
+   reading of the Keeper the cursor left is not this Keeper's. *)
+let keeper_composite_of (state : state) ~keeper_name =
+  match state.keeper_composite with
+  | Some reading when String.equal reading.kcr_keeper keeper_name -> Some reading
+  | Some _ | None -> None
+
+let keeper_composite_error_of (state : state) ~keeper_name =
+  match state.keeper_composite_error with
+  | Some (keeper, detail) when String.equal keeper keeper_name -> Some detail
+  | Some _ | None -> None
+
+let keeper_composite_reading_now (state : state) ~keeper_name =
+  Option.equal String.equal state.keeper_composite_inflight (Some keeper_name)
+
 let keeper_operations_fields (state : state) ~keeper_name =
-  let fields = match state.lanes with
-  | Some snapshot ->
-      (match
-         List.find_opt
-           (fun (lane : Tui_decode.keeper_lane) ->
-             String.equal lane.kl_keeper keeper_name)
-           snapshot.kls_lanes
-       with
-       | Some lane ->
-           [ "Lifecycle:", keeper_lane_lifecycle_text lane
-           ; "Turn:", Terminal_text.single_line
-               (Tui_decode.keeper_lane_turn_phase_to_string lane.kl_turn_phase)
-           ; "Idle:", keeper_lane_idle_text lane.kl_idle_seconds
-           ; "Last outcome:", keeper_operations_outcome_text lane.kl_last_outcome
-           ; "Last runtime:", keeper_last_runtime_text state lane.kl_last_outcome
-           ]
-       | None ->
-           [ "Execution:", Ansi.dim ^ "no composite row for "
-             ^ Terminal_text.single_line keeper_name ^ Ansi.reset ])
+  let reading = keeper_composite_of state ~keeper_name in
+  let error = keeper_composite_error_of state ~keeper_name in
+  let reading_now = keeper_composite_reading_now state ~keeper_name in
+  let fields = match reading with
+  | Some { kcr_lane = lane; _ } ->
+      [ "Lifecycle:", keeper_lane_lifecycle_text lane
+      ; "Turn:", Terminal_text.single_line
+          (Tui_decode.keeper_lane_turn_phase_to_string lane.kl_turn_phase)
+      ; "Idle:", keeper_lane_idle_text lane.kl_idle_seconds
+      ; "Last outcome:", keeper_operations_outcome_text lane.kl_last_outcome
+      ; "Last runtime:", keeper_last_runtime_text state lane.kl_last_outcome
+      ]
   | None ->
-      (match state.lanes_error with
+      (match error with
        | Some detail ->
            [ "Execution:", Theme.warn () ^ "unavailable · "
              ^ Terminal_text.single_line detail ^ Ansi.reset ]
        | None ->
-           if state.keeper_lanes_inflight then []
+           if reading_now then []
            else [ "Execution:", Ansi.dim ^ "not observed" ^ Ansi.reset ])
   in
-  let fields = match state.lanes, state.lanes_error with
+  let fields = match reading, error with
     | Some _, Some detail ->
         ("Execution:", Theme.warn () ^ "stale · refresh failed: "
           ^ Terminal_text.single_line detail ^ Ansi.reset) :: fields
     | Some _, None | None, (Some _ | None) -> fields in
-  if state.keeper_lanes_inflight then
+  if reading_now then
     ("Execution:", Ansi.dim
-      ^ (match state.lanes with
+      ^ (match reading with
          | None -> "reading execution snapshot…"
          | Some _ -> "refreshing execution snapshot · last observation")
       ^ Ansi.reset) :: fields
@@ -877,7 +886,6 @@ let render_keeper_list (state : state) =
                        state.keeper_yolo_names)
               ~selected row
           in
-          let secondary = keeper_secondary_row_content ~inner row in
           let press text =
             pressable (Press_keeper_row row.Keeper_list_model.keeper.Tui_decode.k_name)
               (fit_width text inner)
@@ -888,8 +896,9 @@ let render_keeper_list (state : state) =
             else box_line buf cols (press text)
           in
           emit primary;
+          (* Only the detailed layout draws the second row, so only it builds one. *)
           (match state.keeper_list_layout with
-           | Keeper_list_model.Detailed -> emit secondary
+           | Keeper_list_model.Detailed -> emit (keeper_secondary_row_content ~inner row)
            | Keeper_list_model.Compact | Keeper_list_model.Grouped -> ()))
     entries_window;
 
@@ -959,18 +968,13 @@ let render_keeper_list (state : state) =
    answered for this Keeper yet, the second means it answered that no root is
    configured. Saying "none" for both would report a fact the server did not
    send. [None] here is the first; the tab decides what to say about it from
-   the Lanes reading the list rides on, because a list that is empty after a
-   failed read and one that is empty before any read are the same list. *)
+   the composite reading it rides on, because no projection after a failed
+   read and none before any read are the same absence. *)
 let secret_lines (state : state) (k : keeper) =
   let dim line = Ansi.dim ^ line ^ Ansi.reset in
-  match
-    List.find_opt
-      (fun (p : Masc.Tui_decode.keeper_secret_projection) ->
-        String.equal p.Masc.Tui_decode.ksp_keeper k.k_name)
-      state.keeper_secrets
-  with
-  | None -> None
-  | Some p ->
+  match keeper_composite_of state ~keeper_name:k.k_name with
+  | None | Some { kcr_secret = None; _ } -> None
+  | Some { kcr_secret = Some p; _ } ->
       let status = Masc.Tui_decode.keeper_secret_status_to_string p.ksp_status in
       let status_line =
         match p.ksp_status with
@@ -1220,7 +1224,10 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
     let account_line =
       match account, state.item_account_error with
       | Some (Item_account.Ready account), _ ->
-          Printf.sprintf "  Wallet %s Candle · %d owned" (milli account.balance_milli)
+          let balance_milli = selected_item_balance_now state in
+          Printf.sprintf "  Wallet %s Candle%s · %d owned"
+            (milli (Item_account.spendable_milli account ~balance_milli))
+            (match balance_milli with Some _ -> "" | None -> " (as read)")
             (List.length account.owned_items)
       | Some Item_account.Off, _ -> "  Candle off"
       | Some (Item_account.Disabled reason), _ ->
@@ -1252,8 +1259,13 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
             | Some { price = Item_account.Priced amount; _ } ->
               milli amount ^ " Candle"
               ^ (if owned then ""
-                 else if amount <= account.balance_milli then " · can buy"
-                 else " · need " ^ milli (amount - account.balance_milli) ^ " more")
+                 else
+                   let spendable =
+                     Item_account.spendable_milli account
+                       ~balance_milli:(selected_item_balance_now state)
+                   in
+                   if amount <= spendable then " · can buy"
+                   else " · need " ^ milli (amount - spendable) ^ " more")
           in
           Some ((if owned then "owned · " else "not owned · ") ^ price)
       | Some (Item_account.Off | Item_account.Disabled _) | None -> None
@@ -1401,10 +1413,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                  else Ansi.dim ^ "no" ^ Ansi.reset)
         @ row_lines ~width "Suggested action:"
             (keeper_suggested_action (keeper_reading state k))
-        @ (let amount = match (keeper_reading state k).Keeper_control.liveness with
-            | Keeper_control.Present runtime -> runtime.kr_candle_balance_milli
-            | Keeper_control.Unobserved | Keeper_control.Absent | Keeper_control.Invalid _ -> None in
-           match Masc_tui_candle.balance_text state.candle_observation amount with
+        @ (match Masc_tui_candle.balance_text ~now:(Unix.gettimeofday ())
+                   state.candle_observation ~keeper:k.k_name with
            | None -> []
            | Some value -> row_lines ~width "Candle balance:" (Terminal_text.single_line value))
       in
@@ -1812,7 +1822,10 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
          add_row "Total Tokens:"
            (Masc_tui_message_layout.compact_count activity.k_total_tokens);
          add_row "Lifetime Cost:" (Tui_decode.keeper_cost_summary activity.k_total_cost_usd);
-         add_row "Last Turn:" (Terminal_text.short_timestamp activity.k_last_turn_ts));
+         add_row "Last Turn:"
+           (match activity.k_last_turn_at with
+            | Some at -> Terminal_text.short_timestamp_of_unix at
+            | None -> "(never)"));
       (match k.k_identity with
        | Ok identity ->
          add_row "Created:" (Terminal_text.short_timestamp identity.k_created_at);
@@ -2489,13 +2502,16 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       | Detail_instructions ->
           stamped_or state.keeper_config_view state.keeper_config_view_error
       | Detail_secrets ->
-          let observed = Option.is_some state.lanes in
-          let failure = match state.lanes_error with
+          let reading = keeper_composite_of state ~keeper_name:k.k_name in
+          let error = keeper_composite_error_of state ~keeper_name:k.k_name in
+          let reading_now = keeper_composite_reading_now state ~keeper_name:k.k_name in
+          let observed = Option.is_some reading in
+          let failure = match error with
             | None -> []
             | Some detail ->
                 [ (Theme.bad ()) ^ "  " ^ (if observed then "STALE · " else "")
                   ^ Terminal_text.single_line detail ^ Ansi.reset ] in
-          let progress = if state.keeper_lanes_inflight then
+          let progress = if reading_now then
               [ loading_row (if observed
                   then "refreshing execution snapshot · last observation"
                   else "reading execution snapshot") ]
@@ -2503,7 +2519,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
           let lines = match secret_lines state k with
             | Some lines -> lines
             | None ->
-                (match state.lanes, state.lanes_error, state.keeper_lanes_inflight with
+                (match reading, error, reading_now with
                  | None, None, false ->
                      [ Ansi.dim ^ "  Execution snapshot not observed" ^ Ansi.reset ]
                  | None, (Some _ | None), true | None, Some _, false -> []

@@ -102,5 +102,53 @@ let scenario () =
     check string "backend failure preserves original bytes" "retained bytes"
       (In_channel.with_open_bin source In_channel.input_all))))))
 
-let () = run "browser addon cleanup" ["lifecycle",[
-  test_case "all backends settle despite failure and caller cancellation" `Quick scenario]]
+(* One live connection per transport at a time. A connection that ended,
+   as one whose ego Space went missing does, lets the next one attach and
+   keeps its cleanup for retirement. *)
+let an_ended_live_connection_yields_its_transport () =
+  Eio_main.run (fun env ->
+  Time_compat.set_clock (Eio.Stdenv.clock env);
+  Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5. (fun () -> Eio.Switch.run (fun sw ->
+    let incarnation="0b000000-0000-4000-8000-000000000005" in
+    let owner=ok (Owner.create ~incarnation) in
+    Eio.Switch.on_release sw (fun () -> Owner.revoke owner);
+    let register id =
+      let client_id=ok (B.client_id_of_string id) in
+      let client:B.client_info={client_id;browser=B.Firefox;version="fixture";
+        engine_version="fixture";transport=B.Webdriver_bidi;space=None} in
+      (match Owner.dispatch owner {W.incarnation;command=W.Poll {client;window_sec=0.001}} with
+       | W.Poll_result _ -> ()
+       | Service_refusal _|Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Receipt|Issue_result _ ->
+         fail "live registration refused");
+      client_id in
+    let settled=ref 0 in
+    let attach client_id result=Owner.attach_live owner ~client_id ~cleanup:(fun () -> incr settled;result) in
+    let first=register "0b000000-0000-4000-8000-000000000006" in
+    ok (attach first (Error "the first connection's Space was gone"));
+    let second=register "0b000000-0000-4000-8000-000000000007" in
+    check bool "a second connection of the transport is refused while the first serves" true
+      (Result.is_error (attach second (Ok ())));
+    Owner.disconnect_live owner first;
+    ok (attach second (Ok ()));
+    check bool "retirement settles the ended connection too" true
+      (match Owner.dispatch owner {W.incarnation;command=W.Retire} with
+       | W.Service_refusal {disposition=W.Outcome_unknown;message} -> message="the first connection's Space was gone"
+       | W.Service_refusal {disposition=W.Not_started;_}
+       | W.Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false);
+    check int "each attached connection is settled once" 2 !settled)))
+
+(* A process holds one browser owner, so this case runs in its own process.
+   An earlier case's process manager can interrupt the wait with SIGCHLD. *)
+let rec reaped pid = match Unix.waitpid [] pid with
+  | _, status -> status
+  | exception Unix.Unix_error (Unix.EINTR, _, _) -> reaped pid
+let isolated case () =
+  let pid = Unix.create_process Sys.executable_name [|Sys.executable_name;"--case";case|] Unix.stdin Unix.stdout Unix.stderr in
+  check bool ("isolated owner case " ^ case) true (reaped pid = Unix.WEXITED 0)
+
+let () =
+  if Array.length Sys.argv = 3 && Sys.argv.(1) = "--case" && Sys.argv.(2) = "reattach" then
+    an_ended_live_connection_yields_its_transport ()
+  else run "browser addon cleanup" ["lifecycle",[
+    test_case "all backends settle despite failure and caller cancellation" `Quick scenario;
+    test_case "an ended live connection yields its transport" `Quick (isolated "reattach")]]

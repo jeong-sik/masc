@@ -377,6 +377,111 @@ module Make (F : Line_format) = struct
             write log ~head (String.concat "" (List.map (fun line -> line ^ "\n") lines))))
   ;;
 
+  type end_error =
+    | End_writer_expired
+    | End_stopped of stop
+    | End_locked of { path : string }
+    | End_moved of { path : string }
+    | End_not_one_file of
+        { path : string
+        ; detail : string
+        }
+    | End_unread of
+        { path : string
+        ; detail : string
+        }
+
+  let end_error_to_string = function
+    | End_writer_expired -> "the zone of this writer has ended"
+    | End_stopped { path; reason } ->
+      Printf.sprintf "%s %s is stopped: %s" F.description path reason
+    | End_locked { path } ->
+      Printf.sprintf "%s %s is locked by another process" F.description path
+    | End_moved { path } ->
+      Printf.sprintf "%s %s does not end where this process left it" F.description path
+    | End_not_one_file { path; detail } ->
+      Printf.sprintf
+        "%s %s or its lock is not one regular file under one name: %s"
+        F.description
+        path
+        detail
+    | End_unread { path; detail } ->
+      Printf.sprintf "where %s %s ends was not read: %s" F.description path detail
+  ;;
+
+  (* How a failed read after the end bears on the file. Every failure is named,
+     as in [failure_kind]. The cursor of this process always ends after a
+     complete line, so a cursor that does not match, a cut tail, or a suffix
+     that does not read means that the file is not the one this process left.
+     [Fs_compat] gives the same three errors for the file and for its lock
+     when a path is not one regular file under one name, and does not say
+     which path it was, so those are a case of their own. Every other failure
+     is of the read itself, which wrote no line, and is not taken as a
+     judgment of the file. *)
+  type read_failure =
+    | Read_locked
+    | Read_moved
+    | Read_not_one_file
+    | Read_not_done
+
+  let rec read_failure : Fs_compat.private_jsonl_transaction_error -> read_failure = function
+    | Fs_compat.Stable_lock_contended _ -> Read_locked
+    | Fs_compat.Cursor_mismatch _
+    | Fs_compat.Transaction_content_changed _
+    | Fs_compat.Incomplete_transaction_tail _
+    | Fs_compat.Invalid_transaction_suffix -> Read_moved
+    | Fs_compat.Unexpected_transaction_file_kind _
+    | Fs_compat.Ambiguous_transaction_file_identity _
+    | Fs_compat.Transaction_path_binding_changed _ -> Read_not_one_file
+    | Fs_compat.Transaction_settlement_failed { primary = Fs_compat.Transaction_failed error; cleanup_failures = _ }
+      -> read_failure error
+    | Fs_compat.Transaction_settlement_failed
+        { primary = Fs_compat.Transaction_succeeded _; cleanup_failures = _ }
+    | Fs_compat.Unexpected_stable_lock_permissions _
+    | Fs_compat.Invalid_stable_lock_state _
+    | Fs_compat.Private_jsonl_operation_failed _
+    | Fs_compat.Rewrite_stage_failed _
+    | Fs_compat.Rewrite_published_durability_unknown _
+    | Fs_compat.Transaction_append_failed _ -> Read_not_done
+  ;;
+
+  (* The thread gets the path and the cursor as values, as in [write_on_thread]. *)
+  let read_after_end (log : t) =
+    let path = log.path
+    and expected = log.cursor in
+    Systhread_host.run ~label:(F.thread_label ^ "-confirm-end") (fun () ->
+      Fs_compat.read_private_jsonl_durable_locked_result path ~after:(Some expected))
+  ;;
+
+  let confirm_end writer =
+    let log = writer.log in
+    let moved () =
+      log.stopped <- Some end_moved;
+      Error (End_moved { path = log.path })
+    in
+    if not writer.live
+    then Error End_writer_expired
+    else (
+      match log.stopped with
+      | Some reason -> Error (End_stopped { path = log.path; reason })
+      | None ->
+        (match Fs_compat.private_jsonl_snapshot_success_receipt (read_after_end log) with
+         | Ok { Fs_compat.value = { Fs_compat.bytes; cursor }; settlement_error } ->
+           Option.iter (observe_settlement ~description:F.description ~path:log.path) settlement_error;
+           if String.equal bytes "" && Fs_compat.Private_jsonl_cursor.equal cursor log.cursor
+           then Ok ()
+           else moved ()
+         | Error error ->
+           (match read_failure error with
+            | Read_locked -> Error (End_locked { path = log.path })
+            | Read_moved -> moved ()
+            | Read_not_one_file ->
+              let detail = store_error error in
+              log.stopped <- Some detail;
+              Error (End_not_one_file { path = log.path; detail })
+            | Read_not_done -> Error (End_unread { path = log.path; detail = store_error error }))))
+  ;;
+
   (* [Eio.Mutex.use_rw] disables the mutex for good when its function raises.
      That would turn any exception of the caller's, even one that never touched
      the file, into a file that cannot be entered again. What the file holds is

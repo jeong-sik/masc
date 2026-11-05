@@ -100,6 +100,24 @@ let test_build_mismatch_names_the_older_side () =
             ~max_cells:120 ~port:8935 ~hints:"q" ()))
   | None -> Alcotest.fail "a differing pair produced no item"
 
+(* RFC-0484 §3.3: the server's rollup leads the row with its count and first
+   reason, ahead of the keys, on every working surface. *)
+let test_operator_action_leads_the_row () =
+  let item =
+    Masc_tui_footer.Operator_action
+      { first = "typesafeai:payment_required https://api.typesafe.ai/v1/systemone since=2026-11-04T06:45:51Z"
+      ; count = 2
+      }
+  in
+  let line =
+    Masc_tui_footer.line ~status:[ item ] ~dim:"" ~reset:"" ~max_cells:200 ~port:8935
+      ~hints:"q:quit" ()
+  in
+  check_bool "the count and the first reason lead the row" true
+    (String.starts_with ~prefix:"  ACTION NEEDED 2 \xc2\xb7 typesafeai:payment_required" line);
+  check_bool "the keys still follow" true (contains ~needle:"q:quit" line);
+  check_bool "a working surface keeps it" true (Masc_tui_footer.needs_operator item)
+
 let test_build_mismatch_is_silent_without_testimony () =
   check_bool "matching commits say nothing" true
     (Masc_tui_footer.build_mismatch_item
@@ -305,6 +323,8 @@ let tests =
           test_action_text_is_not_dropped_as_a_key
       ; Alcotest.test_case "build mismatch names the older side" `Quick
           test_build_mismatch_names_the_older_side
+      ; Alcotest.test_case "operator action leads the row" `Quick
+          test_operator_action_leads_the_row
       ; Alcotest.test_case "build mismatch is silent without testimony" `Quick
           test_build_mismatch_is_silent_without_testimony
       ; Alcotest.test_case "help item is stamped on every surface row" `Quick

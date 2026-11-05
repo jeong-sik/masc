@@ -2,7 +2,12 @@ module B = Browser_lane
 module W = Browser_addon_wire
 
 type phase = Serving | Retired
+type ego_recovered = Reclaimed of {space_id:int; space_name:string} | Reopening of {space:string}
 type cleanup = (unit, string) result Eio.Lazy.t
+type ego_space = {
+  space_observation : unit -> Browser_ego_space_observation.t option;
+  space_presence : unit -> Browser_ego_space_observation.presence;
+}
 type t = {
   incarnation : string;
   gate : Eio.Mutex.t;
@@ -14,12 +19,13 @@ type t = {
     (Yojson.Safe.t, Browser_extension_protocol.error) result) option;
   (* The live connections this worker runs, one per transport. *)
   mutable live : (B.live_transport * cleanup) list;
-  mutable ego_input : (B.client_id * Browser_ego_operator.recovery) option;
+  mutable ego_space : (B.client_id * ego_space) option;
   mutable unavailable : Browser_addon_observation.unavailable list;
-  (* Reclaims the user-owned ego Space the worker refused: receives the
-     published ids, answers with the reclaimed Space id and name. Set by the
-     live ego backend between cycles; one claim runs at a time. *)
-  mutable ego_recovery : (int list -> (int * string, string) result) option;
+  (* Recovers the ego Space the worker published as unavailable: receives
+     that record, answers with the Space it reclaimed or the name it is
+     opening again. Set by the live ego backend between cycles; one
+     recovery runs at a time. *)
+  mutable ego_recovery : (Browser_addon_observation.unavailable -> (ego_recovered, string) result) option;
   mutable ego_claim_active : bool;
   mutable models : Browser_addon_models.t option;
   mutable uploads : Browser_addon_uploads.t option;
@@ -38,7 +44,7 @@ let create ~incarnation =
       Error "a browser owner already exists in this process"
     else
       let retired, retire = Eio.Promise.create () in
-      let t = {incarnation;gate=Eio.Mutex.create ();phase=Serving;clients=[];automation=None;stagehand=None;extensions=None;live=[];ego_input=None;unavailable=[];ego_recovery=None;ego_claim_active=false;models=None;uploads=None;downloads=None;retired;retire} in
+      let t = {incarnation;gate=Eio.Mutex.create ();phase=Serving;clients=[];automation=None;stagehand=None;extensions=None;live=[];ego_space=None;unavailable=[];ego_recovery=None;ego_claim_active=false;models=None;uploads=None;downloads=None;retired;retire} in
       B.install_activity_observer (Some (fun lane -> match t.phase,lane with
         | Serving,B.Lane_name.Live -> B.Enabled
         | Serving,B.Lane_name.Automation -> if Option.is_some t.automation then B.Enabled else B.Disabled
@@ -55,9 +61,9 @@ let with_admission t incarnation run =
 let snapshot t = `Assoc ([
   "state",`String (match t.phase with Serving -> "serving" | Retired -> "retired");
   "clients",`List (List.map (fun (client : B.client_info) ->
-    let space_observation,space_presence=match t.ego_input with
-      | Some (client_id,recovery) when client_id=client.client_id ->
-        recovery.space_observation (),Some (recovery.space_presence ())
+    let space_observation,space_presence=match t.ego_space with
+      | Some (client_id,ego_space) when client_id=client.client_id ->
+        ego_space.space_observation (),Some (ego_space.space_presence ())
       | None|Some _ -> None,None in
     Browser_addon_observation.publish_client client ~space_observation ~space_presence) (B.connected_clients ()));
   "owned_backends",Browser_addon_inventory.owned_to_json (Browser_addon_inventory.observe ())]
@@ -74,6 +80,13 @@ let mark_ego_user_owned_name t ~space ~ids ~observed_at =
       || not (Float.is_finite observed_at) || observed_at < 0. ->
       Error "invalid ego user-owned space observation"
     | Serving,[] -> t.unavailable <- [Browser_addon_observation.Ego_user_owned_name {space; ids; observed_at}]; Ok ()
+    | Serving,_ :: _ -> Error "ego unavailability is already published")
+let mark_ego_space_missing t ~space ~space_id ~observed_at =
+  Eio.Mutex.use_rw ~protect:true t.gate (fun () -> match t.phase, t.unavailable with
+    | Retired,_ -> Error "browser owner is retired"
+    | Serving,_ when space = "" || space_id <= 0 || not (Float.is_finite observed_at) || observed_at < 0. ->
+      Error "invalid ego missing Space observation"
+    | Serving,[] -> t.unavailable <- [Browser_addon_observation.Ego_space_missing {space; space_id; observed_at}]; Ok ()
     | Serving,_ :: _ -> Error "ego unavailability is already published")
 let clear_ego_unavailable t =
   Eio.Mutex.use_rw ~protect:true t.gate (fun () ->
@@ -157,7 +170,7 @@ let attach_extensions t execute =
     | Serving,None,_ -> Error "owned Chrome backend is unavailable"
     | Serving,Some _,Some _ -> Error "private extension executor is already attached"
     | Serving,Some _,None -> t.extensions<-Some execute;Ok ())
-let attach_live ?ego_input t ~client_id ~cleanup =
+let attach_live ?ego_space t ~client_id ~cleanup =
   Eio.Mutex.use_rw ~protect:true t.gate (fun () -> match t.phase with
     | Retired -> Error "browser owner is retired"
     | Serving ->
@@ -165,36 +178,26 @@ let attach_live ?ego_input t ~client_id ~cleanup =
       else match List.find_opt (fun (client:B.client_info) -> client.client_id=client_id) (B.active_clients ()) with
         | Some {transport=(B.Webdriver_bidi | B.Ego_task_space) as transport;_} ->
           let name = "live " ^ B.live_transport_to_string transport in
-          if List.mem_assoc transport t.live then Error ("an owned " ^ name ^ " connection is already attached")
+          (* One connection per transport at a time. One that ended, as a
+             connection whose ego Space went missing does, keeps its cleanup
+             here so retirement still settles it, and lets the next attach. *)
+          let serving (other:B.client_info) = other.client_id <> client_id
+            && other.transport = transport && List.mem other.client_id t.clients in
+          if List.exists serving (B.active_clients ()) then Error ("an owned " ^ name ^ " connection is already attached")
           else
             (* This worker disconnects its own connection when it ends; the
                lane's no-poll window is for native hosts only. *)
-            (match transport,ego_input with
-             | (B.Webdriver_bidi|Web_extension),Some _ -> Error "input recovery requires an Ego connection"
+            (match transport,ego_space with
+             | (B.Webdriver_bidi|Web_extension),Some _ -> Error "Space observations require an Ego connection"
              | (Webdriver_bidi|Web_extension|Ego_task_space),None | Ego_task_space,Some _ ->
                Result.map (fun () ->
                  t.live <- (transport, owned_cleanup name cleanup) :: t.live;
-                 t.ego_input <- (match ego_input with None -> t.ego_input | Some recovery -> Some (client_id,recovery));
+                 t.ego_space <- (match ego_space with None -> t.ego_space | Some ego_space -> Some (client_id,ego_space));
                  (* A live connection serving again ends every refusal this
                     owner published about the lane. *)
                  t.unavailable <- [])
                (B.hold_client ~client_id))
         | None | Some {transport=B.Web_extension;_} -> Error "owned live client is not an active connection this worker runs")
-let operator_schema = Browser_ego_operator.schema
-let operator t arguments =
-  Eio.Mutex.use_rw ~protect:true t.gate (fun () ->
-    match t.phase with
-    | Retired -> Error "browser owner is retired"
-    | Serving ->
-      let connection=match t.ego_input with
-        | None -> None
-        | Some (client_id,recovery) ->
-          match List.find_opt (fun (client:B.client_info) -> client.client_id=client_id) (B.connected_clients ()) with
-          | Some {transport=B.Ego_task_space;space=Some space;_} ->
-              Some {Browser_ego_operator.client_id=B.client_id_to_string client_id;space;recovery}
-          | None | Some {transport=Ego_task_space;space=None;_}
-          | Some {transport=(Web_extension|Webdriver_bidi);_} -> None in
-      Ok (Browser_ego_operator.invoke connection arguments))
 let revoke t =
   Eio.Mutex.use_rw ~protect:true t.gate (fun () ->
     match t.phase with
@@ -202,7 +205,7 @@ let revoke t =
     | Serving ->
       t.phase <- Retired;
       t.extensions <- None;
-      t.ego_input <- None;
+      t.ego_space <- None;
       t.ego_recovery <- None;
       t.ego_claim_active <- false;
       Option.iter Browser_addon_models.retire t.models;
@@ -270,9 +273,10 @@ let issue t ~incarnation ~upload_admission ~route ~verb ~actor ~timeout_sec ~onl
       |Page_context _|Page_instruct _|Page_locate _|Page_extract _),(Ordinary|Scoped_upload)
     | Page_act (On_tab {interaction=Upload _;_}),Scoped_upload -> Ok () in
   match allowed with Error reply -> reply | Ok () ->
-    (* take_over without a client reclaims the ego Space whose task ended
-       while the operator held it; every other live execution still names
-       its client. *)
+    (* take_over without a client recovers the ego Space this worker
+       published as unavailable: one whose task ended while the operator
+       held it, or one ego no longer lists. Every other live execution
+       still names its client. *)
     let reclaim = match route with
       | B.Live_route None ->
           (match verb with
@@ -294,28 +298,36 @@ let issue t ~incarnation ~upload_admission ~route ~verb ~actor ~timeout_sec ~onl
          match t.ego_recovery, t.unavailable, t.ego_claim_active with
          | _, _, true ->
              Error (refusal "a task Space reclaim is already running on this worker")
-         | Some claim, [Browser_addon_observation.Ego_user_owned_name {space; ids=[space_id]; _}], false ->
+         | Some recover,
+           [(Browser_addon_observation.Ego_user_owned_name {ids=[_]; _}
+            | Browser_addon_observation.Ego_space_missing _) as published], false ->
              (* The mark rides the same gate as the check, so a second
                 request cannot pass between reading and marking. *)
              t.ego_claim_active <- true;
-             Ok (claim, space, space_id)
+             Ok (recover, published)
          | Some _, [Browser_addon_observation.Ego_user_owned_name {space; ids; _}], false ->
              Error (refusal (Printf.sprintf
                "the refused task Space name %S matches %d Spaces, so one is not chosen for the operator"
                space (List.length ids)))
          | Some _, ([] | _ :: _ :: _), false ->
-             Error (refusal "the ego task space this worker refused is not one user-owned Space; inspect the lane's inventory")
+             Error (refusal "the ego task space this worker published is not one user-owned or missing Space; inspect the lane's inventory")
          | None, _, false -> Error (refusal "worker execution requires a selected clientId")) with
        | Error reply -> reply
-       | Ok (claim, space, space_id) ->
+       | Ok (recover, published) ->
            Fun.protect
              ~finally:(fun () -> Eio.Cancel.protect (fun () ->
                Eio.Mutex.use_rw ~protect:true t.gate (fun () -> t.ego_claim_active <- false)))
              (fun () -> waiting t ~disposition:W.Outcome_unknown (fun () ->
-                match claim [space_id] with
-                | Ok (claimed_id, claimed_name) ->
-                    W.Issue_result (Ok (B.Answered (`Assoc ["action",`String "take_over";
-                      "spaceId",`Int claimed_id;"spaceName",`String claimed_name;"reclaimed",`Bool true])))
+                (* A browser answer is a success only with [ok: true]
+                   (Browser_addon_tool.failure_of_reply), so the recovery
+                   answer carries it like every page answer. *)
+                let taken_over fields = W.Issue_result (Ok (B.Answered
+                  (`Assoc (("ok",`Bool true) :: ("action",`String "take_over") :: fields)))) in
+                match recover published with
+                | Ok (Reclaimed {space_id; space_name}) ->
+                    taken_over ["spaceId",`Int space_id;"spaceName",`String space_name;"reclaimed",`Bool true]
+                | Ok (Reopening {space}) ->
+                    taken_over ["spaceName",`String space;"reopening",`Bool true]
                 | Error detail -> refusal detail)))
     else
     (match with_admission t incarnation (fun () ->

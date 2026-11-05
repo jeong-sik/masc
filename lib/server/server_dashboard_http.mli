@@ -56,6 +56,10 @@ val dashboard_memory_http_payload :
 val dashboard_gate_http_json :
   Httpun.Request.t -> base_path:string -> Yojson.Safe.t
 
+val invalidate_gate_snapshots : base_path:string -> unit
+(** Drop every cached Gate snapshot of [base_path], whatever its limit,
+    window and queue revision. *)
+
 val dashboard_gate_tool_events_http_json :
   Httpun.Request.t -> base_path:string -> Yojson.Safe.t
 
@@ -111,8 +115,10 @@ val cached_planning_payload :
   config:Workspace.config -> Dashboard_cache.cached_payload
 (** Read the cached planning projection. *)
 
-val install_planning_cache_invalidation : unit -> unit
-(** Invalidate the workspace's projection after Goal rows or audit events commit. *)
+val install_goal_projection_observer : unit -> unit
+(** After Goal rows, audit events, the verification ledger or the measurement
+    store commit: drop the workspace's planning projection, then announce
+    {!Goal_projection_broadcast.changed_event} to its observers. *)
 
 val dashboard_goals_tree_http_json :
   config:Workspace.config -> Yojson.Safe.t

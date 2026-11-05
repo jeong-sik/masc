@@ -800,13 +800,9 @@ let proof_request_failure ~tool_name ~start_time = function
 
 (* The phase comes from [Goal_phase.decide_transition], so a proof request
    and a completion request cannot disagree on where the goal goes. Only a goal
-   that is, or now enters, [Verifying] gets a pending proof. *)
-type proof_request_mode = Require_executing | Allow_verifying
-
-let request_current_proof_bound ?evidence_refs ?expected_verification ~mode config ~goal_id =
-  let effects goal (_, verdict) = match verdict with
-    | None -> no_goal_effects | Some verdict -> proof_effects config goal verdict in
-  let result = transact_or_refuse ~effects config ~goal_id (fun goal ->
+   that now enters [Verifying] gets a pending proof. *)
+let request_current_proof_bound ?evidence_refs ?expected_verification config ~goal_id =
+  transact_or_refuse config ~goal_id (fun goal ->
     let open Result.Syntax in
     let* () = match expected_verification with
       | None -> Ok ()
@@ -815,35 +811,16 @@ let request_current_proof_bound ?evidence_refs ?expected_verification ~mode conf
           |> Result.map_error (refuse Internal_error) in
         if matches_expected_verification expected goal record then Ok ()
         else Error (refuse Conflict "The Goal or verification request changed; refresh before requesting completion") in
-    let request phase =
+    match Goal_phase.decide_transition ~phase:goal.phase ~action:Goal_phase.Request_complete with
+    | Ok (Goal_phase.Move_to (Goal_phase.Verifying as phase)) ->
       let* () = Goal_verification.check_authority_backend config
         |> Result.map_error (fun error ->
              refuse Internal_error (Goal_verification.authority_backend_error_to_string error)) in
       let* submitted_evidence = capture_goal_evidence config evidence_refs in
       let* record = mark_proof_pending ?submitted_evidence config ~goal_id goal in
-      Ok ({ goal with phase }, (record, None)) in
-    match Goal_phase.decide_transition ~phase:goal.phase ~action:Goal_phase.Request_complete with
-    | Ok (Goal_phase.Move_to (Goal_phase.Verifying as phase)) -> request phase
+      Ok ({ goal with phase }, record)
     | Ok (Goal_phase.Already Goal_phase.Verifying) ->
-      (match mode with
-       | Allow_verifying ->
-         let* record = Goal_verification.get_record_authoritative config ~goal_id
-           |> Result.map_error (refuse Internal_error) in
-         (match Goal_verification.classify_verifying_record ~goal record with
-          | Goal_verification.Current_pending (record, _, _) ->
-            let* () = preserve_pending_evidence config evidence_refs record in
-            Ok (goal, (record, None))
-          | Goal_verification.Current_verdict (record, verdict) ->
-            if Option.is_some evidence_refs then
-              Error (refuse Validation_error
-                "proof result is already committed; reconcile it without evidence_refs before submitting new evidence")
-            else
-              let* updated = apply_committed_verdict goal verdict |> Result.map_error (refuse Conflict) in
-              Ok (updated, (record, Some verdict))
-          | Goal_verification.Unavailable_request issue ->
-            Error (refuse Conflict (Goal_verification.verifying_issue_to_string issue)))
-       | Require_executing ->
-         Error (refuse Conflict "The Goal changed before this completion request; refresh before retrying"))
+      Error (refuse Conflict "The Goal changed before this completion request; refresh before retrying")
     | Ok (Goal_phase.Move_to
             ( Goal_phase.Executing | Goal_phase.Awaiting_confirmation | Goal_phase.Completed
             | Goal_phase.Dropped | Goal_phase.Paused _ | Goal_phase.Blocked _ )
@@ -851,14 +828,7 @@ let request_current_proof_bound ?evidence_refs ?expected_verification ~mode conf
              ( Goal_phase.Executing | Goal_phase.Awaiting_confirmation | Goal_phase.Completed
              | Goal_phase.Dropped | Goal_phase.Paused _ | Goal_phase.Blocked _ ))
     | Error _ ->
-      Error (refuse Precondition_failed "goal is not requesting verification")) in
-  Result.map (fun (goal, (record, verdict)) ->
-    (match verdict with None -> () | Some _ -> ignore (deliver_goal_effects config));
-    goal, record) result
-;;
-
-let request_current_proof ?evidence_refs config ~goal_id =
-  request_current_proof_bound ?evidence_refs ~mode:Allow_verifying config ~goal_id
+      Error (refuse Precondition_failed "goal is not requesting verification"))
 ;;
 
 let recover_current_proof config ~goal_id =
@@ -970,188 +940,12 @@ let answer_verifying_repeat ?evidence_refs ?expected_verification ~tool_name ~st
              ; "verification", Goal_verification.record_to_yojson_for_goal ~goal proof_record ]))
 ;;
 
-(* Capture linked work before the Goal transaction. The link and Goal reads
-   can still race later changes. Each unclaimed Task is rechecked separately
-   before cancellation, subject to the backlog's existing cache and writer
-   contracts. Held Tasks are reported rather than selected for cancellation. *)
-type dropped_goal_work = {
-  unclaimed : Masc_domain.task list;
-  held : (string * string) list;
-  ambiguous : (string * string) list;
-}
-
-let dropped_goal_work config ~goal_id =
-  let ( let* ) = Result.bind in
-  let* observed_links = Workspace_goal_index.read_goal_task_links_observed_r config in
-  let links = observed_links.Workspace_goal_index.normalized_links in
-  let ambiguous_link_ids = observed_links.ambiguous_task_ids in
-  let linked = Option.value ~default:[] (List.assoc_opt goal_id links) in
-  let* goals = match Goal_store.load_source config with
-    | Goal_store.Available state -> Ok state.goals
-    | Goal_store.Uninitialized -> Ok []
-    | Goal_store.Unavailable error -> Error (Goal_store.unavailable_to_string error) in
-  (* The link registry trims IDs when reading and writing. Preserve every
-     Goal row that could have produced a link key instead of assigning the
-     key to an exact row when a historical padded alias also exists. *)
-  let goals_by_link_id =
-    List.fold_left
-      (fun acc (goal : Goal_store.goal) ->
-         let link_id = Workspace_goal_index.normalize_link_id goal.id in
-         let rows = Option.value ~default:[] (Goal_store.Goal_id_map.find_opt link_id acc) in
-         Goal_store.Goal_id_map.add link_id (goal :: rows) acc)
-      Goal_store.Goal_id_map.empty goals
-  in
-  let goal_rows id = Option.value ~default:[] (Goal_store.Goal_id_map.find_opt id goals_by_link_id) in
-  let target_problem = match goal_rows goal_id with
-    | [goal] when String.equal goal.id goal_id -> None
-    | [] -> Some "not attempted: target Goal row was unavailable during Task observation"
-    | [_] | _ :: _ :: _ -> Some "not attempted: target Goal link ID was ambiguous during Task observation" in
-  let* backlog =
-    try
-      if Workspace.is_initialized config then Workspace_backlog.read_backlog_r config
-      else Error "Workspace is not initialized"
-    with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> Error (Printexc.to_string exn) in
-  let linked_set = Workspace_backlog.Task_id_set.of_list linked in
-  let ambiguous_link_ids = Workspace_backlog.Task_id_set.of_list ambiguous_link_ids in
-  let task_goal_map = Workspace_goal_index.build_task_goal_map ~goal_task_links:links () in
-  let deleted_task_ids =
-    List.fold_left
-      (fun ids (receipt : Masc_domain.task_deletion_receipt) ->
-         Workspace_backlog.Task_id_set.add (Workspace_goal_index.normalize_link_id receipt.deleted_task_id) ids)
-      Workspace_backlog.Task_id_set.empty backlog.task_deletion_receipts
-  in
-  let linkage task_id =
-    let other_ids =
-      Workspace_goal_index.goals_for_task_in_map task_goal_map ~task_id
-      |> List.filter (fun id -> not (String.equal id goal_id))
-      |> List.sort_uniq String.compare
-    in
-    if Workspace_backlog.Task_id_set.mem task_id ambiguous_link_ids then
-      `Ambiguous "not attempted: Goal–Task link ID was ambiguous during Task observation"
-    else match target_problem with
-    | Some detail -> `Ambiguous detail
-    | None ->
-        (match List.find_opt (fun id -> match goal_rows id with
-             | [] -> false
-             | [goal] -> not (String.equal goal.id id)
-             | _ :: _ :: _ -> true) other_ids with
-         | Some id -> `Ambiguous ("not attempted: linked Goal ID is ambiguous: " ^ id)
-         | None ->
-             if List.for_all (fun id -> match goal_rows id with
-                 | [goal] -> String.equal goal.id id && goal.phase = Goal_phase.Dropped
-                 | [] | _ :: _ :: _ -> false) other_ids
-             then `Orphaned else `Shared) in
-  let holders rows =
-    List.filter_map (fun (task : Masc_domain.task) ->
-        match task.task_status with
-        | Masc_domain.Claimed _ | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _ ->
-            Option.map (fun holder -> task.id, holder) (Masc_domain.task_assignee_of_status task.task_status)
-        | Masc_domain.Todo | Masc_domain.Done _ | Masc_domain.Cancelled _ -> None) rows
-    |> List.sort_uniq compare in
-  let candidates_by_id =
-    List.fold_left
-      (fun acc (task : Masc_domain.task) ->
-         let link_id = Workspace_goal_index.normalize_link_id task.id in
-         if not (Workspace_backlog.Task_id_set.mem link_id linked_set) then acc
-         else
-           Workspace_backlog.Task_id_map.update link_id
-             (function None -> Some [task] | Some rows -> Some (task :: rows)) acc)
-      Workspace_backlog.Task_id_map.empty backlog.tasks
-  in
-  let unclaimed, held, ambiguous = List.fold_right (fun (id, rows) (unclaimed, held, ambiguous) ->
-      let observed_holders = holders rows in
-      let deleted = Workspace_backlog.Task_id_set.mem id deleted_task_ids in
-      match linkage id with
-      | `Shared -> (unclaimed, held, ambiguous)
-      | `Ambiguous detail ->
-          (unclaimed, observed_holders @ held, (id, detail) :: ambiguous)
-      | `Orphaned ->
-          if deleted then
-            (unclaimed, observed_holders @ held, (id, "not attempted: Task ID has a deletion receipt") :: ambiguous)
-          else match rows with
-            | [task] when String.equal task.id id ->
-                (match task.task_status with
-                 | Masc_domain.Todo -> (task :: unclaimed, held, ambiguous)
-                 | Masc_domain.Claimed _ | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _ ->
-                     (unclaimed, observed_holders @ held, ambiguous)
-                 | Masc_domain.Done _ | Masc_domain.Cancelled _ -> (unclaimed, held, ambiguous))
-            | [] | [_] | _ :: _ :: _ ->
-                (unclaimed, observed_holders @ held, (id, "not attempted: linked Task ID is ambiguous") :: ambiguous))
-    (Workspace_backlog.Task_id_map.bindings candidates_by_id) ([], [], []) in
-  Ok { unclaimed; held; ambiguous }
-;;
-
-let dropped_goal_notice ~(goal : Goal_store.goal) held =
-  Printf.sprintf
-    "[goal_dropped] %s — %s\nBefore the drop, Task rows indicated these holders. Observations may be stale or ambiguous; check current Task status and Goal links before acting:\n%s"
-    goal.id goal.title
-    (String.concat "\n" (List.map (fun (task_id, holder) -> Printf.sprintf "- %s (%s)" task_id holder) held))
-;;
-
-let cancel_dropped_goal_todos ?(before_transition = fun ~task_id:_ -> ()) (ctx : context) ~goal_id ~reason tasks =
-  let reason = Printf.sprintf "Goal %s was dropped: %s" goal_id reason in
-  List.partition_map (fun (original : Masc_domain.task) ->
-      let task_id = original.id in
-      let observed =
-        try Workspace_backlog.read_backlog_r ctx.config with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn) in
-      match observed with
-      | Error detail -> Either.Right (task_id, "not attempted: backlog unreadable: " ^ detail)
-      | Ok backlog ->
-          let deleted = List.exists (fun (receipt : Masc_domain.task_deletion_receipt) ->
-              String.equal (Workspace_goal_index.normalize_link_id receipt.deleted_task_id) task_id) backlog.task_deletion_receipts in
-          if deleted then Either.Right (task_id, "not attempted: Task ID has a deletion receipt")
-          else match List.filter (fun (task : Masc_domain.task) ->
-              String.equal (Workspace_goal_index.normalize_link_id task.id) task_id) backlog.tasks with
-            | [] -> Either.Right (task_id, "not attempted: Task is no longer in the backlog")
-            | [_; _] | _ :: _ :: _ :: _ -> Either.Right (task_id, "not attempted: Task ID is ambiguous")
-            | [task] ->
-                if not (String.equal task.id task_id) then
-                  Either.Right (task_id, "not attempted: Task ID is ambiguous")
-                else if not (Masc_domain.equal_task original task) then
-                  Either.Right (task_id, "not attempted: Task changed since the candidate observation")
-                else (match task.task_status with
-                 | Masc_domain.Claimed _ | Masc_domain.InProgress _ | Masc_domain.AwaitingVerification _
-                 | Masc_domain.Done _ | Masc_domain.Cancelled _ ->
-                     Either.Right (task_id, "not attempted: Task is no longer Todo")
-                 | Masc_domain.Todo ->
-                     before_transition ~task_id;
-                     match Workspace.transition_task_outcome_r ctx.config ~agent_name:ctx.agent_name ~task_id
-                             ~action:Masc_domain.Cancel ~reason ~expected_version:backlog.version () with
-                     | Ok { noop = false; _ } -> Either.Left task_id
-                     | Ok { noop = true; _ } ->
-                         Either.Right (task_id, "Task cancellation reported a no-op; this call did not cancel it")
-                     | Error error ->
-                         Either.Right (task_id, "Task cancellation returned an error; its commit status may be unknown: "
-                                               ^ Masc_domain.masc_error_to_string error)))
-    tasks
-;;
-
-let dropped_goal_tasks_json ctx ~goal_id ~reason = function
-  | Error detail -> `Assoc [ "unread", `String detail ]
-  | Ok work ->
-      let cancelled, failed = cancel_dropped_goal_todos ctx ~goal_id ~reason work.unclaimed in
-      let failed = work.ambiguous @ failed in
-      `Assoc
-        [ "cancelled", `List (List.map (fun id -> `String id) cancelled)
-        ; "cancel_failed", `List (List.map (fun (id, error) ->
-              `Assoc [ "task_id", `String id; "error", `String error ]) failed)
-        ; "held", `List (List.map (fun (id, holder) ->
-              `Assoc [ "task_id", `String id; "holder", `String holder ]) work.held) ]
-;;
-
-(* The cancellation and its audit intent share the Goal transaction. Decide
-   from the locked row, including its current review metadata, rather than
-   applying a phase calculated from the earlier tool-level read. Delivery is
-   retryable even when a subsequent call finds the Goal already dropped. The
-   Tasks the drop leaves behind are read before the transaction, so no task
-   store read happens under the Goal lock. The reason becomes the Goal's
-   review note and the sentence each cancelled Task's author is told. *)
+(* The drop and its audit intent share the Goal transaction. Decide from the
+   locked row, including its current review metadata, rather than applying a
+   phase calculated from the earlier tool-level read. Delivery is retryable
+   even when a subsequent call finds the Goal already dropped. The reason
+   becomes the Goal's review note. *)
 let finish_goal_drop ~tool_name ~start_time (ctx : context) ~goal_id ~reason =
-  let work = dropped_goal_work ctx.config ~goal_id in
   let effects (goal : Goal_store.goal) changed : Goal_store.transition_effects =
     if not changed then no_goal_effects
     else
@@ -1159,9 +953,7 @@ let finish_goal_drop ~tool_name ~start_time (ctx : context) ~goal_id ~reason =
           `Assoc [ "phase", `String (Goal_phase.to_string goal.phase)
                  ; "resume_phase", Goal_phase.resume_phase_to_yojson goal.phase
                  ; "actor", `String ctx.agent_name ] ]
-      ; notifications = match work with
-          | Ok { held = _ :: _ as held; _ } -> [ ctx.agent_name, dropped_goal_notice ~goal held ]
-          | Ok { held = []; _ } | Error _ -> [] }
+      ; notifications = [] }
   in
   match Goal_store.transact_goal ~effects ctx.config ~goal_id (fun goal ->
     match Goal_phase.decide_transition ~phase:goal.phase ~action:Goal_phase.Drop with
@@ -1185,16 +977,14 @@ let finish_goal_drop ~tool_name ~start_time (ctx : context) ~goal_id ~reason =
         (Goal_store.write_error_to_string error)
   | Ok (goal, changed) ->
       if changed then notify_goal_verification_abandoned ctx ~goal_id;
-      let tasks = if changed then [ "tasks", dropped_goal_tasks_json ctx ~goal_id ~reason work ] else [] in
       let delivery = deliver_goal_effects ctx.config in
       ok_result ~tool_name ~start_time
-        ([ "goal_id", `String goal_id
-         ; "action", `String (Goal_phase.action_to_string Goal_phase.Drop)
-         ; "noop", `Bool (not changed)
-         ; "phase", Goal_phase.to_yojson goal.phase
-         ; "goal", Goal_store.goal_to_yojson goal
-         ; "effect_delivery", delivery ]
-         @ tasks)
+        [ "goal_id", `String goal_id
+        ; "action", `String (Goal_phase.action_to_string Goal_phase.Drop)
+        ; "noop", `Bool (not changed)
+        ; "phase", Goal_phase.to_yojson goal.phase
+        ; "goal", Goal_store.goal_to_yojson goal
+        ; "effect_delivery", delivery ]
 ;;
 
 let finish_goal_reopen ~tool_name ~start_time (ctx : context) ~note goal =
@@ -1267,7 +1057,7 @@ let finish_goal_suspension ~tool_name ~start_time (ctx : context) ~goal_id ~acti
 let finish_goal_request_complete ?evidence_refs ?expected_verification
     ~tool_name ~start_time (ctx : context) ~goal_id ~action =
   match request_current_proof_bound ?evidence_refs ?expected_verification
-      ~mode:Require_executing ctx.config ~goal_id with
+      ctx.config ~goal_id with
   | Error error -> proof_request_failure ~tool_name ~start_time error
   | Ok (updated_goal, record) ->
     emit_goal_event ctx ~goal_id ~event_type:"goal_phase"
@@ -1280,18 +1070,6 @@ let finish_goal_request_complete ?evidence_refs ?expected_verification
       ; "goal", Goal_store.goal_to_yojson updated_goal
       ; "verification", Goal_verification.record_to_yojson_for_goal ~goal:updated_goal record ]
 ;;
-
-module For_testing = struct
-  let answer_verifying_repeat ?evidence_refs ctx ~goal_id =
-    answer_verifying_repeat ?evidence_refs ~tool_name:"masc_goal_transition"
-      ~start_time:(Tool_timing.start ()) ctx ~goal_id ~action:Goal_phase.Request_complete
-
-  let finish_goal_request_complete ?evidence_refs ctx ~goal_id =
-    finish_goal_request_complete ?evidence_refs ~tool_name:"masc_goal_transition"
-      ~start_time:(Tool_timing.start ()) ctx ~goal_id ~action:Goal_phase.Request_complete
-
-  let cancel_dropped_goal_todos = cancel_dropped_goal_todos
-end
 
 (* A transition targets the ID the caller supplied. The shared string
    validator trims input, which could otherwise redirect a stored legacy ID
@@ -1341,14 +1119,13 @@ let handle_goal_transition_validated ~tool_name ~start_time (ctx : context) args
   | Ok goal_id, Ok (Some public_action) ->
     let action = Goal_phase.Public_action.to_action public_action in
     let note = get_string_opt args "note" in
-    (* A drop cancels Tasks whose authors are told why, so it must say why. *)
+    (* A drop records why in the Goal's review note. *)
     let drop () = match Option.map String.trim note with
       | Some reason when not (String.equal reason "") ->
           finish_goal_drop ~tool_name ~start_time ctx ~goal_id ~reason
       | Some _ | None ->
           error_result_typed ~tool_name ~start_time ~code:Validation_error
-            "drop needs a note that says why the Goal is dropped: it becomes the Goal's review \
-             note and the reason every author of a cancelled Task is told" in
+            "drop needs a note that says why the Goal is dropped: it becomes the Goal's review note" in
     (match public_action with
      | Goal_phase.Public_action.Pause | Goal_phase.Public_action.Resume
      | Goal_phase.Public_action.Block | Goal_phase.Public_action.Unblock ->

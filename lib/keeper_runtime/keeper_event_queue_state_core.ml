@@ -18,7 +18,6 @@ type source_terminal_receipt =
   | Fusion_terminal of Keeper_event_queue.fusion_completion
   | Hitl_terminal of Keeper_event_queue.hitl_resolution
   | Turn_completed
-  | Turn_attempt_terminal of { detail : string }
 
 type accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
@@ -49,7 +48,6 @@ type projected_disposition_kind =
   | Projected_fusion_terminal
   | Projected_hitl_terminal
   | Projected_turn_completed
-  | Projected_turn_attempt_terminal
 
 type projected_source_kind =
   | Source_board_signal
@@ -99,28 +97,8 @@ type pending_selection =
   ; admitted_revision : int64
   ; arrival : int64
   ; checkpoint_retentions : int
-  ; repetition_scope : Keeper_execution_scope_id.t option
   ; first_admitted_at : float option
   }
-
-type scope_binding_error =
-  | Empty_scope_batch
-  | Duplicate_scope_selection
-  | Invalid_scope_selection of string
-  | Scope_binding_conflict of
-      { requested : Keeper_execution_scope_id.t
-      ; existing : Keeper_execution_scope_id.t
-      }
-
-let scope_binding_error_to_string = function
-  | Empty_scope_batch -> "repetition scope binding requires a nonempty source batch"
-  | Duplicate_scope_selection -> "repetition scope batch repeats an exact selection"
-  | Invalid_scope_selection detail -> "repetition scope selection is stale: " ^ detail
-  | Scope_binding_conflict { requested; existing } ->
-    Printf.sprintf "repetition scope binding conflict: requested %s, existing %s"
-      (Yojson.Safe.to_string (Keeper_execution_scope_id.to_json requested))
-      (Yojson.Safe.to_string (Keeper_execution_scope_id.to_json existing))
-;;
 
 type t =
   { revision : int64
@@ -172,8 +150,7 @@ let non_immediate_urgency_of_witness (witness : projected_disposition_witness) =
   match witness.kind with
   | Projected_fusion_terminal
   | Projected_hitl_terminal
-  | Projected_turn_completed
-  | Projected_turn_attempt_terminal ->
+  | Projected_turn_completed ->
     non_immediate_urgency witness.urgency
   | Projected_cancel _ | Projected_transfer _ -> None
 ;;
@@ -214,19 +191,6 @@ let derived_last_non_immediate_served
            | Projected_witness witness ->
              non_immediate_urgency_of_witness witness)
          projected_dispositions)
-;;
-
-(* Each admitted entry takes the next number of a counter the state carries, and
-   keeps it until it leaves the queue. A reader that loaded the state when the
-   counter stood at [f] therefore saw exactly the entries numbered below [f].
-   The counter would need 2^63 admissions to wrap. *)
-type frontier = int64
-
-let frontier state = state.next_arrival
-let unobserved_frontier = 0L
-
-let arrived_since frontier (entry : pending_selection) =
-  Int64.compare entry.arrival frontier >= 0
 ;;
 
 let same_entry (left : pending_selection) (right : pending_selection) =
@@ -320,8 +284,6 @@ let projected_kind_of_transition = function
     Projected_hitl_terminal
   | Ack_source_terminal { source_receipt = Turn_completed; _ } ->
     Projected_turn_completed
-  | Ack_source_terminal { source_receipt = Turn_attempt_terminal _; _ } ->
-    Projected_turn_attempt_terminal
 ;;
 
 let projected_source_kind = function
@@ -371,12 +333,6 @@ let transition_ref transition =
         | Fusion_terminal _ -> [ "source_receipt_kind", `String "fusion" ]
         | Hitl_terminal _ -> [ "source_receipt_kind", `String "hitl" ]
         | Turn_completed -> [ "source_receipt_kind", `String "turn_completed" ]
-        | Turn_attempt_terminal _ ->
-          (* [detail] is diagnostic rather than operation authority: both the
-             full-receipt replay contract and retry callers may supply a newer
-             rendering for the same admitted attempt. Keep the compact
-             fingerprint aligned with that typed replay identity. *)
-          [ "source_receipt_kind", `String "turn_attempt_terminal" ]
       in
       [ "kind", `String "source_terminal"
       ; "source_ref", `String source_ref
@@ -488,7 +444,6 @@ let project_accepted_transfer ?admitted_at (transfer : accepted_transfer) state 
                    ; admitted_revision = state.revision
                    ; arrival = state.next_arrival
                    ; checkpoint_retentions = 0
-                   ; repetition_scope = None
                    ; first_admitted_at = admitted_at
                    }
                  ]
@@ -599,7 +554,7 @@ let reconcile_pending ~first_admitted_at pending state =
         | None ->
           ( { source; admitted_revision = state.revision
             ; arrival = next_arrival; checkpoint_retentions = 0
-            ; repetition_scope = None; first_admitted_at }
+            ; first_admitted_at }
           , Int64.succ next_arrival )
       in
       reconcile available (entry :: acc) next_arrival rest
@@ -632,7 +587,7 @@ let transition_outbox_blocked state = state.transition_outbox <> []
 (* For this single-entry selection, rank [Immediate] first and use
    [last_non_immediate_served] to prefer a [Normal] or [Low] lane without
    wall-clock aging. Within a lane, the first ready entry in [pending_entries]
-   wins, preserving FIFO arrival order and [defer_pending] lane rotation.
+   wins, preserving FIFO arrival order and [defer_pending_batch] lane rotation.
    The lane preference does not bound an individual entry's wait. *)
 let first_ready_entry ~last_non_immediate_served ~ready entries =
   entries
@@ -661,13 +616,6 @@ let peek_when ~now:_ ~ready state =
        ~last_non_immediate_served:state.last_non_immediate_served
        ~ready
        state.pending_entries)
-;;
-
-let select_when ~now:_ ~ready state =
-  first_ready_entry
-    ~last_non_immediate_served:state.last_non_immediate_served
-    ~ready
-    state.pending_entries
 ;;
 
 let validate_pending_selection
@@ -704,34 +652,6 @@ let ack_pending ~(selection : pending_selection) state =
       | None -> state.last_non_immediate_served
     in
     Ok { state with pending_entries; last_non_immediate_served }
-;;
-
-let bind_pending_repetition_scope ~selections ~scope state =
-  let open Result.Syntax in
-  let* () = if selections = [] then Error Empty_scope_batch else Ok () in
-  let rec validate seen = function
-    | [] -> Ok ()
-    | selection :: rest ->
-      let* () = if List.mem selection seen then Error Duplicate_scope_selection else Ok () in
-      let* () = validate_pending_selection ~selection state
-        |> Result.map_error (fun detail -> Invalid_scope_selection detail) in
-      let* () = match selection.repetition_scope with
-        | None -> Ok ()
-        | Some existing when Keeper_execution_scope_id.equal existing scope -> Ok ()
-        | Some existing -> Error (Scope_binding_conflict { requested = scope; existing }) in
-      validate (selection :: seen) rest
-  in
-  let* () = validate [] selections in
-  if List.for_all (fun selection -> Option.is_some selection.repetition_scope) selections
-  then Ok (state, selections)
-  else
-    let updates = List.map (fun selection ->
-      selection, { selection with repetition_scope = Some scope }) selections in
-    let pending_entries = List.map (fun entry ->
-      match List.assoc_opt entry updates with
-      | Some updated -> updated
-      | None -> entry) state.pending_entries in
-    Ok ({ state with pending_entries }, List.map snd updates)
 ;;
 
 (* A checkpoint-yield turn retains Connector_attention entries instead of
@@ -774,7 +694,6 @@ let reprioritize_pending
         ; admitted_revision = next_revision
         ; arrival = selection.arrival
         ; checkpoint_retentions = selection.checkpoint_retentions
-        ; repetition_scope = selection.repetition_scope
         ; first_admitted_at = selection.first_admitted_at
         }
       in
@@ -787,27 +706,6 @@ let reprioritize_pending
       let sorted_pending =
         pending state |> Keeper_event_queue.sort_by_urgency
       in
-      Ok (with_pending sorted_pending state, next_revision)
-;;
-
-let defer_pending ~(selection : pending_selection) state =
-  match validate_pending_selection ~selection state with
-  | Error _ as error -> error
-  | Ok () ->
-    if Int64.equal state.revision Int64.max_int
-    then Error "event queue revision exhausted"
-    else
-      let next_revision = Int64.succ state.revision in
-      let deferred = { selection with admitted_revision = next_revision } in
-      let same_urgency, other_urgency =
-        state.pending_entries
-        |> List.filter (Fun.negate (( = ) selection))
-        |> List.partition (fun entry ->
-          entry.source.urgency = selection.source.urgency)
-      in
-      let pending_entries = same_urgency @ [ deferred ] @ other_urgency in
-      let state = { state with pending_entries } in
-      let sorted_pending = state |> pending |> Keeper_event_queue.sort_by_urgency in
       Ok (with_pending sorted_pending state, next_revision)
 ;;
 
@@ -949,7 +847,7 @@ let validate_accepted_source_terminal
   then Error "source-terminal ACK operation id must not be empty"
   else (
     match source_terminal.source_receipt with
-    | Turn_completed | Turn_attempt_terminal _ -> Ok ()
+    | Turn_completed -> Ok ()
     | (Fusion_terminal _ | Hitl_terminal _) as expected ->
       let* receipt = source_terminal_receipt_of_stimulus source_terminal.source in
       if receipt = expected
@@ -1206,7 +1104,9 @@ let accepted_pending_source_terminal_ack_replay source_terminal state =
          source_terminal.operator_operation_id)
 ;;
 
-let turn_attempt_terminal_operation_id
+(* The prefix is part of every durable turn-terminal ACK operation id, so a
+   replayed ACK finds its receipt by the same id. *)
+let turn_terminal_operation_id
       ~admitted_revision
       source
   =
@@ -1269,29 +1169,34 @@ let ack_pending_source_terminal
        state)
 ;;
 
-let turn_terminal_receipt_matches_replay left right =
-  match left, right with
-  | Turn_completed, Turn_completed
-  | Turn_attempt_terminal _, Turn_attempt_terminal _ ->
-    true
-  | Fusion_terminal _, _
-  | Hitl_terminal _, _
-  | Turn_completed, _
-  | Turn_attempt_terminal _, _ ->
-    false
-;;
-
-let terminalize_pending_turn
+let terminalize_pending_turn_completed
       ~applied_at
       ~selection
-      ~source_receipt
       state
   =
   let { source; admitted_revision } = selection in
   let operator_operation_id =
-    turn_attempt_terminal_operation_id
+    turn_terminal_operation_id
       ~admitted_revision
       source
+  in
+  let source_terminal =
+    { source
+    ; source_incarnation = admitted_revision
+    ; operator_operation_id
+    ; source_receipt = Turn_completed
+    }
+  in
+  let completed_receipt = function
+    | Turn_completed -> true
+    | Fusion_terminal _ | Hitl_terminal _ -> false
+  in
+  let completed_witness = function
+    | Projected_turn_completed -> true
+    | Projected_cancel _
+    | Projected_transfer _
+    | Projected_fusion_terminal
+    | Projected_hitl_terminal -> false
   in
   match prior_disposition_by_operation_id operator_operation_id state with
   | Some
@@ -1299,54 +1204,22 @@ let terminalize_pending_turn
         ({ transition =
              Ack_source_terminal
                { source = prior_source
-               ; source_receipt = prior_source_receipt
+               ; source_receipt = prior_receipt
                ; _
                }
          ; _
          } as receipt))
-    when prior_source = source
-         && turn_terminal_receipt_matches_replay
-              prior_source_receipt
-              source_receipt ->
+    when prior_source = source && completed_receipt prior_receipt ->
     Ok (state, Transition_already_applied receipt)
   | Some (Projected_witness witness)
-    when String.equal witness.source_ref (source_snapshot_ref source)
-         && Int64.equal witness.source_incarnation admitted_revision
-         && (match witness.kind, source_receipt with
-             | Projected_turn_completed, Turn_completed
-             | Projected_turn_attempt_terminal, Turn_attempt_terminal _ -> true
-             | Projected_fusion_terminal, Fusion_terminal _
-             | Projected_hitl_terminal, Hitl_terminal _ ->
-               String.equal witness.transition_ref (transition_ref (Ack_source_terminal
-                 { source
-                 ; source_incarnation = admitted_revision
-                 ; operator_operation_id
-                 ; source_receipt
-                 }))
-             | ( (Projected_cancel _ | Projected_transfer _)
-               , (Fusion_terminal _ | Hitl_terminal _ | Turn_completed
-                 | Turn_attempt_terminal _) )
-             | Projected_fusion_terminal
-               , (Hitl_terminal _ | Turn_completed | Turn_attempt_terminal _)
-             | Projected_hitl_terminal
-               , (Fusion_terminal _ | Turn_completed | Turn_attempt_terminal _)
-             | Projected_turn_completed
-               , (Fusion_terminal _ | Hitl_terminal _ | Turn_attempt_terminal _)
-             | Projected_turn_attempt_terminal
-               , (Fusion_terminal _ | Hitl_terminal _ | Turn_completed) -> false) ->
-    let transition =
-      Ack_source_terminal
-        { source
-        ; source_incarnation = admitted_revision
-        ; operator_operation_id
-        ; source_receipt
-        }
-    in
+    when completed_witness witness.kind
+         && String.equal witness.source_ref (source_snapshot_ref source)
+         && Int64.equal witness.source_incarnation admitted_revision ->
     let receipt =
       { transition_id = witness.transition_id
       ; event_id = witness.event_id
       ; applied_at = witness.applied_at
-      ; transition
+      ; transition = Ack_source_terminal source_terminal
       }
     in
     Ok (state, Transition_already_applied receipt)
@@ -1359,46 +1232,14 @@ let terminalize_pending_turn
       | Projected_witness _) ->
     Error
       (Printf.sprintf
-         "turn-attempt terminal operation conflict: %s"
+         "turn terminal operation conflict: %s"
          operator_operation_id)
   | None ->
     let* () = validate_pending_selection ~selection state in
-    let source_terminal =
-      { source
-      ; source_incarnation = admitted_revision
-      ; operator_operation_id
-      ; source_receipt
-      }
-    in
     ack_pending_source_terminal
       ~applied_at
       ~source_terminal
       state
-;;
-
-let terminalize_pending_turn_attempt
-      ~applied_at
-      ~selection
-      ~detail
-      state
-  =
-  terminalize_pending_turn
-    ~applied_at
-    ~selection
-    ~source_receipt:(Turn_attempt_terminal { detail })
-    state
-;;
-
-let terminalize_pending_turn_completed
-      ~applied_at
-      ~selection
-      state
-  =
-  terminalize_pending_turn
-    ~applied_at
-    ~selection
-    ~source_receipt:Turn_completed
-    state
 ;;
 
 (* A turn leaves its batch pending until its terminal receipt, and a
@@ -1419,7 +1260,7 @@ let pending_source_left ~operator_operation_id ~source state =
 let pending_turn_selection_withdrawn ~(selection : pending_selection) state =
   pending_source_left
     ~operator_operation_id:
-      (turn_attempt_terminal_operation_id
+      (turn_terminal_operation_id
          ~admitted_revision:selection.admitted_revision
          selection.source)
     ~source:selection.source
@@ -1513,11 +1354,4 @@ let replay_transition_outbox_entry entry state =
      | Ack_source_terminal _, ([] | _ :: _ :: _) ->
        Error "pending source-terminal ACK WAL must carry exactly one source"
     ))
-;;
-
-let remove_by_post_id post_id state =
-  let removed, pending =
-    Keeper_event_queue.remove_by_post_id post_id (pending state)
-  in
-  Keeper_event_queue.uniq_stimuli removed, with_pending pending state
 ;;

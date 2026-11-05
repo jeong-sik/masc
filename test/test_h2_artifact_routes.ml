@@ -3,7 +3,6 @@
    transport fixture uses a minimal synthetic transformer; the optional run
    uses the actual masc-artifact-document executable. *)
 open Alcotest
-module Preparation = Masc_test_deps.Board_test_preparation
 module Http = Masc.Http_server_eio
 module Live = Masc.Artifact_draft_live
 module Draft = Masc.Artifact_draft
@@ -70,8 +69,7 @@ let with_gateway ?(runtime = false) ?resources ?(zero_window = false) run =
               Fun.protect ~finally:(fun () -> if runtime then Process_eio.reset_for_testing ()) (fun () ->
                 if runtime then (
                   Masc.Board.reset_global_for_test ();
-                  Masc.Board_dispatch.reset_for_test ();
-                  Preparation.prepare ~base_path ~action:Preparation.Bootstrap);
+                  Masc.Board_dispatch.reset_for_test ());
                 let state = if runtime then Masc.Mcp_server.create_state_eio ~sw
                   ~proc_mgr:(Eio.Stdenv.process_mgr env) ~fs:(Eio.Stdenv.fs env)
                   ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env)
@@ -231,7 +229,7 @@ let test_schedule_workspace_read_h1_h2 () =
 let test_goal_planning_workspace_read_h1_h2 () =
   with_gateway (fun ~base_path ~worker:_ ~player:_ ~admin gateway ->
     let config = Masc.Workspace.default_config base_path in
-    let goal, _ = match Goal_store.upsert_goal config
+    let goal, _, _ = match Goal_store.upsert_goal_with_events ~actor:"test" config
       ~title:"Workspace-bound planning" ~metric:"proof" ~target_value:"1" () with
       | Ok goal -> goal | Error error -> fail (Goal_store.write_error_to_string error) in
     let root = Filename.concat base_path ".masc" in
@@ -309,7 +307,7 @@ let test_goal_confirmation_h1_h2 () =
        An empty existing config directory makes this fixture deterministically Off. *)
     Masc_test_deps.with_process_env "MASC_CONFIG_DIR" (Some base_path) @@ fun () ->
     let config = Masc.Workspace.default_config base_path in
-    let goal, _ = match Goal_store.upsert_goal config
+    let goal, _, _ = match Goal_store.upsert_goal_with_events ~actor:"test" config
       ~title:"Transport parity" ~metric:"proof" ~target_value:"1" () with
       | Ok goal -> goal | Error error -> fail (Goal_store.write_error_to_string error) in
     let ctx : Masc.Tool_workspace.context = {config; agent_name = "planner"} in

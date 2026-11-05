@@ -57,14 +57,6 @@ val keeper_observation_current_task_absent : string
 val keeper_observation_current_task_absent_in_recovery : string
 val keeper_observation_current_task_unobservable : string
 
-val keeper_observation_previous_turn_stop_repeated_tool_call : string
-(** Rendered into the next turn's Autonomous Trigger layer when the runtime's
-    repeated-call guard ended the previous turn. Variables: [tool_name],
-    [repeated_count]. *)
-
-val keeper_observation_previous_turn_stop_repeated_assistant_text : string
-(** The same for the repeated-assistant-text guard. Variable: [repeated_count]. *)
-
 val keeper_current_task_skills : string
 val keeper_held_task_skills : string
 val keeper_held_task_skills_heading : string
@@ -200,17 +192,6 @@ val eval_calibration_few_shot_rejected_label : string
 (** The label a divergence example carries when the human rejected what the
     evaluator approved. *)
 
-(** Repository checkout freshness fragments. *)
-val keeper_context_checkouts_section : string
-val keeper_context_checkouts_row : string
-val keeper_context_checkouts_standing_current : string
-val keeper_context_checkouts_standing_stale_ref : string
-val keeper_context_checkouts_standing_ahead : string
-val keeper_context_checkouts_standing_behind : string
-val keeper_context_checkouts_standing_diverged : string
-val keeper_context_checkouts_standing_unavailable : string
-val keeper_context_checkouts_unmeasured : string
-
 (** Approval authority fragments. *)
 val keeper_context_approval_authority_heading : string
 val keeper_context_approval_authority_state_complete : string
@@ -322,10 +303,6 @@ val keeper_world_autonomous_trigger_scheduler_reactive : string
 val keeper_world_autonomous_trigger_reasons : string
 val keeper_world_autonomous_trigger_since_last : string
 
-(** The line closing an autonomous wake input that states whether this turn
-    may end with an empty final answer. *)
-val keeper_wake_completion_quiet_final_allowed : string
-val keeper_wake_completion_progress_required : string
 val keeper_world_scheduled_automation_heading : string
 val keeper_world_scheduled_automation_counts : string
 val keeper_world_scheduled_automation_next_due : string

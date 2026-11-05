@@ -23,45 +23,6 @@ let test_keepalive_signal_callbacks () =
   check bool "grpc starter invoked" true !started;
   Keeper_keepalive_signal.register_grpc_heartbeat_starter
     { Keeper_keepalive_signal.f = (fun ~ctx:_ ~m:_ ~stop:_ -> None) };
-  let wake_called = ref false in
-  Keeper_keepalive_signal.register_record_wake_payload
-    (fun
-      ~keeper_name:_
-      ~trace_id:_
-      ~turn_index:_
-      ~context_window:_
-      ~system_prompt_bytes:_
-      ~tool_schema_json_bytes:_
-      ~message_content_bytes:_
-      ~message_count:_
-      ~role_counts:_
-      ~tool_count:_
-    -> wake_called := true);
-  Keeper_keepalive_signal.record_wake_payload
-    ~keeper_name:"k"
-    ~trace_id:"t"
-    ~turn_index:0
-    ~context_window:4096
-    ~system_prompt_bytes:0
-    ~tool_schema_json_bytes:0
-    ~message_content_bytes:0
-    ~message_count:0
-    ~role_counts:[]
-    ~tool_count:0;
-  check bool "wake payload callback invoked" true !wake_called;
-  Keeper_keepalive_signal.register_record_wake_payload
-    (fun
-      ~keeper_name:_
-      ~trace_id:_
-      ~turn_index:_
-      ~context_window:_
-      ~system_prompt_bytes:_
-      ~tool_schema_json_bytes:_
-      ~message_content_bytes:_
-      ~message_count:_
-      ~role_counts:_
-      ~tool_count:_
-    -> ());
   let skipped = ref false in
   Keeper_keepalive_signal.register_record_tool_skipped
     (fun ~tool_name:_ ~reason_code:_ -> skipped := true);

@@ -172,6 +172,20 @@ let handle_sandbox_volume_gc ~tool_name ~start_time (ctx : context) args : Tool_
     match resolve_gc_image image_argument with
     | Error detail -> workflow_err ~tool_name ~start_time detail
     | Ok claims_image ->
+    let run = Sandbox_readiness.system_runner in
+    match Sandbox_readiness.apple_container_service ~host:(Sandbox_readiness.detect_host ~run) ~run with
+    | ( Sandbox_readiness.Missing_prerequisite _ | Sandbox_readiness.Unsupported_host _
+      | Sandbox_readiness.Unsupported_capability _ | Sandbox_readiness.Probe_failed _
+      | Sandbox_readiness.Needs_configuration _ ) as service ->
+      (* Without an answering Apple Container there are no Keeper volumes to
+         read, so the tool refuses before running a command that cannot start. *)
+      Tool_result.make_err
+        ~tool_name
+        ~class_:Tool_result.Dependency_unavailable
+        ~start_time
+        ("Apple Container is not available on this host: "
+         ^ Sandbox_readiness.state_message service)
+    | Sandbox_readiness.Service_ready ->
       let registered_keeper name =
         Option.is_some
           (Config_dir_resolver.keeper_toml_path_opt_for_base_path

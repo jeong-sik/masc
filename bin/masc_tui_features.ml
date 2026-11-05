@@ -95,6 +95,8 @@ let sections =
   ; ( "Bring media in"
     , [ { opener = Command "image"
         ; description = "draw an image file on the terminal: /image <path>" }
+      ; { opener = Command "images"
+        ; description = "open a conversation image or diagram, newest first: /images [N]; Ctrl-O previews the newest" }
       ; { opener = Command "attach"
         ; description = "stage an image for the next message: /attach <path>" }
       ; { opener = Command "ref"

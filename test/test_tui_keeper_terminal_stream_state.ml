@@ -1,7 +1,6 @@
-(* What the TUI keeps while the Terminal tab follows a Keeper's Execute output
-   over its stream: when a stream is wanted, whose messages are taken, what a
-   lost connection leaves on screen, and how the stream and the one-shot read
-   of the same output share one cell.
+(* What the TUI keeps while the logs view or the Terminal tab follows a
+   Keeper's Execute output over its stream: when a stream is wanted, whose
+   messages are taken, and what a lost connection leaves on screen.
 
    Nothing here opens a socket. The stream's messages are values the render
    loop is handed, and the state decides what each of them does. *)
@@ -27,7 +26,7 @@ let keeper name : Tui_types.keeper =
         ; k_total_turns = 0
         ; k_total_tokens = 0
         ; k_total_cost_usd = Keeper_cost_coverage.empty
-        ; k_last_turn_ts = ""
+        ; k_last_turn_at = None
         ; k_last_proactive_outcome = None
         }
   }
@@ -44,7 +43,7 @@ let server_identity : Masc.Tui_decode.server_identity =
   ; sid_uptime = None
   ; sid_sse_clients = None
   ; sid_gc = None
-  ; sid_scheduler = None
+  ; sid_scheduler = None; sid_operator_action = None
   }
 
 let line seq text : Tui_types.keeper_execute_line =
@@ -82,7 +81,7 @@ let terminal_state () =
 
 (* The job [reconcile_keeper_logs] would open for what is on screen. *)
 let start_stream state =
-  match Tui_types.keeper_terminal_stream_key state with
+  match Tui_types.keeper_execute_stream_key state with
   | None -> Alcotest.fail "no stream is wanted on the Terminal tab"
   | Some key ->
     let job =
@@ -115,30 +114,36 @@ let describe state =
 
 let reading_message ~at texts = Tui_types.Execute_stream_reading (reading_of texts, at)
 
-let test_a_stream_is_wanted_only_for_the_terminal_tab_of_a_confirmed_workspace () =
+let test_a_stream_is_wanted_for_the_logs_view_and_the_terminal_tab_of_a_confirmed_workspace () =
   let state = terminal_state () in
   let wanted () =
     Option.map
       (fun (key : Tui_types.keeper_log_key) -> key.klk_keeper, key.klk_limit)
-      (Tui_types.keeper_terminal_stream_key state)
+      (Tui_types.keeper_execute_stream_key state)
   in
   check
     Alcotest.(option (pair string int))
     "the Terminal tab"
-    (Some ("analyst", Tui_types.keeper_terminal_window))
+    (Some ("analyst", Tui_types.keeper_execute_window))
     (wanted ());
   state.keeper_cursor <- 1;
   check
     Alcotest.(option (pair string int))
     "the Keeper under the cursor"
-    (Some ("builder", Tui_types.keeper_terminal_window))
+    (Some ("builder", Tui_types.keeper_execute_window))
     (wanted ());
   state.keeper_cursor <- 0;
   state.detail_tab <- Tui_types.Detail_info;
   check Alcotest.(option (pair string int)) "another tab" None (wanted ());
   state.detail_tab <- Tui_types.Detail_terminal;
   state.view <- Tui_types.Keepers Keeper_logs;
-  check Alcotest.(option (pair string int)) "the logs view polls" None (wanted ());
+  check
+    Alcotest.(option (pair string int))
+    "the logs view, with the Terminal tab's window"
+    (Some ("analyst", Tui_types.keeper_execute_window))
+    (wanted ());
+  state.view <- Tui_types.Keepers Keeper_list;
+  check Alcotest.(option (pair string int)) "the roster" None (wanted ());
   state.view <- Tui_types.Keepers Keeper_detail;
   state.workspace_identity <- Tui_types.Workspace_identity_unread;
   check Alcotest.(option (pair string int)) "a workspace not yet read" None (wanted ());
@@ -204,11 +209,17 @@ let test_a_message_for_output_the_tab_no_longer_shows_is_dropped () =
   state.detail_tab <- Tui_types.Detail_info;
   check Alcotest.bool "the tab was left" false
     (Tui_types.take_keeper_execute_stream state job (reading_message ~at:5. [ "analyst's" ]));
-  state.detail_tab <- Tui_types.Detail_terminal;
-  state.view <- Tui_types.Keepers Keeper_logs;
-  check Alcotest.bool "the logs view reads the same Keeper but is not the Terminal" false
-    (Tui_types.take_keeper_execute_stream state job (reading_message ~at:5. [ "analyst's" ]));
   check Alcotest.string "nothing was read" "absent" (describe state)
+;;
+
+let test_the_logs_view_takes_the_readings_of_the_same_stream () =
+  let state = terminal_state () in
+  let job, _ = start_stream state in
+  ignore (Tui_types.take_keeper_execute_stream state job (reading_message ~at:5. [ "a" ]));
+  state.view <- Tui_types.Keepers Keeper_logs;
+  check Alcotest.bool "the logs view of the same Keeper" true
+    (Tui_types.take_keeper_execute_stream state job (reading_message ~at:6. [ "a"; "b" ]));
+  check Alcotest.string "shows the newer reading" "ready [a,b] at 6" (describe state)
 ;;
 
 let test_a_lost_connection_keeps_the_last_reading_and_says_so () =
@@ -289,26 +300,6 @@ let test_stopped_stream_keeps_its_owner_until_tab_reentry () =
   check Alcotest.string "replacement clears the stopped state" "ready [new] at 7" (describe state)
 ;;
 
-(* The cell has two writers: the one-shot read the logs view uses, and the
-   stream. A poll that was out when the stream took over answers with what the
-   server held earlier, and must not put that back over newer rows. *)
-let test_a_poll_still_out_does_not_overwrite_a_newer_stream_reading () =
-  let state = terminal_state () in
-  let poll =
-    match
-      Tui_types.begin_keeper_execute_read state ~intent:Tui_types.Snapshot_read.Poll
-        ~limit:Tui_types.keeper_terminal_window (keeper "analyst")
-    with
-    | Some request -> request
-    | None -> Alcotest.fail "the poll did not start"
-  in
-  let job, _ = start_stream state in
-  ignore (Tui_types.take_keeper_execute_stream state job (reading_message ~at:7. [ "newer" ]));
-  check Alcotest.bool "the late answer is dropped" false
-    (Tui_types.take_keeper_execute_read state poll (Ok (reading_of [ "older" ], 3.)));
-  check Alcotest.string "the stream's reading stands" "ready [newer] at 7" (describe state)
-;;
-
 let test_stopping_the_stream_keeps_what_it_drew_and_retires_what_it_awaited () =
   let state = terminal_state () in
   let job, stopped = start_stream state in
@@ -323,7 +314,7 @@ let test_stopping_the_stream_keeps_what_it_drew_and_retires_what_it_awaited () =
   let _job, _ = start_stream state in
   (match
      Masc_tui_fetched.refresh ~equal:Tui_types.keeper_log_equal_key state.keeper_execute_output
-       ~key:(Option.get (Tui_types.keeper_terminal_stream_key state))
+       ~key:(Option.get (Tui_types.keeper_execute_stream_key state))
    with
    | Masc_tui_fetched.Started (next, _) -> state.keeper_execute_output <- next
    | Masc_tui_fetched.Already_loading -> Alcotest.fail "nothing was loading");
@@ -333,39 +324,6 @@ let test_stopping_the_stream_keeps_what_it_drew_and_retires_what_it_awaited () =
     (match Tui_types.keeper_execute_view state with
      | Masc_tui_fetched.Failed _ -> true
      | Absent | Loading | Ready _ | Stale _ -> false)
-;;
-
-(* Leaving the Terminal for the logs view starts the logs read in the key
-   handler, and the loop stops the stream on its next pass. The logs read asks
-   for another window of the same cell, and stopping the stream must not retire
-   it. *)
-let test_stopping_the_stream_leaves_a_read_for_another_window_waiting () =
-  let state = terminal_state () in
-  let _job, stopped = start_stream state in
-  state.view <- Tui_types.Keepers Keeper_logs;
-  (match
-     Tui_types.begin_keeper_execute_read state ~intent:Tui_types.Snapshot_read.Poll ~limit:200
-       (keeper "analyst")
-   with
-   | Some _ -> ()
-   | None -> Alcotest.fail "the logs read did not start");
-  check Alcotest.string "the logs read is out" "loading" (describe state);
-  check Alcotest.bool "the stream was running" true (Tui_types.stop_keeper_execute_stream state);
-  check Alcotest.bool "its owner was told to stop" true !stopped;
-  check Alcotest.string "the logs read is still waiting" "loading" (describe state)
-;;
-
-let test_stopping_the_poll_says_whether_one_was_held () =
-  let state = terminal_state () in
-  check Alcotest.bool "none yet" false (Tui_types.stop_keeper_execute_poll state);
-  ignore
-    (Tui_types.begin_keeper_execute_read state ~intent:Tui_types.Snapshot_read.Poll
-       ~limit:Tui_types.keeper_terminal_window (keeper "analyst"));
-  let cancelled = ref false in
-  state.keeper_execute_cancel <- Some (ref (), fun () -> cancelled := true);
-  check Alcotest.bool "one was held" true (Tui_types.stop_keeper_execute_poll state);
-  check Alcotest.bool "and told to stop" true !cancelled;
-  check Alcotest.bool "then none is" false (Tui_types.stop_keeper_execute_poll state)
 ;;
 
 let plan_name = function
@@ -387,6 +345,9 @@ let test_the_plan_follows_what_the_tab_shows () =
   check Alcotest.string "another Keeper under the cursor restarts it" "follows builder" (plan state);
   state.keeper_cursor <- 0;
   check Alcotest.string "and back again is the same stream" "stays" (plan state);
+  state.view <- Tui_types.Keepers Keeper_logs;
+  check Alcotest.string "the logs view of the same Keeper keeps it" "stays" (plan state);
+  state.view <- Tui_types.Keepers Keeper_detail;
   state.workspace_read_authority <- ref ();
   check Alcotest.string "a stream opened before the workspace changed is not this one"
     "follows analyst" (plan state);
@@ -419,9 +380,9 @@ let () =
     "tui_keeper_terminal_stream_state"
     [ ( "following the stream"
       , [ Alcotest.test_case
-            "a stream is wanted only for the Terminal tab of a confirmed workspace"
+            "a stream is wanted for the logs view and the Terminal tab of a confirmed workspace"
             `Quick
-            test_a_stream_is_wanted_only_for_the_terminal_tab_of_a_confirmed_workspace
+            test_a_stream_is_wanted_for_the_logs_view_and_the_terminal_tab_of_a_confirmed_workspace
         ; Alcotest.test_case "the current stream fills the cell" `Quick
             test_the_current_stream_fills_the_cell
         ; Alcotest.test_case "the first reading settles the wait the opening started" `Quick
@@ -432,6 +393,8 @@ let () =
             test_a_message_from_before_the_workspace_changed_is_dropped
         ; Alcotest.test_case "a message for output the tab no longer shows is dropped" `Quick
             test_a_message_for_output_the_tab_no_longer_shows_is_dropped
+        ; Alcotest.test_case "the logs view takes the readings of the same stream" `Quick
+            test_the_logs_view_takes_the_readings_of_the_same_stream
         ; Alcotest.test_case "a lost connection keeps the last reading and says so" `Quick
             test_a_lost_connection_keeps_the_last_reading_and_says_so
         ; Alcotest.test_case "a stream that never connected is a failure, not an empty log" `Quick
@@ -445,19 +408,11 @@ let () =
       , [ Alcotest.test_case "the plan follows what the tab shows" `Quick
             test_the_plan_follows_what_the_tab_shows
         ] )
-    ; ( "sharing the cell"
-      , [ Alcotest.test_case "a poll still out does not overwrite a newer stream reading" `Quick
-            test_a_poll_still_out_does_not_overwrite_a_newer_stream_reading
-        ; Alcotest.test_case
+    ; ( "stopping and holding"
+      , [ Alcotest.test_case
             "stopping the stream keeps what it drew and retires what it awaited"
             `Quick
             test_stopping_the_stream_keeps_what_it_drew_and_retires_what_it_awaited
-        ; Alcotest.test_case
-            "stopping the stream leaves a read for another window waiting"
-            `Quick
-            test_stopping_the_stream_leaves_a_read_for_another_window_waiting
-        ; Alcotest.test_case "stopping the poll says whether one was held" `Quick
-            test_stopping_the_poll_says_whether_one_was_held
         ; Alcotest.test_case "a hold stands while the stream goes on" `Quick
             test_a_hold_stands_while_the_stream_goes_on
         ] )

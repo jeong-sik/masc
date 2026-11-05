@@ -172,7 +172,7 @@ let authorize state =
     ; sid_runtime_instance_id = None
     ; sid_base_path = path "/workspace"; sid_masc_root = path "/workspace/.masc"
     ; sid_executable_in_worktree = None; sid_state_ready = Some true; sid_uptime = None
-    ; sid_sse_clients = None; sid_gc = None; sid_scheduler = None }
+    ; sid_sse_clients = None; sid_gc = None; sid_scheduler = None; sid_operator_action = None }
 
 let test_observer_open_and_authority () =
   let state = fresh () in
@@ -265,14 +265,29 @@ let test_repeated_observer_failures_do_not_multiply_reads () =
     (Updates.detail_loaded state ~generation:old_detail ~run_id:"a" (Ok (detail a)));
   failed ();
   Alcotest.(check (pair int int)) "idle failure alone schedules nothing" (0, 0) (!runs, !details);
+  (* A reading that settled while the subscription was opening and carries
+     what is open is applied as it arrived, so the subscription failing has
+     nothing left to read. *)
+  state.observer <- Types.Observer_opening;
+  let clean_list = require (Updates.begin_runs state ~demand:Share) in
+  let clean_detail = require (Updates.begin_detail state ~demand:Share ~run_id:"a") in
+  check_completion "clean list settled while opening" Applied
+    (Updates.runs_loaded state clean_list (Ok (snapshot [ a ])));
+  check_completion "clean detail settled while opening" Applied
+    (Updates.detail_loaded state ~generation:clean_detail ~run_id:"a" (Ok (detail a)));
+  state.observer <- Types.Observer_closed_before_answer { reason = "refused again"; at = 2. };
+  List.iter (fun () -> failed ()) [ (); (); () ];
+  Alcotest.(check (pair int int)) "clean readings are not read again" (0, 0) (!runs, !details);
+  (* A reading that failed while opening cannot be trusted yet: one read per
+     such projection once the subscription fails, and no loop after it. *)
   state.observer <- Types.Observer_opening;
   let waiting_list = require (Updates.begin_runs state ~demand:Share) in
   let waiting_detail = require (Updates.begin_detail state ~demand:Share ~run_id:"a") in
-  check_completion "list settled while opening" Await_observer
-    (Updates.runs_loaded state waiting_list (Ok (snapshot [ a ])));
-  check_completion "detail settled while opening" Await_observer
-    (Updates.detail_loaded state ~generation:waiting_detail ~run_id:"a" (Ok (detail a)));
-  state.observer <- Types.Observer_closed_before_answer { reason = "refused again"; at = 2. };
+  check_completion "failed list settled while opening" Await_observer
+    (Updates.runs_loaded state waiting_list (Error "before open"));
+  check_completion "failed detail settled while opening" Await_observer
+    (Updates.detail_loaded state ~generation:waiting_detail ~run_id:"a" (Error "before open"));
+  state.observer <- Types.Observer_closed_before_answer { reason = "refused once more"; at = 3. };
   List.iter (fun () -> failed ()) [ (); (); () ];
   Alcotest.(check (pair int int)) "one read per actually waiting projection" (1, 1) (!runs, !details);
   check_completion "resumed list settles" Applied

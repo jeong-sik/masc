@@ -130,14 +130,6 @@ let test_claim_status_uses_typed_outcome () =
            ~some:(fun value -> [ "claimed_task", value ]) claimed_task)
     |> Yojson.Safe.to_string
   in
-  let typed_no_eligible =
-    Keeper_tool_outcome.to_json
-      (Keeper_tool_outcome.No_progress
-         { reason =
-             Keeper_tool_outcome.No_eligible_tasks
-               { scope_excluded_count = 1 }
-         })
-  in
   let typed_no_work =
     Keeper_tool_outcome.to_json
       (Keeper_tool_outcome.No_progress
@@ -147,8 +139,6 @@ let test_claim_status_uses_typed_outcome () =
     Keeper_tool_outcome.to_json
       (Keeper_tool_outcome.Error { reason = "storage read failed" })
   in
-  log_claim_payload ~keeper:"no-eligible"
-    (output ~result:"No unclaimed tasks." ~typed_outcome:typed_no_eligible ());
   log_claim_payload ~keeper:"no-work"
     (output ~result:"No eligible tasks." ~typed_outcome:typed_no_work ());
   log_claim_payload ~keeper:"failed" ~wire_outcome:Tool_result.Error
@@ -163,17 +153,6 @@ let test_claim_status_uses_typed_outcome () =
   log_claim_payload ~keeper:"malformed-failed" ~wire_outcome:Tool_result.Error
     (output ~result:"Everything is fine"
        ~typed_outcome:(`Assoc [ "kind", `String "unexpected" ]) ());
-  log_claim_payload ~keeper:"missing-exclusions"
-    (output ~result:"No eligible tasks."
-       ~typed_outcome:
-         (`Assoc
-            [ "kind", `String "No_progress"
-            ; "reason",
-              `Assoc
-                [ "kind", `String "No_eligible_tasks"
-                ; "exclusions", `Assoc []
-                ]
-            ]) ());
   log_claim_payload ~keeper:"contradictory"
     (output ~result:"claimed a task" ~typed_outcome:typed_error
        ~claimed_task:(`Assoc [ "task_id", `String "task-z" ]) ());
@@ -187,26 +166,17 @@ let test_claim_status_uses_typed_outcome () =
     Alcotest.(check string) keeper expected
       (claim_status ~claim_window ~keeper)
   in
-  check_status "no-eligible" "no_eligible";
   check_status "no-work" "no_unclaimed";
   check_status "failed" "error";
   check_status "untyped" "observed";
   check_status "untyped-failure" "error";
   check_status "malformed" "unknown";
   check_status "malformed-failed" "error";
-  check_status "missing-exclusions" "unknown";
   check_status "contradictory" "unknown";
   check_status "missing-task-id" "observed";
   check_status "wire-failed-after-claim" "claimed";
   Alcotest.(check (option string)) "contradictory outcome exposes no claimed id"
-    None (claimed_task_id ~claim_window ~keeper:"contradictory");
-  let no_eligible =
-    Server_dashboard_http_composite_claims.composite_claim_attempt_json
-      ~claim_window ~keeper_name:"no-eligible"
-  in
-  Alcotest.(check bool) "attention sees the typed no-eligible claim" true
-    (Server_dashboard_http_composite_claims.composite_execution_claim_no_eligible
-       (`Assoc [ "claim_attempt", no_eligible ]))
+    None (claimed_task_id ~claim_window ~keeper:"contradictory")
 ;;
 
 (* The defect this file exists for.

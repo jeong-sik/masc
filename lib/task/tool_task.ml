@@ -28,46 +28,7 @@ let workflow_rejection_result
     ~data
     (Yojson.Safe.to_string data)
 
-let missing_live_task_transition_rejection ~tool_name ~start_time ctx ~task_id
-      ~action_s =
-  sync_owner_current_task_binding ctx;
-  sync_planning_current_task_with_owned_task ctx;
-  task_log_warn ~task_id
-    "transition rejected stale task_id for action=%s agent=%s; reconciled current task bindings"
-    action_s ctx.agent_name;
-  workflow_rejection_result
-    ~tool_name
-    ~start_time
-    ~rule_id:"stale_task_id_not_found"
-    ~extra_fields:
-      [ "task_id", `String task_id
-      ; "action", `String action_s
-      ; "requested_agent", `String ctx.agent_name
-      ; "stale_context", `Bool true
-      ]
-    (Printf.sprintf
-       "Task %s is absent from the live backlog; cleared stale current-task \
-        bindings and suppressed transition action=%s."
-       task_id action_s)
-
-let rec handle_done ~tool_name ~start_time ctx args =
-  let notes = get_string args "notes" "" in
-  let evidence_refs = get_string_list args "evidence_refs" in
-  handle_transition ~tool_name ~start_time ctx
-    (`Assoc
-       [
-         ("task_id", Json_util.assoc_member_opt "task_id" args |> Option.value ~default:`Null);
-         ("action", `String "done");
-         ("notes", `String notes);
-         ("handoff_context",
-          `Assoc
-            [
-              ("summary", `String notes);
-              ("evidence_refs", `List (List.map (fun s -> `String s) evidence_refs));
-            ]);
-       ])
-
-and handle_transition ~tool_name ~start_time ctx args =
+let handle_transition ~tool_name ~start_time ctx args =
   (* Underscore-prefixed keys (e.g. "_agent_name") are internal protocol markers
      injected by the HTTP transport and dashboard client for identity
      propagation. They are consumed upstream in Client_identity and must not
@@ -137,60 +98,11 @@ and handle_transition ~tool_name ~start_time ctx args =
     log_task_transition_failed ~agent_name:ctx.agent_name err;
     result_to_response ~tool_name ~start_time (Error err)
   | Ok prepared ->
+  (* The lifecycle decides under the backlog lock. [task_opt] supplies
+     observation and metrics only. *)
   let task_opt =
     Workspace_backlog.Task_id_map.find_opt task_id prepared.tasks_by_id
   in
-  match task_opt with
-  | None ->
-    missing_live_task_transition_rejection
-      ~tool_name
-      ~start_time
-      ctx
-      ~task_id
-      ~action_s
-  | Some task_before ->
-  (* The lifecycle checks ownership under the backlog lock. [task_before]
-     supplies observation/metrics only; it cannot admit or refuse submission. *)
-  let completion_state_error =
-    if (=) action Masc_domain.Done_action then
-      completion_state_error ~task_id ~agent_name:ctx.agent_name ~task_opt
-    else
-      None
-  in
-  match completion_state_error with
-  | Some err ->
-    log_task_transition_failed ~agent_name:ctx.agent_name err;
-    let message = Masc_domain.masc_error_to_string err in
-    let rule_id, recoverable =
-      (* Exhaustive, no catch-all: [completion_state_error] returns only
-         [Task] errors and only four of the five constructors, but a [_] arm
-         here would silently absorb a newly added variant into the generic
-         rule id instead of failing to compile. [recoverable] is decided in the
-         same arm as the rule id it belongs to. *)
-      match err with
-      | Masc_domain.Task (Masc_domain.Task_error.NotClaimed _) ->
-        Some "task_done_requires_claimed_or_started", Some true
-      | Masc_domain.Task (Masc_domain.Task_error.AlreadyClaimed _) ->
-        Some "task_done_requires_current_owner", None
-      | Masc_domain.Task
-          (Masc_domain.Task_error.TransitionRejected _
-          | Masc_domain.Task_error.InvalidState _
-          | Masc_domain.Task_error.VerificationSuperseded _) ->
-        Some "task_done_invalid_lifecycle_state", None
-      | Masc_domain.Task (Masc_domain.Task_error.NotFound _) ->
-        Some "task_done_task_not_found", None
-      | Masc_domain.Task (Masc_domain.Task_error.InvalidId _)
-      | Masc_domain.Agent _
-      | Masc_domain.Auth _
-      | Masc_domain.System _ -> Some "task_done_lifecycle_rejected", None
-    in
-    workflow_rejection_result
-      ~tool_name
-      ~start_time
-      ?rule_id
-      ?recoverable
-      message
-  | None ->
   match handoff_context with
   | Error error ->
       (* RFC-0189: handoff_context parse error — caller passed
@@ -199,16 +111,6 @@ and handle_transition ~tool_name ~start_time ctx args =
         ~failure_class:Tool_result.Workflow_rejection
         ~tool_name ~start_time error
   | Ok handoff_context ->
-  if (=) action Masc_domain.Release && strict_release_requires_handoff task_opt
-     && Option.is_none handoff_context
-  then
-    (* RFC-0189: strict-release-without-handoff = workflow violation. *)
-    Tool_result.error
-      ~failure_class:Tool_result.Workflow_rejection
-      ~tool_name ~start_time
-      "Strict task release requires handoff_context.summary"
-  else
-  let action_s = Masc_domain.task_action_to_string action in
   (* [now () -. 60.0] used to stand in whenever the status carried no usable
      start: Todo, Done, Cancelled, an unparseable timestamp, or no task at all.
      That number reaches [Metrics_store_eio] as [started_at] and the average is
@@ -238,23 +140,6 @@ and handle_transition ~tool_name ~start_time ctx args =
         | Masc_domain.Cancelled _ -> (None, []))
     | None -> (None, [])
   in
-  let completion_owner =
-    match task_opt with
-    | Some task ->
-      Option.value
-        ~default:ctx.agent_name
-        (Masc_domain.task_assignee_of_status task.task_status)
-    | None -> ctx.agent_name
-  in
-  let completion_collaborators =
-    (* The approve branch is gone: it added the approving agent to the task's
-       collaborator set, which only made sense while a keeper could be the
-       verifier. A completion authority is not an agent and never joins it. *)
-    collaborators_from_task
-  in
-  (* The pre-transition verification_id capture (issue #7543) is gone with the
-     approve/reject actions: no agent transition consumes an AwaitingVerification
-     state any more, so there is nothing to snapshot before it changes. *)
   (* Bind the receipt to the request created by this transition, before its
      notification can race with a verdict or another submission. An ordinary
      diagnostic read failure does not reject submission; cancellation still
@@ -289,11 +174,21 @@ and handle_transition ~tool_name ~start_time ctx args =
       ?handoff_context
       ()
   in
-  Result.iter
-    (fun _ ->
-       sync_owner_current_task_binding ctx;
-       sync_planning_current_task_with_owned_task ctx)
-    result;
+  (* A missing task leaves any binding that still points at it stale, so it
+     is reconciled the same way a committed transition is. *)
+  (match result with
+   | Ok _ | Error (Masc_domain.Task (Masc_domain.Task_error.NotFound _)) ->
+     sync_owner_current_task_binding ctx;
+     sync_planning_current_task_with_owned_task ctx
+   | Error
+       ( Masc_domain.Task
+           ( Masc_domain.Task_error.AlreadyClaimed _
+           | Masc_domain.Task_error.NotClaimed _
+           | Masc_domain.Task_error.InvalidState _
+           | Masc_domain.Task_error.InvalidId _
+           | Masc_domain.Task_error.TransitionRejected _
+           | Masc_domain.Task_error.VerificationSuperseded _ )
+       | Masc_domain.Agent _ | Masc_domain.Auth _ | Masc_domain.System _ ) -> ());
   (* Notify A2A subscribers on successful transition *)
   (match result with
    | Ok _ ->
@@ -313,18 +208,6 @@ and handle_transition ~tool_name ~start_time ctx args =
      The transition itself is already recorded elsewhere; this hook exists to
      measure duration. *)
   (match result, action, started_at_actual with
-   | Ok _, Masc_domain.Done_action, Some started_at ->
-       (Atomic.get Workspace_hooks.record_task_metric_fn)
-         ctx.config
-         ~agent_id:completion_owner
-         ~task_id
-         ~started_at
-         ~completed_at:(Some (Time_compat.now ()))
-         ~terminal:Task_outcome_measurement.Approved
-         ~error_message:None
-         ~collaborators:completion_collaborators
-         ~handoff_from:None
-         ~handoff_to:None
    | Ok _, Masc_domain.Cancel, Some started_at ->
        (Atomic.get Workspace_hooks.record_task_metric_fn)
          ctx.config
@@ -336,19 +219,16 @@ and handle_transition ~tool_name ~start_time ctx args =
          ~error_message:
            (Some
               (* The same sentence the transition recorded: the caller may have
-                 stated it in handoff_context.summary rather than in [reason].
-                 A committed stop of a started task always carries one — the
-                 transition refuses a holder's cancel without it — so the bare
-                 label only ever names the event. *)
+                 stated it in handoff_context.summary rather than in [reason]. *)
               (match Masc_domain.stated_reason ~reason:(Some reason) ~handoff_context with
                | Some reason -> reason
                | None -> "Cancelled"))
          ~collaborators:collaborators_from_task
          ~handoff_from:None
          ~handoff_to:None
-  | Ok _, (Masc_domain.Done_action | Masc_domain.Cancel), None
+  | Ok _, Masc_domain.Cancel, None
   | Ok _, (Masc_domain.Claim | Masc_domain.Start | Masc_domain.Submit_for_verification
-            | Masc_domain.Release), _
+            | Masc_domain.Release | Masc_domain.Done_action), _
   | Error _, _, _ -> ());
   let transition_result_to_response = function
     | Error (Masc_domain.Task (Masc_domain.Task_error.TransitionRejected rejection)) ->

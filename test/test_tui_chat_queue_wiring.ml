@@ -7,6 +7,9 @@
     Enter during a turn answered "Keeper message already in progress" and threw
     the text away. *)
 
+(* No server runs here, so nothing is sent for this workspace. *)
+let preview_base_path = "tui-chat-queue-test"
+
 open Alcotest
 
 module Keeper_chat = Masc_tui_keeper_chat_projection
@@ -807,7 +810,7 @@ let test_a_request_to_another_keeper_does_not_pin_this_pane () =
   ; k_name = name
   ; k_paused = false
   ; k_identity = Ok { k_trace_id = "trace-" ^ name; k_created_at = "2026-09-07T00:00:00Z"; k_updated_at = "2026-09-07T00:00:00Z" }
-  ; k_activity = Some { k_current_task_id = None; k_total_turns = 0; k_total_tokens = 0; k_total_cost_usd = Keeper_cost_coverage.empty; k_last_turn_ts = ""; k_last_proactive_outcome = None }
+  ; k_activity = Some { k_current_task_id = None; k_total_turns = 0; k_total_tokens = 0; k_total_cost_usd = Keeper_cost_coverage.empty; k_last_turn_at = None; k_last_proactive_outcome = None }
   }
   in
   state.keepers <- [ roster_row "alpha"; roster_row "beta" ];
@@ -1082,7 +1085,7 @@ let test_preflight_first_post_respects_control_epoch () =
     { Tui_decode.sid_version="test"; sid_binary_commit="test"; sid_binary_commit_age_s=None; sid_runtime_instance_id = None;
       sid_base_path=path "/workspace"; sid_masc_root=path "/workspace/.masc";
       sid_executable_in_worktree=None; sid_state_ready=Some true; sid_uptime=None;
-      sid_sse_clients=None; sid_gc=None; sid_scheduler=None };
+      sid_sse_clients=None; sid_gc=None; sid_scheduler=None;sid_operator_action=None };
   let entry, item = preflight_input () in
   let priority = {item with Masc_tui_keeper_chat_queue.intent=
     Masc_tui_keeper_chat_queue.Run_next {automatic=false}} in
@@ -1651,7 +1654,7 @@ let test_recall_edits_and_drafts_follow_workspace_and_keeper () =
     { sid_version="test"; sid_binary_commit="test"; sid_binary_commit_age_s=None; sid_runtime_instance_id = None;
       sid_base_path=path "/workspace"; sid_masc_root=path root;
       sid_executable_in_worktree=None; sid_state_ready=Some true; sid_uptime=None;
-      sid_sse_clients=None; sid_gc=None; sid_scheduler=None } in
+      sid_sse_clients=None; sid_gc=None; sid_scheduler=None;sid_operator_action=None } in
   let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
   state.view <- Tui_types.Keepers Tui_types.Keeper_message;
   state.msg_target_keeper_name <- Some "alpha";
@@ -2787,7 +2790,9 @@ let test_journal_replacement_retains_history_media () =
       let source = match Tui_types.journal_source_of_history history with
         | Some source -> source | None -> fail "fixture must select its actual operation/autonomous journal" in
       let request_id=Log.source_key source in
-      let image=Media.newest_image history.media |> Option.get in
+      let image=match Masc_tui_image_preview.newest (Media.images history.media) with
+        | Masc_tui_image_preview.No_image -> fail "fixture must carry an image"
+        | image -> image in
       let row = { (chat_entry ~request_id ~role:(if autonomous then Tui_types.Message_autonomous else Message_keeper)
           ~text:(Media.append_text ~text:history.text history.media) ~at:2. ()) with
         me_identity=Tui_types.Persisted_row (Option.get history.structural_id);
@@ -3794,7 +3799,7 @@ let test_fold_measurement_retains_raw_source_height () =
      cmi_observed_at=None; cmi_entry_index=0} in
   let parsed = ref [] in
   let text = initial.body ^ " delta" in
-  ignore (Cache.measure_growing Render.For_testing.thinking_height_cache
+  ignore (Cache.measure_growing_details Render.For_testing.thinking_height_cache
     ~theme_revision:Render.For_testing.chat_markdown_theme_revision
     ~palette_generation:context.palette_generation ~width ~identity ~text
     ~renderer:(fun ~width text ->
@@ -4826,6 +4831,31 @@ let test_indexed_timeline_context_matches_the_full_list_functions () =
   check bool "the generator exercised many logs" true (!checked >= 2000)
 ;;
 
+let test_chat_timeline_index_reuses_only_identical_inputs () =
+  let rows = [ chat_entry ~request_id:"r" ~role:Tui_types.Message_keeper ~text:"x" ~at:5. () ] in
+  let visible = List.combine rows (Tui_types.chat_projected_timeline_ats rows) in
+  let first = Tui_types.chat_timeline_index ~messages:rows ~visible in
+  let second = Tui_types.chat_timeline_index ~messages:rows ~visible in
+  check bool "unchanged input lists reuse their derived index" true (first == second);
+  let changed_messages = rows @ [ chat_entry ~request_id:"other" ~role:Tui_types.Message_keeper ~text:"y" ~at:7. () ] in
+  let rebuilt_for_messages = Tui_types.chat_timeline_index ~messages:changed_messages ~visible in
+  check bool "a messages-only change rebuilds the derived index" false (first == rebuilt_for_messages);
+  let changed_visible = List.map (fun (message, _) -> message, Some 6.) visible in
+  let changed = Tui_types.chat_timeline_index ~messages:rows ~visible:changed_visible in
+  check bool "a changed visible list rebuilds the derived index" false (first == changed);
+  check (option (float 0.)) "the rebuilt index carries the changed visible timestamp" (Some 6.)
+    (snd changed.cti_visible.(0));
+  let got = Tui_types.chat_log_timeline_context changed
+      ~member_ids:[ "r" ] ~request_id:"r" ~started_at:5. in
+  let expected_timeline = Tui_types.chat_live_timeline_at ~member_ids:[ "r" ]
+      ~request_id:"r" ~started_at:5. ~request_messages:rows changed_visible in
+  let expected_insertion = Tui_types.chat_block_insertion_index ~member_ids:[]
+      ~bounds:(fun _ -> false) ~request_id:"r" ~timeline_at:expected_timeline changed_visible in
+  check (option (float 0.)) "the rebuilt index matches the full-list moment" expected_timeline got.clt_timeline_at;
+  check int "the rebuilt index matches the full-list insertion" expected_insertion got.clt_insertion;
+  check bool "the rebuilt index keeps no false committed error" false got.clt_committed_error
+;;
+
 (* Held turns that have no committed row of their own are placed among the
    committed rows by their clocks: each block goes after the last committed
    row older than it and before the next, and blocks sharing a gap keep
@@ -5317,59 +5347,6 @@ let test_chat_visibility_defaults_and_cycles () =
      in
      collect 3 Tui_types.Tools_compact)
 
-;;
-
-(* Cancel (Ctrl-K) and edit (Ctrl-P) both act on the newest waiting line, so
-   the take-newest operation has to return exactly the last-pushed pair and
-   leave the drain order of everything older untouched. *)
-let test_take_newest_returns_last_and_keeps_order () =
-  check bool "empty queue has no newest" true
-    (Masc_tui_keeper_chat_queue.take_newest
-       Masc_tui_keeper_chat_queue.empty
-     = None);
-  (* [fun q -> match …] in a [|>] chain swallows the rest of the chain into
-     the match, so the stages are a plain application instead. *)
-  let push_ok queue keeper text =
-    let request =
-      Masc_tui_keeper_chat_projection.create_request ~attachments:[]
-        ~keeper_name:keeper ~message:text ()
-    in
-    match
-      Masc_tui_keeper_chat_queue.push queue ~submitted_at:42. request
-    with
-    | Ok (next, _) -> next
-    | Error detail -> failf "push failed: %s" detail
-  in
-  let queue =
-    push_ok
-      (push_ok
-         (push_ok Masc_tui_keeper_chat_queue.empty "a" "first")
-         "b" "second")
-      "c" "third"
-  in
-  match Masc_tui_keeper_chat_queue.take_newest queue with
-  | None -> failf "take_newest returned None with three waiting"
-  | Some (newest_item, rest) ->
-      let newest = newest_item.Masc_tui_keeper_chat_queue.request in
-      check string "newest request is the last pushed" "c"
-        newest.Masc_tui_keeper_chat_projection.keeper_name;
-      check string "newest text is the last pushed" "third"
-        newest.Masc_tui_keeper_chat_projection.message;
-      check int "drain order of the rest is untouched" 2
-        (Masc_tui_keeper_chat_queue.length rest);
-      (match
-         Masc_tui_keeper_chat_queue.take_first_sendable rest
-           ~sendable:(fun _ -> true)
-       with
-       | Some (oldest_item, remaining) ->
-           let oldest = oldest_item.Masc_tui_keeper_chat_queue.request in
-           check string "oldest still drains first" "a"
-             oldest.Masc_tui_keeper_chat_projection.keeper_name;
-           check (list string) "and what is left keeps its order" [ "second" ]
-             (Masc_tui_keeper_chat_queue.waiting remaining
-              |> List.map (fun item ->
-                     item.Masc_tui_keeper_chat_queue.request.message))
-       | None -> failf "oldest no longer drains first after take_newest")
 ;;
 
 let test_pending_preview_is_bounded_and_keeps_the_newest_submission () =
@@ -6730,7 +6707,7 @@ let test_preparation_requires_actual_turn_owner_and_exact_execution () =
     let current = Token.fresh () and successor = Token.fresh () in
     let writer = Owner.with_owner ~interrupt_token:current ~observation:(Owner.create_turn_observation ()) (fun () ->
       fst (Eio.Fiber.pair
-        (fun () -> Preview.reset ~turn_ref:None ~keeper_name:"alpha" ~execution_scope:(Some (scope "execution-a"))
+        (fun () -> Preview.reset ~base_path:preview_base_path ~turn_ref:None ~keeper_name:"alpha" ~execution_scope:(Some (scope "execution-a"))
           ~now:1. ~redaction:Masc.Keeper_secret_redaction.empty)
         (fun () -> ()))) in
     let state = Tui_types.create_state ~workspace:"test" ~port:0 ~refresh_interval:2. () in
@@ -6807,7 +6784,7 @@ let test_preparation_requires_actual_turn_owner_and_exact_execution () =
       check bool "a fresh clock cannot grant the successor the old owner's preview" true
         (Preview.current_for_turn ~keeper_name:"alpha" ~interrupt_token:successor = None);
       let next = Owner.with_owner ~interrupt_token:successor ~observation:(Owner.create_turn_observation ()) (fun () ->
-        Preview.reset ~turn_ref:None ~keeper_name:"alpha" ~execution_scope:(Some (scope "execution-b"))
+        Preview.reset ~base_path:preview_base_path ~turn_ref:None ~keeper_name:"alpha" ~execution_scope:(Some (scope "execution-b"))
           ~now:4. ~redaction:Masc.Keeper_secret_redaction.empty) in
       Preview.note_attempt ~writer:(Some next) ~now:5. ~runtime_id:"new-provider";
       Ok ()));
@@ -6825,7 +6802,7 @@ let test_task_preparation_precedes_journal_and_keeps_original_writer () =
     let token = Masc.Keeper_interrupt_token.fresh () in
     let original = Ids.Turn_ref.make ~trace_id:"early-task-source" ~absolute_turn:4 in
     let writer = Masc.Keeper_turn_preview_owner.with_owner ~interrupt_token:token ~observation:(Masc.Keeper_turn_preview_owner.create_turn_observation ()) (fun () ->
-      Preview.reset ~keeper_name:"alpha" ~execution_scope:None ~turn_ref:(Some original)
+      Preview.reset ~base_path:preview_base_path ~keeper_name:"alpha" ~execution_scope:None ~turn_ref:(Some original)
         ~now:0. ~redaction:Masc.Keeper_secret_redaction.empty) in
     let state = Tui_types.create_state ~workspace:"test" ~port:0 ~refresh_interval:2. () in
     let snapshot () =
@@ -7247,6 +7224,8 @@ let () =
             test_selected_source_logs_keep_first_order_and_prefer_the_whole_log
         ; test_case "indexed timeline context matches the full-list functions" `Quick
             test_indexed_timeline_context_matches_the_full_list_functions
+        ; test_case "timeline index reuses only identical inputs" `Quick
+            test_chat_timeline_index_reuses_only_identical_inputs
         ; test_case "held turn blocks merge among committed rows by clock" `Quick
             test_held_turn_blocks_merge_among_committed_rows_by_clock
         ; test_case "settled logs are the selected logs held settled" `Quick
@@ -7324,9 +7303,7 @@ let () =
         ; test_case "hidden roster releases focus and retains the conversation" `Quick
             test_hidden_chat_roster_releases_focus_without_changing_conversation ] )
     ; ( "queue"
-      , [ test_case "take_newest returns the last and keeps order" `Quick
-            test_take_newest_returns_last_and_keeps_order
-        ; test_case "pending preview is bounded" `Quick
+      , [ test_case "pending preview is bounded" `Quick
             test_pending_preview_is_bounded_and_keeps_the_newest_submission
         ] )
     ; ( "skill marks"

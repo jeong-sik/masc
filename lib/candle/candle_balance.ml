@@ -371,8 +371,8 @@ let equip state ~keeper ~slot ~choice =
     | Candle_event.Item _ -> (slot, choice) :: remaining in
   Ok {state with selections = Names.add keeper choices state.selections}
 
-let of_events ~at events =
-  let* state = List.fold_left
+let replay events =
+  List.fold_left
     (fun result (event : Candle_event.t) ->
        Result.bind result (fun state ->
          match event.body with
@@ -395,7 +395,14 @@ let of_events ~at events =
          | Candle_event.Unattributed _
          | Candle_event.Payout_failed _ -> Ok state))
     (Ok empty)
-    events in
+    events
+
+let of_events ~at events =
+  let* state = replay events in
   let* state = stamp state ~at in
   advance_all state ~at
+
+let decaying_balances state =
+  Names.fold (fun keeper since rows -> (keeper, since, balance state ~keeper) :: rows) state.last_at []
+  |> List.rev
 ;;

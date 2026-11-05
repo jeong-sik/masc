@@ -2,8 +2,6 @@
 
 open Masc
 
-module Preparation = Masc_test_deps.Board_test_preparation
-
 (* These tests pin how the Board routes a text, not who is declared: every name
    with the shape of a Board identity stands for itself.  Which names are
    declared, and what the author is told about the others, is pinned in
@@ -37,7 +35,6 @@ let with_eio f () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_path = fresh_test_base_path () in
   Fs_compat.mkdir_p base_path;
-  Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Result.get_ok (Board_dispatch.init_jsonl
@@ -45,27 +42,41 @@ let with_eio f () =
     ~recipient_lookup:every_name_declared ());
   f ()
 
+(* Deny board writes through permissions instead of breaking the workspace
+   boundary: the store files lose their write bits (append fails) and the
+   workspace directory loses create/rename rights (the rewrite stage fails),
+   while reads and workspace observation keep working. The earlier fixture
+   replaced .masc with a regular file, which made the posts source re-observe
+   a refused workspace and latch Posts_refused — every write then stayed
+   refused even after the fixture restored the directory (#47727). *)
 let with_blocked_board_masc_dir f =
+  (* Root ignores file permission bits, so a permission-denied fixture would
+     silently stop denying writes and the blocked-phase assertions would
+     fail for the opposite reason. The previous regular-file fixture stayed
+     effective under root; this one skips instead of lying. *)
+  if Unix.geteuid () = 0 then Alcotest.skip ();
   let store = Board.global () in
   let masc_dir = (Board.workspace_masc_dir store) in
-  let backup = masc_dir ^ ".fixture-backup" in
-  if Sys.file_exists backup then Alcotest.fail "workspace fixture backup already exists";
-  Fs_compat.mkdir_p (Filename.dirname masc_dir);
   let paths =
     [ Board.persist_path store; Board.comments_path store; Board.vote_log_path store
     ; Board.reactions_path store; Board.sub_boards_path store ]
   in
   List.iter Fs_compat.invalidate_cached_writer paths;
-  let existed = Sys.file_exists masc_dir in
-  if existed then Unix.rename masc_dir backup;
+  let file_modes =
+    List.filter_map
+      (fun path ->
+         if Sys.file_exists path then Some (path, (Unix.stat path).Unix.st_perm) else None)
+      paths
+  in
+  let dir_mode = (Unix.stat masc_dir).Unix.st_perm in
+  List.iter (fun (path, _) -> Unix.chmod path 0o444) file_modes;
+  Unix.chmod masc_dir 0o555;
   Fun.protect
     ~finally:(fun () ->
-      List.iter Fs_compat.invalidate_cached_writer paths;
-      if Sys.file_exists masc_dir then Sys.remove masc_dir;
-      if existed then Unix.rename backup masc_dir)
-    (fun () ->
-      Fs_compat.save_file masc_dir "not a directory";
-      f ())
+      Unix.chmod masc_dir dir_mode;
+      List.iter (fun (path, mode) -> Unix.chmod path mode) file_modes;
+      List.iter Fs_compat.invalidate_cached_writer paths)
+    f
 
 let seed_post_without_kind () =
   let now = Time_compat.now () in
@@ -1364,7 +1375,6 @@ let test_failed_flusher_start_clears_the_flag () =
       (fun () ->
         let base_path = fresh_test_base_path () in
         Fs_compat.mkdir_p base_path;
-        Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
         Board.reset_global_for_test ();
         Board_dispatch.reset_for_test ();
         (* The flusher forks on whatever switch the context names; a finished
@@ -1393,7 +1403,6 @@ let test_vote_persisted_by_flusher_actor () =
       (fun () ->
         let base_path = fresh_test_base_path () in
         Fs_compat.mkdir_p base_path;
-        Preparation.prepare ~base_path ~action:Preparation.Bootstrap;
         Board.reset_global_for_test ();
         Board_dispatch.reset_for_test ();
         Result.get_ok (Board_dispatch.init_jsonl
@@ -2111,17 +2120,18 @@ let test_set_pinned_persistence_failure_rolls_back () =
   | Ok fetched ->
       Alcotest.(check bool) "pinned rolled back" false fetched.pinned
 
-(* A write that raises no SSE event -- an edit, a thread change, a pin, a close,
-   a reopen, a delete -- still changes what a cached page of the board answers.
-   The write hook is how the server drops those pages; it runs once per write
-   the store took. *)
+(* An edit, a thread change, a pin, a close, a reopen and a delete each change
+   what a page of the board answers, so each raises one [Post_changed] naming
+   the post and what was done to it. *)
   )
 
-let test_write_hook_runs_after_each_write_that_raises_no_event () =
-  let writes = ref 0 in
-  let events = ref 0 in
-  Board_dispatch.set_board_write_hook (fun () -> incr writes);
-  Board_dispatch.set_board_sse_hook (fun _ -> incr events);
+let test_each_post_write_announces_its_change () =
+  let changes = ref [] in
+  let others = ref 0 in
+  Board_dispatch.set_board_sse_hook (function
+    | Board_dispatch.Post_changed { post_id; change } ->
+      changes := (post_id, Board_dispatch.post_change_to_string change) :: !changes
+    | _ -> incr others);
   let post =
     match
       Board_dispatch.create_post ~author:"write-hook" ~content:"a post to write to"
@@ -2135,30 +2145,33 @@ let test_write_hook_runs_after_each_write_that_raises_no_event () =
     | Ok _ -> ()
     | Error e -> Alcotest.fail (label ^ ": " ^ Board.show_board_error e)
   in
-  Alcotest.(check int) "creating raises an event, not a write" 0 !writes;
-  Alcotest.(check int) "and the event reached the SSE hook" 1 !events;
+  Alcotest.(check int) "creating raises its own event" 1 !others;
   ok "update"
     (Board_dispatch.update_post ~post_id ~editor:"write-hook"
        ~content:"a post to write to, edited" ());
-  Alcotest.(check int) "an edit" 1 !writes;
-  ok "thread" (Board_dispatch.set_thread_id ~post_id ~thread_id:"write-hook-thread");
-  Alcotest.(check int) "a thread change" 2 !writes;
+  (* The store trims the id it is given; the event names the post as stored. *)
+  ok "thread"
+    (Board_dispatch.set_thread_id ~post_id:(" " ^ post_id ^ " ")
+       ~thread_id:"write-hook-thread");
   ok "pin" (Board_dispatch.set_pinned ~post_id ~pinned:true);
-  Alcotest.(check int) "a pin" 3 !writes;
+  ok "unpin" (Board_dispatch.set_pinned ~post_id ~pinned:false);
   ok "close"
     (Board_dispatch.set_closed ~post_id ~closed_by:"write-hook"
        ~successor:Board.No_successor ~summary:"done" ());
-  Alcotest.(check int) "a close" 4 !writes;
   ok "reopen" (Board_dispatch.reopen ~post_id);
-  Alcotest.(check int) "a reopen" 5 !writes;
   ok "delete" (Board_dispatch.delete_post ~post_id);
-  Alcotest.(check int) "a delete" 6 !writes;
-  Alcotest.(check int) "none of them raised an SSE event" 1 !events
+  Alcotest.(check (list (pair string string)))
+    "each write is announced once, in order"
+    (List.map (fun change -> (post_id, change))
+       [ "edited"; "thread_set"; "pinned"; "unpinned"; "closed"; "reopened";
+         "deleted" ])
+    (List.rev !changes);
+  Alcotest.(check int) "no other event was raised" 1 !others
 
-(* A write the store refuses changed nothing, so nothing is dropped. *)
-let test_write_hook_skips_a_write_the_store_refuses () =
-  let writes = ref 0 in
-  Board_dispatch.set_board_write_hook (fun () -> incr writes);
+(* A write the store refuses changed nothing, so nothing is announced. *)
+let test_a_refused_post_write_announces_nothing () =
+  let events = ref 0 in
+  Board_dispatch.set_board_sse_hook (fun _ -> incr events);
   let missing = "never-existed-write-hook" in
   let refused label = function
     | Ok _ -> Alcotest.fail (label ^ ": a missing post took the write")
@@ -2172,8 +2185,9 @@ let test_write_hook_skips_a_write_the_store_refuses () =
   refused "close"
     (Board_dispatch.set_closed ~post_id:missing ~closed_by:"write-hook"
        ~successor:Board.No_successor ~summary:"done" ());
+  refused "reopen" (Board_dispatch.reopen ~post_id:missing);
   refused "delete" (Board_dispatch.delete_post ~post_id:missing);
-  Alcotest.(check int) "no refused write reached the hook" 0 !writes
+  Alcotest.(check int) "no refused write was announced" 0 !events
 
 let test_set_closed_and_reopen_round_trip () =
   match
@@ -3070,7 +3084,6 @@ let test_initialization_preserves_captured_workspace_and_lookup () =
                    Alcotest.(check bool) "missing root refusal creates nothing" false
                      (Sys.file_exists absent_base);
                    Fs_compat.mkdir_p absent_base;
-                   Preparation.prepare ~base_path:absent_base ~action:Preparation.Bootstrap;
                    Result.get_ok (Board_dispatch.init_jsonl ~base_path:relative_root
                      ~recipient_lookup:every_name_declared ()));
                  Alcotest.(check string) "absent relative init captures the absolute workspace"
@@ -3088,7 +3101,6 @@ let test_initialization_preserves_captured_workspace_and_lookup () =
              | exception Invalid_argument _ -> ());
             let base_a = fresh_test_base_path () in
             Fs_compat.mkdir_p base_a;
-            Preparation.prepare ~base_path:base_a ~action:Preparation.Bootstrap;
             Board.reset_global_for_test ();
             Board_dispatch.reset_for_test ();
             let retained = Board.global () in
@@ -3188,7 +3200,6 @@ let test_initialization_refuses_foreign_workspace_alias ~lookup_installed () =
           (fun () ->
             let base_a = fresh_test_base_path () in
             Fs_compat.mkdir_p base_a;
-            Preparation.prepare ~base_path:base_a ~action:Preparation.Bootstrap;
             Board.reset_global_for_test ();
             Board_dispatch.reset_for_test ();
             let retained = Board.global () in
@@ -3277,10 +3288,10 @@ let () =
       Alcotest.test_case "create and get" `Quick (with_eio test_create_and_get_post);
       Alcotest.test_case "content clock survives activity and reload" `Quick
         (with_eio test_content_update_time_survives_activity_and_reload);
-      Alcotest.test_case "write hook runs after each write that raises no event"
-        `Quick (with_eio test_write_hook_runs_after_each_write_that_raises_no_event);
-      Alcotest.test_case "write hook skips a write the store refuses" `Quick
-        (with_eio test_write_hook_skips_a_write_the_store_refuses);
+      Alcotest.test_case "each post write announces its change" `Quick
+        (with_eio test_each_post_write_announces_its_change);
+      Alcotest.test_case "a refused post write announces nothing" `Quick
+        (with_eio test_a_refused_post_write_announces_nothing);
       Alcotest.test_case "update by owner persists" `Quick
         (with_eio test_update_post_by_owner);
       Alcotest.test_case "update rejects non-owner" `Quick

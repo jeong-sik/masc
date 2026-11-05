@@ -117,10 +117,17 @@ let summary = function
         (match o.Observer.to_total_turns with Some n -> string_of_int n | None -> "-")
   | Observer.Event (Observer.Keeper_composite_changed { keeper; _ }) ->
       "composite(" ^ keeper ^ ")"
+  | Observer.Event (Observer.Keeper_metrics_appended { keeper; _ }) ->
+      "metrics(" ^ keeper ^ ")"
   | Observer.Event (Observer.Keeper_chat_appended { keeper; connector; _ }) ->
       Printf.sprintf "chat(%s,%s)" keeper (Option.value ~default:"-" connector)
   | Observer.Event (Observer.Keeper_memory_journal_appended { keeper; _ }) ->
       "memory(" ^ keeper ^ ")"
+  | Observer.Event (Observer.Keeper_runtime_journal_appended { keeper; journal; _ }) ->
+      Printf.sprintf "runtime_journal(%s,%s)" keeper
+        (match journal with
+         | Observer.Native_tasks_journal -> "native_tasks"
+         | Observer.Child_content_journal -> "child_content")
   | Observer.Event (Observer.Keeper_chat_stream_frame { keeper; frame; _ }) ->
       Printf.sprintf "stream(%s,%s)" keeper (Option.value ~default:"-" frame)
   | Observer.Event (Observer.Keeper_turn_stream_frame { keeper; turn_ref; _ }) ->
@@ -130,14 +137,52 @@ let summary = function
       Printf.sprintf "waiting(%s,%s)" keeper (Option.value ~default:"-" queue_kind)
   | Observer.Event (Observer.Fusion_run_status { keeper; run_id; status }) ->
       Printf.sprintf "fusion(%s,%s,%s)" keeper status run_id
-  | Observer.Event Observer.Internal_agent_runs_changed -> "internal_runs"
-  | Observer.Event Observer.Schedule_store_invalidated -> "schedule_store_invalidated"
-  | Observer.Event Observer.Pending_confirm_invalidated -> "pending_confirm_invalidated"
+  | Observer.Event (Observer.Internal_agent_runs_changed registry) ->
+      "internal_runs(" ^ Masc.Internal_agent_runs_event.registry_to_wire registry ^ ")"
+  | Observer.Event (Observer.Workspace_store_changed Observer.Schedule_store) -> "schedule_store_invalidated"
+  | Observer.Event (Observer.Workspace_store_changed Observer.Pending_confirms) -> "pending_confirm_invalidated"
+  | Observer.Event (Observer.Dataset_changed dataset) ->
+      "dataset(" ^ Masc.Workspace_dataset_event.dataset_to_wire dataset ^ ")"
+  | Observer.Event (Observer.Workspace_store_changed Observer.Goal_projection) -> "goal_projection"
+  | Observer.Event (Observer.Workspace_store_changed Observer.Runtime_config) -> "runtime_config"
+  | Observer.Event (Observer.Workspace_store_changed Observer.Skill_catalog) -> "skill_catalog_published"
+  | Observer.Event (Observer.Workspace_store_changed Observer.Lane_addon_exports) -> "lane_addon_exports_changed"
+  | Observer.Event (Observer.Gate_connector_changed { connector }) -> "connector(" ^ connector ^ ")"
+  | Observer.Event (Observer.Keeper_event_queue_changed { keeper }) ->
+      "event_queue(" ^ keeper ^ ")"
+  | Observer.Event (Observer.Approval_change change) ->
+      Printf.sprintf "approval(%s)"
+        (match change with
+         | Observer.Approval_queue_changed -> "queue"
+         | Observer.Approval_rules_changed -> "rules"
+         | Observer.Gate_mode_changed -> "gate_mode"
+         | Observer.Gate_keeper_settings_changed { keeper } -> "keeper_settings:" ^ keeper
+         | Observer.Tool_approval_waits_changed { keeper } -> "waits:" ^ keeper
+         | Observer.Tool_approval_mode_changed { keeper } -> "mode:" ^ keeper
+         | Observer.Keeper_asks_changed { keeper } -> "asks:" ^ keeper
+         | Observer.Installation_asks_changed { declaration_id } ->
+             "installation_asks:" ^ declaration_id)
+  | Observer.Event (Observer.Keeper_async_requests_changed { keeper }) ->
+      "async_requests:" ^ keeper
+  | Observer.Event (Observer.Keeper_skill_activations_changed { keeper }) ->
+      "skill_activations:" ^ keeper
+  | Observer.Event (Observer.Keeper_roster_change (Observer.Keeper_row_changed { keeper })) ->
+      "roster_row:" ^ keeper
+  | Observer.Event (Observer.Keeper_roster_change Observer.Every_row_changed) -> "roster_all"
+  | Observer.Event (Observer.Keeper_turn_changed { keeper; change = Observer.Turn_state }) ->
+      "turns:" ^ keeper
+  | Observer.Event (Observer.Keeper_turn_changed { keeper; change = Observer.Turn_preview }) ->
+      "preview:" ^ keeper
+  | Observer.Event (Observer.Board_changed { post_id }) ->
+      Printf.sprintf "board(%s)" (Option.value ~default:"-" post_id)
   | Observer.Event (Observer.Lane_resource { lr_package; lr_instance; lr_detail; _ })
     ->
       Printf.sprintf "lane_resource(%s,%s,%s)" lr_package lr_instance
         (Option.value ~default:"-" lr_detail)
-  | Observer.Event (Observer.Snapshot name) -> "snapshot:" ^ name
+  | Observer.Event (Observer.Snapshot projection) ->
+      "snapshot:" ^ Observer.projection_name projection
+  | Observer.Event Observer.Execution_snapshot ->
+      "snapshot:" ^ Masc.Dashboard_event_slices.execution_snapshot_type
   | Observer.Event (Observer.Other name) -> "other:" ^ name
   | Observer.Undecodable detail -> "undecodable:" ^ detail
 
@@ -349,6 +394,13 @@ let test_every_whole_projection_push_decodes_as_a_snapshot () =
     [ "snapshot:operator_digest"; "snapshot:transport_health_snapshot" ]
     (List.map summary
        (decode_all [ operator_digest_frame; transport_health_frame ]));
+  check (list bool) "only the transport measurement owes the transport a read"
+    [ false; true ]
+    (List.map
+       (function
+         | Observer.Event event -> Observer.transport_health_measured event
+         | Observer.Undecodable _ -> false)
+       (decode_all [ operator_digest_frame; transport_health_frame ]));
   (* Not one at a time: every type the table calls a whole projection. A new
      one added to the table is covered here without this test being touched. *)
   List.iter
@@ -394,6 +446,53 @@ let test_a_frame_its_type_decides_is_not_read_past_the_type () =
     (List.map summary
        (decode_all
           [ "data: {\"name\":\"alpha\",\"type\":\"keeper_heartbeat\",\"ts_unix\":1.0}\n\n" ]))
+
+(* The Goal sources' announcement: the Planning screen reads its Goals on it. *)
+let test_a_goal_projection_change_is_named () =
+  check (list string) "the push reads as a Goal projection change"
+    [ "goal_projection" ]
+    (List.map summary
+       (decode_all
+          [ Printf.sprintf "data: {\"type\":\"%s\",\"ts_unix\":1.0}\n\n"
+              Masc.Goal_projection_broadcast.changed_event ]));
+  check bool "and only it is a Goal projection change" true
+    (Observer.goal_projection_changed (Observer.Workspace_store_changed Observer.Goal_projection)
+     && not (Observer.goal_projection_changed (Observer.Workspace_store_changed Observer.Schedule_store)))
+
+(* The server's runtime.toml commit announcement: the Config screen reads the
+   file on it (RFC-0482 L4). *)
+let test_a_runtime_config_change_is_named () =
+  check (list string) "the push reads as a runtime.toml change"
+    [ "runtime_config" ]
+    (List.map summary
+       (decode_all
+          [ Printf.sprintf "data: {\"type\":\"%s\",\"ts_unix\":1.0}\n\n"
+              Masc.Runtime_config_changed_event.event_type ]));
+  check bool "and only it is a runtime.toml change" true
+    (Observer.runtime_config_changed (Observer.Workspace_store_changed Observer.Runtime_config)
+     && not (Observer.runtime_config_changed (Observer.Workspace_store_changed Observer.Goal_projection)))
+
+(* The metrics file's own announcement, not the heartbeat: the in-turn pulse
+   sends [keeper_heartbeat] without writing a row. *)
+let test_a_metrics_append_names_its_keeper () =
+  check (list string) "the append reads as the Keeper's metrics change"
+    [ "metrics(lane-smith)" ]
+    (List.map summary
+       (decode_all
+          [ Printf.sprintf "data: {\"type\":\"%s\",\"name\":\"lane-smith\",\"ts_unix\":1.0}\n\n"
+              Masc.Keeper_metrics_broadcast.appended_event ]));
+  check (option string) "and the logs view reads that Keeper" (Some "lane-smith")
+    (match decode_all
+             [ "data: {\"type\":\"keeper_metrics_appended\",\"name\":\"lane-smith\",\"ts_unix\":1.0}\n\n" ]
+     with
+     | [ Observer.Event event ] -> Observer.metrics_appended_keeper event
+     | _ -> None);
+  check (option string) "a heartbeat is not a metrics append" None
+    (match decode_all
+             [ "data: {\"type\":\"keeper_heartbeat\",\"name\":\"lane-smith\",\"ts_unix\":1.0}\n\n" ]
+     with
+     | [ Observer.Event event ] -> Observer.metrics_appended_keeper event
+     | _ -> None)
 
 (* A delta has a slice too, and reading the table for "does this have one"
    rather than "does it replace a projection" would swallow this one: the
@@ -463,6 +562,38 @@ let test_only_a_chat_appended_event_names_a_reload_keeper () =
   check (list string) "the appended frame answers its keeper" [ "lane-smith" ]
     (reload_keepers [ chat_appended_frame ])
 
+(* Server shape: keeper_runtime_journal_broadcast.ml writes the keeper in
+   "name". *)
+let native_tasks_frame =
+  "data: {\"type\":\"keeper_native_tasks_appended\",\"name\":\"lane-smith\",\
+   \"ts_unix\":1787507576.0}\n\n"
+
+let child_content_frame =
+  "data: {\"type\":\"keeper_child_content_appended\",\"name\":\"lane-smith\",\
+   \"ts_unix\":1787507576.0}\n\n"
+
+let test_only_a_runtime_journal_event_names_a_runtime_journal () =
+  check (list string) "the journal frames decode with their keeper and journal"
+    [ "runtime_journal(lane-smith,native_tasks)"; "runtime_journal(lane-smith,child_content)" ]
+    (List.map summary (decode_all [ native_tasks_frame; child_content_frame ]));
+  let journals frames =
+    decode_all frames
+    |> List.filter_map (function
+         | Observer.Event event -> Observer.runtime_journal_appended event
+         | Observer.Undecodable _ -> None)
+  in
+  check int "both name a journal" 2 (List.length (journals [ native_tasks_frame; child_content_frame ]));
+  check int "a memory journal or chat frame names none" 0
+    (List.length (journals [ memory_journal_frame; chat_appended_frame ]));
+  check (list string) "neither reloads the chat history or the memory journal" []
+    (decode_all [ native_tasks_frame; child_content_frame ]
+     |> List.filter_map (function
+          | Observer.Event event ->
+            (match Observer.chat_appended_keeper event, Observer.memory_journal_appended_keeper event with
+             | None, None -> None
+             | Some keeper, _ | _, Some keeper -> Some keeper)
+          | Observer.Undecodable _ -> None))
+
 let test_only_a_memory_journal_event_names_a_journal_keeper () =
   check (list string) "the journal frame decodes with its keeper"
     [ "memory(lane-smith)" ]
@@ -484,6 +615,514 @@ let test_only_a_memory_journal_event_names_a_journal_keeper () =
        ]);
   check (list string) "the journal frame answers its keeper" [ "lane-smith" ]
     (journal_keepers [ memory_journal_frame ])
+
+(* The server sends Board writes as JSON-RPC notifications, with a method
+   where the other events have a type. *)
+let board_post_changed_frame =
+  {|data: {"jsonrpc":"2.0","method":"notifications/board","params":{"type":"post_changed","event_type":"post.changed","post_id":"post-7","change":"pinned"}}
+
+|}
+
+let board_comment_voted_frame =
+  {|data: {"jsonrpc":"2.0","method":"notifications/board","params":{"type":"comment_voted","comment_id":"comment-3","voter":"ann","direction":"up"}}
+
+|}
+
+let board_without_params_frame =
+  {|data: {"jsonrpc":"2.0","method":"notifications/board"}
+
+|}
+
+let other_notification_frame =
+  {|data: {"jsonrpc":"2.0","method":"notifications/progress","params":{"post_id":"post-7"}}
+
+|}
+
+let test_only_a_board_notification_names_a_board_change () =
+  check (list string) "the post it names is read; a comment vote names none"
+    [ "board(post-7)"; "board(-)" ]
+    (List.map summary (decode_all [ board_post_changed_frame; board_comment_voted_frame ]));
+  let board_changes frames =
+    decode_all frames
+    |> List.filter_map (function
+         | Observer.Event event -> Observer.board_changed_post event
+         | Observer.Undecodable _ -> None)
+  in
+  check (list (option string)) "every other sample event answers no board change" []
+    (board_changes
+       [ tool_called_frame; agent_completed_frame; agent_failed_frame
+       ; heartbeat_frame; turn_complete_frame; keeper_tool_call_frame
+       ; composite_frame; chat_stream_delta_frame; chat_stream_custom_frame
+       ; waiting_inventory_frame; operator_digest_frame
+       ; transport_health_frame; fusion_run_status_frame
+       ; turn_observation_frame; chat_appended_frame; memory_journal_frame
+       ; other_notification_frame
+       ]);
+  check bool "a board notification without params says why it was not read" true
+    (match decode_all [ board_without_params_frame ] with
+     | [ Observer.Undecodable reason ] ->
+         String.starts_with ~prefix:"notifications/board" reason
+     | _ -> false)
+
+let gate_frames =
+  [ {|data: {"type":"approval:pending","payload":{"id":"approval-1"}}
+
+|}
+  ; {|data: {"type":"approval:resolved","payload":{"id":"approval-1"}}
+
+|}
+  ; {|data: {"type":"approval:summary_updated","payload":{"id":"approval-1"}}
+
+|}
+  ; {|data: {"type":"approval_rules_changed"}
+
+|}
+  ; {|data: {"type":"gate_mode_changed","mode":"hitl"}
+
+|}
+  ; {|data: {"type":"gate_external_mode_changed","mode":"hitl"}
+
+|}
+  ; {|data: {"type":"gate_keeper_mode_changed","keeper_name":"lane-smith","mode":null}
+
+|}
+  ; {|data: {"type":"keeper_exact_lane_preference_changed","keeper_name":"lane-smith","lane_id":"l","slot_id":null}
+
+|}
+  ]
+
+let tool_approval_frames =
+  [ {|data: {"type":"keeper_tool_approval_waits_changed","name":"lane-smith"}
+
+|}
+  ; {|data: {"type":"keeper_tool_approval_mode_changed","name":"lane-smith"}
+
+|}
+  ]
+
+let asks_frames =
+  [ {|data: {"type":"keeper_asks_changed","name":"lane-smith"}
+
+|}
+  ; {|data: {"type":"lane_addon_asks_changed","declaration_id":"quiz"}
+
+|}
+  ]
+
+let async_requests_frame =
+  {|data: {"type":"keeper_async_requests_changed","name":"lane-smith"}
+
+|}
+
+let pending_confirms_frame =
+  {|data: {"type":"operator_pending_confirm_invalidated"}
+
+|}
+
+let test_only_a_confirmation_change_reads_the_confirmations () =
+  check (list string) "a confirmation change decodes as one"
+    [ "pending_confirm_invalidated" ]
+    (List.map summary (decode_all [ pending_confirms_frame ]));
+  let count reads frames =
+    decode_all frames
+    |> List.filter (function
+         | Observer.Event event -> reads event
+         | Observer.Undecodable _ -> false)
+    |> List.length
+  in
+  check int "it reads the confirmations" 1
+    (count Observer.pending_confirms_changed [ pending_confirms_frame ]);
+  check int "no question, Gate, held call or mode change does" 0
+    (count Observer.pending_confirms_changed (asks_frames @ gate_frames @ tool_approval_frames));
+  check int "it reads no Gate, held calls, modes or questions" 0
+    (count
+       (fun event ->
+          Observer.gate_snapshot_changed event || Observer.held_calls_changed event
+          || Observer.tool_modes_changed event || Observer.asks_changed event)
+       [ pending_confirms_frame ])
+
+let schedules_frame =
+  {|data: {"type":"schedule_store_invalidated"}
+
+|}
+
+let test_only_a_schedule_change_reads_the_schedules () =
+  check (list string) "a schedule change decodes as one" [ "schedule_store_invalidated" ]
+    (List.map summary (decode_all [ schedules_frame ]));
+  let count reads frames =
+    decode_all frames
+    |> List.filter (function
+         | Observer.Event event -> reads event
+         | Observer.Undecodable _ -> false)
+    |> List.length
+  in
+  check int "it reads the schedules" 1 (count Observer.schedules_changed [ schedules_frame ]);
+  check int "no confirmation, question, Gate, held call, mode or async request change does" 0
+    (count Observer.schedules_changed
+       ([ pending_confirms_frame; async_requests_frame ]
+        @ asks_frames @ gate_frames @ tool_approval_frames));
+  check int "it reads nothing else" 0
+    (count
+       (fun event ->
+          Observer.gate_snapshot_changed event || Observer.held_calls_changed event
+          || Observer.tool_modes_changed event || Observer.asks_changed event
+          || Observer.pending_confirms_changed event || Observer.async_requests_changed event)
+       [ schedules_frame ])
+
+(* A Keeper's skill activation ledger change names that Keeper, and a
+   published skill catalog is a store change of its own (RFC-0483 §4.3). *)
+let test_skill_pushes_name_their_reads () =
+  let activations_frame =
+    {|data: {"type":"keeper_skill_activations_changed","name":"lane-smith","trace_id":"trace-1","ts_unix":1.0}
+
+|}
+  in
+  let catalog_frame = {|data: {"type":"skill_catalog_published","ts_unix":1.0}
+
+|} in
+  check (list string) "both decode" [ "skill_activations:lane-smith"; "skill_catalog_published" ]
+    (List.map summary (decode_all [ activations_frame; catalog_frame ]));
+  let events frames =
+    List.filter_map
+      (function Observer.Event event -> Some event | Observer.Undecodable _ -> None)
+      (decode_all frames)
+  in
+  check (list (option string)) "the ledger change names its Keeper"
+    [ Some "lane-smith"; None ]
+    (List.map Observer.skill_activations_keeper (events [ activations_frame; catalog_frame ]));
+  check (list bool) "only the catalog push is a published catalog" [ false; true ]
+    (List.map Observer.skill_catalog_published (events [ activations_frame; catalog_frame ]));
+  let exports_frame = {|data: {"type":"lane_addon_exports_changed","ts_unix":1.0}
+
+|} in
+  check (list string) "the Lane Add-on exports push decodes" [ "lane_addon_exports_changed" ]
+    (List.map summary (decode_all [ exports_frame ]));
+  check (list bool) "only the exports push is an exports change" [ false; false; true ]
+    (List.map Observer.lane_addon_exports_changed
+       (events [ activations_frame; catalog_frame; exports_frame ]));
+  check bool "a ledger change is not an async request change" false
+    (List.exists Observer.async_requests_changed (events [ activations_frame ]));
+  check bool "a ledger change without its Keeper says why it was not read" true
+    (match decode_all [ {|data: {"type":"keeper_skill_activations_changed","ts_unix":1.0}
+
+|} ] with
+     | [ Observer.Undecodable _ ] -> true
+     | [] | Observer.Event _ :: _ | Observer.Undecodable _ :: _ :: _ -> false)
+
+let test_only_an_async_request_change_reads_the_async_requests () =
+  check (list string) "an async request change decodes with its Keeper"
+    [ "async_requests:lane-smith" ]
+    (List.map summary (decode_all [ async_requests_frame ]));
+  let count reads frames =
+    decode_all frames
+    |> List.filter (function
+         | Observer.Event event -> reads event
+         | Observer.Undecodable _ -> false)
+    |> List.length
+  in
+  check int "it reads the async requests" 1
+    (count Observer.async_requests_changed [ async_requests_frame ]);
+  check int "no question, Gate, held call or mode change does" 0
+    (count Observer.async_requests_changed (asks_frames @ gate_frames @ tool_approval_frames));
+  let keepers frames =
+    List.filter_map
+      (function
+        | Observer.Event event -> Some (Observer.async_requests_keeper event)
+        | Observer.Undecodable _ -> None)
+      (decode_all frames)
+  in
+  check (list (option string)) "it names the Keeper whose open detail reads again"
+    [ Some "lane-smith" ] (keepers [ async_requests_frame ]);
+  check bool "no question, Gate, held call or mode change names one" true
+    (List.for_all Option.is_none (keepers (asks_frames @ gate_frames @ tool_approval_frames)));
+  check bool "a change without its Keeper says why it was not read" true
+    (match decode_all [ {|data: {"type":"keeper_async_requests_changed"}
+
+|} ] with
+     | [ Observer.Undecodable reason ] ->
+         String.starts_with ~prefix:"keeper_async_requests_changed" reason
+     | _ -> false)
+
+let roster_frames =
+  [ {|data: {"type":"keeper_row_changed","name":"lane-smith","ts_unix":100.0}
+
+|}
+  ; {|data: {"type":"keeper_roster_changed","ts_unix":100.0}
+
+|}
+  ]
+
+let test_a_roster_push_names_the_row_or_every_row () =
+  check (list string) "a row push names its Keeper; a roster push names every row"
+    [ "roster_row:lane-smith"; "roster_all" ]
+    (List.map summary (decode_all roster_frames));
+  let changes frames =
+    decode_all frames
+    |> List.filter_map (function
+         | Observer.Event event -> Observer.roster_change event
+         | Observer.Undecodable _ -> None)
+    |> List.length
+  in
+  check int "both owe the roster a read" 2 (changes roster_frames);
+  check int "no question, Gate or held call change does" 0
+    (changes (asks_frames @ gate_frames @ tool_approval_frames));
+  check bool "a row push without its Keeper says why it was not read" true
+    (match decode_all [ {|data: {"type":"keeper_row_changed"}
+
+|} ] with
+     | [ Observer.Undecodable reason ] ->
+         String.starts_with ~prefix:"keeper_row_changed" reason
+     | _ -> false)
+
+let turn_frame =
+  {|data: {"type":"keeper_turn_changed","name":"lane-smith","ts_unix":100.0}
+
+|}
+
+let preview_frame =
+  {|data: {"type":"keeper_turn_preview_changed","name":"lane-smith","ts_unix":100.0}
+
+|}
+
+let test_a_turns_push_names_its_keeper () =
+  check (list string) "a turns push and a preview push name their Keeper"
+    [ "turns:lane-smith"; "preview:lane-smith" ]
+    (List.map summary (decode_all [ turn_frame; preview_frame ]));
+  let keepers frames =
+    decode_all frames
+    |> List.filter_map (function
+         | Observer.Event event -> Option.map fst (Observer.turn_change event)
+         | Observer.Undecodable _ -> None)
+  in
+  check (list string) "both owe that Keeper's turns a read" [ "lane-smith"; "lane-smith" ]
+    (keepers [ turn_frame; preview_frame ]);
+  check (list string) "no roster push does" [] (keepers roster_frames);
+  check bool "a turns push without its Keeper says why it was not read" true
+    (match decode_all [ {|data: {"type":"keeper_turn_changed"}
+
+|} ] with
+     | [ Observer.Undecodable reason ] ->
+         String.starts_with ~prefix:"keeper_turn_changed" reason
+     | _ -> false);
+  check bool "a preview push without its Keeper says why it was not read" true
+    (match decode_all [ {|data: {"type":"keeper_turn_preview_changed"}
+
+|} ] with
+     | [ Observer.Undecodable reason ] ->
+         String.starts_with ~prefix:"keeper_turn_preview_changed" reason
+     | _ -> false)
+
+let verification_frames =
+  [ {|data: {"type":"workspace_dataset_changed","dataset":"verification_requests","ts_unix":100.0}
+
+|}
+  ; {|data: {"type":"internal_agent_runs_changed","registry":"verification","ts_unix":100.0}
+
+|}
+  ]
+
+let other_run_registry_frames =
+  [ {|data: {"type":"internal_agent_runs_changed","registry":"goal_verification"}
+
+|}
+  ; {|data: {"type":"internal_agent_runs_changed","registry":"exact_lane"}
+
+|}
+  ]
+
+let test_a_verification_or_run_push_reads_the_requests () =
+  check (list string) "both decode with what changed"
+    [ "dataset(verification_requests)"; "internal_runs(verification)" ]
+    (List.map summary (decode_all verification_frames));
+  let count frames =
+    decode_all frames
+    |> List.filter (function
+         | Observer.Event event ->
+             (match Observer.dataset_owed event with
+              | Some Masc.Workspace_dataset_event.Verification_requests -> true
+              | Some Masc.Workspace_dataset_event.Repositories | None -> false)
+         | Observer.Undecodable _ -> false)
+    |> List.length
+  in
+  check int "both owe the verification requests a read" 2 (count verification_frames);
+  check int "no roster or turns push does" 0 (count (turn_frame :: roster_frames));
+  check (list string) "the other registries decode by name"
+    [ "internal_runs(goal_verification)"; "internal_runs(exact_lane)" ]
+    (List.map summary (decode_all other_run_registry_frames));
+  check int "and owe the verification requests nothing" 0 (count other_run_registry_frames);
+  List.iter
+    (fun frame ->
+       match decode_all [ frame ] with
+       | [ Observer.Undecodable _ ] -> ()
+       | decoded ->
+           fail
+             ("a run push without a known registry was read: "
+              ^ String.concat ", " (List.map summary decoded)))
+    [ "data: {\"type\":\"internal_agent_runs_changed\"}\n\n"
+    ; "data: {\"type\":\"internal_agent_runs_changed\",\"registry\":\"elsewhere\"}\n\n"
+    ]
+
+let event_queue_frame =
+  {|data: {"type":"keeper_event_queue_changed","keeper":"alpha"}
+
+|}
+
+let test_a_queue_push_names_its_keeper () =
+  check (list string) "it decodes with the Keeper it names" [ "event_queue(alpha)" ]
+    (List.map summary (decode_all [ event_queue_frame ]));
+  let keepers frames =
+    decode_all frames
+    |> List.filter_map (function
+         | Observer.Event event -> Observer.event_queue_changed event
+         | Observer.Undecodable _ -> None)
+  in
+  check (list string) "it is read as that Keeper's queue" [ "alpha" ] (keepers [ event_queue_frame ]);
+  check (list string) "a schedule push names no queue" [] (keepers [ schedules_frame ]);
+  match decode_all [ "data: {\"type\":\"keeper_event_queue_changed\"}\n\n" ] with
+  | [ Observer.Undecodable _ ] -> ()
+  | decoded ->
+      fail
+        ("a queue push without a Keeper was read: "
+         ^ String.concat ", " (List.map summary decoded))
+
+let repositories_frame =
+  {|data: {"type":"workspace_dataset_changed","dataset":"repositories","ts_unix":100.0}
+
+|}
+
+let test_a_repository_push_reads_the_list () =
+  check (list string) "it decodes with the dataset it names" [ "dataset(repositories)" ]
+    (List.map summary (decode_all [ repositories_frame ]));
+  let count frames =
+    decode_all frames
+    |> List.filter (function
+         | Observer.Event event ->
+             (match Observer.dataset_owed event with
+              | Some Masc.Workspace_dataset_event.Repositories -> true
+              | Some Masc.Workspace_dataset_event.Verification_requests | None -> false)
+         | Observer.Undecodable _ -> false)
+    |> List.length
+  in
+  check int "it owes the repository list a read" 1 (count [ repositories_frame ]);
+  check bool "it owes the verification requests nothing" true
+    (match decode_all [ repositories_frame ] with
+     | [ Observer.Event event ] ->
+         (match Observer.dataset_owed event with
+          | Some Masc.Workspace_dataset_event.Verification_requests -> false
+          | Some Masc.Workspace_dataset_event.Repositories | None -> true)
+     | _ -> false);
+  check int "a verification or run push does not" 0 (count verification_frames);
+  List.iter
+    (fun frame ->
+       match decode_all [ frame ] with
+       | [ Observer.Undecodable _ ] -> ()
+       | decoded ->
+           fail
+             ("a dataset push without a known dataset was read: "
+              ^ String.concat ", " (List.map summary decoded)))
+    [ "data: {\"type\":\"workspace_dataset_changed\"}\n\n"
+    ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"elsewhere\"}\n\n"
+    ]
+
+let connector_frame =
+  {|data: {"type":"gate_connector_changed","connector":"slack","ts_unix":100.0}
+
+|}
+
+let test_a_connector_push_names_its_connector () =
+  check (list string) "it decodes with the connector it names" [ "connector(slack)" ]
+    (List.map summary (decode_all [ connector_frame ]));
+  let count frames =
+    decode_all frames
+    |> List.filter (function
+         | Observer.Event event -> Observer.gate_connector_changed event
+         | Observer.Undecodable _ -> false)
+    |> List.length
+  in
+  check int "it owes the connectors a read" 1 (count [ connector_frame ]);
+  check int "a repository push does not" 0 (count [ repositories_frame ]);
+  match decode_all [ "data: {\"type\":\"gate_connector_changed\"}\n\n" ] with
+  | [ Observer.Undecodable _ ] -> ()
+  | decoded ->
+      fail
+        ("a connector push without a connector was read: "
+         ^ String.concat ", " (List.map summary decoded))
+
+let test_only_a_question_change_reads_the_questions () =
+  check (list string) "question changes decode with what asked them"
+    [ "approval(asks:lane-smith)"; "approval(installation_asks:quiz)" ]
+    (List.map summary (decode_all asks_frames));
+  let count reads frames =
+    decode_all frames
+    |> List.filter (function
+         | Observer.Event event -> reads event
+         | Observer.Undecodable _ -> false)
+    |> List.length
+  in
+  check int "both question changes read the questions" 2
+    (count Observer.asks_changed asks_frames);
+  check int "no Gate, held call or mode change does" 0
+    (count Observer.asks_changed (gate_frames @ tool_approval_frames));
+  check int "a question change reads no Gate, held calls or modes" 0
+    (count
+       (fun event ->
+          Observer.gate_snapshot_changed event || Observer.held_calls_changed event
+          || Observer.tool_modes_changed event)
+       asks_frames);
+  check bool "a question change without its asker says why it was not read" true
+    (match decode_all [ {|data: {"type":"lane_addon_asks_changed"}
+
+|} ] with
+     | [ Observer.Undecodable reason ] -> String.starts_with ~prefix:"lane_addon_asks_changed" reason
+     | _ -> false)
+
+let test_only_a_gate_change_changes_the_gate_snapshot () =
+  check (list string) "Gate changes decode to what changed"
+    [ "approval(queue)"; "approval(queue)"; "approval(queue)"; "approval(rules)"
+    ; "approval(gate_mode)"; "approval(gate_mode)"
+    ; "approval(keeper_settings:lane-smith)"; "approval(keeper_settings:lane-smith)" ]
+    (List.map summary (decode_all gate_frames));
+  check (list string) "held call and mode changes decode with their Keeper"
+    [ "approval(waits:lane-smith)"; "approval(mode:lane-smith)" ]
+    (List.map summary (decode_all tool_approval_frames));
+  let gate_changes frames =
+    decode_all frames
+    |> List.filter (function
+         | Observer.Event event -> Observer.gate_snapshot_changed event
+         | Observer.Undecodable _ -> false)
+    |> List.length
+  in
+  check int "every Gate change changes the snapshot" (List.length gate_frames)
+    (gate_changes gate_frames);
+  check int "no other sample event does" 0
+    (gate_changes
+       (tool_approval_frames
+        @ [ tool_called_frame; agent_completed_frame; agent_failed_frame
+          ; heartbeat_frame; turn_complete_frame; keeper_tool_call_frame
+          ; composite_frame; chat_stream_delta_frame; chat_stream_custom_frame
+          ; waiting_inventory_frame; operator_digest_frame
+          ; transport_health_frame; fusion_run_status_frame
+          ; turn_observation_frame; chat_appended_frame; memory_journal_frame
+          ; board_post_changed_frame ]));
+  let count reads frames =
+    decode_all frames
+    |> List.filter (function
+         | Observer.Event event -> reads event
+         | Observer.Undecodable _ -> false)
+    |> List.length
+  in
+  check int "only the held call change reads the held calls" 1
+    (count Observer.held_calls_changed (gate_frames @ tool_approval_frames));
+  (* A mode change and the two Keeper Gate setting changes. *)
+  check int "a mode or Keeper Gate setting change reads the modes" 3
+    (count Observer.tool_modes_changed (gate_frames @ tool_approval_frames));
+  check bool "a Keeper setting change without its Keeper says why it was not read" true
+    (match decode_all [ {|data: {"type":"gate_keeper_mode_changed","mode":null}
+
+|} ] with
+     | [ Observer.Undecodable reason ] ->
+         String.starts_with ~prefix:"gate_keeper_mode_changed" reason
+     | _ -> false)
 
 let test_a_fusion_status_frame_decodes_its_identity_strings () =
   check (list string) "the three identity strings survive the decode"
@@ -515,14 +1154,20 @@ let untaught_agent_core_frame =
 (* The run registries' change push is read by the name the server broadcasts
    it under, so the two cannot drift apart. *)
 let test_the_internal_runs_push_is_read_by_the_servers_name () =
-  check (list string) "the frame the server broadcasts decodes to the push"
-    [ "internal_runs" ]
+  let registries =
+    Masc.Internal_agent_runs_event.[ Verification; Goal_verification; Exact_lane ]
+  in
+  check (list string) "the frames the server broadcasts decode to the push"
+    [ "internal_runs(verification)"; "internal_runs(goal_verification)"
+    ; "internal_runs(exact_lane)" ]
     (List.map summary
        (decode_all
-          [ "data: "
-            ^ Yojson.Safe.to_string (Masc.Internal_agent_runs_event.to_json ())
-            ^ "\n\n"
-          ]))
+          (List.map
+             (fun registry ->
+                "data: "
+                ^ Yojson.Safe.to_string (Masc.Internal_agent_runs_event.to_json registry)
+                ^ "\n\n")
+             registries)))
 
 let test_schedule_change_is_read_by_the_servers_name () =
   check (list string) "the schedule invalidation has a typed event"
@@ -846,10 +1491,43 @@ let () =
             test_a_frame_its_type_decides_is_not_read_past_the_type
         ; test_case "a delta with a slice is not a snapshot" `Quick
             test_a_delta_with_a_slice_is_not_a_snapshot
+        ; test_case "a metrics append names its Keeper" `Quick
+            test_a_metrics_append_names_its_keeper
+        ; test_case "a Goal projection change is named" `Quick
+            test_a_goal_projection_change_is_named
+        ; test_case "a runtime.toml change is named" `Quick
+            test_a_runtime_config_change_is_named
         ; test_case "only a chat-appended event names a reload keeper" `Quick
             test_only_a_chat_appended_event_names_a_reload_keeper
         ; test_case "only a memory journal event names a journal keeper" `Quick
             test_only_a_memory_journal_event_names_a_journal_keeper
+        ; test_case "only a runtime journal event names a runtime journal" `Quick
+            test_only_a_runtime_journal_event_names_a_runtime_journal
+        ; test_case "only a board notification names a board change" `Quick
+            test_only_a_board_notification_names_a_board_change
+        ; test_case "only a Gate change changes the Gate snapshot" `Quick
+            test_only_a_gate_change_changes_the_gate_snapshot
+        ; test_case "only a question change reads the questions" `Quick
+            test_only_a_question_change_reads_the_questions
+        ; test_case "only an async request change reads the async requests" `Quick
+            test_only_an_async_request_change_reads_the_async_requests
+        ; test_case "Skill pushes name their reads" `Quick test_skill_pushes_name_their_reads
+        ; test_case "a roster push names the row or every row" `Quick
+            test_a_roster_push_names_the_row_or_every_row
+        ; test_case "a turns or preview push names its Keeper" `Quick
+            test_a_turns_push_names_its_keeper
+        ; test_case "a verification or run push reads the requests" `Quick
+            test_a_verification_or_run_push_reads_the_requests
+        ; test_case "a repository push reads the list" `Quick
+            test_a_repository_push_reads_the_list
+        ; test_case "a queue push names its Keeper" `Quick
+            test_a_queue_push_names_its_keeper
+        ; test_case "a connector push names its connector" `Quick
+            test_a_connector_push_names_its_connector
+        ; test_case "only a confirmation change reads the confirmations" `Quick
+            test_only_a_confirmation_change_reads_the_confirmations
+        ; test_case "only a schedule change reads the schedules" `Quick
+            test_only_a_schedule_change_reads_the_schedules
         ; test_case "a fusion status frame decodes its identity strings" `Quick
             test_a_fusion_status_frame_decodes_its_identity_strings
         ; test_case "cursor commits only with a complete event" `Quick

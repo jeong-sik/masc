@@ -1,0 +1,26 @@
+build frames=127 mean=7.22ms p50=2.22 p95=26.27 p99=116.62 max=178.28
+  build[keeper-list] frames=84 mean=10.43ms p50=2.80 p95=76.66 p99=116.62 max=178.28
+  build[overview] frames=43 mean=0.94ms p50=0.66 p95=2.47 p99=3.45 max=3.45
+  worst[0] frame=104 178.28ms tag=keeper-list
+  worst[1] frame=86 116.62ms tag=keeper-list
+  worst[2] frame=106 81.29ms tag=keeper-list
+  worst[3] frame=74 79.17ms tag=keeper-list
+  worst[4] frame=54 76.66ms tag=keeper-list
+present frames=127 mean=1.07ms p50=0.06 p95=2.35 p99=32.29 max=37.15
+  present[keeper-list] frames=84 mean=1.02ms p50=0.08 p95=2.28 p99=10.84 max=37.15
+  present[overview] frames=43 mean=1.18ms p50=0.04 p95=2.35 p99=32.29 max=32.29
+  worst[0] frame=105 37.15ms tag=keeper-list write=0.000ms flush=37.108ms other=0.040ms bytes=2119 writes=1 flushes=1
+  worst[1] frame=6 32.29ms tag=overview write=0.001ms flush=32.258ms other=0.030ms bytes=13555 writes=1 flushes=1
+  worst[2] frame=85 10.84ms tag=keeper-list write=0.002ms flush=0.015ms other=10.824ms bytes=574 writes=1 flushes=1
+  worst[3] frame=1 9.69ms tag=overview write=0.002ms flush=9.649ms other=0.043ms bytes=13555 writes=1 flushes=1
+  worst[4] frame=106 8.33ms tag=keeper-list write=0.000ms flush=8.291ms other=0.042ms bytes=1315 writes=1 flushes=1
+  stage[home.prepare] frames=43 p50=0.006ms p95=0.008 max=0.090
+  stage[home.selection] frames=43 p50=0.002ms p95=0.007 max=0.051
+  stage[overview.rows] frames=43 p50=0.057ms p95=0.271 max=0.673
+  stage[surface.body] frames=127 p50=0.025ms p95=0.043 max=0.741
+  stage[surface.chrome] frames=127 p50=0.174ms p95=1.878 max=29.469
+  stage[surface.content] frames=43 p50=0.057ms p95=0.271 max=0.674
+  stage[surface.materialize] frames=43 p50=0.051ms p95=0.727 max=2.258
+  stage[surface.panes] frames=127 p50=0.348ms p95=1.455 max=45.365
+  stage[surface.setup] frames=43 p50=0.015ms p95=0.104 max=0.163
+  stage[surface.strip_frame] frames=127 p50=0.044ms p95=0.119 max=20.922

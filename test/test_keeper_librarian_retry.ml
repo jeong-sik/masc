@@ -2435,6 +2435,118 @@ let test_a_restatement_read_as_not_written_is_not_checked () =
       (List.map fst selection.cited)
 ;;
 
+(* A claim that writes a current memory again and absorbs another one names
+   that current memory as [into], and is cited under the same identity: every
+   absorbing claim the gate reads has a citation entry, a restatement too. *)
+let test_every_absorbing_claim_is_cited_under_its_into () =
+  List.iter
+    (fun (label, claims, expected_into) ->
+       match parse (selection_json ~dropped:[] ~new_claims:claims ()) with
+       | Error error -> failf "%s: rejected: %s" label (Librarian.parse_error_to_string error)
+       | Ok selection ->
+         let intos =
+           List.map (fun (statement : Memory.absorbed_statement) -> statement.into)
+             selection.absorbed
+         in
+         check (list string) (label ^ ": the absorptions go into the claim") expected_into intos;
+         check bool (label ^ ": every absorbing claim has a citation entry") true
+           (List.for_all (fun into -> List.mem_assoc into selection.cited) intos))
+    [ ( "a restatement that absorbs"
+      , [ citing_claim ~claim:"keep A" ~absorbs:(`List [ `String "m2" ])
+            (evidence_json ~conversation:[ 0 ] ()) () ]
+      , [ current_a_id ] )
+    ; ( "a new claim that absorbs beside a plain restatement"
+      , [ citing_claim ~absorbs:(`List [ `String "m2" ]) (evidence_json ()) ()
+        ; citing_claim ~claim:"keep A" ~absorbs:(`List []) (evidence_json ()) () ]
+      , [ Memory.memory_id (fact ~claim:"A and B, together") ] )
+    ]
+;;
+
+let memory_only_accepted ?(admission_support = []) ?(admission_recall_bindings = []) selection =
+  { Runtime.selection
+  ; continuity_answer = Runtime.Memory_only
+  ; required_memory_ids = []
+  ; explicit_candidate_ids = []
+  ; admission_support
+  ; admission_recall_bindings
+  }
+;;
+
+let cited_rows (absorption : Runtime.durable_absorption) ~field claim =
+  match List.assoc_opt (Memory.memory_id (fact ~claim)) absorption.cited_observations with
+  | None -> failf "no cited observations for %s" claim
+  | Some rows -> List.map (fun row -> Yojson.Safe.Util.(member field row |> to_string)) rows
+;;
+
+(* In admission, a pending explicit-write candidate is an observation of the
+   claim its own judgment names, so each claim's pairs carry only those. A
+   bound candidate the answer does not declare as support carries nothing. *)
+let test_admission_candidates_follow_the_claim_their_judgment_names () =
+  let first = "A and B, together" and second = "B on its own" in
+  match
+    parse
+      (selection_json
+         ~dropped:[]
+         ~new_claims:
+           [ citing_claim ~claim:first ~absorbs:(`List [ `String "m1" ]) (evidence_json ()) ()
+           ; citing_claim ~claim:second ~absorbs:(`List [ `String "m2" ]) (evidence_json ()) ()
+           ]
+         ())
+  with
+  | Error error -> failf "two claims rejected: %s" (Librarian.parse_error_to_string error)
+  | Ok selection ->
+    let bound request_id claim =
+      { Current.candidate_id =
+          { Current.queue_generation = "candidate-generation"; request_id; sequence = 0
+          ; input_sha256 = "candidate-digest" }
+      ; source_fact = fact ~claim:("candidate " ^ request_id)
+      ; target_memory_id = Memory.memory_id (fact ~claim)
+      }
+    in
+    let absorption =
+      Runtime.absorption_input (input ())
+        (memory_only_accepted selection
+           ~admission_support:[ "for-first"; "for-second" ]
+           ~admission_recall_bindings:
+             [ bound "for-first" first; bound "for-second" second; bound "undeclared" first ])
+    in
+    check (list string) "the first claim carries only its own declared candidate"
+      [ "for-first" ] (cited_rows absorption ~field:"request_id" first);
+    check (list string) "the second claim carries only its own candidate"
+      [ "for-second" ] (cited_rows absorption ~field:"request_id" second)
+;;
+
+(* A claim that cites the counterpart block carries that block into its pairs;
+   a claim that cites a turn carries that turn and nothing else. *)
+let test_a_counterpart_citation_reaches_its_claims_pairs () =
+  let counterpart =
+    { Keeper_counterpart_observation.origin = Keeper_counterpart_observation.Durable_chat
+    ; channel = "direct"; workspace_id = None; user_id = None; user_name = None
+    ; authority = Keeper_counterpart_observation.Owner; content = "the owner asked for A" }
+  in
+  let inp = { (input ()) with counterpart_observations = [ counterpart ] } in
+  let citing = "A, as the owner asked" and other = "B on its own" in
+  match
+    Librarian.selection_of_json_result ~now:2_000_000. inp
+      (selection_json
+         ~dropped:[]
+         ~new_claims:
+           [ citing_claim ~claim:citing ~absorbs:(`List [ `String "m1" ])
+               (evidence_json ~counterpart:true ()) ()
+           ; citing_claim ~claim:other ~absorbs:(`List [ `String "m2" ])
+               (evidence_json ~conversation:[ 0 ] ()) ()
+           ]
+         ())
+  with
+  | Error error -> failf "counterpart citation rejected: %s" (Librarian.parse_error_to_string error)
+  | Ok selection ->
+    let absorption = Runtime.absorption_input inp (memory_only_accepted selection) in
+    check (list string) "the counterpart citation reaches its claim's pairs"
+      [ "counterpart" ] (cited_rows absorption ~field:"kind" citing);
+    check (list string) "a claim that cites a turn carries that turn alone"
+      [ "conversation" ] (cited_rows absorption ~field:"kind" other)
+;;
+
 let test_prompt_numbers_each_tool_observation () =
   let observations =
     List.assoc "turn_tool_observations" (Librarian.prompt_variables (input ()))
@@ -2488,6 +2600,12 @@ let () =
             test_same_text_claims_cite_what_either_cites
         ; test_case "a restatement read as not written is not checked" `Quick
             test_a_restatement_read_as_not_written_is_not_checked
+        ; test_case "every absorbing claim is cited under its into" `Quick
+            test_every_absorbing_claim_is_cited_under_its_into
+        ; test_case "admission candidates follow the claim their judgment names" `Quick
+            test_admission_candidates_follow_the_claim_their_judgment_names
+        ; test_case "a counterpart citation reaches its claim's pairs" `Quick
+            test_a_counterpart_citation_reaches_its_claims_pairs
         ; test_case "the prompt numbers each tool observation" `Quick
             test_prompt_numbers_each_tool_observation
         ; test_case "supersedes must be a string or null" `Quick

@@ -1328,7 +1328,7 @@ interrupt outcomes and approval requests stay visible. `Ctrl-S:details` opens
 folded approval records. `Ctrl-D` expands tool details independently of metadata.
 
 Auto-next requests priority for your message; current work continues until it
-finishes or yields. Use the explicit interrupt controls to stop current work.
+finishes. Use the explicit interrupt controls to stop current work.
 When
 one newest message is taller than the history pane, the live edge keeps its
 heading (or inline opening) and latest rows with an explicit
@@ -2424,7 +2424,9 @@ category들(정렬순) → All. 필터는 ordinary 사실만 좁힌다 — sourc
 
 Right 또는 `Enter`를 누르면 선택한 저장소 범위의 Code 화면으로 이동한다.
 `d`를 누르면 선택한 저장소(또는 Keepers 목록/상세 화면에서 누를 경우 프로젝트)의 현재 Git 변경 파일을 연다. 각 행은 staged,
-worktree, untracked, conflict 상태를 구분한다. 이 목록에서 `Right`, `d`, 또는 `Enter`를 누르면
+worktree, untracked, conflict 상태를 구분한다. 제목에는 체크아웃된 브랜치와 upstream 대비
+`↑ahead ↓behind`가 함께 나온다. upstream이 없으면 `(no upstream)`, upstream ref가 사라졌으면
+`(upstream … gone)`, 브랜치가 아니면 `detached HEAD`로 표시하고 숫자를 0으로 채우지 않는다. 이 목록에서 `Right`, `d`, 또는 `Enter`를 누르면
 해당 파일의 Git diff를 구문 강조와 줄 번호가 포함된 인라인 뷰로 바로 확인한다. diff 뷰에서는 `j`/`k`로 스크롤하고 `Esc`/`Left`로 파일 목록으로 돌아온다.
 `v`를 누르면 해당 파일을 Code 화면에서 직접 열 수 있다. Left 또는 `Esc`는 이전 화면(저장소 목록, Keeper 상세, 또는 채팅)으로 돌아간다.
 
@@ -2654,16 +2656,18 @@ reading; a prepared display does not make that reading fresh or complete.
 The Skill Usage pane opens with a summary box: observed catalog entries,
 distinct Keepers, and separate `TRIGGERED`, `DELIVERED`, and `ACTIONS` totals.
 These are observations from current Keeper sessions at exact Skill revisions,
-not lifetime totals or success rates. Missing ledgers make the totals partial
-and are called out beside the summary.
+not lifetime totals or success rates. Each Keeper's usage is its own read.
+Missing ledgers make the totals partial and are called out beside the summary.
+A Keeper whose latest read failed keeps its earlier answer in the totals, and
+the summary counts those apart. When the Keeper roster is not read yet, or its
+read failed, the summary says the totals may miss Keepers.
 
 Skill cards follow in descending invocation order. Each card shows its own
-totals and Keeper rows, with the last use in this terminal's timezone.
-Narrow terminals stack a Keeper's counts and last use below its name;
-wider terminals align them in columns. Source configuration and rejected or
-shadowed entries follow the usage cards. If retained usage
-coverage has no time, the row says `time unavailable`; it does not turn
-bounded evidence into a `never used` claim.
+totals and Keeper rows, with the last use the ledger recorded. Narrow
+terminals stack a Keeper's counts and last use below its name; wider terminals
+align them in columns. Usage rows for a revision this catalog reading does not
+hold follow in their own box. Unavailable ledgers and failed reads are listed
+next, then source configuration and rejected or shadowed entries.
 
 The effective surface lists a skill's name, kind and sizes; a composition
 also carries the shape of its plan (`nodes`, `batches`, `parallel`), which an

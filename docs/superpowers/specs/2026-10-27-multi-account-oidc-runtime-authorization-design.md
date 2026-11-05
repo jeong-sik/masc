@@ -9,7 +9,7 @@
 
 ## 1. 사용예와 현재 차이
 
-한 머신에서 MASC를 실행하고, 초대받은 사용자만 Google OIDC로 Dashboard에 로그인한다. 각 사용자는 자신의 Codex 또는 Claude Code 구독을 등록하고 기본적으로 본인만 Runtime을 사용한다. 필요하면 credential이 아니라 특정 Runtime의 실행 권한만 공유한다.
+한 머신에서 MASC를 실행하고, 초대받은 사용자만 Google OIDC나 GitHub 계정으로 Dashboard에 로그인한다. 각 사용자는 자신의 Codex 또는 Claude Code 구독을 등록하고 기본적으로 본인만 Runtime을 사용한다. 필요하면 credential이 아니라 특정 Runtime의 실행 권한만 공유한다.
 
 현재 코드는 이 사용예를 그대로 지원하지 않는다.
 
@@ -21,6 +21,10 @@
 - official client는 모델 호출과 내장 도구 루프를 소유하고 account-home을 사용한다. MASC가 중개하는 단일 provider 요청 모델을 그대로 적용할 수 없다.
 - 자격 증명 레코드 `Types_auth.agent_credential`(`lib/types/types_auth.mli:98-107`)은 token 해시와 `role`을 가지며 `role`이 유일한 역할 권위다. 진행 중인 MCP OAuth(`docs/rfc/RFC-mcp-dual-bearer-oauth.md`)도 정적 bearer와 OAuth token을 같은 `agent_credential` 투영으로 풀고, loopback 승인 화면에서 기존 bearer를 한 번 제시하게 한다.
 - official client turn에는 protocol-idle 침묵 감시가 있다. Runtime이 `turn-timeout-s`를 선언하지 않으면 기본 300초가 서고, 0 이하로 선언하면 마감이 없다. 정당한 작업의 길이를 자르는 상한이 아니라 조용해진 client를 알아차리는 값이다(`lib/runtime/runtime_inference.ml:57-69`, `lib/runtime/runtime_claude_code.ml:33-35`).
+
+### 1.1 1단계와 2단계
+
+1단계는 초대한 사람이 Google이나 GitHub으로 로그인해 자기 Runtime으로 자기 Keeper를 쓰는 데까지다(2026-11-04 사용자 결정). 1단계는 목표 1·2·4를 지키고, 목표 3에서는 credential과 Runtime을 공유하지 않는 쪽만 지킨다. Runtime의 `Use` 공유(Delegated·MachineShared), 입장 요청(§5.1-2c), MCP OAuth 결속, purge(§8.5), 복원 창과 모드 끄기(§10), official lane attestation(§7.2의 증명)은 2단계다. 1단계를 여는 조건은 §11.1이고, 2단계 기능이 들어오면 그 기능의 증거가 §11의 요구 목록에 다시 들어간다. 1단계에서도 백업 복원은 §5.1 표의 부팅 판정을 거친다.
 
 ## 2. 목표·비목표·반목표
 
@@ -59,7 +63,7 @@
 7. **부분 실패를 숨기지 않는다.** `Outcome_unknown`, `Revocation_pending`, `AuthorizationUncertain`, `Quarantined`, `Purge_pending`, `Purged`를 구분한다.
 8. **판정은 닫힌 합타입으로 표현한다.** 문자열 비교나 이름으로 권한을 추정하지 않는다.
 9. **owner의 부재는 그 의존 사슬만 막는다.** 다른 Cleared 사슬은 계속 실행할 수 있어야 한다.
-10. **실제 증명이 없는 공유는 거부다.** lane·readiness·provider 호출·복구 증명이 없으면 다계정을 열지 않는다.
+10. **실제 증명이 없는 공유는 거부다.** 1단계는 §11.1의 증명이, 2단계는 §11의 증명 전체가 없으면 다계정을 열지 않는다. 1단계에는 공유가 없다.
 11. **dispatch의 prompt·output·transcript는 initiator의 것이다.** owner와 Admin은 사용량·시각·dispatch_id·결과 종류만 읽는다. 공유는 Runtime의 Use이며 대화 내용의 공유가 아니다. Keeper의 지속 상태(컨텍스트·기억·산출 글)는 만든 dispatch의 initiator를 표시하고, 다른 initiator의 dispatch에는 `Read_state` effect가 허용될 때만 보인다. 허용이 없으면 initiator별로 분리된 컨텍스트로 돌린다. 여러 dispatch의 내용을 합쳐 만든 파생 상태(요약·병합된 기억)의 표시는 원천 initiator 전체이고, 모든 원천이 허용될 때만 보인다. 사람 initiator가 없는 dispatch(autonomous·system)가 만든 상태는 Service(system) 표시를 달고 `Read_state`가 허용된 initiator에게만 보인다. initiator가 Disabled가 되면 그가 만든 분리 컨텍스트와 prompt·output은 지우지 않고 아무도 읽지 못한다. 파생 상태에 그의 몫이 섞여 있으면 읽는 호출은 `Source_sealed`를 돌려받고 값은 보지 못한다. 봉인은 읽을 때 원천 initiator의 현재 상태로 판정하고 표시를 쓰지 않으며, Active로 돌아오면 풀린다. initiator가 삭제되면 그의 몫은 `Delete` 사건과 같은 append로 `Purge_pending`이 되고(§8.5) 감사 메타데이터만 남는다. 파생 상태에 섞인 그 몫에는 원천별 `source_purged` 표시를 달고, 표시가 하나라도 있는 파생 상태를 읽는 호출은 결과 값 `Source_purged`를 돌려받고 값은 보지 못한다. Disabled에서 삭제로 가는 것은 명시 결정이고 시간 경과는 근거가 아니다. `Source_sealed`와 `Source_purged`가 막는 범위는 그 원천이 섞인 파생 상태 하나이고, 다른 원천의 분리 컨텍스트와 다른 파생 상태는 읽힌다(§3-9). 대가는 그 파생 상태에 같이 섞인 다른 initiator의 몫도 읽지 못하는 것이다. 남은 원천의 분리 컨텍스트로 새 파생 상태를 만들 수 있으면 Keeper가 만들고, 만들 수 없는 몫은 잃는다. 몫 단위로 되살리는 설계는 이 문서의 범위가 아니며 알려진 한계다.
 
 ## 4. 주체와 레코드
@@ -148,7 +152,8 @@ MachineSharePolicy {
 ```
 
 - `Self`는 `grantee = Runtime.owner`일 때만 유효하며 **Runtime 생성과 같은 append**로 만든다. 실행·조회 경로에서 생성하지는 않지만 인가 판정은 저장된 Self/Delegated를 읽어서만 한다.
-- Human의 Keeper는 Self가 아니라 owner가 명시한 Delegated를 사용한다. Runtime–Keeper binding/profile 승인 시점에 만들고, Human에게 공유했다는 사실만으로 Keeper에 상속하지 않는다.
+- 1단계에서 Human의 Keeper는 owner 한 명의 것이다. Keeper 턴은 owner의 Self grant로 인가하고(executor = owner), Keeper에 배정할 수 있는 Runtime은 owner가 Self grant를 가진 것뿐이다. 다른 사람의 Board 글이 Keeper를 깨워도 실행하는 쪽과 쓰는 구독은 owner의 것이다.
+- 2단계에서 Human의 Keeper는 Self가 아니라 owner가 명시한 Delegated를 사용한다. Runtime–Keeper binding/profile 승인 시점에 만들고, Human에게 공유했다는 사실만으로 Keeper에 상속하지 않는다.
 - **MachineShared는 wildcard가 아니라 `MachineSharePolicy + 승인된 사람별 Delegated`다.** 정책 자체는 실행 권한이 아니다. 미래 principal은 grant가 없으므로 자동 포함되지 않는다. 사람 추가는 해당 Delegated 생성, 제거는 그 grant의 회수다.
 - `member_template_effects`는 신규 member grant 생성 시 초기값일 뿐 현재 정책의 권한이 아니다. 정책 수정으로 기존 member grant를 암묵 변경하지 않는다. 실제 효과 변경은 대상 grant를 지정한 `Grant_effect_update`로만 하며, 관련 행을 같은 append로 갱신한다.
 - 전체 정책 회수·resource_epoch 상승·모든 연결 grant 회수는 같은 append다. member 추가는 revision만, member 제거는 해당 grant_epoch만 올린다.
@@ -242,7 +247,7 @@ Intent는 대상 없이 digest만 남기지 않는다. 중단된 회수가 어�
 
 - `맞음`: 마지막 `Committed`(판정 2로 승격되는 것을 포함)가 replay에 있고, 남은 `Intent_pending`이 판정 1~5로 풀리고, 외부 고수위와 replay의 epoch 값이 같다. lease 줄은 외부 저장소에 가지 않으므로 늘어도 `맞음`은 깨지지 않는다.
 - `안 맞음`: 외부 저장소를 읽을 수 있는데 `맞음`도 `없음`도 아니다. §8.2의 판정 1~5를 통과하지 못한 경우가 여기에 든다.
-- `읽지 못함`: 외부 저장소나 설치 기록이 있는데 열지 못하거나 손상됐다(§8.4). 쓰다가 죽어 끝이 잘린 마지막 항목은 손상이 아니다. 마지막 줄바꿈 뒤에 남은 바이트만 끝이 잘린 항목이고, 줄바꿈으로 끝났는데 읽히지 않는 항목은 손상이다. 잘린 항목에 든 `Committed`에 의존해 나간 응답은 없고, 잘라 낸 `Committed`는 판정 2가, 잘라 낸 `aborted_intent`는 판정 3이 다시 세운다. 부팅은 외부 저장소를 열 때(판정 1~5를 돌리기 전에) 그 항목을 잘라 내고, 잘라 낸 바이트 수와 남긴 바이트 수를 경고로 남긴다(`authz.jsonl`에서 끝이 잘린 마지막 줄을 자르는 규칙과 같다).
+- `읽지 못함`: 외부 저장소나 설치 기록이 있는데 열지 못하거나 손상됐다. 설정 디렉터리가 §8.4의 소유자 검사를 통과하지 못하면 설치 기록이 없어도 여기에 든다(§8.4). 쓰다가 죽어 끝이 잘린 마지막 항목은 손상이 아니다. 마지막 줄바꿈 뒤에 남은 바이트만 끝이 잘린 항목이고, 줄바꿈으로 끝났는데 읽히지 않는 항목은 손상이다. 잘린 항목에 든 `Committed`에 의존해 나간 응답은 없고, 잘라 낸 `Committed`는 판정 2가, 잘라 낸 `aborted_intent`는 판정 3이 다시 세운다. 부팅은 외부 저장소를 열 때(판정 1~5를 돌리기 전에) 그 항목을 잘라 내고, 잘라 낸 바이트 수와 남긴 바이트 수를 경고로 남긴다(`authz.jsonl`에서 끝이 잘린 마지막 줄을 자르는 규칙과 같다).
 - `없음`: 외부 저장소가 없거나, 있어도 `Committed`가 하나도 없고 남은 `Intent_pending`이 모두 `Fresh_bootstrap`의 것이어서 판정 3이 `aborted_intent`로 정한다(쓰기가 실패해도 판정은 선다). `Fresh_bootstrap`이 `Intent_pending`을 쓴 뒤 `authz.jsonl`에 append하기 전에 죽은 설치가 여기에 든다. 이 설치는 `Fresh_bootstrap`을 다시 실행할 수 있고, 새 `Intent_pending`을 쓰기 전에 남은 것을 판정 3으로 닫는다(§8.2-1). workspace_id는 `Committed`가 된 `Fresh_bootstrap`(판정 2로 승격되는 것을 포함)의 것만 유효하다.
 
 `있음`은 `없음`이 아닌 모든 값(`맞음`, `안 맞음`, `읽지 못함`)이다.
@@ -282,6 +287,16 @@ transport는 `Browser_session(session_id) | Scoped_pat(pat_id)`에 결속하고 
 callback은 303 대신 비공개 데이터가 없는 200 HTML 완료 화면을 반환한다. same-origin Dashboard 링크 또는 `location.replace`로 이동해 다음 탐색부터 Strict cookie를 사용한다. `return_to`는 로컬 경로만 허용하고 Strict·Secure를 낮추지 않는다. 다계정은 HTTPS를 요구하고 단일 사용자 개발 모드의 기존 cookie 동작을 깨지 않는다.
 
 OIDC Dashboard는 Authorization header를 제거한 뒤 모드를 연다. cookie+Bearer를 cookie가 조용히 이기는 상태는 두지 않는다. CLI/MCP는 scoped PAT 또는 MCP OAuth token을 사용한다. 원격 WS/SSE의 `token` query·`sse_kind=observer`·IDE LSP query credential은 비활성화하고, 기존 query credential은 단일 사용자 loopback의 단회 교환만 허용한다.
+
+### 5.2.1 GitHub 로그인
+
+GitHub 사용자 로그인은 OIDC가 아니라서 ID token이 없다. 신원은 GitHub이 돌려주는 숫자 사용자 `id`다. `login`은 바뀔 수 있어서 신원 키가 아니다([GitHub REST users](https://docs.github.com/en/rest/users/users)).
+
+- 신원 키는 닫힌 합타입 `External_identity.t = Google of {sub} | Github of {user_id}`다. 이 문서의 `(iss, sub)`는 이 값을 말한다. issuer 문자열을 비교해 갈래를 고르지 않는다. 같은 사람의 Google과 GitHub은 서로 다른 신원이고, 계정 링크는 §5.1-5대로 금지다.
+- 흐름은 OAuth App의 Authorization Code + PKCE(S256) + `state` + exact redirect URI다. github.com은 2025-07-14부터 PKCE를 받는다([GitHub changelog](https://github.blog/changelog/2025-07-14-pkce-support-for-oauth-and-github-app-authentication/), [Authorizing OAuth apps](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps), 2026-11-04 확인). GitHub Enterprise Server는 대상이 아니다.
+- code는 서버가 client secret으로 access token과 바꾼다. 서버는 그 token으로 `GET /user`를 한 번 읽어 `id`를 얻고 token을 저장하지 않는다. scope는 요청하지 않는다. scope 없는 token도 공개 프로필을 읽는다.
+- 입장은 §5.1-2의 (a)와 (b)뿐이다. GitHub에는 `hd`가 없어서 도메인 정책(§5.1-7)의 입장 요청(c)을 만들지 않는다.
+- 세션 cookie와 transaction cookie는 §5.2와 같다. `__Host-masc_oidc_txn`이 GitHub 흐름의 `state`와 PKCE도 결속한다. 콜백은 `/auth/github/callback`이고 §5.2의 콜백 규칙(완료 화면, 기존 세션 폐기, `return_to`)을 그대로 따른다.
 
 ### 5.3 credential 선택과 Strict
 
@@ -404,7 +419,7 @@ Lease_state =
 
 - 발급은 `with_lease` 범위 안에서만 한다. attempt 종료·fiber 취소·executor teardown 중 어느 경로로 나가도 범위 출구에서 `Issued`는 `Revoked`로, `Lease_dispatched`는 종단 기록이 있으면 `Completed`(효과가 나갔으면 `Effected`, 나가기 전에 실패했거나 취소됐으면 `Not_started`), 없으면 `Outcome_unknown`으로 닫는다. 종단 기록이 실패하면 삼키지 않고 `Outcome_unknown`으로 올린다. `Revoked`의 하위 값은 닫은 원인이 정한다. attempt 종료·fiber 취소·`Effect_cancel`은 `Cancelled`, `Executor_teardown`과 재기동은 `Teardown`, scoped epoch 회수(§8.1)는 `Grant_revoked`다. 효과가 시작되지 않은 `Issued` lease는 어느 경로로 닫혀도 `Outcome_unknown`이 되지 않고 reconciliation 질문도 만들지 않는다.
 - 효과는 `consume`으로만 일으킨다. `consume`은 `Issued`에서 한 번만 성공하고 `Lease_dispatched`를 동기 commit한 뒤에 효과를 낸다. 같은 lease의 두 번째 `consume`과 `Revoked` lease의 `consume`은 거부하고 audit record를 남긴다.
-- 재기동 때 `Issued`로 남은 lease는 질문 없이 `Revoked(Teardown)`로 닫는다. `Lease_dispatched`로 남은 lease만 `Outcome_unknown`이 되어 §9의 확인 대상이 된다.
+- 재기동 때 `Issued`로 남은 lease는 질문 없이 `Revoked(Teardown)`로 닫는다. `Lease_dispatched`로 남은 lease만 `Outcome_unknown`이 되어 §9-5의 reconciliation 질문 대상이 된다.
 
 도구 registry의 효과 분류는 닫힌 `Read_only | Effecting`이다. 분류가 없는 새 tool은 Effecting이다.
 
@@ -487,7 +502,7 @@ Committed {
 
 이 절은 `Fresh_bootstrap`을 실행하는 경우와 마지막 모드 사건이 있는 설치에 적용한다. 모드 사건이 없는 `Single_user` 설치는 외부 저장소가 없는 것이 정상이고 그대로 시작한다(§5.1 표 첫 행). 외부 저장소가 없을 때(`ENOENT`, 부모 경로 부재) 새로 시작할 수 있는 것은 명시적 `Fresh_bootstrap`뿐이다. §5.1이 `없음`으로 읽는 저장소도 같다.
 
-외부 저장소의 위치는 설치 기록에서 읽는다. 설치 기록은 `$XDG_CONFIG_HOME/masc/`(없으면 `~/.config/masc/`) 아래에 base path 단위로 두는 파일이고 외부 저장소의 경로를 적는다. 기록 안에도 canonical base path를 적어 읽을 때 대조한다. 설치 기록은 임시 파일에 쓰고 fsync한 뒤 rename하고 부모 디렉터리를 fsync한다. 그래서 읽는 쪽이 보는 파일은 없거나 온전하고, 온전하지 않은 기록은 손상이다. `Fresh_bootstrap`은 설치 기록을 먼저 쓰고 외부 저장소를 만든다. 외부 저장소가 있는데 설치 기록이 가리키지 않는 상태를 만들지 않기 위해서다. `Fresh_bootstrap`은 외부 고수위가 `없음`일 때만 열리므로 설치 기록이 이미 있어도 그 기록이 가리키는 저장소는 `없음`이다. 이때는 기록을 같은 방식으로 새 경로로 교체한다. 설치 기록이 없거나 가리키는 곳에 외부 저장소가 없으면 부팅은 외부 고수위를 `없음`으로 읽는다(§5.1). 설정 디렉터리를 알 수 없으면(`XDG_CONFIG_HOME`과 `HOME`이 모두 없다) 설치 기록이 없는 것이고, 이때 `Fresh_bootstrap`은 기록을 쓸 수 없어 거부한다. 설치 기록이 없는데 `Fresh_bootstrap`이 외부 저장소를 만들 경로에 파일이 이미 있으면 그 파일을 열지 않고 실패한다. 기록 없이 옛 저장소를 덮거나 잇지 않기 위해서다. 설치 기록과 외부 저장소는 백업 복원이 되돌린 것을 알아채려는 장치다. 설정 디렉터리와 base path에 모두 쓸 수 있는 쪽은 막지 못한다.
+외부 저장소의 위치는 설치 기록에서 읽는다. 설치 기록은 `$XDG_CONFIG_HOME/masc/`(없거나 상대 경로면 `~/.config/masc/`) 아래에 base path 단위로 두는 파일이고 외부 저장소의 경로를 적는다. 기록 안에도 canonical base path를 적어 읽을 때 대조한다. 설치 기록은 임시 파일에 쓰고 fsync한 뒤 rename하고 부모 디렉터리를 fsync한다. 그래서 읽는 쪽이 보는 파일은 없거나 온전하고, 온전하지 않은 기록은 손상이다. `Fresh_bootstrap`은 설치 기록을 먼저 쓰고 외부 저장소를 만든다. 외부 저장소가 있는데 설치 기록이 가리키지 않는 상태를 만들지 않기 위해서다. `Fresh_bootstrap`은 외부 고수위가 `없음`일 때만 열리므로 설치 기록이 이미 있어도 그 기록이 가리키는 저장소는 `없음`이다. 이때는 기록을 같은 방식으로 새 경로로 교체한다. 설치 기록이 없거나 가리키는 곳에 외부 저장소가 없으면 부팅은 외부 고수위를 `없음`으로 읽는다(§5.1). 단, **설정 디렉터리 소유자 검사**에 걸리면 — 설정 디렉터리가 이 프로세스의 uid 것이 아니거나 그룹·다른 사용자가 쓸 수 있으면 — 기록이 없어도 `읽지 못함`이다. 그 디렉터리에 쓸 수 있는 쪽이 기록을 지웠을 수 있어서다. 부팅은 매번 설치 기록을 읽으므로(§5.1의 둘째 행), 이 검사에 걸린 설정 디렉터리는 모든 부팅을 막는다. 설정 디렉터리를 알 수 없으면(`XDG_CONFIG_HOME`과 `HOME`이 모두 없다) 설치 기록이 없는 것이고, 이때 `Fresh_bootstrap`은 기록을 쓸 수 없어 거부한다. 설치 기록이 없는데 `Fresh_bootstrap`이 외부 저장소를 만들 경로에 파일이 이미 있으면 그 파일을 열지 않고 실패한다. 기록 없이 옛 저장소를 덮거나 잇지 않기 위해서다. 설치 기록과 외부 저장소는 백업 복원이 되돌린 것을 알아채려는 장치다. 설정 디렉터리와 base path에 모두 쓸 수 있는 쪽은 막지 못한다.
 
 `Fresh_bootstrap`은 **Local_operator가 서명한** 새 workspace_id·새 `account_mode`(`Multi_account`)·빈 `authz.jsonl`·빈 Recovery_manifest·초기 generation이 같은 bootstrap append로 확인되어야 한다. workspace_id도 외부 저장소와 같은 append에 기록한다. `Fresh_bootstrap`이 확인하는 `account_mode`는 `Multi_account`뿐이다. `Multi_account`를 거친 적 없는 `Single_user`는 `authz.jsonl`을 쓰지 않는다(§9.2).
 
@@ -497,7 +512,7 @@ Committed {
 
 ### 8.5 purge의 지정과 삭제
 
-purge는 지정과 삭제가 따로다. 삭제된 initiator의 컨텍스트·prompt·output(§3-11)과 Quarantined 자산의 credential(§10.4)에 같은 규칙을 쓴다.
+purge는 **두 단계**(`Purge_pending`, 삭제 뒤 `Purged`)로 나뉜다 — 지정과 삭제가 따로다. 삭제된 initiator의 컨텍스트·prompt·output(§3-11)과 Quarantined 자산의 credential(§10.4)에 같은 규칙을 쓴다.
 
 1. 지정은 authz append 하나로 `Purge_pending {target}`을 기록한다(initiator 삭제이면 삭제와 같은 append다). 이 append는 §8.2의 `Purge` 사건(initiator 삭제이면 `Delete` 사건)이므로 Intent/Committed 규칙을 따른다. 대상은 지정 시점의 ID 목록이 아니라 initiator(또는 자산) 표시로 정한다. 지정 뒤 그 initiator의 새 shard 쓰기는 §6.2 판정에서 거부된다.
 2. `Purge_pending`인 대상은 삭제가 끝나기 전에도 읽을 수 없다.
@@ -593,6 +608,20 @@ Single_user 모드의 현재 동작은 바꾸지 않는다. 계정당 동시 dis
 4. Provider 실계정 증거는 상시 CI가 아니라 후보·Provider 관련 표면이 바뀐 경우에 갱신한다. 실제 계정의 credential 상태도 확인하고, 검증 당시와 다른 계정·credential·Provider 설정이면 그 증거를 사용하지 않는다.
 5. `Fresh_bootstrap`도 readiness 없이 원격 다계정을 열지 않는다. loopback 로컬 복구는 별도 Local_operator 경로로 제한한다.
 6. Single_flight 대기 시간(§12)의 측정값은 readiness의 evidence로 요구한다. 허용 여부는 운영자가 그 값을 보고 내린 명시 결정을 evidence에 기록해서 정하고, 숫자 기준은 문서에 두지 않는다.
+
+### 11.1 1단계 개시 조건
+
+1단계(§1.1)는 아래 증거가 모이면 연다. 2항과 3항(표면 digest 결속, 불일치 때 거부)은 그대로 적용한다.
+
+- route inventory와 각 경로의 실제 Reject·CSRF·credential 단일성 증명
+- `legacy_workspace_secret_callers=[]`, `agent_credential_callers=[]`, `auth disabled`·`require_token=false` 부팅 거부 증명
+- MCP OAuth 결속 층 전에는 `Mcp_oauth_token`이 Reject라는 시험
+- `lib/runtime`에서 string만으로 실행 객체를 얻는 경로의 잔존 0
+- Provider 두 계정 호출과 제3자 거부. 다른 owner의 Runtime을 Keeper에 배정하거나 실행하려는 시도의 거부를 포함한다.
+- Keeper 실행 lane 종류(호스트 프로세스, container, microVM)마다 다른 owner의 account-home을 읽으려다 거절되는 시험. §7.2의 attestation이 아니라 lane마다 한 번 시도한 결과다.
+- 호스트 프로세스 lane은 서버와 같은 OS 사용자로 돌아서 다른 owner의 account-home을 읽을 수 있다. 위 시험을 통과하지 못하는 lane은 `Multi_account`에서 Keeper에 배정하지 못한다.
+
+복구 리허설, official lane attestation, Single_flight 대기 시간은 1단계 조건이 아니다. 그 기능을 내는 2단계 층이 증거를 만들고, 그때 §11의 요구 목록으로 돌아간다.
 
 ## 12. 필수 적대 시나리오
 

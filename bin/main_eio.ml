@@ -640,7 +640,11 @@ let acquire_base_path_lock ~previous_owner ~run_dir base_path =
            (Server_startup_takeover.base_path_lock_rejection_to_string rejection));
       exit 1
 
-let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Refuse_previous_owner) ~executable_path host port cli_base_path accept_store_quarantine =
+(* [prepare_identity] runs in the process that serves, after the runtime events
+   step: that step may exec this binary again, and the work done before it is
+   done twice. Hashing the executable and probing the repository belong to the
+   serving process only (#48156). *)
+let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Refuse_previous_owner) ~prepare_identity ~executable_path host port cli_base_path accept_store_quarantine =
   Printexc.record_backtrace true;
   (* Read before the workspace directory is created or its lease taken, so a
      host the socket cannot bind leaves nothing behind. *)
@@ -684,7 +688,7 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
         | Env_config.Recorded _ -> ()
         | Env_config.No_record_location ->
           Log.Server.warn
-            "default workspace not recorded: neither XDG_CONFIG_HOME nor HOME is set; pass --base-path to later commands"
+            "default workspace not recorded: no absolute XDG_CONFIG_HOME and no HOME are set; pass --base-path to later commands"
         | Env_config.Refused_under_test ->
           Log.Server.warn
             "default workspace not recorded: a test executable does not write the operator's default"
@@ -729,6 +733,12 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
           ~handoff_error_to_string:Server_startup_takeover.base_path_lock_rejection_to_string
           error);
      exit 1);
+  (match prepare_identity () with
+   | Ok () -> ()
+   | Error (message, code) ->
+     Server_startup_takeover.release_base_path_lease base_path_lease;
+     Printf.eprintf "%s\n" message;
+     exit code);
   Log.init_from_env ();
   let shutdown_cfg =
     match Masc.Shutdown.config_from_env_result () with
@@ -1145,22 +1155,30 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
           ~backtrace:(Printexc.get_backtrace ()));
      exit 1)
 
-let run_cmd_exit host port base_path accept_store_quarantine provenance_path provenance_sha256 provenance_device provenance_inode record_default previous_owner =
+(* The identity a serving process reports and the dashboard it installs. *)
+let initialize_served_identity () =
   let identity = Build_identity.current () in
   Installed_dashboard.initialize ~executable_path:identity.executable_path
-    ~binary_commit:identity.binary_commit;
-  match provenance_path, provenance_sha256, provenance_device, provenance_inode with
-  | None, None, None, None ->
-    run_cmd ~record_default ~previous_owner ~executable_path:identity.executable_path host port base_path accept_store_quarantine;
+    ~binary_commit:identity.binary_commit
+
+let run_cmd_exit host port base_path accept_store_quarantine provenance_path provenance_sha256 provenance_device provenance_inode record_default previous_owner =
+  let serve ~bind_provenance =
+    let prepare_identity () =
+      initialize_served_identity ();
+      bind_provenance ()
+    in
+    run_cmd ~record_default ~previous_owner ~prepare_identity
+      ~executable_path:Build_identity.resolved_executable_path
+      host port base_path accept_store_quarantine;
     Cmd.Exit.ok
+  in
+  match provenance_path, provenance_sha256, provenance_device, provenance_inode with
+  | None, None, None, None -> serve ~bind_provenance:(fun () -> Ok ())
   | Some path, Some sha256, Some device, Some inode ->
-    (match Build_identity.bind_executable_provenance ~path ~sha256 ~device ~inode with
-     | Ok () ->
-       run_cmd ~record_default ~previous_owner ~executable_path:identity.executable_path host port base_path accept_store_quarantine;
-       Cmd.Exit.ok
-     | Error message ->
-       Printf.eprintf "invalid build provenance: %s\n" message;
-       Cmd.Exit.some_error)
+    serve ~bind_provenance:(fun () ->
+      Build_identity.bind_executable_provenance ~path ~sha256 ~device ~inode
+      |> Result.map_error (fun message ->
+        (Printf.sprintf "invalid build provenance: %s" message, Cmd.Exit.some_error)))
   | _ ->
     Printf.eprintf
       "all build provenance path, SHA-256, device, and inode fields must be provided together\n";
@@ -1603,10 +1621,9 @@ let schema_observe_cmd =
       prerr_endline "schema-observe requires an explicit --base-path for its owned workspace";
       Cmd.Exit.cli_error
     | Some workspace ->
-    let identity = Build_identity.current () in
-    Installed_dashboard.initialize ~executable_path:identity.executable_path
-      ~binary_commit:identity.binary_commit;
-    run_cmd ~schema_observation:(mode, directory) ~executable_path:identity.executable_path
+    run_cmd ~schema_observation:(mode, directory)
+      ~prepare_identity:(fun () -> initialize_served_identity (); Ok ())
+      ~executable_path:Build_identity.resolved_executable_path
       host port (Some workspace) false;
     Cmd.Exit.ok
   in
@@ -1794,7 +1811,7 @@ let init_cmd_exit_with ~report base_path force scope record_default =
       Printf.printf "default workspace recorded: %s\n" path
     | Env_config.No_record_location ->
       Printf.printf
-        "default workspace not recorded: neither XDG_CONFIG_HOME nor HOME is set; \
+        "default workspace not recorded: no absolute XDG_CONFIG_HOME and no HOME are set; \
          pass --base-path to later commands\n"
     | Env_config.Record_failed { record; reason } ->
       Printf.printf
@@ -1906,38 +1923,82 @@ let runtime_default_id =
   let doc = "Concrete runtime id to write into [runtime].default" in
   Arg.(required & pos 0 (some string) None & info [] ~docv:"RUNTIME_ID" ~doc)
 
-let runtime_default_set_cmd_exit base_path runtime_id setup_lanes fallback_runtime_ids bind_imp =
+let runtime_default_set_cmd_exit base_path port agent runtime_id setup_lanes fallback_runtime_ids bind_imp =
+  let fail msg = Printf.eprintf "runtime-default-set failed: %s\n" msg; 1 in
   let runtime_config_path = runtime_config_path_for_base_path base_path in
-  let result =
-    try
-      (* Validate against the same catalog sources as server startup, before
-         the config writer checks deployment-local provider/model bindings.
-         This command edits the resolved runtime file, so its sibling overlay
-         must come from that same config root. No server services are started. *)
-      let (_ : string option) =
-        Server_runtime_bootstrap.configure_agent_core_model_catalog_env ()
-      in
-      if setup_lanes then
-        Runtime.set_first_run_runtime ~runtime_config_path ~fallback_runtime_ids ~bind_imp ~runtime_id ()
-      else if bind_imp then Error "--setup-imp requires --setup-lanes"
-      else if fallback_runtime_ids <> [] then
-        Error "--fallback-runtime requires --setup-lanes"
-      else Runtime.set_runtime_default ~runtime_config_path ~runtime_id ()
-    with Env_config_core.Config_error message -> Error message
+  match
+    if setup_lanes then Ok ()
+    else if bind_imp then Error "--setup-imp requires --setup-lanes"
+    else if fallback_runtime_ids <> [] then Error "--fallback-runtime requires --setup-lanes"
+    else Ok ()
+  with
+  | Error msg -> fail msg
+  | Ok () ->
+  (* Validate against the same catalog sources as server startup, before the
+     config writer checks deployment-local provider/model bindings. This
+     command edits the resolved runtime file, so its sibling overlay must come
+     from that same config root. No server services are started. *)
+  match Server_runtime_bootstrap.configure_agent_core_model_catalog_env () with
+  | exception Env_config_core.Config_error message -> fail message
+  | (_ : string option) ->
+  (* With no server answering on the port, the command writes the file
+     itself: then nothing else writes it and no reader is waiting to be told. *)
+  let write_locally () =
+    let result =
+      try
+        if setup_lanes then
+          Runtime.set_first_run_runtime ~runtime_config_path ~fallback_runtime_ids ~bind_imp ~runtime_id ()
+        else Runtime.set_runtime_default ~runtime_config_path ~runtime_id ()
+      with Env_config_core.Config_error message -> Error message
+    in
+    match result with
+    | Ok _receipt ->
+        Printf.printf "set [runtime].default = \"%s\" in %s\n" runtime_id
+          runtime_config_path;
+        0
+    | Error msg -> fail msg
   in
-  match result with
-  | Ok _receipt ->
-      Printf.printf "set [runtime].default = \"%s\" in %s\n" runtime_id
-        runtime_config_path;
-      0
-  | Error msg ->
-      Printf.eprintf "runtime-default-set failed: %s\n" msg;
-      1
+  match Unix.realpath base_path with
+  | exception Unix.Unix_error _ -> write_locally ()
+  | real_base_path ->
+    let route =
+      Masc_cli_runtime_config_remote.with_client (fun ~clock ->
+        match
+          Masc_cli_runtime_config_remote.find ~clock ~base_path:real_base_path ~port ~agent
+        with
+        | Error message -> `Refused message
+        | Ok Masc_cli_runtime_config_remote.No_server -> `Local
+        | Ok (Masc_cli_runtime_config_remote.Running_server server) ->
+          (* RFC-0482 §3.2: the running server is the writer. The edit is the
+             one the local write commits, made to the text the server holds;
+             the server validates the whole file again when it saves. *)
+          let edit text =
+            try
+              if setup_lanes then
+                Runtime.first_run_runtime_text ~fallback_runtime_ids ~bind_imp ~runtime_id text
+              else Runtime.runtime_default_text ~runtime_id text
+            with Env_config_core.Config_error message -> Error message
+          in
+          `Through_server (Masc_cli_runtime_config_remote.save ~clock server ~edit))
+    in
+    (match route with
+     | `Refused message -> fail message
+     | `Local -> write_locally ()
+     | `Through_server (Error message) -> fail message
+     | `Through_server (Ok Masc_cli_runtime_config_remote.Unchanged) ->
+         Printf.printf "[runtime].default is already \"%s\" in the running server's runtime.toml\n"
+           runtime_id;
+         0
+     | `Through_server (Ok (Masc_cli_runtime_config_remote.Saved { path })) ->
+         Printf.printf "set [runtime].default = \"%s\" in %s through the running server\n"
+           runtime_id path;
+         0)
 
 let runtime_default_set_cmd =
   let doc =
     "Validate and update [runtime].default in runtime.toml using the runtime \
-     config writer."
+     config writer. While this workspace's server answers on the port, the \
+     edit is saved through that server."
   in
   let info = Cmd.info "runtime-default-set" ~doc in
   let setup_lanes = Arg.(value & flag & info ["setup-lanes"]
@@ -1946,7 +2007,7 @@ let runtime_default_set_cmd =
     ~docv:"RUNTIME_ID" ~doc:"Append an enabled runtime to the primary lane in option order. Requires --setup-lanes; internal exact-output lanes stay primary-only.") in
   let bind_imp = Arg.(value & flag & info ["setup-imp"]
     ~doc:"Explicitly select this primary lane for imp, preserving other Keeper assignments. Requires --setup-lanes.") in
-  Cmd.v info Term.(const runtime_default_set_cmd_exit $ base_path $ runtime_default_id $ setup_lanes $ fallback_runtime_ids $ bind_imp)
+  Cmd.v info Term.(const runtime_default_set_cmd_exit $ base_path $ port $ login_agent $ runtime_default_id $ setup_lanes $ fallback_runtime_ids $ bind_imp)
 
 let runtime_wizard_field ~field value =
   if String.exists (Char.equal '\000') value
@@ -2384,44 +2445,23 @@ let voice_local_voices_exit () =
            [ "voices", `List (List.map Masc.Voice_bridge.catalogue_voice_json voices) ]));
     0
 
-let voice_local_setup_exit base_path speak_voice hear_model =
-  let base_path = Env_config.normalize_masc_base_path_input base_path in
-  let runtime_config_path = runtime_config_path_for_base_path base_path in
-  let refuse message = prerr_endline message; 1 in
-  (* Voice is a section of the configuration [masc init] writes, so a directory
-     that was never initialized has nowhere to put one. Checked here, by the
-     file's existence, rather than read out of the writer's error: that error
-     carries the exception as text, and telling "absent" from "unreadable" in it
-     would mean matching a string. A file that exists and cannot be read still
-     falls through to the writer's own sentence.
-
-     Measured 2026-09-13 on an empty directory before this: exit 1 and
-     [Sys_error("<path>: No such file or directory")], with nothing created. *)
-  if not (Sys.file_exists runtime_config_path) then
-    refuse
-      (Printf.sprintf
-         "No masc workspace at %s: %s does not exist. Run masc init --base-path %s \
-          first, then this again."
-         base_path runtime_config_path (Filename.quote base_path))
-  else
-  let standalone_path = Voice_config.voice_config_file_in base_path in
-  match Voice_setup.observe ~runtime_config_path ~standalone_path with
-  | Error error -> refuse (Voice_setup.error_message error)
+(* The changes voice-local-setup makes, decided against [ground]: the
+   observation of the writer they go to. [Error] carries the exit code after
+   the reason has been printed. *)
+let voice_local_changes ~refuse (ground : Masc_cli_runtime_config_remote.voice_ground)
+    speak_voice hear_model =
+  match ground.standalone with
   (* The writer refuses this too, under its lock; said here first so nothing
      below is decided against a configuration this command cannot write. *)
-  | Ok (_, Some (Voice_setup.Standalone_json path, _)) ->
-    refuse (Voice_setup.error_message (Voice_setup.Standalone_source_active path))
-  | Ok (revision, ((None | Some (Voice_setup.Runtime_toml, _)) as active)) ->
-    let existing = Option.map snd active in
-    let tts = Option.bind existing (fun config -> config.Voice_config.tts) in
+  | Some path ->
+    Error (refuse (Voice_setup.error_message (Voice_setup.Standalone_source_active path)))
+  | None ->
     if Option.is_some speak_voice
-      && Option.exists
-           (fun (config : Voice_config.tts_config) -> List.exists
-             (fun endpoint -> String.equal endpoint.Voice_config.id "macos-say"
-               && endpoint.Voice_config.kind <> Voice_config.Macos_say)
-             config.Voice_config.endpoints)
-           tts then
-      refuse "The endpoint macos-say already names another provider; nothing was written."
+      && List.exists
+           (fun (id, kind) ->
+             String.equal id "macos-say" && kind <> Some Voice_config.Macos_say)
+           ground.speaking then
+      Error (refuse "The endpoint macos-say already names another provider; nothing was written.")
     else
       (* The name is typed here, and say does not fail on one it does not
          have: it speaks in another voice and exits 0. Measured 2026-09-13,
@@ -2436,7 +2476,7 @@ let voice_local_setup_exit base_path speak_voice hear_model =
             (voice_local_endpoint ~id:"macos-say" ~kind:Voice_config.Macos_say)
             ~voice
       with
-      | Error reason -> refuse (reason ^ ". Nothing was written.")
+      | Error reason -> Error (refuse (reason ^ ". Nothing was written."))
       | Ok () ->
       let speaking =
         match speak_voice with
@@ -2445,14 +2485,7 @@ let voice_local_setup_exit base_path speak_voice hear_model =
           (* Where the choice is written decides whether per-keeper voices
              still reach this endpoint. {!Voice_setup.voice_placement} carries
              the reason and the measurement. *)
-          let alongside =
-            match tts with
-            | None -> []
-            | Some (tts : Voice_config.tts_config) ->
-              List.map
-                (fun (endpoint : Voice_config.endpoint) -> Some endpoint.Voice_config.kind)
-                tts.Voice_config.endpoints
-          in
+          let alongside = List.map snd ground.speaking in
           let endpoint_voice, section =
             match Voice_setup.voice_placement ~alongside ~adding:Voice_config.Macos_say with
             | Voice_setup.On_the_endpoint -> Some voice, []
@@ -2483,16 +2516,101 @@ let voice_local_setup_exit base_path speak_voice hear_model =
       | [] ->
           prerr_endline
             "Nothing to set up: pass --voice to speak, --model to listen, or both.";
-          2
-      | changes ->
-          match
-            Voice_setup.apply ~runtime_config_path ~standalone_path
-              ~expected_revision:revision changes
-          with
-          | Error error -> refuse (Voice_setup.error_message error)
-          | Ok _revision ->
-              print_endline "voice is configured";
-              0
+          Error 2
+      | changes -> Ok changes
+
+(* With no server answering on the port, the command is the writer: it reads
+   the file, decides, and writes it itself. Then nothing else writes it and no
+   reader is waiting to be told. *)
+let voice_local_setup_locally ~refuse ~base_path speak_voice hear_model =
+  let runtime_config_path = runtime_config_path_for_base_path base_path in
+  (* Voice is a section of the configuration [masc init] writes, so a directory
+     that was never initialized has nowhere to put one. Checked here, by the
+     file's existence, rather than read out of the writer's error: that error
+     carries the exception as text, and telling "absent" from "unreadable" in it
+     would mean matching a string. A file that exists and cannot be read still
+     falls through to the writer's own sentence.
+
+     Measured 2026-09-13 on an empty directory before this: exit 1 and
+     [Sys_error("<path>: No such file or directory")], with nothing created. *)
+  if not (Sys.file_exists runtime_config_path) then
+    refuse
+      (Printf.sprintf
+         "No masc workspace at %s: %s does not exist. Run masc init --base-path %s \
+          first, then this again."
+         base_path runtime_config_path (Filename.quote base_path))
+  else
+  let standalone_path = Voice_config.voice_config_file_in base_path in
+  match Voice_setup.observe ~runtime_config_path ~standalone_path with
+  | Error error -> refuse (Voice_setup.error_message error)
+  | Ok (revision, active) ->
+    let ground =
+      { Masc_cli_runtime_config_remote.revision
+      ; standalone =
+          (match active with
+           | Some (Voice_setup.Standalone_json path, _) -> Some path
+           | None | Some (Voice_setup.Runtime_toml, _) -> None)
+      ; speaking =
+          (match Option.bind active (fun (_, config) -> config.Voice_config.tts) with
+           | None -> []
+           | Some (tts : Voice_config.tts_config) ->
+             List.map
+               (fun (endpoint : Voice_config.endpoint) ->
+                 endpoint.Voice_config.id, Some endpoint.Voice_config.kind)
+               tts.Voice_config.endpoints)
+      }
+    in
+    match voice_local_changes ~refuse ground speak_voice hear_model with
+    | Error code -> code
+    | Ok changes ->
+      (match
+         Voice_setup.apply ~runtime_config_path ~standalone_path
+           ~expected_revision:revision changes
+       with
+       | Error error -> refuse (Voice_setup.error_message error)
+       | Ok _revision ->
+           print_endline "voice is configured";
+           0)
+
+(* RFC-0482 §3.2: while this workspace's server answers on the port, it is the
+   writer. The changes are decided against what the server holds, read from its
+   voice route, because the server may resolve a different configuration file
+   than this process would; they go back to the same route with the revision
+   they were decided on. *)
+let voice_local_setup_exit base_path ~port ~agent speak_voice hear_model =
+  let base_path = Env_config.normalize_masc_base_path_input base_path in
+  let refuse message = prerr_endline message; 1 in
+  let writer =
+    match Unix.realpath base_path with
+    | exception Unix.Unix_error _ -> Ok `Local
+    | real_base_path ->
+      Masc_cli_runtime_config_remote.with_client (fun ~clock ->
+        match
+          Masc_cli_runtime_config_remote.find ~clock ~base_path:real_base_path ~port ~agent
+        with
+        | Error message -> Error message
+        | Ok Masc_cli_runtime_config_remote.No_server -> Ok `Local
+        | Ok (Masc_cli_runtime_config_remote.Running_server server) ->
+          Result.map
+            (fun ground -> `Through_server (server, ground))
+            (Masc_cli_runtime_config_remote.fetch_voice_ground ~clock server))
+  in
+  match writer with
+  | Error message -> refuse message
+  | Ok `Local -> voice_local_setup_locally ~refuse ~base_path speak_voice hear_model
+  | Ok (`Through_server (server, (ground : Masc_cli_runtime_config_remote.voice_ground))) ->
+    (match voice_local_changes ~refuse ground speak_voice hear_model with
+     | Error code -> code
+     | Ok changes ->
+       (match
+          Masc_cli_runtime_config_remote.with_client (fun ~clock ->
+            Masc_cli_runtime_config_remote.apply_voice_setup ~clock server
+              ~revision:ground.revision changes)
+        with
+        | Error message -> refuse message
+        | Ok () ->
+            print_endline "voice is configured through the running server";
+            0))
 
 let browser_lane_setup_cmd =
   let modes =
@@ -2709,19 +2827,40 @@ let browser_lane_setup_cmd =
               name. When ego lite does not list its spaces, nothing is written. It \
               installs no host. An existing table keeps its values unless they are named. \
               The server reads the table when it starts."
+         ; `P
+             "While this workspace's server answers on its port, the bidi, automation and \
+              ego tables are planned against the runtime.toml the server holds and saved \
+              through it; with no server answering they are written to the file. The \
+              server's port is MASC_HTTP_PORT, the workspace's saved port or the default: \
+              --port names the BiDi port. While the server is still starting, or no \
+              sign-in is stored for --agent (masc login), nothing is set up."
          ])
     Term.(
-      const (fun base_path modes no_addon binary token_file manifest_dir host_name firefox
-                  profile port geckodriver browser ego_command ego_space ->
+      const (fun base_path requested_base_path named_agent modes no_addon binary token_file manifest_dir
+                  host_name firefox profile port geckodriver browser ego_command ego_space ->
         let base_path = Env_config.normalize_masc_base_path_input base_path in
         Masc_cli_browser_lane_setup.run
           ~base_path
           (* The file the server and masc doctor read: it honors MASC_CONFIG_DIR,
              which the helper the other setup commands use does not. *)
           ~runtime_config_path:(Config_dir_resolver.runtime_toml_path_for_base_path ~base_path)
+          (* --port here is the BiDi port, so the server's is resolved without
+             a flag: MASC_HTTP_PORT, the workspace's saved port, the default. *)
+          ~server_port:
+            (resolve_connection_port requested_base_path None
+             |> Result.map Workspace_connection.to_int
+             |> Result.map_error Workspace_connection.error_message)
+          ~agent:(Option.value named_agent ~default:default_login_agent)
+          ~agent_named:(Option.is_some named_agent)
           ~modes ~no_addon ~binary ~token_file ~manifest_dir ~host_name ~firefox ~profile
           ~port ~geckodriver ~browser ~ego_command ~ego_space)
       $ base_path
+      $ run_base_path
+      $ Arg.(
+          value
+          & opt (some string) None
+          & info [ "agent" ] ~docv:"AGENT"
+              ~doc:"The sign-in a bidi, automation or ego table is saved through the workspace's running server with (masc login --agent). Defaults to local-admin.")
       $ modes
       $ no_addon
       $ binary
@@ -2771,7 +2910,7 @@ let voice_local_setup_cmd =
   Cmd.v
     (Cmd.info
        "voice-local-setup"
-       ~doc:"Turn on voice that needs no server, without one running."
+       ~doc:"Turn on voice that needs no server."
        ~man:
          [ `S Manpage.s_description
          ; `P
@@ -2779,14 +2918,30 @@ let voice_local_setup_cmd =
               formula. Both run once and exit, so neither needs a server -- which is why \
               this can run during setup, before there is anything to talk to over HTTP."
          ; `P
-             "Writes through the same writer the HTTP route uses: the same revision \
-              guard, and the same refusal to publish a section the loader would reject."
+             "While this workspace's server answers on the port, the changes go to its \
+              voice setup route, which saves them and tells its readers. With no server \
+              answering, the command writes the file itself with the same writer: the \
+              same revision guard, and the same refusal to publish a section the loader \
+              would reject."
          ])
     Term.(
-      const (fun base_path voice model list_voices ->
+      const (fun base_path requested_base_path cli_port agent voice model list_voices ->
         if list_voices then voice_local_voices_exit ()
-        else voice_local_setup_exit base_path voice model)
+        else
+          (* Resolved here rather than by the shared [port] term: listing
+             voices talks to no server, so a port setting it cannot read
+             is no reason to refuse it. *)
+          match resolve_connection_port requested_base_path cli_port with
+          | Error error ->
+              prerr_endline (Workspace_connection.error_message error);
+              1
+          | Ok port ->
+              voice_local_setup_exit base_path ~port:(Workspace_connection.to_int port)
+                ~agent voice model)
       $ base_path
+      $ run_base_path
+      $ port_argument
+      $ login_agent
       $ voice
       $ model
       $ list_voices)
@@ -2847,19 +3002,22 @@ let web_search_setup_cmd =
               search order a call would use now, and the variable to export for a \
               provider that is missing."
          ; `P
-             "Writes only the [web_search] section of runtime.toml, through the same \
-              locked writer as voice-local-setup, keeping comments and other tables as \
-              they are. An API key is never written: it is read from the environment \
-              of the process that starts the server."
+             "Writes only the [web_search] section of runtime.toml, keeping comments \
+              and other tables as they are. While this workspace's server answers on the \
+              port, the section is saved through that server; otherwise the command \
+              writes the file itself. An API key is never written: it is read from the \
+              environment of the process that starts the server."
          ])
     Term.(
-      const (fun base_path searxng_url provider provider_order fallbacks timeout_sec
+      const (fun base_path port agent searxng_url provider provider_order fallbacks timeout_sec
                  cache_ttl_sec unset ->
         let base_path = Env_config.normalize_masc_base_path_input base_path in
-        Masc_cli_web_search_setup.run ~base_path
+        Masc_cli_web_search_setup.run ~base_path ~port ~agent
           ~searxng_url ~provider ~provider_order ~fallbacks ~timeout_sec ~cache_ttl_sec
           ~unset)
       $ base_path
+      $ port
+      $ login_agent
       $ searxng_url
       $ provider
       $ provider_order
@@ -2891,16 +3049,23 @@ let config_set_cmd =
               does not name, or a value that is not the kind the key holds, is \
               refused and nothing is written."
          ; `P
+             "When the workspace's server answers on the port, the keys are saved \
+              through it: it is the one writer of runtime.toml while it runs, and it \
+              tells its readers. This needs the sign-in masc login keeps. With no \
+              server answering, the file is written here."
+         ; `P
              "A workspace with no runtime.toml is seeded the way server start seeds \
               it, so a script can set a key before the first start. What a value \
               means (a blank wake prompt, an address a guest cannot use) is checked \
               when the server starts, not here."
          ])
     Term.(
-      const (fun base_path assignments ->
+      const (fun base_path port agent assignments ->
         let base_path = Env_config.normalize_masc_base_path_input base_path in
-        Masc_cli_config_set.run ~base_path ~assignments)
+        Masc_cli_config_set.run ~base_path ~port ~agent ~assignments)
       $ base_path
+      $ port
+      $ login_agent
       $ assignments)
 
 let config_cmd =
@@ -4412,13 +4577,16 @@ let runtime_setup_render_cmd =
     Term.(const (fun base_path spec_path -> Masc_cli_runtime_setup.render ~base_path ~spec_path) $ workspace $ spec)
 
 let runtime_setup_inventory_cmd =
-  Cmd.v (Cmd.info "runtime-setup-inventory" ~doc:"Read local setup choices and their configuration revision together.")
-    Term.(const (fun base_path -> Masc_cli_runtime_setup.inventory ~base_path) $ base_path)
+  Cmd.v (Cmd.info "runtime-setup-inventory" ~doc:"Read setup choices and their configuration revision together, from the workspace's running server while it answers.")
+    Term.(const (fun base_path port agent -> Masc_cli_runtime_setup.inventory ~base_path ~port ~agent)
+      $ base_path $ port $ login_agent)
 
 let runtime_setup_batch_cmd =
   let request = Arg.(required & opt (some string) None & info ["request"] ~doc:"Private setup selection JSON file.") in
   Cmd.v (Cmd.info "runtime-setup-batch" ~doc:"Validate and save the selected runtimes against their original revision.")
-    Term.(const (fun base_path request_path -> Masc_cli_runtime_setup.configure ~base_path ~request_path) $ base_path $ request)
+    Term.(const (fun base_path port agent request_path ->
+        Masc_cli_runtime_setup.configure ~base_path ~port ~agent ~request_path)
+      $ base_path $ port $ login_agent $ request)
 
 let runtime_discover_models_cmd =
   let spec = Arg.(required & opt (some string) None & info ["spec"]
@@ -4673,8 +4841,7 @@ let workspace_upgrade_cmd =
        Term.(const (fun installation -> Restore_journal_installation installation) $ installation)] in
   Cmd.group (Cmd.info "workspace-upgrade" ~doc:"Inspect configuration upgrades and manage offline journal recovery.")
     ~default:Term.(const run_configuration $ base_path $ apply $ source_sha256 $ restore)
-    [journal; Masc_cli_board_posts_initialization.cmd ~base_path
-      ~run:(fun request -> Masc_cli_board_posts_initialization.run request)]
+    [journal]
 
 let antigravity_account_cmd =
   let cli_path = Arg.(value & opt string "agy" & info ["cli-path"] ~docv:"EXECUTABLE") in

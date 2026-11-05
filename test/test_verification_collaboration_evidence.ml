@@ -1,6 +1,5 @@
 open Alcotest
 open Masc
-module Preparation = Masc_test_deps.Board_test_preparation
 module VAT = Verification_authority_tools
 let () = Mirage_crypto_rng_unix.use_default ()
 (* These tests pin what the verification evidence reads from a post, not who is
@@ -31,7 +30,6 @@ let with_fixture f = Eio_main.run @@ fun env ->
     (fun () ->
       let config = Workspace.default_config base in
       ignore (Workspace.init config ~agent_name:(Some "producer"));
-      Preparation.prepare ~base_path:base ~action:Preparation.Bootstrap;
       Result.get_ok (Board_dispatch.init_jsonl
         ~base_path:(Env_config_core.base_path ())
         ~recipient_lookup:every_name_declared ());
@@ -171,7 +169,7 @@ let test_task_sources_preserve_committed_state () = with_fixture (fun config ->
     (schema.input_schema |> member "required" |> to_list |> List.map to_string);
   check (list string) "Task source has no live listing filters" ["cursor";"task_ids"]
     (schema.input_schema |> member "properties" |> keys);
-  let goal, _ = Goal_store.upsert_goal config ~title:"Ordered increments" ~metric:"source" ~target_value:"1" ()
+  let goal, _, _ = Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Ordered increments" ~metric:"source" ~target_value:"1" ()
     |> require "Goal" in
   let ctx : Tool_workspace.context = {config;agent_name="producer"} in
   let result = Tool_workspace.dispatch ctx ~name:"masc_goal_transition"
@@ -330,7 +328,7 @@ let test_capture_failures_and_corruption () = with_fixture (fun config ->
 
 let test_fusion_original_and_separate_decision () = with_fixture (fun config ->
   let id = "opaque-source-id" in
-  let goal_record, _ = Goal_store.upsert_goal config ~title:"Compare designs" ~metric:"verified designs" ~target_value:"1" () |> require "goal" in
+  let goal_record, _, _ = Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Compare designs" ~metric:"verified designs" ~target_value:"1" () |> require "goal" in
   let work = Task.Goal_assignment.add_task_with_result config ~goal_id:goal_record.id
       ~title:"Make a decision" ~priority:2 ~description:"Compare the evidence" |> require "task" in
   Workspace.claim_task_r config ~agent_name:"producer" ~task_id:work.task_id () |> require "claim" |> ignore;
@@ -383,7 +381,7 @@ let test_original_fusion_producer_before_submit () = with_fixture (fun config ->
 
 let test_goal_request_freezes_sources () = with_fixture (fun config ->
   let post = post ~author:"peer" ~visibility:Board.Internal "Goal proof source" in
-  let goal, _ = Goal_store.upsert_goal config ~title:"Frozen Goal proof" ~metric:"proof" ~target_value:"1" () |> require "Goal" in
+  let goal, _, _ = Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Frozen Goal proof" ~metric:"proof" ~target_value:"1" () |> require "Goal" in
   let ctx : Tool_workspace.context = {config; agent_name="producer"} in
   let result = Tool_workspace.dispatch ctx ~name:"masc_goal_transition"
     ~args:(`Assoc ["goal_id", `String goal.id; "action", `String "request_complete";

@@ -260,6 +260,8 @@ let ensure_in_pool pool meta =
            Hashtbl.add pool.owners meta.name owner;
            install_owner_projection pool meta.name owner;
            refresh_owner_handles pool;
+           Keeper_turn_broadcast.changed ~base_path:pool.config.Workspace.base_path
+             ~keeper_name:meta.name;
            Ok owner))
 ;;
 
@@ -282,6 +284,8 @@ let ensure_empty_in_pool pool keeper_name =
               Hashtbl.add pool.owners keeper_name owner;
               install_owner_projection pool keeper_name owner;
               refresh_owner_handles pool;
+              Keeper_turn_broadcast.changed ~base_path:pool.config.Workspace.base_path
+                ~keeper_name;
               Ok owner)))
 ;;
 
@@ -331,6 +335,8 @@ let install_from_store ~sw ~operation_runner ~on_turn_slot_released config =
                meta.name
                detail;
              Hashtbl.replace pool.unavailable meta.name detail;
+             Keeper_turn_broadcast.changed ~base_path:pool.config.Workspace.base_path
+               ~keeper_name:meta.name;
              start_all count rest
            | Error Inventory_stopping ->
              Error
@@ -566,42 +572,6 @@ let await_idle_after_shutdown ~base_path ~keeper_name =
        Ok ())
 ;;
 
-let begin_scheduled_turn_consumer ~base_path ~keeper_name =
-  match get ~base_path ~keeper_name with
-  | Error error -> Error (Command_lookup_failed error)
-  | Ok owner -> Keeper_owner.begin_scheduled_turn_consumer owner
-      |> Result.map_error (fun error -> Command_rejected error)
-
-let end_scheduled_turn_consumer ~base_path ~keeper_name ~consumer =
-  match get ~base_path ~keeper_name with
-  | Error error -> Error (Command_lookup_failed error)
-  | Ok owner -> Keeper_owner.end_scheduled_turn_consumer owner ~consumer
-      |> Result.map_error (fun error -> Command_rejected error)
-
-let observe_scheduled_turn ~base_path ~keeper_name sources =
-  match get ~base_path ~keeper_name with
-  | Error error -> Error (Command_lookup_failed error)
-  | Ok owner -> Keeper_owner.observe_scheduled_turn owner sources
-      |> Result.map_error (fun error -> Command_rejected error)
-
-let scheduled_turn_handoff ~base_path ~keeper_name =
-  match get ~base_path ~keeper_name with
-  | Error error -> Error (Command_lookup_failed error)
-  | Ok owner -> Keeper_owner.scheduled_turn_handoff owner
-      |> Result.map_error (fun error -> Command_rejected error)
-
-let release_scheduled_turn ~base_path ~keeper_name ~handoff =
-  match get ~base_path ~keeper_name with
-  | Error error -> Error (Command_lookup_failed error)
-  | Ok owner -> Keeper_owner.release_scheduled_turn owner ~handoff
-      |> Result.map_error (fun error -> Command_rejected error)
-
-let run_scheduled_if_idle ~base_path ~keeper_name ~handoff ~sources run =
-  match get ~base_path ~keeper_name with
-  | Error error -> Error (Command_lookup_failed error)
-  | Ok owner -> Keeper_owner.run_scheduled_if_idle owner ~handoff ~sources run
-      |> Result.map_error (fun error -> Command_rejected error)
-
 let run_autonomous_if_idle ~base_path ~keeper_name run =
   match get ~base_path ~keeper_name with
   | Error error -> Error (Command_lookup_failed error)
@@ -813,11 +783,6 @@ let batch_operations ~base_path ~keeper_name operation_id =
 let exact_operation ~base_path ~keeper_name operation_id =
   with_owner_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.exact_operation owner operation_id)
-;;
-
-let has_queued_handoff_recipient ~base_path ~keeper_name ~operation_id =
-  with_owner_command ~base_path ~keeper_name (fun owner ->
-    Keeper_owner.has_queued_handoff_recipient owner ~operation_id)
 ;;
 
 type interactive_target = Observed_turn_token of Keeper_interrupt_token.t | Direct_operation_id of Keeper_owner.Chat_operation.Operation_id.t

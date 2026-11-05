@@ -1172,68 +1172,6 @@ let test_chat_lane_holder_blocks_autonomous_admission () =
   Eio.Promise.resolve resolve_release ()
 ;;
 
-let test_direct_waiter_skips_continuations_and_wakes_on_new_input () =
-  Eio_main.run @@ fun _env ->
-  Eio.Switch.run @@ fun sw ->
-  let owner = owner_ok (start_owner ~sw
-    ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
-    ~keeper_name:"direct-waiter" ~initial_meta:(Some (make_meta "direct-waiter"))) in
-  let first = operation_id "kmsg-waiter-first" in
-  let continued = operation_id "kmsg-waiter-continuation" in
-  let submit id = ignore (owner_ok (Owner.submit_operation owner ~operation_id:id
-    ~source:operation_source ~input:(operation_input "original work"))) in
-  submit first;
-  submit continued;
-  ignore (owner_ok (Owner.move_queued_operation_to_end owner first));
-  let running = Option.get (owner_ok (Owner.claim_next_operation owner)) in
-  check bool "newer operation claimed first" true
-    (Chat_operation.Operation_id.equal continued running.operation_id);
-  let checkpoint = Keeper_checkpoint_ref.of_persisted
-    ~trace_id:(Keeper_id.Trace_id.of_string "trace-waiter" |> Result.get_ok)
-    ~turn_count:1 ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes "durable prior progress") |> Result.get_ok in
-  ignore (owner_ok (Owner.defer_direct_checkpoint owner ~operation_id:continued
-    ~execution_digest:running.execution_digest
-    ~checkpoint:(Keeper_semantic_execution.Agent_core checkpoint)));
-  let running = Option.get (owner_ok (Owner.claim_next_operation owner)) in
-  check bool "original operation now owns the slot" true
-    (Chat_operation.Operation_id.equal first running.operation_id);
-  let observed, resolve_observed = Eio.Promise.create () in
-  Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve resolve_observed
-    (Owner.await_queued_handoff_recipient owner ~operation_id:first));
-  Eio.Fiber.yield ();
-  ignore (owner_ok (Owner.exact_operation owner first));
-  check bool "a later continuation does not cause handoff ping-pong" true
-    (Option.is_none (Eio.Promise.peek observed));
-  submit (operation_id "kmsg-waiter-fresh");
-  Eio.Fiber.yield ();
-  ignore (owner_ok (Owner.exact_operation owner first));
-  check bool "fresh input behind the FIFO barrier does not cause a handoff" true
-    (Option.is_none (Eio.Promise.peek observed));
-  ignore (owner_ok (Owner.move_queued_operation_to_end owner continued));
-  check bool "a fresh original at the actual head wakes the direct waiter" true
-    (Eio.Promise.await observed)
-;;
-
-let test_direct_waiter_returns_when_owner_closes () =
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun waiter_sw ->
-  let observed, resolve_observed = Eio.Promise.create () in
-  Eio.Switch.run (fun sw ->
-    let owner = owner_ok (start_owner ~sw
-      ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
-      ~keeper_name:"direct-waiter-close" ~initial_meta:(Some (make_meta "direct-waiter-close"))) in
-    let operation_id = operation_id "kmsg-waiter-close" in
-    ignore (owner_ok (Owner.submit_operation owner ~operation_id
-      ~source:operation_source ~input:(operation_input "running work")));
-    ignore (owner_ok (Owner.claim_next_operation owner));
-    Eio.Fiber.fork ~sw:waiter_sw (fun () -> Eio.Promise.resolve resolve_observed
-      (Owner.await_queued_handoff_recipient owner ~operation_id));
-    Eio.Fiber.yield ();
-    ignore (owner_ok (Owner.exact_operation owner operation_id)));
-  check bool "owner closure releases its direct waiter" false
-    (Eio.Time.with_timeout_exn env#clock 2.0 (fun () -> Eio.Promise.await observed))
-;;
-
 let test_operation_waiting_event_is_scoped_to_owner_workspace () =
   let base_path = Masc_test_deps.setup_test_workspace () in
   let other_path = Filename.concat base_path "other-workspace" in
@@ -1287,10 +1225,6 @@ let test_operation_lifecycle_is_durable_and_projected () =
          ~initial_meta:(Some (make_meta "operation-lifecycle")))
   in
   let operation_id = operation_id "kmsg-operation-lifecycle" in
-  let observed, resolve_observed = Eio.Promise.create () in
-  Eio.Fiber.fork ~sw (fun () ->
-    Eio.Promise.resolve resolve_observed (Owner.await_claimable_operation owner));
-  Eio.Fiber.yield ();
   let accepted =
     owner_ok
       (Owner.submit_operation
@@ -1304,9 +1238,6 @@ let test_operation_lifecycle_is_durable_and_projected () =
   let queued_projection = Owner.operation_projection owner in
   check int "queued projection publishes after commit" 1 queued_projection.queued_count;
   check bool "queued input is ready" true queued_projection.has_claimable_queued;
-  check bool "queue commit wakes a sleeping subscriber" true (Eio.Promise.await observed);
-  check bool "subscription after commit observes existing input" true
-    (Owner.await_claimable_operation owner);
   check bool
     "queued projection has no running operation"
     true
@@ -1325,7 +1256,7 @@ let test_operation_lifecycle_is_durable_and_projected () =
     (Option.is_none (owner_ok (Owner.claim_next_operation owner)));
   let running_projection = Owner.operation_projection owner in
   check int "claim drains queued projection" 0 running_projection.queued_count;
-  check bool "claimed input no longer requests a yield" false running_projection.has_claimable_queued;
+  check bool "claimed input is no longer claimable" false running_projection.has_claimable_queued;
   check bool
     "claim publishes running identity"
     true
@@ -1540,7 +1471,7 @@ let test_health_observer_wakes_after_persistence_exception () =
       ; remove = (fun _ -> fail "unexpected remove") }
     in
     (match Owner.For_testing.commit_metadata_transition
-       ~keeper_name:initial.name replace_store pause with
+       ~base_path:(Filename.get_temp_dir_name ()) ~keeper_name:initial.name replace_store pause with
      | _ -> fail "replace exception did not propagate"
      | exception exn when exn == cancelled -> ()
      | exception exn -> fail ("unexpected replace exception: " ^ Printexc.to_string exn));
@@ -1553,7 +1484,7 @@ let test_health_observer_wakes_after_persistence_exception () =
     in
     cancel_observer := true;
     (match Owner.For_testing.commit_metadata_transition
-       ~keeper_name:initial.name remove_store remove with
+       ~base_path:(Filename.get_temp_dir_name ()) ~keeper_name:initial.name remove_store remove with
      | _ -> fail "remove exception did not propagate"
      | exception exn when exn == remove_error -> ()
      | exception exn -> fail ("unexpected remove exception: " ^ Printexc.to_string exn));
@@ -1565,11 +1496,11 @@ let test_health_observer_wakes_after_persistence_exception () =
       ; remove = (fun _ -> fail "unexpected remove") }
     in
     (match Owner.For_testing.commit_metadata_transition
-       ~keeper_name:initial.name error_store pause with
+       ~base_path:(Filename.get_temp_dir_name ()) ~keeper_name:initial.name error_store pause with
      | Error (Owner.Store_unavailable _) -> ()
      | _ -> fail "returned error did not remain a store error");
     (match Owner.For_testing.commit_metadata_transition
-       ~keeper_name:initial.name error_store (Reducer.begin_stopping state) with
+       ~base_path:(Filename.get_temp_dir_name ()) ~keeper_name:initial.name error_store (Reducer.begin_stopping state) with
      | Ok _ -> ()
      | Error error -> fail (Owner.error_to_string error));
     check int "returned errors and no-persistence transitions do not notify here" 2
@@ -1586,12 +1517,167 @@ let test_health_observer_wakes_after_persistence_exception () =
              raise store_error)
          ; remove = (fun _ -> fail "unexpected remove") }
        in
-       Owner.For_testing.commit_metadata_transition ~keeper_name:initial.name store pause) with
+       Owner.For_testing.commit_metadata_transition ~base_path:(Filename.get_temp_dir_name ()) ~keeper_name:initial.name store pause) with
      | _ -> fail "persistence exception was lost during scope cancellation"
      | exception exn when exn == store_error -> ()
      | exception exn -> fail ("unexpected scope exception: " ^ Printexc.to_string exn));
     check bool "the observer ran before preserving the persistence exception" true
       (!observations = [ Some true; None; Some true ]))
+;;
+
+(* RFC-0481 §3.2: every metadata write the Owner attempts tells the roster
+   readers of its own workspace to reread that Keeper's row. *)
+let hearing_row_changes ~base_path ?(on_heard = fun _ -> ()) f =
+  let id = Printf.sprintf "keeper-owner-row-changed-%d-%s" (Unix.getpid ())
+    (Digest.to_hex (Digest.string base_path)) in
+  let heard = ref [] in
+  Sse.subscribe_external ~runtime_authority:(Sse.runtime_authority_exn ~base_path) ~id
+    ~callback:(fun (event : Sse.external_event) ->
+      match
+        Json_util.assoc_string_opt "type" event.ext_payload,
+        Json_util.assoc_string_opt "name" event.ext_payload
+      with
+      | Some kind, Some name when String.equal kind Keeper_row_broadcast.row_changed_event ->
+        heard := name :: !heard;
+        on_heard name
+      | (Some _ | None), (Some _ | None) -> ())
+    ();
+  Fun.protect ~finally:(fun () -> Sse.unsubscribe_external id) (fun () -> f heard)
+;;
+
+let operator_pause updated_at =
+  Reducer.Pause
+    { reason = Keeper_latched_reason.Operator_paused { operator_actor = Grpc_directive }
+    ; updated_at }
+;;
+
+let start_owner_in ~sw ~base_path ~store (meta : Keeper_meta_contract.keeper_meta) =
+  Owner.start ~sw ~base_path ~store
+    ~operation_store_path:(Filename.concat base_path (meta.name ^ ".sqlite3"))
+    ~session_root:(Filename.concat base_path "traces")
+    ~now:(fun () -> 42.0) ~operation_runner:None ~on_turn_slot_released:None
+    ~keeper_name:meta.name ~initial_meta:(Some meta)
+  |> owner_ok
+;;
+
+(* RFC-0481 §3.4: a chat control token rotation tells the turns readers to
+   read again, after the new token is in place. *)
+let test_a_token_rotation_announces_the_keeper_turns () =
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  Fun.protect ~finally:(fun () -> Masc_test_deps.cleanup_test_workspace base_path) (fun () ->
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let accepting = { Owner.replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) } in
+  let meta = make_meta "turn-announce" in
+  let owner = start_owner_in ~sw ~base_path ~store:accepting meta in
+  let before = Owner.chat_control_token owner in
+  let tokens_when_heard = ref [] in
+  let id = Printf.sprintf "keeper-owner-turn-changed-%d" (Unix.getpid ()) in
+  Sse.subscribe_external ~runtime_authority:(Sse.runtime_authority_exn ~base_path) ~id
+    ~callback:(fun (event : Sse.external_event) ->
+      match
+        Json_util.assoc_string_opt "type" event.ext_payload,
+        Json_util.assoc_string_opt "name" event.ext_payload
+      with
+      | Some kind, Some name
+        when String.equal kind Keeper_turn_broadcast.changed_event && String.equal name meta.name ->
+        tokens_when_heard := Owner.chat_control_token owner :: !tokens_when_heard
+      | (Some _ | None), (Some _ | None) -> ())
+    ();
+  Fun.protect ~finally:(fun () -> Sse.unsubscribe_external id) (fun () ->
+    ignore (owner_ok (Owner.apply_meta owner (operator_pause "turn-pause")));
+    (match !tokens_when_heard with
+     | [ heard ] ->
+       check bool "the announcement follows the new token" true
+         (not (String.equal heard before) && String.equal heard (Owner.chat_control_token owner))
+     | heard -> failf "a pause announced %d turn changes" (List.length heard));
+    ignore (owner_ok (Owner.apply_meta owner (operator_pause "turn-pause-again")));
+    check int "a write that keeps the pause keeps the token and announces nothing" 1
+      (List.length !tokens_when_heard)))
+;;
+
+let test_metadata_writes_announce_the_keeper_row () =
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  let other_path = Filename.concat base_path "other-workspace" in
+  Fun.protect ~finally:(fun () -> Masc_test_deps.cleanup_test_workspace base_path) (fun () ->
+  Unix.mkdir other_path 0o755;
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let accepting = { Owner.replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) } in
+  let initial = make_meta "row-announce" in
+  let owner = start_owner_in ~sw ~base_path ~store:accepting initial in
+  let removed = make_meta "row-announce-removed" in
+  let removing = start_owner_in ~sw ~base_path ~store:accepting removed in
+  let failing = make_meta "row-announce-fenced" in
+  let fenced = start_owner_in ~sw ~base_path
+    ~store:{ replace = (fun _ -> Error "unconfirmed"); remove = (fun _ -> Ok ()) } failing in
+  let paused_when_heard = ref [] in
+  let on_heard name =
+    if String.equal name initial.name then
+      paused_when_heard :=
+        Option.map (fun (meta : Keeper_meta_contract.keeper_meta) -> meta.paused)
+          (Owner.projection owner).meta
+        :: !paused_when_heard
+  in
+  hearing_row_changes ~base_path:other_path (fun elsewhere ->
+  hearing_row_changes ~base_path ~on_heard (fun heard ->
+    ignore (owner_ok (Owner.apply_meta owner (operator_pause "row-pause")));
+    check (list string) "a committed write announces its Keeper" [ initial.name ] !heard;
+    ignore (owner_ok (Owner.apply_meta owner (Reducer.Resume { updated_at = "row-resume" })));
+    check (list string) "each committed write announces" [ initial.name; initial.name ] !heard;
+    check (list (option bool)) "each announcement follows the Owner's projection"
+      [ Some true; Some false ] (List.rev !paused_when_heard);
+    owner_ok (Owner.begin_stopping owner);
+    check int "a transition that persists nothing announces nothing" 2 (List.length !heard);
+    heard := [];
+    let digest = Keeper_meta_json.Snapshot_digest.of_meta removed in
+    ignore (owner_ok (Owner.apply_meta removing (Reducer.Delete_if_snapshot digest)));
+    check (list string) "a removal announces its Keeper" [ removed.name ] !heard;
+    heard := [];
+    (match Owner.apply_meta fenced (operator_pause "row-fenced") with
+     | Error (Owner.Store_unavailable _) -> ()
+     | _ -> fail "a refused write was accepted");
+    check (list string) "the failure that fences the store announces, since the file may have changed"
+      [ failing.name ] !heard;
+    (match Owner.apply_meta fenced (operator_pause "row-fenced-again") with
+     | Error (Owner.Store_unavailable _) -> ()
+     | _ -> fail "a fenced store accepted a write");
+    check (list string) "a fenced store announces nothing more" [ failing.name ] !heard);
+  check (list string) "another workspace hears none of it" [] !elsewhere))
+;;
+
+let test_raised_metadata_write_announces_the_keeper_row () =
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  Fun.protect ~finally:(fun () -> Masc_test_deps.cleanup_test_workspace base_path) (fun () ->
+  Eio_main.run @@ fun _env ->
+  let initial = make_meta "row-announce-raised" in
+  let state = match Reducer.create ~keeper_name:initial.name (Some initial) with
+    | Ok state -> state | Error error -> fail (Reducer.error_to_string error) in
+  let pause = match Reducer.apply_meta state (operator_pause "row-raised") with
+    | Ok transition -> transition | Error error -> fail (Reducer.error_to_string error) in
+  let raised = Failure "write outcome unknown" in
+  let store : Owner.store =
+    { replace = (fun _ -> raise raised); remove = (fun _ -> fail "unexpected remove") } in
+  hearing_row_changes ~base_path (fun heard ->
+    (match Owner.For_testing.commit_metadata_transition ~base_path ~keeper_name:initial.name
+       store pause with
+     | _ -> fail "the write exception did not propagate"
+     | exception exn when exn == raised -> ());
+    check (list string) "a write that raised announces its Keeper" [ initial.name ] !heard;
+    (* The health observer re-raises a cancellation of the Owner's scope; the
+       row is still announced. *)
+    let scope_cancel = Failure "owner scope cancelled during persistence" in
+    with_state_change_observer (fun () -> raise (Eio.Cancel.Cancelled Exit)) (fun () ->
+      match Eio.Cancel.sub (fun context ->
+        let store : Owner.store =
+          { replace = (fun _ -> Eio.Cancel.cancel context scope_cancel; raise raised)
+          ; remove = (fun _ -> fail "unexpected remove") } in
+        Owner.For_testing.commit_metadata_transition ~base_path ~keeper_name:initial.name
+          store pause) with
+      | _ -> fail "the write exception was lost during scope cancellation"
+      | exception exn when exn == raised -> ());
+    check (list string) "a cancelled scope still announces the row"
+      [ initial.name; initial.name ] !heard))
 ;;
 
 let test_health_observer_callback_cancellation_is_isolated () =
@@ -4619,66 +4705,6 @@ let test_availability_recovers_under_an_autonomous_child () =
       | Error error -> fail (Owner.error_to_string error))
 ;;
 
-(* #36203 #4: on a free slot the autonomous lane must not take the turn ahead
-   of a claimable queued chat. [start_child_if_needed] already gives a freed
-   slot to a queued chat everywhere else; the autonomous admission path is the
-   one place it did not, so a chat at the head of the queue waited a whole
-   autonomous turn. *)
-let test_autonomous_admission_defers_to_a_queued_chat () =
-  Eio_main.run @@ fun _env ->
-  Eio.Switch.run @@ fun sw ->
-  let ready = ref false in
-  let executed = ref [] in
-  let started, resolve_started = Eio.Promise.create () in
-  let release, resolve_release = Eio.Promise.create () in
-  let execute ~sw:_ ~keeper_name:_ ~claim =
-    let op = Option.get (owner_ok (claim ())) in
-    executed := op.Chat_operation.operation_id :: !executed;
-    Eio.Promise.resolve resolve_started ();
-    Eio.Promise.await release;
-    Owner.Operation_succeeded { outcome_ref = "chat-answered" }
-  in
-  let owner =
-    owner_ok
-      (start_owner_with_executor_ready ~sw
-         ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
-         ~operation_ready:(fun ~keeper_name:_ -> !ready)
-         ~operation_executor:(Some execute) ~keeper_name:"admission-order"
-         ~initial_meta:(Some (make_meta "admission-order")) ())
-  in
-  let queued = operation_id "kmsg-admission" in
-  (* Queue a chat while the runner is not ready so it stays Queued with the
-     slot free. *)
-  ignore
-    (owner_ok
-       (Owner.submit_operation owner ~operation_id:queued ~source:operation_source
-          ~input:(operation_input "answer me")));
-  (match Owner.turn_in_flight owner with
-   | None -> ()
-   | Some _ -> fail "the chat started before the runner was ready");
-  ready := true;
-  (match
-     Owner.run_autonomous_if_idle owner (fun () ->
-       fail "the autonomous lane ran ahead of a queued chat")
-   with
-   | Ok (`Busy (Owner.Turn_busy (Some { lane = Owner.Chat_operation; _ }))) -> ()
-   | Ok (`Busy other) ->
-     fail ("autonomous deferred to the wrong lane: " ^ Owner.autonomous_block_to_string other)
-   | Ok (`Ran _) -> fail "autonomous took the slot ahead of the queued chat"
-   | Ok `Interrupted -> fail "nothing interrupted the autonomous admission"
-   | Error error -> fail (Owner.error_to_string error));
-  Eio.Promise.await started;
-  Eio.Promise.resolve resolve_release ();
-  let answered = await_terminal owner queued 1_000 in
-  (match answered.state with
-   | Chat_operation.Succeeded { outcome_ref; _ } ->
-     check string "the queued chat is what took the slot" "chat-answered" outcome_ref
-   | _ -> fail "the deferred-to chat did not complete");
-  check (list string) "only the queued chat executed"
-    [ Chat_operation.Operation_id.to_string queued ]
-    (List.map Chat_operation.Operation_id.to_string !executed)
-;;
-
 let test_keeper_owners_do_not_cross_block () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -6330,254 +6356,6 @@ let test_pending_chat_survives_repeated_autonomous_observations () =
   | Error error -> fail (Owner.error_to_string error)
 ;;
 
-type scheduled_handoff_case =
-  | Checkpoint_handoff
-  | Natural_completion_handoff
-  | Withdrawn_handoff
-  | Reinserted_handoff
-  | Unavailable_handoff
-  | Scoped_release_handoff
-  | Failed_chat_handoff
-  | Unconfirmed_checkpoint_handoff
-  | Failed_listener_handoff
-  | Missing_listener_handoff
-  | Paused_handoff
-  | Ended_consumer_handoff
-  | Replaced_consumer_handoff
-
-let scheduled_selection ?(revision = 1L) occurrence : Keeper_event_queue_state.pending_selection =
-  { source = Keeper_event_queue.
-      { post_id = occurrence; urgency = Immediate; arrived_at = 1.
-      ; payload = Schedule_due
-          { occurrence_id = occurrence; schedule_instance_id = "instance-handoff"
-          ; schedule_id = "sched-handoff"; due_at = 1.; payload_digest = "digest"
-          ; title = None; message = "Consume scheduled work"; result_delivery = None } }
-  ; admitted_revision = revision; arrival = revision; checkpoint_retentions = 0
-  ; repetition_scope = None; first_admitted_at = Some 1. }
-
-(* Exercise the real Owner mailbox, chat runner, durable checkpoint deferral,
-   release wake and source-admission callback. Queue terminal ACK remains the
-   heartbeat consumer's authority; this test never manufactures one. *)
-let test_scheduled_source_handoff case () =
-  Eio_main.run @@ fun _env -> Eio.Switch.run @@ fun sw ->
-  let first = operation_id "kmsg-scheduled-first" in
-  let next = operation_id "kmsg-scheduled-next" in
-  let selection = scheduled_selection "occurrence-handoff" in
-  let other = scheduled_selection ~revision:2L "occurrence-added" in
-  let owner_p, resolve_owner = Eio.Promise.create () in
-  let started, resolve_started = Eio.Promise.create () in
-  let settled, resolve_settled = Eio.Promise.create () in
-  let release, resolve_release = Eio.Promise.create () in
-  let settled_sent = ref false in
-  let signal_settled () =
-    if not !settled_sent then (settled_sent := true; Eio.Promise.resolve resolve_settled ()) in
-  let attempts = ref 0 and wakes = ref 0 and order = ref [] in
-  let deferred_checkpoint : Keeper_semantic_execution.gate_checkpoint option ref = ref None in
-  let check_original_checkpoint owner label =
-    let observed = Owner.direct_checkpoint owner ~operation_id:first |> owner_ok in
-    check bool label true
-      (Option.equal Keeper_semantic_execution.equal_gate_checkpoint !deferred_checkpoint observed)
-  in
-  let record text = order := !order @ [text] in
-  let execute ~sw:_ ~keeper_name:_ ~claim =
-    let owner = Eio.Promise.await owner_p in
-    let operation : Chat_operation.t = Option.get (owner_ok (claim ())) in
-    if Chat_operation.Operation_id.equal operation.Chat_operation.operation_id first then (
-      incr attempts;
-      if !attempts = 1 then (
-        record "chat";
-        Eio.Promise.resolve resolve_started ();
-        Eio.Promise.await release;
-        match case with
-        | Natural_completion_handoff -> Owner.Operation_succeeded { outcome_ref = "text-only" }
-        | Failed_chat_handoff -> Owner.Operation_failed
-            { kind = Chat_operation.Turn_invariant; detail = "failed before checkpoint"; outcome_ref = None }
-        | Unconfirmed_checkpoint_handoff -> Owner.Operation_deferred
-        | Checkpoint_handoff | Withdrawn_handoff | Reinserted_handoff
-        | Unavailable_handoff | Scoped_release_handoff | Failed_listener_handoff
-        | Missing_listener_handoff | Paused_handoff | Ended_consumer_handoff
-        | Replaced_consumer_handoff ->
-          let checkpoint = Keeper_checkpoint_ref.of_persisted
-            ~trace_id:(Option.get (Owner.projection owner).meta).runtime.trace_id
-            ~turn_count:1 ~sha256:(Keeper_checkpoint_ref.sha256_of_canonical_bytes "settled original chat boundary")
-            |> Result.get_ok in
-          let checkpoint = Keeper_semantic_execution.Agent_core checkpoint in
-          Owner.defer_direct_checkpoint owner ~operation_id:first
-            ~execution_digest:operation.execution_digest
-            ~checkpoint
-          |> owner_ok |> ignore;
-          deferred_checkpoint := Some checkpoint;
-          check_original_checkpoint owner "deferral retains the exact original checkpoint";
-          Owner.Operation_deferred)
-      else (
-        check_original_checkpoint owner "reclaimed original still owns its exact checkpoint";
-        let checkpoint = match !deferred_checkpoint with
-          | Some checkpoint -> checkpoint
-          | None -> fail "original continuation has no confirmed checkpoint" in
-        (* The production runner consumes its admitted exact checkpoint before
-           executing the continuation (Keeper_direct_checkpoint_continuation).
-           Claiming the operation row alone leaves semantic execution suspended. *)
-        Owner.resume_direct_checkpoint owner ~operation_id:first ~observed:checkpoint
-        |> owner_ok;
-        check bool "only the original checkpoint was consumed" true
-          (Option.is_none (Owner.direct_checkpoint owner ~operation_id:first |> owner_ok));
-        check bool "resumption preserves the running operation identity" true
-          (match Owner.exact_operation owner first |> owner_ok with
-           | Some current -> Chat_operation.Operation_id.equal current.operation_id operation.operation_id
-               && String.equal current.execution_digest operation.execution_digest
-               && (match current.state with
-                   | Chat_operation.Running _ -> true
-                   | Queued | Succeeded _ | Failed _ | Cancelled _ -> false)
-           | None -> false);
-        record "resumed";
-        Owner.Operation_succeeded { outcome_ref = "resumed" }))
-    else (
-      check bool "fresh chat retains its original identity" true
-        (Chat_operation.Operation_id.equal operation.Chat_operation.operation_id next);
-      check_original_checkpoint owner "fresh chat preserves the original checkpoint scope";
-      check bool "fresh chat does not inherit the original checkpoint" true
-        (Option.is_none (Owner.direct_checkpoint owner ~operation_id:next |> owner_ok));
-      record "fresh";
-      Owner.Operation_succeeded { outcome_ref = "fresh" })
-  in
-  let path = Filename.temp_file "keeper-owner-scheduled-handoff-" ".sqlite3" in
-  Unix.unlink path;
-  Eio.Switch.on_release sw (fun () -> if Sys.file_exists path then Unix.unlink path);
-  let listener = match case with
-    | Missing_listener_handoff -> None
-    | Failed_listener_handoff -> Some (fun () -> incr wakes; signal_settled (); failwith "wake unavailable")
-    | Checkpoint_handoff | Natural_completion_handoff | Withdrawn_handoff
-    | Reinserted_handoff | Unavailable_handoff | Scoped_release_handoff
-    | Failed_chat_handoff | Unconfirmed_checkpoint_handoff | Paused_handoff
-    | Ended_consumer_handoff | Replaced_consumer_handoff -> Some (fun () -> incr wakes; signal_settled ())
-  in
-  let owner = Owner.start ~base_path:(Filename.dirname path) ~sw
-    ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
-    ~operation_store_path:path
-    ~session_root:(Filename.concat (Filename.dirname path) "traces")
-    ~now:(fun () -> 42.)
-    ~operation_runner:(Some Owner.
-      { ready = (fun ~keeper_name:_ -> true); execute
-      ; on_execution_settled = (fun ~keeper_name:_ ~claimed_operation_id ~operations:_ ~execution:_ ->
-          if !attempts = 1 && Option.exists (Chat_operation.Operation_id.equal first) claimed_operation_id
-          then signal_settled ()) })
-    ~on_turn_slot_released:listener ~keeper_name:"scheduled-handoff"
-    ~initial_meta:(Some (make_meta "scheduled-handoff")) |> owner_ok in
-  let consumer = Owner.begin_scheduled_turn_consumer owner |> owner_ok in
-  Eio.Promise.resolve resolve_owner owner;
-  let submit id = Owner.submit_operation owner ~operation_id:id
-    ~source:operation_source ~input:(operation_input "Original chat") |> owner_ok |> ignore in
-  submit first;
-  Eio.Promise.await started;
-  submit next;
-  let accepted = Option.is_some (owner_ok (Owner.observe_scheduled_turn owner [selection])) in
-  check bool "handoff requires a live release consumer"
-    (case <> Missing_listener_handoff) accepted;
-  let captured = owner_ok (Owner.scheduled_turn_handoff owner) in
-  (match case, captured with
-   | Scoped_release_handoff, Some old ->
-     (* The release below removes only [selection]. The cohort check after the
-        source slot starts therefore proves that [other] was reserved here. *)
-     ignore (Owner.observe_scheduled_turn owner [other] |> owner_ok);
-     Owner.release_scheduled_turn owner ~handoff:old |> owner_ok
-   | Ended_consumer_handoff, _ ->
-     ignore (Owner.observe_scheduled_turn owner [other] |> owner_ok);
-     Owner.end_scheduled_turn_consumer owner ~consumer |> owner_ok;
-     check bool "ending the consumer rejects late reservation" true
-       (Option.is_none (Owner.observe_scheduled_turn owner [selection] |> owner_ok))
-   | Replaced_consumer_handoff, Some old ->
-     ignore (Owner.begin_scheduled_turn_consumer owner |> owner_ok);
-     (* The cohort size of 2 checked after the source slot starts proves that
-        the replacement reserved both. *)
-     ignore (Owner.observe_scheduled_turn owner [selection; other] |> owner_ok);
-     Owner.end_scheduled_turn_consumer owner ~consumer |> owner_ok;
-     Owner.release_scheduled_turn owner ~handoff:old |> owner_ok
-   | Paused_handoff, _ ->
-     Owner.apply_meta owner (Pause
-       { reason = Keeper_latched_reason.Operator_paused { operator_actor = Grpc_directive }
-       ; updated_at = "pause-before-source" }) |> owner_ok |> ignore
-   | _ -> ());
-  let captured = owner_ok (Owner.scheduled_turn_handoff owner) in
-  Eio.Promise.resolve resolve_release ();
-  (* The callback is inside Child_finished. The following mailbox read is a
-     barrier after its settlement, without a timing deadline or polling loop. *)
-  Eio.Promise.await settled;
-  ignore (owner_ok (Owner.scheduled_turn_handoff owner));
-  let should_admit = match case with
-    | Checkpoint_handoff | Natural_completion_handoff | Scoped_release_handoff
-    | Replaced_consumer_handoff -> true
-    | Withdrawn_handoff | Reinserted_handoff | Unavailable_handoff | Failed_chat_handoff
-    | Unconfirmed_checkpoint_handoff | Failed_listener_handoff | Missing_listener_handoff
-    | Paused_handoff | Ended_consumer_handoff -> false in
-  if should_admit then (
-    check (list string) "queued chat cannot reclaim the reserved slot" ["chat"] !order;
-    (match Owner.run_autonomous_if_idle owner (fun () -> fail "generic caller stole the source slot") with
-     | Ok (`Busy _) -> () | _ -> fail "generic observation changed reservation");
-    let fresh = [selection; other] in
-    (match Owner.run_scheduled_if_idle owner ~handoff:captured ~sources:(Ok fresh) (fun sources ->
-       let expected = if case = Scoped_release_handoff then other else selection in
-       check int "only the original surviving cohort is prioritized"
-         (if case = Replaced_consumer_handoff then 2 else 1) (List.length sources);
-       check bool "exact cohort is preserved despite additions" true
-         (Keeper_event_queue_state.same_entry expected (List.hd sources));
-       check_original_checkpoint owner "scheduled source cannot consume the direct checkpoint";
-       record "source") with
-     | Ok (`Ran ()) -> () | _ -> fail "the source did not receive the next slot");
-    ignore (await_terminal owner next 1_000);
-    ignore (await_terminal owner first 1_000);
-    check (list string) "one source slot then fresh chat and original continuation"
-      (if case = Natural_completion_handoff then ["chat"; "source"; "fresh"]
-       else ["chat"; "source"; "fresh"; "resumed"]) !order;
-    check int "reservation itself delivers the release wake" 1 !wakes)
-  else (
-    let observation = match case with
-      | Unavailable_handoff -> Error "durable queue read unavailable"
-      | Reinserted_handoff -> Ok [scheduled_selection ~revision:99L "occurrence-handoff"]
-      | Withdrawn_handoff -> Ok []
-      | _ -> Ok [selection] in
-    (match Owner.run_scheduled_if_idle owner ~handoff:captured ~sources:observation (fun sources ->
-       check int "unreserved inputs acquire no source priority" 0 (List.length sources)) with
-     | Ok (`Ran () | `Busy _) -> () | _ -> fail "refused handoff escaped its normal lifecycle");
-    check bool "stale, paused or failed handoff releases its scoped reservation" true
-      (Option.is_none (owner_ok (Owner.scheduled_turn_handoff owner)));
-    check bool "no failed handoff dispatches source work" false (List.mem "source" !order));
-  ignore (Owner.begin_stopping owner |> owner_ok)
-;;
-
-(* A scheduled cohort is reserved only behind a busy Direct child, whose
-   natural terminal would otherwise hand the next slot to queued chat. An idle
-   Owner and an autonomous child reserve nothing: that child already owns its
-   input. A consumer is registered and the Owner can release a slot, so any
-   reservation here would be accepted. *)
-let test_scheduled_cohort_is_reserved_only_behind_a_direct_child () =
-  Eio_main.run @@ fun _env -> Eio.Switch.run @@ fun sw ->
-  let path = Filename.temp_file "keeper-owner-scheduled-observe-" ".sqlite3" in
-  Unix.unlink path;
-  Eio.Switch.on_release sw (fun () -> if Sys.file_exists path then Unix.unlink path);
-  let owner = Owner.start ~base_path:(Filename.dirname path) ~sw
-    ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
-    ~operation_store_path:path
-    ~session_root:(Filename.concat (Filename.dirname path) "traces")
-    ~now:(fun () -> 42.)
-    ~operation_runner:None
-    ~on_turn_slot_released:(Some (fun () -> ()))
-    ~keeper_name:"scheduled-observe"
-    ~initial_meta:(Some (make_meta "scheduled-observe")) |> owner_ok in
-  ignore (Owner.begin_scheduled_turn_consumer owner |> owner_ok);
-  let cohort = [ scheduled_selection "occurrence-observed" ] in
-  let reserves () =
-    Option.is_some (owner_ok (Owner.observe_scheduled_turn owner cohort)) in
-  check bool "an idle Owner reserves nothing" false (reserves ());
-  (match Owner.run_autonomous_if_idle owner reserves with
-   | Ok (`Ran reserved) -> check bool "an autonomous child reserves nothing" false reserved
-   | Ok (`Busy _) -> fail "the idle Owner did not admit the autonomous child"
-   | Ok `Interrupted -> fail "nothing interrupted the autonomous child"
-   | Error error -> fail (Owner.error_to_string error));
-  check bool "no reservation outlives the child" true
-    (Option.is_none (owner_ok (Owner.scheduled_turn_handoff owner)));
-  ignore (Owner.begin_stopping owner |> owner_ok)
-;;
-
 let test_input_writer_is_bound_to_child_and_predecessor () =
   Eio_main.run @@ fun _env -> Eio.Switch.run @@ fun sw ->
   let meta = make_meta "input-writer" in
@@ -6818,35 +6596,6 @@ let () =
         test_case "retry acknowledgement and confirmation loss recover the same authorized child" `Quick
           (test_owner_preparation_wait_and_explicit_retry ~retry_readback_failure:true
             ~retry_fault:Keeper_chat_operation_store.For_testing.Fail_after_commit None) ] )
-    ; ( "scheduled source handoff", [
-        test_case "consumer termination releases additions and rejects late registration" `Quick
-          (test_scheduled_source_handoff Ended_consumer_handoff)
-      ; test_case "old consumer cleanup cannot erase replacement epoch" `Quick
-          (test_scheduled_source_handoff Replaced_consumer_handoff)
-      ; test_case "checkpoint yields to source ahead of queued chat" `Quick
-          (test_scheduled_source_handoff Checkpoint_handoff)
-      ; test_case "text-only chat reserves source at natural completion" `Quick
-          (test_scheduled_source_handoff Natural_completion_handoff)
-      ; test_case "withdrawn source releases handoff" `Quick
-          (test_scheduled_source_handoff Withdrawn_handoff)
-      ; test_case "new source incarnation cannot inherit old reservation" `Quick
-          (test_scheduled_source_handoff Reinserted_handoff)
-      ; test_case "unavailable queue releases source priority" `Quick
-          (test_scheduled_source_handoff Unavailable_handoff)
-      ; test_case "late scoped release preserves newly added source" `Quick
-          (test_scheduled_source_handoff Scoped_release_handoff)
-      ; test_case "failed chat releases source reservation" `Quick
-          (test_scheduled_source_handoff Failed_chat_handoff)
-      ; test_case "unconfirmed checkpoint settlement releases reservation" `Quick
-          (test_scheduled_source_handoff Unconfirmed_checkpoint_handoff)
-      ; test_case "failed release listener restores chat admission" `Quick
-          (test_scheduled_source_handoff Failed_listener_handoff)
-      ; test_case "missing release listener cannot reserve a slot" `Quick
-          (test_scheduled_source_handoff Missing_listener_handoff)
-      ; test_case "pause wins over scheduled reservation" `Quick
-          (test_scheduled_source_handoff Paused_handoff)
-      ; test_case "only a busy direct child holds a scheduled reservation" `Quick
-          test_scheduled_cohort_is_reserved_only_behind_a_direct_child ] )
     ; ( "input ownership", [test_case "writer binds child, lane and exact predecessor" `Quick
           test_input_writer_is_bound_to_child_and_predecessor] )
     ; ( "retry_deadline_rearm",
@@ -6855,11 +6604,7 @@ let () =
         ; test_case "later deadline preserves an armed earlier wake" `Quick
             (test_cooling_retry_rearms_earliest ~earlier_added_second:false) ] )
     ; ( "reducer"
-      , [ test_case "direct waiter ignores continuations and wakes on original input" `Quick
-            test_direct_waiter_skips_continuations_and_wakes_on_new_input;
-          test_case "direct waiter is released on owner closure" `Quick
-            test_direct_waiter_returns_when_owner_closes;
-          test_case
+      , [ test_case
             "additive usage and pause are exact"
             `Quick
             test_pure_reducer_adds_deltas_and_preserves_pause
@@ -6971,6 +6716,18 @@ let () =
             "health observer wakes after persistence exceptions"
             `Quick
             test_health_observer_wakes_after_persistence_exception
+        ; test_case
+            "metadata writes announce the Keeper row"
+            `Quick
+            test_metadata_writes_announce_the_keeper_row
+        ; test_case
+            "a token rotation announces the Keeper turns"
+            `Quick
+            test_a_token_rotation_announces_the_keeper_turns
+        ; test_case
+            "a raised metadata write announces the Keeper row"
+            `Quick
+            test_raised_metadata_write_announces_the_keeper_row
         ; test_case
             "health observer isolates callback cancellation"
             `Quick
@@ -7103,8 +6860,6 @@ let () =
             test_recovery_does_not_replay_an_active_or_uncertain_child
         ; test_case "availability recovers under an autonomous child" `Quick
             test_availability_recovers_under_an_autonomous_child
-        ; test_case "autonomous admission defers to a queued chat" `Quick
-            test_autonomous_admission_defers_to_a_queued_chat
         ; test_case
             "Keeper owners do not cross-block"
             `Quick

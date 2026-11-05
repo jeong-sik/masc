@@ -2536,7 +2536,19 @@ let post_keeper_observed_turn_interrupt ~on_control_token ~host ~port ~keeper_na
 let fetch_keeper_runtimes ~(host : string) ~(port : int)
     ~(expected_workspace : Masc.Tui_decode.server_identity) :
     (int * string, string) result =
-  http_get ~host ~port ~path:("/api/v1/gate/keepers?detailed=true&expected_workspace="
+  http_get ~host ~port ~path:("/api/v1/gate/keepers?detailed=true&fresh=true&expected_workspace="
+    ^ percent_encode_path_segment (Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_base_path)
+    ^ "&expected_masc_root="
+    ^ percent_encode_path_segment (Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_masc_root))
+
+(** One Keeper's roster row: [GET /api/v1/gate/keepers?name=<keeper>]
+    (RFC-0481 §3.1). The route never answers it from the list cache. *)
+let fetch_keeper_runtime ~(host : string) ~(port : int)
+    ~(expected_workspace : Masc.Tui_decode.server_identity) ~(keeper_name : string) :
+    (int * string, string) result =
+  http_get ~host ~port ~path:("/api/v1/gate/keepers?detailed=true&name="
+    ^ percent_encode_path_segment keeper_name
+    ^ "&expected_workspace="
     ^ percent_encode_path_segment (Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_base_path)
     ^ "&expected_masc_root="
     ^ percent_encode_path_segment (Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_masc_root))
@@ -2546,6 +2558,105 @@ let keeper_workspace_headers (identity : Masc.Tui_decode.server_identity) =
     Masc.Tui_decode.Canonical_path.to_string identity.sid_base_path
   ; Masc.Request_workspace_precondition.expected_masc_root_header,
     Masc.Tui_decode.Canonical_path.to_string identity.sid_masc_root ]
+
+(* RFC-0482 §3.1: the terminal's [tui] table lives in the runtime.toml the
+   server writes. Both calls carry this terminal's own workspace paths, so a
+   server of another workspace on the port refuses (409) instead of answering
+   with, or storing into, its own settings. *)
+let tui_preferences_path = "/api/v1/tui/preferences"
+
+let own_workspace_headers ~base_path ~masc_root =
+  [ Masc.Request_workspace_precondition.expected_base_path_header,
+    Masc.Tui_decode.Canonical_path.to_string base_path
+  ; Masc.Request_workspace_precondition.expected_masc_root_header,
+    Masc.Tui_decode.Canonical_path.to_string masc_root ]
+
+let fetch_tui_preferences ~host ~port ~base_path ~masc_root =
+  match
+    http_get_response ~host ~port ~path:tui_preferences_path
+      ~headers:(own_workspace_headers ~base_path ~masc_root)
+  with
+  | Error detail -> Error detail
+  | Ok { Masc_http_client.status; body; headers = _ } ->
+    if Masc.Tui_decode.is_success_http_status status then
+      match Yojson.Safe.from_string body with
+      | json -> Masc.Tui_preference.settings_of_yojson json
+      | exception Yojson.Json_error detail -> Error ("The settings answer is not JSON: " ^ detail)
+    else Error (refusal ~status_code:status ~body)
+
+let string_list_of_json = function
+  | `List values ->
+    List.fold_right
+      (fun value acc ->
+         match value, acc with
+         | `String text, Ok texts -> Ok (text :: texts)
+         | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _), Error e ->
+           Error e
+         | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _), Ok _ ->
+           Error "a list entry is not a string")
+      values (Ok [])
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> Error "not a list"
+
+(* A field of an answer object; a body that is not an object has none. *)
+let answer_field name = function
+  | `Assoc fields -> List.assoc_opt name fields
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
+
+(* The answer of a stored pick: committed with its receipt, or unchanged. *)
+let tui_preference_answer body : (Masc_tui_preference_writer.saved, string) result =
+  let open Result.Syntax in
+  let* json =
+    match Yojson.Safe.from_string body with
+    | json -> Ok json
+    | exception Yojson.Json_error detail -> Error ("not JSON: " ^ detail)
+  in
+  match answer_field "state" json with
+  | Some (`String "unchanged") -> Ok Masc_tui_preference_writer.Unchanged
+  | Some (`String "committed") ->
+    let* commit =
+      match answer_field "commit" json with
+      | Some (`Assoc _ as commit) -> Ok commit
+      | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) ->
+        Error "the committed answer carries no commit"
+    in
+    let* durability =
+      match answer_field "durability" commit with
+      | Some (`String "durable") -> Ok Runtime.Durable
+      | Some (`String "unconfirmed") ->
+        (match answer_field "durability_detail" commit with
+         | Some (`String detail) -> Ok (Runtime.Durability_unconfirmed { detail })
+         | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _) ->
+           Error "an unconfirmed commit gives no detail")
+      | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _) ->
+        Error "the commit does not say whether it is durable"
+    in
+    let* ignored_legacy_keys =
+      match answer_field "ignored_legacy_keys" commit with
+      | Some keys -> string_list_of_json keys
+      | None -> Error "the commit does not list ignored keys"
+    in
+    Ok (Masc_tui_preference_writer.Committed { durability; ignored_legacy_keys })
+  | None | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _) ->
+    Error "the answer names no state"
+
+let post_tui_preference ~host ~port ~base_path ~masc_root change :
+    (Masc_tui_preference_writer.saved, Masc_tui_preference_writer.failure) result =
+  match
+    http_post
+      ~headers:(own_workspace_headers ~base_path ~masc_root @ auth_headers ())
+      ~host ~port ~path:tui_preferences_path
+      ~body:(Yojson.Safe.to_string (Masc.Tui_preference.change_to_yojson change))
+  with
+  | Error detail -> Error (Masc_tui_preference_writer.Unobserved detail)
+  | Ok (status, body) when Masc.Tui_decode.is_success_http_status status ->
+    (* The server answered 2xx, so the pick was handled; an answer this client
+       cannot read leaves only whether it was stored unknown. *)
+    Result.map_error
+      (fun detail -> Masc_tui_preference_writer.Unobserved ("Saved, but the answer is unreadable: " ^ detail))
+      (tui_preference_answer body)
+  | Ok ((401 | 403) as status_code, body) ->
+    Error (Masc_tui_preference_writer.Not_permitted (refusal ~status_code ~body))
+  | Ok (status_code, body) -> Error (Masc_tui_preference_writer.Refused (refusal ~status_code ~body))
 
 (** POST a keeper lifecycle action ([boot] / [shutdown]).
 
@@ -3682,6 +3793,18 @@ let fetch_dashboard_tools ~(host : string) ~(port : int) ?keeper () :
   in
   get_json ~host ~port ~path
 
+(** Fetch one Keeper's skill activations (RFC-0483). *)
+let fetch_keeper_skill_activations ~(host : string) ~(port : int) ~(keeper : string) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port
+    ~path:("/api/v1/keepers/skill-activations?keeper=" ^ percent_encode_query_value keeper)
+
+(** Fetch one Keeper's usage of the skill catalog (RFC-0483). *)
+let fetch_keeper_skill_usage ~(host : string) ~(port : int) ~(keeper : string) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port
+    ~path:("/api/v1/keepers/skill-usage?keeper=" ^ percent_encode_query_value keeper)
+
 (** Fetch /api/v1/gate/connectors. *)
 let fetch_connectors ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
@@ -3714,10 +3837,13 @@ let fetch_skills_catalog ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/skills"
 
-(** Fetch the current composite lane snapshot for every registered Keeper. *)
-let fetch_keeper_lanes ~(host : string) ~(port : int) :
+(** Fetch one Keeper's composite snapshot. *)
+let fetch_keeper_composite ~(host : string) ~(port : int) ~(keeper_name : string) :
     (Yojson.Safe.t, string) result =
-  get_json ~host ~port ~path:"/api/v1/keepers/composite"
+  get_json ~host ~port
+    ~path:
+      (Printf.sprintf "/api/v1/keepers/%s/composite"
+         (percent_encode_path_segment keeper_name))
 
 (** Fetch all Lane families from their read-only operator inventory. *)
 let fetch_lane_inventory ~(host : string) ~(port : int) :

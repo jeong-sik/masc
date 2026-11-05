@@ -186,10 +186,10 @@ let planned_reference ~kind ~sha256 ~bytes =
   |> Result.to_option
 ;;
 
-let plan ?(completed_arguments = Occurrences.empty) ?(demote_from = 0)
+let plan ?(completed_arguments = Occurrences.empty)
     ~measure_message_bytes ~demote_before messages =
   let labelled, _atom_count = Runtime_model_input_tail_window.annotate messages in
-  if demote_before <= demote_from && Occurrences.is_empty completed_arguments
+  if demote_before <= 0 && Occurrences.is_empty completed_arguments
   then { messages; pending = [] }
   else (
     let pending = ref [] in
@@ -201,7 +201,7 @@ let plan ?(completed_arguments = Occurrences.empty) ?(demote_from = 0)
              match label with
              | Runtime_model_input_tail_window.Pinned -> false
              | Runtime_model_input_tail_window.Atom index ->
-               demote_from <= index && index < demote_before
+               index < demote_before
            in
            if not aged && Occurrences.is_empty completed_arguments then message
            else

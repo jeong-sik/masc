@@ -43,12 +43,14 @@ type reaction_kind =
 type reaction_decode_error = Unknown_reaction_kind of string
 type row_quarantine_reason
 
-val install_state_change_observer : (unit -> unit) -> unit
+val install_state_change_observer :
+  (base_path:string -> keeper_name:string -> unit) -> unit
 (** Install the process-wide non-yielding observer invoked after a direct
-    stimulus or turn-start row append succeeds. Observer failures are logged
-    and never change the already persisted ledger result. Transition-outbox
+    stimulus, turn-start or turn-finish row append succeeds, with the
+    workspace and Keeper the row belongs to. Observer failures are logged and
+    never change the already persisted ledger result. Transition-outbox
     reactions are followed by event-queue retirement persistence, whose own
-    observer supplies the ordered full-health invalidation. *)
+    observer reports them. *)
 
 val digest_id : string -> string -> string
 (** [digest_id prefix payload] is the durable event id: [prefix], a colon, and

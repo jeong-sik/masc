@@ -23,6 +23,21 @@ module Event_queue = Keeper_event_queue
 module WO = Masc.Keeper_world_observation
 module Prompt = Masc.Keeper_unified_prompt
 
+(* The production peek, read back as the exact pending selection. *)
+let select_ready ~now ~ready state =
+  Option.bind (Keeper_event_queue_state.peek_when ~now ~ready state) (fun source ->
+    List.find_opt
+      (fun (selection : Keeper_event_queue_state.pending_selection) ->
+         Keeper_event_queue.stimulus_identity_equal selection.source source)
+      (Keeper_event_queue_state.pending_selections state))
+;;
+
+(* The production loader with the production peek. *)
+let select_queue_entry ~base_path ~keeper_name ~now ~ready =
+  Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name
+  |> Result.map (select_ready ~now ~ready)
+;;
+
 let submitter = "alpha"
 let request_id = "kmsg-0001"
 let composition_tool = "keeper_compose_memory-background"
@@ -501,7 +516,7 @@ let a_result_is_read_before_the_board_backlog () =
             ; content = ""
             ; hearth = None
             ; updated_at = Some (100.0 +. float_of_int index)
-            ; audience = Some (Keeper_event_queue.Audience_discoverable)
+            ; audience = Keeper_event_queue.Audience_discoverable
             }
       }
     in
@@ -533,7 +548,7 @@ let a_result_is_read_before_the_board_backlog () =
     | Error detail -> fail ("queue state load failed: " ^ detail)
     | Ok state ->
       (match
-         Keeper_event_queue_state.select_when
+         select_ready
            ~now:(Unix.gettimeofday ())
            ~ready:(fun _ -> true)
            state
@@ -710,7 +725,7 @@ let completion_delivery_recovers_without_replaying_or_reconsuming () =
         check string "recovery delivers the original request" accepted.request_id completion.cc_request_id;
         source
       | _ -> fail "recovery lost or duplicated completion" in
-    let selection = match Queue.select_when_result ~base_path submitter ~now:(Time_compat.now ()) ~ready:(fun _ -> true) with
+    let selection = match select_queue_entry ~base_path ~keeper_name:submitter ~now:(Time_compat.now ()) ~ready:(fun _ -> true) with
       | Ok (Some selection) -> selection
       | _ -> fail "recovered completion was not admitted" in
     Masc.Keeper_reaction_ledger.record_event_queue_turn_started ~base_path ~keeper_name:submitter source;

@@ -400,7 +400,10 @@ let replay_journal_status ~base_path ~approval_id replay_outcome =
        | Keeper_approval_queue_result.Grant_still_pending _
        | Keeper_approval_queue_result.Grant_resolution_not_approved _
        | Keeper_approval_queue_result.Grant_resolution_missing _
-       | Keeper_approval_queue_result.Grant_replay_outcome_conflict _ ) as error) ->
+       | Keeper_approval_queue_result.Grant_replay_outcome_conflict _
+       | Keeper_approval_queue_result.Grant_settlement_keeper_mismatch _
+       | Keeper_approval_queue_result.Grant_settlement_fence_mismatch _
+       | Keeper_approval_queue_result.Grant_settlement_conflict _ ) as error) ->
     Error (Keeper_approval_queue_result.grant_error_to_string error)
 ;;
 

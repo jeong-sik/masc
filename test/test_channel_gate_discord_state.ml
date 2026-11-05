@@ -471,6 +471,23 @@ let test_large_mention_allowlist_keeps_tokens_whole () =
       last.allowed_user_mentions
   | [] -> fail "mention chunker produced no messages"
 
+(* A Keeper's channels tab draws the bot, its guilds and the directory, so
+   READY and each directory refresh tell readers (RFC-0480 §3.4). *)
+let test_ready_and_directory_refresh_announce () =
+  let heard = ref 0 in
+  Gate_connector_announce.install (fun ~connector_id ->
+    if String.equal connector_id Discord_state.connector_id then incr heard);
+  Fun.protect ~finally:(fun () -> Gate_connector_announce.install (fun ~connector_id:_ -> ()))
+  @@ fun () ->
+  Discord_state.record_ready ~bot_user_id:"bot-42" ~bot_user_name:(Some "MASC Bot")
+    ~guild_ids:[ "guild-1" ];
+  check int "READY announces" 1 !heard;
+  Discord_state.record_directory_refresh_started ();
+  check int "a directory refresh that starts announces" 2 !heard;
+  Discord_state.record_directory_refresh_finished ~server_count:1 ~channel_count:2
+    ~person_count:3 ~authentication_failed:[] ~permission_denied:[] ~errors:[];
+  check int "a directory refresh that ends announces" 3 !heard
+
 let () =
   Eio_main.run @@ fun _env ->
   run "channel_gate_discord_state"
@@ -487,6 +504,8 @@ let () =
             test_status_json_surfaces_binding_store_failure;
           test_case "record_ready surfaces bot identity" `Quick
             test_record_ready_surfaces_bot_identity;
+          test_case "READY and directory refresh announce" `Quick
+            test_ready_and_directory_refresh_announce;
           test_case "bind persists binding and audit" `Quick
             test_bind_persists_binding_and_audit;
           test_case "unbind removes binding" `Quick

@@ -14,7 +14,7 @@ let identity base_path : Tui_decode.server_identity =
   ; sid_uptime = None
   ; sid_sse_clients = None
   ; sid_gc = None
-  ; sid_scheduler = None
+  ; sid_scheduler = None; sid_operator_action = None
   }
 
 let test_goal_candle_read_rejects_stale_authority_and_refusals () =
@@ -173,7 +173,7 @@ let test_chat_file_observation_retains_its_read_epoch () =
     k_paused=false; k_identity=Error "not observed";
     k_activity=Some { k_current_task_id=Some "task-current"; k_total_turns=0;
       k_total_tokens=0; k_total_cost_usd=Keeper_cost_coverage.empty;
-      k_last_turn_ts=""; k_last_proactive_outcome=None } }];
+      k_last_turn_at=None; k_last_proactive_outcome=None } }];
   let change : Tui_decode.file_change =
     { fc_at=1.; fc_keeper="alpha"; fc_turn=None; fc_task_id=Some "task-original";
       fc_execution_id=None; fc_line_evidence=None;
@@ -217,6 +217,7 @@ let test_chat_file_observation_retains_its_read_epoch () =
        && has diff_screen "Checkout unverified");
     state.repository_changes <- Some Tui_decode.{
       rcs_scope=Repository_change_repository "repo"; rcs_total=1;
+      rcs_branch=Repository_on_branch {name="main"; upstream=Repository_no_upstream};
       rcs_changes=[{rc_path="original.ml";rc_staged=false;rc_unstaged=true;
         rc_untracked=false;rc_conflicted=false}]};
     let frame, _ = Masc_tui_render_repositories.render_repository_changes state in
@@ -295,6 +296,7 @@ let test_chat_file_observation_retains_its_read_epoch () =
     let changes = List.map (fun path -> Tui_decode.{rc_path=path; rc_staged=false;
       rc_unstaged=true;rc_untracked=false;rc_conflicted=false}) paths in
     state.repository_changes <- Some Tui_decode.{rcs_scope=Repository_change_repository "repo";
+      rcs_branch=Repository_on_branch {name="main"; upstream=Repository_no_upstream};
       rcs_changes=changes;rcs_total=List.length changes};
     let records = paths |> List.filteri (fun n _ -> n mod 2 = 0)
       |> List.map (fun path -> {change with fc_location=Fc_in_repo {repo_id="repo";relative_path=path}}) in
@@ -845,31 +847,23 @@ let test_deletion_inventory_waits_for_reconfirmed_workspace () =
     (state.keeper_deletions = Some (Ok refreshed));
   Alcotest.(check int) "selection follows its operation after reorder" 0 state.keeper_deletions_cursor
 
-(* An Info refresh queued behind an in-flight Keeper lanes read belongs to
-   that read's authority. Suspension retires the read; the replacement read
-   launched after reconfirmation leaves later than the queued request, so it
-   satisfies it. A flag left behind would start a second, redundant read
-   when the replacement answers, and that read's failure would overwrite the
-   recovered reading with a stale error. *)
-let test_suspension_folds_queued_lanes_reread_into_resume () =
+(* The composite read in flight and the read the detail owes belong to the
+   detail reading that suspension retires. The visible tab reads again when
+   the detail is recovered, so neither may survive into the new reading: an
+   answer of the retired read would overwrite the recovered one. *)
+let test_suspension_retires_the_keeper_composite_read () =
   let open Masc_tui_types in
   let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
       ~port:0 ~refresh_interval:0. () in
-  state.keeper_lanes_inflight <- true;
-  state.keeper_lanes_reread_pending <- true;
+  state.keeper_composite_inflight <- Some "alpha";
+  state.keeper_composite_owed <-
+    Some { kco_keeper = "alpha"; kco_reading = state.detail_read_authority
+         ; kco_read = Masc_tui_owed_read.changed Masc_tui_owed_read.settled };
   suspend_workspace_readings state;
-  Alcotest.(check bool) "in-flight read released" false state.keeper_lanes_inflight;
-  Alcotest.(check bool) "queued reread retired with its authority" false
-    state.keeper_lanes_reread_pending;
-  Alcotest.(check bool) "replacement read still requested" true state.keeper_lanes_resume;
-  (* A queued reread whose read was already released (not run) still asks
-     for a replacement after reconfirmation. *)
-  state.keeper_lanes_resume <- false;
-  state.keeper_lanes_reread_pending <- true;
-  suspend_workspace_readings state;
-  Alcotest.(check bool) "queued reread retired without an in-flight read" false
-    state.keeper_lanes_reread_pending;
-  Alcotest.(check bool) "its demand carried into resume" true state.keeper_lanes_resume
+  Alcotest.(check bool) "in-flight read released" true
+    (Option.is_none state.keeper_composite_inflight);
+  Alcotest.(check bool) "owed read retired with its reading" true
+    (Option.is_none state.keeper_composite_owed)
 
 let test_uncertain_identity_retires_reads_not_admitted_operations () =
   let open Masc_tui_types in
@@ -1372,13 +1366,9 @@ let test_native_task_read_epoch_retirement () =
 
 let overview_snapshot health : Masc_tui_types.overview_snapshot =
   { ov_workspace_health = health
-  ; ov_keepers = 0
   ; ov_keeper_listing = Masc.Keeper_snapshot_unread.Not_listed
   ; ov_keeper_liveness =
       { klc_active = 0; klc_offline = 0; klc_idle = 0; klc_paused = 0; klc_unreadable = 0 }
-  ; ov_mcp_agents = 0
-  ; ov_attention_items = []
-  ; ov_generated_at = "fixture"
   }
 
 let overview_preview_fixture () =
@@ -1933,7 +1923,7 @@ let early_roster_fixture () =
   state.server_identity <- Some server;
   let ticket = Http_refresh_order.dispatch state.http_refresh_order in
   begin_http_refresh_state state ~ticket ~started_ns:0L;
-  let request = match begin_keeper_roster_read state with
+  let request = match begin_keeper_roster_read ~intent:Snapshot_read.Refresh state with
     | Some request -> request | None -> Alcotest.fail "roster read did not start" in
   state,
   { er_ticket=ticket; er_authority=state.workspace_authority; er_identity=server;
@@ -1982,7 +1972,7 @@ let test_early_roster_preserves_read_ownership () =
      && state.http_refresh_started_ns=Some 0L);
   Alcotest.(check bool) "terminal failure no longer owns a roster reading" true
     (take_keeper_roster_observation state failure=None);
-  let successor=match begin_keeper_roster_read state with
+  let successor=match begin_keeper_roster_read ~intent:Snapshot_read.Refresh state with
     | Some request -> request | None -> Alcotest.fail "successor roster did not start" in
   Alcotest.(check bool) "newer scoped roster supersedes the old full copy" true
     (take_early_keeper_roster_observation state early=None
@@ -3782,52 +3772,6 @@ let keeper_log_snapshot_fixture ?(partial=false) name count =
       [Dated_jsonl.Malformed_json {path="fixture.jsonl"; line_number=Some 2; detail="broken row"}]
       else []))
 
-let test_keeper_execute_reads_are_independent_and_scoped () =
-  let open Masc_tui_types in
-  let state, first = keeper_log_fixture () in
-  let second = { first with k_name = "beta" } in
-  state.keepers <- [first; second];
-  let metrics = keeper_log_request state first Snapshot_read.Poll in
-  let start keeper intent = match begin_keeper_execute_read state ~intent ~limit:4 keeper with
-    | Some request -> request | None -> Alcotest.fail "Execute read not admitted" in
-  let initial = start first Snapshot_read.Poll in
-  Alcotest.(check bool) "Execute settles while metrics is still pending" true
-    (take_keeper_execute_read state initial (Ok (Keeper_execute_none, 100.0)));
-  Alcotest.(check bool) "metrics request remains independent" true
-    (Masc_tui_fetched.is_current ~equal:keeper_log_equal_key state.keeper_logs metrics.klr_request);
-  let refresh = start first Snapshot_read.Poll in
-  Alcotest.(check bool) "failed reread settles" true
-    (take_keeper_execute_read state refresh (Error "offline"));
-  (match keeper_execute_view state with
-   | Masc_tui_fetched.Stale ((Keeper_execute_none, 100.0), Execute_read_failed "offline") -> ()
-   | _ -> Alcotest.fail "last observation and failure were not retained");
-  let stale = start first Snapshot_read.Poll in
-  state.keeper_cursor <- 1;
-  let successor = start second Snapshot_read.Poll in
-  Alcotest.(check bool) "late output from former Keeper is rejected" false
-    (take_keeper_execute_read state stale (Ok (Keeper_execute_none, 101.0)));
-  Alcotest.(check bool) "selected Keeper owns its response" true
-    (take_keeper_execute_read state successor (Ok (Keeper_execute_none, 102.0)));
-  (match keeper_execute_view state with
-   | Masc_tui_fetched.Ready (Keeper_execute_none, 102.0) -> ()
-   | _ -> Alcotest.fail "selected Keeper did not retain its observation")
-
-let test_keeper_execute_decoder_preserves_active_command_and_limits () =
-  let open Masc_tui_types in
-  let json = Yojson.Safe.from_string
-    {|{"type":"snapshot","keeper":"alpha","lines":[{"seq":8,"stream_id":4,"task_id":"task-a","stream":"stdout","text":"hello"}],"active_streams":[{"stream_id":4,"task_id":"task-a","command":"echo hello"}],"lines_omitted":3,"first_retained_seq":2,"active_count":1,"closed":false,"status":null,"generated_at":1.0}|} in
-  (match decode_keeper_execute_output ~keeper:"alpha" json with
-   | Ok (Keeper_execute_snapshot { kes_lines = [line]; kes_active = [active];
-                                  kes_lines_omitted = 3; kes_first_seq = 2; _ }) ->
-     Alcotest.(check string) "active command" "echo hello" active.kes_command;
-     Alcotest.(check (option int)) "output stream identity" (Some 4) line.kel_stream_id
-   | _ -> Alcotest.fail "valid output observation was not retained");
-  Alcotest.(check bool) "another Keeper is rejected" true
-    (Result.is_error (decode_keeper_execute_output ~keeper:"beta" json));
-  Alcotest.(check bool) "incomplete snapshot is unavailable" true
-    (Result.is_error (decode_keeper_execute_output ~keeper:"alpha"
-      (`Assoc ["type", `String "snapshot"; "keeper", `String "alpha"])))
-
 let test_keeper_log_selection_and_late_cleanup_keep_original_owner () =
   let open Masc_tui_types in
   let state, first = keeper_log_fixture () in
@@ -3941,12 +3885,17 @@ let keeper_settings_request state =
   match Masc_tui_types.begin_keeper_settings_editor state ~format:Masc_tui_keeper_config.Json ~available:true ~started_ns:10L with
   | Some request -> request | None -> Alcotest.fail "settings preparation did not start"
 
+let json_editor_stem observed =
+  match Masc_tui_keeper_config.editor_document ~format:Masc_tui_keeper_config.Json observed with
+  | Ok stem -> stem
+  | Error detail -> Alcotest.fail detail
+
 let keeper_settings_snapshot () : Masc_tui_types.keeper_settings_snapshot =
   let observed = `Assoc [
     "config_revision", `Assoc ["manifest",`Assoc ["state",`String "sha256";"value",`String (String.make 64 'a')];
       "runtime_assignment",`Assoc ["state",`String "runtime_config_missing"]];
     "activation_mode",`String "autonomous";"prompt",`Assoc ["instructions",`String "original"]] in
-  {kss_observed=observed;kss_stem=Masc_tui_keeper_config.editor_stem observed}
+  {kss_observed=observed;kss_stem=json_editor_stem observed}
 
 let test_settings_preparation_hands_off_original_snapshot_once () =
   let open Masc_tui_types in
@@ -4120,7 +4069,7 @@ let test_settings_save_recovers_changes_on_fresh_revision () =
     | Ok patch -> patch | Error refusal -> Alcotest.fail (Masc_tui_keeper_config.edit_refusal_to_string refusal) in
   Alcotest.(check bool) "new patch uses current composite revision" true
     (Yojson.Safe.Util.member "expected_config_revision" patch = Yojson.Safe.Util.member "config_revision" current);
-  let snapshot = {kss_observed=current;kss_stem=Masc_tui_keeper_config.editor_stem current} in
+  let snapshot = {kss_observed=current;kss_stem=json_editor_stem current} in
   ignore (take_keeper_settings_editor_read state origin (Ok snapshot));
   ignore (take_ready_keeper_settings_editor state ~available:true ~input_pending:false);
   let successor = match begin_keeper_settings_save state ~origin
@@ -5869,7 +5818,7 @@ let test_waiting_since_does_not_replace_a_fresher_turn () =
         ; k_total_turns = 1
         ; k_total_tokens = 0
         ; k_total_cost_usd = Keeper_cost_coverage.empty
-        ; k_last_turn_ts = "1970-01-01T00:01:40Z"
+        ; k_last_turn_at = Some 100.
         ; k_last_proactive_outcome = None
         }
     }
@@ -6480,6 +6429,30 @@ let test_waiting_row_epochs_isolate_other_keepers_and_controls () =
     (keeper_waiting_row_current state during_control (turn "alpha"))
 ;;
 
+(* A schedule or a confirmation change names no Keeper (RFC-0481 §3.4). A
+   waiting read begun before it may predate it, so that read is not current;
+   the change itself marks no Keeper unverified, so the drawn rows stay. *)
+let test_an_unattributed_change_retires_reads_without_blanking_rows () =
+  let open Masc_tui_types in
+  let state, alpha, _ = local_keeper_source_fixture () in
+  let beta = { alpha with Tui_decode.k_name = "beta" } in
+  let turn name = Tui_decode.{ ktr_keeper_name = name; ktr_chat_control_token = None;
+                               ktr_state = Keeper_turn_idle } in
+  state.keepers <- [alpha; beta];
+  state.keeper_waiting_unverified <- [];
+  let before = capture_keeper_waiting_snapshot state in
+  note_keeper_waiting_change state Waiting_unattributed;
+  Alcotest.(check (list string)) "no Keeper is marked unverified" []
+    state.keeper_waiting_unverified;
+  Alcotest.(check bool) "a read begun before the change is not current" false
+    (keeper_waiting_row_current state before (turn "alpha"));
+  Alcotest.(check bool) "the waiting list owes a read" true
+    (Keeper_waiting_read.change_pending state.keeper_waiting_read);
+  let after = capture_keeper_waiting_snapshot state in
+  Alcotest.(check bool) "a read begun after the change is current" true
+    (keeper_waiting_row_current state after (turn "beta"))
+;;
+
 let test_interactive_generation_revalidates_waiting () =
   let open Masc_tui_types in
   let state, _, _ = local_keeper_source_fixture () in
@@ -6556,6 +6529,73 @@ let test_waiting_event_does_not_hide_turns () =
     (row.waiting = Masc_tui_keeper_list_model.Waiting_observed waiting)
 ;;
 
+(* Each Keeper's readings are joined by name: the first turn, waiting row and
+   held call a name has, its async requests in the order they were read, the
+   questions it asked, and the task it is on. *)
+let test_roster_rows_join_each_reading_by_keeper_name () =
+  let open Masc_tui_types in
+  let state, alpha, _ = local_keeper_source_fixture () in
+  let activity task_id = Tui_decode.{ k_current_task_id = task_id; k_total_turns = 0;
+    k_total_tokens = 0; k_total_cost_usd = Keeper_cost_coverage.empty; k_last_turn_at = None;
+    k_last_proactive_outcome = None } in
+  let alpha = { alpha with Tui_decode.k_activity = Some (activity (Some "task-alpha")) } in
+  let beta = { alpha with Tui_decode.k_name = "beta"; k_activity = Some (activity None) } in
+  let turn name ktr_state = Tui_decode.{ ktr_keeper_name = name; ktr_chat_control_token = None;
+                                         ktr_state } in
+  let running = Tui_decode.Keeper_turn_running { lane = Turn_lane_autonomous;
+    started_at_unix = 1.; interrupt_token = "alpha-turn"; turn_ref = None; preview = None } in
+  let approval keeper id = Tui_decode.{ kta_keeper = keeper; kta_tool_call_id = id;
+    kta_approval_id = id; kta_tool = "tool"; kta_args = "{}"; kta_question = "?";
+    kta_because = None; kta_asked_at = 1.; kta_timeout_sec = 60. } in
+  let request keeper id = Tui_decode.{ ar_request_id = id; ar_submitted_by = "test";
+    ar_keeper_name = keeper; ar_phase = Async_running; ar_submitted_at = 1.;
+    ar_ownership = Async_runtime_owned } in
+  let ask ?(resolution = Masc.Tui_decode_asks.Ask_open) asker id =
+    Masc.Tui_decode_asks.{ ar_asker = asker; ar_id = id; ar_asked_at = 1.;
+      ar_source_turn_ref = None; ar_context = None; ar_questions = []; ar_resolution = resolution } in
+  let task ?(title = "") id status : Tui_decode.task =
+    { id; title = (if title = "" then id else title); status; priority = 3; goal_ids = [] } in
+  let waiting name kwr_waiting_count = Tui_decode.{ kwr_keeper_name = name;
+    kwr_state = Keeper_waiting_idle; kwr_waiting_count; kwr_since = None; kwr_due_at = None;
+    kwr_waiting_on = [] } in
+  state.keepers <- [alpha; beta];
+  state.keeper_turns <- [turn "alpha" running; turn "beta" Keeper_turn_idle; turn "alpha" Keeper_turn_idle];
+  state.keeper_waiting <- [waiting "alpha" 1; waiting "alpha" 2];
+  state.keeper_tool_approvals <- [approval "beta" "first"; approval "beta" "second"];
+  state.tools_async_observation <- Some (Tui_decode.Async_ready {
+    summary = Tui_decode.{ ars_active = 3; ars_runtime_owned = 3; ars_ownership_unknown = 0;
+                           ars_record_errors = 0 };
+    requests = [request "alpha" "a1"; request "beta" "b1"; request "alpha" "a2"];
+    recovery = None });
+  state.asks_snapshot <- Some Masc.Tui_decode_asks.{ asn_keeper = None; asn_open_count = 3;
+    asn_rows = [ask (Ask_keeper "beta") "q1"; ask (Ask_installation
+      { ai_declaration_id = "beta"; ai_title = "beta" }) "q2";
+      ask ~resolution:(Ask_withdrawn { aw_reason = "done"; aw_withdrawn_at = 2. })
+        (Ask_keeper "beta") "q3"] };
+  state.tasks <- [ task "task-other" Masc_domain.Todo
+                 ; task ~title:"first" "task-alpha" (Masc_domain.InProgress { assignee = "alpha"; started_at = "1" })
+                 ; task ~title:"second" "task-alpha" Masc_domain.Todo
+                 ; task "task-beta" (Masc_domain.AwaitingVerification { assignee = "beta";
+                     started_at = "1"; submitted_at = "2"; verification_id = "v" }) ];
+  let rows = keeper_list_rows state in
+  let find name = List.find (fun row -> row.Masc_tui_keeper_list_model.keeper.k_name = name) rows in
+  let alpha_row = find "alpha" and beta_row = find "beta" in
+  Alcotest.(check bool) "a name's first turn row is its turn" true (alpha_row.turn = Some running);
+  Alcotest.(check bool) "a name's first waiting row is its waiting" true
+    (alpha_row.waiting = Masc_tui_keeper_list_model.Waiting_observed (waiting "alpha" 1));
+  Alcotest.(check (option string)) "a name's first held call is its held call" (Some "first")
+    (Option.map (fun (row : Tui_decode.keeper_tool_approval) -> row.kta_approval_id) beta_row.approval);
+  Alcotest.(check (list string)) "async requests keep their read order" ["a1"; "a2"]
+    (List.map (fun (row : Tui_decode.async_request_row) -> row.ar_request_id) alpha_row.async_requests);
+  Alcotest.(check int) "every question the Keeper asked counts, whatever its resolution" 2
+    beta_row.open_questions;
+  Alcotest.(check int) "a Keeper that asked nothing has none" 0 alpha_row.open_questions;
+  Alcotest.(check (option string)) "the current task is the first with its id" (Some "first")
+    (Option.map (fun (task : Tui_decode.task) -> task.title) alpha_row.task);
+  Alcotest.(check bool) "a task awaiting its verdict is held by its assignee" true
+    (beta_row.awaiting_verification && not alpha_row.awaiting_verification)
+;;
+
 let test_continuous_waiting_events_preserve_turn_controls () =
   let open Masc_tui_types in
   let state, _, _ = local_keeper_source_fixture () in
@@ -6605,12 +6645,16 @@ let () =
             test_reconciliation_does_not_compete_with_periodic_reads
         ; Alcotest.test_case "waiting isolates per-keeper and control epochs" `Quick
             test_waiting_row_epochs_isolate_other_keepers_and_controls
+        ; Alcotest.test_case "an unattributed change retires reads without blanking rows" `Quick
+            test_an_unattributed_change_retires_reads_without_blanking_rows
         ; Alcotest.test_case "interactive generation revalidates waiting" `Quick
             test_interactive_generation_revalidates_waiting
         ; Alcotest.test_case "partial waiting isolates missing keepers" `Quick
             test_partial_waiting_only_hides_missing_keepers
         ; Alcotest.test_case "waiting refresh preserves turns" `Quick
             test_waiting_event_does_not_hide_turns
+        ; Alcotest.test_case "roster rows join each reading by Keeper name" `Quick
+            test_roster_rows_join_each_reading_by_keeper_name
         ; Alcotest.test_case "continuous waiting events preserve turn controls" `Quick
             test_continuous_waiting_events_preserve_turn_controls
         ] )
@@ -6701,10 +6745,6 @@ let () =
             test_settings_preparation_retires_focus_and_workspace_owners
         ; Alcotest.test_case "metrics selection and cleanup preserve request ownership" `Quick
             test_keeper_log_selection_and_late_cleanup_keep_original_owner
-        ; Alcotest.test_case "Execute and metrics reads have independent scoped owners" `Quick
-            test_keeper_execute_reads_are_independent_and_scoped
-        ; Alcotest.test_case "Execute output retains active command and bounded history" `Quick
-            test_keeper_execute_decoder_preserves_active_command_and_limits
         ; Alcotest.test_case "metrics refresh shares work and retains partial observations on failure" `Quick
             test_keeper_log_refresh_coalesces_and_failed_revalidation_keeps_partial_rows
         ; Alcotest.test_case "metrics suspension retains data without old authority" `Quick
@@ -6905,8 +6945,8 @@ let () =
             test_keeper_purge_header_and_body_share_workspace
         ; Alcotest.test_case "uncertainty retires reads while admitted operations survive" `Quick
             test_uncertain_identity_retires_reads_not_admitted_operations
-        ; Alcotest.test_case "suspension folds a queued lanes reread into resume" `Quick
-            test_suspension_folds_queued_lanes_reread_into_resume
+        ; Alcotest.test_case "suspension retires the keeper composite read" `Quick
+            test_suspension_retires_the_keeper_composite_read
         ; Alcotest.test_case "async observation owns an independent generation" `Quick
             test_async_observation_has_an_independent_generation
         ; Alcotest.test_case "turn observations replace and refuse atomically" `Quick

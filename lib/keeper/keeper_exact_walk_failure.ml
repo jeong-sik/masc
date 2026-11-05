@@ -269,6 +269,7 @@ let native_cause (cause : Fusion_official_client.failure) =
       ( Runtime_codex_app_server.Invalid_config _
       | Runtime_codex_app_server.Spawn_failed _
       | Runtime_codex_app_server.Reasoning_effort_admission_failed _
+      | Runtime_codex_app_server.Account_read_failed _
       | Runtime_codex_app_server.Turn_input_write_failed _
       | Runtime_codex_app_server.Protocol_error _
       | Runtime_codex_app_server.Rpc_error _

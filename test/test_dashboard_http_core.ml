@@ -700,7 +700,7 @@ let test_event_queue_operator_routes_are_exact () =
           ; content = "private title body"
           ; hearth = None
           ; updated_at = None
-          ; audience = Some (Keeper_event_queue.Audience_targets ["fixture-keeper"])
+          ; audience = Keeper_event_queue.Audience_targets ["fixture-keeper"]
           }
     }
   in
@@ -797,6 +797,15 @@ let test_namespace_pause_status_reads_current_workspace () =
   check bool "another operator's pause remains observable" true
     (member "paused" (read ()) = `Bool true)
 
+(* The production peek, read back as the exact pending selection. *)
+let select_ready ~now ~ready state =
+  Option.bind (Keeper_event_queue_state.peek_when ~now ~ready state) (fun source ->
+    List.find_opt
+      (fun (selection : Keeper_event_queue_state.pending_selection) ->
+         Keeper_event_queue.stimulus_identity_equal selection.source source)
+      (Keeper_event_queue_state.pending_selections state))
+;;
+
 let test_event_operator_uses_exact_source_refs_across_unrelated_enqueues () =
   with_test_env @@ fun ~env:_ ~sw ~config ->
   let require_ok label = function
@@ -857,7 +866,7 @@ let test_event_operator_uses_exact_source_refs_across_unrelated_enqueues () =
     |> require_ok ("enqueue " ^ source.post_id)
   in
   let selection_for (source : Keeper_event_queue.stimulus) state =
-    Keeper_event_queue_state.select_when
+    select_ready
       ~now:(Unix.gettimeofday ())
       ~ready:(Keeper_event_queue.stimulus_identity_equal source)
       state
@@ -2804,7 +2813,7 @@ let test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation () =
   ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
   let hangul_ga = "\234\176\128" in
   let title = String.concat "" (List.init 40 (fun _ -> hangul_ga)) in
-  (match Goal_store.upsert_goal config ~title ~metric:"m" ~target_value:"1" () with
+  (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title ~metric:"m" ~target_value:"1" () with
    | Ok _ -> ()
    | Error error -> fail (Goal_store.write_error_to_string error));
   let json = Server_dashboard_http.dashboard_planning_http_json ~config in
@@ -2817,7 +2826,7 @@ let test_cached_planning_reads_a_new_goal () =
   Fun.protect
     ~finally:(fun () -> Atomic.set Workspace_hooks.on_goal_projection_mutation_fn previous)
     (fun () ->
-      Server_dashboard_http.install_planning_cache_invalidation ();
+      Server_dashboard_http.install_goal_projection_observer ();
       ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
       let goals () =
         let open Yojson.Safe.Util in
@@ -2863,7 +2872,7 @@ let test_cached_planning_reads_new_goal_history () =
   Fun.protect
     ~finally:(fun () -> Atomic.set Workspace_hooks.on_goal_projection_mutation_fn previous)
     (fun () ->
-      Server_dashboard_http.install_planning_cache_invalidation ();
+      Server_dashboard_http.install_goal_projection_observer ();
       ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
       let history_ids () =
         let open Yojson.Safe.Util in
@@ -2979,7 +2988,7 @@ let test_goal_source_failure_is_not_empty () =
     (planning () |> member "goals" |> to_list |> List.length);
   check int "fresh tree store is empty" 0
     (tree () |> member "tree" |> to_list |> List.length);
-  let goal, _ = match Goal_store.upsert_goal config ~title:"Source availability"
+  let goal, _, _ = match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Source availability"
       ~metric:"visible goals" ~target_value:"1" () with
     | Ok goal -> goal | Error error -> fail (Goal_store.write_error_to_string error)
   in
@@ -3097,7 +3106,7 @@ let test_keeper_detail_active_goals_tree_uses_goal_store_envelope () =
        | Error error -> fail ("write meta: " ^ error));
       ignore
         (Masc.Keeper_registry.For_testing.register ~base_path:config.base_path name meta);
-      (match Goal_store.upsert_goal config ~title:"Keeper detail source"
+      (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Keeper detail source"
                ~metric:"visible goals" ~target_value:"1" () with
        | Ok _ -> ()
        | Error error -> fail (Goal_store.write_error_to_string error));
@@ -3142,8 +3151,8 @@ let test_goal_link_source_failure_preserves_unrelated_planning () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
   let get_ok = function Ok value -> value | Error detail -> fail detail in
-  let goal, _ = get_ok (Result.map_error Goal_store.write_error_to_string
-      (Goal_store.upsert_goal config ~title:"Linked source"
+  let goal, _, _ = get_ok (Result.map_error Goal_store.write_error_to_string
+      (Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Linked source"
          ~metric:"tasks" ~target_value:"1" ())) in
   let created = match Workspace.add_task_with_result ~goal_id:goal.id config
       ~title:"Linked task" ~priority:3 ~description:"evidence" with
@@ -3193,8 +3202,8 @@ let test_goal_proof_surfaces_share_persisted_criterion_truth () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
   let get_ok = function Ok value -> value | Error detail -> fail detail in
-  let goal, _ = get_ok (Result.map_error Goal_store.write_error_to_string
-      (Goal_store.upsert_goal config ~title:"Measured dashboard Goal"
+  let goal, _, _ = get_ok (Result.map_error Goal_store.write_error_to_string
+      (Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Measured dashboard Goal"
          ~metric:"passing cases" ~target_value:"10" ())) in
   let goal_id = goal.Goal_store.id in
   let open Yojson.Safe.Util in
@@ -3239,11 +3248,16 @@ let test_goal_proof_surfaces_share_persisted_criterion_truth () =
     expected
   in
   ignore (check_surfaces ~phase:"executing" ~proof_state:"idle");
-  let _, pending =
-    match Lib.Workspace_goals.request_current_proof config ~goal_id with
-    | Ok requested -> requested
-    | Error (Lib.Workspace_goals.Store error) -> fail (Goal_store.write_error_to_string error)
-    | Error (Lib.Workspace_goals.Refused { message; _ }) -> fail message
+  (match Lib.Tool_workspace.dispatch { Lib.Tool_workspace.config; agent_name = "dashboard" }
+           ~name:"masc_goal_transition"
+           ~args:(`Assoc [ "goal_id", `String goal_id; "action", `String "request_complete" ]) with
+   | Some result when Tool_result.is_success result -> ()
+   | Some result -> fail (Tool_result.message result)
+   | None -> fail "masc_goal_transition not handled");
+  let pending = match Goal_verification.get_record_authoritative config ~goal_id with
+    | Ok (Some record) -> record
+    | Ok None -> fail "request did not persist a proof record"
+    | Error detail -> fail detail
   in
   let request_id, criterion = match pending.Goal_verification.completion with
     | Goal_verification.Proof_pending pending -> pending.request_id, pending.criterion
@@ -3263,7 +3277,7 @@ let test_goal_proof_surfaces_share_persisted_criterion_truth () =
       ~criterion_revision:goal.criterion_revision)));
   let proven = check_surfaces ~phase:"completed" ~proof_state:"human_confirmed" in
   ignore (get_ok (Result.map_error Goal_store.write_error_to_string
-    (Goal_store.upsert_goal config ~id:goal_id
+    (Goal_store.upsert_goal_with_events ~actor:"test" config ~id:goal_id
        ~title:"Measured dashboard Goal" ~target_value:"20" ())));
   let stale = check_surfaces ~phase:"executing" ~proof_state:"stale_criterion" in
   check string "stale projection preserves the original proof"
@@ -5223,8 +5237,7 @@ let test_tools_routes_serve_prepared_http_representations () =
       [ "tool_inventory", `List (List.init 200 (fun i -> `Assoc
           [ "name", `String ("tool-" ^ string_of_int i); "description", `String "full final snapshot tool description" ]))
       ; "keeper_waiting_inventory", `Assoc [ "wire_marker", `String "final-decoration" ]
-      ; "effective_keeper_surface", `Null
-      ; "skill_activations", `Null ] in
+      ; "effective_keeper_surface", `Null ] in
     let snapshot = Dashboard_snapshot.make_for_test ~config ~shell:`Null ~tools:final_json
       ~namespace_truth:`Null ~telemetry_summary:`Null () in
     Dashboard_snapshot.publish_for_test snapshot;
@@ -5340,6 +5353,17 @@ let test_cached_dashboard_reads_send_the_kept_bytes () =
     ignore (Workspace.init config ~agent_name:None);
     Server_auth.For_testing.restore_server_state (Some state);
     Unix.mkdir (Filename.concat config.base_path "fixture-dir") 0o755;
+    (* The absent auth file is the secure default (require_token), so the
+       fixture states its own config and reads with a real token: what is
+       under test is the kept bytes, not whether an anonymous read opens. *)
+    Auth.save_auth_config config.base_path
+      { Types.default_auth_config with enabled = true; require_token = true };
+    let token =
+      match Auth.create_token config.base_path ~agent_name:"cache-reader" ~role:Types.Admin with
+      | Ok (token, _) -> token
+      | Error detail -> Alcotest.fail (Masc_domain.masc_error_to_string detail)
+    in
+    let authorized = ["authorization", "Bearer " ^ token] in
     let router =
       Server_routes_http_routes_dashboard.add_routes ~sw
         ~clock:(Eio.Stdenv.clock env) (Lib.Http_server_eio.Router.create ())
@@ -5353,8 +5377,8 @@ let test_cached_dashboard_reads_send_the_kept_bytes () =
         Dashboard_cache.For_testing.with_payload_prepared_hook
           (fun _ -> incr prepared)
           (fun () ->
-             let first = tools_h1_wire_response ~router ~headers:[] target in
-             first, tools_h1_wire_response ~router ~headers:[] target)
+             let first = tools_h1_wire_response ~router ~headers:authorized target in
+             first, tools_h1_wire_response ~router ~headers:authorized target)
       in
       check int (target ^ " answers") 200 first_status;
       check int (target ^ " answers again") 200 second_status;
@@ -6920,8 +6944,6 @@ let test_board_close_route_rejects_wrong_typed_decisions_without_closing () =
   with_env "MASC_BASE_PATH" config.base_path @@ fun () ->
   Lib.Board.reset_global_for_test ();
   Lib.Board_dispatch.reset_for_test ();
-  Masc_test_deps.Board_test_preparation.prepare ~base_path:config.base_path
-    ~action:Masc_test_deps.Board_test_preparation.Bootstrap;
   Result.get_ok (Lib.Board_dispatch.init_jsonl
     ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:Lib.Recipient_lookup.none_declared ());
@@ -7328,6 +7350,90 @@ let test_runtime_raw_save_rejects_stale_source_without_write () =
   let fresh_raw, _ = post (body loser (current |> member "source_revision" |> to_string)) in
   expect_http_status "editor can save after reading current revision" 200 fresh_raw;
   check string "fresh editor source is committed" loser (read_file runtime_path)
+
+(* RFC-0482 §3.1: a terminal reader's pick reaches runtime.toml through the
+   server, which takes one change in a shape it can write and refuses any
+   other at the door, before the file or the audit log is touched. *)
+let test_tui_preference_route_writes_one_parsed_change () =
+  with_direct_assignment_model_catalog @@ fun () ->
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let runtime_path =
+    Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:config.base_path
+  in
+  mkdir_p (Filename.dirname runtime_path);
+  write_file runtime_path config_sync_runtime_toml;
+  (match Runtime.init_default ~config_path:runtime_path with
+   | Ok () -> ()
+   | Error detail -> fail ("runtime init: " ^ detail));
+  with_env "MASC_CONFIG_DIR" (Filename.dirname runtime_path) @@ fun () ->
+  Config_dir_resolver.reset ();
+  Fun.protect ~finally:(fun () -> Config_dir_resolver.reset ()) @@ fun () ->
+  let state = Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path in
+  let post body =
+    post_to_handler ~target:"/api/v1/tui/preferences"
+      (fun request reqd body ->
+        Server_routes_http_routes_dashboard.For_testing.handle_tui_preference_post
+          state "tui-preference-test" request reqd body)
+      body
+  in
+  let stored_theme () =
+    match Keeper_toml_loader.parse_toml (read_file runtime_path) with
+    | Error detail -> fail ("runtime.toml: " ^ detail)
+    | Ok doc ->
+      Keeper_toml_loader.toml_string_opt doc
+        Lib.Tui_preference.(Key.doc_path Key.Theme)
+  in
+  let open Yojson.Safe.Util in
+  let state_of body =
+    let raw, json = post body in
+    expect_http_status body 200 raw;
+    json |> member "state" |> to_string
+  in
+  let audit_rows () = List.length (Lib.Audit_log.read_entries config) in
+  let rows_before = audit_rows () in
+  let raw, json = post {|{"change":"theme","theme":"ayu-dark"}|} in
+  expect_http_status "a theme pick commits" 200 raw;
+  check string "the answer says it committed" "committed" (json |> member "state" |> to_string);
+  check string "the answer names the change" "theme"
+    (json |> member "change" |> member "change" |> to_string);
+  check bool "the answer carries the commit" true
+    (String.length (json |> member "commit" |> member "source_revision" |> to_string) > 0);
+  check (option string) "the pick is stored" (Some "ayu-dark") (stored_theme ());
+  let read_raw, read_json =
+    post_to_handler ~target:"/api/v1/tui/preferences"
+      (fun request reqd _body ->
+        Server_routes_http_routes_dashboard.For_testing.handle_tui_preferences_get state request reqd)
+      ""
+  in
+  expect_http_status "the settings read answers" 200 read_raw;
+  check (option string) "the settings read returns the stored pick" (Some "ayu-dark")
+    (read_json |> member "theme" |> to_string_option);
+  let sent = Yojson.Safe.to_string read_json in
+  check bool "the settings read carries no provider" false
+    (List.exists (String_util.contains_substring sent) [ "test_provider"; "127.0.0.1"; "providers" ]);
+  check int "a committed pick is audited once" (rows_before + 1) (audit_rows ());
+  check string "the same pick again is unchanged" "unchanged"
+    (state_of {|{"change":"theme","theme":"ayu-dark"}|});
+  check int "an unchanged pick is not audited" (rows_before + 1) (audit_rows ());
+  check string "a chat visit commits" "committed"
+    (state_of {|{"change":"chat_visited","keeper":"analyst"}|});
+  check string "a second visit to the same chat is unchanged" "unchanged"
+    (state_of {|{"change":"chat_visited","keeper":"analyst"}|});
+  check string "retiring the hint commits" "committed" (state_of {|{"change":"help_hint_retired"}|});
+  check string "retiring it again is unchanged" "unchanged"
+    (state_of {|{"change":"help_hint_retired"}|});
+  let audit_before = Lib.Audit_log.read_entries config in
+  List.iter
+    (fun (label, body) ->
+       let refused, _ = post body in
+       expect_http_status label 400 refused;
+       check (option string) (label ^ " leaves the file") (Some "ayu-dark") (stored_theme ()))
+    [ "an unknown change", {|{"change":"font","font":"mono"}|}
+    ; "an extra field", {|{"change":"theme","theme":"x","candle":"dotted"}|}
+    ; "a body that is not JSON", "theme=x"
+    ];
+  check bool "a refusal at the door adds no audit entry" true
+    (Lib.Audit_log.read_entries config = audit_before)
 
 (* The routing handler's create, remove and append branches. A created lane
    lands in runtime.toml; a lane under a runtime id, and a lane the default
@@ -9068,6 +9174,8 @@ let () =
             test_runtime_raw_save_rejects_changed_path_with_identical_source;
           test_case "raw editors require a revision and stale source loses without a write" `Quick
             test_runtime_raw_save_rejects_stale_source_without_write;
+          test_case "the TUI preference route writes one parsed change" `Quick
+            test_tui_preference_route_writes_one_parsed_change;
           test_case "direct assignment fences stale Keeper config POST" `Quick
             test_direct_assignment_intervening_write_fences_keeper_config_post;
           test_case "direct assignment response preserves lock warning" `Quick

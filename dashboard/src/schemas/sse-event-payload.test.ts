@@ -16,7 +16,6 @@ import {
   writeContentReplacementReplacedPayload,
   writeHandoffCompletedPayload,
   writeHandoffRequestedPayload,
-  writeSlotSchedulerObservedPayload,
   writeToolCalledPayload,
   writeToolCompletedPayload,
   writeTurnCompletedPayload,
@@ -100,16 +99,6 @@ const ALL_PAYLOAD_CASES: TypedAgentCorePayload[] = [
     kind: 'content_replacement_kept',
     payload: { tool_use_id: 'tu1', seen_count_after: 1 },
   },
-  {
-    kind: 'slot_scheduler_observed',
-    payload: {
-      max_slots: 4,
-      active: 2,
-      available: 2,
-      queue_length: 0,
-      state: 'healthy',
-    },
-  },
 ]
 
 function serializePayload(payload: TypedAgentCorePayload): Record<string, unknown> {
@@ -142,8 +131,6 @@ function serializePayload(payload: TypedAgentCorePayload): Record<string, unknow
       return writeContentReplacementReplacedPayload(payload.payload)
     case 'content_replacement_kept':
       return writeContentReplacementKeptPayload(payload.payload)
-    case 'slot_scheduler_observed':
-      return writeSlotSchedulerObservedPayload(payload.payload)
   }
 }
 
@@ -402,21 +389,6 @@ describe('parseAgentCorePayload', () => {
     expect(result.data.kind).toBe('content_replacement_kept')
     if (result.data.kind !== 'content_replacement_kept') return
     expect(result.data.payload.seen_count_after).toBe(1)
-  })
-
-  it('parses agent_core:slot_scheduler_observed payload', () => {
-    const result = parseAgentCorePayload('agent_core:slot_scheduler_observed', {
-      max_slots: 4,
-      active: 2,
-      available: 2,
-      queue_length: 0,
-      state: 'healthy',
-    })
-    expect(result.success).toBe(true)
-    if (!result.success) return
-    expect(result.data.kind).toBe('slot_scheduler_observed')
-    if (result.data.kind !== 'slot_scheduler_observed') return
-    expect(result.data.payload.state).toBe('healthy')
   })
 
   it('rejects an unknown event type', () => {

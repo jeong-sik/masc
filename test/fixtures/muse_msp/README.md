@@ -2,7 +2,7 @@
 
 These files are copied without changes from
 [meta-models/muse-code-sdk](https://github.com/meta-models/muse-code-sdk)
-at commit `22a8a56103c106009f7452c4ef5631e58cb8485c` (2026-10-19, host 1.4.11).
+at commit `42c7658789a2491580658158d2092b2bbca4118b` (2026-10-31, host 1.4.14).
 Each `<scenario>.ndjson` is that repository's
 `schema/msp/transcripts/<scenario>/transcript.ndjson`, and
 `stable-manifest.json` is its `schema/msp/stable/manifest.json`.

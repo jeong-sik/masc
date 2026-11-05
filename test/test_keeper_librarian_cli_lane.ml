@@ -786,9 +786,9 @@ let test_native_capacity_message_descent native () =
 ;;
 
 (* The supporting candidates are observations of the claim their judgment
-   names. Four of them do not fit a request beside the pair, so the gate asks
-   the pair alone; no size refusal splits the batch. The judgment endpoint is
-   closed, so that request fails and the whole batch stays pending. *)
+   names, and the four together are larger than one gate request. Gate size
+   never splits an admission batch: the judgment endpoint is closed, so the
+   gate request fails and the batch stays pending as one. *)
 let test_oversized_supporting_candidates_do_not_split_the_admission_batch () =
   with_eio @@ fun ~sw:_ ~net:_ ~clock:_ ~base_path ->
   Fixture.with_official_client_runtimes @@ fun () ->

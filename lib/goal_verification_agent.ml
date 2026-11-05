@@ -53,9 +53,8 @@ type process_outcome =
   | Superseded
   | Deferred of deferral
 
-(* The Board notice keys its repeat check on [gate], as a Task stall does: a
-   review the evaluator declined keeps the evaluator's gate name, every other
-   stop is keyed by its constructor. *)
+(* A review the evaluator declined keeps the evaluator's gate name; every
+   other stop is named by its constructor. *)
 let deferral_gate = function
   | Review_not_bound _ -> "Review_not_bound"
   | Proof_lookup_unavailable _ -> "Proof_lookup_unavailable"
@@ -63,10 +62,6 @@ let deferral_gate = function
   | Verdict_without_reason -> "Verdict_without_reason"
   | Commit_refused _ -> "Commit_refused"
 ;;
-
-(* A review that raised is keyed the same way, by its own name, and is the
-   gate the Task verifier's notice uses for the same event. *)
-let raised_gate = "Raised"
 
 let deferral_detail = function
   | Not_reviewed { detail; model_absent_runtimes; _ } ->
@@ -205,12 +200,36 @@ type observation_snapshot = {
 let observations = Atomic.make { reconciliation=None; original_reads=[] }
 let capture_observations () = Atomic.get observations
 
+(* What the planning projection shows of an observation snapshot: the scan's
+   failures and each original read's failure. An in-flight read with no
+   failure shows nothing, and neither does a scan that found no failure. The
+   row looks each failure up by Goal, so order is not shown: a reread moves
+   its observation to the head of the list. *)
+let shown snapshot =
+  let reconciliation =
+    match snapshot.reconciliation with
+    | Some (root, (_ :: _ as failures)) -> Some (root, List.sort compare failures)
+    | Some (_, []) | None -> None
+  in
+  ( reconciliation
+  , List.filter_map
+      (fun observed -> Option.map (fun failure -> observed.binding, failure) observed.failure)
+      snapshot.original_reads
+    |> List.sort compare )
+
+(* The observations live in this process only, so the planning projection
+   changes with them and no store write announces it (RFC-0480 §3.4). *)
+let announce_if_shown_changed config ~before ~after =
+  if shown before <> shown after then Goal_store.notify_projection_change config
+
 (* A refused scan keeps the previous completed scan's observation. *)
 let publish_unreconciled config failures =
   let rec publish () =
     let current = Atomic.get observations in
     let next = {current with reconciliation=Some (Workspace.masc_dir config, failures)} in
-    if not (Atomic.compare_and_set observations current next) then publish ()
+    if Atomic.compare_and_set observations current next
+    then announce_if_shown_changed config ~before:current ~after:next
+    else publish ()
   in
   publish ();
   List.iter
@@ -231,7 +250,7 @@ let same_original_binding left right =
   && String.equal left.request_id right.request_id
   && Goal_store.criterion_equal left.criterion right.criterion
 
-let begin_original_read binding =
+let begin_original_read config binding =
   let rec replace () =
     let current = Atomic.get observations in
     let failure = match List.find_opt (fun observed -> same_original_binding observed.binding binding) current.original_reads with
@@ -240,10 +259,12 @@ let begin_original_read binding =
     let observed = {binding; failure} in
     let original_reads = observed :: List.filter (fun previous -> not (same_original_goal previous.binding binding)) current.original_reads in
     let next = {current with original_reads} in
-    if Atomic.compare_and_set observations current next then observed else replace ()
+    if Atomic.compare_and_set observations current next
+    then (announce_if_shown_changed config ~before:current ~after:next; observed)
+    else replace ()
   in replace ()
 
-let finish_original_read observed failure =
+let finish_original_read config observed failure =
   let rec replace () =
     let current = Atomic.get observations in
     if not (List.exists (fun candidate -> candidate == observed) current.original_reads) then false
@@ -252,15 +273,17 @@ let finish_original_read observed failure =
         if candidate == observed then Option.map (fun failure -> {observed with failure=Some failure}) failure
         else Some candidate) current.original_reads in
       let next = {current with original_reads} in
-      if Atomic.compare_and_set observations current next then true else replace ()
+      if Atomic.compare_and_set observations current next
+      then (announce_if_shown_changed config ~before:current ~after:next; true)
+      else replace ()
   in replace ()
 
-let abandon_original_read observed =
+let abandon_original_read config observed =
   (* Cancellation/exception is not a successful original read. Preserve a
      previously observed failure, if any, rather than clearing it as repaired. *)
-  ignore (finish_original_read observed observed.failure)
+  ignore (finish_original_read config observed observed.failure)
 
-let retire_observations snapshot ~root =
+let retire_observations config snapshot ~root =
   let retired_reads = List.filter (fun observed -> String.equal observed.binding.root root) snapshot.original_reads in
   let rec replace () =
     let current = Atomic.get observations in
@@ -271,7 +294,9 @@ let retire_observations snapshot ~root =
     let original_reads = List.filter (fun candidate ->
       not (List.exists (fun observed -> candidate == observed) retired_reads)) current.original_reads in
     let next = {reconciliation; original_reads} in
-    if not (Atomic.compare_and_set observations current next) then replace ()
+    if Atomic.compare_and_set observations current next
+    then announce_if_shown_changed config ~before:current ~after:next
+    else replace ()
   in replace ()
 
 let unreconciled_from_snapshot_to_yojson snapshot ~config ~record (goal : Goal_store.goal) =
@@ -324,44 +349,6 @@ let defer ~goal_id deferral =
   Deferred deferral
 ;;
 
-(* Report the scheduling owner's actual disposition. The Board neither arms
-   retries nor supplies their authority. *)
-let announce_stall ~goal_id ~request_id ~disposition ~gate ~detail ~evaluator_runtime =
-  match
-    Verification_protocol.notify_stalled_verification_with_runtime
-      ~authority:Workspace_goals.verifier_authority
-      ~subject:(Verification_protocol.Goal_review { goal_id; request_id; disposition })
-      ~gate
-      ~detail
-      ~evaluator_runtime
-  with
-  | () -> ()
-  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-  | exception exn ->
-    Log.Misc.error
-      "goal verifier stall notice did not reach the Board; the line above \
-       stands goal_id=%s request_id=%s error=%s"
-      goal_id
-      request_id
-      (Printexc.to_string exn)
-;;
-
-let announce_deferral ~goal_id ~request_id ~disposition deferral =
-  let evaluator_runtime =
-    match deferral with
-    | Not_reviewed { evaluator_runtime; _ } -> evaluator_runtime
-    | Review_not_bound _ | Proof_lookup_unavailable _ | Verdict_without_reason
-    | Commit_refused _ -> None
-  in
-  announce_stall
-    ~goal_id
-    ~request_id
-    ~disposition
-    ~gate:(deferral_gate deferral)
-    ~detail:(deferral_detail deferral)
-    ~evaluator_runtime
-;;
-
 (* Capture the Goal and its durable request under the Goal lock. The callback
    performs no writes; the model runs only after this lock is released. *)
 let bind_review config ~goal_id =
@@ -376,53 +363,17 @@ let original_read_binding config ~goal_id =
   | Error _ -> None
 
 let observe_original_read config ~goal_id read =
-  let observed = Option.map begin_original_read (original_read_binding config ~goal_id) in
-  Fun.protect ~finally:(fun () -> Option.iter abandon_original_read observed) (fun () ->
+  let observed = Option.map (begin_original_read config) (original_read_binding config ~goal_id) in
+  Fun.protect ~finally:(fun () -> Option.iter (abandon_original_read config) observed) (fun () ->
     match read () with
     | Ok _ as result ->
-      Option.iter (fun observed -> ignore (finish_original_read observed None)) observed;
+      Option.iter (fun observed -> ignore (finish_original_read config observed None)) observed;
       result
     | Error error as result ->
-      Option.iter (fun observed ->
-        (* Keep the failure even if the binding cannot be reread. Unknown
-           authority is not a successful original read. Projection checks the
-           current binding; only its Board notification needs this reread. *)
-        if finish_original_read observed (Some error) then
-          match original_read_binding config ~goal_id with
-          | Some current when same_original_binding observed.binding current ->
-            announce_deferral ~goal_id ~request_id:current.request_id
-              ~disposition:Verification_protocol.No_retry_armed
-              (Proof_lookup_unavailable {detail=worker_detail error})
-          | Some _ | None -> ()) observed;
+      (* Keep the failure. Unknown authority is not a successful original
+         read. Projection checks the current binding. *)
+      Option.iter (fun observed -> ignore (finish_original_read config observed (Some error))) observed;
       result)
-
-(* A review that raised stalls the request the way a deferral does, under the
-   gate the Task verifier uses for the same event. Nothing arms a retry: the
-   scheduling owner isolates the exception and the Goal waits in Verifying for
-   the next request_complete. Only a request that still stands is announced.
-   An exception while reading it is logged, not raised over the review's own
-   exception; a Goal that has left Verifying, or a read that returns an error,
-   posts nothing. *)
-let announce_raised ~config ~goal_id ~request_id ~evaluator_runtime ~detail =
-  match bind_review config ~goal_id with
-  | Ok (_, (current, _, _)) when String.equal current request_id ->
-    announce_stall
-      ~goal_id
-      ~request_id
-      ~disposition:Verification_protocol.No_retry_armed
-      ~gate:raised_gate
-      ~detail
-      ~evaluator_runtime
-  | Ok _ | Error _ -> ()
-  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-  | exception exn ->
-    Log.Misc.error
-      "goal verifier could not read the request to announce a raised review \
-       goal_id=%s request_id=%s error=%s"
-      goal_id
-      request_id
-      (Printexc.to_string exn)
-;;
 
 let new_run () : Worker.run_identity =
   {run_id=Random_id.uuid_v7 (); started_at=Time_compat.now ()}
@@ -463,7 +414,7 @@ let retained_recovery_work config (work : pending_work list) =
 ;;
 
 let process_pending_work ?(sw : Eio.Switch.t option = None)
-    ?(schedule_retry = fun ~goal_id:_ ~request_id:_ _ -> Verification_protocol.No_retry_armed)
+    ?(schedule_retry = fun ~goal_id:_ ~request_id:_ _ -> ())
     config (work : pending_work) : process_outcome =
   let store = owner_store config in
   let registry = Registry.global () in
@@ -597,8 +548,7 @@ let process_pending_work ?(sw : Eio.Switch.t option = None)
          | Deferred deferral ->
            (match bind_review config ~goal_id:work.goal_id with
             | Ok (_, (current,_,_)) when current=request_id ->
-              let disposition = schedule_retry ~goal_id:work.goal_id ~request_id deferral in
-              announce_deferral ~goal_id:work.goal_id ~request_id ~disposition deferral
+              schedule_retry ~goal_id:work.goal_id ~request_id deferral
             | Ok _ | Error _ -> ())
          | Committed | Superseded -> ());
         Ok outcome in
@@ -628,9 +578,6 @@ let process_pending_work ?(sw : Eio.Switch.t option = None)
     (match !active with
      | None -> ()
      | Some retained ->
-       let subject = Original.subject (Worker.original retained) in
-       announce_raised ~config ~goal_id:work.goal_id ~request_id:subject.request_id
-         ~evaluator_runtime:None ~detail:(Printexc.to_string exn);
        match reload_original store retained with
        | Error detail -> Log.Misc.error "raised Goal original read failed: %s" detail
        | Ok saved ->
@@ -806,8 +753,7 @@ let schedule_retry (runtime : runtime) ~goal_id ~request_id deferral =
       else admit ()
     in
     (match admit () with
-    | `Wake_retained -> Verification_protocol.No_retry_armed
-    | `Already_armed -> Verification_protocol.Retry_scheduled {delay=Shared_timer}
+    | `Wake_retained | `Already_armed -> ()
     | `Admitted ->
       let seconds = Verification_retry.delay
           ~retry_interval_sec:Env_config.Timeouts.maintenance_pulse_interval_sec
@@ -829,10 +775,9 @@ let schedule_retry (runtime : runtime) ~goal_id ~request_id deferral =
                 reread_after Env_config.Timeouts.maintenance_pulse_interval_sec
         in
         reread_after seconds;
-        `Stop_daemon);
-      Verification_protocol.Retry_scheduled {delay=Full_interval {seconds}})
+        `Stop_daemon))
   | Not_reviewed _ | Review_not_bound _ | Proof_lookup_unavailable _
-  | Verdict_without_reason | Commit_refused _ -> Verification_protocol.No_retry_armed
+  | Verdict_without_reason | Commit_refused _ -> ()
 ;;
 
 (* Resolve the abandon promise of the Goal's claimed review, if one runs.
@@ -1035,7 +980,7 @@ let start ~sw ~clock ~(config : Workspace_utils_backend_setup.config) =
       then (
         (* No scan runs after this, so its last list would read as current. *)
         Atomic.set runtime.scheduling {ready=[]; in_flight=[]; retries=[]};
-        retire_observations snapshot ~root:(Workspace.masc_dir config);
+        retire_observations config snapshot ~root:(Workspace.masc_dir config);
         Atomic.set
           Workspace_hooks.goal_verification_pending_fn
           previous_pending_hook;

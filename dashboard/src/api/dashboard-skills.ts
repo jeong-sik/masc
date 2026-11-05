@@ -115,6 +115,22 @@ export interface SkillUsage {
   last_used_at: string
 }
 
+/** One catalog surface one Keeper used, from `GET /api/v1/keepers/skill-usage`. */
+export interface KeeperSkillUsageRow {
+  reference: SkillReference
+  invocations: number
+  deliveries: number
+  actions: number
+  last_used_at: string
+}
+
+/** One Keeper's usage of the catalog, read from its ledger alone (RFC-0483). */
+export type KeeperSkillUsage =
+  | { state: 'ready'; rows: readonly KeeperSkillUsageRow[] }
+  | { state: 'no_session' }
+  | { state: 'unavailable'; reason: string; detail: string }
+  | { state: 'no_catalog' }
+
 export interface SkillFlowDependency {
   node_id: string
   kind: 'data' | 'order' | 'data_and_order'
@@ -382,7 +398,6 @@ export type AsyncRequestObservation =
 interface SkillSurfaceBase {
   reference: SkillReference
   diagnostics?: readonly string[]
-  usage?: readonly SkillUsage[]
 }
 
 export type SkillSurface =
@@ -405,10 +420,6 @@ export type SkillsResponse =
       state: 'ready'
       snapshot: SkillSnapshot
       surfaces: readonly SkillSurface[]
-      usage_coverage?: {
-        ledgers_loaded: number
-        unavailable: readonly string[]
-      }
     }
   | { schema: string; state: 'not_registered' | 'uninitialized' }
   | {
@@ -461,14 +472,6 @@ const SkillIdentitySchema = Schema.Struct({
 const SkillReferenceSchema = Schema.Struct({
   identity: SkillIdentitySchema,
   content_revision: Schema.NonEmptyString,
-})
-
-const SkillUsageSchema = Schema.Struct({
-  keeper: Schema.NonEmptyString,
-  invocations: NonNegativeSafeIntegerSchema,
-  deliveries: NonNegativeSafeIntegerSchema,
-  actions: NonNegativeSafeIntegerSchema,
-  last_used_at: Schema.String,
 })
 
 const SkillFlowSchema = Schema.Struct({
@@ -912,29 +915,24 @@ const SkillEditorSaveReceiptSchema = Schema.Union(
   }),
 )
 
-const OptionalUsageSchema = Schema.optional(Schema.Array(SkillUsageSchema))
-
 const SkillSurfaceSchema = Schema.Union(
   Schema.Struct({
     reference: SkillReferenceSchema,
     kind: Schema.Literal('instruction'),
     diagnostics: OptionalDiagnosticsSchema,
     profile: SkillSurfaceProfileSchema,
-    usage: OptionalUsageSchema,
   }),
   Schema.Struct({
     reference: SkillReferenceSchema,
     kind: Schema.Literal('composition'),
     diagnostics: OptionalDiagnosticsSchema,
     profile: SkillSurfaceProfileSchema,
-    usage: OptionalUsageSchema,
   }),
   Schema.Struct({
     reference: SkillReferenceSchema,
     kind: Schema.Literal('unavailable'),
     error: Schema.NonEmptyString,
     diagnostics: OptionalDiagnosticsSchema,
-    usage: OptionalUsageSchema,
   }),
 )
 
@@ -1080,10 +1078,6 @@ const ReadySkillsResponseSchema = Schema.Struct({
   state: Schema.Literal('ready'),
   snapshot: SkillSnapshotSchema,
   surfaces: Schema.Array(SkillSurfaceSchema),
-  usage_coverage: Schema.optional(Schema.Struct({
-    ledgers_loaded: NonNegativeSafeIntegerSchema,
-    unavailable: Schema.Array(Schema.String),
-  })),
 })
 
 const UnreadySkillsResponseSchema = Schema.Union(
@@ -1202,6 +1196,49 @@ export function decodeSkillsResponse(raw: unknown): SkillsResponse {
 export async function fetchSkills(opts: GetOptions = {}): Promise<SkillsResponse> {
   const raw = await get<unknown>('/api/v1/skills', opts)
   return decodeSkillsResponse(raw)
+}
+
+const KeeperSkillUsageResponseSchema = Schema.Struct({
+  schema: Schema.Literal('masc.keeper-skill-usage/v1'),
+  keeper: Schema.NonEmptyString,
+  usage: Schema.Union(
+    Schema.Struct({
+      state: Schema.Literal('ready'),
+      rows: Schema.Array(Schema.Struct({
+        reference: SkillReferenceSchema,
+        invocations: NonNegativeSafeIntegerSchema,
+        deliveries: NonNegativeSafeIntegerSchema,
+        actions: NonNegativeSafeIntegerSchema,
+        last_used_at: Schema.NonEmptyString,
+      })),
+    }),
+    Schema.Struct({ state: Schema.Literal('no_session') }),
+    Schema.Struct({
+      state: Schema.Literal('unavailable'),
+      reason: Schema.NonEmptyString,
+      detail: Schema.String,
+    }),
+    Schema.Struct({ state: Schema.Literal('no_catalog') }),
+  ),
+})
+
+export function decodeKeeperSkillUsage(raw: unknown, keeper: string): KeeperSkillUsage {
+  const decoded = decodeWithSchema(KeeperSkillUsageResponseSchema, raw, 'invalid_response')
+  if (decoded.keeper !== keeper) {
+    contractError('invalid_response', `skill usage answer belongs to ${decoded.keeper}, not ${keeper}`)
+  }
+  return decoded.usage
+}
+
+export async function fetchKeeperSkillUsage(
+  keeper: string,
+  opts: GetOptions = {},
+): Promise<KeeperSkillUsage> {
+  const raw = await get<unknown>(
+    `/api/v1/keepers/skill-usage?keeper=${encodeURIComponent(keeper)}`,
+    opts,
+  )
+  return decodeKeeperSkillUsage(raw, keeper)
 }
 
 function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {

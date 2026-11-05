@@ -350,15 +350,16 @@ let change_json = function
           | None -> `Null )
       ]
 
+let request_json ~revision changes =
+  `Assoc
+    [ "expected_revision", `String revision
+    ; "changes", `List (List.map change_json changes)
+    ]
+
 let save_request draft ~revision ~alongside =
   match changes draft ~alongside with
   | Error gaps -> Error gaps
-  | Ok changes ->
-    Ok
-      (`Assoc
-        [ "expected_revision", `String revision
-        ; "changes", `List (List.map change_json changes)
-        ])
+  | Ok changes -> Ok (request_json ~revision changes)
 
 (* Changing the side re-picks the provider when the current one does not serve
    it: an MCP tool speaks and does not listen, so carrying it across would leave

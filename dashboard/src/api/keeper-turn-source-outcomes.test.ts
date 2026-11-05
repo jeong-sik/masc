@@ -19,7 +19,7 @@ describe('exact selected source outcomes', () => {
     const result = decodeTurnSourceOutcomes(observation(), selected)
     expect(result).toMatchObject({ state: 'observed', observedAt: 110,
       sources: [{ admittedRevision: '9007199254740993', receipts: [{ kind: 'ack_turn_completed' }] }] })
-    for (const kind of ['ack_turn_attempt_terminal', 'cancelled', 'transferred', 'ack_fusion_terminal', 'ack_hitl_terminal']) {
+    for (const kind of ['cancelled', 'transferred', 'ack_fusion_terminal', 'ack_hitl_terminal']) {
       const raw = observation(); raw.sources[0]!.receipts[0] = { ...receipt, kind }
       expect(decodeTurnSourceOutcomes(raw, selected)).toMatchObject({
         state: 'observed', sources: [{ receipts: [{ kind }] }],

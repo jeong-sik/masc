@@ -9,6 +9,7 @@ module Log = Authz_log
 module Store = Authz_external_store
 module Mark = Authz_high_water
 module Install_record = Authz_install_record
+module Store_path = Authz_install_record.Store_path
 module Record = Authz_record
 
 let ( let* ) = Result.bind
@@ -27,9 +28,7 @@ type completed =
   }
 
 type path_problem =
-  | Not_absolute
-  | Holds_nul
-  | Not_normal
+  | Store_path of Store_path.problem
   | Inside_base_path
   | Is_install_record
 
@@ -42,8 +41,8 @@ type error =
   | Install_record_not_located of Install_record.locate_error
   | Install_record_unreadable of Install_record.read_error
   | Install_record_changed of
-      { expected : string option
-      ; found : string option
+      { expected : Store_path.t option
+      ; found : Store_path.t option
       }
   | Path_not_inspected of
       { path : string
@@ -85,9 +84,7 @@ let value_to_string = function
 ;;
 
 let path_problem_to_string = function
-  | Not_absolute -> "it is not absolute"
-  | Holds_nul -> "it holds a NUL byte"
-  | Not_normal -> "it has an empty, . or .. segment, or ends with a separator"
+  | Store_path problem -> Store_path.problem_to_string problem
   | Inside_base_path ->
     "it is inside the base path, which a backup of the base path takes back, or inside the \
      directory of the log, where the log and its lock file are"
@@ -101,13 +98,13 @@ let error_to_string = function
       (path_problem_to_string problem)
       path
   | No_config_dir ->
-    "no config directory is known (neither XDG_CONFIG_HOME nor HOME), so no install record \
+    "no config directory is known (no absolute XDG_CONFIG_HOME and no HOME), so no install record \
      can be written"
   | Install_record_not_located error -> Install_record.locate_error_to_string error
   | Install_record_unreadable error -> Install_record.read_error_to_string error
   | Install_record_changed { expected; found } ->
     let show = function
-      | Some store -> store
+      | Some store -> (store : Store_path.t :> string)
       | None -> "no store"
     in
     Printf.sprintf
@@ -164,38 +161,28 @@ type presence =
   | Regular_file
   | Something_else  (** A directory, a link (one that leads nowhere included), or a special file. *)
 
+(* [lstat] answers ENOENT for a dangling link on the way as well, and a store
+   behind a link to a volume that is not mounted is not a store that is absent.
+   [Authz_presence] tells the two apart, and the kind of what is there comes
+   from [lstat] after it. *)
 let inspect path =
-  match Unix.lstat path with
-  | { Unix.st_kind = Unix.S_REG; _ } -> Ok Regular_file
-  | { Unix.st_kind = Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK; _ }
-    -> Ok Something_else
-  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok Nothing
-  | exception Unix.Unix_error (error, _, _) ->
-    Error (Path_not_inspected { path; detail = Unix.error_message error })
-;;
-
-(* An absolute path without an empty segment, a [.] or a [..], and without a
-   separator at the end. The install record keeps the spelling that is given
-   and a boot opens the store by it, so the spelling must leave no doubt about
-   the file. *)
-let normal_form path =
-  match String.split_on_char '/' path with
-  | "" :: (_ :: _ as segments) ->
-    List.for_all
-      (fun segment -> (not (String.equal segment "")) && segment <> "." && segment <> "..")
-      segments
-  | "" :: [] | _ :: _ | [] -> false
+  let not_inspected detail = Error (Path_not_inspected { path; detail }) in
+  match Authz_presence.of_path path with
+  | Authz_presence.Not_there -> Ok Nothing
+  | Authz_presence.Cannot_check detail -> not_inspected detail
+  | Authz_presence.There ->
+    (match Unix.lstat path with
+     | { Unix.st_kind = Unix.S_REG; _ } -> Ok Regular_file
+     | { Unix.st_kind = Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK
+       ; _
+       } -> Ok Something_else
+     | exception Unix.Unix_error (error, _, _) -> not_inspected (Unix.error_message error))
 ;;
 
 let valid_store_path path =
-  let invalid problem = Error (External_store_path_invalid { path; problem }) in
-  if Filename.is_relative path
-  then invalid Not_absolute
-  else if String.contains path '\000'
-  then invalid Holds_nul
-  else if not (normal_form path)
-  then invalid Not_normal
-  else Ok ()
+  Result.map_error
+    (fun problem -> External_store_path_invalid { path; problem = Store_path problem })
+    (Store_path.of_string path)
 ;;
 
 let locate request =
@@ -263,8 +250,8 @@ let same_file left right =
    exist yet, and then its path is compared as spelled, after the links in the
    part that exists are resolved: a spelling that differs in the case of a name
    that does not exist yet gets past. *)
-let outside_installation request ~record_file =
-  let path = request.external_store in
+let outside_installation request ~(store : Store_path.t) ~record_file =
+  let path = (store :> string) in
   let invalid problem = Error (External_store_path_invalid { path; problem }) in
   let log_directory = Filename.dirname (Log.path_of_base_path ~base_path:request.base_path) in
   if same_file path record_file
@@ -283,11 +270,12 @@ let read_record located =
 
 (* Whether the path of the new store holds the store that the install record
    names. It must hold nothing else. *)
-let store_present ~recorded path =
+let store_present ~recorded (store : Store_path.t) =
+  let path = (store :> string) in
   let* presence = inspect path in
   match presence, recorded with
   | Nothing, (Some _ | None) -> Ok false
-  | Regular_file, Some recorded when String.equal recorded path -> Ok true
+  | Regular_file, Some recorded when Store_path.equal recorded store -> Ok true
   | (Regular_file | Something_else), (Some _ | None) ->
     Error (External_store_in_the_way { path })
 ;;
@@ -335,14 +323,15 @@ let open_absent_store path =
 let named_store recorded =
   match recorded with
   | None -> Ok None
-  | Some named_path ->
+  | Some (named : Store_path.t) ->
+    let named_path = (named :> string) in
     let* presence = inspect named_path in
     (match presence with
      | Nothing -> Ok None
      | Something_else -> Error (External_store_in_the_way { path = named_path })
      | Regular_file ->
        let* opened = open_absent_store named_path in
-       Ok (Some (named_path, opened)))
+       Ok (Some (named, opened)))
 ;;
 
 (* The intent that an earlier bootstrap left pending is given up: the log is
@@ -364,7 +353,7 @@ let intent_to_give_up ~path state =
    store that has no answer. *)
 let record_unchanged located ~recorded =
   let* found = read_record located in
-  if Option.equal String.equal found recorded
+  if Option.equal Store_path.equal found recorded
   then Ok ()
   else Error (Install_record_changed { expected = recorded; found })
 ;;
@@ -372,10 +361,10 @@ let record_unchanged located ~recorded =
 (* The record is written even when it names the path already: a write that
    returned [Replaced_but_not_durable] on an earlier call left a record that is
    not known to survive a crash, and the call after it must write it again. *)
-let write_install_record located path =
+let write_install_record located store =
   Result.map_error
     (fun error -> Install_record_not_written error)
-    (Install_record.write located ~external_store:path)
+    (Install_record.write located ~external_store:store)
 ;;
 
 let store_permissions = 0o600
@@ -491,34 +480,34 @@ let write_bootstrap ~store ~log ~closed request =
 
 type prepared =
   { request : request
+  ; store : Store_path.t  (** The path of the new store, as [request] spells it. *)
   ; located : Install_record.located
-  ; recorded : string option  (** The store that the install record names. *)
+  ; recorded : Store_path.t option  (** The store that the install record names. *)
   ; store_present : bool  (** The path of the new store holds the recorded store. *)
   ; log : Log.t
-  ; named : (string * (Store.t * Store.State.t)) option
+  ; named : (Store_path.t * (Store.t * Store.State.t)) option
         (** The recorded store, opened, when there is a file at its path. *)
   }
 
 let prepare request =
-  let path = request.external_store in
-  let* () = valid_store_path path in
+  let* store = valid_store_path request.external_store in
   let* located, record_file = locate request in
-  let* () = outside_installation request ~record_file in
+  let* () = outside_installation request ~store ~record_file in
   let* recorded = read_record located in
-  let* store_present = store_present ~recorded path in
+  let* store_present = store_present ~recorded store in
   let* log = open_empty_log request.base_path in
   let* named = named_store recorded in
-  Ok { request; located; recorded; store_present; log; named }
+  Ok { request; store; located; recorded; store_present; log; named }
 ;;
 
-let write { request; located; recorded; store_present; log; named } =
-  let path = request.external_store in
+let write { request; store = new_store; located; recorded; store_present; log; named } =
+  let path = (new_store :> string) in
   let* () = record_unchanged located ~recorded in
-  let* () = write_install_record located path in
+  let* () = write_install_record located new_store in
   let* () = if store_present then Ok () else create_store path in
   let* store, state =
     match named with
-    | Some (named_path, opened) when String.equal named_path path -> Ok opened
+    | Some (named, opened) when Store_path.equal named new_store -> Ok opened
     | Some _ | None ->
       let* store = open_store path in
       let* state = state_of store in

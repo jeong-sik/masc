@@ -35,7 +35,7 @@ type keeper_activity = {
   k_total_turns : int;
   k_total_tokens : int;
   k_total_cost_usd : Keeper_cost_coverage.t;
-  k_last_turn_ts : string;
+  k_last_turn_at : float option;
   k_last_proactive_outcome : Keeper_meta_contract.proactive_cycle_outcome option;
 }
 
@@ -140,7 +140,6 @@ type keeper_runtime = {
   kr_name : string;
   kr_identity : (keeper_identity, string) result;
   kr_portrait : keeper_portrait;
-  kr_candle_balance_milli : string option;
   kr_candle_account_revision : (string option, string) result;
   (** [Ok None] is observed Candle-off; [Error] cannot authorize an Item account. *)
   kr_health : keeper_health;
@@ -203,13 +202,7 @@ type keeper_lane = {
   kl_turn_phase : keeper_lane_turn_phase;
   kl_idle_seconds : int;
   kl_last_outcome : keeper_lane_last_outcome option;
-  kl_conditions : keeper_lane_conditions;
-}
-
-type keeper_lanes_snapshot = {
-  kls_generated_at : float;
-  kls_count : int;
-  kls_lanes : keeper_lane list;
+  kl_conditions : keeper_lane_conditions option;
 }
 
 type standalone_lane_status =
@@ -589,9 +582,9 @@ let keeper_of_meta (meta : Keeper_meta_contract.keeper_meta) =
   let runtime = meta.runtime in
   let usage = runtime.usage in
   let proactive = runtime.proactive_rt in
-  let k_last_turn_ts =
-    if Float.compare usage.last_turn_ts 0.0 <= 0 then ""
-    else Masc_domain.iso8601_of_unix_seconds usage.last_turn_ts
+  let k_last_turn_at =
+    if Float.compare usage.last_turn_ts 0.0 <= 0 then None
+    else Some usage.last_turn_ts
   in
   {
     k_origin = Persisted_keeper;
@@ -608,7 +601,7 @@ let keeper_of_meta (meta : Keeper_meta_contract.keeper_meta) =
       k_total_turns = usage.total_turns;
       k_total_tokens = usage.total_tokens;
       k_total_cost_usd = usage.total_cost_usd;
-      k_last_turn_ts;
+      k_last_turn_at;
       k_last_proactive_outcome = Some proactive.last_outcome;
     };
   }
@@ -1824,8 +1817,18 @@ type repository_change_scope =
   | Repository_change_project
   | Repository_change_repository of string
 
+type repository_upstream =
+  | Repository_no_upstream
+  | Repository_upstream_gone of string
+  | Repository_tracking of { upstream : string; ahead : int; behind : int }
+
+type repository_branch =
+  | Repository_detached
+  | Repository_on_branch of { name : string; upstream : repository_upstream }
+
 type repository_change_snapshot = {
   rcs_scope : repository_change_scope;
+  rcs_branch : repository_branch;
   rcs_changes : repository_change list;
   rcs_total : int;
 }
@@ -2360,15 +2363,46 @@ let decode_repository_change_scope json =
   | unknown ->
       Error (Printf.sprintf "repository change scope has unknown kind %S" unknown)
 
+let json_field fields key =
+  Option.value (List.assoc_opt key fields) ~default:`Null
+
+let decode_repository_upstream = function
+  | `Null -> Ok Repository_no_upstream
+  | `Assoc fields as json ->
+      let* upstream = required_string_field json "name" in
+      (match json_field fields "ahead", json_field fields "behind" with
+       | `Null, `Null -> Ok (Repository_upstream_gone upstream)
+       | `Int ahead, `Int behind when ahead >= 0 && behind >= 0 ->
+           Ok (Repository_tracking { upstream; ahead; behind })
+       | _ ->
+           Error
+             "repository branch upstream needs ahead and behind as \
+              non-negative integers, or both null")
+  | _ -> Error "repository branch upstream must be an object or null"
+
+let decode_repository_branch = function
+  | `Assoc fields ->
+      (match json_field fields "head" with
+       | `Null -> Ok Repository_detached
+       | `String name ->
+           let* upstream =
+             decode_repository_upstream (json_field fields "upstream")
+           in
+           Ok (Repository_on_branch { name; upstream })
+       | _ -> Error "repository branch head must be a string or null")
+  | _ -> Error "repository branch must be an object"
+
 let decode_repository_change_snapshot json =
   let* scope_json = required_object_field json "scope" in
   let* rcs_scope = decode_repository_change_scope scope_json in
+  let* branch_json = required_object_field json "branch" in
+  let* rcs_branch = decode_repository_branch branch_json in
   let* changes_json = required_list_field json "changes" in
   let* rcs_changes =
     decode_list "changes" decode_repository_change changes_json
   in
   let* rcs_total = required_int_field json "total" in
-  Ok { rcs_scope; rcs_changes; rcs_total }
+  Ok { rcs_scope; rcs_branch; rcs_changes; rcs_total }
 
 let decode_harness_verdict json =
   let* hv_task_id = required_string_field json "task_id" in
@@ -3087,7 +3121,7 @@ let decode_keeper_roster_identity ~name json =
     Error "Keeper brief identity fields must not be empty"
   else Ok { k_trace_id; k_created_at; k_updated_at }
 
-let decode_keeper_runtime ~candle_balance_milli ~account_revision json =
+let decode_keeper_runtime ~account_revision json =
   let* kr_name = required_string_field json "name" in
   let* kr_portrait = Keeper_portrait_equipment.reading_of_json (member "portrait" json) in
   let* raw_health = required_string_field json "health" in
@@ -3187,7 +3221,6 @@ let decode_keeper_runtime ~candle_balance_milli ~account_revision json =
     { kr_name
     ; kr_identity
     ; kr_portrait
-    ; kr_candle_balance_milli = candle_balance_milli
     ; kr_candle_account_revision = account_revision
     ; kr_health
     ; kr_paused
@@ -3206,14 +3239,34 @@ let decode_keeper_runtime ~candle_balance_milli ~account_revision json =
 (* [truncated] is carried out rather than dropped: the route clamps its own
    limit, so a workspace with more keepers than one response holds would
    otherwise present a short list as the whole fleet. *)
+type candle_reading =
+  | Candle_off
+  | Candle_disabled of string
+  | Candle_ready of Candle_decay_basis.t
+
+(* The roster's [candle] says whether Candle is on; [candle_decay] carries
+   the fold the TUI computes every amount from (RFC-0481 §3.7). A ready
+   observation needs its basis and the other two have none. *)
+let candle_reading_of_json ~candle decay =
+  match candle, decay with
+  | Candle_observation.Off, `Null -> Ok Candle_off
+  | Candle_observation.Disabled { reason }, `Null -> Ok (Candle_disabled reason)
+  | Candle_observation.Ready _, (`Assoc _ as basis) ->
+      Result.map (fun basis -> Candle_ready basis) (Candle_decay_basis.of_json basis)
+  | Candle_observation.Ready _, `Null -> Error "Candle is ready but the roster carries no decay basis"
+  | Candle_observation.Ready _,
+    (`Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `String _) ->
+      Error "Candle decay basis must be an object"
+  | (Candle_observation.Off | Candle_observation.Disabled _),
+    (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `String _) ->
+      Error "Candle decay basis came without a ready Candle observation"
+
 let decode_keeper_runtime_list json =
   let* items = required_list_field json "keepers" in
   let candle_rows =
     let* candle = Candle_observation.of_json (member "candle" json) in
-    let decode_balance json =
-      let* balance = match Json_util.assoc_member_opt "candle_balance_milli" json with
-        | Some value -> Candle_observation.balance_of_json value
-        | None -> Error "missing required field candle_balance_milli" in
+    let* reading = candle_reading_of_json ~candle (member "candle_decay" json) in
+    let decode_revision json =
       let* revision = match Json_util.assoc_member_opt "candle_account_revision" json with
         | Some `Null when candle = Candle_observation.Off -> Ok None
         | Some (`String revision) when String.length revision = 64
@@ -3222,20 +3275,15 @@ let decode_keeper_runtime_list json =
              | Candle_observation.Ready _ | Candle_observation.Disabled _ -> Ok (Some revision)
              | Candle_observation.Off -> Error "Candle-off row revision must be null")
         | Some _ | None -> Error "Candle row account revision is missing or malformed" in
-      match candle, balance with
-      | Candle_observation.Ready _, Some _
-      | (Candle_observation.Off | Candle_observation.Disabled _), None -> Ok (json, balance, Ok revision)
-      | Candle_observation.Ready _, None
-      | (Candle_observation.Off | Candle_observation.Disabled _), Some _ ->
-        Error "Candle row balance disagrees with the envelope observation" in
-    let* rows = decode_list "keepers" decode_balance items in
-    Ok (candle, rows)
+      Ok (json, Ok revision) in
+    let* rows = decode_list "keepers" decode_revision items in
+    Ok (reading, rows)
   in
   let candle, items = match candle_rows with
-    | Ok (candle, rows) -> Ok candle, rows
-    | Error detail -> Error detail, List.map (fun row -> row, None, Error detail) items
+    | Ok (reading, rows) -> Ok reading, rows
+    | Error detail -> Error detail, List.map (fun row -> row, Error detail) items
   in
-  let decode_row (json, candle_balance_milli, account_revision) =
+  let decode_row (json, account_revision) =
     match member "effective_meta_error" json with
     | `Null when member "status" json = `String "error" ->
         let* name = required_string_field json "name" in
@@ -3249,7 +3297,7 @@ let decode_keeper_runtime_list json =
           | `Null -> Ok "Keeper metadata unavailable; the server supplied no error detail"
           | bad -> field_type_error "message" "a string or null" bad in
         Ok (Error (name, detail))
-    | `Null -> Result.map (fun row -> Ok row) (decode_keeper_runtime ~candle_balance_milli ~account_revision json)
+    | `Null -> Result.map (fun row -> Ok row) (decode_keeper_runtime ~account_revision json)
     | error ->
         let* name = required_string_field json "name" in
         (* The row and the nested error name the same keeper on the wire:
@@ -3369,15 +3417,17 @@ let decode_keeper_lane json =
         Ok (Some decoded)
     | Some bad -> field_type_error "last_outcome" "an object or null" bad
   in
-  let* diagnosis = required_object_field json "phase_diagnosis" in
-  let* conditions = required_object_field diagnosis "conditions" in
-  let* klc_launch_pending = required_bool_field conditions "launch_pending" in
-  let* klc_heartbeat_healthy =
-    required_bool_field conditions "heartbeat_healthy"
-  in
-  let* klc_turn_healthy = required_bool_field conditions "turn_healthy" in
-  let kl_conditions =
-    { klc_launch_pending; klc_heartbeat_healthy; klc_turn_healthy }
+  let* kl_conditions =
+    match Json_util.assoc_member_opt "phase_diagnosis" json with
+    | None -> Ok None
+    | Some diagnosis ->
+      let* conditions = required_object_field diagnosis "conditions" in
+      let* klc_launch_pending = required_bool_field conditions "launch_pending" in
+      let* klc_heartbeat_healthy =
+        required_bool_field conditions "heartbeat_healthy"
+      in
+      let* klc_turn_healthy = required_bool_field conditions "turn_healthy" in
+      Ok (Some { klc_launch_pending; klc_heartbeat_healthy; klc_turn_healthy })
   in
   Ok
     { kl_keeper
@@ -3387,13 +3437,6 @@ let decode_keeper_lane json =
     ; kl_last_outcome
     ; kl_conditions
     }
-
-let decode_keeper_lanes_snapshot json =
-  let* kls_generated_at = Json_util.require_float json "generated_at" in
-  let* kls_count = required_int_field json "count" in
-  let* items = required_list_field json "snapshots" in
-  let* kls_lanes = decode_list "snapshots" decode_keeper_lane items in
-  Ok { kls_generated_at; kls_count; kls_lanes }
 
 let standalone_lane_configuration_of_string = function
   | "off" -> Ok Lane_off
@@ -3859,20 +3902,16 @@ let decode_keeper_secret_projection ~keeper json =
     ; ksp_error
     }
 
-let decode_keeper_secret_projections json =
-  let* items = required_list_field json "snapshots" in
-  List.fold_left
-    (fun acc snapshot ->
-      let* acc in
-      match Json_util.assoc_member_opt "secret_projection" snapshot with
-      | None | Some `Null -> Ok acc
-      | Some projection ->
-        let* keeper = required_string_field snapshot "keeper" in
-        let* decoded = decode_keeper_secret_projection ~keeper projection in
-        Ok (decoded :: acc))
-    (Ok [])
-    items
-  |> Result.map List.rev
+let decode_keeper_composite json =
+  let* lane = decode_keeper_lane json in
+  let* secret =
+    match Json_util.assoc_member_opt "secret_projection" json with
+    | None | Some `Null -> Ok None
+    | Some projection ->
+      let* decoded = decode_keeper_secret_projection ~keeper:lane.kl_keeper projection in
+      Ok (Some decoded)
+  in
+  Ok (lane, secret)
 
 let decode_keeper_tool_approval json =
   let* kta_keeper = required_string_field json "keeper" in
@@ -4640,6 +4679,7 @@ type waiting_source =
   | Waiting_source_schedule_waiting
   | Waiting_source_owner_shutdown
   | Waiting_source_operator_pending_confirm
+  | Waiting_source_runtime_quota_spent
   | Waiting_source_read_error
   | Waiting_source_observation_unavailable
 
@@ -4721,6 +4761,7 @@ let waiting_source_of_string raw =
     ; "schedule_waiting", Waiting_source_schedule_waiting
     ; "owner_shutdown", Waiting_source_owner_shutdown
     ; "operator_pending_confirm", Waiting_source_operator_pending_confirm
+    ; "runtime_quota_spent", Waiting_source_runtime_quota_spent
     ; "read_error", Waiting_source_read_error
     ; "observation_unavailable", Waiting_source_observation_unavailable
     ]
@@ -5187,6 +5228,7 @@ type server_identity = {
   sid_sse_clients : int option;
   sid_gc : server_gc_health option;
   sid_scheduler : server_scheduler_health option;
+  sid_operator_action : string list option;
 }
 
 (* [/health] answers before the workspace is fully up, so every field here is
@@ -5300,6 +5342,20 @@ let decode_server_identity json =
           ; ssch_pool_domains = opt_int_in sched_obj "pool_domains"
           }
   in
+  let sid_operator_action =
+    (* Both fields or neither: [operator_action_required] says whether the
+       list is the answer, so a list alone, or a flag that disagrees with
+       the list, is not read. *)
+    match member "operator_action_required" json, member "operator_action_reasons" json with
+    | `Bool required, `List values ->
+      let reasons =
+        List.filter_map (function `String reason -> Some reason | _ -> None) values
+      in
+      if List.length reasons = List.length values && Bool.equal required (reasons <> [])
+      then Some reasons
+      else None
+    | _ -> None
+  in
   Ok
     { sid_version =
         (match member "version" json with
@@ -5319,6 +5375,7 @@ let decode_server_identity json =
     ; sid_sse_clients
     ; sid_gc
     ; sid_scheduler
+    ; sid_operator_action
     }
 ;;
 
@@ -8110,7 +8167,9 @@ type async_request_row =
   ; ar_submitted_by : string
   ; ar_keeper_name : string
   ; ar_phase : async_request_phase
-  ; ar_elapsed_sec : float option
+  ; ar_submitted_at : float
+      (** Epoch seconds. A screen works out the age itself: an age the server
+          worked out stops when the reading is not read again. *)
   ; ar_ownership : async_request_ownership
   }
 
@@ -8181,12 +8240,14 @@ let decode_async_request_observation json =
         | "disk_only_ownership_unknown" -> Ok Async_ownership_unknown
         | _ -> Error (Printf.sprintf "unknown worker ownership %S" ownership)
       in
-      let* ar_elapsed_sec = optional_float_field json "elapsed_sec" in
-      let* () = match ar_elapsed_sec with
-        | Some value when not (Float.is_finite value) -> Error "elapsed_sec must be finite"
-        | Some _ | None -> Ok ()
+      let* ar_submitted_at =
+        match optional_float_field json "submitted_at" with
+        | Ok (Some value) when Float.is_finite value -> Ok value
+        | Ok (Some _) -> Error "submitted_at must be finite"
+        | Ok None -> Error "field 'submitted_at' is missing"
+        | Error _ as error -> error
       in
-      Ok { ar_request_id; ar_submitted_by; ar_keeper_name; ar_phase; ar_elapsed_sec; ar_ownership }
+      Ok { ar_request_id; ar_submitted_by; ar_keeper_name; ar_phase; ar_submitted_at; ar_ownership }
     in
     let* rows = required_list_field json "requests" in
     let* requests = decode_list "requests" decode_row rows in

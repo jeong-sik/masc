@@ -44,17 +44,21 @@ let test_context_creation () =
 
 (* ============================================================
    Dispatch Tests
+
+   The plan tools read and write one file, [.masc/current_task], so each
+   test runs in a workspace of its own under the temp directory.
    ============================================================ *)
 
-let make_ctx () : Tool_plan.context =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let config = Masc.Workspace.default_config "/tmp/test-plan" in
-  ({ config } : Tool_plan.context)
+let rec rm_rf path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path
+    end else
+      Unix.unlink path
 
-let make_ctx_unique label : Tool_plan.context =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+let unique_ctx label : Tool_plan.context =
   let base_path =
     Filename.concat
       (Filename.get_temp_dir_name ())
@@ -64,46 +68,95 @@ let make_ctx_unique label : Tool_plan.context =
          (Unix.getpid ())
          (Random.bits ()))
   in
-  let config = Masc.Workspace.default_config base_path in
-  ({ config } : Tool_plan.context)
+  ({ config = Masc.Workspace.default_config base_path } : Tool_plan.context)
 
-let planning_context_path (ctx : Tool_plan.context) task_id =
-  Filename.concat
-    (Filename.concat ctx.config.Masc.Workspace.base_path (Printf.sprintf "planning/%s" task_id))
-    "context.json"
+let in_workspace label f =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let ctx = unique_ctx label in
+  Fun.protect
+    ~finally:(fun () ->
+      (* Cleanup must not hide the failure of the test body. *)
+      try rm_rf ctx.config.Masc.Workspace.base_path
+      with Sys_error _ | Unix.Unix_error _ -> ())
+    (fun () -> f ctx)
 
-let planning_task_plan_path ctx task_id =
-  Filename.concat (Filename.dirname (planning_context_path ctx task_id)) "task_plan.md"
+let dispatch (ctx : Tool_plan.context) name args =
+  match Tool_plan.dispatch ctx ~name ~args with
+  | Some result -> result
+  | None -> fail (Printf.sprintf "%s is not a plan tool" name)
 
-let test_dispatch_plan_set_task () =
-  let ctx = make_ctx () in
-  let args = `Assoc [("task_id", `String "task-001")] in
-  match Tool_plan.dispatch ctx ~name:"masc_plan_set_task" ~args with
-  | Some result -> check bool "succeeds" true (Tool_result.is_success result)
-  | None -> fail "expected Some"
+let json = testable Yojson.Safe.pretty_print Yojson.Safe.equal
 
-let test_dispatch_plan_set_task_empty () =
-  let ctx = make_ctx () in
-  let args = `Assoc [("task_id", `String "")] in
-  match Tool_plan.dispatch ctx ~name:"masc_plan_set_task" ~args with
-  | Some result -> check bool "fails on empty" false (Tool_result.is_success result)
-  | None -> fail "expected Some"
+let check_ok label result expected =
+  check bool (label ^ " succeeds") true (Tool_result.is_success result);
+  check json (label ^ " data") expected (Tool_result.data result)
 
-let test_dispatch_plan_get_task () =
-  let ctx = make_ctx () in
-  match Tool_plan.dispatch ctx ~name:"masc_plan_get_task" ~args:(`Assoc []) with
-  | Some result -> check bool "succeeds" true (Tool_result.is_success result)
-  | None -> fail "expected Some"
+let check_failed label result expected_class =
+  let name = Tool_result.tool_failure_class_to_string in
+  check bool (label ^ " fails") false (Tool_result.is_success result);
+  check (option string) (label ^ " failure class")
+    (Some (name expected_class))
+    (Option.map name (Tool_result.failure_class result))
 
-let test_dispatch_plan_clear_task () =
-  let ctx = make_ctx () in
-  match Tool_plan.dispatch ctx ~name:"masc_plan_clear_task" ~args:(`Assoc []) with
-  | Some result -> check bool "succeeds" true (Tool_result.is_success result)
-  | None -> fail "expected Some"
+let marker (ctx : Tool_plan.context) =
+  Masc.Task.Planning_eio.get_current_task ctx.config
+
+let set_args task_id = `Assoc [ ("task_id", `String task_id) ]
+
+let test_marker_set_get_clear () =
+  in_workspace "roundtrip" @@ fun ctx ->
+  let unset = `Assoc [ ("current_task", `Null) ] in
+  check_ok "get before set"
+    (dispatch ctx "masc_plan_get_task" (`Assoc []))
+    unset;
+  check_ok "set"
+    (dispatch ctx "masc_plan_set_task" (set_args "task-001"))
+    (`Assoc [ ("status", `String "set"); ("current_task", `String "task-001") ]);
+  check_ok "get after set"
+    (dispatch ctx "masc_plan_get_task" (`Assoc []))
+    (`Assoc [ ("current_task", `String "task-001") ]);
+  check_ok "set again"
+    (dispatch ctx "masc_plan_set_task" (set_args "task-002"))
+    (`Assoc [ ("status", `String "set"); ("current_task", `String "task-002") ]);
+  check (option string) "the marker holds the last value" (Some "task-002")
+    (marker ctx);
+  check_ok "clear"
+    (dispatch ctx "masc_plan_clear_task" (`Assoc []))
+    (`Assoc
+       [ ("status", `String "cleared")
+       ; ("message", `String "Current task cleared")
+       ]);
+  check_ok "get after clear"
+    (dispatch ctx "masc_plan_get_task" (`Assoc []))
+    unset
+
+let test_set_without_task_id_is_refused () =
+  in_workspace "missing-id" @@ fun ctx ->
+  check_failed "empty task_id"
+    (dispatch ctx "masc_plan_set_task" (set_args ""))
+    Tool_result.Workflow_rejection;
+  check_failed "absent task_id"
+    (dispatch ctx "masc_plan_set_task" (`Assoc []))
+    Tool_result.Workflow_rejection;
+  check (option string) "nothing was written" None (marker ctx)
+
+(* The directory that should hold [.masc/current_task] is a regular file. The
+   file store fails; the caller's arguments were fine. *)
+let test_set_store_failure_is_runtime_failure () =
+  in_workspace "store-failure" @@ fun ctx ->
+  Fs_compat.mkdir_p ctx.config.Masc.Workspace.base_path;
+  Fs_compat.save_file (Workspace_utils.masc_dir ctx.config) "not a directory";
+  check_failed "set"
+    (dispatch ctx "masc_plan_set_task" (set_args "task-001"))
+    Tool_result.Runtime_failure;
+  check (option string) "nothing was written" None (marker ctx)
 
 let test_dispatch_unknown_tool () =
-  let ctx = make_ctx () in
-  match Tool_plan.dispatch ctx ~name:"masc_unknown" ~args:(`Assoc []) with
+  match
+    Tool_plan.dispatch (unique_ctx "unknown") ~name:"masc_unknown"
+      ~args:(`Assoc [])
+  with
   | None -> ()
   | Some _ -> fail "expected None for unknown tool"
 
@@ -126,10 +179,11 @@ let () =
       test_case "creation" `Quick test_context_creation;
     ];
     "dispatch", [
-      test_case "plan_set_task" `Quick test_dispatch_plan_set_task;
-      test_case "plan_set_task_empty" `Quick test_dispatch_plan_set_task_empty;
-      test_case "plan_get_task" `Quick test_dispatch_plan_get_task;
-      test_case "plan_clear_task" `Quick test_dispatch_plan_clear_task;
+      test_case "marker set, get, clear" `Quick test_marker_set_get_clear;
+      test_case "set without task_id is refused" `Quick
+        test_set_without_task_id_is_refused;
+      test_case "store failure is a runtime failure" `Quick
+        test_set_store_failure_is_runtime_failure;
       test_case "unknown" `Quick test_dispatch_unknown_tool;
     ];
   ]

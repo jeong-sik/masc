@@ -1,0 +1,23 @@
+# Intentionally duplicate catalog rows: the uniqueness check must refuse this
+# file.  Never loaded by the product — it exists so the check has a known-bad
+# input to reject (the two model rows share the (provider, model_id) key once
+# case folding is applied, exactly the shape the 2026-11-04 opencode_go
+# duplicate took).
+
+[[providers]]
+id = "example_go"
+kind = "openai_compat"
+base_url = "https://example.invalid/go/v1"
+request_path = "/chat/completions"
+auth = "api-key"
+capabilities_base = "openai_chat"
+
+[[models]]
+model_id = "example-flash"
+base = "openai_chat"
+provider_name = "example_go"
+
+[[models]]
+model_id = "EXAMPLE-FLASH"
+base = "openai_chat"
+provider_name = "Example_Go"

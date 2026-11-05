@@ -5,6 +5,21 @@ module State = Keeper_event_queue_state
 module Persistence = Keeper_event_queue_persistence
 module Ledger = Masc.Keeper_reaction_ledger
 
+(* The production peek, read back as the exact pending selection. *)
+let select_ready ~now ~ready state =
+  Option.bind (Keeper_event_queue_state.peek_when ~now ~ready state) (fun source ->
+    List.find_opt
+      (fun (selection : Keeper_event_queue_state.pending_selection) ->
+         Keeper_event_queue.stimulus_identity_equal selection.source source)
+      (Keeper_event_queue_state.pending_selections state))
+;;
+
+(* The production loader with the production peek. *)
+let select_queue_entry ~base_path ~keeper_name ~now ~ready =
+  Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name
+  |> Result.map (select_ready ~now ~ready)
+;;
+
 let require_ok label = function
   | Ok value -> value
   | Error detail -> failf "%s: %s" label detail
@@ -72,7 +87,7 @@ let seed ~base_path ~keeper_name =
     Queue.enqueue (Queue.enqueue pending (stimulus "selected" 1.0)) (stimulus "sibling" 2.0))
   |> require_ok "seed two durable sources";
   let selected =
-    Persistence.select_when_result ~base_path ~keeper_name ~now:3.0 ~ready:(fun _ -> true)
+    select_queue_entry ~base_path ~keeper_name ~now:3.0 ~ready:(fun _ -> true)
     |> require_ok "durable peek" |> require_some "selected source"
   in
   selected, read_state ~base_path ~keeper_name

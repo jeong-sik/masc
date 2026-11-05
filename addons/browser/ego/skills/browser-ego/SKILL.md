@@ -43,12 +43,12 @@ not proof that the application accepted the text or that external input is fresh
 Read the resulting field or editor before deciding what to do next.
 
 If that native window is interrupted or unconfirmed, MASC stops before the next
-workflow step and retains pending input. Never replay the typing or workflow.
+workflow step and reports `release_uncertain`. The typing's effect is unknown,
+so running the typing or workflow again can repeat it.
 A proven refusal before typing can restore the previous input readiness without
 claiming that observation setup had no effects. Typing consumes the native Page
 event buffer for its completion check; a later `events` result is not a full
-history. Previously uncertain input still requires the private operator
-recovery below.
+history.
 
 A `drag` between observed points, and a `drag_to` with waypoints or scene nodes,
 use raw mouse calls with no release receipt. MASC refuses them before input.
@@ -84,11 +84,10 @@ proof of completion or permission to adopt them.
 
 To inspect who owns the already bound Ego Space, send `page.act` with
 `{"action":"space_status"}` on that exact live client. It reads native Space
-metadata only, even when delegated to the operator, without Page calls, claim,
-takeover or input reset. The receipt carries current SDK name/ownership and
-`observedAt`; these observations do not establish permission or login success.
-The private operator form displays the last cached SDK observation and its date.
-Control-changing calls and failed refreshes invalidate that cache.
+metadata only, even when delegated to the operator, without Page calls, claim
+or takeover. The receipt carries current SDK name/ownership and `observedAt`;
+these observations do not establish permission or login success.
+Control-changing calls and failed refreshes invalidate the cached observation.
 
 After the operator explicitly completes a handed-off step, `take_over` on the
 same client returns the native user-boundary Page as `activeTabId`/`egoPage`.
@@ -111,18 +110,22 @@ managed Page and call its boolean method directly without first reading info;
 `answered = true` does not certify input release or identify unobserved dialog text.
 Never repeat an uncertain answer or infer a clean key/button state from it.
 
-If an Ego result says input release is unconfirmed, keep the original connection
-and do not replay its command. Answer any JavaScript dialog separately. Ask the
-operator to check/reset key and button state in that Space and use this Browser
-installation's private operator controls to confirm completion. The confirmation
-applies only to the pending input generation. It is not SDK cleanup proof,
-login completion, takeover permission or a model-callable reset action. Every
-Ego result object carries `inputReadiness`: `command_settled`,
-`operator_asserted` after that confirmation, or `release_uncertain` while input
-is still refused. A tab list that comes back as a plain array carries nothing.
-After a lost confirmation reply, inspect the original installation and read its
-form if the same worker is still available. Never apply its old confirmation to
-a replacement connection or replay browser input.
+Every result object and failure the Ego connection answers carries
+`inputReadiness`: `command_settled`, or `release_uncertain` when the last
+input-holding command ended without the SDK declaring its release (a dialog cut
+it, or its answer was lost). The next input runs either way. After a
+`release_uncertain` typing, the next press of the interrupted key on that Page
+may arrive marked as a key repeat; the text it types is unchanged. The original
+command's effect is unknown, so running it again can repeat it; reading the
+page shows what happened. Answering a JavaScript dialog is a separate step. A
+tab list that comes back as a plain array carries nothing, and neither does a
+failure the server reports on its own (for example when it stopped waiting for
+the connection).
+A click, double click or drag whose target the SDK could not resolve fails with
+`refusedBeforePress: {"kind": ...}` and keeps `inputReadiness` as it was: no
+key or button is left down. A double click may have finished its first click
+before the refusal. `permanent` means the target as written will not resolve;
+`transient` means it may once the page settles.
 
 When Ego reports `EGO_PAGE_UNRESPONSIVE` because navigation has not committed,
 use `BrowserAct` `action = "stop_loading"` on the same observed live client and

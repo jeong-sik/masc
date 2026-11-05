@@ -12,10 +12,13 @@ type stage =
   | Turn_ended
   | Consumed
   | Completed
-  | Failed of string option
   | Cancelled of string option
-  | Settling
-  | Transferring
+  | Settling of string
+      (** The terminal result is recorded but not yet projected into the
+          named Keeper's queue: the Keeper the occurrence resolved to. *)
+  | Transferring of { owner : string; target : string }
+      (** [owner] handed the occurrence to [target]; the transfer is not yet
+          projected into [target]'s queue. *)
   | Unknown of string
 
 type t =

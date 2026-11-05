@@ -5,8 +5,11 @@ open Masc
    never erases the last visible words, and that the tail the turns route
    serves is redacted across delta boundaries. *)
 
+(* No server runs here, so nothing is sent for this workspace. *)
+let preview_base_path = "keeper-turn-preview-test"
+
 let reset keeper_name ~now =
-  Keeper_turn_preview.reset ~execution_scope:None ~turn_ref:None ~keeper_name ~now ~redaction:Keeper_secret_redaction.empty
+  Keeper_turn_preview.reset ~base_path:preview_base_path ~execution_scope:None ~turn_ref:None ~keeper_name ~now ~redaction:Keeper_secret_redaction.empty
 ;;
 
 let text_delta text =
@@ -116,6 +119,24 @@ let test_live_attempt_failover_and_new_turn () =
   Alcotest.(check (option string)) "new turn cannot inherit old failure" None (current ()).last_failure
 ;;
 
+(* The provider request after a tool is a wait on the provider. The tool stays
+   the last observed tool, and the turn's activity is the wait. *)
+let test_a_request_after_a_tool_waits_on_the_provider () =
+  let keeper_name = "request-after-tool" in
+  let current () = Option.get (Keeper_turn_preview.current ~keeper_name) in
+  let writer = Some (reset keeper_name ~now:1.) in
+  Keeper_turn_preview.note_attempt ~writer ~now:2. ~runtime_id:"glm";
+  Keeper_turn_preview.note_tool ~writer ~now:3. "Execute";
+  Keeper_turn_preview.note_request ~writer ~now:4.;
+  Alcotest.(check bool) "the turn waits on the provider" true
+    ((current ()).activity = Keeper_turn_preview.Awaiting_response);
+  Alcotest.(check (option string)) "the tool stays the last observed tool" (Some "Execute")
+    (current ()).last_tool;
+  Keeper_turn_preview.note_stream ~writer ~now:5. (text_delta "next\n");
+  Alcotest.(check bool) "the request's stream moves the activity on" true
+    ((current ()).activity = Keeper_turn_preview.Receiving_response)
+;;
+
 let test_overlapping_and_rejected_tools_remain_observations () =
   let keeper_name = "overlapping-tools" in
   let current () = Option.get (Keeper_turn_preview.current ~keeper_name) in
@@ -158,7 +179,7 @@ let test_secret_split_across_deltas_never_reaches_the_tail () =
     let first = "deploy with preview-split-" and second = "secret-9931 now\n" in
     Alcotest.(check string) "the second half alone passes plain redaction" second
       (Keeper_secret_redaction.redact_text redaction second);
-    let writer = Some (Keeper_turn_preview.reset ~execution_scope:None ~turn_ref:None ~keeper_name ~now:1. ~redaction) in
+    let writer = Some (Keeper_turn_preview.reset ~base_path:preview_base_path ~execution_scope:None ~turn_ref:None ~keeper_name ~now:1. ~redaction) in
     Keeper_turn_preview.note_stream ~writer ~now:2. (text_delta first);
     Alcotest.(check string) "an unfinished line is held back" "" (tail keeper_name);
     Alcotest.(check bool) "while the activity already shows the response" true
@@ -186,7 +207,7 @@ let test_secret_split_across_deltas_never_reaches_the_tail () =
 
 let test_held_text_is_released_at_the_message_stop () =
   let keeper_name = "held-tail-preview" in
-  let writer = Some (Keeper_turn_preview.reset ~execution_scope:None ~turn_ref:None ~keeper_name ~now:1. ~redaction:Keeper_secret_redaction.empty) in
+  let writer = Some (Keeper_turn_preview.reset ~base_path:preview_base_path ~execution_scope:None ~turn_ref:None ~keeper_name ~now:1. ~redaction:Keeper_secret_redaction.empty) in
   Keeper_turn_preview.note_stream ~writer ~now:2. (text_delta "no newline yet");
   Alcotest.(check string) "held while the line is open" "" (tail keeper_name);
   Keeper_turn_preview.note_stream ~writer ~now:3. Agent_core.Types.MessageStop;
@@ -202,7 +223,7 @@ let test_korean_without_secrets_passes_through_whole () =
   let cut_in_a_syllable = 7 in
   let second_cut = String.length korean - 5 in
   with_secret_redaction ~keeper_name "unrelated-secret-value-5550" (fun redaction ->
-    let writer = Some (Keeper_turn_preview.reset ~execution_scope:None ~turn_ref:None ~keeper_name ~now:1. ~redaction) in
+    let writer = Some (Keeper_turn_preview.reset ~base_path:preview_base_path ~execution_scope:None ~turn_ref:None ~keeper_name ~now:1. ~redaction) in
     List.iteri
       (fun index piece ->
          Keeper_turn_preview.note_stream ~writer ~now:(2. +. float_of_int index)
@@ -237,7 +258,7 @@ let test_late_execution_keeps_successor_preview_and_redactor () =
     let a = Some (reset keeper_name ~now:1.) in
     let emit_a = callbacks a in
     emit_a (text_delta "old unfinished ");
-    let b = Some (Keeper_turn_preview.reset ~execution_scope:None ~turn_ref:None ~keeper_name ~now:2. ~redaction) in
+    let b = Some (Keeper_turn_preview.reset ~base_path:preview_base_path ~execution_scope:None ~turn_ref:None ~keeper_name ~now:2. ~redaction) in
     let emit_b = callbacks b in
     Keeper_turn_preview.note_attempt ~writer:b ~now:3. ~runtime_id:"current";
     emit_b (text_delta "successor-");
@@ -321,7 +342,7 @@ let test_released_source_position_through_turns_decoder () =
   Keeper_turn_preview.note_text ~writer ~now:8. "replacement";
   check_position 7 (String.length "replacement");
   with_secret_redaction ~keeper_name:name "exact-secret" (fun redaction ->
-    let writer = Some (Keeper_turn_preview.reset ~execution_scope:None ~turn_ref:None ~keeper_name:name ~now:9. ~redaction) in
+    let writer = Some (Keeper_turn_preview.reset ~base_path:preview_base_path ~execution_scope:None ~turn_ref:None ~keeper_name:name ~now:9. ~redaction) in
     Keeper_turn_preview.note_stream ~writer ~now:10. (text_delta "before exact-");
     check_position 0 0;
     Keeper_turn_preview.note_stream ~writer ~now:11. (text_delta "secret after\n");
@@ -434,7 +455,7 @@ let test_parallel_preparation_lineage_and_actual_wire () =
     let module Preview = Keeper_turn_preview in
     let keeper_name = "preparation-parallel-lineage" in
     let original = Ids.Turn_ref.make ~trace_id:"parallel-original" ~absolute_turn:3 in
-    let owned = Preview.reset ~keeper_name ~execution_scope:None ~turn_ref:(Some original)
+    let owned = Preview.reset ~base_path:preview_base_path ~keeper_name ~execution_scope:None ~turn_ref:(Some original)
         ~now:0. ~redaction:Keeper_secret_redaction.empty in
     let writer = Some owned in
     let scoped phase operation = Preview.with_preparation ~writer ~turn_ref:(Some original) ~phase operation in
@@ -502,7 +523,7 @@ let test_original_preparation_is_durable_after_successor () =
       let operation_id = match Keeper_operation_id.of_string "original-preparation-operation" with
         | Ok value -> value | Error detail -> Alcotest.fail detail in
       let execution_scope = Keeper_execution_scope_id.direct_operation operation_id in
-      let preview = Preview.reset ~keeper_name ~turn_ref:(Some turn_ref)
+      let preview = Preview.reset ~base_path:preview_base_path ~keeper_name ~turn_ref:(Some turn_ref)
           ~execution_scope:(Some execution_scope) ~now:0. ~redaction:Keeper_secret_redaction.empty in
       let expected = Error (ref "original returned error") in
       let result = Observation.with_turn ~config ~keeper_name ~preview (fun () ->
@@ -635,6 +656,8 @@ let () =
             test_overlapping_and_rejected_tools_remain_observations
         ; Alcotest.test_case "live wait, failover, tool, and next-turn visibility" `Quick
             test_live_attempt_failover_and_new_turn
+        ; Alcotest.test_case "a provider request after a tool is a wait" `Quick
+            test_a_request_after_a_tool_waits_on_the_provider
         ; Alcotest.test_case "tail cuts on a UTF-8 boundary" `Quick
             test_tail_cuts_on_utf8_boundary
         ; Alcotest.test_case "blank text does not erase the last words" `Quick

@@ -145,6 +145,29 @@ let test_invalidation () =
     Alcotest.(check yojson) "second value" (`Assoc [ ("count", `Int 2) ]) v2)
 ;;
 
+(* RFC-0480 §3.4: a reader woken by a confirmation change reads the snapshot
+   again, so the announcement drops what is cached before it is heard. *)
+let test_a_confirmation_announcement_drops_the_cache () =
+  Eio_main.run @@ fun env ->
+  Eio_guard.enable ();
+  Eio.Switch.run @@ fun sw ->
+  with_test_eio env sw (fun () ->
+    invalidate ();
+    let key = "confirm-announce-key" in
+    let compute () = `Assoc [] in
+    ignore (get_or_compute key ~ttl:60.0 compute);
+    Alcotest.(check bool) "the snapshot is cached" true
+      (Option.is_some (Operator_control_snapshot_cache.peek key));
+    let cached_when_published = ref None in
+    Server_pending_confirm_expiry.For_testing.invalidate_with
+      ~enqueue:(fun ~base_path:_ ->
+        cached_when_published := Some (Option.is_some (Operator_control_snapshot_cache.peek key)))
+      ~restore:(fun ~base_path:_ -> ())
+      ~base_path:"confirm-announce";
+    Alcotest.(check (option bool)) "the publication found it dropped" (Some false)
+      !cached_when_published)
+;;
+
 let () =
   Alcotest.run
     "Operator_control_snapshot_cache"
@@ -155,6 +178,9 @@ let () =
       , [ Alcotest.test_case "serves stale and refreshes in background" `Quick
             test_stale_while_revalidate ] )
     ; ( "invalidation"
-      , [ Alcotest.test_case "clears entry" `Quick test_invalidation ] )
+      , [ Alcotest.test_case "clears entry" `Quick test_invalidation
+        ; Alcotest.test_case "a confirmation announcement drops the cache" `Quick
+            test_a_confirmation_announcement_drops_the_cache
+        ] )
     ]
 ;;

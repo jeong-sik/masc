@@ -156,6 +156,12 @@ let dashboard_memory_http_json ?config request : Yojson.Safe.t =
     [status_filter] used to be parsed and cache-keyed here while the projection
     discarded them, which fragmented the cache across keys that computed
     identical payloads — they are gone rather than silently ignored. *)
+let gate_cache_prefix ~base_path = Printf.sprintf "gate:%s;" base_path
+
+let invalidate_gate_snapshots ~base_path =
+  Dashboard_cache.invalidate_prefix (gate_cache_prefix ~base_path)
+;;
+
 let dashboard_gate_http_json request ~base_path : Yojson.Safe.t =
   let limit =
     int_query_param
@@ -179,8 +185,8 @@ let dashboard_gate_http_json request ~base_path : Yojson.Safe.t =
   in
   let cache_key =
     Printf.sprintf
-      "gate:%s;%d;%d;%d"
-      base_path
+      "%s%d;%d;%d"
+      (gate_cache_prefix ~base_path)
       limit
       window_minutes
       approval_queue_revision
@@ -284,7 +290,8 @@ let dashboard_scheduled_automation_http_json ~(config : Workspace.config) :
   Yojson.Safe.t
   =
   Dashboard_cache.get_or_compute
-    (Server_dashboard_http_core_cache.scheduled_automation_cache_key config)
+    (Server_dashboard_http_core_cache.scheduled_automation_cache_key
+       ~base_path:config.base_path)
     ~ttl:Server_dashboard_http_core_cache.live_cache_ttl_s
     (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
       Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
@@ -709,9 +716,7 @@ let dashboard_planning_http_json ~(config : Workspace.config) : Yojson.Safe.t =
     ]
 ;;
 
-let planning_cache_key ~base_path =
-  Printf.sprintf "planning:%s" base_path
-;;
+let planning_cache_key = Server_dashboard_http_core_cache.planning_cache_key
 
 let cached_planning_payload ~(config : Workspace.config) =
   Dashboard_cache.get_or_compute_payload (planning_cache_key ~base_path:config.base_path)
@@ -720,9 +725,10 @@ let cached_planning_payload ~(config : Workspace.config) =
        dashboard_planning_http_json ~config))
 ;;
 
-let install_planning_cache_invalidation () =
+let install_goal_projection_observer () =
   Atomic.set Workspace_hooks.on_goal_projection_mutation_fn (fun ~base_path ->
-    Dashboard_cache.invalidate (planning_cache_key ~base_path))
+    Dashboard_cache.invalidate (planning_cache_key ~base_path);
+    Goal_projection_broadcast.changed ~base_path)
 ;;
 
 let dashboard_goals_tree_http_json ~(config : Workspace.config) : Yojson.Safe.t =

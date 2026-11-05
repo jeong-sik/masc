@@ -56,6 +56,18 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
+(* [Board_dispatch] auto-inits the process-wide Board backend against the
+   workspace of the first call that reaches it, and [Board_dispatch.init_jsonl]
+   refuses a different workspace while one is bound. A test case that reaches
+   the board binds the global to its temporary directory and then removes the
+   directory, so the next board call fails with "Board BasePath is missing"
+   (run 41827897543, eio #54: tools/call logs structured MCP details). Every
+   test that can reach the board starts with no Board bound and leaves none
+   behind, as test_server_runtime_bootstrap does with with_server_state_dir. *)
+let reset_board_test_globals () =
+  Masc.Board.reset_global_for_test ();
+  Masc.Board_dispatch.reset_for_test ()
+
 let with_env key value f =
   let old = Sys.getenv_opt key in
   Unix.putenv key value;
@@ -2194,92 +2206,6 @@ let test_handle_request_tools_call_transition_claim_guidance () =
     (List.mem "masc_plan_set_task" steps);
   cleanup_dir base_path
 
-let test_handle_request_tools_call_transition_done_requires_llm_verdict () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Mcp_eio.set_net (Eio.Stdenv.net env);
-  Mcp_eio.set_clock (Eio.Stdenv.clock env);
-  let clock = Eio.Stdenv.clock env in
-  Eio.Switch.run @@ fun sw ->
-  let base_path = temp_dir () in
-  let state = Mcp_eio.For_testing.create_state ~base_path () in
-  Auth.disable_auth base_path;
-  let sid = "mcp-transition-done-guidance" in
-  let init_result =
-    Mcp_eio.execute_tool_eio ~sw ~clock
-      ~workspace_scope:(Mcp_server.workspace_scope state)
-      ~mcp_session_id:sid state
-      ~name:"masc_init" ~arguments:(`Assoc [])
-  in
-  (* masc_init and setup join are not under test here; initialise the workspace
-     fixture directly so transition guidance assertions are isolated. *)
-  Alcotest.(check bool) "init returns failure (tool pruned)" false (Tool_result.is_success init_result);
-  let _ = Masc.Workspace.init (Mcp_server.workspace_config state) ~agent_name:None in
-  let _bound =
-    Masc.Workspace.bind_session (Mcp_server.workspace_config state) ~agent_name:"codex" ~capabilities:[] ()
-  in
-  ignore
-    (Masc.Workspace.add_task (Mcp_server.workspace_config state) ~title:"transition-done"
-       ~priority:2 ~description:"");
-  let claim_result =
-    Mcp_eio.execute_tool_eio ~sw ~clock
-      ~workspace_scope:(Mcp_server.workspace_scope state)
-      ~mcp_session_id:sid state
-      ~name:"masc_transition"
-      ~arguments:
-        (`Assoc
-          [
-            ("task_id", `String "task-001");
-            ("action", `String "claim");
-          ])
-  in
-  Alcotest.(check bool) "claim setup success" true (Tool_result.is_success claim_result);
-  let request =
-    Yojson.Safe.to_string
-      (`Assoc
-        [
-          ("jsonrpc", `String "2.0");
-          ("id", `Int 115);
-          ("method", `String "tools/call");
-          ( "params",
-            `Assoc
-              [
-                ("name", `String "masc_transition");
-                ( "arguments",
-                  `Assoc
-                    [
-                      ("task_id", `String "task-001");
-                      ("action", `String "done");
-                      ("notes", `String "Completed task and verified output");
-                    ] );
-              ] );
-        ])
-  in
-  let response =
-    Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:sid state request
-  in
-  let envelope = result_envelope_exn response in
-  Alcotest.(check string) "done result status" "error"
-    (match List.assoc_opt "status" envelope with
-     | Some (`String status) -> status
-     | _ -> Alcotest.fail "status missing");
-  Alcotest.(check bool) "done rejection is an MCP tool error" true
-    (match List.assoc_opt "isError" (result_fields_exn response) with
-     | Some (`Bool value) -> value
-     | _ -> Alcotest.fail "missing isError");
-  let task =
-    Masc.Workspace.get_tasks_raw (Mcp_server.workspace_config state)
-    |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id "task-001")
-  in
-  (match task with
-   | Some { task_status = Masc_domain.Claimed _; _ } -> ()
-   | Some _ -> Alcotest.fail "task-001 must remain claimed without an LLM verdict"
-   | None -> Alcotest.fail "task-001 missing");
-  Alcotest.(check (option string)) "rejected done keeps current_task"
-    (Some "task-001")
-    (Masc.Task.Planning_eio.get_current_task (Mcp_server.workspace_config state));
-  cleanup_dir base_path
-
 let test_handle_request_tools_call_transition_claim_requires_action () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -3037,6 +2963,7 @@ let test_handle_request_tools_call_board_post_structured_content () =
   Eio_context.set_switch sw;
 
   let base_path = temp_dir () in
+  reset_board_test_globals ();
   let state = Mcp_eio.For_testing.create_state ~base_path () in
   ignore (Masc.Workspace.init (Mcp_server.workspace_config state) ~agent_name:None);
   let request = Yojson.Safe.to_string (`Assoc [
@@ -3060,6 +2987,7 @@ let test_handle_request_tools_call_board_post_structured_content () =
     Yojson.Safe.Util.(structured |> member "content" = `Null);
   Alcotest.(check string) "board author" "tester"
     Yojson.Safe.Util.(structured |> member "author" |> to_string);
+  reset_board_test_globals ();
   cleanup_dir base_path
 
 let test_handle_request_tools_call_logs_structured_mcp_details () =
@@ -3073,8 +3001,11 @@ let test_handle_request_tools_call_logs_structured_mcp_details () =
   let base_path = temp_dir () in
   let request_id = "1201" in
   Fun.protect
-    ~finally:(fun () -> cleanup_dir base_path)
+    ~finally:(fun () ->
+      reset_board_test_globals ();
+      cleanup_dir base_path)
     (fun () ->
+      reset_board_test_globals ();
       let state = Mcp_eio.For_testing.create_state ~base_path () in
       ignore (Masc.Workspace.init (Mcp_server.workspace_config state) ~agent_name:None);
       let request =
@@ -4285,8 +4216,6 @@ let eio_tests = [
     test_handle_request_tools_call_managed_invalid_arguments_records_duration;
   "handle tools/call transition claim guidance", `Quick,
     test_handle_request_tools_call_transition_claim_guidance;
-  "handle tools/call transition done requires LLM verdict", `Quick,
-    test_handle_request_tools_call_transition_done_requires_llm_verdict;
   "handle tools/call transition claim requires action", `Quick,
     test_handle_request_tools_call_transition_claim_requires_action;
   (* cache get structured content test removed: cache tools retired (#3640) *)

@@ -595,15 +595,15 @@ type retry_admission =
   | Already_pending
 
 (* What happened to the retry after the attempt was recorded: the value the
-   Board post is projected from. *)
+   WARN line is chosen from. *)
 type retry_scheduling =
   | Retry_not_requested
   | Retry_admitted of retry_admission
 
 (** Why a review stopped without a verdict. One constructor per way the Task
     is left waiting on a producer, an operator, or the lane's own retry; the
-    registry row, the WARN line and the Board notice are all read off this
-    sum, so none of them can say something the others do not. Only
+    registry row and the WARN line are both read off this sum, so neither can
+    say something the other does not. Only
     [Not_reviewed] can request a retry: the evaluator's typed candidate
     failures are the only automatic-retry authority, so no other stop can ask
     for one. *)
@@ -669,10 +669,9 @@ let registry_outcome_of_stop_cause : stop_cause -> Verification_run_registry.out
 
 (* No verdict means nobody judged this submission. Whether the lane retries
    on its own is read off the evaluator's typed candidate failures that this
-   cause carries; the WARN line and the Board notice follow in
-   [process_task], after the run row is recorded and the scheduler has
-   answered, so both describe the timer that exists rather than the one this
-   attempt asked for. *)
+   cause carries; the WARN line follows in [process_task], after the run row
+   is recorded and the scheduler has answered, so it describes the timer that
+   exists rather than the one this attempt asked for. *)
 let not_reviewed_of_result (result : Task.Anti_rationalization.review_result) =
   let gate = Task.Anti_rationalization.gate_to_string result.gate in
   (* Both arms are real descriptions, not a default standing in for an
@@ -716,15 +715,7 @@ let stop_cause_detail = function
   | Raised { detail } -> detail
 ;;
 
-(* The Board notice keys its repeat check on [gate]: a reviewed stop keeps
-   the evaluator's gate name, every other stop is keyed by its constructor. *)
-let stalled_gate = function
-  | Not_reviewed { gate; _ } -> gate
-  | (Execution_pending _ | Execution_repair_required _ | Infrastructure_unavailable _ | Commit_failed _ | Raised _) as cause ->
-    stop_cause_label cause
-;;
-
-(* The Board disposition for one stall, from what the scheduler reported. A
+(* The disposition for one stall, from what the scheduler reported. A
    timer this stall armed fires after the lane's full interval; a timer it
    joined, or one already holding its key, fires when it fires. *)
 let stall_disposition_of_scheduling ~retry_interval_sec
@@ -738,19 +729,15 @@ let stall_disposition_of_scheduling ~retry_interval_sec
     Verification_protocol.Retry_scheduled { delay = Verification_protocol.Shared_timer }
 ;;
 
-(* The delay as the log line spells it. The Board sentence spells the same
-   value in [Verification_protocol.retry_delay_sentence]; both read one
-   [retry_delay]. *)
+(* The delay as the log line spells it. *)
 let retry_delay_field = function
   | Verification_protocol.Full_interval { seconds } -> Printf.sprintf "in_sec=%.1f" seconds
   | Verification_protocol.Shared_timer -> "in=shared_timer"
 ;;
 
 (* The one WARN a review without a verdict writes. Its template is chosen by
-   the same [stall_disposition] the Board sentence is rendered from, so the
-   line and the post cannot disagree about what happens next: a retry the
-   scheduler armed says so and how soon; anything else names the stop and
-   who must act. *)
+   the [stall_disposition]: a retry the scheduler armed says so and how soon;
+   anything else names the stop and who must act. *)
 let stall_log_line ~task_id ~verification_id ~cause ~disposition =
   match disposition with
   | Verification_protocol.Retry_scheduled { delay } ->
@@ -778,30 +765,8 @@ let stall_log_line ~task_id ~verification_id ~cause ~disposition =
       (stop_cause_detail cause)
 ;;
 
-(* Writes the WARN, then projects the same disposition to the Board through
-   [notify]. The WARN is the lane's own record and goes first, so no Board
-   effect can keep it from being written. The Board is a projection: an
-   ordinary exception out of it is recorded as a second line, with the
-   exception as evidence, and changes neither the review outcome nor the
-   retry already armed. Cancellation is not contained. *)
-let announce_stall ~notify ~task_id ~verification_id ~cause ~disposition =
-  Log.Misc.warn "%s" (stall_log_line ~task_id ~verification_id ~cause ~disposition);
-  match
-    notify
-      ~task_id
-      ~verification_id
-      ~gate:(stalled_gate cause)
-      ~detail:(stop_cause_detail cause)
-      ~disposition
-  with
-  | () -> ()
-  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-  | exception exn ->
-    Log.Misc.error
-      "system LLM completion authority stall notice did not reach the Board; the line above stands task_id=%s verification_id=%s error=%s"
-      task_id
-      verification_id
-      (Printexc.to_string exn)
+let announce_stall ~task_id ~verification_id ~cause ~disposition =
+  Log.Misc.warn "%s" (stall_log_line ~task_id ~verification_id ~cause ~disposition)
 ;;
 
 (* Returns the control-flow outcome the scan loop acts on, paired with the
@@ -1154,6 +1119,7 @@ let process_task_once ?(registry=Verification_run_registry.global ())
                 Task.Anti_rationalization.few_shot_block =
                   Eval_calibration.format_few_shot_block
                     (Eval_calibration.select_examples
+                       ~base_path:runtime.config.base_path
                        ~max_examples:judge_few_shot_examples)
               ; evidence_posture =
                   evidence_posture_of_snapshot prepared.evidence_access
@@ -1271,13 +1237,14 @@ let process_task_once ?(registry=Verification_run_registry.global ())
                July evaluation flow was removed, but this call went with it,
                and the ledger starved for a month while verdicts flowed
                (last record 2026-07-27; the surface read as a museum). A
-               non-verdict is a no-op inside; the stalled path below already
-               reaches the Board. *)
+               non-verdict is a no-op inside. *)
             let reviewed_request = Verifier_review_original.review_request original in
             (* The v3 original freezes the generator runtime, not the submitting
                response identity. The current wake cannot bind that identity to
                this original, even when both name the same runtime. *)
-            Eval_calibration.record_verdict ~task_id:reviewed_request.task_id
+            Eval_calibration.record_verdict
+              ~base_path:runtime.config.base_path
+              ~task_id:reviewed_request.task_id
               ~req:reviewed_request ~result ();
             let evaluator_runtime = result.evaluator_runtime in
             match result.verdict with
@@ -1455,8 +1422,8 @@ let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verifi
        path resting until a time its provider stated -- has no producer
        action that can legally advance the Task: it is still
        [AwaitingVerification]. Re-arm the application-owned scan after the
-       durable run observation is recorded, then say what the scheduler did —
-       in the log first, then on the Board. Every other stall keeps the
+       durable run observation is recorded, then say in the log what the
+       scheduler did. Every other stall keeps the
        producer/operator contract, and restart recovery still comes from
        [start]'s initial pending scan. *)
     let outcome : process_outcome =
@@ -1476,9 +1443,7 @@ let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verifi
          through a fresh submission, or through the sweep, which is armed at
          boot and after a failed backlog read rather than on a timer. So that
          Task sits in [AwaitingVerification] until a producer or operator
-         acts, and the registry row alone reaches no one: every stop is
-         promoted to the Board, where the producer Keeper and the operator
-         read it and decide whether to resubmit. *)
+         acts. *)
       let delay_sec =
         retry_delay_sec
           ~retry_interval_sec:runtime.retry_interval_sec
@@ -1490,25 +1455,9 @@ let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verifi
         | No_retry_requested -> Retry_not_requested
         | Retry_requested | Observe_original_requested -> Retry_admitted (schedule_retry runtime key ~delay_sec)
       in
-      (* One disposition, read after the scheduler answered, drives both the
-         WARN template and the Board sentence: the reader of either is told
-         about a timer that exists. Visibility only; the Board schedules
-         nothing. *)
+      (* The disposition is read after the scheduler answered, so the WARN
+         names a timer that exists. *)
       announce_stall
-        ~notify:(fun ~task_id ~verification_id ~gate ~detail ~disposition ->
-          let evaluator_runtime =
-            match cause with
-            | Not_reviewed { evaluator_runtime; _ } -> Some evaluator_runtime
-            | Execution_pending _ | Execution_repair_required _ | Infrastructure_unavailable _ | Commit_failed _ | Raised _ -> None
-          in
-          Verification_protocol.notify_stalled_verification_with_runtime
-            ~authority:system_authority
-            ~subject:
-              (Verification_protocol.Task_review
-                 { task_id; verification_id; disposition })
-            ~gate
-            ~detail
-            ~evaluator_runtime)
         ~task_id:task.id
         ~verification_id
         ~cause
@@ -1845,7 +1794,6 @@ module For_testing = struct
   let retry_delay_sec = retry_delay_sec
   let stall_disposition_of_scheduling = stall_disposition_of_scheduling
   let stop_cause_label = stop_cause_label
-  let stalled_gate = stalled_gate
   let stall_log_line = stall_log_line
   let announce_stall = announce_stall
 

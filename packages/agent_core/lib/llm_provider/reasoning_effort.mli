@@ -27,6 +27,8 @@ val rank : t -> int
     requested one. *)
 val compare : t -> t -> int
 
+val equal : t -> t -> bool
+
 val to_string : t -> string
 val pp : Format.formatter -> t -> unit
 val show : t -> string

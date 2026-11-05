@@ -36,7 +36,7 @@ val pending_board_event_of_stimulus
     Completion rejection authority is checked at intake: obsolete relations
     retire only their exact selection; unread authority retains it for retry.
     A Board read that established absence is consumed as an empty event; an
-    unpinned legacy audience or unavailable source retains its selection. *)
+    unavailable source retains its selection. *)
 type stimulus_intake_result =
   | Stimulus_consumed of Keeper_world_observation.pending_board_event list
   | Stimulus_board_unavailable of Keeper_world_observation_board_signal.board_unavailable
@@ -50,16 +50,16 @@ type stimulus_intake_result =
   | Stimulus_completion_rejection_obsolete
   | Stimulus_completion_rejection_retry_later of string
 
-(** Pure boundary for one rendered Board event. A missing pinned audience or
-    unavailable source is retained; established absence is consumed. *)
+(** Pure boundary for one rendered Board event. An unavailable source is
+    retained; established absence is consumed. *)
 val classify_pending_board_event_result
   :  (Keeper_world_observation.pending_board_event option, Keeper_world_observation_board_signal.board_unavailable) result
   -> stimulus_intake_result
 
 (** [pending_board_events_of_stimulus_result ~meta_after_triage stim] renders
-    [stim] into zero-or-one pending board events. An unpinned legacy audience
-    or unavailable posts source returns [Stimulus_board_unavailable];
-    established absence is logged, counted and consumed. Original job
+    [stim] into zero-or-one pending board events. An unavailable posts source
+    returns [Stimulus_board_unavailable]; established absence is logged,
+    counted and consumed. Original job
     completions instead require the canonical owner and return
     [Stimulus_job_unavailable] for retention on any source read failure.
     Add-on notices likewise return [Stimulus_addon_unavailable] rather than
@@ -263,12 +263,3 @@ val heartbeat_event_intake
   -> pending_board_events:Keeper_world_observation.pending_board_event list
   -> heartbeat_event_intake
 
-val heartbeat_event_intake_with_priority
-  :  priority_sources:Keeper_event_queue_state.pending_selection list
-  -> ctx:'a context
-  -> meta_after_triage:keeper_meta
-  -> pending_board_events:Keeper_world_observation.pending_board_event list
-  -> heartbeat_event_intake
-(** The still-pending exact handoff cohort is admitted before ambient sources.
-    Newer incarnations are not matched by post id, and the ordinary intake and
-    dispatch-time validation remain authoritative. *)

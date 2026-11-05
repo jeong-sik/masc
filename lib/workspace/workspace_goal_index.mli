@@ -93,19 +93,6 @@ val read_goal_task_links_authoritative_r :
     means a new empty registry. A missing, unreadable, or malformed primary is
     an error when a recovery snapshot exists. Link mutations use this reader. *)
 
-(** Read the same primary authority for an ownership decision, retaining the
-    normalized Task IDs whose original Goal or Task link keys were padded.
-    Duplicate structural JSON members make this observation unreadable. *)
-type goal_task_link_observation =
-  { normalized_links : (string * string list) list
-  ; ambiguous_task_ids : string list
-  ; padded_key_present : bool
-  }
-
-val read_goal_task_links_observed_r :
-  Workspace_utils_backend_setup.config ->
-  (goal_task_link_observation, string) result
-
 (** Persist the goal-task link registry. *)
 val write_goal_task_links :
   Workspace_utils_backend_setup.config -> (string * string list) list -> unit

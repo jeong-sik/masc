@@ -58,11 +58,6 @@ let composite_recommended_actions_json ~keeper_name ~snapshot ~execution ~attent
   let actions =
     if not attention.cra_needs_attention
     then []
-    else if composite_execution_claim_no_eligible execution
-    then
-      [ probe ("Inspect the keeper's latest claim attempt: " ^ reason)
-      ; message ("Resolve keeper claim scope before retry: " ^ reason)
-      ]
     else if composite_execution_config_blocked execution
     then
       [ probe ("Inspect configuration/auth blocker: " ^ reason)

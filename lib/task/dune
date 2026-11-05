@@ -12,9 +12,7 @@
   tool_task
   tool_task_args
   tool_task_completion_review
-  tool_task_contract_gate
   tool_task_handlers
-  tool_task_no_eligible
   tool_task_payloads
   tool_task_schemas
   tool_task_schemas_toml

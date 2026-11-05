@@ -84,7 +84,7 @@ let check_passthrough () =
   check_int "unbound diagnostic thunk is skipped" 0 !observer_calls;
   let calls = ref 0 in
   let original = Ok (ref 17) in
-  let result = Observation.measure ~site:Phase0_bytes ~schema:key (fun () ->
+  let result = Observation.measure ~site:Final_attribution_bytes ~schema:key (fun () ->
     incr calls; original) in
   check_bool "original result object" true (result == original);
   check_int "measurement operation once" 1 !calls;
@@ -103,7 +103,7 @@ let check_passthrough () =
   List.iter (fun expected ->
     let raised_calls = ref 0 in
     check_exception expected (fun () ->
-      Observation.measure ~site:Phase0_bytes (fun () ->
+      Observation.measure ~site:Final_attribution_bytes (fun () ->
         incr raised_calls; raise expected));
     check_int "raising operation once" 1 !raised_calls)
     [Product_failure (ref 9); Eio.Cancel.Cancelled Exit];
@@ -124,7 +124,7 @@ let test_disabled_and_binding_restoration () =
       check_bool "outer observer enabled" true (Observation.enabled ());
       Observation.within disabled check_passthrough;
       check_bool "outer binding restored" true (Observation.enabled ());
-      ignore (Observation.measure ~site:Phase0_bytes (fun () -> 7)));
+      ignore (Observation.measure ~site:Final_attribution_bytes (fun () -> 7)));
     check_int "outer observer receives only restored work" 2
       (List.length (events (report_json active))));
   let report = report_json disabled in
@@ -174,7 +174,7 @@ let test_active_result_and_exception () =
       Observation.within owner (fun () ->
         let calls = ref 0 in
         let original = Ok (ref 19) in
-        let result = Observation.measure ~site:Phase0_bytes (fun () -> incr calls; original) in
+        let result = Observation.measure ~site:Final_attribution_bytes (fun () -> incr calls; original) in
         check_bool "active original result object" true (result == original);
         check_int "active operation once" 1 !calls;
         let bytes = Bytes.to_string (Bytes.of_string "encoder bytes 관측") in
@@ -195,7 +195,7 @@ let test_active_result_and_exception () =
         List.iter (fun error ->
           let calls = ref 0 in
           check_exception error (fun () ->
-            Observation.measure ~site:Phase0_bytes (fun () -> incr calls; raise error));
+            Observation.measure ~site:Final_attribution_bytes (fun () -> incr calls; raise error));
           check_int "active raising operation once" 1 !calls)
           [Product_failure (ref 23); Eio.Cancel.Cancelled Exit]);
       let report = report_json owner in
@@ -219,7 +219,7 @@ let test_observer_failure_isolation () =
       check_bool "ordinary diagnostic failure is isolated" true (result = None);
       check_int "diagnostic failure is not retried" 1 !attempts;
       let product_calls = ref 0 in
-      ignore (Observation.measure ~site:Phase0_bytes (fun () -> incr product_calls));
+      ignore (Observation.measure ~site:Final_attribution_bytes (fun () -> incr product_calls));
       check_int "subsequent product operation runs once" 1 !product_calls;
       let cancellation = Eio.Cancel.Cancelled Exit in
       check_exception cancellation (fun () ->
@@ -289,7 +289,7 @@ let test_captured_scope_survives_yield_and_sibling () =
                   ~absolute_turn:9 ~execution_scope:None ~cause:None (fun () ->
                   let sibling_scope = Option.map Observation.scope_to_json (Observation.current_scope ()) in
                   Eio.Promise.resolve ready_u sibling_scope;
-                  Observation.measure ~site:Phase0_bytes (fun () ->
+                  Observation.measure ~site:Final_attribution_bytes (fun () ->
                     Eio.Promise.await release;
                     Eio.Fiber.yield ();
                     check_bool "sibling keeps its own binding after yielding" true
@@ -526,7 +526,7 @@ let streaming_fixture mode =
             match Observation.fresh_object_id (), Observation.fresh_object_id () with
             | Some descriptor_id, Some addon_owner_id ->
               Observation.with_definition ~descriptor_id ~addon_owner_id:(Some addon_owner_id)
-                (fun () -> Observation.with_site Phase0_bytes work)
+                (fun () -> Observation.with_site Prompt_metrics_encode work)
             | None, None -> work ()
             | Some _, None | None, Some _ -> Alcotest.fail "partial fixture identities"))));
     Observation.snapshot owner)

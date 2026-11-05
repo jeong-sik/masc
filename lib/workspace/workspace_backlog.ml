@@ -28,14 +28,6 @@ let decode_backlog ~path json =
                  path
                  entry.dropped_task_id
                  detail
-           | Field_absent | Field_decoded -> ());
-          (match entry.dropped_outcomes.reclaim_policy_outcome with
-           | Field_unreadable detail ->
-               Log.Misc.warn
-                 "[read_backlog] %s: task %s reclaim_policy unreadable, dropped: %s"
-                 path
-                 entry.dropped_task_id
-                 detail
            | Field_absent | Field_decoded -> ()))
         dropped;
       Ok backlog

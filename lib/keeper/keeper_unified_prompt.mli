@@ -182,14 +182,12 @@ type prepared_prompt
 
 val prepare_prompt :
   turn_decision:Keeper_world_observation.keeper_cycle_decision ->
-  ?previous_turn_stop:Keeper_turn_checkpoint_reason.t ->
   current_task:Keeper_world_observation_inputs.current_task_observation ->
   ?task_skill_surfaces:(string * Keeper_skill_catalog.exact_surface list) list ->
   ?active_goal_summaries:(goal_summary list, Goal_store.unavailable) result ->
   ?workspace_memory:Workspace_memory_ledger.observation ->
   ?wiki_contents:Keeper_wiki_contents.t ->
   ?lane_updates:(Yojson.Safe.t, string) result ->
-  ?repository_freshness:Keeper_sandbox_control.freshness_row list ->
   observation:Keeper_world_observation.world_observation ->
   unit -> prepared_prompt
 (** Render common layers, frame provenance and durable user input once from
@@ -218,7 +216,6 @@ val project_prompt :
     @param observation Current world snapshot *)
 val build_prompt :
   turn_decision:Keeper_world_observation.keeper_cycle_decision ->
-  ?previous_turn_stop:Keeper_turn_checkpoint_reason.t ->
   current_task:Keeper_world_observation_inputs.current_task_observation ->
   ?task_skill_surfaces:(string * Keeper_skill_catalog.exact_surface list) list ->
   ?active_goal_summaries:(goal_summary list, Goal_store.unavailable) result ->
@@ -226,17 +223,11 @@ val build_prompt :
   ?workspace_memory_access:Keeper_request_tool_access.t ->
   ?wiki_contents:Keeper_wiki_contents.t ->
   ?lane_updates:(Yojson.Safe.t, string) result ->
-  ?repository_freshness:Keeper_sandbox_control.freshness_row list ->
   ?recent_work:Keeper_recent_work.transmission ->
   observation:Keeper_world_observation.world_observation ->
   unit ->
   turn_prompt_parts
-(** [?previous_turn_stop]: why this keeper's last turn in this process ended
-    before completing, rendered as one line in the Autonomous Trigger layer.
-    Omitted (the turn completed, failed, or this is the first turn since the
-    process started), the layer says nothing about it.
-
-    RFC-0315 wake-turn self-description:
+(** RFC-0315 wake-turn self-description:
     - [turn_decision]: the scheduler's actual cycle decision, required so the
       rendered wake reason matches the decision that fired the turn.
     - [current_task] renders the held task or its explicit missing/unavailable
@@ -254,9 +245,6 @@ val build_prompt :
     - [?recent_work]: recent attributed conversation and the latest autonomous
       conclusion, read from the selected Keeper trace. Historical context only;
       missing history and unavailable sources do not infer work completion.
-    - [?repository_freshness]: rows for the Repository Checkouts layer,
-      measured by {!Keeper_sandbox_control.checkout_freshness_rows}. Omitted
-      or empty, the layer is absent.
     - [?wiki_contents]: the Wiki layer, {!format_wiki_observation} with the
       request's [?workspace_memory_access]. Omitted, the layer is absent. *)
 
@@ -268,7 +256,6 @@ val build_prompt_preview :
   ?workspace_memory_access:Keeper_request_tool_access.t ->
   ?wiki_contents:Keeper_wiki_contents.t ->
   ?lane_updates:(Yojson.Safe.t, string) result ->
-  ?repository_freshness:Keeper_sandbox_control.freshness_row list ->
   ?recent_work:Keeper_recent_work.transmission ->
   observation:Keeper_world_observation.world_observation ->
   unit ->

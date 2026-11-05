@@ -2,7 +2,7 @@ defer_loading = true
 name = "masc_plan_get_task"
 title = "Get Current Task"
 description = """
-Get the task_id you're currently working on (session-scoped). Use when \
-resuming work after a context switch or verifying your current assignment. \
-Auto-cleared on session end."""
+Read the workspace's current-task marker: a task_id, or null when none is \
+set. A claim sets the marker and each later claim or transition resets it \
+to the first task assigned to the caller, so it normally names that task."""
 additional_properties = false

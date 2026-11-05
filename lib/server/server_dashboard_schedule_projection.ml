@@ -548,8 +548,6 @@ let schedule_keeper_queue_evidence_dashboard_json
           | Some _, [], Error reason -> encode "read_error" [ "reason", `String reason ]
           | Some _, [], Ok (Server_schedule_consumers.Terminal_completed_at (owner, source, evidence)) ->
             terminal owner source evidence "completed" None
-          | Some _, [], Ok (Server_schedule_consumers.Terminal_failed_at (owner, source, reason, evidence)) ->
-            terminal owner source evidence "failed" (Some reason)
           | Some _, [], Ok (Server_schedule_consumers.Terminal_cancelled_at (owner, source, reason, evidence)) ->
             terminal owner source evidence "cancelled" (Some reason)
           | Some _, [], Ok (Server_schedule_consumers.Transfer_projecting_at (owner, target, source)) ->
@@ -1147,6 +1145,24 @@ let schedule_runner_dashboard_json ~now runner_status =
           (Schedule_contract_values.runner_status_to_string
              (Server_schedule_runner_policy.status ~now runner_status)) )
     ]
+;;
+
+let runner_page_view ~now (runner_status : Schedule_runner_status.snapshot) =
+  let holds =
+    match runner_status.last_success with
+    | None -> []
+    | Some { held; held_at; _ } ->
+      List.map
+        (fun ({ signal; reason } : Schedule_runner.held) ->
+           `List
+             [ `String signal.schedule_instance_id
+             ; `String signal.schedule_id
+             ; schedule_runner_hold_dashboard_json
+                 (Some { Schedule_runner_status.signal; reason; observed_at = held_at })
+             ])
+        held
+  in
+  `List [ schedule_runner_dashboard_json ~now runner_status; `List holds ]
 ;;
 
 let schedule_request_rows_dashboard_json ~config ~now ~runner_status state request_rows =

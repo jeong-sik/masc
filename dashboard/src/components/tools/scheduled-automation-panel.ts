@@ -446,7 +446,6 @@ function queueEvidenceTone(
     case 'matched_terminal_completed': return 'ok'
     case 'terminal_projection_pending':
     case 'transfer_projection_pending': return 'info'
-    case 'matched_terminal_failed':
     case 'matched_terminal_cancelled':
     case 'retained_terminal_wake':
     case 'withdrawn_at_cancel': return 'warn'

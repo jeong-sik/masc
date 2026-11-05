@@ -270,7 +270,9 @@ let installation_id (e : entry) = Lane_addon_tool_request_owner.installation_id 
   | None -> Lane_addon_tool_request_owner.Manual e.instance_id)
 let notify_exports m e =
   publish_owner_event ~root:(Lane_addon_store.root m.store) ~package_id:e.package.id Export_inventory_changed;
-  notify_tool_change e.package
+  notify_tool_change e.package;
+  if e.package.exported_tools <> [] then
+    Lane_addon_exports_broadcast.changed ~base_path:m.base_path
 let override : backend option ref = ref None
 type fleet_backend = {
   snapshot : config:Workspace.config -> caller:string -> access:Lane_addon_sources.access -> (Lane_addon_broadcast_delivery.sender_authority * string list,string) result;
@@ -1357,8 +1359,18 @@ let run_host_watch ~sw ~cleanup_sw ~backend m e port await_change =
       match changed with
       | Ok state -> if not e.stopping then (wake_host e;watch (Some state.revision))
       | Error detail -> if not e.stopping then (
+          (* The worker exit's order: the entry stops, records why, and
+             announces that its exports are no longer ready. A cleanup that
+             fails afterwards keeps this cause as the earliest one. *)
+          let cause = Lifecycle.Worker_failed ("model request watcher: " ^ detail) in
+          Log.Misc.warn "Lane Add-on instance %s (package %s): %s" e.instance_id e.package.id
+            (Lifecycle.failure_to_string cause);
           retire_admission e;
-          failed m e (Lifecycle.Worker_failed ("model request watcher: " ^ detail));
+          e.state <- fail_state e cause;
+          notify_exports m e;
+          (match persist m e with Ok () -> wake_dependents m e | Error persist_detail ->
+            Log.Misc.error "Lane Add-on instance %s watcher failure state persistence: %s"
+              e.instance_id persist_detail);
           wake e;
           stop_entry ~sw:cleanup_sw ~backend m e) in
     watch None)
@@ -1761,8 +1773,7 @@ let backend ~store ~artifact_store () = match !override with
             let command=match socket with None -> command | Some socket ->
               {command with arguments=command.arguments @ Browser_addon_socket.arguments socket
                 ~max_message_bytes:(Lane_addon_types.max_reply_bytes package)
-                @ (match live_ego with Some ego -> Browser_addon_live_ego.arguments ego
-                    @ ["--ego-input-store";Lane_addon_store.root store] | None -> [])} in
+                @ (match live_ego with Some ego -> Browser_addon_live_ego.arguments ego | None -> [])} in
             let browser_client=ref None and combined_release=ref None in
             let stop_worker worker=match !combined_release with
               | Some receipt -> Ok receipt

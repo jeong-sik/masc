@@ -13,8 +13,6 @@
 
 open Alcotest
 open Masc
-module Preparation = Masc_test_deps.Board_test_preparation
-
 module Event_queue_persistence_source = Keeper_event_queue_persistence
 module Keeper_event_queue_persistence = struct
   include Event_queue_persistence_source
@@ -25,6 +23,21 @@ module Keeper_event_queue_persistence = struct
     | Error detail -> fail detail
   ;;
 end
+
+(* The production peek, read back as the exact pending selection. *)
+let select_ready ~now ~ready state =
+  Option.bind (Keeper_event_queue_state.peek_when ~now ~ready state) (fun source ->
+    List.find_opt
+      (fun (selection : Keeper_event_queue_state.pending_selection) ->
+         Keeper_event_queue.stimulus_identity_equal selection.source source)
+      (Keeper_event_queue_state.pending_selections state))
+;;
+
+(* The production loader with the production peek. *)
+let select_queue_entry ~base_path ~keeper_name ~now ~ready =
+  Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name
+  |> Result.map (select_ready ~now ~ready)
+;;
 
 (* The keeper.world event-row prose this suite asserts (the fusion
    cancellation preview) moved out of the .ml sources into
@@ -457,7 +470,6 @@ let test_projection_metrics_preserve_judge_result () =
       ~labels:["topology", "simple"; "outcome", outcome; "judge_result", judge_result] () in
   List.iter (fun (expected, judge, judges) ->
     with_isolated_base_path "fusion-projection-metrics" (fun base_dir registry ->
-      Preparation.prepare ~base_path:base_dir ~action:Preparation.Bootstrap;
       let keeper = "metric-keeper" in
       let run_id = Printf.sprintf "metric-%d" (Random.bits ()) in
       let request : Fusion_types.fusion_request =
@@ -515,7 +527,6 @@ let test_policy_denial_metrics_do_not_invent_judge_execution () =
 
 let test_emit_success_projects_board_chat_and_registry () =
   with_isolated_base_path "fusion-success-sink" (fun base_dir registry ->
-    Preparation.prepare ~base_path:base_dir ~action:Preparation.Bootstrap;
     let keeper = "fusion-keeper" in
     let run_id = Printf.sprintf "fus-success-%d" (Random.bits ()) in
     let question = "Which implementation should ship?" in
@@ -1083,13 +1094,12 @@ let test_completion_stimulus_persists_without_live_registry () =
 let test_tool_handle_async_success_projects_running_then_completed ?(with_context=false) () =
   with_isolated_eio_base_path "fusion-tool-async-success"
     (fun env sw base_dir registry ->
-    Preparation.prepare ~base_path:base_dir ~action:Preparation.Bootstrap;
     let keeper = "fusion-tool-keeper" in
     let question = "Which async fusion path should ship?" in
     let config = Workspace.default_config base_dir in
     let source_context = if not with_context then None else (
       ignore (Workspace.init config ~agent_name:(Some keeper));
-      let goal, _ = Goal_store.upsert_goal config ~title:"Choose async delivery" ~metric:"durable replies" ~target_value:"1" () |> Result.get_ok in
+      let goal, _, _ = Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Choose async delivery" ~metric:"durable replies" ~target_value:"1" () |> Result.get_ok in
       let task = Task.Goal_assignment.add_task_with_result config ~goal_id:goal.id
         ~title:"Compare paths" ~priority:2 ~description:"Keep the original request bound" |> Result.get_ok in
       Workspace.claim_task_r config ~agent_name:keeper ~task_id:task.task_id () |> Result.get_ok |> ignore;
@@ -1279,7 +1289,7 @@ let test_completion_is_selected_before_ambient_backlog () =
            urgency=Normal;arrived_at;
            payload=Board_signal
              {kind=Post_created;author="other-keeper";title="ambient";
-              content="unrelated Board activity";hearth=None;updated_at=None;audience=Some Keeper_event_queue.Audience_discoverable}}) in
+              content="unrelated Board activity";hearth=None;updated_at=None;audience=Keeper_event_queue.Audience_discoverable}}) in
         (match Keeper_event_queue_persistence.update_result ~base_path:base_dir ~keeper_name:keeper
             (fun queue -> List.fold_left Keeper_event_queue.enqueue queue (prior::ambient)) with
          | Ok () -> () | Error detail -> fail detail);
@@ -1305,7 +1315,7 @@ let test_completion_is_selected_before_ambient_backlog () =
              (List.map (fun (s : Keeper_event_queue_state.pending_selection) -> s.source.post_id) rest)
          | _ -> fail "durable queue lost the answer or ambient work");
         let ready (source : Keeper_event_queue.stimulus) = source.post_id<>prior.post_id in
-        match Keeper_event_queue_persistence.select_when_result ~base_path:base_dir ~keeper_name:keeper
+        match select_queue_entry ~base_path:base_dir ~keeper_name:keeper
             ~now:(Unix.gettimeofday ()) ~ready with
         | Ok (Some selection) ->
           (match selection.Keeper_event_queue_state.source.payload with

@@ -1,0 +1,38 @@
+keepers=43 tasks=375 same_order=true same_rows=true
+old us_per_call=375.60 minor_bytes_per_call=96872
+new us_per_call=226.11 minor_bytes_per_call=58752
+old us_per_call=461.76 minor_bytes_per_call=96872
+new us_per_call=97.88 minor_bytes_per_call=58752
+old us_per_call=681.68 minor_bytes_per_call=96872
+new us_per_call=78.79 minor_bytes_per_call=58752
+old us_per_call=710.15 minor_bytes_per_call=96872
+new us_per_call=142.96 minor_bytes_per_call=58752
+old us_per_call=374.50 minor_bytes_per_call=96872
+new us_per_call=279.87 minor_bytes_per_call=58752
+median old_us=461.76 new_us=142.96 old_bytes=96872 new_bytes=58752
+
+# after review fixes (empty-roster guard, named table size), same host
+keepers=2 tasks=375 same_order=true same_rows=true
+old us_per_call=53.63 minor_bytes_per_call=2344
+new us_per_call=51.92 minor_bytes_per_call=7256
+old us_per_call=35.16 minor_bytes_per_call=2344
+new us_per_call=74.17 minor_bytes_per_call=7256
+old us_per_call=12.22 minor_bytes_per_call=2344
+new us_per_call=98.61 minor_bytes_per_call=7256
+old us_per_call=34.78 minor_bytes_per_call=2344
+new us_per_call=31.24 minor_bytes_per_call=7256
+old us_per_call=5.81 minor_bytes_per_call=2344
+new us_per_call=88.43 minor_bytes_per_call=7256
+median old_us=34.78 new_us=74.17 old_bytes=2344 new_bytes=7256
+keepers=43 tasks=375 same_order=true same_rows=true
+old us_per_call=554.20 minor_bytes_per_call=96872
+new us_per_call=196.70 minor_bytes_per_call=59136
+old us_per_call=679.51 minor_bytes_per_call=96872
+new us_per_call=397.09 minor_bytes_per_call=59136
+old us_per_call=1248.26 minor_bytes_per_call=96872
+new us_per_call=249.66 minor_bytes_per_call=59136
+old us_per_call=453.50 minor_bytes_per_call=96872
+new us_per_call=116.11 minor_bytes_per_call=59136
+old us_per_call=1511.90 minor_bytes_per_call=96872
+new us_per_call=320.19 minor_bytes_per_call=59136
+median old_us=679.51 new_us=249.66 old_bytes=96872 new_bytes=59136

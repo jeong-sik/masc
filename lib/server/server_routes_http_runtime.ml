@@ -288,12 +288,14 @@ let make_health_probe_fields ?timing ?(listener = "http/1.1") ?full_health_url
       ("scheduler", scheduler_json ());
     ]
 
-let make_health_probe_json ?timing ?(listener = "http/1.1") ~request_authority request =
+let make_health_probe_json ?timing ?(listener = "http/1.1") ?(extra_fields = [])
+    ~request_authority request =
   Tool_args.ok_assoc
     (make_health_probe_fields ?timing ~listener ~health_detail:"probe"
        ~full_health_url:"/health?full=1" ~request_authority request
      @ [ "auxiliary_startup",
-         Server_auxiliary_startup.to_yojson Server_auxiliary_startup.global ])
+         Server_auxiliary_startup.to_yojson Server_auxiliary_startup.global ]
+     @ extra_fields)
 
 (* Keeper fleet scan / paused-keeper diagnostics / phase counts / fleet safety
    extracted to [Server_routes_http_runtime_fleet_scan] (godfile decomp). *)
@@ -488,6 +490,9 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
         | None ->
           Server_keeper_waiting_inventory.health_placeholder ~status:Health_status.Unavailable)
   in
+  let typesafeai_json =
+    compute_section ~name:"typesafeai" ?section_timings_ref Server_typesafeai_health.health_json
+  in
   let fd_accountant_json =
     compute_section ~name:"fd_accountant" ?section_timings_ref fd_accountant_snapshot_json
   in
@@ -589,6 +594,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
     ("keeper_hitl_gate", keeper_hitl_gate_json);
     ("keeper_event_queue", keeper_event_queue_json);
     ("keeper_waiting_inventory", keeper_waiting_inventory_json);
+    ("typesafeai", typesafeai_json);
     ( "keeper_terminal_effect_policy"
     , Keeper_terminal_effect_policy.matrix_to_yojson () );
     ( "keeper_observability_artifacts"
@@ -848,6 +854,9 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
         ] );
     ( "keeper_waiting_inventory",
       Server_keeper_waiting_inventory.health_placeholder
+        ~status:(Health_status.of_string status) );
+    ( "typesafeai",
+      Server_typesafeai_health.health_placeholder
         ~status:(Health_status.of_string status) );
     ( "keeper_terminal_effect_policy"
     , Keeper_terminal_effect_policy.matrix_to_yojson () );
@@ -1783,12 +1792,27 @@ end
 let full_health_requested request =
   Server_utils.bool_query_param request "full" ~default:false
 
+(* RFC-0484 §3.3: the probe the TUI reads on every refresh carries the
+   operator rollup the last full-health snapshot computed. The probe never
+   computes the rollup, so it and [?full=1] always report the same snapshot;
+   before the first snapshot it carries none, and the TUI shows nothing. *)
+let probe_operator_rollup_fields () =
+  match (full_health_snapshot_state ()).observation.snapshot with
+  | None -> []
+  | Some snapshot ->
+    List.filter
+      (fun (name, _) -> List.exists (String.equal name) Server_health_rollup.operator_field_names)
+      snapshot.Health_observation.fields
+;;
+
 let make_health_response_json ?timing ?(listener = "http/1.1") ~request_authority
     request =
   measure_health_phase timing Server_timing.Health_response (fun () ->
     if full_health_requested request
     then make_cached_full_health_json ?timing ~listener ~request_authority request
-    else make_health_probe_json ?timing ~listener ~request_authority request)
+    else
+      make_health_probe_json ?timing ~listener ~request_authority
+        ~extra_fields:(probe_operator_rollup_fields ()) request)
 
 let make_health_response_body ?listener ~request_authority request =
   let timing = Server_timing.create () in

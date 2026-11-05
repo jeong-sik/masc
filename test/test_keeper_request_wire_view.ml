@@ -70,7 +70,6 @@ let view ~front history : Try_provider.request_view =
     ~history_digest_at:(Window.atom_opening_digest history)
     ~current_turn_results:Try_provider.Current_turn_verbatim
     ~base_path:""
-    ~demote_before:0
     ~turn_boundary:(Masc.Keeper_carried_front.Turn_boundary { end_atom = 0 })
     ~materialize:(fun ~pending:_ messages -> messages)
     history

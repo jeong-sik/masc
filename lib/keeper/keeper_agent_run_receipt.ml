@@ -38,10 +38,10 @@ let provider_reached_of_observation = function
     before any provider answered.
 
     A turn does not choose whether to honour the lane it was handed.
-    [Keeper_turn_driver.run_named] builds its candidate list from
-    [deferred_runtime_ids hint] whenever a lane is present and the contract is
-    [Provider_default] (keeper_turn_driver.ml, [lane_candidate_ids]), and
-    [deferred_runtime_ids] leads with [next_runtime_id]. [run_turn] passes no
+    [Keeper_turn_driver.run_named] builds its candidate list from the walk
+    that resumes the hint whenever a lane is present and the contract is
+    [Provider_default] (keeper_turn_driver.ml, [lane_candidate_ids]), and that
+    walk leads with [Keeper_turn_driver.resumed_head]. [run_turn] passes no
     [output_contract], so the contract is always [Provider_default] here: the
     [Tool_verdict] slot calls [run_named] directly. The walk therefore starts
     on the lane's own head, whatever [~runtime_id] this turn was routed to.
@@ -84,6 +84,7 @@ let finalize
     ~(runtime_lane_evidence : Keeper_runtime_walk_evidence.t option)
     ~receipt_response_text_present_ref
     ~(spend : Keeper_turn_spend.attempt list)
+    ~(settled_start : Keeper_unsettled_spend.settled_start option)
     () =
   let receipt_ended_at = Masc_domain.now_iso () in
   let error_kind, error_message =
@@ -323,7 +324,12 @@ let finalize
      already on the receipt; the decision record reads them from here instead
      of computing its own answer, which is how the two surfaces came to
      disagree (#37376). *)
-  ({ result = final_result; degraded_retry_applied; degraded_retry_deferred; spend }
+  ({ result = final_result
+   ; degraded_retry_applied
+   ; degraded_retry_deferred
+   ; spend
+   ; settled_start
+   }
    : Keeper_agent_result.turn_settlement)
 ;;
 

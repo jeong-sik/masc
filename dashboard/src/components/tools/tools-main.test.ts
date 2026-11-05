@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   DashboardKeeperWaitingInventory,
   DashboardScheduledAutomationProjection,
+  DashboardSkillActivationProjection,
   DashboardToolsResponse,
 } from '../../api'
 
@@ -25,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   loadTools: vi.fn(),
   subscribeToolsAutoRefresh: vi.fn(() => () => {}),
   fetchDashboardTools: vi.fn(),
+  fetchKeeperSkillActivations: vi.fn(),
   navigate: vi.fn(),
   configResolutionPanel: vi.fn(),
   toolsData: { value: null as null | MockToolsResponse },
@@ -36,6 +38,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../api', async importOriginal => ({
   ...await importOriginal<typeof import('../../api')>(),
   fetchDashboardTools: mocks.fetchDashboardTools,
+  fetchKeeperSkillActivations: mocks.fetchKeeperSkillActivations,
 }))
 
 vi.mock('../schedule/schedule-state', () => ({
@@ -78,6 +81,12 @@ vi.mock('../tool-metrics', () => ({
 
 vi.mock('./tool-full-inventory', () => ({
   FullInventoryView: () => html`<div>FullInventoryView</div>`,
+}))
+
+// The series panel loads its own endpoint on mount; its behaviour is covered in
+// tool-series-panel.test.ts and tool-series-state.test.ts.
+vi.mock('./tool-series-panel', () => ({
+  ToolSeriesPanel: () => html`<div>ToolSeriesPanel</div>`,
 }))
 
 vi.mock('../../router', () => ({
@@ -128,10 +137,22 @@ function waitingInventoryFixture(
   }
 }
 
+// The selected Keeper's two answers: the tools answer for its surface and
+// the activations route for its ledger.
+type KeeperReceiptFixture = {
+  tools: DashboardToolsResponse
+  activations: DashboardSkillActivationProjection
+}
+
+function answerKeeperReceipt(receipt: KeeperReceiptFixture): void {
+  mocks.fetchDashboardTools.mockResolvedValue(receipt.tools)
+  mocks.fetchKeeperSkillActivations.mockResolvedValue(receipt.activations)
+}
+
 function keeperReceiptFixture(
   keeperName: string,
   sessionId = 'trace-one',
-): DashboardToolsResponse {
+): KeeperReceiptFixture {
   const reference = {
     identity: {
       source_id: 'project-masc',
@@ -140,7 +161,9 @@ function keeperReceiptFixture(
     },
     content_revision: 'a'.repeat(64),
   }
-  return {
+  const fixture: DashboardToolsResponse & {
+    skill_activations: DashboardSkillActivationProjection
+  } = {
     tool_inventory: { count: 0, tools: [] },
     tool_usage: {
       total_calls: 0,
@@ -275,6 +298,8 @@ function keeperReceiptFixture(
       },
     },
   }
+  const { skill_activations: activations, ...tools } = fixture
+  return { tools, activations }
 }
 
 function selectKeeper(container: HTMLElement, keeperName: string): void {
@@ -299,6 +324,7 @@ describe('Tools', () => {
     mocks.loadTools.mockClear()
     mocks.subscribeToolsAutoRefresh.mockClear()
     mocks.fetchDashboardTools.mockReset()
+    mocks.fetchKeeperSkillActivations.mockReset()
     mocks.configResolutionPanel.mockClear()
     mocks.toolsData.value = null
     mocks.toolsLoading.value = false
@@ -368,6 +394,7 @@ describe('Tools', () => {
     expect(container.textContent).toContain('FullInventoryView')
     expect(container.textContent).toContain('도구 사용 현황')
     expect(container.textContent).toContain('ToolMetrics')
+    expect(container.textContent).toContain('ToolSeriesPanel')
     // Prompt editing was consolidated into Settings › Prompts; Lab now only
     // shows a read-only pointer, not the editable PromptRegistryPanel.
     expect(container.textContent).not.toContain('PromptRegistryPanel')
@@ -539,18 +566,18 @@ describe('Tools', () => {
       keeper_waiting_inventory: waitingInventoryFixture(),
     }
     const receipt = keeperReceiptFixture('sangsu')
-    if (receipt.effective_keeper_surface?.status !== 'available') {
+    if (receipt.tools.effective_keeper_surface?.status !== 'available') {
       throw new Error('fixture effective surface is not available')
     }
-    receipt.effective_keeper_surface.skill_selection = {
+    receipt.tools.effective_keeper_surface.skill_selection = {
       mode: 'names',
       names: ['ocaml-coding', 'proof-harness'],
     }
-    receipt.effective_keeper_surface.unavailable_skill_names = [{
+    receipt.tools.effective_keeper_surface.unavailable_skill_names = [{
       name: 'proof-harness',
       reason: 'not_in_turn_skill_catalog',
     }]
-    mocks.fetchDashboardTools.mockResolvedValue(receipt)
+    answerKeeperReceipt(receipt)
 
     render(html`<${Tools} />`, container)
     await flush()
@@ -560,6 +587,7 @@ describe('Tools', () => {
     expect(mocks.fetchDashboardTools).toHaveBeenCalledWith(expect.objectContaining({
       keeperName: 'sangsu',
     }))
+    expect(mocks.fetchKeeperSkillActivations).toHaveBeenCalledWith('sangsu', expect.anything())
     expect(container.textContent).toContain('project-masc/ocaml-coding:ocaml-coding@')
     expect(container.querySelector('[data-testid="skill-load-reason"]')?.textContent)
       .toContain('Task task-001 + Keeper profile')
@@ -613,7 +641,8 @@ describe('Tools', () => {
       keeper_waiting_inventory: waitingInventoryFixture(),
     }
     const allReceipt = keeperReceiptFixture('sangsu')
-    mocks.fetchDashboardTools.mockResolvedValueOnce(allReceipt)
+    mocks.fetchDashboardTools.mockResolvedValueOnce(allReceipt.tools)
+    mocks.fetchKeeperSkillActivations.mockResolvedValueOnce(allReceipt.activations)
 
     render(html`<${Tools} />`, container)
     await flush()
@@ -624,11 +653,12 @@ describe('Tools', () => {
       .toContain('All published Skills')
 
     const noneReceipt = keeperReceiptFixture('sangsu')
-    if (noneReceipt.effective_keeper_surface?.status !== 'available') {
+    if (noneReceipt.tools.effective_keeper_surface?.status !== 'available') {
       throw new Error('fixture effective surface is not available')
     }
-    noneReceipt.effective_keeper_surface.skill_selection = { mode: 'names', names: [] }
-    mocks.fetchDashboardTools.mockResolvedValueOnce(noneReceipt)
+    noneReceipt.tools.effective_keeper_surface.skill_selection = { mode: 'names', names: [] }
+    mocks.fetchDashboardTools.mockResolvedValueOnce(noneReceipt.tools)
+    mocks.fetchKeeperSkillActivations.mockResolvedValueOnce(noneReceipt.activations)
     selectKeeper(container, '')
     await flush()
     selectKeeper(container, 'sangsu')
@@ -649,13 +679,13 @@ describe('Tools', () => {
       keeper_waiting_inventory: waitingInventoryFixture(),
     }
     const receipt = keeperReceiptFixture('sangsu')
-    if (receipt.skill_activations?.status !== 'available') {
+    if (receipt.activations.status !== 'available') {
       throw new Error('expected available Skill activation fixture')
     }
-    receipt.skill_activations.summary.instruction_provider_deliveries = 0
-    receipt.skill_activations.summary.instruction_official_client_handoffs = 1
-    receipt.skill_activations.summary.instruction_actions_observed = 0
-    const scoped = receipt.skill_activations.scoped_summaries[0]!
+    receipt.activations.summary.instruction_provider_deliveries = 0
+    receipt.activations.summary.instruction_official_client_handoffs = 1
+    receipt.activations.summary.instruction_actions_observed = 0
+    const scoped = receipt.activations.scoped_summaries[0]!
     scoped.summary.instruction_provider_deliveries = 0
     scoped.summary.instruction_official_client_handoffs = 1
     scoped.summary.instruction_actions_observed = 0
@@ -664,7 +694,7 @@ describe('Tools', () => {
       { runtime_id: 'openai.codex', count: 1 },
     ]
     scoped.action_runtime_counts = []
-    const activation = receipt.skill_activations.ledger.activations[0]!
+    const activation = receipt.activations.ledger.activations[0]!
     if (activation.delivery === null) throw new Error('expected delivery fixture')
     activation.delivery.boundary = {
       kind: 'official_client_result_handoff',
@@ -672,7 +702,7 @@ describe('Tools', () => {
     }
     activation.delivery.runtime_id = 'openai.codex'
     activation.actions = []
-    mocks.fetchDashboardTools.mockResolvedValue(receipt)
+    answerKeeperReceipt(receipt)
 
     render(html`<${Tools} />`, container)
     await flush()
@@ -697,15 +727,39 @@ describe('Tools', () => {
       keeper_waiting_inventory: waitingInventoryFixture(),
     }
     const partial = keeperReceiptFixture('sangsu')
-    delete partial.skill_activations
-    mocks.fetchDashboardTools.mockResolvedValue(partial)
+    delete partial.tools.effective_keeper_surface
+    answerKeeperReceipt(partial)
 
     render(html`<${Tools} />`, container)
     await flush()
     selectKeeper(container, 'sangsu')
     await flush()
 
-    expect(container.textContent).toContain('Server response omitted skill_activations')
+    expect(container.textContent).toContain('Server response omitted effective_keeper_surface')
+    expect(container.querySelector('[data-testid="skill-effective-surface"]')).toBeNull()
+  })
+
+  it('shows the activations read failure and no surface without it', async () => {
+    mocks.toolsData.value = {
+      tool_inventory: { tools: [] },
+      tool_usage: {
+        registered_count: 0,
+        distinct_tools_called: 0,
+        never_called_count: 0,
+      },
+      keeper_waiting_inventory: waitingInventoryFixture(),
+    }
+    mocks.fetchDashboardTools.mockResolvedValue(keeperReceiptFixture('sangsu').tools)
+    mocks.fetchKeeperSkillActivations.mockRejectedValue(
+      new Error('skill activations answer omitted skill_activations'),
+    )
+
+    render(html`<${Tools} />`, container)
+    await flush()
+    selectKeeper(container, 'sangsu')
+    await flush()
+
+    expect(container.textContent).toContain('skill activations answer omitted skill_activations')
     expect(container.querySelector('[data-testid="skill-effective-surface"]')).toBeNull()
   })
 
@@ -720,22 +774,22 @@ describe('Tools', () => {
       keeper_waiting_inventory: waitingInventoryFixture(),
     }
     const receipt = keeperReceiptFixture('sangsu')
-    if (receipt.effective_keeper_surface?.status !== 'available') {
+    if (receipt.tools.effective_keeper_surface?.status !== 'available') {
       throw new Error('fixture effective surface is not available')
     }
-    receipt.effective_keeper_surface.tool_delivery = {
+    receipt.tools.effective_keeper_surface.tool_delivery = {
       status: 'suppressed',
       reason: 'runtime_tools_unsupported',
     }
-    receipt.effective_keeper_surface.instruction_skills = []
-    receipt.effective_keeper_surface.composition_skills = []
-    receipt.effective_keeper_surface.skill_profiles = []
-    receipt.effective_keeper_surface.skill_discovery_bytes = 0
-    receipt.effective_keeper_surface.skill_body_bytes = 0
-    receipt.effective_keeper_surface.skill_tool_surface_bytes = 0
-    receipt.effective_keeper_surface.tools = []
-    receipt.effective_keeper_surface.count = 0
-    mocks.fetchDashboardTools.mockResolvedValue(receipt)
+    receipt.tools.effective_keeper_surface.instruction_skills = []
+    receipt.tools.effective_keeper_surface.composition_skills = []
+    receipt.tools.effective_keeper_surface.skill_profiles = []
+    receipt.tools.effective_keeper_surface.skill_discovery_bytes = 0
+    receipt.tools.effective_keeper_surface.skill_body_bytes = 0
+    receipt.tools.effective_keeper_surface.skill_tool_surface_bytes = 0
+    receipt.tools.effective_keeper_surface.tools = []
+    receipt.tools.effective_keeper_surface.count = 0
+    answerKeeperReceipt(receipt)
 
     render(html`<${Tools} />`, container)
     await flush()
@@ -757,7 +811,7 @@ describe('Tools', () => {
       },
       keeper_waiting_inventory: waitingInventoryFixture(),
     }
-    mocks.fetchDashboardTools.mockResolvedValue(keeperReceiptFixture('other-keeper'))
+    answerKeeperReceipt(keeperReceiptFixture('other-keeper'))
 
     render(html`<${Tools} />`, container)
     await flush()
@@ -787,6 +841,8 @@ describe('Tools', () => {
         if (keeperName === 'alpha') resolveAlpha = resolve
         if (keeperName === 'beta') resolveBeta = resolve
       }))
+    mocks.fetchKeeperSkillActivations.mockImplementation((keeperName: string) =>
+      Promise.resolve(keeperReceiptFixture(keeperName, `trace-${keeperName}`).activations))
 
     render(html`<${Tools} />`, container)
     await flush()
@@ -795,11 +851,11 @@ describe('Tools', () => {
     selectKeeper(container, 'beta')
     await flush()
 
-    resolveBeta?.(keeperReceiptFixture('beta', 'trace-beta'))
+    resolveBeta?.(keeperReceiptFixture('beta', 'trace-beta').tools)
     await flush()
     expect(container.textContent).toContain('session trace-beta')
 
-    resolveAlpha?.(keeperReceiptFixture('alpha', 'trace-alpha'))
+    resolveAlpha?.(keeperReceiptFixture('alpha', 'trace-alpha').tools)
     await flush()
     expect(container.textContent).toContain('session trace-beta')
     expect(container.textContent).not.toContain('session trace-alpha')

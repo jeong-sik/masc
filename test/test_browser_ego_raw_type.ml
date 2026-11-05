@@ -10,15 +10,8 @@ let source : Window.page = {space_id=7;native={Masc.Browser_surface.label=Some "
   target_id="target";opened_by=Masc.Browser_surface.Unknown_origin}}
 let page_json (page:Window.page) = `Assoc (("spaceId",`Int page.space_id)
   :: Masc.Browser_surface.ego_page_fields page.native)
-let storage () =
-  let current=ref None in
-  let persistence={Input.read=(fun () -> Ok !current);active=(fun () -> true);
-    compare_and_set=(fun ~expected ~replacement ->
-      if expected= !current then (current:=Some replacement;Ok ()) else Error "writer changed")} in
-  persistence,current
 let begin_input input command = ok (ok (Input.within_command input ~command_id:command
-  (fun () -> Input.begin_holding input ~scope:Input.Page_scope ~tab_id:3
-    ~page_label:"p1" ~operation:"native_type")))
+  (fun () -> Input.begin_holding input ~scope:Input.Page_scope ~page_label:"p1")))
 let with_native_cases context consume =
   let directory=Filename.temp_dir ~perms:0o700 "masc-raw-type-" "" in
   Fun.protect ~finally:(fun () ->
@@ -36,12 +29,11 @@ let with_native_cases context consume =
       | WEXITED _ | WSIGNALED _ | WSTOPPED _ -> fail "native stand-in did not complete");
     consume (Yojson.Safe.from_file captures |> to_list))
 let with_cases consume =
-  let persistence,retained=storage () in
-  let input=ok (Input.create_persistent ~persistence ~writer:"original" ~space_id:7) in
+  let input=Input.create ~space_id:7 in
   let pending=begin_input input "actual-issued-command" in
   let context=ok (Raw.prepare ~command_id:pending.command_id ~generation:pending.generation
     ~source ~indices:[0]) in
-  with_native_cases context (consume persistence retained input pending context)
+  with_native_cases context (consume input pending context)
 let case name cases = List.find (fun value -> value |> member "mode" |> to_string = name) cases
 let capture name cases = case name cases |> member "capture"
 let decoded context cases name = ok (Raw.decode context ~index:0 ~current:source (capture name cases))
@@ -54,7 +46,7 @@ let released answers = match Release.judge answers with
 let contains text fragment =
   try ignore (Str.search_forward (Str.regexp_string fragment) text 0);true with Not_found -> false
 
-let producer_and_decoder () = with_cases (fun _ _ _ pending context cases ->
+let producer_and_decoder () = with_cases (fun _ pending context cases ->
   check int "all stand-in paths returned" 8 (List.length cases);
   List.iter (fun value ->
     let name=value |> member "mode" |> to_string in
@@ -78,7 +70,7 @@ let producer_and_decoder () = with_cases (fun _ _ _ pending context cases ->
     check bool "even pre-raw capture cannot rebind invocation" true
       (Result.is_error (Raw.decode other ~index:0 ~current:source (member "capture" value)))) cases)
 
-let cleanup_and_duplicate_evidence () = with_cases (fun _ _ _ pending context cases ->
+let cleanup_and_duplicate_evidence () = with_cases (fun _ pending context cases ->
   let expected,completion=completed context cases "normal" in
   let answer=ok (Release.answer_of_window ~expected completion) in
   let malformed=match capture "normal" cases with
@@ -112,34 +104,28 @@ let cleanup_and_duplicate_evidence () = with_cases (fun _ _ _ pending context ca
         |Never_returned|Native_window_unconfirmed _);_}|Held_by_script_report)
     | Settled _ -> fail "distinct nonce/world/binding invocations were merged"))
 
-let pending_and_writer_fences () = with_cases (fun persistence retained input pending context cases ->
+let pending_and_space_fences () = with_cases (fun input pending context cases ->
   let expected,completion=completed context cases "normal" in
   let proof=released [0,ok (Release.answer_of_window ~expected completion)] in
-  let before= !retained in
   check bool "stale generation cannot settle actual pending" true
     (Result.is_error (Input.command_settled input ~generation:"stale" proof));
-  check bool "stale generation preserves retained bytes" true (!retained=before);
-  let replacement=ok (Input.create_persistent ~persistence ~writer:"replacement" ~space_id:7) in
-  check bool "old writer cannot settle replacement's exact pending" true
-    (Result.is_error (Input.command_settled input ~generation:pending.Input.generation proof));
-  ok (Input.command_settled replacement ~generation:pending.generation proof);
-  check bool "current writer settles exact native completion" true
-    (Input.status replacement=Input.Ready Command_settled);
-  let volatile=Input.create () in
-  let unbound=begin_input volatile "actual-issued-command" in
-  let unbound_context=ok (Raw.prepare ~command_id:unbound.command_id ~generation:unbound.generation
+  check bool "stale generation leaves the pending input" true (Input.status input=Input.Uncertain pending);
+  (* The other connection's own command and generation, on a Page of Space 7:
+     only the Space differs. *)
+  let elsewhere=Input.create ~space_id:8 in
+  let other=begin_input elsewhere "actual-issued-command" in
+  let other_context=ok (Raw.prepare ~command_id:other.Input.command_id ~generation:other.generation
     ~source ~indices:[0]) in
-  with_native_cases unbound_context (fun unbound_cases ->
-    let unbound_expected,unbound_completion=completed unbound_context unbound_cases "normal" in
-    let unbound_proof=released [0,ok (Release.answer_of_window ~expected:unbound_expected unbound_completion)] in
-    check bool "volatile input cannot settle its exact native-window proof" true
-      (Result.is_error (Input.command_settled volatile ~generation:unbound.generation unbound_proof));
-    check bool "volatile exact pending remains unresolved" true
-      (Input.status volatile=Input.Uncertain unbound)))
+  with_native_cases other_context (fun other_cases ->
+    let other_expected,other_completion=completed other_context other_cases "normal" in
+    let other_proof=released [0,ok (Release.answer_of_window ~expected:other_expected other_completion)] in
+    check bool "another Space cannot settle a native-window proof from this Space's Page" true
+      (Result.is_error (Input.command_settled elsewhere ~generation:other.generation other_proof)));
+  ok (Input.command_settled input ~generation:pending.Input.generation proof);
+  check bool "the exact pending generation settles from its native completion" true
+    (Input.status input=Input.Ready Command_settled))
 
-let pre_raw_rollback () = with_cases (fun _ _ input pending _ _ ->
-  ok (Input.assert_reset input ~generation:pending.Input.generation ~now:1.);
-  let prior=Input.status input in
+let pre_raw_rollback () = with_cases (fun input pending _ _ ->
   let next=begin_input input "later-unentered-raw" in
   let context=ok (Raw.prepare ~command_id:next.command_id ~generation:next.generation
     ~source ~indices:[0]) in
@@ -148,11 +134,11 @@ let pre_raw_rollback () = with_cases (fun _ _ input pending _ _ ->
      | Raw.Not_entered _ -> ()
      | Entered_unconfirmed _ | Completed _ -> fail "guard was not proven unentered");
     ok (Input.not_started input ~generation:next.generation);
-    check bool "ordinary proven-unentered retains exact prior operator provenance" true
-      (Input.status input=prior)))
+    check bool "proven-unentered restores the earlier unconfirmed input" true
+      (Input.status input=Input.Ready (Input.Release_uncertain pending))))
 
 let () = run "Ego native raw typing" ["shared producer and authority",[
   test_case "local continuation and independent private capture decoder" `Quick producer_and_decoder;
   test_case "cleanup separation and duplicate mixed evidence" `Quick cleanup_and_duplicate_evidence;
-  test_case "exact pending generation, replacement writer and Space authority" `Quick pending_and_writer_fences;
-  test_case "pre-raw rollback retains prior operator provenance" `Quick pre_raw_rollback]]
+  test_case "exact pending generation and Space authority" `Quick pending_and_space_fences;
+  test_case "pre-raw rollback restores the earlier unconfirmed input" `Quick pre_raw_rollback]]

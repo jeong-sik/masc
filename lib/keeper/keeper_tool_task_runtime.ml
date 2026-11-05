@@ -123,10 +123,6 @@ let task_create_failure_route : Workspace_task.add_task_error -> task_create_fai
   | Workspace_task.Unexpected_error _ -> Task_create_runtime_failure
 ;;
 
-let no_eligible_exclusion_summary =
-  Masc_task_handlers.Tool_task_no_eligible.no_eligible_exclusion_summary
-;;
-
 
 let find_task_goal_id config task_id =
   let index = Workspace_goal_index.build_task_goal_map_for_config config in
@@ -290,12 +286,9 @@ let task_op_of_name name =
   | None -> None
 ;;
 
-(* Entry VALIDITY is an objective parse fact and stays rejected here; a
-   count floor is not. RFC-0337 (Withdrawn) removed the mandatory
-   evidence floor: "local evidence shape can reject work before the
-   configured judge evaluates the actual Task" is the hierarchy it
-   withdrew. Completion is decided by the Task transition, so a
-   missing or empty evidence_refs list proceeds to that judgment. *)
+(* Entry validity is a parse fact and is rejected here. A missing or empty
+   evidence_refs list proceeds to the Task transition, which decides
+   completion. *)
 let parse_keeper_task_done_evidence_refs args =
   match args with
   | `Assoc fields ->
@@ -329,15 +322,6 @@ let parse_keeper_task_done_evidence_refs args =
   | _ -> Error "keeper_task_done arguments must be an object."
 ;;
 
-(* task-540: total-size pre-check on artifact: evidence at the
-   keeper_task_done boundary. Oversized artifacts snapshot as truncated
-   prefixes the completion authority cannot act on, and four tasks stalled
-   8-16h in evaluator_unavailable before anyone saw why. Refusing here names
-   the byte count and the note: escape hatch while the caller can still fix
-   the call. Unmeasurable references (missing file, unreadable, non-artifact)
-   pass through untouched: the snapshot layer reports those as typed
-   unreadable reasons at review time, and restating that taxonomy here would
-   drift. *)
 (* Where an evidence artifact lives depends on the producer's sandbox
    profile, and that policy sits above the store's library. An
    endpoint-owned tree (microvm, remote-ssh) keeps its files inside the
@@ -734,10 +718,8 @@ let handle_keeper_task_tool_with_outcome
                   ~title
                   ~priority
                   ~description
-                    (* Attribute keeper-created tasks so the self-author filter
-                       (below, and in claimable counting) can recognize them.
-                       Without this the row has [created_by = None] and a keeper
-                       is offered its own routing/report tasks back as work. *)
+                    (* The author is a fact on the Task row; the cancellation
+                       notice to the creating Keeper reads it. *)
                   ~created_by:meta.name
               with
               | Ok created ->
@@ -784,12 +766,6 @@ let handle_keeper_task_tool_with_outcome
                           ]
                         message)))))
     | Task_claim ->
-    let auto_claim_eligible task =
-      not
-        (Keeper_world_observation_inputs.task_is_self_authored_todo
-           ~meta
-           task)
-    in
     let requested_task_id =
       Safe_ops.json_string ~default:"" "task_id" args |> String.trim
     in
@@ -808,7 +784,6 @@ let handle_keeper_task_tool_with_outcome
           ; title = task.title
           ; priority = task.priority
           ; message
-          ; scope_widened = false
           }
       | Error e when Masc_domain.is_task_not_found e ->
         Workspace.Claim_next_error
@@ -819,52 +794,32 @@ let handle_keeper_task_tool_with_outcome
       if requested_task_id <> "" then
         explicit_claim_result ()
       else
-        (* Auto-claim (no explicit task_id) must not select the keeper's own
-           authored tasks: that closes the routing/report feedback loop
-           (#25429) the claimable count already excludes. Explicit claim by
-           task_id above is intentional and left unfiltered. The self-author
-           exclusion is a [hard_filter], not a [task_filter]: a hard exclusion
-           must survive the [allow_scope_fallback] widening below, otherwise a
-           keeper whose backlog holds only its own routing/report tasks falls
-           into the fallback, drops the goal-scope filter, and claims its own
-           task right back — exactly the case this is meant to prevent. *)
         Workspace.claim_next_r config ~agent_name:meta.name
-          ~hard_filter:auto_claim_eligible
           ~auto_start:true
           ()
     in
     let result = claim_requested_task () in
     (match result with
-     | Workspace.Claim_next_claimed { task_id; scope_widened = _; _ } ->
+     | Workspace.Claim_next_claimed { task_id; _ } ->
        sync_keeper_meta_current_task ~config ~meta ~task_id
      | Workspace.Claim_next_no_unclaimed
-     | Workspace.Claim_next_no_eligible _
      | Workspace.Claim_next_error _ -> ());
     let message =
       match result with
       | Workspace.Claim_next_claimed { message; _ } -> message
       | Workspace.Claim_next_no_unclaimed -> "No unclaimed tasks."
-      | Workspace.Claim_next_no_eligible
-          { excluded_count
-          ; scope_excluded_count
-          ; _
-          } ->
-        Printf.sprintf
-          "No eligible tasks; searched all tasks, blocked/excluded=%d. %s"
-          excluded_count
-          (no_eligible_exclusion_summary ~scope_excluded_count)
       | Workspace.Claim_next_error e -> Printf.sprintf "Error: %s" e
     in
     let claimed_task_fields =
       match result with
       | Workspace.Claim_next_claimed
-          { task_id; title; priority; scope_widened; _ } ->
+          { task_id; title; priority; _ } ->
           let matched_goal_id = find_task_goal_id config task_id in
           [
             ( "claim_observation",
               Task.Tool.build_claim_observation_payload
                 ~now:(Time_compat.now ()) ~agent_name:meta.name
-                ~task_id ~scope_widened );
+                ~task_id );
             ( "claimed_task",
               `Assoc
                 [
@@ -874,24 +829,11 @@ let handle_keeper_task_tool_with_outcome
                   ("goal_id", Json_util.string_opt_to_json matched_goal_id);
                 ] );
           ]
-      | Workspace.Claim_next_no_eligible _
       | Workspace.Claim_next_no_unclaimed
       | Workspace.Claim_next_error _ -> []
     in
     let typed_outcome_field =
       match result with
-      | Workspace.Claim_next_no_eligible
-          { scope_excluded_count
-          ; _
-          } ->
-        Some
-          ( "typed_outcome"
-          , Keeper_tool_outcome.to_json
-              (Keeper_tool_outcome.No_progress
-                 { reason =
-                     Keeper_tool_outcome.No_eligible_tasks
-                       { scope_excluded_count }
-                 }) )
       | Workspace.Claim_next_no_unclaimed ->
         Some
           ( "typed_outcome"
@@ -924,17 +866,8 @@ let handle_keeper_task_tool_with_outcome
      | Workspace.Claim_next_error _ ->
        Keeper_tool_execution.failure ~class_:Tool_result.Workflow_rejection payload
      | Workspace.Claim_next_claimed _
-     | Workspace.Claim_next_no_unclaimed
-     | Workspace.Claim_next_no_eligible _ -> Keeper_tool_execution.success payload)
+     | Workspace.Claim_next_no_unclaimed -> Keeper_tool_execution.success payload)
     | Task_release ->
-    (* Handing a task back is the other half of the claim refusal in
-       [Workspace_task_claim.held_tasks_refusal_message]: a keeper that
-       cannot finish what it holds is also barred from claiming anything
-       else, and before this tool existed its only way out was for the
-       keeper to be shut down (keeper_shutdown_finalize.ml:137). The
-       release is explicit and carries a summary; #18839 removed the
-       implicit auto-release because a task with no handoff note travelled
-       between keepers losing its progress. *)
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let summary = Safe_ops.json_string ~default:"" "summary" args |> String.trim in
     let optional_field name =
@@ -951,19 +884,6 @@ let handle_keeper_task_tool_with_outcome
              (Keeper_tool_outcome.Error
                 { reason = "keeper_task_release rejected: task_id required" })
            "task_id is required.")
-    else if summary = ""
-    then
-      (* The next owner reads this and nothing else about where the work
-         stands, so an empty summary is refused here rather than stored. *)
-      Keeper_tool_execution.failure
-        ~class_:Tool_result.Workflow_rejection
-        (workflow_rejection_error_json
-           ~typed_outcome:
-             (Keeper_tool_outcome.Error
-                { reason = "keeper_task_release rejected: summary required" })
-           "summary is required. Say where the task stands so the next owner \
-            can start from it. Example: summary='reproduced on the merged-cell \
-            table, fix not started'.")
     else (
       let evidence_refs_field =
         match Json_util.assoc_member_opt "evidence_refs" args with
@@ -1022,19 +942,6 @@ let handle_keeper_task_tool_with_outcome
              (Keeper_tool_outcome.Error
                 { reason = "keeper_task_cancel rejected: task_id required" })
            "task_id is required.")
-    else if reason = ""
-    then
-      (* The authority judges this and nothing else, so an empty reason is
-         refused here rather than sent as a case with no argument. *)
-      Keeper_tool_execution.failure
-        ~class_:Tool_result.Workflow_rejection
-        (workflow_rejection_error_json
-           ~typed_outcome:
-             (Keeper_tool_outcome.Error
-                { reason = "keeper_task_cancel rejected: reason required" })
-           "reason is required. Say why this task should stop existing rather \
-            than move to someone else. Example: reason='the defect was fixed \
-            in #32078; what this task describes no longer occurs'.")
     else (
       let args_for_transition =
         [ "task_id", `String task_id

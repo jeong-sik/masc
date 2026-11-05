@@ -78,11 +78,59 @@ let locate ~config_dir ~base_path =
 
 let file_path t = t.file
 
+module Store_path = struct
+  type t = string
+
+  type problem =
+    | Not_absolute
+    | Holds_nul
+    | Not_normal
+    | Not_utf_8
+
+  let problem_to_string = function
+    | Not_absolute -> "it is not absolute"
+    | Holds_nul -> "it holds a NUL byte"
+    | Not_normal -> "it has an empty, . or .. segment, or ends with a separator"
+    | Not_utf_8 -> "it is not valid UTF-8"
+  ;;
+
+  (* The install record keeps the spelling that is given and a boot opens the
+     store by it, so the spelling must leave no doubt about the file. A last
+     separator makes [lstat] follow a link that [Filename.dirname] steps over. *)
+  let normal_form path =
+    match String.split_on_char '/' path with
+    | "" :: (_ :: _ as segments) ->
+      List.for_all
+        (fun segment -> (not (String.equal segment "")) && segment <> "." && segment <> "..")
+        segments
+    | "" :: [] | _ :: _ | [] -> false
+  ;;
+
+  (* [Unix] answers ENOENT for a path with a NUL byte whatever is on disk, so
+     NUL is judged before the segments. *)
+  let of_string path =
+    if String.equal path "" || Filename.is_relative path
+    then Error Not_absolute
+    else if String.contains path '\000'
+    then Error Holds_nul
+    else if not (normal_form path)
+    then Error Not_normal
+    else if not (String.is_valid_utf_8 path)
+    then Error Not_utf_8
+    else Ok path
+  ;;
+
+  let equal = String.equal
+end
+
 type corruption =
   | Not_json
   | Wrong_members
   | Base_path_differs of { recorded : string }
-  | Store_path_not_absolute
+  | Store_path_invalid of
+      { recorded : string
+      ; problem : Store_path.problem
+      }
 
 type read_error =
   | Unreadable of
@@ -103,7 +151,11 @@ let corruption_to_string = function
       external_store_member
   | Base_path_differs { recorded } ->
     Printf.sprintf "the record was written for the base path %s" recorded
-  | Store_path_not_absolute -> "the path of the external store is not absolute"
+  | Store_path_invalid { recorded; problem } ->
+    Printf.sprintf
+      "the path of the external store %S cannot be used: %s"
+      recorded
+      (Store_path.problem_to_string problem)
 ;;
 
 let read_error_to_string = function
@@ -135,9 +187,13 @@ let decode ~path ~canonical_base_path text =
      | Some (recorded, external_store) ->
        if not (String.equal recorded canonical_base_path)
        then Error (Corrupt { path; reason = Base_path_differs { recorded } })
-       else if String.equal external_store "" || Filename.is_relative external_store
-       then Error (Corrupt { path; reason = Store_path_not_absolute })
-       else Ok (Some external_store))
+       else (
+         match Store_path.of_string external_store with
+         | Ok store -> Ok (Some store)
+         | Error problem ->
+           Error
+             (Corrupt
+                { path; reason = Store_path_invalid { recorded = external_store; problem } })))
 ;;
 
 (* Files and directories this process creates belong to its effective uid. *)
@@ -168,28 +224,6 @@ let check_config_dir dir =
     -> Error "it is not a directory"
 ;;
 
-(* [Unix.realpath] fails with ENOENT when nothing is there, and also when a
-   symbolic link on the way is dangling. Only the first is an absent record.
-   A dangling link may hide the record, for instance when the config directory
-   lives on a volume that is not mounted. The walk goes up to the nearest
-   component that [lstat] finds and demands that a link there is not
-   dangling. *)
-let rec absent_config_dir dir =
-  match Unix.lstat dir with
-  | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
-    let parent = Filename.dirname dir in
-    if String.equal parent dir then Ok () else absent_config_dir parent
-  | exception Unix.Unix_error (error, _, _) -> Error (Unix.error_message error)
-  | { Unix.st_kind = Unix.S_LNK; _ } ->
-    (match Unix.stat dir with
-     | _ -> Ok ()
-     | exception Unix.Unix_error (error, _, _) ->
-       Error
-         (Printf.sprintf "the symbolic link %s is dangling: %s" dir (Unix.error_message error)))
-  | { Unix.st_kind = Unix.S_REG | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK; _ }
-    -> Ok ()
-;;
-
 let read_file t dir =
   let path = Filename.concat dir (Filename.basename t.file) in
   match
@@ -213,7 +247,9 @@ let read = function
     let unreadable detail = Error (Unreadable { path = t.file; detail }) in
     (match Unix.realpath t.config_dir with
      | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
-       (match absent_config_dir t.config_dir with
+       (* ENOENT also comes from a dangling link on the way, which may hide the
+          record: a config directory on a volume that is not mounted. *)
+       (match Authz_presence.confirm_absent t.config_dir with
         | Ok () -> Ok None
         | Error detail -> unreadable detail)
      | exception Unix.Unix_error (error, _, _) -> unreadable (Unix.error_message error)
@@ -226,7 +262,6 @@ let read = function
 
 type write_error =
   | No_config_dir_to_write
-  | Store_path_invalid of { external_store : string }
   | Config_dir_unusable of
       { dir : string
       ; detail : string
@@ -242,11 +277,7 @@ type write_error =
 
 let write_error_to_string = function
   | No_config_dir_to_write ->
-    "there is no config directory for the install record (neither XDG_CONFIG_HOME nor HOME is set)"
-  | Store_path_invalid { external_store } ->
-    Printf.sprintf
-      "the path of the external store %S is not an absolute path in valid UTF-8"
-      external_store
+    "there is no config directory for the install record (no absolute XDG_CONFIG_HOME and no HOME are set)"
   | Config_dir_unusable { dir; detail } ->
     Printf.sprintf "the config directory %s cannot hold the install record: %s" dir detail
   | Not_replaced { path; detail } ->
@@ -284,33 +315,28 @@ let encode ~canonical_base_path ~external_store =
   ^ "\n"
 ;;
 
-let write located ~external_store =
+let write located ~(external_store : Store_path.t) =
   match located with
   | No_config_dir -> Error No_config_dir_to_write
   | Located t ->
-    if String.equal external_store ""
-       || Filename.is_relative external_store
-       || not (String.is_valid_utf_8 external_store)
-    then Error (Store_path_invalid { external_store })
-    else (
-      let unusable detail = Config_dir_unusable { dir = t.config_dir; detail } in
-      let* () = Result.map_error unusable (ensure_private_directory t.config_dir) in
-      let* dir =
-        match Unix.realpath t.config_dir with
-        | dir -> Ok dir
-        | exception Unix.Unix_error (error, _, _) -> Error (unusable (Unix.error_message error))
-      in
-      let* () = Result.map_error unusable (check_config_dir dir) in
-      let path = Filename.concat dir (Filename.basename t.file) in
-      match
-        Fs_compat.save_file_atomic_strict_staged
-          path
-          (encode ~canonical_base_path:t.canonical_base_path ~external_store)
-      with
-      | Ok () -> Ok ()
-      | Error failure ->
-        let detail = Fs_compat.atomic_replace_failure_to_string failure in
-        (match failure.Fs_compat.stage with
-         | Fs_compat.Before_rename -> Error (Not_replaced { path; detail })
-         | Fs_compat.After_rename -> Error (Replaced_but_not_durable { path; detail })))
+    let unusable detail = Config_dir_unusable { dir = t.config_dir; detail } in
+    let* () = Result.map_error unusable (ensure_private_directory t.config_dir) in
+    let* dir =
+      match Unix.realpath t.config_dir with
+      | dir -> Ok dir
+      | exception Unix.Unix_error (error, _, _) -> Error (unusable (Unix.error_message error))
+    in
+    let* () = Result.map_error unusable (check_config_dir dir) in
+    let path = Filename.concat dir (Filename.basename t.file) in
+    (match
+       Fs_compat.save_file_atomic_strict_staged
+         path
+         (encode ~canonical_base_path:t.canonical_base_path ~external_store)
+     with
+     | Ok () -> Ok ()
+     | Error failure ->
+       let detail = Fs_compat.atomic_replace_failure_to_string failure in
+       (match failure.Fs_compat.stage with
+        | Fs_compat.Before_rename -> Error (Not_replaced { path; detail })
+        | Fs_compat.After_rename -> Error (Replaced_but_not_durable { path; detail })))
 ;;

@@ -15,8 +15,6 @@
 
 open Masc
 
-module Preparation = Masc_test_deps.Board_test_preparation
-
 let () = Mirage_crypto_rng_unix.use_default ()
 let () = Random.self_init ()
 
@@ -33,27 +31,41 @@ let fresh_test_base_path () =
    subsequent write under it raises [Sys_error] (ENOTDIR). Same fixture as
    [test_board_vote_persistence.ml], duplicated per the suite's per-file
    convention. *)
+(* Deny board writes through permissions instead of breaking the workspace
+   boundary: the store files lose their write bits (append fails) and the
+   workspace directory loses create/rename rights (the rewrite stage fails),
+   while reads and workspace observation keep working. The earlier fixture
+   replaced .masc with a regular file, which made the posts source re-observe
+   a refused workspace and latch Posts_refused — every write then stayed
+   refused even after the fixture restored the directory (#47727). *)
 let with_blocked_board_masc_dir f =
+  (* Root ignores file permission bits, so a permission-denied fixture would
+     silently stop denying writes and the blocked-phase assertions would
+     fail for the opposite reason. The previous regular-file fixture stayed
+     effective under root; this one skips instead of lying. *)
+  if Unix.geteuid () = 0 then Alcotest.skip ();
   let store = Board.global () in
   let masc_dir = (Board.workspace_masc_dir store) in
-  let backup = masc_dir ^ ".fixture-backup" in
-  if Sys.file_exists backup then Alcotest.fail "workspace fixture backup already exists";
-  Fs_compat.mkdir_p (Filename.dirname masc_dir);
   let paths =
     [ Board.persist_path store; Board.comments_path store; Board.vote_log_path store
     ; Board.reactions_path store; Board.sub_boards_path store ]
   in
   List.iter Fs_compat.invalidate_cached_writer paths;
-  let existed = Sys.file_exists masc_dir in
-  if existed then Unix.rename masc_dir backup;
+  let file_modes =
+    List.filter_map
+      (fun path ->
+         if Sys.file_exists path then Some (path, (Unix.stat path).Unix.st_perm) else None)
+      paths
+  in
+  let dir_mode = (Unix.stat masc_dir).Unix.st_perm in
+  List.iter (fun (path, _) -> Unix.chmod path 0o444) file_modes;
+  Unix.chmod masc_dir 0o555;
   Fun.protect
     ~finally:(fun () ->
-      List.iter Fs_compat.invalidate_cached_writer paths;
-      if Sys.file_exists masc_dir then Sys.remove masc_dir;
-      if existed then Unix.rename backup masc_dir)
-    (fun () ->
-      Fs_compat.save_file masc_dir "not a directory";
-      f ())
+      Unix.chmod masc_dir dir_mode;
+      List.iter (fun (path, mode) -> Unix.chmod path mode) file_modes;
+      List.iter Fs_compat.invalidate_cached_writer paths)
+    f
 
 let with_eio f () =
   Eio_main.run @@ fun env ->
@@ -61,8 +73,6 @@ let with_eio f () =
   ignore (fresh_test_base_path ());
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Preparation.prepare ~base_path:(Env_config_core.base_path ())
-    ~action:Preparation.Bootstrap;
   Result.get_ok (Board_dispatch.init_jsonl
     ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:Recipient_lookup.none_declared ());
@@ -132,7 +142,9 @@ let test_delete_rewrite_failure_keeps_resurrection_scheduled () =
     "flushed clean before the delete" false (store ()).Board.dirty_posts;
   with_blocked_board_masc_dir (fun () ->
   let writes = ref 0 in
-  Board_dispatch.set_board_write_hook (fun () -> incr writes);
+  Board_dispatch.set_board_sse_hook (function
+    | Board_dispatch.Post_changed _ -> incr writes
+    | _ -> ());
   (match Board_dispatch.delete_post ~post_id:doomed_id with
    | Ok (Board.Deletion_persistence_pending detail) ->
      Alcotest.(check bool) "pending outcome carries the persistence failure" true
@@ -140,7 +152,7 @@ let test_delete_rewrite_failure_keeps_resurrection_scheduled () =
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok Board.Durable_deletion ->
      Alcotest.fail "failed snapshot rewrites must not report durable deletion");
-  Alcotest.(check int) "applied deletion invalidates projections once" 1 !writes;
+  Alcotest.(check int) "applied deletion is announced once" 1 !writes;
   (match Board_dispatch.delete_post ~post_id:doomed_id with
    | Error (Board.Post_not_found _) -> ()
    | Error e -> Alcotest.fail (Board.show_board_error e)
@@ -369,7 +381,9 @@ let test_unreadable_snapshot_refuses_before_transition () =
   let post = create_post_exn ~content:"unreadable source cannot authorize deletion" in
   let post_id = Board.Post_id.to_string post.id in
   let writes = ref 0 in
-  Board_dispatch.set_board_write_hook (fun () -> incr writes);
+  Board_dispatch.set_board_sse_hook (function
+    | Board_dispatch.Post_changed _ -> incr writes
+    | _ -> ());
   let _repair_source = refuse_posts_source () in
   (match Board_dispatch.delete_post ~post_id with
    | Error (Board.Io_error _) -> ()
@@ -501,8 +515,10 @@ let test_cleanup_mixed_pending_and_refused_is_post_effect () =
   with_blocked_reactions (fun () ->
     (* The hook runs after persistence unlock, so this is a real subsequent
        source read rather than a reentrant loader under the write mutex. *)
-    Board_dispatch.set_board_write_hook (fun () ->
-      repair_source := Some (refuse_posts_source ()));
+    Board_dispatch.set_board_sse_hook (function
+      | Board_dispatch.Post_changed _ ->
+        repair_source := Some (refuse_posts_source ())
+      | _ -> ());
     let result =
       Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client "masc_board_cleanup"
         (`Assoc ["dry_run", `Bool false; "max_age_hours", `Int 1])
@@ -517,7 +533,7 @@ let test_cleanup_mixed_pending_and_refused_is_post_effect () =
        |> List.map (fun row -> row |> member "post_id" |> to_string));
     Alcotest.(check bool) "refused post remains readable" true
       (Result.is_ok (Board_dispatch.get_post ~post_id:refused_id)));
-  Board_dispatch.set_board_write_hook (fun () -> ());
+  Board_dispatch.set_board_sse_hook (fun _ -> ());
   (match !repair_source with
    | Some repair -> repair ()
    | None -> Alcotest.fail "first applied deletion did not reach the corruption hook");

@@ -572,10 +572,24 @@ let invalidate_execution_cache () =
 let invalidate_task_mutation_caches ~invalidate_full_health_snapshot () =
   (* Wake health after invalidating execution, but before the SSE fanout can
      wait on a subscriber. Preserve the old cancellation order: an exception
-     from health is re-raised only after execution's broadcast is attempted. *)
+     from health is re-raised only after execution's broadcast is attempted.
+     The planning projection carries the task backlog, so a reader that
+     answers [execution_snapshot] by reading planning reads it after the
+     write. *)
   let cancellation = ref None in
   invalidate_execution_cache_with
     ~before_broadcast:(fun () ->
+      (try
+         Dashboard_cache.invalidate_prefix
+           Server_dashboard_http_core_cache.planning_cache_prefix
+       with
+       | Eio.Cancel.Cancelled _ as exn ->
+         cancellation := Some (exn, Printexc.get_raw_backtrace ())
+       | exn ->
+         record_invalidation_failure
+           ~callback:"planning_cache_invalidate"
+           ~message:"Failed to invalidate the planning projection"
+           exn);
       try invalidate_full_health_snapshot () with
       | Eio.Cancel.Cancelled _ as exn ->
         cancellation := Some (exn, Printexc.get_raw_backtrace ())
@@ -1564,7 +1578,7 @@ let start_transport_health_refresh_loop ~state ~sw ~clock =
   let broadcast_snapshot () =
     broadcast_cached_surface
       ~encoding:Encode_inline
-      ~event_type:"transport_health_snapshot"
+      ~event_type:Dashboard_event_slices.transport_health_snapshot_type
       (Server_dashboard_http_cache.cached_surface_json transport_health_cache
        |> with_transport_health_metadata)
   in

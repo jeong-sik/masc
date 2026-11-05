@@ -141,29 +141,6 @@ let execute_output_keeper ~prefix path =
     if String.equal keeper "" then None else Some keeper
 ;;
 
-let handle_execute_output_snapshot _state req inner_reqd =
-  match execute_output_keeper
-          ~prefix:"/api/v1/dashboard/execute-output-snapshot/"
-          (Http.Request.path req) with
-  | None ->
-    respond_dashboard_error ~status:`Bad_request ~request:req inner_reqd
-      "keeper path parameter is required"
-  | Some keeper_name ->
-    let limit = match Server_utils.query_param req "limit" with
-      | None -> Some Dashboard_execute_output.event_log_capacity
-      | Some raw -> int_of_string_opt raw in
-    (match limit with
-     | Some limit when limit > 0 && limit <= Dashboard_execute_output.event_log_capacity ->
-       Http.Response.json_value ~request:req
-         ~extra_headers:([ "cache-control", "private, no-store" ]
-                         @ public_read_cors_headers req)
-         (Dashboard_execute_output.event_json_limited ~keeper_name ~line_limit:limit)
-         inner_reqd
-     | Some _ | None ->
-       respond_dashboard_error ~status:`Bad_request ~request:req inner_reqd
-         "limit must be between 1 and the output event capacity")
-;;
-
 let handle_execute_output_stream ~sw ~clock _state req inner_reqd =
        let path = Http.Request.path req in
        let keeper =
@@ -688,6 +665,7 @@ type runtime_config_write_operation =
   | Runtime_config_assignment of string * string option
   | Runtime_config_fusion of string
   | Runtime_config_account_removal of string
+  | Runtime_config_tui_preference of Tui_preference.change
 
 let runtime_config_write_operation_details =
   let open Runtime_request in
@@ -777,6 +755,8 @@ let runtime_config_write_operation_details =
     [ ("operation", `String "fusion"); ("edit", `String edit) ]
   | Runtime_config_account_removal integration_id ->
     [ ("operation", `String "account_removal"); ("integration_id", `String integration_id) ]
+  | Runtime_config_tui_preference change ->
+    [ ("operation", `String "tui_preference"); ("change", Tui_preference.change_to_yojson change) ]
 
 let runtime_config_write_operation_label = function
   | Runtime_config_raw_save -> "raw_save"
@@ -788,6 +768,7 @@ let runtime_config_write_operation_label = function
   | Runtime_config_assignment _ -> "assignment"
   | Runtime_config_fusion _ -> "fusion"
   | Runtime_config_account_removal _ -> "account_removal"
+  | Runtime_config_tui_preference _ -> "tui_preference"
 ;;
 
 (* 409 while the file is not the one the preview read, or no longer allows
@@ -1110,6 +1091,69 @@ let handle_runtime_assignment_post state agent_name req reqd body_str =
         ~keeper_name ~runtime_id ~expected ())
     state agent_name req reqd body_str
 
+(* GET /api/v1/tui/preferences, after authentication: the [tui] settings of
+   the runtime.toml this server writes. *)
+let handle_tui_preferences_get state req reqd =
+  let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
+  Http.Response.json_value ~request:req
+    (Tui_preference.settings_to_yojson
+       (Tui_preference.read_settings
+          ~path:(Config_dir_resolver.runtime_toml_path_for_base_path ~base_path)))
+    reqd
+
+(* POST /api/v1/tui/preferences, after authentication: one change to the
+   [tui] table of runtime.toml, parsed at the door (RFC-0482 §3.1). The edit
+   goes through Runtime's config write lock and commit, so the commit
+   announces runtime_config_changed like every other save. A change that
+   leaves the text as it is -- a second visit to the same chat, a hint
+   already retired -- writes, audits and announces nothing. The [tui] keys
+   are not read by the Skill catalog, so, as when the terminal wrote them
+   itself, the commit does not republish it. The answer carries the commit
+   receipt and not the file: the reader already holds its choice. *)
+let handle_tui_preference_post state agent_name req reqd body_str =
+  match
+    match Yojson.Safe.from_string body_str with
+    | json -> Tui_preference.change_of_yojson json
+    | exception Yojson.Json_error detail -> Error ("invalid JSON: " ^ detail)
+  with
+  | Error msg -> respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+  | Ok change ->
+    let operation = Runtime_config_tui_preference change in
+    let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
+    (match
+       Runtime.edit_config_text_if_changed
+         ~runtime_config_path:(Config_dir_resolver.runtime_toml_path_for_base_path ~base_path)
+         (Tui_preference.edit change)
+     with
+     | Error msg ->
+       audit_runtime_config_write state agent_name ~operation ~text:body_str
+         ~outcome:(Audit_log.Failure msg) ();
+       respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+     | Ok (Runtime.Config_text_unchanged { observation; lock_warnings }) ->
+       Http.Response.json_value ~request:req
+         (`Assoc
+            [ "ok", `Bool true
+            ; "state", `String "unchanged"
+            ; "change", Tui_preference.change_to_yojson change
+            ; ( "source_revision"
+              , `String (Runtime.config_source_revision_to_string observation.source_revision) )
+            ; "warnings", `List (List.map Runtime.config_lock_warning_to_yojson lock_warnings)
+            ])
+         reqd
+     | Ok (Runtime.Config_text_committed receipt) ->
+       let observation = receipt.Runtime.observation in
+       Eio.Cancel.protect (fun () ->
+         audit_runtime_config_write state agent_name ~path:observation.path ~receipt ~operation
+           ~text:observation.source_text ~outcome:Audit_log.Success ());
+       Http.Response.json_value ~request:req
+         (`Assoc
+            [ "ok", `Bool true
+            ; "state", `String "committed"
+            ; "change", Tui_preference.change_to_yojson change
+            ; "commit", Runtime.config_commit_receipt_to_yojson receipt
+            ])
+         reqd)
+
 (* POST /api/v1/runtime/config/routing, after authentication: one routing
    body, parsed to a variant, answered by the Runtime writer it names. *)
 let handle_runtime_routing_post state agent_name req reqd body_str =
@@ -1408,6 +1452,8 @@ module For_testing = struct
   let handle_runtime_assignment_post_with = handle_runtime_assignment_post_with
   let handle_runtime_routing_post = handle_runtime_routing_post
   let handle_runtime_config_raw_post = handle_runtime_config_raw_post
+  let handle_tui_preference_post = handle_tui_preference_post
+  let handle_tui_preferences_get = handle_tui_preferences_get
   let fusion_run_detail_response = fusion_run_detail_response
   let fusion_run_list_response = fusion_run_list_response
   let skill_delete_audit_of_outcome = skill_delete_audit_of_outcome
@@ -1462,8 +1508,7 @@ let handle_keeper_exact_lane_body state operator_name request reqd body_str =
         with
         | Error message -> refuse message
         | Ok current ->
-          Dashboard_cache.invalidate_prefix
-            (Printf.sprintf "gate:%s;" config.base_path);
+          Server_dashboard_http.invalidate_gate_snapshots ~base_path:config.base_path;
           Sse.broadcast
             (`Assoc
                [ "type", `String "keeper_exact_lane_preference_changed"
@@ -1540,8 +1585,7 @@ let handle_gate_keeper_mode_body state operator_name request reqd body_str =
         with
         | Error message -> refuse message
         | Ok change ->
-          Dashboard_cache.invalidate_prefix
-            (Printf.sprintf "gate:%s;" config.base_path);
+          Server_dashboard_http.invalidate_gate_snapshots ~base_path:config.base_path;
           Sse.broadcast
             (`Assoc
                [ "type", `String "gate_keeper_mode_changed"
@@ -1615,8 +1659,7 @@ let handle_gate_mode_body_for_lane
               reqd
               (operator_error_json message)
           | Ok (change : Keeper_gate_mode.change) ->
-            Dashboard_cache.invalidate_prefix
-              (Printf.sprintf "gate:%s;" config.base_path);
+            Server_dashboard_http.invalidate_gate_snapshots ~base_path:config.base_path;
             Sse.broadcast
               (`Assoc
                  [ "type", `String sse_type
@@ -1795,9 +1838,6 @@ let add_routes ~sw ~clock router =
   |> Server_route.prefix_get Server_route.Public_read
        "/api/v1/dashboard/execute-output/"
        (handle_execute_output_stream ~sw ~clock)
-  |> Server_route.prefix_get Server_route.Public_read
-       "/api/v1/dashboard/execute-output-snapshot/"
-       handle_execute_output_snapshot
 
   (* Batch dashboard endpoint: single request replaces 4 separate API calls *)
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard" (fun _state req reqd ->
@@ -2807,6 +2847,14 @@ let add_routes ~sw ~clock router =
              handle_runtime_assignment_post state agent_name req reqd body_str
            )
          )
+  (* RFC-0482 §3.1: a terminal reader starts from the [tui] table the server
+     writes, not from whichever runtime.toml its own environment finds. Only
+     the settings are sent; the file carries provider configuration. *)
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanReadState) "/api/v1/tui/preferences" (fun state _agent_name req reqd ->
+         handle_tui_preferences_get state req reqd)
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/tui/preferences" (fun state agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body_str ->
+             handle_tui_preference_post state agent_name req reqd body_str))
   (* Phase 1 Action 2 — live Dashboard_cache state surface.  Renders
      hit_ratio, in-flight compute count, per-entry ttl_remaining, and
      timeout-circuit-open counts so operators can correlate slow endpoints
@@ -3532,25 +3580,28 @@ let add_routes ~sw ~clock router =
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/harness-health" (fun state req reqd ->
          let since = Server_utils.query_param req "since" in
          let until = Server_utils.query_param req "until" in
+         let base_path = (Mcp_server.workspace_config state).base_path in
          let cache_key =
            Printf.sprintf "harness_health:%s:%s:%s"
-             (Mcp_server.workspace_config state).base_path
+             base_path
              (Option.value ~default:"-" since)
              (Option.value ~default:"-" until)
          in
          respond_cached_read ~request:req ~reqd ~cache_key ~ttl:standard_cache_ttl_s
-           (Pool_work.cpu ~name:__FUNCTION__ (fun () -> Dashboard_harness_health.json ?since ?until ()))
+           (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+              Dashboard_harness_health.json ?since ?until ~base_path ()))
        )
   (* An operator's own verdict on a harness row. The label is ground truth
      for judge calibration, so it takes the admin permission and the
      authenticated caller becomes the labeler — no anonymous ground truth. *)
-  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/harness-label" (fun _state agent_name req reqd ->
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/harness-label" (fun state agent_name req reqd ->
            Http.Request.read_body_async reqd (fun body_str ->
              match Dashboard_harness_health.parse_label_body body_str with
              | Error message ->
                respond_dashboard_error ~status:`Bad_request ~request:req reqd message
              | Ok label ->
                Dashboard_harness_health.record_operator_label
+                 ~base_path:(Mcp_server.workspace_config state).base_path
                  ~labeler:agent_name label;
                Http.Response.json_value ~request:req
                  (`Assoc [ "ok", `Bool true ]) reqd))

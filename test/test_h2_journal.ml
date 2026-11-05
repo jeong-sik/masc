@@ -97,7 +97,7 @@ let make_plan ?(changed_input = false) () =
        ~input:consumer_input ()] |> require "valid canonical plan"
 
 type prepared = { draft : Draft.t; journal : Journal.t; source : Journal.source }
-let prepare ?observation ?plan base_path =
+let prepare_source ?plan base_path =
   let capability_surface = surface base_path in
   let plan = Option.value plan ~default:(make_plan ()) in
   let draft = Draft.prepare ~base_path ~capability_surface ~keeper_name:keeper
@@ -114,7 +114,38 @@ let prepare ?observation ?plan base_path =
     ; parent_tool_use_id = Agent_core.Tool_contract.Invocation.tool_use_id invocation
     ; source_turn = Agent_core.Tool_contract.Invocation.turn invocation
     ; source_task_id = Some "original-source-task"; producer=Journal.Prepared } in
+  draft, source
+let prepare ?observation ?plan base_path =
+  let draft, source = prepare_source ?plan base_path in
   {draft; source; journal = Journal.prepare ?observation ~base_path source |> journal_value "prepare journal"}
+
+(* The async request detail reads this journal, so a write the journal
+   attempts announces its Keeper's async requests. A prepare that finds the
+   journal already written writes nothing and announces nothing. *)
+let test_journal_writes_announce_async_requests () = with_workspace @@ fun _env _sw base_path ->
+  let _draft, source = prepare_source base_path in
+  let heard = ref 0 in
+  let id = Printf.sprintf "journal-announce-%d" (Unix.getpid ()) in
+  Masc.Sse.subscribe_external ~id
+    ~callback:(fun (event : Masc.Sse.external_event) ->
+      match event.Masc.Sse.ext_payload with
+      | `Assoc fields ->
+        (match List.assoc_opt "type" fields, List.assoc_opt "name" fields with
+         | Some (`String kind), Some (`String name)
+           when String.equal kind Masc.Keeper_msg_async_broadcast.requests_changed_event
+                && String.equal name keeper -> incr heard
+         | _ -> ())
+      | _ -> ())
+    ();
+  Fun.protect ~finally:(fun () -> Masc.Sse.unsubscribe_external id) (fun () ->
+    ignore (Journal.prepare ~base_path source |> journal_value "create the journal");
+    check int "creating the journal announces its Keeper" 1 !heard;
+    ignore (Journal.prepare ~base_path source |> journal_value "find the journal");
+    check int "finding it written announces nothing" 1 !heard;
+    ignore (Journal.load ~base_path ~keeper_name:source.Journal.keeper_name
+              ~composition_run_id:source.Journal.composition_run_id
+            |> journal_value "load the journal");
+    check int "reading it announces nothing" 1 !heard)
 let context (source : Journal.source) =
   ["composition_tool", `String composition_tool;
    "composition_run_id", `String (Plan.Composition_run_id.to_string source.composition_run_id);
@@ -2056,6 +2087,8 @@ let () = match Array.to_list Sys.argv with
         test_case "buffered original history preserves byte offsets, anchors and ordered failures" `Quick test_task_history_buffered_sources;
         test_case "history continuation preserves rows at varied byte boundaries" `Quick test_task_history_row_boundaries;
         test_case "restart reuses completed data and occurrence" `Quick test_restart_reuses_completed;
+        test_case "a journal write announces its Keeper's async requests" `Quick
+          test_journal_writes_announce_async_requests;
         test_case "source and plan identity refuse unsafe dispatch" `Quick test_source_and_plan_identity;
         test_case "original source observations freeze once without late backfill" `Quick test_source_observation_is_frozen_at_creation;
         test_case "resumed Ask never borrows missing source from current run" `Quick

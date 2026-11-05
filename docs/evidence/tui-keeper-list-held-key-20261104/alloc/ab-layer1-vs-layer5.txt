@@ -1,0 +1,30 @@
+== default-1
+load_before [30.1376953125, 81.59619140625, 164.41064453125]
+  build[keeper-list] frames=213 mean=1.78ms p50=1.56 p95=2.72 p99=5.31 max=14.39
+counter domain=0 minor_allocated_words n=105 sum=83578032
+domain=0 top-level empty_minor n=74 total_ms=48.5 p50_ms=0.063 p99_ms=4.826 max_ms=4.826
+== l3-1
+load_before [30.96826171875, 80.09130859375, 162.90966796875]
+  build[keeper-list] frames=218 mean=1.14ms p50=1.02 p95=1.47 p99=3.29 max=7.63
+counter domain=0 minor_allocated_words n=95 sum=57313784
+domain=0 top-level empty_minor n=69 total_ms=31.5 p50_ms=0.041 p99_ms=9.336 max_ms=9.336
+== default-2
+load_before [31.638671875, 77.81982421875, 160.65087890625]
+  build[keeper-list] frames=209 mean=1.48ms p50=1.30 p95=2.33 p99=3.76 max=10.58
+counter domain=0 minor_allocated_words n=102 sum=76613422
+domain=0 top-level empty_minor n=73 total_ms=36.8 p50_ms=0.045 p99_ms=9.185 max_ms=9.185
+== l3-2
+load_before [29.560546875, 75.8505859375, 158.98388671875]
+  build[keeper-list] frames=199 mean=1.49ms p50=1.30 p95=2.21 p99=5.19 max=8.26
+counter domain=0 minor_allocated_words n=94 sum=51898742
+domain=0 top-level empty_minor n=67 total_ms=21.2 p50_ms=0.033 p99_ms=3.653 max_ms=3.653
+== default-3
+load_before [28.955078125, 74.95654296875, 158.18115234375]
+  build[keeper-list] frames=219 mean=1.32ms p50=1.24 p95=1.93 p99=2.33 max=3.18
+counter domain=0 minor_allocated_words n=99 sum=80772196
+domain=0 top-level empty_minor n=74 total_ms=27.8 p50_ms=0.055 p99_ms=4.622 max_ms=4.622
+== l3-3
+load_before [28.69580078125, 73.39208984375, 156.6533203125]
+  build[keeper-list] frames=209 mean=1.31ms p50=1.15 p95=1.56 p99=6.56 max=9.84
+counter domain=0 minor_allocated_words n=94 sum=53326775
+domain=0 top-level empty_minor n=68 total_ms=37.6 p50_ms=0.053 p99_ms=9.110 max_ms=9.110

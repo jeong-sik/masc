@@ -31,13 +31,10 @@ type source_terminal_receipt =
   | Fusion_terminal of Keeper_event_queue.fusion_completion
   | Hitl_terminal of Keeper_event_queue.hitl_resolution
   | Turn_completed
-  | Turn_attempt_terminal of { detail : string }
 (** Closed terminal source evidence. Fusion and HITL completion are intrinsically
     represented by their durable event payload. [Turn_completed] records a
-    successful admitted turn; [Turn_attempt_terminal] records that one admitted
-    turn ended without a successful result. In both cases the exact
-    source remains in the transition receipt instead of being discarded by a
-    raw ACK. [detail] is diagnostic only and carries no transition authority. *)
+    successful admitted turn; the exact source remains in the transition
+    receipt instead of being discarded by a raw ACK. *)
 
 type accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
@@ -70,7 +67,6 @@ type projected_disposition_kind =
   | Projected_fusion_terminal
   | Projected_hitl_terminal
   | Projected_turn_completed
-  | Projected_turn_attempt_terminal
 
 type projected_source_kind =
   | Source_board_signal
@@ -121,7 +117,6 @@ type pending_selection =
   ; admitted_revision : int64
   ; arrival : int64
   ; checkpoint_retentions : int
-  ; repetition_scope : Keeper_execution_scope_id.t option
   ; first_admitted_at : float option
   }
 (** One exact durable queue entry. [admitted_revision] is the current
@@ -132,26 +127,11 @@ type pending_selection =
     retention, deferral and reprioritization preserve it, while an ACK followed
     by reinsertion creates a new entry with a later number. It names the entry,
     not its content or its position, so it is not an exact selection fence; use
-    [admitted_revision] for that. Read it through {!same_entry} and
-    {!arrived_since}. *)
-(** [repetition_scope = None] means no durable binding has been recorded. It
-    does not assert that the source has never been observed by a model. A
-    binding identifies work; it does not by itself authorize Fresh or Resume. *)
+    [admitted_revision] for that. Read it through {!same_entry}. *)
 (** [first_admitted_at] is the observed epoch time of first durable queue
     admission. [None] means the admission boundary recorded no clock evidence;
     it must not be derived from the source timestamp or a later observation.
     Retention, deferral and reprioritization preserve it. It is diagnostic only. *)
-
-type scope_binding_error =
-  | Empty_scope_batch
-  | Duplicate_scope_selection
-  | Invalid_scope_selection of string
-  | Scope_binding_conflict of
-      { requested : Keeper_execution_scope_id.t
-      ; existing : Keeper_execution_scope_id.t
-      }
-
-val scope_binding_error_to_string : scope_binding_error -> string
 
 type t =
   { revision : int64
@@ -180,7 +160,7 @@ val pending_selections : t -> pending_selection list
 
 val last_non_immediate_served : t -> Keeper_event_queue.urgency option
 (** Non-immediate urgency currently held in this state ([Normal] or [Low]),
-    used by {!peek_when} and {!select_when} for lane preference. On snapshot
+    used by {!peek_when} for lane preference. On snapshot
     load it is derived from retained transition evidence, which may not
     include every acknowledgement. *)
 
@@ -194,23 +174,6 @@ val derived_last_non_immediate_served :
     1. [transition_outbox] (an applied transition awaiting projection),
     2. [last_transition] (the latest projected full receipt),
     3. [projected_dispositions] (newest-first displaced history). *)
-
-type frontier
-(** The point in queue history at which one reader loaded the state. *)
-
-val frontier : t -> frontier
-(** The frontier of this loaded state: every entry it holds has a lower
-    [arrival] number than any admitted later. *)
-
-val unobserved_frontier : frontier
-(** A reader that loaded no state: every pending entry arrived after it. *)
-
-val arrived_since : frontier -> pending_selection -> bool
-(** [arrived_since frontier entry] is true when the queue admitted [entry]
-    after the state [frontier] was taken from, so a reader holding [frontier]
-    had not seen it. Reprioritization, deferral and retention of an entry the
-    reader already saw leave this false; an ACK followed by reinsertion makes
-    it true. *)
 
 val same_entry : pending_selection -> pending_selection -> bool
 (** The two values describe the same queue entry, whatever edits happened
@@ -265,12 +228,6 @@ val peek_when :
     the signature for caller compatibility; selection is pure and independent
     of wall-clock elapsed time. *)
 
-val select_when :
-  now:float ->
-  ready:(Keeper_event_queue.stimulus -> bool) ->
-  t ->
-  pending_selection option
-(** See {!peek_when}. *)
 
 val validate_pending_selection :
   selection:pending_selection ->
@@ -286,17 +243,6 @@ val ack_pending :
 (** Compare-and-remove the exact immutable selected stimulus snapshot.
     Unrelated queue revisions and enqueues are allowed; a missing, duplicated,
     or changed selected identity fails closed. *)
-
-val bind_pending_repetition_scope :
-  selections:pending_selection list ->
-  scope:Keeper_execution_scope_id.t ->
-  t ->
-  (t * pending_selection list, scope_binding_error) result
-(** Validate the entire nonempty batch before binding any entry. Conflicting
-    existing bindings cannot be replaced. Returns updated selections in caller
-    order; pre-binding selections become stale. A batch already bound to the
-    same scope returns the original state. Reordering/retention preserves a
-    binding; removing and newly enqueuing a source does not inherit it. *)
 
 val note_checkpoint_retention :
   selection:pending_selection ->
@@ -315,23 +261,14 @@ val reprioritize_pending :
 (** Change only the exact selected source priority. A real change receives the
     next source incarnation; unrelated pending entries retain theirs. *)
 
-val defer_pending :
-  selection:pending_selection ->
-  t ->
-  (t * int64, string) result
-(** Move one exact selected source to the back of its current urgency lane and
-    assign a new source incarnation. This is the durable fairness primitive for
-    transient failures: no source is lost, but it cannot monopolize the head of
-    the active queue while independent work is waiting. *)
-
 val defer_pending_batch :
   selections:pending_selection list -> t -> (t * int64, string) result
 (** Validate every exact selection before rotating a batch within urgency
     lanes. A selected Connector conversation moves with all its currently
     pending rows, including an unadmitted suffix, in their existing queue
-    order. Other selected sources move individually. Payloads, execution
-    scopes, first admission and retention counts are preserved; moved rows
-    receive a new source incarnation. No source is acknowledged. *)
+    order. Other selected sources move individually. Payloads, first admission
+    and retention counts are preserved; moved rows receive a new source
+    incarnation. No source is acknowledged. *)
 
 val cancel_pending_accepted :
   applied_at:float ->
@@ -357,31 +294,19 @@ val ack_pending_source_terminal :
   t ->
   (t * transition_result, string) result
 (** ACK one exact pending event. Intrinsic product-terminal receipts must match
-    the source payload exactly. A turn-attempt terminal receipt carries the
-    exact source itself; its detail is diagnostic and never admission
-    authority. *)
-
-val terminalize_pending_turn_attempt :
-  applied_at:float ->
-  selection:pending_selection ->
-  detail:string ->
-  t ->
-  (t * transition_result, string) result
-(** End one admitted turn attempt with a deterministic operation identity
-    derived from the exact selected queue snapshot and owner generation.
-    Repeating the same request after WAL projection returns its original
-    receipt, while a later selection of the same source is a new attempt;
-    diagnostic [detail] never participates in admission or idempotency. *)
+    the source payload exactly. A turn-completed receipt carries the exact
+    source itself. *)
 
 val terminalize_pending_turn_completed :
   applied_at:float ->
   selection:pending_selection ->
   t ->
   (t * transition_result, string) result
-(** Commit typed completion evidence for one admitted turn. Completion and
-    failure share one deterministic per-attempt operation identity, so a stale
-    contradictory settlement fails closed instead of replacing the first
-    durable outcome. *)
+(** Commit typed completion evidence for one admitted turn with a
+    deterministic operation identity derived from the exact selected queue
+    snapshot. Repeating the same request after WAL projection returns its
+    original receipt; a different prior disposition under that identity fails
+    closed instead of replacing the first durable outcome. *)
 
 val pending_turn_selection_withdrawn : selection:pending_selection -> t -> bool
 (** [true] when the entry an admitted turn was given is no longer pending
@@ -457,9 +382,6 @@ val mark_transition_projected
     every older operator disposition remains in the replay ledger; ordinary
     non-disposition history is not retained indefinitely. Unknown transition
     ids fail closed. *)
-
-val remove_by_post_id :
-  Keeper_event_queue.post_id -> t -> Keeper_event_queue.stimulus list * t
 
 val transition_receipt_equal : transition_receipt -> transition_receipt -> bool
 val replay_transition_outbox_entry : outbox_entry -> t -> (t, string) result

@@ -229,12 +229,20 @@ val effect_disposition_of_call_error : call_error -> Tool_result.failure_effect_
 val call_error_to_string : call_error -> string
 
 val tool_result_of_call :
+  base_path:string ->
+  inline_ceiling_bytes:int ->
   (Mcp_client.tool_result, call_error) result ->
   Agent_core.Types.tool_result
 (** The model's view of one call. A transport or server failure is
     recoverable only when the failure proves the effect never began
     ({!effect_disposition_of_call_error}). An unknown outcome is not
-    recoverable merely because the remote tool claims to be read-only. *)
+    recoverable merely because the remote tool claims to be read-only.
+
+    No answer is longer than [inline_ceiling_bytes]. When the whole answer
+    would be, the service's text is stored under [base_path] and the answer
+    carries its reference in that text's place; MASC's own sentence about the
+    call stays inline. If the store cannot keep the text, the answer says so
+    instead, and a completed call is reported as completed. *)
 
 val for_turn : base_path:string -> keeper_name:string -> offering
 (** Every attached provider's tools, for one turn.

@@ -928,11 +928,11 @@ let test_mcp_rejects_unknown_machine_and_non_observer_machine env =
       ; verify_operator_mcp_auth = admit
       ; verify_seat_mcp_auth = admit
       } in
-    let handler reqd =
-      let request = Httpun.Reqd.request reqd in
-      Server_request_authority.with_current authority (fun () ->
-        Transport.handle_get_mcp ~deps request reqd) in
-    List.iter (fun (target, expected_status) ->
+    List.iter (fun (target, sse_kind, expected_status) ->
+      let handler reqd =
+        let request = Httpun.Reqd.request reqd in
+        Server_request_authority.with_current authority (fun () ->
+          Transport.handle_get_mcp ~deps ~sse_kind request reqd) in
       with_server env ~handler (fun ~port ->
         let before = Masc.Sse.client_count () in
         let url = Printf.sprintf "http://127.0.0.1:%d%s" port target in
@@ -944,9 +944,9 @@ let test_mcp_rejects_unknown_machine_and_non_observer_machine env =
           if response.status <> expected_status then
             Alcotest.failf "%s: expected %d, got %d: %s" target expected_status response.status response.body;
           Alcotest.(check int) "no observer was registered" before (Masc.Sse.client_count ())))
-      [ "/mcp?sse_kind=observer&machine=other", 400
-      ; "/mcp?sse_kind=agent&machine=msx", 400
-      ; "/mcp?sse_kind=observer&machine=msx", 503 ])
+      [ "/mcp?sse_kind=observer&machine=other", Masc.Sse.Observer, 400
+      ; "/mcp?sse_kind=agent&machine=msx", Masc.Sse.Agent_stream, 400
+      ; "/mcp?sse_kind=observer&machine=msx", Masc.Sse.Observer, 503 ])
 ;;
 
 let test_mcp_observer_refuses_foreign_and_retired_workspaces env =

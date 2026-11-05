@@ -1,10 +1,8 @@
 (* Channel_gate_imessage_state — iMessage in-process connector state.
 
-   Replaces the sidecar functor instance this module used to be. The four
-   defects iMessage shipped on 2026-08-16 (#28848, #28855, #28869, #28882) were
-   one shape: liveness lived in a file, so the writer and the readers could
-   disagree about its path, its env var, its freshness and its meaning. None of
-   those four are expressible against an [Atomic] the poll fiber owns.
+   Liveness is held in [Atomic] values the poll fiber owns, so no reader can
+   disagree with the writer about a file path, an env var, freshness or
+   meaning.
 
    Shaped after {!Channel_gate_slack_state}. iMessage differs in what carries
    messages — a local SQLite file and osascript rather than a socket and REST —

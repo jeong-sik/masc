@@ -525,11 +525,10 @@ type agent_core_tool_projector =
     call carries. [Tool_bridge] owns the projection and this library must not
     depend on it, so the direction is inverted by passing the function in.
 
-    It used to be inverted by a process-global [Atomic.t] that [Tool_bridge]
-    filled from a module initializer, which made "was the bridge linked and did
-    its initializer run" a runtime question — answered by an [Internal] error
-    at the point of use, and undone in tests by a [For_testing] helper that
-    emptied the global. As an argument the question is the compiler's. *)
+    It is an argument, not a process-global [Atomic.t] that [Tool_bridge] fills
+    from a module initializer: "was the bridge linked and did its initializer
+    run" would be a runtime question, answered by an [Internal] error at the
+    point of use. As an argument the question is the compiler's. *)
 
 val run_with_masc_tools :
   sw:Eio.Switch.t ->

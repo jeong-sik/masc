@@ -356,10 +356,9 @@ let sse_entries =
   ]
 
 (* MASC_TELEMETRY_ENABLED, MASC_LOG_LEVEL, MASC_LOG_ROUTINE_LEVEL and
-   MASC_PARSE_WARN used to be restated here. [runtime_entries] already carries
-   them and the "runtime" category concatenates both lists, so the operator read
-   each of them twice -- and MASC_LOG_LEVEL answered "(auto)" in one row and
-   "(none)" in the other. *)
+   MASC_PARSE_WARN are listed in [runtime_entries] only. The "runtime" category
+   concatenates both lists, so a second listing here would show each of them
+   twice. *)
 let telemetry_entries =
   [
     entry ~default:Masc_network_defaults.otel_default_enabled_s "MASC_OTEL_ENABLED"

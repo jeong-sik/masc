@@ -123,12 +123,8 @@ val keeper_runtime_store_placement
   -> keeper_runtime_store_placement
 (** Where a store puts its files, and therefore which retention pass owns it.
 
-    This exists because the answer used to be a second list of directory names
-    written out in the maintenance pass. turn-records was added to the store
-    table on 2026-07-31 and nobody added it to that list, so it went unpruned
-    for months at roughly 4 MB a day fleet-wide. A store now has to say where
-    it lives, and the match is exhaustive, so the next one cannot be added
-    without answering. *)
+    A store has to say where it lives, and the match is exhaustive, so the next
+    one cannot be added without answering. *)
 
 val keepers_root_store_dirnames : string list
 (** Directory names of the stores placed [Keepers_root_scoped]: they sit

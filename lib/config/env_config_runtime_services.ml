@@ -4,9 +4,8 @@ open Env_config_core
 
 module OAuth = struct
   (* The knob is a constructor; its name, default and operator description come
-     from [Env_setting]'s exhaustive spec. The default used to be written twice
-     per knob -- once for the read, once for the non-positive fallback -- and
-     neither reached the operator snapshot. *)
+     from [Env_setting]'s exhaustive spec. A non-positive value falls back to
+     that one default. *)
   let positive knob =
     let value = Env_setting.Int_knob.get knob in
     if value > 0

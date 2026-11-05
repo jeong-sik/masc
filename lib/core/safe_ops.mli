@@ -113,11 +113,8 @@ val read_json_file_logged : label:string -> string -> Yojson.Safe.t option
 (** Read JSON file safely, logging errors instead of silently discarding them.
     Returns [Some json] on success, [None] on failure with a warning log. *)
 
-(* The five reason words used to be exported here as strings while
-   [Read_drop_reason] held the same vocabulary as a closed variant that nothing
-   passed. Two spellings, and the compiler compared neither: a new reason could
-   be added to one and missed by the other, and a typo in a call site was a
-   valid string. The reporters below take the variant. *)
+(* The reporters below take [Read_drop_reason.t], a closed variant, so a call
+   site cannot pass a misspelled reason word. *)
 
 val report_persistence_read_drop :
   on_drop:(unit -> unit) ->

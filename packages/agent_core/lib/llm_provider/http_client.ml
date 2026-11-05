@@ -1064,12 +1064,9 @@ let tracked_client ~eof_seen conn =
   Cohttp_eio.Client.make_generic (fun ~sw:_ _uri -> tracked)
 ;;
 
-(** A parked connection to [origin] from [cache], or a new one opened on the
-    cache's switch so that it can be parked after the request's own switch
-    ends. *)
 (* A request's connection: opened for this request alone, or leased from a
-   cache. Only [end_connection] ends either, so a one-shot connection cannot
-   be parked and a leased one cannot be closed behind its cache's back. *)
+   cache. [end_connection] ends either: a one-shot connection cannot be
+   parked, and a leased one ends through its cache's [release]. *)
 type held_connection =
   | One_shot of connection
   | Leased of Http_client_cache.lease

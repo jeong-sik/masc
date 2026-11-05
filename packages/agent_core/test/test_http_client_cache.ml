@@ -630,18 +630,29 @@ let test_reuse_verdict_cases () =
 (* A server that answers every request on a connection with [response] and
    counts the connections it accepted. With [close_after_first] it closes each
    connection after its first answer. *)
-let start_raw_server ?(close_after_first = false) ~sw ~net response =
+(* Answers every request on a connection with [response]. With
+   [close_after_first] the connection closes after the first answer; with
+   [cut_second] the second request gets that instead, and then the close. *)
+let start_raw_server ?(close_after_first = false) ?cut_second ~sw ~net response =
   let port = fresh_port () in
   let accepted = ref 0 in
   let handler flow _addr =
     incr accepted;
     let reader = Eio.Buf_read.of_flow flow ~max_size:8192 in
-    let rec serve () =
+    let rec serve ~first =
       drain_request_headers reader;
-      Eio.Flow.copy_string response flow;
-      if close_after_first then Eio.Flow.shutdown flow `All else serve ()
+      match first, cut_second with
+      | true, _ ->
+        Eio.Flow.copy_string response flow;
+        if close_after_first then Eio.Flow.shutdown flow `All else serve ~first:false
+      | false, Some cut ->
+        Eio.Flow.copy_string cut flow;
+        Eio.Flow.shutdown flow `All
+      | false, None ->
+        Eio.Flow.copy_string response flow;
+        serve ~first:false
     in
-    try serve () with
+    try serve ~first:true with
     | End_of_file | Eio.Io _ | Unix.Unix_error _ -> ()
   in
   let socket =
@@ -764,6 +775,26 @@ let test_get_sync_on_a_connection_the_peer_closed () =
   Alcotest.(check int) "closed as a failed request" 1 stats.closed_total.request_failed;
   Alcotest.(check int) "and counted as a reused connection's failure" 1
     stats.closed_after_reuse.request_failed
+;;
+
+(* The second answer on a parked connection stops two bytes short of its
+   length and the peer closes. The reused connection ends as transport ended,
+   which RFC-0492 §6 counts apart from a new connection's. *)
+let test_a_reused_connection_cut_short_counts_as_reused () =
+  with_cache_switch
+  @@ fun ~sw ~env ~cache ->
+  let url, _ =
+    start_raw_server ~sw ~net:env#net
+      ~cut_second:"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\nok"
+      "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
+  in
+  get_ok ~sw ~net:env#net ~cache url;
+  get_ok ~sw ~net:env#net ~cache url;
+  let stats = Http_client.cache_stats cache in
+  Alcotest.(check int) "the second request reused the connection" 1 stats.reuse_count_total;
+  Alcotest.(check int) "closed as transport ended" 1 stats.closed_total.transport_ended;
+  Alcotest.(check int) "and counted as a reused connection's close" 1
+    stats.closed_after_reuse.transport_ended
 ;;
 
 (* The peer closes before the five bytes its header promised. cohttp ends the
@@ -1622,6 +1653,8 @@ let () =
             test_get_sync_on_a_connection_the_peer_closed
         ; Alcotest.test_case "get_sync does not park a body cut short" `Quick
             test_get_sync_does_not_park_a_body_the_peer_cut_short
+        ; Alcotest.test_case "a reused connection cut short counts as reused" `Quick
+            test_a_reused_connection_cut_short_counts_as_reused
         ; Alcotest.test_case "get_sync does not park an interim answer" `Quick
             test_get_sync_does_not_park_an_interim_answer
         ; Alcotest.test_case "one dispatch does not park a body cut short" `Quick

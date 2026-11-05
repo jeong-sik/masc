@@ -193,12 +193,17 @@ let stats (cache : t) : stats =
         Printf.sprintf "%s://%s:%d" scheme host port, List.length v)
     in
     let total_idle = List.fold_left (fun acc (_, n) -> acc + n) 0 idle_per_host in
+    (* [release] counts a close in [closed] before [closed_after_reuse], and a
+       reader on another domain may run between the two. Reading in the other
+       order keeps every reason's reused count at or below its total. *)
+    let closed_after_reuse = read_close_counters cache.closed_after_reuse in
+    let closed_total = read_close_counters cache.closed in
     { idle_per_host
     ; total_idle
     ; reuse_count_total = Atomic.get cache.reuse_count_total
     ; create_count_total = Atomic.get cache.create_count_total
-    ; closed_total = read_close_counters cache.closed
-    ; closed_after_reuse = read_close_counters cache.closed_after_reuse
+    ; closed_total
+    ; closed_after_reuse
     })
 ;;
 
@@ -255,6 +260,7 @@ type lease =
   ; key : Key.t
   ; connection : connection
   ; provenance : provenance
+  ; released : bool Atomic.t
   }
 
 let lease_connection lease = lease.connection
@@ -263,7 +269,13 @@ let lease_connection lease = lease.connection
    contended [Eio.Mutex.lock] in [park] is a cancellation point, and a
    connection that is neither parked nor closed stays open until the cache's
    switch ends. *)
-let release { cache; key; connection; provenance } (verdict : Reuse_verdict.t) : unit =
+let release lease (verdict : Reuse_verdict.t) : unit =
+  (* A second release would park one socket twice, and two later requests
+     would share it. Like [Eio.Promise.resolve] on a resolved promise, it
+     raises instead of acting. *)
+  if not (Atomic.compare_and_set lease.released false true)
+  then invalid_arg "Http_client_cache.release: the lease was already released";
+  let { cache; key; connection; provenance; released = _ } = lease in
   Eio.Cancel.protect (fun () ->
     match verdict with
     | Park -> park cache key connection
@@ -277,11 +289,12 @@ let release { cache; key; connection; provenance } (verdict : Reuse_verdict.t) :
 
 let checkout (cache : t) key ~create =
   match take cache key with
-  | Some connection -> Ok { cache; key; connection; provenance = Reused }
+  | Some connection ->
+    Ok { cache; key; connection; provenance = Reused; released = Atomic.make false }
   | None ->
     (match create ~sw:cache.sw with
      | Ok connection ->
        Atomic.incr cache.create_count_total;
-       Ok { cache; key; connection; provenance = Created }
+       Ok { cache; key; connection; provenance = Created; released = Atomic.make false }
      | Error _ as error -> error)
 ;;

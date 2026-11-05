@@ -70,11 +70,8 @@
       "consumer": ["execution dashboard", "operator trust surfaces"],
       "wire_or_artifact": ".masc/keepers/<keeper>/execution-receipts/*.jsonl",
       "schema_source": ["lib/keeper/keeper_execution_receipt.mli"],
-      "validator": "Keeper_execution_receipt.to_json and receipt invariant tests",
-      "tests": [
-        "test/test_keeper_receipt_authoritative.ml",
-        "test/test_keeper_receipt_authoritative_matrix.ml"
-      ],
+      "validator": "Keeper_execution_receipt.to_json and receipt wire tests",
+      "tests": ["test/test_keeper_execution_receipt_observation_wire.ml"],
       "stability": "operator_internal",
       "version_field": "schema",
       "external_refs": ["agent_core.raw_trace_record.v1"],

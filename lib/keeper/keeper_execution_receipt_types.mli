@@ -7,10 +7,6 @@ val outcome_kind_to_tla_receipt :
 type error_kind = Error_kind of string
 val error_kind_of_string : string -> error_kind
 val error_kind_to_string : error_kind -> string
-type receipt_authority_violation = { outcome : string; turn_state : string; }
-val assert_receipt_authoritative :
-  outcome:[< `Cancelled | `Error | `Ok | `Skipped ] ->
-  turn_state:string -> (unit, receipt_authority_violation) result
 type tool_surface = {
   turn_lane : Keeper_agent_tool_surface.turn_lane;
 }

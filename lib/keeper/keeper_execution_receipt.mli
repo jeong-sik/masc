@@ -31,40 +31,6 @@ type error_kind = private Error_kind of string
 val error_kind_of_string : string -> error_kind
 val error_kind_to_string : error_kind -> string
 
-(** Witness of a [ReceiptIsAuthoritative] invariant violation.
-    [outcome] holds the receipt-side string (e.g. ["receipt_done"]);
-    [turn_state] is the offending turn-state symbol the caller
-    presented. *)
-type receipt_authority_violation =
-  { outcome : string
-  ; turn_state : string
-  }
-
-(** Runtime check for the TLA+ [ReceiptIsAuthoritative] invariant
-    (specs/keeper-turn-fsm/KeeperTurnFSM.tla:336):
-    [receipt_outcome = "receipt_done" => turn_state = "done"].
-
-    Per [ReceiptMatchesState] the [Done] state also accepts
-    [receipt_skipped] (PhaseGateSkip path), so this helper enforces
-    the receipt-authoritative direction for both [`Ok] and [`Skipped]:
-    a successful-terminal receipt MUST be paired with [turn_state =
-    "done"]. [`Error] and [`Cancelled] are accepted here without
-    further check; pairing them with the right turn_state is the
-    responsibility of [ReceiptMatchesState] (a separate invariant).
-
-    [turn_state] is the canonical TLA+ symbol form (e.g. [done],
-    [failed], [cancelled], ...). Callers that hold a
-    [Keeper_turn_fsm.turn_state] should pass
-    [Keeper_turn_fsm.to_tla_symbol s].
-
-    Returns [Error _] (never raises) so the caller can choose to
-    fail-closed via [Result.Error] propagation or surface a metric.
-    Memory: feedback_keeper_runtime_fail_closed_for_unknown_permissive_default. *)
-val assert_receipt_authoritative
-  :  outcome:outcome_kind
-  -> turn_state:string
-  -> (unit, receipt_authority_violation) result
-
 type tool_surface = Keeper_execution_receipt_types.tool_surface =
   { turn_lane : Keeper_agent_tool_surface.turn_lane }
 

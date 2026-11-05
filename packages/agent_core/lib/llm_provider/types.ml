@@ -1339,6 +1339,16 @@ let content_has_reasoning_artifact content =
     content
 ;;
 
+let rec content_has_image content =
+  List.exists
+    (function
+      | Image _ -> true
+      | ToolResult { content_blocks = Some blocks; _ } -> content_has_image blocks
+      | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
+      | ToolResult { content_blocks = None; _ } | Document _ | Audio _ -> false)
+    content
+;;
+
 let assistant_message_of_response (response : api_response) =
   let message metadata =
     { origin = Conversation;  role = Assistant

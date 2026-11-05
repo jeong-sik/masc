@@ -751,6 +751,44 @@ let test_tool_result_msg_json_detection () =
   | _ -> Alcotest.fail "expected explicit JSON payload"
 ;;
 
+(* ── content_has_image ─────────────────────────────────── *)
+
+let test_content_has_image () =
+  let stored raw = Types.Stored (Agent_core.History.stored_of_raw raw) in
+  let image = Types.Image { media_type = "image/png"; source = stored "png" } in
+  let tool_result ?content_blocks () =
+    Types.ToolResult
+      { tool_use_id = "tu1"
+      ; content = "result"
+      ; outcome = Tool_succeeded
+      ; json = None
+      ; content_blocks
+      }
+  in
+  let check label expected content =
+    Alcotest.(check bool) label expected (Types.content_has_image content)
+  in
+  check "empty" false [];
+  check "text only" false [ Types.Text "hello" ];
+  check "image" true [ Types.Text "hello"; image ];
+  check
+    "documents and audio are not images"
+    false
+    [ Types.Document { media_type = "application/pdf"; source = stored "pdf" }
+    ; Types.Audio { media_type = "audio/wav"; source = stored "wav" }
+    ];
+  check "tool result without blocks" false [ tool_result () ];
+  check
+    "tool result with text blocks"
+    false
+    [ tool_result ~content_blocks:[ Types.Text "hello" ] () ];
+  check "image inside a tool result" true [ tool_result ~content_blocks:[ image ] () ];
+  check
+    "image two tool results deep"
+    true
+    [ tool_result ~content_blocks:[ tool_result ~content_blocks:[ image ] () ] () ]
+;;
+
 (* ── text_of_content / text_of_message ─────────────────── *)
 
 let test_text_of_content_text_only () =
@@ -1399,5 +1437,7 @@ let () =
       , [ Alcotest.test_case "shape checks" `Quick test_validate_tool_result_shape
         ; Alcotest.test_case "json detection" `Quick test_tool_result_msg_json_detection
         ] )
+    ; ( "image_detection"
+      , [ Alcotest.test_case "content_has_image" `Quick test_content_has_image ] )
     ]
 ;;

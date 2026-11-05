@@ -956,6 +956,10 @@ type assistant_message_error =
 (** Whether any block is a reasoning artifact a replay boundary must justify. *)
 val content_has_reasoning_artifact : content_block list -> bool
 
+(** Whether an [Image] block is in the list, or inside the [content_blocks] of
+    a [ToolResult] in it, at any depth. *)
+val content_has_image : 'source content_block_with list -> bool
+
 (** Convert a provider response into the Assistant history message callers
     should append. Reasoning-bearing responses require exact replay
     provenance; plain responses remain metadata-free. A carried

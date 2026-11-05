@@ -1007,18 +1007,22 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
           let send_first_frames () =
             if not (send_if_current (sse_prime_event ())) then
               Log.Server.debug "SSE prime send failed for session %s" info.session_id;
+            (* [List.fold_left] applies its function in list order, so the
+               replay goes out in order; it keeps the deliveries sent. *)
             let replayed =
               match replay with
               | Some { Sse.deliveries; continuity = _ } ->
-                deliveries
-                |> List.filter (fun delivery ->
-                  if send_if_current delivery.Sse.frame
-                  then true
-                  else (
-                    Log.Server.debug
-                      "SSE replay send failed for session %s"
-                      info.session_id;
-                    false))
+                List.rev
+                  (List.fold_left
+                     (fun sent delivery ->
+                        if send_if_current delivery.Sse.frame
+                        then delivery :: sent
+                        else (
+                          Log.Server.debug
+                            "SSE replay send failed for session %s"
+                            info.session_id;
+                          sent))
+                     [] deliveries)
               | None -> []
             in
             Sse.create_replay_handoff replayed

@@ -2,16 +2,16 @@
    cases pin what that leaves: the rows read back as the same entries in the
    same order, the numbers are right-aligned to the last one, no row is wider
    than its budget, and an entry that wraps continues indented under its own
-   text. Widths are cells, not bytes, over wide characters and combining marks
-   too. They check text and cells, not how a screen reads. *)
+   text. That holds for a word wider than a row too, which is what a model id
+   is: it has no space to wrap at. Widths are cells, not bytes, over wide
+   characters and combining marks too. They check text and cells, not how a
+   screen reads. *)
 
 open Alcotest
 module Numbered = Masc_tui_numbered_list
 module Layout = Masc_tui_message_layout
 
 let cells_of = Layout.display_width
-
-let budgets = [ 12; 13; 20; 30; 44; 80 ]
 
 let pieces =
   [| "a"; "bc"; "open"; "\xC3\xA9"; "\xE6\x97\xA5"; "\xEA\xB0\x80\xEB\x82\x98"; "\xF0\x9F\x98\x80" |]
@@ -31,23 +31,79 @@ let random_entry state =
           in
           if Random.State.int state 100 < 10 then word ^ "\xCC\x81" else word))
 
+let segments =
+  [| "glm"
+   ; "coding"
+   ; "ollama"
+   ; "cloud"
+   ; "deepseek"
+   ; "v4"
+   ; "1"
+   ; "flash"
+   ; "openrouter"
+   ; "claude"
+   ; "\xE6\x97\xA5\xE6\x9C\xAC"
+   ; "\xC3\xA9"
+  |]
+
+let separators = [| "-"; "."; "_"; ":"; "/" |]
+
+(* Three to ten segments joined by what a model id joins its parts with, and no
+   space: one word, up to about a hundred cells wide. *)
+let random_id state =
+  String.concat
+    ""
+    (List.init
+       (3 + Random.State.int state 8)
+       (fun index -> (if index = 0 then "" else pick state separators) ^ pick state segments))
+
+(* A family is lists of entries, the budgets to wrap them at, the cells of text
+   every budget must leave, and what the rows of one entry read back with. *)
+type family =
+  { lists : string list list
+  ; budgets : int list
+  ; least_text_cells : int
+  ; rejoin : string
+  }
+
 (* One hundred and twenty lists of up to eleven entries, from a fixed seed.
    Lists of ten or more have two-digit numbers. *)
-let lists =
-  let state = Random.State.make [| 0x57 |] in
-  List.init 120 (fun _ -> List.init (Random.State.int state 12) (fun _ -> random_entry state))
+let random_lists seed entry =
+  let state = Random.State.make [| seed |] in
+  List.init 120 (fun _ -> List.init (Random.State.int state 12) (fun _ -> entry state))
+
+(* Phrases wrap at spaces, and the widest word is eight cells, so a budget
+   leaves room for every word when it leaves the text at least that. *)
+let phrases =
+  { lists = random_lists 0x57 random_entry
+  ; budgets = [ 12; 13; 20; 30; 44; 80 ]
+  ; least_text_cells = 8
+  ; rejoin = " "
+  }
+
+(* A model id is cut inside the word, so the rows of one entry read back with
+   nothing between them. The widest grapheme is two cells. *)
+let ids =
+  { lists = random_lists 0x58 random_id
+  ; budgets = [ 6; 8; 12; 20; 30; 44 ]
+  ; least_text_cells = 2
+  ; rejoin = ""
+  }
+
+let families = [ phrases; ids ]
 
 let marker_cells entries = String.length (string_of_int (List.length entries)) + 2
 
-(* The widest word is eight cells, so a budget leaves room for every word when
-   it leaves the text at least that. *)
-let every_case f =
+let every_case family f =
   List.iter
     (fun budget ->
        List.iter
-         (fun entries -> if budget - marker_cells entries >= 8 then f budget entries)
-         lists)
-    budgets
+         (fun entries ->
+            if budget - marker_cells entries >= family.least_text_cells then f budget entries)
+         family.lists)
+    family.budgets
+
+let each_family f = List.iter f families
 
 let is_blank_prefix row count =
   String.length row >= count && String.equal (String.sub row 0 count) (String.make count ' ')
@@ -67,91 +123,132 @@ let group_by_entry entries rows =
   |> List.rev
 
 let test_rows_read_back_as_the_same_entries () =
-  every_case (fun budget entries ->
-    let rows = Numbered.rows ~max_cells:budget entries in
-    check
-      (list string)
-      "entries"
-      entries
-      (List.map (String.concat " ") (group_by_entry entries rows)))
+  each_family (fun family ->
+    every_case family (fun budget entries ->
+      let rows = Numbered.rows ~max_cells:budget entries in
+      check
+        (list string)
+        "entries"
+        entries
+        (List.map (String.concat family.rejoin) (group_by_entry entries rows))))
 
 let test_numbers_run_from_one_and_are_right_aligned () =
-  every_case (fun budget entries ->
-    let digits = String.length (string_of_int (List.length entries)) in
-    let starts =
-      List.filter
-        (fun row -> not (is_blank_prefix row (digits + 2)))
-        (Numbered.rows ~max_cells:budget entries)
-    in
-    check
-      (list string)
-      "numbers"
-      (List.mapi (fun index _ -> Printf.sprintf "%*d" digits (index + 1)) entries)
-      (List.map (fun row -> String.sub row 0 digits) starts);
-    List.iter
-      (fun row ->
-         check string "two spaces after the number" "  " (String.sub row digits 2))
-      starts)
+  each_family (fun family ->
+    every_case family (fun budget entries ->
+      let digits = String.length (string_of_int (List.length entries)) in
+      let starts =
+        List.filter
+          (fun row -> not (is_blank_prefix row (digits + 2)))
+          (Numbered.rows ~max_cells:budget entries)
+      in
+      check
+        (list string)
+        "numbers"
+        (List.mapi (fun index _ -> Printf.sprintf "%*d" digits (index + 1)) entries)
+        (List.map (fun row -> String.sub row 0 digits) starts);
+      List.iter
+        (fun row ->
+           check string "two spaces after the number" "  " (String.sub row digits 2))
+        starts))
 
 let test_no_row_is_wider_than_the_budget () =
-  every_case (fun budget entries ->
-    List.iter
-      (fun row -> check bool "row fits" true (cells_of row <= budget))
-      (Numbered.rows ~max_cells:budget entries))
+  each_family (fun family ->
+    every_case family (fun budget entries ->
+      List.iter
+        (fun row -> check bool "row fits" true (cells_of row <= budget))
+        (Numbered.rows ~max_cells:budget entries)))
 
 let test_a_continued_entry_is_indented_under_its_text () =
-  every_case (fun budget entries ->
-    let marker = marker_cells entries in
-    List.iter
-      (fun row ->
-         if is_blank_prefix row marker
-         then
-           check
-             bool
-             "text starts at the column where the entry's text starts"
-             true
-             (String.length row > marker && not (Char.equal row.[marker] ' ')))
-      (Numbered.rows ~max_cells:budget entries))
+  each_family (fun family ->
+    every_case family (fun budget entries ->
+      let marker = marker_cells entries in
+      List.iter
+        (fun row ->
+           if is_blank_prefix row marker
+           then
+             check
+               bool
+               "text starts at the column where the entry's text starts"
+               true
+               (String.length row > marker && not (Char.equal row.[marker] ' ')))
+        (Numbered.rows ~max_cells:budget entries)))
+
+(* The id family is there for the word that has no space to wrap at. Every one
+   of its budgets must meet a word wider than the row. *)
+let test_every_budget_meets_a_word_wider_than_the_row () =
+  List.iter
+    (fun budget ->
+       let wider =
+         List.exists
+           (fun entries ->
+              let text_cells = budget - marker_cells entries in
+              text_cells >= ids.least_text_cells
+              && List.exists (fun entry -> cells_of entry > text_cells) entries)
+           ids.lists
+       in
+       check bool (Printf.sprintf "budget %d meets one" budget) true wider)
+    ids.budgets
 
 let test_no_entries_give_no_rows () =
   List.iter
     (fun budget -> check (list string) "rows" [] (Numbered.rows ~max_cells:budget []))
-    (0 :: -3 :: budgets)
+    (0 :: -3 :: phrases.budgets)
 
+(* Entries with no text, among entries with some, at three budgets. *)
 let test_an_entry_with_no_text_is_its_number () =
-  check (list string) "one" [ "1" ] (Numbered.rows ~max_cells:20 [ "" ]);
-  check
-    (list string)
-    "between two"
-    [ "1  a"; "2"; "3  b" ]
-    (Numbered.rows ~max_cells:20 [ "a"; ""; "b" ])
+  let entries = [ "a"; ""; "b c"; ""; "" ] in
+  List.iter
+    (fun budget ->
+       let starts =
+         List.filter
+           (fun row -> not (is_blank_prefix row (marker_cells entries)))
+           (Numbered.rows ~max_cells:budget entries)
+       in
+       check int "one start per entry" (List.length entries) (List.length starts);
+       List.iteri
+         (fun index entry ->
+            if String.equal entry ""
+            then
+              check
+                string
+                "its number alone"
+                (string_of_int (index + 1))
+                (String.trim (List.nth starts index)))
+         entries)
+    [ 12; 20; 44 ]
 
 let test_a_budget_below_the_marker_leaves_the_text_one_cell () =
-  let rows = Numbered.rows ~max_cells:0 [ "ab" ] in
-  check
-    (list string)
-    "text"
-    [ "ab" ]
-    [ String.concat "" (List.map (fun row -> String.sub row 3 (String.length row - 3)) rows) ]
+  List.iter
+    (fun entries ->
+       let at_one_cell = Numbered.rows ~max_cells:(marker_cells entries + 1) entries in
+       List.iter
+         (fun budget ->
+            check (list string) "rows" at_one_cell (Numbered.rows ~max_cells:budget entries))
+         [ marker_cells entries; 0; -3 ])
+    phrases.lists
 
+(* One entry takes one row at the width that holds it whole, and more rows one
+   cell short of it. *)
 let test_a_row_may_fill_the_budget_exactly () =
-  check (list string) "exact" [ "1  ab cd" ] (Numbered.rows ~max_cells:8 [ "ab cd" ]);
-  check
-    (list string)
-    "one cell less"
-    [ "1  ab"; "   cd" ]
-    (Numbered.rows ~max_cells:7 [ "ab cd" ])
-
-let test_widths_are_cells_not_bytes () =
-  let entry = "\xE6\x97\xA5\xE6\x97\xA5 \xE6\x97\xA5\xE6\x97\xA5" in
-  check bool "more bytes than cells" true (String.length entry > cells_of entry);
-  check (list string) "one row" [ "1  " ^ entry ] (Numbered.rows ~max_cells:(3 + cells_of entry) [ entry ])
-
-let test_ten_entries_align_their_numbers () =
-  let entries = List.init 10 (fun index -> Printf.sprintf "e%d" index) in
-  let rows = Numbered.rows ~max_cells:20 entries in
-  check string "first" " 1  e0" (List.hd rows);
-  check string "tenth" "10  e9" (List.nth rows 9)
+  List.iter
+    (fun entries ->
+       List.iter
+         (fun entry ->
+            if String.contains entry ' '
+            then (
+              let exact = marker_cells [ entry ] + cells_of entry in
+              check
+                int
+                "rows at the exact width"
+                1
+                (List.length (Numbered.rows ~max_cells:exact [ entry ]));
+              check
+                bool
+                "more rows one cell short"
+                true
+                (List.length (Numbered.rows ~max_cells:(exact - 1) [ entry ]) > 1)))
+         entries)
+    phrases.lists
 
 let () =
   run
@@ -173,6 +270,10 @@ let () =
             "a continued entry is indented under its text"
             `Quick
             test_a_continued_entry_is_indented_under_its_text
+        ; test_case
+            "every budget meets a word wider than the row"
+            `Quick
+            test_every_budget_meets_a_word_wider_than_the_row
         ] )
     ; ( "boundaries"
       , [ test_case "no entries give no rows" `Quick test_no_entries_give_no_rows
@@ -188,10 +289,5 @@ let () =
             "a row may fill the budget exactly"
             `Quick
             test_a_row_may_fill_the_budget_exactly
-        ; test_case "widths are cells, not bytes" `Quick test_widths_are_cells_not_bytes
-        ; test_case
-            "ten entries align their numbers"
-            `Quick
-            test_ten_entries_align_their_numbers
         ] )
     ]

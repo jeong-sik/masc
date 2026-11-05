@@ -1,15 +1,17 @@
 (* Key hints in an info pane are packed whole. These cases pin what that
    leaves: the rows read back as the same hints in the same order, a hint that
    fits a row is never cut, a row takes the next hint whenever it still fits,
-   and a hint wider than a row gets rows of its own. Widths are counted in
-   cells, not bytes, over wide characters and combining marks too. They check
-   text and cells, not how a screen reads. *)
+   and no hint is dropped at any width. Widths are counted in cells, not bytes,
+   over wide characters and combining marks too. They check text and cells, not
+   how a screen reads. *)
 
 open Alcotest
 module Hint = Masc_tui_hint_lines
 module Layout = Masc_tui_message_layout
 
 let cells_of = Layout.display_width
+
+let separator = Layout.clause_separator
 
 let text (item : Hint.item) = item.key ^ ": " ^ item.label
 
@@ -53,7 +55,6 @@ let every_case f =
 let all_fit budget items = List.for_all (fun i -> cells_of (text i) <= budget) items
 
 let split_on_separator row =
-  let separator = Hint.separator in
   let length = String.length separator in
   let rec from start offset found =
     if offset + length > String.length row
@@ -69,16 +70,14 @@ let first count list = List.filteri (fun index _ -> index < count) list
 
 let after count list = List.filteri (fun index _ -> index >= count) list
 
-(* The rule written the plain way: a row is the longest run of the remaining
-   hints whose joined text fits, measured on the joined text. A hint wider
-   than the budget is wrapped at spaces on its own. *)
+(* The rule written the plain way, for hints that each fit a row: a row is the
+   longest run of the remaining hints whose joined text fits, measured on the
+   joined text. *)
 let reference ~max_cells items =
   let max_cells = max 1 max_cells in
-  let join list = String.concat Hint.separator list in
+  let join list = String.concat separator list in
   let rec rows = function
     | [] -> []
-    | head :: rest when cells_of head > max_cells ->
-      Layout.wrap_words ~max_cells head @ rows rest
     | all ->
       let rec longest count =
         if count < List.length all && cells_of (join (first (count + 1) all)) <= max_cells
@@ -122,7 +121,7 @@ let test_a_row_takes_the_next_hint_whenever_it_fits () =
             bool
             "the first hint below did not fit above"
             true
-            (cells_of above + cells_of Hint.separator + cells_of next > budget);
+            (cells_of above + cells_of separator + cells_of next > budget);
           adjacent rest
         | [ _ ] | [] -> ()
       in
@@ -130,23 +129,41 @@ let test_a_row_takes_the_next_hint_whenever_it_fits () =
 
 let test_rows_match_the_plain_definition () =
   every_case (fun budget items ->
-    check
-      (list string)
-      "rows"
-      (reference ~max_cells:budget items)
-      (Hint.wrap ~max_cells:budget items))
+    if all_fit budget items
+    then
+      check
+        (list string)
+        "rows"
+        (reference ~max_cells:budget items)
+        (Hint.wrap ~max_cells:budget items))
 
-let test_a_hint_wider_than_the_row_has_rows_of_its_own () =
-  let wide = item "d" "one two three four five six" in
-  let before = item "a" "b" in
-  let after = item "c" "e" in
-  let budget = 12 in
-  check bool "the wide hint does not fit" true (cells_of (text wide) > budget);
-  check
-    (list string)
-    "rows"
-    ([ text before ] @ Layout.wrap_words ~max_cells:budget (text wide) @ [ text after ])
-    (Hint.wrap ~max_cells:budget [ before; wide; after ])
+(* Everything the rows carry, less the spaces and the mark between hints. *)
+let remove_all ~sub text =
+  let length = String.length sub in
+  let buffer = Buffer.create (String.length text) in
+  let rec from offset =
+    if offset >= String.length text
+    then ()
+    else if offset + length <= String.length text
+            && String.equal (String.sub text offset length) sub
+    then from (offset + length)
+    else (
+      Buffer.add_char buffer text.[offset];
+      from (offset + 1))
+  in
+  from 0;
+  Buffer.contents buffer
+
+let bare text =
+  remove_all ~sub:"\xC2\xB7" (String.concat "" (String.split_on_char ' ' text))
+
+let test_no_hint_is_dropped_at_any_width () =
+  every_case (fun budget items ->
+    check
+      string
+      "text"
+      (bare (String.concat "" (List.map text items)))
+      (bare (String.concat "" (Hint.wrap ~max_cells:budget items))))
 
 let test_no_hints_give_no_rows () =
   List.iter
@@ -166,11 +183,11 @@ let test_a_budget_below_one_is_one () =
 let test_a_row_may_fill_the_budget_exactly () =
   let first_hint = item "a" "b" in
   let second_hint = item "c" "d" in
-  let exact = cells_of (text first_hint) + cells_of Hint.separator + cells_of (text second_hint) in
+  let exact = cells_of (text first_hint) + cells_of separator + cells_of (text second_hint) in
   check
     (list string)
     "exact"
-    [ text first_hint ^ Hint.separator ^ text second_hint ]
+    [ text first_hint ^ separator ^ text second_hint ]
     (Hint.wrap ~max_cells:exact [ first_hint; second_hint ]);
   check
     (list string)
@@ -180,12 +197,12 @@ let test_a_row_may_fill_the_budget_exactly () =
 
 let test_widths_are_cells_not_bytes () =
   let wide = item "a" "\xE6\x97\xA5" in
-  let exact = (2 * cells_of (text wide)) + cells_of Hint.separator in
+  let exact = (2 * cells_of (text wide)) + cells_of separator in
   check bool "more bytes than cells" true (String.length (text wide) > cells_of (text wide));
   check
     (list string)
     "one row"
-    [ text wide ^ Hint.separator ^ text wide ]
+    [ text wide ^ separator ^ text wide ]
     (Hint.wrap ~max_cells:exact [ wide; wide ])
 
 let () =
@@ -203,9 +220,9 @@ let () =
             test_a_row_takes_the_next_hint_whenever_it_fits
         ; test_case "rows match the plain definition" `Quick test_rows_match_the_plain_definition
         ; test_case
-            "a hint wider than the row has rows of its own"
+            "no hint is dropped at any width"
             `Quick
-            test_a_hint_wider_than_the_row_has_rows_of_its_own
+            test_no_hint_is_dropped_at_any_width
         ] )
     ; ( "boundaries"
       , [ test_case "no hints give no rows" `Quick test_no_hints_give_no_rows

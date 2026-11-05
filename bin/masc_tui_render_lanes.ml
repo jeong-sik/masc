@@ -25,12 +25,14 @@ let runtime_lane_notice_style = function
     if Masc_tui_runtime_config_receipt.lane_needs_attention receipt then Theme.warn ()
     else Theme.info ()
 
+(* What a list of candidates reads when it has none. *)
+let no_candidates = "(없음)"
+
 (* Candidates in the order they are tried, joined by arrows. The arrows carry
-   the order, so a candidate has no number in front of it: a pane that wraps the
-   chain breaks at an arrow, and never between a number and the id it numbers. *)
+   the order, and a pane that wraps the chain breaks at an arrow. *)
 let slot_chain values =
   match values with
-  | [] -> "(없음)"
+  | [] -> no_candidates
   | values -> String.concat "  →  " (List.map Terminal_text.single_line values)
 
 let standalone_lane_purpose (lane : Tui_decode.standalone_lane) =
@@ -140,30 +142,33 @@ let standalone_lane_jev_summary (lane : Tui_decode.standalone_lane) =
         ^ Terminal_text.single_line
             (String.concat ", " (List.map named destinations)) )
 
+(* The cells every row of a detail block is indented by. *)
+let detail_indent = "  "
+
 let wrap_indented_line ~max_cells style text =
   let single = Terminal_text.single_line text in
   if String.equal (String.trim single) "" then [ style, "" ]
   else
     Message_layout.wrap_words ~max_cells:(max 1 max_cells) single
-    |> List.map (fun line -> style, "  " ^ line)
+    |> List.map (fun line -> style, detail_indent ^ line)
 
 let wrap_indented_lines ~max_cells style lines =
   List.concat_map (wrap_indented_line ~max_cells style) lines
 
-(* A candidate list as its label and one numbered row per candidate, nested two
-   cells under the label, so a long model id wraps under its own number and is
-   not read as the next candidate. A list with no candidates stays on the
-   label's row. *)
+(* A candidate list as its label and one numbered row per candidate, one indent
+   under the label, so a long model id wraps under its own number and is not
+   read as the next candidate. A list with no candidates stays on the label's
+   row. *)
 let numbered_slot_lines ~max_cells style ~label values =
   match values with
-  | [] -> wrap_indented_line ~max_cells style (label ^ ": (없음)")
+  | [] -> wrap_indented_line ~max_cells style (label ^ ": " ^ no_candidates)
   | values ->
-    let nested = "  " in
+    let under_label = detail_indent in
     wrap_indented_line ~max_cells style (label ^ ":")
     @ List.map
-        (fun row -> style, "  " ^ nested ^ row)
+        (fun row -> style, detail_indent ^ under_label ^ row)
         (Numbered_list.rows
-           ~max_cells:(max 1 (max_cells - String.length nested))
+           ~max_cells:(max 1 (max_cells - Message_layout.display_width under_label))
            (List.map Terminal_text.single_line values))
 
 let lane_overview_summary_block ~cols ~label ~purpose ~left_title ~left_rows

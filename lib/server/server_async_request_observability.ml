@@ -15,33 +15,28 @@ let file_kind_to_string = function
   | S_SOCK -> "socket"
 ;;
 
-let record_error_kind_to_yojson = function
-  | Keeper_msg_async.Invalid_record_name -> `Assoc [ "kind", `String "invalid_record_name" ]
-  | Record_missing -> `Assoc [ "kind", `String "record_missing" ]
+let record_error_kind_fields = function
+  | Keeper_msg_async.Invalid_record_name -> [ "kind", `String "invalid_record_name" ]
+  | Record_missing -> [ "kind", `String "record_missing" ]
   | Record_not_regular file_kind ->
-    `Assoc
-      [ "kind", `String "record_not_regular"
-      ; "file_kind", `String (file_kind_to_string file_kind)
-      ]
+    [ "kind", `String "record_not_regular"
+    ; "file_kind", `String (file_kind_to_string file_kind)
+    ]
   | Record_unreadable reason ->
-    `Assoc [ "kind", `String "record_unreadable"; "reason", `String reason ]
+    [ "kind", `String "record_unreadable"; "reason", `String reason ]
   | Record_inspection_failed { reason } ->
-    `Assoc [ "kind", `String "record_inspection_failed"; "reason", `String reason ]
+    [ "kind", `String "record_inspection_failed"; "reason", `String reason ]
   | Record_terminal_status status ->
-    `Assoc
-      [ "kind", `String "record_terminal_status"
-      ; "status", `String (Keeper_msg_async.status_to_string status)
-      ]
+    [ "kind", `String "record_terminal_status"
+    ; "status", `String (Keeper_msg_async.status_to_string status)
+    ]
 ;;
 
 let record_error_to_yojson
       ({ request_id; kind; _ } : Keeper_msg_async.active_inventory_record_error) =
-  match record_error_kind_to_yojson kind with
-  | `Assoc fields ->
-    `Assoc
-      (("request_id", Option.fold ~none:`Null ~some:(fun value -> `String value) request_id)
-       :: fields)
-  | _ -> assert false
+  `Assoc
+    (("request_id", Option.fold ~none:`Null ~some:(fun value -> `String value) request_id)
+     :: record_error_kind_fields kind)
 ;;
 
 let store_error_to_yojson = function
@@ -89,9 +84,7 @@ let entry_to_yojson ~runtime_owned_ids (entry : Keeper_msg_async.entry) =
     then "runtime_owned"
     else "disk_only_ownership_unknown"
   in
-  match Keeper_msg_async.entry_to_json entry with
-  | `Assoc fields -> `Assoc (("worker_ownership", `String ownership) :: fields)
-  | _ -> assert false
+  `Assoc (("worker_ownership", `String ownership) :: Keeper_msg_async.entry_to_fields entry)
 ;;
 
 let recovery_store_to_string = function

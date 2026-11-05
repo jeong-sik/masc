@@ -285,26 +285,8 @@ let normalize_request_context request_context =
   let rec normalize_json path (json : Yojson.Safe.t) =
     match json with
     | `Assoc fields ->
-      let rec normalize_fields seen normalized = function
-        | [] ->
-          Ok
-            (`Assoc
-               (List.sort
-                  (fun (left, _) (right, _) -> String.compare left right)
-                  normalized))
-        | (name, value) :: rest ->
-          if List.mem name seen
-          then
-            Error
-              (Printf.sprintf
-                 "request_context contains duplicate field %S at %s"
-                 name
-                 (String.concat "." (List.rev path)))
-          else
-            let* value = normalize_json (name :: path) value in
-            normalize_fields (name :: seen) ((name, value) :: normalized) rest
-      in
-      normalize_fields [] [] fields
+      let* fields = normalize_fields path fields in
+      Ok (`Assoc fields)
     | `List values ->
       let rec normalize_values index normalized = function
         | [] -> Ok (`List (List.rev normalized))
@@ -323,14 +305,29 @@ let normalize_request_context request_context =
     | `Float _ -> Error "request_context float must be finite"
     | (`Null | `Bool _ | `Int _ | `String _) as value ->
       Ok value
+  and normalize_fields path fields =
+    let rec normalize seen normalized = function
+      | [] ->
+        Ok (List.sort (fun (left, _) (right, _) -> String.compare left right) normalized)
+      | (name, value) :: rest ->
+        if List.mem name seen
+        then
+          Error
+            (Printf.sprintf
+               "request_context contains duplicate field %S at %s"
+               name
+               (String.concat "." (List.rev path)))
+        else
+          let* value = normalize_json (name :: path) value in
+          normalize (name :: seen) ((name, value) :: normalized) rest
+    in
+    normalize [] [] fields
   in
   match request_context with
   | None -> Ok None
   | Some fields ->
-    let* normalized = normalize_json [ "request_context" ] (`Assoc fields) in
-    (match normalized with
-     | `Assoc fields -> Ok (Some fields)
-     | _ -> assert false)
+    let* fields = normalize_fields [ "request_context" ] fields in
+    Ok (Some fields)
 ;;
 
 let same_request_identity (left : entry) (right : entry) =
@@ -552,7 +549,7 @@ let entry_of_record_json ~base_path ~request_id:expected_request_id json :
     }
 ;;
 
-let entry_to_json ~now (e : entry) : Yojson.Safe.t =
+let entry_to_fields ~now (e : entry) : (string * Yojson.Safe.t) list =
   let fields =
     [ "request_id", `String e.request_id
     ; "keeper_name", `String e.keeper_name
@@ -620,5 +617,5 @@ let entry_to_json ~now (e : entry) : Yojson.Safe.t =
         ]
     | Queued | Running -> fields
   in
-  `Assoc fields
+  fields
 ;;

@@ -538,6 +538,9 @@ val cancel_result_to_json : request_id:string -> cancel_result -> Yojson.Safe.t
     [elapsed_sec] / [ok] + [result]. *)
 val entry_to_json : entry -> Yojson.Safe.t
 
+(** The fields of {!entry_to_json}, for callers that add fields of their own. *)
+val entry_to_fields : entry -> (string * Yojson.Safe.t) list
+
 module For_testing : sig
   type request_ops
 

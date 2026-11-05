@@ -19,7 +19,7 @@ TUI 렌더링 최적화는 별도 완료 증거인 [`tui-smoothness-20261104`](.
 - `41960925440`: `pr-type-check.yml`, **성공**
 - `41961038163`: 첫 20개 targeted suite, Browser hidden 경합 1건과 Lane cold-build 600초 초과로 **실패**
 - `41963750774`: hidden 진입을 보정한 20개 targeted suite, **실행 중**
-- `41963753486`: test-only head의 `pr-type-check.yml`, **실행 중**
+- `41963753486`: test-only head `5c1420fb9703c78ff403929d3f04563539a4a478`의 `pr-type-check.yml`, **성공**
 - 독립 whole-branch review: **대기**
 
 최종 후보의 `--help`에는 `--refresh`가 없다(`candidate-help.txt`). 시작·명시적 `r`·실패 재시도·재연결·표시 전용 애니메이션·로그인 마감은 별개다.

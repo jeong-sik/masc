@@ -10,9 +10,14 @@
   "native_proof_run": 41960928980,
   "native_binary_sha256": "02f9cec046fdd0f07b5ba0abc762c460ce3eef716b4695f842fba745796394b2",
   "type_check": {
-    "run": 41960925440,
-    "source": "473386e4609917d3129867a895637bb9ed969879",
-    "result": "success"
+    "run": 41963753486,
+    "source": "5c1420fb9703c78ff403929d3f04563539a4a478",
+    "result": "success",
+    "production_previous": {
+      "run": 41960925440,
+      "source": "473386e4609917d3129867a895637bb9ed969879",
+      "result": "success"
+    }
   },
   "targeted_remote_behavior": {
     "run": 41963750774,
@@ -48,7 +53,7 @@
     "source": "473386e4609917d3129867a895637bb9ed969879",
     "browser": {
       "result": "pass",
-      "seconds": 11.571,
+      "seconds": 12.139,
       "open_selected_reads": 1,
       "unrelated_selected_reads": 0,
       "changed_selected_reads": 1,
@@ -83,7 +88,7 @@
     },
     "lane_inventory": {
       "result": "pass",
-      "seconds": 13.240,
+      "seconds": 14.285,
       "open_lane_reads": 1,
       "open_addon_reads_including_detail": 2,
       "matching_inspect_addon_reads": 1,

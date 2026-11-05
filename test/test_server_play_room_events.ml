@@ -37,7 +37,10 @@ let scope ?(client = "tab1") ?(machine = Masc.Machine_lane.Dos) () =
   { Events.play_client = client; machine }
 
 let connect base_path ?(agent_name = "player") ?(role = Masc_domain.Player) ?(sse_client_id = 1) room_scope =
-  Events.connect ~base_path ~agent_name ~role ~scope:room_scope ~sse_client_id |> ok
+  match Events.connect ~base_path ~agent_name ~role ~scope:room_scope ~sse_client_id with
+  | Ok Events.Connected -> ()
+  | Ok Events.Stale -> fail "a stale connect was accepted as the successor"
+  | Error error -> fail (Room.error_message error)
 
 let disconnect base_path ?(agent_name = "player") ?(role = Masc_domain.Player) ?(sse_client_id = 1) room_scope =
   Events.disconnect ~base_path ~agent_name ~role ~scope:room_scope ~sse_client_id |> ok
@@ -94,6 +97,20 @@ let test_replacement_and_http_lease () = workspace (fun base_path ->
     disconnect base_path ~sse_client_id:11 room_scope;
     check (list string) "the exact replacement disconnects" [] (names base_path);
     check int "only real public transitions announce" 2 (event_count heard)))
+
+let test_stale_connect_is_explicit () = workspace (fun base_path ->
+  with_events base_path (fun heard ->
+    let room_scope = scope () in
+    connect base_path ~sse_client_id:60 room_scope;
+    connect base_path ~sse_client_id:61 room_scope;
+    (match Events.connect ~base_path ~agent_name:"player" ~role:Masc_domain.Player
+      ~scope:room_scope ~sse_client_id:60 with
+     | Ok Events.Stale -> ()
+     | Ok Events.Connected -> fail "the older connect replaced its successor"
+     | Error error -> fail (Room.error_message error));
+    check (list string) "stale connect keeps the successor" ["player"] (names base_path);
+    check int "stale connect announces no public transition" 1 (event_count heard);
+    disconnect base_path ~sse_client_id:61 room_scope))
 
 let test_permission_denial_leaves_no_lease () = workspace (fun base_path ->
   with_events base_path (fun heard ->
@@ -224,6 +241,7 @@ let test_register_returns_exact_client_identity () = workspace (fun base_path ->
 let () = run "Play room Observer presence" ["presence", [
   test_case "connect, renew and disconnect carry real changes" `Quick test_connect_renew_disconnect;
   test_case "replacement and HTTP presence are lease guarded" `Quick test_replacement_and_http_lease;
+  test_case "stale connect is explicit" `Quick test_stale_connect_is_explicit;
   test_case "permission denial leaves no lease" `Quick test_permission_denial_leaves_no_lease;
   test_case "renew failure keeps the next ping lease" `Quick test_renew_failure_keeps_lease_for_next_ping;
   test_case "disconnect completes before cancellation" `Quick test_disconnect_finishes_before_cancellation;

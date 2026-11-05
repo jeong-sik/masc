@@ -27,6 +27,7 @@ let refusal_name : I.refusal -> string = function
   | I.Token_digest_taken id -> "token digest taken by " ^ Invite_id.to_string id
   | I.Not_issued id -> "not issued " ^ Invite_id.to_string id
   | I.Already_revoked id -> "already revoked " ^ Invite_id.to_string id
+  | I.Already_consumed id -> "already consumed " ^ Invite_id.to_string id
   | I.Local_operator_invites_only_admins -> "local operator invites only admins"
   | I.Authenticated_author_not_read principal ->
     "authenticated author not read " ^ Principal.to_string principal
@@ -49,6 +50,7 @@ let status_name = function
   | None -> "none"
   | Some { I.status = I.Open; _ } -> "open"
   | Some { I.status = I.Revoked; _ } -> "revoked"
+  | Some { I.status = I.Consumed user_id; _ } -> "consumed by " ^ User_id.to_string user_id
 ;;
 
 let check_status label t invite_id expected =
@@ -128,6 +130,43 @@ let a_revocation () =
   check_status "the state before the revocation is as it was" t first "open"
 ;;
 
+let consume_name = function
+  | Ok (_, role) -> "ok " ^ E.role_label role
+  | Error refusal -> I.consume_refusal_to_string refusal
+;;
+
+(* An admission spends an open invitation once, and gives the role the
+   invitation was issued with. *)
+let an_admission_spends_an_invitation_once () =
+  let bob = get (User_id.of_string "bob") in
+  let t = apply_ok I.empty (issued ()) in
+  Alcotest.(check string)
+    "an invitation never issued"
+    "no invitation invite-2 was issued"
+    (consume_name (I.consume t second ~user_id:bob ~at_ms:9));
+  Alcotest.(check string)
+    "at the expiry"
+    "the invitation invite-1 expired at 10, and the admission is at 10"
+    (consume_name (I.consume t first ~user_id:bob ~at_ms:10));
+  match I.consume t first ~user_id:bob ~at_ms:9 with
+  | Error refusal -> Alcotest.failf "refused: %s" (I.consume_refusal_to_string refusal)
+  | Ok (spent, role) ->
+    Alcotest.(check string) "the role" "admin" (E.role_label role);
+    check_status "spent" spent first "consumed by bob";
+    check_status "the state before is as it was" t first "open";
+    Alcotest.(check string)
+      "twice"
+      "the invitation invite-1 was spent by an admission before"
+      (consume_name (I.consume spent first ~user_id:bob ~at_ms:9));
+    check_refused "a spent invitation is not revoked" spent (E.Revoked { invite_id = first })
+      "already consumed invite-1";
+    let revoked = apply_ok t (E.Revoked { invite_id = first }) in
+    Alcotest.(check string)
+      "a revoked invitation"
+      "the invitation invite-1 was revoked"
+      (consume_name (I.consume revoked first ~user_id:bob ~at_ms:9))
+;;
+
 let refusals_are_told_apart () =
   let texts =
     List.map
@@ -136,6 +175,7 @@ let refusals_are_told_apart () =
       ; I.Token_digest_taken first
       ; I.Not_issued first
       ; I.Already_revoked first
+      ; I.Already_consumed first
       ; I.Local_operator_invites_only_admins
       ; I.Authenticated_author_not_read alice
       ; I.Not_an_invite_author Author.System_cron
@@ -157,6 +197,7 @@ let () =
         ; Alcotest.test_case "one invitation for good" `Quick
             an_id_and_a_digest_name_one_invitation_for_good
         ; Alcotest.test_case "revocation" `Quick a_revocation
+        ; Alcotest.test_case "spent once" `Quick an_admission_spends_an_invitation_once
         ; Alcotest.test_case "texts" `Quick refusals_are_told_apart
         ] )
     ]

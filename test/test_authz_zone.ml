@@ -317,6 +317,8 @@ let refusal_name : Authz_state.refusal -> string = function
   | Authz_state.Mode _ -> "Mode"
   | Authz_state.Invite_unreadable _ -> "Invite_unreadable"
   | Authz_state.Invite _ -> "Invite"
+  | Authz_state.Admission_unreadable _ -> "Admission_unreadable"
+  | Authz_state.Admission _ -> "Admission"
   | Authz_state.Accounts_off kind -> "Accounts_off " ^ R.Kind.to_string kind
   | Authz_state.Kind_not_read kind -> "Kind_not_read " ^ R.Kind.to_string kind
 ;;
@@ -774,6 +776,42 @@ let a_revoked_invite_has_an_intent () =
     check_judgment "a log cut back to before the revocation" dirs "Mismatch Commit_not_in_log")
 ;;
 
+(* An Admin admission raises the role epoch of the new principal, so it goes
+   through the store as an intent and its answer, after the invitation, which
+   did not. *)
+let an_admin_admission_has_an_intent () =
+  with_dirs (fun dirs ->
+    let (_ : B.completed) = bootstrap dirs in
+    let zone = open_zone dirs in
+    let (_ : Z.committed) = commit_ok zone (invite_draft ()) in
+    let person = get (User_id.of_string "0123456789abcdef0123456789abcdef") in
+    let identity = get (Authz_external_identity.google ~sub:"111") in
+    let body =
+      match Authz_admission_event.to_body { Authz_admission_event.user_id = person; identity; invite_id } with
+      | Ok body -> body
+      | Error _ -> Alcotest.fail "fixture admission refused"
+    in
+    let draft =
+      { Z.at_ms = at_ms + 2
+      ; author = Author.Authenticated (Principal.Human person)
+      ; kind = R.Kind.Admission
+      ; body
+      }
+    in
+    let admitted = commit_ok zone draft in
+    check_settled "nothing to close" "Nothing_to_settle" admitted;
+    Alcotest.(check bool)
+      "the published state has the Admin"
+      true
+      (Authz_principal_state.is_admin admitted.Z.snapshot.Z.state.Authz_state.principals person);
+    let opened = check_restart "a restart" dirs ~mode:on ~head:admitted.Z.record_hash in
+    check_store "a restart" opened ~pending:None ~last_committed:admitted.Z.record_hash ~aborted:[];
+    Alcotest.(check bool)
+      "the replay has the Admin"
+      true
+      (Authz_principal_state.is_admin opened.replay.Z.Replay.state.Authz_state.principals person))
+;;
+
 let a_refused_invite_writes_nothing () =
   with_dirs (fun dirs ->
     let (_ : B.completed) = bootstrap dirs in
@@ -1222,6 +1260,7 @@ let () =
             an_invite_settles_the_intent_left_before_it
         ; Alcotest.test_case "a revoked invite has an intent" `Quick a_revoked_invite_has_an_intent
         ; Alcotest.test_case "a refused invite writes nothing" `Quick a_refused_invite_writes_nothing
+        ; Alcotest.test_case "an Admin admission has an intent" `Quick an_admin_admission_has_an_intent
         ] )
     ; ( "refusals"
       , [ Alcotest.test_case "refused records write nothing" `Quick refused_records_write_nothing

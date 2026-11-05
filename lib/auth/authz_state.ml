@@ -6,9 +6,14 @@ module R = Authz_record
 type t =
   { mode : Authz_mode_state.t
   ; invites : Authz_invite_state.t
+  ; principals : Authz_principal_state.t
   }
 
-let empty = { mode = Authz_mode_state.empty; invites = Authz_invite_state.empty }
+let empty =
+  { mode = Authz_mode_state.empty
+  ; invites = Authz_invite_state.empty
+  ; principals = Authz_principal_state.empty
+  }
 
 type refusal =
   | Before_bootstrap of K.t
@@ -16,6 +21,8 @@ type refusal =
   | Mode of Authz_mode_state.refusal
   | Invite_unreadable of Authz_invite_event.error
   | Invite of Authz_invite_state.refusal
+  | Admission_unreadable of Authz_admission_event.error
+  | Admission of Authz_principal_state.refusal
   | Accounts_off of K.t
   | Kind_not_read of K.t
 
@@ -28,6 +35,9 @@ let refusal_to_string = function
   | Invite_unreadable error ->
     "the invite record cannot be read: " ^ Authz_invite_event.error_to_string error
   | Invite refusal -> Authz_invite_state.refusal_to_string refusal
+  | Admission_unreadable error ->
+    "the admission cannot be read: " ^ Authz_admission_event.error_to_string error
+  | Admission refusal -> Authz_principal_state.refusal_to_string refusal
   | Accounts_off kind ->
     Printf.sprintf "the accounts are off, and no %s record is written while they are" (K.to_string kind)
   | Kind_not_read kind -> Printf.sprintf "no layer of this server reads %s records" (K.to_string kind)
@@ -76,6 +86,39 @@ let invite state (record : R.t) =
      | Error refusal -> Error (Invite refusal))
 ;;
 
+(* An admission makes a principal, which raises no epoch, and an Admin
+   invitation also makes an Admin assignment, which raises the role epoch of
+   that principal (design 8.1). The store takes that as a [Grant] on the
+   principal. *)
+let admission state (record : R.t) =
+  match Authz_admission_event.of_body record.R.body with
+  | Error error -> Error (Admission_unreadable error)
+  | Ok event ->
+    (match
+       Authz_principal_state.admit
+         state.principals
+         ~invites:state.invites
+         ~author:record.R.author
+         ~at_ms:record.R.at_ms
+         event
+     with
+     | Error refusal -> Error (Admission refusal)
+     | Ok { Authz_principal_state.principals; invites; role } ->
+       let high_water =
+         match role with
+         | Authz_invite_event.Member -> None
+         | Authz_invite_event.Admin ->
+           Some
+             (Authz_external_store.Change.Authz
+                { event = Authz_external_store.Change.Grant
+                ; subject =
+                    Authz_records.Subject.Principal
+                      (Authz_types.Principal.Human event.Authz_admission_event.user_id)
+                })
+       in
+       Ok { state = { state with principals; invites }; high_water })
+;;
+
 (* Every kind but a mode event is matched with the mode, so the branch of a
    kind says what a record of it means before the bootstrap, and a layer gets
    the workspace of the bootstrap only from a branch that has one. *)
@@ -85,6 +128,8 @@ let apply state (record : R.t) =
     mode_event state record
   | K.Invite, Authz_mode_state.Multi_account _ -> invite state record
   | K.Invite, Authz_mode_state.Off _ -> Error (Accounts_off K.Invite)
+  | K.Admission, Authz_mode_state.Multi_account _ -> admission state record
+  | K.Admission, Authz_mode_state.Off _ -> Error (Accounts_off K.Admission)
   | ( ( K.Runtime_grant
       | K.Delegate_policy
       | K.Principal
@@ -107,8 +152,7 @@ let apply state (record : R.t) =
       | K.Lease_terminal_evidence
       | K.Preauthorized_expiry
       | K.Migration_diagnostic
-      | K.Local_recovery
-      | K.Admission ) as kind )
+      | K.Local_recovery ) as kind )
     , (Authz_mode_state.Multi_account _ | Off _) -> Error (Kind_not_read kind)
 ;;
 

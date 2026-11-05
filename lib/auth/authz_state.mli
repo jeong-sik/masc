@@ -35,6 +35,7 @@
 type t = private
   { mode : Authz_mode_state.t
   ; invites : Authz_invite_state.t  (** Plan B3c-1. *)
+  ; principals : Authz_principal_state.t  (** Plan B3c-2. *)
   }
 
 val empty : t
@@ -46,6 +47,8 @@ type refusal =
   | Mode of Authz_mode_state.refusal
   | Invite_unreadable of Authz_invite_event.error
   | Invite of Authz_invite_state.refusal
+  | Admission_unreadable of Authz_admission_event.error
+  | Admission of Authz_principal_state.refusal
   | Accounts_off of Authz_record.Kind.t
       (** The mode is [Off], and a record of this kind is not written while the
           accounts are off (design 10.5). *)
@@ -60,7 +63,9 @@ val refusal_to_string : refusal -> string
     no scoped epoch (design 8.1 and 8.2): the zone appends it with no intent and
     no answer in the store. Its revocation has one, a [Revoke] of the invitation,
     so a log restored from before the revocation does not open the invitation
-    again (design 5.1-4). *)
+    again (design 5.1-4). An admission has one only when its invitation has the
+    role [Admin], because the Admin assignment raises the role epoch of the
+    principal: a [Grant] on that principal. *)
 type applied =
   { state : t
   ; high_water : Authz_external_store.Change.t option

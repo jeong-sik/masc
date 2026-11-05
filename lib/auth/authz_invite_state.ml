@@ -9,6 +9,7 @@ module Digest_map = Map.Make (String)
 type status =
   | Open
   | Revoked
+  | Consumed of User_id.t
 
 type invitation =
   { token_digest : E.Token_digest.t
@@ -41,6 +42,7 @@ type refusal =
   | Token_digest_taken of Invite_id.t
   | Not_issued of Invite_id.t
   | Already_revoked of Invite_id.t
+  | Already_consumed of Invite_id.t
   | Local_operator_invites_only_admins
   | Authenticated_author_not_read of Principal.t
   | Not_an_invite_author of Author.t
@@ -62,6 +64,8 @@ let refusal_to_string = function
   | Not_issued id -> Printf.sprintf "no invitation %s was issued" (Invite_id.to_string id)
   | Already_revoked id ->
     Printf.sprintf "the invitation %s was revoked before" (Invite_id.to_string id)
+  | Already_consumed id ->
+    Printf.sprintf "the invitation %s was spent by an admission" (Invite_id.to_string id)
   | Local_operator_invites_only_admins -> "the local operator invites only Admins"
   | Authenticated_author_not_read principal ->
     Printf.sprintf
@@ -86,8 +90,47 @@ let revoke t ~invite_id =
   match find t invite_id with
   | None -> Error (Not_issued invite_id)
   | Some { status = Revoked; _ } -> Error (Already_revoked invite_id)
+  | Some { status = Consumed _; _ } -> Error (Already_consumed invite_id)
   | Some ({ status = Open; _ } as invitation) ->
     Ok { t with by_id = Invite_map.add invite_id { invitation with status = Revoked } t.by_id }
+;;
+
+type consume_refusal =
+  | Invitation_not_issued of Invite_id.t
+  | Invitation_revoked of Invite_id.t
+  | Invitation_consumed of Invite_id.t
+  | Invitation_expired of
+      { invite_id : Invite_id.t
+      ; expires_at_ms : int
+      ; at_ms : int
+      }
+
+let consume_refusal_to_string = function
+  | Invitation_not_issued id -> Printf.sprintf "no invitation %s was issued" (Invite_id.to_string id)
+  | Invitation_revoked id -> Printf.sprintf "the invitation %s was revoked" (Invite_id.to_string id)
+  | Invitation_consumed id ->
+    Printf.sprintf "the invitation %s was spent by an admission before" (Invite_id.to_string id)
+  | Invitation_expired { invite_id; expires_at_ms; at_ms } ->
+    Printf.sprintf
+      "the invitation %s expired at %d, and the admission is at %d"
+      (Invite_id.to_string invite_id)
+      expires_at_ms
+      at_ms
+;;
+
+let consume t invite_id ~user_id ~at_ms =
+  match find t invite_id with
+  | None -> Error (Invitation_not_issued invite_id)
+  | Some { status = Revoked; _ } -> Error (Invitation_revoked invite_id)
+  | Some { status = Consumed _; _ } -> Error (Invitation_consumed invite_id)
+  | Some { status = Open; expires_at_ms; _ } when at_ms >= expires_at_ms ->
+    Error (Invitation_expired { invite_id; expires_at_ms; at_ms })
+  | Some ({ status = Open; role; _ } as invitation) ->
+    Ok
+      ( { t with
+          by_id = Invite_map.add invite_id { invitation with status = Consumed user_id } t.by_id
+        }
+      , role )
 ;;
 
 (* The author is matched before the event, so a branch says what each author

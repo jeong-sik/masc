@@ -364,6 +364,22 @@ let help_viewport (state : state) =
   in
   (count, overlay_window_height ~rows ~count)
 
+(* What a palette lists, as the noun a count is written with and its plural.
+   The count line, the finder's catalog note and the empty-list line name the
+   same thing, and each spelled it as a plural: "1 commands · 1/1". The
+   symbol chooser's rows are the names on the cursor's line, not commands. *)
+let palette_noun : palette_mode -> string * string = function
+  | Masc_tui_types.Palette_jump -> ("command", "commands")
+  | Masc_tui_types.Palette_choice _ -> ("name", "names")
+  | Masc_tui_types.Palette_files _ -> ("file", "files")
+  | Masc_tui_types.Palette_locations _ -> ("location", "locations")
+  | Masc_tui_types.Palette_branches _ -> ("branch", "branches")
+  | Masc_tui_types.Palette_worktrees _ -> ("worktree", "worktrees")
+
+let palette_count mode count =
+  let singular, plural = palette_noun mode in
+  Message_layout.count_noun ~plural count singular
+
 (* The [:] palette: a typed filter over every jump the strip and roster
    offer. The list is the same [Masc_tui_palette.palette_matches] the Enter key resolves, so
    what is highlighted is what will run. *)
@@ -398,7 +414,8 @@ let render_palette (state : state) =
         (" MASC Command palette", ":", if Option.is_some typed_question then "ask" else "run")
     | Masc_tui_types.Palette_choice { choice_question; choice_line } ->
         let names = List.length (Masc_tui_palette.code_cursor_line_symbols state) in
-        ( Printf.sprintf " %s · %d names on line %d" choice_question names choice_line
+        ( Printf.sprintf " %s · %s on line %d" choice_question
+            (palette_count state.palette_mode names) choice_line
         , "filter:", "ask" )
     | Masc_tui_types.Palette_files _ ->
         (" MASC Find file", "filter:", "open")
@@ -452,8 +469,9 @@ let render_palette (state : state) =
            | Masc_tui_fetched.Loading -> [ "Reading worktrees…" ]
            | Masc_tui_fetched.Failed detail | Masc_tui_fetched.Stale (_, detail) -> [ detail ]
            | Masc_tui_fetched.Ready listing ->
-               [ Printf.sprintf "%d worktrees · %s%s"
-                   (List.length listing.Tui_decode.gws_worktrees)
+               [ Printf.sprintf "%s · %s%s"
+                   (palette_count state.palette_mode
+                      (List.length listing.Tui_decode.gws_worktrees))
                    (if String.equal listing.gws_root "" then "workspace repository"
                     else listing.gws_root)
                    (if listing.gws_truncated then " · first only" else "") ])
@@ -464,8 +482,9 @@ let render_palette (state : state) =
            | Masc_tui_fetched.Loading -> [ "Reading branches…" ]
            | Masc_tui_fetched.Failed detail | Masc_tui_fetched.Stale (_, detail) -> [ detail ]
            | Masc_tui_fetched.Ready listing ->
-               [ Printf.sprintf "%d branches · %s%s"
-                   (List.length listing.Tui_decode.gbs_branches)
+               [ Printf.sprintf "%s · %s%s"
+                   (palette_count state.palette_mode
+                      (List.length listing.Tui_decode.gbs_branches))
                    (if String.equal listing.gbs_root "" then "workspace checkout"
                     else listing.gbs_root)
                    (if listing.gbs_truncated then " · newest only" else "") ])
@@ -479,7 +498,9 @@ let render_palette (state : state) =
           | Masc_tui_fetched.Loading -> "Reading checkout files…"
           | Masc_tui_fetched.Failed detail | Masc_tui_fetched.Stale (_, detail) -> detail
           | Masc_tui_fetched.Ready catalog ->
-              Printf.sprintf "%d files · %s" (List.length catalog.Tui_decode.wfc_files)
+              Printf.sprintf "%s · %s"
+                (palette_count state.palette_mode
+                   (List.length catalog.Tui_decode.wfc_files))
                 (if String.equal catalog.wfc_root "" then "workspace checkout"
                  else catalog.wfc_root) in
         let file_notes = match Masc_tui_fetched.current state.code_finder_file with
@@ -515,14 +536,9 @@ let render_palette (state : state) =
             ^ Terminal_text.single_line symbol);
           c.push "   Ask about this symbol in the file open on Code"
       | None ->
-          let kind = match state.palette_mode with
-            | Palette_files _ -> "files" | Palette_locations _ -> "locations"
-            | Palette_branches _ -> "branches"
-            | Palette_worktrees _ -> "worktrees"
-            | Palette_jump | Palette_choice _ -> "commands" in
           c.push_styled ~style:(Theme.recede ())
-            (Printf.sprintf "   %d %s · %d/%d · type to filter"
-              total kind
+            (Printf.sprintf "   %s · %d/%d · type to filter"
+              (palette_count state.palette_mode total)
               (if total = 0 then 0 else cursor + 1) total);
           let list_rows = max 0 (budget - 2 - List.length finder_notes) in
           let first = max 0 (cursor - list_rows + 1) in
@@ -554,7 +570,9 @@ let render_palette (state : state) =
                | Palette_jump | Palette_choice _),
                (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Ready _
                | Masc_tui_fetched.Failed _ | Masc_tui_fetched.Stale _) ->
-                 c.push ("   No matching " ^ kind ^ " · Ctrl-U clears the filter")))
+                 c.push ("   No matching "
+                         ^ snd (palette_noun state.palette_mode)
+                         ^ " · Ctrl-U clears the filter")))
 
 (* The patch review overlay. [surface_chrome] owns the box, the fill and the
    footer's row, so the rows are not counted here and the keys on screen are

@@ -4,11 +4,6 @@ let config_error ~field detail =
   Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; detail })
 ;;
 
-type image_block =
-  { media_type : string
-  ; base64_data : string
-  }
-
 (* Split a goal into the text the CLI receives and the images that ride with it.
    [text_of_blocks] rejects every non-text block; this admits [Image] for the
    transports that carry one, and keeps rejecting the rest so a block nobody
@@ -25,7 +20,13 @@ let text_and_images_of_blocks ~media_store ~runtime_label ~field blocks =
        | Agent_core.Types.Stored stored ->
          (match media_store.Agent_core.History.get stored with
           | Ok raw ->
-            loop texts ({ media_type; base64_data = Base64.encode_string raw } :: images) rest
+            loop
+              texts
+              ({ Runtime_official_client_tool.media_type
+               ; base64_data = Base64.encode_string raw
+               }
+               :: images)
+              rest
           | Error error -> Error (Agent_core.Error.Media error))
        | Agent_core.Types.Url _ | Agent_core.Types.File_id _ ->
          Error

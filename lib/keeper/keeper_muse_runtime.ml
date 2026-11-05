@@ -1098,14 +1098,14 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
       }
     in
     let turn_count = claim_plan.turn_count in
-    let* goal, goal_images =
+    let* goal, images =
       match goal_blocks with
       | None -> Ok (goal, [])
       | Some blocks -> Host.text_and_images_of_blocks
             ~media_store ~runtime_label ~field:"goal_blocks" blocks
     in
     let* () =
-      match goal_images, accepts_image_input with
+      match images, accepts_image_input with
       | _ :: _, false ->
         Error
           (config_error
@@ -1199,7 +1199,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
       (String.length prompt)
       (String.length prepared.system_prompt)
       (String.length goal)
-      (List.length goal_images);
+      (List.length images);
     let client_config : Serve.config =
       { config with
         prepared_home = Some prepared_home
@@ -1214,12 +1214,6 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
            | Some seconds -> Some seconds)
 
       }
-    in
-    let images =
-      List.map
-        (fun (image : Host.image_block) ->
-           { Serve.media_type = image.media_type; base64_data = image.base64_data })
-        goal_images
     in
     let* () =
       Serve.validate_turn ~session_mode client_config ~workspace_root ~prompt ~images

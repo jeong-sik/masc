@@ -1019,18 +1019,8 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
       match goal_blocks with
       | None -> Ok (goal, [])
       | Some blocks ->
-        let* text, images =
-          Host.text_and_images_of_blocks
-            ~media_store ~runtime_label ~field:"goal_blocks" blocks
-        in
-        Ok
-          ( text
-          , List.map
-              (fun (image : Host.image_block) ->
-                { Runtime_codex_app_server.media_type = image.Host.media_type
-                ; base64_data = image.Host.base64_data
-                })
-              images )
+        Host.text_and_images_of_blocks
+          ~media_store ~runtime_label ~field:"goal_blocks" blocks
     in
     let composed_context = prepared.composed_context in
     let compose_developer_instructions developer_messages =

@@ -17,11 +17,6 @@ type host_stop = Runtime_official_client_tool.host_stop =
       ; outcome : terminal_boundary_outcome
       }
 
-type image_block = Keeper_official_client_context_projection.image_block =
-  { media_type : string
-  ; base64_data : string
-  }
-
 type composed_context = Keeper_official_client_context_projection.composed_context
 
 type resume_delivery = Keeper_official_client_context_projection.resume_delivery =
@@ -42,8 +37,7 @@ type carried_summary = Keeper_official_client_context_projection.carried_summary
 include
   (Keeper_official_client_context_projection :
     module type of Keeper_official_client_context_projection
-      with type image_block := image_block
-       and type composed_context := composed_context
+      with type composed_context := composed_context
        and type resume_delivery := resume_delivery
        and type carried_summary := carried_summary
 )

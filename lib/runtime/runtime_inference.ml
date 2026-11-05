@@ -43,43 +43,12 @@ let resolve_turn_timeout_s_or ~runtime_id ~default =
    option], and AGENT_CORE alone owns model-capability validation plus
    envelope-specific clamp/fallback policy. *)
 
-type seed = {
-  thinking_enabled : bool option;
-  preserve_thinking : bool option;
-}
-
-(** Map a model's [thinking-support] capability (runtime.toml SSOT) to the
-    keeper thinking seed.
-
-    The keeper turn loop ([Keeper_run_tools_hooks]) consumes [thinking_enabled]
-    as an explicit runtime-model policy: [Some false] forces thinking OFF for
-    the turn, while [Some true] actively enables thinking for that runtime.
-    An explicit model policy takes precedence over the fleet request policy.
-
-    [None] means the model leaves the policy unset, or the runtime id is not
-    loaded. Preserve that absence so provider defaults remain authoritative
-    unless the caller explicitly configured a thinking request.
-
-    Thinking is a toggle here, not a quantity: no configuration carries a
-    token budget any more. *)
-let seed_of_thinking_support ?(preserve_thinking = None) (thinking_support : bool option)
-  : seed
-  =
-  { thinking_enabled = thinking_support; preserve_thinking }
-;;
-
 let for_runtime ~name =
   match Runtime.get_runtime_by_id name with
   | Some runtime ->
     (match Runtime_execution.checkpoint_owner runtime.Runtime_instance.execution with
-     | Runtime_execution.Official_client ->
-       seed_of_thinking_support None
+     | Runtime_execution.Official_client -> Runtime_thinking_seed.absent
      | Runtime_execution.Masc_agent_core ->
-       seed_of_thinking_support
-         ~preserve_thinking:(Runtime.preserve_thinking_of_runtime_id name)
-         (Runtime_schema.thinking_request runtime.Runtime_instance.model))
-  | None ->
-    seed_of_thinking_support
-      ~preserve_thinking:(Runtime.preserve_thinking_of_runtime_id name)
-      (Runtime.thinking_support_of_runtime_id name)
+       Runtime_thinking_seed.of_model runtime.Runtime_instance.model)
+  | None -> Runtime_thinking_seed.absent
 ;;

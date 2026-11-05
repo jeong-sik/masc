@@ -35,13 +35,6 @@ val runtime_catalog_error_to_core_error : string -> Agent_core.Error.t
 
 (** {1 Provider resolution} *)
 
-val apply_inference_seed
-  :  seed:Runtime_inference.seed
-  -> Llm_provider.Provider_config.t
-  -> Llm_provider.Provider_config.t
-(** Overlay a runtime's thinking seed onto a resolved provider config. Declared
-    seed values win; absent ones leave the binding untouched. *)
-
 val resolve_runtime_providers_for_turn :
   runtime_id:string -> unit ->
   (Llm_provider.Provider_config.t list, string) result

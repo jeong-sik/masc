@@ -557,7 +557,7 @@ def provider_parallel_suppression_contract(provider: str) -> bool:
     return value
 
 # reasoning-effort / thinking-support in [models.X] seed the keeper turn's
-# reasoning controls (Runtime_inference.thinking_support_of_runtime_id ->
+# reasoning controls (Runtime_inference.for_runtime ->
 # keeper_turn_driver.attempt_inference_policy). Emit them only where the
 # provider wire can carry effort:
 # - anthropic: thinking-support=true (without it the keeper default

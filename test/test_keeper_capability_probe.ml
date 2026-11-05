@@ -8,7 +8,6 @@ open Alcotest
 
 module Probe = Masc.Keeper_capability_probe
 module Descriptor = Masc.Keeper_tool_descriptor
-module Runner = Runtime_agent_core_runner
 module Turn_driver = Masc.Keeper_turn_driver
 
 let verdict = testable (Fmt.of_to_string Probe.verdict_to_string) ( = )
@@ -306,39 +305,39 @@ let bool_opts = [ Some true; Some false; None ]
 
 let test_declared_thinking_off_reaches_the_config () =
   let seed =
-    { Runtime_inference.thinking_enabled = Some false
+    { Runtime_thinking_seed.thinking_enabled = Some false
     ; preserve_thinking = None
     }
   in
-  let out = Runner.apply_inference_seed ~seed (bare_config ()) in
+  let out = Runtime_thinking_seed.apply seed (bare_config ()) in
   (* Some false, not None: None is what omits the wire field. *)
   check bool_opt "declared thinking-off reaches the request" (Some false) out.enable_thinking
 ;;
 
 let test_declared_thinking_on_reaches_the_config () =
   let seed =
-    { Runtime_inference.thinking_enabled = Some true
+    { Runtime_thinking_seed.thinking_enabled = Some true
     ; preserve_thinking = Some true
     }
   in
-  let out = Runner.apply_inference_seed ~seed (bare_config ()) in
+  let out = Runtime_thinking_seed.apply seed (bare_config ()) in
   check bool_opt "declared thinking-on reaches the request" (Some true) out.enable_thinking;
   check bool_opt "preserve_thinking rides along" (Some true) out.preserve_thinking
 ;;
 
 let test_undeclared_seed_leaves_the_binding_alone () =
   let seed =
-    { Runtime_inference.thinking_enabled = None
+    { Runtime_thinking_seed.thinking_enabled = None
     ; preserve_thinking = None
     }
   in
   let base = { (bare_config ()) with Llm_provider.Provider_config.enable_thinking = Some true } in
-  let out = Runner.apply_inference_seed ~seed base in
+  let out = Runtime_thinking_seed.apply seed base in
   check bool_opt "an absent seed does not clear the binding" (Some true) out.enable_thinking
 ;;
 
 (* The pin the review asked for (#28530): seed application now exists twice —
-   [Runner.apply_inference_seed] on the probe path and
+   [Runtime_thinking_seed.apply] on the probe path and
    [Keeper_turn_driver.For_testing.attempt_inference_policy] on the turn path.
    Two implementations of "what does this runtime actually send" is the shape of
    the defect this PR fixes, so their agreement is asserted rather than assumed.
@@ -363,7 +362,7 @@ let test_probe_and_turn_agree_on_the_seed () =
             ; preserve_thinking = binding_preserve
             }
           in
-          let probe = Runner.apply_inference_seed ~seed binding in
+          let probe = Runtime_thinking_seed.apply seed binding in
           let turn =
             Turn_driver.For_testing.attempt_inference_policy
               ~runtime_id:seed_free_runtime_id

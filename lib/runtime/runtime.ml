@@ -1590,16 +1590,10 @@ let max_context_of_runtime_id (id : string) : int option =
   | None -> None
 ;;
 
-let thinking_support_of_runtime_id (id : string) : bool option =
-  match get_runtime_by_id id with
-  | Some rt -> rt.model.thinking_support
-  | None -> None
-;;
-
 (* The per-model [temperature] override declared in runtime.toml
    ([models.<id>.temperature]), or [None] when the runtime is unknown or the
    model leaves it unset. Projects the runtime.toml [model] record (per-binding
-   config SSOT), mirroring [thinking_support_of_runtime_id]. Consumed by
+   config SSOT). Consumed by
    [Runtime_inference.resolve_temperature]: a keeper turn uses this value when
    set and its caller fallback otherwise. *)
 let temperature_of_runtime_id (id : string) : float option =
@@ -1637,23 +1631,6 @@ let turn_timeout_s_of_runtime_id (id : string) : float option =
 let quota_scope_of_runtime_id (id : string) : Runtime_quota_window.scope option =
   match get_runtime_by_id id with
   | Some rt -> Some (quota_scope_of_runtime rt)
-  | None -> None
-;;
-
-let default_preserve_thinking_for_model (_rt : t) : bool option =
-  (* AGENT_CORE owns provider/model capability truth and can preserve reasoning when
-     the provider contract requires it. MASC must not turn "request-side
-     preserve is supported" into a fleet-wide replay policy; long-running
-     keepers otherwise accumulate hidden reasoning across unrelated turns. *)
-  None
-;;
-
-let preserve_thinking_of_runtime_id (id : string) : bool option =
-  match get_runtime_by_id id with
-  | Some rt ->
-    (match rt.model.preserve_thinking with
-     | Some _ as explicit -> explicit
-     | None -> default_preserve_thinking_for_model rt)
   | None -> None
 ;;
 

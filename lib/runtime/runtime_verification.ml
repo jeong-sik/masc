@@ -768,13 +768,10 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
              (Unavailable
                 (Invalid_configuration (Runtime_instance.dispatch_credential_error_to_string error)))
          | Ok () ->
-           let seed =
-             Runtime_inference.seed_of_thinking_support
-               ~preserve_thinking:runtime.model.preserve_thinking
-               (Runtime_schema.thinking_request runtime.model)
-           in
            let provider_cfg =
-             Runtime_agent_core_runner.apply_inference_seed ~seed provider_cfg
+             Runtime_thinking_seed.apply
+               (Runtime_thinking_seed.of_model runtime.model)
+               provider_cfg
            in
            (match
               Agent_core.Types.tool_schema_of_input_schema

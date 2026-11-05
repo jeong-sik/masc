@@ -648,11 +648,11 @@ let test_codex_runtime_has_no_agent_core_thinking_seed () =
     Alcotest.(check (option bool))
       "thinking enabled"
       None
-      seed.Runtime_inference.thinking_enabled;
+      seed.Runtime_thinking_seed.thinking_enabled;
     Alcotest.(check (option bool))
       "preserve thinking"
       None
-      seed.Runtime_inference.preserve_thinking)
+      seed.Runtime_thinking_seed.preserve_thinking)
 ;;
 
 (* Two rows on one OpenAI-compatible provider, both saying the model thinks.
@@ -702,10 +702,11 @@ let test_uncontrolled_row_sends_no_thinking_request () =
        match Runtime.init_default ~config_path:path with
        | Error msg -> Alcotest.failf "uncontrolled runtime init failed: %s" msg
        | Ok () ->
-         let seed name = (Runtime_inference.for_runtime ~name).Runtime_inference.thinking_enabled in
-         let request name = match Runtime.get_runtime_by_id name with
-           | Some runtime -> Runtime_schema.thinking_request runtime.Runtime_instance.model
+         let seed name = (Runtime_inference.for_runtime ~name).Runtime_thinking_seed.thinking_enabled in
+         let model name = match Runtime.get_runtime_by_id name with
+           | Some runtime -> runtime.Runtime_instance.model
            | None -> Alcotest.failf "runtime %s is not materialized" name in
+         let request name = Runtime_schema.thinking_request (model name) in
          Alcotest.(check (option bool))
            "a row with thinking-support asks for thinking" (Some true) (seed "openai.asks");
          Alcotest.(check (option bool))
@@ -716,7 +717,7 @@ let test_uncontrolled_row_sends_no_thinking_request () =
            "the shared rule agrees for the uncontrolled row" None (request "openai.free");
          Alcotest.(check (option bool))
            "the uncontrolled row still says the model thinks" (Some true)
-           (Runtime.thinking_support_of_runtime_id "openai.free"))
+           (model "openai.free").Runtime_schema.thinking_support)
 ;;
 
 let test_runtime_inventory_surfaces_declared_model_capabilities () =
@@ -2972,11 +2973,11 @@ let test_thinking_support_true_enables_thinking_and_preserves () =
     Alcotest.(check (option bool))
       "thinking-support true emits Some true"
       (Some true)
-      seed.Runtime_inference.thinking_enabled;
+      seed.Runtime_thinking_seed.thinking_enabled;
     Alcotest.(check (option bool))
       "preserve-thinking true emits Some true"
       (Some true)
-      seed.Runtime_inference.preserve_thinking)
+      seed.Runtime_thinking_seed.preserve_thinking)
 ;;
 
 let test_thinking_support_true_leaves_preserve_unset () =
@@ -2985,7 +2986,7 @@ let test_thinking_support_true_leaves_preserve_unset () =
     Alcotest.(check (option bool))
       "AGENT_CORE request-side preserve capability does not auto-enable preserve"
       None
-      seed.Runtime_inference.preserve_thinking)
+      seed.Runtime_thinking_seed.preserve_thinking)
 ;;
 
 let test_explicit_preserve_false_overrides_capability_default () =
@@ -2994,7 +2995,7 @@ let test_explicit_preserve_false_overrides_capability_default () =
     Alcotest.(check (option bool))
       "explicit preserve-thinking=false remains Some false"
       (Some false)
-      seed.Runtime_inference.preserve_thinking)
+      seed.Runtime_thinking_seed.preserve_thinking)
 ;;
 
 let test_thinking_support_false_forces_off () =
@@ -3003,7 +3004,7 @@ let test_thinking_support_false_forces_off () =
     Alcotest.(check (option bool))
       "non-thinking model emits Some false (capability gate forces thinking off)"
       (Some false)
-      seed.Runtime_inference.thinking_enabled)
+      seed.Runtime_thinking_seed.thinking_enabled)
 ;;
 
 let test_runtime_inventory_surfaces_parameter_policy () =
@@ -3324,22 +3325,7 @@ let test_thinking_unknown_runtime_defers () =
     Alcotest.(check (option bool))
       "unknown runtime id emits None (no per-model signal)"
       None
-      seed.Runtime_inference.thinking_enabled)
-;;
-
-let test_seed_of_thinking_support_gate_contract () =
-  Alcotest.(check (option bool))
-    "Some false -> force thinking off"
-    (Some false)
-    (Runtime_inference.seed_of_thinking_support (Some false)).Runtime_inference.thinking_enabled;
-  Alcotest.(check (option bool))
-    "Some true -> enable thinking"
-    (Some true)
-    (Runtime_inference.seed_of_thinking_support (Some true)).Runtime_inference.thinking_enabled;
-  Alcotest.(check (option bool))
-    "None -> leave caller policy unchanged"
-    None
-    (Runtime_inference.seed_of_thinking_support None).Runtime_inference.thinking_enabled
+      seed.Runtime_thinking_seed.thinking_enabled)
 ;;
 
 let test_max_output_tokens_accessor_projects_catalog () =
@@ -4433,10 +4419,6 @@ let () =
             "unknown runtime id defers (None)"
             `Quick
             test_thinking_unknown_runtime_defers
-        ; Alcotest.test_case
-            "seed_of_thinking_support gate contract (pure)"
-            `Quick
-            test_seed_of_thinking_support_gate_contract
         ] )
     ; ( "runtime token capacity projection"
       , [ Alcotest.test_case

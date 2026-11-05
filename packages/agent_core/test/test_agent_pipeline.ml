@@ -851,8 +851,8 @@ let test_mixed_turn_refuses_the_call_it_dropped () =
   | Exit -> ()
 ;;
 
-(* Argument text the model broke: [, "] is missing before the last key, the
-   shape of the 11-05 DeepSeek call. *)
+(* Argument text the model broke: the comma and the opening quote before the
+   last key are missing, the shape of the 11-05 DeepSeek call. *)
 let unreadable_arguments = {|{"argv": ["bash", "-lc", "true"]"timeout_sec": 120}|}
 
 let openai_tool_calls_response calls =

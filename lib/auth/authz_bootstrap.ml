@@ -53,7 +53,7 @@ type error =
   | Log_not_empty of { lines : int }
   | External_store_not_opened of
       { path : string
-      ; error : unit Store.open_error
+      ; error : Store.violation Store.open_error
       }
   | Not_a_fresh_installation of
       { store : string
@@ -64,17 +64,8 @@ type error =
       { path : string
       ; detail : string
       }
-  | Store_stopped of Store.stop
-  | Log_stopped of Log.stop
-  | Dead_intent_not_closed of Store.append_error
-  | Intent_not_written of Store.append_error
-  | Record_not_appended of Log.append_error
-  | Answer_not_written of
-      { record_hash : Record.Hash.t
-      ; error : Store.append_error
-      }
+  | Zone_failed of Authz_zone.error
   | Mode_event_not_built of Authz_body.error
-  | Record_not_built of Record.make_error
 
 let value_to_string = function
   | Mark.Absent -> "absent"
@@ -122,7 +113,7 @@ let error_to_string = function
   | Log_not_empty { lines } ->
     Printf.sprintf "the authorization log has %d record(s), so this is not a new installation" lines
   | External_store_not_opened { path; error } ->
-    Printf.sprintf "the external store %s did not open: %s" path (Store.open_error_to_string (fun () -> "") error)
+    Printf.sprintf "the external store %s did not open: %s" path (Store.open_error_to_string Store.violation_to_string error)
   | Not_a_fresh_installation { store; value } ->
     Printf.sprintf
       "the external store %s is not that of a new installation: %s"
@@ -131,27 +122,9 @@ let error_to_string = function
   | Install_record_not_written error -> Install_record.write_error_to_string error
   | External_store_not_created { path; detail } ->
     Printf.sprintf "the external store %s was not created: %s" path detail
-  | Store_stopped { Store.path; reason } ->
-    Printf.sprintf "the external store %s is stopped: %s" path reason
-  | Log_stopped { Log.path; reason } ->
-    Printf.sprintf "the authorization log %s is stopped: %s" path reason
-  | Dead_intent_not_closed error ->
-    Printf.sprintf "the intent of an earlier bootstrap was not given up: %s" (Store.append_error_to_string error)
-  | Intent_not_written error ->
-    Printf.sprintf "the intent of the bootstrap was not written: %s" (Store.append_error_to_string error)
-  | Record_not_appended error ->
-    Printf.sprintf
-      "the record of the bootstrap was not appended: %s"
-      (Log.append_error_to_string error)
-  | Answer_not_written { record_hash; error } ->
-    Printf.sprintf
-      "the record %s is in the log and its answer was not written: %s"
-      (Record.Hash.to_hex record_hash)
-      (Store.append_error_to_string error)
+  | Zone_failed error -> "the record of the bootstrap: " ^ Authz_zone.error_to_string error
   | Mode_event_not_built error ->
     Printf.sprintf "the body of the mode event was refused: %s" (Authz_body.error_to_string error)
-  | Record_not_built (Record.Author_not_admitted { kind; author = _ }) ->
-    Printf.sprintf "the local operator may not write a %s record" (Record.Kind.to_string kind)
 ;;
 
 (* ---- what is already there ---- *)
@@ -295,26 +268,17 @@ let open_empty_log base_path =
 ;;
 
 let open_store path =
-  match
-    Store.open_at_start ~path ~init:() ~step:(fun () _entry -> (Ok () : (unit, unit) result))
-  with
+  match Store.open_at_start ~path ~init:Store.State.empty ~step:Store.apply with
   | Error error -> Error (External_store_not_opened { path; error })
-  | Ok (store, (), _recovered) -> Ok store
-;;
-
-let state_of store =
-  match Store.with_writer store (fun _writer state -> state) with
-  | Ok state -> Ok state
-  | Error stop -> Error (Store_stopped stop)
+  | Ok (store, state, (_ : Store.recovered)) -> Ok (store, state)
 ;;
 
 (* The store that the install record names, read over the empty log: it must say
    that nothing was answered. *)
 let open_absent_store path =
-  let* store = open_store path in
-  let* state = state_of store in
+  let* store, state = open_store path in
   match Mark.judge (Mark.Probe.create state) with
-  | Mark.Absent -> Ok (store, state)
+  | Mark.Absent -> Ok store
   | (Mark.Matches | Mark.Mismatch _) as value -> Error (Not_a_fresh_installation { store = path; value })
 ;;
 
@@ -332,18 +296,6 @@ let named_store recorded =
      | Regular_file ->
        let* opened = open_absent_store named_path in
        Ok (Some (named, opened)))
-;;
-
-(* The intent that an earlier bootstrap left pending is given up: the log is
-   empty, so that bootstrap never appended its record. *)
-let intent_to_give_up ~path state =
-  let probe = Mark.Probe.create state in
-  match Mark.settle probe with
-  | Ok Mark.Nothing_to_settle -> Ok None
-  | Ok (Mark.Abort intent) -> Ok (Some intent)
-  | Ok (Mark.Promote _) | Error _ ->
-    (* [judge] read this state as [Absent], and that excludes both. *)
-    Error (Not_a_fresh_installation { store = path; value = Mark.judge probe })
 ;;
 
 (* ---- what is written ---- *)
@@ -401,79 +353,27 @@ let create_store path =
   Result.map_error not_created (Fs_compat.sync_file_and_parent_strict path)
 ;;
 
-(* The zone of the store, and inside it the zone of the log: the intent, the
-   record, and the answer, in this order. *)
-let write_bootstrap ~store ~log ~closed request =
-  (* The intent and the record say the same thing because both come from this
-     one value. *)
-  let mode_event =
-    { Authz_mode_event.event = Authz_mode_event.Fresh_bootstrap
-    ; workspace_id = request.workspace_id
-    }
+(* The record goes through the writes of the zone, which gives up the intent
+   of an earlier bootstrap first. *)
+let write_bootstrap ~store ~log request =
+  let* body =
+    Result.map_error
+      (fun error -> Mode_event_not_built error)
+      (Authz_mode_event.to_body
+         { Authz_mode_event.event = Authz_mode_event.Fresh_bootstrap
+         ; workspace_id = request.workspace_id
+         })
   in
-  let in_log_zone store_writer log_writer head =
-    let* body =
-      Result.map_error
-        (fun error -> Mode_event_not_built error)
-        (Authz_mode_event.to_body mode_event)
-    in
-    let* record =
-      Result.map_error
-        (fun error -> Record_not_built error)
-        (Record.make
-           ~head
-           ~at_ms:request.at_ms
-           ~author:Authz_records.Author.Local_operator
-           ~kind:Record.Kind.Mode_event
-           ~body)
-    in
-    let intent =
-      { Store.previous_record_hash = Record.head_hash head
-      ; intended_next_record_digest = record.Record.hash
-      ; change =
-          Store.Change.Mode
-            { event = mode_event.Authz_mode_event.event
-            ; workspace_id = mode_event.Authz_mode_event.workspace_id
-            }
-      }
-    in
-    let* (_ : Store.State.t) =
-      Result.map_error
-        (fun error -> Intent_not_written error)
-        (Store.append store_writer [ Store.Intent_pending intent ])
-    in
-    let* head_after =
-      Result.map_error (fun error -> Record_not_appended error) (Log.append log_writer [ record ])
-    in
-    (* The answer is made from the head that the append returned, so it cannot
-       be written before the record is in the log. *)
-    let appended_hash = Record.head_hash head_after in
-    let* (_ : Store.State.t) =
-      Result.map_error
-        (fun error -> Answer_not_written { record_hash = appended_hash; error })
-        (Store.append store_writer [ Store.Committed { record_hash = appended_hash } ])
-    in
-    Ok appended_hash
-  in
-  let in_store_zone store_writer (_ : Store.State.t) =
-    let* () =
-      match closed with
-      | None -> Ok ()
-      | Some intent ->
-        let* (_ : Store.State.t) =
-          Result.map_error
-            (fun error -> Dead_intent_not_closed error)
-            (Store.append store_writer [ Store.Aborted_intent intent ])
-        in
-        Ok ()
-    in
-    match Log.with_writer log (in_log_zone store_writer) with
-    | Ok result -> result
-    | Error stop -> Error (Log_stopped stop)
-  in
-  match Store.with_writer store in_store_zone with
-  | Ok result -> result
-  | Error stop -> Error (Store_stopped stop)
+  Result.map_error
+    (fun error -> Zone_failed error)
+    (Authz_zone.install
+       ~log
+       ~store
+       { Authz_zone.at_ms = request.at_ms
+       ; author = Authz_records.Author.Local_operator
+       ; kind = Record.Kind.Mode_event
+       ; body
+       })
 ;;
 
 (* ---- the two steps ---- *)
@@ -485,7 +385,7 @@ type prepared =
   ; recorded : Store_path.t option  (** The store that the install record names. *)
   ; store_present : bool  (** The path of the new store holds the recorded store. *)
   ; log : Log.t
-  ; named : (Store_path.t * (Store.t * Store.State.t)) option
+  ; named : (Store_path.t * Store.t) option
         (** The recorded store, opened, when there is a file at its path. *)
   }
 
@@ -505,17 +405,15 @@ let write { request; store = new_store; located; recorded; store_present; log; n
   let* () = record_unchanged located ~recorded in
   let* () = write_install_record located new_store in
   let* () = if store_present then Ok () else create_store path in
-  let* store, state =
+  let* store =
     match named with
     | Some (named, opened) when Store_path.equal named new_store -> Ok opened
     | Some _ | None ->
-      let* store = open_store path in
-      let* state = state_of store in
-      Ok (store, state)
+      let* store, (_ : Store.State.t) = open_store path in
+      Ok store
   in
-  let* closed = intent_to_give_up ~path state in
-  let* record_hash = write_bootstrap ~store ~log ~closed request in
-  Ok { record_hash; closed_intent = closed }
+  let* installed = write_bootstrap ~store ~log request in
+  Ok { record_hash = installed.Authz_zone.record_hash; closed_intent = installed.Authz_zone.aborted }
 ;;
 
 let fresh_bootstrap request =

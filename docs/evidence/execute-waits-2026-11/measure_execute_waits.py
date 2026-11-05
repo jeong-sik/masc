@@ -3,9 +3,13 @@
 
 Reads `<base-path>/.masc/tool_calls/YYYY-MM/DD[.NNN].jsonl`, the tool-call
 ledger, and never writes to it. The ledger deletes old day files, so the same
-window gives the same result until a day in it is deleted. A line that is not a
-JSON object, holds NaN or Infinity, or is not valid UTF-8 is skipped and counted
-under `skipped_lines`. Such a line has no readable timestamp, so `skipped_lines`
+window gives the same result until a day in it is deleted. A day that is still
+being written can change under the script too: its files are listed once, and a
+rotation after that moves rows into a segment this run never opens. Measure a
+window whose last day is over to get a repeatable result. A line that is not a
+JSON object, holds NaN or Infinity, nests deeper than the JSON parser allows, or
+is not valid UTF-8 is skipped and counted under `skipped_lines`. Such a line has
+no readable timestamp, so `skipped_lines`
 covers the whole day files, not only the window. `rows_in_window` counts every
 row stamped inside the window, whatever its tool. `rows_without_timestamp` counts
 the rows whose `ts` is not a finite number. `executes_without_duration` counts
@@ -35,13 +39,18 @@ Definitions:
   carries to the `gh` call is not seen.
 - repository: `owner/name` after `repos/`, `-R `, `--repo ` (or `--repo=`) or
   `github.com/`, in lower case without a trailing `.git`. A command that names
-  several repositories belongs to each.
+  several repositories belongs to each. The `-R ` marker also fits the flag of
+  other tools (`cp -R a/b`), and such a name counts as a repository.
 - kind: the first of these that fits the command. `names_a_run`: it holds a run id.
   `gh_without_run`: it holds the word `gh`. `build_or_test`: it holds the word
   `dune`, `opam`, `make`, `npm`, `pnpm`, `yarn`, `cargo`, `pytest`, `vitest` or
   `tsc`, or `python -m unittest`. `rest`: none of those, which includes a call
   without a command.
 - long call: an execute call of 60 seconds or more.
+- github call: a long call of kind `names_a_run` or `gh_without_run`, sleeping or
+  not. `long_calls.github_*` count them against all long calls, and
+  `long_calls.sleeping_github_*` count the sleeping ones against the sleeping
+  long calls.
 - by day: the execute calls grouped by the UTC date of their `ts`. A window that
   ends inside a day holds only the part before `--until` for that day.
 - poll call: a sleeping execute call that names at least one run id.
@@ -78,6 +87,7 @@ from collections import defaultdict
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
+from enum import StrEnum
 from itertools import pairwise
 from typing import cast
 
@@ -109,13 +119,20 @@ REPO_NAME = re.compile(r"(?:\brepos/|-R\s+|--repo[ =]|github\.com/)([A-Za-z0-9_.
 GIT_SUFFIX = ".git"
 GH_CLI = re.compile(r"\bgh\b")
 BUILD_TOOL = re.compile(r"\b(?:dune|opam|make|npm|pnpm|yarn|cargo|pytest|vitest|tsc)\b|\bpython3?\s+-m\s+unittest\b")
-KIND_RUN = "names_a_run"
-KIND_GH = "gh_without_run"
-KIND_BUILD = "build_or_test"
-KIND_REST = "rest"
-KINDS = (KIND_RUN, KIND_GH, KIND_BUILD, KIND_REST)
-GITHUB_KINDS = (KIND_RUN, KIND_GH)
 RUN_ID = re.compile(r"(?:actions/runs/|\bruns?\s+(?:(?:view|watch|rerun|cancel)\s+)?)([0-9]{10,11})(?![0-9])")
+
+
+class Kind(StrEnum):
+    """What a command looks like. The value is the name written to the JSON output."""
+
+    RUN = "names_a_run"
+    GH = "gh_without_run"
+    BUILD = "build_or_test"
+    REST = "rest"
+
+
+KINDS = tuple(Kind)
+GITHUB_KINDS = (Kind.RUN, Kind.GH)
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,7 +143,7 @@ class ExecuteCall:
     sleeping: bool
     run_ids: tuple[str, ...]
     repos: tuple[str, ...]
-    kind: str
+    kind: Kind
     day: date
 
 
@@ -171,7 +188,7 @@ def as_object(value: object) -> dict[str, object] | None:
 def parse_row(line: bytes) -> dict[str, object] | None:
     try:
         row: object = json.loads(line.decode("utf-8"), parse_constant=reject_constant)
-    except ValueError:
+    except (ValueError, RecursionError):
         return None
     return as_object(row)
 
@@ -193,14 +210,14 @@ def run_ids_of(text: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(RUN_ID.findall(text)))
 
 
-def kind_of(text: str, run_ids: tuple[str, ...]) -> str:
+def kind_of(text: str, run_ids: tuple[str, ...]) -> Kind:
     if run_ids:
-        return KIND_RUN
+        return Kind.RUN
     if GH_CLI.search(text) is not None:
-        return KIND_GH
+        return Kind.GH
     if BUILD_TOOL.search(text) is not None:
-        return KIND_BUILD
-    return KIND_REST
+        return Kind.BUILD
+    return Kind.REST
 
 
 def repos_of(text: str) -> tuple[str, ...]:
@@ -376,6 +393,8 @@ def summarize_execute(calls: list[ExecuteCall]) -> dict[str, object]:
     sleeping = [call for call in long_calls if call.sleeping]
     sleeping_seconds = sum(call.seconds for call in sleeping)
     sleeping_github_seconds = sum(call.seconds for call in sleeping if call.kind in GITHUB_KINDS)
+    github = [call for call in long_calls if call.kind in GITHUB_KINDS]
+    github_seconds = sum(call.seconds for call in github)
     return {
         "calls": len(calls),
         "calls_without_command": sum(1 for call in calls if not call.has_command),
@@ -389,6 +408,9 @@ def summarize_execute(calls: list[ExecuteCall]) -> dict[str, object]:
             "calls_without_command": sum(1 for call in long_calls if not call.has_command),
             "hours": hours(long_seconds),
             "hours_percent_of_execute": percent(long_seconds, total),
+            "github_calls": len(github),
+            "github_hours": hours(github_seconds),
+            "github_hours_percent_of_long": percent(github_seconds, long_seconds),
             "sleeping_calls": len(sleeping),
             "sleeping_hours": hours(sleeping_seconds),
             "sleeping_hours_percent_of_long": percent(sleeping_seconds, long_seconds),
@@ -541,7 +563,7 @@ def parse_day(text: str) -> date:
 
 
 def parse_until(text: str) -> float:
-    moment = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    moment = datetime.fromisoformat(text)
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=timezone.utc)
     return moment.timestamp()
@@ -559,6 +581,8 @@ def main() -> int:
 
     if args.to_date < args.from_date:
         parser.error("--to-date is before --from-date")
+    if args.to_date == date.max:
+        parser.error(f"--to-date must be before {date.max.isoformat()}")
     since = datetime(args.from_date.year, args.from_date.month, args.from_date.day, tzinfo=timezone.utc).timestamp()
     end_of_last_day = (datetime(args.to_date.year, args.to_date.month, args.to_date.day, tzinfo=timezone.utc) + timedelta(days=1)).timestamp()
     until = args.until if args.until is not None else end_of_last_day
@@ -576,9 +600,12 @@ def main() -> int:
         **summarize(ledger),
     }
     text = json.dumps(summary, indent=2, sort_keys=True)
-    print(text)
     if args.json_out:
-        pathlib.Path(args.json_out).write_text(text + "\n", encoding="utf-8")
+        try:
+            pathlib.Path(args.json_out).write_text(text + "\n", encoding="utf-8")
+        except OSError as error:
+            parser.error(f"cannot write --json-out {args.json_out}: {error}")
+    print(text)
     return 0
 
 

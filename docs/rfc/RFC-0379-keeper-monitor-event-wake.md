@@ -98,22 +98,24 @@ catalog/schema/dispatch 결. create 입력: trigger, payload(opaque), expires_at
 
 ## 6. 측정 수요 — GitHub 실행이 끝나기를 기다리는 호출 (2026-11-05)
 
-v1 트리거(`Port_up`, `Port_down`, `File_changed`)는 §1 의 서버 재기동 사례를 겨냥한다. 이 세 트리거의 수요는 재지 않았다. 도구 호출 원장에서 Keeper 가 오래 기다리는 대상을 재 보니 GitHub Actions 실행이 가장 컸다.
+v1 트리거(`Port_up`, `Port_down`, `File_changed`)는 §1 의 서버 재기동 사례를 겨냥한다. 이 세 트리거의 수요는 재지 않았다. 도구 호출 원장에서 Keeper 가 오래 기다리는 대상을 재 보니 GitHub 쪽 상태(Actions 실행)를 기다리는 것으로 보이는 호출이 가장 컸다.
 
-`docs/evidence/execute-waits-2026-11/measure_execute_waits.py` 로 11-01T00:00Z ~ 11-05T05:00Z 를 쟀다. 정의와 한계는 그 폴더의 README 에 있다.
+`docs/evidence/execute-waits-2026-11/measure_execute_waits.py` 로 11-01T00:00Z ~ 11-05T05:00Z 를 쟀다. 정의와 한계는 그 폴더의 README 에 있다. 턴 시간은 같은 창을 `docs/evidence/lane-time-2026-11/measure_lane_time.py` 로 잰 값이다(그 폴더의 `result-2026-11-01_11-05.json`).
 
 | 측정 | 값 |
 |---|---|
 | `Execute` 호출 | 75,471건, 117.15시간 |
-| 60초 이상 걸린 호출 | 729건, 56.52시간 (`Execute` 시간의 48.2%) |
-| 그중 `sleep` 든 호출 | 378건, 36.77시간 |
-| 그 시간 중 실행 번호가 있거나 `gh` 를 쓰는 호출 | 35.16시간 (95.6%). 실행 번호가 있는 호출만 27.23시간 (74.0%). 번호를 변수로 넘기는 호출은 번호를 못 읽어서 이 몫은 하한이다 |
-| 빌드·시험 도구를 쓴 60초 이상 호출 | 84건, 4.58시간 (`Execute` 시간의 3.9%) |
-| 실행 기다림 (Keeper 하나와 실행 번호 하나) | 188개. 폴링 277번, 막힌 시간 27.41시간 (`Execute` 시간의 23.4%), 기다림당 중앙값 7.1분·p90 17.0분·최대 46.7분 |
-| 기다림이 닿는 저장소 (명령에 이름이 보이는 156개) | `jeong-sik/masc` 95개(11.83시간), `jeong-sik/wkbl` 61개(11.07시간). 나머지 32개(4.52시간)는 명령에 저장소 이름이 없다 |
+| 같은 창의 Keeper 턴 시간 (Keeper 28명의 합) | 792.17시간. `Execute` 는 그 14.8% |
+| 60초 이상 걸린 호출 | 729건, 56.52시간 (`Execute` 시간의 48.2%, 턴 시간의 7.1%) |
+| 60초 이상 호출 중 실행 번호가 있거나 `gh` 를 쓰는 호출 | 450건, 39.46시간 (60초 이상 호출 시간의 69.8%, 턴 시간의 5.0%). 실행 번호가 있는 호출만 246건, 27.58시간 (48.8%) |
+| 60초 이상 호출 중 빌드·시험 도구를 쓴 호출 | 84건, 4.58시간 (60초 이상 호출 시간의 8.1%) |
+| 60초 이상 호출 중 그 밖 | 195건, 12.48시간 (22.1%). 무엇을 기다리는지 가리지 못했다 |
+| 60초 이상 호출 중 `sleep` 든 호출 | 378건, 36.77시간. 이 시간 중 실행 번호가 있거나 `gh` 를 쓰는 호출이 35.16시간 (95.6%), 실행 번호가 있는 호출만 27.23시간 (74.0%). 번호를 변수로 넘기는 호출은 번호를 못 읽어서 실행 번호 쪽 비율은 하한이다 |
+| 실행 기다림 (Keeper 하나와 실행 번호 하나) | 188개. 폴링 277번, 막힌 시간 27.41시간 (`Execute` 시간의 23.4%, 턴 시간의 3.5%), 기다림당 중앙값 7.1분·p90 17.0분·최대 46.7분 |
+| 기다림이 걸린 저장소 (명령에 이름이 보이는 156개) | `jeong-sik/masc` 95개(11.83시간), `jeong-sik/wkbl` 61개(11.07시간). 나머지 32개(4.52시간)는 명령에 저장소 이름이 없다 |
 | 실행 번호가 든 일정 (`masc_schedule_create`, Keeper 가 자기를 깨움) | 81건 (자기를 깨우는 240건 중). Keeper 와 실행 번호 쌍으로 68개. `due_in_sec` 중앙값 1,500초 |
 
-- 호출 종류는 명령 글자로 붙인 이름이다. `gh` 를 쓴다고 GitHub 를 기다렸다는 증거는 아니다. `sleep` 했다가 `gh` 로 상태를 보는 명령이라서 GitHub 쪽 상태를 기다린 것으로 읽었다(추정).
+- 호출 종류는 명령 문자열로 붙인 이름이다. `gh` 를 쓴다고 GitHub 를 기다렸다는 증거는 아니다. `sleep` 했다가 `gh` 로 상태를 보는 명령이라서 GitHub 쪽 상태를 기다린 것으로 읽었다(추정).
 - Keeper 다섯 명(`wkbl-data`, `masc-productor-owner`, `sangsu`, `wkbl-front`, `e-masc-the-leader`)이 `sleep` 으로 기다리는 방법과 일정으로 깨우는 방법을 둘 다 썼다. 같은 실행에 둘 다 썼다는 뜻은 아니다.
 - `masc_schedule_create` 도 `defer_loading = true` 인데 같은 기간 기록된 결과가 성공인 호출이 326건이다. 지연 로딩만으로 도구가 안 쓰이지는 않는다. 같은 설정인 `keeper_job_*` 는 0호출이다(`docs/reports/2026-11-05-tool-efficiency.md` §6).
 - 일정은 시각으로만 깨운다. 일정 시각과 실제로 실행이 끝난 시각의 차이는 재지 않았다.
@@ -124,23 +126,26 @@ v1 트리거(`Port_up`, `Port_down`, `File_changed`)는 §1 의 서버 재기동
 ```
 type trigger =
   | (* §2.1 의 셋 *)
-  | Github_run_completed of { repo : string; run_id : int }
+  | Github_run_completed of { repo : Github_repo.t; run_id : int; run_attempt : int }
 ```
 
-- 판정은 순수 함수다. 실행 조회(`GET /repos/{owner}/{repo}/actions/runs/{run_id}`) 응답의 `status` 가 `completed` 이면 `Completed of conclusion`, 아니면 `Not_completed` 로 읽는다. `status` 가 없거나 글이 아니면 읽기 오류로 두고 발화하지 않는다. 2026-11-05 에 진행 중인 실행을 `gh api` 로 읽어 `status` 가 `in_progress`, `conclusion` 이 `null` 인 것을 확인했다.
-- §2.1 의 baseline 규칙은 이 트리거에서 맞지 않는다. 최초 관측을 baseline 으로 받으면, 건 시점에 이미 끝난 실행은 baseline 이 `Completed` 라서 영영 울리지 않는다. 서버가 재시작한 동안 끝난 실행도 같다(§2.5). 한 시도 안에서 `status` 는 `Not_completed` 에서 `Completed` 로 한 방향으로만 바뀐다. 그래서 만들 때 한 번 읽는다. 이미 `Completed` 면 monitor 를 만들지 않고 그 결과를 도구 응답으로 돌려준다. `Not_completed` 면 monitor 를 만들고, 이후 처음 보는 `Completed` 를 전이로 본다. last_state 를 저장하지 않으므로 재시작 뒤에도 같은 규칙이고, 재시작 중에 끝난 실행은 재시작 뒤 첫 관측에서 울린다.
+- 입력은 타입으로 받는다. `Github_repo.t` 는 새로 만들 타입이고, `owner` 와 `name` 을 따로 검증해 만든다(영문·숫자·`_`·`.`·`-` 만 허용하고 `.` 과 `..` 는 거절한다). `run_id` 와 `run_attempt` 는 양의 정수다. Keeper 가 준 문자열이 URL 경로에 그대로 들어가지 않는다.
+- 판정은 순수 함수다. 시도 조회(`GET /repos/{owner}/{repo}/actions/runs/{run_id}/attempts/{attempt_number}`) 응답의 `status` 가 `completed` 이면 `Completed of conclusion`, 다른 글이면 `Not_completed` 로 읽는다. `status` 가 `null` 이거나 글이 아니면 읽기 오류로 두고 발화하지 않는다. `status` 가 `completed` 인데 `conclusion` 이 `null` 이거나 처음 보는 값이면 `Completed` 로 보고 발화한다. `conclusion` 은 `Unrecognized of string` 가지를 가진 닫힌 variant 로 읽는다. GitHub 공식 문서(`https://docs.github.com/en/rest/actions/workflow-runs`, 2026-11-05 확인)는 응답의 `status` 와 `conclusion` 을 "string or null" 로 적고, 응답에 오는 값의 목록은 적지 않는다. 질의 필터의 값 목록에는 `completed` 가 있다. 2026-11-05 에 진행 중인 실행을 `gh api` 로 읽어 `status` 가 `in_progress`, `conclusion` 이 `null` 인 것을 확인했다.
+- 만들 때 한 번 읽는다. 읽기가 실패하면(404·403·429, 네트워크 오류, 응답을 해석하지 못함) monitor 를 만들지 않고 도구 오류로 돌려준다. 읽지 못한 채 만들면 §2.2 의 조용한 만료로 가서 Keeper 가 영영 모른다. 이미 `Completed` 면 monitor 를 만들지 않고 그 결과를 도구 응답으로 돌려준다. `Not_completed` 면 monitor 를 만들고, 이후 처음 보는 `Completed` 를 전이로 본다.
+- §2.1 의 baseline 규칙은 이 트리거에서 맞지 않는다. 최초 관측을 baseline 으로 받으면, 건 시점에 이미 끝난 실행은 baseline 이 `Completed` 라서 영영 울리지 않는다. 서버가 재시작한 동안 끝난 실행도 같다(§2.5). 위 규칙은 last_state 를 저장하지 않으므로 재시작 뒤에도 같고, 재시작 중에 끝난 실행은 재시작 뒤 첫 관측에서 울린다. 이 규칙은 한 시도의 `status` 가 `Not_completed` 에서 `Completed` 로 한 방향으로만 바뀐다는 가정 위에 있다. 공식 문서에서 확인하지 못한 가정이라 구현 시험에서 실제 실행으로 확인한다.
+- 시도 번호를 트리거에 넣어 한 시도의 완료만 본다. 공식 문서는 시도 조회가 실행 조회와 같은 응답 모양이라고 적는다. 재실행(`Re-run a workflow`, `Re-run failed jobs`)이 새 `run_attempt` 를 만드는지, `status` 를 되돌리는지는 같은 문서가 적지 않는다(2026-11-05 확인). 시도로 고정하면 재실행이 어떻게 동작하든 이 monitor 의 대상은 바뀌지 않는다. 다음 시도를 기다리려면 새 monitor 를 건다. `gh run rerun` 은 CI 를 다시 돌리므로 이 문서를 쓰면서 시험하지 않았다.
 - §2.4 의 인터벌(미충족 2초, 충족 유지 10초)은 로컬 포트와 파일에 맞춘 값이다. GitHub 를 2초마다 읽으면 기다림 188개의 폴링 시간을 기다림별로 더한 28.76시간 동안 5만 번이 넘는다. 이 트리거는 따로 인터벌을 가진다. 아래 계산은 30초로 가정한다.
-- 전송은 `lib/server/server_repository_pulls.ml` 의 `default_http_post`(`:165`)가 선례다. curl 서브프로세스로 보내고 속도 제한 헤더를 읽는다. 이 함수는 POST(GraphQL)라서 실행 조회에는 GET 전송이 하나 더 필요하다.
+- 전송은 `lib/server/server_repository_pulls.ml` 의 `default_http_post`(`:165`)가 선례다. curl 서브프로세스로 보내고 속도 제한 헤더를 읽는다. 이 함수는 POST(GraphQL)라서 시도 조회에는 GET 전송이 하나 더 필요하다.
 - 발화는 §2.3 의 `monitor_fired` 로 간다. payload 는 Keeper 가 넣은 값에 `conclusion` 과 실행 주소를 더한다. 로그나 산출물은 Keeper 가 도구로 따로 읽는다.
 - 호출 수는 계산값이다. 30초마다 한 번 읽는다고 가정하면, 기다림 188개의 폴링 시간을 기다림별로 더한 28.76시간(1,726분) 동안 3,451번이고 창 101시간으로 나누면 시간당 34번이다. 같은 실행을 둘이 기다려도 따로 센 값이고, 폴링 시간은 monitor 가 걸려 있을 시간의 대용이다. 잰 값이 아니다.
 
-### 6.2 정해야 하는 것 (사용자 몫)
+### 6.2 정해야 하는 것 (사용자가 정한다)
 
-1. 어느 신원으로 읽는가. PR 스냅숏을 읽는 계정은 `RFC-keeper-world-state-shows-open-work` D6(2026-09-28)이 지금 계정(`pr_reader` Keeper, 곧 Keeper 12명이 `gh` 로 같이 쓰는 anyang-keepers 계정)으로 유지하기로 했고, 속도 제한은 기존 `Rate_limited` 경로가 받는다. `server_repository_pulls.ml` 은 `Keeper_github_login_lane.stored_token` 으로 그 계정의 토큰을 읽는다. 이 트리거도 같은 계정으로 읽는 것을 기본으로 제안한다. 정할 것은 그 결정을 실행 조회까지 넓히는지다. Keeper 별 GitHub 신원(`RFC-keeper-github-apps`, `RFC-per-keeper-github-cli-identity`)은 둘 다 Draft 이고 D7 이 따로 정하기로 했다.
-2. 저장소가 둘이고 공개 여부가 다르다. `gh repo view` 로 `jeong-sik/masc` 는 PUBLIC, `jeong-sik/wkbl` 은 PRIVATE 임을 확인했다(2026-11-05). 읽는 계정의 토큰이 `wkbl` 의 Actions 를 읽을 수 있는지는 시험하지 않았다. 이름이 안 보인 기다림 32개가 어느 저장소인지도 모른다.
+1. 어느 신원으로 읽는가. PR 스냅숏을 읽는 계정은 `RFC-keeper-world-state-shows-open-work` D6(2026-09-28)이 지금 계정(`pr_reader` Keeper 가 쓰는 anyang-keepers 계정. 그 RFC 는 이 계정을 Keeper 12명이 `gh` 로 같이 쓴다고 적었다)으로 유지하기로 했고, 속도 제한은 기존 `Rate_limited` 경로가 받는다고 했다. `server_repository_pulls.ml` 은 `Keeper_github_login_lane.stored_token` 으로 그 계정의 토큰을 읽는다. 이 트리거도 같은 계정으로 읽는 것을 기본으로 제안한다. 정할 것은 그 결정을 실행 조회까지 넓히는지다. Keeper 별 GitHub 신원은 `RFC-keeper-github-apps` 가 다루고 D7 이 신원 전환을 그 RFC 에서 따로 정하기로 했다. `RFC-per-keeper-github-cli-identity` 도 별도의 Draft 이다.
+2. 저장소가 둘이고 공개 여부가 다르다. `gh repo view` 로 `jeong-sik/masc` 는 PUBLIC, `jeong-sik/wkbl` 은 PRIVATE 임을 확인했다(2026-11-05). 읽는 계정의 토큰이 `wkbl` 의 Actions 를 읽을 수 있는지는 시험하지 않았다(Keeper 의 토큰을 꺼내 쓰지 않았다). 공식 문서는 실행 조회를 "Anyone with read access to the repository" 가 쓸 수 있고, 비공개 저장소에서는 OAuth 앱 토큰과 classic 개인 토큰에 `repo` scope 가 필요하다고 적는다. fine-grained 토큰은 적지 않는다. `wkbl` 을 읽을 수 없으면 이 제안이 닿는 기다림에서 61개(11.07시간, 막힌 시간의 40%)가 빠진다. 이름이 안 보인 기다림 32개가 어느 저장소인지도 모른다.
 3. v1 세 트리거보다 먼저 하는가. 이 측정은 v1 쪽 수요를 재지 않았다.
-4. 읽기가 계속 실패하면 어떻게 보이는가. 404·403·429 나 네트워크 오류가 이어지면 monitor 는 울리지 않고 만료까지 간다. §2.2 는 미발화 만료를 조용히 지운다. 마지막 읽기 결과를 `masc_monitor_list` 에 보일지, 만료 때 마지막 읽기가 오류였으면 알릴지 정해야 한다.
-5. 재실행. `gh run rerun` 이 같은 실행 번호에서 `run_attempt` 만 올리고 `status` 를 되돌리는지 확인하지 않았다(응답에 `run_attempt` 필드는 있다). 되돌린다면 만든 시점의 `run_attempt` 를 기억해 그 시도의 완료만 볼지 정해야 한다.
+4. 지워지는 기다림을 어떻게 보이는가. §2.2 는 미발화 만료를 조용히 지운다. 이 트리거에서는 만든 뒤에 읽기가 계속 실패해서 만료되는 경우와, 실행이 끝나지 않은 채 기다림이 만료보다 길어져 만료되는 경우가 모두 Keeper 가 모르는 채 지워진다. 만들 때 읽기 실패는 위 규칙대로 도구 오류가 되므로 여기서 남는 것은 만든 뒤의 실패와 만료다. 마지막 읽기 결과(`status`, 읽기 오류)를 `masc_monitor_list` 에 보일지, 만료 때 `monitor_fired` 와 같은 길로 "끝나지 않고 만료됨" 과 "읽지 못하고 만료됨" 을 알릴지 정해야 한다.
+5. 재실행. 시도 번호로 고정하면 대상은 정해진다. 정할 것은 Keeper 가 재실행 뒤 다음 시도를 기다릴 때 새 monitor 를 걸게 하는지, 도구에 "최신 시도" 모드를 따로 두는지다.
 
 ### 6.3 다른 RFC 와 겹치는 곳
 
@@ -153,10 +158,12 @@ type trigger =
 - 그 RFC 는 켜면 서버가 계속 도는 규칙이고, 이 트리거는 Keeper 가 만든 monitor 가 발화하거나 만료되면 사라진다.
 
 겹치는 곳은 자기 PR 의 checks 가 실패로 끝난 경우 하나다. 이 크기는 재지 않았다. 이 측정은 실행의 결과(성공·실패)를 보지 않는다.
-둘이 GitHub 읽기를 따로 만들면 신원, 속도 제한 처리, 토큰 읽기가 둘로 갈라진다. 어느 쪽이 먼저 구현되든 읽는 계정과 속도 제한 처리(`Rate_limited`)는 하나를 쓰도록 제안한다.
+둘이 GitHub 읽기를 따로 만들면 신원, 토큰 읽기, 속도 제한 처리가 둘로 갈라진다. 어느 쪽이 먼저 구현되든 읽는 계정은 하나를 쓰도록 제안한다.
+속도 제한 처리는 공유할 것이 아직 없고 이 제안이 새로 정해야 한다. `Rate_limited` 는 PR 스냅숏 읽기의 실패 가지 하나이고(`lib/server/server_repository_pulls.ml` 의 `failure`), `held_answer` 는 그 스냅숏의 답을 GitHub 가 알려 준 `reset_at` 까지 쥘 뿐이다. 계정 단위로 남은 한도를 나누는 상태가 아니다. 시도 조회(REST GET)가 429 나 한도 소진을 만났을 때 monitor 가 어떻게 하는지(다음 인터벌에 다시 읽기, 알려 준 시각까지 쉬기)는 새로 정한다.
 
 ### 6.4 줄이는 크기의 한계와 확인 방법
 
-- 줄이는 것은 Keeper 가 한 턴을 붙잡고 기다리는 시간(27.41시간)과 폴링 호출(277번)이다. 그 시간에 다른 작업이 밀려 있던 몫은 측정한 두 대기열에서 작다. 위임·채팅 작업의 대기 중 같은 Keeper 가 60초 이상 `Execute` 를 돌던 시간과 겹친 것은 1.9%, 일정 깨움의 대기 중에서는 3.8%였다(`docs/reports/2026-11-05-tool-efficiency.md` §6, 창은 11-01~11-04T19:10Z). Board 멘션으로 깨운 턴의 대기와 완료 순간에 바로 이어 받는 이득은 재지 못했다.
+- 줄이는 것은 Keeper 가 한 턴을 붙잡고 기다리는 시간(27.41시간, 턴 시간의 3.5%)과 폴링 호출(277번)이다. 그 시간에 다른 작업이 밀려 있던 비율은 측정한 두 대기열에서 작다. 같은 창에서 위임·채팅 작업의 대기(6,703.7분) 중 같은 Keeper 가 60초 이상 `Execute` 를 돌던 시간과 겹친 것은 216.8분(3.2%)이고, 일정 깨움의 대기(482.2시간) 중에서는 21.6시간(4.5%)이었다(`docs/evidence/lane-time-2026-11/result-2026-11-01_11-05.json`). Board 멘션으로 깨운 턴의 대기와 완료 순간에 바로 이어 받는 이득은 재지 못했다.
 - 같은 기다림을 체크아웃의 감시 프로세스로 푸는 길도 있다(`RFC-keeper-async-fleet-continuity` §8 의 3·4층). 이 제안은 체크아웃의 프로세스가 필요 없는 대신 서버가 GitHub 를 읽는 신원이 필요하다. 이 측정은 두 길 중 어느 쪽이 나은지 가르지 못한다.
-- 구현 뒤에는 같은 하네스를 같은 일수로 돌린다. `run_waits.waits`·`blocked_hours` 와 `schedule_wakes.self_wakes_naming_a_run` 이 기준선(188개, 27.41시간, 81건)보다 줄어야 한다. 줄지 않으면 Keeper 가 새 도구를 안 쓰는 것이다. 날마다 값이 많이 달라서(`sleep` 든 오래 걸린 호출은 11-01 이 0.44시간, 11-02 ~ 11-04 가 8 ~ 13시간) `execute.by_day` 로 날짜별로 비교한다.
+- 구현 뒤에는 같은 하네스를 같은 일수로 돌린다. 기준선은 `run_waits.waits` 188개, `blocked_hours` 27.41시간, `schedule_wakes.self_wakes_naming_a_run` 81건이다. 날마다 값이 많이 달라서(`sleep` 든 오래 걸린 호출은 11-01 이 0.44시간, 11-02 ~ 11-04 가 8 ~ 13시간) 총량만 비교하면 효과와 날의 차이를 가르지 못한다. 그래서 (Keeper, 실행 번호) 쌍 단위로 본다. 새 도구로 monitor 를 건 쌍이 `sleep` 폴링에도 나오는지(나오면 폴링 시간이 0에 가까워야 한다) 쌍마다 센다.
+- 값이 줄지 않았을 때는 이 순서로 원인을 가린다. (1) monitor 가 실제로 만들어졌는지(도구 호출 수와 만들 때의 읽기 오류). (2) 만든 monitor 의 결과(발화·만료·읽기 오류)와 저장소별 읽기 성공률(`wkbl` 포함). (3) 발화한 뒤 Keeper 가 깨어나기까지의 시간. (4) 깨어난 뒤에도 같은 실행을 `sleep` 으로 다시 기다리는지. 지금 하네스에는 새 도구 호출과 monitor 결과를 세는 필드가 없어서 구현과 함께 더해야 한다.

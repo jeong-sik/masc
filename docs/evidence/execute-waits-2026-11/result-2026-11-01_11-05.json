@@ -126,6 +126,9 @@
       "calls": 729,
       "calls_percent": 1.0,
       "calls_without_command": 0,
+      "github_calls": 450,
+      "github_hours": 39.46,
+      "github_hours_percent_of_long": 69.8,
       "hours": 56.52,
       "hours_percent_of_execute": 48.2,
       "sleeping_calls": 378,
@@ -137,7 +140,7 @@
     }
   },
   "executes_without_duration": 0,
-  "files_read": 55,
+  "files_read": 56,
   "keepers_in_both": [
     {
       "blocked_hours": 8.97,

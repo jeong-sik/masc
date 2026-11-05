@@ -10,10 +10,12 @@ import io
 import json
 import os
 import pathlib
+import subprocess
 import sys
 import tempfile
 import time
 import unittest
+from collections.abc import Callable
 from datetime import date
 from typing import cast
 from unittest import mock
@@ -29,6 +31,8 @@ DAY_SECONDS = 86400.0
 DAY = date(2026, 11, 1)
 RUN_A = "41258710053"
 RUN_B = "41279552260"
+SCRIPT = pathlib.Path(__file__).resolve().parent / "measure_execute_waits.py"
+PROGRAM_TIMEOUT_SECONDS = 60
 
 
 def rows_of(value: object) -> list[dict[str, object]]:
@@ -110,10 +114,10 @@ def call(
     run_ids: tuple[str, ...] = (),
     has_command: bool = True,
     repos: tuple[str, ...] = (),
-    kind: str | None = None,
+    kind: waits.Kind | None = None,
     day: date = DAY,
 ) -> waits.ExecuteCall:
-    chosen = kind if kind is not None else (waits.KIND_RUN if run_ids else waits.KIND_REST)
+    chosen = kind if kind is not None else (waits.Kind.RUN if run_ids else waits.Kind.REST)
     return waits.ExecuteCall(keeper, seconds, has_command, sleeping, run_ids, repos, chosen, day)
 
 
@@ -221,7 +225,7 @@ class ReposOfTest(unittest.TestCase):
         self.assertEqual(waits.repos_of(text), ("a/x", "b/y"))
 
     def test_text_without_a_marker_names_no_repository(self) -> None:
-        for text in ("ls src/foo", "cd work/wkbl && gh run view 1", "prepos/octo/hub", "gh run view 1 -Rocto/hub", ""):
+        for text in ("ls src/foo", "cd work/wkbl && gh run view 1", "prepos/octo/hub", "gh run view 1 -Rocto/hub", "curl https://githubXcom/octo/hub", ""):
             with self.subTest(text=text):
                 self.assertEqual(waits.repos_of(text), ())
 
@@ -239,7 +243,7 @@ class SleepingTest(unittest.TestCase):
         return call.sleeping
 
     def test_sleep_followed_by_a_number(self) -> None:
-        for command in ("sleep 5", "cd /tmp && sleep 30", "sleep 240; gh run view x", "sleep 1.5", "echo; sleep\t7"):
+        for command in ("sleep 5", "cd /tmp && sleep 30", "sleep 240; gh run view x", "sleep 1.5", "echo; sleep\t7", "sleep  5", "sleep 0", "sleep 0.5"):
             with self.subTest(command=command):
                 self.assertTrue(self.sleeping(command))
 
@@ -259,6 +263,8 @@ class RunIdsOfTest(unittest.TestCase):
             f"gh run cancel {RUN_A}",
             f"merge-compile run {RUN_A}(head b3130cf)",
             f"runs {RUN_A}",
+            f"gh run  watch  {RUN_A}",
+            f"gh run\tview\t{RUN_A}",
         ):
             with self.subTest(text=text):
                 self.assertEqual(waits.run_ids_of(text), (RUN_A,))
@@ -290,14 +296,18 @@ class RunIdsOfTest(unittest.TestCase):
 
 
 class KindOfTest(unittest.TestCase):
-    def kind(self, command: str | None) -> str:
+    def kind(self, command: str | None) -> waits.Kind:
         found = waits.execute_call_of(execute_row("a", 1, command), NOON)
         assert found is not None
         return found.kind
 
     def test_the_kind_names_are_fixed(self) -> None:
-        self.assertEqual(waits.KINDS, ("names_a_run", "gh_without_run", "build_or_test", "rest"))
-        self.assertEqual(waits.GITHUB_KINDS, ("names_a_run", "gh_without_run"))
+        self.assertEqual([kind.value for kind in waits.Kind], ["names_a_run", "gh_without_run", "build_or_test", "rest"])
+        self.assertEqual(waits.KINDS, tuple(waits.Kind))
+        self.assertEqual(waits.GITHUB_KINDS, (waits.Kind.RUN, waits.Kind.GH))
+
+    def test_a_kind_is_written_to_json_as_its_name(self) -> None:
+        self.assertEqual(json.dumps({"kind": waits.Kind.RUN}), '{"kind": "names_a_run"}')
 
     def test_a_run_id_wins_over_gh_and_build_tools(self) -> None:
         self.assertEqual(self.kind(f"gh run view {RUN_A} -R o/r"), "names_a_run")
@@ -357,6 +367,23 @@ class KindOfTest(unittest.TestCase):
         self.assertEqual((found.has_command, found.kind), (False, "rest"))
 
 
+class ArithmeticTest(unittest.TestCase):
+    def test_hours_are_seconds_over_3600_rounded_to_two_places(self) -> None:
+        self.assertEqual(waits.hours(0), 0.0)
+        self.assertEqual(waits.hours(3600), 1.0)
+        self.assertEqual(waits.hours(5400), 1.5)
+        self.assertEqual(waits.hours(36), 0.01)
+        self.assertEqual(waits.hours(1), 0.0)
+        self.assertEqual(waits.hours(360000), 100.0)
+
+    def test_percent_is_rounded_to_one_place_and_empty_without_a_whole(self) -> None:
+        self.assertEqual(waits.percent(1, 1), 100.0)
+        self.assertEqual(waits.percent(0.5, 0.5), 100.0)
+        self.assertEqual(waits.percent(1, 3), 33.3)
+        self.assertEqual(waits.percent(0, 5), 0.0)
+        self.assertIsNone(waits.percent(1, 0))
+
+
 class BucketTest(unittest.TestCase):
     def test_labels(self) -> None:
         self.assertEqual(waits.bucket_labels(), ["<1s", "1-3s", "3-10s", "10-60s", "60-300s", ">=300s"])
@@ -386,10 +413,10 @@ class SummarizeExecuteTest(unittest.TestCase):
             call("a", 0.5, has_command=False),
             call("a", 59, run_ids=(RUN_B,)),
             call("b", 60, sleeping=True, run_ids=(RUN_A,)),
-            call("b", 120, sleeping=True, kind=waits.KIND_GH),
+            call("b", 120, sleeping=True, kind=waits.Kind.GH),
             call("c", 600, has_command=False),
             call("c", 1200, sleeping=False, run_ids=(RUN_B,)),
-            call("d", 100, sleeping=True, kind=waits.KIND_BUILD),
+            call("d", 100, sleeping=True, kind=waits.Kind.BUILD),
             call("e", 240, sleeping=True),
         ]
         summary = waits.summarize_execute(calls)
@@ -399,6 +426,7 @@ class SummarizeExecuteTest(unittest.TestCase):
         days = rows_of(summary["by_day"])
         self.assertEqual([(row["day"], row["calls"]) for row in days], [("2026-11-01", 8)])
         buckets = rows_of(summary["duration_buckets"])
+        self.assertEqual([bucket["label"] for bucket in buckets], waits.bucket_labels())
         self.assertEqual([bucket["calls"] for bucket in buckets], [1, 0, 0, 1, 4, 2])
         self.assertEqual([bucket["hours"] for bucket in buckets], [0.0, 0.0, 0.0, 0.02, 0.14, 0.5])
         self.assertEqual([bucket["hours_percent"] for bucket in buckets], [0.0, 0.0, 0.0, 2.5, 21.9, 75.6])
@@ -411,6 +439,9 @@ class SummarizeExecuteTest(unittest.TestCase):
                 "calls_without_command": 1,
                 "hours": 0.64,
                 "hours_percent_of_execute": 97.5,
+                "github_calls": 3,
+                "github_hours": 0.38,
+                "github_hours_percent_of_long": 59.5,
                 "sleeping_calls": 4,
                 "sleeping_hours": 0.14,
                 "sleeping_hours_percent_of_long": 22.4,
@@ -450,6 +481,28 @@ class SummarizeExecuteTest(unittest.TestCase):
         self.assertEqual((long_calls["calls"], long_calls["sleeping_calls"]), (0, 0))
         self.assertEqual([row["calls"] for row in rows_of(long_calls["by_kind"])], [0, 0, 0, 0])
 
+    def test_every_kind_has_a_row_in_by_kind(self) -> None:
+        summary = waits.summarize_execute([call("a", 100, kind=kind) for kind in waits.Kind])
+        long_calls = object_of(summary["long_calls"])
+        self.assertEqual(long_calls["calls"], len(waits.Kind))
+        by_kind = rows_of(long_calls["by_kind"])
+        self.assertEqual([(row["kind"], row["calls"]) for row in by_kind], [(kind.value, 1) for kind in waits.Kind])
+        self.assertEqual((long_calls["github_calls"], long_calls["github_hours"], long_calls["github_hours_percent_of_long"]), (2, 0.06, 50.0))
+
+    def test_the_github_share_counts_sleeping_and_sleepless_calls_of_both_github_kinds(self) -> None:
+        calls = [
+            call("a", 3600, sleeping=True, run_ids=(RUN_A,)),
+            call("a", 1800, run_ids=(RUN_A,)),
+            call("a", 1800, kind=waits.Kind.GH),
+            call("a", 3600, kind=waits.Kind.BUILD),
+            call("a", 1800),
+            call("a", 59, run_ids=(RUN_A,)),
+        ]
+        long_calls = object_of(waits.summarize_execute(calls)["long_calls"])
+        self.assertEqual((long_calls["calls"], long_calls["hours"]), (5, 3.5))
+        self.assertEqual((long_calls["github_calls"], long_calls["github_hours"], long_calls["github_hours_percent_of_long"]), (3, 2.0, 57.1))
+        self.assertEqual((long_calls["sleeping_github_hours"], long_calls["sleeping_github_percent_of_sleeping"]), (1.0, 100.0))
+
     def test_no_calls_gives_no_percentages(self) -> None:
         summary = waits.summarize_execute([])
         self.assertEqual((summary["calls"], summary["calls_without_command"], summary["hours"]), (0, 0, 0.0))
@@ -460,6 +513,8 @@ class SummarizeExecuteTest(unittest.TestCase):
         self.assertTrue(all(row["calls"] == 0 and row["hours_percent_of_long"] is None for row in kinds))
         self.assertTrue(all(row["sleeping_hours_percent_of_sleeping"] is None for row in kinds))
         self.assertIsNone(long_calls["sleeping_github_percent_of_sleeping"])
+        self.assertEqual((long_calls["github_calls"], long_calls["github_hours"]), (0, 0.0))
+        self.assertIsNone(long_calls["github_hours_percent_of_long"])
         self.assertIsNone(long_calls["calls_percent"])
         self.assertIsNone(long_calls["hours_percent_of_execute"])
         self.assertIsNone(long_calls["sleeping_hours_percent_of_long"])
@@ -486,6 +541,16 @@ class RunWaitTest(unittest.TestCase):
             waits.run_waits(self.CALLS),
             {("a", RUN_A): [60, 120, 100], ("a", RUN_B): [100], ("b", RUN_A): [300, 300]},
         )
+
+    def test_single_poll_waits_are_counted_apart_from_longer_ones(self) -> None:
+        calls = [
+            call("a", 60, sleeping=True, run_ids=(RUN_A,)),
+            call("b", 60, sleeping=True, run_ids=(RUN_A,)),
+            call("a", 60, sleeping=True, run_ids=(RUN_B,)),
+            call("a", 60, sleeping=True, run_ids=(RUN_B,)),
+        ]
+        summary = waits.summarize_run_waits(calls)
+        self.assertEqual((summary["waits"], summary["single_poll_waits"]), (3, 2))
 
     def test_summary(self) -> None:
         summary = waits.summarize_run_waits(self.CALLS)
@@ -764,6 +829,7 @@ class ReadLedgerTest(unittest.TestCase):
                     execute_row("other_tool", 5, "ls", tool="Read"),
                     execute_row("no_duration", None, "ls"),
                     execute_row("negative", -1, "ls"),
+                    execute_row("one_millisecond_below_zero", -0.001, "ls"),
                     execute_row("bool_duration", True, "ls"),
                     execute_row("text_duration", "5", "ls"),
                     execute_row("no_stamp", 5, "ls", ts=None),
@@ -772,10 +838,10 @@ class ReadLedgerTest(unittest.TestCase):
             )
             ledger = self.read(base)
             self.assertEqual([call.keeper for call in ledger.executes], ["ok"])
-            self.assertEqual(ledger.rows_in_window, 7)
+            self.assertEqual(ledger.rows_in_window, 8)
             self.assertEqual(ledger.skipped_lines, 0)
             self.assertEqual(ledger.rows_without_timestamp, 2)
-            self.assertEqual(ledger.executes_without_duration, 4)
+            self.assertEqual(ledger.executes_without_duration, 5)
 
     def test_numbers_that_are_not_finite_are_counted_and_do_not_crash(self) -> None:
         huge = "9" * 400
@@ -800,7 +866,23 @@ class ReadLedgerTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             base = pathlib.Path(raw)
             write_day(base, "01.jsonl", [execute_row("a", 0, "")])
-            self.assertEqual(self.read(base).executes, [waits.ExecuteCall("a", 0.0, True, False, (), (), waits.KIND_REST, DAY)])
+            self.assertEqual(self.read(base).executes, [waits.ExecuteCall("a", 0.0, True, False, (), (), waits.Kind.REST, DAY)])
+
+    def test_a_line_the_json_parser_gives_up_on_for_its_depth_is_skipped_and_counted(self) -> None:
+        # How deep a line must nest before the parser raises RecursionError depends on the Python build.
+        real_loads = json.loads
+
+        def loads(text: str, *, parse_constant: Callable[[str], object]) -> object:
+            if "nested too deep" in text:
+                raise RecursionError("maximum recursion depth exceeded while decoding a JSON array")
+            return real_loads(text, parse_constant=parse_constant)
+
+        with tempfile.TemporaryDirectory() as raw, mock.patch.object(json, "loads", loads):
+            base = pathlib.Path(raw)
+            write_day(base, "01.jsonl", [execute_row("ok", 5, "ls"), '{"note": "nested too deep"}'])
+            ledger = self.read(base)
+            self.assertEqual([call.keeper for call in ledger.executes], ["ok"])
+            self.assertEqual((ledger.rows_in_window, ledger.skipped_lines), (1, 1))
 
     def test_unreadable_lines_are_counted_and_blank_lines_are_not(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -840,12 +922,12 @@ class ReadLedgerTest(unittest.TestCase):
                 ],
             )
             calls = self.read(base).executes
-            self.assertEqual(calls[0], waits.ExecuteCall("a", 61.5, True, True, (RUN_A,), ("o/r",), waits.KIND_RUN, DAY))
-            self.assertEqual(calls[1], waits.ExecuteCall("b", 3.0, True, False, (RUN_B,), ("o/r",), waits.KIND_RUN, DAY))
-            self.assertEqual(calls[2], waits.ExecuteCall("c", 2.0, False, False, (), (), waits.KIND_REST, DAY))
-            self.assertEqual(calls[3], waits.ExecuteCall("d", 5.0, True, True, (), (), waits.KIND_REST, DAY))
-            self.assertEqual(calls[4], waits.ExecuteCall("e", 1.0, True, False, (), (), waits.KIND_REST, DAY))
-            self.assertEqual(calls[5], waits.ExecuteCall("f", 1.0, True, False, (), (), waits.KIND_REST, DAY))
+            self.assertEqual(calls[0], waits.ExecuteCall("a", 61.5, True, True, (RUN_A,), ("o/r",), waits.Kind.RUN, DAY))
+            self.assertEqual(calls[1], waits.ExecuteCall("b", 3.0, True, False, (RUN_B,), ("o/r",), waits.Kind.RUN, DAY))
+            self.assertEqual(calls[2], waits.ExecuteCall("c", 2.0, False, False, (), (), waits.Kind.REST, DAY))
+            self.assertEqual(calls[3], waits.ExecuteCall("d", 5.0, True, True, (), (), waits.Kind.REST, DAY))
+            self.assertEqual(calls[4], waits.ExecuteCall("e", 1.0, True, False, (), (), waits.Kind.REST, DAY))
+            self.assertEqual(calls[5], waits.ExecuteCall("f", 1.0, True, False, (), (), waits.Kind.REST, DAY))
 
     def test_schedule_creates(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -924,21 +1006,24 @@ class MainTest(unittest.TestCase):
                     schedule_row("a", target="a", message=f"run {RUN_A}", due=300),
                     execute_row("early", 90, "ls", ts=SINCE - 1),
                     execute_row("late", 90, "ls", ts=MIDNIGHT),
+                    "{not json",
+                    execute_row("no_stamp", 5, "ls", ts=None),
+                    execute_row("no_duration", None, "ls"),
                 ],
             )
             target = base / "out.json"
             summary, printed = self.run_main(base, "--from-date", "2026-11-01", "--to-date", "2026-11-01", "--json-out", str(target))
             self.assertEqual(target.read_text(encoding="utf-8"), printed.rstrip("\n") + "\n")
             self.assertEqual(summary["window"], {"from": "2026-11-01", "to": "2026-11-01", "until": "2026-11-02T00:00:00+00:00"})
-            self.assertEqual(summary["rows_in_window"], 2)
+            self.assertEqual(summary["rows_in_window"], 3)
             self.assertEqual((summary["files_read"], summary["days_without_file"]), (1, []))
-            self.assertEqual((summary["rows_without_timestamp"], summary["executes_without_duration"], summary["skipped_lines"]), (0, 0, 0))
+            self.assertEqual((summary["rows_without_timestamp"], summary["executes_without_duration"], summary["skipped_lines"]), (1, 1, 1))
             execute = object_of(summary["execute"])
             self.assertEqual(execute["calls"], 1)
             run_waits = object_of(summary["run_waits"])
             self.assertEqual((run_waits["waits"], run_waits["polls"]), (1, 1))
             wakes = object_of(summary["schedule_wakes"])
-            self.assertEqual((wakes["self_wakes"], wakes["self_wakes_naming_a_run"]), (1, 1))
+            self.assertEqual((wakes["creates"], wakes["self_wakes"], wakes["self_wakes_naming_a_run"]), (1, 1, 1))
             self.assertEqual(summary["keepers_in_both"], [{"keeper": "a", "blocked_hours": 0.03, "self_wakes_naming_a_run": 1}])
 
     def test_the_output_is_sorted_indented_ascii_json(self) -> None:
@@ -956,20 +1041,28 @@ class MainTest(unittest.TestCase):
             self.assertTrue(printed.isascii())
             self.assertEqual(object_of(summary["run_waits"])["top_keepers"], [{"blocked_hours": 0.03, "keeper": "\ud800", "waits": 1}])
 
-    def fails(self, base: pathlib.Path, *arguments: str) -> str:
-        argv = ["measure_execute_waits.py", "--base-path", str(base), *arguments]
-        err = io.StringIO()
-        patched = mock.patch.object(sys, "argv", argv)
-        with patched, contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as raised:
+    def fails_with_output(self, *arguments: str) -> tuple[str, str]:
+        out, err = io.StringIO(), io.StringIO()
+        patched = mock.patch.object(sys, "argv", ["measure_execute_waits.py", *arguments])
+        with patched, contextlib.redirect_stdout(out), contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as raised:
             waits.main()
         self.assertEqual(raised.exception.code, 2)
-        return err.getvalue()
+        return out.getvalue(), err.getvalue()
+
+    def fails(self, base: pathlib.Path, *arguments: str) -> str:
+        return self.fails_with_output("--base-path", str(base), *arguments)[1]
 
     def test_a_last_day_before_the_first_day_is_refused(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             base = pathlib.Path(raw)
             write_day(base, "01.jsonl", [execute_row("a", 5, "ls")])
-            self.assertIn("--to-date is before --from-date", self.fails(base, "--from-date", "2026-11-02", "--to-date", "2026-11-01"))
+            message = self.fails(base, "--from-date", "2026-11-02", "--to-date", "2026-11-01")
+            self.assertRegex(message, r"error: --to-date is before --from-date\n$")
+
+    def test_a_last_day_that_has_no_following_day_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            message = self.fails(pathlib.Path(raw), "--from-date", "9999-12-30", "--to-date", "9999-12-31")
+            self.assertRegex(message, r"error: --to-date must be before 9999-12-31\n$")
 
     def test_an_until_outside_the_days_read_is_refused(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -977,7 +1070,32 @@ class MainTest(unittest.TestCase):
             write_day(base, "01.jsonl", [execute_row("a", 5, "ls")])
             for until in ("2026-11-02T00:00:01Z", "2026-11-03T23:00:00Z", "2026-11-01T00:00:00Z", "2026-10-31T23:00:00Z"):
                 with self.subTest(until=until):
-                    self.assertIn("--until must be", self.fails(base, "--from-date", "2026-11-01", "--to-date", "2026-11-01", "--until", until))
+                    message = self.fails(base, "--from-date", "2026-11-01", "--to-date", "2026-11-01", "--until", until)
+                    self.assertRegex(message, r"error: --until must be after --from-date midnight and not after the end of --to-date\n$")
+
+    def test_a_missing_date_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            for given, missing in ((("--to-date", "2026-11-01"), "--from-date"), (("--from-date", "2026-11-01"), "--to-date")):
+                with self.subTest(missing=missing):
+                    self.assertIn(f"the following arguments are required: {missing}", self.fails(pathlib.Path(raw), *given))
+
+    def test_a_base_path_is_required(self) -> None:
+        with mock.patch.dict(os.environ):
+            os.environ.pop("MASC_BASE_PATH", None)
+            out, err = self.fails_with_output("--from-date", "2026-11-01", "--to-date", "2026-11-01")
+        self.assertEqual(out, "")
+        self.assertRegex(err, r"error: --base-path or MASC_BASE_PATH is required\n$")
+
+    def test_a_json_out_that_cannot_be_written_is_refused_before_anything_is_printed(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            base = pathlib.Path(raw)
+            write_day(base, "01.jsonl", [execute_row("a", 5, "ls")])
+            for target in (base / "missing" / "out.json", base):
+                with self.subTest(target=target.name):
+                    arguments = ("--base-path", str(base), "--from-date", "2026-11-01", "--to-date", "2026-11-01", "--json-out", str(target))
+                    out, err = self.fails_with_output(*arguments)
+                    self.assertEqual(out, "")
+                    self.assertIn("error: cannot write --json-out", err)
 
     def test_an_until_at_the_end_of_the_last_day_is_accepted(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -1007,6 +1125,17 @@ class MainTest(unittest.TestCase):
             self.assertEqual(execute["calls"], 1)
             window = object_of(summary["window"])
             self.assertEqual(window["until"], "2026-11-01T12:00:30+00:00")
+
+
+class ProgramTest(unittest.TestCase):
+    def test_the_script_run_as_a_program_prints_the_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            base = pathlib.Path(raw)
+            write_day(base, "01.jsonl", [execute_row("a", 108, f"sleep 108; gh run view {RUN_A}")])
+            command = [sys.executable, "-B", "-I", str(SCRIPT), "--base-path", str(base), "--from-date", "2026-11-01", "--to-date", "2026-11-01"]
+            done = subprocess.run(command, capture_output=True, text=True, check=False, timeout=PROGRAM_TIMEOUT_SECONDS)
+            self.assertEqual((done.returncode, done.stderr), (0, ""))
+            self.assertEqual(object_of(object_of(json.loads(done.stdout))["execute"])["calls"], 1)
 
 
 if __name__ == "__main__":

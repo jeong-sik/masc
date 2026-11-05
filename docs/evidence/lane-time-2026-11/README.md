@@ -17,7 +17,7 @@ docs/evidence/lane-time-2026-11/measure_lane_time.py --base-path ~/me \
     --from-date 2026-11-01 --to-date 2026-11-04 --until 2026-11-04T19:10:00Z --json-out after.json
 ```
 
-이 폴더의 `result-2026-11-01_11-04.json` 이 위 명령의 결과예요. 시험은 `python3 -m unittest discover -s docs/evidence/lane-time-2026-11` 로 돌려요.
+이 폴더의 `result-2026-11-01_11-04.json` 이 위 명령의 결과예요. `result-2026-11-01_11-05.json` 은 `--to-date 2026-11-05 --until 2026-11-05T05:00:00Z` 로 같은 명령을 돌린 결과이고, `docs/evidence/execute-waits-2026-11` 과 같은 창이에요. 시험은 `python3 -m unittest discover -s docs/evidence/lane-time-2026-11` 로 돌려요.
 
 ## 센 방법
 

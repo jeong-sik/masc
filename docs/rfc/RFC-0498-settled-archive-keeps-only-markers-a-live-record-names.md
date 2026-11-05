@@ -154,11 +154,16 @@ type settling_family = Librarian_history | Librarian_floor | Workspace_curator
 
 ### 4.4 Exact 요청 기록과 원본 실행 증명
 
-`settling_family` 의 각 항목은 자기 declaration 을 안다. Librarian 두 항목은 `keeper-librarian`, Curator 는 `workspace-curator` 다. §4.2 의 pass 는 이어서 이렇게 한다.
+`settling_family` 의 각 항목은 자기 declaration 을 안다. Librarian 두 항목은 `keeper-librarian`, Curator 는 `workspace-curator` 다.
+
+대상 여부는 declaration 이름이 아니라 권한 검사와 같은 결정으로 정한다. Curator 의 `authorize` 는 그 declaration 에 묶인 package 가 Curator package 일 때만 원본 없는 요청을 `Unowned` 로 거절한다. 다른 package 면 원본 없이 허가한다. 그래서 두 validation 모듈(`server_librarian_addon_validation`, `server_workspace_memory_addon_validation`)이 "이 declaration·package 의 요청은 원본이 있어야 허가된다"를 답하는 함수 하나씩을 내놓는다. `authorize` 와 이 pass 가 그 함수를 같이 쓴다. 지금 그 declaration 에 묶인 package 를 알 수 없으면 그 declaration 의 기록은 건드리지 않는다.
+
+§4.2 의 pass 는 이어서 이렇게 한다.
 
 1. 그 declaration 의 `exact-requests` 와 `host-results` 파일 목록을 먼저 만든다.
 2. 그다음 모든 scope 의 살아 있는 원본 목록을 읽는다.
-3. 목록 1 의 기록 중 요청 ID 를 가진 살아 있는 원본이 목록 2 에 없는 것을 지운다.
+3. 목록 1 의 기록 중 요청 ID 를 가진 살아 있는 원본이 목록 2 에 없는 것을 지운다. Exact 기록은 파일 이름(`digest request_id`)을 살아 있는 원본 파일 이름과 맞대면 되므로 내용을 읽지 않는다. 실행 증명은 파일 이름에 요청 digest 가 섞여 있어서 `executions[].request_id` 를 읽는다.
+4. 한 요청 ID 에서는 실행 증명을 먼저, Exact 기록을 나중에 지운다. Exact 기록 없이 증명만 남으면 `read_*_original_execution` 과 `run` 의 `bound_proofs` 가 "proof has no matching started attempt" Error 를 낸다. 그러면 `run` 이 권한 검사에 닿기 전에 멈춘다. 반대로 증명만 지우고 멈추면 `run` 은 권한 검사에서 `Not_allowed` 로 끝난다.
 
 원본은 Exact 실행보다 먼저 저장된다(`retain` 이 dispatch 전에 기록과 본문을 쓴다). 그래서 1 다음에 생긴 Exact 기록은 목록 1 에 없다. 목록 1 에 있는 기록의 원본은 2 에서 보인다. RFC-0497 의 폴더 목록과 같은 순서다.
 
@@ -188,6 +193,8 @@ type settling_family = Librarian_history | Librarian_floor | Workspace_curator
 - `lane_addon_store.mli` 의 틀린 주석(§3.1)을 고친다.
 - Librarian·Curator 의 권한 함수가 살아 있는 원본이 없을 때 `Undecided` 가 아니라 `Unowned` 를 돌려주는 경로를 모두 확인한다. `Undecided` 경로가 있으면 그 ID 의 기록은 D6 에서 뺀다.
 - 살아 있는 child 가 이미 settle 된 parent 의 실행 증명을 읽는 경로가 없는지 확인한다. 체인은 잎부터 settle 되므로 없어야 한다.
+- 권한 검사가 `Undecided` 로 답하는 경우(원본을 읽지 못함)는 "못 읽으면 아무것도 지우지 않는다" 규칙에 묶는다. 그 pass 는 D6 의 기록을 하나도 지우지 않는다.
+- worker 가 settle 된 ID 를 계속 내면 `run` 의 거절이 그 ID 에 작은 `Not_allowed` 기록을 다시 쓰는지 확인한다. 쓴다면 이 pass 가 날마다 그것을 지우고 다음 거절이 다시 쓴다. 그 반복의 크기를 L1 에서 센다.
 - 시험은 바뀌는 계약만 고친다. 지금 보관 본문이 생기는지 보는 시험(`test_workspace_memory_curator_lane.ml`, `test_keeper_librarian_durable_execution.ml`)은 본문이 지워지는지 보게 바꾼다. `test_lane_addon_original_body_inventory.ml`, `test_lane_addon_request_discovery.ml` 도 보관 경로를 쓴다.
 - `bench_keeper_librarian_pass.ml` 은 보관 기록과 본문을 읽는다. Librarian Goal 의 측정 도구라서 D1 이 들어가면 그 단계가 실패한다. L2 에서 같이 고친다.
 
@@ -210,3 +217,7 @@ type settling_family = Librarian_history | Librarian_floor | Workspace_curator
   - 판단: "가리키는 기록이 없는 보관 기록은 다시 가리켜지지 않는다"는 깨지지 않았다. `N` 이 빠지면 결과는 재실행이 아니라 체인의 정지다(§3.2).
   - P2(`N` 을 만드는 단계가 닫혀 있지 않다): 못 읽은 scope·기록이 있으면 아무것도 지우지 않는다. scope 는 저장소 디렉터리를 훑어 모은다. 답은 이벤트까지 넓힌 타입 답이다(§4.2). 리뷰어가 권한 문자열 훑기 안전망은 넣지 않았다. 문자열 분류를 운영 코드에 두지 않는다는 저장소 규칙 때문이다. 대신 이벤트까지 넓힌 타입 답을 쓰고, L1 에서 이 측정과 한 번 비교한다.
   - P3: 본문이 이미 없으면 성공, 지운 뒤 디렉터리 sync(§4.1). 표 첫 행 이름을 `finish_settling` 으로 고쳤다. barrier 의 역할을 §3.2 에 적었다. bench 와 시험 파일을 §7 에 적었다.
+- 셋째 head(`416fe24d07f`) 리뷰(5791260269): §4.4 판단(원본 없는 ID 의 Exact 기록은 지워도 재질의 결과가 같다)은 코드와 맞다고 봤다. 새 P2 두 건을 반영했다.
+  - P2-1: 증명을 먼저, Exact 기록을 나중에 지운다(§4.4 의 4).
+  - P2-2: 대상 여부를 declaration 이름이 아니라 `authorize` 와 같은 함수로 정한다. package 를 모르면 건드리지 않는다(§4.4).
+  - P3: `Undecided` 를 못 읽음 규칙에 묶었다. Exact 기록은 파일 이름만 맞댄다. 거절이 다시 쓰는 작은 기록의 반복을 L1 에서 센다(§7).

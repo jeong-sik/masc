@@ -136,20 +136,7 @@ let host_stop_result
       ~latency_ms
       ~request_context
     stop =
-  match stop with
-  | Terminal_tool_boundary
-      { outcome = Terminal_failed { failure_class; effect_disposition; detail }
-      ; _
-      } ->
-    Error
-      (Keeper_internal_error.core_error_of_masc_internal_error
-         (Keeper_internal_error.Terminal_effect_failed
-            { failure_class; effect_disposition; detail }))
-  | Terminal_tool_boundary
-      { outcome =
-          (Terminal_completed | Durable_stimulus_deferred)
-      ; _
-      } ->
+  let ok_result stop_reason =
     let response : Agent_core.Types.api_response =
       { id = turn_id
       ; model
@@ -163,14 +150,6 @@ let host_stop_result
               canonical_model_id = Some model
             }
       }
-    in
-    let stop_reason =
-      match stop with
-      | Terminal_tool_boundary { outcome = Terminal_completed; _ } ->
-        Runtime_agent.Completed { provider_turn_ordinal }
-      | Terminal_tool_boundary { outcome = Durable_stimulus_deferred; _ } ->
-        Runtime_agent.Yielded_to_durable_stimulus { turns_used; provider_turn_ordinal }
-      | Terminal_tool_boundary { outcome = Terminal_failed _; _ } -> assert false
     in
     (* masc#31312: this host-stop path was the one producer that returned
        [runtime_observation = None] on a successful or yielded turn, so every
@@ -208,6 +187,21 @@ let host_stop_result
       ; cooperative_boundary = None
       ; stop_reason
       }
+  in
+  match stop with
+  | Terminal_tool_boundary
+      { outcome = Terminal_failed { failure_class; effect_disposition; detail }
+      ; _
+      } ->
+    Error
+      (Keeper_internal_error.core_error_of_masc_internal_error
+         (Keeper_internal_error.Terminal_effect_failed
+            { failure_class; effect_disposition; detail }))
+  | Terminal_tool_boundary { outcome = Terminal_completed; _ } ->
+    ok_result (Runtime_agent.Completed { provider_turn_ordinal })
+  | Terminal_tool_boundary { outcome = Durable_stimulus_deferred; _ } ->
+    ok_result
+      (Runtime_agent.Yielded_to_durable_stimulus { turns_used; provider_turn_ordinal })
 ;;
 
 type prepared_turn =
@@ -1864,6 +1858,12 @@ let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_app
           let result = settle result in
           let producer_effect_state = terminal_effect_state () in
           let terminal_boundary =
+            let when_terminal_after_success outcome =
+              match Agent_core.Tool.completion tool with
+              | Agent_core.Tool_contract.Continue_after_success -> None
+              | Agent_core.Tool_contract.Terminal_after_success _ ->
+                Some (Terminal_tool_boundary { tool_name = tool.schema.name; outcome })
+            in
             match producer_effect_state with
             | Keeper_tools_agent_core.Terminal_effect_failed
                 ({ effect_disposition =
@@ -1886,46 +1886,19 @@ let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_app
                          ; detail = failure.detail
                          }
                    })
-            | ( Keeper_tools_agent_core.Terminal_effect_open
-              | Keeper_tools_agent_core.Deferred_tool_result
-              | Keeper_tools_agent_core.External_effect_deferred
-              | Keeper_tools_agent_core.Terminal_effect_completed _
-              | Keeper_tools_agent_core.Terminal_effect_failed
-                  { effect_disposition = Tool_result.Proven_pre_effect; _ } ) as state ->
-              (match Agent_core.Tool.completion tool with
-               | Agent_core.Tool_contract.Continue_after_success -> None
-               | Agent_core.Tool_contract.Terminal_after_success _ ->
-                 (match state with
-               | Keeper_tools_agent_core.Terminal_effect_completed _
-                 ->
-                 Some
-                   (Terminal_tool_boundary
-                      { tool_name = tool.schema.name
-                      ; outcome = Terminal_completed
-                      })
-               (* A Gate deferral parks one call and nothing has happened
-                  yet, so a terminal tool is no exception: the turn keeps
-                  going and the host replays the call once the approval
-                  resolves. See Keeper_tool_terminal_boundary, which makes
-                  the same decision for the native loop. *)
-               | Keeper_tools_agent_core.External_effect_deferred -> None
-               | Keeper_tools_agent_core.Deferred_tool_result ->
-                 Some
-                   (Terminal_tool_boundary
-                      { tool_name = tool.schema.name
-                      ; outcome = Durable_stimulus_deferred
-                      })
-               | Keeper_tools_agent_core.Terminal_effect_failed
-                   { effect_disposition = Tool_result.Proven_pre_effect; _ }
-               | Keeper_tools_agent_core.Terminal_effect_open ->
-                 None
-               | Keeper_tools_agent_core.Terminal_effect_failed
-                   { effect_disposition =
-                       ( Tool_result.Proven_post_effect
-                       | Tool_result.Effect_outcome_unknown )
-                   ; _
-                   } ->
-                 assert false))
+            | Keeper_tools_agent_core.Terminal_effect_completed _ ->
+              when_terminal_after_success Terminal_completed
+            (* A Gate deferral parks one call and nothing has happened
+               yet, so a terminal tool is no exception: the turn keeps
+               going and the host replays the call once the approval
+               resolves. See Keeper_tool_terminal_boundary, which makes
+               the same decision for the native loop. *)
+            | Keeper_tools_agent_core.External_effect_deferred -> None
+            | Keeper_tools_agent_core.Deferred_tool_result ->
+              when_terminal_after_success Durable_stimulus_deferred
+            | Keeper_tools_agent_core.Terminal_effect_open
+            | Keeper_tools_agent_core.Terminal_effect_failed
+                { effect_disposition = Tool_result.Proven_pre_effect; _ } -> None
           in
           let terminal_boundary =
             match delivery_error, terminal_boundary with

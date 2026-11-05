@@ -64,7 +64,9 @@ val to_status_json : t -> Yojson.Safe.t
     creation time, the batch execution id when the operation was coalesced, and
     the state with its terminal facts. State and failure fields are the ones
     {!to_json} reports. The admission and execution digests, [source] and the
-    queued [input] are left out; the reader sent that request. *)
+    queued [input] are left out; the reader sent that request. No [schema] key:
+    no in-repo reader gates on the status tag (tool body, TUI projection,
+    harness scripts and tests all read named fields). *)
 
 val public_failure_message : failure_kind -> string
 (** Fixed public message selected only by the closed failure kind. It never

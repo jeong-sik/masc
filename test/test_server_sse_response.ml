@@ -19,6 +19,9 @@ let client_leaves_stalled_after_s = 2.0
 (* A bound on the mock clock, which moves only when the test moves it. *)
 let mock_stalled_after_s = 100.0
 
+(* Frames that have to reach a reading client after the late one. *)
+let frames_after_the_late_one = 8
+
 let frame_bytes = 64 * 1024
 let frame = "data: " ^ String.make (frame_bytes - 8) 'x' ^ "\n\n"
 
@@ -43,9 +46,16 @@ type server =
   }
 
 (* The real accept loop and httpun connection, on a loopback port. Each request
-   gets one SSE response, handed to [on_response] in a fiber of its own. *)
-let start_server ~sw env ~stalled_after_s ~on_response =
+   gets one SSE response, handed to [on_response] in a fiber of its own. The
+   response's stall bound runs on [response_clock], the system clock unless a
+   test moves time by hand. *)
+let start_server ?response_clock ~sw env ~stalled_after_s ~on_response =
   let clock = Eio.Stdenv.clock env in
+  let response_clock =
+    match response_clock with
+    | Some (mock : Eio_mock.Clock.t) -> (mock :> float Eio.Time.clock_ty Eio.Resource.t)
+    | None -> (clock :> float Eio.Time.clock_ty Eio.Resource.t)
+  in
   let listening, resolve_listening = Eio.Promise.create () in
   let finished, resolve_finished = Eio.Promise.create () in
   Eio.Fiber.fork ~sw (fun () ->
@@ -74,7 +84,7 @@ let start_server ~sw env ~stalled_after_s ~on_response =
                  [ "content-type", "text/event-stream"; "connection", "close" ]
              in
              let response =
-               Sse.respond ~clock ~stalled_after_s gluten_reqd.Gluten.Reqd.reqd
+               Sse.respond ~clock:response_clock ~stalled_after_s gluten_reqd.Gluten.Reqd.reqd
                  (Httpun.Response.create ~headers `OK)
              in
              Eio.Fiber.fork ~sw:server_sw (fun () -> on_response response)))
@@ -290,6 +300,46 @@ let test_close_ends_every_waiting_send () =
     server.stop ())
 ;;
 
+(* The bound belongs to one frame. A frame the client takes late, but in time,
+   is [Written], and the next frame is timed from its own [send]. *)
+let test_the_stall_bound_counts_from_each_send () =
+  with_env (fun env sw ->
+    let mock = Eio_mock.Clock.make () in
+    let opened, resolve = Eio.Promise.create () in
+    let server =
+      start_server ~response_clock:mock ~sw env ~stalled_after_s:mock_stalled_after_s
+        ~on_response:(fun response -> Eio.Promise.resolve resolve response)
+    in
+    let flow = connect ~sw env ~port:server.port in
+    let response = within env "the response" (fun () -> Eio.Promise.await opened) in
+    let sender = start_sender ~sw response in
+    within env "the response head" (fun () -> read_until flow "200 OK");
+    await_all_pending env [ sender ];
+    Eio_mock.Clock.set_time mock (mock_stalled_after_s -. 1.0);
+    Eio.Fiber.yield ();
+    check bool "a second before the bound the frame still waits" false
+      (Eio.Promise.is_resolved sender.last);
+    let waiting = Atomic.get sender.returned in
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+      let buf = Cstruct.create 65536 in
+      let rec read_on () = ignore (Eio.Flow.single_read flow buf : int); read_on () in
+      (try read_on () with End_of_file | Eio.Io _ -> ());
+      `Stop_daemon);
+    let frames_after s = Atomic.get sender.returned >= waiting + s in
+    let clock = Eio.Stdenv.clock env in
+    within env "the client to take the waiting frame" (fun () ->
+      while not (frames_after 1) do Eio.Time.sleep clock poll_s done);
+    (* Past the bound the first waiting frame had. *)
+    Eio_mock.Clock.set_time mock (mock_stalled_after_s +. 1.0);
+    within env "more frames to reach the client" (fun () ->
+      while not (frames_after frames_after_the_late_one) do Eio.Time.sleep clock poll_s done);
+    check bool "no frame stalled" false (Eio.Promise.is_resolved sender.last);
+    Sse.close response;
+    check outcome_t "the sender ends when the response closes" Sse.Closed
+      (within env "the sender" (fun () -> Eio.Promise.await sender.last));
+    server.stop ())
+;;
+
 let test_a_waiting_send_can_be_cancelled () =
   with_env (fun env sw ->
     let opened, resolve = Eio.Promise.create () in
@@ -328,6 +378,8 @@ let () =
         ; test_case "a frame answered as the time runs out is Written" `Quick
             test_a_frame_answered_as_the_time_runs_out_is_written
         ; test_case "close ends every waiting send" `Quick test_close_ends_every_waiting_send
+        ; test_case "the stall bound counts from each send" `Quick
+            test_the_stall_bound_counts_from_each_send
         ; test_case "a waiting send can be cancelled" `Quick test_a_waiting_send_can_be_cancelled
         ] )
     ]

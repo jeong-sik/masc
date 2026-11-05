@@ -198,7 +198,7 @@ SSE 어댑터는 이벤트를 받아 공용 코덱으로 인코딩해서 쓴다.
 - 인증은 다른 운영자 읽기와 같은 `with_public_read` 다. 기본 설정에서는 열려 있고 엄격 설정에서는 읽기 인증이 필요하다.
 - 서버 SSE 쓰기 코드와 TUI 의 `Sse_wire` 를 쓴다. 이미 열려 있는 HTTP 포트를 쓰므로 새 포트도 새 설정 값도 없고, 터널로 붙는 다른 기계의 TUI 도 읽는다.
 
-연결 하나가 받는 것은 `Server_fleet_stream_pump`(소켓과 분리된 모듈, 시험이 있다)가 정하고, 경로 파일은 인증과 소켓 쓰기만 맡는다.
+연결 하나가 받는 것은 `Server_sse_pump`(소켓과 분리된 모듈, 시험이 있다)가 정하고, frame 하나를 쓰고 기다리는 것은 `Server_sse_response` 가 맡는다(RFC-0493). 경로 파일은 인증과 둘의 연결만 맡는다.
 
 - 연결마다 크기가 64인 큐를 두고, 허브는 큐에 넣기만 한다(허브의 락을 쥔 채 불리므로 기다리지 않는다). 큐가 가득 찬 연결은 이벤트를 건너뛰지 않고 닫는다. 건너뛰고 두면 클라이언트는 다음 이벤트의 번호가 빠진 걸 보고 어차피 다시 연결해야 한다.
 - 가득 찬 것을 알아채는 때는 쓰고 있던 `send` 가 돌아온 뒤이고, 그 뒤에는 그 연결에 아무것도 더 쓰지 않는다. 다시 읽기 시작한 클라이언트는 이미 보낸 것까지 읽고 응답의 끝을 만나 다시 연결하며, 새 `Snapshot` 으로 바로잡힌다(§5 의 실제 소켓 시험).
@@ -277,7 +277,7 @@ fleet 이벤트는 키퍼 이름 목록 세 개가 크기를 정한다(`bootable
 | L1 | `lib/fleet_stream` 타입·코덱·시험 | 코덱 시험 |
 | L2a | `Fleet_stream_hub`(상태, 번호, 구독)와 건강 스냅샷 구간 변환(`Fleet_stream_health_section`). 서버에 연결하지 않는다 | 허브 시험(여러 domain 동시 호출 포함), 변환 시험 |
 | L2b | 갱신 루프의 저장 두 함수에서 허브를 부른다 | 연결 시험(저장 두 함수에서 `Snapshot`·`Changed`·`Degraded` 가 나가는지). 실제 서버에서 이벤트 관찰은 L3a 가 배포된 뒤 |
-| L3a | SSE 경로 `GET /api/v1/stream/fleet`, 연결 하나를 맡는 `Server_fleet_stream_pump` | pump 시험(큐 상한, 정지 한도, keepalive, 구독 해제) |
+| L3a | SSE 경로 `GET /api/v1/stream/fleet`, 연결 하나를 맡는 `Server_sse_pump` | pump 시험(큐 상한, 정지 한도, keepalive, 구독 해제) |
 | L3b | TUI 쪽 순수 클라이언트 `Masc_tui_fleet_stream` | 클라이언트 시험(번호 건너뜀, 거절, 무작위 허브 조작) |
 | L3c | 서버 경로와 클라이언트를 loopback 에서 잇는 시험, 반영 시간 벤치(`bench_fleet_stream`, SSE 와 gRPC) | loopback 시험 5건, 벤치 측정값(§3.4) |
 | L4 | TUI 구독(`launch_fleet_stream`), `/health?full=1` 읽기와 옛 디코더 삭제 | 실제 화면 증거(§5) |

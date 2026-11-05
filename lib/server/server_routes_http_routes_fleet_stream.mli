@@ -11,8 +11,11 @@
     [expected_masc_root] is refused before the first frame when the server
     holds another workspace.
 
-    {!Server_fleet_stream_pump} decides what each connection is sent and when it
-    is closed; this module only connects it to the socket. *)
+    {!Server_sse_pump} decides what each connection is sent and when it is
+    closed, and {!Server_sse_response} writes each frame and waits for it. *)
+
+val frame : Fleet_stream.event -> string
+(** The SSE frame for one event. Its [id] is the event's revision. *)
 
 val serve :
   ?scope_is_current:(unit -> bool) ->
@@ -26,8 +29,8 @@ val serve :
   Httpun.Reqd.t ->
   unit
 (** Answers one request with the stream: the response head, then what
-    {!Server_fleet_stream_pump.run} sends until the client is gone, falls
-    behind or stops accepting frames, and the end of the response. Returns once the stream runs in [sw].
+    {!Server_sse_pump.run} sends until the client is gone, falls behind or
+    accepts no frame within [stalled_after_s], and the end of the response. Returns once the stream runs in [sw].
     Authorization is the caller's: {!add_routes} puts this behind it, with the
     server's hub and limits. Exposed so tests and the bench drive the code the
     server runs, over a real socket. Headers admitted in the request fiber are

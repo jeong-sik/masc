@@ -2,7 +2,8 @@
 ; socket takes is Written, a client that stops reading ends the response as
 ; Stalled, a frame waiting when the client goes away ends at the stall bound,
 ; a frame answered as the time runs out is Written, close ends every waiting
-; send, and a waiting send can be cancelled.
+; send, the stall bound counts from each send, and a waiting send can be
+; cancelled.
 
 (test
  (name test_server_sse_response)

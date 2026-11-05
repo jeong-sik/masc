@@ -64,15 +64,6 @@
   border: var(--card-border);
 }
 
-/* Mobile safe-area helpers */
-[data-theme="styleseed"] .ss-safe-bottom {
-  padding-bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px));
-}
-
-[data-theme="styleseed"] .ss-safe-top {
-  padding-top: calc(1.5rem + env(safe-area-inset-top, 0px));
-}
-
 /* Shared Skill authoring, lookup and catalog controls. */
 .ss-input {
   display: block;

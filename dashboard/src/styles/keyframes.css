@@ -155,22 +155,4 @@
   0%, 50%  { opacity: 1; }
   51%, 100% { opacity: 0; }
 }
-
-.anim-heartbeat  { animation: anim-heartbeat  1.4s var(--ease-inout) infinite; }
 .anim-pulse-glow { animation: anim-pulse-glow 2.4s var(--ease-inout) infinite; }
-.anim-blink      { animation: anim-blink      1s steps(1)      infinite; }
-
-/* Shimmer ships its own background gradient since the animation is
-   driven by `background-position` over a striped surface — callers
-   that need a different base color can override `background` after
-   composing the class. */
-.anim-shimmer {
-  background: linear-gradient(
-    90deg,
-    var(--color-bg-elevated) 0%,
-    var(--color-bg-hover) 50%,
-    var(--color-bg-elevated) 100%
-  );
-  background-size: 200% 100%;
-  animation: anim-shimmer 1.5s linear infinite;
-}

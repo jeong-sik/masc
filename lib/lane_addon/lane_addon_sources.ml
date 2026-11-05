@@ -277,10 +277,6 @@ let access_of_json = function
        | ["keeper",`String keeper;"kind",`String "keeper"] when String.trim keeper <> "" -> Ok (Keeper keeper)
        | _ -> Error "invalid retained source authority")
   | _ -> Error "invalid retained source authority"
-let has_native_fusion binding =
-  let* sources = parse binding in
-  Ok (List.exists (function Fusion_run _ -> true
-    | Snapshot_file _ | Msx_capture _ | Dos_capture _ | Lane_output _ | Browser_document _ -> false) sources)
 
 let authorized_fusion_run ~access ~run_id =
   match Fusion_run_registry.get_for_observer (Fusion_run_registry.global ()) ~run_id with

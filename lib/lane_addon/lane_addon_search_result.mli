@@ -52,8 +52,3 @@ val result_to_json : result -> Yojson.Safe.t
 val result_of_json : Yojson.Safe.t -> (result, string) Stdlib.result
 (** The host's projection of what it delivered; the inverse of
     {!result_to_json}. Exact: an unknown key is refused whole. *)
-
-val plan_summary : ?limit:int -> string -> Yojson.Safe.t
-(** The package-side view of a planned request: query and limit. It is a
-    display projection, not a result identity — cache identity stays the
-    host tool's (query, limit, provider plan) key. *)

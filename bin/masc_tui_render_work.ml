@@ -380,6 +380,7 @@ let planning_detail_tone (tone : Planning_detail.tone) =
   | Planning_detail.Waiting | Planning_detail.Unreadable -> (Theme.warn ())
   | Planning_detail.Note | Planning_detail.Quiet -> Ansi.dim
   | Planning_detail.Plain -> Ansi.default_fg
+  | Planning_detail.Heading -> Theme.info () ^ Ansi.bold
 
 (* What moves this goal next, in one sentence, from the pair the operator can
    see separately but had to combine themselves: the phase and the judge's
@@ -1089,8 +1090,10 @@ let planning_proof_rows ~width lines =
 
 let planning_detail_content (state : state) ~confirmation ~cols (goal : planning_goal) =
   let width = max 1 (framed_inner_width cols - 2) in
-  let field ?(tone = Planning_detail.Note) label text =
-    let prefix = "  " ^ label ^ ": " in
+  (* A field is a fact the operator reads, so it takes the plain foreground.
+     Provenance rows (Created, Link) pass [Quiet] to recede. *)
+  let field ?(tone = Planning_detail.Plain) ?(separator = ": ") label text =
+    let prefix = "  " ^ label ^ separator in
     let cells = Message_layout.display_width prefix in
     let project text = { Planning_detail.tone; text } in
     if cells < framed_inner_width cols then
@@ -1106,7 +1109,7 @@ let planning_detail_content (state : state) ~confirmation ~cols (goal : planning
   let _, next_text = planning_next_step goal in
   let section title =
     Masc_tui_text_block.rows ~max_cells:width ("[ " ^ title ^ " ]")
-    |> List.map (fun line -> { Planning_detail.tone = Note; text = "  " ^ line })
+    |> List.map (fun line -> { Planning_detail.tone = Heading; text = "  " ^ line })
   in
   let gap = [ { Planning_detail.tone = Quiet; text = "" } ] in
   let metadata =
@@ -1154,9 +1157,12 @@ let planning_detail_content (state : state) ~confirmation ~cols (goal : planning
                | Goal_links_read _ -> "(none)") in
         field ~tone:Planning_detail.Quiet "Open tasks" note
     | tasks -> field "Open tasks" (string_of_int (List.length tasks))
+        (* One row per task, led by its id. Its [Link.reference] is that id
+           under a fixed prefix, and only the board scans text for links, so
+           a row of its own would repeat the id. *)
         @ List.concat_map (fun (task : Tui_decode.task) ->
-            field "Task" task.id @ field "Title" task.title
-            @ field ~tone:Planning_detail.Quiet "Link" (Link.reference Task task.id)) tasks
+            field ~separator:"  " task.id
+              (Masc_domain.task_status_to_string task.status ^ " · " ^ task.title)) tasks
   in
   let confirmation_rows =
     (match confirmation with

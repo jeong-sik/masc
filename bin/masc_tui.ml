@@ -22607,9 +22607,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Preset_detail_loaded (_, _) | Preset_contents_shown (_, _) | Preset_saved (_, _)
         | Preset_restored (_, _) | Preset_deleted (_, _) | Play_room_received (_, _)
         | Play_invites_listed (_, _) | Play_invite_revoked (_, _, _, _)
-        | Librarian_input_loaded (_, _) | (Resources_listed _ | Artifact_checks_loaded _) | Code_draft_saved _ | Code_catalog_loaded (_, _) | Code_branches_loaded (_, _) | Code_worktrees_loaded (_, _) | Code_finder_file_loaded (_, _) | Code_entries_loaded (_, _)
-        | Code_file_loaded (_, _, _) | Code_history_loaded (_, _) | Code_diff_loaded (_, _)
-        | Acting_pane_changes_loaded (_, _) | Code_blame_loaded (_, _) | Code_lsp_answered (_, _)
+        | Librarian_input_loaded (_, _) | (Resources_listed _ | Artifact_checks_loaded _)
+        | Code_msg
+            ( Code_draft_saved _ | Code_catalog_loaded (_, _) | Code_branches_loaded (_, _)
+            | Code_worktrees_loaded (_, _) | Code_finder_file_loaded (_, _) | Code_entries_loaded (_, _)
+            | Code_file_loaded (_, _, _) | Code_history_loaded (_, _) | Code_diff_loaded (_, _)
+            | Code_blame_loaded (_, _) | Code_lsp_answered (_, _) )
+        | Acting_pane_changes_loaded (_, _)
         | Resource_exported _ | Resource_share_changed _ | Resource_share_recovery_loaded _ | Resource_read (_, _, _) | Resource_diagram_ready _ | Github_identity_view_loaded (_, _)
         | Identity_providers_loaded (_, _, _) | Identity_switch_set (_, _, _, _)
         | Identity_login_started (_, _) | Identity_refreshed (_, _) | Identity_app_saved (_, _, _)
@@ -25370,32 +25374,32 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           state.runtime_model_jump <- None;
           state.runtime_config_jump_section <- None;
           state.runtime_config_view_error <- Some detail)
-  | Code_catalog_loaded (request, result) ->
+  | Code_msg (Code_catalog_loaded (request, result)) ->
       Code_results.apply_catalog state request result
-  | Code_branches_loaded (request, result) ->
+  | Code_msg (Code_branches_loaded (request, result)) ->
       Code_results.apply_branches state request result
-  | Code_worktrees_loaded (request, result) ->
+  | Code_msg (Code_worktrees_loaded (request, result)) ->
       Code_results.apply_worktrees state request result
-  | Code_finder_file_loaded (request, result) ->
+  | Code_msg (Code_finder_file_loaded (request, result)) ->
       (* Publication is not navigation. The loop gives ready keys, pastes and
          incomplete terminal sequences priority before committing this read. *)
       ignore (Code_results.apply_found_file ~input_pending:true state request result)
-  | Code_entries_loaded (request, result) ->
+  | Code_msg (Code_entries_loaded (request, result)) ->
       Code_results.apply_entries state request result
-  | Code_draft_saved (request, outcome) ->
+  | Code_msg (Code_draft_saved (request, outcome)) ->
       if Code_results.complete_draft_save state request outcome && not (input_pending ()) then
         Masc_tui_code_requests.launch_file_load ~intent:Refresh_code_file state
           ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox)
           ~path:request.csr_address.path
-  | Code_file_loaded (intent, request, result) ->
+  | Code_msg (Code_file_loaded (intent, request, result)) ->
       Code_results.apply_file ~intent state request result
-  | Code_blame_loaded (request, result) ->
+  | Code_msg (Code_blame_loaded (request, result)) ->
       Code_results.apply_blame state request result
-  | Code_lsp_answered (request, result) ->
+  | Code_msg (Code_lsp_answered (request, result)) ->
       Code_results.apply_lsp_answer state request result
-  | Code_diff_loaded (request, result) ->
+  | Code_msg (Code_diff_loaded (request, result)) ->
       Code_results.apply_diff state request result
-  | Code_history_loaded (request, result) ->
+  | Code_msg (Code_history_loaded (request, result)) ->
       Code_results.apply_history state request result
   | Resources_listed (owner, result) ->
       withdraw_resource_diagram_pending state;

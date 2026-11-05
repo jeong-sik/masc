@@ -364,41 +364,6 @@ let content_replacement_kept
     payload_json
 ;;
 
-(** Emit a [slot_scheduler_observed] envelope.  The [state] variant
-    (Idle/Queued/Saturated) is stringified by the runtime arm before
-    invocation. *)
-let slot_scheduler_observed
-      ~(ts_unix : float)
-      ~(correlation_id : string)
-      ~(run_id : string)
-      ~(max_slots : int)
-      ~(active : int)
-      ~(available : int)
-      ~(queue_length : int)
-      ~(state : string)
-  : Yojson.Safe.t
-  =
-  let payload_json =
-    let p : Sse_event_t.slot_scheduler_observed_payload =
-      { max_slots; active; available; queue_length; state }
-    in
-    Yojson.Safe.from_string
-      (Sse_event_j.string_of_slot_scheduler_observed_payload p)
-  in
-  wrap_envelope
-    { event_type = "slot_scheduler_observed"
-    ; ts_unix
-    ; correlation_id
-    ; run_id
-    ; caused_by = None
-    ; agent_name = None
-    ; task_id = None
-    ; turn = None
-    ; tool_name = None
-    }
-    payload_json
-;;
-
 (** Append a caller-supplied addendum to an atd-emitted record JSON.
 
     Used by [agent_completed] to splice the runtime-local success-response

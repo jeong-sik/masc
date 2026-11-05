@@ -58,14 +58,6 @@ type content_replacement_kept_payload = {
   seen_count_after: int;
 }
 
-type slot_scheduler_observed_payload = {
-  max_slots: int;
-  active: int;
-  available: int;
-  queue_length: int;
-  state: string;
-}
-
 type agent_completed_payload = {
   agent_name: string;
   task_id: string;

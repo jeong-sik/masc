@@ -1394,11 +1394,11 @@ describe('parseSSEMessage', () => {
 
   it('keeps unknown agent-core-prefixed events instead of dropping them', () => {
     const msg = parseSSEMessage({
-      type: 'agent_core:slot_scheduler_observed',
-      payload: { state: 'saturated', active: 3, max_slots: 3 },
+      type: 'agent_core:unlisted_event',
+      payload: { state: 'saturated', active: 3 },
     })
     expect(msg).not.toBeNull()
-    expect(msg?.type).toBe('agent_core:slot_scheduler_observed')
+    expect(msg?.type).toBe('agent_core:unlisted_event')
   })
 
   it('keeps agentCore telemetry tuple payloads instead of logging schema drift', () => {

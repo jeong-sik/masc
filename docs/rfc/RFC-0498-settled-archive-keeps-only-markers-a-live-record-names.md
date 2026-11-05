@@ -35,7 +35,7 @@ related: ["librarian-history-settles-finished-originals", "workspace-curator-ori
 ## 1. 결정
 
 - D1. `settle` 은 기록을 보관 위치로 옮긴 뒤, 본문을 보관 위치로 옮기지 않고 지운다. 순서는 지금처럼 기록이 먼저다. 다시 부른 `settle` 은 남은 본문을 지운다.
-- D2. 보관된 기록은 살아 있는 기록이 그 요청 ID 를 가리키지 않으면 지운다. "가리킨다"는 settle 을 부르는 세 곳이 마저 끝내기에서 묻는 ID 와 같다(§3.2). 각 곳이 타입으로 답한다(§4.2).
+- D2. 보관된 기록은 살아 있는 기록이 그 요청 ID 를 가리키지 않으면 지운다. "가리킨다"는 settle 을 부르는 세 곳이 마저 끝내기에서 묻는 ID 와 같다(§3.2). 살아 있는 기록을 두는 owner 마다 타입으로 답한다(§4.2).
 - D3. 지우기는 settlement barrier 와 workspace process lease 안에서 한다. 그 안에서는 settle 이 돌지 않는다. 그래서 그 순간 살아 있는 기록이 가리키는 ID 집합이 정확하다.
 - D4. 이미 쌓인 12,456개도 같은 규칙으로 지운다. 먼저 대상만 세는 층을 내고, 운영자가 수치를 확인한 뒤 지우는 층을 낸다(§6).
 - D5. 표시를 두 단계("표시 → 다음 주기 재확인 → 삭제")로 지우지 않는다. 이유는 §4.3 에 있다.
@@ -102,6 +102,8 @@ settle 을 부르는 곳은 셋이다. 셋 모두 살아 있는 기록이 가리
 | `Keeper_librarian_floor_cleanup` `settle_orphan_gates` | step gate inventory 의 execution ID |
 | `Server_workspace_memory_addon` `finish_settling` | `Progress.Subdivided (_, intent)` 인 기록의 `intent.request_id` |
 
+RFC-0500 1층(#49002)이 넷째 호출처를 더한다. admission `evaluate` 가 서버가 멈춰 끊긴 실행을 옮긴다. 이 호출처는 `settled` 를 묻지 않는다. 옮긴 실행을 가리키는 살아 있는 기록이 생길 수 없기 때문이다(RFC-0500 §3.2).
+
 `true` 면 살아 있는 부모 체인을 마저 옮긴다. `false` 면 그 부모를 그대로 둔다. 그 뒤 lineage 검사(`validate_lineage`)가 그 부모를 거절한다. 그래서 표시를 잘못 지웠을 때의 결과는 재실행이 아니라 그 체인의 정지다. 정지는 저절로 풀리지 않는다.
 
 묻는 쪽은 settlement barrier 를 잡지 않는다. 읽기만 하기 때문이다. barrier 는 settle 의 이동과 §4.2 의 pass 를 서로 막는다. 묻는 쪽이 묻는 ID 는 그 순간 살아 있는 기록이 가리키는 것이라 `N` 에 들어 있다. 그래서 pass 와 같이 돌아도 그 표시는 지워지지 않는다.
@@ -125,13 +127,26 @@ settle 을 부르는 곳은 셋이다. 셋 모두 살아 있는 기록이 가리
 
 ### 4.2 보관 기록
 
-settle 을 부르는 세 곳을 닫힌 타입 하나로 묶는다.
+`tool-request-owners/` 아래에 기록을 두는 owner 를 닫힌 타입 하나로 묶는다. settle 을 부르는 owner 만 적지 않는다. 아래의 "어느 항목에도 속하지 않는 scope 가 있으면 지우지 않는다" 규칙이 살아 있는 scope 모두에 걸리기 때문이다.
+
+2026-11-06 운영 workspace 의 살아 있는 scope 를 (package, tool) 로 세면 다섯 가지다.
+
+| package / tool | scope | 기록 | 항목 |
+|---|---|---|---|
+| `keeper-librarian` / `admit_memory` | 60 | 282 | `Librarian_admission` |
+| `keeper-librarian` / `derive_memory` | 23 | 23 | `Librarian_history`, `Librarian_floor` |
+| `workspace-curator` / `curate` | 1 | 8 | `Workspace_curator` |
+| `masc.completion-authority.review` / `verifier_review` | 1 | 101 | `Completion_review` |
+| `masc.goal-verification.review` / `goal_proof_review` | 1 | 8 | `Goal_proof_review` |
 
 ```ocaml
-type settling_family = Librarian_history | Librarian_floor | Workspace_curator
+type owner_family =
+  | Librarian_admission | Librarian_history | Librarian_floor | Workspace_curator
+  | Completion_review | Goal_proof_review
 ```
 
-- `Lane_addon_tool_request_owner.settle` 은 `family` 를 받는다. 새 호출처는 이 타입에 항목을 더해야 컴파일된다.
+- `Lane_addon_tool_request_owner.settle` 은 `family` 를 받는다. 부르는 곳은 `Librarian_admission`(RFC-0500), `Librarian_history`, `Librarian_floor`, `Workspace_curator` 다. 새 호출처나 새 owner 는 이 타입에 항목을 더해야 컴파일된다.
+- 두 review 항목은 settle 하지 않는다. 그래서 보관 위치에 그 owner 의 기록이 없고, 답은 빈 집합이다. 구현 층은 그 기록이 다른 owner 의 요청 ID 를 담지 않는지 확인한다(§7).
 - 각 항목은 살아 있는 기록 하나가 담은 원본 ID 를 모두 답한다. §3.2 의 표보다 넓다. 마저 끝내기가 묻는 ID 만이 아니라, `Lane_addon_request_progress` 의 이벤트 중 요청 ID 를 담는 것(`Preparation_intended`, `Replacement_intended`, `Successor_intended`, `Subdividing`, `Subdivided` 등)과 gate inventory 의 execution ID 를 모두 넣는다. 모든 phase 와 이벤트를 와일드카드 없이 match 한다. 그래서 새 이벤트가 생기면 컴파일러가 이 답을 고치게 한다.
 - 지우는 pass 는 모든 scope 의 살아 있는 기록을 읽는다. scope 는 Keeper 목록이 아니라 `tool-request-owners/` 아래 디렉터리를 훑어 모은다. 각 기록에 항목의 답을 모아 ID 집합 `N` 을 만든다.
 - scope 하나, 기록 하나라도 읽지 못하거나 decode 하지 못하면 그 pass 는 아무것도 지우지 않고 끝난다. 어느 항목에도 속하지 않는 scope 가 있어도 같다.
@@ -154,7 +169,7 @@ type settling_family = Librarian_history | Librarian_floor | Workspace_curator
 
 ### 4.4 Exact 요청 기록과 원본 실행 증명
 
-`settling_family` 의 각 항목은 자기 declaration 을 안다. Librarian 두 항목은 `keeper-librarian`, Curator 는 `workspace-curator` 다.
+`owner_family` 의 settle 하는 항목은 자기 declaration 을 안다. Librarian 세 항목은 `keeper-librarian`, Curator 는 `workspace-curator` 다. 두 review 항목은 이 절의 대상이 아니다.
 
 대상 여부는 declaration 이름이 아니라 권한 검사와 같은 결정으로 정한다. Curator 의 `authorize` 는 그 declaration 에 묶인 package 가 Curator package 일 때만 원본 없는 요청을 `Unowned` 로 거절한다. 다른 package 면 원본 없이 허가한다. 그래서 두 validation 모듈(`server_librarian_addon_validation`, `server_workspace_memory_addon_validation`)이 "이 declaration·package 의 요청은 원본이 있어야 허가된다"를 답하는 함수 하나씩을 내놓는다. `authorize` 와 이 pass 가 그 함수를 같이 쓴다. 지금 그 declaration 에 묶인 package 를 알 수 없으면 그 declaration 의 기록은 건드리지 않는다.
 
@@ -178,7 +193,7 @@ type settling_family = Librarian_history | Librarian_floor | Workspace_curator
 
 ## 6. 구현 순서
 
-1. L1 계획: §4.2·§4.4 의 pass 가 지울 대상만 센다. 아무것도 지우지 않는다. 기록 수·바이트, 본문 수·바이트, 남는 수를 시작 로그 한 줄과 본문 inventory 보고에 싣는다. `settling_family` 와 세 곳의 답 함수도 이 층에 들어간다.
+1. L1 계획: §4.2·§4.4 의 pass 가 지울 대상만 센다. 아무것도 지우지 않는다. 기록 수·바이트, 본문 수·바이트, 남는 수를 시작 로그 한 줄과 본문 inventory 보고에 싣는다. `owner_family` 와 항목마다의 답 함수도 이 층에 들어간다.
    - 확인: 배포 뒤 대상 수가 §2.2 와 같은 방법으로 잰 값과 맞는다.
 2. L2 본문: D1. `settle` 이 본문을 지운다. 이미 쌓인 본문은 L3 이 지운다.
    - 확인: 배포 뒤 새 날짜 디렉터리에 `bodies/` 가 생기지 않는다.
@@ -188,6 +203,7 @@ type settling_family = Librarian_history | Librarian_floor | Workspace_curator
 
 ## 7. 구현 층이 코드로 닫을 것
 
+- 두 review 항목(`verifier_review`, `goal_proof_review`)의 기록이 다른 owner 의 요청 ID 를 담지 않는지 확인한다. 담는다면 그 항목도 답을 낸다(§4.2).
 - 세 곳에서 자식 ID 를 언제 만드는지 확인한다(§4.3 의 1·4 번). 부모가 자식 ID 를 기록하기 전에 자식 기록이 생기는 경로가 있으면 D2 는 그 경로를 막는 방법과 같이 다시 쓴다.
 - `Progress` 가 자식 ID 를 담는 곳을 모두 찾는다. §3.2 는 마저 끝내기가 묻는 ID 만 적었다. `Preparation_intended`, `Successor_intended` 처럼 ID 를 담는 이벤트가 더 있다. 다른 phase 가 보관된 ID 를 가리키면서 `settled` 를 묻지 않는다면 D2 에 영향이 없다. 다만 그 목록을 PR 에 적는다.
 - `lane_addon_store.mli` 의 틀린 주석(§3.1)을 고친다.
@@ -221,3 +237,4 @@ type settling_family = Librarian_history | Librarian_floor | Workspace_curator
   - P2-1: 증명을 먼저, Exact 기록을 나중에 지운다(§4.4 의 4).
   - P2-2: 대상 여부를 declaration 이름이 아니라 `authorize` 와 같은 함수로 정한다. package 를 모르면 건드리지 않는다(§4.4).
   - P3: `Undecided` 를 못 읽음 규칙에 묶었다. Exact 기록은 파일 이름만 맞댄다. 거절이 다시 쓰는 작은 기록의 반복을 L1 에서 센다(§7).
+- 2026-11-06 자체 확인: §4.2 의 닫힌 타입이 settle 호출처 셋만 적어서, "어느 항목에도 속하지 않는 scope 면 지우지 않는다" 규칙대로라면 pass 가 매번 멈췄다. 살아 있는 scope 에 admission·두 review owner 가 있기 때문이다. 타입을 살아 있는 owner 다섯 종류로 넓혔다. RFC-0500 1층이 admission 을 넷째 settle 호출처로 더하는 것도 같이 적었다.

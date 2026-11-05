@@ -147,10 +147,6 @@ type io_error =
 type orchestration_error =
   | UnknownAgent of { name : string }
   | TaskTimeout of { task_id : string }
-  | DiscoveryFailed of
-      { url : string
-      ; detail : string
-      }
 
 (** Open extension point for host-typed internal payloads (RFC-0371 B12).
     agent-core never constructs or inspects extensions: a host (e.g. MASC)
@@ -340,7 +336,6 @@ let io_error_to_string = function
 let orchestration_error_to_string = function
   | UnknownAgent r -> Printf.sprintf "Unknown agent: %s" r.name
   | TaskTimeout r -> Printf.sprintf "Task timed out: %s" r.task_id
-  | DiscoveryFailed r -> Printf.sprintf "Agent discovery failed for %s: %s" r.url r.detail
 ;;
 
 let media_error_to_string : History.media_error -> string = function

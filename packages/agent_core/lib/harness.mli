@@ -65,16 +65,6 @@ end
 (** {1 Adversarial harness} *)
 
 module Adversarial : sig
-  (** Types of adversarial input. *)
-  type adversarial_input =
-    | MalformedJson of string
-    | PromptInjection of string
-    | ToolError of
-        { tool_name : string
-        ; error : string
-        }
-    | OversizedInput of { size : int }
-
   (** What we expect under adversarial conditions. *)
   type expectation =
     | GracefulError
@@ -145,15 +135,6 @@ end
 (** {1 Composability harness} *)
 
 module Composability : sig
-  type scenario =
-    | SingleAgent
-    | Handoff of
-        { parent : string
-        ; targets : string list
-        }
-    | Orchestrated of { agents : string list }
-    | Pipeline of { stages : string list }
-
   type expectation =
     | HandoffOccurred of string
     | AllAgentsCompleted

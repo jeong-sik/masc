@@ -199,6 +199,11 @@ val footer_hints_memory_recall_form : unit -> string
     save and the way out. The form takes every key, so the pane's row would
     name keys that no longer do what it says. *)
 
+val footer_hints_typesafeai_exclusion_form : unit -> string
+(** The runtime.toml exclusion form's row: the rows, the pick, the save and
+    the way out. The form takes every key, so the pane's row would name keys
+    that no longer do what it says. *)
+
 val footer_hints_runtime_account_saved : unit -> string
 (** The account form's row after a save: the copy of the sign-in command
     and the way out. *)

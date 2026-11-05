@@ -3883,6 +3883,7 @@
   masc_tui_ask_projection
   masc_tui_runtime_account_form
   masc_tui_memory_recall_form
+  masc_tui_typesafeai_exclusion_form
   masc_tui_runtime_config_view
   masc_tui_model_form
   masc.voice_setup
@@ -5121,6 +5122,7 @@
 (include stanzas/test_tui_code_lexer.inc)
 (include stanzas/test_tui_runtime_account_form.inc)
 (include stanzas/test_tui_memory_recall_form.inc)
+(include stanzas/test_tui_typesafeai_exclusion_form.inc)
 (include stanzas/test_tui_runtime_assignment_label.inc)
 (include stanzas/test_tui_lane_addon_reading.inc)
 (include stanzas/test_tui_mermaid.inc)

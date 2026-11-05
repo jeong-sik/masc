@@ -280,6 +280,7 @@ data and paint. A missing finish record remains an unfinished observation.
 | `i` | on prompts, the input this prompt was last given |
 | `a` | runtime.toml: declare an account by copying a provider |
 | `m` | runtime.toml: choose which keepers memory recall asks Jev about |
+| `x` | runtime.toml: choose which keepers no [typesafeai] gate asks a destination about |
 | `a` | prompts: show or hide internal fragments |
 | `a` | voice: assign a voice to a keeper |
 | `u` | presets: restore the selected preset; press twice to confirm |
@@ -662,7 +663,7 @@ count is drawn beyond the available space.
 | `y` | send the whole readable file's original bytes to the terminal clipboard via OSC 52; terminal support is unconfirmed |
 | `b` | who last touched each run of lines, in the margin; b again drops it |
 | `m` | the memos in the open file: comments on their own row reading masc(name): text, or masc(name) question: text; m again closes the list |
-| `d` | on the project tree, list every working-tree change; on an open file, show that file's diff against HEAD |
+| `d` | on the project tree, list every working-tree change; on an open file, show that file's diff against HEAD; in the file's history, on a commit row, show what that commit changed |
 | `Enter (history)` | a commit answers with its pull request, from its (#N) and the repository's remote |
 | `H` | the commits that touched the open file, newest first (H or Esc closes) |
 | `PgUp/PgDn` | page |

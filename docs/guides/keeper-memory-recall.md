@@ -138,6 +138,22 @@ the Keepers added to or dropped from the list, or that nothing changes.
   the end of the table, below a comment that sits above the next table's header
   (the line editor does this for every file it edits, issue #46797).
 
+### Keep a Keeper out
+
+`[typesafeai] excluded_keepers` names Keepers that no `[typesafeai]` gate asks a
+destination about: every gate that is switched on, memory recall included,
+skips them. Config > runtime.toml, key `x`, opens a form for that list. It lists
+the Keepers the TUI knows, picked when the file excludes them, and a name the
+file lists that is no Keeper stays in the list, marked, so it can be dropped:
+such a name excludes nobody, and boot only warns about it. Space picks or
+drops, Enter saves through the same raw-edit save as `e`, Esc closes. Picking
+nobody removes the key, which excludes nobody, as a file without it does.
+
+An excluded Keeper's Board candidates are still judged. The
+`board_attention_exact` slots take them, and the model a slot names receives
+the post. Exclusion keeps a Keeper's content from the `[typesafeai]`
+destinations, not from those slots.
+
 ## Watch it
 
 - **Standing.** `GET /api/v1/runtime/config/memory-recall` (admin token) says,

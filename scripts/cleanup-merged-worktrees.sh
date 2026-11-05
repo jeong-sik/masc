@@ -53,7 +53,6 @@ skipped=0
 dirty=0
 nested=0
 active=0
-locked=0
 
 while read -r branch; do
   [ -z "$branch" ] && continue
@@ -80,31 +79,12 @@ while read -r branch; do
     continue
   fi
 
-  if worktree_cleanup_is_locked "$wt_path"; then
-    owner="$(cat "$wt_path/.masc-lock" 2>/dev/null || true)"
-    echo "LOCKED $wt_path (branch $branch) — skipped (held by $owner)"
-    locked=$((locked+1))
-    continue
-  fi
-
   if [ "$APPLY" -eq 1 ]; then
     remove_err=""
     if remove_err="$(git worktree remove "$wt_path" 2>&1)"; then
       echo "REMOVED $wt_path (branch $branch)"
       removed=$((removed+1))
       git branch -d "$branch" 2>/dev/null || true
-    elif [ -f "$wt_path/.masc-lock" ] && ! worktree_cleanup_is_locked "$wt_path"; then
-      # Stale lock: the holder is dead, but the untracked lock file makes
-      # `git worktree remove` refuse. Drop it and retry once.
-      rm -f "$wt_path/.masc-lock"
-      if remove_err="$(git worktree remove "$wt_path" 2>&1)"; then
-        echo "REMOVED $wt_path (branch $branch) (stale lock dropped)"
-        removed=$((removed+1))
-        git branch -d "$branch" 2>/dev/null || true
-      else
-        echo "SKIP    $wt_path (remove failed after dropping stale lock: $remove_err)"
-        skipped=$((skipped+1))
-      fi
     else
       echo "SKIP    $wt_path (remove failed: $remove_err)"
       skipped=$((skipped+1))
@@ -118,8 +98,8 @@ done <<< "$MERGED_BRANCHES"
 if [ "$APPLY" -eq 1 ]; then
   git worktree prune
   echo ""
-  echo "Summary: removed=$removed skipped=$skipped dirty=$dirty nested=$nested active=$active locked=$locked"
+  echo "Summary: removed=$removed skipped=$skipped dirty=$dirty nested=$nested active=$active"
 else
   echo ""
-  echo "Summary: $removed candidates (dry run — pass --apply to remove; dirty=$dirty nested=$nested active=$active locked=$locked)"
+  echo "Summary: $removed candidates (dry run — pass --apply to remove; dirty=$dirty nested=$nested active=$active)"
 fi

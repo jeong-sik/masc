@@ -317,14 +317,13 @@ end
    Config's panes, Planning's tabs, Metrics' sections -- each drew their own
    variant: a "|" between names on two of them, a space before the unmarked
    names on two, a different colour on one. *)
-(* [width] is what the row can spare for the strip. A strip wider than that
-   used to be cut by the row's fitter from the right, so beside the roster pane
-   the Keeper detail's nine tabs ended at "Automatio…" and a reader on Runs
-   had no mark anywhere on the row; Config's seven panes lost "voice" the
-   same way. The entries are cut around the current one instead: it always
-   draws, its neighbours fill what is left, one side at a time, and a dim
-   "…" stands where entries were dropped. Entries that fit draw exactly as
-   before. *)
+(* [width] is what the row can spare for the strip. The entries are cut around
+   the current one: it draws whole, its neighbours fill what is left, one
+   side at a time, and a dim "…" stands where entries were dropped. A fitter
+   that cut the strip from the right would take the current entry's mark
+   first. When the current entry does not fit whole with its marks
+   ([tab_strip_min_width]) the strip draws nothing, since an entry cut inside
+   its name names nothing. Entries that fit draw exactly as before. *)
 let tab_strip_gap = "  "
 
 (* What stands where a strip could not draw its entries, with how many it is
@@ -369,11 +368,11 @@ let current_tab entries =
   find 0
 
 (* The cells this strip needs to keep its promise: the current entry whole,
-   with the cut marks its position calls for. Below this the window cannot
-   grow past the current entry and [fit_width] cuts into the entry itself --
-   a row would read "@p@" where it means "prompts", which names nothing. A
-   row that draws a strip asks for this before it spends the width on
-   anything that can give way. *)
+   with the cut marks its position calls for. Below this a strip that has to
+   drop entries has no room for the current one and draws nothing, rather
+   than an entry cut to "@p@" where it means "prompts". A row that draws a
+   strip asks for this before it spends the width on anything that can give
+   way. *)
 let tab_strip_min_width (tabs : (string * bool * 'target) list) =
   let cells text = Masc_tui_message_layout.display_width text in
   let entries = Array.of_list tabs in
@@ -476,29 +475,13 @@ let tab_strip ~width ~(press : 'target -> string -> string)
       in
       let drawn = compose press in
       (* The window is seeded with the current entry and only grows under
-         [fits], so an entry wider than the whole budget is drawn anyway. At a
-         hundred columns the Config row had two cells left for its strip and
-         the strip spent sixteen on the marked tab and its cut; the frame
-         took those cells back from the end of the row, which is where the
-         clock and the connection badge are. [tab_strip_width] exists to stop exactly that,
-         and its own reasoning says why the strip is the one that gives way:
-         a strip can drop tabs and mark the cut, and a badge has no way of
-         saying it was shortened.
-
-         So the strip keeps its promise here rather than leaving the frame to
-         enforce it on whatever sits furthest right. [fit_width] pads a short
-         string, which would push that tail out by hand, so it is asked only
-         when the strip is actually over.
-
-         Cut there, the strip is drawn without marks. [fit_width] drops what
-         follows its cut, a mark's close included, and an unclosed mark runs
-         to the end of the row (#39238): a cut count's press would cover the
-         clock, the badge and the Activity pane beside it. Over its width the
-         window holds the current entry alone, which a press would not move,
-         so nothing a reader could press is lost. *)
-      if Masc_tui_message_layout.display_width drawn > width then
-        Masc_tui_message_layout.fit_width (compose (fun _ text -> text)) width
-      else drawn
+         [fits], so it is over [width] only when the current entry with its
+         marks does not fit ([tab_strip_min_width]). The strip then draws
+         nothing: cut to the width, it would end inside the entry's name
+         ("▸클라이언트…") and name nothing. Over its width the window holds
+         the current entry alone, which a press would not move, so nothing a
+         reader could press is lost. *)
+      if Masc_tui_message_layout.display_width drawn > width then "" else drawn
     end
   end
 
@@ -978,8 +961,7 @@ let row_with_field ~cols ~lead ~field ~tail =
 (* What a heading draws before the record's id. [Lead_text] is drawn as
    given. [Lead_strip] is drawn in the width it is handed and needs [floor]
    at least: a tab strip, which drops entries and marks the cut down to the
-   width that holds the current entry alone, and loses its press marks below
-   that. *)
+   width that holds the current entry alone, and draws nothing below that. *)
 type heading_lead =
   | Lead_text of string
   | Lead_strip of { floor : int; draw : int -> string }

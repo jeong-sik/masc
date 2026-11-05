@@ -163,7 +163,6 @@ export function normalizeExecutionSummary(raw: unknown): DashboardExecutionSumma
   if (!isRecord(raw)) return null
   return {
     active_operations: asNumber(raw.active_operations),
-    blocked_operations: asNumber(raw.blocked_operations),
     worker_alerts: asNumber(raw.worker_alerts),
     continuity_alerts: asNumber(raw.continuity_alerts),
     priority_items: asNumber(raw.priority_items),

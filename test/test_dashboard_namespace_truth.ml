@@ -321,9 +321,6 @@ let test_dashboard_namespace_truth_execution_fixture () =
             (request "/api/v1/dashboard/namespace-truth?fixture=execution_smoke")
         in
         let open Yojson.Safe.Util in
-        check int "fixture blocked operations"
-          0
-          (json |> member "execution" |> member "summary" |> member "blocked_operations" |> to_int);
         (* top_queue is null when cache has no execution_queue entries *)
         check bool "fixture top queue absent when no blockers"
           true

@@ -108,7 +108,7 @@ mtime 으로 센 주별 증가는 09-21 주가 3.41GB 로 가장 크다. 10-05 �
 - `put` 은 이 프로세스가 이미 쓴 주소면 파일을 다시 쓰지 않는다(`written_addresses`). 정리가 그 파일을 지운 뒤 같은 본문을 `put` 하면, 파일 없이 참조만 남는다.
 - 참조는 blob 을 쓰지 않고도 생긴다. Board 첨부(`board_tool_attachment.ml`)와 composition 초안(`keeper_composition_draft.ml`)은 `fetch` 로 blob 을 읽은 뒤 `Tool_output.make_artifact_ref` 로 참조를 만든다. 기록에서 푼 참조를 다시 쓰는 길도 있다. `normalized_artifact_ref_of_json` 과 `decode_from_agent_core` 는 여러 소비자가 부른다.
 
-- 서버 밖 프로세스도 같은 저장소에 쓴다. `bin/masc_librarian_continuity.ml` 은 `--publish-base-path` 를 받으면 서버가 떠 있어도 `put_durable` 로 보고서 사본을 쓴다(294줄, 426줄). 이 쓰기는 서버의 건드림 기록에 남지 않는다. `bin/` 에서 `Tool_blob_store` 에 쓰는 프로세스는 이것과 lease 를 잡는 helper 뿐이다.
+- 서버 밖 프로세스도 같은 저장소에 쓴다. `bin/masc_librarian_continuity.ml` 은 `--publish-base-path` 를 받으면 서버가 떠 있어도 `put_durable` 로 보고서 사본을 쓴다(294줄, 426줄). 이 쓰기는 서버의 건드림 기록에 남지 않는다. `bin/` 에서 `Tool_blob_store` 를 직접 여는 곳은 이것과 lease 를 잡는 helper 뿐이다. `bin/` 이 `lib/` 를 거쳐 여는 경로는 이 검색에 안 잡힌다. 어느 경로든 서버 밖 쓰기는 §4.2 의 mtime 조건이 덮는다.
 
 두 번째 경우는 오프라인 정리에도 있다. 두 오프라인 실행 사이에 서버가 옛 참조를 다시 쓰면 같은 결과가 난다. 이 RFC 는 그 위험을 새로 만들지 않는다. 대신 1층에서 얼마나 생기는지 잰다(§5.2).
 
@@ -129,7 +129,7 @@ mtime 으로 센 주별 증가는 09-21 주가 3.41GB 로 가장 크다. 10-05 �
 `Tool_blob_store` 가 프로세스 전역 값 하나를 둔다.
 
 ```
-type touched = { current : Touch_map.t; previous : Touch_map.t }   (* sha256 -> Put | Read *)
+type touched = { current : Touch_map.t; previous : Touch_map.t }   (* sha256 -> { put : bool; read : bool } *)
 val touched : touched Atomic.t
 ```
 
@@ -138,7 +138,7 @@ val touched : touched Atomic.t
 
 스캔을 열 때 `{ current = empty; previous = old.current }` 로 한 번에 바꾼다(CAS). 두 집합을 따로 두고 옮긴 뒤 비우면, 그 사이에 기록된 건드림을 잃는다. 건드림 기록도 같은 값에 CAS 로 더한다. 프로세스가 앞 스캔 뒤에 떴으면 `previous` 는 비어 있고 `current` 가 프로세스 시작부터 채운 집합이다.
 
-건드림을 기록하는 함수는 `put`, `put_addressed`, `put_durable`, `put_durable_reuse`, `put_file_durable*`, `fetch`, `fetch_bounded`, `fetch_range` 다. 쓰기는 `Put`, 읽기는 `Read` 로 기록한다(§5.2 가 둘을 나눠 센다). 기록은 파일을 보기 **전에** 한다. 이 모듈 밖에서 blob 파일 경로를 직접 쓰거나 읽는 코드는 lib·bin 에 없다(`root_dir` 은 시험에서만 쓴다).
+건드림을 기록하는 함수는 `put`, `put_addressed`, `put_durable`, `put_durable_reuse`, `put_file_durable*`, `fetch`, `fetch_bounded`, `fetch_range` 다. 쓰기는 `put`, 읽기는 `read` 표시를 켠다. 한 주소의 표시는 덮지 않고 합친다. 읽은 뒤 쓴 주소가 `read` 로만 남으면 §5.2 의 분류가 틀어진다. 기록은 파일을 보기 **전에** 한다. 이 모듈 밖에서 blob 파일 경로를 직접 쓰거나 읽는 코드는 lib·bin 에 없다(`root_dir` 은 시험에서만 쓴다).
 
 다른 프로세스의 쓰기는 파일로 본다. 한 프로세스에서 처음 `put` 하면 파일을 다시 쓰고, `put_durable` 은 매번 다시 쓴다. 그래서 다른 프로세스가 앞 스캔 시작 뒤에 쓴 blob 은 mtime 이 앞 스캔 시작 뒤다.
 
@@ -175,6 +175,8 @@ delete h:
 ```
 
 `lstat`·`rename`·`unlink` 은 지금 `Tool_blob_store.delete` 와 같이 소유 경로, 일반 파일, 같은 parent 를 확인하고 잡아 둔 parent 기준으로 한다.
+
+`previous_scan_started_at` 은 `Unix.gettimeofday` 가 아니라, 스캔을 열 때 blob 폴더에 쓴 표지 파일의 mtime 으로 정한다. 그러면 blob mtime 과 같은 파일시스템 시계끼리 비교한다. `rename` 은 mtime 을 바꾸지 않으므로, 되돌린 blob 은 옛 mtime 그대로 다음 스캔에서 다시 판정된다.
 
 경우를 나누면:
 
@@ -255,6 +257,8 @@ d <sha256>
 - 스캔 시간과 그동안의 메인 domain 지연. 1층 로그와 기존 지연 측정을 같은 시간대로 맞춰 본다.
 - §5.2 의 수.
 - 두 건드림 집합의 크기와, pass 동안의 서버 RSS(후보 집합을 메모리에 든다).
+- `fetch` 마다 건드림을 CAS 로 더하는 비용. 스캔 중과 스캔 밖의 `fetch` 지연을 같이 잰다.
+- `bin/` 이 `lib/` 를 거쳐 `Tool_blob_store` 에 쓰는 경로. 쓰기는 mtime 조건이 덮지만, 읽기만 하고 참조를 쓰는 서버 밖 경로가 있는지 같이 본다.
 - 스캔 범위 대조: 참조(`Tool_output` marker, `Stored` media source)를 기록하는 producer 마다 쓰는 위치가 `durable_consumer_basenames` 나 Board 글 파일 안에 있는지. 1층 PR 본문에 표로 남긴다.
 - `list_all_result` 가 sha256 이 아닌 이름(`.deleting`, 임시 파일)을 어떻게 다루는지.
 

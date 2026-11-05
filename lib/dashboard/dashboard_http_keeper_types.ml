@@ -125,20 +125,10 @@ let keeper_decisions_dashboard_surface = "/api/v1/dashboard/keeper-decisions"
 
 let k2_feed_limit limit = max 1 (min 200 limit)
 
-let keeper_decisions_retention_json ~per_keeper_limit ~keeper_count =
+let keeper_decisions_retention_json ~keeper_count =
   `Assoc
     [
       ("scope", `String "per_keeper_jsonl_tail");
       ("durable_store", `String ".masc/keepers/:name.decisions.jsonl");
       ("keeper_count", `Int keeper_count);
     ]
-
-let k2_iso8601_of_unix ts_unix =
-  if ts_unix <= 0.0 then ""
-  else Masc_domain.iso8601_of_unix_seconds ts_unix
-
-let k2_stable_id ~prefix ~keeper_name ~ts_unix ~raw =
-  let ms = Int64.of_float (ts_unix *. 1000.0) in
-  let hash = Digest.to_hex (Digest.string raw) in
-  Printf.sprintf "%s-%s-%016Lx-%s"
-    prefix keeper_name ms (String.sub hash 0 8)

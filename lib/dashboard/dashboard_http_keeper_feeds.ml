@@ -432,9 +432,7 @@ let keeper_decisions_json
     [ "dashboard_surface", `String keeper_decisions_dashboard_surface
     ; "source", `String "keeper_decision_log"
     ; ( "retention"
-      , keeper_decisions_retention_json
-          ~per_keeper_limit
-          ~keeper_count:(List.length keepers) )
+      , keeper_decisions_retention_json ~keeper_count:(List.length keepers) )
     ; "events", `List items
     ; "limit", `Int limit
     (* NDT-OK: K2 feed metadata is an observation timestamp only; sorting and

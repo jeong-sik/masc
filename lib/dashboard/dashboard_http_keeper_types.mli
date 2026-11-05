@@ -70,15 +70,5 @@ val keeper_decisions_dashboard_surface : string
 val k2_feed_limit : int -> int
 (** Pure: clamp the feed limit to [1, 200]. *)
 
-val keeper_decisions_retention_json :
-  per_keeper_limit:int -> keeper_count:int -> Yojson.Safe.t
+val keeper_decisions_retention_json : keeper_count:int -> Yojson.Safe.t
 (** Pure: retention metadata JSON for the keeper-decisions feed. *)
-
-val k2_iso8601_of_unix : float -> string
-(** Pure: ISO8601 (UTC) string for a Unix epoch seconds value. Empty
-    string when [ts_unix] is non-positive. *)
-
-val k2_stable_id :
-  prefix:string -> keeper_name:string -> ts_unix:float -> raw:string -> string
-(** Pure: stable feed identifier composed of prefix, keeper, ms epoch,
-    and a Digest hash prefix of [raw]. *)

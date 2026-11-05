@@ -446,6 +446,14 @@ let item_key item =
   | None -> None
   | Some i -> Some (String.trim (String.sub plain 0 i))
 
+(* Every key a hint string names, one atom each: [Right / Enter:open] names
+   Right and Enter, [j/k:move] names j and k. The navigation trace asks this of
+   the hints a screen was drawn with. *)
+let advertised_key_atoms hints =
+  split_on_double_space hints
+  |> List.filter_map item_key
+  |> List.concat_map key_atoms
+
 let item_is_pinned item =
   match item_key item with
   | None -> false

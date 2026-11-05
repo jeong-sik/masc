@@ -1,7 +1,7 @@
 ---
 rfc: "0485"
 title: "TUI 는 켜 두면 열어 본 화면과, 푸터가 안내했는데 화면이 그대로였던 키를 파일에 남긴다"
-status: Draft
+status: Active
 created: 2026-11-05
 updated: 2026-11-05
 author: claude
@@ -50,7 +50,7 @@ related: ["0480", "0484", "tui-single-input-decoder"]
 
 ```json
 {"t":1762300000.120,"kind":"surface","from":"keepers","to":"changes"}
-{"t":1762300004.310,"kind":"key_unchanged","surface":"changes","key":"Left","advertised":true}
+{"t":1762300004.310,"kind":"key_unchanged","surface":"changes","key":"left","advertised":true}
 ```
 
 - `surface`: 어떤 프레임의 `surface_key` 가 앞 프레임과 다를 때 한 줄이다. 화면을 여는 길이 여럿이어도 프레임 한 곳에서 잡혀서, 이동 함수마다 호출을 달다가 빠뜨릴 일이 없다.
@@ -60,8 +60,8 @@ related: ["0480", "0484", "tui-single-input-decoder"]
 
 ### 2.2 키 이름은 푸터가 안내한 것만 적는다
 
-- 이름이 있는 키(`Left`, `Esc`, `Enter`, `Tab`, 화살표, `PgUp`)는 이름을 적는다.
-- 글자 키는 현재 푸터가 안내하는 글자일 때만 적는다. 그 밖의 글자는 `"key":"char"` 로만 적는다.
+- 글자가 아닌 키는 입력 디코더가 붙인 이름(`left`, `esc`, `enter`, `tab`, `up`, `pageup`)을 적는다. 터미널이 한 바이트로 보내는 제어 키(`\r`, `\t`, `\x17`)도 같은 이름(`enter`, `tab`, `ctrl-w`)으로 적는다. `advertised` 는 푸터가 그 키를 안내했는지다. 푸터는 `PgUp`·`Ctrl-W` 처럼 쓰고 디코더는 `pageup`·`ctrl-w` 처럼 말해서, 둘을 같은 이름으로 맞추는 표가 `bin/masc_tui_nav_trace.ml` 에 있다.
+- 글자 키는 현재 푸터가 안내하는 글자일 때만, 푸터가 쓴 모양(`j`, `G`, `Space`)으로 적는다. 그 밖의 글자는 `"key":"char"` 로만 적는다. 이 구분은 타입이 한다: 기록할 키는 `Named`(이름), `Advertised_char`(푸터의 글자), `Other_char`(값 없음) 셋 중 하나이고, `Other_char` 에는 값을 담을 자리가 없다.
 - 작성창, 검색, 팔레트에 친 글자는 푸터가 안내하지 않는 글자라서 이 규칙으로는 값이 남지 않는다. 구현 층에서 이 말이 맞는지, 입력을 받는 모든 곳을 한 번 점검한다.
 - 붙여넣기, 마우스, 터미널 응답은 사건을 만들지 않는다.
 

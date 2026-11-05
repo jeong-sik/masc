@@ -857,7 +857,7 @@ let test_private_addon_events_are_scoped_to_their_readers () =
           | `Assoc fields ->
               (match List.assoc_opt "visibility" fields with
                | Some (`Assoc [ "kind", `String "shared" ]) ->
-                   shared_external := (!shared_external) + 1
+                   incr shared_external
                | Some _ | None -> ())
           | _ -> ())
         ();

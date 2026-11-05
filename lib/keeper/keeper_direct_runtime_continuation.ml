@@ -148,12 +148,12 @@ let load ~base_path ~keeper_name ~operation_id ~session_dir ~session_id =
     let context = Agent_core.Context.copy checkpoint.context ~eio:true in
     Keeper_repetition_scope.save context frame;
     let checkpoint = {checkpoint with Agent_core.Checkpoint.context; messages} in
-    let* () = match Checkpoint.save_agent_core_if_source ~session_dir
+    let* () = Checkpoint.save_agent_core_if_source ~session_dir
         ~expected_source_ref:(Checkpoint.exact_snapshot_reference current)
-        ~boundary:Agent_core.Checkpoint_objects.Turn_continues checkpoint with
-      | Checkpoint.Installed {auxiliary=[]; _} -> Ok ()
-      | Checkpoint.Installed _ | Checkpoint.Not_installed _ ->
-        Error "current-history direct runtime admission is not durably confirmed" in
+        ~boundary:Agent_core.Checkpoint_objects.Turn_continues checkpoint
+      |> Checkpoint.require_confirmed_installation
+      |> Result.map ignore
+      |> Result.map_error (fun _ -> "current-history direct runtime admission is not durably confirmed") in
     (* The checkpoint owns input and effects. A changed assignment owns the
        next dispatch, including when a restart discarded the live witness. *)
     let* dispatch_retry = restore_retry ~keeper_name observed in
@@ -192,10 +192,10 @@ let retry_not_before ~now (lane : Keeper_turn_driver.deferred_runtime_lane) =
 let defer ~base_path ~keeper_name ~operation_id ~session_dir ~session_id ~dispatch_snapshot
     (lane : Keeper_turn_driver.deferred_runtime_lane) =
   let* snapshot = load_owned ~operation_id ~session_dir ~session_id in
-  let* () = match Checkpoint.retain_exact_snapshot ~session_dir snapshot with
-    | Checkpoint.Installed {auxiliary=[]; _} -> Ok ()
-    | Checkpoint.Installed _ | Checkpoint.Not_installed _ ->
-      Error "direct runtime checkpoint retention is not durably confirmed" in
+  let* () = Checkpoint.retain_exact_snapshot ~session_dir snapshot
+    |> Checkpoint.require_confirmed_installation
+    |> Result.map ignore
+    |> Result.map_error (fun _ -> "direct runtime checkpoint retention is not durably confirmed") in
   let checkpoint = Checkpoint.exact_snapshot_reference snapshot in
   let not_before = retry_not_before ~now:(Time_compat.now ()) lane in
   let* continuation = Semantic.runtime_retry ~not_before ~checkpoint ~assignment_id:lane.assignment_id

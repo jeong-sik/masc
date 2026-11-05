@@ -59,6 +59,14 @@ val of_yojson : Yojson.Safe.t -> (t, error) result
 
 val to_yojson : t -> Yojson.Safe.t
 
+(** The text of a [String], and [None] for any other value. A decoder reads a
+    member with this, so its own match names no constructor of {!t} and stays
+    exhaustive only while this one does. *)
+val string_value : t -> string option
+
+(** The number of an [Int], and [None] for any other value. *)
+val int_value : t -> int option
+
 (** The canonical text of a body. *)
 val to_string : t -> string
 

@@ -219,6 +219,21 @@ let of_yojson_refuses_what_a_body_may_not_hold () =
     B.Invalid_utf8
 ;;
 
+(* Every value but the one asked for reads as [None]. *)
+let values_of_members () =
+  let others =
+    [ B.null; B.bool true; get (B.int 7); get (B.string "x"); B.list []; get (B.object_ []) ]
+  in
+  Alcotest.(check (list (option string)))
+    "string_value"
+    [ None; None; None; Some "x"; None; None ]
+    (List.map B.string_value others);
+  Alcotest.(check (list (option int)))
+    "int_value"
+    [ None; None; Some 7; None; None; None ]
+    (List.map B.int_value others)
+;;
+
 let () =
   Alcotest.run
     "authz_body"
@@ -243,5 +258,6 @@ let () =
             `Quick
             of_yojson_refuses_what_a_body_may_not_hold
         ] )
+    ; "reading a member", [ Alcotest.test_case "a string or a number" `Quick values_of_members ]
     ]
 ;;

@@ -125,36 +125,53 @@ let invite_id_of text =
   Result.map_error (fun error -> Invalid_invite_id error) (Invite_id.of_string text)
 ;;
 
+(* The members of an issue are read in order, so the first that is not valid is
+   the error. *)
+let issued_of ~invite_id ~token_digest ~expires_at_ms ~role =
+  let* invite_id = invite_id_of invite_id in
+  let* token_digest =
+    match Token_digest.of_hex token_digest with
+    | Some digest -> Ok digest
+    | None -> Error Invalid_token_digest
+  in
+  let* role =
+    match role_of_label role with
+    | Some role -> Ok role
+    | None -> Error (Unknown_role role)
+  in
+  Ok (Issued { invite_id; token_digest; expires_at_ms; role })
+;;
+
 let of_body (body : Authz_body.t) =
   match body with
   | Authz_body.Object (("event", Authz_body.String event) :: members) ->
     if String.equal event issued_label
     then (
       match members with
-      | [ ("invite_id", Authz_body.String invite_id)
-        ; ("token_digest", Authz_body.String token_digest)
-        ; ("expires_at_ms", Authz_body.Int expires_at_ms)
-        ; ("role", Authz_body.String role)
+      | [ ("invite_id", invite_id)
+        ; ("token_digest", token_digest)
+        ; ("expires_at_ms", expires_at_ms)
+        ; ("role", role)
         ] ->
-        let* invite_id = invite_id_of invite_id in
-        let* token_digest =
-          match Token_digest.of_hex token_digest with
-          | Some digest -> Ok digest
-          | None -> Error Invalid_token_digest
-        in
-        let* role =
-          match role_of_label role with
-          | Some role -> Ok role
-          | None -> Error (Unknown_role role)
-        in
-        Ok (Issued { invite_id; token_digest; expires_at_ms; role })
+        (match
+           ( Authz_body.string_value invite_id
+           , Authz_body.string_value token_digest
+           , Authz_body.int_value expires_at_ms
+           , Authz_body.string_value role )
+         with
+         | Some invite_id, Some token_digest, Some expires_at_ms, Some role ->
+           issued_of ~invite_id ~token_digest ~expires_at_ms ~role
+         | (None | Some _), (None | Some _), (None | Some _), (None | Some _) -> Error Wrong_members)
       | _ -> Error Wrong_members)
     else if String.equal event revoked_label
     then (
       match members with
-      | [ ("invite_id", Authz_body.String invite_id) ] ->
-        let* invite_id = invite_id_of invite_id in
-        Ok (Revoked { invite_id })
+      | [ ("invite_id", invite_id) ] ->
+        (match Authz_body.string_value invite_id with
+         | Some invite_id ->
+           let* invite_id = invite_id_of invite_id in
+           Ok (Revoked { invite_id })
+         | None -> Error Wrong_members)
       | _ -> Error Wrong_members)
     else Error (Unknown_event event)
   | Authz_body.Object _ -> Error Wrong_members

@@ -42,6 +42,16 @@ let int value =
 let string text = if String.is_valid_utf_8 text then Ok (String text) else Error Invalid_utf8
 let list items = List items
 
+let string_value = function
+  | String text -> Some text
+  | Null | Bool _ | Int _ | List _ | Object _ -> None
+;;
+
+let int_value = function
+  | Int value -> Some value
+  | Null | Bool _ | String _ | List _ | Object _ -> None
+;;
+
 (* The smallest name that appears twice, so the answer does not depend on how
    the caller ordered the members. *)
 let first_repeated_name names =

@@ -1,8 +1,8 @@
-(* The default-off contract of the frame-time histogram.
+(* The default-off contract of frame timing.
 
    test_tui_frame_timing runs with MASC_TUI_FRAME_TIMING set so its opt-in
-   cases can record; this case needs the variable empty, so it is its own
-   executable whose stanza sets it to the empty string. *)
+   cases can record; these cases need the variable empty, so they are their
+   own executable whose stanza sets it to the empty string. *)
 
 module Timing = Masc_tui_frame_timing
 
@@ -22,12 +22,25 @@ let test_default_off_keeps_values_and_skips_names () =
     (Option.is_none (Timing.start_stage ()))
 ;;
 
+let test_default_off_writes_nothing_for_a_picture () =
+  let written = Buffer.create 16 in
+  let picture () =
+    Timing.note_external ~surface:"image" ~write:(Buffer.add_string written)
+      ~frame_start:"<frame start>"
+  in
+  picture ();
+  picture ();
+  Alcotest.(check string) "a picture writes no frame start" "" (Buffer.contents written)
+;;
+
 let () =
   Alcotest.run
     "tui frame timing default off"
     [ ( "default off",
         [ Alcotest.test_case "default off keeps values and skips names" `Quick
             test_default_off_keeps_values_and_skips_names
+        ; Alcotest.test_case "default off writes nothing for a picture" `Quick
+            test_default_off_writes_nothing_for_a_picture
         ] )
     ]
 ;;

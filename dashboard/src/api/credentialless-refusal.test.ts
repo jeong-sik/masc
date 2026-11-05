@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { clearStoredToken, get, setStoredToken } from './core'
+import { ensureDevToken } from './dev-token'
 
 const missingToken = () => new Response(
   '{"error":"Authentication required","auth_error_code":"missing_token"}',
@@ -77,5 +78,43 @@ describe('a request without a credential that the server refused', () => {
     await expect(get('/api/v1/dashboard/briefing')).resolves.toEqual({ status: 'ok' })
 
     expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+
+  it('does not hold back a route the server answered without a credential', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => ok())
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(get('/api/v1/agents')).resolves.toEqual({ status: 'ok' })
+    await expect(get('/api/v1/agents')).resolves.toEqual({ status: 'ok' })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('is sent with the dev token that a retried bootstrap stored', async () => {
+    const devTokenAnswers = [
+      new Response('{"status":"initializing"}', { status: 200, headers: { 'Content-Type': 'application/json' } }),
+      new Response('{"token":"dev-token-1","actor":"dashboard","role":"admin"}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ]
+    const fetchMock = vi.fn().mockImplementation(async (path: string, init: RequestInit) => {
+      if (path !== '/api/v1/dashboard/dev-token') {
+        return new Headers(init.headers).has('Authorization') ? ok() : missingToken()
+      }
+      const answer = devTokenAnswers.shift()
+      if (answer === undefined) throw new Error('dev-token asked more than twice')
+      return answer
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await ensureDevToken()
+    await expect(get('/api/v1/dashboard/keepers')).rejects.toMatchObject({ status: 401, authErrorCode: 'missing_token' })
+    await ensureDevToken()
+    await expect(get('/api/v1/dashboard/keepers')).resolves.toEqual({ status: 'ok' })
+
+    const keeperCalls = fetchMock.mock.calls.flatMap((call, index) => call[0] === '/api/v1/dashboard/keepers' ? [index] : [])
+    expect(keeperCalls).toHaveLength(2)
+    expect(sentAuthorization(fetchMock, keeperCalls[1] ?? -1)).toBe('Bearer dev-token-1')
   })
 })

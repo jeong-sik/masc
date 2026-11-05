@@ -8,7 +8,13 @@ import { isRecord } from '../lib/type-guards'
    request with no credential to that route is answered from it. Storing or
    clearing a token moves the revision, and a reload empties the table, so
    either one sends again. A route the server opens to callers without a
-   credential is never refused, so it is never answered from here. */
+   credential is never refused, so it is never answered from here.
+
+   The key leaves out the X-MASC-Agent name: with no bearer the server finds
+   no credential whatever name is sent, so the answer does not change with
+   it. A replayed refusal starts no recovery, the same as the one the server
+   sent: the rejected-credential listener only hears 401s that carried a
+   token. */
 
 /** One request sent without a credential, as the table keys it. */
 export interface CredentiallessRequest {

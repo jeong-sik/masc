@@ -78,7 +78,9 @@ let forget_measurement ~config ~keeper_name =
     Hashtbl.remove limited_reads key;
     List.iter
       (fun site -> Hashtbl.remove reported_problems (key, site))
-      all_problem_sites)
+      all_problem_sites);
+  Keeper_memory_health_input.written
+    ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
 ;;
 
 let limited_read ~config ~keeper_name ~trace_id =
@@ -154,7 +156,10 @@ let forget_input_capacity ~config ~keeper_name =
 let publish_measurement ~config ~keeper_name ~last_pass ~unread =
   let key = measurement_key ~config ~keeper_name in
   let measurement = { measured_at = Time_compat.now (); last_pass; unread } in
-  Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.replace measurements key measurement)
+  Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.replace measurements key measurement);
+  (* The Keeper's memory health row shows the latest measurement (RFC-0487). *)
+  Keeper_memory_health_input.written
+    ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
 ;;
 
 let measure_unread ~config ~keeper_name =
@@ -282,8 +287,9 @@ let run_durable_with_consumer ~config ~keeper_name ~consume =
     last_pass
   with
   | Eio.Cancel.Cancelled _ as exn ->
-    (* Do not run another filesystem read in the cancelled context. Replace
-       any older success observation before preserving cancellation. *)
+    (* Do not read the stores again in the cancelled context. Replace any
+       older success observation before preserving cancellation; announcing
+       it performs no Eio effect, so it cannot suspend here. *)
     publish_measurement ~config ~keeper_name ~last_pass:(Raised (Printexc.to_string exn)) ~unread:None;
     raise exn
   | exn ->

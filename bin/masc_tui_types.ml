@@ -10882,6 +10882,9 @@ type state = {
   mutable memory_health_cursor: int;
   mutable memory_unit: Masc_tui_memory_usage.display_unit;
   mutable memory_input: (string, Masc_tui_memory_usage.t) Masc_tui_fetched.t;
+  (* The input pane reads the selected Keeper again after each memory health
+     answer and after a failed read, while Memory shows it (RFC-0487). *)
+  mutable memory_input_owed: Masc_tui_owed_read.t;
   (* The Memory fact browser. [memory_facts_keeper = None] draws the health
      table; [Some name] draws that keeper's fact listing over it. The
      category filter holds a category string exactly as the server spelled
@@ -14969,6 +14972,7 @@ let suspend_workspace_readings state =
   state.resources_list_owner <- None;
   state.resources_reports_complete <- false;
   state.memory_input <- Masc_tui_fetched.suspend state.memory_input;
+  state.memory_input_owed <- Masc_tui_owed_read.settled;
   state.memory_facts <- Masc_tui_fetched.suspend state.memory_facts;
   state.code_listing <- Masc_tui_fetched.suspend state.code_listing;
   state.code_catalog <- Masc_tui_fetched.suspend state.code_catalog;
@@ -20478,6 +20482,7 @@ let create_state
   memory_health_cursor = 0;
   memory_unit = Masc_tui_memory_usage.Tokens;
   memory_input = Masc_tui_fetched.initial;
+  memory_input_owed = Masc_tui_owed_read.settled;
   memory_facts_keeper = None;
   memory_facts = Masc_tui_fetched.initial;
   memory_facts_cursor = 0;

@@ -42,20 +42,25 @@ let string_of_mode = function
   | Store_only -> "store_only"
 ;;
 
-let record_eviction ~keeper_name ~mode ~result ~reason =
+let record_eviction ?base_path ~keeper_name ~mode ~result ~reason () =
   Otel_metric_store.inc_counter
     Keeper_metrics.(to_string VisionIngestEvictions)
     ~labels:[ "mode", string_of_mode mode; "result", result; "reason", reason ]
     ();
   (* The operator-facing error counter: per keeper, by the closed reason set.
      The pipeline counter above keeps its mode/result/reason shape; this one
-     answers "whose images failed and why" in a single lookup per reason. *)
+     answers "whose images failed and why" in a single lookup per reason. The
+     Keeper's memory health row shows it, so the workspace whose vision store
+     this eviction uses is told (RFC-0487). *)
   if String.equal result "error"
-  then
+  then (
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string VisionIngestErrors)
       ~labels:[ "keeper", keeper_name; "reason", reason ]
-      ()
+      ();
+    Keeper_memory_health_input.written
+      ~keepers_dir:(Keeper_vision_tool.vision_keepers_dir ?base_path ())
+      ~keeper_id:keeper_name)
 ;;
 
 (* Every reason an eviction can fail with, in one list. Closed by
@@ -158,14 +163,14 @@ let evict_block ?base_path ~media_store ~read ~mode ~keeper_name ~eager_budget (
           (#33669). Passing the block through unchanged keeps the reference
           requestable instead of replacing it with a store-failure
           placeholder the reader cannot act on. *)
-       record_eviction ~keeper_name ~mode ~result:"ok" ~reason:"reference_passthrough";
+       record_eviction ?base_path ~keeper_name ~mode ~result:"ok" ~reason:"reference_passthrough" ();
        block
      | Agent_core.Types.Stored stored ->
        match media_store.Agent_core.History.get stored with
       | Error
           ( Agent_core.History.Store_failed _ | Missing_bytes _ | Digest_mismatch _
           | Invalid_base64 _ ) ->
-        record_eviction ~keeper_name ~mode ~result:"error" ~reason:"media_unavailable";
+        record_eviction ?base_path ~keeper_name ~mode ~result:"error" ~reason:"media_unavailable" ();
         (match mode with
          | Store_only ->
            (* A persisted message keeps the reference: bytes the store cannot
@@ -178,13 +183,13 @@ let evict_block ?base_path ~media_store ~read ~mode ~keeper_name ~eager_budget (
       | Ok bytes ->
         (match Keeper_vision_tool.validate_image_size bytes with
          | Error _ ->
-           record_eviction ~keeper_name ~mode ~result:"error" ~reason:"image_too_large";
+           record_eviction ?base_path ~keeper_name ~mode ~result:"error" ~reason:"image_too_large" ();
            Agent_core.Types.Text
              (image_store_failed_placeholder ~reason:"image too large")
          | Ok () ->
            (match Keeper_vision_tool.validate_media_type media_type with
             | Error _ ->
-              record_eviction ~keeper_name ~mode ~result:"error" ~reason:"invalid_media_type";
+              record_eviction ?base_path ~keeper_name ~mode ~result:"error" ~reason:"invalid_media_type" ();
               Agent_core.Types.Text
                 (image_store_failed_placeholder ~reason:"unsupported image media type")
             | Ok media_type ->
@@ -192,13 +197,13 @@ let evict_block ?base_path ~media_store ~read ~mode ~keeper_name ~eager_budget (
                  Keeper_vision_tool.store_kept ?base_path ~keeper_name bytes
                with
                | Error _ ->
-                 record_eviction ~keeper_name ~mode ~result:"error" ~reason:"store_failed";
+                 record_eviction ?base_path ~keeper_name ~mode ~result:"error" ~reason:"store_failed" ();
                  Agent_core.Types.Text
                    (image_store_failed_placeholder ~reason:"artifact store failed")
                | Ok handle ->
                  (match mode with
                   | Store_only ->
-                    record_eviction ~keeper_name ~mode ~result:"ok" ~reason:"stored";
+                    record_eviction ?base_path ~keeper_name ~mode ~result:"ok" ~reason:"stored" ();
                     Agent_core.Types.Text
                       (image_unread_placeholder ~handle ~media_type ~reason:"not read")
                   | Eager when !eager_budget > 0 ->
@@ -208,25 +213,25 @@ let evict_block ?base_path ~media_store ~read ~mode ~keeper_name ~eager_budget (
                     decr eager_budget;
                     (match outcome with
                      | Some (Ok read_text) ->
-                       record_eviction ~keeper_name ~mode ~result:"ok" ~reason:"eager_read";
+                       record_eviction ?base_path ~keeper_name ~mode ~result:"ok" ~reason:"eager_read" ();
                        Agent_core.Types.Text
                          (image_read_placeholder ~handle ~media_type ~read_text)
                      | Some (Error reason) ->
-                       record_eviction ~keeper_name ~mode ~result:"error" ~reason;
+                       record_eviction ?base_path ~keeper_name ~mode ~result:"error" ~reason ();
                        Agent_core.Types.Text
                          (image_unread_placeholder
                             ~handle
                             ~media_type
                             ~reason:"vision read failed")
                      | None ->
-                       record_eviction ~keeper_name ~mode ~result:"ok" ~reason:"stored_unread";
+                       record_eviction ?base_path ~keeper_name ~mode ~result:"ok" ~reason:"stored_unread" ();
                        Agent_core.Types.Text
                          (image_unread_placeholder
                             ~handle
                             ~media_type
                             ~reason:"not yet read"))
                   | Eager ->
-                    record_eviction ~keeper_name ~mode ~result:"ok" ~reason:"eager_budget_exhausted";
+                    record_eviction ?base_path ~keeper_name ~mode ~result:"ok" ~reason:"eager_budget_exhausted" ();
                     Agent_core.Types.Text
                       (image_unread_placeholder
                          ~handle

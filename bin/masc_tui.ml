@@ -6521,6 +6521,7 @@ let launch_memory_input_load state ~mailbox ~refresh =
         | Masc_tui_fetched.Already_loading -> ()
         | Masc_tui_fetched.Started (next, request) ->
           state.memory_input <- next;
+          state.memory_input_owed <- Masc_tui_owed_read.started state.memory_input_owed;
           let host = server_peer_host and port = state.port in
           launch_workspace_request state ~mailbox ~boundary_error:Fun.id
             ~deliver:(fun result -> Memory_input_loaded (request, result))
@@ -8232,6 +8233,11 @@ let owe_harness_read state =
 let owe_memory_health_read state =
   state.memory_health_owed <- Masc_tui_owed_read.changed state.memory_health_owed
 
+(* The input pane shows the selected Keeper's turn records. A memory health
+   answer may be about them: the fleet read, or a pushed row of that Keeper. *)
+let owe_memory_input_read state =
+  state.memory_input_owed <- Masc_tui_owed_read.changed state.memory_input_owed
+
 (* A memory health push names the Keeper whose input was written. That
    Keeper's row is read on its own and merged into the fleet answer, so a
    Keeper that writes often costs one row per push (RFC-0487). *)
@@ -9255,6 +9261,26 @@ let launch_owed_memory_health state ~mailbox =
     | Settled, Some _, [] -> ()
     | Settled, None, _ :: _ -> owe_memory_health_read state
     | Settled, None, [] -> ()
+  end
+
+(* Runs on every loop iteration. The input pane reads when the selection moves
+   to another Keeper, when a memory health answer owes it, and again after a
+   failed read, which waits like any owed read (RFC-0480 §3.1). Off Memory
+   nothing is owed: arriving reads the fleet, whose answer owes the pane. The
+   facts browser covers the pane and keeps what it owes, so closing the
+   browser reads a change that came meanwhile. *)
+let launch_owed_memory_input state ~mailbox =
+  if not (state.view = Memory) then
+    state.memory_input_owed <- Masc_tui_owed_read.settled
+  else begin
+    let reading = Masc_tui_fetched.in_flight state.memory_input in
+    let read =
+      if reading then state.memory_input_owed
+      else Masc_tui_owed_read.abandoned state.memory_input_owed
+    in
+    state.memory_input_owed <- read;
+    launch_memory_input_load state ~mailbox
+      ~refresh:((not reading) && Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read)
   end
 
 let harness_on_screen state =
@@ -16855,6 +16881,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   (* Keeper names are local to a workspace. Retire both the selected roster
      and its input request before another workspace can reuse the same name. *)
   state.memory_input <- Masc_tui_fetched.clear state.memory_input;
+  state.memory_input_owed <- Masc_tui_owed_read.settled;
   state.memory_health <- None;
   state.memory_health_error <- None;
   state.memory_health_inflight <- false;
@@ -27801,7 +27828,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               < held.Masc.Tui_decode_memory_health.mhs_generated_at -> ()
        | Ok snapshot, (Some _ | None) -> apply_memory_health_snapshot state snapshot
        | Error detail, (Some _ | None) -> state.memory_health_error <- Some detail);
-      launch_memory_input_load state ~mailbox ~refresh:true
+      owe_memory_input_read state
   | Memory_loaded (Row_health_read { keeper; result }) ->
       state.memory_health_inflight <- false;
       (* The row replaces the Keeper's row in the fleet answer, or removes it
@@ -27833,13 +27860,20 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            (match selected_memory_keeper state with
             | Some selected
               when String.equal selected.Masc.Tui_decode_memory_health.mkh_keeper_id keeper ->
-                launch_memory_input_load state ~mailbox ~refresh:true
+                owe_memory_input_read state
             | Some _ | None -> ())
        | None, Error detail ->
            state.memory_health_error <- Some detail;
            state.memory_health_owed <- failed_read state.memory_health_owed
        | None, Ok _ -> owe_memory_health_read state)
   | Memory_input_loaded (request, result) ->
+      (* An answer for a selection already left settles nothing; the read
+         of the current selection does. *)
+      if Masc_tui_fetched.is_current ~equal:String.equal state.memory_input request then
+        state.memory_input_owed <-
+          (match result with
+           | Ok _ -> Masc_tui_owed_read.succeeded state.memory_input_owed
+           | Error _ -> failed_read state.memory_input_owed);
       state.memory_input <-
         Masc_tui_fetched.complete ~equal:String.equal state.memory_input request result
   | Memory_facts_loaded (request, result) ->
@@ -41895,7 +41929,7 @@ Use relative paths for resources already held in the package. -->
           ~available:(keeper_settings_editor_available state) then
         Render_schedule.request render_schedule Render_schedule.Background;
 
-      launch_memory_input_load state ~mailbox:async_messages ~refresh:false;
+      launch_owed_memory_input state ~mailbox:async_messages;
       reconcile_context_inspector_part state ~mailbox:async_messages;
       if reconcile_live_context state ~mailbox:async_messages then
         Render_schedule.request render_schedule Render_schedule.Background;
@@ -42082,10 +42116,12 @@ Use relative paths for resources already held in the package. -->
          (* Fusion re-reads on [fusion_run_status] and retries a failed read
             ([launch_owed_fusion]). *)
          | Fusion -> ()
-         | Memory ->
-             (* Fleet memory health is a reading, so the tick refreshes it
-                like the listings above. *)
-             launch_memory_health_load state ~mailbox:async_messages
+         (* Memory health reads one Keeper's row on its [memory_health]
+            push, and the fleet on arrival, on a revalidation and after a
+            failed read ([launch_owed_memory_health], RFC-0487). The input
+            pane reads after each of those answers and retries a failed
+            read ([launch_owed_memory_input]). *)
+         | Memory -> ()
          (* The repository list re-reads on its dataset push and
             retries a failed read ([launch_owed_repositories]). *)
          | Repositories -> ()

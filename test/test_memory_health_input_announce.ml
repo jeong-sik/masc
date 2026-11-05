@@ -123,8 +123,10 @@ let require = function
 ;;
 
 (* Each store write that changed a file the row reads says so once, naming
-   the Keeper and the resolved keepers directory. The continuity snapshot's
-   save is internal to its module and is not written here. *)
+   the Keeper and the resolved keepers directory, and so does each change of
+   an input the row reads from this process's memory. The continuity
+   snapshot's save and the drain measurement's publication are internal to
+   their modules and are not written here. *)
 let test_each_store_write_tells_the_signal () =
   with_workspace
   @@ fun ~config ~fleet_key:_ ~elsewhere:_ ~config_keepers_dir ~runtime_keepers_dir ~heard:_ ->
@@ -195,6 +197,50 @@ let test_each_store_write_tells_the_signal () =
       ~kind:Keeper_memory_os_current.Prompt_render_failure ~detail:"fixture"
       ~snapshot_present:false;
     told_as "a memory journal line" [ config_dir, "forte" ] (take ());
+    (* A publication that stopped before its snapshot rename leaves a prepared
+       receipt. Recovering it writes no commit, so it says so itself. *)
+    let module Current = Keeper_memory_os_current in
+    let module Types = Keeper_memory_os_types in
+    let source = { Current.kind = Current.Explicit_write; trace_id = "trace" } in
+    let fact claim =
+      Types.observed ~claim ~category:Types.Fact ~now:10.
+        ~origin:{ kind = Types.Authored; trace_id = "trace" }
+    in
+    ignore
+      (Current.replace ~keepers_dir:config_keepers_dir ~keeper_id:"mezzo"
+         ~expected_revision:None ~now:20. ~source ~facts:[ fact "before" ] ()
+       |> require);
+    let write_snapshot path content =
+      Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
+        ~sync_file:(fun _ -> failwith "before rename") path content
+    in
+    (match
+       Current.For_testing.replace_with_publication_io ~write_snapshot
+         ~sync_snapshot:(fun _ -> Error "unconfirmed") ~on_committed:(fun _ _ -> ())
+         ~before_journal:(fun () -> ()) ~keepers_dir:config_keepers_dir ~keeper_id:"mezzo"
+         ~now:30. ~source ~facts:[ fact "after" ]
+     with
+     | Error _ -> ()
+     | Ok _ -> fail "the publication must stop before its rename");
+    check bool "the prepared receipt waits for recovery" true
+      (Sys.file_exists
+         (Current.publication_receipt_path ~keepers_dir:config_keepers_dir ~keeper_id:"mezzo"));
+    ignore (take ());
+    Current.recover_publication ~keepers_dir:config_keepers_dir ~keeper_id:"mezzo" |> require;
+    told_as "recovering a publication that never reached its target"
+      [ config_dir, "mezzo" ] (take ());
+    let unreadable =
+      Agent_core.Types.Image
+        { media_type = "image/png"
+        ; source = Agent_core.Types.Stored (Agent_core.History.stored_of_raw "never put")
+        }
+    in
+    ignore
+      (Keeper_vision_ingest.evict_blocks ~base_path:config.Workspace.base_path
+         ~media_store:(Agent_core.History.Memory_store.create ())
+         ~mode:Keeper_vision_ingest.Store_only ~delegate:true ~keeper_name:"forte"
+         [ unreadable ]);
+    told_as "a vision eviction error" [ config_dir, "forte" ] (take ());
     Eio.Switch.run (fun sw ->
       let store = Keeper_types_support.keeper_turn_record_store config "largo" in
       Eio.Switch.on_release sw (fun () -> Dated_jsonl.prepare_for_directory_removal store);
@@ -215,7 +261,19 @@ let test_each_store_write_tells_the_signal () =
           ; input_provenance = None
           }
         ~execution_ids:[] ~blocks:[] ~input_components:None ~tool_surface_ref:None ();
-      told_as "a turn record" [ runtime_dir, "largo" ] (take ())))
+      told_as "a turn record" [ runtime_dir, "largo" ] (take ()));
+    (* The inputs the row reads from this process's memory. *)
+    Keeper_continuity_observation.record ~config ~keeper_name:"largo"
+      { Keeper_continuity_observation.prepared_at = 1000.
+      ; runtime_id = "fixture-runtime"
+      ; input = Keeper_continuity_observation.Not_applied
+      ; request_bytes = 1
+      };
+    told_as "a continuity observation" [ runtime_dir, "largo" ] (take ());
+    Keeper_continuity_observation.forget ~config ~keeper_name:"largo";
+    told_as "forgetting the observations" [ runtime_dir, "largo" ] (take ());
+    Keeper_librarian_queue_refresh.forget_measurement ~config ~keeper_name:"largo";
+    told_as "forgetting the drain measurement" [ runtime_dir, "largo" ] (take ()))
 ;;
 
 (* The writers have already committed and some still have bookkeeping to do,

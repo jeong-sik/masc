@@ -49,8 +49,18 @@ val append_at :
     re-checks on the way out. Here the second one is told its read is
     stale. *)
 
+(** Whether a newline follows the line. Every append writes one, so the one
+    line that can lack it is the last line of the file: an append that stopped
+    before its newline, or a hand edit. *)
+type line_end =
+  | Newline_terminated
+  | Unterminated_final_line
+
+val line_end_to_string : line_end -> string
+
 type rejected_line = {
   line_number : int;  (** 1-based, counting every line including blanks. *)
+  line_end : line_end;
   detail : string;
 }
 

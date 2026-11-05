@@ -176,9 +176,34 @@ let test_a_line_that_does_not_decode_is_reported_not_dropped () =
       match ledger.rejected with
       | [ rejected ] ->
         Alcotest.(check int) "names the offending line" 2 rejected.line_number;
+        Alcotest.(check string) "a line inside the file ends with its newline"
+          "newline_terminated" (Store.line_end_to_string rejected.line_end);
         Alcotest.(check bool)
           "carries a reason" true
           (String.length rejected.detail > 0)
+      | others ->
+        Alcotest.failf "expected one rejection, got %d" (List.length others))
+
+(* An append that stopped before its newline leaves the file's last line
+   unterminated. The norms before it still fold, and the cut line is reported
+   as the last line rather than as one written whole. *)
+let test_an_unterminated_last_line_is_reported_as_such () =
+  with_world (fun base_path ->
+      add ~base_path (article "a readable norm");
+      let channel =
+        open_out_gen [ Open_append; Open_text ] 0o600
+          (Store.ledger_path ~base_path)
+      in
+      output_string channel "{\"kind\":\"added\",\"artic";
+      close_out channel;
+      let ledger = load_or_fail ~base_path in
+      Alcotest.(check (list string))
+        "the norm before the cut still holds" [ "a readable norm" ] (texts ledger);
+      match ledger.rejected with
+      | [ rejected ] ->
+        Alcotest.(check int) "names the cut line" 2 rejected.line_number;
+        Alcotest.(check string) "the cut line has no newline"
+          "unterminated_final_line" (Store.line_end_to_string rejected.line_end)
       | others ->
         Alcotest.failf "expected one rejection, got %d" (List.length others))
 
@@ -209,5 +234,7 @@ let () =
       ( "rejections",
         [ Alcotest.test_case "a broken line is reported, not dropped" `Quick
             test_a_line_that_does_not_decode_is_reported_not_dropped;
+          Alcotest.test_case "an unterminated last line is reported as such" `Quick
+            test_an_unterminated_last_line_is_reported_as_such;
         ] );
     ]

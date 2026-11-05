@@ -12,7 +12,7 @@ import {
 import { ApiRequestError } from '../api/core'
 import { pauseKeeper, resumeKeeper, wakeKeeper } from '../api/keeper'
 import type { DashboardRuntimeProviderSnapshot, KeeperConfigUpdatePayload, SandboxProfile, SandboxNetworkMode } from '../api/dashboard'
-import type { KeeperConfig, KeeperHookSlot, KeeperInputPolicy, KeeperSystemPromptPreview } from '../types'
+import type { KeeperConfig, KeeperConstitutionLedgerPreview, KeeperHookSlot, KeeperInputPolicy, KeeperSystemPromptPreview } from '../types'
 import { SANDBOX_PROFILE_OPTIONS, UNKNOWN_SANDBOX_PROFILE, isGuestSandboxProfile, toSandboxProfile } from '../types'
 import { formatTokens } from '../lib/format-number'
 import {
@@ -1556,10 +1556,27 @@ function RuntimeList({ runtimes }: { runtimes: string[] }) {
 
 // Exhaustive over the preview union: a new state is a type error here, not a
 // blank pane (#38354).
+function renderConstitutionLedger(ledger: KeeperConstitutionLedgerPreview) {
+  if (ledger.state === 'unreadable') {
+    return html`<div class="text-2xs text-[var(--color-danger-fg)]" data-testid="kcf-constitution-ledger-unreadable">
+      헌법 원장을 다시 읽지 못해서, 프롬프트에서 빠진 줄을 확인하지 못했어요.
+      <div class="font-mono mt-1">${ledger.path}</div>
+      <div class="font-mono">${ledger.detail}</div>
+    </div>`
+  }
+  if (ledger.rejected_lines.length === 0) return null
+  return html`<div class="text-2xs text-[var(--color-danger-fg)]" data-testid="kcf-constitution-rejected-lines">
+    헌법 원장에서 읽지 못한 줄은 이 프롬프트에 들어가지 않아요.
+    ${ledger.rejected_lines.map((line) => html`<div class="font-mono mt-1" data-testid="kcf-constitution-rejected-line" data-line=${line.line} data-line-end=${line.line_end}>
+      ${line.line}번째 줄${line.line_end === 'unterminated_final_line' ? ' (마지막 줄, 줄바꿈 없음)' : ''}: ${line.detail}
+    </div>`)}
+  </div>`
+}
+
 function renderSystemPromptPreview(preview: KeeperSystemPromptPreview) {
   switch (preview.state) {
     case 'available':
-      return html`<${LongText} text=${preview.assembled} truncateAt=${null} />`
+      return html`${renderConstitutionLedger(preview.constitution_ledger)}<${LongText} text=${preview.assembled} truncateAt=${null} />`
     case 'unavailable':
       if (preview.reason === 'workspace_unavailable') {
         return html`<div class="text-2xs text-[var(--color-danger-fg)]" data-testid="kcf-system-prompt-unavailable">

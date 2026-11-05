@@ -97,8 +97,17 @@ let append_at ~base_path ~expected_end_offset entry =
         ; _ } ->
       Error (Write_failed { path; detail = append_failure_detail error }))
 
+type line_end =
+  | Newline_terminated
+  | Unterminated_final_line
+
+let line_end_to_string = function
+  | Newline_terminated -> "newline_terminated"
+  | Unterminated_final_line -> "unterminated_final_line"
+
 type rejected_line = {
   line_number : int;
+  line_end : line_end;
   detail : string;
 }
 
@@ -145,8 +154,16 @@ let parse_with ~keep_history contents =
       if String.equal (String.trim line) "" then
         scan (line_number + 1) held entries rejected rest
       else (
+        (* [split_on_char] leaves the text after the last newline as the
+           final element, so only that element can be unterminated. *)
+        let line_end =
+          match rest with
+          | [] -> Unterminated_final_line
+          | _ :: _ -> Newline_terminated
+        in
         let reject detail =
-          scan (line_number + 1) held entries ({ line_number; detail } :: rejected) rest
+          scan (line_number + 1) held entries
+            ({ line_number; line_end; detail } :: rejected) rest
         in
         match Yojson.Safe.from_string line with
         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn

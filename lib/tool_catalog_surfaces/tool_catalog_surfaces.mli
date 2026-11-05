@@ -1,10 +1,8 @@
 
 (** Tool_catalog_surfaces — SSOT for curated tool-name lists.
 
-    Flat, consumer-owned tool-name lists.  The [surface] actor-classification
-    type and its dispatch/reverse-lookup machinery were deleted in the
-    surface-cut refactor: tools are a flat list, and each consumer projects
-    the subset it needs by referencing the named list directly.
+    Flat, consumer-owned tool-name lists. Each consumer projects the subset
+    it needs by referencing the named list directly.
 
     {b Why centralize}: keeping every list in one .ml + .mli pair prevents
     the same tool name from drifting across two consumers' definitions. *)

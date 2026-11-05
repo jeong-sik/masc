@@ -38,7 +38,4 @@ val provider_supports_inline_tools :
 (** Human-readable [provider_kind:model_id] label. *)
 val provider_label : Llm_provider.Provider_config.t -> string
 
-(* CLI subprocess transport surface ([make_per_call_switch_transport],
-   [non_http_transport_of_provider], [Json_stream_cli_transport_local]) was
-   removed in the CLI provider purge (2026-05-31). Provider dispatch is
-   HTTP-only. *)
+(* Provider dispatch is HTTP-only. *)

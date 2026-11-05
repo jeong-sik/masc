@@ -200,9 +200,9 @@ let trajectory_to_json (t : trajectory) : Yojson.Safe.t =
 (* Decoders live next to the serializers above and are shared by the read
    paths. *)
 
-(* [None] when the row carries no readable gate object. It used to read as
-   [Pass], which is a verdict the row never recorded; rows that predate the
-   gate payload are dropped by the caller instead. *)
+(* [None] when the row carries no readable gate object: a missing gate is not
+   a [Pass], a verdict the row never recorded. Rows that predate the gate
+   payload are dropped by the caller instead. *)
 let gate_decision_of_json = function
   | `Assoc fields -> (
       match List.assoc_opt "status" fields with

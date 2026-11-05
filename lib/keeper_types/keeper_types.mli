@@ -1,12 +1,7 @@
 (** Keeper_types — health, continuity, and context types.
 
     This module owns types that cannot live closer to their consumer
-    without creating circular dependencies.
-
-    Formerly a facade that re-exported [Keeper_meta_contract],
-    [Keeper_types_profile], [Keeper_meta_json], and [Keeper_meta_store].
-    Removed by RFC-0205 — consumers access those modules directly
-    via qualified names (e.g. [Keeper_meta_contract.keeper_meta]). *)
+    without creating circular dependencies. *)
 
 (** {1 Health types} *)
 

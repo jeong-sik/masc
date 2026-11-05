@@ -28,10 +28,8 @@ let public_schedule_surface_tools = schedule_request_surface_tools
 (* Curated tool-name lists                                          *)
 (* ================================================================ *)
 
-(* These are flat, consumer-owned tool-name lists.  The [surface] actor
-   classification type and its dispatch/reverse-lookup machinery were deleted
-   in the surface-cut refactor — tools are a flat list, and each consumer
-   projects the subset it needs by referencing the named list directly. *)
+(* These are flat, consumer-owned tool-name lists. Each consumer projects the
+   subset it needs by referencing the named list directly. *)
 
 let public_mcp_surface_tools =
   [ (* Workspace lifecycle *)

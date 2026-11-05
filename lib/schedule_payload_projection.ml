@@ -198,11 +198,10 @@ let set_keeper_wake_result_delivery ~payload ~channel =
   | _ -> Error "payload must be a JSON object"
 ;;
 
-(* Every field this contract reads. The body used to accept anything: an
-   unknown key was persisted at creation and then dropped by the consumer,
-   which is how a live schedule ended up carrying a channel_id that no
-   dispatch ever saw (#25689). [result_delivery] already closed its own
-   fields; this closes the body around it. *)
+(* Every field this contract reads. A key outside this list is rejected:
+   persisting it would leave a field that no consumer reads.
+   [result_delivery] already closes its own fields; this closes the body
+   around it. *)
 let keeper_wake_body_fields =
   [ "keeper_name"; "message"; "title"; "urgency"; "result_delivery" ]
 

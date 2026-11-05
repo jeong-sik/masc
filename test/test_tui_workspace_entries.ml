@@ -524,6 +524,94 @@ let test_finder_commits_navigation_only_after_success () =
   Alcotest.(check bool) "duplicate completion cannot reopen" false
     (apply_found_file state request (Ok "different bytes"))
 
+let git_branch ?(current = false) ?(upstream = Decode.Repository_no_upstream) name subject =
+  { Decode.gb_name = name; gb_current = current; gb_upstream = upstream
+  ; gb_commit_epoch = 1787000000; gb_subject = subject }
+
+let branches_answer branches =
+  { Decode.gbs_root = ""; gbs_branches = branches; gbs_truncated = false }
+
+(* The Code pane has src/old.ml open, with the branch palette open over it and
+   one list landed. *)
+let branches_fixture () =
+  let state, _ = finder_fixture () in
+  open_code_branches state;
+  let origin =
+    match state.palette_mode with
+    | Palette_branches origin -> origin
+    | Palette_jump | Palette_files _ | Palette_locations _ | Palette_choice _ ->
+        Alcotest.fail "the branch palette did not open"
+  in
+  let reading, request =
+    start_read ~equal:code_scope_path_equal state.code_branches
+      (origin.cfo_scope, origin.cfo_dir) in
+  state.code_branches <- reading;
+  Code_results.apply_branches state request
+    (Ok (branches_answer
+           [ git_branch ~current:true "feat/x" "work in progress"
+           ; git_branch "loose" "an idea" ]));
+  state, origin, request
+
+let test_branch_palette_lists_the_landed_answer_and_filters_by_typing () =
+  let state, origin, _ = branches_fixture () in
+  Alcotest.(check bool) "the palette is over this directory" true
+    (origin.cfo_scope = Code_scope_repo "example" && String.equal origin.cfo_dir "src");
+  Alcotest.(check string) "the prompt starts empty" "" state.palette_query;
+  let names () =
+    List.filter_map
+      (function
+        | _, Masc_tui_palette.Palette_code_branch branch -> Some branch.Decode.gb_name
+        | _, _ -> None)
+      (Masc_tui_palette.palette_matches state)
+  in
+  Alcotest.(check (list string)) "server order" [ "feat/x"; "loose" ] (names ());
+  state.palette_query <- "loo";
+  Alcotest.(check (list string)) "typing filters by name" [ "loose" ] (names ());
+  state.palette_query <- "progress";
+  Alcotest.(check (list string)) "typing filters by subject" [ "feat/x" ] (names ());
+  List.iter
+    (fun (label, action) ->
+      match action with
+      | Masc_tui_palette.Palette_code_branch branch ->
+          Alcotest.(check bool) "a row names its branch and subject" true
+            (String.length label >= String.length branch.Decode.gb_name
+             && (let contains needle =
+                   let n = String.length needle and l = String.length label in
+                   let rec at i = i + n <= l && (String.sub label i n = needle || at (i + 1)) in
+                   at 0 in
+                 contains branch.Decode.gb_name && contains branch.gb_subject))
+      | _ -> ())
+    (Masc_tui_palette.palette_matches state);
+  state.palette_query <- "";
+  close_code_finder state;
+  Alcotest.(check bool) "closing clears the list" true
+    (Option.is_none (Fetched.current state.code_branches))
+
+let test_branch_list_needs_the_palette_and_directory_it_was_asked_in () =
+  let state, origin = finder_fixture () in
+  let reading, request =
+    start_read ~equal:code_scope_path_equal state.code_branches
+      (origin.cfo_scope, origin.cfo_dir) in
+  state.code_branches <- reading;
+  Code_results.apply_branches state request (Ok (branches_answer []));
+  Alcotest.(check bool) "a file finder palette does not take a branch list" true
+    (match Fetched.current state.code_branches with
+     | Some (_, Fetched.Loading) -> true
+     | Some _ | None -> false);
+  state.palette_mode <- Palette_branches origin;
+  state.code_dir <- "elsewhere";
+  Code_results.apply_branches state request (Ok (branches_answer []));
+  Alcotest.(check bool) "a palette whose directory moved does not take it" true
+    (match Fetched.current state.code_branches with
+     | Some (_, Fetched.Loading) -> true
+     | Some _ | None -> false);
+  state.code_dir <- origin.cfo_dir;
+  Code_results.apply_branches state request (Error "git failed");
+  Alcotest.(check bool) "a failure is kept, not an empty list" true
+    (match code_branches_view state with
+     | Fetched.Failed _ -> true
+     | Fetched.Absent | Fetched.Loading | Fetched.Ready _ | Fetched.Stale _ -> false)
+
 let test_finder_failure_and_cancel_preserve_original () =
   let state, origin = finder_fixture () in
   let before = state.code_file in
@@ -1356,7 +1444,7 @@ let test_location_picker_survives_finder_idle_and_late_replies () =
        && code_location_offer_current state offer
        && (match state.palette_mode with
            | Palette_locations current -> current == offer
-           | Palette_files _ | Palette_jump | Palette_choice _ -> false)
+           | Palette_files _ | Palette_branches _ | Palette_jump | Palette_choice _ -> false)
        && state.code_file == source && state.code_jump_back == history
        && state.code_file_cursor=2 && state.code_file_scroll=2
        && state.code_dir="src" && Option.is_none state.code_navigation);
@@ -1814,6 +1902,10 @@ let () =
             test_branches_decoder_keeps_order_and_every_upstream_shape
         ; Alcotest.test_case "branches decoder refuses bad rows" `Quick
             test_branches_decoder_refuses_bad_rows
+        ; Alcotest.test_case "branch palette lists the landed answer and filters by typing" `Quick
+            test_branch_palette_lists_the_landed_answer_and_filters_by_typing
+        ; Alcotest.test_case "branch list needs the palette and directory it was asked in" `Quick
+            test_branch_list_needs_the_palette_and_directory_it_was_asked_in
         ; Alcotest.test_case "received success yields to queued input" `Quick
             test_finder_success_yields_to_pending_input
         ; Alcotest.test_case "ready content cannot borrow reconfirmed read authority" `Quick

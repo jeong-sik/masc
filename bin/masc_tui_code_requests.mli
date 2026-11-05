@@ -15,6 +15,13 @@ val launch_file_finder :
   Masc_tui_types.state -> host:string ->
   deliver:(Masc_tui_async_protocol.async_msg -> unit) -> unit
 
+val launch_branches :
+  Masc_tui_types.state -> host:string ->
+  deliver:(Masc_tui_async_protocol.async_msg -> unit) -> unit
+(** Open the branch palette over Code and read the branches of the checkout
+    that owns the directory shown. A late list for another directory is dropped
+    by the reading key. *)
+
 val open_found_file :
   Masc_tui_types.state -> host:string ->
   deliver:(Masc_tui_async_protocol.async_msg -> unit) -> path:string -> unit

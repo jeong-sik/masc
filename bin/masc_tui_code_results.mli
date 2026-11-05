@@ -28,6 +28,11 @@ val apply_entries : Masc_tui_types.state ->
 val apply_catalog : Masc_tui_types.state ->
   (Masc_tui_types.code_workspace_scope * string) Masc_tui_fetched.request ->
   (Masc.Tui_decode.workspace_file_catalog, string) result -> unit
+val apply_branches : Masc_tui_types.state ->
+  (Masc_tui_types.code_workspace_scope * string) Masc_tui_fetched.request ->
+  (Masc.Tui_decode.git_branches, string) result -> unit
+(** Lands only while the branch palette that asked is still open over the same
+    directory; a late list for another key is dropped. *)
 val apply_found_file : ?input_pending:bool -> Masc_tui_types.state ->
   (Masc_tui_types.code_workspace_scope * string) Masc_tui_fetched.request ->
   (Masc.Tui_decode.workspace_file_source, string) result -> bool

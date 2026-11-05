@@ -63,6 +63,7 @@ type palette_action =
   | Palette_lsp of string * string
   | Palette_code_file of string
   | Palette_code_location of code_location_offer * Masc.Tui_decode.lsp_location
+  | Palette_code_branch of Masc.Tui_decode.git_branch
 
 (* The identifier names on the file pane's cursor line, in reading order,
    first occurrence only. The open file already carries its lexed segments,
@@ -376,6 +377,31 @@ let palette_action_words = function
   | Palette_board_post _ | Palette_lsp _ | Palette_code_file _ ->
       []
   | Palette_code_location (_, location) -> [location.Masc.Tui_decode.ll_path]
+  | Palette_code_branch branch -> [branch.Masc.Tui_decode.gb_name; branch.gb_subject]
+
+(* One branch row: the checked-out mark, the name, how it stands against its
+   upstream, the tip's UTC date and its subject. The date comes from the tip
+   itself, so a row reads the same whenever it is drawn. *)
+let branch_label (branch : Masc.Tui_decode.git_branch) =
+  let open Masc.Tui_decode in
+  let upstream =
+    match branch.gb_upstream with
+    | Repository_no_upstream -> "no upstream"
+    | Repository_upstream_gone upstream -> upstream ^ " (gone)"
+    | Repository_tracking { upstream; ahead; behind } ->
+        String.concat " "
+          (upstream
+           :: (if ahead > 0 then [ Printf.sprintf "↑%d" ahead ] else [])
+           @ (if behind > 0 then [ Printf.sprintf "↓%d" behind ] else []))
+  in
+  let date =
+    let tm = Unix.gmtime (float_of_int branch.gb_commit_epoch) in
+    Printf.sprintf "%04d-%02d-%02d" (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1)
+      tm.Unix.tm_mday
+  in
+  Printf.sprintf "%s %s  %s  %s  %s"
+    (if branch.gb_current then "*" else " ")
+    branch.gb_name upstream date branch.gb_subject
 
 let palette_matches (state : state) =
   let needle = String.trim state.palette_query in
@@ -396,7 +422,7 @@ let palette_matches (state : state) =
                    | Palette_usage_scope _ | Palette_config _ | Palette_ui_language _ | Palette_gate_mode _ | Palette_chat _
                    | Palette_task _ | Palette_task_creation _ | Palette_board_hearth _
                    | Palette_board_post _ | Palette_code_file _
-                   | Palette_code_location _ ) ) -> false) entries
+                   | Palette_code_location _ | Palette_code_branch _ ) ) -> false) entries
          | Some (_, Some _) -> [])
     | Palette_choice { choice_question; _ } ->
         List.map
@@ -408,6 +434,13 @@ let palette_matches (state : state) =
              List.map (fun path -> path, Palette_code_file path) catalog.Tui_decode.wfc_files
          | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
          | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _ -> [])
+    | Palette_branches _ ->
+        (match code_branches_view state with
+         | Masc_tui_fetched.Ready listing | Masc_tui_fetched.Stale (listing, _) ->
+             List.map (fun branch -> branch_label branch, Palette_code_branch branch)
+               listing.Tui_decode.gbs_branches
+         | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
+         | Masc_tui_fetched.Failed _ -> [])
     | Palette_locations offer ->
         if not (code_location_offer_current state offer) then []
         else List.map (fun location ->
@@ -443,7 +476,7 @@ let selected_file state =
     | Palette_goto _ | Palette_goal_payouts
     | Palette_usage_scope _ | Palette_config _ | Palette_ui_language _ | Palette_gate_mode _ | Palette_chat _
     | Palette_task _ | Palette_task_creation _ | Palette_board_hearth _ | Palette_board_post _ | Palette_lsp _
-    | Palette_code_location _))
+    | Palette_code_location _ | Palette_code_branch _))
   | None -> None
 
 let selected_location state =
@@ -456,5 +489,5 @@ let selected_location state =
     | Palette_goto _ | Palette_goal_payouts
     | Palette_usage_scope _ | Palette_config _ | Palette_ui_language _ | Palette_gate_mode _ | Palette_chat _
     | Palette_task _ | Palette_task_creation _ | Palette_board_hearth _ | Palette_board_post _ | Palette_lsp _
-    | Palette_code_file _))
+    | Palette_code_file _ | Palette_code_branch _))
   | None -> None

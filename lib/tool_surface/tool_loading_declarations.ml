@@ -30,8 +30,14 @@ let table : Tool_definition_toml.loading String_map.t Lazy.t =
        Embedded_config.file_list)
 ;;
 
-let loading_of_tool name =
-  match String_map.find_opt name (Lazy.force table) with
+let declared name = String_map.find_opt name (Lazy.force table)
+
+let required name =
+  match declared name with
   | Some loading -> loading
-  | None -> Tool_definition_toml.Always_loaded
+  | None ->
+    failwith
+      (Printf.sprintf
+         "tool loading declarations: %s is missing"
+         (Tool_definition_embedded.path name))
 ;;

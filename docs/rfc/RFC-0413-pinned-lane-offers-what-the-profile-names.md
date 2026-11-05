@@ -230,8 +230,7 @@ lane-smith 21, sangsu 20, edgar.a.poe 19, analyst 16).
 선언하고, 라이브 트리는 144개 중 54개다. 두 트리의 차이는 파일 하나
 (`keeper_task_cancel`, worktree 에만 있음)이고, 두 트리에 다 있는 144개 중 선언이
 서로 다른 파일은 0개다. 런타임은 라이브 트리가 아니라 바이너리에 박힌 사본을 읽는다
-(`tool_loading_declarations.ml:32-35` 의 `loading_of_tool`, 파일이 없는 이름은
-`Always_loaded`).
+(`Tool_loading_declarations.declared`, 파일이 없는 이름은 `None`).
 
 일곱 Keeper 가 **공통으로 받는 내장은 94개**이고, 그중 `defer_loading = true` 를
 선언한 것이 **54개**다. 그 차이 나는 파일 하나는 이 94개 밖이라 54는 정확한 값이고,
@@ -498,8 +497,8 @@ RFC-0403 은 아직 `Draft` 이고 이 문서가 그것을 통째로 대체하�
 
 파일이 없는 6개는 `Execute`, `WebFetch`, `WebSearch`, `keeper_compose_background-snapshot`,
 `keeper_compose_mission-snapshot`, `keeper_compose_work-intake` 다. 이들이 필터 밖에
-있는 것은 정책이 아니라 구조다 —— `tool_loading_declarations.ml:32-35` 의
-`loading_of_tool` 이 이름을 못 찾으면 `Always_loaded` 를 돌려준다.
+있는 것은 정책이 아니라 구조다 —— `Keeper_tool_descriptor.declared_loading_of_model_name`
+이 tool 파일을 못 찾으면 `Always_loaded` 를 돌려준다.
 
 **그래서 "항상 실리는" 집합은 40개(34 + 6)다.** 앞선 초안이 여기와 §6.2·§7 에 쓴
 `47` 은 이 문서 안의 어떤 집합도 가리키지 않아 뺀다. 앞선 초안이 §8 에 미해결로
@@ -629,7 +628,7 @@ tools.attached_allow  ->  tools.deferred_allow
 
 항상 실리는 40개는 이 필드의 사정권 밖이다 —— 정책이 아니라 구조로.
 `always_loaded_builtin_tools` 는 필터를 지나지 않고, tool 파일이 없는 6개는
-`loading_of_tool` 이 `Always_loaded` 를 돌려주므로 애초에 `deferred_builtin_tools`
+`declared_loading_of_model_name` 이 `Always_loaded` 를 돌려주므로 애초에 `deferred_builtin_tools`
 에 들어가지 않는다.
 
 **두 레인 모두에서 읽는다.** 유예 레인에서도 지명 안 된 도구는 목록에서 빠진다.

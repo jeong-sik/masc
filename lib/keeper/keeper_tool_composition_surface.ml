@@ -2883,7 +2883,7 @@ let make_tools_with_authority
                 | Error { message; _ } ->
                   Tool_result.make_err ~tool_name:schema.name ~class_:Tool_result.Runtime_failure
                     ~effect_disposition:Tool_result.Effect_outcome_unknown ~start_time message)
-        , Tool_loading_declarations.loading_of_tool schema.name
+        , Tool_loading_declarations.required schema.name
         , model_projection)
       in
       let prepare = make Draft.prepare_schema ~artifact_projection:Tool_output.Inline_with_reference
@@ -3064,7 +3064,7 @@ let make_tools_with_authority
                 ~context ~reference ~body ())
             ~instruction_skills:skills
             ()
-          , Tool_loading_declarations.loading_of_tool Catalog.skill_tool_name
+          , Tool_loading_declarations.required Catalog.skill_tool_name
           , Tool_output.bounded_inline_model_projection )
         ]
   in
@@ -3105,10 +3105,10 @@ let make_tools_with_authority
   then
     composition_tools
     @ [ ( status_tool
-        , Tool_loading_declarations.loading_of_tool Catalog.status_tool_name
+        , Tool_loading_declarations.required Catalog.status_tool_name
         , Tool_output.default_model_projection )
       ; ( cancel_tool
-        , Tool_loading_declarations.loading_of_tool Catalog.cancel_tool_name
+        , Tool_loading_declarations.required Catalog.cancel_tool_name
         , Tool_output.default_model_projection )
       ]
   else composition_tools

@@ -81,7 +81,7 @@
 
 **Files:**
 - Create: `lib/server/server_play_room_events.ml`, `lib/server/server_play_room_events.mli`
-- Modify: `lib/server/server_mcp_transport_http.ml`, `lib/server/server_routes_http_routes_play_room.ml`
+- Modify: `lib/server/server_mcp_transport_http.ml`, `lib/server/server_routes_http_routes_play_room.ml`, `lib/server/server_routes_http_routes_play_room.mli`, `lib/server/server_h2_gateway.ml`
 - Modify: `lib/sse.ml`, `lib/sse.mli`, preserving `Sse.register` while returning the exact client through `register_with_client`
 - Modify: `lib/play/play_room.ml`, `lib/play/play_room.mli` with a typed Join/Leave client projection
 - Create: `test/test_server_play_room_events.ml`, `test/stanzas/test_server_play_room_events.inc`
@@ -120,7 +120,7 @@
   - Expect all selected suites to pass; no extra Machine step, public SSE regression, or Leave/Join gap in the handoff contract.
 
 - [ ] **Step 5: Commit**
-  - `git add lib/server/server_play_room_events.ml lib/server/server_play_room_events.mli lib/server/server_mcp_transport_http.ml lib/server/server_routes_http_routes_play_room.ml lib/sse.ml lib/sse.mli lib/play/play_room.ml lib/play/play_room.mli test/test_server_play_room_events.ml test/stanzas/test_server_play_room_events.inc test/test_tui_execute_stream_http.ml test/dune`
+  - `git add lib/server/server_play_room_events.ml lib/server/server_play_room_events.mli lib/server/server_mcp_transport_http.ml lib/server/server_routes_http_routes_play_room.ml lib/server/server_routes_http_routes_play_room.mli lib/server/server_h2_gateway.ml lib/sse.ml lib/sse.mli lib/play/play_room.ml lib/play/play_room.mli test/test_server_play_room_events.ml test/stanzas/test_server_play_room_events.inc test/test_tui_execute_stream_http.ml test/dune`
   - `git -c core.hooksPath=/dev/null commit -m "feat(sse): bind play presence to observers"`
 
 ### Task 3: Stop successful polling and retain exact revalidation

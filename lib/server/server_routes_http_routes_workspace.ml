@@ -875,6 +875,34 @@ let checkout_of_directory ~base ~path =
        | Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK ->
            Error Checkout_directory_unavailable)
 
+(* The one answer to "may the operator open this file Git listed", shared by
+   everything that turns Git's paths into paths the file reader accepts: the
+   file catalog and the content search. [repo_relative] is a path under [root]
+   as Git prints it; the result is the same file as a [base]-relative path, or
+   [None] when the file reader would refuse it (confidential component, path
+   escape, symlink out of the workspace), when it is not a regular file, or when
+   it no longer exists. With [max_bytes], a file larger than that is refused
+   too, the way the file reader refuses it. *)
+let vetted_regular_file ?max_bytes ~base ~root repo_relative =
+  let lexical_path = Filename.concat root repo_relative in
+  let relative = rel_under base lexical_path in
+  match resolve_workspace_file base relative with
+  | Error _ -> None
+  | Ok file ->
+      (* The file reader accepts backslashes as separators. A literal POSIX
+         backslash name must not become a different file when the operator
+         opens the selection. *)
+      if not (String.equal file.lexical_path lexical_path) then None
+      else
+        match Unix.stat file.resolved_path with
+        | { Unix.st_kind = Unix.S_REG; st_size; _ } ->
+            (match max_bytes with
+             | Some limit when st_size > limit -> None
+             | Some _ | None -> Some relative)
+        | { Unix.st_kind = Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK
+                         | Unix.S_FIFO | Unix.S_SOCK; _ } -> None
+        | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> None
+
 let workspace_file_catalog ~base ~path =
   let ( let* ) = Result.bind in
   try
@@ -891,24 +919,7 @@ let workspace_file_catalog ~base ~path =
             |> Result.map_error (fun detail -> Catalog_scan_failed detail)
           in
           let catalog_paths =
-            List.filter_map
-              (fun path ->
-                let lexical_path = Filename.concat root path in
-                let relative = rel_under base lexical_path in
-                match resolve_workspace_file base relative with
-                | Error _ -> None
-                | Ok file ->
-                    (* The file reader accepts backslashes as separators. A
-                       literal POSIX backslash name must not become a different
-                       file when the operator opens the catalog selection. *)
-                    if not (String.equal file.lexical_path lexical_path) then None
-                    else
-                      match (Unix.stat file.resolved_path).Unix.st_kind = Unix.S_REG with
-                      | true -> Some relative
-                      | false -> None
-                      | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) ->
-                          None)
-              paths
+            List.filter_map (vetted_regular_file ~base ~root) paths
           in
           Ok { catalog_root = rel_under base root; catalog_paths }
     end
@@ -1020,6 +1031,131 @@ let workspace_worktrees_json (found : workspace_worktrees) =
     ; ("truncated", `Bool found.worktrees_list.wl_truncated)
     ]
 
+type workspace_search_match = {
+  sm_path : string;
+  sm_line : int;
+  sm_text : string;
+}
+
+type workspace_search = {
+  search_root : string;
+  search_matches : workspace_search_match list;
+  search_truncated : bool;
+}
+
+type workspace_search_error =
+  | Search_invalid_query
+  | Search_invalid_path
+  | Search_directory_unavailable
+  | Search_repository_unavailable
+  | Search_failed of string
+
+let search_query_min_bytes = 2
+let search_query_max_bytes = 200
+
+(* Git is read up to [search_scan_matches] rows. Rows the file reader would
+   refuse are dropped from that, and [search_result_matches] of what is left
+   are returned, so a burst of hits in secret files cannot use up the answer. *)
+let search_scan_matches = 1000
+let search_result_matches = 200
+let search_line_max_bytes = 300
+
+(* A newline would make [git grep -e] search two patterns, and a NUL cannot be
+   an argument. Tab is a legitimate thing to look for. *)
+let search_query_is_valid query =
+  let length = String.length query in
+  length >= search_query_min_bytes
+  && length <= search_query_max_bytes
+  && String.is_valid_utf_8 query
+  && String.for_all (fun c -> c = '\t' || (c >= ' ' && c <> '\127')) query
+
+(* The longest whole-character prefix of [text] within [max_bytes], with every
+   invalid byte sequence replaced by U+FFFD, so the answer is always valid
+   UTF-8 for the JSON the TUI decodes. *)
+let utf8_lossy_prefix ~max_bytes text =
+  let out = Buffer.create (min max_bytes (String.length text)) in
+  let piece = Buffer.create 4 in
+  let rec go index =
+    if index < String.length text then begin
+      let decoded = String.get_utf_8_uchar text index in
+      let char =
+        if Uchar.utf_decode_is_valid decoded then Uchar.utf_decode_uchar decoded
+        else Uchar.rep
+      in
+      Buffer.clear piece;
+      Buffer.add_utf_8_uchar piece char;
+      if Buffer.length out + Buffer.length piece <= max_bytes then begin
+        Buffer.add_buffer out piece;
+        go (index + Uchar.utf_decode_length decoded)
+      end
+    end
+  in
+  go 0;
+  Buffer.contents out
+
+let rec take_first count = function
+  | item :: rest when count > 0 -> item :: take_first (count - 1) rest
+  | _ :: _ | [] -> []
+
+let workspace_search ~base ~path ~query ~ignore_case =
+  let ( let* ) = Result.bind in
+  if not (search_query_is_valid query) then Error Search_invalid_query
+  else
+    let* directory =
+      resolve_workspace_file base path
+      |> Result.map_error (fun _ -> Search_invalid_path)
+    in
+    try
+      if (Unix.stat directory.resolved_path).Unix.st_kind <> Unix.S_DIR then
+        Error Search_directory_unavailable
+      else
+        match repository_containing ~base ~directory:directory.lexical_path with
+        | None -> Error Search_repository_unavailable
+        | Some root ->
+            let* found =
+              Repo_git.grep_at ~local_path:root
+                ~pathspec:(rel_under root directory.lexical_path)
+                ~pattern:query ~ignore_case ~max_matches:search_scan_matches ()
+              |> Result.map_error (fun detail -> Search_failed detail)
+            in
+            let vetted = Hashtbl.create 64 in
+            let vet repo_relative =
+              match Hashtbl.find_opt vetted repo_relative with
+              | Some answer -> answer
+              | None ->
+                  let answer =
+                    vetted_regular_file ~max_bytes:workspace_file_read_max_bytes ~base ~root
+                      repo_relative
+                  in
+                  Hashtbl.add vetted repo_relative answer;
+                  answer
+            in
+            let readable =
+              List.filter_map
+                (fun (found : Repo_git.grep_match) ->
+                  Option.map
+                    (fun relative ->
+                      { sm_path = relative
+                      ; sm_line = found.gm_line
+                      ; sm_text =
+                          utf8_lossy_prefix ~max_bytes:search_line_max_bytes
+                            found.gm_text
+                      })
+                    (vet found.gm_path))
+                found.gr_matches
+            in
+            Ok
+              { search_root = rel_under base root
+              ; search_matches = take_first search_result_matches readable
+              ; search_truncated =
+                  found.gr_truncated || List.length readable > search_result_matches
+              }
+    with
+    | Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) ->
+        Error Search_directory_unavailable
+    | (Unix.Unix_error _ | Sys_error _ | Invalid_argument _) as ex ->
+        Error (Search_failed (Printexc.to_string ex))
+
 module For_testing = struct
   let sanitize_log_value = sanitize_log_value
   let observe_workspace_route_failure = observe_workspace_route_failure
@@ -1032,6 +1168,7 @@ module For_testing = struct
   let workspace_branches_json = workspace_branches_json
   let workspace_worktrees = workspace_worktrees
   let workspace_worktrees_json = workspace_worktrees_json
+  let workspace_search = workspace_search
   let load_workspace_file_content = load_workspace_file_content
   let workspace_file_revision = workspace_file_revision
   let save_workspace_file = save_workspace_file
@@ -1419,6 +1556,77 @@ let add_routes router =
                          | Worktrees_failed detail -> `Internal_server_error, detail
                        in
                        json_response ~status request reqd (json_error message))
+
+  (* HIGH-RISK-UNREVIEWED: this route returns lines of file content. Every
+     path in the answer has passed [vetted_regular_file], the same guard the
+     file catalog applies before it offers a file to [/api/v1/workspace/file];
+     the query is a fixed string bounded by [search_query_is_valid]. *)
+  |> Server_route.get Server_route.Public_read "/api/v1/workspace/search" (fun state request reqd ->
+           let uri = Uri.of_string request.target in
+           let base, source = resolve_workspace_base ~state ~uri in
+           match source with
+           | `RepositoryMissing _ | `RepositoryUnknown _
+           | `PlaygroundMissing _ | `KeeperUnknown _ ->
+               json_response ~status:`Not_found request reqd
+                 (json_error "The selected workspace is unavailable")
+           | `Project | `Repository _ | `Playground _ ->
+               let ignore_case =
+                 match Uri.get_query_param uri "ignore_case" with
+                 | None | Some "0" -> Ok false
+                 | Some "1" -> Ok true
+                 | Some _ -> Error "ignore_case must be 0 or 1"
+               in
+               (match
+                  Uri.get_query_param uri "path", Uri.get_query_param uri "q", ignore_case
+                with
+                | None, _, _ ->
+                    json_response ~status:`Bad_request request reqd
+                      (json_error "Missing path parameter")
+                | _, None, _ ->
+                    json_response ~status:`Bad_request request reqd
+                      (json_error "Missing q parameter")
+                | _, _, Error message ->
+                    json_response ~status:`Bad_request request reqd (json_error message)
+                | Some path, Some query, Ok ignore_case ->
+                    let result =
+                      Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+                        workspace_search ~base ~path ~query ~ignore_case)
+                    in
+                    (match result with
+                     | Ok found ->
+                         json_response_with_source ~status:`OK ~source request reqd
+                           (`Assoc
+                              [ ("root", `String found.search_root)
+                              ; ("query", `String query)
+                              ; ("ignore_case", `Bool ignore_case)
+                              ; ( "matches"
+                                , `List
+                                    (List.map
+                                       (fun (m : workspace_search_match) ->
+                                         `Assoc
+                                           [ ("path", `String m.sm_path)
+                                           ; ("line", `Int m.sm_line)
+                                           ; ("text", `String m.sm_text)
+                                           ])
+                                       found.search_matches) )
+                              ; ("truncated", `Bool found.search_truncated)
+                              ])
+                     | Error error ->
+                         let status, message =
+                           match error with
+                           | Search_invalid_query ->
+                               ( `Bad_request
+                               , Printf.sprintf
+                                   "q must be %d to %d bytes of valid UTF-8 without line breaks or control characters"
+                                   search_query_min_bytes search_query_max_bytes )
+                           | Search_invalid_path -> `Bad_request, "Invalid path"
+                           | Search_directory_unavailable ->
+                               `Not_found, "The selected directory is unavailable"
+                           | Search_repository_unavailable ->
+                               `Not_found, "Open a Git repository directory to search"
+                           | Search_failed detail -> `Internal_server_error, detail
+                         in
+                         json_response ~status request reqd (json_error message))))
 
   |> Server_route.get Server_route.Public_read "/api/v1/git/status" (fun state request reqd ->
            let uri = Uri.of_string request.target in

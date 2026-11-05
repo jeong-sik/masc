@@ -2720,13 +2720,18 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                  its commit events are not published: [push_worker_event] can
                  wait for buffer space, and a stop must not wait on a reader.
                  A deadline would not shorten the stop: the store write runs
-                 in a systhread that cancellation cannot end once submitted. *)
+                 in a systhread that cancellation cannot end once submitted.
+                 A failure of the write is logged here and never replaces the
+                 cancellation this arm re-raises. *)
+              let not_kept detail =
+                Log.Keeper.error ~keeper_name:payload.name
+                  "keeper_stream: tool rows of the cancelled turn were not kept: %s"
+                  detail
+              in
               (match Eio.Cancel.protect persist_ran_tool_calls with
                | Ok (_ : Keeper_chat_store.tool_call list) -> ()
-               | Error detail ->
-                 Log.Keeper.error ~keeper_name:payload.name
-                   "keeper_stream: tool rows of the cancelled turn were not kept: %s"
-                   detail);
+               | Error detail -> not_kept detail
+               | exception write_exn -> not_kept (Printexc.to_string write_exn));
               Printexc.raise_with_backtrace exn bt
             | exception exn when Keeper_registry_types.is_operator_interrupt exn ->
               (* Typed operator cancellation (#28810): the interrupt fails

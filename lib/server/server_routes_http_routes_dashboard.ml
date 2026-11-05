@@ -3049,16 +3049,12 @@ let add_routes ~sw ~clock router =
            respond_json_value_with_cors ~status:`Bad_request req reqd
              (`Assoc [ "error", `String "keeper is empty" ])
          | Some keeper ->
-           (match
-              Pool_work.submit
+           Http.Response.json_value ~compress:true ~request:req
+             (Pool_work.submit
                 (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
                    Server_dashboard_http_keeper_memory_health.keeper_memory_health_row_http_json
-                     ~base_path ~keeper))
-            with
-            | Some json -> Http.Response.json_value ~compress:true ~request:req json reqd
-            | None ->
-              respond_json_value_with_cors ~status:`Not_found req reqd
-                (`Assoc [ "error", `String ("no memory health row for keeper " ^ keeper) ])))
+                     ~base_path ~keeper)))
+             reqd)
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/runtime-observables" (fun _state req reqd ->
          let json =
            Server_dashboard_http_runtime_observables.runtime_observables_http_json ()

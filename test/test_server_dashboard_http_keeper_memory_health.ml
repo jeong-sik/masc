@@ -1266,24 +1266,25 @@ let test_the_librarian_stalled_alarm_is_read_from_files () =
 ;;
 
 (* One Keeper's row is the element the fleet answer carries for it, and a
-   name the fleet does not list, a path-shaped one included, has no row. *)
+   name the fleet does not list, a path-shaped one included, answers [null]. *)
 let test_one_keepers_row_is_its_fleet_row () =
   let base = fresh_dir "masc-memory-health-one-row" in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
   ignore (write_snapshot ~keepers_dir ~keeper_id:"solo" [ fact "A"; fact "B" ]);
   ignore (write_snapshot ~keepers_dir ~keeper_id:"other" [ fact "C" ]);
   let fleet = Health.keeper_memory_health_http_json ~base_path:base in
-  (match Health.keeper_memory_health_row_http_json ~base_path:base ~keeper:"solo" with
-   | Some answer ->
-     Alcotest.(check string) "the row answer names the fleet schema"
-       "keeper.memory_os.current_health.v8" (string_field "schema" answer);
-     Alcotest.(check bool) "the row is the fleet's row for the Keeper" true
-       (Yojson.Safe.equal (keeper_obj "solo" fleet) (member "keeper" answer))
-   | None -> Alcotest.fail "a listed Keeper has no row");
-  Alcotest.(check bool) "an unlisted Keeper has no row" true
-    (Option.is_none (Health.keeper_memory_health_row_http_json ~base_path:base ~keeper:"absent"));
-  Alcotest.(check bool) "a path-shaped name has no row" true
-    (Option.is_none (Health.keeper_memory_health_row_http_json ~base_path:base ~keeper:"../solo"))
+  let answer = Health.keeper_memory_health_row_http_json ~base_path:base ~keeper:"solo" in
+  Alcotest.(check string) "the row answer names the fleet schema"
+    "keeper.memory_os.current_health.v8" (string_field "schema" answer);
+  Alcotest.(check bool) "the row is the fleet's row for the Keeper" true
+    (Yojson.Safe.equal (keeper_obj "solo" fleet) (member "keeper" answer));
+  let row_of keeper =
+    member "keeper" (Health.keeper_memory_health_row_http_json ~base_path:base ~keeper)
+  in
+  Alcotest.(check bool) "an unlisted Keeper answers no row" true
+    (Yojson.Safe.equal `Null (row_of "absent"));
+  Alcotest.(check bool) "a path-shaped name answers no row" true
+    (Yojson.Safe.equal `Null (row_of "../solo"))
 ;;
 
 (* The totals count the rows: unread turns go unknown with one unmeasured

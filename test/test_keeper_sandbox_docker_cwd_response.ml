@@ -118,8 +118,6 @@ let test_container_path_translation_under_sandbox () =
           ~remote_workspace_root:None ~config ~meta:ssh_meta
           ~args:(`Assoc [ "cwd", `String explicit_cwd ]) ~cwd:explicit_cwd
       in
-      check bool "unresolved SSH explicitly returns a null top-level cwd" true
-        (List.assoc_opt "cwd" response = Some `Null);
       let location =
         match List.assoc_opt "execution_location" response with
         | Some (`Assoc fields) -> fields
@@ -182,6 +180,7 @@ let test_typed_execute_response_cwd_uses_container_path () =
          (Astring.String.is_infix ~affix:host_cwd json_str);
       let response_cwd =
         full_response
+        |> Yojson.Safe.Util.member "execution_location"
         |> Yojson.Safe.Util.member "cwd"
         |> Yojson.Safe.Util.to_string
       in
@@ -201,22 +200,14 @@ let test_typed_execute_response_cwd_uses_container_path () =
       check bool "Docker validation error does NOT contain host base" false
         (Astring.String.is_infix ~affix:base error_raw);
       let error_response = Yojson.Safe.from_string error_raw in
-      let error_cwd =
-        error_response
-        |> Yojson.Safe.Util.member "cwd"
-        |> Yojson.Safe.Util.to_string
-      in
       let error_location_cwd =
         error_response
         |> Yojson.Safe.Util.member "execution_location"
         |> Yojson.Safe.Util.member "cwd"
         |> Yojson.Safe.Util.to_string
       in
-      check string "Docker error top-level cwd uses visible root"
+      check string "Docker error location cwd uses visible root"
         visible_root
-        error_cwd;
-      check string "Docker error location cwd matches top-level cwd"
-        error_cwd
         error_location_cwd;
       let missing_relative = "missing-relative" in
       let missing_raw =
@@ -245,11 +236,6 @@ let test_typed_execute_response_cwd_uses_container_path () =
         |> Yojson.Safe.Util.member "error"
         |> Yojson.Safe.Util.to_string
       in
-      let missing_cwd =
-        missing_response
-        |> Yojson.Safe.Util.member "cwd"
-        |> Yojson.Safe.Util.to_string
-      in
       let missing_location_cwd =
         missing_response
         |> Yojson.Safe.Util.member "execution_location"
@@ -259,11 +245,8 @@ let test_typed_execute_response_cwd_uses_container_path () =
       check string "Docker missing-cwd code is actionable"
         "cwd_missing"
         missing_code;
-      check string "Docker missing-cwd top-level path is visible"
+      check string "Docker missing-cwd location path is visible"
         (Filename.concat visible_root missing_relative)
-        missing_cwd;
-      check string "Docker missing-cwd location matches top-level cwd"
-        missing_cwd
         missing_location_cwd;
       let not_directory = "not-directory" in
       let host_file = Filename.concat host_root not_directory in
@@ -295,11 +278,6 @@ let test_typed_execute_response_cwd_uses_container_path () =
         |> Yojson.Safe.Util.member "error"
         |> Yojson.Safe.Util.to_string
       in
-      let not_directory_cwd =
-        not_directory_response
-        |> Yojson.Safe.Util.member "cwd"
-        |> Yojson.Safe.Util.to_string
-      in
       let not_directory_location_cwd =
         not_directory_response
         |> Yojson.Safe.Util.member "execution_location"
@@ -311,11 +289,8 @@ let test_typed_execute_response_cwd_uses_container_path () =
         not_directory_code;
       check bool "Docker cwd errors keep distinct public messages" false
         (String.equal missing_error not_directory_error);
-      check string "Docker non-directory top-level path is visible"
+      check string "Docker non-directory location path is visible"
         (Filename.concat visible_root not_directory)
-        not_directory_cwd;
-      check string "Docker non-directory location matches top-level cwd"
-        not_directory_cwd
         not_directory_location_cwd)
 
 let test_prompt_keeps_caller_owned_workspace_generation () =

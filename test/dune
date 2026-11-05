@@ -7235,3 +7235,7 @@
 (include stanzas/test_tui_context_msg.inc)
 (include stanzas/test_tui_fleet_msg.inc)
 (include stanzas/test_tui_original_msg.inc)
+
+(include stanzas/test_schedule_run_watch.inc)
+
+(include stanzas/test_schedule_run_watch_tick.inc)

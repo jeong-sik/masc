@@ -802,8 +802,9 @@ boundaries as they land. See [`docs/TUI-GUIDE.md`](TUI-GUIDE.md).
 For targeted task lookup and compact census reads, see
 [Reading tasks without scanning the backlog](guides/KEEPER-TASK-QUERIES.md).
 
-A task moves through `todo`, `in_progress`, `awaiting_verification`, and then
-`done`, `dropped`, or `blocked`.
+A task moves through `todo`, `claimed`, `in_progress`, and
+`awaiting_verification`, and ends as `done` or `cancelled`. A rejected
+verification sends it back to `in_progress`.
 
 1. Someone creates a task — you, through the TUI composer's `/task <title>`,
    or a Keeper through `masc_add_task`.

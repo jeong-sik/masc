@@ -34,17 +34,6 @@ let goal_receipt_authority_current (state : state) (receipt : goal_action_receip
       Planning_detail.receipt_authority_current ~credential_current ~current_instance
         ~current_confirmation ~receipt:authority
 
-(* The icon, the status word and the owner share one colour so the row's state
-   reads at a glance: in-flight rows in cyan, waiting rows dimmed. Terminal
-   states never reach this list ([active_tasks_of_domain] filters them); they
-   keep the default so a future caller showing one is visible rather than wrong. *)
-let task_state_style (task : task) =
-  match task.status with
-  | Masc_domain.Claimed _ | Masc_domain.InProgress _ -> (Theme.info ())
-  | Masc_domain.AwaitingVerification _ -> Theme.warn ()
-  | Masc_domain.Todo -> Ansi.dim
-  | Masc_domain.Done _ | Masc_domain.Cancelled _ -> ""
-
 (* The spelling a row falls back to when the state's own name does not fit
    beside the other columns. *)
 let task_status_short (status : Masc_domain.task_status) =
@@ -85,12 +74,13 @@ let task_row_id ~id_width ~ordinal ~task_ids ~use_ordinals (task : task) =
   then Printf.sprintf "row %d" ordinal else id
 
 (* One row of the list: the readings of one task on the columns the header
-   names. [task_ids] and [use_ordinals] come from the whole list, because
-   whether a short id is ambiguous depends on the other rows. *)
+   names. The mark, the status word and the owner share the state's colour.
+   [task_ids] and [use_ordinals] come from the whole list, because whether a
+   short id is ambiguous depends on the other rows. *)
 let task_line ~layout ~id_width ~ordinal ~task_ids ~use_ordinals (task : task) =
   Render_schedule.work_task_row
     ~styles:
-      { Render_schedule.wstyle_state = task_state_style task
+      { Render_schedule.wstyle_state = task_state_style task.status
       ; wstyle_task = Ansi.dim
       ; wstyle_goal = Theme.recede ()
       ; wstyle_urgent = Theme.bad ()
@@ -141,13 +131,14 @@ let task_detail_lines (state : state) ~cols (task : Masc_domain.task) =
       | Not_read | Read _ -> []) in
   (failures |> List.concat_map (Masc_tui_text_block.rows ~max_cells:(max 1 (framed_inner_width cols))))
   @ task_document_lines state ~cols Masc_tui_task_document.Body
+  @ ("" :: Masc_tui_task_document.history_heading_rows ~width)
   @ (Masc_tui_task_document.history_status_lines ~width ~view:history
       ~in_flight:(Masc_tui_fetched.in_flight state.task_history)
       ~continuing:(Option.exists (fun request -> Option.is_some request.thr_page.hr_cursor)
         state.task_history_request)
-     |> List.concat_map (fun line -> if line="" then [""] else
-       Masc_tui_text_block.preformatted_rows
-         ~max_cells:(max 1 (framed_inner_width cols)) line))
+     |> List.concat_map
+          (Masc_tui_text_block.preformatted_rows
+             ~max_cells:(max 1 (framed_inner_width cols))))
   @ task_document_lines state ~cols Masc_tui_task_document.History
 
 let task_detail_height ~rows ~count =

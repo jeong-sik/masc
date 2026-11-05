@@ -3899,6 +3899,11 @@
  (libraries alcotest masc_tui_task_selection masc.masc_types))
 
 (test
+ (name test_tui_task_document_style)
+ (modules test_tui_task_document_style)
+ (libraries alcotest masc.masc_types masc_tui_ansi masc_tui_task_document))
+
+(test
  (name test_tui_overview_tasks)
  (modules test_tui_overview_tasks)
  (libraries alcotest masc masc.masc_types masc_tui_overview_tasks masc_tui_theme))

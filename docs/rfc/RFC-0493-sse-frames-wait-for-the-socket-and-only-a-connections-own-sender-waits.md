@@ -70,6 +70,17 @@ H2 응답은 이미 flush 를 기다리므로 이 RFC 범위 밖이다. `server_
 
 flush 를 기다리는 fleet 스트림은 읽지 않는 클라이언트를 8일 동안 세 번 닫았다. 같은 기간 MCP 스트림에서는 queue 가 찬 일이 없다. MCP drain fiber 는 쓰기가 바로 끝나므로 queue 에서 바로 다음 이벤트를 꺼낸다. 그래서 클라이언트가 읽지 않아도 queue 는 차지 않는다(§2.1). 이 0건이 MCP 클라이언트가 늘 읽었다는 뜻인지, 바이트가 Faraday 에 쌓였다는 뜻인지는 지금 로그로 가를 수 없다. 이 RFC 는 그 차이를 세지 않았다.
 
+### 1.4 Keeper chat 이벤트 빈도
+
+`~/me/.masc/keeper_chat_events/` 에서 2026-10-29 뒤에 바뀐 journal 2,274개(operation 하나에 파일 하나)를 읽었다. 각 operation 에서 같은 시간 창 안에 들어온 이벤트 수의 최댓값을 journal 행의 `ts` 로 셌다(2026-11-05 측정).
+
+| 창 | p50 | p99 | p99.9 | 최대 |
+|---|---|---|---|---|
+| 1초 | 292 | 1,480 | 2,162 | 2,616 |
+| 5초 | 416 | 1,891 | 2,845 | 3,190 |
+| 30초 | 503 | 4,454 | 5,939 | 6,496 |
+| 90초 | 607 | 8,447 | 12,712 | 14,162 |
+
 ## 2. 지금 코드
 
 ### 2.1 MCP 스트림의 queue 상한이 일하지 않는다
@@ -85,6 +96,8 @@ Keeper chat 스트림에서는 Keeper 턴의 이벤트를 낸 쪽이 직접 보�
 MCP `subscriptions/listen` 에서는 `Mcp_subscriptions.deliver` 가 알림을 구독마다 차례로 보낸다. 구독마다 `send_mutex` 를 잡은 채로 `send` 를 부른다.
 
 이 두 곳의 `send` 가 flush 를 기다리면, 느린 클라이언트 하나가 Keeper 턴이나 다른 구독의 알림을 막는다. 그래서 이 둘은 쓰기 함수만 바꿔서는 안 되고, 송신을 연결 전용 fiber 로 옮겨야 한다.
+
+Keeper chat 의 live sink 는 Keeper 턴의 adapter fiber 가 부른다(`server_routes_http_keeper_stream.ml:3229-3262`). `MASC_SERVING_DOMAIN_ENABLED=true` 면 HTTP 연결은 따로 둔 domain 에서 돈다(`server_runtime_bootstrap.ml:2157-2174`). 그러면 이 fiber 는 연결과 다른 domain 에서 httpun writer 에 쓴다. httpun writer 는 domain 사이에서 안전하지 않다. 송신을 연결 전용 fiber 로 옮기면 이 쓰기도 없어진다.
 
 ### 2.3 artifact draft 스트림은 끝나지 않을 수 있다
 
@@ -140,22 +153,40 @@ val is_closed : t -> bool
 `Server_fleet_stream_pump` 를 이벤트 타입에 대해 일반화해 `Server_sse_pump` 로 바꾼다.
 
 ```ocaml
-type ending = Client_gone | Fell_behind | Stalled
+type ending = Client_gone | Fell_behind | Stalled | Finished
+
+type step =
+  | Skip               (** 이 이벤트는 쓰지 않는다. *)
+  | Send of string     (** frame 을 쓰고 이어 간다. *)
+  | Send_last of string  (** frame 을 쓰고 끝낸다. *)
+
+type idle =
+  | Keepalive  (** keepalive 주석을 쓴다. *)
+  | Quiet      (** 쓰지 않고 다음 간격을 기다린다. *)
+  | Finish     (** 쓰지 않고 끝낸다. *)
+
+module Queue : sig
+  type 'event t
+  val create : max_queued_events:int -> 'event t
+  val push : 'event t -> 'event -> unit
+end
 
 val run :
-  subscribe:(on_event:('event -> unit) -> unit -> unit) ->
-  frame:('event -> string) ->
+  queue:'event Queue.t ->
+  step:('event -> step) ->
+  idle:(unit -> idle) ->
   clock:_ Eio.Time.clock ->
   ping_interval_s:float ->
-  max_queued_events:int ->
   send:(string -> Server_sse_response.outcome) ->
   ending
 ```
 
-- producer 는 `on_event` 로 queue 에 넣고 바로 돌아간다. queue 가 차 있으면 `Fell_behind` 표시만 하고 돌아간다.
-- 송신 fiber 하나가 queue 에서 꺼내 `send` 한다. ping 도 같은 fiber 가 보낸다.
-- `send` 가 `Closed` 면 `Client_gone`, `Stalled` 면 `Stalled` 로 끝난다.
-- `stalled_after_s` 는 `Server_sse_response.respond` 가 받는다. pump 는 시간을 재지 않는다.
+- producer 는 `Queue.push` 로 넣고 바로 돌아간다. 자리는 `Atomic` 카운터로 예약한다. 그래서 여러 producer 가 여러 domain 에서 동시에 넣어도 `Eio.Stream.add` 가 기다리지 않는다. 자리가 없으면 뒤처짐만 표시한다.
+- 송신 fiber 하나가 queue 에서 꺼내 `step` 에 따라 쓴다. ping 간격 동안 이벤트가 없으면 `idle` 에 따라 쓴다.
+- `send` 가 `Closed` 면 `Client_gone`, `Stalled` 면 `Stalled` 로 끝난다. `Send_last` 를 쓰거나 `idle` 이 `Finish` 면 `Finished` 로 끝난다.
+- `stalled_after_s` 는 `Server_sse_response.respond` 가 받는다. pump 는 `send` 의 시간을 재지 않는다.
+- 구독은 route 가 맡는다. route 는 queue 를 만들고 `Queue.push` 로 구독한 뒤 구독 해제를 switch 에 건다. 그다음 앞서 보낼 frame 을 같은 fiber 에서 `send` 하고 `run` 을 부른다. 그동안 들어온 이벤트는 queue 에서 기다린다.
+- fleet 과 MCP listen 의 `step` 은 늘 `Send`, `idle` 은 늘 `Keepalive` 다.
 
 이 pump 를 쓰는 곳은 셋이다.
 
@@ -165,7 +196,7 @@ val run :
 | Keeper chat | `register_operation_live_sink` | `since_seq` 로 다시 붙어서 journal replay 를 받는다(RFC-0412 §3.2) |
 | MCP `subscriptions/listen` | `Mcp_subscriptions.register_after_ack` 의 `send` 가 `on_event` 다 | 다시 구독한다. `tools/list_changed` 와 `resources/updated` 는 바뀌었다는 신호만 싣고 내용은 싣지 않는다. 놓친 알림은 클라이언트가 목록과 resource 를 다시 읽어야 메워진다. 클라이언트가 다시 구독한 뒤 다시 읽는지는 확인 필요 |
 
-Keeper chat 에서는 acceptance frame 과 replay frame 을 송신 fiber 가 queue 를 비우기 전에 같은 fiber 에서 보낸다. 그동안 들어온 live 이벤트는 queue 에서 기다린다. `Server_keeper_stream_handoff` 는 이 순서를 지키려고 있었으므로 지운다.
+Keeper chat 에서는 acceptance frame 과 replay frame 을 송신 fiber 가 `run` 을 부르기 전에 같은 fiber 에서 보낸다. 그동안 들어온 live 이벤트는 queue 에서 기다린다. `Server_keeper_stream_handoff` 는 이 순서를 지키려고 있었으므로 지운다. replay 가 이미 쓴 seq 의 live 이벤트는 `Skip`, `Run_finished`·`Run_error` 는 `Send_last` 다. `idle` 은 지금 heartbeat 처럼 operation 기록을 읽고 `Keepalive`(아직 도는 중), `Finish`(terminal 없이 끝남), `Quiet`(기록을 읽지 못함)를 고른다.
 
 `Mcp_subscriptions` 는 `masc_transport_protocol` 라이브러리에 있다. 이 라이브러리는 바꾸지 않는다. transport 가 넘기는 `send` 는 queue 에 넣고 바로 돌아온다. pump 가 이미 끝났으면 `false` 를 돌려주고, `deliver` 는 그 구독을 지운다. 그래서 `deliver` 는 느린 구독을 기다리지 않는다.
 
@@ -183,6 +214,7 @@ MCP GET·AG-UI·presence 스트림은 이미 `Sse` 의 queue 와 drain fiber 를
 - **producer 가 직접 flush 를 기다린다.** Keeper chat 에서 느린 TUI 하나가 Keeper 턴을 멈춘다. `subscriptions/listen` 에서는 느린 구독 하나가 뒤의 구독을 모두 멈춘다(§2.2). 받지 않는다.
 - **송신 fiber 의 queue 에 상한을 두지 않는다.** 쌓이는 곳이 Faraday 에서 queue 로 옮겨질 뿐이다. 받지 않는다.
 - **기다리는 동안 `is_closed` 를 주기적으로 읽는다.** 클라이언트가 떠난 것을 90초보다 빨리 알 수 있다. 하지만 httpun 이 닫힘을 알리지 않는 것을 폴링으로 메우는 일이다. 받지 않는다. 근본 해결은 httpun 이 실패한 연결의 스트리밍 body 를 비워서 기다리는 flush 에 `` `Closed `` 로 답하는 것이다(§1.2). httpun 을 고치는 일은 이 저장소 밖이라 이 RFC 에서 하지 않는다.
+- **Keeper chat 이 자기 송신 루프를 따로 갖는다.** pump 에 `step`·`idle` 을 더하지 않아도 된다. 하지만 이벤트와 keepalive 가 같은 차례에 오면 이벤트를 쓰는 규칙과, 뒤처짐을 `send` 가 돌아온 뒤에만 보는 규칙을 두 곳에서 지켜야 한다. 받지 않는다.
 - **route 마다 기다림을 각자 쓴다.** 지금 세 벌이 이미 서로 다르고, 그중 하나는 끝나지 않는다(§2.3). 받지 않는다.
 
 ## 5. 영향
@@ -195,18 +227,19 @@ MCP GET·AG-UI·presence 스트림은 이미 `Sse` 의 queue 와 drain fiber 를
 
 ## 6. 검증
 
-- `Server_sse_response` 시험은 loopback 소켓으로 한다. 클라이언트가 읽지 않으면 `send` 가 돌아오지 않는다. 그동안 서버가 쥔 바이트가 frame 하나보다 많지 않다. `stalled_after_s` 가 지나면 `Stalled` 다. 클라이언트가 떠나면 기다리던 frame 은 `Stalled` 이고 응답은 닫힌다. `close` 는 기다리는 `send` 를 모두 `Closed` 로 끝낸다. 닿는 것과 시간이 겹칠 때 `Written` 인 것은 `Watched_work` 시험(`test/test_watched_work.ml`)이 본다.
+- `Server_sse_response` 시험은 loopback 소켓으로 한다. 클라이언트가 읽지 않으면 `send` 가 돌아오지 않는다. 그동안 서버가 쥔 바이트가 frame 하나보다 많지 않다. `stalled_after_s` 가 지나면 `Stalled` 다. 클라이언트가 떠나면 기다리던 frame 은 `Stalled` 이고 응답은 닫힌다. `close` 는 기다리는 `send` 를 모두 `Closed` 로 끝낸다. 닿는 것과 시간이 같은 차례에 오면 `Written` 인 것은 메모리 위 httpun 연결로 쓰기 답을 손으로 줘서 본다.
 - 지금 코드에 같은 시험을 돌리면, 읽지 않는 클라이언트에게 `send_raw` 가 계속 `true` 를 돌려주고 쥔 바이트가 frame 수에 비례해서 늘어야 한다. 이 시험이 지금 코드에서 실패하는 것을 PR 본문에 적는다.
-- `Server_sse_pump` 시험은 지금 `test/test_fleet_stream_pump.ml` 의 경우를 이벤트 타입만 바꿔서 지킨다.
-- Keeper chat 시험: 느린 송신 중에 producer 가 `publish` 를 부르면 바로 돌아온다. queue 가 차면 스트림이 닫힌다. acceptance, replay, live 순서가 지금과 같다.
+- `Server_sse_pump` 시험은 지금 `test/test_fleet_stream_pump.ml` 의 경우를 이벤트 타입만 바꿔서 지킨다. `Skip`·`Send_last`·`Quiet`·`Finish` 를 더 잰다. 여러 domain 의 producer 가 동시에 넣어도 `push` 가 기다리지 않는다.
+- Keeper chat 시험: 느린 송신 중에 producer 가 sink 를 부르면 바로 돌아온다. queue 가 차면 스트림이 닫힌다. acceptance, replay, live 순서가 지금과 같다.
 - 배포 뒤 시스템 로그에서 MCP `stream full` 과 각 스트림의 `Stalled` 건수를 센다.
 
 ## 7. 층
 
 1. 이 RFC.
 2. `Server_sse_response` 를 만들고 artifact draft, Keeper 실행 출력, 로그인 둘, Ask follow-up 을 옮긴다.
-3. `Server_fleet_stream_pump` 를 `Server_sse_pump` 로 일반화한다. fleet route 를 `Server_sse_response` 로 옮기고, pump 가 쓰던 `Watched_work` 를 지운다. 한 frame 의 시간을 두 곳에서 재지 않도록 fleet 은 이 층에서 한 번에 옮긴다.
-4. Keeper chat 스트림을 pump 로 옮기고 `Server_keeper_stream_handoff` 를 지운다. queue 상한은 이 층에서 journal 의 operation 별 초당 이벤트 수를 재서 정한다.
+3. `Server_fleet_stream_pump` 를 `Server_sse_pump` 로 일반화한다. fleet route 를 `Server_sse_response` 로 옮기고, pump 가 `send` 의 시간을 재던 `Watched_work` 를 지운다. 한 frame 의 시간을 두 곳에서 재지 않도록 fleet 은 이 층에서 한 번에 옮긴다.
+4a. pump 가 `Queue.t` 를 받고 `step`·`idle` 로 쓰고 끝낼 것을 정하게 바꾼다. 구독은 fleet route 로 옮긴다. fleet 의 동작은 같다.
+4b. Keeper chat 스트림을 pump 로 옮기고 `Server_keeper_stream_handoff` 를 지운다. queue 상한은 4,096 이다. 1초 창 최댓값 2,616(§1.4)을 담는 가장 작은 2의 거듭제곱이다. 읽는 클라이언트가 1초 동안 frame 을 받지 못해도 끊기지 않는다. 그보다 오래 멈춘 클라이언트는 `since_seq` 로 다시 붙어 journal replay 를 받는다.
 5. MCP `subscriptions/listen` 을 pump 로 옮기고, `send_raw` 와 eviction frame 을 `Server_sse_response` 로 바꾼다.
 
 #48650 이 먼저 병합되면 2층에서 로그 스트림의 `send_within` 도 옮긴다. 이 RFC 가 먼저면 #48650 이 `Server_sse_response` 를 쓴다.

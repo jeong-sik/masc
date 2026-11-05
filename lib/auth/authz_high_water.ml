@@ -57,6 +57,28 @@ module Probe = struct
     in
     { probe with head = record.Authz_record.hash; after_previous; commit_seen }
   ;;
+
+  (* No record follows the previous hash of a new intent when that hash is the
+     head, as it is for the intent of a writer. An intent at an earlier record
+     keeps [after_previous] at [None] with a head that differs, which [settle]
+     reads as [Intent_unplaced], never as [Abort]. A [Committed] closes the
+     pending intent with the hash it named, so it is in the log when the record
+     after the previous hash of that intent was fed. *)
+  let store_moved probe entry =
+    match Store.apply probe.state entry with
+    | Error violation -> Error violation
+    | Ok state ->
+      (match entry with
+       | Store.Intent_pending _ | Store.Aborted_intent _ ->
+         Ok { probe with state; after_previous = None }
+       | Store.Committed { record_hash } ->
+         let commit_seen =
+           match probe.after_previous with
+           | Some found -> Hash.equal found record_hash
+           | None -> false
+         in
+         Ok { probe with state; after_previous = None; commit_seen })
+  ;;
 end
 
 (* Items 2, 3 and 5 of design 8.2: the record after the previous hash of the
@@ -90,10 +112,14 @@ let check_commit (probe : Probe.t) =
   | Some _ | None -> Ok ()
 ;;
 
-let judge (probe : Probe.t) =
+type agreement =
+  | Nothing_answered
+  | Answered of settlement
+
+let settle_on_entry (probe : Probe.t) =
   match check_commit probe, settle probe with
-  | Error first, Error second -> Mismatch (first, [ second ])
-  | Error reason, Ok _ | Ok (), Error reason -> Mismatch (reason, [])
+  | Error first, Error second -> Error (first, [ second ])
+  | Error reason, Ok _ | Ok (), Error reason -> Error (reason, [])
   | Ok (), Ok settlement ->
     (* The rules of the store let an intent come before the first [Committed]
        only if it is a [Fresh_bootstrap], so with no [Committed] there is no
@@ -101,8 +127,16 @@ let judge (probe : Probe.t) =
        bootstrap that did not happen (design 5.1, 없음). A promoted intent is a
        [Committed] that the store has not written yet. *)
     (match Store.State.last_committed probe.Probe.state, settlement with
-     | None, (Nothing_to_settle | Abort _) -> Absent
-     | None, Promote _ | Some _, (Nothing_to_settle | Promote _ | Abort _) -> Matches)
+     | None, (Nothing_to_settle | Abort _) -> Ok Nothing_answered
+     | None, Promote _ | Some _, (Nothing_to_settle | Promote _ | Abort _) ->
+       Ok (Answered settlement))
+;;
+
+let judge (probe : Probe.t) =
+  match settle_on_entry probe with
+  | Error (first, rest) -> Mismatch (first, rest)
+  | Ok Nothing_answered -> Absent
+  | Ok (Answered (_ : settlement)) -> Matches
 ;;
 
 let reason_to_string = function

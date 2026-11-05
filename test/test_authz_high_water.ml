@@ -180,7 +180,24 @@ let check_probe label expected probe =
   Alcotest.(check string)
     (label ^ ": what closes the intent")
     expected.settle
-    (settle_name (H.settle probe))
+    (settle_name (H.settle probe));
+  (* A writer that enters its zone gets the reasons of a mismatch, and
+     otherwise whether the store holds an answer and, when it does, the
+     settlement. *)
+  match H.settle_on_entry probe with
+  | Error (first, rest) ->
+    Alcotest.(check string)
+      (label ^ ": on entry to a zone")
+      expected.value
+      (value_name (H.Mismatch (first, rest)))
+  | Ok H.Nothing_answered ->
+    Alcotest.(check string) (label ^ ": on entry to a zone") expected.value (value_name H.Absent)
+  | Ok (H.Answered settlement) ->
+    Alcotest.(check string) (label ^ ": on entry to a zone") expected.value (value_name H.Matches);
+    Alcotest.(check string)
+      (label ^ ": what closes the intent on entry")
+      expected.settle
+      (settlement_name settlement)
 ;;
 
 (* Each case: what the store holds, what the log holds, the value, and what
@@ -546,6 +563,97 @@ let reasons_name_the_records () =
   Alcotest.(check int) "each reason has its own text" (List.length texts) (List.length distinct)
 ;;
 
+(* ---- a probe that a writer moves ---- *)
+
+type move =
+  | Entry of S.entry
+  | Record of R.t
+
+let moved_probe moves =
+  List.fold_left
+    (fun probe move ->
+      match move with
+      | Record record -> H.Probe.add probe record
+      | Entry entry ->
+        (match H.Probe.store_moved probe entry with
+         | Ok probe -> probe
+         | Error violation ->
+           Alcotest.failf "the probe refused an entry: %s" (S.violation_to_string violation)))
+    (H.Probe.create S.State.empty)
+    moves
+;;
+
+(* The probe built from the whole files, the way a start builds it. *)
+let probe_from_scratch moves =
+  probe_of
+    (List.filter_map
+       (function
+         | Entry entry -> Some entry
+         | Record _ -> None)
+       moves)
+    (List.filter_map
+       (function
+         | Record record -> Some record
+         | Entry _ -> None)
+       moves)
+;;
+
+let wrote_bootstrap = [ Entry bootstrap_intent; Record (record 1); Entry (committed (hash_of_record 1)) ]
+
+(* A writer that puts each intent at the head: the probe it moves says what a
+   probe built from the files says. *)
+let a_moved_probe_agrees_with_the_files () =
+  List.iter
+    (fun (label, moves) ->
+      let moved = moved_probe moves in
+      let built = probe_from_scratch moves in
+      Alcotest.(check string)
+        (label ^ ": the value")
+        (value_name (H.judge built))
+        (value_name (H.judge moved));
+      Alcotest.(check string)
+        (label ^ ": what closes the intent")
+        (settle_name (H.settle built))
+        (settle_name (H.settle moved)))
+    [ "the bootstrap", wrote_bootstrap
+    ; "an intent at the head", wrote_bootstrap @ [ Entry (intent_after 1 2) ]
+    ; "the record of the intent", wrote_bootstrap @ [ Entry (intent_after 1 2); Record (record 2) ]
+    ; ( "its answer"
+      , wrote_bootstrap
+        @ [ Entry (intent_after 1 2); Record (record 2); Entry (committed (hash_of_record 2)) ] )
+    ; ( "an aborted intent"
+      , wrote_bootstrap
+        @ [ Entry (intent_after 1 2)
+          ; Entry (aborted ~previous:(hash_of_record 1) ~digest:(hash_of_record 2) revoke)
+          ] )
+    ; ( "an answer for a record that is not in the log"
+      , wrote_bootstrap @ [ Entry (intent_after 1 2); Entry (committed (hash_of_record 2)) ] )
+    ; ( "another record after the intent"
+      , wrote_bootstrap @ [ Entry (intent_after 1 2); Record (other_record 2) ] )
+    ; "a record without an intent", wrote_bootstrap @ [ Record (record 2) ]
+    ]
+;;
+
+(* An intent that a writer did not put at the head: the moved probe cannot see
+   what follows it, and reads it as unplaced. It never aborts it. *)
+let an_intent_behind_the_head_is_not_aborted () =
+  let moves = wrote_bootstrap @ [ Record (record 2); Entry (intent_after 1 3) ] in
+  Alcotest.(check string)
+    "the moved probe"
+    "stays pending, intent unplaced r1>r3"
+    (settle_name (H.settle (moved_probe moves)));
+  Alcotest.(check string)
+    "the files"
+    "stays pending, digest differs r1>r3 found r2"
+    (settle_name (H.settle (probe_from_scratch moves)))
+;;
+
+let a_moved_probe_refuses_what_the_store_refuses () =
+  match H.Probe.store_moved (H.Probe.create S.State.empty) (committed (hash_of_record 1)) with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "a commit with no intent was taken"
+;;
+
 let () =
   Alcotest.run
     "authz_high_water"
@@ -565,6 +673,17 @@ let () =
             "a promoted bootstrap gives its workspace"
             `Quick
             a_promoted_bootstrap_gives_its_workspace
+        ] )
+    ; ( "moved"
+      , [ Alcotest.test_case "agrees with the files" `Quick a_moved_probe_agrees_with_the_files
+        ; Alcotest.test_case
+            "an intent behind the head is not aborted"
+            `Quick
+            an_intent_behind_the_head_is_not_aborted
+        ; Alcotest.test_case
+            "refuses what the store refuses"
+            `Quick
+            a_moved_probe_refuses_what_the_store_refuses
         ] )
     ; ( "file"
       , [ Alcotest.test_case

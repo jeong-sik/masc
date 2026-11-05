@@ -139,6 +139,23 @@ module Probe : sig
       The records are those that {!Authz_log} has checked, so their hashes and
       links are not checked again. *)
   val add : t -> Authz_record.t -> t
+
+  (** The probe after the external store took [entry], for a writer that keeps
+      one probe while it writes both files, so that it does not read the log
+      again. [Error] is the violation the store refuses [entry] with
+      ({!Authz_external_store.apply}): the writer asks here before it writes
+      the entry.
+
+      An [Intent_pending] is taken to have no record after its previous hash.
+      That holds for an intent at the last record fed to the probe, as the
+      intent of a writer is. An intent at an earlier record reads as
+      {!Intent_unplaced}, and never as {!Abort}. A [Committed] counts as in the
+      log when the record after the previous hash of the intent it closes was
+      fed. *)
+  val store_moved
+    :  t
+    -> Authz_external_store.entry
+    -> (t, Authz_external_store.violation) result
 end
 
 (** Items 2, 3 and 5: what closes the pending intent. [Error] holds the reason
@@ -153,7 +170,22 @@ val settle : Probe.t -> (settlement, reason) result
     and after a promoted [Fresh_bootstrap] that state holds the workspace. *)
 val settlement_entry : settlement -> Authz_external_store.entry option
 
-(** The value for the store the probe was built from, and the log it was fed. *)
+(** Whether a store and a log that agree hold an answer, and for one that
+    does, what settles the intent that an earlier writer left. *)
+type agreement =
+  | Nothing_answered  (** The value is {!Absent}: the store holds no [Committed]. *)
+  | Answered of settlement  (** The value is {!Matches}. *)
+
+(** Items 2 to 5, as a writer reads them each time it enters its zone (design
+    8.2, item 1). When every judgment passes, whether the store holds an answer,
+    with the settlement. Otherwise every reason, in the order of {!Mismatch}.
+    A writer that installs a log wants {!Nothing_answered}, and a writer that
+    adds to an installed log wants {!Answered}. *)
+val settle_on_entry : Probe.t -> (agreement, reason * reason list) result
+
+(** The value for the store the probe was built from, and the log it was fed:
+    [Mismatch] with the reasons of {!settle_on_entry} when it is [Error],
+    [Absent] for {!Nothing_answered}, and [Matches] for {!Answered}. *)
 val judge : Probe.t -> t
 
 val reason_to_string : reason -> string

@@ -22,19 +22,29 @@ let refusal_to_string = function
   | Kind_not_read kind -> Printf.sprintf "no layer of this server reads %s records" (K.to_string kind)
 ;;
 
+type applied =
+  { state : t
+  ; high_water : Authz_external_store.Change.t
+  }
+
+(* A mode event is an intent of the external store (design 8.2). *)
 let mode_event state (record : R.t) =
   match Authz_mode_event.of_body record.R.body with
   | Error error -> Error (Mode_event_unreadable error)
-  | Ok event ->
-    (match Authz_mode_state.apply state.mode event with
-     | Ok mode -> Ok { mode }
+  | Ok ({ Authz_mode_event.event; workspace_id } as mode_event) ->
+    (match Authz_mode_state.apply state.mode mode_event with
+     | Ok mode ->
+       Ok
+         { state = { mode }
+         ; high_water = Authz_external_store.Change.Mode { event; workspace_id }
+         }
      | Error refusal -> Error (Mode refusal))
 ;;
 
 (* Every kind but a mode event is matched with the mode, so the branch of a
    kind says what a record of it means before the bootstrap, and a layer gets
    the workspace of the bootstrap only from a branch that has one. *)
-let step state (record : R.t) =
+let apply state (record : R.t) =
   match record.R.kind, state.mode with
   | K.Mode_event, (Authz_mode_state.Not_bootstrapped | Multi_account _ | Off _) ->
     mode_event state record
@@ -60,4 +70,10 @@ let step state (record : R.t) =
       | K.Migration_diagnostic
       | K.Local_recovery ) as kind )
     , (Authz_mode_state.Multi_account _ | Off _) -> Error (Kind_not_read kind)
+;;
+
+let step state record =
+  match apply state record with
+  | Ok { state; high_water = _ } -> Ok state
+  | Error refusal -> Error refusal
 ;;

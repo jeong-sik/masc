@@ -1064,31 +1064,35 @@ let is_success_http_status status_code = status_code >= 200 && status_code < 300
    the same way whether it is the whole body or the message of the [ok:false]
    wrapper. The voice config route, Board reactions and operator actions send
    it as the whole body, and there the pane showed the JSON cut at the head
-   limit with the sentence's tail missing. *)
+   limit with the sentence's tail missing. The message of a failed delegated
+   tool is that tool's own envelope as text, so one such layer is unwrapped
+   wherever the message sits. *)
 let json_error_sentence body =
   let non_blank = function
     | `String message when String.trim message <> "" -> Some (String.trim message)
     | `String _ | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null -> None in
-  let envelope_sentence fields =
+  let envelope_message fields =
     match List.assoc_opt "status" fields, List.assoc_opt "message" fields with
-    | Some (`String "error"), Some value -> non_blank value
+    | Some (`String "error"), Some (`String message) -> Some message
     | _ -> None in
-  let tool_message message =
-    match Yojson.Safe.from_string message with
-    | `Assoc fields -> envelope_sentence fields
-    | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
-    | exception Yojson.Json_error _ -> None in
+  let sentence_of message =
+    let inner =
+      match Yojson.Safe.from_string message with
+      | `Assoc fields ->
+        Option.bind (envelope_message fields) (fun text -> non_blank (`String text))
+      | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
+      | exception Yojson.Json_error _ -> None in
+    match inner with Some _ as sentence -> sentence | None -> non_blank (`String message) in
   match Yojson.Safe.from_string body with
   | `Assoc fields -> (
     match List.assoc_opt "error" fields with
     | Some (`String message) when String.trim message <> "" -> Some (String.trim message)
     | Some _ | None ->
-      (match envelope_sentence fields with
-       | Some _ as sentence -> sentence
+      (match envelope_message fields with
+       | Some message -> sentence_of message
        | None ->
          (match List.assoc_opt "ok" fields, List.assoc_opt "message" fields with
-          | Some (`Bool false), Some (`String message) ->
-            (match tool_message message with Some _ as detail -> detail | None -> non_blank (`String message))
+          | Some (`Bool false), Some (`String message) -> sentence_of message
           | _ -> None)))
   | _ -> None
   | exception Yojson.Json_error _ -> None

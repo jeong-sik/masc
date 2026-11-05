@@ -723,6 +723,168 @@ let branches_at ?(timeout_sec = inspection_timeout_sec) ~local_path ~max_entries
   | Stdlib.Error msg -> Stdlib.Error msg
   | Stdlib.Ok output -> branch_list_of_for_each_ref ~max_entries output
 
+type worktree_state =
+  | Worktree_branch of string
+  | Worktree_detached
+  | Worktree_bare
+
+type worktree_entry = {
+  wt_name : string;
+  wt_main : bool;
+  wt_head : string option;
+  wt_state : worktree_state;
+  wt_locked : bool;
+  wt_prunable : bool;
+}
+
+type worktree_list = {
+  wl_entries : worktree_entry list;
+  wl_truncated : bool;
+}
+
+(* Fields of one [git worktree list --porcelain -z] record, filled as the
+   attribute lines are read. [wf_state] is the one of branch, detached and bare
+   that the record named. *)
+type worktree_fields = {
+  wf_head : string option;
+  wf_state : worktree_state option;
+  wf_locked : bool;
+  wf_prunable : bool;
+}
+
+let worktree_value ~prefix field =
+  let prefix_length = String.length prefix in
+  if String.length field >= prefix_length
+     && String.equal (String.sub field 0 prefix_length) prefix
+  then Some (String.sub field prefix_length (String.length field - prefix_length))
+  else None
+
+(* [locked] and [prunable] carry an optional free-text reason after a space.
+   The reason is dropped: only whether the worktree is flagged is kept. *)
+let worktree_flag ~name field =
+  String.equal field name || Option.is_some (worktree_value ~prefix:(name ^ " ") field)
+
+let worktree_is_hex value =
+  let hex = function '0' .. '9' | 'a' .. 'f' -> true | _ -> false in
+  String.length value > 0 && String.for_all hex value
+
+let rec worktree_read_fields acc = function
+  | [] -> Stdlib.Ok acc
+  | field :: rest ->
+      let ( let* ) = Stdlib.Result.bind in
+      let set_state state =
+        match acc.wf_state with
+        | None -> Stdlib.Ok { acc with wf_state = Some state }
+        | Some _ -> Stdlib.Error "git worktree record names its checkout state twice"
+      in
+      let* acc =
+        match worktree_value ~prefix:"HEAD " field with
+        | Some head ->
+            if not (worktree_is_hex head) then
+              Stdlib.Error (Printf.sprintf "git worktree has an unreadable HEAD: %S" head)
+            else (
+              match acc.wf_head with
+              | None -> Stdlib.Ok { acc with wf_head = Some head }
+              | Some _ -> Stdlib.Error "git worktree record names HEAD twice")
+        | None ->
+            (match worktree_value ~prefix:"branch refs/heads/" field with
+             | Some name when not (String.equal name "") -> set_state (Worktree_branch name)
+             | Some _ -> Stdlib.Error "git worktree record has an empty branch name"
+             | None ->
+                 if String.equal field "detached" then set_state Worktree_detached
+                 else if String.equal field "bare" then set_state Worktree_bare
+                 else if worktree_flag ~name:"locked" field then
+                   Stdlib.Ok { acc with wf_locked = true }
+                 else if worktree_flag ~name:"prunable" field then
+                   Stdlib.Ok { acc with wf_prunable = true }
+                 else
+                   Stdlib.Error
+                     (Printf.sprintf "git worktree record has an unknown field: %S" field))
+      in
+      worktree_read_fields acc rest
+
+(* One record: [worktree PATH] first, then attribute lines. Only the last path
+   component is kept, because the list is served to clients that may not see
+   the host's directory layout. *)
+let worktree_entry_of_record ~main = function
+  | [] -> Stdlib.Error "git worktree record is empty"
+  | first :: rest ->
+      let ( let* ) = Stdlib.Result.bind in
+      let* path =
+        match worktree_value ~prefix:"worktree " first with
+        | Some path when not (String.equal path "") -> Stdlib.Ok path
+        | Some _ | None ->
+            Stdlib.Error (Printf.sprintf "git worktree record does not start with a path: %S" first)
+      in
+      let wt_name = Filename.basename path in
+      let* () =
+        if String.equal wt_name "" || String.equal wt_name "/" then
+          Stdlib.Error (Printf.sprintf "git worktree path has no name: %S" path)
+        else Stdlib.Ok ()
+      in
+      let* fields =
+        worktree_read_fields
+          { wf_head = None; wf_state = None; wf_locked = false; wf_prunable = false }
+          rest
+      in
+      let* wt_state =
+        match fields.wf_state with
+        | Some state -> Stdlib.Ok state
+        | None -> Stdlib.Error (Printf.sprintf "git worktree %S names no checkout state" wt_name)
+      in
+      (match wt_state, fields.wf_head with
+       | Worktree_bare, (Some _ | None) | (Worktree_branch _ | Worktree_detached), Some _ ->
+           Stdlib.Ok
+             { wt_name; wt_main = main; wt_head = fields.wf_head; wt_state
+             ; wt_locked = fields.wf_locked; wt_prunable = fields.wf_prunable }
+       | (Worktree_branch _ | Worktree_detached), None ->
+           Stdlib.Error (Printf.sprintf "git worktree %S has no HEAD" wt_name))
+
+(* Splits the NUL stream into records. A field ends at a NUL and a record at an
+   empty field, so a stream cut inside a record has a non-empty tail and is an
+   error rather than a shorter list. *)
+let worktree_records_of_output output =
+  let fields = String.split_on_char '\000' output in
+  let rec group current records = function
+    | [] ->
+        (match current with
+         | [] -> Stdlib.Ok (List.rev records)
+         | _ :: _ -> Stdlib.Error "git worktree list output ends inside a record")
+    | "" :: rest ->
+        (match current with
+         | [] -> group [] records rest
+         | _ :: _ -> group [] (List.rev current :: records) rest)
+    | field :: rest -> group (field :: current) records rest
+  in
+  (* [split_on_char] yields a final "" for the closing NUL of a complete
+     stream. Without a closing NUL the last field is non-empty and [group]
+     reports the cut. *)
+  group [] [] fields
+
+let worktree_list_of_porcelain ~max_entries output =
+  if max_entries < 1 then Stdlib.Error "git worktree listing needs max_entries of at least 1"
+  else
+    let ( let* ) = Stdlib.Result.bind in
+    let* records = worktree_records_of_output output in
+    let rec take acc count = function
+      | [] -> Stdlib.Ok { wl_entries = List.rev acc; wl_truncated = false }
+      | _ :: _ when count >= max_entries ->
+          Stdlib.Ok { wl_entries = List.rev acc; wl_truncated = true }
+      | record :: rest ->
+          (match worktree_entry_of_record ~main:(count = 0) record with
+           | Stdlib.Error msg -> Stdlib.Error msg
+           | Stdlib.Ok entry -> take (entry :: acc) (count + 1) rest)
+    in
+    take [] 0 records
+
+let worktrees_at ?(timeout_sec = inspection_timeout_sec) ~local_path ~max_entries () =
+  match
+    run_git_raw ~cwd:local_path ~env:read_only_git_env ~timeout_sec
+      [ "--no-optional-locks"; "worktree"; "list"; "--porcelain"; "-z" ]
+  with
+  | Stdlib.Error msg -> Stdlib.Error msg
+  | Stdlib.Ok output -> worktree_list_of_porcelain ~max_entries output
+
 let file_paths_at ?(timeout_sec = inspection_timeout_sec) ~local_path () =
   match
     run_git_raw ~cwd:local_path ~env:read_only_git_env ~timeout_sec

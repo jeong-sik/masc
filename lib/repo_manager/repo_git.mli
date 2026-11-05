@@ -224,6 +224,47 @@ val branches_at :
     [timeout_sec]. The caller proves that [local_path] is its authorised Git
     root. An empty repository is [Ok] with no entries. *)
 
+(** What a worktree has checked out. *)
+type worktree_state =
+  | Worktree_branch of string  (** A local branch, without [refs/heads/]. *)
+  | Worktree_detached
+  | Worktree_bare
+
+(** One linked or main worktree. The directory is reduced to its last path
+    component: the list is meant for clients that must not learn the host's
+    directory layout. *)
+type worktree_entry = {
+  wt_name : string;
+  wt_main : bool;  (** The first record of git's list is the main worktree. *)
+  wt_head : string option;  (** Full commit id. [None] only for a bare entry. *)
+  wt_state : worktree_state;
+  wt_locked : bool;  (** The lock reason is not kept. *)
+  wt_prunable : bool;  (** Git reports the checkout directory as gone. *)
+}
+
+type worktree_list = {
+  wl_entries : worktree_entry list;  (** In git's order, main worktree first. *)
+  wl_truncated : bool;  (** More worktrees existed than [max_entries]. *)
+}
+
+val worktree_list_of_porcelain :
+  max_entries:int -> string -> (worktree_list, string) result
+(** Pure reader for [git worktree list --porcelain -z]: fields end at a NUL and
+    records at an empty field. A record without a path, without a checkout
+    state, with two states, with an unknown field, or cut short is an
+    [Error _]; none is skipped. *)
+
+val worktrees_at :
+  ?timeout_sec:float ->
+  local_path:string ->
+  max_entries:int ->
+  unit ->
+  (worktree_list, string) result
+(** Worktrees of the repository at [local_path], read-only and bounded by
+    [timeout_sec]. [-z] needs git 2.36 or later; an older git fails with its own
+    message, which is returned as [Error _]. The caller proves that
+    [local_path] is its authorised Git root. *)
+
 val status_snapshot_at :
   ?timeout_sec:float ->
   local_path:string ->

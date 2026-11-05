@@ -548,7 +548,6 @@
   test_channel_gate_imessage_state
   test_dashboard
   test_dashboard_librarian_metric
-  test_dashboard_perf
   test_dashboard_tool_host_events
   test_dashboard_nav_event
   test_server_dashboard_http_keeper_memory_health
@@ -893,7 +892,6 @@
   test_channel_gate_imessage_state
   test_dashboard
   test_dashboard_librarian_metric
-  test_dashboard_perf
   test_dashboard_tool_host_events
   test_dashboard_nav_event
   test_server_dashboard_http_keeper_memory_health

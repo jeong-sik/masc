@@ -3540,10 +3540,6 @@ let add_routes ~sw ~clock router =
          let json = dashboard_transport_health_http_json ~state in
          Http.Response.json_value ~compress:true ~request:req json reqd
        )
-  |> Server_route.get Server_route.Public_read "/api/v1/dashboard/perf" (fun state req reqd ->
-         let json = dashboard_perf_http_json (Mcp_server.workspace_config state) in
-         Http.Response.json_value ~compress:true ~request:req json reqd
-       )
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/clients" (fun state req reqd ->
          (* Everyone attached to this workspace in one reading: directory
             agents, state-backed sessions, and runtime fibers, merged with

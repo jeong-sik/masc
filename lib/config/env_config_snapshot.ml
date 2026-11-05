@@ -176,8 +176,6 @@ let autonomy_entries =
 
 let dashboard_entries =
   [
-    entry ~default:"(none)" "MASC_BENCHMARK_RESULTS_DIR"
-      "Benchmark results directory override; None when unset";
     entry ~default:"(none)" "MASC_DASHBOARD_CACHE_MAX_ENTRIES"
       "Dashboard cache max entries (clamped 16-512)";
     entry ~default:"48" "MASC_DASHBOARD_EXECUTION_REFRESH_TIMEOUT_S"

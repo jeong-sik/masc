@@ -202,7 +202,7 @@ Keeper chat 에서는 retry frame 을 submit 과 함께 보낸다(`Eio.Fiber.pai
 
 MCP GET·AG-UI·presence 스트림은 이미 `Sse` 의 queue 와 drain fiber 를 갖고 있다. 이 셋은 pump 로 옮기지 않는다. drain fiber 와 ping fiber 의 `send_raw` 가 `Server_sse_response.send` 를 쓰면, `sse.ml:1064` 의 queue 상한이 일하기 시작한다.
 
-drain 은 frame 마다 기다린다. 5b층처럼 묶지 않는다. frame 마다 기다리는 `send` 는 loopback 에서 256B frame 을 초당 3,374~4,781 개 쓴다(§7 5b). queue 는 256칸(`Sse.stream_capacity` 기본값)이다. 그러므로 읽는 클라이언트의 queue 가 차려면, 이벤트가 초당 3,000개 넘게 계속 들어와야 한다. 이 세 스트림의 이벤트 빈도는 재지 않았다. 배포 뒤 `stream full` 건수(§6)로 확인한다.
+drain 은 frame 마다 기다린다. 5b층처럼 묶지 않는다. frame 마다 기다리는 `send` 는 loopback 에서 256B frame 을 초당 3,318~8,921 개 쓴다(§7 5b). queue 는 256칸(`Sse.stream_capacity` 기본값)이다. 그러므로 읽는 클라이언트의 queue 가 차려면, 이벤트가 초당 3,000개 넘게 계속 들어와야 한다. 이 세 스트림의 이벤트 빈도는 재지 않았다. 배포 뒤 `stream full` 건수(§6)로 확인한다.
 
 이 세 스트림의 연결은 다른 domain 에서도 닫힌다. `Sse` queue 상한을 넘은 세션을 끊는 hook(`sse.ml:1064`), 유지보수 fiber(`server_bootstrap_maintenance.ml:783`), 서버 종료(`bin/main_eio.ml:996`)다. response 는 연결의 domain 에 속하므로(§3.1), 닫는 쪽은 response 를 건드리지 않는다.
 
@@ -256,7 +256,7 @@ drain 은 frame 마다 기다린다. 5b층처럼 묶지 않는다. frame 마다 
 4a. pump 가 `Queue.t` 를 받고 `step`·`idle` 로 쓰고 끝낼 것을 정하게 바꾼다. 구독은 fleet route 로 옮긴다. fleet 의 동작은 같다.
 4b. Keeper chat 스트림을 pump 로 옮기고 `Server_keeper_stream_handoff` 를 지운다. queue 상한은 4,096 이다. 1초 창 최댓값 2,616(§1.4)을 담는 가장 작은 2의 거듭제곱이다. 읽는 클라이언트가 1초 동안 frame 을 받지 못해도 끊기지 않는다. 그보다 오래 멈춘 클라이언트는 `since_seq` 로 다시 붙어 journal replay 를 받는다.
 5a. HTTP/1.1 MCP `subscriptions/listen` 을 pump 로 옮긴다. queue 상한은 MCP GET 스트림과 같은 `Sse.stream_capacity` 다. queue 가 차면 스트림을 닫는다. listen 에는 replay 가 없어서 쌓였던 알림은 돌아오지 않는다. 다시 listen 한 클라이언트는 그 뒤 알림을 받는다. 전에는 상한이 없어 알림을 잃지 않았지만, 읽지 않는 클라이언트의 알림이 서버 메모리에 쌓였다.
-5b. pump 가 이미 쌓인 frame 을 한 `send` 로 쓴다. frame 마다 기다리면 loopback 에서 256B frame 이 초당 3,374~4,781 개였다(`test/bench_sse_pump_throughput.ml`, 2만 frame 을 먼저 쌓은 burst, 3회 중앙값). 묶으면 초당 95만~109만 개다. 기다리지 않던 옛 쓰기는 초당 74만~100만 개다. 같은 장비를 다른 세션이 쓰고 있어 실행마다 값이 다르다. frame 한 번 기다리는 데 드는 시간 대부분은 flush 가 아니라 `send` 의 감시(fiber 와 타이머)다. flush 만 기다리면 초당 2만~2.8만 개다.
+5b. pump 가 이미 쌓인 frame 을 한 `send` 로 쓴다. `test/bench_sse_pump_throughput.ml` 은 loopback 에서 2만 frame 을 먼저 쌓은 burst 를 잰다. 네 방식은 실행마다 순서를 하나씩 돌리고, 한 번 부를 때 3회 중앙값을 낸다. 2026-11-06 에 다섯 번 불렀고 장비 load average 는 29~57 이었다. 256B frame 에서 frame 마다 기다리는 `send` 는 초당 3,318~8,921 개(중앙값 5,332), 묶은 pump 는 129,447~688,206 개(중앙값 517,716)다. 기다리지 않던 옛 쓰기는 203,294~641,311 개(중앙값 591,263)다. 같은 실행 안에서 pump 는 옛 쓰기의 0.64~1.21배(중앙값 0.81)다. 4096B frame 에서는 pump 34,531~69,281 개(중앙값 59,118), 옛 쓰기 79,626~124,707 개(중앙값 97,327)로 0.35~0.63배(중앙값 0.57)다. 묶음 하나가 64KiB 라서 4096B frame 은 16개마다 한 번 기다린다. pump 는 옛 쓰기보다 느리지만, writer 가 쥐는 양을 묶음 하나로 묶는다. flush 만 기다리면 256B 에서 3,825~18,918 개(중앙값 11,916)로, 같은 실행의 `send` 보다 1.15~2.55배(중앙값 1.94) 빠르다. 그래서 frame 하나를 기다리는 시간의 절반쯤이 `send` 의 감시(fiber 와 타이머)다.
 5c. `send_raw` 를 `Server_sse_response.send` 로 바꾸고, response 를 닫는 일을 연결의 감독 fiber 로 옮긴다(§3.2). `tools/call` POST 스트림은 `Server_sse_response.t` 를 바로 쓴다. 닿지 않는 `event: evicted` frame 쓰기를 지운다(#48870).
 
 #48650 이 먼저 병합되면 2층에서 로그 스트림의 `send_within` 도 옮긴다. 이 RFC 가 먼저면 #48650 이 `Server_sse_response` 를 쓴다.

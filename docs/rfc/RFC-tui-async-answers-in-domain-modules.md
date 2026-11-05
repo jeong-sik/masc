@@ -233,6 +233,28 @@ Incr_dom 의 `schedule_action`, Elm 의 `Cmd.map` 이 하는 일이다. 요청 �
 받는다. 예를 들어 `Masc_tui_identity_requests.launch_github_view` 는 Github 답을 보내므로
 Github 의 `deliver` 를 받는다.
 
+많은 요청 함수는 공용 helper 로 답을 보낸다. `launch_workspace_result`,
+`launch_workspace_request`, `launch_workspace_json_read` 를 부르는 곳이 69곳이다. 이 helper
+는 요청을 시작할 때 도장을 잡는다. 그리고 `~deliver` 로 받은 함수로 결과를 `async_msg` 로
+바꾼 뒤, 도장을 찍어 보낸다. 그중 52곳은 `~deliver` 가 묶음 생성자를 바로 만든다. 19개
+묶음이고, Tools 8곳, Lane 7곳, Goal 5곳 순이다.
+
+이런 묶음은 보내는 함수 대신 감싸는 함수 하나를 둔다. helper 의 `~deliver` 는 그 함수를
+거쳐 답을 만든다.
+
+```ocaml
+let wrap_original answer =
+  match Original_results.answer_kind answer with
+  | Original_results.Read -> Original_msg answer
+
+(* 요청 함수 안 *)
+~deliver:(fun result -> wrap_original (Original_results.Original_task_read_done (request, result)))
+```
+
+helper 는 늘 도장을 찍는다. 그래서 도장 없이 보내야 하는 kind 의 답은 이 helper 로 보내지
+않는다. 감싸는 함수가 kind 를 빠짐없이 match 하므로, 그런 kind 가 생기면 이 자리가 컴파일
+오류로 알려 준다.
+
 ### 3.3 `masc_tui.ml` 에 남는 것
 
 - 묶음마다 한 갈래. Code 는 아래처럼 된다. 지금 코드와 같은 순서로 판단한다. 저장을 먼저
@@ -317,8 +339,8 @@ Github 의 `deliver` 를 받는다.
   적어야 컴파일된다. 답 목록에 넣는 일은 컴파일러가 알려 주지 않는다.
 - **파싱 검사(층마다)**: `apply_async_message_body` 의 맨 위 갈래와 받지 않는 답의 match 에
   그 묶음 갈래가 하나씩만 있는지 센다. 그 묶음 생성자가 쓰인 곳이 모두 자기 묶음 생성자
-  안에 있는지도 센다. `bin/masc_tui.ml` 에서 묶음 생성자를 만드는 곳이 `deliver_<묶음>`
-  한 곳뿐인지도 센다.
+  안에 있는지도 센다. `bin/masc_tui.ml` 에서 묶음 생성자를 만드는 곳이 `deliver_<묶음>` 이나
+  `wrap_<묶음>` 한 곳뿐인지도 센다.
 - CI type-check 와 그 묶음의 시험 suite.
 
 ## 6. 비용과 위험
@@ -337,7 +359,7 @@ Github 의 `deliver` 를 받는다.
   그 묶음 라이브러리를 직접 적어야 한다. L1 은 시험 stanza 에 더했다.
 - 옮기는 동안 두 모양이 섞인다. 층마다 묶음 하나를 끝까지 옮겨서, 반쯤 옮긴 묶음은 남기지
   않는다.
-- 묶음 생성자는 공개다. `deliver_<묶음>` 밖에서 `enqueue_async mailbox (Context_msg answer)`
+- 묶음 생성자는 공개다. 감싸는 함수 밖에서 `enqueue_async mailbox (Context_msg answer)`
   처럼 만들어도 컴파일되고, 그 답은 도장 없이 들어간다. 지금은 5의 파싱 검사로 찾는다.
   컴파일러가 막게 하려면 감싼 답을 만드는 함수만 공개해야 한다(private 타입). 이 RFC 범위
   밖이다.
@@ -369,6 +391,9 @@ Github 의 `deliver` 를 받는다.
   369곳 중 274곳, match 779곳 중 339곳이 `bin/masc_tui.ml` 이다. 프로토콜은 match 405곳이다.
 - 로그 갈래: 본문에 `Log.<모듈>.warn`·`info`·`debug`·`err`·`error` 를 부르는 줄이 하나라도
   있는 갈래를 센다.
+- helper 호출: `bin/masc_tui.ml` 에서 세 helper 를 모듈 이름 없이 적용한 식을 센다. 모두
+  71곳이고, helper 정의 안에서 다른 helper 를 부르는 2곳을 빼면 69곳이다. `~deliver` 인자가
+  `fun x -> <묶음>_msg …` 꼴이면 그 묶음으로 센다.
 - 한계: 다른 모듈 함수 안에서 바꾸는 필드는 세지 않는다. 갈래 안에서 같은 이름을 다시 묶으면
   그 이름은 세지 않는다. 측정 도구는 저장소에 넣지 않았다.
 

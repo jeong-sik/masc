@@ -9131,6 +9131,21 @@ let launch_owed_browser_observation state ~mailbox =
   match browser_lane_on_screen state with
   | None -> state.browser_observation_owed <- Masc_tui_owed_read.settled
   | Some view ->
+      (match view.Browser_lane_view.load with
+       | Browser_lane_view.Failed _ ->
+           let owed_kind = match state.browser_observation_owed with
+             | Masc_tui_owed_read.Settled -> "settled"
+             | Masc_tui_owed_read.Owed _ -> "owed"
+             | Masc_tui_owed_read.Reading _ -> "reading"
+             | Masc_tui_owed_read.Waiting { retry_at; _ } ->
+                 Printf.sprintf "waiting:%.3f" retry_at
+           in
+           Log.Transport.warn
+             "browser observation failed tick owed=%s now=%.3f ready=%b history=%b"
+             owed_kind (monotonic_now_s ()) (server_authority_ready state)
+             (Option.is_some state.browser_history)
+       | Browser_lane_view.Loading _ | Browser_lane_view.Idle
+       | Browser_lane_view.No_browser -> ());
       let owed = match view.Browser_lane_view.load with
         | Browser_lane_view.Loading _ -> state.browser_observation_owed
         | Browser_lane_view.Idle -> Masc_tui_owed_read.succeeded state.browser_observation_owed
@@ -9145,7 +9160,9 @@ let launch_owed_browser_observation state ~mailbox =
         let viewport = if state.image_open then Option.map fst state.browser_viewport else None in
         match Browser_lane_view.cadence_operation ?viewport view with
         | Some operation ->
-            Log.Transport.warn "browser observation cadence selected";
+            Log.Transport.warn "browser observation cadence selected ready=%b busy=%b history=%b"
+              (server_authority_ready state) (Browser_lane_view.busy view)
+              (Option.is_some state.browser_history);
             state.browser_observation_owed <- Masc_tui_owed_read.started owed;
             launch_browser_lane state ~mailbox operation
         | None ->

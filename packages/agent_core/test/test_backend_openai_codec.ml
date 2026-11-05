@@ -853,7 +853,7 @@ let test_inline_carrier_validation_and_synthetic_stream () =
     | Ok replay -> replay | Error detail -> Alcotest.fail detail in
   let interleaved_response = {response with content=interleaved;
     telemetry=Some {default_inference_telemetry with inline_content_replay=Some interleaved_witness}} in
-  let admission = Agent_core.Agent_tools.admit_tool_use_names
+  let admission = Agent_core.Agent_tools.admit_tool_use_names ~unreadable_tool_uses:[]
       (Agent_core.Agent_tools.build_index []) interleaved in
   (match retain_response_content ~retained_indices:admission.retained_content_indices
       ~content:admission.admitted interleaved_response with

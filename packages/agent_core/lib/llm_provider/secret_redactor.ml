@@ -349,3 +349,14 @@ let%test "redact_string leaves ordinary text alone" =
 let%test "redact_string does not infer credential meaning from a bare identifier" =
   redact_string "opaque_prefix_0123456789" = "opaque_prefix_0123456789"
 ;;
+
+let max_redacted_excerpt_bytes = 256
+
+let redacted_excerpt raw =
+  let redacted = redact_string raw in
+  if String.length redacted <= max_redacted_excerpt_bytes
+  then redacted
+  else
+    Agent_core_strings.utf8_prefix ~max_bytes:max_redacted_excerpt_bytes redacted
+    ^ "...(truncated)"
+;;

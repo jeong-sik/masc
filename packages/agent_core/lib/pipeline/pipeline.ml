@@ -147,6 +147,21 @@ let stage_route
 
 (* ── Stage 4: Collect ────────────────────────────────────── *)
 
+(* The calls one turn did not run, kept apart by why. A call whose arguments
+   were not one JSON object never reached admission as a [ToolUse]: the
+   response carried it in [unreadable_tool_uses], and the sentence for it says
+   what the parser found rather than echoing the broken text. *)
+type refused_tool_calls =
+  { unavailable_names : string list
+  ; unreadable : Llm_provider.Types.unreadable_tool_use list
+  }
+
+let no_refused_tool_calls = { unavailable_names = []; unreadable = [] }
+
+let has_refused_tool_calls { unavailable_names; unreadable } =
+  unavailable_names <> [] || unreadable <> []
+;;
+
 (* One sentence, one builder. The turn refuses a call in two places -- before
    tool results when nothing routed, after them when something did -- and a
    model that reads two different wordings for one refusal has to work out
@@ -169,21 +184,37 @@ let stage_route
    [User] message the transcript replays that for the rest of the
    conversation. So the sentence names the request as the scope, gives both
    reasons a name can be missing, and points at loading before re-sending. *)
-let admission_refusal_message names : Types.message =
-  { origin = Recovery_instruction; Types.role = User
-  ; content =
-      [ Types.Text
-          (Printf.sprintf
-             "%d tool call(s) in your previous message named no tool available \
-              on that request and were not run: %s. A name can be missing \
-              because no such tool exists or because its schema was not sent \
-              on that request; if a tool for loading tools by name is offered, \
-              ask it for the name and call it again. Otherwise send an \
-              available tool name on its own and put every argument in the \
-              input object."
-             (List.length names)
-             (Agent_tools.describe_rejected_names names))
+let admission_refusal_message { unavailable_names; unreadable } : Types.message =
+  let unavailable =
+    match unavailable_names with
+    | [] -> []
+    | names ->
+      [ Printf.sprintf
+          "%d tool call(s) in your previous message named no tool available \
+           on that request and were not run: %s. A name can be missing \
+           because no such tool exists or because its schema was not sent \
+           on that request; if a tool for loading tools by name is offered, \
+           ask it for the name and call it again. Otherwise send an \
+           available tool name on its own and put every argument in the \
+           input object."
+          (List.length names)
+          (Agent_tools.describe_rejected_names names)
       ]
+  in
+  let unreadable =
+    match unreadable with
+    | [] -> []
+    | calls ->
+      [ Printf.sprintf
+          "%d tool call(s) in your previous message were not run because their \
+           arguments were not one JSON object: %s. Send each of them again \
+           with all of its arguments in one JSON object."
+          (List.length calls)
+          (Agent_tools.describe_unreadable_tool_uses calls)
+      ]
+  in
+  { origin = Recovery_instruction; Types.role = User
+  ; content = [ Types.Text (String.concat " " (unavailable @ unreadable)) ]
   ; name = None
   ; tool_call_id = None
   ; metadata = []
@@ -231,8 +262,14 @@ let stage_collect
           transcript replays. *)
        let admission =
          Agent_tools.admit_tool_use_names
+           ~unreadable_tool_uses:response.unreadable_tool_uses
            (Agent_tools.build_index (Tool_set.to_list agent.tools))
            response.content
+       in
+       let refused =
+         { unavailable_names = admission.Agent_tools.rejected_names
+         ; unreadable = response.unreadable_tool_uses
+         }
        in
        let* response =
          Types.retain_response_content
@@ -240,6 +277,10 @@ let stage_collect
            ~retained_indices:admission.Agent_tools.retained_content_indices response
          |> Result.map_error (fun detail -> Error.Internal detail)
        in
+       (* The calls that could not be read are answered through [refused],
+          like the names admission dropped; the admitted response keeps none
+          of them, which is what the provider response authority records. *)
+       let response = { response with Types.unreadable_tool_uses = [] } in
        (* Freeze admission before hooks can widen the tools and before the
           collected checkpoint becomes durable. Recovery consumes this exact
           response rather than reinterpreting the raw provider blocks with a
@@ -259,6 +300,36 @@ let stage_collect
             ; Log.S ("names", Agent_tools.describe_rejected_names names)
             ; Log.I ("turn", turn)
             ]);
+       List.iter
+         (fun (call : Llm_provider.Types.unreadable_tool_use) ->
+            (* What a reader needs to tell a model slip from a broken
+               stream: the parser's account, the size, how the stream built the
+               text and a redacted, bounded excerpt of it. The call is cut from
+               history and the provider response record, so this line is where
+               the text survives, in the same form the wire error used to
+               carry. *)
+            Log.warn
+              _log
+              "tool call with unreadable arguments dropped before history"
+              [ Log.S ("tool", call.tool_name)
+              ; Log.S ("tool_use_id", call.tool_use_id)
+              ; Log.S
+                  ( "problem"
+                  , match call.arguments_problem with
+                    | Llm_provider.Tool_call_input.Not_object -> "not_object"
+                    | Llm_provider.Tool_call_input.Invalid_json message -> message )
+              ; Log.I ("argument_bytes", String.length call.arguments)
+              ; Log.S
+                  ( "arguments_excerpt"
+                  , Llm_provider.Secret_redactor.redacted_excerpt call.arguments )
+              ; Log.S
+                  ( "assembly"
+                  , match call.arguments_assembly with
+                    | None -> "whole"
+                    | Some assembly -> Types.tool_argument_assembly_to_string assembly )
+              ; Log.I ("turn", turn)
+              ])
+         refused.unreadable;
        let usage =
          Agent_turn.accumulate_usage
            ~current_usage:agent.state.usage
@@ -345,15 +416,16 @@ let stage_collect
                | Audio _ -> false)
              response.content
          in
-         match admission.Agent_tools.rejected_names with
-         | [] -> None
-         (* A turn that also routed something answers its refusal after the
-            tool results, in [stage_execute]. Appending here would put a User
-            message between the assistant's tool_use blocks and their
-            tool_results, which is the one place the pairing cannot take
-            one. *)
-         | _ when admitted_any_call -> None
-         | names -> Some (admission_refusal_message names)
+         if not (has_refused_tool_calls refused)
+         then None
+           (* A turn that also routed something answers its refusal after the
+              tool results, in [stage_execute]. Appending here would put a User
+              message between the assistant's tool_use blocks and their
+              tool_results, which is the one place the pairing cannot take
+              one. *)
+         else if admitted_any_call
+         then None
+         else Some (admission_refusal_message refused)
        in
        let collected_messages base =
          let with_assistant = Util.snoc base assistant_message in
@@ -448,7 +520,7 @@ let stage_collect
        (* The admitted response, not the wire one, is what the output stage must
           route: dispatch reads [response.content] on its own, so handing back
           the original here would run a call the transcript no longer records. *)
-       Ok (response, admission.Agent_tools.rejected_names))
+       Ok (response, refused))
 ;;
 
 (* ── Stage 5: Execute ────────────────────────────────────── *)
@@ -507,9 +579,9 @@ let stage_execute
                 and its own dropped block is already gone from the transcript,
                 so silence left it nothing to correct. *)
              let messages =
-               match rejected_tool_calls with
-               | [] -> with_results
-               | names -> Util.snoc with_results (admission_refusal_message names)
+               if has_refused_tool_calls rejected_tool_calls
+               then Util.snoc with_results (admission_refusal_message rejected_tool_calls)
+               else with_results
              in
              { state with messages });
            let base_state = agent.state in
@@ -602,8 +674,9 @@ let stage_output ?raw_trace_run ?before_tool_execution ~turn ~rejected_tool_call
              response.content
          in
          (match Nonempty.of_list tool_uses with
-          | None when rejected_tool_calls <> [] ->
-            (* Every call this turn named no available tool, so admission kept
+          | None when has_refused_tool_calls rejected_tool_calls ->
+            (* Every call this turn was refused -- it named no available tool
+               or its arguments were not one JSON object -- so admission kept
                none of them (see [Agent_tools.admit_tool_use_names]). The turn
                did reach a decision — it just routed nowhere — and the note
                appended in [stage_collect] tells the model so. Continuing here
@@ -853,7 +926,7 @@ let run_turn
         ?raw_trace_run
         ?before_tool_execution
         ~turn
-        ~rejected_tool_calls:[]
+        ~rejected_tool_calls:no_refused_tool_calls
         ~response
         agent
         tool_uses)
@@ -862,7 +935,7 @@ let run_turn
     ~tools_settled:Pipeline_terminal_tool.recovered_outcome
     ~pending_terminal:(fun ~turn response ->
       stage_output ?raw_trace_run ?before_tool_execution ~turn
-        ~rejected_tool_calls:[] agent response)
+        ~rejected_tool_calls:no_refused_tool_calls agent response)
     ~terminal:(fun response -> Complete response)
     ~fresh:(fun ~turn ->
       run_new_turn

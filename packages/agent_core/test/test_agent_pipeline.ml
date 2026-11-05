@@ -851,6 +851,127 @@ let test_mixed_turn_refuses_the_call_it_dropped () =
   | Exit -> ()
 ;;
 
+(* Argument text the model broke: the comma and the opening quote before the
+   last key are missing, the shape of the 11-05 DeepSeek call. *)
+let unreadable_arguments = {|{"argv": ["bash", "-lc", "true"]"timeout_sec": 120}|}
+
+let openai_tool_calls_response calls =
+  let call (id, name, arguments) =
+    Printf.sprintf
+      {|{"id":"%s","type":"function","function":{"name":"%s","arguments":"%s"}}|}
+      id
+      name
+      (escape_json_string arguments)
+  in
+  Printf.sprintf
+    {|{"id":"chatcmpl-t","object":"chat.completion","model":"mock","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[%s]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":15,"completion_tokens":10,"total_tokens":25}}|}
+    (String.concat "," (List.map call calls))
+;;
+
+let unreadable_note = "were not run because their arguments were not one JSON object"
+
+(* A call whose arguments are not one JSON object used to end the turn as a
+   wire error, taking the response's other calls with it. The turn now goes
+   on: the call is cut from history like an unroutable one, and the model is
+   told which call it was and where its text broke. *)
+let test_unreadable_arguments_call_is_refused_not_replayed () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let bodies = ref [] in
+    let url =
+      start_multi_mock
+        ~on_body:(fun body -> bodies := body :: !bodies)
+        ~sw
+        ~net:env#net
+        ~port:20051
+        [ openai_tool_calls_response [ "call_bad", "Execute", unreadable_arguments ]
+        ; openai_text_response "done"
+        ]
+    in
+    let agent = make_agent ~net:env#net ~tools:[ execute_tool ] url in
+    (match Agent.run ~sw agent "call a tool" with
+     | Ok _ -> ()
+     | Error error ->
+       failf "run must survive a call with unreadable arguments: %s" (Error.to_string error));
+    let body = second_request_body !bodies in
+    let messages = request_messages body in
+    (* The note may quote the parser's account of where the text broke; the
+       assistant turn must not carry the call itself. *)
+    check
+      bool
+      "no assistant turn replays the broken call"
+      false
+      (List.exists
+         (fun (role, text) ->
+            String.equal role "assistant" && string_contains ~needle:"timeout_sec" text)
+         messages);
+    check
+      bool
+      "the model is told the call was not run"
+      true
+      (List.exists
+         (fun (role, text) ->
+            String.equal role "user"
+            && string_contains ~needle:unreadable_note text
+            && string_contains ~needle:"Execute" text)
+         messages);
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
+(* The live shape: a readable call next to an unreadable one. The readable call
+   runs, and the note follows its tool result. *)
+let test_unreadable_call_leaves_its_readable_sibling_running () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let bodies = ref [] in
+    let url =
+      start_multi_mock
+        ~on_body:(fun body -> bodies := body :: !bodies)
+        ~sw
+        ~net:env#net
+        ~port:20052
+        [ openai_tool_calls_response
+            [ "call_ok", "Execute", "{}"
+            ; "call_bad", "Execute", unreadable_arguments
+            ]
+        ; openai_text_response "done"
+        ]
+    in
+    let agent = make_agent ~net:env#net ~tools:[ execute_tool ] url in
+    (match Agent.run ~sw agent "call two tools" with
+     | Ok _ -> ()
+     | Error error ->
+       failf "run must survive a partly unreadable turn: %s" (Error.to_string error));
+    let messages = request_messages (second_request_body !bodies) in
+    let index_of predicate =
+      let rec walk index = function
+        | [] -> -1
+        | entry :: rest -> if predicate entry then index else walk (index + 1) rest
+      in
+      walk 0 messages
+    in
+    let result_index =
+      index_of (fun (role, text) -> String.equal role "tool" && string_contains ~needle:"ran" text)
+    in
+    let note_index =
+      index_of (fun (role, text) ->
+        String.equal role "user" && string_contains ~needle:unreadable_note text)
+    in
+    check bool "the readable call ran" true (result_index >= 0);
+    check bool "the note follows the tool result" true (note_index > result_index);
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
 (* The call-number recovery landed in #29999 fixed dispatch but not the
    transcript: the fused spelling stayed in history and kept being replayed.
    Recovery is only complete when the next request carries the stem. *)
@@ -925,6 +1046,14 @@ let () =
             "recovered name is replayed as the registered name"
             `Quick
             test_recovered_tool_name_is_replayed_as_the_registered_name
+        ; test_case
+            "unreadable arguments are refused, not replayed"
+            `Quick
+            test_unreadable_arguments_call_is_refused_not_replayed
+        ; test_case
+            "an unreadable call leaves its readable sibling running"
+            `Quick
+            test_unreadable_call_leaves_its_readable_sibling_running
         ] )
     ; ( "streaming"
       , [ test_case "run_stream" `Quick test_agent_run_stream

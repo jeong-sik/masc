@@ -12,6 +12,12 @@
     unchanged. *)
 val redact_string : string -> string
 
+(** [redacted_excerpt s] is [redact_string s] cut to at most 256 bytes on a
+    UTF-8 boundary, with [...(truncated)] appended when it was cut. Redaction
+    runs first so the cut cannot split a token past the redactor. This is the
+    bounded form provider text takes in an operator-facing message. *)
+val redacted_excerpt : string -> string
+
 (** [redact_json j] recursively redacts string values inside a JSON tree.
     The tree structure and key names are preserved. *)
 val redact_json : Yojson.Safe.t -> Yojson.Safe.t

@@ -81,7 +81,15 @@ type tool_use_admission =
   ; tool_source_map : Hooks.admitted_tool_source_map
   }
 
-val admit_tool_use_names : tool_index -> Llm_provider.Types.content_block list -> tool_use_admission
+val admit_tool_use_names
+  :  unreadable_tool_uses:Llm_provider.Types.unreadable_tool_use list
+  -> tool_index
+  -> Llm_provider.Types.content_block list
+  -> tool_use_admission
+(** [unreadable_tool_uses] are the response's calls whose arguments were not
+    one JSON object. They are not in the blocks and are never admitted, but
+    they hold places in [tool_source_map]: the inventory counts every tool call
+    the response sent, as a stream that counted its tool blocks saw them. *)
 
 val describe_rejected_names : string list -> string
 (** Render [rejected_names] for the sentence the model reads: distinct names in
@@ -89,6 +97,14 @@ val describe_rejected_names : string list -> string
     itself clipped with a count of what it left out. Bounded on both axes
     because the sentence lands in a User message, which the transcript replays
     on every later request. *)
+
+val describe_unreadable_tool_uses : Llm_provider.Types.unreadable_tool_use list -> string
+(** Render calls whose arguments were not one JSON object for the sentence the
+    model reads: each quoted tool name with the parser's account of where the
+    text broke. The account can quote the few bytes the parser stopped at; the
+    argument text itself is never repeated. Names and accounts are clipped
+    on UTF-8 boundaries and the list carries a count of what it left out, under
+    the same bounds as [describe_rejected_names]. *)
 
 type tool_failure_kind = Types.tool_failure_kind =
   | Validation_error

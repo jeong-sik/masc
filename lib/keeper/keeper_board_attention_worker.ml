@@ -2162,6 +2162,11 @@ let run
            then Ok ()
            else
              let now = Time_compat.now () in
+             let* () =
+               Candidate.recover_for_process_start
+                 ~base_path
+                 ~keeper_name
+             in
              let* (_ : int) =
                Partition.recover_for_process_start
                  ~now

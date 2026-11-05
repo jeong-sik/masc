@@ -39,8 +39,6 @@ type t =
   | TurnHolderBookkeepingFailures
   | OperatorCompact
   | OperatorClear
-  | ToolEmissionRegistrySize
-  | ToolEmissionPushes
   | ToolUnderusedAllowedCount
   | ToolUnderusedAllowed
   | PathRejection
@@ -165,7 +163,6 @@ type t =
   | ReceiptUnmappedDisposition
   | ExecuteNetworkUpgrade
   | ExecuteLocalExecution
-  | DockerRuntimeDiscarded
   | ProactiveSkip
   | NoProgressStreak
   | UsageTrust
@@ -250,8 +247,6 @@ let to_string = function
   | TurnHolderBookkeepingFailures -> "masc_keeper_turn_holders_bookkeeping_failures_total"
   | OperatorCompact -> "masc_keeper_operator_compact_total"
   | OperatorClear -> "masc_keeper_operator_clear_total"
-  | ToolEmissionRegistrySize -> "masc_keeper_tool_emission_registry_size"
-  | ToolEmissionPushes -> "masc_keeper_tool_emission_pushes_total"
   | ToolUnderusedAllowedCount -> "masc_keeper_tool_underused_allowed_count"
   | ToolUnderusedAllowed -> "masc_keeper_tool_underused_allowed"
   | PathRejection -> "masc_keeper_path_rejection_total"
@@ -383,7 +378,6 @@ let to_string = function
   | ReceiptUnmappedDisposition -> "masc_keeper_receipt_unmapped_disposition_total"
   | ExecuteNetworkUpgrade -> "masc_keeper_execute_network_upgrade_total"
   | ExecuteLocalExecution -> "masc_keeper_execute_local_execution_total"
-  | DockerRuntimeDiscarded -> "masc_keeper_docker_runtime_discarded_total"
   | ProactiveSkip -> "masc_keeper_proactive_skip_total"
   | NoProgressStreak -> "masc_keeper_no_progress_streak"
   | UsageTrust -> "masc_keeper_usage_trust_total"
@@ -450,8 +444,8 @@ let collection = function
   | MetricEmitDropped | ContextMaxObserved | TurnStarts | TurnReattempts | TurnRegressions
   | TurnLatencyBucket | TurnLatencyByModelBucket | ProviderCooldownRemainingSec
   | ProviderBlockDurationSec | TurnQueueDepth | SupervisorSweepStarts | SupervisorLastSweepUnixtime
-  | TurnHolderBookkeepingFailures | OperatorCompact | OperatorClear | ToolEmissionRegistrySize
-  | ToolEmissionPushes | ToolUnderusedAllowedCount | ToolUnderusedAllowed | PathRejection
+  | TurnHolderBookkeepingFailures | OperatorCompact | OperatorClear
+  | ToolUnderusedAllowedCount | ToolUnderusedAllowed | PathRejection
   | PathResolverIdentityMismatch | KeeperMetaOverlayDrift | HeartbeatSuccesses | HeartbeatFailures
   | CleanupTrackingFailures | DispatchEventFailures | DirectiveFailures | ToolCallDuration
   | ToolCallDurationBucket | WriteMetaFailures | MetaReadFailures | ApprovalQueueFailures
@@ -485,7 +479,7 @@ let collection = function
   | RegistryInvalidEntry | StimulusConsumed | UnsupportedStimulus | RestartAttempts
   | RestartOutcomes | Agent_coreRunTimeout | RuntimeSelected | ToolUseFailure | ToolNotAllowed
   | ReceiptUnmappedDisposition | ExecuteNetworkUpgrade | ExecuteLocalExecution
-  | DockerRuntimeDiscarded | ProactiveSkip | NoProgressStreak | UsageTrust | UsageAnomalyReason
+  | ProactiveSkip | NoProgressStreak | UsageTrust | UsageAnomalyReason
   | ConfigEnvParseFailures | PostTurnWireinFailures | TurnCleanupFailures
   | MemoryRecallHistorySwallowedExceptions | MemoryRecallReadErrors | MemoryOsRecallUnavailable
   | MemoryOsExplicitFactWrite | MemorySearch | RuntimeRequestWireBytes

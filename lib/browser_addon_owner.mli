@@ -43,23 +43,11 @@ val attach_automation : t -> locate:bool -> execute:(Browser_lane.verb -> Browse
   document:(tab_id:int -> Browser_lane.answer) ->
   cleanup:(unit -> (unit, string) result) -> (unit, string) result
 (** Publish a ready worker-owned backend. Revocation removes all three callbacks
-    before resource teardown. A retired owner cannot acquire a backend. *)
-val attach_stagehand : t -> models:bool ->
-  execute:(actor:string option -> Browser_lane.verb -> Browser_lane.answer) ->
-  session:(unit -> Browser_lane.session_observation) ->
-  cleanup:(unit -> (unit, string) result) -> (unit, string) result
-(** Publish an owned Chrome backend independently of automation. Actor identity
-    remains attached to its admitted command. Registration does not establish an
-    open session. [models] observes the selected consumer/output grant and
-    controls model-verb admission independently of native input. Retire fences both backends, starts both
-    cleanups and waits for both before answering. Each attached cleanup runs once;
-    concurrent or repeated Retire requests observe the same result. An error or
-    exception from either cleanup prevents a successful retirement receipt. *)
-val attach_extensions : t ->
-  (Browser_extension_protocol.command ->
-    (Yojson.Safe.t, Browser_extension_protocol.error) result) -> (unit, string) result
-(** One private executor attached to the already owned Chrome backend. Admission
-    is revoked before cleanup. The admission lock is never held during execution. *)
+    before resource teardown. A retired owner cannot acquire a backend. Retire
+    fences the backend, starts its cleanup and waits for it before answering.
+    Each attached cleanup runs once; concurrent or repeated Retire requests
+    observe the same result. An error or exception from a cleanup prevents a
+    successful retirement receipt. *)
 type ego_space = {
   space_observation : unit -> Browser_ego_space_observation.t option;
   space_presence : unit -> Browser_ego_space_observation.presence;

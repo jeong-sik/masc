@@ -7,7 +7,6 @@ let () =
   | Error message -> prerr_endline message;exit 1
   | Ok (instance_id,command) ->
     Eio_main.run (fun env ->
-      (* The existing Stagehand process cleanup grants 5 s before group KILL. *)
       match Browser_process_owner.run ~env ~instance_id ~command ~grace_seconds:5.
         ~on_ready:(fun receipt -> Eio.Flow.copy_string
           (Yojson.Safe.to_string (Browser_process_owner.ready_to_json receipt) ^ "\n") (Eio.Stdenv.stdout env)) with

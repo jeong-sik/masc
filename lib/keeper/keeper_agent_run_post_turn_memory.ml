@@ -97,10 +97,7 @@ let run
   (match checkpoint_owner with
    | Runtime_execution.Masc_agent_core | Runtime_execution.Official_client ->
      completed_history_changed ~config ~keeper_name:meta.name);
-  (* Post-turn timing evidence is logged to decisions.jsonl. The keyword
-     recall eval that used to ride along here was removed: it was called
-     with an empty user message, so it short-circuited to a constant
-     [performed=false] while re-reading 50 history lines per turn. *)
+  (* Post-turn timing evidence is logged to decisions.jsonl. *)
   (try
      let post_turn_ms =
        Keeper_timing.round1

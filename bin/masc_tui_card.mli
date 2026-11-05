@@ -28,6 +28,11 @@ type style =
   ; reset : string
   }
 
+val more_text : int -> string
+(** What a card says in place of the rows it leaves out, given how many:
+    ["+3 more"]. A screen that cuts a list short without a card says it the
+    same way. *)
+
 val min_width : int
 (** The narrowest card that still has a cell of content between its sides. *)
 

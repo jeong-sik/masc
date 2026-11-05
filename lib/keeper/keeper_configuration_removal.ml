@@ -281,6 +281,10 @@ let finish config receipt ~cleanup =
          last_error=Some detail}
      | Ok () ->
        Keeper_types_profile.invalidate_keeper_profile_snapshots ();
+       Keeper_memory_health_input.written
+         ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path
+           ~base_path:config.Workspace.base_path)
+         ~keeper_id:receipt.keeper_name;
        advance config receipt Removed)
 
 let submit ~config ~keeper_name ~actor ~cleanup =

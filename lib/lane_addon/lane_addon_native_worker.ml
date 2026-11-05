@@ -66,8 +66,6 @@ let action_schema t = match t.phase with
   | Serving -> Protocol.action_schema t.protocol | Initializing | Validating_owner | Retired -> None
 let operator_schema t = match t.phase with
   | Serving -> Protocol.operator_schema t.protocol | Initializing | Validating_owner | Retired -> None
-let companion_tools t = match t.phase with
-  | Serving -> Protocol.companion_tools t.protocol | Initializing | Validating_owner | Retired -> []
 let observation_effect t name = match t.phase with
   | Serving -> Protocol.observation_effect t.protocol name
   | Initializing | Validating_owner | Retired -> Lane_addon_call_context.May_change
@@ -89,12 +87,12 @@ let observe t ~binding ~sources = call t (fun () -> Protocol.observe t.protocol 
 let act t ~arguments = call t (fun () -> Protocol.act t.protocol ~arguments)
 let host_requests t = call t (fun () -> Protocol.host_requests t.protocol)
 let host_result t ~arguments = call t (fun () -> Protocol.host_result t.protocol ~arguments)
-let call_exported_tool ?on_result ?(on_dispatch = fun () -> ()) ?companion ?finalize_result ?authorize ?principal
+let call_exported_tool ?on_result ?(on_dispatch = fun () -> ()) ?finalize_result ?authorize ?principal
     t ~name ~arguments =
   let dispatched = ref false in
   call ~reached:(fun () -> !dispatched) t (fun () ->
     Protocol.call_exported_tool ?on_result ~on_dispatch:(fun () -> dispatched := true; on_dispatch ())
-      ?companion ?finalize_result ?authorize ?principal t.protocol ~name ~arguments)
+      ?finalize_result ?authorize ?principal t.protocol ~name ~arguments)
 
 let start ~sw ~clock ~grace_seconds ~admission ~launcher ~contract ~command ?cwd ?env
     ?artifact_store ?(on_created = fun _ -> Ok ()) () =

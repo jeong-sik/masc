@@ -14,9 +14,6 @@ type t = {
   mutable phase : phase;
   mutable clients : B.client_id list;
   mutable automation : cleanup option;
-  mutable stagehand : cleanup option;
-  mutable extensions : (Browser_extension_protocol.command ->
-    (Yojson.Safe.t, Browser_extension_protocol.error) result) option;
   (* The live connections this worker runs, one per transport. *)
   mutable live : (B.live_transport * cleanup) list;
   mutable ego_space : (B.client_id * ego_space) option;
@@ -44,12 +41,11 @@ let create ~incarnation =
       Error "a browser owner already exists in this process"
     else
       let retired, retire = Eio.Promise.create () in
-      let t = {incarnation;gate=Eio.Mutex.create ();phase=Serving;clients=[];automation=None;stagehand=None;extensions=None;live=[];ego_space=None;unavailable=[];ego_recovery=None;ego_claim_active=false;models=None;uploads=None;downloads=None;retired;retire} in
+      let t = {incarnation;gate=Eio.Mutex.create ();phase=Serving;clients=[];automation=None;live=[];ego_space=None;unavailable=[];ego_recovery=None;ego_claim_active=false;models=None;uploads=None;downloads=None;retired;retire} in
       B.install_activity_observer (Some (fun lane -> match t.phase,lane with
         | Serving,B.Lane_name.Live -> B.Enabled
         | Serving,B.Lane_name.Automation -> if Option.is_some t.automation then B.Enabled else B.Disabled
-        | Serving,B.Lane_name.Stagehand -> if Option.is_some t.stagehand then B.Enabled else B.Disabled
-        | Retired,(B.Lane_name.Live|Automation|Stagehand) -> B.Disabled));
+        | Retired,(B.Lane_name.Live|Automation) -> B.Disabled));
       Ok t
 let refusal ?(disposition=W.Not_started) message = W.Service_refusal {message;disposition}
 let admission t incarnation =
@@ -156,20 +152,6 @@ let attach_automation t ~locate ~execute ~session ~document ~cleanup =
       B.install_server_session_observer B.Server_automation (Some session);
       B.install_automation_document_observer (Some document);
       t.automation <- Some (owned_cleanup "automation" cleanup);Ok ())
-let attach_stagehand t ~models ~execute ~session ~cleanup =
-  Eio.Mutex.use_rw ~protect:true t.gate (fun () -> match t.phase,t.stagehand with
-    | Retired,_ -> Error "browser owner is retired"
-    | Serving,Some _ -> Error "Stagehand backend is already attached"
-    | Serving,None ->
-      B.install_stagehand_executor ~models (Some execute);
-      B.install_server_session_observer B.Server_stagehand (Some session);
-      t.stagehand <- Some (owned_cleanup "Stagehand" cleanup);Ok ())
-let attach_extensions t execute =
-  Eio.Mutex.use_rw ~protect:true t.gate (fun () -> match t.phase,t.stagehand,t.extensions with
-    | Retired,_,_ -> Error "browser owner is retired"
-    | Serving,None,_ -> Error "owned Chrome backend is unavailable"
-    | Serving,Some _,Some _ -> Error "private extension executor is already attached"
-    | Serving,Some _,None -> t.extensions<-Some execute;Ok ())
 let attach_live ?ego_space t ~client_id ~cleanup =
   Eio.Mutex.use_rw ~protect:true t.gate (fun () -> match t.phase with
     | Retired -> Error "browser owner is retired"
@@ -204,7 +186,6 @@ let revoke t =
     | Retired -> ()
     | Serving ->
       t.phase <- Retired;
-      t.extensions <- None;
       t.ego_space <- None;
       t.ego_recovery <- None;
       t.ego_claim_active <- false;
@@ -214,8 +195,6 @@ let revoke t =
       B.install_automation_executor None;
       B.install_server_session_observer B.Server_automation None;
       B.install_automation_document_observer None;
-      B.install_stagehand_executor None;
-      B.install_server_session_observer B.Server_stagehand None;
       Eio.Promise.resolve t.retire ();
       List.iter (fun client_id -> ignore (B.disconnect_client ~client_id)) t.clients;
       t.clients <- [])
@@ -230,18 +209,16 @@ let cleanup t =
               (Eio.Fiber.List.map (fun (_, cleanup) -> Eio.Lazy.force cleanup) t.live) with
       | [] -> Ok ()
       | errors -> Error (String.concat "; " errors) in
-    let live,(automation,stagehand) = Eio.Fiber.pair
-      settle_live
-      (fun () -> Eio.Fiber.pair (fun () -> settle t.automation) (fun () -> settle t.stagehand)) in
+    let live,automation = Eio.Fiber.pair settle_live (fun () -> settle t.automation) in
     let uploads=cleanup_uploads t in
     let downloads=match t.downloads with
       | None -> Ok ()
-      | Some downloads -> (match live,automation,stagehand with
-          | Ok (),Ok (),Ok () -> cleanup_downloads t
-          | Error _,_,_ | Ok (),Error _,_ | Ok (),Ok (),Error _ ->
+      | Some downloads -> (match live,automation with
+          | Ok (),Ok () -> cleanup_downloads t
+          | Error _,_ | Ok (),Error _ ->
               Eio_unix.run_in_systhread (fun () -> Browser_addon_downloads.abandon downloads)) in
     let errors=List.filter_map (function Ok () -> None | Error detail -> Some detail)
-      [live;automation;stagehand;uploads;downloads] in
+      [live;automation;uploads;downloads] in
     match errors with [] -> W.Receipt
       | _::_ -> refusal ~disposition:W.Outcome_unknown (String.concat "; " errors))
 let waiting t ~disposition run =
@@ -258,7 +235,7 @@ let bind_downloads t ~actor ~route ~verb answer = match verb,answer with
        | (Some _|None),(Some _|None),(Some _|None),(Some _|None) -> answer)
   | (B.Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _
     |Session_open _|Session_close|Session_status|Page_goto _|Page_elements _|Page_act _
-    |Page_context _|Page_instruct _|Page_locate _|Page_extract _),
+    |Page_context _|Page_locate _),
     (Ok (B.Answered _|Lane_absent|Timed_out|Refused _|Rejected_before_effect _)|Error _) -> answer
 type upload_admission = Ordinary | Scoped_upload
 let issue t ~incarnation ~upload_admission ~route ~verb ~actor ~timeout_sec ~only_if_idle =
@@ -270,7 +247,7 @@ let issue t ~incarnation ~upload_admission ~route ~verb ~actor ~timeout_sec ~onl
     | (B.Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _
       |Session_open _|Session_close|Session_status|Page_goto _|Page_elements _
       |Page_act (Open_tab _|Open_window _|Control _|On_tab {interaction=Close_tab|Back|Forward|Reload|Stop_loading|Accept_dialog _|Dismiss_dialog|Set_cookie _|Delete_cookie _|Set_emulation _|Clear_emulation|Block_requests _|Unblock_requests;_})
-      |Page_context _|Page_instruct _|Page_locate _|Page_extract _),(Ordinary|Scoped_upload)
+      |Page_context _|Page_locate _),(Ordinary|Scoped_upload)
     | Page_act (On_tab {interaction=Upload _;_}),Scoped_upload -> Ok () in
   match allowed with Error reply -> reply | Ok () ->
     (* take_over without a client recovers the ego Space this worker
@@ -285,8 +262,8 @@ let issue t ~incarnation ~upload_admission ~route ~verb ~actor ~timeout_sec ~onl
            |B.Page_read _|B.Page_document _|B.Page_downloads _|B.Page_console _|B.Page_network _
            |B.Page_cookies _|B.Page_capture _|B.Page_scene _|B.Page_snapshot _
            |B.Page_native_workflow _|B.Page_interact _|B.Page_goto _|B.Page_elements _
-           |B.Page_context _|B.Page_instruct _|B.Page_locate _|B.Page_extract _ -> false)
-      | B.Live_route (Some _) | B.Automation_route | B.Stagehand_route -> false in
+           |B.Page_context _|B.Page_locate _ -> false)
+      | B.Live_route (Some _) | B.Automation_route -> false in
     if reclaim then
       (* The claim answers in seconds, so only this state read holds the
          gate; the claim itself runs like any other browser command, and
@@ -332,10 +309,9 @@ let issue t ~incarnation ~upload_admission ~route ~verb ~actor ~timeout_sec ~onl
     else
     (match with_admission t incarnation (fun () ->
       match route with
-      | B.Stagehand_route when Option.is_none t.stagehand -> Error (refusal "Stagehand is not attached to this worker")
       | B.Automation_route when Option.is_none t.automation -> Error (refusal "automation is not attached to this worker")
       | B.Live_route None -> Error (refusal "worker execution requires a selected clientId")
-      | B.Live_route (Some _) | B.Automation_route | B.Stagehand_route ->
+      | B.Live_route (Some _) | B.Automation_route ->
         B.resolve_target ~verb route |> Result.map_error (fun error -> W.Issue_result (Error error))) with
      | Error reply -> reply
      | Ok target -> waiting t ~disposition:W.Outcome_unknown (fun () ->
@@ -344,7 +320,7 @@ let issue t ~incarnation ~upload_admission ~route ~verb ~actor ~timeout_sec ~onl
            | B.Page_document {tab_id} -> B.issue_document_if_idle ~target ~tab_id ~timeout_sec
            | B.Tabs_list|Page_read _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _
            | Session_open _|Session_close|Session_status|Page_goto _|Page_elements _|Page_act _
-           | Page_context _|Page_instruct _|Page_locate _|Page_extract _ ->
+           | Page_context _|Page_locate _ ->
              Ok (B.Rejected_before_effect "idle admission supports document reads only")
          else B.issue_for_actor ~actor ~target ~verb ~timeout_sec
          |> bind_downloads t ~actor ~route ~verb)))
@@ -408,17 +384,6 @@ let dispatch t (request : W.request) =
           Browser_addon_downloads.release downloads ~id ~actor ~route ~verb) with
           | Ok () -> W.Receipt | Error detail -> refusal ~disposition:W.Outcome_unknown detail))
   | W.Model_requests -> model_port t request.incarnation Browser_addon_models.listing
-  | W.Extension command ->
-    (match with_admission t request.incarnation (fun () -> match t.extensions with
-      | Some execute -> Ok execute
-      | None -> Error (refusal "private extension executor is unavailable")) with
-     | Error reply -> reply
-     | Ok execute -> waiting t ~disposition:W.Outcome_unknown (fun () ->
-         match execute command with
-         | Ok value -> W.Extension_reply value
-         | Error Browser_extension_protocol.Not_started -> refusal "private extension operation was not started"
-         | Error Browser_extension_protocol.Outcome_unknown ->
-             refusal ~disposition:W.Outcome_unknown "private extension outcome is unknown"))
   | W.Model_result arguments -> model_port t request.incarnation (fun models ->
       Browser_addon_models.deliver models ~arguments
       |> Result.map (fun accepted -> `Assoc ["accepted",`Bool accepted]))
@@ -457,7 +422,7 @@ let live t command = dispatch t {W.incarnation=t.incarnation;command}
 let poll_live t ~client ~window_sec = match live t (W.Poll {client;window_sec}) with
   | W.Poll_result {command;_} -> Ok command
   | W.Service_refusal {message;_} -> if is_retired t then Ok None else Error message
-  | W.Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Receipt|Issue_result _ -> Error "unexpected reply to a live poll"
+  | W.Snapshot_result _|Model_reply _|Download_reply _|Receipt|Issue_result _ -> Error "unexpected reply to a live poll"
 let live_request_window t ~client_id ~id =
   Eio.Mutex.use_ro t.gate (fun () ->
     match t.phase with
@@ -468,5 +433,5 @@ let live_request_window t ~client_id ~id =
 let deliver_live t ~client_id ~id ~payload = match live t (W.Deliver {client_id;id;payload}) with
   | W.Receipt -> Ok ()
   | W.Service_refusal {message;_} -> Error message
-  | W.Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Issue_result _ -> Error "unexpected reply to a live delivery"
+  | W.Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Issue_result _ -> Error "unexpected reply to a live delivery"
 let disconnect_live t client_id = ignore (live t (W.Disconnect client_id))

@@ -38,7 +38,7 @@ HTTP/2 게이트웨이는 갈래마다 `with_h2_public_read`, `with_h2_read_auth
 
 - 전: A4d 앞부분 PR 머리(`e2f8012`, main `0744b9de509`와 트리가 같아요)로 만든 서버
 - 후: 이 브랜치로 만든 서버
-- 기본 설정과 엄격 설정(`MASC_HTTP_AUTH_STRICT=true MASC_AUTH_STRICT=strict`) 각각
+- 기본 설정과 엄격 설정(`MASC_HTTP_AUTH_STRICT=true`) 각각
 
 경로 388개마다 요청 4개를 보내요(HTTP/1.1과 h2c, 자격 없음과 잘못된 bearer). `probe_extra.py`가 라우터 밖 경우 78개를 더 보내요. 비교는 `compare.py`예요. 출력은 `compare.txt`에 있어요.
 

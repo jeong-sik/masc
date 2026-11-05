@@ -85,8 +85,7 @@ let should_run_turn_after_event_intake
   | Some (Stimulus_intake.Connector_item_missing _)
   | Some (Stimulus_intake.Ask_read_failed _)
   | Some (Stimulus_intake.Completion_rejection_read_failed _)
-  | Some (Stimulus_intake.Job_result_unavailable _)
-  | Some (Stimulus_intake.Addon_result_unavailable _) -> true
+  | Some (Stimulus_intake.Job_result_unavailable _) -> true
   | Some (Stimulus_intake.Pending_selection_failed _) -> false
 ;;
 
@@ -432,7 +431,7 @@ let stimulus_owns_turn_reaction (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Workspace_message _
   | Keeper_event_queue.Delegate_completed _
   | Keeper_event_queue.Composition_completed _
-  | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _
+  | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _
   | Keeper_event_queue.Task_outcome _ -> false
 ;;
 
@@ -466,7 +465,7 @@ let record_replay_owned_turn_started_reactions ~ctx ~keeper_name stimuli =
        | Keeper_event_queue.Workspace_message _
        | Keeper_event_queue.Delegate_completed _
        | Keeper_event_queue.Composition_completed _
-       | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _
+       | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _
        | Keeper_event_queue.Task_outcome _ -> ())
     stimuli
 ;;
@@ -612,7 +611,7 @@ let checkpoint_source_policy : Keeper_event_queue.stimulus_payload -> checkpoint
   | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Fusion_completed _ | Keeper_event_queue.Delegate_completed _
   | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Tool_result_ready _
-  | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _
+  | Keeper_event_queue.Owned_job_completed _
   | Keeper_event_queue.Workspace_message _ | Keeper_event_queue.Ask_answered _
   | Keeper_event_queue.Completion_authority_rejected _ | Keeper_event_queue.Task_cancelled _
   | Keeper_event_queue.Task_outcome _ | Keeper_event_queue.Schedule_due _ -> Preserve_and_rotate
@@ -1160,10 +1159,8 @@ let run_keepalive_unified_turn
         then (
           (* fd/disk pressure is pre-checked
              by [classify_turn_intake_admission] in [run_heartbeat_loop] BEFORE
-             stimulus intake, so this branch is reached only when a turn is
-             admitted. The four prior inline pressure gates here were removed: they
-             ran AFTER intake had already consumed the stimulus, forcing a
-             consume/requeue churn loop, and logged only at DEBUG (a silent skip). *)
+             stimulus intake, so a stimulus is never consumed and requeued under
+             pressure, and this branch is reached only when a turn is admitted. *)
           (* Captured before dispatch: a source withdrawn after intake leaves
              [source_batch] there, and its turn-entry reaction still gets its
              closing half below. *)
@@ -1188,7 +1185,7 @@ let run_keepalive_unified_turn
                   | Keeper_event_queue.Completion_authority_rejected _
                   | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
                   | Keeper_event_queue.Delegate_completed _
-                  | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _ | Keeper_event_queue.Task_outcome _ -> None)
+                  | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Task_outcome _ -> None)
                 (Keeper_heartbeat_source_batch.stimuli !source_batch)
             with
             | Some resolution -> Some resolution
@@ -1357,7 +1354,7 @@ let run_keepalive_unified_turn
                | Keeper_event_queue.Completion_authority_rejected _
                | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
                | Keeper_event_queue.Delegate_completed _
-               | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _ | Keeper_event_queue.Task_outcome _ -> true
+               | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Task_outcome _ -> true
              in
              let selections_to_ack, retained_selections =
                List.partition should_ack selections

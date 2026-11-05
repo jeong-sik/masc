@@ -389,7 +389,6 @@ let test_a_snapshot_target_is_checked_before_any_browser () =
   let live fields = interact "live" (("clientId",`String "0c000000-0000-4000-8000-000000000001") :: fields) in
   List.iter (fun (name, result) -> check bool name true (refused_as_input result))
     [ "a target on the automation browser", interact "automation" (click @ url)
-    ; "a target on the Stagehand browser", interact "stagehand" (click @ url)
     ; "a fill target on the automation browser",
       interact "automation" (["action",`String "fill";"target",`Assoc ["ref",`Int 5];"text",`String "Ada"] @ url)
     ; "a target without expectedUrl", live click ];
@@ -404,7 +403,6 @@ let test_a_hand_off_is_checked_before_any_browser () =
   let live fields = act (("lane",`String "live") :: ("clientId",`String "0c000000-0000-4000-8000-000000000001") :: fields) in
   List.iter (fun (name, result) -> check bool name true (refused_as_input result))
     [ "a hand-off on the automation browser", act ["lane",`String "automation";"action",`String "hand_off"]
-    ; "a take-over on the Stagehand browser", act ["lane",`String "stagehand";"action",`String "take_over"]
     ; "a hand-off with no connection named", act ["lane",`String "live";"action",`String "hand_off"]
     ; "a hand-off with no lane", act ["action",`String "hand_off"]
     ; "a hand-off of one tab", live ["action",`String "hand_off";"tabId",`Int 1] ];

@@ -183,24 +183,13 @@ val capture_tool_request_owner : config:Workspace.config -> access:Lane_addon_so
     discover the original ID rather than minting another one. This does not
     dispatch, commit or authorize a later RPC. Manual/missing/conflicting
     configuration is refused rather than supplying invented revisions. *)
-type companion_publication = origin:Lane_addon_companion_origin.record ->
-  output_schema:Yojson.Safe.t -> event:Lane_addon_companion_publication.event ->
-  (unit,unit) result
-(** Host-injected durable continuation admission. The original private provider
-    owns this callback through delivery; a successful result acknowledges only
-    queue admission. The package never supplies a route or a replacement sink. *)
-val call_exported_tool_with_authority : companion_publish:companion_publication option ->
-  continuation:(Lane_addon_companion_origin.source, Lane_addon_companion_origin.error) result option ->
+val call_exported_tool_with_authority :
   on_complete:(unit -> unit) -> on_result:(Mcp_protocol.Mcp_types.tool_result -> unit) -> authorize:Lane_addon_call_context.mediation option -> principal:Lane_addon_call_context.principal option ->
   config:Workspace.config -> access:Lane_addon_sources.access -> reserved:string list ->
   export:tool_export -> arguments:Yojson.Safe.t ->
   (Mcp_protocol.Mcp_types.tool_result, tool_call_error) result
 (** Trusted host boundary only: principal must come from host admission,
     never from caller-supplied tool arguments. [access] still controls visibility.
-    A supplied continuation is captured by the Keeper adapter. Only companion
-    exports retain it before granting private authority; an invalid or repeated
-    original invocation cannot dispatch another grant. [None] names a caller
-    without automatic Keeper continuation, not a guessed Keeper destination.
     [on_result] records replies under worker RPC serialization. [on_complete]
     runs on the owner domain after mediation unwinds, including cancellation;
     caller cancellation alone does not run it. Both callbacks must be synchronous
@@ -337,10 +326,10 @@ val check_inventory_record : path:string -> Yojson.Safe.t -> (unit, string) resu
 val native_claims_directory : string
 (** The directory below the Lane Add-on store root that holds the native claim
     slots. *)
-type native_claim_slot = Installation_slot | Chrome_child_slot | Live_bidi_child_slot
+type native_claim_slot = Installation_slot | Live_bidi_child_slot
 (** Who reads a native claim slot: the host recovering an installation reads
-    its cleanup descriptor through {!Browser_addon_socket}; a Chrome or live
-    BiDi child slot is compared with the descriptor its parent recomputes. *)
+    its cleanup descriptor through {!Browser_addon_socket}; a live BiDi child
+    slot is compared with the descriptor its parent recomputes. *)
 val native_claim_slot_of_name : string -> native_claim_slot option
 (** The slot a directory name below {!native_claims_directory} names, as this
     module creates it; [None] for a name it never creates. *)
@@ -538,11 +527,10 @@ module For_testing : sig
     observe : binding:Yojson.Safe.t -> sources:Yojson.Safe.t ->
       (Lane_addon_types.output, string) result;
     exported_tools : unit -> Mcp_protocol.Mcp_types.tool list;
-    call_exported_tool : companion:Lane_addon_worker_protocol.companion_admission option -> on_result:(Mcp_protocol.Mcp_types.tool_result -> unit) -> on_dispatch:(unit -> unit) -> authorize:Lane_addon_call_context.mediation option -> principal:Lane_addon_call_context.principal -> name:string -> arguments:Yojson.Safe.t ->
+    call_exported_tool : on_result:(Mcp_protocol.Mcp_types.tool_result -> unit) -> on_dispatch:(unit -> unit) -> authorize:Lane_addon_call_context.mediation option -> principal:Lane_addon_call_context.principal -> name:string -> arguments:Yojson.Safe.t ->
       (Mcp_protocol.Mcp_types.tool_result, Lane_addon_call_context.invocation_error) result;
     action_schema : unit -> Yojson.Safe.t option;
     operator_schema : unit -> Yojson.Safe.t option;
-    companion_tools : unit -> string list;
     observation_effect : string -> Lane_addon_call_context.observation_effect;
     (** What the worker declared for an export. [Reads_only] lets a successful
         call to it skip the observation that otherwise follows. *)

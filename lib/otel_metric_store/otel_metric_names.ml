@@ -184,19 +184,6 @@ let metric_file_lock_table_cas_retries =
 let metric_tool_keeper_cache_ttl_parse_failures =
   Otel_metric_store_core.declare_counter "masc_tool_keeper_cache_ttl_parse_failures_total"
 
-(* Tier K5 — observability over the K4c per-keeper tool-emission
-   accumulator registry. The registry is process-local; this gauge
-   exposes its size so operators can alert on divergence from the
-   active keeper count (a leak symptom would be registry size >
-   live keeper count without trending down on teardown). *)
-
-(* Tier K6 — per-keeper tagged tool-emission push counter. Increments
-   each time [Keeper_tool_emission_hook.push] captures a parsed JSON
-   tool result into the keeper's accumulator. Lets operators rank
-   keepers by multimodal output volume and detect silent emission
-   stalls (a keeper that should be emitting goes flat). Labels:
-   [keeper]. *)
-
 (* #13387: keeper tool diversity gauges. The count gauge gives
    dashboard/operator summaries a cheap per-keeper signal; the per-tool
    gauge identifies exactly which allowed tools are available but unused

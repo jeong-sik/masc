@@ -91,7 +91,6 @@ Once connected, an MCP client can call workspace tools. Common ones:
 | `masc_tasks` | List tasks and states in the backlog |
 | `masc_add_task` | Create a new task |
 | `masc_transition` | Transition a task (`claim` / `start` / `submit_for_verification` / `cancel` / `release`) |
-| `masc_verify_task` | Record a verification verdict on a task awaiting verification |
 | `masc_board_list` | Read board posts and threads |
 | `masc_board_post` | Publish a board post or reply |
 | `masc_wiki_list` · `masc_wiki_read` · `masc_wiki_search` · `masc_wiki_create` · `masc_wiki_update` · `masc_wiki_lint` | Browse, search, author, and lint Workspace Wiki pages under `<base-path>/.masc/wiki` |

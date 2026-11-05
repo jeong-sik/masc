@@ -14,6 +14,7 @@ module Kind = struct
     | Provider_standing
     | Keeper_costs
     | Keeper_oauth_attempts
+    | Memory_health
 
   let to_wire = function
     | Repositories -> "repositories"
@@ -25,6 +26,7 @@ module Kind = struct
     | Provider_standing -> "provider_standing"
     | Keeper_costs -> "keeper_costs"
     | Keeper_oauth_attempts -> "keeper_oauth_attempts"
+    | Memory_health -> "memory_health"
   ;;
 
   let of_wire = function
@@ -37,6 +39,7 @@ module Kind = struct
     | "provider_standing" -> Some Provider_standing
     | "keeper_costs" -> Some Keeper_costs
     | "keeper_oauth_attempts" -> Some Keeper_oauth_attempts
+    | "memory_health" -> Some Memory_health
     | _ -> None
   ;;
 end
@@ -51,6 +54,7 @@ type dataset =
   | Provider_standing
   | Keeper_costs
   | Keeper_oauth_attempts of { keeper : string }
+  | Memory_health of { keeper : string }
 
 let kind = function
   | Repositories -> Kind.Repositories
@@ -62,6 +66,7 @@ let kind = function
   | Provider_standing -> Kind.Provider_standing
   | Keeper_costs -> Kind.Keeper_costs
   | Keeper_oauth_attempts _ -> Kind.Keeper_oauth_attempts
+  | Memory_health _ -> Kind.Memory_health
 ;;
 
 let dataset_to_wire dataset = Kind.to_wire (kind dataset);;
@@ -72,7 +77,8 @@ let dataset_to_wire dataset = Kind.to_wire (kind dataset);;
 let subject_fields = function
   | Repositories | Verification_requests | Harness_verdicts | Clients | Account_emails
   | Provider_usage | Provider_standing | Keeper_costs -> []
-  | Keeper_oauth_attempts { keeper } -> [ ("keeper", `String keeper) ]
+  | Keeper_oauth_attempts { keeper } | Memory_health { keeper } ->
+    [ ("keeper", `String keeper) ]
 ;;
 
 (* The Keeper a subject-naming event carries. An empty or missing name is an
@@ -98,6 +104,10 @@ let of_fields fields =
      | Some Kind.Keeper_oauth_attempts ->
        (match keeper_field ~wire fields with
         | Ok keeper -> Ok (Keeper_oauth_attempts { keeper })
+        | Error detail -> Error detail)
+     | Some Kind.Memory_health ->
+       (match keeper_field ~wire fields with
+        | Ok keeper -> Ok (Memory_health { keeper })
         | Error detail -> Error detail)
      | None -> Error (event_type ^ " names an unknown dataset " ^ wire))
   | Some _ | None -> Error (event_type ^ " carries no dataset name")

@@ -86,7 +86,6 @@ let test_the_verb_round_trips_and_is_automation_only () =
     (Browser_lane.verb_json verb = obj [ "verb", `String "page.console"; "args", obj [ "tabId", `Int 3 ] ]);
   check bool "a read" true (Browser_lane.verb_is_read verb);
   check bool "automation serves it" true (Browser_lane.verb_allowed_on_automation verb);
-  check bool "Stagehand does not" false (Browser_lane.verb_allowed_on_stagehand verb);
   check bool "a connected browser does not" false (Browser_lane.verb_allowed_on_live verb);
   match Masc.Browser_addon_wire.verb_of_json ~route:Browser_lane.Automation_route (Browser_lane.verb_json verb) with
   | Ok parsed -> check bool "the Add-on wire parses it back" true (parsed = verb)
@@ -99,7 +98,7 @@ let test_the_capability_table () =
   check bool "the owned Firefox reads the console" true (reaches Cap.Owned_gecko);
   List.iter (fun (label, backend) -> check bool (label ^ " does not") false (reaches backend))
     [ "live BiDi", Cap.Connected Browser_lane.Webdriver_bidi; "the extension", Cap.Connected Browser_lane.Web_extension
-    ; "Stagehand", Cap.Owned_chromium; "Safari", Cap.Safari_unavailable ]
+    ; "Safari", Cap.Safari_unavailable ]
 
 let () = run "browser console" [ "console", [
   test_case "entries are kept in order per tab" `Quick test_entries_are_kept_in_order_per_tab;

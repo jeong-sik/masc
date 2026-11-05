@@ -509,7 +509,7 @@ let render_runtime_detail (state : state) target =
   box_line buf cols
     (detail_heading ~cols
        ~lead:(Lead_text (screen_title (if state.ui_language = Lang_ko then " MASC 시스템 / 런타임 상세" else runtime_detail_title) ^ "  "))
-       ~id:target_label ~after:"" ~tail:(connection_badge state));
+       ~id:target_label ~after:[] ~tail:(connection_badge state));
   box_divider buf cols;
   let lines = runtime_detail_lines state target ~width:(max 1 (framed_inner_width cols - 4)) in
   let total = List.length lines in
@@ -978,14 +978,19 @@ let render_runtime (state : state) =
           let runtime = candidate.rcr_runtime in
           let is_first = candidate.rcr_position = 1 in
           let is_last = candidate.rcr_position = candidate.rcr_candidate_count in
-          (* Names preserve both ends; the fallback label preserves its head. *)
+          (* Names preserve both ends. The fallback label is the branch mark,
+             then the word, then the number, and the lane column keeps as many
+             of them as it holds whole: a cut word named a fallback by half a
+             word. The candidate column's "2/3" gives the position either way. *)
           let lane_cell =
             if candidate.rcr_candidate_count <= 1 || is_first then
               Terminal_text.single_line candidate.rcr_lane_id
             else
-              (Printf.sprintf "  %s fallback #%d"
-                   (if is_last then "\xe2\x94\x94\xe2\x94\x80" else "\xe2\x94\x9c\xe2\x94\x80")
-                   (candidate.rcr_position - 1))
+              Message_layout.join_fitting ~sep:" " ~cells:runtime_lane_width
+                [ "  " ^ (if is_last then "\xe2\x94\x94\xe2\x94\x80" else "\xe2\x94\x9c\xe2\x94\x80")
+                ; "fallback"
+                ; Printf.sprintf "#%d" (candidate.rcr_position - 1)
+                ]
           in
           let candidate_label =
             Printf.sprintf "%d/%d %s"

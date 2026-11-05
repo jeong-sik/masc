@@ -214,6 +214,46 @@ type memory_health_snapshot = {
   mhs_starving_keepers : int;
 }
 
+val memory_keeper_totals_row : memory_keeper_health -> Keeper_memory_health_totals.Row.t
+(** What a decoded row contributes to the fleet totals. The server counts its
+    rows through the same {!Keeper_memory_health_totals.of_rows}, and the
+    snapshot decoder checks the server's totals and alert summary against it
+    when every row decoded. *)
+
+(** One Keeper's row as [GET /api/v1/dashboard/keeper-memory-health?keeper=]
+    answers it (RFC-0487). *)
+type memory_health_row_keeper =
+  | Row_present of memory_keeper_health
+  | Row_refused of memory_keeper_refusal
+      (** A row this build cannot read, named after the Keeper asked for. *)
+  | Row_absent  (** The fleet lists no such Keeper: it left, or never had a row. *)
+
+type memory_health_row_answer = {
+  mhr_generated_at : float;
+  mhr_keeper : memory_health_row_keeper;
+}
+
+val decode_memory_health_row :
+  keeper:string -> Yojson.Safe.t -> (memory_health_row_answer, string) result
+(** [Error] when the answer is not a row answer, or its row names a Keeper
+    other than [keeper]. *)
+
+val with_keeper_row :
+  memory_health_snapshot ->
+  generated_at:float ->
+  keeper_id:string ->
+  memory_keeper_health option ->
+  memory_health_snapshot option
+(** The fleet answer with [keeper_id]'s row replaced by the one given, or
+    removed when none is given (the Keeper left), in the fleet's row order,
+    with its totals and alert summary counted again through
+    {!Keeper_memory_health_totals.of_rows}. Observed at the later of the two
+    readings.
+
+    [None] while another Keeper's row stands refused: the server counted that
+    row and this build cannot, so the totals cannot be counted again here and
+    the fleet answer has to be read. *)
+
 val decode_memory_health_snapshot :
   Yojson.Safe.t -> (memory_health_snapshot, string) result
 (** Decode the fleet memory-health snapshot served at

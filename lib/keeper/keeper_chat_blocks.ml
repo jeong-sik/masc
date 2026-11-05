@@ -242,9 +242,6 @@ let is_http_url url =
   | _ -> false
 ;;
 
-(* [Invalid_url] was removed from this vocabulary: its only producer was an
-   exception arm behind [Uri.of_string], which does not raise, so the reason
-   could never occur. *)
 type dropped_http_url_reason =
   | Missing_scheme
   | Unsupported_scheme of string

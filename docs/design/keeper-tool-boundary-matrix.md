@@ -28,7 +28,7 @@ Scope:
 | `agent-core-tool-bridge` | Keeper tool bridge for agent core bundle, handler, telemetry, and deterministic errors. | Generic tool policy or non-agent core hook observation. |
 | `sandbox-runtime` | Sandbox containment, Docker runtime, read/session runners, executor, and shell IR target plumbing. | Tool naming policy or GitHub runtime. |
 | `shell-surface` | Shell command parsing, typed Execute input, shell ops, path, runtime paths, and timeout semantics. | Sandbox runtime or keeper tool registry/policy. |
-| `tool-surface-policy` | Keeper tool aliasing, boundary, disclosure, diversity, emission, registry, policy, resolution, and tool-specific policy records. | agent core bridge implementation, shell parsing, sandbox execution. |
+| `tool-surface-policy` | Keeper tool aliasing, boundary, disclosure, diversity, registry, policy, resolution, and tool-specific policy records. | agent core bridge implementation, shell parsing, sandbox execution. |
 
 ## Coverage Manifest
 
@@ -160,8 +160,6 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper_tool_name/keeper_tool_name.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_diversity.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_diversity.mli` - tool-surface-policy
-- `lib/keeper/keeper_tool_emission_hook.ml` - tool-surface-policy
-- `lib/keeper/keeper_tool_emission_hook.mli` - tool-surface-policy
 - `lib/keeper_metrics/keeper_tool_outcome.ml` - tool-surface-policy
 - `lib/keeper_metrics/keeper_tool_outcome.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_keeper_audit.ml` - tool-surface-policy

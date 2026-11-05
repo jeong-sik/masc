@@ -12,12 +12,6 @@ let make_routes ~port ~host:_ ~sw ~clock =
   Channel_gate_connector.register (module Channel_gate_imessage_state);
   Channel_gate_connector.register (module Channel_gate_slack_state);
   Channel_gate_connector.register (module Channel_gate_telegram_state);
-  (* Tier K1: bind the multimodal workspace getter so the dashboard
-     reads the live keeper-side workspace instead of [Workspace.empty].
-     Idempotent — calling [bind_workspace_getter] twice just replaces
-     the callback. *)
-  Server_routes_http_routes_multimodal.bind_workspace_getter
-    Multimodal.Workspace_holder.get;
   Http.Router.create ()
   |> Server_routes_http_routes_frontend.add_routes ~port ~sw ~clock
   |> Server_oauth_http.add_routes
@@ -44,9 +38,7 @@ let make_routes ~port ~host:_ ~sw ~clock =
   |> Server_routes_http_routes_artifact_app_data.add_routes
   |> Server_routes_http_routes_artifact_draft_live.add_routes
   |> Server_routes_http_routes_voice.add_routes
-  |> Server_routes_http_routes_multimodal.add_routes
   |> Server_routes_http_routes_play_screen.add_routes
-  |> Server_routes_http_routes_autonomous.add_routes
   |> Server_routes_http_routes_channel_gate.add_routes ~sw ~clock
   |> Server_routes_http_routes_fleet_stream.add_routes ~sw ~clock
   |> Server_routes_http_routes_repositories.add_routes

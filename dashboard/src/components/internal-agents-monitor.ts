@@ -139,22 +139,19 @@ type SelectedLane = Extract<LaneNavigationTarget, { kind: 'run_history' }>['lane
 type SelectedLaneRuns = { lane: SelectedLane; rows: Row[]; reading: RunReading }
 
 // Where a selected Lane's runs are kept. Exact-lane runs never name
-// verifier_exact or browser_stagehand_exact (ExactLane excludes both). The
-// Verifier's runs are its task and Goal reviews, and Stagehand keeps no run
-// history at all. The target's rows and its availability reading both come
+// verifier_exact (ExactLane excludes it); the Verifier's runs are its task
+// and Goal reviews. The target's rows and its availability reading both come
 // from this one read, so an unrelated source's failure cannot mark the
 // target's observations unavailable.
 type LaneRunHistory =
   | { kind: 'exact'; lane: ExactLane }
   | { kind: 'verifier' }
-  | { kind: 'not_retained' }
 
 function laneRunHistory(lane: SelectedLane): LaneRunHistory {
   switch (lane) {
     case 'board_attention_exact': case 'hitl_auto_judge': case 'librarian_exact':
     case 'workspace_curator_exact': case 'candle_appraiser': return { kind: 'exact', lane }
     case 'verifier_exact': return { kind: 'verifier' }
-    case 'browser_stagehand_exact': return { kind: 'not_retained' }
   }
 }
 
@@ -181,7 +178,6 @@ async function fetchLaneRuns(history: LaneRunHistory): Promise<Row[]> {
       return [...task.runs.map(verificationRow), ...goal.runs.map(goalVerificationRow)]
         .sort((a, b) => startedAt(b) - startedAt(a))
     }
-    case 'not_retained': return []
   }
 }
 
@@ -857,7 +853,6 @@ function InternalAgentsMonitorContent({ target }: { target?: Extract<LaneNavigat
     ? (selectedLaneRuns?.rows ?? []).map(row => ({ row, stale: selectedLaneRuns?.reading === 'stale' }))
     : rows.filter(row => matches(row, filter)).map(row => ({ row, stale: runReadings[row.source] === 'stale' })),
   [rows, filter, target, selectedLaneRuns, runReadings])
-  const targetHistory = target ? laneRunHistory(target.lane) : null
   const roster = keeperRosterSignal.value
   const pausedKeeperNames = shellRuntimeResolution.value?.fleet_safety?.paused_keepers_health?.names ?? []
   const keepers = useMemo(() => {
@@ -937,21 +932,16 @@ function InternalAgentsMonitorContent({ target }: { target?: Extract<LaneNavigat
                 </thead>
                 <tbody>
                   ${laneMatrix.lanes.map(lane => {
-                    const stagehandHasNoHistory = lane.laneId === 'browser_stagehand_exact'
                     const exactWindowExcludesHistory = lane.laneId !== 'verifier_exact'
                       && laneMatrix.exactRunProjectionTruncated
                     const statusLabel = lane.status === 'no_retained_observation'
-                      ? stagehandHasNoHistory
-                        ? 'Run history not retained'
-                        : exactWindowExcludesHistory
-                          ? 'No run in recent window'
-                          : 'No retained observation'
+                      ? exactWindowExcludesHistory
+                        ? 'No run in recent window'
+                        : 'No retained observation'
                       : lane.status.charAt(0).toUpperCase() + lane.status.slice(1)
-                    const noTerminalLabel = stagehandHasNoHistory
-                      ? '실행 기록 미보존'
-                      : exactWindowExcludesHistory
-                        ? '최근 완료 관측 없음'
-                        : '관측 기록 없음'
+                    const noTerminalLabel = exactWindowExcludesHistory
+                      ? '최근 완료 관측 없음'
+                      : '관측 기록 없음'
                     const statusClass = lane.status === 'degraded' || lane.status === 'unavailable'
                       ? 'text-[var(--color-danger)]'
                       : lane.status === 'running'
@@ -1055,7 +1045,7 @@ function InternalAgentsMonitorContent({ target }: { target?: Extract<LaneNavigat
         <span class="text-3xs text-[var(--color-fg-muted)]">절대 시각 + 상대 시각 + elapsed</span>
       </div>
       ${!loading && visible.length === 0
-        ? html`<div class="ia-empty">${targetHistory?.kind === 'not_retained' ? 'Run history is not retained for this Lane.' : selectedReading === 'ready' ? 'No internal agent runs for this filter.' : selectedReading === 'stale' ? 'STALE · No runs in the last successful observation.' : 'Run observations unavailable for this filter.'}</div>`
+        ? html`<div class="ia-empty">${selectedReading === 'ready' ? 'No internal agent runs for this filter.' : selectedReading === 'stale' ? 'STALE · No runs in the last successful observation.' : 'Run observations unavailable for this filter.'}</div>`
         : html`<div class="ia-list">
             ${visible.map(({ row, stale }) => {
               const open = expanded === row.id

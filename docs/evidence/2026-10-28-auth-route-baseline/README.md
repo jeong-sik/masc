@@ -9,7 +9,7 @@
 2. `scripts/auth-route-baseline/run.sh`가 격리 서버를 띄워요. 환경변수는 비우고(`env -i`), base path는 새 디렉터리, 키퍼는 없고, loopback에만 열어요. 시작 전에 그 포트에 이미 듣는 프로세스가 있으면 멈추고, 서버가 준비된 뒤에는 그 포트의 listener가 방금 띄운 서버인지 확인한 다음에만 요청을 보내요. 끝나면 그 서버만 멈추고, 작업 디렉터리는 이 스크립트가 만든 표시 파일이 있을 때만 지워요. 운영 중인 워크스페이스는 건드리지 않아요.
 3. `probe.py`가 조합마다 요청 4개를 보내요. HTTP/1.1과 HTTP/2(h2c) 각각 "자격 없음"과 "아무 토큰과도 맞지 않는 bearer"예요. prefix 경로는 `/probe-a1` 한 칸을 붙여서 보내요.
 4. `probe_extra.py`가 라우터 밖에서 처리하는 경로를 따로 확인해요. `/mcp`와 프로필 셋, `/ws`, `/api/v1/ide/lsp`, query `token`, 서버 자신의 것이 아닌 `Host` 헤더예요.
-5. 같은 일을 기본 설정(`default/`)과 엄격 설정(`strict/`, `MASC_HTTP_AUTH_STRICT=true MASC_AUTH_STRICT=strict`)으로 한 번씩 했어요.
+5. 같은 일을 기본 설정(`default/`)과 엄격 설정(`strict/`, `MASC_HTTP_AUTH_STRICT=true`)으로 한 번씩 했어요.
 
 다시 돌리려면:
 

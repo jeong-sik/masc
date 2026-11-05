@@ -3,7 +3,7 @@
 open Masc_domain
 
 (* Crypto utilities, file I/O, config, credential CRUD, token
-   verification — formerly re-exported via Auth_credential shim. *)
+   verification. *)
 
 include Auth_credential_base
 include Auth_credential_token

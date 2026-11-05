@@ -35,7 +35,7 @@ let operation_fixture keeper_name =
       { cleanup = { settled_task_ids = []; pending_confirms_removed = 0
           ; meta_snapshot_digest = Keeper_meta_json.Snapshot_digest.of_meta meta }
       ; meta_removed = false; session_removed = false; registry_unregistered = true
-      ; accumulator_dropped = true; completion = Completion_not_requested }
+      ; completion = Completion_not_requested }
   ; created_at = now; updated_at = now }
 ;;
 

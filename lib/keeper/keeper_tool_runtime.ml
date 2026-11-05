@@ -263,11 +263,7 @@ let handle_in_process ctx descriptor args =
   | Tool_lane_addon export ->
     Some (match ctx.capability_authority with
       | Frozen_surface surface when Keeper_capability_surface.admits surface descriptor ->
-          let continuation=Lane_addon_companion_origin.source ~keeper_name:ctx.meta.name
-            ~turn_ref:ctx.turn_ref ~tool_use_id:ctx.tool_use_id ~trace_id:ctx.trace_id
-            ~source_context:ctx.source_context ~channel:ctx.continuation_channel in
-          Keeper_lane_addon_runtime.call ~continuation:(Some continuation)
-            ~config:ctx.config ~keeper_name:ctx.meta.name ~export ~arguments:args
+          Keeper_lane_addon_runtime.call ~config:ctx.config ~keeper_name:ctx.meta.name ~export ~arguments:args
       | Frozen_surface _ | Compatibility_meta ->
           Keeper_tool_execution.failure ~class_:Tool_result.Policy_rejection
             ~effect_disposition:Tool_result.Proven_pre_effect

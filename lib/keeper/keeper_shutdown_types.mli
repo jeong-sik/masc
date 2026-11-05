@@ -182,7 +182,6 @@ type finalization_evidence =
   ; meta_removed : bool
   ; session_removed : bool
   ; registry_unregistered : bool
-  ; accumulator_dropped : bool
   ; completion : completion_receipt
   }
 
@@ -302,7 +301,6 @@ type invariant_error =
       { expected_session_removed : bool
       ; actual_session_removed : bool
       }
-  | Required_accumulator_not_dropped
   | Finalized_completion_mismatch of cleanup_reason * completion_receipt
   | Superseded_cleanup_reason_mismatch of cleanup_reason
   | Invalid_absence_acknowledgement of string

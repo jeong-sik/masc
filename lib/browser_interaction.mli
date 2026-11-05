@@ -28,7 +28,7 @@ val pointer_target_script : string
     rectangle. Does not scroll or dispatch page events. *)
 val needs_pointer_resolution : Browser_lane.interaction -> bool
 (** Whether a native action first resolves a semantic target. WebDriver, BiDi
-    and ego share this classification; Stagehand also preflights native timing. *)
+    and ego share this classification. *)
 val resolve_pointer_input : Browser_lane.interaction -> Yojson.Safe.t ->
   ((string option * Browser_lane.interaction), string) result
 (** Decode one semantic resolution, retaining its observed URL as the native

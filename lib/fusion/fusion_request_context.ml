@@ -74,10 +74,10 @@ let capture ~current_task ~config ~keeper ~turn_ref ~args =
   let empty_context = {keeper; turn_ref; task=None; goals=[]; question; decision_context} in
   (* The inferred Task is resolved inside the same locks that read the backlog
      below, not before them. The resolver reads the backlog unlocked, so a Task
-     that changed hands or finished between the two reads used to be inferred
+     that changed hands or finished between the two reads would be inferred
      from one view of the file and then validated against another -- the caller
-     was told its own inferred Task does not exist, or the context was built on
-     a premise the lock never saw. One lock, one view. *)
+     would be told its own inferred Task does not exist, or the context would
+     be built on a premise the lock never saw. One lock, one view. *)
   let resolved_task_id () = match task_id, selected_goal, current_task with
     | None, None, Some resolve ->
       source (resolve ()) |> Result.map (Option.map Keeper_id.Task_id.to_string)

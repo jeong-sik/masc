@@ -124,8 +124,7 @@ let with_mutex f = Prompt_registry_store.with_lock store f
 
 (* What the operator saved for a key this process will not apply, with the
    reason it will not. Read by the catalog so an operator can see that the
-   file holds a prompt the server is not using -- the state that used to be
-   visible only as one ERROR line at boot. *)
+   file holds a prompt the server is not using. *)
 let held_back_overrides () =
   with_mutex (fun () ->
       Hashtbl.fold

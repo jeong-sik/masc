@@ -15,7 +15,7 @@ different interval after a composition result has already been produced.
 
 Task Skill resolution now groups shared exact references before resolving them
 under the captured Tool descriptors, then reuses that selection when setup has
-the identical immutable inputs. The [Skill flow comparison](../SKILLS-FLOW.md#task-참조-준비의-as-is--to-be)
+the identical immutable inputs. The [Skill flow](../SKILLS-FLOW.md#턴-준비-재사용과-준비-단계-관측)
 records the source call-count scope and changed-input behavior. Measure setup
 time separately from first-request bytes, model roundtrips and first useful Tool
 latency; a source lookup reduction does not establish those timing results.

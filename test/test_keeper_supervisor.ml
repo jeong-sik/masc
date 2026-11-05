@@ -30,7 +30,6 @@ module Shutdown_types = Masc.Keeper_shutdown_types
 module Subprocess_registry = Masc.Keeper_subprocess_registry
 module Supervisor_cleanup = Masc.Keeper_supervisor_cleanup
 module Process_switch = Masc.Keeper_process_switch
-module Tool_accumulator = Masc.Keeper_tool_emission_hook
 module Latched_reason = Keeper_latched_reason
 module Lifecycle_reservation = Masc.Keeper_lifecycle_reservation
 module Launch_transaction = Masc.Keeper_keepalive_launch_transaction

@@ -939,8 +939,22 @@ let accept_rejection_has_no_progress_retry_hint err =
    before the carrier existed. *)
 type Agent_core.Error.carrier += Masc_internal of masc_internal_error
 
+type Agent_core.Error.carrier +=
+  | Terminal_effect_failed_with_agent of
+      { masc_error : masc_internal_error
+      ; agent_error : Agent_core.Error.agent_error
+      }
+
+let message_of_masc_internal_error err =
+  masc_internal_error_prefix
+  ^ Yojson.Safe.to_string (masc_internal_error_to_json err)
+;;
+
 let carried_masc_internal_error = function
   | Agent_core.Error.Internal_carried { carrier = Masc_internal err; _ } -> Some err
+  | Agent_core.Error.Internal_carried
+      { carrier = Terminal_effect_failed_with_agent { masc_error; _ }; _ } ->
+    Some masc_error
   | Agent_core.Error.Internal_carried _
   | Agent_core.Error.Internal _
   | Agent_core.Error.Api _
@@ -955,11 +969,31 @@ let carried_masc_internal_error = function
 
 let core_error_of_masc_internal_error err =
   Agent_core.Error.Internal_carried
-    { message =
-        masc_internal_error_prefix
-        ^ Yojson.Safe.to_string (masc_internal_error_to_json err)
-    ; carrier = Masc_internal err
+    { message = message_of_masc_internal_error err; carrier = Masc_internal err }
+;;
+
+let core_error_of_masc_internal_error_with_agent ~agent_error masc_error =
+  Agent_core.Error.Internal_carried
+    { message = message_of_masc_internal_error masc_error
+    ; carrier = Terminal_effect_failed_with_agent { masc_error; agent_error }
     }
+;;
+
+let agent_error_of_carried_terminal_effect_failure = function
+  | Agent_core.Error.Internal_carried
+      { carrier = Terminal_effect_failed_with_agent { agent_error; _ }; _ } ->
+    Some agent_error
+  | Agent_core.Error.Internal_carried _
+  | Agent_core.Error.Internal _
+  | Agent_core.Error.Api _
+  | Agent_core.Error.Provider _
+  | Agent_core.Error.Agent _
+  | Agent_core.Error.Mcp _
+  | Agent_core.Error.Config _
+  | Agent_core.Error.Serialization _
+  | Agent_core.Error.Io _
+  | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _ -> None
+;;
 
 
 (* ------------------------------------------------------------------ *)
@@ -1233,18 +1267,17 @@ let classify_masc_internal_error_of_string (raw : string) :
     (try parse_masc_internal_error_json (Yojson.Safe.from_string payload)
      with Yojson.Json_error _ -> None)
 
+let failure_effect_disposition_of_core effect_disposition =
+  match Agent_core.Error.terminal_effect_disposition effect_disposition with
+  | Agent_core.Tool_contract.Proven_pre_effect -> Tool_result.Proven_pre_effect
+  | Agent_core.Tool_contract.Proven_post_effect -> Tool_result.Proven_post_effect
+  | Agent_core.Tool_contract.Effect_outcome_unknown -> Tool_result.Effect_outcome_unknown
+;;
+
 let classify_masc_internal_error (err : Agent_core.Error.t) :
     masc_internal_error option =
   let terminal_effect_failed ~effect_disposition ~detail =
-    let effect_disposition =
-      match Agent_core.Error.terminal_effect_disposition effect_disposition with
-      | Agent_core.Tool_contract.Proven_pre_effect ->
-        Tool_result.Proven_pre_effect
-      | Agent_core.Tool_contract.Proven_post_effect ->
-        Tool_result.Proven_post_effect
-      | Agent_core.Tool_contract.Effect_outcome_unknown ->
-        Tool_result.Effect_outcome_unknown
-    in
+    let effect_disposition = failure_effect_disposition_of_core effect_disposition in
     Some
       (Terminal_effect_failed
          { failure_class = Tool_result.Runtime_failure
@@ -1257,6 +1290,9 @@ let classify_masc_internal_error (err : Agent_core.Error.t) :
      below stays as the boundary for persisted strings and for [Internal]
      values from producers that predate the carrier. *)
   | Agent_core.Error.Internal_carried { carrier = Masc_internal err; _ } -> Some err
+  | Agent_core.Error.Internal_carried
+      { carrier = Terminal_effect_failed_with_agent { masc_error; _ }; _ } ->
+    Some masc_error
   | Agent_core.Error.Internal_carried { message; _ } ->
     classify_masc_internal_error_of_string message
   | Agent_core.Error.Internal msg -> classify_masc_internal_error_of_string msg

@@ -62,6 +62,24 @@ type noncompletion_result =
   ; usage : usage
   }
 
+(* Print mode cannot ask for approval, so agy refuses such an action and ends
+   the run with status SUCCESS. The result names the refusals in
+   [denied_actions] (CLI changelog; measured 2026-11-05 on agy 1.5.1, where
+   text written before the refused call survives as [response]). A result with
+   no refusals carries [None]; this record is never empty. *)
+type denied_actions =
+  { first : string
+  ; rest : string list
+  }
+
+type denied_result =
+  { conversation_id : string
+  ; denied : denied_actions
+  ; response : string
+  ; num_turns : int
+  ; usage : usage
+  }
+
 type error =
   | Invalid_config of string
   | Spawn_failed of string
@@ -72,6 +90,7 @@ type error =
   | State_callback_failed of string
   | Turn_failed of string
   | Result_not_completed of noncompletion_result
+  | Actions_denied of denied_result
   | Process_exited of string
   | Unhandled_exception of string
   | Child_fd_ceiling_exceeded of
@@ -110,6 +129,7 @@ type wire_event =
       ; error : string option
       ; num_turns : int
       ; usage : usage
+      ; denied : denied_actions option
       }
 
 and step_state =
@@ -143,6 +163,7 @@ type terminal = {
   error : string option;
   num_turns : int;
   usage : usage;
+  denied : denied_actions option;
   tool_steps : int;
   tool_errors : int;
 }
@@ -164,6 +185,7 @@ type received_result =
   ; error : string option
   ; num_turns : int
   ; usage : usage
+  ; denied : denied_actions option
   }
 
 type state =
@@ -186,6 +208,7 @@ let terminal (state : state) : terminal option =
       ; error = result.error
       ; num_turns = result.num_turns
       ; usage = result.usage
+      ; denied = result.denied
       ; tool_steps = running.tool_steps
       ; tool_errors = running.tool_errors
       }
@@ -381,7 +404,7 @@ let advance ~expected_model ~expected_cwd ~conversation_mode
         { candidate = Admitted running
         ; required = text_obligations @ completion_obligations @ native_obligations
         }
-  | Result { conversation_id; status; response; error; num_turns; usage } ->
+  | Result { conversation_id; status; response; error; num_turns; usage; denied } ->
     let stage = "result event" in
     let* running =
       match state, status with
@@ -418,7 +441,7 @@ let advance ~expected_model ~expected_cwd ~conversation_mode
           else []
         | Not_completed _ -> []
     in
-    let result : received_result = { status; response; error; num_turns; usage } in
+    let result : received_result = { status; response; error; num_turns; usage; denied } in
     Ok
       { candidate = Completed { running; result }
       ; required =

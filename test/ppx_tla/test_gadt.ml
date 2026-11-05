@@ -12,9 +12,9 @@
    Emitting [let to_tla_symbol : type a. a t -> string = function ...]
    via ppxlib AST builders requires a three-piece AST (ptyp_poly +
    pexp_newtype + inner pexp_constraint) whose interaction with OCaml
-   5.4's scoped-type rules is non-trivial. For lib/autonomous/'s small
-   number of GADT existentials, hand-writing [to_tla_symbol_any] is
-   the recommended workaround until the follow-up tier lands. *)
+   5.4's scoped-type rules is non-trivial. For a small number of GADT
+   existentials, hand-writing [to_tla_symbol_any] is the recommended
+   workaround until the follow-up tier lands. *)
 
 (* ─── 0 type-param GADT (supported by I8) ────────────────────────── *)
 

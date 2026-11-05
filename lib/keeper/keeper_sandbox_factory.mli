@@ -8,7 +8,7 @@
     [(in_playground, network_mode)]
     so a guest runtime is created at most once per compatible dispatch
     context within a turn.  The runtime can still execute from different cwd
-    values via [Keeper_turn_sandbox_runtime.container_cwd_of_host].
+    values inside its playground; each is projected to its container path.
 
     Background: pre-PR-3b, [keeper_tools_agent_core.make_tool_bundle] inspected
     [meta.sandbox_profile] eagerly at turn-start.  The factory still creates

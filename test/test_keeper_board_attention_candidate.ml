@@ -605,6 +605,38 @@ let test_purge_invalidates_cached_candidates_and_retains_lock () =
        (ok "load successor candidate" (A.load_candidates ~base_path ~keeper_name:"alpha")))
 ;;
 
+(* A crash in the middle of an append leaves a final row with no newline.
+   General reads refuse it; process-start recovery cuts it and the rows
+   written before it stay readable. *)
+let test_process_start_recovery_cuts_a_torn_tail () =
+  with_temp_base "board-attention-candidate-torn-tail" @@ fun base_path ->
+  let kept = candidate (signal "torn-tail-kept") in
+  ignore (record ~base_path kept);
+  let path = A.ledger_path ~base_path ~keeper_name:"alpha" in
+  let channel = open_out_gen [ Open_append; Open_binary ] 0o600 path in
+  output_string channel {|{"kind":|};
+  close_out channel;
+  (match A.load_candidates_with_rejections ~base_path ~keeper_name:"alpha" with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "a general read accepted the torn tail");
+  (match A.recover_for_process_start ~base_path ~keeper_name:"alpha" with
+   | Ok () -> ()
+   | Error detail -> Alcotest.failf "process-start recovery failed: %s" detail);
+  Alcotest.(check (list string))
+    "the row written before the crash is readable"
+    [ kept.candidate_id ]
+    (List.map (fun (candidate : A.candidate) -> candidate.candidate_id)
+       (ok "load after recovery" (A.load_candidates ~base_path ~keeper_name:"alpha")));
+  let next = candidate (signal "torn-tail-next") in
+  ignore (record ~base_path next);
+  Alcotest.(check (list string))
+    "the ledger takes the next row"
+    (List.sort String.compare [ kept.candidate_id; next.candidate_id ])
+    (List.sort String.compare
+       (List.map (fun (candidate : A.candidate) -> candidate.candidate_id)
+          (ok "load after the next row" (A.load_candidates ~base_path ~keeper_name:"alpha"))))
+;;
+
 let test_edit_candidates_preserve_revision_identity () =
   with_temp_base "board-edit-candidates" @@ fun base_path ->
   let edited at =
@@ -1460,6 +1492,10 @@ let () =
             "candidate purge invalidates cache and retains stable lock"
             `Quick
             test_purge_invalidates_cached_candidates_and_retains_lock
+        ; Alcotest.test_case
+            "process-start recovery cuts a torn tail"
+            `Quick
+            test_process_start_recovery_cuts_a_torn_tail
         ; Alcotest.test_case
             "codec and context identity are strict"
             `Quick

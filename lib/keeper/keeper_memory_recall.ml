@@ -1,10 +1,5 @@
 (** Keeper_memory_recall — history/tail JSONL reading for memory surfaces.
-
-    The keyword-classifier recall eval ([is_memory_recall_query],
-    [expected_topic_hint], [evaluate_memory_recall]) was removed with the
-    legacy memory bank: recall is the keeper's own judgment via the
-    [keeper_memory_search] tool, not a substring heuristic. What remains
-    here is the typed file-reading substrate those surfaces share. *)
+    This is the typed file-reading substrate those surfaces share. *)
 
 (* Whether the final returned line was newline-terminated in the file.
    [Partial_last_line] means an append was in flight when the read happened,
@@ -150,13 +145,15 @@ let load_history_user_messages_result ~path ~limit ~accept =
     | Dated_jsonl.Parsed json ->
       (try
          let role = Json_util.get_string json "role" in
-         let source =
-           Json_util.get_string json "source"
-           |> Option.value ~default:""
-           |> String.trim
+         let internal =
+           match
+             Option.bind (Json_util.get_string json "source")
+               Keeper_types_support.history_source_of_string
+           with
+           | Some source -> Keeper_types_support.is_internal_history_source source
+           | None -> false
          in
-         if role = Some "user"
-            && not (Keeper_types_support.is_internal_history_source source)
+         if role = Some "user" && not internal
          then
            Keeper_context_core.message_of_json json |> user_message_text
          else None

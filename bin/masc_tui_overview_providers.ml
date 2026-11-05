@@ -706,6 +706,10 @@ type entry_body =
   | Window_lines of window_line list
   | State_text of string
       (** An account with no window to show says why. *)
+  | Not_reported
+      (** The server has heard nothing from the account since it started.
+          Every such account says the same thing, so the No_windows section
+          says it once and lists them. *)
 
 type drawn_entry = {
   de_name : string;
@@ -717,14 +721,17 @@ type drawn_entry = {
       (** Drawn once per account, with its first entry. *)
 }
 
-let state_text ~now (account : Masc.Tui_decode_usage.provider_usage_account) =
+let not_reported_text = "No usage report since server start"
+
+let no_window_body ~now (account : Masc.Tui_decode_usage.provider_usage_account) =
   match account.pua_state with
-  | Masc.Tui_decode_usage.Account_not_reported_since_start ->
-      "No usage report since server start"
+  | Masc.Tui_decode_usage.Account_not_reported_since_start -> Not_reported
   | Masc.Tui_decode_usage.Account_reported_no_windows { observed_at; source } ->
-      "Provider reported no usage windows \xc2\xb7 Last report "
-      ^ clock_text ~now observed_at ^ " \xc2\xb7 " ^ Terminal_text.single_line source
-  | Masc.Tui_decode_usage.Account_reported _ -> "No reported window gates model calls"
+      State_text
+        ("Provider reported no usage windows \xc2\xb7 Last report "
+         ^ clock_text ~now observed_at ^ " \xc2\xb7 " ^ Terminal_text.single_line source)
+  | Masc.Tui_decode_usage.Account_reported _ ->
+      State_text "No reported window gates model calls"
 
 let drawn_groups ~now ~account_emails groups =
   let _, drawn =
@@ -738,7 +745,7 @@ let drawn_groups ~now ~account_emails groups =
               let newest = newest_report entry.pe_account in
               let body =
                 match entry.pe_windows with
-                | [] -> State_text (state_text ~now entry.pe_account)
+                | [] -> no_window_body ~now entry.pe_account
                 | _ :: _ as windows ->
                     Window_lines (List.map (window_line ~now ~newest) windows)
               in
@@ -824,7 +831,9 @@ let layout_for ~show_names ~width entries =
   let window_lines =
     List.concat_map
       (fun entry ->
-        match entry.de_body with Window_lines lines -> lines | State_text _ -> [])
+        match entry.de_body with
+        | Window_lines lines -> lines
+        | State_text _ | Not_reported -> [])
       entries
   in
   let percent_cells = max percent_cells (widest (fun line -> cells_of line.percent) window_lines) in
@@ -958,6 +967,13 @@ let draw_entry layout tone entry =
       (fun wrapped -> layout.continuation ^ style tone wrapped)
       (Text.wrap_words ~max_cells:layout.continuation_cells text)
   in
+  let state_rows text =
+    match Text.wrap_words ~max_cells:layout.continuation_cells text with
+    | [] -> [ indent ^ name_cell tone entry.de_name ]
+    | first :: rest ->
+        (indent ^ name_cell tone entry.de_name ^ " " ^ first)
+        :: List.map (fun wrapped -> layout.continuation ^ wrapped) rest
+  in
   let rows =
     match entry.de_body with
     | Window_lines lines ->
@@ -966,12 +982,8 @@ let draw_entry layout tone entry =
              (fun index line ->
                window_row tone ~first:(if index = 0 then Some entry.de_name else None) line)
              lines)
-    | State_text text ->
-        (match Text.wrap_words ~max_cells:layout.continuation_cells text with
-         | [] -> [ indent ^ name_cell tone entry.de_name ]
-         | first :: rest ->
-             (indent ^ name_cell tone entry.de_name ^ " " ^ first)
-             :: List.map (fun wrapped -> layout.continuation ^ wrapped) rest)
+    | State_text text -> state_rows text
+    | Not_reported -> state_rows not_reported_text
   in
   rows
   @ (match entry.de_tag with
@@ -1008,6 +1020,53 @@ let rec separated = function
   | [ block ] -> block
   | block :: rest -> block @ ("" :: separated rest)
 
+(* A block with no lines is left out, so [separated] adds no blank line for it. *)
+let blocks parts = separated (List.filter (function [] -> false | _ :: _ -> true) parts)
+
+(* An account the server has not heard from and that has nothing else to say. *)
+let is_silent entry =
+  match entry.de_body, entry.de_tag with
+  | Not_reported, None -> true
+  | Not_reported, Some _ | (Window_lines _ | State_text _), _ -> false
+
+(* Only the No_windows section lists its silent accounts under one line. The
+   catalogue's exhausted tag is drawn in the first section only, so an account
+   with a tag keeps its own entry. Returns the silent accounts, then the rest. *)
+let split_silent section entries =
+  match section with
+  | No_windows -> List.partition is_silent entries
+  | At_limit_or_exhausted | Other_windows -> ([], entries)
+
+(* The gap between an account's name and its email on one line. *)
+let email_gap = 2
+
+(* Accounts the server has not heard from all have the same thing to say, so
+   one line says it and the accounts are listed under it. An email, when the
+   account has one, follows the name or takes a line of its own. *)
+let draw_silent_accounts ~width ~tone entries =
+  match entries with
+  | [] -> []
+  | _ :: _ ->
+      let room = max 1 (width - indent_cells) in
+      let name_style line = indent ^ Ansi.bold ^ tone ^ line ^ Ansi.reset in
+      let email_style email = Theme.recede () ^ email ^ Ansi.reset in
+      let account entry =
+        let name_lines =
+          wrap_marked ~width:room ~attention:entry.de_attention entry.de_name
+        in
+        match entry.de_email, List.rev name_lines with
+        | Some email, last :: before_rev
+          when cells_of last + email_gap + cells_of email <= room ->
+            List.rev_map name_style before_rev
+            @ [ name_style last ^ String.make email_gap ' ' ^ email_style email ]
+        | Some email, _ ->
+            List.map name_style name_lines @ [ indent ^ "  " ^ email_style email ]
+        | None, _ -> List.map name_style name_lines
+      in
+      List.map (fun line -> indent ^ line)
+        (Masc_tui_message_layout.wrap_words ~max_cells:room not_reported_text)
+      @ List.concat_map account entries
+
 let draw_stacked_entry ~width ~tone entry =
   let wrap tone text =
     Masc_tui_message_layout.wrap_words ~max_cells:(max 1 width) text
@@ -1017,6 +1076,7 @@ let draw_stacked_entry ~width ~tone entry =
     |> List.map (fun text -> Ansi.bold ^ tone ^ text ^ Ansi.reset) in
   let body = match entry.de_body with
     | State_text text -> wrap None text
+    | Not_reported -> wrap None not_reported_text
     | Window_lines lines ->
         List.map (fun line ->
           (wrap_marked ~width ~attention:line.at_limit line.label |> List.map (style line.tone))
@@ -1027,7 +1087,9 @@ let draw_stacked_entry ~width ~tone entry =
   @ Option.fold ~none:[] ~some:(wrap (Some (Theme.recede ()))) entry.de_email
 
 let draw_groups ~show_limit_exhausted ~width groups =
-  let entries = List.concat_map snd groups in
+  let entries =
+    List.concat_map (fun (section, entries) -> snd (split_silent section entries)) groups
+  in
   let layout = layout_for ~show_names:true ~width entries in
   let draw_group (section, entries) =
     match section with
@@ -1040,7 +1102,7 @@ let draw_groups ~show_limit_exhausted ~width groups =
           else
           let label_overflows =
             match entry.de_body with
-            | State_text _ -> false
+            | State_text _ | Not_reported -> false
             | Window_lines lines ->
                 List.exists (fun line -> cells_of (marked ~attention:line.at_limit line.label) > layout.label_cells) lines
           in
@@ -1053,8 +1115,9 @@ let draw_groups ~show_limit_exhausted ~width groups =
             in
             heading @ draw_entry (layout_for ~show_names:false ~width [ entry ]) tone entry
         in
+        let silent, listed = split_silent section entries in
         group_heading ~width section entries
-        @ separated (List.map draw entries)
+        @ blocks [ separated (List.map draw listed); draw_silent_accounts ~width ~tone silent ]
   in
   List.map (clip width) (separated (List.map draw_group groups))
 
@@ -1127,8 +1190,10 @@ let draw_cards ~show_limit_exhausted ~width groups =
     | At_limit_or_exhausted when not show_limit_exhausted ->
         hidden_limit_heading ~width section entries
     | At_limit_or_exhausted | Other_windows | No_windows ->
+        let tone = section_tone section in
+        let silent, listed = split_silent section entries in
         group_heading ~width section entries
-        @ draw_card_rows ~width ~tone:(section_tone section) entries
+        @ blocks [ draw_card_rows ~width ~tone listed; draw_silent_accounts ~width ~tone silent ]
   in
   List.map (clip width) (separated (List.map draw_group groups))
 
@@ -1273,7 +1338,7 @@ let bound_groups ~width ~rows groups =
   let bound_entry entry =
     let body =
       match entry.de_body with
-      | State_text _ as state -> state
+      | (State_text _ | Not_reported) as state -> state
       | Window_lines lines ->
           Window_lines (List.map (fun line ->
             { line with label = text line.label }) lines)

@@ -3,7 +3,7 @@
     UUID v7 (RFC 9562 §5.7) places a 48-bit Unix-epoch-millisecond
     timestamp in the high bits, ensuring monotonic sort by creation time.
     This makes UUID v7 friendly to B-tree indexing and natural-order
-    timeline rendering (Multimodal Workspace.timeline).
+    timeline rendering.
 
     The internal representation is the canonical 36-character lowercase
     string form (e.g. [01890e2a-4c8e-7b21-9f3c-...]). Construction is

@@ -126,10 +126,13 @@ let keeper_runtime_cell ~width ?failure_context (runtime : keeper_runtime option
                (phase ^ fit_runtime_id (width - phase_width) runtime_id)
                width)
 
-(* One activation mode and the sandbox declaration from the roster row. *)
+(* One activation mode and the sandbox declaration from the roster row. The
+   cell fills the whole flags field, so the columns to its right line up with
+   their header. *)
 let keeper_flag_cell (runtime : keeper_runtime option) =
+  let gap = String.make Render_schedule.keeper_flags_gap ' ' in
   match runtime with
-  | None -> Ansi.dim ^ "- -" ^ Ansi.reset
+  | None -> Ansi.dim ^ "-" ^ gap ^ "-" ^ Ansi.reset
   | Some row ->
       let module Mark = Masc_tui_keeper_mark in
       let sandbox =
@@ -144,7 +147,7 @@ let keeper_flag_cell (runtime : keeper_runtime option) =
           (Theme.warn ()) ^ String.uppercase_ascii (String.sub other 0 1) ^ Ansi.reset
         | None, _ -> Ansi.dim ^ "?" ^ Ansi.reset
       in
-      Mark.activation_letter row.kr_activation_mode ^ " " ^ sandbox
+      Mark.activation_letter row.kr_activation_mode ^ gap ^ sandbox
 
 let keeper_activity_word (activity : Keeper_list_model.activity) =
   match activity with
@@ -258,7 +261,9 @@ let keeper_column_header (columns : Render_schedule.keeper_columns) =
     ; " "
     ; Message_layout.fit_width "NOW" Render_schedule.keeper_status_width
     ; (if columns.kcol_show_flags then
-         " " ^ Message_layout.fit_width "Mode S" Render_schedule.keeper_flags_width
+         " "
+         ^ Message_layout.fit_width Render_schedule.keeper_flags_header
+             Render_schedule.keeper_flags_width
        else "")
     ; " " ^ Message_layout.pad_left "AGE" Render_schedule.keeper_last_turn_width
     ; (if columns.kcol_show_runtime then
@@ -541,14 +546,29 @@ let keeper_group_heading_style = function
   | Keeper_list_model.Inactive -> Theme.recede ()
   | Keeper_list_model.Unobserved -> Theme.warn ()
 
-let keeper_view_summary rows layout sort =
+(* The frame cuts a row from the right. The counts are what a narrow screen
+   needs, so they lead and the layout and sort name trail. An item that does
+   not fit whole is left out, because "0 inactiv…" reads as a number. *)
+let keeper_view_summary ~cells rows layout sort =
   let mode = Keeper_list_model.layout_label layout ^ " · " ^ Keeper_list_model.sort_label sort in
-  match layout with
-  | Keeper_list_model.Grouped -> "  " ^ mode
-  | Keeper_list_model.Compact | Keeper_list_model.Detailed ->
-      let attention, active, waiting, inactive, unobserved = Keeper_list_model.group_counts rows in
-      Printf.sprintf "  %s   ! %d attention   \xe2\x96\xb6 %d active   \xe2\x97\x8c %d waiting   \xe2\x97\x8b %d inactive   ? %d unknown"
-        mode attention active waiting inactive unobserved
+  let items =
+    match layout with
+    | Keeper_list_model.Grouped -> [ mode ]
+    | Keeper_list_model.Compact | Keeper_list_model.Detailed ->
+        let attention, active, waiting, inactive, unobserved =
+          Keeper_list_model.group_counts rows
+        in
+        [ Printf.sprintf "! %d attention" attention
+        ; Printf.sprintf "\xe2\x96\xb6 %d active" active
+        ; Printf.sprintf "\xe2\x97\x8c %d waiting" waiting
+        ; Printf.sprintf "\xe2\x97\x8b %d inactive" inactive
+        ; Printf.sprintf "? %d unknown" unobserved
+        ; mode
+        ]
+  in
+  let lead = "  " in
+  lead ^ Message_layout.join_fitting ~sep:"   "
+           ~cells:(cells - Message_layout.display_width lead) items
 
 let render_keeper_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -595,7 +615,7 @@ let render_keeper_list (state : state) =
   box_line buf cols (heading ^ String.make gap ' ' ^ badge);
   box_line buf cols
     (Theme.recede ()
-     ^ keeper_view_summary model_rows state.keeper_list_layout state.keeper_list_sort
+     ^ keeper_view_summary ~cells:inner model_rows state.keeper_list_layout state.keeper_list_sort
      ^ Ansi.reset);
   Option.iter
     (fun message -> box_line buf cols

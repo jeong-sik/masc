@@ -44,6 +44,11 @@ type dataset =
           [keeper], which [GET /api/v1/keepers/oauth/attempt-status] reads.
           The event names the Keeper only: no provider, attempt id, state,
           code or consent URL. *)
+  | Memory_health of { keeper : string }
+      (** An input of [keeper]'s row in
+          [GET /api/v1/dashboard/keeper-memory-health] was written. A reader
+          reads that row alone ([?keeper=]); a Keeper that left has no row
+          (RFC-0487). *)
 
 val event_type : string
 
@@ -62,6 +67,7 @@ module Kind : sig
     | Provider_standing
     | Keeper_costs
     | Keeper_oauth_attempts
+    | Memory_health
 
   val to_wire : t -> string
 

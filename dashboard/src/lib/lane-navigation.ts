@@ -6,7 +6,7 @@ import type { LaneInventoryRow } from '../api/lane-inventory'
 export type LaneNavigationTarget = { workspace: string } & (
   | { kind: 'exact'; lane: typeof LANE_IDS[number] }
   | { kind: 'run_history'; lane: LaneRunIdentity }
-  | { kind: 'browser'; lane: 'live' | 'automation' | 'stagehand' }
+  | { kind: 'browser'; lane: 'live' | 'automation' }
   | { kind: 'machine'; machine: 'msx' | 'dos' }
   | { kind: 'declaration'; path: string; installation: string | null }
   | { kind: 'instance'; instance: string; incarnation: string }
@@ -30,7 +30,7 @@ export function parseLaneTarget(raw: string | undefined): ParsedLaneTarget {
         if (!isLaneRunIdentity(fields.lane)) throw new Error()
         target = { kind: 'run_history', workspace: fields.workspace, lane: fields.lane }; break
       case 'browser':
-        if (fields.lane !== 'live' && fields.lane !== 'automation' && fields.lane !== 'stagehand') throw new Error()
+        if (fields.lane !== 'live' && fields.lane !== 'automation') throw new Error()
         target = { kind: 'browser', workspace: fields.workspace, lane: fields.lane }; break
       case 'machine':
         if (fields.machine !== 'msx' && fields.machine !== 'dos') throw new Error()

@@ -2791,8 +2791,7 @@ let browser_lane_setup_cmd =
               .masc/packages/browser-<source> and, when the workspace has no declaration of \
               that source, creates browser-<source>.toml in its Lane directory: automation, \
               firefox and ego when runtime.toml has their table or the mode writes it, \
-              stagehand when [browser.stagehand] is there, and external when a native host is \
-              installed. A source whose table the mode writes is declared once that table is \
+              and external when a native host is installed. A source whose table the mode writes is declared once that table is \
               written. A declaration's enabled switches its source on or off. An existing \
               declaration is left as it is. \
               The server attaches the Add-ons when it starts and on its maintenance pass. \

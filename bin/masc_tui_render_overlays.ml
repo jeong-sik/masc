@@ -828,6 +828,41 @@ let render_keeper_deletions (state : state) =
          far they had to go. *)
       Option.iter c.push (overlay_window_row ~scroll ~height count))
 
+(* The sheet's title: its name, then the filter while there is one, or whether
+   the hint rows are on. The end of the filter being typed stays in view, the
+   way the palette keeps its query. *)
+let help_title (state : state) ~cols =
+  let name = screen_title " MASC Cheat Sheet" in
+  match state.help_filter with
+  | Masc_tui_help.Off ->
+      name ^ "  " ^ Ansi.dim ^ "hints "
+      ^ (if state.hints_visible then "on" else "off")
+      ^ Ansi.reset
+  | (Masc_tui_help.Typing query | Masc_tui_help.Kept query) as filter ->
+      let caret =
+        match filter with
+        | Masc_tui_help.Typing _ -> "\xe2\x96\x8c"
+        | Masc_tui_help.Off | Masc_tui_help.Kept _ -> ""
+      in
+      let lead = name ^ "  /" in
+      let query_cells =
+        framed_inner_width cols - Message_layout.display_width lead
+        - Message_layout.display_width caret
+      in
+      lead
+      ^ Message_layout.input_viewport ~max_cells:query_cells
+          (Terminal_text.single_line query)
+      ^ caret
+
+(* The keys the footer names for the sheet in its current state. *)
+let help_hints (state : state) =
+  match state.help_filter with
+  | Masc_tui_help.Off ->
+      "/:filter  j/k:scroll  PgUp/PgDn:page  g/G:first/last  h:hints  Esc:close"
+  | Masc_tui_help.Typing _ -> "Enter:keep  Esc:clear  Up/Down:scroll  PgUp/PgDn:page"
+  | Masc_tui_help.Kept _ ->
+      "/:edit  Esc:clear  j/k:scroll  PgUp/PgDn:page  g/G:first/last  h:hints  ?:close"
+
 (* The cheat sheet, through the overlay contract. It drew its box and its rows
    by hand and closed the box under the last row, so a sheet shorter than the
    screen -- a narrow filter, a tall terminal -- put the footer mid-screen. *)
@@ -843,17 +878,13 @@ let render_help (state : state) =
     (* The title says what state the sheet is in; the keys that change it are
        the footer's, which draws h and Esc on this overlay and never drops Esc.
        Both rows spelled them, so the title said the footer twice. *)
-    ~title:
-      (screen_title " MASC Cheat Sheet" ^ "  " ^ Ansi.dim
-      ^ "hints "
-      ^ (if state.hints_visible then "on" else "off")
-      ^ Ansi.reset)
+    ~title:(help_title state ~cols)
     (* The sheet that names every other surface's keys did not name its own.
        It is longer than any terminal -- at 150x78 the later sections are
        still off screen -- so [G] is the difference between reading them and
        pressing [j] forty times, and nothing said [G] exists. The keys are
        handled at masc_tui.ml: "pageup" | "pagedown", "g", "G". *)
-    ~hints:"j/k:scroll  PgUp/PgDn:page  g/G:first/last  h:hints  Esc:close"
+    ~hints:(help_hints state)
     (* [help_viewport] rather than the budget it is derived from: the
        keypress bounds the scroll against that pair, and a sheet whose
        drawing used a different height would leave [G] one row short. *)

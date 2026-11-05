@@ -107,32 +107,6 @@
       }
     },
     {
-      "id": "exact/browser_stagehand_exact",
-      "label": "Browser Stagehand",
-      "purpose": "Answers structured model requests from the Stagehand browser lane; run records are not retained yet.",
-      "ui_category": "browser",
-      "selection": {
-        "kind": "exact",
-        "lane_id": "browser_stagehand_exact"
-      },
-      "state": {
-        "kind": "exact",
-        "configuration": {
-          "kind": "configured",
-          "admitted_slots": [
-            "glm-coding.glm-5-turbo"
-          ],
-          "cli_slots": [],
-          "declared_slots": [
-            "glm-coding.glm-5-turbo"
-          ],
-          "declared_cli_slots": [],
-          "dropped_slots": [],
-          "admission_error": null
-        }
-      }
-    },
-    {
       "id": "exact/candle_appraiser",
       "label": "Candle Appraiser",
       "purpose": "Appraises a confirmed Goal payout grade, each candidate Task's relation to the Goal, and Keeper contribution weights.",
@@ -183,23 +157,6 @@
       "selection": {
         "kind": "browser",
         "lane": "automation"
-      },
-      "state": {
-        "kind": "browser_executor",
-        "addon": {
-          "kind": "observed",
-          "registered": false
-        }
-      }
-    },
-    {
-      "id": "browser/stagehand",
-      "label": "Browser Stagehand",
-      "purpose": "Browser backend observation.",
-      "ui_category": "browser",
-      "selection": {
-        "kind": "browser",
-        "lane": "stagehand"
       },
       "state": {
         "kind": "browser_executor",
@@ -406,41 +363,6 @@
             "count": 12
           }
         ],
-        "runs_without_slot": {
-          "vendor_system_one": 0,
-          "server_restarted": 0,
-          "no_slot": 0
-        }
-      },
-      {
-        "lane_id": "browser_stagehand_exact",
-        "label": "Browser Stagehand",
-        "purpose": "Answers structured model requests from the Stagehand browser lane; run records are not retained yet.",
-        "required": false,
-        "observation_only": true,
-        "configured": true,
-        "configuration_state": "ready",
-        "declared_slots": [
-          "glm-coding.glm-5-turbo"
-        ],
-        "declared_cli_slots": [],
-        "admitted_slots": [
-          "glm-coding.glm-5-turbo"
-        ],
-        "cli_slots": [],
-        "dropped_slots": [],
-        "admission_error": null,
-        "status": "no_retained_observation",
-        "retained_run_count": 0,
-        "running_count": 0,
-        "succeeded_count": 0,
-        "failed_count": 0,
-        "cancelled_count": 0,
-        "last_started_at": null,
-        "last_terminal_at": null,
-        "last_outcome": null,
-        "p50_elapsed_s": null,
-        "selected_slots": [],
         "runs_without_slot": {
           "vendor_system_one": 0,
           "server_restarted": 0,

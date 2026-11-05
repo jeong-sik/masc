@@ -603,6 +603,8 @@ let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None)
     else if door_answers then Masc_tui_footer.ensure_help_item hints
     else hints
   in
+  (* The keys this frame announces, for the navigation trace (RFC-0485). *)
+  Masc_tui_nav_trace_log.announce hints;
   (* Search status is literal text, not key hints: runs of spaces belong
      to the user's query and must survive compact hint-item fitting. *)
   let literal_prefix = search_marker state in
@@ -695,13 +697,11 @@ let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None)
          | Some true -> [ Masc_tui_footer.Server_worktree_binary ]
          | Some false | None -> [])
         @
-        (* The server's rollup, from the probe it serves on every refresh.
-           An older server, or one before its first snapshot, cannot say
-           (None) and draws nothing. *)
-        (match identity.Tui_decode.sid_operator_action with
-         | Some (first :: rest) ->
+        (* The server's rollup, from the probe it serves on every refresh. *)
+        (match Masc_tui_types.operator_actions state with
+         | first :: rest ->
            [ Masc_tui_footer.Operator_action { first; count = 1 + List.length rest } ]
-         | Some [] | None -> [])
+         | [] -> [])
         @
         (* This TUI's own embedded commit against the server's: the pair
            that told "restart masc" apart from "the feature is not merged"
@@ -2975,7 +2975,7 @@ let harness_detail_heading (state : state) ~cols ~task_id ~tail =
                ^ planning_workspace_strip ~width:(width - around) tabs
                ^ mark)
          })
-    ~id:task_id ~after:"" ~tail
+    ~id:task_id ~after:[] ~tail
 
 
 (* Where the goal stands with the completion judge, in one column. The phase
@@ -3484,7 +3484,7 @@ let render_diff_surface (state : state) (ds : diff_surface) =
   let total = List.length diff_rows in
   let header =
     detail_heading ~cols ~lead:(Lead_text (screen_title ds.ds_title ^ " "))
-      ~id:ds.ds_address ~after:"  vs HEAD" ~tail:(connection_badge state)
+      ~id:ds.ds_address ~after:[ "  vs HEAD" ] ~tail:(connection_badge state)
   in
   if rows < diff_surface_minimum_rows then begin
     Buffer.add_string buf (Message_layout.fit_width
@@ -3672,7 +3672,7 @@ let config_pane_tabs (state : state) =
       , pane ))
     config_panes
 
-let system_subnav_row (state : state) =
+let system_subnav_row ~cells (state : state) =
   let item surface ko en =
     pressable (Press_surface surface) (Masc_tui_types.ui_text state ~ko ~en)
   in
@@ -3682,20 +3682,24 @@ let system_subnav_row (state : state) =
          ~ko:("[언어:" ^ Masc_tui_types.ui_language_code state.ui_language ^ " 전환]")
          ~en:("[Lang:" ^ Masc_tui_types.ui_language_code state.ui_language ^ " toggle]"))
   in
-  "  "
-  ^ Masc_tui_types.ui_text state ~ko:"시스템 메뉴:" ~en:"System views:"
-  ^ " "
-  ^ item Runtime "9:런타임" "9:Runtime"
-  ^ " · "
-  ^ item Resources "s:리소스" "s:Resources"
-  ^ " · "
-  ^ item Tools "t:도구·스킬" "t:Tools&Skills"
-  ^ " · "
-  ^ item Acting "A:활동" "A:Activity"
-  ^ " · "
-  ^ item System_logs "L:로그" "L:Logs"
-  ^ "   "
-  ^ lang_chip
+  let menu =
+    "  "
+    ^ Masc_tui_types.ui_text state ~ko:"시스템 메뉴:" ~en:"System views:"
+    ^ " "
+    ^ item Runtime "9:런타임" "9:Runtime"
+    ^ " · "
+    ^ item Resources "s:리소스" "s:Resources"
+    ^ " · "
+    ^ item Tools "t:도구·스킬" "t:Tools&Skills"
+    ^ " · "
+    ^ item Acting "A:활동" "A:Activity"
+    ^ " · "
+    ^ item System_logs "L:로그" "L:Logs"
+  in
+  (* The language chip is the row's last item. On a row too narrow for it the
+     frame cut it in the middle ("[언어:KO…"), which reads as a broken label;
+     it is left out whole instead. [:language] and a click toggle it as well. *)
+  Message_layout.join_fitting ~sep:"   " ~cells [ menu; lang_chip ]
 
 let config_pane_strip ~cols ~before ~after (state : state) =
   let keys = config_pane_keys state in
@@ -3892,6 +3896,17 @@ let help_entry_rows ~width ~lead ~lead_cells ~column text =
    so the two displays cannot drift apart. A key added to the dispatch gets
    its row there, once. *)
 let help_lines ~width (state : state) =
+  (* What the reader typed after [/]. An empty query matches everything, so
+     the sheet is whole until something is typed. *)
+  let query = Masc_tui_help.filter_query state.help_filter in
+  let matches_query text = Masc_tui_pick_list.lowercase_contains ~needle:query text in
+  (* A section's name without the mark that says it is the reader's own. *)
+  let heading title =
+    if String.ends_with ~suffix:Masc_tui_keys.here_marker title then
+      String.sub title 0
+        (String.length title - String.length Masc_tui_keys.here_marker)
+    else title
+  in
   let section (title, entries) =
     let is_current =
       String.ends_with ~suffix:Masc_tui_keys.here_marker title
@@ -3904,9 +3919,7 @@ let help_lines ~width (state : state) =
        only one of them. *)
     let header_line =
       if is_current then
-        let marker_len = String.length Masc_tui_keys.here_marker in
-        let base_title = String.sub title 0 (String.length title - marker_len) in
-        (Theme.info ()) ^ "\xe2\x97\x86 " ^ Ansi.bold ^ base_title ^ Ansi.reset
+        (Theme.info ()) ^ "\xe2\x97\x86 " ^ Ansi.bold ^ heading title ^ Ansi.reset
       else
         Ansi.dim ^ "\xe2\x97\x87 " ^ Ansi.reset ^ Ansi.bold ^ title ^ Ansi.reset
     in
@@ -3942,7 +3955,16 @@ let help_lines ~width (state : state) =
          entries
     @ [ "" ]
   in
+  let commands =
+    List.filter
+      (fun (cmd : Masc_tui_command.command_help) ->
+        matches_query (Masc_tui_command.help_usage cmd) || matches_query cmd.summary)
+      Masc_tui_command.catalog
+  in
   let slash_commands =
+    match commands with
+    | [] -> []
+    | _ :: _ ->
     (Ansi.dim ^ "\xe2\x97\x87 " ^ Ansi.reset ^ Ansi.bold ^ "Slash commands" ^ Ansi.reset)
     :: List.concat_map
          (fun (cmd : Masc_tui_command.command_help) ->
@@ -3970,7 +3992,7 @@ let help_lines ~width (state : state) =
              summary_rows
                (Printf.sprintf "  %s%s%s%s" (Theme.warn ()) text Ansi.reset padding)
                (2 + Message_layout.display_width (text ^ padding)))
-         Masc_tui_command.catalog
+         commands
     @ [ "" ]
   in
   (* After any live Candle details, the first key section is the reader's
@@ -3984,6 +4006,7 @@ let help_lines ~width (state : state) =
   let candle =
     match Masc_tui_candle.summary_lines ~now:(Unix.gettimeofday ()) state.candle_observation with
     | [] -> []
+    | _ :: _ when not (String.equal query "") -> []
     | lines ->
       (Ansi.bold ^ "Candle details" ^ Ansi.reset)
       :: (List.concat_map
@@ -3991,10 +4014,21 @@ let help_lines ~width (state : state) =
               (Terminal_text.single_line line)) lines @ [ "" ])
   in
   let _, cols = get_terminal_size () in
-  candle @ (match Masc_tui_keys.help_sections_for_state ~cols state with
-  | [] -> slash_commands
-  | first :: rest ->
-      section first @ slash_commands @ List.concat_map section rest)
+  let rows =
+    candle
+    @ (match
+         Masc_tui_help.filter_sections ~query ~heading
+           (Masc_tui_keys.help_sections_for_state ~cols state)
+       with
+       | [] -> slash_commands
+       | first :: rest ->
+           section first @ slash_commands @ List.concat_map section rest)
+  in
+  match rows with
+  | _ :: _ -> rows
+  | [] ->
+      [ Printf.sprintf "%s  No key or command matches \"%s\".%s" Ansi.dim
+          (Terminal_text.single_line query) Ansi.reset ]
 
 
 module Context_bars = Masc_tui_context_bars

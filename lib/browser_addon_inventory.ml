@@ -12,13 +12,12 @@ let observe () : Browser_selection.snapshot =
   let work lane : Browser_selection.work_browser =
     let observed = B.inventory_observation (B.server_lane_name lane) in
     let registered = match observed.backend with B.Executor_registered value -> value | B.Live_clients _ -> false in
-    let locate=match lane with B.Server_automation -> B.automation_locate_available ()
-      | B.Server_stagehand -> B.stagehand_models_available () in
+    let locate=match lane with B.Server_automation -> B.automation_locate_available () in
     {activity=observed.activity;registered;session=B.server_session_observation lane;locate} in
   {live_activity=B.activity B.Lane_name.Live;live_clients=B.connected_clients ();live_space_presence=[];
-   automation=work B.Server_automation;stagehand=work B.Server_stagehand}
+   automation=work B.Server_automation}
 let owned_to_json (snapshot:Browser_selection.snapshot) = `Assoc [
-  "automation",work_to_json snapshot.automation;"stagehand",work_to_json snapshot.stagehand]
+  "automation",work_to_json snapshot.automation]
 let fields expected = function
   | `Assoc fields when List.sort String.compare (List.map fst fields)=expected -> Ok fields
   | _ -> Error "invalid owned browser inventory fields"
@@ -37,9 +36,6 @@ let work_of_json value =
     | Some (`Bool value) -> Ok value | None|Some _ -> Error "invalid browser locate availability" in
   Ok {Browser_selection.activity;registered;session;locate}
 let owned_of_json value =
-  let* fields=fields ["automation";"stagehand"] value in
-  let read key = let* value=Option.to_result ~none:"missing owned browser inventory" (List.assoc_opt key fields) in
-    work_of_json value in
-  let* automation=read "automation" in
-  let* stagehand=read "stagehand" in
-  Ok (automation,stagehand)
+  let* fields=fields ["automation"] value in
+  let* value=Option.to_result ~none:"missing owned browser inventory" (List.assoc_opt "automation" fields) in
+  work_of_json value

@@ -21,7 +21,7 @@ The command palette is `:`.
 | `:` | command palette |
 | `;` | agenda: what is coming, and who is waiting on you; Enter opens a row |
 | `@` | answering: who is mid-turn or just finished; Enter opens their chat |
-| `?` | this help |
+| `?` | this help; `/` filters its keys and commands |
 | `&` | Collab: watch MSX/DOS and manage play links (also `:` go Collab) |
 | `Ctrl-B` | show or hide the Keeper roster; it starts hidden and the choice persists across navigation and resizing |
 | `Ctrl-L` | cycle the Activity pane narrow, wide or hidden; the wheel over the pane scrolls the full list; a press picks a keeper, a second press opens its chat; /activity order turns the order of its calls, /activity scroll moves the pane |
@@ -53,7 +53,8 @@ The command palette is `:`.
 | `p` | open operator approvals and Keeper questions; Esc returns to Work |
 | `v` | Goals, then the two task surfaces: Task Review and Task Verdicts. Not stages of one flow |
 | `Right / Enter` | detail |
-| `Left / Esc` | back |
+| `Esc` | leave Work for the Dashboard |
+| `Left / Esc` | close the detail |
 | `f` | cycle all / active / completed / dropped |
 | `s` | cycle phase / updated / due |
 | `[ / ]` | while a detail is open, step to the row before or after it |
@@ -210,6 +211,7 @@ data and paint. A missing finish record remains an unfinished observation.
 |---|---|
 | `j/k` | move |
 | `Right / Enter` | read the post |
+| `Esc` | back to Dashboard |
 | `Left / Esc` | close the post |
 | `w` | write a post |
 | `v / V` | press twice to vote: v up, V down; while reading, on the selected comment when the comments have focus, otherwise on the post |
@@ -543,6 +545,7 @@ count is drawn beyond the available space.
 | `v` | on to Task Verdicts, then back to Goals |
 | `h` | the queue is what a task is still waiting on; the history is every request ever submitted, which nothing removes |
 | `Right / Enter` | read the request and evidence |
+| `Esc` | back to Work |
 | `Left / Esc` | back to the list |
 | `[ / ]` | while a detail is open, step to the row before or after it |
 | `< / >` | step either list a page at a time; one page holds two hundred rows, so a shorter queue arrives whole |
@@ -564,6 +567,7 @@ count is drawn beyond the available space.
 | `v` | back round to Goals |
 | `PgUp/PgDn` | page |
 | `Right / Enter` | open the full evaluator verdict |
+| `Esc` | back to Work |
 | `Left / Esc` | back to the verdict list |
 | `[ / ]` | while a detail is open, step to the row before or after it |
 | `y / x` | y records the machine's verdict as yours; x records the opposite, with $EDITOR taking the reason |
@@ -597,6 +601,7 @@ count is drawn beyond the available space.
 | `PgUp/PgDn` | page |
 | `< / >` | previous / next server page; pages are separate observations |
 | `Right / Enter` | open schedule details |
+| `Esc` | back to Work |
 | `Left / Esc` | back to the schedule list |
 | `[ / ]` | while a detail is open, step to the row before or after it |
 | `n` | create a schedule through a $EDITOR JSON form |
@@ -678,6 +683,7 @@ count is drawn beyond the available space.
 | `j/k` | move |
 | `[ / ]` | previous / next keeper |
 | `Right / Enter` | what the call wrote, as a diff |
+| `Esc` | back to the Keeper screen this list was opened from |
 | `Left / Esc` | close the diff |
 | `d` | what the tree holds now |
 | `v` | the file on the Code surface, read from the keeper's own workspace |
@@ -706,7 +712,8 @@ count is drawn beyond the available space.
 | `m` | edit [runtime].media_failover in the slot editor; refused while boot dropped one of its entries |
 | `R` | give the lane under the cursor another name; the assignments that route to it and [runtime].default, when it names it, are rewritten in the same write. The field opens on the name it has now |
 | `D` | remove the lane under the cursor; press twice. Refused while a keeper is assigned to it |
-| `Left / Esc` | back |
+| `Esc` | back to Config |
+| `Left / Esc` | close the open detail, back to the list |
 | `/` | jump the cursor to a matching lane id or runtime id |
 | `n / N` | next / previous match |
 | `Home/End` | top/bottom |
@@ -796,7 +803,8 @@ or completion.
 | `v` | toggle DEBUG rows directly; off uses the INFO floor |
 | `c` | cycle through the categories this page carries |
 | `Right / Enter` | show the full message, source, category, turn, and JSON details |
-| `Left / Esc` | back |
+| `Esc` | back to Activity |
+| `Left / Esc` | close the detail |
 | `/` | jump the cursor to a matching module, keeper, or message, over the rows the level and category filters leave |
 | `n / N` | next / previous match |
 | `Home/End` | top/bottom |

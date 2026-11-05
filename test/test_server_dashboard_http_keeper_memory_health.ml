@@ -663,31 +663,6 @@ let test_toml_name_override_uses_canonical_identity () =
     (list_field "alerts" keeper |> List.map (string_field "code"))
 ;;
 
-(* The pre-librarian snapshot read failure aborts before the librarian runs
-   and increments the counter under its own site label; the health row must
-   count it or a keeper with a corrupt first snapshot reports failure-free. *)
-let test_counts_snapshot_read_site_failures () =
-  let base = fresh_dir "masc-memory-health-readsite" in
-  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
-  let keeper_id = "readfail-" ^ Filename.basename base in
-  write_keeper_config ~keepers_dir ~keeper_id ();
-  Metrics.inc_counter
-    KeeperMetrics.(to_string MemoryOsLibrarianFailures)
-    ~labels:[ "keeper", keeper_id; "site", "memory_os_current_read" ]
-    ~delta:2.0
-    ();
-  let json = Health.keeper_memory_health_http_json ~base_path:base in
-  let keeper = keeper_obj keeper_id json in
-  Alcotest.(check int)
-    "read-site failures counted"
-    2
-    (int_field "librarian_failures" keeper);
-  Alcotest.(check (list string))
-    "starvation error raised"
-    [ "librarian_starvation" ]
-    (list_field "alerts" keeper |> List.map (string_field "code"))
-;;
-
 let test_workspace_context_preserves_sources_and_failures () =
   let base = fresh_dir "workspace-memory-context" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base) (fun () ->
@@ -1265,11 +1240,173 @@ let test_the_librarian_stalled_alarm_is_read_from_files () =
     (String.length (string_field "detail" stalled) > 0)
 ;;
 
+(* One Keeper's row is the element the fleet answer carries for it, and a
+   name the fleet does not list, a path-shaped one included, answers [null]. *)
+let test_one_keepers_row_is_its_fleet_row () =
+  let base = fresh_dir "masc-memory-health-one-row" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  ignore (write_snapshot ~keepers_dir ~keeper_id:"solo" [ fact "A"; fact "B" ]);
+  ignore (write_snapshot ~keepers_dir ~keeper_id:"other" [ fact "C" ]);
+  let fleet = Health.keeper_memory_health_http_json ~base_path:base in
+  let answer = Health.keeper_memory_health_row_http_json ~base_path:base ~keeper:"solo" in
+  Alcotest.(check string) "the row answer names the fleet schema"
+    "keeper.memory_os.current_health.v8" (string_field "schema" answer);
+  Alcotest.(check bool) "the row is the fleet's row for the Keeper" true
+    (Yojson.Safe.equal (keeper_obj "solo" fleet) (member "keeper" answer));
+  let row_of keeper =
+    member "keeper" (Health.keeper_memory_health_row_http_json ~base_path:base ~keeper)
+  in
+  Alcotest.(check bool) "an unlisted Keeper answers no row" true
+    (Yojson.Safe.equal `Null (row_of "absent"));
+  Alcotest.(check bool) "a path-shaped name answers no row" true
+    (Yojson.Safe.equal `Null (row_of "../solo"))
+;;
+
+(* The totals count the rows: unread turns go unknown with one unmeasured
+   row, the continuity lag sums the measured rows and counts the rest, and
+   the alert summary counts each severity. *)
+let test_totals_count_the_rows () =
+  let module Totals = Masc.Keeper_memory_health_totals in
+  let row ?(unread = Some (1, 2)) ?(continuity = Some 3) ?(alerts = []) ?(failures = 0)
+      ?(snapshot_present = true) ?(stopped = false) ?(read_error = false) facts : Totals.Row.t =
+    { Totals.Row.facts
+    ; observed_facts = facts
+    ; derived_facts = 0
+    ; support_invalidations = 0
+    ; snapshot_bytes = 10
+    ; added = 1
+    ; removed = 0
+    ; source_facts = 0
+    ; source_invalidations = 0
+    ; source_snapshot_bytes = 0
+    ; unread_atom_turns = Option.map fst unread
+    ; unread_official_turns = Option.map snd unread
+    ; continuity_unread_atoms = continuity
+    ; librarian_failures = failures
+    ; vision_ingest_errors = 0
+    ; read_error
+    ; source_read_error = false
+    ; snapshot_present
+    ; librarian_stopped = stopped
+    ; alerts
+    }
+  in
+  let measured = Totals.of_rows [ row 2; row 3 ~continuity:None ] in
+  Alcotest.(check int) "facts are summed" 5 measured.Totals.facts;
+  Alcotest.(check (option int)) "unread turns are summed when every row is measured" (Some 6)
+    measured.Totals.librarian_unread_turns;
+  Alcotest.(check int) "the continuity lag sums the measured rows" 3
+    measured.Totals.librarian_continuity_unread_atoms;
+  Alcotest.(check int) "and counts the rest" 1 measured.Totals.librarian_continuity_unmeasured;
+  let mixed =
+    Totals.of_rows
+      [ row 1 ~unread:None ~failures:1 ~snapshot_present:false ~stopped:true ~read_error:true
+          ~alerts:[ Totals.Alert_warn; Totals.Alert_error ]
+      ; row 1
+      ]
+  in
+  Alcotest.(check (option int)) "one unmeasured row leaves unread turns unknown" None
+    mixed.Totals.librarian_unread_turns;
+  Alcotest.(check int) "warn alerts" 1 mixed.Totals.warn_alerts;
+  Alcotest.(check int) "error alerts" 1 mixed.Totals.error_alerts;
+  Alcotest.(check int) "every alert" 2 mixed.Totals.total_alerts;
+  Alcotest.(check int) "Keepers with alerts" 1 mixed.Totals.keepers_with_alerts;
+  Alcotest.(check int) "read errors" 1 mixed.Totals.read_errors;
+  Alcotest.(check int) "stopped Keepers" 1 mixed.Totals.librarian_stopped_keepers;
+  Alcotest.(check int) "a Keeper with failures and no snapshot starves" 1
+    mixed.Totals.librarian_starving_keepers;
+  Alcotest.(check (option int)) "no row is a measured zero" (Some 0)
+    (Totals.of_rows []).Totals.librarian_unread_turns
+;;
+
+(* The TUI reads one Keeper's row after its push and merges it into the fleet
+   answer it holds (RFC-0487). The merged answer is the fleet answer read
+   after the write: the same rows, in the same order, with the same totals.
+   A Keeper that left loses its row, and another Keeper's refused row, whose
+   counts only the server has, stops the merge. *)
+let test_a_merged_row_is_the_fleet_read_after_the_write () =
+  let module Decode = Masc.Tui_decode_memory_health in
+  let base = fresh_dir "masc-memory-health-merge" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  ignore (write_snapshot ~keepers_dir ~keeper_id:"alpha" [ fact "A" ]);
+  ignore (write_snapshot ~keepers_dir ~keeper_id:"beta" [ fact "B1"; fact "B2" ]);
+  let fleet () =
+    match Decode.decode_memory_health_snapshot (Health.keeper_memory_health_http_json ~base_path:base) with
+    | Ok snapshot -> snapshot
+    | Error detail -> Alcotest.fail detail
+  in
+  let held = fleet () in
+  ignore (write_snapshot ~keepers_dir ~keeper_id:"alpha" [ fact "A"; fact "A2"; fact "A3" ]);
+  let row_answer keeper =
+    match
+      Decode.decode_memory_health_row ~keeper
+        (Health.keeper_memory_health_row_http_json ~base_path:base ~keeper)
+    with
+    | Ok answer -> answer
+    | Error detail -> Alcotest.fail detail
+  in
+  let answer = row_answer "alpha" in
+  let row =
+    match answer.Decode.mhr_keeper with
+    | Decode.Row_present row -> row
+    | Decode.Row_refused refusal -> Alcotest.fail refusal.Decode.mkr_reason
+    | Decode.Row_absent -> Alcotest.fail "a listed Keeper has no row"
+  in
+  let observed_now (snapshot : Decode.memory_health_snapshot) =
+    { snapshot with Decode.mhs_generated_at = 0.0 }
+  in
+  (match
+     Decode.with_keeper_row held ~generated_at:answer.Decode.mhr_generated_at ~keeper_id:"alpha"
+       (Some row)
+   with
+   | Some merged ->
+     Alcotest.(check bool) "the merged answer is the fleet read after the write" true
+       (observed_now merged = observed_now (fleet ()));
+     Alcotest.(check bool) "it is observed when the row was" true
+       (merged.Decode.mhs_generated_at >= answer.Decode.mhr_generated_at)
+   | None -> Alcotest.fail "a row merges into an answer with no refused row");
+  (match Decode.with_keeper_row held ~generated_at:0.0 ~keeper_id:"beta" None with
+   | Some removed ->
+     Alcotest.(check (list string)) "a Keeper that left loses its row" [ "alpha" ]
+       (List.map (fun (keeper : Decode.memory_keeper_health) -> keeper.Decode.mkh_keeper_id)
+          removed.Decode.mhs_keepers);
+     Alcotest.(check int) "and the totals count the rows left"
+       (List.fold_left
+          (fun total (keeper : Decode.memory_keeper_health) -> total + keeper.Decode.mkh_facts)
+          0 removed.Decode.mhs_keepers)
+       removed.Decode.mhs_total_facts
+   | None -> Alcotest.fail "a removal merges into an answer with no refused row");
+  let refused name = { Decode.mkr_keeper_id = Some name; mkr_reason = "refused" } in
+  Alcotest.(check bool) "another Keeper's refused row stops the merge" true
+    (Option.is_none
+       (Decode.with_keeper_row
+          { held with Decode.mhs_refused_keepers = [ refused "gamma" ] }
+          ~generated_at:0.0 ~keeper_id:"alpha" (Some row)));
+  Alcotest.(check bool) "the Keeper's own refused row is replaced by its row" true
+    (Option.is_some
+       (Decode.with_keeper_row
+          { held with Decode.mhs_refused_keepers = [ refused "alpha" ] }
+          ~generated_at:0.0 ~keeper_id:"alpha" (Some row)));
+  Alcotest.(check bool) "a row answer for another Keeper is refused" true
+    (Result.is_error
+       (Decode.decode_memory_health_row ~keeper:"beta"
+          (Health.keeper_memory_health_row_http_json ~base_path:base ~keeper:"alpha")));
+  Alcotest.(check bool) "an unlisted Keeper's answer decodes as no row" true
+    (match (row_answer "absent").Decode.mhr_keeper with
+     | Decode.Row_absent -> true
+     | Decode.Row_present _ | Decode.Row_refused _ -> false)
+;;
+
 let () =
   Alcotest.run
     "server_dashboard_http_keeper_memory_health"
     [ ( "current snapshot"
-      , [ Alcotest.test_case "unread evidence is observed without publication" `Quick
+      , [ Alcotest.test_case "one Keeper's row is its fleet row" `Quick
+            test_one_keepers_row_is_its_fleet_row
+        ; Alcotest.test_case "the totals count the rows" `Quick test_totals_count_the_rows
+        ; Alcotest.test_case "a merged row is the fleet read after the write" `Quick
+            test_a_merged_row_is_the_fleet_read_after_the_write
+        ; Alcotest.test_case "unread evidence is observed without publication" `Quick
             test_unread_evidence_is_observed_without_publication
         ; Alcotest.test_case "saved versus prepared context" `Quick
             test_context_cycle_separates_saved_and_prepared
@@ -1315,8 +1452,6 @@ let () =
             test_librarian_failures_with_snapshot_is_warn_alert
         ; Alcotest.test_case "toml name override canonical identity" `Quick
             test_toml_name_override_uses_canonical_identity
-        ; Alcotest.test_case "snapshot read site failures counted" `Quick
-            test_counts_snapshot_read_site_failures
         ; Alcotest.test_case "source-only snapshot counted" `Quick
             test_source_only_snapshot_is_enumerated_and_counted
         ; Alcotest.test_case "corrupt source snapshot visible" `Quick

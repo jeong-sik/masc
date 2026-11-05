@@ -28,8 +28,7 @@ val machine_of_kind : kind -> Machine_lane.t option
     other kinds. A new source kind must choose here. *)
 val offers : Lane_id.builtin -> kind list
 (** The source kinds a built-in lane offers a binding. [parse] accepts a
-    [browser_document] source only from a Browser Lane backend listed here;
-    Stagehand has no idle document observer and offers none. *)
+    [browser_document] source only from a Browser Lane backend listed here. *)
 type activity = Tool_completed | Machine_changed of Machine_lane.t | Browser_changed
   | Fusion_changed of string
 type refresh_interest
@@ -72,7 +71,6 @@ type access = Operator_configuration | Keeper of string | Unauthenticated
     or an operator-owned persistent configuration. This value is host-owned. *)
 val access_to_json : access -> Yojson.Safe.t
 val access_of_json : Yojson.Safe.t -> (access, string) result
-val has_native_fusion : Yojson.Safe.t -> (bool, string) result
 val fusion_owner : access:access -> run_id:string -> (string, string) result
 (** Read the authoritative registry owner only after the same Fusion access
     check used for acquisition. Unknown and foreign runs share one denial. *)

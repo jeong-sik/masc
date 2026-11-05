@@ -67,7 +67,6 @@ let packages_directory base = Filename.concat base ".masc/packages"
    it independently of setup; setup names the package [browser-<folder>]. *)
 let folder = function
   | B.Automation -> "automation"
-  | B.Stagehand -> "stagehand"
   | B.Owned_firefox -> "firefox"
   | B.Ego -> "ego"
   | B.External_host -> "external"

@@ -802,9 +802,6 @@ let accept_event ~resolved_binding ~dispatch_for_delivery ~base_dir
       ~message_reference_channel_id ~message_reference_message_id
       ~referenced_message_author_id ()
   | Gw.Reaction_add _ ->
-    (* The previous Python sidecar used a configurable emoji
-       trigger to drain pending messages. That feature is dropped in
-       the in-process gateway; re-add as a follow-up if needed. *)
     None
   | Gw.Thread_tracked { thread_id; parent_channel_id } ->
     State.register_thread ~thread_id ~parent_channel_id;

@@ -6465,7 +6465,7 @@ let refresh_browser_lane state ~mailbox =
         (match view.selection, view.source with
          | Live_unbound, _ -> Discover Choose_client
          | (Unbound | Work_unbound), _ | (Bound_automatic | Bound_explicit), Live -> Discover Read_after_discovery
-         | (Bound_automatic | Bound_explicit), (Automation | Stagehand) -> Read)
+         | (Bound_automatic | Bound_explicit), Automation -> Read)
   | Some _ | None -> ()
 
 let open_browser_lane state ~mailbox =
@@ -6521,6 +6521,7 @@ let launch_memory_input_load state ~mailbox ~refresh =
         | Masc_tui_fetched.Already_loading -> ()
         | Masc_tui_fetched.Started (next, request) ->
           state.memory_input <- next;
+          state.memory_input_owed <- Masc_tui_owed_read.started state.memory_input_owed;
           let host = server_peer_host and port = state.port in
           launch_workspace_request state ~mailbox ~boundary_error:Fun.id
             ~deliver:(fun result -> Memory_input_loaded (request, result))
@@ -6533,14 +6534,39 @@ let launch_memory_health_load state ~mailbox =
      || not (same_workspace_identity state.server_identity state.server_identity) then ()
   else begin
     state.memory_health_inflight <- true;
+    state.memory_health_owed <- Masc_tui_owed_read.started state.memory_health_owed;
+    (* The rows owed stay owed through this read: the server may answer the
+       fleet from a cache older than their writes, and an answer older than
+       the one held is not applied. Reading them after it costs one row each. *)
     let host = server_peer_host in
     let port = state.port in
     launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-      ~deliver:(fun result -> Memory_loaded result)
+      ~deliver:(fun result -> Memory_loaded (Fleet_health_read result))
       (fun () -> Masc_tui_loader.load_memory_health ~host ~port)
   end
 
   end
+
+(* The oldest Keeper a push named, read as its own row (RFC-0487). It shares
+   the in-flight mark with the fleet read: one memory health read at a time.
+   The Keeper leaves the list only when its read starts, so a read that
+   cannot start yet keeps it owed. *)
+let launch_owed_memory_health_row state ~mailbox =
+  match state.memory_health_rows_owed with
+  | [] -> ()
+  | keeper :: rest ->
+      if server_authority_ready state
+         && not state.memory_health_inflight
+         && same_workspace_identity state.server_identity state.server_identity
+      then begin
+        state.memory_health_rows_owed <- rest;
+        state.memory_health_inflight <- true;
+        let host = server_peer_host in
+        let port = state.port in
+        launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+          ~deliver:(fun result -> Memory_loaded (Row_health_read { keeper; result }))
+          (fun () -> Masc_tui_loader.load_memory_health_row ~host ~port ~keeper)
+      end
 
 (* Ask for [key]'s facts and run [read] for them, unless that read is already
    in flight. *)
@@ -8202,6 +8228,23 @@ let owe_connectors_read state =
 let owe_harness_read state =
   state.harness_owed <- Masc_tui_owed_read.changed state.harness_owed
 
+(* The fleet memory health reads on arrival, on a revalidation, when a row
+   read cannot be merged, and again after a failed read (RFC-0487). *)
+let owe_memory_health_read state =
+  state.memory_health_owed <- Masc_tui_owed_read.changed state.memory_health_owed
+
+(* The input pane shows the selected Keeper's turn records. A memory health
+   answer may be about them: the fleet read, or a pushed row of that Keeper. *)
+let owe_memory_input_read state =
+  state.memory_input_owed <- Masc_tui_owed_read.changed state.memory_input_owed
+
+(* A memory health push names the Keeper whose input was written. That
+   Keeper's row is read on its own and merged into the fleet answer, so a
+   Keeper that writes often costs one row per push (RFC-0487). *)
+let owe_memory_health_row state keeper =
+  if not (List.exists (String.equal keeper) state.memory_health_rows_owed) then
+    state.memory_health_rows_owed <- state.memory_health_rows_owed @ [ keeper ]
+
 (* A dataset push owes a read to the surface that shows that dataset. *)
 let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
   match dataset with
@@ -8216,6 +8259,7 @@ let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
   | Masc.Workspace_dataset_event.Keeper_costs -> owe_keeper_costs_read state
   | Masc.Workspace_dataset_event.Keeper_oauth_attempts { keeper } ->
       Masc_tui_types.owe_identity_login_read state keeper
+  | Masc.Workspace_dataset_event.Memory_health { keeper } -> owe_memory_health_row state keeper
 
 (* The durable async requests the Keepers list and Tools draw read under the
    same rules. *)
@@ -8255,7 +8299,12 @@ let launch_surface_reads state ~mailbox (surface : surface) =
            launch_fusion_detail_load ~demand state ~mailbox ~run_id
        | Fusion_historical_detail reference ->
            launch_fusion_historical_detail_load ~demand state ~mailbox ~reference)
-  | Memory -> launch_memory_health_load state ~mailbox
+  (* Arriving owes the fleet a read as well as starting one: a read already in
+     flight may have begun before a write announced while the surface was off
+     screen. Metrics shows the same health and owes it the same way. *)
+  | Memory ->
+      owe_memory_health_read state;
+      launch_memory_health_load state ~mailbox
   | Repositories ->
       owe_repositories_read state;
       launch_repositories_load state ~mailbox
@@ -8292,6 +8341,7 @@ let launch_surface_reads state ~mailbox (surface : surface) =
   | Resources -> launch_resources_load state ~mailbox
   | Code -> Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox)
   | Metrics ->
+      owe_memory_health_read state;
       launch_memory_health_load state ~mailbox;
       launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh state ~mailbox;
       launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox;
@@ -8303,6 +8353,13 @@ let launch_surface_reads state ~mailbox (surface : surface) =
    a load the other performs. Surfaces not listed refresh on the periodic
    cadence ([surface_needs]); the ones here are snapshots that would
    otherwise read as empty until the next tick. *)
+(* Leaving the Browser lane returns to the surface it was opened from. That is
+   an arrival: while the lane covered the surface, the surface was off screen
+   and dropped what it owed, so it reads the way it reads on arrival. *)
+let leave_browser_lane state ~mailbox =
+  hide_browser_lane state;
+  launch_surface_reads state ~mailbox state.view
+
 let goto_surface ?(from_reference = false) state ~mailbox (destination : surface) =
   state.code_hover <- None;
   state.runtime_config_jump_section <- None;
@@ -9167,6 +9224,63 @@ let launch_owed_repositories state ~mailbox =
     state.repositories_owed <- read;
     if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
       launch_repositories_load state ~mailbox
+  end
+
+let memory_health_on_screen state =
+  match state.view with
+  | Memory | Metrics -> true
+  | Overview | Approvals | Acting | Lanes | Clients | Board | Planning | Schedules
+  | Verification | Harness | Repositories | Fusion | Code | Changes | Connectors | Runtime
+  | Config | Resources | Tools | System_logs | Keepers _ ->
+      false
+
+(* Runs on every loop iteration. Off screen nothing is owed: arriving reads the
+   fleet. One memory health read runs at a time. A fleet read that is owed goes
+   first, and a failed read's wait holds the rows too. With nothing owed for the
+   fleet, the rows pushes named are read one at a time. While a row of the held
+   answer stands refused no row can be merged (the server counted that row and
+   this build cannot), so the pushes owe the fleet instead. *)
+let launch_owed_memory_health state ~mailbox =
+  if not (memory_health_on_screen state) then begin
+    state.memory_health_owed <- Masc_tui_owed_read.settled;
+    state.memory_health_rows_owed <- []
+  end
+  else if not state.memory_health_inflight then begin
+    let read = Masc_tui_owed_read.abandoned state.memory_health_owed in
+    state.memory_health_owed <- read;
+    match read, state.memory_health, state.memory_health_rows_owed with
+    | (Masc_tui_owed_read.Owed _ | Waiting _ | Reading _), _, _ ->
+        if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read then
+          launch_memory_health_load state ~mailbox
+    | Settled, Some held, _ :: _ ->
+        (match held.Masc.Tui_decode_memory_health.mhs_refused_keepers with
+         | [] -> launch_owed_memory_health_row state ~mailbox
+         | _ :: _ ->
+             state.memory_health_rows_owed <- [];
+             owe_memory_health_read state)
+    | Settled, Some _, [] -> ()
+    | Settled, None, _ :: _ -> owe_memory_health_read state
+    | Settled, None, [] -> ()
+  end
+
+(* Runs on every loop iteration. The input pane reads when the selection moves
+   to another Keeper, when a memory health answer owes it, and again after a
+   failed read, which waits like any owed read (RFC-0480 §3.1). Off Memory
+   nothing is owed: arriving reads the fleet, whose answer owes the pane. The
+   facts browser covers the pane and keeps what it owes, so closing the
+   browser reads a change that came meanwhile. *)
+let launch_owed_memory_input state ~mailbox =
+  if not (state.view = Memory) then
+    state.memory_input_owed <- Masc_tui_owed_read.settled
+  else begin
+    let reading = Masc_tui_fetched.in_flight state.memory_input in
+    let read =
+      if reading then state.memory_input_owed
+      else Masc_tui_owed_read.abandoned state.memory_input_owed
+    in
+    state.memory_input_owed <- read;
+    launch_memory_input_load state ~mailbox
+      ~refresh:((not reading) && Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read)
   end
 
 let harness_on_screen state =
@@ -14315,8 +14429,7 @@ let draw_browser_viewport state (shot : Browser_lane_view.screenshot) bytes =
   let pointer_hint = match !image_cell_pixels with
     | Some (width, height) when width > 0 && height > 0 ->
         let click = match shot.source with
-          | Browser_lane_view.Live | Browser_lane_view.Automation -> "click: link"
-          | Browser_lane_view.Stagehand -> "click: control" in
+          | Browser_lane_view.Live | Browser_lane_view.Automation -> "click: link" in
         (* A view that holds no clients answers "not listed" for a live shot. *)
         let view = Option.value state.browser_lane ~default:(Browser_lane_view.create ()) in
         click ^ "   " ^ Browser_lane_view.screenshot_drag_hint view shot
@@ -14331,7 +14444,6 @@ let draw_browser_viewport state (shot : Browser_lane_view.screenshot) bytes =
              (match Browser_lane_view.screenshot_client view shot with
               | Some client -> Browser_lane_view.browser_identity client
               | None -> "Selected browser")
-         | Stagehand, _ -> "Chromium work browser"
          | Automation, _ -> "Work browser"
          | Live, None -> "Selected browser") shot.tab_id shot.elapsed_ms; shot.url]
     ~footer:("  Esc: back  r:refresh  " ^ wheel_hint ^ "  j/k:center  " ^ pointer_hint) bytes;
@@ -15771,16 +15883,8 @@ let apply_approvals_load state result =
    moves the cursor, so this writes out of band rather than through the frame.
    The banner names the Keeper or the installation so it says who is waiting. *)
 let notify_new_asks (arrived : Masc.Tui_decode_asks.ask_key list) =
-  let message =
-    match List.map (fun (ask : Masc.Tui_decode_asks.ask_key) -> ask.ak_asker) arrived with
-    | [ asker ] ->
-        Printf.sprintf "%s is waiting on a decision" (Masc.Tui_decode_asks.ask_asker_label asker)
-    | [] | _ :: _ :: _ ->
-        let count = List.length arrived in
-        Printf.sprintf "%s %s waiting on a decision"
-          (Masc_tui_message_layout.count_noun count "question") (if count = 1 then "is" else "are")
-  in
-  write_to_terminal (Printf.sprintf "\x07\x1b]9;%s\x07" message)
+  write_to_terminal
+    (Printf.sprintf "\x07\x1b]9;%s\x07" (Ask.arrival_notification arrived))
 
 let record_applied_asks (snapshot : Masc.Tui_decode_asks.asks_snapshot) =
   if Masc_tui_frame_timing.enabled then begin
@@ -16670,20 +16774,26 @@ let apply_http_scoped_data state ~datasets results =
     (Mtime_clock.elapsed_ns ()) (Yojson.Safe.to_string (`List (List.rev !outcomes)));
   roster_refreshed
 
-let apply_http_dataset state = function
-  | Dataset_transport result ->
-      apply_transport_load state result;
-      settle_pushed_dataset state Surface_read_order.Transport_data ~received:(Result.is_ok result);
-      None
-  | Dataset_board_posts board -> Some (apply_board_list_load state board)
-  | Dataset_board_hearths hearths -> apply_board_hearths_load state hearths; None
-  | Dataset_planning result -> apply_planning_load state result; None
-  | Dataset_system_logs result -> apply_system_logs_load state result; None
-  | Dataset_runtime_quota (runtimes, quota) -> apply_runtime_quota_load state (runtimes, quota); None
-  | Dataset_keeper_usage result -> apply_keeper_usage_load state result; None
-  | Dataset_provider_history reading -> apply_provider_history_load state reading; None
-  | Dataset_overview_goals result -> apply_overview_goals_load state result; None
-  | Dataset_account_emails result -> apply_account_emails_load state result; None
+(* Taking a dataset early ([take_early_surface_dataset]) ends its bundle's
+   ownership of it, so the bundle's [apply_http_scoped_data] skips it and
+   this is the only answer that settles its pushed source's owed read. Left
+   in flight, the next loop iteration finds no read pending, owes the source
+   again and reads it at once, every frame. *)
+let apply_http_dataset state dataset =
+  let application = match dataset with
+    | Dataset_transport result -> apply_transport_load state result; None
+    | Dataset_board_posts board -> Some (apply_board_list_load state board)
+    | Dataset_board_hearths hearths -> apply_board_hearths_load state hearths; None
+    | Dataset_planning result -> apply_planning_load state result; None
+    | Dataset_system_logs result -> apply_system_logs_load state result; None
+    | Dataset_runtime_quota (runtimes, quota) -> apply_runtime_quota_load state (runtimes, quota); None
+    | Dataset_keeper_usage result -> apply_keeper_usage_load state result; None
+    | Dataset_provider_history reading -> apply_provider_history_load state reading; None
+    | Dataset_overview_goals result -> apply_overview_goals_load state result; None
+    | Dataset_account_emails result -> apply_account_emails_load state result; None in
+  settle_pushed_dataset state (http_dataset_key dataset)
+    ~received:(http_dataset_received dataset);
+  application
 
 (* Revoke the whole workspace-owned detail population before any successor
    starts. Queued plain replies carry the old authority token; fetched reads
@@ -16759,11 +16869,17 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
      next workspace's screens must not carry it. *)
   state.home_decision_receipt <- None;
   (* Keeper names are local to a workspace. Retire both the selected roster
-     and its input request before another workspace can reuse the same name. *)
+     and its input request before another workspace can reuse the same name:
+     Enter must select a newly read B health row, never A's retained row. The
+     next workspace's fleet is owed, so a Memory or Metrics screen left empty
+     reads it once that workspace can be read (RFC-0487). *)
   state.memory_input <- Masc_tui_fetched.clear state.memory_input;
+  state.memory_input_owed <- Masc_tui_owed_read.settled;
   state.memory_health <- None;
   state.memory_health_error <- None;
   state.memory_health_inflight <- false;
+  state.memory_health_owed <- Masc_tui_owed_read.changed Masc_tui_owed_read.settled;
+  state.memory_health_rows_owed <- [];
   state.memory_health_cursor <- 0;
   state.memory_health_scroll <- 0;
   state.task_detail_id <- None;
@@ -16806,12 +16922,6 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.memory_facts_scroll <- 0;
   state.memory_fact_claim_wrap <- None;
   state.memory_facts_category <- Category_all;
-  (* Enter must select a newly read B health row, never A's retained row. *)
-  state.memory_health <- None;
-  state.memory_health_error <- None;
-  state.memory_health_inflight <- false;
-  state.memory_health_cursor <- 0;
-  state.memory_health_scroll <- 0;
   state.preset_save_draft <- None;
   state.preset_save_draft_description <- "";
   state.preset_save_draft_source <- Preset_form_local;
@@ -19048,6 +19158,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        owe_runtime_config_read state;
        owe_harness_read state;
        owe_clients_read state;
+       owe_memory_health_read state;
        Masc_tui_types.owe_every_identity_login_read state;
        owe_async_requests_read state;
        owe_selected_tools_async_detail_read state;
@@ -27688,14 +27799,66 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       | Error detail ->
           state.repositories_owed <- failed_read state.repositories_owed;
           state.repositories_error <- Some detail)
-  | Memory_loaded result ->
+  | Memory_loaded (Fleet_health_read result) ->
       state.memory_health_inflight <- false;
-      (match result with
-      | Ok snapshot ->
-          apply_memory_health_snapshot state snapshot
-      | Error detail -> state.memory_health_error <- Some detail);
-      launch_memory_input_load state ~mailbox ~refresh:true
+      state.memory_health_owed <-
+        (match result with
+         | Ok _ -> Masc_tui_owed_read.succeeded state.memory_health_owed
+         | Error _ -> failed_read state.memory_health_owed);
+      (match result, state.memory_health with
+       (* An answer observed before the one held, rows merged since included,
+          says nothing newer and does not replace it. *)
+       | Ok snapshot, Some held
+         when snapshot.Masc.Tui_decode_memory_health.mhs_generated_at
+              < held.Masc.Tui_decode_memory_health.mhs_generated_at -> ()
+       | Ok snapshot, (Some _ | None) -> apply_memory_health_snapshot state snapshot
+       | Error detail, (Some _ | None) -> state.memory_health_error <- Some detail);
+      owe_memory_input_read state
+  | Memory_loaded (Row_health_read { keeper; result }) ->
+      state.memory_health_inflight <- false;
+      (* The row replaces the Keeper's row in the fleet answer, or removes it
+         when the Keeper has none, and the totals are counted again
+         (RFC-0487). A row that cannot be merged -- no fleet answer yet, a
+         refused row, or a failed read -- owes the fleet. *)
+      let merged =
+        match state.memory_health, result with
+        | Some snapshot,
+          Ok { Masc.Tui_decode_memory_health.mhr_generated_at;
+               mhr_keeper = Masc.Tui_decode_memory_health.Row_present row } ->
+            Masc.Tui_decode_memory_health.with_keeper_row snapshot
+              ~generated_at:mhr_generated_at ~keeper_id:keeper (Some row)
+        | Some snapshot,
+          Ok { Masc.Tui_decode_memory_health.mhr_generated_at;
+               mhr_keeper = Masc.Tui_decode_memory_health.Row_absent } ->
+            Masc.Tui_decode_memory_health.with_keeper_row snapshot
+              ~generated_at:mhr_generated_at ~keeper_id:keeper None
+        | Some _,
+          Ok { Masc.Tui_decode_memory_health.mhr_keeper = Masc.Tui_decode_memory_health.Row_refused _; _ }
+        | None, Ok _
+        | (Some _ | None), Error _ -> None
+      in
+      (match merged, result with
+       | Some snapshot, (Ok _ | Error _) ->
+           apply_memory_health_snapshot state snapshot;
+           (* The input pane shows the selected Keeper's turn records, which
+              its push may have been about. *)
+           (match selected_memory_keeper state with
+            | Some selected
+              when String.equal selected.Masc.Tui_decode_memory_health.mkh_keeper_id keeper ->
+                owe_memory_input_read state
+            | Some _ | None -> ())
+       | None, Error detail ->
+           state.memory_health_error <- Some detail;
+           state.memory_health_owed <- failed_read state.memory_health_owed
+       | None, Ok _ -> owe_memory_health_read state)
   | Memory_input_loaded (request, result) ->
+      (* An answer for a selection already left settles nothing; the read
+         of the current selection does. *)
+      if Masc_tui_fetched.is_current ~equal:String.equal state.memory_input request then
+        state.memory_input_owed <-
+          (match result with
+           | Ok _ -> Masc_tui_owed_read.succeeded state.memory_input_owed
+           | Error _ -> failed_read state.memory_input_owed);
       state.memory_input <-
         Masc_tui_fetched.complete ~equal:String.equal state.memory_input request result
   | Memory_facts_loaded (request, result) ->
@@ -28602,6 +28765,10 @@ let terminal_title_runtime state keeper_name =
         | Keeper_control.Absent | Keeper_control.Unobserved | Keeper_control.Invalid _ -> None))
 ;;
 
+let terminal_title_attention state =
+  List.length (Masc_tui_types.operator_actions state)
+;;
+
 let terminal_title_snapshot state =
   let live = Option.map turn_log_keeper_name state.msg_live in
   let inflight =
@@ -28622,6 +28789,7 @@ let terminal_title_snapshot state =
   in
   Terminal_title.make
     ~activity
+    ~attention:(terminal_title_attention state)
     ~keeper_name
     ~runtime_id:(terminal_title_runtime state keeper_name)
     ~workspace:state.workspace
@@ -28854,6 +29022,8 @@ let main
         (Terminal_profile.synchronized_output terminal_profile)
       ()
   in
+  (* Off unless MASC_TUI_NAV_TRACE names a file (RFC-0485). *)
+  let nav_trace = Masc_tui_nav_trace_log.from_environment ~clock:Unix.gettimeofday in
   (* All interaction evidence is committed together after terminal output. *)
   let presented = ref (Presented.initial ~approval:None
       ~presses:Masc_tui_hit.no_zones ~panes:Masc_tui_pane_selection.no_panes
@@ -29375,13 +29545,16 @@ let main
        presentation. Activity, chat row action and repository change authority
        changes force a full presentation only if a differential draw would
        otherwise do nothing; ordinary async updates stay differential. *)
-    match
+    let result =
       Frame_presenter.present frame_presenter
         ~invalidate_before:(damaged || authority_changed || preset_confirmation_changed)
         ~force_present:(activity_authority_changed || chat_actions_changed || change_authority_changed
                         || task_detail_needs_present || tools_task_needs_present)
         ~write ~flush frame
-    with
+    in
+    Masc_tui_nav_trace_log.note_frame nav_trace
+      ~surface:frame.Frame_presenter.surface_key ~result;
+    match result with
     | Frame_presenter.Presented _ as frame_result ->
         state.frames_presented <- state.frames_presented + 1;
         Masc_tui_frame_timing.note_presented ~surface:frame.Frame_presenter.surface_key;
@@ -31501,6 +31674,12 @@ Use relative paths for resources already held in the package. -->
             Option.iter (observe_input_received input_reader) input;
             input)
       in
+      Masc_tui_nav_trace_log.note_input nav_trace
+        (match input with
+         | Some (Key name) -> Masc_tui_nav_trace_log.Key name
+         | Some (Pasted _ | Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _
+                | Mouse_wheel _) -> Masc_tui_nav_trace_log.Other_input
+         | Some (Graphics_reply _) | None -> Masc_tui_nav_trace_log.No_input);
       (* Retire the old preview before a frame barrier or paste recovery can
          consume the event. Protocol replies do not represent operator input. *)
       let duplicate_image_save = match input with
@@ -33179,6 +33358,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_keeper_turns state ~mailbox:async_messages;
       launch_owed_verification state ~mailbox:async_messages;
       launch_owed_repositories state ~mailbox:async_messages;
+      launch_owed_memory_health state ~mailbox:async_messages;
       launch_owed_runtime_config state ~mailbox:async_messages;
       launch_owed_connectors state ~mailbox:async_messages;
       launch_owed_harness state ~mailbox:async_messages;
@@ -33514,6 +33694,54 @@ Use relative paths for resources already held in the package. -->
                 search_jump state ~query:longer ~after:(-1)
             | _ -> ())
       in
+      (* The cheat sheet's keys. [Masc_tui_help.step] says what a key does in
+         the filter's current state; this applies it to the sheet. *)
+      let handle_help_key k =
+           let scroll_help () =
+             (* Bounded against the sheet the frame draws, which folds to
+                two columns on a wide terminal and so holds half the rows
+                the lines were written as. A page moves by the viewport
+                height the sheet itself claims, so one press lands the
+                reader where the last visible line was the first. *)
+             let count, height = Masc_tui_render.help_viewport state in
+             let step =
+               match k with
+               | "pageup" | "pagedown" -> max 1 height
+               | _ -> 1
+             in
+             let move =
+               match k with
+               | "j" | "down" | "pagedown" -> Masc_tui_scroll.down
+               | _ -> Masc_tui_scroll.up
+             in
+             (* [down]/[up] move by one; the page keys repeat the single
+                step so the bound stays the scroll module's, not a
+                re-derived one. *)
+             let rec repeat n scroll =
+               if n <= 0 then scroll else repeat (n - 1) (move ~count ~height scroll)
+             in
+             state.help_scroll <- repeat step state.help_scroll
+           in
+           (match Masc_tui_help.step state.help_filter ~key:k with
+            | Masc_tui_help.Set_filter { filter; scroll_to_top } ->
+                state.help_filter <- filter;
+                if scroll_to_top then state.help_scroll <- 0
+            | Masc_tui_help.Close ->
+                state.help_open <- false;
+                state.help_scroll <- 0;
+                state.help_filter <- Masc_tui_help.Off
+            | Masc_tui_help.Toggle_hints ->
+                (* Session toggle; the persistent form is [tui].hints_visible in
+                   runtime.toml, named on the help sheet itself. *)
+                state.hints_visible <- not state.hints_visible;
+                note_session_key state Masc.Tui_preference.Key.Hints_visible
+            | Masc_tui_help.Scroll -> scroll_help ()
+            | Masc_tui_help.Scroll_to_top -> state.help_scroll <- 0
+            | Masc_tui_help.Scroll_to_end ->
+                let count, height = Masc_tui_render.help_viewport state in
+                state.help_scroll <- Masc_tui_scroll.maximum ~count ~height
+            | Masc_tui_help.Ignore -> ())
+      in
       let toggle_roster_chrome () =
            if state.keeper_navigation_open then begin
              state.keeper_navigation_open <- false;
@@ -33553,45 +33781,7 @@ Use relative paths for resources already held in the package. -->
        | Some _ when compact_viewport ->
            if quit_key && Option.is_some (Frame_presenter.presented_rows frame_presenter)
            then handle_quit_key ()
-       | Some k when help_owns_input && k = "h" ->
-           (* Session toggle; the persistent form is [tui].hints_visible in
-              runtime.toml, named on the help sheet itself. *)
-           state.hints_visible <- not state.hints_visible;
-           note_session_key state Masc.Tui_preference.Key.Hints_visible
-       | Some k when help_owns_input ->
-           (match k with
-            | "?" | "esc" ->
-                state.help_open <- false;
-                state.help_scroll <- 0
-            | "j" | "down" | "k" | "up" | "pageup" | "pagedown" ->
-                (* Bounded against the sheet the frame draws, which folds to
-                   two columns on a wide terminal and so holds half the rows
-                   the lines were written as. A page moves by the viewport
-                   height the sheet itself claims, so one press lands the
-                   reader where the last visible line was the first. *)
-                let count, height = Masc_tui_render.help_viewport state in
-                let step =
-                  match k with
-                  | "pageup" | "pagedown" -> max 1 height
-                  | _ -> 1
-                in
-                let move =
-                  match k with
-                  | "j" | "down" | "pagedown" -> Masc_tui_scroll.down
-                  | _ -> Masc_tui_scroll.up
-                in
-                (* [down]/[up] move by one; the page keys repeat the single
-                   step so the bound stays the scroll module's, not a
-                   re-derived one. *)
-                let rec repeat n scroll =
-                  if n <= 0 then scroll else repeat (n - 1) (move ~count ~height scroll)
-                in
-                state.help_scroll <- repeat step state.help_scroll
-            | "g" -> state.help_scroll <- 0
-            | "G" ->
-              let count, height = Masc_tui_render.help_viewport state in
-              state.help_scroll <- Masc_tui_scroll.maximum ~count ~height
-            | _ -> ())
+       | Some k when help_owns_input -> handle_help_key k
        | Some "?" when Option.is_some current_panel
                        && current_panel <> Some Presented.Context_search ->
            state.help_open <- true;
@@ -35046,7 +35236,7 @@ Use relative paths for resources already held in the package. -->
               && (match state.ask_answer_mode with Ask_browsing -> true | Ask_answering _ -> false)
               && Option.is_none (text_input_target state ~compact_viewport) ->
            (match browser_lane_on_screen state with
-            | Some _ -> hide_browser_lane state
+            | Some _ -> leave_browser_lane state ~mailbox:async_messages
             | None ->
                 open_browser_lane state ~mailbox:async_messages);
            Render_schedule.request render_schedule Render_schedule.Force
@@ -36022,7 +36212,7 @@ Use relative paths for resources already held in the package. -->
                  | Some _, None | None, (Some _ | None) -> ());
                 (match chosen with
                  | Some (_, Masc_tui_palette.Palette_hide_browser_lane) ->
-                     hide_browser_lane state
+                     leave_browser_lane state ~mailbox:async_messages
                  | Some (_, Masc_tui_palette.Palette_collab) ->
                      open_collab state ~mailbox:async_messages
                  | Some (_, Masc_tui_palette.Palette_msx) ->
@@ -36512,9 +36702,6 @@ Use relative paths for resources already held in the package. -->
                  | "a" when view.advanced_choices && not (busy view) ->
                      state.browser_lane <- Some (switch_source Automation view);
                      refresh_browser_lane state ~mailbox:async_messages
-                 | "c" when view.advanced_choices && not (busy view) ->
-                     state.browser_lane <- Some (switch_source Stagehand view);
-                     refresh_browser_lane state ~mailbox:async_messages
                  | "j" | "down" | "k" | "up" when not (busy view) ->
                      let delta = if key = "j" || key = "down" then 1 else -1 in
                      state.browser_lane <- Some { view with client_picker = Some
@@ -36650,15 +36837,12 @@ Use relative paths for resources already held in the package. -->
                 in
                 (match key with
                  | "esc" | "left" ->
-                     hide_browser_lane state;
-                     if state.view = Connectors then
-                       launch_connectors_load state ~mailbox:async_messages
+                     leave_browser_lane state ~mailbox:async_messages
                  | "A" when not (busy view) ->
                      state.browser_lane <- Some {view with advanced_choices = true; client_picker=Some 0};
                      launch_browser_lane state ~mailbox:async_messages (Discover Choose_client)
                  | "l" when view.advanced_choices -> switch_to Live
                  | "a" when view.advanced_choices -> switch_to Automation
-                 | "c" when view.advanced_choices -> switch_to Stagehand
                  | "b" when not (busy view) ->
                      state.browser_lane <- Some { view with client_picker = Some 0 };
                      launch_browser_lane state ~mailbox:async_messages (Discover Choose_client)
@@ -39638,6 +39822,12 @@ Use relative paths for resources already held in the package. -->
                  | Planning_detail _ ->
                      state.planning_mode <- Planning_list;
                      state.planning_scroll <- Planning_scroll_offset 0
+                 | Planning_list when Option.is_some state.task_detail_id ->
+                     (* The Task detail is the second detail Work owns, and its
+                        footer says [Left / Esc:back]. Esc closes it the same
+                        way in the arm for Esc above. *)
+                     state.task_detail_id <- None;
+                     reset_task_detail_scroll state
                  | Planning_list -> ())
             | Fusion ->
                 (match state.fusion_mode with
@@ -41731,7 +41921,7 @@ Use relative paths for resources already held in the package. -->
           ~available:(keeper_settings_editor_available state) then
         Render_schedule.request render_schedule Render_schedule.Background;
 
-      launch_memory_input_load state ~mailbox:async_messages ~refresh:false;
+      launch_owed_memory_input state ~mailbox:async_messages;
       reconcile_context_inspector_part state ~mailbox:async_messages;
       if reconcile_live_context state ~mailbox:async_messages then
         Render_schedule.request render_schedule Render_schedule.Background;
@@ -41918,10 +42108,12 @@ Use relative paths for resources already held in the package. -->
          (* Fusion re-reads on [fusion_run_status] and retries a failed read
             ([launch_owed_fusion]). *)
          | Fusion -> ()
-         | Memory ->
-             (* Fleet memory health is a reading, so the tick refreshes it
-                like the listings above. *)
-             launch_memory_health_load state ~mailbox:async_messages
+         (* Memory health reads one Keeper's row on its [memory_health]
+            push, and the fleet on arrival, on a revalidation and after a
+            failed read ([launch_owed_memory_health], RFC-0487). The input
+            pane reads after each of those answers and retries a failed
+            read ([launch_owed_memory_input]). *)
+         | Memory -> ()
          (* The repository list re-reads on its dataset push and
             retries a failed read ([launch_owed_repositories]). *)
          | Repositories -> ()

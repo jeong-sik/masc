@@ -265,9 +265,9 @@ let test_read_sse_done_marker () =
   Alcotest.(check string) "data is DONE" "[DONE]" (snd (List.hd !events))
 ;;
 
-(* Spec-valid field lines WITHOUT the optional space after ':' used to be
-   silently dropped by the literal "data: " / "event: " prefix match — a
-   provider or proxy omitting the space made the whole stream vanish. *)
+(* Spec-valid field lines WITHOUT the optional space after ':' are read, not
+   dropped: a provider or proxy omitting the space must not make the whole
+   stream vanish. *)
 let test_read_sse_no_space_after_colon () =
   Eio_main.run
   @@ fun _env ->

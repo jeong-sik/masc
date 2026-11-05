@@ -81,10 +81,14 @@ val first_vision_runtime_id : now:float -> (string, string) result
 (** Compatibility helper returning the first entry of {!vision_runtime_ids}, or
     [Error] when none is configured. *)
 
+val vision_keepers_dir : ?base_path:string -> unit -> string
+(** The keepers directory the vision stores live under. Workspace-bound callers
+    pass their explicit [base_path]; omission uses the process configuration
+    for callers without a Workspace context. *)
+
 val vision_store_dir : ?base_path:string -> keeper_name:string -> unit -> string
 (** Per-keeper artifact store directory used by [analyze_image] and eager image
-    eviction. Workspace-bound callers pass their explicit [base_path]; omission
-    uses the process configuration for callers without a Workspace context. *)
+    eviction, under {!vision_keepers_dir}. *)
 
 val load_artifact :
   dir:string -> Multimodal.Vision_artifact_store.handle ->

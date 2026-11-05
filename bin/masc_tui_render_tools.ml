@@ -328,11 +328,16 @@ let async_source_task_lines ~cols state source =
   @ text Ansi.dim (Printf.sprintf " 출처 run: %s · 논리 관측 %.3f%s" source.ats_run_id source.ats_observed_at
       (if source.ats_retained then " · 이전 확인 관측에서 열림" else ""))
   @ pending @ errors @ content
+  @ [ "", "" ]
+  @ (Masc_tui_task_document.history_heading_rows ~width:(max 1 (width - 2))
+     |> List.map (fun row -> "", row))
   @ (Masc_tui_task_document.history_status_lines ~width ~view:history
        ~in_flight:(Masc_tui_fetched.in_flight state.tools_async_task_history)
        ~continuing:(Option.exists (fun request -> Option.is_some request.thr_page.hr_cursor)
          state.tools_async_task_history_request)
-      |> List.concat_map (text ""))
+      |> List.concat_map (fun line ->
+           Masc_tui_text_block.preformatted_rows ~max_cells:width line
+           |> List.map (fun row -> "", row)))
   @ (task_document_lines state ~cols Masc_tui_task_document.History
      |> List.map (fun line -> "",line))
 

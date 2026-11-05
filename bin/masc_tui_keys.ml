@@ -172,6 +172,9 @@ let config_bindings =
    has no lane row to act on. *)
 type runtime_key =
   | Every_reading of binding
+  | Detail_reading of binding
+      (** answers only with a detail open; the footer drawn for the readings
+          never names it, and the cheat sheet does *)
   | Keeper_lanes_only of binding
   | Reading_edit
   | Reading_walk
@@ -222,14 +225,16 @@ let runtime_keys =
       (b Act "D" "remove lane"
          ~help:"remove the lane under the cursor; press twice. Refused while a keeper is \
                 assigned to it")
-  ; Every_reading (b Act "Left / Esc" "back")
+  ; Every_reading (b Act "Esc" "back" ~help:"back to Config")
+  ; Detail_reading
+      (b Act "Left / Esc" "list" ~help:"close the open detail, back to the list")
   ; Every_reading
       (b Search "/" "find" ~help:"jump the cursor to a matching lane id or runtime id")
   ; Every_reading (b Search "n / N" "next / previous match")
   ]
 
 let runtime_sheet_binding = function
-  | Every_reading binding | Keeper_lanes_only binding -> binding
+  | Every_reading binding | Detail_reading binding | Keeper_lanes_only binding -> binding
   | Reading_edit ->
     b Act "e" "model settings / add candidate"
       ~help:"on all runtimes, open the selected binding in Config Models; \
@@ -240,6 +245,7 @@ let runtime_sheet_binding = function
 
 let runtime_footer_binding ~(mode : runtime_mode) = function
   | Every_reading binding -> Some binding
+  | Detail_reading _ -> None
   | Keeper_lanes_only binding ->
     (match mode with
      | Runtime_lanes -> Some binding
@@ -311,6 +317,7 @@ let global =
       "agenda: what is coming, and who is waiting on you; Enter opens a row"
   ; b Meta "@" "answering: who is mid-turn or just finished; Enter opens their chat"
   ; b Meta "?" "this help"
+      ~help:"this help; `/` filters its keys and commands"
   ; b Meta "&"
       "Collab: watch MSX/DOS and manage play links (also `:` go Collab)"
   ; b Meta roster_toggle_key "show or hide the Keeper roster"
@@ -457,7 +464,8 @@ let board_vote_key =
   b Act "v / V" "up / down"
     ~help:"press twice to vote: v up, V down; while reading, on the selected \
            comment when the comments have focus, otherwise on the post"
-let board_reply_key = b Act "c" "reply" ~help:"reply (while reading)"
+let board_reply_key =
+  b Act "c" "reply" ~detail:Detail_only ~help:"reply (while reading)"
 let board_copy_key = b Act "Y" "copy link" ~help:"copy the selected post reference"
 let board_read_focus_key =
   b Navigate "b" "post / comments" ~detail:Detail_only
@@ -744,7 +752,13 @@ let for_surface = function
   | Board ->
       [ b Navigate "j/k" "move"
       ; b Act "Right / Enter" "read" ~help:"read the post"
-      ; b Act "Left / Esc" "back" ~help:"close the post"
+        (* Left closes the open post and does nothing on the list
+           ([Board_list | Board_compose -> ()] in the [Some "left"] arm of
+           masc_tui.ml); Esc leaves the list for the Dashboard. One row per
+           state, so the list footer stops offering a key that does nothing
+           there. *)
+      ; b Act "Esc" "back" ~detail:List_only ~help:"back to Dashboard"
+      ; b Act "Left / Esc" "back" ~detail:Detail_only ~help:"close the post"
       ; b Act "w" "write" ~help:"write a post"
       ; board_vote_key
       ; board_reply_key
@@ -821,15 +835,21 @@ let for_surface = function
       [ b Navigate "j/k" "move"
       ; b Act "b" "summary" ~detail:List_only
           ~help:"read captured Goal totals, the global Task backlog, history, and snapshot changes"
-      ; b Navigate "t" "Goals / Tasks"
+        (* [t] and [p] answer on the list only. In a Goal detail [p] is Pause
+           and [r] is Resume (the Actions row), so the detail footer must not
+           name [p] as Approvals. *)
+      ; b Navigate "t" "Goals / Tasks" ~detail:List_only
           ~help:"switch between Goals and the active task list"
-      ; b Navigate "p" "Approvals"
+      ; b Navigate "p" "Approvals" ~detail:List_only
           ~help:"open operator approvals and Keeper questions; Esc returns to Work"
       ; b Navigate "v" "next Work tab"
           ~help:"Goals, then the two task surfaces: Task Review and \
                  Task Verdicts. Not stages of one flow"
       ; b Act "Right / Enter" "detail" ~detail:List_only
-      ; b Act "Left / Esc" "back"
+        (* Left only closes an open Goal or Task detail ([Planning_list -> ()]
+           in the [Some "left"] arm of masc_tui.ml); Esc also leaves Work. *)
+      ; b Act "Esc" "back" ~detail:List_only ~help:"leave Work for the Dashboard"
+      ; b Act "Left / Esc" "back" ~detail:Detail_only ~help:"close the detail"
       ; b Navigate "f" "filter" ~help:"cycle all / active / completed / dropped"
       ; b Navigate "s" "sort" ~help:"cycle phase / updated / due"
       ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
@@ -847,8 +867,9 @@ let for_surface = function
       ; b Act "Y" "copy link" ~help:"copy the selected goal reference"
         (* Over the goals [f] and [s] left on screen, in the order they are
            drawn: the search walks what the list shows, not the snapshot. *)
-      ; b Search "/" "find" ~help:"jump the cursor to a matching goal id or title"
-      ; b Search "n / N" "next / previous match"
+      ; b Search "/" "find" ~detail:List_only
+          ~help:"jump the cursor to a matching goal id or title"
+      ; b Search "n / N" "next / previous match" ~detail:List_only
       ]
       @ row_list_jumps @ listing_meta
   | Schedules ->
@@ -858,7 +879,9 @@ let for_surface = function
           ~help:"previous / next server page; pages are separate observations"
       ; b Act "Right / Enter" "details" ~detail:List_only
           ~help:"open schedule details"
-      ; b Act "Left / Esc" "back" ~help:"back to the schedule list"
+      ; b Act "Esc" "back" ~detail:List_only ~help:"back to Work"
+      ; b Act "Left / Esc" "back" ~detail:Detail_only
+          ~help:"back to the schedule list"
       ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
           ~help:"while a detail is open, step to the row before or after it"
       ; b Act "n" "new" ~help:"create a schedule through a $EDITOR JSON form"
@@ -877,7 +900,8 @@ let for_surface = function
                  every request ever submitted, which nothing removes"
       ; b Act "Right / Enter" "details" ~detail:List_only
           ~help:"read the request and evidence"
-      ; b Act "Left / Esc" "back" ~help:"back to the list"
+      ; b Act "Esc" "back" ~detail:List_only ~help:"back to Work"
+      ; b Act "Left / Esc" "back" ~detail:Detail_only ~help:"back to the list"
       ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
           ~help:"while a detail is open, step to the row before or after it"
       ; b Navigate "< / >" "newer / older"
@@ -899,10 +923,12 @@ let for_surface = function
       ; b Act "a / x" "approve / reject"
           ~help:"a approves the row under the cursor (press twice); x rejects \
                  with a reason ($EDITOR form)"
-      ; b Search "/" "find"
+      (* The row search reads the list's rows. An open detail has none, so the
+         footer drawn for it leaves the pair out. *)
+      ; b Search "/" "find" ~detail:List_only
           ~help:"jump the cursor to a matching task id, title, or submitter; \
                  the queue answers this, an open detail does not"
-      ; b Search "n / N" "next / previous match"
+      ; b Search "n / N" "next / previous match" ~detail:List_only
       ]
       @ row_list_jumps @ listing_meta
   | Harness ->
@@ -911,7 +937,9 @@ let for_surface = function
       ; b Navigate "PgUp/PgDn" "page"
       ; b Act "Right / Enter" "verdict" ~detail:List_only
           ~help:"open the full evaluator verdict"
-      ; b Act "Left / Esc" "back" ~help:"back to the verdict list"
+      ; b Act "Esc" "back" ~detail:List_only ~help:"back to Work"
+      ; b Act "Left / Esc" "back" ~detail:Detail_only
+          ~help:"back to the verdict list"
       ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
           ~help:"while a detail is open, step to the row before or after it"
         (* One item, spelled the way Verification spells its own pair. Apart,
@@ -927,8 +955,9 @@ let for_surface = function
           ~help:"y records the machine's verdict as yours; x records the \
                  opposite, with $EDITOR taking the reason"
       ; b Act "Y" "copy task" ~help:"copy a link to the task in Work"
-      ; b Search "/" "find" ~help:"jump the cursor to a matching task id or title"
-      ; b Search "n / N" "next / previous match"
+      ; b Search "/" "find" ~detail:List_only
+          ~help:"jump the cursor to a matching task id or title"
+      ; b Search "n / N" "next / previous match" ~detail:List_only
       ]
       @ row_list_edges @ listing_meta
   | Fusion ->
@@ -1003,7 +1032,13 @@ let for_surface = function
       ; b Navigate "[ / ]" "keeper" ~help:"previous / next keeper"
       ; b Act "Right / Enter" "written diff"
           ~help:"what the call wrote, as a diff"
-      ; b Act "Left / Esc" "back" ~help:"close the diff"
+        (* Left closes an open diff and does nothing on the list; Esc closes
+           the diff too and, on the list, goes back to the Keeper screen the
+           list was opened from. The diff footers are their own strings, so
+           this table's footer is the list's. *)
+      ; b Act "Esc" "back" ~detail:List_only
+          ~help:"back to the Keeper screen this list was opened from"
+      ; b Act "Left / Esc" "back" ~detail:Detail_only ~help:"close the diff"
       ; b Act "d" "tree diff" ~help:"what the tree holds now"
       ; b Act "v" "view code"
           ~help:"the file on the Code surface, read from the keeper's own \
@@ -1208,11 +1243,12 @@ let for_surface = function
           ~help:"cycle through the categories this page carries"
       ; b Act "Right / Enter" "detail"
           ~help:"show the full message, source, category, turn, and JSON details"
-      ; b Act "Left / Esc" "back"
-      ; b Search "/" "find"
+      ; b Act "Esc" "back" ~detail:List_only ~help:"back to Activity"
+      ; b Act "Left / Esc" "back" ~detail:Detail_only ~help:"close the detail"
+      ; b Search "/" "find" ~detail:List_only
           ~help:"jump the cursor to a matching module, keeper, or message, \
                  over the rows the level and category filters leave"
-      ; b Search "n / N" "next / previous match"
+      ; b Search "n / N" "next / previous match" ~detail:List_only
       ]
       @ row_list_edges @ listing_meta
 
@@ -1636,8 +1672,12 @@ let code_history_bindings =
   ]
 
 let footer_hints_code ~pane =
+  (* The draft keys ([e], [S], [V], [X], [A (draft)]) belong here too: the
+     dispatcher answers them only with the file pane focused and no diff,
+     history or notes drawn over it. *)
   let file_keys =
-    [ "Shift-Left / Shift-Right"; "K"; "D"; "R"; "B"; "y"; "b"; "d"; "H"; "m" ]
+    [ "Shift-Left / Shift-Right"; "K"; "D"; "R"; "B"; "y"; "b"; "d"; "H"; "m"
+    ; "e"; "S"; "V"; "X"; "A (draft)" ]
   in
   (* One key belongs to one pane and was showing on all three: [Enter
      (history)] opens a commit's pull request and only the history view has

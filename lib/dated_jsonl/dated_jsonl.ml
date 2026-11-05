@@ -1944,7 +1944,7 @@ let days_to_keep ~operator_window_days store =
   | Store.Own_days read -> Some (read ())
   | Store.Kept -> None
 
-let prune_listed_stores_bound root held ~operator_window_days =
+let prune_listed_stores_bound root held ~operator_window_days ~on_pruned =
   List.fold_left
     (fun pruned store ->
        match days_to_keep ~operator_window_days store with
@@ -1954,13 +1954,17 @@ let prune_listed_stores_bound root held ~operator_window_days =
          pruned + Store.fold_retention_directories root held store
            ~f:(fun location directory ->
              let t = open_store location in
-             Eio.Mutex.use_ro (Atomic.get t.mutex) (fun () ->
-               prune_bound_directory ~location ~days directory)))
+             let removed =
+               Eio.Mutex.use_ro (Atomic.get t.mutex) (fun () ->
+                 prune_bound_directory ~location ~days directory)
+             in
+             if removed > 0 then on_pruned location;
+             removed))
     0 Store.all
 
 let prune_listed_stores root ~operator_window_days =
   match Store.with_retention_root root (fun held ->
-    prune_listed_stores_bound root held ~operator_window_days) with
+    prune_listed_stores_bound root held ~operator_window_days ~on_pruned:ignore) with
   | None -> 0
   | Some count -> count
 

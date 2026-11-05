@@ -721,9 +721,6 @@ let hint_spans = function
       ; Detail (" is not a command" ^ em_dash ^ "/help lists them")
       ]
 
-let hint_span_text = function
-  | Typed text | Untyped text | Detail text | Wrong text -> text
-
 (* How [/keeper <name>] finds its keeper. The command grammar stays closed —
    no prefix matching on command words — but a keeper NAME is an argument,
    and an operator mid-thought types the least of it that still names one

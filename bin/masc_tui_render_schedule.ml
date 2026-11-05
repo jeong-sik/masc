@@ -141,12 +141,14 @@ end
 
 let keeper_marker_width = 3
 let keeper_status_width = 12
-(* "A P S": autoboot, proactive, sandbox. The width and the inner-width
-   threshold below move together -- widening the cell without raising the
-   threshold spends two columns the layout had already promised to the name and
-   task cells, and the row grows past the frame at exactly the widths where
-   flags first appear. *)
-let keeper_flags_width = 5
+
+(* The flag cell is two one-cell letters: an activation letter under "Mode" and
+   a sandbox letter under "S". The field is as wide as that header, so the
+   header, the cells and the column budget come from one string. *)
+let keeper_flags_header = "Mode S"
+let keeper_flag_letter_count = 2
+let keeper_flags_width = String.length keeper_flags_header
+let keeper_flags_gap = keeper_flags_width - keeper_flag_letter_count
 
 (* Six cells fit [Message_layout.span_text]'s widest reading ("99d23h"). *)
 let keeper_last_turn_width = 6
@@ -638,9 +640,15 @@ let system_log_row ~styles ~level_style ~layout values =
    capitals.
 
    The last column carries the task's own title, which is what a verification
-   request asks for: that this task be verified. *)
+   request asks for: that this task be verified. It is the column that says
+   which task a row is, so it takes what the others leave and its floor is kept
+   before any other column is. The view Enter opens carries the submitter, both
+   evidence counts and the verdict sentence in full, so those give way first
+   when the row is too wide: the submitter, then the evidence counts, then the
+   verdict. *)
 let verification_task_width = 14
 let verification_evidence_width = 17
+let verification_review_width = 16
 let verification_minimum_title_width = 16
 
 type verification_row_values = {
@@ -659,30 +667,255 @@ let verification_no_values =
   ; vrow_title = ""
   }
 
-let verification_cells ~submitter_width ~title_width values =
-  [ Table.cell ~header:"TASK" ~width:verification_task_width values.vrow_task
-  ; Table.cell ~header:"SUBMITTED BY" ~width:submitter_width
-      values.vrow_submitted_by
-  ; Table.cell ~header:"제출 / 요구" ~width:verification_evidence_width
-      values.vrow_evidence
-  ; Table.cell ~header:"자동 검증" ~width:16 values.vrow_review
-  ; Table.cell ~fold:Table.Fold_tail ~header:"TITLE" ~width:title_width
-      values.vrow_title
+type verification_column =
+  | Verification_task
+  | Verification_submitter
+  | Verification_evidence
+  | Verification_review
+  | Verification_title
+
+let verification_column_width ~submitter_width = function
+  | Verification_task -> verification_task_width
+  | Verification_submitter -> submitter_width
+  | Verification_evidence -> verification_evidence_width
+  | Verification_review -> verification_review_width
+  | Verification_title -> verification_minimum_title_width
+
+let verification_layout ~inner_width ~submitter_width =
+  Table.fit ~inner_width
+    ~width:(verification_column_width ~submitter_width)
+    ~flex:Verification_title
+    ~drop_order:[ Verification_submitter; Verification_evidence; Verification_review ]
+    [ Verification_task
+    ; Verification_submitter
+    ; Verification_evidence
+    ; Verification_review
+    ; Verification_title
+    ]
+
+let verification_cells ~submitter_width ~(layout : verification_column Table.layout)
+    values =
+  List.map
+    (function
+      | Verification_task ->
+          Table.cell ~header:"TASK" ~width:verification_task_width
+            values.vrow_task
+      | Verification_submitter ->
+          Table.cell ~header:"SUBMITTED BY" ~width:submitter_width
+            values.vrow_submitted_by
+      | Verification_evidence ->
+          Table.cell ~header:"제출 / 요구" ~width:verification_evidence_width
+            values.vrow_evidence
+      | Verification_review ->
+          Table.cell ~header:"자동 검증" ~width:verification_review_width
+            values.vrow_review
+      | Verification_title ->
+          Table.cell ~fold:Table.Fold_tail ~header:"TITLE"
+            ~width:layout.Table.flex_width values.vrow_title)
+    layout.Table.shown
+
+let verification_header_row ~submitter_width ~layout =
+  Table.header_row
+    (verification_cells ~submitter_width ~layout verification_no_values)
+
+let verification_row ~submitter_width ~layout values =
+  Table.row (verification_cells ~submitter_width ~layout values)
+
+(* Work / Tasks list columns.
+
+   The list drew one line per task and let the title take whatever its
+   neighbours left on that line. "(in_progress @keeper)" is longer than
+   "(todo)", so the status began at a different cell on every row, and the goal
+   was drawn only on the rows that happened to have room left: two rows that
+   said the same thing looked different. Every other list on this tab states
+   its columns above its rows. This one did not, so the reader learned what a
+   cell meant from the cells around it.
+
+   The columns are named once here, so the header and a row cannot place one
+   differently. The title is the column that says which task a row is, so it
+   keeps its floor before any other column is given up. When the row is too
+   wide the goal goes first, then the owner, then the status word. All three
+   are in the detail the row opens, and the mark in front of the row still
+   wears the status colour.
+
+   The status word has two spellings. The state's own name is what the detail
+   view and the dashboard show, and the longest of them, awaiting_verification,
+   takes twenty-one cells. The short spelling (verify) is the one the old row
+   fell back to when it was tight. The state's own name stays while it costs the
+   row neither a column nor the title its comfortable width. *)
+let work_task_mark_width = 1
+let work_task_urgent_width = 1
+let work_task_minimum_title_width = 16
+
+(* Below this the status word takes its short spelling before the title is cut
+   any further. A design choice, not a measurement. *)
+let work_task_comfortable_title_width = 40
+
+(* Identifiers keep both ends when they fold, so a cap that is too small shows
+   two tasks as one. Fourteen is the cap the Task Review list gives a task id. *)
+let work_task_id_cap = 14
+let work_task_owner_cap = 16
+let work_task_goal_cap = 20
+
+type work_task_column =
+  | Work_task_mark
+  | Work_task_id
+  | Work_task_title
+  | Work_task_status
+  | Work_task_owner
+  | Work_task_goal
+  | Work_task_urgent
+
+let work_task_columns =
+  [ Work_task_mark
+  ; Work_task_id
+  ; Work_task_title
+  ; Work_task_status
+  ; Work_task_owner
+  ; Work_task_goal
+  ; Work_task_urgent
   ]
 
-let verification_title_width ~inner_width ~submitter_width =
-  let named =
-    Table.used_width
-      (verification_cells ~submitter_width ~title_width:0 verification_no_values)
+(* First to go first. The mark, the id, the title and the urgent mark never go:
+   what state the task is in, which task it is, what it asks for, and whether it
+   is the top priority. *)
+let work_task_drop_order = [ Work_task_goal; Work_task_owner; Work_task_status ]
+
+type work_task_status_form =
+  | Work_task_status_named
+  | Work_task_status_short
+
+type work_task_widths = {
+  wt_id : int;
+  wt_status_named : int;
+  wt_status_short : int;
+  wt_owner : int;
+  wt_goal : int;
+}
+
+(* A column is as wide as its widest reading, never narrower than its own name
+   and never wider than its cap. The status words are a closed set, so they have
+   no cap. *)
+let work_task_widths ~widest_id ~widest_status_named ~widest_status_short
+    ~widest_owner ~widest_goal =
+  let measured ~header ?(cap = max_int) widest =
+    max (String.length header) (min cap widest)
   in
-  max verification_minimum_title_width (inner_width - named)
+  { wt_id = measured ~header:"TASK" ~cap:work_task_id_cap widest_id
+  ; wt_status_named = measured ~header:"STATUS" widest_status_named
+  ; wt_status_short = measured ~header:"STATUS" widest_status_short
+  ; wt_owner = measured ~header:"OWNER" ~cap:work_task_owner_cap widest_owner
+  ; wt_goal = measured ~header:"GOAL" ~cap:work_task_goal_cap widest_goal
+  }
 
-let verification_header_row ~submitter_width ~title_width =
+let work_task_id_width widths = widths.wt_id
+
+type work_task_layout = {
+  wtl_widths : work_task_widths;
+  wtl_form : work_task_status_form;
+  wtl_table : work_task_column Table.layout;
+}
+
+let work_task_status_width ~widths = function
+  | Work_task_status_named -> widths.wt_status_named
+  | Work_task_status_short -> widths.wt_status_short
+
+let work_task_column_width ~widths ~form = function
+  | Work_task_mark -> work_task_mark_width
+  | Work_task_id -> widths.wt_id
+  | Work_task_title -> work_task_minimum_title_width
+  | Work_task_status -> work_task_status_width ~widths form
+  | Work_task_owner -> widths.wt_owner
+  | Work_task_goal -> widths.wt_goal
+  | Work_task_urgent -> work_task_urgent_width
+
+(* The state's own name is kept when spelling it in full shows every column the
+   short spelling would show and leaves the title its comfortable width. *)
+let work_task_layout ~inner_width ~widths =
+  let fit form =
+    Table.fit ~inner_width ~width:(work_task_column_width ~widths ~form)
+      ~flex:Work_task_title ~drop_order:work_task_drop_order work_task_columns
+  in
+  let named = fit Work_task_status_named in
+  let short = fit Work_task_status_short in
+  let form, table =
+    if List.length named.Table.shown = List.length short.Table.shown
+       && named.Table.flex_width >= work_task_comfortable_title_width
+    then (Work_task_status_named, named)
+    else (Work_task_status_short, short)
+  in
+  { wtl_widths = widths; wtl_form = form; wtl_table = table }
+
+type work_task_row_values = {
+  wrow_mark : string;
+  wrow_task : string;
+  wrow_title : string;
+  wrow_status_named : string;
+  wrow_status_short : string;
+  wrow_owner : string;
+  wrow_goal : string;
+  wrow_urgent : string;
+}
+
+let work_task_no_values =
+  { wrow_mark = ""
+  ; wrow_task = ""
+  ; wrow_title = ""
+  ; wrow_status_named = ""
+  ; wrow_status_short = ""
+  ; wrow_owner = ""
+  ; wrow_goal = ""
+  ; wrow_urgent = ""
+  }
+
+type work_task_styles = {
+  wstyle_state : string;
+  wstyle_task : string;
+  wstyle_goal : string;
+  wstyle_urgent : string;
+}
+
+let work_task_plain_styles =
+  { wstyle_state = ""; wstyle_task = ""; wstyle_goal = ""; wstyle_urgent = "" }
+
+let work_task_cell ~styles ~layout values = function
+  | Work_task_mark ->
+      Table.cell ~style:styles.wstyle_state ~header:"" ~width:work_task_mark_width
+        values.wrow_mark
+  | Work_task_id ->
+      Table.cell ~style:styles.wstyle_task ~header:"TASK"
+        ~width:layout.wtl_widths.wt_id values.wrow_task
+  | Work_task_title ->
+      Table.cell ~fold:Table.Fold_tail ~header:"TITLE"
+        ~width:layout.wtl_table.Table.flex_width values.wrow_title
+  | Work_task_status ->
+      let value =
+        match layout.wtl_form with
+        | Work_task_status_named -> values.wrow_status_named
+        | Work_task_status_short -> values.wrow_status_short
+      in
+      Table.cell ~style:styles.wstyle_state ~header:"STATUS"
+        ~width:(work_task_status_width ~widths:layout.wtl_widths layout.wtl_form)
+        value
+  | Work_task_owner ->
+      Table.cell ~style:styles.wstyle_state ~header:"OWNER"
+        ~width:layout.wtl_widths.wt_owner values.wrow_owner
+  | Work_task_goal ->
+      Table.cell ~style:styles.wstyle_goal ~header:"GOAL"
+        ~width:layout.wtl_widths.wt_goal values.wrow_goal
+  | Work_task_urgent ->
+      Table.cell ~style:styles.wstyle_urgent ~header:"!"
+        ~width:work_task_urgent_width values.wrow_urgent
+
+let work_task_cells ~styles ~layout values =
+  List.map (work_task_cell ~styles ~layout values) layout.wtl_table.Table.shown
+
+let work_task_header_row ~layout =
   Table.header_row
-    (verification_cells ~submitter_width ~title_width verification_no_values)
+    (work_task_cells ~styles:work_task_plain_styles ~layout work_task_no_values)
 
-let verification_row ~submitter_width ~title_width values =
-  Table.row (verification_cells ~submitter_width ~title_width values)
+let work_task_row ~styles ~layout values =
+  Table.row (work_task_cells ~styles ~layout values)
 
 (* Schedules list columns.
 

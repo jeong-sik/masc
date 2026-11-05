@@ -49,7 +49,7 @@ let backend env base_path calls : R.For_testing.backend = {
         ("sha256:" ^ String.make 64 'a') |> get);
       observe=(fun ~binding ~sources -> P.observe protocol ~binding ~sources |> Result.map_error protocol_error);
       exported_tools=(fun () -> P.exported_tools protocol);
-      call_exported_tool=(fun ~companion:_ ~on_result ~on_dispatch ~authorize ~principal ~name ~arguments ->
+      call_exported_tool=(fun ~on_result ~on_dispatch ~authorize ~principal ~name ~arguments ->
         let result = P.call_exported_tool ~on_result ~on_dispatch ?authorize ~principal protocol ~name ~arguments
           |> Result.map_error invocation_error in
         (match result with
@@ -57,7 +57,6 @@ let backend env base_path calls : R.For_testing.backend = {
          | Error _ -> ());
         result);
       operator_schema=(fun () -> None);
-      companion_tools=(fun () -> []);
       observation_effect=(fun _ -> Lane_addon_call_context.May_change);
       call_operator=(fun ~admit:_ ~arguments:_ -> Error Masc.Lane_addon_worker_protocol.Operator_unavailable);
       action_schema=(fun () -> P.action_schema protocol);

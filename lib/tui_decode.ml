@@ -3512,13 +3512,6 @@ let standalone_lane_answer (lane : standalone_lane) =
          open a run to inspect inputs, dispositions, excerpts, duration, and \
          truncation."
     }
-  | Standalone_lane.Browser_stagehand ->
-    { sla_output_meaning =
-        "Output meaning: structured answer to one Stagehand browser model request."
-    ; sla_evidence =
-        "Evidence: this lane does not yet retain standalone run records; \
-         inspect the browser operation response for its result."
-    }
 
 let standalone_lane_status_of_string = function
   | "off" -> Ok Standalone_off
@@ -3622,8 +3615,7 @@ let decode_standalone_lane json =
     | Standalone_lane.Librarian
     | Standalone_lane.Hitl_auto_judge
     | Standalone_lane.Candle_appraiser
-    | Standalone_lane.Verifier
-    | Standalone_lane.Browser_stagehand -> Ok None
+    | Standalone_lane.Verifier -> Ok None
   in
   let* admitted_slots = required_list_field json "admitted_slots" in
   let* sl_admitted_slots =
@@ -4720,7 +4712,6 @@ type wake_producer =
   | Wake_keeper_delegate
   | Wake_keeper_composition
   | Wake_keeper_job
-  | Wake_keeper_addon
   | Wake_read_model_reader
 
 type waiting_item = {
@@ -4805,7 +4796,6 @@ let wake_producer_of_string raw =
     ; "keeper_delegate", Wake_keeper_delegate
     ; "keeper_composition", Wake_keeper_composition
     ; "keeper_job", Wake_keeper_job
-    ; "keeper_addon", Wake_keeper_addon
     ; "read_model_reader", Wake_read_model_reader
     ]
     raw
@@ -6079,8 +6069,7 @@ let decode_librarian_run_page json =
          | Lane_run_identity.Board_attention
          | Lane_run_identity.Workspace_curator
          | Lane_run_identity.Candle_appraiser
-         | Lane_run_identity.Verifier
-         | Lane_run_identity.Browser_stagehand -> None)
+         | Lane_run_identity.Verifier -> None)
       rows
   in
   let* lrp_next =
@@ -6325,8 +6314,7 @@ let decode_lane_run_gate_judgment ~(lane : Lane_run_identity.t) ~status ~output 
   | Lane_run_identity.Board_attention
   | Lane_run_identity.Workspace_curator
   | Lane_run_identity.Candle_appraiser
-  | Lane_run_identity.Verifier
-  | Lane_run_identity.Browser_stagehand -> Ok Lane_run_not_gate_judgment
+  | Lane_run_identity.Verifier -> Ok Lane_run_not_gate_judgment
   | Lane_run_identity.Hitl_auto_judge ->
     let decode_advisory output =
       let* judgment = required_string_field output "judgment" in
@@ -6856,8 +6844,7 @@ let decode_lane_run_detail json =
       | Lane_run_identity.Hitl_auto_judge
       | Lane_run_identity.Workspace_curator
       | Lane_run_identity.Candle_appraiser
-      | Lane_run_identity.Verifier
-      | Lane_run_identity.Browser_stagehand ->
+      | Lane_run_identity.Verifier ->
         false
     in
     match is_board_attention, answer_succeeded, lrd_output with
@@ -6895,7 +6882,7 @@ let decode_lane_run_detail json =
     | Lane_run_identity.Librarian, Some output -> decode_librarian_preflight output
     | (Lane_run_identity.Librarian, _) | (Lane_run_identity.Hitl_auto_judge, _)
     | (Lane_run_identity.Board_attention, _) | (Lane_run_identity.Workspace_curator, _)
-    | (Lane_run_identity.Verifier, _) | (Lane_run_identity.Browser_stagehand, _)
+    | (Lane_run_identity.Verifier, _)
     | (Lane_run_identity.Candle_appraiser, _) -> Ok None
   in
   let* () = match lrd_librarian_preflight, answer_succeeded with
@@ -7005,8 +6992,7 @@ let decode_lane_run_detail json =
     | Lane_run_identity.Board_attention
     | Lane_run_identity.Workspace_curator
     | Lane_run_identity.Candle_appraiser
-    | Lane_run_identity.Verifier
-    | Lane_run_identity.Browser_stagehand -> decode_judgment ()
+    | Lane_run_identity.Verifier -> decode_judgment ()
   in
   Ok
     { lrd_run_id = summary.lrs_run_id
@@ -7584,6 +7570,38 @@ let decode_git_worktrees json =
   let* gws_worktrees = decode_list "worktrees" decode_git_worktree worktrees in
   let* gws_truncated = required_bool_field json "truncated" in
   Ok { gws_root; gws_worktrees; gws_truncated }
+
+type workspace_search_match = {
+  wsm_path : string;
+  wsm_line : int;
+  wsm_text : string;
+}
+
+type workspace_search = {
+  wss_root : string;
+  wss_query : string;
+  wss_ignore_case : bool;
+  wss_matches : workspace_search_match list;
+  wss_truncated : bool;
+}
+
+let decode_workspace_search_match json =
+  let* wsm_path = required_string_field json "path" in
+  let* wsm_line = required_int_field json "line" in
+  let* wsm_text = required_string_field json "text" in
+  if String.equal wsm_path "" then Error "search match path must be nonempty"
+  else if wsm_line < 1 then
+    Error (Printf.sprintf "search match line must be at least 1 (received %d)" wsm_line)
+  else Ok { wsm_path; wsm_line; wsm_text }
+
+let decode_workspace_search json =
+  let* wss_root = required_string_field json "root" in
+  let* wss_query = required_string_field json "query" in
+  let* wss_ignore_case = required_bool_field json "ignore_case" in
+  let* matches = required_list_field json "matches" in
+  let* wss_matches = decode_list "matches" decode_workspace_search_match matches in
+  let* wss_truncated = required_bool_field json "truncated" in
+  Ok { wss_root; wss_query; wss_ignore_case; wss_matches; wss_truncated }
 
 type workspace_file_source = { wfs_content : string; wfs_revision : string }
 

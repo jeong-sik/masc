@@ -2341,6 +2341,7 @@ let run_pass
                Keeper_metrics.(to_string MemoryOsLibrarianFailures)
                ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]
                ();
+             Keeper_memory_health_input.written ~keepers_dir ~keeper_id;
              (* A failed pass leaves the read position where it was. What the
                 next signal reads from it is the caller's to decide, from the
                 verdict handed to [on_not_committed] above; nothing here
@@ -2450,6 +2451,7 @@ let run_pass
         Keeper_metrics.(to_string MemoryOsLibrarianFailures)
         ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]
         ();
+      Keeper_memory_health_input.written ~keepers_dir ~keeper_id;
       (* A raise is this process failing, not a provider judging the request,
          so the caller keeps the width it had. *)
       on_not_committed

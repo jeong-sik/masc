@@ -56,7 +56,7 @@ const row = Schema.Union(
     state: Schema.Struct({ kind: Schema.Literal('exact'), configuration }) }),
   Schema.Struct({ ...common, selection: Schema.Struct({ kind: Schema.Literal('browser'), lane: Schema.Literal('live') }),
     state: Schema.Struct({ kind: Schema.Literal('browser_clients'), addon: browserClientsAddon }) }),
-  Schema.Struct({ ...common, selection: Schema.Struct({ kind: Schema.Literal('browser'), lane: Schema.Literal('automation', 'stagehand') }),
+  Schema.Struct({ ...common, selection: Schema.Struct({ kind: Schema.Literal('browser'), lane: Schema.Literal('automation') }),
     state: Schema.Struct({ kind: Schema.Literal('browser_executor'), addon: browserExecutorAddon }) }),
   Schema.Struct({ ...common, selection: Schema.Struct({ kind: Schema.Literal('machine'), machine: Schema.Literal('msx', 'dos') }),
     state: Schema.Struct({ kind: Schema.Literal('machine'), activity: Schema.Literal('on', 'off', 'unobserved'),
@@ -77,7 +77,7 @@ export function parseLaneInventory(raw: unknown) {
   const exact = parseStandaloneLanesSnapshot(parsed.exact_snapshot)
   const ids = new Set<string>(), workers = new Set<string>()
   const builtins = new Set([...LANE_IDS.map(id => `exact/${id}`), 'browser/live', 'browser/automation',
-    'browser/stagehand', 'machine/msx', 'machine/dos'])
+    'machine/msx', 'machine/dos'])
   for (const item of parsed.rows) {
     const selection = item.selection
     let expected: string

@@ -657,7 +657,7 @@ let test_fleet_board_pending_is_not_certified_by_same_post () =
     | Connector_attention _ | Hitl_resolved _ | Ask_answered _
     | Completion_authority_rejected _ | Task_outcome _ | Task_cancelled _
     | Workspace_message _ | Delegate_completed _ | Composition_completed _
-    | Tool_result_ready _ | Owned_job_completed _ | Addon_operation_changed _ ->
+    | Tool_result_ready _ | Owned_job_completed _ ->
       fail "board fixture has a non-board payload" in
   let original = comment "comment-a" and other = comment "comment-b" in
   check bool "different comments are different queue identities" false
@@ -708,7 +708,7 @@ let test_fleet_schedule_occurrence_payload_identity () =
       | Connector_attention _ | Hitl_resolved _ | Ask_answered _
       | Completion_authority_rejected _ | Task_outcome _ | Task_cancelled _
       | Workspace_message _ | Delegate_completed _ | Composition_completed _
-      | Tool_result_ready _ | Owned_job_completed _ | Addon_operation_changed _ ->
+      | Tool_result_ready _ | Owned_job_completed _ ->
         fail "schedule fixture has a non-schedule payload" in
     Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name original;
     Keeper_registry_event_queue.enqueue ~base_path keeper_name queued;
@@ -764,7 +764,7 @@ let test_fleet_duplicate_scheduled_queue_entries_require_attention () =
     | Connector_attention _ | Hitl_resolved _ | Ask_answered _
     | Completion_authority_rejected _ | Task_outcome _ | Task_cancelled _
     | Workspace_message _ | Delegate_completed _ | Composition_completed _
-    | Tool_result_ready _ | Owned_job_completed _ | Addon_operation_changed _ ->
+    | Tool_result_ready _ | Owned_job_completed _ ->
       fail "schedule fixture has a non-schedule payload" in
   let malformed_immediate = malformed_occurrence original in
   let malformed_low = malformed_occurrence other in
@@ -809,7 +809,7 @@ let test_fleet_ambiguous_ledger_id_requires_attention () =
     | Connector_attention _ | Hitl_resolved _ | Ask_answered _
     | Completion_authority_rejected _ | Task_outcome _ | Task_cancelled _
     | Workspace_message _ | Delegate_completed _ | Composition_completed _
-    | Tool_result_ready _ | Owned_job_completed _ | Addon_operation_changed _ ->
+    | Tool_result_ready _ | Owned_job_completed _ ->
       fail "schedule fixture has a non-schedule payload" in
   let board = board_stimulus ~post_id:"shared-post" () in
   List.iter (fun (label, stimuli, expected_attention) ->

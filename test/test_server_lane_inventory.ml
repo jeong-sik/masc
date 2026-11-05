@@ -422,7 +422,7 @@ let browser_rows_read_the_addon_observation () =
   let output = match Browser_addon_observation.of_snapshot ~observed_at:1.
       (`Assoc ["state",`String "serving";
         "clients",`List [client "01a16363-ef67-7000-ad62-05bcd0320d99"; client "01a16363-ef68-7000-aee1-37e1be230202"];
-        "owned_backends",`Assoc ["automation",work true;"stagehand",work false]]) with
+        "owned_backends",`Assoc ["automation",work true]]) with
     | Ok output -> output | Error detail -> fail detail in
   let snapshot : Addon.export_observation = {instance_id="browser-worker";observation_seq=2;
     max_bytes=4096;refreshing=false;output} in
@@ -431,10 +431,10 @@ let browser_rows_read_the_addon_observation () =
   let reading observations = Browser_addon_presence.of_observations ~declarations
       ~applications:(fun () -> fail "only an Add-on declared on and not running asks how it was applied")
       observations in
-  (* The automation, Stagehand and external host workers each publish this
+  (* The automation and external host workers each publish this
      observation; each lane reads its own source's. *)
   let every observation = List.map (fun backend -> {Addon.backend;observation})
-      Browser_lane.Backend.[Automation; Stagehand; External_host] in
+      Browser_lane.Backend.[Automation; External_host] in
   let read observation lane = Browser_addon_presence.lane (reading (every observation)) lane in
   let state observation lane = Inventory.For_testing.browser_state
       (read observation lane) lane in
@@ -443,8 +443,6 @@ let browser_rows_read_the_addon_observation () =
     (state observed Browser_lane.Lane_name.Live = Inventory.Browser_clients (Inventory.Browser_observed 2));
   check bool "the automation row reads its registration from the Add-on" true
     (state observed Browser_lane.Lane_name.Automation = Inventory.Browser_executor (Inventory.Browser_observed true));
-  check bool "the Stagehand row reads its registration from the Add-on" true
-    (state observed Browser_lane.Lane_name.Stagehand = Inventory.Browser_executor (Inventory.Browser_observed false));
   check bool "no browser Add-on is not zero connected clients" true
     (state (Ok None) Browser_lane.Lane_name.Live
      = Inventory.Browser_clients (Inventory.Browser_addon_absent));
@@ -494,7 +492,7 @@ let browser_lanes_read_their_own_sources () =
      reads only the sources the package names. *)
   let published clients = match Browser_addon_observation.of_snapshot ~observed_at:1.
       (`Assoc ["state",`String "serving";"clients",`List clients;
-        "owned_backends",`Assoc ["automation",work true;"stagehand",work true]]) with
+        "owned_backends",`Assoc ["automation",work true]]) with
     | Ok output -> Ok (Some ({instance_id="worker";observation_seq=1;max_bytes=4096;refreshing=false;output}
                              : Addon.export_observation))
     | Error detail -> fail detail in
@@ -519,7 +517,7 @@ let browser_lanes_read_their_own_sources () =
     (state workers Browser_lane.Lane_name.Automation
      = Inventory.Browser_executor (Inventory.Browser_observed true));
   check bool "a source no installation serves reads as no Add-on, though another worker reported it" true
-    (state workers Browser_lane.Lane_name.Stagehand
+    (state [ego; extension] Browser_lane.Lane_name.Automation
      = Inventory.Browser_executor (Inventory.Browser_addon_absent));
   (* Two installations of one source reach presence as one ambiguous
      observation: that source's lane cannot be read, and the others read as

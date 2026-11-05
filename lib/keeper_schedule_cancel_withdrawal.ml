@@ -10,7 +10,7 @@ let matches schedule_id (source : Keeper_event_queue.stimulus) =
   | Connector_attention _ | Hitl_resolved _ | Ask_answered _
   | Completion_authority_rejected _ | Task_cancelled _ | Workspace_message _
   | Delegate_completed _ | Composition_completed _ | Tool_result_ready _
-  | Owned_job_completed _ | Addon_operation_changed _ | Task_outcome _ -> false
+  | Owned_job_completed _ | Task_outcome _ -> false
 ;;
 
 let discover ~base_path =

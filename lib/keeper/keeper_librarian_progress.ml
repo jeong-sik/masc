@@ -149,7 +149,9 @@ let write ~keepers_dir ~keeper_id progress =
        Fs_compat.mkdir_p (Filename.dirname path);
        Fs_compat.save_file_atomic_strict path (Yojson.Safe.to_string (to_json progress))
      with
-     | Ok () -> Ok ()
+     | Ok () ->
+       Keeper_memory_health_input.written ~keepers_dir ~keeper_id;
+       Ok ()
      | Error message -> failed message
      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
      | exception Sys_error message -> failed message

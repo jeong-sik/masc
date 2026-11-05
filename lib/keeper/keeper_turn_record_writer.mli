@@ -2,7 +2,9 @@
     cadence as the execution receipt. A committed autonomous record emits
     [keeper_chat_appended] so an open dashboard transcript re-reads its
     authoritative history without waiting for a page reload. Direct turns
-    already emit that invalidation from their chat-store append path.
+    already emit that invalidation from their chat-store append path. Every
+    appended record, either kind, is told to {!Keeper_memory_health_input}:
+    the Librarian gap reads the newest one.
 
     Append failures never fail the turn: they log a WARN with the
     keeper/trace coordinates (the receipt path already guards turn

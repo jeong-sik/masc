@@ -1196,7 +1196,6 @@ let standalone_lane_rank = function
   | Standalone_lane.Hitl_auto_judge -> 1
   | Standalone_lane.Board_attention -> 2
   | Standalone_lane.Verifier -> 3
-  | Standalone_lane.Browser_stagehand -> 4
   | Standalone_lane.Candle_appraiser -> 5
 ;;
 

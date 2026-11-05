@@ -1,19 +1,11 @@
 (** Keeper_unified_prompt — Build a single unified prompt from keeper identity
     and world observation.
 
-    Sections removed in #6814: Available Tools (AGENT_CORE tool schema handles),
-    Recent Tool Activity, Last Cycle Outcome, Tool Diversity Signal,
-    Peer Keepers, Your Recent Board Posts,
-    Behavioral Self-Assessment, Actionable Routes, Signal Interpretation.
-    Telemetry for removed sections is preserved via decision_audit and
-    independent storage paths.
-
-    "Your Recent Board Posts" was later restored as the [Own_board_posts]
-    context layer: raw observation rows (post_id, updated_at, title, preview)
-    with no advisory wording. #6814 was right to remove the scolding text; the
-    side effect was that a keeper could never see its own published posts
-    in-prompt (board events are cursor-based and exclude self-authors), which
-    produced near-duplicate posting loops in production.
+    The [Own_board_posts] context layer lists the keeper's own published
+    posts as raw observation rows (post_id, updated_at, title, preview) with
+    no advisory wording. Board events are cursor-based and exclude
+    self-authors, so a keeper sees its own published posts in the prompt
+    through this layer.
 
     @since Unified Keeper Loop *)
 
@@ -690,7 +682,7 @@ let answered_ask_rows (observation : Keeper_world_observation.world_observation)
       Some (event, answered_by, input)
     | Keeper_world_observation.Board_post_created | Keeper_world_observation.Board_post_updated
     | Keeper_world_observation.Fusion_completed | Keeper_world_observation.Composition_completed
-    | Keeper_world_observation.Owned_job_completed _ | Keeper_world_observation.Addon_operation_changed _
+    | Keeper_world_observation.Owned_job_completed _
     | Keeper_world_observation.Board_comment_added _
     | Keeper_world_observation.Board_reaction_changed _ | Keeper_world_observation.Board_vote_cast _
     | Keeper_world_observation.Delegate_completed _ | Keeper_world_observation.Schedule_due _
@@ -837,7 +829,7 @@ let format_completion_authority_rejection_observations
          | Keeper_world_observation.Delegate_completed _
          | Keeper_world_observation.Ask_answered_row _
          | Keeper_world_observation.Composition_completed
-         | Keeper_world_observation.Owned_job_completed _ | Keeper_world_observation.Addon_operation_changed _ -> None)
+         | Keeper_world_observation.Owned_job_completed _ -> None)
       events
   in
   match rows with
@@ -888,7 +880,7 @@ let format_task_outcome_observations
          | Keeper_world_observation.Delegate_completed _
          | Keeper_world_observation.Ask_answered_row _
          | Keeper_world_observation.Composition_completed
-         | Keeper_world_observation.Owned_job_completed _ | Keeper_world_observation.Addon_operation_changed _ -> None)
+         | Keeper_world_observation.Owned_job_completed _ -> None)
       events
   in
   match rows with
@@ -943,7 +935,7 @@ let format_task_cancellation_observations
          | Keeper_world_observation.Delegate_completed _
          | Keeper_world_observation.Ask_answered_row _
          | Keeper_world_observation.Composition_completed
-         | Keeper_world_observation.Owned_job_completed _ | Keeper_world_observation.Addon_operation_changed _ -> None)
+         | Keeper_world_observation.Owned_job_completed _ -> None)
       events
   in
   match rows with

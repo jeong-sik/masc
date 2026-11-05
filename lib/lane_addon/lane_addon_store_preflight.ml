@@ -245,7 +245,7 @@ let scan_native_claims root =
             slot_dir :: Option.fold ~none:[] ~some:(instance_records root) instance
           in
           match Lane_addon_runtime.native_claim_slot_of_name name with
-          | None | Some (Lane_addon_runtime.Chrome_child_slot | Live_bidi_child_slot) -> report
+          | None | Some Lane_addon_runtime.Live_bidi_child_slot -> report
           | Some Installation_slot ->
             (match Native_addon_lease.inspect ~directory:slot_dir with
              | Error (lease : Native_addon_lease.inspection_error) ->

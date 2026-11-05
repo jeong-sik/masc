@@ -242,14 +242,6 @@ it('reads verifier_exact availability from verification runs, not the exact-run 
   expect(screen.queryByText('Run observations unavailable for this filter.')).toBeNull()
 })
 
-it('says Stagehand keeps no run history even while the exact-run endpoint fails', async () => {
-  api.fetchExactLaneRuns.mockRejectedValue(new Error('exact unavailable'))
-  replaceRoute('monitoring', laneTargetParams({ kind: 'exact', lane: 'browser_stagehand_exact', workspace: '/fixture/navigation' }, true))
-  render(html`<${InternalAgentsMonitor} />`)
-  await screen.findByText('Run history is not retained for this Lane.')
-  expect(screen.queryByText('Run observations unavailable for this filter.')).toBeNull()
-})
-
 it('lists the Verifier Lane Goal reviews beside its task reviews', async () => {
   api.fetchGoalVerificationRuns.mockResolvedValue({ runs: [{ runId: 'goal-run', goalId: 'goal-fixture', requestId: 'request-fixture',
     criterion: { revision: 'c1', title: 'ships the fixture', metric: null, target_value: null }, reviewKind: 'proof',

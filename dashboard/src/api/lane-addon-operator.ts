@@ -43,9 +43,7 @@ export async function invokeAddonOperator(owner: AddonOperatorOwner, action: str
     ))
     if (view.open_url !== undefined) {
       const url = new URL(view.open_url)
-      const approval = url.protocol === 'onepassword:' && url.host === 'grant-brokered-access'
-        && url.pathname === '' && url.hash === ''
-      if ((!approval && url.protocol !== 'https:') || url.username !== '' || url.password !== '') throw new Error('unsafe link')
+      if (url.protocol !== 'https:' || url.username !== '' || url.password !== '') throw new Error('unsafe link')
     }
     return view
   } catch {

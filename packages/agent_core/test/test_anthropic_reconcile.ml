@@ -1,18 +1,16 @@
 (** End-to-end regression guard for the EndTurn + tool-block reconcile fix
     (agent-core boundary).
 
-    Migrated here from [lib/llm_provider/backend_tool_call_harness.ml] when that
-    Internal-declared zero-consumer module was deleted (agent-core boundary). The pure
-    [Stop_reason_wire.reconcile] / [of_finish] unit tests in
+    The pure [Stop_reason_wire.reconcile] / [of_finish] unit tests in
     [lib/llm_provider/stop_reason_wire.ml] pin the typed function contract; this
     test exercises the full integration path
     (JSON -> [Backend_anthropic.parse_response] ->
     [stop_reason_of_string] -> [has_tool_blocks] -> [reconcile])
     so a future regression in any of those wiring links — not just the typed
-    [reconcile] arm — is still caught. The inline version in the harness
-    couldn't move into [stop_reason_wire.ml] because [Backend_anthropic] already
-    depends on [Stop_reason_wire], so an inline [let%test] there forms a module
-    dependency cycle; this standalone test is the instruction-listed alternative.
+    [reconcile] arm — is still caught. It is a standalone test, not an inline
+    [let%test] in [stop_reason_wire.ml], because [Backend_anthropic] already
+    depends on [Stop_reason_wire] and an inline test would form a module
+    dependency cycle.
 
     Reverting the EndTurn-with-tool-blocks arm of [reconcile] (or breaking the
     [has_tool_blocks] predicate inside [Backend_anthropic.parse_response]) turns

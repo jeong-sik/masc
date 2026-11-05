@@ -26,9 +26,7 @@ let tool_inventory_json _ctx ~include_hidden =
     then surface_map
     else String_map.add name (s :: prev) surface_map
   in
-  (* The per-actor [surfaces_for_tool] contribution was dropped in the
-     surface-cut refactor (the [surface] type is deleted).  Tool visibility is
-     now reported via the public_mcp projection below plus the
+  (* Tool visibility is reported via the public_mcp projection below plus the
      Capability_registry projection seeds. *)
   let surface_map =
     List.fold_left

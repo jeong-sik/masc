@@ -20,6 +20,7 @@ the gate-state extension in `lib/gate/channel_gate_discord_state.{ml,mli}`.
 | Env var | Required | Notes |
 |---|---|---|
 | `DISCORD_BOT_TOKEN` | **yes** | Developer Portal → Bot → Reset Token. Read at every `send_message` call, so token rotation does not require a server restart. If unset the gateway logs a warning and skips startup; the rest of the server boots normally. |
+
 The trigger policy is not an env var. Which inbound messages start a turn is a
 stance the operator writes down, so it is read from `[discord].trigger_policy`
 in the resolved `runtime.toml` and nowhere else. Resolution is the
@@ -49,13 +50,11 @@ policy.
 Slack's `[slack].trigger_policy` and its `slack.trigger_policy` param work the
 same way, through the same shared resolution (`Connector_trigger_policy`).
 
-Channel→keeper bindings live where they always did:
-`Channel_gate_discord_state.bind` / `unbind` write to
+Channel→keeper bindings: `Channel_gate_discord_state.bind` / `unbind` write to
 `.gate/runtime/discord/bindings.json` (overridable via
-`MASC_DISCORD_BINDING_STORE_PATH`). The HTTP routes
-`/api/v1/gate/connector/bind?name=discord` and
-`/api/v1/gate/connector/unbind?name=discord` remain functional and
-are how the dashboard mutates bindings.
+`MASC_DISCORD_BINDING_STORE_PATH`). The dashboard mutates bindings through the
+HTTP routes `/api/v1/gate/connector/bind?name=discord` and
+`/api/v1/gate/connector/unbind?name=discord`, which remain functional.
 
 Discord-specific setup (cannot be driven from dashboard — operator must do):
 
@@ -90,15 +89,11 @@ Bindings work like every other connector:
 `MASC_IMESSAGE_BINDING_STORE_PATH`), mutated through
 `/api/v1/gate/connector/bind?name=imessage` and the matching `unbind`.
 
-The sidecar's `IMESSAGE_*` spellings, `MASC_GATE_URL`, `MASC_GATE_API_TOKEN`
-and `status.json` are gone, and so is `/api/v1/sidecar/*?name=imessage`, which
-now 404s. There is no process to start or stop.
-
 #### Setting it up
 
 1. Give **the terminal that runs the masc server** Full Disk Access: System
    Settings → Privacy & Security → Full Disk Access. The grant follows the
-   process that reads the file, and that is now the server rather than a bot.
+   process that reads the file, which is the server.
 2. Sign in to Messages.app and leave it open, so chat.db keeps receiving rows.
 3. Start the server. Without the grant it boots normally and this connector
    alone stays down, with the reason in the log and in the connector's `error`
@@ -140,12 +135,12 @@ cannot be discovered from masc — see #30596.
 | `error` | empty |
 
 This connector never reports `stale`. Liveness is a value the poll fiber
-publishes, not a heartbeat file that can age out.
+publishes.
 
 ### Slack (in-process gateway — RFC-0317)
 
 The Slack connector runs **inside the server process** over **Socket Mode** —
-no public endpoint, no OAuth callback, no sidecar. Modules:
+no public endpoint and no OAuth callback. Modules:
 `lib/server/server_slack_in_process_gateway.{ml,mli}` plus the gate-state
 module `lib/gate/channel_gate_slack_state.{ml,mli}`; env reads live in
 `lib/config/env_config_slack.{ml,mli}`.
@@ -205,10 +200,3 @@ Connection state comes from `GET /api/v1/gate/connectors`. Keeper bindings use
 `POST /api/v1/gate/connector/unbind?name=<id>`. Configuration panels provide
 credential/permission instructions. Gateways start with the server; connection
 configuration and actual remote connectivity are separate observations.
-
-## References
-
-- Mautrix bridges (`bridge.toml` pattern): https://docs.mau.fi/bridges/
-- BlueBubbles (iMessage admin panel start/stop): https://bluebubbles.app/
-- Matterbridge TOML sections: https://github.com/42wim/matterbridge
-- Beeper desktop (tabbed per-network config): commercial reference only.

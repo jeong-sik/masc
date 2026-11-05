@@ -66,7 +66,6 @@ type projected_source_kind =
   | Source_composition_completed
   | Source_owned_job_completed
   | Source_tool_result_ready
-  | Source_addon_operation_changed
 
 type projected_disposition_witness =
   { transition_id : string
@@ -304,7 +303,6 @@ let projected_source_kind = function
   | Keeper_event_queue.Composition_completed _ -> Source_composition_completed
   | Keeper_event_queue.Tool_result_ready _ -> Source_tool_result_ready
   | Keeper_event_queue.Owned_job_completed _ -> Source_owned_job_completed
-  | Keeper_event_queue.Addon_operation_changed _ -> Source_addon_operation_changed
 ;;
 
 let transition_ref transition =
@@ -832,7 +830,7 @@ let source_terminal_receipt_of_stimulus source =
   (* Same reason: an async composition's result belongs to the Keeper that
      submitted it. *)
   | Keeper_event_queue.Composition_completed _
-  | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Addon_operation_changed _ ->
+  | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ ->
     Error "source event does not carry a typed terminal receipt"
 ;;
 

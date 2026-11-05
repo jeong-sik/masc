@@ -64,8 +64,8 @@ let with_worker ?other_backend ~machine ~create ~clock ~sw ~base_path f =
                         host = None; resource=Masc.Lane_addon_lifecycle.Container_resource instance_id;
             exported_tools=(fun () -> List.filter (fun (tool : S.tool) ->
               List.mem tool.name package.exported_tools) tools);
-            call_exported_tool=(fun ~companion:_ ~on_result ~on_dispatch ~authorize ~principal ~name ~arguments ->
-              Masc.Lane_addon_worker_invocation.run ~companion:None ~invocation:package.tool_invocation
+            call_exported_tool=(fun ~on_result ~on_dispatch ~authorize ~principal ~name ~arguments ->
+              Masc.Lane_addon_worker_invocation.run ~invocation:package.tool_invocation
                 ~authorize ~principal ~name ~arguments
                 ~call:(fun ~name ~arguments -> Eio.Mutex.use_ro mutex (fun () ->
                   on_dispatch ();
@@ -80,7 +80,6 @@ let with_worker ?other_backend ~machine ~create ~clock ~sw ~base_path f =
               Masc.Lane_addon_machine_history.retain history ~store ~instance_id
                 ~max_response_bytes:(Masc.Lane_addon_types.max_reply_bytes package) ~call:rpc output));
             operator_schema=(fun () -> None);
-      companion_tools=(fun () -> []);
             observation_effect=(fun name -> match List.assoc_opt name effects with
               | Some declared -> declared
               | None -> Lane_addon_call_context.May_change);
@@ -139,7 +138,7 @@ max_reply_bytes = %d
            observed ());
         let invoke ~principal ~controller ~name ~arguments =
           call Lane_addon_call_context.tool_name
-            (Lane_addon_call_context.to_json_with_controller ~companion:None ~controller ~principal ~tool:name ~arguments) in
+            (Lane_addon_call_context.to_json_with_controller ~controller ~principal ~tool:name ~arguments) in
         let detach () = ignore (R.dispatch ~access:Masc.Lane_addon_sources.Operator_configuration
           ~config ~operation:R.Detach (`Assoc ["instance_id",`String id])
           |> Result.map_error R.error_to_string |> unwrap) in

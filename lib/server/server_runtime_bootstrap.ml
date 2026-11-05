@@ -204,34 +204,6 @@ let require_explicit_mandatory_exact_output_lanes ~config_path lanes =
 let warn_catalog_absent_keeper_assignments _resolver_snapshot = ()
 ;;
 
-(* The Stagehand browser lane is optional: without it only the browser target
-   that asks it for answers is degraded, which [Runtime.report_exact_output_registry]
-   reports. A slot whose model takes no system prompt is named once here, at
-   boot, and not only in each refused llm.generate. *)
-let warn_browser_stagehand_slots registry =
-  let lane_id = Standalone_lane.to_id Standalone_lane.Browser_stagehand in
-  match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
-  | Error
-      ( Runtime_exact_output_registry.Exact_lane_off _
-      | Runtime_exact_output_registry.Exact_lane_unconfigured _
-      | Runtime_exact_output_registry.No_admitted_lane_slots _ ) ->
-    (* [Runtime.report_exact_output_registry] reported it. *)
-    ()
-  | Ok resolved ->
-    (match Browser_stagehand_model.admit_lane resolved with
-     | Ok { refused_slots = []; _ } -> ()
-     | Ok { refused_slots = _ :: _ as refused_slots; _ } ->
-       Log.Server.warn
-         "exact_output: lane %S skips slots it cannot use: %s"
-         lane_id
-         (String.concat "; " (List.map Browser_stagehand_model.refused_slot_to_string refused_slots))
-     | Error refusal ->
-       Log.Server.warn
-         "exact_output: lane %S refuses every request: %s"
-         lane_id
-         (Browser_stagehand_model.refusal_to_string (Browser_stagehand_model.Lane_refused refusal)))
-;;
-
 (* The lanes runtime.toml declares, refused when a mandatory one is unusable,
    and the catalog the loaded runtimes give them. Boot publishes from these;
    the deployment preflight only asks whether it could. *)
@@ -289,8 +261,7 @@ let publish_exact_output_catalog (lanes, catalog, runtimes) =
     warn_catalog_absent_keeper_assignments resolver_snapshot;
     Log.Misc.info
       "exact_output: immutable resolver-and-lane registry published%s"
-      catalog.Runtime.catalog_description;
-    warn_browser_stagehand_slots registry
+      catalog.Runtime.catalog_description
 ;;
 
 let configure_exact_output_registry ?config_path ?config_root () =
@@ -572,6 +543,7 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   Server_keeper_cost_broadcast.install ~sw ~clock ~config;
   Server_turn_preview_broadcast.install ~sw ~clock;
   Workspace_dataset_event.install_store_observers ();
+  Server_memory_health_broadcast.install ~sw ~config;
   (* The harness health read is cached per workspace and query window. The
      verdict store belongs to the workspace that wrote the record, so its
      base_path is the one announced; every cached window goes first because

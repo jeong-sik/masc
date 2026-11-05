@@ -18,7 +18,6 @@ type ready = {
   tool_hooks : (string * Lane_addon_tool_hooks.t) list;
   action_schema : Yojson.Safe.t option;
   operator_schema : Yojson.Safe.t option;
-  companion_tools : string list;
   observation_effects : (string * Lane_addon_call_context.observation_effect) list;
 }
 type attachment = Awaiting | Initializing of Agent_core.Mcp.t
@@ -34,16 +33,6 @@ type t = {
   mutex : Eio.Mutex.t;
 }
 open Result.Syntax
-
-let companion_public_result (result : Mcp_protocol.Mcp_types.tool_result) =
-  let module S = Mcp_protocol.Mcp_types in
-  let is_error = result.is_error = Some true in
-  let value = if is_error then None else result.structured_content in
-  let text = match value with
-    | Some value -> Yojson.Safe.to_string value
-    | None -> "private companion operation failed" in
-  {S.content=[S.TextContent {type_="text"; text; annotations=None}];
-   structured_content=value; is_error=Some is_error; _meta=None}
 
 let compare_tool_hook a b =
   match a, b with
@@ -93,8 +82,6 @@ let action_schema t = match t.attachment with
   | Ready ready -> ready.action_schema | Awaiting | Initializing _ | Retired _ -> None
 let operator_schema t = match t.attachment with
   | Ready ready -> ready.operator_schema | Awaiting | Initializing _ | Retired _ -> None
-let companion_tools t = match t.attachment with
-  | Ready ready -> ready.companion_tools | Awaiting | Initializing _ | Retired _ -> []
 let observation_effect t name = match t.attachment with
   | Ready ready ->
       (match List.assoc_opt name ready.observation_effects with
@@ -151,29 +138,6 @@ let initialize t client =
                   |> Result.map_error (fun _ -> Protocol_failed "invalid private operator schema") in
                 Ok (Some tool.input_schema)
             | _ -> Error (Protocol_failed "duplicate private operator port") in
-          let* companion_tools = match List.filter (fun (tool:Mcp_protocol.Mcp_types.tool) ->
-              tool.name=companion_tool) tools with
-            | [] -> Ok []
-            | [_] when t.contract.tool_invocation=Host_context ->
-                let* reply=Agent_core.Mcp.call_tool_full client ~name:companion_tool ~arguments:(`Assoc ["version",`Int 3])
-                  |> Result.map_error (fun _ -> Protocol_failed "private companion handshake failed") in
-                let* value=match reply.is_error,reply.structured_content with
-                  | (None|Some false),Some value -> Lane_addon_action.canonical value
-                    |> Result.map_error (fun _ -> Protocol_failed "invalid private companion handshake")
-                  | Some true,_ | (None|Some false),None -> Error (Protocol_failed "private companion handshake refused") in
-                (match value with
-                 | `Assoc fields when List.sort String.compare (List.map fst fields)=["tools";"version"] ->
-                   (match List.assoc "version" fields,List.assoc "tools" fields with
-                    | `Int 3,`List names ->
-                      let* names=List.fold_left (fun result -> function
-                        | `String name when List.mem name t.contract.exported_tools -> Result.map (fun names -> name::names) result
-                        | _ -> Error (Protocol_failed "invalid companion export name")) (Ok []) names in
-                      if List.length names=List.length (List.sort_uniq String.compare names) then Ok (List.rev names)
-                      else Error (Protocol_failed "duplicate companion export")
-                    | _ -> Error (Protocol_failed "unsupported private companion handshake"))
-                 | _ -> Error (Protocol_failed "invalid private companion handshake"))
-            | [_] -> Error (Invalid_contract "private companion requires host-context invocation")
-            | _ -> Error (Protocol_failed "duplicate private companion handshake") in
           (* Only an explicit schema marker opts into the worker's word on
              which exports leave its observation as it was. Absent or ambiguous
              opt-in declares nothing; a malformed reply refuses Ready. *)
@@ -208,18 +172,10 @@ let initialize t client =
             (Ok []) t.contract.exported_tools in
           let* tool_hooks = List.fold_left (fun result (tool : Mcp_protocol.Mcp_types.tool) ->
             let* checks = result in
-            let* () = if List.mem tool.name companion_tools then
-                (match tool.output_schema with
-                 | Some schema -> Lane_addon_companion_publication.validate_output_schema schema
-                   |> Result.map_error (fun _ -> Protocol_failed "private companion output schema must be recursively closed")
-                 | None -> Error (Protocol_failed "private companion output schema is required"))
-              else Ok () in
-            let selected_hooks=if List.mem tool.name companion_tools then
-                List.sort_uniq compare_tool_hook (Validate_input::Validate_output::t.contract.tool_hooks) else t.contract.tool_hooks in
-            let* hooks = Lane_addon_tool_hooks.prepare ~hooks:selected_hooks tool
+            let* hooks = Lane_addon_tool_hooks.prepare ~hooks:t.contract.tool_hooks tool
               |> Result.map_error (fun detail -> Protocol_failed detail) in
             Ok ((tool.name, hooks) :: checks)) (Ok []) exported in
-          Ok {client;tool_hooks;action_schema;operator_schema;companion_tools;observation_effects;
+          Ok {client;tool_hooks;action_schema;operator_schema;observation_effects;
             exported_tools=List.rev exported}
     with
     | Eio.Cancel.Cancelled _ as exn -> revoke t; raise exn
@@ -349,8 +305,7 @@ let act t ~arguments =
 type result_finalizer = name:string -> arguments:Yojson.Safe.t ->
   principal:Lane_addon_call_context.principal -> result:Mcp_protocol.Mcp_types.tool_result ->
   (Mcp_protocol.Mcp_types.tool_result, string) result
-type companion_admission = {context:Lane_addon_call_context.companion;admit:unit -> bool}
-let call_exported_tool ?(on_result = fun _ -> ()) ?(on_dispatch = fun () -> ()) ?companion
+let call_exported_tool ?(on_result = fun _ -> ()) ?(on_dispatch = fun () -> ())
     ?(finalize_result = fun ~name:_ ~arguments:_ ~principal:_ ~result -> Ok result)
     ?authorize ?(principal = Lane_addon_call_context.Anonymous) t ~name ~arguments =
   (* A call cancelled while it waits for the RPC mutex, or in its mediation
@@ -361,12 +316,6 @@ let call_exported_tool ?(on_result = fun _ -> ()) ?(on_dispatch = fun () -> ()) 
   if revoked t then Error Stopped
   else
       let* ready = ready_for_call t in
-      let* ()=match companion with
-        | None when List.mem name ready.companion_tools ->
-            Error (Host_refusal (Lane_addon_call_context.Unavailable "private companion grant is required"))
-        | None -> Ok ()
-        | Some _ when List.mem name ready.companion_tools -> Ok ()
-        | Some _ -> Error (Host_refusal (Lane_addon_call_context.Rejected "tool has no private companion grant")) in
       let* () = if List.exists (fun (tool : Mcp_protocol.Mcp_types.tool) ->
           String.equal tool.name name) ready.exported_tools then Ok ()
         else Error (Protocol_failed "tool is not exported by this worker") in
@@ -378,46 +327,29 @@ let call_exported_tool ?(on_result = fun _ -> ()) ?(on_dispatch = fun () -> ()) 
         |> Result.map_error (fun detail -> Host_refusal (Lane_addon_call_context.Rejected detail)) in
       let call ~name ~arguments =
         Eio.Mutex.use_ro t.mutex (fun () ->
-          let admitted=not (revoked t) && (match companion with None -> true | Some admission -> admission.admit ()) in
-          if not admitted || revoked t
+          if revoked t
           then Error "Add-on worker is unavailable"
           else (on_dispatch ();
             Agent_core.Mcp.call_tool_full client ~name ~arguments)
-            |> Result.map (fun result -> (match companion with None -> on_result result | Some _ -> ()); result)
-            |> Result.map_error (fun error -> match companion with
-              | None -> Agent_core.Error.to_string error | Some _ -> "private invocation outcome unknown")) in
+            |> Result.map (fun result -> on_result result; result)
+            |> Result.map_error Agent_core.Error.to_string) in
       try
         let* result = Lane_addon_worker_invocation.run ~invocation:t.contract.tool_invocation
-          ~companion:(Option.map (fun admission -> admission.context) companion)
           ~authorize ~principal ~name ~arguments ~call
         |> Result.map_error (function
           | Lane_addon_call_context.Host_refusal refusal -> Host_refusal refusal
-          | Transport_error detail -> Protocol_failed (match companion with
-              | None -> detail | Some _ -> "private invocation outcome unknown")) in
-        let validate_result result = Lane_addon_tool_hooks.after_call hooks result
-          |> Result.map_error (fun detail -> Protocol_failed (match companion with
-            | None -> "tool result rejected after dispatch: " ^ detail
-            | Some _ -> "private invocation public result rejected")) in
-        let* result = match companion with
-          | None -> Ok result
-          | Some _ ->
-            let* () = validate_result result in
-            Ok (companion_public_result result) in
+          | Transport_error detail -> Protocol_failed detail) in
         let* result = (try finalize_result ~name ~arguments ~principal ~result with
           | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
-          | exn -> Error (match companion with None -> Printexc.to_string exn | Some _ -> "private invocation finalization failed"))
-          |> Result.map_error (fun detail -> Protocol_failed (match companion with
-            | None -> "tool result finalization failed after dispatch: " ^ detail
-            | Some _ -> "private invocation finalization failed")) in
-        let* () = validate_result result in
-        let result=match companion with
-          | None -> result
-          | Some _ -> companion_public_result result in
-        (match companion with Some _ -> on_result result | None -> ());
+          | exn -> Error (Printexc.to_string exn))
+          |> Result.map_error (fun detail ->
+            Protocol_failed ("tool result finalization failed after dispatch: " ^ detail)) in
+        let* () = Lane_addon_tool_hooks.after_call hooks result
+          |> Result.map_error (fun detail -> Protocol_failed ("tool result rejected after dispatch: " ^ detail)) in
         Ok result
       with
       | (Eio.Io _ | Unix.Unix_error _ | Sys_error _ | End_of_file | Failure _ | Invalid_argument _) as exn ->
-          Error (Protocol_failed (match companion with None -> Printexc.to_string exn | Some _ -> "private invocation outcome unknown")))
+          Error (Protocol_failed (Printexc.to_string exn)))
 
 let call_host_tool t ~name ~arguments = protect_call t (fun () ->
   if not t.contract.host_requests then Error (Protocol_failed "worker contract has no host request ports")

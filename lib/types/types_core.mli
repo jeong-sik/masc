@@ -362,9 +362,6 @@ type workspace_state =
   ; pause_reason : string option [@default None]
   ; paused_by : string option [@default None]
   ; paused_at : string option [@default None]
-  ; search_strategy_default : string option [@default None]
-  ; speculation_enabled : bool [@default false]
-  ; speculation_budget : int option [@default None]
   }
 [@@deriving yojson { strict = false }, show]
 

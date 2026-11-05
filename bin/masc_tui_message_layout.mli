@@ -581,6 +581,15 @@ val fit_width : string -> int -> string
     For a fixed column whose head carries the meaning. Where both ends carry
     -- an identifier, an address -- use {!fit_middle}. *)
 
+val join_fitting : sep:string -> cells:int -> string list -> string
+(** [join_fitting ~sep ~cells items] joins [items] with [sep] and leaves out
+    whole items from the back until the row takes at most [cells] cells. The
+    first item always stays, so the row is never empty and the frame can still
+    cut it.
+
+    For a row of readings that each carry a number. {!fit_width} would cut the
+    last one in the middle, and ["0 inactiv…"] reads as a count. *)
+
 val pad_left : string -> int -> string
 (** [pad_left text width] right-aligns [text] in [width] cells, cutting it
     with {!fit_width} when it does not fit. Printf's ["%*s"] counts bytes,
@@ -755,7 +764,15 @@ val message_viewport_supported :
 
 val wrap_words : max_cells:int -> string -> string list
 (** Wrap a plain single-line string at spaces using a terminal-cell budget.
-    Words wider than the budget are split between complete UTF-8 scalars. *)
+    A word wider than the budget breaks after its last [_], [:], [/], [.] or
+    [-] that leaves the row at least half full, so the parts of a name stay
+    whole: [configured_keeper_without_runtime_meta] in 30 cells wraps as
+    [configured_keeper_without_] and [runtime_meta]. A mark that combines with
+    a separator goes with it, and the bytes of an escape are not separators. A
+    stretch with no such break is split between complete UTF-8 scalars, as
+    {!split_cells} does, and so is a word that is not valid UTF-8. A row that
+    ends at a separator can be as little as half full, so a name can take up to
+    about twice the rows a cut at the width takes. *)
 
 val boxed_rows : inner:int -> string -> string list
 (** The rows a box body spends on [content] at inner width [inner]: one row per

@@ -113,7 +113,7 @@ type decision = Selected of S.selected | Refused of S.error | Incomplete | Worke
 type t = {client_rows:Yojson.Safe.t list; issues:issue list; browse:decision; work:decision}
 module Instance_set = Set.Make (String)
 let snapshot (published:Browser_addon_observation.published) : S.snapshot =
-  {live_activity=B.Enabled;live_clients=published.clients;live_space_presence=published.space_presence;automation=published.automation;stagehand=published.stagehand}
+  {live_activity=B.Enabled;live_clients=published.clients;live_space_presence=published.space_presence;automation=published.automation}
 let decide snapshot verb = match S.choose ~verb ~bound:false ~snapshot S.Automatic with
   | Ok selected -> Selected selected | Error error -> Refused error
 let breaks_completeness (issue : issue)=match issue with
@@ -162,7 +162,7 @@ let build ~observations ~issues =
       let disabled:S.work_browser={activity=B.Disabled;registered=false;session=B.Browser_unknown;locate=false} in
       let snapshot:S.snapshot={live_activity=B.Enabled;live_clients=List.map (fun (_,client,_) -> client) pairs;
         live_space_presence=List.concat_map (fun observation -> observation.published.space_presence) observations;
-        automation=disabled;stagehand=disabled} in
+        automation=disabled} in
       let browse=match decide snapshot B.Tabs_list with
         | Refused S.No_available_browser -> Worker_scope_required
         | Selected _|Refused (Binding_required|Ambiguous_browsers _|Required_actions_unavailable _|Unsupported_required_actions _) as value -> value

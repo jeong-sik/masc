@@ -141,10 +141,8 @@ let test_browser_tools_follow_the_lane_argument () =
   let session_lanes = Lane_manifest.lanes_of_misc_operation Tool_schemas_misc.Misc_browser_session in
   check bool "the live browser takes no session" false
     (List.exists (Lane_id.equal_builtin (Lane_id.Browser Browser_lane.Lane_name.Live)) session_lanes);
-  check bool "automation and stagehand take sessions" true
-    (List.for_all
-       (fun lane -> List.exists (Lane_id.equal_builtin (Lane_id.Browser lane)) session_lanes)
-       [ Browser_lane.Lane_name.Automation; Browser_lane.Lane_name.Stagehand ]);
+  check bool "automation takes sessions" true
+    (List.exists (Lane_id.equal_builtin (Lane_id.Browser Browser_lane.Lane_name.Automation)) session_lanes);
   check (list string) "the live browser is read and acted on"
     [ "masc_browser_tabs"; "masc_browser_read"; "masc_browser_act"; "masc_browser_interact" ]
     (tool_names (Lane_id.Browser Browser_lane.Lane_name.Live))

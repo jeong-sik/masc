@@ -69,12 +69,12 @@ let session config trace_id =
   Keeper_context_core.create_session ~session_id:trace_id ~base_dir:(Keeper_fs.session_store_path config)
 let official_row config ~trace_id ~turn text =
   Keeper_context_core_history.persist_message ~keeper_name ~turn_ref:(Ids.Turn_ref.make ~trace_id ~absolute_turn:turn)
-    ~source:"direct_user" (session config trace_id) (message text)
+    ~source:Masc.Keeper_types_support.Direct_user (session config trace_id) (message text)
 let official_turn config ~trace_id ~turn ~time =
   let turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn:turn in
   let session=session config trace_id in
-  Keeper_context_core_history.persist_message ~keeper_name ~turn_ref ~source:"direct_user" session (message "official main");
-  Keeper_context_core_history.persist_message ~keeper_name ~turn_ref ~source:"internal_assistant" session
+  Keeper_context_core_history.persist_message ~keeper_name ~turn_ref ~source:Masc.Keeper_types_support.Direct_user session (message "official main");
+  Keeper_context_core_history.persist_message ~keeper_name ~turn_ref ~source:Masc.Keeper_types_support.Internal_assistant session
     (Agent_core.Types.make_message ~role:Agent_core.Types.Assistant [Agent_core.Types.Text "official internal"]);
   Keeper_context_core_history.persist_tool_observation ~keeper_name ~turn_ref session ~tool_name:"read_file"
     ~outcome:Tool_result.Ok;

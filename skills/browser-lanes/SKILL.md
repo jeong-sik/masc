@@ -162,7 +162,6 @@ browserSelection.lane을 읽기·조작에 유지하고 clientId가 null이면 �
 live 인증 화면을 연결 오류 때문에 automation이나 별도 API·수집 버퍼로 대체하지 않는다.
 다른 사람의 세션을 닫거나 덮어쓰지 않으며, 자신이 만든 임시 세션의 정리·인계만 한다.
 
-- 문장으로 시키는 Stagehand Chromium(BrowserInstruct): [Stagehand lane](references/stagehand.md).
 - 연결·세션 문제: [연결과 소유권](references/connection.md).
 - scene 범위·참조 오류, CSS selector, screenshot·큰 artifact: [읽기와 관측 복구](references/observation.md).
 - iframe, JS 대화상자, 업로드·다운로드: [고급 조작](references/advanced.md).

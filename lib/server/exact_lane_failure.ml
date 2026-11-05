@@ -150,6 +150,7 @@ let antigravity_error = function
   | Runtime_antigravity.Protocol_error _
   | Runtime_antigravity.State_callback_failed _
   | Runtime_antigravity.Turn_failed _
+  | Runtime_antigravity.Actions_denied _
   | Runtime_antigravity.Process_exited _
   | Runtime_antigravity.Unhandled_exception _
   | Runtime_antigravity.Timeout _ -> Transient

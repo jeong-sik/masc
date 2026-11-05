@@ -1,4 +1,4 @@
-type source = Browser_lane.Lane_name.t = Live | Automation | Stagehand
+type source = Browser_lane.Lane_name.t = Live | Automation
 type request = { route : Browser_selection.preference; tab_id : int option }
 type dialog_kind = Alert | Confirm | Prompt | Beforeunload
 type dialog = { kind : dialog_kind; message : string; default_value : string option }
@@ -58,8 +58,7 @@ let parse_request = function
           Ok (Browser_selection.Exact (Browser_lane.Live_route (Some selected)))
       | Some Live, None -> Ok (Browser_selection.Exact (Browser_lane.Live_route None))
       | Some Automation, None -> Ok (Browser_selection.Exact Browser_lane.Automation_route)
-      | Some Stagehand, None -> Ok (Browser_selection.Exact Browser_lane.Stagehand_route)
-      | Some (Automation | Stagehand), Some _ -> Error "client_id_requires_live" in
+      | Some Automation, Some _ -> Error "client_id_requires_live" in
     let* () = if List.for_all (fun (key, _) -> List.mem key ["lane";"tabId";"clientId"]) fields
       then Ok () else Error "unknown browser read argument" in
     Ok {route; tab_id}
@@ -169,8 +168,8 @@ let project_read plan ~binding ~started ~page =
   let check_provenance provenance=match Browser_binding.backend binding,provenance with
     | Browser_capabilities.Connected Browser_lane.Ego_task_space,Some _ -> Ok ()
     | Connected Ego_task_space,None -> Error "Ego tab is missing its Page provenance"
-    | (Connected (Web_extension|Webdriver_bidi)|Owned_gecko|Owned_chromium|Safari_unavailable),None -> Ok ()
-    | (Connected (Web_extension|Webdriver_bidi)|Owned_gecko|Owned_chromium|Safari_unavailable),Some _ ->
+    | (Connected (Web_extension|Webdriver_bidi)|Owned_gecko|Safari_unavailable),None -> Ok ()
+    | (Connected (Web_extension|Webdriver_bidi)|Owned_gecko|Safari_unavailable),Some _ ->
       Error "Ego Page provenance requires an Ego connection" in
   let rec check_tabs = function
     | [] -> Ok ()

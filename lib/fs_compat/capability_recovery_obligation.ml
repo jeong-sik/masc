@@ -1424,9 +1424,7 @@ let raise_resource_scope_exception
   (* A release failure alongside a foreign exception has no typed home here --
      the arms above carry it into [Transition_failed] and [Store_failure],
      which readers destructure, and this case has no such error to carry it
-     in. It used to be wrapped in its own exception; nothing caught that, so
-     the release cause reached only a top-level print. The callback exception
-     continues with its own backtrace. *)
+     in. The callback exception continues with its own backtrace. *)
   | _, _ -> Printexc.raise_with_backtrace exception_ backtrace
 ;;
 

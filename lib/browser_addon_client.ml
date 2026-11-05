@@ -21,13 +21,12 @@ let expected command reply = match command,reply with
   | W.Issue _,W.Issue_result _ -> true
   | (W.Model_requests|Model_result _|Model_wait _),W.Model_reply _ -> true
   | W.Download_claim _,W.Download_reply _ -> true
-  | W.Extension _,W.Extension_reply _ -> true
-  | (W.Snapshot|Retire|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _|Model_requests|Model_result _|Model_wait _|Extension _|Poll _|Deliver _|Disconnect _|Issue _),
-    (W.Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _) -> false
+  | (W.Snapshot|Retire|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _|Model_requests|Model_result _|Model_wait _|Poll _|Deliver _|Disconnect _|Issue _),
+    (W.Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _) -> false
 let issue_policy t route verb =
   let open Browser_lane in
   match route with
-  | Automation_route | Stagehand_route -> Ok (reply_policy verb)
+  | Automation_route -> Ok (reply_policy verb)
   | Live_route selected ->
     match reply_policy verb with
     | Executor_owned -> Ok Executor_owned
@@ -41,9 +40,9 @@ let issue_policy t route verb =
         | Some Ego_task_space -> Ok Executor_owned
         | Some (Web_extension | Webdriver_bidi) -> Ok Reply_window
         | None -> Error (Unavailable "live browser transport is not observed; read this worker's snapshot before dispatch")
-let raw_exchange t ~settlement ~admit ~on_cancel_after_dispatch command =
+let raw_exchange t ~settlement ~on_cancel_after_dispatch command =
   let available () = settlement || (not t.revoked && t.available ()) in
-  if not (available () && admit ()) then Error (Unavailable "browser worker is unavailable")
+  if not (available ()) then Error (Unavailable "browser worker is unavailable")
   else match Eio_context.get_net_opt (),Eio_context.get_clock_opt () with
   | None,_ | _,None -> Error (Unavailable "browser worker network context is unavailable")
   | Some net,Some clock ->
@@ -53,17 +52,17 @@ let raw_exchange t ~settlement ~admit ~on_cancel_after_dispatch command =
       let writing = ref false in
       let allowance=t.control_timeout_sec +. (match command with
         | W.Issue {timeout_sec;_} -> timeout_sec | W.Poll {window_sec;_} -> window_sec
-        | W.Snapshot|Retire|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _|Model_requests|Model_result _|Model_wait _|Extension _|Deliver _|Disconnect _ -> 0.) in
+        | W.Snapshot|Retire|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _|Model_requests|Model_result _|Model_wait _|Deliver _|Disconnect _ -> 0.) in
       let policy=match command with
         | W.Issue {route;verb;_} -> issue_policy t route verb
         | Snapshot|Retire|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _
-        | Model_requests|Model_result _|Model_wait _|Extension _|Poll _|Deliver _|Disconnect _ -> Ok Browser_lane.Reply_window in
+        | Model_requests|Model_result _|Model_wait _|Poll _|Deliver _|Disconnect _ -> Ok Browser_lane.Reply_window in
       match policy with
       | Error error -> Error error
       | Ok policy ->
       let exchange () = Eio.Switch.run (fun sw ->
         let flow = Eio.Net.connect ~sw net (`Unix t.socket_path) in
-        if not (admit () && available ()) then Error (Unavailable "browser worker was retired before dispatch")
+        if not (available ()) then Error (Unavailable "browser worker was retired before dispatch")
         else (
           writing := true;
           Eio.Flow.copy_string (text ^ "\n") flow;
@@ -76,16 +75,13 @@ let raw_exchange t ~settlement ~admit ~on_cancel_after_dispatch command =
           | Ok _ -> Error (Outcome_unknown "unexpected browser service reply")
           | Error _ -> Error (Outcome_unknown "invalid browser service reply"))) in
       try (match command with
-        | W.Retire | W.Model_wait _ | W.Extension _ -> exchange ()
-        | W.Issue {route;verb;timeout_sec;_} ->
-          let owned_startup=match route with
-            | Browser_lane.Stagehand_route -> Option.is_none (Browser_lane.stagehand_server_deadline verb ~timeout_sec)
-            | Browser_lane.Automation_route | Browser_lane.Live_route _ -> false in
+        | W.Retire | W.Model_wait _ -> exchange ()
+        | W.Issue {verb;_} ->
           (* Policy was fixed before dispatch from the original worker's
              validated metadata, never from a caller-supplied transport. *)
           let executor_owned = match policy with
             | Executor_owned -> true | Reply_window -> false in
-          if owned_startup || executor_owned || Browser_lane.verb_uses_model verb then exchange ()
+          if executor_owned || Browser_lane.verb_uses_model verb then exchange ()
           else Eio.Time.with_timeout_exn clock allowance exchange
         | Snapshot|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _|Model_requests|Model_result _|Poll _|Deliver _|Disconnect _ -> Eio.Time.with_timeout_exn clock allowance exchange)
       with
@@ -98,14 +94,14 @@ let raw_exchange t ~settlement ~admit ~on_cancel_after_dispatch command =
           | _ -> "browser service transport failed" in
         Error (if !writing then Outcome_unknown detail else Unavailable detail)
 
-let exchange t ~settlement ~admit ~on_cancel_after_dispatch command =
+let exchange t ~settlement ~on_cancel_after_dispatch command =
   let snapshot_token=match command with
    | W.Snapshot ->
      let token=ref () in
      t.snapshot_token <- Some token; t.live_transports <- None; Some token
    | Retire|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _
-   | Model_requests|Model_result _|Model_wait _|Extension _|Poll _|Deliver _|Disconnect _|Issue _ -> None in
-  let result=raw_exchange t ~settlement ~admit ~on_cancel_after_dispatch command in
+   | Model_requests|Model_result _|Model_wait _|Poll _|Deliver _|Disconnect _|Issue _ -> None in
+  let result=raw_exchange t ~settlement ~on_cancel_after_dispatch command in
   match command with
   | W.Snapshot ->
     (match result with
@@ -119,26 +115,22 @@ let exchange t ~settlement ~admit ~on_cancel_after_dispatch command =
             t.live_transports <- Some (List.map (fun (client:Browser_lane.client_info) -> client.client_id,client.transport) published.clients);
           result
         | Error detail -> Error (Outcome_unknown ("invalid browser transport snapshot: " ^ detail)))
-     | Ok (Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _|Service_refusal _)
+     | Ok (Model_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _|Service_refusal _)
      | Error _ -> result)
   | Retire|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _
-  | Model_requests|Model_result _|Model_wait _|Extension _|Poll _|Deliver _|Disconnect _|Issue _ -> result
+  | Model_requests|Model_result _|Model_wait _|Poll _|Deliver _|Disconnect _|Issue _ -> result
 
 let call t ~on_cancel_after_dispatch command =
-  exchange t ~settlement:false ~admit:(fun () -> true) ~on_cancel_after_dispatch command
-let call_companion t ~admit ~on_cancel_after_dispatch command =
-  try exchange t ~settlement:false ~admit ~on_cancel_after_dispatch (W.Extension command) with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | _ -> Error (Outcome_unknown "private browser call outcome unknown")
+  exchange t ~settlement:false ~on_cancel_after_dispatch command
 
 let transfer_download t ~id ~actor ~route ~verb ~publish =
   let call ~settlement command =
-    exchange t ~settlement ~admit:(fun () -> true) ~on_cancel_after_dispatch:(fun () -> ()) command
+    exchange t ~settlement ~on_cancel_after_dispatch:(fun () -> ()) command
     |> Result.map_error (function Unavailable detail|Outcome_unknown detail -> detail) in
   let receipt = function
     | W.Receipt -> Ok ()
     | W.Service_refusal {message;_} -> Error message
-    | Snapshot_result _|Model_reply _|Extension_reply _|Download_reply _|Poll_result _|Issue_result _ ->
+    | Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Issue_result _ ->
         Error "unexpected download settlement receipt" in
   let ( let* )=Result.bind in
   let released=ref None in
@@ -150,7 +142,7 @@ let transfer_download t ~id ~actor ~route ~verb ~publish =
       | W.Download_reply (Browser_addon_downloads.Published value) -> Ok value
       | Download_reply (Snapshot descriptor) -> publish descriptor
       | Service_refusal {message;_} -> Error message
-      | Snapshot_result _|Model_reply _|Extension_reply _|Poll_result _|Receipt|Issue_result _ ->
+      | Snapshot_result _|Model_reply _|Poll_result _|Receipt|Issue_result _ ->
           Error "unexpected download claim receipt" in
     let* reply=call ~settlement:true (W.Download_commit {id;actor;route;verb;receipt=artifact}) in
     let* ()=receipt reply in Ok artifact) in

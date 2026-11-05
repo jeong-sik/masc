@@ -169,7 +169,6 @@ type finalization_evidence =
   ; meta_removed : bool
   ; session_removed : bool
   ; registry_unregistered : bool
-  ; accumulator_dropped : bool
   ; completion : completion_receipt
   }
 
@@ -252,7 +251,6 @@ type invariant_error =
       { expected_session_removed : bool
       ; actual_session_removed : bool
       }
-  | Required_accumulator_not_dropped
   | Finalized_completion_mismatch of cleanup_reason * completion_receipt
   | Superseded_cleanup_reason_mismatch of cleanup_reason
   | Invalid_absence_acknowledgement of string
@@ -412,8 +410,6 @@ let invariant_error_to_string = function
       "shutdown finalized session evidence mismatch: expected removed=%b, actual=%b"
       expected_session_removed
       actual_session_removed
-  | Required_accumulator_not_dropped ->
-    "shutdown finalized cleanup without dropping its required tool accumulator"
   | Finalized_completion_mismatch (cleanup_reason, completion) ->
     Printf.sprintf
       "shutdown finalized completion mismatch: cleanup_reason=%s, completion=%s"
@@ -484,19 +480,6 @@ let rec validate operation =
              ; actual_session_removed = evidence.session_removed
              })
       else
-        let accumulator_drop_required =
-          match operation.lane_ownership, operation.cleanup_intent.reason with
-          | Dormant_meta, _
-          | Registered_lane _, Dashboard_keeper_purge _ ->
-            true
-          | Registered_lane _,
-            ( Operator_stop_retain_meta
-            | Operator_stop_remove_meta
-            | Supervisor_cleanup ) -> false
-        in
-        if accumulator_drop_required && not evidence.accumulator_dropped
-        then Error Required_accumulator_not_dropped
-        else
         (match
            completion_action_of_cleanup_reason operation.cleanup_intent.reason,
            evidence.completion

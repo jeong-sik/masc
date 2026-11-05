@@ -248,20 +248,10 @@ let surface_tool_names_from (public_tool_source_schemas : Masc_domain.tool_schem
   surface_tool_schemas_from public_tool_source_schemas surface
   |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
 
-(* Surface filtering at this layer removed in #1961 — all registered tools pass
-   through here unchanged. The public MCP surface is now filtered at the profile
-   level: [Mcp_server_eio_tool_profile.tool_schemas_for_profile] applies
-   [Tool_catalog.is_public_mcp] to the Full profile, reducing tools/list to ~34.
-
-   RFC-0084 §1.1 + §2.2 (PR-7) — Internal dispatch now flows through
-   [Tool_dispatch.guarded_dispatch] which wraps [dispatch_structured]
-   (pre-hook + handler + observer) with [Tool_telemetry.with_span].
-   The keeper turn loop in [keeper_tool_registered_runtime.ml:164,218] routes through
-   the guarded entry so the pre-hook chain ([external_effect_gate:203],
-   [tool_input_validation:217]) covers keeper-originated calls.
-   PR-8 wires the MCP server; PR-9 wires tag-dispatch fallback.
-   PR-11 removes the legacy [dispatch] and [dispatch_structured] entries
-   once all callers migrate. *)
+(* All registered tools pass through here unchanged. The public MCP surface
+   is filtered at the profile level:
+   [Mcp_server_eio_tool_profile.tool_schemas_for_profile] applies
+   [Tool_catalog.is_public_mcp] to the Full profile. *)
 let canonical_tool_schemas_from (public_tool_source_schemas : Masc_domain.tool_schema list) :
     Masc_domain.tool_schema list =
   require_unique_schemas ~label:"public tool catalog" public_tool_source_schemas

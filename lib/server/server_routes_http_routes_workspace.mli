@@ -140,6 +140,19 @@ type workspace_branches_error =
   | Branches_repository_unavailable
   | Branches_failed of string
 
+(** The checkout that owns a directory and the worktrees of its repository.
+    [worktrees_root] is relative to the selected workspace. *)
+type workspace_worktrees = {
+  worktrees_root : string;
+  worktrees_list : Repo_git.worktree_list;
+}
+
+type workspace_worktrees_error =
+  | Worktrees_invalid_path
+  | Worktrees_directory_unavailable
+  | Worktrees_repository_unavailable
+  | Worktrees_failed of string
+
 type workspace_file_catalog_error =
   | Catalog_invalid_path
   | Catalog_directory_unavailable
@@ -212,6 +225,20 @@ module For_testing : sig
 
   val workspace_branches_json : workspace_branches -> Yojson.Safe.t
   (** The [GET /api/v1/git/branches] body: [{root; branches; truncated}]. *)
+
+  val workspace_worktrees :
+    base:string ->
+    path:string ->
+    (workspace_worktrees, workspace_worktrees_error) result
+  (** Worktrees of the repository whose checkout contains directory [path],
+      stopping at [base], in git's order with the main worktree first and at
+      most 500. Each entry keeps only its directory's last name. *)
+
+  val workspace_worktrees_json : workspace_worktrees -> Yojson.Safe.t
+  (** The [GET /api/v1/git/worktrees] body: [{root; worktrees; truncated}]. A
+      worktree row is [{name; main; head; state; branch; locked; prunable}]
+      where [state] is ["branch"], ["detached"] or ["bare"], and [head] and
+      [branch] are [null] when absent. *)
 
   val workspace_file_catalog :
     base:string ->

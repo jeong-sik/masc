@@ -964,6 +964,62 @@ let workspace_branches_json (found : workspace_branches) =
     ; ("truncated", `Bool found.branches_list.bl_truncated)
     ]
 
+type workspace_worktrees = {
+  worktrees_root : string;
+  worktrees_list : Repo_git.worktree_list;
+}
+
+type workspace_worktrees_error =
+  | Worktrees_invalid_path
+  | Worktrees_directory_unavailable
+  | Worktrees_repository_unavailable
+  | Worktrees_failed of string
+
+(* A busy Keeper host holds several hundred linked worktrees; the cut is
+   reported through [truncated]. *)
+let worktrees_max_entries = 500
+
+let workspace_worktrees ~base ~path =
+  try
+    match checkout_of_directory ~base ~path with
+    | Error Checkout_invalid_path -> Error Worktrees_invalid_path
+    | Error Checkout_directory_unavailable -> Error Worktrees_directory_unavailable
+    | Error Checkout_repository_unavailable -> Error Worktrees_repository_unavailable
+    | Ok root ->
+        (match Repo_git.worktrees_at ~local_path:root ~max_entries:worktrees_max_entries () with
+         | Ok worktrees ->
+             Ok { worktrees_root = rel_under base root; worktrees_list = worktrees }
+         | Error detail -> Error (Worktrees_failed detail))
+  with
+  | Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) ->
+      Error Worktrees_directory_unavailable
+  | (Unix.Unix_error _ | Sys_error _ | Invalid_argument _) as ex ->
+      Error (Worktrees_failed (Printexc.to_string ex))
+
+let worktree_entry_json (entry : Repo_git.worktree_entry) =
+  let state, branch =
+    match entry.wt_state with
+    | Repo_git.Worktree_branch name -> ("branch", `String name)
+    | Repo_git.Worktree_detached -> ("detached", `Null)
+    | Repo_git.Worktree_bare -> ("bare", `Null)
+  in
+  `Assoc
+    [ ("name", `String entry.wt_name)
+    ; ("main", `Bool entry.wt_main)
+    ; ("head", (match entry.wt_head with Some head -> `String head | None -> `Null))
+    ; ("state", `String state)
+    ; ("branch", branch)
+    ; ("locked", `Bool entry.wt_locked)
+    ; ("prunable", `Bool entry.wt_prunable)
+    ]
+
+let workspace_worktrees_json (found : workspace_worktrees) =
+  `Assoc
+    [ ("root", `String found.worktrees_root)
+    ; ("worktrees", `List (List.map worktree_entry_json found.worktrees_list.wl_entries))
+    ; ("truncated", `Bool found.worktrees_list.wl_truncated)
+    ]
+
 module For_testing = struct
   let sanitize_log_value = sanitize_log_value
   let observe_workspace_route_failure = observe_workspace_route_failure
@@ -974,6 +1030,8 @@ module For_testing = struct
   let workspace_file_catalog = workspace_file_catalog
   let workspace_branches = workspace_branches
   let workspace_branches_json = workspace_branches_json
+  let workspace_worktrees = workspace_worktrees
+  let workspace_worktrees_json = workspace_worktrees_json
   let load_workspace_file_content = load_workspace_file_content
   let workspace_file_revision = workspace_file_revision
   let save_workspace_file = save_workspace_file
@@ -1325,6 +1383,40 @@ let add_routes router =
                          | Branches_repository_unavailable ->
                              `Not_found, "Open a Git repository directory to list branches"
                          | Branches_failed detail -> `Internal_server_error, detail
+                       in
+                       json_response ~status request reqd (json_error message))
+
+  |> Server_route.get Server_route.Public_read "/api/v1/git/worktrees" (fun state request reqd ->
+           let uri = Uri.of_string request.target in
+           let base, source = resolve_workspace_base ~state ~uri in
+           match source with
+           | `RepositoryMissing _ | `RepositoryUnknown _
+           | `PlaygroundMissing _ | `KeeperUnknown _ ->
+               json_response ~status:`Not_found request reqd
+                 (json_error "The selected workspace is unavailable")
+           | `Project | `Repository _ | `Playground _ ->
+               match Uri.get_query_param uri "path" with
+               | None ->
+                   json_response ~status:`Bad_request request reqd
+                     (json_error "Missing path parameter")
+               | Some path ->
+                   let result =
+                     Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+                       workspace_worktrees ~base ~path)
+                   in
+                   match result with
+                   | Ok found ->
+                       json_response_with_source ~status:`OK ~source request reqd
+                         (workspace_worktrees_json found)
+                   | Error error ->
+                       let status, message =
+                         match error with
+                         | Worktrees_invalid_path -> `Bad_request, "Invalid path"
+                         | Worktrees_directory_unavailable ->
+                             `Not_found, "The selected directory is unavailable"
+                         | Worktrees_repository_unavailable ->
+                             `Not_found, "Open a Git repository directory to list worktrees"
+                         | Worktrees_failed detail -> `Internal_server_error, detail
                        in
                        json_response ~status request reqd (json_error message))
 

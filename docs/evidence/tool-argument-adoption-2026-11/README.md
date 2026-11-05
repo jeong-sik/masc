@@ -91,6 +91,25 @@ PR 이 병합된 시각이 아니라 새 바이너리가 요청을 받기 시작
 `docs/evidence/repeated-calls-2026-11/` 의 README 는 raw trace 에서 `masc_board_list` 2,135번 중 28번(1.3%)이 `if_revision` 을 넣었다고 적어요. 두 수는 창이 달라서 더하거나 견주지 않아요.
 raw trace 의 28번은 모두 `mad-scientist` 의 10-28(24번), 10-29(4번) 호출이에요. 11-01 부터 읽는 이 폴더의 창에는 들어 있지 않아요. 반대로 위 5번은 `sangsu` 의 호출이고, raw trace 에는 잡히지 않았어요.
 
+## 인자가 아닌 변경: `masc_keeper_delegate_status` 결과 크기 (스크립트로 재지 않음)
+
+#48343 은 이 도구의 결과에서 제출한 요청(`input`, `source`, digest 필드)을 뺐어요. 결과를 줄이는 변경이라 모델이 따라 하지 않아도 줄어요.
+같은 상태(`Running`)끼리 견줘요. 창은 11-03T00:00Z ~ 11-05T21:00Z 이고, 원장 줄의 `output` 을 열어 센 값이라 `measure_argument_adoption.py` 로는 재지 않아요.
+
+| | 전 | 후 |
+|---|---:|---:|
+| 모든 조회 | 134 | 18 |
+| `Running` 조회 | 53 | 18 |
+| `Running` 결과 평균 바이트 | 2,899.5 | 135.9 |
+| `Running` 결과 범위 | 1,533 ~ 9,571 | 135 ~ 136 |
+| 모든 조회의 operation 수 / operation 당 최대 조회 | 84 / 6 | 11 / 5 |
+| `Running` 을 조회한 Keeper | `code-reviewer` 49, `e-masc-the-leader` 4 | `code-reviewer` 18 |
+
+- 전 결과의 `Running` 한 건을 열어 보면 `input` 1,362바이트, `source` 496바이트, digest 두 개 64바이트씩이 들어 있어요. 후 결과는 `operation_id`, `created_at`, `state`, `started_at` 네 필드예요.
+- 결과 모양이 바뀐 때는 원장으로 알 수 있어요. 옛 모양(`input` 이 있는 결과)의 마지막 호출이 11-05T04:33:44Z 이고 새 모양의 첫 호출이 13:44:36Z 예요. 그 사이에는 호출이 없어서 나눈 시각을 이 안 어디에 잡아도 같은 값이에요. #48343 은 05:21:47Z 에 병합됐고, 어느 부팅이 처음 담았는지는 몰라요. 이 변경은 도구 TOML 이 아니라 코드라서 부팅 로그의 `tool assets synced` 줄에 나오지 않아요.
+- 후 창에는 `Succeeded`(전 32번, 평균 6,394바이트), `Queued`(33번, 2,817바이트), `Failed`(14번, 1,036바이트) 조회가 없어서 견주지 못해요. 후 18번은 모두 `Running` 이었고 한 Keeper 가 operation 11개를 되풀이해 조회한 것이에요.
+- 후 창은 18호출이에요. 모양이 고정이라 크기는 135 ~ 136바이트로 같지만, 조회 횟수가 줄었는지는 이 표로 말할 수 없어요(창마다 일이 달라요).
+
 ## 기준선 33.2% 는 하루가 만든 값이에요
 
 `docs/evidence/tool-efficiency-baseline-2026-11/` 의 "같은 결과를 다시 받은 호출"은 11-01 ~ 11-04 합계로 결과 바이트의 33.2%(310.3 MB / 933.7 MB)예요.

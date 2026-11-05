@@ -113,8 +113,26 @@ describe('decodeLogsData', () => {
     expect(entry?.details).toEqual({ tool_name: 'masc_status' })
   })
 
+  it('reads the category filter echo as a list of selectors', () => {
+    const wire = currentWire()
+    const data = Effect.runSync(decodeLogsData({
+      ...wire,
+      query: {
+        ...wire.query,
+        category: ['tool', 'uncategorized'],
+        exclude_category: ['fsm'],
+      },
+    }))
+
+    expect(data.entries).toEqual([])
+  })
+
   it.each([
     ['non-array entries', { ...currentWire(), entries: null }],
+    ['a single category echo', {
+      ...currentWire(),
+      query: { ...currentWire().query, category: 'tool' },
+    }],
     ['missing required envelope field', (() => {
       const wire = currentWire()
       const { retention: _retention, ...rest } = wire

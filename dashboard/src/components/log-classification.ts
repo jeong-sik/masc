@@ -1,4 +1,9 @@
 import type { LogEntry } from '../api/dashboard-logs'
+import {
+  LOG_CATEGORIES,
+  type LogCategory,
+  type LogCategorySelector,
+} from '../api/schemas/logs'
 
 export type LogDisplayKind =
   | 'tool'
@@ -23,7 +28,11 @@ export function detailLabel(details: Record<string, unknown> | null, key: string
 /** The chip a row belongs to is a projection of the producer's typed
     category alone: no detail-key sniffing, no turn_id fallback. */
 export function logDisplayKind(entry: LogEntry): LogDisplayKind {
-  switch (entry.category) {
+  return categoryDisplayKind(entry.category)
+}
+
+function categoryDisplayKind(category: LogCategory | null): LogDisplayKind {
+  switch (category) {
     case 'tool':
       return 'tool'
     case 'turn':
@@ -41,4 +50,13 @@ export function logDisplayKind(entry: LogEntry): LogDisplayKind {
     case null:
       return 'log'
   }
+}
+
+/** The route's category selectors for one chip, read back from the same
+    projection, so a chip asks the server for exactly the rows it shows. */
+export function logKindCategories(kind: LogDisplayKind): readonly LogCategorySelector[] {
+  const categories: LogCategorySelector[] = LOG_CATEGORIES.filter(
+    category => categoryDisplayKind(category) === kind,
+  )
+  return categoryDisplayKind(null) === kind ? [...categories, 'uncategorized'] : categories
 }

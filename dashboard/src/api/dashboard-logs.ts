@@ -7,6 +7,7 @@ import {
 import {
   decodeLogsData,
   type LogCategory,
+  type LogCategorySelector,
   type LogLevel,
   type LogsData,
   type LogsSchemaDriftError,
@@ -21,7 +22,7 @@ export interface LogsRequest {
   readonly module?: string
   readonly sinceSeq?: number
   readonly beforeSeq?: number
-  readonly category?: LogCategory
+  readonly categories?: readonly LogCategorySelector[]
   readonly excludeCategories?: readonly LogCategory[]
 }
 
@@ -40,7 +41,9 @@ function logsPath(request: LogsRequest): string {
   if (request.beforeSeq !== undefined && request.beforeSeq >= 0) {
     params.set('before_seq', String(request.beforeSeq))
   }
-  if (request.category !== undefined) params.set('category', request.category)
+  if (request.categories !== undefined && request.categories.length > 0) {
+    params.set('category', request.categories.join(','))
+  }
   if (request.excludeCategories !== undefined && request.excludeCategories.length > 0) {
     params.set('exclude_category', request.excludeCategories.join(','))
   }

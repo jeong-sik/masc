@@ -84,7 +84,7 @@ end
 | 층 | 대상 | 확인한 것 |
 |---|---|---|
 | L1 | Curator capture·summary(`workspace_memory_execution_capture.ml`), stored ledger(`workspace_memory_revision.ml` 의 `stored_ledger.workspace`) | 이 문서 §1.2·§1.3 |
-| 다음 층 | librarian durable request(`keeper_librarian_durable_request.ml:28`), admission capture(`keeper_librarian_admission_capture.ml:45`) | 조사 에이전트 보고. 층을 열 때 재확인 |
+| 미룸 | librarian durable request(`keeper_librarian_durable_request.ml:28`), admission capture(`keeper_librarian_admission_capture.ml:45`) | §2.5 |
 | 다음 층 | owned job(`keeper_owned_job_backend.ml:291`), event queue quarantine intent(`keeper_runtime/keeper_event_queue_quarantine.ml:105`) | 라이브 기록 0개(11-06) |
 | 다음 층 | capability recovery(`fs_compat/capability_recovery_reconciler.ml:242`·`:1347`), endpoint job registry·output seal, tool-call continuity(`keeper_tool_call_index.ml:141`·`:567`), build provenance sidecar | 조사 에이전트 보고. 층을 열 때 재확인 |
 
@@ -100,6 +100,16 @@ end
 - 옛 기록은 새 reader 가 거절한다. `recoverable_successors` 는 하나라도 거절하면 전체가 멈추므로 Fresh state 가 필요하다.
 - L1 Fresh state: 서버를 멈추고 `.masc/lane-addons` 아래 Curator scope 폴더 셋(`tool-request-owners`, `tool-request-bodies`, `tool-request-owners-settled` 의 `<sha256("workspace-curator")>`)을 지운 뒤 설치한다.
 - 지워도 Curator ledger 의 사실은 남는다. 아직 분류하지 않은 사실은 다음 Curator 턴이 다시 잡는다.
+
+### 2.5 librarian 은 미룬다
+
+- librarian 은 owner identity 를 해시해 lane add-on scope 이름을 만든다(`keeper_librarian_durable_request.ml` 의 `address`·`scope`, `keeper_librarian_admission_capture.ml` 의 `scope_identity`). device 가 바뀌면 scope 이름도 바뀐다.
+- 그래도 일은 다시 돈다. 새 scope 에 기록이 없으면 다음 pass 가 아직 반영하지 않은 history 범위를 새로 capture 한다(`keeper_librarian_durable_execution.ml` 의 `| [],[] ->` 갈래).
+- 잃는 것은 두 가지다.
+  - 옛 scope 에 남은 파일. 11-06 에 history scope 는 진행 중 23폴더, 정리된 것 61폴더·11,742파일·13GB 다.
+  - 옛 scope 의 refusal·capacity stop 기록. 새 scope 에서는 거절됐던 범위를 다시 시도할 수 있다.
+- 형식을 바꾸면 모든 librarian scope 이름이 바뀐다. deploy preflight(`keeper_librarian_store_preflight.ml`)는 librarian 기록의 owner 를 모두 decode 하므로, 옛 기록이 하나라도 남으면 배포가 멈춘다. 그래서 librarian lane add-on 기록 전부를 Fresh state 로 지워야 한다.
+- 피해(다시 도는 일, 남는 파일)가 비용(13GB 기록 삭제, 배포 위험)보다 작다. 남는 파일 정리는 정리된 기록 처리(#45436)와 같이 정한다.
 
 ## 3. 완료 조건
 

@@ -46,10 +46,6 @@ val request_id_error_to_string : request_id_error -> string
 val has_field : string -> Yojson.Safe.t -> bool
 (** [has_field key json] is [true] when [json] is an [`Assoc] containing [key]. *)
 
-val get_field : string -> Yojson.Safe.t -> Yojson.Safe.t option
-(** [get_field key json] returns [Some v] when [json] is an [`Assoc] mapping
-    [key] to [v], else [None]. *)
-
 val is_jsonrpc_v2 : Yojson.Safe.t -> bool
 (** Returns [true] iff [json] has a top-level field [jsonrpc = "2.0"]. *)
 

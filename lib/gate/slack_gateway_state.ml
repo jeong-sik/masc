@@ -302,24 +302,19 @@ let step t ~now_mono input =
 
 (* ---- JSON parsing ---- *)
 
-let assoc key json =
-  match json with
-  | `Assoc fields -> List.assoc_opt key fields
-  | _ -> None
-;;
-
 let as_string = function `String s -> Some s | _ -> None
 
 let string_field key json =
-  match Option.bind (assoc key json) as_string with
+  match Option.bind (Json_util.assoc_member_opt key json) as_string with
   | Some s -> s
   | None -> ""
 ;;
 
-let string_field_opt key json = Option.bind (assoc key json) as_string
+let string_field_opt key json =
+  Option.bind (Json_util.assoc_member_opt key json) as_string
 
 let object_field key json =
-  match assoc key json with
+  match Json_util.assoc_member_opt key json with
   | Some (`Assoc _ as obj) -> Ok obj
   | Some _ -> Error (key ^ " must be an object")
   | None -> Error (key ^ " missing")
@@ -336,7 +331,7 @@ let file_access_of_string = function
    hold. So a file is described with whatever came, never dropped for missing
    fields the way a Discord attachment is — here missing is the normal case. *)
 let decode_inbound_files payload =
-  match assoc "files" payload with
+  match Json_util.assoc_member_opt "files" payload with
   | Some (`List items) ->
     List.filter_map
       (fun item ->
@@ -351,7 +346,7 @@ let decode_inbound_files payload =
                  | Some n -> Some n)
             ; if_mimetype = string_field_opt "mimetype" item
             ; if_size =
-                (match assoc "size" item with
+                (match Json_util.assoc_member_opt "size" item with
                  | Some (`Int n) -> Some n
                  | Some _ | None -> None)
             ; if_permalink = string_field_opt "permalink" item

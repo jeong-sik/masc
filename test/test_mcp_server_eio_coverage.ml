@@ -109,28 +109,6 @@ let test_has_field_not_assoc () =
   check bool "not assoc" false (Mcp_transport_protocol.has_field "key" json)
 
 (* ============================================================
-   get_field Tests
-   ============================================================ *)
-
-let test_get_field_exists () =
-  let json = `Assoc [("name", `String "test")] in
-  match Mcp_transport_protocol.get_field "name" json with
-  | Some (`String "test") -> ()
-  | _ -> fail "expected Some"
-
-let test_get_field_missing () =
-  let json = `Assoc [] in
-  match Mcp_transport_protocol.get_field "name" json with
-  | None -> ()
-  | Some _ -> fail "expected None"
-
-let test_get_field_not_assoc () =
-  let json = `String "not assoc" in
-  match Mcp_transport_protocol.get_field "name" json with
-  | None -> ()
-  | Some _ -> fail "expected None"
-
-(* ============================================================
    is_jsonrpc_response Tests
    ============================================================ *)
 
@@ -406,11 +384,6 @@ let () =
       test_case "exists" `Quick test_has_field_exists;
       test_case "missing" `Quick test_has_field_missing;
       test_case "not assoc" `Quick test_has_field_not_assoc;
-    ];
-    "get_field", [
-      test_case "exists" `Quick test_get_field_exists;
-      test_case "missing" `Quick test_get_field_missing;
-      test_case "not assoc" `Quick test_get_field_not_assoc;
     ];
     "is_jsonrpc_response", [
       test_case "valid" `Quick test_is_jsonrpc_response_valid;

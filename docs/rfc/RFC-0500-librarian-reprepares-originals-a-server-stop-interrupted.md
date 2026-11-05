@@ -97,18 +97,20 @@ Librarian 원본이 모델을 부르는 중에 서버가 멈추면, 호스트는
 
 ### 3.2 1층: admission 은 끊긴 실행을 옮긴다
 
-`run_queue` 의 첫 `discover`(`:304`) 뒤, 복구 단계에서 옮긴다.
+`evaluate` 의 `Refused` 갈래(`:256`)에서 옮긴다.
 
-- 대상: `initial.executions` 가운데 §3.1 을 만족하는 실행.
+- `Rejected {stage = Execution; _}` 인 기록은 패스마다 `Submit.resume` 에서 `Final` 로, `Dispatch.resume` 에서 `Refused` 로 돌아온다(`lane_addon_submit_once.ml:187-196`). 그래서 이미 멈춘 실행과 이번 패스가 처음 거절을 쓴 실행이 같은 갈래로 온다.
+- 대상: 그 갈래의 기록 가운데 §3.1 을 만족하는 실행. 나머지는 지금처럼 `size_refused` 로 간다.
 - 옮기기 전에 그 실행을 가리키는 기록이 없는지 본다.
   - gate: 판정 전에 끊긴 실행이라 gate 가 없어야 한다. gate 가 있으면 오류다.
   - partition: partition 은 크기 증거가 있는 실행만 가리킨다. 가리키는 partition 이 있으면 오류다.
 - 옮기는 날짜는 그 실행 요청 ID 의 uuid v7 날짜다. history 의 `minted_on` 과 같은 방법이다.
-- 옮긴 뒤의 `discover` 는 그 part 를 실행이 없는 part 로 본다. `evaluate` 는 `new_capture` 로 새 요청 ID 의 실행을 만든다.
+- 옮긴 뒤 walk 는 같은 part 로 돌아간다. 다음 `discover` 는 그 part 를 실행이 없는 part 로 본다. `evaluate` 는 `new_capture` 로 새 요청 ID 의 실행을 만든다.
+- 같은 패스 안에서 다시 돌지 않는다. 새 실행이 이 프로세스 안에서 끊기면 `cut` 이라 옮기지 않는다.
 - 새 실행은 그 순간의 Memory 를 다시 캡처한다. 설계 문서의 "fresh Memory capture at the moment each sibling is actually evaluated" 와 같다.
 - 옮긴 실행 하나마다 `Log.Keeper.info` 한 줄을 남긴다. 요청 ID 와 원인을 적는다.
 
-"Complete discovery precedes every local repair" 는 그대로다. 첫 `discover` 가 전체를 검증한 뒤 옮긴다.
+"Complete discovery precedes every local repair" 는 그대로다. walk 는 part 마다 `discover` 로 전체를 검증한 뒤 `evaluate` 한다. 옮기기는 그 뒤의 수리다.
 
 ### 3.3 2층: history 는 끊긴 원본을 종단 거절로 다룬다
 
@@ -156,7 +158,7 @@ Librarian 원본이 모델을 부르는 중에 서버가 멈추면, 호스트는
 
 ### 6.1 시험
 
-- admission: `interrupted` 로 거절된 실행이 있는 workspace 에서 `run_queue` 를 돌리면 그 실행이 settled 위치로 가고, 같은 part 에 새 요청 ID 의 실행이 생긴다.
+- admission: 호스트 Exact 기록에 다른 프로세스가 남긴 시작 표시(`{"started": <다른 incarnation>}`)를 둔다. 서버가 호출 중에 멈춘 뒤 남는 모양이다. `run_queue` 를 돌리면 그 실행이 settled 위치로 가고, 같은 part 에 새 요청 ID 의 실행이 생겨 후보가 커밋된다.
 - admission: 거절 증거가 `cut`·`raised` 이면 실행이 그대로 남고, 대기 이유에 그 원인이 나온다.
 - admission: 끊긴 실행을 gate 나 partition 이 가리키면 옮기지 않고 오류로 끝난다.
 - history(2층): `interrupted` 원본이 종단 거절로 옮겨지고, 다음 패스가 같은 범위를 새 원본으로 잡는다.

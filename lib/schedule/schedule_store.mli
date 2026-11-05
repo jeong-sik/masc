@@ -91,6 +91,14 @@ type store_error =
       (** Authority could not be established, including a non-authoritative
           read, unidentified/contradictory wake, or another workspace/backend.
           This is an error, never evidence of supersession. *)
+  | Stale_instance of
+      { schedule_id : string
+      ; expected : string
+      ; found : string
+      }
+      (** [update_request] was told which instance it replaces and the stored
+          row is another one: the schedule was replaced after the caller read
+          it. No write occurs. *)
   | Persistence_failed of string
   | Corrupt_ledger of
       { primary_err : string
@@ -225,6 +233,7 @@ val update_request :
   now:float ->
   runner_tick_sec:float ->
   ?timing_update:timing_update ->
+  ?expected_instance_id:string ->
   Schedule_domain.schedule_request ->
   (Schedule_domain.schedule_request, store_error) result
 (** Atomically replaces an existing [Scheduled] or [Due] request. The caller
@@ -239,7 +248,13 @@ val update_request :
     and expiry. [Keep_recurrence] retains only the latest recurrence, while
     replacing due time and expiry. The current row and its replacement must both belong to
     [authority] before any write. Replacement ownership uses the current
-    row's scheduler, and the stored requester and scheduler are preserved. *)
+    row's scheduler, and the stored requester and scheduler are preserved.
+    [expected_instance_id] makes the replacement conditional: under the
+    mutation lock the stored row must carry that instance id, or the result is
+    {!Stale_instance} and nothing is written. A caller that built the
+    replacement from a row it read earlier passes the id of that row. The
+    authority is checked first, so a caller that may not change the row gets
+    {!Not_schedule_owner} and never learns the stored instance id. *)
 
 val cancel_request :
   Workspace_utils.config ->

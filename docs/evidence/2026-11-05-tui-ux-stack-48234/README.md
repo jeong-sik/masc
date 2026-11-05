@@ -1,14 +1,14 @@
 # TUI UX stack #48234: before and after screens
 
-Scope: layers 1 to 6, 8 to 11, 13 to 17, 19, 20, 22 to 25, 27, 29, 31 and 33 to
-36 of the stack (#48231, #48232, #48233, #48250, #48254, #48266, #48289, #48292,
+Scope: layers 1 to 6, 8 to 11, 13 to 17, 19, 20, 22 to 25, 27, 29, 31, 33 to 36
+and 38 of the stack (#48231, #48232, #48233, #48250, #48254, #48266, #48289, #48292,
 #48299, #48306, #48327, #48329, #48341, #48344, #48350, #48365, #48370, #48386,
-#48389, #48392, #48401, #48411, #48424, #48436, #48456, #48481, #48493, #48516). Layer 7
+#48389, #48392, #48401, #48411, #48424, #48436, #48456, #48481, #48493, #48516, #48534). Layer 7
 is the first version of this document. Layer 12 added layers 6 and 8 to 11.
 Layer 18 added layers 13 to 17. Layer 21 added layers 19 and 20. Layer 26 is an
 RFC and has no screens. Layer 28 added layers 22 to 25 and 27. Layer 30 added
-layer 29. Layer 32 added layer 31. The layer that carries this text added
-layers 33 to 36.
+layer 29. Layer 32 added layer 31. Layer 37 added layers 33 to 36. The layer that carries
+this text added layer 38.
 
 ## Source
 
@@ -39,6 +39,7 @@ whose `sha256` and `server_sha256` match the files that were run, and
 | After (layers 1 to 34) | `16699347711857a0088028d5bfcdcaa280375834` | 41950346736 | `e833ad2d5c16c116abc3f5e650510929847f5d0ef9f17c19d88728f6b754bcbe` | `cd48bf57b82f994f12e0b8beecc90b290babfce81b633368e6314b76ebd9b0cb` |
 | After (layers 1 to 35) | `c177173775d9245db26beb4db4c94d208d4da1d5` | 41953166859 | `0b57468d24bfcb32b90d289a45bbdc5570904faa6a12f30d18c4d0cf7c0775bd` | `714dc40b8e2185fd882f5e4569a6b07bfa7fab65bc67989cdace7f089a12aebe` |
 | After (layers 1 to 36) | `ee537e002edec7d33e812dc73fab59a9637f87ef` | 41960815641 | `118f0ae57bb201f6060a86a9ee23b5962b9c66c54376b74b4116d353b8b7911f` | `6bfc13656a2a33b7f5021f80f8422e3d904145077ee14c714d0066b1b39785a6` |
+| After (layers 1 to 38) | `92b883871eb84114b1512b94131a46a859b2060b` | 41968335391 | `b9c634c2ac26ba44986a74f1179a1851a3ae2adbbe47afbb4e67c9048f4f69cb` | `4ccfb7b664574d37bfac961638f3fbe0e1d5fb91df2e836b8927f16c578414f8` |
 
 Commit `68231ced9d9` was added to layer 5 after the After build. It changes
 `test/dune` only, so the After binary is the one the layer 5 head would build.
@@ -996,6 +997,170 @@ with a mark, 900k bytes                 146 ms     185 ms     262 ms
 not UTF-8, 900k bytes                   137 ms     166 ms     148 ms
 ```
 
+### Layer 38: a Task history note that is JSON is drawn in colour (#48534)
+
+A history entry of a Task shows its note. For the tool call and task events of
+the fixture the note is a JSON object. The Task detail drew every note in one
+colour, so a key and its value looked alike. The Keeper chat draws a served
+JSON document with a colour for each kind of token, through
+`Masc_tui_tool_detail.document`. Layer 38 draws a history note the same way
+when the note is a JSON object or an array: keys, strings, numbers, `true`,
+`false`, `null` and punctuation each have a colour, and a string that holds a
+JSON document is opened into rows. Any other note (prose, a number or a string
+on its own, text that is not JSON) keeps the one colour.
+
+Before is the layers 1 to 36 build. After is the layers 1 to 38 build. Layer 37
+changes no code. The colours of the After captures, read from the `.ansi` files
+(tmux's own encoding of the screen), match the theme's JSON colours:
+
+```
+key                ESC[96m  bright cyan
+string             ESC[92m  bright green
+number             ESC[93m  bright yellow
+true, false, null  ESC[95m  bright magenta
+punctuation        ESC[2m   dim
+```
+
+The fixture's history notes are JSON objects with the members `tool_name`,
+`success`, `duration_ms`, `source`, `error`, `tool_args_preview` and `task_id`.
+The Task detail was captured at 120x35 and 80x24 for the Task in progress, the
+claimed Task and the Task awaiting verification, each at the top and scrolled
+to its history (12 captures).
+
+Colour codes differ in the seven captures that have a history note on screen,
+and in none of the other five. With times, `.jsonl` offsets and durations
+masked, the text of the two builds differs in these rows only:
+
+- The row count in the footer of the detail (`[lines a-b/N]`) grew in all 12
+  captures, because the notes are drawn longer. At 120x35 it went from 103 to
+  113 for the Task awaiting verification, from 53 to 57 for the claimed Task
+  and from 68 to 76 for the Task in progress. At 80x24 it went from 105 to 114,
+  53 to 57 and 68 to 76.
+- The claimed and the in-progress Task scrolled to the history at 120x35: the
+  `tool_args_preview` member and the small objects that the server sends on one
+  row, such as `{ "task_id": "task-004" }`. Both are shown below.
+- The Task awaiting verification scrolled at 120x35: the read state text
+  (`finishing refresh` in the title row and `Refreshing Keeper list: result
+  awaiting state application` in the footer, on the Before build only).
+
+`tool_args_preview` holds a string that is itself a JSON document. Before, the
+string wrapped over three rows with every quote escaped. After, it is opened
+into an object with one member to a row. A small object takes three rows where
+it took one.
+
+```
+claimed (task-004), 120x35, scrolled to the history
+
+  before  "tool_args_preview":
+          "{\"_agent_name\":\"iso-fixture\",\"task_id\":\"task-004\",\"action\":
+          \"claim\"}",
+          ...
+          { "task_id": "task-004" }
+
+  after   "tool_args_preview": {
+            "_agent_name": "iso-fixture",
+            "task_id": "task-004",
+            "action": "claim"
+          },
+          ...
+          {
+            "task_id": "task-004"
+          }
+```
+
+The Task awaiting verification has a `tool_args_preview` that the server cut
+and ended with `...(truncated)`. That is not a JSON document, so it stays one
+string. It is drawn in the string colour over four rows, and each of the four
+rows starts with ESC[92m, so a wrapped row carries the colour it continues.
+
+![The claimed Task history at 120x35 before](task-json-120-before.png)
+*Before: the whole note is one colour, and the quoted action is one escaped string over three rows.*
+
+![The claimed Task history at 120x35 after](task-json-120-after.png)
+*After: keys are cyan, strings green, numbers yellow, `true` and `null` magenta, and the quoted action is an object.*
+
+![The Task awaiting verification at 120x35 before](task-json-awaiting-before.png)
+*Before: the cut string wraps in the one colour.*
+
+![The Task awaiting verification at 120x35 after](task-json-awaiting-after.png)
+*After: the same four rows, each in the string colour.*
+
+![The claimed Task history at 80x24 before](task-json-80-before.png)
+*Before, at 80x24: three members in the one colour.*
+
+![The claimed Task history at 80x24 after](task-json-80-after.png)
+*After, at 80x24: the same three members in colour.*
+
+Nothing else moved. The Dashboard at 80x24, 100x30 and 120x35 has no row that
+differs in the text or in the colour codes. The first screen of each of the 15
+palette destinations at 60x24, 80x24 and 120x35 (45 captures) has two captures
+that differ in the text files and two in the colour-code files, and every
+differing row is a read state phrase or a log line: Fusion at 80x24 and
+Artifacts / Resources at 80x24 differ in `refreshing`, `finishing refresh` and
+`Refreshing Keeper list`, and Logs at 120x35 differs in which log lines it had
+received.
+
+The rows below come from calling `Masc_tui_tool_detail.document` of the layer 38
+source with no colours, which is the call the Task detail makes for a note.
+
+```
+note    {"x":1e3,"y":0.10,"z":1E-7,"neg":-0}
+result  "x": 1000.0, "y": 0.1, "z": 1e-07, "neg": 0, one member to a row
+
+note    {"b":1,"a":2,"b":3}
+result  the members in the note's order, the repeated key kept
+
+note    {"tool_args_preview":"{\"action\":\"claim\"}"}
+result  "tool_args_preview": { "action": "claim" }, opened over rows
+
+note    {"note":"line one\nline two"}
+result  "note": | and then one row for each line
+
+note    "just text"    42    Task claimed by iso-fixture    {"a":1} trailing
+result  not a document, so the note keeps the one colour
+```
+
+A note is drawn again from its parsed form, not from its bytes: spaces change,
+and a number is printed the way it parses. The server's own formatting of a
+note, such as the one-row `{ "task_id": "task-004" }`, is not kept.
+
+Control characters in the keys and values of a note were checked in the same
+call. A JSON object with ESC, `ESC ] 0 ; t BEL`, BEL, DEL, NUL, CR, a C1 `CSI`
+(U+009B) and a right-to-left override (U+202E) in a key and in a value was
+drawn with each of them spelled as a JSON escape or replaced by a space, and
+no ESC byte was left. A line separator (U+2028) is the one character it did
+not remove: it was a space in one row and stayed as it was in another, and the
+one-colour path leaves it in place as well.
+
+`test/test_tui_text_block.ml` has 12 cases and `test/test_tui_tool_detail.ml`
+has 8. They were run in a bytecode build outside the repository with small
+stand-ins for the heavy modules, and all passed.
+`test/test_tui_task_document_style.ml` (6 cases) needs the `masc` library, so
+it was type-checked and not run. Eight copies of the two modules, each with one
+fault put in on purpose, were each failed by at least one case:
+
+```
+styled-sanitises          passes a styled row through the sanitiser         3 cases fail
+styled-plain-wrap         wraps a styled row with the plain wrap            1
+styled-no-indent          drops the indent of a styled row                  3
+document-always-some      makes a number, string, bool or null a document   1
+document-skips-unfold     does not open a string that holds a document      1
+document-objects-only     counts an object as a document and an array not   2
+document-raises-on-prose  raises when the note is not JSON                  2
+document-no-reset         leaves a coloured token without the reset         2
+```
+
+A random comparison made 24000 JSON values from English letters, separators,
+Chinese and Hangul characters, emoji, marks, joiners, strings that hold JSON
+documents, bytes that are not UTF-8, and the control characters above. 12092 of
+them were documents (6573 with a string that holds a document). Their 94774 rows
+were wrapped at 11 widths between 1 and 47 cells, which makes 5128386 rows
+from the styled wrap. In every one the visible text matched the plain wrap of
+the same line with its colour codes removed. No row ended with a colour left
+open, and no escape other than the five palette colours and the reset was
+found. No row held a C0 control, DEL, a C1 control or a bidirectional control.
+Rows with U+2028 remained.
+
 ## Not verified
 
 - Layer 11 with a waiting question, and on a terminal that reports its palette:
@@ -1085,5 +1250,13 @@ not UTF-8, 900k bytes                   137 ms     166 ms     148 ms
 - Layer 36 for a word that is not valid UTF-8 on a screen: no capture holds
   one, so the module call and the unit tests stand in for it. Whether any
   caller can receive such a word was not traced.
+- Layer 38 with a note that is a JSON array, with a string that spans lines
+  (drawn as a block under `|`) and with a number such as `1e3`: the fixture's
+  notes are objects whose strings are single lines, so those were drawn only by
+  the module call and the unit tests.
+- Layer 38 in the Tools view of a Task from an async request, which draws the
+  same history rows: the fixture has no async request source.
+- Layer 38 with colours off and on a terminal with another palette: the colours
+  are fixed SGR codes, and the capture terminal drew them with its own palette.
 - Screens come from the CI-built binaries on one macOS machine. Nothing here
   was run on Linux or in a terminal other than tmux.

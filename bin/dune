@@ -2481,7 +2481,7 @@
  (name masc_tui_http_error)
  (wrapped false)
  (modules masc_tui_http_error)
- (libraries masc masc.string_util markup cohttp uutf yojson))
+ (libraries masc masc.string_util markup angstrom uutf yojson))
 
 (library
  (name masc_tui_workspace_read)

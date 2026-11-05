@@ -21,26 +21,62 @@ let encoding_of_name name =
        | "windows-1251" | "cp1251" -> Known (Markup.Encoding.windows_1251, Single_byte)
        | _ -> Unsupported name)
 
+(* One Content-Type value, read with the RFC 9110 §8.3.1 media-type grammar.
+   [html_response] runs on several CPU-pool domains at once, so this parser
+   keeps no state between calls. An ocamlyacc parser such as [Cohttp.Accept]
+   cannot be used here: the stdlib [Parsing] engine keeps one process-wide
+   stack, and two domains parsing at once read each other's values. *)
+type media_type = { kind: string; subtype: string; parameters: (string * string) list }
+
+let is_tchar = function
+  | '!' | '#' | '$' | '%' | '&' | '\'' | '*' | '+' | '-' | '.' | '^' | '_' | '`' | '|' | '~'
+  | '0' .. '9' | 'a' .. 'z' | 'A' .. 'Z' -> true
+  | _ -> false
+
+let is_ows = function ' ' | '\t' -> true | _ -> false
+
+let is_qdtext = function
+  | '\t' | ' ' | '\x21' | '\x23' .. '\x5b' | '\x5d' .. '\x7e' | '\x80' .. '\xff' -> true
+  | _ -> false
+
+let is_quoted_pair_char = function
+  | '\t' | ' ' | '\x21' .. '\x7e' | '\x80' .. '\xff' -> true
+  | _ -> false
+
+let media_type =
+  let open Angstrom in
+  let token = take_while1 is_tchar in
+  let ows = skip_while is_ows in
+  let quoted_string =
+    char '"'
+    *> many (take_while1 is_qdtext
+             <|> (char '\\' *> satisfy is_quoted_pair_char >>| String.make 1))
+    <* char '"' >>| String.concat "" in
+  let parameter = both (token <* char '=') (token <|> quoted_string) in
+  (* [parameters = *( OWS ";" OWS [ parameter ] )]: an empty parameter
+     between two semicolons is part of the grammar. *)
+  let parameters =
+    many (ows *> char ';' *> ows *> option None (parameter >>| Option.some))
+    >>| List.filter_map Fun.id in
+  ows *> lift3 (fun kind subtype parameters -> {kind; subtype; parameters})
+    (token <* char '/') token parameters <* ows
+
 let html_encoding headers =
   let values = List.filter_map (fun (name, value) ->
     if String.equal (String.lowercase_ascii name) "content-type" then Some value else None) headers in
   match values with
   | [value] ->
-      (match Cohttp.Accept.media_ranges (Some value) with
-       | [(_, (Cohttp.Accept.MediaType (major, minor), params))]
-         when String.equal (String.lowercase_ascii major) "text"
-           && String.equal (String.lowercase_ascii minor) "html" ->
+      (match Angstrom.parse_string ~consume:Angstrom.Consume.All media_type value with
+       | Ok {kind; subtype; parameters}
+         when String.equal (String.lowercase_ascii kind) "text"
+           && String.equal (String.lowercase_ascii subtype) "html" ->
            let charsets = List.filter_map (fun (name, value) ->
-             if String.equal (String.lowercase_ascii name) "charset" then Some value else None) params in
+             if String.equal (String.lowercase_ascii name) "charset" then Some value else None) parameters in
            Some (match charsets with
              | [] -> Detect
              | [name] -> encoding_of_name name
              | _ :: _ :: _ -> Ambiguous)
-       | [(_, (Cohttp.Accept.MediaType _, _))]
-       | [(_, (Cohttp.Accept.AnyMediaSubtype _, _))]
-       | [(_, (Cohttp.Accept.AnyMedia, _))]
-       | [] | _ :: _ :: _ -> None
-       | exception Parsing.Parse_error | exception Failure _ -> None)
+       | Ok _ | Error _ -> None)
   | [] | _ :: _ :: _ -> None
 
 type excerpt = { text: Buffer.t; mutable space: bool; mutable cut: bool }

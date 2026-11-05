@@ -170,13 +170,10 @@ val settle : Probe.t -> (settlement, reason) result
     and after a promoted [Fresh_bootstrap] that state holds the workspace. *)
 val settlement_entry : settlement -> Authz_external_store.entry option
 
-(** Whether a store and a log that agree hold an answer, and what settles the
-    intent that an earlier writer left. *)
+(** Whether a store and a log that agree hold an answer, and for one that
+    does, what settles the intent that an earlier writer left. *)
 type agreement =
-  | Nothing_answered of { abort : Authz_external_store.intent option }
-      (** The value is {!Absent}: the store holds no [Committed]. [abort] is
-          the [Fresh_bootstrap] intent that the log never got ({!Abort}), when
-          one is pending. *)
+  | Nothing_answered  (** The value is {!Absent}: the store holds no [Committed]. *)
   | Answered of settlement  (** The value is {!Matches}. *)
 
 (** Items 2 to 5, as a writer reads them each time it enters its zone (design
@@ -191,8 +188,8 @@ val settle_on_entry : Probe.t -> (agreement, reason * reason list) result
     previous hash of an intent there, so nothing is promoted, and a [Committed]
     names a record that the log does not hold ({!Commit_not_in_log}). [Ok] is
     the [Fresh_bootstrap] intent that the log never got ({!Abort}), when one is
-    pending. It gives what {!settle_on_entry} gives for {!Probe.create} of the
-    same state, which is never {!Answered}. *)
+    pending. For {!Probe.create} of the same state, {!settle_on_entry} gives
+    the same reasons, and {!Nothing_answered} where this gives [Ok]. *)
 val settle_over_empty_log
   :  Authz_external_store.State.t
   -> (Authz_external_store.intent option, reason * reason list) result

@@ -208,7 +208,7 @@ let uncertain (first, rest) = Uncertain { first; rest }
    installed log, so the store must hold an answer. *)
 let entered_to_add = function
   | Error reasons -> Error (uncertain reasons)
-  | Ok (H.Nothing_answered { abort = (_ : S.intent option) }) -> Error Store_holds_no_answer
+  | Ok H.Nothing_answered -> Error Store_holds_no_answer
   | Ok (H.Answered settled) -> Ok settled
 ;;
 

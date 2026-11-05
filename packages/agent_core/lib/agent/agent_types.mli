@@ -166,7 +166,6 @@ type options =
         [Waiting_for_permit], knowing the wait it sees is bounded, and counts
         again from [Wait_settled_at]. *)
   ; hooks : Hooks.hooks
-  ; guardrails_async : Guardrails_async.t
   ; tracer : Tracing.t
   ; trace_link : (string * string) option
   ; raw_trace : Raw_trace.t option

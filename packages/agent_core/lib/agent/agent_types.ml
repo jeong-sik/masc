@@ -59,7 +59,6 @@ type options =
   ; admission_timeout_s : float option
   ; permit_wait : Llm_provider.Provider_admission.permit_wait Atomic.t option
   ; hooks : Hooks.hooks
-  ; guardrails_async : Guardrails_async.t
   ; tracer : Tracing.t
   ; trace_link : (string * string) option
     (** Optional (trace_id, span_id) of a parent span to link to.
@@ -129,7 +128,6 @@ let default_options =
   ; admission_timeout_s = None
   ; permit_wait = None
   ; hooks = Hooks.empty
-  ; guardrails_async = Guardrails_async.empty
   ; tracer = Tracing.null
   ; trace_link = None
   ; raw_trace = None

@@ -720,7 +720,7 @@ sequenceDiagram
 
 1. `init_runtime_context`: Eio 환경(clock, net, proc_mgr, fs) 추출
 2. `create_server_state`: 서버 상태 생성 (Workspace config, Eio context 설정)
-3. `bootstrap_server_state`: 단일 루트 `<base-path>/.masc` Workspace 초기화 (레거시 `.masc/clusters` 하위 트리는 사용하지 않음), Chain bootstrap, Tool registry warm-up, 단일 루트 `.masc` JSONL pruning
+3. `bootstrap_server_state`: 단일 루트 `<base-path>/.masc` Workspace 초기화, Chain bootstrap, Tool registry warm-up, 단일 루트 `.masc` JSONL pruning
 4. `bootstrap_keepers`: Keeper 에이전트 부트스트랩
 6. `start_background_maintenance`: 주기적 cleanup fiber 시작
 7. HTTP 서버 listen 시작

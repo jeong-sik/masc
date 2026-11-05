@@ -14,8 +14,7 @@ Gate, Fusion, and their correlations. It does not own provider/model execution;
 MASC calls agent core for that boundary and agent core does not import MASC concepts.
 
 Every path is resolved from the caller's `BasePath` into a single `<base-path>/.masc/`
-root (`Common.masc_dirname`). Multi-cluster subdirectories (`.masc/clusters/<name>/` and
-`MASC_CLUSTER_NAME`) are retired (`#43188`). A repository, connector,
+root (`Common.masc_dirname`). A repository, connector,
 credential, vendor, or command name is data supplied through a registered
 boundary, never a branch in Workspace policy.
 
@@ -114,6 +113,14 @@ tombstone is recorded as its own event.
 Failure of one Keeper, Job, Connector, Gate request, or storage operation is
 scoped to that object and lane. It cannot pause the Workspace or other Keepers.
 
+The MCP tools `masc_pause` and `masc_resume` and the operator actions
+`namespace_pause` and `namespace_resume` write and clear `paused`,
+`pause_reason`, `paused_by` and `paused_at` in Workspace state and broadcast
+the change. The record does not pause anything. Status projections
+(`masc_pause_status`, GraphQL, the dashboard, the operator snapshot and digest,
+`/api/v1/status`) show it, and `resume` checks it before clearing it. No
+Keeper, Task, Goal or Gate transition reads it.
+
 ## 7. Required invariants
 
 - `INV-WORKSPACE-001`: every mutation is versioned and atomic.
@@ -125,11 +132,3 @@ scoped to that object and lane. It cannot pause the Workspace or other Keepers.
 - `INV-WORKSPACE-006`: Gate resolution wakes only its origin lane.
 - `INV-WORKSPACE-007`: no observation automatically pauses or stops a Keeper.
 - `INV-WORKSPACE-008`: all filesystem locations derive from `BasePath`.
-
-## 8. Retired contracts
-
-The following are not part of Workspace state: multi-cluster `.masc/clusters`
-directories (`MASC_CLUSTER_NAME`), global pause/resume, claim TTL,
-stale-claim auto-release, zombie time thresholds, starvation/priority boosts,
-speculation budgets, reputation scores, risk tiers, and product-specific
-authorization tables.

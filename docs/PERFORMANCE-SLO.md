@@ -36,8 +36,8 @@ agent core `Streaming_summary.ttft_ms`(Time To First Token)는 MASC가 직접 �
 
 노출 메트릭:
 
-- `masc_llm_provider_streaming_first_chunk` — TTFRC histogram (seconds)
-- `gen_ai.response.time_to_first_chunk` — OpenTelemetry GenAI semconv TTFRC
+- `masc_llm_provider_streaming_first_chunk_seconds` — TTFRC histogram (seconds)
+- `gen_ai.client.operation.time_to_first_chunk` — OpenTelemetry GenAI semconv TTFRC
 
 **TTFT-to-client**(= provider TTFT + transport overhead)는 현재 측정되지 않는다.
 agent core RFC-AC-020이 요구하는 consumer SLO를 추가하려면 agent core `Streaming_summary`를

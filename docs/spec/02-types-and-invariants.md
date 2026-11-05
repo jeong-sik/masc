@@ -189,7 +189,7 @@ type workspace_state = {
 }
 ```
 
-RFC-0323 및 [03-workspace-state.md](./03-workspace-state.md)에 따라 global pause/resume 및 speculation budget은 retired contract이며, wire 호환성을 위한 레코드 필드로만 보존된다.
+`paused`·`pause_reason`·`paused_by`·`paused_at` 은 MCP 도구 `masc_pause`·`masc_resume` 과 operator action `namespace_pause`·`namespace_resume` 이 쓰고 지운다. 이 기록은 아무것도 멈추지 않는다. 상태 조회가 보여 주고 `resume` 이 지우기 전에 확인할 뿐이며, Keeper·Task·Goal·Gate 전이는 읽지 않는다([03-workspace-state.md](./03-workspace-state.md) §6). `speculation_enabled`·`speculation_budget` 은 상태 파일에 그대로 읽고 쓰지만 동작에 쓰는 곳이 없다.
 
 ### 2.10 Backlog
 

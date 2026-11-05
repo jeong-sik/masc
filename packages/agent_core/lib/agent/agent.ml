@@ -411,9 +411,7 @@ let lifecycle_outcome_of_error error =
         | Error.ToolRoundLimitExceeded _
         | Error.HookExecutionFailed _
         | Error.TerminalToolEffectFailed _
-        | Error.TerminalToolDurabilityFailed _
-        | Error.GuardrailViolation _
-        | Error.TripwireViolation _ )
+        | Error.TerminalToolDurabilityFailed _ )
     | Error.Api _
     | Error.Provider _
     | Error.Mcp _

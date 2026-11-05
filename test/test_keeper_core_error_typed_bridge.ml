@@ -396,14 +396,13 @@ let test_user_message_of_network_errors () =
     "a reset connection is named as a reset, not a refusal"
     "Runtime provider 'ollama_cloud' reset the connection"
     (AE.user_message_of_core_error provider_reset);
-  let guardrail =
-    CoreError.Agent
-      (CoreError.GuardrailViolation { validator = "policy"; reason = "blocked" })
+  let stop_reason =
+    CoreError.Agent (CoreError.UnrecognizedStopReason { reason = "abrupt" })
   in
   Alcotest.(check string)
     "non-network errors preserve agent-core message"
-    (Agent_core.Error.to_string guardrail)
-    (AE.user_message_of_core_error guardrail);
+    (Agent_core.Error.to_string stop_reason)
+    (AE.user_message_of_core_error stop_reason);
   (* The raw overflow diagnostic must not reach chat verbatim (2026-07-21:
      "Context overflow: empty completion (stop_reason=…)" was stored in
      dashboard chat four times). Only the typed Api arm exists — the

@@ -11,8 +11,6 @@ let user_message_of_core_error err =
 
 type core_termination_semantics =
   | Provider_wall_clock_timeout
-  | Agent_core_guardrail_violation
-  | Agent_core_tripwire_violation
   | Agent_core_input_required
   | Core_error_failure
 
@@ -23,10 +21,6 @@ let core_termination_semantics err =
   | Agent_core.Error.Provider
       (Llm_provider.Error.NetworkError { timeout_phase = Some _; _ }) ->
     Provider_wall_clock_timeout
-  | Agent_core.Error.Agent (Agent_core.Error.GuardrailViolation _) ->
-    Agent_core_guardrail_violation
-  | Agent_core.Error.Agent (Agent_core.Error.TripwireViolation _) ->
-    Agent_core_tripwire_violation
   | Agent_core.Error.Agent (Agent_core.Error.InputRequired _) -> Agent_core_input_required
   | Agent_core.Error.Agent (Agent_core.Error.UnrecognizedStopReason _)
   | Agent_core.Error.Agent (Agent_core.Error.ToolRoundLimitExceeded _)
@@ -74,8 +68,6 @@ let core_termination_semantics err =
 
 let core_termination_semantics_to_string = function
   | Provider_wall_clock_timeout -> "provider_wall_clock_timeout"
-  | Agent_core_guardrail_violation -> "agent_core_guardrail_violation"
-  | Agent_core_tripwire_violation -> "agent_core_tripwire_violation"
   | Agent_core_input_required -> "agent_core_input_required"
   | Core_error_failure -> "core_error_failure"
 ;;
@@ -150,10 +142,6 @@ let agent_error_terminal_reason_code = function
       "agent_error_terminal_tool_durability_failed:tool_use_id=%s,effect_disposition=%s"
       (Agent_core.Tool_contract.Invocation.tool_use_id invocation)
       (terminal_effect_disposition_to_wire effect_disposition)
-  | Agent_core.Error.GuardrailViolation { validator; reason = _ } ->
-    Printf.sprintf "agent_error_guardrail_violation:validator=%s" validator
-  | Agent_core.Error.TripwireViolation { tripwire; reason = _ } ->
-    Printf.sprintf "agent_error_tripwire_violation:tripwire=%s" tripwire
   | Agent_core.Error.InputRequired { request_id; question = _; _ } ->
     Printf.sprintf "agent_error_input_required:request_id=%s" request_id
 ;;
@@ -317,8 +305,6 @@ let receipt_outcome_kind_of_core_error err =
   match core_termination_semantics err with
   | Provider_wall_clock_timeout -> `Cancelled
   | Agent_core_input_required -> `Cancelled
-  | Agent_core_guardrail_violation
-  | Agent_core_tripwire_violation
   | Core_error_failure -> `Error
 ;;
 

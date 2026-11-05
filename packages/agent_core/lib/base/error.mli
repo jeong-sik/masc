@@ -60,14 +60,6 @@ type agent_error =
       ; effect_disposition : closed_terminal_effect
       ; detail : string
       }
-  | GuardrailViolation of
-      { validator : string
-      ; reason : string
-      }
-  | TripwireViolation of
-      { tripwire : string
-      ; reason : string
-      }
   | InputRequired of input_required
 
 type mcp_error =

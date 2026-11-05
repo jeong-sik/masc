@@ -154,7 +154,6 @@ let roundtrip_corpus =
   ; "io_error"
   ; "orchestration_error"
   ; "a2a_error"
-  ; "agent_error_guardrail_violation:validator=x"
   ; "agent_error_idle_detected:consecutive_idle_turns=3"
   ; "registry_phase_missing"
   ; "supervisor_stop"

@@ -16,8 +16,6 @@ val user_message_of_core_error : Agent_core.Error.t -> string
     Keeper pause, retry, or blocker authority. *)
 type core_termination_semantics =
   | Provider_wall_clock_timeout
-  | Agent_core_guardrail_violation
-  | Agent_core_tripwire_violation
   | Agent_core_input_required
   | Core_error_failure
 

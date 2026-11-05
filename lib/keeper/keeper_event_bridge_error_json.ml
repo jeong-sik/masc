@@ -118,8 +118,6 @@ let agent_failed_error_summary = function
       (( Agent_core.Error.UnrecognizedStopReason _
        | Agent_core.Error.ToolRoundLimitExceeded _
        | Agent_core.Error.HookExecutionFailed _
-       | Agent_core.Error.GuardrailViolation _
-       | Agent_core.Error.TripwireViolation _
        | Agent_core.Error.InputRequired _ ) as agent_error) ->
     Agent_core.Error.to_string (Agent_core.Error.Agent agent_error)
   | ( Agent_core.Error.Api _
@@ -232,16 +230,6 @@ let core_agent_error_fields = function
     ; ( "effect_disposition"
       , `String (Keeper_agent_error.terminal_effect_disposition_to_wire effect_disposition) )
     ; "detail_digest", `String (sha256_hex detail)
-    ]
-  | Agent_core.Error.GuardrailViolation { validator; reason } ->
-    [ "variant", `String "guardrail_violation"
-    ; "validator", `String validator
-    ; "reason", `String reason
-    ]
-  | Agent_core.Error.TripwireViolation { tripwire; reason } ->
-    [ "variant", `String "tripwire_violation"
-    ; "tripwire", `String tripwire
-    ; "reason", `String reason
     ]
   | Agent_core.Error.InputRequired { request_id; participant_name; question; _ } ->
     [ "variant", `String "input_required"

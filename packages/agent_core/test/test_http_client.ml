@@ -949,9 +949,9 @@ let test_error_domain_retryable () =
     false
     (Error_domain.is_retryable (`Auth_error "bad"));
   Alcotest.(check bool)
-    "guardrail violation not retryable"
+    "unrecognized stop reason not retryable"
     false
-    (Error_domain.is_retryable (`Guardrail_violation ("typed-input", "rejected")))
+    (Error_domain.is_retryable (`Unrecognized_stop_reason "weird"))
 ;;
 
 let test_error_domain_context () =

@@ -56,14 +56,6 @@ type agent_error =
       ; effect_disposition : closed_terminal_effect
       ; detail : string
       }
-  | GuardrailViolation of
-      { validator : string
-      ; reason : string
-      }
-  | TripwireViolation of
-      { tripwire : string
-      ; reason : string
-      }
   | InputRequired of input_required
 
 (** MCP client errors. *)
@@ -268,10 +260,6 @@ let agent_error_to_string = function
        | Tool_contract.Proven_post_effect -> "a proven post-effect boundary"
        | Tool_contract.Effect_outcome_unknown -> "an unknown effect boundary")
       r.detail
-  | GuardrailViolation r ->
-    Printf.sprintf "Guardrail violation [%s]: %s" r.validator r.reason
-  | TripwireViolation r ->
-    Printf.sprintf "Tripwire violation [%s]: %s" r.tripwire r.reason
   | InputRequired r ->
     Printf.sprintf
       "Input required%s: %s (request %s)"

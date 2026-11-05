@@ -19,6 +19,12 @@ val secret_roots : base_path:string -> keeper_name:string -> secret_root_info li
     [secrets/base] root is loaded first and [secrets/<keeper>] overlays it.
     For the literal [base] keeper, the root is returned once. *)
 
+val strip_one_final_newline : string -> string
+(** One final [CRLF], [LF] or [CR] is dropped and the rest is kept as
+    written. Env secret entries are read through it, and the Keeper redactor
+    derives each file's whole-value form from the same function, so a secret
+    saved with Windows line endings is masked the way a Keeper receives it. *)
+
 val local_env_for_keeper :
   ?host_env:string array ->
   base_path:string ->

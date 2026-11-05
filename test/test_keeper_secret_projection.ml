@@ -296,6 +296,27 @@ let test_keeper_secret_overrides_base_secret_entries () =
     projection.cleanup ()
 ;;
 
+let test_strip_one_final_newline () =
+  List.iter
+    (fun (input, expected) ->
+       Alcotest.(check string)
+         (String.escaped input)
+         expected
+         (Keeper_secret_projection.strip_one_final_newline input))
+    [ "", ""
+    ; "a", "a"
+    ; "a\n", "a"
+    ; "a\r\n", "a"
+    ; "a\r", "a"
+    ; "a\n\n", "a\n"
+    ; "a\r\n\r\n", "a\r\n"
+    ; "a\n\r", "a\n"
+    ; "\n", ""
+    ; "\r\n", ""
+    ; "a b \n", "a b "
+    ]
+;;
+
 let test_local_env_missing_secret_dir_is_scrubbed () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
@@ -948,6 +969,8 @@ let () =
             test_base_secret_env_and_files_project_to_keeper_docker_args
         ; Alcotest.test_case "keeper secret overrides base secret entries" `Quick
             test_keeper_secret_overrides_base_secret_entries
+        ; Alcotest.test_case "one final newline is stripped" `Quick
+            test_strip_one_final_newline
         ; Alcotest.test_case "local env missing secret dir is scrubbed" `Quick
             test_local_env_missing_secret_dir_is_scrubbed
         ; Alcotest.test_case "local env uses keeper env without ambient creds" `Quick

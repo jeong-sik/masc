@@ -1231,12 +1231,41 @@ let test_memory_health_reloads_only_the_changed_keeper () =
       Alcotest.(check int) "beta remains warm" 1 (read_count "beta"))
 ;;
 
+let test_failed_health_reads_are_retried () =
+  let base = fresh_dir "masc-memory-health-retry" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  ignore (write_snapshot ~keepers_dir ~keeper_id:"alpha" [fact "recovered fact"]);
+  let valid_json =
+    match Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"alpha" with
+    | Ok (Some snapshot) -> Yojson.Safe.to_string (Current.to_json snapshot)
+    | Ok None -> Alcotest.fail "the valid snapshot is missing"
+    | Error detail -> Alcotest.fail detail
+  in
+  let path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"alpha" in
+  let attempts = ref 0 in
+  Health.For_testing.with_runtime
+    ~keeper_health:(fun ~config ~keepers_dir keeper_id ->
+      incr attempts;
+      Fs_compat.save_file path (if !attempts = 1 then {|{"schema":"wrong"}|} else valid_json);
+      Health.For_testing.keeper_health ~config ~keepers_dir keeper_id)
+    (fun () ->
+      let first = Health.keeper_memory_health_http_json ~base_path:base in
+      Alcotest.(check bool) "the failed read is explicit" false
+        (is_null (member "read_error" (keeper_obj "alpha" first)));
+      let second = Health.keeper_memory_health_http_json ~base_path:base in
+      Alcotest.(check bool) "the recovered read has no old error" true
+        (is_null (member "read_error" (keeper_obj "alpha" second)));
+      Alcotest.(check int) "the failed health read was retried" 2 !attempts)
+;;
+
 let () =
   Alcotest.run
     "server_dashboard_http_keeper_memory_health"
     [ ( "current snapshot"
       , [ Alcotest.test_case "a write reloads only its own Keeper" `Quick
             test_memory_health_reloads_only_the_changed_keeper
+        ; Alcotest.test_case "failed health reads are retried" `Quick
+            test_failed_health_reads_are_retried
         ; Alcotest.test_case "unread evidence is observed without publication" `Quick
             test_unread_evidence_is_observed_without_publication
         ; Alcotest.test_case "saved versus prepared context" `Quick

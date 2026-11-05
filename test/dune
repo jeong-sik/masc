@@ -3004,7 +3004,7 @@
 (include stanzas/test_fleet_stream_loopback.inc)
 (include stanzas/test_server_sse_response.inc)
 
-(include stanzas/test_fleet_stream_pump.inc)
+(include stanzas/test_server_sse_pump.inc)
 
 (include stanzas/test_fleet_stream_server_wiring.inc)
 

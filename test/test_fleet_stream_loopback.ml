@@ -297,7 +297,7 @@ let test_a_keepalive_crosses_http_without_becoming_an_event () =
         env
         ~port:server.port
         ~on_bytes:(fun chunk ->
-          if contains ~needle:Server_fleet_stream_pump.keepalive_frame chunk
+          if contains ~needle:Server_sse_pump.keepalive_frame chunk
           then incr keepalives)
         reader;
       wait_until env "two keepalives" (fun () -> !keepalives >= 2);

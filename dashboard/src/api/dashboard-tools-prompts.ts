@@ -14,6 +14,13 @@ import type { TelemetryFreshnessMetadata } from './dashboard-shared'
 import type { DashboardConfigResolution, DashboardRuntimeResolution } from '../types'
 import type { DashboardRuntimeProbeResponse } from './schemas/runtime-probe'
 import { parsePromptAuthoringIssues, type PromptAuthoringIssue } from './schemas/prompt-authoring'
+import {
+  parseToolMetricsSeriesResponse,
+  seriesAnswerMismatch,
+  toolMetricsSeriesQuery,
+  type ToolMetricsSeriesRequest,
+  type ToolMetricsSeriesResponse,
+} from './schemas/tool-metrics-series'
 
 // The activation ledger's wire schema — keeper_skill_activation_ledger.ml
 // writes exactly this tag, and every reader below pins it before trusting
@@ -909,6 +916,21 @@ export type {
 
 export function fetchToolMetrics(): Promise<ToolMetricsResponse> {
   return get('/api/v1/tool-metrics')
+}
+
+export type { ToolMetricsSeriesRequest }
+
+export async function fetchToolMetricsSeries(
+  request: ToolMetricsSeriesRequest,
+  opts?: AbortableRequestOptions,
+): Promise<ToolMetricsSeriesResponse> {
+  const raw = await get<unknown>(`/api/v1/tool-metrics/series?${toolMetricsSeriesQuery(request)}`, {
+    signal: opts?.signal,
+  })
+  const response = parseToolMetricsSeriesResponse(raw)
+  const mismatch = seriesAnswerMismatch(request, response)
+  if (mismatch !== null) throw new Error(mismatch)
+  return response
 }
 
 export async function fetchDashboardRuntimeProbe(

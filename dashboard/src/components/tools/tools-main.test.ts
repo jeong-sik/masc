@@ -83,6 +83,12 @@ vi.mock('./tool-full-inventory', () => ({
   FullInventoryView: () => html`<div>FullInventoryView</div>`,
 }))
 
+// The series panel loads its own endpoint on mount; its behaviour is covered in
+// tool-series-panel.test.ts and tool-series-state.test.ts.
+vi.mock('./tool-series-panel', () => ({
+  ToolSeriesPanel: () => html`<div>ToolSeriesPanel</div>`,
+}))
+
 vi.mock('../../router', () => ({
   navigate: mocks.navigate,
 }))
@@ -388,6 +394,7 @@ describe('Tools', () => {
     expect(container.textContent).toContain('FullInventoryView')
     expect(container.textContent).toContain('도구 사용 현황')
     expect(container.textContent).toContain('ToolMetrics')
+    expect(container.textContent).toContain('ToolSeriesPanel')
     // Prompt editing was consolidated into Settings › Prompts; Lab now only
     // shows a read-only pointer, not the editable PromptRegistryPanel.
     expect(container.textContent).not.toContain('PromptRegistryPanel')

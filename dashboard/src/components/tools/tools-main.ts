@@ -20,6 +20,7 @@ import { ToolExecutor } from '../tool-executor/tool-executor'
 import { formatElapsedCompact } from '../../lib/format-time'
 import { sourceHealthClass, coverageGapDisplay } from '../common/source-health'
 import { ScheduledAutomationPanel } from './scheduled-automation-panel'
+import { ToolSeriesPanel } from './tool-series-panel'
 import { KeeperWaitingInventoryPanel } from './keeper-waiting-inventory-panel'
 import { SkillActivationPanel, type KeeperSkillReceipt } from './skill-activation-panel'
 import {
@@ -245,6 +246,10 @@ export function Tools() {
             `
           : null}
         <${ToolMetrics} data=${usage} />
+      <//>
+
+      <${SectionCard} label="도구 실행 통계" class="section v2-lab-panel mb-4">
+        <${ToolSeriesPanel} />
       <//>
       ${data?.generated_at
         ? html`<div class="flex flex-wrap gap-x-3 gap-y-2 mt-3 text-[var(--color-fg-muted)] text-xs">

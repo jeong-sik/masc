@@ -97,12 +97,14 @@ settle 을 부르는 곳은 셋이다. 셋 모두 살아 있는 기록이 가리
 
 | 묻는 곳 | 살아 있는 기록에서 꺼내는 ID |
 |---|---|
-| `Keeper_librarian_durable_execution` `finished_chains` | `Progress.replacement` 가 `Preparation_confirmed intended` 인 기록의 `intended.request_id` |
+| `Keeper_librarian_durable_execution` `finish_settling` | `Progress.replacement` 가 `Preparation_confirmed intended` 인 기록의 `intended.request_id` |
 | `Keeper_librarian_durable_execution` `settle_orphan_gates` | gate inventory 의 execution ID |
 | `Keeper_librarian_floor_cleanup` `settle_orphan_gates` | step gate inventory 의 execution ID |
 | `Server_workspace_memory_addon` `finish_settling` | `Progress.Subdivided (_, intent)` 인 기록의 `intent.request_id` |
 
-`true` 면 살아 있는 부모 체인을 마저 옮긴다. `false` 면 그 부모를 그대로 둔다.
+`true` 면 살아 있는 부모 체인을 마저 옮긴다. `false` 면 그 부모를 그대로 둔다. 그 뒤 lineage 검사(`validate_lineage`)가 그 부모를 거절한다. 그래서 표시를 잘못 지웠을 때의 결과는 재실행이 아니라 그 체인의 정지다. 정지는 저절로 풀리지 않는다.
+
+묻는 쪽은 settlement barrier 를 잡지 않는다. 읽기만 하기 때문이다. barrier 는 settle 의 이동과 §4.2 의 pass 를 서로 막는다. 묻는 쪽이 묻는 ID 는 그 순간 살아 있는 기록이 가리키는 것이라 `N` 에 들어 있다. 그래서 pass 와 같이 돌아도 그 표시는 지워지지 않는다.
 
 ### 3.3 Exact 요청 기록과 원본 실행 증명을 읽는 곳
 
@@ -117,6 +119,8 @@ settle 을 부르는 곳은 셋이다. 셋 모두 살아 있는 기록이 가리
 `settle_tool_request` 는 지금 기록과 본문을 차례로 `move_into_archive` 한다. D1 은 두 번째 이동을 지우기로 바꾼다.
 
 - 기록이 먼저 옮겨진다. 그래서 중간에 멈추면 지금처럼 "본문만 scope 옆에 남는다". 기록이 본문 없이 남는 일은 없다.
+- 본문이 이미 없으면 성공으로 본다. 지금 `move_into_archive` 는 원래 자리에도 보관 위치에도 없으면 `Error` 다. 지우기는 "이미 없음"이 다시 부른 settle 의 정상 결과다.
+- 지운 뒤 부모 디렉터리를 sync 한다(`remove_binding_with` 와 같이 `sync_existing_parent`).
 - `settle` 의 호출 계약은 이미 "다른 기록이 가리키지 않는 본문"만 settle 한다고 적는다. 본문은 자기 요청 ID 를 담아서 두 기록이 한 본문을 나누지 않는다.
 
 ### 4.2 보관 기록
@@ -128,8 +132,10 @@ type settling_family = Librarian_history | Librarian_floor | Workspace_curator
 ```
 
 - `Lane_addon_tool_request_owner.settle` 은 `family` 를 받는다. 새 호출처는 이 타입에 항목을 더해야 컴파일된다.
-- 각 항목은 살아 있는 기록 하나가 가리키는 ID 를 답한다. §3.2 의 표와 같고, `Progress` 의 모든 phase 를 와일드카드 없이 match 한다.
-- 지우는 pass 는 모든 scope 의 살아 있는 기록을 읽는다. 각 기록에 항목의 답을 모아 ID 집합 `N` 을 만든다. 보관 기록 중 `digest request_id` 가 `N` 의 digest 에 없는 것을 지운다. 지울 때는 그 날짜 디렉터리의 본문 파일도 같이 지운다(이미 쌓인 본문).
+- 각 항목은 살아 있는 기록 하나가 담은 원본 ID 를 모두 답한다. §3.2 의 표보다 넓다. 마저 끝내기가 묻는 ID 만이 아니라, `Lane_addon_request_progress` 의 이벤트 중 요청 ID 를 담는 것(`Preparation_intended`, `Replacement_intended`, `Successor_intended`, `Subdividing`, `Subdivided` 등)과 gate inventory 의 execution ID 를 모두 넣는다. 모든 phase 와 이벤트를 와일드카드 없이 match 한다. 그래서 새 이벤트가 생기면 컴파일러가 이 답을 고치게 한다.
+- 지우는 pass 는 모든 scope 의 살아 있는 기록을 읽는다. scope 는 Keeper 목록이 아니라 `tool-request-owners/` 아래 디렉터리를 훑어 모은다. 각 기록에 항목의 답을 모아 ID 집합 `N` 을 만든다.
+- scope 하나, 기록 하나라도 읽지 못하거나 decode 하지 못하면 그 pass 는 아무것도 지우지 않고 끝난다. 어느 항목에도 속하지 않는 scope 가 있어도 같다.
+- §2.2 에서 쓴 "문자열 값 중 ID 모양인 것" 훑기는 쓰지 않는다. 이 측정은 타입 답이 아직 없어서 쓴 근사다. 구현은 위의 타입 답을 쓴다. L1 은 같은 데이터에서 타입 답의 `N` 이 이 측정의 457개를 모두 덮는지 한 번 비교해 PR 에 적는다. 보관 기록 중 `digest request_id` 가 `N` 의 digest 에 없는 것을 지운다. 지울 때는 그 날짜 디렉터리의 본문 파일도 같이 지운다(이미 쌓인 본문).
 - 이 pass 는 settlement barrier 와 workspace process lease 안에서 돈다. 시작할 때 본문 inventory 다음에, 그리고 날짜별 store 정리가 도는 24시간 주기에 같이 돈다. 새 주기는 만들지 않는다.
 
 ### 4.3 두 단계로 지우지 않는 이유
@@ -182,7 +188,8 @@ type settling_family = Librarian_history | Librarian_floor | Workspace_curator
 - `lane_addon_store.mli` 의 틀린 주석(§3.1)을 고친다.
 - Librarian·Curator 의 권한 함수가 살아 있는 원본이 없을 때 `Undecided` 가 아니라 `Unowned` 를 돌려주는 경로를 모두 확인한다. `Undecided` 경로가 있으면 그 ID 의 기록은 D6 에서 뺀다.
 - 살아 있는 child 가 이미 settle 된 parent 의 실행 증명을 읽는 경로가 없는지 확인한다. 체인은 잎부터 settle 되므로 없어야 한다.
-- 시험은 바뀌는 계약만 고친다. 지금 보관 본문이 생기는지 보는 시험(`test_workspace_memory_curator_lane.ml`, `test_keeper_librarian_durable_execution.ml`)은 본문이 지워지는지 보게 바꾼다.
+- 시험은 바뀌는 계약만 고친다. 지금 보관 본문이 생기는지 보는 시험(`test_workspace_memory_curator_lane.ml`, `test_keeper_librarian_durable_execution.ml`)은 본문이 지워지는지 보게 바꾼다. `test_lane_addon_original_body_inventory.ml`, `test_lane_addon_request_discovery.ml` 도 보관 경로를 쓴다.
+- `bench_keeper_librarian_pass.ml` 은 보관 기록과 본문을 읽는다. Librarian Goal 의 측정 도구라서 D1 이 들어가면 그 단계가 실패한다. L2 에서 같이 고친다.
 
 ## 8. 열린 질문
 
@@ -199,3 +206,7 @@ type settling_family = Librarian_history | Librarian_floor | Workspace_curator
   - 받아들인 것: RFC-0497 과 따로 쓴다. 기간이나 개수가 아니라 가리키는 쪽이 없을 때 지운다. 가리키는 쪽의 범위에 Librarian durable 실행, floor 정리, Curator 가 모두 들어간다. 세기 → 운영자 확인 → 지우기 순서로 낸다.
   - 바꾼 것: 리뷰어는 독자마다 읽은 위치(watermark)를 보자고 했다. 이 보관 위치의 독자는 순서대로 읽지 않는다. 살아 있는 부모가 가리키는 ID 만 묻는다. 그래서 watermark 대신 "살아 있는 기록이 가리키는 ID 집합"을 쓴다(§4.2).
   - 받아들이지 않은 것: 두 단계 지우기. 이유는 §4.3 에 있다.
+- 첫 head(`9a05f5e108e`) 리뷰(5791182846)를 이렇게 반영했다.
+  - 판단: "가리키는 기록이 없는 보관 기록은 다시 가리켜지지 않는다"는 깨지지 않았다. `N` 이 빠지면 결과는 재실행이 아니라 체인의 정지다(§3.2).
+  - P2(`N` 을 만드는 단계가 닫혀 있지 않다): 못 읽은 scope·기록이 있으면 아무것도 지우지 않는다. scope 는 저장소 디렉터리를 훑어 모은다. 답은 이벤트까지 넓힌 타입 답이다(§4.2). 리뷰어가 권한 문자열 훑기 안전망은 넣지 않았다. 문자열 분류를 운영 코드에 두지 않는다는 저장소 규칙 때문이다. 대신 이벤트까지 넓힌 타입 답을 쓰고, L1 에서 이 측정과 한 번 비교한다.
+  - P3: 본문이 이미 없으면 성공, 지운 뒤 디렉터리 sync(§4.1). 표 첫 행 이름을 `finish_settling` 으로 고쳤다. barrier 의 역할을 §3.2 에 적었다. bench 와 시험 파일을 §7 에 적었다.

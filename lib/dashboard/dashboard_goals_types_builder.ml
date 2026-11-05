@@ -1,15 +1,11 @@
-(** Dashboard_goals_types_builder — Stage 22 split (was inline in
-    dashboard_goals_types.ml).
-
-    Pure builders that compose the lower-level projections into
-    the recursive [build_tree] that produces a [tree_node] from a
-    [build_context] snapshot.
+(** Dashboard_goals_types_builder — pure builders that compose the
+    lower-level projections into the recursive [build_tree] that produces a
+    [tree_node] from a [build_context] snapshot.
 
     Depends on [Dashboard_goals_types_accessor],
-    [Dashboard_goals_types_health], and on [Json_util] / [Masc_domain]
-    for JSON and timestamp helpers (no state mutation).
-    Re-included by [Dashboard_goals_types] so the public surface is
-    unchanged. *)
+    [Dashboard_goals_types_health], and on [Json_util] / [Masc_domain] for
+    JSON and timestamp helpers (no state mutation). Re-included by
+    [Dashboard_goals_types]. *)
 
 open Dashboard_goals_types_accessor
 

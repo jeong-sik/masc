@@ -1,12 +1,9 @@
-(** Dashboard_goals_types_accessor — Stage 22 split (was inline in
-    dashboard_goals_types.ml).
+(** Dashboard_goals_types_accessor — the public record types, pure
+    task-status helpers, list utilities, and the receipt / trust JSON
+    inspectors plus iso/duration helpers. All pure projections over
+    already-loaded inputs; no I/O or clock reads.
 
-    Holds the public record types, pure task-status helpers, list utilities,
-    and the receipt / trust JSON inspectors + iso/duration helpers. All
-    pure projections over already-loaded inputs; no I/O or clock reads.
-
-    Facade [Dashboard_goals_types] re-includes this module so existing
-    callers keep using [Dashboard_goals.task_is_done], etc. unchanged. *)
+    Re-included by [Dashboard_goals_types]. *)
 
 
 type tree_node = {

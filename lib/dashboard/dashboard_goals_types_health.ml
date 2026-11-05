@@ -1,13 +1,9 @@
-(** Dashboard_goals_types_health — Stage 22 split (was inline in
-    dashboard_goals_types.ml).
+(** Dashboard_goals_types_health — pure approval matching, keeper assignee
+    resolution, and explicit Goal FSM projection. Goal phase is the display
+    truth; this module does not derive a second operational hierarchy.
 
-    Pure approval matching, keeper assignee resolution, and explicit Goal
-    FSM projection. Goal phase is the display truth; this module does not
-    derive a second operational hierarchy.
-
-    Depends on [Dashboard_goals_types_accessor] for the [tree_node]
-    record. Re-included by
-    [Dashboard_goals_types] so the public surface is unchanged. *)
+    Depends on [Dashboard_goals_types_accessor] for the [tree_node] record.
+    Re-included by [Dashboard_goals_types]. *)
 
 open Dashboard_goals_types_accessor
 

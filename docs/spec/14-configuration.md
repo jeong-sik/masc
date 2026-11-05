@@ -55,10 +55,9 @@ operator choice. Configurability is not added speculatively.
 5. `[runtime.assignments]` — maps a Keeper name (or `default`) to a declared lane id or single `<provider>.<model>` binding.
 
 The configurable builtin exact-output routes are `librarian_exact`,
-`hitl_auto_judge`, `board_attention_exact`, `verifier_exact`,
-`browser_stagehand_exact` and `candle_appraiser`. Board Attention and HITL are
-Required; the other builtin routes are Optional according to
-`Standalone_lane.obligation`.
+`hitl_auto_judge`, `board_attention_exact`, `verifier_exact` and
+`candle_appraiser`. Board Attention and HITL are Required; the other builtin
+routes are Optional according to `Standalone_lane.obligation`.
 
 Workspace Curator selects models per installed Addon, using
 `[runtime.addon_exact_lanes.<installation-id>.classification]` and

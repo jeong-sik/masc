@@ -1837,13 +1837,14 @@ status: reference
   → [Runtime.media_failover](../../lib/runtime/runtime.mli) · [keeper_vision_tool](../../lib/keeper/keeper_vision_tool.mli)
 
 **Lane**
-: 모델이 도는 exact-output 작업을 위한 고정 실행 경로. 일곱
-  (`Librarian`·`Hitl_auto_judge`·`Board_attention`·`Workspace_curator`·`Verifier`·
-  `Browser_stagehand`·`Candle_appraiser`)은 닫힌 타입 `Standalone_lane.t` 하나다.
+: 모델이 도는 exact-output 작업을 위한 고정 실행 경로. 다섯
+  (`Librarian`·`Hitl_auto_judge`·`Board_attention`·`Verifier`·`Candle_appraiser`)은
+  닫힌 타입 `Standalone_lane.t` 하나다.
   `Standalone_lane.all`이 열거하고 `to_id`가 이름을 적는다. `Runtime.exact_lane`은
-  이 타입을 그대로 쓴다. 실행 기록의 `Exact_lane_run_registry.lane`은 `Verifier`와
-  `Browser_stagehand`를 뺀 다섯이고, `standalone_lane`·`lane_of_standalone`으로 이
-  타입과 오간다. Verifier 검토는 Task·Goal 검증 기록에 남는다. 그 경로를 선언하는 설정은
+  이 타입을 그대로 쓴다. 실행 기록의 `Exact_lane_run_registry.lane`은 `Librarian`·
+  `Hitl_auto_judge`·`Board_attention`·`Workspace_curator`·`Candle_appraiser` 다섯이고,
+  `lane_of_standalone`이 `Standalone_lane.t`를 이 타입으로 바꾼다(`Verifier`는 `None`).
+  Verifier 검토는 Task·Goal 검증 기록에 남는다. 그 경로를 선언하는 설정은
   `Exact-output route`이고, Keeper turn이 runtime 후보를 시도하는 순서
   (`Runtime Candidate Order`)와 다른 층이다.
   경계: 코드와 문서가 lane이라는 말을 네 곳에 더 쓴다. 뜻이 모두 다르다.
@@ -2448,7 +2449,7 @@ status: reference
   `snapshot_file`·`msx_capture`·`dos_capture`·`lane_output`·`browser_document`이고,
   코어는 도메인 의미를 해석하지 않고 공통 row/coverage를 검사·표시한다. 내장 lane은
   바인딩에 제공하는 원천 종류를 정하며, `browser_document`는 목록에 든 Browser Lane
-  백엔드만 받는다 — Stagehand에는 유휴 문서 관측자가 없어 이 원천을 제공하지 않는다.
+  백엔드만 받는다.
   → [설계 계약](../design/lane-addon-v0.md),
   [Lane_addon_types](../../lib/lane_addon/lane_addon_types.mli),
   [Lane_addon_sources](../../lib/lane_addon/lane_addon_sources.mli)
@@ -2552,8 +2553,7 @@ status: reference
 
 **Exact-output route**
 : Keeper의 목적별 단독 모델 작업(Librarian, Workspace memory curator, HITL auto judge,
-  Board attention)과 Browser Stagehand 확장의 구조화 `llm.generate` 요청이 쓰는 실행
-  경로(`Agent_core.Exact_output`). 설정은 API slot과 후속 CLI
+  Board attention)이 쓰는 실행 경로(`Agent_core.Exact_output`). 설정은 API slot과 후속 CLI
   후보 순서를 선언한다(`exact_output_lane_decl`). 대부분의 exact route는 도구를 쓰지
   않고 단일 완결 응답을 받아 도메인 검증기가 유효성을 판정하며, Keeper turn의
   Runtime Candidate Order와는 다른 층이다. 단 **verifier_exact은 예외로 도구를 호출한다** —
@@ -2561,11 +2561,6 @@ status: reference
   (`lib/task/anti_rationalization.ml`: "The verdict channel is the
   report_review_verdict tool call, so every slot needs a tool-calling model"). 이 lane의
   모든 slot은 도구 호출이 가능한 모델이어야 한다.
-  - **Browser Stagehand `llm.generate`**: `browser_stagehand_exact` route는 구조화
-    (`json_schema`) 요청과 text-only message만 제공한다. 스키마는 AGENT_CORE의
-    `Json_syntax` 프롬프트 텍스트로 전달되고, 응답은 JSON 값·선언된 필수 객체 키·방문한
-    primitive 모양만 검사한다. 전체 JSON Schema 검증은 하지 않으며, 그 밖의 요청 모양은
-    provider 호출 전에 거절한다(#38708).
   - **슬롯 전진 조건 (`flow_execution_terminal_kind`)**: 한 슬롯이 실패하면 선언된 다음
     후보 슬롯으로 넘어간다. 실행 실패는 모두 넘긴다 — 제공자 거절, 보내기 전후의 기한 초과,
     보낸 뒤 결과를 모르는 실패(응답 전에 끊긴 연결, 도중에 멈춘 stream), 읽을 수 없는 답
@@ -2623,8 +2618,7 @@ status: reference
   → [Exact_output](../../packages/agent_core/lib/llm_provider/exact_output.mli),
   [Exact_lane_run_registry](../../lib/exact_lane_run_registry.mli),
   [Runtime_exact_lane_backpressure](../../lib/runtime/runtime_exact_lane_backpressure.mli),
-  [Keeper_board_attention_exact_flow](../../lib/keeper/keeper_board_attention_exact_flow.mli),
-  [Browser_stagehand_model](../../lib/browser_stagehand_model.mli)
+  [Keeper_board_attention_exact_flow](../../lib/keeper/keeper_board_attention_exact_flow.mli)
 
 **Memory queue**
 : Keeper별 Librarian 작업을 직렬화하는 제출 경로. 현재 실행 하나와 교체 가능한

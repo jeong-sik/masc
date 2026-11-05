@@ -374,9 +374,7 @@ let resolve_workspace_file base requested =
                 resolved_path = resolved_full;
               }
 
-let run_blocking_file_io f =
-  try Eio_unix.run_in_systhread ~label:"workspace-file-read" f with
-  | Stdlib.Effect.Unhandled _ -> f ()
+let run_blocking_file_io f = Eio_guard.run_in_systhread ~label:"workspace-file-read" f
 
 let same_file_identity a b =
   a.Unix.st_dev = b.Unix.st_dev

@@ -122,12 +122,15 @@ let test_exec_home_guard ~op path =
                   (Stdlib.Filename.basename Stdlib.Sys.executable_name)))))
 ;;
 
+(* [global_fs] is process-wide, so it is also [Some] on a system thread that
+   Eio started. The fiber check comes first: on such a thread [f] would write
+   its systhread suspend trace and run any work before its first effect, then
+   fail on the missing handler, and [fallback] would run that work again. *)
 let with_fs_or_fallback ~path ~fallback f =
-  match Atomic.get global_fs with
-  | Some fs ->
-    (try with_io ~path (fun () -> f fs) with
-     | Stdlib.Effect.Unhandled _ -> fallback ())
-  | None -> fallback ()
+  match Atomic.get global_fs, Execution_context.current () with
+  | Some fs, Execution_context.Eio_fiber -> with_io ~path (fun () -> f fs)
+  | Some _, Execution_context.Non_eio | None, (Execution_context.Eio_fiber | Execution_context.Non_eio) ->
+    fallback ()
 ;;
 
 let read_channel_and_close ~before_read (path : string) ic : string =

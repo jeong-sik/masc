@@ -315,8 +315,6 @@ let first_string_opt values =
 let runtime_manifest_public_json row =
   Keeper_runtime_manifest.public_to_json row
 
-let take_last = List_util.take_last
-
 let error_json ?ok message =
   let fields = [ ("error", `String message) ] in
   let fields =

@@ -114,19 +114,6 @@ let collapse_line_breaks text =
   |> short_preview ~max_len:recent_direct_content_max_len
 ;;
 
-let take_last limit items =
-  let limit = max 0 limit in
-  let len = List.length items in
-  let rec drop n xs =
-    if n <= 0 then xs
-    else
-      match xs with
-      | [] -> []
-      | _ :: rest -> drop (n - 1) rest
-  in
-  drop (max 0 (len - limit)) items
-;;
-
 let recent_direct_conversation_of_messages
       ?(limit = default_recent_direct_limit)
       (messages : Keeper_chat_store.chat_message list)
@@ -161,7 +148,7 @@ let recent_direct_conversation_of_messages
                ; content = name
                })
       | Keeper_chat_store.Role.System | Keeper_chat_store.Role.Request_failure -> None)
-  |> take_last limit
+  |> List_util.take_last limit
 ;;
 
 let collect_recent_direct_conversation

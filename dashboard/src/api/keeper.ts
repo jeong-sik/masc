@@ -1151,13 +1151,6 @@ export interface KeeperStateDiagramResponse {
   keeper: string
   current_phase: string
   mermaid: string
-  runtime_fsm_mermaid?: string
-  // Structured data for Cytoscape FSM rendering
-  tool_count?: number
-  runtime_models?: string[]
-  last_provider_result?: string | null
-  runtime_models_source?: string
-  last_provider_result_source?: string
 }
 
 export async function fetchKeeperTransitions(

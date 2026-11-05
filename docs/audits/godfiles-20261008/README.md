@@ -191,8 +191,6 @@ Codex child environment projection is separated from environment/config/path acq
 
 Declared runtime settings and capability JSON are separated from live acquisition in [#42122](https://github.com/jeong-sik/masc/pull/42122). See [runtime-declaration-projection/README.md](runtime-declaration-projection/README.md). Remaining probe/cache/resolution policies require semantic audit.
 
-Keeper state-diagram evidence acquisition and redacted projection are separated in [#42124](https://github.com/jeong-sik/masc/pull/42124). See [keeper-state-evidence/README.md](keeper-state-evidence/README.md). Remaining API responsibilities are pending audit.
-
 Claude child environment policy is separated from account/path/environment reads in [#42126](https://github.com/jeong-sik/masc/pull/42126). See [claude-environment-projection/README.md](claude-environment-projection/README.md). Remaining protocol and lifecycle policies require semantic audit.
 
 Canonical Board candidate data, strict codecs and pure projections are separated from persistence/wake in [#42130](https://github.com/jeong-sik/masc/pull/42130). See [board-candidate-wire/README.md](board-candidate-wire/README.md). Remaining lifecycle/effect semantics stay pending after crossing below2000 lines.

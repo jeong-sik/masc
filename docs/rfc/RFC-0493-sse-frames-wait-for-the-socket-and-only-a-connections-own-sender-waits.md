@@ -186,6 +186,7 @@ val run :
 - 송신 fiber 하나가 queue 에서 꺼내 `step` 에 따라 쓴다. ping 간격 동안 이벤트가 없으면 `idle` 에 따라 쓴다.
 - `send` 가 `Closed` 면 `Client_gone`, `Stalled` 면 `Stalled` 로 끝난다. `Send_last` 를 쓰거나, `step` 이 `Stop` 이거나, `idle` 이 `Finish` 면 `Finished` 로 끝난다.
 - `stalled_after_s` 는 `Server_sse_response.respond` 가 받는다. pump 는 `send` 의 시간을 재지 않는다.
+- 이벤트를 하나 꺼내면, 그때 이미 쌓인 이벤트의 frame 도 같은 `send` 로 쓴다. 그래서 burst 는 frame 마다가 아니라 묶음마다 한 번 기다린다. 묶음은 64KiB(`max_batch_bytes`)를 넘으면 더 받지 않는다. 64KiB 도 stall 한도 안에 받지 못하는 클라이언트는 읽지 않는 것이므로, 한도의 뜻이 묶음에서도 같다. 꺼낼 때마다 뒤처짐을 먼저 본다. 그래서 빠진 이벤트 뒤의 frame 은 쓰지 않는다. `Send_last`·`Stop` 은 묶음을 쓰고 끝낸다.
 - 구독은 route 가 맡는다. route 는 queue 를 만들고 `Queue.push` 로 구독한 뒤 구독 해제를 switch 에 건다. 그다음 앞서 보낼 frame 을 같은 fiber 에서 `send` 하고 `run` 을 부른다. 그동안 들어온 이벤트는 queue 에서 기다린다.
 - fleet 과 MCP listen 의 `step` 은 늘 `Send`, `idle` 은 늘 `Keepalive` 다.
 
@@ -242,6 +243,7 @@ MCP GET·AG-UI·presence 스트림은 이미 `Sse` 의 queue 와 drain fiber 를
 4a. pump 가 `Queue.t` 를 받고 `step`·`idle` 로 쓰고 끝낼 것을 정하게 바꾼다. 구독은 fleet route 로 옮긴다. fleet 의 동작은 같다.
 4b. Keeper chat 스트림을 pump 로 옮기고 `Server_keeper_stream_handoff` 를 지운다. queue 상한은 4,096 이다. 1초 창 최댓값 2,616(§1.4)을 담는 가장 작은 2의 거듭제곱이다. 읽는 클라이언트가 1초 동안 frame 을 받지 못해도 끊기지 않는다. 그보다 오래 멈춘 클라이언트는 `since_seq` 로 다시 붙어 journal replay 를 받는다.
 5a. HTTP/1.1 MCP `subscriptions/listen` 을 pump 로 옮긴다. queue 상한은 MCP GET 스트림과 같은 `Sse.stream_capacity` 다.
-5b. `send_raw` 와 eviction frame 을 `Server_sse_response` 로 바꾼다. eviction frame 은 HTTP 처리 함수가 쓴다(`server_mcp_transport_http.ml`, `server_mcp_transport_http_agui.ml`). 연결을 닫는 쪽은 다른 domain 에서도 온다. `Sse` queue 상한을 넘은 세션을 끊는 hook(`sse.ml:1064`), 유지보수 fiber(`server_bootstrap_maintenance.ml`), 서버 종료(`bin/main_eio.ml`)다. 지금은 `close_sse_conn` 이 `info.mutex` 를 잡고 writer 를 닫는다. 이 층은 그 닫기를 연결의 fiber 로 옮기는 설계를 먼저 적는다.
+5b. pump 가 이미 쌓인 frame 을 한 `send` 로 쓴다. frame 마다 기다리면 loopback 에서 256B frame 이 초당 3,374~4,781 개였다(`test/bench_sse_pump_throughput.ml`, 2만 frame 을 먼저 쌓은 burst, 3회 중앙값). 묶으면 초당 95만~109만 개다. 기다리지 않던 옛 쓰기는 초당 74만~100만 개다. 같은 장비를 다른 세션이 쓰고 있어 실행마다 값이 다르다. frame 한 번 기다리는 데 드는 시간 대부분은 flush 가 아니라 `send` 의 감시(fiber 와 타이머)다. flush 만 기다리면 초당 2만~2.8만 개다.
+5c. `send_raw` 와 eviction frame 을 `Server_sse_response` 로 바꾼다. eviction frame 은 HTTP 처리 함수가 쓴다(`server_mcp_transport_http.ml`, `server_mcp_transport_http_agui.ml`). 연결을 닫는 쪽은 다른 domain 에서도 온다. `Sse` queue 상한을 넘은 세션을 끊는 hook(`sse.ml:1064`), 유지보수 fiber(`server_bootstrap_maintenance.ml`), 서버 종료(`bin/main_eio.ml`)다. 지금은 `close_sse_conn` 이 `info.mutex` 를 잡고 writer 를 닫는다. 이 층은 그 닫기를 연결의 fiber 로 옮기는 설계를 먼저 적는다.
 
 #48650 이 먼저 병합되면 2층에서 로그 스트림의 `send_within` 도 옮긴다. 이 RFC 가 먼저면 #48650 이 `Server_sse_response` 를 쓴다.

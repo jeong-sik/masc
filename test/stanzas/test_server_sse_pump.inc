@@ -8,4 +8,4 @@
 (test
  (name test_server_sse_pump)
  (modules test_server_sse_pump)
- (libraries masc masc_server masc.sse_wire alcotest yojson eio eio.mock eio_main))
+ (libraries masc masc_server masc.sse_wire alcotest yojson eio eio.mock eio_main str))

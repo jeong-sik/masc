@@ -241,8 +241,8 @@ type composition =
   }
 
 (* Keeper instructions and the Goal observation ride in the system prompt; the
-   remaining prompt blocks, Completion Authority among them (RFC-0491 §3.1),
-   ride as pinned extra context. Message kinds are the
+   remaining prompt blocks, Completion Authority and the constitution
+   amendments among them (RFC-0491 §3.1, §3.2), ride as pinned extra context. Message kinds are the
    history the range decides about and belong to neither. A composition is a
    first round's when it carries a block the post-tool assembly drops; the
    predicate is the assembly's own, and so is the block order: the assembly
@@ -260,6 +260,7 @@ let read_composition (components : Turn_record.input_component list) =
         | Turn_record.Prompt_block
             (( Prompt_block_id.Dynamic_context
              | Prompt_block_id.Completion_authority
+             | Prompt_block_id.Constitution_amendments
              | Prompt_block_id.Temporal_summary
              | Prompt_block_id.Memory_os_recall
              | Prompt_block_id.Librarian_working_context

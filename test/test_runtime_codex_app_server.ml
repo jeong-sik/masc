@@ -9139,8 +9139,9 @@ let captured_extra_context_blocks (blocks : Keeper_prompt_capture.block list) =
   List.filter_map (fun (block : Keeper_prompt_capture.block) ->
     match block.id with
     | Keeper_instructions | Active_goals | Completion_authority -> None
-    | Dynamic_context | Temporal_summary | Memory_os_recall | Librarian_working_context
-    | Recalled_memory | Recalled_memory_status | Operator_note | Skill_compositions ->
+    | Dynamic_context | Constitution_amendments | Temporal_summary | Memory_os_recall
+    | Librarian_working_context | Recalled_memory | Recalled_memory_status | Operator_note
+    | Skill_compositions ->
       Some (block.id, block.text)) blocks
 ;;
 

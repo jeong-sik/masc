@@ -1871,7 +1871,8 @@ let deliver_fleet state =
 
 (* Every Original answer is wrapped in [Original_msg] here. Its reads go
    through [launch_workspace_result], which stamps the answer with the
-   workspace it captured when the read started. *)
+   workspace it captured when the read started. That launcher stamps every
+   answer, so a kind that must go unstamped is not sent through it. *)
 let wrap_original answer =
   match Original_results.answer_kind answer with
   | Original_results.Read -> Original_msg answer

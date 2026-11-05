@@ -1,4 +1,4 @@
-; Original Task inspection's answers: how the protocol classifies them, and when apply lets a Task or history read land.
+; Original Task inspection's answers: how the protocol classifies them, and when apply lets a Task, history or evidence read land.
 
 (test
  (name test_tui_original_msg)

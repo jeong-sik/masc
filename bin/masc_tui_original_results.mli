@@ -15,11 +15,13 @@ type msg =
 
 (** The protocol and the loop decide by kind, not by answer: whether an answer
     is a read, whether it waits for input, whether it carries an operation
-    receipt, what is left to clean up when its workspace has changed, and
-    whether it is stamped with the workspace that asked. A new answer that
-    takes an existing kind takes all of that kind's decisions without a
-    compile error. An answer that needs another decision adds a kind, and
-    then each match on the kind stops compiling until it decides. *)
+    receipt, and what is left to clean up when its workspace has changed. A
+    new answer that takes an existing kind takes all of that kind's decisions
+    without a compile error. An answer that needs another decision adds a
+    kind, and then each match on the kind stops compiling until it decides.
+    The kind does not choose the workspace stamp. Every Original read is sent
+    through a launcher that stamps its answer with the workspace that asked,
+    so an answer that must go unstamped needs another way to be sent. *)
 type answer_kind =
   | Read  (** Reads the workspace that asked, and is stamped with it. *)
 
@@ -28,6 +30,7 @@ val answer_kind : msg -> answer_kind
 val apply : Masc_tui_types.state -> msg -> unit
 (** Apply one answer to the inspection that asked. An answer for a read the
     inspection no longer waits on changes nothing. An awaited answer lands
-    only while its inspector is still the current one and the read is still
-    the source's current read. Otherwise it does not land, and every read of
-    that inspection is suspended. *)
+    only while the workspace authority and read authority it was asked under
+    are still the state's, its inspector is still the current one, and the
+    read is still the source's current read. Otherwise it does not land, and
+    every read of that inspection is suspended. *)

@@ -3,8 +3,7 @@
    that never waits for input. An awaited answer lands while its inspector is
    current. When the inspector is no longer current, the answer does not land
    and the inspection's reads are suspended. An answer the inspection no
-   longer waits on changes nothing. Evidence answers are only classified here:
-   choosing a verification to read needs a Task or history page naming one. *)
+   longer waits on changes nothing. *)
 
 module Protocol = Masc_tui_async_protocol
 module Original = Masc_tui_original_results
@@ -53,11 +52,12 @@ let answer_identity () =
       Alcotest.fail "expected the answer's start"
   | Error detail -> Alcotest.fail detail
 
-(* An answered Ask's source names its Task, so a Task or history read starts
-   without a creation receipt. The inspection that holds it belongs to a
-   created Task, whose inspector stays current while the composer keeps its
-   target. Production pairs a created Task with its own creation source; the
-   answers below read only the source's Task link. *)
+(* The fixture joins two halves that production keeps apart. The source is an
+   answered Ask's: its link names the Task, so reads start without a creation
+   receipt, and it records the workspace the server must still match. The
+   owner is a created Task's: its inspector stays current while the composer
+   keeps its target. Production gives a created Task its own creation source,
+   and an Ask source its own owner. *)
 let open_inspection (state : Types.state) =
   let source =
     match
@@ -104,6 +104,50 @@ let begin_history state =
   match Types.begin_original_history_inspection state ~earlier:false ~limit:1 with
   | Some request -> request
   | None -> Alcotest.fail "the history read did not start"
+
+let begin_evidence state =
+  match Types.begin_original_evidence_inspection state ~next:true with
+  | Some request -> request
+  | None -> Alcotest.fail "the evidence read did not start"
+
+(* One stored history page whose only event names a verification, so the
+   inspection has a verification to read evidence for. *)
+let history_naming_a_verification (request : Types.task_inspection_request) =
+  let ticket =
+    match request.tcr_query with
+    | Types.Original_history_query ticket -> ticket
+    | Types.Creation_query _ | Types.Original_task_query _ | Types.Original_evidence_query _ ->
+        Alcotest.fail "the history read asked for something else"
+  in
+  let page =
+    `Assoc
+      [ ("schema", `String "masc.task-history.page/v2")
+      ; ("task_id", `String "task-1")
+      ; ("cursor", `Null)
+      ; ("next_cursor", `Null)
+      ; ( "sources"
+        , `List
+            [ `Assoc [ ("source", `String "activity-events"); ("state", `String "not-created") ]
+            ; `Assoc [ ("source", `String "events"); ("state", `String "observed") ] ] )
+      ; ( "events"
+        , `List
+            [ `Assoc
+                [ ("source", `String "events")
+                ; ("file", `String "events/2026-11/05.jsonl")
+                ; ("offset", `Int 0)
+                ; ( "event"
+                  , `Assoc
+                      [ ("type", `String "task_transition")
+                      ; ("task", `String "task-1")
+                      ; ("agent", `String "alpha")
+                      ; ("ts", `String "2026-11-05T01:00:00Z")
+                      ; ("verification_id", `String "verification-1") ] ) ] ] ) ]
+  in
+  match
+    Masc.Tui_decode_task_inspection.history_page ~request:(Read.history_page_request ticket) page
+  with
+  | Ok history -> Read.prepare_history history
+  | Error detail -> Alcotest.fail detail
 
 let failure = function
   | Fetched.Failed error -> Some error
@@ -167,6 +211,19 @@ let test_a_history_read_lands_while_its_inspector_is_current () =
   Alcotest.(check bool) "the history shows the read's own failure" true
     (failure (Read.history_observation (shown owner)) = Some (Read.Read_failed "boom"))
 
+let test_an_evidence_read_lands_while_its_inspector_is_current () =
+  let state = fresh () in
+  let owner = open_inspection state in
+  let history = begin_history state in
+  Original.apply state
+    (Original.Original_task_history_done (history, Ok (history_naming_a_verification history)));
+  let request = begin_evidence state in
+  Original.apply state
+    (Original.Original_task_evidence_done (request, Error (Read.Read_failed "boom")));
+  Alcotest.(check bool) "the read is no longer awaited" true (Option.is_none (awaited owner));
+  Alcotest.(check bool) "the evidence shows the read's own failure" true
+    (failure (Read.evidence_observation (shown owner)) = Some (Read.Read_failed "boom"))
+
 let test_an_answer_after_the_inspector_left_suspends_the_inspection () =
   let state = fresh () in
   let owner = open_inspection state in
@@ -184,11 +241,11 @@ let test_an_answer_no_longer_awaited_changes_nothing () =
   let owner = open_inspection state in
   let task = begin_task state in
   let history = begin_history state in
+  let before = shown owner in
   Original.apply state (Original.Original_task_read_done (task, Error (Read.Read_failed "late")));
   Alcotest.(check bool) "the history read is still awaited" true
     (match awaited owner with Some pending -> pending == history | None -> false);
-  Alcotest.(check bool) "the late Task answer did not land" true
-    (failure (Read.task_observation (shown owner)) <> Some (Read.Read_failed "late"))
+  Alcotest.(check bool) "the inspection's source is untouched" true (shown owner == before)
 
 let () =
   Alcotest.run "tui original msg"
@@ -201,6 +258,8 @@ let () =
             test_a_task_read_lands_while_its_inspector_is_current
         ; Alcotest.test_case "a history read lands while its inspector is current" `Quick
             test_a_history_read_lands_while_its_inspector_is_current
+        ; Alcotest.test_case "an evidence read lands while its inspector is current" `Quick
+            test_an_evidence_read_lands_while_its_inspector_is_current
         ; Alcotest.test_case "an answer after the inspector left suspends the inspection" `Quick
             test_an_answer_after_the_inspector_left_suspends_the_inspection
         ; Alcotest.test_case "an answer no longer awaited changes nothing" `Quick

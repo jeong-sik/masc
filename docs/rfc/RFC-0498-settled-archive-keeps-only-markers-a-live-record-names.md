@@ -1,6 +1,6 @@
 ---
 rfc: "0498"
-title: "settled 보관 위치는 살아 있는 기록이 가리키는 표시만 남기고, 본문은 보관하지 않는다"
+title: "settled 보관 위치는 살아 있는 기록이 가리키는 표시만 남기고, 본문과 원본 없는 Exact 기록은 지운다"
 status: Draft
 created: 2026-11-06
 updated: 2026-11-06
@@ -10,7 +10,7 @@ superseded_by: null
 related: ["librarian-history-settles-finished-originals", "workspace-curator-originals-name-ledger-revisions", "0497"]
 ---
 
-# RFC-0498: settled 보관 위치는 살아 있는 기록이 가리키는 표시만 남기고, 본문은 보관하지 않는다
+# RFC-0498: settled 보관 위치는 살아 있는 기록이 가리키는 표시만 남기고, 본문과 원본 없는 Exact 기록은 지운다
 
 - 상태: 초안
 - 이슈: #48946
@@ -28,7 +28,9 @@ related: ["librarian-history-settles-finished-originals", "workspace-curator-ori
 - 보관된 기록 5.64GB 도 내용은 아무도 읽지 않는다. 파일이 있는지만 쓴다.
 - 지금 살아 있는 기록 420개가 담은 요청 ID 457개 중, 보관된 기록 12,456개를 가리키는 것은 0개다.
 
-이 RFC 는 두 가지를 정한다. `settle` 은 본문을 보관하지 않고 지운다. 보관된 기록은 살아 있는 기록이 그 ID 를 가리키지 않으면 지운다.
+같은 원본 ID 로 남는 기록이 두 곳 더 있다. Exact 요청 기록(`exact-requests`)과 원본 실행 증명(`host-results`)이다. 둘 다 살아 있는 원본을 처리할 때만 읽힌다. 원본이 settle 되면 Librarian·Curator 의 권한 검사가 그 ID 를 `Unowned` 로 영구히 거절한다. 그래서 다시 쓰이지 않는다. 지금 이 두 곳에 4.78GB 가 그렇게 남아 있다.
+
+이 RFC 는 세 가지를 정한다. `settle` 은 본문을 보관하지 않고 지운다. 보관된 기록은 살아 있는 기록이 그 ID 를 가리키지 않으면 지운다. 살아 있는 원본이 없는 ID 의 Exact 기록과 실행 증명은 지운다.
 
 ## 1. 결정
 
@@ -37,6 +39,7 @@ related: ["librarian-history-settles-finished-originals", "workspace-curator-ori
 - D3. 지우기는 settlement barrier 와 workspace process lease 안에서 한다. 그 안에서는 settle 이 돌지 않는다. 그래서 그 순간 살아 있는 기록이 가리키는 ID 집합이 정확하다.
 - D4. 이미 쌓인 12,456개도 같은 규칙으로 지운다. 먼저 대상만 세는 층을 내고, 운영자가 수치를 확인한 뒤 지우는 층을 낸다(§6).
 - D5. 표시를 두 단계("표시 → 다음 주기 재확인 → 삭제")로 지우지 않는다. 이유는 §4.3 에 있다.
+- D6. Librarian·Curator declaration 의 Exact 요청 기록과 원본 실행 증명은 그 요청 ID 를 가진 살아 있는 원본이 없으면 지운다(§4.4). 다른 declaration 의 기록은 건드리지 않는다.
 
 ## 2. 무슨 일이 났나
 
@@ -64,6 +67,19 @@ related: ["librarian-history-settles-finished-originals", "workspace-curator-ori
 
 즉 지금 보관된 기록 12,456개는 모두 D2 의 대상이다.
 
+### 2.3 Exact 요청 기록과 원본 실행 증명
+
+같은 시각에 쟀다. Exact 요청 기록은 `request_id` 를, 실행 증명은 `executions[].request_id` 를 읽어 그 SHA-256 을 살아 있는 원본 파일 이름과 맞대었다. 요청 메시지와 답은 열지 않았다.
+
+| declaration | Exact 요청 기록: 원본 없음 | 원본 있음 | 실행 증명: 원본 없음 | 원본 있음 |
+|---|---|---|---|---|
+| `keeper-librarian` | 6,392개, 1,331.6MB | 90개, 15.7MB | 6,342개, 1,355.9MB | 61개, 16.3MB |
+| `workspace-curator` | 580개, 864.6MB | 8개, 20.6MB | 526개, 1,224.1MB | 8개, 55.3MB |
+
+- 원본 없는 Exact 기록은 모두 final 이 있다. Librarian 은 `answered` 6,341, `outcome_unknown` 34, `not_allowed` 17 이다. Curator 는 `answered` 409, `outcome_unknown` 89, `input_refused` 67, `invalid_output` 12, `not_allowed` 2 다. 진행 중(final 없음)인 것은 0개다.
+- Librarian 의 원본 없는 Exact 기록 중 5,865개, Curator 의 552개는 원본이 settled 보관 위치에 있다. 나머지는 어느 쪽에도 없다.
+- 다른 declaration(`operator-quiz` 19·18개, `browser-stagehand` 2개, `candle-appraiser` 1·1개)은 요청 ID 가 원본 ID 가 아니다. D6 의 대상이 아니다.
+
 ## 3. 지금 코드
 
 ### 3.1 보관 위치를 읽는 곳
@@ -87,6 +103,12 @@ settle 을 부르는 곳은 셋이다. 셋 모두 살아 있는 기록이 가리
 | `Server_workspace_memory_addon` `finish_settling` | `Progress.Subdivided (_, intent)` 인 기록의 `intent.request_id` |
 
 `true` 면 살아 있는 부모 체인을 마저 옮긴다. `false` 면 그 부모를 그대로 둔다.
+
+### 3.3 Exact 요청 기록과 원본 실행 증명을 읽는 곳
+
+- Exact 요청 기록: `Lane_addon_store.exact_request_path ~declaration_id ~request_id`. `Lane_addon_exact.run` 이 같은 요청을 다시 받을 때 남은 final 을 찾으려고 읽는다. 살아 있는 원본을 처리하는 consumer 도 `observe_retained` 로 읽는다(`keeper_librarian_admission_capture`, `keeper_librarian_original_final`, `lane_addon_submit_once`).
+- 원본 실행 증명: `host-results/<digest ["exact-original-execution", declaration_id]>/<digest ["original-request", request_id, digest]>.json`(`lane_addon_exact.ml` `proof_key`). `read_original_execution`, `read_latest_original_execution` 이 읽는다. 호출처는 `keeper_librarian_admission_parts`, `keeper_librarian_admission_capture`, `keeper_librarian_original_final` 이다. 모두 살아 있는 원본의 capture 를 먼저 복원한 뒤 읽는다.
+- `run` 은 실행 때마다 권한을 다시 묻는다. Librarian(`server_librarian_addon_validation.ml` `load_original`)과 Curator(`server_workspace_memory_addon_validation.ml` `authorize`)는 살아 있는 원본이 없으면 `Unowned` 로 거절한다. `.mli` 는 `Unowned` 를 "The host has no original request with this ID, so none can grant it later. The request ends as [Not_allowed]." 라고 적는다. 거절은 dispatch 와 delivery 를 모두 막는다. 그래서 원본이 없는 ID 의 남은 final 은 worker 에게 다시 전달되지 않고, provider 도 다시 불리지 않는다.
 
 ## 4. 설계
 
@@ -124,6 +146,18 @@ type settling_family = Librarian_history | Librarian_floor | Workspace_curator
 
 한 번 확인해서 정확한 조건을 두 번 확인해도 결과가 같다. 두 단계는 표시 상태만 하나 더 만든다. 구현 층은 4 번(자식 ID 를 어디서 만드는지)을 세 곳 모두 코드로 확인한다(§7).
 
+### 4.4 Exact 요청 기록과 원본 실행 증명
+
+`settling_family` 의 각 항목은 자기 declaration 을 안다. Librarian 두 항목은 `keeper-librarian`, Curator 는 `workspace-curator` 다. §4.2 의 pass 는 이어서 이렇게 한다.
+
+1. 그 declaration 의 `exact-requests` 와 `host-results` 파일 목록을 먼저 만든다.
+2. 그다음 모든 scope 의 살아 있는 원본 목록을 읽는다.
+3. 목록 1 의 기록 중 요청 ID 를 가진 살아 있는 원본이 목록 2 에 없는 것을 지운다.
+
+원본은 Exact 실행보다 먼저 저장된다(`retain` 이 dispatch 전에 기록과 본문을 쓴다). 그래서 1 다음에 생긴 Exact 기록은 목록 1 에 없다. 목록 1 에 있는 기록의 원본은 2 에서 보인다. RFC-0497 의 폴더 목록과 같은 순서다.
+
+원본이 없는 ID 는 `Unowned` 계약상 다시 허가되지 않는다. 그래서 두 단계로 지울 까닭이 없다. 이 pass 도 settlement barrier 와 workspace process lease 안에서 돈다.
+
 ## 5. 이 RFC 가 하지 않는 것
 
 - Lane instance 의 binding 과 관측: RFC-0497.
@@ -133,12 +167,12 @@ type settling_family = Librarian_history | Librarian_floor | Workspace_curator
 
 ## 6. 구현 순서
 
-1. L1 계획: §4.2 의 pass 가 지울 대상만 센다. 아무것도 지우지 않는다. 기록 수·바이트, 본문 수·바이트, 남는 수를 시작 로그 한 줄과 본문 inventory 보고에 싣는다. `settling_family` 와 세 곳의 답 함수도 이 층에 들어간다.
+1. L1 계획: §4.2·§4.4 의 pass 가 지울 대상만 센다. 아무것도 지우지 않는다. 기록 수·바이트, 본문 수·바이트, 남는 수를 시작 로그 한 줄과 본문 inventory 보고에 싣는다. `settling_family` 와 세 곳의 답 함수도 이 층에 들어간다.
    - 확인: 배포 뒤 대상 수가 §2.2 와 같은 방법으로 잰 값과 맞는다.
 2. L2 본문: D1. `settle` 이 본문을 지운다. 이미 쌓인 본문은 L3 이 지운다.
    - 확인: 배포 뒤 새 날짜 디렉터리에 `bodies/` 가 생기지 않는다.
 3. 운영자 확인: L1 수치를 보고 L3 을 병합한다. 설정 스위치는 두지 않는다.
-4. L3 지우기: §4.2 의 pass 가 지운다. 지운 수와 바이트를 한 줄 info 로그에 남긴다.
+4. L3 지우기: §4.2·§4.4 의 pass 가 지운다. 지운 수와 바이트를 한 줄 info 로그에 남긴다.
    - 확인: 첫 pass 뒤 `tool-request-owners-settled` 가 거의 빈다. 이후 하루 크기가 settle 중에 멈춘 체인 수만큼만 남는다.
 
 ## 7. 구현 층이 코드로 닫을 것
@@ -146,6 +180,8 @@ type settling_family = Librarian_history | Librarian_floor | Workspace_curator
 - 세 곳에서 자식 ID 를 언제 만드는지 확인한다(§4.3 의 1·4 번). 부모가 자식 ID 를 기록하기 전에 자식 기록이 생기는 경로가 있으면 D2 는 그 경로를 막는 방법과 같이 다시 쓴다.
 - `Progress` 가 자식 ID 를 담는 곳을 모두 찾는다. §3.2 는 마저 끝내기가 묻는 ID 만 적었다. `Preparation_intended`, `Successor_intended` 처럼 ID 를 담는 이벤트가 더 있다. 다른 phase 가 보관된 ID 를 가리키면서 `settled` 를 묻지 않는다면 D2 에 영향이 없다. 다만 그 목록을 PR 에 적는다.
 - `lane_addon_store.mli` 의 틀린 주석(§3.1)을 고친다.
+- Librarian·Curator 의 권한 함수가 살아 있는 원본이 없을 때 `Undecided` 가 아니라 `Unowned` 를 돌려주는 경로를 모두 확인한다. `Undecided` 경로가 있으면 그 ID 의 기록은 D6 에서 뺀다.
+- 살아 있는 child 가 이미 settle 된 parent 의 실행 증명을 읽는 경로가 없는지 확인한다. 체인은 잎부터 settle 되므로 없어야 한다.
 - 시험은 바뀌는 계약만 고친다. 지금 보관 본문이 생기는지 보는 시험(`test_workspace_memory_curator_lane.ml`, `test_keeper_librarian_durable_execution.ml`)은 본문이 지워지는지 보게 바꾼다.
 
 ## 8. 열린 질문

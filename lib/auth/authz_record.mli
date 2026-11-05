@@ -18,9 +18,11 @@
     depend on the version of any library. A line holds [seq], [previous_hash],
     [at_ms], [author], [kind], [body], and [hash], in that order and with no
     spaces. [seq] and [at_ms] are decimal digits and are not range-checked:
-    [seq] comes from the head, and [at_ms] from the caller's clock, so [at_ms]
-    may be zero or negative, and a tool that reads numbers as doubles reads it
-    exactly only up to 2^53 - 1. The hash is
+    [seq] comes from the head, and [at_ms] from the clock that {!Authz_zone}
+    reads, so [at_ms] may be zero or negative, and a tool that reads numbers as
+    doubles reads it exactly only up to 2^53 - 1. The zone refuses a time
+    before the [at_ms] of the head ({!head_at_ms}). This module and a read of
+    the log do not check that order. The hash is
     the SHA-256 of ["masc-authz-record-v1\n"] followed by the line with its
     [hash] member cut out, closing brace kept. [test_authz_record] pins one line
     and its hash. *)
@@ -96,10 +98,16 @@ val genesis : head
 val next_seq : head -> int
 val head_hash : head -> Hash.t
 
+(** The [at_ms] of the record at the head. [None] at {!genesis}. *)
+val head_at_ms : head -> int option
+
 type t = private
   { seq : int  (** From 1. *)
   ; previous_hash : Hash.t
-  ; at_ms : int  (** Wall clock in milliseconds. For audit, never for ordering. *)
+  ; at_ms : int
+        (** Wall clock in milliseconds. The order of the log is [seq]. An
+            admission is judged against the expiry of its invitation with this
+            time ({!Authz_invite_state.consume}). *)
   ; author : Author.t
   ; kind : Kind.t
   ; body : Authz_body.t

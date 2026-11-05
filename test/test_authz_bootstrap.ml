@@ -216,7 +216,7 @@ let request dirs : B.request =
   ; config_dir = Some dirs.config
   ; external_store = dirs.store
   ; workspace_id = workspace
-  ; at_ms
+  ; now_ms = (fun () -> at_ms)
   }
 ;;
 
@@ -271,6 +271,7 @@ let zone_error_name : Z.error -> string = function
   | Z.Uncertain _ -> "Uncertain"
   | Z.Store_holds_no_answer -> "Store_holds_no_answer"
   | Z.Log_holds_records { next_seq } -> Printf.sprintf "Log_holds_records %d" next_seq
+  | Z.Clock_behind_head _ -> "Clock_behind_head"
   | Z.Record_not_built _ -> "Record_not_built"
   | Z.Refused _ -> "Refused"
   | Z.Store_entry_refused _ -> "Store_entry_refused"
@@ -402,7 +403,7 @@ let a_first_run_sets_the_installation_up () =
     match records_of_log dirs with
     | [ record ] ->
       Alcotest.(check int) "the first record of the log" 1 record.R.seq;
-      Alcotest.(check int) "the time of the request" at_ms record.R.at_ms;
+      Alcotest.(check int) "the time of the clock" at_ms record.R.at_ms;
       Alcotest.(check string) "the kind" "mode_event" (R.Kind.to_string record.R.kind);
       (match record.R.author with
        | A.Local_operator -> ()
@@ -1307,6 +1308,8 @@ let texts_name_what_they_are_about () =
     ; B.External_store_not_created { path = "/p/store"; detail = "detail" }, "/p/store"
     ; ( B.Zone_failed (Z.Answer_not_written { record_hash = hash; error = S.Writer_expired })
       , R.Hash.to_hex hash )
+    ; B.Zone_failed (Z.Clock_behind_head { clock_ms = 5; head_at_ms = 9 }), "reads 5 ms"
+    ; B.Zone_failed (Z.Clock_behind_head { clock_ms = 5; head_at_ms = 9 }), "at 9 ms"
     ]
 ;;
 

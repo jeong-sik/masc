@@ -74,6 +74,7 @@ type snapshot =
 type t =
   { log : L.t
   ; store : S.t
+  ; now_ms : unit -> int
   ; current : snapshot Atomic.t
   ; mutable probe : H.Probe.t
   }
@@ -96,7 +97,7 @@ let open_error_to_string = function
     Printf.sprintf "whether the authorization log %s is there cannot be told: %s" path detail
 ;;
 
-let open_files ~log_path ~store_path =
+let open_files ~now_ms ~log_path ~store_path =
   match S.open_at_start ~path:store_path ~init:S.State.empty ~step:S.apply with
   | Error error -> Error (Store_not_opened error)
   | Ok (store, store_state, (_ : S.recovered)) ->
@@ -110,6 +111,7 @@ let open_files ~log_path ~store_path =
           Ok
             { log
             ; store
+            ; now_ms
             ; current = Atomic.make { state = replay.state; head = replay.head }
             ; probe = replay.probe
             }))
@@ -117,18 +119,17 @@ let open_files ~log_path ~store_path =
 
 (* Opening a file makes its directory and its lock file, so a log that is not
    there is refused before either file is opened. *)
-let open_at_start ~log_path ~store_path =
+let open_at_start ~now_ms ~log_path ~store_path =
   match P.of_path log_path with
   | P.Not_there -> Error (Not_bootstrapped { path = log_path })
   | P.Cannot_check detail -> Error (Log_not_checked { path = log_path; detail })
-  | P.There -> open_files ~log_path ~store_path
+  | P.There -> open_files ~now_ms ~log_path ~store_path
 ;;
 
 let snapshot t = Atomic.get t.current
 
 type draft =
-  { at_ms : int
-  ; author : Authz_records.Author.t
+  { author : Authz_records.Author.t
   ; kind : R.Kind.t
   ; body : Authz_body.t
   }
@@ -154,6 +155,10 @@ type error =
       }
   | Store_holds_no_answer
   | Log_holds_records of { next_seq : int }
+  | Clock_behind_head of
+      { clock_ms : int
+      ; head_at_ms : int
+      }
   | Record_not_built of R.make_error
   | Refused of Authz_state.refusal
   | Store_entry_refused of
@@ -188,6 +193,11 @@ let error_to_string = function
     Printf.sprintf
       "the authorization log is to be installed and holds records: the next one is %d"
       next_seq
+  | Clock_behind_head { clock_ms; head_at_ms } ->
+    Printf.sprintf
+      "the clock reads %d ms, before the record at the head of the log, written at %d ms"
+      clock_ms
+      head_at_ms
   | Record_not_built (R.Author_not_admitted { kind; author = _ }) ->
     Printf.sprintf "the author may not write a %s record" (R.Kind.to_string kind)
   | Refused refusal -> "the record was refused: " ^ Authz_state.refusal_to_string refusal
@@ -254,6 +264,14 @@ let entered_to_add = function
   | Ok (H.Answered settled) -> Ok settled
 ;;
 
+(* A time before the head would let an admission spend an invitation that had
+   expired when the record before it was written. *)
+let clock_not_behind head clock_ms =
+  match R.head_at_ms head with
+  | Some head_at_ms when clock_ms < head_at_ms -> Error (Clock_behind_head { clock_ms; head_at_ms })
+  | Some (_ : int) | None -> Ok ()
+;;
+
 let abort_settlement = function
   | None -> H.Nothing_to_settle
   | Some intent -> H.Abort intent
@@ -271,10 +289,14 @@ let in_zone t draft store_writer log_writer head settlement =
       Authz_state.hold_revocations published.state (Option.to_list (reduction_subject intent))
     | H.Nothing_to_settle | H.Promote (_ : S.intent) -> published.state
   in
+  (* The clock is read inside both locks, so no other commit writes between the
+     read and the append, and the time is the one the record is written at. *)
+  let at_ms = t.now_ms () in
+  let* () = clock_not_behind head at_ms in
   let* record =
     Result.map_error
       (fun error -> Record_not_built error)
-      (R.make ~head ~at_ms:draft.at_ms ~author:draft.author ~kind:draft.kind ~body:draft.body)
+      (R.make ~head ~at_ms ~author:draft.author ~kind:draft.kind ~body:draft.body)
   in
   let* { Authz_state.state; high_water } =
     Result.map_error (fun refusal -> Refused refusal) (Authz_state.apply base record)
@@ -341,7 +363,7 @@ let commit t draft =
 (* The handles are the caller's, and the log they show holds no record, so the
    replay of the log is the empty one, over the store as its handle has it. The
    zone lives for this one call. *)
-let install ~log ~store draft =
+let install ~now_ms ~log ~store draft =
   in_both_zones ~store ~log (fun store_writer store_state log_writer head ->
     if Int.equal (R.next_seq head) (R.next_seq R.genesis)
     then (
@@ -349,7 +371,12 @@ let install ~log ~store draft =
       (* The state a start would read over this store and the empty log. *)
       let replay = Replay.finish (Replay.init store_state) in
       let t =
-        { log; store; current = Atomic.make { state = replay.state; head }; probe = replay.probe }
+        { log
+        ; store
+        ; now_ms
+        ; current = Atomic.make { state = replay.state; head }
+        ; probe = replay.probe
+        }
       in
       let* snapshot, record_hash =
         in_zone t draft store_writer log_writer head (abort_settlement aborted)

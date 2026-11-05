@@ -681,7 +681,7 @@ let test_fresh_bootstrap_log () =
              ; config_dir = Some (Filename.concat root "config")
              ; external_store = Filename.concat (Filename.concat root "store") "external.jsonl"
              ; workspace_id = workspace
-             ; at_ms
+             ; now_ms = (fun () -> at_ms)
              }
          with
          | Ok _ -> ()

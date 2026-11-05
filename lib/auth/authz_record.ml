@@ -160,11 +160,13 @@ let author_of_json = function
 type head =
   { next_seq : int
   ; head_hash : Hash.t
+  ; head_at_ms : int option
   }
 
-let genesis = { next_seq = 1; head_hash = Hash.genesis }
+let genesis = { next_seq = 1; head_hash = Hash.genesis; head_at_ms = None }
 let next_seq head = head.next_seq
 let head_hash head = head.head_hash
+let head_at_ms head = head.head_at_ms
 
 type t =
   { seq : int
@@ -176,7 +178,9 @@ type t =
   ; hash : Hash.t
   }
 
-let head_after record = { next_seq = record.seq + 1; head_hash = record.hash }
+let head_after record =
+  { next_seq = record.seq + 1; head_hash = record.hash; head_at_ms = Some record.at_ms }
+;;
 
 (* The line without its last member and its closing brace. The hash covers this
    text with the closing brace added back, so a line is this text, then

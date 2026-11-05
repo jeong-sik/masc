@@ -121,8 +121,8 @@
     where no server runs. The files can change between {!prepare} and {!write}:
     an install record that changed fails the re-read, a store that appeared fails
     the exclusive creation, and the zone notices a moved end and stops the file
-    ([Diverged] on a write, [End_moved] before an abort). The module does not choose the workspace id, and it takes the time of
-    the record as an argument. *)
+    ([Diverged] on a write, [End_moved] before an abort). The module does not choose the workspace id, and the zone reads the
+    time of the record from the clock in the request. *)
 
 type request =
   { base_path : string  (** The base path of the installation. It must exist. *)
@@ -133,7 +133,9 @@ type request =
   ; external_store : string
         (** The absolute path where the external store will be created. *)
   ; workspace_id : Authz_types.Workspace_id.t  (** The workspace of the installation. *)
-  ; at_ms : int  (** The time of the record. *)
+  ; now_ms : unit -> int
+        (** The wall clock in milliseconds. The zone reads it for the time of
+            the record ({!Authz_zone.install}). *)
   }
 
 type completed =

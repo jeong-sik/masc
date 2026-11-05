@@ -15,15 +15,48 @@ end
 
 module Node_map = Map.Make (Node_id)
 
-(* The composable subset supports an explicit nullable type pair. Normalize
-   only a known non-null type plus null; other unions remain unsupported.
-   Contract validation, value validation and pointer traversal share this
-   interpretation so an accepted status schema remains usable downstream. *)
-let nullable_schema_type = function
-  | `List [ `String "null"; (`String ("boolean" | "integer" | "number" | "string" | "array" | "object") as kind) ]
-  | `List [ (`String ("boolean" | "integer" | "number" | "string" | "array" | "object") as kind); `String "null" ] ->
-    Some kind
+type json_type =
+  | Null_type
+  | Boolean_type
+  | Integer_type
+  | Number_type
+  | String_type
+  | Array_type
+  | Object_type
+
+(* The type names a schema may declare. *)
+let schema_json_type = function
+  | "null" -> Some Null_type
+  | "boolean" -> Some Boolean_type
+  | "integer" -> Some Integer_type
+  | "number" -> Some Number_type
+  | "string" -> Some String_type
+  | "array" -> Some Array_type
+  | "object" -> Some Object_type
   | _ -> None
+;;
+
+(* What the "type" of a schema declares, read once. The composable subset
+   supports an explicit nullable type pair. Only a known non-null type plus
+   null is a [Nullable]; other unions remain unsupported. Contract validation,
+   value validation and pointer traversal share this reading so an accepted
+   status schema remains usable downstream. *)
+type declared_type =
+  | Plain of json_type
+  | Nullable of json_type
+
+let declared_type = function
+  | `String name -> Option.map (fun kind -> Plain kind) (schema_json_type name)
+  | `List [ `String "null"; `String name ] | `List [ `String name; `String "null" ] ->
+    (match schema_json_type name with
+     | None | Some Null_type -> None
+     | Some ((Boolean_type | Integer_type | Number_type | String_type | Array_type | Object_type) as kind) ->
+       Some (Nullable kind))
+  | _ -> None
+;;
+
+let declared_kind = function
+  | Plain kind | Nullable kind -> kind
 ;;
 
 module Json_pointer = struct
@@ -196,24 +229,22 @@ module Json_pointer = struct
          | `Assoc fields ->
            (match
               Option.map
-                (fun kind ->
-                   match nullable_schema_type kind with
-                   | Some non_null_kind -> non_null_kind
-                   | None -> kind)
-                (List.assoc_opt "type" fields)
+                declared_kind
+                (Option.bind (List.assoc_opt "type" fields) declared_type)
             with
-            | Some (`String "object") ->
+            | Some Object_type ->
               (match unique_schema_property segment fields with
                | Ok schema -> descend schema rest
                | Error _ as error -> error)
-            | Some (`String "array") ->
+            | Some Array_type ->
               (match array_index segment with
                | Error _ -> Error (Expected_schema_container segment)
                | Ok _ ->
                  (match List.assoc_opt "items" fields with
                   | Some item_schema -> descend item_schema rest
                   | None -> Error (Missing_items_schema segment)))
-            | Some _ | None -> Error (Expected_schema_container segment))
+            | Some (Null_type | Boolean_type | Integer_type | Number_type | String_type)
+            | None -> Error (Expected_schema_container segment))
          | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
            Error (Expected_schema_container segment))
     in
@@ -390,15 +421,6 @@ module Composition_run_id = struct
       (`List [`String identity;`String parent_tool_use_id;`String (Node_id.to_string alias)])
 end
 
-type json_type =
-  | Null_type
-  | Boolean_type
-  | Integer_type
-  | Number_type
-  | String_type
-  | Array_type
-  | Object_type
-
 type schema_value_error =
   | Unsupported_schema_type of Yojson.Safe.t
   | Missing_required_field of
@@ -481,6 +503,13 @@ let first_duplicate_name names =
 
 let schema_type fields = List.assoc_opt "type" fields
 
+(* The keywords a contract may use beside the type. *)
+let allowed_schema_keywords = function
+  | Object_type -> [ "type"; "properties"; "required"; "additionalProperties" ]
+  | Array_type -> [ "type"; "items" ]
+  | Null_type | Boolean_type | Integer_type | Number_type | String_type -> [ "type" ]
+;;
+
 let rec validate_schema_contract ~path schema =
   match schema with
   | `Assoc fields ->
@@ -489,42 +518,29 @@ let rec validate_schema_contract ~path schema =
      | None ->
        (match schema_type fields with
         | None -> Error (Missing_schema_type { path })
-        | Some (`String schema_type) ->
-          let allowed_keywords =
-            match schema_type with
-            | "object" ->
-              Ok [ "type"; "properties"; "required"; "additionalProperties" ]
-            | "array" -> Ok [ "type"; "items" ]
-            | "null" | "boolean" | "integer" | "number" | "string" -> Ok [ "type" ]
-            | _ -> Error (Unsupported_contract_type { path; value = `String schema_type })
-          in
-          (match allowed_keywords with
-           | Error _ as error -> error
-           | Ok allowed_keywords ->
+        | Some value ->
+          (match declared_type value with
+           | None -> Error (Unsupported_contract_type { path; value })
+           | Some declared ->
+             let kind = declared_kind declared in
+             let allowed_keywords = allowed_schema_keywords kind in
              (match
                 List.find_opt
                   (fun (keyword, _) -> not (List.mem keyword allowed_keywords))
                   fields
               with
               | Some (keyword, _) -> Error (Unsupported_schema_keyword { path; keyword })
-              | None -> validate_schema_keywords ~path ~schema_type fields))
-        | Some value ->
-          (match nullable_schema_type value with
-           | Some kind ->
-             validate_schema_contract ~path
-               (`Assoc (("type", kind) :: List.remove_assoc "type" fields))
-           | None -> Error (Unsupported_contract_type { path; value }))))
+              | None -> validate_schema_keywords ~path ~kind fields))))
   | schema -> Error (Expected_schema_object { path; schema })
 
-and validate_schema_keywords ~path ~schema_type fields =
-  match schema_type with
-  | "object" -> validate_object_schema_contract ~path fields
-  | "array" ->
+and validate_schema_keywords ~path ~kind fields =
+  match kind with
+  | Object_type -> validate_object_schema_contract ~path fields
+  | Array_type ->
     (match List.assoc_opt "items" fields with
      | None -> Ok ()
      | Some item_schema -> validate_schema_contract ~path:(path @ [ "items" ]) item_schema)
-  | "null" | "boolean" | "integer" | "number" | "string" -> Ok ()
-  | _ -> assert false
+  | Null_type | Boolean_type | Integer_type | Number_type | String_type -> Ok ()
 
 and validate_object_schema_contract ~path fields =
   let properties_result =
@@ -583,27 +599,28 @@ let rec validate_schema_value ~path schema value =
   match schema with
   | `Assoc schema_fields ->
     (match schema_type schema_fields with
-     | Some (`String "object") -> validate_schema_object ~path schema_fields value
-     | Some (`String "array") -> validate_schema_array ~path schema_fields value
-     | Some (`String "null") -> validate_schema_scalar ~path Null_type value
-     | Some (`String "string") -> validate_schema_scalar ~path String_type value
-     | Some (`String "integer") -> validate_schema_scalar ~path Integer_type value
-     | Some (`String "number") ->
-       (match json_type value with
-        | Integer_type | Number_type -> Ok ()
-        | (Null_type | Boolean_type | String_type | Array_type | Object_type) as actual ->
-          Error (Type_mismatch { path; expected = Number_type; actual }))
-     | Some (`String "boolean") -> validate_schema_scalar ~path Boolean_type value
-     | Some unsupported ->
-       (match nullable_schema_type unsupported, value with
-        | Some _, `Null -> Ok ()
-        | Some kind, _ ->
-          validate_schema_value ~path
-            (`Assoc (("type", kind) :: List.remove_assoc "type" schema_fields))
-            value
-        | None, _ -> Error (Unsupported_schema_type unsupported))
-     | None -> Error (Unsupported_schema_type `Null))
+     | None -> Error (Unsupported_schema_type `Null)
+     | Some value_type ->
+       (match declared_type value_type with
+        | None -> Error (Unsupported_schema_type value_type)
+        | Some (Plain kind) -> validate_schema_kind ~path schema_fields kind value
+        | Some (Nullable kind) ->
+          (match value with
+           | `Null -> Ok ()
+           | _ -> validate_schema_kind ~path schema_fields kind value)))
   | unsupported -> Error (Unsupported_schema_type unsupported)
+
+and validate_schema_kind ~path schema_fields kind value =
+  match kind with
+  | Object_type -> validate_schema_object ~path schema_fields value
+  | Array_type -> validate_schema_array ~path schema_fields value
+  | Number_type ->
+    (match json_type value with
+     | Integer_type | Number_type -> Ok ()
+     | (Null_type | Boolean_type | String_type | Array_type | Object_type) as actual ->
+       Error (Type_mismatch { path; expected = Number_type; actual }))
+  | (Null_type | Boolean_type | Integer_type | String_type) as expected ->
+    validate_schema_scalar ~path expected value
 
 and validate_schema_scalar ~path expected value =
   let actual = json_type value in

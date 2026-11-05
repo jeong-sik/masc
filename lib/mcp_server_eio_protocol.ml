@@ -813,7 +813,6 @@ let method_allowed_in_profile profile method_ =
   | Seat ->
     (match method_ with
      | "initialize"
-     | "initialized"
      | "notifications/initialized"
      | "server/discover"
      | "ping"
@@ -853,7 +852,7 @@ let request_protocol_error_response ~id = function
 ;;
 
 let method_removed_from_stateless_protocol = function
-  | "initialize" | "initialized" | "notifications/initialized" | "ping"
+  | "initialize" | "notifications/initialized" | "ping"
   | "resources/subscribe" | "resources/unsubscribe" | "logging/setLevel" -> true
   | _ -> false
 ;;
@@ -997,7 +996,7 @@ let handle_request
                     else
                       make_error_typed ~id Mcp_error_code.Invalid_params
                         "Ping params or progress metadata are invalid")
-              | "initialized" | "notifications/initialized" ->
+              | "notifications/initialized" ->
                 with_required_auth
                   ~base_path
                   ~id

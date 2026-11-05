@@ -641,7 +641,7 @@ let release_identity_cache =
   fun () -> Lazy.force cache
 ;;
 
-let run_install_status ?(extra_env = "") ?(seed_config = false) ?existing_version args base_path =
+let run_install_status ?(extra_env = "") ?(seed_config = false) ?(pin_version = true) ?existing_version args base_path =
   let root = source_root () in
   let script = Filename.concat root "scripts/install.sh" in
   let prefix = Filename.concat base_path ".local" in
@@ -717,12 +717,14 @@ let run_install_status ?(extra_env = "") ?(seed_config = false) ?existing_versio
   let quoted_args = String.concat " " (List.map Filename.quote args) in
   let cmd =
     Printf.sprintf
-      "%s%sMASC_RELEASE_BASE_URL=%s MASC_PREFIX=%s MASC_VERSION=%s MASC_BASE_PATH=%s bash %s --allow-unverified %s --base-path %s %s 2>&1"
+      "%s%sMASC_RELEASE_BASE_URL=%s MASC_PREFIX=%s %s MASC_BASE_PATH=%s bash %s --allow-unverified %s --base-path %s %s 2>&1"
       extra_env
       (if String.equal extra_env "" then "" else " ")
       (Filename.quote release_base_url)
       (Filename.quote prefix)
-      (Filename.quote (release_tag ()))
+      (if pin_version
+       then "MASC_VERSION=" ^ Filename.quote (release_tag ())
+       else "env -u MASC_VERSION")
       (Filename.quote base_path)
       (Filename.quote script)
       (if seed_config then "" else "--no-seed")
@@ -951,6 +953,45 @@ let test_downgrade_and_unknown_version_require_force () =
         (status <> Unix.WEXITED 0);
       assert_contains "explicit overwrite instruction" output "pass --force to replace it"))
     [ "999.0.0"; "development-build" ]
+;;
+
+(* GitHub answers the /releases/latest page with a redirect to the latest
+   release tag. This curl gives that answer, fails any api.github.com request
+   and hands every other request to the real curl, so an install without
+   --version can learn its version only from the redirect. *)
+let with_latest_redirect_curl ~redirect f =
+  let real_curl =
+    let ic = Unix.open_process_in "command -v curl" in
+    let line = In_channel.input_line ic in
+    match Unix.close_process_in ic, line with
+    | Unix.WEXITED 0, Some path when String.trim path <> "" -> String.trim path
+    | _ -> fail "no curl on PATH for the fake to hand requests to"
+  in
+  let bin = Filename.temp_dir "masc-install-fake-curl-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree bin) (fun () ->
+    let script = Filename.concat bin "curl" in
+    write_file script
+      (Printf.sprintf
+         "#!/bin/sh\nfor arg; do last=$arg; done\ncase \"$last\" in\n  https://github.com/jeong-sik/masc/releases/latest) printf '302 %%s' %s; exit 0 ;;\n  https://api.github.com/*) exit 22 ;;\nesac\nexec %s \"$@\"\n"
+         (Filename.quote redirect) (Filename.quote real_curl));
+    Unix.chmod script 0o755;
+    f ~extra_env:(Printf.sprintf "PATH=%s:\"$PATH\"" (Filename.quote bin)))
+;;
+
+let test_latest_release_comes_from_the_web_redirect () =
+  let release_page = "https://github.com/jeong-sik/masc/releases" in
+  List.iter (fun (label, redirect, expected_ok) ->
+    let dir = Filename.temp_dir "masc-install-latest-" "" in
+    Fun.protect ~finally:(fun () -> Fs_compat.remove_tree dir) (fun () ->
+      with_latest_redirect_curl ~redirect (fun ~extra_env ->
+        let output, status =
+          run_install_status ~extra_env ~pin_version:false
+            [ "--dry-run"; "--no-wizard" ] dir in
+        check bool (label ^ "\n" ^ output) expected_ok (status = Unix.WEXITED 0))))
+    [ "the installed release tag installs", release_page ^ "/tag/" ^ release_tag (), true
+    ; "an older tag is a downgrade and is refused", release_page ^ "/tag/v0.0.1", false
+    ; "a redirect that names no tag is refused", release_page, false
+    ]
 ;;
 
 let test_provider_display_name_with_pipe_round_trips () =
@@ -1599,6 +1640,7 @@ let () =
         ; test_case "dry-run + no-seed skips wizard when catalog is absent" `Quick test_wizard_dry_run_no_seed_skips
         ; test_case "dry-run preserves and force replaces an older unrelated install" `Quick test_existing_release_upgrade_preserves_workspace
         ; test_case "downgrades and unrecognized versions need force" `Quick test_downgrade_and_unknown_version_require_force
+        ; test_case "latest release comes from the web redirect" `Quick test_latest_release_comes_from_the_web_redirect
         ; test_case "unrelated existing binary is only replaced with force" `Quick test_unrelated_existing_binary_requires_force
         ; test_case "forced wizard without catalog errors" `Quick test_wizard_forced_without_catalog_errors
         ; test_case "invalid provider key env name errors" `Quick test_invalid_provider_key_env_name_errors

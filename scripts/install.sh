@@ -1315,29 +1315,30 @@ log "platform: $ASSET"
 
 
 # --- 2. resolve version -------------------------------------------------------
+# The web page /releases/latest redirects to the tag GitHub calls the latest
+# release (published, not a draft or prerelease), the same one the API names.
+# It is not an api.github.com call, so the anonymous limit of 60 API requests
+# an hour per IP, which a few retried installs used up, does not apply.
 resolve_version() {
   if [ -n "$VERSION" ]; then echo "$VERSION"; return; fi
   log "resolving latest release from github.com/$REPO ..." >&2
-  local api="https://api.github.com/repos/$REPO/releases/latest"
-  local tag
-  if command -v jq >/dev/null 2>&1; then
-    tag=$(curl -fsSL \
+  local latest_url="https://github.com/$REPO/releases/latest"
+  local tag_prefix="https://github.com/$REPO/releases/tag/"
+  local answer
+  answer=$(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' \
       --max-time "$MASC_INSTALL_RELEASE_METADATA_TIMEOUT_S" \
       --retry "$MASC_INSTALL_CURL_RETRIES" \
-      "$api" | jq -er '.tag_name // empty') \
-      || die "could not parse latest release tag from GitHub API response"
-  else
-    tag=$(curl -fsSL \
-      --max-time "$MASC_INSTALL_RELEASE_METADATA_TIMEOUT_S" \
-      --retry "$MASC_INSTALL_CURL_RETRIES" \
-      "$api" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n1)
-    [ -n "$tag" ] || die "could not parse latest release tag from GitHub API response (fallback regex failed)"
-  fi
-  echo "$tag"
+      "$latest_url") \
+    || die "could not reach $latest_url to find the latest release; check the network or pass --version vX.Y.Z"
+  local status="${answer%% *}"
+  local target="${answer#* }"
+  case "$status:$target" in
+    3[0-9][0-9]:"$tag_prefix"?*) echo "${target#"$tag_prefix"}" ;;
+    *) die "$latest_url answered HTTP $status (redirect: ${target:-none}), which names no release; check MASC_REPO or pass --version vX.Y.Z" ;;
+  esac
 }
 
 VERSION=$(resolve_version)
-[ -n "$VERSION" ] || die "could not resolve version (network or rate limit?)"
 # Release tags carry a leading v. `--version 0.37.0` would otherwise miss
 # SHA256SUMS and end on a checksum error that points at --allow-unverified.
 case "$VERSION" in [0-9]*) VERSION="v$VERSION" ;; esac

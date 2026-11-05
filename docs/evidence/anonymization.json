@@ -62,7 +62,6 @@
     "limitation": "OCR has recognition limits; absence of detected text is not a mathematical guarantee about every pixel."
   },
   "artifact_reference_updates": [
-    "docs/evidence/keeper-goal-verifier-matrix-2026-08-21.json",
-    "docs/screenshots/dashboard/2026-09-04/README.md"
+    "docs/evidence/keeper-goal-verifier-matrix-2026-08-21.json"
   ]
 }

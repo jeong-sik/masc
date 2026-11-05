@@ -225,7 +225,7 @@ let hostname_title url =
   let uri = Uri.of_string url in
   let host = Option.value (Uri.host uri) ~default:url in
   let host =
-    if String.length host > 4 && String.sub host 0 4 = "www."
+    if String.length host > 4 && String.starts_with ~prefix:"www." host
     then String.sub host 4 (String.length host - 4)
     else host
   in
@@ -264,11 +264,6 @@ let redacted_http_url_opt ?on_drop url =
   | Some "http" | Some "https" -> Some url
   | Some scheme -> drop (Unsupported_scheme scheme)
   | None -> drop Missing_scheme
-;;
-
-let has_prefix ~prefix value =
-  let prefix_len = String.length prefix in
-  String.length value >= prefix_len && String.sub value 0 prefix_len = prefix
 ;;
 
 let opt_bool_field key = function
@@ -593,7 +588,7 @@ let parse_text_to_blocks text : chat_block list =
       let acc = push_text_fragment acc before in
       let acc =
         match cap with
-        | Some lang when has_prefix ~prefix:"mermaid" lang ->
+        | Some lang when String.starts_with ~prefix:"mermaid" lang ->
           Mermaid { source; caption = None } :: acc
         | _ -> Code { cap; html = escape_html source; source = Some source } :: acc
       in

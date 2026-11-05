@@ -9,7 +9,7 @@ let task_id_to_int id =
   let prefix = "task-" in
   let prefix_len = String.length prefix in
   if String.length id <= prefix_len then None
-  else if String.sub id 0 prefix_len <> prefix then None
+  else if not (String.starts_with ~prefix id) then None
   else int_of_string_opt (String.sub id prefix_len (String.length id - prefix_len))
 
 (** Extract the raw task-entry JSON list from a parsed archive document.

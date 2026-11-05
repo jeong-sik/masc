@@ -600,8 +600,7 @@ let base_path_prod_guard path =
       | None -> path
       | Some home ->
         let home_norm = normalize_masc_base_path_input home in
-        if home_norm <> "" && String.length path >= String.length home_norm
-           && String.sub path 0 (String.length home_norm) = home_norm
+        if home_norm <> "" && String.starts_with ~prefix:home_norm path
         then
           raise (Config_error
             (Printf.sprintf

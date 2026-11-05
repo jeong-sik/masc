@@ -67,7 +67,7 @@ let is_slug_char c =
 let path_segment_to_slug seg =
   if seg = "" then None
   else if String.equal seg "." then None
-  else if String.length seg >= 2 && String.sub seg 0 2 = ".."
+  else if String.starts_with ~prefix:".." seg
   then None
   else if String.for_all is_slug_char seg
   then Some seg
@@ -178,7 +178,7 @@ module Code_address = struct
     String.length slug >= 3
     && has_interior_join 1
     && not single_join_suffix_is_dotdot
-    && not (String.length slug >= 2 && String.sub slug 0 2 = "..")
+    && not (String.starts_with ~prefix:".." slug)
     && String.for_all is_slug_char slug
   ;;
 

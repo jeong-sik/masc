@@ -121,7 +121,7 @@ module Uid = struct
   let is_valid s =
     let plen = String.length prefix in
     String.length s = plen + 36
-    && String.sub s 0 plen = prefix
+    && String.starts_with ~prefix s
     && (let uuid_str = String.sub s plen 36 in
         match Uuidm.of_string uuid_str with
         | Some _ -> true

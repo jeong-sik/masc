@@ -189,7 +189,7 @@ let resolve ?base_path () =
   in
   let test_mode =
     let exec = Filename.basename Sys.executable_name in
-    if String.length exec >= 5 && String.sub exec 0 5 = "test_"
+    if String.starts_with ~prefix:"test_" exec
     then Test
     else Production
   in

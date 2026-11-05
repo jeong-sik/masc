@@ -606,8 +606,8 @@ let default_owned_target ~ownership_root ~path =
   in
   let strip_prefix prefix p =
     let plen = String.length prefix in
-    if String.length p >= plen + 1
-       && String.sub p 0 plen = prefix
+    if String.length p > plen
+       && String.starts_with ~prefix p
        && p.[plen] = '/'
     then String.sub p (plen + 1) (String.length p - plen - 1)
     else p

@@ -132,7 +132,8 @@ pass 하나가 읽은 binding 전체를 `R`, 그 순간 이 프로세스가 쥐�
 instance 하나는 binding → 관측 폴더 → action 폴더 순서로 지운다.
 
 - binding 이 그 instance 를 읽을 수 있게 하는 기록이다. binding 을 먼저 지우면, 지우는 중에 멈춰도 읽는 쪽은 "없는 instance" 로 본다. 반쯤 지운 관측을 읽는 일이 없다.
-- 관측·action 폴더 이름(instance id 의 SHA-256)이 `R` 의 어떤 binding 과도, `L` 의 어떤 instance 와도 맞지 않으면 그 pass 에서 지운다. 폴더 목록은 잠금 안에서, binding 을 읽기 전에 만든다. 목록을 만든 뒤 생긴 폴더는 목록에 없다. 목록에 있는 폴더의 binding 은 그 폴더보다 먼저 써졌으므로(다음 항목의 전제) `R` 에 들어 있다. 그래서 막 생긴 instance 의 폴더가 orphan 으로 보이지 않는다. 직접 Attach 가 configuration 잠금을 잡지 않아도 이 순서는 맞다. binding 을 지우고 멈춘 instance 는 다음 pass 에서 마저 지워진다. 지금 binding 없이 남은 관측 폴더 2개와 action 폴더 5개도 이 규칙으로 지워진다.
+- 관측·action 폴더 이름(instance id 의 SHA-256)이 `R` 의 어떤 binding 과도, `L` 의 어떤 instance 와도 맞지 않으면 그 pass 에서 지운다. 폴더 목록은 잠금 안에서, binding 을 읽기 전에 만든다. 목록을 만든 뒤 생긴 폴더는 목록에 없다. 목록에 있는 폴더의 binding 은 그 폴더보다 먼저 써졌으므로(다음 항목의 전제) `R` 에 들어 있다. 그래서 막 생긴 instance 의 폴더가 orphan 으로 보이지 않는다. 직접 Attach 가 configuration 잠금을 잡지 않아도 이 순서는 맞다.
+- 읽지 못한 binding(fault)이 있으면 폴더 규칙도 `gecko_sweepable` 과 같이 막는다. fault 가 이름을 댄 instance 의 폴더는 지우지 않는다. 어느 instance 인지 모르는 fault 가 하나라도 있으면 그 pass 는 binding 없는 폴더를 하나도 지우지 않는다. 읽지 못한 binding 의 instance 는 `R` 에 없어서, 이 규칙이 없으면 그 폴더가 orphan 으로 보인다. binding 을 지우고 멈춘 instance 는 다음 pass 에서 마저 지워진다. 지금 binding 없이 남은 관측 폴더 2개와 action 폴더 5개도 이 규칙으로 지워진다.
 - 관측 기록은 binding 이 커밋을 정한다(RFC "lane-addon-observation-commits-at-the-binding"). 이 RFC 는 새 instance 의 binding 이 그 instance 의 관측보다 먼저 써진다고 전제한다. 그러면 binding 없는 관측 폴더는 진행 중인 instance 의 것이 아니다. 이 전제는 아직 코드로 확인하지 않았다. 구현 층이 L1 에서 확인한다(§7). 전제가 틀리면 binding 없는 폴더는 지우지 않는다.
 
 ### 4.4 어디서 도나
@@ -195,3 +196,4 @@ pass 하나가 binding 전체를 두 번 읽는다(`historical`, gecko sweep). �
   - 조건 5 의 근거에서 "runtime 이 모두 같다"를 뺐다. 대표의 runtime 과 같아야 한다고 바로 적었다.
   - L1 만 배포된 동안 두 번 읽기 비용이 그대로라는 점을 §6 에, `Failed` 등이 계속 남는 점을 §5 에 적었다. 대시보드 사용 수를 L1 전후로 세기로 했다(Q1).
   - 한 단계 삭제는 P2-A 가 닫히면 받아들인다고 했다. 위 반영으로 닫았다고 본다.
+- 둘째 head(`b853045f91e`) 리뷰(5791182567): P2-A·B·C 는 닫혔다고 봤다. 새 P2-D 는 읽지 못한 binding 의 instance 폴더가 orphan 으로 지워질 수 있다는 것이다. → §4.3 에 `gecko_sweepable` 과 같은 fault 규칙을 더했다.

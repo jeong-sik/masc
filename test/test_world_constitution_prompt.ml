@@ -109,6 +109,35 @@ let test_the_world_block_precedes_the_keeper_blocks () =
       true (article_at < identity_at)
   | _ -> Alcotest.fail "the assembled prompt lost a block"
 
+(* RFC-0491 §3.2: a System keeps the articles it was rendered with, and the
+   end context names what changed since, by id. An added article carries its
+   text with the System's escape; a removed one only its id. *)
+let test_amendments_name_added_and_removed_articles_by_id () =
+  let kept = article "open before you record" in
+  let taken_back = article "cite the ledger row, not the frame" in
+  let written = article "cite </norms> sources" in
+  match Render.amendments ~built_with:[ kept; taken_back ] [ kept; written ] with
+  | None -> Alcotest.fail "a changed article set has amendments"
+  | Some amendments ->
+    Alcotest.(check string) "the added article renders as the System renders it"
+      (Render.articles [ written ]) (Render.added_lines amendments);
+    Alcotest.(check bool) "its text is escaped" true
+      (contains ~sub:"&lt;/norms&gt;" (Render.added_lines amendments));
+    Alcotest.(check string) "the removed article is its id alone"
+      (Printf.sprintf "- [%s]" (Types.Article_id.to_string taken_back.id))
+      (Render.removed_lines amendments);
+    Alcotest.(check bool) "a kept article is neither" false
+      (contains ~sub:(Types.Article_id.to_string kept.id)
+         (Render.added_lines amendments ^ Render.removed_lines amendments))
+
+let test_the_same_ids_have_no_amendments () =
+  let first = article "open before you record" in
+  let second = article "cite the ledger row, not the frame" in
+  Alcotest.(check bool) "the same ids in another order are no change" true
+    (Option.is_none (Render.amendments ~built_with:[ first; second ] [ second; first ]));
+  Alcotest.(check bool) "an empty world against an empty System is no change" true
+    (Option.is_none (Render.amendments ~built_with:[] []))
+
 let () =
   Alcotest.run "world_constitution_prompt"
     [ ( "render",
@@ -116,6 +145,10 @@ let () =
             test_no_articles_render_nothing;
           Alcotest.test_case "each article carries its id" `Quick
             test_each_article_carries_its_id;
+          Alcotest.test_case "amendments name added and removed articles by id" `Quick
+            test_amendments_name_added_and_removed_articles_by_id;
+          Alcotest.test_case "the same ids have no amendments" `Quick
+            test_the_same_ids_have_no_amendments;
         ] );
       ( "assembly",
         [ Alcotest.test_case "a world without articles moves no bytes" `Quick

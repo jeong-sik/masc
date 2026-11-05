@@ -533,6 +533,42 @@ let test_all_persistence_stays_in_captured_workspace () =
       b_unchanged "after complete reload")
 ;;
 
+(* A vote takes its time before it writes its log row, outside the lock; an
+   edit can commit in between. The post below stands for that edit: its
+   [updated_at] and [content_updated_at] are later than the vote's time. The
+   commit keeps them in order, as the vote-log replay on load does. *)
+let test_a_vote_does_not_move_updated_at_back () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let _dir = fresh_test_base_path () in
+  let store = Board_core.create_store ~base_path:(Env_config_core.base_path ()) () in
+  load_posts_source store;
+  let post =
+    match
+      Board_core.create_post store ~lookup:nobody_declared ~author:"fixture-author"
+        ~content:"edited while a vote was in flight" ~post_kind:Board.Human_post ()
+    with
+    | Ok post -> post
+    | Error error ->
+      Alcotest.failf "create_post failed: %s" (Board.Post_publication_failure.to_string error)
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let edited_at = Time_compat.now () +. 3600. in
+  Hashtbl.replace store.posts post_id
+    { post with updated_at = edited_at; content_updated_at = edited_at };
+  (match
+     Masc_board_handlers.Board_votes.vote store ~voter:"fixture-voter" ~post_id
+       ~direction:Board.Up
+   with
+   | Ok _ -> ()
+   | Error error -> Alcotest.failf "vote failed: %s" (Board.show_board_error error));
+  match Hashtbl.find_opt store.posts post_id with
+  | None -> Alcotest.fail "the voted post is gone"
+  | Some voted ->
+    Alcotest.(check int) "the vote is counted" 1 voted.votes_up;
+    Alcotest.(check (float 0.)) "updated_at stays at the edit" edited_at voted.updated_at
+;;
+
 let () =
   Random.self_init ();
   Alcotest.run
@@ -560,6 +596,10 @@ let () =
             "a partial load never rewrites the posts or comments file"
             `Quick
             test_partial_load_never_rewrites_the_file
+        ; Alcotest.test_case
+            "a vote does not move updated_at back"
+            `Quick
+            test_a_vote_does_not_move_updated_at_back
         ] )
     ]
 ;;

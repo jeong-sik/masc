@@ -138,6 +138,25 @@ let test_a_client_that_stops_reading_holds_up_no_other_subscription () =
     check int "the idle stream ended at its bound" (before + 1) (Mcp_subscriptions.count ()))
 ;;
 
+(* The notifications arrive before the stream's sender runs again. The
+   sender is waiting on the queue, so the first one goes straight to it; the
+   rest are one more than the queue holds. The sender writes the one it took,
+   then sees the pile-up and ends, without the clock moving: it ended as
+   [Fell_behind] and not at the stall bound. Nothing queued is written. *)
+let test_a_client_that_falls_behind_is_closed_at_once () =
+  with_streams (fun ~sw ~clock ~before ->
+    let client = open_stream ~sw ~clock ~id:4 in
+    read_all client;
+    check int "subscribed while the stream runs" (before + 1) (Mcp_subscriptions.count ());
+    for _ = 1 to max_queued_events + 2 do
+      Mcp_subscriptions.notify_tools_list_changed tools_changed
+    done;
+    read_all client;
+    check int "the stream ended and left the subscriptions" before (Mcp_subscriptions.count ());
+    check int "only the notification the sender took was written" 1
+      (occurrences ~needle:"notifications/tools/list_changed" (Buffer.contents client.received)))
+;;
+
 let () =
   run
     "server_mcp_listen_stream"
@@ -146,6 +165,8 @@ let () =
             test_the_acknowledgement_comes_first_and_notifications_follow
         ; test_case "a client that stops reading holds up no other subscription" `Quick
             test_a_client_that_stops_reading_holds_up_no_other_subscription
+        ; test_case "a client that falls behind is closed at once" `Quick
+            test_a_client_that_falls_behind_is_closed_at_once
         ] )
     ]
 ;;

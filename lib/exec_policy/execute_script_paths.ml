@@ -120,19 +120,14 @@ let argv_stage_destinations (stage : Masc_exec.Shell_ir.simple) : named =
               Outside_vocabulary
             | [] -> Destinations [])
           | Subcommand_operands (words, max_count), args -> (
-            let rec drop_words = function
-              | w :: ws, Masc_exec.Shell_ir.Lit (a, _) :: rest when String.equal a w ->
-                drop_words (ws, rest)
-              | [], rest -> Some rest
-              | _ :: _
-                , ([]
-                  | ( Masc_exec.Shell_ir.Lit _
-                    | Masc_exec.Shell_ir.Var _
-                    | Masc_exec.Shell_ir.Concat _
-                    | Masc_exec.Shell_ir.Subst _ )
-                    :: _) -> None
+            let is_word word (arg : Masc_exec.Shell_ir.arg) =
+              match arg with
+              | Masc_exec.Shell_ir.Lit (literal, _) -> String.equal literal word
+              | Masc_exec.Shell_ir.Var _
+              | Masc_exec.Shell_ir.Concat _
+              | Masc_exec.Shell_ir.Subst _ -> false
             in
-            match drop_words (words, args) with
+            match List_util.strip_prefix ~equal:is_word words args with
             | None -> match_specs rest
             | Some rest -> (
               let rec collect acc n = function

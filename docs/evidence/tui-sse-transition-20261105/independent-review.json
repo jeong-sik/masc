@@ -28,7 +28,7 @@
       "severity": "P2",
       "location": "bin/masc_tui.ml:23068-23136",
       "behavior": "Machine and open Add-on Inspect can remain stale after manual r or replay gaps.",
-      "status": "RED test pending"
+      "status": "RED confirmed for manual Add-on reread in 41969375564; fix a4e38cea058f747cfa2b17b53f44aa1f6386e37a; PTY/type-check pending"
     },
     {
       "id": "P2-cold-failure-cache",

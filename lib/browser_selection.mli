@@ -40,7 +40,7 @@ val target : verb:Browser_lane.verb -> snapshot:snapshot -> Browser_lane.route -
     same route: a lane that is off, a client that is not connected, and a live
     lane without a client ID while none or several are connected. The worker
     checks the route again before it dispatches. *)
-val require : snapshot:snapshot -> Browser_capabilities.operation list -> browser -> (unit, error) result
+val require : Browser_capabilities.operation list -> browser -> (unit, error) result
 (** Check the chosen browser's implemented operations. Explicit routes remain
     explicit even if unsupported. *)
 val bind : selected -> browser -> selected

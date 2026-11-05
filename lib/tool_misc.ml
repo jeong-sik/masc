@@ -330,7 +330,7 @@ let dispatch ?ask_source_turn_ref ?dos_admission ?(lane_access = Lane_addon_sour
         | Tool_schemas_misc.Misc_browser_tabs | Tool_schemas_misc.Misc_browser_read
         | Tool_schemas_misc.Misc_browser_session | Tool_schemas_misc.Misc_browser_goto
         | Tool_schemas_misc.Misc_browser_act | Tool_schemas_misc.Misc_browser_interact
-        | Tool_schemas_misc.Misc_browser_instruct | Tool_schemas_misc.Misc_msx _
+        | Tool_schemas_misc.Misc_msx _
         | Tool_schemas_misc.Misc_portrait_read
         | Tool_schemas_misc.Misc_candle_balance | Tool_schemas_misc.Misc_candle_catalog
         | Tool_schemas_misc.Misc_candle_purchase | Tool_schemas_misc.Misc_candle_equip
@@ -455,8 +455,6 @@ let dispatch ?ask_source_turn_ref ?dos_admission ?(lane_access = Lane_addon_sour
       Some (browser Browser_capabilities.Goto)
   | Some Tool_schemas_misc.Misc_browser_act ->
       Some (browser Browser_capabilities.Act)
-  | Some Tool_schemas_misc.Misc_browser_instruct ->
-      Some (browser Browser_capabilities.Instruct)
   | Some (Tool_schemas_misc.Misc_msx _)
   | Some Tool_schemas_misc.Misc_dos_load
   | Some Tool_schemas_misc.Misc_dos_meta
@@ -538,7 +536,6 @@ let is_read_only = function
     Tool_schemas_misc.Misc_browser_goto
   | Tool_schemas_misc.Misc_browser_act
   | Tool_schemas_misc.Misc_browser_interact
-  | Tool_schemas_misc.Misc_browser_instruct
   | Tool_schemas_misc.Misc_web_fetch
   | Tool_schemas_misc.Misc_web_search -> false
 

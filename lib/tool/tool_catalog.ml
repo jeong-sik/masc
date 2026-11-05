@@ -570,7 +570,6 @@ let explicit_metadata : (string * metadata) list =
     ("masc_browser_goto", public_keeper_shard_write);
     ("masc_browser_act", public_keeper_shard_write);
     ("masc_browser_interact", public_keeper_shard_write);
-    ("masc_browser_instruct", public_keeper_shard_write);
     ("masc_web_search", keeper_shard_read);
     ("masc_web_fetch", keeper_shard_read);
     ("masc_file_list", keeper_shard_read);

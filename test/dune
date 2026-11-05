@@ -5738,7 +5738,6 @@
 (include stanzas/test_browser_extension_companion.inc)
 (include stanzas/test_lane_addon_companion_broker.inc)
 (include stanzas/test_lane_addon_companion_allocation.inc)
-(include stanzas/test_browser_instruct.inc)
 (include stanzas/test_browser_chromium_process.inc)
 (include stanzas/test_browser_controls.inc)
 

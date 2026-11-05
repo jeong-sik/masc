@@ -170,16 +170,7 @@ let prepare ~upload_paths tool json =
         | (Open_tab _|Open_window _|On_tab _),(Automatic|Exact (Live_route _|Automation_route|Stagehand_route))
         | Control _,Exact (Live_route (Some _)) -> Ok () in
       prepared request Raw (B.Page_act action)
-  | Instruct ->
-      let* fields=fields ("lane"::Legacy.instruct_arguments) json in
-      let* verb=Legacy.instruct_verb fields in
-      let* request=surface fields in
-      let* ()=match request.route with
-        | Browser_selection.Exact B.Stagehand_route -> Ok ()
-        | Exact B.Automation_route when B.verb_allowed_on_automation verb -> Ok ()
-        | Exact B.Automation_route -> Error "automation supports observe with selected locate Exact Output; act/extract require stagehand"
-        | Automatic|Exact (B.Live_route _) -> Error "BrowserInstruct/masc_browser_instruct requires the observed automation or stagehand lane and tabId" in
-      prepared request Raw verb
+
   | Tabs ->
       let* fields=fields ["lane";"clientId";"tabId";"requiredActions"] json in
       let* request=surface fields in
@@ -244,7 +235,7 @@ let prepare_request ~upload_paths tool json =
          let* _=fields ["action";"goalId"] json in
          Ok (Metadata (Unbind_goal goal_id))
        | None|Some _ -> Error "unknown Goal Space operation")
-  | (C.Session|Tabs|Read|Interact|Act|Instruct|Goto),_ ->
+  | (C.Session|Tabs|Read|Interact|Act|Goto),_ ->
       prepare ~upload_paths tool json |> Result.map (fun value -> Browser value)
 let initial_goal_space initial_goal_ids config request =
   match request.preference,request.verb with

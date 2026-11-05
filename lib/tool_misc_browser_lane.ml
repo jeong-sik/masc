@@ -1,6 +1,6 @@
 (** Browser tool arguments shared by {!Browser_addon_tools}: input errors,
-    the lane/client/tab request, required browser actions, the read mode and
-    the BrowserInstruct sentence. [retain_read_result] commits a scene or
+    the lane/client/tab request, required browser actions and the read mode.
+    [retain_read_result] commits a scene or
     regions read as an observation receipt. *)
 
 (* These failures come from caller-input parsing, before browser dispatch.
@@ -88,45 +88,3 @@ let retain_read_result ~base_path ~tool_name ~start_time args result =
        ^ "; retry only the read, not preceding navigation or interaction.")
 ;;
 
-let instruct_arguments = [ "action"; "instruction"; "tabId"; "schema" ]
-
-type instruct_action = Act | Observe | Extract
-
-let instruct_action = function
-  | Some (`String "act") -> Ok Act
-  | Some (`String "observe") -> Ok Observe
-  | Some (`String "extract") -> Ok Extract
-  | Some _ | None -> Error "action must be one of: act, observe, extract"
-;;
-
-let instruct_verb fields =
-  let open Result.Syntax in
-  let* instruction =
-    match List.assoc_opt "instruction" fields with
-    | None -> Ok None
-    | Some (`String text) when String.trim text <> "" -> Ok (Some text)
-    | Some _ -> Error "instruction must be a nonempty string"
-  in
-  let* tab_id =
-    match List.assoc_opt "tabId" fields with
-    | Some (`Int id) when id >= 0 -> Ok id
-    | Some _ | None -> Error "tabId must be an observed BrowserTabs id on the selected owned browser"
-  in
-  let* schema =
-    match List.assoc_opt "schema" fields with
-    | None -> Ok None
-    | Some (`String text) ->
-      (match Yojson.Safe.from_string text with
-       | `Assoc _ as schema -> Ok (Some schema)
-       | _ -> Error "schema must be a JSON object"
-       | exception Yojson.Json_error detail -> Error ("schema is not JSON: " ^ detail))
-    | Some _ -> Error "schema must be JSON Schema text"
-  in
-  let* action = instruct_action (List.assoc_opt "action" fields) in
-  match action, instruction, schema with
-  | Act, Some instruction, None -> Ok (Browser_lane.Page_instruct { tab_id; instruction })
-  | Observe, instruction, None -> Ok (Browser_lane.Page_locate { tab_id; instruction })
-  | Extract, Some instruction, schema -> Ok (Browser_lane.Page_extract { tab_id; instruction; schema })
-  | (Act | Extract), None, _ -> Error "act and extract need an instruction"
-  | (Act | Observe), _, Some _ -> Error "schema is for extract only"
-;;

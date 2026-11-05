@@ -77,7 +77,7 @@ let execution_machine operation arguments =
   | Some (Tool_schemas_misc.Misc_browser_tabs) | Some (Tool_schemas_misc.Misc_browser_read)
   | Some (Tool_schemas_misc.Misc_browser_session) | Some (Tool_schemas_misc.Misc_browser_goto)
   | Some (Tool_schemas_misc.Misc_browser_act) | Some (Tool_schemas_misc.Misc_browser_interact)
-  | Some (Tool_schemas_misc.Misc_browser_instruct) | Some (Tool_schemas_misc.Misc_portrait_read)
+  | Some (Tool_schemas_misc.Misc_portrait_read)
   | Some (Tool_schemas_misc.Misc_candle_balance) | Some (Tool_schemas_misc.Misc_candle_catalog)
   | Some (Tool_schemas_misc.Misc_candle_purchase) | Some (Tool_schemas_misc.Misc_candle_equip)
   | Some (Tool_schemas_misc.Misc_candle_gift) | Some (Tool_schemas_misc.Misc_dos_meta)

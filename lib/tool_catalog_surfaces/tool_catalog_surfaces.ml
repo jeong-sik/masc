@@ -122,7 +122,6 @@ let public_mcp_surface_tools =
   ; "masc_browser_goto"
   ; "masc_browser_act"
   ; "masc_browser_interact"
-  ; "masc_browser_instruct"
   ; (* Utility *)
     "masc_tool_help"
   ; "masc_check"

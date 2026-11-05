@@ -83,7 +83,7 @@ let tag_of_runtime_handler
   | Tool_browser_tabs
   | Tool_browser_read
   | Tool_browser_session
-  | Tool_browser_goto | Tool_browser_act | Tool_browser_interact | Tool_browser_instruct -> Mod_misc
+  | Tool_browser_goto | Tool_browser_act | Tool_browser_interact -> Mod_misc
   | Tool_masc_local_runtime_dispatch -> Mod_local_runtime
   | Tool_masc_wiki_dispatch -> Mod_wiki
   | Tool_board_dispatch -> Mod_inline
@@ -201,7 +201,7 @@ let runtime_schema_for_descriptor
     | Keeper_tool_descriptor.Tool_web_fetch | Keeper_tool_descriptor.Tool_browser_tabs
     | Keeper_tool_descriptor.Tool_browser_read | Keeper_tool_descriptor.Tool_browser_session
     | Keeper_tool_descriptor.Tool_browser_goto | Keeper_tool_descriptor.Tool_browser_act
-    | Keeper_tool_descriptor.Tool_browser_instruct | Keeper_tool_descriptor.Tool_browser_interact
+    | Keeper_tool_descriptor.Tool_browser_interact
     | Keeper_tool_descriptor.Tool_masc_agent_timeline_dispatch
     | Keeper_tool_descriptor.Tool_masc_schedule_dispatch
     | Keeper_tool_descriptor.Tool_keeper_code_query_dispatch

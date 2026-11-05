@@ -16,8 +16,8 @@ type operation =
   | Hand_off | Take_over | Space_status | Finish_space | Wait_for_control | Adopt_tab | Release_tab
   | Upload_file | List_downloads | Page_zoom | Resize_viewport | Touch
   | Read_clipboard | Write_clipboard | Read_network | Intercept_network
-  | Read_console | Read_storage | Write_storage | Emulate_environment | Sentence_action
-type tool = Tabs | Read | Interact | Act | Session | Goto | Instruct
+  | Read_console | Read_storage | Write_storage | Emulate_environment
+type tool = Tabs | Read | Interact | Act | Session | Goto
 type invocation = { tool : tool; action : string option; mode : string option }
 type support = Available of invocation
   | Conditional of { invocation : invocation; constraints : string list }

@@ -151,33 +151,30 @@ let choose_candidates ~verb ~bound ~snapshot preference =
       | [] -> match owned with
         | _::_ -> one Existing_work_session owned
         | [] -> one Available_connected_browser (connected Lane.Web_extension)
-let effective_missing ~models backend required =
+let effective_missing backend required =
   let missing=Browser_capabilities.missing_operations backend required in
-  List.filter (fun operation -> List.mem operation missing ||
-    (operation=Browser_capabilities.Sentence_action && not models)) required
+  List.filter (fun operation -> List.mem operation missing) required
 let choose ?(required_actions=[]) ~verb ~bound ~snapshot preference =
   match preference with
   | Exact _ -> choose_candidates ~verb ~bound ~snapshot preference
   | Automatic when bound || required_actions=[] -> choose_candidates ~verb ~bound ~snapshot preference
   | Automatic ->
-    let missing ~models backend = effective_missing ~models backend required_actions in
+    let missing backend = effective_missing backend required_actions in
     let candidates = List.map (fun (info : Lane.client_info) ->
-        Lane.Live_route (Some info.client_id),missing ~models:false (Browser_capabilities.Connected info.transport)) snapshot.live_clients
-      @ List.filter_map (fun (route,backend,state) -> if state.registered then Some (route,missing ~models:state.locate backend) else None)
+        Lane.Live_route (Some info.client_id),missing (Browser_capabilities.Connected info.transport)) snapshot.live_clients
+      @ List.filter_map (fun (route,backend,state) -> if state.registered then Some (route,missing backend) else None)
           [Lane.Stagehand_route,Browser_capabilities.Owned_chromium,snapshot.stagehand;
            Lane.Automation_route,Browser_capabilities.Owned_gecko,snapshot.automation] in
-    let filter_work backend state = {state with registered=state.registered && missing ~models:state.locate backend=[]} in
+    let filter_work backend state = {state with registered=state.registered && missing backend=[]} in
     let filtered = {snapshot with
-      live_clients=List.filter (fun (info : Lane.client_info) -> missing ~models:false (Browser_capabilities.Connected info.transport)=[]) snapshot.live_clients;
+      live_clients=List.filter (fun (info : Lane.client_info) -> missing (Browser_capabilities.Connected info.transport)=[]) snapshot.live_clients;
       stagehand=filter_work Browser_capabilities.Owned_chromium snapshot.stagehand;
       automation=filter_work Browser_capabilities.Owned_gecko snapshot.automation} in
     (match choose_candidates ~verb ~bound ~snapshot:filtered preference with
      | Error No_available_browser -> Error (Required_actions_unavailable {required=required_actions;candidates})
      | (Ok _ | Error (Binding_required | Ambiguous_browsers _ | Required_actions_unavailable _ | Unsupported_required_actions _)) as result -> result)
-let require ~snapshot required browser =
-  let models=match browser with Owned_stagehand -> snapshot.stagehand.locate
-    | Owned_automation | Connected _ -> false in
-  match effective_missing ~models (backend_of_browser browser) required with
+let require required browser =
+  match effective_missing (backend_of_browser browser) required with
   | [] -> Ok ()
   | missing -> Error (Unsupported_required_actions {route=route_of_browser browser;missing})
 let target ~verb ~snapshot route =

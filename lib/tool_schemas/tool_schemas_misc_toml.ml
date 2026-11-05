@@ -17,7 +17,6 @@ let browser_session = schema_of_name "masc_browser_session"
 let browser_goto = schema_of_name "masc_browser_goto"
 let browser_act = schema_of_name "masc_browser_act"
 let browser_interact = schema_of_name "masc_browser_interact"
-let browser_instruct = schema_of_name "masc_browser_instruct"
 (* Every MSX tool's definition is read here, at module initialization, so a
    tool added to [Msx_tool] without its TOML refuses the boot. The table holds
    every tool by construction, so [List.assoc] finds each one. *)

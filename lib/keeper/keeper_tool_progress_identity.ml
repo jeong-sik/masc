@@ -189,7 +189,6 @@ let memory_identity ~tool_name ~input ~evidence =
   | Keeper_tool_answer.Keeper_handler (Keeper_tool_descriptor.Tool_browser_session)
   | Keeper_tool_answer.Keeper_handler (Keeper_tool_descriptor.Tool_browser_goto)
   | Keeper_tool_answer.Keeper_handler (Keeper_tool_descriptor.Tool_browser_act)
-  | Keeper_tool_answer.Keeper_handler (Keeper_tool_descriptor.Tool_browser_instruct)
   | Keeper_tool_answer.Keeper_handler (Keeper_tool_descriptor.Tool_browser_interact)
   | Keeper_tool_answer.Keeper_handler (Keeper_tool_descriptor.Tool_masc_control_dispatch)
   | Keeper_tool_answer.Keeper_handler (Keeper_tool_descriptor.Tool_masc_agent_timeline_dispatch)

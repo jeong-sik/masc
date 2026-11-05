@@ -745,17 +745,7 @@ let test_shipped_embedded_mcp_surface_loads () =
    which reads like an intent value, so Keepers sent intent=observe and were
    rejected 140 times between 09-13 and 09-27 (#39448). *)
 let test_execute_intent_description_names_accepted_values () =
-  let contents =
-    match Embedded_config.read "tools/tool_execute.toml" with
-    | Some contents -> contents
-    | None -> fail "embedded tool_execute.toml is missing"
-  in
-  let loaded =
-    match Tool_definition_toml.load ~name:"tool_execute" ~contents with
-    | Ok loaded -> loaded
-    | Error message -> failf "tool_execute.toml does not load: %s" message
-  in
-  let description = loaded.Tool_definition_toml.schema.description in
+  let description = (Tool_definition_embedded.schema "tool_execute").description in
   List.iter
     (fun value ->
        check
@@ -769,6 +759,43 @@ let test_execute_intent_description_names_accepted_values () =
     "the description does not name a value the schema rejects"
     false
     (contains ~needle:"observe" (String.lowercase_ascii description))
+;;
+
+(* [Tool_definition_embedded] is the one place that reads the shipped tree by
+   tool name; every schema module publishes through it. *)
+let test_embedded_lookup_matches_a_direct_load () =
+  let contents =
+    match Embedded_config.read "tools/tool_execute.toml" with
+    | Some contents -> contents
+    | None -> fail "embedded tool_execute.toml is missing"
+  in
+  let direct =
+    match Tool_definition_toml.load ~name:"tool_execute" ~contents with
+    | Ok loaded -> loaded
+    | Error message -> failf "tool_execute.toml does not load: %s" message
+  in
+  let expected = json_string direct.Tool_definition_toml.schema in
+  check string "path" "tools/tool_execute.toml" (Tool_definition_embedded.path "tool_execute");
+  (match Tool_definition_embedded.find "tool_execute" with
+   | Ok loaded ->
+     check string "find decodes the shipped file" expected
+       (json_string loaded.Tool_definition_toml.schema)
+   | Error message -> failf "expected the shipped definition, got: %s" message);
+  check string "load decodes the shipped file" expected
+    (json_string (Tool_definition_embedded.load "tool_execute").Tool_definition_toml.schema);
+  check string "schema is the decoded schema" expected
+    (json_string (Tool_definition_embedded.schema "tool_execute"))
+;;
+
+let test_a_missing_embedded_definition_is_refused () =
+  let expected = "embedded tool definition missing: tools/masc_no_such_tool.toml" in
+  (match Tool_definition_embedded.find "masc_no_such_tool" with
+   | Ok _ -> fail "expected an error for a tool with no embedded definition"
+   | Error message -> check string "find names the missing entry" expected message);
+  check_raises "load refuses with Failure" (Failure expected) (fun () ->
+    ignore (Tool_definition_embedded.load "masc_no_such_tool"));
+  check_raises "schema refuses with Failure" (Failure expected) (fun () ->
+    ignore (Tool_definition_embedded.schema "masc_no_such_tool"))
 ;;
 
 let test_validate_embedded () =
@@ -1265,19 +1292,8 @@ let test_help_table_is_fail_closed () =
 
 (* #39448: a description that hides a real limit sends the Keeper to a call
    that is refused. These pin the two descriptions that were wrong. *)
-let load_embedded_tool name =
-  let contents =
-    match Embedded_config.read ("tools/" ^ name ^ ".toml") with
-    | Some contents -> contents
-    | None -> failf "embedded %s.toml is missing" name
-  in
-  match Tool_definition_toml.load ~name ~contents with
-  | Ok loaded -> loaded
-  | Error message -> failf "%s.toml does not load: %s" name message
-;;
-
 let test_board_search_description_names_its_scope () =
-  let loaded = load_embedded_tool "masc_board_search" in
+  let loaded = Tool_definition_embedded.load "masc_board_search" in
   check
     bool
     "the description says comments are not searched"
@@ -1286,7 +1302,7 @@ let test_board_search_description_names_its_scope () =
 ;;
 
 let test_web_fetch_description_names_the_reader () =
-  let loaded = load_embedded_tool "masc_web_fetch" in
+  let loaded = Tool_definition_embedded.load "masc_web_fetch" in
   let serialized =
     Yojson.Safe.to_string loaded.Tool_definition_toml.schema.input_schema
   in
@@ -1444,6 +1460,12 @@ let () =
             test_shipped_embedded_mcp_surface_loads
         ; test_case "the Execute intent description names its values" `Quick
             test_execute_intent_description_names_accepted_values
+        ] )
+    ; ( "embedded lookup"
+      , [ test_case "find, load and schema agree with a direct load" `Quick
+            test_embedded_lookup_matches_a_direct_load
+        ; test_case "a missing definition is named and refused" `Quick
+            test_a_missing_embedded_definition_is_refused
         ] )
     ; ( "title"
       , [ test_case "optional, non-empty when present" `Quick test_title_key ] )

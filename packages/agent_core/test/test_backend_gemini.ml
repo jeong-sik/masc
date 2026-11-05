@@ -36,12 +36,12 @@ let to_list json = Yojson.Safe.Util.to_list json
 let to_bool json = Yojson.Safe.Util.to_bool json
 
 let parse_gemini_chunk data =
-  match Streaming.parse_gemini_sse_chunk data with
-  | Streaming.Gemini_chunk chunk -> Some chunk
-  | Streaming.Gemini_provider_error _ -> None
-  | Streaming.Gemini_unsupported_part _ -> None
-  | Streaming.Gemini_unsupported_response _ -> None
-  | Streaming.Gemini_parse_failed _ -> None
+  match Gemini_wire.parse_gemini_sse_chunk data with
+  | Gemini_wire.Gemini_chunk chunk -> Some chunk
+  | Gemini_wire.Gemini_provider_error _ -> None
+  | Gemini_wire.Gemini_unsupported_part _ -> None
+  | Gemini_wire.Gemini_unsupported_response _ -> None
+  | Gemini_wire.Gemini_parse_failed _ -> None
 ;;
 
 let gemini_events state chunk =

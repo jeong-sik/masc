@@ -1758,6 +1758,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         | None -> "API classification inapplicable"
         | Some Fault.Unattributed -> "unattributed API refusal"
         | Some Fault.Unknown_after_dispatch -> "outcome uncertain"
+        | Some Fault.Local_admission -> "MASC admission wait"
         | Some (Fault.Binding binding) ->
           match binding with
           | Fault.Credential -> "credential"

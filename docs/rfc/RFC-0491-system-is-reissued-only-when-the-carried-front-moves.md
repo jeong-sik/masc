@@ -30,7 +30,7 @@ related: ["0442", "goal-observations-leave-the-system-prompt", "0488"]
 결정은 셋이다.
 
 1. `Completion_authority` 는 System 에 붙이지 않는다. 그 턴의 끝 문맥 블록으로 보내고, 같은 턴의 뒤 round 에도 다시 싣는다(§3.1).
-2. 조항이 바뀌어도 System 은 그 Keeper 가 마지막으로 보낸 조항으로 렌더한다. 그 뒤 바뀐 조항은 끝 문맥 layer `Constitution_amendments` 로 보낸다. 범위 앞부분이 움직이면 System 을 지금 조항으로 다시 만든다(§3.2).
+2. 조항이 바뀌어도 System 은 그 Keeper 가 마지막으로 보낸 조항으로 렌더한다. 그 뒤 바뀐 조항은 끝 문맥 블록 `Constitution_amendments` 로 보낸다. 범위 앞부분이 움직이면 System 을 지금 조항으로 다시 만든다(§3.2).
 3. `Active_goals` 도 2 와 같은 규칙을 따른다. 2 를 배포한 뒤 다시 재고 층을 연다(§3.3).
 
 ## 1. 측정
@@ -139,6 +139,8 @@ Keeper 마다 두 값을 프로세스 메모리에 든다. System 을 만들 때
 - 실제 요청의 앞부분으로는 고르지 못한다. Agent Core 는 요청마다 System 을 먼저 정하고(`packages/agent_core/lib/pipeline/pipeline_stage_prepare.ml:207-213`), 그 뒤 `prepare_turn_for_agent`(같은 파일 236행)가 부르는 projection 이 앞부분을 정한다. System 은 턴마다 한 번 만들고, 그 턴의 모든 lane·시도·round 가 같이 쓴다.
 - 예상과 실제가 다를 수 있다. 크기 거절로 앞부분이 턴 경계로 옮겨지거나 다른 lane 으로 넘어갈 때다. 그 요청은 어차피 기록 캐시를 놓친다. 조항은 System 과 끝 문맥을 합쳐 늘 지금 것이 실린다. 예상은 캐시가 맞을지만 정하고, 무엇이 실리는지는 정하지 않는다.
 - 든 값은 저장하지 않는다. 조항 원장과 Keeper 지시문이 SSOT 이고, 든 값은 그 투영이다. 서버가 다시 뜨면 첫 턴은 지금 조항으로 만든다. 그 사이 조항이 바뀌었으면 그 턴 한 번 캐시가 깨진다.
+
+`Constitution_amendments` 는 `Prompt_block_id` 블록이다. world state 의 layer 가 아니다. world state 는 턴이 System 을 고르기 전에 렌더되고, 조항 차이는 System 을 고를 때 정해지기 때문이다. §3.1 의 `Completion_authority` 블록처럼 같은 턴의 뒤 round 에도 싣는다. 든 조항으로 만든 System 과 그 차이는 한 값으로 다녀서, 차이 없이 그 System 만 쓰는 호출자는 생기지 않는다.
 
 `Constitution_amendments` 는 끝 문맥이라 System 보다 뒤에 읽힌다. 뒤에 온 글이 지금 상태로 읽힌다는 것은 RFC-0366 이 운영자 메모를 맨 뒤에 둔 근거와 같다(`lib/keeper/keeper_run_tools_hooks.ml` `Operator_note` 주석). 끝 문맥은 런타임이 조립하는 `[system context]` 다. 모델이 쓴 글은 조항 본문뿐이고, 그 본문은 System 에서와 같은 escape 를 거친다.
 

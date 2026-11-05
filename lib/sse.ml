@@ -576,9 +576,7 @@ let validate_registration ~(auth : registration_auth) session_id : (Masc_domain.
               | _ ->
                   Ok credential
 
-(** Register a new SSE client.
-    Returns (client_id, event_stream, evicted_session_id option). *)
-let register ?(kind = Agent_stream) ?on_disconnect ?observer_instance_id
+let register_with_client ?(kind = Agent_stream) ?on_disconnect ?observer_instance_id
     ~(auth : registration_auth) session_id ~last_event_id =
   match validate_registration ~auth session_id with
   | Error e -> Error e
@@ -609,7 +607,7 @@ let register ?(kind = Agent_stream) ?on_disconnect ?observer_instance_id
     last_seen_at = Atomic.make 0.0;
     on_disconnect;
   } in
-  let evicted =
+  let evicted, client =
     Lockfree_atomic.update_with_commit clients (fun state ->
       run_test_hook register_commit_test_hook;
       let evicted =
@@ -658,7 +656,7 @@ let register ?(kind = Agent_stream) ?on_disconnect ?observer_instance_id
           count = Sse_queue_inventory.count queue_inventory;
           queue_inventory;
         };
-        result = evicted;
+        result = evicted, client;
       })
   in
   (match evicted with
@@ -672,7 +670,16 @@ let register ?(kind = Agent_stream) ?on_disconnect ?observer_instance_id
    | None ->
        ());
   sync_transport_snapshot ();
-  Ok (client_id, event_stream, Option.map fst evicted)
+  Ok (client, Option.map fst evicted)
+
+(** Register a new SSE client.
+    Returns (client_id, event_stream, evicted_session_id option). *)
+let register ?kind ?on_disconnect ?observer_instance_id
+    ~(auth : registration_auth) session_id ~last_event_id =
+  match register_with_client ?kind ?on_disconnect ?observer_instance_id
+    ~auth session_id ~last_event_id with
+  | Error _ as error -> error
+  | Ok (client, evicted) -> Ok (client.id, client.event_stream, evicted)
 
 (** Unregister an SSE client *)
 let unregister session_id =

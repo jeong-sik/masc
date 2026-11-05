@@ -23,6 +23,9 @@ val parse_action : Yojson.Safe.t -> (action, error) result
     [say] also requires message_id and text (1..4096 UTF-8 bytes).
     [read] accepts a positive [before] message id for older history.
     Only join renews presence. Read and say do not upsert membership. *)
+type presence_operation = Join | Leave
+val presence : action -> (presence_operation * string) option
+(** The presence operation and its client identity, or [None] for Read/Say. *)
 val perform : base_path:string -> who:string -> speaker:speaker -> now:float ->
   action -> (snapshot, error) result
 (** Identity comes from the authenticated request/tool principal, never the body.

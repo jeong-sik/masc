@@ -22,21 +22,21 @@ let before request =
 let read ~base_path request =
   Result.bind (before request) (fun before ->
     Play_room.read ~base_path ~now:(Time_compat.now ()) ~before)
-let perform ~base_path ~who body =
+let perform ~base_path ~who ~role body =
   let action =
     try Play_room.parse_action (Yojson.Safe.from_string body)
     with Yojson.Json_error _ -> Error (Play_room.Invalid_request "body must be JSON")
   in
-  Result.bind action (fun action ->
-    match Play_room.perform_with_change ~base_path ~who ~speaker:Play_room.Participant
-      ~now:(Time_compat.now ()) action with
-    | Ok (snapshot, change) ->
-        if change.message_committed || change.membership_changed then
-          Workspace_dataset_event.announce ~base_path
-            (Workspace_dataset_event.Play_room { machine = change.machine });
-        Ok snapshot
-    | Error _ as error -> error)
-let perform_bound ~config ~who body =
+  Result.bind action (Server_play_room_events.perform_http ~base_path ~agent_name:who ~role)
+
+let role_of_request ~base_path request =
+  match request_credential_standing ~base_path request with
+  | Operator_credential -> Ok Masc_domain.Admin
+  | Agent_credential -> Ok Masc_domain.Worker
+  | Player_credential | No_credential -> Ok Masc_domain.Player
+  | Unreadable_credential -> Error (Play_room.Unavailable "play room credential store is unavailable")
+
+let perform_bound ~config ~who ~role body =
   match Yojson.Safe.from_string body with
   | exception Yojson.Json_error _ ->
     response ~viewer:who (Error (Play_room.Invalid_request "body must be JSON"))
@@ -46,7 +46,7 @@ let perform_bound ~config ~who body =
       `Bad_request, Server_refusal.json ~code:"invalid_workspace_precondition" "invalid expected_workspace precondition"
     | Error Workspace.Workspace_precondition_failed ->
       `Conflict, Server_refusal.json ~code:"workspace_precondition_failed" "workspace precondition failed"
-    | Ok args -> perform ~base_path:config.Workspace.base_path ~who (Yojson.Safe.to_string args)
+    | Ok args -> perform ~base_path:config.Workspace.base_path ~who ~role (Yojson.Safe.to_string args)
         |> response ~viewer:who
 let add_routes router =
   router
@@ -55,6 +55,9 @@ let add_routes router =
       respond ~viewer:name request reqd (read ~base_path:config.base_path request))
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanPlayMachine) path (fun state name request reqd ->
       let config = Mcp_server.workspace_config state in
-      Http.Request.read_body_async reqd (fun body ->
-        let status, json = perform_bound ~config ~who:name body in
-        respond_json_value_with_cors ~status request reqd json))
+      match role_of_request ~base_path:config.base_path request with
+      | Error error -> respond ~viewer:name request reqd (Error error)
+      | Ok role ->
+        Http.Request.read_body_async reqd (fun body ->
+          let status, json = perform_bound ~config ~who:name ~role body in
+          respond_json_value_with_cors ~status request reqd json))

@@ -133,6 +133,13 @@ val register :
     transport layer can respond with an auth error and close the connection
     without leaking a half-registered SSE client. *)
 
+val register_with_client :
+  ?kind:session_kind -> ?on_disconnect:(unit -> unit) -> ?observer_instance_id:string ->
+  auth:registration_auth -> string -> last_event_id:int ->
+  (client * string option, registration_error) result
+(** As {!register}, but returns the exact committed client. Its [event_stream]
+    and [id] belong to the same registration as [agent_name] and [role]. *)
+
 val unregister : string -> unit
 val unregister_if_current : string -> int -> unit
 

@@ -1934,12 +1934,21 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
       | `POST, path when path = Server_routes_http_routes_play_room.path ->
           h2_gate_actor h2_reqd (fun state viewer ->
               let config = Mcp_server.workspace_config state in
-              h2_read_body h2_reqd (fun body ->
+              match Server_routes_http_routes_play_room.role_of_request
+                ~base_path:config.base_path httpun_request with
+              | Error error ->
                 let status, json =
-                  Server_routes_http_routes_play_room.perform_bound ~config ~who:viewer body
+                  Server_routes_http_routes_play_room.response ~viewer (Error error)
                 in
                 h2_respond_json_value h2_reqd json
-                  ~status:(status :> H2.Status.t) ~extra_headers:cors))
+                  ~status:(status :> H2.Status.t) ~extra_headers:cors
+              | Ok role ->
+                h2_read_body h2_reqd (fun body ->
+                  let status, json =
+                    Server_routes_http_routes_play_room.perform_bound ~config ~who:viewer ~role body
+                  in
+                  h2_respond_json_value h2_reqd json
+                    ~status:(status :> H2.Status.t) ~extra_headers:cors))
 
       | `GET, "/api/v1/board/reactions/batch" ->
           h2_gate_actor

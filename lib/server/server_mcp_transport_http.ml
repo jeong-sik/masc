@@ -766,13 +766,23 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
          | None, (Sse.Agent_stream | Sse.Presence) -> Ok None
          | (Some _ | None), Sse.Observer -> Ok browser)
   in
-  match machine, browser with
-  | Error detail, _ | _, Error detail ->
+  let play =
+    match Server_play_room_events.room_scope_of_request_target request.target with
+    | Error _ as error -> error
+    | Ok play ->
+        (match play, sse_kind with
+         | Some _, (Sse.Agent_stream | Sse.Presence) ->
+             Error "a play query requires an observer stream"
+         | None, (Sse.Agent_stream | Sse.Presence) -> Ok None
+         | (Some _ | None), Sse.Observer -> Ok play)
+  in
+  match machine, browser, play with
+  | Error detail, _, _ | _, Error detail, _ | _, _, Error detail ->
       respond_mcp_error ~code:Mcp_error_code.Invalid_request ~deps
         ~request_authority request reqd ~session_id ~protocol_version detail
-  | Ok (Some _), Ok _ when Result.is_error (deps.get_runtime_result ()) ->
+  | Ok (Some _), Ok _, Ok _ when Result.is_error (deps.get_runtime_result ()) ->
       respond_not_ready ~deps request reqd
-  | Ok machine, Ok browser ->
+  | Ok machine, Ok browser, Ok play ->
   let observer_scope =
     match sse_kind with
     | Sse.Observer ->
@@ -914,7 +924,6 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
           respond_sse_rate_limited ~deps ~origin ~session_id ~protocol_version
             ~reason ~retry_after_s reqd
       | Ok () ->
-          stop_sse_session session_id;
           if Option.is_some last_event_id then
             Transport_metrics.inc_sse_reconnect ();
           ensure_sse_backing_session_for_known_transport_session
@@ -924,27 +933,78 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
           in
           let owned_info = Atomic.make None in
           let disconnected = Atomic.make false in
+          let play_registration = Atomic.make None in
+          let disconnect_play () =
+            Option.iter (fun (client, scope) ->
+              match Server_play_room_events.disconnect ~base_path
+                ~agent_name:client.Sse.agent_name ~role:client.Sse.role ~scope
+                ~sse_client_id:client.Sse.id with
+              | Ok () -> ()
+              | Error error ->
+                Log.Server.warn "Play room disconnect failed for %s: %s"
+                  session_id (Play_room.error_message error))
+              (Atomic.get play_registration)
+          in
           let on_disconnect () =
             Atomic.set disconnected true;
-            Option.iter stop_sse_conn_if_current (Atomic.get owned_info)
+            Option.iter stop_sse_conn_if_current (Atomic.get owned_info);
+            disconnect_play ()
+          in
+          let renew_play () =
+            Option.iter (fun (client, scope) ->
+              match Server_play_room_events.renew ~base_path
+                ~agent_name:client.Sse.agent_name ~role:client.Sse.role ~scope
+                ~sse_client_id:client.Sse.id with
+              | Ok () -> ()
+              | Error error ->
+                Log.Server.warn "Play room renewal failed for %s: %s"
+                  session_id (Play_room.error_message error))
+              (Atomic.get play_registration)
+          in
+          let with_play_presence (client : Sse.client) body =
+            Atomic.set play_registration
+              (Option.map (fun scope -> client, scope) play);
+            match play with
+            | Some scope ->
+              (match Server_play_room_events.connect ~base_path
+                ~agent_name:client.Sse.agent_name ~role:client.Sse.role ~scope
+                ~sse_client_id:client.Sse.id with
+               | Ok () ->
+                 stop_sse_session session_id;
+                 body ()
+               | Error error ->
+                 Sse.unregister_if_current session_id client.id;
+                 stop_sse_session session_id;
+                 respond_mcp_error ~code:Mcp_error_code.Invalid_request ~deps
+                   ~request_authority request reqd ~session_id ~protocol_version
+                   (Play_room.error_message error))
+            | None ->
+              stop_sse_session session_id;
+              body ()
           in
           (match
              Auth_oauth.with_expected_resource expected_resource (fun () ->
-               Sse.register ~kind:sse_kind ~auth ?observer_instance_id session_id
+               Sse.register_with_client ~kind:sse_kind ~auth ?observer_instance_id session_id
                  ~last_event_id:(Option.value ~default:0 last_event_id)
                  ~on_disconnect)
            with
            | Error reg_err ->
                let msg = Sse.registration_error_to_string reg_err in
                Log.Server.warn "%s" msg;
+               stop_sse_session session_id;
                respond_sse_register_error ~deps ~origin ~protocol_version reqd msg
-           | Ok (client_id, _, _) when not (scope_is_current ()) ->
-              Sse.unregister_if_current session_id client_id;
+           | Ok (client, _) when not (scope_is_current ()) ->
+              Sse.unregister_if_current session_id client.id;
+              stop_sse_session session_id;
               refuse_workspace Workspace.Workspace_precondition_failed
-           | Ok (client_id, _, _) when sse_kind = Sse.Observer && not (deps.is_ready ()) ->
-              Sse.unregister_if_current session_id client_id;
+           | Ok (client, _) when sse_kind = Sse.Observer && not (deps.is_ready ()) ->
+              Sse.unregister_if_current session_id client.id;
+              stop_sse_session session_id;
               respond_not_ready ~deps request reqd
-           | Ok (client_id, event_stream, evicted) ->
+           | Ok (client, evicted) ->
+              with_play_presence client (fun () ->
+              let client_id = client.id in
+              let event_stream = client.event_stream in
               let attested_runtime =
                 match sse_kind, admission_headers with
                 | Sse.Observer, [receipt]
@@ -1101,10 +1161,12 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                       (try
                          if Atomic.get info.closed then
                            stop_sse_conn_if_current info
-                         else if not (Atomic.get info.stop) then
+                         else if not (Atomic.get info.stop) then begin
+                           renew_play ();
                            if not (send_if_current ": ping\n\n") then
                              Log.Server.debug "SSE ping send failed for session %s"
                                info.session_id
+                         end
                        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                          if is_cancelled exn then raise exn;
                          Log.Server.error "ping send error: %s"
@@ -1126,7 +1188,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
           let client_count = Sse.client_count () in
           if client_count > Sse.max_clients / 2 then
               Log.Server.info "SSE connected: %s (active: %d/%d)"
-              session_id client_count Sse.max_clients))))))
+              session_id client_count Sse.max_clients)))))))
 
 
 let handle_get_operator_mcp ~deps request reqd =

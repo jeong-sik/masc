@@ -660,13 +660,12 @@ let provider_connection_cache_json () =
   | None -> `Null
   | Some stats ->
     let closed = stats.closed_total in
+    let idle_max_per_origin =
+      List.fold_left (fun most (_origin, idle) -> max most idle) 0 stats.idle_per_host
+    in
     `Assoc
-      [ ( "idle_per_origin"
-        , `List
-            (List.map
-               (fun (origin, idle) -> `Assoc [ "origin", `String origin; "idle", `Int idle ])
-               stats.idle_per_host) )
-      ; "idle_total", `Int stats.total_idle
+      [ "idle_total", `Int stats.total_idle
+      ; "idle_max_per_origin", `Int idle_max_per_origin
       ; "reused_total", `Int stats.reuse_count_total
       ; "created_total", `Int stats.create_count_total
       ; ( "closed_total"

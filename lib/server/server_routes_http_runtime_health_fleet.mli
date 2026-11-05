@@ -55,8 +55,10 @@ val fd_accountant_snapshot_json : unit -> Yojson.Safe.t
 
 val provider_connection_cache_json : unit -> Yojson.Safe.t
 (** The installed provider connection cache's counts (RFC-0492 §6): idle
-    connections per origin, reuses, new connections, and connections closed
-    by reason. [`Null] when no cache is installed. *)
+    connections in all and on the origin holding the most, reuses, new
+    connections, and connections closed by reason. [`Null] when no cache is
+    installed. Origins are not named: health is an aggregate surface, which
+    does not carry provider identity (RFC-0132). *)
 
 val runtime_truth_json :
   build:Build_identity.t ->

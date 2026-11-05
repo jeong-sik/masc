@@ -1,0 +1,8975 @@
+{
+ "rows": 690216,
+ "skipped": {
+  "unreadable_lines": 0,
+  "tool_calls_without_timestamp": 0
+ },
+ "outcomes": {
+  "succeeded": 666248,
+  "failed": 23967,
+  "deferred": 1
+ },
+ "tool_time_s": 2632072.7,
+ "result_bytes": 3997462295,
+ "identical_rereads": {
+  "calls": 79698,
+  "calls_pct": 11.55,
+  "bytes": 923467977,
+  "bytes_pct": 23.1,
+  "same_turn": 62042,
+  "later_turn": 17656
+ },
+ "spilled_results": {
+  "calls": 22026,
+  "bytes": 1034405813,
+  "bytes_pct": 25.88,
+  "read_back_calls": 98751,
+  "read_back_bytes": 1344313486,
+  "distinct_artifacts_read": 22788,
+  "most_paged_artifacts": [
+   [
+    "3252b9a59b21efe32253cf2ab967cae186ea7b601501fb82e4025081da470019",
+    7317
+   ],
+   [
+    "60b45b23da2c6ca97c8820d449472b9d318b6a97a4ce272de0bf8bbca5b63c3e",
+    5970
+   ],
+   [
+    "2b7c7099ca28111a06ba0b04899153d5ef21016dab1df07500e4d6bae5ab3dd9",
+    5078
+   ]
+  ]
+ },
+ "blocked_waits": {
+  "execute_calls": 299877,
+  "execute_time_s": 2372756.6,
+  "wait_calls": 3219,
+  "wait_time_s": 255058.5,
+  "wait_time_pct_of_execute": 10.75
+ },
+ "empty_input_failures": {
+  "total": 1644,
+  "by_profile": [
+   {
+    "profile": "unrecorded",
+    "failed": 797,
+    "calls": 9060,
+    "rate_pct": 8.8
+   },
+   {
+    "profile": "muse_d242bc1a.muse-spark-1.3_75bc5a82",
+    "failed": 400,
+    "calls": 28609,
+    "rate_pct": 1.4
+   },
+   {
+    "profile": "glm-coding.glm-5.3-flash",
+    "failed": 106,
+    "calls": 119023,
+    "rate_pct": 0.09
+   },
+   {
+    "profile": "outsiders",
+    "failed": 103,
+    "calls": 41790,
+    "rate_pct": 0.25
+   },
+   {
+    "profile": "sonnet-5-5-medium",
+    "failed": 26,
+    "calls": 9347,
+    "rate_pct": 0.28
+   },
+   {
+    "profile": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+    "failed": 26,
+    "calls": 77521,
+    "rate_pct": 0.03
+   },
+   {
+    "profile": "claude_code_b6e72ff9.claude-sonnet-5-5_24044830-c500k",
+    "failed": 25,
+    "calls": 12106,
+    "rate_pct": 0.21
+   },
+   {
+    "profile": "claude_code_ac22c1f2.claude-sonnet-5-5_yousleepwhen-500k",
+    "failed": 22,
+    "calls": 20171,
+    "rate_pct": 0.11
+   },
+   {
+    "profile": "codex_e641909e.gpt-6.1-sol_e641909e-copy",
+    "failed": 22,
+    "calls": 44612,
+    "rate_pct": 0.05
+   },
+   {
+    "profile": "codex_5675bb80.gpt-6-luna_5675bb80",
+    "failed": 16,
+    "calls": 92499,
+    "rate_pct": 0.02
+   },
+   {
+    "profile": "lights",
+    "failed": 14,
+    "calls": 8230,
+    "rate_pct": 0.17
+   },
+   {
+    "profile": "codex_e641909e.gpt-6.1-sol_e641909e",
+    "failed": 12,
+    "calls": 4304,
+    "rate_pct": 0.28
+   }
+  ],
+  "by_tool": [
+   [
+    "Execute",
+    507
+   ],
+   [
+    "BrowserTabs",
+    164
+   ],
+   [
+    "masc_board_post_get",
+    138
+   ],
+   [
+    "keeper_artifact_read",
+    129
+   ],
+   [
+    "Read",
+    109
+   ],
+   [
+    "WebFetch",
+    92
+   ],
+   [
+    "masc_dos_screen",
+    71
+   ],
+   [
+    "masc_board_search",
+    58
+   ],
+   [
+    "masc_board_comment",
+    53
+   ],
+   [
+    "masc_msx_screen",
+    40
+   ],
+   [
+    "keeper_compose_work-intake",
+    29
+   ],
+   [
+    "Grep",
+    26
+   ]
+  ]
+ },
+ "same_tool_bursts": [
+  {
+   "tool": "keeper_artifact_read",
+   "keeper": "msx-retro-mania",
+   "turn": "trace-1788882319100-00000#6799",
+   "calls": 7286,
+   "span_s": 241.6,
+   "result_bytes": 119373626
+  },
+  {
+   "tool": "keeper_artifact_read",
+   "keeper": "msx-retro-mania",
+   "turn": "trace-1788882319100-00000#6833",
+   "calls": 5294,
+   "span_s": 767.1,
+   "result_bytes": 86355007
+  },
+  {
+   "tool": "keeper_artifact_read",
+   "keeper": "msx-retro-mania",
+   "turn": "trace-1788882319100-00000#6633",
+   "calls": 4669,
+   "span_s": 832.1,
+   "result_bytes": 75904851
+  },
+  {
+   "tool": "keeper_artifact_read",
+   "keeper": "msx-retro-mania",
+   "turn": "trace-1788882319100-00000#6651",
+   "calls": 4432,
+   "span_s": 523.7,
+   "result_bytes": 72356841
+  },
+  {
+   "tool": "keeper_artifact_read",
+   "keeper": "ocaml-agent-ic",
+   "turn": "trace-1789802729372-00000#7366",
+   "calls": 4293,
+   "span_s": 200.1,
+   "result_bytes": 70310514
+  },
+  {
+   "tool": "keeper_artifact_read",
+   "keeper": "ocaml-agent-ic",
+   "turn": "trace-1789802729372-00000#7207",
+   "calls": 3252,
+   "span_s": 157.8,
+   "result_bytes": 53268010
+  },
+  {
+   "tool": "keeper_artifact_read",
+   "keeper": "msx-retro-mania",
+   "turn": "trace-1788882319100-00000#6650",
+   "calls": 3186,
+   "span_s": 126.8,
+   "result_bytes": 52199424
+  },
+  {
+   "tool": "keeper_artifact_read",
+   "keeper": "sangsu",
+   "turn": "trace-1788310783624-00004#4435",
+   "calls": 2472,
+   "span_s": 187.4,
+   "result_bytes": 40479472
+  },
+  {
+   "tool": "keeper_artifact_read",
+   "keeper": "code-reviewer-brother",
+   "turn": "trace-1792566606674-00000#1339",
+   "calls": 2186,
+   "span_s": 109.5,
+   "result_bytes": 35803665
+  },
+  {
+   "tool": "keeper_artifact_read",
+   "keeper": "ocaml-agent-ic",
+   "turn": "trace-1789802729372-00000#7629",
+   "calls": 1941,
+   "span_s": 503.5,
+   "result_bytes": 31454183
+  },
+  {
+   "tool": "masc_board_comment",
+   "keeper": "wkbl-front",
+   "turn": "trace-1790267159649-00001#2557",
+   "calls": 1825,
+   "span_s": 12357.3,
+   "result_bytes": 379404
+  },
+  {
+   "tool": "masc_board_list",
+   "keeper": "code-reviewer-father",
+   "turn": "trace-1793025151961-00000#215",
+   "calls": 1636,
+   "span_s": 11010.8,
+   "result_bytes": 1222771
+  }
+ ],
+ "tools": [
+  {
+   "tool": "Execute",
+   "calls": 299877,
+   "failed": 3122,
+   "time_s": 2372756.6,
+   "p50_ms": 1197.0720291137695,
+   "p99_ms": 121904.22797203064,
+   "result_bytes": 669155152,
+   "p99_result_bytes": 16917.0,
+   "reread_calls": 8163,
+   "reread_bytes": 7800141,
+   "spilled_calls": 9759,
+   "spilled_bytes": 24287975
+  },
+  {
+   "tool": "Read",
+   "calls": 32102,
+   "failed": 1329,
+   "time_s": 72651.3,
+   "p50_ms": 297.4269390106201,
+   "p99_ms": 14440.228939056396,
+   "result_bytes": 145469870,
+   "p99_result_bytes": 20776.0,
+   "reread_calls": 803,
+   "reread_bytes": 3225737,
+   "spilled_calls": 494,
+   "spilled_bytes": 9936180
+  },
+  {
+   "tool": "keeper_analyze_image",
+   "calls": 1450,
+   "failed": 120,
+   "time_s": 39573.4,
+   "p50_ms": 8989.0,
+   "p99_ms": 484617.5100803375,
+   "result_bytes": 1036070,
+   "p99_result_bytes": 2062.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "Write",
+   "calls": 14991,
+   "failed": 770,
+   "time_s": 19729.2,
+   "p50_ms": 305.5880069732666,
+   "p99_ms": 14117.604970932007,
+   "result_bytes": 3444880,
+   "p99_result_bytes": 3577.0,
+   "reread_calls": 15,
+   "reread_bytes": 2769,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "Grep",
+   "calls": 9769,
+   "failed": 386,
+   "time_s": 15422.3,
+   "p50_ms": 323.17399978637695,
+   "p99_ms": 15296.531915664673,
+   "result_bytes": 19383727,
+   "p99_result_bytes": 11745.0,
+   "reread_calls": 57,
+   "reread_bytes": 24505,
+   "spilled_calls": 15,
+   "spilled_bytes": 2614174
+  },
+  {
+   "tool": "keeper_memory_search",
+   "calls": 4991,
+   "failed": 30,
+   "time_s": 15263.7,
+   "p50_ms": 89.45989608764648,
+   "p99_ms": 54711.38906478882,
+   "result_bytes": 27364257,
+   "p99_result_bytes": 31312.0,
+   "reread_calls": 57,
+   "reread_bytes": 562067,
+   "spilled_calls": 107,
+   "spilled_bytes": 2429567
+  },
+  {
+   "tool": "Edit",
+   "calls": 12133,
+   "failed": 660,
+   "time_s": 13760.9,
+   "p50_ms": 581.9780826568604,
+   "p99_ms": 8401.179075241089,
+   "result_bytes": 2676407,
+   "p99_result_bytes": 304.0,
+   "reread_calls": 44,
+   "reread_bytes": 9934,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "WebFetch",
+   "calls": 10947,
+   "failed": 1180,
+   "time_s": 10996.8,
+   "p50_ms": 557.5840473175049,
+   "p99_ms": 8919.50798034668,
+   "result_bytes": 108937397,
+   "p99_result_bytes": 101104.0,
+   "reread_calls": 534,
+   "reread_bytes": 4975290,
+   "spilled_calls": 1173,
+   "spilled_bytes": 48180787
+  },
+  {
+   "tool": "masc_board_comment",
+   "calls": 23298,
+   "failed": 7303,
+   "time_s": 8293.3,
+   "p50_ms": 32.68098831176758,
+   "p99_ms": 6557.9938888549805,
+   "result_bytes": 28630377,
+   "p99_result_bytes": 5350.0,
+   "reread_calls": 3,
+   "reread_bytes": 345,
+   "spilled_calls": 2,
+   "spilled_bytes": 43215
+  },
+  {
+   "tool": "keeper_artifact_read",
+   "calls": 98751,
+   "failed": 825,
+   "time_s": 4797.1,
+   "p50_ms": 2.054929733276367,
+   "p99_ms": 796.144962310791,
+   "result_bytes": 1344313486,
+   "p99_result_bytes": 16384.0,
+   "reread_calls": 46791,
+   "reread_bytes": 757834406,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "keeper_compose_msx-observe",
+   "calls": 575,
+   "failed": 2,
+   "time_s": 4418.0,
+   "p50_ms": 7446.810007095337,
+   "p99_ms": 14542.62900352478,
+   "result_bytes": 2160550,
+   "p99_result_bytes": 4557.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "BrowserRead",
+   "calls": 4038,
+   "failed": 327,
+   "time_s": 4401.0,
+   "p50_ms": 65.86694717407227,
+   "p99_ms": 20013.017892837524,
+   "result_bytes": 52653927,
+   "p99_result_bytes": 96918.0,
+   "reread_calls": 186,
+   "reread_bytes": 983200,
+   "spilled_calls": 653,
+   "spilled_bytes": 27326010
+  },
+  {
+   "tool": "masc_dos_press",
+   "calls": 7662,
+   "failed": 52,
+   "time_s": 3949.0,
+   "p50_ms": 159.69491004943848,
+   "p99_ms": 3906.3949584960938,
+   "result_bytes": 84000623,
+   "p99_result_bytes": 11492.0,
+   "reread_calls": 10,
+   "reread_bytes": 67989,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_board_post_get",
+   "calls": 34033,
+   "failed": 762,
+   "time_s": 2833.4,
+   "p50_ms": 1.8780231475830078,
+   "p99_ms": 2149.6200561523438,
+   "result_bytes": 249469084,
+   "p99_result_bytes": 41552.0,
+   "reread_calls": 3247,
+   "reread_bytes": 18206894,
+   "spilled_calls": 276,
+   "spilled_bytes": 9208745
+  },
+  {
+   "tool": "masc_dos_screen",
+   "calls": 9091,
+   "failed": 83,
+   "time_s": 2201.4,
+   "p50_ms": 94.81620788574219,
+   "p99_ms": 2662.5001430511475,
+   "result_bytes": 729837995,
+   "p99_result_bytes": 115308.0,
+   "reread_calls": 1189,
+   "reread_bytes": 63113438,
+   "spilled_calls": 7581,
+   "spilled_bytes": 706967868
+  },
+  {
+   "tool": "keeper_context_status",
+   "calls": 516,
+   "failed": 0,
+   "time_s": 2163.5,
+   "p50_ms": 2573.4200477600098,
+   "p99_ms": 34394.58918571472,
+   "result_bytes": 3043873,
+   "p99_result_bytes": 17555.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 5,
+   "spilled_bytes": 88616
+  },
+  {
+   "tool": "keeper_task_done",
+   "calls": 968,
+   "failed": 35,
+   "time_s": 2049.2,
+   "p50_ms": 644.1309452056885,
+   "p99_ms": 19177.505016326904,
+   "result_bytes": 218956,
+   "p99_result_bytes": 1558.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "keeper_lane_status",
+   "calls": 2086,
+   "failed": 0,
+   "time_s": 1847.5,
+   "p50_ms": 9.46807861328125,
+   "p99_ms": 35221.455097198486,
+   "result_bytes": 1143240,
+   "p99_result_bytes": 1069.0,
+   "reread_calls": 235,
+   "reread_bytes": 89614,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "BrowserInstruct",
+   "calls": 42,
+   "failed": 28,
+   "time_s": 1680.1,
+   "p50_ms": 17333.479166030884,
+   "p99_ms": 125669.25096511841,
+   "result_bytes": 19918,
+   "p99_result_bytes": 2117.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "BrowserInteract",
+   "calls": 1894,
+   "failed": 426,
+   "time_s": 1537.6,
+   "p50_ms": 110.45289039611816,
+   "p99_ms": 16178.8649559021,
+   "result_bytes": 2188002,
+   "p99_result_bytes": 22218.0,
+   "reread_calls": 141,
+   "reread_bytes": 59718,
+   "spilled_calls": 38,
+   "spilled_bytes": 856904
+  },
+  {
+   "tool": "github_pull_request_read",
+   "calls": 618,
+   "failed": 51,
+   "time_s": 1525.9,
+   "p50_ms": 2056.385040283203,
+   "p99_ms": 9324.59282875061,
+   "result_bytes": 12085481,
+   "p99_result_bytes": 159157.0,
+   "reread_calls": 61,
+   "reread_bytes": 805630,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_board_comment_vote",
+   "calls": 1157,
+   "failed": 28,
+   "time_s": 1459.3,
+   "p50_ms": 43.27988624572754,
+   "p99_ms": 16088.634967803955,
+   "result_bytes": 50316,
+   "p99_result_bytes": 206.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "keeper_task_claim",
+   "calls": 1290,
+   "failed": 506,
+   "time_s": 1439.1,
+   "p50_ms": 321.8867778778076,
+   "p99_ms": 16416.02921485901,
+   "result_bytes": 662368,
+   "p99_result_bytes": 899.0,
+   "reread_calls": 1,
+   "reread_bytes": 895,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "keeper_tasks_list",
+   "calls": 16555,
+   "failed": 1,
+   "time_s": 1289.0,
+   "p50_ms": 1.363992691040039,
+   "p99_ms": 1960.1659774780273,
+   "result_bytes": 49177975,
+   "p99_result_bytes": 14417.0,
+   "reread_calls": 1944,
+   "reread_bytes": 3364894,
+   "spilled_calls": 62,
+   "spilled_bytes": 4165298
+  },
+  {
+   "tool": "WebSearch",
+   "calls": 432,
+   "failed": 136,
+   "time_s": 1269.6,
+   "p50_ms": 1419.604778289795,
+   "p99_ms": 23250.970125198364,
+   "result_bytes": 4481940,
+   "p99_result_bytes": 46729.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 23,
+   "spilled_bytes": 803663
+  },
+  {
+   "tool": "keeper_artifact_transfer",
+   "calls": 358,
+   "failed": 94,
+   "time_s": 1147.3,
+   "p50_ms": 89.4310474395752,
+   "p99_ms": 28527.4338722229,
+   "result_bytes": 148715,
+   "p99_result_bytes": 842.0,
+   "reread_calls": 6,
+   "reread_bytes": 210,
+   "spilled_calls": 223,
+   "spilled_bytes": 132000
+  },
+  {
+   "tool": "BrowserGoto",
+   "calls": 657,
+   "failed": 85,
+   "time_s": 1111.7,
+   "p50_ms": 921.7028617858887,
+   "p99_ms": 18999.597787857056,
+   "result_bytes": 241787,
+   "p99_result_bytes": 1043.0,
+   "reread_calls": 90,
+   "reread_bytes": 27191,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_board_search",
+   "calls": 11690,
+   "failed": 70,
+   "time_s": 1076.9,
+   "p50_ms": 30.70807456970215,
+   "p99_ms": 1246.8721866607666,
+   "result_bytes": 16737775,
+   "p99_result_bytes": 16914.0,
+   "reread_calls": 827,
+   "reread_bytes": 1057482,
+   "spilled_calls": 124,
+   "spilled_bytes": 6227936
+  },
+  {
+   "tool": "cloudflare_execute",
+   "calls": 447,
+   "failed": 127,
+   "time_s": 1040.6,
+   "p50_ms": 1361.5741729736328,
+   "p99_ms": 9835.962057113647,
+   "result_bytes": 812382,
+   "p99_result_bytes": 24000.0,
+   "reread_calls": 7,
+   "reread_bytes": 1365,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "atlassian_getJiraIssue",
+   "calls": 103,
+   "failed": 4,
+   "time_s": 1031.0,
+   "p50_ms": 914.696216583252,
+   "p99_ms": 9394.434928894043,
+   "result_bytes": 2934993,
+   "p99_result_bytes": 87454.0,
+   "reread_calls": 11,
+   "reread_bytes": 445476,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "keeper_memory_write",
+   "calls": 7228,
+   "failed": 646,
+   "time_s": 953.9,
+   "p50_ms": 25.016069412231445,
+   "p99_ms": 796.0619926452637,
+   "result_bytes": 4096412,
+   "p99_result_bytes": 895.0,
+   "reread_calls": 44,
+   "reread_bytes": 28875,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_schedule_create",
+   "calls": 1588,
+   "failed": 140,
+   "time_s": 932.3,
+   "p50_ms": 99.47991371154785,
+   "p99_ms": 9498.588800430298,
+   "result_bytes": 2919411,
+   "p99_result_bytes": 3053.0,
+   "reread_calls": 1,
+   "reread_bytes": 1103,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "BrowserAct",
+   "calls": 438,
+   "failed": 57,
+   "time_s": 898.4,
+   "p50_ms": 1028.5508632659912,
+   "p99_ms": 20898.714065551758,
+   "result_bytes": 141207,
+   "p99_result_bytes": 537.0,
+   "reread_calls": 6,
+   "reread_bytes": 800,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_dos_step",
+   "calls": 2117,
+   "failed": 10,
+   "time_s": 878.9,
+   "p50_ms": 268.89991760253906,
+   "p99_ms": 3592.053174972534,
+   "result_bytes": 22770264,
+   "p99_result_bytes": 11494.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_board_list",
+   "calls": 12742,
+   "failed": 10,
+   "time_s": 827.9,
+   "p50_ms": 2.92205810546875,
+   "p99_ms": 1135.7390880584717,
+   "result_bytes": 30909685,
+   "p99_result_bytes": 16209.0,
+   "reread_calls": 5125,
+   "reread_bytes": 5098026,
+   "spilled_calls": 109,
+   "spilled_bytes": 6794734
+  },
+  {
+   "tool": "keeper_task_create",
+   "calls": 719,
+   "failed": 19,
+   "time_s": 816.0,
+   "p50_ms": 319.7460174560547,
+   "p99_ms": 12446.505069732666,
+   "result_bytes": 135059,
+   "p99_result_bytes": 293.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "keeper_skill",
+   "calls": 6562,
+   "failed": 558,
+   "time_s": 740.6,
+   "p50_ms": 2.802133560180664,
+   "p99_ms": 3249.420166015625,
+   "result_bytes": 36889715,
+   "p99_result_bytes": 14409.0,
+   "reread_calls": 2836,
+   "reread_bytes": 15375029,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "BrowserSession",
+   "calls": 300,
+   "failed": 41,
+   "time_s": 698.9,
+   "p50_ms": 761.3909244537354,
+   "p99_ms": 27607.949018478394,
+   "result_bytes": 2682811,
+   "p99_result_bytes": 21359.0,
+   "reread_calls": 38,
+   "reread_bytes": 513414,
+   "spilled_calls": 77,
+   "spilled_bytes": 1520868
+  },
+  {
+   "tool": "BrowserTabs",
+   "calls": 1467,
+   "failed": 477,
+   "time_s": 599.5,
+   "p50_ms": 19.20795440673828,
+   "p99_ms": 8728.373050689697,
+   "result_bytes": 11471971,
+   "p99_result_bytes": 29742.0,
+   "reread_calls": 194,
+   "reread_bytes": 996629,
+   "spilled_calls": 232,
+   "spilled_bytes": 5307506
+  },
+  {
+   "tool": "datadog_search_datadog_events",
+   "calls": 235,
+   "failed": 6,
+   "time_s": 530.3,
+   "p50_ms": 1662.1439456939697,
+   "p99_ms": 9255.352973937988,
+   "result_bytes": 2417975,
+   "p99_result_bytes": 40423.0,
+   "reread_calls": 15,
+   "reread_bytes": 1020,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_board_vote",
+   "calls": 656,
+   "failed": 35,
+   "time_s": 515.8,
+   "p50_ms": 27.914047241210938,
+   "p99_ms": 23198.390007019043,
+   "result_bytes": 25525,
+   "p99_result_bytes": 132.0,
+   "reread_calls": 3,
+   "reread_bytes": 123,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_schedule_note_add",
+   "calls": 2381,
+   "failed": 11,
+   "time_s": 487.8,
+   "p50_ms": 40.979862213134766,
+   "p99_ms": 2250.65016746521,
+   "result_bytes": 940959,
+   "p99_result_bytes": 1522.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "github_search_pull_requests",
+   "calls": 164,
+   "failed": 6,
+   "time_s": 487.7,
+   "p50_ms": 2423.7148761749268,
+   "p99_ms": 10020.017147064209,
+   "result_bytes": 1702283,
+   "p99_result_bytes": 131023.0,
+   "reread_calls": 9,
+   "reread_bytes": 25126,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "keeper_compose_prior-art",
+   "calls": 229,
+   "failed": 0,
+   "time_s": 481.9,
+   "p50_ms": 102.58197784423828,
+   "p99_ms": 41712.597131729126,
+   "result_bytes": 1132878,
+   "p99_result_bytes": 14153.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 8,
+   "spilled_bytes": 2778
+  },
+  {
+   "tool": "datadog_search_datadog_monitors",
+   "calls": 200,
+   "failed": 16,
+   "time_s": 471.2,
+   "p50_ms": 1731.5149307250977,
+   "p99_ms": 9001.57904624939,
+   "result_bytes": 1061367,
+   "p99_result_bytes": 28399.0,
+   "reread_calls": 1,
+   "reread_bytes": 277,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_board_post",
+   "calls": 1976,
+   "failed": 134,
+   "time_s": 443.1,
+   "p50_ms": 18.677949905395508,
+   "p99_ms": 3090.7950401306152,
+   "result_bytes": 4929642,
+   "p99_result_bytes": 6230.0,
+   "reread_calls": 2,
+   "reread_bytes": 5988,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_dos_save",
+   "calls": 1533,
+   "failed": 5,
+   "time_s": 441.5,
+   "p50_ms": 89.65086936950684,
+   "p99_ms": 3604.542016983032,
+   "result_bytes": 16002414,
+   "p99_result_bytes": 11480.0,
+   "reread_calls": 1,
+   "reread_bytes": 11222,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "keeper_voice_speak",
+   "calls": 15,
+   "failed": 0,
+   "time_s": 395.9,
+   "p50_ms": 19301.09405517578,
+   "p99_ms": 78139.9199962616,
+   "result_bytes": 5325,
+   "p99_result_bytes": 365.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "railway_list-deployments",
+   "calls": 226,
+   "failed": 19,
+   "time_s": 362.0,
+   "p50_ms": 1241.3699626922607,
+   "p99_ms": 10669.489860534668,
+   "result_bytes": 345827,
+   "p99_result_bytes": 4752.0,
+   "reread_calls": 8,
+   "reread_bytes": 4458,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_board_post_update",
+   "calls": 634,
+   "failed": 211,
+   "time_s": 326.4,
+   "p50_ms": 100.32796859741211,
+   "p99_ms": 10843.027830123901,
+   "result_bytes": 3693972,
+   "p99_result_bytes": 51141.0,
+   "reread_calls": 177,
+   "reread_bytes": 12390,
+   "spilled_calls": 2,
+   "spilled_bytes": 47840
+  },
+  {
+   "tool": "atlassian_getAccessibleAtlassianResources",
+   "calls": 150,
+   "failed": 1,
+   "time_s": 309.9,
+   "p50_ms": 1469.376802444458,
+   "p99_ms": 7231.198072433472,
+   "result_bytes": 97765,
+   "p99_result_bytes": 655.0,
+   "reread_calls": 134,
+   "reread_bytes": 87770,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_schedule_update",
+   "calls": 969,
+   "failed": 144,
+   "time_s": 291.2,
+   "p50_ms": 98.31094741821289,
+   "p99_ms": 4435.396909713745,
+   "result_bytes": 2071342,
+   "p99_result_bytes": 4354.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "keeper_compose_work-intake",
+   "calls": 2561,
+   "failed": 29,
+   "time_s": 265.2,
+   "p50_ms": 14.0228271484375,
+   "p99_ms": 1479.0840148925781,
+   "result_bytes": 31127643,
+   "p99_result_bytes": 15636.0,
+   "reread_calls": 4,
+   "reread_bytes": 2352,
+   "spilled_calls": 10,
+   "spilled_bytes": 3490
+  },
+  {
+   "tool": "atlassian_searchJiraIssuesUsingJql",
+   "calls": 183,
+   "failed": 8,
+   "time_s": 236.0,
+   "p50_ms": 968.7690734863281,
+   "p99_ms": 5577.409029006958,
+   "result_bytes": 5798504,
+   "p99_result_bytes": 170585.0,
+   "reread_calls": 1,
+   "reread_bytes": 76,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "datadog_get_datadog_metric",
+   "calls": 120,
+   "failed": 28,
+   "time_s": 225.8,
+   "p50_ms": 1700.7479667663574,
+   "p99_ms": 4086.801052093506,
+   "result_bytes": 314019,
+   "p99_result_bytes": 42233.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "keeper_capability_search",
+   "calls": 1557,
+   "failed": 40,
+   "time_s": 218.6,
+   "p50_ms": 17.100095748901367,
+   "p99_ms": 2608.2568168640137,
+   "result_bytes": 5962546,
+   "p99_result_bytes": 49701.0,
+   "reread_calls": 135,
+   "reread_bytes": 205213,
+   "spilled_calls": 65,
+   "spilled_bytes": 3115653
+  },
+  {
+   "tool": "masc_schedule_list",
+   "calls": 11994,
+   "failed": 12,
+   "time_s": 213.2,
+   "p50_ms": 1.0,
+   "p99_ms": 215.65699577331543,
+   "result_bytes": 8175099,
+   "p99_result_bytes": 9266.0,
+   "reread_calls": 2047,
+   "reread_bytes": 1651787,
+   "spilled_calls": 1,
+   "spilled_bytes": 20285
+  },
+  {
+   "tool": "railway_get-logs",
+   "calls": 84,
+   "failed": 1,
+   "time_s": 196.2,
+   "p50_ms": 1257.530927658081,
+   "p99_ms": 19056.026935577393,
+   "result_bytes": 374634,
+   "p99_result_bytes": 22579.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_lane_inspect",
+   "calls": 122,
+   "failed": 6,
+   "time_s": 189.7,
+   "p50_ms": 577.5411128997803,
+   "p99_ms": 10940.729856491089,
+   "result_bytes": 55105213,
+   "p99_result_bytes": 3717246.0,
+   "reread_calls": 3,
+   "reread_bytes": 234946,
+   "spilled_calls": 69,
+   "spilled_bytes": 54555486
+  },
+  {
+   "tool": "masc_schedule_get",
+   "calls": 1777,
+   "failed": 74,
+   "time_s": 187.6,
+   "p50_ms": 1.6679763793945312,
+   "p99_ms": 2220.0939655303955,
+   "result_bytes": 5555207,
+   "p99_result_bytes": 8472.0,
+   "reread_calls": 405,
+   "reread_bytes": 1331572,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_schedule_notes_list",
+   "calls": 513,
+   "failed": 2,
+   "time_s": 178.4,
+   "p50_ms": 87.61787414550781,
+   "p99_ms": 7861.709833145142,
+   "result_bytes": 28391424,
+   "p99_result_bytes": 162830.0,
+   "reread_calls": 206,
+   "reread_bytes": 11617155,
+   "spilled_calls": 318,
+   "spilled_bytes": 27776821
+  },
+  {
+   "tool": "keeper_compose_sangokushi-3-end-month",
+   "calls": 144,
+   "failed": 4,
+   "time_s": 175.5,
+   "p50_ms": 531.8129062652588,
+   "p99_ms": 14667.303085327148,
+   "result_bytes": 408587,
+   "p99_result_bytes": 12312.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 111,
+   "spilled_bytes": 38409
+  },
+  {
+   "tool": "github_search_code",
+   "calls": 50,
+   "failed": 5,
+   "time_s": 165.9,
+   "p50_ms": 1823.4519958496094,
+   "p99_ms": 18106.534957885742,
+   "result_bytes": 152961,
+   "p99_result_bytes": 22647.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_dos_pass",
+   "calls": 65,
+   "failed": 5,
+   "time_s": 155.9,
+   "p50_ms": 138.0290985107422,
+   "p99_ms": 22420.524835586548,
+   "result_bytes": 422621,
+   "p99_result_bytes": 11244.0,
+   "reread_calls": 2,
+   "reread_bytes": 22416,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_keeper_delegate",
+   "calls": 1362,
+   "failed": 187,
+   "time_s": 154.3,
+   "p50_ms": 9.812116622924805,
+   "p99_ms": 2399.034023284912,
+   "result_bytes": 166417,
+   "p99_result_bytes": 1047.0,
+   "reread_calls": 2,
+   "reread_bytes": 82,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_msx_step",
+   "calls": 1746,
+   "failed": 4,
+   "time_s": 151.3,
+   "p50_ms": 101.04012489318848,
+   "p99_ms": 319.38982009887695,
+   "result_bytes": 4418334,
+   "p99_result_bytes": 3637.0,
+   "reread_calls": 2,
+   "reread_bytes": 7274,
+   "spilled_calls": 2,
+   "spilled_bytes": 1262982
+  },
+  {
+   "tool": "datadog_search_datadog_rum_events",
+   "calls": 62,
+   "failed": 1,
+   "time_s": 151.1,
+   "p50_ms": 1216.6380882263184,
+   "p99_ms": 20422.02401161194,
+   "result_bytes": 195882,
+   "p99_result_bytes": 17764.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_schedule_cancel",
+   "calls": 427,
+   "failed": 80,
+   "time_s": 145.6,
+   "p50_ms": 106.89115524291992,
+   "p99_ms": 4260.509014129639,
+   "result_bytes": 844386,
+   "p99_result_bytes": 3776.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_ask_status",
+   "calls": 4594,
+   "failed": 1,
+   "time_s": 141.0,
+   "p50_ms": 1.0,
+   "p99_ms": 579.5280933380127,
+   "result_bytes": 21882892,
+   "p99_result_bytes": 119309.0,
+   "reread_calls": 675,
+   "reread_bytes": 4369119,
+   "spilled_calls": 136,
+   "spilled_bytes": 15822703
+  },
+  {
+   "tool": "keeper_broadcast",
+   "calls": 110,
+   "failed": 13,
+   "time_s": 137.6,
+   "p50_ms": 815.9570693969727,
+   "p99_ms": 6423.240184783936,
+   "result_bytes": 189599,
+   "p99_result_bytes": 3448.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_play_room",
+   "calls": 396,
+   "failed": 0,
+   "time_s": 137.2,
+   "p50_ms": 80.52587509155273,
+   "p99_ms": 4924.721002578735,
+   "result_bytes": 1929808,
+   "p99_result_bytes": 5373.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_keeper_delegate_status",
+   "calls": 1324,
+   "failed": 71,
+   "time_s": 135.4,
+   "p50_ms": 1.6520023345947266,
+   "p99_ms": 2280.283212661743,
+   "result_bytes": 3131817,
+   "p99_result_bytes": 8923.0,
+   "reread_calls": 546,
+   "reread_bytes": 1209625,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_dos_restore",
+   "calls": 291,
+   "failed": 34,
+   "time_s": 134.7,
+   "p50_ms": 152.7390480041504,
+   "p99_ms": 4730.867147445679,
+   "result_bytes": 28215645,
+   "p99_result_bytes": 469839.0,
+   "reread_calls": 35,
+   "reread_bytes": 7187816,
+   "spilled_calls": 83,
+   "spilled_bytes": 26079166
+  },
+  {
+   "tool": "keeper_task_release",
+   "calls": 181,
+   "failed": 11,
+   "time_s": 132.9,
+   "p50_ms": 219.0260887145996,
+   "p99_ms": 8345.100164413452,
+   "result_bytes": 25525,
+   "p99_result_bytes": 960.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "keeper_task_cancel",
+   "calls": 112,
+   "failed": 5,
+   "time_s": 125.7,
+   "p50_ms": 296.77605628967285,
+   "p99_ms": 17301.083087921143,
+   "result_bytes": 14369,
+   "p99_result_bytes": 828.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "github_pull_request_review_write",
+   "calls": 42,
+   "failed": 6,
+   "time_s": 118.8,
+   "p50_ms": 2807.8911304473877,
+   "p99_ms": 7209.963083267212,
+   "result_bytes": 4020,
+   "p99_result_bytes": 328.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "supabase_execute_sql",
+   "calls": 116,
+   "failed": 11,
+   "time_s": 113.1,
+   "p50_ms": 616.0678863525391,
+   "p99_ms": 9444.125890731812,
+   "result_bytes": 166034,
+   "p99_result_bytes": 11577.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "github_get_file_contents",
+   "calls": 52,
+   "failed": 9,
+   "time_s": 111.6,
+   "p50_ms": 1833.7628841400146,
+   "p99_ms": 4815.163850784302,
+   "result_bytes": 779865,
+   "p99_result_bytes": 128275.0,
+   "reread_calls": 4,
+   "reread_bytes": 911,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_msx_press",
+   "calls": 1525,
+   "failed": 7,
+   "time_s": 111.5,
+   "p50_ms": 18.28598976135254,
+   "p99_ms": 774.5089530944824,
+   "result_bytes": 3253426,
+   "p99_result_bytes": 8573.0,
+   "reread_calls": 5,
+   "reread_bytes": 18185,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "github_issue_read",
+   "calls": 38,
+   "failed": 1,
+   "time_s": 110.0,
+   "p50_ms": 2432.7330589294434,
+   "p99_ms": 10768.03207397461,
+   "result_bytes": 144409,
+   "p99_result_bytes": 34506.0,
+   "reread_calls": 8,
+   "reread_bytes": 14699,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "railway_list-projects",
+   "calls": 53,
+   "failed": 4,
+   "time_s": 106.5,
+   "p50_ms": 1812.5121593475342,
+   "p99_ms": 4494.29988861084,
+   "result_bytes": 13163,
+   "p99_result_bytes": 259.0,
+   "reread_calls": 9,
+   "reread_bytes": 2331,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "github_list_pull_requests",
+   "calls": 26,
+   "failed": 0,
+   "time_s": 98.5,
+   "p50_ms": 3084.8731994628906,
+   "p99_ms": 12115.721940994263,
+   "result_bytes": 1900400,
+   "p99_result_bytes": 663277.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "railway_http-requests",
+   "calls": 44,
+   "failed": 2,
+   "time_s": 95.1,
+   "p50_ms": 1996.082067489624,
+   "p99_ms": 7052.783012390137,
+   "result_bytes": 4946,
+   "p99_result_bytes": 124.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_run_plan",
+   "calls": 1134,
+   "failed": 70,
+   "time_s": 93.5,
+   "p50_ms": 5.118846893310547,
+   "p99_ms": 2064.6591186523438,
+   "result_bytes": 1992121,
+   "p99_result_bytes": 5326.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "keeper_surface_read",
+   "calls": 600,
+   "failed": 39,
+   "time_s": 85.4,
+   "p50_ms": 26.376008987426758,
+   "p99_ms": 3236.8030548095703,
+   "result_bytes": 5993504,
+   "p99_result_bytes": 87350.0,
+   "reread_calls": 52,
+   "reread_bytes": 276203,
+   "spilled_calls": 25,
+   "spilled_bytes": 1381452
+  },
+  {
+   "tool": "keeper_artifact_publish",
+   "calls": 243,
+   "failed": 7,
+   "time_s": 81.2,
+   "p50_ms": 10.13803482055664,
+   "p99_ms": 6527.714967727661,
+   "result_bytes": 248513,
+   "p99_result_bytes": 1597.0,
+   "reread_calls": 3,
+   "reread_bytes": 1875,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "railway_list-services",
+   "calls": 68,
+   "failed": 2,
+   "time_s": 66.2,
+   "p50_ms": 816.1389827728271,
+   "p99_ms": 2805.5148124694824,
+   "result_bytes": 17739,
+   "p99_result_bytes": 365.0,
+   "reread_calls": 9,
+   "reread_bytes": 2589,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "keeper_image_read",
+   "calls": 218,
+   "failed": 7,
+   "time_s": 65.4,
+   "p50_ms": 18.74709129333496,
+   "p99_ms": 5692.201852798462,
+   "result_bytes": 58289,
+   "p99_result_bytes": 337.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "datadog_aggregate_rum_events",
+   "calls": 40,
+   "failed": 0,
+   "time_s": 62.5,
+   "p50_ms": 1155.4820537567139,
+   "p99_ms": 5662.487030029297,
+   "result_bytes": 55364,
+   "p99_result_bytes": 6170.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "keeper_surface_post",
+   "calls": 769,
+   "failed": 8,
+   "time_s": 49.6,
+   "p50_ms": 28.655052185058594,
+   "p99_ms": 591.850996017456,
+   "result_bytes": 35897,
+   "p99_result_bytes": 41.0,
+   "reread_calls": 4,
+   "reread_bytes": 164,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_run_get",
+   "calls": 574,
+   "failed": 1,
+   "time_s": 48.4,
+   "p50_ms": 2.505064010620117,
+   "p99_ms": 629.1258335113525,
+   "result_bytes": 1926657,
+   "p99_result_bytes": 11539.0,
+   "reread_calls": 65,
+   "reread_bytes": 221036,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "github_get_commit",
+   "calls": 14,
+   "failed": 0,
+   "time_s": 46.4,
+   "p50_ms": 3233.212947845459,
+   "p99_ms": 7571.960926055908,
+   "result_bytes": 873019,
+   "p99_result_bytes": 436306.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "railway_http-error-rate",
+   "calls": 41,
+   "failed": 4,
+   "time_s": 46.2,
+   "p50_ms": 916.8851375579834,
+   "p99_ms": 3531.5301418304443,
+   "result_bytes": 7593,
+   "p99_result_bytes": 209.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "cloudflare_search",
+   "calls": 11,
+   "failed": 1,
+   "time_s": 45.6,
+   "p50_ms": 4932.289123535156,
+   "p99_ms": 5912.007093429565,
+   "result_bytes": 88367,
+   "p99_result_bytes": 24000.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "railway_get-service-metrics",
+   "calls": 29,
+   "failed": 0,
+   "time_s": 45.5,
+   "p50_ms": 1241.7831420898438,
+   "p99_ms": 5700.057029724121,
+   "result_bytes": 7372,
+   "p99_result_bytes": 325.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "atlassian_searchConfluenceUsingCql",
+   "calls": 30,
+   "failed": 4,
+   "time_s": 44.6,
+   "p50_ms": 1531.3279628753662,
+   "p99_ms": 2624.562978744507,
+   "result_bytes": 636841,
+   "p99_result_bytes": 96629.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_msx_screen",
+   "calls": 964,
+   "failed": 40,
+   "time_s": 44.2,
+   "p50_ms": 15.0,
+   "p99_ms": 447.1011161804199,
+   "result_bytes": 8040672,
+   "p99_result_bytes": 36157.0,
+   "reread_calls": 65,
+   "reread_bytes": 647767,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "keeper_skill_validate",
+   "calls": 1649,
+   "failed": 1640,
+   "time_s": 38.7,
+   "p50_ms": 1.3990402221679688,
+   "p99_ms": 467.3628807067871,
+   "result_bytes": 106263,
+   "p99_result_bytes": 60.0,
+   "reread_calls": 1632,
+   "reread_bytes": 99210,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_dos_meta",
+   "calls": 497,
+   "failed": 3,
+   "time_s": 37.1,
+   "p50_ms": 6.174802780151367,
+   "p99_ms": 1915.9910678863525,
+   "result_bytes": 206452,
+   "p99_result_bytes": 419.0,
+   "reread_calls": 425,
+   "reread_bytes": 177443,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_task_history",
+   "calls": 292,
+   "failed": 6,
+   "time_s": 35.6,
+   "p50_ms": 81.22897148132324,
+   "p99_ms": 879.0102005004883,
+   "result_bytes": 2225870,
+   "p99_result_bytes": 37321.0,
+   "reread_calls": 7,
+   "reread_bytes": 37286,
+   "spilled_calls": 7,
+   "spilled_bytes": 153636
+  },
+  {
+   "tool": "masc_msx_restore",
+   "calls": 87,
+   "failed": 1,
+   "time_s": 33.8,
+   "p50_ms": 99.7629165649414,
+   "p99_ms": 1923.5260486602783,
+   "result_bytes": 276074,
+   "p99_result_bytes": 4005.0,
+   "reread_calls": 6,
+   "reread_bytes": 10663,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "railway_get-status",
+   "calls": 23,
+   "failed": 2,
+   "time_s": 33.1,
+   "p50_ms": 1242.784023284912,
+   "p99_ms": 4043.445825576782,
+   "result_bytes": 21124,
+   "p99_result_bytes": 1166.0,
+   "reread_calls": 5,
+   "reread_bytes": 5040,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_ask",
+   "calls": 556,
+   "failed": 85,
+   "time_s": 30.1,
+   "p50_ms": 3.9358139038085938,
+   "p99_ms": 1184.7670078277588,
+   "result_bytes": 164621,
+   "p99_result_bytes": 2126.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "datadog_search_datadog_sdk",
+   "calls": 12,
+   "failed": 3,
+   "time_s": 29.0,
+   "p50_ms": 2095.6530570983887,
+   "p99_ms": 4616.182088851929,
+   "result_bytes": 35267,
+   "p99_result_bytes": 14318.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_dashboard",
+   "calls": 42,
+   "failed": 0,
+   "time_s": 28.8,
+   "p50_ms": 209.1808319091797,
+   "p99_ms": 14784.30700302124,
+   "result_bytes": 427964,
+   "p99_result_bytes": 13921.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "github_create_pull_request",
+   "calls": 9,
+   "failed": 0,
+   "time_s": 27.5,
+   "p50_ms": 3077.5070190429688,
+   "p99_ms": 3354.951858520508,
+   "result_bytes": 648,
+   "p99_result_bytes": 72.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "keeper_tools_list",
+   "calls": 105,
+   "failed": 0,
+   "time_s": 26.7,
+   "p50_ms": 44.30103302001953,
+   "p99_ms": 1273.5159397125244,
+   "result_bytes": 27388590,
+   "p99_result_bytes": 304478.0,
+   "reread_calls": 28,
+   "reread_bytes": 7828594,
+   "spilled_calls": 105,
+   "spilled_bytes": 27388590
+  },
+  {
+   "tool": "github_add_issue_comment",
+   "calls": 11,
+   "failed": 0,
+   "time_s": 24.5,
+   "p50_ms": 2096.7888832092285,
+   "p99_ms": 3207.918167114258,
+   "result_bytes": 1058,
+   "p99_result_bytes": 98.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "keeper_workspace_memory_read",
+   "calls": 55,
+   "failed": 0,
+   "time_s": 24.0,
+   "p50_ms": 245.9421157836914,
+   "p99_ms": 2904.4599533081055,
+   "result_bytes": 6255009,
+   "p99_result_bytes": 1072789.0,
+   "reread_calls": 1,
+   "reread_bytes": 268,
+   "spilled_calls": 8,
+   "spilled_bytes": 6069945
+  },
+  {
+   "tool": "masc_dos_type",
+   "calls": 96,
+   "failed": 0,
+   "time_s": 22.6,
+   "p50_ms": 136.95788383483887,
+   "p99_ms": 1458.2860469818115,
+   "result_bytes": 1042055,
+   "p99_result_bytes": 11484.0,
+   "reread_calls": 1,
+   "reread_bytes": 5493,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "github_list_commits",
+   "calls": 6,
+   "failed": 1,
+   "time_s": 21.8,
+   "p50_ms": 4506.132125854492,
+   "p99_ms": 7096.114158630371,
+   "result_bytes": 66195,
+   "p99_result_bytes": 23894.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "keeper_memory_retract",
+   "calls": 435,
+   "failed": 84,
+   "time_s": 21.1,
+   "p50_ms": 26.05915069580078,
+   "p99_ms": 250.90384483337402,
+   "result_bytes": 237070,
+   "p99_result_bytes": 601.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "keeper_composition_run",
+   "calls": 17,
+   "failed": 10,
+   "time_s": 19.1,
+   "p50_ms": 4.247903823852539,
+   "p99_ms": 18508.245944976807,
+   "result_bytes": 19327,
+   "p99_result_bytes": 5519.0,
+   "reread_calls": 1,
+   "reread_bytes": 973,
+   "spilled_calls": 4,
+   "spilled_bytes": 632
+  },
+  {
+   "tool": "keeper_artifact_draft",
+   "calls": 129,
+   "failed": 19,
+   "time_s": 16.8,
+   "p50_ms": 91.84002876281738,
+   "p99_ms": 762.484073638916,
+   "result_bytes": 953145,
+   "p99_result_bytes": 16301.0,
+   "reread_calls": 10,
+   "reread_bytes": 96662,
+   "spilled_calls": 1,
+   "spilled_bytes": 31669
+  },
+  {
+   "tool": "atlassian_getConfluencePage",
+   "calls": 15,
+   "failed": 3,
+   "time_s": 16.1,
+   "p50_ms": 879.5230388641357,
+   "p99_ms": 2992.7361011505127,
+   "result_bytes": 628095,
+   "p99_result_bytes": 69625.0,
+   "reread_calls": 3,
+   "reread_bytes": 159118,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_file_list",
+   "calls": 21,
+   "failed": 0,
+   "time_s": 15.7,
+   "p50_ms": 364.41516876220703,
+   "p99_ms": 4392.1959400177,
+   "result_bytes": 672,
+   "p99_result_bytes": 32.0,
+   "reread_calls": 1,
+   "reread_bytes": 32,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_plan_get_task",
+   "calls": 418,
+   "failed": 0,
+   "time_s": 13.5,
+   "p50_ms": 1.1839866638183594,
+   "p99_ms": 146.1620330810547,
+   "result_bytes": 9156,
+   "p99_result_bytes": 28.0,
+   "reread_calls": 112,
+   "reread_bytes": 2429,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_goal_measure",
+   "calls": 66,
+   "failed": 4,
+   "time_s": 13.2,
+   "p50_ms": 9.825944900512695,
+   "p99_ms": 933.8538646697998,
+   "result_bytes": 157538,
+   "p99_result_bytes": 4620.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "railway_whoami",
+   "calls": 7,
+   "failed": 1,
+   "time_s": 13.0,
+   "p50_ms": 1194.9729919433594,
+   "p99_ms": 5994.703054428101,
+   "result_bytes": 1087,
+   "p99_result_bytes": 161.0,
+   "reread_calls": 1,
+   "reread_bytes": 161,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "railway_connect-service-source",
+   "calls": 3,
+   "failed": 3,
+   "time_s": 12.2,
+   "p50_ms": 4020.405054092407,
+   "p99_ms": 4772.017002105713,
+   "result_bytes": 108,
+   "p99_result_bytes": 36.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "railway_environment-status",
+   "calls": 8,
+   "failed": 3,
+   "time_s": 11.3,
+   "p50_ms": 1229.356050491333,
+   "p99_ms": 2500.6449222564697,
+   "result_bytes": 2371,
+   "p99_result_bytes": 428.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "atlassian_addCommentToJiraIssue",
+   "calls": 9,
+   "failed": 0,
+   "time_s": 11.0,
+   "p50_ms": 1095.3078269958496,
+   "p99_ms": 2166.0938262939453,
+   "result_bytes": 38748,
+   "p99_result_bytes": 4823.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_goal_list",
+   "calls": 112,
+   "failed": 0,
+   "time_s": 10.9,
+   "p50_ms": 33.60390663146973,
+   "p99_ms": 954.3440341949463,
+   "result_bytes": 9164584,
+   "p99_result_bytes": 160237.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 89,
+   "spilled_bytes": 8507206
+  },
+  {
+   "tool": "datadog_list_datadog_skills",
+   "calls": 3,
+   "failed": 0,
+   "time_s": 10.9,
+   "p50_ms": 1986.4931106567383,
+   "p99_ms": 7988.400936126709,
+   "result_bytes": 73173,
+   "p99_result_bytes": 27406.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "railway_railway-agent",
+   "calls": 1,
+   "failed": 0,
+   "time_s": 9.9,
+   "p50_ms": 9874.382972717285,
+   "p99_ms": 9874.382972717285,
+   "result_bytes": 1525,
+   "p99_result_bytes": 1525.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_msx_save",
+   "calls": 229,
+   "failed": 2,
+   "time_s": 8.9,
+   "p50_ms": 24.5819091796875,
+   "p99_ms": 202.2101879119873,
+   "result_bytes": 500885,
+   "p99_result_bytes": 4011.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "railway_describe-service",
+   "calls": 8,
+   "failed": 1,
+   "time_s": 8.8,
+   "p50_ms": 936.7380142211914,
+   "p99_ms": 2046.9939708709717,
+   "result_bytes": 8213,
+   "p99_result_bytes": 1363.0,
+   "reread_calls": 2,
+   "reread_bytes": 2276,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_msx_checkpoint_info",
+   "calls": 82,
+   "failed": 32,
+   "time_s": 8.7,
+   "p50_ms": 50.7051944732666,
+   "p99_ms": 609.3838214874268,
+   "result_bytes": 34031,
+   "p99_result_bytes": 857.0,
+   "reread_calls": 9,
+   "reread_bytes": 5482,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "supabase_list_projects",
+   "calls": 8,
+   "failed": 0,
+   "time_s": 8.4,
+   "p50_ms": 606.687068939209,
+   "p99_ms": 3034.3871116638184,
+   "result_bytes": 6208,
+   "p99_result_bytes": 776.0,
+   "reread_calls": 2,
+   "reread_bytes": 1552,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_wiki_lint",
+   "calls": 38,
+   "failed": 0,
+   "time_s": 8.1,
+   "p50_ms": 4.316091537475586,
+   "p99_ms": 7294.562816619873,
+   "result_bytes": 29986,
+   "p99_result_bytes": 1105.0,
+   "reread_calls": 3,
+   "reread_bytes": 2354,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "github_search_commits",
+   "calls": 5,
+   "failed": 0,
+   "time_s": 7.2,
+   "p50_ms": 1350.9471416473389,
+   "p99_ms": 1736.9239330291748,
+   "result_bytes": 120632,
+   "p99_result_bytes": 120112.0,
+   "reread_calls": 1,
+   "reread_bytes": 130,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "cloudflare_docs",
+   "calls": 2,
+   "failed": 1,
+   "time_s": 7.0,
+   "p50_ms": 6466.383934020996,
+   "p99_ms": 6466.383934020996,
+   "result_bytes": 8077,
+   "p99_result_bytes": 7968.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_file_upload",
+   "calls": 11,
+   "failed": 11,
+   "time_s": 6.4,
+   "p50_ms": 618.1609630584717,
+   "p99_ms": 762.8459930419922,
+   "result_bytes": 513,
+   "p99_result_bytes": 63.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_msx_meta",
+   "calls": 205,
+   "failed": 0,
+   "time_s": 6.3,
+   "p50_ms": 5.492925643920898,
+   "p99_ms": 290.8439636230469,
+   "result_bytes": 167098,
+   "p99_result_bytes": 1879.0,
+   "reread_calls": 83,
+   "reread_bytes": 61134,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "railway_delete-service",
+   "calls": 1,
+   "failed": 0,
+   "time_s": 6.0,
+   "p50_ms": 6049.850940704346,
+   "p99_ms": 6049.850940704346,
+   "result_bytes": 120,
+   "p99_result_bytes": 120.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_ask_withdraw",
+   "calls": 76,
+   "failed": 5,
+   "time_s": 5.9,
+   "p50_ms": 3.1528472900390625,
+   "p99_ms": 113.5098934173584,
+   "result_bytes": 5106,
+   "p99_result_bytes": 68.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_board_reaction",
+   "calls": 14,
+   "failed": 0,
+   "time_s": 5.8,
+   "p50_ms": 89.21289443969727,
+   "p99_ms": 3955.5671215057373,
+   "result_bytes": 3113,
+   "p99_result_bytes": 226.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "datadog_execute_code",
+   "calls": 4,
+   "failed": 0,
+   "time_s": 5.8,
+   "p50_ms": 1228.5528182983398,
+   "p99_ms": 2339.1621112823486,
+   "result_bytes": 18694,
+   "p99_result_bytes": 11061.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "keeper_wiki_read",
+   "calls": 157,
+   "failed": 4,
+   "time_s": 5.6,
+   "p50_ms": 2.115011215209961,
+   "p99_ms": 296.70190811157227,
+   "result_bytes": 679345,
+   "p99_result_bytes": 15878.0,
+   "reread_calls": 6,
+   "reread_bytes": 24444,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "browser_command",
+   "calls": 39,
+   "failed": 15,
+   "time_s": 5.5,
+   "p50_ms": 22.491931915283203,
+   "p99_ms": 1206.3789367675781,
+   "result_bytes": 545747,
+   "p99_result_bytes": 125633.0,
+   "reread_calls": 2,
+   "reread_bytes": 72711,
+   "spilled_calls": 8,
+   "spilled_bytes": 472924
+  },
+  {
+   "tool": "masc_msx_peek",
+   "calls": 127,
+   "failed": 2,
+   "time_s": 5.3,
+   "p50_ms": 9.860038757324219,
+   "p99_ms": 610.1799011230469,
+   "result_bytes": 23568,
+   "p99_result_bytes": 538.0,
+   "reread_calls": 25,
+   "reread_bytes": 4051,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "github_update_pull_request",
+   "calls": 2,
+   "failed": 0,
+   "time_s": 5.2,
+   "p50_ms": 2851.9680500030518,
+   "p99_ms": 2851.9680500030518,
+   "result_bytes": 144,
+   "p99_result_bytes": 72.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "github_search_issues",
+   "calls": 2,
+   "failed": 0,
+   "time_s": 4.9,
+   "p50_ms": 3253.147840499878,
+   "p99_ms": 3253.147840499878,
+   "result_bytes": 15142,
+   "p99_result_bytes": 15087.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_run_list",
+   "calls": 5,
+   "failed": 0,
+   "time_s": 4.8,
+   "p50_ms": 549.0279197692871,
+   "p99_ms": 2535.811185836792,
+   "result_bytes": 4226243,
+   "p99_result_bytes": 946818.0,
+   "reread_calls": 1,
+   "reread_bytes": 876548,
+   "spilled_calls": 5,
+   "spilled_bytes": 4226243
+  },
+  {
+   "tool": "atlassian_lookupJiraAccountId",
+   "calls": 3,
+   "failed": 0,
+   "time_s": 4.7,
+   "p50_ms": 874.1562366485596,
+   "p99_ms": 3057.1908950805664,
+   "result_bytes": 1240,
+   "p99_result_bytes": 503.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "github_get_me",
+   "calls": 2,
+   "failed": 0,
+   "time_s": 4.6,
+   "p50_ms": 3101.377010345459,
+   "p99_ms": 3101.377010345459,
+   "result_bytes": 938,
+   "p99_result_bytes": 632.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "cloudflare_whoami",
+   "calls": 1,
+   "failed": 0,
+   "time_s": 4.4,
+   "p50_ms": 4356.553077697754,
+   "p99_ms": 4356.553077697754,
+   "result_bytes": 178,
+   "p99_result_bytes": 178.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "atlassian_fetch",
+   "calls": 4,
+   "failed": 0,
+   "time_s": 3.9,
+   "p50_ms": 951.8840312957764,
+   "p99_ms": 1125.887155532837,
+   "result_bytes": 12471,
+   "p99_result_bytes": 3598.0,
+   "reread_calls": 2,
+   "reread_bytes": 7196,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "atlassian_getTransitionsForJiraIssue",
+   "calls": 2,
+   "failed": 0,
+   "time_s": 3.9,
+   "p50_ms": 3284.8830223083496,
+   "p99_ms": 3284.8830223083496,
+   "result_bytes": 4422,
+   "p99_result_bytes": 2595.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "datadog_aggregate_events",
+   "calls": 3,
+   "failed": 0,
+   "time_s": 3.8,
+   "p50_ms": 844.3620204925537,
+   "p99_ms": 2194.164991378784,
+   "result_bytes": 1329,
+   "p99_result_bytes": 1163.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "railway_redeploy",
+   "calls": 3,
+   "failed": 2,
+   "time_s": 3.4,
+   "p50_ms": 1163.5429859161377,
+   "p99_ms": 1636.3279819488525,
+   "result_bytes": 1457,
+   "p99_result_bytes": 673.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "github_push_files",
+   "calls": 1,
+   "failed": 0,
+   "time_s": 3.4,
+   "p50_ms": 3380.457878112793,
+   "p99_ms": 3380.457878112793,
+   "result_bytes": 429,
+   "p99_result_bytes": 429.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "railway_describe-environment",
+   "calls": 4,
+   "failed": 2,
+   "time_s": 3.3,
+   "p50_ms": 897.7329730987549,
+   "p99_ms": 1033.3809852600098,
+   "result_bytes": 1871,
+   "p99_result_bytes": 1450.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "railway_list-variables",
+   "calls": 2,
+   "failed": 1,
+   "time_s": 3.3,
+   "p50_ms": 1724.0090370178223,
+   "p99_ms": 1724.0090370178223,
+   "result_bytes": 882,
+   "p99_result_bytes": 654.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "github_create_branch",
+   "calls": 1,
+   "failed": 0,
+   "time_s": 2.9,
+   "p50_ms": 2935.828924179077,
+   "p99_ms": 2935.828924179077,
+   "result_bytes": 429,
+   "p99_result_bytes": 429.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "railway_get-service-config",
+   "calls": 4,
+   "failed": 0,
+   "time_s": 2.9,
+   "p50_ms": 672.8849411010742,
+   "p99_ms": 978.348970413208,
+   "result_bytes": 3770,
+   "p99_result_bytes": 1044.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "keeper_skill_publish",
+   "calls": 23,
+   "failed": 2,
+   "time_s": 2.5,
+   "p50_ms": 33.54001045227051,
+   "p99_ms": 912.2350215911865,
+   "result_bytes": 22486,
+   "p99_result_bytes": 1676.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_dos_load",
+   "calls": 12,
+   "failed": 2,
+   "time_s": 2.5,
+   "p50_ms": 113.51585388183594,
+   "p99_ms": 1188.3838176727295,
+   "result_bytes": 66760,
+   "p99_result_bytes": 11893.0,
+   "reread_calls": 1,
+   "reread_bytes": 5617,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "railway_get-staged-changes",
+   "calls": 3,
+   "failed": 0,
+   "time_s": 2.5,
+   "p50_ms": 860.6879711151123,
+   "p99_ms": 1073.6360549926758,
+   "result_bytes": 213,
+   "p99_result_bytes": 71.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "github_issue_write",
+   "calls": 1,
+   "failed": 0,
+   "time_s": 2.4,
+   "p50_ms": 2387.0229721069336,
+   "p99_ms": 2387.0229721069336,
+   "result_bytes": 74,
+   "p99_result_bytes": 74.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "github_list_branches",
+   "calls": 1,
+   "failed": 0,
+   "time_s": 2.1,
+   "p50_ms": 2067.1868324279785,
+   "p99_ms": 2067.1868324279785,
+   "result_bytes": 3617,
+   "p99_result_bytes": 3617.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_lane_observe",
+   "calls": 2,
+   "failed": 2,
+   "time_s": 2.0,
+   "p50_ms": 1348.1841087341309,
+   "p99_ms": 1348.1841087341309,
+   "result_bytes": 86,
+   "p99_result_bytes": 43.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "keeper_library_search",
+   "calls": 154,
+   "failed": 0,
+   "time_s": 1.9,
+   "p50_ms": 7.0,
+   "p99_ms": 95.0,
+   "result_bytes": 8509,
+   "p99_result_bytes": 96.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_msx_load",
+   "calls": 8,
+   "failed": 0,
+   "time_s": 1.9,
+   "p50_ms": 198.75597953796387,
+   "p99_ms": 415.8368110656738,
+   "result_bytes": 39508,
+   "p99_result_bytes": 5844.0,
+   "reread_calls": 1,
+   "reread_bytes": 5828,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "keeper_wiki_search",
+   "calls": 142,
+   "failed": 1,
+   "time_s": 1.8,
+   "p50_ms": 8.0,
+   "p99_ms": 65.28210639953613,
+   "result_bytes": 15294,
+   "p99_result_bytes": 776.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "datadog_load_datadog_skill",
+   "calls": 2,
+   "failed": 0,
+   "time_s": 1.8,
+   "p50_ms": 955.132007598877,
+   "p99_ms": 955.132007598877,
+   "result_bytes": 8578,
+   "p99_result_bytes": 6705.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_config",
+   "calls": 116,
+   "failed": 0,
+   "time_s": 1.6,
+   "p50_ms": 2.51007080078125,
+   "p99_ms": 257.8890323638916,
+   "result_bytes": 1149839,
+   "p99_result_bytes": 96742.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 5,
+   "spilled_bytes": 255408
+  },
+  {
+   "tool": "masc_board_delete",
+   "calls": 7,
+   "failed": 1,
+   "time_s": 1.6,
+   "p50_ms": 151.4139175415039,
+   "p99_ms": 902.6439189910889,
+   "result_bytes": 394,
+   "p99_result_bytes": 112.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_goal_transition",
+   "calls": 9,
+   "failed": 2,
+   "time_s": 1.5,
+   "p50_ms": 51.14412307739258,
+   "p99_ms": 468.5029983520508,
+   "result_bytes": 17531,
+   "p99_result_bytes": 3679.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "keeper_candle_balance",
+   "calls": 66,
+   "failed": 0,
+   "time_s": 1.4,
+   "p50_ms": 4.935979843139648,
+   "p99_ms": 71.65098190307617,
+   "result_bytes": 7535,
+   "p99_result_bytes": 149.0,
+   "reread_calls": 1,
+   "reread_bytes": 64,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "railway_list-workspaces",
+   "calls": 1,
+   "failed": 0,
+   "time_s": 1.3,
+   "p50_ms": 1325.6950378417969,
+   "p99_ms": 1325.6950378417969,
+   "result_bytes": 80,
+   "p99_result_bytes": 80.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_run_init",
+   "calls": 60,
+   "failed": 0,
+   "time_s": 1.2,
+   "p50_ms": 2.685070037841797,
+   "p99_ms": 263.32688331604004,
+   "result_bytes": 7985,
+   "p99_result_bytes": 141.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "atlassian_transitionJiraIssue",
+   "calls": 1,
+   "failed": 0,
+   "time_s": 1.1,
+   "p50_ms": 1137.8638744354248,
+   "p99_ms": 1137.8638744354248,
+   "result_bytes": 47,
+   "p99_result_bytes": 47.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "keeper_memory_select",
+   "calls": 1,
+   "failed": 0,
+   "time_s": 1.1,
+   "p50_ms": 1081.434965133667,
+   "p99_ms": 1081.434965133667,
+   "result_bytes": 186,
+   "p99_result_bytes": 186.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "keeper_constitution_read",
+   "calls": 50,
+   "failed": 0,
+   "time_s": 1.0,
+   "p50_ms": 4.604816436767578,
+   "p99_ms": 542.8359508514404,
+   "result_bytes": 1463470,
+   "p99_result_bytes": 37162.0,
+   "reread_calls": 4,
+   "reread_bytes": 124079,
+   "spilled_calls": 10,
+   "spilled_bytes": 300104
+  },
+  {
+   "tool": "masc_dos_click",
+   "calls": 7,
+   "failed": 1,
+   "time_s": 1.0,
+   "p50_ms": 107.34009742736816,
+   "p99_ms": 317.49701499938965,
+   "result_bytes": 45458,
+   "p99_result_bytes": 11478.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_wiki_list",
+   "calls": 29,
+   "failed": 0,
+   "time_s": 1.0,
+   "p50_ms": 5.350828170776367,
+   "p99_ms": 212.48912811279297,
+   "result_bytes": 70820,
+   "p99_result_bytes": 3957.0,
+   "reread_calls": 1,
+   "reread_bytes": 231,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "keeper_compose_sangokushi-2-end-command",
+   "calls": 3,
+   "failed": 0,
+   "time_s": 0.8,
+   "p50_ms": 209.17701721191406,
+   "p99_ms": 506.0451030731201,
+   "result_bytes": 14560,
+   "p99_result_bytes": 7144.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 1,
+   "spilled_bytes": 345
+  },
+  {
+   "tool": "masc_lane_evidence",
+   "calls": 1,
+   "failed": 0,
+   "time_s": 0.8,
+   "p50_ms": 824.2011070251465,
+   "p99_ms": 824.2011070251465,
+   "result_bytes": 892,
+   "p99_result_bytes": 892.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_task_set_goal",
+   "calls": 10,
+   "failed": 1,
+   "time_s": 0.7,
+   "p50_ms": 17.663955688476562,
+   "p99_ms": 533.607006072998,
+   "result_bytes": 843,
+   "p99_result_bytes": 173.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_dos_inventory",
+   "calls": 6,
+   "failed": 0,
+   "time_s": 0.7,
+   "p50_ms": 112.00904846191406,
+   "p99_ms": 331.58397674560547,
+   "result_bytes": 79410,
+   "p99_result_bytes": 13235.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_wiki_update",
+   "calls": 33,
+   "failed": 0,
+   "time_s": 0.7,
+   "p50_ms": 6.561994552612305,
+   "p99_ms": 294.9810028076172,
+   "result_bytes": 1568,
+   "p99_result_bytes": 64.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_keeper_delegate_cancel",
+   "calls": 26,
+   "failed": 4,
+   "time_s": 0.6,
+   "p50_ms": 5.778074264526367,
+   "p99_ms": 211.9619846343994,
+   "result_bytes": 19308,
+   "p99_result_bytes": 877.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_msx_step_until_change",
+   "calls": 11,
+   "failed": 1,
+   "time_s": 0.6,
+   "p50_ms": 31.46219253540039,
+   "p99_ms": 157.79709815979004,
+   "result_bytes": 33924,
+   "p99_result_bytes": 3733.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_board_hearths",
+   "calls": 10,
+   "failed": 0,
+   "time_s": 0.5,
+   "p50_ms": 1.4989376068115234,
+   "p99_ms": 469.0721035003662,
+   "result_bytes": 12577,
+   "p99_result_bytes": 1807.0,
+   "reread_calls": 1,
+   "reread_bytes": 1807,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "keeper_webmcp_list",
+   "calls": 2,
+   "failed": 2,
+   "time_s": 0.3,
+   "p50_ms": 145.0948715209961,
+   "p99_ms": 145.0948715209961,
+   "result_bytes": 369,
+   "p99_result_bytes": 207.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_goal_upsert",
+   "calls": 5,
+   "failed": 0,
+   "time_s": 0.3,
+   "p50_ms": 35.01415252685547,
+   "p99_ms": 157.17291831970215,
+   "result_bytes": 8847,
+   "p99_result_bytes": 2129.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "keeper_constitution_write",
+   "calls": 56,
+   "failed": 25,
+   "time_s": 0.3,
+   "p50_ms": 2.0520687103271484,
+   "p99_ms": 17.055988311767578,
+   "result_bytes": 6192,
+   "p99_result_bytes": 152.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_agent_fitness",
+   "calls": 3,
+   "failed": 0,
+   "time_s": 0.3,
+   "p50_ms": 88.76705169677734,
+   "p99_ms": 135.17212867736816,
+   "result_bytes": 68925,
+   "p99_result_bytes": 24158.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_lane_declaration_read",
+   "calls": 6,
+   "failed": 1,
+   "time_s": 0.3,
+   "p50_ms": 6.175994873046875,
+   "p99_ms": 249.96280670166016,
+   "result_bytes": 2882,
+   "p99_result_bytes": 841.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_msx_eject",
+   "calls": 1,
+   "failed": 0,
+   "time_s": 0.3,
+   "p50_ms": 268.4791088104248,
+   "p99_ms": 268.4791088104248,
+   "result_bytes": 240,
+   "p99_result_bytes": 240.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "keeper_tool_search",
+   "calls": 1928,
+   "failed": 34,
+   "time_s": 0.2,
+   "p50_ms": 0.052928924560546875,
+   "p99_ms": 0.3819465637207031,
+   "result_bytes": 277723,
+   "p99_result_bytes": 512.0,
+   "reread_calls": 13,
+   "reread_bytes": 1227,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "keeper_candle_catalog",
+   "calls": 4,
+   "failed": 0,
+   "time_s": 0.2,
+   "p50_ms": 73.03810119628906,
+   "p99_ms": 75.68216323852539,
+   "result_bytes": 4874,
+   "p99_result_bytes": 1345.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_msx_change_disk",
+   "calls": 3,
+   "failed": 0,
+   "time_s": 0.2,
+   "p50_ms": 79.83803749084473,
+   "p99_ms": 102.32114791870117,
+   "result_bytes": 9128,
+   "p99_result_bytes": 3681.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_board_close",
+   "calls": 16,
+   "failed": 1,
+   "time_s": 0.2,
+   "p50_ms": 1.3799667358398438,
+   "p99_ms": 169.35300827026367,
+   "result_bytes": 789,
+   "p99_result_bytes": 99.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_msx_ram_diff",
+   "calls": 2,
+   "failed": 0,
+   "time_s": 0.2,
+   "p50_ms": 149.48606491088867,
+   "p99_ms": 149.48606491088867,
+   "result_bytes": 5980,
+   "p99_result_bytes": 3105.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_dos_peek",
+   "calls": 142,
+   "failed": 2,
+   "time_s": 0.1,
+   "p50_ms": 0.41604042053222656,
+   "p99_ms": 5.7659149169921875,
+   "result_bytes": 59704,
+   "p99_result_bytes": 540.0,
+   "reread_calls": 1,
+   "reread_bytes": 540,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_board_profile",
+   "calls": 9,
+   "failed": 0,
+   "time_s": 0.1,
+   "p50_ms": 7.996082305908203,
+   "p99_ms": 63.85207176208496,
+   "result_bytes": 764,
+   "p99_result_bytes": 90.0,
+   "reread_calls": 1,
+   "reread_bytes": 79,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_wiki_create",
+   "calls": 8,
+   "failed": 0,
+   "time_s": 0.1,
+   "p50_ms": 7.396936416625977,
+   "p99_ms": 16.731977462768555,
+   "result_bytes": 850,
+   "p99_result_bytes": 129.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_lane_detach",
+   "calls": 1,
+   "failed": 0,
+   "time_s": 0.1,
+   "p50_ms": 121.31094932556152,
+   "p99_ms": 121.31094932556152,
+   "result_bytes": 2890,
+   "p99_result_bytes": 2890.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "keeper_voice_agent",
+   "calls": 3,
+   "failed": 0,
+   "time_s": 0.1,
+   "p50_ms": 14.82391357421875,
+   "p99_ms": 65.45782089233398,
+   "result_bytes": 3747,
+   "p99_result_bytes": 1249.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "keeper_candle_purchase",
+   "calls": 1,
+   "failed": 0,
+   "time_s": 0.0,
+   "p50_ms": 1.2478828430175781,
+   "p99_ms": 1.2478828430175781,
+   "result_bytes": 160,
+   "p99_result_bytes": 160.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "keeper_candle_equip",
+   "calls": 1,
+   "failed": 0,
+   "time_s": 0.0,
+   "p50_ms": 0.8420944213867188,
+   "p99_ms": 0.8420944213867188,
+   "result_bytes": 144,
+   "p99_result_bytes": 144.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_get_metrics",
+   "calls": 7,
+   "failed": 5,
+   "time_s": 0.0,
+   "p50_ms": 3.1239986419677734,
+   "p99_ms": 9.11402702331543,
+   "result_bytes": 1027,
+   "p99_result_bytes": 286.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_plan_clear_task",
+   "calls": 11,
+   "failed": 0,
+   "time_s": 0.0,
+   "p50_ms": 3.1609535217285156,
+   "p99_ms": 10.155916213989258,
+   "result_bytes": 583,
+   "p99_result_bytes": 53.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "keeper_voice_sessions",
+   "calls": 1,
+   "failed": 0,
+   "time_s": 0.0,
+   "p50_ms": 3.3550262451171875,
+   "p99_ms": 3.3550262451171875,
+   "result_bytes": 33,
+   "p99_result_bytes": 33.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_fusion_status",
+   "calls": 3,
+   "failed": 0,
+   "time_s": 0.0,
+   "p50_ms": 1.190185546875,
+   "p99_ms": 3.5130977630615234,
+   "result_bytes": 343,
+   "p99_result_bytes": 281.0,
+   "reread_calls": 1,
+   "reread_bytes": 31,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "keeper_tasks_audit",
+   "calls": 7,
+   "failed": 0,
+   "time_s": 0.0,
+   "p50_ms": 2.0020008087158203,
+   "p99_ms": 4.541873931884766,
+   "result_bytes": 3667,
+   "p99_result_bytes": 663.0,
+   "reread_calls": 1,
+   "reread_bytes": 591,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "keeper_constitution_remove",
+   "calls": 10,
+   "failed": 0,
+   "time_s": 0.0,
+   "p50_ms": 1.5549659729003906,
+   "p99_ms": 3.793001174926758,
+   "result_bytes": 5185,
+   "p99_result_bytes": 896.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "keeper_compose_browser-live-follow-read",
+   "calls": 1,
+   "failed": 1,
+   "time_s": 0.0,
+   "p50_ms": 12.206077575683594,
+   "p99_ms": 12.206077575683594,
+   "result_bytes": 2089,
+   "p99_result_bytes": 2089.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_board_curation_read",
+   "calls": 1,
+   "failed": 0,
+   "time_s": 0.0,
+   "p50_ms": 1.2631416320800781,
+   "p99_ms": 1.2631416320800781,
+   "result_bytes": 4,
+   "p99_result_bytes": 4.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_lane_updates",
+   "calls": 2,
+   "failed": 0,
+   "time_s": 0.0,
+   "p50_ms": 0.8921623229980469,
+   "p99_ms": 0.8921623229980469,
+   "result_bytes": 264,
+   "p99_result_bytes": 132.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "masc_msx_export_disk",
+   "calls": 1,
+   "failed": 0,
+   "time_s": 0.0,
+   "p50_ms": 27.064085006713867,
+   "p99_ms": 27.064085006713867,
+   "result_bytes": 475,
+   "p99_result_bytes": 475.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  },
+  {
+   "tool": "keeper_composition_result",
+   "calls": 1,
+   "failed": 1,
+   "time_s": 0.0,
+   "p50_ms": 0.00286102294921875,
+   "p99_ms": 0.00286102294921875,
+   "result_bytes": 120,
+   "p99_result_bytes": 120.0,
+   "reread_calls": 0,
+   "reread_bytes": 0,
+   "spilled_calls": 0,
+   "spilled_bytes": 0
+  }
+ ],
+ "daily": {
+  "2026-10-05": {
+   "calls": 29908,
+   "failed": 671,
+   "time_s": 76420.6,
+   "result_bytes": 86553614,
+   "spilled_bytes": 6107024,
+   "reread_bytes": 0,
+   "wait_s": 3026.7
+  },
+  "2026-10-06": {
+   "calls": 27079,
+   "failed": 436,
+   "time_s": 99028.7,
+   "result_bytes": 76602024,
+   "spilled_bytes": 5989897,
+   "reread_bytes": 1592428,
+   "wait_s": 5185.8
+  },
+  "2026-10-07": {
+   "calls": 33429,
+   "failed": 514,
+   "time_s": 94208.5,
+   "result_bytes": 109288312,
+   "spilled_bytes": 11772073,
+   "reread_bytes": 2688843,
+   "wait_s": 9908.2
+  },
+  "2026-10-08": {
+   "calls": 35340,
+   "failed": 635,
+   "time_s": 83907.5,
+   "result_bytes": 126762497,
+   "spilled_bytes": 13088049,
+   "reread_bytes": 7234879,
+   "wait_s": 3068.9
+  },
+  "2026-10-09": {
+   "calls": 26837,
+   "failed": 403,
+   "time_s": 81278.2,
+   "result_bytes": 99110235,
+   "spilled_bytes": 10790481,
+   "reread_bytes": 5192325,
+   "wait_s": 3052.3
+  },
+  "2026-10-10": {
+   "calls": 10402,
+   "failed": 212,
+   "time_s": 22252.2,
+   "result_bytes": 23081372,
+   "spilled_bytes": 1965355,
+   "reread_bytes": 596380,
+   "wait_s": 312.2
+  },
+  "2026-10-11": {
+   "calls": 9238,
+   "failed": 310,
+   "time_s": 31681.8,
+   "result_bytes": 23062100,
+   "spilled_bytes": 2434395,
+   "reread_bytes": 1740204,
+   "wait_s": 13123.1
+  },
+  "2026-10-12": {
+   "calls": 19370,
+   "failed": 472,
+   "time_s": 57377.0,
+   "result_bytes": 60287506,
+   "spilled_bytes": 5632017,
+   "reread_bytes": 1230630,
+   "wait_s": 4449.9
+  },
+  "2026-10-13": {
+   "calls": 29180,
+   "failed": 579,
+   "time_s": 110421.9,
+   "result_bytes": 157222648,
+   "spilled_bytes": 63269418,
+   "reread_bytes": 8541984,
+   "wait_s": 9801.9
+  },
+  "2026-10-14": {
+   "calls": 29845,
+   "failed": 411,
+   "time_s": 89458.0,
+   "result_bytes": 119532748,
+   "spilled_bytes": 39706027,
+   "reread_bytes": 9090980,
+   "wait_s": 14488.7
+  },
+  "2026-10-15": {
+   "calls": 2856,
+   "failed": 63,
+   "time_s": 21720.4,
+   "result_bytes": 7277225,
+   "spilled_bytes": 329648,
+   "reread_bytes": 407359,
+   "wait_s": 5172.4
+  },
+  "2026-10-16": {
+   "calls": 15400,
+   "failed": 277,
+   "time_s": 61416.8,
+   "result_bytes": 53585769,
+   "spilled_bytes": 6663638,
+   "reread_bytes": 2637289,
+   "wait_s": 12418.7
+  },
+  "2026-10-17": {
+   "calls": 13397,
+   "failed": 98,
+   "time_s": 42249.6,
+   "result_bytes": 116884241,
+   "spilled_bytes": 73252991,
+   "reread_bytes": 1718849,
+   "wait_s": 1968.1
+  },
+  "2026-10-18": {
+   "calls": 10845,
+   "failed": 105,
+   "time_s": 20182.3,
+   "result_bytes": 34330252,
+   "spilled_bytes": 2359254,
+   "reread_bytes": 533747,
+   "wait_s": 165.5
+  },
+  "2026-10-19": {
+   "calls": 24112,
+   "failed": 2453,
+   "time_s": 108244.9,
+   "result_bytes": 75254793,
+   "spilled_bytes": 8968350,
+   "reread_bytes": 1401410,
+   "wait_s": 18824.2
+  },
+  "2026-10-20": {
+   "calls": 25243,
+   "failed": 889,
+   "time_s": 270182.8,
+   "result_bytes": 121490661,
+   "spilled_bytes": 43630188,
+   "reread_bytes": 2356425,
+   "wait_s": 19010.0
+  },
+  "2026-10-21": {
+   "calls": 28888,
+   "failed": 667,
+   "time_s": 326524.9,
+   "result_bytes": 114496647,
+   "spilled_bytes": 30640127,
+   "reread_bytes": 5012903,
+   "wait_s": 33800.8
+  },
+  "2026-10-22": {
+   "calls": 16501,
+   "failed": 497,
+   "time_s": 101387.7,
+   "result_bytes": 110735814,
+   "spilled_bytes": 52072975,
+   "reread_bytes": 3306776,
+   "wait_s": 12764.8
+  },
+  "2026-10-23": {
+   "calls": 36961,
+   "failed": 817,
+   "time_s": 96696.0,
+   "result_bytes": 228481535,
+   "spilled_bytes": 57543683,
+   "reread_bytes": 45686592,
+   "wait_s": 16826.4
+  },
+  "2026-10-24": {
+   "calls": 39777,
+   "failed": 601,
+   "time_s": 92361.8,
+   "result_bytes": 492760139,
+   "spilled_bytes": 115896043,
+   "reread_bytes": 213819086,
+   "wait_s": 1006.7
+  },
+  "2026-10-25": {
+   "calls": 59369,
+   "failed": 2300,
+   "time_s": 218592.1,
+   "result_bytes": 722687075,
+   "spilled_bytes": 133126791,
+   "reread_bytes": 394994445,
+   "wait_s": 4754.2
+  },
+  "2026-10-26": {
+   "calls": 43971,
+   "failed": 1804,
+   "time_s": 136562.4,
+   "result_bytes": 341299211,
+   "spilled_bytes": 124968356,
+   "reread_bytes": 98755761,
+   "wait_s": 6163.5
+  },
+  "2026-10-27": {
+   "calls": 28685,
+   "failed": 1261,
+   "time_s": 96819.8,
+   "result_bytes": 183058116,
+   "spilled_bytes": 81813045,
+   "reread_bytes": 5946142,
+   "wait_s": 17327.5
+  },
+  "2026-10-28": {
+   "calls": 32669,
+   "failed": 1361,
+   "time_s": 103332.0,
+   "result_bytes": 214796411,
+   "spilled_bytes": 50436209,
+   "reread_bytes": 51787383,
+   "wait_s": 6325.5
+  },
+  "2026-10-29": {
+   "calls": 23113,
+   "failed": 796,
+   "time_s": 85356.8,
+   "result_bytes": 92678025,
+   "spilled_bytes": 20736490,
+   "reread_bytes": 7710420,
+   "wait_s": 15121.4
+  },
+  "2026-10-30": {
+   "calls": 29795,
+   "failed": 3725,
+   "time_s": 90469.6,
+   "result_bytes": 168153411,
+   "spilled_bytes": 48890118,
+   "reread_bytes": 39240299,
+   "wait_s": 13360.7
+  },
+  "2026-10-31": {
+   "calls": 8006,
+   "failed": 1610,
+   "time_s": 13938.3,
+   "result_bytes": 37989914,
+   "spilled_bytes": 22323171,
+   "reread_bytes": 10244438,
+   "wait_s": 3630.2
+  }
+ },
+ "hourly": {
+  "2026-10-05T00": {
+   "calls": 472,
+   "failed": 5,
+   "time_s": 376.6,
+   "result_bytes": 1666976,
+   "spilled_bytes": 147712,
+   "reread_bytes": 0,
+   "wait_s": 0.0
+  },
+  "2026-10-05T01": {
+   "calls": 215,
+   "failed": 3,
+   "time_s": 195.3,
+   "result_bytes": 683620,
+   "spilled_bytes": 86669,
+   "reread_bytes": 0,
+   "wait_s": 1.1
+  },
+  "2026-10-05T02": {
+   "calls": 140,
+   "failed": 4,
+   "time_s": 84.9,
+   "result_bytes": 375321,
+   "spilled_bytes": 0,
+   "reread_bytes": 0,
+   "wait_s": 0.0
+  },
+  "2026-10-05T03": {
+   "calls": 157,
+   "failed": 4,
+   "time_s": 58.9,
+   "result_bytes": 447935,
+   "spilled_bytes": 0,
+   "reread_bytes": 0,
+   "wait_s": 0.0
+  },
+  "2026-10-05T04": {
+   "calls": 137,
+   "failed": 4,
+   "time_s": 80.1,
+   "result_bytes": 300485,
+   "spilled_bytes": 0,
+   "reread_bytes": 0,
+   "wait_s": 0.0
+  },
+  "2026-10-05T05": {
+   "calls": 1462,
+   "failed": 17,
+   "time_s": 2817.4,
+   "result_bytes": 4268702,
+   "spilled_bytes": 208024,
+   "reread_bytes": 0,
+   "wait_s": 23.4
+  },
+  "2026-10-05T06": {
+   "calls": 921,
+   "failed": 13,
+   "time_s": 1364.1,
+   "result_bytes": 3028543,
+   "spilled_bytes": 354270,
+   "reread_bytes": 0,
+   "wait_s": 0.0
+  },
+  "2026-10-05T07": {
+   "calls": 1201,
+   "failed": 24,
+   "time_s": 3803.1,
+   "result_bytes": 3732815,
+   "spilled_bytes": 138827,
+   "reread_bytes": 0,
+   "wait_s": 76.0
+  },
+  "2026-10-05T08": {
+   "calls": 793,
+   "failed": 114,
+   "time_s": 362.8,
+   "result_bytes": 3486358,
+   "spilled_bytes": 383608,
+   "reread_bytes": 0,
+   "wait_s": 0.0
+  },
+  "2026-10-05T09": {
+   "calls": 906,
+   "failed": 62,
+   "time_s": 226.5,
+   "result_bytes": 6752307,
+   "spilled_bytes": 973855,
+   "reread_bytes": 0,
+   "wait_s": 0.0
+  },
+  "2026-10-05T10": {
+   "calls": 894,
+   "failed": 49,
+   "time_s": 260.3,
+   "result_bytes": 6523575,
+   "spilled_bytes": 1331072,
+   "reread_bytes": 0,
+   "wait_s": 0.0
+  },
+  "2026-10-05T11": {
+   "calls": 1828,
+   "failed": 23,
+   "time_s": 10581.1,
+   "result_bytes": 5251186,
+   "spilled_bytes": 457586,
+   "reread_bytes": 0,
+   "wait_s": 520.9
+  },
+  "2026-10-05T12": {
+   "calls": 1912,
+   "failed": 25,
+   "time_s": 4511.9,
+   "result_bytes": 5131219,
+   "spilled_bytes": 194204,
+   "reread_bytes": 0,
+   "wait_s": 778.7
+  },
+  "2026-10-05T13": {
+   "calls": 1631,
+   "failed": 25,
+   "time_s": 7005.2,
+   "result_bytes": 4437338,
+   "spilled_bytes": 428981,
+   "reread_bytes": 0,
+   "wait_s": 228.3
+  },
+  "2026-10-05T14": {
+   "calls": 2417,
+   "failed": 41,
+   "time_s": 5569.3,
+   "result_bytes": 5263180,
+   "spilled_bytes": 129583,
+   "reread_bytes": 0,
+   "wait_s": 73.1
+  },
+  "2026-10-05T15": {
+   "calls": 1959,
+   "failed": 92,
+   "time_s": 6659.4,
+   "result_bytes": 4507527,
+   "spilled_bytes": 28537,
+   "reread_bytes": 0,
+   "wait_s": 166.3
+  },
+  "2026-10-05T16": {
+   "calls": 1269,
+   "failed": 18,
+   "time_s": 4414.1,
+   "result_bytes": 3311917,
+   "spilled_bytes": 49045,
+   "reread_bytes": 0,
+   "wait_s": 71.6
+  },
+  "2026-10-05T17": {
+   "calls": 1652,
+   "failed": 28,
+   "time_s": 4691.0,
+   "result_bytes": 4889153,
+   "spilled_bytes": 396072,
+   "reread_bytes": 0,
+   "wait_s": 34.2
+  },
+  "2026-10-05T18": {
+   "calls": 2130,
+   "failed": 23,
+   "time_s": 4800.0,
+   "result_bytes": 4952005,
+   "spilled_bytes": 174591,
+   "reread_bytes": 0,
+   "wait_s": 22.7
+  },
+  "2026-10-05T19": {
+   "calls": 2253,
+   "failed": 21,
+   "time_s": 4021.6,
+   "result_bytes": 4610605,
+   "spilled_bytes": 173701,
+   "reread_bytes": 0,
+   "wait_s": 67.5
+  },
+  "2026-10-05T20": {
+   "calls": 587,
+   "failed": 28,
+   "time_s": 513.6,
+   "result_bytes": 1446161,
+   "spilled_bytes": 1245,
+   "reread_bytes": 0,
+   "wait_s": 0.0
+  },
+  "2026-10-05T21": {
+   "calls": 1791,
+   "failed": 18,
+   "time_s": 4049.5,
+   "result_bytes": 4167452,
+   "spilled_bytes": 2994,
+   "reread_bytes": 0,
+   "wait_s": 726.2
+  },
+  "2026-10-05T22": {
+   "calls": 2065,
+   "failed": 23,
+   "time_s": 6157.8,
+   "result_bytes": 4916514,
+   "spilled_bytes": 313902,
+   "reread_bytes": 0,
+   "wait_s": 0.0
+  },
+  "2026-10-05T23": {
+   "calls": 1116,
+   "failed": 7,
+   "time_s": 3816.1,
+   "result_bytes": 2402720,
+   "spilled_bytes": 132546,
+   "reread_bytes": 0,
+   "wait_s": 236.6
+  },
+  "2026-10-06T00": {
+   "calls": 856,
+   "failed": 4,
+   "time_s": 2346.8,
+   "result_bytes": 2224767,
+   "spilled_bytes": 2503,
+   "reread_bytes": 1358,
+   "wait_s": 176.5
+  },
+  "2026-10-06T01": {
+   "calls": 738,
+   "failed": 13,
+   "time_s": 3585.7,
+   "result_bytes": 2228111,
+   "spilled_bytes": 108662,
+   "reread_bytes": 64251,
+   "wait_s": 599.7
+  },
+  "2026-10-06T02": {
+   "calls": 834,
+   "failed": 15,
+   "time_s": 3547.4,
+   "result_bytes": 2261338,
+   "spilled_bytes": 232387,
+   "reread_bytes": 61693,
+   "wait_s": 31.2
+  },
+  "2026-10-06T03": {
+   "calls": 860,
+   "failed": 30,
+   "time_s": 3585.5,
+   "result_bytes": 2117604,
+   "spilled_bytes": 194309,
+   "reread_bytes": 41245,
+   "wait_s": 18.9
+  },
+  "2026-10-06T04": {
+   "calls": 989,
+   "failed": 22,
+   "time_s": 10460.6,
+   "result_bytes": 2413179,
+   "spilled_bytes": 410196,
+   "reread_bytes": 177040,
+   "wait_s": 18.5
+  },
+  "2026-10-06T05": {
+   "calls": 1024,
+   "failed": 46,
+   "time_s": 4032.5,
+   "result_bytes": 1975821,
+   "spilled_bytes": 90635,
+   "reread_bytes": 37990,
+   "wait_s": 82.3
+  },
+  "2026-10-06T06": {
+   "calls": 1239,
+   "failed": 24,
+   "time_s": 4123.0,
+   "result_bytes": 3252347,
+   "spilled_bytes": 224546,
+   "reread_bytes": 48993,
+   "wait_s": 146.6
+  },
+  "2026-10-06T07": {
+   "calls": 1261,
+   "failed": 10,
+   "time_s": 6054.6,
+   "result_bytes": 3775118,
+   "spilled_bytes": 567779,
+   "reread_bytes": 230571,
+   "wait_s": 696.4
+  },
+  "2026-10-06T08": {
+   "calls": 1537,
+   "failed": 22,
+   "time_s": 8596.2,
+   "result_bytes": 4262638,
+   "spilled_bytes": 118047,
+   "reread_bytes": 83686,
+   "wait_s": 979.5
+  },
+  "2026-10-06T09": {
+   "calls": 1595,
+   "failed": 18,
+   "time_s": 5047.7,
+   "result_bytes": 5335960,
+   "spilled_bytes": 1021415,
+   "reread_bytes": 71579,
+   "wait_s": 511.1
+  },
+  "2026-10-06T10": {
+   "calls": 952,
+   "failed": 13,
+   "time_s": 1699.2,
+   "result_bytes": 3429355,
+   "spilled_bytes": 379624,
+   "reread_bytes": 54996,
+   "wait_s": 18.1
+  },
+  "2026-10-06T12": {
+   "calls": 60,
+   "failed": 0,
+   "time_s": 233.7,
+   "result_bytes": 128364,
+   "spilled_bytes": 0,
+   "reread_bytes": 0,
+   "wait_s": 0.0
+  },
+  "2026-10-06T13": {
+   "calls": 1356,
+   "failed": 21,
+   "time_s": 3489.2,
+   "result_bytes": 4687951,
+   "spilled_bytes": 589106,
+   "reread_bytes": 67416,
+   "wait_s": 231.7
+  },
+  "2026-10-06T14": {
+   "calls": 1374,
+   "failed": 14,
+   "time_s": 3284.1,
+   "result_bytes": 3629661,
+   "spilled_bytes": 2540,
+   "reread_bytes": 95396,
+   "wait_s": 452.9
+  },
+  "2026-10-06T15": {
+   "calls": 1266,
+   "failed": 20,
+   "time_s": 2790.2,
+   "result_bytes": 3690049,
+   "spilled_bytes": 210943,
+   "reread_bytes": 26610,
+   "wait_s": 108.2
+  },
+  "2026-10-06T16": {
+   "calls": 1305,
+   "failed": 23,
+   "time_s": 3832.4,
+   "result_bytes": 3925399,
+   "spilled_bytes": 296901,
+   "reread_bytes": 16383,
+   "wait_s": 56.5
+  },
+  "2026-10-06T17": {
+   "calls": 1525,
+   "failed": 26,
+   "time_s": 5189.6,
+   "result_bytes": 4686780,
+   "spilled_bytes": 319197,
+   "reread_bytes": 53892,
+   "wait_s": 51.2
+  },
+  "2026-10-06T18": {
+   "calls": 1254,
+   "failed": 11,
+   "time_s": 6272.8,
+   "result_bytes": 3788849,
+   "spilled_bytes": 2551,
+   "reread_bytes": 139080,
+   "wait_s": 301.5
+  },
+  "2026-10-06T19": {
+   "calls": 1239,
+   "failed": 28,
+   "time_s": 4846.4,
+   "result_bytes": 3870228,
+   "spilled_bytes": 191408,
+   "reread_bytes": 62517,
+   "wait_s": 65.0
+  },
+  "2026-10-06T20": {
+   "calls": 1368,
+   "failed": 23,
+   "time_s": 5023.4,
+   "result_bytes": 3712967,
+   "spilled_bytes": 17133,
+   "reread_bytes": 70317,
+   "wait_s": 495.9
+  },
+  "2026-10-06T21": {
+   "calls": 1444,
+   "failed": 11,
+   "time_s": 2301.1,
+   "result_bytes": 3348689,
+   "spilled_bytes": 71861,
+   "reread_bytes": 35166,
+   "wait_s": 114.7
+  },
+  "2026-10-06T22": {
+   "calls": 1555,
+   "failed": 17,
+   "time_s": 5154.4,
+   "result_bytes": 4365632,
+   "spilled_bytes": 850189,
+   "reread_bytes": 91580,
+   "wait_s": 11.3
+  },
+  "2026-10-06T23": {
+   "calls": 1448,
+   "failed": 25,
+   "time_s": 3532.1,
+   "result_bytes": 3491217,
+   "spilled_bytes": 87965,
+   "reread_bytes": 60669,
+   "wait_s": 18.0
+  },
+  "2026-10-07T00": {
+   "calls": 1089,
+   "failed": 17,
+   "time_s": 3526.2,
+   "result_bytes": 2936724,
+   "spilled_bytes": 74913,
+   "reread_bytes": 27629,
+   "wait_s": 0.0
+  },
+  "2026-10-07T01": {
+   "calls": 1132,
+   "failed": 20,
+   "time_s": 2394.9,
+   "result_bytes": 3189943,
+   "spilled_bytes": 316074,
+   "reread_bytes": 79727,
+   "wait_s": 99.2
+  },
+  "2026-10-07T02": {
+   "calls": 1210,
+   "failed": 15,
+   "time_s": 5177.2,
+   "result_bytes": 4042918,
+   "spilled_bytes": 258520,
+   "reread_bytes": 30191,
+   "wait_s": 384.3
+  },
+  "2026-10-07T03": {
+   "calls": 1343,
+   "failed": 29,
+   "time_s": 5140.4,
+   "result_bytes": 4049054,
+   "spilled_bytes": 6926,
+   "reread_bytes": 58407,
+   "wait_s": 190.7
+  },
+  "2026-10-07T04": {
+   "calls": 1234,
+   "failed": 29,
+   "time_s": 3309.0,
+   "result_bytes": 3612693,
+   "spilled_bytes": 186741,
+   "reread_bytes": 25029,
+   "wait_s": 95.9
+  },
+  "2026-10-07T05": {
+   "calls": 1439,
+   "failed": 27,
+   "time_s": 5935.8,
+   "result_bytes": 4552704,
+   "spilled_bytes": 341585,
+   "reread_bytes": 32397,
+   "wait_s": 119.7
+  },
+  "2026-10-07T06": {
+   "calls": 928,
+   "failed": 20,
+   "time_s": 1823.1,
+   "result_bytes": 2837448,
+   "spilled_bytes": 180238,
+   "reread_bytes": 64392,
+   "wait_s": 0.0
+  },
+  "2026-10-07T07": {
+   "calls": 1689,
+   "failed": 24,
+   "time_s": 5726.2,
+   "result_bytes": 5410687,
+   "spilled_bytes": 370909,
+   "reread_bytes": 157236,
+   "wait_s": 75.5
+  },
+  "2026-10-07T08": {
+   "calls": 1320,
+   "failed": 21,
+   "time_s": 4061.4,
+   "result_bytes": 4857674,
+   "spilled_bytes": 681218,
+   "reread_bytes": 178110,
+   "wait_s": 1.4
+  },
+  "2026-10-07T09": {
+   "calls": 1226,
+   "failed": 21,
+   "time_s": 3210.4,
+   "result_bytes": 3853655,
+   "spilled_bytes": 360808,
+   "reread_bytes": 133549,
+   "wait_s": 0.0
+  },
+  "2026-10-07T10": {
+   "calls": 1138,
+   "failed": 15,
+   "time_s": 5562.5,
+   "result_bytes": 3682461,
+   "spilled_bytes": 159709,
+   "reread_bytes": 87840,
+   "wait_s": 3.3
+  },
+  "2026-10-07T11": {
+   "calls": 760,
+   "failed": 14,
+   "time_s": 5367.1,
+   "result_bytes": 2948967,
+   "spilled_bytes": 487257,
+   "reread_bytes": 67712,
+   "wait_s": 3198.4
+  },
+  "2026-10-07T12": {
+   "calls": 480,
+   "failed": 15,
+   "time_s": 1957.2,
+   "result_bytes": 1965076,
+   "spilled_bytes": 217761,
+   "reread_bytes": 149362,
+   "wait_s": 1500.9
+  },
+  "2026-10-07T13": {
+   "calls": 1314,
+   "failed": 20,
+   "time_s": 4387.2,
+   "result_bytes": 7062119,
+   "spilled_bytes": 361953,
+   "reread_bytes": 143289,
+   "wait_s": 2612.5
+  },
+  "2026-10-07T14": {
+   "calls": 1002,
+   "failed": 15,
+   "time_s": 2334.5,
+   "result_bytes": 3794891,
+   "spilled_bytes": 296192,
+   "reread_bytes": 150287,
+   "wait_s": 11.4
+  },
+  "2026-10-07T15": {
+   "calls": 2509,
+   "failed": 41,
+   "time_s": 3643.6,
+   "result_bytes": 10373175,
+   "spilled_bytes": 2939693,
+   "reread_bytes": 401594,
+   "wait_s": 58.8
+  },
+  "2026-10-07T16": {
+   "calls": 1771,
+   "failed": 20,
+   "time_s": 4431.2,
+   "result_bytes": 5514312,
+   "spilled_bytes": 536591,
+   "reread_bytes": 118060,
+   "wait_s": 105.2
+  },
+  "2026-10-07T17": {
+   "calls": 1387,
+   "failed": 23,
+   "time_s": 4394.3,
+   "result_bytes": 4232336,
+   "spilled_bytes": 553324,
+   "reread_bytes": 71586,
+   "wait_s": 182.5
+  },
+  "2026-10-07T18": {
+   "calls": 1701,
+   "failed": 16,
+   "time_s": 3566.5,
+   "result_bytes": 4656705,
+   "spilled_bytes": 208688,
+   "reread_bytes": 67780,
+   "wait_s": 313.5
+  },
+  "2026-10-07T19": {
+   "calls": 2103,
+   "failed": 34,
+   "time_s": 3550.0,
+   "result_bytes": 6309826,
+   "spilled_bytes": 572526,
+   "reread_bytes": 136285,
+   "wait_s": 121.6
+  },
+  "2026-10-07T20": {
+   "calls": 1593,
+   "failed": 18,
+   "time_s": 3241.9,
+   "result_bytes": 5011857,
+   "spilled_bytes": 861976,
+   "reread_bytes": 157417,
+   "wait_s": 177.5
+  },
+  "2026-10-07T21": {
+   "calls": 1594,
+   "failed": 14,
+   "time_s": 3256.3,
+   "result_bytes": 4922401,
+   "spilled_bytes": 811025,
+   "reread_bytes": 116260,
+   "wait_s": 116.6
+  },
+  "2026-10-07T22": {
+   "calls": 1493,
+   "failed": 29,
+   "time_s": 2733.2,
+   "result_bytes": 4276881,
+   "spilled_bytes": 619817,
+   "reread_bytes": 161505,
+   "wait_s": 28.4
+  },
+  "2026-10-07T23": {
+   "calls": 1974,
+   "failed": 17,
+   "time_s": 5478.5,
+   "result_bytes": 5193805,
+   "spilled_bytes": 367629,
+   "reread_bytes": 73199,
+   "wait_s": 510.9
+  },
+  "2026-10-08T00": {
+   "calls": 1202,
+   "failed": 16,
+   "time_s": 3020.7,
+   "result_bytes": 3502124,
+   "spilled_bytes": 443950,
+   "reread_bytes": 49670,
+   "wait_s": 82.2
+  },
+  "2026-10-08T01": {
+   "calls": 1216,
+   "failed": 40,
+   "time_s": 3333.1,
+   "result_bytes": 3466871,
+   "spilled_bytes": 136442,
+   "reread_bytes": 59420,
+   "wait_s": 362.0
+  },
+  "2026-10-08T02": {
+   "calls": 1197,
+   "failed": 27,
+   "time_s": 3159.1,
+   "result_bytes": 4015310,
+   "spilled_bytes": 512805,
+   "reread_bytes": 74491,
+   "wait_s": 502.4
+  },
+  "2026-10-08T03": {
+   "calls": 934,
+   "failed": 15,
+   "time_s": 1455.1,
+   "result_bytes": 3372028,
+   "spilled_bytes": 224164,
+   "reread_bytes": 61067,
+   "wait_s": 61.3
+  },
+  "2026-10-08T04": {
+   "calls": 745,
+   "failed": 14,
+   "time_s": 1050.6,
+   "result_bytes": 2472516,
+   "spilled_bytes": 81002,
+   "reread_bytes": 36503,
+   "wait_s": 9.4
+  },
+  "2026-10-08T05": {
+   "calls": 815,
+   "failed": 16,
+   "time_s": 2266.3,
+   "result_bytes": 2549503,
+   "spilled_bytes": 56391,
+   "reread_bytes": 35574,
+   "wait_s": 124.6
+  },
+  "2026-10-08T06": {
+   "calls": 864,
+   "failed": 27,
+   "time_s": 1880.4,
+   "result_bytes": 2392048,
+   "spilled_bytes": 59701,
+   "reread_bytes": 70796,
+   "wait_s": 364.5
+  },
+  "2026-10-08T07": {
+   "calls": 243,
+   "failed": 3,
+   "time_s": 780.7,
+   "result_bytes": 658721,
+   "spilled_bytes": 0,
+   "reread_bytes": 44050,
+   "wait_s": 7.8
+  },
+  "2026-10-08T08": {
+   "calls": 278,
+   "failed": 17,
+   "time_s": 726.6,
+   "result_bytes": 1123964,
+   "spilled_bytes": 248146,
+   "reread_bytes": 41110,
+   "wait_s": 0.0
+  },
+  "2026-10-08T09": {
+   "calls": 1375,
+   "failed": 13,
+   "time_s": 2486.8,
+   "result_bytes": 4961336,
+   "spilled_bytes": 463257,
+   "reread_bytes": 51596,
+   "wait_s": 12.8
+  },
+  "2026-10-08T10": {
+   "calls": 1889,
+   "failed": 26,
+   "time_s": 7990.4,
+   "result_bytes": 6171450,
+   "spilled_bytes": 1414323,
+   "reread_bytes": 163692,
+   "wait_s": 0.0
+  },
+  "2026-10-08T11": {
+   "calls": 2130,
+   "failed": 32,
+   "time_s": 3795.3,
+   "result_bytes": 5777061,
+   "spilled_bytes": 279599,
+   "reread_bytes": 185211,
+   "wait_s": 0.0
+  },
+  "2026-10-08T12": {
+   "calls": 1169,
+   "failed": 16,
+   "time_s": 2746.1,
+   "result_bytes": 3341025,
+   "spilled_bytes": 189199,
+   "reread_bytes": 32880,
+   "wait_s": 245.1
+  },
+  "2026-10-08T13": {
+   "calls": 1835,
+   "failed": 39,
+   "time_s": 4250.8,
+   "result_bytes": 6439870,
+   "spilled_bytes": 1565391,
+   "reread_bytes": 190070,
+   "wait_s": 347.3
+  },
+  "2026-10-08T14": {
+   "calls": 2771,
+   "failed": 37,
+   "time_s": 9535.9,
+   "result_bytes": 10542772,
+   "spilled_bytes": 2129088,
+   "reread_bytes": 443063,
+   "wait_s": 95.3
+  },
+  "2026-10-08T15": {
+   "calls": 2497,
+   "failed": 25,
+   "time_s": 4656.1,
+   "result_bytes": 10256553,
+   "spilled_bytes": 686512,
+   "reread_bytes": 375310,
+   "wait_s": 26.4
+  },
+  "2026-10-08T16": {
+   "calls": 2681,
+   "failed": 55,
+   "time_s": 5346.2,
+   "result_bytes": 10548024,
+   "spilled_bytes": 1096171,
+   "reread_bytes": 309242,
+   "wait_s": 132.8
+  },
+  "2026-10-08T17": {
+   "calls": 1453,
+   "failed": 24,
+   "time_s": 1750.0,
+   "result_bytes": 5915156,
+   "spilled_bytes": 708944,
+   "reread_bytes": 262409,
+   "wait_s": 0.0
+  },
+  "2026-10-08T18": {
+   "calls": 1048,
+   "failed": 19,
+   "time_s": 1938.2,
+   "result_bytes": 4107905,
+   "spilled_bytes": 252107,
+   "reread_bytes": 406785,
+   "wait_s": 179.0
+  },
+  "2026-10-08T19": {
+   "calls": 1388,
+   "failed": 24,
+   "time_s": 2292.3,
+   "result_bytes": 3876692,
+   "spilled_bytes": 261812,
+   "reread_bytes": 146852,
+   "wait_s": 376.9
+  },
+  "2026-10-08T20": {
+   "calls": 2550,
+   "failed": 36,
+   "time_s": 8197.8,
+   "result_bytes": 10358067,
+   "spilled_bytes": 764700,
+   "reread_bytes": 1090593,
+   "wait_s": 0.0
+  },
+  "2026-10-08T21": {
+   "calls": 2031,
+   "failed": 54,
+   "time_s": 5113.8,
+   "result_bytes": 10594621,
+   "spilled_bytes": 732873,
+   "reread_bytes": 2647068,
+   "wait_s": 0.0
+  },
+  "2026-10-08T22": {
+   "calls": 1604,
+   "failed": 29,
+   "time_s": 2141.9,
+   "result_bytes": 5430982,
+   "spilled_bytes": 287380,
+   "reread_bytes": 314426,
+   "wait_s": 61.6
+  },
+  "2026-10-08T23": {
+   "calls": 1425,
+   "failed": 31,
+   "time_s": 3993.4,
+   "result_bytes": 4887898,
+   "spilled_bytes": 494092,
+   "reread_bytes": 143001,
+   "wait_s": 77.6
+  },
+  "2026-10-09T00": {
+   "calls": 1524,
+   "failed": 21,
+   "time_s": 2683.7,
+   "result_bytes": 5200850,
+   "spilled_bytes": 354787,
+   "reread_bytes": 268793,
+   "wait_s": 253.3
+  },
+  "2026-10-09T01": {
+   "calls": 926,
+   "failed": 11,
+   "time_s": 1711.4,
+   "result_bytes": 3707887,
+   "spilled_bytes": 447564,
+   "reread_bytes": 149801,
+   "wait_s": 413.5
+  },
+  "2026-10-09T02": {
+   "calls": 1135,
+   "failed": 10,
+   "time_s": 1202.8,
+   "result_bytes": 3732659,
+   "spilled_bytes": 220988,
+   "reread_bytes": 180000,
+   "wait_s": 0.0
+  },
+  "2026-10-09T03": {
+   "calls": 841,
+   "failed": 15,
+   "time_s": 1307.2,
+   "result_bytes": 3710752,
+   "spilled_bytes": 475108,
+   "reread_bytes": 82847,
+   "wait_s": 90.7
+  },
+  "2026-10-09T04": {
+   "calls": 1716,
+   "failed": 31,
+   "time_s": 2360.8,
+   "result_bytes": 6950060,
+   "spilled_bytes": 1555609,
+   "reread_bytes": 374474,
+   "wait_s": 46.8
+  },
+  "2026-10-09T05": {
+   "calls": 1451,
+   "failed": 34,
+   "time_s": 2032.9,
+   "result_bytes": 4914107,
+   "spilled_bytes": 373856,
+   "reread_bytes": 485972,
+   "wait_s": 69.9
+  },
+  "2026-10-09T06": {
+   "calls": 1445,
+   "failed": 21,
+   "time_s": 3454.1,
+   "result_bytes": 5703513,
+   "spilled_bytes": 593491,
+   "reread_bytes": 314724,
+   "wait_s": 7.5
+  },
+  "2026-10-09T07": {
+   "calls": 2014,
+   "failed": 29,
+   "time_s": 5556.9,
+   "result_bytes": 8349649,
+   "spilled_bytes": 735199,
+   "reread_bytes": 620590,
+   "wait_s": 63.1
+  },
+  "2026-10-09T08": {
+   "calls": 1737,
+   "failed": 18,
+   "time_s": 2869.7,
+   "result_bytes": 7104846,
+   "spilled_bytes": 1005575,
+   "reread_bytes": 409905,
+   "wait_s": 0.0
+  },
+  "2026-10-09T09": {
+   "calls": 1142,
+   "failed": 18,
+   "time_s": 5298.1,
+   "result_bytes": 4596982,
+   "spilled_bytes": 719641,
+   "reread_bytes": 221358,
+   "wait_s": 38.4
+  },
+  "2026-10-09T10": {
+   "calls": 2009,
+   "failed": 48,
+   "time_s": 7572.5,
+   "result_bytes": 9343793,
+   "spilled_bytes": 1497495,
+   "reread_bytes": 714441,
+   "wait_s": 878.2
+  },
+  "2026-10-09T11": {
+   "calls": 1223,
+   "failed": 21,
+   "time_s": 4891.6,
+   "result_bytes": 4712861,
+   "spilled_bytes": 405993,
+   "reread_bytes": 353355,
+   "wait_s": 50.5
+  },
+  "2026-10-09T12": {
+   "calls": 2268,
+   "failed": 35,
+   "time_s": 8179.9,
+   "result_bytes": 9295775,
+   "spilled_bytes": 1220455,
+   "reread_bytes": 453841,
+   "wait_s": 579.1
+  },
+  "2026-10-09T13": {
+   "calls": 554,
+   "failed": 6,
+   "time_s": 1874.4,
+   "result_bytes": 1501102,
+   "spilled_bytes": 5257,
+   "reread_bytes": 30927,
+   "wait_s": 28.8
+  },
+  "2026-10-09T14": {
+   "calls": 683,
+   "failed": 10,
+   "time_s": 1909.4,
+   "result_bytes": 2036656,
+   "spilled_bytes": 176646,
+   "reread_bytes": 63801,
+   "wait_s": 0.0
+  },
+  "2026-10-09T15": {
+   "calls": 1021,
+   "failed": 26,
+   "time_s": 3579.0,
+   "result_bytes": 3861458,
+   "spilled_bytes": 377123,
+   "reread_bytes": 210030,
+   "wait_s": 23.9
+  },
+  "2026-10-09T16": {
+   "calls": 1079,
+   "failed": 11,
+   "time_s": 3996.9,
+   "result_bytes": 3931163,
+   "spilled_bytes": 212240,
+   "reread_bytes": 149831,
+   "wait_s": 0.0
+  },
+  "2026-10-09T17": {
+   "calls": 766,
+   "failed": 6,
+   "time_s": 4577.9,
+   "result_bytes": 2570434,
+   "spilled_bytes": 70373,
+   "reread_bytes": 31565,
+   "wait_s": 26.9
+  },
+  "2026-10-09T18": {
+   "calls": 561,
+   "failed": 8,
+   "time_s": 4923.4,
+   "result_bytes": 1966592,
+   "spilled_bytes": 297563,
+   "reread_bytes": 7302,
+   "wait_s": 0.0
+  },
+  "2026-10-09T19": {
+   "calls": 819,
+   "failed": 9,
+   "time_s": 5698.3,
+   "result_bytes": 1982766,
+   "spilled_bytes": 9279,
+   "reread_bytes": 7411,
+   "wait_s": 418.7
+  },
+  "2026-10-09T20": {
+   "calls": 544,
+   "failed": 4,
+   "time_s": 2697.7,
+   "result_bytes": 1270324,
+   "spilled_bytes": 12780,
+   "reread_bytes": 33348,
+   "wait_s": 45.0
+  },
+  "2026-10-09T21": {
+   "calls": 145,
+   "failed": 0,
+   "time_s": 565.6,
+   "result_bytes": 289971,
+   "spilled_bytes": 9517,
+   "reread_bytes": 6337,
+   "wait_s": 0.0
+  },
+  "2026-10-09T22": {
+   "calls": 381,
+   "failed": 6,
+   "time_s": 1092.5,
+   "result_bytes": 1076392,
+   "spilled_bytes": 6443,
+   "reread_bytes": 7102,
+   "wait_s": 18.0
+  },
+  "2026-10-09T23": {
+   "calls": 853,
+   "failed": 5,
+   "time_s": 1241.7,
+   "result_bytes": 1299643,
+   "spilled_bytes": 7499,
+   "reread_bytes": 14570,
+   "wait_s": 0.0
+  },
+  "2026-10-10T00": {
+   "calls": 540,
+   "failed": 6,
+   "time_s": 1073.6,
+   "result_bytes": 1926595,
+   "spilled_bytes": 565545,
+   "reread_bytes": 4042,
+   "wait_s": 7.2
+  },
+  "2026-10-10T01": {
+   "calls": 896,
+   "failed": 12,
+   "time_s": 2195.9,
+   "result_bytes": 1743558,
+   "spilled_bytes": 3770,
+   "reread_bytes": 21025,
+   "wait_s": 0.0
+  },
+  "2026-10-10T02": {
+   "calls": 715,
+   "failed": 5,
+   "time_s": 1651.5,
+   "result_bytes": 1393463,
+   "spilled_bytes": 5351,
+   "reread_bytes": 33269,
+   "wait_s": 22.0
+  },
+  "2026-10-10T03": {
+   "calls": 643,
+   "failed": 9,
+   "time_s": 814.0,
+   "result_bytes": 1032027,
+   "spilled_bytes": 104009,
+   "reread_bytes": 36210,
+   "wait_s": 0.0
+  },
+  "2026-10-10T04": {
+   "calls": 403,
+   "failed": 5,
+   "time_s": 453.5,
+   "result_bytes": 469256,
+   "spilled_bytes": 2506,
+   "reread_bytes": 28890,
+   "wait_s": 0.0
+  },
+  "2026-10-10T05": {
+   "calls": 532,
+   "failed": 9,
+   "time_s": 753.3,
+   "result_bytes": 735002,
+   "spilled_bytes": 8537,
+   "reread_bytes": 6290,
+   "wait_s": 10.1
+  },
+  "2026-10-10T06": {
+   "calls": 200,
+   "failed": 2,
+   "time_s": 197.3,
+   "result_bytes": 660581,
+   "spilled_bytes": 889,
+   "reread_bytes": 507,
+   "wait_s": 0.0
+  },
+  "2026-10-10T07": {
+   "calls": 93,
+   "failed": 2,
+   "time_s": 72.5,
+   "result_bytes": 290915,
+   "spilled_bytes": 0,
+   "reread_bytes": 1915,
+   "wait_s": 0.0
+  },
+  "2026-10-10T08": {
+   "calls": 343,
+   "failed": 3,
+   "time_s": 431.9,
+   "result_bytes": 871749,
+   "spilled_bytes": 11249,
+   "reread_bytes": 325,
+   "wait_s": 0.0
+  },
+  "2026-10-10T09": {
+   "calls": 347,
+   "failed": 1,
+   "time_s": 495.6,
+   "result_bytes": 569145,
+   "spilled_bytes": 1254,
+   "reread_bytes": 22768,
+   "wait_s": 0.0
+  },
+  "2026-10-10T10": {
+   "calls": 854,
+   "failed": 12,
+   "time_s": 1124.0,
+   "result_bytes": 2764124,
+   "spilled_bytes": 515164,
+   "reread_bytes": 141294,
+   "wait_s": 0.0
+  },
+  "2026-10-10T11": {
+   "calls": 987,
+   "failed": 27,
+   "time_s": 1686.7,
+   "result_bytes": 2153292,
+   "spilled_bytes": 152884,
+   "reread_bytes": 95028,
+   "wait_s": 36.2
+  },
+  "2026-10-10T12": {
+   "calls": 145,
+   "failed": 1,
+   "time_s": 85.9,
+   "result_bytes": 616553,
+   "spilled_bytes": 61549,
+   "reread_bytes": 47106,
+   "wait_s": 0.0
+  },
+  "2026-10-10T13": {
+   "calls": 69,
+   "failed": 0,
+   "time_s": 274.6,
+   "result_bytes": 72713,
+   "spilled_bytes": 0,
+   "reread_bytes": 19328,
+   "wait_s": 0.0
+  },
+  "2026-10-10T14": {
+   "calls": 75,
+   "failed": 0,
+   "time_s": 172.9,
+   "result_bytes": 160532,
+   "spilled_bytes": 0,
+   "reread_bytes": 7880,
+   "wait_s": 0.0
+  },
+  "2026-10-10T15": {
+   "calls": 57,
+   "failed": 0,
+   "time_s": 182.0,
+   "result_bytes": 120761,
+   "spilled_bytes": 0,
+   "reread_bytes": 26204,
+   "wait_s": 0.0
+  },
+  "2026-10-10T16": {
+   "calls": 636,
+   "failed": 6,
+   "time_s": 2104.6,
+   "result_bytes": 1615075,
+   "spilled_bytes": 4961,
+   "reread_bytes": 25125,
+   "wait_s": 77.9
+  },
+  "2026-10-10T17": {
+   "calls": 380,
+   "failed": 10,
+   "time_s": 1462.3,
+   "result_bytes": 1393004,
+   "spilled_bytes": 289380,
+   "reread_bytes": 10994,
+   "wait_s": 11.0
+  },
+  "2026-10-10T18": {
+   "calls": 366,
+   "failed": 14,
+   "time_s": 1338.1,
+   "result_bytes": 615747,
+   "spilled_bytes": 4045,
+   "reread_bytes": 3008,
+   "wait_s": 8.2
+  },
+  "2026-10-10T19": {
+   "calls": 703,
+   "failed": 25,
+   "time_s": 2455.2,
+   "result_bytes": 1596537,
+   "spilled_bytes": 6809,
+   "reread_bytes": 8040,
+   "wait_s": 42.5
+  },
+  "2026-10-10T20": {
+   "calls": 593,
+   "failed": 28,
+   "time_s": 1474.6,
+   "result_bytes": 1139675,
+   "spilled_bytes": 219940,
+   "reread_bytes": 1813,
+   "wait_s": 69.2
+  },
+  "2026-10-10T21": {
+   "calls": 332,
+   "failed": 17,
+   "time_s": 1044.4,
+   "result_bytes": 472953,
+   "spilled_bytes": 7513,
+   "reread_bytes": 10222,
+   "wait_s": 28.0
+  },
+  "2026-10-10T22": {
+   "calls": 442,
+   "failed": 17,
+   "time_s": 630.2,
+   "result_bytes": 564660,
+   "spilled_bytes": 0,
+   "reread_bytes": 22453,
+   "wait_s": 0.0
+  },
+  "2026-10-10T23": {
+   "calls": 51,
+   "failed": 1,
+   "time_s": 77.6,
+   "result_bytes": 103455,
+   "spilled_bytes": 0,
+   "reread_bytes": 22644,
+   "wait_s": 0.0
+  },
+  "2026-10-11T00": {
+   "calls": 153,
+   "failed": 0,
+   "time_s": 140.2,
+   "result_bytes": 536213,
+   "spilled_bytes": 293632,
+   "reread_bytes": 10084,
+   "wait_s": 0.0
+  },
+  "2026-10-11T01": {
+   "calls": 390,
+   "failed": 10,
+   "time_s": 1380.3,
+   "result_bytes": 562239,
+   "spilled_bytes": 0,
+   "reread_bytes": 14801,
+   "wait_s": 59.3
+  },
+  "2026-10-11T02": {
+   "calls": 1104,
+   "failed": 23,
+   "time_s": 4271.2,
+   "result_bytes": 1585239,
+   "spilled_bytes": 7140,
+   "reread_bytes": 12633,
+   "wait_s": 414.6
+  },
+  "2026-10-11T03": {
+   "calls": 942,
+   "failed": 27,
+   "time_s": 5589.5,
+   "result_bytes": 2765782,
+   "spilled_bytes": 413017,
+   "reread_bytes": 139812,
+   "wait_s": 1200.7
+  },
+  "2026-10-11T04": {
+   "calls": 1458,
+   "failed": 56,
+   "time_s": 3314.9,
+   "result_bytes": 2786715,
+   "spilled_bytes": 106012,
+   "reread_bytes": 164190,
+   "wait_s": 1754.6
+  },
+  "2026-10-11T05": {
+   "calls": 1102,
+   "failed": 49,
+   "time_s": 4059.6,
+   "result_bytes": 2732419,
+   "spilled_bytes": 174230,
+   "reread_bytes": 122572,
+   "wait_s": 1589.5
+  },
+  "2026-10-11T06": {
+   "calls": 414,
+   "failed": 7,
+   "time_s": 2421.7,
+   "result_bytes": 2088176,
+   "spilled_bytes": 395873,
+   "reread_bytes": 389535,
+   "wait_s": 774.6
+  },
+  "2026-10-11T07": {
+   "calls": 310,
+   "failed": 5,
+   "time_s": 2557.7,
+   "result_bytes": 909137,
+   "spilled_bytes": 4084,
+   "reread_bytes": 33949,
+   "wait_s": 2320.9
+  },
+  "2026-10-11T08": {
+   "calls": 124,
+   "failed": 6,
+   "time_s": 51.4,
+   "result_bytes": 373131,
+   "spilled_bytes": 32352,
+   "reread_bytes": 27321,
+   "wait_s": 0.0
+  },
+  "2026-10-11T09": {
+   "calls": 141,
+   "failed": 8,
+   "time_s": 61.5,
+   "result_bytes": 510890,
+   "spilled_bytes": 38926,
+   "reread_bytes": 23402,
+   "wait_s": 0.0
+  },
+  "2026-10-11T10": {
+   "calls": 187,
+   "failed": 11,
+   "time_s": 96.1,
+   "result_bytes": 985391,
+   "spilled_bytes": 284366,
+   "reread_bytes": 107951,
+   "wait_s": 0.0
+  },
+  "2026-10-11T11": {
+   "calls": 144,
+   "failed": 10,
+   "time_s": 122.8,
+   "result_bytes": 411514,
+   "spilled_bytes": 37119,
+   "reread_bytes": 41158,
+   "wait_s": 0.0
+  },
+  "2026-10-11T12": {
+   "calls": 163,
+   "failed": 18,
+   "time_s": 203.7,
+   "result_bytes": 409384,
+   "spilled_bytes": 0,
+   "reread_bytes": 54504,
+   "wait_s": 48.8
+  },
+  "2026-10-11T13": {
+   "calls": 168,
+   "failed": 12,
+   "time_s": 106.9,
+   "result_bytes": 520907,
+   "spilled_bytes": 18954,
+   "reread_bytes": 78655,
+   "wait_s": 0.0
+  },
+  "2026-10-11T14": {
+   "calls": 45,
+   "failed": 5,
+   "time_s": 21.2,
+   "result_bytes": 181068,
+   "spilled_bytes": 20530,
+   "reread_bytes": 12413,
+   "wait_s": 0.0
+  },
+  "2026-10-11T15": {
+   "calls": 50,
+   "failed": 0,
+   "time_s": 19.4,
+   "result_bytes": 122656,
+   "spilled_bytes": 0,
+   "reread_bytes": 0,
+   "wait_s": 0.0
+  },
+  "2026-10-11T16": {
+   "calls": 226,
+   "failed": 18,
+   "time_s": 160.5,
+   "result_bytes": 846915,
+   "spilled_bytes": 242166,
+   "reread_bytes": 183231,
+   "wait_s": 0.0
+  },
+  "2026-10-11T17": {
+   "calls": 257,
+   "failed": 17,
+   "time_s": 295.1,
+   "result_bytes": 460120,
+   "spilled_bytes": 0,
+   "reread_bytes": 43164,
+   "wait_s": 0.0
+  },
+  "2026-10-11T18": {
+   "calls": 263,
+   "failed": 5,
+   "time_s": 282.4,
+   "result_bytes": 715516,
+   "spilled_bytes": 5374,
+   "reread_bytes": 112475,
+   "wait_s": 0.0
+  },
+  "2026-10-11T19": {
+   "calls": 247,
+   "failed": 5,
+   "time_s": 323.7,
+   "result_bytes": 512024,
+   "spilled_bytes": 40863,
+   "reread_bytes": 26897,
+   "wait_s": 3.8
+  },
+  "2026-10-11T20": {
+   "calls": 291,
+   "failed": 5,
+   "time_s": 374.4,
+   "result_bytes": 598519,
+   "spilled_bytes": 1232,
+   "reread_bytes": 37136,
+   "wait_s": 2.5
+  },
+  "2026-10-11T21": {
+   "calls": 377,
+   "failed": 5,
+   "time_s": 979.2,
+   "result_bytes": 790197,
+   "spilled_bytes": 99812,
+   "reread_bytes": 17243,
+   "wait_s": 579.6
+  },
+  "2026-10-11T22": {
+   "calls": 437,
+   "failed": 5,
+   "time_s": 2619.8,
+   "result_bytes": 1090368,
+   "spilled_bytes": 181594,
+   "reread_bytes": 61927,
+   "wait_s": 2300.6
+  },
+  "2026-10-11T23": {
+   "calls": 245,
+   "failed": 3,
+   "time_s": 2228.8,
+   "result_bytes": 567580,
+   "spilled_bytes": 37119,
+   "reread_bytes": 25151,
+   "wait_s": 2073.7
+  },
+  "2026-10-12T00": {
+   "calls": 233,
+   "failed": 6,
+   "time_s": 1254.0,
+   "result_bytes": 741047,
+   "spilled_bytes": 129638,
+   "reread_bytes": 31633,
+   "wait_s": 1026.7
+  },
+  "2026-10-12T01": {
+   "calls": 773,
+   "failed": 16,
+   "time_s": 1956.5,
+   "result_bytes": 2557449,
+   "spilled_bytes": 124330,
+   "reread_bytes": 87406,
+   "wait_s": 447.0
+  },
+  "2026-10-12T02": {
+   "calls": 710,
+   "failed": 14,
+   "time_s": 1225.2,
+   "result_bytes": 2773464,
+   "spilled_bytes": 559445,
+   "reread_bytes": 6017,
+   "wait_s": 2.4
+  },
+  "2026-10-12T03": {
+   "calls": 889,
+   "failed": 16,
+   "time_s": 1407.4,
+   "result_bytes": 2457215,
+   "spilled_bytes": 285028,
+   "reread_bytes": 9177,
+   "wait_s": 1.2
+  },
+  "2026-10-12T04": {
+   "calls": 938,
+   "failed": 24,
+   "time_s": 1984.8,
+   "result_bytes": 2839652,
+   "spilled_bytes": 6625,
+   "reread_bytes": 26321,
+   "wait_s": 68.7
+  },
+  "2026-10-12T05": {
+   "calls": 925,
+   "failed": 18,
+   "time_s": 3355.0,
+   "result_bytes": 2839636,
+   "spilled_bytes": 472577,
+   "reread_bytes": 29224,
+   "wait_s": 570.5
+  },
+  "2026-10-12T06": {
+   "calls": 805,
+   "failed": 12,
+   "time_s": 1973.6,
+   "result_bytes": 2203731,
+   "spilled_bytes": 108511,
+   "reread_bytes": 5738,
+   "wait_s": 269.1
+  },
+  "2026-10-12T07": {
+   "calls": 305,
+   "failed": 27,
+   "time_s": 2390.8,
+   "result_bytes": 1185127,
+   "spilled_bytes": 98265,
+   "reread_bytes": 14319,
+   "wait_s": 57.7
+  },
+  "2026-10-12T08": {
+   "calls": 281,
+   "failed": 2,
+   "time_s": 2623.0,
+   "result_bytes": 830112,
+   "spilled_bytes": 1455,
+   "reread_bytes": 4649,
+   "wait_s": 0.0
+  },
+  "2026-10-12T09": {
+   "calls": 505,
+   "failed": 8,
+   "time_s": 1866.7,
+   "result_bytes": 1680416,
+   "spilled_bytes": 240058,
+   "reread_bytes": 7502,
+   "wait_s": 10.5
+  },
+  "2026-10-12T10": {
+   "calls": 760,
+   "failed": 43,
+   "time_s": 2195.9,
+   "result_bytes": 2813710,
+   "spilled_bytes": 436254,
+   "reread_bytes": 13128,
+   "wait_s": 202.1
+  },
+  "2026-10-12T11": {
+   "calls": 143,
+   "failed": 2,
+   "time_s": 4688.6,
+   "result_bytes": 380822,
+   "spilled_bytes": 0,
+   "reread_bytes": 2016,
+   "wait_s": 8.1
+  },
+  "2026-10-12T13": {
+   "calls": 766,
+   "failed": 24,
+   "time_s": 1973.7,
+   "result_bytes": 2291133,
+   "spilled_bytes": 69913,
+   "reread_bytes": 10855,
+   "wait_s": 511.5
+  },
+  "2026-10-12T14": {
+   "calls": 918,
+   "failed": 25,
+   "time_s": 3334.9,
+   "result_bytes": 3156921,
+   "spilled_bytes": 88611,
+   "reread_bytes": 166314,
+   "wait_s": 51.0
+  },
+  "2026-10-12T15": {
+   "calls": 997,
+   "failed": 19,
+   "time_s": 3412.2,
+   "result_bytes": 2988291,
+   "spilled_bytes": 206538,
+   "reread_bytes": 16681,
+   "wait_s": 107.0
+  },
+  "2026-10-12T16": {
+   "calls": 1189,
+   "failed": 33,
+   "time_s": 3675.6,
+   "result_bytes": 3514448,
+   "spilled_bytes": 543209,
+   "reread_bytes": 74624,
+   "wait_s": 64.7
+  },
+  "2026-10-12T17": {
+   "calls": 1358,
+   "failed": 29,
+   "time_s": 1964.3,
+   "result_bytes": 4050989,
+   "spilled_bytes": 801324,
+   "reread_bytes": 169891,
+   "wait_s": 40.7
+  },
+  "2026-10-12T18": {
+   "calls": 1244,
+   "failed": 17,
+   "time_s": 3050.8,
+   "result_bytes": 3260722,
+   "spilled_bytes": 114759,
+   "reread_bytes": 58492,
+   "wait_s": 194.5
+  },
+  "2026-10-12T19": {
+   "calls": 1198,
+   "failed": 31,
+   "time_s": 3051.8,
+   "result_bytes": 3285523,
+   "spilled_bytes": 171230,
+   "reread_bytes": 77939,
+   "wait_s": 99.2
+  },
+  "2026-10-12T20": {
+   "calls": 997,
+   "failed": 19,
+   "time_s": 1962.4,
+   "result_bytes": 2542409,
+   "spilled_bytes": 230648,
+   "reread_bytes": 63695,
+   "wait_s": 270.3
+  },
+  "2026-10-12T21": {
+   "calls": 960,
+   "failed": 24,
+   "time_s": 2694.7,
+   "result_bytes": 3221945,
+   "spilled_bytes": 219262,
+   "reread_bytes": 90368,
+   "wait_s": 250.8
+  },
+  "2026-10-12T22": {
+   "calls": 1018,
+   "failed": 31,
+   "time_s": 1427.5,
+   "result_bytes": 3619374,
+   "spilled_bytes": 296706,
+   "reread_bytes": 169891,
+   "wait_s": 64.3
+  },
+  "2026-10-12T23": {
+   "calls": 1458,
+   "failed": 32,
+   "time_s": 3907.6,
+   "result_bytes": 5053370,
+   "spilled_bytes": 427631,
+   "reread_bytes": 94750,
+   "wait_s": 131.9
+  },
+  "2026-10-13T00": {
+   "calls": 1252,
+   "failed": 33,
+   "time_s": 3290.0,
+   "result_bytes": 4309064,
+   "spilled_bytes": 450351,
+   "reread_bytes": 149269,
+   "wait_s": 242.3
+  },
+  "2026-10-13T01": {
+   "calls": 770,
+   "failed": 35,
+   "time_s": 1972.8,
+   "result_bytes": 3346205,
+   "spilled_bytes": 763510,
+   "reread_bytes": 137971,
+   "wait_s": 34.3
+  },
+  "2026-10-13T02": {
+   "calls": 1251,
+   "failed": 52,
+   "time_s": 4529.2,
+   "result_bytes": 4652642,
+   "spilled_bytes": 5266,
+   "reread_bytes": 19895,
+   "wait_s": 0.0
+  },
+  "2026-10-13T03": {
+   "calls": 1141,
+   "failed": 35,
+   "time_s": 3596.8,
+   "result_bytes": 3808633,
+   "spilled_bytes": 479290,
+   "reread_bytes": 7695,
+   "wait_s": 378.2
+  },
+  "2026-10-13T04": {
+   "calls": 1186,
+   "failed": 45,
+   "time_s": 3219.0,
+   "result_bytes": 3262604,
+   "spilled_bytes": 108936,
+   "reread_bytes": 39827,
+   "wait_s": 1042.6
+  },
+  "2026-10-13T05": {
+   "calls": 1276,
+   "failed": 29,
+   "time_s": 3374.0,
+   "result_bytes": 4249496,
+   "spilled_bytes": 109205,
+   "reread_bytes": 172365,
+   "wait_s": 150.7
+  },
+  "2026-10-13T06": {
+   "calls": 1099,
+   "failed": 51,
+   "time_s": 3734.1,
+   "result_bytes": 3159296,
+   "spilled_bytes": 213485,
+   "reread_bytes": 46439,
+   "wait_s": 359.2
+  },
+  "2026-10-13T07": {
+   "calls": 894,
+   "failed": 34,
+   "time_s": 3151.6,
+   "result_bytes": 3131219,
+   "spilled_bytes": 188852,
+   "reread_bytes": 43441,
+   "wait_s": 154.3
+  },
+  "2026-10-13T08": {
+   "calls": 1444,
+   "failed": 19,
+   "time_s": 2574.1,
+   "result_bytes": 4375809,
+   "spilled_bytes": 159847,
+   "reread_bytes": 5476,
+   "wait_s": 173.1
+  },
+  "2026-10-13T09": {
+   "calls": 1202,
+   "failed": 35,
+   "time_s": 5914.3,
+   "result_bytes": 3749079,
+   "spilled_bytes": 223905,
+   "reread_bytes": 7098,
+   "wait_s": 821.3
+  },
+  "2026-10-13T10": {
+   "calls": 928,
+   "failed": 11,
+   "time_s": 4748.5,
+   "result_bytes": 3434290,
+   "spilled_bytes": 393048,
+   "reread_bytes": 259,
+   "wait_s": 555.7
+  },
+  "2026-10-13T11": {
+   "calls": 1331,
+   "failed": 21,
+   "time_s": 6721.9,
+   "result_bytes": 4197134,
+   "spilled_bytes": 422378,
+   "reread_bytes": 25437,
+   "wait_s": 513.9
+  },
+  "2026-10-13T12": {
+   "calls": 1086,
+   "failed": 16,
+   "time_s": 6315.4,
+   "result_bytes": 3833631,
+   "spilled_bytes": 461901,
+   "reread_bytes": 243803,
+   "wait_s": 943.1
+  },
+  "2026-10-13T13": {
+   "calls": 1329,
+   "failed": 19,
+   "time_s": 7035.3,
+   "result_bytes": 5411778,
+   "spilled_bytes": 364892,
+   "reread_bytes": 113979,
+   "wait_s": 86.4
+  },
+  "2026-10-13T14": {
+   "calls": 1199,
+   "failed": 11,
+   "time_s": 10513.6,
+   "result_bytes": 11705022,
+   "spilled_bytes": 6929880,
+   "reread_bytes": 609678,
+   "wait_s": 299.4
+  },
+  "2026-10-13T15": {
+   "calls": 1395,
+   "failed": 14,
+   "time_s": 5098.1,
+   "result_bytes": 15185596,
+   "spilled_bytes": 10004258,
+   "reread_bytes": 799807,
+   "wait_s": 824.8
+  },
+  "2026-10-13T16": {
+   "calls": 1525,
+   "failed": 27,
+   "time_s": 5648.3,
+   "result_bytes": 7343979,
+   "spilled_bytes": 3300127,
+   "reread_bytes": 493470,
+   "wait_s": 261.2
+  },
+  "2026-10-13T17": {
+   "calls": 1499,
+   "failed": 14,
+   "time_s": 5617.8,
+   "result_bytes": 18533877,
+   "spilled_bytes": 13223442,
+   "reread_bytes": 1461351,
+   "wait_s": 24.0
+  },
+  "2026-10-13T18": {
+   "calls": 1237,
+   "failed": 8,
+   "time_s": 3660.3,
+   "result_bytes": 11163020,
+   "spilled_bytes": 6392090,
+   "reread_bytes": 761888,
+   "wait_s": 233.1
+  },
+  "2026-10-13T19": {
+   "calls": 1717,
+   "failed": 15,
+   "time_s": 6002.6,
+   "result_bytes": 15406105,
+   "spilled_bytes": 8839325,
+   "reread_bytes": 539528,
+   "wait_s": 764.3
+  },
+  "2026-10-13T20": {
+   "calls": 1108,
+   "failed": 13,
+   "time_s": 4223.2,
+   "result_bytes": 7114079,
+   "spilled_bytes": 3730376,
+   "reread_bytes": 807353,
+   "wait_s": 1151.6
+  },
+  "2026-10-13T21": {
+   "calls": 1205,
+   "failed": 11,
+   "time_s": 4734.6,
+   "result_bytes": 7424333,
+   "spilled_bytes": 3674274,
+   "reread_bytes": 1051534,
+   "wait_s": 534.7
+  },
+  "2026-10-13T22": {
+   "calls": 943,
+   "failed": 9,
+   "time_s": 2195.3,
+   "result_bytes": 5247990,
+   "spilled_bytes": 2632566,
+   "reread_bytes": 760137,
+   "wait_s": 22.1
+  },
+  "2026-10-13T23": {
+   "calls": 1163,
+   "failed": 22,
+   "time_s": 2551.0,
+   "result_bytes": 3177767,
+   "spilled_bytes": 198214,
+   "reread_bytes": 244284,
+   "wait_s": 231.5
+  },
+  "2026-10-14T00": {
+   "calls": 1009,
+   "failed": 7,
+   "time_s": 3096.1,
+   "result_bytes": 3459188,
+   "spilled_bytes": 861178,
+   "reread_bytes": 295301,
+   "wait_s": 537.8
+  },
+  "2026-10-14T01": {
+   "calls": 594,
+   "failed": 16,
+   "time_s": 1738.4,
+   "result_bytes": 3911542,
+   "spilled_bytes": 2199243,
+   "reread_bytes": 625577,
+   "wait_s": 63.3
+  },
+  "2026-10-14T02": {
+   "calls": 1502,
+   "failed": 18,
+   "time_s": 3179.1,
+   "result_bytes": 14091467,
+   "spilled_bytes": 8886191,
+   "reread_bytes": 775655,
+   "wait_s": 344.1
+  },
+  "2026-10-14T03": {
+   "calls": 1430,
+   "failed": 16,
+   "time_s": 7015.8,
+   "result_bytes": 9846545,
+   "spilled_bytes": 5493664,
+   "reread_bytes": 592512,
+   "wait_s": 200.1
+  },
+  "2026-10-14T04": {
+   "calls": 1463,
+   "failed": 16,
+   "time_s": 6037.6,
+   "result_bytes": 7901133,
+   "spilled_bytes": 2851052,
+   "reread_bytes": 819548,
+   "wait_s": 1986.1
+  },
+  "2026-10-14T05": {
+   "calls": 1273,
+   "failed": 10,
+   "time_s": 5241.0,
+   "result_bytes": 4874385,
+   "spilled_bytes": 960698,
+   "reread_bytes": 433214,
+   "wait_s": 1048.9
+  },
+  "2026-10-14T06": {
+   "calls": 1322,
+   "failed": 25,
+   "time_s": 4332.5,
+   "result_bytes": 3260984,
+   "spilled_bytes": 34530,
+   "reread_bytes": 47792,
+   "wait_s": 195.7
+  },
+  "2026-10-14T07": {
+   "calls": 1453,
+   "failed": 22,
+   "time_s": 3242.5,
+   "result_bytes": 3927342,
+   "spilled_bytes": 10517,
+   "reread_bytes": 28425,
+   "wait_s": 74.9
+  },
+  "2026-10-14T08": {
+   "calls": 1547,
+   "failed": 10,
+   "time_s": 3940.6,
+   "result_bytes": 4285172,
+   "spilled_bytes": 79965,
+   "reread_bytes": 40338,
+   "wait_s": 195.5
+  },
+  "2026-10-14T09": {
+   "calls": 1363,
+   "failed": 22,
+   "time_s": 3893.6,
+   "result_bytes": 6115095,
+   "spilled_bytes": 2061505,
+   "reread_bytes": 683201,
+   "wait_s": 5.9
+  },
+  "2026-10-14T10": {
+   "calls": 1310,
+   "failed": 42,
+   "time_s": 4070.4,
+   "result_bytes": 5486925,
+   "spilled_bytes": 2262975,
+   "reread_bytes": 581312,
+   "wait_s": 61.0
+  },
+  "2026-10-14T11": {
+   "calls": 1575,
+   "failed": 8,
+   "time_s": 3672.9,
+   "result_bytes": 4451857,
+   "spilled_bytes": 1453675,
+   "reread_bytes": 502992,
+   "wait_s": 51.8
+  },
+  "2026-10-14T12": {
+   "calls": 1189,
+   "failed": 18,
+   "time_s": 2163.7,
+   "result_bytes": 5908824,
+   "spilled_bytes": 2706927,
+   "reread_bytes": 1204915,
+   "wait_s": 12.9
+  },
+  "2026-10-14T13": {
+   "calls": 1280,
+   "failed": 15,
+   "time_s": 3777.3,
+   "result_bytes": 5133792,
+   "spilled_bytes": 1788094,
+   "reread_bytes": 601018,
+   "wait_s": 37.5
+  },
+  "2026-10-14T14": {
+   "calls": 1315,
+   "failed": 23,
+   "time_s": 2951.8,
+   "result_bytes": 5210376,
+   "spilled_bytes": 2095080,
+   "reread_bytes": 314280,
+   "wait_s": 240.4
+  },
+  "2026-10-14T15": {
+   "calls": 1606,
+   "failed": 19,
+   "time_s": 3752.7,
+   "result_bytes": 7665048,
+   "spilled_bytes": 3960392,
+   "reread_bytes": 49454,
+   "wait_s": 388.6
+  },
+  "2026-10-14T16": {
+   "calls": 1277,
+   "failed": 14,
+   "time_s": 3294.4,
+   "result_bytes": 3528756,
+   "spilled_bytes": 300660,
+   "reread_bytes": 229101,
+   "wait_s": 499.1
+  },
+  "2026-10-14T17": {
+   "calls": 1271,
+   "failed": 18,
+   "time_s": 3269.9,
+   "result_bytes": 3939599,
+   "spilled_bytes": 220787,
+   "reread_bytes": 139610,
+   "wait_s": 492.5
+  },
+  "2026-10-14T18": {
+   "calls": 1293,
+   "failed": 19,
+   "time_s": 3913.4,
+   "result_bytes": 4193409,
+   "spilled_bytes": 432527,
+   "reread_bytes": 327839,
+   "wait_s": 951.1
+  },
+  "2026-10-14T19": {
+   "calls": 1078,
+   "failed": 14,
+   "time_s": 6446.2,
+   "result_bytes": 3537536,
+   "spilled_bytes": 609065,
+   "reread_bytes": 352219,
+   "wait_s": 1729.1
+  },
+  "2026-10-14T20": {
+   "calls": 1085,
+   "failed": 17,
+   "time_s": 1699.9,
+   "result_bytes": 2717945,
+   "spilled_bytes": 222902,
+   "reread_bytes": 137360,
+   "wait_s": 366.9
+  },
+  "2026-10-14T21": {
+   "calls": 919,
+   "failed": 15,
+   "time_s": 4966.9,
+   "result_bytes": 1880748,
+   "spilled_bytes": 6527,
+   "reread_bytes": 26001,
+   "wait_s": 3871.6
+  },
+  "2026-10-14T22": {
+   "calls": 853,
+   "failed": 15,
+   "time_s": 1315.0,
+   "result_bytes": 2166720,
+   "spilled_bytes": 207873,
+   "reread_bytes": 110168,
+   "wait_s": 448.2
+  },
+  "2026-10-14T23": {
+   "calls": 838,
+   "failed": 12,
+   "time_s": 2446.3,
+   "result_bytes": 2038360,
+   "spilled_bytes": 0,
+   "reread_bytes": 173148,
+   "wait_s": 685.6
+  },
+  "2026-10-15T00": {
+   "calls": 629,
+   "failed": 15,
+   "time_s": 3432.9,
+   "result_bytes": 1661308,
+   "spilled_bytes": 122021,
+   "reread_bytes": 61901,
+   "wait_s": 55.5
+  },
+  "2026-10-15T01": {
+   "calls": 332,
+   "failed": 7,
+   "time_s": 3626.0,
+   "result_bytes": 721420,
+   "spilled_bytes": 0,
+   "reread_bytes": 54939,
+   "wait_s": 2849.0
+  },
+  "2026-10-15T02": {
+   "calls": 504,
+   "failed": 10,
+   "time_s": 2663.6,
+   "result_bytes": 1203577,
+   "spilled_bytes": 1272,
+   "reread_bytes": 146549,
+   "wait_s": 1011.2
+  },
+  "2026-10-15T03": {
+   "calls": 1,
+   "failed": 0,
+   "time_s": 1067.7,
+   "result_bytes": 962,
+   "spilled_bytes": 0,
+   "reread_bytes": 0,
+   "wait_s": 0.0
+  },
+  "2026-10-15T04": {
+   "calls": 200,
+   "failed": 6,
+   "time_s": 2418.2,
+   "result_bytes": 529917,
+   "spilled_bytes": 0,
+   "reread_bytes": 4476,
+   "wait_s": 1183.6
+  },
+  "2026-10-15T05": {
+   "calls": 669,
+   "failed": 17,
+   "time_s": 4333.7,
+   "result_bytes": 1578761,
+   "spilled_bytes": 127593,
+   "reread_bytes": 94675,
+   "wait_s": 39.4
+  },
+  "2026-10-15T06": {
+   "calls": 21,
+   "failed": 0,
+   "time_s": 1124.8,
+   "result_bytes": 52919,
+   "spilled_bytes": 0,
+   "reread_bytes": 0,
+   "wait_s": 0.0
+  },
+  "2026-10-15T07": {
+   "calls": 42,
+   "failed": 0,
+   "time_s": 754.7,
+   "result_bytes": 182005,
+   "spilled_bytes": 0,
+   "reread_bytes": 0,
+   "wait_s": 0.0
+  },
+  "2026-10-15T08": {
+   "calls": 458,
+   "failed": 8,
+   "time_s": 2298.8,
+   "result_bytes": 1346356,
+   "spilled_bytes": 78762,
+   "reread_bytes": 44819,
+   "wait_s": 33.7
+  },
+  "2026-10-16T03": {
+   "calls": 793,
+   "failed": 21,
+   "time_s": 1332.9,
+   "result_bytes": 2920709,
+   "spilled_bytes": 586929,
+   "reread_bytes": 83114,
+   "wait_s": 59.3
+  },
+  "2026-10-16T04": {
+   "calls": 1194,
+   "failed": 23,
+   "time_s": 4202.6,
+   "result_bytes": 5172939,
+   "spilled_bytes": 556954,
+   "reread_bytes": 555051,
+   "wait_s": 78.7
+  },
+  "2026-10-16T05": {
+   "calls": 843,
+   "failed": 21,
+   "time_s": 3983.3,
+   "result_bytes": 2315970,
+   "spilled_bytes": 217468,
+   "reread_bytes": 321501,
+   "wait_s": 1291.3
+  },
+  "2026-10-16T06": {
+   "calls": 910,
+   "failed": 15,
+   "time_s": 3883.4,
+   "result_bytes": 4055918,
+   "spilled_bytes": 809072,
+   "reread_bytes": 260789,
+   "wait_s": 1412.3
+  },
+  "2026-10-16T07": {
+   "calls": 969,
+   "failed": 8,
+   "time_s": 5720.1,
+   "result_bytes": 3037413,
+   "spilled_bytes": 71126,
+   "reread_bytes": 48298,
+   "wait_s": 2884.0
+  },
+  "2026-10-16T08": {
+   "calls": 687,
+   "failed": 11,
+   "time_s": 2695.0,
+   "result_bytes": 2344895,
+   "spilled_bytes": 2778,
+   "reread_bytes": 154313,
+   "wait_s": 1855.9
+  },
+  "2026-10-16T09": {
+   "calls": 837,
+   "failed": 11,
+   "time_s": 3434.2,
+   "result_bytes": 2782044,
+   "spilled_bytes": 1504,
+   "reread_bytes": 220787,
+   "wait_s": 2216.5
+  },
+  "2026-10-16T10": {
+   "calls": 902,
+   "failed": 25,
+   "time_s": 4699.6,
+   "result_bytes": 3605603,
+   "spilled_bytes": 1093324,
+   "reread_bytes": 52528,
+   "wait_s": 253.7
+  },
+  "2026-10-16T11": {
+   "calls": 1213,
+   "failed": 26,
+   "time_s": 4429.8,
+   "result_bytes": 5123912,
+   "spilled_bytes": 523759,
+   "reread_bytes": 132711,
+   "wait_s": 55.4
+  },
+  "2026-10-16T12": {
+   "calls": 1509,
+   "failed": 15,
+   "time_s": 4304.8,
+   "result_bytes": 5330883,
+   "spilled_bytes": 384065,
+   "reread_bytes": 113547,
+   "wait_s": 29.0
+  },
+  "2026-10-16T13": {
+   "calls": 692,
+   "failed": 8,
+   "time_s": 3420.9,
+   "result_bytes": 2025425,
+   "spilled_bytes": 146572,
+   "reread_bytes": 11887,
+   "wait_s": 253.9
+  },
+  "2026-10-16T14": {
+   "calls": 943,
+   "failed": 10,
+   "time_s": 3828.3,
+   "result_bytes": 3070655,
+   "spilled_bytes": 359438,
+   "reread_bytes": 68541,
+   "wait_s": 30.1
+  },
+  "2026-10-16T15": {
+   "calls": 637,
+   "failed": 12,
+   "time_s": 3073.8,
+   "result_bytes": 2057137,
+   "spilled_bytes": 261290,
+   "reread_bytes": 86240,
+   "wait_s": 609.7
+  },
+  "2026-10-16T16": {
+   "calls": 477,
+   "failed": 5,
+   "time_s": 1211.9,
+   "result_bytes": 1264339,
+   "spilled_bytes": 158212,
+   "reread_bytes": 46268,
+   "wait_s": 0.0
+  },
+  "2026-10-16T17": {
+   "calls": 495,
+   "failed": 15,
+   "time_s": 1923.2,
+   "result_bytes": 1152295,
+   "spilled_bytes": 108430,
+   "reread_bytes": 199540,
+   "wait_s": 384.1
+  },
+  "2026-10-16T18": {
+   "calls": 522,
+   "failed": 17,
+   "time_s": 1590.3,
+   "result_bytes": 2155711,
+   "spilled_bytes": 1015393,
+   "reread_bytes": 101462,
+   "wait_s": 314.6
+  },
+  "2026-10-16T19": {
+   "calls": 394,
+   "failed": 4,
+   "time_s": 1390.4,
+   "result_bytes": 885214,
+   "spilled_bytes": 2538,
+   "reread_bytes": 45698,
+   "wait_s": 392.1
+  },
+  "2026-10-16T20": {
+   "calls": 331,
+   "failed": 10,
+   "time_s": 786.3,
+   "result_bytes": 778860,
+   "spilled_bytes": 2772,
+   "reread_bytes": 49909,
+   "wait_s": 13.4
+  },
+  "2026-10-16T21": {
+   "calls": 321,
+   "failed": 10,
+   "time_s": 791.1,
+   "result_bytes": 984806,
+   "spilled_bytes": 0,
+   "reread_bytes": 21643,
+   "wait_s": 11.2
+  },
+  "2026-10-16T22": {
+   "calls": 354,
+   "failed": 2,
+   "time_s": 2568.1,
+   "result_bytes": 707624,
+   "spilled_bytes": 0,
+   "reread_bytes": 36038,
+   "wait_s": 254.5
+  },
+  "2026-10-16T23": {
+   "calls": 377,
+   "failed": 8,
+   "time_s": 2147.0,
+   "result_bytes": 1813417,
+   "spilled_bytes": 362014,
+   "reread_bytes": 27424,
+   "wait_s": 19.1
+  },
+  "2026-10-17T00": {
+   "calls": 436,
+   "failed": 6,
+   "time_s": 1694.0,
+   "result_bytes": 1528066,
+   "spilled_bytes": 242645,
+   "reread_bytes": 25742,
+   "wait_s": 0.0
+  },
+  "2026-10-17T01": {
+   "calls": 501,
+   "failed": 9,
+   "time_s": 2392.1,
+   "result_bytes": 1418023,
+   "spilled_bytes": 9836,
+   "reread_bytes": 37906,
+   "wait_s": 22.2
+  },
+  "2026-10-17T02": {
+   "calls": 352,
+   "failed": 3,
+   "time_s": 1532.2,
+   "result_bytes": 735857,
+   "spilled_bytes": 0,
+   "reread_bytes": 21058,
+   "wait_s": 28.0
+  },
+  "2026-10-17T03": {
+   "calls": 601,
+   "failed": 3,
+   "time_s": 2012.4,
+   "result_bytes": 1717131,
+   "spilled_bytes": 130032,
+   "reread_bytes": 14601,
+   "wait_s": 44.4
+  },
+  "2026-10-17T04": {
+   "calls": 506,
+   "failed": 4,
+   "time_s": 2001.3,
+   "result_bytes": 1252668,
+   "spilled_bytes": 616,
+   "reread_bytes": 12236,
+   "wait_s": 328.2
+  },
+  "2026-10-17T05": {
+   "calls": 977,
+   "failed": 3,
+   "time_s": 5789.2,
+   "result_bytes": 8838749,
+   "spilled_bytes": 5263863,
+   "reread_bytes": 106675,
+   "wait_s": 166.3
+  },
+  "2026-10-17T06": {
+   "calls": 960,
+   "failed": 3,
+   "time_s": 5239.0,
+   "result_bytes": 14750780,
+   "spilled_bytes": 9391865,
+   "reread_bytes": 21294,
+   "wait_s": 104.8
+  },
+  "2026-10-17T07": {
+   "calls": 1536,
+   "failed": 8,
+   "time_s": 1802.7,
+   "result_bytes": 34592837,
+   "spilled_bytes": 25591423,
+   "reread_bytes": 76182,
+   "wait_s": 28.8
+  },
+  "2026-10-17T08": {
+   "calls": 1121,
+   "failed": 5,
+   "time_s": 3191.8,
+   "result_bytes": 18947552,
+   "spilled_bytes": 14221770,
+   "reread_bytes": 544179,
+   "wait_s": 54.7
+  },
+  "2026-10-17T09": {
+   "calls": 1209,
+   "failed": 5,
+   "time_s": 1437.1,
+   "result_bytes": 17070120,
+   "spilled_bytes": 12612052,
+   "reread_bytes": 250080,
+   "wait_s": 37.1
+  },
+  "2026-10-17T10": {
+   "calls": 756,
+   "failed": 2,
+   "time_s": 1080.2,
+   "result_bytes": 6411575,
+   "spilled_bytes": 4197333,
+   "reread_bytes": 39582,
+   "wait_s": 31.6
+  },
+  "2026-10-17T11": {
+   "calls": 344,
+   "failed": 9,
+   "time_s": 762.4,
+   "result_bytes": 830626,
+   "spilled_bytes": 93546,
+   "reread_bytes": 63444,
+   "wait_s": 16.9
+  },
+  "2026-10-17T12": {
+   "calls": 616,
+   "failed": 9,
+   "time_s": 1758.5,
+   "result_bytes": 1362696,
+   "spilled_bytes": 191433,
+   "reread_bytes": 53447,
+   "wait_s": 48.1
+  },
+  "2026-10-17T13": {
+   "calls": 871,
+   "failed": 4,
+   "time_s": 2376.4,
+   "result_bytes": 1772276,
+   "spilled_bytes": 163296,
+   "reread_bytes": 84360,
+   "wait_s": 50.7
+  },
+  "2026-10-17T14": {
+   "calls": 637,
+   "failed": 11,
+   "time_s": 1232.2,
+   "result_bytes": 1066653,
+   "spilled_bytes": 94750,
+   "reread_bytes": 48043,
+   "wait_s": 53.6
+  },
+  "2026-10-17T15": {
+   "calls": 744,
+   "failed": 6,
+   "time_s": 1913.3,
+   "result_bytes": 1744752,
+   "spilled_bytes": 283190,
+   "reread_bytes": 150499,
+   "wait_s": 882.8
+  },
+  "2026-10-17T16": {
+   "calls": 492,
+   "failed": 4,
+   "time_s": 709.2,
+   "result_bytes": 1026628,
+   "spilled_bytes": 292758,
+   "reread_bytes": 69872,
+   "wait_s": 70.1
+  },
+  "2026-10-17T17": {
+   "calls": 402,
+   "failed": 1,
+   "time_s": 370.2,
+   "result_bytes": 1145108,
+   "spilled_bytes": 378345,
+   "reread_bytes": 81862,
+   "wait_s": 0.0
+  },
+  "2026-10-17T18": {
+   "calls": 108,
+   "failed": 1,
+   "time_s": 158.9,
+   "result_bytes": 289710,
+   "spilled_bytes": 94238,
+   "reread_bytes": 11523,
+   "wait_s": 0.0
+  },
+  "2026-10-17T19": {
+   "calls": 162,
+   "failed": 2,
+   "time_s": 2347.2,
+   "result_bytes": 267335,
+   "spilled_bytes": 0,
+   "reread_bytes": 5791,
+   "wait_s": 0.0
+  },
+  "2026-10-17T20": {
+   "calls": 34,
+   "failed": 0,
+   "time_s": 53.0,
+   "result_bytes": 54044,
+   "spilled_bytes": 0,
+   "reread_bytes": 473,
+   "wait_s": 0.0
+  },
+  "2026-10-17T21": {
+   "calls": 22,
+   "failed": 0,
+   "time_s": 350.8,
+   "result_bytes": 52388,
+   "spilled_bytes": 0,
+   "reread_bytes": 0,
+   "wait_s": 0.0
+  },
+  "2026-10-17T22": {
+   "calls": 8,
+   "failed": 0,
+   "time_s": 2043.5,
+   "result_bytes": 7664,
+   "spilled_bytes": 0,
+   "reread_bytes": 0,
+   "wait_s": 0.0
+  },
+  "2026-10-17T23": {
+   "calls": 2,
+   "failed": 0,
+   "time_s": 2.2,
+   "result_bytes": 1003,
+   "spilled_bytes": 0,
+   "reread_bytes": 0,
+   "wait_s": 0.0
+  },
+  "2026-10-18T00": {
+   "calls": 1,
+   "failed": 0,
+   "time_s": 926.0,
+   "result_bytes": 818,
+   "spilled_bytes": 0,
+   "reread_bytes": 0,
+   "wait_s": 0.0
+  },
+  "2026-10-18T02": {
+   "calls": 77,
+   "failed": 2,
+   "time_s": 1772.3,
+   "result_bytes": 88909,
+   "spilled_bytes": 0,
+   "reread_bytes": 6399,
+   "wait_s": 0.0
+  },
+  "2026-10-18T03": {
+   "calls": 476,
+   "failed": 7,
+   "time_s": 607.8,
+   "result_bytes": 1326967,
+   "spilled_bytes": 283984,
+   "reread_bytes": 8345,
+   "wait_s": 31.4
+  },
+  "2026-10-18T04": {
+   "calls": 237,
+   "failed": 3,
+   "time_s": 361.9,
+   "result_bytes": 908630,
+   "spilled_bytes": 415639,
+   "reread_bytes": 23782,
+   "wait_s": 0.0
+  },
+  "2026-10-18T05": {
+   "calls": 53,
+   "failed": 1,
+   "time_s": 48.0,
+   "result_bytes": 167743,
+   "spilled_bytes": 3841,
+   "reread_bytes": 896,
+   "wait_s": 0.0
+  },
+  "2026-10-18T06": {
+   "calls": 356,
+   "failed": 5,
+   "time_s": 502.9,
+   "result_bytes": 1357502,
+   "spilled_bytes": 69081,
+   "reread_bytes": 32344,
+   "wait_s": 89.1
+  },
+  "2026-10-18T07": {
+   "calls": 403,
+   "failed": 7,
+   "time_s": 752.7,
+   "result_bytes": 1412596,
+   "spilled_bytes": 163473,
+   "reread_bytes": 34904,
+   "wait_s": 0.0
+  },
+  "2026-10-18T08": {
+   "calls": 400,
+   "failed": 7,
+   "time_s": 632.2,
+   "result_bytes": 1257244,
+   "spilled_bytes": 11376,
+   "reread_bytes": 26668,
+   "wait_s": 7.9
+  },
+  "2026-10-18T09": {
+   "calls": 505,
+   "failed": 3,
+   "time_s": 880.1,
+   "result_bytes": 1452265,
+   "spilled_bytes": 20273,
+   "reread_bytes": 15394,
+   "wait_s": 0.0
+  },
+  "2026-10-18T10": {
+   "calls": 433,
+   "failed": 5,
+   "time_s": 619.3,
+   "result_bytes": 1142863,
+   "spilled_bytes": 55727,
+   "reread_bytes": 13798,
+   "wait_s": 6.7
+  },
+  "2026-10-18T11": {
+   "calls": 460,
+   "failed": 1,
+   "time_s": 676.1,
+   "result_bytes": 1283814,
+   "spilled_bytes": 65037,
+   "reread_bytes": 16380,
+   "wait_s": 0.0
+  },
+  "2026-10-18T12": {
+   "calls": 484,
+   "failed": 6,
+   "time_s": 787.1,
+   "result_bytes": 1356111,
+   "spilled_bytes": 67301,
+   "reread_bytes": 25091,
+   "wait_s": 0.0
+  },
+  "2026-10-18T13": {
+   "calls": 457,
+   "failed": 4,
+   "time_s": 738.4,
+   "result_bytes": 1625683,
+   "spilled_bytes": 265059,
+   "reread_bytes": 7764,
+   "wait_s": 0.0
+  },
+  "2026-10-18T14": {
+   "calls": 848,
+   "failed": 15,
+   "time_s": 1827.3,
+   "result_bytes": 3163133,
+   "spilled_bytes": 161321,
+   "reread_bytes": 52391,
+   "wait_s": 2.3
+  },
+  "2026-10-18T15": {
+   "calls": 1066,
+   "failed": 5,
+   "time_s": 1832.2,
+   "result_bytes": 3762613,
+   "spilled_bytes": 181964,
+   "reread_bytes": 71833,
+   "wait_s": 0.0
+  },
+  "2026-10-18T16": {
+   "calls": 844,
+   "failed": 2,
+   "time_s": 820.1,
+   "result_bytes": 2915976,
+   "spilled_bytes": 115114,
+   "reread_bytes": 58033,
+   "wait_s": 0.0
+  },
+  "2026-10-18T17": {
+   "calls": 609,
+   "failed": 1,
+   "time_s": 606.8,
+   "result_bytes": 2148924,
+   "spilled_bytes": 54240,
+   "reread_bytes": 28775,
+   "wait_s": 0.0
+  },
+  "2026-10-18T18": {
+   "calls": 541,
+   "failed": 3,
+   "time_s": 670.4,
+   "result_bytes": 1952954,
+   "spilled_bytes": 57347,
+   "reread_bytes": 33643,
+   "wait_s": 0.0
+  },
+  "2026-10-18T19": {
+   "calls": 739,
+   "failed": 7,
+   "time_s": 955.4,
+   "result_bytes": 2374767,
+   "spilled_bytes": 129907,
+   "reread_bytes": 30142,
+   "wait_s": 0.0
+  },
+  "2026-10-18T20": {
+   "calls": 666,
+   "failed": 6,
+   "time_s": 1174.3,
+   "result_bytes": 1514529,
+   "spilled_bytes": 79271,
+   "reread_bytes": 16836,
+   "wait_s": 11.1
+  },
+  "2026-10-18T21": {
+   "calls": 523,
+   "failed": 6,
+   "time_s": 2043.1,
+   "result_bytes": 1565360,
+   "spilled_bytes": 93310,
+   "reread_bytes": 19371,
+   "wait_s": 0.0
+  },
+  "2026-10-18T22": {
+   "calls": 339,
+   "failed": 4,
+   "time_s": 447.7,
+   "result_bytes": 684579,
+   "spilled_bytes": 10293,
+   "reread_bytes": 2530,
+   "wait_s": 17.1
+  },
+  "2026-10-18T23": {
+   "calls": 328,
+   "failed": 5,
+   "time_s": 500.2,
+   "result_bytes": 866272,
+   "spilled_bytes": 55696,
+   "reread_bytes": 8428,
+   "wait_s": 0.0
+  },
+  "2026-10-19T00": {
+   "calls": 662,
+   "failed": 4,
+   "time_s": 1986.7,
+   "result_bytes": 2049813,
+   "spilled_bytes": 206545,
+   "reread_bytes": 39048,
+   "wait_s": 331.5
+  },
+  "2026-10-19T01": {
+   "calls": 891,
+   "failed": 28,
+   "time_s": 4226.8,
+   "result_bytes": 3409314,
+   "spilled_bytes": 452843,
+   "reread_bytes": 95703,
+   "wait_s": 25.4
+  },
+  "2026-10-19T02": {
+   "calls": 873,
+   "failed": 3,
+   "time_s": 3379.0,
+   "result_bytes": 3208635,
+   "spilled_bytes": 487798,
+   "reread_bytes": 36135,
+   "wait_s": 99.4
+  },
+  "2026-10-19T03": {
+   "calls": 840,
+   "failed": 17,
+   "time_s": 1413.0,
+   "result_bytes": 3723004,
+   "spilled_bytes": 637970,
+   "reread_bytes": 16853,
+   "wait_s": 285.0
+  },
+  "2026-10-19T04": {
+   "calls": 1286,
+   "failed": 9,
+   "time_s": 2092.7,
+   "result_bytes": 5661964,
+   "spilled_bytes": 707201,
+   "reread_bytes": 213277,
+   "wait_s": 0.0
+  },
+  "2026-10-19T05": {
+   "calls": 1344,
+   "failed": 19,
+   "time_s": 3153.2,
+   "result_bytes": 5106631,
+   "spilled_bytes": 902803,
+   "reread_bytes": 51264,
+   "wait_s": 10.8
+  },
+  "2026-10-19T06": {
+   "calls": 1182,
+   "failed": 26,
+   "time_s": 6598.8,
+   "result_bytes": 4335940,
+   "spilled_bytes": 616619,
+   "reread_bytes": 93173,
+   "wait_s": 8.7
+  },
+  "2026-10-19T07": {
+   "calls": 1092,
+   "failed": 22,
+   "time_s": 12119.0,
+   "result_bytes": 3592999,
+   "spilled_bytes": 205055,
+   "reread_bytes": 91775,
+   "wait_s": 810.0
+  },
+  "2026-10-19T08": {
+   "calls": 1232,
+   "failed": 40,
+   "time_s": 8565.2,
+   "result_bytes": 5529389,
+   "spilled_bytes": 1086738,
+   "reread_bytes": 87014,
+   "wait_s": 31.2
+  },
+  "2026-10-19T09": {
+   "calls": 1293,
+   "failed": 58,
+   "time_s": 2623.1,
+   "result_bytes": 4492154,
+   "spilled_bytes": 484963,
+   "reread_bytes": 47826,
+   "wait_s": 12.6
+  },
+  "2026-10-19T10": {
+   "calls": 812,
+   "failed": 61,
+   "time_s": 5167.8,
+   "result_bytes": 3279323,
+   "spilled_bytes": 459541,
+   "reread_bytes": 26237,
+   "wait_s": 62.7
+  },
+  "2026-10-19T11": {
+   "calls": 426,
+   "failed": 20,
+   "time_s": 5419.3,
+   "result_bytes": 1721779,
+   "spilled_bytes": 301890,
+   "reread_bytes": 1001,
+   "wait_s": 0.0
+  },
+  "2026-10-19T12": {
+   "calls": 476,
+   "failed": 19,
+   "time_s": 3153.0,
+   "result_bytes": 1551825,
+   "spilled_bytes": 240601,
+   "reread_bytes": 100854,
+   "wait_s": 309.9
+  },
+  "2026-10-19T13": {
+   "calls": 702,
+   "failed": 19,
+   "time_s": 2487.3,
+   "result_bytes": 2183316,
+   "spilled_bytes": 291476,
+   "reread_bytes": 99085,
+   "wait_s": 143.6
+  },
+  "2026-10-19T14": {
+   "calls": 796,
+   "failed": 19,
+   "time_s": 8717.7,
+   "result_bytes": 2850058,
+   "spilled_bytes": 322699,
+   "reread_bytes": 4126,
+   "wait_s": 23.7
+  },
+  "2026-10-19T15": {
+   "calls": 745,
+   "failed": 32,
+   "time_s": 3462.2,
+   "result_bytes": 2497251,
+   "spilled_bytes": 405000,
+   "reread_bytes": 38050,
+   "wait_s": 610.6
+  },
+  "2026-10-19T16": {
+   "calls": 809,
+   "failed": 54,
+   "time_s": 2214.2,
+   "result_bytes": 2048343,
+   "spilled_bytes": 5036,
+   "reread_bytes": 16157,
+   "wait_s": 131.5
+  },
+  "2026-10-19T17": {
+   "calls": 1111,
+   "failed": 59,
+   "time_s": 4707.6,
+   "result_bytes": 3107388,
+   "spilled_bytes": 407632,
+   "reread_bytes": 58920,
+   "wait_s": 1322.7
+  },
+  "2026-10-19T18": {
+   "calls": 726,
+   "failed": 38,
+   "time_s": 5119.7,
+   "result_bytes": 2262323,
+   "spilled_bytes": 225606,
+   "reread_bytes": 24856,
+   "wait_s": 2706.1
+  },
+  "2026-10-19T19": {
+   "calls": 1055,
+   "failed": 68,
+   "time_s": 3423.5,
+   "result_bytes": 2776028,
+   "spilled_bytes": 190044,
+   "reread_bytes": 67164,
+   "wait_s": 1415.2
+  },
+  "2026-10-19T20": {
+   "calls": 1349,
+   "failed": 140,
+   "time_s": 5026.1,
+   "result_bytes": 2983018,
+   "spilled_bytes": 24938,
+   "reread_bytes": 25281,
+   "wait_s": 2863.0
+  },
+  "2026-10-19T21": {
+   "calls": 1407,
+   "failed": 412,
+   "time_s": 4318.0,
+   "result_bytes": 2333314,
+   "spilled_bytes": 0,
+   "reread_bytes": 43096,
+   "wait_s": 2593.6
+  },
+  "2026-10-19T22": {
+   "calls": 1658,
+   "failed": 542,
+   "time_s": 5866.9,
+   "result_bytes": 2678829,
+   "spilled_bytes": 268737,
+   "reread_bytes": 93840,
+   "wait_s": 3032.7
+  },
+  "2026-10-19T23": {
+   "calls": 1345,
+   "failed": 744,
+   "time_s": 3004.0,
+   "result_bytes": 1872155,
+   "spilled_bytes": 36615,
+   "reread_bytes": 30675,
+   "wait_s": 1994.2
+  },
+  "2026-10-20T00": {
+   "calls": 614,
+   "failed": 215,
+   "time_s": 1158.8,
+   "result_bytes": 1476761,
+   "spilled_bytes": 163081,
+   "reread_bytes": 11589,
+   "wait_s": 511.1
+  },
+  "2026-10-20T01": {
+   "calls": 407,
+   "failed": 9,
+   "time_s": 10783.3,
+   "result_bytes": 1402892,
+   "spilled_bytes": 307226,
+   "reread_bytes": 14225,
+   "wait_s": 459.2
+  },
+  "2026-10-20T02": {
+   "calls": 283,
+   "failed": 7,
+   "time_s": 401.0,
+   "result_bytes": 1028339,
+   "spilled_bytes": 253342,
+   "reread_bytes": 11933,
+   "wait_s": 0.0
+  },
+  "2026-10-20T03": {
+   "calls": 280,
+   "failed": 40,
+   "time_s": 290.3,
+   "result_bytes": 686721,
+   "spilled_bytes": 93317,
+   "reread_bytes": 123279,
+   "wait_s": 0.0
+  },
+  "2026-10-20T04": {
+   "calls": 443,
+   "failed": 45,
+   "time_s": 3439.9,
+   "result_bytes": 1680814,
+   "spilled_bytes": 401653,
+   "reread_bytes": 12877,
+   "wait_s": 33.1
+  },
+  "2026-10-20T05": {
+   "calls": 817,
+   "failed": 99,
+   "time_s": 3437.4,
+   "result_bytes": 3279581,
+   "spilled_bytes": 1419091,
+   "reread_bytes": 33412,
+   "wait_s": 69.3
+  },
+  "2026-10-20T06": {
+   "calls": 749,
+   "failed": 20,
+   "time_s": 7017.3,
+   "result_bytes": 3549601,
+   "spilled_bytes": 1407091,
+   "reread_bytes": 53661,
+   "wait_s": 892.0
+  },
+  "2026-10-20T07": {
+   "calls": 997,
+   "failed": 20,
+   "time_s": 5516.1,
+   "result_bytes": 5440062,
+   "spilled_bytes": 2134732,
+   "reread_bytes": 103382,
+   "wait_s": 1387.2
+  },
+  "2026-10-20T08": {
+   "calls": 636,
+   "failed": 13,
+   "time_s": 8922.2,
+   "result_bytes": 3754619,
+   "spilled_bytes": 1522309,
+   "reread_bytes": 20589,
+   "wait_s": 31.5
+  },
+  "2026-10-20T09": {
+   "calls": 655,
+   "failed": 14,
+   "time_s": 36030.0,
+   "result_bytes": 5648548,
+   "spilled_bytes": 3330291,
+   "reread_bytes": 16016,
+   "wait_s": 73.0
+  },
+  "2026-10-20T10": {
+   "calls": 843,
+   "failed": 18,
+   "time_s": 3789.4,
+   "result_bytes": 3395769,
+   "spilled_bytes": 837787,
+   "reread_bytes": 20385,
+   "wait_s": 75.7
+  },
+  "2026-10-20T11": {
+   "calls": 537,
+   "failed": 13,
+   "time_s": 32640.9,
+   "result_bytes": 3421694,
+   "spilled_bytes": 1269109,
+   "reread_bytes": 25687,
+   "wait_s": 13.0
+  },
+  "2026-10-20T12": {
+   "calls": 305,
+   "failed": 23,
+   "time_s": 1574.5,
+   "result_bytes": 1585551,
+   "spilled_bytes": 552459,
+   "reread_bytes": 111673,
+   "wait_s": 11.2
+  },
+  "2026-10-20T13": {
+   "calls": 1851,
+   "failed": 51,
+   "time_s": 26009.5,
+   "result_bytes": 9697333,
+   "spilled_bytes": 2574421,
+   "reread_bytes": 154932,
+   "wait_s": 348.1
+  },
+  "2026-10-20T14": {
+   "calls": 1349,
+   "failed": 33,
+   "time_s": 24317.4,
+   "result_bytes": 9366400,
+   "spilled_bytes": 3331387,
+   "reread_bytes": 224559,
+   "wait_s": 551.7
+  },
+  "2026-10-20T15": {
+   "calls": 1653,
+   "failed": 36,
+   "time_s": 3766.3,
+   "result_bytes": 6616621,
+   "spilled_bytes": 1314318,
+   "reread_bytes": 69266,
+   "wait_s": 443.9
+  },
+  "2026-10-20T16": {
+   "calls": 2031,
+   "failed": 39,
+   "time_s": 4538.3,
+   "result_bytes": 7850715,
+   "spilled_bytes": 1513603,
+   "reread_bytes": 262596,
+   "wait_s": 122.0
+  },
+  "2026-10-20T17": {
+   "calls": 946,
+   "failed": 25,
+   "time_s": 17452.4,
+   "result_bytes": 6910345,
+   "spilled_bytes": 2868508,
+   "reread_bytes": 87160,
+   "wait_s": 708.3
+  },
+  "2026-10-20T18": {
+   "calls": 2269,
+   "failed": 35,
+   "time_s": 13007.5,
+   "result_bytes": 9152898,
+   "spilled_bytes": 3029962,
+   "reread_bytes": 198861,
+   "wait_s": 2811.9
+  },
+  "2026-10-20T19": {
+   "calls": 1645,
+   "failed": 25,
+   "time_s": 6236.3,
+   "result_bytes": 7486713,
+   "spilled_bytes": 2307399,
+   "reread_bytes": 208020,
+   "wait_s": 2731.9
+  },
+  "2026-10-20T20": {
+   "calls": 1525,
+   "failed": 33,
+   "time_s": 7700.9,
+   "result_bytes": 5471109,
+   "spilled_bytes": 2184298,
+   "reread_bytes": 29833,
+   "wait_s": 2296.2
+  },
+  "2026-10-20T21": {
+   "calls": 1526,
+   "failed": 22,
+   "time_s": 19566.5,
+   "result_bytes": 7876572,
+   "spilled_bytes": 3790827,
+   "reread_bytes": 37301,
+   "wait_s": 2678.0
+  },
+  "2026-10-20T22": {
+   "calls": 1351,
+   "failed": 29,
+   "time_s": 27723.7,
+   "result_bytes": 8969859,
+   "spilled_bytes": 5055267,
+   "reread_bytes": 256501,
+   "wait_s": 1896.8
+  },
+  "2026-10-20T23": {
+   "calls": 1531,
+   "failed": 25,
+   "time_s": 4862.9,
+   "result_bytes": 5741144,
+   "spilled_bytes": 1968710,
+   "reread_bytes": 268688,
+   "wait_s": 864.9
+  },
+  "2026-10-21T00": {
+   "calls": 1421,
+   "failed": 25,
+   "time_s": 4627.1,
+   "result_bytes": 5648141,
+   "spilled_bytes": 2216737,
+   "reread_bytes": 34119,
+   "wait_s": 2207.6
+  },
+  "2026-10-21T01": {
+   "calls": 1292,
+   "failed": 49,
+   "time_s": 27345.9,
+   "result_bytes": 5574176,
+   "spilled_bytes": 1748337,
+   "reread_bytes": 464899,
+   "wait_s": 597.7
+  },
+  "2026-10-21T02": {
+   "calls": 1236,
+   "failed": 31,
+   "time_s": 18411.5,
+   "result_bytes": 5204784,
+   "spilled_bytes": 1657796,
+   "reread_bytes": 124934,
+   "wait_s": 1222.7
+  },
+  "2026-10-21T03": {
+   "calls": 1829,
+   "failed": 58,
+   "time_s": 17285.5,
+   "result_bytes": 5733159,
+   "spilled_bytes": 704976,
+   "reread_bytes": 50813,
+   "wait_s": 515.3
+  },
+  "2026-10-21T04": {
+   "calls": 1296,
+   "failed": 25,
+   "time_s": 40400.4,
+   "result_bytes": 7653279,
+   "spilled_bytes": 3109946,
+   "reread_bytes": 158724,
+   "wait_s": 108.2
+  },
+  "2026-10-21T05": {
+   "calls": 1139,
+   "failed": 44,
+   "time_s": 10563.8,
+   "result_bytes": 4502305,
+   "spilled_bytes": 582501,
+   "reread_bytes": 208678,
+   "wait_s": 2474.2
+  },
+  "2026-10-21T06": {
+   "calls": 1145,
+   "failed": 19,
+   "time_s": 18992.4,
+   "result_bytes": 4251851,
+   "spilled_bytes": 850168,
+   "reread_bytes": 166305,
+   "wait_s": 1296.2
+  },
+  "2026-10-21T07": {
+   "calls": 1566,
+   "failed": 59,
+   "time_s": 10680.7,
+   "result_bytes": 6806831,
+   "spilled_bytes": 1617650,
+   "reread_bytes": 465063,
+   "wait_s": 3661.0
+  },
+  "2026-10-21T08": {
+   "calls": 1643,
+   "failed": 39,
+   "time_s": 12091.1,
+   "result_bytes": 5582522,
+   "spilled_bytes": 713978,
+   "reread_bytes": 384886,
+   "wait_s": 455.8
+  },
+  "2026-10-21T09": {
+   "calls": 1448,
+   "failed": 59,
+   "time_s": 33072.6,
+   "result_bytes": 4415052,
+   "spilled_bytes": 899363,
+   "reread_bytes": 344945,
+   "wait_s": 1134.8
+  },
+  "2026-10-21T10": {
+   "calls": 667,
+   "failed": 8,
+   "time_s": 24340.3,
+   "result_bytes": 4172302,
+   "spilled_bytes": 2347592,
+   "reread_bytes": 63794,
+   "wait_s": 530.8
+  },
+  "2026-10-21T11": {
+   "calls": 2095,
+   "failed": 50,
+   "time_s": 23632.6,
+   "result_bytes": 12395191,
+   "spilled_bytes": 5639702,
+   "reread_bytes": 404489,
+   "wait_s": 600.9
+  },
+  "2026-10-21T12": {
+   "calls": 1398,
+   "failed": 18,
+   "time_s": 32384.3,
+   "result_bytes": 10136989,
+   "spilled_bytes": 5893857,
+   "reread_bytes": 1005006,
+   "wait_s": 858.9
+  },
+  "2026-10-21T13": {
+   "calls": 2143,
+   "failed": 23,
+   "time_s": 10612.2,
+   "result_bytes": 5489025,
+   "spilled_bytes": 554417,
+   "reread_bytes": 423484,
+   "wait_s": 3669.0
+  },
+  "2026-10-21T14": {
+   "calls": 2007,
+   "failed": 33,
+   "time_s": 12068.8,
+   "result_bytes": 6705605,
+   "spilled_bytes": 878637,
+   "reread_bytes": 193510,
+   "wait_s": 3854.9
+  },
+  "2026-10-21T15": {
+   "calls": 1795,
+   "failed": 31,
+   "time_s": 8824.6,
+   "result_bytes": 4579999,
+   "spilled_bytes": 339367,
+   "reread_bytes": 197048,
+   "wait_s": 2787.7
+  },
+  "2026-10-21T16": {
+   "calls": 1643,
+   "failed": 25,
+   "time_s": 5763.4,
+   "result_bytes": 4889808,
+   "spilled_bytes": 415506,
+   "reread_bytes": 160272,
+   "wait_s": 282.3
+  },
+  "2026-10-21T17": {
+   "calls": 1305,
+   "failed": 33,
+   "time_s": 3744.1,
+   "result_bytes": 4026755,
+   "spilled_bytes": 147090,
+   "reread_bytes": 51548,
+   "wait_s": 1042.8
+  },
+  "2026-10-21T18": {
+   "calls": 305,
+   "failed": 16,
+   "time_s": 1004.8,
+   "result_bytes": 1523607,
+   "spilled_bytes": 229273,
+   "reread_bytes": 22432,
+   "wait_s": 69.0
+  },
+  "2026-10-21T19": {
+   "calls": 271,
+   "failed": 2,
+   "time_s": 729.3,
+   "result_bytes": 907994,
+   "spilled_bytes": 48803,
+   "reread_bytes": 7288,
+   "wait_s": 66.0
+  },
+  "2026-10-21T20": {
+   "calls": 240,
+   "failed": 8,
+   "time_s": 841.6,
+   "result_bytes": 830618,
+   "spilled_bytes": 1257,
+   "reread_bytes": 5466,
+   "wait_s": 51.0
+  },
+  "2026-10-21T21": {
+   "calls": 291,
+   "failed": 4,
+   "time_s": 2617.1,
+   "result_bytes": 1085412,
+   "spilled_bytes": 1259,
+   "reread_bytes": 29206,
+   "wait_s": 1936.0
+  },
+  "2026-10-21T22": {
+   "calls": 317,
+   "failed": 1,
+   "time_s": 3719.2,
+   "result_bytes": 1070292,
+   "spilled_bytes": 3072,
+   "reread_bytes": 29513,
+   "wait_s": 2857.3
+  },
+  "2026-10-21T23": {
+   "calls": 396,
+   "failed": 7,
+   "time_s": 2771.7,
+   "result_bytes": 1310950,
+   "spilled_bytes": 38843,
+   "reread_bytes": 16481,
+   "wait_s": 1520.5
+  },
+  "2026-10-22T00": {
+   "calls": 515,
+   "failed": 6,
+   "time_s": 4315.3,
+   "result_bytes": 2043249,
+   "spilled_bytes": 41210,
+   "reread_bytes": 31443,
+   "wait_s": 1659.6
+  },
+  "2026-10-22T01": {
+   "calls": 817,
+   "failed": 38,
+   "time_s": 8584.5,
+   "result_bytes": 3267941,
+   "spilled_bytes": 139686,
+   "reread_bytes": 142808,
+   "wait_s": 1259.8
+  },
+  "2026-10-22T02": {
+   "calls": 675,
+   "failed": 27,
+   "time_s": 8296.5,
+   "result_bytes": 2715573,
+   "spilled_bytes": 42485,
+   "reread_bytes": 104199,
+   "wait_s": 1911.2
+  },
+  "2026-10-22T03": {
+   "calls": 451,
+   "failed": 10,
+   "time_s": 3125.0,
+   "result_bytes": 2003147,
+   "spilled_bytes": 152130,
+   "reread_bytes": 52341,
+   "wait_s": 1114.7
+  },
+  "2026-10-22T04": {
+   "calls": 404,
+   "failed": 15,
+   "time_s": 4528.8,
+   "result_bytes": 1105528,
+   "spilled_bytes": 32528,
+   "reread_bytes": 18950,
+   "wait_s": 1659.3
+  },
+  "2026-10-22T05": {
+   "calls": 308,
+   "failed": 7,
+   "time_s": 4933.5,
+   "result_bytes": 856390,
+   "spilled_bytes": 38197,
+   "reread_bytes": 1417,
+   "wait_s": 1912.8
+  },
+  "2026-10-22T06": {
+   "calls": 784,
+   "failed": 16,
+   "time_s": 3014.7,
+   "result_bytes": 3613733,
+   "spilled_bytes": 143762,
+   "reread_bytes": 49649,
+   "wait_s": 230.9
+  },
+  "2026-10-22T07": {
+   "calls": 657,
+   "failed": 23,
+   "time_s": 5192.2,
+   "result_bytes": 3035851,
+   "spilled_bytes": 10653,
+   "reread_bytes": 95500,
+   "wait_s": 1169.7
+  },
+  "2026-10-22T08": {
+   "calls": 828,
+   "failed": 33,
+   "time_s": 4530.8,
+   "result_bytes": 3423959,
+   "spilled_bytes": 646189,
+   "reread_bytes": 62127,
+   "wait_s": 35.1
+  },
+  "2026-10-22T09": {
+   "calls": 271,
+   "failed": 5,
+   "time_s": 5992.3,
+   "result_bytes": 894688,
+   "spilled_bytes": 25811,
+   "reread_bytes": 37857,
+   "wait_s": 0.0
+  },
+  "2026-10-22T10": {
+   "calls": 904,
+   "failed": 15,
+   "time_s": 3895.4,
+   "result_bytes": 5278790,
+   "spilled_bytes": 2149039,
+   "reread_bytes": 34818,
+   "wait_s": 217.4
+  },
+  "2026-10-22T11": {
+   "calls": 2112,
+   "failed": 56,
+   "time_s": 4159.6,
+   "result_bytes": 16942493,
+   "spilled_bytes": 10841146,
+   "reread_bytes": 168250,
+   "wait_s": 40.0
+  },
+  "2026-10-22T12": {
+   "calls": 1512,
+   "failed": 31,
+   "time_s": 6300.4,
+   "result_bytes": 11741585,
+   "spilled_bytes": 6586741,
+   "reread_bytes": 209588,
+   "wait_s": 79.3
+  },
+  "2026-10-22T13": {
+   "calls": 492,
+   "failed": 22,
+   "time_s": 6645.4,
+   "result_bytes": 1996583,
+   "spilled_bytes": 368108,
+   "reread_bytes": 31086,
+   "wait_s": 8.6
+  },
+  "2026-10-22T14": {
+   "calls": 970,
+   "failed": 32,
+   "time_s": 5697.2,
+   "result_bytes": 12356465,
+   "spilled_bytes": 8839571,
+   "reread_bytes": 1043302,
+   "wait_s": 1192.9
+  },
+  "2026-10-22T15": {
+   "calls": 1122,
+   "failed": 23,
+   "time_s": 2948.4,
+   "result_bytes": 10393242,
+   "spilled_bytes": 6663783,
+   "reread_bytes": 166191,
+   "wait_s": 21.6
+  },
+  "2026-10-22T16": {
+   "calls": 657,
+   "failed": 36,
+   "time_s": 7996.4,
+   "result_bytes": 4858886,
+   "spilled_bytes": 2389200,
+   "reread_bytes": 182214,
+   "wait_s": 22.8
+  },
+  "2026-10-22T17": {
+   "calls": 296,
+   "failed": 6,
+   "time_s": 1312.8,
+   "result_bytes": 3183904,
+   "spilled_bytes": 2038887,
+   "reread_bytes": 24661,
+   "wait_s": 0.0
+  },
+  "2026-10-22T18": {
+   "calls": 869,
+   "failed": 59,
+   "time_s": 3272.5,
+   "result_bytes": 7997578,
+   "spilled_bytes": 5100163,
+   "reread_bytes": 123173,
+   "wait_s": 25.9
+  },
+  "2026-10-22T19": {
+   "calls": 728,
+   "failed": 21,
+   "time_s": 2689.2,
+   "result_bytes": 8535573,
+   "spilled_bytes": 5664370,
+   "reread_bytes": 151195,
+   "wait_s": 157.5
+  },
+  "2026-10-22T20": {
+   "calls": 344,
+   "failed": 5,
+   "time_s": 1404.2,
+   "result_bytes": 1412658,
+   "spilled_bytes": 138707,
+   "reread_bytes": 116493,
+   "wait_s": 26.4
+  },
+  "2026-10-22T21": {
+   "calls": 263,
+   "failed": 2,
+   "time_s": 857.5,
+   "result_bytes": 1052722,
+   "spilled_bytes": 0,
+   "reread_bytes": 130173,
+   "wait_s": 6.0
+  },
+  "2026-10-22T22": {
+   "calls": 334,
+   "failed": 3,
+   "time_s": 789.4,
+   "result_bytes": 1266479,
+   "spilled_bytes": 0,
+   "reread_bytes": 249031,
+   "wait_s": 13.1
+  },
+  "2026-10-22T23": {
+   "calls": 188,
+   "failed": 6,
+   "time_s": 905.6,
+   "result_bytes": 758797,
+   "spilled_bytes": 20609,
+   "reread_bytes": 80310,
+   "wait_s": 0.0
+  },
+  "2026-10-23T00": {
+   "calls": 840,
+   "failed": 15,
+   "time_s": 1956.6,
+   "result_bytes": 2684843,
+   "spilled_bytes": 37075,
+   "reread_bytes": 30215,
+   "wait_s": 47.9
+  },
+  "2026-10-23T01": {
+   "calls": 1576,
+   "failed": 57,
+   "time_s": 4399.8,
+   "result_bytes": 5457816,
+   "spilled_bytes": 936161,
+   "reread_bytes": 88814,
+   "wait_s": 459.8
+  },
+  "2026-10-23T02": {
+   "calls": 1517,
+   "failed": 15,
+   "time_s": 4567.4,
+   "result_bytes": 4017940,
+   "spilled_bytes": 362935,
+   "reread_bytes": 138217,
+   "wait_s": 383.4
+  },
+  "2026-10-23T03": {
+   "calls": 1054,
+   "failed": 7,
+   "time_s": 3731.8,
+   "result_bytes": 3288450,
+   "spilled_bytes": 61569,
+   "reread_bytes": 118838,
+   "wait_s": 405.6
+  },
+  "2026-10-23T04": {
+   "calls": 1621,
+   "failed": 38,
+   "time_s": 5693.8,
+   "result_bytes": 5492745,
+   "spilled_bytes": 205357,
+   "reread_bytes": 75650,
+   "wait_s": 523.0
+  },
+  "2026-10-23T05": {
+   "calls": 2373,
+   "failed": 46,
+   "time_s": 6943.1,
+   "result_bytes": 7644880,
+   "spilled_bytes": 787931,
+   "reread_bytes": 341285,
+   "wait_s": 153.7
+  },
+  "2026-10-23T06": {
+   "calls": 1904,
+   "failed": 26,
+   "time_s": 5129.4,
+   "result_bytes": 4621221,
+   "spilled_bytes": 76389,
+   "reread_bytes": 384530,
+   "wait_s": 165.4
+  },
+  "2026-10-23T07": {
+   "calls": 2212,
+   "failed": 73,
+   "time_s": 6246.0,
+   "result_bytes": 6003470,
+   "spilled_bytes": 848720,
+   "reread_bytes": 338386,
+   "wait_s": 448.0
+  },
+  "2026-10-23T08": {
+   "calls": 1441,
+   "failed": 44,
+   "time_s": 4508.3,
+   "result_bytes": 6039116,
+   "spilled_bytes": 867086,
+   "reread_bytes": 128706,
+   "wait_s": 22.3
+  },
+  "2026-10-23T09": {
+   "calls": 2181,
+   "failed": 31,
+   "time_s": 6080.8,
+   "result_bytes": 5760806,
+   "spilled_bytes": 696899,
+   "reread_bytes": 299418,
+   "wait_s": 110.7
+  },
+  "2026-10-23T10": {
+   "calls": 2676,
+   "failed": 68,
+   "time_s": 5863.8,
+   "result_bytes": 7377225,
+   "spilled_bytes": 1020564,
+   "reread_bytes": 773331,
+   "wait_s": 751.8
+  },
+  "2026-10-23T11": {
+   "calls": 1991,
+   "failed": 103,
+   "time_s": 3743.0,
+   "result_bytes": 5876640,
+   "spilled_bytes": 902366,
+   "reread_bytes": 389182,
+   "wait_s": 157.7
+  },
+  "2026-10-23T12": {
+   "calls": 1455,
+   "failed": 123,
+   "time_s": 3301.5,
+   "result_bytes": 4712644,
+   "spilled_bytes": 477904,
+   "reread_bytes": 241020,
+   "wait_s": 0.0
+  },
+  "2026-10-23T13": {
+   "calls": 1026,
+   "failed": 23,
+   "time_s": 2688.4,
+   "result_bytes": 9168708,
+   "spilled_bytes": 3255117,
+   "reread_bytes": 402423,
+   "wait_s": 0.0
+  },
+  "2026-10-23T14": {
+   "calls": 891,
+   "failed": 22,
+   "time_s": 2343.5,
+   "result_bytes": 1514995,
+   "spilled_bytes": 1245,
+   "reread_bytes": 508922,
+   "wait_s": 47.9
+  },
+  "2026-10-23T15": {
+   "calls": 842,
+   "failed": 3,
+   "time_s": 3010.2,
+   "result_bytes": 1360247,
+   "spilled_bytes": 1250,
+   "reread_bytes": 542411,
+   "wait_s": 902.0
+  },
+  "2026-10-23T16": {
+   "calls": 394,
+   "failed": 13,
+   "time_s": 2553.8,
+   "result_bytes": 910667,
+   "spilled_bytes": 84213,
+   "reread_bytes": 13081,
+   "wait_s": 565.6
+  },
+  "2026-10-23T17": {
+   "calls": 1136,
+   "failed": 34,
+   "time_s": 4027.9,
+   "result_bytes": 10328034,
+   "spilled_bytes": 4352252,
+   "reread_bytes": 711252,
+   "wait_s": 1520.1
+  },
+  "2026-10-23T18": {
+   "calls": 1990,
+   "failed": 15,
+   "time_s": 4707.9,
+   "result_bytes": 28750215,
+   "spilled_bytes": 11904364,
+   "reread_bytes": 1062462,
+   "wait_s": 2512.0
+  },
+  "2026-10-23T19": {
+   "calls": 2611,
+   "failed": 16,
+   "time_s": 4335.9,
+   "result_bytes": 46457496,
+   "spilled_bytes": 20245130,
+   "reread_bytes": 1809521,
+   "wait_s": 2124.2
+  },
+  "2026-10-23T20": {
+   "calls": 3102,
+   "failed": 20,
+   "time_s": 3306.3,
+   "result_bytes": 49074441,
+   "spilled_bytes": 9640716,
+   "reread_bytes": 30835365,
+   "wait_s": 1577.3
+  },
+  "2026-10-23T21": {
+   "calls": 575,
+   "failed": 7,
+   "time_s": 3987.7,
+   "result_bytes": 2171762,
+   "spilled_bytes": 218254,
+   "reread_bytes": 697742,
+   "wait_s": 2422.7
+  },
+  "2026-10-23T22": {
+   "calls": 700,
+   "failed": 12,
+   "time_s": 2751.5,
+   "result_bytes": 2920316,
+   "spilled_bytes": 364943,
+   "reread_bytes": 690326,
+   "wait_s": 1525.3
+  },
+  "2026-10-23T23": {
+   "calls": 853,
+   "failed": 6,
+   "time_s": 817.5,
+   "result_bytes": 6846858,
+   "spilled_bytes": 195243,
+   "reread_bytes": 5065495,
+   "wait_s": 0.0
+  },
+  "2026-10-24T00": {
+   "calls": 623,
+   "failed": 12,
+   "time_s": 1490.2,
+   "result_bytes": 2115173,
+   "spilled_bytes": 202908,
+   "reread_bytes": 196874,
+   "wait_s": 310.2
+  },
+  "2026-10-24T01": {
+   "calls": 400,
+   "failed": 10,
+   "time_s": 1515.1,
+   "result_bytes": 1290338,
+   "spilled_bytes": 98180,
+   "reread_bytes": 202300,
+   "wait_s": 337.0
+  },
+  "2026-10-24T03": {
+   "calls": 1200,
+   "failed": 130,
+   "time_s": 1996.7,
+   "result_bytes": 8788993,
+   "spilled_bytes": 1351382,
+   "reread_bytes": 195301,
+   "wait_s": 309.5
+  },
+  "2026-10-24T04": {
+   "calls": 5738,
+   "failed": 28,
+   "time_s": 9245.5,
+   "result_bytes": 87661415,
+   "spilled_bytes": 6535554,
+   "reread_bytes": 70855458,
+   "wait_s": 0.0
+  },
+  "2026-10-24T05": {
+   "calls": 1814,
+   "failed": 21,
+   "time_s": 5884.1,
+   "result_bytes": 18106204,
+   "spilled_bytes": 7037543,
+   "reread_bytes": 1133185,
+   "wait_s": 0.0
+  },
+  "2026-10-24T06": {
+   "calls": 2392,
+   "failed": 56,
+   "time_s": 12710.5,
+   "result_bytes": 25760930,
+   "spilled_bytes": 10122910,
+   "reread_bytes": 1787969,
+   "wait_s": 4.1
+  },
+  "2026-10-24T07": {
+   "calls": 10672,
+   "failed": 75,
+   "time_s": 6846.6,
+   "result_bytes": 155154354,
+   "spilled_bytes": 13366309,
+   "reread_bytes": 124737545,
+   "wait_s": 0.0
+  },
+  "2026-10-24T08": {
+   "calls": 2658,
+   "failed": 19,
+   "time_s": 5599.1,
+   "result_bytes": 35869219,
+   "spilled_bytes": 14829228,
+   "reread_bytes": 1576223,
+   "wait_s": 0.0
+  },
+  "2026-10-24T09": {
+   "calls": 623,
+   "failed": 13,
+   "time_s": 2131.2,
+   "result_bytes": 2675792,
+   "spilled_bytes": 479112,
+   "reread_bytes": 89356,
+   "wait_s": 0.0
+  },
+  "2026-10-24T10": {
+   "calls": 16,
+   "failed": 0,
+   "time_s": 23.8,
+   "result_bytes": 22625,
+   "spilled_bytes": 1267,
+   "reread_bytes": 0,
+   "wait_s": 0.0
+  },
+  "2026-10-24T12": {
+   "calls": 1156,
+   "failed": 18,
+   "time_s": 1314.1,
+   "result_bytes": 11504851,
+   "spilled_bytes": 4530908,
+   "reread_bytes": 566489,
+   "wait_s": 2.1
+  },
+  "2026-10-24T13": {
+   "calls": 2972,
+   "failed": 70,
+   "time_s": 26741.9,
+   "result_bytes": 45578376,
+   "spilled_bytes": 19378358,
+   "reread_bytes": 3167932,
+   "wait_s": 7.5
+  },
+  "2026-10-24T14": {
+   "calls": 3067,
+   "failed": 47,
+   "time_s": 3364.0,
+   "result_bytes": 35946176,
+   "spilled_bytes": 14394780,
+   "reread_bytes": 3660190,
+   "wait_s": 3.8
+  },
+  "2026-10-24T15": {
+   "calls": 2191,
+   "failed": 40,
+   "time_s": 3769.0,
+   "result_bytes": 18052399,
+   "spilled_bytes": 6321814,
+   "reread_bytes": 1394961,
+   "wait_s": 5.2
+  },
+  "2026-10-24T16": {
+   "calls": 1803,
+   "failed": 30,
+   "time_s": 3855.6,
+   "result_bytes": 11883165,
+   "spilled_bytes": 3401534,
+   "reread_bytes": 1630973,
+   "wait_s": 27.3
+  },
+  "2026-10-24T17": {
+   "calls": 2305,
+   "failed": 29,
+   "time_s": 2848.3,
+   "result_bytes": 30449354,
+   "spilled_bytes": 13133477,
+   "reread_bytes": 2519105,
+   "wait_s": 0.0
+  },
+  "2026-10-24T18": {
+   "calls": 147,
+   "failed": 3,
+   "time_s": 3026.1,
+   "result_bytes": 1900775,
+   "spilled_bytes": 710779,
+   "reread_bytes": 105225,
+   "wait_s": 0.0
+  },
+  "2026-10-25T00": {
+   "calls": 1554,
+   "failed": 53,
+   "time_s": 89924.4,
+   "result_bytes": 15333610,
+   "spilled_bytes": 5583165,
+   "reread_bytes": 1233789,
+   "wait_s": 0.0
+  },
+  "2026-10-25T08": {
+   "calls": 19,
+   "failed": 0,
+   "time_s": 10.2,
+   "result_bytes": 69751,
+   "spilled_bytes": 1315,
+   "reread_bytes": 0,
+   "wait_s": 0.0
+  },
+  "2026-10-25T09": {
+   "calls": 6467,
+   "failed": 46,
+   "time_s": 10784.8,
+   "result_bytes": 101856582,
+   "spilled_bytes": 20581049,
+   "reread_bytes": 54398729,
+   "wait_s": 0.0
+  },
+  "2026-10-25T10": {
+   "calls": 2120,
+   "failed": 31,
+   "time_s": 22018.6,
+   "result_bytes": 23331889,
+   "spilled_bytes": 9476321,
+   "reread_bytes": 4166982,
+   "wait_s": 20.1
+  },
+  "2026-10-25T11": {
+   "calls": 5504,
+   "failed": 76,
+   "time_s": 22547.2,
+   "result_bytes": 88017613,
+   "spilled_bytes": 20756547,
+   "reread_bytes": 43991110,
+   "wait_s": 651.8
+  },
+  "2026-10-25T12": {
+   "calls": 3492,
+   "failed": 38,
+   "time_s": 4616.4,
+   "result_bytes": 47232171,
+   "spilled_bytes": 18671159,
+   "reread_bytes": 2696655,
+   "wait_s": 77.9
+  },
+  "2026-10-25T13": {
+   "calls": 2725,
+   "failed": 56,
+   "time_s": 19190.4,
+   "result_bytes": 26487611,
+   "spilled_bytes": 9379189,
+   "reread_bytes": 2969257,
+   "wait_s": 1030.2
+  },
+  "2026-10-25T14": {
+   "calls": 1812,
+   "failed": 56,
+   "time_s": 13982.5,
+   "result_bytes": 20833620,
+   "spilled_bytes": 8626253,
+   "reread_bytes": 1924842,
+   "wait_s": 662.7
+  },
+  "2026-10-25T15": {
+   "calls": 2324,
+   "failed": 33,
+   "time_s": 4872.8,
+   "result_bytes": 21640889,
+   "spilled_bytes": 7349673,
+   "reread_bytes": 1652517,
+   "wait_s": 471.5
+  },
+  "2026-10-25T16": {
+   "calls": 9833,
+   "failed": 114,
+   "time_s": 3808.0,
+   "result_bytes": 148430490,
+   "spilled_bytes": 11754097,
+   "reread_bytes": 120890296,
+   "wait_s": 23.0
+  },
+  "2026-10-25T17": {
+   "calls": 6095,
+   "failed": 173,
+   "time_s": 2433.5,
+   "result_bytes": 84772128,
+   "spilled_bytes": 5231426,
+   "reread_bytes": 71480915,
+   "wait_s": 90.7
+  },
+  "2026-10-25T18": {
+   "calls": 2782,
+   "failed": 340,
+   "time_s": 4393.8,
+   "result_bytes": 18478863,
+   "spilled_bytes": 6262683,
+   "reread_bytes": 1975750,
+   "wait_s": 240.4
+  },
+  "2026-10-25T19": {
+   "calls": 7428,
+   "failed": 343,
+   "time_s": 4957.2,
+   "result_bytes": 95714808,
+   "spilled_bytes": 4689779,
+   "reread_bytes": 82741715,
+   "wait_s": 466.3
+  },
+  "2026-10-25T20": {
+   "calls": 2485,
+   "failed": 450,
+   "time_s": 6481.1,
+   "result_bytes": 5713022,
+   "spilled_bytes": 271418,
+   "reread_bytes": 431655,
+   "wait_s": 1005.1
+  },
+  "2026-10-25T21": {
+   "calls": 2618,
+   "failed": 469,
+   "time_s": 4516.4,
+   "result_bytes": 9435643,
+   "spilled_bytes": 497474,
+   "reread_bytes": 2856711,
+   "wait_s": 14.4
+  },
+  "2026-10-25T22": {
+   "calls": 1109,
+   "failed": 11,
+   "time_s": 2609.4,
+   "result_bytes": 5171443,
+   "spilled_bytes": 496733,
+   "reread_bytes": 154377,
+   "wait_s": 0.0
+  },
+  "2026-10-25T23": {
+   "calls": 1002,
+   "failed": 11,
+   "time_s": 1445.4,
+   "result_bytes": 10166942,
+   "spilled_bytes": 3498510,
+   "reread_bytes": 1429145,
+   "wait_s": 0.0
+  },
+  "2026-10-26T00": {
+   "calls": 1933,
+   "failed": 148,
+   "time_s": 2267.3,
+   "result_bytes": 21559132,
+   "spilled_bytes": 9100763,
+   "reread_bytes": 2132998,
+   "wait_s": 138.3
+  },
+  "2026-10-26T01": {
+   "calls": 1168,
+   "failed": 178,
+   "time_s": 4624.6,
+   "result_bytes": 6284992,
+   "spilled_bytes": 2798601,
+   "reread_bytes": 64318,
+   "wait_s": 0.0
+  },
+  "2026-10-26T02": {
+   "calls": 1473,
+   "failed": 54,
+   "time_s": 8121.1,
+   "result_bytes": 17404036,
+   "spilled_bytes": 11725207,
+   "reread_bytes": 297059,
+   "wait_s": 434.5
+  },
+  "2026-10-26T03": {
+   "calls": 1711,
+   "failed": 63,
+   "time_s": 4452.7,
+   "result_bytes": 12493134,
+   "spilled_bytes": 7575807,
+   "reread_bytes": 706945,
+   "wait_s": 47.2
+  },
+  "2026-10-26T04": {
+   "calls": 942,
+   "failed": 22,
+   "time_s": 4065.6,
+   "result_bytes": 4542911,
+   "spilled_bytes": 2001518,
+   "reread_bytes": 305542,
+   "wait_s": 760.9
+  },
+  "2026-10-26T05": {
+   "calls": 543,
+   "failed": 16,
+   "time_s": 2253.7,
+   "result_bytes": 2688850,
+   "spilled_bytes": 1155855,
+   "reread_bytes": 75822,
+   "wait_s": 512.4
+  },
+  "2026-10-26T06": {
+   "calls": 1892,
+   "failed": 51,
+   "time_s": 5274.0,
+   "result_bytes": 9461359,
+   "spilled_bytes": 3343295,
+   "reread_bytes": 1510097,
+   "wait_s": 258.4
+  },
+  "2026-10-26T07": {
+   "calls": 1676,
+   "failed": 43,
+   "time_s": 10134.3,
+   "result_bytes": 7823826,
+   "spilled_bytes": 2558294,
+   "reread_bytes": 933702,
+   "wait_s": 85.6
+  },
+  "2026-10-26T08": {
+   "calls": 1778,
+   "failed": 77,
+   "time_s": 7142.9,
+   "result_bytes": 9545432,
+   "spilled_bytes": 3836356,
+   "reread_bytes": 782217,
+   "wait_s": 0.0
+  },
+  "2026-10-26T09": {
+   "calls": 1836,
+   "failed": 62,
+   "time_s": 4930.8,
+   "result_bytes": 7398399,
+   "spilled_bytes": 1857918,
+   "reread_bytes": 716363,
+   "wait_s": 406.2
+  },
+  "2026-10-26T10": {
+   "calls": 1995,
+   "failed": 85,
+   "time_s": 13488.7,
+   "result_bytes": 17790307,
+   "spilled_bytes": 10289315,
+   "reread_bytes": 1132465,
+   "wait_s": 0.0
+  },
+  "2026-10-26T11": {
+   "calls": 3578,
+   "failed": 57,
+   "time_s": 9751.6,
+   "result_bytes": 45967292,
+   "spilled_bytes": 7638391,
+   "reread_bytes": 32745830,
+   "wait_s": 703.5
+  },
+  "2026-10-26T12": {
+   "calls": 905,
+   "failed": 43,
+   "time_s": 6341.0,
+   "result_bytes": 6846323,
+   "spilled_bytes": 3554418,
+   "reread_bytes": 350542,
+   "wait_s": 202.8
+  },
+  "2026-10-26T13": {
+   "calls": 1231,
+   "failed": 132,
+   "time_s": 5132.6,
+   "result_bytes": 9454379,
+   "spilled_bytes": 5256863,
+   "reread_bytes": 810635,
+   "wait_s": 221.3
+  },
+  "2026-10-26T14": {
+   "calls": 673,
+   "failed": 66,
+   "time_s": 847.6,
+   "result_bytes": 5491825,
+   "spilled_bytes": 2694950,
+   "reread_bytes": 2261741,
+   "wait_s": 0.0
+  },
+  "2026-10-26T15": {
+   "calls": 1350,
+   "failed": 85,
+   "time_s": 1859.9,
+   "result_bytes": 12645430,
+   "spilled_bytes": 7038578,
+   "reread_bytes": 4461186,
+   "wait_s": 17.1
+  },
+  "2026-10-26T16": {
+   "calls": 1749,
+   "failed": 83,
+   "time_s": 6110.6,
+   "result_bytes": 10681473,
+   "spilled_bytes": 5008086,
+   "reread_bytes": 1141102,
+   "wait_s": 38.2
+  },
+  "2026-10-26T17": {
+   "calls": 3702,
+   "failed": 86,
+   "time_s": 5428.9,
+   "result_bytes": 45544492,
+   "spilled_bytes": 12882801,
+   "reread_bytes": 24734939,
+   "wait_s": 5.8
+  },
+  "2026-10-26T18": {
+   "calls": 2215,
+   "failed": 74,
+   "time_s": 5790.7,
+   "result_bytes": 15636267,
+   "spilled_bytes": 8019318,
+   "reread_bytes": 1227345,
+   "wait_s": 247.6
+  },
+  "2026-10-26T19": {
+   "calls": 2520,
+   "failed": 88,
+   "time_s": 4789.4,
+   "result_bytes": 13596114,
+   "spilled_bytes": 4481872,
+   "reread_bytes": 1071976,
+   "wait_s": 16.0
+  },
+  "2026-10-26T20": {
+   "calls": 2367,
+   "failed": 80,
+   "time_s": 5870.2,
+   "result_bytes": 11985915,
+   "spilled_bytes": 1942408,
+   "reread_bytes": 1584650,
+   "wait_s": 16.7
+  },
+  "2026-10-26T21": {
+   "calls": 2217,
+   "failed": 89,
+   "time_s": 5352.3,
+   "result_bytes": 12191220,
+   "spilled_bytes": 4342990,
+   "reread_bytes": 1115090,
+   "wait_s": 0.0
+  },
+  "2026-10-26T22": {
+   "calls": 2905,
+   "failed": 68,
+   "time_s": 5767.1,
+   "result_bytes": 28688423,
+   "spilled_bytes": 5429209,
+   "reread_bytes": 17527309,
+   "wait_s": 28.8
+  },
+  "2026-10-26T23": {
+   "calls": 1612,
+   "failed": 54,
+   "time_s": 6764.6,
+   "result_bytes": 5577680,
+   "spilled_bytes": 435543,
+   "reread_bytes": 1065888,
+   "wait_s": 2022.2
+  },
+  "2026-10-27T00": {
+   "calls": 1757,
+   "failed": 155,
+   "time_s": 3386.8,
+   "result_bytes": 7820756,
+   "spilled_bytes": 2538209,
+   "reread_bytes": 874091,
+   "wait_s": 0.0
+  },
+  "2026-10-27T01": {
+   "calls": 1274,
+   "failed": 48,
+   "time_s": 4271.6,
+   "result_bytes": 9531160,
+   "spilled_bytes": 5299924,
+   "reread_bytes": 281375,
+   "wait_s": 9.7
+  },
+  "2026-10-27T02": {
+   "calls": 1496,
+   "failed": 89,
+   "time_s": 8080.4,
+   "result_bytes": 9465557,
+   "spilled_bytes": 3963328,
+   "reread_bytes": 387423,
+   "wait_s": 0.0
+  },
+  "2026-10-27T03": {
+   "calls": 1199,
+   "failed": 56,
+   "time_s": 4571.3,
+   "result_bytes": 6470671,
+   "spilled_bytes": 1232188,
+   "reread_bytes": 153184,
+   "wait_s": 0.0
+  },
+  "2026-10-27T04": {
+   "calls": 1306,
+   "failed": 60,
+   "time_s": 3419.3,
+   "result_bytes": 8997633,
+   "spilled_bytes": 2762625,
+   "reread_bytes": 530721,
+   "wait_s": 161.4
+  },
+  "2026-10-27T05": {
+   "calls": 803,
+   "failed": 42,
+   "time_s": 4093.6,
+   "result_bytes": 4349756,
+   "spilled_bytes": 477176,
+   "reread_bytes": 360524,
+   "wait_s": 0.0
+  },
+  "2026-10-27T06": {
+   "calls": 1193,
+   "failed": 48,
+   "time_s": 4628.0,
+   "result_bytes": 12633982,
+   "spilled_bytes": 7802429,
+   "reread_bytes": 350120,
+   "wait_s": 169.7
+  },
+  "2026-10-27T07": {
+   "calls": 994,
+   "failed": 41,
+   "time_s": 4478.1,
+   "result_bytes": 8711045,
+   "spilled_bytes": 5464642,
+   "reread_bytes": 163625,
+   "wait_s": 739.7
+  },
+  "2026-10-27T08": {
+   "calls": 1410,
+   "failed": 74,
+   "time_s": 6280.4,
+   "result_bytes": 10909733,
+   "spilled_bytes": 5540041,
+   "reread_bytes": 89034,
+   "wait_s": 2170.6
+  },
+  "2026-10-27T09": {
+   "calls": 1032,
+   "failed": 73,
+   "time_s": 4477.7,
+   "result_bytes": 10578867,
+   "spilled_bytes": 6250783,
+   "reread_bytes": 152536,
+   "wait_s": 1798.6
+  },
+  "2026-10-27T10": {
+   "calls": 1439,
+   "failed": 52,
+   "time_s": 4504.5,
+   "result_bytes": 11128938,
+   "spilled_bytes": 4896775,
+   "reread_bytes": 341380,
+   "wait_s": 1029.1
+  },
+  "2026-10-27T11": {
+   "calls": 2,
+   "failed": 0,
+   "time_s": 304.5,
+   "result_bytes": 3063,
+   "spilled_bytes": 1254,
+   "reread_bytes": 0,
+   "wait_s": 0.0
+  },
+  "2026-10-27T12": {
+   "calls": 294,
+   "failed": 9,
+   "time_s": 472.6,
+   "result_bytes": 2105814,
+   "spilled_bytes": 970333,
+   "reread_bytes": 1638,
+   "wait_s": 0.0
+  },
+  "2026-10-27T13": {
+   "calls": 1566,
+   "failed": 72,
+   "time_s": 2844.9,
+   "result_bytes": 16680005,
+   "spilled_bytes": 10897571,
+   "reread_bytes": 376879,
+   "wait_s": 278.9
+  },
+  "2026-10-27T14": {
+   "calls": 1547,
+   "failed": 73,
+   "time_s": 4779.6,
+   "result_bytes": 12007188,
+   "spilled_bytes": 7247400,
+   "reread_bytes": 259347,
+   "wait_s": 1749.1
+  },
+  "2026-10-27T15": {
+   "calls": 1336,
+   "failed": 58,
+   "time_s": 5666.8,
+   "result_bytes": 10507144,
+   "spilled_bytes": 6005927,
+   "reread_bytes": 154811,
+   "wait_s": 1921.4
+  },
+  "2026-10-27T16": {
+   "calls": 2082,
+   "failed": 57,
+   "time_s": 6233.6,
+   "result_bytes": 15636788,
+   "spilled_bytes": 9250651,
+   "reread_bytes": 424183,
+   "wait_s": 1248.4
+  },
+  "2026-10-27T17": {
+   "calls": 383,
+   "failed": 9,
+   "time_s": 1234.3,
+   "result_bytes": 1821767,
+   "spilled_bytes": 582292,
+   "reread_bytes": 60043,
+   "wait_s": 504.2
+  },
+  "2026-10-27T18": {
+   "calls": 1818,
+   "failed": 53,
+   "time_s": 4819.6,
+   "result_bytes": 4332485,
+   "spilled_bytes": 19232,
+   "reread_bytes": 105497,
+   "wait_s": 841.8
+  },
+  "2026-10-27T19": {
+   "calls": 1696,
+   "failed": 43,
+   "time_s": 6358.6,
+   "result_bytes": 5053343,
+   "spilled_bytes": 37008,
+   "reread_bytes": 226692,
+   "wait_s": 1321.8
+  },
+  "2026-10-27T20": {
+   "calls": 493,
+   "failed": 9,
+   "time_s": 847.5,
+   "result_bytes": 2257919,
+   "spilled_bytes": 36221,
+   "reread_bytes": 97541,
+   "wait_s": 0.0
+  },
+  "2026-10-27T21": {
+   "calls": 738,
+   "failed": 37,
+   "time_s": 1073.7,
+   "result_bytes": 2330013,
+   "spilled_bytes": 58347,
+   "reread_bytes": 151658,
+   "wait_s": 0.0
+  },
+  "2026-10-27T22": {
+   "calls": 843,
+   "failed": 21,
+   "time_s": 2019.3,
+   "result_bytes": 2932181,
+   "spilled_bytes": 96577,
+   "reread_bytes": 286921,
+   "wait_s": 579.6
+  },
+  "2026-10-27T23": {
+   "calls": 1984,
+   "failed": 82,
+   "time_s": 7973.1,
+   "result_bytes": 6792308,
+   "spilled_bytes": 382112,
+   "reread_bytes": 116919,
+   "wait_s": 2803.6
+  },
+  "2026-10-28T00": {
+   "calls": 1775,
+   "failed": 73,
+   "time_s": 4546.7,
+   "result_bytes": 9728472,
+   "spilled_bytes": 4269025,
+   "reread_bytes": 266754,
+   "wait_s": 1123.7
+  },
+  "2026-10-28T01": {
+   "calls": 789,
+   "failed": 62,
+   "time_s": 4336.1,
+   "result_bytes": 5773365,
+   "spilled_bytes": 2750299,
+   "reread_bytes": 269556,
+   "wait_s": 362.2
+  },
+  "2026-10-28T02": {
+   "calls": 392,
+   "failed": 25,
+   "time_s": 1676.3,
+   "result_bytes": 2004818,
+   "spilled_bytes": 891299,
+   "reread_bytes": 34606,
+   "wait_s": 0.0
+  },
+  "2026-10-28T03": {
+   "calls": 689,
+   "failed": 18,
+   "time_s": 2668.1,
+   "result_bytes": 3316048,
+   "spilled_bytes": 711514,
+   "reread_bytes": 135472,
+   "wait_s": 38.0
+  },
+  "2026-10-28T04": {
+   "calls": 778,
+   "failed": 20,
+   "time_s": 1891.6,
+   "result_bytes": 4093000,
+   "spilled_bytes": 908644,
+   "reread_bytes": 172204,
+   "wait_s": 16.4
+  },
+  "2026-10-28T05": {
+   "calls": 1177,
+   "failed": 28,
+   "time_s": 4087.3,
+   "result_bytes": 4955263,
+   "spilled_bytes": 1121677,
+   "reread_bytes": 242657,
+   "wait_s": 124.5
+  },
+  "2026-10-28T06": {
+   "calls": 775,
+   "failed": 18,
+   "time_s": 1903.2,
+   "result_bytes": 2845788,
+   "spilled_bytes": 841668,
+   "reread_bytes": 192629,
+   "wait_s": 34.3
+  },
+  "2026-10-28T07": {
+   "calls": 1007,
+   "failed": 124,
+   "time_s": 10605.3,
+   "result_bytes": 8689411,
+   "spilled_bytes": 4912814,
+   "reread_bytes": 852949,
+   "wait_s": 4.9
+  },
+  "2026-10-28T08": {
+   "calls": 1281,
+   "failed": 57,
+   "time_s": 4597.9,
+   "result_bytes": 8665585,
+   "spilled_bytes": 2987304,
+   "reread_bytes": 1213729,
+   "wait_s": 0.0
+  },
+  "2026-10-28T09": {
+   "calls": 3876,
+   "failed": 68,
+   "time_s": 7205.4,
+   "result_bytes": 44350965,
+   "spilled_bytes": 2910902,
+   "reread_bytes": 36320531,
+   "wait_s": 0.0
+  },
+  "2026-10-28T10": {
+   "calls": 2305,
+   "failed": 120,
+   "time_s": 8727.8,
+   "result_bytes": 19816452,
+   "spilled_bytes": 6559852,
+   "reread_bytes": 2239892,
+   "wait_s": 0.0
+  },
+  "2026-10-28T11": {
+   "calls": 548,
+   "failed": 12,
+   "time_s": 1911.4,
+   "result_bytes": 1925657,
+   "spilled_bytes": 206370,
+   "reread_bytes": 119186,
+   "wait_s": 0.0
+  },
+  "2026-10-28T12": {
+   "calls": 415,
+   "failed": 20,
+   "time_s": 894.4,
+   "result_bytes": 1563579,
+   "spilled_bytes": 123633,
+   "reread_bytes": 82169,
+   "wait_s": 13.8
+  },
+  "2026-10-28T13": {
+   "calls": 2134,
+   "failed": 41,
+   "time_s": 6163.0,
+   "result_bytes": 12072034,
+   "spilled_bytes": 3266154,
+   "reread_bytes": 2268884,
+   "wait_s": 30.7
+  },
+  "2026-10-28T14": {
+   "calls": 1705,
+   "failed": 57,
+   "time_s": 3920.1,
+   "result_bytes": 10044454,
+   "spilled_bytes": 2514369,
+   "reread_bytes": 1125847,
+   "wait_s": 1.6
+  },
+  "2026-10-28T15": {
+   "calls": 1806,
+   "failed": 59,
+   "time_s": 5822.7,
+   "result_bytes": 7413865,
+   "spilled_bytes": 1143127,
+   "reread_bytes": 684619,
+   "wait_s": 1176.5
+  },
+  "2026-10-28T16": {
+   "calls": 3115,
+   "failed": 64,
+   "time_s": 7240.6,
+   "result_bytes": 11064491,
+   "spilled_bytes": 1419055,
+   "reread_bytes": 664674,
+   "wait_s": 954.6
+  },
+  "2026-10-28T17": {
+   "calls": 2077,
+   "failed": 171,
+   "time_s": 11114.6,
+   "result_bytes": 17333185,
+   "spilled_bytes": 6113774,
+   "reread_bytes": 999149,
+   "wait_s": 1609.5
+  },
+  "2026-10-28T18": {
+   "calls": 1973,
+   "failed": 125,
+   "time_s": 3965.2,
+   "result_bytes": 24360164,
+   "spilled_bytes": 4302624,
+   "reread_bytes": 2169599,
+   "wait_s": 807.8
+  },
+  "2026-10-28T19": {
+   "calls": 848,
+   "failed": 77,
+   "time_s": 2775.1,
+   "result_bytes": 6138386,
+   "spilled_bytes": 1573063,
+   "reread_bytes": 257089,
+   "wait_s": 27.1
+  },
+  "2026-10-28T20": {
+   "calls": 630,
+   "failed": 46,
+   "time_s": 2566.6,
+   "result_bytes": 1475342,
+   "spilled_bytes": 103039,
+   "reread_bytes": 346248,
+   "wait_s": 0.0
+  },
+  "2026-10-28T21": {
+   "calls": 1060,
+   "failed": 27,
+   "time_s": 981.3,
+   "result_bytes": 2108204,
+   "spilled_bytes": 95048,
+   "reread_bytes": 501674,
+   "wait_s": 0.0
+  },
+  "2026-10-28T22": {
+   "calls": 730,
+   "failed": 22,
+   "time_s": 1810.3,
+   "result_bytes": 2649501,
+   "spilled_bytes": 509123,
+   "reread_bytes": 232431,
+   "wait_s": 0.0
+  },
+  "2026-10-28T23": {
+   "calls": 784,
+   "failed": 27,
+   "time_s": 1920.8,
+   "result_bytes": 2408382,
+   "spilled_bytes": 201832,
+   "reread_bytes": 394835,
+   "wait_s": 0.0
+  },
+  "2026-10-29T00": {
+   "calls": 714,
+   "failed": 19,
+   "time_s": 1519.9,
+   "result_bytes": 1110759,
+   "spilled_bytes": 0,
+   "reread_bytes": 472332,
+   "wait_s": 0.0
+  },
+  "2026-10-29T01": {
+   "calls": 321,
+   "failed": 34,
+   "time_s": 1610.4,
+   "result_bytes": 6593648,
+   "spilled_bytes": 4804645,
+   "reread_bytes": 40868,
+   "wait_s": 0.0
+  },
+  "2026-10-29T02": {
+   "calls": 1477,
+   "failed": 38,
+   "time_s": 3216.1,
+   "result_bytes": 8658790,
+   "spilled_bytes": 2152757,
+   "reread_bytes": 392293,
+   "wait_s": 0.0
+  },
+  "2026-10-29T03": {
+   "calls": 1440,
+   "failed": 50,
+   "time_s": 5383.4,
+   "result_bytes": 6582379,
+   "spilled_bytes": 741392,
+   "reread_bytes": 295881,
+   "wait_s": 31.9
+  },
+  "2026-10-29T04": {
+   "calls": 1077,
+   "failed": 109,
+   "time_s": 12176.2,
+   "result_bytes": 5672355,
+   "spilled_bytes": 1305728,
+   "reread_bytes": 196441,
+   "wait_s": 31.9
+  },
+  "2026-10-29T05": {
+   "calls": 359,
+   "failed": 25,
+   "time_s": 1644.5,
+   "result_bytes": 2324552,
+   "spilled_bytes": 643575,
+   "reread_bytes": 120585,
+   "wait_s": 0.0
+  },
+  "2026-10-29T06": {
+   "calls": 991,
+   "failed": 81,
+   "time_s": 3716.8,
+   "result_bytes": 5294345,
+   "spilled_bytes": 755049,
+   "reread_bytes": 414772,
+   "wait_s": 34.8
+  },
+  "2026-10-29T07": {
+   "calls": 1029,
+   "failed": 29,
+   "time_s": 3563.1,
+   "result_bytes": 4909800,
+   "spilled_bytes": 430987,
+   "reread_bytes": 517702,
+   "wait_s": 23.9
+  },
+  "2026-10-29T08": {
+   "calls": 900,
+   "failed": 70,
+   "time_s": 3431.0,
+   "result_bytes": 4064331,
+   "spilled_bytes": 212399,
+   "reread_bytes": 470421,
+   "wait_s": 217.2
+  },
+  "2026-10-29T09": {
+   "calls": 980,
+   "failed": 41,
+   "time_s": 3502.0,
+   "result_bytes": 4009109,
+   "spilled_bytes": 598501,
+   "reread_bytes": 196198,
+   "wait_s": 0.0
+  },
+  "2026-10-29T10": {
+   "calls": 798,
+   "failed": 19,
+   "time_s": 3166.5,
+   "result_bytes": 3228751,
+   "spilled_bytes": 519718,
+   "reread_bytes": 9084,
+   "wait_s": 843.0
+  },
+  "2026-10-29T11": {
+   "calls": 951,
+   "failed": 46,
+   "time_s": 4607.8,
+   "result_bytes": 4694576,
+   "spilled_bytes": 1129403,
+   "reread_bytes": 158709,
+   "wait_s": 85.1
+  },
+  "2026-10-29T12": {
+   "calls": 715,
+   "failed": 21,
+   "time_s": 3335.3,
+   "result_bytes": 2571292,
+   "spilled_bytes": 227092,
+   "reread_bytes": 39414,
+   "wait_s": 177.6
+  },
+  "2026-10-29T13": {
+   "calls": 1048,
+   "failed": 50,
+   "time_s": 2791.3,
+   "result_bytes": 4697249,
+   "spilled_bytes": 680777,
+   "reread_bytes": 240387,
+   "wait_s": 55.8
+  },
+  "2026-10-29T14": {
+   "calls": 1134,
+   "failed": 29,
+   "time_s": 3072.6,
+   "result_bytes": 3458611,
+   "spilled_bytes": 317801,
+   "reread_bytes": 323073,
+   "wait_s": 24.7
+  },
+  "2026-10-29T15": {
+   "calls": 947,
+   "failed": 17,
+   "time_s": 3268.4,
+   "result_bytes": 3220518,
+   "spilled_bytes": 297106,
+   "reread_bytes": 235760,
+   "wait_s": 464.1
+  },
+  "2026-10-29T16": {
+   "calls": 962,
+   "failed": 31,
+   "time_s": 3711.2,
+   "result_bytes": 3572978,
+   "spilled_bytes": 1086574,
+   "reread_bytes": 255970,
+   "wait_s": 0.0
+  },
+  "2026-10-29T17": {
+   "calls": 993,
+   "failed": 20,
+   "time_s": 3219.4,
+   "result_bytes": 2883648,
+   "spilled_bytes": 1063594,
+   "reread_bytes": 221340,
+   "wait_s": 921.0
+  },
+  "2026-10-29T18": {
+   "calls": 704,
+   "failed": 5,
+   "time_s": 5864.7,
+   "result_bytes": 1304256,
+   "spilled_bytes": 0,
+   "reread_bytes": 177432,
+   "wait_s": 3116.2
+  },
+  "2026-10-29T19": {
+   "calls": 872,
+   "failed": 9,
+   "time_s": 3395.0,
+   "result_bytes": 3545886,
+   "spilled_bytes": 1416559,
+   "reread_bytes": 290977,
+   "wait_s": 2295.5
+  },
+  "2026-10-29T20": {
+   "calls": 910,
+   "failed": 20,
+   "time_s": 3005.0,
+   "result_bytes": 2029946,
+   "spilled_bytes": 84488,
+   "reread_bytes": 296419,
+   "wait_s": 2452.4
+  },
+  "2026-10-29T21": {
+   "calls": 1379,
+   "failed": 22,
+   "time_s": 1001.8,
+   "result_bytes": 3032179,
+   "spilled_bytes": 912680,
+   "reread_bytes": 648076,
+   "wait_s": 213.8
+  },
+  "2026-10-29T22": {
+   "calls": 1363,
+   "failed": 7,
+   "time_s": 4321.4,
+   "result_bytes": 3305089,
+   "spilled_bytes": 927637,
+   "reread_bytes": 811701,
+   "wait_s": 3577.2
+  },
+  "2026-10-29T23": {
+   "calls": 1049,
+   "failed": 4,
+   "time_s": 832.8,
+   "result_bytes": 1912978,
+   "spilled_bytes": 428028,
+   "reread_bytes": 884585,
+   "wait_s": 555.3
+  },
+  "2026-10-30T00": {
+   "calls": 441,
+   "failed": 14,
+   "time_s": 1912.3,
+   "result_bytes": 1853757,
+   "spilled_bytes": 354626,
+   "reread_bytes": 123071,
+   "wait_s": 52.1
+  },
+  "2026-10-30T01": {
+   "calls": 1273,
+   "failed": 20,
+   "time_s": 5334.4,
+   "result_bytes": 6001365,
+   "spilled_bytes": 1568427,
+   "reread_bytes": 462818,
+   "wait_s": 20.6
+  },
+  "2026-10-30T02": {
+   "calls": 1545,
+   "failed": 29,
+   "time_s": 8062.7,
+   "result_bytes": 4720968,
+   "spilled_bytes": 447489,
+   "reread_bytes": 642191,
+   "wait_s": 1747.1
+  },
+  "2026-10-30T03": {
+   "calls": 1783,
+   "failed": 21,
+   "time_s": 5209.6,
+   "result_bytes": 5742725,
+   "spilled_bytes": 981265,
+   "reread_bytes": 407885,
+   "wait_s": 598.4
+  },
+  "2026-10-30T04": {
+   "calls": 2477,
+   "failed": 66,
+   "time_s": 6581.6,
+   "result_bytes": 11254003,
+   "spilled_bytes": 1945593,
+   "reread_bytes": 894875,
+   "wait_s": 0.1
+  },
+  "2026-10-30T05": {
+   "calls": 2182,
+   "failed": 64,
+   "time_s": 7089.2,
+   "result_bytes": 11756721,
+   "spilled_bytes": 4063597,
+   "reread_bytes": 658451,
+   "wait_s": 31.9
+  },
+  "2026-10-30T06": {
+   "calls": 2085,
+   "failed": 92,
+   "time_s": 11923.3,
+   "result_bytes": 10657926,
+   "spilled_bytes": 2506474,
+   "reread_bytes": 945912,
+   "wait_s": 0.0
+  },
+  "2026-10-30T07": {
+   "calls": 2709,
+   "failed": 39,
+   "time_s": 6290.7,
+   "result_bytes": 22192590,
+   "spilled_bytes": 9473141,
+   "reread_bytes": 6485919,
+   "wait_s": 131.5
+  },
+  "2026-10-30T08": {
+   "calls": 1794,
+   "failed": 101,
+   "time_s": 8227.0,
+   "result_bytes": 13325939,
+   "spilled_bytes": 5404663,
+   "reread_bytes": 2670275,
+   "wait_s": 0.0
+  },
+  "2026-10-30T09": {
+   "calls": 1537,
+   "failed": 90,
+   "time_s": 5688.6,
+   "result_bytes": 12996516,
+   "spilled_bytes": 5359805,
+   "reread_bytes": 6724572,
+   "wait_s": 0.0
+  },
+  "2026-10-30T10": {
+   "calls": 3431,
+   "failed": 57,
+   "time_s": 3731.2,
+   "result_bytes": 46688079,
+   "spilled_bytes": 8832127,
+   "reread_bytes": 12948570,
+   "wait_s": 0.0
+  },
+  "2026-10-30T11": {
+   "calls": 778,
+   "failed": 31,
+   "time_s": 2892.6,
+   "result_bytes": 6073494,
+   "spilled_bytes": 3399040,
+   "reread_bytes": 3161515,
+   "wait_s": 501.4
+  },
+  "2026-10-30T12": {
+   "calls": 985,
+   "failed": 49,
+   "time_s": 2752.8,
+   "result_bytes": 2319837,
+   "spilled_bytes": 191276,
+   "reread_bytes": 154006,
+   "wait_s": 861.1
+  },
+  "2026-10-30T13": {
+   "calls": 763,
+   "failed": 23,
+   "time_s": 2323.5,
+   "result_bytes": 1689547,
+   "spilled_bytes": 169733,
+   "reread_bytes": 140831,
+   "wait_s": 1272.6
+  },
+  "2026-10-30T14": {
+   "calls": 612,
+   "failed": 16,
+   "time_s": 1342.9,
+   "result_bytes": 2179757,
+   "spilled_bytes": 936967,
+   "reread_bytes": 284530,
+   "wait_s": 446.2
+  },
+  "2026-10-30T15": {
+   "calls": 345,
+   "failed": 13,
+   "time_s": 643.9,
+   "result_bytes": 1679565,
+   "spilled_bytes": 698083,
+   "reread_bytes": 377613,
+   "wait_s": 321.8
+  },
+  "2026-10-30T16": {
+   "calls": 178,
+   "failed": 7,
+   "time_s": 245.0,
+   "result_bytes": 320598,
+   "spilled_bytes": 0,
+   "reread_bytes": 74985,
+   "wait_s": 54.5
+  },
+  "2026-10-30T17": {
+   "calls": 400,
+   "failed": 20,
+   "time_s": 3577.7,
+   "result_bytes": 908288,
+   "spilled_bytes": 173579,
+   "reread_bytes": 177652,
+   "wait_s": 3001.8
+  },
+  "2026-10-30T18": {
+   "calls": 802,
+   "failed": 428,
+   "time_s": 2250.9,
+   "result_bytes": 660399,
+   "spilled_bytes": 0,
+   "reread_bytes": 117077,
+   "wait_s": 1579.1
+  },
+  "2026-10-30T19": {
+   "calls": 781,
+   "failed": 576,
+   "time_s": 740.3,
+   "result_bytes": 1740752,
+   "spilled_bytes": 1146676,
+   "reread_bytes": 677957,
+   "wait_s": 483.3
+  },
+  "2026-10-30T20": {
+   "calls": 761,
+   "failed": 529,
+   "time_s": 502.6,
+   "result_bytes": 534798,
+   "spilled_bytes": 0,
+   "reread_bytes": 151768,
+   "wait_s": 76.8
+  },
+  "2026-10-30T21": {
+   "calls": 533,
+   "failed": 326,
+   "time_s": 421.6,
+   "result_bytes": 530831,
+   "spilled_bytes": 63922,
+   "reread_bytes": 127796,
+   "wait_s": 133.2
+  },
+  "2026-10-30T22": {
+   "calls": 775,
+   "failed": 532,
+   "time_s": 1754.9,
+   "result_bytes": 470964,
+   "spilled_bytes": 0,
+   "reread_bytes": 116200,
+   "wait_s": 1463.0
+  },
+  "2026-10-30T23": {
+   "calls": 825,
+   "failed": 582,
+   "time_s": 970.7,
+   "result_bytes": 1853992,
+   "spilled_bytes": 1173635,
+   "reread_bytes": 713830,
+   "wait_s": 584.2
+  },
+  "2026-10-31T00": {
+   "calls": 839,
+   "failed": 419,
+   "time_s": 1612.8,
+   "result_bytes": 2886691,
+   "spilled_bytes": 1785020,
+   "reread_bytes": 1311122,
+   "wait_s": 371.7
+  },
+  "2026-10-31T01": {
+   "calls": 36,
+   "failed": 1,
+   "time_s": 598.4,
+   "result_bytes": 37770,
+   "spilled_bytes": 0,
+   "reread_bytes": 12663,
+   "wait_s": 579.0
+  },
+  "2026-10-31T09": {
+   "calls": 266,
+   "failed": 100,
+   "time_s": 71.5,
+   "result_bytes": 1658089,
+   "spilled_bytes": 913134,
+   "reread_bytes": 563451,
+   "wait_s": 0.0
+  },
+  "2026-10-31T10": {
+   "calls": 523,
+   "failed": 218,
+   "time_s": 80.1,
+   "result_bytes": 1291474,
+   "spilled_bytes": 339104,
+   "reread_bytes": 384061,
+   "wait_s": 0.1
+  },
+  "2026-10-31T11": {
+   "calls": 686,
+   "failed": 265,
+   "time_s": 1732.0,
+   "result_bytes": 2064030,
+   "spilled_bytes": 152211,
+   "reread_bytes": 52402,
+   "wait_s": 1088.1
+  },
+  "2026-10-31T12": {
+   "calls": 779,
+   "failed": 415,
+   "time_s": 843.2,
+   "result_bytes": 2347511,
+   "spilled_bytes": 1321405,
+   "reread_bytes": 961697,
+   "wait_s": 162.2
+  },
+  "2026-10-31T13": {
+   "calls": 620,
+   "failed": 59,
+   "time_s": 866.8,
+   "result_bytes": 7358834,
+   "spilled_bytes": 5463090,
+   "reread_bytes": 2379161,
+   "wait_s": 38.3
+  },
+  "2026-10-31T14": {
+   "calls": 522,
+   "failed": 105,
+   "time_s": 1531.9,
+   "result_bytes": 2766632,
+   "spilled_bytes": 1519505,
+   "reread_bytes": 1621570,
+   "wait_s": 645.8
+  },
+  "2026-10-31T15": {
+   "calls": 272,
+   "failed": 5,
+   "time_s": 1037.2,
+   "result_bytes": 9794351,
+   "spilled_bytes": 9086609,
+   "reread_bytes": 1279505,
+   "wait_s": 629.4
+  },
+  "2026-10-31T16": {
+   "calls": 292,
+   "failed": 3,
+   "time_s": 216.6,
+   "result_bytes": 896000,
+   "spilled_bytes": 303901,
+   "reread_bytes": 375971,
+   "wait_s": 0.0
+  },
+  "2026-10-31T17": {
+   "calls": 383,
+   "failed": 2,
+   "time_s": 727.7,
+   "result_bytes": 281475,
+   "spilled_bytes": 0,
+   "reread_bytes": 27537,
+   "wait_s": 0.0
+  },
+  "2026-10-31T18": {
+   "calls": 1141,
+   "failed": 1,
+   "time_s": 541.0,
+   "result_bytes": 773489,
+   "spilled_bytes": 0,
+   "reread_bytes": 108817,
+   "wait_s": 0.0
+  },
+  "2026-10-31T19": {
+   "calls": 271,
+   "failed": 2,
+   "time_s": 634.4,
+   "result_bytes": 1051864,
+   "spilled_bytes": 101511,
+   "reread_bytes": 143168,
+   "wait_s": 0.0
+  },
+  "2026-10-31T20": {
+   "calls": 531,
+   "failed": 1,
+   "time_s": 1218.2,
+   "result_bytes": 1526893,
+   "spilled_bytes": 535229,
+   "reread_bytes": 295859,
+   "wait_s": 33.1
+  },
+  "2026-10-31T21": {
+   "calls": 436,
+   "failed": 8,
+   "time_s": 803.8,
+   "result_bytes": 896668,
+   "spilled_bytes": 1271,
+   "reread_bytes": 147863,
+   "wait_s": 16.7
+  },
+  "2026-10-31T22": {
+   "calls": 243,
+   "failed": 3,
+   "time_s": 842.3,
+   "result_bytes": 876613,
+   "spilled_bytes": 1268,
+   "reread_bytes": 145651,
+   "wait_s": 65.8
+  },
+  "2026-10-31T23": {
+   "calls": 166,
+   "failed": 3,
+   "time_s": 580.5,
+   "result_bytes": 1481530,
+   "spilled_bytes": 799913,
+   "reread_bytes": 433940,
+   "wait_s": 0.0
+  }
+ }
+}

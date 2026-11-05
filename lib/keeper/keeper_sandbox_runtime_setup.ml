@@ -365,7 +365,7 @@ let trim_env_opt key =
 ;;
 
 let docker_config_host_root ~base_path =
-  match trim_env_opt "MASC_CONFIG_DIR" with
+  match trim_env_opt Env_config_core.config_dir_env_key with
   | Some config_root -> config_root
   | None -> Filename.concat (Common.masc_dir_from_base_path ~base_path) "config"
 ;;
@@ -493,8 +493,8 @@ let docker_workspace_state_mount_args ~base_path ~container_root =
    and the microvm remote lane injects the same pairs into each shim request
    (the guest's shim allowlists them by name, from {!config_env_names}). *)
 let config_env ~container_base_path ~container_config_root =
-  [ "MASC_BASE_PATH", container_base_path
-  ; "MASC_CONFIG_DIR", container_config_root
+  [ Env_config_core.base_path_env_key, container_base_path
+  ; Env_config_core.config_dir_env_key, container_config_root
   ]
 ;;
 

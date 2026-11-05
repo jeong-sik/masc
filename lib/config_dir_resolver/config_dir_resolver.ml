@@ -235,7 +235,7 @@ let environment_for_workspace ~cwd ~base_path ~env =
         | None -> entry
         | Some index -> String.sub entry 0 index
       in
-      not (List.mem key ["MASC_BASE_PATH"; "MASC_CONFIG_DIR"]))
+      not (List.mem key [Env_config_core.base_path_env_key; Env_config_core.config_dir_env_key]))
   in
   Array.of_list (inherited @
     [ "MASC_BASE_PATH=" ^ base_path

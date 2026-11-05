@@ -759,7 +759,7 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
     Log.Server.warn
       "Normalizing --base-path from %s to %s because runtime base paths must point at the workspace root, not the .masc directory."
       raw_base_path canonical_base_path;
-  Unix.putenv "MASC_BASE_PATH" canonical_base_path;
+  Unix.putenv Env_config_core.base_path_env_key canonical_base_path;
   Workspace_utils_backend_setup.cache_resolved_base_path canonical_base_path;
   Unix.putenv "MASC_BASE_PATH_RESOLUTION_SOURCE" resolution_source;
   (* Persist logs inside .masc/logs/ — colocated with state, not a sibling.
@@ -2279,7 +2279,7 @@ let voice_verify_cmd_exit requested_base_path message audio agent as_json =
      has already resolved once by the time a subcommand runs. *)
   Option.iter
     (fun raw ->
-      Unix.putenv "MASC_BASE_PATH" (Env_config.normalize_masc_base_path_input raw);
+      Unix.putenv Env_config_core.base_path_env_key (Env_config.normalize_masc_base_path_input raw);
       Config_dir_resolver.reset ())
     requested_base_path;
   (* The keeper whose voice is being checked, when one is named. A voice is

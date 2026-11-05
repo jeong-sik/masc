@@ -1,7 +1,6 @@
-// Setup guides surfaced in the dashboard. Originally just connector
-// onboarding (sidecars), now also covers in-process operator setup like
-// the hardened Docker sandbox for keeper playgrounds. The renderer in
-// setup-guide-card.ts is data-driven and does not care what the id means.
+// Setup guides surfaced in the dashboard: connector onboarding and operator
+// setup like the hardened Docker sandbox for keeper playgrounds. The renderer
+// in setup-guide-card.ts is data-driven and does not care what the id means.
 // Keep this file data-only. Source of truth for connector steps:
 // docs/CONNECTOR-CONFIG-SCHEMA.md.
 

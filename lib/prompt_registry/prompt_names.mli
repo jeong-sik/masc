@@ -155,6 +155,15 @@ val keeper_constitution : string
 (** The norms this world's keepers wrote for themselves (RFC-0442). Variable:
     [articles]. *)
 
+val keeper_constitution_amendments : string
+(** The end-context block that names the articles added and removed since
+    the System's [<norms>] were rendered (RFC-0491 §3.2). Variable: [changes],
+    the two sections below that have lines. *)
+
+val keeper_constitution_amendments_added : string
+val keeper_constitution_amendments_removed : string
+(** The added and the removed articles, one line each. Variable: [articles]. *)
+
 val keeper_tags_system_open : string
 val keeper_tags_system_close : string
 val keeper_tags_instructions_open : string

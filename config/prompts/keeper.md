@@ -672,6 +672,20 @@ Call the tool named {{tool}} exactly once, with any arguments that satisfy its s
 {{articles}}
 </norms>
 
+### constitution_amendments (vars: changes)
+<norms_amended>
+System 의 `<norms>` 에 적힌 조항은 이 System 을 만들 때의 것이다. 그 뒤 이 세계의 Keeper 들이 조항을 더하거나 되돌렸다. 지금 이 세계의 규범은 `<norms>` 에서 되돌린 조항을 빼고 더한 조항을 넣은 것이다.
+{{changes}}
+</norms_amended>
+
+### constitution_amendments.added (vars: articles)
+더한 조항:
+{{articles}}
+
+### constitution_amendments.removed (vars: articles)
+되돌린 조항:
+{{articles}}
+
 ### tags.system_open
 <system>
 

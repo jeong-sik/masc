@@ -7,7 +7,7 @@ is a mask (1 left, 2 right, 4 middle; 3 is left and right together) and \
 clicks -- down, run, up, run, in one call, so the button is never left \
 held; 0 only moves. x and y are pixels inside the frame size masc_dos_screen \
 reports. A game that polls the mouse instead of asking for keys returns \
-settled false with the budget spent; that is normal. Recorded in the ledger."""
+settled false with the budget spent; that is normal. include_frame=true returns the screen after the click. Recorded in the ledger."""
 additional_properties = false
 
 defer_loading = true
@@ -41,3 +41,9 @@ description = "Machine-step budget for the whole call. Default 4000000."
 minimum = 1
 maximum = 4000000
 default = 4000000
+
+[[params]]
+name = "include_frame"
+type = "boolean"
+description = "true adds the screen this call leaves as a PNG, as masc_dos_screen returns it, so reading it takes no second call. Default false."
+default = false

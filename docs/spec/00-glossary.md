@@ -543,15 +543,6 @@ status: reference
     모양의 불변식이다 — `:loop`가 잡힌 소스 계획은 `midi-source-playback.mjs`가
     `schemaVersion: 3`과 `sources`·`regions`로 만들어 `arrangement` 쪽으로 가므로, 반복
     재생 자체는 거절되지 않는다.
-  - 서술 이력: #43769(`2fa99025a2`)의 MIDI-SOURCE.md는 "Pause, resume, seek and looping
-    are explicitly unavailable for source timelines"라고 적었고, #43792(`59d3653d3b`)가 그
-    문장을 pause/resume·seek 지원 문장으로 바꿨으며, #44513이 `:loop` 세션 구간 루프를
-    더했다. "It plays once from the beginning."과 "Source clip looping remains unfinished."
-    같은 옛 문장은 지금 MIDI-SOURCE.md와 README.md 어디에도 없고, MUSIC-SEQUENCER.md의
-    "Source looping, VST routing, overdubs, shared clock and practice workflows remain
-    separate unfinished units" 개요 문장도 #44572에서 "Source-window looping is available
-    but stays session-local"로 고쳐졌다. 옛 문장을 인용하면 현행 코드와 어긋나므로, 이
-    항목은 현행 main 문장만 근거로 쓴다.
   → [tools/alphatex/MIDI-SOURCE.md](../../tools/alphatex/MIDI-SOURCE.md) ·
   [tools/alphatex/native/MidiTransport.swift](../../tools/alphatex/native/MidiTransport.swift)
 
@@ -816,7 +807,7 @@ status: reference
   프롬프트 단일 권위(Single Authority): 직접(direct) 턴과 자율(autonomous) 턴 모두
   `Keeper_run_context.prepare_run_context`가 조립한 단일 `base_system_prompt`만 모델로 보낸다.
   `Keeper_unified_prompt.build_prompt`는 관찰 프레임과 사용자 메시지만 만들며(`turn_prompt_parts`),
-  별도 시스템 프롬프트를 렌더하지 않는다(`turn_prompt`의 `system_prompt` 필드는 제거됨).
+  별도 시스템 프롬프트를 렌더하지 않는다.
   대시보드 및 TUI 설정 표면에서는 `prompt.system_prompt`가 닫힌 세 상태
   (`available`·`unavailable: constitution_unreadable`·`decode_failed`)로 투영되어
   오류 사유와 파일 경로를 직접 드러낸다.
@@ -1156,8 +1147,7 @@ status: reference
 : 한 Keeper 파이버(`Owner` fiber)의 단일 실행 슬롯(`turn slot`)이 해제되었을 때, 큐에 대기 중인
   청구 가능한 직접 입력(`claimable queued chat operation`)이 자율 턴(`autonomous turn`)보다
   항상 먼저 슬롯을 획득하는 엄격한 우선순위 규칙(#41654). 자율 레인이 바쁜 슬롯을 반복
-  관측하더라도 진입 순서는 바뀌지 않으며, 이전 RFC-0373 방향(direction 2)의 유예 부채
-  한도(`autonomous_deferral_debt_cap`) 메커니즘은 폐기되었다. 러너가 준비되지 않은 Queued
+  관측하더라도 진입 순서는 바뀌지 않는다. 러너가 준비되지 않은 Queued
   chat은 자율 진입을 막지 않으며, 이전에 슬롯을 거절당한 자율 레인은 청구 가능한 직접 오퍼레이션이
   슬롯을 가져가지 않고 슬롯이 여전히 미청구(`unclaimed`) 상태일 때 `notify_turn_slot_released`
   신호로 깨어나 실행을 재개한다.

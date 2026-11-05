@@ -1,0 +1,74 @@
+{
+  "schema": "masc.tui.independent-review-evidence.v1",
+  "captured_on": "2026-11-05",
+  "reviewer": "fresh-context coder agent-3 (no shared implementation history)",
+  "base": "33ada8b2568d4d5a632de6ad1b3b6fdabeae7986",
+  "reviewed_head": "22e1f75767131f36afd509fbf8e91f83a40c7c54",
+  "commits": 161,
+  "diff_bytes": 1941479,
+  "verdict": "With fixes",
+  "read_only": true,
+  "findings": [
+    {
+      "id": "P1-skill-lock-order",
+      "severity": "P1",
+      "location": "lib/server/server_skill_usage_runtime.ml:25-40",
+      "behavior": "Cold Skill read holds the cache mutex across Ledger.load; activation commit holds the session lock and waits for the same cache mutex.",
+      "status": "RED test pending"
+    },
+    {
+      "id": "P1-memory-lock-order",
+      "severity": "P1",
+      "location": "lib/server/server_dashboard_http_keeper_memory_health.ml:563-571",
+      "behavior": "Cold Memory health read holds the cache mutex across store I/O; journal commit holds the aggregate/snapshot locks and waits for the same cache mutex.",
+      "status": "RED test pending"
+    },
+    {
+      "id": "P2-visible-revalidation",
+      "severity": "P2",
+      "location": "bin/masc_tui.ml:23068-23136",
+      "behavior": "Machine and open Add-on Inspect can remain stale after manual r or replay gaps.",
+      "status": "RED test pending"
+    },
+    {
+      "id": "P2-cold-failure-cache",
+      "severity": "P2",
+      "location": "lib/server/server_skill_usage_runtime.ml and lib/server/server_dashboard_http_keeper_memory_health.ml",
+      "behavior": "Transient first-load failures became permanent cache entries.",
+      "status": "FIXED: bea45f2c591 and 881854d58d2; GREEN 41966485936 and 41966803734; type-check 41966807144"
+    },
+    {
+      "id": "P2-machine-step-stop",
+      "severity": "P2",
+      "location": "lib/server/server_machine_spectator.ml:24-35",
+      "behavior": "A transient worker Unavailable permanently stopped the ticker while the observer stayed open.",
+      "status": "RED test pending"
+    },
+    {
+      "id": "P2-exact-log-page",
+      "severity": "P2",
+      "location": "lib/server/server_routes_http_routes_log_stream.ml:34-46",
+      "behavior": "Exactly limit new entries resets the client page and loses prior history.",
+      "status": "RED test pending"
+    },
+    {
+      "id": "P2-addon-visibility",
+      "severity": "P2",
+      "location": "lib/lane_addon/lane_addon_runtime.ml:762-767 and lib/sse.ml",
+      "behavior": "Private Add-on instance identifiers and activity are delivered to unauthorized live and replay observers.",
+      "status": "RED test pending"
+    }
+  ],
+  "deferred_p3": [
+    "No-op or failed memory-source writes can announce unnecessary health reads.",
+      "Inspect trailing and machine-step lifecycle coverage gaps.",
+      "Summary seconds mismatched retained logs; corrected to Browser 12.139 and Lane 14.285 before this record."
+  ],
+  "set_aside": [
+    "Play room still polls every two seconds and needs server-owned presence/notification design; full TUI SSE is not complete.",
+    "Browser detection is server sampling, not backend-native events.",
+    "The ignored create_state refresh_interval compatibility argument has no polling behavior.",
+    "Four native failed suites remain unclassified, not presumed pre-existing."
+  ],
+  "integration": "PR #48180 is closed with no open replacement. No merge, rebase, reopen, installation or runtime configuration change was performed."
+}

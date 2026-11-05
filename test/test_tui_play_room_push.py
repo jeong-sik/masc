@@ -21,6 +21,15 @@ def room_event(machine: str) -> dict[str, object]:
     return {"type": "workspace_dataset_changed", "dataset": "play_room", "machine": machine}
 
 
+def source_loss_event(sequence: int) -> dict[str, object]:
+    return {
+        "type": "agent_core:relay_subscription_loss",
+        "event_type": "relay_subscription_loss",
+        "ts_unix": 1.0,
+        "payload": {"source_id": "play-room-fixture", "sequence": sequence, "dropped_count": 1},
+    }
+
+
 class PlayRoomHandler(spectator_fixture.SpectatorHandler):
     def observer_event_label(self) -> str:
         query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
@@ -134,6 +143,11 @@ class PlayRoomPushTest(unittest.TestCase):
             step("drain", 0.5)
             self.assertEqual(room.response_count("trailing", "play:read"), 2)
 
+            room.set_phase("source-loss")
+            room.events.put(source_loss_event(1))
+            step("wait", lambda: room.response_count("source-loss", "play:read") == 1,
+                 "a relay source loss did not revalidate the visible room")
+
             room.observer_gap_on_resume = True
             room.set_phase("reconnect")
             room.events.put("close")
@@ -142,6 +156,7 @@ class PlayRoomPushTest(unittest.TestCase):
             step("wait", lambda: room.count("reconnect", "observer-play:msx:" + next(iter(room.play_clients))) >= 1,
                  "the reconnected Observer lost its Play scope")
 
+            room.observer_gap_on_resume = False
             room.set_phase("leaving")
             step("keys", "\x1b")
             step("wait", lambda: room.response_count("leaving", "play:leave") == 1,

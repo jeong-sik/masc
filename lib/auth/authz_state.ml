@@ -7,13 +7,27 @@ type t =
   { mode : Authz_mode_state.t
   ; invites : Authz_invite_state.t
   ; principals : Authz_principal_state.t
+  ; revocation_pending : Authz_records.Subject.t list
   }
 
 let empty =
   { mode = Authz_mode_state.empty
   ; invites = Authz_invite_state.empty
   ; principals = Authz_principal_state.empty
+  ; revocation_pending = []
   }
+
+let is_pending state subject = List.exists (Authz_records.Subject.equal subject) state.revocation_pending
+
+let hold_revocations state subjects =
+  let revocation_pending =
+    List.fold_left
+      (fun held subject -> if List.exists (Authz_records.Subject.equal subject) held then held else subject :: held)
+      state.revocation_pending
+      subjects
+  in
+  { state with revocation_pending }
+;;
 
 type refusal =
   | Before_bootstrap of K.t
@@ -23,6 +37,7 @@ type refusal =
   | Invite of Authz_invite_state.refusal
   | Admission_unreadable of Authz_admission_event.error
   | Admission of Authz_principal_state.refusal
+  | Revocation_pending of Authz_records.Subject.t
   | Accounts_off of K.t
   | Kind_not_read of K.t
 
@@ -38,6 +53,11 @@ let refusal_to_string = function
   | Admission_unreadable error ->
     "the admission cannot be read: " ^ Authz_admission_event.error_to_string error
   | Admission refusal -> Authz_principal_state.refusal_to_string refusal
+  | Revocation_pending subject ->
+    Printf.sprintf
+      "a revocation of %s was given up before it reached the log, so %s stays blocked"
+      (Authz_records.Subject.to_string subject)
+      (Authz_records.Subject.to_string subject)
   | Accounts_off kind ->
     Printf.sprintf "the accounts are off, and no %s record is written while they are" (K.to_string kind)
   | Kind_not_read kind -> Printf.sprintf "no layer of this server reads %s records" (K.to_string kind)
@@ -86,13 +106,16 @@ let invite state (record : R.t) =
      | Error refusal -> Error (Invite refusal))
 ;;
 
-(* An admission makes a principal, which raises no epoch, and an Admin
-   invitation also makes an Admin assignment, which raises the role epoch of
-   that principal (design 8.1). The store takes that as a [Grant] on the
-   principal. *)
+(* An admission spends a token that opens once (design 5.1-3) and makes a
+   principal; an Admin invitation also makes an Admin assignment, which raises
+   the role epoch of that principal (design 8.1). A log restored from before the
+   admission would open the token again, so every admission is a [Grant] on the
+   principal it makes, and the restored log disagrees with the store. *)
 let admission state (record : R.t) =
   match Authz_admission_event.of_body record.R.body with
   | Error error -> Error (Admission_unreadable error)
+  | Ok event when is_pending state (Authz_records.Subject.Invite event.Authz_admission_event.invite_id) ->
+    Error (Revocation_pending (Authz_records.Subject.Invite event.Authz_admission_event.invite_id))
   | Ok event ->
     (match
        Authz_principal_state.admit
@@ -103,20 +126,18 @@ let admission state (record : R.t) =
          event
      with
      | Error refusal -> Error (Admission refusal)
-     | Ok { Authz_principal_state.principals; invites; role } ->
-       let high_water =
-         match role with
-         | Authz_invite_event.Member -> None
-         | Authz_invite_event.Admin ->
-           Some
-             (Authz_external_store.Change.Authz
-                { event = Authz_external_store.Change.Grant
-                ; subject =
-                    Authz_records.Subject.Principal
-                      (Authz_types.Principal.Human event.Authz_admission_event.user_id)
-                })
-       in
-       Ok { state = { state with principals; invites }; high_water })
+     | Ok { Authz_principal_state.principals; invites; role = _ } ->
+       Ok
+         { state = { state with principals; invites }
+         ; high_water =
+             Some
+               (Authz_external_store.Change.Authz
+                  { event = Authz_external_store.Change.Grant
+                  ; subject =
+                      Authz_records.Subject.Principal
+                        (Authz_types.Principal.Human event.Authz_admission_event.user_id)
+                  })
+         })
 ;;
 
 (* Every kind but a mode event is matched with the mode, so the branch of a

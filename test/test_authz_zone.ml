@@ -319,6 +319,7 @@ let refusal_name : Authz_state.refusal -> string = function
   | Authz_state.Invite _ -> "Invite"
   | Authz_state.Admission_unreadable _ -> "Admission_unreadable"
   | Authz_state.Admission _ -> "Admission"
+  | Authz_state.Revocation_pending _ -> "Revocation_pending"
   | Authz_state.Accounts_off kind -> "Accounts_off " ^ R.Kind.to_string kind
   | Authz_state.Kind_not_read kind -> "Kind_not_read " ^ R.Kind.to_string kind
 ;;
@@ -812,6 +813,51 @@ let an_admin_admission_has_an_intent () =
       (Authz_principal_state.is_admin opened.replay.Z.Replay.state.Authz_state.principals person))
 ;;
 
+let admission_draft ~at_ms : Z.draft =
+  let person = get (User_id.of_string "0123456789abcdef0123456789abcdef") in
+  let identity = get (Authz_external_identity.google ~sub:"111") in
+  match Authz_admission_event.to_body { Authz_admission_event.user_id = person; identity; invite_id } with
+  | Ok body -> { Z.at_ms; author = Author.Authenticated (Principal.Human person); kind = R.Kind.Admission; body }
+  | Error _ -> Alcotest.fail "fixture admission refused"
+;;
+
+(* A revocation whose append failed leaves its intent. The next entry gives it
+   up, and from then on its invitation is blocked (design 8.3): the holder of
+   the token does not get in, and a replay keeps the block. *)
+let an_aborted_revocation_blocks_its_invitation () =
+  with_dirs (fun dirs ->
+    let (_ : B.completed) = bootstrap dirs in
+    let zone = open_zone dirs in
+    let (_ : Z.committed) = commit_ok zone (invite_draft ()) in
+    let revoke = revoke_draft ~at_ms:(at_ms + 2) in
+    let head = (Z.snapshot zone).Z.head in
+    let left : S.intent =
+      { S.previous_record_hash = R.head_hash head
+      ; intended_next_record_digest = (record_at ~head revoke).R.hash
+      ; change = S.Change.Authz { event = S.Change.Revoke; subject = Subject.Invite invite_id }
+      }
+    in
+    with_foreign_lock ~lock_path:(Fs_compat.private_jsonl_lock_path (log_file dirs)) (fun release ->
+      check_error
+        "a revocation while another process holds the log"
+        "Record_not_appended Write_locked"
+        zone
+        revoke;
+      release ());
+    check_error
+      "the token of the invitation after it"
+      "Refused Revocation_pending"
+      zone
+      (admission_draft ~at_ms:(at_ms + 3));
+    let switched = commit_ok zone (mode_draft ~at_ms:(at_ms + 4) M.Off) in
+    check_settled "the next record gives the revocation up" ("Abort " ^ intent_name left) switched;
+    let opened = check_restart "a restart" dirs ~mode:off ~head:switched.Z.record_hash in
+    Alcotest.(check (list string))
+      "the replay blocks the invitation"
+      [ "invite:invite-1" ]
+      (List.map Subject.to_string opened.replay.Z.Replay.state.Authz_state.revocation_pending))
+;;
+
 let a_refused_invite_writes_nothing () =
   with_dirs (fun dirs ->
     let (_ : B.completed) = bootstrap dirs in
@@ -1261,6 +1307,10 @@ let () =
         ; Alcotest.test_case "a revoked invite has an intent" `Quick a_revoked_invite_has_an_intent
         ; Alcotest.test_case "a refused invite writes nothing" `Quick a_refused_invite_writes_nothing
         ; Alcotest.test_case "an Admin admission has an intent" `Quick an_admin_admission_has_an_intent
+        ; Alcotest.test_case
+            "an aborted revocation blocks its invitation"
+            `Quick
+            an_aborted_revocation_blocks_its_invitation
         ] )
     ; ( "refusals"
       , [ Alcotest.test_case "refused records write nothing" `Quick refused_records_write_nothing

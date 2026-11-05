@@ -426,6 +426,14 @@ let test_an_admission_that_is_refused () =
   refused "an identity bound before" admitted
     (admission_record ~user_id:bob ~identity:alice_identity ~invite:second_invite ())
     "the identity google:111 is bound to user-1";
+  (match
+     S.step
+       (S.hold_revocations (invited ()) [ Authz_records.Subject.Invite invite_id ])
+       (admission_record ~user_id:user ~identity:alice_identity ~invite:invite_id ())
+   with
+   | Error (S.Revocation_pending subject) ->
+     Alcotest.(check string) "a revocation given up" "invite:invite-1" (Authz_records.Subject.to_string subject)
+   | other -> Alcotest.failf "an invitation whose revocation was given up: %s" (step_label other));
   (match S.step S.empty (admission_record ~user_id:user ~identity:alice_identity ~invite:invite_id ()) with
    | Error (S.Before_bootstrap K.Admission) -> ()
    | other -> Alcotest.failf "before the bootstrap: %s" (step_label other));

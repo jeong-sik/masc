@@ -8,6 +8,14 @@ module S = Authz_external_store
 
 let ( let* ) = Result.bind
 
+let reduction_subject (intent : S.intent) =
+  match intent.S.change with
+  | S.Change.Authz { subject; event = _ } when S.Change.is_reduction intent.S.change -> Some subject
+  | S.Change.Authz _ | S.Change.Mode _ -> None
+;;
+
+let reduction_subjects intents = List.filter_map reduction_subject intents
+
 module Replay = struct
   type t =
     { state : Authz_state.t
@@ -15,7 +23,14 @@ module Replay = struct
     ; head : R.head
     }
 
-  let init store = { state = Authz_state.empty; probe = H.Probe.create store; head = R.genesis }
+  (* The subjects of the reductions that the store gave up before this replay
+     are blocked from the first record on (design 8.3). *)
+  let init store =
+    { state = Authz_state.hold_revocations Authz_state.empty (reduction_subjects (S.State.aborted store))
+    ; probe = H.Probe.create store
+    ; head = R.genesis
+    }
+  ;;
 
   let step replay (record : R.t) =
     match Authz_state.step replay.state record with
@@ -222,13 +237,20 @@ let abort_settlement = function
    snapshot. *)
 let in_zone t draft store_writer log_writer head settlement =
   let published = Atomic.get t.current in
+  (* A reduction that this entry gives up blocks its subject before the record
+     is read, so the record cannot spend what the reduction was about. *)
+  let base =
+    match settlement with
+    | H.Abort intent -> Authz_state.hold_revocations published.state (reduction_subjects [ intent ])
+    | H.Nothing_to_settle | H.Promote (_ : S.intent) -> published.state
+  in
   let* record =
     Result.map_error
       (fun error -> Record_not_built error)
       (R.make ~head ~at_ms:draft.at_ms ~author:draft.author ~kind:draft.kind ~body:draft.body)
   in
   let* { Authz_state.state; high_water } =
-    Result.map_error (fun refusal -> Refused refusal) (Authz_state.apply published.state record)
+    Result.map_error (fun refusal -> Refused refusal) (Authz_state.apply base record)
   in
   (* The settlement comes first even for a record with no intent: the append
      moves the head, and an intent left pending behind it could no longer be

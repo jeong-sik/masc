@@ -24,10 +24,13 @@
       began.
     + It writes [Intent_pending] to the store, appends the record to the log,
       publishes the state with the record, and writes [Committed]. A record
-      whose {!Authz_state.applied} has no change, an invitation for one, has no
-      intent and no [Committed]: it is appended and published. Its settlement
-      is still written before the append, because the append moves the head
-      and an intent left behind it could no longer be aborted.
+      whose {!Authz_state.applied} has no change, the issue of an invitation
+      for one, has no intent and no [Committed]: it is appended and published.
+      Its settlement is still written before the append, because the append
+      moves the head and an intent left behind it could no longer be aborted.
+      A reduction that the settlement gives up blocks its subject in the state
+      that reads the record ({!Authz_state.hold_revocations}, design 8.3), and
+      a replay blocks the subjects of every reduction the store gave up.
 
     Each step writes only when the steps before it passed, so a commit that is
     refused in the first two steps writes nothing, and the settlement waits for

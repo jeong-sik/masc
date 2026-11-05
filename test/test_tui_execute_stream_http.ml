@@ -1232,14 +1232,14 @@ let test_stale_reconnect_cannot_replace_successor env =
     let calls = ref 0 in
     let started, announce = Eio.Promise.create () in
     let release, resume = Eio.Promise.create () in
-    Server_play_room_events.For_testing.with_perform
-      (fun ~base_path ~who ~speaker ~now action ->
+    Server_play_room_events.For_testing.with_permission
+      (fun role permission ->
         incr calls;
         if !calls = 1 then begin
           Eio.Promise.resolve announce ();
           Eio.Promise.await release
         end;
-        Masc.Play_room.perform_with_change ~base_path ~who ~speaker ~now action)
+        Masc_domain.has_permission role permission)
       (fun () ->
         let first = open_play ~sw ~clock ~port ~session_id ~token ~instance_id in
         Play_fixture.await clock started;
@@ -1267,14 +1267,14 @@ let test_disconnect_before_lease_install_cleans_up env =
     let started, announce = Eio.Promise.create () in
     let release, resume = Eio.Promise.create () in
     let entered = ref false in
-    Server_play_room_events.For_testing.with_perform
-      (fun ~base_path ~who ~speaker ~now action ->
+    Server_play_room_events.For_testing.with_permission
+      (fun role permission ->
         if not !entered then begin
           entered := true;
           Eio.Promise.resolve announce ();
           Eio.Promise.await release
         end;
-        Masc.Play_room.perform_with_change ~base_path ~who ~speaker ~now action)
+        Masc_domain.has_permission role permission)
       (fun () ->
         let first = open_play ~sw ~clock ~port ~session_id ~token ~instance_id in
         Play_fixture.await clock started;
@@ -1307,16 +1307,17 @@ let test_aborted_replacement_cleans_predecessor_presence env =
     assert_http_join_available workspace)
 
 let test_readiness_loss_cleans_predecessor_presence env =
-  let ready = ref true in
-  Play_fixture.with_fixture env ~ready:(fun () -> !ready)
+  let readiness_checks = ref 0 in
+  Play_fixture.with_fixture env
+    ~ready:(fun () -> incr readiness_checks; !readiness_checks < 3)
     (fun ~workspace ~session_id ~token ~instance_id ~port ~sw ~clock ->
       let first = open_play ~sw ~clock ~port ~session_id ~token ~instance_id in
       Alcotest.(check int) "the established Observer opens" 200 (Play_fixture.await clock first.response);
       Alcotest.(check (list string)) "the established Observer owns presence"
         ["play-observer"] (Play_fixture.member_names workspace);
-      ready := false;
+      readiness_checks := 0;
       let second = open_play ~sw ~clock ~port ~session_id ~token ~instance_id in
-      Alcotest.(check int) "readiness loss is refused" 503 (Play_fixture.await clock second.response);
+      Alcotest.(check int) "readiness is lost after replacement" 503 (Play_fixture.await clock second.response);
       Play_fixture.await clock first.ended;
       Alcotest.(check (list string)) "readiness loss removes the predecessor"
         [] (Play_fixture.member_names workspace);

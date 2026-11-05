@@ -271,31 +271,33 @@ let reply_bytes (response : Agent_core.Types.api_response) =
    model named that tool, and it counts among the other tools otherwise. *)
 let invocation_of_response ~requested ~elapsed_s (response : Agent_core.Types.api_response)
   =
+  let names = tool_use_names response in
   let unreadable = response.unreadable_tool_uses in
-  match tool_use_names response, unreadable with
-  | [], [] -> Replied_no_tool { reply_bytes = reply_bytes response; elapsed_s }
-  | names, _ when List.exists (String.equal requested) names ->
-    Tool_invoked { tool = requested; elapsed_s }
-  | names, unreadable ->
-    (match
-       List.find_opt
-         (fun (call : Llm_provider.Types.unreadable_tool_use) ->
-            String.equal requested call.tool_name)
-         unreadable
-     with
-     | Some call ->
-       Tool_arguments_unreadable
-         { tool = requested; problem = call.arguments_problem; elapsed_s }
-     | None ->
-       Other_tool_invoked
-         { requested
-         ; invoked =
-             names
-             @ List.map
-                 (fun (call : Llm_provider.Types.unreadable_tool_use) -> call.tool_name)
-                 unreadable
-         ; elapsed_s
-         })
+  if List.exists (String.equal requested) names
+  then Tool_invoked { tool = requested; elapsed_s }
+  else (
+    match
+      List.find_opt
+        (fun (call : Llm_provider.Types.unreadable_tool_use) ->
+           String.equal requested call.tool_name)
+        unreadable
+    with
+    | Some call ->
+      Tool_arguments_unreadable
+        { tool = requested; problem = call.arguments_problem; elapsed_s }
+    | None ->
+      (match names, unreadable with
+       | [], [] -> Replied_no_tool { reply_bytes = reply_bytes response; elapsed_s }
+       | _ :: _, _ | [], _ :: _ ->
+         Other_tool_invoked
+           { requested
+           ; invoked =
+               names
+               @ List.map
+                   (fun (call : Llm_provider.Types.unreadable_tool_use) -> call.tool_name)
+                   unreadable
+           ; elapsed_s
+           }))
 ;;
 
 let probe_invocation ~sw ~net ~clock ~now ~runtime_id ~tool ~prompt () =

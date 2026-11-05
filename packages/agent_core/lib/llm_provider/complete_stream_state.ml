@@ -929,7 +929,13 @@ let required_nonblank ~reason = function
 type block_projection =
   | Content of Types.content_block
   | No_content
-  | Unreadable_tool_use of Types.unreadable_tool_use
+  | Unreadable_tool_use of
+      { tool_use_id : string
+      ; tool_name : string
+      ; arguments : string
+      ; arguments_problem : Tool_call_input.parse_error
+      ; arguments_assembly : Types.tool_argument_assembly option
+      }
 
 let media_content ~index ~kind ~make block =
   match block.media with
@@ -1134,7 +1140,7 @@ let content_of_block ~disposition ~stop_reason (index, block) =
      | Error arguments_problem ->
        Ok
          (Unreadable_tool_use
-            { Types.tool_use_id = id
+            { tool_use_id = id
             ; tool_name = name
             ; arguments = text
             ; arguments_problem
@@ -1186,19 +1192,38 @@ let content_of_block ~disposition ~stop_reason (index, block) =
       ()
 ;;
 
+(* [tool_calls] counts the tool calls kept so far, readable or not, so an
+   unreadable call takes the place the wire gave it among them. *)
 let collect_content state stop_reason =
-  let rec loop content unreadable = function
+  let rec loop content unreadable tool_calls = function
     | [] -> Ok (List.rev content, List.rev unreadable)
     | ((index, _) as block) :: rest ->
       let* projection =
         content_of_block ~disposition:state.disposition ~stop_reason block
       in
       (match projection with
-       | Content item -> loop ((index, item) :: content) unreadable rest
-       | No_content -> loop content unreadable rest
-       | Unreadable_tool_use call -> loop content (call :: unreadable) rest)
+       | Content (Types.ToolUse _ as item) ->
+         loop ((index, item) :: content) unreadable (tool_calls + 1) rest
+       | Content
+           (( Types.Text _ | Types.Thinking _ | Types.ReasoningDetails _
+            | Types.RedactedThinking _ | Types.ToolResult _ | Types.Image _
+            | Types.Document _ | Types.Audio _ ) as item) ->
+         loop ((index, item) :: content) unreadable tool_calls rest
+       | No_content -> loop content unreadable tool_calls rest
+       | Unreadable_tool_use
+           { tool_use_id; tool_name; arguments; arguments_problem; arguments_assembly } ->
+         let call : Types.unreadable_tool_use =
+           { tool_use_id
+           ; tool_name
+           ; tool_use_ordinal = tool_calls
+           ; arguments
+           ; arguments_problem
+           ; arguments_assembly
+           }
+         in
+         loop content (call :: unreadable) (tool_calls + 1) rest)
   in
-  loop [] [] (Blocks.bindings state.blocks)
+  loop [] [] 0 (Blocks.bindings state.blocks)
 ;;
 
 let group_content state indexed_content =

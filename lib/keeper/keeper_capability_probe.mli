@@ -165,16 +165,6 @@ type invocation_error =
 
 val invocation_error_to_string : invocation_error -> string
 
-(** Send one synthetic turn to [runtime_id] and report whether [tool] was
-    called.
-
-    Writes nothing. There is no keeper name, no session, and no checkpoint in
-    this path: the Agent Core lane is stateless per request, so isolation here
-    is the absence of a session rather than a separate one.
-
-    The turn goes through {!Keeper_provider_subcall.complete}, the same
-    boundary the vision tool uses, so it inherits the resolved provider
-    deadline instead of installing its own. *)
 val invocation_of_response
   :  requested:string
   -> elapsed_s:float
@@ -185,6 +175,16 @@ val invocation_of_response
     is [Tool_arguments_unreadable]; other calls, readable or not, are
     [Other_tool_invoked]; no call at all is [Replied_no_tool]. *)
 
+(** Send one synthetic turn to [runtime_id] and report whether [tool] was
+    called.
+
+    Writes nothing. There is no keeper name, no session, and no checkpoint in
+    this path: the Agent Core lane is stateless per request, so isolation here
+    is the absence of a session rather than a separate one.
+
+    The turn goes through {!Keeper_provider_subcall.complete}, the same
+    boundary the vision tool uses, so it inherits the resolved provider
+    deadline instead of installing its own. *)
 val probe_invocation
   :  sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t

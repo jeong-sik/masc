@@ -147,6 +147,7 @@ let probe_response ?(unreadable = []) content : Agent_core.Types.api_response =
 let unreadable_call name : Llm_provider.Types.unreadable_tool_use =
   { tool_use_id = "c1"
   ; tool_name = name
+  ; tool_use_ordinal = 0
   ; arguments = {|{"limit": 5"x"}|}
   ; arguments_problem = Llm_provider.Tool_call_input.Invalid_json "bad"
   ; arguments_assembly = None

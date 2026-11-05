@@ -1318,6 +1318,7 @@ let test_finalize_unreadable_call_keeps_its_readable_siblings () =
     Alcotest.(check (list string)) "readable calls" [ "c0"; "c1" ] runnable;
     let call = expect_one_unreadable "sibling" response in
     Alcotest.(check string) "unreadable call" "c2" call.tool_use_id;
+    Alcotest.(check int) "third tool call on the wire" 2 call.tool_use_ordinal;
     Alcotest.(check string)
       "tool stop"
       "tool_use"

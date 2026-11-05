@@ -1994,8 +1994,10 @@ let test_parse_tool_calls_rejects_malformed_arguments () =
     (* Not repaired and not run: the call leaves [content] whole. *)
     check_bool "no runnable call" true (response.content = []);
     (match response.unreadable_tool_uses with
-     | [ { tool_use_id; tool_name; arguments; arguments_problem; arguments_assembly } ] ->
+     | [ { tool_use_id; tool_name; tool_use_ordinal; arguments; arguments_problem; arguments_assembly } ]
+       ->
        check_string "id" "call-bad" tool_use_id;
+       Alcotest.(check int) "first tool call" 0 tool_use_ordinal;
        check_string "name" "lookup" tool_name;
        check_string "argument text" {|{"city":|} arguments;
        check_bool
@@ -2009,6 +2011,77 @@ let test_parse_tool_calls_rejects_malformed_arguments () =
     check_string "tool stop" "tool_use" (stop_reason_to_string response.stop_reason)
   | Error msg ->
     Alcotest.failf "the response stands without the call: %s" (Parse.parse_error_to_string msg)
+;;
+
+(* [ok, broken, ok] through the non-streamed fallback: the synthetic stream
+   emits the broken call at its place among the tool calls, so a consumer
+   counting streamed tool blocks sees three, and the accumulator reads the
+   same response back. *)
+let test_unreadable_call_keeps_its_place_through_the_synthetic_stream () =
+  let call id arguments =
+    `Assoc
+      [ "id", `String id
+      ; "function", `Assoc [ "name", `String "lookup"; "arguments", `String arguments ]
+      ]
+  in
+  let response =
+    parse_ok
+      (response_json
+         ~content:`Null
+         ~finish_reason:"tool_calls"
+         ~message_fields:
+           [ ( "tool_calls"
+             , `List [ call "c0" "{}"; call "c1" {|{"city":"Paris""x"}|}; call "c2" "{}" ] )
+           ]
+         ())
+  in
+  let tool_blocks = ref 0 in
+  let acc = Complete_stream_acc.create_stream_acc () in
+  Streaming.emit_synthetic_events response (fun event ->
+    (match event with
+     | ContentBlockStart { content_type = "tool_use"; _ } -> incr tool_blocks
+     | _ -> ());
+    Complete_stream_acc.accumulate_event acc event);
+  Alcotest.(check int) "every wire tool call is a streamed block" 3 !tool_blocks;
+  match Complete_stream_acc.finalize_stream_acc acc with
+  | Error _ -> Alcotest.fail "synthetic stream failed"
+  | Ok reread ->
+    let ids =
+      List.filter_map
+        (function
+          | ToolUse { id; _ } -> Some id
+          | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolResult _
+          | Image _ | Document _ | Audio _ -> None)
+        reread.content
+    in
+    Alcotest.(check (list string)) "readable calls" [ "c0"; "c2" ] ids;
+    (match reread.unreadable_tool_uses with
+     | [ { tool_use_id = "c1"; tool_use_ordinal = 1; _ } ] -> ()
+     | _ -> Alcotest.fail "expected c1 at tool ordinal 1")
+;;
+
+(* A call the length limit cut off is unfinished, not unreadable. *)
+let test_length_cut_call_is_not_unreadable () =
+  let response =
+    parse_ok
+      (response_json
+         ~content:`Null
+         ~finish_reason:"length"
+         ~message_fields:
+           [ ( "tool_calls"
+             , `List
+                 [ `Assoc
+                     [ "id", `String "call-cut"
+                     ; ( "function"
+                       , `Assoc [ "name", `String "lookup"; "arguments", `String {|{"city":|} ]
+                       )
+                     ]
+                 ] )
+           ]
+         ())
+  in
+  Alcotest.(check int) "no unreadable call" 0 (List.length response.unreadable_tool_uses);
+  check_string "length stop" "max_tokens" (stop_reason_to_string response.stop_reason)
 ;;
 
 let test_parse_tool_calls_rejects_non_object_arguments () =
@@ -3747,6 +3820,14 @@ let () =
             "tool calls reject non-object arguments"
             `Quick
             test_parse_tool_calls_rejects_non_object_arguments
+        ; Alcotest.test_case
+            "unreadable call keeps its place through the synthetic stream"
+            `Quick
+            test_unreadable_call_keeps_its_place_through_the_synthetic_stream
+        ; Alcotest.test_case
+            "a length-cut call is not unreadable"
+            `Quick
+            test_length_cut_call_is_not_unreadable
         ; Alcotest.test_case
             "reasoning_content and tool_calls coexist"
             `Quick

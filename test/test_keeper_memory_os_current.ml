@@ -2991,6 +2991,8 @@ let test_declared_revision_links_survive_journal_failure () =
     let receipt = Yojson.Safe.from_file receipt_path in
     check int "prepared transaction retains each declared branch" (List.length links)
       Yojson.Safe.Util.(receipt |> member "revision_links" |> to_list |> List.length);
+    check bool "preflight reads the prepared receipt" true
+      (Result.is_ok (Current.inspect_for_preflight ~keepers_dir ~keeper_id:"keeper"));
     (match revision_evidence ~keepers_dir seeded.revision with
      | Error _ -> () | Ok _ -> fail "unfinished lineage returned as complete evidence");
     Unix.rmdir journal;
@@ -3513,6 +3515,48 @@ let test_successor_recall_keeps_binding_outcomes_separate () =
   check bool "retirement is local to its binding" true
     (observed.unresolved=[{Current.binding=retired_binding;
       reason=Current.Retired_without_successor current.revision}])
+;;
+
+(* A retraction plan receipt without [revision_links] is not read. The reader
+   and the store preflight refuse it and name the file, so the hard cut's
+   preflight finds it before install and the operator deletes that file. *)
+let test_retraction_plan_receipt_without_revision_links_is_refused_with_its_path () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let original = fact ~claim:"prepared receipt without lineage" () in
+  let receipt =
+    `Assoc
+      [ "plan_id", `Null
+      ; "state", `String "prepared"
+      ; "prior_revision", `Int 3
+      ; "prior_snapshot_sha256", `String (String.make 64 'a')
+      ; "target_revision", `Int 4
+      ; "target_snapshot_sha256", `String (String.make 64 'b')
+      ; ( "dropped"
+        , `List
+            [ `Assoc
+                [ "memory_id", `String (Types.memory_id original)
+                ; "reason", `String "verified split recorded without lineage"
+                ] ] )
+      ]
+  in
+  let path = Current.retraction_plan_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+  Fs_compat.save_file_atomic_strict path (Yojson.Safe.to_string receipt) |> require_ok;
+  let names_file_and_field detail =
+    String_util.contains_substring detail ("path=" ^ path)
+    && String_util.contains_substring detail "missing: revision_links"
+  in
+  (match Current.read_dropped ~keepers_dir ~keeper_id:"keeper" ~current_facts:[] with
+   | Error message ->
+     check bool "reader names the receipt file and the missing field" true
+       (names_file_and_field message)
+   | Ok _ -> fail "receipt without revision_links read as a settled archive");
+  check (list string) "preflight lists the keeper of a receipt alone" [ "keeper" ]
+    (Current.list_preflight_keeper_ids ~keepers_dir |> require_ok);
+  match Current.inspect_for_preflight ~keepers_dir ~keeper_id:"keeper" with
+  | Error detail ->
+    check bool "preflight names the receipt file and the missing field" true
+      (names_file_and_field detail)
+  | Ok _ -> fail "preflight passed a receipt without revision_links"
 ;;
 
 let test_admission_recall_cache_invalidates_external_prefix_edit_and_growth () =
@@ -5327,6 +5371,8 @@ let () =
             test_successor_recall_distinguishes_replayed_and_conflicting_rewrites
         ; test_case "successor recall keeps direct, revised and retired bindings separate" `Quick
             test_successor_recall_keeps_binding_outcomes_separate
+        ; test_case "retraction plan receipt without revision links is refused with its path" `Quick
+            test_retraction_plan_receipt_without_revision_links_is_refused_with_its_path
         ; test_case "prepared candidate receipt set recovers exact snapshot only" `Quick
             test_candidate_prepared_set_recovers_exact_snapshot
         ; test_case

@@ -870,7 +870,11 @@ let list_preflight_keeper_ids ~keepers_dir =
       |> List.filter_map (fun filename ->
            match Filename.chop_suffix_opt ~suffix filename with
            | Some _ as id -> id
-           | None -> Filename.chop_suffix_opt ~suffix:publication_receipt_suffix filename)
+           | None ->
+             (match Filename.chop_suffix_opt ~suffix:publication_receipt_suffix filename with
+              | Some _ as id -> id
+              | None ->
+                Filename.chop_suffix_opt ~suffix:retraction_plan_receipt_suffix filename))
       |> List.sort_uniq String.compare
       |> fun ids -> Ok ids
   with
@@ -1285,19 +1289,26 @@ let retraction_plan_receipt_of_json = function
   | _ -> Error "retraction plan receipt is not a JSON object"
 ;;
 
+let parse_retraction_plan_receipt ~path content =
+  match Yojson.Safe.from_string content with
+  | json ->
+    retraction_plan_receipt_of_json json
+    |> Result.map_error (fun detail ->
+         Printf.sprintf "retraction plan receipt rejected path=%s: %s" path detail)
+  | exception Yojson.Json_error detail ->
+    Error
+      (Printf.sprintf
+         "retraction plan receipt is not JSON path=%s: %s"
+         path
+         detail)
+;;
+
 let read_retraction_plan_receipt ~keepers_dir ~keeper_id =
   let path = retraction_plan_receipt_path ~keepers_dir ~keeper_id in
   match Fs_compat.load_file_opt path with
   | None -> Ok None
   | Some content ->
-    (match Yojson.Safe.from_string content with
-     | json -> Result.map Option.some (retraction_plan_receipt_of_json json)
-     | exception Yojson.Json_error detail ->
-       Error
-         (Printf.sprintf
-            "retraction plan receipt is not JSON path=%s: %s"
-            path
-            detail))
+    Result.map Option.some (parse_retraction_plan_receipt ~path content)
   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception exn ->
     Error
@@ -1627,6 +1638,15 @@ let read_publication ~keepers_dir ~keeper_id =
   | Some text -> Result.map Option.some (parse_publication text)
 
 let inspect_for_preflight ~keepers_dir ~keeper_id =
+  let retraction_path = retraction_plan_receipt_path ~keepers_dir ~keeper_id in
+  let* retraction = preflight_file retraction_path in
+  let* () =
+    match retraction with
+    | None -> Ok ()
+    | Some text ->
+      let+ _ = parse_retraction_plan_receipt ~path:retraction_path text in
+      ()
+  in
   let publication_path = publication_receipt_path ~keepers_dir ~keeper_id in
   let publication () =
     let* contents = preflight_file publication_path in

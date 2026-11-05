@@ -185,7 +185,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
   - 발행한 상태는 파일이 멈췄다는 것을 담지 않고, 구역에는 그것을 읽는 함수도 아직 없다. `/health`의 `Recovery_store_unavailable`(§8.4)과, 권한 축소 사건의 intent가 남았을 때 바로 세우는 §8.3 차단이 필요한 층이 그 함수를 구역에 더한다. 지금 받는 레코드는 mode 사건뿐이라 아직 해당하는 층이 없다.
   - 이 층의 append는 레코드 하나다. 한 레코드에 사건 여럿을 담을지, 여러 레코드를 한 intent로 묶을지는 처음 필요한 층(B3c의 초대 소비)이 정한다. `Authz_log.append`는 중간에 끊기면 앞 레코드만 남을 수 있다.
   - B3b의 둘째 층: `Authz_bootstrap`이 첫 레코드를 `Authz_zone.install`로 쓴다. `install`은 부른 쪽이 연 두 손잡이 위에 그 호출 동안만 구역을 세우고, `commit`과 같은 함수로 쓴다. 다른 것은 들어갈 때의 판정 하나다. `commit`은 저장소에 답이 있어야 하고(`Answered`), `install`은 답이 없어야 한다(`Nothing_answered`). `Nothing_answered`는 포기할 `Fresh_bootstrap` intent를 함께 돌려준다. 그래서 bootstrap도 append 전에 `Authz_state.apply`를 돌리고(빈 상태는 `Fresh_bootstrap`만 받는다), 남은 intent를 포기하기 전에 `confirm_end`로 로그 끝을 확인한다. 확인하기 전에 그 intent의 레코드가 로그에 들어왔으면 포기하지 않고 로그를 멈춘다. 다음 부팅이 그 intent를 승격한다. 손잡이가 아는 로그에 레코드가 있으면(`Log_holds_records`) 아무것도 쓰지 않는다. bootstrap의 쓰기 오류는 구역 오류 하나(`Zone_failed`)로 받는다.
-  - 부팅 판정은 지금 두 파일을 구역과 같은 접기(`Authz_zone.Replay`)로 읽고 손잡이를 버린다. 다계정이 된 로그는 `Multi_account_not_served`로 멈추므로 구역을 쥘 곳이 없다. 구역의 열기는 두 파일이 다 있을 때만 구역을 만들고, 부팅은 하나가 없는 경우(설치 기록 없음, 로그 없음, 빈 로그)도 판정한다. 그 경우들을 구역의 열기가 어떤 값으로 돌려줄지는 `Multi_account_not_served`를 거두는 층이 `Multi_account_uncertain`에서 무엇을 서빙할지와 함께 정하고, 그 층이 부팅에서 연 구역을 쥔다. 그 층은 아직 1단계 순서에 이름이 없다(열린 항목).
+  - 부팅 판정은 지금 두 파일을 구역과 같은 접기(`Authz_zone.Replay`)로 읽고 손잡이를 버린다. 다계정이 된 로그는 `Multi_account_not_served`로 멈추므로 구역을 쥘 곳이 없다. 구역의 열기는 두 파일이 다 있을 때만 구역을 만들고, 부팅은 하나가 없는 경우(설치 기록 없음, 로그 없음, 빈 로그)도 판정한다. 그 경우들을 구역의 열기가 어떤 값으로 돌려줄지는 S1이 `Multi_account_uncertain`에서 무엇을 서빙할지와 함께 정하고, S1이 부팅에서 연 구역을 쥔다.
 - 첫 Admin(2026-11-05 사용자 결정): bootstrap 명령이 한 번 쓰는 Admin 초대 링크를 찍는다. 그 링크로 로그인한 사람의 초대 소비, User 생성, Admin 지정은 append 한 번이다. Principal 레코드는 인증된 author만 쓴다(설계 §6.3). `Local_operator`는 초대 기록만 쓴다. 그래서 초대는 Principal과 다른 Kind다.
 - ID 발급(§4.1): Human `user_id`는 OS CSPRNG가 만든 128비트 이상의 값이고 `(iss, sub)`나 email에서 유도하지 않는다. 발급은 writer lock 안에서 현재 principal과 ledger의 `Delete` 기록을 대조한다. `user_id`가 겹치면 다시 뽑고, `service_id`가 겹치면 등록을 거부하고, ledger를 읽지 못하면 발급하지 않는다.
 - 호스트 로컬 bootstrap이 `Fresh_bootstrap`(B2)을 부른다. 이 층이 A2의 `Multi_account_not_activatable` 거부를 거둔다. 부팅 코드의 거부 한 줄을 지우고, 활성화 전 요청일 때 호스트 로컬 bootstrap만 연다. 외부 저장소의 위치(§6의 결정 2)는 B2 전에 정해지므로 이 층이 열릴 때 이미 있다. 호스트 로컬 bootstrap은 서버를 멈추고 돌리는 CLI 하위 명령이고 BasePath lease를 쥔다(2026-11-05 사용자 결정). 그래서 서버와도, 다른 bootstrap과도 동시에 돌지 않는다(B2d의 한계 참고). loopback 엔드포인트는 쓰지 않는다. 터널이 localhost로 들어와서 원격 요청과 구분할 수 없다.
@@ -225,6 +225,15 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 - 봉인은 읽을 때 원천 initiator의 현재 상태로 판정한다. 봉인 표시를 저장하지 않는다. 저장하면 initiator가 Active로 돌아와도 풀리지 않는다(§3-11).
 - 표시를 붙이면 저장 형식이 바뀐다. 기존 상태를 어떻게 할지는 §6의 결정 5가 정한다.
 - 첫 일은 조사이고 산출물은 표다. 칸은 다섯이다. ① 파생 상태를 만드는 자리(요약, 병합된 기억 등) ② 내용 주소로 공유되는 blob과 artifact ③ 이미 퍼진 복사본(산출 글, artifact 게시본, checkpoint, 백업, 로그와 trace) ④ 쓰기 경로의 미러와 이중 저장 ⑤ initiator 표시를 붙일 수 있는 키가 저장소에 있는지. 표시를 붙일 수 없는 저장소가 나오면 D6을 쪼개거나 이 계획을 고친 뒤 시작한다.
+
+### S. 1단계 개시
+
+| 층 | 결과 | 설계 | 선행 |
+|---|---|---|---|
+| S1 | 부팅이 `Multi_account_not_served` 거부를 거두고 다계정 로그를 서빙한다. 부팅이 구역(`Authz_zone.open_at_start`)을 열어 쥐고, 그 구역을 C2a~C4의 다계정 경로와 D1~D4의 실행 게이트에 넘긴다. 설치 기록이 없거나 로그가 없거나 비었을 때 구역의 열기가 무엇을 돌려줄지, `Multi_account_uncertain`에서 무엇을 서빙할지 이 층이 정한다. 설계 §11.1의 1단계 개시 증거를 이 층에서 모은다. | §5.1, §8.2, §11.1 | B3, C4, C6, D4 |
+
+- S1이 1단계의 맨 끝인 까닭: 계정 층 없이 부팅하면 여러 사람이 소유한 기록을 한 사용자처럼 서빙하기 때문에 이 거부가 있다(`Authz_boot_mode_read`). 그 계정 층의 마지막이 D4다. D1이 소유권을, D2~D4가 실행 진입마다 인가를 검사하고, D3이 lane마다 다른 owner의 account-home을 읽지 못하는 증거를 남긴다. 그 전에 거부를 거두면 C4를 통과한 사용자가 다른 사람의 Runtime과 Keeper를 쓴다.
+- S1 전에는 다계정 설치로 서버가 뜨지 않는다. C2a~D4의 코드는 시험이 구역을 직접 열어 부르고, 실제 서버에서 로그인부터 Keeper 실행까지 잇는 확인은 S1에서 처음 한다.
 
 ### E. official client 격리
 
@@ -272,7 +281,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 - A2, B3, B4를 뺀 A, B, C1은 서로 거의 독립이라 병렬 스택으로 쌓을 수 있다. 나머지 순서는 층 표의 선행 열을 따른다.
 - D2와 D3은 `Single_user`에서 동작을 바꾸지 않도록 `Runtime.authorize`가 모드에 따라 근거를 달리 발급해야 한다. 설계 §6.1이 이 점을 정한다. 이 근거가 없으면 D2는 시작하지 않는다.
 - 1단계 개시 조건은 설계 §11.1이다. 백업 복원은 A2의 부팅 판정이 거부하거나 `AuthorizationUncertain`으로 시작한다. 복원 뒤 이어 쓰는 절차(F2)와 복구 리허설, official lane attestation(E3)은 2단계이고, 2단계 층이 들어오면 그 층의 증거가 설계 §11의 요구 목록에 다시 들어간다.
-- 1단계(2026-11-04 사용자 결정, §6 결정 9). 순서는 A2 → B3 → B2e → C2a → C2b → C3 → A4d 뒷부분 → C4 → C6 → D1 → D2 → D3 → D4다. 이 층이 들어오고 설계 §11.1의 증거가 모이면, 초대한 사람이 Google이나 GitHub으로 로그인해 자기 Runtime으로 자기 Keeper를 쓴다. `Single_user` 동작은 층마다 그대로다. B2e(`Revocation_pending` 게이트)가 1단계에 드는 까닭은 1단계에도 Admin의 사용자 `Disable`과 초대 취소 같은 회수가 있어서다. 회수 기록이 중간에 끊기면 실행을 막아야 한다(설계 §3-5).
+- 1단계(2026-11-04 사용자 결정, §6 결정 9). 순서는 A2 → B3 → B2e → C2a → C2b → C3 → A4d 뒷부분 → C4 → C6 → D1 → D2 → D3 → D4 → S1이다(S1은 2026-11-05 사용자 결정). 이 층이 들어오고 설계 §11.1의 증거가 모이면, 초대한 사람이 Google이나 GitHub으로 로그인해 자기 Runtime으로 자기 Keeper를 쓴다. `Single_user` 동작은 층마다 그대로다. B2e(`Revocation_pending` 게이트)가 1단계에 드는 까닭은 1단계에도 Admin의 사용자 `Disable`과 초대 취소 같은 회수가 있어서다. 회수 기록이 중간에 끊기면 실행을 막아야 한다(설계 §3-5).
 - 2단계는 B4, C2c, C5, D5, D6, E1~E4, F1~F5다. Runtime 공유(Delegated·MachineShared), 입장 요청, MCP OAuth 결속, purge, 복원 창, 모드 끄기를 맡는다. 1단계를 실제로 쓴 뒤 연다.
 - C6은 C2의 로그인 경로와 C3의 세션·CSRF만 쓰고 `Auth_gate.decide`(C4)를 호출하지 않는다. 그래서 C4와 C6은 서로의 선행이 아니고, 둘 다 C3 뒤에 어느 쪽을 먼저 열어도 된다. 다만 다계정을 켜려면 C4가 필요하다(설계 §11 readiness의 `legacy_workspace_secret_callers=[]`·`agent_credential_callers=[]`가 C4 몫이다). 화면만 먼저 병합돼도 다계정은 켜지지 않는다.
 - C6 ①의 "거부"는 HTTP 401이다. 현재 `server_auth.ml`의 strict 경로는 자격이 없는 요청을 `Missing_token` 등으로 거절하고 `www-authenticate: Bearer`를 붙인다(`http_status_of_auth_error`, `auth_error_headers`). HTTP strict는 `MASC_HTTP_AUTH_STRICT`가 켜져 있거나, 비 loopback으로 바인드하거나, `MASC_HTTP_BASE_URL`이 비 loopback 주소일 때 켜진다. A2가 `Multi_account`에서 `enabled=false`, `require_token=false`, `MASC_ALLOW_ANONYMOUS_MUTATIONS=true`를 부팅 때 거부해도 strict가 항상 켜지는 것은 아니다. `with_public_read`는 strict에서도 `is_public_read_path`의 공개 경로를 열고, strict가 꺼진 loopback에서는 다른 읽기에도 인증 검사를 하지 않는다. 자격 없는 요청의 401 여부는 경로와 C3·C4의 구현에 따라 확인한다. Dashboard의 기존 401 처리(`dashboard/src/api/core.ts`의 `reportRejectedCredential`)는 bearer를 보낸 요청에만 반응하므로, 자격 없는 요청이 401을 받으면 로그인으로 이동하는 부분은 C6이 새로 만든다. C4가 들어오기 전 C6의 상태 전이 시험은 서버 fixture 응답으로 하고, 실제 서버의 Reject 경로와 엮은 증거는 C4 뒤에 만든다.

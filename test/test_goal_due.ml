@@ -27,8 +27,7 @@ let test_no_value_is_no_due_date () =
 
 let test_a_calendar_day_falls_due_at_the_last_second_utc () =
   match due_date "2026-09-23" with
-  | Goal_due.Due_date { date; instant } ->
-    check (triple int int int) "the day as written" (2026, 9, 23) date;
+  | Goal_due.Due_date { instant } ->
     check ptime "23:59:59 UTC of that day" (utc 2026 9 23 23 59 59) instant
   | Goal_due.No_due_date | Goal_due.Unreadable_due_date _ ->
     fail "2026-09-23 was not read as a due date"
@@ -65,9 +64,10 @@ let test_readable_exactly_when_the_day_exists () =
         let raw = Printf.sprintf "%04d-%02d-%02d" year month day in
         let exists = Option.is_some (Ptime.of_date (year, month, day)) in
         match due_date raw with
-        | Goal_due.Due_date { date; _ } ->
+        | Goal_due.Due_date { instant } ->
           check bool (raw ^ " exists") true exists;
-          check (triple int int int) (raw ^ " keeps its digits") (year, month, day) date
+          check (triple int int int) (raw ^ " keeps its digits") (year, month, day)
+            (Ptime.to_date instant)
         | Goal_due.Unreadable_due_date _ -> check bool (raw ^ " does not exist") false exists
         | Goal_due.No_due_date -> failf "%S read as no due date" raw
       done

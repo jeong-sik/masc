@@ -1,8 +1,8 @@
 (** A Goal's due date, read once from the string the store keeps.
 
-    [Goal_store.goal.due_date] is a string. Whoever needs a moment or a day
-    out of it reads it here, so the upsert check and the Candle appraisal
-    agree on what a due date is.
+    [Goal_store.goal.due_date] is a string. Whoever needs the moment it falls
+    due reads it here, so the upsert check and the Candle appraisal agree on
+    what a due date is.
 
     A due date is [YYYY-MM-DD] and nothing else: four digits, a dash, two
     digits, a dash, two digits, and a day that exists in the calendar. It is
@@ -14,9 +14,7 @@
 type t =
   | No_due_date
   | Due_date of
-      { date : Ptime.date  (** The day, as written: year, month, day. *)
-      ; instant : Ptime.t  (** 23:59:59 UTC of [date]. *)
-      }
+      { instant : Ptime.t  (** 23:59:59 UTC of the day the string names. *) }
   | Unreadable_due_date of string
       (** A value that is not a due date, kept as it was written. *)
 

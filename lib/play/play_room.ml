@@ -14,7 +14,6 @@ type change = {
 type error = Invalid_request of string | Conflict of string | Unavailable of string
 type operation = Join | Read of int option | Say of { message_id : string; text : string } | Leave
 type action = { client_id : string; machine : Machine_lane.t; operation : operation }
-type presence_operation = Join | Leave
 let history_page_size = 100
 let presence_seconds = 60.
 let error_message = function Invalid_request s | Conflict s | Unavailable s -> s
@@ -86,6 +85,8 @@ let parse_action = function
         | _ -> Error (Invalid_request "action must be join, read, say or leave") in
       Ok { client_id; machine; operation }
   | _ -> Error (Invalid_request "room request must be an object")
+
+type presence_operation = Join | Leave
 
 let presence action = match action.operation with
   | Join -> Some (Join, action.client_id)

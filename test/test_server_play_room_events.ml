@@ -113,10 +113,10 @@ let test_renew_failure_keeps_lease_for_next_ping () = workspace (fun base_path -
   with_events base_path (fun heard ->
     let room_scope = scope () in
     connect base_path ~sse_client_id:30 room_scope;
-    let fail = ref true in
+    let fail_next = ref true in
     Events.For_testing.with_perform
       (fun ~base_path ~who ~speaker ~now action ->
-        if !fail then Error (Room.Unavailable "injected renewal failure")
+        if !fail_next then Error (Room.Unavailable "injected renewal failure")
         else Room.perform_with_change ~base_path ~who ~speaker ~now action)
       (fun () ->
         match Events.renew ~base_path ~agent_name:"player" ~role:Masc_domain.Player
@@ -125,7 +125,7 @@ let test_renew_failure_keeps_lease_for_next_ping () = workspace (fun base_path -
         | Error _ | Ok () -> fail "the injected renewal failure was lost");
     check (list string) "a failed renewal leaves presence for the next ping" ["player"] (names base_path);
     check int "a failed renewal announces nothing new" 1 (event_count heard);
-    fail := false;
+    fail_next := false;
     Events.renew ~base_path ~agent_name:"player" ~role:Masc_domain.Player
       ~scope:room_scope ~sse_client_id:30 |> ok;
     disconnect base_path ~sse_client_id:30 room_scope))

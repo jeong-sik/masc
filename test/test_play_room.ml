@@ -55,25 +55,25 @@ let test_change_metadata () = workspace (fun base ->
   check (pair bool bool) "the first public member is a membership change" (false, true) (flags join);
   let _, first = perform_change ~base_path:base "alice" (action ~id:"first" ~text:"hello" "say") in
   check (pair bool bool) "a new message does not alter membership" (true, false) (flags first);
-  let _, retry = perform_change ~now:105. "alice" (action ~id:"first" ~text:"hello" "say") in
+  let _, retry = perform_change ~base_path:base ~now:105. "alice" (action ~id:"first" ~text:"hello" "say") in
   check (pair bool bool) "an identical retry has no new effect" (false, false) (flags retry);
   let conflict = ok (Room.parse_action (action ~id:"first" ~text:"changed" "say")) in
   check bool "a conflicting retry cannot write" true
     (match Room.perform_with_change ~base_path:base ~who:"alice" ~speaker:Room.Participant ~now:106. conflict with
      | Error (Room.Conflict _) -> true | Ok _ | Error _ -> false);
-  let _, renewal = perform_change ~now:105. "alice" (action "join") in
+  let _, renewal = perform_change ~base_path:base ~now:105. "alice" (action "join") in
   check (pair bool bool) "seen_at renewal is not a public change" (false, false) (flags renewal);
-  let _, second_tab = perform_change ~now:106. "alice" (action ~client:"tab2" "join") in
+  let _, second_tab = perform_change ~base_path:base ~now:106. "alice" (action ~client:"tab2" "join") in
   check (pair bool bool) "the same public member is not duplicated" (false, false) (flags second_tab);
-  let _, moved = perform_change ~now:110. "alice" (action ~machine:"msx" "join") in
+  let _, moved = perform_change ~base_path:base ~now:110. "alice" (action ~machine:"msx" "join") in
   check (pair bool bool) "changing the public machine is a membership change" (false, true) (flags moved);
   let _, left = perform_change "alice" (action "leave") in
   check (pair bool bool) "the last Leave removes the public member" (false, true) (flags left);
-  let _, reread = perform_change ~now:150. "alice" (action "read") in
+  let _, reread = perform_change ~base_path:base ~now:150. "alice" (action "read") in
   check (pair bool bool) "Read neither revives nor moves presence" (false, false) (flags reread);
   check (list string) "Read leaves no membership behind" [] (names reread);
   ignore (perform_change ~base_path:base "expiring" (action ~client:"expiry" "join"));
-  let _, expired = perform_change ~now:160.5 "expiring" (action ~client:"expiry" "read") in
+  let _, expired = perform_change ~base_path:base ~now:160.5 "expiring" (action ~client:"expiry" "read") in
   check (pair bool bool) "a public member expiring is a change" (false, true) (flags expired);
   check (list string) "the expired public member is gone" [] (names expired))
 

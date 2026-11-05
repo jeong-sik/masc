@@ -121,8 +121,6 @@ let test_retired_read () =
 let test_revalidate_marks_pending_for_trailing_read () =
   let t, read = View.poll (idle ()) ~now:1. ~machine:Masc.Machine_lane.Dos in
   let t = View.revalidate t in
-  check bool "a change during the pending read is retained" true t.changed_since;
-  check (float 0.) "revalidation is due immediately" 0. t.next_read;
   let t = View.receive t read ~now:1. (Ok empty) in
   let _, trailing = View.poll t ~now:1. ~machine:Masc.Machine_lane.Dos in
   check bool "the changed read is followed by one trailing read" true

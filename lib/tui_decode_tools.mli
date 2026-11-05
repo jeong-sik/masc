@@ -255,7 +255,6 @@ type effective_tool_surface =
       ets_reason : string;
       ets_detail : string;
     }
-  | Effective_surface_warming of { ets_keeper_name : string }
 
 type skill_activation_projection =
   | Skill_activations_available of {

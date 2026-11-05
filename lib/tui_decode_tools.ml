@@ -131,7 +131,6 @@ type effective_tool_surface =
       ets_reason : string;
       ets_detail : string;
     }
-  | Effective_surface_warming of { ets_keeper_name : string }
 
 type skill_activation_projection =
   | Skill_activations_available of
@@ -338,7 +337,6 @@ let decode_effective_tool_surface json =
   let* status = required_string_field json "status" in
   let* ets_keeper_name = required_string_field json "keeper_name" in
   match status with
-  | "warming" -> Ok (Effective_surface_warming { ets_keeper_name })
   | "unavailable" ->
       let* ets_reason = required_string_field json "reason" in
       let* ets_detail = required_string_field json "detail" in

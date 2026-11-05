@@ -1075,7 +1075,7 @@ let render_tools (state : state) =
   box_line_styled buf cols ~style:Theme.selection
     (Render_tools.tools_selection_line ~cols state);
   box_divider buf cols;
-  (match state.tools_error with
+  (match (selected_tools_error state) with
    | None -> ()
    | Some detail ->
        box_line_styled buf cols ~style:(Theme.bad ())

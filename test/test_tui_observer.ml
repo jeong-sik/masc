@@ -146,6 +146,7 @@ let summary = function
   | Observer.Event (Observer.Workspace_store_changed Observer.Goal_projection) -> "goal_projection"
   | Observer.Event (Observer.Workspace_store_changed Observer.Runtime_config) -> "runtime_config"
   | Observer.Event (Observer.Workspace_store_changed Observer.Skill_catalog) -> "skill_catalog_published"
+  | Observer.Event (Observer.Workspace_store_changed Observer.Lane_addon_exports) -> "lane_addon_exports_changed"
   | Observer.Event (Observer.Gate_connector_changed { connector }) -> "connector(" ^ connector ^ ")"
   | Observer.Event (Observer.Keeper_event_queue_changed { keeper }) ->
       "event_queue(" ^ keeper ^ ")"
@@ -791,6 +792,14 @@ let test_skill_pushes_name_their_reads () =
     (List.map Observer.skill_activations_keeper (events [ activations_frame; catalog_frame ]));
   check (list bool) "only the catalog push is a published catalog" [ false; true ]
     (List.map Observer.skill_catalog_published (events [ activations_frame; catalog_frame ]));
+  let exports_frame = {|data: {"type":"lane_addon_exports_changed","ts_unix":1.0}
+
+|} in
+  check (list string) "the Lane Add-on exports push decodes" [ "lane_addon_exports_changed" ]
+    (List.map summary (decode_all [ exports_frame ]));
+  check (list bool) "only the exports push is an exports change" [ false; false; true ]
+    (List.map Observer.lane_addon_exports_changed
+       (events [ activations_frame; catalog_frame; exports_frame ]));
   check bool "a ledger change is not an async request change" false
     (List.exists Observer.async_requests_changed (events [ activations_frame ]));
   check bool "a ledger change without its Keeper says why it was not read" true

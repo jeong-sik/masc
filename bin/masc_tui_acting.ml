@@ -491,6 +491,7 @@ let label_of_event (event : Observer.event) =
   | Observer.Workspace_store_changed Observer.Goal_projection -> "goals"
   | Observer.Workspace_store_changed Observer.Runtime_config -> "runtime.toml"
   | Observer.Workspace_store_changed Observer.Skill_catalog -> "skill catalog"
+  | Observer.Workspace_store_changed Observer.Lane_addon_exports -> "lane add-on exports"
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Repositories -> "repositories"
   | Observer.Gate_connector_changed _ -> "connector"
   | Observer.Keeper_event_queue_changed _ -> "event queue"
@@ -651,6 +652,8 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
       { at; keeper = "server"; glyph = Quiet; label; detail = "runtime.toml changed" }
   | Observer.Workspace_store_changed Observer.Skill_catalog ->
       { at; keeper = "server"; glyph = Quiet; label; detail = "the skill catalog was published" }
+  | Observer.Workspace_store_changed Observer.Lane_addon_exports ->
+      { at; keeper = "server"; glyph = Quiet; label; detail = "a Lane Add-on's exported tools changed" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Repositories ->
       { at; keeper = "server"; glyph = Quiet; label; detail = "the repository catalog changed" }
   | Observer.Gate_connector_changed { connector } ->

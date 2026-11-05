@@ -5756,6 +5756,37 @@ type tools_activations =
   | Activations_no_keeper
   | Activations_read of Masc.Tui_decode_tools.skill_activation_projection
 
+(* A failed Activations read, held for the Keeper it was made for. *)
+type activations_failure = { taf_keeper : string; taf_detail : string }
+
+(* Whether the Activations reading, or the failure held without one, belongs
+   to a Keeper other than [selected], or to one while none is selected. *)
+let activations_held_for_another ~selected reading failure =
+  match selected, reading, failure with
+  | Some keeper, Some (Activations_read projection), (Some _ | None) ->
+      not (String.equal (Masc.Tui_decode_tools.skill_activation_keeper projection) keeper)
+  | Some keeper, None, Some failure -> not (String.equal failure.taf_keeper keeper)
+  | Some _, Some Activations_no_keeper, (Some _ | None)
+  | None, Some (Activations_read _), (Some _ | None)
+  | None, (Some Activations_no_keeper | None), Some _ -> true
+  | Some _, None, None
+  | None, (Some Activations_no_keeper | None), None -> false
+
+(* A read for another Keeper than the one its held reading or failure is for
+   starts with no failures behind it: that Keeper's backoff is not this
+   one's. *)
+let start_owed_read ~for_another owed =
+  Masc_tui_owed_read.started
+    (if for_another then Masc_tui_owed_read.changed Masc_tui_owed_read.settled else owed)
+
+(* The inventory failure the Tools screen draws: the one held for [selected].
+   One held for another Keeper waits for the selected Keeper's read, which
+   drops it. *)
+let held_tools_error ~selected ~held_keeper error =
+  match error with
+  | Some _ when Option.equal String.equal held_keeper selected -> error
+  | Some _ | None -> None
+
 (* One Keeper's Usage reading. A failed read keeps the Keeper's last answer
    beside the failure. *)
 type keeper_skill_usage_reading =
@@ -10634,7 +10665,7 @@ type state = {
   mutable tools_read_inflight: tools_read_inflight option;
   mutable tools_error: string option;
   mutable tools_activations: tools_activations option;
-  mutable tools_activations_error: string option;
+  mutable tools_activations_error: activations_failure option;
   (* The Usage pane's per-Keeper usage readings, in Keeper name order. A
      Keeper that left the roster leaves this list at the next read. *)
   mutable tools_keeper_usage: (string * keeper_skill_usage_reading) list;
@@ -10642,6 +10673,10 @@ type state = {
      catalog, the selected Keeper's activations, and each roster Keeper's
      usage. A roster Keeper with no entry has never been read. *)
   mutable tools_catalog_owed: Masc_tui_owed_read.t;
+  (* The selected Keeper's tool inventory and effective surface, and the
+     Keeper the reading on screen was read for. *)
+  mutable tools_inventory_owed: Masc_tui_owed_read.t;
+  mutable tools_inventory_keeper: string option;
   mutable tools_activations_owed: Masc_tui_owed_read.t;
   mutable tools_usage_owed: (string * Masc_tui_owed_read.t) list;
   mutable skills_catalog: Masc.Tui_decode_tools.skills_catalog option;
@@ -12767,6 +12802,11 @@ let keeper_list_select_name state keeper_name =
 let selected_keeper (state : state) =
   List.nth_opt (keepers_for_selection state) state.keeper_cursor
 
+let selected_tools_error (state : state) =
+  held_tools_error
+    ~selected:(Option.map (fun (row : keeper) -> row.k_name) (selected_keeper state))
+    ~held_keeper:state.tools_inventory_keeper state.tools_error
+
 let keeper_preference_unresolved_warnings (state : state) =
   List.filter_map Fun.id
     [ state.keeper_list_order_save_error; state.keeper_list_view_save_error
@@ -14487,12 +14527,16 @@ let owe_every_skill_usage_read state =
 let owe_tools_catalog_read state =
   state.tools_catalog_owed <- Masc_tui_owed_read.changed state.tools_catalog_owed
 
+let owe_tools_inventory_read state =
+  state.tools_inventory_owed <- Masc_tui_owed_read.changed state.tools_inventory_owed
+
 let owe_tools_activations_read state =
   state.tools_activations_owed <- Masc_tui_owed_read.changed state.tools_activations_owed
 
-(* The Tools parts that read on a push, owed together: arriving on Tools, a
-   refresh, a revalidation and a resumed authority read them all. *)
-let owe_tools_skill_reads state =
+(* The Tools parts, owed together: arriving on Tools, a refresh, a
+   revalidation and a resumed authority read them all. *)
+let owe_tools_reads state =
+  owe_tools_inventory_read state;
   owe_tools_catalog_read state;
   owe_tools_activations_read state;
   owe_every_skill_usage_read state
@@ -15210,8 +15254,7 @@ let tools_skill_profiles (state : state) =
       { Masc.Tui_decode_tools.ts_effective =
           ( None
           | Some
-              ( Masc.Tui_decode_tools.Effective_surface_unavailable _
-              | Masc.Tui_decode_tools.Effective_surface_warming _ ) )
+              Masc.Tui_decode_tools.Effective_surface_unavailable _ )
       ; _ }
   | None -> []
 
@@ -18616,7 +18659,7 @@ let tools_skill_inventory_matches_keeper (state : state) keeper_name =
       String.equal expected ets_keeper_name
   | None, (Some _ | None)
   | Some _, (None | Some {ts_effective=(None | Some
-      (Effective_surface_unavailable _ | Effective_surface_warming _));_}) -> false
+      Effective_surface_unavailable _);_}) -> false
 
 (* Local files, drafts and explicit remote URLs survive peer reconfirmation
    but never a workspace replacement. Peer images retain their exact reading.
@@ -18677,7 +18720,7 @@ let tools_skill_may_be_unread (state : state) (origin : sent_image_read) =
         Skill_reference.equal_identity expected.identity
           profile.Masc.Tui_decode_tools.esp_reference.identity) ets_skill_profiles)
   | Some _, (None | Some {ts_effective=(None | Some
-      (Effective_surface_unavailable _ | Effective_surface_warming _));_})
+      Effective_surface_unavailable _);_})
   | None, (Some _ | None) -> false
 
 (* A displayed observation outlives the request epoch that admitted it. A
@@ -18698,7 +18741,7 @@ let image_cell_origin_for_redraw (state : state) ~workspace (origin : sent_image
         List.exists (fun profile -> Skill_reference.equal expected profile.Masc.Tui_decode_tools.esp_reference)
           ets_skill_profiles
     | Some _, (None | Some {ts_effective=(None | Some
-        (Effective_surface_unavailable _ | Effective_surface_warming _));_}) -> true in
+        Effective_surface_unavailable _);_}) -> true in
   let keeper_changed = match origin.sir_view, origin.sir_skill_reference, selected_keeper state with
     | Tools, Some _, (Some _ | None) ->
         (* As with the Skill cursor, roster reconciliation can move the
@@ -18791,7 +18834,7 @@ let image_cell_source_unconfirmed (state : state) (origin : sent_image_read) =
           Skill_reference.equal expected profile.Masc.Tui_decode_tools.esp_reference)
           (selected_tools_skill_profile state)))
     | Some _, (None | Some {ts_effective=(None | Some
-        (Effective_surface_unavailable _ | Effective_surface_warming _));_}) -> true in
+        Effective_surface_unavailable _);_}) -> true in
   skill_unconfirmed || tools_skill_may_be_unread state origin || match origin.sir_owner with
   | Local_file_image_read _ | Remote_url_image_read _ | Draft_image_read _ -> false
   | Peer_image_read _ ->
@@ -20094,6 +20137,8 @@ let create_state
   tools_activations_error = None;
   tools_keeper_usage = [];
   tools_catalog_owed = Masc_tui_owed_read.settled;
+  tools_inventory_owed = Masc_tui_owed_read.settled;
+  tools_inventory_keeper = None;
   tools_activations_owed = Masc_tui_owed_read.settled;
   tools_usage_owed = [];
   skills_catalog = None;
@@ -22100,7 +22145,7 @@ let surface_body_rows (state : state) ~terminal_rows =
 
 let tools_scroll_layout state ~count =
   { sc_count = count
-  ; sc_chrome = if Option.is_some state.tools_error then 9 else 7
+  ; sc_chrome = if Option.is_some (selected_tools_error state) then 9 else 7
   ; sc_overflow_takes_row = Option.is_none state.tools_skill_source_picker
   ; sc_preview_keep = None }
 ;;

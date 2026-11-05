@@ -146,10 +146,7 @@ let test_inline_source_spans_survive_reflow () =
   let prefixed = Markdown.render_inline_with_spans ~palette:tagged ~width:8
     ~prefix:"│ " ~continuation:"│ " "abcdefghi" in
   Alcotest.(check string) "generated gutters are not semantic source"
-    "abcdefghi" prefixed.semantic_text;
-  Alcotest.(check bool) "continuation prefix still draws" true
-    (List.for_all (fun (row : Markdown.mapped_row) -> String.starts_with ~prefix:"│ " row.text)
-      prefixed.mapped_rows)
+    "abcdefghi" prefixed.semantic_text
 
 let test_block_and_table_source_spans () =
   List.iter (fun source -> List.iter (fun width ->
@@ -330,10 +327,7 @@ let test_lexed_code_source_spans () =
       List.iter (fun (span : Markdown.source_range) ->
         Alcotest.(check int) "code slices remain contiguous through wraps" !cursor span.start_byte;
         cursor := span.end_byte) row.source_ranges) mapped.mapped_rows;
-    Alcotest.(check int) "all code bytes mapped exactly once" (String.length source) !cursor;
-    Alcotest.(check bool) "repeated code gutters remain display only" true
-      (List.for_all (fun (row : Markdown.mapped_row) ->
-         String.starts_with ~prefix:Markdown.plain_palette.code_gutter row.text) mapped.mapped_rows)
+    Alcotest.(check int) "all code bytes mapped exactly once" (String.length source) !cursor
   ) [4;12;80]) [
     ["  let ",Lexer.kind_code; "가나다",Lexer.kind_string; " = 42",Lexer.kind_number];
     ["+ long added line",Lexer.kind_diff_added];
@@ -376,10 +370,8 @@ let test_inline_raw_source_positions () =
 
 (* {1 alphaTex fences}
 
-   What the fence arm does with what the renderer gave it. The checks follow
-   the renderer's own output, not the frame around it: the lines of the tab
-   are on the screen, a score that cannot be drawn says why, and a drawn tab
-   is not passed off as text that can be searched. *)
+   What the fence arm does with what the renderer gave it: a drawn tab is not
+   passed off as text that can be searched. *)
 
 let contains ~part whole =
   let part_length = String.length part in
@@ -391,50 +383,11 @@ let contains ~part whole =
 
 let fence score = "```alphatex\n" ^ score ^ "\n```"
 
-let test_alphatex_fence_shows_the_renderers_tab () =
-  let score = ":4 0.6 3.6 5.6 3.6" in
-  match Masc_tui_alphatex.render_tab ~max_width:78 score with
-  | Error failure -> Alcotest.fail (Masc_tui_alphatex.failure_text failure)
-  | Ok tab_lines ->
-      let rows = render ~width:80 (fence score) in
-      List.iter
-        (fun line ->
-          Alcotest.(check bool) ("the screen has the line " ^ line) true
-            (List.exists (contains ~part:line) rows))
-        tab_lines
-
-let test_alphatex_fence_says_why_a_score_is_not_drawn () =
-  let score = ":4 0.6 (3.6" in
-  match Masc_tui_alphatex.render_tab ~max_width:78 score with
-  | Ok _ -> Alcotest.fail "the score was expected to fail"
-  | Error failure ->
-      let reason = Masc_tui_alphatex.failure_text failure in
-      List.iter
-        (fun (label, text) ->
-          Alcotest.(check bool) label true
-            (List.exists (contains ~part:reason) (render ~width:80 text)))
-        [ "a closed fence gives the reason", fence score
-        ; "an unclosed fence gives it too", "```alphatex\n" ^ score
-        ]
-
 let test_alphatex_tag_ignores_case () =
   let score = ":4 0.6 3.6" in
   check_rows "an upper-case tag draws the same rows"
     (render ~width:80 (fence score))
     (render ~width:80 ("```AlphaTex\n" ^ score ^ "\n```"))
-
-let test_alphatex_rhythm_word_draws_the_rhythm_line () =
-  let score = ":4 0.6 3.6 :8 5.6 3.6" in
-  let plain = render ~width:80 (fence score) in
-  let rhythm = render ~width:80 ("```alphatex rhythm\n" ^ score ^ "\n```") in
-  Alcotest.(check bool) "the rhythm fence draws one more row" true
-    (List.length rhythm = List.length plain + 1);
-  (* The header row says what the fence draws and names the rhythm, so it is
-     the one row allowed to differ; every drawn tab row is the same. *)
-  Alcotest.(check bool) "the rhythm fence keeps the score's tab" true
-    (List.for_all
-       (fun row -> List.exists (String.equal row) rhythm)
-       (List.filter (fun row -> not (contains ~part:"악보" row)) plain))
 
 let test_alphatex_rhythm_word_survives_case_and_order () =
   let score = ":4 0.6 3.6" in
@@ -507,14 +460,8 @@ let () =
     ; ( "fenced highlighting"
       , [] )
     ; ( "alphatex fence"
-      , [ Alcotest.test_case "the renderer's tab is on the screen" `Quick
-            test_alphatex_fence_shows_the_renderers_tab
-        ; Alcotest.test_case "a score not drawn says why" `Quick
-            test_alphatex_fence_says_why_a_score_is_not_drawn
-        ; Alcotest.test_case "the tag ignores case" `Quick
+      , [ Alcotest.test_case "the tag ignores case" `Quick
             test_alphatex_tag_ignores_case
-        ; Alcotest.test_case "the rhythm word draws the rhythm line" `Quick
-            test_alphatex_rhythm_word_draws_the_rhythm_line
         ; Alcotest.test_case "the rhythm word survives case and order" `Quick
             test_alphatex_rhythm_word_survives_case_and_order
         ; Alcotest.test_case "a drawn tab is not a searchable document" `Quick

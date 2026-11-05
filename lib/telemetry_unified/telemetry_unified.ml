@@ -147,8 +147,6 @@ let latest_store_ts source location label : float option =
 let sort_newest_first entries =
   List.sort (fun a b -> Float.compare (extract_ts b) (extract_ts a)) entries
 
-let take_first = List.take
-
 let freshness_fields ~now latest_ts =
   match latest_ts with
   | Some ts ->
@@ -475,7 +473,7 @@ let bounded_entries_for_window store ~n ?since_ts ?until_ts () =
    The merged result is unchanged. Each store is already newest-first, so an
    entry beyond a store's own newest [target] is older than that store's newest
    [target] and cannot reach the merged head. Trimming per store therefore
-   discards only entries that the final [take_first target] would have dropped
+   discards only entries that the final [List.take target] would have dropped
    anyway.
 
    [target <= 0] keeps the old concat behaviour; callers inside this module
@@ -488,7 +486,7 @@ let merge_newest_bounded ~target ~read items =
       (fun acc item ->
          match read item with
          | [] -> acc
-         | slice -> sort_newest_first (slice @ acc) |> take_first target)
+         | slice -> sort_newest_first (slice @ acc) |> List.take target)
       []
       items
 ;;
@@ -589,7 +587,7 @@ let read_keeper_metrics_fast_top ~masc_root ~n () : Yojson.Safe.t list =
   let rec loop acc = function
     | [] -> acc
     | (_name, location, latest_ts) :: rest ->
-      let acc = sort_newest_first acc |> take_first target in
+      let acc = sort_newest_first acc |> List.take target in
       let cutoff =
         if List.length acc < target then None
         else List.nth_opt acc (target - 1) |> Option.map extract_ts
@@ -602,7 +600,7 @@ let read_keeper_metrics_fast_top ~masc_root ~n () : Yojson.Safe.t list =
             keeper count; the cutoff above already skips most directories, so
             the reads this adds are the ones that contribute to the result. *)
          let entries = read_fixed_source location Keeper_metric ~n:target () in
-         loop (sort_newest_first (entries @ acc) |> take_first target) rest)
+         loop (sort_newest_first (entries @ acc) |> List.take target) rest)
   in
   loop [] probes
 
@@ -706,7 +704,7 @@ let read_trajectory_tool_calls ~masc_root ?keeper_name ?since_ts ?until_ts ~n ()
   in
   (* Bound the per-file tail read. A non-positive [n] ("unlimited") clamps to
      [unbounded_window_scan_cap] so no trace file is full-parsed. The final
-     [take_first n] still trims the merged set; this only stops the read itself
+     [List.take n] still trims the merged set; this only stops the read itself
      from being unbounded (the freeze cause). *)
   let max_lines = if n <= 0 then unbounded_window_scan_cap else n in
   let entries =
@@ -725,7 +723,7 @@ let read_trajectory_tool_calls ~masc_root ?keeper_name ?since_ts ?until_ts ~n ()
                  ~max_lines ?since_ts ?until_ts ())))
   in
   let entries = sort_newest_first entries in
-  let entries = if n <= 0 then entries else take_first n entries in
+  let entries = if n <= 0 then entries else List.take n entries in
   List.map (tag_entry Trajectory_tool_call) entries
 
 let goal_events_path ~masc_root =
@@ -753,7 +751,7 @@ let read_goal_events ~masc_root ?since_ts ?until_ts ~n () : Yojson.Safe.t list =
           |> List.rev)
     in
     let entries = sort_newest_first entries in
-    let entries = if n <= 0 then entries else take_first n entries in
+    let entries = if n <= 0 then entries else List.take n entries in
     List.map (tag_entry Goal_event) entries
 
 (* ── Unified read ───────────────────────────────────── *)
@@ -831,7 +829,7 @@ let read_unified_result ~masc_root ?(sources = all_sources)
   (* Sort by timestamp descending (newest first) *)
   let sorted = sort_newest_first filtered in
   let total_matching_entries = List.length sorted in
-  let entries = sorted |> List.drop offset |> take_first n in
+  let entries = sorted |> List.drop offset |> List.take n in
   { entries; total_matching_entries; truncated = total_matching_entries > offset + n }
 
 let read_unified ~masc_root ?sources ?keeper_name ?session_id

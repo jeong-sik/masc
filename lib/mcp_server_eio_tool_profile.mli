@@ -21,7 +21,7 @@
     + the [declared_title_table] read of each tool file's [title] key
     (consumed by {!tool_title_of_name}), the parsing helpers
     [strict_assoc_params] / [cursor_param] / [bool_param] /
-    [take_list] / [validate_optional_meta], and the raw cursor codec
+    [validate_optional_meta], and the raw cursor codec
     [encode_cursor] / [decode_cursor] (callers go through
     {!page_items_with_cursor}). *)
 

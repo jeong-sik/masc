@@ -109,8 +109,6 @@ let nonempty_string_opt value =
   let trimmed = String.trim value in
   if trimmed = "" then None else Some trimmed
 
-let take_list n xs = List_util.take_first n xs
-
 let percentile_sorted_float (sorted : float array) (p : float) : float =
   let n = Array.length sorted in
   if n = 0 then 0.0

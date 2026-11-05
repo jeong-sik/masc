@@ -281,8 +281,6 @@ let snapshot_all () =
         (fun _ q acc -> Queue.fold (fun a x -> x :: a) acc q)
         table [])
 
-let take_first = List.take
-
 let recent ?provider ?(limit = 50) () =
   let xs =
     match provider with
@@ -292,7 +290,7 @@ let recent ?provider ?(limit = 50) () =
   let sorted =
     List.sort (fun (_, t1) (_, t2) -> Float.compare t2 t1) xs
   in
-  take_first limit sorted
+  List.take limit sorted
 
 type summary = {
   sample_count : int;

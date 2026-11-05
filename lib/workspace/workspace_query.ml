@@ -167,8 +167,6 @@ let get_tasks_safe config =
 let safe_yield () =
   Safe_ops.protect ~default:() (fun () -> Eio.Fiber.yield ())
 
-let take_first = List.take
-
 let list_leaf_json_names config dir =
   list_dir config dir
   |> List.filter (fun name ->
@@ -418,7 +416,7 @@ let select_recent_message_names ~since_seq ~limit names =
             else
               insert (existing :: prefix) rest
       in
-      insert [] acc |> take_first limit
+      insert [] acc |> List.take limit
   in
   names
   |> List.fold_left

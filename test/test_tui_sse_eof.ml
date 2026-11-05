@@ -103,13 +103,51 @@ let test_execute_output_route_eof env =
           | Ok () -> ()
           | Error _ -> Alcotest.fail "execute stream did not end cleanly")))
 
-(* A presence stream is closed by the real session stop path after its prime
-   frame. The HTTP server itself stays up while the client waits for EOF. *)
-let test_presence_route_eof env =
+let admit ~base_path:_ _request = Ok ()
+
+(* The real presence route, served with a runtime on [runtime_sw], so its
+   supervisor owns the response (RFC-0493 §3.2). *)
+let presence_handler env ~workspace ~runtime_sw =
+  let authority =
+    match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
+    | Ok authority -> authority
+    | Error `Malformed -> Alcotest.fail "fixture authority"
+  in
+  let runtime : Server_mcp_transport_http_types.runtime =
+    { base_path = workspace
+    ; sw = runtime_sw
+    ; clock = Eio.Stdenv.clock env
+    ; tool_allowed_in_profile = (fun _ _ -> true)
+    ; handle_request =
+        (fun ?profile:_ ?mcp_session_id:_ ?otel_mcp_protocol_version:_
+             ?otel_transport_context:_ ?auth_token:_ ?internal_keeper_runtime:_ _ -> `Null)
+    ; clear_resource_subscriptions_for_session = (fun _ -> ())
+    }
+  in
+  let deps : Server_mcp_transport_http_types.deps =
+    { get_origin = (fun _ -> "")
+    ; cors_headers = (fun _ -> [])
+    ; auth_token_from_request = (fun _ -> None)
+    ; is_ready = (fun () -> true)
+    ; get_runtime_result = (fun () -> Ok runtime)
+    ; get_base_path = (fun () -> workspace)
+    ; get_server_state = (fun () -> None)
+    ; verify_mcp_auth = admit
+    ; verify_mcp_observer_stream_auth = admit
+    ; verify_operator_mcp_auth = admit
+    ; verify_seat_mcp_auth = admit
+    }
+  in
+  fun reqd ->
+    let request = Httpun.Reqd.request reqd in
+    Server_request_authority.with_current authority (fun () ->
+      Server_mcp_transport_http_agui.handle_presence_events ~deps request reqd)
+
+let with_presence_session prefix body =
   let workspace = Masc_test_deps.setup_test_workspace () in
-  let raw_session_id = "presence-eof-" ^ string_of_int (Random.bits ()) in
+  let raw_session_id = prefix ^ "-" ^ string_of_int (Random.bits ()) in
   let session_id = "presence:" ^ raw_session_id in
-  let auth = Masc_test_deps.make_sse_auth workspace "presence-eof" in
+  let auth = Masc_test_deps.make_sse_auth workspace prefix in
   let token = Option.get auth.Masc.Sse.token in
   ignore (Masc.Session.McpSessionStore.get_or_create ~id:raw_session_id ());
   ignore (Masc.Session.McpSessionStore.get_or_create ~id:session_id ());
@@ -119,31 +157,14 @@ let test_presence_route_eof env =
       ignore (Masc.Session.McpSessionStore.remove raw_session_id);
       ignore (Masc.Session.McpSessionStore.remove session_id);
       Masc_test_deps.cleanup_test_workspace workspace)
-    (fun () ->
-      let authority = match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
-        | Ok authority -> authority
-        | Error `Malformed -> Alcotest.fail "fixture authority"
-      in
-      let admit ~base_path:_ _request = Ok () in
-      let deps : Server_mcp_transport_http_types.deps =
-        { get_origin = (fun _ -> "")
-        ; cors_headers = (fun _ -> [])
-        ; auth_token_from_request = (fun _ -> None)
-        ; is_ready = (fun () -> true)
-        ; get_runtime_result = (fun () -> Error "unused")
-        ; get_base_path = (fun () -> workspace)
-        ; get_server_state = (fun () -> None)
-        ; verify_mcp_auth = admit
-        ; verify_mcp_observer_stream_auth = admit
-        ; verify_operator_mcp_auth = admit
-        ; verify_seat_mcp_auth = admit
-        }
-      in
-      let handler reqd =
-        let request = Httpun.Reqd.request reqd in
-        Server_request_authority.with_current authority (fun () ->
-          Server_mcp_transport_http_agui.handle_presence_events ~deps request reqd)
-      in
+    (fun () -> body ~workspace ~raw_session_id ~session_id ~token)
+
+(* A presence stream is closed by the real session stop path after its prime
+   frame. The HTTP server itself stays up while the client waits for EOF. *)
+let test_presence_route_eof env =
+  with_presence_session "presence-eof" (fun ~workspace ~raw_session_id ~session_id ~token ->
+    Eio.Switch.run (fun runtime_sw ->
+      let handler = presence_handler env ~workspace ~runtime_sw in
       with_server env ~handler (fun ~port ->
         let clock = Eio.Stdenv.clock env in
         let got_frame = ref false in
@@ -168,10 +189,49 @@ let test_presence_route_eof env =
         match result with
         | Ok (Masc_http_client.Pool.Streamed _) -> ()
         | Ok (Masc_http_client.Pool.Buffered _) -> Alcotest.fail "presence was buffered"
-        | Error detail -> Alcotest.failf "presence stream failed: %s" detail))
+        | Error detail -> Alcotest.failf "presence stream failed: %s" detail)))
+
+let unread_stream_bound_s = 5.0
+
+(* The request arrives on an in-memory connection whose writes nobody reads,
+   so the prime frame never reaches a socket. The handler still returns at
+   once: the drain pump sends the prime under the supervisor. A stop then
+   cancels that waiting send, and the runtime switch can finish. Before, the
+   handler itself waited on the prime for [sse_stalled_after_s] (90 s). *)
+let test_presence_prime_waits_in_the_pump env =
+  with_presence_session "presence-unread" (fun ~workspace ~raw_session_id ~session_id ~token ->
+    let request =
+      Printf.sprintf
+        "GET /events/presence HTTP/1.1\r\nHost: 127.0.0.1:8935\r\nAccept: text/event-stream\r\nMcp-Session-Id: %s\r\nAuthorization: Bearer %s\r\n\r\n"
+        raw_session_id token
+    in
+    let len = String.length request in
+    match
+      Eio.Time.with_timeout (Eio.Stdenv.clock env) unread_stream_bound_s (fun () ->
+        Eio.Switch.run (fun runtime_sw ->
+          let connection =
+            Httpun.Server_connection.create (presence_handler env ~workspace ~runtime_sw)
+          in
+          ignore
+            (Httpun.Server_connection.read connection
+               (Bigstringaf.of_string request ~off:0 ~len) ~off:0 ~len
+             : int);
+          Alcotest.(check bool) "the handler returned with the stream open" true
+            (Server_mcp_transport_http_conn.is_active_sse_session session_id);
+          Server_mcp_transport_http_conn.stop_sse_session session_id);
+        Ok ())
+    with
+    | Ok () ->
+      Alcotest.(check bool) "the stream left the registry" false
+        (Server_mcp_transport_http_conn.is_active_sse_session session_id)
+    | Error `Timeout ->
+      Alcotest.failf "an unread presence stream held its handler or supervisor past %.0f s"
+        unread_stream_bound_s)
 
 let () =
   let case name test = Alcotest.test_case name `Quick (fun () -> Eio_main.run test) in
   Alcotest.run "Tui_sse_eof"
     [ "real routes", [ case "execute cleanup ends response" test_execute_output_route_eof
-                     ; case "presence stop ends response" test_presence_route_eof ] ]
+                     ; case "presence stop ends response" test_presence_route_eof
+                     ; case "an unread presence prime waits in the pump"
+                         test_presence_prime_waits_in_the_pump ] ]

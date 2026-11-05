@@ -2573,12 +2573,13 @@
  (modules test_field_resolution)
  (libraries alcotest repo_manager otoml))
 
-; SSE per-connection pump cancellation (issue #21548).
+; SSE per-connection pump cancellation (issue #21548) and the response the
+; supervisor closes (RFC-0493 §3.2).
 
 (test
  (name test_sse_pumps)
  (modules test_sse_pumps)
- (libraries masc_test_deps masc_server))
+ (libraries masc_test_deps masc_server httpun bigstringaf))
 
 ; Non-hierarchical Gate HITL runtime-info projection.
 
@@ -3374,6 +3375,7 @@
 (include stanzas/test_keeper_response_feedback.inc)
 
 (include stanzas/test_mcp_post_sse_e2e.inc)
+(include stanzas/test_mcp_post_sse_stream.inc)
 
 (include stanzas/test_mcp_server_eio_tool_profile_capability.inc)
 

@@ -998,33 +998,39 @@ let test_mcp_observer_refuses_foreign_and_retired_workspaces env =
         | Ok response -> response
         | Error detail -> Alcotest.failf "runtime unavailable: %s" detail in
       Alcotest.(check int) "unavailable runtime retains the existing stream status" 200 response.status;
+      Alcotest.(check int) "unavailable runtime leaves no observer registered" before (Masc.Sse.client_count ());
       Alcotest.(check bool) "unavailable runtime carries no identity receipt" true
         (Sse_wire.decode_observer_identity response.headers = Ok None)))
 ;;
 
 (* A retired scope's delayed close must not remove a successor that reused
-   the same session. Both writers here are real loopback connections. *)
+   the same session. Both responses here are real loopback connections, and
+   each has the supervisor that closes it, as every served stream does. *)
 let test_retired_observer_close_keeps_successor env =
   let module Conn = Server_mcp_transport_http_conn in
   let session_id = "observer-owner-" ^ string_of_int (Random.bits ()) in
   let first, first_open = Eio.Promise.create () in
   let second, second_open = Eio.Promise.create () in
   let opened = ref 0 in
-  let handler reqd =
+  let handler ~sw reqd =
     incr opened;
     let headers = Httpun.Headers.of_list
         ["content-type", "text/event-stream"; "connection", "close"] in
-    let writer = Httpun.Reqd.respond_with_streaming reqd (Httpun.Response.create ~headers `OK) in
-    let info = Conn.make_sse_conn ~session_id ~client_id:!opened ~writer ~mutex:(Eio.Mutex.create ()) () in
+    let response =
+      Server_sse_response.respond ~clock:(Eio.Stdenv.clock env)
+        ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s reqd
+        (Httpun.Response.create ~headers `OK)
+    in
+    let info = Conn.make_sse_conn ~session_id ~client_id:!opened ~response () in
     Conn.register_sse_conn ~session_id ~info;
-    Httpun.Body.Writer.write_string writer ": open\n\n";
-    Httpun.Body.Writer.flush writer (fun _ -> ());
+    Conn.run_sse_pumps ~sw info ~drain:Eio.Fiber.await_cancel ~ping:Eio.Fiber.await_cancel;
+    Alcotest.(check bool) "the opening frame was sent" true (Conn.send_raw info ": open\n\n");
     if !opened = 1 then Eio.Promise.resolve first_open info
     else Eio.Promise.resolve second_open info
   in
   Fun.protect ~finally:(fun () -> Eio.Cancel.protect (fun () -> Conn.stop_sse_session session_id))
     (fun () -> Eio.Switch.run (fun sw ->
-      with_server env ~handler (fun ~port ->
+      with_server env ~handler:(handler ~sw) (fun ~port ->
         let ended, mark_ended = Eio.Stream.create 2, ref 0 in
         let connect () = Eio.Fiber.fork ~sw (fun () ->
           let url = Printf.sprintf "http://127.0.0.1:%d/mcp" port in

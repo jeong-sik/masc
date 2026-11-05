@@ -128,7 +128,6 @@ val respond :
   Httpun.Reqd.t -> Httpun.Response.t -> t
 
 val send : t -> string -> outcome
-val finish : t -> string -> unit
 val close : t -> unit
 val is_closed : t -> bool
 ```
@@ -140,10 +139,9 @@ val is_closed : t -> bool
 - `Written` 이 아닌 결과를 돌려주기 전에 응답을 닫는다. 그 뒤의 `send` 는 쓰지 않고 `Closed` 를 돌려주고, `is_closed` 는 `true` 다.
 - 클라이언트가 떠난 뒤 기다리던 frame 은 flush 콜백을 받지 못하고 `Stalled` 로 끝난다(§1.2). 그 뒤의 `send` 는 `is_closed` 를 보고 바로 `Closed` 를 돌려주고, 같은 응답에서 기다리던 다른 `send` 도 깨운다.
 - `Stalled` 는 요청 경로와 함께 경고 로그 한 줄을 남긴다. 스트림마다 따로 남기지 않는다. 배포 뒤 측정(§6)은 이 줄을 센다.
-- 보내는 fiber 는 자기 frame 이 닿을 때까지 다음 frame 을 쓰지 않는다. 그래서 읽지 않는 클라이언트 하나에 서버가 쥐는 바이트는 보내는 fiber 마다 frame 하나다.
+- 보내는 fiber 는 자기 `send` 가 닿을 때까지 다음 `send` 를 하지 않는다. 그래서 읽지 않는 클라이언트 하나에 서버가 쥐는 바이트는 보내는 fiber 마다 `send` 하나다. pump 의 `send` 하나는 묶은 frame 들이다(§7 5b, 상한 `max_batch_bytes` 에 frame 하나를 더한 크기).
 - `stalled_after_s` 값은 `Server_mcp_transport_http_headers.sse_stalled_after_s` 하나다. ping 간격 `sse_ping_interval_s` 와 같은 곳에 둔다. `observer_idle_timeout_ms` 도 이 값에서 얻는다.
-- `?flush_headers_immediately` 는 fleet route 를 옮기는 3층에서, `finish` 는 MCP eviction 을 옮기는 5층에서 더한다. 2층에서 옮기는 다섯 곳은 둘 다 쓰지 않는다.
-- `finish` 는 마지막 frame 을 쓰고 바로 닫는다. 기다리지 않는다. 닫은 뒤에는 더 쓸 수 없으므로, 쌓이는 양은 그 frame 하나다. MCP eviction frame(`server_mcp_transport_http_conn.ml` `stop_sse_session_evict`)처럼, 다른 세션의 처리 함수가 이 연결의 느린 클라이언트를 기다리면 안 되는 곳에 쓴다.
+- `?flush_headers_immediately` 는 fleet route 를 옮기는 3층에서 더한다. 2층에서 옮기는 다섯 곳은 쓰지 않는다.
 - `t` 는 추상 타입이다. 이 모듈 밖에서는 `Httpun.Body.Writer.t` 를 꺼낼 수 없다. 그래서 flush 를 기다리지 않고 쓰는 코드는 이 타입으로는 쓸 수 없다.
 
 `Watched_work.run` 이 시간을 재는 곳은 이 모듈과 pump(§3.2) 둘이 아니라 이 모듈 하나다. pump 는 `send` 의 `outcome` 을 받아서 끝낼지 정한다.
@@ -204,6 +202,19 @@ Keeper chat 에서는 acceptance frame 과 replay frame 을 송신 fiber 가 `ru
 
 MCP GET·AG-UI·presence 스트림은 이미 `Sse` 의 queue 와 drain fiber 를 갖고 있다. 이 셋은 pump 로 옮기지 않는다. drain fiber 와 ping fiber 의 `send_raw` 가 `Server_sse_response.send` 를 쓰면, `sse.ml:1064` 의 queue 상한이 일하기 시작한다.
 
+drain 은 frame 마다 기다린다. 5b층처럼 묶지 않는다. frame 마다 기다리는 `send` 는 loopback 에서 256B frame 을 초당 3,374~4,781 개 쓴다(§7 5b). queue 는 256칸(`Sse.stream_capacity` 기본값)이다. 그러므로 읽는 클라이언트의 queue 가 차려면, 이벤트가 초당 3,000개 넘게 계속 들어와야 한다. 이 세 스트림의 이벤트 빈도는 재지 않았다. 배포 뒤 `stream full` 건수(§6)로 확인한다.
+
+이 세 스트림의 연결은 다른 domain 에서도 닫힌다. `Sse` queue 상한을 넘은 세션을 끊는 hook(`sse.ml:1064`), 유지보수 fiber(`server_bootstrap_maintenance.ml:783`), 서버 종료(`bin/main_eio.ml:996`)다. response 는 연결의 domain 에 속하므로(§3.1), 닫는 쪽은 response 를 건드리지 않는다.
+
+- `close_sse_conn` 은 닫기를 한 번만 잡고, stop promise 를 풀고, `Sse` 등록을 지운다. response 는 닫지 않는다. 그래서 어느 domain 에서 불러도 된다. `info.mutex` 는 지운다.
+- `run_sse_pumps` 의 감독 fiber 가 response 를 닫는다. 처리 함수가 연결의 domain 에서 이 fiber 를 띄운다. stop promise 가 풀리면 감독 fiber 가 drain·ping 을 취소한다. 그다음 연결 switch 의 release 에서 연결을 registry 에서 빼고 response 를 닫는다. 서버 switch 가 취소되어 감독 fiber 가 끝나도 release 는 돈다.
+- 서버 switch 가 이미 꺼져 있으면 `Eio.Fiber.fork` 는 아무것도 돌리지 않는다(Eio 1.3 `Fiber.fork`: "If [sw] is already off then [fn] fails immediately"). 그때는 `run_sse_pumps` 가 감독 fiber 없이 같은 release 를 바로 한다. switch 가 켜져 있으면 fork 가 감독 fiber 를 바로 돌리므로("[fn] runs immediately"), release 는 switch 가 취소되기 전에 걸린다.
+- prime·replay frame 도 drain fiber 가 live 이벤트 앞에 보낸다. 처리 함수는 감독 fiber 를 띄우고 바로 돌아온다. 그래서 stop 이 기다리는 prime·replay 전송도 취소하고, 읽지 않는 클라이언트가 처리 함수(gluten 읽기 루프)를 `sse_stalled_after_s` 동안 붙잡지 않는다.
+- 그러므로 response 를 연 스트림에는 감독 fiber 가 늘 있어야 한다. 지금은 runtime 을 얻지 못하면 drain 없는 스트림을 열어 둔다. 이제는 response 를 열기 전에 runtime 을 얻는다. 얻지 못하면 `Sse` 등록을 지우고 200 으로 응답한 뒤 바로 끝낸다. 상태 코드는 지금과 같다(`test_tui_execute_stream_http` 가 200 을 고정한다).
+- `send_raw` 는 `Server_sse_response.send` 로 쓰고, `Written` 이 아니면 연결을 닫는다. 부르는 곳은 drain(prime·replay·live)과 ping 이다. 모두 연결의 domain 이다.
+- `tools/call` POST 스트림은 registry 에 들지 않는다. 처리 함수와 keepalive fiber 만 쓴다. 이 스트림은 `sse_conn_info` 대신 `Server_sse_response.t` 를 바로 쓴다.
+- `stop_sse_session_evict` 는 `event: evicted` frame 을 쓰지 않는다. 이 frame 은 지금도 클라이언트에 닿지 않는다. `Sse.register` 가 내보낸 클라이언트의 `on_disconnect` 를 먼저 부르고, 그 hook 이 연결을 registry 에서 빼기 때문이다(#48870). frame 을 닿게 할지는 #48870 에서 정한다. lifecycle 이벤트는 지금처럼 낸다.
+
 ### 3.3 한 frame 은 90초 안에 닿아야 한다
 
 `stalled_after_s` 는 `sse_ping_interval_s`(30초)의 세 배인 90초다. fleet 스트림이 지금 쓰는 값이다(`server_routes_http_routes_fleet_stream.ml:7-8`). 읽는 클라이언트는 frame 을 바로 받는다. ping 세 번 동안 frame 하나를 받지 않은 클라이언트는 읽기를 멈췄거나, 연결이 반쯤 끊긴 것이다.
@@ -223,6 +234,7 @@ MCP GET·AG-UI·presence 스트림은 이미 `Sse` 의 queue 와 drain fiber 를
 
 - 읽지 않는 클라이언트 하나에 서버가 쥐는 메모리는 queue 상한과, 보내는 fiber 마다 frame 하나로 묶인다. 지금 flush 를 기다리지 않는 네 함수에서는 상한이 없다.
 - MCP GET 스트림에서 읽지 않는 클라이언트는 queue 가 차면 끊기고 `Last-Event-Id` 로 다시 붙는다. 지금은 끊기지 않는다.
+- MCP GET·AG-UI·presence 는 runtime 을 얻지 못하면 200 으로 응답하고 바로 끝난다. 클라이언트는 다시 붙는다. 지금은 drain 없는 스트림이 열린 채 남는다.
 - Keeper chat 스트림에서 TUI 가 queue 상한만큼 뒤처지면 스트림이 닫히고, TUI 는 `since_seq` 로 다시 붙는다. Keeper 턴은 TUI 를 기다리지 않는다. 지금도 기다리지 않지만, 그 대가로 handoff queue 와 Faraday 가 상한 없이 자란다.
 - 로그인 스트림과 Ask follow-up 은 처리 함수 안에서 기다린다. 브라우저가 90초 동안 읽지 않으면 스트림이 닫힌다. 로그인은 `is_closed` 로 그것을 보고 끝난다.
 - artifact draft 스트림은 읽지 않는 클라이언트를 90초 뒤에 닫고 `Live.leave` 를 부른다.
@@ -233,6 +245,7 @@ MCP GET·AG-UI·presence 스트림은 이미 `Sse` 의 queue 와 drain fiber 를
 - 지금 코드에 같은 시험을 돌리면, 읽지 않는 클라이언트에게 `send_raw` 가 계속 `true` 를 돌려주고 쥔 바이트가 frame 수에 비례해서 늘어야 한다. 이 시험이 지금 코드에서 실패하는 것을 PR 본문에 적는다.
 - `Server_sse_pump` 시험은 지금 `test/test_fleet_stream_pump.ml` 의 경우를 이벤트 타입만 바꿔서 지킨다. `Skip`·`Send_last`·`Quiet`·`Finish` 를 더 잰다. 여러 domain 의 producer 가 동시에 넣어도 `push` 가 기다리지 않는다.
 - Keeper chat 시험: 느린 송신 중에 producer 가 sink 를 부르면 바로 돌아온다. queue 가 차면 스트림이 닫힌다. acceptance, replay, live 순서가 지금과 같다.
+- MCP 연결 시험: 읽지 않는 클라이언트에게 `send_raw` 는 `stalled_after_s` 뒤 `false` 다. 다른 domain 에서 `close_sse_conn` 을 불러도 response 는 감독 fiber 가 닫는다. 감독 fiber 가 취소되어도 response 는 닫히고 연결은 registry 에서 빠진다.
 - 배포 뒤 시스템 로그에서 MCP `stream full` 과 각 스트림의 `Stalled` 건수를 센다.
 
 ## 7. 층
@@ -242,8 +255,8 @@ MCP GET·AG-UI·presence 스트림은 이미 `Sse` 의 queue 와 drain fiber 를
 3. `Server_fleet_stream_pump` 를 `Server_sse_pump` 로 일반화한다. fleet route 를 `Server_sse_response` 로 옮기고, pump 가 `send` 의 시간을 재던 `Watched_work` 를 지운다. 한 frame 의 시간을 두 곳에서 재지 않도록 fleet 은 이 층에서 한 번에 옮긴다.
 4a. pump 가 `Queue.t` 를 받고 `step`·`idle` 로 쓰고 끝낼 것을 정하게 바꾼다. 구독은 fleet route 로 옮긴다. fleet 의 동작은 같다.
 4b. Keeper chat 스트림을 pump 로 옮기고 `Server_keeper_stream_handoff` 를 지운다. queue 상한은 4,096 이다. 1초 창 최댓값 2,616(§1.4)을 담는 가장 작은 2의 거듭제곱이다. 읽는 클라이언트가 1초 동안 frame 을 받지 못해도 끊기지 않는다. 그보다 오래 멈춘 클라이언트는 `since_seq` 로 다시 붙어 journal replay 를 받는다.
-5a. HTTP/1.1 MCP `subscriptions/listen` 을 pump 로 옮긴다. queue 상한은 MCP GET 스트림과 같은 `Sse.stream_capacity` 다.
+5a. HTTP/1.1 MCP `subscriptions/listen` 을 pump 로 옮긴다. queue 상한은 MCP GET 스트림과 같은 `Sse.stream_capacity` 다. queue 가 차면 스트림을 닫는다. listen 에는 replay 가 없어서 쌓였던 알림은 돌아오지 않는다. 다시 listen 한 클라이언트는 그 뒤 알림을 받는다. 전에는 상한이 없어 알림을 잃지 않았지만, 읽지 않는 클라이언트의 알림이 서버 메모리에 쌓였다.
 5b. pump 가 이미 쌓인 frame 을 한 `send` 로 쓴다. frame 마다 기다리면 loopback 에서 256B frame 이 초당 3,374~4,781 개였다(`test/bench_sse_pump_throughput.ml`, 2만 frame 을 먼저 쌓은 burst, 3회 중앙값). 묶으면 초당 95만~109만 개다. 기다리지 않던 옛 쓰기는 초당 74만~100만 개다. 같은 장비를 다른 세션이 쓰고 있어 실행마다 값이 다르다. frame 한 번 기다리는 데 드는 시간 대부분은 flush 가 아니라 `send` 의 감시(fiber 와 타이머)다. flush 만 기다리면 초당 2만~2.8만 개다.
-5c. `send_raw` 와 eviction frame 을 `Server_sse_response` 로 바꾼다. eviction frame 은 HTTP 처리 함수가 쓴다(`server_mcp_transport_http.ml`, `server_mcp_transport_http_agui.ml`). 연결을 닫는 쪽은 다른 domain 에서도 온다. `Sse` queue 상한을 넘은 세션을 끊는 hook(`sse.ml:1064`), 유지보수 fiber(`server_bootstrap_maintenance.ml`), 서버 종료(`bin/main_eio.ml`)다. 지금은 `close_sse_conn` 이 `info.mutex` 를 잡고 writer 를 닫는다. 이 층은 그 닫기를 연결의 fiber 로 옮기는 설계를 먼저 적는다.
+5c. `send_raw` 를 `Server_sse_response.send` 로 바꾸고, response 를 닫는 일을 연결의 감독 fiber 로 옮긴다(§3.2). `tools/call` POST 스트림은 `Server_sse_response.t` 를 바로 쓴다. 닿지 않는 `event: evicted` frame 쓰기를 지운다(#48870).
 
 #48650 이 먼저 병합되면 2층에서 로그 스트림의 `send_within` 도 옮긴다. 이 RFC 가 먼저면 #48650 이 `Server_sse_response` 를 쓴다.

@@ -171,9 +171,9 @@ val apply : Masc_tui_types.state -> msg -> answer_followup
   Masc_tui_code_results.msg` 로 가리킨다.
 - `apply` 의 본문은 지금 `apply_async_message_body` 의 Code 갈래 본문이다. 터미널·네트워크
   IO 는 하지 않는다. 할 일이 남으면 `answer_followup` 값으로 돌려준다.
-- 프로토콜과 루프는 Code 답에 넷을 묻는다. 읽기인가, 입력을 기다리는가, 작업 영수증을
-  싣는가, 작업 공간이 바뀌면 치울 것이 있는가. 묶음 모듈은 답마다 kind 를 정하고, 묻는 쪽은
-  kind 를 빠짐없이 match 한다.
+- 프로토콜과 루프는 Code 답에 다섯을 묻는다. 읽기인가, 입력을 기다리는가, 작업 영수증을
+  싣는가, 작업 공간이 바뀌면 치울 것이 있는가, 작업 공간 도장을 찍는가. 묶음 모듈은 답마다
+  kind 를 정하고, 묻는 쪽은 kind 를 빠짐없이 match 한다.
 
   ```ocaml
   | Code_msg answer ->
@@ -182,9 +182,11 @@ val apply : Masc_tui_types.state -> msg -> answer_followup
        | Masc_tui_code_results.Save -> false)
   ```
 
-  답마다 bool 함수를 두면 Code 에서는 같은 11줄 나열이 네 벌 생긴다. `Code_msg _` 로 줄이면
-  새 답이 생겨도 컴파일러가 알려 주지 않는다. 다른 처리가 필요한 답이 생기면 kind 를 더한다.
-  그러면 그 kind 를 따지는 곳이 모두 컴파일 오류로 알려 준다.
+  답마다 bool 함수를 두면 Code 에서는 같은 11줄 나열이 다섯 벌 생긴다. `Code_msg _` 로
+  줄이면 새 답이 생겨도 컴파일러가 알려 주지 않는다. kind 를 쓰면 새 답은 `answer_kind` 에서
+  kind 를 골라야 컴파일된다. 이미 있는 kind 를 고르면 다섯 질문의 답도 그 kind 를 그대로
+  따른다. 이때 컴파일러는 묻는 곳을 알려 주지 않는다. 다섯 중 하나라도 다르게 다뤄야 하면
+  kind 를 더한다. 그러면 그 kind 를 따지는 곳이 모두 컴파일 오류로 알려 준다.
 - 답에 실린 작업 영수증과 관찰을 고쳐 쓰는 일(`project_workspace_operation_reply`)처럼 답의
   내용이 필요한 질문은 kind 로 답할 수 없다. 그런 질문은 그 묶음 모듈의 함수로 둔다. Code
   답에는 이런 질문이 없다.
@@ -201,12 +203,15 @@ val launch_file_load : … -> deliver:(Masc_tui_async_protocol.async_msg -> unit
 val launch_file_load : … -> deliver:(Masc_tui_code_results.msg -> unit) -> …
 ```
 
-`masc_tui.ml` 은 감싸는 함수를 한 번 만든다.
+`masc_tui.ml` 은 감싸는 함수를 한 번 만든다. 도장을 찍을지도 kind 로 정한다.
 
 ```ocaml
 let deliver_code state =
   let enqueue = workspace_enqueue state in    (* 요청을 보내는 순간 권한을 잡는다 *)
-  fun mailbox answer -> enqueue mailbox (Code_msg answer)
+  fun mailbox answer ->
+    match Code_results.answer_kind answer with
+    | Code_results.Read -> enqueue mailbox (Code_msg answer)
+    | Code_results.Save -> enqueue_async mailbox (Code_msg answer)
 ```
 
 `workspace_enqueue state` 는 부분 적용하는 순간 작업 공간 권한을 잡는다. 감싸는 함수도 같은
@@ -214,11 +219,15 @@ let deliver_code state =
 (Code_msg msg)` 로 쓰면 답이 도착할 때 잡는다. 그러면 옛 작업 공간의 늦은 답이 새 작업 공간
 것으로 들어온다.
 
+초안 저장 답(`Save`)은 도장 없이 보낸다. 이미 보낸 쓰기의 결과라서, 작업 공간을 옮겨도
+잃으면 안 된다. 이 답만 저장 호출 자리에서 따로 감싸면 두 `deliver` 의 타입이 같다. 그래서
+저장에 `deliver_code` 를 넘겨도 컴파일되고, 작업 공간이 바뀐 뒤 저장 결과가 버려진다. kind
+로 정하면 어느 요청이든 `deliver_code` 를 받고, 도장은 답의 종류가 정한다.
+
 Incr_dom 의 `schedule_action`, Elm 의 `Cmd.map` 이 하는 일이다. 요청 함수는 자기 묶음의
 답만 만든다. 한 요청 모듈에 다른 묶음의 요청 함수가 있으면 함수마다 그 묶음의 `deliver` 를
 받는다. 예를 들어 `Masc_tui_identity_requests.launch_github_view` 는 Github 답을 보내므로
-Github 의 `deliver` 를 받는다. 초안 저장처럼 작업 공간 도장 없이 보내는 답은 그 자리에서
-직접 감싼다.
+Github 의 `deliver` 를 받는다.
 
 ### 3.3 `masc_tui.ml` 에 남는 것
 
@@ -294,7 +303,8 @@ Github 의 `deliver` 를 받는다. 초안 저장처럼 작업 공간 도장 없
 
 - **컴파일러**: `apply` 와 `answer_kind` 는 자기 `msg` 를 와일드카드 없이 빠짐없이 match
   한다. 새 답을 더하면 두 곳이 컴파일 오류로 알려 준다. kind 를 더하면 그 kind 를 따지는
-  곳이 모두 알려 준다. Code 는 프로토콜 함수 넷과 받지 않는 답의 갈래, 다섯 곳이다.
+  곳이 모두 알려 준다. Code 는 프로토콜 함수 넷, 받지 않는 답의 갈래, `deliver_code`, 여섯
+  곳이다.
 - **시험**: 묶음마다 모든 생성자를 나열해 `apply`·분류 함수를 부르는 시험을 둔다.
   `test/test_tui_code_msg.ml` 이 이미 `code_msg` 를 생성자마다 나열한다.
 - **파싱 검사(층마다)**: `apply_async_message_body` 의 맨 위 갈래와 받지 않는 답의 match 에

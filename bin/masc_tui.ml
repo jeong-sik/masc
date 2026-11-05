@@ -25354,6 +25354,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       end
   | Schedules_loaded (Schedule_agenda_read ticket, result) ->
       let current = Snapshot_read.is_current state.schedules_agenda_read ticket in
+      (match Snapshot_read.settle state.schedules_agenda_read ticket with
+       | Some read -> state.schedules_agenda_read <- read
+       | None -> ());
       apply_schedule_agenda_read state ticket result;
       if current then
         state.schedules_agenda_owed <- settled_schedule_read state.schedules_agenda_owed result
@@ -25362,6 +25365,15 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         Option.exists (Snapshot_read.is_current state.schedules_agenda_read)
           request.spr_agenda_ticket in
       let current_page = Snapshot_read.is_current state.schedules_read request.spr_ticket in
+      (match Snapshot_read.settle state.schedules_read request.spr_ticket with
+       | Some read -> state.schedules_read <- read
+       | None -> ());
+      (match request.spr_agenda_ticket with
+       | Some agenda_ticket ->
+         (match Snapshot_read.settle state.schedules_agenda_read agenda_ticket with
+          | Some read -> state.schedules_agenda_read <- read
+          | None -> ())
+       | None -> ());
       apply_schedule_page_read state request result;
       if current_page then
         state.schedules_page_owed <- settled_schedule_read state.schedules_page_owed result;

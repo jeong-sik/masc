@@ -165,6 +165,18 @@ let invocation_json (invocation : Probe.invocation) =
       ; "invoked", `List (List.map (fun t -> `String t) invoked)
       ; "elapsed_s", `Float elapsed_s
       ]
+  | Probe.Tool_arguments_unreadable { tool; problem; elapsed_s } ->
+    `Assoc
+      [ "kind", `String "tool_arguments_unreadable"
+      ; "tool", `String tool
+      ; ( "problem"
+        , match problem with
+          | Llm_provider.Tool_call_input.Invalid_json message ->
+            `Assoc [ "kind", `String "invalid_json"; "message", `String message ]
+          | Llm_provider.Tool_call_input.Not_object ->
+            `Assoc [ "kind", `String "not_object" ] )
+      ; "elapsed_s", `Float elapsed_s
+      ]
   | Probe.Replied_no_tool { reply_bytes; elapsed_s } ->
     `Assoc
       [ "kind", `String "replied_no_tool"

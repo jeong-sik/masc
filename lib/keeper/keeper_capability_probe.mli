@@ -103,7 +103,15 @@ type invocation =
       ; elapsed_s : float
       }
       (** Tools were called, but not the one asked for. Distinct from silence:
-          the surface reached the model and the model used it. *)
+          the surface reached the model and the model used it. [invoked]
+          includes calls whose arguments were unreadable. *)
+  | Tool_arguments_unreadable of
+      { tool : string
+      ; problem : Llm_provider.Tool_call_input.parse_error
+      ; elapsed_s : float
+      }
+      (** The model called the requested tool, but its argument text was not
+          one JSON object, so the call could not have run. *)
   | Replied_no_tool of
       { reply_bytes : int
       ; elapsed_s : float
@@ -162,6 +170,16 @@ val invocation_error_to_string : invocation_error -> string
     The turn goes through {!Keeper_provider_subcall.complete}, the same
     boundary the vision tool uses, so it inherits the resolved provider
     deadline instead of installing its own. *)
+val invocation_of_response
+  :  requested:string
+  -> elapsed_s:float
+  -> Agent_core.Types.api_response
+  -> invocation
+(** Classify one probe response. The requested tool among the readable calls
+    is [Tool_invoked]; named only by a call whose arguments were unreadable it
+    is [Tool_arguments_unreadable]; other calls, readable or not, are
+    [Other_tool_invoked]; no call at all is [Replied_no_tool]. *)
+
 val probe_invocation
   :  sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t

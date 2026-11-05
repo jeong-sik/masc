@@ -92,6 +92,11 @@ type invocation =
       ; invoked : string list
       ; elapsed_s : float
       }
+  | Tool_arguments_unreadable of
+      { tool : string
+      ; problem : Llm_provider.Tool_call_input.parse_error
+      ; elapsed_s : float
+      }
   | Replied_no_tool of
       { reply_bytes : int
       ; elapsed_s : float
@@ -152,6 +157,14 @@ let invocation_to_string = function
       "called %s instead of %s in %.1fs"
       (String.concat ", " invoked)
       requested
+      elapsed_s
+  | Tool_arguments_unreadable { tool; problem; elapsed_s } ->
+    Printf.sprintf
+      "called %s with arguments that are not one JSON object (%s) in %.1fs"
+      tool
+      (match problem with
+       | Llm_provider.Tool_call_input.Invalid_json message -> message
+       | Llm_provider.Tool_call_input.Not_object -> "not an object")
       elapsed_s
   | Replied_no_tool { reply_bytes; elapsed_s } ->
     Printf.sprintf "replied %d B without calling a tool in %.1fs" reply_bytes elapsed_s
@@ -247,6 +260,38 @@ let reply_bytes (response : Agent_core.Types.api_response) =
     response.content
 ;;
 
+(* What the model did with the probe prompt. A call whose arguments were
+   unreadable is still a call: it is the requested tool's own outcome when the
+   model named that tool, and it counts among the other tools otherwise. *)
+let invocation_of_response ~requested ~elapsed_s (response : Agent_core.Types.api_response)
+  =
+  let unreadable = response.unreadable_tool_uses in
+  match tool_use_names response, unreadable with
+  | [], [] -> Replied_no_tool { reply_bytes = reply_bytes response; elapsed_s }
+  | names, _ when List.exists (String.equal requested) names ->
+    Tool_invoked { tool = requested; elapsed_s }
+  | names, unreadable ->
+    (match
+       List.find_opt
+         (fun (call : Llm_provider.Types.unreadable_tool_use) ->
+            String.equal requested call.tool_name)
+         unreadable
+     with
+     | Some call ->
+       Tool_arguments_unreadable
+         { tool = requested; problem = call.arguments_problem; elapsed_s }
+     | None ->
+       Other_tool_invoked
+         { requested
+         ; invoked =
+             names
+             @ List.map
+                 (fun (call : Llm_provider.Types.unreadable_tool_use) -> call.tool_name)
+                 unreadable
+         ; elapsed_s
+         })
+;;
+
 let probe_invocation ~sw ~net ~clock ~now ~runtime_id ~tool ~prompt () =
   match probe_surface ~tool with
   | (Not_a_descriptor | Operator_only | Aliased _ | Withheld_by_schema_error _) as v ->
@@ -317,15 +362,11 @@ let probe_invocation ~sw ~net ~clock ~now ~runtime_id ~tool ~prompt () =
               | Error err -> Ok (Provider_rejected { detail = detail_of_http_error err })
               | Ok response ->
                 let elapsed_s = now () -. started in
-                (match tool_use_names response with
-                 | [] ->
-                   Ok (Replied_no_tool { reply_bytes = reply_bytes response; elapsed_s })
-                 | names when List.exists (String.equal model_facing_name) names ->
-                   Ok (Tool_invoked { tool = model_facing_name; elapsed_s })
-                 | invoked ->
-                   Ok
-                     (Other_tool_invoked
-                        { requested = model_facing_name; invoked; elapsed_s }))))))))
+                Ok
+                  (invocation_of_response
+                     ~requested:model_facing_name
+                     ~elapsed_s
+                     response)))))))
 ;;
 
 (* --- Official-client lanes --- *)

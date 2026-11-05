@@ -1,5 +1,6 @@
 (* HIGH-RISK-UNREVIEWED: see the interface. *)
 
+module B = Authz_boot_mode
 module E = Authz_invite_event
 module M = Authz_boot_mode_read
 module Z = Authz_zone
@@ -17,6 +18,11 @@ type invitation =
   ; expires_at_ms : int
   }
 
+let invite_id invitation = invitation.invite_id
+let expires_at_ms invitation = invitation.expires_at_ms
+let invitation_path = "/accounts/invite"
+let link ~base_url invitation = base_url ^ invitation_path ^ "#" ^ invitation.token
+
 type activated =
   { workspace_id : Authz_types.Workspace_id.t
   ; invitation : invitation
@@ -30,6 +36,8 @@ type invitation_error =
 
 type error =
   | Not_asked
+  | Config_unreadable of string
+  | Already_active
   | Boot_stops of string * string list
   | Workspace_id_not_built of Authz_id.error
   | Bootstrap_failed of Authz_bootstrap.error
@@ -53,6 +61,13 @@ let error_to_string = function
   | Not_asked ->
     "config.json does not ask for Multi_account, so a boot starts a single user and there is \
      nothing to activate"
+  | Config_unreadable detail ->
+    "config.json did not decode, so a boot starts a single user and there is nothing to \
+     activate: "
+    ^ detail
+  | Already_active ->
+    "the authorization log made Multi_account and the external store matches it: this \
+     installation is already activated"
   | Boot_stops (first, rest) ->
     "a boot stops on this installation, and an activation would not change that: "
     ^ String.concat "; " (first :: rest)
@@ -68,8 +83,15 @@ let asked ~base_path ~config_dir ~anonymous_mutations =
   let input = M.input ~base_path ~config_dir ~anonymous_mutations in
   match M.decide input with
   | M.Stop M.Multi_account_not_activatable -> Ok ()
-  | M.Boot_single_user -> Error Not_asked
-  | M.Stop ((M.Refuse _ | M.Multi_account_not_served _) as stop) ->
+  | M.Boot_single_user ->
+    (match input.B.settings with
+     | B.Settings_read _ -> Error Not_asked
+     | B.Settings_unreadable detail -> Error (Config_unreadable detail))
+  | M.Stop (M.Multi_account_not_served B.Multi_account) -> Error Already_active
+  | M.Stop
+      ((M.Refuse _
+       | M.Multi_account_not_served
+           (B.Single_user | B.Activation_requested | B.Multi_account_uncertain)) as stop) ->
     let first, rest = M.messages input stop in
     Error (Boot_stops (first, rest))
 ;;

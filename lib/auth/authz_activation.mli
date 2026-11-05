@@ -8,10 +8,13 @@
     in order, and stops at the first step that fails:
     + It reads what a boot reads ({!Authz_boot_mode_read.input}) and goes on
       only on the row of design 5.1 that asks for an activation: [config.json]
-      asks for [Multi_account], and neither the log nor the external store
-      holds anything. Every other row is refused before anything is written:
-      a single-user boot with {!Not_asked}, a boot that stops with the lines
-      it prints ({!Boot_stops}).
+      asks for [Multi_account] with [enabled] and [require_token], anonymous
+      mutations are off, the log holds no mode event, and the external store
+      no high-water mark. Every other row is refused before anything is
+      written: a single-user boot with {!Not_asked} or {!Config_unreadable},
+      an installation that a boot reads as activated with {!Already_active},
+      and a boot that stops for another reason with the lines it prints
+      ({!Boot_stops}).
     + It runs {!Authz_bootstrap.fresh_bootstrap} with a new workspace id.
     + It opens the zone over the two files and commits an Admin invitation
       written by the host-local operator. Only the digest of the token is
@@ -29,13 +32,21 @@
 (** 24 hours. Design 5.1-4 leaves the value to the plan. *)
 val admin_invitation_lifetime_ms : int
 
-type invitation =
-  { invite_id : Authz_types.Invite_id.t
-  ; token : string
-        (** 32 random bytes as 64 lowercase hex characters. It is returned once
-            and written nowhere. *)
-  ; expires_at_ms : int
-  }
+(** An Admin invitation that was just committed. Its token is 32 random bytes
+    as 64 lowercase hex characters, written nowhere; {!link} is the only way
+    out of the value. *)
+type invitation
+
+val invite_id : invitation -> Authz_types.Invite_id.t
+val expires_at_ms : invitation -> int
+
+(** ["/accounts/invite"]. The screen of the invitation (plan C6) and its
+    consumption (plan C2a) serve this path. *)
+val invitation_path : string
+
+(** [<base_url>/accounts/invite#<token>]. The token is in the fragment, so a
+    browser does not send it to the server in the URL (design 5.1-4). *)
+val link : base_url:string -> invitation -> string
 
 type activated =
   { workspace_id : Authz_types.Workspace_id.t
@@ -54,6 +65,13 @@ type error =
   | Not_asked
       (** [config.json] does not ask for [Multi_account], so a boot starts a
           single user. Nothing was written. *)
+  | Config_unreadable of string
+      (** [config.json] is there and its decoder refused it, with the reason.
+          A boot starts a single user that answers 503 to a request reading
+          the config. Nothing was written. *)
+  | Already_active
+      (** The log made [Multi_account] and the external store matches it: a
+          boot reads this installation as activated. Nothing was written. *)
   | Boot_stops of string * string list
       (** A boot stops on this installation for another reason than an
           activation, with the lines it prints. Nothing was written. *)

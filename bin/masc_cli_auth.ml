@@ -4,7 +4,6 @@ module A = Authz_activation
 module T = Server_startup_takeover
 
 let ( let* ) = Result.bind
-let invitation_path = "/accounts/invite#"
 let now_ms () = int_of_float (Unix.gettimeofday () *. 1000.)
 
 let with_lease ~base_path f =
@@ -20,7 +19,30 @@ let with_lease ~base_path f =
        Fun.protect ~finally:(fun () -> T.release_base_path_lease lease) (fun () -> f base_path))
 ;;
 
-(* What a server started from this environment would read. *)
+(* The person opens the link from wherever they are, so its base is the public
+   address the operator states, as for a Play invite. MASC_HOST and
+   MASC_HTTP_PORT of this shell need not be where the server listens. *)
+let public_base_url () =
+  let key = Env_config_core.http_base_url_env_key in
+  match Env_config_core.masc_http_base_url_opt () with
+  | None ->
+    Error
+      (key
+       ^ " is not set, so the link has no address; set it to the http(s) address the \
+          person opens")
+  | Some base ->
+    if Masc.Play_invite.is_http_public_base_url base
+    then Ok base
+    else
+      Error
+        (Printf.sprintf
+           "%s=%s is not an http(s) origin with no path, so it cannot carry the link"
+           key
+           base)
+;;
+
+(* What a server started from this shell would read. A server started from
+   another environment reads its own. *)
 let anonymous_mutations () =
   Result.map
     Server_auth_config.allow_anonymous_mutations
@@ -29,8 +51,10 @@ let anonymous_mutations () =
        (Server_auth_config.resolve (Server_auth_config.read_env ())))
 ;;
 
+(* Both are read before anything is written, so a link that could not be
+   printed, or a setting a server would refuse, writes nothing. *)
 let activate ~external_store base_path =
-  let* base_url = Env_config_core.masc_http_base_url_result () in
+  let* base_url = public_base_url () in
   let* anonymous_mutations = anonymous_mutations () in
   let* activated =
     Result.map_error
@@ -54,12 +78,12 @@ let bootstrap ~base_path ~external_store =
   | Ok (base_url, { A.workspace_id; invitation }) ->
     Printf.printf
       "The installation is activated for multi-account use, workspace %s.\n\
+       This build does not serve multi-account yet, so a server stops at boot on this \
+       workspace. No command undoes the activation.\n\
        The first Admin signs in once with this link before %s. It is not shown again:\n\
-       %s%s%s\n"
+       %s\n"
       (Authz_types.Workspace_id.to_string workspace_id)
-      (Time_codec.rfc3339_of_unix (float_of_int invitation.A.expires_at_ms /. 1000.))
-      base_url
-      invitation_path
-      invitation.A.token;
+      (Time_codec.rfc3339_of_unix (float_of_int (A.expires_at_ms invitation) /. 1000.))
+      (A.link ~base_url invitation);
     0
 ;;

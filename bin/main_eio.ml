@@ -1446,14 +1446,22 @@ let auth_cmd =
     let man =
       [ `S Manpage.s_description
       ; `P
-          "config.json must ask for account_mode Multi_account, and the \
-           workspace must hold no authorization log and no external store \
-           yet. The command takes the workspace lease, so stop the server \
-           first."
+          "config.json must ask for account_mode Multi_account with enabled \
+           and require_token, MASC_ALLOW_ANONYMOUS_MUTATIONS must be off in \
+           this shell, and the workspace must hold no authorization log and \
+           no external store yet. The command takes the workspace lease, so \
+           stop the server first."
+      ; `P
+          "MASC_HTTP_BASE_URL must be the http(s) address the person opens; \
+           the link is built on it."
       ; `P
           "The link carries the invitation token after #, so a browser keeps \
            it out of the request URL. Only a digest of the token is written. \
            The invitation works once and expires after 24 hours."
+      ; `P
+          "This build does not serve multi-account yet: once the command \
+           succeeds, a server stops at boot on the workspace, and no command \
+           undoes the activation."
       ]
     in
     Cmd.v

@@ -7,12 +7,14 @@
 
     The command takes the BasePath lease, so a running server, another
     activation, or a server that starts meanwhile waits on the lease or is
-    refused. It reads the base URL of the server before anything is written,
-    then runs {!Authz_activation.activate} with the auth settings a server
-    would read from the environment, and prints the invitation link
-    [<base url>/accounts/invite#<token>] once on standard output. The token is
-    in the fragment, so a browser does not send it to the server in the URL
-    (design 5.1-4). It is printed nowhere else.
+    refused. Before anything is written it reads [MASC_HTTP_BASE_URL], the
+    public address that the person opens, and refuses when it is not an http(s)
+    origin with no path; [MASC_HOST] and [MASC_HTTP_PORT] are not read, because
+    the server can listen elsewhere. It then runs {!Authz_activation.activate}
+    with the anonymous-mutation setting of this process's environment, which a
+    server started from the same environment reads, and prints
+    {!Authz_activation.link} once on standard output. The link is printed
+    nowhere else.
 
     Returns the exit code: [0] once the link is printed, [1] otherwise, with
     the reason on standard error. *)

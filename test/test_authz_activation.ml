@@ -68,6 +68,8 @@ let activate ?(anonymous_mutations = false) dirs =
 
 let error_name : A.error -> string = function
   | A.Not_asked -> "Not_asked"
+  | A.Config_unreadable _ -> "Config_unreadable"
+  | A.Already_active -> "Already_active"
   | A.Boot_stops _ -> "Boot_stops"
   | A.Workspace_id_not_built _ -> "Workspace_id_not_built"
   | A.Bootstrap_failed _ -> "Bootstrap_failed"
@@ -107,19 +109,32 @@ let is_lowercase_hex text =
     text
 ;;
 
+(* The link with an empty base is the path, [#], and the token. *)
+let token_of invitation =
+  let prefix = A.invitation_path ^ "#" in
+  let link = A.link ~base_url:"" invitation in
+  if not (String.starts_with ~prefix link)
+  then Alcotest.failf "the link %s does not start with %s" link prefix;
+  String.sub link (String.length prefix) (String.length link - String.length prefix)
+;;
+
 (* ---- an activation ---- *)
 
 let an_activation_writes_the_bootstrap_and_one_admin_invitation () =
   with_dirs (fun dirs ->
     ask_for_multi_account dirs;
     let { A.workspace_id; invitation } = activated_exn dirs in
-    let token = invitation.A.token in
+    let token = token_of invitation in
+    Alcotest.(check string)
+      "the link"
+      ("https://masc.example/accounts/invite#" ^ token)
+      (A.link ~base_url:"https://masc.example" invitation);
     Alcotest.(check int) "the token is 32 bytes in hex" 64 (String.length token);
     Alcotest.(check bool) "the token is lowercase hex" true (is_lowercase_hex token);
     Alcotest.(check int)
       "the invitation expires a day after the clock"
       (at_ms + (24 * 60 * 60 * 1000))
-      invitation.A.expires_at_ms;
+      (A.expires_at_ms invitation);
     Alcotest.(check int) "two records" 2 (count_lines (read_file (log_path dirs)));
     Alcotest.(check bool)
       "the token is not on disk"
@@ -137,14 +152,17 @@ let an_activation_writes_the_bootstrap_and_one_admin_invitation () =
            (Authz_types.Workspace_id.equal id workspace_id)
        | Authz_mode_state.Off _ | Authz_mode_state.Not_bootstrapped ->
          Alcotest.fail "the log does not hold Multi_account");
-      (match Authz_invite_state.find state.Authz_state.invites invitation.A.invite_id with
+      (match Authz_invite_state.find state.Authz_state.invites (A.invite_id invitation) with
        | None -> Alcotest.fail "the invitation is not in the state"
        | Some found ->
          Alcotest.(check bool)
            "the digest of the token"
            true
            (E.Token_digest.equal found.Authz_invite_state.token_digest (E.Token_digest.of_token token));
-         Alcotest.(check int) "the expiry" invitation.A.expires_at_ms found.Authz_invite_state.expires_at_ms;
+         Alcotest.(check int)
+           "the expiry"
+           (A.expires_at_ms invitation)
+           found.Authz_invite_state.expires_at_ms;
          Alcotest.(check bool)
            "an Admin invitation"
            true
@@ -171,6 +189,16 @@ let nothing_is_written_unless_config_json_asks () =
     Alcotest.(check bool) "no config directory" false (Sys.file_exists dirs.config))
 ;;
 
+(* A config.json the decoder refuses boots a single user, and the refusal
+   says why instead of reading as a config that asks for nothing. *)
+let a_config_json_that_does_not_decode_is_named () =
+  with_dirs (fun dirs ->
+    write_file (Auth.auth_config_file dirs.base) "{";
+    check_refused "a config.json that does not decode" "Config_unreadable" (activate dirs);
+    Alcotest.(check bool) "no log" false (Sys.file_exists (log_path dirs));
+    Alcotest.(check bool) "no store" false (Sys.file_exists dirs.store))
+;;
+
 (* Design 5.1 refuses Multi_account with anonymous mutations, and an activation
    would leave an installation that does not boot. *)
 let a_boot_that_would_stop_writes_nothing () =
@@ -187,7 +215,7 @@ let a_second_activation_is_refused () =
     let (_ : A.activated) = activated_exn dirs in
     let log = read_file (log_path dirs) in
     let store = read_file dirs.store in
-    check_refused "the second activation" "Boot_stops" (activate dirs);
+    check_refused "the second activation" "Already_active" (activate dirs);
     Alcotest.(check string) "the log is as it was" log (read_file (log_path dirs));
     Alcotest.(check string) "the store is as it was" store (read_file dirs.store))
 ;;
@@ -206,6 +234,10 @@ let () =
             "nothing unless config.json asks"
             `Quick
             nothing_is_written_unless_config_json_asks
+        ; Alcotest.test_case
+            "a config.json that does not decode"
+            `Quick
+            a_config_json_that_does_not_decode_is_named
         ; Alcotest.test_case
             "a boot that would stop"
             `Quick

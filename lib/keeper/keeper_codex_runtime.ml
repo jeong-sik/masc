@@ -879,6 +879,54 @@ let observe_failed_dispatch ~observe_transport_uncertain = function
   | Runtime_codex_app_server.Runtime_shutting_down -> ()
 ;;
 
+(* Codex reads AGENTS.md and repo [.agents/skills] from its cwd up to the
+   nearest project root (codex-rs/core/src/agents_md.rs,
+   codex-rs/ext/skills/src/host_roots.rs), and
+   [Runtime_codex_app_server.client_argv] sets [project_root_markers=[]] so
+   that walk stops at the cwd. base_path is the operator's own checkout, with
+   the operator's AGENTS.md and skills in it, so it is never the cwd (#39444).
+   The cwd follows the rule Muse and Antigravity use: a Keeper whose sandbox
+   mounts its host tree runs in that tree; every other Keeper runs in a
+   private directory of its own under the MASC runtime root.
+   HIGH-RISK-UNREVIEWED: this cwd is also the writable workspace root of the
+   [:workspace] permission profile a Native_full Keeper runs under. *)
+let native_cwd ~base_path ~keeper_name ~sandbox_profile =
+  let unusable detail =
+    Error (config_error ~field:"codex_app_server.native_workspace" detail)
+  in
+  let located =
+    Option.map
+      (fun profile -> profile, Keeper_types_profile_sandbox.tree_location_of_profile profile)
+      sandbox_profile
+  in
+  try
+    match located with
+    | Some (profile, Keeper_types_profile_sandbox.Shared_mount) ->
+      ignore
+        (Keeper_alerting_path.ensure_sandbox_bundle_for_profile
+           ~config:(Workspace.default_config base_path) ~name:keeper_name
+           ~sandbox_profile:profile
+         : string list);
+      let rel = Keeper_sandbox.host_root_rel_of_profile profile keeper_name in
+      let expected = Filename.concat (Unix.realpath base_path) rel in
+      let canonical = Unix.realpath (Filename.concat base_path rel) in
+      if String.equal canonical (Env_config_core.strip_trailing_slashes expected)
+      then Ok canonical
+      else unusable "the Keeper host tree must not traverse symbolic links"
+    | Some (_, Keeper_types_profile_sandbox.Endpoint_owned) | None ->
+      let identity = Agent_core_sha256.(to_hex (digest_string keeper_name)) in
+      let dir =
+        List.fold_left Filename.concat (Common.masc_dir_from_base_path ~base_path)
+          [ "official-clients"; "codex-workspaces"; identity ]
+      in
+      Fs_compat.mkdir_p dir;
+      Unix.chmod dir 0o700;
+      Ok (Unix.realpath dir)
+  with
+  | Sys_error detail -> unusable detail
+  | Unix.Unix_error (error, _, _) -> unusable (Unix.error_message error)
+;;
+
 let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~required_native_posture ~official_client_continuation ~runtime_id ~context_window ~configured_reasoning_effort ~turn_timeout_s ~quota_scope ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~loading_plan ~initial_messages ~capacity_bytes ~project_history
@@ -968,6 +1016,21 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
       |> Result.map_error (Keeper_internal_error.guidance_preparation_unavailable
           ~field:Prompt_names.keeper_codex_native_read)
     in
+    let* sandbox_profile =
+      match required_native_posture with
+      | Some _ -> Ok None
+      | None ->
+        let* defaults =
+          Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
+            ~base_path keeper_name
+          |> Result.map_error (fun error ->
+            config_error ~field:"keeper.sandbox_profile"
+              (Keeper_types_profile.keeper_toml_load_error_to_string error))
+        in
+        Ok defaults.sandbox_profile
+    in
+    let* native_cwd = native_cwd ~base_path ~keeper_name ~sandbox_profile in
+    let process_cwd = Eio.Path.(Eio.Stdenv.fs env / native_cwd) in
     let* () = on_guidance_prepared () in
     let tool_surface_sha256 =
       Keeper_official_client_session_store.tool_surface_sha256
@@ -1236,7 +1299,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
         Runtime_codex_app_server.validate_turn
           ~dynamic_tools
           ~thread_mode
-          ~cwd:Eio.Path.(Eio.Stdenv.fs env / base_path)
+          ~cwd:process_cwd
           client_config
           ~prompt
           ~images
@@ -1507,7 +1570,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
          ~mgr:(Posix_spawn_process_mgr.foreground_mgr ~clock
            ~grace_seconds:Process_eio.child_exit_grace_seconds)
          ~clock
-         ~cwd:Eio.Path.(Eio.Stdenv.fs env / base_path)
+         ~cwd:process_cwd
          ~dynamic_tools
          ?reasoning_effort:requested_reasoning_effort
          ~on_reasoning_effort_resolved:(fun ~model ~requested ~effective ->
@@ -1626,7 +1689,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
        then
          read_usage_after_quota_refusal
            ~keeper_name ~quota_scope ~clock
-           ~cwd:Eio.Path.(Eio.Stdenv.fs env / base_path)
+           ~cwd:process_cwd
            config;
        (match stored_session with
         | Some restore ->
@@ -1675,7 +1738,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
        then
          read_usage_after_quota_refusal
            ~keeper_name ~quota_scope ~clock
-           ~cwd:Eio.Path.(Eio.Stdenv.fs env / base_path)
+           ~cwd:process_cwd
            config;
        recovery_failure :=
          recovery_failure_of_attempt ~thread_mode

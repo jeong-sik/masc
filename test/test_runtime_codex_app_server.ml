@@ -3037,6 +3037,7 @@ let test_client_argv_carries_posture_and_sub_agent_overrides () =
            ["-c"; "features.shell_tool=false"; "-c"; "features.unified_exec=false"]
          | Native_full -> []
          | Native_none -> fail "none is not part of this fixture") @
+        ["-c"; "project_root_markers=[]"] @
         (* The model catalog picks the version when only features.multi_agent
            is off, so the switch that counts is [agents] enabled. *)
         ["-c"; "agents.enabled=false"; "-c"; "features.multi_agent_v2=false"] in

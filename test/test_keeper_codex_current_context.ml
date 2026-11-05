@@ -32,6 +32,8 @@ if '--masc-warmup' in sys.argv:
 capture = %S
 with open(capture+'.argv', 'a') as out:
     out.write(json.dumps(sys.argv[1:])+'\n')
+with open(capture+'.cwd', 'a') as out:
+    out.write(os.getcwd()+'\n')
 reject_context = %s
 overflow_resume = %s
 hold_first_resume = %s
@@ -242,6 +244,28 @@ let test_captured_context_window_survives_catalog_reload () =
   let methods = read_requests capture |> List.map (fun request -> request |> member "method" |> text) in
   check bool "fresh thread started" true (List.mem "thread/start" methods);
   check bool "existing thread resumed" true (List.mem "thread/resume" methods)
+
+(* #39444: Codex reads AGENTS.md and repo skills from its cwd, and the base
+   path is the operator's checkout. A Keeper without a host-tree sandbox runs
+   its client in a private directory, as the process and as the thread. *)
+let test_codex_runs_in_the_keepers_private_directory () =
+  with_fixture @@ fun ~run ~capture ~reports:_ ->
+  successful (run ~instructions:"Follow the current context." ~world:"First turn" ());
+  let root = Unix.realpath (Filename.dirname capture) in
+  let expected =
+    List.fold_left Filename.concat (Common.masc_dir_from_base_path ~base_path:root)
+      [ "official-clients"; "codex-workspaces";
+        Agent_core_sha256.(to_hex (digest_string "context-fixture")) ] in
+  let process_cwds = In_channel.with_open_bin (capture ^ ".cwd") In_channel.input_lines in
+  check (list string) "the client process starts in the private directory" [expected] process_cwds;
+  let start = List.find (fun row -> member "method" row = `String "thread/start")
+      (read_requests capture) in
+  check string "the thread names the private directory as its cwd" expected
+    (start |> member "params" |> member "cwd" |> text);
+  let argv = In_channel.with_open_bin (capture ^ ".argv") In_channel.input_lines
+    |> List.concat_map (fun line -> Yojson.Safe.from_string line |> items |> List.map text) in
+  check bool "the AGENTS.md walk stops at that directory" true
+    (List.mem "project_root_markers=[]" argv)
 
 let test_selected_reasoning_survives_catalog_reload
     ?(remove_runtime = false) ?hook_reasoning_effort
@@ -1506,6 +1530,8 @@ let test_checkpoint_preserves_receipt_across_session_replacement () =
       check int "replacement never re-executes the original or independent effect" 1 !calls)
 
 let () = run "Keeper current Codex context" ["native requests",[
+  test_case "a Keeper's Codex client runs in its private directory" `Quick
+    test_codex_runs_in_the_keepers_private_directory;
   test_case "selected high survives a replacement low on start and resume" `Quick
     (test_selected_reasoning_survives_catalog_reload
        ~selected:(Some High) ~replacement:(Some Low) ~expected:(Some "high"));

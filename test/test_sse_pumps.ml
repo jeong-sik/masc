@@ -91,6 +91,56 @@ let test_cancelled_supervisor_closes_the_response () =
   check bool "the connection left the registry" false (Conn.is_active_sse_session session_id)
 ;;
 
+(* [Eio.Fiber.fork] runs nothing on a switch that is already off, so no
+   supervisor starts there. [run_sse_pumps] still closes the response and
+   removes the connection. *)
+let test_switch_off_closes_the_response () =
+  Eio_main.run
+  @@ fun env ->
+  let session_id = fresh_session "off" in
+  let info = make_info ~clock:(Eio.Stdenv.clock env) ~stalled_after_s:long_stall_s session_id in
+  Conn.register_sse_conn ~session_id ~info;
+  (match
+     Eio.Switch.run (fun sw ->
+       Eio.Switch.fail sw Server_stopped;
+       Conn.run_sse_pumps ~sw info ~drain:Eio.Fiber.await_cancel ~ping:Eio.Fiber.await_cancel)
+   with
+   | () -> fail "the failed switch returned normally"
+   | exception Server_stopped -> ());
+  check bool "the response is closed" true (Server_sse_response.is_closed info.response);
+  check bool "the connection is stopped" true (Atomic.get info.closed);
+  check bool "the connection left the registry" false (Conn.is_active_sse_session session_id)
+;;
+
+let stop_bound_s = 5.0
+
+(* A drain that waits for the socket is cancelled by the stop, like one
+   blocked on its queue. *)
+let test_stop_cancels_a_waiting_send () =
+  Eio_main.run
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let info = make_info ~clock ~stalled_after_s:long_stall_s (fresh_session "waiting") in
+  let sending, set_sending = Eio.Promise.create () in
+  match
+    Eio.Time.with_timeout clock stop_bound_s (fun () ->
+      Eio.Switch.run (fun sw ->
+        Conn.run_sse_pumps
+          ~sw
+          info
+          ~drain:(fun () ->
+            Eio.Promise.resolve set_sending ();
+            ignore (Conn.send_raw info "data: {}\n\n" : bool))
+          ~ping:Eio.Fiber.await_cancel;
+        Eio.Promise.await sending;
+        Conn.close_sse_conn info);
+      Ok ())
+  with
+  | Ok () ->
+    check bool "the supervisor closed the response" true (Server_sse_response.is_closed info.response)
+  | Error `Timeout -> failf "a waiting send outlived the stop by %.0f s" stop_bound_s
+;;
+
 (* A frame that never reaches a socket ends the send at the stall bound.
    Before RFC-0493 [send_raw] returned [true] here and the frame stayed in
    httpun's buffer. *)
@@ -114,6 +164,10 @@ let () =
             test_close_leaves_the_response_to_the_supervisor
         ; test_case "a cancelled supervisor closes the response" `Quick
             test_cancelled_supervisor_closes_the_response
+        ; test_case "a switch that is off closes the response at once" `Quick
+            test_switch_off_closes_the_response
+        ; test_case "the stop cancels a send that waits for the socket" `Quick
+            test_stop_cancels_a_waiting_send
         ] )
     ; ( "send_raw"
       , [ test_case "an unread frame ends at the stall bound" `Quick

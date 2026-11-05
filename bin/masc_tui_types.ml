@@ -6539,7 +6539,7 @@ module Browser_lane_view = struct
   let browser_name = function Firefox -> "Firefox" | Zen -> "Zen" | Ego_lite -> "ego lite"
   let client_id t = match t.source, t.selected_client with
     | Live, Some client -> Some client.client_id
-    | Live, None | Automation, _, _ -> None
+    | Live, None | Automation, _ -> None
   (* The browser a read goes to, when there is one. Live with none chosen has
      no browser to name; this used to answer "choose browser", and every row
      that put a name there read as nonsense ("choose browser page reader"). *)
@@ -6753,10 +6753,10 @@ module Browser_lane_view = struct
      out. *)
   let connection_label t = match t.source, t.selected_client with
     | Live, Some client -> Some (browser_identity client)
-    | Live, None | Automation, _, _ -> browser_label t
+    | Live, None | Automation, _ -> browser_label t
   let connection_summary t = match t.source, t.selected_client with
     | Live, Some client -> Some (browser_identity client)
-    | Live, None | Automation, _, _ -> browser_label t
+    | Live, None | Automation, _ -> browser_label t
   let live_connection_row t =
     (match connection_summary t with
      | Some connection -> "  " ^ connection
@@ -7553,7 +7553,7 @@ module Browser_lane_view = struct
     match source, value with
     | Live, `String id when String.trim id <> "" -> Ok (Some id)
     | Automation, `Null -> Ok None
-    | Live, _ | Automation, _, _ -> Error "browser client ID does not match source"
+    | Live, _ | Automation, _ -> Error "browser client ID does not match source"
   let parse_tab json =
     let* ()=match json with
       | `Assoc fields when List.length fields=List.length (List.sort_uniq String.compare (List.map fst fields)) -> Ok ()

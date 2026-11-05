@@ -310,7 +310,7 @@ show how many entries hide past each edge (`‹4`, `5›`).
 | Key | Effect |
 |-----|--------|
 | `Tab` / `Shift-Tab` | next / previous surface in the strip's order |
-| `?` | help screen -- every binding, grouped by surface; `j`/`k` scroll, `Esc` closes |
+| `?` | help screen -- every binding, grouped by surface; `j`/`k` scroll, `/` filters keys and commands by what you type, `Esc` clears the filter and then closes |
 | `:` | command palette -- type to filter `go <surface>` and `keeper <name>` jumps, `Enter` runs the highlighted one |
 
 On the keeper roster, `/` searches names: typing moves the cursor to the

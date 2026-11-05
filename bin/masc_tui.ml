@@ -32886,6 +32886,15 @@ Use relative paths for resources already held in the package. -->
          when Option.is_some state.account_login -> ()
        | Some (Pasted _) when state.keeper_deletions_open -> ()
        | Some (Pasted _) when state.about_open -> ()
+       (* The sheet's filter takes a paste the way typing it would, on one line.
+          With no filter open nothing on the sheet reads one. *)
+       | Some (Pasted paste) when help_owns_input
+                                  && help_filter_typing state.help_filter ->
+           state.help_filter <-
+             Help_filter_typing
+               (help_filter_query state.help_filter
+                ^ Masc_tui_identity_model.identity_field_paste paste.Masc_tui_paste.text);
+           state.help_scroll <- 0
        | Some (Pasted paste) when text_target = Some Text_account_login ->
            Option.iter (fun view ->
              if paste.Masc_tui_paste.dropped > 0 then
@@ -33519,6 +33528,84 @@ Use relative paths for resources already held in the package. -->
                 search_jump state ~query:longer ~after:(-1)
             | _ -> ())
       in
+      (* The cheat sheet's keys. While the filter is being typed every
+         printable key is text, so [h], [j], [g] and [?] reach the query and
+         the sheet's own keys wait for Enter or Esc. *)
+      let handle_help_key k =
+           let close_help () =
+             state.help_open <- false;
+             state.help_scroll <- 0;
+             state.help_filter <- Help_filter_off
+           in
+           (* A different query is a different sheet; the reader looks for the
+              match at its top. *)
+           let filter_with query =
+             state.help_filter <- Help_filter_typing query;
+             state.help_scroll <- 0
+           in
+           let scroll_help () =
+             (* Bounded against the sheet the frame draws, which folds to
+                two columns on a wide terminal and so holds half the rows
+                the lines were written as. A page moves by the viewport
+                height the sheet itself claims, so one press lands the
+                reader where the last visible line was the first. *)
+             let count, height = Masc_tui_render.help_viewport state in
+             let step =
+               match k with
+               | "pageup" | "pagedown" -> max 1 height
+               | _ -> 1
+             in
+             let move =
+               match k with
+               | "j" | "down" | "pagedown" -> Masc_tui_scroll.down
+               | _ -> Masc_tui_scroll.up
+             in
+             (* [down]/[up] move by one; the page keys repeat the single
+                step so the bound stays the scroll module's, not a
+                re-derived one. *)
+             let rec repeat n scroll =
+               if n <= 0 then scroll else repeat (n - 1) (move ~count ~height scroll)
+             in
+             state.help_scroll <- repeat step state.help_scroll
+           in
+           (match state.help_filter with
+            | Help_filter_typing query ->
+                (match k with
+                 | "esc" ->
+                     state.help_filter <- Help_filter_off;
+                     state.help_scroll <- 0
+                 | "\r" ->
+                     state.help_filter <-
+                       (if String.equal query "" then Help_filter_off
+                        else Help_filter_kept query)
+                 | "\127" | "\b" ->
+                     filter_with (Masc_tui_message_layout.drop_last_utf8_scalar query)
+                 | "down" | "up" | "pageup" | "pagedown" -> scroll_help ()
+                 | s
+                   when (String.length s = 1 && Char.code s.[0] >= 32)
+                        || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
+                     filter_with (query ^ s)
+                 | _ -> ())
+            | Help_filter_kept _ when String.equal k "esc" ->
+                (* The first Esc puts the whole sheet back; the next closes it. *)
+                state.help_filter <- Help_filter_off;
+                state.help_scroll <- 0
+            | Help_filter_off | Help_filter_kept _ ->
+                (match k with
+                 | "/" -> state.help_filter <- Help_filter_typing (help_filter_query state.help_filter)
+                 | "?" | "esc" -> close_help ()
+                 | "h" ->
+                     (* Session toggle; the persistent form is [tui].hints_visible in
+                        runtime.toml, named on the help sheet itself. *)
+                     state.hints_visible <- not state.hints_visible;
+                     note_session_key state Masc.Tui_preference.Key.Hints_visible
+                 | "j" | "down" | "k" | "up" | "pageup" | "pagedown" -> scroll_help ()
+                 | "g" -> state.help_scroll <- 0
+                 | "G" ->
+                     let count, height = Masc_tui_render.help_viewport state in
+                     state.help_scroll <- Masc_tui_scroll.maximum ~count ~height
+                 | _ -> ()))
+      in
       let toggle_roster_chrome () =
            if state.keeper_navigation_open then begin
              state.keeper_navigation_open <- false;
@@ -33558,45 +33645,7 @@ Use relative paths for resources already held in the package. -->
        | Some _ when compact_viewport ->
            if quit_key && Option.is_some (Frame_presenter.presented_rows frame_presenter)
            then handle_quit_key ()
-       | Some k when help_owns_input && k = "h" ->
-           (* Session toggle; the persistent form is [tui].hints_visible in
-              runtime.toml, named on the help sheet itself. *)
-           state.hints_visible <- not state.hints_visible;
-           note_session_key state Masc.Tui_preference.Key.Hints_visible
-       | Some k when help_owns_input ->
-           (match k with
-            | "?" | "esc" ->
-                state.help_open <- false;
-                state.help_scroll <- 0
-            | "j" | "down" | "k" | "up" | "pageup" | "pagedown" ->
-                (* Bounded against the sheet the frame draws, which folds to
-                   two columns on a wide terminal and so holds half the rows
-                   the lines were written as. A page moves by the viewport
-                   height the sheet itself claims, so one press lands the
-                   reader where the last visible line was the first. *)
-                let count, height = Masc_tui_render.help_viewport state in
-                let step =
-                  match k with
-                  | "pageup" | "pagedown" -> max 1 height
-                  | _ -> 1
-                in
-                let move =
-                  match k with
-                  | "j" | "down" | "pagedown" -> Masc_tui_scroll.down
-                  | _ -> Masc_tui_scroll.up
-                in
-                (* [down]/[up] move by one; the page keys repeat the single
-                   step so the bound stays the scroll module's, not a
-                   re-derived one. *)
-                let rec repeat n scroll =
-                  if n <= 0 then scroll else repeat (n - 1) (move ~count ~height scroll)
-                in
-                state.help_scroll <- repeat step state.help_scroll
-            | "g" -> state.help_scroll <- 0
-            | "G" ->
-              let count, height = Masc_tui_render.help_viewport state in
-              state.help_scroll <- Masc_tui_scroll.maximum ~count ~height
-            | _ -> ())
+       | Some k when help_owns_input -> handle_help_key k
        | Some "?" when Option.is_some current_panel
                        && current_panel <> Some Presented.Context_search ->
            state.help_open <- true;

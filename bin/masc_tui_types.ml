@@ -6333,6 +6333,23 @@ type palette_mode =
       choice_line : int;  (* 1-based, what the title says *)
     }
 
+(* The cheat sheet's [/] filter. The sheet is longer than any terminal, so a
+   reader looking for one key types a piece of its name or of what it does.
+   While the query is typed every printable key belongs to it, [j] and [h]
+   included; Enter keeps it and gives the scroll keys back to the sheet. *)
+type help_filter =
+  | Help_filter_off
+  | Help_filter_typing of string
+  | Help_filter_kept of string
+
+let help_filter_query = function
+  | Help_filter_off -> ""
+  | Help_filter_typing query | Help_filter_kept query -> query
+
+let help_filter_typing = function
+  | Help_filter_typing _ -> true
+  | Help_filter_off | Help_filter_kept _ -> false
+
 (* Browser reads remain separate from connector routing. A request generation
    belongs to this view instance, so late browser replies cannot replace a
    different source or tab after the operator moves. *)
@@ -9722,6 +9739,7 @@ type state = {
   mutable workspace_cancellations: (unit ref * (unit -> unit)) list;
   mutable workspace_observation_cancellations: (unit ref * (unit -> unit)) list;
   mutable help_scroll: int;
+  mutable help_filter: help_filter;
   (* An image the operator asked to see, drawn over the whole terminal rather
      than into a frame. A picture does not live in a row: the terminal keeps
      it in its own layer, and the frame presenter redraws only the rows that
@@ -19515,6 +19533,7 @@ let close_key_modals (state : state) =
   state.chat_call_reader <- None;
   state.help_open <- false;
   state.help_scroll <- 0;
+  state.help_filter <- Help_filter_off;
   state.queue_panel <- None;
   close_detail_reading state;
   state.about_open <- false;
@@ -19837,6 +19856,7 @@ let create_state
      then Workspace_identity_match
      else Workspace_identity_unread);
   help_scroll = 0;
+  help_filter = Help_filter_off;
   image_open = false;
   image_inspection = None;
   image_cell_view = None;

@@ -31,3 +31,14 @@ val sheet : ?header:string list -> cols:int -> string list -> string list
     columns -- the sections between blank lines set side by side two at a
     time, each whole, with a blank row between pairs. *)
 
+val filter_sections :
+  query:string ->
+  heading:(string -> string) ->
+  (string * (string * string) list) list ->
+  (string * (string * string) list) list
+(** The sections a typed query leaves, as (title, (key, action) entries). An
+    entry stays when its key or its action holds [query], ignoring case. A
+    section whose [heading title] holds [query] stays whole, and a section left
+    with no entry goes. [heading] is the part of a title a reader would type: a
+    title that carries a mark beside its name gives the name back, so the mark
+    does not answer a query. An empty [query] leaves every section as it was. *)

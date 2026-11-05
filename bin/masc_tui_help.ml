@@ -55,3 +55,16 @@ let sheet ?(header = []) ~cols lines =
     end
   in
   header @ body
+
+let filter_sections ~query ~heading sections =
+  if String.equal query "" then sections
+  else
+    let holds text = Masc_tui_pick_list.lowercase_contains ~needle:query text in
+    List.filter_map
+      (fun (title, entries) ->
+        if holds (heading title) then Some (title, entries)
+        else
+          match List.filter (fun (key, action) -> holds key || holds action) entries with
+          | [] -> None
+          | kept -> Some (title, kept))
+      sections

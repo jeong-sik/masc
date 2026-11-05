@@ -930,7 +930,16 @@ let namespace_allowance e seq output =
 type action_writer = store:Lane_addon_store.t -> instance_id:string -> request_id:string ->
   Yojson.Safe.t -> (unit, string) result
 let action_writer_key : action_writer Eio.Fiber.key = Eio.Fiber.create_key ()
+(* How many receipt saves each instance has made, keyed by store root and
+   instance. Every action state is saved here, so a reader that compares the
+   inspection over time also sees an action that started and ended between
+   two of its readings ([inspect_reading]). *)
+let action_saves : (string * string, int) Hashtbl.t = Hashtbl.create 16
+let action_saves_of (m : manager) ~instance_id =
+  Option.value ~default:0 (Hashtbl.find_opt action_saves (Lane_addon_store.root m.store, instance_id))
 let save_action_unlocked m (receipt : Lane_addon_action.receipt) =
+  let key = Lane_addon_store.root m.store, receipt.instance_id in
+  Hashtbl.replace action_saves key (action_saves_of m ~instance_id:receipt.instance_id + 1);
   let write = match Eio.Fiber.get action_writer_key with
     | None -> (fun ~store ~instance_id ~request_id json ->
         Lane_addon_store.save_action store ~instance_id ~request_id json)
@@ -4885,6 +4894,43 @@ let installation_questions ~config =
           loop ((declaration_id, rows) :: acc) rest
       in
       loop [] ids))
+
+type inspect_reading = { configuration : Yojson.Safe.t; instances : (string * Yojson.Safe.t) list }
+
+(* The operator's Inspect, split per instance for a reader that compares it
+   over time. A live instance also carries its current and queued action
+   receipts, which Inspect leaves out and Action_status reads, and how many
+   receipts it has saved, which moves even for an action that started and
+   ended between two readings. *)
+let inspect_reading ~config = Eio_context.run_on_owner_domain (fun () ->
+  let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+  match Hashtbl.find_opt managers root with
+  | None -> Ok None
+  | Some m ->
+      let* json = snapshot m ~access:Lane_addon_sources.Operator_configuration () in
+      let actions = entries m |> List.map (fun (e : entry) ->
+        e.instance_id, `Assoc [
+          "current", Option.fold ~none:`Null ~some:Lane_addon_action.to_json e.current_action;
+          "queued", `List (List.of_seq (Seq.map Lane_addon_action.to_json (Queue.to_seq e.action_queue)));
+          "saved", `Int (action_saves_of m ~instance_id:e.instance_id)]) in
+      match json with
+      | `Assoc fields ->
+          let configuration = Option.value ~default:`Null (List.assoc_opt "configuration" fields) in
+          let items = match List.assoc_opt "instances" fields with Some (`List items) -> items | Some _ | None -> [] in
+          let instance item = match item with
+            | `Assoc item_fields ->
+                (match List.assoc_opt "instance_id" item_fields with
+                 | Some (`String id) ->
+                     Ok (id, `Assoc ["inspect", item;
+                       "actions", Option.value ~default:`Null (List.assoc_opt id actions)])
+                 | Some _ | None -> Error "an inspected instance names no instance_id")
+            | _ -> Error "an inspected instance is not an object" in
+          let* instances = List.fold_right (fun item acc ->
+            let* rest = acc in
+            let* one = instance item in
+            Ok (one :: rest)) items (Ok []) in
+          Ok (Some {configuration; instances})
+      | _ -> Error "Inspect did not answer an object")
 
 module For_testing = struct
   let browser_source_table = browser_source_table

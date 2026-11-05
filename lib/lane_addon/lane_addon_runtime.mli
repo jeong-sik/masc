@@ -494,6 +494,19 @@ val tool_execution_skill_owner : tool_execution -> skill_export_owner
 val host_issue_to_json : host_issue -> Yojson.Safe.t
 (** The [issue] of an instance's [host_requests] in the inspect payload. *)
 
+type inspect_reading = {
+  configuration : Yojson.Safe.t;  (** Inspect's [configuration]. *)
+  instances : (string * Yojson.Safe.t) list;
+      (** Per instance id, its Inspect entry and, for a live instance, its
+          current and queued action receipts and how many receipts it has
+          saved. *)
+}
+
+val inspect_reading : config:Workspace.config -> (inspect_reading option, string) result
+(** What the operator's Inspect shows, split per instance. [None] while no
+    manager has been observed in this process; it creates none and starts,
+    reconciles or cleans nothing. *)
+
 module For_testing : sig
   val browser_source_table :
     Browser_configuration.t option -> backend:Browser_lane.Backend.t ->

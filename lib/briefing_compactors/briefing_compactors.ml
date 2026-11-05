@@ -2,20 +2,6 @@
 
 open Briefing_json_helpers
 
-let compact_keeper_json keeper_json =
-  let diagnostic = member_assoc "diagnostic" keeper_json in
-  `Assoc
-    [
-      ("name", string_json_opt (member_assoc "name" keeper_json));
-      ("status", string_json_opt (member_assoc "status" keeper_json));
-      ("context_ratio", float_json (member_assoc "context_ratio" keeper_json));
-      ("last_turn_ago_s", float_json (member_assoc "last_turn_ago_s" keeper_json));
-      ( "current_task"
-      , string_json_opt ~max_len:160 (member_assoc "current_task_id" keeper_json) );
-      ("last_reply_status", string_json_opt (member_assoc "last_reply_status" diagnostic));
-      ("last_reply_preview", string_json_opt ~max_len:160 (member_assoc "last_reply_preview" diagnostic));
-    ]
-
 let compact_agent_json (agent : Masc_domain.agent) =
   let current_focus =
     match agent.current_task with

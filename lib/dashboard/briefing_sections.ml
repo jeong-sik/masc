@@ -63,24 +63,18 @@ let status_is_active_agent value =
 let evidence_add_if cond text items =
   if cond && text <> "" then text :: items else items
 
-let build_communication_section ~recent_messages ~metadata_gaps ~workspace_health
+let build_communication_section ~recent_messages ~workspace_health
     ~incident_count ~recommended_action_count =
   let recent_message_count = List.length recent_messages in
-  let metadata_evidence = evidence_of_metadata_gaps ~section:Communication metadata_gaps in
   let positive_signal = recent_message_count > 0 in
   let evidence =
     []
     |> evidence_add_if positive_signal
          (Printf.sprintf "Recent namespace messages recorded: %d" recent_message_count)
     |> evidence_add_if (not positive_signal) "Recent namespace message count is zero"
-    |> fun activity_evidence -> take 2 (metadata_evidence @ activity_evidence)
   in
-  if positive_signal && metadata_evidence = [] then
+  if positive_signal then
     ("healthy", "Communication activity is recorded across recent namespace messages.", evidence)
-  else if positive_signal then
-    ("watch", "Communication activity exists, but some communication metadata is still missing.", evidence)
-  else if metadata_evidence <> [] then
-    ("unclear", "Communication metadata is incomplete and no message activity is recorded.", evidence)
   else if Dashboard_utils.is_health_at_risk (Dashboard_utils.health_level_of_string workspace_health)
           || incident_count > 0 || recommended_action_count > 0
   then
@@ -169,7 +163,7 @@ let build_briefing_sections ~briefing_summary_json ~agents ~recent_messages
     briefing_summary_json |> string_field "top_attention_summary"
   in
   let communication_status, communication_summary, communication_evidence =
-    build_communication_section ~recent_messages ~metadata_gaps ~workspace_health
+    build_communication_section ~recent_messages ~workspace_health
       ~incident_count ~recommended_action_count
   in
   let alignment_status, alignment_summary, alignment_evidence =

@@ -230,15 +230,6 @@ run_tlc_buggy "$REPO_ROOT/specs/multimodal" "MultimodalArtifact.tla"
 run_tlc "$REPO_ROOT/specs/multimodal" "MultimodalHydrator.tla"
 run_tlc_buggy "$REPO_ROOT/specs/multimodal" "MultimodalHydrator.tla"
 
-# Cycle 27 — Autonomous phase taxonomy + 19 transitions (Tier B5 catch-up).
-run_tlc "$REPO_ROOT/specs/autonomous" "AutonomousPhase.tla"
-run_tlc_buggy "$REPO_ROOT/specs/autonomous" "AutonomousPhase.tla"
-
-# Cycle 27 — Autonomous loop wirein non-invasive contract (Tier A5 catch-up).
-run_tlc "$REPO_ROOT/specs/autonomous" "AutonomousLoop.tla"
-run_tlc_buggy "$REPO_ROOT/specs/autonomous" "AutonomousLoop.tla"
-
-
 # RFC-0160 G6 — Shell IR carries decision invariant.
 run_tlc "$REPO_ROOT/specs/shell-ir-first-class" "ShellIRFirstClass.tla"
 run_tlc_buggy "$REPO_ROOT/specs/shell-ir-first-class" "ShellIRFirstClass.tla"

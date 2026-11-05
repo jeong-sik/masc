@@ -1,7 +1,7 @@
 (* A tools/call POST for a streaming tool answers over SSE on the real HTTP/1
    route: the prime frame, the result as one [message] event, then the end of
-   the response. The route writes through [Server_sse_response], so each frame
-   waits for the socket (RFC-0493 §3.2). *)
+   the response. A reading client sees the same bytes whether or not a frame
+   waits for the socket; [test_server_sse_response] checks the wait. *)
 
 let protocol_version = "2025-11-25"
 let request_timeout_s = 5.0

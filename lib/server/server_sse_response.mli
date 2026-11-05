@@ -3,8 +3,9 @@
     A frame is written only by {!send}. [send] returns once httpun has handed
     the frame to the socket, once the response has closed, or once
     [stalled_after_s] has passed. A client that stops reading therefore holds
-    each sending fiber at its frame, and the bytes the server keeps for that
-    client are at most one frame per sending fiber. The writer itself is not
+    each sending fiber at its send, and the bytes the server keeps for that
+    client are at most one send per sending fiber. A pump's send carries the
+    frames it batched (RFC-0493 §7 5b). The writer itself is not
     reachable from outside this module, so no caller can write a frame
     without waiting for it.
 

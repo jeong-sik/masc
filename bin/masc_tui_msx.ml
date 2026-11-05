@@ -40,11 +40,16 @@ let placement_id = 1
 let synchronized_output = ref false
 let set_synchronized_output enabled = synchronized_output := enabled
 let delete_image = Masc_tui_graphics.delete_image ~image_id
+(* What frame timing calls this screen. *)
+let surface_key = "machine"
 let write_batch ~write payload =
   (* A full-width sidebar/footer must not leave a pending automatic wrap. *)
   let payload = "\027[?7l" ^ payload ^ "\027[?7h" in
   if !synchronized_output then write ("\027[?2026h" ^ payload ^ "\027[?2026l")
-  else write payload
+  else write payload;
+  (* The batch opened with the frame start the request probe counts, so it is
+     a frame of this screen. *)
+  Masc_tui_frame_timing.note_presented ~surface:surface_key
 
 let graphics_protocol = ref Masc_tui_graphics.Unsupported_protocol
 

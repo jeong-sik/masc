@@ -36,6 +36,9 @@ let phase_name = function
    TUI cannot grow its exit report for hours. Omitted samples are named. *)
 let max_frames_per_phase = 512
 let max_stage_samples = 4096
+(* A surface run starts only when the written surface changes, so a session
+   reaches this cap only by changing surface this many times. *)
+let max_surface_runs = 4096
 
 type ask_owner = Keeper of string | Installation of string
 type ask_identity = {
@@ -104,6 +107,52 @@ module Ask_samples = struct
     | None -> events
     | Some first -> events @ [json_line ["schema",`String "masc.tui.asks_application_omissions.v1";
         "omitted",`Int (t.count - List.length t.events);"unknown_from_build",`Int first]]
+end
+
+(* The surface the terminal received, frame by frame. A frame here is a write
+   that opens with the presenter's frame start: each frame the presenter
+   wrote, each batch the machine screen wrote, and each write of
+   [note_external]. A frame the presenter found unchanged writes nothing and
+   is not one, so the n-th frame recorded is the n-th frame start the
+   terminal received. A run starts at the first frame whose surface differs
+   from the frame before. *)
+module Surface_runs = struct
+  type run = { surface : string; first_written_frame : int }
+  type t = {
+    runs : run list;  (* newest first *)
+    kept : int;
+    omitted : int;
+    written : int;
+    current : string option;
+    unknown_from : int option;
+  }
+  let empty =
+    { runs = []; kept = 0; omitted = 0; written = 0; current = None; unknown_from = None }
+  let add t ~surface =
+    let written = t.written + 1 in
+    match t.current with
+    | Some current when String.equal current surface -> { t with written }
+    | Some _ | None when t.kept < max_surface_runs ->
+        { t with written; current = Some surface; kept = t.kept + 1;
+          runs = { surface; first_written_frame = written } :: t.runs }
+    | Some _ | None ->
+        { t with written; current = Some surface; omitted = t.omitted + 1;
+          unknown_from = (match t.unknown_from with
+            | Some _ as prior -> prior
+            | None -> Some written) }
+  let showing t ~surface =
+    match t.current with
+    | Some current -> String.equal current surface
+    | None -> false
+  let raw_lines t =
+    List.rev_map (fun run ->
+      json_line ["schema",`String "masc.tui.surface_run.v1";"surface",`String run.surface;
+        "first_written_frame",`Int run.first_written_frame]) t.runs
+    @ [json_line ["schema",`String "masc.tui.surface_runs.v1";"written_frames",`Int t.written;
+        "runs",`Int t.kept;"omitted",`Int t.omitted;
+        "unknown_from_written_frame",(match t.unknown_from with
+          | None -> `Null
+          | Some first -> `Int first)]]
 end
 
 module Samples = struct
@@ -495,6 +544,16 @@ let stage_samples = ref Stage_samples.empty
 let active_build_frame = ref None
 let active_home_questions = ref None
 let asks_samples = ref Ask_samples.empty
+let surface_runs = ref Surface_runs.empty
+
+let note_presented ~surface =
+  if enabled then surface_runs := Surface_runs.add !surface_runs ~surface
+
+let note_external ~surface ~write ~frame_start =
+  if enabled && not (Surface_runs.showing !surface_runs ~surface) then begin
+    write frame_start;
+    note_presented ~surface
+  end
 
 let note_asks_application application =
   if enabled then
@@ -638,5 +697,6 @@ let report () =
               @ Stage_samples.residual_lines !stage_samples !samples
               @ Ask_samples.raw_lines !asks_samples
               @ Samples.raw_lines ~asks:!asks_samples !samples
-              @ Stage_samples.raw_lines !stage_samples)))
+              @ Stage_samples.raw_lines !stage_samples
+              @ Surface_runs.raw_lines !surface_runs)))
 ;;

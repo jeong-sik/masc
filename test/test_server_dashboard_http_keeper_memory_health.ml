@@ -40,6 +40,14 @@ let require_ok = function
   | Error detail -> Alcotest.fail detail
 ;;
 
+let cold_health_json ~base_path =
+  Health.For_testing.with_runtime
+    ~keeper_health:Health.For_testing.keeper_health
+    (fun () ->
+      Server_dashboard_http_keeper_memory_health.keeper_memory_health_http_json
+        ~base_path)
+;;
+
 let write_snapshot ~keepers_dir ~keeper_id facts =
   Fs_compat.mkdir_p keepers_dir;
   let expected_revision =
@@ -205,7 +213,7 @@ let test_reports_revision_snapshot_bytes_and_latest_delta () =
   let second = fact "B" in
   ignore (write_snapshot ~keepers_dir ~keeper_id:"solo" [ first ]);
   ignore (write_snapshot ~keepers_dir ~keeper_id:"solo" [ changed; second ]);
-  let json = Health.keeper_memory_health_http_json ~base_path:base in
+  let json = cold_health_json ~base_path:base in
   let keeper = keeper_obj "solo" json in
   Alcotest.(check string)
     "schema"
@@ -233,14 +241,14 @@ let test_reports_derived_facts_and_support_invalidations () =
   let premise = fact "dependency is healthy" in
   let conclusion = derived_fact ~claim:"rollout can proceed" ~premise in
   ignore (write_snapshot ~keepers_dir ~keeper_id:"support" [ premise; conclusion ]);
-  let supported = Health.keeper_memory_health_http_json ~base_path:base in
+  let supported = cold_health_json ~base_path:base in
   let supported_keeper = keeper_obj "support" supported in
   Alcotest.(check int) "one observed fact" 1
     (int_field "observed_facts" supported_keeper);
   Alcotest.(check int) "one derived fact" 1
     (int_field "derived_facts" supported_keeper);
   ignore (write_snapshot ~keepers_dir ~keeper_id:"support" [ conclusion ]);
-  let invalidated = Health.keeper_memory_health_http_json ~base_path:base in
+  let invalidated = cold_health_json ~base_path:base in
   let invalidated_keeper = keeper_obj "support" invalidated in
   Alcotest.(check int) "unsupported conclusion is absent" 0
     (int_field "facts" invalidated_keeper);
@@ -277,7 +285,7 @@ let test_source_only_snapshot_is_enumerated_and_counted () =
     ~labels:[ "keeper", "source-only"; "site", "memory_os_librarian" ]
     ~delta:1.0
     ();
-  let json = Health.keeper_memory_health_http_json ~base_path:base in
+  let json = cold_health_json ~base_path:base in
   Alcotest.(check (list string))
     "source snapshot contributes identity"
     [ "source-only" ]
@@ -322,7 +330,7 @@ let test_corrupt_source_snapshot_is_visible () =
   in
   Fs_compat.mkdir_p keepers_dir;
   Fs_compat.save_file path {|{"schema":"wrong"}|};
-  let json = Health.keeper_memory_health_http_json ~base_path:base in
+  let json = cold_health_json ~base_path:base in
   let keeper = keeper_obj "source-broken" json in
   Alcotest.(check (list string))
     "source read alert"
@@ -348,7 +356,7 @@ let test_reports_the_librarian_position_without_a_loop () =
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
   let keeper_id = "librarian-" ^ Filename.basename base in
   ignore (write_snapshot ~keepers_dir ~keeper_id [ fact "librarian fact" ]);
-  let json = Health.keeper_memory_health_http_json ~base_path:base in
+  let json = cold_health_json ~base_path:base in
   let keeper = keeper_obj keeper_id json in
   let librarian = member "librarian" keeper in
   Alcotest.(check bool) "state is not measured" true (is_null (member "state" librarian));
@@ -383,7 +391,7 @@ let test_reports_the_librarian_position_without_a_loop () =
     ~kind:Current.Exact_execution_failure
     ~detail:"the lane refused"
     ~snapshot_present:true;
-  let after_failure = Health.keeper_memory_health_http_json ~base_path:base in
+  let after_failure = cold_health_json ~base_path:base in
   Alcotest.(check string)
     "a failure after the last Librarian commit is shown"
     "exact_execution_failure"
@@ -423,7 +431,7 @@ let test_librarian_failure_then_explicit_write_keeps_both () =
   |> require_ok
   |> ignore;
   let librarian =
-    member "librarian" (keeper_obj keeper_id (Health.keeper_memory_health_http_json ~base_path:base))
+    member "librarian" (keeper_obj keeper_id (cold_health_json ~base_path:base))
   in
   Alcotest.(check string)
     "the failure before the keeper's write is still shown"
@@ -443,7 +451,7 @@ let test_corrupt_snapshot_is_visible_as_read_error () =
     Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"broken"
   in
   Fs_compat.save_file broken_path {|{"schema":"wrong"}|};
-  let json = Health.keeper_memory_health_http_json ~base_path:base in
+  let json = cold_health_json ~base_path:base in
   Alcotest.(check (list string))
     "both keepers stay visible"
     [ "broken"; "good" ]
@@ -467,7 +475,7 @@ let test_sorts_by_snapshot_bytes_and_handles_empty_store () =
        [ fact "a much longer current memory claim"
        ; fact "another much longer current memory claim"
        ]);
-  let json = Health.keeper_memory_health_http_json ~base_path:base in
+  let json = cold_health_json ~base_path:base in
   Alcotest.(check (list string))
     "largest snapshot first"
     [ "large"; "small" ]
@@ -498,7 +506,7 @@ let test_configured_keeper_without_snapshot_gets_row () =
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
   let keeper_id = "configured-" ^ Filename.basename base in
   write_keeper_config ~keepers_dir ~keeper_id ();
-  let json = Health.keeper_memory_health_http_json ~base_path:base in
+  let json = cold_health_json ~base_path:base in
   let keeper = keeper_obj keeper_id json in
   Alcotest.(check bool) "snapshot_present" false (bool_field "snapshot_present" keeper);
   Alcotest.(check int) "facts" 0 (int_field "facts" keeper);
@@ -518,7 +526,7 @@ let test_librarian_starvation_is_error_alert () =
     ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]
     ~delta:4.0
     ();
-  let json = Health.keeper_memory_health_http_json ~base_path:base in
+  let json = cold_health_json ~base_path:base in
   let keeper = keeper_obj keeper_id json in
   Alcotest.(check int) "failures" 4 (int_field "librarian_failures" keeper);
   let alerts = list_field "alerts" keeper in
@@ -550,7 +558,7 @@ let test_librarian_failures_with_snapshot_is_warn_alert () =
     ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]
     ~delta:2.0
     ();
-  let json = Health.keeper_memory_health_http_json ~base_path:base in
+  let json = cold_health_json ~base_path:base in
   let keeper = keeper_obj keeper_id json in
   Alcotest.(check bool) "snapshot_present" true (bool_field "snapshot_present" keeper);
   let alerts = list_field "alerts" keeper in
@@ -581,7 +589,7 @@ let test_toml_name_override_uses_canonical_identity () =
     ~labels:[ "keeper", canonical; "site", "memory_os_librarian" ]
     ~delta:1.0
     ();
-  let json = Health.keeper_memory_health_http_json ~base_path:base in
+  let json = cold_health_json ~base_path:base in
   Alcotest.(check (list string)) "canonical row only" [ canonical ] (keeper_ids json);
   let keeper = keeper_obj canonical json in
   Alcotest.(check int) "failures visible" 1 (int_field "librarian_failures" keeper);
@@ -604,7 +612,7 @@ let test_counts_snapshot_read_site_failures () =
     ~labels:[ "keeper", keeper_id; "site", "memory_os_current_read" ]
     ~delta:2.0
     ();
-  let json = Health.keeper_memory_health_http_json ~base_path:base in
+  let json = cold_health_json ~base_path:base in
   let keeper = keeper_obj keeper_id json in
   Alcotest.(check int)
     "read-site failures counted"
@@ -751,7 +759,7 @@ let test_context_cycle_separates_saved_and_prepared () =
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
   write_keeper_config ~keepers_dir ~keeper_id:keeper_name ();
   let cycle () = member "context_cycle"
-    (keeper_obj keeper_name (Health.keeper_memory_health_http_json ~base_path:base)) in
+    (keeper_obj keeper_name (cold_health_json ~base_path:base)) in
   Alcotest.(check bool) "no prepared request inferred from saved state" true
     (is_null (member "prepared" (cycle ())));
   let messages = [Agent_core.Types.make_message ~role:Agent_core.Types.User
@@ -844,7 +852,7 @@ let test_unread_evidence_is_observed_without_publication () =
   ignore (Current.committed_unread_messages ~keepers_dir ~keeper_id:keeper_name |> require_ok);
   let files = [path;ledger;Current.durable_range_receipt_path ~keepers_dir ~keeper_id:keeper_name] in
   let before = List.map Fs_compat.load_file files in
-  let produced = Health.keeper_memory_health_http_json ~base_path:base in
+  let produced = cold_health_json ~base_path:base in
   let fields = match produced with
     | `Assoc fields -> fields
     | _ -> Alcotest.fail "the production health response must be an object" in
@@ -861,7 +869,7 @@ let test_unread_evidence_is_observed_without_publication () =
     ; "unknown root field still refuses the response", `Assoc (("unexpected", `Null) :: fields)
     ];
   let reading () =
-    let json = Health.keeper_memory_health_http_json ~base_path:base in
+    let json = cold_health_json ~base_path:base in
     let decoded = D.decode_memory_health_snapshot json |> require_ok in
     match List.find_opt (fun (row : D.memory_keeper_health) -> row.mkh_keeper_id=keeper_name) decoded.mhs_keepers with
     | Some row -> row.mkh_context_cycle
@@ -895,7 +903,7 @@ let test_context_cycle_reads_the_librarian_position_beside_the_cut () =
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
   write_keeper_config ~keepers_dir ~keeper_id:keeper_name ();
   let cycle () = member "context_cycle"
-    (keeper_obj keeper_name (Health.keeper_memory_health_http_json ~base_path:base)) in
+    (keeper_obj keeper_name (cold_health_json ~base_path:base)) in
   Alcotest.(check bool) "a keeper that has read nothing has no position" true
     (is_null (member "read_position" (cycle ())));
   Alcotest.(check bool) "and no read error to explain it" true
@@ -958,7 +966,7 @@ let test_the_continuity_lag_is_measured_or_says_it_cannot_be () =
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base) @@ fun () ->
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
   write_keeper_config ~keepers_dir ~keeper_id:keeper_name ();
-  let json () = Health.keeper_memory_health_http_json ~base_path:base in
+  let json () = cold_health_json ~base_path:base in
   let librarian () = member "librarian" (keeper_obj keeper_name (json ())) in
   let lag () = member "continuity_unread_atoms" (librarian ()) in
   let lag_atoms () = int_field "continuity_unread_atoms" (librarian ()) in
@@ -1060,7 +1068,7 @@ let test_the_librarian_stalled_alarm_is_read_from_files () =
   Masc.Keeper_meta_store.replace_snapshot config meta |> get;
   let librarian () =
     member "librarian"
-      (keeper_obj keeper_name (Health.keeper_memory_health_http_json ~base_path:base))
+      (keeper_obj keeper_name (cold_health_json ~base_path:base))
   in
   let gap () =
     match member "stalled" (librarian ()) with

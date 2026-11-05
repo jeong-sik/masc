@@ -19,7 +19,8 @@ let region : Dataset.browser_scope =
       ; scope = Some { Browser_lane.document_id = "document-a"; node_id = "region-4" } } }
 
 let browser_event (scope : Dataset.browser_scope) revision =
-  Dataset.browser_scope_fields scope @ [ "revision", `String revision ]
+  ("dataset", `String "browser_observation")
+  :: Dataset.browser_scope_fields scope @ [ "revision", `String revision ]
 
 let test_scope_round_trip_and_strict_identity () =
   List.iter

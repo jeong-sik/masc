@@ -129,7 +129,7 @@ let test_configuration_passes_do_not_publish_fresh_clocks () = with_workspace (f
     Fun.protect ~finally:(fun () -> Sse.unsubscribe_external id) (fun () ->
       Inventory.refresh ~base_path:base Addon.Configuration_changed;
       Inventory.refresh ~base_path:base Addon.Configuration_changed;
-      check int "fresh observation clocks do not produce a redundant event" 1 !heard)))
+      check int "fresh observation clocks do not produce a redundant event" 0 !heard)))
 
 let test_snapshot_does_not_consume_an_unannounced_change () = with_workspace (fun base ->
   with_config base (fun () ->

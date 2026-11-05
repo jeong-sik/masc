@@ -355,8 +355,11 @@ let test_observation_scope_tracks_exact_selection () =
   let expected = { source = Live; client_id = Some firefox.client_id; tab_id = 2; view = Read } in
   expect "text observation follows the selected live client and tab"
     (observation_scope initial = Some expected);
-  expect "choosing another client changes the observation owner"
-    (observation_scope (choose_client zen initial)
+  let changed = choose_client zen initial in
+  expect "choosing another client does not observe the previous client's tab"
+    (observation_scope changed = None);
+  expect "the next tab belongs to the new observation owner"
+    (observation_scope { changed with selected_tab = Some 2 }
      = Some { expected with client_id = Some zen.client_id });
   expect "an owned browser has no fabricated client id"
     (observation_scope { initial with source = Automation; selected_client = None }
@@ -370,10 +373,12 @@ let test_observation_scope_tracks_exact_selection () =
   expect "the focused scene retains its exact region"
     (observation_scope focused
      = Some { expected with view = Scene { scene_view = Browser_lane.Regions; scope = Some target } });
+  expect "an in-flight read keeps its observation identity without revalidating it"
+    (observation_scope { initial with load = Loading (8, Read) } = Some expected);
   List.iter
     (fun (name, view) -> expect (name ^ " pauses the observation subscription")
       (observation_scope view = None))
-    [ "in-flight read", { initial with load = Loading (8, Read) }
+    [ "effect in flight", { initial with load = Loading (8, Goto "https://example.org/new") }
     ; "pending refresh", { initial with refresh_pending = Some 8 }
     ; "client picker", { initial with client_picker = Some 0 }
     ; "URL draft", { initial with url_draft = Some "https://example.org/new" } ]

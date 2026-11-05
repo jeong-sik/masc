@@ -907,39 +907,42 @@ let test_mcp_rejects_duplicate_cursors_before_registration env =
 
 let test_mcp_rejects_unknown_machine_and_non_observer_machine env =
   let module Transport = Server_mcp_transport_http in
-  let authority = match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
-    | Ok authority -> authority | Error `Malformed -> Alcotest.fail "fixture authority" in
-  let admit ~base_path:_ _request = Ok () in
-  let deps : Transport.deps =
-    { get_origin = (fun _ -> "")
-    ; cors_headers = (fun _ -> [])
-    ; auth_token_from_request = (fun _ -> None)
-    ; is_ready = (fun () -> true)
-    ; get_runtime_result = (fun () -> Error "unused")
-    ; get_base_path = (fun () -> "/tmp/observer-test")
-    ; get_server_state = (fun () -> None)
-    ; verify_mcp_auth = admit
-    ; verify_mcp_observer_stream_auth = admit
-    ; verify_operator_mcp_auth = admit
-    ; verify_seat_mcp_auth = admit
-    } in
-  let handler reqd =
-    let request = Httpun.Reqd.request reqd in
-    Server_request_authority.with_current authority (fun () ->
-      Transport.handle_get_mcp ~deps request reqd) in
-  List.iter (fun (target, expected_status) ->
-    with_server env ~handler (fun ~port ->
-      let before = Masc.Sse.client_count () in
-      let url = Printf.sprintf "http://127.0.0.1:%d%s" port target in
-      match Masc_http_client.get_response_sync ~clock:(Eio.Stdenv.clock env) ~timeout_sec:3.
-              ~url ~headers:[ "Accept", "text/event-stream"; "Mcp-Session-Id", "observer-machine-test" ] () with
-      | Error detail -> Alcotest.failf "MCP request failed: %s" detail
-      | Ok response ->
-        Alcotest.(check int) "machine query outcome" expected_status response.status;
-        Alcotest.(check int) "no observer was registered" before (Masc.Sse.client_count ())))
-    [ "/mcp?sse_kind=observer&machine=other", 400
-    ; "/mcp?sse_kind=agent&machine=msx", 400
-    ; "/mcp?sse_kind=observer&machine=msx", 503 ]
+  let workspace = Masc_test_deps.setup_test_workspace () in
+  Fun.protect ~finally:(fun () -> Masc_test_deps.cleanup_test_workspace workspace) (fun () ->
+    let state = Masc.Mcp_server.For_testing.create_state ~base_path:workspace in
+    let authority = match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
+      | Ok authority -> authority | Error `Malformed -> Alcotest.fail "fixture authority" in
+    let admit ~base_path:_ _request = Ok () in
+    let deps : Transport.deps =
+      { get_origin = (fun _ -> "")
+      ; cors_headers = (fun _ -> [])
+      ; auth_token_from_request = (fun _ -> None)
+      ; is_ready = (fun () -> true)
+      ; get_runtime_result = (fun () -> Error "runtime unavailable")
+      ; get_base_path = (fun () -> workspace)
+      ; get_server_state = (fun () -> Some state)
+      ; verify_mcp_auth = admit
+      ; verify_mcp_observer_stream_auth = admit
+      ; verify_operator_mcp_auth = admit
+      ; verify_seat_mcp_auth = admit
+      } in
+    let handler reqd =
+      let request = Httpun.Reqd.request reqd in
+      Server_request_authority.with_current authority (fun () ->
+        Transport.handle_get_mcp ~deps request reqd) in
+    List.iter (fun (target, expected_status) ->
+      with_server env ~handler (fun ~port ->
+        let before = Masc.Sse.client_count () in
+        let url = Printf.sprintf "http://127.0.0.1:%d%s" port target in
+        match Masc_http_client.get_response_sync ~clock:(Eio.Stdenv.clock env) ~timeout_sec:3.
+                ~url ~headers:[ "Accept", "text/event-stream"; "Mcp-Session-Id", "observer-machine-test" ] () with
+        | Error detail -> Alcotest.failf "MCP request failed: %s" detail
+        | Ok response ->
+          Alcotest.(check int) "machine query outcome" expected_status response.status;
+          Alcotest.(check int) "no observer was registered" before (Masc.Sse.client_count ())))
+      [ "/mcp?sse_kind=observer&machine=other", 400
+      ; "/mcp?sse_kind=agent&machine=msx", 400
+      ; "/mcp?sse_kind=observer&machine=msx", 503 ])
 ;;
 
 let test_mcp_observer_refuses_foreign_and_retired_workspaces env =

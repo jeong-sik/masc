@@ -185,6 +185,79 @@ let test_two_streamed_runs_share_one_connection () =
        Alcotest.(check int) "it is parked again" 1 (count "idle_total" cache))
 ;;
 
+(* Reads one HTTP/1.1 request head and answers [response], on every request
+   of a connection; with [close_after_first] the connection closes after the
+   first answer. *)
+let start_raw_server ?(close_after_first = false) ~sw ~net response =
+  let socket =
+    Eio.Net.listen net ~sw ~backlog:8 ~reuse_addr:true (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+  in
+  let port =
+    match Eio.Net.listening_addr socket with
+    | `Tcp (_, port) -> port
+    | _ -> Alcotest.fail "the loopback listener has no TCP port"
+  in
+  let handler flow _addr =
+    let reader = Eio.Buf_read.of_flow flow ~max_size:8192 in
+    let rec read_head () =
+      match Eio.Buf_read.line reader with
+      | "" -> ()
+      | _ -> read_head ()
+    in
+    let rec serve () =
+      read_head ();
+      Eio.Flow.copy_string response flow;
+      if close_after_first then Eio.Flow.shutdown flow `All else serve ()
+    in
+    try serve () with
+    | End_of_file | Eio.Io _ -> ()
+  in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Eio.Net.run_server socket handler ~on_error:(fun _ -> ()));
+  Printf.sprintf "http://127.0.0.1:%d" port
+;;
+
+(* One server closes a connection after its first answer, so the request
+   that reuses it fails. The other answers [Connection: close], so its new
+   connection closes as not persistent. The full health response counts both
+   in [closed_total] and only the first in [closed_after_reuse]. *)
+let test_health_tells_a_reused_connection's_closes_from_a_new_one's () =
+  Eio_main.run
+  @@ fun env ->
+  with_provider_and_cache env (fun ~sw ~net _provider ->
+    Masc_test_deps.init_eio_clock ~sw env;
+    let cache =
+      match Provider_connection_cache_ref.for_this_domain () with
+      | Some cache -> cache
+      | None -> Alcotest.fail "the cache is installed on this domain"
+    in
+    let ok_answer = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok" in
+    let closes_after_first = start_raw_server ~close_after_first:true ~sw ~net ok_answer in
+    let answers_close =
+      start_raw_server ~sw ~net
+        "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+    in
+    let get url = Llm_provider.Http_client.get_sync ~cache ~sw ~net ~url ~headers:[] () in
+    (match get closes_after_first with
+     | Ok _ -> ()
+     | Error _ -> Alcotest.fail "the first request is answered");
+    (match get closes_after_first with
+     | Error (Llm_provider.Http_client.NetworkError _) -> ()
+     | Ok _ | Error _ -> Alcotest.fail "the reused connection the server closed fails");
+    (match get answers_close with
+     | Ok _ -> ()
+     | Error _ -> Alcotest.fail "the closing answer is answered");
+    let closed name reason =
+      Yojson.Safe.Util.(full_health_cache () |> member name |> member reason |> to_int)
+    in
+    Alcotest.(check int) "failed requests in all" 1 (closed "closed_total" "request_failed");
+    Alcotest.(check int) "of them on a reused connection" 1
+      (closed "closed_after_reuse" "request_failed");
+    Alcotest.(check int) "not persistent in all" 1 (closed "closed_total" "not_persistent");
+    Alcotest.(check int) "none on a reused connection" 0
+      (closed "closed_after_reuse" "not_persistent"))
+;;
+
 let () =
   Alcotest.run
     "provider_connection_cache_wiring"
@@ -195,6 +268,8 @@ let () =
             test_a_run_on_another_domain_opens_its_own_connection
         ; Alcotest.test_case "two streamed runs share one connection" `Quick
             test_two_streamed_runs_share_one_connection
+        ; Alcotest.test_case "health tells a reused connection's closes from a new one's"
+            `Quick test_health_tells_a_reused_connection's_closes_from_a_new_one's
         ] )
     ]
 ;;

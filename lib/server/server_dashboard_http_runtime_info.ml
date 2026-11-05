@@ -688,15 +688,10 @@ let runtime_diagnostics_json () =
               ; "signal", `String signal
               ; "message", `String message
               ])
-      (* Two needles were removed from this classifier because nothing in the
-         repository produces them: "repairing state and rewriting canonical
-         JSON" (whole state_repair arm) and "parse error:
-         Types_core.agent.last_seen". A guard with no producer classifies
-         nothing and only pins the phrasing of future log lines
-         (RFC-0371 §3.7). *)
-      | None
-        when String_util.contains_substring message "invalid agent JSON"
-             || String_util.contains_substring message "repaired agent JSON" ->
+      (* Matches the "invalid agent JSON" phrase that [Workspace_lifecycle],
+         [Workspace_gc] and [Masc_grpc_service] log when an agent record fails
+         to decode. *)
+      | None when String_util.contains_substring message "invalid agent JSON" ->
         Some
           (`Assoc
               [ "ts", `String entry.ts

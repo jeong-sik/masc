@@ -39,10 +39,5 @@ val kata_runtime_ids : string list
     this list are known-unsupported Kata family (e.g. Firecracker) or foreign
     — never adoptable; report them via {!classify_runtime_id}. *)
 
-val vmm_name : vmm -> string
-(** Stable lowercase name for records and labels.  Only [Ours vmm] carries a
-    VMM: a [Default_shim] row must display as the default shim ("VMM
-    unobserved"), never as a guessed VMM. *)
-
 val vmm_of_choice : string -> (vmm, string) result
 (** The Keeper-facing choice decoder: exactly three names, nothing else. *)

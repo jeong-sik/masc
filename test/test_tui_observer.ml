@@ -154,7 +154,8 @@ let summary = function
          | Masc.Workspace_dataset_event.Skill_catalog
          | Masc.Workspace_dataset_event.Clients
          | Masc.Workspace_dataset_event.Provider_usage
-         | Masc.Workspace_dataset_event.Provider_standing -> "")
+         | Masc.Workspace_dataset_event.Provider_standing
+         | Masc.Workspace_dataset_event.Keeper_costs -> "")
       ^ ")"
   | Observer.Event (Observer.Keeper_event_queue_changed { keeper }) ->
       "event_queue(" ^ keeper ^ ")"
@@ -868,6 +869,7 @@ let test_a_verification_or_run_push_reads_the_requests () =
                   | Masc.Workspace_dataset_event.Clients
                   | Masc.Workspace_dataset_event.Provider_usage
                   | Masc.Workspace_dataset_event.Provider_standing
+                  | Masc.Workspace_dataset_event.Keeper_costs
                   | Masc.Workspace_dataset_event.Harness_verdicts
                   | Masc.Workspace_dataset_event.Goals
                   | Masc.Workspace_dataset_event.Runtime_config
@@ -943,6 +945,7 @@ let test_a_repository_push_reads_the_list () =
                   | Masc.Workspace_dataset_event.Clients
                   | Masc.Workspace_dataset_event.Provider_usage
                   | Masc.Workspace_dataset_event.Provider_standing
+                  | Masc.Workspace_dataset_event.Keeper_costs
                   | Masc.Workspace_dataset_event.Harness_verdicts
                   | Masc.Workspace_dataset_event.Goals
                   | Masc.Workspace_dataset_event.Runtime_config
@@ -966,6 +969,7 @@ let test_a_repository_push_reads_the_list () =
               | Masc.Workspace_dataset_event.Clients
               | Masc.Workspace_dataset_event.Provider_usage
               | Masc.Workspace_dataset_event.Provider_standing
+              | Masc.Workspace_dataset_event.Keeper_costs
                   | Masc.Workspace_dataset_event.Harness_verdicts
                   | Masc.Workspace_dataset_event.Goals
                   | Masc.Workspace_dataset_event.Runtime_config
@@ -1004,6 +1008,11 @@ let test_a_repository_push_reads_the_list () =
           ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"provider_usage\"}\n\n"
           ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"provider_standing\"}\n\n"
           ]));
+  check (list string) "A Keeper costs push decodes by name"
+    [ "dataset(keeper_costs)" ]
+    (List.map summary
+       (decode_all
+          [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"keeper_costs\"}\n\n" ]));
   check (list string) "Skill pushes decode with the Keeper a ledger row names"
     [ "dataset(skill_activations:alpha)"; "dataset(skill_catalog)" ]
     (List.map summary

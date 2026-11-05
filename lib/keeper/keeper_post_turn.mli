@@ -1,6 +1,6 @@
 (** Keeper_post_turn — post-turn checkpoint preservation.
 
-    Orchestrates end-of-turn checkpoint wire-ins.
+    Orchestrates the end-of-turn checkpoint pipeline.
 
     This module owns only the checkpoint/lineage tail of a keeper turn.
     Current-memory selection runs in
@@ -13,7 +13,6 @@
     context metrics. *)
 type post_turn_lifecycle =
   { updated_meta : Keeper_meta_contract.keeper_meta
-  ; checkpoint : Agent_core.Checkpoint.t option
   ; checkpoint_bytes : int option
       (** Bytes of the canonical checkpoint on disk after the turn. [None]
           when no checkpoint was preserved or the store could not answer;
@@ -37,8 +36,3 @@ val durable_checkpoint_bytes :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   (int option, string) result
-(** Apply the keeper post-turn lifecycle.
-
-    Ordering is strict: tool emission drain (K4b) then multimodal
-    hydration (K1). K4b is the producer K1 consumes, and the multimodal
-    pass persists a [workspace_meta] summary that depends on it. *)

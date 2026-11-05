@@ -309,10 +309,6 @@ let execute_with_observers_with_authority
       ; terminal_effect_receipt = None
       }
     | Tool_result.Completed () ->
-      Option.iter
-        (Keeper_tool_emission_hook.capture_typed_result_for_keeper
-           ~keeper_name:meta.name)
-        producer_data;
       Keeper_registry.record_tool_use
         ~base_path:config.base_path
         meta.name
@@ -373,10 +369,6 @@ let execute_with_observers_with_authority
       ; terminal_effect_receipt = result.terminal_effect_receipt
       }
     | Tool_result.Deferred () ->
-      Option.iter
-        (Keeper_tool_emission_hook.capture_typed_result_for_keeper
-           ~keeper_name:meta.name)
-        producer_data;
       Keeper_registry.record_tool_use
         ~base_path:config.base_path
         meta.name

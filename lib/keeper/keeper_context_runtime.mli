@@ -55,7 +55,6 @@ val save_agent_core_checkpoint
 
 type post_turn_lifecycle =
   { updated_meta : keeper_meta
-  ; checkpoint : Agent_core.Checkpoint.t option
   ; checkpoint_bytes : int option
   ; message_count : int
   }

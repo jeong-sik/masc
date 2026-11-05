@@ -498,6 +498,7 @@ let label_of_event (event : Observer.event) =
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Repositories -> "repositories"
   | Observer.Gate_connector_changed _ -> "connector"
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Harness_verdicts -> "harness"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Clients -> "clients"
   | Observer.Dataset_changed
       (Masc.Workspace_dataset_event.Keeper_oauth_attempts _) -> "login"
   | Observer.Keeper_event_queue_changed _ -> "event queue"
@@ -668,6 +669,8 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
       { at; keeper = "server"; glyph = Quiet; label; detail = "a judge verdict or label was recorded" }
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Keeper_oauth_attempts { keeper }) ->
       { at; keeper; glyph = Quiet; label; detail = "an OAuth login attempt changed" }
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Clients ->
+      { at; keeper = "server"; glyph = Quiet; label; detail = "a workspace client row changed" }
   | Observer.Keeper_event_queue_changed { keeper } ->
       { at; keeper; glyph = Quiet; label; detail = "the event queue changed" }
   | Observer.Board_changed { post_id } ->

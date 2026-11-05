@@ -3822,14 +3822,19 @@ type client_row = {
   cr_status : client_status;
   cr_current_task : string option;
   cr_keeper_name : string option;
-  cr_session_bound_at : string;
-  cr_last_seen : string;
+  cr_session_bound_at : string option;
+      (* [None] unless the row is an agent record: the only source with a
+         session time of its own. *)
+  cr_last_seen : string option;
+      (* [None] unless the row is an agent record. *)
   cr_capabilities : string list;
 }
 
 type clients_snapshot = {
   cls_observed_at : string;
   cls_clients : client_row list;
+  cls_read_failures : string list;
+      (* Sources the server could not read; their rows are missing. *)
 }
 
 (* The clients roster's status is the agent_status ADT on the wire. The
@@ -3858,8 +3863,8 @@ let decode_client_row json =
   let* cr_status = client_status_of_string status in
   let* cr_current_task = required_nullable_string_field json "current_task" in
   let* cr_keeper_name = required_nullable_string_field json "keeper_name" in
-  let* cr_session_bound_at = required_string_field json "session_bound_at" in
-  let* cr_last_seen = required_string_field json "last_seen" in
+  let* cr_session_bound_at = required_nullable_string_field json "session_bound_at" in
+  let* cr_last_seen = required_nullable_string_field json "last_seen" in
   let* capabilities = required_list_field json "capabilities" in
   let* cr_capabilities = decode_string_list "capabilities" capabilities in
   Ok
@@ -3876,7 +3881,11 @@ let decode_client_row json =
 let decode_clients_snapshot json =
   let* schema = required_string_field json "schema" in
   let* () =
-    if String.equal schema "masc.dashboard.clients.v1" then Ok ()
+    (* v2 made the two time fields nullable and added a required
+       read_failures list. A response under the v1 tag matches neither, so
+       the tag itself names which contract the reader holds; there is no v1
+       reader beside it. *)
+    if String.equal schema "masc.dashboard.clients.v2" then Ok ()
     else Error ("clients: unsupported schema " ^ schema)
   in
   let* cls_observed_at = required_string_field json "generated_at" in
@@ -3887,7 +3896,9 @@ let decode_clients_snapshot json =
   in
   let* rows = required_list_field json "clients" in
   let* cls_clients = decode_list "clients" decode_client_row rows in
-  Ok { cls_observed_at; cls_clients }
+  let* failures = required_list_field json "read_failures" in
+  let* cls_read_failures = decode_string_list "read_failures" failures in
+  Ok { cls_observed_at; cls_clients; cls_read_failures }
 
 let decode_keeper_secret_projection ~keeper json =
   let* status = required_string_field json "status" in

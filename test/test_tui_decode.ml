@@ -7109,10 +7109,11 @@ let clients_row_json ~name ~agent_type ~status ~keeper ~task =
 
 let clients_snapshot_json rows =
   `Assoc
-    [ "schema", `String "masc.dashboard.clients.v1"
+    [ "schema", `String "masc.dashboard.clients.v2"
     ; "generated_at", `String "2026-09-04T01:21:00Z"
     ; "observation_only", `Bool true
     ; "clients", `List rows
+    ; "read_failures", `List []
     ]
 
 let test_decode_clients_reads_the_status_enum_and_ignores_profile () =
@@ -7169,10 +7170,11 @@ let test_decode_clients_rejects_unknown_status_and_schema () =
   match
     Tui_decode.decode_clients_snapshot
       (`Assoc
-         [ "schema", `String "masc.dashboard.clients.v2"
+         [ "schema", `String "masc.dashboard.clients.v1"
          ; "generated_at", `String "2026-09-04T01:21:00Z"
          ; "observation_only", `Bool true
          ; "clients", `List []
+         ; "read_failures", `List []
          ])
   with
   | Ok _ -> Alcotest.fail "a wrong schema decoded"

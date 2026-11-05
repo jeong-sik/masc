@@ -106,13 +106,15 @@ let bind_session config ~agent_name ?(agent_type_override=None) ~capabilities
          capabilities;
          meta = Some new_meta;
        } in
-       write_json config agent_file_dedup (agent_to_yojson updated);
+       Workspace_agent_record.write config agent_file_dedup
+         ~previous:(Some existing_agent) updated;
        if is_inactive then begin
          (* Restore to active_agents on session rebound *)
          let _state = update_state config (fun s ->
            let agents = nickname :: List.filter ((<>) nickname) s.active_agents in
            { s with active_agents = agents }
          ) in
+         Workspace_agent_record.report_roster_changed config;
          broadcast ~audience:System_record config ~from_agent:nickname
            ~msg_type:Msg_session_rebound
            ~content:(Printf.sprintf "%s rebound the namespace session" nickname)
@@ -172,15 +174,15 @@ let bind_session config ~agent_name ?(agent_type_override=None) ~capabilities
     last_seen = now_iso ();
     meta = Some meta;
   } in
-  let agent_json = agent_to_yojson agent in
   (* Write to filesystem — agent state is short-term workspace data. *)
-  write_json config agent_file agent_json;
+  Workspace_agent_record.write config agent_file ~previous:None agent;
 
   (* Update state *)
   let _state = update_state config (fun s ->
     let agents = nickname :: (List.filter ((<>) nickname) s.active_agents) in
     { s with active_agents = agents }
   ) in
+  Workspace_agent_record.report_roster_changed config;
 
   (* Broadcast session binding *)
   broadcast ~audience:System_record config ~from_agent:nickname
@@ -229,7 +231,7 @@ let end_session config ~agent_name =
     (match read_agent config agent_file with
      | Ok existing_agent ->
        let updated = { existing_agent with status = Inactive; last_seen = now_iso () } in
-       write_json config agent_file (agent_to_yojson updated)
+       Workspace_agent_record.write config agent_file ~previous:(Some existing_agent) updated
      | Error e ->
          let snapshot =
            agent_parse_error_snapshot ~agent_name:actual_name ~agent_file
@@ -238,9 +240,14 @@ let end_session config ~agent_name =
            "agent session end: invalid agent JSON for %s: %s | snapshot=%s"
            actual_name e (Yojson.Safe.to_string snapshot));
 
+    (* The record went Inactive above; pruning the name from the state's
+       list can still change what the roster draws — the name stopped being
+       listed as a workspace-state row — so the prune reports too, whether or
+       not the record could be read. *)
     let _state = update_state config (fun s ->
       { s with active_agents = List.filter ((<>) actual_name) s.active_agents }
     ) in
+    Workspace_agent_record.report_roster_changed config;
 
     broadcast ~audience:System_record config ~from_agent:"system"
       ~msg_type:Msg_session_ended

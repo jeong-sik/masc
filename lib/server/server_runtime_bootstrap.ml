@@ -582,6 +582,13 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   Keeper_oauth_pending.install_change_observer (fun ~base_path ~keeper ->
     Workspace_dataset_event.announce ~base_path
       (Workspace_dataset_event.Keeper_oauth_attempts { keeper }));
+  (* The Clients roster draws what an agent record says (listed, type,
+     status, current Task, Keeper) and what the workspace state lists as
+     active. A heartbeat that moves only last_seen changes neither. *)
+  Workspace_agent_record.install_rows_changed_observer (fun config ->
+    Workspace_dataset_event.announce
+      ~base_path:config.Workspace_utils_backend_setup.base_path
+      Workspace_dataset_event.Clients);
   let path_diagnostics =
     Server_base_path_diagnostics.detect
       ?input_base_path

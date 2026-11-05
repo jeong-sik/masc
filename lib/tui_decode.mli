@@ -1022,14 +1022,20 @@ type client_row = {
   cr_status : client_status;
   cr_current_task : string option;
   cr_keeper_name : string option;
-  cr_session_bound_at : string;
-  cr_last_seen : string;
+  cr_session_bound_at : string option;
+      (** [None] unless the row is an agent record, the only source with a
+          session time of its own. *)
+  cr_last_seen : string option;
+      (** [None] unless the row is an agent record. *)
   cr_capabilities : string list;
 }
 
 type clients_snapshot = {
   cls_observed_at : string;
   cls_clients : client_row list;
+  cls_read_failures : string list;
+      (** Sources the server could not read; their rows are missing, so the
+          roster is shorter than a complete reading. *)
 }
 
 val client_status_to_string : client_status -> string

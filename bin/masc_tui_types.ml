@@ -10671,6 +10671,10 @@ type state = {
   mutable clients_surface: Tui_decode.clients_snapshot option;
   mutable clients_surface_error: string option;
   mutable clients_surface_inflight: bool;
+  (* The read the Clients roster owes: a clients push, a Keeper registry row
+     or every-row change, a revalidation and a failed read each owe one;
+     off the surface nothing is owed. *)
+  mutable clients_owed: Masc_tui_owed_read.t;
   mutable clients_surface_scroll: int;
   mutable clients_surface_cursor: int;
   mutable client_detail: Tui_decode.client_row option;
@@ -20277,6 +20281,7 @@ let create_state
   slot_editor = None;
   clients_surface = None;
   clients_surface_error = None;
+  clients_owed = Masc_tui_owed_read.settled;
   clients_surface_inflight = false;
   clients_surface_scroll = 0;
   clients_surface_cursor = 0;

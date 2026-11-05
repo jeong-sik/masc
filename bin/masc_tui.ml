@@ -8157,12 +8157,36 @@ let owe_connectors_read state =
 let owe_harness_read state =
   state.harness_owed <- Masc_tui_owed_read.changed state.harness_owed
 
+(* The Clients roster reads again when a workspace client row changes, when
+   a Keeper registry row or every row changes, on a revalidation, and after
+   a failed read (RFC-0480 §3.4). A heartbeat that only moves a row's
+   [last_seen] is not announced. *)
+let owe_clients_read state =
+  state.clients_owed <- Masc_tui_owed_read.changed state.clients_owed
+
+(* Runs on every loop iteration. Off the Clients surface nothing is owed:
+   arriving reads it. A read in flight is let finish first; one whose
+   generation was superseded returns abandoned. *)
+let launch_owed_clients state ~mailbox =
+  if state.view <> Clients then state.clients_owed <- Masc_tui_owed_read.settled
+  else begin
+    let reading = state.clients_surface_inflight in
+    let read =
+      if reading then state.clients_owed
+      else Masc_tui_owed_read.abandoned state.clients_owed
+    in
+    state.clients_owed <- read;
+    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
+      launch_clients_load state ~mailbox
+  end
+
 (* A dataset push owes a read to the surface that shows that dataset. *)
 let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
   match dataset with
   | Masc.Workspace_dataset_event.Repositories -> owe_repositories_read state
   | Masc.Workspace_dataset_event.Verification_requests -> owe_verification_read state
   | Masc.Workspace_dataset_event.Harness_verdicts -> owe_harness_read state
+  | Masc.Workspace_dataset_event.Clients -> owe_clients_read state
   | Masc.Workspace_dataset_event.Keeper_oauth_attempts { keeper } ->
       Masc_tui_types.owe_identity_login_read state keeper
 
@@ -8175,7 +8199,7 @@ let launch_surface_reads state ~mailbox (surface : surface) =
   if server_authority_ready state then
   match surface with
   | Lanes -> launch_lanes_load state ~mailbox
-  | Clients -> launch_clients_load state ~mailbox
+  | Clients -> owe_clients_read state
   (* The list draws nothing from the Keeper composite; Info and Secrets read
      it on entry and when it changes. *)
   | Keepers
@@ -18977,6 +19001,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        owe_connectors_read state;
        owe_runtime_config_read state;
        owe_harness_read state;
+       owe_clients_read state;
        Masc_tui_types.owe_every_identity_login_read state;
        owe_async_requests_read state;
        owe_selected_tools_async_detail_read state;
@@ -19370,6 +19395,7 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
     (* The feed was gone while the authority was withdrawn: every login
        announcement it would have delivered was lost, so each Keeper a kept
        expectation names owes its read again. *)
+    owe_clients_read state;
     Masc_tui_types.owe_every_identity_login_read state;
     owe_async_requests_read state;
     owe_selected_tools_async_detail_read state;
@@ -23418,6 +23444,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                    waiting_inventory_changed := keeper :: !waiting_inventory_changed
                | Masc_tui_observer.Keeper_roster_change change ->
                    owe_keeper_roster_change state change;
+                   (* The Clients roster lists the registry's Keepers by
+                      phase, so a registry row change re-reads it too. *)
+                   owe_clients_read state;
                    (* A Keeper's metadata and configuration feed its
                       effective tool surface. *)
                    (match change, selected_keeper state with
@@ -27855,6 +27884,15 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       end
   | Clients_loaded (generation, result) ->
       state.clients_surface_inflight <- false;
+      (* A source the server could not read leaves its rows out, so the
+         roster is shorter than a complete reading and stays owed a read
+         through the same failed-read path as an error. *)
+      state.clients_owed <-
+        (match result with
+         | Ok { Masc.Tui_decode.cls_read_failures = []; _ } ->
+             Masc_tui_owed_read.succeeded state.clients_owed
+         | Ok { Masc.Tui_decode.cls_read_failures = _ :: _; _ } | Error _ ->
+             failed_read state.clients_owed);
       if generation = state.clients_surface_generation then (
         match result with
         | Ok snapshot ->
@@ -33088,6 +33126,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_runtime_config state ~mailbox:async_messages;
       launch_owed_connectors state ~mailbox:async_messages;
       launch_owed_harness state ~mailbox:async_messages;
+      launch_owed_clients state ~mailbox:async_messages;
       launch_owed_identity_logins state ~mailbox:async_messages;
       launch_owed_keeper_waiting state ~mailbox:async_messages;
       launch_owed_tool_modes state ~mailbox:async_messages;
@@ -39152,8 +39191,7 @@ Use relative paths for resources already held in the package. -->
                        state.task_detail_id
                  | Planning_detail goal_id ->
                      launch_goal_timeline_load state ~mailbox:async_messages goal_id)
-             | Clients ->
-                 launch_clients_load state ~mailbox:async_messages
+             | Clients -> owe_clients_read state
              | Lanes ->
                 launch_lanes_reread state ~mailbox:async_messages;
                 if Option.is_some state.runtime_lane_pick || Option.is_some state.slot_editor then
@@ -41818,7 +41856,7 @@ Use relative paths for resources already held in the package. -->
             a failed read ([launch_owed_verification]). *)
          | Verification -> ()
              | Lanes -> launch_lanes_load state ~mailbox:async_messages
-             | Clients -> launch_clients_load state ~mailbox:async_messages
+             | Clients -> owe_clients_read state
          (* Harness re-reads when a verdict or a label is recorded and
             retries a failed read ([launch_owed_harness]). *)
          | Harness -> ()

@@ -286,7 +286,7 @@ let unbind_exact_workspace_agents config aliases =
         aliases
     in
     if unbound <> []
-    then
+    then begin
       ignore
         (Workspace.update_state config (fun current ->
            { current with
@@ -295,6 +295,10 @@ let unbind_exact_workspace_agents config aliases =
                  (fun active -> not (List.exists (String.equal active) aliases))
                  current.active_agents
            }));
+      (* The purged names stopped being workspace-state rows, so the Clients
+         roster draws differently even though no record was written. *)
+      Workspace_agent_record.report_roster_changed config
+    end;
     Ok unbound
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn

@@ -147,7 +147,8 @@ let summary = function
          | Masc.Workspace_dataset_event.Keeper_oauth_attempts { keeper } -> ":" ^ keeper
          | Masc.Workspace_dataset_event.Repositories
          | Masc.Workspace_dataset_event.Verification_requests
-         | Masc.Workspace_dataset_event.Harness_verdicts -> "")
+         | Masc.Workspace_dataset_event.Harness_verdicts
+         | Masc.Workspace_dataset_event.Clients -> "")
       ^ ")"
   | Observer.Event (Observer.Workspace_store_changed Observer.Goal_projection) -> "goal_projection"
   | Observer.Event (Observer.Workspace_store_changed Observer.Runtime_config) -> "runtime_config"
@@ -949,6 +950,7 @@ let test_a_verification_or_run_push_reads_the_requests () =
               | Some
                   ( Masc.Workspace_dataset_event.Repositories
                   | Masc.Workspace_dataset_event.Harness_verdicts
+                  | Masc.Workspace_dataset_event.Clients
                   | Masc.Workspace_dataset_event.Keeper_oauth_attempts _ )
               | None -> false)
          | Observer.Undecodable _ -> false)
@@ -1012,6 +1014,7 @@ let test_a_repository_push_reads_the_list () =
               | Some
                   ( Masc.Workspace_dataset_event.Verification_requests
                   | Masc.Workspace_dataset_event.Harness_verdicts
+                  | Masc.Workspace_dataset_event.Clients
                   | Masc.Workspace_dataset_event.Keeper_oauth_attempts _ )
               | None -> false)
          | Observer.Undecodable _ -> false)
@@ -1026,6 +1029,7 @@ let test_a_repository_push_reads_the_list () =
           | Some
               ( Masc.Workspace_dataset_event.Repositories
               | Masc.Workspace_dataset_event.Harness_verdicts
+              | Masc.Workspace_dataset_event.Clients
               | Masc.Workspace_dataset_event.Keeper_oauth_attempts _ )
           | None -> true)
      | _ -> false);
@@ -1052,7 +1056,12 @@ let test_a_repository_push_reads_the_list () =
     [ "dataset(keeper_oauth_attempts:largo)" ]
     (List.map summary
        (decode_all
-          [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"keeper_oauth_attempts\",\"keeper\":\"largo\"}\n\n" ]))
+          [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"keeper_oauth_attempts\",\"keeper\":\"largo\"}\n\n" ]));
+  check (list string) "a clients push decodes by name"
+    [ "dataset(clients)" ]
+    (List.map summary
+       (decode_all
+          [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"clients\"}\n\n" ]))
 
 let connector_frame =
   {|data: {"type":"gate_connector_changed","connector":"slack","ts_unix":100.0}

@@ -3322,6 +3322,8 @@
 
 (include stanzas/test_keeper_turn_fsm_tla_parity.inc)
 
+(include stanzas/test_workspace_agent_record.inc)
+
 (include stanzas/test_workspace_heartbeat_outcome.inc)
 
 (include stanzas/test_workspace_init_state_parity.inc)

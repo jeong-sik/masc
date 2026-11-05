@@ -70,7 +70,8 @@ let update_local_agent_state config ~agent_name f =
     with_file_lock config agent_file (fun () ->
       let json = read_json config agent_file in
       match agent_of_yojson json with
-      | Ok agent -> write_json config agent_file (agent_to_yojson (f agent))
+      | Ok agent ->
+        Workspace_agent_record.write config agent_file ~previous:(Some agent) (f agent)
       | Error msg ->
         Log.Misc.error "update_local_agent_state: parse failed for %s: %s" agent_name msg)
 ;;

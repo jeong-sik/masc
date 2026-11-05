@@ -68,6 +68,7 @@ let fault_to_json = function
   | Fault.Binding fact -> `Assoc ["kind",`String "binding";"fact",`String (binding_to_string fact)]
   | Fault.Unattributed -> `Assoc ["kind",`String "unattributed"]
   | Fault.Unknown_after_dispatch -> `Assoc ["kind",`String "unknown_after_dispatch"]
+  | Fault.Local_admission -> `Assoc ["kind",`String "local_admission"]
 
 let failure_fields (value : failure) =
   ["attempt",`Int value.attempt;"runtime_id",`String value.runtime_id;
@@ -135,6 +136,8 @@ let fault_of_json json =
     let* ()=exact_fields ["kind"] fields in Ok Fault.Unattributed
   | "unknown_after_dispatch" ->
     let* ()=exact_fields ["kind"] fields in Ok Fault.Unknown_after_dispatch
+  | "local_admission" ->
+    let* ()=exact_fields ["kind"] fields in Ok Fault.Local_admission
   | _ -> Error "unknown runtime walk candidate fault kind"
 
 let failure_of_json json =

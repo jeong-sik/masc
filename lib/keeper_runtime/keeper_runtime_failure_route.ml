@@ -8,6 +8,7 @@ type retry_class =
   | Server_error
   | Network_transient
   | Provider_timeout
+  | Local_admission_timeout
 
 type rotate_class =
   | Auth_failed
@@ -314,6 +315,7 @@ let route_of_api_error (api : Llm_provider.Retry.api_error) =
     rotate Request_refused
   | Llm_provider.Candidate_fault.Binding Admission -> rotate Admission
   | Llm_provider.Candidate_fault.Binding Deadline -> observe Provider_timeout
+  | Llm_provider.Candidate_fault.Local_admission -> observe Local_admission_timeout
   | Llm_provider.Candidate_fault.Binding Output_dialect ->
     (* No [Retry.api_error] constructor currently maps here. If one is
        added, this arm names the route action for a binding whose declared
@@ -365,7 +367,11 @@ let route_of_provider_error (p : Llm_provider.Error.provider_error) =
        -> rotate Server_error_not_transient
      | None -> exhaust Provider_integration)
   | Llm_provider.Error.NetworkError _ -> observe_retry Network_transient
-  | Llm_provider.Error.Timeout _ -> observe_retry Provider_timeout
+  | Llm_provider.Error.Timeout _ ->
+    observe_retry
+      (if Llm_provider.Error.is_local_admission_timeout p
+       then Local_admission_timeout
+       else Provider_timeout)
   | Llm_provider.Error.AuthError _ -> rotate Auth_failed
   | Llm_provider.Error.AuthorizationError _ -> rotate Authorization_refused
   | Llm_provider.Error.NotFound _ -> rotate Model_unavailable
@@ -494,7 +500,8 @@ let path_rest_sec ~cap_sec ~retry_class ~retry_after_hint =
     | Empty_completion _
     | Server_error
     | Network_transient
-    | Provider_timeout ->
+    | Provider_timeout
+    | Local_admission_timeout ->
       Env_config_keeper.KeeperKeepalive.rate_limit_backoff_floor_sec
   in
   match usable_retry_after retry_after_hint with
@@ -516,6 +523,7 @@ let retry_class_label = function
   | Server_error -> "server_error"
   | Network_transient -> "network_transient"
   | Provider_timeout -> "provider_timeout"
+  | Local_admission_timeout -> "local_admission_timeout"
 
 let rotate_class_label = function
   | Auth_failed -> "auth_failed"
@@ -588,8 +596,10 @@ let response_observed = function
      (* 5xx or provider unavailable: nothing the model said is on record. *)
      | Network_transient
      (* the transport failed; no answer arrived. *)
-     | Provider_timeout ->
-       (* the deadline expired before an answer. *)
+     | Provider_timeout
+     (* the deadline expired before an answer. *)
+     | Local_admission_timeout ->
+       (* the wait expired in MASC's own admission; nothing was sent. *)
        false)
   | Rotate_now { rotate } ->
     (match rotate with
@@ -715,8 +725,10 @@ let route_resumes_on_same_path = function
      (* 5xx or provider unavailable. *)
      | Network_transient
      (* the transport dropped. *)
-     | Provider_timeout ->
-       (* a deadline expired. *)
+     | Provider_timeout
+     (* a deadline expired. *)
+     | Local_admission_timeout ->
+       (* MASC's own admission queue was full for the moment. *)
        true
      | Empty_completion
          { stop_reason =

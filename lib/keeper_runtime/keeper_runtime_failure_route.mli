@@ -45,6 +45,10 @@ type retry_class =
   | Server_error  (** typed server failure / provider unavailable *)
   | Network_transient  (** transport-level network failure *)
   | Provider_timeout  (** provider or transport deadline expiry *)
+  | Local_admission_timeout
+      (** the wait expired in MASC's own permit queue or local capacity gate,
+          before anything reached the provider
+          ([Candidate_fault.Local_admission]) *)
 
 val core_error_is_hard_quota : Agent_core.Error.t -> bool
 (** True only for the typed [PaymentRequired] and provider [HardQuota]
@@ -280,10 +284,11 @@ val route_resumes_on_same_path : route -> bool
 
     [true]: [Rate_limited], [Provider_capacity], [Empty_completion] with
     [EndTurn], [MaxTokens], or [StopSequence], [Server_error],
-    [Network_transient], [Provider_timeout], and [Hard_quota] with a usable
-    reset hint (positive, not NaN). The empty-completion reasons resume a
-    direct operation once so its saved tool results are not discarded; another
-    resume still requires a newly saved tool result. An accept rejection with
+    [Network_transient], [Provider_timeout], [Local_admission_timeout], and
+    [Hard_quota] with a usable reset hint (positive, not NaN). The
+    empty-completion reasons resume a direct operation once so its saved tool
+    results are not discarded; another resume still requires a newly saved
+    tool result. An accept rejection with
     no usable progress, an empty response shape, and [MaxTokens] uses this same
     empty-completion route when the SDK preserves the authoritative terminal.
     Blank, thinking-only, and partial-content rejections retain their rotations.

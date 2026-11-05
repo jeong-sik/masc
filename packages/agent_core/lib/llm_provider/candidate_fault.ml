@@ -20,6 +20,7 @@ type t =
   | Binding of binding_fact
   | Unattributed
   | Unknown_after_dispatch
+  | Local_admission
 
 (* [of_api_error] matches [Retry.api_error] without [_]: a new constructor
    stops compilation until its expected judgment is written here and in the
@@ -49,5 +50,9 @@ let of_api_error (api : Retry.api_error) : t =
      unknown. The Keeper walk still rotates on it through
      [Runtime_attempt_fsm.should_try_next]. *)
   | Retry.NetworkError _ -> Unknown_after_dispatch
-  | Retry.Timeout _ -> Binding Deadline
+  (* [Queue] and [Capacity_backpressure] expire in MASC's own permit queue or
+     local capacity gate, before the request reaches this binding. *)
+  | Retry.Timeout { phase; message = _ } ->
+    if Error.timeout_phase_is_local_admission phase then Local_admission
+    else Binding Deadline
 ;;

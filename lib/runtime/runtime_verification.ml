@@ -551,7 +551,8 @@ let failure_of_agent_core_error error =
     Provider_overloaded (with_retry_after retry_after detail)
   | Route.Retry_after_observed { retry_class = Route.Network_transient; _ } ->
     Provider_unreachable detail
-  | Route.Retry_after_observed { retry_class = Route.Provider_timeout; _ } -> Timed_out
+  | Route.Retry_after_observed
+      { retry_class = Route.Provider_timeout | Route.Local_admission_timeout; _ } -> Timed_out
   | Route.Retry_after_observed { retry_class = Route.Empty_completion _; _ } ->
     Provider_rejected detail
   | Route.Rotate_now { rotate = Route.Auth_failed | Route.Authorization_refused } ->

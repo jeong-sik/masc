@@ -120,6 +120,22 @@ let test_rate_limit_hint_survives_persisted_walk () =
       None, None, "wait 900 seconds is only prose"
     ]
 
+let test_admission_wait_survives_persisted_walk () =
+  let timeout phase =
+    Agent_core.Error.Api (Agent_core.Retry.Timeout {message="timed out";phase=Some phase}) in
+  let waited=observe 0 "queued.runtime" (timeout Llm_provider.Http_client.Queue)
+  and slow=observe 1 "slow.runtime" (timeout Llm_provider.Http_client.First_token) in
+  let evidence=decode {Evidence.failures=[waited;slow];
+    terminal=Evidence.observe_terminal ~runtime_id:"slow.runtime" ~attempt:1
+      (timeout Llm_provider.Http_client.First_token)} in
+  match evidence.failures with
+  | [waited;slow] ->
+    check bool "MASC's own admission wait reads back as itself" true
+      (waited.api_candidate_fault=Some Fault.Local_admission);
+    check bool "a provider deadline still reads back as the binding's deadline" true
+      (slow.api_candidate_fault=Some (Fault.Binding Fault.Deadline))
+  | _ -> fail "timed-out candidates disappeared"
+
 let test_malformed_rate_limit_hint_is_refused () =
   let fields = ["kind",`String "provider_rate_limited";"provider",`Null;
     "retry_after",`Float 12.5;"detail",`String "throttle"] in
@@ -138,4 +154,5 @@ let () = run "runtime walk receipt evidence" ["candidate facts",[
   test_case "successful fallback and transformed terminal preserve separate facts" `Quick test_successful_fallback_and_unobserved_terminal;
   test_case "malformed evidence cannot masquerade as an empty walk" `Quick test_corrupt_evidence_is_not_an_empty_walk;
   test_case "rate limit survives candidate and terminal persistence" `Quick test_rate_limit_hint_survives_persisted_walk;
+  test_case "an admission wait and a provider deadline survive persistence apart" `Quick test_admission_wait_survives_persisted_walk;
   test_case "malformed rate-limit hints are refused" `Quick test_malformed_rate_limit_hint_is_refused]]

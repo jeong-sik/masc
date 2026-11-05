@@ -113,6 +113,12 @@ tombstone is recorded as its own event.
 Failure of one Keeper, Job, Connector, Gate request, or storage operation is
 scoped to that object and lane. It cannot pause the Workspace or other Keepers.
 
+The operator actions `namespace_pause` and `namespace_resume`
+([SUPERVISOR-MODE](../SUPERVISOR-MODE.md)) write and clear `paused`,
+`pause_reason`, `paused_by` and `paused_at` in Workspace state and broadcast
+the change. Status reads (`masc_pause_status`, GraphQL, the dashboard) show
+that record. No Keeper, Task, Goal or Gate transition reads it.
+
 ## 7. Required invariants
 
 - `INV-WORKSPACE-001`: every mutation is versioned and atomic.

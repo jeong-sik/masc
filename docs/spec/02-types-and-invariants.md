@@ -189,7 +189,7 @@ type workspace_state = {
 }
 ```
 
-RFC-0323 및 [03-workspace-state.md](./03-workspace-state.md)에 따라 global pause/resume 및 speculation budget은 retired contract이며, wire 호환성을 위한 레코드 필드로만 보존된다.
+`paused`·`pause_reason`·`paused_by`·`paused_at` 은 operator action `namespace_pause`·`namespace_resume` 이 쓰고 지운다. 상태 조회(`masc_pause_status`, GraphQL, dashboard)만 이 값을 읽고 Keeper·Task 전이는 읽지 않는다([03-workspace-state.md](./03-workspace-state.md) §6). `speculation_enabled`·`speculation_budget` 은 상태 파일에서 읽기만 하고 동작에 쓰는 곳이 없다.
 
 ### 2.10 Backlog
 

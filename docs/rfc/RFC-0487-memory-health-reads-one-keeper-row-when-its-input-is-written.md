@@ -77,6 +77,7 @@ TUI 의 Memory 화면은 2초마다 fleet 전체 Memory health(`GET /api/v1/dash
 5. **합계와 경보 요약 계산은 모듈 하나로 둔다.** 지금은 서버만 계산한다. 서버 fleet 응답과 TUI 가 같은 모듈을 쓴다. 두 쪽이 따로 계산하면 숫자가 어긋난다.
 6. **Memory 입력 창은 선택한 Keeper 의 알림에 다시 읽는다.** 지금은 2초 health 읽기에 묻어 갱신된다.
 7. **보관 기간 정리는 지운 turn record 의 Keeper 마다 알린다.** 시간이 일으키는 변화도 쓰기 자리에서 알린다.
+8. **알림을 낼 때 그 workspace 의 fleet 답 캐시를 비운다.** fleet 답은 60초 캐시 뒤에 있다. 비우지 않으면 화면에 도착할 때 읽는 fleet 답이 막 읽은 행보다 낡을 수 있다.
 
 ## 3. 층
 
@@ -86,7 +87,7 @@ TUI 의 Memory 화면은 2초마다 fleet 전체 Memory health(`GET /api/v1/dash
 |---|---|---|
 | L1 | 서버: `GET /api/v1/dashboard/keeper-memory-health?keeper=<k>`. 합계·경보 요약 계산을 공용 모듈로 옮기고, fleet 응답도 그 모듈을 쓴다 | main |
 | L2 | wire 와 TUI: dataset `Memory_health { keeper }`. 알림이 오면 그 Keeper 행만 읽고 합친다. Memory 입력 창도 선택한 Keeper 알림에 읽는다. Browser lane 에서 돌아오면 그 화면에 도착한 것으로 읽는다. 2초 갈래는 아직 둔다 | L1, RFC-0480 2층(#48489, subject 디코더) |
-| L3 | 서버: 입력 1~6·10·11·13 의 저장소 observer, `C`·`R` → `base_path` 묶음, 알림. 보관 기간 정리 알림 | L2 |
+| L3 | 서버: 입력 1~6·10·11·13 의 저장소 observer, `C`·`R` → `base_path` 묶음, 알림과 fleet 캐시 비우기. 보관 기간 정리 알림 | L2 |
 | L4 | 서버: 메모리 안 입력 7·8·12 의 observer. TUI: Memory 2초 갈래를 지운다 | L3 |
 
 L4 가 2초 갈래를 지운다. 그 전까지는 2초 갈래가 남아 있어 중간 층이 main 에 들어가도 화면이 멈추지 않는다.

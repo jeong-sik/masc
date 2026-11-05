@@ -1313,11 +1313,20 @@ let section_with ~draw ~bound ~(providers : Types.overview_providers_reading) ~r
         | Exhausted_unknown -> "unknown"
         | Exhausted_accounts count -> string_of_int count
       in
+      (* Two header rows, each a list of clauses. A row that is too wide ends
+         where a clause ends: broken at a space it left "Exhausted" and
+         "(observed) 0" on two rows, or "v:" at the end of one and its label
+         alone on the next. The Trend reading is named by the tab row above,
+         with the key that reaches it, so this row does not name it again. *)
       let summary =
-        [ Printf.sprintf "Accounts %d \xc2\xb7 Reporting %d \xc2\xb7 At limit (reported) %d \xc2\xb7 Exhausted (observed) %s"
-            counts.accounts counts.reporting counts.at_limit exhausted
-        ; "!: at limit or exhausted \xc2\xb7 Bar: used at last report \xc2\xb7 other use does not block model calls \xc2\xb7 v: Trend" ]
-        |> List.concat_map (Masc_tui_message_layout.wrap_words ~max_cells:width) in
+        List.concat_map (Masc_tui_message_layout.pack_clauses ~max_cells:width)
+          [ [ Printf.sprintf "Accounts %d" counts.accounts
+            ; Printf.sprintf "Reporting %d" counts.reporting
+            ; Printf.sprintf "At limit (reported) %d" counts.at_limit
+            ; Printf.sprintf "Exhausted (observed) %s" exhausted ]
+          ; [ "!: at limit or exhausted"
+            ; "Bar: used at last report"
+            ; "other use does not block model calls" ] ] in
       let notes = runtimes_note @ emails_note in
       match rows with
       | [] ->

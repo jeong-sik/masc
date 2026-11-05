@@ -16,15 +16,7 @@
 
 open Masc_domain
 
-let schema_of_name name : tool_schema =
-  let rel = "tools/" ^ name ^ ".toml" in
-  match Embedded_config.read rel with
-  | None -> failwith (Printf.sprintf "embedded tool definition missing: %s" rel)
-  | Some contents ->
-    (match Tool_definition_toml.load ~name ~contents with
-     | Ok { Tool_definition_toml.schema; _ } -> schema
-     | Error message -> failwith message)
-;;
+let schema_of_name = Tool_definition_embedded.schema
 
 (* B1 — creation requires metric and target_value — is deliberately not a
    schema-level [required] on masc_goal_upsert: the one tool serves both create

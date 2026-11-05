@@ -68,7 +68,7 @@ let assemble_request_context ~base_system_prompt ~post_tool_round ~previous_asse
           let observations = match Keeper_context_layers.text goals with
             | "" -> [] | text -> [Keeper_context_assembly.Active_goals (Inference_utils.sanitize_text_utf8 text)] in
           let authority = match Keeper_context_layers.text authority with
-            | "" -> [] | text -> [Prompt_block_id.Completion_authority, text] in
+            | "" -> [] | text -> [Prompt_block_id.Completion_authority, Inference_utils.sanitize_text_utf8 text] in
           observations, authority @ List.map (fun (id, text) ->
             if Prompt_block_id.equal id Prompt_block_id.Dynamic_context
             then id, Keeper_context_layers.text remaining else id, text) blocks, Some remaining

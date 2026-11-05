@@ -3064,6 +3064,32 @@ let prepare_authority_turn ~system_prompt assembly =
 
 let authority_text = "Approved task-approved; verification vrf-approved; authority operator-fixture"
 
+(* Before RFC-0491 the authority text reached the System through
+   [sanitize_text_utf8]; as a carrier block it keeps that. An official client
+   JSON-encodes the carrier, and Yojson writes bytes from 0x80 up as given. *)
+let test_carrier_authority_block_is_valid_utf8 () =
+  let module A = Keeper_context_assembly in
+  let truncated_dash = "\xE2\x80" in
+  let partition = Layers.assemble ~content_of:(function
+    | Layers.Completion_authority ->
+      Some ("Approved task-cut " ^ truncated_dash ^ "; verification vrf-cut")
+    | _ -> None) in
+  let assembly = Keeper_run_prompt.assemble_request_context ~base_system_prompt:"BASE"
+      ~post_tool_round:false ~previous_assembly:None ~dynamic_context_partition:(Some partition)
+      ~existing_extra_system_context:None
+      ~blocks:[Prompt_block_id.Dynamic_context, Layers.text partition] in
+  let authority = match List.filter (fun (id, _) ->
+      Prompt_block_id.equal id Prompt_block_id.Completion_authority) assembly.A.blocks with
+    | [(_, text)] -> text
+    | _ -> fail "one authority block required" in
+  check bool "the authority block is valid UTF-8" true (String.is_valid_utf_8 authority);
+  check bool "the authority block keeps its text" true
+    (contains authority "verification vrf-cut");
+  match assembly.A.extra_system_context with
+  | Some carrier -> check bool "the carrier is valid UTF-8" true (String.is_valid_utf_8 carrier)
+  | None -> fail "carrier missing"
+;;
+
 let test_authority_leaves_the_carrier_when_the_sent_system_is_not_the_issued_one () =
   let partition = Layers.assemble ~content_of:(function
     | Layers.Completion_authority -> Some authority_text
@@ -3512,6 +3538,8 @@ let () =
             test_a_changed_system_goal_reaches_a_held_official_session
         ; test_case "carrier authority is current-turn input on official Start and Resume" `Quick
             test_carrier_authority_is_current_turn_input_on_official_start_and_resume
+        ; test_case "the carrier authority block is valid UTF-8" `Quick
+            test_carrier_authority_block_is_valid_utf8
         ; test_case "authority leaves the carrier when the sent System is not the issued one" `Quick
             test_authority_leaves_the_carrier_when_the_sent_system_is_not_the_issued_one
         ; test_case "an authority-only carrier is not expected among the messages" `Quick

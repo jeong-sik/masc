@@ -1,5 +1,5 @@
 (* Typed payload schemas for Agent Core events relayed to Dashboard SSE. The
-   shared envelope is owned by [Sse_event.wrap_envelope]. *)
+   envelope around a payload is built by [Keeper_event_bridge.wrap_event]. *)
 
 type agent_started_payload = {
   agent_name: string;

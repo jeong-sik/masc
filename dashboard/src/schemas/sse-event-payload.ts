@@ -1,10 +1,10 @@
 // Typed boundary for Agent Core event payloads using atdgen-generated decoders.
 //
 // The SSE wire format wraps a typed payload inside an envelope
-// (see lib/sse_event/sse_event.ml wrap_envelope).  This module parses the
-// nested payload object with the atdts-generated readers in
-// sse_event_generated.ts and returns a closed, discriminated union so
-// downstream handlers never need string-key access on raw payload objects.
+// (see Keeper_event_bridge.wrap_event in lib/keeper/keeper_event_bridge.ml).
+// This module parses the nested payload object with the atdts-generated
+// readers in sse_event_generated.ts and returns a closed, discriminated union
+// so downstream handlers never need string-key access on raw payload objects.
 //
 // Unknown event types and malformed payloads are rejected with a structured
 // error; the caller decides whether to drop the event or fall back.

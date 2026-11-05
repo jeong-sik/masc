@@ -4,8 +4,11 @@ The fakes are not MASC. These tests show that the probe attributes requests
 and events to windows, never starts its child when the server or the relay
 cannot be verified, and reports an observation as incomplete when the TUI
 never draws, leaves a step early, reaches the server around the relay or
-sends bytes the relay cannot frame. They do not show what a real TUI sends.
+sends bytes the relay cannot frame. When the TUI writes no frame-timing report
+or its last output cannot be read, no window names a surface. They do not show
+what a real TUI sends.
 """
+import errno
 import importlib
 import json
 import os
@@ -99,6 +102,22 @@ while True:
 # With SIGPIPE at its default the shell dies of its own SIGPIPE; ignored, it exits 3.
 SIGPIPE_CHECK = '#!/bin/sh\nkill -PIPE $$\nexit 3\n'
 
+# The probe with its read after the TUI exits, the only read that does not
+# wait, made to fail. The reads before it never report the terminal closed, so
+# the loop ends when the TUI is reaped, as it does when the reap comes first.
+LAST_READ_FAILS = '''import errno, sys
+sys.path[:0] = [{perf!r}]
+import tui_request_probe as probe
+real_drain = probe.drain
+def drain(master, timeout):
+    if timeout == 0:
+        raise OSError(errno.EBADF, 'the last read was made to fail')
+    output, _ = real_drain(master, timeout)
+    return output, False
+probe.drain = drain
+sys.exit(probe.main(sys.argv[1:]))
+'''
+
 
 class StepTest(unittest.TestCase):
     def test_steps_keep_their_text_and_the_bytes_they_send(self):
@@ -133,10 +152,10 @@ class ProbeTest(unittest.TestCase):
         self.fake.chmod(0o755)
         self.out = self.tmp / 'out'
 
-    def run_probe(self, *steps, mode='normal', binary=None, ready_timeout='10'):
+    def run_probe(self, *steps, mode='normal', binary=None, ready_timeout='10', script=PROBE):
         """Run the probe as a fresh process and check that it forked its child
         while it had one thread."""
-        argv = [sys.executable, '-W', 'always::DeprecationWarning', str(PROBE),
+        argv = [sys.executable, '-W', 'always::DeprecationWarning', str(script),
                 '--binary', str(binary or self.fake), '--base-path', str(self.base),
                 '--output-dir', str(self.out), '--port', str(self.upstream.port), '--settle', '0.3',
                 '--ready-timeout', ready_timeout, '--termination-grace', '3']
@@ -190,6 +209,17 @@ class ProbeTest(unittest.TestCase):
         result = self.result(self.run_probe('rest::0.5', mode='no-report'), 0)
         self.assertTrue(result['observation_complete'])
         self.assertEqual(result['surface_record']['error'], 'the TUI wrote no frame-timing report')
+        self.assertEqual([window['surfaces'] for window in result['windows']], [None, None])
+
+    def test_a_failed_last_read_names_no_surface_and_leaves_the_observation(self):
+        wrapper = self.tmp / 'last-read-fails.py'
+        wrapper.write_text(LAST_READ_FAILS.format(perf=str(PERF)))
+        result = self.result(self.run_probe('rest::0.5', script=wrapper), 0)
+        self.assertTrue(result['observation_complete'])
+        self.assertGreater(result['relayed_requests'], 0)
+        self.assertEqual(result['surface_record']['error'],
+                         f"the TUI's last output could not be read: OSError: [Errno {errno.EBADF}] "
+                         'the last read was made to fail')
         self.assertEqual([window['surfaces'] for window in result['windows']], [None, None])
 
     def test_a_tui_that_never_draws_is_stopped_at_the_ready_timeout(self):

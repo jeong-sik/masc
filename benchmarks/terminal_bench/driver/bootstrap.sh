@@ -20,8 +20,6 @@ source "$BENCH/driver/gh_seed.sh"
 export MASC_BASE_PATH=$BENCH/base
 export MASC_CONFIG_DIR=$BENCH/config
 export MASC_KEEPER_AUTONOMOUS_ENABLED=0
-export MASC_ORCHESTRATOR_ENABLED=0
-export AGENT_CORE_MCP_SERVERS_CONFIG="mcp_servers={}"
 
 # config dir must be writable (server writes runtime state overlays); if the
 # mount is read-only, fall back to a writable copy.

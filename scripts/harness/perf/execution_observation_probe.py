@@ -165,7 +165,7 @@ def run(args):
     connection = None
     env = {'PATH': os.environ['PATH'], 'LANG': 'C.UTF-8',
            'MASC_CONFIG_BOOTSTRAP': 'skip', 'MASC_KEEPER_AUTONOMOUS_ENABLED': '0',
-           'MASC_ORCHESTRATOR_ENABLED': '0', 'MASC_GRPC_ENABLED': '0', 'MASC_WS_ENABLED': '0',
+           'MASC_GRPC_ENABLED': '0', 'MASC_WS_ENABLED': '0',
            'MASC_HTTP_AUTH_STRICT': '0', 'MASC_OTEL_ENABLED': '0'}
     model_requests = []
     records = []

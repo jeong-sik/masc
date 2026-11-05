@@ -285,12 +285,10 @@ start_live_server() {
     export MASC_CONFIG_DIR="${CONFIG_DIR}"
     export MASC_LOG_FILE="${SERVER_LOG}"
     export MASC_KEEPER_AUTONOMOUS_ENABLED="0"
-    export MASC_KEEPER_AUTONOMOUS_ENABLED="0"
     if context_recovery_cases_selected; then
       export MASC_KEEPER_MEMORY_OS_RECALL="1"
       export MASC_KEEPER_MEMORY_OS_LIBRARIAN="0"
     fi
-    export AGENT_CORE_MCP_SERVERS_CONFIG="mcp_servers={}"
     exec "${ROOT_DIR}/scripts/run-local.sh" \
       --target-dir "${TARGET_DIR}" \
       --port "${PORT}" \
@@ -307,12 +305,10 @@ start_live_server() {
     export MASC_CONFIG_DIR="${CONFIG_DIR}"
     export MASC_LOG_FILE="${SERVER_LOG}"
     export MASC_KEEPER_AUTONOMOUS_ENABLED="0"
-    export MASC_KEEPER_AUTONOMOUS_ENABLED="0"
     if context_recovery_cases_selected; then
       export MASC_KEEPER_MEMORY_OS_RECALL="1"
       export MASC_KEEPER_MEMORY_OS_LIBRARIAN="0"
     fi
-    export AGENT_CORE_MCP_SERVERS_CONFIG="mcp_servers={}"
     exec "${ROOT_DIR}/scripts/run-local.sh" --target-dir "${TARGET_DIR}" --port "${PORT}"
   ) >"${launch_log}" 2>&1 &
   SERVER_PID="$!"

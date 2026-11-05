@@ -329,8 +329,6 @@ let terminal_effect_failure_error error terminal_effect_state =
       | Agent_core.Error.ToolRoundLimitExceeded _
       | Agent_core.Error.HookExecutionFailed _
       | Agent_core.Error.TerminalToolDurabilityFailed _
-      | Agent_core.Error.GuardrailViolation _
-      | Agent_core.Error.TripwireViolation _
       | Agent_core.Error.InputRequired _ )
   | Agent_core.Error.Internal_carried _ | Agent_core.Error.Internal _
   | Agent_core.Error.Api _ | Agent_core.Error.Provider _ | Agent_core.Error.Mcp _

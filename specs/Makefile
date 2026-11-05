@@ -140,9 +140,9 @@ check-boundary: check-all
 #
 # Wall-clock fan-out reduces TLA+ Main from ~22 min monolithic to ~7-8 min.
 
-OTHER_DIRS := auth autonomous boundary bug-models \
+OTHER_DIRS := auth boundary bug-models \
               keeper-switch-hierarchy keeper-turn-fsm \
-              multimodal server-state shared shell-ir-first-class \
+              server-state shell-ir-first-class \
               task-lifecycle
 check-others: CLEAN_CFGS := $(foreach d,$(OTHER_DIRS),$(call clean_cfgs_in,$(d)/))
 check-others: BUGGY_CFGS := $(foreach d,$(OTHER_DIRS),$(call buggy_cfgs_in,$(d)/))

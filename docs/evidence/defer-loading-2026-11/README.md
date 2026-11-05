@@ -57,7 +57,7 @@ python3 -m unittest discover -s docs/evidence/defer-loading-2026-11
 
 - 도구 스키마는 본문의 4.6%(합계)에서 9.3%(요청별 중앙값)예요. 이 PR 이 빼는 25.9 ~ 36.1 MB 는 본문 합계의 0.22 ~ 0.31% 예요.
 - "그 밖"은 부위를 빼고 남은 바이트예요. 이미지가 든 요청 299개(`msx-retro-mania` 263개 포함)가 끌어올리고, 요청별 중앙값은 0이에요.
-- 메시지 부위는 요청에 실리는 크기의 상한이에요. 타입이 있는 블록으로 오는 도구 결과(예: `masc_dos_*`)는 저장할 때 블록과 평문 사본(`text_content`)을 함께 쓰는데(`packages/agent_core/lib/base/history.ml` 의 `content_block_to_json`), 요청에는 블록만 실려요(`llm_provider/api_common.ml` 의 `tool_result_wire_fields_with`, `backend_openai_serialize.ml` 의 `tool_result_content_string`). 사본이 얼마인지는 이 스크립트가 재지 않아요.
+- 메시지 부위는 요청에 실리는 크기의 상한이에요. 타입이 있는 블록으로 오는 도구 결과(예: `masc_dos_*`)는 저장할 때 블록과 평문 사본(`text_content`)을 함께 쓰는데(`packages/agent_core/lib/base/history.ml` 의 `content_block_to_json`), 요청에는 블록만 실려요(`llm_provider/api_common.ml` 의 `tool_result_wire_fields_with`, `backend_openai_serialize.ml` 의 `tool_result_content_string`). 사본이 얼마인지는 이 스크립트가 재지 않아요. #48506 의 스크립트가 같은 기간에서 쟀고, 실린 도구 결과 저장 크기의 23.4%(본문의 8.1%)였어요.
 - 이 스크립트는 메시지 안을 읽지 않아서 도구별로 나누지 못하고, 도구 호출 인자와 모델이 쓴 글도 나누지 못해요. 도구 스키마 몫은 이 영향을 받지 않아요(스키마 항목은 보낸 JSON 의 크기예요).
 
 ## 안 바꾼 도구

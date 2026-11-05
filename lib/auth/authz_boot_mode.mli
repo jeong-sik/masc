@@ -36,8 +36,8 @@ type log_mode =
   | Made_multi_account  (** The last mode event is [Fresh_bootstrap] or [Reactivate]. *)
   | Made_off  (** The last mode event is [Off]. *)
 
-(** The mode that a mode event makes. *)
-val made_by : Authz_mode_event.event -> log_mode
+(** What the mode of a log that opened says. *)
+val of_mode_state : Authz_mode_state.t -> log_mode
 
 (** The external high-water mark. *)
 type high_water =

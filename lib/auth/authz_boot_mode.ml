@@ -13,9 +13,10 @@ type log_mode =
   | Made_multi_account
   | Made_off
 
-let made_by : Authz_mode_event.event -> log_mode = function
-  | Fresh_bootstrap | Reactivate -> Made_multi_account
-  | Off -> Made_off
+let of_mode_state : Authz_mode_state.t -> log_mode = function
+  | Authz_mode_state.Not_bootstrapped -> No_mode_event
+  | Authz_mode_state.Multi_account _ -> Made_multi_account
+  | Authz_mode_state.Off _ -> Made_off
 ;;
 
 type high_water =

@@ -6,7 +6,6 @@ module B = Authz_boot_mode
 module H = Authz_high_water
 module I = Authz_install_record
 module L = Authz_log
-module M = Authz_mode_event
 module P = Authz_presence
 module R = Authz_record
 module S = Authz_external_store
@@ -63,32 +62,17 @@ let read_config ~base_path =
           absent ("not a JSON object: " ^ Yojson.Safe.to_string json)))
 ;;
 
-(* What the fold over the log keeps: the probe of the high-water mark, the last
-   mode event, and how many records it saw. *)
+(* What the fold over the log keeps: the probe of the high-water mark and the
+   state of the records. *)
 type fold =
   { probe : H.Probe.t
-  ; last : M.event option
-  ; records : int
+  ; state : Authz_state.t
   }
 
 let step acc (record : R.t) =
-  let probe = H.Probe.add acc.probe record in
-  let records = acc.records + 1 in
-  match record.R.kind with
-  | R.Kind.Mode_event ->
-    (match M.of_body record.R.body with
-     | Ok event -> Ok { probe; last = Some event.M.event; records }
-     | Error error -> Error error)
-  | R.Kind.Runtime_grant
-  | R.Kind.Delegate_policy
-  | R.Kind.Principal
-  | R.Kind.Internal_service_credential
-  | R.Kind.Permission_revocation
-  | R.Kind.Trigger_evidence
-  | R.Kind.Lease_terminal_evidence
-  | R.Kind.Preauthorized_expiry
-  | R.Kind.Migration_diagnostic
-  | R.Kind.Local_recovery -> Ok { acc with probe; records }
+  match Authz_state.step acc.state record with
+  | Ok state -> Ok { probe = H.Probe.add acc.probe record; state }
+  | Error refusal -> Error refusal
 ;;
 
 (* The state of the external store that the install record names. [None] when
@@ -128,9 +112,9 @@ let read_log ~base_path ~state =
   | P.Cannot_check detail -> Log_cannot_check (Printf.sprintf "%s: %s" path detail)
   | P.There ->
     (match
-       L.open_at_start ~path ~init:{ probe = H.Probe.create state; last = None; records = 0 } ~step
+       L.open_at_start ~path ~init:{ probe = H.Probe.create state; state = Authz_state.empty } ~step
      with
-     | Error error -> Log_opened (Error (L.open_error_to_string M.error_to_string error))
+     | Error error -> Log_opened (Error (L.open_error_to_string Authz_state.refusal_to_string error))
      | Ok (_log, fold, _recovered) -> Log_opened (Ok fold))
 ;;
 
@@ -146,12 +130,7 @@ let read_log_and_store ~base_path ~config_dir =
     match log with
     | Log_not_there -> B.No_mode_event
     | Log_cannot_check detail | Log_opened (Error detail) -> B.Log_unreadable detail
-    | Log_opened (Ok { last = Some event; _ }) -> B.made_by event
-    | Log_opened (Ok { last = None; records = 0; _ }) -> B.No_mode_event
-    | Log_opened (Ok { last = None; records; _ }) ->
-      (* A Fresh_bootstrap is the first record of every log (design 5.1). *)
-      B.Log_unreadable
-        (Printf.sprintf "it holds %d records and no mode event, and only a mode event starts it" records)
+    | Log_opened (Ok fold) -> B.of_mode_state fold.state.Authz_state.mode
   in
   let high_water =
     match store, log with

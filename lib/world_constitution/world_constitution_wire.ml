@@ -8,7 +8,6 @@ let field_author = "author"
 let field_at = "at"
 let field_evidence = "evidence"
 let field_uri = "uri"
-let field_sha256 = "sha256"
 let field_kind = "kind"
 let field_article = "article"
 let field_by = "by"
@@ -120,19 +119,13 @@ let article_id_field ~path ~field fields =
   | Error detail ->
     Error { path = path @ [ Field field ]; reason = Invalid_id detail }
 
-let evidence_item_to_json { uri; sha256 } =
-  `Assoc
-    (( field_uri, `String uri )
-     :: (match sha256 with
-         | None -> []
-         | Some digest -> [ field_sha256, `String digest ]))
+let evidence_item_to_json { uri } = `Assoc [ field_uri, `String uri ]
 
 let evidence_item_of_json ~path json =
   let* fields = object_fields ~path json in
-  let* () = reject_unknown ~path ~allowed:[ field_uri; field_sha256 ] fields in
+  let* () = reject_unknown ~path ~allowed:[ field_uri ] fields in
   let* uri = string_field ~path ~field:field_uri fields in
-  let* sha256 = optional_string_field ~path ~field:field_sha256 fields in
-  Ok { uri; sha256 }
+  Ok { uri }
 
 let evidence_of_json ~path json =
   match json with

@@ -91,16 +91,6 @@ let closing_bracket text from =
   go from 0
 ;;
 
-let rec find_substring ~needle text from =
-  let needle_length = String.length needle in
-  let limit = String.length text - needle_length in
-  if from > limit
-  then None
-  else if String.equal (String.sub text from needle_length) needle
-  then Some from
-  else find_substring ~needle text (from + 1)
-;;
-
 (* The target part of [(…)]: an angle-bracketed target, or the text up to
    the first whitespace, which drops a trailing title. *)
 let target_of_inner inner =
@@ -138,7 +128,7 @@ let scan_line ~line_no text found =
       && index + 1 < length
       && Char.equal text.[index + 1] '['
     then (
-      match find_substring ~needle:"]]" text (index + 2) with
+      match String_util.find_substring ~pos:(index + 2) text "]]" with
       | Some stop ->
         let name = String.sub text (index + 2) (stop - index - 2) in
         go

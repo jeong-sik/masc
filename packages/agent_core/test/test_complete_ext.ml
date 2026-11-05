@@ -45,7 +45,7 @@ let make_response
       ?usage
       ()
   =
-  { Types.id = "resp-complete-ext"; model; stop_reason; content; usage; telemetry = None }
+  { Types.id = "resp-complete-ext"; model; unreadable_tool_uses = []; stop_reason; content; usage; telemetry = None }
 ;;
 
 type metric_probe =
@@ -387,6 +387,64 @@ let test_complete_stream_injected_transport_rejects_typed_empty () =
          ()).Llm_provider.Completion_outcome.result
        |> check_typed_empty_completion stop_reason)
     empty_failure_stops
+;;
+
+(* One call, no text, arguments not one JSON object: content is empty, but the
+   model did answer. Rejecting it as an empty completion would end the turn
+   before the pipeline can tell the model which call it has to send again. *)
+let test_complete_keeps_a_response_whose_only_call_is_unreadable () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let unreadable : Types.unreadable_tool_use =
+    { tool_use_id = "call_bad"
+    ; tool_name = "Read"
+    ; tool_use_ordinal = 0
+    ; arguments = "[]"
+    ; arguments_problem = Tool_call_input.Not_object
+    ; arguments_assembly = None
+    }
+  in
+  let response =
+    { (make_response ~stop_reason:Types.StopToolUse ~content:[] ()) with
+      unreadable_tool_uses = [ unreadable ]
+    }
+  in
+  let transport =
+    transport_of_sync (fun () ->
+      { Llm_transport.response = Ok response; latency_ms = Some 1 })
+  in
+  let check_kept label = function
+    | Ok (kept : Types.api_response) ->
+      check
+        (list string)
+        (label ^ " keeps the unreadable call")
+        [ "call_bad" ]
+        (List.map
+           (fun (call : Types.unreadable_tool_use) -> call.tool_use_id)
+           kept.unreadable_tool_uses)
+    | Error err ->
+      failf "%s rejected a response that made one call: %s" label (string_of_http_error err)
+  in
+  let config = make_config ~model_id:"injected-unreadable-only" () in
+  (Complete.complete
+     ~sw
+     ~net:(Eio.Stdenv.net env)
+     ~transport
+     ~config
+     ~messages:[ Types.user_msg "hello" ]
+     ()).Llm_provider.Completion_outcome.result
+  |> check_kept "sync";
+  (Complete.complete_stream
+     ~sw
+     ~net:(Eio.Stdenv.net env)
+     ~transport
+     ~config
+     ~messages:[ Types.user_msg "hello" ]
+     ~on_event:(fun _ -> ())
+     ()).Llm_provider.Completion_outcome.result
+  |> check_kept "stream"
 ;;
 
 let test_complete_injected_terminal_outcomes () =
@@ -751,6 +809,10 @@ let () =
             "injected stream rejects typed empty"
             `Quick
             test_complete_stream_injected_transport_rejects_typed_empty
+        ; test_case
+            "injected response with only an unreadable call is not empty"
+            `Quick
+            test_complete_keeps_a_response_whose_only_call_is_unreadable
         ; test_case
             "injected sync preserves terminal outcomes"
             `Quick

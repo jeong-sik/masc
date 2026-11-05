@@ -139,7 +139,7 @@ let test_a_settled_native_receipt_names_nothing () = with_root (fun root ->
     commit (Keeper_native_call.Checkpoint {call_id; observed=seed; checkpoint=latest});
     commit (Keeper_native_call.Terminal {call_id; disposition=
       {Agent_core.Agent.outcome=Agent_core.Agent.Terminal_failed; recovery=Agent_core.Agent.Retire}});
-    ignore (Store.settle_running_after_restart store ~now:13. |> store_ok : Operation.t list);
+    ignore (Store.settle_running_without_executor ~cause:Store.After_process_restart store ~now:13. |> store_ok : Operation.t list);
     ignore (defer_direct_checkpoint store "sweep-suspended" suspended));
   let paths = List.map (retained root ~session:["sweep-trace"]) [seed; latest; suspended] in
   List.iter (fun path -> write path "{}") paths;

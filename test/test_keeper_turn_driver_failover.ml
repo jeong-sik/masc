@@ -86,6 +86,7 @@ let completed_run_result () : Runtime_agent.run_result =
   { response =
       { Agent_core.Types.id = "response-test"
       ; model = "model-test"
+      ; unreadable_tool_uses = []
       ; stop_reason = Agent_core.Types.EndTurn
       ; content = []
       ; usage = None

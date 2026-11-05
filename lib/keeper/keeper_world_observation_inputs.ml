@@ -342,12 +342,13 @@ let count_running_keeper_fibers ~(config : Workspace.config) : int =
     0
 ;;
 
-(** Compute idle seconds from keeper timestamps. *)
+(** Seconds since the keeper's last turn of any channel, or since it was
+    created when it has not run one. *)
 let compute_idle_seconds ~(meta : keeper_meta) : int =
   let now_ts = Time_compat.now () in
   let created_ts =
     Workspace_resilience.Time.parse_iso8601_opt meta.created_at |> Option.value ~default:0.0
   in
-  let activity_ts = List.fold_left max created_ts [ meta.runtime.proactive_rt.last_ts ] in
+  let activity_ts = max created_ts meta.runtime.usage.last_turn_ts in
   if activity_ts <= 0.0 then 0 else int_of_float (max 0.0 (now_ts -. activity_ts))
 ;;

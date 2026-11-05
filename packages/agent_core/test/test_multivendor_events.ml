@@ -29,6 +29,7 @@ open Agent_core
 let stub_api_response : Types.api_response =
   { id = "msg_test"
   ; model = "any-model"
+  ; unreadable_tool_uses = []
   ; stop_reason = Types.EndTurn
   ; content = [ Llm_provider.Types.Text "done" ]
   ; usage = None

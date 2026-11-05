@@ -687,6 +687,7 @@ let digest_cancelled_while_queued_does_not_publish () =
 let thinking_only_response ~stop_reason content : Agent_core.Types.api_response =
   { id = "resp-1"
   ; model = "mock"
+  ; unreadable_tool_uses = []
   ; stop_reason
   ; content = [ Llm_provider.Types.Thinking { content; signature = None } ]
   ; usage = None
@@ -739,6 +740,7 @@ let rejected_reasoning_capture_ignores_other_shapes () =
     let response : Agent_core.Types.api_response =
       { id = "resp-2"
       ; model = "mock"
+      ; unreadable_tool_uses = []
       ; stop_reason = Agent_core.Types.EndTurn
       ; content =
           [ Llm_provider.Types.Thinking { content = "some thought"; signature = None }

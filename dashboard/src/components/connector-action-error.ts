@@ -1,13 +1,11 @@
 // Connector action failures — headline toast, raw detail on demand.
 //
-// The server's error text for sidecar/bind actions carries operator
-// internals (filesystem paths it probed, env-var hints — e.g. the
-// 2026-06-11 sidecar-stop error listed two absolute paths and a
-// MASC_SIDECAR_ROOT instruction). Dumping that into a toast buries the
-// one thing the operator needs first: which action on which connector
-// failed. The headline comes from the call site's typed context — no
-// string classification of the server text — and the raw text stays
-// one click away, copyable for a report.
+// The server's error text for connector and bind actions carries operator
+// internals (filesystem paths it probed, env-var hints). Dumping that into
+// a toast buries the one thing the operator needs first: which action on
+// which connector failed. The headline comes from the call site's typed
+// context — no string classification of the server text — and the raw text
+// stays one click away, copyable for a report.
 
 import { showActionToast, showToast } from './common/toast'
 import { requestConfirm } from './common/confirm-dialog'

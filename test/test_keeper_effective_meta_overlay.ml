@@ -1781,6 +1781,64 @@ sandbox_image = "base"
             (Option.is_none (json_field "effective" system_prompt)
              && Option.is_none (json_field "assembled" system_prompt))))
 
+(* #35415: a turn renders the ledger lines that decode and goes on without the
+   rest. The preview sends the same prompt text with and without the broken
+   lines, and names each line it left out with how the line ended. *)
+let test_config_snapshot_names_constitution_lines_the_prompt_left_out () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  within_eio @@ fun () ->
+  let name = "broken-constitution-line" in
+  write_file (Filename.concat keepers_dir (name ^ ".toml"))
+    "[keeper]\ninstructions = \"ledger fixture\"\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\n";
+  let config = Workspace.default_config base in
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
+  let ledger = Masc.World_constitution_store.ledger_path ~base_path:config.base_path in
+  mkdir_p (Filename.dirname ledger);
+  let readable =
+    match
+      Masc.World_constitution_types.make
+        ~id:(Masc.World_constitution_types.Article_id.generate ())
+        ~text:"cite the ledger row" ~author:"fixture" ~at:1.0 ~evidence:[]
+    with
+    | Ok article ->
+      Yojson.Safe.to_string
+        (Masc.World_constitution_wire.entry_to_json (Masc.World_constitution_types.Added article))
+    | Error _ -> Alcotest.fail "fixture article was refused"
+  in
+  let system_prompt () =
+    match Dashboard_http_keeper_snapshot.keeper_config_json config name with
+    | `Not_found, _ -> Alcotest.fail "expected a keeper config snapshot"
+    | `OK, json -> json_assoc_field "prompt" json |> json_assoc_field "system_prompt"
+  in
+  let rejected_lines system_prompt =
+    let ledger_json = json_assoc_field "constitution_ledger" system_prompt in
+    Alcotest.(check (option string)) "the ledger was read" (Some "read")
+      (json_string_field "state" ledger_json);
+    match json_field "rejected_lines" ledger_json with
+    | Some (`List rows) ->
+      List.map
+        (fun row ->
+          match json_int_field "line" row, json_string_field "line_end" row with
+          | Some line, Some line_end -> line, line_end
+          | _ -> Alcotest.failf "unreadable row %s" (Yojson.Safe.to_string row))
+        rows
+    | _ -> Alcotest.failf "no rejected_lines in %s" (Yojson.Safe.to_string ledger_json)
+  in
+  write_file ledger (readable ^ "\n");
+  let clean = system_prompt () in
+  Alcotest.(check (list (pair int string))) "a clean ledger leaves nothing out" []
+    (rejected_lines clean);
+  write_file ledger
+    (readable ^ "\n" ^ "{\"kind\":\"added\",\"article\":{}}\n" ^ "{\"kind\":\"add");
+  let broken = system_prompt () in
+  Alcotest.(check (option string)) "the prompt is still built" (Some "available")
+    (json_string_field "state" broken);
+  Alcotest.(check (option string)) "the prompt text is the same as the clean ledger's"
+    (json_string_field "effective" clean) (json_string_field "effective" broken);
+  Alcotest.(check (list (pair int string))) "each left-out line and how it ended"
+    [ 2, "newline_terminated"; 3, "unterminated_final_line" ]
+    (rejected_lines broken)
+
 let test_config_snapshot_keeps_invalid_primary_prompt_editable () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   within_eio @@ fun () ->
@@ -2070,6 +2128,8 @@ let () =
             test_config_snapshot_carries_open_goals_without_a_task;
           Alcotest.test_case "config snapshot reports an unbuildable system prompt" `Quick
             test_config_snapshot_reports_an_unbuildable_system_prompt;
+          Alcotest.test_case "config snapshot names constitution lines the prompt left out" `Quick
+            test_config_snapshot_names_constitution_lines_the_prompt_left_out;
           Alcotest.test_case "invalid primary keeps config editable" `Quick
             test_config_snapshot_keeps_invalid_primary_prompt_editable;
           Alcotest.test_case

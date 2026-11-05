@@ -539,7 +539,7 @@ let check_stored_image_reader_is_callable_with_read_authority ~agent_core ~name 
   check bool "catalog requires read-state permission only" true
     ((Tool_catalog.metadata name).required_permission = Masc_domain.CanReadState);
   match Policy.verdict_for ~identity_tool_index:Masc.Keeper_identity_tool_index.empty ~composition_plan_index:None ~tool_name:name ~input with
-  | Policy.Run _ -> ()
+  | Policy.Run -> ()
   | Policy.Ask { because } -> failf "stored-image reading asks for approval: %s" because
 ;;
 
@@ -718,6 +718,7 @@ let test_per_candidate_image_projection () =
         let requests = ref 0 and read_dispatches = ref 0 in
         let response content stop_reason : Agent_core.Types.api_response =
           {id="projection-fixture";model="image-projection-uncatalogued";
+           unreadable_tool_uses = [];
            stop_reason;content;usage=None;telemetry=None} in
         let complete (request : Llm_provider.Llm_transport.completion_request) =
           incr requests;

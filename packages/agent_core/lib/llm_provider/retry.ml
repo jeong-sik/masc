@@ -74,12 +74,11 @@ let error_message = function
       | Some seconds -> Printf.sprintf " (retry_after: %.3fs)" seconds
     in
     Printf.sprintf "Rate limited: %s%s" r.message retry_after
-  | Overloaded r -> Printf.sprintf "Overloaded: %s (retry_after: none)" r.message
+  | Overloaded r -> Printf.sprintf "Overloaded: %s" r.message
   | ServerError r -> Printf.sprintf "Server error %d: %s" r.status r.message
   | AuthError r -> Printf.sprintf "Auth error: %s" r.message
   | AuthorizationError r -> Printf.sprintf "Authorization error: %s" r.message
-  | PaymentRequired r ->
-    Printf.sprintf "Payment required: %s (retry_after: none)" r.message
+  | PaymentRequired r -> Printf.sprintf "Payment required: %s" r.message
   | InvalidRequest r ->
     Printf.sprintf
       "Invalid request (%s): %s"

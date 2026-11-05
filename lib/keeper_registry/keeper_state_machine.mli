@@ -92,11 +92,7 @@ type event = Keeper_state_machine_types.event =
   | Stop_requested
   | Drain_complete
   | Fiber_started
-  | Fiber_terminated of
-      { outcome : string
-      ; provider_id : string option
-      ; http_status : int option
-      }
+  | Fiber_terminated of { outcome : string }
   | Supervisor_restart_attempt of { attempt : int }
   | Operator_clear_requested of { preserve_system : bool; reason : string }
     (** Operator invoked [masc_keeper_clear]. Last-resort: drops

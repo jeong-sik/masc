@@ -60,13 +60,17 @@ type output_normalization_error =
     body deadline is required here: when it is absent preflight fails with
     {!Missing_deadline}, whether or not a connect deadline is declared, so the
     response body is never read without a deadline. The
-    header budget may be caller-supplied; see {!Caller_supplied_header_not_allowed}. *)
+    header budget may be caller-supplied; see {!Caller_supplied_header_not_allowed}.
+    [declared_headers] are the target binding's own request headers; they are
+    frozen after the auth headers and before [Content-Type]/[Content-Length],
+    and the plan fingerprint covers them. *)
 (** Resolve credentials once and freeze them with the request. A delayed plan
     does not renew expiring credentials during execution, because that would
     invalidate its fingerprint. Callers must prepare a new plan when fresh
     credentials are required. *)
 val preflight
   :  config:Provider_config.t
+  -> declared_headers:Exact_output_declared_headers.t
   -> messages:Types.message list
   -> body_timeout_s:float option
   -> anthropic_thinking_control:Capabilities.anthropic_thinking_control option

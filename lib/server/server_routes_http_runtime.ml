@@ -9,7 +9,6 @@ module Http = Http_server_eio
 let is_dashboard_spa_deep_link path =
   String.starts_with ~prefix:"/dashboard/" path
   && not (String.starts_with ~prefix:"/dashboard/assets/" path)
-  && path <> "/dashboard/credits"
 
 (** CORS preflight response headers *)
 let cors_preflight_headers origin =
@@ -292,7 +291,7 @@ let make_health_probe_json ?timing ?(listener = "http/1.1") ?(extra_fields = [])
     ~request_authority request =
   Tool_args.ok_assoc
     (make_health_probe_fields ?timing ~listener ~health_detail:"probe"
-       ~full_health_url:"/health?full=1" ~request_authority request
+       ~full_health_url:Server_health_paths.full ~request_authority request
      @ [ "auxiliary_startup",
          Server_auxiliary_startup.to_yojson Server_auxiliary_startup.global ]
      @ extra_fields)
@@ -1668,7 +1667,7 @@ let make_cached_full_health_json ?timing ?listener ~request_authority request =
     ?timing ?listener ~request_authority request
 
 let start_full_health_snapshot_refresh_loop ~sw ~clock ~request_authority =
-  let request = Httpun.Request.create `GET "/health?full=1" in
+  let request = Httpun.Request.create `GET Server_health_paths.full in
   Proactive_refresh.start
     ~sw
     ~clock

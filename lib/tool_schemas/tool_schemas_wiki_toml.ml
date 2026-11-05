@@ -18,15 +18,7 @@
     tools declare a keeper_projection; the descriptions and schemas it also
     pinned were copies of these values. *)
 
-let loaded_of_name name : Tool_definition_toml.loaded =
-  let rel = "tools/" ^ name ^ ".toml" in
-  match Embedded_config.read rel with
-  | None -> failwith (Printf.sprintf "embedded tool definition missing: %s" rel)
-  | Some contents ->
-    (match Tool_definition_toml.load ~name ~contents with
-     | Ok loaded -> loaded
-     | Error message -> failwith message)
-;;
+let loaded_of_name = Tool_definition_embedded.load
 
 let list = loaded_of_name "masc_wiki_list"
 let read = loaded_of_name "masc_wiki_read"

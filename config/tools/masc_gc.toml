@@ -1,6 +1,6 @@
 name = "masc_gc"
 description = """
-Run explicit age-based garbage collection. Agent lifecycle is not modified."""
+Run the explicit workspace garbage-collection pass with a retention horizon of `days`: archive Done and Cancelled tasks older than that, delete workspace messages older than that unless their body mentions an open task id, and run the backend pubsub cleanup. An open task found in the task archive is moved back to the backlog. Agent lifecycle is not modified."""
 additional_properties = false
 
 # Held back from the request until the model asks for it by name.

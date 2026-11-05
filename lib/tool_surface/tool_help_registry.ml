@@ -70,44 +70,6 @@ let render_fragment_opt key =
     None
 ;;
 
-(* RFC-0089 §4-1 G1: tool family typed classifier.
-
-   Closed sum over live tool name prefixes.  Adding a new family
-   requires extending [tool_family] AND every [match] — the
-   compiler refuses partial coverage.
-
-   The only string classifier is [classify_tool_family] — the
-   boundary parser from tool name to typed family.  After this
-   point every consumer uses the variant directly. *)
-type tool_family =
-  | Policy
-  | Observe
-
-let tool_family_prefix = function
-  | Policy -> "masc_policy_"
-  | Observe -> "masc_observe_"
-
-let all_tool_families =
-  [ Policy; Observe ]
-
-(* The single boundary parser.  Internal callers receive
-   [tool_family option] and dispatch via exhaustive [match];
-   no other site in this module compares a tool-name prefix. *)
-let classify_tool_family name =
-  List.find_opt
-    (fun family -> String.starts_with ~prefix:(tool_family_prefix family) name)
-    all_tool_families
-
-let help_doc_refs name =
-  match classify_tool_family name with
-  | Some Policy
-  | Some Observe ->
-      [
-        "docs/KEEPER-USER-MANUAL.md";
-        "docs/BENCHMARK-RUNBOOK.md";
-      ]
-  | None -> []
-
 let help_prompt_hints name =
   if String.equal name "masc_tool_help"
   then (
@@ -223,10 +185,10 @@ let derived_details_with_meta (meta : Tool_catalog.metadata) original =
 let entry_of_schema (schema : Masc_domain.tool_schema) : help_entry =
   match toml_help schema.name with
   | Some (help : Tool_definition_toml.help) ->
-      (* An authored [help] table is the whole entry, the way the retired
-         in-code table was: absent prose fields fall back to the schema
-         derivation, absent lists stay empty rather than picking up derived
-         constraint notes, so an authored entry renders exactly as written. *)
+      (* An authored [help] table is the whole entry: absent prose fields fall
+         back to the schema derivation, absent lists stay empty rather than
+         picking up derived constraint notes, so an authored entry renders
+         exactly as written. *)
       let meta = Tool_catalog.metadata schema.name in
       {
         name = schema.name;
@@ -268,7 +230,7 @@ let entry_of_schema (schema : Masc_domain.tool_schema) : help_entry =
         when_to_use = default_when_to_use schema.name;
         key_constraints = constraints_from_meta meta;
         details_markdown = derived_details_with_meta meta schema.description;
-        doc_refs = help_doc_refs schema.name;
+        doc_refs = [];
         prompt_hints = help_prompt_hints schema.name;
         examples = [];
         alternatives = [];

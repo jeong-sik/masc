@@ -166,11 +166,9 @@ let seed_read_of_rows ~trace_id rows =
   }
 ;;
 
-let current_generation_floor ~config ~keeper_name ~trace_id =
+let read_generation_floor ~keepers_dir ~keeper_name ~trace_id =
   Result.bind
-    (Keeper_turn_boundaries.read
-       ~keepers_dir:(Workspace.keepers_runtime_dir config)
-       ~keeper_id:keeper_name)
+    (Keeper_turn_boundaries.read ~keepers_dir ~keeper_id:keeper_name)
     (fun lines ->
        let rec loop latest_turn floor = function
          | [] -> Ok floor
@@ -214,6 +212,43 @@ let current_generation_floor ~config ~keeper_name ~trace_id =
             | Keeper_turn_boundaries.History_restarted _ -> loop latest_turn floor rest)
        in
        loop None None lines)
+;;
+
+(* The floor is folded over the whole boundary store, which only grows (a
+   turn's end appends) or is replaced. A floor that was read is kept per store
+   and trace with the identity the file had before the read, so a store that
+   has not changed since is not read again: an idle Keeper's next read reuses
+   it, and an append reads it once. A failed read is not kept. *)
+type floor_kept =
+  { identity : int * int * int * float
+  ; floor : int option
+  }
+
+let floor_kept : (string * string, floor_kept) Hashtbl.t = Hashtbl.create 16
+let floor_kept_mu = Stdlib.Mutex.create ()
+
+let file_identity path =
+  match Unix.stat path with
+  | stats -> Some (stats.Unix.st_dev, stats.Unix.st_ino, stats.Unix.st_size, stats.Unix.st_mtime)
+  | exception Unix.Unix_error _ -> None
+;;
+
+let current_generation_floor ~config ~keeper_name ~trace_id =
+  let keepers_dir = Workspace.keepers_runtime_dir config in
+  let path = Keeper_turn_boundaries.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name in
+  let key = path, trace_id in
+  let identity = file_identity path in
+  let kept = Stdlib.Mutex.protect floor_kept_mu (fun () -> Hashtbl.find_opt floor_kept key) in
+  match identity, kept with
+  | Some identity, Some kept when kept.identity = identity -> Ok kept.floor
+  | (Some _ | None), (Some _ | None) ->
+    let read = read_generation_floor ~keepers_dir ~keeper_name ~trace_id in
+    (match identity, read with
+     | Some identity, Ok floor ->
+       Stdlib.Mutex.protect floor_kept_mu (fun () ->
+         Hashtbl.replace floor_kept key { identity; floor })
+     | None, (Ok _ | Error _) | Some _, Error _ -> ());
+    read
 ;;
 
 let read_seed ~config ~keeper_name ~trace_id =

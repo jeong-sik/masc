@@ -855,9 +855,7 @@ let test_a_read_only_hint_still_reaches_the_gate () =
   match
     Policy.verdict_for ~identity_tool_index ~composition_plan_index:None ~tool_name:"atlassian_getJiraIssue" ~input:(`Assoc [])
   with
-  | Policy.Run { because } ->
-      check Alcotest.bool "the durable Gate owns the call" true
-        (Str.string_match (Str.regexp ".*durable Gate") because 0)
+  | Policy.Run -> ()
   | Policy.Ask { because } ->
       Alcotest.failf "the stream policy duplicated the durable Gate: %s" because
 
@@ -873,9 +871,7 @@ let test_a_writing_tool_belongs_to_the_durable_gate () =
   match
     Policy.verdict_for ~identity_tool_index ~composition_plan_index:None ~tool_name:"atlassian_editJiraIssue" ~input:(`Assoc [])
   with
-  | Policy.Run { because } ->
-      check Alcotest.bool "and the reason names the durable Gate" true
-        (Str.string_match (Str.regexp ".*durable Gate") because 0)
+  | Policy.Run -> ()
   | Policy.Ask { because } ->
       Alcotest.failf
         "the stream policy asked about a call the durable Gate owns: %s"
@@ -891,9 +887,7 @@ let test_silence_is_not_permission () =
     Policy.verdict_for ~identity_tool_index ~composition_plan_index:None ~tool_name:"atlassian_somethingUnannotated"
       ~input:(`Assoc [])
   with
-  | Policy.Run { because } ->
-      check Alcotest.bool "the durable Gate owns the call" true
-        (Str.string_match (Str.regexp ".*durable Gate") because 0)
+  | Policy.Run -> ()
   | Policy.Ask { because } ->
       Alcotest.failf
         "the stream policy asked about a call the durable Gate owns: %s"
@@ -913,12 +907,10 @@ let test_turn_declarations_are_isolated () =
   let second = offer ~base_path [tool ~read_only:false "sharedTool"] in
   let second_index = Index.of_tools second.offered in
   let tool_name = "atlassian_sharedTool" in
-  check (Alcotest.option (Alcotest.option Alcotest.bool))
-    "first turn retains its declaration" (Some (Some true))
-    (Index.read_only first_index ~tool_name);
-  check (Alcotest.option (Alcotest.option Alcotest.bool))
-    "second turn has its own declaration" (Some (Some false))
-    (Index.read_only second_index ~tool_name);
+  check Alcotest.bool "first turn retains its tool" true
+    (Index.mem first_index ~tool_name);
+  check Alcotest.bool "second turn retains its own" true
+    (Index.mem second_index ~tool_name);
   check Alcotest.bool "catalog projection cannot register a tool in another turn" false
     (Policy.classifies ~identity_tool_index:Index.empty
        ~composition_plan_index:None ~tool_name);
@@ -928,9 +920,7 @@ let test_turn_declarations_are_isolated () =
   List.iter
     (fun index ->
        match verdict index with
-       | Policy.Run { because } ->
-         check Alcotest.bool "both declarations reach the durable Gate" true
-           (Str.string_match (Str.regexp ".*durable Gate") because 0)
+       | Policy.Run -> ()
        | Policy.Ask _ -> Alcotest.fail "stream policy must defer to the durable Gate")
     [ first_index; second_index ];
   Eio_main.run (fun env ->

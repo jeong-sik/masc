@@ -552,7 +552,7 @@ let degrade_loaded_for_missing_catalog
 ;;
 
 let materialize_config
-    ?(validate_max_context = true)
+    ?(validate_runtime_declarations = true)
     (cfg : Runtime_schema.config)
   : ( materialized_config * Runtime_schema.exact_output_lane_decl list
     , load_failure )
@@ -638,7 +638,11 @@ let materialize_config
     validate_exact_lane_cli_slots ~runtimes active_exact_output_lanes
   in
   let* () =
-    if validate_max_context then validate_runtime_max_context runtimes else Ok ()
+    if validate_runtime_declarations
+    then (
+      let* () = validate_runtime_max_context runtimes in
+      validate_runtime_thinking_requests runtimes)
+    else Ok ()
   in
   (* Every runtime on one provider account must declare the account's
      allowance alike: admission keeps one allowance per account. *)
@@ -677,7 +681,7 @@ let materialize_config
   Ok (loaded, cfg.exact_output_lane_decls)
 ;;
 
-let load_list_internal ~(config_path : string) ~validate_max_context
+let load_list_internal ~(config_path : string) ~validate_runtime_declarations
   : ( materialized_config * Runtime_schema.exact_output_lane_decl list
     , load_failure )
     result
@@ -686,23 +690,23 @@ let load_list_internal ~(config_path : string) ~validate_max_context
     Runtime_toml.parse_file config_path
     |> Result.map_error (fun errs -> Toml_unparsable errs)
   in
-  materialize_config ~validate_max_context cfg
+  materialize_config ~validate_runtime_declarations cfg
 ;;
 
 (* The path is still the caller's label for this content; nothing in the typed
    failure needs it, so it is accepted and not read. *)
-let load_list_internal_text ~config_path:(_ : string) ~content ~validate_max_context =
+let load_list_internal_text ~config_path:(_ : string) ~content ~validate_runtime_declarations =
   let* cfg =
     Runtime_toml.parse_string content
     |> Result.map_error (fun errs -> Toml_unparsable errs)
   in
-  materialize_config ~validate_max_context cfg
+  materialize_config ~validate_runtime_declarations cfg
 ;;
 
 (* The public five-tuple stays as its callers destructure it. The remaining
    runtime.toml settings travel in the named materialization to [set_loaded]. *)
 let load_list ~config_path =
-  load_list_internal ~config_path ~validate_max_context:true
+  load_list_internal ~config_path ~validate_runtime_declarations:true
   |> Result.map
        (fun ((loaded : materialized_config), _) ->
          ( loaded.runtimes
@@ -855,7 +859,7 @@ let set_loaded
 
 let init_default ~config_path =
   let* (loaded : materialized_config), exact_output_lane_decls =
-    load_list_internal ~config_path ~validate_max_context:true
+    load_list_internal ~config_path ~validate_runtime_declarations:true
     |> Result.map_error (to_diagnostic_text ~config_path)
   in
   set_loaded ~config_path ~exact_output_lane_decls loaded;
@@ -1019,7 +1023,7 @@ let unpublish_exact_output_registry () =
    the gate that load_list intentionally no longer applies, kept out of load_list
    so unit tests stay catalog-independent. *)
 let init_default_strict_report ~config_path =
-  match load_list_internal ~config_path ~validate_max_context:true with
+  match load_list_internal ~config_path ~validate_runtime_declarations:true with
   | Error failure -> Error (Runtime_config_error (to_diagnostic_text ~config_path failure))
   | Ok ((loaded : materialized_config), exact_output_lane_decls) ->
     (match missing_runtime_model_capabilities ~config_path loaded.runtimes with
@@ -1049,7 +1053,8 @@ let prepare_degraded_loaded ~config_path
         Ok (loaded, Some degradation)
   in
   let* () =
-    validate_runtime_max_context loaded.runtimes
+    (let* () = validate_runtime_max_context loaded.runtimes in
+     validate_runtime_thinking_requests loaded.runtimes)
     |> Result.map_error (to_diagnostic_text ~config_path)
   in
   Ok
@@ -1081,7 +1086,7 @@ let initialize_degraded_loaded ~config_path parsed =
 ;;
 
 let init_default_degraded_report ~config_path =
-  load_list_internal ~config_path ~validate_max_context:false
+  load_list_internal ~config_path ~validate_runtime_declarations:false
   |> initialize_degraded_loaded ~config_path
 ;;
 
@@ -1089,7 +1094,7 @@ let init_default_degraded_observation (observation : config_observation) =
   load_list_internal_text
     ~config_path:observation.path
     ~content:observation.source_text
-    ~validate_max_context:false
+    ~validate_runtime_declarations:false
   |> initialize_degraded_loaded ~config_path:observation.path
 ;;
 
@@ -1590,16 +1595,10 @@ let max_context_of_runtime_id (id : string) : int option =
   | None -> None
 ;;
 
-let thinking_support_of_runtime_id (id : string) : bool option =
-  match get_runtime_by_id id with
-  | Some rt -> rt.model.thinking_support
-  | None -> None
-;;
-
 (* The per-model [temperature] override declared in runtime.toml
    ([models.<id>.temperature]), or [None] when the runtime is unknown or the
    model leaves it unset. Projects the runtime.toml [model] record (per-binding
-   config SSOT), mirroring [thinking_support_of_runtime_id]. Consumed by
+   config SSOT). Consumed by
    [Runtime_inference.resolve_temperature]: a keeper turn uses this value when
    set and its caller fallback otherwise. *)
 let temperature_of_runtime_id (id : string) : float option =
@@ -1637,23 +1636,6 @@ let turn_timeout_s_of_runtime_id (id : string) : float option =
 let quota_scope_of_runtime_id (id : string) : Runtime_quota_window.scope option =
   match get_runtime_by_id id with
   | Some rt -> Some (quota_scope_of_runtime rt)
-  | None -> None
-;;
-
-let default_preserve_thinking_for_model (_rt : t) : bool option =
-  (* AGENT_CORE owns provider/model capability truth and can preserve reasoning when
-     the provider contract requires it. MASC must not turn "request-side
-     preserve is supported" into a fleet-wide replay policy; long-running
-     keepers otherwise accumulate hidden reasoning across unrelated turns. *)
-  None
-;;
-
-let preserve_thinking_of_runtime_id (id : string) : bool option =
-  match get_runtime_by_id id with
-  | Some rt ->
-    (match rt.model.preserve_thinking with
-     | Some _ as explicit -> explicit
-     | None -> default_preserve_thinking_for_model rt)
   | None -> None
 ;;
 
@@ -1743,7 +1725,7 @@ let materialize_runtime_config_text ~config_path content =
         config_path
         (runtime_parse_errors_to_string errs))
   in
-  materialize_config ~validate_max_context:false cfg
+  materialize_config ~validate_runtime_declarations:false cfg
   |> Result.map_error (to_diagnostic_text ~config_path)
 ;;
 

@@ -33,7 +33,7 @@ let gen_event_chaos : SM.event QCheck.Gen.t =
     return SM.Stop_requested;
     return SM.Drain_complete;
     return SM.Fiber_started;
-    return (SM.Fiber_terminated { outcome = "pbt_test"; provider_id = None; http_status = None });
+    return (SM.Fiber_terminated { outcome = "pbt_test" });
     (let* attempt = int_range 1 5 in
      return (SM.Supervisor_restart_attempt { attempt }));
   ]
@@ -52,28 +52,28 @@ let valid_events_for_phase (phase : SM.phase) (c : SM.conditions) : SM.event lis
           context_actions = { handoff = false }};
         SM.Operator_pause;
         SM.Stop_requested;
-        SM.Fiber_terminated { outcome = "crash"; provider_id = None; http_status = None };
+        SM.Fiber_terminated { outcome = "crash" };
       ]
     | SM.Failing ->
       [ SM.Heartbeat_ok; SM.Turn_succeeded;
-        SM.Fiber_terminated { outcome = "crash"; provider_id = None; http_status = None };
+        SM.Fiber_terminated { outcome = "crash" };
         SM.Stop_requested; SM.Operator_pause;
       ]
     | SM.Draining ->
       [ SM.Drain_complete;
-        SM.Fiber_terminated { outcome = "crash"; provider_id = None; http_status = None };
+        SM.Fiber_terminated { outcome = "crash" };
       ]
     | SM.Paused ->
       [ SM.Operator_resume;
         SM.Operator_clear_requested { preserve_system = true; reason = "pbt" };
         SM.Stop_requested;
-        SM.Fiber_terminated { outcome = "crash"; provider_id = None; http_status = None };
+        SM.Fiber_terminated { outcome = "crash" };
       ]
     | SM.Crashed ->
       [ SM.Supervisor_restart_attempt { attempt = 1 } ]
     | SM.Restarting ->
       [ SM.Fiber_started;
-        SM.Fiber_terminated { outcome = "fail"; provider_id = None; http_status = None };
+        SM.Fiber_terminated { outcome = "fail" };
       ]
     | SM.Stopped -> []
     | SM.Offline -> [ SM.Fiber_started ]

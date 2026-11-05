@@ -200,8 +200,7 @@ val is_failed : result -> bool
 (** {1 Handler constructors}
 
     Direct constructors for [Tool_*.dispatch] functions.  Callers provide
-    execution metadata at the boundary; zero-duration compatibility
-    constructors have been removed. *)
+    execution metadata at the boundary. *)
 
 (** Completed result with an opaque string body.  Producers with typed JSON
     must use {!make_ok} and pass [~data] directly. *)

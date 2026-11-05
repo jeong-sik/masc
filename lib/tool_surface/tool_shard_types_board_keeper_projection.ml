@@ -10,15 +10,13 @@
 
 let projection_of_board_name board_name : Masc_domain.tool_schema =
   let name = Tool_name.Board_name.to_string board_name in
-  let rel = "tools/" ^ name ^ ".toml" in
-  match Embedded_config.read rel with
-  | None -> failwith (Printf.sprintf "embedded tool definition missing: %s" rel)
-  | Some contents ->
-    (match Tool_definition_toml.load ~name ~contents with
-     | Ok { Tool_definition_toml.keeper_projection = Some schema; _ } -> schema
-     | Ok { Tool_definition_toml.keeper_projection = None; _ } ->
-       failwith (Printf.sprintf "%s declares no keeper_projection table" rel)
-     | Error message -> failwith message)
+  match (Tool_definition_embedded.load name).Tool_definition_toml.keeper_projection with
+  | Some schema -> schema
+  | None ->
+    failwith
+      (Printf.sprintf
+         "%s declares no keeper_projection table"
+         (Tool_definition_embedded.path name))
 ;;
 
 (* The eight curated Keeper projections. The other Board tools reach a

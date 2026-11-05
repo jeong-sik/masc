@@ -36,15 +36,14 @@ let canonical_add_task =
    declaration that does not decode refuses the boot — the same posture as
    [canonical_add_task] above. *)
 let projection_of_name name : Masc_domain.tool_schema =
-  let rel = "tools/" ^ name ^ ".toml" in
-  match Embedded_config.read rel with
-  | None -> invalid_arg (Printf.sprintf "embedded tool definition missing: %s" rel)
-  | Some contents ->
-    (match Tool_definition_toml.load ~name ~contents with
-     | Ok { Tool_definition_toml.agent_core_projection = Some schema; _ } -> schema
-     | Ok { Tool_definition_toml.agent_core_projection = None; _ } ->
-       invalid_arg (Printf.sprintf "%s declares no agent_core_projection table" rel)
-     | Error message -> invalid_arg message)
+  match Tool_definition_embedded.find name with
+  | Ok { Tool_definition_toml.agent_core_projection = Some schema; _ } -> schema
+  | Ok { Tool_definition_toml.agent_core_projection = None; _ } ->
+    invalid_arg
+      (Printf.sprintf
+         "%s declares no agent_core_projection table"
+         (Tool_definition_embedded.path name))
+  | Error message -> invalid_arg message
 ;;
 
 let batch_add_tasks_projection = projection_of_name "masc_batch_add_tasks"

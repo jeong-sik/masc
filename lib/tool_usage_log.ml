@@ -277,18 +277,3 @@ let source_metadata_json ~masc_root =
     @ freshness_fields ~now latest_ts
     @ source_health_fields
         ~now ~exists ~entry_count ~latest_ts ?coverage_gap ())
-
-let attach_source_metadata ~masc_root json =
-  let metadata_fields =
-    match source_metadata_json ~masc_root with
-    | `Assoc fields -> fields
-    | _ -> []
-  in
-  match json with
-  | `Assoc fields ->
-    `Assoc
-      (List.fold_left
-         (fun acc (key, value) -> (key, value) :: List.remove_assoc key acc)
-         fields
-         metadata_fields)
-  | other -> other

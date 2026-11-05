@@ -142,15 +142,18 @@ val runtime_attempt_errors_to_string : runtime_attempt_error list -> string
 val turn_event_bus_manifest_decision :
   Keeper_turn_runtime_budget.turn_event_bus_summary -> Yojson.Safe.t
 
-(** [registry_failure_reason_of_terminal_reason terminal ~raw_error]
-    maps a [Keeper_turn_terminal.t] disposition to the corresponding
-    [Keeper_registry.failure_reason], or [None] for benign terminals
-    (Success, External_cancel, timeouts, etc.). [raw_error] is truncated
-    via [Keeper_types_profile.short_preview]. *)
+(** [registry_failure_reason_of_terminal_reason terminal ~raw_error
+    ~terminal_error_origin] maps a [Keeper_turn_terminal.t] disposition to
+    the corresponding [Keeper_registry.failure_reason], or [None] for benign
+    terminals (Success, External_cancel, timeouts, etc.). [raw_error] is
+    truncated via [Keeper_types_profile.short_preview]. A provider error or
+    an exhausted attempt chain records the runtime [terminal_error_origin]
+    names: the candidate whose error ended the turn. *)
 val registry_failure_reason_of_terminal_reason :
   ?core_error:Agent_core.Error.t ->
   Keeper_turn_terminal.t ->
   raw_error:string ->
+  terminal_error_origin:keeper_cycle_failed_terminal_origin ->
   Keeper_registry.failure_reason option
 
 (** Tracker for matching ToolCalled/ToolCompleted event pairs within a

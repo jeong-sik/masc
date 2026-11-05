@@ -6658,7 +6658,7 @@ let launch_repository_changes_diff_load state ~mailbox ~reader ~scope ~path =
       enqueue_async mailbox (Repository_changes_diff_loaded (request, result)))
     (fun () ->
       Masc_tui_loader.load_git_diff ~host ~port ?repo ~keeper:None ~path
-        ~base_ref:tree_diff_base_ref ())
+        ~against:(Masc_tui_http.Working_tree_against tree_diff_base_ref) ())
   end
 
 let diff_text_max_width text =
@@ -7013,7 +7013,7 @@ let launch_git_diff_load state ~mailbox ~keeper ~path =
       enqueue_async mailbox (Git_diff_loaded (path, result)))
     (fun () ->
       Masc_tui_loader.load_git_diff ~host ~port ~keeper ~path
-        ~base_ref:tree_diff_base_ref ())
+        ~against:(Masc_tui_http.Working_tree_against tree_diff_base_ref) ())
   end
 
 let launch_harness_load state ~mailbox =
@@ -19406,7 +19406,9 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
            Masc_tui_code_requests.launch_history_load state ~host ~deliver ~path)
            selected_file;
          if state.code_diff_open then Option.iter (fun path ->
-           Masc_tui_code_requests.launch_diff_load state ~host ~deliver ~base_ref:tree_diff_base_ref ~path)
+           Masc_tui_code_requests.launch_diff_load state ~host ~deliver
+             ~target:(diff_target_for_refresh state
+                        ~base_ref:tree_diff_base_ref ~path))
            selected_file;
          Option.iter (fun path -> Masc_tui_code_requests.launch_blame_load state ~host ~deliver ~path)
            (Masc_tui_fetched.current_key state.code_blame);
@@ -37965,8 +37967,35 @@ Use relative paths for resources already held in the package. -->
            end
        | Some "d" when state.view = Code && state.code_focus_file = Right_pane
                        && state.code_history_open ->
-           if not (Masc_tui_render_code.toggle_history_change state) then
-             report_action state "error" "Select a Keeper record to expand its recorded change"
+           (* A commit row opens what that commit changed in this file, over
+              the same overlay the working-tree diff uses; a Keeper record
+              expands its recorded text in place. *)
+           (match
+              history_commit_diff_target
+                ~file_path:(Masc_tui_fetched.current_key state.code_file)
+                (Masc_tui_render_code.code_history_selected state)
+            with
+            | Some target ->
+                state.code_diff_open <- true;
+                state.code_history_open <- false;
+                state.code_notes_open <- false;
+                (* A failed or stale read starts again, so an ambiguous
+                   abbreviation or a refused read can be retried by pressing
+                   d once more. *)
+                (match Masc_tui_fetched.current state.code_diff with
+                 | Some (loaded, (Masc_tui_fetched.Ready _ | Masc_tui_fetched.Loading))
+                   when code_diff_target_equal loaded target -> ()
+                 | Some (_, (Masc_tui_fetched.Ready _ | Masc_tui_fetched.Loading
+                            | Masc_tui_fetched.Absent | Masc_tui_fetched.Stale (_, _)
+                            | Masc_tui_fetched.Failed _))
+                 | None ->
+                     Masc_tui_code_requests.launch_diff_load state
+                       ~host:server_peer_host
+                       ~deliver:(workspace_enqueue state async_messages) ~target)
+            | None ->
+                if not (Masc_tui_render_code.toggle_history_change state) then
+                  report_action state "error"
+                    "Select a commit or a Keeper record to see its change")
        | Some "d" when state.view = Code && state.code_focus_file = Right_pane
                        && Option.is_some (Masc_tui_fetched.current_key state.code_file) ->
            (* The working tree against HEAD, over the open file. One overlay
@@ -37976,17 +38005,17 @@ Use relative paths for resources already held in the package. -->
            (match Masc_tui_fetched.current_key state.code_file with
             | None -> ()
             | Some path ->
-                if state.code_diff_open then state.code_diff_open <- false
+                if state.code_diff_open then close_code_diff state
                 else begin
                   state.code_diff_open <- true;
                   state.code_history_open <- false;
                   state.code_notes_open <- false;
+                  let target = Diff_worktree { path; base_ref = tree_diff_base_ref } in
                   (match Masc_tui_fetched.current state.code_diff with
-                   | Some (loaded_path, _)
-                     when String.equal loaded_path path -> ()
+                   | Some (loaded, _) when code_diff_target_equal loaded target -> ()
                    | Some _ | None ->
-                       Masc_tui_code_requests.launch_diff_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~base_ref:tree_diff_base_ref
-                         ~path)
+                       Masc_tui_code_requests.launch_diff_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages)
+                         ~target)
                 end)
        | Some ("pageup" | "pagedown" | "home" | "end" as move)
          when state.view = Code && state.code_focus_file = Right_pane
@@ -39059,7 +39088,7 @@ Use relative paths for resources already held in the package. -->
                 cancel_theme_preview state
             | Code ->
                 if state.code_notes_open then state.code_notes_open <- false
-                else if state.code_diff_open then state.code_diff_open <- false
+                else if state.code_diff_open then close_code_diff state
                 else if state.code_history_open then
                   state.code_history_open <- false
                 else if state.code_focus_file = Right_pane then
@@ -39283,7 +39312,7 @@ Use relative paths for resources already held in the package. -->
            (match state.view with
             | Code ->
                 if state.code_notes_open then state.code_notes_open <- false
-                else if state.code_diff_open then state.code_diff_open <- false
+                else if state.code_diff_open then close_code_diff state
                 else if state.code_history_open then
                   state.code_history_open <- false
                 else if state.code_focus_file = Right_pane then

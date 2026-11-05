@@ -98,23 +98,7 @@ let rec parse_args argv index cfg =
 
 (* [{tool}] rather than [%s]: the template is operator-supplied, and a stray
    percent in a hand-written prompt would otherwise raise at format time. *)
-let render_prompt template ~tool =
-  let placeholder = "{tool}" in
-  let plen = String.length placeholder in
-  let buf = Buffer.create (String.length template + String.length tool) in
-  let rec go i =
-    if i >= String.length template
-    then ()
-    else if i + plen <= String.length template && String.sub template i plen = placeholder
-    then (
-      Buffer.add_string buf tool;
-      go (i + plen))
-    else (
-      Buffer.add_char buf template.[i];
-      go (i + 1))
-  in
-  go 0;
-  Buffer.contents buf
+let render_prompt template ~tool = String_util.replace_substring ~needle:"{tool}" ~by:tool template
 ;;
 
 let lane_label runtime_id =
@@ -163,6 +147,13 @@ let invocation_json (invocation : Probe.invocation) =
       [ "kind", `String "other_tool_invoked"
       ; "requested", `String requested
       ; "invoked", `List (List.map (fun t -> `String t) invoked)
+      ; "elapsed_s", `Float elapsed_s
+      ]
+  | Probe.Tool_arguments_unreadable { tool; problem; elapsed_s } ->
+    `Assoc
+      [ "kind", `String "tool_arguments_unreadable"
+      ; "tool", `String tool
+      ; "problem", Probe.arguments_problem_json problem
       ; "elapsed_s", `Float elapsed_s
       ]
   | Probe.Replied_no_tool { reply_bytes; elapsed_s } ->

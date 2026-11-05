@@ -222,7 +222,7 @@ let prepare_server ~base_path ~port ~owned =
         let clock = Eio.Stdenv.clock env in
         let read () =
           Masc_http_client.get_sync ~clock
-            ~url:(Printf.sprintf "http://127.0.0.1:%d/health?full=1" port)
+            ~url:(Masc_network_defaults.masc_http_loopback_origin ~port ^ Server_health_paths.full)
             ~headers:[] ()
         in
         let initial = read () in
@@ -343,8 +343,9 @@ let run_with_selection ~network_mode ~base_path ~port ~initialize ~prepare_image
         else (
           (* Explicit headless setup keeps its server running for the caller. *)
           owned := None;
-          Printf.printf "Server remains on http://127.0.0.1:%d. Open masc --base-path %s --port %d\n%!"
-            port (Filename.quote base_path) port);
+          Printf.printf "Server remains on %s. Open masc --base-path %s --port %d\n%!"
+            (Masc_network_defaults.masc_http_loopback_origin ~port)
+            (Filename.quote base_path) port);
         0
       with
       | Setup_error message -> Log.Misc.error "setup: %s" message; 1

@@ -86,10 +86,19 @@ let conflicting_identity ()=let state,acc=start()in let first=named "native-a"(i
 let omitted_terminal_phase ()=let state,acc=start()in let original=item ~phase:(`String"commentary")["checking"]in done_item state acc 0 original;terminal state acc[item["checking"]];Alcotest.(check bool)"known item phase survives a later omitted field"true(equal_items(replay acc)[original])
 let malformed_terminal_calls ()=
  let fields=["type",`String"function_call";"call_id",`String"call";"name",`String"test";"arguments",`String"{}"]in
- let malformed=[`Assoc(List.remove_assoc "call_id" fields);`Assoc(List.remove_assoc "name" fields);`Assoc(("arguments",`String"private-provider-fragment")::List.remove_assoc "arguments" fields)]in
+ let malformed=[`Assoc(List.remove_assoc "call_id" fields);`Assoc(List.remove_assoc "name" fields)]in
  List.iter(fun call->let state,acc=start()in terminal state acc[call];match Acc.finalize_stream_acc acc with
  | Error error->Alcotest.(check bool)"shared strict function-call refusal is public-safe"true(error=Stream_parse_failed{raw="";reason="responses_replay:malformed_function_call"})
- | Ok _->Alcotest.fail"malformed terminal function became executable")malformed
+ | Ok _->Alcotest.fail"malformed terminal function became executable")malformed;
+ (* Identity intact, argument text not one object: the call the model made is
+    kept unreadable instead of failing the stream, and it never runs. *)
+ let state,acc=start()in
+ terminal state acc[`Assoc(("arguments",`String"private-provider-fragment")::List.remove_assoc "arguments" fields)];
+ match Acc.finalize_stream_acc acc with
+ | Error _->Alcotest.fail"an unreadable terminal call failed the stream"
+ | Ok response->
+   Alcotest.(check bool)"unreadable terminal call is not executable"false(List.exists(function ToolUse _->true| Llm_provider.Types.Text _| Llm_provider.Types.Thinking _| Llm_provider.Types.ReasoningDetails _| Llm_provider.Types.RedactedThinking _| Llm_provider.Types.ToolResult _| Llm_provider.Types.Image _| Llm_provider.Types.Document _| Llm_provider.Types.Audio _->false)response.content);
+   Alcotest.(check (list string))"kept as unreadable"["call"](List.map(fun(c:Llm_provider.Types.unreadable_tool_use)->c.tool_use_id)response.unreadable_tool_uses)
 let unsupported_custom ()=
  let state,acc=start()in terminal state acc[`Assoc["type",`String"custom_tool_call";"call_id",`String"custom";"name",`String"test";"input",`String"plain input"]];
  match Acc.finalize_stream_acc acc with Error _->()|Ok response->Alcotest.(check bool)"unsupported custom terminal is never promoted"false(List.exists(function ToolUse _->true| Llm_provider.Types.Text _| Llm_provider.Types.Thinking _| Llm_provider.Types.ReasoningDetails _| Llm_provider.Types.RedactedThinking _| Llm_provider.Types.ToolResult _| Llm_provider.Types.Image _| Llm_provider.Types.Document _| Llm_provider.Types.Audio _->false)response.content)
@@ -166,6 +175,30 @@ let chat_control () =
     (List.for_all (function `Assoc fields->not(List.mem_assoc "phase" fields)
       | `Null|`Bool _|`Int _|`Intlit _|`Float _|`String _|`List _->false) messages)
 
+(* The API takes a reasoning item back only together with the item that
+   followed it, and refuses one with nothing after it. Admission leaves it
+   alone two ways: a call whose arguments were not one JSON object, and a call
+   it refused by name. *)
+let reasoning_without_its_following_item () =
+  let reasoning=`Assoc Streams.encrypted_reasoning_fields in
+  let call arguments=`Assoc["type",`String"function_call";"call_id",`String"call";"name",`String"test";"arguments",`String arguments] in
+  let item_types response=match assistant_message_of_response response with
+    | Ok message->List.map(fun item->Yojson.Safe.Util.(item|>member "type"|>to_string))(replay_input_items message)
+    | Error error->Alcotest.fail(show_assistant_message_error error) in
+  let unreadable=Sync.parse(Sync.response[reasoning;call "[]"]) in
+  Alcotest.(check int) "the call is kept unreadable" 1 (List.length unreadable.unreadable_tool_uses);
+  Alcotest.(check (list string)) "no reasoning item goes back without its call" []
+    (item_types {unreadable with unreadable_tool_uses=[]});
+  let readable=Sync.parse(Sync.response[reasoning;call "{}"]) in
+  Alcotest.(check (list string)) "an admitted call keeps its reasoning" ["reasoning";"function_call"]
+    (item_types readable);
+  let refused=match retain_response_content ~retained_indices:[0]
+      ~content:(List.filteri(fun index _->index=0)readable.content) readable with
+    | Ok response->response
+    | Error detail->Alcotest.fail detail in
+  Alcotest.(check (list string)) "a refused call takes its reasoning out of the request" []
+    (item_types refused)
+
 let () = Alcotest.run "provider replay conformance" [
  "sync",[
   Alcotest.test_case "native groups" `Quick Sync.parts;
@@ -175,7 +208,8 @@ let () = Alcotest.run "provider replay conformance" [
   Alcotest.test_case "telemetry roundtrip" `Quick Sync.telemetry_roundtrip;
   Alcotest.test_case "manual phase control" `Quick Sync.legacy;
   Alcotest.test_case "public response cache" `Quick cache_roundtrip;
-  Alcotest.test_case "Chat control" `Quick chat_control];
+  Alcotest.test_case "Chat control" `Quick chat_control;
+  Alcotest.test_case "reasoning without its following item" `Quick reasoning_without_its_following_item];
  "stream",[
   Alcotest.test_case "native multipart and order" `Quick Streams.native_order;
   Alcotest.test_case "nullable phases" `Quick Streams.nullable;

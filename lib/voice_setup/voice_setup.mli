@@ -84,6 +84,13 @@ type error =
           standalone JSON at this path instead. The first section written into
           runtime.toml would become the configuration in effect and drop every
           setting that file carries, so nothing was written. *)
+  | Voice_not_on_endpoint of string
+      (** A command endpoint (say, espeak-ng) would be asked for a voice it
+          does not have, so nothing was written. say speaks such a name in
+          another voice and exits 0, so without this the mistake is heard
+          rather than reported. The message is the endpoint's own refusal,
+          naming the voice. Only names this edit newly asks of an endpoint
+          are checked. *)
 
 val error_message : error -> string
 
@@ -109,7 +116,8 @@ val observe
     [Ok (revision, None)] means neither source configures voice. *)
 
 val preview
-  :  runtime_config_path:string
+  :  check_command_voices:(Voice_config.endpoint -> voices:string list -> (unit, string) result)
+  -> runtime_config_path:string
   -> standalone_path:string
   -> expected_revision:string
   -> change list
@@ -120,10 +128,16 @@ val preview
     Validated the way {!apply} validates, so an [Ok] preview is a preview of
     something that can be written. It reads outside the write lock, so the
     revision may move before {!apply} runs -- which is why apply checks it
-    again, under the lock. *)
+    again, under the lock.
+
+    [check_command_voices endpoint ~voices] answers whether a command endpoint
+    has every one of [voices]. It is asked once per enabled command endpoint,
+    with only the names the edit newly asks of it: a default voice or agent
+    mapping it already answered to is not asked again. *)
 
 val apply
-  :  runtime_config_path:string
+  :  check_command_voices:(Voice_config.endpoint -> voices:string list -> (unit, string) result)
+  -> runtime_config_path:string
   -> standalone_path:string
   -> expected_revision:string
   -> change list
@@ -137,7 +151,10 @@ val apply
     because they depend on one another: a tts endpoint and the [default_voice]
     its section requires have to land together, and applying them one at a time
     would refuse the first half and leave the file in a state the loader
-    rejects. *)
+    rejects.
+
+    The voice names are checked as {!preview} checks them, before the write
+    lock is taken, since listing a command endpoint's voices runs a process. *)
 
 type voice_placement =
   | On_the_section (** the section's default is say's to set: the voice becomes it *)

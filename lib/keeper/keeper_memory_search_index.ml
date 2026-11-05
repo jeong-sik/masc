@@ -96,30 +96,33 @@ let populate db texts =
     loop 0 texts)
 ;;
 
-let search db ~count ~exclude_owner ~max_results expression =
-  let sql = match exclude_owner, max_results with
-    | None, None ->
+(* The rows one query may return. [Excluding] leaves out one owner's rows and
+   keeps the best [limit] of the rest; the owner and the limit come together. *)
+type row_filter =
+  | All_rows
+  | Excluding of { owner : string; limit : int }
+
+let search db ~count ~filter expression =
+  let sql = match filter with
+    | All_rows ->
       "SELECT ordinal, bm25(memory_search) FROM memory_search WHERE memory_search MATCH ? \
        ORDER BY bm25(memory_search), ordinal"
-    | Some _, Some _ ->
+    | Excluding _ ->
       "SELECT ordinal, bm25(memory_search) FROM memory_search WHERE memory_search MATCH ? \
        AND owner != ? ORDER BY bm25(memory_search), ordinal LIMIT ?"
-    | None, Some _ | Some _, None ->
-      "SELECT ordinal, bm25(memory_search) FROM memory_search WHERE memory_search MATCH ? \
-       ORDER BY bm25(memory_search), ordinal"
   in
   with_statement
     db
     sql
     (fun statement ->
        let* () = check db "bind memory query" (Sqlite3.bind statement 1 (Sqlite3.Data.TEXT expression)) in
-       let* () = match exclude_owner, max_results with
-         | Some owner, Some limit ->
+       let* () = match filter with
+         | Excluding { owner; limit } ->
            let* () = check db "bind excluded memory owner"
              (Sqlite3.bind statement 2 (Sqlite3.Data.TEXT owner)) in
            check db "bind memory result limit"
              (Sqlite3.bind statement 3 (Sqlite3.Data.INT (Int64.of_int limit)))
-         | None, None | None, Some _ | Some _, None -> Ok () in
+         | All_rows -> Ok () in
        let rec rows hits =
          match Sqlite3.step statement with
          | exception Sqlite3.Error detail -> Error (Index_unavailable ("search memory: " ^ detail))
@@ -154,14 +157,13 @@ let create_table db texts =
   populate db texts
 ;;
 
-let rank_many_with ~queries ~texts ~max_results =
-  let expressions = List.map (fun (owner, query) -> owner, match_expression query) queries in
-  let empty_stats = { index_builds = 0; indexed_rows = 0; queries_executed = 0 } in
-  match max_results, texts, List.exists (fun (_, expression) -> Option.is_some expression) expressions with
-  | Some limit, _, _ when limit < 0 -> Error (Index_unavailable "negative result limit")
-  | Some 0, _, _ | _, [], _ | _, _, false ->
-    Ok (List.map (fun _ -> []) queries, empty_stats)
-  | _, _ :: _, true ->
+let no_work = { index_builds = 0; indexed_rows = 0; queries_executed = 0 }
+
+let rank_many_with ~queries ~texts =
+  let expressions = List.map (fun (filter, query) -> filter, match_expression query) queries in
+  match texts, List.exists (fun (_, expression) -> Option.is_some expression) expressions with
+  | [], _ | _, false -> Ok (List.map (fun _ -> []) queries, no_work)
+  | _ :: _, true ->
     (* Building and querying the table is one SQLite call per row, and a
        caller's fiber cannot yield inside it. The workspace curator ranks the
        whole workspace ledger: on domain 0 that held the server's HTTP answers
@@ -175,9 +177,8 @@ let rank_many_with ~queries ~texts ~max_results =
                        { index_builds = 1; indexed_rows = List.length texts;
                          queries_executed = executed })
            | (_, None) :: rest -> search_all ([] :: results) executed rest
-           | (owner, Some expression) :: rest ->
-             let* ranked = search db ~count:(List.length texts)
-                 ~exclude_owner:owner ~max_results expression in
+           | (filter, Some expression) :: rest ->
+             let* ranked = search db ~count:(List.length texts) ~filter expression in
              search_all (ranked :: results) (executed + 1) rest
          in
          search_all [] 0 expressions)
@@ -186,15 +187,19 @@ let rank_many_with ~queries ~texts ~max_results =
 ;;
 
 let rank_many ~queries texts =
-  let queries = List.map (fun query -> None, query) queries in
+  let queries = List.map (fun query -> All_rows, query) queries in
   let texts = List.map (fun text -> "", text) texts in
-  let* ranked, _ = rank_many_with ~queries ~texts ~max_results:None in
+  let* ranked, _ = rank_many_with ~queries ~texts in
   Ok ranked
 ;;
 
 let rank_many_excluding_owners ~queries ~texts ~max_results =
-  rank_many_with ~queries:(List.map (fun (owner, query) -> Some owner, query) queries)
-    ~texts ~max_results:(Some max_results)
+  if max_results < 0 then Error (Index_unavailable "negative result limit")
+  else if max_results = 0 then Ok (List.map (fun _ -> []) queries, no_work)
+  else
+    rank_many_with
+      ~queries:(List.map (fun (owner, query) -> Excluding { owner; limit = max_results }, query) queries)
+      ~texts
 ;;
 
 let close_table db =
@@ -211,7 +216,7 @@ let close_table db =
    runs [f] itself. *)
 let with_excluding_owners ~texts ~max_results f =
   let opened = ref None in
-  let stats = ref { index_builds = 0; indexed_rows = 0; queries_executed = 0 } in
+  let stats = ref no_work in
   let table () =
     match !opened with
     | Some db -> Ok db
@@ -245,7 +250,7 @@ let with_excluding_owners ~texts ~max_results f =
             | (_, None) :: rest -> search_all ([] :: results) executed rest
             | (owner, Some expression) :: rest ->
               let* ranked = search db ~count:(List.length texts)
-                  ~exclude_owner:(Some owner) ~max_results:(Some max_results) expression in
+                  ~filter:(Excluding { owner; limit = max_results }) expression in
               search_all (ranked :: results) (executed + 1) rest
           in
           try search_all [] 0 expressions with Sqlite3.Error detail -> Error (Index_unavailable detail))

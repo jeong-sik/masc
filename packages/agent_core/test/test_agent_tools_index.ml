@@ -166,6 +166,7 @@ let tool_use id name = Types.ToolUse { id; name; input = `Assoc [] }
 
 let admit names blocks =
   Agent_tools.admit_tool_use_names
+    ~unreadable_tool_uses:[]
     (Agent_tools.build_index (List.map make_tool names))
     blocks
 ;;
@@ -368,6 +369,36 @@ let test_admission_preserves_original_tool_indices () =
     sources
 ;;
 
+(* A call whose arguments were unreadable is not in the blocks, but it holds
+   its place: the readable calls around it keep the ordinals the wire gave
+   them, and the inventory counts it. *)
+let test_admission_counts_an_unreadable_call_at_its_place () =
+  let unreadable : Types.unreadable_tool_use =
+    { tool_use_id = "broken"
+    ; tool_name = "Execute"
+    ; tool_use_ordinal = 1
+    ; arguments = {|{"argv": ["ls"]"cwd": "."}|}
+    ; arguments_problem = Llm_provider.Tool_call_input.Invalid_json "bad"
+    ; arguments_assembly = None
+    }
+  in
+  let admission =
+    Agent_tools.admit_tool_use_names
+      ~unreadable_tool_uses:[ unreadable ]
+      (Agent_tools.build_index (List.map make_tool [ "Execute" ]))
+      [ tool_use "t0" "Execute"; tool_use "t2" "Execute" ]
+  in
+  let sources =
+    List.map
+      (fun (source : Hooks.admitted_tool_use_source) ->
+         source.planned_index, source.source_tool_use_ordinal)
+      admission.tool_source_map.admitted_tool_sources
+  in
+  check int "inventory counts the unreadable call" 3
+    admission.tool_source_map.source_tool_use_count;
+  check (list (pair int int)) "readable calls skip its place" [ 0, 0; 1, 2 ] sources
+;;
+
 let test_admission_retains_name_recovery_authority () =
   let admission = admit ["keeper_skill"]
     [tool_use "same-id" "Unknown"; tool_use "same-id" "keeper_skill1";
@@ -433,6 +464,10 @@ let () =
             "admission retains original tool indices"
             `Quick
             test_admission_preserves_original_tool_indices
+        ; test_case
+            "admission counts an unreadable call at its place"
+            `Quick
+            test_admission_counts_an_unreadable_call_at_its_place
         ] )
     ; ( "rejected name rendering"
       , [ test_case

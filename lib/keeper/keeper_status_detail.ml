@@ -603,7 +603,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
          in
          let runtime_blocker = runtime_blocker_surface_opt config m in
          let runtime_blocker_fields =
-          runtime_blocker_fields_json_of_surface m runtime_blocker
+          runtime_blocker_fields_json_of_surface runtime_blocker
          in
          let attention_fields =
            attention_fields_json config m

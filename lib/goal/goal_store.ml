@@ -34,6 +34,9 @@ let goals_path config =
 let goals_recovery_path config =
   goals_path config ^ ".last-good"
 
+let goal_events_path config =
+  Filename.concat (Workspace_utils.masc_dir config) "goal_events.jsonl"
+
 let ensure_dirs config =
   Workspace_utils.mkdir_p (Workspace_utils.masc_dir config)
 
@@ -723,7 +726,7 @@ let upsert_event_intents ~actor ~revision (goal : goal) action =
    writers already holding the Goal lock. This function never takes that lock
    or calls back into the Goal store. *)
 let append_audit_event config json =
-  let path = Filename.concat (Workspace_utils.masc_dir config) "goal_events.jsonl" in
+  let path = goal_events_path config in
   try
     let expected = try (Unix.stat path).Unix.st_size with
       | Unix.Unix_error (Unix.ENOENT, _, _) -> 0 in
@@ -770,7 +773,7 @@ let flush_pending_events_locked config =
       | Unavailable unavailable -> Error (unavailable_to_string unavailable)
       | Available { pending_events = []; _ } -> Ok ()
       | Available state ->
-          let path = Filename.concat (Workspace_utils.masc_dir config) "goal_events.jsonl" in
+          let path = goal_events_path config in
           let outcome = Fs_compat.update_private_file_durable_locked_result path (fun existing ->
             let inspect () =
               if existing <> "" && not (String.ends_with ~suffix:"\n" existing) then

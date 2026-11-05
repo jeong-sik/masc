@@ -489,16 +489,6 @@ let turn_start_request ~id ~session_id ~command_id ~input ~reasoning_effort =
         | Some effort -> [ "reasoningEffort", `String (reasoning_effort_to_string effort) ]))
 ;;
 
-let turn_interrupt_request ~id ~session_id ~command_id ~turn_id =
-  request
-    ~id
-    ~method_:"turn/interrupt"
-    [ "sessionId", `String session_id
-    ; "commandId", `String command_id
-    ; "turnId", `String turn_id
-    ]
-;;
-
 let usage_read_request ~id = request ~id ~method_:"usage/read" []
 
 let method_not_found = -32601

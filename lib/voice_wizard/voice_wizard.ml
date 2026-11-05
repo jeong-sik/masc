@@ -15,16 +15,6 @@ let provider_label = function
   | Mcp_tool -> "mcp_tool"
 ;;
 
-let provider_of_label = function
-  | "macos_say" -> Some Macos_say
-  | "espeak_ng" -> Some Espeak_ng
-  | "whisper_cli" -> Some Whisper_cli
-  | "elevenlabs" -> Some Elevenlabs
-  | "openai_compatible" -> Some Openai_compatible
-  | "mcp_tool" -> Some Mcp_tool
-  | _ -> None
-;;
-
 (* Each side is offered what can do its half.
 
    Speech in is offered neither an MCP tool nor say: both synthesize and have
@@ -272,17 +262,6 @@ let step_prompt = function
      path of the ggml file it loads."
   | Voice -> "Which voice should speech out use by default?"
   | Review -> "Here is what will change."
-;;
-
-let step_gap = function
-  | Section -> None
-  | Provider -> None
-  | Name -> Some Endpoint_id_is_blank
-  | Address -> Some Address_is_blank
-  | Credential -> Some Credential_variable_is_blank
-  | Model -> Some Model_is_blank
-  | Voice -> Some Voice_is_blank
-  | Review -> None
 ;;
 
 (* ── the request a surface sends ───────────────────────────────────────── *)

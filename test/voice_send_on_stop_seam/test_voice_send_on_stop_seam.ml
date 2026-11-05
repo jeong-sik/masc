@@ -66,7 +66,9 @@ let write ~path changes =
   | Error error -> Alcotest.fail (Voice_setup.error_message error)
   | Ok (revision, _) ->
     (match
-       Voice_setup.apply ~runtime_config_path:path ~standalone_path
+       Voice_setup.apply
+         ~check_command_voices:(fun _endpoint ~voices:_ -> Ok ())
+         ~runtime_config_path:path ~standalone_path
          ~expected_revision:revision changes
      with
      | Error error -> Alcotest.fail (Voice_setup.error_message error)

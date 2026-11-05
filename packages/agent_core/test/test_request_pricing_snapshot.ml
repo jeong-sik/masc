@@ -47,7 +47,7 @@ let raw_config () = Provider_config.make ~kind:OpenAI_compat
     ~base_url:"https://pricing.invalid" ()
 
 let response ?(model = "request-model") ?cost () : Llm_provider.Types.api_response =
-  { id = "pricing-response"; model; stop_reason = EndTurn; content = [Text "ok"]
+  { id = "pricing-response"; model; unreadable_tool_uses = []; stop_reason = EndTurn; content = [Text "ok"]
   ; usage = Some {input_tokens = 1_000_000; output_tokens = 1_000_000;
       cache_creation_input_tokens = 0; cache_read_input_tokens = 0; cost_usd = cost}
   ; telemetry = Some (Llm_provider.Types.with_reported_model ~model None) }

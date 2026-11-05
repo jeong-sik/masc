@@ -29,10 +29,6 @@ type media =
   ; chunks : Types.media_chunks
   }
 
-type input_piece =
-  | Delta_bytes of int
-  | Snapshot_bytes of int
-
 type block_lifecycle =
   | Open
   | Closed
@@ -41,7 +37,7 @@ type block =
   { header : block_header
   ; lifecycle : block_lifecycle
   ; text_chunks_rev : string list
-  ; input_pieces_rev : input_piece list
+  ; input_pieces_rev : Types.tool_argument_piece list
   ; input_piece_count : int
   ; signature_chunks_rev : string list
   ; reasoning_details_rev : Types.reasoning_detail list
@@ -273,23 +269,10 @@ let record_input_piece piece block =
   }
 ;;
 
-let input_trace_suffix block =
-  match block.input_piece_count with
-  | 0 -> ""
-  | count ->
-    let retained = List.rev block.input_pieces_rev in
-    let omitted = count - List.length retained in
-    let pieces =
-      retained
-      |> List.map (function
-        | Delta_bytes bytes -> Printf.sprintf "delta:%d" bytes
-        | Snapshot_bytes bytes -> Printf.sprintf "snapshot:%d" bytes)
-      |> String.concat ","
-    in
-    let pieces =
-      if omitted = 0 then pieces else Printf.sprintf "omitted:%d,%s" omitted pieces
-    in
-    Printf.sprintf ":assembly=%s" pieces
+let argument_assembly block =
+  { Types.last_pieces = List.rev block.input_pieces_rev
+  ; piece_count = block.input_piece_count
+  }
 ;;
 
 let signature_of_block block =
@@ -785,10 +768,10 @@ let transition_open state = function
            { block with text_chunks_rev = [ text ] }
          | Types.InputJsonDelta text ->
            { block with text_chunks_rev = text :: block.text_chunks_rev }
-           |> record_input_piece (Delta_bytes (String.length text))
+           |> record_input_piece (Types.Argument_delta (String.length text))
          | Types.InputJsonSnapshot text ->
            { block with text_chunks_rev = [ text ] }
-           |> record_input_piece (Snapshot_bytes (String.length text))
+           |> record_input_piece (Types.Argument_snapshot (String.length text))
          | Types.ReasoningDetailsDelta { reasoning_content; details } ->
            { block with
              text_chunks_rev =
@@ -942,42 +925,39 @@ let required_nonblank ~reason = function
   | Some _ | None -> stream_parse_failed ~reason ()
 ;;
 
+(* What one assembled block becomes in the response. *)
+type block_projection =
+  | Content of Types.content_block
+  | No_content
+  | Unreadable_tool_use of
+      { tool_use_id : string
+      ; tool_name : string
+      ; arguments : string
+      ; arguments_problem : Tool_call_input.parse_error
+      ; arguments_assembly : Types.tool_argument_assembly option
+      }
+
 let media_content ~index ~kind ~make block =
   match block.media with
-  | None -> Ok None
+  | None -> Ok No_content
   | Some { media_type; chunks } ->
     let source = Types.media_chunks_source chunks in
     if String.trim (Types.media_source_payload source) = ""
-    then Ok None
+    then Ok No_content
     else if String.trim media_type <> ""
-    then Ok (Some (make ~media_type ~source))
+    then Ok (Content (make ~media_type ~source))
     else
       stream_parse_failed
         ~reason:(Printf.sprintf "malformed_media_block:%s:index:%d" kind index)
         ()
 ;;
 
-let tool_input ~index ~trace text =
+(* A call with no parameters may stream no argument text at all; that is the
+   empty object, not an unreadable one. *)
+let tool_input text =
   if String.trim text = ""
   then Ok (`Assoc [])
-  else (
-    match Tool_call_input.parse_object text with
-    | Ok (input, _dropped) -> Ok input
-    | Error Tool_call_input.Not_object ->
-      stream_parse_failed
-        ~reason:(Printf.sprintf "malformed_tool_use_arguments:index:%d:not_object" index)
-        ~raw:text
-        ()
-    | Error (Tool_call_input.Invalid_json reason) ->
-      stream_parse_failed
-        ~reason:
-          (Printf.sprintf
-             "malformed_tool_use_arguments:index:%d:%s%s"
-             index
-             reason
-             (input_trace_suffix trace))
-        ~raw:text
-        ())
+  else Tool_call_input.parse_object text |> Result.map fst
 ;;
 
 let tool_block_is_incomplete disposition stop_reason =
@@ -1116,42 +1096,56 @@ let coalesce_text_details details =
 let content_of_block ~disposition ~stop_reason (index, block) =
   let text = text_of_block block in
   match block.header with
-  | Unannounced -> Ok None
-  | Announced { kind = Text_block; _ } -> Ok (Some (Types.Text text))
+  | Unannounced -> Ok No_content
+  | Announced { kind = Text_block; _ } -> Ok (Content (Types.Text text))
   | Announced { kind = Thinking_block; _ } ->
     Ok
-      (Some
+      (Content
          (Types.Thinking { content = text; signature = signature_of_block block }))
   | Announced { kind = Reasoning_details_block; _ } ->
     let details = coalesce_text_details (List.rev block.reasoning_details_rev) in
     let reasoning_content = if String.trim text = "" then None else Some text in
     (match reasoning_content, details with
-     | None, [] -> Ok None
+     | None, [] -> Ok No_content
      | Some _, _ | None, _ :: _ ->
-       Ok (Some (Types.ReasoningDetails { reasoning_content; details })))
+       Ok (Content (Types.ReasoningDetails { reasoning_content; details })))
   | Announced { kind = Redacted_thinking_block; tool_id; _ } ->
     (match tool_id with
-     | Some data when data <> "" -> Ok (Some (Types.RedactedThinking data))
-     | Some _ | None -> Ok None)
+     | Some data when data <> "" -> Ok (Content (Types.RedactedThinking data))
+     | Some _ | None -> Ok No_content)
   | Announced { kind = Tool_use_block; _ }
     when tool_block_is_incomplete disposition stop_reason ->
     (* A cut-off tool block is not executable even when its partial argument
        buffer happens to parse. Projection drops it before it can enter
        assistant history. *)
-    Ok None
+    Ok No_content
   | Announced { kind = Tool_use_block; tool_id; tool_name } ->
     let* name =
       required_nonblank
         ~reason:(Printf.sprintf "malformed_tool_use:index:%d:missing_name" index)
         tool_name
     in
-    let* input = tool_input ~index ~trace:block text in
     let* id =
       required_nonblank
         ~reason:(Printf.sprintf "malformed_tool_use:index:%d:missing_id" index)
         tool_id
     in
-    Ok (Some (Types.ToolUse { id; name; input }))
+    (* Argument text that is not one JSON object is something the model
+       sent, not a broken stream: the call has its id and name, and the rest
+       of the response stands. It leaves [content] for [unreadable_tool_uses]
+       with its text and how the stream built it, for whoever answers the
+       model about it. *)
+    (match tool_input text with
+     | Ok input -> Ok (Content (Types.ToolUse { id; name; input }))
+     | Error arguments_problem ->
+       Ok
+         (Unreadable_tool_use
+            { tool_use_id = id
+            ; tool_name = name
+            ; arguments = text
+            ; arguments_problem
+            ; arguments_assembly = Some (argument_assembly block)
+            }))
   | Announced { kind = Tool_result_block { is_error }; tool_id; _ } ->
     let* tool_use_id =
       required_nonblank
@@ -1159,7 +1153,7 @@ let content_of_block ~disposition ~stop_reason (index, block) =
         tool_id
     in
     Ok
-      (Some
+      (Content
          (Types.ToolResult
             { tool_use_id
             ; content = text
@@ -1198,14 +1192,38 @@ let content_of_block ~disposition ~stop_reason (index, block) =
       ()
 ;;
 
+(* [tool_calls] counts the tool calls kept so far, readable or not, so an
+   unreadable call takes the place the wire gave it among them. *)
 let collect_content state stop_reason =
-  let rec loop content = function
-    | [] -> Ok (List.rev content)
+  let rec loop content unreadable tool_calls = function
+    | [] -> Ok (List.rev content, List.rev unreadable)
     | ((index, _) as block) :: rest ->
-      let* item = content_of_block ~disposition:state.disposition ~stop_reason block in
-      loop (Option.fold ~none:content ~some:(fun item -> (index,item) :: content) item) rest
+      let* projection =
+        content_of_block ~disposition:state.disposition ~stop_reason block
+      in
+      (match projection with
+       | Content (Types.ToolUse _ as item) ->
+         loop ((index, item) :: content) unreadable (tool_calls + 1) rest
+       | Content
+           (( Types.Text _ | Types.Thinking _ | Types.ReasoningDetails _
+            | Types.RedactedThinking _ | Types.ToolResult _ | Types.Image _
+            | Types.Document _ | Types.Audio _ ) as item) ->
+         loop ((index, item) :: content) unreadable tool_calls rest
+       | No_content -> loop content unreadable tool_calls rest
+       | Unreadable_tool_use
+           { tool_use_id; tool_name; arguments; arguments_problem; arguments_assembly } ->
+         let call : Types.unreadable_tool_use =
+           { tool_use_id
+           ; tool_name
+           ; tool_use_ordinal = tool_calls
+           ; arguments
+           ; arguments_problem
+           ; arguments_assembly
+           }
+         in
+         loop content (call :: unreadable) (tool_calls + 1) rest)
   in
-  loop [] (Blocks.bindings state.blocks)
+  loop [] [] 0 (Blocks.bindings state.blocks)
 ;;
 
 let group_content state indexed_content =
@@ -1262,7 +1280,7 @@ let has_tool_block =
 ;;
 
 let finalize_completed state stop_reason =
-  let* indexed_content = collect_content state stop_reason in
+  let* indexed_content, unreadable_tool_uses = collect_content state stop_reason in
   let* content, response_replay = group_content state indexed_content in
   let* inline_content_replay = match state.inline_content_carrier, response_replay with
     | None, _ -> Ok None
@@ -1281,7 +1299,12 @@ let finalize_completed state stop_reason =
        | Error reason -> stream_parse_failed ~reason ())
   in
   let stop_reason =
-    Stop_reason_wire.reconcile stop_reason ~has_tool_blocks:(has_tool_block content)
+    (* An unreadable call is still a tool call the model made: a turn whose
+       only calls are unreadable keeps its tool stop, so the agent answers the
+       model about them instead of ending the turn. *)
+    Stop_reason_wire.reconcile
+      stop_reason
+      ~has_tool_blocks:(has_tool_block content || unreadable_tool_uses <> [])
   in
   let cache_creation_input_tokens =
     Option.bind state.usage (fun (u : Types.delta_usage) ->
@@ -1294,6 +1317,7 @@ let finalize_completed state stop_reason =
   Ok
     { Types.id = state.id
     ; model = state.model
+    ; unreadable_tool_uses
     ; stop_reason
     ; content
     ; usage = Option.map terminal_usage state.usage

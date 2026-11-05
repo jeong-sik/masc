@@ -8,6 +8,7 @@ open Agent_core
 let make_response text : Types.api_response =
   { id = "m"
   ; model = "m"
+  ; unreadable_tool_uses = []
   ; stop_reason = EndTurn
   ; content = [ Text text ]
   ; usage = None

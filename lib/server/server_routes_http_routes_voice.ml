@@ -168,7 +168,8 @@ let respond_voice_setup_error request reqd error =
     | Server_voice_setup_actions.Setup_failed
         ( Voice_setup.Voice_section_invalid _
         | Voice_setup.Endpoint_path_unusable _
-        | Voice_setup.Configuration_rejected _ ) -> `Bad_request
+        | Voice_setup.Configuration_rejected _
+        | Voice_setup.Voice_not_on_endpoint _ ) -> `Bad_request
   in
   respond_json_value_with_cors ~status request reqd
     (`Assoc
@@ -298,9 +299,15 @@ let add_routes router =
            let base_path = (Mcp_server.workspace_config state).base_path in
            Http.Request.read_body_async reqd (fun body ->
              handle_voice_setup ~base_path
-               ~act:Server_voice_setup_actions.preview request reqd body))
+               ~act:
+                 (Server_voice_setup_actions.preview
+                    ~check_command_voices:Voice_bridge.check_command_voices)
+               request reqd body))
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/voice/setup" (fun state _agent_name request reqd ->
            let base_path = (Mcp_server.workspace_config state).base_path in
            Http.Request.read_body_async reqd (fun body ->
-             handle_voice_setup ~base_path ~act:Server_voice_setup_actions.apply request
-               reqd body))
+             handle_voice_setup ~base_path
+               ~act:
+                 (Server_voice_setup_actions.apply
+                    ~check_command_voices:Voice_bridge.check_command_voices)
+               request reqd body))

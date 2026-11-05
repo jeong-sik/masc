@@ -47,6 +47,7 @@ let make_zero_usage : Agent_core.Types.api_usage =
 let make_response ?(model = "") ?telemetry () : Agent_core.Types.api_response =
   { id = "msg-test-10083"
   ; model
+  ; unreadable_tool_uses = []
   ; stop_reason = EndTurn
   ; content = []
   ; usage = Some make_zero_usage

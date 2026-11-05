@@ -43,12 +43,6 @@ let make_error_handler () =
 let make_request_handler ~trust_policy ~routes ~sw ~clock ~server_start_time:_ =
   let embedded_resources = Server_h2_response_resources.create
     ~max_pending_bytes:(H2_response_limits.max_pending_bytes ()) in
-  let mcp_eio_profile_of_transport_profile = function
-    | Server_mcp_transport_http.Full -> Mcp_eio.Full
-    | Server_mcp_transport_http.Managed_agent -> Mcp_eio.Managed_agent
-    | Server_mcp_transport_http.Operator_remote -> Mcp_eio.Operator_remote
-    | Server_mcp_transport_http.Seat -> Mcp_eio.Seat
-  in
   (* ═══════════════════════════════════════════════════════════════════════
      Route-local query helpers
      ═══════════════════════════════════════════════════════════════════════ *)
@@ -942,9 +936,6 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                                      .serves_subscriptions_listen ~profile
                                        post_context.body_str
                                    in
-                                   let profile =
-                                     mcp_eio_profile_of_transport_profile profile
-                                   in
                                    let timing = Server_timing.create () in
                                    Server_timing.record_ms timing Mcp_http_auth auth_ms;
                                    let response_json =
@@ -1159,18 +1150,6 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
       (* ─────────────────────────────────────────────────────────────────────
          REST API
          ───────────────────────────────────────────────────────────────────── *)
-      | `GET, "/api/v1/dashboard" ->
-          h2_gate_state h2_reqd (fun _state ->
-            let json =
-              `Assoc
-                [
-                  ("error", `String "dashboard batch contract removed");
-                  ("message", `String "Use /api/v1/dashboard/shell and surface-specific projection endpoints.");
-                ]
-            in
-            h2_respond_json_value h2_reqd json
-              ~status:`Gone ~extra_headers:cors)
-
       | `GET, p when p = Server_dashboard_http_hitl_recover.uncertain_path ->
           with_h2_token_permission_auth h2_reqd
             ~permission:Server_dashboard_http_hitl_recover.permission (fun state _actor ->

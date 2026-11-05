@@ -4,6 +4,7 @@
 
 import { html } from 'htm/preact'
 import { useEffect, useRef, useCallback } from 'preact/hooks'
+import { storedTokenRevision } from '../../api/token-revision'
 import { ActionButton } from '../common/button'
 import { EmptyState, ErrorState, LoadingState } from '../common/feedback-state'
 import { SessionTraceEntry } from './session-trace-entry'
@@ -164,14 +165,17 @@ interface SessionTraceViewProps {
 export function SessionTraceView({ agentName, isKeeper, keeperOffline }: SessionTraceViewProps) {
   const listRef = useRef<HTMLDivElement>(null)
 
-  // Load on first mount. Clean up only when agentName changes (overlay closes).
-  // CollapsibleSection uses native <details> — children stay mounted when collapsed.
+  // Close only when agentName changes (overlay closes). Load on mount and again
+  // under a new credential: the store has already emptied what the previous one
+  // read. CollapsibleSection uses native <details> — children stay mounted when
+  // collapsed.
+  const credentialRevision = storedTokenRevision.value
+  useEffect(() => () => {
+    closeSessionTrace(agentName)
+  }, [agentName, isKeeper])
   useEffect(() => {
     void loadSessionTrace(agentName, isKeeper)
-    return () => {
-      closeSessionTrace(agentName)
-    }
-  }, [agentName, isKeeper])
+  }, [agentName, isKeeper, credentialRevision])
 
   // Subscribe to traceSlots changes for reactivity.
   void traceSlots.value

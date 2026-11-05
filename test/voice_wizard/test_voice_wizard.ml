@@ -338,7 +338,9 @@ let test_a_complete_draft_writes_a_configuration_that_loads () =
       | Error error -> Alcotest.fail (Voice_setup.error_message error)
     in
     (match
-       Voice_setup.apply ~runtime_config_path:path ~standalone_path
+       Voice_setup.apply
+         ~check_command_voices:(fun _endpoint ~voices:_ -> Ok ())
+         ~runtime_config_path:path ~standalone_path
          ~expected_revision:revision changes
      with
      | Ok _revision -> ()
@@ -390,7 +392,9 @@ let test_a_command_endpoint_is_written_with_nothing_to_reach () =
       | Error error -> Alcotest.fail (Voice_setup.error_message error)
     in
     (match
-       Voice_setup.apply ~runtime_config_path:path ~standalone_path
+       Voice_setup.apply
+         ~check_command_voices:(fun _endpoint ~voices:_ -> Ok ())
+         ~runtime_config_path:path ~standalone_path
          ~expected_revision:revision changes
      with
      | Ok _revision -> ()

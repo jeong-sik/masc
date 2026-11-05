@@ -131,6 +131,7 @@ let config base_url =
 let response =
   { Types.id = "exact-fit-response"
   ; model = "exact-fit-call-window"
+  ; unreadable_tool_uses = []
   ; stop_reason = Types.EndTurn
   ; content = [ Types.Text "accepted" ]
   ; usage = None

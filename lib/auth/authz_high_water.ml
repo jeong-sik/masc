@@ -81,6 +81,14 @@ module Probe = struct
   ;;
 end
 
+(* Items 3 and 5 of design 8.2, when no record follows the previous hash of the
+   intent: the end of the log decides. *)
+let at_end ~head intent =
+  if Hash.equal head intent.Store.previous_record_hash
+  then Ok intent
+  else Error (Intent_unplaced intent)
+;;
+
 (* Items 2, 3 and 5 of design 8.2: the record after the previous hash of the
    intent decides, and the end of the log decides when there is none. *)
 let settle (probe : Probe.t) =
@@ -92,10 +100,7 @@ let settle (probe : Probe.t) =
        if Hash.equal found intent.Store.intended_next_record_digest
        then Ok (Promote intent)
        else Error (Digest_differs { intent; found })
-     | None ->
-       if Hash.equal probe.Probe.head intent.Store.previous_record_hash
-       then Ok (Abort intent)
-       else Error (Intent_unplaced intent))
+     | None -> Result.map (fun intent -> Abort intent) (at_end ~head:probe.Probe.head intent))
 ;;
 
 let settlement_entry = function
@@ -130,6 +135,22 @@ let settle_on_entry (probe : Probe.t) =
      | None, (Nothing_to_settle | Abort _) -> Ok Nothing_answered
      | None, Promote _ | Some _, (Nothing_to_settle | Promote _ | Abort _) ->
        Ok (Answered settlement))
+;;
+
+(* Over a log with no record, no record follows the previous hash of an intent
+   and the head is the genesis hash, so nothing can be promoted and the last
+   [Committed] is never in the log. *)
+let settle_over_empty_log state =
+  let probe = Probe.create state in
+  let pending =
+    match Store.State.pending state with
+    | None -> Ok None
+    | Some intent -> Result.map Option.some (at_end ~head:probe.Probe.head intent)
+  in
+  match check_commit probe, pending with
+  | Error first, Error second -> Error (first, [ second ])
+  | Error reason, Ok (_ : Store.intent option) | Ok (), Error reason -> Error (reason, [])
+  | Ok (), Ok abort -> Ok abort
 ;;
 
 let judge (probe : Probe.t) =

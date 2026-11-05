@@ -1,13 +1,9 @@
-let installed checkpoint = function
-  | Keeper_checkpoint_store.Installed installed ->
-    if List.exists (function
-         | Keeper_checkpoint_store.Commit_durability_unknown _ -> true
-         | Keeper_checkpoint_store.Commit_observer_failed _
-         | Keeper_checkpoint_store.Release_process_lock_failed _
-         | Keeper_checkpoint_store.Post_commit_unwind_interrupted _ -> false) installed.auxiliary
-    then Error "approval input checkpoint durability could not be confirmed"
-    else Ok checkpoint
-  | Keeper_checkpoint_store.Not_installed _ ->
+let installed checkpoint installation =
+  match Keeper_checkpoint_store.require_confirmed_installation installation with
+  | Ok _installed_ref -> Ok checkpoint
+  | Error (Keeper_checkpoint_store.Installed _) ->
+    Error "approval input checkpoint durability could not be confirmed"
+  | Error (Keeper_checkpoint_store.Not_installed _) ->
     Error "approval input checkpoint was not installed; canonical history remains authoritative"
 
 let candidate ~co_inputs ~identity ~message (checkpoint : Agent_core.Checkpoint.t) =

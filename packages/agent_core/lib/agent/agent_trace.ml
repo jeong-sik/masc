@@ -164,6 +164,7 @@ let%test "raw trace final_text excludes thinking blocks" =
   let response =
     { Types.id = "resp"
     ; model = "model"
+    ; unreadable_tool_uses = []
     ; stop_reason = EndTurn
     ; content =
         [ Thinking { signature = None; content = "private reasoning" }
@@ -180,6 +181,7 @@ let%test "raw trace final_text is absent for thinking-only responses" =
   let response =
     { Types.id = "resp"
     ; model = "model"
+    ; unreadable_tool_uses = []
     ; stop_reason = EndTurn
     ; content = [ Thinking { signature = None; content = "private reasoning" } ]
     ; usage = None

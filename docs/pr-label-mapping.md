@@ -2,7 +2,7 @@
 
 PR 을 분류할 때 세 축 라벨(kind / area / impact)을 각각 하나씩 붙입니다.
 
-라벨 어휘의 정본은 `.github/issue-taxonomy.json`입니다. 이 문서는 정본 어휘로 PR 분류를 안내하며, 정본이 은퇴한 라벨(`area/tui`, `area/gates`, `area/typed`, `impact/no-op`, `pr/*`)은 쓰지 않습니다.
+라벨 어휘의 정본은 `.github/issue-taxonomy.json`입니다. 이 문서는 정본 어휘로 PR 분류를 안내합니다.
 
 ## kind — PR 이 무엇을 하는가
 
@@ -23,7 +23,7 @@ area/keeper, area/dashboard, area/ci, area/collab, area/connector, area/continui
 
 - 변경 파일 경로(`lib/`, `test/`, `bin/` 아래)를 근거로 정합니다.
 - 코드 경로가 없는 문서 전용 PR 은 문서가 다루는 주제 기준으로 정합니다(예: 분류·게이트 문서는 `area/tools`).
-- TUI 화면 변경은 `area/dashboard` 입니다. 정본이 `area/tui`를 `area/dashboard` 에 합쳤습니다.
+- TUI 화면 변경은 `area/dashboard` 입니다.
 - 여러 영역을 건드리면 가장 중심인 하나만 남깁니다.
 
 ## impact — 바깥에 미치는 영향 (하나)
@@ -39,4 +39,4 @@ area/keeper, area/dashboard, area/ci, area/collab, area/connector, area/continui
 ## 규칙
 
 - 축 라벨은 PR 당 각 하나입니다.
-- 리뷰·충돌·병합 상태는 `pr/*` 라벨 대신 GitHub의 PR 필드와 리뷰 상태(`APPROVED`, `CHANGES_REQUESTED`)에서 확인합니다. 승인은 검토한 head를 기준으로 확인합니다.
+- 리뷰·충돌·병합 상태는 GitHub의 PR 필드와 리뷰 상태(`APPROVED`, `CHANGES_REQUESTED`)에서 확인합니다. 승인은 검토한 head를 기준으로 확인합니다.

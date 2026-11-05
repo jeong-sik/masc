@@ -14,17 +14,7 @@
     silently escalating to a whole-file overwrite (masc#31573). Write and Grep
     were open before this move and stay open. *)
 
-open Masc_domain
-
-let schema_of_name name : tool_schema =
-  let rel = "tools/" ^ name ^ ".toml" in
-  match Embedded_config.read rel with
-  | None -> failwith (Printf.sprintf "embedded tool definition missing: %s" rel)
-  | Some contents ->
-    (match Tool_definition_toml.load ~name ~contents with
-     | Ok { Tool_definition_toml.schema; _ } -> schema
-     | Error message -> failwith message)
-;;
+let schema_of_name = Tool_definition_embedded.schema
 
 let read_file = schema_of_name "Read"
 let edit_file = schema_of_name "Edit"

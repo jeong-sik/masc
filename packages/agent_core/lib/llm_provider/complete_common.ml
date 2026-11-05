@@ -192,12 +192,14 @@ let latency_ms_int counter = Option.map round_latency_ms (latency_ms_float count
 
 (** Preserve authoritative policy/truncation outcomes at completion consumption
     boundaries even when they carry no content. Other empty turns fail closed
-    with their typed stop reason for the existing retry/overflow classifier. *)
+    with their typed stop reason for the existing retry/overflow classifier.
+    A response whose only tool calls could not be read is not empty: the model
+    made those calls, and the pipeline answers them. *)
 let ensure_nonempty_completion
       (result : (Types.api_response, Http_client.http_error) result)
   =
   match result with
-  | Ok ({ content = []; stop_reason; _ } : Types.api_response) ->
+  | Ok ({ content = []; unreadable_tool_uses = []; stop_reason; _ } : Types.api_response) ->
     (match stop_reason with
      | Refusal | MaxTokens | ContentFilter | RepetitionTruncation -> result
      | EndTurn | StopToolUse | StopSequence | ContextWindowExceeded
@@ -328,35 +330,6 @@ let requires_non_http_transport = function
   | Provider_config.Ollama
   | Provider_config.Gemini
   | Provider_config.Glm -> false
-;;
-
-let validate_output_schema_request (config : Provider_config.t) =
-  match Provider_config.validate_output_schema_request config with
-  | Ok () -> Ok ()
-  | Error reason -> Error (Http_client.AcceptRejected { reason })
-;;
-
-let validate_tool_choice_request (config : Provider_config.t) =
-  match Provider_config.validate_tool_choice_request config with
-  | Ok () -> Ok ()
-  | Error reason -> Error (Http_client.AcceptRejected { reason })
-;;
-
-let validate_reasoning_effort_request (config : Provider_config.t) =
-  match Provider_config.validate_reasoning_effort_request_typed config with
-  | Ok () -> Ok ()
-  | Error rejection ->
-    Error
-      (Http_client.AcceptRejected
-         { reason =
-             Provider_config.reasoning_effort_request_rejection_to_message rejection
-         })
-;;
-
-let validate_request_path (config : Provider_config.t) =
-  match Provider_config.validate_request_path config with
-  | Ok () -> Ok ()
-  | Error reason -> Error (Http_client.AcceptRejected { reason })
 ;;
 
 (* Agent Core contract (capability axis) — fail loud when an explicit thinking-control
@@ -516,8 +489,8 @@ let thinking_control_request_rejection
 
 (* Operator-facing rejection reason for an unsatisfiable thinking-control
    request, or [None] when the request is admissible. Consumed by the Complete
-   path ([validate_thinking_control_request], which wraps the reason in a
-   typed [Http_client.AcceptRejected]). Until 2026-07-21 this was also shared
+   path ([request_admission]; [validate_all] wraps its reason in a typed
+   [Http_client.AcceptRejected]). Until 2026-07-21 this was also shared
    with the legacy public OpenAI-compatible body builder
    ([Api_openai.build_openai_body_result*], removed with the rest of the
    `Api`/`Api_openai`/`Streaming`/`Provider_intf` dispatch island), which kept
@@ -599,7 +572,7 @@ let validate_thinking_control_request
   =
   match thinking_control_request_rejection_reason ?anthropic_thinking_control config with
   | None -> Ok ()
-  | Some reason -> Error (Http_client.AcceptRejected { reason })
+  | Some reason -> Error reason
 ;;
 
 (* An admission bound of zero or less would mean "no request may ever
@@ -610,72 +583,60 @@ let validate_thinking_control_request
 let validate_admission_declaration (config : Provider_config.t) =
   match config.max_concurrent_requests, config.admission_priority_run_limit with
   | Some n, _ when n < 1 ->
-    Error
-      (Http_client.AcceptRejected
-         { reason =
-             Printf.sprintf "max_concurrent_requests must be >= 1 when declared, got %d" n
-         })
+    Error (Printf.sprintf "max_concurrent_requests must be >= 1 when declared, got %d" n)
   | _, Some limit when limit < 1 ->
     Error
-      (Http_client.AcceptRejected
-         { reason =
-             Printf.sprintf
-               "admission_priority_run_limit must be >= 1 when declared, got %d"
-               limit
-         })
+      (Printf.sprintf
+         "admission_priority_run_limit must be >= 1 when declared, got %d"
+         limit)
   | None, Some limit ->
     Error
-      (Http_client.AcceptRejected
-         { reason =
-             Printf.sprintf
-               "admission_priority_run_limit=%d needs max_concurrent_requests: without \
-                it the endpoint has no permit queue to order"
-               limit
-         })
+      (Printf.sprintf
+         "admission_priority_run_limit=%d needs max_concurrent_requests: without \
+          it the endpoint has no permit queue to order"
+         limit)
   | None, None | Some _, (None | Some _) -> Ok ()
 ;;
 
 let validate_common (config : Provider_config.t) =
-  match validate_request_path config with
-  | Error _ as e -> e
-  | Ok () ->
-    (match validate_output_schema_request config with
-     | Error _ as e -> e
-     | Ok () ->
-       (match validate_tool_choice_request config with
-        | Error _ as e -> e
-        | Ok () -> validate_reasoning_effort_request config))
+  let open Result.Syntax in
+  let* () = Provider_config.validate_request_path config in
+  let* () = Provider_config.validate_output_schema_request config in
+  let* () = Provider_config.validate_tool_choice_request config in
+  Provider_config.validate_reasoning_effort_request config
+;;
+
+let accept_rejected result =
+  Result.map_error (fun reason -> Http_client.AcceptRejected { reason }) result
 ;;
 
 let validate_all_with_thinking_control
       ~anthropic_thinking_control
       (config : Provider_config.t)
   =
-  match validate_common config with
-  | Error _ as e -> e
-  | Ok () ->
-    (match validate_thinking_control_request ?anthropic_thinking_control config with
-     | Error _ as e -> e
-     | Ok () -> validate_admission_declaration config)
+  accept_rejected
+    (let open Result.Syntax in
+     let* () = validate_common config in
+     let* () = validate_thinking_control_request ?anthropic_thinking_control config in
+     validate_admission_declaration config)
 ;;
 
-let validate_all (config : Provider_config.t) =
-  match validate_common config with
-  | Error _ as e -> e
-  | Ok () ->
-    (match config.kind with
-     | Provider_config.Anthropic ->
-       (match Backend_anthropic.validate_nonexact_thinking_controls config with
-        | Error reason -> Error (Http_client.AcceptRejected { reason })
-        | Ok () -> validate_admission_declaration config)
-     | Provider_config.Kimi
-     | Provider_config.OpenAI_compat
-     | Provider_config.Ollama
-     | Provider_config.Gemini
-     | Provider_config.Glm ->
-       (match validate_thinking_control_request config with
-        | Error _ as e -> e
-        | Ok () -> validate_admission_declaration config))
+let request_admission (config : Provider_config.t) =
+  let open Result.Syntax in
+  let* () = validate_common config in
+  let* () =
+    match config.kind with
+    | Provider_config.Anthropic -> Backend_anthropic.validate_nonexact_thinking_controls config
+    | Provider_config.Kimi
+    | Provider_config.OpenAI_compat
+    | Provider_config.Ollama
+    | Provider_config.Gemini
+    | Provider_config.Glm -> validate_thinking_control_request config
+  in
+  validate_admission_declaration config
+;;
+
+let validate_all (config : Provider_config.t) = accept_rejected (request_admission config)
 ;;
 
 type anthropic_serialization_policy =

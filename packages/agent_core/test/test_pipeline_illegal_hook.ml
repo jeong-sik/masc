@@ -9,6 +9,7 @@ open Agent_core
 let mock_response : Types.api_response =
   { id = "illegal-hook-mock"
   ; model = "mock-model"
+  ; unreadable_tool_uses = []
   ; stop_reason = EndTurn
   ; content = [ Text "unused" ]
   ; usage = None

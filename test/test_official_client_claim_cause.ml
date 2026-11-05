@@ -115,7 +115,7 @@ let check_preserved ~base_path ~keeper_name ~expected error =
        (Route.response_observed route)
    | _ -> Alcotest.fail "local refusal must not rotate, retry or claim a remote effect");
   let reason = Keeper_unified_turn_types.registry_failure_reason_of_terminal_reason
-      ~core_error:error terminal ~raw_error in
+      ~core_error:error terminal ~raw_error ~terminal_error_origin:Keeper_unified_turn_types.Terminal_error_not_from_a_candidate in
   Alcotest.(check bool) "registry receives same typed payload" true
     (reason = Some (R.Official_client_recovery_required expected));
   let meta =
@@ -128,7 +128,8 @@ let check_preserved ~base_path ~keeper_name ~expected error =
     (fun () ->
       Keeper_unified_turn_failure.record_failure_observation
         ~config:(Workspace.default_config base_path) ~meta ~terminal_reason:terminal
-        ~err:error ~error_text:raw_error;
+        ~err:error ~error_text:raw_error
+        ~terminal_error_origin:Keeper_unified_turn_types.Terminal_error_not_from_a_candidate;
       let count = R.get_turn_failures ~base_path keeper_name in
       Keeper_heartbeat_loop.refresh_failure_reason_after_turn
         ~registry_entry ~turn_fail_count:count;
@@ -304,7 +305,8 @@ let check_resolved_recovery_is_not_restored () =
            ~meta
            ~terminal_reason:terminal
            ~err:error
-           ~error_text:raw_error;
+           ~error_text:raw_error
+           ~terminal_error_origin:Keeper_unified_turn_types.Terminal_error_not_from_a_candidate;
          match R.get ~base_path keeper_name with
          | Some { last_failure_reason = None; _ } -> ()
          | Some { last_failure_reason = Some reason; _ } ->
@@ -349,7 +351,8 @@ let check_unreadable_store_preserves_recovery_cause () =
           ~meta
           ~terminal_reason:terminal
           ~err:error
-          ~error_text:raw_error;
+          ~error_text:raw_error
+          ~terminal_error_origin:Keeper_unified_turn_types.Terminal_error_not_from_a_candidate;
         match R.get ~base_path keeper_name with
         | Some
             { last_failure_reason =

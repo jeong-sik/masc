@@ -146,8 +146,11 @@ The bootstrap then:
 Delete the input token file after successful provisioning using the
 organization's approved secret-file procedure.
 
-For a planned host-key rotation, verify the new fingerprint out of band and
-rerun with `--replace-host-key`. Never use that flag merely to clear a mismatch.
+An existing known_hosts file is kept when one of its lines already pins the
+ED25519 key the host presents for that host, even if it pins other key types
+too. When it does not, bootstrap stops before it authorizes its key there. For a
+planned host-key rotation, verify the new fingerprint out of band and rerun
+with `--replace-host-key`. Never use that flag merely to clear a mismatch.
 
 ### Tools and environment the host declares
 

@@ -19,53 +19,15 @@ let sensitive_assignment_markers =
   ]
 ;;
 
-let redact_url_credentials token =
-  let redact_after_scheme token scheme =
-    if String.starts_with ~prefix:scheme token
-    then (
-      let scheme_len = String.length scheme in
-      match String.index_from_opt token scheme_len '@' with
-      | Some at_idx ->
-        let slash_idx =
-          match String.index_from_opt token scheme_len '/' with
-          | Some idx -> idx
-          | None -> String.length token
-        in
-        if at_idx < slash_idx
-        then
-          String.sub token 0 scheme_len
-          ^ "[REDACTED]"
-          ^ String.sub token at_idx (String.length token - at_idx)
-        else token
-      | None -> token)
-    else token
-  in
-  token
-  |> fun t -> redact_after_scheme t "https://"
-  |> fun t -> redact_after_scheme t "http://"
-;;
-
 let redact_inline_secret_assignment token =
   (* Markers are lowercase; the match runs against a lowercased copy so
      [TOKEN=] and [Password=] redact like [token=], while the kept prefix
      is spliced from the token as it came. The copy is rebuilt per marker
      because an earlier marker may already have shortened the token. *)
   let redact_after token marker =
-    let lower = String.lowercase_ascii token in
-    if String_util.contains_substring lower marker
-    then (
-      let marker_len = String.length marker in
-      let rec find i =
-        if i + marker_len > String.length lower
-        then None
-        else if String.sub lower i marker_len = marker
-        then Some i
-        else find (i + 1)
-      in
-      match find 0 with
-      | Some idx -> String.sub token 0 (idx + marker_len) ^ "[REDACTED]"
-      | None -> token)
-    else token
+    match String_util.find_substring (String.lowercase_ascii token) marker with
+    | Some idx -> String.sub token 0 (idx + String.length marker) ^ "[REDACTED]"
+    | None -> token
   in
   List.fold_left redact_after token sensitive_assignment_markers
 ;;
@@ -85,7 +47,7 @@ let sanitize_parts parts =
       let part =
         if prev_sensitive && part <> ""
         then "[REDACTED]"
-        else part |> redact_url_credentials |> redact_inline_secret_assignment
+        else part |> Url_userinfo.redact_text |> redact_inline_secret_assignment
       in
       let next_sensitive = List.mem (String.lowercase_ascii part) sensitive_flags in
       redact next_sensitive (part :: acc) rest
@@ -99,7 +61,7 @@ let sanitize_command_for_log cmd =
   then "[EMPTY]"
   else if command_has_sensitive_marker cmd
   then "[REDACTED]"
-  else cmd |> redact_url_credentials |> redact_inline_secret_assignment
+  else cmd |> Url_userinfo.redact_text |> redact_inline_secret_assignment
 ;;
 
 let sanitize_command_for_log_of_ir ~fallback_cmd ir =

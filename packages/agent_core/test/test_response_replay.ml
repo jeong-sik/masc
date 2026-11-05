@@ -38,7 +38,7 @@ let nullable_phase () =
 
 let assistant_history () =
   let response : api_response =
-    {id="response";model="native";stop_reason=EndTurn;content;usage=None;
+    {id="response";model="native";unreadable_tool_uses = []; stop_reason=EndTurn;content;usage=None;
      telemetry=Some {default_inference_telemetry with response_replay=Some groups}} in
   let message = match assistant_message_of_response response with
     | Ok message -> message
@@ -73,7 +73,7 @@ let admission_remap () =
 
 let chat_control () =
   let response : api_response =
-    {id="chat";model="fixture";stop_reason=EndTurn;content;usage=None;telemetry=None} in
+    {id="chat";model="fixture";unreadable_tool_uses = []; stop_reason=EndTurn;content;usage=None;telemetry=None} in
   match assistant_message_of_response response with
   | Ok {metadata=[];content=actual;_} -> Alcotest.(check bool) "chat remains unchanged" true (actual=content)
   | Ok _ | Error _ -> Alcotest.fail "ordinary Chat gained native grouping"

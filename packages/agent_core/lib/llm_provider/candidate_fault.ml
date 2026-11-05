@@ -21,10 +21,6 @@ type t =
   | Unattributed
   | Unknown_after_dispatch
 
-type dispatch =
-  | Not_dispatched
-  | Dispatched
-
 (* [of_api_error] matches [Retry.api_error] without [_]: a new constructor
    stops compilation until its expected judgment is written here and in the
    table test. *)
@@ -54,34 +50,4 @@ let of_api_error (api : Retry.api_error) : t =
      [Runtime_attempt_fsm.should_try_next]. *)
   | Retry.NetworkError _ -> Unknown_after_dispatch
   | Retry.Timeout _ -> Binding Deadline
-;;
-
-(* [of_transport_error] classifies the transport edge. The [dispatch] fact is
-   the Exact_output [generation_dispatch_fact] lowered: a timeout before
-   dispatch is wiring, after dispatch it is this binding's deadline. *)
-let of_transport_error (err : Http_client.http_error) ~(dispatch : dispatch) : t =
-  match err with
-  | Http_client.HttpError _ -> Binding Server
-  | Http_client.NetworkError _ -> Unknown_after_dispatch
-  | Http_client.TimeoutError { phase; _ } ->
-    (match dispatch with
-     | Dispatched ->
-       (match phase with
-        | Http_client.Http_operation | Http_client.Wall_clock -> Binding Deadline
-        | Http_client.Queue
-        | Http_client.First_token
-        | Http_client.Capacity_backpressure
-        | Http_client.Non_streaming_body
-        | Http_client.Stream_body
-        | Http_client.Stream_idle _
-        | Http_client.Provider_step
-        | Http_client.Cli_stdout_idle
-        | Http_client.Unknown_timeout -> Unknown_after_dispatch)
-     | Not_dispatched -> Unknown_after_dispatch)
-  (* Wiring and provider-terminal conditions are not this binding's affair in
-     the advance sense; they carry no "the next candidate may serve the same
-     input" fact. *)
-  | Http_client.AcceptRejected _ -> Unknown_after_dispatch
-  | Http_client.ProviderTerminal _ -> Unknown_after_dispatch
-  | Http_client.ProviderFailure _ -> Unknown_after_dispatch
 ;;

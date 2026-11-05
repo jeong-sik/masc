@@ -153,6 +153,10 @@ val goals_path : Workspace_utils.config -> string
 (** [{!Workspace_utils.masc_dir} / "goals.json"]. The mirror is this path
     with [".last-good"] appended. *)
 
+val goal_events_path : Workspace_utils.config -> string
+(** [{!Workspace_utils.masc_dir} / "goal_events.jsonl"]: the Goal audit event
+    ledger that {!append_audit_event} and {!flush_pending_events} append to. *)
+
 (** {1 Source (RFC-0444 §2.1)} *)
 
 type source =

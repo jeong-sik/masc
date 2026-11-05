@@ -13,7 +13,6 @@
   model_catalog_embedded
   provider_http_codec
   tool_result_projection
-  tool_call_input
   responses_function_call
   responses_reasoning
   responses_reasoning_stream

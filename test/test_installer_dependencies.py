@@ -166,16 +166,30 @@ class PortableBootstrap(unittest.TestCase):
         fixtures.bundle.verify_tree(installed, self.fixture.asset)
         self.assertTrue((installed / 'python/bin/python3').is_file())
 
-    def test_latest_resolution_precedes_python_bootstrap(self):
-        mirror = self.fixture.mirror()
-        # Stub only the public latest metadata response; every asset download,
+    def latest_redirect_curl(self, target):
+        # Stub only the redirect GitHub sends for the public latest-release
+        # page, and fail any api.github.com request; every asset download,
         # checksum, extraction and interpreter execution remains real.
         curl = self.bin / 'curl'
-        curl.write_text('#!/bin/sh\ncase "$*" in *api.github.com*/releases/latest*) '
-                        'echo \'{"tag_name":"v9.9.9"}\' ;; *) exec /usr/bin/curl "$@" ;; esac\n')
+        curl.write_text('#!/bin/sh\ncase "$*" in '
+                        '*github.com/jeong-sik/masc/releases/latest*) '
+                        f"printf '302 %s' '{target}' ;; "
+                        '*api.github.com*) exit 22 ;; '
+                        '*) exec /usr/bin/curl "$@" ;; esac\n')
         curl.chmod(0o755)
+
+    def test_latest_resolution_precedes_python_bootstrap(self):
+        mirror = self.fixture.mirror()
+        self.latest_redirect_curl('https://github.com/jeong-sik/masc/releases/tag/v9.9.9')
         result = self.run_installer(['--no-seed', '--no-guest-shim', '--no-wizard'], mirror)
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_latest_redirect_without_a_tag_installs_nothing(self):
+        mirror = self.fixture.mirror()
+        self.latest_redirect_curl('https://github.com/jeong-sik/masc/releases')
+        result = self.run_installer(['--no-seed', '--no-guest-shim', '--no-wizard'], mirror)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.fixture.prefix / 'masc').exists())
 
     def test_unverified_override_cannot_execute_tampered_python(self):
         mirror = self.fixture.mirror()

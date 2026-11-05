@@ -8,7 +8,6 @@ open Alcotest
 
 module Probe = Masc.Keeper_capability_probe
 module Descriptor = Masc.Keeper_tool_descriptor
-module Runner = Runtime_agent_core_runner
 module Turn_driver = Masc.Keeper_turn_driver
 
 let verdict = testable (Fmt.of_to_string Probe.verdict_to_string) ( = )
@@ -127,6 +126,74 @@ let test_no_descriptor_is_withheld_by_a_schema_error () =
   check (list string) "no descriptor has schema errors" [] withheld
 ;;
 
+
+(* invocation_of_response: a call the model made with arguments that were not
+   one JSON object is a call, not silence. *)
+
+let invocation = testable (Fmt.of_to_string Probe.invocation_to_string) ( = )
+
+let probe_response ?(unreadable = []) content : Agent_core.Types.api_response =
+  { id = "probe"
+  ; model = "m"
+  ; stop_reason = Llm_provider.Types.StopToolUse
+  ; content
+  ; unreadable_tool_uses = unreadable
+  ; usage = None
+  ; telemetry = None
+  }
+;;
+
+let unreadable_call name : Llm_provider.Types.unreadable_tool_use =
+  { tool_use_id = "c1"
+  ; tool_name = name
+  ; tool_use_ordinal = 0
+  ; arguments = {|{"limit": 5"x"}|}
+  ; arguments_problem = Llm_provider.Tool_call_input.Invalid_json "bad"
+  ; arguments_assembly = None
+  }
+;;
+
+let test_requested_tool_with_unreadable_arguments_is_its_own_outcome () =
+  check
+    invocation
+    "requested tool, arguments broken"
+    (Probe.Tool_arguments_unreadable
+       { tool = "masc_board_list"
+       ; problem = Llm_provider.Tool_call_input.Invalid_json "bad"
+       ; elapsed_s = 1.0
+       })
+    (Probe.invocation_of_response
+       ~requested:"masc_board_list"
+       ~elapsed_s:1.0
+       (probe_response ~unreadable:[ unreadable_call "masc_board_list" ] []))
+;;
+
+let test_other_unreadable_call_counts_as_another_tool () =
+  check
+    invocation
+    "another tool, arguments broken"
+    (Probe.Other_tool_invoked
+       { requested = "masc_board_list"; invoked = [ "masc_status" ]; elapsed_s = 1.0 })
+    (Probe.invocation_of_response
+       ~requested:"masc_board_list"
+       ~elapsed_s:1.0
+       (probe_response ~unreadable:[ unreadable_call "masc_status" ] []))
+;;
+
+let test_readable_requested_call_wins_over_an_unreadable_one () =
+  check
+    invocation
+    "readable call of the requested tool"
+    (Probe.Tool_invoked { tool = "masc_board_list"; elapsed_s = 1.0 })
+    (Probe.invocation_of_response
+       ~requested:"masc_board_list"
+       ~elapsed_s:1.0
+       (probe_response
+          ~unreadable:[ unreadable_call "masc_board_list" ]
+          [ Llm_provider.Types.ToolUse
+              { id = "c0"; name = "masc_board_list"; input = `Assoc [] }
+          ]))
+;;
 
 (* probe_invocation, offline. Every case below returns before any provider
    call, which is the point: the errors that can be decided without spending a
@@ -306,39 +373,39 @@ let bool_opts = [ Some true; Some false; None ]
 
 let test_declared_thinking_off_reaches_the_config () =
   let seed =
-    { Runtime_inference.thinking_enabled = Some false
+    { Runtime_thinking_seed.thinking_enabled = Some false
     ; preserve_thinking = None
     }
   in
-  let out = Runner.apply_inference_seed ~seed (bare_config ()) in
+  let out = Runtime_thinking_seed.apply seed (bare_config ()) in
   (* Some false, not None: None is what omits the wire field. *)
   check bool_opt "declared thinking-off reaches the request" (Some false) out.enable_thinking
 ;;
 
 let test_declared_thinking_on_reaches_the_config () =
   let seed =
-    { Runtime_inference.thinking_enabled = Some true
+    { Runtime_thinking_seed.thinking_enabled = Some true
     ; preserve_thinking = Some true
     }
   in
-  let out = Runner.apply_inference_seed ~seed (bare_config ()) in
+  let out = Runtime_thinking_seed.apply seed (bare_config ()) in
   check bool_opt "declared thinking-on reaches the request" (Some true) out.enable_thinking;
   check bool_opt "preserve_thinking rides along" (Some true) out.preserve_thinking
 ;;
 
 let test_undeclared_seed_leaves_the_binding_alone () =
   let seed =
-    { Runtime_inference.thinking_enabled = None
+    { Runtime_thinking_seed.thinking_enabled = None
     ; preserve_thinking = None
     }
   in
   let base = { (bare_config ()) with Llm_provider.Provider_config.enable_thinking = Some true } in
-  let out = Runner.apply_inference_seed ~seed base in
+  let out = Runtime_thinking_seed.apply seed base in
   check bool_opt "an absent seed does not clear the binding" (Some true) out.enable_thinking
 ;;
 
 (* The pin the review asked for (#28530): seed application now exists twice —
-   [Runner.apply_inference_seed] on the probe path and
+   [Runtime_thinking_seed.apply] on the probe path and
    [Keeper_turn_driver.For_testing.attempt_inference_policy] on the turn path.
    Two implementations of "what does this runtime actually send" is the shape of
    the defect this PR fixes, so their agreement is asserted rather than assumed.
@@ -363,7 +430,7 @@ let test_probe_and_turn_agree_on_the_seed () =
             ; preserve_thinking = binding_preserve
             }
           in
-          let probe = Runner.apply_inference_seed ~seed binding in
+          let probe = Runtime_thinking_seed.apply seed binding in
           let turn =
             Turn_driver.For_testing.attempt_inference_policy
               ~runtime_id:seed_free_runtime_id
@@ -839,6 +906,14 @@ let () =
     ; ( "agreement with the surface"
       , [ test_case "round-trips every published name" `Quick test_agrees_with_the_surface_it_reports_on
         ; test_case "no schema-withheld descriptor" `Quick test_no_descriptor_is_withheld_by_a_schema_error
+        ] )
+    ; ( "invocation_of_response"
+      , [ test_case "requested tool with unreadable arguments" `Quick
+            test_requested_tool_with_unreadable_arguments_is_its_own_outcome
+        ; test_case "other unreadable call is another tool" `Quick
+            test_other_unreadable_call_counts_as_another_tool
+        ; test_case "readable requested call wins" `Quick
+            test_readable_requested_call_wins_over_an_unreadable_one
         ] )
     ; ( "probe_invocation (offline)"
       , [ test_case "operator-only costs no turn" `Quick test_operator_only_costs_no_turn

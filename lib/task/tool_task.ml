@@ -595,15 +595,6 @@ let load_events_file_index ~verify_content path =
             | _ | exception Unix.Unix_error _ -> ());
          Some by_task)
 
-let compare_month_entries_desc a b =
-  match
-    Dated_jsonl.Layout.year_and_month_of_directory_name a,
-    Dated_jsonl.Layout.year_and_month_of_directory_name b
-  with
-  | Some _, Some _ | None, None -> String.compare b a
-  | Some _, None -> -1
-  | None, Some _ -> 1
-
 let read_matching_task_events config ~task_id ~limit =
   if limit <= 0 then []
   else
@@ -613,7 +604,7 @@ let read_matching_task_events config ~task_id ~limit =
       let month_dirs =
         Sys.readdir events_dir
         |> Array.to_list
-        |> List.sort compare_month_entries_desc
+        |> List.sort (fun a b -> Dated_jsonl.Layout.compare_month_entries b a)
       in
       let collected = ref [] in
       let remaining = ref limit in

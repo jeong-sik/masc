@@ -17,17 +17,8 @@ type dual_schemas =
   ; remote : Masc_domain.tool_schema
   }
 
-let load_of_name name : Tool_definition_toml.loaded =
-  let rel = "tools/" ^ name ^ ".toml" in
-  match Embedded_config.read rel with
-  | None -> failwith (Printf.sprintf "embedded tool definition missing: %s" rel)
-  | Some contents ->
-    (match Tool_definition_toml.load ~name ~contents with
-     | Ok loaded -> loaded
-     | Error message -> failwith message)
-;;
-
-let schema_of_name name = (load_of_name name).Tool_definition_toml.schema
+let load_of_name = Tool_definition_embedded.load
+let schema_of_name = Tool_definition_embedded.schema
 
 let dual_of_name name =
   let loaded = load_of_name name in

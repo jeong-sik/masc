@@ -1619,6 +1619,53 @@ max-concurrent = 1
     (String.equal
        updated.runtime.proactive_rt.last_reason
        "unified:reactive_success");
+  (* A board-reactive turn with a visible reply is a turn, not a scheduled
+     autonomous cycle: the turn clock moves, the cycle clock and count stay. *)
+  let cycle_ts = 5.0 in
+  let prior_with_cycle =
+    { meta with
+      runtime =
+        { meta.runtime with
+          proactive_rt = { meta.runtime.proactive_rt with last_ts = cycle_ts }
+        ; usage = { meta.runtime.usage with last_turn_ts = cycle_ts }
+        }
+    }
+  in
+  let reacted =
+    reactive_success
+      ~prior:prior_with_cycle
+      ~last_outcome:KMC.Proactive_unknown
+      ~last_reason:"before the reactive turn"
+      ()
+  in
+  check
+    "a reactive turn leaves the scheduled cycle time"
+    (Float.equal reacted.runtime.proactive_rt.last_ts cycle_ts);
+  check
+    "a reactive turn leaves the scheduled cycle count"
+    (reacted.runtime.proactive_rt.count_total
+     = prior_with_cycle.runtime.proactive_rt.count_total);
+  check
+    "a reactive turn moves the turn time"
+    (reacted.runtime.usage.last_turn_ts > cycle_ts);
+  (* Idle counts from the last turn of any channel, so a keeper that only
+     answers wakes is not reported idle since its last scheduled cycle. *)
+  let wall_now = Unix.gettimeofday () in
+  let answering_meta =
+    { meta with
+      created_at = "2020-01-01T00:00:00Z"
+    ; runtime =
+        { meta.runtime with
+          proactive_rt =
+            { meta.runtime.proactive_rt with last_ts = wall_now -. 10_000.0 }
+        ; usage = { meta.runtime.usage with last_turn_ts = wall_now -. 10.0 }
+        }
+    }
+  in
+  check
+    "idle counts from the last turn"
+    (Masc.Keeper_world_observation_inputs.compute_idle_seconds ~meta:answering_meta
+     < 1_000);
   let error_like_reason = "unified:error:display text is not state" in
   let updated =
     reactive_success
@@ -1937,8 +1984,6 @@ max-concurrent = 1
     Masc.Keeper_registry.Provider_runtime_error
       { code = "api_error_invalid_request"
       ; detail = "stale quota from a previous runtime"
-      ; provider_id = Some "kimi_code"
-      ; http_status = None
       ; runtime_id = Some "kimi_code.kimi-for-coding"
       ; agent_core_timeout = None
       ; fenced_empty_turn_runtime = None
@@ -2009,7 +2054,7 @@ max-concurrent = 1
        let terminal = Masc.Keeper_turn_terminal.of_failure ~raw_error core_error in
        let reason =
          Masc.Keeper_unified_turn_types.registry_failure_reason_of_terminal_reason
-           ~core_error terminal ~raw_error
+           ~core_error terminal ~raw_error ~terminal_error_origin:Masc.Keeper_unified_turn_types.Terminal_error_not_from_a_candidate
        in
        Masc.Keeper_registry.set_failure_reason ~base_path:config.base_path
          keeper_name reason;
@@ -3232,7 +3277,7 @@ let () =
   let terminal = Masc.Keeper_turn_terminal.of_failure ~raw_error core_error in
   (match
      Masc.Keeper_unified_turn_types.registry_failure_reason_of_terminal_reason
-       ~core_error terminal ~raw_error
+       ~core_error terminal ~raw_error ~terminal_error_origin:Masc.Keeper_unified_turn_types.Terminal_error_not_from_a_candidate
    with
    | Some (Masc.Keeper_registry.Provider_runtime_error { detail; code; _ }) ->
      check

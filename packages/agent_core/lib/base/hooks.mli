@@ -46,7 +46,8 @@ type tool_name_resolution =
 
 (** Exact mapping retained across tool-name admission. [planned_index] is the
     ordinal assigned to a surviving ToolUse; [source_tool_use_ordinal] is its ordinal
-    among all well-formed ToolUse blocks before unroutable calls were removed.
+    among all tool calls before admission removed any, counting calls whose
+    arguments were unreadable at the place the response gave them.
     It is deliberately not a raw content-block index: response assembly may
     omit empty non-tool blocks. *)
 type admitted_tool_use_source =
@@ -58,7 +59,8 @@ type admitted_tool_use_source =
 type admitted_tool_source_map =
   { admitted_tool_sources : admitted_tool_use_source list
   ; source_tool_use_count : int
-      (** Total well-formed ToolUse inventory before admission. It distinguishes
+      (** Total tool-call inventory before admission, unreadable calls
+          included. It distinguishes
           no tool calls from an all-rejected turn and proves that the streamed
           inventory contains neither missing nor extra calls. *)
   }

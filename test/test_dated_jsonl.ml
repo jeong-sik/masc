@@ -1583,6 +1583,28 @@ let test_strict_single_file_reports_malformed_and_torn_rows () =
     | Error (Dated_jsonl.Io_error {operation=Read_file;_}) -> ()
     | Error _ | Ok _ -> fail "torn authority row was silently skipped")
 
+let test_complete_entries_read_waits_for_a_torn_row () =
+  let path = Filename.temp_file "dated_complete_single" ".jsonl" in
+  Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
+    Out_channel.with_open_bin path (fun oc -> output_string oc "{\"i\":1}\n{\"i\":2");
+    let read cursor = Dated_jsonl.fold_file_appended_complete_entries_result path ~cursor
+      ~init:[] ~f:(fun rows -> function
+        | Dated_jsonl.Parsed row -> row :: rows
+        | Dated_jsonl.Malformed_json _ -> fail "a complete row was reported malformed") in
+    let require = function
+      | Ok (Dated_jsonl.Appended (rows, cursor)) -> List.length rows, cursor
+      | Ok Dated_jsonl.Cursor_invalidated -> fail "unexpected cursor invalidation"
+      | Error error -> fail (Dated_jsonl.read_error_to_string error)
+    in
+    let before, cursor = require (read None) in
+    check int "only the complete row is read" 1 before;
+    let unchanged, cursor = require (read (Some cursor)) in
+    check int "the torn row is still not read" 0 unchanged;
+    Out_channel.with_open_gen [Open_wronly;Open_append;Open_binary] 0o600 path
+      (fun oc -> output_string oc "}\n");
+    let completed, _ = require (read (Some cursor)) in
+    check int "the row is read once it is complete" 1 completed)
+
 let test_strict_incremental_large_utf8_row_and_captured_extent () =
   let path = Filename.temp_file "dated_strict_large_utf8" ".jsonl" in
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
@@ -1619,6 +1641,20 @@ let test_strict_incremental_large_utf8_row_and_captured_extent () =
     let rows, _ = require (read (Some cursor)) in
     check int "unchanged complete extent has no rows" 0 (List.length rows))
 
+(* Listings that tolerate foreign entries read the newest month first by
+   reversing this order, so a name that is not a month directory has to land
+   before every month here and after every month there. *)
+let test_compare_month_entries () =
+  let entries = [ "2026-11"; "notes"; "2026-13"; "2025-12"; ".keep"; "2026-01"; "2026-00" ] in
+  check (list string) "months by calendar, foreign names first and by name"
+    [ ".keep"; "2026-00"; "2026-13"; "notes"; "2025-12"; "2026-01"; "2026-11" ]
+    (List.sort Dated_jsonl.Layout.compare_month_entries entries);
+  check (list string) "reversed, the newest month leads and foreign names trail"
+    [ "2026-11"; "2026-01"; "2025-12"; "notes"; "2026-13"; "2026-00"; ".keep" ]
+    (List.sort (fun a b -> Dated_jsonl.Layout.compare_month_entries b a) entries);
+  check int "equal names compare equal" 0
+    (Dated_jsonl.Layout.compare_month_entries "2026-11" "2026-11")
+
 let () =
   run "Dated_jsonl"
     [
@@ -1626,6 +1662,8 @@ let () =
         [
           test_case "strict single file reports malformed and torn evidence" `Quick
             test_strict_single_file_reports_malformed_and_torn_rows;
+          test_case "complete-entries read waits for a torn row" `Quick
+            test_complete_entries_read_waits_for_a_torn_row;
           test_case "large UTF-8 row preserves captured extent" `Quick
             test_strict_incremental_large_utf8_row_and_captured_extent;
           test_case "creates dated file" `Quick test_append_creates_dated_file;
@@ -1783,5 +1821,10 @@ let () =
       ( "empty",
         [
           test_case "empty store" `Quick test_empty_store;
+        ] );
+      ( "layout",
+        [
+          test_case "month entries sort oldest first, foreign names before them" `Quick
+            test_compare_month_entries;
         ] );
     ]

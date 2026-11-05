@@ -326,6 +326,12 @@ val voice_for_agent_at_endpoint : tts_config -> endpoint -> string -> string
     fallback chain resolves this per endpoint rather than once, so switching
     endpoints does not carry the previous provider's voice vocabulary along. *)
 
+val voices_at_endpoint : tts_config -> endpoint -> string list
+(** Every voice name [endpoint] can be asked for: the one
+    {!voice_for_agent_at_endpoint} gives each agent mapped in the endpoint or
+    the section, and the one any other agent gets. In first-seen order,
+    without repeats. *)
+
 val tuning_for_agent : tts_config -> string -> voice_tuning
 (** [tuning_for_agent tts agent_id] returns the
     agent-specific tuning when present in

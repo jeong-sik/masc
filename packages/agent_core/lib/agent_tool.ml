@@ -216,6 +216,7 @@ let[@warning "-32"] mock_runner text _prompt =
   Ok
     { id = "m"
     ; model = "m"
+    ; unreadable_tool_uses = []
     ; stop_reason = EndTurn
     ; content = [ Text text ]
     ; usage = None

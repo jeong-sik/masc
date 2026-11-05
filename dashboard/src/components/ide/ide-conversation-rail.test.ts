@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
-import { fireEvent, waitFor } from '@testing-library/preact'
+import { act, fireEvent, waitFor } from '@testing-library/preact'
+import { clearStoredToken, setStoredToken } from '../../api/core'
 import {
   boardKindFromPost,
   conversationContextSummary,
@@ -579,6 +580,72 @@ describe('Reaction Thread source lifecycle', () => {
       await new Promise(resolve => setTimeout(resolve, 0))
       expect(container.textContent).toBe('')
     } finally { render(null, container) }
+  })
+  it('keeps nothing the previous credential read once the stored token changes', async () => {
+    setStoredToken('admin-token', { source: 'manual' })
+    let failBoard = false
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => url.startsWith('/api/v1/board')
+      ? (failBoard ? response({}, 503) : response(board('Read as admin')))
+      : response({ events: [], limit: 200, generated_at: null })))
+    const container = document.createElement('div')
+    render(h(IdeConversationRail, {}), container)
+    try {
+      await waitFor(() => expect(container.textContent).toContain('Read as admin'))
+      failBoard = true
+      act(() => { setStoredToken('worker-token', { source: 'manual' }) })
+      expect(container.textContent).not.toContain('Read as admin')
+      await waitFor(() => expect(container.querySelector('[data-conversation-source="Board"]')?.getAttribute('data-load-state')).toBe('error'))
+      expect(container.textContent).not.toContain('Read as admin')
+      expect(container.querySelector('[data-conversation-source="Board"] time')).toBeNull()
+    } finally {
+      render(null, container)
+      clearStoredToken()
+    }
+  })
+  it('ignores a reply the previous credential was still waiting for', async () => {
+    setStoredToken('admin-token', { source: 'manual' })
+    const pending: Array<{ signal: AbortSignal; finish: (value: Response) => void }> = []
+    vi.stubGlobal('fetch', vi.fn((url: string, options: RequestInit) => {
+      if (!url.startsWith('/api/v1/board')) return Promise.resolve(response({ events: [], limit: 200, generated_at: null }))
+      return new Promise<Response>(finish => pending.push({ signal: options.signal as AbortSignal, finish }))
+    }))
+    const container = document.createElement('div')
+    render(h(IdeConversationRail, {}), container)
+    try {
+      await waitFor(() => expect(pending).toHaveLength(1))
+      act(() => { setStoredToken('worker-token', { source: 'manual' }) })
+      await waitFor(() => expect(pending).toHaveLength(2))
+      expect(pending[0]!.signal.aborted).toBe(true)
+      pending[1]!.finish(response(board('Read as worker')))
+      await waitFor(() => expect(container.textContent).toContain('Read as worker'))
+      pending[0]!.finish(response(board('Read as admin')))
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(container.textContent).not.toContain('Read as admin')
+    } finally {
+      render(null, container)
+      clearStoredToken()
+    }
+  })
+  it('does not read again when the same credential is written', async () => {
+    setStoredToken('admin-token', { source: 'manual' })
+    let boardCalls = 0
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (!url.startsWith('/api/v1/board')) return response({ events: [], limit: 200, generated_at: null })
+      boardCalls++
+      return response(board('Read as admin'))
+    }))
+    const container = document.createElement('div')
+    render(h(IdeConversationRail, {}), container)
+    try {
+      await waitFor(() => expect(container.textContent).toContain('Read as admin'))
+      act(() => { setStoredToken(' admin-token ', { source: 'manual' }) })
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(boardCalls).toBe(1)
+      expect(container.textContent).toContain('Read as admin')
+    } finally {
+      render(null, container)
+      clearStoredToken()
+    }
   })
   it('reports a malformed Decisions envelope while retaining independently loaded Board notes', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => response(url.startsWith('/api/v1/board')

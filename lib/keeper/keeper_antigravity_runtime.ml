@@ -1207,6 +1207,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
           let response =
             { Agent_core.Types.id = turn_id
             ; model = turn.model
+            ; unreadable_tool_uses = []
             ; stop_reason = EndTurn
             ; content = [ Text turn.text ]
             ; usage = Some usage

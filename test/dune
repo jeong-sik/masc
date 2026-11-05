@@ -74,6 +74,7 @@
 (include stanzas/test_runtime_response_identity.inc)
 (include stanzas/test_keeper_sandbox_observation.inc)
 (include stanzas/test_published_artifact.inc)
+(include stanzas/test_keeper_artifact_search.inc)
 (include stanzas/test_structured_response_evidence.inc)
 (include stanzas/test_fusion_judge_response_evidence_walk.inc)
 (include stanzas/test_keeper_trust_disposition.inc)
@@ -624,7 +625,6 @@
   test_claimable_task_summaries
   test_keeper_lifecycle_registry_dispatch
   test_keeper_lifecycle_chaos
-  test_keeper_registry_provenance
   test_keeper_registry_hardening
   test_keeper_fd_pressure_fleet
   test_workspace_telemetry_drop_non_eio
@@ -976,7 +976,6 @@
   test_claimable_task_summaries
   test_keeper_lifecycle_registry_dispatch
   test_keeper_lifecycle_chaos
-  test_keeper_registry_provenance
   test_keeper_registry_hardening
   test_keeper_fd_pressure_fleet
   test_workspace_telemetry_drop_non_eio
@@ -1174,6 +1173,9 @@
  ;; test_enum_mirror_sync names the connected Browser_lane backends in the
  ;; capability table it checks; the browser lane is its own library.
  masc.browser_lane
+ ;; test_observability_redact calls the shared JSON redaction pass of the
+ ;; unwrapped secret-pattern library directly.
+ masc.secret_patterns
  masc.agent_core mcp_protocol))
 
 (test
@@ -3173,6 +3175,7 @@
 
 (include stanzas/test_keeper_execution_join.inc)
 (include stanzas/test_full_health_wakeup.inc)
+(include stanzas/test_dashboard_spa_deep_link.inc)
 (include stanzas/test_pending_confirm_expiry.inc)
 (include stanzas/test_wall_deadline.inc)
 

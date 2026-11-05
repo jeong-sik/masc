@@ -1,6 +1,7 @@
 type parse_error =
   | Invalid_json of string
   | Not_object
+[@@deriving show, yojson]
 
 (* A provider can bind the same key twice inside one tool-argument object. The
    rule for resolving that lives in [Json_object_keys] because the payload a

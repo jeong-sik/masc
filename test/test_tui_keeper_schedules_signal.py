@@ -60,7 +60,14 @@ class KeeperSchedulesHandler(owed.ChatHandler):
                 # does not.
                 if keeper_read:
                     body["payload_target_selector"] = KEEPER_TARGET
-                sent = self.respond(200, body)
+                # The TUI reads every 2xx through the workspace-bound reader,
+                # which requires the admission receipt on the response itself.
+                # Without it a 200 is a failed read ("Server did not attest the
+                # requested workspace read"), so a test that counts requests
+                # sees the retries that follow instead of the single answer it
+                # waits for. 503 stays receipt-free: the reader passes non-2xx
+                # through and decodes the refusal instead.
+                sent = self.respond(200, body, workspace_receipt=True)
             if sent:
                 server.responded(phase, KEEPER_SCHEDULES if keeper_read else request.path)
         else:

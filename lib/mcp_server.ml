@@ -279,15 +279,6 @@ let int_query_param uri key ~default =
   | None -> default
   | Some s -> Safe_ops.int_of_string_with_default ~default s
 
-let compare_month_entries_desc a b =
-  match
-    Dated_jsonl.Layout.year_and_month_of_directory_name a,
-    Dated_jsonl.Layout.year_and_month_of_directory_name b
-  with
-  | Some _, Some _ | None, None -> String.compare b a
-  | Some _, None -> -1
-  | None, Some _ -> 1
-
 (** Read recent event log lines from .masc/events *)
 let read_event_lines config ~limit =
   if limit <= 0 then []
@@ -298,7 +289,7 @@ let read_event_lines config ~limit =
       let month_dirs =
         Sys.readdir events_dir
         |> Array.to_list
-        |> List.sort compare_month_entries_desc
+        |> List.sort (fun a b -> Dated_jsonl.Layout.compare_month_entries b a)
       in
       let collected = ref [] in
       let remaining = ref limit in

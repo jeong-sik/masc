@@ -79,6 +79,9 @@ let masc_http_default_host = "127.0.0.1"
    read the server's bind setting as its destination. *)
 let masc_http_loopback_peer = "127.0.0.1"
 
+let masc_http_loopback_origin ~port =
+  Printf.sprintf "http://%s:%d" masc_http_loopback_peer port
+
 (* Lives here rather than at the reader so [Env_config_snapshot] can name it
    instead of restating the number. Restating is how the operator surface came
    to report 128 while the server accepted 512 (#14143 raised the reader and

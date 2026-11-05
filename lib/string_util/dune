@@ -6,6 +6,9 @@
 ; of contains_substring instead of using the canonical one; this removes the
 ; reason.
 ;
+; Url_userinfo redacts the userinfo of a URL-shaped string and uses
+; String_util only.
+;
 ; Keep this library dependency-free. A dependency added here is inherited by
 ; every caller, and the copies come back.
 
@@ -15,6 +18,6 @@
  (name masc_string_util)
  (public_name masc.string_util)
  (wrapped false)
- (modules string_util)
+ (modules string_util url_userinfo)
  (flags
   (:standard -w +4 -w +33)))

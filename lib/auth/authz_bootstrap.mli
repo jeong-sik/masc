@@ -82,13 +82,15 @@
       [Fs_compat.create_file_exclusive], which keeps a registry in the directory
       of the file: a process that dies while the registry is being made leaves
       one that blocks every later creation by the same owner.
-    + [Aborted_intent] for the intent that an earlier bootstrap left pending. The
-      log is empty, so that bootstrap never appended its record.
-    + The intent of this bootstrap, then its record in the log, then the answer
-      ({!Authz_external_store.entry} [Committed]), inside the zone of the store
-      and, inside it, the zone of the log. A caller that enters both zones enters
-      them in this order. The answer is made from the head that the append of the
-      record returned, so it cannot be written before the record.
+    + The record of the bootstrap, with {!Authz_zone.install}: the steps of a
+      commit of the zone, over the empty log. The zone judges what an earlier
+      bootstrap left, builds the record and runs {!Authz_state.apply} on it, and
+      writes nothing before both pass. Then it writes [Aborted_intent] for the
+      intent of the earlier bootstrap, once {!Authz_log.confirm_end} says that
+      the log still ends where that intent began, the intent of this bootstrap,
+      the record in the log, and the answer ({!Authz_external_store.entry}
+      [Committed]). The log is empty, so an intent that an earlier bootstrap
+      left never got its record.
 
     {b After a failure.} Each write is one step, and a process that stops between
     two of them leaves a state that a second call goes on from, or that a boot
@@ -118,8 +120,8 @@
     that. The caller runs one bootstrap at a time, where it holds the lease or
     where no server runs. The files can change between {!prepare} and {!write}:
     an install record that changed fails the re-read, a store that appeared fails
-    the exclusive creation, and the zones notice a moved end ([Diverged]) and
-    stop. The module does not choose the workspace id, and it takes the time of
+    the exclusive creation, and the zone notices a moved end and stops the file
+    ([Diverged] on a write, [End_moved] before an abort). The module does not choose the workspace id, and it takes the time of
     the record as an argument. *)
 
 type request =
@@ -187,7 +189,7 @@ type error =
   | Log_not_empty of { lines : int }
   | External_store_not_opened of
       { path : string
-      ; error : unit Authz_external_store.open_error
+      ; error : Authz_external_store.violation Authz_external_store.open_error
       }
   | Not_a_fresh_installation of
       { store : string
@@ -204,23 +206,13 @@ type error =
       (** The directory or the file of the store could not be made, or the file
           was made and could not be synced. The install record was written
           before. *)
-  | Store_stopped of Authz_external_store.stop
-  | Log_stopped of Authz_log.stop
-  | Dead_intent_not_closed of Authz_external_store.append_error
-  | Intent_not_written of Authz_external_store.append_error
-  | Record_not_appended of Authz_log.append_error
-      (** The intent is in the store. The record may or may not be in the log. *)
-  | Answer_not_written of
-      { record_hash : Authz_record.Hash.t
-      ; error : Authz_external_store.append_error
-      }
-      (** The record is in the log and the store may not hold the answer: a
-          failed append can leave the line behind. The next boot reads the
-          files. *)
+  | Zone_failed of Authz_zone.error
+      (** {!Authz_zone.install} wrote the record, or stopped before it. The
+          install record was written before, and so was the store file when the
+          path held none. The error of the zone says what the zone left in the
+          two files. *)
   | Mode_event_not_built of Authz_body.error
-  | Record_not_built of Authz_record.make_error
-      (** The last two cannot come from a request: the labels and the ids are
-          ASCII, and the local operator may write a mode event. *)
+      (** This cannot come from a request: the labels and the ids are ASCII. *)
 
 val error_to_string : error -> string
 

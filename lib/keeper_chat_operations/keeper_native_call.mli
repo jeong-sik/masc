@@ -26,6 +26,11 @@ type change =
 
 val transition : state -> change -> (state, string) result
 
+val unknown_effect_disposition : Agent_core.Agent.execution_terminal_disposition
+(** How the Owner closes an Active call whose effect it cannot account for:
+    cancelled, with an operator repair required, because a tool attempt inside
+    it may have run without being settled. *)
+
 val create :
   call_id:string -> runtime_id:string -> operation_digest:string -> api:api ->
   seed_checkpoint:Keeper_checkpoint_ref.t -> locator:Agent_core.Agent.execution_locator ->

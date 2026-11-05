@@ -171,4 +171,40 @@ let validate_runtime_max_context (runtimes : t list)
          })
 ;;
 
+(* A row that decides its thinking request decides it for every turn on the
+   runtime: the turn applies the same seed and meets the same admission before
+   it sends anything. When admission refuses that request, the runtime loads,
+   takes keepers and lanes, and then fails each turn at its first request
+   (#28447). So the refusal belongs to the row, and it is read here, where the
+   row is. *)
+let validate_runtime_thinking_requests (runtimes : t list)
+  : (unit, load_failure) result
+  =
+  let refusal (r : t) : thinking_request_refusal option =
+    match r.execution, Runtime_schema.thinking_request r.model with
+    | Runtime_execution.Agent_core provider_config, Some _ ->
+      let request =
+        Runtime_thinking_seed.apply (Runtime_thinking_seed.of_model r.model) provider_config
+      in
+      (match Llm_provider.Complete_common.request_admission request with
+       | Ok () -> None
+       | Error reason ->
+         Some
+           { runtime_id = r.id
+           ; execution_model = provider_config.Llm_provider.Provider_config.model_id
+           ; declared_model = r.model.id
+           ; reason
+           })
+    | Runtime_execution.Agent_core _, None
+    | ( ( Runtime_execution.Codex_app_server _
+        | Runtime_execution.Claude_code _
+        | Runtime_execution.Antigravity_cli _
+        | Runtime_execution.Muse_serve _ )
+      , (Some _ | None) ) -> None
+  in
+  match List.filter_map refusal runtimes with
+  | [] -> Ok ()
+  | refusals -> Error (Thinking_requests_inadmissible refusals)
+;;
+
 

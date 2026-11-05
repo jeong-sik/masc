@@ -550,7 +550,7 @@ let timeout_reason () =
   let raw_error = Agent_core.Error.to_string timeout_error in
   let terminal = Keeper_turn_terminal.of_failure ~raw_error timeout_error in
   match Keeper_unified_turn_types.registry_failure_reason_of_terminal_reason
-          ~core_error:timeout_error terminal ~raw_error with
+          ~core_error:timeout_error terminal ~raw_error ~terminal_error_origin:Keeper_unified_turn_types.Terminal_error_not_from_a_candidate with
   | Some (Keeper_registry.Provider_runtime_error { detail; _ } as reason) ->
     check string "original typed error detail survives" raw_error detail;
     reason
@@ -652,7 +652,7 @@ let fenced_empty_turn_reason () =
   let raw_error = Agent_core.Error.to_string err in
   let terminal = Keeper_turn_terminal.of_failure ~raw_error err in
   match Keeper_unified_turn_types.registry_failure_reason_of_terminal_reason
-          ~core_error:err terminal ~raw_error with
+          ~core_error:err terminal ~raw_error ~terminal_error_origin:Keeper_unified_turn_types.Terminal_error_not_from_a_candidate with
   | Some reason -> reason
   | None -> fail "a fenced empty turn must record a failure reason"
 ;;

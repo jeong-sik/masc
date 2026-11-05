@@ -463,7 +463,7 @@ let test_a_settled_native_receipt_does_not_block_selection () =
   List.iter (fun (recovery, conflicting_seed) -> with_input_result ~pending:true
     ~before_close:(fun ~base_path ~store ~snapshot ->
       native_input_fixture ~terminal:(Some recovery) ~conflicting_seed ~base_path ~store ~snapshot;
-      ignore (Store.settle_running_after_restart store ~now:4. |> store_ok))
+      ignore (Store.settle_running_without_executor ~cause:Store.After_process_restart store ~now:4. |> store_ok))
     (fun ~base_path ~run_dir ~path:_ ~session_dir:_ ~canonical:_ ~metadata:_ ~snapshot:_ ~bundle:_ result ->
       let receipt = adopt run_dir (ok result) |> ok |> adopted in
       ignore (Journal.load_input_adoption ~base_path ~adoption_id:(Journal.input_adoption_id receipt) |> ok)))
@@ -535,16 +535,26 @@ let test_retention_post_commit_cancel_propagates_with_evidence () =
       (match Agent_core.Checkpoint_objects.head_of_string (contents (input_retained_path session_dir snapshot)) with
        | Ok head -> (Agent_core.Checkpoint_objects.head_content_digest head :> string)
        | Error error -> fail (Agent_core.Checkpoint_objects.load_error_to_string error));
-    let failure = Checkpoint.Installed {installed_ref=Checkpoint.exact_snapshot_reference snapshot;
+    let installed_ref = Checkpoint.exact_snapshot_reference snapshot in
+    (* An observer failure comes after the durable commit, so the retention
+       holds. *)
+    let observer_failed = Checkpoint.Installed {installed_ref;
       auxiliary=[Checkpoint.Commit_observer_failed (Failure "observer failed",original_backtrace)]} in
-    (match Journal.For_testing.confirm_input_retention failure with
+    (match Journal.For_testing.confirm_input_retention observer_failed with
+     | Ok () -> ()
+     | Error _ -> fail "a retention committed before its observer failed was refused");
+    let durability_unknown = Checkpoint.Installed {installed_ref;
+      auxiliary=[Checkpoint.Commit_durability_unknown
+        { Keeper_fs.renamed = true; stage = Keeper_fs.Parent_directory_fsync_after_rename
+        ; failure = Keeper_fs.Operation_failed "injected post-rename durability failure" }]} in
+    (match Journal.For_testing.confirm_input_retention durability_unknown with
      | Error cause -> (match cause.Journal.failure with
        | Input_retention_unconfirmed preserved ->
-         check bool "full installation evidence retained" true (preserved==failure)
+         check bool "full installation evidence retained" true (preserved==durability_unknown)
        | Invalid_keeper _ | Workspace_in_use | Unsafe_path _ | Source_absent | Source_changed
          | Companion_present _ | Store_failed _ | Io_failed _ | Invalid_bundle | Bundle_workspace_mismatch _
          | Input_selection_invalid _ | Input_source_changed _ | Input_history_unresolved _ | Installation_intent_unconfirmed _ -> fail "installation evidence was discarded")
-     | Ok _ -> fail "failed retention was accepted"))
+     | Ok _ -> fail "a retention of unknown durability was accepted"))
 
 let install_digests plan =
   let json = Journal.installation_plan_to_json plan in

@@ -102,6 +102,24 @@ let test_artifact_read_bounds_match_their_owner () =
     (declared_int "keeper_artifact_read" ~field:"max_bytes" ~key:"default")
 ;;
 
+(* The search bounds have the same shape of problem as the page bounds: the
+   handler refuses what the schema should have told the model. *)
+let test_artifact_search_bounds_match_their_owner () =
+  let module Search = Masc.Keeper_artifact_search in
+  List.iter
+    (fun (label, expected, field, key) ->
+       check
+         (option int)
+         (Printf.sprintf "keeper_artifact_read %s" label)
+         (Some expected)
+         (declared_int "keeper_artifact_read" ~field ~key))
+    [ "max_matches minimum", Search.minimum_max_matches, "max_matches", "minimum"
+    ; "max_matches maximum", Search.maximum_max_matches, "max_matches", "maximum"
+    ; "max_matches default", Search.default_max_matches, "max_matches", "default"
+    ; "contains maxLength", Search.maximum_needle_bytes, "contains", "maxLength"
+    ]
+;;
+
 let test_analyze_image_enum_matches_its_owner () =
   let declared_types =
     match declared "keeper_analyze_image" ~field:"media_type" ~key:"enum" with
@@ -127,6 +145,10 @@ let () =
             "keeper_artifact_read bounds match their owner"
             `Quick
             test_artifact_read_bounds_match_their_owner
+        ; test_case
+            "keeper_artifact_read search bounds match their owner"
+            `Quick
+            test_artifact_search_bounds_match_their_owner
         ; test_case
             "keeper_analyze_image enum matches its owner"
             `Quick

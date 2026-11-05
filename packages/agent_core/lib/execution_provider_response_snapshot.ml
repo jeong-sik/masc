@@ -84,10 +84,20 @@ let of_yojson json =
   let* telemetry =
     optional_field "telemetry" Types.inference_telemetry_of_yojson fields
   in
-  Ok { Types.id; model; stop_reason; content; usage; telemetry }
+  Ok { Types.id; model; unreadable_tool_uses = []; stop_reason; content; usage; telemetry }
 ;;
 
-let validate response =
+(* The recorded response is the one tool admission kept. Admission answers the
+   model about each unreadable tool call and keeps none of them, so the durable
+   authority has no field for them and refuses a response that still carries
+   one: recording it would drop calls the model made without saying so. *)
+let validate (response : Types.api_response) =
+  let* () =
+    match response.unreadable_tool_uses with
+    | [] -> Ok ()
+    | _ :: _ ->
+      Error "provider response snapshot still carries unreadable tool uses"
+  in
   let encoded = to_yojson response in
   let* () = validate_json ~context:"provider response snapshot" encoded in
   let* decoded = of_yojson encoded in

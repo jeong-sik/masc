@@ -103,7 +103,15 @@ type invocation =
       ; elapsed_s : float
       }
       (** Tools were called, but not the one asked for. Distinct from silence:
-          the surface reached the model and the model used it. *)
+          the surface reached the model and the model used it. [invoked]
+          includes calls whose arguments were unreadable. *)
+  | Tool_arguments_unreadable of
+      { tool : string
+      ; problem : Llm_provider.Tool_call_input.parse_error
+      ; elapsed_s : float
+      }
+      (** The model called the requested tool, but its argument text was not
+          one JSON object, so the call could not have run. *)
   | Replied_no_tool of
       { reply_bytes : int
       ; elapsed_s : float
@@ -113,6 +121,11 @@ type invocation =
       (** The request never produced a response — quota, auth, transport. *)
 
 val invocation_to_string : invocation -> string
+
+val arguments_problem_json : Llm_provider.Tool_call_input.parse_error -> Yojson.Safe.t
+(** [{"kind":"invalid_json","message":...}] or [{"kind":"not_object"}], for
+    callers that render [Tool_arguments_unreadable] without linking the
+    provider library themselves. *)
 
 val detail_of_http_error : Llm_provider.Http_client.http_error -> string
 (** Render a provider error for [Provider_rejected.detail]. Exhaustive over
@@ -151,6 +164,16 @@ type invocation_error =
   | Tool_schema_rejected of string
 
 val invocation_error_to_string : invocation_error -> string
+
+val invocation_of_response
+  :  requested:string
+  -> elapsed_s:float
+  -> Agent_core.Types.api_response
+  -> invocation
+(** Classify one probe response. The requested tool among the readable calls
+    is [Tool_invoked]; named only by a call whose arguments were unreadable it
+    is [Tool_arguments_unreadable]; other calls, readable or not, are
+    [Other_tool_invoked]; no call at all is [Replied_no_tool]. *)
 
 (** Send one synthetic turn to [runtime_id] and report whether [tool] was
     called.

@@ -252,6 +252,7 @@ let test_synthetic_events_media_blocks () =
   let response : api_response =
     { id = "r1"
     ; model = "m1"
+    ; unreadable_tool_uses = []
     ; stop_reason = EndTurn
     ; usage = Some (usage ())
     ; telemetry = None
@@ -405,6 +406,31 @@ let test_openai_object_arguments () =
   | _ -> fail "expected exactly one tool call"
 ;;
 
+(* Arguments that are a JSON value but not an object are the model's argument
+   text, not a broken chunk: the chunk stands, and the stream assembly judges
+   the call unreadable like a fragment that does not parse. *)
+let test_openai_non_object_arguments_reach_assembly () =
+  List.iter
+    (fun (label, value) ->
+       let raw =
+         Printf.sprintf
+           {|{"id":"c","model":"m","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"f","arguments":%s}}]},"finish_reason":null}]}|}
+           value
+       in
+       let chunk =
+         require_openai_chunk label
+           (S.parse_openai_sse_chunk ~streaming_reasoning:RD.No_streaming_reasoning raw)
+       in
+       match chunk.delta_tool_calls with
+       | [ tc ] ->
+         (match tc.tc_arguments with
+          | Some (S.Args_complete text) -> check string (label ^ " text") value text
+          | Some (S.Args_fragment _) -> fail (label ^ ": a JSON value is not a fragment")
+          | None -> fail (label ^ ": arguments dropped"))
+       | _ -> fail (label ^ ": expected exactly one tool call"))
+    [ "scalar", "true"; "array", "[]" ]
+;;
+
 let test_openai_malformed_tool_call_shapes_fail_closed () =
   let cases =
     [ ( "non-object member"
@@ -428,12 +454,6 @@ let test_openai_malformed_tool_call_shapes_fail_closed () =
     ; ( "non-string name"
       , {|{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":42}}]}}]}|}
       , "malformed_delta_tool_call:position:0:name_not_string" )
-    ; ( "scalar arguments"
-      , {|{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":true}}]}}]}|}
-      , "malformed_delta_tool_call:position:0:arguments_invalid_type" )
-    ; ( "array arguments"
-      , {|{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":[]}}]}}]}|}
-      , "malformed_delta_tool_call:position:0:arguments_invalid_type" )
     ]
   in
   List.iter
@@ -1303,6 +1323,8 @@ let () =
     ; ( "openai_sse"
       , [ test_case "parse edge shapes" `Quick test_openai_parse_edge_shapes
         ; test_case "object-form tool arguments" `Quick test_openai_object_arguments
+        ; test_case "non-object tool arguments reach assembly" `Quick
+            test_openai_non_object_arguments_reach_assembly
         ; test_case
             "blank id and name accepted as none"
             `Quick

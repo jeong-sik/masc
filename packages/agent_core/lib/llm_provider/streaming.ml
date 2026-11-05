@@ -264,59 +264,122 @@ let sse_event_is_deliverable_progress_signal (e : sse_event) : bool =
 ;;
 
 (** Emit synthetic SSE events from a complete [api_response].
-    Used as fallback for non-Anthropic providers that don't support SSE. *)
+    Used as fallback for non-Anthropic providers that don't support SSE.
+
+    An unreadable tool call is emitted as the tool block it was on the wire,
+    at its [tool_use_ordinal] among the tool calls, with its argument text as a
+    snapshot. A consumer that counts tool blocks then sees what a stream would
+    have shown it, and the accumulator classifies the call again on its own. *)
 let emit_synthetic_events (response : api_response) on_event =
   on_event
     (MessageStart { id = response.id; model = response.model; usage = response.usage });
-  List.iteri
-    (fun index block ->
-       let content_type, tool_id, tool_name =
-         match block with
-         | Text _ -> "text", None, None
-         | Thinking _ -> "thinking", None, None
-         | ReasoningDetails _ -> "reasoning_details", None, None
-         | ToolUse { id; name; _ } -> "tool_use", Some id, Some name
-         | Image _ -> "image", None, None
-         | Document _ -> "document", None, None
-         | Audio _ -> "audio", None, None
-         | RedactedThinking data -> "redacted_thinking", Some data, None
-         | ToolResult _ -> "text", None, None
-       in
-       on_event (ContentBlockStart { index; content_type; tool_id; tool_name });
-       (match block with
-        | Text s -> on_event (ContentBlockDelta { index; delta = TextDelta s })
-        | Thinking { content; signature } ->
-          on_event (ContentBlockDelta { index; delta = ThinkingDelta content });
-          (match signature with
-           | Some s ->
-             on_event (ContentBlockDelta { index; delta = ThinkingSignatureDelta s })
-           | None -> ())
-        | ReasoningDetails { reasoning_content; details } ->
-          on_event
-            (ContentBlockDelta
-               { index; delta = ReasoningDetailsDelta { reasoning_content; details } })
-        | ToolUse { input; _ } ->
-          on_event
-            (ContentBlockDelta
-               { index; delta = InputJsonSnapshot (Yojson.Safe.to_string input) })
-        | Image { media_type; source }
-        | Document { media_type; source }
-        | Audio { media_type; source } ->
-          (* Re-emit media payload through the typed media channel so a
-             non-streamed media block survives an api_response -> synthetic SSE
-             -> accumulator round-trip instead of collapsing to empty text. *)
-          on_event
-            (ContentBlockDelta
-               { index; delta = MediaDelta { media_type; source } })
-        | RedactedThinking _ | ToolResult _ -> ());
-       on_event (ContentBlockStop { index }))
-    response.content;
+  let next_index = ref 0 in
+  let next_tool_ordinal = ref 0 in
+  (* Emission walks the calls in ordinal order; the response does not promise
+     its list is in that order. *)
+  let pending_unreadable =
+    ref
+      (List.stable_sort
+         (fun (a : unreadable_tool_use) (b : unreadable_tool_use) ->
+            Int.compare a.tool_use_ordinal b.tool_use_ordinal)
+         response.unreadable_tool_uses)
+  in
+  let take_index () =
+    let index = !next_index in
+    incr next_index;
+    index
+  in
+  let emit_unreadable (call : unreadable_tool_use) =
+    let index = take_index () in
+    incr next_tool_ordinal;
+    on_event
+      (ContentBlockStart
+         { index
+         ; content_type = "tool_use"
+         ; tool_id = Some call.tool_use_id
+         ; tool_name = Some call.tool_name
+         });
+    on_event (ContentBlockDelta { index; delta = InputJsonSnapshot call.arguments });
+    on_event (ContentBlockStop { index })
+  in
+  let rec emit_unreadable_due () =
+    match !pending_unreadable with
+    | call :: rest when call.tool_use_ordinal <= !next_tool_ordinal ->
+      pending_unreadable := rest;
+      emit_unreadable call;
+      emit_unreadable_due ()
+    | _ :: _ | [] -> ()
+  in
+  let stream_indices =
+    List.map
+      (fun block ->
+         let content_type, tool_id, tool_name =
+           match block with
+           | Text _ -> "text", None, None
+           | Thinking _ -> "thinking", None, None
+           | ReasoningDetails _ -> "reasoning_details", None, None
+           | ToolUse { id; name; _ } -> "tool_use", Some id, Some name
+           | Image _ -> "image", None, None
+           | Document _ -> "document", None, None
+           | Audio _ -> "audio", None, None
+           | RedactedThinking data -> "redacted_thinking", Some data, None
+           | ToolResult _ -> "text", None, None
+         in
+         (match block with
+          | ToolUse _ -> emit_unreadable_due ()
+          | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolResult _
+          | Image _ | Document _ | Audio _ -> ());
+         let index = take_index () in
+         on_event (ContentBlockStart { index; content_type; tool_id; tool_name });
+         (match block with
+          | Text s -> on_event (ContentBlockDelta { index; delta = TextDelta s })
+          | Thinking { content; signature } ->
+            on_event (ContentBlockDelta { index; delta = ThinkingDelta content });
+            (match signature with
+             | Some s ->
+               on_event (ContentBlockDelta { index; delta = ThinkingSignatureDelta s })
+             | None -> ())
+          | ReasoningDetails { reasoning_content; details } ->
+            on_event
+              (ContentBlockDelta
+                 { index; delta = ReasoningDetailsDelta { reasoning_content; details } })
+          | ToolUse { input; _ } ->
+            incr next_tool_ordinal;
+            on_event
+              (ContentBlockDelta
+                 { index; delta = InputJsonSnapshot (Yojson.Safe.to_string input) })
+          | Image { media_type; source }
+          | Document { media_type; source }
+          | Audio { media_type; source } ->
+            (* Re-emit media payload through the typed media channel so a
+               non-streamed media block survives an api_response -> synthetic SSE
+               -> accumulator round-trip instead of collapsing to empty text. *)
+            on_event
+              (ContentBlockDelta
+                 { index; delta = MediaDelta { media_type; source } })
+          | RedactedThinking _ | ToolResult _ -> ());
+         on_event (ContentBlockStop { index });
+         index)
+      response.content
+  in
+  List.iter emit_unreadable !pending_unreadable;
   (* The start event already carried the complete usage; repeating it here
      would make any replace-or-add accumulator double-count. The synthetic
-     delta only settles the stop reason. *)
+     delta only settles the stop reason. Inline replay names content
+     positions; an unreadable call emitted before a block moves that block's
+     stream index, so the positions are carried over to stream indices. *)
   (match Option.bind response.telemetry (fun telemetry -> telemetry.inline_content_replay) with
    | None -> ()
    | Some {Inline_content_replay.raw_content;block_indices} ->
+     let stream_indices = Array.of_list stream_indices in
+     let block_indices =
+       List.map
+         (fun position ->
+            if position >= 0 && position < Array.length stream_indices
+            then stream_indices.(position)
+            else position)
+         block_indices
+     in
      on_event (InlineContentReplay {raw_content;block_indices}));
   on_event (MessageDelta { stop_reason = Some response.stop_reason; usage = None });
   on_event MessageStop
@@ -334,6 +397,7 @@ let%test "emit_synthetic_events round-trips a media block through the accumulato
   let response : api_response =
     { id = "msg_rt"
     ; model = "test-model"
+    ; unreadable_tool_uses = []
     ; stop_reason = EndTurn
     ; content = [ image ]
     ; usage = None
@@ -577,23 +641,22 @@ let parse_delta_tool_call_index ~position json =
          position)
 ;;
 
-let parse_delta_tool_call_arguments ~position function_json =
+(* Some explicitly OpenAI-compatible servers send the arguments as a complete
+   JSON value rather than the wire string fragment. This is a structural wire
+   variant, not a provider/model-name inference: the complete value replaces
+   the accumulator buffer instead of being concatenated. A value that is not an
+   object is still the model's argument text; the stream assembly judges it
+   the way it judges a fragment that does not parse, so one call with such
+   arguments does not fail the stream. *)
+let parse_delta_tool_call_arguments function_json =
   match assoc_field_opt "arguments" function_json with
   | None | Some `Null -> Ok None
   | Some (`String arguments) -> Ok (Some (Args_fragment arguments))
   | Some arguments ->
     (match Tool_call_input.validate_object arguments with
-     | Ok (arguments, _dropped) ->
-       (* Some explicitly OpenAI-compatible servers send a complete JSON object
-          rather than the wire string fragment. This is a structural wire
-          variant, not a provider/model-name inference: the complete value
-          replaces the accumulator buffer instead of being concatenated. *)
-       Ok (Some (Args_complete (Yojson.Safe.to_string arguments)))
+     | Ok (arguments, _dropped) -> Ok (Some (Args_complete (Yojson.Safe.to_string arguments)))
      | Error (Tool_call_input.Invalid_json _ | Tool_call_input.Not_object) ->
-       Error
-         (Printf.sprintf
-            "malformed_delta_tool_call:position:%d:arguments_invalid_type"
-            position))
+       Ok (Some (Args_complete (Yojson.Safe.to_string arguments))))
 ;;
 
 let parse_openai_delta_tool_call ~position = function
@@ -609,7 +672,7 @@ let parse_openai_delta_tool_call ~position = function
         let* tc_name =
           parse_optional_delta_string ~position ~field:"name" function_json
         in
-        let* tc_arguments = parse_delta_tool_call_arguments ~position function_json in
+        let* tc_arguments = parse_delta_tool_call_arguments function_json in
         Ok (tc_name, tc_arguments)
       | Some (`List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _) ->
         Error
@@ -1661,8 +1724,7 @@ let%test
   =
   (* minimax-m3 (Ollama Cloud) stamps every parallel tool call index:0 but gives
      each a distinct id. Blocks are keyed by id so the three calls do not collapse
-     into one buffer, which previously concatenated their arguments into invalid
-     JSON and failed the turn with malformed_tool_use_arguments. *)
+     into one buffer whose concatenated arguments are not one JSON object. *)
   let mk id name args : openai_tool_call_delta =
     { tc_index = 0
     ; tc_id = Some id

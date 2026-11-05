@@ -2244,6 +2244,44 @@ let test_set_closed_missing_post () =
   | Error (Board.Post_not_found _) -> ()
   | Error e -> Alcotest.fail (Board.show_board_error e)
 
+let refused_close_leaves_post_open ~successor ~expect_message () =
+  match
+    Board_dispatch.create_post ~author:"close-test" ~content:"close me"
+      ~post_kind:Board.Human_post ()
+  with
+  | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
+  | Ok post ->
+      let pid = Board.Post_id.to_string post.id in
+      (match
+         Board_dispatch.set_closed ~post_id:pid ~closed_by:"an-operator"
+           ~successor:(successor pid) ~summary:"wrapped up" ()
+       with
+       | Error (Board.Validation_error message) ->
+           Alcotest.(check bool) "successor is refused with a reason" true
+             (expect_message pid message)
+       | Ok () -> Alcotest.fail "the close was accepted"
+       | Error e -> Alcotest.fail (Board.show_board_error e));
+      (match Board_dispatch.get_post ~post_id:pid with
+       | Error e -> Alcotest.fail (Board.show_board_error e)
+       | Ok p ->
+           Alcotest.(check bool) "refused close leaves the post open" true
+             (Option.is_none p.closed))
+
+let test_set_closed_refuses_self_successor () =
+  refused_close_leaves_post_open
+    ~successor:(fun pid -> Board.Successor pid)
+    ~expect_message:(fun pid message ->
+      String.equal message (Printf.sprintf "post %s cannot be its own successor" pid))
+    ()
+
+let test_set_closed_refuses_missing_successor () =
+  refused_close_leaves_post_open
+    ~successor:(fun _ -> Board.Successor "never-existed")
+    ~expect_message:(fun _ message ->
+      String_util.string_contains_substring
+        ~needle:"does not refer to an existing post" message)
+    ()
+
 let test_reopen_missing_post () =
   match Board_dispatch.reopen ~post_id:"never-existed" with
   | Ok () -> Alcotest.fail "expected Post_not_found"
@@ -3416,6 +3454,10 @@ let () =
         (with_eio test_set_closed_and_reopen_round_trip);
       Alcotest.test_case "set_closed missing post" `Quick
         (with_eio test_set_closed_missing_post);
+      Alcotest.test_case "set_closed refuses self successor" `Quick
+        (with_eio test_set_closed_refuses_self_successor);
+      Alcotest.test_case "set_closed refuses missing successor" `Quick
+        (with_eio test_set_closed_refuses_missing_successor);
       Alcotest.test_case "reopen missing post" `Quick
         (with_eio test_reopen_missing_post);
     ];

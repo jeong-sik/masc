@@ -69,7 +69,7 @@ val runtime_blocker_surface_opt :
     JSON {!runtime_blocker_fields_json_of_surface} writes. *)
 
 val runtime_blocker_fields_json_of_surface :
-  keeper_meta -> runtime_blocker_surface option -> (string * Yojson.Safe.t) list
+  runtime_blocker_surface option -> (string * Yojson.Safe.t) list
 (** The status JSON fields for a blocker already read with
     {!runtime_blocker_surface_opt}. Forces [summary]. Besides the class and
     the summary the fields carry [runtime_blocker_signature]: the machine

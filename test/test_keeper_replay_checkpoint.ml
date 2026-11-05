@@ -143,7 +143,7 @@ let test_finalization_preserves_reasoning_source_through_restore () =
       |> expect_ok in
     let producing_source = source "https://producer.test" in
     let response : Types.api_response =
-      { id = "fixture"; model = "replay-fixture"; stop_reason = EndTurn;
+      { id = "fixture"; model = "replay-fixture"; unreadable_tool_uses = []; stop_reason = EndTurn;
         content = [artifact; Llm_provider.Types.Text "draft"]; usage = None;
         telemetry = Some {Types.default_inference_telemetry with
           reasoning_source = Some producing_source} } in

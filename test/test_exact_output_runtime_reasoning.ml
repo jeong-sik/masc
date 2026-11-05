@@ -45,7 +45,8 @@ let test_missing_effort_has_typed_request_rejection () =
    | Some Llm_provider.Complete_common.Enable_not_encodable ->
      Printf.eprintf "typed request control: Enable_not_encodable\n%!"
    | _ -> fail "missing effort had a different typed rejection");
-  match Plan.preflight ~config:projected.config ~messages
+  match Plan.preflight ~config:projected.config
+      ~declared_headers:projected.declared_headers ~messages
       ~body_timeout_s:projected.body_timeout_s
       ~anthropic_thinking_control:projected.anthropic_thinking_control with
   | Error (Plan.Provider_request_rejected (Llm_provider.Http_client.AcceptRejected { reason })) ->
@@ -197,6 +198,7 @@ let serialized_body target =
   let preflight =
     Plan.preflight
       ~config:projected.config
+      ~declared_headers:projected.declared_headers
       ~messages
       ~body_timeout_s:projected.body_timeout_s
       ~anthropic_thinking_control:projected.anthropic_thinking_control

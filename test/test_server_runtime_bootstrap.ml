@@ -1313,11 +1313,7 @@ let terminate_keeper_fiber config (meta : Keeper_meta_contract.keeper_meta) =
       ~base_path:config.Workspace.base_path
       meta.name
       (Keeper_state_machine.Fiber_terminated
-         {
-           outcome = "stale_turn_timeout(idle_turn(2268s))";
-           provider_id = None;
-           http_status = None;
-         })
+         { outcome = "stale_turn_timeout(idle_turn(2268s))" })
   with
   | Ok _ -> ()
   | Error err ->
@@ -1339,8 +1335,6 @@ let mark_keeper_dead_with_registry_cause config
               Printf.sprintf
                 "provider cancelled with sk-testsecret at %s/private/provider.json"
                 base_path;
-            provider_id = Some "runpod";
-            http_status = Some 500;
             runtime_id = Some "runtime-a";
             agent_core_timeout = None;
             fenced_empty_turn_runtime = None;
@@ -3140,7 +3134,7 @@ let test_fleet_official_client_recovery ~paused ~autoboot () =
           let raw_error = Agent_core.Error.to_string error in
           let terminal = Keeper_turn_terminal.of_failure ~raw_error error in
           let failure = Keeper_unified_turn_types.registry_failure_reason_of_terminal_reason
-              ~core_error:error terminal ~raw_error in
+              ~core_error:error terminal ~raw_error ~terminal_error_origin:Keeper_unified_turn_types.Terminal_error_not_from_a_candidate in
           Keeper_registry.set_failure_reason ~base_path:dir meta.Keeper_meta_contract.name failure;
           mark_keeper_failing config meta)
         native;
@@ -3243,7 +3237,8 @@ let test_fleet_official_client_recovery_clears_after_success reason () =
       let raw_error = Agent_core.Error.to_string error in
       let terminal_reason = Keeper_turn_terminal.of_failure ~raw_error error in
       Keeper_unified_turn_failure.record_failure_observation
-        ~config ~meta ~terminal_reason ~err:error ~error_text:raw_error;
+        ~config ~meta ~terminal_reason ~err:error ~error_text:raw_error
+        ~terminal_error_origin:Keeper_unified_turn_types.Terminal_error_not_from_a_candidate;
       mark_keeper_failing config meta;
       let health () =
         let snapshot =

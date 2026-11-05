@@ -78,12 +78,13 @@ let url_credential_re = Re.compile url_credential
 (** Common secret-bearing value patterns — structural prefixes only.
 
     Each pattern identifies a secret by its *structure* (a known prefix family
-    or the [://user:pass@] URL shape), not by a length heuristic. The former
-    generic "20+ alphanumeric run" matcher was removed: it classified ordinary
-    identifiers (keeper names, commit hashes, task ids) as secrets by length
-    alone, erasing them from observability fields, while every real prefix it
-    caught is already matched here in one shot (e.g. [sk-proj-...] via the
-    [sk-] body below). Known secret *values* loaded from the environment remain
+    or the [://user:pass@] URL shape), not by a length heuristic. A generic
+    "20+ alphanumeric run" matcher is deliberately absent: it would classify
+    ordinary identifiers (keeper names, commit hashes, task ids) as secrets by
+    length alone, erasing them from observability fields, while every real
+    prefix it would catch is already matched here in one shot (e.g.
+    [sk-proj-...] via the [sk-] body below). Known secret *values* loaded from
+    the environment remain
     redacted exactly by {!Keeper_secret_redaction}, which does not rely on this
     heuristic.
 
@@ -343,12 +344,6 @@ let redact_pieces pieces =
 let redact_text_mapped text = redact_pieces (copied_text text)
 let redact_text text = render_pieces (redact_text_mapped text)
 
-(* A key is text too: a map keyed by URL (registry [auths], remote lists)
-   carries credentials in its keys, so the key's text is redacted like any
-   string. Whether the value is masked whole is decided on the key as it came.
-   Two keys that differ only in their secret redact to the same text; both
-   members are kept, in order, so no value is dropped here — a reader that
-   folds members by name sees the last one. *)
 (* Under a fragment-matching key the parent already named the shape, so no
    string leaf in its subtree can be trusted in clear
    ([{"client_secret_v2":{"value":"opaque"}}] must not leak [opaque]).
@@ -362,18 +357,29 @@ let rec mask_fragment_subtree = function
   | `List items -> `List (List.map mask_fragment_subtree items)
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as json -> json
 
-let rec redact_json_strings = function
-  | `String s -> `String (redact_text s)
-  | `Assoc fields ->
-      `Assoc
-        (List.map
-           (fun (key, value) ->
-             let key' = redact_text key in
-             if is_sensitive_key key
-             then (key', `String "[REDACTED]")
-             else if key_suggests_secret key
-             then (key', mask_fragment_subtree value)
-             else (key', redact_json_strings value))
-           fields)
-  | `List items -> `List (List.map redact_json_strings items)
-  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as json -> json
+(* A key is text too: a map keyed by URL (registry [auths], remote lists)
+   carries credentials in its keys, so the key's text is redacted like any
+   string. Whether the value is masked whole is decided on the key as it came.
+   Two keys that differ only in their secret redact to the same text; both
+   members are kept, in order, so no value is dropped here — a reader that
+   folds members by name sees the last one. *)
+let redact_json_with ~on_string json =
+  let rec redact = function
+    | `String s -> `String (on_string s)
+    | `Assoc fields ->
+        `Assoc
+          (List.map
+             (fun (key, value) ->
+               let key' = redact_text key in
+               if is_sensitive_key key
+               then (key', `String "[REDACTED]")
+               else if key_suggests_secret key
+               then (key', mask_fragment_subtree value)
+               else (key', redact value))
+             fields)
+    | `List items -> `List (List.map redact items)
+    | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as json -> json
+  in
+  redact json
+
+let redact_json_strings json = redact_json_with ~on_string:redact_text json

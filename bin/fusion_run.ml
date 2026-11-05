@@ -25,8 +25,6 @@
    and calls [Fusion_panel.run] and [Fusion_judge.run] directly. This avoids the sink
    side effect (which writes a transcript to a keeper chat lane and, for a
    synthetic keeper, would mix benchmark evidence with production delivery).
-   (An hourly budget counter used to be listed here; it
-   was removed in PR #22051 and no invocation rate limit exists.)
 
    The baseline and the self-consistency arm reuse [Fusion_panel.run] so the
    call path is identical to a panel member: the arms differ only in model set

@@ -312,6 +312,7 @@ let test_with_provider_config_reaches_dispatch_losslessly () =
   let response : Types.api_response =
     { id = "builder-exact-response"
     ; model = "builder-exact-model"
+    ; unreadable_tool_uses = []
     ; stop_reason = Types.EndTurn
     ; content = [ Llm_provider.Types.Text "ok" ]
     ; usage = None
@@ -422,6 +423,7 @@ let test_missing_provider_config_is_rejected_at_dispatch () =
   let response : Types.api_response =
     { id = "must-not-dispatch"
     ; model = "must-not-dispatch"
+    ; unreadable_tool_uses = []
     ; stop_reason = Types.EndTurn
     ; content = [ Llm_provider.Types.Text "must not dispatch" ]
     ; usage = None
@@ -459,6 +461,7 @@ let test_handoff_inherits_injected_transport () =
   let response ~id ~stop_reason content : Types.api_response =
     { id
     ; model = "builder-exact-model"
+    ; unreadable_tool_uses = []
     ; stop_reason
     ; content
     ; usage = None

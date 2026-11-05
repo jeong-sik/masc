@@ -566,6 +566,7 @@ let failing_transport error : Llm_provider.Llm_transport.t =
 let empty_response : Types.api_response =
   { id = "empty"
   ; model = "model-a"
+  ; unreadable_tool_uses = []
   ; stop_reason = Types.EndTurn
   ; content = []
   ; usage = None

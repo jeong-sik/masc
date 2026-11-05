@@ -164,22 +164,6 @@ let ok_result ?tool_name ~start_time fields =
   let tool_name = Option.value ~default:"" tool_name in
   Tool_result.make_ok ~tool_name ~start_time ~data:(ok_assoc fields) ()
 
-(** {1 Parse, Don't Validate — Required Field Extractors}
-
-    Use these for required parameters instead of [get_string args key ""].
-    Returns [Ok value] on success, [Error message] on missing/empty input.
-    The error is deliberately opaque text; callers needing typed fields must
-    construct them explicitly with [error_result_typed]. *)
-
-(** Required non-empty string. Trims whitespace. *)
-let get_string_required args key =
-  match Safe_ops.json_string_opt key args with
-  | Some s ->
-      let trimmed = String.trim s in
-      if not (String.equal trimmed "") then Ok trimmed
-      else Error (Printf.sprintf "%s must not be empty" key)
-  | None -> Error (Printf.sprintf "%s is required" key)
-
 (** {1 Structured Field Validation}
 
     Machine-readable field-path error feedback for keeper tool argument

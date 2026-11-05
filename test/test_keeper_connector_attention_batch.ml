@@ -743,7 +743,10 @@ let test_unavailable_ask_survives_other_completed_work ~failure () =
         (pending_ids ());
       assert_no_delivery ();
       (* The canonical answer was never lost: answer recovery enqueues a fresh
-         pointer for the restored answer, and intake delivers it. *)
+         pointer for the restored answer, and intake delivers it. Recovery
+         delivers only to a Keeper whose meta file is stored. *)
+      (match Keeper_meta_store.replace_snapshot (Workspace.default_config base_path) meta with
+       | Ok _ -> () | Error error -> fail error);
       let report = match Keeper_ask_answer_wake.reconcile ~base_path with
         | Ok report -> report
         | Error error -> fail (Keeper_ask_store.read_error_to_string error) in

@@ -11,3 +11,10 @@ type tool_profile =
       (** An invited player at the shared machine (RFC
           play-link-for-the-shared-machine §2.7): [/mcp/play], the tools that
           require [CanPlayMachine] and no other MCP method. *)
+
+(** The name a profile has in telemetry, error messages and the persisted
+    session file: [full], [managed_agent], [operator_remote], [seat]. *)
+val tool_profile_to_string : tool_profile -> string
+
+(** The profile named by [tool_profile_to_string]; [None] for any other string. *)
+val tool_profile_of_string : string -> tool_profile option

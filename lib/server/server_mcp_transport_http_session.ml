@@ -157,19 +157,6 @@ let forget_mcp_session session_id =
 
 (* ===== File persistence ===== *)
 
-let profile_to_string = function
-  | Server_mcp_transport_http_types.Full -> "full"
-  | Server_mcp_transport_http_types.Managed_agent -> "managed_agent"
-  | Server_mcp_transport_http_types.Operator_remote -> "operator_remote"
-  | Server_mcp_transport_http_types.Seat -> "seat"
-
-let profile_of_string = function
-  | "full" -> Some Server_mcp_transport_http_types.Full
-  | "managed_agent" -> Some Server_mcp_transport_http_types.Managed_agent
-  | "operator_remote" -> Some Server_mcp_transport_http_types.Operator_remote
-  | "seat" -> Some Server_mcp_transport_http_types.Seat
-  | _ -> None
-
 let sessions_file_path ~base_path () =
   Filename.concat
     (Config_dir_resolver.masc_root ~base_path)
@@ -205,7 +192,7 @@ let write_sessions path =
       | Some pv ->
           let profile_str =
             match SMap.find_opt sid profiles with
-            | Some p -> profile_to_string p
+            | Some p -> Mcp_server_eio_types.tool_profile_to_string p
             | None -> "full"
           in
           let ts =
@@ -449,7 +436,7 @@ let decode_sessions (json : Yojson.Basic.t) =
                     in
                     let profile =
                       match profile_str with
-                      | Some (`String p) -> profile_of_string p
+                      | Some (`String p) -> Mcp_server_eio_types.tool_profile_of_string p
                       | _ -> None
                     in
                     {patch={versions=SMap.add sid v patch.versions;

@@ -152,7 +152,7 @@ function parsePathname(pathname: string, search: string): RouteState | null {
   if (segments[0] !== 'dashboard') return null
 
   const sub = segments.slice(1)
-  if (sub[0] === 'assets' || sub[0] === 'credits') return null
+  if (sub[0] === 'assets') return null
   // /dashboard?tab=monitoring&section=… is the shape a person writes by hand,
   // and it used to land on overview: this returned DEFAULT_ROUTE with the
   // params attached, so `tab` rode along as a parameter of the wrong tab.

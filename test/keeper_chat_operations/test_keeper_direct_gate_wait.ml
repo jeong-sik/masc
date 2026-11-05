@@ -69,7 +69,7 @@ let test_wait_restart_resolution decision () = with_path (fun path ->
     check bool "later independent input claims" true (Operation.Operation_id.equal other independent.operation_id);
     Store.succeed_running store ~now:5. ~operation_id:other ~outcome_ref:"independent-result" |> ok |> ignore);
   with_store path (fun store ->
-    Store.settle_running_after_restart store ~now:6. |> ok |> ignore;
+    Store.settle_running_without_executor ~cause:Store.After_process_restart store ~now:6. |> ok |> ignore;
     check bool "complete original input survives owner restart" true ((get store).input = Some input);
     let restored = Store.direct_gate_state store ~operation_id:original |> ok in
     check bool "the Gate wait survives SQLite restart" true
@@ -118,7 +118,7 @@ let test_unconfirmed_checkpoint_survives_restart () = with_path (fun path ->
       ~diagnostic:"retained checkpoint could not be installed" |> ok |> ignore;
     check bool "checkpoint-less request is nonclaimable" true (claim store = None));
   with_store path (fun store ->
-    Store.settle_running_after_restart store ~now:6. |> ok |> ignore;
+    Store.settle_running_without_executor ~cause:Store.After_process_restart store ~now:6. |> ok |> ignore;
     check bool "full original input survives restart" true ((get store).input = Some input);
     check bool "exact effect identity survives restart" true
       ((Store.direct_gate_obligations store ~operation_id:original |> ok) = [obligation]);
@@ -143,7 +143,7 @@ let test_fresh_gate_and_runtime_retry_restart () = with_path (fun path ->
       ~waiting |> ok |> ignore;
     check bool "runtime retry cannot bypass pending Gate" true (claim store = None));
   with_store path (fun store ->
-    Store.settle_running_after_restart store ~now:4. |> ok |> ignore;
+    Store.settle_running_without_executor ~cause:Store.After_process_restart store ~now:4. |> ok |> ignore;
     let observed = match Store.direct_gate_state store ~operation_id:original |> ok with
       | Some state -> state | None -> fail "simultaneous obligations lost on restart" in
     check bool "frozen checkpoint and runtime assignment survive restart" true
@@ -167,7 +167,7 @@ let test_unbound_gate_and_runtime_survive_restart () = with_path (fun path ->
     Store.defer_direct_gate_reconciliation store ~now:3. ~operation_id:original
       ~execution_digest:operation.execution_digest ~binding ~diagnostic:"Gate authority unavailable" |> ok |> ignore);
   with_store path (fun store ->
-    Store.settle_running_after_restart store ~now:4. |> ok |> ignore;
+    Store.settle_running_without_executor ~cause:Store.After_process_restart store ~now:4. |> ok |> ignore;
     check bool "unbound Gate and frozen suffix survive restart" true
       ((Store.direct_gate_binding store ~operation_id:original |> ok) = Some binding);
     check bool "original task attachments and channel retained" true ((get store).input=Some input);
@@ -214,7 +214,7 @@ let test_exact_source_reconciliation_after_restart () = with_path (fun path ->
     Store.defer_direct_gate_reconciliation store ~now:3. ~operation_id:original
       ~execution_digest:operation.execution_digest ~binding ~diagnostic:"retention fsync was not confirmed" |> ok |> ignore);
   with_store path (fun store ->
-    Store.settle_running_after_restart store ~now:4. |> ok |> ignore;
+    Store.settle_running_without_executor ~cause:Store.After_process_restart store ~now:4. |> ok |> ignore;
     let observed = Store.direct_gate_binding store ~operation_id:original |> ok |> Option.get in
     check bool "exact source survives SQLite restart" true
       (Option.fold ~none:false ~some:(Semantic.equal_gate_wait waiting) observed.unconfirmed_wait);
@@ -249,7 +249,7 @@ let test_unprepared_source_reconciliation_after_restart () = with_path (fun path
       ~execution_digest:operation.execution_digest ~binding ~diagnostic:"authority unavailable before source preparation"
       |> ok |> ignore);
   with_store path (fun store ->
-    Store.settle_running_after_restart store ~now:4. |> ok |> ignore;
+    Store.settle_running_without_executor ~cause:Store.After_process_restart store ~now:4. |> ok |> ignore;
     let observed = Store.direct_gate_binding store ~operation_id:original |> ok |> Option.get in
     check bool "original preparation survives SQLite restart without a wait" true
       (observed.preparation = preparation && observed.unconfirmed_wait = None);

@@ -34,14 +34,9 @@ let transcriber_of_kind = Voice_catalogue.transcriber_of_kind
 
 let list_voices_via_command_endpoint = Voice_probe.list_voices_via_command_endpoint
 
-let check_say_voice endpoint ~voice =
-  Voice_catalogue.check_say_voice
-    ~lister:list_voices_via_command_endpoint endpoint ~voice
-;;
-
-let check_espeak_voice endpoint ~voice =
-  Voice_catalogue.check_espeak_voice
-    ~lister:list_voices_via_command_endpoint endpoint ~voice
+let check_command_voices endpoint ~voices =
+  Voice_catalogue.check_command_voices
+    ~lister:list_voices_via_command_endpoint endpoint ~voices
 ;;
 
 

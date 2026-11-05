@@ -182,6 +182,7 @@ let test_schema_mixed_required () =
 let make_response ?(stop_reason = EndTurn) content : Types.api_response =
   { id = "m"
   ; model = "m"
+  ; unreadable_tool_uses = []
   ; stop_reason
   ; content
   ; usage = None

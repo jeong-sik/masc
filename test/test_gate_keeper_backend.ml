@@ -1409,6 +1409,7 @@ let test_agent_core_tool_call_projection_preserves_adjacent_reasoning_groups () 
     {
       id = "resp-interleaving";
       model = "runtime_lane";
+      unreadable_tool_uses = [];
       stop_reason = StopToolUse;
       content =
         [
@@ -1505,6 +1506,7 @@ let test_agent_core_interleaving_matches_masc_receipt_and_progress_facts () =
   let response : api_response =
     { id = "resp-agent_core-masc-interleaving"
     ; model = "runtime_lane"
+    ; unreadable_tool_uses = []
     ; stop_reason = StopToolUse
     ; content = [ thinking_before_read; read_tool; thinking_before_done; done_tool ]
     ; usage = None

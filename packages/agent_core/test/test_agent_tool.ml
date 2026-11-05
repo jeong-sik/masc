@@ -8,6 +8,7 @@ let mock_runner text _prompt : (Types.api_response, Error.t) result =
   Ok
     { id = "r1"
     ; model = "test"
+    ; unreadable_tool_uses = []
     ; stop_reason = EndTurn
     ; content = [ Text text ]
     ; usage = None
@@ -19,6 +20,7 @@ let echo_runner prompt : (Types.api_response, Error.t) result =
   Ok
     { id = "r1"
     ; model = "test"
+    ; unreadable_tool_uses = []
     ; stop_reason = EndTurn
     ; content = [ Text (Printf.sprintf "echo: %s" prompt) ]
     ; usage = None
@@ -34,6 +36,7 @@ let structured_runner prompt : (Types.api_response, Error.t) result =
   Ok
     { id = "child-run-1"
     ; model = "child-model"
+    ; unreadable_tool_uses = []
     ; stop_reason = EndTurn
     ; content =
         [ Text (Printf.sprintf "child: %s" prompt)
@@ -167,6 +170,7 @@ let test_multi_content () =
     Ok
       { id = "r1"
       ; model = "test"
+      ; unreadable_tool_uses = []
       ; stop_reason = EndTurn
       ; content = [ Text "line 1"; Text "line 2"; Text "line 3" ]
       ; usage = None

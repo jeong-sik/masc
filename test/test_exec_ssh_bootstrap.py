@@ -164,6 +164,33 @@ sys.exit(subprocess.run(["/bin/sh", "-c", command]).returncode)
         self.assertEqual(self.config.read_text(), original)
         self.assertFalse((self.remote / "masc-exec-shim").exists())
 
+    def known_hosts(self):
+        path = self.root / ".masc/ssh/known_hosts.d/fixture"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def test_known_hosts_pinning_the_scanned_key_beside_others_is_kept(self):
+        # The fixture host presents "fixture ssh-ed25519 test". A file that
+        # also pins RSA and ECDSA keys for it is not a rotation.
+        pinned = ("fixture ssh-rsa rsa-key\n"
+                  "fixture ssh-ed25519 test\n"
+                  "fixture ecdsa-sha2-nistp256 ecdsa-key\n")
+        self.known_hosts().write_text(pinned)
+        result = self.run_bootstrap("--keeper", "keeper-a")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.known_hosts().read_text(), pinned)
+
+    def test_known_hosts_without_the_scanned_key_is_refused(self):
+        for stored in ["fixture ssh-ed25519 rotated\n",
+                       "other-host ssh-ed25519 test\n",
+                       "fixture ssh-rsa rsa-key\n"]:
+            with self.subTest(stored=stored):
+                self.known_hosts().write_text(stored)
+                result = self.run_bootstrap("--keeper", "keeper-a")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertNotIn("provisioned.", result.stdout)
+                self.assertEqual(self.known_hosts().read_text(), stored)
+
     def test_failed_probe_is_not_success(self):
         self.env["PROBE_EXIT"] = "19"
         result = self.run_bootstrap("--keeper", "keeper-a")

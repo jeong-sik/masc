@@ -391,12 +391,15 @@ live installation or merge.
 ### Confirming retained checkpoint writes
 
 The Native next-call seed, input Producer, Birth and journal-adoption paths use the shared
-`Keeper_checkpoint_store.require_confirmed_installation` interpreter. Only an
-installed result without auxiliary evidence yields its exact reference. A real
-Eio cancellation in observer or unwind evidence is reraised with its original
-exception and backtrace; committed bytes remain evidence. Other uncertain or
-not-installed results retain the original structured result. The interpreter
-performs no I/O and does not reconfirm uncertain durability.
+`Keeper_checkpoint_store.require_confirmed_installation` interpreter. An
+installed result yields its exact reference unless its durability is unknown
+(`Commit_durability_unknown`). An observer failure, a lock release failure or
+an interrupted unwind happened after the durable commit; it is accepted and
+logged with the reference. A real Eio cancellation in observer or unwind
+evidence is reraised with its original exception and backtrace; committed bytes
+remain evidence. Durability-unknown and not-installed results retain the
+original structured result. The interpreter performs no I/O and does not
+reconfirm uncertain durability.
 
 The new focused cancellation cases use actual durable filesystem writes and the
 existing observer/unwind test boundary. They establish the staged-result boundary,

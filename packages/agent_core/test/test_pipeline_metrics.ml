@@ -22,6 +22,7 @@ module Retry = Llm_provider.Retry
 let mk_mock_response () : Types.api_response =
   { id = "test-msg-1"
   ; model = "mock-model"
+  ; unreadable_tool_uses = []
   ; stop_reason = Types.EndTurn
   ; content = [ Llm_provider.Types.Text "hello from mock transport" ]
   ; usage = None

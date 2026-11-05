@@ -837,7 +837,7 @@ let record_keeper_crashed
         ?lifecycle_token
         entry
         (Keeper_state_machine.Fiber_terminated
-           { outcome; provider_id = None; http_status = None })
+           { outcome })
     in
     ignore
       (update_exact (fun current ->

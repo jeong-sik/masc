@@ -15,7 +15,7 @@ type saved =
   | Unchanged
   | Saved of { path : string }
 
-let health_path = "/health?full=1"
+let health_path = Server_health_paths.full
 let raw_path = "/api/v1/runtime/config/raw"
 let voice_setup_path = "/api/v1/voice/setup"
 
@@ -26,7 +26,7 @@ let voice_setup_path = "/api/v1/voice/setup"
    another workspace or for something that is not a masc server: this
    workspace's server is not there, and the command is the writer. *)
 let find ~clock ~base_path ~port ~agent =
-  let origin = Printf.sprintf "http://127.0.0.1:%d" port in
+  let origin = Masc_network_defaults.masc_http_loopback_origin ~port in
   match Masc_http_client.get_sync ~clock ~url:(origin ^ health_path) ~headers:[] () with
   | Error _ -> Ok No_server
   | Ok (200, health) ->

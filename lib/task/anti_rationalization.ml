@@ -394,15 +394,7 @@ let build_prompt
     [test_anti_rationalization_empty_reject] pins to [valid_verdict_strings]
     (the variant SSOT). Decoded once at module initialization; a missing or
     undecodable file refuses the boot. *)
-let schema_of_name name : Masc_domain.tool_schema =
-  let rel = "tools/" ^ name ^ ".toml" in
-  match Embedded_config.read rel with
-  | None -> failwith (Printf.sprintf "embedded tool definition missing: %s" rel)
-  | Some contents ->
-    (match Tool_definition_toml.load ~name ~contents with
-     | Ok { Tool_definition_toml.schema; _ } -> schema
-     | Error message -> failwith message)
-;;
+let schema_of_name = Tool_definition_embedded.schema
 
 (* What to say on each verdict lives in config/prompts/verification.md, not
    in the schema — model-facing prose belongs in the prompt files (RFC

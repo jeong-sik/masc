@@ -54,6 +54,17 @@ type exact_slot_degradation =
 val exact_slot_body_deadline_gap_to_string : exact_slot_body_deadline_gap -> string
 (** One line naming the lane table, the slot, the provider and the key to add. *)
 
+type thinking_request_refusal =
+  { runtime_id : string
+  ; execution_model : string
+  ; declared_model : string
+  ; reason : string
+  }
+(** One [Agent_core] runtime whose model row decides its own thinking request
+    ({!Runtime_schema.thinking_request} is [Some _]) and builds a request that
+    {!Llm_provider.Complete_common.request_admission} refuses. [reason] is
+    admission's own account. *)
+
 type exact_lane_cli_slot_unservable_reason =
   | Not_an_official_client
       (** The runtime is dispatched over HTTP ([Agent_core]). *)
@@ -101,6 +112,9 @@ type load_failure =
           [max-concurrent] or [admission-priority-run-limit]. Admission keeps
           one allowance per account, so the configuration is refused, naming
           each runtime and its values. *)
+  | Thinking_requests_inadmissible of thinking_request_refusal list
+      (** Runtimes whose every turn would be refused before it is sent: a turn
+          applies the row's thinking request and meets the same admission. *)
   | Exact_slot_body_deadlines_absent of exact_slot_body_deadline_gap list
       (** The exact-output slots a save would add on an HTTP provider that
           declares no [exact-body-timeout-s], compared with the file on disk.

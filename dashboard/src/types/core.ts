@@ -1583,8 +1583,20 @@ interface KeeperSupervisorDiagnostics {
 // The system prompt a keeper turn would send (#38354). A turn that cannot
 // build it is refused, so the server sends the typed reason instead of text.
 // A shape this client does not know fails only this field.
+// A constitution ledger line the prompt left out. Every append ends with a
+// newline, so only the file's last line can be unterminated.
+export interface KeeperConstitutionRejectedLine {
+  line: number
+  line_end: 'newline_terminated' | 'unterminated_final_line'
+  detail: string
+}
+
+export type KeeperConstitutionLedgerPreview =
+  | { state: 'read'; rejected_lines: KeeperConstitutionRejectedLine[] }
+  | { state: 'unreadable'; path: string; detail: string }
+
 export type KeeperSystemPromptPreview =
-  | { state: 'available'; effective: string; assembled: string }
+  | { state: 'available'; effective: string; assembled: string; constitution_ledger: KeeperConstitutionLedgerPreview }
   | { state: 'unavailable'; reason: 'constitution_unreadable'; path: string; detail: string }
   | { state: 'unavailable'; reason: 'workspace_unavailable'; detail: string }
   | { state: 'unavailable'; reason: 'prompt_unrenderable'; detail: string }

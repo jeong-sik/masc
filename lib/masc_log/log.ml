@@ -95,11 +95,6 @@ let event_class_to_string : event_class -> string = function
 
 let has_prefix ~prefix value = String.starts_with ~prefix value
 
-(* RFC-0079: [infer_legacy_level] (a string-prefix classifier on the
-   message body) was deleted along with the [?level] option on
-   [legacy_stderr] / [legacy_traceln]. All callers now pass typed [~level]
-   explicitly; see [Log.legacy_stderr] / [Log.legacy_traceln] below. *)
-
 (** Check if level should be logged *)
 let should_log level =
   level_to_int level >= Atomic.get current_level

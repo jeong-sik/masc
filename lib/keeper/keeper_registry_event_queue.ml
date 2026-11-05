@@ -889,60 +889,6 @@ let cancel_scheduled_wakes_result ~base_path name ~applied_at ~schedule_ids ~rea
       cancelled
 ;;
 
-let drain_owner_absent_pending_result ~base_path name ~applied_at ~reason =
-  (* Owner-absent termination (task-370): when the Keeper store holds no
-     metadata for a name that owns durable pending work, no maintenance cycle
-     can make the wait productive -- the work can never execute until an
-     operator registers the name. The observed outcome of retaining it was a
-     913-error day for one stale tenant queue and 881 retained visits for
-     one keeper. Drain the pending entries now, through the same
-     exact accepted-cancellation transition, instead of re-visiting them
-     every cycle. [pending_selections_result] refuses unregistered names, but
-     an owner-absent queue is by definition unregistered, so this reads the
-     durable state directly through persistence. *)
-  match
-    Keeper_event_queue_persistence.pending_selections_result
-      ~base_path
-      ~keeper_name:name
-  with
-  | Error _ as error -> error
-  | Ok selections ->
-    List.fold_left
-      (fun acc (selection : Keeper_event_queue_state.pending_selection) ->
-         match acc with
-         | Error _ as error -> error
-         | Ok count ->
-           (* Same address-derived id as the schedule cancellation above:
-              this fold cancels every pending entry in one tick, so a
-              wall-clock id collided from the second entry on. *)
-           let operation_id =
-             Printf.sprintf
-               "owner-absent-drain:%s:%s:%Ld"
-               name
-               (Keeper_event_queue_state.source_snapshot_ref selection.source)
-               selection.admitted_revision
-           in
-           let cancellation =
-             { Keeper_event_queue_state.source = selection.source
-             ; source_incarnation = selection.admitted_revision
-             ; operator_operation_id = operation_id
-             ; reason
-             }
-           in
-           (match
-              commit_and_project_accepted_cancellation
-                ~base_path
-                name
-                ~applied_at
-                cancellation
-            with
-            | Ok Fold_cancelled -> Ok (count + 1)
-            | Ok Fold_source_already_left -> Ok count
-            | Error detail -> Error detail))
-      (Ok 0)
-      selections
-;;
-
 let transfer_pending_accepted_result
       ?intake_token
       ~base_path

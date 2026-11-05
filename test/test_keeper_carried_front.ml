@@ -757,6 +757,39 @@ let test_read_seed_stops_at_history_restart () =
   check bool "the pre-clear response is not a seed" true (Option.is_none read.Front.seed)
 ;;
 
+(* The floor is kept with the boundary store's identity, so a read after an
+   append sees the boundary the append wrote, and a read with no append in
+   between answers the same. *)
+let test_read_seed_sees_a_boundary_appended_after_a_read () =
+  with_turn_record_store @@ fun config store ->
+  let keepers_dir = Masc.Workspace.keepers_runtime_dir config in
+  Dated_jsonl.append store
+    (Turn_record.to_json (record ~turn:1 (Some (30, 100))));
+  Masc.Keeper_turn_boundaries.append ~keepers_dir ~keeper_id:"alpha"
+    { recorded_at = 1.
+    ; event =
+        Masc.Keeper_turn_boundaries.Turn_ended
+          { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id:"trace-1" ~absolute_turn:1
+          ; history_at_start = Masc.Keeper_turn_boundaries.Continued_history
+          ; position = Masc.Keeper_turn_boundaries.Stale_noop
+          }
+    }
+  |> Result.get_ok;
+  let seeded () =
+    Option.is_some (Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1").Front.seed in
+  check bool "the response before any restart is a seed" true (seeded ());
+  check bool "an unchanged store answers the same" true (seeded ());
+  Masc.Keeper_turn_boundaries.append ~keepers_dir ~keeper_id:"alpha"
+    { recorded_at = 2.
+    ; event = Masc.Keeper_turn_boundaries.History_restarted { trace_id = "trace-1" }
+    }
+  |> Result.get_ok;
+  Dated_jsonl.append store
+    (Turn_record.to_json
+       (record ~turn:2 ~finish:None ~response_observed:false None));
+  check bool "a restart appended after the read fences the old response" false (seeded ())
+;;
+
 (* The marker a fresh turn owed failed to be written and only its empty end
    line records the restart. The line still has to fence the old generation:
    without it the seed scan walks back into the pre-restart responses and
@@ -1085,6 +1118,8 @@ let () =
             test_read_seed_counts_only_unreadable_rows_visited_before_the_response
         ; test_case "history restart fences older responses" `Quick
             test_read_seed_stops_at_history_restart
+        ; test_case "read seed sees a boundary appended after a read" `Quick
+            test_read_seed_sees_a_boundary_appended_after_a_read
         ; test_case "a fresh-history end line fences older responses" `Quick
             test_read_seed_stops_at_a_fresh_history_end_line
         ; test_case "previous trace fences older retained rows" `Quick

@@ -73,12 +73,12 @@ let load ~base_path ~keeper_name ~operation_id ~session_dir ~session_id =
     (* Newer user steering remains in canonical history. Restore execution
        ownership without appending the original input or replaying tool calls. *)
     let checkpoint = { checkpoint with Agent_core.Checkpoint.context } in
-    let* () = match Checkpoint.save_agent_core_if_source ~session_dir
+    let* () = Checkpoint.save_agent_core_if_source ~session_dir
         ~expected_source_ref:(Checkpoint.exact_snapshot_reference current)
-        ~boundary:Agent_core.Checkpoint_objects.Turn_continues checkpoint with
-      | Checkpoint.Installed { auxiliary = []; _ } -> Ok ()
-      | Checkpoint.Installed _ | Checkpoint.Not_installed _ ->
-        Error "cooperative continuation admission is not durably confirmed" in
+        ~boundary:Agent_core.Checkpoint_objects.Turn_continues checkpoint
+      |> Checkpoint.require_confirmed_installation
+      |> Result.map ignore
+      |> Result.map_error (fun _ -> "cooperative continuation admission is not durably confirmed") in
     Ok (Some { authority = Agent_core checkpoint; observed = Semantic.Agent_core observed })
 
 let consume ~base_path ~keeper_name ~operation_id admission =
@@ -95,10 +95,10 @@ let defer ~base_path ~keeper_name ~operation_id ~session_dir ~session_id ~checkp
       (Checkpoint.exact_snapshot_reference snapshot) then Ok ()
     else Error "canonical checkpoint is not the checkpoint returned by this turn" in
   let* _ = validate_scope ~operation_id (Checkpoint.exact_snapshot_checkpoint snapshot) in
-  let* () = match Checkpoint.retain_exact_snapshot ~session_dir snapshot with
-    | Checkpoint.Installed { auxiliary = []; _ } -> Ok ()
-    | Checkpoint.Installed _ | Checkpoint.Not_installed _ ->
-      Error "cooperative checkpoint retention is not durably confirmed" in
+  let* () = Checkpoint.retain_exact_snapshot ~session_dir snapshot
+    |> Checkpoint.require_confirmed_installation
+    |> Result.map ignore
+    |> Result.map_error (fun _ -> "cooperative checkpoint retention is not durably confirmed") in
   let* operation = Owner.exact_operation ~base_path ~keeper_name operation_id |> owner in
   match operation with
   | None -> Error "direct operation disappeared before cooperative deferral"

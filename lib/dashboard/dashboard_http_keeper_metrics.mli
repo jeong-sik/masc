@@ -23,25 +23,7 @@ val top_counts_map_json :
   int Count_map.t ->
   Yojson.Safe.t list
 
-val count_table_incr :
-  (string, int) Hashtbl.t -> string -> unit
-(** [count_table_incr tbl key] increments [tbl.(key)] by 1
-    (initialising to 1 when missing).  Trims [key] before lookup
-    to avoid whitespace-driven duplicates.  Used to update the
-    work-kind / tool counters of the keeper metrics window. *)
-
-(** {1 Top-count rendering (runtime-visible)} *)
-
-val top_counts_json :
-  ?limit:int ->
-  name_key:string ->
-  (string, int) Hashtbl.t ->
-  Yojson.Safe.t list
-(** [top_counts_json ?limit ~name_key tbl] returns the top
-    [limit] (default 5) entries from [tbl] as JSON objects with
-    fields [name_key -> entry name] and ["count" -> count].
-    Sorted by count descending.  Used to render top-models /
-    top-tools sections of keeper-detail JSON. *)
+(** {1 History summary (runtime-visible)} *)
 
 val keeper_history_summary_json :
   all_keeper_names:string list ->

@@ -1612,9 +1612,9 @@ let load_keeper_file_changes ~(host : string) ~(port : int)
 
 (** Load what the working tree holds for one file, from /api/v1/git/diff. *)
 let load_git_diff ?repo ~(host : string) ~(port : int)
-    ~(keeper : string option) ~(path : string) ~(base_ref : string) () :
+    ~(keeper : string option) ~(path : string) ~(against : git_diff_against) () :
     (Tui_decode.git_diff, string) result =
-  match fetch_git_diff ?repo ~host ~port ~keeper ~path ~base_ref () with
+  match fetch_git_diff ?repo ~host ~port ~keeper ~path ~against () with
   | Error err -> Error ("git diff load failed: " ^ err)
   | Ok diff -> Ok diff
 

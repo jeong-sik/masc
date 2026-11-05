@@ -108,6 +108,15 @@ let year_and_month_of_directory_name name =
   else None
 ;;
 
+let compare_month_entries left right =
+  match
+    year_and_month_of_directory_name left, year_and_month_of_directory_name right
+  with
+  | Some _, Some _ | None, None -> String.compare left right
+  | None, Some _ -> -1
+  | Some _, None -> 1
+;;
+
 let month_directory_name_is_valid name =
   Option.is_some (year_and_month_of_directory_name name)
 ;;

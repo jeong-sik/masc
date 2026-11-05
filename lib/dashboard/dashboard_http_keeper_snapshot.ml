@@ -75,16 +75,47 @@ type system_prompt_preview_error =
   | Workspace_unavailable of string
   | Prompt_unrenderable of string
 
+(* Ledger lines the prompt left out. A turn renders only the lines that
+   decode and goes on without the rest, so the preview is where an operator
+   sees which line is missing and why. Read separately from the prompt
+   build: an unreadable answer here is this read's, not the prompt's. *)
+let constitution_ledger_json = function
+  | Ok (ledger : World_constitution_store.ledger) ->
+    `Assoc
+      [ "state", `String "read"
+      ; ( "rejected_lines"
+        , `List
+            (List.map
+               (fun (line : World_constitution_store.rejected_line) ->
+                 `Assoc
+                   [ "line", `Int line.World_constitution_store.line_number
+                   ; ( "line_end"
+                     , `String
+                         (World_constitution_store.line_end_to_string
+                            line.World_constitution_store.line_end) )
+                   ; "detail", `String line.World_constitution_store.detail
+                   ])
+               ledger.World_constitution_store.rejected) )
+      ]
+  | Error (World_constitution_store.Unreadable { path; detail }) ->
+    `Assoc
+      [ "state", `String "unreadable"
+      ; "path", `String path
+      ; "detail", `String detail
+      ]
+;;
+
 (* The system prompt a turn would send, as one closed union on the wire.
    [assembled] matches what a turn actually sends: the base prompt with
    the observation frame riding the per-turn dynamic context. *)
-let system_prompt_json ~world_state
+let system_prompt_json ~world_state ~constitution_ledger
     : (string, system_prompt_preview_error) result -> Yojson.Safe.t = function
   | Ok effective ->
     `Assoc
       [ "state", `String "available"
       ; "effective", `String effective
       ; "assembled", `String (effective ^ "\n\n" ^ world_state)
+      ; "constitution_ledger", constitution_ledger_json (Lazy.force constitution_ledger)
       ]
   | Error (Constitution_unreadable { path; detail }) ->
     `Assoc
@@ -268,6 +299,8 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
               ] );
           ( "system_prompt",
             system_prompt_json ~world_state:world_state_preview
+              ~constitution_ledger:
+                (lazy (World_constitution_store.load ~base_path:config.base_path))
               effective_system_prompt );
           ("unified_user_message_preview", `String unified_user_message_preview);
         ]

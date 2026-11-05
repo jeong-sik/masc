@@ -45,6 +45,7 @@ let binding () =
 let child_response : Types.api_response =
   { id = "projection-child-response"
   ; model = "projection-child-model"
+  ; unreadable_tool_uses = []
   ; stop_reason = Types.EndTurn
   ; content = [ Llm_provider.Types.Text "child-finished" ]
   ; usage = None

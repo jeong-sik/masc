@@ -398,16 +398,7 @@ let text_with_files ~text ~files =
 let text_mentions_bot ~bot_user_id text =
   match bot_user_id with
   | None -> false
-  | Some id ->
-    let needle = "<@" ^ id ^ ">" in
-    let len = String.length needle in
-    let tlen = String.length text in
-    let rec loop i =
-      if i + len > tlen then false
-      else if String.sub text i len = needle then true
-      else loop (i + 1)
-    in
-    loop 0
+  | Some id -> String_util.contains_substring text ("<@" ^ id ^ ">")
 ;;
 
 let decode_event ~bot_user_id ~event_type ~payload =

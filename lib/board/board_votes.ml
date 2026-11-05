@@ -169,26 +169,21 @@ let set_closed store ~post_id ~closed_by ~successor ~summary ()
        with_persist_lock store (fun () ->
          let result =
            with_lock store (fun () ->
-             match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
-             | None -> Error (Post_not_found post_id)
-             | Some _
-               when (match successor_id with
-                     | Some sid -> String.equal (Post_id.to_string sid) (Post_id.to_string pid)
-                     | None -> false) ->
+             match Hashtbl.find_opt store.posts (Post_id.to_string pid), successor_id with
+             | None, _ -> Error (Post_not_found post_id)
+             | Some _, Some sid
+               when String.equal (Post_id.to_string sid) (Post_id.to_string pid) ->
                Error
                  (Validation_error
                     (Printf.sprintf "post %s cannot be its own successor" post_id))
-             | Some _
-               when (match successor_id with
-                     | Some sid -> not (Hashtbl.mem store.posts (Post_id.to_string sid))
-                     | None -> false) ->
-               let sid = match successor_id with Some s -> s | None -> assert false in
+             | Some _, Some sid
+               when not (Hashtbl.mem store.posts (Post_id.to_string sid)) ->
                Error
                  (Validation_error
                     (Printf.sprintf
                        "successor_id %s does not refer to an existing post"
                        (Post_id.to_string sid)))
-             | Some post ->
+             | Some post, (Some _ | None) ->
                let now = Time_compat.now () in
                let closed =
                  Some { closed_by = closed_by_id; closed_at = now; successor_id; summary = Some summary }

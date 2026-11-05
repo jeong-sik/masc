@@ -1800,7 +1800,11 @@ let fold_range_appended_result t ~since ~until ~cursor ~init ~f =
     else Error (appended_read_changed t.base_dir)
 ;;
 
-let fold_file_appended_entries_result path ~cursor ~init ~f =
+type incomplete_tail =
+  | Incomplete_tail_is_error
+  | Incomplete_tail_is_unwritten
+
+let fold_file_appended path ~incomplete_tail ~cursor ~init ~f =
   let open Result.Syntax in
   let* captured = inspect_path_result path in
   let* () = match non_regular_file_kind_of_stats captured with
@@ -1822,12 +1826,26 @@ let fold_file_appended_entries_result path ~cursor ~init ~f =
         let from = match previous with [] -> 0 | (_,_,offset) :: _ -> offset in
         let* value, boundary = fold_captured_entries_result channel ~path ~from
           ~until:captured.Unix.st_size ~init ~f in
-        let* () = if boundary = captured.Unix.st_size then Ok ()
-          else Error (Io_error {operation=Read_file;path;detail="incomplete trailing JSONL row"}) in
+        let* () =
+          if boundary = captured.Unix.st_size then Ok ()
+          else
+            match incomplete_tail with
+            | Incomplete_tail_is_error ->
+              Error (Io_error {operation=Read_file;path;detail="incomplete trailing JSONL row"})
+            | Incomplete_tail_is_unwritten -> Ok ()
+        in
         let* after = inspect_path_result path in
         if append_only_successor captured after then
           Ok (Appended (value, [(path,captured,boundary)]))
         else Error (appended_read_changed path))
+;;
+
+let fold_file_appended_entries_result path =
+  fold_file_appended path ~incomplete_tail:Incomplete_tail_is_error
+;;
+
+let fold_file_appended_complete_entries_result path =
+  fold_file_appended path ~incomplete_tail:Incomplete_tail_is_unwritten
 ;;
 
 (* Like [read_range] but bounded to the [n] most recent entries within

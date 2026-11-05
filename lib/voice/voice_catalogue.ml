@@ -306,6 +306,26 @@ let check_command_voice ~lister endpoint ~voice =
          endpoint.Voice_config.id)
 ;;
 
+(* Several names asked of one endpoint list its voices once: a listing took
+   0.56-0.59s per call on the mac that measured it. The first name it lacks
+   ends the check. *)
+let check_command_voices ~lister endpoint ~voices =
+  let listed = ref None in
+  let lister endpoint =
+    match !listed with
+    | Some result -> result
+    | None ->
+      let result = lister endpoint in
+      listed := Some result;
+      result
+  in
+  List.fold_left
+    (fun checked voice ->
+      Result.bind checked (fun () -> check_command_voice ~lister endpoint ~voice))
+    (Ok ())
+    voices
+;;
+
 (* The container each kind writes. say encodes WAVE and cannot encode MP3
    at all; everything reached over a wire answers MP3, which is what the
    OpenAI-compatible /audio/speech and ElevenLabs both default to and what

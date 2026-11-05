@@ -51,13 +51,13 @@ val launch_history_load
   -> path:string
   -> unit
 
-(** The caller supplies the shared working-tree comparison reference. *)
+(** Read one diff target. The target is the fetched state's key, so an answer
+    for any other target is dropped. *)
 val launch_diff_load
   :  Masc_tui_types.state
   -> host:string
   -> deliver:(Masc_tui_async_protocol.async_msg -> unit)
-  -> base_ref:string
-  -> path:string
+  -> target:Masc_tui_types.code_diff_target
   -> unit
 
 (** Capture workspace axes before launching the margin read. *)

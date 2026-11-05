@@ -103,9 +103,14 @@ let endpoint ?base_url ?api_key_env ?timeout_seconds ?model ~id ~kind () : Voice
   ; model
   }
 
-let apply path changes =
-  Voice_setup.apply ~runtime_config_path:path ~standalone_path:(standalone path)
-    ~expected_revision:(revision path) changes
+(* The cases that are not about voice names pass a list that has every name. *)
+let accept_every_voice _endpoint ~voices:_ = Ok ()
+
+let apply_with ~check_command_voices path changes =
+  Voice_setup.apply ~check_command_voices ~runtime_config_path:path
+    ~standalone_path:(standalone path) ~expected_revision:(revision path) changes
+
+let apply path changes = apply_with ~check_command_voices:accept_every_voice path changes
 
 let test_observe_reads_the_section () =
   with_config fixture (fun path ->
@@ -193,6 +198,7 @@ let test_a_stale_revision_writes_nothing () =
     Out_channel.with_open_bin path (fun out -> output_string out concurrent);
     match
       Voice_setup.apply
+        ~check_command_voices:accept_every_voice
         ~runtime_config_path:path
         ~standalone_path:(standalone path)
         ~expected_revision:stale
@@ -326,6 +332,7 @@ let test_preview_does_not_write () =
   with_config fixture (fun path ->
     match
       Voice_setup.preview
+        ~check_command_voices:accept_every_voice
         ~runtime_config_path:path
         ~standalone_path:(standalone path)
         ~expected_revision:(revision path)
@@ -464,6 +471,81 @@ let test_a_local_voice_goes_where_its_default_is_not_someone_elses () =
   Alcotest.(check bool) "an unreadable kind: on the endpoint" false (placed [ None ])
 ;;
 
+(* say speaks a name it does not have in another voice and exits 0, so the
+   writer asks the endpoint's own list (#35875). This list stands in for say:
+   it has [installed], and keeps every call so a case can say what was asked. *)
+let command_list ~installed =
+  let asked = ref [] in
+  let checker (endpoint : Voice_config.endpoint) ~voices =
+    asked := !asked @ [ endpoint.Voice_config.id, voices ];
+    match List.find_opt (fun voice -> not (List.mem voice installed)) voices with
+    | None -> Ok ()
+    | Some voice -> Error (Printf.sprintf "say has no voice named %S" voice)
+  in
+  checker, asked
+
+let say_fixture =
+  runtime_base
+  ^ {|
+[voice.tts]
+default_voice = "Yuna"
+
+[voice.tts.agent_voices]
+voice-setup-fixture = "Yuna"
+
+[[voice.tts.endpoints]]
+id = "macos-say"
+kind = "macos_say"
+enabled = true
+|}
+
+let asked_calls = Alcotest.(list (pair string (list string)))
+
+let test_a_voice_the_command_lacks_is_not_written () =
+  with_config say_fixture (fun path ->
+    let checker, asked = command_list ~installed:[ "Yuna" ] in
+    let changes = [ Voice_setup.Set_tts_default_voice "NoSuchVoice" ] in
+    let refused what = function
+      | Error (Voice_setup.Voice_not_on_endpoint _) -> ()
+      | Ok _ -> Alcotest.failf "%s must not accept a voice say does not have" what
+      | Error error -> Alcotest.fail (Voice_setup.error_message error)
+    in
+    refused "preview"
+      (Voice_setup.preview ~check_command_voices:checker ~runtime_config_path:path
+         ~standalone_path:(standalone path) ~expected_revision:(revision path) changes);
+    refused "apply" (apply_with ~check_command_voices:checker path changes);
+    Alcotest.(check string) "runtime.toml is untouched" say_fixture (read path);
+    Alcotest.check asked_calls "say is asked for the new name, once per call"
+      [ "macos-say", [ "NoSuchVoice" ]; "macos-say", [ "NoSuchVoice" ] ]
+      !asked)
+
+(* Yuna is in the file before the edit, and this list no longer has her -- a
+   voice taken off the machine. An edit that maps one more agent to Kyoko still
+   lands: say is asked once, for Kyoko only. *)
+let test_only_names_the_edit_adds_are_asked () =
+  with_config say_fixture (fun path ->
+    let checker, asked = command_list ~installed:[ "Kyoko" ] in
+    match
+      apply_with ~check_command_voices:checker path
+        [ Voice_setup.Set_agent_voice ("another-agent", Some "Kyoko") ]
+    with
+    | Error error -> Alcotest.fail (Voice_setup.error_message error)
+    | Ok _revision ->
+      Alcotest.check asked_calls "only the added name is asked" [ "macos-say", [ "Kyoko" ] ]
+        !asked)
+
+(* An ElevenLabs voice is a 20-character id no command list has. Its endpoint
+   is reached over HTTP, so nothing asks a command about it. *)
+let test_an_endpoint_reached_over_http_is_not_asked () =
+  with_config fixture (fun path ->
+    let checker, asked = command_list ~installed:[] in
+    match
+      apply_with ~check_command_voices:checker path
+        [ Voice_setup.Set_tts_default_voice "CwhRBWXzGAHq8TQ4Fs17" ]
+    with
+    | Error error -> Alcotest.fail (Voice_setup.error_message error)
+    | Ok _revision -> Alcotest.check asked_calls "no command was asked" [] !asked)
+
 (* The loader reads the standalone JSON when runtime.toml has no [voice]
    section. The observation parsed only the TOML, so a workspace whose voice
    worked from that file observed as not configured, and a client listed no
@@ -525,7 +607,8 @@ let test_a_write_over_the_standalone_source_is_refused () =
       | Error error -> Alcotest.fail (Voice_setup.error_message error)
     in
     refused "preview"
-      (Voice_setup.preview ~runtime_config_path:path ~standalone_path:(standalone path)
+      (Voice_setup.preview ~check_command_voices:accept_every_voice
+         ~runtime_config_path:path ~standalone_path:(standalone path)
          ~expected_revision:(revision path) changes);
     refused "apply" (apply path changes);
     Alcotest.(check string) "runtime.toml is untouched" runtime_base (read path);
@@ -623,6 +706,14 @@ let () =
         ; Alcotest.test_case "removing the last endpoint is refused" `Quick
             test_removing_the_last_endpoint_is_refused
         ; Alcotest.test_case "preview does not write" `Quick test_preview_does_not_write
+        ; Alcotest.test_case "a voice the command lacks is not written" `Quick
+            test_a_voice_the_command_lacks_is_not_written
+        ] )
+    ; ( "voice names"
+      , [ Alcotest.test_case "only names the edit adds are asked" `Quick
+            test_only_names_the_edit_adds_are_asked
+        ; Alcotest.test_case "an endpoint reached over HTTP is not asked" `Quick
+            test_an_endpoint_reached_over_http_is_not_asked
         ] )
     ; ( "changes"
       , [ Alcotest.test_case "an endpoint is added and the notes survive" `Quick

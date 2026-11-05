@@ -56,7 +56,7 @@ let test_active_restart_preserves_seed_and_exact_identity () = with_store @@ fun
   commit store operation (Native.Checkpoint {call_id; observed=checkpoint 1; checkpoint=checkpoint 2});
   let before = read store in
   with_reopened path store @@ fun reopened ->
-  check int "active call is not marked interrupted" 0 (List.length (Store.settle_running_after_restart reopened ~now:4. |> ok));
+  check int "active call is not marked interrupted" 0 (List.length (Store.settle_running_without_executor ~cause:Store.After_process_restart reopened ~now:4. |> ok));
   let resumed = match Store.claim_next reopened ~now:5. |> ok with
     | Some operation -> operation | None -> fail "active operation did not resume" in
   check bool "same operation" true (Operation.Operation_id.equal resumed.operation_id operation.operation_id);
@@ -72,7 +72,7 @@ let test_terminal_restart_never_dispatches () = with_store @@ fun path store ope
   terminal store operation Agent.Retire;
   let before = read store in
   with_reopened path store @@ fun reopened ->
-  check int "terminal call lacks an Owner receipt" 1 (List.length (Store.settle_running_after_restart reopened ~now:4. |> ok));
+  check int "terminal call lacks an Owner receipt" 1 (List.length (Store.settle_running_without_executor ~cause:Store.After_process_restart reopened ~now:4. |> ok));
   check bool "terminal journal never dispatched" true (Option.is_none (Store.claim_next reopened ~now:5. |> ok));
   check bool "terminal evidence survives" true (Native.equal_state before (read reopened));
   (match Store.get reopened operation_id |> ok with
@@ -298,7 +298,7 @@ let test_a_restart_settlement_releases_the_receipt_checkpoints () =
   with_store @@ fun path store operation ->
   retired_after_advancing store operation;
   let receipt = read store in
-  ignore (Store.settle_running_after_restart store ~now:4. |> ok : Operation.t list);
+  ignore (Store.settle_running_without_executor ~cause:Store.After_process_restart store ~now:4. |> ok : Operation.t list);
   released "the restart releases the receipt's seed and latest checkpoint"
     [checkpoint 1; checkpoint 2] store;
   check bool "the settled execution keeps the receipt" true (Native.equal_state receipt (read store));
@@ -359,7 +359,7 @@ let test_the_release_selection_matches_the_sweep () =
         ~execution_digest:operation.Operation.execution_digest change |> ok in
     commit (Native.Bind {observed=Native.No_native_call; call});
     commit (Native.Terminal {call_id=next_call_id; disposition=disposition Agent.Retire});
-    ignore (Store.settle_running_after_restart store ~now:6. |> ok : Operation.t list);
+    ignore (Store.settle_running_without_executor ~cause:Store.After_process_restart store ~now:6. |> ok : Operation.t list);
     let suspended = id "native-suspended-operation" in
     submit store suspended "suspend me";
     let operation = claim store in
@@ -638,7 +638,7 @@ let test_an_unsettled_execution_refuses_history_clear () =
    bind store operation (make_call operation);
    with_reopened path store @@ fun reopened ->
    check int "the restart leaves the active call to resume" 0
-     (List.length (Store.settle_running_after_restart reopened ~now:4. |> ok));
+     (List.length (Store.settle_running_without_executor ~cause:Store.After_process_restart reopened ~now:4. |> ok));
    refused "a call left to resume" reopened);
   with_store @@ fun _path store operation ->
   Store.update_input_checkpoint store ~observed:None ~checkpoint:(checkpoint 1) |> ok |> input_updated;

@@ -571,6 +571,8 @@ type projection_target = private
   ; capabilities : Capabilities.capabilities
   ; anthropic_thinking_control : Capabilities.anthropic_thinking_control option
   ; body_timeout_s : float option
+  ; declared_headers : Exact_output_declared_headers.t
+      (** The binding's own request headers the exact request sends. *)
   ; model_admitted : bool
   }
 

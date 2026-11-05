@@ -3809,7 +3809,7 @@ describe('fetchKeeperConfig', () => {
           world: { key: 'keeper.world', source: 'override', text: 'world text' },
           capabilities: { key: 'keeper.capabilities', source: 'file', text: 'capabilities text' },
         },
-        system_prompt: { state: 'available', effective: 'full prompt', assembled: 'assembled prompt' },
+        system_prompt: { state: 'available', effective: 'full prompt', assembled: 'assembled prompt', constitution_ledger: { state: 'read', rejected_lines: [] } },
         unified_user_message_preview: 'world state',
       },
       execution: {
@@ -3969,6 +3969,42 @@ describe('fetchKeeperConfig', () => {
     expect((await fetchKeeperConfig('keeper-sangsu')).prompt.system_prompt).toEqual({
       state: 'decode_failed',
       detail: 'unknown prompt state "later"',
+    })
+  })
+
+  it('decodes the constitution lines a built prompt left out, and never reads an absent answer as none (#35415)', async () => {
+    const body = (value: unknown) =>
+      `{"name":"keeper-sangsu","config_revision":{"manifest":{"state":"missing"},"runtime_assignment":{"state":"runtime_config_missing"}},"max_context_override":null,"input_policy":"small","activation_mode":"manual","skills":{"names":null},"prompt":{"instructions":"be exact","system_prompt":${JSON.stringify(value)}}}`
+    const fetchWith = (value: unknown) => vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(body(value), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+    const available = { state: 'available', effective: 'full prompt', assembled: 'assembled prompt' }
+    const ledger = {
+      state: 'read',
+      rejected_lines: [
+        { line: 2, line_end: 'newline_terminated', detail: 'Yojson error' },
+        { line: 4, line_end: 'unterminated_final_line', detail: 'Unexpected end of input' },
+      ],
+    }
+
+    fetchWith({ ...available, constitution_ledger: ledger })
+    expect((await fetchKeeperConfig('keeper-sangsu')).prompt.system_prompt).toEqual({ ...available, constitution_ledger: ledger })
+
+    const unreadable = { state: 'unreadable', path: '/base/.masc/constitution/articles.jsonl', detail: 'EACCES' }
+    fetchWith({ ...available, constitution_ledger: unreadable })
+    expect((await fetchKeeperConfig('keeper-sangsu')).prompt.system_prompt).toEqual({ ...available, constitution_ledger: unreadable })
+
+    fetchWith(available)
+    expect((await fetchKeeperConfig('keeper-sangsu')).prompt.system_prompt).toEqual({
+      state: 'decode_failed',
+      detail: 'constitution_ledger is absent',
+    })
+
+    const torn = { line: 4, line_end: 'cut', detail: 'Unexpected end of input' }
+    fetchWith({ ...available, constitution_ledger: { state: 'read', rejected_lines: [torn] } })
+    expect((await fetchKeeperConfig('keeper-sangsu')).prompt.system_prompt).toEqual({
+      state: 'decode_failed',
+      detail: `constitution_ledger has an unreadable row ${JSON.stringify(torn)}`,
     })
   })
 

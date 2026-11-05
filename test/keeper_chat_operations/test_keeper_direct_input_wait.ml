@@ -80,7 +80,7 @@ let test_wait_survives_restart_and_time () = with_path @@ fun path ->
     check bool "only independent work claims" true (Operation.Operation_id.equal independent.operation_id other);
     Store.succeed_running store ~now:9. ~operation_id:other ~outcome_ref:"actual independent result" |> ok |> ignore);
   with_store path (fun store ->
-    check int "restart does not invent interruption of queued wait" 0 (List.length (Store.settle_running_after_restart store ~now:1e12 |> ok));
+    check int "restart does not invent interruption of queued wait" 0 (List.length (Store.settle_running_without_executor ~cause:Store.After_process_restart store ~now:1e12 |> ok));
     check_wait store;check_owner store;
     check bool "restart cannot redispatch unresolved input" true (Store.claim_next store ~now:1e12 |> ok=None);
     let references=Semantic.continuation_checkpoints (semantic store) in
@@ -246,7 +246,7 @@ let test_intent_survives_restart_without_resuming () = with_path @@ fun path ->
     check bool "diagnostic reconciliation preserves intent" true
       (Option.equal Semantic.equal_input_response_intent recorded.input_response_intent reconciled.input_response_intent));
   with_store path (fun store ->
-    ignore (Store.settle_running_after_restart store ~now:1e12 |> ok);
+    ignore (Store.settle_running_without_executor ~cause:Store.After_process_restart store ~now:1e12 |> ok);
     check_wait store;check_intent store;check_owner store;
     check bool "response kind and canonical answer survive journal reopen" true
       (match intent store with Some {response=Agent_core.Hooks.Answer answer;_} ->

@@ -809,7 +809,7 @@ let run_real_tool_bridge ~durable inspect =
   let tool=Core.Tool.create ~name:"joined_tool" ~description:"real joined Tool effect" ~parameters:[]
       (fun _->incr effects;Ok {Core.Types.content="settled";content_blocks=None;_meta=None}) in
   let response content stop_reason : Core.Types.api_response =
-    {id="join-response";model="test-model";content;stop_reason;usage=None;telemetry=None} in
+    {id="join-response";model="test-model";content;unreadable_tool_uses = []; stop_reason;usage=None;telemetry=None} in
   let responses=ref
     [response [Llm_provider.Types.ToolUse {id="same-provider-id";name="joined_tool";input=`Assoc []}] Core.Types.StopToolUse;
      response [Llm_provider.Types.Text "done"] Core.Types.EndTurn] in

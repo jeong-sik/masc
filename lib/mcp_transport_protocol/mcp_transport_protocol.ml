@@ -729,19 +729,6 @@ let request_meta_of_json = function
     | Some _ | None -> None)
   | _ -> None
 
-(* Absent and present-but-null are the same answer to "did the client declare
-   its capabilities?": neither is a declaration. *)
-let request_meta_has_key body_str key =
-  match Yojson.Safe.from_string body_str with
-  | json -> (
-    match request_meta_of_json json with
-    | None -> false
-    | Some meta -> (
-      match List.assoc_opt key meta with
-      | Some `Null | None -> false
-      | Some _ -> true))
-  | exception Yojson.Json_error _ -> false
-
 let request_meta_has_object body_str key =
   match Yojson.Safe.from_string body_str with
   | json ->

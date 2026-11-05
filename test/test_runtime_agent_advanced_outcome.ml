@@ -13,6 +13,7 @@ let response ?(id = "resp-advanced") () : Agent_core.Types.api_response =
   ; model = "model-advanced"
   ; content = []
   ; usage = None
+  ; unreadable_tool_uses = []
   ; stop_reason = Agent_core.Types.EndTurn
   ; telemetry = None
   }

@@ -273,16 +273,6 @@ val start_position_stated
   -> record
   -> (Ids.Turn_ref.t * int * string) option
 
-(** The turn of [record] when it states the position [end_atom],
-    [last_atom_digest] of [trace_id], as the end of its turn or as the history
-    its turn started from. Pure. *)
-val states_position
-  :  trace_id:string
-  -> end_atom:int
-  -> last_atom_digest:string
-  -> record
-  -> Ids.Turn_ref.t option
-
 (** Whether the log contains a successful restart witness for this trace
     with no later evidence of atoms, a store no-op, or an unreadable line. *)
 type history_stated =

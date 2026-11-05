@@ -15,6 +15,7 @@ module Reg = Masc.Keeper_registry
 
 let provider_runtime_surface_exn
       ?(detail = "provider runtime failed")
+      ?(runtime_id = Some "r")
       ~reason
       ~code
       ()
@@ -23,9 +24,7 @@ let provider_runtime_surface_exn
     Reg.Provider_runtime_error
       { code
       ; detail
-      ; provider_id = None
-      ; http_status = None
-      ; runtime_id = Some "r"
+      ; runtime_id
       ; agent_core_timeout = None
       ; fenced_empty_turn_runtime = None
       ; reason
@@ -74,7 +73,20 @@ let test_typed_provider_code_summary_is_the_record () =
   let detail = "The provider reported that the RPC request failed." in
   let surface = provider_runtime_surface_exn ~reason:None ~code ~detail () in
   check string "class" "provider_runtime_error" (KSB.runtime_blocker_class_to_string surface.KSB.blocker_class);
-  check string "the summary is the record's code and detail"
+  check string "the summary names the runtime that failed"
+    (Printf.sprintf "Provider runtime error from r (%s): %s" code detail)
+    (Lazy.force surface.KSB.summary)
+;;
+
+(* A record written without a runtime names none: the summary keeps the
+   bare code-and-detail sentence. *)
+let test_typed_provider_code_summary_without_runtime () =
+  let code = "provider_error_reported:rpc_error" in
+  let detail = "The provider reported that the RPC request failed." in
+  let surface =
+    provider_runtime_surface_exn ~runtime_id:None ~reason:None ~code ~detail ()
+  in
+  check string "the summary without a runtime is code and detail"
     (Printf.sprintf "Provider runtime error (%s): %s" code detail)
     (Lazy.force surface.KSB.summary)
 ;;
@@ -261,6 +273,8 @@ let () =
             test_reason_none_provider_error_falls_through
         ; test_case "a typed provider code is summarised as its own record" `Quick
             test_typed_provider_code_summary_is_the_record
+        ; test_case "a typed provider code without runtime omits from" `Quick
+            test_typed_provider_code_summary_without_runtime
         ; test_case "provider timeout catch-all stays provider runtime" `Quick
             test_provider_timeout_catch_all_stays_provider_runtime_error
         ; test_case

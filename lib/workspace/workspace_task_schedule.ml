@@ -40,23 +40,6 @@ let json_raw_string_path = Workspace_task_receipts.json_raw_string_path
 let json_string_path = Workspace_task_receipts.json_string_path
 let receipt_sort_key = Workspace_task_receipts.receipt_sort_key
 let latest_execution_receipt_json = Workspace_task_receipts.latest_execution_receipt_json
-let active_task_assignees_by_task_id backlog =
-  let table = Hashtbl.create (List.length backlog.tasks) in
-  List.iter
-    (fun (task : Masc_domain.task) ->
-       match task.task_status with
-       | Claimed { assignee; _ } | InProgress { assignee; _ } ->
-         Hashtbl.replace table task.id assignee
-       | Todo | AwaitingVerification _ | Done _ | Cancelled _ -> ())
-    backlog.tasks;
-  table
-;;
-
-let agent_current_task_matches_assignments active_task_assignees ~agent_name task_id =
-  match Hashtbl.find_opt active_task_assignees task_id with
-  | Some assignee -> String.equal assignee agent_name
-  | None -> false
-;;
 
 let reconcile_agent_current_task_with_prepared_backlog
       config

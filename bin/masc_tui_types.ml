@@ -5621,6 +5621,24 @@ let code_scope_path_equal (left_scope, left_path) (right_scope, right_path) =
   left_scope = right_scope && String.equal left_path right_path
 ;;
 
+(* What the Code diff overlay compares, and so the key of its fetched state. A
+   late answer for another target must not land as the current one, so the
+   target itself, not only the path, is what a reply has to match. *)
+type code_diff_target =
+  | Diff_worktree of { path : string; base_ref : string }
+      (** The working tree against [base_ref]. *)
+  | Diff_commit of { path : string; commit : string }
+      (** What one commit changed in [path], against its first parent. *)
+
+let code_diff_target_equal left right =
+  match left, right with
+  | Diff_worktree a, Diff_worktree b ->
+    String.equal a.path b.path && String.equal a.base_ref b.base_ref
+  | Diff_commit a, Diff_commit b ->
+    String.equal a.path b.path && String.equal a.commit b.commit
+  | Diff_worktree _, Diff_commit _ | Diff_commit _, Diff_worktree _ -> false
+;;
+
 (* One row of the file pane's history view. Git owns committed history;
    Keeper file changes are durable tool-call facts. They share only their
    timestamp and exact repository address, which is enough to sort a display
@@ -10940,7 +10958,7 @@ type state = {
      the working tree holds against HEAD, keyed the same way. One overlay at
      a time -- opening this closes the history and vice versa. *)
   (* The open file's uncommitted diff, keyed by its path. *)
-  mutable code_diff: (string, Tui_decode.git_diff) Masc_tui_fetched.t;
+  mutable code_diff: (code_diff_target, Tui_decode.git_diff) Masc_tui_fetched.t;
   mutable code_diff_open: bool;
   mutable code_diff_scroll: int;
   mutable code_diff_hscroll: int;
@@ -11272,6 +11290,37 @@ type state = {
   port: int;
   refresh_interval: float;
 }
+
+(* The target a refresh of the open diff asks for. A commit diff already on
+   screen for this file stays a commit diff; anything else is the working tree
+   against [base_ref], so a refresh never swaps one comparison for another.
+   Here, not in the request module, because the tests link only this one. *)
+let diff_target_for_refresh state ~base_ref ~path =
+  match Masc_tui_fetched.current_key state.code_diff with
+  | Some (Diff_commit { path = shown; _ } as target) when String.equal shown path ->
+    target
+  | Some (Diff_commit _ | Diff_worktree _) | None -> Diff_worktree { path; base_ref }
+;;
+
+(* The commit diff a [d] on the selected history entry opens: only a commit
+   row, and only while a file is open to name the path. A Keeper record, no
+   selection or no open file answer [None]. *)
+let history_commit_diff_target ~file_path entry =
+  match entry, file_path with
+  | Some (Hist_commit row), Some path ->
+    Some (Diff_commit { path; commit = row.Tui_decode.gl_hash })
+  | Some (Hist_commit _), None | Some (Hist_keeper_change _), _ | None, _ -> None
+;;
+
+(* Leaving a commit diff returns to the history it was opened from, at the
+   position it was left, the way the Task view does. Any other diff just
+   closes. *)
+let close_code_diff state =
+  state.code_diff_open <- false;
+  match Masc_tui_fetched.current_key state.code_diff with
+  | Some (Diff_commit _) -> state.code_history_open <- true
+  | Some (Diff_worktree _) | None -> ()
+;;
 
 let clear_goal_action_error state ~goal_id =
   state.goal_action_errors <- List.remove_assoc goal_id state.goal_action_errors

@@ -179,6 +179,33 @@ let test_find_substring_rejects_negative_pos () =
     "String_util.find_substring: negative position")
     (fun () -> ignore (SU.find_substring ~pos:(-1) "abc" "a"))
 
+let test_rfind_substring_basic () =
+  check_int_option "last of several" (Some 8)
+    (SU.rfind_substring "ab--ab--ab" "ab");
+  check_int_option "single match" (Some 2)
+    (SU.rfind_substring "xxabxx" "ab");
+  check_int_option "absent" None
+    (SU.rfind_substring "xxabxx" "ba");
+  check_int_option "overlapping candidates take the last" (Some 1)
+    (SU.rfind_substring "aaaa" "aaa");
+  check_int_option "UTF-8 bytes" (Some 6)
+    (SU.rfind_substring "가나가" "가")
+
+let test_rfind_substring_boundaries () =
+  check_int_option "whole string" (Some 0) (SU.rfind_substring "abc" "abc");
+  check_int_option "match at the last byte" (Some 2)
+    (SU.rfind_substring "abc" "c");
+  check_int_option "match at the first byte only" (Some 0)
+    (SU.rfind_substring "abc" "a");
+  check_int_option "needle longer than haystack" None
+    (SU.rfind_substring "abc" "abcd");
+  check_int_option "empty haystack" None (SU.rfind_substring "" "a")
+
+let test_rfind_substring_empty_needle () =
+  check_int_option "empty needle returns the end" (Some 3)
+    (SU.rfind_substring "abc" "");
+  check_int_option "empty in empty" (Some 0) (SU.rfind_substring "" "")
+
 (* ---- substring containment ---- *)
 
 let test_contains_substring_basic () =
@@ -520,6 +547,115 @@ let test_utf8_complete_prefix_every_cut_is_valid () =
         (String.length head - String.length kept)
   done
 
+(* ---- Url_userinfo.redact ---- *)
+
+let check_redact label expected input =
+  Alcotest.(check string) label expected (Url_userinfo.redact input)
+
+let test_redact_leaves_values_without_userinfo () =
+  check_redact "empty" "" "";
+  check_redact "bare host" "search.example:8888" "search.example:8888";
+  check_redact "url without userinfo"
+    "https://search.example:8443/path?q=a@b"
+    "https://search.example:8443/path?q=a@b";
+  check_redact "scheme only" "http://" "http://";
+  check_redact "ipv6 literal host" "http://[::1]:8080/x" "http://[::1]:8080/x"
+
+let test_redact_replaces_userinfo_of_each_shape () =
+  check_redact "user and password"
+    "https://[REDACTED]@search.example"
+    "https://user:SECRETPASS6@search.example";
+  check_redact "user only"
+    "http://[REDACTED]@search.example:8888/search"
+    "http://user@search.example:8888/search";
+  check_redact "bare authority"
+    "[REDACTED]@search.example:8888"
+    "user:SECRETPASS6@search.example:8888";
+  check_redact "protocol-relative"
+    "//[REDACTED]@search.example:8888/search"
+    "//user:SECRETPASS6@search.example:8888/search";
+  check_redact "ipv6 literal host"
+    "http://[REDACTED]@[::1]:8080"
+    "http://u:p@[::1]:8080"
+
+let test_redact_takes_the_last_at_of_the_authority () =
+  check_redact "raw @ in the password is redacted whole"
+    "http://[REDACTED]@proxy.example:8080"
+    "http://user:p@ss@proxy.example:8080";
+  check_redact "second @ before the path"
+    "http://[REDACTED]@host/x"
+    "http://a@b@host/x"
+
+let test_redact_stops_the_authority_at_slash_question_and_hash () =
+  check_redact "@ in the query is not userinfo"
+    "http://host?next=a@b" "http://host?next=a@b";
+  check_redact "@ in the fragment is not userinfo"
+    "http://host#a@b" "http://host#a@b";
+  check_redact "userinfo before a query that holds @"
+    "http://[REDACTED]@host?next=a@b" "http://user@host?next=a@b";
+  check_redact "userinfo before a fragment that holds @"
+    "http://[REDACTED]@host#a@b" "http://user@host#a@b"
+
+let test_redact_ignores_scheme_separator_after_the_authority () =
+  check_redact "bare authority with :// in the query"
+    "[REDACTED]@search.example/?next=http://other"
+    "user:SECRETPASS6@search.example/?next=http://other";
+  check_redact "bare host with :// and @ in the query is unchanged"
+    "search.example/?next=http://a@b"
+    "search.example/?next=http://a@b";
+  check_redact "bare authority with :// in the path"
+    "[REDACTED]@host/redirect/http://x@y"
+    "user:pw@host/redirect/http://x@y"
+
+(* ---- Url_userinfo.redact_text ---- *)
+
+let check_redact_text label expected input =
+  Alcotest.(check string) label expected (Url_userinfo.redact_text input)
+
+let test_redact_text_replaces_userinfo_of_every_url () =
+  check_redact_text "one url among words"
+    "curl https://[REDACTED]@api.example.com/v1 --fail"
+    "curl https://user:pw@api.example.com/v1 --fail";
+  check_redact_text "two urls"
+    "a http://[REDACTED]@h1/x b ftp://[REDACTED]@h2"
+    "a http://u1@h1/x b ftp://u2:p2@h2";
+  check_redact_text "a scheme other than http"
+    "postgres://[REDACTED]@h:5432/db" "postgres://u:p@h:5432/db"
+
+let test_redact_text_takes_the_last_at_of_the_authority () =
+  check_redact_text "raw @ in the password is redacted whole"
+    "https://[REDACTED]@host/x" "https://user:pa@ss@host/x"
+
+let test_redact_text_stops_the_authority_at_boundaries () =
+  check_redact_text "query" "https://host?x=a@b" "https://host?x=a@b";
+  check_redact_text "fragment" "https://host#a@b" "https://host#a@b";
+  check_redact_text "space" "see https://host and me@x.com"
+    "see https://host and me@x.com";
+  check_redact_text "tab" "https://host\tme@x.com" "https://host\tme@x.com";
+  check_redact_text "newline after userinfo" "https://[REDACTED]@h\nnext@line"
+    "https://tok@h\nnext@line"
+
+let test_redact_text_leaves_text_without_url_userinfo () =
+  check_redact_text "empty" "" "";
+  check_redact_text "no scheme separator" "user:pw@host" "user:pw@host";
+  check_redact_text "trailing separator" "abc://" "abc://";
+  check_redact_text "empty authority" "https:///x@y" "https:///x@y"
+
+let test_redact_text_resumes_after_a_separator_inside_an_authority () =
+  check_redact_text "malformed authority holding a second ://"
+    "://://[REDACTED]@aa" "://://b@aa"
+
+let test_redact_text_is_idempotent () =
+  List.iter
+    (fun input ->
+      let once = Url_userinfo.redact_text input in
+      Alcotest.(check string) input once (Url_userinfo.redact_text once))
+    [ "curl https://user:pw@api.example.com/v1";
+      "https://user:pa@ss@host/x";
+      "a http://u1@h1/x b ftp://u2:p2@h2";
+      "://://b@aa";
+      "" ]
+
 let () =
   run "string_util"
     [ ( "utf8_char_boundary",
@@ -548,6 +684,10 @@ let () =
           test_case "empty needle" `Quick test_find_substring_empty_needle;
           test_case "negative pos rejected" `Quick
             test_find_substring_rejects_negative_pos ] );
+      ( "rfind_substring",
+        [ test_case "basic" `Quick test_rfind_substring_basic;
+          test_case "boundaries" `Quick test_rfind_substring_boundaries;
+          test_case "empty needle" `Quick test_rfind_substring_empty_needle ] );
       ( "contains_substring",
         [ test_case "basic" `Quick test_contains_substring_basic;
           test_case "empty needle" `Quick
@@ -609,4 +749,28 @@ let () =
           test_case "utf8_complete_prefix keeps bytes that are not UTF-8"
             `Quick test_utf8_complete_prefix_keeps_bytes_that_are_not_utf8;
           test_case "utf8_complete_prefix leaves every cut valid" `Quick
-            test_utf8_complete_prefix_every_cut_is_valid ] ) ]
+            test_utf8_complete_prefix_every_cut_is_valid ] );
+      ( "url_userinfo",
+        [ test_case "values without userinfo are unchanged" `Quick
+            test_redact_leaves_values_without_userinfo;
+          test_case "userinfo of every URL shape is replaced" `Quick
+            test_redact_replaces_userinfo_of_each_shape;
+          test_case "the last @ of the authority separates userinfo" `Quick
+            test_redact_takes_the_last_at_of_the_authority;
+          test_case "the authority ends at / ? and #" `Quick
+            test_redact_stops_the_authority_at_slash_question_and_hash;
+          test_case "a :// after the authority is not the scheme separator"
+            `Quick test_redact_ignores_scheme_separator_after_the_authority ] );
+      ( "url_userinfo_text",
+        [ test_case "userinfo of every URL in the text is replaced" `Quick
+            test_redact_text_replaces_userinfo_of_every_url;
+          test_case "the last @ of the authority separates userinfo" `Quick
+            test_redact_text_takes_the_last_at_of_the_authority;
+          test_case "the authority ends at / ? # and whitespace" `Quick
+            test_redact_text_stops_the_authority_at_boundaries;
+          test_case "text without URL userinfo is unchanged" `Quick
+            test_redact_text_leaves_text_without_url_userinfo;
+          test_case "scanning resumes inside a malformed authority" `Quick
+            test_redact_text_resumes_after_a_separator_inside_an_authority;
+          test_case "redacting twice changes nothing more" `Quick
+            test_redact_text_is_idempotent ] ) ]

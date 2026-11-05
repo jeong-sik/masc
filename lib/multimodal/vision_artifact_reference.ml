@@ -26,18 +26,9 @@ exception Error_exn of error
 
 let unix_reason fn arg code = Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)
 
-let contains_substring ~needle haystack =
-  let nlen = String.length needle in
-  let hlen = String.length haystack in
-  if nlen = 0 || nlen > hlen then false
-  else begin
-    let rec loop i =
-      if i > hlen - nlen then false
-      else if String.equal (String.sub haystack i nlen) needle then true
-      else loop (i + 1)
-    in
-    loop 0
-  end
+(* An empty handle names nothing, so no file mentions it. *)
+let mentions ~handle content =
+  (not (String.equal handle "")) && String_util.contains_substring content handle
 ;;
 
 let read_whole_file path =
@@ -65,7 +56,7 @@ let rec walk_tree ~handle path =
     (match stat.Unix.st_kind with
      | Unix.S_REG ->
        (match read_whole_file path with
-        | content -> if contains_substring ~needle:handle content then raise Found
+        | content -> if mentions ~handle content then raise Found
         | exception Sys_error reason -> raise (Error_exn (Durable_source_read_failed { path; reason })))
      | Unix.S_DIR ->
        (match Sys.readdir path with

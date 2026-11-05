@@ -66,12 +66,6 @@ type change =
 val change_key : change -> key
 (** The key a change sets or removes. *)
 
-val display_searxng_url : string -> string
-(** [display_searxng_url url] returns [url] with any authority userinfo
-    ([user:password@] or [user@]) replaced by [[REDACTED]@], so printing a
-    hand-edited [runtime.toml] or a refusal message never echoes embedded
-    credentials (#43143). *)
-
 type settings =
   { searxng_url : string option
   ; provider : string option

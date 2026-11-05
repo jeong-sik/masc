@@ -24,17 +24,6 @@ let env_opt name =
       if String.equal value "" then None else Some value
 ;;
 
-let get_int_logged name ~default =
-  match env_opt name with
-  | None -> default
-  | Some raw ->
-      (match int_of_string_opt raw with
-       | Some value -> value
-       | None ->
-           Log.Keeper.warn "invalid %s=%S; using default %d" name raw default;
-           default)
-;;
-
 let get_bool_logged ?(invalid = Default) name ~default =
   match env_opt name with
   | None -> default

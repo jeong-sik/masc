@@ -295,9 +295,6 @@ let save_binding t ~instance_id json = write t (binding_path instance_id) (Yojso
 type binding_write_error =
   | Binding_rejected of string
   | Binding_publication_failed of Fs_compat.atomic_replace_failure
-let binding_write_error_to_string = function
-  | Binding_rejected detail -> detail
-  | Binding_publication_failed failure -> Fs_compat.atomic_replace_failure_to_string failure
 let save_binding_staged_with ~replace_file t ~instance_id json =
   let* path = protect (fun () ->
     let path = Filename.concat t.root (binding_path instance_id) in
@@ -933,14 +930,6 @@ let fold_tool_request_owner_inventory_all t ~init ~f =
 
 let fold_startup_tool_request_owners t ~init ~f =
   fold_tool_request_owner_inventory_all_with ~check_staged:true ~serialize_scopes:false t ~init ~f
-
-let tool_request_owner_inventory_all t =
-  let* rows =
-    fold_tool_request_owner_inventory_all t ~init:[]
-      ~f:(fun rows ~directory_name ~file_name json ->
-        Ok ((directory_name,file_name,json)::rows))
-  in
-  Ok (List.rev rows)
 
 (* These inventories are used only while the caller excludes all original
    request writers. The complete read finishes before any cleanup effect. *)

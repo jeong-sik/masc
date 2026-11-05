@@ -9691,7 +9691,7 @@ let test_native_filesystem_approval_preserves_producer_boundary () =
       let invoke name input =
         (match Masc.Keeper_tool_approval_policy.verdict_for ~identity_tool_index:Masc.Keeper_identity_tool_index.empty ~composition_plan_index:None
            ~tool_name:name ~input with
-         | Masc.Keeper_tool_approval_policy.Run _ -> ()
+         | Masc.Keeper_tool_approval_policy.Run -> ()
          | Masc.Keeper_tool_approval_policy.Ask _ -> fail "duplicate native approval intercepted filesystem call");
         KET.execute_keeper_tool_call_with_outcome ~config ~meta ~publication_recovery
           ~ctx_work ~name ~input () in

@@ -264,11 +264,9 @@ let test_evidence_uri_reaches_the_ledger () =
       (match held ~base_path with
        | [ article ] -> (
          match article.Types.evidence with
-         | [ { Types.uri; sha256 } ] ->
+         | [ { Types.uri } ] ->
            Alcotest.(check string) "the coordinate survives a round trip"
-             "c-0123456789abcdef0123456789abcdef" uri;
-           Alcotest.(check bool) "no digest for a ledger row" true
-             (Option.is_none sha256)
+             "c-0123456789abcdef0123456789abcdef" uri
          | others ->
            Alcotest.failf "expected one evidence row, got %d"
              (List.length others))

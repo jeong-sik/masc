@@ -36,6 +36,12 @@ class SchedulesHandler(owed.ChatHandler):
                 fail = server.failures_left > 0
                 if fail:
                     server.failures_left -= 1
+            # The TUI reads every 2xx through the workspace-bound reader, which
+            # requires the admission receipt on the response itself. Without it
+            # a 200 is a failed read ("Server did not attest the requested
+            # workspace read"), so the third read of this test could never be
+            # the success it asserts on. 503 stays receipt-free: the reader
+            # passes non-2xx through and decodes the refusal instead.
             if fail:
                 sent = self.respond(503, {"error": "schedule list unavailable"})
             else:
@@ -51,6 +57,7 @@ class SchedulesHandler(owed.ChatHandler):
                         "requests": [],
                         "schedule_runner": {"status": "ok"},
                     },
+                    workspace_receipt=True,
                 )
             if sent:
                 server.responded(phase, request.path)

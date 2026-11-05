@@ -72,6 +72,11 @@ val masc_http_loopback_peer : string
     reachable peer -- so a client that reads the server's bind setting as its
     destination can end up dialing an address that is not one. *)
 
+val masc_http_loopback_origin : port:int -> string
+(** [http://<masc_http_loopback_peer>:<port>]: the origin a client on this
+    machine dials to reach the MASC HTTP server listening on [port]. A request
+    URL is this origin followed by a path. *)
+
 val masc_http_default_max_connections : int
 (** Default concurrent-connection ceiling for the MASC HTTP server.
 

@@ -3367,11 +3367,11 @@ let declared_loading descriptor =
   | Tool_masc_local_runtime_dispatch
   | Tool_analyze_image
   | Tool_read_image
-    -> Tool_loading_declarations.loading_of_tool descriptor.internal_name
+    -> Tool_loading_declarations.required descriptor.internal_name
 ;;
 
-(* A name no descriptor offers (a Skill composition tool) is declared under
-   that name itself. *)
+(* A name no descriptor offers (a Skill composition, an attached tool) is
+   looked up as its own tool file; with none it rides in every request. *)
 let declared_loading_of_model_name name =
   match
     List.find_opt
@@ -3379,7 +3379,10 @@ let declared_loading_of_model_name name =
       (all_descriptors ())
   with
   | Some descriptor -> declared_loading descriptor
-  | None -> Tool_loading_declarations.loading_of_tool name
+  | None ->
+    (match Tool_loading_declarations.declared name with
+     | Some loading -> loading
+     | None -> Tool_definition_toml.Always_loaded)
 ;;
 
 let registered_names descriptor =

@@ -112,7 +112,7 @@ type mcp_server =
   ; tool_names : string list
   }
 
-type image_input =
+type image_input = Runtime_official_client_tool.image_input =
   { media_type : string
   ; base64_data : string
   }

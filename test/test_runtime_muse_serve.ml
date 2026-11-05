@@ -645,6 +645,28 @@ let test_valid_image_inputs_use_shared_official_media_contract () =
     Runtime_official_client_tool.official_client_image_media_types
 ;;
 
+(* The host reads one JSON line per request, so a string that is not UTF-8 is
+   refused before the shared media type and Base64 rules look at the image. *)
+let test_refused_images_name_the_image_and_the_reason () =
+  let refusal images =
+    match Serve.validate_turn (config ()) ~workspace_root:"/w" ~prompt:"Inspect image" ~images with
+    | Ok () -> fail "the images were accepted"
+    | Error (Serve.Invalid_config detail) -> detail
+    | Error other -> fail (Serve.error_to_string other)
+  in
+  let image media_type base64_data : Serve.image_input = { media_type; base64_data } in
+  check string "a media type outside the set"
+    ("images[1].media_type \"image/tiff\" is not one of "
+     ^ String.concat ", " Runtime_official_client_tool.official_client_image_media_types)
+    (refusal [ image "image/png" "aGVsbG8="; image "image/tiff" "aGVsbG8=" ]);
+  check string "data that is not Base64"
+    "images[0].base64_data must contain valid Base64 data"
+    (refusal [ image "image/png" "not base64!" ]);
+  check string "a media type that is not UTF-8"
+    "images[0].media_type is not valid UTF-8"
+    (refusal [ image "image/png\xff" "aGVsbG8=" ])
+;;
+
 let test_session_identity_is_verified_before_admission () =
   let frame ~model ~workspace =
     Yojson.Safe.to_string (`Assoc ["jsonrpc", `String "2.0"; "id", `Int 2;
@@ -1838,6 +1860,7 @@ let () =
         ; test_case "selected account home isolates child roots and posture" `Quick
             test_selected_homes_do_not_inherit_other_account_roots
         ; test_case "valid images use shared official media contract" `Quick test_valid_image_inputs_use_shared_official_media_contract
+        ; test_case "refused images name the image and the reason" `Quick test_refused_images_name_the_image_and_the_reason
         ; test_case "session identity is verified before admission" `Quick test_session_identity_is_verified_before_admission
         ; test_case "resumed session model is selected before admission" `Quick
             test_resumed_session_model_is_selected_before_admission

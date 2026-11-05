@@ -128,6 +128,9 @@ type image_input =
   ; base64_data : string
   }
 
+val validate_image_input : where:string -> image_input -> (unit, string) result
+(** Check one image. [where] names it in the error, such as [images[0]]. *)
+
 val validate_image_inputs : image_input list -> (unit, string) result
 (** Check a turn's images before the client starts. The error names the first
     bad image, as [images[N].media_type ...] or [images[N].base64_data ...]. *)

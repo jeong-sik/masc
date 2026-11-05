@@ -455,8 +455,8 @@ let parse_openai_response_result_json_raw
       |> Stop_reason_wire.with_refusal ~has_refusal
     in
     (* A call the length limit cut off is unfinished, not unreadable: telling
-       the model its arguments were not one JSON object would be false. The
-       stream drops cut-off tool blocks the same way. *)
+       the model its arguments were not one JSON object would be false, so it
+       is dropped. The stop reason still says the response was cut. *)
     let unreadable_tool_uses =
       if stop_reason = MaxTokens then [] else unreadable_tool_uses
     in

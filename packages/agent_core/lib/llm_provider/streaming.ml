@@ -275,7 +275,15 @@ let emit_synthetic_events (response : api_response) on_event =
     (MessageStart { id = response.id; model = response.model; usage = response.usage });
   let next_index = ref 0 in
   let next_tool_ordinal = ref 0 in
-  let pending_unreadable = ref response.unreadable_tool_uses in
+  (* Emission walks the calls in ordinal order; the response does not promise
+     its list is in that order. *)
+  let pending_unreadable =
+    ref
+      (List.stable_sort
+         (fun (a : unreadable_tool_use) (b : unreadable_tool_use) ->
+            Int.compare a.tool_use_ordinal b.tool_use_ordinal)
+         response.unreadable_tool_uses)
+  in
   let take_index () =
     let index = !next_index in
     incr next_index;

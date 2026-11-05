@@ -192,12 +192,14 @@ let latency_ms_int counter = Option.map round_latency_ms (latency_ms_float count
 
 (** Preserve authoritative policy/truncation outcomes at completion consumption
     boundaries even when they carry no content. Other empty turns fail closed
-    with their typed stop reason for the existing retry/overflow classifier. *)
+    with their typed stop reason for the existing retry/overflow classifier.
+    A response whose only tool calls could not be read is not empty: the model
+    made those calls, and the pipeline answers them. *)
 let ensure_nonempty_completion
       (result : (Types.api_response, Http_client.http_error) result)
   =
   match result with
-  | Ok ({ content = []; stop_reason; _ } : Types.api_response) ->
+  | Ok ({ content = []; unreadable_tool_uses = []; stop_reason; _ } : Types.api_response) ->
     (match stop_reason with
      | Refusal | MaxTokens | ContentFilter | RepetitionTruncation -> result
      | EndTurn | StopToolUse | StopSequence | ContextWindowExceeded

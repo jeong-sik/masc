@@ -1971,7 +1971,7 @@ let test_parse_tool_calls_rejects_malformed_and_does_not_drop () =
   | Ok _ -> Alcotest.fail "expected malformed tool_calls to fail closed"
 ;;
 
-let test_parse_tool_calls_rejects_malformed_arguments () =
+let test_parse_tool_calls_keeps_malformed_arguments_unreadable () =
   let json =
     response_json
       ~content:`Null
@@ -2060,6 +2060,41 @@ let test_unreadable_call_keeps_its_place_through_the_synthetic_stream () =
      | _ -> Alcotest.fail "expected c1 at tool ordinal 1")
 ;;
 
+(* The response type does not order [unreadable_tool_uses]; the synthetic
+   stream still has to put each call at its ordinal, or the keeper seal binds
+   a readable call to another call's block. *)
+let test_synthetic_stream_places_unreadable_calls_by_ordinal_not_list_order () =
+  let unreadable id ordinal : unreadable_tool_use =
+    { tool_use_id = id
+    ; tool_name = "lookup"
+    ; tool_use_ordinal = ordinal
+    ; arguments = "[]"
+    ; arguments_problem = Tool_call_input.Not_object
+    ; arguments_assembly = None
+    }
+  in
+  let readable id = ToolUse { id; name = "lookup"; input = `Assoc [] } in
+  let response : api_response =
+    { id = "resp-unsorted"
+    ; model = "mock"
+    ; stop_reason = StopToolUse
+    ; content = [ readable "c0"; readable "c3" ]
+    ; unreadable_tool_uses = [ unreadable "c2" 2; unreadable "c1" 1 ]
+    ; usage = None
+    ; telemetry = None
+    }
+  in
+  let streamed = ref [] in
+  Streaming.emit_synthetic_events response (function
+    | ContentBlockStart { content_type = "tool_use"; tool_id = Some id; _ } ->
+      streamed := id :: !streamed
+    | _ -> ());
+  Alcotest.(check (list string))
+    "tool blocks in ordinal order"
+    [ "c0"; "c1"; "c2"; "c3" ]
+    (List.rev !streamed)
+;;
+
 (* A call the length limit cut off is unfinished, not unreadable. *)
 let test_length_cut_call_is_not_unreadable () =
   let response =
@@ -2084,7 +2119,7 @@ let test_length_cut_call_is_not_unreadable () =
   check_string "length stop" "max_tokens" (stop_reason_to_string response.stop_reason)
 ;;
 
-let test_parse_tool_calls_rejects_non_object_arguments () =
+let test_parse_tool_calls_keeps_non_object_arguments_unreadable () =
   List.iter
     (fun (label, arguments) ->
        let json =
@@ -3813,17 +3848,21 @@ let () =
             `Quick
             test_parse_tool_calls_rejects_malformed_and_does_not_drop
         ; Alcotest.test_case
-            "tool calls reject malformed arguments"
+            "tool calls keep malformed arguments unreadable"
             `Quick
-            test_parse_tool_calls_rejects_malformed_arguments
+            test_parse_tool_calls_keeps_malformed_arguments_unreadable
         ; Alcotest.test_case
-            "tool calls reject non-object arguments"
+            "tool calls keep non-object arguments unreadable"
             `Quick
-            test_parse_tool_calls_rejects_non_object_arguments
+            test_parse_tool_calls_keeps_non_object_arguments_unreadable
         ; Alcotest.test_case
             "unreadable call keeps its place through the synthetic stream"
             `Quick
             test_unreadable_call_keeps_its_place_through_the_synthetic_stream
+        ; Alcotest.test_case
+            "synthetic stream places unreadable calls by ordinal"
+            `Quick
+            test_synthetic_stream_places_unreadable_calls_by_ordinal_not_list_order
         ; Alcotest.test_case
             "a length-cut call is not unreadable"
             `Quick

@@ -4,8 +4,6 @@
 type error =
   | Profile_unavailable of Keeper_types_profile.keeper_toml_load_error
   | Metadata_unavailable of Keeper_meta_store.current_meta_rejection
-  | Metadata_missing
-  | Metadata_owner_mismatch
   | Profile_rejected of string
   | Keeper_paused
   | Snapshot_lookup_failed of Config_dir_resolver.canonical_base_path_error

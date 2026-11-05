@@ -1,5 +1,4 @@
 type error =
-  | Tool_surface_unavailable of string
   | Skill_config_rejected of { diagnostics : Skill_source_config.diagnostic list }
   | Skill_config_unreadable of { detail : string }
   | Skill_source_unreadable of
@@ -442,7 +441,6 @@ let unprojectable_to_yojson (row : unprojectable) =
 ;;
 
 let error_code = function
-  | Tool_surface_unavailable _ -> "lane_addon_surface_unavailable"
   | Skill_config_rejected _ -> "task_skill_config_rejected"
   | Skill_config_unreadable _ -> "task_skill_config_unreadable"
   | Skill_source_unreadable _ -> "task_skill_source_unreadable"
@@ -477,7 +475,6 @@ let source_observation_to_string = function
 ;;
 
 let error_to_string = function
-  | Tool_surface_unavailable detail -> "Lane Add-on tool surface unavailable: " ^ detail
   | Skill_config_rejected { diagnostics } ->
     "Skill configuration is rejected, so Task Skills cannot be resolved: "
     ^ String.concat "; " (List.map Skill_source_config.diagnostic_to_string diagnostics)

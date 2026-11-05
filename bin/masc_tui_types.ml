@@ -20965,7 +20965,7 @@ let code_worktrees_view (state : state) =
         ~key:(origin.cfo_scope, origin.cfo_dir)
   | Palette_worktrees _ | Palette_branches _ | Palette_files _ | Palette_locations _
   | Palette_jump
-  | Palette_choice _ | Palette_search _ -> None
+  | Palette_choice _ | Palette_search _ -> Masc_tui_fetched.Absent
 
 (* Opens the worktree palette over the Code pane, in the directory and over the
    file it is looking at. *)

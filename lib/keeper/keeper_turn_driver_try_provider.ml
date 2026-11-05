@@ -2333,6 +2333,13 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                with nothing sent and the same rotation; left to the attempt
                watchdog it was "made no progress" with the queue invisible. *)
             admission_timeout_s = Some ctx.provider_call_deadline_sec
+          ; (* The same wait on a non-streaming completion is bounded by
+               [call_timeout_s], not [admission_timeout_s] (the streaming
+               path never reads it, so this changes nothing there). Without
+               it a queued [Complete.complete] had no whole-call window, so
+               the 30s no-progress watchdog ended it as [wall_clock] before
+               the keeper's deadline could end it as [Queue]. *)
+            call_timeout_s = Some ctx.provider_call_deadline_sec
           ; permit_wait = Some permit_wait
           ; temperature
           ; hooks = hooks_with_gate

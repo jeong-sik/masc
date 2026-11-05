@@ -328,7 +328,10 @@ let ssh_target ~endpoint ~base_path ~meta ~timeout_sec ?ssh_bin ?on_receipt () =
                message)
         | Ok () ->
           let runner = Keeper_sandbox_remote.runner ?on_receipt ~timeout_sec ssh in
-          let sandbox_endpoint = Keeper_sandbox_ssh.sandbox_endpoint ~base_path endpoint in
+          let sandbox_endpoint =
+            Keeper_sandbox_ssh.sandbox_endpoint ~base_path
+              ~workspace_root:(Keeper_sandbox_remote.workspace_root ssh) endpoint
+          in
           Ok
             { target =
                 Masc_exec.Sandbox_target.ssh ~endpoint:sandbox_endpoint ~runner ()

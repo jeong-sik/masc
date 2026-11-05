@@ -41,9 +41,14 @@ val create :
     and known-hosts paths resolve against [base_path]. *)
 
 val sandbox_endpoint :
-  base_path:string -> Exec_ssh_endpoint.t -> Masc_exec.Sandbox_target.ssh_endpoint
+  base_path:string ->
+  workspace_root:string ->
+  Exec_ssh_endpoint.t ->
+  Masc_exec.Sandbox_target.ssh_endpoint
 (** The endpoint as the Shell IR target carries it, with the key paths
-    resolved the same way {!create} resolves them. *)
+    resolved the same way {!create} resolves them. [workspace_root] is the
+    Keeper's root on the endpoint, {!Keeper_sandbox_remote.workspace_root}
+    of the runtime built for it. *)
 
 module For_testing : sig
   val set_ssh_bin_override : string option -> unit

@@ -44,15 +44,16 @@ let requires_existing_dir_of_sandbox = function
   | Micro_vm _ | Ssh _ | Delegated _ -> false
 ;;
 
-(* Only an ssh endpoint declares extra roots its commands may name
-   ([exec.ssh.endpoints.<name>] allowed_paths); every other target keeps the
-   default workdir + /tmp boundary. *)
+(* An ssh command runs on the endpoint, in the Keeper's own root there, and
+   Execute reports its cwd under that root; the endpoint may also declare
+   extra roots ([exec.ssh.endpoints.<name>] allowed_paths). Every other
+   target keeps the default workdir + /tmp boundary. *)
 let extra_roots_of_sandbox = function
   | Masc_exec.Sandbox_target.Host
   | Docker _
   | Micro_vm _
   | Delegated _ -> []
-  | Ssh { endpoint; _ } -> endpoint.allowed_paths
+  | Ssh { endpoint; _ } -> endpoint.workspace_root :: endpoint.allowed_paths
 ;;
 
 let validate_paths ?requires_existing_dir ?sandbox ~workdir ir =

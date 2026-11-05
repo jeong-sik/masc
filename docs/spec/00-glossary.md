@@ -3680,6 +3680,8 @@ status: reference
   추가 루트 경로 목록(`allowed_paths`).
   - **격리 기본값**: 기본 실행 정책(`Exec_policy_paths.validate_path`)은 Keeper 작업
     디렉터리(`workdir`)와 `/tmp` 외의 경로 접근을 정적 스크립트 검사에서 엄격히 거절한다.
+    SSH 타깃은 명령이 엔드포인트의 Keeper 루트(`Sandbox_target.ssh_endpoint.workspace_root`,
+    예: `/masc-work/<keeper>`)에서 돌기 때문에, 그 아래 절대 경로도 받는다.
   - **추가 루트 선언**: Terminal-Bench 등 외부 벤치마크/엔드포인트 환경(예: `/app`)을
     지원하기 위해 `runtime.toml`의 `[exec.ssh.endpoints.<name>] allowed_paths = ["/app", ...]`로
     추가 허용 루트를 선언할 수 있다(#38603).

@@ -1094,6 +1094,121 @@ let test_retired_observer_close_keeps_successor env =
         Alcotest.(check bool) "successor was removed" false (Conn.is_active_sse_session session_id))))
 ;;
 
+let test_play_observer_reconnect_keeps_replacement_presence env =
+  let module Transport = Server_mcp_transport_http in
+  let workspace = Masc_test_deps.setup_test_workspace () in
+  let session_id = "play-observer-" ^ string_of_int (Random.bits ()) in
+  let subscription = "play-observer-events-" ^ string_of_int (Random.bits ()) in
+  let changes = ref 0 in
+  Masc.Sse.subscribe_external
+    ~runtime_authority:(Masc.Sse.runtime_authority_exn ~base_path:workspace)
+    ~id:subscription
+    ~callback:(fun (event : Masc.Sse.external_event) ->
+      match event.ext_payload with
+      | `Assoc fields ->
+        (match Masc.Workspace_dataset_event.of_fields fields with
+         | Ok (Masc.Workspace_dataset_event.Play_room _) -> incr changes
+         | Ok _ | Error _ -> ())
+      | _ -> ())
+    ();
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Sse.unsubscribe_external subscription;
+      Eio.Cancel.protect (fun () -> Transport.stop_sse_session session_id);
+      Masc_test_deps.cleanup_test_workspace workspace)
+    (fun () -> Eio.Switch.run (fun sw ->
+      let authority = match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
+        | Ok authority -> authority | Error `Malformed -> Alcotest.fail "fixture authority" in
+      let admit ~base_path:_ _request = Ok () in
+      let runtime : Transport.runtime =
+        { base_path = workspace
+        ; sw
+        ; clock = Eio.Stdenv.clock env
+        ; tool_allowed_in_profile = (fun _ _ -> true)
+        ; handle_request =
+            (fun ?profile:_ ?mcp_session_id:_ ?otel_mcp_protocol_version:_
+                 ?otel_transport_context:_ ?auth_token:_ ?internal_keeper_runtime:_ _ -> `Null)
+        ; clear_resource_subscriptions_for_session = (fun _ -> ())
+        } in
+      let state = Masc.Mcp_server.For_testing.create_state ~base_path:workspace in
+      let scope = Masc.Mcp_server.workspace_scope state in
+      let previous_authority = Masc.Sse.runtime_authority_exn ~base_path:scope.config.base_path in
+      let instance_id = Masc.Build_identity.runtime_instance_id ^ "."
+        ^ Masc.Mcp_server.Workspace_scope_epoch.to_string scope.epoch in
+      ignore (Masc.Sse.observer_scope ~runtime_authority:previous_authority ~instance_id);
+      let deps : Transport.deps =
+        { get_origin = (fun _ -> "")
+        ; cors_headers = (fun _ -> [])
+        ; auth_token_from_request = (fun _ -> None)
+        ; is_ready = (fun () -> true)
+        ; get_runtime_result = (fun () -> Ok runtime)
+        ; get_base_path = (fun () -> workspace)
+        ; get_server_state = (fun () -> Some state)
+        ; verify_mcp_auth = admit
+        ; verify_mcp_observer_stream_auth = admit
+        ; verify_operator_mcp_auth = admit
+        ; verify_seat_mcp_auth = admit
+        } in
+      let handler reqd =
+        let request = Httpun.Reqd.request reqd in
+        Server_request_authority.with_current authority (fun () ->
+          Transport.handle_get_mcp ~deps ~sse_kind:Masc.Sse.Observer request reqd) in
+      let auth = Masc_test_deps.make_sse_auth workspace "play-observer" in
+      let token = Option.get auth.Masc.Sse.token in
+      ignore (Masc.Session.McpSessionStore.get_or_create ~id:session_id ());
+      let member_names () =
+        match Masc.Play_room.read ~base_path:workspace ~now:(Time_compat.now ()) ~before:None with
+        | Ok snapshot -> List.map (fun (member : Masc.Play_room.member) -> member.name) snapshot.members
+        | Error error -> Alcotest.fail (Masc.Play_room.error_message error)
+      in
+      let control_steps = ref 0 in
+      Server_machine_spectator.For_testing.with_step
+        (fun ~config:_ ~machine:_ -> incr control_steps; Ok ()) (fun () ->
+        with_server env ~handler (fun ~port ->
+          let open_observer () =
+            let response, publish_response = Eio.Promise.create () in
+            let ended, publish_ended = Eio.Promise.create () in
+            let url =
+              Uri.add_query_params'
+                (Uri.of_string (Printf.sprintf "http://127.0.0.1:%d/mcp" port))
+                [ "sse_kind", "observer"; "play_machine", "msx"; "play_client_id", "tab-1"
+                ; "expected_base_path", Unix.realpath workspace
+                ; "expected_masc_root", Unix.realpath (Filename.concat workspace ".masc") ]
+              |> Uri.to_string
+            in
+            let headers =
+              [ "Accept", "text/event-stream"; "Mcp-Session-Id", session_id
+              ; "Authorization", "Bearer " ^ token; "x-masc-sse-instance-id", instance_id ]
+            in
+            Eio.Fiber.fork ~sw (fun () ->
+              ignore (Masc_http_client.get_stream ~clock:(Eio.Stdenv.clock env)
+                ~idle_timeout_sec:3. ~url ~headers
+                ~on_response:(fun ~status ~headers:_ ->
+                  ignore (Eio.Promise.try_resolve publish_response status))
+                ~on_chunk:(fun _ -> ()) ());
+              Eio.Promise.resolve publish_ended ());
+            response, ended
+          in
+          let await promise = Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 3.
+            (fun () -> Eio.Promise.await promise) in
+          let first_response, first_ended = open_observer () in
+          Alcotest.(check int) "the first Play observer opens" 200 (await first_response);
+          Alcotest.(check (list string)) "connect owns membership" ["play-observer"] (member_names ());
+          Alcotest.(check int) "the initial Join announces once" 1 !changes;
+          let second_response, second_ended = open_observer () in
+          Alcotest.(check int) "the replacement opens" 200 (await second_response);
+          await first_ended;
+          Alcotest.(check (list string)) "old disconnect keeps replacement presence"
+            ["play-observer"] (member_names ());
+          Alcotest.(check int) "handoff has no Leave/Join gap" 1 !changes;
+          Alcotest.(check bool) "the replacement remains registered" true (Masc.Sse.exists session_id);
+          Transport.stop_sse_session session_id;
+          await second_ended;
+          Alcotest.(check (list string)) "the exact final disconnect leaves" [] (member_names ());
+          Alcotest.(check int) "the final Leave announces once" 2 !changes;
+          Alcotest.(check int) "Play metadata never steps Control" 0 !control_steps))))
+;;
+
 let test_mcp_future_cursor_resets_before_live_delivery env =
   let module Transport = Server_mcp_transport_http in
   let workspace = Masc_test_deps.setup_test_workspace () in
@@ -1322,6 +1437,7 @@ let () =
         ; case "MCP rejects duplicate cursor headers" test_mcp_rejects_duplicate_cursors_before_registration
         ; case "MCP refuses foreign and retired workspaces" test_mcp_observer_refuses_foreign_and_retired_workspaces
         ; case "retired observer cannot close its successor" test_retired_observer_close_keeps_successor
+        ; case "Play observer reconnect keeps replacement presence" test_play_observer_reconnect_keeps_replacement_presence
         ; case "MCP resets a future cursor and sends live events" test_mcp_future_cursor_resets_before_live_delivery
         ] )
     ; ( "SSE response"

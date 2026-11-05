@@ -2791,8 +2791,8 @@ let session config trace_id =
 let write_official_turn config ~trace_id ~turn ~user ~assistant ~tools =
   let turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn in
   let session = session config trace_id in
-  History.persist_message ~keeper_name ~turn_ref ~source:"direct_user" session (message user);
-  History.persist_message ~keeper_name ~turn_ref ~source:"direct_assistant" session
+  History.persist_message ~keeper_name ~turn_ref ~source:Masc.Keeper_types_support.Direct_user session (message user);
+  History.persist_message ~keeper_name ~turn_ref ~source:Masc.Keeper_types_support.Direct_assistant session
     (Agent_core.Types.make_message
        ~role:Agent_core.Types.Assistant
        [ Agent_core.Types.Text assistant ]);
@@ -2993,7 +2993,7 @@ let test_a_failed_official_turn_is_read ?(tool_only=false) () =
   let trace_id = "trace-official-failed" in
   write_meta config trace_id;
   let failed_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1 in
-  if not tool_only then History.persist_message ~keeper_name ~turn_ref:failed_ref ~source:"direct_user"
+  if not tool_only then History.persist_message ~keeper_name ~turn_ref:failed_ref ~source:Masc.Keeper_types_support.Direct_user
     (session config trace_id) (message "q-failed");
   let detail tool_name : Masc.Keeper_agent_result.tool_call_detail =
     { tool_name

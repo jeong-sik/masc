@@ -413,9 +413,9 @@ let run_turn
       ~(runtime_id : string)
       ?world_observation
       ?(answered_ask_inputs = [])
-      ?(history_user_source = "direct_user")
+      ?(history_user_source = Keeper_types_support.Direct_user)
       ?(user_turn_record = Keeper_run_prompt.Record_user_turn)
-      ?(history_assistant_source = "direct_assistant")
+      ?(history_assistant_source = Keeper_types_support.Direct_assistant)
       ?temperature
       ?on_event
       ?on_tool_stream_observation

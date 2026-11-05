@@ -1350,9 +1350,9 @@ let test_autonomous_turn_recovers_task_free_work_from_history () =
         { origin = Llm_provider.Types.Conversation; Agent_core.Types.role; content=[Text text]; name=None; tool_call_id=None; metadata} in
     let attribution = Masc.Keeper_input_speaker.metadata
         (Masc.Keeper_input_speaker.Person Masc.Keeper_input_speaker.Owner) in
-    persist 1 "direct_user" User "Review PR-ongoing through verdict" attribution;
-    persist 1 "direct_assistant" Assistant "Read producer; consumer remains" [];
-    persist 2 "internal_assistant" Assistant "Consumer inspected; publish pending verdict next" [];
+    persist 1 Masc.Keeper_types_support.Direct_user User "Review PR-ongoing through verdict" attribution;
+    persist 1 Masc.Keeper_types_support.Direct_assistant Assistant "Read producer; consumer remains" [];
+    persist 2 Masc.Keeper_types_support.Internal_assistant Assistant "Consumer inspected; publish pending verdict next" [];
     let source = Masc.Keeper_recent_work.collect ~config ~meta in
     let tools = [artifact_reader ~base_path] in
     let project ?(tools=tools) ?(base_path=base_path) source =
@@ -1395,7 +1395,7 @@ let test_autonomous_turn_recovers_task_free_work_from_history () =
     check bool "other source survives failure" true
       (contains ~needle:"Review PR-ongoing through verdict" degraded);
     let large_text = String.make 8000 'x' ^ " resume the remaining review" in
-    persist 3 "direct_user" User large_text attribution;
+    persist 3 Masc.Keeper_types_support.Direct_user User large_text attribution;
     let large = Masc.Keeper_recent_work.collect ~config ~meta in
     let transmitted = project large in
     check bool "large request remains retrievable" true (contains ~needle:large_text (read_evidence transmitted));

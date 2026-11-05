@@ -1917,9 +1917,9 @@ let with_history_search ~checkpoint_texts ~current_texts check =
       (fun index text ->
          let turn_ref = Ids.Turn_ref.make ~trace_id:trace ~absolute_turn:(index + 1) in
          Masc.Keeper_context_runtime.persist_message
-           ~keeper_name:trace ~turn_ref session (user text);
+           ~keeper_name:trace ~turn_ref ~source:Masc.Keeper_types_support.Direct_user session (user text);
          Masc.Keeper_context_runtime.persist_message
-           ~keeper_name:trace ~turn_ref session
+           ~keeper_name:trace ~turn_ref ~source:Masc.Keeper_types_support.Direct_assistant session
            (Agent_core.Types.make_message ~role:Agent_core.Types.Assistant
               [ Agent_core.Types.Text "Recorded." ]))
       texts;
@@ -2012,7 +2012,7 @@ let test_history_search_excludes_runtime_context () =
     (fun index message ->
        Masc.Keeper_context_runtime.persist_message ~keeper_name:meta.name
          ~turn_ref:(Ids.Turn_ref.make ~trace_id ~absolute_turn:(index + 1))
-         session message)
+         ~source:Masc.Keeper_types_support.Direct_user session message)
     (ordinary "disk" :: carriers "disk");
   let malformed_metadata =
     match Masc.Keeper_context_core.message_to_json
@@ -2122,7 +2122,7 @@ let test_history_search_reports_read_errors ~malformed () =
   Masc.Keeper_context_runtime.persist_message
     ~keeper_name:meta.name
     ~turn_ref:(Ids.Turn_ref.make ~trace_id:current_trace ~absolute_turn:1)
-    session amber;
+    ~source:Masc.Keeper_types_support.Direct_user session amber;
   let path = Masc.Keeper_types_support.keeper_history_path config current_trace in
   if malformed then
     Out_channel.with_open_gen [ Open_wronly; Open_append ] 0o600 path

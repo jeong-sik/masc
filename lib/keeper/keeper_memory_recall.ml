@@ -150,13 +150,15 @@ let load_history_user_messages_result ~path ~limit ~accept =
     | Dated_jsonl.Parsed json ->
       (try
          let role = Json_util.get_string json "role" in
-         let source =
-           Json_util.get_string json "source"
-           |> Option.value ~default:""
-           |> String.trim
+         let internal =
+           match
+             Option.bind (Json_util.get_string json "source")
+               Keeper_types_support.history_source_of_string
+           with
+           | Some source -> Keeper_types_support.is_internal_history_source source
+           | None -> false
          in
-         if role = Some "user"
-            && not (Keeper_types_support.is_internal_history_source source)
+         if role = Some "user" && not internal
          then
            Keeper_context_core.message_of_json json |> user_message_text
          else None

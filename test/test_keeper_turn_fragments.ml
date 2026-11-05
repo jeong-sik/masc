@@ -58,11 +58,11 @@ let text_of (fragment : Fragments.fragment) =
 let test_a_turns_fragments_come_back_by_its_turn_ref () =
   with_session
   @@ fun session ->
-  History.persist_message ~keeper_name ~turn_ref:(turn 1) ~source:"user" session
+  History.persist_message ~keeper_name ~turn_ref:(turn 1) ~source:Masc.Keeper_types_support.Direct_user session
     (message ~role:Types.User "q1");
-  History.persist_message ~keeper_name ~turn_ref:(turn 1) ~source:"assistant" session
+  History.persist_message ~keeper_name ~turn_ref:(turn 1) ~source:Masc.Keeper_types_support.Direct_assistant session
     (message ~role:Types.Assistant "a1");
-  History.persist_message ~keeper_name ~turn_ref:(turn 2) ~source:"user" session
+  History.persist_message ~keeper_name ~turn_ref:(turn 2) ~source:Masc.Keeper_types_support.Direct_user session
     (message ~role:Types.User "q2");
   History.persist_tool_observation ~keeper_name ~turn_ref:(turn 1) session
     ~tool_name:"masc_tasks" ~outcome:Tool_result.Error;
@@ -88,7 +88,7 @@ let test_untagged_lines_belong_to_no_turn_and_refusals_count_from_the_first_name
     {|{"ts_unix":1.0,"role":"user","content_blocks":[{"type":"text","text":"old"}]}
 not json at all
 |};
-  History.persist_message ~keeper_name ~turn_ref:(turn 1) session (message ~role:Types.User "new");
+  History.persist_message ~keeper_name ~turn_ref:(turn 1) ~source:Masc.Keeper_types_support.Direct_user session (message ~role:Types.User "new");
   let lines = read session Fragments.Main in
   (match lines with
    | [ (1, Ok Fragments.Untagged); (2, Error (Fragments.Not_json _)); (3, Ok (Fragments.Fragment _)) ] -> ()
@@ -142,7 +142,7 @@ let test_a_tagged_line_that_cannot_be_named_is_refused () =
 let test_a_torn_tail_is_not_a_line () =
   with_session
   @@ fun session ->
-  History.persist_message ~keeper_name ~turn_ref:(turn 1) session (message ~role:Types.User "whole");
+  History.persist_message ~keeper_name ~turn_ref:(turn 1) ~source:Masc.Keeper_types_support.Direct_user session (message ~role:Types.User "whole");
   append_raw session Fragments.Main {|{"ts_unix":2.0,"turn_ref":"trace#2","ki|};
   let lines = read session Fragments.Main in
   (match lines with
@@ -274,14 +274,14 @@ let test_recent_messages_skip_tools_without_losing_provenance () =
   let request = { (message ~role:Types.User (String.make 900 'x' ^ " remaining PR"))
     with metadata = Masc.Keeper_input_speaker.metadata
       (Masc.Keeper_input_speaker.Person Masc.Keeper_input_speaker.Owner) } in
-  History.persist_message ~keeper_name ~turn_ref:(turn 1) ~source:"direct_user" session request;
+  History.persist_message ~keeper_name ~turn_ref:(turn 1) ~source:Masc.Keeper_types_support.Direct_user session request;
   for _ = 1 to 30 do
-    History.persist_message ~keeper_name ~turn_ref:(turn 1) ~source:"direct_tool" session
+    History.persist_message ~keeper_name ~turn_ref:(turn 1) ~source:Masc.Keeper_types_support.Direct_assistant session
       (message ~role:Types.Tool "tool result that must not displace the request");
     History.persist_tool_observation ~keeper_name ~turn_ref:(turn 1) session
       ~tool_name:"Execute" ~outcome:Tool_result.Ok
   done;
-  History.persist_message ~keeper_name ~turn_ref:(turn 1) ~source:"direct_assistant" session
+  History.persist_message ~keeper_name ~turn_ref:(turn 1) ~source:Masc.Keeper_types_support.Direct_assistant session
     (message ~role:Types.Assistant "PR remains; next read the changed consumer");
   let read file roles limit =
     match Fragments.read_recent_messages ~session_dir:session.Keeper_types.session_dir
@@ -300,7 +300,7 @@ let test_recent_messages_skip_tools_without_losing_provenance () =
    | _ -> fail "conversation messages were lost");
   check int "tool-only file is not a reply" 0
     (List.length (read Fragments.Internal [Types.Assistant] 1));
-  History.persist_message ~keeper_name ~turn_ref:(turn 2) ~source:"internal_assistant" session
+  History.persist_message ~keeper_name ~turn_ref:(turn 2) ~source:Masc.Keeper_types_support.Internal_assistant session
     (message ~role:Types.Assistant "consumer checked; next publish verdict");
   check (list string) "latest autonomous conclusion" ["consumer checked; next publish verdict"]
     (List.map (fun (m : Fragments.observed_message) -> Types.text_of_message m.message)
@@ -312,7 +312,7 @@ let test_recent_messages_distinguish_missing_and_corrupt () =
   let read () = Fragments.read_recent_messages
       ~session_dir:session.Keeper_types.session_dir ~roles:[Types.Assistant] ~limit:1 Fragments.Main in
   check bool "missing history is absent" true (read () = Ok {Fragments.messages=[];prefix_omitted=false});
-  History.persist_message ~keeper_name ~turn_ref:(turn 1) session (message ~role:Types.Assistant "old reply");
+  History.persist_message ~keeper_name ~turn_ref:(turn 1) ~source:Masc.Keeper_types_support.Direct_assistant session (message ~role:Types.Assistant "old reply");
   append_raw session Fragments.Main "{broken\n";
   match read () with
   | Error _ -> ()
@@ -321,7 +321,7 @@ let test_recent_messages_distinguish_missing_and_corrupt () =
 
 let test_recent_messages_reject_complete_json_without_newline () =
   with_session @@ fun session ->
-  History.persist_message ~keeper_name ~turn_ref:(turn 1) session
+  History.persist_message ~keeper_name ~turn_ref:(turn 1) ~source:Masc.Keeper_types_support.Direct_assistant session
     (message ~role:Types.Assistant "committed reply");
   let file = Fragments.path ~session_dir:session.Keeper_types.session_dir Fragments.Main in
   let committed = In_channel.with_open_bin file In_channel.input_all in
@@ -335,10 +335,10 @@ let test_recent_messages_reject_complete_json_without_newline () =
 
 let test_recent_messages_report_a_tool_only_window () =
   with_session @@ fun session ->
-  History.persist_message ~keeper_name ~turn_ref:(turn 1) ~source:"internal_assistant" session
+  History.persist_message ~keeper_name ~turn_ref:(turn 1) ~source:Masc.Keeper_types_support.Internal_assistant session
     (message ~role:Types.Assistant "older reply outside physical window");
   (* One retained tool row alone exceeds the physical observation window. *)
-  History.persist_message ~keeper_name ~turn_ref:(turn 2) ~source:"internal_assistant" session
+  History.persist_message ~keeper_name ~turn_ref:(turn 2) ~source:Masc.Keeper_types_support.Internal_assistant session
     (message ~role:Types.Tool (String.make (Masc.Keeper_status_options_defaults.max_tail_bytes + 1) 'x'));
   match Fragments.read_recent_messages ~session_dir:session.Keeper_types.session_dir
       ~roles:[Types.Assistant] ~limit:1 Fragments.Internal with

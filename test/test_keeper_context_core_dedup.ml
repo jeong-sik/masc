@@ -381,6 +381,7 @@ let test_persist_message_writes_single_ts_unix_key () =
       C.persist_message
         ~keeper_name:"history-ts"
         ~turn_ref:(Ids.Turn_ref.make ~trace_id:"history-ts" ~absolute_turn:1)
+        ~source:Masc.Keeper_types_support.Direct_user
         session
         (text_message "hello");
       let path =

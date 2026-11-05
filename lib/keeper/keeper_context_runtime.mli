@@ -23,7 +23,7 @@ val create_session : session_id:string -> base_dir:string -> session_context
 val persist_message :
   keeper_name:string ->
   turn_ref:Ids.Turn_ref.t ->
-  ?source:string ->
+  source:Keeper_types_support.history_source ->
   session_context ->
   Agent_core.Types.message ->
   unit

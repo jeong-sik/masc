@@ -11,11 +11,6 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
-type history_line_action =
-  | Keep_main
-  | Move_internal
-  | Drop_line
-
 (** {1 Wire vocabulary} *)
 
 val key_ts_unix : string
@@ -44,13 +39,13 @@ val internal_history_path : session_dir:string -> string
     A completed append remains committed if settling the session lock fails;
     that failure is logged separately rather than reported as a lost line. *)
 
-(** Append a conversation message, choosing [history.jsonl] /
-    [history.internal.jsonl] from [source]. A prompt-only source writes
-    nothing. *)
+(** Append a conversation message under its [source] word: [Direct_user] and
+    [Direct_assistant] to [history.jsonl], [Internal_assistant] to
+    [history.internal.jsonl]. [World_state_prompt] writes nothing. *)
 val persist_message :
   keeper_name:string ->
   turn_ref:Ids.Turn_ref.t ->
-  ?source:string ->
+  source:Keeper_types_support.history_source ->
   session_context ->
   Agent_core.Types.message ->
   unit

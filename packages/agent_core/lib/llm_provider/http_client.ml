@@ -1005,8 +1005,7 @@ let make_connection ~sw ~net ~origin : (connection, http_error) result =
   | Failure msg -> Error (unknown_network_error msg)
 ;;
 
-let track_connection_eof connection =
-  let eof_seen = ref false in
+let track_connection_eof ~eof_seen connection =
   let module Flow = struct
     type t = unit
 
@@ -1032,7 +1031,7 @@ let track_connection_eof connection =
       (Eio.Resource.H (Eio.Resource.Close, fun () -> Eio.Resource.close connection)
        :: Eio.Resource.bindings (Eio.Flow.Pi.two_way (module Flow)))
   in
-  Eio.Resource.T ((), operations), eof_seen
+  Eio.Resource.T ((), operations)
 ;;
 
 (* The peer closed and something upstream reported it as prose.
@@ -1057,11 +1056,11 @@ let eof_error exn =
   NetworkError { message = Printexc.to_string exn; kind = End_of_file }
 ;;
 
-(* A cohttp client whose requests all go over [conn]. The flag is set once a
-   read on [conn] met the transport's end of file. *)
-let tracked_client conn =
-  let tracked, eof_seen = track_connection_eof conn in
-  Cohttp_eio.Client.make_generic (fun ~sw:_ _uri -> tracked), eof_seen
+(* A cohttp client whose requests all go over [conn]. [eof_seen] is set once
+   a read on [conn] met the transport's end of file. *)
+let tracked_client ~eof_seen conn =
+  let tracked = track_connection_eof ~eof_seen conn in
+  Cohttp_eio.Client.make_generic (fun ~sw:_ _uri -> tracked)
 ;;
 
 (** A parked connection to [origin] from [cache], or a new one opened on the
@@ -1124,7 +1123,8 @@ let with_client ?cache ~sw ~net ~origin f =
          Ok result)
   | Some cache ->
     let* conn = checkout_connection cache ~net ~origin in
-    let client, eof_seen = tracked_client conn in
+    let eof_seen = ref false in
+    let client = tracked_client ~eof_seen conn in
     let verdict = ref (Reuse_verdict.Close Request_failed) in
     Fun.protect
       ~finally:(fun () ->
@@ -1349,6 +1349,7 @@ let post_sync_once_after_validation
   let phase = ref Before_dispatch in
   let status = ref None in
   let connection = ref None in
+  let transport_eof_seen = ref false in
   let close_connection conn =
     try Eio.Cancel.protect (fun () -> Eio.Resource.close conn) with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -1393,7 +1394,10 @@ let post_sync_once_after_validation
      paths, which is the signal that the fix belongs at this single choke point
      rather than at each boundary.
 
-     Reserved exceptions (cancellation) are re-raised first, unchanged.
+     Reserved exceptions (cancellation) are re-raised first, unchanged. When the
+     tracked connection saw the transport's end of file, the exception is that
+     close, as on the stream path ({!eof_error}): a parked connection the peer
+     had closed fails the way a fresh one does (RFC-0492 §3.3).
      [Unknown_provider_failure] states that the failure was not classified instead
      of guessing a kind; the message is diagnostics only, per the note on
      [provider_failure_to_string] telling consumers to branch on the kind and never
@@ -1404,10 +1408,13 @@ let post_sync_once_after_validation
     | None ->
       release_connection Request_failed;
       Reserved_exn.reraise_if_reserved exn;
-      ProviderFailure
-        { kind = Unknown_provider_failure { reason = Some (Printexc.to_string exn) }
-        ; message = "unclassified transport exception"
-        }
+      if !transport_eof_seen
+      then eof_error exn
+      else
+        ProviderFailure
+          { kind = Unknown_provider_failure { reason = Some (Printexc.to_string exn) }
+          ; message = "unclassified transport exception"
+          }
   in
   let fail_exn exn = Error (http_error_of_exn exn) in
   let total_started_at =
@@ -1462,7 +1469,7 @@ let post_sync_once_after_validation
           | Some cache -> checkout_connection cache ~net ~origin
         in
         connection := Some conn;
-        let client, transport_eof_seen = tracked_client conn in
+        let client = tracked_client ~eof_seen:transport_eof_seen conn in
         phase := Dispatch_started;
         Http_client_phase_observer.observe Http_client_phase_observer.Dispatch_started;
         Http_request_observer.dispatch_entered observation;
@@ -1486,8 +1493,7 @@ let post_sync_once_after_validation
         Http_client_phase_observer.observe
           (Http_client_phase_observer.Response_received response_status);
         Ok
-          ( transport_eof_seen
-          , response
+          ( response
           , response_body
           , response_status
           , response_header_evidence
@@ -1503,8 +1509,7 @@ let post_sync_once_after_validation
     release_connection Request_failed;
     fail error
   | Ok
-      ( transport_eof_seen
-      , response
+      ( response
       , response_body
       , response_status
       , response_header_evidence
@@ -1824,10 +1829,8 @@ let with_post_stream
               | Some cache -> checkout_connection cache ~net ~origin
             in
             connection := Some conn;
-            let tracked_conn, transport_eof_seen = track_connection_eof conn in
-            let client =
-              Cohttp_eio.Client.make_generic (fun ~sw:_ _uri -> tracked_conn)
-            in
+            let transport_eof_seen = ref false in
+            let client = tracked_client ~eof_seen:transport_eof_seen conn in
             Http_request_observer.dispatch_entered observation;
             match
               Cohttp_eio.Client.post

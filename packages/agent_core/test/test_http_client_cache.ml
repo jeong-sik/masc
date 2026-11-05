@@ -1144,8 +1144,10 @@ let test_stream_refusal_read_to_its_end_is_parked () =
 let test_one_dispatch_stale_cache_has_no_hidden_retry () =
   let (first, second, stats), posts = exercise_raw_one_dispatch_cache () in
   expect_raw_ok "stale setup" first;
+  (* A parked connection the peer closed fails as a network error, the way a
+     fresh connection's close does (RFC-0492 §3.3). *)
   (match second with
-   | Error (Http_client.Dispatch_started_error _) -> ()
+   | Error (Http_client.Dispatch_started_error (Http_client.NetworkError _)) -> ()
    | Ok _ | Error _ ->
      Alcotest.fail "stale cached connection was retried or misclassified");
   Alcotest.(check int) "stale server sees one POST" 1 posts;

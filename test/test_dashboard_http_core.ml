@@ -4945,7 +4945,7 @@ let test_pause_status_route_preserves_invalid_state () =
         (Sys.is_directory state_path))
 
 let test_asks_list_publishes_written_alternative_capability () =
-  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  with_test_env @@ fun ~env ~sw:_ ~config ->
   let module Ask = Masc.Keeper_ask in
   let name = "ask-capability" in
   let meta =
@@ -4984,7 +4984,8 @@ let test_asks_list_publishes_written_alternative_capability () =
       let state = Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path in
       let router = Lib.Http_server_eio.Router.create ()
         |> Server_route.get Server_route.Always_public "/api/v1/keepers/asks"
-             (Server_routes_http_keeper_stream.handle_keeper_asks_list state)
+             (Server_routes_http_keeper_stream.handle_keeper_asks_list
+                ~clock:(Eio.Stdenv.clock env) state)
       in
       let status, _, body = tools_h1_wire_response ~router ~headers:[]
         ("/api/v1/keepers/asks?name=" ^ name) in
@@ -6519,16 +6520,12 @@ let test_keeper_github_login_stream_headers_include_cors () =
     (Httpun.Headers.get headers "access-control-allow-credentials")
 ;;
 
-let test_keeper_github_login_stream_flushes_each_event () =
-  let actions = ref [] in
-  Keeper_config_post.For_testing.github_login_stream_send_with
-    ~write:(fun frame -> actions := !actions @ [ "write:" ^ frame ])
-    ~flush:(fun () -> actions := !actions @ [ "flush" ])
-    "device_code"
-    (`Assoc [ "code", `String "ABCD-EFGH" ]);
-  Alcotest.(check (list string)) "frame is written before it is flushed"
-    [ "write:event: device_code\ndata: {\"code\":\"ABCD-EFGH\"}\n\n"; "flush" ]
-    !actions
+let test_keeper_github_login_stream_frame_names_its_event () =
+  Alcotest.(check string) "one SSE frame per login event"
+    "event: device_code\ndata: {\"code\":\"ABCD-EFGH\"}\n\n"
+    (Keeper_config_post.For_testing.github_login_stream_frame
+       "device_code"
+       (`Assoc [ "code", `String "ABCD-EFGH" ]))
 ;;
 
 let shrink_base_meta () =
@@ -8948,8 +8945,8 @@ let () =
             test_skill_evidence_joins_activation_and_composition;
           test_case "GitHub login stream includes CORS" `Quick
             test_keeper_github_login_stream_headers_include_cors;
-          test_case "GitHub login stream flushes each event" `Quick
-            test_keeper_github_login_stream_flushes_each_event;
+          test_case "GitHub login stream frame names its event" `Quick
+            test_keeper_github_login_stream_frame_names_its_event;
           test_case "GitHub token route refuses an unreadable hostname" `Quick
             test_github_token_post_refuses_an_unreadable_hostname;
           test_case "pause status read-only route preserves invalid state" `Quick

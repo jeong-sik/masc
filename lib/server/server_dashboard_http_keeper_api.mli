@@ -195,6 +195,7 @@ val handle_keeper_secrets_post :
 (** Handle [POST /secrets] (redacted env-secret projection edits). *)
 
 val handle_keeper_github_login_post :
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Stream an isolated GitHub CLI login for the selected keeper. *)
 

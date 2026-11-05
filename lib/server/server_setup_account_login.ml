@@ -89,13 +89,16 @@ let start ~actor ~base_path ~body request reqd =
           (["content-type", "text/event-stream"; "cache-control", "no-store";
             "connection", "close"; "x-accel-buffering", "no"]
             @ Server_auth.cors_headers (Server_auth.get_origin request)) in
-        let writer = Httpun.Reqd.respond_with_streaming reqd (Httpun.Response.create ~headers `OK) in
-        let is_closed () = Httpun.Body.Writer.is_closed writer in
+        let response = Server_sse_response.respond ~clock:(Eio.Stdenv.clock env)
+          ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
+          reqd (Httpun.Response.create ~headers `OK) in
+        let is_closed () = Server_sse_response.is_closed response in
+        (* A response that did not take the frame is closed, so [is_closed]
+           reports it and the login ends there. *)
         let send event json =
-          if not (is_closed ()) then (
-            Httpun.Body.Writer.write_string writer
-              ("event: " ^ event ^ "\ndata: " ^ Yojson.Safe.to_string json ^ "\n\n");
-            Httpun.Body.Writer.flush writer (fun _ -> ())) in
+          match Server_sse_response.send response
+            ("event: " ^ event ^ "\ndata: " ^ Yojson.Safe.to_string json ^ "\n\n") with
+          | Server_sse_response.Written | Closed | Stalled -> () in
         let save next = Eio.Cancel.protect (fun () ->
           let* () = Receipt.save ~workspace:base_path ~actor next
             |> Result.map_error (fun _ -> receipt_failure) in
@@ -126,7 +129,7 @@ let start ~actor ~base_path ~body request reqd =
         let credentials_rewritten () =
           Workspace_dataset_event.announce ~base_path
             Workspace_dataset_event.Account_emails in
-        Fun.protect ~finally:(fun () -> Httpun.Body.Writer.close writer) (fun () ->
+        Fun.protect ~finally:(fun () -> Server_sse_response.close response) (fun () ->
           let on_ready () = send "started" (Receipt.to_json !receipt) in
           let on_output stream text = send "output" (`Assoc ["stream", `String stream; "text", `String text]) in
           let on_input_ready () = send "input_ready" (`Assoc []) in

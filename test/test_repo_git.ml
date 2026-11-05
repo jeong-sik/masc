@@ -547,6 +547,117 @@ let test_branches_at_reads_a_checkout () =
            | None -> Alcotest.fail "loose is missing");
           Alcotest.(check bool) "the base branch is listed" true (Option.is_some (find base)))
 
+(* [git worktree list --porcelain -z] writes each field with a closing NUL and
+   closes a record with one more NUL. *)
+let porcelain records =
+  String.concat "" (List.map (fun fields -> String.concat "\000" fields ^ "\000\000") records)
+
+let worktree_head = String.make 40 'a'
+
+let test_worktree_rows_read_every_state () =
+  let output =
+    porcelain
+      [ [ "worktree /host/repo"; "HEAD " ^ worktree_head; "branch refs/heads/main" ]
+      ; [ "worktree /host/trees/linked"; "HEAD " ^ worktree_head; "detached"
+        ; "locked kept for a diagnostic" ]
+      ; [ "worktree /host/trees/bare"; "bare" ]
+      ; [ "worktree /host/trees/gone"; "HEAD " ^ worktree_head
+        ; "branch refs/heads/feat/a"; "prunable gitdir file points to nothing" ]
+      ; [ "worktree /host/trees/locked-plain"; "HEAD " ^ worktree_head; "detached"; "locked" ]
+      ]
+  in
+  match Repo_git.worktree_list_of_porcelain ~max_entries:10 output with
+  | Error e -> Alcotest.fail ("worktree rows failed: " ^ e)
+  | Ok { wl_entries; wl_truncated } ->
+      Alcotest.(check bool) "not truncated" false wl_truncated;
+      Alcotest.(check (list string)) "only the last path component is kept"
+        [ "repo"; "linked"; "bare"; "gone"; "locked-plain" ]
+        (List.map (fun (e : Repo_git.worktree_entry) -> e.wt_name) wl_entries);
+      Alcotest.(check (list bool)) "only the first record is the main worktree"
+        [ true; false; false; false; false ]
+        (List.map (fun (e : Repo_git.worktree_entry) -> e.wt_main) wl_entries);
+      Alcotest.(check (list bool)) "locked, with or without a reason"
+        [ false; true; false; false; true ]
+        (List.map (fun (e : Repo_git.worktree_entry) -> e.wt_locked) wl_entries);
+      Alcotest.(check (list bool)) "prunable"
+        [ false; false; false; true; false ]
+        (List.map (fun (e : Repo_git.worktree_entry) -> e.wt_prunable) wl_entries);
+      Alcotest.(check bool) "branch, detached and bare are told apart" true
+        (List.map (fun (e : Repo_git.worktree_entry) -> e.wt_state) wl_entries
+         = [ Repo_git.Worktree_branch "main"; Repo_git.Worktree_detached
+           ; Repo_git.Worktree_bare; Repo_git.Worktree_branch "feat/a"
+           ; Repo_git.Worktree_detached ]);
+      Alcotest.(check bool) "a bare entry has no HEAD, the others do" true
+        (List.map (fun (e : Repo_git.worktree_entry) -> e.wt_head) wl_entries
+         = [ Some worktree_head; Some worktree_head; None; Some worktree_head
+           ; Some worktree_head ])
+
+let test_worktree_rows_refuse_what_they_cannot_read () =
+  let head = "HEAD " ^ worktree_head in
+  let refused label records =
+    Alcotest.(check bool) label true
+      (Result.is_error (Repo_git.worktree_list_of_porcelain ~max_entries:5 (porcelain records)))
+  in
+  refused "no path" [ [ head; "detached" ] ];
+  refused "an empty path" [ [ "worktree "; head; "detached" ] ];
+  refused "no checkout state" [ [ "worktree /a/x"; head ] ];
+  refused "two checkout states" [ [ "worktree /a/x"; head; "detached"; "branch refs/heads/b" ] ];
+  refused "a non-branch ref" [ [ "worktree /a/x"; head; "branch refs/tags/v1" ] ];
+  refused "an empty branch name" [ [ "worktree /a/x"; head; "branch refs/heads/" ] ];
+  refused "no HEAD on a non-bare entry" [ [ "worktree /a/x"; "detached" ] ];
+  refused "HEAD named twice" [ [ "worktree /a/x"; head; head; "detached" ] ];
+  refused "a HEAD that is not hex" [ [ "worktree /a/x"; "HEAD not-a-commit"; "detached" ] ];
+  refused "an unknown field" [ [ "worktree /a/x"; head; "detached"; "future-field 1" ] ];
+  refused "a bad record after a good one"
+    [ [ "worktree /a/x"; head; "detached" ]; [ "worktree /a/y"; head ] ];
+  (* A stream cut inside a record has no closing NUL after its last field. *)
+  Alcotest.(check bool) "a stream cut inside a record" true
+    (Result.is_error
+       (Repo_git.worktree_list_of_porcelain ~max_entries:5
+          ("worktree /a/x\000HEAD " ^ worktree_head ^ "\000detached")));
+  Alcotest.(check bool) "max_entries of zero" true
+    (Result.is_error (Repo_git.worktree_list_of_porcelain ~max_entries:0 ""));
+  (match Repo_git.worktree_list_of_porcelain ~max_entries:5 "" with
+   | Ok { wl_entries = []; wl_truncated = false } -> ()
+   | Ok _ | Error _ -> Alcotest.fail "empty output is an empty list");
+  let three =
+    porcelain
+      (List.map (fun name -> [ "worktree /a/" ^ name; head; "detached" ]) [ "one"; "two"; "three" ])
+  in
+  match Repo_git.worktree_list_of_porcelain ~max_entries:2 three with
+  | Ok { wl_entries; wl_truncated = true } ->
+      Alcotest.(check int) "keeps max_entries" 2 (List.length wl_entries)
+  | Ok _ | Error _ -> Alcotest.fail "a third record must mark the list truncated"
+
+let test_worktrees_at_reads_a_checkout () =
+  with_temp_dir (fun tmp ->
+      let source = Filename.concat tmp "source" in
+      init_local_repo source;
+      let git args =
+        match run_cmd ~cwd:source ("git" :: args) with
+        | Ok () -> ()
+        | Error e -> Alcotest.fail ("git " ^ String.concat " " args ^ " failed: " ^ e)
+      in
+      let linked = Filename.concat tmp "linked-tree" in
+      git [ "worktree"; "add"; linked; "-b"; "linked-branch" ];
+      git [ "worktree"; "lock"; linked; "--reason"; "kept by a test" ];
+      match Repo_git.worktrees_at ~local_path:source ~max_entries:10 () with
+      | Error e -> Alcotest.fail ("worktrees failed: " ^ e)
+      | Ok { wl_entries; wl_truncated } ->
+          Alcotest.(check bool) "not truncated" false wl_truncated;
+          (match wl_entries with
+           | [ main; second ] ->
+               Alcotest.(check string) "main worktree name" "source" main.wt_name;
+               Alcotest.(check bool) "the first entry is the main worktree" true main.wt_main;
+               Alcotest.(check string) "linked worktree name" "linked-tree" second.wt_name;
+               Alcotest.(check bool) "the linked one is not main" false second.wt_main;
+               Alcotest.(check bool) "the linked one is locked" true second.wt_locked;
+               Alcotest.(check bool) "the linked one is on its new branch" true
+                 (second.wt_state = Repo_git.Worktree_branch "linked-branch")
+           | other ->
+               Alcotest.fail
+                 (Printf.sprintf "expected two worktrees, got %d" (List.length other))))
+
 let test_status_files_preserve_paths_and_axes () =
   with_temp_dir (fun tmp ->
       let source = Filename.concat tmp "source" in
@@ -697,6 +808,15 @@ let () =
 	            test_branch_rows_refuse_what_they_cannot_read;
 	          Alcotest.test_case "reads a real checkout" `Quick
 	            test_branches_at_reads_a_checkout;
+	        ] );
+	      ( "worktrees",
+	        [
+	          Alcotest.test_case "reads every state" `Quick
+	            test_worktree_rows_read_every_state;
+	          Alcotest.test_case "refuses what it cannot read" `Quick
+	            test_worktree_rows_refuse_what_they_cannot_read;
+	          Alcotest.test_case "reads a real checkout" `Quick
+	            test_worktrees_at_reads_a_checkout;
 	        ] );
 	      ( "origin_head_branch",
 	        [

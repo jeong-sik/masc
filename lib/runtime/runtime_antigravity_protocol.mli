@@ -62,6 +62,19 @@ type noncompletion_result =
   ; usage : usage
   }
 
+type denied_actions =
+  { first : string
+  ; rest : string list
+  }
+
+type denied_result =
+  { conversation_id : string
+  ; denied : denied_actions
+  ; response : string
+  ; num_turns : int
+  ; usage : usage
+  }
+
 type error =
   | Invalid_config of string
   | Spawn_failed of string
@@ -72,6 +85,7 @@ type error =
   | State_callback_failed of string
   | Turn_failed of string
   | Result_not_completed of noncompletion_result
+  | Actions_denied of denied_result
   | Process_exited of string
   | Unhandled_exception of string
   | Child_fd_ceiling_exceeded of
@@ -110,6 +124,7 @@ type wire_event =
       ; error : string option
       ; num_turns : int
       ; usage : usage
+      ; denied : denied_actions option
       }
 
 and step_state =
@@ -143,6 +158,7 @@ type terminal = private {
   error : string option;
   num_turns : int;
   usage : usage;
+  denied : denied_actions option;
   tool_steps : int;
   tool_errors : int;
 }

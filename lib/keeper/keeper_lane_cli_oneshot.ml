@@ -101,6 +101,7 @@ let antigravity_error_is_binding_rest : Runtime_antigravity.error -> bool = func
   | Runtime_antigravity.State_callback_failed _
   | Runtime_antigravity.Turn_failed _
   | Runtime_antigravity.Result_not_completed _
+  | Runtime_antigravity.Actions_denied _
   | Runtime_antigravity.Process_exited _
   | Runtime_antigravity.Child_fd_ceiling_exceeded _
   | Runtime_antigravity.Unhandled_exception _
@@ -193,6 +194,7 @@ let antigravity_error_is_input_size : Runtime_antigravity.error -> bool = functi
   | Runtime_antigravity.State_callback_failed _
   | Runtime_antigravity.Turn_failed _
   | Runtime_antigravity.Result_not_completed _
+  | Runtime_antigravity.Actions_denied _
   | Runtime_antigravity.Process_exited _
   | Runtime_antigravity.Child_fd_ceiling_exceeded _
   | Runtime_antigravity.Unhandled_exception _

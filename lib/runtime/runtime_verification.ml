@@ -744,6 +744,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
               | Runtime_antigravity.State_callback_failed _
               | Runtime_antigravity.Turn_failed _
               | Runtime_antigravity.Result_not_completed _
+              | Runtime_antigravity.Actions_denied _
               | Runtime_antigravity.Process_exited _
               | Runtime_antigravity.Child_fd_ceiling_exceeded _
               | Runtime_antigravity.Unhandled_exception _ ) as err)) ->

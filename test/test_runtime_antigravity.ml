@@ -48,6 +48,7 @@ let result
     ?(status = "SUCCESS")
     ?(response = "MASC_ANTIGRAVITY_OK\n")
     ?error
+    ?denied_actions_json
     ?(num_turns = 1)
     ()
   =
@@ -56,12 +57,18 @@ let result
     | None -> ""
     | Some value -> Printf.sprintf ",\"error\":%S" value
   in
+  let denied_field =
+    match denied_actions_json with
+    | None -> ""
+    | Some value -> Printf.sprintf ",\"denied_actions\":%s" value
+  in
   Printf.sprintf
-    {|{"event":"result","result":{"conversation_id":%S,"status":%S,"response":%S%s,"duration_seconds":5.5,"num_turns":%d,"usage":{"input_tokens":100,"output_tokens":7,"thinking_tokens":3,"cache_read_tokens":50,"total_tokens":107}}}|}
+    {|{"event":"result","result":{"conversation_id":%S,"status":%S,"response":%S%s%s,"duration_seconds":5.5,"num_turns":%d,"usage":{"input_tokens":100,"output_tokens":7,"thinking_tokens":3,"cache_read_tokens":50,"total_tokens":107}}}|}
     conversation_id
     status
     response
     error_field
+    denied_field
     num_turns
 ;;
 
@@ -1492,6 +1499,61 @@ let test_empty_success_after_a_tool_step_carries_diagnostics () =
        | Ok _ -> fail "blank SUCCESS after a tool step was admitted")
 ;;
 
+(* The wire shape agy 1.5.1 printed on 2026-11-05 when print mode refused a
+   read it could not ask about. *)
+let refused_read_json = {|[{"action":"read_file","display_name":"ReadFile"}]|}
+
+(* Measured the same day: text written before the refused call survives as
+   the SUCCESS response, so the run's leftover sentence must not pass as the
+   answer. *)
+let test_text_before_a_refused_action_is_not_the_answer () =
+  let finished = ref false in
+  with_fixture
+    [ init ()
+    ; step ~state:"ACTIVE" ~text_delta:"Starting the check now." ()
+    ; result ~response:"Starting the check now.\n" ~denied_actions_json:refused_read_json () ]
+    (fun path ->
+       (match run_fixture path ~on_stream_event:(function
+           | Runtime_antigravity.Turn_finished _ -> finished := true
+           | _ -> ()) with
+        | Error (Runtime_antigravity.Actions_denied
+            { conversation_id; denied; response; num_turns; usage }) ->
+          check string "admitted identity" "conversation-1" conversation_id;
+          check (list string) "refused actions" [ "read_file" ]
+            (Runtime_antigravity.denied_action_names denied);
+          check string "partial text kept as evidence" "Starting the check now.\n" response;
+          check int "reported turn count" 1 num_turns;
+          check int "raw input kept" 100 usage.input_tokens
+        | Error error -> fail (Runtime_antigravity.error_to_string error)
+        | Ok _ -> fail "a refused run completed with its partial text");
+       check bool "no successful turn ending" false !finished)
+;;
+
+let test_refusal_without_text_names_the_refusal () =
+  with_fixture
+    [ init (); result ~response:"" ~denied_actions_json:refused_read_json () ]
+    (fun path ->
+       match run_fixture path with
+       | Error (Runtime_antigravity.Actions_denied { denied; _ }) ->
+         check (list string) "refused actions" [ "read_file" ]
+           (Runtime_antigravity.denied_action_names denied)
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok _ -> fail "an empty refused run completed")
+;;
+
+let test_malformed_refusal_entry_is_a_protocol_error () =
+  List.iter
+    (fun denied_actions_json ->
+       with_fixture
+         [ init (); result ~denied_actions_json () ]
+         (fun path ->
+            match run_fixture path with
+            | Error (Runtime_antigravity.Protocol_error _) -> ()
+            | Error error -> fail (Runtime_antigravity.error_to_string error)
+            | Ok _ -> failf "denied_actions %s was accepted" denied_actions_json))
+    [ {|["read_file"]|}; {|[{"display_name":"ReadFile"}]|}; {|[{"action":""}]|}; {|"read_file"|} ]
+;;
+
 (* A Korean stderr line longer than the byte budget must come back cut at a
    character boundary, never with a torn Hangul character at its head
    (#39090 made String_util the SSOT for that rule). *)
@@ -2259,6 +2321,12 @@ let () =
             "blank success after a tool step carries diagnostics"
             `Quick
             test_empty_success_after_a_tool_step_carries_diagnostics
+        ; test_case "text before a refused action is not the answer" `Quick
+            test_text_before_a_refused_action_is_not_the_answer
+        ; test_case "refusal without text names the refusal" `Quick
+            test_refusal_without_text_names_the_refusal
+        ; test_case "malformed refusal entry is a protocol error" `Quick
+            test_malformed_refusal_entry_is_a_protocol_error
         ; test_case "duplicate keys" `Quick test_duplicate_keys_fail_closed
         ; test_case
             "observed permission modes are admitted"

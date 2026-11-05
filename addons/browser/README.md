@@ -1,8 +1,8 @@
 # Browser workers
 
-Each browser source has its own package here: `automation/`, `stagehand/`,
-`firefox/`, `ego/` and `external/`, with the ids `browser-automation`,
-`browser-stagehand`, `browser-firefox`, `browser-ego` and `browser-external`.
+Each browser source has its own package here: `automation/`, `firefox/`,
+`ego/` and `external/`, with the ids `browser-automation`, `browser-firefox`,
+`browser-ego` and `browser-external`.
 Every package runs `masc-browser-addon-worker` as a native Add-on for the one
 source its `lane.toml` names in `browser_backend`, so a failure of one source
 ends only its own worker. The server finds the worker on its PATH, and `masc-native-addon-launcher` and
@@ -25,8 +25,7 @@ masc carries these packages. After installing, the script runs
 `masc browser-lane-setup --mode addon` for the workspace, and every other
 `browser-lane-setup` mode does the same, for each source the workspace runs:
 automation, firefox and ego when `runtime.toml` has their table or the run
-writes it, stagehand when `[browser.stagehand]` is there, and external when a
-native host is installed. A source whose table the mode writes is declared
+writes it, and external when a native host is installed. A source whose table the mode writes is declared
 once that table is written.
 
 - It writes each package to `<base-path>/.masc/packages/browser-<source>/`. An
@@ -96,7 +95,7 @@ An unreadable or unready live-source publisher can hide another controller of
 the same native Space. Until every live publisher's identity is observed, Ego
 commands and Goal pins are refused before dispatch, including exact-client and
 stored Goal routes. Explicit extension clients remain usable, and a failed
-Automation or Stagehand observation does not block an exact Ego route. Cached
+Automation observation does not block an exact Ego route. Cached
 `browser_document` reads preserve the same unknown-identity refusal.
 The host rechecks topology after snapshot I/O; this admission observation does
 not provide an atomic native-Space lease against later lifecycle changes.
@@ -194,7 +193,7 @@ an actual browser run.
 [TOML guide](../../docs/guides/lane-addon-toml.md) describes every key. To
 choose hooks or model outputs, add them to the `browser-<source>.toml` setup
 wrote; setup never rewrites an existing declaration. `locate` belongs to
-`browser-automation` and `stagehand` to `browser-stagehand`:
+`browser-automation`:
 
 ```toml
 id = "browser-automation"
@@ -211,8 +210,7 @@ sources = []
 The installed external native host and browser extension/BiDi peer use the
 workspace token. Each worker owns only its own source's browser. The
 automation worker starts its Gecko driver with a private profile/download
-directory; the Stagehand worker's Chrome sessions use a private or explicit
-persistent profile. The firefox worker starts its configured live
+directory. The firefox worker starts its configured live
 Firefox during attachment, on its dedicated existing owner-only profile. Its reported profile
 and process ID must match the original process owner. A busy port is refused;
 no external Firefox is adopted. See the [Firefox setup guide](../../docs/design/browser-bidi-live-host.md).
@@ -267,21 +265,6 @@ this partial guard is not a full JSON Schema validator. Baseline and grant are
 both pinned to the worker incarnation. The bundled fixed `locate` output does
 not grant request schemas.
 
-The `browser-stagehand` package's `stagehand` output grants request schemas and declares an open
-structured-object baseline. `Browser_addon_stagehand_model.for_owner` constructs
-the actual Stagehand session model callback only for that selected contract.
-It routes text/structured protocol requests through the original owner queue
-and the host's shared Exact Output runner, then returns Stagehand's existing
-structured answer format and reported usage. The result itself is not wrapped.
-User/assistant roles and text-block order remain; blocks within one turn join
-with two newlines. Image/tool blocks, text/tool generations and supplied
-temperature/stop options are refused before model queue admission. Caller
-cancellation withdraws the waiter; retirement wakes it; uncertain results return
-an error without an automatic retry. Captured-protocol/loopback-provider
-scenarios and isolated owned Chrome scenarios cover this callback. See the exact source and execution scope in the
-[lifecycle evidence](../../docs/design/browser-addon-lifecycle.md#completion-evidence);
-these checks do not establish deployment or provider response quality.
-
 The `browser-automation` package declares the fixed `locate` output and connects it to owned
 Gecko `page.locate`. Configure an existing model slot for the installation's
 `runtime.addon_exact_lanes.<installation-id>.locate` route using the
@@ -290,11 +273,6 @@ output; installation `exact_outputs = []` disables it independently of tool
 validation hooks. Inventory `locate` observes the selected consumer, not provider
 readiness. A missing/off/unavailable route remains pending under the existing
 Exact Output policy until an authority event or original-command cancellation.
-
-For the public alias, use `BrowserInstruct` with `action = "observe"`, the
-observed `lane = "automation"` and `tabId`, and an optional instruction. Every
-BrowserInstruct action requires the observed owned lane; act/extract still
-require Stagehand. A bound tab cannot move to another browser.
 
 The model selects node IDs from a typed scene; it supplies no selectors, code,
 coordinates or input actions. The driver reads the same tab again and refuses
@@ -305,7 +283,7 @@ scene never establishes that all matching elements were found. The original
 command or detach owns model waiting; the quick browser transport clock does
 not abandon its request.
 
-Scripted protocol cases, actual isolated Chrome/BiDi/Gecko cases and installed
+Scripted protocol cases, actual isolated BiDi/Gecko cases and installed
 browser behavior are separate evidence scopes. New production changes require
 their own recorded verification; a historical passing run does not prove the
 current installed runtime. Follow the

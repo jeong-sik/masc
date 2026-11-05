@@ -7,6 +7,7 @@ module Provider_account_id = Authz_id.Make ()
 module Grant_id = Authz_id.Make ()
 module Policy_id = Authz_id.Make ()
 module Workspace_id = Authz_id.Make ()
+module Invite_id = Authz_id.Make ()
 
 module Principal = struct
   type t =

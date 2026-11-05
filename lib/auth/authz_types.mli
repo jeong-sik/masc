@@ -11,6 +11,7 @@ module Provider_account_id : Authz_id.S
 module Grant_id : Authz_id.S
 module Policy_id : Authz_id.S
 module Workspace_id : Authz_id.S
+module Invite_id : Authz_id.S
 
 module Principal : sig
   type t =

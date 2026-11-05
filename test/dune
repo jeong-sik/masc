@@ -7243,6 +7243,8 @@
 
 (include stanzas/test_authz_mode_event.inc)
 
+(include stanzas/test_authz_invite_event.inc)
+
 (include stanzas/test_authz_log.inc)
 
 (include stanzas/test_authz_install_record.inc)

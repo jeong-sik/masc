@@ -381,15 +381,6 @@ let load_event_file_max_task_id ~verify_content (st : Unix.stats) path =
          | _ | exception Unix.Unix_error _ -> ());
       max_task_id
 
-let compare_month_entries_desc a b =
-  match
-    Dated_jsonl.Layout.year_and_month_of_directory_name a,
-    Dated_jsonl.Layout.year_and_month_of_directory_name b
-  with
-  | Some _, Some _ | None, None -> String.compare b a
-  | Some _, None -> -1
-  | None, Some _ -> 1
-
 let event_history_max_task_id config =
   let events_dir = Filename.concat (masc_dir config) "events" in
   match Unix.stat events_dir with
@@ -398,7 +389,7 @@ let event_history_max_task_id config =
     let month_dirs =
       Sys.readdir events_dir
       |> Array.to_list
-      |> List.sort compare_month_entries_desc
+      |> List.sort (fun a b -> Dated_jsonl.Layout.compare_month_entries b a)
     in
     let is_first_file = ref true in
     let max_id = ref 0 in

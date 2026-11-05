@@ -1619,6 +1619,20 @@ let test_strict_incremental_large_utf8_row_and_captured_extent () =
     let rows, _ = require (read (Some cursor)) in
     check int "unchanged complete extent has no rows" 0 (List.length rows))
 
+(* Listings that tolerate foreign entries read the newest month first by
+   reversing this order, so a name that is not a month directory has to land
+   before every month here and after every month there. *)
+let test_compare_month_entries () =
+  let entries = [ "2026-11"; "notes"; "2026-13"; "2025-12"; ".keep"; "2026-01"; "2026-00" ] in
+  check (list string) "months by calendar, foreign names first and by name"
+    [ ".keep"; "2026-00"; "2026-13"; "notes"; "2025-12"; "2026-01"; "2026-11" ]
+    (List.sort Dated_jsonl.Layout.compare_month_entries entries);
+  check (list string) "reversed, the newest month leads and foreign names trail"
+    [ "2026-11"; "2026-01"; "2025-12"; "notes"; "2026-13"; "2026-00"; ".keep" ]
+    (List.sort (fun a b -> Dated_jsonl.Layout.compare_month_entries b a) entries);
+  check int "equal names compare equal" 0
+    (Dated_jsonl.Layout.compare_month_entries "2026-11" "2026-11")
+
 let () =
   run "Dated_jsonl"
     [
@@ -1783,5 +1797,10 @@ let () =
       ( "empty",
         [
           test_case "empty store" `Quick test_empty_store;
+        ] );
+      ( "layout",
+        [
+          test_case "month entries sort oldest first, foreign names before them" `Quick
+            test_compare_month_entries;
         ] );
     ]

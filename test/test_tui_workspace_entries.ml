@@ -824,7 +824,8 @@ let test_search_palette_opens_over_the_current_reading_and_asks_nothing () =
        Alcotest.(check bool) "it is over this directory" true
          (origin.cfo_scope = Code_scope_repo "example" && String.equal origin.cfo_dir "src");
        Alcotest.(check bool) "its owner is current" true (code_finder_current state origin)
-   | Palette_jump | Palette_files _ | Palette_locations _ | Palette_choice _ ->
+   | Palette_jump | Palette_files _ | Palette_locations _ | Palette_choice _ | Palette_branches _
+   | Palette_worktrees _ ->
        Alcotest.fail "the search palette did not open");
   Alcotest.(check bool) "nothing was asked" true
     (Option.is_none (Fetched.current state.code_search))

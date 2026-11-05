@@ -558,7 +558,8 @@ let render_palette (state : state) =
               (if total = 0 then 0 else cursor + 1) total
               (match state.palette_mode with
                | Palette_search _ -> "Enter searches the typed text"
-               | Palette_files _ | Palette_locations _ | Palette_jump | Palette_choice _ ->
+               | Palette_files _ | Palette_branches _ | Palette_worktrees _ | Palette_locations _
+               | Palette_jump | Palette_choice _ ->
                    "type to filter"));
           let list_rows = max 0 (budget - 2 - List.length finder_notes) in
           let first = max 0 (cursor - list_rows + 1) in

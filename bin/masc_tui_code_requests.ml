@@ -130,7 +130,7 @@ let launch_search state ~host ~deliver =
       Masc_tui_loader.report_action state "error"
         "The search no longer matches the file open on Code; Esc, then Ctrl-G opens it again"
   | (Palette_search _ | Palette_files _ | Palette_locations _ | Palette_jump
-    | Palette_choice _), (Some _ | None) ->
+    | Palette_choice _ | Palette_branches _ | Palette_worktrees _), (Some _ | None) ->
       Masc_tui_loader.report_action state "error" "Search needs a confirmed workspace"
 
 let open_found_file state ~host ~deliver ~path =

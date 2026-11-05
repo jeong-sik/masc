@@ -331,17 +331,14 @@ let ending_name = function
   | Pump.Stalled -> "Stalled"
   | Pump.Finished -> "Finished"
 
-(* Runs the stream's own step through the real pump, as the handler does after
-   its replay. [before_run] stands for the replay: it writes through [send]
-   and may push, as live events arrive while the replay writes. Returns every
-   frame written, in order, and how the stream ended. *)
-let serve_chat ~replayed ?(before_run = fun ~send:_ _ -> ()) items =
+(* Runs the stream's own step through the real pump over [items] already
+   queued. Returns every frame written, in order, and how the stream ended. *)
+let serve_chat ~replayed items =
   Eio_main.run (fun env ->
     let queue = Pump.Queue.create ~max_queued_events:64 in
     let written = ref [] in
     let send frame = written := frame :: !written; Sse.Written in
     List.iter (Pump.Queue.push queue) items;
-    before_run ~send queue;
     let ending =
       Pump.run ~queue
         ~step:(Stream.For_testing.keeper_chat_step ~replayed)
@@ -354,6 +351,40 @@ let serve_chat ~replayed ?(before_run = fun ~send:_ _ -> ()) items =
 
 let live_item (seq, event) = Stream.For_testing.Live (Some seq, event)
 
+let acceptance = "event: accepted\n\n"
+
+(* A ping interval no queued event waits for. A stream that should have ended
+   and asks [idle] fails the test instead. *)
+let short_ping_interval_s = 0.05
+
+let idle_must_not_be_asked () = Alcotest.fail "the stream waited for more events"
+
+(* Runs the handler's code after an accepted submit with a [send] that
+   records each frame. [after_send n] gives the live events the sink
+   publishes right after the [n]th frame (the acceptance is the first), and
+   [closed_from n] makes the client leave at the [n]th frame. *)
+let serve_accepted ?(queued = []) ?(after_send = fun _ -> []) ?closed_from
+    ?(missed_terminal = fun ~replayed:_ -> None) ?(settled = false) ~replay () =
+  Eio_main.run (fun env ->
+    let queue = Pump.Queue.create ~max_queued_events:64 in
+    List.iter (Pump.Queue.push queue) queued;
+    let written = ref [] and sends = ref 0 in
+    let send frame =
+      incr sends;
+      match closed_from with
+      | Some n when !sends >= n -> Sse.Closed
+      | Some _ | None ->
+        written := frame :: !written;
+        List.iter (Pump.Queue.push queue) (after_send !sends);
+        Sse.Written
+    in
+    let ending =
+      Stream.For_testing.serve_accepted_chat ~send ~queue ~acceptance_frame:acceptance
+        ~replay:(fun () -> replay) ~missed_terminal ~settled ~idle:idle_must_not_be_asked
+        ~clock:(Eio.Stdenv.clock env) ~ping_interval_s:short_ping_interval_s
+    in
+    List.rev !written, Option.map ending_name ending)
+
 (* A reconnect replays the first three live seqs while the live sink keeps
    publishing: two events were queued before the replay began and the rest
    arrive after its first frame. Each replayed seq goes out once, from the
@@ -361,23 +392,105 @@ let live_item (seq, event) = Stream.For_testing.Live (Some seq, event)
    ending at the turn's terminal. *)
 let test_live_events_queued_during_the_replay_follow_it () =
   let live = live_events () in
-  let replay_part = List.filteri (fun i _ -> i < 3) live in
-  let queued_before = List.filteri (fun i _ -> i < 2) live in
-  let arriving = List.filteri (fun i _ -> i >= 2) live in
-  let replayed = Hashtbl.create 8 in
-  let before_run ~send queue =
-    List.iteri
-      (fun i (seq, event) ->
-         Hashtbl.replace replayed seq ();
-         ignore (send (frame (seq, event)) : Sse.outcome);
-         if i = 0 then List.iter (fun entry -> Pump.Queue.push queue (live_item entry)) arriving)
-      replay_part
+  let replay = List.filteri (fun i _ -> i < 3) live in
+  let queued = List.map live_item (List.filteri (fun i _ -> i < 2) live) in
+  let arriving = List.map live_item (List.filteri (fun i _ -> i >= 2) live) in
+  let written, ending =
+    serve_accepted ~queued ~after_send:(fun n -> if n = 2 then arriving else []) ~replay ()
   in
-  let written, ending = serve_chat ~replayed ~before_run (List.map live_item queued_before) in
-  Alcotest.(check string) "the live terminal ends the stream" "Finished" ending;
+  Alcotest.(check (option string)) "the live terminal ends the stream" (Some "Finished") ending;
   Alcotest.(check (list string))
-    "replayed seqs once, then the live frames in order"
-    (List.map snd (live_frames ())) written
+    "the acceptance, the replay, then the live frames once each"
+    (acceptance :: List.map snd (live_frames ())) written
+
+let delta () = live_event_of_type Ag_ui.Text_message_content
+let finished () = live_event_of_type Ag_ui.Run_finished
+
+let failure =
+  Ag_ui.run_error ~thread_id:"keeper:replay" ~run_id:"keeper-operation-run-op"
+    ~message:"failed" ~code:"failed" ()
+
+(* The missed terminal is asked after the replay, with the seqs it wrote, and
+   goes out behind the live event that arrived during the replay. *)
+let test_the_missed_terminal_follows_the_live_events_of_the_replay () =
+  let delta = delta () in
+  let asked_with = ref [] in
+  let missed_terminal ~replayed =
+    asked_with := Hashtbl.fold (fun seq () acc -> seq :: acc) replayed [];
+    Some failure
+  in
+  let written, ending =
+    serve_accepted ~replay:[ 0, delta ] ~missed_terminal
+      ~after_send:(fun n -> if n = 2 then [ Stream.For_testing.Live (Some 1, delta) ] else [])
+      ()
+  in
+  Alcotest.(check (list int)) "asked with the replayed seqs" [ 0 ] !asked_with;
+  Alcotest.(check (option string)) "the missed terminal ends the stream" (Some "Finished") ending;
+  Alcotest.(check (list string)) "acceptance, replay, live, then the terminal without a seq"
+    [ acceptance; Ag_ui.event_to_sse ~id:0 delta; Ag_ui.event_to_sse ~id:1 delta
+    ; Ag_ui.event_to_sse failure ]
+    written
+
+(* An operation that had settled, or a replay that wrote the terminal, ends
+   the stream once the live events queued during the replay are out. *)
+let test_a_settled_turn_ends_after_the_live_events_of_the_replay () =
+  let delta = delta () and finished = finished () in
+  let arriving n = if n = 2 then [ Stream.For_testing.Live (Some 1, delta) ] else [] in
+  let written, ending = serve_accepted ~replay:[ 0, delta ] ~settled:true ~after_send:arriving () in
+  Alcotest.(check (option string)) "a settled operation ends the stream" (Some "Finished") ending;
+  Alcotest.(check (list string)) "acceptance, replay, then the queued live event"
+    [ acceptance; Ag_ui.event_to_sse ~id:0 delta; Ag_ui.event_to_sse ~id:1 delta ] written;
+  let arriving n = if n = 2 then [ Stream.For_testing.Live (Some 2, delta) ] else [] in
+  let written, ending =
+    serve_accepted ~replay:[ 0, delta; 1, finished ] ~after_send:arriving ()
+  in
+  Alcotest.(check (option string)) "a replayed terminal ends the stream" (Some "Finished") ending;
+  Alcotest.(check (list string)) "the replay with its terminal, then the queued live event"
+    [ acceptance; Ag_ui.event_to_sse ~id:0 delta; Ag_ui.event_to_sse ~id:1 finished
+    ; Ag_ui.event_to_sse ~id:2 delta ]
+    written
+
+(* A client gone during the replay ends the stream there: nothing more is
+   written and the missed terminal is not looked up. *)
+let test_a_client_gone_during_the_replay_ends_before_the_live_part () =
+  let delta = delta () in
+  let asked = ref false in
+  let written, ending =
+    serve_accepted ~replay:[ 0, delta; 1, delta ] ~closed_from:3
+      ~missed_terminal:(fun ~replayed:_ -> asked := true; None)
+      ~queued:[ Stream.For_testing.Live (Some 2, delta) ] ()
+  in
+  Alcotest.(check (option string)) "no live part" None ending;
+  Alcotest.(check bool) "the missed terminal was not looked up" false !asked;
+  Alcotest.(check (list string)) "the acceptance and the first replay frame"
+    [ acceptance; Ag_ui.event_to_sse ~id:0 delta ] written
+
+let idle_name = function
+  | Pump.Keepalive -> "Keepalive"
+  | Pump.Quiet -> "Quiet"
+  | Pump.Finish -> "Finish"
+
+(* A quiet stream ends when its client is gone without reading the operation,
+   keeps a queued or running operation's stream alive, ends a settled one so
+   the TUI settles it from the record, and waits when the record is
+   unreadable. *)
+let test_a_quiet_stream_follows_the_client_and_the_operation () =
+  let idle ?(client_gone = false) state =
+    idle_name
+      (Stream.For_testing.keeper_chat_idle ~client_gone:(fun () -> client_gone)
+         ~operation_state:(fun () -> state))
+  in
+  let module Op = Keeper_owner.Chat_operation in
+  Alcotest.(check string) "the client is gone"
+    "Finish"
+    (idle_name
+       (Stream.For_testing.keeper_chat_idle ~client_gone:(fun () -> true)
+          ~operation_state:(fun () -> Alcotest.fail "the operation was read")));
+  Alcotest.(check string) "queued" "Keepalive" (idle (Some Op.Queued));
+  Alcotest.(check string) "running" "Keepalive" (idle (Some (Op.Running { started_at = 1.0 })));
+  Alcotest.(check string) "settled" "Finish"
+    (idle (Some (Op.Succeeded { completed_at = 2.0; outcome_ref = "receipt" })));
+  Alcotest.(check string) "unreadable" "Quiet" (idle None)
 
 (* Seq 4's append failed (fail-open) and the replay wrote 5. Live 5 is the
    replay's duplicate; 4, 6 and an event that never went through the bus go
@@ -543,6 +656,14 @@ let () =
             test_dedup_keeps_the_event_the_journal_lost
         ; Alcotest.test_case "live events queued during the replay follow it" `Quick
             test_live_events_queued_during_the_replay_follow_it
+        ; Alcotest.test_case "the missed terminal follows the live events of the replay" `Quick
+            test_the_missed_terminal_follows_the_live_events_of_the_replay
+        ; Alcotest.test_case "a settled turn ends after the live events of the replay" `Quick
+            test_a_settled_turn_ends_after_the_live_events_of_the_replay
+        ; Alcotest.test_case "a client gone during the replay ends before the live part" `Quick
+            test_a_client_gone_during_the_replay_ends_before_the_live_part
+        ; Alcotest.test_case "a quiet stream follows the client and the operation" `Quick
+            test_a_quiet_stream_follows_the_client_and_the_operation
         ; Alcotest.test_case "the step drops only what the replay wrote" `Quick
             test_the_step_drops_only_what_the_replay_wrote
         ; Alcotest.test_case "terminals and Settled end the stream" `Quick

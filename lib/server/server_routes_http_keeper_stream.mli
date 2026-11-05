@@ -281,8 +281,12 @@ val handle_keeper_chat_stream :
     replay, then serves the live events of the turn through
     {!Server_sse_pump}. The Keeper turn only puts its events in that
     stream's queue. The stream ends after the turn's terminal, when the
-    operation settled without one, or when the client is gone, stalled or a
-    full queue behind; the client then reconnects with [since_seq]. A failure of the stream is logged and does not fail [sw]. *)
+    operation settled without one, when the client is gone, when a frame
+    has waited 90 seconds for the socket, or when 4,096 events wait in the
+    queue. The client then reconnects with [since_seq] and gets the
+    journaled events back; a queued event whose journal append failed is
+    not in the journal and does not come back. A failure of the stream is
+    logged and does not fail [sw]. *)
 
 (** {1 Owner operation turn execution} *)
 
@@ -453,6 +457,32 @@ module For_testing : sig
   (** The frame the stream writes for an item: nothing for a seq the replay
       already wrote, the last frame for a terminal, and the end for
       [Settled]. *)
+
+  val keeper_chat_idle :
+    client_gone:(unit -> bool) ->
+    operation_state:(unit -> Keeper_owner.Chat_operation.state option) ->
+    Server_sse_pump.idle
+  (** What a quiet stream does: ends when the client is gone (without
+      reading the operation), sends a keepalive while the operation is
+      queued or running, ends when it settled, and waits when its record
+      cannot be read ([None]). *)
+
+  val serve_accepted_chat :
+    send:(string -> Server_sse_response.outcome) ->
+    queue:chat_stream_item Server_sse_pump.Queue.t ->
+    acceptance_frame:string ->
+    replay:(unit -> (int * Ag_ui.event) list) ->
+    missed_terminal:(replayed:(int, unit) Hashtbl.t -> Ag_ui.event option) ->
+    settled:bool ->
+    idle:(unit -> Server_sse_pump.idle) ->
+    clock:_ Eio.Time.clock ->
+    ping_interval_s:float ->
+    Server_sse_pump.ending option
+  (** The handler after an accepted submit: writes the acceptance and the
+      replay, queues the missed terminal and [Settled] (when [settled] or the
+      replay wrote a terminal) behind the live events that arrived meanwhile,
+      then runs the pump. [None] when the client was gone before the live
+      part. *)
   val has_connector_context : keeper_chat_stream_request -> bool
   val has_external_speaker : keeper_chat_stream_request -> bool
   val message_for_request : keeper_chat_stream_request -> string

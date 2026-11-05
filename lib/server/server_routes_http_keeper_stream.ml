@@ -3763,39 +3763,44 @@ let keeper_chat_step ~replayed : chat_stream_item -> Server_sse_pump.step = func
   | Settled -> Stop
 ;;
 
-let keeper_chat_idle ~base_path ~keeper_name ~operation_id ~request_id response
-  : Server_sse_pump.idle
-  =
-  if Server_sse_response.is_closed response
+(* The operation's state for the heartbeat, or [None] after a warning when
+   the record cannot be read. *)
+let read_operation_state ~base_path ~keeper_name ~operation_id request_id =
+  match Keeper_owner_registry.exact_operation ~base_path ~keeper_name request_id with
+  | Ok (Some operation) -> Some operation.Keeper_owner.Chat_operation.state
+  | Ok None -> None
+  | Error error ->
+    Log.Keeper.warn
+      "keeper chat heartbeat could not read operation=%s: %s"
+      operation_id
+      (Keeper_owner_registry.command_error_to_string error);
+    None
+  | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
+  | exception exn ->
+    Log.Keeper.warn
+      "keeper chat heartbeat operation read raised operation=%s: %s"
+      operation_id
+      (Printexc.to_string exn);
+    None
+;;
+
+let keeper_chat_idle ~client_gone ~operation_state : Server_sse_pump.idle =
+  if client_gone ()
   then Finish
-  else (
-    let state =
-      match Keeper_owner_registry.exact_operation ~base_path ~keeper_name request_id with
-      | Ok (Some operation) -> Some operation.Keeper_owner.Chat_operation.state
-      | Ok None -> None
-      | Error error ->
-        Log.Keeper.warn
-          "keeper chat heartbeat could not read operation=%s: %s"
-          operation_id
-          (Keeper_owner_registry.command_error_to_string error);
-        None
-      | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
-      | exception exn ->
-        Log.Keeper.warn
-          "keeper chat heartbeat operation read raised operation=%s: %s"
-          operation_id
-          (Printexc.to_string exn);
-        None
-    in
+  else
     (* A queued operation has no journal events until its Keeper gets the
        slot. The comment keeps the stream alive during that silence, so a
        healthy queue does not trip the TUI's per-chunk idle bound. It proves
        only transport liveness, not model progress. *)
-    match operation_heartbeat_decision state with
+    match operation_heartbeat_decision (operation_state ()) with
     | `Send_comment -> Keepalive
     | `Finish_stream ->
       (* The operation settled without a wire terminal. Closing lets the TUI
-         settle its exact request from the operation record. *)
+         settle its exact request from the operation record. The live sink
+         may queue this operation's terminal while the record is read. If the
+         close wins, the client sees a stream that ended after acceptance
+         without a terminal: the same case, settled from the operation
+         record, so the race changes no outcome. *)
       Finish
     | `Retain_idle_timeout ->
       (* The operation record cannot be read. A comment would hold the stream
@@ -3803,7 +3808,41 @@ let keeper_chat_idle ~base_path ~keeper_name ~operation_id ~request_id response
          wire terminal, so nothing is written and the TUI's idle bound stays
          in force. Cost: with no write, a departed client goes unnoticed
          until the record is readable again. *)
-      Quiet)
+      Quiet
+;;
+
+(* What a Keeper chat stream writes after an accepted submit, in order
+   (RFC-0493 §3.2): the acceptance, the reconnect replay, then the live
+   events through the pump. [missed_terminal] is asked after the replay, and
+   its marker and [Settled] go behind the live events queued meanwhile.
+   [None] when the client was gone before the live part. *)
+let serve_accepted_chat ~send ~queue ~acceptance_frame ~replay ~missed_terminal ~settled
+    ~idle ~clock ~ping_interval_s =
+  match (send acceptance_frame : Server_sse_response.outcome) with
+  | Closed | Stalled -> None
+  | Written ->
+    (* Seqs the replay wrote to this stream. Only this fiber reads and
+       writes it. *)
+    let replayed : (int, unit) Hashtbl.t = Hashtbl.create 64 in
+    let rec send_replay ~terminal_written = function
+      | [] -> Some terminal_written
+      | (seq, event) :: rest ->
+        Hashtbl.replace replayed seq ();
+        (match (send (Ag_ui.event_to_sse ~id:seq event) : Server_sse_response.outcome) with
+         | Written ->
+           send_replay ~terminal_written:(terminal_written || ag_ui_terminal_event event) rest
+         | Closed | Stalled -> None)
+    in
+    (match send_replay ~terminal_written:false (replay ()) with
+     | None -> None
+     | Some terminal_written ->
+       Option.iter
+         (fun event -> Server_sse_pump.Queue.push queue (Missed_terminal event))
+         (missed_terminal ~replayed);
+       if terminal_written || settled then Server_sse_pump.Queue.push queue Settled;
+       Some
+         (Server_sse_pump.run ~queue ~step:(keeper_chat_step ~replayed) ~idle ~clock
+            ~ping_interval_s ~send))
 ;;
 
 let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payload =
@@ -3811,7 +3850,6 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
     Server_sse_response.respond
       ~clock
       ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
-      ~flush_headers_immediately:true
       reqd
       (Httpun.Response.create ~headers:(keeper_chat_stream_headers (get_origin request)) `OK)
   in
@@ -3833,8 +3871,9 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
       let queue =
         Server_sse_pump.Queue.create ~max_queued_events:keeper_chat_max_queued_events
       in
-      (* The sink is registered before the submit, so no event of this
-         operation is published before it. Nothing between registering and
+      (* The sink is registered before the submit, so every event published
+         for this operation from here on reaches this stream; what came before
+         reaches it through the replay. Nothing between registering and
          putting the removal on the switch can be cancelled. A publisher still
          holding the removed sink only fills a queue nobody takes from. *)
       let unregister =
@@ -3842,9 +3881,6 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
           (fun ~seq event -> Server_sse_pump.Queue.push queue (Live (seq, event)))
       in
       Eio.Switch.on_release stream_sw unregister;
-      (* Seqs the reconnect replay wrote to this stream. Only this fiber reads
-         and writes it. *)
-      let replayed : (int, unit) Hashtbl.t = Hashtbl.create 64 in
       let acceptance_frame (acceptance, interactive) =
         let operation = acceptance.Keeper_owner.operation in
         let state =
@@ -3900,51 +3936,18 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
           (* A first submit: nothing journaled, nothing asked for. *)
           []
       in
-      (* Writes the replay in order and says whether the stream goes on, and
-         whether the replay carried a terminal. *)
-      let rec send_replay ~terminal_written = function
-        | [] -> `Live terminal_written
-        | (seq, event) :: rest ->
-          Hashtbl.replace replayed seq ();
-          (match send (Ag_ui.event_to_sse ~id:seq event) with
-           | Written ->
-             send_replay ~terminal_written:(terminal_written || ag_ui_terminal_event event) rest
-           | Closed | Stalled -> `Ended)
-      in
-      let serve_live (acceptance : Keeper_owner.operation_acceptance) ~terminal_written =
-        let operation = acceptance.operation in
-        Option.iter
-          (fun event -> Server_sse_pump.Queue.push queue (Missed_terminal event))
-          (operation_terminal_after_replay ~base_path ~keeper_name:payload.name ~operation ~replayed);
-        if terminal_written || Keeper_owner.Chat_operation.is_terminal operation.state
-        then Server_sse_pump.Queue.push queue Settled;
-        match
-          Server_sse_pump.run
-            ~queue
-            ~step:(keeper_chat_step ~replayed)
-            ~idle:(fun () ->
-              keeper_chat_idle ~base_path ~keeper_name:payload.name ~operation_id
-                ~request_id:payload.request_id response)
-            ~clock
-            ~ping_interval_s:Server_mcp_transport_http_headers.sse_ping_interval_s
-            ~send
-        with
-        (* [Server_sse_response.send] logs a stalled frame with the request path. *)
-        | Client_gone | Stalled | Finished -> ()
-        | Fell_behind ->
-          Log.Keeper.warn ~keeper_name:payload.name
-            "keeper chat stream closed operation=%s: the client was %d events behind"
-            operation_id keeper_chat_max_queued_events
-      in
       let submit_error_frame public =
         Ag_ui.event_to_sse
           (Ag_ui.run_error ~thread_id
              ~run_id:("keeper-operation-run-" ^ public.Server_keeper_chat_public_error.incident_id)
              ~message:public.message ~code:public.code ())
       in
-      (* The submit does not wait for the client: a closed stream cannot roll
-         back a durable acceptance, and the frames are built (and their
-         failures logged) whether or not the client is still there. *)
+      (* The retry frame goes first: it sets the client's reconnect delay, and
+         the client hears from the stream before the submit returns. *)
+      let retry = send (Printf.sprintf "retry: %d\n\n" sse_dashboard_retry_backoff_ms) in
+      (* The submit happens whether or not the client is still there: a closed
+         stream cannot roll back a durable acceptance, and the frames are
+         built (and their failures logged) either way. *)
       let submitted =
         let open Result.Syntax in
         let* source =
@@ -3983,16 +3986,33 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
             (Keeper_owner_registry.command_error_to_string error);
           Error (submit_error_frame public)
       in
-      match send (Printf.sprintf "retry: %d\n\n" sse_dashboard_retry_backoff_ms), opening with
+      match retry, opening with
       | (Closed | Stalled), _ -> ()
       | Written, Error frame -> ignore (send frame : Server_sse_response.outcome)
       | Written, Ok (acceptance, frame) ->
-        (match send frame with
-         | Closed | Stalled -> ()
-         | Written ->
-           (match send_replay ~terminal_written:false (replay_frames acceptance) with
-            | `Ended -> ()
-            | `Live terminal_written -> serve_live acceptance ~terminal_written)))
+        let operation = acceptance.operation in
+        (match
+           serve_accepted_chat ~send ~queue ~acceptance_frame:frame
+             ~replay:(fun () -> replay_frames acceptance)
+             ~missed_terminal:(fun ~replayed ->
+               operation_terminal_after_replay ~base_path ~keeper_name:payload.name
+                 ~operation ~replayed)
+             ~settled:(Keeper_owner.Chat_operation.is_terminal operation.state)
+             ~idle:(fun () ->
+               keeper_chat_idle
+                 ~client_gone:(fun () -> Server_sse_response.is_closed response)
+                 ~operation_state:(fun () ->
+                   read_operation_state ~base_path ~keeper_name:payload.name ~operation_id
+                     payload.request_id))
+             ~clock
+             ~ping_interval_s:Server_mcp_transport_http_headers.sse_ping_interval_s
+         with
+         (* [Server_sse_response.send] logs a stalled frame with the request path. *)
+         | None | Some (Client_gone | Stalled | Finished) -> ()
+         | Some Fell_behind ->
+           Log.Keeper.warn ~keeper_name:payload.name
+             "keeper chat stream closed operation=%s: the client was %d events behind"
+             operation_id keeper_chat_max_queued_events))
     with
     | () -> ()
     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
@@ -4017,6 +4037,8 @@ module For_testing = struct
     | Missed_terminal of Ag_ui.event
     | Settled
   let keeper_chat_step = keeper_chat_step
+  let keeper_chat_idle = keeper_chat_idle
+  let serve_accepted_chat = serve_accepted_chat
   let has_connector_context = has_connector_context
   let has_external_speaker = has_external_speaker
   let message_for_request = message_for_request

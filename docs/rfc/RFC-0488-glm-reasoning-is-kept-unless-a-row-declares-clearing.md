@@ -113,6 +113,8 @@ replay 정책은 `supports_reasoning` 까지 셋이 정한다.
 
 멤버를 빼도 명시한 enable 은 실린다. 지금은 `No_toggle` 갈래가 멤버가 있는지로 `thinking` 객체를 만들어서, 멤버만 빼면 `type` 도 사라진다. 그래서 갈래를 멤버가 아니라 선언된 wire(`dialect.preserve_wire`)로 나눈다. 멤버도 같은 함수 안에서 구하므로, preflight 와 serializer 가 같은 fields 와 수신증(`explicit_enable_receipt`)을 얻는다. wire 필드 이름을 builder 한 함수에만 두라는 RFC-AC-029 S2.1 과도 맞는다.
 
+이 갈래의 수신증은 `Explicit_enable_not_encoded` 다. 행이 toggle wire 를 선언하지 않았으므로 `type` 을 실어도 토글을 인코딩했다고 주장하지 않는다. admission 은 지금처럼 `supports_reasoning` 으로 정한다(`complete_common.ml` `thinking_control_request_rejection`). reasoning 이 본래 켜진 행은 통과하고, 그렇지 않은 행의 enable 은 `Enable_not_declared` 로 거절된다. 지금 preflight 가 이 갈래에서 받는 수신증도 같은 값이다.
+
 `Some false` 는 지금처럼 지운다. 요청 크기를 줄이려는 운영자의 선택이고, 이 RFC 는 그 선택을 막지 않는다.
 
 ### 3.3 기본 설정의 GLM 행은 보존을 선언한다
@@ -132,7 +134,7 @@ replay 정책은 `supports_reasoning` 까지 셋이 정한다.
 - 보존을 선언한 GLM 요청은 완료된 턴의 reasoning 만큼 커진다. 그 부분은 직전 요청과 같은 앞부분이라 캐시에서 읽힌다(§2 문서). 비용은 `docs/constitution.xml` `cost_and_observability` 를 따른다.
 - 구조화 출력·vision subcall 은 그대로 `clear_thinking: true` 를 보낸다(`preserve_thinking = Some false`). 한 번만 부르는 요청이라 이전 턴이 없다.
 - `preserve_thinking` 이 비어 있는 GLM 요청은 `thinking.clear_thinking` 멤버가 빠진다. Coding Plan 은 보존하고 표준 endpoint 는 지운다.
-- preflight 수신증이 바뀌는 행은 `OpenAI_compat` kind 로 GLM wire 를 선언하고 toggle wire 가 없는 행이다. 명시한 enable 이 `Explicit_enable_not_encoded` 에서 `Explicit_enable_encoded` 가 된다. serializer 는 지금도 그 enable 을 싣는다. 기본 catalog(`packages/agent_core/models.toml`)에서 이 wire 를 선언한 행은 모두 `provider_name = "glm"` 이라 `Glm_chat` codec 이고, preflight 는 그 codec 에서 artifact 를 만들지 않는다.
+- preflight 의 admission 은 바뀌지 않는다. codec 은 `config.kind` 로만 정해지므로(`provider_http_codec.ml` `of_config`), `OpenAI_compat` kind 로 GLM 행(`glm-4`, `glm-4v`, `glm-4-flash` 처럼 `supports_reasoning = false` 인 행 포함)을 부르면 preflight 가 artifact 를 만든다. 그 행들의 enable 은 지금처럼 `Enable_not_declared` 로 거절된다.
 
 ## 6. 검증
 

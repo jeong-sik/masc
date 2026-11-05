@@ -767,8 +767,10 @@ val wrap_words : max_cells:int -> string -> string list
     A word wider than the budget breaks after its last [_], [:], [/], [.] or
     [-] that leaves the row at least half full, so the parts of a name stay
     whole: [configured_keeper_without_runtime_meta] in 30 cells wraps as
-    [configured_keeper_without_] and [runtime_meta]. A stretch with no such
-    break is split between complete UTF-8 scalars, as {!split_cells} does. *)
+    [configured_keeper_without_] and [runtime_meta]. A mark that combines with
+    a separator goes with it, and the bytes of an escape are not separators. A
+    stretch with no such break is split between complete UTF-8 scalars, as
+    {!split_cells} does, and so is a word that is not valid UTF-8. *)
 
 val boxed_rows : inner:int -> string -> string list
 (** The rows a box body spends on [content] at inner width [inner]: one row per

@@ -2617,7 +2617,7 @@ let test_execution_trust_uses_narrow_keeper_projection () =
     | Ok meta -> meta
     | Error error -> failf "meta fixture: %s" error
   in
-  (* #36066: both dashboard projections row an undeclared keeper as
+  (* #36066: the dashboard rows an undeclared keeper as
      [invalid_profile_dashboard_row], which carries no [trace_id]. *)
   Masc_test_deps.declare_fixture_keeper
     ~base_path:config.Workspace.base_path ~sandbox_profile:None name;
@@ -2631,34 +2631,6 @@ let test_execution_trust_uses_narrow_keeper_projection () =
     | [ row ] -> row
     | rows -> failf "expected one execution-trust row, got %d" (List.length rows)
   in
-  let full_row =
-    match
-      Dashboard_http_keeper.keepers_dashboard_json ~compact:true config
-      |> member "keepers"
-      |> to_list
-    with
-    | [ full_row ] -> full_row
-    | rows -> failf "expected one full Keeper row, got %d" (List.length rows)
-  in
-  let full_row_field key =
-    Option.value ~default:`Null (Json_util.assoc_member_opt key full_row)
-  in
-  let expected_row =
-    `Assoc
-      (List.map
-         (fun key -> key, full_row_field key)
-         [ "name"
-         ; "keeper_id"
-         ; "phase"
-         ; "pipeline_stage"
-         ; "status"
-         ; "trace_id"
-         ; "current_task_id"
-         ; "trust"
-         ])
-  in
-  check bool "narrow row preserves the full projection wire values" true
-    (Yojson.Safe.equal expected_row row);
   let keys =
     match row with
     | `Assoc fields -> List.map fst fields |> List.sort String.compare
@@ -3070,92 +3042,6 @@ let test_goal_source_failure_is_not_empty () =
   Sys.remove mirror;
   check int "both absent is a fresh store" 0
     (planning () |> member "goals" |> to_list |> List.length)
-
-(* RFC-0444 §2.3 row 4: the keeper detail's [active_goals_tree] member is
-   the same envelope as Planning and the Goal tree, not a second shape for
-   one error code. *)
-let test_keeper_detail_active_goals_tree_uses_goal_store_envelope () =
-  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
-  ignore (Workspace.init config ~agent_name:None);
-  let name = "goal-envelope-keeper" in
-  Fun.protect
-    ~finally:(fun () ->
-      Masc.Keeper_registry.For_testing.unregister ~base_path:config.base_path name)
-    (fun () ->
-      let meta =
-        match
-          Masc_test_deps.meta_of_json_fixture
-            (`Assoc [ "name", `String name; "trace_id", `String (name ^ "-trace") ])
-        with
-        | Ok meta -> meta
-        | Error error -> fail ("meta fixture: " ^ error)
-      in
-      (* The per-keeper enrich resolves the keeper's runtime id through
-         [Keeper_meta_contract.runtime_id_of_meta], which reads the process
-         default runtime and raises when none was initialized (RFC-0206
-         §2.1: no silent fallback). This case runs before the groups that
-         call [Runtime.init_default], so it initializes the same fixture
-         runtime itself; without it the worker raised, the degraded row
-         raised again on the same read, and the keeper vanished from the
-         payload before [active_goals_tree] was ever built. *)
-      let runtime_path =
-        Config_dir_resolver.runtime_toml_path_for_base_path
-          ~base_path:config.Workspace.base_path
-      in
-      mkdir_p (Filename.dirname runtime_path);
-      write_file runtime_path config_sync_runtime_toml;
-      (match Runtime.init_default ~config_path:runtime_path with
-       | Ok () -> ()
-       | Error error -> fail ("runtime init: " ^ error));
-      (* #36066: both dashboard projections row an undeclared keeper as
-         [invalid_profile_dashboard_row], which carries no [trace_id]. *)
-      Masc_test_deps.declare_fixture_keeper
-        ~base_path:config.Workspace.base_path ~sandbox_profile:None name;
-      (match Masc.Keeper_meta_store.replace_snapshot config meta with
-       | Ok () -> ()
-       | Error error -> fail ("write meta: " ^ error));
-      ignore
-        (Masc.Keeper_registry.For_testing.register ~base_path:config.base_path name meta);
-      (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Keeper detail source"
-               ~metric:"visible goals" ~target_value:"1" () with
-       | Ok _ -> ()
-       | Error error -> fail (Goal_store.write_error_to_string error));
-      let primary = Goal_store.goals_path config in
-      let open Yojson.Safe.Util in
-      let invalid_schema =
-        match Yojson.Safe.from_string (Fs_compat.load_file primary) with
-        | `Assoc fields ->
-            `Assoc (List.map (fun (key, value) ->
-              if key = "goals" then
-                key, `List (value |> to_list |> List.map (function
-                  | `Assoc fields -> `Assoc (List.remove_assoc "criterion_revision" fields)
-                  | json -> json))
-              else key, value) fields)
-        | _ -> fail "saved Goal store must be an object"
-      in
-      Fs_compat.save_file primary (Yojson.Safe.to_string invalid_schema);
-      let json = Dashboard_http_keeper.keepers_dashboard_json config in
-      let row =
-        match
-          json |> member "keepers" |> to_list
-          |> List.find_opt (fun row -> row |> member "name" |> to_string = name)
-        with
-        | Some row -> row
-        | None -> fail "registered keeper is missing from the detail envelope"
-      in
-      let tree = row |> member "active_goals_tree" in
-      check bool "keeper active_goals_tree not successful" false (tree |> member "ok" |> to_bool);
-      check string "keeper active_goals_tree error_code" "goal_store_unavailable"
-        (tree |> member "error_code" |> to_string);
-      check string "keeper active_goals_tree reason" "schema_rejected"
-        (tree |> member "reason" |> to_string);
-      check string "keeper active_goals_tree field" "criterion_revision"
-        (tree |> member "field" |> to_string);
-      check string "keeper active_goals_tree file" primary (tree |> member "file" |> to_string);
-      check string "keeper active_goals_tree reset_step" "repair_field"
-        (tree |> member "reset_step" |> to_string);
-      check bool "keeper active_goals_tree carries no rendered line" true
-        (member "error" tree = `Null))
 
 let test_goal_link_source_failure_preserves_unrelated_planning () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
@@ -8147,75 +8033,6 @@ let test_config_post_round_trips_typed_skills_patch () =
             "keeper.tools.native"))
 ;;
 
-(* #10710 regression: [keepers_dashboard_json] must aggregate every persisted
-   keeper through the bounded fiber pool. Before the fiber-batch change the
-   per-keeper enrich ran as an unbounded fan-out; this pins that all registered
-   keepers still surface in the envelope (and that the pool cap stays a sane
-   positive bound). *)
-let test_keepers_dashboard_json_fiber_batch_collects_all_keepers () =
-  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
-  ignore (Workspace.init config ~agent_name:None);
-  let names = [ "fiber-a"; "fiber-b"; "fiber-c" ] in
-  Fun.protect
-    ~finally:(fun () ->
-      List.iter
-        (fun name ->
-          Masc.Keeper_registry.For_testing.unregister
-            ~base_path:config.base_path
-            name)
-        names)
-    (fun () ->
-      List.iter
-        (fun name ->
-          let meta =
-            match
-              Masc_test_deps.meta_of_json_fixture
-                (`Assoc
-                  [ "name", `String name
-                  ; "trace_id", `String (name ^ "-trace")
-                  ])
-            with
-            | Ok meta -> meta
-            | Error error -> fail ("meta fixture: " ^ error)
-          in
-          (* #36066: both dashboard projections row an undeclared keeper as
-             [invalid_profile_dashboard_row], which carries no [trace_id]. *)
-          Masc_test_deps.declare_fixture_keeper
-            ~base_path:config.Workspace.base_path ~sandbox_profile:None name;
-          (match Masc.Keeper_meta_store.replace_snapshot config meta with
-           | Ok () -> ()
-           | Error error -> fail ("write meta: " ^ error));
-          ignore
-            (Masc.Keeper_registry.For_testing.register
-               ~base_path:config.base_path
-               name
-               meta))
-        names;
-      let json = Dashboard_http_keeper.keepers_dashboard_json config in
-      let open Yojson.Safe.Util in
-      let keeper_rows = json |> member "keepers" |> to_list in
-      let row_names =
-        keeper_rows
-        |> List.map (fun row -> row |> member "name" |> to_string)
-        |> List.sort String.compare
-      in
-      check (list string) "fiber pool collects every registered keeper"
-        (List.sort String.compare names)
-        row_names;
-      (* Since #36066 an undeclared keeper also yields a row that carries its
-         name, so the name check alone would pass on the refusal path. The
-         trace_id is written only by the per-keeper enrich this test pins. *)
-      List.iter
-        (fun row ->
-          let name = row |> member "name" |> to_string in
-          check string (name ^ " row came through the meta enrich")
-            (name ^ "-trace")
-            (row |> member "trace_id" |> to_string))
-        keeper_rows;
-      check int "total mirrors collected keeper count"
-        (List.length names)
-        (json |> member "total" |> to_int))
-
 (* #36101: a keeper whose dashboard worker raised used to drop out of the list
    when its degraded row could not be built either, and the response still said
    [ok]. Whatever the meta looks like, the keeper keeps a row that carries its
@@ -8814,8 +8631,6 @@ let () =
             test_goal_proof_surfaces_share_persisted_criterion_truth;
           test_case "Goal source failure is not empty" `Quick
             test_goal_source_failure_is_not_empty;
-          test_case "keeper detail active_goals_tree uses the goal store envelope" `Quick
-            test_keeper_detail_active_goals_tree_uses_goal_store_envelope;
           test_case "Goal link source error preserves unrelated planning" `Quick
             test_goal_link_source_failure_preserves_unrelated_planning;
           test_case "planning payload keeps UTF-8 valid after truncation" `Quick
@@ -9092,7 +8907,6 @@ let () =
             test_config_post_round_trips_typed_skills_patch;
         ] );
       ( "defined but never registered until task-1768",
-          [ Alcotest.test_case "keepers dashboard json fiber batch collects all keepers" `Quick test_keepers_dashboard_json_fiber_batch_collects_all_keepers
-          ; Alcotest.test_case "a keeper whose worker raised keeps a row" `Quick test_keeper_row_after_worker_failure_is_never_absent
+          [ Alcotest.test_case "a keeper whose worker raised keeps a row" `Quick test_keeper_row_after_worker_failure_is_never_absent
           ] );
     ]

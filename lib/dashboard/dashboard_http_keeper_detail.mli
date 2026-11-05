@@ -1,6 +1,6 @@
-(** Dashboard_http_keeper_detail — metrics window computation for keeper dashboard.
+(** Dashboard_http_keeper_detail — metrics window computation for the keeper
+    metrics API.
 
-    Extracts the metrics series iteration loop from keepers_dashboard_json.
     Re-exports [Dashboard_http_keeper_metrics] for downstream consumers. *)
 
 include module type of Dashboard_http_keeper_metrics

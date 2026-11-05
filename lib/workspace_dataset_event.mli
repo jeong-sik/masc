@@ -27,6 +27,14 @@ type dataset =
           read by the setup account-emails route the Metrics and Config
           models panes draw. A login run in a terminal has no writer here
           and is not announced. *)
+  | Provider_usage
+      (** A provider usage report was recorded: the windows of the resolved
+          document and the points of the provider-usage-history store moved
+          together. *)
+  | Provider_standing
+      (** A runtime's quota or rate-limit standing in the resolved document
+          changed, a reset passing included, or the standing stopped or
+          started building. The history does not move with it. *)
   | Keeper_oauth_attempts of { keeper : string }
       (** The OAuth login attempts {!Keeper_oauth_pending} holds for
           [keeper], which [GET /api/v1/keepers/oauth/attempt-status] reads.
@@ -46,6 +54,8 @@ module Kind : sig
     | Harness_verdicts
     | Clients
     | Account_emails
+    | Provider_usage
+    | Provider_standing
     | Keeper_oauth_attempts
 
   val to_wire : t -> string

@@ -17,3 +17,13 @@ val build : generated_at_iso:string -> config:Workspace.config -> Yojson.Safe.t
     live [Runtime] singleton state. [config] supplies the full keeper name
     list (bug #14: an assignments-only listing misses keepers riding
     [\[runtime\].default] with no explicit [\[runtime.assignments\]] entry). *)
+
+val standing : now:float -> config:Workspace.config -> Yojson.Safe.t
+(** {!build_at} with an empty [generated_at_iso]: two readings are equal
+    unless a runtime's standing, a usage window or the catalog changed. *)
+
+val next_standing_change_at : now:float -> float option
+(** The earliest future time a runtime's quota window or provider-stated
+    rate limit ends, when its standing in {!standing} changes with no
+    write. *)
+

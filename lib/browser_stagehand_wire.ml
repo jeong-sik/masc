@@ -135,9 +135,9 @@ let decode payload =
 type init = { client_version : string; browser_cdp_url : string }
 type sentence_timeout_ms = Sentence_timeout_ms of int
 
-(* BrowserInstruct formerly abandoned the caller at 120 s. Keep that one
-   operation limit, but let the extension and the model responder see it
-   before the longer Browser Lane transport wait ends. *)
+(* BrowserInstruct has one 120 s operation limit, which the extension and
+   the model responder see before the longer Browser Lane transport wait
+   ends. *)
 let sentence_timeout = Sentence_timeout_ms 120_000
 let timeout_ms (Sentence_timeout_ms timeout) = timeout
 

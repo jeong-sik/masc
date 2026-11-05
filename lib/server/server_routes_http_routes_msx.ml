@@ -1,8 +1,7 @@
 (** HTTP routes for the workspace MSX machine (RFC-0439 §3.7, RFC #38695).
 
     Spectating the machine goes through
-    [GET /api/v1/lane-addons/live?source_kind=msx_capture] (RFC #38695);
-    the legacy per-machine frame route has been removed.
+    [GET /api/v1/lane-addons/live?source_kind=msx_capture] (RFC #38695).
 
     [POST /api/v1/msx/press] lets the human at the TUI press keys on the same
     machine a keeper is playing (RFC-0439 §3.3): [{keys:[..], hold_frames?,

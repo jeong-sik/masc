@@ -179,6 +179,33 @@ let test_find_substring_rejects_negative_pos () =
     "String_util.find_substring: negative position")
     (fun () -> ignore (SU.find_substring ~pos:(-1) "abc" "a"))
 
+let test_rfind_substring_basic () =
+  check_int_option "last of several" (Some 8)
+    (SU.rfind_substring "ab--ab--ab" "ab");
+  check_int_option "single match" (Some 2)
+    (SU.rfind_substring "xxabxx" "ab");
+  check_int_option "absent" None
+    (SU.rfind_substring "xxabxx" "ba");
+  check_int_option "overlapping candidates take the last" (Some 1)
+    (SU.rfind_substring "aaaa" "aaa");
+  check_int_option "UTF-8 bytes" (Some 6)
+    (SU.rfind_substring "가나가" "가")
+
+let test_rfind_substring_boundaries () =
+  check_int_option "whole string" (Some 0) (SU.rfind_substring "abc" "abc");
+  check_int_option "match at the last byte" (Some 2)
+    (SU.rfind_substring "abc" "c");
+  check_int_option "match at the first byte only" (Some 0)
+    (SU.rfind_substring "abc" "a");
+  check_int_option "needle longer than haystack" None
+    (SU.rfind_substring "abc" "abcd");
+  check_int_option "empty haystack" None (SU.rfind_substring "" "a")
+
+let test_rfind_substring_empty_needle () =
+  check_int_option "empty needle returns the end" (Some 3)
+    (SU.rfind_substring "abc" "");
+  check_int_option "empty in empty" (Some 0) (SU.rfind_substring "" "")
+
 (* ---- substring containment ---- *)
 
 let test_contains_substring_basic () =
@@ -657,6 +684,10 @@ let () =
           test_case "empty needle" `Quick test_find_substring_empty_needle;
           test_case "negative pos rejected" `Quick
             test_find_substring_rejects_negative_pos ] );
+      ( "rfind_substring",
+        [ test_case "basic" `Quick test_rfind_substring_basic;
+          test_case "boundaries" `Quick test_rfind_substring_boundaries;
+          test_case "empty needle" `Quick test_rfind_substring_empty_needle ] );
       ( "contains_substring",
         [ test_case "basic" `Quick test_contains_substring_basic;
           test_case "empty needle" `Quick

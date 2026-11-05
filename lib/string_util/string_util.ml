@@ -50,6 +50,28 @@ let find_substring ?(pos = 0) haystack needle =
     in
     loop pos
 
+(* Byte-wise substring search from the end: returns the index of the last
+   match, or [None] if absent. Empty needle returns [Some (String.length
+   haystack)], the last index an empty match can start at. *)
+let rfind_substring haystack needle =
+  let hay_len = String.length haystack in
+  let needle_len = String.length needle in
+  if needle_len > hay_len then None
+  else
+    let rec match_at i j =
+      if j = needle_len then true
+      else if String.unsafe_get haystack (i + j)
+            <> String.unsafe_get needle j
+      then false
+      else match_at i (j + 1)
+    in
+    let rec loop i =
+      if i < 0 then None
+      else if match_at i 0 then Some i
+      else loop (i - 1)
+    in
+    loop (hay_len - needle_len)
+
 (* ASCII case-insensitive substring containment without lowercasing
    either string.  Lowering happens byte-by-byte during compare. *)
 let contains_substring_ci haystack needle =

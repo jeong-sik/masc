@@ -135,18 +135,8 @@ let curl_write_out =
 
 let curl_timeout_sec = 20
 
-let rfind_substring ~needle haystack =
-  let n = String.length needle in
-  let h = String.length haystack in
-  let rec loop i =
-    if i < 0 then None
-    else if String.sub haystack i n = needle then Some i
-    else loop (i - 1)
-  in
-  if n = 0 || n > h then None else loop (h - n)
-
 let response_of_curl_output output =
-  match rfind_substring ~needle:curl_meta_marker output with
+  match String_util.rfind_substring output curl_meta_marker with
   | None -> Error "curl output carried no status trailer"
   | Some idx ->
     let body = String.sub output 0 idx in

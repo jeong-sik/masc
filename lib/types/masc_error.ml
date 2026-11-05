@@ -153,7 +153,6 @@ module Task_error = struct
   type t =
     | NotFound of string
     | AlreadyClaimed of { task_id: string; by: string }
-    | NotClaimed of string
     | InvalidState of string
     | InvalidId of string
     | TransitionRejected of transition_rejected
@@ -197,10 +196,6 @@ module Task_error = struct
         Printf.sprintf
           "[TaskError] Task %s is currently owned by %s."
           task_id by
-    | NotClaimed id ->
-        Printf.sprintf
-          "[TaskError] Task %s is still todo."
-          id
     | InvalidState msg -> Printf.sprintf "[TaskError] Invalid task state: %s" msg
     | InvalidId reason -> Printf.sprintf "[TaskError] Invalid task ID: %s" reason
     | TransitionRejected rejection ->
@@ -296,7 +291,6 @@ let code = function
   | Task (Task_error.NotFound _) -> 404
   | Agent (Agent_error.NotFound _) -> 404
   | Task (Task_error.AlreadyClaimed _
-         | Task_error.NotClaimed _
          | Task_error.InvalidState _
          | Task_error.TransitionRejected _
          | Task_error.InvalidId _) -> 400
@@ -314,7 +308,6 @@ let code = function
 let is_task_not_found = function
   | Task (Task_error.NotFound _) -> true
   | Task ( Task_error.AlreadyClaimed _
-         | Task_error.NotClaimed _
          | Task_error.InvalidState _
          | Task_error.InvalidId _
          | Task_error.TransitionRejected _

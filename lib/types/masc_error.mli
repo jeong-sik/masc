@@ -29,7 +29,6 @@ module Task_error : sig
   type t =
     | NotFound of string
     | AlreadyClaimed of { task_id: string; by: string }
-    | NotClaimed of string
     | InvalidState of string
     | InvalidId of string
     | TransitionRejected of transition_rejected

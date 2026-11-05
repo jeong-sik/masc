@@ -319,7 +319,7 @@ let test_completion_denied_for_non_owner () =
      | Error e ->
        fail ("foreign claim setup failed: " ^ Masc_domain.masc_error_to_string e));
     (* pre-state: task-001 owned by a non-caller agent (else the reject below
-       would be NotClaimed for the wrong reason). *)
+       would come from an unclaimed task, not from ownership). *)
     (match assignee_of config "task-001" with
      | Some a ->
        check bool "pre-state: task owned by a non-caller agent" true

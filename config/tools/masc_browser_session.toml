@@ -2,6 +2,14 @@ name = "masc_browser_session"
 description = """
 Manage a browser or explicitly bind an observed Ego Space to a shared Goal. Goal Space binding is experimental: it has no measured Keeper production run yet. action=bind_goal requires goalId, lane=live and the observed Ego clientId; it stores metadata without browser input or taking control. action=goal_status with goalId reads only the stored binding. The same binding is idempotent; reassignment or sharing a Space across distinct Goals is refused. action=unbind_goal with goalId removes the Goal's binding so a wrong one can be bound again; it changes no browser or Space. Keeper initial automatic discovery/open consults its current Task Goal binding; retain the resulting lane/clientId for subsequent calls. A bound Ego Space is already open: use BrowserTabs to discover its pages, rather than opening a managed session. A missing bound connection does not select another browser. Open or manage a work browser. For initial action=open, optional requiredActions chooses a work browser implementing all requested operations; unsupported combinations fail before opening. Omit lane to reuse a single open work session, or start the configured Chrome backend before the Gecko backend when no session is open. Multiple open work sessions require a choice. Visible by default. The receipt reports browserSelection; retain its lane for later work. lane=automation: Gecko (configure [browser.automation] geckodriver, optional binary e.g. Zen). lane=stagehand: Chromium with the Stagehand runtime (configure [browser.stagehand]). Each backend runs while its browser-automation or browser-stagehand Lane Add-on declaration is enabled. The server starts and stops it; operator live sessions are not managed. After open, use BrowserGoto/masc_browser_goto with the same lane."""
 additional_properties = false
+# 2026-10-29 ~ 11-04 에 저장된 agent-core 요청 5,479개(Keeper 28명)가 이 정의 4,611 B 를
+# 매번 실었다. 이 도구를 부른 서로 다른 Keeper 턴은 24개(44회)다. 지연의 손익은
+# 호출 수가 아니라 필요했던 턴 수로 가른다(masc #32062): 실으면 25.5 MB, 지연하면
+# 24턴 x 표면 91,483 B = 2.2 MB 라서 11.6배다. 같은 도구 묶음의 BrowserRead,
+# BrowserAct, BrowserInteract 는 이미 지연돼 있다. 지연돼도 keeper_tool_search
+# 목록에 이름이 남고, 부르면 그 턴에 스키마가 붙는다. 재측정 방법은
+# docs/evidence/defer-loading-2026-11/README.md 에 있다.
+defer_loading = true
 
 [[params]]
 name = "action"

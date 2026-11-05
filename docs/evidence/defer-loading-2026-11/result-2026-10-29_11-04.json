@@ -1,0 +1,447 @@
+{
+  "window": {
+    "from": "2026-10-29",
+    "to": "2026-11-04"
+  },
+  "stored_requests": 5479,
+  "agent_core_keepers": 28,
+  "keeper_days": 106,
+  "surface_median_bytes": 91483,
+  "skipped": {
+    "bad_lines": 0,
+    "bad_schema_entries": 0,
+    "unplaced_files": 0
+  },
+  "tools": [
+    {
+      "name": "keeper_candle_gift",
+      "presence_pct": 100.0,
+      "median_bytes": 1014,
+      "loading_bytes": 5555706,
+      "calls": 0,
+      "needed_turns": 0,
+      "ratio": null
+    },
+    {
+      "name": "keeper_compose_sangokushi-2-end-command",
+      "presence_pct": 96.03942325241833,
+      "median_bytes": 226.0,
+      "loading_bytes": 1189212,
+      "calls": 0,
+      "needed_turns": 0,
+      "ratio": null
+    },
+    {
+      "name": "keeper_candle_purchase",
+      "presence_pct": 100.0,
+      "median_bytes": 687,
+      "loading_bytes": 3764073,
+      "calls": 1,
+      "needed_turns": 1,
+      "ratio": 41.15
+    },
+    {
+      "name": "keeper_candle_equip",
+      "presence_pct": 100.0,
+      "median_bytes": 567,
+      "loading_bytes": 3106593,
+      "calls": 2,
+      "needed_turns": 1,
+      "ratio": 33.96
+    },
+    {
+      "name": "keeper_candle_catalog",
+      "presence_pct": 100.0,
+      "median_bytes": 260,
+      "loading_bytes": 1424540,
+      "calls": 1,
+      "needed_turns": 1,
+      "ratio": 15.57
+    },
+    {
+      "name": "BrowserSession",
+      "presence_pct": 100.0,
+      "median_bytes": 4611,
+      "loading_bytes": 25508185,
+      "calls": 44,
+      "needed_turns": 24,
+      "ratio": 11.62
+    },
+    {
+      "name": "BrowserInstruct",
+      "presence_pct": 100.0,
+      "median_bytes": 998,
+      "loading_bytes": 5468042,
+      "calls": 8,
+      "needed_turns": 6,
+      "ratio": 9.96
+    },
+    {
+      "name": "keeper_candle_balance",
+      "presence_pct": 100.0,
+      "median_bytes": 342,
+      "loading_bytes": 1873818,
+      "calls": 5,
+      "needed_turns": 5,
+      "ratio": 4.1
+    },
+    {
+      "name": "WebSearch",
+      "presence_pct": 100.0,
+      "median_bytes": 1388,
+      "loading_bytes": 7604852,
+      "calls": 55,
+      "needed_turns": 31,
+      "ratio": 2.68
+    },
+    {
+      "name": "keeper_compose_prior-art",
+      "presence_pct": 99.92699397700311,
+      "median_bytes": 1207,
+      "loading_bytes": 6608325,
+      "calls": 30,
+      "needed_turns": 29,
+      "ratio": 2.49
+    },
+    {
+      "name": "keeper_skill",
+      "presence_pct": 99.92699397700311,
+      "median_bytes": 22950,
+      "loading_bytes": 130590217,
+      "calls": 1766,
+      "needed_turns": 1093,
+      "ratio": 1.31
+    },
+    {
+      "name": "masc_goal_measure",
+      "presence_pct": 100.0,
+      "median_bytes": 1197,
+      "loading_bytes": 6558363,
+      "calls": 114,
+      "needed_turns": 86,
+      "ratio": 0.83
+    },
+    {
+      "name": "keeper_tool_search",
+      "presence_pct": 100.0,
+      "median_bytes": 3629,
+      "loading_bytes": 21207043,
+      "calls": 380,
+      "needed_turns": 305,
+      "ratio": 0.76
+    },
+    {
+      "name": "BrowserTabs",
+      "presence_pct": 100.0,
+      "median_bytes": 4423,
+      "loading_bytes": 22365719,
+      "calls": 980,
+      "needed_turns": 350,
+      "ratio": 0.7
+    },
+    {
+      "name": "masc_board_post",
+      "presence_pct": 100.0,
+      "median_bytes": 2914,
+      "loading_bytes": 15965806,
+      "calls": 282,
+      "needed_turns": 252,
+      "ratio": 0.69
+    },
+    {
+      "name": "keeper_task_done",
+      "presence_pct": 100.0,
+      "median_bytes": 2267,
+      "loading_bytes": 12322055,
+      "calls": 263,
+      "needed_turns": 228,
+      "ratio": 0.59
+    },
+    {
+      "name": "BrowserGoto",
+      "presence_pct": 100.0,
+      "median_bytes": 1172,
+      "loading_bytes": 6421388,
+      "calls": 508,
+      "needed_turns": 151,
+      "ratio": 0.46
+    },
+    {
+      "name": "keeper_compose_work-intake",
+      "presence_pct": 99.92699397700311,
+      "median_bytes": 849,
+      "loading_bytes": 4648275,
+      "calls": 135,
+      "needed_turns": 134,
+      "ratio": 0.38
+    },
+    {
+      "name": "keeper_task_create",
+      "presence_pct": 100.0,
+      "median_bytes": 1425,
+      "loading_bytes": 7784111,
+      "calls": 273,
+      "needed_turns": 245,
+      "ratio": 0.35
+    },
+    {
+      "name": "keeper_capability_search",
+      "presence_pct": 100.0,
+      "median_bytes": 1699,
+      "loading_bytes": 9308821,
+      "calls": 503,
+      "needed_turns": 305,
+      "ratio": 0.33
+    },
+    {
+      "name": "keeper_tools_list",
+      "presence_pct": 100.0,
+      "median_bytes": 420,
+      "loading_bytes": 2301180,
+      "calls": 78,
+      "needed_turns": 77,
+      "ratio": 0.33
+    },
+    {
+      "name": "keeper_compose_sangokushi-3-end-month",
+      "presence_pct": 96.03942325241833,
+      "median_bytes": 227.0,
+      "loading_bytes": 1194474,
+      "calls": 58,
+      "needed_turns": 43,
+      "ratio": 0.3
+    },
+    {
+      "name": "keeper_context_status",
+      "presence_pct": 100.0,
+      "median_bytes": 633,
+      "loading_bytes": 3468207,
+      "calls": 142,
+      "needed_turns": 139,
+      "ratio": 0.27
+    },
+    {
+      "name": "keeper_memory_search",
+      "presence_pct": 100.0,
+      "median_bytes": 2755,
+      "loading_bytes": 15094645,
+      "calls": 1029,
+      "needed_turns": 713,
+      "ratio": 0.23
+    },
+    {
+      "name": "Grep",
+      "presence_pct": 100.0,
+      "median_bytes": 909,
+      "loading_bytes": 4980411,
+      "calls": 1270,
+      "needed_turns": 243,
+      "ratio": 0.22
+    },
+    {
+      "name": "keeper_task_claim",
+      "presence_pct": 100.0,
+      "median_bytes": 909,
+      "loading_bytes": 4795740,
+      "calls": 277,
+      "needed_turns": 256,
+      "ratio": 0.2
+    },
+    {
+      "name": "WebFetch",
+      "presence_pct": 100.0,
+      "median_bytes": 1170,
+      "loading_bytes": 6410430,
+      "calls": 1519,
+      "needed_turns": 395,
+      "ratio": 0.18
+    },
+    {
+      "name": "masc_board_list",
+      "presence_pct": 100.0,
+      "median_bytes": 1709,
+      "loading_bytes": 9363611,
+      "calls": 4571,
+      "needed_turns": 851,
+      "ratio": 0.12
+    },
+    {
+      "name": "keeper_tasks_list",
+      "presence_pct": 100.0,
+      "median_bytes": 3185,
+      "loading_bytes": 17450615,
+      "calls": 3090,
+      "needed_turns": 2076,
+      "ratio": 0.09
+    },
+    {
+      "name": "Edit",
+      "presence_pct": 100.0,
+      "median_bytes": 1527,
+      "loading_bytes": 8366433,
+      "calls": 2001,
+      "needed_turns": 1148,
+      "ratio": 0.08
+    },
+    {
+      "name": "masc_board_search",
+      "presence_pct": 100.0,
+      "median_bytes": 818,
+      "loading_bytes": 4481822,
+      "calls": 1483,
+      "needed_turns": 669,
+      "ratio": 0.07
+    },
+    {
+      "name": "Read",
+      "presence_pct": 100.0,
+      "median_bytes": 1993,
+      "loading_bytes": 10919647,
+      "calls": 4734,
+      "needed_turns": 1721,
+      "ratio": 0.07
+    },
+    {
+      "name": "keeper_lane_status",
+      "presence_pct": 100.0,
+      "median_bytes": 664,
+      "loading_bytes": 3638056,
+      "calls": 959,
+      "needed_turns": 918,
+      "ratio": 0.04
+    },
+    {
+      "name": "keeper_artifact_read",
+      "presence_pct": 100.0,
+      "median_bytes": 1326,
+      "loading_bytes": 7265154,
+      "calls": 23038,
+      "needed_turns": 2721,
+      "ratio": 0.03
+    },
+    {
+      "name": "Write",
+      "presence_pct": 100.0,
+      "median_bytes": 731,
+      "loading_bytes": 4005149,
+      "calls": 3254,
+      "needed_turns": 1686,
+      "ratio": 0.03
+    },
+    {
+      "name": "masc_board_comment",
+      "presence_pct": 100.0,
+      "median_bytes": 1133,
+      "loading_bytes": 6207707,
+      "calls": 10451,
+      "needed_turns": 3793,
+      "ratio": 0.02
+    },
+    {
+      "name": "masc_board_post_get",
+      "presence_pct": 100.0,
+      "median_bytes": 1547,
+      "loading_bytes": 8476013,
+      "calls": 8235,
+      "needed_turns": 5481,
+      "ratio": 0.02
+    },
+    {
+      "name": "Execute",
+      "presence_pct": 100.0,
+      "median_bytes": 2379,
+      "loading_bytes": 13034541,
+      "calls": 86432,
+      "needed_turns": 10290,
+      "ratio": 0.01
+    }
+  ],
+  "replays": [
+    {
+      "carry": "same-day",
+      "tools": [
+        {
+          "name": "BrowserSession",
+          "requests_carrying": 5479,
+          "requests_released": 4840,
+          "released_bytes": 22549555,
+          "listing_bytes": 87664,
+          "keeper_days_loading": 9
+        },
+        {
+          "name": "BrowserInstruct",
+          "requests_carrying": 5479,
+          "requests_released": 5282,
+          "released_bytes": 5271436,
+          "listing_bytes": 93143,
+          "keeper_days_loading": 4
+        },
+        {
+          "name": "keeper_candle_gift",
+          "requests_carrying": 5479,
+          "requests_released": 5479,
+          "released_bytes": 5555706,
+          "listing_bytes": 109580,
+          "keeper_days_loading": 0
+        },
+        {
+          "name": "keeper_candle_equip",
+          "requests_carrying": 5479,
+          "requests_released": 5458,
+          "released_bytes": 3094686,
+          "listing_bytes": 115059,
+          "keeper_days_loading": 1
+        }
+      ],
+      "surface_median_before": 91483,
+      "surface_median_after": 84380,
+      "summed_before": 526364234,
+      "summed_after": 490298297,
+      "removed_bytes": 36065937,
+      "removed_pct": 6.85
+    },
+    {
+      "carry": "from-first-call",
+      "tools": [
+        {
+          "name": "BrowserSession",
+          "requests_carrying": 5479,
+          "requests_released": 2878,
+          "released_bytes": 13365994,
+          "listing_bytes": 87664,
+          "keeper_days_loading": 40
+        },
+        {
+          "name": "BrowserInstruct",
+          "requests_carrying": 5479,
+          "requests_released": 4304,
+          "released_bytes": 4295392,
+          "listing_bytes": 93143,
+          "keeper_days_loading": 19
+        },
+        {
+          "name": "keeper_candle_gift",
+          "requests_carrying": 5479,
+          "requests_released": 5479,
+          "released_bytes": 5555706,
+          "listing_bytes": 109580,
+          "keeper_days_loading": 0
+        },
+        {
+          "name": "keeper_candle_equip",
+          "requests_carrying": 5479,
+          "requests_released": 5391,
+          "released_bytes": 3056697,
+          "listing_bytes": 115059,
+          "keeper_days_loading": 3
+        }
+      ],
+      "surface_median_before": 91483,
+      "surface_median_after": 87316,
+      "summed_before": 526364234,
+      "summed_after": 500495891,
+      "removed_bytes": 25868343,
+      "removed_pct": 4.91
+    }
+  ]
+}

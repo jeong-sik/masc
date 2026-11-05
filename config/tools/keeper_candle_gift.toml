@@ -1,7 +1,12 @@
 name = "keeper_candle_gift"
 description = "Gift Candle or one owned portrait accessory to another Keeper. Give exactly one of amount_milli (with a reason naming the occasion) or item (an item id you own). Money moves, never mints; a gifted item you wear comes off. Your Keeper identity comes from this turn."
 additional_properties = false
-defer_loading = false
+# 2026-10-29 ~ 11-04 에 저장된 agent-core 요청 5,479개(Keeper 28명)가 이 정의 1,014 B 를
+# 매번 실었고, 도구 호출 원장 전체(10-06 ~ 11-05)에 이 도구의 호출이 한 번도 없다.
+# 필요했던 턴이 0이라 지연하는 값이 0이다(masc #32062). 잔액 조회와 구매 도구는
+# RFC-goal-candle-ledger §3.7 에 따라 계속 싣는다. 이 도구는 거기에 들지 않는다.
+# 지연돼도 keeper_tool_search 목록에 이름이 남고, 부르면 그 턴에 스키마가 붙는다.
+defer_loading = true
 
 [[params]]
 name = "to"

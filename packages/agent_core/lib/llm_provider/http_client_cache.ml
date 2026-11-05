@@ -217,12 +217,17 @@ let park (cache : t) key connection : unit =
     if not parked then Eio.Resource.close connection)
 ;;
 
+(* Protected because a cancelled request still ends its connection: a
+   contended [Eio.Mutex.lock] in [park] is a cancellation point, and a
+   connection that is neither parked nor closed stays open until the cache's
+   switch ends. *)
 let release (cache : t) key connection (verdict : Reuse_verdict.t) : unit =
-  match verdict with
-  | Park -> park cache key connection
-  | Close reason ->
-    Atomic.incr (close_counter cache.closed reason);
-    Eio.Resource.close connection
+  Eio.Cancel.protect (fun () ->
+    match verdict with
+    | Park -> park cache key connection
+    | Close reason ->
+      Atomic.incr (close_counter cache.closed reason);
+      Eio.Resource.close connection)
 ;;
 
 let checkout (cache : t) key ~create =

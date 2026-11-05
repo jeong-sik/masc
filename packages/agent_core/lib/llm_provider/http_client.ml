@@ -1005,6 +1005,65 @@ let make_connection ~sw ~net ~origin : (connection, http_error) result =
   | Failure msg -> Error (unknown_network_error msg)
 ;;
 
+let track_connection_eof connection =
+  let eof_seen = ref false in
+  let module Flow = struct
+    type t = unit
+
+    (* Expose no alternate read path: every transport read must pass through
+       [single_read] below so raw EOF cannot bypass the observation. *)
+    let read_methods = []
+
+    let single_read () buffer =
+      match Eio.Flow.single_read connection buffer with
+      | count -> count
+      | exception End_of_file ->
+        eof_seen := true;
+        raise End_of_file
+    ;;
+
+    let single_write () buffers = Eio.Flow.single_write connection buffers
+    let copy () ~src = Eio.Flow.copy src connection
+    let shutdown () command = Eio.Flow.shutdown connection command
+  end
+  in
+  let operations =
+    Eio.Resource.handler
+      (Eio.Resource.H (Eio.Resource.Close, fun () -> Eio.Resource.close connection)
+       :: Eio.Resource.bindings (Eio.Flow.Pi.two_way (module Flow)))
+  in
+  Eio.Resource.T ((), operations), eof_seen
+;;
+
+(* The peer closed and something upstream reported it as prose.
+
+   cohttp-eio reads the response through the flow above, and on a closed
+   connection [Io.Response.read] answers [`Eof], which it turns into
+   [Failure "connection closed by peer"] (cohttp-eio/client.ml:60).
+   [classify_network_exn] declines to read that message — inventing a network
+   kind from prose is how a classifier starts guessing — so the exception used
+   to escape [with_post_stream] entirely. It then reached the runtime runner's
+   outermost handler and was recorded as [internal_unhandled_exception], an
+   internal defect. It is not one: the socket ended. masc counts that against
+   the keeper's crash threshold, so a provider hanging up walked keepers toward
+   termination (masc#29951; 185 occurrences over 2026-08-18/20/24).
+
+   The evidence here is structural, not textual. [track_connection_eof] routes
+   every transport read through one [single_read], and nothing but a real
+   [End_of_file] on the socket sets the flag, so a set flag at the moment an
+   unclassified exception surfaces means the read that failed is the close. The
+   original exception text is kept as the message. *)
+let eof_error exn =
+  NetworkError { message = Printexc.to_string exn; kind = End_of_file }
+;;
+
+(* A cohttp client whose requests all go over [conn]. The flag is set once a
+   read on [conn] met the transport's end of file. *)
+let tracked_client conn =
+  let tracked, eof_seen = track_connection_eof conn in
+  Cohttp_eio.Client.make_generic (fun ~sw:_ _uri -> tracked), eof_seen
+;;
+
 (** A parked connection to [origin] from [cache], or a new one opened on the
     cache's switch so that it can be parked after the request's own switch
     ends. *)
@@ -1036,13 +1095,17 @@ let connection_switch cache ~sw =
     availability can be checked up front and reported as typed errors. *)
 (** Run [f client] with a client obtained either from [cache] or created
     for one request. When [cache] is supplied, a hit reuses a parked
-    connection, a miss creates one and parks it on success, and any error
-    evicts it. When [cache] is omitted the client is created for a single
-    request and closed immediately after [f] returns.
+    connection and a miss creates one; the connection then ends through
+    {!end_connection}. When [cache] is omitted the client is created for a
+    single request and closed immediately after [f] returns.
 
     [f] receives the caller switch and returns its result with the
     {!Reuse_verdict.t} for the exchange it read. [Error] and exceptions close
-    the connection as [Request_failed]. *)
+    the connection as [Request_failed]. A cached connection whose transport
+    reported end of file closes as [Transport_ended] even when [f] answered:
+    cohttp ends a body at the peer's close without an error. An exception
+    raised after that end of file is the peer's close, and is returned as
+    {!eof_error}. *)
 let with_client ?cache ~sw ~net ~origin f =
   match cache with
   | None ->
@@ -1061,9 +1124,7 @@ let with_client ?cache ~sw ~net ~origin f =
          Ok result)
   | Some cache ->
     let* conn = checkout_connection cache ~net ~origin in
-    let client =
-      Cohttp_eio.Client.make_generic (fun ~sw:_ _uri -> (conn :> _ Eio.Flow.two_way))
-    in
+    let client, eof_seen = tracked_client conn in
     let verdict = ref (Reuse_verdict.Close Request_failed) in
     Fun.protect
       ~finally:(fun () ->
@@ -1075,9 +1136,17 @@ let with_client ?cache ~sw ~net ~origin f =
             "with_client cleanup failed: %s"
             (Printexc.to_string exn))
       (fun () ->
-         let* result, reuse = f ~sw client in
-         verdict := reuse;
-         Ok result)
+         match f ~sw client with
+         | Ok (result, reuse) ->
+           verdict := if !eof_seen then Close Transport_ended else reuse;
+           Ok result
+         | Error error -> Error error
+         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+         | exception exn ->
+           (match classify_network_exn exn with
+            | Some error -> Error error
+            | None when !eof_seen -> Error (eof_error exn)
+            | None -> raise exn))
 module Safe_cohttp_response_flow = struct
   let min_chunk_read_len = 65_536
 
@@ -1294,7 +1363,7 @@ let post_sync_once_after_validation
     | Before_dispatch, Some _ | Dispatch_started, Some _ | Response_received, None ->
       invalid_arg "Http_client.post_sync_once: inconsistent receipt state"
   in
-  let release_connection reason =
+  let end_request_connection verdict =
     match !connection with
     | None -> ()
     | Some conn ->
@@ -1303,7 +1372,7 @@ let post_sync_once_after_validation
        | Some _ ->
          (try
             Eio.Cancel.protect (fun () ->
-              end_connection ?cache ~origin conn (Close reason))
+              end_connection ?cache ~origin conn verdict)
           with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn ->
@@ -1313,6 +1382,7 @@ let post_sync_once_after_validation
               (Printexc.to_string exn))
        | None -> close_connection conn)
   in
+  let release_connection reason = end_request_connection (Close reason) in
   (* An unclassified exception is still a transport failure, and this function
      returns a result. Re-raising it made the return type a half-truth: cohttp-eio
      signals a peer close with [failwith "connection closed by peer"]
@@ -1392,9 +1462,7 @@ let post_sync_once_after_validation
           | Some cache -> checkout_connection cache ~net ~origin
         in
         connection := Some conn;
-        let client =
-          Cohttp_eio.Client.make_generic (fun ~sw:_ _uri -> (conn :> _ Eio.Flow.two_way))
-        in
+        let client, transport_eof_seen = tracked_client conn in
         phase := Dispatch_started;
         Http_client_phase_observer.observe Http_client_phase_observer.Dispatch_started;
         Http_request_observer.dispatch_entered observation;
@@ -1418,7 +1486,7 @@ let post_sync_once_after_validation
         Http_client_phase_observer.observe
           (Http_client_phase_observer.Response_received response_status);
         Ok
-          ( conn
+          ( transport_eof_seen
           , response
           , response_body
           , response_status
@@ -1435,7 +1503,7 @@ let post_sync_once_after_validation
     release_connection Request_failed;
     fail error
   | Ok
-      ( conn
+      ( transport_eof_seen
       , response
       , response_body
       , response_status
@@ -1465,7 +1533,7 @@ let post_sync_once_after_validation
           invalid_arg "Http_client.post_sync_once: inconsistent total deadline state"
       with
       | Eio.Time.Timeout as exn ->
-        release_connection Body_not_drained;
+        release_connection Request_failed;
         raise exn
       | exn -> `Failed (http_error_of_exn exn)
     in
@@ -1487,7 +1555,7 @@ let post_sync_once_after_validation
        fail error
      | `Deadline_passed timeout_s when is_success_status response_status ->
        (* The body is the answer; without it there is none. *)
-       release_connection Body_not_drained;
+       release_connection Request_failed;
        fail (total_deadline_error timeout_s)
      | `Deadline_passed _ ->
        (* A refusing status line is the provider's answer, and it is already
@@ -1497,20 +1565,12 @@ let post_sync_once_after_validation
        release_connection Body_not_drained;
        Ok (response_of Not_received_in_window)
      | `Body response_body ->
-       let release_result =
-         try
-           end_connection ?cache ~origin conn
-             (Reuse_verdict.decide ~request_headers:header ~response ~body:`Drained);
-           connection := None;
-           Ok ()
-         with
-         | exn -> fail_exn exn
-       in
-       (match release_result with
-        | Error error ->
-          release_connection Request_failed;
-          fail error
-        | Ok () -> Ok (response_of (Received response_body))))
+       (* cohttp ends a body at the peer's close without an error, so the
+          transport's end of file is read from the tracked connection. *)
+       let body = if !transport_eof_seen then `Transport_ended else `Drained in
+       end_request_connection
+         (Reuse_verdict.decide ~request_headers:header ~response ~body);
+       Ok (response_of (Received response_body)))
 ;;
 
 let dispatch_sync_request
@@ -1601,57 +1661,6 @@ let post_sync_once
   | Error error -> Error error
 ;;
 
-let track_connection_eof connection =
-  let eof_seen = ref false in
-  let module Flow = struct
-    type t = unit
-
-    (* Expose no alternate read path: every transport read must pass through
-       [single_read] below so raw EOF cannot bypass the observation. *)
-    let read_methods = []
-
-    let single_read () buffer =
-      match Eio.Flow.single_read connection buffer with
-      | count -> count
-      | exception End_of_file ->
-        eof_seen := true;
-        raise End_of_file
-    ;;
-
-    let single_write () buffers = Eio.Flow.single_write connection buffers
-    let copy () ~src = Eio.Flow.copy src connection
-    let shutdown () command = Eio.Flow.shutdown connection command
-  end
-  in
-  let operations =
-    Eio.Resource.handler
-      (Eio.Resource.H (Eio.Resource.Close, fun () -> Eio.Resource.close connection)
-       :: Eio.Resource.bindings (Eio.Flow.Pi.two_way (module Flow)))
-  in
-  Eio.Resource.T ((), operations), eof_seen
-;;
-
-(* The peer closed and something upstream reported it as prose.
-
-   cohttp-eio reads the response through the flow above, and on a closed
-   connection [Io.Response.read] answers [`Eof], which it turns into
-   [Failure "connection closed by peer"] (cohttp-eio/client.ml:60).
-   [classify_network_exn] declines to read that message — inventing a network
-   kind from prose is how a classifier starts guessing — so the exception used
-   to escape [with_post_stream] entirely. It then reached the runtime runner's
-   outermost handler and was recorded as [internal_unhandled_exception], an
-   internal defect. It is not one: the socket ended. masc counts that against
-   the keeper's crash threshold, so a provider hanging up walked keepers toward
-   termination (masc#29951; 185 occurrences over 2026-08-18/20/24).
-
-   The evidence here is structural, not textual. [track_connection_eof] routes
-   every transport read through one [single_read], and nothing but a real
-   [End_of_file] on the socket sets the flag, so a set flag at the moment an
-   unclassified exception surfaces means the read that failed is the close. The
-   original exception text is kept as the message. *)
-let eof_error exn =
-  NetworkError { message = Printexc.to_string exn; kind = End_of_file }
-;;
 
 (* Which budget bounds the phase before the response headers, so the
    timeout it raises is reported as the budget that was spent. *)
@@ -1877,12 +1886,19 @@ let with_post_stream
            status and headers received and its body [Not_received_in_window]
            -- which a consumer must not read as a body the provider left
            empty, the reason it carried being unread. A refusal's connection
-           is never reused. *)
+           ends through the same verdict as an answer's (RFC-0492 §3.2): a
+           refusal read to its end on a persistent connection is parked. *)
         let refusal body = Error (HttpError { code; body; retry_after_header }) in
+        let body_state = ref `Failed in
         Fun.protect
           ~finally:(fun () ->
-            Eio.Cancel.protect (fun () ->
-              end_connection ?cache ~origin conn (Close Request_failed)))
+            let body =
+              match !body_state with
+              | `Drained when !transport_eof_seen -> `Transport_ended
+              | (`Drained | `Not_drained | `Failed) as state -> state
+            in
+            end_connection ?cache ~origin conn
+              (Reuse_verdict.decide ~request_headers:hdr ~response:resp ~body))
           (fun () ->
              let read_body () =
                match read_response_body resp_body with
@@ -1908,6 +1924,7 @@ let with_post_stream
              in
              match body_result with
              | Ok (Ok refusal_body) ->
+               body_state := `Drained;
                Http_client_diagnostics.profile_opaque_client_error
                  ~url
                  ~code
@@ -1917,7 +1934,9 @@ let with_post_stream
                  ~response_body:refusal_body;
                refusal (Received refusal_body)
              | Ok (Error err) -> Error err
-             | Error `Timeout -> refusal Not_received_in_window)
+             | Error `Timeout ->
+               body_state := `Not_drained;
+               refusal Not_received_in_window)
       | `Stream_headers (conn, transport_eof_seen, resp, resp_body) ->
         (try
            (* EOF proves the body was drained; it does not prove the connection

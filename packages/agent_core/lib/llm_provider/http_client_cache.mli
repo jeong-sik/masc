@@ -19,8 +19,10 @@ end
 
 type t
 
-(** Checked-out connections closed instead of parked, by
-    {!Reuse_verdict.close_reason}. *)
+(** Connections that {!release} closed on a [Close] verdict, by
+    {!Reuse_verdict.close_reason}. A [Park] that finds the origin full or the
+    cache stopped closes the connection without a reason and is not counted
+    here. *)
 type close_counts =
   { request_failed : int
   ; not_persistent : int
@@ -72,5 +74,5 @@ val checkout
 (** Ends a checked-out connection. [Park] parks it for later reuse, or closes
     it when the origin already holds [max_idle_per_host] idle connections or
     the cache is stopped. [Close reason] closes it and counts [reason] in
-    {!stats}. *)
+    {!stats}. Cancellation does not interrupt it. *)
 val release : t -> Key.t -> connection -> Reuse_verdict.t -> unit

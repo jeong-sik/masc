@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-11-05T10:51:02Z (HEAD: 10b7973e942)
+Generated: 2026-11-05T12:30:44Z (HEAD: f0574ed38a0)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -13,12 +13,12 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 
 | Metric | Value |
 |--------|-------|
-| Total .tla files | 41 |
-| Manual specs | 41 |
+| Total .tla files | 40 |
+| Manual specs | 40 |
 | TTrace (auto-generated) | 0 |
 | Directories | 9 |
-| Total .cfg files | 129 |
-| Buggy .cfg (bug-model pair) | 82 |
+| Total .cfg files | 127 |
+| Buggy .cfg (bug-model pair) | 81 |
 
 `kind` column: **manual** = hand-authored spec; **ttrace** = TLC counterexample export (`*TTrace*` or trace marker in header). `cfg`/`buggy` columns count companion `.cfg` files. `invariants/properties` lists names per cfg label (`clean=...`, `buggy=...`). `source hash` is the tracked `.tla` blob fingerprint.
 
@@ -30,14 +30,13 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 |------|--------|------|-----|-------|-------------------------|---------------|
 | AuthIdentityFSM.tla | AuthIdentityFSM | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | 929be520c8ba |
 
-### specs/boundary (7 specs)
+### specs/boundary (6 specs)
 
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
 |------|--------|------|-----|-------|-------------------------|---------------|
 | AuditLog.tla | AuditLog | manual | 2 | 1 | clean={inv:TypeOK, inv:CacheConsistency} buggy={inv:CacheConsistency} | a3c241509eb1 |
 | AuditLogAppendOrder.tla | AuditLogAppendOrder | manual | 2 | 1 | clean={inv:TypeOK, inv:MutexExclusion} buggy={inv:MutexExclusion} | 5cafd04c9e66 |
 | AuditLogDurableBeforeAck.tla | AuditLogDurableBeforeAck | manual | 2 | 1 | clean={inv:TypeOK, inv:Durability} buggy={inv:Durability} | 2e72a23b081e |
-| Cancellation.tla | Cancellation | manual | 2 | 1 | clean={inv:TypeOK, inv:ReasonBeforeCancelled, inv:CallbacksFiredAtMostOnce} buggy={inv:ReasonBeforeCancelled, inv:CallbacksFiredAtMostOnce} | bbed415483ac |
 | ContinuationCorrelation.tla | ContinuationCorrelation | manual | 3 | 2 | clean={inv:TypeOK, inv:ContinuationPreservesCorrelation, inv:ContinuationNeverAuthorizesOperation} correlation-buggy={inv:ContinuationPreservesCorrelation} decision-buggy={inv:ContinuationNeverAuthorizesOperation} | 65c3b699244a |
 | SandboxDispatch.tla | SandboxDispatch | manual | 2 | 1 | clean={inv:TypeOK, inv:BackendImpliesBackendVia, inv:RemoteSshImpliesSshVia} buggy={inv:BackendImpliesBackendVia, inv:RemoteSshImpliesSshVia} | 4c6c55a9e9eb |
 | TurnEvidenceChain.tla | TurnEvidenceChain | manual | 2 | 1 | clean={inv:TypeOK, inv:TerminalHasFullEvidence, inv:TerminalVisibleInRuntimeLens, inv:AgentCoreBoundaryGeneric} buggy={inv:TerminalHasFullEvidence} | ae0c4b3f330f |

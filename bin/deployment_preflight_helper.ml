@@ -304,11 +304,9 @@ let verify_base_path_lease_owner base_path owner_pid =
   if owner_pid <= 0
   then errorf "lease owner PID must be positive"
   else
-    let lease_dir = (Host_config.host ()).base_path_lease_dir in
     match
-      Server_startup_takeover.acquire_base_path_lock
-        ~run_dir:lease_dir
-        base_path
+      Server_startup_takeover.acquire_owner_lease
+        (Host_config.host ()).base_path_lease_root base_path
     with
     | Server_startup_takeover.Base_path_already_owned { owner; _ }
       when Server_startup_takeover.base_path_owner_pid owner = Some owner_pid ->
@@ -339,11 +337,9 @@ let run_under_base_path_lease base_path command =
   match command with
   | [] -> errorf "lease-run requires a command"
   | _ :: _ ->
-    let lease_dir = (Host_config.host ()).base_path_lease_dir in
     (match
-       Server_startup_takeover.acquire_base_path_lock
-         ~run_dir:lease_dir
-         base_path
+       Server_startup_takeover.acquire_owner_lease
+         (Host_config.host ()).base_path_lease_root base_path
      with
      | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
       let pid = Server_startup_takeover.base_path_owner_pid owner in
@@ -370,11 +366,9 @@ let run_under_base_path_lease base_path command =
 ;;
 
 let run_tool_blob_maintenance base_path delete_previous_candidates =
-  let lease_dir = (Host_config.host ()).base_path_lease_dir in
   match
-    Server_startup_takeover.acquire_base_path_lock
-      ~run_dir:lease_dir
-      base_path
+    Server_startup_takeover.acquire_owner_lease
+      (Host_config.host ()).base_path_lease_root base_path
   with
   | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
     let pid = Server_startup_takeover.base_path_owner_pid owner in
@@ -438,9 +432,9 @@ let run_tool_blob_maintenance base_path delete_previous_candidates =
    store whose scan cannot complete is reported and makes the command fail;
    the sweep itself deletes nothing in that store. *)
 let run_vision_kept_maintenance base_path =
-  let lease_dir = (Host_config.host ()).base_path_lease_dir in
   match
-    Server_startup_takeover.acquire_base_path_lock ~run_dir:lease_dir base_path
+    Server_startup_takeover.acquire_owner_lease
+      (Host_config.host ()).base_path_lease_root base_path
   with
   | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
     let pid = Server_startup_takeover.base_path_owner_pid owner in
@@ -564,9 +558,9 @@ let run_vision_kept_maintenance base_path =
    failure rule as [vision-kept-maintenance]: a directory whose scan cannot
    complete fails the command and deletes nothing in that directory. *)
 let run_media_reading_maintenance base_path =
-  let lease_dir = (Host_config.host ()).base_path_lease_dir in
   match
-    Server_startup_takeover.acquire_base_path_lock ~run_dir:lease_dir base_path
+    Server_startup_takeover.acquire_owner_lease
+      (Host_config.host ()).base_path_lease_root base_path
   with
   | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
     let pid = Server_startup_takeover.base_path_owner_pid owner in
@@ -668,11 +662,9 @@ let handoff_base_path_lease
   match prepare_command with
   | [] -> errorf "lease-handoff requires a preparation command"
   | _ ->
-    let lease_dir = (Host_config.host ()).base_path_lease_dir in
     (match
-       Server_startup_takeover.acquire_base_path_lock
-         ~run_dir:lease_dir
-         base_path
+       Server_startup_takeover.acquire_owner_lease
+         (Host_config.host ()).base_path_lease_root base_path
      with
      | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
       let pid = Server_startup_takeover.base_path_owner_pid owner in
@@ -1474,11 +1466,9 @@ let cut_run_registries base_path ~execute =
   if not execute
   then cut_run_registries_report ~execute (scan_run_registries base_path ~execute)
   else (
-    let lease_dir = (Host_config.host ()).base_path_lease_dir in
     match
-      Server_startup_takeover.acquire_base_path_lock
-        ~run_dir:lease_dir
-        base_path
+      Server_startup_takeover.acquire_owner_lease
+        (Host_config.host ()).base_path_lease_root base_path
     with
     | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
       let pid = Server_startup_takeover.base_path_owner_pid owner in

@@ -267,18 +267,26 @@ let run ~base_path ~port ~host ~log_path ~agent ~login =
       base_path (Unix.error_message error);
     1
   | base_path ->
-    let run_dir = (Host_config.host ()).base_path_lease_dir in
-    let log_path = Option.value log_path ~default:(default_log_path ~base_path) in
-    (match
-       Masc_cli_owner_upgrade.with_http (fun sw clock ->
-         replace ~sw ~clock ~run_dir ~base_path ~port ~host ~log_path ~agent ~login)
-     with
-     | Ok code -> code
-     | Error refusal ->
-       prerr_endline (refusal_message ~base_path ~port refusal);
-       1
-     | exception (Unix.Unix_error _ | Sys_error _ as error) ->
-       Printf.eprintf "Restart stopped: %s. A server named above as asked to stop is \
-                       shutting down; start one with `masc start`.\n"
-         (Printexc.to_string error);
-       1)
+    match
+      Server_startup_takeover.lease_run_dir (Host_config.host ()).base_path_lease_root ~base_path
+    with
+    | Error rejection ->
+      Printf.eprintf "The owner lease root of workspace %s could not be prepared (%s). \
+                      Nothing was stopped or started.\n"
+        base_path (Server_startup_takeover.base_path_lock_rejection_to_string rejection);
+      1
+    | Ok run_dir ->
+      let log_path = Option.value log_path ~default:(default_log_path ~base_path) in
+      (match
+         Masc_cli_owner_upgrade.with_http (fun sw clock ->
+           replace ~sw ~clock ~run_dir ~base_path ~port ~host ~log_path ~agent ~login)
+       with
+       | Ok code -> code
+       | Error refusal ->
+         prerr_endline (refusal_message ~base_path ~port refusal);
+         1
+       | exception (Unix.Unix_error _ | Sys_error _ as error) ->
+         Printf.eprintf "Restart stopped: %s. A server named above as asked to stop is \
+                         shutting down; start one with `masc start`.\n"
+           (Printexc.to_string error);
+         1)

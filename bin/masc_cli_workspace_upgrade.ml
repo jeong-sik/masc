@@ -24,6 +24,8 @@ let read base_path path =
   | Ok (Some snapshot) when snapshot.snapshot.owner_uid = Unix.geteuid () -> Ok snapshot.content
   | Ok (None) | Error _ | Ok (Some _) -> Error "The configuration must be an owned regular file."
 let emit json = print_endline (Yojson.Safe.to_string json)
+let lease_run_dir base_path =
+  Server_startup_takeover.lease_run_dir (Host_config.host ()).base_path_lease_root ~base_path
 let inspect base_path =
   let* files = names (directory base_path) in
   let keepers = files |> List.filter (fun name -> Filename.check_suffix name ".toml")
@@ -56,11 +58,16 @@ let apply base_path keeper_name source_sha256 =
   | Upgrade_available plan ->
     if not (String.equal (Upgrade.source_sha256 plan) source_sha256) then
       Error "This configuration changed after you reviewed it. Refresh setup before upgrading."
-    else Upgrade.apply ~run_dir:(Host_config.host ()).base_path_lease_dir ~base_path plan
+    else
+      let* run_dir = lease_run_dir base_path
+        |> Result.map_error Server_startup_takeover.base_path_lock_rejection_to_string in
+      Upgrade.apply ~run_dir ~base_path plan
       |> Result.map Upgrade.receipt_to_json |> Result.map_error Upgrade.error_message
 let restore base_path backup_id =
   let* receipt = Upgrade.load_recovery ~base_path ~backup_id |> Result.map_error Upgrade.error_message in
-  let* result = Upgrade.restore ~run_dir:(Host_config.host ()).base_path_lease_dir ~base_path receipt
+  let* run_dir = lease_run_dir base_path
+    |> Result.map_error Server_startup_takeover.base_path_lock_rejection_to_string in
+  let* result = Upgrade.restore ~run_dir ~base_path receipt
     |> Result.map_error Upgrade.error_message in
   Ok (`Assoc ["schema", `String "masc.workspace_restore.v1";
     "restored", `Bool true; "backup_id", `String backup_id;
@@ -68,13 +75,17 @@ let restore base_path backup_id =
     "lock_release_confirmed", `Bool result.lock_release_confirmed])
 let journal base_path action =
   let module Journal = Keeper_journal_preparation in
+  let journal_run_dir () = lease_run_dir base_path |> Result.map_error (fun rejection ->
+    {Journal.bundle_id=None;
+     failure=Unsafe_path (Server_startup_takeover.base_path_lock_rejection_to_string rejection)}) in
   let result = match action with
     | Inspect_journal keeper_name -> Journal.assess ~base_path ~keeper_name |> Result.map Journal.plan_to_json
     | Prepare_journal {keeper_name;source_sha256} ->
       let* plan = Journal.assess ~base_path ~keeper_name in
       if Journal.source_sha256 plan <> source_sha256 then
         Error {Journal.bundle_id=None;failure=Source_changed}
-      else let* outcome = Journal.prepare ~run_dir:(Host_config.host ()).base_path_lease_dir plan in
+      else let* run_dir = journal_run_dir () in
+        let* outcome = Journal.prepare ~run_dir plan in
         let receipt,confirmed = match outcome with
           | Journal.Published receipt -> receipt,true
           | Publication_unconfirmed receipt -> receipt,false in
@@ -90,7 +101,8 @@ let journal base_path action =
       Journal.assess_input ~base_path ~bundle_id ~trace_id |> Result.map Journal.input_plan_to_json
     | Adopt_journal_input {bundle_id;trace_id;checkpoint_sha256} ->
       let* plan = Journal.assess_input ~base_path ~bundle_id ~trace_id in
-      let* outcome = Journal.adopt_input ~run_dir:(Host_config.host ()).base_path_lease_dir
+      let* run_dir = journal_run_dir () in
+      let* outcome = Journal.adopt_input ~run_dir
         ~expected_checkpoint_sha256:checkpoint_sha256 plan in
       let receipt,confirmed = match outcome with
         | Journal.Input_adopted receipt -> receipt,true
@@ -107,7 +119,8 @@ let journal base_path action =
       Journal.assess_installation ~base_path ~adoption_id |> Result.map Journal.installation_plan_to_json
     | Install_journal {adoption_id;source_sha256;adopted_sha256} ->
       let* plan = Journal.assess_installation ~base_path ~adoption_id in
-      let* result = Journal.install ~run_dir:(Host_config.host ()).base_path_lease_dir
+      let* run_dir = journal_run_dir () in
+      let* result = Journal.install ~run_dir
         ~expected_source_sha256:source_sha256 ~expected_adopted_sha256:adopted_sha256 plan in
       let record,confirmed = match result with
         | Journal.Replaced record -> record,true | Replacement_unconfirmed record -> record,false in
@@ -131,7 +144,8 @@ let journal base_path action =
         "entries",`List entries;"read_only",`Bool true;"snapshot_only",`Bool true])
     | Restore_journal_installation installation_id ->
       let* record = Journal.load_installation ~base_path ~installation_id in
-      let* result = Journal.restore_installation ~run_dir:(Host_config.host ()).base_path_lease_dir record in
+      let* run_dir = journal_run_dir () in
+      let* result = Journal.restore_installation ~run_dir record in
       let record,confirmed = match result with
         | Journal.Replaced record -> record,true | Replacement_unconfirmed record -> record,false in
       Ok (`Assoc ["schema",`String "masc.keeper_journal_restored.v1";

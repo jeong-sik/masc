@@ -214,17 +214,14 @@ let test_masc_start_claims_a_second_task_after_task_commit () =
          |> Option.map Tool_result.tool_failure_class_to_string);
       Alcotest.(check bool) "no claim-failure text" false
         (String_util.contains_substring (Tool_result.message result) "claim failed");
-      let data = Tool_result.data result in
-      Alcotest.(check string) "created task remains a post-effect"
-        "proven_post_effect"
-        Yojson.Safe.Util.(data |> member "effect_disposition" |> to_string);
-      Alcotest.(check string) "task id is returned"
-        "task-002"
-        Yojson.Safe.Util.(data |> member "task_id" |> to_string);
-      Alcotest.(check bool) "committed task result is preserved" true
-      (String_util.contains_substring
-           Yojson.Safe.Util.(data |> member "primary_result" |> to_string)
-           "Added task-002"))
+      let message = Tool_result.message result in
+      Alcotest.(check bool) "the created task stays the current task" true
+        (String_util.contains_substring message
+           "task task-002 created+claimed+set as current");
+      Alcotest.(check bool) "task id is returned" true
+        (String_util.contains_substring message "task task-002");
+      Alcotest.(check bool) "the compound onboarding steps are reported" true
+        (String_util.contains_substring message "project scope set, session bound"))
 ;;
 
 let test_masc_start_surfaces_current_task_failure_after_claim_commit () =

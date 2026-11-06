@@ -11,8 +11,10 @@ let error_message = function
   | Goal_reference (Goal_store.Goal_source_unavailable error) -> Goal_store.unavailable_to_string error
   | Goal_reference (Goal_lock_failed error) -> Masc_domain.masc_error_to_string error
   | Goal_reference (Goal_missing id) -> "Goal does not exist: " ^ id
+let filename = "browser_goal_spaces.json"
+
 open Result.Syntax
-let path config = Filename.concat (Workspace.masc_dir config) "browser_goal_spaces.json"
+let path config = Filename.concat (Workspace.masc_dir config) filename
 let to_json binding = `Assoc ["goalId",`String binding.goal_id;
   "installationId",`String (Lane_addon_tool_request_owner.installation_id binding.installation);
   "space",Browser_lane.ego_space_to_json binding.space;"actor",`String binding.actor]

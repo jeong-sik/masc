@@ -69,8 +69,6 @@ let host_pressure_entries =
       "Disable the host fd-pressure poller";
     entry ~default:"1" Env_config_core.host_fd_pressure_poll_interval_sec_env_key
       "Host fd-pressure poll interval (seconds)";
-    entry ~default:"120" Env_config_core.git_fetch_timeout_sec_env_key
-      "Timeout for a git fetch (seconds); floored at 10";
   ]
 
 let runtime_entries =

@@ -735,21 +735,6 @@ let admin_token_env_key = "MASC_ADMIN_TOKEN"
 let admin_token_opt () =
   raw_value_opt admin_token_env_key |> trim_opt
 
-(** {1 Git operations} *)
-
-(** [git fetch origin] is network-bound and can stall behind a slow
-    Docker bridge or a large remote. Default 120s gives enough headroom
-    for a cold fetch on a non-trivial repo while still bounding hung
-    connections. Operators can override via [MASC_GIT_FETCH_TIMEOUT_SEC]
-    when running on faster networks (e.g. 60s in CI) or slower ones
-    (e.g. 300s on a constrained laptop tether). Floor 10s prevents a
-    footgun setting like [0] from disabling the cap entirely. *)
-let git_fetch_timeout_sec_env_key = "MASC_GIT_FETCH_TIMEOUT_SEC"
-
-let git_fetch_timeout_sec () =
-  Float.max 10.0
-    (get_float ~default:120.0 git_fetch_timeout_sec_env_key)
-
 (** {1 Logging / Telemetry} *)
 
 (** SSOT for logging / observability env-var names (issue 8352). *)

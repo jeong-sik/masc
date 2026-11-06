@@ -344,7 +344,7 @@ let rec remember_screen key ~blob ~blob_bytes ~screen =
 let encode_lazily identity encoding =
   Eio.Lazy.from_fun ~cancel:`Restart (fun () ->
     Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
-      Http_response_payload.compress_encoded_body ~level:3 encoding identity))
+      Http_response_payload.compress_encoded_body encoding identity))
 
 let build_frame ~fields ~observation_seq ~refreshing =
   let identity, etag = Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->

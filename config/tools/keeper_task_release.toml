@@ -53,7 +53,7 @@ Optional sources to retain in the Task handoff for the next owner. Use \
 artifact:<producer-root-relative-path>, note:<text>, board:<post-id>, \
 fusion:<run-id>, or task:<task-id>. These references preserve context; they do not copy a \
 peer's sandbox file. Export binary files with keeper_artifact_transfer \
-and pass the exported objects through masc_keeper_delegate artifacts."""
+and pass the returned sha256 through masc_keeper_delegate artifacts."""
 
 [help]
 short_description = "Hand your claimed task back to the backlog."

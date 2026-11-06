@@ -3,19 +3,27 @@ open Result.Syntax
 
 let reference = Keeper_peer_artifact_ref.of_json
 
-let fetch ~config (descriptor : Keeper_peer_artifact_ref.t) =
-  let reference = descriptor.blob in
-  let* bytes = Tool_blob_store.fetch (Tool_blob_store.create ~base_path:config.Workspace.base_path)
-      ~sha256:reference.sha256 |> Result.map_error Tool_blob_store.fetch_error_to_string in
-  match bytes with
+(* Every export is stored with this one media type, so a reference needs no
+   copy of it: the sha256 alone finds the bytes. *)
+let mime = "application/octet-stream"
+
+type fetched = { blob : Tool_output.artifact_ref; content : string }
+
+let fetch ~config (artifact : Keeper_peer_artifact_ref.t) =
+  let sha256 = (artifact :> string) in
+  let* content = Tool_blob_store.fetch (Tool_blob_store.create ~base_path:config.Workspace.base_path)
+      ~sha256 |> Result.map_error Tool_blob_store.fetch_error_to_string in
+  match content with
   | None -> Error "Exported artifact is absent"
-  | Some bytes when String.length bytes = reference.bytes -> Ok bytes
-  | Some _ -> Error "Exported artifact size differs from its reference"
+  | Some content ->
+    Tool_output.make_artifact_ref ~sha256 ~bytes:(String.length content) ~preview:"" ~mime
+    |> Result.map (fun blob -> { blob; content })
+    |> Result.map_error Tool_output.make_error_to_string
 
 let materialize ~base_path ~(artifact : Keeper_peer_artifact_ref.t) ~path ~fetch ~read ~write =
   let carried_data = function None -> [] | Some data -> ["write_result", data] in
-  let persist_result ~effect_disposition ~retained_artifacts result =
-    let roots = artifact.blob :: retained_artifacts
+  let persist_result ~blobs ~effect_disposition ~retained_artifacts result =
+    let roots = blobs @ retained_artifacts
       @ Tool_output.normalized_artifact_refs_in_json (Tool_result.data result)
       @ (match Tool_result.metadata result with None -> []
          | Some metadata -> Tool_output.normalized_artifact_refs_in_json metadata) in
@@ -36,7 +44,7 @@ let materialize ~base_path ~(artifact : Keeper_peer_artifact_ref.t) ~path ~fetch
     in
     Keeper_tool_execution.with_retained_artifacts roots execution
   in
-  let failure ?metadata ?write_result ?file_change_evidence ?(retained_artifacts = []) ~effect_disposition detail =
+  let failure ~blobs ?metadata ?write_result ?file_change_evidence ?(retained_artifacts = []) ~effect_disposition detail =
     Tool_result.make_err ~tool_name:"keeper_artifact_transfer" ~start_time:(Tool_timing.start ())
       ~class_:Tool_result.Runtime_failure ~effect_disposition ?metadata
       ~data:(`Assoc (["path", `String path;
@@ -45,14 +53,17 @@ let materialize ~base_path ~(artifact : Keeper_peer_artifact_ref.t) ~path ~fetch
            | None -> []
            | Some evidence -> ["write_evidence", Keeper_file_change_evidence.to_yojson evidence])))
       detail
-    |> persist_result ~effect_disposition ~retained_artifacts
+    |> persist_result ~blobs ~effect_disposition ~retained_artifacts
   in
   match fetch () with
-  | Error detail -> failure ~effect_disposition:Tool_result.Proven_pre_effect detail
-  | Ok expected ->
+  | Error detail -> failure ~blobs:[] ~effect_disposition:Tool_result.Proven_pre_effect detail
+  | Ok { blob; content = expected } ->
+    (* From here on every result this call builds keeps the fetched blob alive:
+       the call names it by sha256 alone, which the blob GC does not count. *)
+    let blobs = [ blob ] in
     (* Read one byte past the expected length: a matching prefix is not proof
-       that the recipient has exactly this artifact. The fetched string, not
-       an untrusted descriptor size, bounds the allocation. *)
+       that the recipient has exactly this artifact. The fetched string
+       bounds the allocation. *)
     let observe () = read ~max_bytes:(String.length expected + 1) in
     let receipt ?metadata ?write_result ?(retained_artifacts = []) ~recovered () =
       Tool_result.make_ok ~tool_name:"keeper_artifact_transfer" ~start_time:(Tool_timing.start ()) ?metadata
@@ -61,7 +72,7 @@ let materialize ~base_path ~(artifact : Keeper_peer_artifact_ref.t) ~path ~fetch
                  "write_attempted", `Bool recovered;
                  "verified", `Bool true; "recovered", `Bool recovered;
                  "artifact", Keeper_peer_artifact_ref.to_json artifact] @ carried_data write_result)) ()
-      |> persist_result ~retained_artifacts
+      |> persist_result ~blobs ~retained_artifacts
         ~effect_disposition:(if recovered then Tool_result.Proven_post_effect else Tool_result.Proven_pre_effect)
     in
     let after_write result =
@@ -82,12 +93,12 @@ let materialize ~base_path ~(artifact : Keeper_peer_artifact_ref.t) ~path ~fetch
         (match observe () with
          | Ok actual when String.equal actual expected -> result
          | Ok _ ->
-           failure ?metadata:result.metadata ?write_result:result.data ~retained_artifacts:result.retained_artifacts
+           failure ~blobs ?metadata:result.metadata ?write_result:result.data ~retained_artifacts:result.retained_artifacts
              ?file_change_evidence:result.file_change_evidence
              ~effect_disposition:Tool_result.Proven_post_effect
              "Artifact write completed, but recipient bytes differ. Inspect the recipient; do not blindly repeat the write."
          | Error error ->
-           failure ?metadata:result.metadata ?write_result:result.data ~retained_artifacts:result.retained_artifacts
+           failure ~blobs ?metadata:result.metadata ?write_result:result.data ~retained_artifacts:result.retained_artifacts
              ?file_change_evidence:result.file_change_evidence
              ~effect_disposition:Tool_result.Proven_post_effect
              ("Artifact write completed, but recipient verification failed: "
@@ -95,26 +106,25 @@ let materialize ~base_path ~(artifact : Keeper_peer_artifact_ref.t) ~path ~fetch
     in
     match observe () with
     | Ok actual when String.equal actual expected -> receipt ~recovered:false ()
-    | Ok _ | Error (Keeper_sandbox_read_backend.Missing_file _) -> after_write (write ())
+    | Ok _ | Error (Keeper_sandbox_read_backend.Missing_file _) -> after_write (write blob)
     | Error (Keeper_sandbox_read_backend.Not_a_file detail
             | Keeper_sandbox_read_backend.Read_refused detail) ->
       Keeper_tool_execution.failure ~class_:Tool_result.Workflow_rejection
         ~effect_disposition:Tool_result.Proven_pre_effect detail
     | Error (Keeper_sandbox_read_backend.Read_failed detail) ->
-      failure ~effect_disposition:Tool_result.Proven_pre_effect detail
+      failure ~blobs ~effect_disposition:Tool_result.Proven_pre_effect detail
 
 let handle ~config ~meta ~turn_sandbox_factory ~write ~args =
   let fail class_ detail = Keeper_tool_execution.failure ~class_ detail in
   match Keeper_peer_artifact_request.of_json args with
   | Error detail -> fail Tool_result.Policy_rejection detail
-  | Ok (Keeper_peer_artifact_request.Export { path; purpose }) ->
+  | Ok (Keeper_peer_artifact_request.Export { path }) ->
     (* The Keeper names the path, so the size is the Keeper's choice, and the
        bytes end up durable in the blob store. Read one past the ceiling: at
        exactly the ceiling a file that fits and a file that was cut look the
-       same, and a cut export would still satisfy the size check its own
-       reference records -- [fetch] compares against [reference.bytes], which
-       was written from the cut length. So an oversize file is refused, never
-       shortened. *)
+       same, and the sha256 of cut bytes is as good an address as the whole
+       file's, so nothing after this point could tell them apart. So an
+       oversize file is refused, never shortened. *)
     let ceiling = Env_config_keeper.KeeperPeerArtifact.max_bytes () in
     (match Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix ?turn_sandbox_factory
         ~config ~meta ~path ~max_bytes:(ceiling + 1) () with
@@ -134,32 +144,20 @@ let handle ~config ~meta ~turn_sandbox_factory ~write ~args =
      | Ok bytes ->
        (try
           let blob = Tool_blob_store.put_durable
-              (Tool_blob_store.create ~base_path:config.Workspace.base_path)
-              ~bytes ~mime:"application/octet-stream" in
-          match Keeper_peer_artifact_ref.make ~blob ~filename:(Filename.basename path) ~purpose with
-          | Error detail -> fail Tool_result.Policy_rejection detail
-          | Ok artifact ->
-            (* The exported bytes are durable already. Preserve the result
-               manifest at this producer boundary before the model projection
-               replaces normalized references with its durable manifest. *)
-            Eio.Cancel.protect (fun () ->
-              let data = `Assoc ["artifact", Keeper_peer_artifact_ref.to_json artifact] in
-              let result = Tool_result.make_ok ~tool_name:"keeper_artifact_transfer"
-                  ~start_time:(Tool_timing.start ()) ~data () in
-              match Tool_bridge.attach_artifact_manifest ~base_path:config.base_path result with
-              | Ok result -> Keeper_tool_execution.of_tool_result result
-              | Error error ->
-                Log.Keeper.error "exported peer artifact result manifest unavailable: %s" error.message;
-                Keeper_tool_execution.failure_data ~class_:Tool_result.Runtime_failure
-                  ~effect_disposition:Tool_result.Proven_post_effect
-                  ~message:"The artifact was exported, but its result manifest could not be stored. Read the recorded artifact; do not repeat the export."
-                  data)
+              (Tool_blob_store.create ~base_path:config.Workspace.base_path) ~bytes ~mime in
+          (* The result names the blob by sha256 alone, which the blob GC does
+             not count as a reference. The ledger row of this call keeps it
+             alive through the retained artifact instead. *)
+          Tool_result.make_ok ~tool_name:"keeper_artifact_transfer" ~start_time:(Tool_timing.start ())
+            ~data:(`Assoc ["artifact", Keeper_peer_artifact_ref.(to_json (of_blob blob))]) ()
+          |> Keeper_tool_execution.of_tool_result
+          |> Keeper_tool_execution.with_retained_artifacts [ blob ]
         with Sys_error detail -> fail Tool_result.Runtime_failure detail))
   | Ok (Keeper_peer_artifact_request.Materialize { path; artifact }) ->
     materialize ~base_path:config.Workspace.base_path ~artifact ~path ~fetch:(fun () -> fetch ~config artifact)
       ~read:(fun ~max_bytes ->
         Keeper_tool_filesystem_runtime.read_sandbox_raw_prefix ?turn_sandbox_factory
           ~config ~meta ~path ~max_bytes ())
-      ~write:(fun () ->
+      ~write:(fun blob ->
         write (`Assoc ["path", `String path; "mode", `String "overwrite";
-                      "content_artifact", Tool_output.normalized_artifact_ref_to_json artifact.blob]))
+                      "content_artifact", Tool_output.normalized_artifact_ref_to_json blob]))

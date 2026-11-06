@@ -19,8 +19,8 @@ Librarian이 남기는 `validated_approach`·`lesson`과 `absorbs`는 Memory OS�
 (`Server_skill_editor`, `Server_routes_http_routes_dashboard`). Keeper는
 `keeper_skill_publish`로 새 Skill을 직접 발행한다(아래).
 
-Keeper는 새 `SKILL.md`를 `keeper_artifact_transfer`로 export한 뒤, 반환된 정확한
-`artifact` 객체와 제안하는 package 디렉터리 이름 `package_id`를
+Keeper는 새 `SKILL.md`를 `keeper_artifact_transfer`로 export한 뒤, 반환된
+`artifact` sha256과 제안하는 package 디렉터리 이름 `package_id`를
 `keeper_skill_validate`에 전달할 수 있다. 기존 문서·composition 계획 parser와
 편집기의 크기 제한으로 원문 bytes를 읽기 전용 검증한다. 결과의 artifact와
 package 이름은 검증한 입력을 가리키며, 발행된 Skill Reference가 아니다.

@@ -253,7 +253,7 @@ let kind_of_row ~(handler : Keeper_tool_descriptor.runtime_handler) row =
         Ok
           (Some
              ( keeper
-             , Materialized { sha256 = artifact.blob.sha256 } )))
+             , Materialized { sha256 = (artifact :> string) } )))
   | Keeper_tool_descriptor.Tool_execute
   | Keeper_tool_descriptor.Tool_search_files
   | Keeper_tool_descriptor.Tool_read_file

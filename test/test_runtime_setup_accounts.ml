@@ -143,6 +143,13 @@ let client_login_files () =
   check string "Antigravity OAuth OpenID email" "google@example.com"
     (email_of (Email.of_google_oauth (Printf.sprintf {|{"token":{"access_token":"a"},"auth_method":"oauth","id_token":%S}|}
        (id_token {|{"iss":"https://accounts.google.com","sub":"s","email":"google@example.com"}|}))));
+  check string "Antigravity agy 1.5 recorded email" "google@example.com"
+    (email_of (Email.of_google_oauth
+       {|{"auth_method":"consumer","id_token_email":"google@example.com","token":{"access_token":"a"}}|}));
+  check bool "an Antigravity file in both shapes is not guessed" true
+    (missing (Email.of_google_oauth (Printf.sprintf {|{"id_token_email":"a@example.com","id_token":%S}|}
+       (id_token {|{"iss":"https://accounts.google.com","sub":"s","email":"b@example.com"}|})))
+     = Email.Source_unrecognized);
   check bool "a key given twice is not guessed" true
     (missing (Email.of_claude_account {|{"oauthAccount":{"emailAddress":"a@example.com","emailAddress":"b@example.com"}}|})
      = Email.Source_unrecognized);

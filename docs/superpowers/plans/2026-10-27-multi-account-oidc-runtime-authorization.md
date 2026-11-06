@@ -182,7 +182,11 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
     - replay는 로그가 더는 닿지 않는 머리에서 시작한 막힘을 로그를 다 읽은 뒤 세운다. 그 막힘을 닫는 레코드를 만나면 그 레코드 앞에서 세운다. 그 레코드를 쓴 구역은 열 때부터 막힘을 들고 있었기 때문이다. 레코드는 자기보다 뒤에서 시작하는 intent를 가리킬 수 없다(intent digest가 시작 머리의 해시를 덮는다).
   - B2e-2: 적격 Admin의 취소. 2a(초대를 쓴 사람 기록)와 2b(취소 Kind·본문·판정)로 나눠 낸다.
     - 2a: 초대는 그것을 쓴 사람(`issuer`: 로컬 운영자이거나 그 Admin)을 기록한다. 초대를 쓸 수 있는 쪽이 이 둘뿐이라 닫힌 타입으로 둔다.
-    - 2b: 새 Kind와 본문 `{ aborted; subject }`를 더한다. `admits`는 인증된 principal만 받는다.
+    - 2b: 새 Kind `Revocation_cancel`과 본문 `{ aborted; subject }`를 더한다. `admits`는 인증된 principal만 받는다. 네 층으로 낸다.
+      - 2b-1: principal이 들어온 초대를 찾는 함수(`Authz_invite_state.find_consumed_by`). 원 승인자를 여기서 읽는다.
+      - 2b-2: 본문(`Authz_cancel_event`). subject는 외부 저장소가 change에 쓰는 모양과 같다. 저장소 없이 로그만 읽어도 무엇을 풀었는지 보인다.
+      - 2b-3: Kind. 판정이 들어오기 전에는 `Kind_not_read`로 거절한다.
+      - 2b-4: 판정과 replay. replay는 취소가 가리키는 막힘도 재시도의 `closes`처럼 그 레코드 앞에서 세운다. 그러지 않으면 로그가 더는 닿지 않는 머리에서 시작한 막힘을 푼 로그가 열리지 않는다.
     - 적격(설계 §4.1 98줄)은 활성 Admin이고, 자신이 막히지 않았고, 그 항목의 subject·owner·원 grant 승인자가 아닌 사람이다.
       - subject가 초대면 owner는 그 초대를 쓴 Admin이다.
       - subject가 principal이면 그 principal이 들어온 초대를 쓴 Admin이 원 승인자다.

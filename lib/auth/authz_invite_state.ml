@@ -42,6 +42,15 @@ let find_by_token_digest t digest =
      | None -> None)
 ;;
 
+let find_consumed_by t user_id =
+  Seq.find
+    (fun ((_ : Invite_id.t), invitation) ->
+      match invitation.status with
+      | Consumed spender -> User_id.equal spender user_id
+      | Open | Revoked -> false)
+    (Invite_map.to_seq t.by_id)
+;;
+
 type refusal =
   | Already_issued of Invite_id.t
   | Token_digest_taken of Invite_id.t

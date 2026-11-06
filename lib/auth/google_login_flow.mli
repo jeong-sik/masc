@@ -45,7 +45,7 @@ val start_error_to_string : start_error -> string
     fails at Google leaves no transaction behind. [invite] is the token that
     the invitation link posted, if any. *)
 val start
-  :  get:Oidc_google_exchange.get
+  :  get:Login_transport.get
   -> Oidc_google_exchange.cache
   -> Oidc_login_transaction.t
   -> Oidc_google_exchange.Client.t
@@ -81,8 +81,8 @@ val callback_error_to_string : callback_error -> string
     [draw] gives the user ID and the namespace of an admission
     ({!Authz_login.sign_in}). *)
 val callback
-  :  get:Oidc_google_exchange.get
-  -> post:Oidc_google_exchange.post
+  :  get:Login_transport.get
+  -> post:Login_transport.post
   -> Oidc_google_exchange.cache
   -> Oidc_login_transaction.t
   -> Authz_zone.t

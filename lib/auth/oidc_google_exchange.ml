@@ -2,15 +2,6 @@
 
 let ( let* ) = Result.bind
 
-type response =
-  { status : int
-  ; headers : (string * string) list
-  ; body : string
-  }
-
-type get = url:string -> (response, string) result
-type post = url:string -> headers:(string * string) list -> body:string -> (response, string) result
-
 let https_url url =
   let uri = Uri.of_string url in
   match Uri.scheme uri, Uri.host uri, Uri.query uri, Uri.fragment uri with
@@ -131,8 +122,8 @@ let error_to_string = function
 ;;
 
 (* The answer of a GET, as a body of at most [max_document_bytes]. *)
-let fetch ~(get : get) ~url ~unavailable =
-  match get ~url with
+let fetch ~(get : Login_transport.get) ~url ~unavailable =
+  match get ~url ~headers:[] with
   | Error detail -> Error (unavailable detail)
   | Ok { status; _ } when status <> http_ok -> Error (unavailable (Printf.sprintf "HTTP %d" status))
   | Ok { body; _ } when String.length body > max_document_bytes -> Error (unavailable "the answer is too long")
@@ -228,7 +219,7 @@ let json_members body =
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 ;;
 
-let id_token_of_code ~(post : post) endpoints (client : Client.t) ~code ~code_verifier =
+let id_token_of_code ~(post : Login_transport.post) endpoints (client : Client.t) ~code ~code_verifier =
   let body =
     form
       [ "grant_type", "authorization_code"

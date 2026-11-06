@@ -11,19 +11,10 @@
     of a token that is checked is one that Google wrote, and nobody outside
     can make the keys be fetched again.
 
-    The transport is a function, so this module does no I/O of its own and the
-    tests answer for Google. The server passes calls of the shared HTTP client,
+    The transport is a pair of functions ({!Login_transport}), so this module
+    does no I/O of its own and the tests answer for Google. The discovery
+    document and the JWKS are read with no headers. The server passes calls of the shared HTTP client,
     bounded by {!max_document_bytes} and a timeout. *)
-
-(** One answer of the transport. *)
-type response =
-  { status : int
-  ; headers : (string * string) list
-  ; body : string
-  }
-
-type get = url:string -> (response, string) result
-type post = url:string -> headers:(string * string) list -> body:string -> (response, string) result
 
 (** The client of this installation at Google. The secret is in no function
     out of it: it is only sent in the token request. *)
@@ -95,7 +86,7 @@ val error_to_string : error -> string
 
 (** The endpoints, from the cache while it is fresh at [now_ms] and from
     {!Oidc_google.discovery_url} otherwise. *)
-val endpoints : get:get -> cache -> now_ms:int -> (endpoints, error) result
+val endpoints : get:Login_transport.get -> cache -> now_ms:int -> (endpoints, error) result
 
 (** Where the start of a login sends the browser: the authorization endpoint
     with [response_type=code], the client ID, the redirect URI, [scope=openid],
@@ -111,8 +102,8 @@ val authorization_url : endpoints -> Client.t -> Oidc_login_transaction.started 
     token's key ID, it is read once more, because Google rotates its keys; a
     JWKS read in this call is not read again. *)
 val identity
-  :  get:get
-  -> post:post
+  :  get:Login_transport.get
+  -> post:Login_transport.post
   -> cache
   -> now:Ptime.t
   -> now_ms:int

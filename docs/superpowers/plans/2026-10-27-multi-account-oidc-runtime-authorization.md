@@ -314,9 +314,10 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
   - 세 주소와 API 버전은 GitHub이 정한 값이라 추측이 아니다. GitHub에는 discovery 문서가 없다. 네 값은 한 곳(`Github_oauth` 선언)에만 둔다.
 - 층은 셋이다. C2b-1과 C2b-2는 구역에 닿지 않는다. HTTP 경로는 셋 다 만들지 않는다(C3).
   - C2b-1 공용 transaction과 전송.
-    - transaction이 시작한 흐름을 든다. `Google of { nonce }`와 `Github`이다. nonce는 Google 흐름만 뽑는다. 꺼낼 때 다른 흐름의 transaction이면 지우고 `Other_flow`로 거절한다.
-    - 모듈 이름을 `Login_transaction`으로 바꾼다. GitHub 흐름은 OIDC가 아니다. 쿠키 이름은 설계(§5.2.1)대로 둔다.
-    - 전송 함수 `get`이 헤더를 받는다. Google의 discovery와 JWKS는 빈 헤더로 부른다. 전송 타입은 두 흐름이 함께 쓰는 모듈 하나에 둔다.
+    - transaction이 시작한 흐름을 타입으로 든다(GADT `_ flow = Google : google flow | Github : unit flow`). Google transaction은 nonce를 들고, GitHub transaction은 들지 않는다. 꺼낼 때 부르는 쪽이 흐름을 대고, 다른 흐름이면 지우고 `Other_flow`로 거절한다.
+    - 모듈 이름 `Oidc_login_transaction`은 그대로 둔다. 설계(§5.2.1)가 GitHub 흐름의 쿠키도 `__Host-masc_oidc_txn`이라고 부르기 때문이다.
+    - 전송 함수 `get`이 헤더를 받는다. Google의 discovery와 JWKS는 빈 헤더로 부른다. 전송 타입은 두 흐름이 함께 쓰는 모듈 `Login_transport` 하나에 둔다.
+    - PR은 둘로 나눈다. C2b-1a가 전송, C2b-1b가 transaction이다.
   - C2b-2 GitHub과 주고받기. 인가 URL, token 교환, `GET /user` 한 번이다.
     - access token은 이 함수 안에서만 쓴다. 저장하지 않고, 로그와 오류 문구에 싣지 않는다.
     - `id`가 정수가 아니거나 `Authz_external_identity.github`가 거절하면(0 이하, 2^53-1 초과) 거절한다. `login`과 email은 읽지 않는다.

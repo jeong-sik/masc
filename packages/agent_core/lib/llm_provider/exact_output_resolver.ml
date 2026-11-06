@@ -140,8 +140,6 @@ type credential_outcome =
       (** A catalog-wire target on a keyed provider row. The payload is the
           provider id, not an environment variable name: catalog rows state
           whether a key is needed, not where it lives. *)
-  | Credential_invalid of string
-  | Credential_read_failed of string
 
 type frozen_target =
   { config : PC.t
@@ -194,14 +192,6 @@ type target_selection_error =
   | Missing_declared_target_credential of
       { target_ref : string
       ; provider_id : string
-      }
-  | Target_credential_invalid of
-      { target_ref : string
-      ; environment_variable : string
-      }
-  | Target_credential_read_failed of
-      { target_ref : string
-      ; environment_variable : string
       }
 
 type target_catalog_admission_error =
@@ -1003,10 +993,6 @@ let resolve_target (admitted : admitted_target) =
     Error (Missing_target_credential { target_ref; environment_variable })
   | Credential_missing_declared_key provider_id ->
     Error (Missing_declared_target_credential { target_ref; provider_id })
-  | Credential_invalid environment_variable ->
-    Error (Target_credential_invalid { target_ref; environment_variable })
-  | Credential_read_failed environment_variable ->
-    Error (Target_credential_read_failed { target_ref; environment_variable })
   | Credential_not_required -> select Secret.empty
   | Credential_available frozen_api_key -> select frozen_api_key
 ;;

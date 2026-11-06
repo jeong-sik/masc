@@ -348,11 +348,10 @@ let collect ~keeper_name ~max_turns =
   end
 ;;
 
-let externalize_failures ~base_path ~keeper_name ~policy ~tools turns =
-  match policy with
-  | Keeper_input_policy.Wide -> turns
-  | Small when Result.is_error (Keeper_recovery_transmission.require_reader tools) -> turns
-  | Small ->
+let externalize_failures ~base_path ~keeper_name ~tools turns =
+  match Keeper_recovery_transmission.require_reader tools with
+  | Error _ -> turns
+  | Ok _ ->
     let store = Tool_blob_store.create ~base_path in
     let externalize text =
       match Tool_output.decode_from_agent_core text with
@@ -377,6 +376,6 @@ let externalize_failures ~base_path ~keeper_name ~policy ~tools turns =
            with Sys_error _ -> incr failed; call)) turn.calls in
       {turn with calls}) turns in
     if !failed > 0 then Log.Keeper.warn ~keeper_name
-      "small action briefing retained original failed-call payloads: storage failed for %d calls" !failed;
+      "action briefing retained original failed-call payloads: storage failed for %d calls" !failed;
     turns
 ;;

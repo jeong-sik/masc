@@ -628,11 +628,11 @@ type argument_source
     memo. It never authorizes changing a remote client-held conversation. *)
 
 val create_argument_source :
-  input_policy:Keeper_input_policy.t -> base_path:string -> keeper_name:string ->
+  base_path:string -> keeper_name:string ->
   seed:Agent_core.Types.message list option ->
   replay_prefix:Keeper_replay_prefix.projection ->
   turn_start:Keeper_carried_front.turn_start -> argument_source option
-(** [None] for Wide, missing raw seed, empty base path, or unknown/empty
+(** [None] for a missing raw seed, empty base path, or unknown/empty
     completed boundary. Creation performs no blob I/O or occurrence binding.
     The replay authority covers history only: official clients transmit the
     current goal separately, so its input obligation is not part of this

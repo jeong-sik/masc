@@ -1365,7 +1365,7 @@ let argument_fixture capture =
     (Result.is_error (Keeper_replay_prefix.restore_messages replay_prefix history));
   let base_path = Filename.dirname capture in
   let source () = Keeper_official_client_host.create_argument_source
-    ~input_policy:Keeper_input_policy.Small ~base_path ~keeper_name:"context-fixture"
+    ~base_path ~keeper_name:"context-fixture"
     ~seed:(Some seed) ~replay_prefix ~turn_start:boundary in
   let librarian_front _ = Ok (frozen_librarian_position
     (Keeper_turn_driver_try_provider.Librarian_progress {end_atom=1})) in

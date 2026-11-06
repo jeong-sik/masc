@@ -345,7 +345,6 @@ type attempt_input =
 
     This is not a nested Agent-call entry point. *)
 val run_named :
-  ?input_policy:Keeper_input_policy.t ->
   runtime_id:string ->
   ?keeper_name:string ->
   walk_owner:walk_owner ->

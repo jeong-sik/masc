@@ -44,8 +44,8 @@ let project ~base_path ~audience work =
         ["recent_conversation", observed_json work.conversation;
          "latest_autonomous_reply", observed_json work.autonomous_reply]) in
     (* The existing artifact preview envelope is already safe to carry inline.
-       Everything larger travels through its canonical reader, independently
-       of the history's Wide/Small policy: this is extra pinned context. *)
+       Everything larger travels through its canonical reader: this is extra
+       pinned context. *)
     if String.length bytes <= Tool_blob_store.preview_max then evidence bytes
     else match (match audience with
       | Operator_preview -> Ok ()

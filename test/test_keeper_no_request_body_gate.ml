@@ -202,7 +202,7 @@ candidates = ["overflow.sample", "fixture.sample"]
   | [] -> fail "the fallback response observation is missing"
 
 (* Every condition under which a completed turn's tool results and arguments
-   once left as markers holds here: Small policy, a recorded turn boundary, a
+   once left as markers holds here: a recorded turn boundary, a
    Librarian behind on that turn, the canonical reader, and a completed raw
    seed. The second request still carries them exactly as the first one sent
    them (RFC-0363 §3.4.1). *)
@@ -381,7 +381,7 @@ streaming = false
     Observation.with_wake ~keeper:"demote-proof" ~trace_id ~absolute_turn:2
       ~execution_scope:None ~cause:None (fun () ->
     Keeper_turn_driver.run_named ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = trace_id }) ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
-      ~input_policy:Keeper_input_policy.Small ?argument_demotion_seed
+      ?argument_demotion_seed
 
       ~system_prompt
       ~runtime_id:"fixture.sample"

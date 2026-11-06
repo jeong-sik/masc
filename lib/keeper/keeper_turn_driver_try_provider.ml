@@ -127,8 +127,7 @@ let completed_history_end ~trace_id ~lines ~messages =
    hand does not match, is [Turn_boundary_unknown]: the range then opens on
    the newest atom alone and the origin says so, rather than on the whole
    history under a boundary that was never read (§13.4 does not fold an
-   unknown start into 0). Under the small input policy no completed-turn
-   boundary demotes tool bodies either. Reading it logs nothing: a request
+   unknown start into 0). Reading it logs nothing: a request
    whose range it opens says so ([Keeper_carried_front.warn_range_opens_on_newest_atom]),
    and the dispatches that read it but start from a seed or a Librarian
    point, or the forecast that only looks, have nothing to report. *)
@@ -413,7 +412,6 @@ type try_provider_ctx =
        per attempt, on that path only. *)
     carried_front_seed : unit -> Keeper_carried_front.seed_read
   ; request_input : request_input
-  ; input_policy : Keeper_input_policy.t
   ; turn_boundary : Keeper_carried_front.turn_start
   ; carried_front_after_refusal : unit -> Keeper_carried_front.seed option
   ; (* Where a front moved after a refusal is kept for the rest of the
@@ -1690,13 +1688,11 @@ let bounded_model_input_projection
   let demotion_addresses = Keeper_model_input_demotion.create_address_memo () in
   let store_failure_reported = ref false in
   let reader_available = Result.is_ok (Keeper_recovery_transmission.require_reader ctx.tools) in
-  let argument_references_enabled = match ctx.input_policy with
-    | Keeper_input_policy.Small ->
-      reader_available
-      && (match ctx.turn_boundary with
-          | Keeper_carried_front.Turn_boundary { end_atom } -> end_atom > 0
-          | Keeper_carried_front.Turn_boundary_unknown _ -> false)
-    | Keeper_input_policy.Wide -> false in
+  let argument_references_enabled =
+    reader_available
+    && (match ctx.turn_boundary with
+        | Keeper_carried_front.Turn_boundary { end_atom } -> end_atom > 0
+        | Keeper_carried_front.Turn_boundary_unknown _ -> false) in
   (* Core may deserialize a retained native checkpoint after dispatch. Bind
      once to its first actual request, while closure eligibility still comes
      exclusively from the pre-admission seed. Result resends never rebind it.
@@ -1718,7 +1714,7 @@ let bounded_model_input_projection
              | Ok arguments -> Some arguments
              | Error error ->
                Log.Keeper.warn ~keeper_name:ctx.keeper_name
-                 "input policy kept original tool arguments: %s"
+                 "model input kept original tool arguments: %s"
                  (argument_binding_error_to_string error);
                None)
           | None, (Keeper_carried_front.Turn_boundary _ | Turn_boundary_unknown _)
@@ -1731,8 +1727,8 @@ let bounded_model_input_projection
      again: the marker names a body [artifact_read] reads back. *)
   let demotion_base_path = if reader_available then ctx.base_path else "" in
   Log.Keeper.info ~keeper_name:ctx.keeper_name
-    "input policy runtime=%s selected=%s context_owner=agent_core turn_boundary=%s blob_reader_available=%b argument_references_enabled=%b"
-    ctx.runtime_id (Keeper_input_policy.to_string ctx.input_policy)
+    "model input references runtime=%s context_owner=agent_core turn_boundary=%s blob_reader_available=%b argument_references_enabled=%b"
+    ctx.runtime_id
     (Keeper_carried_front.turn_start_to_string ctx.turn_boundary) reader_available argument_references_enabled;
 
   (* Scoped to the attempt, written by the one fiber that drives it. The
@@ -1876,7 +1872,7 @@ let bounded_model_input_projection
           if outcome.Keeper_model_input_demotion.reverted > 0 && not !store_failure_reported then (
             store_failure_reported := true;
             Log.Keeper.warn ~keeper_name:ctx.keeper_name
-              "input policy kept original tool bodies after externalization failure: count=%d"
+              "model input kept original tool bodies after externalization failure: count=%d"
               outcome.reverted);
           outcome.Keeper_model_input_demotion.messages)
         ~to_wire
@@ -1896,7 +1892,7 @@ let bounded_model_input_projection
     if view.argument_prefix_protected && not !argument_protection_reported then (
       argument_protection_reported := true;
       Log.Keeper.info ~keeper_name:ctx.keeper_name
-        "input policy kept tool argument prefix to preserve signed reasoning replay");
+        "model input kept tool argument prefix to preserve signed reasoning replay");
     let composed = view.composed in
     Keeper_carried_front.warn_if_origin_is_unknown_start
       ~keeper_name:ctx.keeper_name composed.origin;
@@ -1965,7 +1961,6 @@ let bounded_model_input_projection
           ; "origin", `String (Keeper_carried_front.origin_to_string composed.origin)
           ; "projected_bytes", `Int transmitted_bytes
           ; "reserved_bytes", `Int reserved_bytes
-          ; "input_policy", `String (Keeper_input_policy.to_string ctx.input_policy)
           ; "current_turn_results", `String (current_turn_results_to_string current_turn_results)
           ]) Keeper_runtime_manifest.History_projection_observed;
       Log.Keeper.info

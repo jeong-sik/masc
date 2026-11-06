@@ -1884,7 +1884,6 @@ let observe_native_attempt ?on_request_observation binding run ~idx ~runtime_id 
 ;;
 
 let run_named
-    ?(input_policy = Keeper_input_policy.default)
     ~runtime_id
     ?(keeper_name = "")
     ~walk_owner
@@ -2012,9 +2011,8 @@ let run_named
          The checkpoint remains the source of every atom index. *)
       (* The end of the last completed turn on this history: where a request
          with no absorbed point starts (RFC keeper-context-window-in-tokens
-         §13.4) and, under the small input policy, the boundary before which
-         completed turns' tool bodies demote. Read once per turn for every
-         input policy and lane. *)
+         §13.4) and the boundary before which completed arguments bind. Read
+         once per turn for every lane. *)
       let turn_boundary = Eio.Lazy.from_fun ~cancel:`Restart (fun () ->
         match session_id with
         | Some trace_id ->
@@ -2758,7 +2756,7 @@ let run_named
         | Runtime_execution.Agent_core _ -> None
         | Codex_app_server _ | Claude_code _ | Antigravity_cli _ | Muse_serve _ ->
           Keeper_official_client_host.create_argument_source
-            ~input_policy ~base_path ~keeper_name ~seed:argument_demotion_seed
+            ~base_path ~keeper_name ~seed:argument_demotion_seed
             ~replay_prefix:replay_prefix_projection
             ~turn_start:(Eio.Lazy.force official_client_turn_boundary)
       in
@@ -2766,8 +2764,8 @@ let run_named
        | Runtime_execution.Agent_core _ -> ()
        | Codex_app_server _ | Claude_code _ | Antigravity_cli _ | Muse_serve _ ->
          Log.Keeper.info ~keeper_name
-           "input policy runtime=%s selected=%s context_owner=official_client argument_source_available=%b"
-           attempt_runtime_id (Keeper_input_policy.to_string input_policy)
+           "model input references runtime=%s context_owner=official_client argument_source_available=%b"
+           attempt_runtime_id
            (Option.is_some official_argument_source));
       let guidance_entry = ref false in
       let on_guidance_prepared () =
@@ -3424,7 +3422,6 @@ let run_named
             { runtime_id = attempt_runtime_id
             ; input_runtime = Some runtime
             ; error_runtime_id
-            ; input_policy
             ; turn_boundary = Eio.Lazy.force turn_boundary
             ; argument_demotion_seed
             ; argument_replay_prefix = replay_prefix_projection

@@ -36118,7 +36118,7 @@ Use relative paths for resources already held in the package. -->
                            state.code_file_scroll
                      | Code_results.Read_location_file (owner, request) ->
                          Masc_tui_code_requests.launch_navigation_read state ~host:server_peer_host
-                           ~deliver:(workspace_enqueue state async_messages) owner request)
+                           ~deliver:(deliver_code state async_messages) owner request)
             | "\r" when (match state.palette_mode with
                 | Palette_locations _ -> true
                 | Palette_jump | Palette_choice _ | Palette_files _ | Palette_branches _

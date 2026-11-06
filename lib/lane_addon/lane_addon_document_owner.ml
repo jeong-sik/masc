@@ -7,9 +7,11 @@ let protect f = try f () with
   | Unix.Unix_error (error, call, _) -> Error (call ^ ": " ^ Unix.error_message error)
   | Yojson.Json_error message -> Error message
 let canonical path = Filename.concat (Unix.realpath (Filename.dirname path)) (Filename.basename path)
+let dirname = "declaration-owners"
+
 let identity ~root ~source_path =
   let root = canonical root and source_path = canonical source_path in
-  let path = Filename.concat root (Filename.concat "declaration-owners"
+  let path = Filename.concat root (Filename.concat dirname
     (Lane_addon_store.digest source_path ^ ".jsonl")) in
   root, source_path, path
 let keeper = function Pending p -> Some p.keeper | Owned p -> Some p.keeper | Reassigned p -> Some p.keeper | Revoked -> None

@@ -34,8 +34,10 @@ type owner_event = Export_inventory_changed | Configuration_observed
 type owner_subscription = { root:string; package_id:string; signal:owner_event -> unit }
 let owner_subscriptions_mutex=Stdlib.Mutex.create ()
 let owner_subscriptions : owner_subscription list ref=ref []
+let lane_addons_dirname = "lane-addons"
+
 let subscribe_owner_events ~config ~package_id signal =
-  let root=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons")
+  let root=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) lane_addons_dirname)
     |> Lane_addon_store.root in
   let subscription={root;package_id;signal} in
   Stdlib.Mutex.protect owner_subscriptions_mutex (fun () ->
@@ -1478,7 +1480,8 @@ let native_result result = Result.map_error (fun error ->
   Lifecycle.Cleanup_unconfirmed (Native_addon_lease.error_to_string error)) result
 (* Where a released browser allocation's files for the Keeper go, one folder
    per instance. The host never removes them. *)
-let native_kept_root store = Filename.concat (Lane_addon_store.root store) "kept-files"
+let kept_files_dirname = "kept-files"
+let native_kept_root store = Filename.concat (Lane_addon_store.root store) kept_files_dirname
 let native_settlement ~store claim =
   let* status = offload (fun () -> Native_addon_lease.status claim) |> native_result in
   match status with

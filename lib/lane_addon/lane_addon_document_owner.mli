@@ -21,3 +21,6 @@ val reassign : root:string -> source_path:string -> keeper:string ->
 
 val revoke : root:string -> source_path:string -> (unit, string) result
 (** Supersede Keeper authority when operator configuration becomes shared or operator-only. *)
+
+val dirname : string
+(** The directory declaration owners sit in below the Lane add-on store. *)

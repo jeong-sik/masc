@@ -10,6 +10,7 @@
   task_goal_assignment
   task_history_inventory
   task_history_page
+  task_history_reader
   task_history_types
   tool_task
   tool_task_args
@@ -22,6 +23,7 @@
   workflow_rejection_payload)
  (private_modules
   task_history_inventory
+  task_history_reader
   task_history_types)
  (flags
   (:standard -w +37))

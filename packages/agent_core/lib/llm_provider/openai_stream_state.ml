@@ -236,7 +236,6 @@ let record_tool_index_route ?tx state tool_index block_index =
 type tool_block_index_policy =
   | Next_available
   | Next_after_carrier
-  | Wire_index
 
 type idless_tool_semantics =
   (* Argument fragments continue the one call selected by the wire index. *)
@@ -314,7 +313,6 @@ let open_tool_block
     match index_policy with
     | Next_available -> state.next_block_index
     | Next_after_carrier -> state.next_block_index + 1
-    | Wire_index -> wire_index
   in
   if Hashtbl.mem state.tool_block_identities block_index
   then reject_tool_block ~protocol ~wire_index Block_index_collision, None
@@ -386,16 +384,9 @@ let resolve_tool_block
         | Some (Tool_index_single block_index) ->
           (match Hashtbl.find_opt state.tool_block_identities block_index with
            | Some { origin = Agent_core_allocated; _ } -> reject Late_provider_identity
-           | Some { origin = Provider_supplied; _ } ->
-             (match index_policy with
-              | Next_available | Next_after_carrier -> open_and_record ()
-              | Wire_index -> reject Block_index_collision)
+           | Some { origin = Provider_supplied; _ } -> open_and_record ()
            | None -> reject Missing_block_identity)
-        | Some (Tool_index_ambiguous _) ->
-          (match index_policy with
-           | Next_available | Next_after_carrier -> open_and_record ()
-           | Wire_index -> reject Block_index_collision)
-        | None -> open_and_record ()))
+        | Some (Tool_index_ambiguous _) | None -> open_and_record ()))
   | None ->
     (match idless_semantics with
      | Complete_occurrence -> open_and_record ()

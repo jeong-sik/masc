@@ -116,12 +116,11 @@ val rollback_openai_projection : openai_projection_tx -> unit
 
 (** {1 Tool block resolution} *)
 
-(** Which block index a newly opened tool block takes: the next unused index,
-    the one after it, or the provider's wire index itself. *)
+(** Which block index a newly opened tool block takes: the next unused index
+    or the one after it. *)
 type tool_block_index_policy =
   | Next_available
   | Next_after_carrier
-  | Wire_index
 
 type idless_tool_semantics =
   (* Argument fragments continue the one call selected by the wire index. *)

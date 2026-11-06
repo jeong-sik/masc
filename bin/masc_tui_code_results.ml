@@ -757,7 +757,8 @@ let prepare_draft state =
       | (None | Some _), Some (_, Masc_tui_fetched.Ready { cfd_body = Code_binary _; _ }) ->
         Error "A binary file cannot be edited as text"
       | (None | Some _), (None | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
-          | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _ | Masc_tui_fetched.Ready _))) ->
+          | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _
+          | Masc_tui_fetched.Ready { cfd_body = Code_text _; _ }))) ->
         Error "The current file has no editable source revision"
 
 let edit_draft state draft text =

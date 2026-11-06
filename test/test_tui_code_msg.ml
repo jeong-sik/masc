@@ -154,7 +154,7 @@ let test_a_committed_save_rereads_its_file () =
    refused instead of drawing its bytes as lines of escapes or handing them to
    an editor; the next text file opens as before. *)
 let test_a_binary_file_has_no_text_to_edit_or_copy () =
-  let state = Types.create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = Types.create_state ~workspace:"" ~port:0 () in
   confirm_workspace state;
   let open_file path content =
     let reading, read =

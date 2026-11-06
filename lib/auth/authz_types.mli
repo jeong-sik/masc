@@ -13,6 +13,10 @@ module Policy_id : Authz_id.S
 module Workspace_id : Authz_id.S
 module Invite_id : Authz_id.S
 
+(** The id of an entry of the allowlist: an identity that an Admin registered
+    so that its first sign-in makes a Member (plan C2d). *)
+module Registration_id : Authz_id.S
+
 (** The name of the directory, inside a workspace, that holds the provider
     account homes of one member (design 4.1 and 5.4). Its alphabet is that of
     {!Authz_id} without the capital letters: the file system may not tell case

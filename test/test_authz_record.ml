@@ -396,6 +396,7 @@ let kind_labels_are_the_names_on_disk () =
     ; "mode_event"
     ; "invite"
     ; "admission"
+    ; "admin_assignment"
     ]
     (List.map R.Kind.to_string R.Kind.all)
 ;;

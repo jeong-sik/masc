@@ -2750,6 +2750,39 @@ let test_native_context_signed_tool_round_trip () =
     (headers = Backend_anthropic.request_headers ~body:count_body headers)
 ;;
 
+(* Histories saved before and after the canonical-role storage both reach this
+   lane: an earlier server stored the context row with the System role, and a
+   current one stores it as User. The same row in either role puts the same
+   bytes on the wire and binds the same creation prefix, so signed thinking
+   keeps replaying across the deployment. *)
+let test_native_context_stored_role_is_not_on_the_wire () =
+  let config = native_context_config () in
+  let tools = [prefix_test_tool_schema] in
+  let caller = message User [Text "inspect workspace"] in
+  let fresh role = message ~origin:System_context role [Text "workspace version one"] in
+  let assistant = stamped_assistant ~config ~request_messages:[caller; fresh User] ~tools
+      [ Thinking {content="inspect first";signature=Some "synthetic-fixture-signature"}
+      ; ToolUse {id="call-1";name="inspect";input=`Assoc []} ] in
+  let history role =
+    [ caller; {(fresh role) with origin=Historical_system_context}; assistant
+    ; message Tool [tool_result "call-1"]
+    ; message ~origin:System_context role [Text "workspace version two"] ] in
+  let body role = Backend_anthropic.build_request ~config ~messages:(history role) ~tools () in
+  Alcotest.(check string) "the stored role does not reach the wire" (body System) (body User);
+  let prefix role =
+    Backend_anthropic.transmitted_reasoning_prefix ~config ~messages:[caller; fresh role] ~tools
+      ~response_content:assistant.content ()
+  in
+  check_bool "both roles bind the same creation prefix" true (prefix System = prefix User);
+  List.iter (fun role ->
+    match Backend_anthropic.retained_prefix_reasoning_indices ~config ~tools (history role) with
+    | Ok (Some retained) ->
+      Alcotest.(check (list int)) "the signed thinking replays in either stored role" [2] retained
+    | Ok None -> Alcotest.fail "the native lane binds reasoning to its request"
+    | Error error -> Alcotest.fail (Reasoning_history_projection.error_to_string error))
+    [System; User]
+;;
+
 let test_native_context_placement_and_removed_assistant () =
   let module Lower = Message_origin_lowering in
   let policy = Lower.Turn_scoped_system_context in
@@ -2786,6 +2819,8 @@ let () =
     [ ( "typed replay projection"
       , [ Alcotest.test_case "native context preserves the signed tool prefix" `Quick
             test_native_context_signed_tool_round_trip
+        ; Alcotest.test_case "native context stored role is not on the wire" `Quick
+            test_native_context_stored_role_is_not_on_the_wire
         ; Alcotest.test_case "native context validates post-filter placement" `Quick
             test_native_context_placement_and_removed_assistant
         ; Alcotest.test_case "initial System preserves the native caller boundary" `Quick

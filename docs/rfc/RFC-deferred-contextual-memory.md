@@ -251,16 +251,16 @@ input preserves the original pair-only request; a pair whose cited observations 
 not fit is asked the pair-only question and recorded as such. This corrects the
 missing input path,
 not the semantic-quality measurement. The subsequent controlled experiment in
-`experiments/memory-transition-evidence` (PR #41922) motivates the source-observation
+`docs/evidence/2026-10-09-memory-transition-evidence` (PR #41922) motivates the source-observation
 path above: 15/18 pair-only, 12/18 instruction-only, 18/18 with evidence. These remain
 six development scenarios; they do not prove held-out or installed behavior.
 These refusals retain
 original memories, so no memory-reduction claim follows from this experiment.
 
-A [subsequent bounded validation package](../../experiments/memory-transition-evidence/validation-41910-84e348cd/README.md)
+A [subsequent bounded validation package](../evidence/2026-10-09-memory-transition-evidence/validation-41910-84e348cd/README.md)
 retains 108 calls using the exact production question at source head
 `84e348cd3e321a667edeeeaa4d6ce54c08f0c63c`. It keeps the six development cases
-separate from six [new independently frozen synthetic held-out cases](../../experiments/memory-transition-evidence/validation-41910-84e348cd/heldout-new-protocol.md).
+separate from six [new independently frozen synthetic held-out cases](../evidence/2026-10-09-memory-transition-evidence/validation-41910-84e348cd/heldout-new-protocol.md).
 With three repetitions per case, the source-observation arm matched 18/18 in each
 cohort; current pair-only matched 15/18 development and 18/18 new held-out.
 No arm falsely merged a negative case. The new held-out cohort therefore does

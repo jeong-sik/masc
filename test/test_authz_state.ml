@@ -231,9 +231,9 @@ module Invites = Authz_invite_state
 let invite_id = id_of_string Authz_types.Invite_id.of_string "invite-1"
 
 (* A reduction that the store gave up, named by the record it was for. *)
-let held ?(aborted = String.make 64 'a') subject =
+let held ?(aborted = String.make 64 'a') ?(event = Authz_external_store.Change.Revoke) subject =
   match Authz_record.Hash.of_hex aborted with
-  | Some aborted -> { S.aborted; subject }
+  | Some aborted -> { S.aborted; event; subject }
   | None -> Alcotest.fail "fixture digest refused"
 ;;
 
@@ -548,6 +548,81 @@ let test_a_block_is_one_per_given_up_reduction () =
     (answer (Authz_records.Subject.Invite (id_of_string Authz_types.Invite_id.of_string "invite-2")))
 ;;
 
+(* The revocation of an invitation that closes the given blocks. *)
+let revoke_record ~closes id =
+  match I.to_body (I.Revoked { invite_id = id }) with
+  | Error error -> Alcotest.failf "fixture revocation refused: %s" (Authz_body.error_to_string error)
+  | Ok body ->
+    (match R.make ~head:R.genesis ~at_ms ~author:Authz_records.Author.Local_operator ~kind:K.Invite ~body with
+     | Ok record -> R.closing record ~closes:(List.map (fun held -> held.S.aborted) closes)
+     | Error _ -> Alcotest.fail "fixture revocation record refused")
+;;
+
+let hex_list hashes = List.sort String.compare (List.map R.Hash.to_hex hashes)
+let held_digests state = hex_list (List.map (fun held -> held.S.aborted) state.S.revocation_pending)
+
+let revocation_word state subject =
+  match S.revocation state subject with
+  | Authz_records.Revocation_state.Pending -> "pending"
+  | Authz_records.Revocation_state.Not_pending -> "clear"
+;;
+
+(* A record that makes a given-up reduction again closes the blocks it names
+   (design 8.3). A block it does not name stays, of the same subject or of
+   another, and so does its subject. *)
+let test_a_retry_closes_the_blocks_it_names () =
+  let invite = Authz_records.Subject.Invite invite_id in
+  let first = held invite in
+  let second = held ~aborted:(String.make 64 'b') invite in
+  let other = held ~aborted:(String.make 64 'c') (Authz_records.Subject.Invite second_invite) in
+  let state = S.hold_revocations (invited ()) [ first; second; other ] in
+  let change event = Authz_external_store.Change.Authz { event; subject = invite } in
+  Alcotest.(check (list string))
+    "a revocation of invite-1 closes its two blocks"
+    (hex_list [ first.S.aborted; second.S.aborted ])
+    (hex_list (S.closable state (change Authz_external_store.Change.Revoke)));
+  Alcotest.(check (list string))
+    "a grant closes nothing"
+    []
+    (hex_list (S.closable state (change Authz_external_store.Change.Grant)));
+  let one = step_ok state (revoke_record ~closes:[ first ] invite_id) in
+  Alcotest.(check (list string))
+    "closing one leaves the others"
+    (hex_list [ second.S.aborted; other.S.aborted ])
+    (held_digests one);
+  Alcotest.(check string) "invite-1 after one" "pending" (revocation_word one invite);
+  let both = step_ok state (revoke_record ~closes:[ first; second ] invite_id) in
+  Alcotest.(check (list string)) "closing both" (hex_list [ other.S.aborted ]) (held_digests both);
+  Alcotest.(check string) "invite-1 after both" "clear" (revocation_word both invite)
+;;
+
+(* A record closes only a block of the change it makes, and only a reduction
+   closes one. *)
+let test_closes_that_name_no_block_of_the_change_are_refused () =
+  let invite = Authz_records.Subject.Invite invite_id in
+  let first = held invite in
+  let other = held ~aborted:(String.make 64 'c') (Authz_records.Subject.Invite second_invite) in
+  let state = S.hold_revocations (invited ()) [ first; other ] in
+  let refused label record expected =
+    match S.step state record with
+    | Error refusal -> Alcotest.(check string) label expected (S.refusal_to_string refusal)
+    | Ok _ -> Alcotest.failf "%s: the record was read" label
+  in
+  let unknown = held ~aborted:(String.make 64 'd') invite in
+  refused
+    "a digest that no block has"
+    (revoke_record ~closes:[ unknown ] invite_id)
+    (S.refusal_to_string (S.Closes_not_held unknown.S.aborted));
+  refused
+    "the block of another subject"
+    (revoke_record ~closes:[ other ] invite_id)
+    (S.refusal_to_string (S.Closes_not_held other.S.aborted));
+  refused
+    "a record that reduces nothing"
+    (R.closing (issue_record third_invite "token-3") ~closes:[ first.S.aborted ])
+    (S.refusal_to_string S.Closes_without_reduction)
+;;
+
 (* The revocation of bob was given up, so bob writes nothing while the block
    stands, and alice is still an Admin. *)
 let test_a_principal_whose_revocation_was_given_up_writes_nothing () =
@@ -772,6 +847,10 @@ let () =
             test_a_principal_whose_revocation_was_given_up_writes_nothing
         ; Alcotest.test_case "one block per given-up reduction" `Quick
             test_a_block_is_one_per_given_up_reduction
+        ; Alcotest.test_case "a retry closes the blocks it names" `Quick
+            test_a_retry_closes_the_blocks_it_names
+        ; Alcotest.test_case "closes that name no block of the change" `Quick
+            test_closes_that_name_no_block_of_the_change_are_refused
         ; Alcotest.test_case "an Admin invites a Member" `Quick test_an_admin_invites_a_member
         ; Alcotest.test_case "by mode" `Quick test_an_admin_assignment_by_mode
         ] )

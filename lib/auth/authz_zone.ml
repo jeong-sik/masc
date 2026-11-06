@@ -11,8 +11,8 @@ let ( let* ) = Result.bind
 (* The block of a reduction, named by the record the intent was for. *)
 let reduction_held (intent : S.intent) =
   match intent.S.change with
-  | S.Change.Authz { subject; event = _ } when S.Change.is_reduction intent.S.change ->
-    Some { Authz_state.aborted = intent.S.intended_next_record_digest; subject }
+  | S.Change.Authz { subject; event } when S.Change.is_reduction intent.S.change ->
+    Some { Authz_state.aborted = intent.S.intended_next_record_digest; event; subject }
   | S.Change.Authz _ | S.Change.Mode _ -> None
 ;;
 
@@ -297,8 +297,19 @@ let in_zone t draft store_writer log_writer head settlement =
       (fun error -> Record_not_built error)
       (R.make ~head ~at_ms ~author:draft.author ~kind:draft.kind ~body:draft.body)
   in
-  let* { Authz_state.state; high_water } =
+  let apply record =
     Result.map_error (fun refusal -> Refused refusal) (Authz_state.apply base record)
+  in
+  let* applied = apply record in
+  (* A reduction that was given up and is made again closes its block (design
+     8.3). The record names the blocks it closes, so the hash and the intent
+     cover them: the record is built again with them and read again. *)
+  let* record, { Authz_state.state; high_water } =
+    match Option.map (Authz_state.closable base) applied.Authz_state.high_water with
+    | None | Some [] -> Ok (record, applied)
+    | Some closes ->
+      let record = R.closing record ~closes in
+      Result.map (fun applied -> record, applied) (apply record)
   in
   (* The settlement comes first even for a record with no intent: the append
      moves the head, and an intent left pending behind it could no longer be

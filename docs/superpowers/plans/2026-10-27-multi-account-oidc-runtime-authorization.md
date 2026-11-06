@@ -172,10 +172,12 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 - B3c가 권한 축소 사건(Admin 회수, principal 비활성·삭제, 초대 취소)을 더했다. 구역은 들어올 때 포기한 축소 intent의 subject를 이미 막는다(`Authz_zone.Replay`, `Authz_state.hold_revocations`). 남은 것은 셋이다. 막힘을 푸는 출구가 없다. 쓰기가 실패한 직후에는 막지 않는다. 막힘을 묻는 공개 함수가 없다.
 - 실행 경로는 D2 전에 이 값을 읽지 않는다. lib과 bin에서 `Authz_decision`을 부르는 곳은 없다. 그래서 이 층에서 보이는 것은 구역의 거절, 게이트 값, `Authz_decision.allowed`의 `Revocation_pending` 거부까지다. `Single_user`는 구역을 열지 않으므로 동작이 같다.
 - 두 층으로 낸다.
-  - B2e-1: 게이트 값, 즉시 차단, 재시도 출구. 1a(digest로 든 막힘, 게이트 값, 즉시 차단)와 1b(`closes` 출구)로 나눠 낸다. 1b는 축소 사건 본문 셋(초대 취소, Admin 회수, principal 비활성·삭제)의 코덱을 바꾼다.
+  - B2e-1: 게이트 값, 즉시 차단, 재시도 출구. 1a(digest로 든 막힘, 게이트 값, 즉시 차단)와 1b(`closes` 출구)로 나눠 낸다. 1b는 레코드 줄 형식(`Authz_record`)에 `closes`를 더한다.
     - 막힘은 subject 목록이 아니라 포기한 intent마다 한 항목(`intended_next_record_digest`와 change)이다. 어느 intent가 닫혔는지 가려야 해서다.
     - 게이트 값은 구역의 함수로 묻는다. 그 subject의 항목이 남아 있으면 `Pending`이다. 로그나 외부 저장소가 멈춘 구역(`Log_stopped`, `Store_stopped`)은 모든 subject에 `Uncertain`으로 답한다(B2 범위의 "`Authz_log`가 멈추면 `AuthorizationUncertain`"). snapshot은 파일이 멈춘 것을 담지 않아서(B3b), 값을 snapshot에서 바로 읽지 않는다. D2가 이 값을 `facts.revocation`에 넣는다.
-    - 재시도 출구(설계 §8.3): 축소 사건 본문에 닫는 digest 목록 `closes`를 더한다. 구역은 축소 change를 commit할 때 같은 change(사건과 subject)의 남은 항목 digest를 `closes`에 채운다. 부른 쪽은 채우지 않는다. `apply`는 `closes`가 가리키는 항목만 지우고, 남은 항목이 아닌 digest는 거절한다. replay도 같은 `step`을 쓰므로 재기동한 결과가 같다. 로그를 되감으면 닫는 레코드도 사라져 막힘이 돌아온다. 2026-11-06에 라이브 `authz.jsonl`과 설치 기록이 없음을 확인했다. 축소 사건 본문만 바꾸는 hard cut이고 읽기 호환 코드는 두지 않는다.
+    - 재시도 출구(설계 §8.3): 레코드에 닫는 digest 목록 `closes`를 더한다. 본문이 아니라 `seq`·`previous_hash`·`at_ms`처럼 구역이 채우는 겉 필드다. 부른 쪽은 본문만 주고 `closes`를 채우지 않는다. 줄에서는 `body`와 `hash` 사이에 오고, 비면 쓰지 않는다. 그래서 닫는 것이 없는 레코드의 줄과 해시는 전과 같다. 빈 목록, 순서가 틀리거나 겹친 digest는 거절한다.
+    - 구역은 레코드를 한 번 읽어 change를 얻는다. 같은 change(사건과 subject)의 남은 항목이 있으면 그 digest로 레코드를 다시 만들고 다시 읽는다. 그래서 intent의 digest와 해시가 `closes`를 덮는다. `apply`는 `closes`가 가리키는 항목만 지운다. 그 change의 남은 항목이 아닌 digest(`Closes_not_held`)와, 축소가 아닌 레코드의 `closes`(`Closes_without_reduction`)는 거절한다. replay도 같은 `step`을 쓰므로 재기동한 결과가 같다. 로그를 되감으면 닫는 레코드도 사라져 막힘이 돌아온다.
+    - 같은 change가 두 번 막히는 길은 잠긴 로그로 첫 시도가 실패하고, 둘째 시도가 첫 시도를 포기하고 쓰기에 실패해 로그가 멈춘 뒤 재기동하는 경우다. 재시도는 둘을 다 닫는다.
     - 즉시 차단(설계 §8.2 판정 3): 축소의 `Intent_pending`을 쓴 뒤 append가 실패하면(`Record_not_appended`) 구역은 그 자리에서 subject를 막은 상태를 발행한다. 다음 진입의 판정 3이 같은 intent를 포기하면 같은 항목이 된다.
   - B2e-2: 적격 Admin의 취소.
     - 새 Kind와 본문 `{ aborted; subject }`를 더한다. `admits`는 인증된 principal만 받는다.

@@ -277,6 +277,26 @@ let keeper_waiting_detail (row : Keeper_list_model.row) =
   | Keeper_list_model.Waiting_observed { kwr_waiting_on = []; _ }
   | Keeper_list_model.Waiting_unobserved | Keeper_list_model.Waiting_unavailable -> None
 
+(* The resting path the Keeper's next dispatch waits on, with the time the
+   walk releases. Only a phase that takes turns waits on it; a stopped or
+   paused Keeper's path rest says nothing about it. *)
+let keeper_path_rest_detail (row : Keeper_list_model.row) =
+  match row.reading.Keeper_control.liveness with
+  | Keeper_control.Present runtime
+    when Tui_decode.keeper_phase_executes_turns runtime.Tui_decode.kr_phase -> (
+      match runtime.Tui_decode.kr_runtime_path_rest with
+      | Ok
+          (Some
+             (Tui_decode.Path_rest_resting { runtime_id; release_at; release_basis = _ })) ->
+          Some
+            (Printf.sprintf "쉬는 중 ~%s (%s)"
+               (Terminal_text.short_timestamp_of_unix release_at)
+               (Terminal_text.single_line runtime_id))
+      | Ok (Some (Tui_decode.Path_rest_serving _)) | Ok None -> None
+      | Error detail -> Some ("쉼 읽기 실패: " ^ Terminal_text.single_line detail))
+  | Keeper_control.Present _ | Keeper_control.Absent | Keeper_control.Unobserved
+  | Keeper_control.Invalid _ -> None
+
 let keeper_detail_text ?(failure_context = None) (row : Keeper_list_model.row) =
   let approval =
     Option.map
@@ -298,7 +318,8 @@ let keeper_detail_text ?(failure_context = None) (row : Keeper_list_model.row) =
   Option.to_list failure_context
   @ List.map keeper_badge_text (Keeper_list_model.badges_of_row row)
   @ List.filter_map Fun.id
-      [ approval; questions; keeper_waiting_detail row; keeper_task_detail row; health ]
+      [ approval; questions; keeper_path_rest_detail row; keeper_waiting_detail row
+      ; keeper_task_detail row; health ]
   |> String.concat " · "
 
 let keeper_column_header (columns : Render_schedule.keeper_columns) =

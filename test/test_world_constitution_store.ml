@@ -158,6 +158,54 @@ let test_articles_only_load_of_a_missing_ledger_is_empty () =
       Alcotest.(check int) "no ledger, no articles" 0
         (List.length (load_articles_or_fail ~base_path)))
 
+let held_or_fail ~base_path =
+  match Store.load_held ~base_path with
+  | Ok held -> held
+  | Error error -> Alcotest.failf "%s" (Store.read_error_to_string error)
+
+let articles_at_or_fail ~base_path position =
+  match Store.load_articles_at ~base_path position with
+  | Ok articles -> articles
+  | Error error -> Alcotest.failf "%s" (Store.read_error_to_string error)
+
+(* RFC-0491 §3.2: a System's basis names the ledger position it was read at.
+   Later writes only append, so that position reads back the same articles,
+   an edit in place included. *)
+let test_a_position_reads_back_the_articles_held_then () =
+  with_world (fun base_path ->
+      let kept = article "a norm that stays" in
+      add ~base_path kept;
+      let then_articles, position = held_or_fail ~base_path in
+      add ~base_path (article "a norm written later");
+      remove ~base_path kept;
+      (match
+         make ~id:kept.id ~text:"a norm that stays, edited" ~author:"lane-smith" ~at:2.0
+           ~evidence:[]
+       with
+       | Ok edited -> add ~base_path edited
+       | Error invalid -> Alcotest.failf "article rejected: %s" (invalid_to_string invalid));
+      Alcotest.(check (option (list string))) "the position folds what was held then"
+        (Some (article_texts then_articles))
+        (Option.map article_texts (articles_at_or_fail ~base_path position));
+      let (_ : t list), now = held_or_fail ~base_path in
+      Alcotest.(check bool) "the ledger grew past it" true
+        (now.Store.end_offset > position.Store.end_offset))
+
+let test_a_position_the_ledger_no_longer_begins_with_reads_nothing () =
+  with_world (fun base_path ->
+      add ~base_path (article "a norm that stays");
+      let (_ : t list), position = held_or_fail ~base_path in
+      Alcotest.(check bool) "a longer position than the ledger" true
+        (Option.is_none
+           (articles_at_or_fail ~base_path
+              { position with Store.end_offset = position.Store.end_offset + 1 }));
+      Out_channel.with_open_bin (Store.ledger_path ~base_path) (fun channel ->
+        output_string channel "");
+      add ~base_path (article "a norm written over the old bytes");
+      add ~base_path (article "and another, so the ledger is long enough to compare");
+      Alcotest.(check bool) "bytes that no longer hash the same" true
+        (Option.is_none (articles_at_or_fail ~base_path position)))
+
 let test_a_line_that_does_not_decode_is_reported_not_dropped () =
   with_world (fun base_path ->
       add ~base_path (article "a readable norm");
@@ -230,6 +278,10 @@ let () =
             test_articles_only_load_folds_the_same_articles;
           Alcotest.test_case "articles-only load of a missing ledger is empty"
             `Quick test_articles_only_load_of_a_missing_ledger_is_empty;
+          Alcotest.test_case "a position reads back the articles held then" `Quick
+            test_a_position_reads_back_the_articles_held_then;
+          Alcotest.test_case "a position the ledger no longer begins with reads nothing"
+            `Quick test_a_position_the_ledger_no_longer_begins_with_reads_nothing;
         ] );
       ( "rejections",
         [ Alcotest.test_case "a broken line is reported, not dropped" `Quick

@@ -129,25 +129,28 @@ MASC direct-provider HTTP 레인은 내부 재시도 루프가 없어 턴당 한
   - provider 가 자기 한도를 이유로 요청을 거절했고, 리셋 시각을 말했다.
   - 거절된 시도는 도구 효과를 내지 않았다.
   - 다음 dispatch 가 그 경로가 쉬는 동안 기다린다.
-- 판정은 typed route 하나로 한다.
-  - route 가 `Retry_after_observed { retry_class = Hard_quota; retry_after }` 이다.
-  - `usable_retry_after` 가 시각을 준다.
-  - 효과를 냈거나 효과를 관측하지 못한 시도는 fence 가 걸린다. fence 가 걸린
-    시도의 route 는 `Exhausted_visible_alive` 라서 조건에 들지 않는다.
-  - 쉬는 시각은 `next_dispatch_after_failure` 가 준 대기와 같다.
+- 판정은 typed 값 네 개로 한다. 넷이 모두 맞아야 쉬는 중이다
+  (`Keeper_turn_driver.provider_rest_of_failure`).
+  1. route 가 `Retry_after_observed { retry_class = Hard_quota; retry_after }` 이다.
+  2. `usable_retry_after retry_after` 가 `Some` 이다. 값이 있고, 유한하고, 0보다 크다.
+  3. `next_dispatch_after_failure` 가 `Wait_until` 을 돌려준다. 쉬는 시각은 그
+     `release_at` 이다. `Dispatch_now` 나 `None` 이면 쉬는 중이 아니다.
+  4. 거절된 시도에 fence 가 없다. 효과를 냈거나 효과를 관측하지 못한 시도는
+     fence 가 걸리고, 그 route 는 `Exhausted_visible_alive` 라서 1에서 이미 빠진다.
 - 쉬는 중인 cycle 은 streak 를 올리지도 지우지도 않는다.
   - 상태머신에 `Turn_succeeded` 도 `Turn_failed` 도 보내지 않는다.
   - registry 실패 원인과 `Health` 도 그대로다.
   - 앞선 실패가 있었다면 다음 성공까지 Failing 으로 남는다.
 - 옛 면제와 다른 점은 두 가지다.
-  - 옛 면제는 실패를 `Turn_succeeded` 로 보고했다. 쉬는 중은 성공으로 보고하지 않는다.
-  - 옛 면제는 다음 케이던스에 같은 요청을 다시 보냈다(#31958). 쉬는 중에는
-    provider 가 말한 시각까지 그 경로로 요청을 보내지 않는다.
+  - 옛 면제는 실패를 성공(`Turn_succeeded`)으로 보고했다. 쉬는 중은 상태머신에
+    턴 event 를 보내지 않는다.
+  - 옛 면제는 바로 다시 시도했다(#31958). 쉬는 중은 provider 가 말한 시각까지
+    잔다. 그동안 그 경로로 요청을 보내지 않는다.
 - 조건에 들지 않아 계속 실패로 세는 것:
   - 시각이 없는 한도 거절. 크레딧 부족처럼 운영자가 손써야 한다.
   - `Rate_limited`. 짧은 대기를 계속 말하는 throttle 은 실패 기록 없이
     영원히 쉬게 된다.
-  - fence 가 걸린 거절.
+  - fence 가 걸린 거절. Muse 레인은 호스트가 턴을 시작하면 늘 fence 를 건다(#49369).
 - 턴 수준 기록은 거절 사실이라 그대로 남는다. turn FSM `Failed`,
   decision record `Failed`, `FailureRoute` 지표가 그렇다.
 

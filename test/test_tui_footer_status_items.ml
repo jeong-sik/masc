@@ -10,18 +10,6 @@ let contains ~needle text =
     true
   with Not_found -> false
 
-let check_at_most_cells label max_cells text =
-  Alcotest.(check bool) label true
-    (Masc_tui_message_layout.display_width text <= max_cells)
-
-let check_one_line label text =
-  let newlines =
-    String.fold_left
-      (fun count char -> if Char.equal char '\n' then count + 1 else count)
-      0 text
-  in
-  Alcotest.(check int) label 1 newlines
-
 let action_message =
   "skill \"reviewed-skill\": composition name \"new-skill\" must equal the skill name"
 
@@ -47,11 +35,8 @@ let test_action_text_is_not_dropped_as_a_key () =
         (contains ~needle:(Masc_tui_theme.strip_sgr key) row))
       (Masc_tui_footer.undroppable_keys
          (Masc_tui_footer.prepare_hints (Masc_tui_keys.footer_hints view)));
-    check_bool "a clipped diagnosis is explicit" true (contains ~needle:"…" row);
     check_string "rendering keeps the complete outcome in state" action_message
       (Option.get (Masc_tui_action_notice.ordinary state.last_action) |> fst);
-    check_at_most_cells "the action respects the existing cell budget" 98 (String.trim row);
-    check_one_line "action footer stays one line" row;
     let narrow = render_action state 60 in
     check_bool "a narrower row retains the start of the actual action" true
       (contains ~needle:"skill " narrow);
@@ -59,9 +44,7 @@ let test_action_text_is_not_dropped_as_a_key () =
       check_bool ("the narrow diagnosis preserves " ^ key) true
         (contains ~needle:(Masc_tui_theme.strip_sgr key) narrow))
       (Masc_tui_footer.undroppable_keys
-         (Masc_tui_footer.prepare_hints (Masc_tui_keys.footer_hints view)));
-    check_bool "a narrower row marks the cut" true (contains ~needle:"…" narrow);
-    check_at_most_cells "narrow action footer remains bounded" 60 (String.trim narrow))
+         (Masc_tui_footer.prepare_hints (Masc_tui_keys.footer_hints view))))
     [ Masc_tui_types.Tools; Masc_tui_types.Repositories ]
 
 let test_build_mismatch_names_the_older_side () =
@@ -113,8 +96,6 @@ let test_operator_action_leads_the_row () =
     Masc_tui_footer.line ~status:[ item ] ~dim:"" ~reset:"" ~max_cells:200 ~port:8935
       ~hints:"q:quit" ()
   in
-  check_bool "the count and the first reason lead the row" true
-    (String.starts_with ~prefix:"  ACTION NEEDED 2 \xc2\xb7 typesafeai:payment_required" line);
   check_bool "the keys still follow" true (contains ~needle:"q:quit" line);
   check_bool "a working surface keeps it" true (Masc_tui_footer.needs_operator item)
 

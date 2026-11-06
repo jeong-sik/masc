@@ -358,8 +358,16 @@ let test_reads_run_the_shared_page_scripts () =
     | "page.elements" -> page_answer ~label:"p1" (obj ["url",str "https://app.slack.com/";"title",str "Slack";
         "within",str "#main";"withinMatches",`Int 1;"total",`Int 0;"truncated",`Bool false;"elements",`List []])
     | "page.scene" -> page_answer ~label:"p2" (obj ["url",str "about:blank";"items",`List []])
+    | "page.document" -> page_answer ~label:"p1" (obj ["documentId",str "d1";"url",str "https://app.slack.com/";
+        "title",str "Slack";"html",str "<html></html>";"htmlComplete",`Bool true;"htmlUnavailableReason",`Null])
     | other -> failf "unexpected step %s" other) in
   ignore (dispatch peer Live.Tabs_list (obj []));
+  (match dispatch peer Live.Page_read (obj ["tabId",`Int 1;"includeHtml",`Bool true]) with
+   | Ok page -> check int "the document's tabId" 1 (Yojson.Safe.Util.to_int (field "tabId" page));
+     check string "the document source" "<html></html>" (text (field "html" page))
+   | Error _ -> fail "the document read failed");
+  check bool "the document script is the shared one" true
+    (String_util.contains_substring (text (field "fn" (List.hd !asked).args)) Lane.Document.runtime);
   (match dispatch peer Live.Page_read (obj ["tabId",`Int 1;"maxChars",`Int 10]) with
    | Ok page -> check int "tabId" 1 (Yojson.Safe.Util.to_int (field "tabId" page));
      check string "text" "hello" (text (field "text" page))
@@ -395,7 +403,6 @@ let test_refusals_run_no_script () =
   check bool "reports unmanaged status without attributing origin" true (String_util.contains_substring operator "is unmanaged");
   check string "an unknown tab" "browser tab is no longer present"
     (before_effect "an unknown tab" (dispatch peer Live.Page_capture (obj ["tabId",`Int 40])));
-  ignore (before_effect "the document source" (dispatch peer Live.Page_read (obj ["tabId",`Int 1;"includeHtml",`Bool true])));
   ignore (before_effect "a cap past the limit" (dispatch peer Live.Page_read (obj ["tabId",`Int 1;"maxChars",`Int 100_001])));
   List.iter (fun verb -> ignore (before_effect (Live.verb_to_wire verb) (dispatch peer verb (obj ["tabId",`Int 1]))))
     [Live.Page_interact; Live.Page_act; Live.Page_goto];
@@ -1224,6 +1231,7 @@ let test_the_scripts_parse_as_modules () =
   ignore (dispatch peer Live.Tabs_list (obj []));
   List.iter (fun (verb, args) -> ignore (dispatch peer verb args))
     [ Live.Page_read, obj ["tabId",`Int 1];
+      Live.Page_read, obj ["tabId",`Int 1;"includeHtml",`Bool true];
       Live.Page_elements, obj ["tabId",`Int 1;"within",str "#main"];
       Live.Page_scene, obj ["tabId",`Int 1];
       Live.Page_snapshot, obj ["tabId",`Int 1;"maxChars",`Int 1000;"scope",str "subtree";"root",str "@12"];
@@ -1249,7 +1257,7 @@ let test_the_scripts_parse_as_modules () =
       Live.Page_interact, interact_args (Lane.Drag {from={x=0.25;y=0.5};to_={x=0.75;y=0.5};viewport;via=[];duration_ms=0}) ];
   check (result unit string) "finish" (Ok ()) (Peer.finish peer);
   check (list string) "every step"
-    ["space.open";"tabs.list";"page.read";"page.elements";"page.scene";"page.snapshot";"page.downloads";"page.capture";
+    ["space.open";"tabs.list";"page.read";"page.document";"page.elements";"page.scene";"page.snapshot";"page.downloads";"page.capture";
      "page.open";"page.goto";"page.target";"page.pointer";"page.pointer";"page.pointer";"page.keyboard";"page.input";"page.target_input";
      "page.close";"page.reload";"page.stop_loading";"page.history";"page.dialog";"page.dialog";"page.upload";"page.choose_files";"space.finish"]
     (List.rev_map fst !scripts);
@@ -1306,7 +1314,7 @@ let test_the_peer_serves_what_the_lane_table_says () =
       answered (obj ["label",str "p1";"path",str path;
         "before",(state ~url:"https://app.slack.com/" ~width:800);
         "after",(state ~url:"https://app.slack.com/" ~width:800)])
-    | "page.read" | "page.elements" | "page.scene" -> page_answer ~label:"p1" (obj ["url",str "https://app.slack.com/"])
+    | "page.read" | "page.document" | "page.elements" | "page.scene" -> page_answer ~label:"p1" (obj ["url",str "https://app.slack.com/"])
     | "page.native_workflow" -> answered (obj ["completed",`List [];"effectStarted",`Bool false;
         "completedEffect",`Bool false;"inputReleased",`Bool true;"failure",`Null;"urlBefore",str "https://app.slack.com/";"url",str "https://app.slack.com/";"title",str "Slack";
         "snapshot",str "root";"truncated",`Bool false;"chars",`Int 4])

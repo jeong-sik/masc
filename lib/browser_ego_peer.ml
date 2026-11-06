@@ -505,12 +505,18 @@ let read t args =
     | None -> Browser_page_script.text_cap None
     | Some (`Int cap) -> Browser_page_script.text_cap (Some cap)
     | Some _ -> Error Browser_page_script.text_cap_refused in
-  let* () = match field "includeHtml" args with
-    | None | Some (`Bool false) -> Ok ()
-    | Some (`Bool true) -> Error "an ego connection does not read the document source"
-    | Some _ -> Error "invalid includeHtml" in
-  let* id,page = evaluate t args ~step:"page.read" Browser_page_script.text (`Int cap) in
-  with_tab id page
+  match field "includeHtml" args with
+  | None | Some (`Bool false) ->
+    let* id,page = evaluate t args ~step:"page.read" Browser_page_script.text (`Int cap) in
+    with_tab id page
+  (* The document helper the other connections run: it drops HTML over 1 MiB
+     and says so, instead of returning a cut document. *)
+  | Some (`Bool true) ->
+    let* id,page = evaluate t args ~step:"page.document"
+        (Browser_page_script.parsed (Browser_lane.Document.runtime ^ "\nreturn browserDocument();")) `Null in
+    if Option.is_some (field "documentLoading" page) then Error Browser_page_script.document_loading_refused
+    else with_tab id page
+  | Some _ -> Error "invalid includeHtml"
 
 let elements t args =
   let* filter = Browser_page_script.elements_filter_of_json (fun key -> field key args) in

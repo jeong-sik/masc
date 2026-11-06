@@ -15,7 +15,9 @@ val import_signed_in : source_home:string -> t -> (unit, error) result
     private HOME. A keychain value is read as go-keyring reads it
     ({!Runtime_antigravity_oauth_credential.login_of_keychain_value}); one
     that does not decode is [Unrecognized_credential], and one that decodes
-    to blank text is [Sign_in_required], as a blank file is.
+    to blank text is [Sign_in_required], as a blank file is. A stored value
+    that is blank before decoding reads as [Unavailable]
+    ({!Apple_keychain.read}), so setup stops with [Keychain_unavailable].
     Never modify the source; call only after account selection. *)
 val capture_login : t -> (unit, error) result
 (** Capture authentication created by an explicit interactive [agy] sign-in. *)

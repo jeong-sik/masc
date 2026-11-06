@@ -59,7 +59,7 @@ let import_with ~read_keychain ~clear_keychain ~source_home home =
       (match Runtime_antigravity_oauth_credential.login_of_keychain_value value with
        | Ok login when String.trim login = "" -> Error Sign_in_required
        | Ok login -> Ok login
-       | Error Runtime_antigravity_oauth_credential.(Not_hex | Not_base64) ->
+       | Error Runtime_antigravity_oauth_credential.(Not_printable | Not_hex | Not_base64) ->
          Error Unrecognized_credential)
     | Unavailable -> Error Keychain_unavailable
     | Missing | Unsupported ->

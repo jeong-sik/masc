@@ -605,14 +605,32 @@ let test_managed_keychain_principal_must_match_selected_generation () =
     (saved "{broken") (`Unrecognized (C.Keychain_login C.Not_json_object));
   refuses "an unencoded value that is no login"
     (Apple_keychain.Found "{broken") (`Unrecognized (C.Keychain_login C.Not_json_object));
-  (* go-keyring's [Get] reads all three forms, after [strings.TrimSpace]. *)
   let same_account = login "account-a" in
   let encoded = Masc_test_deps.antigravity_keychain_value same_account in
+  let split = String.length encoded / 2 in
+  let inserted text =
+    String.sub encoded 0 split ^ text ^ String.sub encoded split (String.length encoded - split) in
+  (* [security -w] prints a value with any unprintable byte as hex. *)
+  List.iter (fun (label, value) ->
+    refuses label (Apple_keychain.Found value) (`Unrecognized (C.Undecodable C.Not_printable)))
+    [ "a tab before the value", "\t" ^ encoded
+    ; "a line break after the value", encoded ^ "\n"
+    ; "a line break inside base64", inserted "\n"
+    ; "a byte outside ASCII", "{\"id_token_email\":\"\xc3\xa9@example.test\"}" ];
+  refuses "a space inside base64" (Apple_keychain.Found (inserted " "))
+    (`Unrecognized (C.Undecodable C.Not_base64));
+  (* A length that is a multiple of three encodes with no padding. *)
+  let unpadded_groups =
+    let text = same_account in
+    Masc_test_deps.antigravity_keychain_value
+      (text ^ String.make ((3 - (String.length text mod 3)) mod 3) ' ') in
+  refuses "padding after the last group" (Apple_keychain.Found (unpadded_groups ^ "===="))
+    (`Unrecognized (C.Undecodable C.Not_base64));
+  (* go-keyring's [Get] reads all three forms, after [strings.TrimSpace]. *)
   let hex_digits =
     let value = hex same_account in
     let prefix = String.length "go-keyring-encoded:" in
     String.sub value prefix (String.length value - prefix) in
-  let split = String.length encoded / 2 in
   List.iter (fun (label, value) ->
     let admitted = prepare_with (Apple_keychain.Found value) |> require_ok in
     check string label home_dir (Runtime_antigravity_home.home_dir admitted))
@@ -620,9 +638,7 @@ let test_managed_keychain_principal_must_match_selected_generation () =
     ; "the same account in hex keeps the generation", hex same_account
     ; "upper-case hex reads the same account",
       "go-keyring-encoded:" ^ String.uppercase_ascii hex_digits
-    ; "Go's spaces around the value are trimmed", " \011\t" ^ encoded ^ "\012\r\n"
-    ; "line breaks inside base64 are skipped",
-      String.sub encoded 0 split ^ "\r\n" ^ String.sub encoded split (String.length encoded - split) ];
+    ; "spaces around the value are trimmed", "  " ^ encoded ^ " " ];
   let refreshed = prepare_with (saved (login ~revision:"native-refresh" "account-a")) |> require_ok in
   check string "keychain refresh for the same principal preserves the generation" home_dir
     (Runtime_antigravity_home.home_dir refreshed);
@@ -1455,14 +1471,23 @@ let test_keychain_selection_and_private_account_switch () =
       (apply () = Error S.Sign_in_required);
     check int "a blank keychain login leaves the destination untouched" 2 !clears;
     check string "a blank keychain login preserves B" "selected-account-B" (reference ());
-    selected_account := Apple_keychain.Found " selected-account-D\n";
+    selected_account := Apple_keychain.Found "  selected-account-D ";
     check bool "an unencoded keychain value is imported" true (apply () = Ok ());
     check string "the unencoded value is copied trimmed, as go-keyring reads it"
       "selected-account-D" (reference ());
+    check int "an unencoded import clears the private item" 3 !clears;
     selected_account :=
       Apple_keychain.Found (Masc_test_deps.antigravity_keychain_hex_value "selected-account-E");
     check bool "a hex keychain value is imported" true (apply () = Ok ());
     check string "the hex value is copied decoded" "selected-account-E" (reference ());
+    check int "a hex import clears the private item" 4 !clears;
+    List.iter (fun (label, value) ->
+      selected_account := Apple_keychain.Found value;
+      check bool (label ^ " is refused") true (apply () = Error S.Unrecognized_credential);
+      check int (label ^ " leaves the destination untouched") 4 !clears;
+      check string (label ^ " preserves E") "selected-account-E" (reference ()))
+      [ "a hex value that is not hex", "go-keyring-encoded:zz"
+      ; "a value the CLI reads as hex text", "selected-account-F\n" ];
     selected_account := Apple_keychain.Missing;
     check bool "true missing item permits canonical fallback" true (apply () = Ok ());
     check string "explicit fallback captured" "stale-file-account" (reference ());

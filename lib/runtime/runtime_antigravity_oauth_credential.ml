@@ -21,6 +21,7 @@ type rejection =
   | Not_email_text of email_key
 
 type undecodable =
+  | Not_printable
   | Not_hex
   | Not_base64
 
@@ -54,6 +55,7 @@ let rejection_to_string = function
 ;;
 
 let undecodable_to_string = function
+  | Not_printable -> "holds a byte outside printable ASCII, which the CLI reads as hex text"
   | Not_hex -> "go-keyring-encoded: is not followed by an even count of hex digits"
   | Not_base64 -> "go-keyring-base64: is not followed by padded standard base64"
 ;;
@@ -136,10 +138,14 @@ let account_email bytes =
 (* go-keyring's macOS [Get], read at tag v0.2.8 and master 85eb737c1258 on
    2026-11-06T12:50Z (also tag v0.2.2, the first whose [Set] writes base64):
    https://github.com/zalando/go-keyring/blob/85eb737c1258e4849bfba6456dc0c48228ca8242/keyring_darwin.go#L43-L67
-   It applies [strings.TrimSpace], then decodes a [go-keyring-encoded:] value
-   as hex and a [go-keyring-base64:] value as standard base64, and returns any
-   other value as it is. *)
+   It runs [security find-generic-password -w], applies [strings.TrimSpace]
+   to the output, then decodes a [go-keyring-encoded:] value as hex and a
+   [go-keyring-base64:] value as standard base64, and returns any other value
+   as it is. [security -w] prints the stored bytes as they are when [isprint]
+   admits every byte, and as lowercase hex with no prefix otherwise:
+   https://github.com/apple-oss-distributions/Security/blob/ef677c3d667a44e1737c1b0245e9ed04d11c51c1/SecurityTool/macOS/keychain_find.c#L408-L443 *)
 type keychain_value =
+  | Unprintable
   | Go_keyring_hex of string
   | Go_keyring_base64 of string
   | Unencoded of string
@@ -147,19 +153,17 @@ type keychain_value =
 let go_keyring_hex_prefix = "go-keyring-encoded:"
 let go_keyring_base64_prefix = "go-keyring-base64:"
 
-(* The ASCII bytes Go's [unicode.IsSpace] admits. *)
-let is_go_space = function
-  | '\t' | '\n' | '\011' | '\012' | '\r' | ' ' -> true
-  | _ -> false
-;;
+(* [isprint] in the C locale. *)
+let printable byte = byte >= ' ' && byte <= '~'
 
-let trim_go_space value =
+(* With every byte printable, [strings.TrimSpace] removes only spaces. *)
+let trim_spaces value =
   let length = String.length value in
   let rec first index =
-    if index < length && is_go_space value.[index] then first (index + 1) else index
+    if index < length && Char.equal value.[index] ' ' then first (index + 1) else index
   in
   let rec last index =
-    if index > 0 && is_go_space value.[index - 1] then last (index - 1) else index
+    if index > 0 && Char.equal value.[index - 1] ' ' then last (index - 1) else index
   in
   let start = first 0 in
   let stop = last length in
@@ -171,13 +175,16 @@ let after prefix value =
   String.sub value offset (String.length value - offset)
 ;;
 
-let keychain_value value =
-  let value = trim_go_space value in
-  if String.starts_with ~prefix:go_keyring_hex_prefix value
-  then Go_keyring_hex (after go_keyring_hex_prefix value)
-  else if String.starts_with ~prefix:go_keyring_base64_prefix value
-  then Go_keyring_base64 (after go_keyring_base64_prefix value)
-  else Unencoded value
+let keychain_value stored =
+  if not (String.for_all printable stored)
+  then Unprintable
+  else (
+    let value = trim_spaces stored in
+    if String.starts_with ~prefix:go_keyring_hex_prefix value
+    then Go_keyring_hex (after go_keyring_hex_prefix value)
+    else if String.starts_with ~prefix:go_keyring_base64_prefix value
+    then Go_keyring_base64 (after go_keyring_base64_prefix value)
+    else Unencoded value)
 ;;
 
 let hex_digit = function
@@ -207,20 +214,32 @@ let decode_hex digits =
     fill 0)
 ;;
 
-(* Go's [base64.StdEncoding] skips carriage returns and line feeds. *)
-let without_line_breaks text =
-  String.to_seq text |> Seq.filter (fun byte -> byte <> '\r' && byte <> '\n') |> String.of_seq
+(* Go's [base64.StdEncoding] takes whole four-character groups with at most
+   two [=], all at the end. ocaml-base64 also admits longer padding, such as
+   [QUJD====]. *)
+let go_base64_shape text =
+  let length = String.length text in
+  let padding =
+    if length >= 2 && Char.equal text.[length - 1] '=' && Char.equal text.[length - 2] '='
+    then 2
+    else if length >= 1 && Char.equal text.[length - 1] '='
+    then 1
+    else 0
+  in
+  length mod 4 = 0 && not (String.contains (String.sub text 0 (length - padding)) '=')
 ;;
 
 (* HIGH-RISK-UNREVIEWED: setup copies this login into a private account. *)
 let login_of_keychain_value value =
   match keychain_value value with
+  | Unprintable -> Error Not_printable
   | Go_keyring_hex digits ->
     (match decode_hex digits with
      | Some login -> Ok login
      | None -> Error Not_hex)
+  | Go_keyring_base64 text when not (go_base64_shape text) -> Error Not_base64
   | Go_keyring_base64 text ->
-    (match Base64.decode ~pad:true (without_line_breaks text) with
+    (match Base64.decode ~pad:true text with
      | Ok login -> Ok login
      | Error _ -> Error Not_base64)
   | Unencoded login -> Ok login

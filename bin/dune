@@ -3288,6 +3288,7 @@
   masc_tui_fetched
   masc_tui_code_lexer
   masc_tui_memo
+  masc_tui_execute_terminal
   masc_tui_message_layout))
 
 (library

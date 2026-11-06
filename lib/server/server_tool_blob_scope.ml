@@ -179,6 +179,22 @@ let workspace =
 let config_keepers =
   [ M.Keeper_files { suffix = Config_dir_resolver.keeper_toml_suffix; reason = M.Operator_config }
   ; M.Keeper_files { suffix = Keeper_vision_tool.vision_store_suffix; reason = M.Other_media_store }
+    (* The Librarian working context keeps whole chat operations, media
+       sources included. *)
+  ; M.Decoded_keeper_files
+      { suffix = Keeper_librarian_context.filename_suffix
+      ; decode =
+          (fun path ->
+             Keeper_librarian_context.read_committed_file path
+             |> Result.map (Option.map Keeper_librarian_context.snapshot_json))
+      }
+    (* The recall index names the published context. The current recall pin
+       and the dated recall history own it, and recall publishes it again
+       from the committed working context when it is gone. *)
+  ; M.Keeper_files
+      { suffix = Keeper_librarian_context_recall.filename_suffix
+      ; reason = M.Repairable_pointer
+      }
   ; finder_metadata
   ; unpublished_writes
   ]

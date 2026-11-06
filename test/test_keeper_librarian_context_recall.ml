@@ -346,6 +346,26 @@ let test_unavailable_context_preserves_current_pin () =
   check bool "unavailable authority keeps current context reachable" true
     (artifact_present ~base_path reference)
 
+(* The working context can be the last owner of a blob: its sources keep
+   what the chat history they came from no longer holds. *)
+let test_working_context_keeps_the_blob_it_names () =
+  with_store @@ fun ~base_path ~keepers_dir ->
+  let (Tool_output.Stored reference) =
+    Tool_blob_store.put (Tool_blob_store.create ~base_path)
+      ~bytes:"output a working context source names" ~mime:"text/plain" in
+  let marker = Tool_output.encode_for_agent_core (Tool_output.Stored reference) in
+  let source : Context.source =
+    {reference = "event:output"; content = `Assoc ["output_ref", `String marker]} in
+  let pocket : Context.pocket =
+    { id = "output"; merge_contexts = []; sources = [source.reference];
+      context = "the output this pocket keeps"; next_steps = ["READ_THE_OUTPUT"];
+      completeness = Context.Current } in
+  ignore (ok (Context.commit ~keepers_dir ~keeper_id:"keeper" ~expected_version:None
+    ~sources:[source] [pocket]));
+  sweep_blobs ~base_path;
+  check bool "the named blob survives a delete scan" true
+    (artifact_present ~base_path reference)
+
 let test_late_empty_read_preserves_same_artifact_publication () =
   with_store @@ fun ~base_path ~keepers_dir ->
   let first = commit ~keepers_dir ~previous:None "reopened working context" in
@@ -462,6 +482,8 @@ let () =
       test_confirmed_empty_context_releases_current_pin;
     test_case "unavailable context preserves the current pin" `Quick
       test_unavailable_context_preserves_current_pin;
+    test_case "working context keeps the blob it names" `Quick
+      test_working_context_keeps_the_blob_it_names;
     test_case "late empty read preserves a newer same-artifact publication" `Quick
       test_late_empty_read_preserves_same_artifact_publication;
     test_case "invalid pin cannot authorize retirement" `Quick

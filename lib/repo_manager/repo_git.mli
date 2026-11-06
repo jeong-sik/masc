@@ -42,7 +42,9 @@ type status_file = {
 (** One changed path from Git's NUL-delimited porcelain-v1 contract. *)
 
 val clone : repository:repository -> (unit, string) result
-(** [clone ~repository] clones [repository.url] into [repository.local_path]. *)
+(** [clone ~repository] clones [repository.url] into [repository.local_path].
+    Over HTTP(S), a transfer that moves less than a byte a second for a minute
+    fails with git's own error. *)
 
 val run_git :
   cwd:string ->
@@ -61,7 +63,9 @@ val run_git_read_only_raw : cwd:string -> string list -> (string, string) result
 
 val fetch : repository:repository -> (string list, string) result
 (** [fetch ~repository] fetches all remotes and returns the list of remote
-    branch names. *)
+    branch names. Over HTTP(S), a transfer that moves less than a byte a
+    second for a minute fails with git's own error, and the sync records that
+    error. *)
 
 val fast_forward :
   repository:repository -> target_ref:string -> (unit, string) result

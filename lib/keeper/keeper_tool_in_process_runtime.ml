@@ -1875,11 +1875,6 @@ let handle_masc_misc_with_outcome ~(config : Workspace.config) ~(meta : keeper_m
   |> dispatch_option_to_execution ~name
 ;;
 
-let handle_masc_control_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
-  let ctx : Tool_control.context = { config; agent_name = meta.name } in
-  Tool_control.dispatch ctx ~name ~args |> dispatch_option_to_execution ~name
-;;
-
 let handle_masc_agent_timeline_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
   let ctx : Tool_agent_timeline.context = { config; agent_name = meta.name } in
   Tool_agent_timeline.dispatch

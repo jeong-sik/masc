@@ -151,7 +151,6 @@ let handle_filesystem ?prepared_read ?prepared_edit ?prepared_write ctx descript
   | Tool_browser_goto
   | Tool_browser_act
   | Tool_browser_interact
-  | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
   | Tool_keeper_job_dispatch
@@ -239,7 +238,6 @@ let handle_shell_ir ctx ~(dispatch : Keeper_shell_tool_command.dispatch) descrip
   | Tool_browser_goto
   | Tool_browser_act
   | Tool_browser_interact
-  | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
   | Tool_keeper_job_dispatch
@@ -524,13 +522,6 @@ let handle_in_process ctx descriptor args =
       ~turn_sandbox_factory:ctx.turn_sandbox_factory ~config:ctx.config ~meta:ctx.meta ~args)
   | Tool_browser_interact ->
     Some (Keeper_tool_in_process_runtime.handle_browser_interact_with_outcome ~config:ctx.config ~meta:ctx.meta ~args)
-  | Tool_masc_control_dispatch ->
-    Some
-      (Keeper_tool_in_process_runtime.handle_masc_control_with_outcome
-         ~config:ctx.config
-         ~meta:ctx.meta
-         ~name
-         ~args)
   | Tool_masc_agent_timeline_dispatch ->
     Some
       (Keeper_tool_in_process_runtime.handle_masc_agent_timeline_with_outcome

@@ -797,7 +797,13 @@ let render_code (state : state) =
            for _ = 1 to content_height do
              box_empty pane_buf pane_cols
            done
-       | Some (open_path, Masc_tui_fetched.Ready { cfd_rows = file_rows; _ }) ->
+       | Some (_, Masc_tui_fetched.Ready { cfd_body = Code_binary { bytes }; _ }) ->
+           (* Its bytes would draw as hundreds of rows of escapes. The title
+              already names the file, so the pane says only what it is. *)
+           say (Theme.recede ())
+             (Printf.sprintf "바이너리 파일 · %s · 텍스트로 표시하지 않아요"
+                (Masc_tui_context_inspector.format_bytes bytes))
+       | Some (open_path, Masc_tui_fetched.Ready { cfd_body = Code_text _; cfd_rows = file_rows; _ }) ->
            let scroll = file_scroll (Array.length file_rows) in
            let hscroll =
              max 0

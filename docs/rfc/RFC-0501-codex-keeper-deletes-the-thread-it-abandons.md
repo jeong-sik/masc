@@ -1,6 +1,6 @@
 ---
 rfc: "0501"
-title: "Codex Keeper 는 새 thread 를 열기 전에 버리는 thread 를 지운다"
+title: "Codex Keeper 는 세션 기록이 잊은 thread 를 지운다"
 status: Draft
 created: 2026-11-06
 updated: 2026-11-06
@@ -10,14 +10,14 @@ superseded_by: null
 related: ["0495"]
 ---
 
-# RFC-0501 — Codex Keeper 는 새 thread 를 열기 전에 버리는 thread 를 지운다
+# RFC-0501 — Codex Keeper 는 세션 기록이 잊은 thread 를 지운다
 
 ## 0. 요약
 
 - Codex 계정 home 하나의 `sessions` 에 rollout 이 7,008개, 11.9 GB 쌓였다(#49031). Keeper 세션 기록이 가리키는 것은 3개뿐이다.
-- Keeper 가 새 thread 로 갈 때 claim 이 옛 `session_id` 를 기록에서 지운다. vendor 쪽 rollout 은 그대로 남는다.
+- Keeper 세션 기록이 thread id 를 잊는 때가 둘이다. 새 thread 로 가는 claim, 그리고 일시 오류 뒤 `Ready` 로 돌리는 release 다. 어느 쪽도 vendor 쪽 rollout 은 지우지 않는다.
 - Codex app-server 에는 `thread/delete` 가 있다. codex-cli 0.166.0 에서 rollout 파일을 지우는 것을 확인했다.
-- 제안: claim 계획이 버리는 thread id 를 값으로 낸다. Codex runtime 은 같은 app-server 연결에서 `thread/start` 전에 그 thread 를 `thread/delete` 한다.
+- 제안: 기록이 바뀔 때 잊은 thread id 를 순수 함수로 계산한다. Codex Keeper 턴이 끝나면 그 id 들을 `thread/delete` 한다.
 - 이어 갈 일이 없는 호출(Fusion, capability probe)은 `ephemeral` thread 를 연다.
 - 세션 저장소(`session.json`) 스키마는 바꾸지 않는다. 이미 쌓인 rollout 은 hard cut 이다.
 
@@ -53,15 +53,21 @@ related: ["0495"]
 
 `?thread_mode` 의 기본값이 `Start` 라서, 이어 가지 않는 호출처도 남는 thread 를 연다.
 
-### 1.3 Keeper 가 새 thread 를 여는 때
+### 1.3 기록이 thread 를 잊는 때
 
-claim 계획에 `previous_settlement` 가 없으면 `Keeper_codex_runtime` 은 `thread/start` 를 보낸다. 앞 thread 를 놓는 곳은 `plan_claim` 과 `reconcile_tool_surface` 다.
+`Keeper_official_client_session_store` 의 기록은 단계마다 thread id 를 담는다. `Settled`·`Active`·`Turn_inflight` 는 `session_id` 를, `Start`·`Active`·`Turn_inflight` 는 `previous_settlement` 를, `Recovery_required` 는 `observed_session_id` 와 `previous_settlement` 를 담는다. `Ready` 는 아무 id 도 담지 않는다.
 
-- 기록이 `Settled` 인데 client 종류나 runtime id 가 바뀌었을 때
-- 기록이 `Settled` 인데 도구 목록 digest 가 바뀌었을 때. 도구를 더하거나 설명을 고치는 배포마다 바뀐다.
-- 기록이 `Recovery_required` 일 때(`Input_rejected` 는 거절)
+기록이 thread 를 잊는 길은 둘이다.
 
-`claim_with_context_frontier` 는 이때 `Start { previous_settlement = None }` 을 저장한다. 앞 thread 의 id 는 기록에서 사라진다. 다시 읽는 곳이 없다.
+1. 새 thread 로 가는 claim. `plan_claim` 과 `reconcile_tool_surface` 가 계획에서 `previous_settlement` 를 비우면, `claim_with_context_frontier` 가 `Start { previous_settlement = None }` 을 저장한다.
+   - 기록이 `Recovery_required` 일 때(`Input_rejected` 는 거절)
+   - 기록이 `Settled` 인데 도구 목록 digest 가 바뀌었을 때. 도구를 더하거나 설명을 고치는 배포마다 바뀐다.
+   - 기록이 `Settled` 인데 client 종류나 runtime id 가 바뀌었을 때
+2. `release_transient`. 새 thread 로 시작한 턴(`previous_settlement = None`)이 일시 오류로 끝나면 기록을 `Ready` 로 돌린다. 그 턴이 연 `session_id` 는 사라진다.
+
+잊은 id 를 다시 읽는 곳은 없다.
+
+11-06 에 서버 로그 8일치(10-30 ~ 11-06, 모든 official client)를 셌다. 1번의 `Recovery_required` 갈래가 4,898번(`provider_rejected` 4,615, `protocol_failed` 189, `transport_interrupted` 86, `process_restarted` 8)이다. 2번이 164번(`owner_stopped_turn` 126, `pre_dispatch_failed` 38)이다. 도구 목록 digest 갈래는 로그가 없어 세지 못했다.
 
 같은 Keeper 의 claim 은 겹치지 않는다. 기록이 `Start`·`Active`·`Turn_inflight` 이면 `plan_claim` 이 거절한다.
 
@@ -71,54 +77,63 @@ claim 계획에 `previous_settlement` 가 없으면 `Keeper_codex_runtime` 은 `
 - 임시 `CODEX_HOME` 에 rollout 하나를 복사해 `thread/delete` 를 불렀다.
   - 응답은 `{}` 이고, rollout 파일이 지워지고, `thread/deleted` 알림이 온다.
   - 같은 id 를 다시 지우면 `-32600 no rollout found for thread id …` 로 거절한다.
-  - 로그인 없이 동작한다.
+  - 로그인 없이 동작한다. `initialize` 만 하면 된다.
 - upstream `codex-rs/thread-store/src/local/delete_thread.rs`(main) 는 rollout 파일, `thread_history` 행, state DB 행을 지운다. 붙은 하위 thread 가 있으면 거절한다.
 
 Muse 에는 세션을 지우는 요청이 없어서 RFC-0495 는 storage root 를 비운다. Codex 는 계정 home 에 `auth.json` 과 설정이 같이 있어 비울 수 없다. 대신 thread 를 하나씩 지울 수 있다.
 
 ## 2. 제안
 
-### 2.1 claim 계획이 버리는 thread 를 낸다
+### 2.1 기록이 잊은 thread 를 계산한다
 
 `Keeper_official_client_session_store` 에 순수 함수 하나를 더한다.
 
 ```ocaml
-val abandoned_sessions :
-  expected:t option -> client_kind:client_kind -> runtime_id:string ->
-  claim_plan -> string list
+val forgotten_sessions : before:t option -> after:t -> string list
 ```
 
-계획에 `previous_settlement` 가 없을 때만 id 를 낸다. 기록 단계마다 이렇다. 와일드카드 없이 생성자를 모두 적는다.
+- `before` 단계가 담은 thread id 중 `after` 단계가 담지 않은 것을 낸다. 1.3 의 단계별 id 를 쓴다.
+- `before` 와 `after` 의 client 종류나 runtime id 가 다르면 아무것도 내지 않는다(2.4).
+- 단계 match 는 생성자를 모두 적는다. 와일드카드는 없다.
 
-| 기록 | 같은 client·runtime | 내는 id |
+1.3 의 두 길에 넣으면 이렇다.
+
+| before | after | 내는 id |
 | --- | --- | --- |
-| 없음, `Ready` | — | 없음 |
-| `Settled s` | 예 | `s.session_id` |
-| `Recovery_required r` | 예 | `r.observed_session_id` 와 `r.previous_settlement` 의 `session_id`. 같으면 하나 |
-| `Settled`·`Recovery_required` | 아니오 | 없음(2.4) |
-| `Start`·`Active`·`Turn_inflight` | — | 없음. `plan_claim` 이 이미 거절한다 |
+| `Settled s` | `Start { previous_settlement = None }` | `s.session_id` |
+| `Settled s` | `Start { previous_settlement = Some s }` | 없음 |
+| `Recovery_required r` | `Start { previous_settlement = None }` | `r.observed_session_id`, `r.previous_settlement` 의 id |
+| `Active`·`Turn_inflight { session_id = x; previous_settlement = None }` | `Ready` | `x` |
+| `Turn_inflight { session_id = x }` | `Settled { session_id = x }` | 없음 |
 
-새 상태나 필드는 없다. 지금 `expected` 와 계획에서 계산한다.
+새 상태나 필드는 없다. 이미 저장하는 두 기록에서 계산한다.
 
-### 2.2 Codex runtime 은 `thread/start` 전에 지운다
+### 2.2 Codex Keeper 턴이 끝나면 지운다
 
-`thread_mode` 를 세 갈래로 바꾼다.
+`Runtime_codex_app_server` 에 함수 하나를 더한다.
+
+```ocaml
+val delete_threads :
+  mgr:_ Eio.Process.mgr -> clock:_ Eio.Time.clock -> config -> string list ->
+  (string * (unit, error) result) list
+```
+
+- 턴과 같은 계정 home 으로 app-server 를 띄우고 `initialize` 뒤 id 마다 `thread/delete` 를 보낸다. `account/read` 는 보내지 않는다.
+- `Keeper_codex_runtime` 은 claim 과 release 에서 2.1 의 id 를 모은다. `run_turn` 이 돌아온 뒤, 결과와 상관없이 한 번 부른다. 모은 id 가 없으면 부르지 않는다.
+- 결과는 Keeper 로그에 id 마다 한 줄씩 남긴다. 성공, 또는 오류다.
+- 실패해도 턴 결과는 바꾸지 않는다. 기록이 이미 그 id 를 잊었으니 이어 갈 길이 없다.
+- 다시 시도하지 않는다. 실패한 id 를 저장하는 필드도 두지 않는다. 디스크가 남는 일은 durable truth 를 해치지 않는다.
+
+턴 앞이 아니라 뒤에서 지운다. 앞에서 지우면 새 thread 를 여는 턴마다 app-server 를 한 번 더 띄우는 만큼 늦어진다. release 로 잊는 id 는 턴이 끝나야 생긴다.
+
+### 2.3 이어 가지 않는 호출은 `Ephemeral`
 
 ```ocaml
 type thread_mode =
   | Ephemeral
-  | Start of { discard : string list }
+  | Start
   | Resume of { thread_id : string }
 ```
-
-- `Start { discard }` 이면 `initialize` 뒤, `thread/start` 전에 `discard` 의 thread 마다 `thread/delete` 를 보낸다.
-- 결과는 Keeper 로그에 한 줄씩 남긴다. 성공, 또는 RPC 오류의 code 와 message 다.
-- 실패해도 턴은 이어 간다. 새 thread 는 옛 thread 와 무관하다. claim 이 이미 옛 id 를 기록에서 지웠으니 이어 갈 길도 없다.
-- 지우기를 다시 시도하지 않는다. 실패한 id 를 저장하는 필드도 두지 않는다. 디스크가 남는 일은 durable truth 를 해치지 않는다.
-
-`Keeper_codex_runtime` 은 2.1 의 값을 `discard` 로 넘긴다.
-
-### 2.3 이어 가지 않는 호출은 `Ephemeral`
 
 - `?thread_mode` 기본값을 없애고 `~thread_mode` 를 필수로 한다. 호출처마다 고른다.
 - `Fusion_official_client`, `Keeper_capability_probe` 는 `Ephemeral` 을 넘긴다. `thread/start` 에 `"ephemeral": true` 를 보낸다.
@@ -127,7 +142,9 @@ type thread_mode =
 
 ### 2.4 client 나 계정이 바뀐 thread
 
-runtime id 나 client 종류가 바뀌면 옛 thread 는 다른 계정 home 이나 다른 client 에 있을 수 있다. 지금 runtime 의 app-server 로는 지울 수 없다. 이 경우는 지우지 않는다. 얼마나 자주 일어나는지는 재지 못했다(6장).
+runtime id 나 client 종류가 바뀌면 옛 thread 는 다른 계정 home 이나 다른 client 에 있을 수 있다. 지금 runtime 의 app-server 로는 지울 수 없다. 이 경우는 지우지 않는다.
+
+같은 runtime id 인데 운영자가 계정 home 을 바꾸면, 새 home 에 `thread/delete` 를 보내고 `no rollout found` 를 받는다. 로그에 남고 옛 home 의 rollout 은 그대로다.
 
 ### 2.5 하드컷
 
@@ -143,32 +160,33 @@ runtime id 나 client 종류가 바뀌면 옛 thread 는 다른 계정 home 이�
 
 | 모듈 | 바뀌는 것 |
 | --- | --- |
-| `Keeper_official_client_session_store` | `abandoned_sessions` 추가 |
-| `Runtime_codex_app_server` | `thread_mode` 세 갈래, `~thread_mode` 필수, `Start` 의 `thread/delete`, `thread_is_ephemeral` 삭제 |
-| `Keeper_codex_runtime` | `Start { discard }` 를 만든다 |
-| `Fusion_official_client`, `Keeper_capability_probe`, `Runtime_verification` | `Ephemeral` 을 넘긴다 |
+| `Keeper_official_client_session_store` | `forgotten_sessions` 추가 |
+| `Runtime_codex_app_server` | `delete_threads` 추가, `thread_mode` 에 `Ephemeral`, `~thread_mode` 필수, `thread_is_ephemeral` 삭제 |
+| `Keeper_codex_runtime` | claim·release 에서 잊은 id 를 모으고 턴 뒤 `delete_threads` |
+| `Fusion_official_client`, `Keeper_capability_probe`, `Runtime_verification` | `~thread_mode` 를 넘긴다 |
 
 ## 4. 하지 않는 것
 
-- 서버 시작 때 모든 thread 를 훑어 기록에 없는 것을 지우지 않는다. `thread/start` 를 보냈지만 아직 기록되지 않은 thread 를 지울 수 있다. 버리는 순간에 지우면 이 경합이 없다.
+- 서버 시작 때 모든 thread 를 훑어 기록에 없는 것을 지우지 않는다. `thread/start` 를 보냈지만 아직 기록되지 않은 thread 를 지울 수 있다. 잊는 순간을 아는 쪽이 지우면 이 경합이 없다.
 - `session.json` 에 필드를 더하지 않는다.
 - 실패한 `thread/delete` 를 다시 시도하지 않는다.
+- 서버의 recovery 해제 엔드포인트처럼 Keeper 턴 밖에서 기록을 바꾸는 곳은 지우지 않는다. 운영자가 손으로 하는 일이고 드물다.
 - Muse 는 RFC-0495 가 다룬다. Claude Code 와 Antigravity 는 이 RFC 밖이다.
-- 배포마다 도구 목록 digest 가 바뀌어 새 thread 가 열리는 일은 그대로 둔다. 이 RFC 는 버린 thread 의 디스크만 다룬다.
+- recovery 뒤에 새 thread 를 여는 규칙은 그대로 둔다. `provider_rejected` 가 많은 것은 #48674 가 다룬다. 이 RFC 는 잊은 thread 의 디스크만 다룬다.
 
 ## 5. 층
 
 | 층 | 내용 | 확인 |
 | --- | --- | --- |
 | L1 | 이 RFC | 리뷰 |
-| L2 | `abandoned_sessions`(2.1), `Start { discard }` 와 `thread/delete`(2.2) | type-check. 시험: 기록 단계별로 내는 id, `Start { discard }` 가 `thread/start` 전에 `thread/delete` 를 보내고 거절돼도 턴을 이어 감 |
-| L3 | `Ephemeral`, `~thread_mode` 필수(2.3) | type-check. 시험: `Ephemeral` 이 `"ephemeral": true` 를 보냄. 배포 전에 실제 app-server 에서 ephemeral thread 가 `dynamicTools` 를 받는지 확인 |
+| L2 | `forgotten_sessions`(2.1), `delete_threads` 와 Keeper 턴 뒤 호출(2.2) | type-check. 시험: 1.3 의 두 길에서 낸 id 가 턴 뒤 `thread/delete` 로 나가고, 거절돼도 턴 결과가 그대로다 |
+| L3 | `Ephemeral`, `~thread_mode` 필수(2.3) | type-check. 시험: `Ephemeral` 이 `"ephemeral": true` 를 보낸다. 배포 전에 실제 app-server 에서 ephemeral thread 가 `dynamicTools` 를 받는지 확인 |
 | L4 | changelog `Fresh state required`, 운영자 절차(2.5) | `changelog-fragments.py check`, 임시 home 복사본에서 절차 확인 |
 
-배포 뒤 확인: Codex Keeper 가 다시 돌면 계정 home 의 rollout 수가 Codex Keeper 수 근처에 머무는지 본다.
+배포 뒤 확인: Codex Keeper 가 다시 돌면 계정 home 의 rollout 수가 Codex Keeper 수 근처에 머무는지 본다. 로그의 `thread/delete` 결과 줄 수와 실패 수를 센다.
 
 ## 6. 열린 질문
 
-- `thread/delete` 가 실패하면 턴을 멈춰야 하나? 이 RFC 는 이어 간다(2.2).
-- runtime id 가 바뀐 thread(2.4)를 지울 주체가 필요한가? 바뀐 횟수를 Keeper 로그에서 세어 정한다.
+- `thread/delete` 가 실패하면 턴 결과를 바꾸지 않는다(2.2). 이대로 좋은가?
+- runtime id 가 바뀐 thread(2.4)를 지울 주체가 필요한가? 바뀐 횟수를 로그에서 세어 정한다.
 - 하드컷 대상에 두 SQLite 파일을 넣어도 되나? `thread/delete` 는 행을 지우지만 파일 크기는 VACUUM 없이 줄지 않는다.

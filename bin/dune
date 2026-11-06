@@ -1448,11 +1448,6 @@
  (modules masc_tui_board_selection))
 
 (library
- (name masc_tui_board_score)
- (wrapped false)
- (modules masc_tui_board_score))
-
-(library
  (name masc_tui_model_runtime_table)
  (wrapped false)
  (libraries masc_tui_message_layout masc.runtime masc.runtime_toml_namespace masc.agent_core.llm_provider)
@@ -2958,7 +2953,6 @@
   masc_tui_board_hearth
   masc_tui_board_composer
   masc.board_addressing
-  masc_tui_board_score
   masc_tui_model_runtime_table
   masc_tui_keeper_selection
   masc_tui_planning_selection

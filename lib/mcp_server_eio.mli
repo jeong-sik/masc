@@ -84,7 +84,7 @@ val create_state_eio :
     This is the main entry point for Eio-native request handling.
     Uses execute_tool_eio for tool calls.
 
-    @param clock Eio time clock for Session_eio timeout operations
+    @param clock Eio time clock for [Mcp_server_eio_helpers.wait_for_message_eio] timeouts
     @param sw Eio.Switch for structured concurrency
     @param mcp_session_id Optional HTTP MCP session ID for identity continuity
     @param state Server state

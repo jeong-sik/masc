@@ -7,9 +7,8 @@
     Contract:
     - Reads lifecycle state without changing it. [observe] records invariant
       violations in observation metrics; it does not emit lifecycle events.
-    - Never calls [Keeper_state_machine.apply_event],
-      [Keeper_runtime_routing.select_runtime], or any routine that would
-      shift keeper lifecycle state.
+    - Never calls [Keeper_state_machine.apply_event] or any routine that
+      would shift keeper lifecycle state.
     - Does not read provider names, token counts, or context bytes —
       those belong to AGENT_CORE (see [feedback_masc-agent_core-layer-boundary]).
 

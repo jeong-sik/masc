@@ -245,26 +245,6 @@ let supported_is_not_default () = with_catalog (fun () ->
       (Llm_provider.Catalog_snapshot.publish (Masc_test_deps.admit_catalogs ~models:(Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ())) ~providers:(Some (overlay))));
       Alcotest.(check bool) "supported-model metadata cannot invent an execution default" true
         (Result.is_error (Runtime_transport.resolve_provider_config_of_label "label-a:auto"))))
-let projected_defaults () = with_catalog (fun () ->
-  with_env "MASC_DEFAULT_RUNTIME" None (fun () ->
-    with_env "MASC_DEFAULT_PROVIDER" None (fun () ->
-      with_env "MASC_DEFAULT_MODEL" None (fun () ->
-        with_env "LABEL_A_DEFAULT_MODEL" (Some "ambient-model") (fun () ->
-          Alcotest.(check (list string)) "projection offers only explicitly declared catalog defaults"
-            ["label-b:overlap"] (Provider_runtime_projection.default_execution_model_strings "fixture");
-          with_env "MASC_DEFAULT_PROVIDER" (Some "label-a") (fun () ->
-            Alcotest.(check (list string)) "incomplete explicit configuration cannot trigger a fallback"
-              [] (Provider_runtime_projection.default_execution_model_strings "fixture"));
-          List.iter (fun key -> List.iter (fun value ->
-            with_env key (Some value) (fun () ->
-              Alcotest.(check (list string)) "present blank configuration cannot trigger catalog defaults"
-                [] (Provider_runtime_projection.default_execution_model_strings "fixture"))) ["";"  "])
-            ["MASC_DEFAULT_RUNTIME";"MASC_DEFAULT_PROVIDER";"MASC_DEFAULT_MODEL"];
-          with_env "MASC_DEFAULT_PROVIDER" (Some "") (fun () ->
-            with_env "MASC_DEFAULT_MODEL" (Some " ") (fun () ->
-              Alcotest.(check (list string)) "blank explicit pair cannot trigger catalog defaults"
-                [] (Provider_runtime_projection.default_execution_model_strings "fixture"))))))))
-
 let ollama_auto_uses_production_discovery_cache () =
   let handler _conn req body =
     ignore (Eio.Buf_read.(of_flow ~max_size:(1024 * 1024) body |> take_all) : string);
@@ -822,8 +802,7 @@ let () = Alcotest.run "runtime model label binding"
      "ports",`Quick,endpoint_ports;"authority",`Quick,endpoint_authority;
      "explicit",`Quick,explicit_endpoint];
    "catalog defaults",["missing default",`Quick,no_default;"declared default",`Quick,declared_default;
-     "canonical alias",`Quick,alias_default;"supported is not default",`Quick,supported_is_not_default;
-     "projection",`Quick,projected_defaults];
+     "canonical alias",`Quick,alias_default;"supported is not default",`Quick,supported_is_not_default];
    "ollama auto",["production cache",`Quick,ollama_auto_uses_production_discovery_cache;
      "cold public cache",`Quick,ollama_auto_reuses_cold_public_observation;
      "public cache survives refresh",`Quick,ollama_auto_preserves_public_observation_through_global_refresh;

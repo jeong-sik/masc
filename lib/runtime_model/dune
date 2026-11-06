@@ -1,12 +1,11 @@
 ; Runtime_model — runtime/provider label resolution boundary.
 ;
-; Bundles the model-label parser, provider-kind resolver and provider
-; projection used by runtime/keeper/server call sites.
+; Bundles the model-label parser and provider-kind resolver used by
+; runtime/keeper/server call sites.
 ;
 ; (include_subdirs no) opts out of parent's (include_subdirs unqualified).
 ; (wrapped false) keeps the bare `Runtime_model_*`,
-; `Provider_kind_resolver`, `Provider_runtime_projection`, and
-; `Runtime_provider_binding` identifiers.
+; `Provider_kind_resolver`, and `Runtime_provider_binding` identifiers.
 
 (include_subdirs no)
 

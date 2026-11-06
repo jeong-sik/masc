@@ -291,16 +291,6 @@ let message_gc_entries =
   [
   ]
 
-let model_routing_entries =
-  [
-    entry ~default:"(none)" "MASC_DEFAULT_RUNTIME"
-      "Default runtime label; None when unset";
-    entry ~default:"(none)" "MASC_DEFAULT_MODEL"
-      "Default model id; None when unset";
-    entry ~default:"(none)" "MASC_DEFAULT_PROVIDER"
-      "Default provider name; None when unset";
-  ]
-
 let agent_core_sse_entries =
   [
     entry ~default:"2.0" "MASC_AGENT_CORE_SSE_DRAIN_INTERVAL_SEC"
@@ -403,7 +393,7 @@ let category_specs () =
       @ host_pressure_entries
       @ declared_entries "runtime" );
     "rate_limiting", rate_limiting_entries;
-    "inference", model_routing_entries @ agent_core_sse_entries @ local_runtime_entries;
+    "inference", agent_core_sse_entries @ local_runtime_entries;
     ( "keeper"
     , keeper_runtime_entries @ keeper_entries
       @ docker_playground_entries

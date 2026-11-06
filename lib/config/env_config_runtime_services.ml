@@ -144,12 +144,4 @@ module Dashboard_config = struct
 
 end
 
-(** {1 Model Routing Defaults} *)
-
-module Model_defaults = struct
-  (** Default runtime label (e.g. "glm:pro,openai:gpt-4.1"). *)
-  let default_runtime_opt () =
-    Sys.getenv_opt "MASC_DEFAULT_RUNTIME" |> trim_opt
-end
-
 (** {1 Endpoint Configuration} *)

@@ -27,6 +27,8 @@ type error =
 val error_to_string : error -> string
 
 type retained
+val scope : string
+(** The one owner scope every Goal proof review original is retained in. *)
 val host_installation_id : string
 val host_package_id : string
 

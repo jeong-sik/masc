@@ -6081,6 +6081,11 @@
  (libraries alcotest yojson masc masc.fs_compat masc.string_util unix))
 
 (test
+ (name test_server_settled_original_census)
+ (modules test_server_settled_original_census)
+ (libraries alcotest yojson masc masc.server unix))
+
+(test
  (name test_workspace_memory_execution_capture)
  (modules test_workspace_memory_execution_capture)
  (libraries alcotest  masc.agent_core.digest yojson masc masc.fs_compat masc.prompt_registry unix))

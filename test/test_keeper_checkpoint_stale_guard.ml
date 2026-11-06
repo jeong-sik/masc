@@ -429,6 +429,8 @@ let test_run_context_binds_generation_before_agent_core_checkpoint () =
       fail (Keeper_run_context.base_prompt_error_to_string error)
     | Error (Keeper_run_context.Prompt_unrenderable detail) ->
       fail ("unexpected prompt failure: " ^ detail)
+    | Error (Keeper_run_context.Turn_system_unreadable detail) ->
+      fail ("unexpected turn system failure: " ^ detail)
   in
   check bool "caller-owned context remains the AGENT_CORE context" true
     (run_context.shared_context == shared_context);
@@ -638,6 +640,7 @@ let prepare_error_to_string = function
   | Keeper_run_context.Base_prompt_unavailable error ->
     Keeper_run_context.base_prompt_error_to_string error
   | Keeper_run_context.Prompt_unrenderable detail -> detail
+  | Keeper_run_context.Turn_system_unreadable detail -> detail
 ;;
 
 (* Raw file edits can break an already registered slot. The override API

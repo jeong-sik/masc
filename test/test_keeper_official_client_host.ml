@@ -13,8 +13,14 @@ module Host = Keeper_official_client_host
 
 (* A System with no amendments, as a turn without a basis issues it. *)
 let system_of_text text =
-  Keeper_turn_system.issue ~base_path:"" ~keeper_name:"" ~lane:Keeper_turn_system.Without_basis
-    ~render:(fun (_ : World_constitution_types.t list) -> text) ~current:[]
+  match
+    Keeper_turn_system.issue ~held:None ~lane:Keeper_turn_system.Without_basis
+      ~render:(fun (_ : World_constitution_types.t list) -> text) ~current:[]
+      ~at:{ World_constitution_store.end_offset = 0; digest = "" }
+      ~articles_at:(fun (_ : World_constitution_store.position) -> Ok None)
+  with
+  | Ok (system, (_ : Keeper_turn_system.held)) -> system
+  | Error () -> Alcotest.fail "a turn without a basis reads no ledger"
 
 (* What the operator's window currently says. The store takes the window as an
    argument -- it is reachable from a raw Domain, where reading a setting
@@ -3133,12 +3139,24 @@ let amended_system () =
     | Error invalid -> fail (World_constitution_types.invalid_to_string invalid) in
   let kept = article "open before you record" in
   let written = article "cite the ledger row, not the frame" in
-  let issue front current =
-    Keeper_turn_system.issue ~base_path:"official-host-amendments" ~keeper_name:"amended"
-      ~lane:(Keeper_turn_system.Agent_core front)
-      ~render:(fun articles -> "BASE\n" ^ World_constitution_render.articles articles) ~current in
-  let (_ : Keeper_turn_system.t) = issue Keeper_turn_system.No_previous_request [kept] in
-  issue Keeper_turn_system.Same_front [kept; written], written
+  (* The first turn reads the ledger with [kept] alone; that position reads
+     back the same list. *)
+  let at_of articles : World_constitution_store.position =
+    { end_offset = List.length articles; digest = "official-host-amendments" } in
+  let articles_at (position : World_constitution_store.position) =
+    Ok (if position.end_offset = 1 then Some [kept] else None) in
+  let issue ~held front current =
+    match
+      Keeper_turn_system.issue ~held
+        ~lane:(Keeper_turn_system.Agent_core { runtime_id = "official-host-amendments"; front })
+        ~render:(fun articles -> "BASE\n" ^ World_constitution_render.articles articles) ~current
+        ~at:(at_of current) ~articles_at
+    with
+    | Ok issued -> issued
+    | Error () -> fail "the in-memory ledger does not fail" in
+  let (_ : Keeper_turn_system.t), held =
+    issue ~held:None Keeper_turn_system.No_previous_request [kept] in
+  fst (issue ~held:(Some held) Keeper_turn_system.Same_front [kept; written]), written
 
 let amendments_blocks (assembly : Keeper_context_assembly.t) =
   List.filter_map (fun (id, text) ->

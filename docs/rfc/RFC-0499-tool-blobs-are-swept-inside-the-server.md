@@ -152,6 +152,7 @@ mtime 으로 센 주별 증가는 09-21 주가 3.41GB 로 가장 크다. 10-05 �
 | 만드는 코드가 없는 파일 | `wire-capture/*/manual-*.sse.txt` | 1 |
 
 - 실행 journal 은 blob 을 가리킨다. 표시를 가진 WAL 이 `keepers` 725개, `traces` 230개다. `_blob` 객체를 가진 WAL 은 1,049개, 275개다. 바이트 검색으로 셌고 프레임은 풀지 않았다. 그래서 범위에서 뺄 수 없다.
+- 큰 tool 결과의 표시는 `ToolResult` 내용으로 journal 에 들어간다(`execution_journal.ml` `Event.Tool_result`). 끝나지 않은 native 실행은 재개할 때 그 결과를 읽고 blob 을 열어 확인한다(`keeper_direct_native_continuation.ml` `restore` → `Keeper_tool_answer.verified_stored_answer`). 끝난 journal 을 다시 읽는 곳은 verifier 뿐이고, blob 은 읽지 않는다. 하지만 끝났는지 알려면 journal 을 읽어야 하고, 읽는 곳이 없다는 것은 주인이 아니라는 증거가 못 된다.
 - 실행 journal 의 reader 는 `Execution_event_store.read_only_snapshot ~codec ~dir` 이다. `Eio.Path` 와 `Eio.Switch` 를 쓰고, codec 은 runtime 의 codec pool 을 쓴다. 스캔은 `Systhread_host.run` 으로 Eio 밖 system thread 에서 돈다(§4.4). 그 자리에서는 이 reader 를 부를 수 없다.
 - `keepers` 와 `traces` 는 범위에 통째로 `Tree` 로 들어 있다. 닫힌 분류는 세 곳의 직속 항목만 나눈다. 그래서 그 아래의 비기록 파일은 분류도 경고도 없이 스캔을 끝낸다.
 - `keepers/<k>/` 바로 아래 이름은 137가지, `traces/<t>/` 는 13가지다(11-06).
@@ -241,8 +242,10 @@ delete h:
 
 실행 journal(§3.6)을 읽으면 이 전제가 바뀐다. journal reader 는 Eio 경로를 받는다.
 
-- 스캔은 메인 domain 이 아닌 domain 에서, 그 domain 의 Eio 루프 위 fiber 로 돈다. 메인 domain 은 스캔을 기다리지 않는다.
-- journal 은 서버가 scope 에 넘기는 함수로 읽는다. 그 함수는 runtime 의 codec 으로 `read_only_snapshot` 을 부르고, 사건을 `Execution_event.to_yojson` 으로 바꿔 돌려준다. 스캔은 그 JSON 에서 지금 규칙대로 참조를 찾는다.
+- 스캔은 두 단계다. 지금 system thread 가 일반 파일을 읽으면서 실행 journal 디렉터리는 열지 않고 목록만 모은다. 그다음 서버가 넘긴 reader 가 그 목록을 읽는다.
+- reader 는 메인 domain 이 아닌 domain 의 Eio 루프 위 fiber 로 돈다. 메인 domain 은 스캔을 기다리지 않는다(D5).
+- reader 는 runtime 의 codec 으로 journal 을 읽고, 사건을 정규 JSON 인코딩으로 바꿔 돌려준다. 스캔은 그 JSON 에서 지금 규칙대로 참조를 찾는다. 사건 종류를 골라 필드를 꺼내지 않는다. 그래야 사건 종류가 늘어도 참조를 놓치지 않고, tool 결과 밖(요청 snapshot, checkpoint)에 있는 표시도 같은 길로 잡힌다.
+- `read_only_snapshot` 은 모든 사건을 목록으로 쥔다. 큰 journal 1만 6천 개를 날마다 그렇게 읽지 않도록, agent_core 가 확정된 사건을 하나씩 흘려 주는 함수를 내보낸다. commit authority 규칙은 `read_only_snapshot` 과 같은 코드를 쓴다.
 - blob 저장소 라이브러리는 agent_core 의 실행 저장소를 직접 부르지 않는다. 작업 맥락 디코더(§5.3)와 같은 방향이다.
 - 나머지 파일은 지금처럼 `Fs_compat` 로 읽는다.
 
@@ -299,8 +302,8 @@ u <sha256>
 - Librarian 요청: owner 기록 안에 참조 목록을 구조로(`normalized_artifact_ref_to_json`) 둔다. 본문과 owner 기록은 다른 파일이고 본문이 먼저 게시된다. 그래서 조건은 "owner 기록이 보이면 그 안에 목록이 있다"다. 문자열 안을 훑어 참조를 찾는 코드는 두지 않는다. RFC-0498 이 settle 때 본문을 지우므로 보관 위치는 범위에 넣지 않는다.
   - 이미 있는 owner 기록에는 이 목록이 없다. 목록이 없는 살아 있는 기록을 만나면 스캔을 오류로 끝낸다.
   - 그런 기록이 하나라도 남으면 스캔이 기록을 쓰지 못한다. 그래서 이 층 PR 이 세 길 중 하나를 고른다. 지우고 설치한다. 끝난 요청이 settle 되기를 기다린다. 기존 typed decoder 로 캡처를 풀어 목록을 한 번 채운다.
-- 완료 검토 journal: `verifier-executions/*/.masc/keepers/*/request-executions` 를 고정된 깊이로 나열해 범위에 넣는다. 읽지 못한 항목은 스캔 오류다. review_root 안에 따로 저장소가 있으면 그것은 이 정리의 범위가 아니다.
-  - 이 journal 도 실행 journal 이다. 아래 "트리 안의 파일" 의 reader 로 읽는다.
+- 완료 검토 journal: `verifier-executions/*/.masc/keepers/*/request-executions` 를 고정된 깊이로 나열해 범위에 넣는다. 그 깊이의 디렉터리를 나열하지 못하면 스캔 오류다. review_root 안에 따로 저장소가 있으면 그것은 이 정리의 범위가 아니다.
+  - 이 journal 도 실행 journal 이다. 아래 "트리 안의 파일" 의 reader 로 읽고, 읽지 못한 journal 도 같은 규칙으로 다룬다.
   - media 는 workspace 저장소에 있다. 검토 실행이 `~media_store:(Tool_blob_media_store.of_base_path ~base_path)` 로 workspace 저장소를 넘긴다(`workspace_metric_hooks.ml`, 11-06 확인).
   - `verifier-executions` 를 지우는 코드는 없다(11-06 확인, 운영 462개). 그래서 그 참조는 blob 을 계속 붙잡는다. 안전한 쪽이다.
 - Librarian 작업 맥락: config 폴더의 `*.working-context.json` 을 범위에 넣는다. 참조는 같은 모듈의 디코더(`Keeper_librarian_context.read_committed_file`)로 꺼낸다. 풀리지 않는 바이트는 주인이 격리하고 원본 입력에서 다시 만드는 파생 바이트라 참조를 붙잡지 않는다. 읽기 실패는 스캔 오류다(#49294).
@@ -311,11 +314,14 @@ u <sha256>
 - 트리 안의 파일(§3.6): 범위 안 트리 아래의 파일도 기록이 아닌 것은 이름 규칙으로 나눈다.
   - 잠금 파일은 읽지 않는다. 이름은 `Fs_compat.lock_suffix` 로 판정한다. private JSONL 잠금과 `File_lock_eio` 가 이 상수 하나를 쓴다(#49297).
   - `.DS_Store` 는 트리 안에서도 읽지 않는다. 이름은 scope 의 Finder 항목과 같은 상수를 쓴다.
-  - 실행 journal 디렉터리는 §4.4 의 reader 로 읽는다. 디렉터리는 `Execution_event_store` 가 내보내는 파일 이름(WAL, commit authority, writer lock)으로 알아본다. 그 안의 파일을 하나씩 기록으로 읽지 않고, 프레임 바이트를 문자열로 훑지 않는다. reader 가 실패하면 스캔 오류다.
+  - 실행 journal 디렉터리는 §4.4 의 reader 로 읽는다. 디렉터리는 `Execution_event_store` 가 내보내는 파일 이름(WAL, commit authority, writer lock)으로 알아본다. 그 안의 파일을 하나씩 기록으로 읽지 않고, 프레임 바이트를 문자열로 훑지 않는다.
+  - 읽지 못한 journal 하나가 스캔 전체를 끝내지 않는다. 옛 형식, 깨진 저장소, 초기화가 덜 된 저장소, 읽는 중에 사라진 저장소가 섞여 있을 수 있다. 하나 때문에 스캔이 끝나면 지금 증상이 다른 파일로 옮겨 갈 뿐이다. 읽지 못한 journal 은 `unclassified` 처럼 다룬다. 스캔은 끝까지 돌고 기록을 쓰되, 사유별 개수를 기록 머리에 남기고 `deletable` 을 0 으로 둔다.
+  - reader 가 들어오기 전 중간 단계: 실행 journal 디렉터리를 "reader 대기" 범위로 분류한다. 스캔은 그 디렉터리를 읽지 않고 끝까지 돌며, `deletable` 을 0 으로 두고 경고를 남긴다. `Excluded` 와 다른 분류다. `Excluded` 는 "읽지 않아도 안전하다"는 뜻이고, 이 분류는 "2층 전에 반드시 읽어야 한다"는 뜻이다. 둘을 합치면 2층이 켜질 때 journal 이 붙잡는 blob 을 지울 수 있다.
   - `keepers/<k>/` 와 `traces/<t>/` 의 직속 항목도 닫힌 분류에 넣는다. 주인 폴더 이름은 바뀌므로 "각 주인 폴더의 직속 항목" 한 단계를 더한다.
   - 공식 CLI 가 쓰는 자기 홈(`official-client-runtime` 안의 CLI 저장소, `github-cli`)은 새 제외 이유로 뺀다. CLI 가 쓰는 자기 설정과 상태라 MASC 기록이 아니다. `official-client-runtime` 의 outbox 영수증은 범위에 남는다.
   - `wire-capture/*/manual-*.sse.txt` 는 만드는 코드가 없다. Upgrade notes 에 적는다.
-  - 순서: 잠금 → Finder → 주인 폴더 한 단계 분류 → journal reader. 마지막 것이 들어가야 1층 스캔이 끝까지 돈다.
+  - 작업 맥락이 격리한 `<keeper>.working-context.json.invalid-<hash>` 는 주인이 다시 읽지 않는다. 지금 운영에 0개다. 생기면 `unclassified` 로 남아 지우기를 계속 막는다. 이름 규칙을 주인이 내보내고, 다시 읽지 않는 사본이라는 제외 이유로 분류한다.
+  - 순서: 잠금 → Finder → journal "reader 대기"와 주인 폴더 한 단계 분류 → journal reader. 셋째까지 들어가면 1층 스캔이 끝까지 돌아 기록이 쌓인다. 넷째가 들어가야 `deletable` 이 0 을 벗어난다.
 - Exact 기록: `lane-addons/exact-requests`, `host-results`, `evidence` 를 범위에 넣는다. Exact 호스트는 표시를 풀지 않는다. 하지만 지금 범위의 규칙은 "표시를 담은 기록은 살아 있는 동안 그 blob 을 붙잡는다"이고, `traces`·`wire-capture` 도 그 규칙으로 들어 있다. 같은 규칙을 따른다.
   - 비용: 스캔이 11GB 늘어 27GB 가 된다(§3.4). 1층 로그가 저장소마다 스캔 시간을 따로 남기게 이 층 PR 이 고친다. 시간이 문제면 먼저 `evidence`(6.4GB)를 줄인다. 이 폴더의 파일은 sha256 으로 이름 지은 불변 파일이라, 한 번 읽은 이름의 참조를 기억하면 다음 스캔은 새 파일만 읽는다. `exact-requests`·`host-results` 는 기록이 바뀌어서 이 방법이 맞지 않는다. 그쪽은 Librarian 요청처럼 owner 쪽 구조 목록으로 바꾼다. 범위에서 빼는 것으로 풀지 않는다(§6).
 - 제외는 이유를 variant 로 적는다. 11-06 에 확인한 것:
@@ -374,7 +380,9 @@ u <sha256>
 - `bin/` 이 `lib/` 를 거쳐 `Tool_blob_store` 에 쓰는 경로. 쓰기는 mtime 조건이 덮지만, 읽기만 하고 참조를 쓰는 서버 밖 경로가 있는지 같이 본다.
 - 스캔 범위 대조: 참조(`Tool_output` marker, `Stored` media source)를 기록하는 producer 마다 쓰는 위치가 `durable_consumer_basenames` 나 Board 글 파일 안에 있는지. 1층 PR 본문에 표로 남긴다.
 - `list_all_result` 가 sha256 이 아닌 이름(`.deleting`, 임시 파일)을 어떻게 다루는지.
-- 실행 journal 읽기 비용. WAL 은 3.4GB 다(11-06). 끝난 journal 은 바뀌지 않는다. commit authority 의 `committed_offset` 이 같으면 앞 스캔의 참조를 다시 쓰는 방법은 1층 수치를 본 뒤 정한다.
+- 실행 journal 읽기 비용. WAL 은 3.4GB 다(11-06). 끝난 journal 은 덧붙이기만 하므로 바뀌지 않는다. `(경로, scope_id, committed_offset, last_seq)` 가 같으면 앞 스캔에서 꺼낸 참조를 다시 쓰는 방법은 1층 수치를 본 뒤 정한다.
+- reader 를 메인 domain 밖에서 부를 때 codec pool 이 다른 domain 의 호출을 받는지.
+- 읽지 못한 journal 의 사유별 개수와, 끝나지 않은 journal 의 개수.
 
 ## 8. 열린 질문
 

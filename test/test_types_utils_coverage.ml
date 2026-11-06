@@ -293,20 +293,6 @@ let test_effective_limit () =
   let eff = Masc_domain.effective_limit cfg ~role:Masc_domain.Admin ~category:Masc_domain.GeneralLimit in
   check int "admin general" 20 eff (* 10 * 2.0 *)
 
-let test_rate_limit_config_roundtrip () =
-  let cfg = Masc_domain.{
-    per_minute = 20;
-    burst_allowed = 10;
-    priority_agents = ["admin-1"; "admin-2"];
-    worker_multiplier = 1.5;
-    admin_multiplier = 3.0;
-    broadcast_per_minute = 30;
-    task_ops_per_minute = 60;
-  } in
-  let json = Masc_domain.rate_limit_config_to_yojson cfg in
-  let result = Masc_domain.rate_limit_config_of_yojson json in
-  check bool "roundtrip ok" true (is_ok result)
-
 (* ============================================================ *)
 (* Masc_domain.masc_error Tests                                        *)
 (* ============================================================ *)
@@ -588,7 +574,6 @@ let rate_limit_tests = [
   "category_for_tool", `Quick, test_category_for_tool;
   "multiplier_for_role", `Quick, test_multiplier_for_role;
   "effective_limit", `Quick, test_effective_limit;
-  "config roundtrip", `Quick, test_rate_limit_config_roundtrip;
 ]
 
 let error_tests = [

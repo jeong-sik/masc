@@ -7,18 +7,18 @@ module Transaction = Oidc_login_transaction
 
 type client_error =
   | Secret_variable_unset of string
-  | Client_refused of Exchange.Client.error
+  | Client_refused of Login_client.error
 
 let client_error_to_string = function
   | Secret_variable_unset name -> Printf.sprintf "the environment variable %s is not set" name
-  | Client_refused error -> Exchange.Client.error_to_string error
+  | Client_refused error -> Login_client.error_to_string error
 ;;
 
 let client ~getenv ~client_id ~redirect_uri ~client_secret_env =
   match getenv client_secret_env with
   | None -> Error (Secret_variable_unset client_secret_env)
   | Some client_secret ->
-    Exchange.Client.make ~client_id ~client_secret ~redirect_uri
+    Login_client.make ~client_id ~client_secret ~redirect_uri
     |> Result.map_error (fun error -> Client_refused error)
 ;;
 

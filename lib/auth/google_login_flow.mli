@@ -13,7 +13,7 @@
 type client_error =
   | Secret_variable_unset of string
       (** The environment variable named by the configuration is not set. *)
-  | Client_refused of Oidc_google_exchange.Client.error
+  | Client_refused of Login_client.error
 
 val client_error_to_string : client_error -> string
 
@@ -25,7 +25,7 @@ val client
   -> client_id:string
   -> redirect_uri:string
   -> client_secret_env:string
-  -> (Oidc_google_exchange.Client.t, client_error) result
+  -> (Login_client.t, client_error) result
 
 (** What a start gives the route: the ID for the cookie, and where to send the
     browser. *)
@@ -48,7 +48,7 @@ val start
   :  get:Login_transport.get
   -> Oidc_google_exchange.cache
   -> Oidc_login_transaction.t
-  -> Oidc_google_exchange.Client.t
+  -> Login_client.t
   -> now:(unit -> Ptime.t)
   -> invite:Oidc_login_transaction.Invite_token.t option
   -> return_to:Oidc_login_transaction.Local_path.t
@@ -86,7 +86,7 @@ val callback
   -> Oidc_google_exchange.cache
   -> Oidc_login_transaction.t
   -> Authz_zone.t
-  -> Oidc_google_exchange.Client.t
+  -> Login_client.t
   -> now:(unit -> Ptime.t)
   -> draw:(unit -> string)
   -> Oidc_login_transaction.Id.t

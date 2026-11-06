@@ -17,13 +17,13 @@ let now =
 
 let client =
   match
-    X.Client.make
+    Login_client.make
       ~client_id:"test-client.apps.example"
       ~client_secret:"secret-1"
       ~redirect_uri:"https://masc.example/auth/oidc/callback"
   with
   | Ok client -> client
-  | Error error -> failwith (X.Client.error_to_string error)
+  | Error error -> failwith (Login_client.error_to_string error)
 ;;
 
 let discovery_document =
@@ -320,23 +320,23 @@ let errors_are_told_apart () =
 
 let a_client_that_cannot_work_is_not_made () =
   let made ?(client_id = "test-client.apps.example") ?(client_secret = "secret-1") redirect_uri =
-    match X.Client.make ~client_id ~client_secret ~redirect_uri with
+    match Login_client.make ~client_id ~client_secret ~redirect_uri with
     | Ok _ -> None
     | Error error -> Some error
   in
   let callback = "https://masc.example/auth/oidc/callback" in
   Alcotest.(check bool) "made" true (made callback = None);
-  Alcotest.(check bool) "no client ID" true (made ~client_id:"" callback = Some X.Client.Client_id_empty);
+  Alcotest.(check bool) "no client ID" true (made ~client_id:"" callback = Some Login_client.Client_id_empty);
   Alcotest.(check bool)
     "no secret"
     true
-    (made ~client_secret:"" callback = Some X.Client.Client_secret_empty);
+    (made ~client_secret:"" callback = Some Login_client.Client_secret_empty);
   List.iter
     (fun redirect_uri ->
        Alcotest.(check bool)
          ("refused " ^ redirect_uri)
          true
-         (made redirect_uri = Some X.Client.Redirect_uri_not_https))
+         (made redirect_uri = Some Login_client.Redirect_uri_not_https))
     [ "http://masc.example/auth/oidc/callback"
     ; "https:///auth/oidc/callback"
     ; "/auth/oidc/callback"

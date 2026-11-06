@@ -265,33 +265,43 @@ let latest_after state (record : R.t) =
   | Some (_ : int) | None -> None
 ;;
 
-(* An admission spends a token that opens once (design 5.1-3) and makes a
-   principal; an Admin invitation also makes an Admin assignment, which raises
-   the role epoch of that principal (design 8.1). A log restored from before the
-   admission would open the token again, so every admission is a [Grant] on the
-   principal it makes, and the restored log disagrees with the store. *)
+(* The subject whose given-up revocation keeps an admission out: the invitation
+   or the registration it spends (design 4.5). *)
+let subject_of_through = function
+  | Authz_admission_event.Invite invite_id -> Authz_records.Subject.Invite invite_id
+  | Authz_admission_event.Registration registration_id ->
+    Authz_records.Subject.Registration registration_id
+;;
+
+(* An admission spends a token or an allowlist entry that opens once (design
+   5.1-3) and makes a principal; an Admin invitation also makes an Admin
+   assignment, which raises the role epoch of that principal (design 8.1). A log
+   restored from before the admission would open what it spent again, so every
+   admission is a [Grant] on the principal it makes, and the restored log
+   disagrees with the store. *)
 let admission state ~workspace_id (record : R.t) =
   match Authz_admission_event.of_body record.R.body, latest_after state record with
   | Error error, (_ : int option) -> Error (Admission_unreadable error)
   | Ok (_ : Authz_admission_event.t), Some latest_at_ms ->
     Error (Admission_behind_log { at_ms = record.R.at_ms; latest_at_ms })
   | Ok event, None
-    when is_pending state (Authz_records.Subject.Invite event.Authz_admission_event.invite_id) ->
-    Error (Revocation_pending (Authz_records.Subject.Invite event.Authz_admission_event.invite_id))
+    when is_pending state (subject_of_through event.Authz_admission_event.through) ->
+    Error (Revocation_pending (subject_of_through event.Authz_admission_event.through))
   | Ok event, None ->
     (match
        Authz_principal_state.admit
          state.principals
          ~invites:state.invites
+         ~registrations:state.registrations
          ~workspace_id
          ~author:record.R.author
          ~at_ms:record.R.at_ms
          event
      with
      | Error refusal -> Error (Admission refusal)
-     | Ok { Authz_principal_state.principals; invites; role = _ } ->
+     | Ok { Authz_principal_state.principals; invites; registrations; role = _ } ->
        Ok
-         { state = { state with principals; invites }
+         { state = { state with principals; invites; registrations }
          ; high_water =
              Some
                (Authz_external_store.Change.Authz
@@ -370,11 +380,13 @@ let owner_of_issuer = function
 
 (* Who stands behind a subject (design 4.1): the issuer of the invitation that
    is the subject and the Admin who wrote the registration that is the subject,
-   their owners, or the issuer of the invitation a human principal joined
-   through, its original approver. The first stage has no manager, and the
-   beneficiary is the subject or the person an open invitation or registration
-   is for, who has not joined and writes nothing. Nobody stands behind any
-   other subject yet. *)
+   their owners, or the issuer of the invitation or the writer of the
+   registration a human principal joined through, its original approver. An
+   admission through an invitation also spends the open registration of the
+   identity, so the invitation is read first: it is the way the person came
+   in. The first stage has no manager, and the beneficiary is the subject or
+   the person an open invitation or registration is for, who has not joined
+   and writes nothing. Nobody stands behind any other subject yet. *)
 let owner_behind state = function
   | Authz_records.Subject.Invite invite_id ->
     Option.map
@@ -387,10 +399,14 @@ let owner_behind state = function
         Admin_owned registration.Authz_registration_state.registrar)
       (Authz_registration_state.find state.registrations registration_id)
   | Authz_records.Subject.Principal (Authz_types.Principal.Human user_id) ->
-    Option.map
-      (fun ((_ : Authz_types.Invite_id.t), (invitation : Authz_invite_state.invitation)) ->
-        owner_of_issuer invitation.Authz_invite_state.issuer)
-      (Authz_invite_state.find_consumed_by state.invites user_id)
+    (match Authz_invite_state.find_consumed_by state.invites user_id with
+     | Some ((_ : Authz_types.Invite_id.t), invitation) ->
+       Some (owner_of_issuer invitation.Authz_invite_state.issuer)
+     | None ->
+       Option.map
+         (fun ((_ : Authz_types.Registration_id.t), (registration : Authz_registration_state.registration)) ->
+           Admin_owned registration.Authz_registration_state.registrar)
+         (Authz_registration_state.find_consumed_by state.registrations user_id))
   | Authz_records.Subject.Principal (Authz_types.Principal.Service _)
   | Authz_records.Subject.Grant _
   | Authz_records.Subject.Credential _

@@ -397,7 +397,7 @@ let issue_record ?(at_ms = at_ms) id token =
      | Error _ -> Alcotest.fail "fixture invite record refused")
 ;;
 
-let admission_record ?author ?(at_ms = at_ms) ~user_id ~identity ~invite () =
+let admission_through_record ?author ?(at_ms = at_ms) ~user_id ~identity through =
   let author =
     match author with
     | Some author -> author
@@ -409,12 +409,16 @@ let admission_record ?author ?(at_ms = at_ms) ~user_id ~identity ~invite () =
         id_of_string Authz_types.Account_home_namespace.of_string ("ns-" ^ Authz_types.User_id.to_string user_id)
     }
   in
-  match Adm.to_body { Adm.user_id; identity; invite_id = invite; membership } with
+  match Adm.to_body { Adm.user_id; identity; through; membership } with
   | Error _ -> Alcotest.fail "fixture admission refused"
   | Ok body ->
     (match R.make ~head:R.genesis ~at_ms ~author ~kind:K.Admission ~body with
      | Ok record -> record
      | Error _ -> Alcotest.fail "fixture admission record refused")
+;;
+
+let admission_record ?author ?at_ms ~user_id ~identity ~invite () =
+  admission_through_record ?author ?at_ms ~user_id ~identity (Adm.Invite invite)
 ;;
 
 let invited () =
@@ -1166,6 +1170,67 @@ let test_the_registrar_does_not_cancel_the_block_of_a_removal () =
        (cancel_record ~author:(human bob) removal_held))
 ;;
 
+let erin = id_of_string Authz_types.User_id.of_string "user-5"
+
+let registration_admission ~user_id identity =
+  admission_through_record ~user_id ~identity (Adm.Registration first_registration)
+;;
+
+(* A registered identity joins as a Member through its entry, and the store
+   takes a [Grant] on the principal, as for every admission. The Admin who wrote
+   the entry is the original approver of the person (design 4.1), so that Admin
+   does not lift a block of them. *)
+let test_an_admission_through_a_registration () =
+  let state = step_ok (three_admins ()) (registered_by ~by:user dana_identity) in
+  Alcotest.(check string)
+    "the admission"
+    "grant of principal:human:user-5"
+    (intent_word (S.apply state (registration_admission ~user_id:erin dana_identity)));
+  let state = step_ok state (registration_admission ~user_id:erin dana_identity) in
+  Alcotest.(check bool) "a Member" false (People.is_admin state.S.principals erin);
+  Alcotest.(check string) "the entry is spent" "none" (open_word state dana_identity);
+  Alcotest.(check string)
+    "a second admission through it"
+    (S.refusal_to_string
+       (S.Admission (People.Registration (Regs.Registration_consumed first_registration))))
+    (intent_word (S.apply state (registration_admission ~user_id:carol (identity_of "555"))));
+  let erin_held = held ~aborted:(String.make 64 'f') (principal_subject erin) in
+  let blocked = S.hold_revocations state [ erin_held ] in
+  Alcotest.(check string)
+    "user wrote the entry erin came through"
+    (S.refusal_to_string (S.Canceller_owns_the_subject (principal_subject erin)))
+    (cancel_word blocked (cancel_record ~author:(human user) erin_held));
+  Alcotest.(check string)
+    "bob lifts it"
+    "lifted"
+    (cancel_word blocked (cancel_record ~author:(human bob) erin_held))
+;;
+
+(* A removal whose intent the store gave up holds the entry, so no admission
+   spends it (design 8.3). *)
+let test_a_held_removal_keeps_the_entry_out () =
+  let state = step_ok (three_admins ()) (registered_by ~by:user dana_identity) in
+  let blocked = S.hold_revocations state [ held registration_subject ] in
+  Alcotest.(check string)
+    "the admission"
+    (S.refusal_to_string (S.Revocation_pending registration_subject))
+    (intent_word (S.apply blocked (registration_admission ~user_id:erin dana_identity)))
+;;
+
+(* An invitation admission spends the open entry of the identity, so the
+   person does not come back through it once deleted. *)
+let test_an_invitation_admission_spends_the_entry () =
+  let state = step_ok (three_admins ()) (registered_by ~by:user dana_identity) in
+  let state =
+    step_ok state (admission_record ~user_id:erin ~identity:dana_identity ~invite:fourth_invite ())
+  in
+  Alcotest.(check string) "the entry is spent" "none" (open_word state dana_identity);
+  match Regs.find state.S.registrations first_registration with
+  | Some { Regs.status = Regs.Consumed by; _ } ->
+    Alcotest.(check string) "spent by" "user-5" (Authz_types.User_id.to_string by)
+  | Some _ | None -> Alcotest.fail "the entry is not spent by the invitation admission"
+;;
+
 let () =
   Alcotest.run
     "authz_state"
@@ -1221,6 +1286,11 @@ let () =
         ; Alcotest.test_case "by mode" `Quick test_a_registration_by_mode
         ; Alcotest.test_case "the registrar behind a block" `Quick
             test_the_registrar_does_not_cancel_the_block_of_a_removal
+        ; Alcotest.test_case "an admission through an entry" `Quick
+            test_an_admission_through_a_registration
+        ; Alcotest.test_case "a held removal" `Quick test_a_held_removal_keeps_the_entry_out
+        ; Alcotest.test_case "an invitation spends the entry" `Quick
+            test_an_invitation_admission_spends_the_entry
         ] )
     ; ( "principal records"
       , [ Alcotest.test_case "disable, enable, delete" `Quick test_a_principal_record

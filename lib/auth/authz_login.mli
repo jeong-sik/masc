@@ -60,8 +60,9 @@ type refusal =
 val refusal_to_string : refusal -> string
 
 (** Whether the refusal is a conflict with another writer, which the route
-    answers with 409 (design 5.1-3): the invitation was spent, or the identity
-    was bound, by someone else, or an invitation came with a bound identity. *)
+    answers with 409 (design 5.1-3): the invitation or the registration was
+    spent, or the identity was bound, by someone else, or an invitation came
+    with a bound identity. *)
 val is_conflict : refusal -> bool
 
 (** Three. *)

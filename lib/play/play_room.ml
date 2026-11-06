@@ -113,10 +113,12 @@ CREATE TABLE IF NOT EXISTS members (
  who TEXT NOT NULL, client_id TEXT NOT NULL, speaker TEXT NOT NULL,
  machine TEXT NOT NULL, seen_at REAL NOT NULL, PRIMARY KEY(who, client_id));
 |}
+let dirname = "play"
+
 let with_db ~base_path fn =
   let work () =
     try
-      let directory = Filename.concat (Common.masc_dir_from_base_path ~base_path) "play" in
+      let directory = Filename.concat (Common.masc_dir_from_base_path ~base_path) dirname in
       Fs_compat.mkdir_p directory;
       let db = Sqlite3.db_open (Filename.concat directory "room.sqlite3") in
       Fun.protect ~finally:(fun () ->

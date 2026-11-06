@@ -549,7 +549,7 @@ let body_for id messages =
 let test_completed_bodies_go_raw_until_a_size_refusal () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let base_path = Filename.temp_dir "input-policy-" "" in
+  let base_path = Filename.temp_dir "completed-bodies-" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) @@ fun () ->
   let store = Tool_blob_store.create ~base_path in
   let older_body = String.make 8000 'o' and current_body = String.make 8000 'c' in
@@ -612,7 +612,7 @@ let test_completed_bodies_go_raw_until_a_size_refusal () =
 let test_failed_externalization_keeps_raw_body () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let base_path = Filename.temp_dir "input-policy-write-failure-" "" in
+  let base_path = Filename.temp_dir "externalization-write-failure-" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) @@ fun () ->
   let obstacle = open_out (Filename.concat base_path ".masc") in close_out obstacle;
   let blocked = exchange "blocked" (String.make 8000 'b') in

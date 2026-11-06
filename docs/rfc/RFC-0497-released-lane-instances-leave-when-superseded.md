@@ -160,8 +160,9 @@ pass 하나가 binding 전체를 두 번 읽는다(`historical`, gecko sweep). �
 
 ## 6. 구현 순서
 
-1. L1 계획: `reconcile_configuration` 이 §4.1 의 대상을 계산한다. 아무것도 지우지 않는다. 대상 수와 바이트(`eligible_before_bytes`), 남는 수와 바이트(`protected_before_bytes`)를 inventory(`GET /api/v1/lane-addons` 의 configuration 부분)에 싣는다.
-   - visibility 나 runtime 이 대표와 달라 남는 binding 수, 그런 묶음 수도 같이 싣는다.
+1. L1 계획: §4.1 의 대상을 계산한다. 아무것도 지우지 않는다. 두 조각으로 나눈다.
+   - L1a: `reconcile_configuration` 이 pass 마다 대상 수와 남는 수를 inventory(`GET /api/v1/lane-addons` 의 configuration 부분, 운영자에게만)에 싣는다. visibility 나 runtime 이 대표와 달라 남는 binding 수, 그런 묶음 수도 같이 싣는다. 수는 그 pass 가 이미 읽은 binding 으로 센다.
+   - L1b: 바이트는 시작 정비(worker domain)에서 한 번 센다. 대상의 바이트, 남는 것의 바이트, `observations` 전체 바이트를 로그 한 줄에 남긴다. pass 마다 세지 않는 까닭: 2026-11-06 관측 파일이 27만 개라 60초마다 그만큼 lstat 해야 한다. 대상 바이트는 서버를 다시 켤 때만 늘어서, 시작마다 세면 충분하다. 시작 시점의 liveness 는 pass 의 liveness 와 다를 수 있으므로 이 바이트는 근사다. Keeper 리뷰가 이 방식을 골랐다(2026-11-06).
    - 확인: 배포 뒤 inventory 의 대상 수가 §4.2 의 수치(그 사이 늘어난 만큼 더한 값)와 맞는다.
    - L1 만 배포된 동안에는 pass 마다 binding 3,540개(그 사이 늘어난 만큼 더)를 계속 두 번 읽는다. §4.5 의 비용 감소는 L2 부터다.
    - §2.3 의 0번에는 `Execute` 안의 호출과 대시보드·TUI 화면 조회가 빠져 있다. L1 배포 전후로 서버 요청 로그에서 `GET /api/v1/lane-addons` 수를 세어 운영자에게 같이 보인다.

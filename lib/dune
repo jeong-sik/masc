@@ -122,6 +122,7 @@
   keeper_chat_store_append_once
   keeper_chat_store_message_append
   keeper_chat_store_line_decode
+  keeper_chat_store_history_window
   keeper_runtime_trust_snapshot_core)
  (libraries
   masc.sse_queue_inventory

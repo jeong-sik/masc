@@ -26174,6 +26174,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
   | Ask_msg (Ask_followup_finished (read, result)) ->
       let request=read.afr_request and submission=read.afr_submission in
       Option.iter (fun result ->
+        state.ask_followup_owed <- (match result with
+          | Ok () -> Masc_tui_owed_read.succeeded state.ask_followup_owed
+          | Error (Ask.Followup_cancelled | Ask.Followup_not_started _ | Ask.Followup_withdrawn) ->
+              Masc_tui_owed_read.abandoned state.ask_followup_owed
+          | Error (Ask.Followup_read_failed _) -> failed_read state.ask_followup_owed);
         Ask_followup_observation.emit read ~sources:(Masc_tui_types.current_ask_followup state)
           (Ask_followup_observation.Followup_ui_settled result))
         (Masc_tui_types.finish_ask_followup_read state request submission result)

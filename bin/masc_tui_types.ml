@@ -10364,6 +10364,9 @@ type state = {
   mutable ask_followup: (ask_submission * Masc_tui_ask_projection.followup) option;
   mutable ask_followup_cancel: (Snapshot_read.request * (string -> unit)) option;
   mutable ask_followup_error: Masc_tui_ask_projection.followup_failure option;
+  (* The read a recorded Keeper answer owes: its wake is observed until one
+     read that began after the answer finishes. *)
+  mutable ask_followup_owed: Masc_tui_owed_read.t;
   (* The tool calls keepers are holding, drawn above the operator actions on
      the same surface. Live registry state on the server; refreshed with the
      surface. *)
@@ -12061,6 +12064,7 @@ let begin_ask_followup_read (state : state) =
           if owner.as_request == submission.as_request then Some reading else None) in
         state.ask_followup <- Some (submission, Masc_tui_ask_projection.begin_followup ~previous);
         state.ask_followup_error <- None;
+        state.ask_followup_owed <- Masc_tui_owed_read.started state.ask_followup_owed;
         request, submission, keeper_name) request
   | None -> None
 
@@ -14929,6 +14933,7 @@ let suspend_workspace_readings state =
   state.board_post_owed <- None;
   state.board_list_owed <- Masc_tui_owed_read.settled;
   state.pushed_reads <- [];
+  state.ask_followup_owed <- Masc_tui_owed_read.settled;
   state.asks_owed <- Masc_tui_owed_read.settled;
   state.async_requests_owed <- Masc_tui_owed_read.settled;
   state.pending_confirms_owed <- Masc_tui_owed_read.settled;
@@ -20220,6 +20225,7 @@ let create_state
   ask_followup = None;
   ask_followup_cancel = None;
   ask_followup_error = None;
+  ask_followup_owed = Masc_tui_owed_read.settled;
   keeper_tool_approvals = [];
   keeper_tool_approvals_error = None;
   keeper_tool_approvals_observed = false;

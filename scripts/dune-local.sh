@@ -243,7 +243,7 @@ if [[ "${GITHUB_ACTIONS:-}" != "true" \
       if command -v pgrep >/dev/null 2>&1; then
         if pgrep -x dune >/dev/null 2>&1; then _has_dune=1; fi
       elif command -v ps >/dev/null 2>&1; then
-        if ps aux 2>/dev/null | grep -q '[d]une'; then _has_dune=1; fi
+        if grep -q '[d]une' <<<"$(ps aux 2>/dev/null)"; then _has_dune=1; fi
       fi
       if [[ "${_has_dune}" -eq 0 ]]; then
         printf '[dune-local] removing stale _build/.lock (no dune process running)\n' >&2

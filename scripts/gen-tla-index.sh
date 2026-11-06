@@ -46,7 +46,7 @@ detect_kind() {
   fi
   # Heuristic: TLC-emitted traces usually contain "Trace specification" or
   # "@@ Trace" or refer to a parent module via TT_xxx variables.
-  if head -80 "$f" 2>/dev/null | grep -qE "^\\\\\\* (Trace specification|TLC counterexample)"; then
+  if grep -qE "^\\\\\\* (Trace specification|TLC counterexample)" <<<"$(head -80 "$f" 2>/dev/null)"; then
     echo "ttrace"
     return
   fi

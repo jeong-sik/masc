@@ -229,9 +229,9 @@ needs_rebuild() {
   fi
 
   # Any .ts/.tsx/.css/.html source newer than stamp → rebuild
-  if find "$DASHBOARD_DIR/src" \
+  if [[ -n "$(find "$DASHBOARD_DIR/src" \
        -newer "$STAMP" \( -name '*.ts' -o -name '*.tsx' -o -name '*.css' -o -name '*.html' \) \
-       2>/dev/null | head -1 | grep -q .; then
+       -print -quit 2>/dev/null)" ]]; then
     return 0
   fi
 

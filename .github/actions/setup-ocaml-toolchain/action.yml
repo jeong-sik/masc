@@ -162,7 +162,7 @@ runs:
         # default `~/.opam` root and an XDG root under `~/.local/share/opam`,
         # so don't pre-gate on a single directory path (that produced a false
         # cache miss when opam used the XDG layout).
-        if opam switch list --short 2>/dev/null | grep -q "^${switch_name}$"; then
+        if grep -q "^${switch_name}$" <<<"$(opam switch list --short 2>/dev/null)"; then
           echo "::notice::Cache hit — reusing opam switch ${switch_name}"
           bash scripts/ci/opam-cache-freshness.sh \
             --refresh "${OPAM_CACHE_EXACT_HIT:-}"

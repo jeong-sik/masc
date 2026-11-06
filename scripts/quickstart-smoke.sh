@@ -132,8 +132,8 @@ source "$env_file"
   exit 1
 }
 
-if find "$base_path/.masc/config/keepers" -type f -name '*.toml' -print -quit \
-  2>/dev/null | grep -q .
+if [[ -n "$(find "$base_path/.masc/config/keepers" -type f -name '*.toml' -print -quit \
+  2>/dev/null)" ]]
 then
   echo "quickstart-smoke: default quickstart unexpectedly seeded a Keeper" >&2
   exit 1

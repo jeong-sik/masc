@@ -112,6 +112,12 @@ type report =
   ; blobs_observed : int
   ; candidates_recorded : int
   ; deleted : int
+  ; (** Names the scope left unclassified. A run that sees any of these
+        deletes nothing in either mode — the stores behind these names are
+        not read for live references, so their blobs must stay — and the
+        offline run keeps the closed-classification guarantee the in-server
+        sweep has. *)
+    unclassified : string list
   }
 
 val error_to_string : error -> string

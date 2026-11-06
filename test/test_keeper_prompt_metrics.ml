@@ -530,6 +530,34 @@ let test_a_merged_bucket_has_no_fingerprint_and_a_single_one_keeps_it () =
     (Option.is_none (fingerprint Turn_record.Message_user))
 ;;
 
+(* A retained turn context row keeps the User role it was created with. Its
+   text is system context, so it is counted in the system bucket and leaves the
+   caller's text alone in the user bucket. *)
+let test_retained_context_text_counts_as_system () =
+  let text_message ~origin role text : Agent_core.Types.message =
+    { origin; Agent_core.Types.role; content = [ Agent_core.Types.Text text ]
+    ; name = None; tool_call_id = None; metadata = [] }
+  in
+  let caller = "inspect the board" in
+  let context = "[system context] world state" in
+  let segments =
+    KAPM.build_ctx_segments ~prompt_blocks:[] ~tools:[]
+      ~input_messages:
+        [ text_message ~origin:Llm_provider.Types.Conversation Agent_core.Types.User caller
+        ; text_message ~origin:Llm_provider.Types.Historical_system_context
+            Agent_core.Types.User context
+        ]
+  in
+  let bytes key =
+    List.assoc_opt key segments
+    |> Option.map (fun (segment : KAPM.prompt_segment_metrics) -> segment.KAPM.bytes)
+  in
+  check (option int) "the context row is system text" (Some (String.length context))
+    (bytes Turn_record.Message_system);
+  check (option int) "the user bucket holds only the caller" (Some (String.length caller))
+    (bytes Turn_record.Message_user)
+;;
+
 let test_tool_schema_fingerprint_follows_the_order_sent () =
   let tool name =
     Agent_core.Tool.create
@@ -743,6 +771,8 @@ let () =
             test_tool_schema_fingerprint_follows_the_order_sent;
           test_case "a merged bucket keeps no fingerprint" `Quick
             test_a_merged_bucket_has_no_fingerprint_and_a_single_one_keeps_it;
+          test_case "retained context text counts as system" `Quick
+            test_retained_context_text_counts_as_system;
           test_case "attributes final provider input content" `Quick
             test_ctx_composition_splits_final_provider_input_bytes;
           test_case "removes typed prompt carrier" `Quick

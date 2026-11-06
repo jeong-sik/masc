@@ -347,18 +347,33 @@ let metric_of_block
   in
   { bytes; fingerprint = None }
 
+(* Turn context text counts in the system bucket by its origin. A historical
+   context row is counted there whatever role it was stored with and whatever
+   role its lane sends it as. *)
 let input_component_of_block
     ~(role : Agent_core.Types.role)
+    ~(origin : Agent_core.Types.message_origin)
     (block : Agent_core.Types.content_block) : Turn_record.input_component_id =
   match block with
   | Agent_core.Types.ToolUse _ -> Turn_record.Message_tool_use
   | Agent_core.Types.ToolResult _ -> Turn_record.Message_tool_result
   | Agent_core.Types.Text _ -> (
-      match role with
-      | Agent_core.Types.User -> Turn_record.Message_user
-      | Agent_core.Types.System -> Turn_record.Message_system
-      | Agent_core.Types.Assistant -> Turn_record.Message_assistant_text
-      | Agent_core.Types.Tool -> Turn_record.Message_tool_result)
+      match origin, role with
+      | (Agent_core.Types.System_context | Agent_core.Types.Historical_system_context),
+        (Agent_core.Types.User | Agent_core.Types.System | Agent_core.Types.Assistant
+        | Agent_core.Types.Tool) -> Turn_record.Message_system
+      | ( Agent_core.Types.Conversation | Agent_core.Types.Recovery_instruction
+        | Agent_core.Types.Tool_result_followup | Agent_core.Types.Agent_instruction ),
+        Agent_core.Types.User -> Turn_record.Message_user
+      | ( Agent_core.Types.Conversation | Agent_core.Types.Recovery_instruction
+        | Agent_core.Types.Tool_result_followup | Agent_core.Types.Agent_instruction ),
+        Agent_core.Types.System -> Turn_record.Message_system
+      | ( Agent_core.Types.Conversation | Agent_core.Types.Recovery_instruction
+        | Agent_core.Types.Tool_result_followup | Agent_core.Types.Agent_instruction ),
+        Agent_core.Types.Assistant -> Turn_record.Message_assistant_text
+      | ( Agent_core.Types.Conversation | Agent_core.Types.Recovery_instruction
+        | Agent_core.Types.Tool_result_followup | Agent_core.Types.Agent_instruction ),
+        Agent_core.Types.Tool -> Turn_record.Message_tool_result)
   | Agent_core.Types.Thinking _ | Agent_core.Types.ReasoningDetails _ ->
       Turn_record.Message_thinking
   | Agent_core.Types.RedactedThinking _ -> Turn_record.Message_redacted_thinking
@@ -413,7 +428,9 @@ let build_ctx_segments
     (fun (message : Agent_core.Types.message) ->
       List.iter
         (fun block ->
-          let bucket = input_component_of_block ~role:message.role block in
+          let bucket =
+            input_component_of_block ~role:message.role ~origin:message.origin block
+          in
           let metric = metric_of_block ~role:message.role block in
           if metric.bytes > 0 then add_segment_metric totals ~bucket metric)
         message.content)

@@ -44,9 +44,44 @@ let cache =
 let with_cache_lock f =
   Eio.Mutex.use_rw ~protect:true cache.mutex f
 
+(* [Dashboard_briefing.json] keeps workspace_health and project in its
+   [summary] object; the incidents, the recommended actions and the item that
+   leads them sit beside it. The sections count those lists, so a summary key
+   that no producer writes cannot read as zero (#32971). *)
+let briefing_summary_of_briefing briefing_json =
+  let count key =
+    match member_assoc key briefing_json with
+    | `List items -> Ok (List.length items)
+    | other ->
+      Error
+        (Printf.sprintf "briefing %s is not a list: %s" key
+           (Yojson.Safe.to_string other))
+  in
+  match count "incidents", count "recommended_actions" with
+  | Error detail, _ | Ok _, Error detail -> Error detail
+  | Ok incident_count, Ok recommended_action_count ->
+    Ok
+      (`Assoc
+        [
+          ( "workspace_health",
+            member_assoc "summary" briefing_json |> member_assoc "workspace_health" );
+          ("incident_count", `Int incident_count);
+          ("recommended_action_count", `Int recommended_action_count);
+          ( "top_attention_summary",
+            match
+              briefing_json
+              |> member_assoc "command_focus"
+              |> member_assoc "top_attention"
+              |> member_assoc "summary"
+            with
+            | `String value -> `String (compact_text value)
+            | other -> other );
+        ])
+
 (* ── For_test ───────────────────────────────────────────────────── *)
 
 module For_test = struct
+  let briefing_summary_of_briefing = briefing_summary_of_briefing
   let compact_agent_json = Briefing_compactors.compact_agent_json
   let collect_metadata_gaps = Briefing_gaps.collect_metadata_gaps
   let build_briefing_sections = Briefing_sections.build_briefing_sections
@@ -126,22 +161,9 @@ let compute_briefing_json ~actor_name ~config ~sw ~(clock : [> float Eio.Time.cl
                  ("timestamp", `String message.timestamp);
                ])
     in
-    let briefing_summary_json =
-      let summary = member_assoc "summary" briefing_json in
-      `Assoc
-        [
-          ("workspace_health", member_assoc "workspace_health" summary);
-          ("active_agents", member_assoc "active_agents" summary);
-          ("keeper_pressure", member_assoc "keeper_pressure" summary);
-          ("active_operations", member_assoc "active_operations" summary);
-          ("incident_count", member_assoc "incident_count" summary);
-          ("recommended_action_count", member_assoc "recommended_action_count" summary);
-          ( "top_attention_summary",
-            match member_assoc "top_attention" summary |> member_assoc "summary" with
-            | `String value -> `String (compact_text value)
-            | other -> other );
-        ]
-    in
+    match briefing_summary_of_briefing briefing_json with
+    | Error detail -> Error detail
+    | Ok briefing_summary_json ->
     let metadata_gaps =
       Briefing_gaps.collect_metadata_gaps ~agents:compact_agents
     in

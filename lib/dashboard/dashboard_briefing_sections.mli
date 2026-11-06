@@ -9,6 +9,7 @@ val json :
   Yojson.Safe.t
 
 module For_test : sig
+  val briefing_summary_of_briefing : Yojson.Safe.t -> (Yojson.Safe.t, string) result
   val compact_agent_json : Masc_domain.agent -> Yojson.Safe.t
   val reset_cache : unit -> unit
   val seed_cache :

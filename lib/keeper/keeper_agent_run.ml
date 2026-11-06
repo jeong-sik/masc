@@ -1231,8 +1231,13 @@ let run_turn
            | Ok () -> ()
            | Error detail -> failwith detail)
         | Some (Checkpoint_continuation _ | Runtime_continuation _) | None -> () in
+      (* An official turn hands its client the issuer's carrier without the
+         Completion Authority block, so a carrier that held only that block is
+         not among the messages it reports. *)
       let prompt_context_present =
-        Option.is_some (Keeper_run_tools_hook_accumulator.extra_system_context_receipt acc)
+        Option.is_some
+          (Option.bind acc.Keeper_run_tools_hook_accumulator.extra_system_context_assembly
+             Keeper_official_client_host.transmitted_carrier_receipt)
       in
       let provider_content =
         match transmitted with

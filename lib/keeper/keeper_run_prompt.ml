@@ -36,14 +36,23 @@ let sanitize_user_message = Inference_utils.sanitize_text_utf8
 
 let assemble_extra_system_context = Keeper_context_assembly.assemble
 
+(* RFC-0491 §3.1: the Completion Authority layer is world state that comes and
+   goes between turns, so it is a context block, not a System observation.
+   Only the Goal observation is a System suffix. A later round of the same
+   turn carries this turn's authority block again because the post-tool
+   assembly drops the [Dynamic_context] it came from (#45853). *)
 let assemble_request_context ~base_system_prompt ~post_tool_round ~previous_assembly
     ~dynamic_context_partition ~existing_extra_system_context ~blocks =
   let observations, blocks, dynamic_context_partition =
     if post_tool_round then
-      let observations = match Option.bind previous_assembly (fun previous ->
-          previous.Keeper_context_assembly.system_prompt) with
-        | None -> [] | Some issued -> issued.observations in
-      observations, blocks, dynamic_context_partition
+      match previous_assembly with
+      | None -> [], blocks, dynamic_context_partition
+      | Some (previous : Keeper_context_assembly.t) ->
+        let observations = match previous.system_prompt with
+          | None -> [] | Some issued -> issued.observations in
+        let authority = List.filter (fun (id, _) ->
+            Prompt_block_id.equal id Prompt_block_id.Completion_authority) previous.blocks in
+        observations, authority @ blocks, dynamic_context_partition
     else
       match dynamic_context_partition,
         List.filter (fun (id, _) -> Prompt_block_id.equal id Prompt_block_id.Dynamic_context) blocks with
@@ -56,12 +65,11 @@ let assemble_request_context ~base_system_prompt ~post_tool_round ~previous_asse
         else
           let goals, remaining = Keeper_context_layers.partition_layer Active_goals partition in
           let authority, remaining = Keeper_context_layers.partition_layer Completion_authority remaining in
-          let observations =
-            (match Keeper_context_layers.text goals with
-             | "" -> [] | text -> [Keeper_context_assembly.Active_goals (Inference_utils.sanitize_text_utf8 text)])
-            @ (match Keeper_context_layers.text authority with
-               | "" -> [] | text -> [Keeper_context_assembly.Completion_authority (Inference_utils.sanitize_text_utf8 text)]) in
-          observations, List.map (fun (id, text) ->
+          let observations = match Keeper_context_layers.text goals with
+            | "" -> [] | text -> [Keeper_context_assembly.Active_goals (Inference_utils.sanitize_text_utf8 text)] in
+          let authority = match Keeper_context_layers.text authority with
+            | "" -> [] | text -> [Prompt_block_id.Completion_authority, Inference_utils.sanitize_text_utf8 text] in
+          observations, authority @ List.map (fun (id, text) ->
             if Prompt_block_id.equal id Prompt_block_id.Dynamic_context
             then id, Keeper_context_layers.text remaining else id, text) blocks, Some remaining
       | Some _, _ | None, _ -> [], blocks, dynamic_context_partition

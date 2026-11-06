@@ -17,8 +17,8 @@ type receipt = private
   }
 type system_observation =
   | Active_goals of string
-  | Completion_authority of string
-(** Only these renderer-issued observations can become a System suffix. *)
+(** Only this renderer-issued observation can become a System suffix.
+    Completion Authority is a context block (RFC-0491 §3.1). *)
 val observation_block : system_observation -> Prompt_block_id.t * string
 
 type system_prompt = private
@@ -29,9 +29,8 @@ type system_prompt = private
   }
 (** One canonical issued System: the prior base/override followed by exact
     renderer-issued observations, independently of the extra-context carrier.
-    Official clients may project a current-turn observation to User rather
-    than their persistent System; this issuer receipt is not that submitted
-    packet. It is never a history row. *)
+    An official-client Resume may deliver a held observation in User; this
+    issuer receipt is not that submitted packet. It is never a history row. *)
 type t = private
   { extra_system_context : string option
   ; blocks : (Prompt_block_id.t * string) list
@@ -50,6 +49,13 @@ val assemble :
   blocks:(Prompt_block_id.t * string) list -> t
 (** Preserves [None] versus [Some ""], source order and every separator.
     [receipt=None] means no carrier exists, not a zero-byte carrier. *)
+
+val split_block : Prompt_block_id.t -> t -> (t * string) option
+(** [Some (rest, text)] when the carrier holds [block] exactly once: [text] is
+    its exact bytes and [rest] is the same assembly issued again without it,
+    with the same existing prefix, block order, separators, [Dynamic_context]
+    partition and issued System. [rest] has no carrier when nothing else was
+    in it. [None] when the block is absent, repeated, or there is no carrier. *)
 
 val with_system_observations :
   base_text:string -> observations:system_observation list -> t -> t

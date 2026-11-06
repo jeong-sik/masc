@@ -785,7 +785,7 @@ let test_cooperative_resume_sends_only_remaining_work_instruction () =
     (String_util.contains_substring (resume |> member "developerInstructions" |> text)
        "masc.official-client-historical-task.v1");
   let sent = turn_text rows in
-  (* [Host.resume_prompt] writes each carried message as one encoded line
+  (* [Host.resume_prompt ~turn_observation:None] writes each carried message as one encoded line
      behind its role label. *)
   let historical_task = sent |> String.split_on_char '\n'
     |> List.find_map (fun line ->

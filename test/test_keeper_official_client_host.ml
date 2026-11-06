@@ -1508,13 +1508,13 @@ let test_hook_override_to_blank_system_prompt_is_refused () =
    instructions the official lane already requires. The assembly is published
    by the actual hook; reading it before that hook would miss this refusal. *)
 let test_goal_observation_cannot_mask_blank_keeper_instructions () =
-  let prepare_composed ?(source = Keeper_context_layers.Active_goals) ~initial ~override () =
+  let prepare_composed ~initial ~override () =
     let issued = ref None in
     let hooks = {Agent_core.Hooks.empty with before_turn_params=Some (function
       | Agent_core.Hooks.BeforeTurnParams {current_params;_} ->
         let current_params = {current_params with system_prompt_override=override} in
         let base_system_prompt = Option.value ~default:initial current_params.system_prompt_override in
-        let partition = Keeper_context_layers.singleton source
+        let partition = Keeper_context_layers.singleton Keeper_context_layers.Active_goals
             "Goal observation: current revision and reported measurement 1/3" in
         let assembly = Keeper_run_prompt.assemble_request_context ~base_system_prompt
             ~post_tool_round:false ~previous_assembly:None ~dynamic_context_partition:(Some partition)
@@ -1534,12 +1534,11 @@ let test_goal_observation_cannot_mask_blank_keeper_instructions () =
        | Some {system_prompt=Some {observations=_ :: _;_};_} -> true
        | Some _ | None -> false);
     result in
-  List.iter (fun source -> List.iter (fun (initial, override) -> check_refused_system_prompt
+  List.iter (fun (initial, override) -> check_refused_system_prompt
       "observation over blank selected Keeper instructions"
-      (prepare_composed ~source ~initial ~override ()))
+      (prepare_composed ~initial ~override ()))
     ["",None; " \n\t ",None; "valid configured instructions",Some "";
-     "valid configured instructions",Some " \n\t "])
-    [Keeper_context_layers.Active_goals; Keeper_context_layers.Completion_authority];
+     "valid configured instructions",Some " \n\t "];
   match prepare_composed ~initial:"" ~override:(Some "valid selected instructions") () with
   | Error error -> fail (Agent_core.Error.to_string error)
   | Ok prepared -> check bool "a valid selected override and its Goal remain admitted" true
@@ -2642,34 +2641,34 @@ let test_issued_prefix_delivery_preserves_held_semantics () =
   let rendered assembly = "SYSTEM:\n" ^ Host.encode_history_message (message assembly) ^ "\n\nGOAL" in
   List.iter (fun prefix ->
     let first = issued prefix in
-    let initial = Host.resume_prompt ~goal:"GOAL" ~held:[] ~composed_context:first [message first] in
+    let initial = Host.resume_prompt ~turn_observation:None ~goal:"GOAL" ~held:[] ~composed_context:first [message first] in
     check string "unattributed prefix is delivered with whole carrier" (rendered first) initial.prompt;
-    let repeated = Host.resume_prompt ~goal:"GOAL" ~held:initial.held_context
+    let repeated = Host.resume_prompt ~turn_observation:None ~goal:"GOAL" ~held:initial.held_context
       ~composed_context:first [message first] in
     check string "unchanged whole carrier follows existing held policy" "GOAL" repeated.prompt;
     let changed = issued (Some "changed prefix") in
-    let replacement = Host.resume_prompt ~goal:"GOAL" ~held:initial.held_context
+    let replacement = Host.resume_prompt ~turn_observation:None ~goal:"GOAL" ~held:initial.held_context
       ~composed_context:changed [message changed] in
     check string "changed prefix with unchanged blocks is not lost" (rendered changed) replacement.prompt;
-    let stale = Host.resume_prompt ~goal:"GOAL" ~held:initial.held_context
+    let stale = Host.resume_prompt ~turn_observation:None ~goal:"GOAL" ~held:initial.held_context
       ~composed_context:first [message changed] in
     check string "stale issuer receipt falls back to complete carrier" (rendered changed) stale.prompt)
     [Some "prefix";Some ""];
   let first = issued None in
-  let initial = Host.resume_prompt ~goal:"GOAL" ~held:[] ~composed_context:first [message first] in
+  let initial = Host.resume_prompt ~turn_observation:None ~goal:"GOAL" ~held:[] ~composed_context:first [message first] in
   let changed = Keeper_run_prompt.assemble_extra_system_context ~dynamic_context_partition:None ~existing_extra_system_context:None
     ~blocks:[Prompt_block_id.Memory_os_recall,"updated recall"] in
   check string "blocks-only change retains typed resend"
     (rendered changed)
-    (Host.resume_prompt ~goal:"GOAL" ~held:initial.held_context
+    (Host.resume_prompt ~turn_observation:None ~goal:"GOAL" ~held:initial.held_context
        ~composed_context:changed [message changed]).prompt;
   let duplicate = Keeper_run_prompt.assemble_extra_system_context ~dynamic_context_partition:None ~existing_extra_system_context:None
     ~blocks:[Prompt_block_id.Memory_os_recall,"first";Prompt_block_id.Memory_os_recall,"second"] in
-  let held = Host.start_held_context ~composed_context:duplicate [message duplicate] in
+  let held = Host.start_held_context ~turn_observation:None ~composed_context:duplicate [message duplicate] in
   check int "duplicate block identities retain a single whole carrier" 1 (List.length held);
   check string "duplicate identities preserve every source byte"
     (rendered duplicate)
-    (Host.resume_prompt ~goal:"GOAL" ~held:[] ~composed_context:duplicate [message duplicate]).prompt
+    (Host.resume_prompt ~turn_observation:None ~goal:"GOAL" ~held:[] ~composed_context:duplicate [message duplicate]).prompt
 ;;
 
 (* The two recall blocks resume by their classes: the session holds the body
@@ -2689,15 +2688,15 @@ let test_the_recall_blocks_resume_by_their_resend_classes () =
   in
   let has prompt fragment = String_util.contains_substring prompt fragment in
   let first = issued ~body:"BODY-ONE" ~status:"STATUS-ONE" in
-  let initial = Host.resume_prompt ~goal:"GOAL" ~held:[] ~composed_context:first [message first] in
+  let initial = Host.resume_prompt ~turn_observation:None ~goal:"GOAL" ~held:[] ~composed_context:first [message first] in
   check bool "the first delivery carries both" true
     (has initial.prompt "BODY-ONE" && has initial.prompt "STATUS-ONE");
-  let repeated = Host.resume_prompt ~goal:"GOAL" ~held:initial.held_context
+  let repeated = Host.resume_prompt ~turn_observation:None ~goal:"GOAL" ~held:initial.held_context
     ~composed_context:first [message first] in
   check bool "the same status line is sent again" true (has repeated.prompt "STATUS-ONE");
   check bool "the same body is not" false (has repeated.prompt "BODY-ONE");
   let next = issued ~body:"BODY-TWO" ~status:"STATUS-ONE" in
-  let replaced = Host.resume_prompt ~goal:"GOAL" ~held:initial.held_context
+  let replaced = Host.resume_prompt ~turn_observation:None ~goal:"GOAL" ~held:initial.held_context
     ~composed_context:next [message next] in
   check bool "a changed body is sent" true (has replaced.prompt "BODY-TWO")
 ;;
@@ -2720,13 +2719,13 @@ let test_a_status_only_turn_between_two_identical_selections_keeps_the_held_body
       ; Prompt_block_id.Recalled_memory_status, "STATUS-ONE"
       ]
   in
-  let initial = Host.resume_prompt ~goal:"GOAL" ~held:[] ~composed_context:chosen [message chosen] in
+  let initial = Host.resume_prompt ~turn_observation:None ~goal:"GOAL" ~held:[] ~composed_context:chosen [message chosen] in
   let quiet = issued [ Prompt_block_id.Recalled_memory_status, "STATUS-NONE" ] in
-  let between = Host.resume_prompt ~goal:"GOAL" ~held:initial.held_context
+  let between = Host.resume_prompt ~turn_observation:None ~goal:"GOAL" ~held:initial.held_context
     ~composed_context:quiet [message quiet] in
   check bool "the quiet turn sends its status line" true (has between.prompt "STATUS-NONE");
   check bool "and no body" false (has between.prompt "BODY-ONE");
-  let again = Host.resume_prompt ~goal:"GOAL" ~held:between.held_context
+  let again = Host.resume_prompt ~turn_observation:None ~goal:"GOAL" ~held:between.held_context
     ~composed_context:chosen [message chosen] in
   check bool "the same status line is sent again" true (has again.prompt "STATUS-ONE");
   check bool "the body the session still holds is not" false (has again.prompt "BODY-ONE")
@@ -2739,7 +2738,7 @@ let test_carried_summaries_name_blocks_and_digests () =
   let message, composed =
     carried_composed ~dynamic_text:"world state one" ~operator_text:"note"
   in
-  let summaries = Host.carried_summaries ~composed_context:composed [ message ] in
+  let summaries = Host.carried_summaries ~turn_observation:None ~composed_context:composed [ message ] in
   check (list string) "one entry per block"
     [ "block:" ^ Prompt_block_id.to_string Prompt_block_id.Dynamic_context
     ; "block:" ^ Prompt_block_id.to_string Prompt_block_id.Operator_note
@@ -2752,13 +2751,13 @@ let test_carried_summaries_name_blocks_and_digests () =
        check int "digest prefix length" 12 (String.length item.sha256_prefix);
        check bool "rendered bytes are counted" true (item.bytes > 0))
     summaries;
-  let again = Host.carried_summaries ~composed_context:composed [ message ] in
+  let again = Host.carried_summaries ~turn_observation:None ~composed_context:composed [ message ] in
   check bool "same input gives the same summaries" true (summaries = again);
   let changed_message, changed_composed =
     carried_composed ~dynamic_text:"world state two" ~operator_text:"note"
   in
   let changed =
-    Host.carried_summaries ~composed_context:changed_composed [ changed_message ]
+    Host.carried_summaries ~turn_observation:None ~composed_context:changed_composed [ changed_message ]
   in
   let sha_of items =
     List.map (fun (item : Host.carried_summary) -> item.sha256_prefix) items
@@ -2776,9 +2775,9 @@ let test_carried_summaries_without_a_witness_name_one_carrier () =
   check (list string) "an unwitnessed carrier is one entry" [ "carrier" ]
     (List.map
        (fun (item : Host.carried_summary) -> item.label)
-       (Host.carried_summaries [ message ]));
+       (Host.carried_summaries ~turn_observation:None [ message ]));
   check int "a conversation without carried contexts has none" 0
-    (List.length (Host.carried_summaries [ Agent_core.Types.user_msg "hi" ]))
+    (List.length (Host.carried_summaries ~turn_observation:None [ Agent_core.Types.user_msg "hi" ]))
 ;;
 
 (* World State sections: a fixture whose standing sections (memory ledger,
@@ -2814,11 +2813,11 @@ let world_state_turn ?partition_known world =
 ;;
 
 let resume ~held (message, assembly) =
-  Host.resume_prompt ~goal:"GOAL" ~held ~composed_context:assembly [ message ]
+  Host.resume_prompt ~turn_observation:None ~goal:"GOAL" ~held ~composed_context:assembly [ message ]
 ;;
 
 let start_holding (message, assembly) =
-  Host.start_held_context ~composed_context:assembly [ message ]
+  Host.start_held_context ~turn_observation:None ~composed_context:assembly [ message ]
 ;;
 
 let section_names sources = List.map Layers.source_name sources
@@ -2865,9 +2864,9 @@ let test_a_changed_system_goal_reaches_a_held_official_session () =
   let first, first_prepared = prepare (Some first_text) in
   check bool "Start actually issues its Goal in the System prompt" true
     (contains first_prepared.system_prompt first_text);
-  let held = Host.start_held_context ~composed_context:first first_prepared.messages in
+  let held = Host.start_held_context ~turn_observation:None ~composed_context:first first_prepared.messages in
   let resume assembly (prepared : Host.prepared_turn) held =
-    Host.resume_prompt ~goal:owner ~held ~composed_context:assembly prepared.messages in
+    Host.resume_prompt ~turn_observation:None ~goal:owner ~held ~composed_context:assembly prepared.messages in
   let same = resume first first_prepared held in
   check string "the first System observation is held without a duplicate Resume" owner same.prompt;
   let second, second_prepared = prepare (Some new_text) in
@@ -2883,7 +2882,7 @@ let test_a_changed_system_goal_reaches_a_held_official_session () =
   check string "the updated revision is subsequently held" owner repeated.prompt;
   let absent, absent_prepared = prepare None in
   let added = resume second second_prepared
-      (Host.start_held_context ~composed_context:absent absent_prepared.messages) in
+      (Host.start_held_context ~turn_observation:None ~composed_context:absent absent_prepared.messages) in
   check string "a Goal introduced after Start reaches Resume too" delivery.prompt added.prompt;
   let open Yojson.Safe.Util in
   let binding projected prompt = Keeper_context_submission_link.binding_to_json
@@ -2911,136 +2910,231 @@ let test_a_changed_system_goal_reaches_a_held_official_session () =
   check bool "held omission retains explicit System source proof" true
     (List.exists (fun proof -> member "source_carrier" proof = `String "system_prompt")
       (omitted |> member "omitted_held" |> to_list));
-  let stale = Keeper_context_submission_link.encoded_system_observation ~target:Official_resume_user ~block:Prompt_block_id.Active_goals ~assembly:(Some first)
+  let stale = Keeper_context_submission_link.encoded_system_observation ~block:Prompt_block_id.Active_goals ~assembly:(Some first)
       (Agent_core.Types.user_msg new_text) in
   check string "an observation cannot borrow an older System receipt" "unavailable"
     (binding stale (Keeper_context_submission_link.text stale)
       |> member "issuer_attribution" |> member "status" |> to_string)
 ;;
 
-let test_system_authority_repeats_with_exact_source_on_official_resume () =
+(* RFC-0491 §3.1: the issuer carries Completion Authority as a block of its
+   context carrier, so the Agent Core System holds standing instructions only.
+   An official client keeps the System-role carrier in the vendor's persistent
+   System, so its turn takes the block out and delivers it as current-turn
+   input on Start and on every Resume, proved by the issuer's carrier span. *)
+let test_carrier_authority_is_current_turn_input_on_official_start_and_resume () =
   let module A = Keeper_context_assembly in
+  let open Yojson.Safe.Util in
   let block = Prompt_block_id.Completion_authority in
   let text = "Approved task-approved; verification vrf-approved; authority operator-fixture" in
-  let assembly = A.assemble ~dynamic_context_partition:None
-      ~existing_extra_system_context:None ~blocks:[]
-    |> A.with_system_observations ~base_text:"BASE"
-         ~observations:[A.Completion_authority text] in
+  let issue ?goal authority =
+    let partition = Layers.assemble ~content_of:(function
+      | Layers.Active_goals -> goal
+      | Layers.Completion_authority -> authority
+      | Layers.Fleet_messages -> Some "FLEET-WORLD"
+      | _ -> None) in
+    Keeper_run_prompt.assemble_request_context ~base_system_prompt:"BASE"
+      ~post_tool_round:false ~previous_assembly:None ~dynamic_context_partition:(Some partition)
+      ~existing_extra_system_context:None
+      ~blocks:[Prompt_block_id.Dynamic_context, Layers.text partition] in
+  let prepare ?(goal = "OWNER") ?(issuer = Option.some) assembly =
+    let reads = ref 0 in
+    let hooks = {Agent_core.Hooks.empty with before_turn_params=Some (function
+      | Agent_core.Hooks.BeforeTurnParams {current_params;_} ->
+        Agent_core.Hooks.AdjustParams {current_params with
+          extra_system_context=assembly.A.extra_system_context;
+          system_prompt_override=A.system_prompt_override
+            ~previous:current_params.system_prompt_override assembly}
+      | BeforeTurn _ | AfterTurn _ | PreToolUse _ | PostToolUse _ | PostToolUseFailure _
+      | OnStop _ | OnError _ | OnToolError _ -> Agent_core.Hooks.Continue)} in
+    let prepared = match Host.prepare_turn ~runtime_label:"carrier-authority-fixture"
+        ~composed_context:(Some (fun () -> incr reads; issuer assembly))
+        ~keeper_name:"carrier-authority" ~turn_count:1 ~system_prompt:"BASE" ~tools:[]
+        ~initial_messages:[Agent_core.Types.user_msg goal] ~model_input_projection:None
+        ~hooks:(Some hooks) ~configured_reasoning_effort:None with
+      | Ok prepared -> prepared | Error error -> fail (Agent_core.Error.to_string error) in
+    check int "issuer acquired once per prepared turn" 1 !reads;
+    prepared in
+  let binding piece = Keeper_context_submission_link.binding_to_json
+      ~slot:Runtime_official_client_write.Whole_write piece
+      (Runtime_official_client_write.raw (Keeper_context_submission_link.text piece)) in
+  let only_source piece = match binding piece |> member "occurrences" |> to_list with
+    | [occurrence] -> member "source" occurrence
+    | _ -> fail "exactly one authority source occurrence required" in
+  let check_carrier_source label (issuer : A.t) source =
+    let receipt = match issuer.receipt with Some receipt -> receipt | None -> fail "carrier receipt missing" in
+    check string (label ^ ": the proof hashes the issuer's carrier") receipt.sha256
+      (source |> member "assembly" |> member "sha256" |> to_string);
+    let span = match source |> member "source_span_indices" |> to_list with
+      | [index] -> List.nth receipt.spans (to_int index)
+      | _ -> fail "one authority span required" in
+    check bool (label ^ ": the proof names the authority span") true (span.kind = A.Block block);
+    check string (label ^ ": the span bytes are the delivered authority") text
+      (String.sub (Option.get issuer.extra_system_context) span.offset span.bytes) in
+  let assembly = issue (Some text) in
+  check string "the Agent Core System carries no authority" "BASE"
+    (A.effective_system_prompt ~base_text:"BASE" assembly);
+  check (option string) "the Agent Core carrier holds the authority block" (Some text)
+    (List.assoc_opt block assembly.blocks);
+  let prepared = prepare assembly in
+  check string "the fixed Start System contains only standing instructions" "BASE"
+    prepared.system_prompt;
+  check bool "the System-role carrier no longer holds the authority" false
+    (List.exists (fun message -> contains (Host.encode_history_message message) text)
+       prepared.messages);
+  check bool "the rest of the carrier stays" true
+    (List.exists (fun message -> contains (Host.encode_history_message message) "FLEET-WORLD")
+       prepared.messages);
+  let start = Host.start_prompt prepared "OWNER" in
+  let start_text = Keeper_context_submission_link.text start in
+  check bool "the initial event is delivered once in front of the Start prompt" true
+    (String.starts_with ~prefix:"SYSTEM:\n" start_text
+     && String.ends_with ~suffix:"\n\nOWNER" start_text && contains start_text text);
+  check_carrier_source "Start" assembly (only_source start);
+  let turn_observation = prepared.turn_observation in
+  let composed_context = prepared.composed_context in
+  let held = Host.start_held_context ~turn_observation ?composed_context prepared.messages in
+  check bool "the session never holds the authority" false
+    (List.exists (fun (held : Keeper_official_client_session_store.held_context) ->
+       held.context = Context_block block) held);
+  let deliver held =
+    Host.resume_prompt ~goal:"OWNER" ~held ~turn_observation ?composed_context prepared.messages in
+  let first = deliver held in
+  let second = deliver first.held_context in
+  check bool "authority keeps its Sent_every_resume semantics" true
+    (Prompt_block_id.resent_when_held block);
+  check string "the authority is sent again with identical bytes" first.prompt second.prompt;
+  check bool "Resume actually contains the authority" true (contains second.prompt text);
+  check bool "held world state is not rebroadcast" false (contains second.prompt "FLEET-WORLD");
+  check_carrier_source "Resume" assembly (only_source second.context_projection);
+  let next = prepare ~goal:"NEXT" (issue None) in
+  check string "a turn without an event has no Start observation" "NEXT"
+    (Host.start_prompt next "NEXT" |> Keeper_context_submission_link.text);
+  check bool "a turn without an event carries no turn observation" true
+    (Option.is_none next.turn_observation);
+  let next_resume = Host.resume_prompt ~turn_observation:None ~goal:"NEXT" ~held:second.held_context
+      ?composed_context:next.composed_context next.messages in
+  check bool "the next turn cannot replay the old approval" false (contains next_resume.prompt text);
+  let changed_text = "Rejected task-other verification vrf-new authority operator-second" in
+  let changed = prepare ~goal:"NEXT" (issue ~goal:"GOAL revision2" (Some changed_text)) in
+  check string "the Goal keeps its Start System surface" "BASE\n\nGOAL revision2"
+    changed.system_prompt;
+  let changed_start = Host.start_prompt changed "NEXT" |> Keeper_context_submission_link.text in
+  check bool "new correlation keys reach the Start prompt" true (contains changed_start changed_text);
+  check bool "old correlation keys are not borrowed" false (contains changed_start text);
+  let changed_resume = Host.resume_prompt ~goal:"NEXT" ~held:next_resume.held_context
+      ~turn_observation:changed.turn_observation ?composed_context:changed.composed_context
+      changed.messages in
+  check bool "new correlation keys reach Resume" true (contains changed_resume.prompt changed_text);
+  List.iter (fun (label, issuer) ->
+    let unknown = prepare ~goal:"NEXT" ~issuer (issue (Some changed_text)) in
+    check string (label ^ ": no Start observation is invented") "NEXT"
+      (Host.start_prompt unknown "NEXT" |> Keeper_context_submission_link.text);
+    check bool (label ^ ": the carrier is kept whole") true
+      (List.exists (fun message -> contains (Host.encode_history_message message) changed_text)
+         unknown.messages);
+    check bool (label ^ ": an old event is not borrowed on Resume") false
+      (contains (Host.resume_prompt ~turn_observation:None ~goal:"NEXT" ~held:[] ?composed_context:unknown.composed_context
+                   unknown.messages).prompt text))
+    ["missing issuer", (fun _ -> None); "stale issuer", (fun _ -> Some assembly)]
+;;
+
+(* The authority leaves the carrier on the carrier's own evidence. A turn
+   whose sent System is not the issued one (no Goal observation, so nothing
+   overrides the configured System) still keeps the authority out of the
+   vendor's persistent System. *)
+let prepare_authority_turn ~system_prompt assembly =
+  let module A = Keeper_context_assembly in
   let hooks = {Agent_core.Hooks.empty with before_turn_params=Some (function
     | Agent_core.Hooks.BeforeTurnParams {current_params;_} ->
       Agent_core.Hooks.AdjustParams {current_params with
-        system_prompt_override=A.system_prompt_override ~previous:current_params.system_prompt_override assembly}
+        extra_system_context=assembly.A.extra_system_context;
+        system_prompt_override=A.system_prompt_override
+          ~previous:current_params.system_prompt_override assembly}
     | BeforeTurn _ | AfterTurn _ | PreToolUse _ | PostToolUse _ | PostToolUseFailure _
     | OnStop _ | OnError _ | OnToolError _ -> Agent_core.Hooks.Continue)} in
-  let prepared = match Host.prepare_turn ~runtime_label:"held-authority-fixture"
-      ~composed_context:(Some (fun () -> Some assembly)) ~keeper_name:"held-authority"
-      ~turn_count:1 ~system_prompt:"BASE" ~tools:[]
+  match Host.prepare_turn ~runtime_label:"carrier-authority-fixture"
+      ~composed_context:(Some (fun () -> Some assembly))
+      ~keeper_name:"carrier-authority" ~turn_count:1 ~system_prompt ~tools:[]
       ~initial_messages:[Agent_core.Types.user_msg "OWNER"] ~model_input_projection:None
       ~hooks:(Some hooks) ~configured_reasoning_effort:None with
-    | Ok prepared -> prepared | Error error -> fail (Agent_core.Error.to_string error) in
-  check string "the fixed Start System contains only standing instructions"
-    "BASE" prepared.system_prompt;
-  check (list string) "authority is absent from the canonical history" ["OWNER"]
-    (List.map Host.encode_history_message prepared.messages
-     |> List.map (fun encoded ->
-       let json = Yojson.Safe.from_string encoded in
-       Yojson.Safe.Util.(json |> member "message" |> member "content_blocks" |> to_list
-         |> List.hd |> member "text" |> to_string)));
-  let start = Host.start_prompt prepared "OWNER" in
-  check string "the initial event is delivered once in current-turn User"
-    ("USER:\n" ^ Host.encode_history_message (Agent_core.Types.user_msg text) ^ "\n\nOWNER")
-    (Keeper_context_submission_link.text start);
-  let held = {Keeper_official_client_session_store.context=Context_block block;
-              sha256=Agent_core_sha256.(digest_string text |> to_hex)}
-             :: Host.start_held_context ~composed_context:assembly prepared.messages in
-  let deliver held = Host.resume_prompt ~goal:"OWNER" ~held ~composed_context:assembly prepared.messages in
-  let first = deliver held in
-  let second = deliver first.held_context in
-  check bool "authority keeps its original Sent_every_resume semantics" true
-    (Prompt_block_id.resent_when_held block);
-  check string "the held authority is sent again with identical bytes" first.prompt second.prompt;
-  check bool "Resume actually contains the authority row" true (contains second.prompt text);
-  let binding = Keeper_context_submission_link.binding_to_json
-      ~slot:Runtime_official_client_write.Whole_write second.context_projection
-      (Runtime_official_client_write.raw second.prompt) in
-  let open Yojson.Safe.Util in
-  let start_binding = Keeper_context_submission_link.binding_to_json
-      ~slot:Runtime_official_client_write.Whole_write start
-      (Runtime_official_client_write.raw (Keeper_context_submission_link.text start)) in
-  let start_source = match start_binding |> member "occurrences" |> to_list with
-    | [occurrence] -> member "source" occurrence | _ -> fail "one Start authority source required" in
-  check string "Start proof names the actual User target" "official_start_user_prompt"
-    (start_source |> member "target_carrier" |> to_string);
-  check string "Start proof describes the canonical issuer, not submitted System"
-    "canonical_issued_system_prompt" (start_source |> member "source_scope" |> to_string);
-  let source = match binding |> member "occurrences" |> to_list with
-    | [occurrence] -> member "source" occurrence | _ -> fail "one authority source occurrence required" in
-  check string "source carrier is System" "system_prompt" (source |> member "source_carrier" |> to_string);
-  let physical = Option.get assembly.system_prompt in
-  let index = match source |> member "source_span_indices" |> to_list with
-    | [index] -> to_int index | _ -> fail "one authority source index required" in
-  let span = List.nth physical.partition.spans index in
-  check bool "proof names the authority span rather than the Goal span" true
-    (span.kind = A.Block block);
-  check string "selected physical bytes equal the repeated observation" text
-    (String.sub physical.text span.offset span.bytes);
-  let missing = Keeper_context_submission_link.encoded_system_observation ~target:Official_resume_user ~block ~assembly:None
-      (Agent_core.Types.user_msg text) in
-  let missing_binding = Keeper_context_submission_link.binding_to_json
-      ~slot:Runtime_official_client_write.Whole_write missing
-      (Runtime_official_client_write.raw (Keeper_context_submission_link.text missing)) in
-  check string "an absent issuer remains unavailable" "unavailable"
-    (missing_binding |> member "issuer_attribution" |> member "status" |> to_string);
-  let prepare observations issuer =
-    let assembly = A.assemble ~dynamic_context_partition:None ~existing_extra_system_context:None ~blocks:[]
-      |> A.with_system_observations ~base_text:"BASE" ~observations in
-    let hooks = {Agent_core.Hooks.empty with before_turn_params=Some (fun _ ->
-      Agent_core.Hooks.AdjustParams {Agent_core.Hooks.default_turn_params with
-        system_prompt_override=Some (A.effective_system_prompt ~base_text:"BASE" assembly)})} in
-    let reads = ref 0 in
-    let prepared = Host.prepare_turn ~runtime_label:"Start-event" ~keeper_name:"fixture"
-      ~turn_count:2 ~system_prompt:"BASE" ~tools:[] ~initial_messages:[Agent_core.Types.user_msg "NEXT"]
-      ~model_input_projection:None ~hooks:(Some hooks) ~configured_reasoning_effort:None
-      ~composed_context:(Some (fun () -> incr reads; issuer assembly)) |> Result.get_ok in
-    check int "issuer acquired once per prepared turn" 1 !reads;
-    assembly, prepared in
-  let goal = A.Active_goals "GOAL revision2 measurement1/4" in
-  let absent, absent_prepared = prepare [goal] Option.some in
-  check string "Goal keeps its existing Start System surface" "BASE\n\nGOAL revision2 measurement1/4"
-    absent_prepared.system_prompt;
-  check string "next turn without an event has no Start User observation" "NEXT"
-    (Keeper_context_submission_link.text (Host.start_prompt absent_prepared "NEXT"));
-  let no_event = Host.resume_prompt ~goal:"NEXT" ~held:second.held_context
-    ~composed_context:absent absent_prepared.messages in
-  check bool "next turn cannot replay the old approval" false (contains no_event.prompt text);
-  let changed_text = "Rejected task-other verification vrf-new authority operator-second" in
-  let changed, changed_prepared = prepare [goal; A.Completion_authority changed_text] Option.some in
-  check string "changed event does not enter fixed System" absent_prepared.system_prompt
-    changed_prepared.system_prompt;
-  let changed_start = Host.start_prompt changed_prepared "NEXT" |> Keeper_context_submission_link.text in
-  check bool "new correlation keys reach first User" true (contains changed_start changed_text);
-  check bool "old correlation keys are not borrowed" false (contains changed_start text);
-  let changed_resume = Host.resume_prompt ~goal:"NEXT" ~held:no_event.held_context
-    ~composed_context:changed changed_prepared.messages in
-  check bool "new correlation keys reach Resume" true (contains changed_resume.prompt changed_text);
-  List.iter (fun issuer ->
-    let selected, unknown = prepare [A.Completion_authority changed_text] issuer in
-    check string "unknown issuer cannot rewrite selected System"
-      (A.effective_system_prompt ~base_text:"BASE" selected) unknown.system_prompt;
-    check string "unknown issuer cannot invent a Start observation" "NEXT"
-      (Host.start_prompt unknown "NEXT" |> Keeper_context_submission_link.text);
-    check string "unknown issuer cannot borrow an old event on Resume" "NEXT"
-      (Host.resume_prompt ~goal:"NEXT" ~held:[] ?composed_context:unknown.composed_context
-        unknown.messages).prompt)
-    [(fun _ -> None); (fun _ -> Some assembly)];
-  List.iter (fun issuer ->
-    let piece = Keeper_context_submission_link.encoded_system_observation
-        ~target:Official_start_user ~block ~assembly:issuer (Agent_core.Types.user_msg changed_text) in
-    let receipt = Keeper_context_submission_link.binding_to_json
-        ~slot:Runtime_official_client_write.Whole_write piece
-        (Runtime_official_client_write.raw (Keeper_context_submission_link.text piece)) in
-    check string "missing/stale Start source remains unknown" "unavailable"
-      (receipt |> member "issuer_attribution" |> member "status" |> to_string)) [None; Some assembly]
+  | Ok prepared -> prepared
+  | Error error -> fail (Agent_core.Error.to_string error)
+;;
+
+let authority_text = "Approved task-approved; verification vrf-approved; authority operator-fixture"
+
+(* Before RFC-0491 the authority text reached the System through
+   [sanitize_text_utf8]; as a carrier block it keeps that. An official client
+   JSON-encodes the carrier, and Yojson writes bytes from 0x80 up as given. *)
+let test_carrier_authority_block_is_valid_utf8 () =
+  let module A = Keeper_context_assembly in
+  let truncated_dash = "\xE2\x80" in
+  let partition = Layers.assemble ~content_of:(function
+    | Layers.Completion_authority ->
+      Some ("Approved task-cut " ^ truncated_dash ^ "; verification vrf-cut")
+    | _ -> None) in
+  let assembly = Keeper_run_prompt.assemble_request_context ~base_system_prompt:"BASE"
+      ~post_tool_round:false ~previous_assembly:None ~dynamic_context_partition:(Some partition)
+      ~existing_extra_system_context:None
+      ~blocks:[Prompt_block_id.Dynamic_context, Layers.text partition] in
+  let authority = match List.filter (fun (id, _) ->
+      Prompt_block_id.equal id Prompt_block_id.Completion_authority) assembly.A.blocks with
+    | [(_, text)] -> text
+    | _ -> fail "one authority block required" in
+  check bool "the authority block is valid UTF-8" true (String.is_valid_utf_8 authority);
+  check bool "the authority block keeps its text" true
+    (contains authority "verification vrf-cut");
+  match assembly.A.extra_system_context with
+  | Some carrier -> check bool "the carrier is valid UTF-8" true (String.is_valid_utf_8 carrier)
+  | None -> fail "carrier missing"
+;;
+
+let test_authority_leaves_the_carrier_when_the_sent_system_is_not_the_issued_one () =
+  let partition = Layers.assemble ~content_of:(function
+    | Layers.Completion_authority -> Some authority_text
+    | Layers.Fleet_messages -> Some "FLEET-WORLD"
+    | _ -> None) in
+  let assembly = Keeper_run_prompt.assemble_request_context ~base_system_prompt:"ISSUED BASE"
+      ~post_tool_round:false ~previous_assembly:None ~dynamic_context_partition:(Some partition)
+      ~existing_extra_system_context:None
+      ~blocks:[Prompt_block_id.Dynamic_context, Layers.text partition] in
+  let prepared = prepare_authority_turn ~system_prompt:"SENT BASE" assembly in
+  check string "the sent System is the configured one" "SENT BASE" prepared.system_prompt;
+  check bool "the System evidence does not borrow the issuer" true
+    (Option.is_none prepared.composed_context);
+  check bool "the System-role carrier no longer holds the authority" false
+    (List.exists (fun message -> contains (Host.encode_history_message message) authority_text)
+       prepared.messages);
+  check bool "the rest of the carrier stays" true
+    (List.exists (fun message -> contains (Host.encode_history_message message) "FLEET-WORLD")
+       prepared.messages);
+  check bool "the authority goes out with the Start prompt" true
+    (contains (Host.start_prompt prepared "NEXT" |> Keeper_context_submission_link.text)
+       authority_text)
+;;
+
+(* A carrier whose only block is the authority leaves the messages whole; the
+   carrier presence the turn expects agrees with what it hands the client. *)
+let test_an_authority_only_carrier_is_not_expected_among_the_messages () =
+  let module A = Keeper_context_assembly in
+  let assembly =
+    A.assemble ~dynamic_context_partition:None ~existing_extra_system_context:None
+      ~blocks:[Prompt_block_id.Completion_authority, authority_text]
+    |> A.with_system_observations ~base_text:"BASE" ~observations:[] in
+  check bool "the issuer has a carrier" true (Option.is_some assembly.receipt);
+  let prepared = prepare_authority_turn ~system_prompt:"BASE" assembly in
+  check bool "no System-role carrier is handed to the client" false
+    (List.exists (fun (message : Agent_core.Types.message) ->
+         message.origin = Agent_core.Types.System_context) prepared.messages);
+  let expected = Option.is_some (Host.transmitted_carrier_receipt assembly) in
+  check bool "the turn expects no carrier" false expected;
+  match Keeper_agent_prompt_metrics.provider_content_of_transmitted
+      ~prompt_context_present:expected ~messages:prepared.messages with
+  | Ok _ -> ()
+  | Error failure ->
+    fail ("transmitted input provenance: "
+          ^ Keeper_agent_prompt_metrics.provenance_failure_reason failure)
 ;;
 
 (* One session: the wiki, the memory ledger and the Board posts stay the same
@@ -3442,8 +3536,14 @@ let () =
     ; ( "World State sections on resume"
       , [ test_case "changed System Goal reaches a held session" `Quick
             test_a_changed_system_goal_reaches_a_held_official_session
-        ; test_case "System authority repeats with its exact source on official Resume" `Quick
-            test_system_authority_repeats_with_exact_source_on_official_resume
+        ; test_case "carrier authority is current-turn input on official Start and Resume" `Quick
+            test_carrier_authority_is_current_turn_input_on_official_start_and_resume
+        ; test_case "the carrier authority block is valid UTF-8" `Quick
+            test_carrier_authority_block_is_valid_utf8
+        ; test_case "authority leaves the carrier when the sent System is not the issued one" `Quick
+            test_authority_leaves_the_carrier_when_the_sent_system_is_not_the_issued_one
+        ; test_case "an authority-only carrier is not expected among the messages" `Quick
+            test_an_authority_only_carrier_is_not_expected_among_the_messages
         ; test_case
             "a resume sends only the changed sections"
             `Quick

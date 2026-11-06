@@ -2682,7 +2682,7 @@ let test_resume_prompt_carries_the_task_reference () =
   in
   check string "reference, then turn context, then the goal; history left out"
     (rendered reference ^ "\n\n" ^ rendered carrier ^ "\n\nGOAL")
-    (Keeper_official_client_host.resume_prompt ~goal:"GOAL" ~held:[]
+    (Keeper_official_client_host.resume_prompt ~turn_observation:None ~goal:"GOAL" ~held:[]
        [ reference; message User "held by the vendor session"; carrier ])
       .prompt
 ;;
@@ -2727,18 +2727,18 @@ let test_resume_prompt_sends_only_changed_blocks () =
          : Agent_core.Types.message)
   in
   let composed_context, messages = turn [ "MEMORY"; "DYNAMIC"; "CLOCK 1"; "NOTE"; "LIBRARIAN 1" ] in
-  let held = Keeper_official_client_host.start_held_context ?composed_context messages in
+  let held = Keeper_official_client_host.start_held_context ~turn_observation:None ?composed_context messages in
   check int "a start holds every block except the note" 4 (List.length held);
   let composed_context, messages = turn [ "MEMORY"; "DYNAMIC"; "CLOCK 1"; "NOTE"; "LIBRARIAN 2" ] in
   let librarian_delivery =
-    Keeper_official_client_host.resume_prompt ~goal:"GOAL" ~held ?composed_context messages
+    Keeper_official_client_host.resume_prompt ~turn_observation:None ~goal:"GOAL" ~held ?composed_context messages
   in
   check string "a Librarian revision does not replay unchanged ordinary Recall"
     (rendered_blocks [ "NOTE"; "LIBRARIAN 2" ] ^ "\n\nGOAL")
     librarian_delivery.prompt;
   let composed_context, messages = turn [ "MEMORY"; "DYNAMIC"; "CLOCK 2"; "NOTE"; "LIBRARIAN 1" ] in
   let delivery =
-    Keeper_official_client_host.resume_prompt ~goal:"GOAL" ~held ?composed_context messages
+    Keeper_official_client_host.resume_prompt ~turn_observation:None ~goal:"GOAL" ~held ?composed_context messages
   in
   check string "the changed clock and the note go; held blocks stay out"
     (rendered_blocks [ "CLOCK 2"; "NOTE" ] ^ "\n\nGOAL")
@@ -2746,13 +2746,13 @@ let test_resume_prompt_sends_only_changed_blocks () =
   let composed_context, messages = turn [ "MEMORY 2"; "DYNAMIC"; "CLOCK 2"; "NOTE"; "LIBRARIAN 1" ] in
   check string "the session now holds the clock it was sent"
     (rendered_blocks [ "MEMORY 2"; "NOTE" ] ^ "\n\nGOAL")
-    (Keeper_official_client_host.resume_prompt
+    (Keeper_official_client_host.resume_prompt ~turn_observation:None
        ~goal:"GOAL" ~held:delivery.held_context ?composed_context messages)
       .prompt;
   let _, messages = turn [ "MEMORY 2"; "DYNAMIC"; "CLOCK 2"; "NOTE"; "LIBRARIAN 1" ] in
   check bool "a carrier its assembly does not name is carried whole" true
     (String_util.contains_substring
-       (Keeper_official_client_host.resume_prompt
+       (Keeper_official_client_host.resume_prompt ~turn_observation:None
           ~goal:"GOAL" ~held:delivery.held_context messages)
          .prompt
        "DYNAMIC")
@@ -2788,11 +2788,11 @@ let test_whole_carrier_supersedes_held_blocks () =
         (carrier_of (String.concat "\n\n" texts))
   in
   let composed_context, messages = turn [ "RECALL A"; "DYNAMIC" ] in
-  let held = Keeper_official_client_host.start_held_context ?composed_context messages in
+  let held = Keeper_official_client_host.start_held_context ~turn_observation:None ?composed_context messages in
   (* The assembly is not named, so the carrier goes whole. *)
   let _, messages = turn [ "RECALL B"; "DYNAMIC" ] in
   let whole =
-    Keeper_official_client_host.resume_prompt ~goal:"GOAL" ~held messages
+    Keeper_official_client_host.resume_prompt ~turn_observation:None ~goal:"GOAL" ~held messages
   in
   check string "the unnamed carrier is sent whole"
     (rendered [ "RECALL B"; "DYNAMIC" ] ^ "\n\nGOAL")
@@ -2800,7 +2800,7 @@ let test_whole_carrier_supersedes_held_blocks () =
   let composed_context, messages = turn [ "RECALL A"; "DYNAMIC" ] in
   check string "every block goes again after the whole carrier"
     (rendered [ "RECALL A"; "DYNAMIC" ] ^ "\n\nGOAL")
-    (Keeper_official_client_host.resume_prompt
+    (Keeper_official_client_host.resume_prompt ~turn_observation:None
        ~goal:"GOAL" ~held:whole.held_context ?composed_context messages)
       .prompt
 ;;
@@ -3143,14 +3143,15 @@ let test_start_authority_is_user_context_not_standing_system () =
     List.iteri (fun index event ->
       let system_marker = Filename.concat base_path (Printf.sprintf "authority-system-%d" index) in
       let prompt_marker = Filename.concat base_path (Printf.sprintf "authority-input-%d" index) in
-      let assembly = A.assemble ~dynamic_context_partition:None ~existing_extra_system_context:None ~blocks:[]
-        |> A.with_system_observations ~base_text:"BASE"
-          ~observations:(A.Active_goals goal_text ::
-            Option.to_list (Option.map (fun text -> A.Completion_authority text) event)) in
+      let assembly = A.assemble ~dynamic_context_partition:None ~existing_extra_system_context:None
+          ~blocks:(Option.to_list
+            (Option.map (fun text -> Prompt_block_id.Completion_authority, text) event))
+        |> A.with_system_observations ~base_text:"BASE" ~observations:[A.Active_goals goal_text] in
       let reads = ref 0 in
       let hooks = {Agent_core.Hooks.empty with before_turn_params=Some (function
         | Agent_core.Hooks.BeforeTurnParams {current_params;_} ->
           Agent_core.Hooks.AdjustParams {current_params with
+            extra_system_context=assembly.A.extra_system_context;
             system_prompt_override=A.system_prompt_override
               ~previous:current_params.system_prompt_override assembly}
         | BeforeTurn _ | AfterTurn _ | PreToolUse _ | PostToolUse _ | PostToolUseFailure _
@@ -3182,7 +3183,11 @@ let test_start_authority_is_user_context_not_standing_system () =
         expected_system system;
       let expected = match event with
         | None -> "OWNER"
-        | Some text -> "USER:\n" ^ Host.encode_history_message (Agent_core.Types.user_msg text) ^ "\n\nOWNER" in
+        | Some text ->
+          "SYSTEM:\n" ^ Host.encode_history_message
+            { Agent_core.Types.origin = System_context; role = System; content = [ Text text ]
+            ; name = None; tool_call_id = None; metadata = [] }
+          ^ "\n\nOWNER" in
       check string "current event delivered once; absent event sends owner only" expected user;
       if index > 1 then check bool "later owner cannot borrow first approval keys" false
         (String_util.contains_substring user first_event))

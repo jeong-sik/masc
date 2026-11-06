@@ -162,9 +162,7 @@ let source assembly selected_blocks ~omitted_sections ~omitted_rows
      | (Agent_core.Types.System, [], _)
      | ((Agent_core.Types.User | (Agent_core.Types.Assistant | Agent_core.Types.Tool)), _, _) -> Unavailable Unsupported_carrier)
 
-type observation_target = Official_start_user | Official_resume_user
-
-let system_observation_source ~target ~block assembly (message : Agent_core.Types.message) =
+let system_observation_source ~block assembly (message : Agent_core.Types.message) =
   match message.role, message.content, assembly with
   | User, [Text _], None -> Unavailable Missing_issuer
   | User, [Text actual], Some assembly ->
@@ -191,12 +189,8 @@ let system_observation_source ~target ~block assembly (message : Agent_core.Type
                ; "source_span_indices", `List [`Int index]
                ; "rendered_text_bytes", `Int (String.length actual)
                ; "rendered_text_sha256", `String (hash actual)
-               ; "rendering", `String (match target with
-                   | Official_start_user -> "system_observation_to_official_start_user"
-                   | Official_resume_user -> "system_observation_to_official_resume_user")
-               ; "target_carrier", `String (match target with
-                   | Official_start_user -> "official_start_user_prompt"
-                   | Official_resume_user -> "official_resume_user_prompt")
+               ; "rendering", `String "system_observation_to_official_resume_user"
+               ; "target_carrier", `String "official_resume_user_prompt"
                ; "codec_schema", `String Keeper_official_client_context_codec.schema
                ; "codec_text_path", `String "/message/content_blocks/0/text"
                ])
@@ -217,16 +211,19 @@ let encoded_carrier ~assembly ~selected_blocks ?(omitted_sections = []) ?(omitte
     message =
   encode_with_evidence (source assembly selected_blocks ~omitted_sections ~omitted_rows message) message
 
-let encoded_system_observation ~target ~block ~assembly message =
-  encode_with_evidence (system_observation_source ~target ~block assembly message) message
+let encoded_system_observation ~block ~assembly message =
+  encode_with_evidence (system_observation_source ~block assembly message) message
 
+(* Each piece starts where the previous one and the separator end. The offset
+   is threaded through [List.fold_left_map], whose calls each take the previous
+   call's result; [List.map] does not document the order it calls [f] in. *)
 let concat ~separator pieces =
-  let offset = ref 0 in
-  let occurrences = List.mapi (fun i piece ->
-    if i > 0 then offset := !offset + String.length separator;
-    let shifted = List.map (fun occurrence -> {occurrence with offset = !offset + occurrence.offset}) piece.occurrences in
-    offset := !offset + String.length piece.text; shifted) pieces |> List.concat in
-  { text = String.concat separator (List.map text pieces); occurrences;
+  let separator_bytes = String.length separator in
+  let _, shifted = List.fold_left_map (fun (index, offset) piece ->
+    let start = if index > 0 then offset + separator_bytes else offset in
+    let shifted = List.map (fun occurrence -> {occurrence with offset = start + occurrence.offset}) piece.occurrences in
+    (index + 1, start + String.length piece.text), shifted) (0, 0) pieces in
+  { text = String.concat separator (List.map text pieces); occurrences = List.concat shifted;
     omitted = List.concat_map (fun p -> p.omitted) pieces;
     acquisitions = List.concat_map (fun p -> p.acquisitions) pieces }
 
@@ -255,7 +252,7 @@ let omit_held ~assembly ~blocks message piece =
   omit_with_evidence (source assembly blocks ~omitted_sections:[] ~omitted_rows:[] message) piece
 
 let omit_held_system_observation ~block ~assembly message piece =
-  omit_with_evidence (system_observation_source ~target:Official_resume_user ~block assembly message) piece
+  omit_with_evidence (system_observation_source ~block assembly message) piece
 
 let reason_to_string = function
   | Missing_issuer -> "missing_issuer"

@@ -907,16 +907,16 @@ let test_goal_is_counted_once_in_the_system_slot () =
       (component (Turn_record.Prompt_block Prompt_block_id.Active_goals) 1_094
        :: component (Turn_record.Prompt_block Prompt_block_id.Completion_authority) 521
        :: first_round_composition) in
-  Alcotest.(check int) "the system slot includes Goal and authority once" (10_832 + 1_094 + 521)
+  Alcotest.(check int) "the system slot includes the Goal once" (10_832 + 1_094)
     composition.instructions_bytes;
-  Alcotest.(check int) "fixed total includes those observations once" (82_410 + 1_094 + 521)
+  Alcotest.(check int) "fixed total includes the Goal once" (82_410 + 1_094)
     composition.fixed_bytes;
-  Alcotest.(check (option int)) "the extra context does not count it again" (Some 159_710)
-    composition.first_round_pinned_bytes;
+  Alcotest.(check (option int)) "the extra context counts the authority block once"
+    (Some (159_710 + 521)) composition.first_round_pinned_bytes;
   Alcotest.(check bool) "Goal is absent from the trailing-context layout" false
     (List.mem_assoc Prompt_block_id.Active_goals composition.pinned_blocks);
-  Alcotest.(check bool) "authority is absent from the trailing-context layout" false
-    (List.mem_assoc Prompt_block_id.Completion_authority composition.pinned_blocks)
+  Alcotest.(check (option int)) "authority rides in the trailing-context layout" (Some 521)
+    (List.assoc_opt Prompt_block_id.Completion_authority composition.pinned_blocks)
 
 let test_a_post_tool_composition_says_nothing_about_the_pinned_blocks () =
   let composition = Keeper_next_request_forecast.read_composition post_tool_composition in

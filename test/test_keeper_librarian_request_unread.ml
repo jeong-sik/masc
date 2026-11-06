@@ -162,14 +162,14 @@ let test_summary_fallback_and_resume () =
   check bool "summary may be left out without losing unread evidence" false
     (List.exists Window.is_working_state composed.sent);
   check int "summary omission retains the same original atoms" plain_composed.atoms_kept composed.atoms_kept;
-  let start=Host.resume_prompt ~goal:"current goal" ~held:[] composed.sent in
+  let start=Host.resume_prompt ~turn_observation:None ~goal:"current goal" ~held:[] composed.sent in
   let changed=Frozen.of_results ~snapshot:(Ok [hole]) ~memory:(Ok [hole;later_hole]) in
   let changed_messages=Frozen.attach ~role:T.System changed composed.sent in
   check_carrier changed changed_messages;
-  let next=Host.resume_prompt ~goal:"current goal" ~held:start.held_context changed_messages in
+  let next=Host.resume_prompt ~turn_observation:None ~goal:"current goal" ~held:start.held_context changed_messages in
   check bool "a new unread record is sent to the resumed native session" true
     (resume_has_carrier next changed_messages);
-  let unchanged=Host.resume_prompt ~goal:"current goal" ~held:next.held_context changed_messages in
+  let unchanged=Host.resume_prompt ~turn_observation:None ~goal:"current goal" ~held:next.held_context changed_messages in
   check string "an unchanged held context is acknowledged once" "current goal" unchanged.prompt;
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
   Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
@@ -237,17 +237,17 @@ let test_native_empty_replaces_held_evidence () =
   let first=official_front (choose (Ok [hole])) in
   let initial=start_projection first ~capacity:max_int messages
     |> Result.map_error Agent_core.Error.to_string |> require in
-  let started=Host.resume_prompt ~goal:"current goal" ~held:[] initial in
+  let started=Host.resume_prompt ~turn_observation:None ~goal:"current goal" ~held:[] initial in
   let empty=official_front (choose (Ok [])) in
   let cleared=start_projection empty ~capacity:max_int messages
     |> Result.map_error Agent_core.Error.to_string |> require in
   check_carrier Frozen.empty cleared;
-  let next=Host.resume_prompt ~goal:"current goal" ~held:started.held_context cleared in
+  let next=Host.resume_prompt ~turn_observation:None ~goal:"current goal" ~held:started.held_context cleared in
   check bool "a resumed thread receives an explicit latest empty observation" true
     (resume_has_carrier next cleared);
   check bool "the stale held unread digest is replaced" false
     (next.held_context=started.held_context);
-  let unchanged=Host.resume_prompt ~goal:"current goal" ~held:next.held_context cleared in
+  let unchanged=Host.resume_prompt ~turn_observation:None ~goal:"current goal" ~held:next.held_context cleared in
   check string "the acknowledged empty observation is not resent" "current goal" unchanged.prompt;
   let unobserved=Host.read_librarian_front None messages
     |> Result.map_error Agent_core.Error.to_string |> require in
@@ -255,7 +255,7 @@ let test_native_empty_replaces_held_evidence () =
     |> Result.map_error Agent_core.Error.to_string |> require in
   let expected=Frozen.of_results ~snapshot:(Error "no reader") ~memory:(Error "no reader") in
   check_carrier expected unknown;
-  let resumed=Host.resume_prompt ~goal:"current goal" ~held:next.held_context unknown in
+  let resumed=Host.resume_prompt ~turn_observation:None ~goal:"current goal" ~held:next.held_context unknown in
   check bool "missing observation updates the native session to unknown, never empty" true
     (resume_has_carrier resumed unknown);
   let carrier_bytes=measure_native (carrier cleared) in
@@ -276,7 +276,7 @@ let test_managed_policy_keeps_frozen_request_evidence () =
   let official=start_projection (official_front continuity) ~capacity:max_int messages
     |> Result.map_error Agent_core.Error.to_string |> require in
   check_carrier expected official;
-  let delivered=Host.resume_prompt ~goal:"Current goal" ~held:[] official in
+  let delivered=Host.resume_prompt ~turn_observation:None ~goal:"Current goal" ~held:[] official in
   check bool "actual official request consumes the same managed policy" true
     (String_util.contains_substring delivered.prompt "MANAGED_UNREAD_OBSERVATION");
   check bool "an override without JSON variables cannot omit frozen evidence" true
@@ -308,7 +308,7 @@ let test_missing_policy_carries_evidence_and_explicit_error () =
   check_error official;
   check int "replacement removes the stale observation even without guidance" 1
     (List.length (List.filter Window.is_unread_context official));
-  let delivered=Host.resume_prompt ~goal:"Continue" ~held:[] official in
+  let delivered=Host.resume_prompt ~turn_observation:None ~goal:"Continue" ~held:[] official in
   check bool "unknown snapshot and exact unread coordinates reach the official request" true
     (resume_has_carrier delivered official);
   let cleared=Frozen.attach ~include_empty:true ~role:T.System Frozen.empty official in

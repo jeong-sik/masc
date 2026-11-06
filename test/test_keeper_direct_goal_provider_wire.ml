@@ -468,19 +468,29 @@ let test_completion_observation_survives_tool_reply approved () =
     let system = match List.filter (fun message -> Json.member "role" message = `String "system") messages with
       | [message] -> Json.member "content" message |> Json.to_string
       | _ -> fail "one System carrier required" in
+    let newest, before_newest = match List.rev messages with
+      | newest :: before_newest :: _ -> newest, before_newest
+      | [_] | [] -> fail "a context carrier after the conversation required" in
+    let carrier = Json.member "content" newest |> Json.to_string in
+    check bool "the context carrier is the request's tail" true
+      (Json.member "role" newest = `String "user"
+       && String.starts_with ~prefix:"[system context] " carrier);
     List.iter (fun marker -> check bool "every request retains exact authority correlation" true
-      (contains ~needle:marker system)) [task_id;verification_id;post_id;"fixture-operator";"human_operator"];
+      (contains ~needle:marker carrier)) [task_id;verification_id;post_id;"fixture-operator";"human_operator"];
     check bool "the verdict kind is preserved" true
-      (contains ~needle:(if approved then "Approved Task Outcomes" else "Completion Authority Decisions") system);
-    let issued = match issued.Keeper_context_assembly.system_prompt with
+      (contains ~needle:(if approved then "Approved Task Outcomes" else "Completion Authority Decisions") carrier);
+    check bool "the System holds no authority event" false (contains ~needle:verification_id system);
+    let issued_system = match issued.Keeper_context_assembly.system_prompt with
       | Some issued -> issued | None -> fail "physical System receipt missing" in
-    check string "physical issuer bytes match the received System carrier" issued.text system;
-    check int "exactly one completion-authority source span" 1
+    check string "physical issuer bytes match the received System carrier" issued_system.text system;
+    let receipt = match issued.Keeper_context_assembly.receipt with
+      | Some receipt -> receipt | None -> fail "carrier receipt missing" in
+    check int "exactly one completion-authority span in the carrier" 1
       (List.length (List.filter (fun (span : Keeper_context_assembly.span) ->
-        span.kind = Keeper_context_assembly.Block Prompt_block_id.Completion_authority) issued.partition.spans));
+        span.kind = Keeper_context_assembly.Block Prompt_block_id.Completion_authority) receipt.spans));
     if index > 0 then (
-      check bool "tool feedback remains the newest message" true
-        (Json.member "role" (List.hd (List.rev messages)) = `String "tool");
+      check bool "tool feedback is the newest conversation message" true
+        (Json.member "role" before_newest = `String "tool");
       check bool "clock is not rebroadcast" false (contains ~needle:"INITIAL_CLOCK" body)))
     (List.combine requests assemblies);
   check bool "projection does not acknowledge or rewrite pending events" true

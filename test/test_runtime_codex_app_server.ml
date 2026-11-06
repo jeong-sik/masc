@@ -2124,23 +2124,23 @@ let test_issuer_assembly_links_to_completed_slots () =
     { origin = Llm_provider.Types.System_context; role=System;content=[Text (Option.get assembly.Assembly.extra_system_context)];name=None;
      tool_call_id=None;metadata=[]} in
   let message=carrier assembly in
-  let held=Host.start_held_context ~composed_context:assembly [message] in
+  let held=Host.start_held_context ~turn_observation:None ~composed_context:assembly [message] in
   let partial_held=List.filter (fun (item:Masc.Keeper_official_client_session_store.held_context) ->
     item.context=Context_block Prompt_block_id.Memory_os_recall) held in
-  let subset=Host.resume_prompt ~goal:"GOAL" ~held:partial_held ~composed_context:assembly [message] in
-  let allheld=Host.resume_prompt ~goal:"GOAL" ~held ~composed_context:assembly [message] in
+  let subset=Host.resume_prompt ~turn_observation:None ~goal:"GOAL" ~held:partial_held ~composed_context:assembly [message] in
+  let allheld=Host.resume_prompt ~turn_observation:None ~goal:"GOAL" ~held ~composed_context:assembly [message] in
   check string "held carrier contributes no bytes" "GOAL" allheld.prompt;
   let changed=Assembly.assemble ~dynamic_context_partition:(Some dynamic_partition) ~existing_extra_system_context:None
     ~blocks:[Prompt_block_id.Dynamic_context,dynamic_text;Prompt_block_id.Memory_os_recall,repeated;
       Prompt_block_id.Temporal_summary,repeated ^ " changed"] in
-  let changed_delivery=Host.resume_prompt ~goal:"GOAL" ~held ~composed_context:changed [carrier changed] in
+  let changed_delivery=Host.resume_prompt ~turn_observation:None ~goal:"GOAL" ~held ~composed_context:changed [carrier changed] in
   let prefixed=Assembly.assemble ~dynamic_context_partition:(Some dynamic_partition) ~existing_extra_system_context:(Some "prefix\n") ~blocks in
-  let whole=Host.resume_prompt ~goal:"GOAL" ~held:[] ~composed_context:prefixed [carrier prefixed] in
-  let stale=Host.resume_prompt ~goal:"GOAL" ~held:[] ~composed_context:assembly [carrier prefixed] in
-  let missing = Host.resume_prompt ~goal:"GOAL" ~held:[] [message] in
-  let missing_held = Host.resume_prompt ~goal:"GOAL"
-      ~held:(Host.start_held_context [message]) [message] in
-  let unsupported = Host.resume_prompt ~goal:"GOAL" ~held:[] ~composed_context:assembly
+  let whole=Host.resume_prompt ~turn_observation:None ~goal:"GOAL" ~held:[] ~composed_context:prefixed [carrier prefixed] in
+  let stale=Host.resume_prompt ~turn_observation:None ~goal:"GOAL" ~held:[] ~composed_context:assembly [carrier prefixed] in
+  let missing = Host.resume_prompt ~turn_observation:None ~goal:"GOAL" ~held:[] [message] in
+  let missing_held = Host.resume_prompt ~turn_observation:None ~goal:"GOAL"
+      ~held:(Host.start_held_context ~turn_observation:None [message]) [message] in
+  let unsupported = Host.resume_prompt ~turn_observation:None ~goal:"GOAL" ~held:[] ~composed_context:assembly
       [{message with content=[Text repeated;Text repeated]}] in
   let verified_piece = Link.encoded_carrier ~assembly:(Some assembly) ~selected_blocks:None message in
   let mixed = Link.concat ~separator:"\n\n" [verified_piece;

@@ -965,12 +965,14 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
       | Runtime_claude_code.Start ->
         ( Host.start_prompt prepared (initial_turn_prompt ~history ~goal)
           |> Keeper_context_submission_link.text
-        , Host.start_held_context ?composed_context prepared.messages )
+        , Host.start_held_context ~turn_observation:prepared.turn_observation
+            ?composed_context prepared.messages )
       | Runtime_claude_code.Resume _ ->
         let delivery =
           Host.resume_prompt
             ~goal
             ~held:(Session_store.held_context_for_resume claim_plan ~expected:stored_session)
+            ~turn_observation:prepared.turn_observation
             ?composed_context
             prepared.messages
         in

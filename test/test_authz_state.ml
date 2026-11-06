@@ -54,7 +54,8 @@ let mode_record event workspace_id =
 ;;
 
 (* The kinds that no layer reads yet. *)
-let other_kinds = List.filter (fun kind -> kind <> K.Mode_event && kind <> K.Invite) K.all
+let other_kinds =
+  List.filter (fun kind -> kind <> K.Mode_event && kind <> K.Invite && kind <> K.Admission) K.all
 
 let mode = Alcotest.testable (fun fmt m -> Format.pp_print_string fmt (Mode.to_string m)) Mode.equal
 
@@ -311,6 +312,137 @@ let test_an_invitation_that_is_refused () =
     | _ -> false)
 ;;
 
+(* ---- admissions ---- *)
+
+module Adm = Authz_admission_event
+module People = Authz_principal_state
+module X = Authz_external_identity
+
+let identity_of sub =
+  match X.google ~sub with
+  | Ok identity -> identity
+  | Error error -> Alcotest.failf "fixture identity refused: %s" (X.error_to_string error)
+;;
+
+let bob = id_of_string Authz_types.User_id.of_string "user-2"
+let second_invite = id_of_string Authz_types.Invite_id.of_string "invite-2"
+
+let issue_record id token =
+  match
+    I.to_body
+      (I.Issued
+         { invite_id = id
+         ; token_digest = I.Token_digest.of_token token
+         ; expires_at_ms = at_ms + 1000
+         ; role = I.Admin
+         })
+  with
+  | Error _ -> Alcotest.fail "fixture invite refused"
+  | Ok body ->
+    (match R.make ~head:R.genesis ~at_ms ~author:Authz_records.Author.Local_operator ~kind:K.Invite ~body with
+     | Ok record -> record
+     | Error _ -> Alcotest.fail "fixture invite record refused")
+;;
+
+let admission_record ?author ?(at_ms = at_ms) ~user_id ~identity ~invite () =
+  let author =
+    match author with
+    | Some author -> author
+    | None -> Authz_records.Author.Authenticated (Authz_types.Principal.Human user_id)
+  in
+  match Adm.to_body { Adm.user_id; identity; invite_id = invite } with
+  | Error _ -> Alcotest.fail "fixture admission refused"
+  | Ok body ->
+    (match R.make ~head:R.genesis ~at_ms ~author ~kind:K.Admission ~body with
+     | Ok record -> record
+     | Error _ -> Alcotest.fail "fixture admission record refused")
+;;
+
+let invited () =
+  step_ok (step_ok (bootstrapped ()) (issue_record invite_id "token-1")) (issue_record second_invite "token-2")
+;;
+
+let alice_identity = identity_of "111"
+
+let test_an_admission_through_an_admin_invitation () =
+  let change =
+    Alcotest.testable
+      (fun fmt c -> Format.pp_print_string fmt (Authz_external_store.Change.to_string c))
+      Authz_external_store.Change.equal
+  in
+  match S.apply (invited ()) (admission_record ~user_id:user ~identity:alice_identity ~invite:invite_id ()) with
+  | Error refusal -> Alcotest.failf "the admission was refused: %s" (S.refusal_to_string refusal)
+  | Ok { S.state; high_water } ->
+    Alcotest.check (Alcotest.option change) "the role epoch of the new Admin"
+      (Some
+         (Authz_external_store.Change.Authz
+            { event = Authz_external_store.Change.Grant
+            ; subject = Authz_records.Subject.Principal (Authz_types.Principal.Human user)
+            }))
+      high_water;
+    (match People.find state.S.principals user with
+     | Some { People.status = People.Active; identity } ->
+       Alcotest.(check bool) "the identity" true (X.equal identity alice_identity)
+     | None -> Alcotest.fail "no principal was made");
+    Alcotest.(check bool) "an Admin" true (People.is_admin state.S.principals user);
+    Alcotest.(check (option string)) "the identity finds the principal" (Some "user-1")
+      (Option.map Authz_types.User_id.to_string (People.find_identity state.S.principals alice_identity));
+    (match Invites.find state.S.invites invite_id with
+     | Some { Invites.status = Invites.Consumed spent_by; _ } ->
+       Alcotest.(check string) "spent by" "user-1" (Authz_types.User_id.to_string spent_by)
+     | Some _ | None -> Alcotest.fail "the invitation is not spent")
+;;
+
+let test_an_admission_that_is_refused () =
+  let admitted = step_ok (invited ()) (admission_record ~user_id:user ~identity:alice_identity ~invite:invite_id ()) in
+  let refused label state record expected =
+    match S.step state record with
+    | Error refusal -> Alcotest.(check string) label expected (S.refusal_to_string refusal)
+    | Ok _ -> Alcotest.failf "%s: the admission was taken" label
+  in
+  refused "written by another person" (invited ())
+    (admission_record ~author:(Authz_records.Author.Authenticated (Authz_types.Principal.Human bob))
+       ~user_id:user ~identity:alice_identity ~invite:invite_id ())
+    "the principal human:user-2 wrote the admission of user-1, which only that person writes";
+  refused "written by a service" (invited ())
+    (admission_record
+       ~author:(Authz_records.Author.Authenticated
+                  (Authz_types.Principal.Service (id_of_string Authz_types.Service_id.of_string "keeper-1")))
+       ~user_id:user ~identity:alice_identity ~invite:invite_id ())
+    "the principal service:keeper-1 wrote the admission of user-1, which only that person writes";
+  refused "an invitation never issued" (bootstrapped ())
+    (admission_record ~user_id:user ~identity:alice_identity ~invite:invite_id ())
+    "no invitation invite-1 was issued";
+  refused "an invitation at its expiry" (invited ())
+    (admission_record ~at_ms:(at_ms + 1000) ~user_id:user ~identity:alice_identity ~invite:invite_id ())
+    (Printf.sprintf "the invitation invite-1 expired at %d, and the admission is at %d" (at_ms + 1000)
+       (at_ms + 1000));
+  refused "an invitation spent before" admitted
+    (admission_record ~user_id:bob ~identity:(identity_of "222") ~invite:invite_id ())
+    "the invitation invite-1 was spent by an admission before";
+  refused "a user id given before" admitted
+    (admission_record ~user_id:user ~identity:(identity_of "222") ~invite:second_invite ())
+    "the user id user-1 was given before";
+  refused "an identity bound before" admitted
+    (admission_record ~user_id:bob ~identity:alice_identity ~invite:second_invite ())
+    "the identity google:111 is bound to user-1";
+  (match
+     S.step
+       (S.hold_revocations (invited ()) [ Authz_records.Subject.Invite invite_id ])
+       (admission_record ~user_id:user ~identity:alice_identity ~invite:invite_id ())
+   with
+   | Error (S.Revocation_pending subject) ->
+     Alcotest.(check string) "a revocation given up" "invite:invite-1" (Authz_records.Subject.to_string subject)
+   | other -> Alcotest.failf "an invitation whose revocation was given up: %s" (step_label other));
+  (match S.step S.empty (admission_record ~user_id:user ~identity:alice_identity ~invite:invite_id ()) with
+   | Error (S.Before_bootstrap K.Admission) -> ()
+   | other -> Alcotest.failf "before the bootstrap: %s" (step_label other));
+  match S.step (step_ok (invited ()) (mode_record M.Off workspace))
+          (admission_record ~user_id:user ~identity:alice_identity ~invite:invite_id ()) with
+  | Error (S.Accounts_off K.Admission) -> ()
+  | other -> Alcotest.failf "while the accounts are off: %s" (step_label other)
+;;
+
 (* ---- the log of a real bootstrap ---- *)
 
 let rec remove_tree path =
@@ -372,6 +504,11 @@ let () =
         ; Alcotest.test_case "a revocation is an intent" `Quick test_a_revocation_is_an_intent
         ; Alcotest.test_case "by mode" `Quick test_an_invitation_by_mode
         ; Alcotest.test_case "refused" `Quick test_an_invitation_that_is_refused
+        ] )
+    ; ( "admissions"
+      , [ Alcotest.test_case "through an Admin invitation" `Quick
+            test_an_admission_through_an_admin_invitation
+        ; Alcotest.test_case "refused" `Quick test_an_admission_that_is_refused
         ] )
     ; "log", [ Alcotest.test_case "of a real bootstrap" `Quick test_fresh_bootstrap_log ]
     ]

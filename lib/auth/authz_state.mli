@@ -35,9 +35,22 @@
 type t = private
   { mode : Authz_mode_state.t
   ; invites : Authz_invite_state.t  (** Plan B3c-1. *)
+  ; principals : Authz_principal_state.t  (** Plan B3c-2. *)
+  ; revocation_pending : Authz_records.Subject.t list
+        (** The subjects of reductions whose intent the external store gave up
+            (design 8.3). No record adds one: the writer zone does, from the
+            store ({!hold_revocations}). *)
   }
 
 val empty : t
+
+(** Blocks the subjects of reductions that the store gave up: an
+    [Aborted_intent] whose change {!Authz_external_store.Change.is_reduction}.
+    Design 8.3 blocks such a subject at the gate, without a record, until a
+    record that names the aborted intent closes it. No layer writes that record
+    yet, so a subject stays blocked. A revoked invitation that is blocked cannot
+    be spent, which is what its revocation was for. *)
+val hold_revocations : t -> Authz_records.Subject.t list -> t
 
 type refusal =
   | Before_bootstrap of Authz_record.Kind.t
@@ -46,6 +59,11 @@ type refusal =
   | Mode of Authz_mode_state.refusal
   | Invite_unreadable of Authz_invite_event.error
   | Invite of Authz_invite_state.refusal
+  | Admission_unreadable of Authz_admission_event.error
+  | Admission of Authz_principal_state.refusal
+  | Revocation_pending of Authz_records.Subject.t
+      (** The record spends what a revocation that the store gave up was about
+          (design 8.3). *)
   | Accounts_off of Authz_record.Kind.t
       (** The mode is [Off], and a record of this kind is not written while the
           accounts are off (design 10.5). *)
@@ -60,7 +78,9 @@ val refusal_to_string : refusal -> string
     no scoped epoch (design 8.1 and 8.2): the zone appends it with no intent and
     no answer in the store. Its revocation has one, a [Revoke] of the invitation,
     so a log restored from before the revocation does not open the invitation
-    again (design 5.1-4). *)
+    again (design 5.1-4). An admission has one, a [Grant] on the principal it
+    makes: it spends a token that opens once (design 5.1-3), and an Admin
+    invitation also raises the role epoch of that principal. *)
 type applied =
   { state : t
   ; high_water : Authz_external_store.Change.t option

@@ -216,10 +216,11 @@ Subject =
   | Credential of provider_account_id
   | Principal of principal_id
   | Runtime of runtime_id
+  | Invite of invite_id
   | Workspace of workspace_id
 ```
 
-Intent는 대상 없이 digest만 남기지 않는다. 중단된 회수가 어느 `Grant`·`Credential`·`Principal`·`Runtime`에 대한 것인지 게이트가 식별할 수 있어야 한다. 모드 사건(§5.1)은 회수가 아니라서 이 목록에 들지 않고, 대상은 `Workspace`다.
+Intent는 대상 없이 digest만 남기지 않는다. 중단된 회수가 어느 `Grant`·`Credential`·`Principal`·`Runtime`·`Invite`에 대한 것인지 게이트가 식별할 수 있어야 한다. `Invite`는 초대 token 취소의 대상이다(§8.2). 중단된 취소의 초대는 입장에 쓰이지 않는다. 모드 사건(§5.1)은 회수가 아니라서 이 목록에 들지 않고, 대상은 `Workspace`다.
 
 ## 5. 인증과 Provider 등록
 

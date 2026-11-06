@@ -17,12 +17,15 @@
     neither. A token that was given out for a revoked invitation therefore never
     opens another one.
 
-    Nothing here reads a clock: whether an open invitation has expired is for the
-    writer that consumes it to say. *)
+    {b Expiry.} Nothing here reads a clock. An admission spends an open
+    invitation only if the time of its record is before [expires_at_ms]
+    ({!consume}), so a replay of the log gives the same answer on any day. *)
 
 type status =
   | Open
   | Revoked
+  | Consumed of Authz_types.User_id.t
+      (** An admission spent it, and made this principal (plan B3c-2). *)
 
 type invitation = private
   { token_digest : Authz_invite_event.Token_digest.t
@@ -48,6 +51,7 @@ type refusal =
       (** Another invitation, open or revoked, has the same token digest. *)
   | Not_issued of Authz_types.Invite_id.t
   | Already_revoked of Authz_types.Invite_id.t
+  | Already_consumed of Authz_types.Invite_id.t
   | Local_operator_invites_only_admins
       (** The local operator issued an invitation with the role [Member]. *)
   | Authenticated_author_not_read of Authz_types.Principal.t
@@ -57,6 +61,30 @@ type refusal =
           invite record. *)
 
 val refusal_to_string : refusal -> string
+
+(** Why an admission cannot spend an invitation. *)
+type consume_refusal =
+  | Invitation_not_issued of Authz_types.Invite_id.t
+  | Invitation_revoked of Authz_types.Invite_id.t
+  | Invitation_consumed of Authz_types.Invite_id.t
+  | Invitation_expired of
+      { invite_id : Authz_types.Invite_id.t
+      ; expires_at_ms : int
+      ; at_ms : int  (** The time of the admission record. *)
+      }
+
+val consume_refusal_to_string : consume_refusal -> string
+
+(** Spends an open invitation for the principal that an admission makes, and
+    gives its role. [at_ms] is the time of the admission record, and the
+    invitation is spent only if it is before [expires_at_ms]. The admission
+    record calls this ({!Authz_state}); no invite record does. *)
+val consume
+  :  t
+  -> Authz_types.Invite_id.t
+  -> user_id:Authz_types.User_id.t
+  -> at_ms:int
+  -> (t * Authz_invite_event.role, consume_refusal) result
 
 (** What one invite record does to the invitations. *)
 val apply

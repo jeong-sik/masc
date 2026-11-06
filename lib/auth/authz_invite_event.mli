@@ -16,9 +16,9 @@
     in this order. The labels are on disk and renaming one orphans every record
     written with it. A body with other members, the same members in another
     order, or a member of another type is refused. [expires_at_ms] is not
-    range-checked: whether an invitation has expired is for the writer that
-    consumes it to say with its clock, and the replay of the log reads no
-    clock.
+    range-checked. An admission spends the invitation only if the time of its
+    record is before it ({!Authz_invite_state.consume}), and the replay of the
+    log reads no clock.
 
     This module does not know who may write the record ({!Authz_record.admits}
     and {!Authz_state} decide that), nor in which order the events may come. *)

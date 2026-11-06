@@ -88,7 +88,7 @@ let workspace_preflight_at_root ~root =
                 Masc.Goal_verification_run_registry.storage_filename, validate_run_log] in
   let store_issues = List.concat_map (fun (name, validate) ->
     let path = Filename.concat root name in
-    let mirror = path ^ ".last-good" in
+    let mirror = path ^ Common.recovery_mirror_suffix in
     let missing_primary =
       if not (Sys.file_exists path) && Sys.file_exists mirror then
         [{path; kind = Unreadable_state;

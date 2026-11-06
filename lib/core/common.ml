@@ -41,6 +41,8 @@ let masc_dirname = ".masc"
 let owner_lease_dirname = ".masc-owner"
 let browser_lane_dirname = "browser-lane"
 let searxng_dirname = "searxng"
+let dos_dirname = "dos"
+let msx_dirname = "msx"
 let browser_lane_token_name = "token"
 
 (* OUTPUT root segment for server-written keeper runtime state (meta json +
@@ -185,8 +187,10 @@ let keepers_root_store_dirnames =
 
 let is_keepers_root_store_dirname name =
   List.mem (String.lowercase_ascii name) keepers_root_store_dirnames
+let auth_dirname = "auth"
+
 let auth_dir_from_base_path ~base_path =
-  Filename.concat (masc_dir_from_base_path ~base_path) "auth"
+  Filename.concat (masc_dir_from_base_path ~base_path) auth_dirname
 
 let agents_dir_from_base_path ~base_path =
   Filename.concat (auth_dir_from_base_path ~base_path) "agents"
@@ -284,11 +288,22 @@ let is_tool_call_read_index_file path =
 
 let chat_operation_store_basename = "chat-operations.sqlite3"
 
+let sqlite_wal_suffix = "-wal"
+let sqlite_shm_suffix = "-shm"
+let sqlite_journal_suffix = "-journal"
+
 let chat_operation_store_sidecar_filenames =
-  [ chat_operation_store_basename ^ "-wal"
-  ; chat_operation_store_basename ^ "-shm"
-  ; chat_operation_store_basename ^ "-journal"
+  [ chat_operation_store_basename ^ sqlite_wal_suffix
+  ; chat_operation_store_basename ^ sqlite_shm_suffix
+  ; chat_operation_store_basename ^ sqlite_journal_suffix
   ]
+
+let recovery_mirror_suffix = ".last-good"
+let tui_dirname = "tui"
+let tui_music_dirname = "music"
+let tui_account_login_filename = "tui-account-login.json"
+let tui_play_pending_filename = "tui-play-pending.jsonl"
+let tui_artifact_share_pending_filename = "tui-artifact-share-pending.jsonl"
 
 let is_chat_operation_store_sidecar_file path =
   List.mem (Filename.basename path) chat_operation_store_sidecar_filenames

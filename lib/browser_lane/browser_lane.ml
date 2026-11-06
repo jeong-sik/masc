@@ -148,7 +148,8 @@ let reply_policy = function
      | Action.On_tab {interaction;_} ->
        (match interaction with
         | Action.Upload _ -> Executor_owned
-        | Action.Set_emulation _ | Action.Clear_emulation | Action.Accept_dialog _ | Action.Dismiss_dialog
+        | Action.Set_emulation _ | Action.Clear_emulation | Action.Block_requests _ | Action.Unblock_requests
+        | Action.Accept_dialog _ | Action.Dismiss_dialog
         | Action.Back | Action.Forward | Action.Reload | Action.Stop_loading | Action.Close_tab -> Reply_window))
   | Tabs_list | Page_read _ | Page_document _ | Page_downloads _
   | Page_capture _ | Page_scene _ | Page_snapshot _ | Page_interact _
@@ -165,7 +166,7 @@ let ego_reply_policy = function
      | Action.On_tab {interaction=(Action.Reload|Action.Stop_loading);_} -> Executor_owned
      | (Action.Control _
        | Action.On_tab {interaction=(Action.Upload _ | Action.Set_emulation _ | Action.Clear_emulation
-         | Action.Accept_dialog _ | Action.Dismiss_dialog
+         | Action.Block_requests _ | Action.Unblock_requests | Action.Accept_dialog _ | Action.Dismiss_dialog
          | Action.Back | Action.Forward | Action.Close_tab);_}) -> reply_policy (Page_act action))
   | Page_interact {action;_} ->
     (match action with
@@ -462,6 +463,7 @@ type live_capability =
   | Download_listing
   | File_upload
   | Environment_emulation
+  | Request_blocking
 [@@deriving enumerate]
 
 let live_capability_to_wire = function
@@ -497,6 +499,7 @@ let live_capability_to_wire = function
   | Download_listing -> "download_listing"
   | File_upload -> "file_upload"
   | Environment_emulation -> "environment_emulation"
+  | Request_blocking -> "request_blocking"
 ;;
 
 let live_capability_of_wire raw =
@@ -543,6 +546,7 @@ let live_capability = function
   | Page_context _ -> Dialog_read
   | Page_act (Action.On_tab {interaction = Action.Upload _; _}) -> File_upload
   | Page_act (Action.On_tab {interaction = (Action.Set_emulation _ | Action.Clear_emulation); _}) -> Environment_emulation
+  | Page_act (Action.On_tab {interaction = (Action.Block_requests _ | Action.Unblock_requests); _}) -> Request_blocking
 ;;
 
 
@@ -616,8 +620,9 @@ let live_transport_of_string = function
    moves and closes only the pages an agent opened there. It hands its space
    to the operator and takes it back, lists downloads saved into the worker's
    own folder, sets files on their file inputs from the worker's upload
-   copies, and sets a page's viewport, location, locale and time zone
-   through CDP overrides that last as long as the ego SDK process. It taps
+   copies, and sets a page's viewport, location, locale and time zone, and
+   the hosts its subresource requests may not reach, through CDP settings
+   that last as long as the ego SDK process. It taps
    and swipes with CDP touch events and no touch emulation;
    test_browser_ego_peer holds its column to what Browser_ego_peer does. *)
 let live_transport_serves transport capability =
@@ -627,7 +632,7 @@ let live_transport_serves transport capability =
                     | Point_scroll | Trusted_hover | Trusted_double_click | Trusted_button_click
                     | Trusted_drag | Trusted_keyboard | Tab_history | Accessibility_snapshot | Dialog_read | Dialog_answer
                     | Snapshot_target_input | Native_workflow | Page_recovery | Operator_handoff | Page_management | Download_listing | File_upload | Tab_activation
-                    | Viewport_resize | Environment_emulation | Touch_input) -> true
+                    | Viewport_resize | Environment_emulation | Request_blocking | Touch_input) -> true
 ;;
 
 let live_transports_serving capability =

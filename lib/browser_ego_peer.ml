@@ -1066,6 +1066,64 @@ let emulate t id emulation =
   | Error failure -> Error (effect_failure ~unknown failure)
   | Ok value -> emulation_receipt ~id ~action ~kind value
 
+(* Request blocking goes through the Page's CDP session with
+   Network.setBlockedURLs urlPatterns (RFC-browser-ego-cdp-capabilities §3.3).
+   Each call replaces the Page's list (ego lite 0.6.2.7), so the SDK process
+   keeps the hosts it blocked for each Page label and every block_requests
+   sends their union: blocks add up, and they end with the SDK process, as
+   the setting does. The pattern *://host:*/* matches that host on any port,
+   the default one included, and no other host; the deprecated urls globs
+   also matched a URL that carried the host in its query. Only subresource
+   requests are blocked: a navigation of the tab or of a frame still loads,
+   and a cross-site frame, which runs in its own process, is not covered
+   (L6 evidence). A CDP call that threw may or may not have taken effect, so
+   the list kept for the Page changes only when the call answered. *)
+let request_block_script = {js|async function(page, args, reason) {
+  const registry = globalThis.mascBlockedHosts ??= new Map();
+  const before = registry.get(args.label) ?? [];
+  const hosts = args.hosts === null ? [] : [...new Set([...before, ...args.hosts])].sort();
+  try {
+    await page.cdp("Network.setBlockedURLs",
+      {urlPatterns: hosts.map(host => ({urlPattern: "*://" + host + ":*/*", block: true}))});
+  } catch (error) {
+    return {ok: false, error: "Network.setBlockedURLs failed: " + reason(error)};
+  }
+  if (hosts.length === 0) registry.delete(args.label); else registry.set(args.label, hosts);
+  return {ok: true, value: args.hosts === null ? {unblocked: before.length} : {blocked: hosts}};
+}|js}
+
+let request_block_note = function
+  | `Block -> "the tab's subresource requests to these hosts, and its same-origin frames', now fail as network errors. \
+      Navigations and frames of another site are not blocked, and a request already sent is not affected. \
+      The blocks last until unblock_requests or until the ego SDK process that set them ends (sdkProcessStartedAt changes)"
+  | `Unblock -> "every block on the tab is lifted"
+
+let request_block_receipt ~id ~action ~kind ~unknown value =
+  let answered fields = Ok (obj ((("action",str action) :: ("tabId",`Int id) :: fields)
+    @ ["refsInvalidated",`Bool true;"note",str (request_block_note kind)])) in
+  let hosts = List.for_all (function `String _ -> true | _ -> false) in
+  match kind, value with
+  | `Block, `Assoc ["blocked",`List blocked] when blocked <> [] && hosts blocked ->
+    answered ["blocked",`List blocked;"lifetime",str "ego_sdk_process"]
+  | `Unblock, `Assoc ["unblocked",`Int count] when count >= 0 -> answered ["unblocked",`Int count]
+  | (`Block | `Unblock), _ ->
+    Error (Live.Outcome_unknown ("ego answered a request block receipt of another shape; " ^ unknown))
+
+let block_requests t id hosts =
+  let* label = label_of t id in
+  let interaction, action, kind, wire = match hosts with
+    | Some hosts -> Browser_lane.Action.Block_requests hosts, "block_requests", `Block, `List (List.map str hosts)
+    | None -> Browser_lane.Action.Unblock_requests, "unblock_requests", `Unblock, `Null in
+  let unknown = Printf.sprintf "the %s may have changed the blocked hosts of tab %d: unblock_requests lifts every block" action id in
+  match run_step t ~window_s:(tab_window id interaction) ~step:"page.block_requests"
+      ~args:(obj ["label",str label;"tabId",`Int id;"hosts",wire]) (String.concat "\n" [
+      "  const reason = " ^ message ^ ";";
+      unblocked_managed_page;
+      "    emit(await (" ^ request_block_script ^ ")(task.page(args.label), args, reason));";
+      "  }" ]) with
+  | Error failure -> Error (effect_failure ~unknown failure)
+  | Ok value -> request_block_receipt ~id ~action ~kind ~unknown value
+
 (* ego's Page API has no back or forward, so the step goes through the
    page's CDP session: it reads the tab's history, refuses before acting when
    there is no entry that way, moves to the entry, and waits until the tab's
@@ -2133,6 +2191,10 @@ let act ?actor t args =
     emulate t tab_id (Some emulation)
   | Ok (Browser_lane.Action.On_tab {tab_id; interaction = Browser_lane.Action.Clear_emulation}) ->
     emulate t tab_id None
+  | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Block_requests hosts}) ->
+    block_requests t tab_id (Some hosts)
+  | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Unblock_requests}) ->
+    block_requests t tab_id None
 
 let workflow ?actor t args =
   let pre result = Result.map_error (fun detail -> Live.Before_effect detail) result in

@@ -253,7 +253,8 @@ let verb_asking_for : Lane.live_capability -> Lane.verb = Lane.(function
     | Page_management -> Page_act (Action.Control (Action.Adopt_tab {tab_id=2;label=None}))
   | Download_listing -> Page_downloads {tab_id=2}
   | File_upload -> Page_act (Action.On_tab {tab_id=2;interaction=Action.Upload {target=Action.File_input "#file";paths=["/tmp/note.txt"]}})
-  | Environment_emulation -> Page_act (Action.On_tab {tab_id=2;interaction=Action.Set_emulation {geolocation=None;locale=Some "fr-FR";timezone=None}}))
+  | Environment_emulation -> Page_act (Action.On_tab {tab_id=2;interaction=Action.Set_emulation {geolocation=None;locale=Some "fr-FR";timezone=None}})
+  | Request_blocking -> Page_act (Action.On_tab {tab_id=2;interaction=Action.Block_requests ["ads.example.com"]}))
 
 let capability = testable
   (fun ppf value -> Format.pp_print_string ppf (Lane.live_capability_to_wire value)) ( = )
@@ -678,11 +679,35 @@ let test_emulation_arguments () =
     check bool "emulation survives the wire" true (Lane.Action.parse (Lane.Action.to_json round) = Ok round))
     [Lane.Action.Set_emulation emulation; Lane.Action.Clear_emulation]
 
+(* The hosts a request block names are parsed before any browser effect, as
+   they were for the removed automation Firefox (feac9aa2). *)
+let test_request_block_arguments () =
+  let parse fields = Lane.Action.parse (`Assoc (["action",`String "block_requests";"tabId",`Int 1] @ fields)) in
+  check bool "a host list parses" true
+    (parse ["hosts",`List [`String "ads.example.com"]]
+     = Ok (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Block_requests ["ads.example.com"]}));
+  List.iter (fun (label, fields) -> check bool label true (Result.is_error (parse fields)))
+    [ "no hosts", []
+    ; "an empty host list", ["hosts",`List []]
+    ; "an uppercase host", ["hosts",`List [`String "Ads.Example.com"]]
+    ; "a URL instead of a host", ["hosts",`List [`String "https://ads.example.com/"]]
+    ; "a wildcard", ["hosts",`List [`String "*.example.com"]]
+    ; "a host with a port", ["hosts",`List [`String "example.com:8080"]]
+    ; "an empty label", ["hosts",`List [`String "ads..example.com"]]
+    ; "inside a frame", ["hosts",`List [`String "ads.example.com"];"framePath",`List [`String "iframe"]] ];
+  check bool "unblock takes nothing else" true
+    (Result.is_error (Lane.Action.parse (`Assoc ["action",`String "unblock_requests";"tabId",`Int 1;"hosts",`List [`String "ads.example.com"]])));
+  List.iter (fun interaction ->
+    let round = Lane.Action.On_tab {tab_id=1;interaction} in
+    check bool "a block survives the wire" true (Lane.Action.parse (Lane.Action.to_json round) = Ok round))
+    [Lane.Action.Block_requests ["ads.example.com";"10.0.0.1"]; Lane.Action.Unblock_requests]
+
 let () = run "browser client routing" ["ownership", [
   test_case "native Page management retains exact tab binding" `Quick test_native_page_management_contract;
   test_case "actions are parsed before effects" `Quick test_action_parser;
   test_case "context and file arguments are explicit" `Quick test_action_context_arguments;
   test_case "emulation arguments are parsed before effects" `Quick test_emulation_arguments;
+  test_case "request block arguments are parsed before effects" `Quick test_request_block_arguments;
   test_case "native Space wait keeps SDK ownership and options" `Quick test_native_control_wait_contract;
   test_case "reads retain caller, scope and settled results" `Quick test_read_activity;
   test_case "agent activity follows queue ownership and cleanup" `Quick test_agent_activity;

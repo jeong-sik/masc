@@ -134,6 +134,38 @@ test('native inventory takes each tab window from the browser and lists a tab it
   assert.deepEqual(withoutCdp.map(row=>row.targetId),['T1','T9','T2','T3']);
   assert.equal(withoutCdp.some(row=>Object.hasOwn(row,'windowId')),false);
 });
+test('request blocks add up per Page label, lift together, and stay as they were when CDP throws',async()=>{
+  const run=script('request_block_script');
+  const sent=[];
+  let fail=false;
+  const page={cdp:async(method,params)=>{
+    if (fail) throw Error('CDP request timed out');
+    sent.push([method,JSON.parse(JSON.stringify(params))]);
+    return {};
+  }};
+  const reason=error=>String(error && error.message || error);
+  const patterns=hosts=>({urlPatterns:hosts.map(host=>({urlPattern:`*://${host}:*/*`,block:true}))});
+  const first=await run(page,{label:'p1',hosts:['b.example','a.example']},reason);
+  assert.equal(first.ok,true);
+  assert.deepEqual([...first.value.blocked],['a.example','b.example']);
+  const second=await run(page,{label:'p1',hosts:['a.example','c.example']},reason);
+  assert.deepEqual([...second.value.blocked],['a.example','b.example','c.example']);
+  assert.deepEqual(sent[1],['Network.setBlockedURLs',patterns(['a.example','b.example','c.example'])]);
+  const other=await run(page,{label:'p2',hosts:['d.example']},reason);
+  assert.deepEqual([...other.value.blocked],['d.example']);
+  fail=true;
+  const lost=await run(page,{label:'p1',hosts:['e.example']},reason);
+  assert.equal(lost.ok,false);
+  assert.equal(Object.hasOwn(lost,'before'),false);
+  assert.match(lost.error,/Network.setBlockedURLs failed: CDP request timed out/);
+  fail=false;
+  const lifted=await run(page,{label:'p1',hosts:null},reason);
+  assert.equal(lifted.ok,true);
+  assert.equal(lifted.value.unblocked,3);
+  assert.deepEqual(sent.at(-1),['Network.setBlockedURLs',{urlPatterns:[]}]);
+  assert.equal((await run(page,{label:'p1',hosts:null},reason)).value.unblocked,0);
+  assert.deepEqual([...(await run(page,{label:'p2',hosts:['d.example']},reason)).value.blocked],['d.example']);
+});
 test('dialog answer validates fresh canonical identity before any watcher or method',async()=>{
   for(const mutate of [
     f=>{f.task.spaceId=21;},f=>{f.task.tabs=async()=>[];},

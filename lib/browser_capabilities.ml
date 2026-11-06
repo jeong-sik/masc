@@ -11,7 +11,7 @@ type operation =
   | Read_frames | Frame_interaction | Read_dialog | Accept_dialog | Dismiss_dialog
   | Hand_off | Take_over | Space_status | Finish_space | Wait_for_control | Adopt_tab | Release_tab
   | Upload_file | List_downloads | Page_zoom | Resize_viewport | Touch
-  | Read_clipboard | Write_clipboard | Emulate_environment
+  | Read_clipboard | Write_clipboard | Emulate_environment | Intercept_network
 [@@deriving enumerate]
 type tool = Tabs | Read | Interact | Act | Session | Goto
 type invocation = { tool : tool; action : string option; mode : string option }
@@ -287,6 +287,13 @@ let support backend operation = match backend with
            "A page that already read its location, language or time zone keeps what it read: reload it afterwards.";
            ego_agent_pages]
       | Safari_unavailable -> missing)
+    | Intercept_network -> (match backend with
+      | Connected Browser_lane.Ego_task_space -> conditional ~action:"block_requests" Act
+          [observed;"Makes the Page's subresource requests to the listed hosts, such as fetch and images, fail as network errors, and those of its same-origin frames. A host is an exact lowercase host name or IPv4 address compared with the request's host on any port, so a subdomain is a host of its own.";
+           "Navigations are not blocked: the tab or a frame still loads a document from a blocked host. Requests from a frame of another site, which runs in its own process, are not blocked either. A request already sent is not affected.";
+           "Each block_requests adds to the tab's blocks; unblock_requests lifts every one. Blocks stay while the SDK process that set them runs; every answer's sdkProcessStartedAt names that process, and another value means they are gone. The setting invalidates snapshot refs (refsInvalidated): take a new snapshot.";
+           ego_agent_pages]
+      | Safari_unavailable -> missing)
 let catalog backend = List.map (fun operation -> {operation;support=support backend operation}) operations
 let operation_name = function
   | List_tabs -> "list_tabs" | Open_tab -> "open_tab" | Close_tab -> "close_tab"
@@ -309,7 +316,7 @@ let operation_name = function
   | Upload_file -> "upload_file"
   | List_downloads -> "list_downloads" | Page_zoom -> "page_zoom" | Resize_viewport -> "resize_viewport"
   | Touch -> "touch" | Read_clipboard -> "read_clipboard" | Write_clipboard -> "write_clipboard"
-  | Emulate_environment -> "emulate_environment"
+  | Emulate_environment -> "emulate_environment" | Intercept_network -> "intercept_network"
 let operation_of_wire name = List.find_opt (fun operation -> String.equal (operation_name operation) name) operations
 let parse_required_actions = function
   | `List values ->

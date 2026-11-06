@@ -409,7 +409,7 @@ val run_captured
   -> ?after_evaluate:(evaluation_id:'evaluation_id -> evaluation -> unit)
   -> ?on_evaluation_aborted:
        (evaluation_id:'evaluation_id -> [ `Cancelled | `Failed of string ] -> unit)
-  -> ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t
+  -> clock:[> float Eio.Time.clock_ty ] Eio.Resource.t
   -> cited_observations:cited_observations
   -> facts:Keeper_memory_os_types.fact list
   -> new_claims:Keeper_memory_os_types.fact list
@@ -472,7 +472,7 @@ val run
   -> ?after_evaluate:(evaluation_id:'evaluation_id -> evaluation -> unit)
   -> ?on_evaluation_aborted:
        (evaluation_id:'evaluation_id -> [ `Cancelled | `Failed of string ] -> unit)
-  -> ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t
+  -> clock:[> float Eio.Time.clock_ty ] Eio.Resource.t
   -> keeper_id:string
   -> cited_observations:cited_observations
   -> facts:Keeper_memory_os_types.fact list

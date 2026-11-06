@@ -1641,9 +1641,21 @@ let test_cancellation_during_failure_settlement_propagates_as_cancelled () =
   | `Other detail -> Alcotest.failf "provider exception escaped instead of Cancelled: %s" detail
 ;;
 
+(* The runs below end before any request is sent, so they never read the
+   request clock; reading it fails the case. *)
+let unread_clock () =
+  let module Unread = struct
+    type t = unit
+    type time = float
+    let now () = failwith "a run that sends no request read the request clock"
+    let sleep_until () _ = failwith "a run that sends no request slept on the request clock"
+  end in
+  Eio.Resource.T ((), Eio.Time.Pi.clock (module Unread))
+;;
+
 let test_skipped_run_publishes_its_completed_observation () =
   let observed = ref [] in
-  let run = Gate.run ~cited_observations:[] ~keeper_id:"empty-observation-fixture" ~superseding:[] ~facts:[] ~new_claims:[]
+  let run = Gate.run ~cited_observations:[] ~clock:(unread_clock ()) ~keeper_id:"empty-observation-fixture" ~superseding:[] ~facts:[] ~new_claims:[]
       ~absorbed:[] ~observe:(fun value -> observed := value :: !observed) () in
   match !observed with
   | [ Gate.Complete result ] ->
@@ -1668,7 +1680,7 @@ let test_an_excluded_keeper_is_applied_as_answered_without_a_request () =
     ; absorb_gate = true
     ; excluded_keepers = [ "kept-home" ]
     } @@ fun () ->
-  match Gate.run ~cited_observations:(nothing_cited absorbed) ~keeper_id:"kept-home" ~superseding:[] ~facts ~new_claims:[ merged ] ~absorbed () with
+  match Gate.run ~cited_observations:(nothing_cited absorbed) ~clock:(unread_clock ()) ~keeper_id:"kept-home" ~superseding:[] ~facts ~new_claims:[ merged ] ~absorbed () with
   | Gate.Skipped { reason = Gate.Unavailable Masc.Typesafeai_config.Keeper_excluded; absorbed = applied } ->
     Alcotest.(check int) "every absorption is applied" (List.length absorbed) (List.length applied)
   | Gate.Skipped { reason = Gate.No_absorptions | Gate.Unavailable _; _ } ->
@@ -1689,7 +1701,7 @@ let test_a_gate_declared_on_without_a_lane_keeps_the_sources_current () =
         , [] )
     ; absorb_gate = true
     } @@ fun () ->
-  match Gate.run ~cited_observations:(nothing_cited absorbed) ~keeper_id:"meant-to-judge" ~superseding:[] ~facts ~new_claims:[ merged ] ~absorbed () with
+  match Gate.run ~cited_observations:(nothing_cited absorbed) ~clock:(unread_clock ()) ~keeper_id:"meant-to-judge" ~superseding:[] ~facts ~new_claims:[ merged ] ~absorbed () with
   | Gate.Skipped { reason = Gate.Unavailable Masc.Typesafeai_config.Lane_disabled; absorbed = applied } ->
     Alcotest.(check int) "no absorption is applied" 0 (List.length applied);
     Alcotest.(check bool) "there was something to withhold" true (absorbed <> [])
@@ -1707,7 +1719,7 @@ let test_a_gate_declared_off_applies_as_answered_even_without_a_lane () =
   Masc_test_deps.with_typesafeai_policy
     { Runtime_schema.default_typesafeai with lane_enabled = false; absorb_gate = false }
   @@ fun () ->
-  match Gate.run ~cited_observations:(nothing_cited absorbed) ~keeper_id:"told-not-to" ~superseding:[] ~facts ~new_claims:[ merged ] ~absorbed () with
+  match Gate.run ~cited_observations:(nothing_cited absorbed) ~clock:(unread_clock ()) ~keeper_id:"told-not-to" ~superseding:[] ~facts ~new_claims:[ merged ] ~absorbed () with
   | Gate.Skipped { reason = Gate.Unavailable Masc.Typesafeai_config.Absorb_gate_disabled; absorbed = applied } ->
     Alcotest.(check int) "every absorption is applied" (List.length absorbed) (List.length applied)
   | Gate.Skipped { reason = Gate.No_absorptions | Gate.Unavailable _; _ } ->
@@ -1979,7 +1991,7 @@ let test_an_enabled_gate_without_a_lane_defers_admission () =
     ; absorb_gate = true
     } @@ fun () ->
   let run =
-    Gate.run ~cited_observations:(nothing_cited absorbed) ~keeper_id:"reverse-unavailable" ~superseding:[] ~facts:copy_sources
+    Gate.run ~cited_observations:(nothing_cited absorbed) ~clock:(unread_clock ()) ~keeper_id:"reverse-unavailable" ~superseding:[] ~facts:copy_sources
       ~new_claims:[ copy_claim ] ~absorbed ()
   in
   Alcotest.(check int) "nothing is absorbed" 0 (List.length (Gate.absorbed_of_run run));

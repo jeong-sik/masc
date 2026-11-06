@@ -18,7 +18,7 @@ type judged =
   }
 
 val judge_candidate :
-  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   destinations:Typesafeai_config.destinations ->
   candidate:Keeper_board_attention_candidate.candidate ->
   unit ->
@@ -29,7 +29,7 @@ val judge_candidate :
     response or unoffered choice. *)
 
 val judge_candidates :
-  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   destinations:Typesafeai_config.destinations ->
   candidates:Keeper_board_attention_candidate.candidate list ->
   unit ->

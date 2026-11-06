@@ -647,7 +647,34 @@ let provider_rest_of_failure ~now ~route ~assignment_id deferred =
           | Route.Local_admission_timeout )
       ; retry_after = _
       }
-  | Route.Rotate_now _ | Route.Exhausted_visible_alive _ -> None
+  | Route.Rotate_now
+      { rotate =
+          ( Route.Auth_failed | Route.Authorization_refused | Route.Model_unavailable
+          | Route.Resumable_cli_session | Route.Candidates_filtered
+          | Route.Runtime_exhausted | Route.No_progress_empty
+          | Route.No_progress_thinking_only | Route.No_progress_truncated
+          | Route.Refusal_body_not_received | Route.Admission
+          | Route.Provider_reported_failure | Route.Request_refused
+          | Route.Provider_wire_defect | Route.Server_error_not_transient
+          | Route.Context_window_exceeded )
+      }
+  | Route.Exhausted_visible_alive
+      { terminal =
+          ( Route.Deterministic_request | Route.Session_claim_refused
+          | Route.Transcript_refused | Route.Contract_violation | Route.Protocol_error
+          | Route.Config_mismatch | Route.Provider_integration
+          | Route.Unmodeled_empty_completion
+          | Route.Terminal_effect_dependency_unavailable
+          | Route.Terminal_effect_policy_rejection
+          | Route.Terminal_effect_runtime_failure
+          | Route.Terminal_effect_workflow_rejection
+          | Route.Terminal_effect_operator_cancelled
+          | Route.Provider_attempt_effect_fenced
+              (Route.Fenced_effect_attempted | Route.Fenced_observation_unavailable)
+          | Route.Tool_correction_lost
+              (Route.Fenced_effect_attempted | Route.Fenced_observation_unavailable)
+          | Route.Internal_opaque )
+      } -> None
 ;;
 
 (* Two lanes name the same hint. The order a resumed lane fixed is not part of

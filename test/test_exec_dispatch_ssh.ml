@@ -113,7 +113,7 @@ let () =
   let bin = Masc_exec.Exec_program.of_string "echo" |> Result.get_ok in
   let runner_called = ref false in
   let remote_target =
-    Masc_exec.Path_scope.classify ~raw:"/tmp/exec-dispatch-ssh-out" ~cwd:"/tmp"
+    Masc_exec.Path_scope.of_raw "/tmp/exec-dispatch-ssh-out"
   in
   let mock_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
     runner_called := true;

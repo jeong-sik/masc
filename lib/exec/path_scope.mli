@@ -1,16 +1,13 @@
-(** Path_scope — abstract classification of explicit filesystem scopes.
+(** Path_scope — a filesystem path as the command wrote it.
 
-    A [Shell_ir.Simple] carries typed scopes for [cwd] and redirect targets.
-    Positional argv remains opaque application data and is not classified from
-    token shape or command semantics. *)
+    A [Shell_ir.Simple] carries the written [cwd] and redirect targets. The
+    path stays as written: the dispatch that runs the command decides which
+    filesystem it names. Positional argv remains opaque application data and
+    is not read as a path from token shape or command semantics. *)
 
 type t
 
-type scope =
-  | Inside_workspace of string      (** path beneath the current workspace root *)
-  | Inside_sandbox of string        (** [.masc/], [/tmp/masc-*] and similar *)
-  | Outside_workspace of string      (** path escapes the workspace root *)
-  | Absolute_unknown of string      (** absolute path we cannot place *)
+val of_raw : string -> t
 
 val lexical_normalize_abs : string -> string
 (** Collapse empty, [.], and [..] segments of an absolute path without
@@ -19,12 +16,6 @@ val lexical_normalize_abs : string -> string
     resolution would substitute host symlinks and macOS firmlinks into paths
     that only exist on the endpoint. *)
 
-val classify : raw:string -> cwd:string -> t
-(** Classify [raw] relative to [cwd].  Arm selection is deterministic
-    and fail-closed: a path that cannot be resolved lands in
-    [Absolute_unknown] rather than being silently admitted. *)
-
-val scope : t -> scope
 val raw : t -> string
 val is_discard_sink : t -> bool
 (** [is_discard_sink t] is true for the canonical stdout/stderr discard

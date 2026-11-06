@@ -1,6 +1,5 @@
 val simple_bin :
   ?cwd_raw:string ->
-  ?cwd_base:string ->
   ?sandbox:Masc_exec.Sandbox_target.t ->
   Masc_exec.Exec_program.t ->
   string list ->

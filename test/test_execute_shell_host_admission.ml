@@ -5,9 +5,8 @@ open Alcotest
    (#46410), which is outside Eio. Each case answers once outside Eio, where
    [Systhread_host.run] calls the work directly, and once inside Eio with the
    host started, and requires the same answer. An Eio effect added to any of
-   them raises [Effect.Unhandled] in the outside-Eio answer (checked by adding
-   [Eio.Fiber.yield] to [Path_scope.classify]); the inside answer shows the
-   work answers the same when the host runs it for a fiber.
+   them raises [Effect.Unhandled] in the outside-Eio answer; the inside answer
+   shows the work answers the same when the host runs it for a fiber.
 
    The host is process-wide and cannot be stopped, so every case starts it;
    the outside-Eio answers do not depend on it. *)
@@ -62,11 +61,10 @@ let test_allowed_command_runs () =
     | Error error -> fail ("an allowed command was refused: " ^ refusal_tag error))
 ;;
 
-(* The cwd cases reach the realpath in [Path_scope.classify] and the
-   ancestor walk in [Exec_policy_paths.resolve_path]; the nested pipeline is
-   refused by the gate before any path is read. *)
+(* The cwd cases reach the ancestor walk in [Exec_policy_paths.resolve_path];
+   the nested pipeline is refused by the gate before any path is read. *)
 let refused_cases () =
-  let scope raw = Masc_exec.Path_scope.classify ~raw ~cwd:raw in
+  let scope raw = Masc_exec.Path_scope.of_raw raw in
   let open Masc_exec.Shell_ir in
   [ "a cwd outside the workspace", echo ~cwd:(scope "/etc") "x"
   ; "a cwd that does not exist", echo ~cwd:(scope "/masc_46410_absent/a/b") "x"

@@ -301,8 +301,8 @@ let test_positional_param_still_excluded () =
 
 let test_redirect_target_param_is_parse_error () =
   (* The redirect target stays a literal in the grammar — a substituted
-     path has nothing for [Path_scope.classify] to classify at parse
-     time, so [> $OUT] is refused rather than passed unchecked. *)
+     path has no value for the path policy to check at parse time, so
+     [> $OUT] is refused rather than passed unchecked. *)
   match Bash.parse_string "echo x > $OUT" with
   | Parsed.Parse_error _ -> ()
   | _ -> assert false

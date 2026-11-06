@@ -62,7 +62,7 @@ let test_delegated_redirect_refused () =
   let caller, _calls = recording_caller () in
   let base = delegated_simple ~caller ~argv:[ "board"; "list" ] in
   let target =
-    Redirect_scope.In_command_namespace (Path_scope.classify ~raw:"out.txt" ~cwd:".")
+    Redirect_scope.In_command_namespace (Path_scope.of_raw "out.txt")
   in
   let stage =
     { base with

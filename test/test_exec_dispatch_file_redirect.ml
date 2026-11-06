@@ -33,11 +33,11 @@ let bin name =
 ;;
 
 let target p =
-  E.Redirect_scope.In_command_namespace (E.Path_scope.classify ~raw:p ~cwd:temp_dir)
+  E.Redirect_scope.In_command_namespace (E.Path_scope.of_raw p)
 ;;
 
 let host_target p =
-  E.Redirect_scope.on_this_host (E.Path_scope.classify ~raw:p ~cwd:temp_dir) p
+  E.Redirect_scope.on_this_host (E.Path_scope.of_raw p) p
 
 let simple ?(redirects = []) ?sandbox executable args =
   { E.Shell_ir.bin = bin executable
@@ -111,7 +111,7 @@ let test_stdin_from_dev_null_runs () =
         ~redirects:
           [ E.Redirect_scope.File
               { fd = 0
-              ; target = E.Redirect_scope.In_command_namespace (E.Path_scope.classify ~raw:"/dev/null" ~cwd:temp_dir)
+              ; target = E.Redirect_scope.In_command_namespace (E.Path_scope.of_raw "/dev/null")
               ; mode = E.Redirect_scope.Read
               }
           ]
@@ -149,7 +149,7 @@ let test_discard_still_drops_without_touching_a_file () =
         ~redirects:
           [ E.Redirect_scope.File
               { fd = 1
-              ; target = E.Redirect_scope.In_command_namespace (E.Path_scope.classify ~raw:"/dev/null" ~cwd:temp_dir)
+              ; target = E.Redirect_scope.In_command_namespace (E.Path_scope.of_raw "/dev/null")
               ; mode = E.Redirect_scope.Write
               }
           ]
@@ -231,7 +231,7 @@ let test_relative_target_without_a_cwd_is_refused () =
               { fd = 1
               ; target =
                   E.Redirect_scope.In_command_namespace
-                    (E.Path_scope.classify ~raw:"relative-out.txt" ~cwd:temp_dir)
+                    (E.Path_scope.of_raw "relative-out.txt")
               ; mode = E.Redirect_scope.Write
               }
           ]

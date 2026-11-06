@@ -253,7 +253,6 @@ let shell_simple ?(sandbox = Masc_exec.Sandbox_target.host ()) ?cwd argv =
   Ok
     (Keeper_tooling.Execute_shell_ir.simple_bin
        ?cwd_raw:cwd
-       ?cwd_base:cwd
        ~sandbox
        bin
        arguments)

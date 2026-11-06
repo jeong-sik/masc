@@ -1,11 +1,12 @@
-(** Durable, nonblocking HITL requests for Keeper external effects. *)
+(** Durable, nonblocking HITL requests for Keeper external effects.
 
-open Keeper_approval_queue_rules_types
+    The code lives in the [Keeper_approval_queue_*] modules included below, in
+    dependency order: a module reads the ones above it and none below it.
+    [For_testing] holds the seams that tests use. *)
+
 open Keeper_approval_queue_rules
-open Keeper_approval_queue_projection
 open Keeper_approval_queue_result
 open Keeper_approval_queue_codec
-open Keeper_approval_queue_state
 include Keeper_approval_queue_registry
 include Keeper_approval_queue_persist
 include Keeper_approval_queue_load

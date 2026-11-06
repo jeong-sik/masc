@@ -260,9 +260,8 @@ describe('setupServerPushReaction reconnect hydration', () => {
 
     // Pins the FRONTEND routing contract: an `approval:pending` event must
     // reach the Gate refresh (and thus the nav-rail/topbar badge). This
-    // asserts only the FE literal — the cross-boundary pin that also fails when
-    // the backend (keeper_approval_queue.ml) renames the emitted string lives
-    // in sse-approval-event-drift.test.ts.
+    // asserts only the FE literal. The backend emits the string as
+    // `approval_sse_pending_event` in keeper_approval_queue_projection.ml.
     sseStore.routeServerPushEvent({ type: 'approval:pending' })
     vi.advanceTimersByTime(1_000)
     await flushAsyncWork()

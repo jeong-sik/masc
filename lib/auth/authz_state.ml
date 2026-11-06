@@ -90,6 +90,16 @@ type refusal =
       }
   | Closes_without_reduction
   | Closes_not_held of R.Hash.t
+  | Cancel_unreadable of Authz_cancel_event.error
+  | Canceller_is_not_an_admin of Authz_records.Author.t
+  | Cancel_not_held of R.Hash.t
+  | Cancel_subject_differs of
+      { aborted : R.Hash.t
+      ; named : Authz_records.Subject.t
+      ; held : Authz_records.Subject.t
+      }
+  | Canceller_issued_the_invitation of Authz_records.Subject.t
+  | Cancel_owner_unknown of Authz_records.Subject.t
 
 let refusal_to_string = function
   | Before_bootstrap kind ->
@@ -131,6 +141,26 @@ let refusal_to_string = function
     Printf.sprintf
       "the record closes %s, which is not a given-up reduction of the change it makes"
       (R.Hash.to_hex aborted)
+  | Cancel_unreadable error ->
+    "the revocation cancel cannot be read: " ^ Authz_cancel_event.error_to_string error
+  | Canceller_is_not_an_admin (_ : Authz_records.Author.t) ->
+    "only an active Admin cancels a block, and the author of this cancel is not one"
+  | Cancel_not_held aborted ->
+    Printf.sprintf "no given-up reduction %s is blocked" (R.Hash.to_hex aborted)
+  | Cancel_subject_differs { aborted; named; held } ->
+    Printf.sprintf
+      "the given-up reduction %s is of %s, and the cancel names %s"
+      (R.Hash.to_hex aborted)
+      (Authz_records.Subject.to_string held)
+      (Authz_records.Subject.to_string named)
+  | Canceller_issued_the_invitation subject ->
+    Printf.sprintf
+      "the canceller issued the invitation behind %s, so another Admin cancels its block"
+      (Authz_records.Subject.to_string subject)
+  | Cancel_owner_unknown subject ->
+    Printf.sprintf
+      "no invitation stands behind %s, so no Admin is known to be eligible to cancel its block"
+      (Authz_records.Subject.to_string subject)
 ;;
 
 type applied =
@@ -284,6 +314,67 @@ let principal_event state (record : R.t) =
        Ok { state = { state with principals }; high_water })
 ;;
 
+(* Who stands behind a subject (design 4.1): the issuer of the invitation that
+   is the subject, its owner, or of the one a human principal joined through,
+   its original approver. The first stage has no manager, and the beneficiary
+   is the subject or the person an open invitation is for, who has not joined
+   and writes nothing. No invitation stands behind any other subject yet. *)
+let issuer_behind state = function
+  | Authz_records.Subject.Invite invite_id ->
+    Option.map
+      (fun (invitation : Authz_invite_state.invitation) -> invitation.Authz_invite_state.issuer)
+      (Authz_invite_state.find state.invites invite_id)
+  | Authz_records.Subject.Principal (Authz_types.Principal.Human user_id) ->
+    Option.map
+      (fun ((_ : Authz_types.Invite_id.t), (invitation : Authz_invite_state.invitation)) ->
+        invitation.Authz_invite_state.issuer)
+      (Authz_invite_state.find_consumed_by state.invites user_id)
+  | Authz_records.Subject.Principal (Authz_types.Principal.Service _)
+  | Authz_records.Subject.Grant _
+  | Authz_records.Subject.Credential _
+  | Authz_records.Subject.Runtime _ -> None
+;;
+
+(* An eligible Admin lifts one block (design 8.3). The canceller is never the
+   subject: a principal whose reduction is held is an author that
+   [author_refusal] refuses before this. A cancel raises no epoch, so the store
+   takes no intent for it: a log cut back to before it brings the block back,
+   which is the side that stops the subject. *)
+let cancel state (record : R.t) =
+  match Authz_cancel_event.of_body record.R.body with
+  | Error error -> Error (Cancel_unreadable error)
+  | Ok { Authz_cancel_event.aborted; subject } ->
+    (match record.R.author with
+     | Authz_records.Author.Authenticated (Authz_types.Principal.Human canceller)
+       when Authz_principal_state.is_admin state.principals canceller ->
+       (match List.find_opt (fun held -> R.Hash.equal held.aborted aborted) state.revocation_pending with
+        | None -> Error (Cancel_not_held aborted)
+        | Some held when not (Authz_records.Subject.equal held.subject subject) ->
+          Error (Cancel_subject_differs { aborted; named = subject; held = held.subject })
+        | Some (_ : held) ->
+          (match issuer_behind state subject with
+           | None -> Error (Cancel_owner_unknown subject)
+           | Some (Authz_invite_state.Admin_issued issuer)
+             when Authz_types.User_id.equal issuer canceller ->
+             Error (Canceller_issued_the_invitation subject)
+           | Some (Authz_invite_state.Admin_issued _ | Authz_invite_state.Local_operator_issued) ->
+             Ok
+               { state =
+                   { state with
+                     revocation_pending =
+                       List.filter
+                         (fun held -> not (R.Hash.equal held.aborted aborted))
+                         state.revocation_pending
+                   }
+               ; high_water = None
+               }))
+     | Authz_records.Author.Authenticated (Authz_types.Principal.Human _ | Authz_types.Principal.Service _)
+     | Authz_records.Author.Local_operator
+     | Authz_records.Author.System_cron
+     | Authz_records.Author.System_maintenance
+     | Authz_records.Author.System_migration -> Error (Canceller_is_not_an_admin record.R.author))
+;;
+
 (* Every kind but a mode event is matched with the mode, so the branch of a
    kind says what a record of it means before the bootstrap, and a layer gets
    the workspace of the bootstrap only from a branch that has one. *)
@@ -299,6 +390,8 @@ let read state (record : R.t) =
   | K.Admin_assignment, Authz_mode_state.Off _ -> Error (Accounts_off K.Admin_assignment)
   | K.Principal, Authz_mode_state.Multi_account _ -> principal_event state record
   | K.Principal, Authz_mode_state.Off _ -> Error (Accounts_off K.Principal)
+  | K.Revocation_cancel, Authz_mode_state.Multi_account _ -> cancel state record
+  | K.Revocation_cancel, Authz_mode_state.Off _ -> Error (Accounts_off K.Revocation_cancel)
   | ( ( K.Runtime_grant
       | K.Delegate_policy
       | K.Principal
@@ -322,8 +415,7 @@ let read state (record : R.t) =
       | K.Lease_terminal_evidence
       | K.Preauthorized_expiry
       | K.Migration_diagnostic
-      | K.Local_recovery
-      | K.Revocation_cancel ) as kind )
+      | K.Local_recovery ) as kind )
     , (Authz_mode_state.Multi_account _ | Off _) -> Error (Kind_not_read kind)
 ;;
 
@@ -394,6 +486,28 @@ let apply state (record : R.t) =
     let* applied = read state record in
     let* closed = close applied record in
     Ok { applied with state = later closed record }
+;;
+
+let closed_by (record : R.t) =
+  match record.R.kind with
+  | K.Revocation_cancel ->
+    (match Authz_cancel_event.of_body record.R.body with
+     | Ok { Authz_cancel_event.aborted; subject = _ } -> aborted :: record.R.closes
+     | Error (_ : Authz_cancel_event.error) -> record.R.closes)
+  | K.Runtime_grant
+  | K.Delegate_policy
+  | K.Principal
+  | K.Internal_service_credential
+  | K.Permission_revocation
+  | K.Trigger_evidence
+  | K.Lease_terminal_evidence
+  | K.Preauthorized_expiry
+  | K.Migration_diagnostic
+  | K.Local_recovery
+  | K.Mode_event
+  | K.Invite
+  | K.Admission
+  | K.Admin_assignment -> record.R.closes
 ;;
 
 let step state record =

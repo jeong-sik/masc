@@ -43,15 +43,16 @@ module Replay = struct
   ;;
 
   (* A block whose head the log no longer holds started when a writer opened
-     the log ([finish]), so a record written after that may close it, and the
-     block starts before that record. A record cannot close an intent that
-     begins after it: the digest of the intent covers the hash of the record
-     the intent began at, and so the record itself. *)
+     the log ([finish]), so a record written after that may close or cancel
+     it, and the block starts before that record. A record cannot name an
+     intent that begins after it: the digest of the intent covers the hash of
+     the record the intent began at, and so the record itself. *)
   let step replay (record : R.t) =
+    let closed = Authz_state.closed_by record in
     let named, unreached =
       List.partition
         (fun ((_ : R.Hash.t), (held : Authz_state.held)) ->
-          List.exists (R.Hash.equal held.Authz_state.aborted) record.R.closes)
+          List.exists (R.Hash.equal held.Authz_state.aborted) closed)
         replay.unreached
     in
     match Authz_state.step (Authz_state.hold_revocations replay.state (helds named)) record with

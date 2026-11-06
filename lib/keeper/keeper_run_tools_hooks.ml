@@ -756,7 +756,7 @@ let assemble_hooks
           observation_attribution_for_tool_input ~config ~meta:!meta_ref input)
         ~on_tool_executed:
           (fun
-            ~tool_name ~input ~output_text ~execution_evidence ~observation ~success ~duration_ms
+            ~tool_name ~input ~output_text ~execution_evidence ~observation:_ ~success ~duration_ms
             ~provider ~typed_outcome ->
             serialize_tool_observer (fun () ->
               let route_evidence =
@@ -815,45 +815,22 @@ let assemble_hooks
                  Keeper_repetition_scope.Execution.observe execution
                    ~target:shared_context call
                | None, _ | Some _, [] -> ());
-              (* Emit neutral agent observation events; UI adapters subscribe separately. *)
-              (let typed_outcome_str =
-                 match typed_outcome with
-                 | Some Keeper_tool_outcome.Progress -> "progress"
-                 | Some (Keeper_tool_outcome.No_progress _) -> "no_progress"
-                 | Some (Keeper_tool_outcome.Error _) -> "error"
-                 | None -> Tool_result.string_of_tool_call_outcome execution_outcome
-               in
-               (* Forward the same immutable attribution already committed in
-                  the canonical execution row; never resolve Git again here. *)
-               Option.iter (fun (observation : Tool_observation.t) ->
-               Agent_observation.emit_tool_event
-                 { base_path = config.base_path
-                 ; attribution = observation.attribution
-                 ; tool_name
-                 ; keeper_id = acc.meta.name
-                 ; turn_id = Ids.Turn_ref.to_string observation.turn_ref
-                 ; outcome = Tool_result.string_of_tool_call_outcome execution_outcome
-                 ; typed_outcome = typed_outcome_str
-                 ; duration_ms
-                 ; output_text
-                 ; input
-                 }) observation;
-               (* #23540: keeper in-turn tool executions never reached the
-                  activity log ([tool.called] is emitted only by the external MCP
-                  path), so the agent timeline reported tool_calls = 0 for any
-                  keeper working through its own turn. *)
-               Keeper_tool_activity.emit_tool_exec
-                 ~config
-                 ~meta:acc.meta
-                 ~tool_name
-                 ~success
-                 ~duration_ms:(int_of_float (Float.round duration_ms))
-                 ~typed_outcome
-                 ~provider
-                 ~keeper_turn_id:(Some keeper_turn_id)
-                 ~agent_core_turn:acc.current_turn
-                 ~task_id
-                 ())))
+              (* #23540: keeper in-turn tool executions never reached the
+                 activity log ([tool.called] is emitted only by the external MCP
+                 path), so the agent timeline reported tool_calls = 0 for any
+                 keeper working through its own turn. *)
+              Keeper_tool_activity.emit_tool_exec
+                ~config
+                ~meta:acc.meta
+                ~tool_name
+                ~success
+                ~duration_ms:(int_of_float (Float.round duration_ms))
+                ~typed_outcome
+                ~provider
+                ~keeper_turn_id:(Some keeper_turn_id)
+                ~agent_core_turn:acc.current_turn
+                ~task_id
+                ()))
         ()
     in
     let before_turn_hook : Agent_core.Hooks.hooks =

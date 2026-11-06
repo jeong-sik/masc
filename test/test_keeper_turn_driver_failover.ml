@@ -4296,6 +4296,36 @@ let test_a_failure_without_a_suffix_waits_until_a_fresh_walk_head_serves () =
             ~assignment_id:"quota_lane" None))))
 ;;
 
+(* #48674: a quota refusal after the adapter lost effect observation ends the
+   turn fenced. The fence is the route; the quota still rests the one path.
+   Ordinary cadence there let every pending message wake the Keeper into the
+   spent account again. *)
+let test_a_fenced_failure_waits_while_its_walk_rests () =
+  with_runtime_config (runtime_toml_quota_lane_of [ "other.test_model" ]) (fun () ->
+    Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
+      reset_quota_lane_rests ();
+      let path = "other.test_model" in
+      let fenced =
+        Keeper_runtime_failure_route.Exhausted_visible_alive
+          { terminal =
+              Keeper_runtime_failure_route.Provider_attempt_effect_fenced
+                Keeper_runtime_failure_route.Fenced_observation_unavailable
+          }
+      in
+      let now = Unix.gettimeofday () in
+      let decide () =
+        describe_dispatch ~now
+          (Driver.next_dispatch_after_failure ~now ~route:fenced ~assignment_id:"quota_lane" None)
+      in
+      Alcotest.(check string) "a fence on a serving walk keeps ordinary cadence"
+        "no provider wait" (decide ());
+      Runtime_quota_window.note_exhausted
+        ~scope:(Option.get (Runtime.quota_scope_of_runtime_id path))
+        ~resets_at:(now +. 3600.);
+      Alcotest.(check string) "a fence on a resting walk waits for its release"
+        ("wait 3600s for " ^ path) (decide ())))
+;;
+
 (* RFC-provider-path-rest §3.4: the chat lane's deferred retry reads the same
    next dispatch as the heartbeat. A suffix whose walk head serves is claimable
    at once; a resting head holds the retry until its release; a provider's
@@ -7366,6 +7396,8 @@ let () =
             test_an_undated_quota_row_does_not_move_between_reads;
           Alcotest.test_case "a failure without a suffix waits until a fresh walk head serves"
             `Quick test_a_failure_without_a_suffix_waits_until_a_fresh_walk_head_serves;
+          Alcotest.test_case "a fenced failure waits while its walk rests" `Quick
+            test_a_fenced_failure_waits_while_its_walk_rests;
           Alcotest.test_case "a chat retry follows the shared next dispatch" `Quick
             test_a_chat_retry_follows_the_shared_next_dispatch;
           Alcotest.test_case "a same-path suffix waits only for a recorded rest" `Quick

@@ -559,13 +559,27 @@ let assignment_next_dated_release ~now assignment_id =
    assignment follows its fresh walk's rest. A final candidate's quota does
    not rest siblings that failed for unrelated reasons; a serving head returns
    to ordinary cadence, not an immediate replay. A single/unresolved
-   assignment also retains the failed response's rest. Other failures without
-   a suffix have no provider wait. *)
+   assignment also retains the failed response's rest.
+
+   Every other failure without a suffix also follows the fresh walk's rest.
+   Only rate-limit and quota evidence rests a path ([path_rest_parts]), so a
+   resting head means the next dispatch would repeat a refused call; ordinary
+   cadence would let any wake send it (§4 P). A fenced attempt arrives here
+   with the quota that fenced it: its route keeps the fence, not the refusal,
+   and a Keeper with pending messages called a spent Muse account about once
+   every 44 seconds (#48674). *)
 let next_dispatch_after_failure ~now ~route ~assignment_id deferred =
   let module Route = Keeper_runtime_failure_route in
   let cap_sec = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec in
   let route_release retry_class retry_after =
     now +. Route.path_rest_sec ~cap_sec ~retry_class ~retry_after_hint:retry_after
+  in
+  let fresh_walk_wait () =
+    match assignment_walk_rest ~now assignment_id with
+    | Walk_head_serving _ -> None
+    | Walk_waits_until { release_at; resting_runtime_id } ->
+      Some (Wait_until
+        { release_at; waiting_on = resting_runtime_id; basis = Observed_path_rest })
   in
   match route, deferred with
   | ( ( Route.Retry_after_observed
@@ -592,11 +606,7 @@ let next_dispatch_after_failure ~now ~route ~assignment_id deferred =
           lane. Other candidates may already serve again after a transient
           failure. Keep normal cadence when a fresh walk can start; only the
           walk's own observed rest can delay all of its pending inputs. *)
-       (match assignment_walk_rest ~now assignment_id with
-        | Walk_head_serving _ -> None
-        | Walk_waits_until { release_at; resting_runtime_id } ->
-          Some (Wait_until
-            { release_at; waiting_on = resting_runtime_id; basis = Observed_path_rest }))
+       fresh_walk_wait ()
      | Ok { order = [] | [ _ ]; _ }
      | Error (Assignment_missing | Catalog_unavailable _) ->
        let failed_release_at = route_release retry_class retry_after in
@@ -620,7 +630,7 @@ let next_dispatch_after_failure ~now ~route ~assignment_id deferred =
           }
       | Route.Rotate_now _ | Route.Exhausted_visible_alive _ )
     , None ) ->
-    None
+    fresh_walk_wait ()
 ;;
 
 (* Two lanes name the same hint. The order a resumed lane fixed is not part of

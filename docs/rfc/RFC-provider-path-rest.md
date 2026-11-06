@@ -3,7 +3,7 @@ rfc: "provider-path-rest"
 title: "사용량 제한은 그 경로만 쉬게 하고, Keeper 는 다음에 보낼 경로의 쉼만 기다린다"
 status: Draft
 created: 2026-09-15
-updated: 2026-09-26
+updated: 2026-11-06
 author: claude
 supersedes: []
 superseded_by: null
@@ -131,7 +131,15 @@ rate-limited failure route; backing off next cycle by 600s (cadence 600s, cap 90
 | suffix 없음, 여러 후보, route 가 `Rate_limited`·`Hard_quota` | 새 walk의 머리가 쉬지 않음 | 일반 실패 cadence를 유지한다. 마지막 후보의 quota로 다른 후보까지 쉬지 않는다 |
 | suffix 없음, 여러 후보, route 가 `Rate_limited`·`Hard_quota` | 새 walk의 머리가 쉼 | 새 walk의 관측된 release 시각까지 기다린다 |
 | suffix 없음, 단일·미해결 배정, route 가 `Rate_limited`·`Hard_quota` | 실패한 경로가 쉼 | 실패 응답과 관측된 경로의 release 중 늦은 시각까지 기다린다 |
-| 그 밖 | — | 지금처럼 cadence |
+| suffix 없음, 그 밖 route | 새 walk의 머리가 쉬지 않음 | 지금처럼 cadence |
+| suffix 없음, 그 밖 route | 새 walk의 머리가 쉼 | 새 walk의 관측된 release 시각까지 기다린다 |
+
+마지막 두 줄은 2026-11-06 에 나눴다(#48674). 경로를 쉬게 하는 것은 rate limit 과
+quota 관측뿐이다(`path_rest_parts`). 그래서 머리가 쉬면 다음 사이클은 거절된 호출을
+되풀이한다. 그 전에는 "그 밖 → cadence" 였고, wake 가 cadence 잠을 끊어 4장의 P 가
+깨졌다. effect 관측을 잃은 뒤 온 quota 거절은 턴을 `Provider_attempt_effect_fenced` 로
+끝낸다. route 는 fence 를 따르고 거절을 따르지 않는다. 11-06 에 쌓인 메시지가 있는
+Keeper 하나가 소진된 Muse 계정을 약 44초마다(1.5시간에 67턴) 불렀다.
 
 suffix가 없으면 이 턴의 후보 순회가 끝났다는 뜻이다. 모든 후보가 같은 이유나
 같은 기한으로 쉬는 것은 아니다. 마지막 Claude 후보가 quota reset을 알려 줬더라도

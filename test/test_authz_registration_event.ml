@@ -1,10 +1,13 @@
 (* Checks for the body of an allowlist record: the bytes it writes, that it
-   reads back what it wrote, and every way a body fails to be one. No files,
-   clock, or network. The record that carries the body comes with its kind. *)
+   reads back what it wrote, and every way a body fails to be one. A last case
+   puts the body in a record and reads the record back, and checks who may
+   write one. No files, clock, or network. *)
 
 open Authz_types
+open Authz_records
 module E = Authz_registration_event
 module X = Authz_external_identity
+module R = Authz_record
 
 let get = function
   | Ok value -> value
@@ -237,6 +240,47 @@ let errors_are_told_apart () =
     (contains ~sub:"bogus" (E.error_to_string (E.Unknown_event "bogus")))
 ;;
 
+(* ---- the body in a record ---- *)
+
+let alice = Author.Authenticated (Principal.Human (get (User_id.of_string "alice")))
+let events = [ registered google; registered github; removed ]
+
+let a_record_carries_the_body () =
+  List.iter
+    (fun t ->
+      match
+        R.make ~head:R.genesis ~at_ms:1000 ~author:alice ~kind:R.Kind.Registration
+          ~body:(to_body_exn t)
+      with
+      | Error (R.Author_not_admitted _) -> Alcotest.fail "a principal may write an allowlist record"
+      | Ok record ->
+        (match R.of_line ~head:R.genesis (R.to_line record) with
+         | Error _ -> Alcotest.fail "the line of the record is not read back"
+         | Ok read ->
+           Alcotest.(check string) "the kind" "registration" (R.Kind.to_string read.R.kind);
+           (match E.of_body read.R.body with
+            | Ok back -> Alcotest.(check bool) "the body" true (E.equal t back)
+            | Error error -> Alcotest.failf "refused: %s" (E.error_to_string error))))
+    events
+;;
+
+(* The local operator invites the first Admin; it does not register. *)
+let no_other_author_may_write_one () =
+  List.iter
+    (fun (name, author) ->
+      match
+        R.make ~head:R.genesis ~at_ms:1000 ~author ~kind:R.Kind.Registration
+          ~body:(to_body_exn removed)
+      with
+      | Error (R.Author_not_admitted _) -> ()
+      | Ok _ -> Alcotest.failf "%s wrote an allowlist record" name)
+    [ "the local operator", Author.Local_operator
+    ; "system cron", Author.System_cron
+    ; "system maintenance", Author.System_maintenance
+    ; "system migration", Author.System_migration
+    ]
+;;
+
 let () =
   Alcotest.run
     "authz_registration_event"
@@ -246,6 +290,10 @@ let () =
         ; Alcotest.test_case "equality" `Quick equality_looks_at_every_member
         ; Alcotest.test_case "refusals" `Quick a_body_that_is_not_an_allowlist_record_is_refused
         ; Alcotest.test_case "texts" `Quick errors_are_told_apart
+        ] )
+    ; ( "record"
+      , [ Alcotest.test_case "carries the body" `Quick a_record_carries_the_body
+        ; Alcotest.test_case "other authors" `Quick no_other_author_may_write_one
         ] )
     ]
 ;;

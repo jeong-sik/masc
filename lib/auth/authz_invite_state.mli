@@ -31,10 +31,18 @@ type status =
   | Consumed of Authz_types.User_id.t
       (** An admission spent it, and made this principal (plan B3c-2). *)
 
+(** Who wrote the issue of an invitation: its owner (design 4.1). Only the
+    local operator and an Admin may issue one, so nothing else can stand
+    here. *)
+type issuer =
+  | Local_operator_issued
+  | Admin_issued of Authz_types.User_id.t
+
 type invitation = private
   { token_digest : Authz_invite_event.Token_digest.t
   ; expires_at_ms : int
   ; role : Authz_invite_event.role
+  ; issuer : issuer
   ; status : status
   }
 

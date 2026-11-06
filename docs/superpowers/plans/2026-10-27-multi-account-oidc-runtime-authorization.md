@@ -179,9 +179,13 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
     - 구역은 레코드를 한 번 읽어 change를 얻는다. 같은 change(사건과 subject)의 남은 항목이 있으면 그 digest로 레코드를 다시 만들고 다시 읽는다. 그래서 intent의 digest와 해시가 `closes`를 덮는다. `apply`는 `closes`가 가리키는 항목만 지운다. 그 change의 남은 항목이 아닌 digest(`Closes_not_held`)와, 축소가 아닌 레코드의 `closes`(`Closes_without_reduction`)는 거절한다. replay도 같은 `step`을 쓰므로 재기동한 결과가 같다. 로그를 되감으면 닫는 레코드도 사라져 막힘이 돌아온다.
     - 같은 change가 두 번 막히는 길은 잠긴 로그로 첫 시도가 실패하고, 둘째 시도가 첫 시도를 포기하고 쓰기에 실패해 로그가 멈춘 뒤 재기동하는 경우다. 재시도는 둘을 다 닫는다.
     - 즉시 차단(설계 §8.2 판정 3): 축소의 `Intent_pending`을 쓴 뒤 append가 실패하면(`Record_not_appended`) 구역은 그 자리에서 subject를 막은 상태를 발행한다. 다음 진입의 판정 3이 같은 intent를 포기하면 같은 항목이 된다.
-  - B2e-2: 적격 Admin의 취소.
-    - 새 Kind와 본문 `{ aborted; subject }`를 더한다. `admits`는 인증된 principal만 받는다.
-    - 적격(설계 §4.1)은 활성 Admin이고, 자신이 막히지 않았고, subject가 아닌 사람이다. subject가 초대면 그 초대를 쓴 Admin(owner)도 뺀다. 1단계에는 manager 관계가 없어 더 뺄 사람이 없다.
+  - B2e-2: 적격 Admin의 취소. 2a(초대를 쓴 사람 기록)와 2b(취소 Kind·본문·판정)로 나눠 낸다.
+    - 2a: 초대는 그것을 쓴 사람(`issuer`: 로컬 운영자이거나 그 Admin)을 기록한다. 초대를 쓸 수 있는 쪽이 이 둘뿐이라 닫힌 타입으로 둔다.
+    - 2b: 새 Kind와 본문 `{ aborted; subject }`를 더한다. `admits`는 인증된 principal만 받는다.
+    - 적격(설계 §4.1 98줄)은 활성 Admin이고, 자신이 막히지 않았고, 그 항목의 subject·owner·원 grant 승인자가 아닌 사람이다.
+      - subject가 초대면 owner는 그 초대를 쓴 Admin이다.
+      - subject가 principal이면 그 principal이 들어온 초대를 쓴 Admin이 원 승인자다.
+      - 1단계에는 manager 관계가 없어 더 뺄 사람이 없다. beneficiary는 subject인 principal 자신이거나, 아직 들어오지 않은 초대의 주인이라 따로 뺄 사람이 없다.
     - 적격 Admin이 없으면 막힌 채 둔다. Local_operator가 쓰는 `Quarantined(No_eligible_admin)`는 2단계 F2다.
     - 취소는 intent를 쓰지 않는다. 되감기면 막힘이 돌아오는 쪽이라서다.
 - 막힌 subject가 author인 레코드는 모두 거절한다(B3c, `Authz_state`). 설계 §8.3은 실행만 말한다. 막힌 Admin이 다른 사람의 권한을 바꾸는 것도 같은 회수를 무르는 일이라 같이 막는다. 이 결정을 여기 적는다.

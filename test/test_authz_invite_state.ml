@@ -63,7 +63,13 @@ let check_status label t invite_id expected =
 let the_local_operator_issues_an_admin_invitation () =
   let t = apply_ok I.empty (issued ()) in
   (match I.find t first with
-   | Some { I.status = I.Open; role = E.Admin; expires_at_ms = 10; token_digest } ->
+   | Some
+       { I.status = I.Open
+       ; role = E.Admin
+       ; expires_at_ms = 10
+       ; issuer = I.Local_operator_issued
+       ; token_digest
+       } ->
      Alcotest.(check bool) "the digest" true (E.Token_digest.equal token_digest (digest_of "token-1"))
    | Some _ | None -> Alcotest.fail "the invitation is not open as issued");
   (match I.find_by_token_digest t (digest_of "token-1") with
@@ -196,6 +202,32 @@ let an_admin_invites_and_revokes () =
     "token digest taken by invite-2"
 ;;
 
+let issuer_name = function
+  | None -> "none"
+  | Some { I.issuer = I.Local_operator_issued; _ } -> "local operator"
+  | Some { I.issuer = I.Admin_issued user_id; _ } -> "admin " ^ User_id.to_string user_id
+;;
+
+(* The owner of an invitation is who wrote its issue (design 4.1): the local
+   operator or the Admin. A revocation and an admission do not change it. *)
+let an_invitation_keeps_who_issued_it () =
+  let by_operator = apply_ok I.empty (issued ()) in
+  let both =
+    apply_ok
+      ~author:(Author.Authenticated alice)
+      by_operator
+      (issued ~invite_id:second ~token:"token-2" ~role:E.Member ())
+  in
+  Alcotest.(check string) "issued by the local operator" "local operator" (issuer_name (I.find both first));
+  Alcotest.(check string) "issued by an Admin" "admin alice" (issuer_name (I.find both second));
+  let revoked = apply_ok both (E.Revoked { invite_id = first }) in
+  Alcotest.(check string) "after its revocation" "local operator" (issuer_name (I.find revoked first));
+  match I.consume both second ~user_id:alice_id ~at_ms:1 with
+  | Ok (spent, _role) ->
+    Alcotest.(check string) "after an admission spends it" "admin alice" (issuer_name (I.find spent second))
+  | Error _ -> Alcotest.fail "the admission was refused"
+;;
+
 let refusals_are_told_apart () =
   let texts =
     List.map
@@ -228,6 +260,7 @@ let () =
         ; Alcotest.test_case "revocation" `Quick a_revocation
         ; Alcotest.test_case "by an Admin" `Quick an_admin_invites_and_revokes
         ; Alcotest.test_case "spent once" `Quick an_admission_spends_an_invitation_once
+        ; Alcotest.test_case "who issued it" `Quick an_invitation_keeps_who_issued_it
         ; Alcotest.test_case "texts" `Quick refusals_are_told_apart
         ] )
     ]

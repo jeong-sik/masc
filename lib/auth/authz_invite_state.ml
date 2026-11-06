@@ -11,10 +11,15 @@ type status =
   | Revoked
   | Consumed of User_id.t
 
+type issuer =
+  | Local_operator_issued
+  | Admin_issued of User_id.t
+
 type invitation =
   { token_digest : E.Token_digest.t
   ; expires_at_ms : int
   ; role : E.role
+  ; issuer : issuer
   ; status : status
   }
 
@@ -74,14 +79,14 @@ let refusal_to_string = function
   | Not_an_invite_author author -> author_label author ^ " does not write invitations"
 ;;
 
-let issue t ~invite_id ~token_digest ~expires_at_ms ~role =
+let issue t ~issuer ~invite_id ~token_digest ~expires_at_ms ~role =
   let digest_key = E.Token_digest.to_hex token_digest in
   match Invite_map.mem invite_id t.by_id, Digest_map.find_opt digest_key t.by_digest with
   | true, (None | Some _) -> Error (Already_issued invite_id)
   | false, Some holder -> Error (Token_digest_taken holder)
   | false, None ->
     Ok
-      { by_id = Invite_map.add invite_id { token_digest; expires_at_ms; role; status = Open } t.by_id
+      { by_id = Invite_map.add invite_id { token_digest; expires_at_ms; role; issuer; status = Open } t.by_id
       ; by_digest = Digest_map.add digest_key invite_id t.by_digest
       }
 ;;
@@ -138,12 +143,12 @@ let consume t invite_id ~user_id ~at_ms =
 let apply t ~(author : Author.t) ~is_admin (event : E.t) =
   match author, event with
   | Author.Local_operator, E.Issued { invite_id; token_digest; expires_at_ms; role = E.Admin } ->
-    issue t ~invite_id ~token_digest ~expires_at_ms ~role:E.Admin
+    issue t ~issuer:Local_operator_issued ~invite_id ~token_digest ~expires_at_ms ~role:E.Admin
   | Author.Local_operator, E.Issued { role = E.Member; _ } ->
     Error Local_operator_invites_only_admins
   | Author.Local_operator, E.Revoked { invite_id } -> revoke t ~invite_id
   | Author.Authenticated (Principal.Human id), E.Issued { invite_id; token_digest; expires_at_ms; role }
-    when is_admin id -> issue t ~invite_id ~token_digest ~expires_at_ms ~role
+    when is_admin id -> issue t ~issuer:(Admin_issued id) ~invite_id ~token_digest ~expires_at_ms ~role
   | Author.Authenticated (Principal.Human id), E.Revoked { invite_id } when is_admin id ->
     revoke t ~invite_id
   | Author.Authenticated ((Principal.Human _ | Principal.Service _) as principal), (E.Issued _ | E.Revoked _)

@@ -149,6 +149,14 @@ let wrap_indented_line ~max_cells style text =
 let wrap_indented_lines ~max_cells style lines =
   List.concat_map (wrap_indented_line ~max_cells style) lines
 
+(* A key hint row is a list of "key: label" clauses. [pack_clauses] ends a row
+   between two clauses; [wrap_words] on the joined text ends it at any space,
+   which can leave a key at the end of one row and its label at the start of
+   the next. *)
+let wrap_indented_clauses ~max_cells style clauses =
+  Message_layout.pack_clauses ~max_cells:(max 1 max_cells) clauses
+  |> List.map (fun line -> style, "  " ^ line)
+
 let lane_overview_summary_block ~cols ~label ~purpose ~left_title ~left_rows
     ~right_title ~right_rows ~actions =
   let max_cells = max 1 (framed_inner_width cols - 2) in
@@ -158,7 +166,7 @@ let lane_overview_summary_block ~cols ~label ~purpose ~left_title ~left_rows
        (Terminal_text.single_line purpose))
   @ split_summary_columns ~cols
       ~left_title ~left_rows ~right_title ~right_rows
-  @ wrap_indented_line ~max_cells (Theme.info ()) actions
+  @ wrap_indented_clauses ~max_cells (Theme.info ()) actions
 
 let failover_candidate_rows ?(no_slot_count = 0) ~admitted_slots ~cli_slots
     ~dropped_slots () =
@@ -175,8 +183,16 @@ let failover_candidate_rows ?(no_slot_count = 0) ~admitted_slots ~cli_slots
      | dropped ->
        [ Theme.warn (), "탈락 후보: " ^ ordered_slot_list dropped ])
 
+let toggle_action = "Space: 켜기/끄기"
+let full_detail_action = "d: 전체 상세"
+
 let exact_lane_overview_actions =
-  "Enter: 실행 기록 · s: 모델 순서 변경 · a: 후보 추가 · Space: 켜기/끄기 · d: 상세(슬롯통계·설정·계약)"
+  [ "Enter: 실행 기록"
+  ; "s: 모델 순서 변경"
+  ; "a: 후보 추가"
+  ; toggle_action
+  ; "d: 상세(슬롯통계·설정·계약)"
+  ]
 
 (* Concise two-column summary for the bottom pane of MASC Features.
    Focuses on the 3 operator questions:
@@ -237,7 +253,7 @@ let toggleable_lane_summary_columns ~state_line ~off_note ~right_title
   , [ Ansi.reset, "구분:   " ^ kind_label
     ; Theme.recede (), "식별자: " ^ row_id
     ]
-  , open_hint ^ " · Space: 켜기/끄기 · d: 전체 상세" )
+  , [ open_hint; toggle_action; full_detail_action ] )
 
 let inventory_row_summary_lines ~cols ~standing ~selected_output
     (row : Masc.Tui_decode_lane_inventory.row) =
@@ -288,7 +304,7 @@ let inventory_row_summary_lines ~cols ~standing ~selected_output
       , [ Ansi.reset, "구분:   Browser 레인"
         ; Theme.recede (), "식별자: " ^ row.id
         ]
-      , "Enter: 브라우저 열기 · d: 전체 상세" )
+      , [ "Enter: 브라우저 열기"; full_detail_action ] )
     | Machine_state _ ->
       toggleable_lane_summary_columns ~state_line
         ~off_note:"머신 상태와 체크포인트 보존"
@@ -351,9 +367,9 @@ let inventory_row_summary_lines ~cols ~standing ~selected_output
       , state_line :: decl_rows
       , "실행 워커 · 출력 바인딩"
       , worker_rows @ output_or_source_rows
-      , if has_outputs then
-          "Enter: 열기 · [ / ]: 출력 선택 · e: 설정 편집 · d: 전체 상세"
-        else "Enter: 열기 · d: 전체 상세" )
+      , ("Enter: 열기"
+         :: (if has_outputs then [ "[ / ]: 출력 선택"; "e: 설정 편집" ] else [])
+         @ [ full_detail_action ]) )
   in
   lane_overview_summary_block ~cols ~label:row.label ~purpose:row.purpose
     ~left_title ~left_rows ~right_title ~right_rows ~actions

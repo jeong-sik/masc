@@ -78,10 +78,6 @@ let test_default_workspace_state_constants () =
       assert (st.protocol_version = "0.1.0");
       assert (st.message_seq = 0);
       assert (st.active_agents = []);
-      assert (st.paused = false);
-      assert (st.pause_reason = None);
-      assert (st.paused_by = None);
-      assert (st.paused_at = None);
       (* started_at is non-empty (now_iso ()). *)
       assert (st.started_at <> ""))
 
@@ -670,7 +666,7 @@ let test_state_seed_rechecks_inside_lease_fence () =
       let config = Workspace.default_config dir in
       let path = Workspace_utils.state_path config in
       let key = Option.get (Workspace_utils.key_of_path config path) in
-      let prior = { (B.default_workspace_state config) with paused = true } in
+      let prior = { (B.default_workspace_state config) with project = "seeded-inside-fence" } in
       let seam = Backend.FileSystem.after_lease_owner_read_hook in
       let previous = Atomic.get seam in
       let inserted = ref false in
@@ -688,7 +684,7 @@ let test_state_seed_rechecks_inside_lease_fence () =
       in
       assert !inserted;
       assert (String.equal result "MASC already initialized.");
-      assert ((Workspace.read_state config).paused))
+      assert (String.equal (Workspace.read_state config).project "seeded-inside-fence"))
 
 (* ── runner ───────────────────────────────────────────────── *)
 

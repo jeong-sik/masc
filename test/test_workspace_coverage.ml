@@ -1622,50 +1622,6 @@ let test_claim_next_while_holding_does_not_emit_release_observability () =
 ;;
 
 (* ============================================================ *)
-(* Pause/Resume Tests                                            *)
-(* ============================================================ *)
-
-let test_pause_workspace () =
-  with_test_env (fun config ->
-    Workspace.pause config ~by:"claude" ~reason:"Testing pause";
-    Alcotest.(check bool) "workspace is paused" true (Workspace.is_paused config))
-;;
-
-let test_resume_workspace () =
-  with_test_env (fun config ->
-    Workspace.pause config ~by:"claude" ~reason:"Testing pause";
-    let result = Workspace.resume config ~by:"claude" in
-    match result with
-    | `Resumed -> Alcotest.(check bool) "workspace resumed" true (not (Workspace.is_paused config))
-    | _ -> Alcotest.fail "Expected Resumed")
-;;
-
-let test_resume_not_paused () =
-  with_test_env (fun config ->
-    let result = Workspace.resume config ~by:"claude" in
-    match result with
-    | `Already_running -> ()
-    | _ -> Alcotest.fail "Expected Already_running")
-;;
-
-let test_pause_info () =
-  with_test_env (fun config ->
-    Workspace.pause config ~by:"claude" ~reason:"Maintenance";
-    match Workspace.pause_info config with
-    | Some (Some by, Some reason, Some _) ->
-      Alcotest.(check string) "paused by" "claude" by;
-      Alcotest.(check string) "reason" "Maintenance" reason
-    | _ -> Alcotest.fail "Expected pause info")
-;;
-
-let test_pause_info_not_paused () =
-  with_test_env (fun config ->
-    match Workspace.pause_info config with
-    | None -> ()
-    | Some _ -> Alcotest.fail "Expected None")
-;;
-
-(* ============================================================ *)
 (* Raw Data Accessor Tests                                       *)
 (* ============================================================ *)
 
@@ -3455,14 +3411,6 @@ let () =
             "claim_next while holding a task no release fan-out"
             `Quick
             test_claim_next_while_holding_does_not_emit_release_observability
-        ] )
-    ; (* === Pause/Resume === *)
-      ( "pause_resume"
-      , [ Alcotest.test_case "pause" `Quick test_pause_workspace
-        ; Alcotest.test_case "resume" `Quick test_resume_workspace
-        ; Alcotest.test_case "resume not paused" `Quick test_resume_not_paused
-        ; Alcotest.test_case "pause info" `Quick test_pause_info
-        ; Alcotest.test_case "pause info not paused" `Quick test_pause_info_not_paused
         ] )
     ; (* === Raw Data Accessors === *)
       ( "raw_data"

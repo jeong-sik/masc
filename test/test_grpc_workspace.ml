@@ -759,7 +759,7 @@ let test_heartbeat_projects_workspace_view () =
     | _ -> Alcotest.fail "Heartbeat bidi handler missing")
 ;;
 
-let test_heartbeat_projects_keeper_pause_not_workspace_pause () =
+let test_heartbeat_projects_keeper_pause () =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -778,7 +778,6 @@ let test_heartbeat_projects_keeper_pause_not_workspace_pause () =
          ~base_path:workspace_config.base_path
          keeper_name
          meta);
-    Masc.Workspace.pause workspace_config ~by:"operator" ~reason:"maintenance";
     let service =
       Masc_grpc_service.create_service
         ~workspace_config
@@ -803,12 +802,11 @@ let test_heartbeat_projects_keeper_pause_not_workspace_pause () =
           Grpc_eio.Stream.take response_stream)
         |> T.HeartbeatAck.of_bytes
       in
-      let workspace_paused_ack = send_heartbeat "sess-workspace-pause" in
+      let running_ack = send_heartbeat "sess-keeper-running" in
       Alcotest.(check (list string))
-        "workspace pause does not become a durable keeper pause"
+        "a running keeper gets no directive"
         []
-        (List.map directive_label workspace_paused_ack.directives);
-      ignore (Masc.Workspace.resume workspace_config ~by:"operator");
+        (List.map directive_label running_ack.directives);
       ignore
         (Keeper_registry.For_testing.register
            ~base_path:workspace_config.base_path
@@ -938,9 +936,9 @@ let () =
             `Quick
             test_heartbeat_projects_workspace_view
         ; Alcotest.test_case
-            "heartbeat projects keeper pause only"
+            "heartbeat projects keeper pause"
             `Quick
-            test_heartbeat_projects_keeper_pause_not_workspace_pause
+            test_heartbeat_projects_keeper_pause
         ; Alcotest.test_case
             "heartbeat leaves uninitialized workspace absent"
             `Quick

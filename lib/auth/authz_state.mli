@@ -62,8 +62,11 @@ type refusal =
   | Admission_unreadable of Authz_admission_event.error
   | Admission of Authz_principal_state.refusal
   | Revocation_pending of Authz_records.Subject.t
-      (** The record spends what a revocation that the store gave up was about
+      (** The record spends what a revocation that the store gave up was about,
+          or its author is a principal whose revocation the store gave up
           (design 8.3). *)
+  | Admin_assignment_unreadable of Authz_admin_event.error
+  | Admin_assignment of Authz_principal_state.revocation_refusal
   | Accounts_off of Authz_record.Kind.t
       (** The mode is [Off], and a record of this kind is not written while the
           accounts are off (design 10.5). *)
@@ -80,7 +83,8 @@ val refusal_to_string : refusal -> string
     so a log restored from before the revocation does not open the invitation
     again (design 5.1-4). An admission has one, a [Grant] on the principal it
     makes: it spends a token that opens once (design 5.1-3), and an Admin
-    invitation also raises the role epoch of that principal. *)
+    invitation also raises the role epoch of that principal. The revocation
+    of an Admin assignment is a [Revoke] on its principal. *)
 type applied =
   { state : t
   ; high_water : Authz_external_store.Change.t option

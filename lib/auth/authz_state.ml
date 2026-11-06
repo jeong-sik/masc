@@ -38,6 +38,8 @@ type refusal =
   | Admission_unreadable of Authz_admission_event.error
   | Admission of Authz_principal_state.refusal
   | Revocation_pending of Authz_records.Subject.t
+  | Admin_assignment_unreadable of Authz_admin_event.error
+  | Admin_assignment of Authz_principal_state.revocation_refusal
   | Accounts_off of K.t
   | Kind_not_read of K.t
 
@@ -58,6 +60,9 @@ let refusal_to_string = function
       "a revocation of %s was given up before it reached the log, so %s stays blocked"
       (Authz_records.Subject.to_string subject)
       (Authz_records.Subject.to_string subject)
+  | Admin_assignment_unreadable error ->
+    "the Admin assignment record cannot be read: " ^ Authz_admin_event.error_to_string error
+  | Admin_assignment refusal -> Authz_principal_state.revocation_refusal_to_string refusal
   | Accounts_off kind ->
     Printf.sprintf "the accounts are off, and no %s record is written while they are" (K.to_string kind)
   | Kind_not_read kind -> Printf.sprintf "no layer of this server reads %s records" (K.to_string kind)
@@ -90,7 +95,13 @@ let invite state (record : R.t) =
   match Authz_invite_event.of_body record.R.body with
   | Error error -> Error (Invite_unreadable error)
   | Ok event ->
-    (match Authz_invite_state.apply state.invites ~author:record.R.author event with
+    (match
+       Authz_invite_state.apply
+         state.invites
+         ~author:record.R.author
+         ~is_admin:(Authz_principal_state.is_admin state.principals)
+         event
+     with
      | Ok invites ->
        let high_water =
          match event with
@@ -140,10 +151,33 @@ let admission state (record : R.t) =
          })
 ;;
 
+(* An Admin assignment that ends lowers the role epoch of its principal
+   (design 8.1), so the store takes a [Revoke] on that principal. *)
+let admin_assignment state (record : R.t) =
+  match Authz_admin_event.of_body record.R.body with
+  | Error error -> Error (Admin_assignment_unreadable error)
+  | Ok (Authz_admin_event.Revoked { user_id; cause = _ } as event) ->
+    let held id =
+      is_pending state (Authz_records.Subject.Principal (Authz_types.Principal.Human id))
+    in
+    (match Authz_principal_state.revoke_admin state.principals ~author:record.R.author ~held event with
+     | Error refusal -> Error (Admin_assignment refusal)
+     | Ok principals ->
+       Ok
+         { state = { state with principals }
+         ; high_water =
+             Some
+               (Authz_external_store.Change.Authz
+                  { event = Authz_external_store.Change.Revoke
+                  ; subject = Authz_records.Subject.Principal (Authz_types.Principal.Human user_id)
+                  })
+         })
+;;
+
 (* Every kind but a mode event is matched with the mode, so the branch of a
    kind says what a record of it means before the bootstrap, and a layer gets
    the workspace of the bootstrap only from a branch that has one. *)
-let apply state (record : R.t) =
+let read state (record : R.t) =
   match record.R.kind, state.mode with
   | K.Mode_event, (Authz_mode_state.Not_bootstrapped | Multi_account _ | Off _) ->
     mode_event state record
@@ -151,6 +185,8 @@ let apply state (record : R.t) =
   | K.Invite, Authz_mode_state.Off _ -> Error (Accounts_off K.Invite)
   | K.Admission, Authz_mode_state.Multi_account _ -> admission state record
   | K.Admission, Authz_mode_state.Off _ -> Error (Accounts_off K.Admission)
+  | K.Admin_assignment, Authz_mode_state.Multi_account _ -> admin_assignment state record
+  | K.Admin_assignment, Authz_mode_state.Off _ -> Error (Accounts_off K.Admin_assignment)
   | ( ( K.Runtime_grant
       | K.Delegate_policy
       | K.Principal
@@ -174,9 +210,28 @@ let apply state (record : R.t) =
       | K.Lease_terminal_evidence
       | K.Preauthorized_expiry
       | K.Migration_diagnostic
-      | K.Local_recovery
-      | K.Admin_assignment ) as kind )
+      | K.Local_recovery ) as kind )
     , (Authz_mode_state.Multi_account _ | Off _) -> Error (Kind_not_read kind)
+;;
+
+(* A principal whose revocation the store gave up writes nothing (design 8.3):
+   an Admin whose assignment was being revoked neither invites nor revokes
+   another Admin while the block stands. *)
+let blocked_author state (author : Authz_records.Author.t) =
+  match author with
+  | Authz_records.Author.Authenticated principal ->
+    let subject = Authz_records.Subject.Principal principal in
+    if is_pending state subject then Some subject else None
+  | Authz_records.Author.Local_operator
+  | Authz_records.Author.System_cron
+  | Authz_records.Author.System_maintenance
+  | Authz_records.Author.System_migration -> None
+;;
+
+let apply state (record : R.t) =
+  match blocked_author state record.R.author with
+  | Some subject -> Error (Revocation_pending subject)
+  | None -> read state record
 ;;
 
 let step state record =

@@ -6,11 +6,12 @@
     B3c-1). {!Authz_state} keeps one of these as its field and hands it every
     invite record of a bootstrapped log.
 
-    {b Who may write.} In this layer the local operator issues invitations with
-    the role [Admin] and revokes any invitation. That is how the first Admin is
-    made (plan B3, the first Admin). An invitation by an authenticated principal
-    needs to know who the Admins are, and the layer that reads the Admins
-    (B3c-3) opens it. Until then such a record is refused.
+    {b Who may write.} The local operator issues invitations with the role
+    [Admin] and revokes any invitation. That is how the first Admin is made
+    (plan B3, the first Admin). An Admin issues invitations of either role and
+    revokes any invitation (plan B3c-3). Who is an Admin is for the caller to
+    say ([is_admin] of {!apply}), as the Admins are made by admissions, which
+    this module does not read.
 
     {b Identity.} An invite id and a token digest name one invitation for
     good: a revoked invitation keeps both, so a second invitation can take
@@ -54,8 +55,9 @@ type refusal =
   | Already_consumed of Authz_types.Invite_id.t
   | Local_operator_invites_only_admins
       (** The local operator issued an invitation with the role [Member]. *)
-  | Authenticated_author_not_read of Authz_types.Principal.t
-      (** No layer reads yet whether this principal may write invitations. *)
+  | Author_is_not_an_admin of Authz_types.Principal.t
+      (** An authenticated principal that is not an Admin. A service has no
+          Admin role (design 4.1). *)
   | Not_an_invite_author of Authz_records.Author.t
       (** A system author, which {!Authz_record.admits} does not let write an
           invite record. *)
@@ -86,9 +88,11 @@ val consume
   -> at_ms:int
   -> (t * Authz_invite_event.role, consume_refusal) result
 
-(** What one invite record does to the invitations. *)
+(** What one invite record does to the invitations. [is_admin] says whether a
+    human principal has an Admin assignment in force. *)
 val apply
   :  t
   -> author:Authz_records.Author.t
+  -> is_admin:(Authz_types.User_id.t -> bool)
   -> Authz_invite_event.t
   -> (t, refusal) result

@@ -29,19 +29,22 @@ let refusal_name : I.refusal -> string = function
   | I.Already_revoked id -> "already revoked " ^ Invite_id.to_string id
   | I.Already_consumed id -> "already consumed " ^ Invite_id.to_string id
   | I.Local_operator_invites_only_admins -> "local operator invites only admins"
-  | I.Authenticated_author_not_read principal ->
-    "authenticated author not read " ^ Principal.to_string principal
+  | I.Author_is_not_an_admin principal -> "not an admin " ^ Principal.to_string principal
   | I.Not_an_invite_author _ -> "not an invite author"
 ;;
 
+(* Only alice is an Admin in these checks. *)
+let alice_id = get (User_id.of_string "alice")
+let is_admin id = User_id.equal id alice_id
+
 let apply_ok ?(author = Author.Local_operator) t event =
-  match I.apply t ~author event with
+  match I.apply t ~author ~is_admin event with
   | Ok t -> t
   | Error refusal -> Alcotest.failf "refused: %s" (refusal_name refusal)
 ;;
 
 let check_refused label ?(author = Author.Local_operator) t event expected =
-  match I.apply t ~author event with
+  match I.apply t ~author ~is_admin event with
   | Ok _ -> Alcotest.failf "%s: the event was taken" label
   | Error refusal -> Alcotest.(check string) label expected (refusal_name refusal)
 ;;
@@ -79,15 +82,20 @@ let who_may_write_what () =
     I.empty
     (issued ~role:E.Member ())
     "local operator invites only admins";
+  let bob = Principal.Human (get (User_id.of_string "bob")) in
+  let keeper = Principal.Service (get (Service_id.of_string "keeper-1")) in
   List.iter
-    (fun event ->
-      check_refused
-        "an authenticated principal"
-        ~author:(Author.Authenticated alice)
-        (apply_ok I.empty (issued ()))
-        event
-        "authenticated author not read human:alice")
-    [ issued ~invite_id:second ~token:"token-2" (); E.Revoked { invite_id = first } ];
+    (fun (author, expected) ->
+      List.iter
+        (fun event ->
+          check_refused
+            ("an authenticated principal that is not an Admin: " ^ expected)
+            ~author:(Author.Authenticated author)
+            (apply_ok I.empty (issued ()))
+            event
+            expected)
+        [ issued ~invite_id:second ~token:"token-2" (); E.Revoked { invite_id = first } ])
+    [ bob, "not an admin human:bob"; keeper, "not an admin service:keeper-1" ];
   List.iter
     (fun author ->
       check_refused "a system author" ~author I.empty (issued ()) "not an invite author")
@@ -167,6 +175,27 @@ let an_admission_spends_an_invitation_once () =
       (consume_name (I.consume revoked first ~user_id:bob ~at_ms:9))
 ;;
 
+(* An Admin issues invitations of either role and revokes any invitation, the
+   one the local operator issued included. *)
+let an_admin_invites_and_revokes () =
+  let by_alice = Author.Authenticated alice in
+  let t = apply_ok I.empty (issued ()) in
+  let t =
+    apply_ok ~author:by_alice t (issued ~invite_id:second ~token:"token-2" ~role:E.Member ())
+  in
+  (match I.find t second with
+   | Some { I.status = I.Open; role = E.Member; _ } -> ()
+   | Some _ | None -> Alcotest.fail "the Member invitation is not open");
+  let t = apply_ok ~author:by_alice t (E.Revoked { invite_id = first }) in
+  check_status "the invitation of the local operator" t first "revoked";
+  check_refused
+    "the same digest again"
+    ~author:by_alice
+    t
+    (issued ~invite_id:(invite_of "invite-3") ~token:"token-2" ())
+    "token digest taken by invite-2"
+;;
+
 let refusals_are_told_apart () =
   let texts =
     List.map
@@ -177,7 +206,7 @@ let refusals_are_told_apart () =
       ; I.Already_revoked first
       ; I.Already_consumed first
       ; I.Local_operator_invites_only_admins
-      ; I.Authenticated_author_not_read alice
+      ; I.Author_is_not_an_admin alice
       ; I.Not_an_invite_author Author.System_cron
       ]
   in
@@ -197,6 +226,7 @@ let () =
         ; Alcotest.test_case "one invitation for good" `Quick
             an_id_and_a_digest_name_one_invitation_for_good
         ; Alcotest.test_case "revocation" `Quick a_revocation
+        ; Alcotest.test_case "by an Admin" `Quick an_admin_invites_and_revokes
         ; Alcotest.test_case "spent once" `Quick an_admission_spends_an_invitation_once
         ; Alcotest.test_case "texts" `Quick refusals_are_told_apart
         ] )

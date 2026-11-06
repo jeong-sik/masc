@@ -320,6 +320,8 @@ let refusal_name : Authz_state.refusal -> string = function
   | Authz_state.Admission_unreadable _ -> "Admission_unreadable"
   | Authz_state.Admission _ -> "Admission"
   | Authz_state.Revocation_pending _ -> "Revocation_pending"
+  | Authz_state.Admin_assignment_unreadable _ -> "Admin_assignment_unreadable"
+  | Authz_state.Admin_assignment _ -> "Admin_assignment"
   | Authz_state.Accounts_off kind -> "Accounts_off " ^ R.Kind.to_string kind
   | Authz_state.Kind_not_read kind -> "Kind_not_read " ^ R.Kind.to_string kind
 ;;
@@ -676,11 +678,18 @@ module Invite_event = Authz_invite_event
 
 let invite_id = get (Authz_types.Invite_id.of_string "invite-1")
 
-let invite_draft ?(author = Author.Local_operator) ?(at_ms = at_ms + 1) () : Z.draft =
+let invite_draft
+  ?(author = Author.Local_operator)
+  ?(at_ms = at_ms + 1)
+  ?(invite_id = invite_id)
+  ?(token = "token-1")
+  ()
+  : Z.draft
+  =
   let event =
     Invite_event.Issued
       { invite_id
-      ; token_digest = Invite_event.Token_digest.of_token "token-1"
+      ; token_digest = Invite_event.Token_digest.of_token token
       ; expires_at_ms = at_ms + 1000
       ; role = Invite_event.Admin
       }
@@ -813,19 +822,22 @@ let an_admin_admission_has_an_intent () =
       (Authz_principal_state.is_admin opened.replay.Z.Replay.state.Authz_state.principals person))
 ;;
 
-let admission_draft ~at_ms : Z.draft =
-  let person = get (User_id.of_string "0123456789abcdef0123456789abcdef") in
-  let identity = get (Authz_external_identity.google ~sub:"111") in
+let first_admin = get (User_id.of_string "0123456789abcdef0123456789abcdef")
+
+let admission_draft_of ~person ~sub ~invite_id ~at_ms : Z.draft =
+  let identity = get (Authz_external_identity.google ~sub) in
   match Authz_admission_event.to_body { Authz_admission_event.user_id = person; identity; invite_id } with
   | Ok body -> { Z.at_ms; author = Author.Authenticated (Principal.Human person); kind = R.Kind.Admission; body }
   | Error _ -> Alcotest.fail "fixture admission refused"
 ;;
 
+let admission_draft ~at_ms = admission_draft_of ~person:first_admin ~sub:"111" ~invite_id ~at_ms
+
 (* The intent that a commit of the revocation [draft] at [head] writes. *)
-let revocation_intent ~head draft : S.intent =
+let revocation_intent ?(subject = Subject.Invite invite_id) ~head draft : S.intent =
   { S.previous_record_hash = R.head_hash head
   ; intended_next_record_digest = (record_at ~head draft).R.hash
-  ; change = S.Change.Authz { event = S.Change.Revoke; subject = Subject.Invite invite_id }
+  ; change = S.Change.Authz { event = S.Change.Revoke; subject }
   }
 ;;
 
@@ -906,6 +918,73 @@ let a_block_outlives_a_commit_that_fails_after_the_abort () =
       "Refused Revocation_pending"
       (open_zone dirs)
       (admission_draft ~at_ms:(at_ms + 4)))
+;;
+
+(* ---- Admin assignments ---- *)
+
+let second_admin = get (User_id.of_string "fedcba9876543210fedcba9876543210")
+let second_invite_id = get (Authz_types.Invite_id.of_string "invite-2")
+let third_invite_id = get (Authz_types.Invite_id.of_string "invite-3")
+
+let admin_revocation_draft ~by ~user_id ~at_ms : Z.draft =
+  match
+    Authz_admin_event.to_body
+      (Authz_admin_event.Revoked { user_id; cause = Authz_admin_event.Operational })
+  with
+  | Ok body ->
+    { Z.at_ms; author = Author.Authenticated (Principal.Human by); kind = R.Kind.Admin_assignment; body }
+  | Error _ -> Alcotest.fail "fixture Admin revocation refused"
+;;
+
+(* Two Admins, and a revocation of the second that the store gave up. The
+   second Admin joined before the revocation began, so a restart reads that
+   admission as the writer did and starts the block after it: the log opens,
+   the second Admin writes nothing, and the first is the last Admin who can. *)
+let an_aborted_admin_revocation_starts_after_the_admission () =
+  with_dirs (fun dirs ->
+    let (_ : B.completed) = bootstrap dirs in
+    let zone = open_zone dirs in
+    let (_ : Z.committed) = commit_ok zone (invite_draft ()) in
+    let (_ : Z.committed) =
+      commit_ok zone (invite_draft ~at_ms:(at_ms + 2) ~invite_id:second_invite_id ~token:"token-2" ())
+    in
+    let (_ : Z.committed) = commit_ok zone (admission_draft ~at_ms:(at_ms + 3)) in
+    let (_ : Z.committed) =
+      commit_ok
+        zone
+        (admission_draft_of ~person:second_admin ~sub:"222" ~invite_id:second_invite_id ~at_ms:(at_ms + 4))
+    in
+    let revoke = admin_revocation_draft ~by:first_admin ~user_id:second_admin ~at_ms:(at_ms + 5) in
+    let subject = Subject.Principal (Principal.Human second_admin) in
+    let left = revocation_intent ~subject ~head:(Z.snapshot zone).Z.head revoke in
+    with_foreign_lock ~lock_path:(Fs_compat.private_jsonl_lock_path (log_file dirs)) (fun release ->
+      check_error
+        "a revocation while another process holds the log"
+        "Record_not_appended Write_locked"
+        zone
+        revoke;
+      release ());
+    let issued =
+      commit_ok zone (invite_draft ~at_ms:(at_ms + 6) ~invite_id:third_invite_id ~token:"token-3" ())
+    in
+    check_settled "the next record gives the revocation up" ("Abort " ^ intent_name left) issued;
+    let opened = check_restart "a restart" dirs ~mode:on ~head:issued.Z.record_hash in
+    check_blocked "the replay blocks the second Admin" [ Subject.to_string subject ] opened.replay.Z.Replay.state;
+    Alcotest.(check bool)
+      "the replay keeps the admission of the second Admin"
+      true
+      (Authz_principal_state.is_admin opened.replay.Z.Replay.state.Authz_state.principals second_admin);
+    let restarted = open_zone dirs in
+    check_error
+      "the second Admin writes"
+      "Refused Revocation_pending"
+      restarted
+      (admin_revocation_draft ~by:second_admin ~user_id:first_admin ~at_ms:(at_ms + 7));
+    check_error
+      "the first Admin revokes their own"
+      "Refused Admin_assignment"
+      restarted
+      (admin_revocation_draft ~by:first_admin ~user_id:first_admin ~at_ms:(at_ms + 7)))
 ;;
 
 let a_refused_invite_writes_nothing () =
@@ -1365,6 +1444,10 @@ let () =
             "a block outlives a commit that fails after the abort"
             `Quick
             a_block_outlives_a_commit_that_fails_after_the_abort
+        ; Alcotest.test_case
+            "an aborted Admin revocation starts after the admission"
+            `Quick
+            an_aborted_admin_revocation_starts_after_the_admission
         ] )
     ; ( "refusals"
       , [ Alcotest.test_case "refused records write nothing" `Quick refused_records_write_nothing

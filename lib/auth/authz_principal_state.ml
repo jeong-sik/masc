@@ -100,3 +100,38 @@ let admit t ~invites ~author ~at_ms ({ Authz_admission_event.user_id; identity; 
          in
          Ok { principals; invites; role }))
 ;;
+
+type revocation_refusal =
+  | Revoker_is_not_an_admin of Author.t
+  | Not_an_admin of User_id.t
+  | Last_admin of User_id.t
+
+let revocation_refusal_to_string = function
+  | Revoker_is_not_an_admin author ->
+    Printf.sprintf "%s is not an Admin, and only an Admin revokes an Admin assignment" (author_label author)
+  | Not_an_admin user_id -> Printf.sprintf "%s has no Admin assignment" (User_id.to_string user_id)
+  | Last_admin user_id ->
+    Printf.sprintf "%s is the last Admin, so the assignment stays" (User_id.to_string user_id)
+;;
+
+let author_is_an_admin t (author : Author.t) =
+  match author with
+  | Author.Authenticated (Principal.Human id) -> is_admin t id
+  | Author.Authenticated (Principal.Service _)
+  | Author.Local_operator
+  | Author.System_cron
+  | Author.System_maintenance
+  | Author.System_migration -> false
+;;
+
+let revoke_admin t ~author ~held (Authz_admin_event.Revoked { user_id; cause = _ }) =
+  if not (author_is_an_admin t author)
+  then Error (Revoker_is_not_an_admin author)
+  else if not (is_admin t user_id)
+  then Error (Not_an_admin user_id)
+  else (
+    let admins = User_id.Set.remove user_id t.admins in
+    if User_id.Set.exists (fun id -> not (held id)) admins
+    then Ok { t with admins }
+    else Error (Last_admin user_id))
+;;

@@ -17,7 +17,13 @@
     of design 5.1-3. Design 4.1 also keeps the id of a deleted principal from
     being given again. No layer deletes a principal yet (B3c-5 does), so every
     id that was ever given is still held here. The writer draws a user id of 128
-    bits from the OS CSPRNG and draws again when {!admit} refuses it as taken. *)
+    bits from the OS CSPRNG and draws again when {!admit} refuses it as taken.
+
+    {b Admins.} An admission through an Admin invitation makes an Admin
+    assignment, and a revocation ({!revoke_admin}) ends one. The last Admin
+    assignment in force is never revoked (design 5.1-5), so a log with one Admin
+    keeps one. An Admin whose revocation the store gave up writes nothing
+    (design 8.3), so that Admin does not count as the one that remains. *)
 
 type status = Active
 
@@ -69,3 +75,27 @@ val admit
   -> at_ms:int
   -> Authz_admission_event.t
   -> (admitted, refusal) result
+
+type revocation_refusal =
+  | Revoker_is_not_an_admin of Authz_records.Author.t
+      (** Only a human principal with an Admin assignment in force revokes one. *)
+  | Not_an_admin of Authz_types.User_id.t
+      (** The principal has no Admin assignment in force. *)
+  | Last_admin of Authz_types.User_id.t
+      (** Every other assignment in force is held, or there is none (design
+          5.1-5). *)
+
+val revocation_refusal_to_string : revocation_refusal -> string
+
+(** What one revocation of an Admin assignment does. The checks run in this
+    order: the author, the principal, the last Admin. An Admin may revoke their
+    own assignment while another Admin remains. [held] says whether the store
+    gave up a revocation of that principal (design 8.3), and an Admin it holds
+    is not one that remains. The cause changes nothing here in the first stage
+    (see {!Authz_admin_event}). *)
+val revoke_admin
+  :  t
+  -> author:Authz_records.Author.t
+  -> held:(Authz_types.User_id.t -> bool)
+  -> Authz_admin_event.t
+  -> (t, revocation_refusal) result

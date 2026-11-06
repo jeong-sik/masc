@@ -21,6 +21,22 @@ let require_ok = function
 
 let permission path = (Unix.lstat path).Unix.st_perm land 0o7777
 
+let rejection =
+  testable
+    (fun ppf rejection ->
+      Format.pp_print_string ppf
+        (Runtime_antigravity_oauth_credential.rejection_to_string rejection))
+    ( = )
+;;
+
+let keychain_rejection =
+  testable
+    (fun ppf rejection ->
+      Format.pp_print_string ppf
+        (Runtime_antigravity_oauth_credential.keychain_rejection_to_string rejection))
+    ( = )
+;;
+
 let test_prepares_private_home_with_oauth_seed () =
   with_temp_root
   @@ fun runtime_root ->
@@ -473,7 +489,8 @@ let test_corrupt_generation_never_reseeds_managed_state () =
     (match corruption, prepare () with
      | `Managed_malformed,
        Error (Runtime_antigravity_home.Unrecognized_managed_oauth
-                { rejection = Runtime_antigravity_oauth_credential.Not_json_object; _ }) -> ()
+                { path; rejection = Runtime_antigravity_oauth_credential.Not_json_object }) ->
+       check string "the refusal names the managed copy" token path
      | (`Record | `Record_permissions | `Missing_record | `Missing_token | `Managed_principal),
        Error (Runtime_antigravity_home.Invalid_managed_oauth _) -> ()
      | _, Error error -> fail (Runtime_antigravity_home.error_to_string error)
@@ -523,10 +540,12 @@ let test_interrupted_generation_creation_leaves_no_orphan () =
 ;;
 
 let test_managed_keychain_principal_must_match_selected_generation () =
+  let module C = Runtime_antigravity_oauth_credential in
   with_temp_root @@ fun runtime_root ->
   let oauth_source = Filename.concat runtime_root "source" in
   let owner_leaf = "keychain-principal" in
-  write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "account-a");
+  let login ?revision account = Masc_test_deps.antigravity_oauth_fixture ?revision account in
+  write_file ~mode:0o600 oauth_source (login "account-a");
   let sync dir =
     let fd = Unix.openfile dir [Unix.O_RDONLY; Unix.O_CLOEXEC] 0 in
     Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd) in
@@ -536,6 +555,7 @@ let test_managed_keychain_principal_must_match_selected_generation () =
       ~sync_store:sync
       ~read_keychain:(fun ~path -> observed := path :: !observed; keychain)
       ~runtime_root ~owner_leaf ~oauth_source () in
+  let saved value = Apple_keychain.Found (Masc_test_deps.antigravity_keychain_value value) in
   let first = prepare_with Apple_keychain.Missing |> require_ok in
   let home_dir = Runtime_antigravity_home.home_dir first in
   let store = Filename.dirname home_dir in
@@ -545,18 +565,31 @@ let test_managed_keychain_principal_must_match_selected_generation () =
   let managed_keychain = Filename.concat home_dir
       (Filename.concat "Library" (Filename.concat "Keychains" "login.keychain-db")) in
   check (list string) "fresh generation creation consults no keychain" [] !observed;
-  observed := [];
-  (match prepare_with (Apple_keychain.Found (Masc_test_deps.antigravity_oauth_fixture "account-b")) with
-   | Error (Runtime_antigravity_home.Invalid_managed_oauth _) -> ()
-   | Error error -> fail (Runtime_antigravity_home.error_to_string error)
-   | Ok _ -> fail "keychain principal from another account was admitted");
-  check (list string) "reuse consults the managed login keychain" [managed_keychain] !observed;
-  check (list string) "divergent keychain creates no replacement generation" entries_before
-    (Sys.readdir store |> Array.to_list |> List.sort String.compare);
-  check string "divergent keychain keeps the authoritative pointer" pointer_before (Fs_compat.load_file pointer);
-  let refreshed = prepare_with
-      (Apple_keychain.Found (Masc_test_deps.antigravity_oauth_fixture ~revision:"native-refresh" "account-a"))
-    |> require_ok in
+  let refuses label observation expected =
+    observed := [];
+    (match prepare_with observation, expected with
+     | Error (Runtime_antigravity_home.Invalid_managed_oauth { path; _ }), `Divergent ->
+       check string (label ^ ": names the managed keychain") managed_keychain path
+     | Error (Runtime_antigravity_home.Unrecognized_managed_keychain { path; rejection }),
+       `Unrecognized expected ->
+       check string (label ^ ": names the managed keychain") managed_keychain path;
+       check keychain_rejection label expected rejection
+     | Error error, _ -> fail (label ^ ": " ^ Runtime_antigravity_home.error_to_string error)
+     | Ok _, _ -> fail (label ^ ": the keychain item was admitted"));
+    check (list string) (label ^ ": reuse consults the managed login keychain")
+      [managed_keychain] !observed;
+    check (list string) (label ^ ": creates no replacement generation") entries_before
+      (Sys.readdir store |> Array.to_list |> List.sort String.compare);
+    check string (label ^ ": keeps the authoritative pointer") pointer_before
+      (Fs_compat.load_file pointer) in
+  refuses "another account" (saved (login "account-b")) `Divergent;
+  refuses "login JSON without go-keyring's encoding"
+    (Apple_keychain.Found (login "account-a")) (`Unrecognized C.Not_go_keyring_base64);
+  refuses "go-keyring prefix without base64"
+    (Apple_keychain.Found "go-keyring-base64:not base64") (`Unrecognized C.Not_go_keyring_base64);
+  refuses "encoded bytes that are no login"
+    (saved "{broken") (`Unrecognized (C.Keychain_login C.Not_json_object));
+  let refreshed = prepare_with (saved (login ~revision:"native-refresh" "account-a")) |> require_ok in
   check string "keychain refresh for the same principal preserves the generation" home_dir
     (Runtime_antigravity_home.home_dir refreshed);
   List.iter (fun observation ->
@@ -705,14 +738,6 @@ let test_native_roots_never_overlap_the_runtime_root () =
     Runtime_native_tools.[Native_none; Native_read; Native_full]
 ;;
 
-let rejection =
-  testable
-    (fun ppf rejection ->
-      Format.pp_print_string ppf
-        (Runtime_antigravity_oauth_credential.rejection_to_string rejection))
-    ( = )
-;;
-
 let test_unknown_account_identity_causes_no_managed_mutation () =
   let module C = Runtime_antigravity_oauth_credential in
   let edit fixture change =
@@ -720,15 +745,17 @@ let test_unknown_account_identity_causes_no_managed_mutation () =
     | `Assoc fields -> Yojson.Safe.to_string (`Assoc (change fields))
     | _ -> fail "fixture source must be an object" in
   let replace name value fields = (name, value) :: List.remove_assoc name fields in
+  let add name value fields = (name, value) :: fields in
+  let openid = Masc_test_deps.antigravity_oauth_fixture "fixture" in
+  let recorded = Masc_test_deps.antigravity_id_token_email_fixture "fixture" in
+  let encode text = Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet text in
+  let with_id_token token = edit openid (replace "id_token" (`String token)) in
   let with_claims claims =
-    let payload = Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet
-      (Yojson.Safe.to_string (`Assoc claims)) in
-    edit (Masc_test_deps.antigravity_oauth_fixture "fixture")
-      (replace "id_token" (`String ("synthetic-header." ^ payload ^ ".synthetic-signature"))) in
-  let id_token_email = Masc_test_deps.antigravity_id_token_email_fixture "fixture" in
-  let no_shape openid_id_token id_token_email = C.No_known_shape { openid_id_token; id_token_email } in
+    with_id_token ("synthetic-header." ^ encode (Yojson.Safe.to_string (`Assoc claims))
+                   ^ ".synthetic-signature") in
   let google = "iss", `String "https://accounts.google.com" in
   let email = "email", `String (Masc_test_deps.antigravity_account_email "fixture") in
+  let id_token problem = C.Invalid_id_token problem in
   List.iter (fun (label, source, expected) -> with_temp_root (fun runtime_root ->
     let oauth_source = Filename.concat runtime_root "invalid-source" in
     write_file ~mode:0o600 oauth_source source;
@@ -743,27 +770,72 @@ let test_unknown_account_identity_causes_no_managed_mutation () =
     [ "empty", "", C.Not_json_object
     ; "opaque", "opaque-token", C.Not_json_object
     ; "array", "[]", C.Not_json_object
-    ; "empty object", "{}", no_shape C.Auth_method C.Auth_method
-    ; "no account field", edit id_token_email (List.remove_assoc "id_token_email"),
-      no_shape C.Id_token C.Id_token_email
-    ; "blank recorded email", edit id_token_email (replace "id_token_email" (`String " ")),
-      no_shape C.Id_token C.Id_token_email
-    ; "token without refresh", edit id_token_email (fun fields ->
-          match List.assoc "token" fields with
-          | `Assoc token -> replace "token" (`Assoc (List.remove_assoc "refresh_token" token)) fields
-          | _ -> fail "fixture token must be an object"),
-      no_shape C.Token_refresh_token C.Token_refresh_token
+    ; "empty object", "{}", C.No_account_key
+    ; "no account key", edit recorded (List.remove_assoc "id_token_email"), C.No_account_key
+    ; "null account keys",
+      edit recorded (fun fields -> replace "id_token_email" `Null fields |> add "id_token" `Null),
+      C.No_account_key
+    ; "repeated recorded email",
+      edit recorded (add "id_token_email" (`String "other@example.test")), C.Repeated_account_key
+    ; "repeated id_token", edit openid (add "id_token" (`String "a.b.c")), C.Repeated_account_key
+    ; "both shapes for one email",
+      edit openid (add "id_token_email" (`String (Masc_test_deps.antigravity_account_email "fixture"))),
+      C.Both_account_keys
+    ; "both shapes for two emails",
+      edit openid (add "id_token_email" (`String "other@example.test")), C.Both_account_keys
+    ; "a broken id_token beside the email",
+      edit recorded (add "id_token" (`String "broken")), C.Both_account_keys
+    ; "blank recorded email", edit recorded (replace "id_token_email" (`String " ")),
+      C.Not_email_text C.Id_token_email
+    ; "recorded email with a space",
+      edit recorded (replace "id_token_email" (`String "a b@example.test")),
+      C.Not_email_text C.Id_token_email
+    ; "non-string recorded email", edit recorded (replace "id_token_email" (`Int 1)),
+      C.Unreadable_email C.Id_token_email
+    ; "non-string id_token", edit openid (replace "id_token" (`Int 1)), id_token C.Not_a_jwt
+    ; "two-segment JWT", with_id_token "synthetic-header.synthetic-payload", id_token C.Not_a_jwt
+    ; "empty JWT signature", with_id_token ("synthetic-header." ^ encode "{}" ^ "."),
+      id_token C.Not_a_jwt
+    ; "claims not base64url", with_id_token "synthetic-header.!!!.synthetic-signature",
+      id_token C.Claims_not_base64url
+    ; "claims not JSON",
+      with_id_token ("synthetic-header." ^ encode "{broken" ^ ".synthetic-signature"),
+      id_token C.Claims_not_json_object
+    ; "claims not an object",
+      with_id_token ("synthetic-header." ^ encode "[]" ^ ".synthetic-signature"),
+      id_token C.Claims_not_json_object
     ; "foreign issuer", with_claims ["iss", `String "https://unknown.invalid"; email],
-      no_shape C.Id_token_issuer C.Id_token_email
-    ; "no email claim", with_claims [google; "sub", `String "fixture"],
-      no_shape C.Id_token_email_claim C.Id_token_email
-    ; "null email claim", with_claims [google; "email", `Null],
-      no_shape C.Id_token_email_claim C.Id_token_email
+      id_token C.Issuer_not_google
+    ; "no issuer", with_claims [email], id_token C.Issuer_not_google
+    ; "repeated issuer", with_claims [google; google; email], id_token C.Issuer_not_google
+    ; "no email claim", with_claims [google; "sub", `String "fixture"], id_token C.No_email_claim
+    ; "null email claim", with_claims [google; "email", `Null], id_token C.No_email_claim
     ; "repeated email claim", with_claims [google; email; "email", `String "other@example.test"],
-      no_shape C.Id_token_email_claim C.Id_token_email
-    ; "both shapes", edit (Masc_test_deps.antigravity_oauth_fixture "fixture")
-        (replace "id_token_email" (`String (Masc_test_deps.antigravity_account_email "fixture"))),
-      C.Both_shapes ]
+      C.Unreadable_email C.Id_token_email_claim
+    ; "non-string email claim", with_claims [google; "email", `Int 1],
+      C.Unreadable_email C.Id_token_email_claim
+    ; "email claim with a space", with_claims [google; "email", `String "a b@example.test"],
+      C.Not_email_text C.Id_token_email_claim ]
+;;
+
+(* masc reads only the account keys, so the CLI's token envelope can take any
+   form without changing the account. *)
+let test_login_account_ignores_the_token_envelope () =
+  let module C = Runtime_antigravity_oauth_credential in
+  let without_envelope fixture =
+    match Yojson.Safe.from_string fixture with
+    | `Assoc fields ->
+      Yojson.Safe.to_string
+        (`Assoc (("token", `Int 1) :: List.filter (fun (key, _) ->
+           not (List.mem key ["token"; "auth_method"])) fields))
+    | _ -> fail "fixture source must be an object" in
+  let principal fixture = match C.account_email fixture with
+    | Ok email -> C.principal_sha256 email
+    | Error rejection -> fail (C.rejection_to_string rejection) in
+  List.iter (fun (label, fixture) ->
+    check string label (principal fixture) (principal (without_envelope fixture)))
+    [ "agy 1.2 login", Masc_test_deps.antigravity_oauth_fixture "fixture"
+    ; "agy 1.5 login", Masc_test_deps.antigravity_id_token_email_fixture "fixture" ]
 ;;
 
 (* agy 1.5 rewrote the operator's login file without [id_token] on
@@ -819,8 +891,10 @@ let test_cli_shape_rewrite_keeps_the_account_generation () =
   let home_dir = Runtime_antigravity_home.home_dir first in
   write_file ~mode:0o600 (Runtime_antigravity_home.oauth_path first)
     (recorded ~revision:"native-refresh" "account-a");
+  let saved login =
+    Apple_keychain.Found (Masc_test_deps.antigravity_keychain_value login) in
   let rewritten_copy =
-    prepare_with (Apple_keychain.Found (recorded ~revision:"native-refresh" "account-a"))
+    prepare_with (saved (recorded ~revision:"native-refresh" "account-a"))
     |> require_ok in
   check string "a rewritten managed copy keeps the generation" home_dir
     (Runtime_antigravity_home.home_dir rewritten_copy);
@@ -831,10 +905,35 @@ let test_cli_shape_rewrite_keeps_the_account_generation () =
   check string "the native refresh survives the rewrite"
     (recorded ~revision:"native-refresh" "account-a")
     (Fs_compat.load_file (Runtime_antigravity_home.oauth_path rewritten_source));
-  match prepare_with (Apple_keychain.Found (recorded "account-b")) with
+  match prepare_with (saved (recorded "account-b")) with
   | Error (Runtime_antigravity_home.Invalid_managed_oauth _) -> ()
   | Error error -> fail (Runtime_antigravity_home.error_to_string error)
   | Ok _ -> fail "a keychain item naming another email was admitted"
+;;
+
+(* Setup names a refusal of the selected login apart from a refusal of the
+   private account's saved copy. *)
+let test_setup_names_which_login_it_cannot_read () =
+  with_temp_root @@ fun runtime_root ->
+  let oauth_source = Filename.concat runtime_root "operator-oauth-token" in
+  let prepare () =
+    Runtime_antigravity_setup.prepare_from_credential_file ~runtime_root ~account_id:"setup"
+      ~oauth_source in
+  let expect label expected = match prepare () with
+    | Error actual when actual = expected -> ()
+    | Error actual -> fail (label ^ ": " ^ Runtime_antigravity_setup.error_message actual)
+    | Ok _ -> fail (label ^ ": admitted") in
+  write_file ~mode:0o600 oauth_source "{}";
+  expect "a selected login naming no account" Runtime_antigravity_setup.Unrecognized_credential;
+  write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_id_token_email_fixture "account-a");
+  let home = match prepare () with
+    | Ok home -> home
+    | Error error -> fail (Runtime_antigravity_setup.error_message error) in
+  let saved_copy = match Runtime_antigravity_setup.credential_reference home with
+    | Ok (Runtime_schema.File path) -> path
+    | _ -> fail "setup must reference its private copy" in
+  write_file ~mode:0o600 saved_copy "{broken";
+  expect "a saved copy masc cannot read" Runtime_antigravity_setup.Unrecognized_managed_credential
 ;;
 
 let test_rejects_non_private_or_indirect_oauth_source () =
@@ -1246,7 +1345,8 @@ let test_keychain_selection_and_private_account_switch () =
       Fs_compat.mkdir_p (Filename.dirname destination);
       write_file ~mode:0o600 destination "private keychain fixture");
     let active_keychain_account = ref (Some "old-private-account") in
-    let selected_account = ref (Apple_keychain.Found "selected-account-A") in
+    let saved login = Apple_keychain.Found (Masc_test_deps.antigravity_keychain_value login) in
+    let selected_account = ref (saved "selected-account-A") in
     let clears = ref 0 in
     let read_keychain ~path =
       check string "reads only explicitly selected source keychain" source_keychain path;
@@ -1260,7 +1360,7 @@ let test_keychain_selection_and_private_account_switch () =
       | Ok (Runtime_schema.File path) -> Fs_compat.load_file path | _ -> fail "private account reference" in
     check string "keychain wins over stale fallback" "selected-account-A" (reference ());
     active_keychain_account := Some "selected-account-A";
-    selected_account := Apple_keychain.Found "selected-account-B";
+    selected_account := saved "selected-account-B";
     check bool "second account imported" true (apply () = Ok ());
     check (option string) "old destination keychain cannot override B" None !active_keychain_account;
     check string "selected B copied" "selected-account-B" (reference ());
@@ -1269,11 +1369,16 @@ let test_keychain_selection_and_private_account_switch () =
     check bool "inaccessible keychain never falls back to stale file" true (apply () = Error S.Keychain_unavailable);
     check int "failed source selection leaves destination untouched" 2 !clears;
     check string "failed source selection preserves B" "selected-account-B" (reference ());
-    selected_account := Apple_keychain.Found "selected-account-C";
+    selected_account := saved "selected-account-C";
     check bool "destination reset failure rejects switch" true
       (S.For_testing.import_with ~read_keychain ~clear_keychain:(fun ~path:_ -> Error ())
         ~source_home account = Error S.Keychain_unavailable);
     check string "failed destination reset preserves B" "selected-account-B" (reference ());
+    selected_account := Apple_keychain.Found "selected-account-D";
+    check bool "a keychain value without go-keyring's encoding is refused" true
+      (apply () = Error S.Unrecognized_credential);
+    check int "an unrecognized keychain value leaves the destination untouched" 2 !clears;
+    check string "an unrecognized keychain value preserves B" "selected-account-B" (reference ());
     selected_account := Apple_keychain.Missing;
     check bool "true missing item permits canonical fallback" true (apply () = Ok ());
     check string "explicit fallback captured" "stale-file-account" (reference ());
@@ -1282,7 +1387,7 @@ let test_keychain_selection_and_private_account_switch () =
       (S.For_testing.import_with ~source_home:(S.home_dir account) account
          ~read_keychain:(fun ~path ->
            check string "capture reads own login keychain" destination path;
-           match !fresh_login with Some token -> Apple_keychain.Found token | None -> Unavailable)
+           match !fresh_login with Some token -> saved token | None -> Unavailable)
          ~clear_keychain:(fun ~path ->
            check string "capture clears only own login item" destination path;
            fresh_login := None; Ok ()) = Ok ());
@@ -1396,10 +1501,14 @@ let () =
             test_rejects_non_private_or_indirect_oauth_source
         ; test_case "unknown source identity causes no managed mutation" `Quick
             test_unknown_account_identity_causes_no_managed_mutation
+        ; test_case "login account ignores the token envelope" `Quick
+            test_login_account_ignores_the_token_envelope
         ; test_case "agy 1.5 login file selects its account generation" `Quick
             test_cli_1_5_login_file_selects_its_account_generation
         ; test_case "CLI shape rewrite keeps the account generation" `Quick
             test_cli_shape_rewrite_keeps_the_account_generation
+        ; test_case "setup names which login it cannot read" `Quick
+            test_setup_names_which_login_it_cannot_read
         ; test_case
             "runtime OAuth refresh survives preparation"
             `Quick

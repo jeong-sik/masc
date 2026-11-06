@@ -1,7 +1,8 @@
 (** Explicit Antigravity account selection, never called by catalog inspection. *)
 type t
 type error = Private_home_unavailable | Sign_in_required | Unsafe_credential
-  | Unrecognized_credential | Command_failed | Invalid_catalog | Keychain_unavailable
+  | Unrecognized_credential | Unrecognized_managed_credential | Command_failed | Invalid_catalog
+  | Keychain_unavailable
 val error_message : error -> string
 val prepare : runtime_root:string -> account_id:string -> (t, error) result
 val prepare_from_credential_file : runtime_root:string -> account_id:string ->
@@ -10,7 +11,9 @@ val home_dir : t -> string
 val environment : t -> string array
 val import_signed_in : source_home:string -> t -> (unit, error) result
 (** Read only the canonical CLI OAuth file or the explicitly named macOS
-    gemini/antigravity keychain item, then copy it into this private HOME.
+    gemini/antigravity keychain item, then copy its login JSON into this
+    private HOME. A keychain value is go-keyring's [go-keyring-base64:]
+    encoding of that JSON; any other value is [Unrecognized_credential].
     Never modify the source; call only after account selection. *)
 val capture_login : t -> (unit, error) result
 (** Capture authentication created by an explicit interactive [agy] sign-in. *)

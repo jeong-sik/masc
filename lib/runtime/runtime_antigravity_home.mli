@@ -32,7 +32,13 @@ type error =
       { path : string
       ; rejection : Runtime_antigravity_oauth_credential.rejection
       }
-      (** A managed copy (file or login-keychain item) matches no known shape. *)
+      (** The managed login file matches no known CLI login shape. *)
+  | Unrecognized_managed_keychain of
+      { path : string
+      ; rejection : Runtime_antigravity_oauth_credential.keychain_rejection
+      }
+      (** The managed login keychain at [path] holds a readable item that is
+          not go-keyring's encoding of a known CLI login. *)
   | Settings_write_failed of
       { path : string
       ; detail : string
@@ -87,8 +93,13 @@ val prepare
     effective-user-owned regular 0600 managed credential only when its principal
     still matches the generation record. A readable managed login-keychain item
     naming another principal refuses the same way, since keyring-first CLI reads
-    would resume that account; a missing or unreadable item leaves the file
-    authoritative. A missing pointer is first-time setup
+    would resume that account, and so does a readable item in no known
+    encoding. A missing or unreadable item leaves the file authoritative; an
+    item the CLI wrote is unreadable here, because its ACL admits only
+    /usr/bin/security. The principal is the login's email, so a source login
+    for an address Google gave to another account selects the previous
+    holder's generation, and its managed credential stays in use.
+    A missing pointer is first-time setup
     only in an empty owner store; populated stores refuse without reseeding.
     This local continuity
     identity is not cryptographic authentication or readiness evidence. Missing

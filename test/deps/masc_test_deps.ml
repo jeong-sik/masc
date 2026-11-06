@@ -713,6 +713,10 @@ let antigravity_id_token_email_fixture ?(revision = "initial") account =
     "token", `Assoc (antigravity_token_fields ~revision account @ ["expires_in", `Int 3599])])
 ;;
 
+(* A [gemini]/[antigravity] keychain value as go-keyring's macOS [Set] stores
+   [login]. *)
+let antigravity_keychain_value login = "go-keyring-base64:" ^ Base64.encode_string login
+
 (** Write [checkpoint] at [path] as the Keeper checkpoint store lays it out
     (RFC-0476 §3.2): its messages as one closed-turn bundle under
     [session_dir]'s objects, then a head that names it. Answers the head bytes.

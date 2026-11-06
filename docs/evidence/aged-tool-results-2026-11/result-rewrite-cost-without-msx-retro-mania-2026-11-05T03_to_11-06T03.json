@@ -1,0 +1,113 @@
+{
+  "params": {
+    "threshold": 2048,
+    "marker_bytes": 596,
+    "since": 1793847600.0,
+    "until": 1793934000.0
+  },
+  "requests": {
+    "counted": 810,
+    "cold": 1,
+    "bad_lines": 0,
+    "bad_message_entries": 0,
+    "no_boundary": 0,
+    "outside_window": 1119
+  },
+  "prompt_bytes": 1626245924,
+  "saved": {
+    "bytes": 803784074,
+    "share_of_prompt": 0.4943
+  },
+  "rewrite": {
+    "bytes": 17808909,
+    "share_of_prompt": 0.011,
+    "requests_with_rewrite": 591,
+    "share_of_requests_with_predecessor": 0.7305,
+    "per_request_share": {
+      "p50": 0.0032,
+      "p90": 0.0313,
+      "p99": 0.1631,
+      "max": 0.6333
+    }
+  },
+  "aged_results_without_digest": 0,
+  "by_keeper": [
+    {
+      "keeper": "context-reviewer",
+      "prompt_bytes": 329636078,
+      "saved_share": 0.5276,
+      "rewrite_share": 0.0102
+    },
+    {
+      "keeper": "kidsnote-incoming-dd-manager",
+      "prompt_bytes": 165745571,
+      "saved_share": 0.6776,
+      "rewrite_share": 0.0024
+    },
+    {
+      "keeper": "masc-productor-owner",
+      "prompt_bytes": 153176527,
+      "saved_share": 0.5874,
+      "rewrite_share": 0.003
+    },
+    {
+      "keeper": "e-masc-the-leader",
+      "prompt_bytes": 147886467,
+      "saved_share": 0.514,
+      "rewrite_share": 0.0028
+    },
+    {
+      "keeper": "wkbl-web-leader",
+      "prompt_bytes": 129864099,
+      "saved_share": 0.5074,
+      "rewrite_share": 0.004
+    },
+    {
+      "keeper": "code-reviewer-father",
+      "prompt_bytes": 97300653,
+      "saved_share": 0.5679,
+      "rewrite_share": 0.0073
+    },
+    {
+      "keeper": "wkbl-growth",
+      "prompt_bytes": 91802944,
+      "saved_share": 0.2101,
+      "rewrite_share": 0.0151
+    },
+    {
+      "keeper": "code-reviewer-uncle",
+      "prompt_bytes": 83840888,
+      "saved_share": 0.6268,
+      "rewrite_share": 0.0094
+    }
+  ],
+  "price": [
+    {
+      "requests_per_turn": 1.0,
+      "break_even_cache_price": 0.0217,
+      "net_per_turn_in_prompts": {
+        "0.1": 0.0396,
+        "0.25": 0.1154,
+        "0.5": 0.2417
+      }
+    },
+    {
+      "requests_per_turn": 5.0,
+      "break_even_cache_price": 0.0044,
+      "net_per_turn_in_prompts": {
+        "0.1": 0.2373,
+        "0.25": 0.6096,
+        "0.5": 1.2302
+      }
+    },
+    {
+      "requests_per_turn": 17.0,
+      "break_even_cache_price": 0.0013,
+      "net_per_turn_in_prompts": {
+        "0.1": 0.8304,
+        "0.25": 2.0924,
+        "0.5": 4.1957
+      }
+    }
+  ]
+}

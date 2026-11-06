@@ -200,6 +200,8 @@ reasoning 제거 32건 중 25건은 바로 다음 메시지가 tool 결과 강�
 
 비용: 강등하지 않은 이전 턴 결과가 범위에 남아 요청이 커진다. 11-04 Keeper 13명의 마지막 요청에서 16,384 B 이하 마커를 원문 크기로 되돌려 세면 메시지 바이트가 0~153% 늘어난다. 늘어난 부분은 직전 요청과 같은 prefix 라 캐시된다. 범위가 provider 한도에 닿으면 1번이나 2번이 답한다.
 
+예외: `RFC-tool-results-age-out-of-context` 는 끝난 턴의 tool 결과 하나를 이 규칙의 예외로 둔다. 본문이 2 KB 이상인 결과는 그 턴이 끝난 뒤 첫 요청에서 마커가 되고, 이후 요청에서는 같은 마커로 나간다(`finished_turn_results`). 인자와 2 KB 보다 작은 결과는 이 절의 규칙을 그대로 따른다. 입력 정책이 `small` 이고 Keeper 가 `artifact_read` 를 쓸 수 있을 때만 켜진다. 크기 거절 뒤 재전송은 이 설정과 상관없이 거절된 요청의 결과 전부를 마커로 보낸다.
+
 reasoning 제거는 이 RFC 의 조립 코드가 아니라 runtime 선언이 정한다. GLM 모델 선언이 `preserve-thinking = false` 면 `clear_thinking: true` 가 나가고, replay 정책이 최신 user 턴의 reasoning 만 남긴다(`Reasoning_dialect.apply_clear_thinking_replay_gate`). z.ai 는 Coding Plan endpoint 에서 reasoning 보존을 기본값으로 두고, 그 블록을 고치거나 순서를 바꾸면 캐시 적중이 떨어진다고 적는다(https://docs.z.ai/guides/capabilities/thinking-mode, 2026-11-04 확인). 이 개정의 이득은 선언이 reasoning 을 보존할 때 나온다.
 
 ### 3.4.2 측정 — 모델이 강등된 호출 인자를 호출 모양으로 따라 한다 (2026-11-05)

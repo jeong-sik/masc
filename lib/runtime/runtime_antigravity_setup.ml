@@ -1,10 +1,12 @@
 type t = Runtime_antigravity_home.t
 type error = Private_home_unavailable | Sign_in_required | Unsafe_credential
-  | Command_failed | Invalid_catalog | Keychain_unavailable
+  | Unrecognized_credential | Command_failed | Invalid_catalog | Keychain_unavailable
 let error_message = function
   | Private_home_unavailable -> "Antigravity's private account directory is unavailable."
   | Sign_in_required -> "Sign in with the official Antigravity CLI, then continue setup."
   | Unsafe_credential -> "The selected Antigravity credential is not a private owned file."
+  | Unrecognized_credential ->
+    "The selected Antigravity credential names no account in a login file shape masc reads."
   | Command_failed -> "The official Antigravity account command did not complete."
   | Invalid_catalog -> "The official Antigravity model catalog has an unsupported response format."
   | Keychain_unavailable -> "The selected Antigravity keychain could not be read or its private account could not be switched. Unlock that account and retry; no fallback account was selected."
@@ -16,7 +18,9 @@ let prepare_from_credential_file ~runtime_root ~account_id ~oauth_source =
   Runtime_antigravity_home.prepare ~runtime_root ~owner_leaf:account_id ~oauth_source
   |> Result.map_error (function
     | Runtime_antigravity_home.Invalid_oauth_source _ -> Unsafe_credential
+    | Unrecognized_oauth_source _ -> Unrecognized_credential
     | Invalid_runtime_root _ | Invalid_owner_leaf _ | Unsafe_directory _ | Invalid_managed_oauth _
+    | Unrecognized_managed_oauth _
     | Settings_write_failed _ | Mcp_config_write_failed _ | Mcp_config_cleanup_failed _ ->
       Private_home_unavailable)
 let home_dir = Runtime_antigravity_home.home_dir

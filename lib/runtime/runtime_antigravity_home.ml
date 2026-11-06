@@ -9,9 +9,17 @@ type error =
       { path : string
       ; detail : string
       }
+  | Unrecognized_oauth_source of
+      { path : string
+      ; rejection : Runtime_antigravity_oauth_credential.rejection
+      }
   | Invalid_managed_oauth of
       { path : string
       ; detail : string
+      }
+  | Unrecognized_managed_oauth of
+      { path : string
+      ; rejection : Runtime_antigravity_oauth_credential.rejection
       }
   | Settings_write_failed of
       { path : string
@@ -83,8 +91,14 @@ let error_to_string = function
     Printf.sprintf "unsafe Antigravity directory %s: %s" path detail
   | Invalid_oauth_source { path; detail } ->
     Printf.sprintf "invalid Antigravity OAuth source %s: %s" path detail
+  | Unrecognized_oauth_source { path; rejection } ->
+    Printf.sprintf "unrecognized Antigravity OAuth source %s: %s" path
+      (Runtime_antigravity_oauth_credential.rejection_to_string rejection)
   | Invalid_managed_oauth { path; detail } ->
     Printf.sprintf "invalid managed Antigravity OAuth file %s: %s" path detail
+  | Unrecognized_managed_oauth { path; rejection } ->
+    Printf.sprintf "unrecognized managed Antigravity OAuth file %s: %s" path
+      (Runtime_antigravity_oauth_credential.rejection_to_string rejection)
   | Settings_write_failed { path; detail } ->
     Printf.sprintf "failed to write Antigravity settings %s: %s" path detail
   | Mcp_config_write_failed { path; detail } ->
@@ -618,48 +632,17 @@ let home_with_keychain ~runtime_root (home_dir, settings_path, mcp_config_path, 
 ;;
 
 let generation_error path detail = Invalid_managed_oauth {path; detail}
-(* Installed agy 1.2.11 persists OAuth JSON with an OpenID [id_token].
-   Google documents [iss]/[sub] as stable account identity; access/refresh
-   tokens, expiry, email and issuance timestamps are not identity. This parses
-   a selected private local credential for continuity only, not authentication
-   or cryptographic ID-token verification. Native login/readiness owns those.
-   https://developers.google.com/identity/openid-connect/reference *)
-let account_digest ~make_error ~path bytes =
-  let invalid () = Error (make_error path
-      "expected native OAuth JSON with a Google OpenID issuer and subject") in
-  let field name fields =
-    match List.filter (fun (key, _) -> String.equal key name) fields with
-    | [(_, `String value)] when String.trim value <> "" -> Some value
-    | _ -> None in
-  try
-    match Yojson.Safe.from_string bytes with
-    | `Assoc fields ->
-      (match field "id_token" fields, List.filter (fun (key, _) -> key = "token") fields with
-       | Some token, [("token", `Assoc credentials)]
-         when Option.is_some (field "auth_method" fields) &&
-           List.for_all (fun key -> Option.is_some (field key credentials))
-             ["access_token"; "token_type"; "refresh_token"; "expiry"] ->
-         (match String.split_on_char '.' token with
-          | [header; payload; signature] when header <> "" && signature <> "" ->
-            (match Base64.decode ~pad:false ~alphabet:Base64.uri_safe_alphabet payload with
-             | Error _ -> invalid ()
-             | Ok payload ->
-               (match Yojson.Safe.from_string payload with
-                | `Assoc claims ->
-                  (match field "iss" claims, field "sub" claims with
-                   | Some ("accounts.google.com" | "https://accounts.google.com"), Some subject
-                     when String.length subject <= 255 &&
-                       String.for_all (fun char -> Char.code char < 128) subject ->
-                     let canonical = Yojson.Safe.to_string (`List
-                       [`String "https://accounts.google.com"; `String subject]) in
-                     Ok Agent_core_sha256.(to_hex (digest_string canonical))
-                   | _ -> invalid ())
-                | _ -> invalid ()))
-          | _ -> invalid ())
-       | _ -> invalid ())
-    | _ -> invalid ()
-  with Yojson.Json_error _ -> invalid ()
+(* The generation's principal is the account the CLI login file names; see
+   {!Runtime_antigravity_oauth_credential} for the shapes it reads and why the
+   sign-in email is the principal. Tokens and expiry are never identity.
+   HIGH-RISK-UNREVIEWED: a human must review this identity boundary. *)
+let account_digest ~unrecognized ~path bytes =
+  Runtime_antigravity_oauth_credential.parse bytes
+  |> Result.map Runtime_antigravity_oauth_credential.principal_sha256
+  |> Result.map_error (fun rejection -> unrecognized path rejection)
 ;;
+
+let managed_unrecognized path rejection = Unrecognized_managed_oauth { path; rejection }
 
 let parse_generation_record ~path body =
   let invalid () = Error (generation_error path "invalid account generation record") in
@@ -693,7 +676,8 @@ let check_managed_keychain ~home_dir ~account_sha256 ~read_keychain =
   match read_keychain ~path:keychain_path with
   | Apple_keychain.Missing | Apple_keychain.Unsupported | Apple_keychain.Unavailable -> Ok ()
   | Apple_keychain.Found contents ->
-    let* keychain_sha256 = account_digest ~make_error:generation_error ~path:keychain_path contents in
+    let* keychain_sha256 =
+      account_digest ~unrecognized:managed_unrecognized ~path:keychain_path contents in
     if String.equal keychain_sha256 account_sha256 then Ok ()
     else Error (generation_error keychain_path "managed keychain principal differs from the selected generation")
 ;;
@@ -709,7 +693,7 @@ let existing_generation ~store ~revision ~account_sha256 ~read_keychain =
   let oauth_path = Filename.concat cli_dir "antigravity-oauth-token" in
   let* credential = load_private_oauth_file ~make_error:generation_error oauth_path in
   let* managed_sha256 = match credential with
-    | Some file -> account_digest ~make_error:generation_error ~path:oauth_path file.content
+    | Some file -> account_digest ~unrecognized:managed_unrecognized ~path:oauth_path file.content
     | None -> Error (generation_error oauth_path "account generation credential is missing") in
   let* () = if String.equal managed_sha256 account_sha256 then Ok ()
     else Error (generation_error oauth_path "managed credential principal differs from the selected generation") in
@@ -819,7 +803,7 @@ let select_generation ~sync_store
      managed account directories. Unknown identity cannot seed a generation. *)
   let* source_bytes = read_oauth_seed oauth_source in
   let* account_sha256 = account_digest
-    ~make_error:(fun path detail -> Invalid_oauth_source {path; detail})
+    ~unrecognized:(fun path rejection -> Unrecognized_oauth_source {path; rejection})
     ~path:oauth_source source_bytes in
   let* store = prepare_owner_directory ~runtime_root ~owner_leaf in
   let record_path = Filename.concat store "current.json" in

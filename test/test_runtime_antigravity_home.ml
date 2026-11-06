@@ -701,33 +701,136 @@ let test_native_roots_never_overlap_the_runtime_root () =
     Runtime_native_tools.[Native_none; Native_read; Native_full]
 ;;
 
+let rejection =
+  testable
+    (fun ppf rejection ->
+      Format.pp_print_string ppf
+        (Runtime_antigravity_oauth_credential.rejection_to_string rejection))
+    ( = )
+;;
+
 let test_unknown_account_identity_causes_no_managed_mutation () =
-  let credential claims =
-    let payload = Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet
-      (Yojson.Safe.to_string claims) in
-    let source = Masc_test_deps.antigravity_oauth_fixture "fixture" |> Yojson.Safe.from_string in
-    match source with
-    | `Assoc fields -> Yojson.Safe.to_string (`Assoc
-        (("id_token", `String ("synthetic-header." ^ payload ^ ".synthetic-signature")) ::
-         List.remove_assoc "id_token" fields))
+  let module C = Runtime_antigravity_oauth_credential in
+  let edit fixture change =
+    match Yojson.Safe.from_string fixture with
+    | `Assoc fields -> Yojson.Safe.to_string (`Assoc (change fields))
     | _ -> fail "fixture source must be an object" in
-  List.iter (fun source -> with_temp_root (fun runtime_root ->
+  let replace name value fields = (name, value) :: List.remove_assoc name fields in
+  let with_claims claims =
+    let payload = Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet
+      (Yojson.Safe.to_string (`Assoc claims)) in
+    edit (Masc_test_deps.antigravity_oauth_fixture "fixture")
+      (replace "id_token" (`String ("synthetic-header." ^ payload ^ ".synthetic-signature"))) in
+  let id_token_email = Masc_test_deps.antigravity_id_token_email_fixture "fixture" in
+  let no_shape openid_id_token id_token_email = C.No_known_shape { openid_id_token; id_token_email } in
+  let google = "iss", `String "https://accounts.google.com" in
+  let email = "email", `String (Masc_test_deps.antigravity_account_email "fixture") in
+  List.iter (fun (label, source, expected) -> with_temp_root (fun runtime_root ->
     let oauth_source = Filename.concat runtime_root "invalid-source" in
     write_file ~mode:0o600 oauth_source source;
     (match Runtime_antigravity_home.prepare ~runtime_root ~owner_leaf:"unknown-account" ~oauth_source with
-     | Error (Runtime_antigravity_home.Invalid_oauth_source _) -> ()
-     | Error error -> fail (Runtime_antigravity_home.error_to_string error)
-     | Ok _ -> fail "unknown account identity was admitted");
-    check bool "unknown identity creates no managed account tree" false
+     | Error (Runtime_antigravity_home.Unrecognized_oauth_source { path; rejection = actual }) ->
+       check string (label ^ ": names the source") oauth_source path;
+       check rejection label expected actual
+     | Error error -> fail (label ^ ": " ^ Runtime_antigravity_home.error_to_string error)
+     | Ok _ -> fail (label ^ ": unknown account identity was admitted"));
+    check bool (label ^ ": creates no managed account tree") false
       (Sys.file_exists (Filename.concat runtime_root "official-clients"))))
-    [""; "opaque-token"; "{}";
-     credential (`Assoc ["iss", `String "https://unknown.invalid"; "sub", `String "fixture"]);
-     credential (`Assoc ["iss", `String "https://accounts.google.com"]);
-     credential (`Assoc ["iss", `String "https://accounts.google.com"; "sub", `Null]);
-     credential (`Assoc ["iss", `String "https://accounts.google.com"; "sub", `String (String.make 256 'x')]);
-     credential (`Assoc ["iss", `String "https://accounts.google.com"; "sub", `String "비ASCII"]);
-     credential (`Assoc ["iss", `String "https://accounts.google.com";
-                        "sub", `String "one"; "sub", `String "two"])]
+    [ "empty", "", C.Not_json_object
+    ; "opaque", "opaque-token", C.Not_json_object
+    ; "array", "[]", C.Not_json_object
+    ; "empty object", "{}", no_shape C.Auth_method C.Auth_method
+    ; "no account field", edit id_token_email (List.remove_assoc "id_token_email"),
+      no_shape C.Id_token C.Id_token_email
+    ; "blank recorded email", edit id_token_email (replace "id_token_email" (`String " ")),
+      no_shape C.Id_token C.Id_token_email
+    ; "token without refresh", edit id_token_email (fun fields ->
+          match List.assoc "token" fields with
+          | `Assoc token -> replace "token" (`Assoc (List.remove_assoc "refresh_token" token)) fields
+          | _ -> fail "fixture token must be an object"),
+      no_shape C.Token_refresh_token C.Token_refresh_token
+    ; "foreign issuer", with_claims ["iss", `String "https://unknown.invalid"; email],
+      no_shape C.Id_token_issuer C.Id_token_email
+    ; "no email claim", with_claims [google; "sub", `String "fixture"],
+      no_shape C.Id_token_email_claim C.Id_token_email
+    ; "null email claim", with_claims [google; "email", `Null],
+      no_shape C.Id_token_email_claim C.Id_token_email
+    ; "repeated email claim", with_claims [google; email; "email", `String "other@example.test"],
+      no_shape C.Id_token_email_claim C.Id_token_email
+    ; "both shapes", edit (Masc_test_deps.antigravity_oauth_fixture "fixture")
+        (replace "id_token_email" (`String (Masc_test_deps.antigravity_account_email "fixture"))),
+      C.Both_shapes ]
+;;
+
+(* agy 1.5 rewrote the operator's login file without [id_token] on
+   2026-11-05, and every Antigravity Keeper turn then failed admission. *)
+let test_cli_1_5_login_file_selects_its_account_generation () =
+  with_temp_root @@ fun runtime_root ->
+  let oauth_source = Filename.concat runtime_root "operator-oauth-token" in
+  let login ?revision account =
+    Masc_test_deps.antigravity_id_token_email_fixture ?revision account in
+  write_file ~mode:0o600 oauth_source (login "account-a");
+  let owner_leaf = Runtime_antigravity_home.keeper_owner_leaf
+      ~keeper_name:"keeper-alpha" ~oauth_source in
+  let prepare () =
+    Runtime_antigravity_home.prepare ~runtime_root ~owner_leaf ~oauth_source |> require_ok in
+  let first = prepare () in
+  check string "the login file seeds the managed copy" (login "account-a")
+    (Fs_compat.load_file (Runtime_antigravity_home.oauth_path first));
+  write_file ~mode:0o600 (Runtime_antigravity_home.oauth_path first)
+    (login ~revision:"native-refresh" "account-a");
+  write_file ~mode:0o600 oauth_source (login ~revision:"source-refresh" "account-a");
+  let refreshed = prepare () in
+  check string "refreshes for the same email keep the generation"
+    (Runtime_antigravity_home.home_dir first) (Runtime_antigravity_home.home_dir refreshed);
+  check string "the native refresh survives" (login ~revision:"native-refresh" "account-a")
+    (Fs_compat.load_file (Runtime_antigravity_home.oauth_path refreshed));
+  write_file ~mode:0o600 oauth_source (login "account-b");
+  let switched = prepare () in
+  check bool "another email selects another generation" false
+    (String.equal (Runtime_antigravity_home.home_dir first)
+       (Runtime_antigravity_home.home_dir switched));
+  check string "the other account seeds its own copy" (login "account-b")
+    (Fs_compat.load_file (Runtime_antigravity_home.oauth_path switched))
+;;
+
+(* agy 1.5 reads an agy 1.2 file and writes it back without [id_token], in
+   the managed HOME and the keychain first, at the operator's source later. *)
+let test_cli_shape_rewrite_keeps_the_account_generation () =
+  with_temp_root @@ fun runtime_root ->
+  let oauth_source = Filename.concat runtime_root "source" in
+  let owner_leaf = "shape-rewrite" in
+  let openid ?revision account = Masc_test_deps.antigravity_oauth_fixture ?revision account in
+  let recorded ?revision account =
+    Masc_test_deps.antigravity_id_token_email_fixture ?revision account in
+  write_file ~mode:0o600 oauth_source (openid "account-a");
+  let sync dir =
+    let fd = Unix.openfile dir [Unix.O_RDONLY; Unix.O_CLOEXEC] 0 in
+    Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd) in
+  let prepare_with keychain =
+    Runtime_antigravity_home.For_testing.prepare_account_with_store_sync
+      ~sync_store:sync ~read_keychain:(fun ~path:_ -> keychain)
+      ~runtime_root ~owner_leaf ~oauth_source () in
+  let first = prepare_with Apple_keychain.Missing |> require_ok in
+  let home_dir = Runtime_antigravity_home.home_dir first in
+  write_file ~mode:0o600 (Runtime_antigravity_home.oauth_path first)
+    (recorded ~revision:"native-refresh" "account-a");
+  let rewritten_copy =
+    prepare_with (Apple_keychain.Found (recorded ~revision:"native-refresh" "account-a"))
+    |> require_ok in
+  check string "a rewritten managed copy keeps the generation" home_dir
+    (Runtime_antigravity_home.home_dir rewritten_copy);
+  write_file ~mode:0o600 oauth_source (recorded ~revision:"source-refresh" "account-a");
+  let rewritten_source = prepare_with Apple_keychain.Missing |> require_ok in
+  check string "a rewritten source keeps the generation" home_dir
+    (Runtime_antigravity_home.home_dir rewritten_source);
+  check string "the native refresh survives the rewrite"
+    (recorded ~revision:"native-refresh" "account-a")
+    (Fs_compat.load_file (Runtime_antigravity_home.oauth_path rewritten_source));
+  match prepare_with (Apple_keychain.Found (recorded "account-b")) with
+  | Error (Runtime_antigravity_home.Invalid_managed_oauth _) -> ()
+  | Error error -> fail (Runtime_antigravity_home.error_to_string error)
+  | Ok _ -> fail "a keychain item naming another email was admitted"
 ;;
 
 let test_rejects_non_private_or_indirect_oauth_source () =
@@ -1289,6 +1392,10 @@ let () =
             test_rejects_non_private_or_indirect_oauth_source
         ; test_case "unknown source identity causes no managed mutation" `Quick
             test_unknown_account_identity_causes_no_managed_mutation
+        ; test_case "agy 1.5 login file selects its account generation" `Quick
+            test_cli_1_5_login_file_selects_its_account_generation
+        ; test_case "CLI shape rewrite keeps the account generation" `Quick
+            test_cli_shape_rewrite_keeps_the_account_generation
         ; test_case
             "runtime OAuth refresh survives preparation"
             `Quick

@@ -209,7 +209,7 @@ name = "query"
 - `execution = "inline"` 은 결과를 그 자리에서 돌려주고, `"async"` 는 durable broker 로
   넘긴 뒤 `keeper_composition_status` / `keeper_composition_result` / `keeper_composition_cancel` 로
   조회·회수·취소한다. 재사용 Skill로 고정하지 않는 작업별(ad-hoc) 레시피는
-  `keeper_composition_prepare` 와 `keeper_composition_run` 으로 검증·실행한다.
+  `keeper_composition_run` 의 `recipe` 로 검증·실행한다.
 - `defer_loading = true` 는 Agent Core 의 초기 호출 스키마에서 제외할 수 있는 선언이다.
   사용 이력이나 아직 소비되지 않은 로드 영수증이 있으면 이미 로드된 상태로 시작할 수 있다.
   `keeper_tool_search` 목록은 이름만 보여 주며, 정확한 이름을 넘기면 같은 Agent 의 다음

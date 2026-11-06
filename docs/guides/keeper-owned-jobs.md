@@ -494,8 +494,8 @@ manifest. A generic reader does not declare every child-specific export name.
 Failure stays failed and retains canonical diagnostics, partial outputs and
 artifact references. A missing or changed original source refuses the read.
 
-Explicit submit-then-read composition and exact async Skill child nodes in
-`keeper_composition_prepare` share the original admitted logical run. A binding identifies that run,
+Explicit submit-then-read composition and exact async Skill child nodes in a
+`keeper_composition_run` recipe share the original admitted logical run. A binding identifies that run,
 including its canonically bound suspended successors. The current request codec
 is v5 and the execution journal codec is v3; unknown versions are refused.
 Finish or explicitly resolve pending v2 runs on their original runtime, preserve

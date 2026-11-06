@@ -146,21 +146,20 @@ equivalent explicitly on every node that has one.
   `artifact` sha256 and proposed directory name `package_id` to `keeper_skill_validate`.
   This checks document and composition-plan rules; it does not execute or publish.
   Writing the draft does not update the catalog.
-- **Task-specific composition:** pass the structured prepare input as
-  `keeper_composition_run.recipe` to validate, save and execute in one call. Use
-  `keeper_composition_prepare` separately when the plan needs inspection before
-  execution, then run its exact draft reference. Both paths freeze the caller,
-  plan and authorized tool/Skill contracts without publishing a Skill. Ordinary
+- **Task-specific composition:** pass the structured plan as
+  `keeper_composition_run.recipe` to validate, save and execute in one call. The
+  result returns the draft reference; a later run reruns that exact draft by its
+  sha256. The run freezes the caller, plan and authorized tool/Skill contracts
+  without publishing a Skill. Ordinary
   nodes take fixed `args` or an `input` template for upstream values, never both.
   Exact admitted child Skills take `skill_reference` and expose their declared
   exports. Supported inline Read/Edit/Write plans can overlap independent file
   scopes after inputs resolve; unsupported bindings keep the original schedule.
   Original handlers, authorization and publication recovery still apply.
   Durable async plans use the admitted read-only and owned-job/Ask contracts above.
-  Preparation does not execute or activate a Skill, and is not a prerequisite for
-  an existing composition or a direct tool.
+  Existing compositions and direct tools need no recipe.
 - **Same draft to Skill:** for a reusable parameter-free plan, include `skill`
-  metadata (`package_id`, `description`) during prepare. This freezes the validated
+  metadata (`package_id`, `description`) in the recipe. This freezes the validated
   `SKILL.md` bytes too. Use the same `draft_sha256` and `package_id` for
   `keeper_skill_validate` and `keeper_skill_publish`; publish also requires the
   evidence list below. Both refuse changed ownership, package or tool contracts.

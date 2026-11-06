@@ -1,8 +1,9 @@
-# Prepare and run a task-specific composition
+# Run a task-specific composition
 
-Use `keeper_composition_prepare` to check a task-specific plan before executing it.
-The draft is local to the preparing Keeper; it does not publish a shared Skill.
-The tools are discoverable through the Keeper tool search surface.
+Use `keeper_composition_run` with a `recipe` to validate, freeze and execute a
+task-specific plan in one call. The frozen draft is local to the Keeper that ran
+it; it does not publish a shared Skill. The tools are discoverable through the
+Keeper tool search surface.
 
 An ordinary Tool node accepts fixed arguments as an object:
 `{"id":"lane","tool":"keeper_lane_status","args":{}}`.
@@ -15,8 +16,7 @@ tagged child `input` must match the Skill's parameter object schema.
 Leave optional `after` out or supply an array of node IDs (`[]` means no
 explicit dependencies). `after: null` is invalid.
 
-When the plan is ready to execute, submit the same prepare input as
-`keeper_composition_run.recipe` in one call:
+Submit the plan as `keeper_composition_run.recipe`:
 
 ```json
 {"recipe":{"execution":"inline","nodes":[{"id":"lane","tool":"keeper_lane_status"}],"exports":[{"name":"profile","node":"lane","pointer":"/profile"}]}}
@@ -24,9 +24,7 @@ When the plan is ready to execute, submit the same prepare input as
 
 The server validates and durably freezes the recipe, binds the original SDK
 invocation, then uses the same inline or async executor and leaf permissions.
-The result retains both `draft` and `run_artifact` references. This avoids a
-required model roundtrip between preparation and execution; it makes no fixed
-latency promise. Use separate prepare when inspection is useful. Supply exactly
+The result retains both `draft` and `run_artifact` references. Supply exactly
 one of `recipe` or `sha256`; a fresh recipe cannot include `resume_run_id`.
 To continue an async run created from a recipe, use its returned draft digest
 and original run ID in the ordinary continuation form below.
@@ -47,21 +45,19 @@ for the initial callable surface and measurement boundaries.
 }
 ```
 
-Prepare returns the durable draft reference, exact execution mode, dependency
-layers, descriptor schedule groups and selected output fields. The schedule is
-an explanation of dependencies and execution contracts, not a fixed timetable.
-Every fixed input is checked before prepare succeeds. Output-dependent inputs
-are checked when their producers settle.
+Every fixed input is checked before the draft is frozen and before any node
+runs. Output-dependent inputs are checked when their producers settle.
 
-Pass the returned draft's exact sha256 to `keeper_composition_run`:
+A later run of the same frozen draft passes its exact sha256:
 
 ```json
-{"sha256": "the exact 64-character digest returned by prepare"}
+{"sha256": "the exact 64-character digest from a previous run's draft reference"}
 ```
 
 The run rechecks ownership, the frozen Tool/Skill surface and each node's
-input/output schema and route before dispatch. If those contracts changed,
-prepare again rather than silently executing a different preview. An invocation
+input/output schema and route before dispatch. If those contracts changed, the
+run is refused; submit the recipe again rather than executing a different
+plan. An invocation
 record binds the draft to the actual source turn and tool-call identity before
 any node executes. Plan validation does not bypass a leaf tool's permissions.
 
@@ -89,7 +85,7 @@ request are rejected. If the result record cannot be read or disagrees with
 the completion, `result_available=false` and a structured error remain visible
 in the next prompt; a wake alone is not proof of a usable result.
 
-To continue a prepared async run, pass the same draft digest and its original
+To continue an async run, pass the same draft digest and its original
 `composition_run_id` to the existing run tool:
 
 ```json
@@ -175,7 +171,7 @@ original results and failure evidence. Publish a reusable Skill separately with
 `keeper_skill_publish` after checking execution evidence and applicability. A
 published Skill and a draft remain distinct objects.
 
-For a reusable parameter-free plan, add Skill metadata during prepare:
+For a reusable parameter-free plan, add Skill metadata to the recipe:
 
 ```json
 {
@@ -186,9 +182,9 @@ For a reusable parameter-free plan, add Skill metadata during prepare:
 }
 ```
 
-The draft freezes both the plan and validated `SKILL.md` bytes. Its preview
-identifies the source by digest. Use the same draft digest to run, validate
-and publish; no handwritten TOML or repeated source-text submission is needed:
+The draft freezes both the plan and validated `SKILL.md` bytes. Use the draft
+digest the run returned to validate and publish; no handwritten TOML or
+repeated source-text submission is needed:
 
 ```json
 {"package_id": "lane-profile", "draft_sha256": "the exact draft sha256"}

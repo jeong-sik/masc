@@ -254,7 +254,7 @@ flowchart TD
   Read끼리의 공유는 허용하고 겹치는 Write는 앞선 소유자 뒤에서 실행한다. 명시적인
   의존성·실패 정책은 그대로 적용된다. 지원 범위는
   [Read/Edit 자원](guides/PREPARED-EDIT-RESOURCES.md)을 따른다. 재사용 Skill로 고정하지
-  않는 작업별(ad-hoc) 레시피는 `keeper_composition_prepare`와 `keeper_composition_run`으로
+  않는 작업별(ad-hoc) 레시피는 `keeper_composition_run`의 `recipe`로
   검증·실행한다. `execution = "async"`면 기존 durable broker로 흐르고
   `keeper_composition_status`/`keeper_composition_result`/`keeper_composition_cancel`로
   조회·회수·취소한다. 접수 결과와 각 노드의 실제 실행 결과는 별도로 확인한다.

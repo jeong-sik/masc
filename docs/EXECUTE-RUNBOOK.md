@@ -106,7 +106,7 @@ The public schema accepts only typed command fields: `argv`, `command`, `shell`,
 Asynchronous execution is provided by separate typed tool families:
 - **Keeper chat operations**: `masc_keeper_delegate` and `masc_keeper_msg` submit a turn and return an `operation_id` without waiting for it; `masc_keeper_delegate_status`, `masc_keeper_delegate_list` and `masc_keeper_delegate_cancel` read or cancel it.
 - **Isolated Docker jobs**: `keeper_job_start`, `keeper_job_status`, `keeper_job_result`, `keeper_job_cancel` (each job runs in an isolated container and delivers a wakeup on completion).
-- **Multi-Keeper compositions**: `keeper_composition_prepare`, `keeper_composition_run`, `keeper_composition_status`, `keeper_composition_result`, `keeper_composition_cancel`.
+- **Multi-Keeper compositions**: `keeper_composition_run`, `keeper_composition_status`, `keeper_composition_result`, `keeper_composition_cancel`.
 
 For explicitly requested targeted verification, the `test_tool_input_validation`
 suite exercises `Execute`'s accepted fields and rejects background and async

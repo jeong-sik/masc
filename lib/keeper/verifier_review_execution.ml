@@ -83,12 +83,17 @@ let references ~original progress =
     | Commit_conflicted _ | Refused _ | Successor_intended _ | Successor_observed _ | Observer _ -> Ok refs) (Ok []) (P.events progress) in
   Ok (List.rev refs)
 
-type observation = Awaiting | Repair_required of string | Verdict of AR.review_result
+type observation =
+  | Awaiting
+  | Repair_required of string
+  | Cancelled_without_verdict of AR.review_result
+  | Verdict of AR.review_result
 
 type call_observation =
   | Call_awaiting
   | Call_repair of string
   | Call_no_verdict
+  | Call_cancelled
   | Call_verdict of AR.verdict
 
 let observe_call ~base_path ~original reference =
@@ -126,7 +131,8 @@ let observe_call ~base_path ~original reference =
                Ok (Call_repair "settled report does not satisfy the original verdict protocol"))
          else Ok (Call_repair "report invocation has no successful handler settlement")
        | (Terminal_failed | Terminal_succeeded), [] -> Ok Call_no_verdict
-       | Terminal_cancelled, _ -> Ok (Call_repair "original reviewer was cancelled without a retained judgment")
+       | Terminal_cancelled, [] -> Ok Call_cancelled
+       | Terminal_cancelled, _ :: _ -> Ok (Call_repair "original reviewer was cancelled without a retained judgment")
        | (Terminal_succeeded | Terminal_failed), _ ->
          Ok (Call_repair "original report history cannot establish one accepted verdict"))
 
@@ -142,14 +148,28 @@ let observe ~base_path ~original progress =
       Ok ((reference,observation)::observations)) (Ok []) references in
     if List.exists (fun (_,observation) -> observation=Call_awaiting) observations then Ok Awaiting
     else match List.find_map (function _,Call_repair detail -> Some detail
-      | _,(Call_awaiting | Call_no_verdict | Call_verdict _) -> None) observations with
+      | _,(Call_awaiting | Call_no_verdict | Call_cancelled | Call_verdict _) -> None) observations with
     | Some detail -> Ok (Repair_required detail)
     | None ->
       match List.filter_map (function reference,Call_verdict verdict -> Some (reference,verdict)
-        | _,(Call_awaiting | Call_no_verdict | Call_repair _) -> None) observations with
+        | _,(Call_awaiting | Call_no_verdict | Call_cancelled | Call_repair _) -> None) observations with
       | [reference,verdict] -> Ok (Verdict {
           AR.verdict=Some verdict;evaluator_runtime=reference.runtime_id;
           generator_runtime=V.generator_runtime original;evaluator_execution=None;
           gate=AR.Structured_tool;fallback_reason=None;retryable_runtimes=[];model_absent_runtimes=[]})
-      | [] -> Ok (Repair_required "original executions have no retained verdict")
+      | [] ->
+        (* [observations] is in reverse reference order. *)
+        let cancelled = List.fold_left (fun runtimes (reference,observation) ->
+          match observation with
+          | Call_cancelled when not (List.mem reference.runtime_id runtimes) -> reference.runtime_id :: runtimes
+          | Call_cancelled | Call_awaiting | Call_no_verdict | Call_repair _ | Call_verdict _ -> runtimes)
+          [] (List.rev observations) |> List.rev in
+        (match cancelled with
+         | [] -> Ok (Repair_required "original executions have no retained verdict")
+         | first :: rest -> Ok (Cancelled_without_verdict {
+             AR.verdict=None;evaluator_runtime=List.fold_left (fun _ runtime -> runtime) first rest;
+             generator_runtime=V.generator_runtime original;evaluator_execution=None;
+             gate=AR.Evaluator_unavailable;
+             fallback_reason=Some "original reviewer was cancelled before it reported a verdict";
+             retryable_runtimes=cancelled;model_absent_runtimes=[]}))
       | _ -> Ok (Repair_required "multiple original executions supplied verdicts")

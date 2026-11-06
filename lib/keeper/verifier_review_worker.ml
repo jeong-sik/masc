@@ -49,6 +49,15 @@ let run_attempt_with ~advance_events ?prepare_observer_registration ?on_verdict 
     match observation with
     | Verifier_review_execution.Awaiting -> Error (Execution_pending "original execution has no terminal observation")
     | Repair_required detail -> Error (Execution_repair_required detail)
+    | Cancelled_without_verdict result ->
+      (* The journals settle every effect, so the refusal is definite and the
+         owner's successor walk may run the next attempt. *)
+      let evidence = `Assoc ["schema",`String "verifier_review_refusal/v1";"certainty",`String "definite";
+        "observations",`List (List.map (fun runtime_id ->
+          `Assoc ["fact",`String "cancelled";"runtime_id",`String runtime_id]) result.AR.retryable_runtimes);
+        "result",O.result_to_json result] in
+      let* _ = save retained (Progress.Refused {stage=Progress.Execution;evidence}) in
+      Ok result
     | Verdict result ->
       let* _ = retain_judgment retained result in
       Ok result in

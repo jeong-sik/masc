@@ -894,7 +894,7 @@ let signed_prefix_tracks_replay_projection_and_tool_user_merge () =
   let followup = "follow up immediately after the tool result" in
   let prefix = [signed_user "first ask"; excluded]
     @ argument_cycle ~id:"earlier" earlier_input
-    @ [signed_user followup] in
+    @ [{ (signed_user followup) with origin = Llm_provider.Types.Tool_result_followup }] in
   let signed = stamp_signed_call ~config ~prefix ~id:"signed" (`Assoc []) in
   let source = prefix @ [signed; tool_message ~id:"signed" "done"]
     @ argument_cycle ~id:"later" later_input in

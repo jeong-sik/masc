@@ -42,6 +42,7 @@ let writers_of =
     ; Invite, "local operator" :: authenticated
     ; Admission, authenticated
     ; Admin_assignment, authenticated
+    ; Revocation_cancel, authenticated
     ]
 ;;
 
@@ -73,6 +74,7 @@ let ordinal = function
   | R.Kind.Invite -> 11
   | R.Kind.Admission -> 12
   | R.Kind.Admin_assignment -> 13
+  | R.Kind.Revocation_cancel -> 14
 ;;
 
 let kinds_are_all_listed () =
@@ -397,6 +399,7 @@ let kind_labels_are_the_names_on_disk () =
     ; "invite"
     ; "admission"
     ; "admin_assignment"
+    ; "revocation_cancel"
     ]
     (List.map R.Kind.to_string R.Kind.all)
 ;;

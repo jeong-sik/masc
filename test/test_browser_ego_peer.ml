@@ -1389,7 +1389,7 @@ let test_the_peer_serves_what_the_lane_table_says () =
     | "page.downloads" -> answered (obj ["since",`Null;"rows",`List []])
     | "page.upload" -> answered (obj ["error",`Null;"dialog",`Null;"tab",`Null])
     | "page.target" -> answered resolved
-    | "page.pointer" | "page.keyboard" -> input_answer ()
+    | "page.pointer" | "page.keyboard" | "page.viewport" -> input_answer ()
     | "page.input" -> dom_answer (obj ["action",str "fill"])
     | other -> failf "unexpected step %s" other) in
   ignore (dispatch peer Live.Tabs_list (obj []));

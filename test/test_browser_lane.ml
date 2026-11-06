@@ -266,8 +266,8 @@ let test_transport_table () =
     Lane.[Accessibility_snapshot; Snapshot_target_input; Native_workflow; Page_recovery; Trusted_hover; Trusted_drag; Trusted_double_click; Trusted_button_click; Touch_input; Trusted_keyboard; Viewport_resize; Tab_history; Tab_navigation; Tab_closing; Tab_creation; Dialog_read; Dialog_answer; Frame_read; Operator_handoff; Page_management; Download_listing; File_upload] (unserved Lane.Web_extension);
   check (list capability) "the BiDi peer has no ego snapshot, browser zoom, hand-off, download list or upload"
     Lane.[Accessibility_snapshot; Snapshot_target_input; Native_workflow; Page_recovery; Browser_zoom; Dialog_read; Operator_handoff; Page_management; Download_listing; File_upload] (unserved Lane.Webdriver_bidi);
-  check (list capability) "the ego connection has no touch, zoom, resize or frame reads"
-    Lane.[Touch_input; Browser_zoom; Viewport_resize; Frame_read]
+  check (list capability) "the ego connection has no touch, zoom or frame reads"
+    Lane.[Touch_input; Browser_zoom; Frame_read]
     (unserved Lane.Ego_task_space);
   check bool "native Ego activation uses SDK execution ownership" true
     (Lane.ego_reply_policy (Lane.Page_interact {tab_id=1;frame_path=[];

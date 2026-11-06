@@ -160,6 +160,31 @@ let issue_result t ~admin ~invite_id ~token =
        })
 ;;
 
+let not_invited_text = Login.refusal_to_string Login.Not_invited
+
+(* An entry of the allowlist that [admin] writes for [identity] (plan C2d). *)
+let register t ~admin ~registration_id identity =
+  commit
+    t
+    ~by:admin
+    Authz_record.Kind.Registration
+    (get
+       (Authz_registration_event.to_body
+          (Authz_registration_event.Registered
+             { registration_id = get (Registration_id.of_string registration_id); identity })))
+;;
+
+let remove t ~admin ~registration_id =
+  commit
+    t
+    ~by:admin
+    Authz_record.Kind.Registration
+    (get
+       (Authz_registration_event.to_body
+          (Authz_registration_event.Removed
+             { registration_id = get (Registration_id.of_string registration_id) })))
+;;
+
 let principal_event t ~admin event =
   commit t ~by:admin Authz_record.Kind.Principal (get (Authz_principal_event.to_body event))
 ;;
@@ -179,7 +204,7 @@ let nothing_is_written_for_who_is_not_let_in () =
     let before = next_seq t in
     Alcotest.(check string)
       "no invitation"
-      "this identity has no principal and came with no invitation"
+      not_invited_text
       (outcome (sign_in t ~identity:(google "111") ~invite:None));
     Alcotest.(check string)
       "another token"
@@ -276,7 +301,7 @@ let a_deleted_identity_joins_again_as_someone_new () =
     principal_event t ~admin (Authz_principal_event.Deleted { user_id = member; identity = google "222" });
     Alcotest.(check string)
       "deleted is like never invited"
-      "this identity has no principal and came with no invitation"
+      not_invited_text
       (outcome (sign_in t ~identity:(google "222") ~invite:None));
     issue t ~admin ~invite_id:"invite-3" ~token:(String.make 64 'c');
     let back = sign_in t ~identity:(google "222") ~invite:(digest (String.make 64 'c')) in
@@ -284,6 +309,101 @@ let a_deleted_identity_joins_again_as_someone_new () =
     match back with
     | Ok (Login.Admitted { previously_deleted; _ }) -> Alcotest.(check bool) "marked" true previously_deleted
     | Ok (Login.Signed_in _) | Error _ -> Alcotest.fail "not admitted")
+;;
+
+(* A registered identity joins with no invitation, as a Member, through one
+   admission record; its next login signs in. A removed entry lets nobody in,
+   and nothing is written for it. *)
+let a_registered_identity_joins_as_a_member () =
+  with_installation (fun t ->
+    let admin = admitted_id (sign_in t ~identity:(google "111") ~invite:(digest t.admin_token)) in
+    register t ~admin ~registration_id:"registration-1" (google "333");
+    let before = next_seq t in
+    Alcotest.(check string)
+      "an identity with no entry of its own"
+      not_invited_text
+      (outcome (sign_in t ~identity:(google "555") ~invite:None));
+    Alcotest.(check int) "nothing written for it" before (next_seq t);
+    let member = sign_in t ~identity:(google "333") ~invite:None ~draw:(drawing [ String.make 32 'c' ]) in
+    Alcotest.(check string) "admitted" ("admitted " ^ String.make 32 'c' ^ " as member") (outcome member);
+    Alcotest.(check int) "one record" (before + 1) (next_seq t);
+    Alcotest.(check string)
+      "the next login"
+      ("signed in " ^ String.make 32 'c')
+      (outcome (sign_in t ~identity:(google "333") ~invite:None));
+    register t ~admin ~registration_id:"registration-2" (google "444");
+    remove t ~admin ~registration_id:"registration-2";
+    let before = next_seq t in
+    Alcotest.(check string)
+      "a removed entry"
+      not_invited_text
+      (outcome (sign_in t ~identity:(google "444") ~invite:None));
+    Alcotest.(check int) "the log did not move" before (next_seq t))
+;;
+
+(* The entry a person came through is spent, so once deleted they do not come
+   back through it. An Admin registers the identity again, and the person joins
+   as someone new, marked as previously deleted (design 5.1-6). *)
+let a_deleted_member_needs_a_new_entry () =
+  with_installation (fun t ->
+    let admin = admitted_id (sign_in t ~identity:(google "111") ~invite:(digest t.admin_token)) in
+    register t ~admin ~registration_id:"registration-1" (google "333");
+    let member = admitted_id (sign_in t ~identity:(google "333") ~invite:None) in
+    principal_event t ~admin (Authz_principal_event.Deleted { user_id = member; identity = google "333" });
+    Alcotest.(check string)
+      "the spent entry"
+      not_invited_text
+      (outcome (sign_in t ~identity:(google "333") ~invite:None));
+    register t ~admin ~registration_id:"registration-2" (google "333");
+    let back = sign_in t ~identity:(google "333") ~invite:None in
+    Alcotest.(check bool) "a new principal" false (User_id.equal member (admitted_id back));
+    match back with
+    | Ok (Login.Admitted { previously_deleted; role; _ }) ->
+      Alcotest.(check bool) "marked" true previously_deleted;
+      Alcotest.(check string) "a Member" "member" (E.role_label role)
+    | Ok (Login.Signed_in _) | Error _ -> Alcotest.fail "not admitted")
+;;
+
+(* An invitation admission of a registered identity spends its entry too. When
+   both logins of one identity check before either commits, one joins and the
+   other is a conflict (design 5.1-3). *)
+let an_invitation_and_an_entry_race_for_one_identity () =
+  with_installation (fun t ->
+    let admin = admitted_id (sign_in t ~identity:(google "111") ~invite:(digest t.admin_token)) in
+    issue t ~admin ~invite_id:"invite-2" ~token:(String.make 64 'b');
+    register t ~admin ~registration_id:"registration-1" (google "333");
+    let yielding () =
+      let draw = drawing [] in
+      fun () ->
+        Eio.Fiber.yield ();
+        draw ()
+    in
+    let through_invitation = ref (Error Login.Not_invited) in
+    let through_entry = ref (Error Login.Not_invited) in
+    Eio.Fiber.both
+      (fun () ->
+        through_invitation
+        := Login.sign_in
+             t.zone
+             ~now_ms:(now_ms t.clock)
+             ~draw:(yielding ())
+             ~identity:(google "333")
+             ~invite:(digest (String.make 64 'b')))
+      (fun () ->
+        through_entry
+        := Login.sign_in
+             t.zone
+             ~now_ms:(now_ms t.clock)
+             ~draw:(fun () -> String.make 32 'e')
+             ~identity:(google "333")
+             ~invite:None);
+    Alcotest.(check string)
+      "the entry joins first"
+      ("admitted " ^ String.make 32 'e' ^ " as member")
+      (outcome !through_entry);
+    match !through_invitation with
+    | Ok _ -> Alcotest.fail "the identity joined twice"
+    | Error refusal -> Alcotest.(check bool) "the invitation is a conflict" true (Login.is_conflict refusal))
 ;;
 
 (* Both logins check the invitation before either commits: the draw yields,
@@ -387,11 +507,21 @@ let a_stopped_log_signs_nobody_in () =
 let conflicts_are_the_writer_races () =
   let user = get (User_id.of_string "user-1") in
   let invite = get (Invite_id.of_string "invite-1") in
+  let registration = get (Registration_id.of_string "registration-1") in
   List.iter
     (fun (label, expected, refusal) -> Alcotest.(check bool) label expected (Login.is_conflict refusal))
     [ "spent", true, Login.Admission_refused (P.Invitation (Authz_invite_state.Invitation_consumed invite))
     ; "bound meanwhile", true, Login.Admission_refused (P.Identity_bound { identity = google "1"; user_id = user })
     ; "already joined", true, Login.Already_joined user
+    ; ( "an entry spent"
+      , true
+      , Login.Admission_refused (P.Registration (Authz_registration_state.Registration_consumed registration)) )
+    ; ( "an entry removed"
+      , false
+      , Login.Admission_refused (P.Registration (Authz_registration_state.Registration_removed registration)) )
+    ; ( "an entry of another identity"
+      , false
+      , Login.Admission_refused (P.Registration (Authz_registration_state.Identity_differs registration)) )
     ; "revoked", false, Login.Admission_refused (P.Invitation (Authz_invite_state.Invitation_revoked invite))
     ; "not issued", false, Login.Admission_refused (P.Invitation (Authz_invite_state.Invitation_not_issued invite))
     ; "not invited", false, Login.Not_invited
@@ -413,6 +543,10 @@ let () =
         ; Alcotest.test_case "a taken id" `Quick a_taken_id_is_drawn_again
         ; Alcotest.test_case "deleted, then again" `Quick a_deleted_identity_joins_again_as_someone_new
         ; Alcotest.test_case "a race" `Quick two_logins_race_for_one_invitation
+        ; Alcotest.test_case "a registered identity" `Quick a_registered_identity_joins_as_a_member
+        ; Alcotest.test_case "deleted, then a new entry" `Quick a_deleted_member_needs_a_new_entry
+        ; Alcotest.test_case "an invitation and an entry race" `Quick
+            an_invitation_and_an_entry_race_for_one_identity
         ; Alcotest.test_case "blocked" `Quick a_blocked_principal_does_not_sign_in
         ; Alcotest.test_case "a stopped log" `Quick a_stopped_log_signs_nobody_in
         ; Alcotest.test_case "conflicts" `Quick conflicts_are_the_writer_races

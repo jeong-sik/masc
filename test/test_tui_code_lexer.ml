@@ -82,6 +82,9 @@ let test_the_extension_table_names_only_lexed_languages () =
     (lang "fix.patch");
   Alcotest.(check (option string)) ".diff is diff" (Some "diff")
     (lang "fix.diff");
+  Alcotest.(check (option string)) ".md" (Some "markdown") (lang "docs/a.md");
+  Alcotest.(check (option string)) ".markdown, any case" (Some "markdown")
+    (lang "README.MARKDOWN");
   Alcotest.(check (option string)) "unlexed .rb stays None" None (lang "app.rb");
   Alcotest.(check (option string)) "no extension" None (lang "Makefile")
 
@@ -462,6 +465,184 @@ let test_digit_start_lines_without_a_gutter_stay_plain () =
     [ ("123456    42 + x", Masc_tui_code_lexer.kind_code) ]
     (spans "diff" "123456    42 + x")
 
+(* Markdown, read as a source file. The kinds are the Code surface's palette:
+   headings the bold type hue, markers and fence lines keyword, inline code
+   string, task boxes number. Only an HTML comment is a comment, because the
+   memo reader trusts that kind. *)
+let test_markdown_reads_a_heading_whole () =
+  check seg "the heading line, then the paragraph under it"
+    [ ("## Why", Masc_tui_code_lexer.kind_type)
+    ; ("body", Masc_tui_code_lexer.kind_code)
+    ]
+    (spans "markdown" "## Why\n\nbody");
+  check seg "no blank after the hashes: a hashtag, not a heading"
+    [ ("#hashtag", Masc_tui_code_lexer.kind_code) ]
+    (spans "markdown" "#hashtag");
+  check seg "seven hashes are not a heading"
+    [ ("####### x", Masc_tui_code_lexer.kind_code) ]
+    (spans "markdown" "####### x");
+  check seg "four blanks make an indented block, not a heading"
+    [ ("    # comment in a code block", Masc_tui_code_lexer.kind_code) ]
+    (spans "markdown" "    # comment in a code block")
+
+let test_markdown_marks_list_items_and_task_boxes () =
+  check seg "a bullet, a done task and an ordinal"
+    [ ("-", Masc_tui_code_lexer.kind_keyword)
+    ; (" item", Masc_tui_code_lexer.kind_code)
+    ; ("-", Masc_tui_code_lexer.kind_keyword)
+    ; (" ", Masc_tui_code_lexer.kind_code)
+    ; ("[x]", Masc_tui_code_lexer.kind_number)
+    ; (" done", Masc_tui_code_lexer.kind_code)
+    ; ("12.", Masc_tui_code_lexer.kind_keyword)
+    ; (" twelve", Masc_tui_code_lexer.kind_code)
+    ]
+    (spans "markdown" "- item\n- [x] done\n12. twelve");
+  check seg "an asterisk that opens emphasis is not a bullet"
+    [ ("*stress* here", Masc_tui_code_lexer.kind_code) ]
+    (spans "markdown" "*stress* here");
+  check seg "a nested bullet keeps its marker"
+    [ ("    ", Masc_tui_code_lexer.kind_code)
+    ; ("-", Masc_tui_code_lexer.kind_keyword)
+    ; (" inner", Masc_tui_code_lexer.kind_code)
+    ]
+    (spans "markdown" "    - inner")
+
+let test_markdown_reads_a_code_span () =
+  check seg "a span closes on a run of the same length"
+    [ ("use ", Masc_tui_code_lexer.kind_code)
+    ; ("``a ` b``", Masc_tui_code_lexer.kind_string)
+    ; (" now", Masc_tui_code_lexer.kind_code)
+    ]
+    (spans "markdown" "use ``a ` b`` now");
+  check seg "backticks nobody closes are plain text"
+    [ ("a ` b", Masc_tui_code_lexer.kind_code) ]
+    (spans "markdown" "a ` b");
+  check seg "an escaped backtick opens nothing"
+    [ ("\\`not code`", Masc_tui_code_lexer.kind_code) ]
+    (spans "markdown" "\\`not code`")
+
+let test_markdown_hands_a_fence_body_to_its_language () =
+  check seg "an ocaml fence between two keyword lines"
+    [ ("```ocaml", Masc_tui_code_lexer.kind_keyword)
+    ; ("let", Masc_tui_code_lexer.kind_keyword)
+    ; (" x = ", Masc_tui_code_lexer.kind_code)
+    ; ("1", Masc_tui_code_lexer.kind_number)
+    ; ("```", Masc_tui_code_lexer.kind_keyword)
+    ]
+    (spans "markdown" "```ocaml\nlet x = 1\n```");
+  check seg "a fence whose language nobody lexes keeps its body plain"
+    [ ("```text", Masc_tui_code_lexer.kind_keyword)
+    ; ("let x", Masc_tui_code_lexer.kind_code)
+    ; ("```", Masc_tui_code_lexer.kind_keyword)
+    ]
+    (spans "markdown" "```text\nlet x\n```");
+  check seg "a fence nobody closes runs to the end of the text"
+    [ ("```", Masc_tui_code_lexer.kind_keyword)
+    ; ("# not a heading", Masc_tui_code_lexer.kind_code)
+    ]
+    (spans "markdown" "```\n# not a heading");
+  check seg "a shorter run does not close a longer fence"
+    [ ("````", Masc_tui_code_lexer.kind_keyword)
+    ; ("```", Masc_tui_code_lexer.kind_code)
+    ; ("````", Masc_tui_code_lexer.kind_keyword)
+    ]
+    (spans "markdown" "````\n```\n````");
+  check seg "a fence in a list item is a fence"
+    [ ("1.", Masc_tui_code_lexer.kind_keyword)
+    ; (" step", Masc_tui_code_lexer.kind_code)
+    ; ("   ", Masc_tui_code_lexer.kind_code)
+    ; ("```sh", Masc_tui_code_lexer.kind_keyword)
+    ]
+    (spans "markdown" "1. step\n   ```sh")
+
+(* A Markdown fence inside Markdown keeps its body plain. Reading it as
+   Markdown again hands the rest of the text to one more level for every
+   opener, so the cost grows with the square of the openers. *)
+let test_markdown_does_not_read_a_markdown_fence_again () =
+  List.iter
+    (fun tag ->
+      check seg
+        (Printf.sprintf "a %s fence's body is not read as markdown" tag)
+        [ ("```" ^ tag, Masc_tui_code_lexer.kind_keyword)
+        ; ("# not a heading", Masc_tui_code_lexer.kind_code)
+        ; ("```", Masc_tui_code_lexer.kind_keyword)
+        ]
+        (spans "markdown" ("```" ^ tag ^ "\n# not a heading\n```")))
+    [ "md"; "markdown" ];
+  check seg "a diff of markdown inside markdown reads by line"
+    [ ("```diff:md", Masc_tui_code_lexer.kind_keyword)
+    ; ("+# not a heading", Masc_tui_code_lexer.kind_diff_added)
+    ; ("```", Masc_tui_code_lexer.kind_keyword)
+    ]
+    (spans "markdown" "```diff:md\n+# not a heading\n```");
+  check seg "markdown outside a fence is still markdown"
+    [ ("# a heading", Masc_tui_code_lexer.kind_type) ]
+    (spans "md" "# a heading")
+
+let test_markdown_marks_quotes_rules_and_table_rows () =
+  check seg "a nested quote marks each > and leaves the words alone"
+    [ (">", Masc_tui_code_lexer.kind_keyword)
+    ; (" ", Masc_tui_code_lexer.kind_code)
+    ; (">", Masc_tui_code_lexer.kind_keyword)
+    ; (" said", Masc_tui_code_lexer.kind_code)
+    ]
+    (spans "markdown" "> > said");
+  check seg "a rule and a table's rule row are punctuation"
+    [ ("text", Masc_tui_code_lexer.kind_code)
+    ; ("---", Masc_tui_code_lexer.kind_keyword)
+    ; ("| a | b |", Masc_tui_code_lexer.kind_code)
+    ; ("|---|:-:|", Masc_tui_code_lexer.kind_keyword)
+    ; ("| 1 | 2 |", Masc_tui_code_lexer.kind_code)
+    ]
+    (spans "markdown" "text\n---\n| a | b |\n|---|:-:|\n| 1 | 2 |")
+
+let test_markdown_calls_only_an_html_comment_a_comment () =
+  check seg "a closed comment, and one that spans rows"
+    [ ("<!-- one -->", Masc_tui_code_lexer.kind_comment)
+    ; ("<!-- two", Masc_tui_code_lexer.kind_comment)
+    ; ("still two -->", Masc_tui_code_lexer.kind_comment)
+    ; (" tail", Masc_tui_code_lexer.kind_code)
+    ]
+    (spans "markdown" "<!-- one -->\n<!-- two\nstill two --> tail");
+  let rest =
+    spans "markdown"
+      "> quoted\n---\n```ocaml\nlet a = 1\n```\n| a |\n|---|\n[x](http://u)"
+  in
+  Alcotest.(check bool)
+    "no quote, rule, fence, table rule or link is a comment" false
+    (List.exists
+       (fun (_, kind) -> String.equal kind Masc_tui_code_lexer.kind_comment)
+       rest)
+
+let test_markdown_reads_front_matter_as_yaml () =
+  check seg "delimiters, a key, its string, then the first heading"
+    [ ("---", Masc_tui_code_lexer.kind_keyword)
+    ; ("rfc", Masc_tui_code_lexer.kind_type)
+    ; (": ", Masc_tui_code_lexer.kind_code)
+    ; ("\"0505\"", Masc_tui_code_lexer.kind_string)
+    ; ("---", Masc_tui_code_lexer.kind_keyword)
+    ; ("# T", Masc_tui_code_lexer.kind_type)
+    ]
+    (spans "markdown" "---\nrfc: \"0505\"\n---\n# T");
+  check seg "a rule on the first line with no closer is just a rule"
+    [ ("---", Masc_tui_code_lexer.kind_keyword)
+    ; ("text", Masc_tui_code_lexer.kind_code)
+    ]
+    (spans "markdown" "---\ntext")
+
+let test_markdown_never_loses_or_adds_a_byte () =
+  match Masc_tui_code_lexer.lexer_of_language "markdown" with
+  | None -> Alcotest.fail "no lexer for markdown"
+  | Some lex ->
+      List.iter
+        (fun text ->
+          check Alcotest.string (Printf.sprintf "%S" text) text
+            (String.concat "" (List.map fst (lex text))))
+        [ ""; "`"; "```"; "~~~\n```\n~~~"; "<!--"; "<!-- a -->b<!--"; "> > ";
+          "|-|"; "- [ ]"; "- [x"; "1."; "#"; "######## x"; "\\"; "---\n---\n";
+          "---\na: 1\n..."; "    # code\n\t- x"; "\r\n"; "`a\n`b`";
+          "한글 `코드` 입니다\n- 목록"; "```ocaml\nlet (* open"; "````\n~~~\n" ]
+
 (* Every branch of every lexer has to move the cursor. One that does not
    turns opening a file into a frozen TUI, and no assertion catches it: the
    lexer never answers, right or wrong. So this asks the only question that
@@ -474,11 +655,11 @@ let awkward_fragments =
     ".5"; "e-"; "'"; "\""; "`"; "'''"; "\"\"\""; "\\"; "/*"; "*/"; "//"; "#";
     "{"; "}"; "["; "]"; ":"; ": -"; "= -"; "@@"; "$"; "<<"; ">>";
     {|{"a": -1}|}; "[-2.5, 3]"; "a = -1"; "x: -1"; "select -1"; "let x = -1";
-    "echo -1" ]
+    "echo -1"; "```"; "~~~"; "<!--"; "> "; "|-"; "- "; "1. "; "[ ]"; "---\n" ]
 
 let lexer_languages =
   [ "ocaml"; "bash"; "json"; "diff"; "diff:ocaml"; "diff:diff:ocaml"; "yaml"; "toml"; "sql";
-    "typescript"; "go"; "rust"; "c"; "python"; "alphatex" ]
+    "typescript"; "go"; "rust"; "c"; "python"; "alphatex"; "markdown" ]
 
 let in_flight = ref "the suite"
 
@@ -518,6 +699,27 @@ let test_every_lexer_finishes_on_awkward_fragments () =
         lexer_languages)
     ();
   Alcotest.(check bool) "every lexer answered" true true
+
+(* The fragments above are short, so they cannot show a cost that grows with
+   the text. This one is long: a file of unclosed ```md openers, 72 KB. Before
+   a Markdown fence stopped being read as Markdown again, this input took
+   18.5 s on an M3 Max; a linear read takes milliseconds, so the bound only
+   has to tell those two apart. *)
+let test_a_pile_of_unclosed_markdown_fences_finishes_quickly () =
+  let openers = 12_000 in
+  let text = String.concat "" (List.init openers (fun _ -> "```md\n")) in
+  match Masc_tui_code_lexer.lexer_of_language "markdown" with
+  | None -> Alcotest.fail "no lexer for markdown"
+  | Some lex ->
+      in_flight := Printf.sprintf "markdown on %d unclosed md fences" openers;
+      let started = Sys.time () in
+      let segments = lex text in
+      let seconds = Sys.time () -. started in
+      check Alcotest.string "no byte is lost or added" text
+        (String.concat "" (List.map fst segments));
+      Alcotest.(check bool)
+        (Printf.sprintf "finished in %.2f s, under 5 s" seconds)
+        true (seconds < 5.0)
 
 let () =
   start_the_watchdog ();
@@ -612,6 +814,28 @@ let () =
             test_sql_reads_a_keyword_however_it_is_spelled
         ; Alcotest.test_case "double quotes name rather than hold text" `Quick
             test_sql_double_quotes_name_rather_than_hold_text
+        ] )
+    ; ( "markdown"
+      , [ Alcotest.test_case "a heading is one bold segment" `Quick
+            test_markdown_reads_a_heading_whole
+        ; Alcotest.test_case "list items and task boxes" `Quick
+            test_markdown_marks_list_items_and_task_boxes
+        ; Alcotest.test_case "a code span closes on its own length" `Quick
+            test_markdown_reads_a_code_span
+        ; Alcotest.test_case "a fence body goes to its language" `Quick
+            test_markdown_hands_a_fence_body_to_its_language
+        ; Alcotest.test_case "quotes, rules and table rule rows" `Quick
+            test_markdown_marks_quotes_rules_and_table_rows
+        ; Alcotest.test_case "only an HTML comment is a comment" `Quick
+            test_markdown_calls_only_an_html_comment_a_comment
+        ; Alcotest.test_case "front matter is yaml" `Quick
+            test_markdown_reads_front_matter_as_yaml
+        ; Alcotest.test_case "no byte is lost or added" `Quick
+            test_markdown_never_loses_or_adds_a_byte
+        ; Alcotest.test_case "a markdown fence is not read as markdown again"
+            `Quick test_markdown_does_not_read_a_markdown_fence_again
+        ; Alcotest.test_case "unclosed markdown fences finish quickly" `Quick
+            test_a_pile_of_unclosed_markdown_fences_finishes_quickly
         ] )
     ; ( "paths"
       , [ Alcotest.test_case "the extension table names only lexed languages"

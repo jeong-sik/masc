@@ -1158,7 +1158,373 @@ let diff_lexer_with ~sub text =
     (List.combine lines rows);
   runs_segments runs
 
-let rec lexer_of_language (tag : string) =
+(* {1 Markdown}
+
+   A Markdown file read as source, one line at a time. The kinds say what the
+   reader should notice, not what the grammar calls it: a heading is the type
+   hue in bold; a list marker, a quote marker, a code fence and a table's rule
+   row are keyword punctuation; an inline code span is a string; a task box is
+   a number. A fence's body goes to the lexer its info string names, so an
+   OCaml block in a design document reads as OCaml.
+
+   Only an HTML comment is a comment. The memo reader takes that kind to mean
+   "a comment someone wrote", so a dimmed rule or URL would have it looking for
+   memos in text nobody wrote as a comment.
+
+   Emphasis and links stay the text they are. Pairing [*] and [_] takes the
+   grammar's flanking rules ([snake_case] holds two underscores), and a
+   tokenizer that guessed at them would colour text it had not read. *)
+
+let markdown_blank = function ' ' | '\t' | '\r' -> true | _ -> false
+
+(* End of the line that starts at [start]: its newline, or the end of the
+   text. *)
+let markdown_line_stop text start =
+  match String.index_from_opt text start '\n' with
+  | Some stop -> stop
+  | None -> String.length text
+
+let markdown_skip_blanks text index stop =
+  let rec skip index =
+    if index < stop && markdown_blank text.[index] then skip (index + 1)
+    else index
+  in
+  skip index
+
+(* The index of the next [marker] at or after [from]. *)
+let markdown_find text from marker =
+  let last = String.length text - String.length marker in
+  let rec scan index =
+    if index > last then None
+    else if starts_at text index marker then Some index
+    else scan (index + 1)
+  in
+  scan from
+
+(* Three or more backticks or tildes, then an info string. A backtick fence
+   whose info string holds a backtick is an inline code span that happens to
+   open the line. Answers the fence character, its length and the info
+   string. *)
+let markdown_fence_opening text index stop =
+  if index >= stop then None
+  else
+    let fence = text.[index] in
+    if fence <> '`' && fence <> '~' then None
+    else
+      let rec run index =
+        if index < stop && text.[index] = fence then run (index + 1) else index
+      in
+      let after = run index in
+      if after - index < 3 then None
+      else
+        let info = String.trim (String.sub text after (stop - after)) in
+        if fence = '`' && String.contains info '`' then None
+        else Some (fence, after - index, info)
+
+(* A closing fence is the same character at least as many times, and nothing
+   else on the line. *)
+let markdown_fence_closing text index stop ~fence ~length =
+  let rec run index =
+    if index < stop && text.[index] = fence then run (index + 1) else index
+  in
+  let after = run index in
+  after - index >= length && markdown_skip_blanks text after stop >= stop
+
+(* The language an info string names is its first word: [ocaml], and
+   [python {.numberLines}] is [python]. *)
+let markdown_fence_language info =
+  let rec word_end index =
+    if index < String.length info
+       && (not (markdown_blank info.[index]))
+       && info.[index] <> '{'
+    then word_end (index + 1)
+    else index
+  in
+  String.sub info 0 (word_end 0)
+
+(* Three or more of one of [-*_] and nothing else but blanks. *)
+let markdown_thematic_break text index stop =
+  index < stop
+  && (match text.[index] with '-' | '*' | '_' -> true | _ -> false)
+  &&
+  let mark = text.[index] in
+  let count = ref 0 and only = ref true in
+  for i = index to stop - 1 do
+    if text.[i] = mark then incr count
+    else if not (markdown_blank text.[i]) then only := false
+  done;
+  !only && !count >= 3
+
+(* One to six hashes, then a blank or the end of the line: [#hashtag] is not a
+   heading. *)
+let markdown_heading text index stop =
+  let rec hashes index =
+    if index < stop && text.[index] = '#' then hashes (index + 1) else index
+  in
+  let after = hashes index in
+  let count = after - index in
+  count >= 1 && count <= 6 && (after >= stop || markdown_blank text.[after])
+
+(* The index just past a bullet or ordinal, when the line opens with one. *)
+let markdown_list_marker text index stop =
+  if index >= stop then None
+  else
+    match text.[index] with
+    | '-' | '*' | '+' ->
+        if index + 1 >= stop || markdown_blank text.[index + 1] then
+          Some (index + 1)
+        else None
+    | '0' .. '9' ->
+        let rec digits index =
+          if index < stop && is_digit text.[index] then digits (index + 1)
+          else index
+        in
+        let after = digits index in
+        if
+          after - index <= 9 && after < stop
+          && (text.[after] = '.' || text.[after] = ')')
+          && (after + 1 >= stop || markdown_blank text.[after + 1])
+        then Some (after + 1)
+        else None
+    | _ -> None
+
+let markdown_task_box text index stop =
+  index + 3 <= stop
+  && text.[index] = '['
+  && (match text.[index + 1] with ' ' | 'x' | 'X' -> true | _ -> false)
+  && text.[index + 2] = ']'
+  && (index + 3 >= stop || markdown_blank text.[index + 3])
+
+(* The row under a table's header: pipes, dashes, colons and blanks. *)
+let markdown_table_rule text index stop =
+  index < stop
+  && text.[index] = '|'
+  &&
+  let dashes = ref false and only = ref true in
+  for i = index to stop - 1 do
+    match text.[i] with
+    | '-' -> dashes := true
+    | '|' | ':' | ' ' | '\t' | '\r' -> ()
+    | _ -> only := false
+  done;
+  !only && !dashes
+
+(* Four blanks or a tab: a code block under CommonMark, and in a list item the
+   continuation of one. A tokenizer cannot tell which, so such a line only
+   gets the markers that are safe in both (a bullet, a code fence). *)
+let markdown_indented text start first =
+  first - start >= 4
+  ||
+  let rec tab index = index < first && (text.[index] = '\t' || tab (index + 1)) in
+  tab start
+
+(* Code spans inside a line. A run of backticks opens a span that the next run
+   of the same length closes; one with no closer is just backticks. A length
+   with no closer later on the line has none for the rest of it either, so a
+   line of unmatched backticks costs one scan per length, not one per
+   backtick. *)
+let markdown_inline text start stop (runs : runs) =
+  let unmatched = Array.make 9 false in
+  let rec run_end index =
+    if index < stop && text.[index] = '`' then run_end (index + 1) else index
+  in
+  let rec closing from length =
+    if from >= stop then None
+    else if text.[from] = '`' then
+      let after = run_end from in
+      if after - from = length then Some from else closing after length
+    else closing (from + 1) length
+  in
+  let rec go index =
+    if index >= stop then ()
+    else
+      match text.[index] with
+      | '\\' when index + 1 < stop ->
+          runs_add runs kind_code '\\';
+          runs_add runs kind_code text.[index + 1];
+          go (index + 2)
+      | '`' -> (
+          let after = run_end index in
+          let length = after - index in
+          if length > 8 || unmatched.(length) then begin
+            paint ~kind:kind_code text index after runs;
+            go after
+          end
+          else
+            match closing after length with
+            | Some close ->
+                paint ~kind:kind_string text index (close + length) runs;
+                go (close + length)
+            | None ->
+                unmatched.(length) <- true;
+                paint ~kind:kind_code text index after runs;
+                go after)
+      | char ->
+          runs_add runs kind_code char;
+          go (index + 1)
+  in
+  go start
+
+(* [sub] answers the lexer a fence's language names, if there is one. *)
+let markdown_lexer_with ~sub text =
+  let runs = new_runs kind_code in
+  let limit = String.length text in
+  let newline stop = if stop < limit then runs_add runs kind_code '\n' in
+  let emit_lexed lexer body =
+    List.iter
+      (fun (piece, kind) -> String.iter (runs_add runs kind) piece)
+      (lexer body)
+  in
+  (* A fence body between the opening line and the closing one. *)
+  let body ~info from stop =
+    if stop > from then begin
+      let body = String.sub text from (stop - from) in
+      match sub (markdown_fence_language info) with
+      | Some lexer -> emit_lexed lexer body
+      | None -> paint ~kind:kind_code text from stop runs
+    end
+  in
+  (* The first line at or after [from] that closes the fence, as its start and
+     its end. A fence nobody closes runs to the end of the text. *)
+  let rec closing from ~fence ~length =
+    if from >= limit then None
+    else
+      let stop = markdown_line_stop text from in
+      let first = markdown_skip_blanks text from stop in
+      if markdown_fence_closing text first stop ~fence ~length then
+        Some (from, stop)
+      else closing (stop + 1) ~fence ~length
+  in
+  (* Each handler lexes its line (or the lines it spans) whole, newline
+     included, and answers where the next line starts. *)
+  let rec line start =
+    if start >= limit then ()
+    else begin
+      let stop = markdown_line_stop text start in
+      let first = markdown_skip_blanks text start stop in
+      let indent () = paint ~kind:kind_code text start first runs in
+      let whole kind =
+        indent ();
+        paint ~kind text first stop runs;
+        newline stop;
+        stop + 1
+      in
+      let inline from =
+        markdown_inline text from stop runs;
+        newline stop;
+        stop + 1
+      in
+      let next =
+        if first >= stop then begin
+          paint ~kind:kind_code text start stop runs;
+          newline stop;
+          stop + 1
+        end
+        else
+          match markdown_fence_opening text first stop with
+          | Some (fence, length, info) -> (
+              ignore (whole kind_keyword);
+              let from = min limit (stop + 1) in
+              match closing from ~fence ~length with
+              | Some (close_start, close_stop) ->
+                  body ~info from close_start;
+                  let close_first =
+                    markdown_skip_blanks text close_start close_stop
+                  in
+                  paint ~kind:kind_code text close_start close_first runs;
+                  paint ~kind:kind_keyword text close_first close_stop runs;
+                  newline close_stop;
+                  close_stop + 1
+              | None ->
+                  body ~info from limit;
+                  limit)
+          | None ->
+              let indented = markdown_indented text start first in
+              if (not indented) && starts_at text first "<!--" then begin
+                indent ();
+                let close =
+                  match markdown_find text (first + 4) "-->" with
+                  | Some at -> at + 3
+                  | None -> limit
+                in
+                paint ~kind:kind_comment text first close runs;
+                let stop = markdown_line_stop text close in
+                markdown_inline text close stop runs;
+                newline stop;
+                stop + 1
+              end
+              else if (not indented) && markdown_heading text first stop then
+                whole kind_type
+              else if (not indented) && markdown_thematic_break text first stop
+              then whole kind_keyword
+              else if (not indented) && markdown_table_rule text first stop
+              then whole kind_keyword
+              else if (not indented) && text.[first] = '>' then begin
+                indent ();
+                let rec quote index =
+                  runs_add runs kind_keyword '>';
+                  let after = markdown_skip_blanks text (index + 1) stop in
+                  paint ~kind:kind_code text (index + 1) after runs;
+                  if after < stop && text.[after] = '>' then quote after
+                  else after
+                in
+                inline (quote first)
+              end
+              else
+                match markdown_list_marker text first stop with
+                | Some after ->
+                    indent ();
+                    paint ~kind:kind_keyword text first after runs;
+                    let rest = markdown_skip_blanks text after stop in
+                    paint ~kind:kind_code text after rest runs;
+                    if markdown_task_box text rest stop then begin
+                      paint ~kind:kind_number text rest (rest + 3) runs;
+                      inline (rest + 3)
+                    end
+                    else inline rest
+                | None ->
+                    indent ();
+                    inline first
+      in
+      line next
+    end
+  in
+  (* A block of YAML between two [---] lines at the very top. *)
+  let front_matter () =
+    let first_stop = markdown_line_stop text 0 in
+    let delimiter from stop mark =
+      String.equal (String.trim (String.sub text from (stop - from))) mark
+    in
+    if limit = 0 || not (delimiter 0 first_stop "---") then 0
+    else
+      let rec close from =
+        if from >= limit then None
+        else
+          let stop = markdown_line_stop text from in
+          if delimiter from stop "---" || delimiter from stop "..." then
+            Some (from, stop)
+          else close (stop + 1)
+      in
+      match close (first_stop + 1) with
+      | None -> 0
+      | Some (close_start, close_stop) ->
+          paint ~kind:kind_keyword text 0 first_stop runs;
+          newline first_stop;
+          let from = first_stop + 1 in
+          if close_start > from then
+            emit_lexed yaml_lexer (String.sub text from (close_start - from));
+          paint ~kind:kind_keyword text close_start close_stop runs;
+          newline close_stop;
+          close_stop + 1
+  in
+  line (front_matter ());
+  runs_segments runs
+
+(* [within_markdown] is true while the tag of a fence inside a Markdown
+   document is being resolved. That fence's body is not read as Markdown
+   again: every level would hand the rest of the text to the next, and a
+   file of unclosed ```md openers would cost time quadratic in its size. *)
+let rec lexer_in ~within_markdown (tag : string) =
   let tag = String.lowercase_ascii (String.trim tag) in
   match String.index_opt tag ':' with
   | Some colon
@@ -1173,7 +1539,7 @@ let rec lexer_of_language (tag : string) =
       match sub with
       | "" | "diff" | "patch" -> Some diff_lexer
       | sub -> (
-          match lexer_of_language sub with
+          match lexer_in ~within_markdown sub with
           | Some sub_lexer -> Some (diff_lexer_with ~sub:sub_lexer)
           | None -> Some diff_lexer))
   | Some _ | None -> (
@@ -1191,7 +1557,12 @@ let rec lexer_of_language (tag : string) =
           Some c_like_lexer
       | "python" | "py" -> Some python_lexer
       | "alphatex" | "atex" -> Some alphatex_lexer
+      | "markdown" | "md" ->
+          if within_markdown then None
+          else Some (markdown_lexer_with ~sub:(lexer_in ~within_markdown:true))
       | _ -> None)
+
+let lexer_of_language tag = lexer_in ~within_markdown:false tag
 
 
 (* The extension decides the language. Only extensions whose language has a
@@ -1220,6 +1591,7 @@ let language_of_path path =
   else if has ".yaml" || has ".yml" then Some "yaml"
   else if has ".toml" then Some "toml"
   else if has ".sql" then Some "sql"
+  else if has ".md" || has ".markdown" then Some "markdown"
   (* The lexer was already here; only the extension was missing, so a patch
      opened as a file read as prose while the same text inside a fence read as
      a diff. *)

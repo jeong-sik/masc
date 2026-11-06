@@ -106,9 +106,9 @@ module Replay : sig
     { state : Authz_state.t
     ; probe : Authz_high_water.Probe.t
     ; head : Authz_record.head
-    ; unreached : (Authz_record.Hash.t * Authz_records.Subject.t) list
-          (** The blocks of given-up reductions whose record the replay has not
-              read yet. *)
+    ; unreached : (Authz_record.Hash.t * Authz_state.held) list
+          (** The blocks of given-up reductions, each with the head its intent
+              began at, that the replay has not reached yet. *)
     }
 
   (** Over an empty log, for a store in the given state. *)
@@ -162,6 +162,21 @@ val open_at_start
   -> (t, open_error) result
 
 val snapshot : t -> snapshot
+
+(** What the gate reads for [revocation_pending(subject)] (design 8.3). *)
+type revocation =
+  | Known of Authz_records.Revocation_state.t
+      (** [Pending] while the published state holds a reduction of the
+          subject. A reduction whose record did not append is held from the
+          failed commit on, not from the next entry. *)
+  | Unknown_log_stopped of Authz_log.stop
+      (** The log is stopped: its head is not trusted and no commit runs, so
+          the zone cannot say whether a reduction was given up
+          ([AuthorizationUncertain], plan B2). *)
+  | Unknown_store_stopped of Authz_external_store.stop
+      (** The external store is stopped, with the same consequence. *)
+
+val revocation : t -> Authz_records.Subject.t -> revocation
 
 (** The record to append. Its seq and previous hash come from the head, and its
     time from the clock of the zone. *)
@@ -231,7 +246,8 @@ type error =
       (** The intent, when the record has one, is in the store. When the error
           stopped the log, the next start reads whether the record is in it.
           Otherwise it is not, and the next commit or install aborts the
-          intent. *)
+          intent. The subject of a reduction is blocked in the published state
+          from this failure on (design 8.3). *)
   | Answer_not_written of
       { record_hash : Authz_record.Hash.t
       ; error : Authz_external_store.append_error

@@ -67,6 +67,7 @@
   keeper_gate_auto_judge_queue
   keeper_gate_auto_judge_worker
   keeper_gate_auto_judge_recovery
+  keeper_approval_queue_registry
   keeper_skill_activation_types
   keeper_skill_activation_summary
   keeper_skill_activation_ledger_errors

@@ -1,8 +1,8 @@
-# Shell IR Oracle Sidecar
+# Shell IR Oracle
 
 Non-production fixture emitter for Shell IR parser hardening.
 
-This sidecar parses a shell command with `mvdan.cc/sh/v3/syntax` and emits the
+This tool parses a shell command with `mvdan.cc/sh/v3/syntax` and emits the
 data-only JSON contract consumed by `lib/exec/shell_ir_oracle.ml`.
 
 It does not execute commands, make policy decisions, or participate in runtime

@@ -1,6 +1,6 @@
 (** Shell_ir_oracle — parser-oracle fact subset for Shell IR validation.
 
-    This module is intentionally data-only.  A non-production sidecar can
+    This module is intentionally data-only.  A non-production tool (tools/shell_ir_oracle) can
     emit this JSON shape from a real shell parser. *)
 
 type parse_status =

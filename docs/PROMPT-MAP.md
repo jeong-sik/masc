@@ -81,7 +81,7 @@ Muse·Claude Code·Codex 처럼 공식 클라이언트 세션을 이어 쓰는 �
 | `workspace_memory_curator.md` | `workspace_curator.ml` — 공유 작업 공간 기억 합성 | system / user |
 | `workspace_memory_briefing.md` | 공유 기억 브리핑 서식 | 조립용 슬롯 |
 | `verification.md` | `task/anti_rationalization.ml` — Task 완료 검증 | system. 계약·증거·조회도구 슬롯이 본문에 끼워짐 |
-| `judge.md ### effect` | `keeper/hitl_summary_worker.ml` — 외부 효과 승인 판정 | system. `effect.output_contract` 가 JSON 계약 |
+| `judge.md ### effect` | `keeper/hitl_summary_flow_prepare.ml` — 외부 효과 승인 판정 | system. `effect.output_contract` 가 JSON 계약 |
 | `judge.md ### board` | `keeper/keeper_board_attention_exact_flow.ml` | system |
 | `goal_verification.md` | `goal_verification_agent.ml` — metric 이 target 에 닿았나 | system. `lookup` 이 `proof` 안에 끼워짐 |
 | `fusion.judge.md` | `fusion/fusion_judge.ml` — 1차·재심·메타 3위상 | system. 셋이 같은 `output` 슬롯을 공유 |

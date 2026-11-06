@@ -415,6 +415,7 @@ type try_provider_ctx =
     carried_front_seed : unit -> Keeper_carried_front.seed_read
   ; request_input : request_input
   ; turn_boundary : Keeper_carried_front.turn_start
+  ; history_at_start : Keeper_turn_boundaries.history_at_start
   ; carried_front_after_refusal : unit -> Keeper_carried_front.seed option
   ; (* Where a front moved after a refusal is kept for the rest of the
        turn. The position is a fact about the history, not about the
@@ -1172,25 +1173,69 @@ let librarian_point_end_atom = function
   | At_read_position { end_atom } -> end_atom
 ;;
 
+(* Where this turn began on the history in hand (RFC librarian-lifecycle
+   §4.10, rules 7 and 8): the atom count the turn started from, as its start
+   state names it, while this history still opens the atom before it with the
+   same message. [Fresh_history] began at 0. [Continued_history] names no
+   position, and a digest this history does not hold names none it can use. *)
+let this_turn_start ~history_digest_at (history_at_start : Keeper_turn_boundaries.history_at_start) =
+  match history_at_start with
+  | Keeper_turn_boundaries.Fresh_history -> Some 0
+  | Keeper_turn_boundaries.Continued_history -> None
+  | Keeper_turn_boundaries.Continued_history_from { start_atom; start_atom_digest } ->
+    (match history_digest_at (start_atom - 1) with
+     | Some digest when String.equal digest start_atom_digest -> Some start_atom
+     | Some (_ : string) | None -> None)
+;;
+
+(* What a front rule 8 moved to where this turn began is called (RFC
+   librarian-lifecycle §4.10): a label of its own on each continuity, so a
+   log line, the continuity request record and rule 7 tell it from rule 1's
+   front at the turn boundary. *)
+let this_turn_front_source (continuity : continuity) =
+  match continuity.point with
+  | Summarized _ | Absorbed _ -> Keeper_carried_front.This_turn_start_after_librarian_refusal
+  | Without_snapshot -> Keeper_carried_front.This_turn_start_after_seed_refusal
+;;
+
 (* Rule 7 of RFC librarian-lifecycle §4.10: an accepted start is at most
-   this turn's boundary, so this turn's input always rides. A start past it
-   is moved back to it, named by the message that opens the boundary atom;
-   a boundary this history does not name keeps no accepted start. An unknown
-   boundary bounds nothing, and the projection still carries the newest
-   atom ({!Keeper_carried_front.clamp}). *)
-let within_turn_boundary ~history_digest_at ~turn_boundary (seed : Keeper_carried_front.seed) =
+   this turn's boundary, so the atoms since the last completed turn always
+   ride. A start past it is moved back to it, named by the message that
+   opens the boundary atom; a boundary this history does not name keeps no
+   accepted start. A front rule 8 moved this turn to where it began is
+   bounded by where it began instead, or by the boundary when that is not
+   known: rule 8 runs only after a range opened at the boundary was refused
+   as too large, so pulling its front back would send that range again. An
+   unknown boundary bounds nothing, and the projection still carries the
+   newest atom ({!Keeper_carried_front.clamp}). *)
+let within_turn_boundary ~history_digest_at ~turn_boundary ~history_at_start
+      (seed : Keeper_carried_front.seed) =
   match seed.front, turn_boundary with
-  | Model_input_front.At_atom _, Keeper_carried_front.Turn_boundary { end_atom }
-    when seed.first_atom > end_atom ->
-    Option.map
-      (fun front_digest -> { seed with first_atom = end_atom; front = Model_input_front.At_atom front_digest })
-      (history_digest_at end_atom)
+  | Model_input_front.At_atom _, Keeper_carried_front.Turn_boundary { end_atom } ->
+    let bound =
+      match seed.source with
+      | Keeper_carried_front.This_turn_start_after_seed_refusal
+      | Keeper_carried_front.This_turn_start_after_librarian_refusal ->
+        Option.fold ~none:end_atom ~some:(Int.max end_atom)
+          (this_turn_start ~history_digest_at history_at_start)
+      | Keeper_carried_front.Ledger | Keeper_carried_front.Turn_record _
+      | Keeper_carried_front.Turn_start_after_seed_refusal
+      | Keeper_carried_front.Turn_start_after_librarian_refusal -> end_atom
+    in
+    if seed.first_atom > bound
+    then
+      Option.map
+        (fun front_digest -> { seed with first_atom = bound; front = Model_input_front.At_atom front_digest })
+        (history_digest_at bound)
+    else Some seed
+  | (Model_input_front.After_history _ | Model_input_front.Empty_history),
+    Keeper_carried_front.Turn_boundary _
   | (Model_input_front.At_atom _ | Model_input_front.After_history _ | Model_input_front.Empty_history),
-    (Keeper_carried_front.Turn_boundary _ | Keeper_carried_front.Turn_boundary_unknown _) ->
+    Keeper_carried_front.Turn_boundary_unknown _ ->
     Some seed
 ;;
 
-let from_librarian_point ~accepted ~history_digest_at ~turn_boundary point =
+let from_librarian_point ~accepted ~history_digest_at ~turn_boundary ~history_at_start point =
   let at_point =
     match point with
     | At_snapshot snapshot -> From_snapshot snapshot
@@ -1200,7 +1245,7 @@ let from_librarian_point ~accepted ~history_digest_at ~turn_boundary point =
     Option.bind accepted (fun seed ->
       match Keeper_carried_front.for_history ~digest_at:history_digest_at seed with
       | Error (_ : Keeper_carried_front.dropped_front) -> None
-      | Ok seed -> within_turn_boundary ~history_digest_at ~turn_boundary seed)
+      | Ok seed -> within_turn_boundary ~history_digest_at ~turn_boundary ~history_at_start seed)
   in
   match past_point with
   | Some seed when seed.Keeper_carried_front.first_atom > librarian_point_end_atom point ->
@@ -1208,7 +1253,8 @@ let from_librarian_point ~accepted ~history_digest_at ~turn_boundary point =
   | Some (_ : Keeper_carried_front.seed) | None -> at_point
 ;;
 
-let choose_range_start ~continuity ~front ~accepted ~history_digest_at ~turn_boundary =
+let choose_range_start ~continuity ~front ~accepted ~history_digest_at ~turn_boundary
+      ~history_at_start =
   let without_point () =
     match front with
     | None -> { start = From_turn_boundary turn_boundary; outlived_seed = None }
@@ -1219,7 +1265,7 @@ let choose_range_start ~continuity ~front ~accepted ~history_digest_at ~turn_bou
          { start = From_turn_boundary turn_boundary; outlived_seed = Some (seed, dropped) })
   in
   let at_point point =
-    { start = from_librarian_point ~accepted ~history_digest_at ~turn_boundary point
+    { start = from_librarian_point ~accepted ~history_digest_at ~turn_boundary ~history_at_start point
     ; outlived_seed = None
     }
   in
@@ -1312,6 +1358,7 @@ let compose_carried_model_input
       ?continuity
       ?completed_arguments
       ?(finished_turn_results = Finished_turns_verbatim)
+      ?(history_at_start = Keeper_turn_boundaries.Continued_history)
       ~measure_message_bytes
       ~measure_wire_bytes
       ~(front : Keeper_carried_front.seed option)
@@ -1331,6 +1378,7 @@ let compose_carried_model_input
      keeps the position. *)
   let { start; outlived_seed } =
     choose_range_start ~continuity ~front ~accepted ~history_digest_at ~turn_boundary
+      ~history_at_start
   in
   (* The resend that answers a size refusal demotes every atom of the refused
      request with the completed arguments the attempt bound: the resend is the
@@ -1440,6 +1488,7 @@ let unchecked_request_view
       ?continuity
       ?completed_arguments
       ?finished_turn_results
+      ?history_at_start
       ~provider_config
       ~measure_message_bytes
       ~measure_wire_bytes
@@ -1456,7 +1505,7 @@ let unchecked_request_view
   let composed =
     offload_model_input_cpu (fun () ->
       compose_carried_model_input
-        ?continuity ?completed_arguments ?finished_turn_results
+        ?continuity ?completed_arguments ?finished_turn_results ?history_at_start
         ~measure_message_bytes
         ~measure_wire_bytes
         ~front
@@ -1513,13 +1562,14 @@ let carried_source_indices ~messages (view : request_view) =
 ;;
 
 let request_view
-      ?continuity ?completed_arguments ?finished_turn_results
+      ?continuity ?completed_arguments ?finished_turn_results ?history_at_start
       ?(tools = []) ~provider_config ~measure_message_bytes ~measure_wire_bytes ~front
       ~accepted ~history_digest_at ~current_turn_results ~base_path
       ~turn_boundary ~materialize ~to_wire messages =
   let open Result.Syntax in
   let build ?(materialize = materialize) completed_arguments =
     unchecked_request_view ~tools ?continuity ?completed_arguments ?finished_turn_results
+      ?history_at_start
       ~provider_config ~measure_message_bytes ~measure_wire_bytes ~front ~accepted
       ~history_digest_at
       ~current_turn_results ~base_path ~turn_boundary ~materialize
@@ -1922,6 +1972,7 @@ let bounded_model_input_projection
       request_view
         ?continuity:(input_continuity ctx.request_input) ?completed_arguments:view_arguments
         ~finished_turn_results
+        ~history_at_start:ctx.history_at_start
         ~tools:prefix_tools
         ~provider_config
         ~measure_message_bytes
@@ -1987,6 +2038,7 @@ let bounded_model_input_projection
              let demoted =
                compose_carried_model_input
                  ?continuity:(input_continuity ctx.request_input) ?completed_arguments
+                 ~history_at_start:ctx.history_at_start
                  ~measure_message_bytes
                  ~measure_wire_bytes
                  ~front
@@ -3175,8 +3227,9 @@ let turn_boundary_resend_sequence
      | None -> failed)
 ;;
 
-(* #28845's step, the last answer to a size refusal on every continuity
-   (RFC keeper-context-window-in-tokens §10.4, §13.9). When [first] -- the
+(* #28845's step, an answer to a size refusal on every continuity (RFC
+   keeper-context-window-in-tokens §10.4, §13.9), before rule 8
+   ([this_turn_start_resend_sequence]). When [first] -- the
    lane's own answer, which on a turn with an absorbed point is one attempt --
    ends with a refusal [is_size_refusal] names, [same_run_retry_authorized]
    holds, and [demotable] names the refused request's atom count because
@@ -3184,8 +3237,9 @@ let turn_boundary_resend_sequence
    fewer bytes, [demote] makes the compositions demote them and [resend] runs once on the
    same candidate; its result is returned as it is. The range is not
    narrowed. Nothing to demote, or any other failure, returns the failure at
-   once. A failed turn writes no boundary line, so without this step the next
-   turn composes the same range and the same results and is refused again. *)
+   once, to rule 8. A failed turn writes no boundary line, so without this
+   step the next turn composes the same range and the same results and is
+   refused again. *)
 let current_turn_demotion_sequence
       ~same_run_retry_authorized
       ~(demotable : unit -> int option)
@@ -3206,6 +3260,53 @@ let current_turn_demotion_sequence
         resend ()
       | None -> failed)
     else failed
+;;
+
+(* Rule 8 of RFC librarian-lifecycle §4.10: the last rung, after
+   [current_turn_demotion_sequence]. A turn that saved atoms and failed
+   leaves no end line, so the turn boundary stays before those atoms, and a
+   range opened at that boundary carries them again on every later turn.
+   When [first] ends with a refusal [is_size_refusal] names,
+   [same_run_retry_authorized] holds, and [this_turn_front] names where this
+   turn began strictly after [refused_first_atom], that front is given to
+   [hold_front], [on_this_turn_start] is told, and [attempt] runs once more
+   with whatever demotion [first] chose. A refusal of that resend for a
+   reason [is_size_refusal] does not name gives back the front [held_front]
+   reported before, as rule 1 does. Any other failure returns at once. The
+   atoms between the boundary and this turn's start stay in the checkpoint.
+   With a Librarian point, a later Librarian round reads them: a round reads
+   every atom from its position to its cut point ({!Keeper_librarian_range}). *)
+let this_turn_start_resend_sequence
+      ~same_run_retry_authorized
+      ~(refused_first_atom : unit -> int option)
+      ~(this_turn_front : unit -> Keeper_carried_front.seed option)
+      ~(held_front : unit -> Keeper_carried_front.seed option)
+      ~(restore_front : Keeper_carried_front.seed option -> unit)
+      ~(hold_front : Keeper_carried_front.seed -> unit)
+      ~(on_this_turn_start : Agent_core.Error.t -> Keeper_carried_front.seed -> unit)
+      ~(first : unit -> ('ok, Agent_core.Error.t) result)
+      ~(attempt : unit -> ('ok, Agent_core.Error.t) result)
+      ()
+  : ('ok, Agent_core.Error.t) result
+  =
+  match first () with
+  | Ok _ as ok -> ok
+  | Error error as failed ->
+    if not (is_size_refusal error && same_run_retry_authorized ())
+    then failed
+    else (
+      match refused_first_atom (), this_turn_front () with
+      | Some refused, Some (front : Keeper_carried_front.seed) when front.first_atom > refused ->
+        let before = held_front () in
+        hold_front front;
+        on_this_turn_start error front;
+        (match attempt () with
+         | Ok _ as ok -> ok
+         | Error resent as refused ->
+           if not (is_size_refusal resent) then restore_front before;
+           refused)
+      | Some (_ : int), (Some (_ : Keeper_carried_front.seed) | None) | None, (Some _ | None) ->
+        failed)
 ;;
 
 let native_retry_allowed (ctx : try_provider_ctx) =
@@ -3315,7 +3416,24 @@ let run_try_provider_with_history_recovery
         ~source:Keeper_carried_front.Turn_start_after_seed_refusal
         ()
   in
-  let result =
+  let this_turn_front () =
+    Option.bind !(state.last_request) (fun (sent : sent_request) ->
+      Option.bind
+        (this_turn_start ~history_digest_at:sent.digest_at ctx.history_at_start)
+        (fun start_atom ->
+           let first_atom =
+             Keeper_carried_front.clamp
+               ~atom_count:sent.request.Keeper_model_input_ledger.atom_count start_atom
+           in
+           Option.map
+             (fun front_digest ->
+                { Keeper_carried_front.first_atom
+                ; front = Model_input_front.At_atom front_digest
+                ; source = this_turn_front_source continuity
+                })
+             (sent.digest_at first_atom)))
+  in
+  let demotion_ladder () =
     current_turn_demotion_sequence
       ~same_run_retry_authorized
       ~demotable:(fun () ->
@@ -3338,6 +3456,29 @@ let run_try_provider_with_history_recovery
           (Agent_core.Error.to_string error))
       ~first:range_answer
       ~resend:attempt
+      ()
+  in
+  let result =
+    this_turn_start_resend_sequence
+      ~same_run_retry_authorized
+      ~refused_first_atom:(fun () ->
+        Option.map
+          (fun (sent : sent_request) -> sent.request.Keeper_model_input_ledger.first_atom)
+          !(state.last_request))
+      ~this_turn_front
+      ~held_front:ctx.carried_front_after_refusal
+      ~restore_front:ctx.restore_carried_front
+      ~hold_front:ctx.hold_carried_front
+      ~on_this_turn_start:(fun error front ->
+        Log.Keeper.info
+          ~keeper_name:ctx.keeper_name
+          "model input carried range refused runtime=%s: the turn's front moves to \
+           where this turn began and the same candidate is asked again front=%s error=%s"
+          ctx.runtime_id
+          (Yojson.Safe.to_string (Keeper_carried_front.seed_to_json front))
+          (Agent_core.Error.to_string error))
+      ~first:demotion_ladder
+      ~attempt
       ()
   in
   result, !checkpoint_after, !success_sample
@@ -3602,6 +3743,8 @@ module For_testing = struct
   let aged_result_min_bytes = aged_result_min_bytes
   let compose_carried_model_input = compose_carried_model_input
   let request_view = request_view
+  let this_turn_start = this_turn_start
+  let this_turn_front_source = this_turn_front_source
   let current_turn_demotion = current_turn_demotion
   let offload_model_input_cpu = offload_model_input_cpu
 end

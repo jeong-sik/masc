@@ -37,6 +37,7 @@ let carry ?front ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 
     ~continuity:(Some Keeper_turn_driver_try_provider.without_snapshot)
     ~accepted:None ~front
     ~turn_start
+    ~history_at_start:Keeper_turn_boundaries.Continued_history
     ~counted_tokens
     messages
 
@@ -142,6 +143,40 @@ let test_an_unknown_turn_start_opens_on_the_newest_atom () =
   Alcotest.(check int) "one atom" 1 c.kept_atoms;
   Alcotest.(check bool) "the origin names the unknown start" true
     (c.origin = Keeper_carried_front.Turn_start_unknown { reason })
+
+(* The forecast bounds an accepted start the way the turn does (RFC
+   librarian-lifecycle §4.10, rule 7). The Librarian stands at atom 2, the
+   last completed turn ended at atom 8, the next turn begins at atom 14, and
+   the newest turn record accepted atom 12. A known start widens the bound
+   only for a front rule 8 held inside a turn, which the forecast never
+   reads, so the range opens at the boundary, not at the recorded start. *)
+let test_a_known_start_leaves_a_recorded_start_bounded_by_the_boundary () =
+  let messages = history ~exchanges:10 ~text_bytes:100 in
+  let trace_id = "forecast-known-start" in
+  let digest_at = Runtime_model_input_tail_window.atom_opening_digest messages in
+  let progress : Keeper_librarian_progress.t =
+    { position = { trace_id; end_atom = 2; last_atom_digest = Option.get (digest_at 1) }
+    ; boundary_lines_seen = 1 }
+  in
+  let continuity =
+    match Keeper_turn_driver_try_provider.absorbed_history ~trace_id ~messages progress with
+    | Some (_, continuity) -> continuity
+    | None -> Alcotest.fail "the read position names an atom of this history"
+  in
+  let accepted =
+    { (seed ~messages 12) with source = Keeper_carried_front.Turn_record { turn = 1 } } in
+  let c =
+    Keeper_next_request_forecast.carry
+      ~measure:(Keeper_context_core.message_measurer ())
+      ~continuity:(Some continuity) ~front:None ~accepted:(Some accepted)
+      ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 8 })
+      ~history_at_start:
+        (Keeper_turn_boundaries.history_at_start_of_messages
+           (List.filteri (fun index _ -> index < 14) messages))
+      ~counted_tokens:None messages
+  in
+  Alcotest.(check int) "from the turn boundary" 8 c.first_atom;
+  Alcotest.(check int) "twelve atoms" 12 c.kept_atoms
 
 (* The real forecast entrypoint reads a persisted meta, checkpoint and turn
    store. A recent-row limit for byte-composition readings must not also
@@ -1422,6 +1457,8 @@ let () =
             test_without_a_front_the_range_starts_at_the_turn_start
         ; Alcotest.test_case "an unknown turn start opens on the newest atom" `Quick
             test_an_unknown_turn_start_opens_on_the_newest_atom
+        ; Alcotest.test_case "a known start leaves a recorded start bounded by the boundary"
+            `Quick test_a_known_start_leaves_a_recorded_start_bounded_by_the_boundary
         ] )
     ; ( "assembly"
       , [ Alcotest.test_case "the assembly travels prompt, tools, history, wake, then context"

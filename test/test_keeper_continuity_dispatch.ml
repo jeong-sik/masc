@@ -31,6 +31,10 @@ let with_dispatch_fixture ?(refused_behavior = Fixture.Reply overflow_reply) bod
   let runtime = Runtime.For_testing.snapshot () in
   let catalog = Llm_provider.Catalog_snapshot.current () in
   let base_path = Filename.temp_dir "continuity-dispatch-" "" in
+  (* The accepted-range ledger is one table per process, keyed by Keeper,
+     runtime and trace, which every case here shares: without a reset an
+     earlier case's accepted range is a later case's front. *)
+  Keeper_model_input_ledger.Table.For_testing.reset ();
   Config_dir_resolver.reset ();
   Eio.Switch.on_release sw (fun () ->
     Runtime.For_testing.restore runtime;
@@ -85,13 +89,13 @@ let record_completed_turn ~config =
 
 (* Runs one turn whose history is [covered] plus this turn's input, and
    returns the attempt errors the lane reported, newest first. *)
-let dispatch ?carried_front_seed ?(initial_messages = covered @ [msg T.User pending])
-    ?(on_error = fun () -> ())
+let dispatch ?carried_front_seed ?history_at_start ?(initial_messages = covered @ [msg T.User pending])
+    ?(agent_core_tools = []) ?(on_error = fun () -> ())
     ~sw ~net ~base_path () =
   let errors = ref [] in
   (match Keeper_turn_driver.run_named ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = trace_id }) ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk ~system_prompt:"Continuity dispatch fixture."
       ~runtime_id:"continuity" ~keeper_name ~base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
-      ?carried_front_seed ~initial_messages ~agent_core_tools:[]
+      ?carried_front_seed ?history_at_start ~initial_messages ~agent_core_tools
       ~goal:"Report progress."
       ~on_runtime_attempt_error:(fun ~runtime_id ~attempt:_ ~dispatch:_ error ->
         errors := (runtime_id, error) :: !errors;on_error ())
@@ -336,6 +340,175 @@ let test_a_librarian_behind_refusal_resends_from_the_boundary () =
     (has_content resent "ask 2")
 ;;
 
+(* RFC librarian-lifecycle §4.10, rule 8, through the driver's own attempt
+   and lane answer. The last completed turn ended at atom 6. A later turn
+   saved "ask 3" and "answer 3" and failed, so it wrote no end line, and
+   this turn began at atom 8. The turn record's accepted start is the turn
+   boundary 6, so the first request opens there and rule 1 has no later
+   start to try; no tool result is left to demote. The lane resends once to
+   the same peer from where this turn began, and the peer answers. *)
+let test_a_refused_boundary_resends_from_where_this_turn_began () =
+  with_dispatch_fixture
+    ~refused_behavior:
+      (Fixture.Replies
+         [ overflow_reply
+         ; Fixture.openai_response (`Assoc [ "answer", `String "Resent from this turn's start." ])
+         ])
+  @@ fun ~sw ~net ~config ~base_path ~refused ~accepted ->
+  let completed =
+    [ msg T.User "ask 0"; msg T.Assistant "answer 0"
+    ; msg T.User "ask 1"; msg T.Assistant "answer 1"
+    ; msg T.User "ask 2"; msg T.Assistant "answer 2" ]
+  in
+  let failed_turn = [ msg T.User "ask 3"; msg T.Assistant "answer 3" ] in
+  let initial_messages = completed @ failed_turn @ [ msg T.User pending ] in
+  let keepers_dir = Workspace.keepers_runtime_dir config in
+  let position = match B.position_of_messages completed with
+    | Ok position -> position | Error detail -> fail detail in
+  (match B.append ~keepers_dir ~keeper_id:keeper_name
+     {recorded_at = 1.; event = B.Turn_ended
+        { task_context = Masc.Keeper_turn_task_context.No_task;turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
+         history_at_start = B.Fresh_history; position}} with
+   | Ok () -> () | Error error -> fail (B.append_error_to_string error));
+  let digest_at = Runtime_model_input_tail_window.atom_opening_digest initial_messages in
+  (match
+     Keeper_librarian_progress.write ~keepers_dir ~keeper_id:keeper_name
+       { position = { trace_id; end_atom = 2; last_atom_digest = Option.get (digest_at 1) }
+       ; boundary_lines_seen = 1 }
+   with
+   | Ok () -> () | Error error -> fail (Keeper_librarian_progress.write_error_to_string error));
+  let recorded : Keeper_carried_front.seed =
+    { first_atom = 6; front = Model_input_front.At_atom (Option.get (digest_at 6))
+    ; source = Keeper_carried_front.Turn_record { turn = 1 } } in
+  let carried_front_seed () =
+    { Keeper_carried_front.seed = Some recorded; unreadable = None; boundary_error = None } in
+  let history_at_start = B.history_at_start_of_messages (completed @ failed_turn) in
+  let (_ : (string * Agent_core.Error.t) list) =
+    dispatch ~carried_front_seed ~history_at_start ~initial_messages ~sw ~net ~base_path () in
+  check int "the refused peer is asked twice" 2 (Fixture.post_count refused);
+  check int "the next peer is not reached" 0 (Fixture.post_count accepted);
+  let sent n = Fixture.request_bodies refused |> Fun.flip List.nth n
+    |> Yojson.Safe.from_string |> U.member "messages" |> U.to_list in
+  let first = sent 0 and resent = sent 1 in
+  check bool "the first request opens at the turn boundary" true (has_content first "ask 3");
+  check bool "and not before it" false (has_content first "answer 2");
+  check bool "the resend carries this turn's input" true (has_content resent pending);
+  check bool "the resend opens where this turn began, past the failed turn" false
+    (has_content resent "answer 3")
+;;
+
+(* The three completed exchanges every rule-8 fixture below starts from,
+   written to the boundary log as one completed turn that ended at atom 6. *)
+let three_completed_exchanges =
+  [ msg T.User "ask 0"; msg T.Assistant "answer 0"
+  ; msg T.User "ask 1"; msg T.Assistant "answer 1"
+  ; msg T.User "ask 2"; msg T.Assistant "answer 2" ]
+
+let record_three_completed_exchanges ~config =
+  let position = match B.position_of_messages three_completed_exchanges with
+    | Ok position -> position | Error detail -> fail detail in
+  match B.append ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
+     {recorded_at = 1.; event = B.Turn_ended
+        { task_context = Masc.Keeper_turn_task_context.No_task;turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
+         history_at_start = B.Fresh_history; position}} with
+  | Ok () -> () | Error error -> fail (B.append_error_to_string error)
+;;
+
+let refused_then_answered answer =
+  Fixture.Replies [ overflow_reply; Fixture.openai_response (`Assoc [ "answer", `String answer ]) ]
+
+let sent_to peer n = Fixture.request_bodies peer |> Fun.flip List.nth n
+  |> Yojson.Safe.from_string |> U.member "messages" |> U.to_list
+
+(* RFC librarian-lifecycle §4.10, rule 8, on a turn with no snapshot, no
+   Librarian position and no seed. A later turn saved "ask 3" and
+   "answer 3" and failed, so the turn boundary stays at 6 and this turn
+   began at 8. The first request opens at the boundary, so rule 1 has no
+   later start to try, and no tool result is left to demote. The lane
+   resends once to the same peer from where this turn began. *)
+let test_a_refused_boundary_without_a_snapshot_resends_from_where_this_turn_began () =
+  with_dispatch_fixture ~refused_behavior:(refused_then_answered "Resent without a snapshot.")
+  @@ fun ~sw ~net ~config ~base_path ~refused ~accepted ->
+  record_three_completed_exchanges ~config;
+  let failed_turn = [ msg T.User "ask 3"; msg T.Assistant "answer 3" ] in
+  let initial_messages = three_completed_exchanges @ failed_turn @ [ msg T.User pending ] in
+  let history_at_start = B.history_at_start_of_messages (three_completed_exchanges @ failed_turn) in
+  let (_ : (string * Agent_core.Error.t) list) =
+    dispatch ~history_at_start ~initial_messages ~sw ~net ~base_path () in
+  check int "the refused peer is asked twice" 2 (Fixture.post_count refused);
+  check int "the next peer is not reached" 0 (Fixture.post_count accepted);
+  let first = sent_to refused 0 and resent = sent_to refused 1 in
+  check bool "the first request opens at the turn boundary" true (has_content first "ask 3");
+  check bool "and not before it" false (has_content first "answer 2");
+  check bool "the resend carries this turn's input" true (has_content resent pending);
+  check bool "the resend opens where this turn began, past the failed turn" false
+    (has_content resent "answer 3");
+  (match (latest_observation ~config).input with
+   | Keeper_continuity_observation.Without_snapshot -> ()
+   | _ -> fail "the resend was not attributed to a start without a snapshot");
+  Keeper_continuity_observation.forget ~config ~keeper_name
+;;
+
+(* The reader a Keeper opens a marker with. Composition demotes a result
+   only for a Keeper that offers it ([Keeper_recovery_transmission.require_reader]);
+   no request here calls it. *)
+let artifact_reader ~base_path =
+  let schema = Keeper_runtime_schemas_toml.artifact_read in
+  Tool_bridge.agent_core_tool_of_masc_with_execution_env
+    ~base_path
+    ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
+    ~model_projection:(fun () -> Tool_output.bounded_inline_model_projection)
+    ~name:schema.name ~description:schema.description ~input_schema:schema.input_schema
+    (fun _ _ -> fail "no request calls the reader")
+;;
+
+(* RFC librarian-lifecycle §4.10, rule 6 before rule 8. The failed turn
+   saved "ask 3", a tool call and its large result, and "answer 3". The
+   first request opens at the turn boundary and is refused. Rule 6 answers
+   first: the resend still opens at the boundary, so "ask 3" rides, and the
+   result's body leaves as a marker. Rule 8 is not reached. *)
+let test_a_refused_boundary_demotes_before_it_moves_past_the_failed_turn () =
+  with_dispatch_fixture ~refused_behavior:(refused_then_answered "Resent with markers.")
+  @@ fun ~sw ~net ~config ~base_path ~refused ~accepted ->
+  record_three_completed_exchanges ~config;
+  let call_id = "call-failed-turn" in
+  let body = "failed-turn result " ^ String.make 8_000 'x' in
+  let failed_turn =
+    [ msg T.User "ask 3"
+    ; T.make_message ~role:T.Assistant
+        [ T.ToolUse { id = call_id; name = "fixture_tool"; input = `Assoc [] } ]
+    ; T.make_message ~role:T.Tool ~tool_call_id:call_id
+        [ T.ToolResult
+            { tool_use_id = call_id; content = body; outcome = T.Tool_succeeded
+            ; json = None; content_blocks = None } ]
+    ; msg T.Assistant "answer 3" ]
+  in
+  let initial_messages = three_completed_exchanges @ failed_turn @ [ msg T.User pending ] in
+  let history_at_start = B.history_at_start_of_messages (three_completed_exchanges @ failed_turn) in
+  let (_ : (string * Agent_core.Error.t) list) =
+    dispatch ~history_at_start ~initial_messages
+      ~agent_core_tools:[ artifact_reader ~base_path ] ~sw ~net ~base_path () in
+  check int "the refused peer is asked twice" 2 (Fixture.post_count refused);
+  check int "the next peer is not reached" 0 (Fixture.post_count accepted);
+  let result_content rows =
+    match List.filter (fun row -> U.member "role" row = `String "tool") rows with
+    | [ row ] -> U.member "content" row |> U.to_string
+    | _ -> fail "the request does not carry the failed turn's one tool result"
+  in
+  let first = sent_to refused 0 and resent = sent_to refused 1 in
+  check string "the first request carries the body" body (result_content first);
+  check bool "the resend still opens at the turn boundary" true (has_content resent "ask 3");
+  check bool "the resend carries this turn's input" true (has_content resent pending);
+  (match Tool_output.decode_from_agent_core (result_content resent) with
+   | Tool_output.Decoded reference ->
+     (match Tool_blob_store.fetch (Tool_blob_store.create ~base_path)
+              ~sha256:reference.Tool_output.sha256 with
+      | Ok (Some bytes) -> check string "the marker opens the body" body bytes
+      | Ok None | Error _ -> fail "the marker's body is not stored")
+   | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
+     fail "the resend does not carry the body as a marker")
+;;
+
 let () = run "continuity HTTP dispatch"
   ["real peer", [test_case "saved pair survives provider refusal and failover" `Quick
     test_real_dispatch_preserves_pair_across_refusal;
@@ -348,4 +521,10 @@ let () = run "continuity HTTP dispatch"
       test_changed_prefix_dispatches_from_the_turn_start];
    "Librarian behind", [
     test_case "a size refusal resends from the turn boundary" `Quick
-      test_a_librarian_behind_refusal_resends_from_the_boundary]]
+      test_a_librarian_behind_refusal_resends_from_the_boundary;
+    test_case "a refused boundary resends from where this turn began" `Quick
+      test_a_refused_boundary_resends_from_where_this_turn_began;
+    test_case "a refused boundary without a snapshot resends from where this turn began" `Quick
+      test_a_refused_boundary_without_a_snapshot_resends_from_where_this_turn_began;
+    test_case "a refused boundary demotes before it moves past the failed turn" `Quick
+      test_a_refused_boundary_demotes_before_it_moves_past_the_failed_turn]]

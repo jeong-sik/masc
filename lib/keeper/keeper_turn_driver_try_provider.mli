@@ -300,6 +300,7 @@ val choose_range_start :
   accepted:Keeper_carried_front.seed option ->
   history_digest_at:(int -> string option) ->
   turn_boundary:Keeper_carried_front.turn_start ->
+  history_at_start:Keeper_turn_boundaries.history_at_start ->
   start_choice
 (** The one rule for where a request starts: a snapshot that fits, else the
     Librarian's read position, else [front] when [history_digest_at] opens
@@ -308,8 +309,15 @@ val choose_range_start :
     message and it lies after the point ({!Past_librarian_point}): the start
     the provider last accepted, read from the newest response-observed turn
     record, or the turn boundary a size refusal moved this turn to (RFC
-    librarian-lifecycle §4.10, rules 1, 2 and 5). An [accepted] past a known
-    [turn_boundary] is moved back to it (rule 7). [accepted] is not read
+    librarian-lifecycle §4.10, rules 1, 2 and 5). With a known
+    [turn_boundary], an [accepted] past it is moved back to it (rule 7). A
+    front rule 8 moved to where this turn began
+    ({!Keeper_carried_front.This_turn_start_after_seed_refusal},
+    {!Keeper_carried_front.This_turn_start_after_librarian_refusal}) is
+    bounded instead by the later of [turn_boundary] and where this turn
+    began ({!For_testing.this_turn_start} of [history_at_start]), and by
+    [turn_boundary] when that start is not known.
+    [accepted] is not read
     without a Librarian point, and [front] is not read with one.
     [continuity] is [None] for a request with no trace or one composed from
     a recovery view, and is then read as {!without_snapshot}. Pure: the
@@ -352,6 +360,13 @@ type try_provider_ctx =
             it. *)
   ; request_input : request_input
   ; turn_boundary : Keeper_carried_front.turn_start
+  ; history_at_start : Keeper_turn_boundaries.history_at_start
+        (** Where this turn began, as the turn computed it from the history
+            it started from. Rule 8 resends from it, and rule 7 bounds the
+            front rule 8 held by it (RFC librarian-lifecycle §4.10). A
+            resumed checkpoint already holds the turn's input, so its run
+            and a caller that does not know the start pass
+            [Continued_history]. *)
   ; carried_front_after_refusal : unit -> Keeper_carried_front.seed option
         (** The latest refusal's front, shared by every Agent Core candidate
             of this turn. A valid later front takes precedence over the
@@ -667,6 +682,32 @@ val turn_boundary_resend_sequence :
     asked twice. The range is never halved: an accepted boundary request is
     what the ledger records, so the next turn's seed is that boundary. *)
 
+val this_turn_start_resend_sequence :
+  same_run_retry_authorized:(unit -> bool) ->
+  refused_first_atom:(unit -> int option) ->
+  this_turn_front:(unit -> Keeper_carried_front.seed option) ->
+  held_front:(unit -> Keeper_carried_front.seed option) ->
+  restore_front:(Keeper_carried_front.seed option -> unit) ->
+  hold_front:(Keeper_carried_front.seed -> unit) ->
+  on_this_turn_start:(Agent_core.Error.t -> Keeper_carried_front.seed -> unit) ->
+  first:(unit -> ('ok, Agent_core.Error.t) result) ->
+  attempt:(unit -> ('ok, Agent_core.Error.t) result) ->
+  unit ->
+  ('ok, Agent_core.Error.t) result
+(** The last rung of a size refusal (RFC librarian-lifecycle §4.10, rule 8),
+    over an injected [first] (the rungs before it) and [attempt]. When
+    [first] fails with a refusal {!is_size_refusal} names,
+    [same_run_retry_authorized] holds, and [this_turn_front] names where this
+    turn began strictly after [refused_first_atom]
+    ({!Keeper_carried_front.This_turn_start_after_seed_refusal} or
+    {!Keeper_carried_front.This_turn_start_after_librarian_refusal}), that
+    front goes to [hold_front], [on_this_turn_start] is told, and [attempt]
+    runs once more;
+    its result is returned as it is. When that attempt is refused for a reason
+    {!is_size_refusal} does not name, [restore_front] gets back what
+    [held_front] reported before the hold. Every other failure of [first] is
+    returned at once. *)
+
 type current_turn_results =
   | Current_turn_verbatim
       (** No size refusal yet: every message goes as the range first sent it,
@@ -710,8 +751,9 @@ val current_turn_demotion_sequence :
   resend:(unit -> ('ok, Agent_core.Error.t) result) ->
   unit ->
   ('ok, Agent_core.Error.t) result
-(** The last answer to a size refusal, on every continuity (RFC
-    keeper-context-window-in-tokens §10.4, §13.9). When [first] fails with a
+(** An answer to a size refusal, on every continuity (RFC
+    keeper-context-window-in-tokens §10.4, §13.9), before
+    {!this_turn_start_resend_sequence}. When [first] fails with a
     typed size refusal {!is_size_refusal} names,
     [same_run_retry_authorized] holds, and [demotable] names the refused
     request's atom count because demoting the tool results and bound
@@ -818,6 +860,21 @@ type request_view =
     runtime whatever reasoning each replays or deletes. *)
 
 module For_testing : sig
+  val this_turn_start :
+    history_digest_at:(int -> string option) ->
+    Keeper_turn_boundaries.history_at_start ->
+    int option
+  (** Where this turn began on the history [history_digest_at] reads: [0]
+      for [Fresh_history], the start atom of [Continued_history_from] while
+      the history opens the atom before it with the recorded digest, and
+      [None] otherwise. *)
+
+  val this_turn_front_source : continuity -> Keeper_carried_front.source
+  (** The source of a front rule 8 moves to where this turn began:
+      {!Keeper_carried_front.This_turn_start_after_librarian_refusal} with a
+      Librarian point, {!Keeper_carried_front.This_turn_start_after_seed_refusal}
+      without one. *)
+
   val observe_provider_lease :
     now:(unit -> float) -> on_yield:(unit -> unit) option ->
     on_resume:(unit -> unit) option ->
@@ -886,6 +943,7 @@ module For_testing : sig
     ?continuity:continuity ->
     ?completed_arguments:Keeper_model_input_demotion.completed_arguments ->
     ?finished_turn_results:finished_turn_results ->
+    ?history_at_start:Keeper_turn_boundaries.history_at_start ->
     measure_message_bytes:(Agent_core.Types.message -> int) ->
     measure_wire_bytes:(Agent_core.Types.message -> int option) ->
     front:Keeper_carried_front.seed option ->
@@ -901,6 +959,7 @@ module For_testing : sig
     ?continuity:continuity ->
     ?completed_arguments:Keeper_model_input_demotion.completed_arguments ->
     ?finished_turn_results:finished_turn_results ->
+    ?history_at_start:Keeper_turn_boundaries.history_at_start ->
     ?tools:Yojson.Safe.t list ->
     provider_config:Agent_core.Llm_provider.Provider_config.t ->
     measure_message_bytes:(Agent_core.Types.message -> int) ->

@@ -1910,6 +1910,7 @@ let run_named
     ?required_native_posture
     ?(initial_messages = [])
     ?argument_demotion_seed
+    ?(history_at_start = Keeper_turn_boundaries.Continued_history)
     ?model_input_projection
     ?temperature
     ?(accept = fun (_ : Agent_core.Types.api_response) -> true)
@@ -3421,6 +3422,7 @@ let run_named
             ; input_runtime = Some runtime
             ; error_runtime_id
             ; turn_boundary = Eio.Lazy.force turn_boundary
+            ; history_at_start
             ; argument_demotion_seed
             ; argument_replay_prefix = replay_prefix_projection
             ; request_input

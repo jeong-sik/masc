@@ -5,6 +5,8 @@ type source =
   | Turn_record of { turn : int }
   | Turn_start_after_seed_refusal
   | Turn_start_after_librarian_refusal
+  | This_turn_start_after_seed_refusal
+  | This_turn_start_after_librarian_refusal
 
 type seed =
   { first_atom : int
@@ -352,6 +354,8 @@ let source_to_string = function
   | Turn_record { turn } -> Printf.sprintf "turn_record#%d" turn
   | Turn_start_after_seed_refusal -> "turn_start_after_seed_refusal"
   | Turn_start_after_librarian_refusal -> "turn_start_after_librarian_refusal"
+  | This_turn_start_after_seed_refusal -> "this_turn_start_after_seed_refusal"
+  | This_turn_start_after_librarian_refusal -> "this_turn_start_after_librarian_refusal"
 ;;
 
 let seed_to_json (seed : seed) =
@@ -382,6 +386,10 @@ let rec origin_to_json = function
     `Assoc [ "kind", `String "turn_start_after_seed_refusal" ]
   | Carried Turn_start_after_librarian_refusal ->
     `Assoc [ "kind", `String "turn_start_after_librarian_refusal" ]
+  | Carried This_turn_start_after_seed_refusal ->
+    `Assoc [ "kind", `String "this_turn_start_after_seed_refusal" ]
+  | Carried This_turn_start_after_librarian_refusal ->
+    `Assoc [ "kind", `String "this_turn_start_after_librarian_refusal" ]
   | Past_librarian_point { librarian_end_atom; source } ->
     `Assoc
       [ "kind", `String "past_librarian_point"

@@ -775,6 +775,9 @@ let run_turn
     | Some _, _ | None, Some _ -> Keeper_run_prompt.Skip_already_checkpointed_user_turn
     | None, None -> user_turn_record
   in
+  let range_turn_start =
+    Keeper_run_prompt.range_turn_start prompt_user_turn_record ~history_at_start
+  in
   let prompt_ctx =
     Keeper_turn_preview.with_preparation ~writer:preview ~turn_ref:(Some turn_ref)
       ~phase:Keeper_turn_preview.Prompt_preparation (fun () ->
@@ -1482,6 +1485,7 @@ let run_turn
                       ~checkpoint_sink
                       ~initial_messages
                       ~argument_demotion_seed
+                      ~history_at_start:range_turn_start
                       ~model_input_projection
                       ~hooks
                       ?approval_gate

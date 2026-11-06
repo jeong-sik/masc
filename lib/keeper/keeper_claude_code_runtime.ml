@@ -351,10 +351,17 @@ let claude_stream_callback ?on_provider_retry ?on_child_content_observation ?on_
           emit Agent_core.Types.MessageStop)
 ;;
 
+(* Only a rejected rate-limit event dates this refusal. The CLI puts
+   [resetsAt] on allowed events too, where it is the end of a window that
+   still serves; a 429 after one is a throttle, and taking that time would
+   rest the Keeper until the window resets. *)
 let retry_after_of_rate_limit = function
   | None -> None
-  | Some ({ resets_at = None; _ } : Runtime_claude_code.rate_limit) -> None
-  | Some { resets_at = Some timestamp; _ } ->
+  | Some
+      ({ status = Runtime_claude_code.Allowed | Runtime_claude_code.Allowed_warning; _ }
+        : Runtime_claude_code.rate_limit) -> None
+  | Some { status = Runtime_claude_code.Rejected; resets_at = None; _ } -> None
+  | Some { status = Runtime_claude_code.Rejected; resets_at = Some timestamp; _ } ->
     Some (Float.max 0.0 (Float.of_int timestamp -. Time_compat.now ()))
 ;;
 

@@ -1131,8 +1131,8 @@ let public_descriptors =
       ~internal_name:Tool_schemas_misc.browser_session_schema.name
       ~description:Tool_schemas_misc.browser_session_schema.description
       ~input_schema:Tool_schemas_misc.browser_session_schema.input_schema
-      (* Session lifecycle changes must preserve tool-call order relative to
-         browser reads and navigation in the same batch. *)
+      (* A Goal binding changes which browser later automatic discovery picks,
+         so it keeps its order relative to browser calls in the same batch. *)
       ~ordinary_execution_mode:Serial
       ~policy:(policy ~readonly:false ())
       ~executor:In_process

@@ -6,10 +6,10 @@
 배열에 넣어 안쪽 frames를 읽고, 필요한 깊이까지 바깥→안쪽 순으로 이어간다.
 같은 경로의 `text`와 `elements`를 읽은 뒤 해당 탭·프레임에서 조작한다.
 
-`framePath`는 automation의 `BrowserRead` text/elements/frames 읽기, `BrowserAct upload`,
+`framePath`는 `BrowserRead` text/elements/frames 읽기, `BrowserAct upload`,
 `BrowserInteract`의 selector 기반 click/fill/select_option/scroll에 사용한다.
-`BrowserInteract`의 `expectedUrl`은 안쪽 frame 문서의 URL이다. 자동화 Firefox와
-live BiDi 연결이 처리한다. 확장은 `framePath`가 있는 요청을 효과 전에
+`BrowserInteract`의 `expectedUrl`은 안쪽 frame 문서의 URL이다. live BiDi 연결이
+처리한다. 확장은 `framePath`가 있는 요청을 효과 전에
 거절하므로 최상위 문서만 조작할 수 있다.
 
 ego 연결은 `framePath` 를 받지 않는다. `BrowserRead mode=snapshot` 의 viewport
@@ -43,7 +43,7 @@ HTML `<dialog>`와 OS 파일 선택창은 이 JS 대화상자 계약에 포함�
 선택한다. `paths`는 자신의 sandbox에서 실제로 읽을 수 있는 경로다. 호스트의
 임의 경로를 sandbox 경로로 가장하거나 다른 사용자의 파일로 대체하지 않는다.
 
-명시적 automation 이나 명시적 ego 브라우저에서 쓴다. ego 연결에서는 그 연결이 연
+명시적 ego 브라우저에서 쓴다. ego 연결에서는 그 연결이 연
 agent 페이지에서 native locator/ref로 파일 입력·label·고유 입력이 있는 container를
 지정한다. 영수증의 `chosen`(이름·크기)은 SDK에 넘긴 staged 파일이며 페이지의
 `input.files`를 다시 관측한 값이 아니다. ego 의 브라우저는 파일을 페이지가 읽을 때 읽으므로, 그 연결이 끝날 때까지
@@ -53,7 +53,6 @@ agent 페이지에서 native locator/ref로 파일 입력·label·고유 입력�
 연결에서 `selector` 대신 `opener` 에 그 버튼의 native locator/ref를 준다. SDK가 선택 창 대기를 맡고 클릭 자체가 효과다.
 영수증의 `chosen` 은 선택 창에 넘긴 파일이고, 페이지가 받았는지는 페이지를 다시 읽어
 확인한다. 결과를 모름으로 끝나면 버튼이 눌렸을 수 있으니, 다시 누르기 전에 탭을 읽는다.
-automation Firefox 는 `opener` 를 거절한다.
 
 파일 선택만 요청됐다면 선택 결과를 확인하고 멈춘다. 제출·업로드가 요청된 경우에는
 허용된 대상에 실제로 제출하고 수신 결과를 확인한다. 선택 성공은 전송 완료가 아니다.
@@ -66,8 +65,8 @@ automation Firefox 는 `opener` 를 거절한다.
 
 ## 다운로드
 
-현재 스키마가 지원할 때 `BrowserRead mode=downloads`를 명시적 automation 또는
-명시적 ego 브라우저의 `tabId`로 호출한다. pending/completed/canceled/interrupted 등
+현재 스키마가 지원할 때 `BrowserRead mode=downloads`를 명시적 ego 브라우저의
+`tabId`로 호출한다. pending/completed/interrupted 등
 반환된 상태를 따른다. 끝난 파일은 `artifact`로 받는다.
 
 ego 연결은 그 연결이 한 번이라도 다룬 agent 페이지(연 탭 포함)의 다운로드만 본다.

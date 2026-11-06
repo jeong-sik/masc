@@ -6,7 +6,7 @@ type backend = Connected of Browser_lane.live_transport
   | Safari_unavailable
 type operation =
   | List_tabs | Open_tab | Close_tab | Activate_tab | List_windows | Create_window | Close_window
-  | Navigate | Follow_link | Back | Forward | Reload | Stop_loading | Session_lifecycle
+  | Navigate | Follow_link | Back | Forward | Reload | Stop_loading
   | Read_text | Read_html | Read_elements | Read_scene | Read_regions | Read_snapshot | Screenshot
   | Native_workflow
   | Click_snapshot_target | Fill_snapshot_target | Hover_snapshot_target | Double_click_snapshot_target
@@ -15,8 +15,7 @@ type operation =
   | Read_frames | Frame_interaction | Read_dialog | Accept_dialog | Dismiss_dialog
   | Hand_off | Take_over | Space_status | Finish_space | Wait_for_control | Adopt_tab | Release_tab
   | Upload_file | List_downloads | Page_zoom | Resize_viewport | Touch
-  | Read_clipboard | Write_clipboard | Read_network | Intercept_network
-  | Read_console | Read_storage | Write_storage | Emulate_environment
+  | Read_clipboard | Write_clipboard
 type tool = Tabs | Read | Interact | Act | Session | Goto
 type invocation = { tool : tool; action : string option; mode : string option }
 type support = Available of invocation

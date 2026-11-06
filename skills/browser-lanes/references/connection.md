@@ -2,19 +2,17 @@
 
 ## 자동 선택과 고정된 작업
 
-처음 BrowserTabs 또는 BrowserSession open에서 lane을 생략하면 서버가 사용 가능한
+처음 BrowserTabs에서 lane을 생략하면 서버가 사용 가능한
 브라우저를 선택한다. browserSelection의 lane과 clientId를 이후 호출에 복사한다.
 browser_binding_required는 tabId가 어느 브라우저의 것인지 빠졌다는 뜻이다.
 원래 관측의 lane/clientId를 넣어 고친다. ambiguous_browsers이면 browsers 목록에서
-작업 대상을 확인해 명시한다. no_available_browser이면 연결 또는 설정된 작업 세션이
+작업 대상을 확인해 명시한다. no_available_browser이면 브라우저 연결이
 필요하다. 이 오류들은 브라우저 명령을 보내기 전에 반환된다.
 
 선택 거절이나 특정 탭의 실패를 전체 브라우저·Lane Add-on 장애로 일반화하지
 않는다. `keeper_lane_status`는 Keeper 실행 sandbox를 보는 도구이므로 browser
-연결 진단에는 쓰지 않는다. BrowserSession open 성공은 기존 live 연결·로그인·읽기
-실패의 복구 증거가 아니다. 새 세션은 독립 작업에만 사용하고, 원래 작업은 반환된
-live 연결 중 요청 대상과 로그인이 있는 연결에서 탭 목록과 읽기로 계속할 수
-있는지 먼저 확인한다.
+연결 진단에는 쓰지 않는다. 원래 작업은 반환된 live 연결 중 요청 대상과 로그인이
+있는 연결에서 탭 목록과 읽기로 계속할 수 있는지 먼저 확인한다.
 
 ## 레인 오류
 
@@ -57,12 +55,7 @@ live 연결 중 요청 대상과 로그인이 있는 연결에서 탭 목록과 
     운영자에게 알린다.
 - live 응답은 성공했을 때도 `clientId` 옆에 `transport`를 싣는다. hover나 drag가 필요한
   일이면 시작할 때 이 값을 본다. `web_extension`이면 그 연결로는 못 하므로, 연결 목록에
-  `webdriver_bidi` 연결이 있는지 먼저 확인한다. automation 응답에는
-  `transport`가 없다.
-- 닫힌 automation 세션에서 작업해야 한다면 자신의 새 세션을 연다.
-  `BrowserSession status`로 상태를 읽고 `open`/`close`는 작업 소유권을 확인해 사용한다.
-- 이미 시작된 세션이라는 응답은 소유권 증명이 아니다. 그 세션이 자신의 진행 중인
-  작업인지 확인하고, 확인할 수 없다면 takeover나 close 후 reopen을 하지 않는다.
+  `webdriver_bidi` 연결이 있는지 먼저 확인한다.
 - 특정 탭의 확장 권한이 없으면 그 권한 문제를 알린다. 요청된 탭 대신 무관한
   다른 탭을 읽어 같은 작업을 완료했다고 하지 않는다.
 
@@ -143,23 +136,3 @@ Space인지 확인한 뒤 그 Space만 정리한다.
 이 케이스를 구분하는 근거는 `inventoryIssues`다. 해당 이슈가 없는데
 client가 없으면 `no_live_client` 절차를 따른다.
 
-## 운영자가 automation을 설정할 때
-
-```toml
-[browser]
-geckodriver = "/absolute/path/to/geckodriver"
-# 필요하면 설치된 Firefox/Zen 실행 파일의 절대 경로를 지정한다.
-# binary = "/path/to/Zen.app/Contents/MacOS/zen"
-```
-
-geckodriver는 MASC 서버가 직접 띄우고 서버가 끝날 때 내린다. 빈 loopback 포트와
-`--websocket-port 0`을 쓰므로 포트를 고를 일이 없다. 드라이버 출력은
-`.masc/browser-lane/geckodriver.log`에 있다.
-
-복구할 때는 종료된 자기 테스트 세션만 대상으로 한다. geckodriver 프로세스는
-서버 몫이라 Keeper가 종료하거나 새로 띄우지 않는다.
-다른 브라우저나 9222의 기존 프로세스를 종료하지 않는다. Keeper에게 운영자
-프로세스 제어 권한이 주어진 것으로 해석하지 않는다.
-
-근거: [Mozilla geckodriver Flags](https://firefox-source-docs.mozilla.org/testing/geckodriver/Flags.html),
-[MDN BiDi 연결](https://developer.mozilla.org/en-US/docs/Web/WebDriver/How_to/Create_BiDi_connection).

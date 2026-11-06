@@ -1527,7 +1527,7 @@ let test_peer_serves_what_the_lane_table_says () =
     List.iter (fun capability ->
       let name = Lane.live_capability_to_wire capability in
       let asked = verb_asking_for capability in
-      check bool (name ^ " is what its verb asks for") true (Lane.live_capability asked = Some capability);
+      check bool (name ^ " is what its verb asks for") true (Lane.live_capability asked = capability);
       let wire = Lane.verb_json asked in
       let verb = peer_verb Yojson.Safe.Util.(wire |> member "verb" |> to_string) in
       (* A refusal below has to be the peer's own answer for this work, not

@@ -75,12 +75,12 @@ let raw_exchange t ~settlement ~on_cancel_after_dispatch command =
           | Error _ -> Error (Outcome_unknown "invalid browser service reply"))) in
       try (match command with
         | W.Retire | W.Model_wait _ -> exchange ()
-        | W.Issue {verb;_} ->
+        | W.Issue _ ->
           (* Policy was fixed before dispatch from the original worker's
              validated metadata, never from a caller-supplied transport. *)
           let executor_owned = match policy with
             | Executor_owned -> true | Reply_window -> false in
-          if executor_owned || Browser_lane.verb_uses_model verb then exchange ()
+          if executor_owned then exchange ()
           else Eio.Time.with_timeout_exn clock allowance exchange
         | Snapshot|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _|Model_requests|Model_result _|Poll _|Deliver _|Disconnect _ -> Eio.Time.with_timeout_exn clock allowance exchange)
       with

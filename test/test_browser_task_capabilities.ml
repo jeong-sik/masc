@@ -5,7 +5,7 @@ module Selection = Masc.Browser_selection
 module Tools = Masc.Browser_addon_tools
 module Worker = Masc.Browser_addon_tool
 
-(* The requiredActions a discovery schema advertises are the operations this
+(* The requiredActions the discovery schema advertises are the operations this
    table answers for. Input validation refuses a name the schema leaves out
    before the host sees it, so a browser needed only for that work could not
    be chosen. *)
@@ -16,8 +16,7 @@ let test_required_actions_schema_lists_every_operation () =
   let operations = List.map Cap.operation_name Cap.operations |> List.sort String.compare in
   List.iter (fun (name, schema) ->
     check (list string) (name ^ " requiredActions are the operation table") operations (enum schema))
-    ["masc_browser_tabs", Tool_schemas_misc_toml.browser_tabs;
-     "masc_browser_session", Tool_schemas_misc_toml.browser_session]
+    ["masc_browser_tabs", Tool_schemas_misc_toml.browser_tabs]
 
 let test_bound_request_keeps_its_browser () =
   check bool "bound automatic request cannot be reselected by capabilities" true
@@ -115,8 +114,8 @@ let test_invalid_required_actions_reach_no_browser () =
     ; "an operation that is not a name", `List [`Int 1] ];
   check bool "a repeated requiredActions field" true
     (refused_as_input (invoke Cap.Tabs ["requiredActions",`List [];"requiredActions",`List [`String "hover"]]));
-  check bool "requirements cannot ride a session status" true
-    (refused_as_input (invoke Cap.Session ["action",`String "status";"requiredActions",`List []]));
+  check bool "requirements cannot ride a Goal status read" true
+    (refused_as_input (invoke Cap.Session ["action",`String "goal_status";"goalId",`String "goal-probe";"requiredActions",`List []]));
   check bool "an accepted list goes on to find the browser Add-on" true
     (Tool_result.failure_class (invoke Cap.Tabs ["requiredActions",`List [`String "hover"]])
      = Some Tool_result.Dependency_unavailable);

@@ -11,9 +11,9 @@ let enum names = `Assoc ["type",`String "string";"enum",`List (List.map (fun val
 let input_schema = object_schema ~required:["lane";"command"] [
   "lane",enum ["live"];"clientId",text_schema;"uploadId",text_schema;
   "command",object_schema ~required:["verb";"args"] [
-    "verb",enum ["tabs.list";"page.read";"page.downloads";"page.console";"page.network";"page.cookies";"page.capture";
-      "page.scene";"page.snapshot";"page.interact";"page.native_workflow";"session.open";"session.close";"session.status";
-      "page.goto";"page.elements";"page.act";"page.context";"page.locate"];
+    "verb",enum ["tabs.list";"page.read";"page.downloads";"page.capture";
+      "page.scene";"page.snapshot";"page.interact";"page.native_workflow";
+      "page.goto";"page.elements";"page.act";"page.context"];
     "args",object_schema ~open_fields:true ~required:[] []]]
 let output_schema = object_schema ~required:["reply";"answer"] [
   "reply",enum ["issue"];
@@ -47,11 +47,11 @@ let parse json =
          | B.Page_act action ->
              if B.Action.is_take_over action then Ok ()
              else Error "a live lane without a clientId answers only its task Space reclaim"
-         | B.Tabs_list|Session_open _|Session_close|Session_status
-         |B.Page_read _|B.Page_document _|B.Page_downloads _|B.Page_console _|B.Page_network _
-         |B.Page_cookies _|B.Page_capture _|B.Page_scene _|B.Page_snapshot _
+         | B.Tabs_list
+         |B.Page_read _|B.Page_document _|B.Page_downloads _
+         | B.Page_capture _|B.Page_scene _|B.Page_snapshot _
          |B.Page_native_workflow _|B.Page_interact _|B.Page_goto _|B.Page_elements _
-         |B.Page_context _|B.Page_locate _ ->
+         |B.Page_context _ ->
              Error "a live lane without a clientId answers only its task Space reclaim")
     | B.Live_route (Some _) -> Ok () in
   let* upload_id=match List.assoc_opt "uploadId" fields with
@@ -64,15 +64,15 @@ let transferable verb upload_id = match verb,upload_id with
   | B.Page_act (B.Action.On_tab {interaction=B.Action.Upload _;_}),Some _ -> Ok ()
   | Page_act (B.Action.On_tab {interaction=B.Action.Upload _;_}),None ->
       Error "upload requires a private host snapshot grant; no command was dispatched"
-  | (Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _
-  | Session_open _|Session_close|Session_status|Page_goto _|Page_elements _
+  | (Tabs_list|Page_read _|Page_document _|Page_downloads _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _
+  | Page_goto _|Page_elements _
   | Page_act (B.Action.Open_tab _|Open_window _|Control _)
-  | Page_act (B.Action.On_tab {interaction=(Close_tab|Back|Forward|Reload|Stop_loading|Accept_dialog _|Dismiss_dialog|Set_cookie _|Delete_cookie _|Set_emulation _|Clear_emulation|Block_requests _|Unblock_requests);_})
-  | Page_context _|Page_locate _),None -> Ok ()
-  | (Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _
-    |Session_open _|Session_close|Session_status|Page_goto _|Page_elements _|Page_act (Open_tab _|Open_window _|Control _
-      |On_tab {interaction=Close_tab|Back|Forward|Reload|Stop_loading|Accept_dialog _|Dismiss_dialog|Set_cookie _|Delete_cookie _|Set_emulation _|Clear_emulation|Block_requests _|Unblock_requests;_})
-    |Page_context _|Page_locate _),Some _ -> Error "uploadId applies only to an upload command"
+  | Page_act (B.Action.On_tab {interaction=(Close_tab|Back|Forward|Reload|Stop_loading|Accept_dialog _|Dismiss_dialog);_})
+  | Page_context _),None -> Ok ()
+  | (Tabs_list|Page_read _|Page_document _|Page_downloads _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _
+    | Page_goto _|Page_elements _|Page_act (Open_tab _|Open_window _|Control _
+      |On_tab {interaction=Close_tab|Back|Forward|Reload|Stop_loading|Accept_dialog _|Dismiss_dialog;_})
+    |Page_context _),Some _ -> Error "uploadId applies only to an upload command"
 let result ~start_time ~failure data message : S.tool_result =
   let result=match failure with
     | Some (class_,effect_disposition) -> Tool_result.make_err ~tool_name:definition.name ~start_time

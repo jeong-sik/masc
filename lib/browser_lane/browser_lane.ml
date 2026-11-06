@@ -104,9 +104,6 @@ type verb =
   | Page_read of { tab_id : int option; max_chars : int option }
   | Page_document of { tab_id : int }
   | Page_downloads of { tab_id : int }
-  | Page_console of { tab_id : int }
-  | Page_network of { tab_id : int }
-  | Page_cookies of { tab_id : int }
   | Page_capture of { tab_id : int; options : Capture.t option }
   | Page_scene of { tab_id : int; max_chars : int; view : scene_view; scope : node_ref option }
   (* The connection's own accessibility snapshot of a page, with the refs its
@@ -114,30 +111,18 @@ type verb =
   | Page_snapshot of { tab_id : int; max_chars : int; scope : snapshot_scope }
   | Page_native_workflow of Native_workflow.t
   | Page_interact of { tab_id : int; frame_path : string list; expected_url : string option; action : interaction }
-  | Session_open of { headless : bool option }
-  | Session_close
-  (* Reads the backend's own record of whether a session exists. It issues no
-     browser request, so it answers while a session is closed -- which is the
-     question a keeper has before deciding to open one. *)
-  | Session_status
   | Page_goto of { url : string; tab_id : int option }
   | Page_elements of { tab_id : int option; filter : elements_filter }
   | Page_act of Browser_action.t
   | Page_context of { tab_id : int; frame_path : string list; mode : [ `Text of int | `Elements of elements_filter | `Frames | `Dialog ] }
-  (* Ask the model the automation executor calls for an element on the page. *)
-  | Page_locate of { tab_id : int; instruction : string option }
 
 (** Shared reply observation policy for built-in and Add-on callers. A timed-out
-    observation does not establish that the browser effect did not happen.
-    Model-backed locate retains its executor-owned wait policy. *)
+    observation does not establish that the browser effect did not happen. *)
 let reply_timeout_sec = function
-  | Session_open _ | Session_close -> 60.
-  | Session_status -> 10.
   | Page_goto _ -> 45.
   | Page_act action -> Action.reply_timeout_sec action
-  | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _ | Page_capture _
-  | Page_scene _ | Page_snapshot _ | Page_interact _ | Page_native_workflow _ | Page_elements _ | Page_context _
-  | Page_locate _ -> default_timeout_sec
+  | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_capture _
+  | Page_scene _ | Page_snapshot _ | Page_interact _ | Page_native_workflow _ | Page_elements _ | Page_context _ -> default_timeout_sec
 
 type reply_policy = Reply_window | Executor_owned
 let reply_policy = function
@@ -149,12 +134,11 @@ let reply_policy = function
      | Action.On_tab {interaction;_} ->
        (match interaction with
         | Action.Upload _ -> Executor_owned
-        | Action.Set_cookie _ | Action.Delete_cookie _ | Action.Set_emulation _ | Action.Clear_emulation
-        | Action.Block_requests _ | Action.Unblock_requests | Action.Accept_dialog _ | Action.Dismiss_dialog
+        | Action.Accept_dialog _ | Action.Dismiss_dialog
         | Action.Back | Action.Forward | Action.Reload | Action.Stop_loading | Action.Close_tab -> Reply_window))
-  | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _
-  | Page_capture _ | Page_scene _ | Page_snapshot _ | Page_interact _ | Session_open _ | Session_close | Session_status
-  | Page_goto _ | Page_elements _ | Page_context _ | Page_locate _ -> Reply_window
+  | Tabs_list | Page_read _ | Page_document _ | Page_downloads _
+  | Page_capture _ | Page_scene _ | Page_snapshot _ | Page_interact _
+  | Page_goto _ | Page_elements _ | Page_context _ -> Reply_window
 
 (* SDK-native navigation and selector/ref input need no MASC execution clock. Scene,
    coordinate and custom-waypoint adapters retain their existing guards. *)
@@ -166,9 +150,8 @@ let ego_reply_policy = function
      | Action.Open_tab _ -> Executor_owned
      | Action.On_tab {interaction=(Action.Reload|Action.Stop_loading);_} -> Executor_owned
      | (Action.Open_window _ | Action.Control _
-       | Action.On_tab {interaction=(Action.Upload _ | Action.Set_cookie _ | Action.Delete_cookie _
-         | Action.Set_emulation _ | Action.Clear_emulation | Action.Block_requests _
-         | Action.Unblock_requests | Action.Accept_dialog _ | Action.Dismiss_dialog
+       | Action.On_tab {interaction=(Action.Upload _
+         | Action.Accept_dialog _ | Action.Dismiss_dialog
          | Action.Back | Action.Forward | Action.Close_tab);_}) -> reply_policy (Page_act action))
   | Page_interact {action;_} ->
     (match action with
@@ -185,11 +168,10 @@ let ego_reply_policy = function
      | Set_zoom _ | Set_viewport _ | Double_click_at _ | Type_text _
      | Press_key _ | Scroll _ | Hover_at _ | Tap_at _ | Swipe _ | Click_at _
      | Scroll_at _ | Drag _ | Follow_link _ | Click_node _ | Fill_node _ -> Reply_window)
-  | (Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_console _
-    | Page_network _ | Page_cookies _ | Page_scene _ | Page_snapshot _
-    | Page_native_workflow _ | Session_open _ | Session_close | Session_status
-    | Page_elements _ | Page_context _
-    | Page_locate _) as verb -> reply_policy verb
+  | (Tabs_list | Page_read _ | Page_document _ | Page_downloads _
+    | Page_scene _ | Page_snapshot _
+    | Page_native_workflow _
+    | Page_elements _ | Page_context _) as verb -> reply_policy verb
 
 (* The CSS scope an elements read carries, top-level or in a frame. Every
    caller that relays such a read checks the answer against it. *)
@@ -197,9 +179,9 @@ let elements_filter = function
   | Page_elements { filter; _ } -> filter
   | Page_context { mode = `Elements filter; _ } -> filter
   | Page_context { mode = (`Text _ | `Frames | `Dialog); _ }
-  | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_console _ | Page_network _
-  | Page_cookies _ | Page_capture _ | Page_scene _ | Page_snapshot _ | Page_interact _ | Page_native_workflow _ | Session_open _ | Session_close
-  | Session_status | Page_goto _ | Page_act _ | Page_locate _ -> unfiltered_elements
+  | Tabs_list | Page_read _ | Page_document _ | Page_downloads _
+  | Page_capture _ | Page_scene _ | Page_snapshot _ | Page_interact _ | Page_native_workflow _
+  | Page_goto _ | Page_act _ -> unfiltered_elements
 ;;
 
 let verb_to_string = function
@@ -207,22 +189,15 @@ let verb_to_string = function
   | Page_read _ -> "page.read"
   | Page_document _ -> "page.document"
   | Page_downloads _ -> "page.downloads"
-  | Page_console _ -> "page.console"
-  | Page_network _ -> "page.network"
-  | Page_cookies _ -> "page.cookies"
   | Page_capture _ -> "page.capture"
   | Page_scene _ -> "page.scene"
   | Page_snapshot _ -> "page.snapshot"
   | Page_interact _ -> "page.interact"
   | Page_native_workflow _ -> "page.native_workflow"
-  | Session_open _ -> "session.open"
-  | Session_close -> "session.close"
-  | Session_status -> "session.status"
   | Page_goto _ -> "page.goto"
   | Page_elements _ -> "page.elements"
   | Page_act _ -> "page.act"
   | Page_context _ -> "page.context"
-  | Page_locate _ -> "page.locate"
 ;;
 
 (* The wire carries a verb name plus args; the closed variant is the only
@@ -404,12 +379,6 @@ let verb_json = function
       "args", `Assoc ["tabId", `Int tab_id; "includeHtml", `Bool true]]
   | Page_downloads {tab_id} ->
     `Assoc ["verb",`String "page.downloads";"args",`Assoc ["tabId",`Int tab_id]]
-  | Page_console {tab_id} ->
-    `Assoc ["verb",`String "page.console";"args",`Assoc ["tabId",`Int tab_id]]
-  | Page_network {tab_id} ->
-    `Assoc ["verb",`String "page.network";"args",`Assoc ["tabId",`Int tab_id]]
-  | Page_cookies {tab_id} ->
-    `Assoc ["verb",`String "page.cookies";"args",`Assoc ["tabId",`Int tab_id]]
   | Page_scene {tab_id;max_chars;view;scope} ->
     `Assoc ["verb",`String "page.scene";"args",scene_args ~tab_id ~max_chars ~view ~scope]
   | Page_snapshot {tab_id;max_chars;scope} ->
@@ -421,14 +390,6 @@ let verb_json = function
     `Assoc ["verb",`String "page.native_workflow";"args",Native_workflow.to_json workflow]
   | Page_interact { tab_id; frame_path; expected_url; action } ->
     `Assoc ["verb", `String "page.interact"; "args", interaction_args ~tab_id ~frame_path ~expected_url action]
-  | Session_open { headless } ->
-    `Assoc
-      [ ("verb", `String "session.open")
-      ; ( "args"
-        , `Assoc (Option.map (fun v -> ("headless", `Bool v)) headless |> Option.to_list) )
-      ]
-  | Session_close -> `Assoc [ ("verb", `String "session.close"); ("args", `Assoc []) ]
-  | Session_status -> `Assoc [ ("verb", `String "session.status"); ("args", `Assoc []) ]
   | Page_goto { url; tab_id } ->
     `Assoc ["verb", `String "page.goto"; "args", `Assoc
       (["url", `String url] @ Option.to_list (Option.map (fun id -> "tabId", `Int id) tab_id))]
@@ -445,29 +406,19 @@ let verb_json = function
       (["tabId",`Int tab_id;"framePath",`List (List.map (fun s -> `String s) frame_path);"mode",`String name] @ extra)]
   | Page_act action ->
     `Assoc ["verb", `String "page.act"; "args", Browser_action.to_json action]
-  | Page_locate { tab_id; instruction } ->
-    `Assoc ["verb", `String "page.locate"; "args", `Assoc
-      (["tabId", `Int tab_id] @ Option.to_list (Option.map (fun text -> "instruction", `String text) instruction))]
 ;;
 
 (* Two different questions, two different classifications, both exhaustive
    over the closed verb set:
 
-   - [verb_is_read]: does this leave browser content and lifecycle unchanged?
-     Interaction, navigation, and session changes are writes.
+   - [verb_is_read]: does this leave browser content unchanged? Interaction
+     and navigation are writes.
    - [live_capability]: what does this ask of the operator's browser, if it
      may run there at all? Readers and explicit-tab interactions are
      supported. *)
 let verb_is_read = function
-  | Tabs_list | Page_read _ | Page_document _ | Page_elements _ | Page_capture _ | Page_scene _ | Page_snapshot _ | Page_context _ | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _
-  | Session_status | Page_locate _ -> true
-  | Session_open _ | Session_close | Page_goto _ | Page_act _ | Page_interact _ | Page_native_workflow _ -> false
-let verb_uses_model = function
-  | Page_locate _ -> true
-  | Tabs_list | Page_read _ | Page_document _ | Page_elements _ | Page_capture _ | Page_scene _ | Page_snapshot _
-  | Page_context _ | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _ | Session_open _ | Session_close | Session_status
+  | Tabs_list | Page_read _ | Page_document _ | Page_elements _ | Page_capture _ | Page_scene _ | Page_snapshot _ | Page_context _ | Page_downloads _ -> true
   | Page_goto _ | Page_act _ | Page_interact _ | Page_native_workflow _ -> false
-;;
 
 (* What the live lane asks of the operator's browser, named by what the
    connection must be able to do there. The two live transports reach the
@@ -568,47 +519,34 @@ let live_capability_of_interaction = function
 ;;
 
 let live_capability = function
-  | Tabs_list -> Some Tab_listing
-  | Page_read _ -> Some Text_read
-  | Page_document _ -> Some Document_source
-  | Page_elements _ -> Some Element_inventory
-  | Page_capture {options=None;_} -> Some Viewport_capture
-  | Page_capture {options=Some _;_} -> Some Native_workflow
-  | Page_scene _ -> Some Scene_read
-  | Page_native_workflow _ -> Some Native_workflow
-  | Page_snapshot _ -> Some Accessibility_snapshot
-  | Page_interact { action; _ } -> Some (live_capability_of_interaction action)
-  | Page_act (Action.Open_tab _ | Action.Open_window _) -> Some Tab_creation
-  | Page_act (Action.Control (Action.Hand_off | Action.Take_over | Action.Space_status | Action.Finish_space _ | Action.Wait_for_control _)) -> Some Operator_handoff
-  | Page_act (Action.Control (Action.Adopt_tab _|Action.Release_tab _)) -> Some Page_management
-  | Page_act (Action.On_tab {interaction = (Action.Back | Action.Forward | Action.Reload); _}) -> Some Tab_history
-  | Page_act (Action.On_tab {interaction = Action.Stop_loading; _}) -> Some Page_recovery
-  | Page_act (Action.On_tab {interaction = Action.Close_tab; _}) -> Some Tab_closing
-  | Page_goto _ -> Some Tab_navigation
-  | Page_act (Action.On_tab {interaction = (Action.Accept_dialog _ | Action.Dismiss_dialog); _}) -> Some Dialog_answer
-  | Page_context { mode = (`Text _ | `Elements _ | `Frames); _ } -> Some Frame_read
-  | Page_downloads _ -> Some Download_listing
-  | Page_context { mode = `Dialog; _ } -> Some Dialog_read
-  | Page_console _ | Page_network _ | Page_cookies _ -> None
-  (* The operator's browser owns itself, so it has no session to report on. *)
-  | Page_act (Action.On_tab {interaction = Action.Upload _; _}) -> Some File_upload
-  | Session_open _ | Session_close | Session_status
-  | Page_act (Action.On_tab { interaction = (Action.Set_cookie _ | Action.Delete_cookie _ | Action.Set_emulation _ | Action.Clear_emulation
-      | Action.Block_requests _ | Action.Unblock_requests); _ }) -> None
-  | Page_locate _ -> None
+  | Tabs_list -> Tab_listing
+  | Page_read _ -> Text_read
+  | Page_document _ -> Document_source
+  | Page_elements _ -> Element_inventory
+  | Page_capture {options=None;_} -> Viewport_capture
+  | Page_capture {options=Some _;_} -> Native_workflow
+  | Page_scene _ -> Scene_read
+  | Page_native_workflow _ -> Native_workflow
+  | Page_snapshot _ -> Accessibility_snapshot
+  | Page_interact { action; _ } -> live_capability_of_interaction action
+  | Page_act (Action.Open_tab _ | Action.Open_window _) -> Tab_creation
+  | Page_act (Action.Control (Action.Hand_off | Action.Take_over | Action.Space_status | Action.Finish_space _ | Action.Wait_for_control _)) -> Operator_handoff
+  | Page_act (Action.Control (Action.Adopt_tab _|Action.Release_tab _)) -> Page_management
+  | Page_act (Action.On_tab {interaction = (Action.Back | Action.Forward | Action.Reload); _}) -> Tab_history
+  | Page_act (Action.On_tab {interaction = Action.Stop_loading; _}) -> Page_recovery
+  | Page_act (Action.On_tab {interaction = Action.Close_tab; _}) -> Tab_closing
+  | Page_goto _ -> Tab_navigation
+  | Page_act (Action.On_tab {interaction = (Action.Accept_dialog _ | Action.Dismiss_dialog); _}) -> Dialog_answer
+  | Page_context { mode = (`Text _ | `Elements _ | `Frames); _ } -> Frame_read
+  | Page_downloads _ -> Download_listing
+  | Page_context { mode = `Dialog; _ } -> Dialog_read
+  | Page_act (Action.On_tab {interaction = Action.Upload _; _}) -> File_upload
 ;;
 
-let verb_allowed_on_live verb = Option.is_some (live_capability verb)
 
 let snapshot_refused = "an accessibility snapshot is served only by an ego connection on the live lane"
 let snapshot_target_refused = "a snapshot target is acted on only by an ego connection on the live lane"
 let handoff_refused = "Space control actions apply only to an ego connection on the live lane"
-let verb_allowed (lane : Lane_name.t) verb =
-  match lane with
-  | Live -> verb_allowed_on_live verb
-;;
-
-
 type issued = { id : string; verb_json : Yojson.Safe.t }
 
 type answer =
@@ -635,10 +573,9 @@ let activity_rejection_message = function
 (* The same check against an activity the caller observed, such as the one a
    worker reported in its snapshot. *)
 let activity_rejection_with ~activity lane = function
-  | Session_close | Session_status -> None
-  | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _ | Page_capture _
-  | Page_scene _ | Page_snapshot _ | Page_interact _ | Page_native_workflow _ | Session_open _ | Page_goto _ | Page_elements _
-  | Page_act _ | Page_context _ | Page_locate _ ->
+  | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_capture _
+  | Page_scene _ | Page_snapshot _ | Page_interact _ | Page_native_workflow _ | Page_goto _ | Page_elements _
+  | Page_act _ | Page_context _ ->
     match activity with
     | Enabled -> None
     | Disabled -> Some (Lane_off lane)
@@ -791,13 +728,12 @@ let settled_activity_of_json = function
 let activity_scope = function
   | Page_native_workflow workflow -> Some workflow.tab_id
   | Page_interact {tab_id;_} | Page_document {tab_id} | Page_downloads {tab_id}
-  | Page_console {tab_id} | Page_network {tab_id} | Page_cookies {tab_id} | Page_capture {tab_id;_}
+  | Page_capture {tab_id;_}
   | Page_scene {tab_id;_} | Page_snapshot {tab_id;_} | Page_context {tab_id;_}
-  | Page_locate {tab_id;_}
   | Page_act (Action.Control (Action.Adopt_tab {tab_id;_}|Action.Release_tab tab_id))
   | Page_act (Action.On_tab {tab_id;_}) -> Some tab_id
   | Page_read {tab_id;_} | Page_elements {tab_id;_} | Page_goto {tab_id;_} -> tab_id
-  | Tabs_list | Session_open _ | Session_close | Session_status
+  | Tabs_list
   | Page_act (Action.Open_tab _|Open_window _|Control (Hand_off|Take_over|Space_status|Finish_space _|Wait_for_control _)) -> None
 let activity_name = function
   | Page_act (Action.Control Action.Space_status) -> "space_status"
@@ -807,10 +743,10 @@ let activity_name = function
   | Page_act (Action.Control (Action.Release_tab _)) -> "release_tab"
   | Page_interact {action;_} -> interaction_verb action
   | Page_native_workflow _ -> "workflow"
-  | (Tabs_list|Page_read _|Page_document _|Page_downloads _|Page_console _|Page_network _|Page_cookies _
-    |Page_capture _|Page_scene _|Page_snapshot _|Session_open _|Session_close|Session_status|Page_goto _
+  | (Tabs_list|Page_read _|Page_document _|Page_downloads _
+    |Page_capture _|Page_scene _|Page_snapshot _|Page_goto _
     |Page_elements _|Page_act (Action.Open_tab _|Open_window _|Control (Hand_off|Take_over)|On_tab _)
-    |Page_context _|Page_locate _) as verb -> verb_to_string verb
+    |Page_context _) as verb -> verb_to_string verb
 let activity_result = function
   | `Assoc fields ->
     (match List.assoc_opt "ok" fields,List.assoc_opt "effectPhase" fields with
@@ -1188,13 +1124,11 @@ let issue_live_with ~activity_check ?actor ?(only_if_idle = false) client ~verb 
   | Some refusal -> Ok refusal
   | None -> if not (connected client) then
     Error (Selected_client_disconnected client.info.client_id)
-  else match live_capability verb with
-  | None ->
-    Ok (Rejected_before_effect "no live browser connection serves this command")
-  | Some capability when not (live_transport_serves client.info.transport capability) ->
+  else let capability = live_capability verb in
+  if not (live_transport_serves client.info.transport capability) then
     Error (Transport_unsupported
       { client_id = client.info.client_id; transport = client.info.transport; capability })
-  | Some _ ->
+  else
     Ok (Eio.Switch.run (fun sw ->
       let policy = live_reply_policy client.info.transport verb in
       let id = Uuidm.to_string (command_uuid ()) in

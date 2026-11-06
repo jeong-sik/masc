@@ -2,7 +2,7 @@ type backend = Connected of Browser_lane.live_transport
   | Safari_unavailable
 type operation =
   | List_tabs | Open_tab | Close_tab | Activate_tab | List_windows | Create_window | Close_window
-  | Navigate | Follow_link | Back | Forward | Reload | Stop_loading | Session_lifecycle
+  | Navigate | Follow_link | Back | Forward | Reload | Stop_loading
   | Read_text | Read_html | Read_elements | Read_scene | Read_regions | Read_snapshot | Screenshot
   | Native_workflow
   | Click_snapshot_target | Fill_snapshot_target | Hover_snapshot_target | Double_click_snapshot_target
@@ -11,8 +11,7 @@ type operation =
   | Read_frames | Frame_interaction | Read_dialog | Accept_dialog | Dismiss_dialog
   | Hand_off | Take_over | Space_status | Finish_space | Wait_for_control | Adopt_tab | Release_tab
   | Upload_file | List_downloads | Page_zoom | Resize_viewport | Touch
-  | Read_clipboard | Write_clipboard | Read_network | Intercept_network
-  | Read_console | Read_storage | Write_storage | Emulate_environment
+  | Read_clipboard | Write_clipboard
 [@@deriving enumerate]
 type tool = Tabs | Read | Interact | Act | Session | Goto
 type invocation = { tool : tool; action : string option; mode : string option }
@@ -147,7 +146,6 @@ let support backend operation = match backend with
            "Requires a native managed Page, including an explicitly adopted unknown-origin Page. A tab the operator opened must first be explicitly adopted in this same Space; recovery neither adopts it nor changes its origin."]
       | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Safari_unavailable ->
           Unsupported "Native stop_loading recovery requires an ego connection.")
-    | Session_lifecycle -> missing
     | Read_text -> read backend (invoke ~mode:"text" Read) []
     | Read_html -> (match backend with
       | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) ->
@@ -364,13 +362,12 @@ let support backend operation = match backend with
       | Connected Browser_lane.Ego_task_space | Safari_unavailable -> missing)
     | Pointer_down | Pointer_up -> missing
     | Read_clipboard | Write_clipboard -> missing
-    | Read_console | Read_network | Intercept_network | Read_storage | Emulate_environment | Write_storage -> missing
 let catalog backend = List.map (fun operation -> {operation;support=support backend operation}) operations
 let operation_name = function
   | List_tabs -> "list_tabs" | Open_tab -> "open_tab" | Close_tab -> "close_tab"
   | Activate_tab -> "activate_tab" | List_windows -> "list_windows" | Create_window -> "create_window" | Close_window -> "close_window"
   | Navigate -> "navigate" | Follow_link -> "follow_link" | Back -> "back" | Forward -> "forward"
-  | Reload -> "reload" | Stop_loading -> "stop_loading" | Session_lifecycle -> "session_lifecycle" | Read_text -> "read_text"
+  | Reload -> "reload" | Stop_loading -> "stop_loading" | Read_text -> "read_text"
   | Read_html -> "read_html" | Read_elements -> "read_elements" | Read_scene -> "read_scene"
   | Read_regions -> "read_regions" | Read_snapshot -> "read_snapshot" | Screenshot -> "screenshot"
   | Native_workflow -> "native_workflow"
@@ -387,8 +384,6 @@ let operation_name = function
   | Upload_file -> "upload_file"
   | List_downloads -> "list_downloads" | Page_zoom -> "page_zoom" | Resize_viewport -> "resize_viewport"
   | Touch -> "touch" | Read_clipboard -> "read_clipboard" | Write_clipboard -> "write_clipboard"
-  | Read_network -> "read_network" | Intercept_network -> "intercept_network" | Read_console -> "read_console"
-  | Read_storage -> "read_storage" | Write_storage -> "write_storage" | Emulate_environment -> "emulate_environment"
 let operation_of_wire name = List.find_opt (fun operation -> String.equal (operation_name operation) name) operations
 let parse_required_actions = function
   | `List values ->

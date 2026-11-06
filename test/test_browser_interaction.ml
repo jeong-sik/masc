@@ -13,7 +13,6 @@ let test_typed_actions () =
   let scroll = parsed (fields "scroll" @ ["x", `Int (-10); "y", `Int 200]) in
   let verb = Browser_lane.Page_interact {frame_path=[];tab_id=scroll.tab_id;
     expected_url=scroll.expected_url; action=scroll.action} in
-  check bool "live interactions admitted" true (Browser_lane.verb_allowed_on_live verb);
   check bool "interactions are writes" false (Browser_lane.verb_is_read verb);
   check string "closed wire verb" "page.interact" (Browser_lane.verb_to_string verb)
 let test_native_keyboard_parser () =
@@ -193,10 +192,10 @@ let test_click_button_capability () =
     action=Browser_lane.Click_at {point={x=0.5;y=0.5};
       viewport={document_id="d";width=100.;height=100.;scroll_x=0.;scroll_y=0.}; button}} in
   check bool "primary click keeps the plain pointer capability" true
-    (Browser_lane.live_capability (click Browser_lane.Pointer.Primary) = Some Browser_lane.Point_click);
+    (Browser_lane.live_capability (click Browser_lane.Pointer.Primary) = Browser_lane.Point_click);
   List.iter (fun button ->
     check bool "middle and secondary ask for the button capability" true
-      (Browser_lane.live_capability (click button) = Some Browser_lane.Trusted_button_click))
+      (Browser_lane.live_capability (click button) = Browser_lane.Trusted_button_click))
     [Browser_lane.Pointer.Middle;Browser_lane.Pointer.Secondary];
   check bool "the extension cannot serve a non-primary button" false
     (Browser_lane.live_transport_serves Browser_lane.Web_extension Browser_lane.Trusted_button_click);
@@ -247,7 +246,7 @@ let test_set_viewport () =
     ((parsed Yojson.Safe.Util.(to_assoc wire)).action = request.action);
   check bool "the lane asks for the viewport capability" true
     (Browser_lane.live_capability (Browser_lane.Page_interact {frame_path=[];tab_id=request.tab_id;expected_url=request.expected_url;
-      action=request.action}) = Some Browser_lane.Viewport_resize)
+      action=request.action}) = Browser_lane.Viewport_resize)
 let test_select_option () =
   let base = fields "select_option" @ ["selector",`String "#country"] in
   let request = parsed (base @ ["value",`String "kr"]) in
@@ -259,7 +258,7 @@ let test_select_option () =
     ((parsed Yojson.Safe.Util.(to_assoc wire)).action = request.action);
   check bool "select_option is the DOM interaction capability" true
     (Browser_lane.live_capability (Browser_lane.Page_interact {frame_path=[];tab_id=request.tab_id;
-      expected_url=request.expected_url;action=request.action}) = Some Browser_lane.Dom_interaction);
+      expected_url=request.expected_url;action=request.action}) = Browser_lane.Dom_interaction);
   (match (parsed (base @ ["value",`String ""])).action with
    | Browser_lane.Select_option {selection=Browser_lane.Single_option "";_} -> ()
    | _ -> fail "an empty option value is a value");
@@ -304,7 +303,7 @@ let test_snapshot_targets () =
         ((parsed Yojson.Safe.Util.(to_assoc wire)).action = request.action);
       check bool (label ^ " asks for the snapshot target capability") true
         (Browser_lane.live_capability (Browser_lane.Page_interact {frame_path=[];tab_id=request.tab_id;
-          expected_url=request.expected_url;action=request.action}) = Some Browser_lane.Snapshot_target_input)
+          expected_url=request.expected_url;action=request.action}) = Browser_lane.Snapshot_target_input)
     | Error error -> failf "%s: %s" label error in
   expect "a ref" (Browser_lane.Click_target (Browser_lane.Target_ref 12)) (target "click" (`Assoc ["ref",`Int 12]));
   expect "a hover ref" (Browser_lane.Hover_target (Browser_lane.Target_ref 12)) (target "hover" (`Assoc ["ref",`Int 12]));
@@ -364,7 +363,7 @@ let test_touch_actions () =
       ((parsed Yojson.Safe.Util.(to_assoc wire)).action = request.action);
     check bool "touch action is the touch capability" true
       (Browser_lane.live_capability (Browser_lane.Page_interact {frame_path=[];tab_id=request.tab_id;
-        expected_url=request.expected_url;action=request.action}) = Some Browser_lane.Touch_input);
+        expected_url=request.expected_url;action=request.action}) = Browser_lane.Touch_input);
     check bool "touch action requires its observed URL" true
       (Result.is_error (Interaction.parse (`Assoc (List.remove_assoc "expectedUrl" input)))))
     [tap; swipe];

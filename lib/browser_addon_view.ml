@@ -59,18 +59,6 @@ let request_fields allowed = function
   | _ -> Error "unknown browser request argument"
 let route fields = Browser_surface.parse_request (`Assoc
   (List.filter (fun (key,_) -> List.mem key ["lane";"clientId";"tabId"]) fields))
-let session host json=run (fun () ->
-  let* fields=parse (request_fields ["lane";"clientId";"tabId";"action";"headless"]) json in
-  let* request=input (route fields) in
-  let* headless=input (match List.assoc_opt "headless" fields with
-    | None -> Ok (Some false)|Some (`Bool value) -> Ok (Some value)|Some _ -> Error "headless must be boolean") in
-  let* verb=input (match List.assoc_opt "action" fields with
-    | Some (`String "open") -> Ok (B.Session_open {headless})
-    | Some (`String "close") -> Ok B.Session_close
-    | Some (`String "status") -> Ok B.Session_status
-    | None|Some _ -> Error "action must be open, close or status") in
-  let* receipt=Host.issue host ~preference:request.route verb in
-  Ok (Browser_binding.annotate receipt.binding receipt.data))
 let goto host json=run (fun () ->
   let* fields=parse (request_fields ["lane";"clientId";"tabId";"url"]) json in
   let* request=input (route fields) in
@@ -90,8 +78,7 @@ let clients ~bidi_host host=run (fun () ->
   let decision verb=match Browser_selection.choose ~verb ~bound:false ~snapshot Browser_selection.Automatic with
     | Ok selected -> `Assoc ["ok",`Bool true;"data",Browser_selection.to_json selected]
     | Error error -> `Assoc ["ok",`Bool false;"error",Browser_selection.error_to_json error] in
-  Ok (`Assoc (["clients",`List published.client_rows;"automatic",`Assoc ["browse",decision B.Tabs_list;
-    "work",decision (B.Session_open {headless=Some false})];
+  Ok (`Assoc (["clients",`List published.client_rows;"automatic",`Assoc ["browse",decision B.Tabs_list];
     "bidiHost",Browser_bidi_host_status.to_json bidi_host]
     @ (match published.unavailable with [] -> [] | items ->
         ["unavailable",`List (List.map Browser_addon_observation.unavailable_to_json items)]))))

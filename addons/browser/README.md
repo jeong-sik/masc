@@ -117,7 +117,7 @@ tab/document work repeats the returned selection. `page.read` with
 `includeHtml = true` reads document source. The bundled browser skill describes
 guarded input and partial-result handling.
 
-Initial `tabs.list` or `session.open` commands may supply `requiredActions`, using
+An initial `tabs.list` command may supply `requiredActions`, using
 the operation names from the browser capability catalog. The host's automatic
 selection considers those capabilities; explicit connections are checked before
 dispatch too. An explicit `lane = "live"` tab creation requires the observed `clientId`.

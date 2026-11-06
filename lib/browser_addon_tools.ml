@@ -3,7 +3,7 @@ module Host = Browser_addon_host
 module C = Browser_capabilities
 module Legacy = Tool_misc_browser_lane
 open Result.Syntax
-type projection = Raw | Inventory | Session | Scene of Browser_scene.request | Screenshot of int * B.Capture.t option
+type projection = Raw | Inventory | Scene of Browser_scene.request | Screenshot of int * B.Capture.t option
   | Scoped_elements of B.elements_filter
 type prepared = {preference:Browser_selection.preference;verb:B.verb;
   required_actions:C.operation list;projection:projection}
@@ -47,33 +47,33 @@ let prepare_read json =
   let* filter=Browser_page_script.elements_filter_of_json (fun key -> List.assoc_opt key fields) in
   let* ()=match mode,(filter.within,filter.selector) with
     | `Elements,((None|Some _),(None|Some _))
-    | (`Text|`Html|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads|`Console|`Network|`Cookies|`Frames|`Dialog),(None,None) -> Ok ()
-    | (`Text|`Html|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads|`Console|`Network|`Cookies|`Frames|`Dialog),((Some _,_)|(_,Some _)) ->
+    | (`Text|`Html|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads|`Frames|`Dialog),(None,None) -> Ok ()
+    | (`Text|`Html|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads|`Frames|`Dialog),((Some _,_)|(_,Some _)) ->
         Error "within and selector apply to mode elements only" in
   let elements_projection=match filter.within,filter.selector with None,None -> Raw | (Some _,_|_,Some _) -> Scoped_elements filter in
   let top_scene=frame_path=[] && (match mode with `Scene|`Regions -> true
-    | `Text|`Html|`Elements|`Snapshot|`Screenshot|`Downloads|`Console|`Network|`Cookies|`Frames|`Dialog -> false) in
+    | `Text|`Html|`Elements|`Snapshot|`Screenshot|`Downloads|`Frames|`Dialog -> false) in
   let* ()=if not top_scene && List.exists (fun key -> List.mem_assoc key fields)
       ["scope";"expectedUrl";"navigationSource"] then
       Error "scope, expectedUrl and navigationSource support top-document scene or regions only" else Ok () in
   let* ()=match mode with
     | `Snapshot -> Ok ()
-    | `Text|`Html|`Elements|`Scene|`Regions|`Screenshot|`Downloads|`Console|`Network|`Cookies|`Frames|`Dialog ->
+    | `Text|`Html|`Elements|`Scene|`Regions|`Screenshot|`Downloads|`Frames|`Dialog ->
       if List.exists (fun key -> List.mem_assoc key fields) ["snapshotScope";"root"]
       then Error "snapshotScope and root apply to mode snapshot only" else Ok () in
   let contextual=frame_path<>[] || (match mode with `Frames|`Dialog -> true
-    | `Text|`Html|`Elements|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads|`Console|`Network|`Cookies -> false) in
+    | `Text|`Html|`Elements|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads -> false) in
   if contextual then
     let* ()=match request.route,mode with
       | Browser_selection.Exact (Live_route _),(`Text|`Elements|`Frames|`Dialog) -> Ok ()
-      | Exact (Live_route _),(`Html|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads|`Console|`Network|`Cookies) ->
+      | Exact (Live_route _),(`Html|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads) ->
           Error "a live contextual read supports text, elements, frames, or a top-level native dialog"
       | Automatic,_ -> Error "frame and dialog reads require an explicit live browser" in
     let* tab_id=tab request in
     let* mode=match mode with
       | `Text -> Ok (`Text max_chars) | `Elements -> Ok (`Elements filter) | `Frames -> Ok `Frames
       | `Dialog when frame_path=[] -> Ok `Dialog
-      | `Dialog|`Html|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads|`Console|`Network|`Cookies -> Error "framePath supports text, elements and frames" in
+      | `Dialog|`Html|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads -> Error "framePath supports text, elements and frames" in
     let projection=match mode with `Elements _ -> elements_projection
       | `Text _|`Frames|`Dialog -> Raw in
     prepared request projection (B.Page_context {tab_id;frame_path;mode})
@@ -99,7 +99,6 @@ let prepare_read json =
       let* ()=match request.route with Browser_selection.Exact (B.Live_route _) -> Ok ()
         | Automatic -> Error "downloads require an explicit live browser" in
       let* tab_id=tab request in prepared request Raw (B.Page_downloads {tab_id})
-  | `Console|`Network|`Cookies -> Error "no connected browser serves console, network or cookie reads"
   | `Text -> prepared request Raw (B.Page_read {tab_id=request.tab_id;max_chars=Some max_chars})
   (* The source of the top document, never cut: when the JSON reply would
      pass 1 MiB it says htmlComplete false instead. A browser that cannot read it refuses at
@@ -141,7 +140,7 @@ let prepare ~upload_paths tool json =
             Ok (B.Action.On_tab {target with interaction=Upload {target=upload;paths}})
         | On_tab {interaction=Upload _;_},None -> Error "upload requires an authoritative Keeper file context"
         | (Open_tab _|Open_window _|Control _|On_tab {interaction=(Back|Forward|Reload
-            |Close_tab|Stop_loading|Accept_dialog _|Dismiss_dialog|Set_cookie _|Delete_cookie _|Set_emulation _|Clear_emulation|Block_requests _|Unblock_requests);_}),(None|Some _) -> Ok action in
+            |Close_tab|Stop_loading|Accept_dialog _|Dismiss_dialog);_}),(None|Some _) -> Ok action in
       let* request=Legacy.tool_request json in
       let* ()=match action,request.route with
         | (B.Action.Open_tab _|Open_window _|Control _),Browser_selection.Exact (B.Live_route None)
@@ -159,18 +158,7 @@ let prepare ~upload_paths tool json =
           Error "requiredActions applies only to initial discovery without tabId"
         | (None|Some _),[]|None,_::_ -> Ok () in
       prepared ~required_actions request Inventory B.Tabs_list
-  | Session ->
-      let* fields=fields ["lane";"clientId";"tabId";"requiredActions";"action";"headless"] json in
-      let* request=surface fields in
-      let* required_actions=Legacy.required_actions json in
-      let* headless=match List.assoc_opt "headless" fields with None -> Ok (Some false)
-        | Some (`Bool value) -> Ok (Some value)|Some _ -> Error "headless must be boolean" in
-      let* verb=match List.assoc_opt "action" fields with
-        | Some (`String "open") -> Ok (B.Session_open {headless})
-        | Some (`String "close") when not (List.mem_assoc "requiredActions" fields) -> Ok B.Session_close
-        | Some (`String "status") when not (List.mem_assoc "requiredActions" fields) -> Ok B.Session_status
-        | None|Some _ -> Error "action must be open, close or status; requiredActions applies only to open" in
-      prepared ~required_actions request Session verb
+  | Session -> Error "action must be bind_goal, goal_status or unbind_goal"
   | Goto ->
       let* fields=fields ["lane";"clientId";"tabId";"url"] json in
       let* request=surface fields in
@@ -219,17 +207,16 @@ let prepare_request ~upload_paths tool json =
       prepare ~upload_paths tool json |> Result.map (fun value -> Browser value)
 let initial_goal_space initial_goal_ids config request =
   match request.preference,request.verb with
-  | Browser_selection.Automatic,(B.Tabs_list|Session_open _) ->
+  | Browser_selection.Automatic,B.Tabs_list ->
     let* ids=match initial_goal_ids with None -> Ok [] | Some read -> read () in
     (match List.sort_uniq String.compare ids with
      | [] -> Ok None
      | [goal_id] -> Browser_goal_space.find config ~goal_id |> Result.map_error Browser_goal_space.error_message
      | _::_::_ -> Error "current Task belongs to multiple Goals; choose an explicit browser lane and clientId")
   | (Automatic|Exact (B.Live_route _)),
-    (Tabs_list|Session_open _|Session_close|Session_status|Page_read _|Page_document _|Page_downloads _
-    |Page_console _|Page_network _|Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _
-    |Page_native_workflow _|Page_interact _|Page_goto _|Page_elements _|Page_act _|Page_context _
-    | Page_locate _) -> Ok None
+    (Tabs_list|Page_read _|Page_document _|Page_downloads _
+    | Page_capture _|Page_scene _|Page_snapshot _
+    |Page_native_workflow _|Page_interact _|Page_goto _|Page_elements _|Page_act _|Page_context _) -> Ok None
 let annotate_goal binding = function
   | `Assoc fields -> `Assoc ((match binding with None -> [] | Some value ->
       ["browserGoal",Browser_goal_space.to_json value]) @ List.remove_assoc "browserGoal" fields)
@@ -245,14 +232,13 @@ let project ~base_path ~keeper_name ~started request (receipt:Host.receipt) =
   let with_capabilities = function
     | `Assoc fields -> Ok (`Assoc (capability_fields @ List.filter
         (fun (key,_) -> not (List.mem key ["browserCapabilities";"requiredActions"])) fields))
-    | _ -> Error "browser inventory/session response must be an object" in
+    | _ -> Error "browser inventory response must be an object" in
   let data value = Result.map (fun data -> data,None) value in
   match request.projection with
   | Raw -> data (Ok (annotate receipt.data))
   | Inventory ->
       let inventory=match receipt.data with `List tabs -> `Assoc ["tabs",`List tabs] | value -> value in
       data (with_capabilities (annotate inventory))
-  | Session -> data (with_capabilities (annotate receipt.data))
   | Scene scene -> data (Browser_scene.project scene ~binding:receipt.binding ~started receipt.data)
   | Scoped_elements filter ->
       data (Result.map annotate (Browser_page_script.check_scoped_elements ~filter receipt.data))
@@ -337,13 +323,11 @@ let handle ?initial_goal_ids ?upload_paths ~config ~access ~principal ~reserved 
                  | Ok (data,content_blocks) ->
                      Tool_result.make_ok ~tool_name ~start_time ~data:(annotate_goal goal_space data) ?content_blocks ?metadata:receipt.raw_result._meta ()
                  | Error detail ->
-                     let effect_disposition=match request.projection with
-                       | Session -> Tool_result.Effect_outcome_unknown
-                       | Raw|Inventory|Scene _|Screenshot _|Scoped_elements _ -> Tool_result.Proven_pre_effect in
+                     let effect_disposition=Tool_result.Proven_pre_effect in
                      (* A refused scoped read does not pass on the unscoped answer. *)
                      let data=match request.projection with
                        | Scoped_elements _ -> `Assoc ["error",`String detail]
-                       | Session|Raw|Inventory|Scene _|Screenshot _ ->
+                       | Raw|Inventory|Scene _|Screenshot _ ->
                            Mcp_protocol.Mcp_types.tool_result_to_yojson receipt.raw_result in
                      Tool_result.make_err ~tool_name ~start_time
                      ~class_:Tool_result.Runtime_failure ~effect_disposition

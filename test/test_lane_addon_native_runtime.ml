@@ -551,14 +551,14 @@ hooks = ["validate_input", "validate_output"]
           && (Keeper_tool_execution.of_tool_result failure).failure_effect_disposition=Tool_result.Proven_pre_effect
           && (match message with None -> true | Some expected -> Tool_result.message failure=expected)
       | Ok _ -> false) in
-  host_refusal "requirements ride only discovery or session open" (`Assoc ["requiredActions",`List [`String "hover"];
+  host_refusal "requirements ride only initial tab discovery" (`Assoc ["requiredActions",`List [`String "hover"];
     "command",Browser_lane.verb_json (Browser_lane.Page_read {tab_id=Some 7;max_chars=None})]);
   let workflow=require (Browser_lane.Native_workflow.of_json (`Assoc ["tabId",`Int 7;
     "expectedUrl",`String "https://example.org/";"maxChars",`Int 1000;
     "steps",`List [`Assoc ["method",`String "click";"selector",`String "#observed"]]])) in
   let workflow_command=Browser_lane.verb_json (Browser_lane.Page_native_workflow workflow) in
   host_refusal "native workflow requirements cannot reach the worker"
-    ~message:"requiredActions applies only to initial tab discovery or session open"
+    ~message:"requiredActions applies only to initial tab discovery"
     (`Assoc ["lane",`String "live";"clientId",`String (Browser_lane.client_id_to_string client_id);
       "requiredActions",`List [`String "hover"];"command",workflow_command]);
   List.iter (fun (label,selection) ->

@@ -24,12 +24,12 @@ let route_and_wait () =
   check bool "native capture uses SDK execution ownership" true (B.ego_reply_policy native=B.Executor_owned);
   check bool "viewport capture also uses SDK execution ownership" true (B.ego_reply_policy ordinary=B.Executor_owned);
   check bool "native options require Ego capability" true
-    (B.live_capability native=Some B.Native_workflow
+    (B.live_capability native=B.Native_workflow
       && B.live_transport_serves B.Ego_task_space B.Native_workflow
       && not (B.live_transport_serves B.Webdriver_bidi B.Native_workflow)
       && not (B.live_transport_serves B.Web_extension B.Native_workflow));
   check bool "ordinary capture remains supported by BiDi" true
-    (B.live_capability ordinary=Some B.Viewport_capture
+    (B.live_capability ordinary=B.Viewport_capture
       && B.live_transport_serves B.Webdriver_bidi B.Viewport_capture)
 let () = run "native screenshot request" ["boundary",[
   test_case "native option contract and owned path" `Quick native_options;

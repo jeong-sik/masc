@@ -821,8 +821,6 @@ module KeeperKeepalive = struct
 
 end
 
-(** {1 Keeper Context Window} *)
-
 (** {1 gRPC Heartbeat Reconnect} *)
 
 module KeeperGrpc = struct

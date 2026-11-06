@@ -43,9 +43,6 @@ val openai_chat_completions_path : string
     Agent Core's internal default in [api_openai.ml]. *)
 val chat_completions_path : string
 
-(** {1 CLI transport discriminator} *)
-
-
 (** {1 Local LLM URL} *)
 
 (** Override order:

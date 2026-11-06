@@ -228,5 +228,3 @@ module Shell_timeout : sig
          that is not a number reads as {!global_default_sec}.
       2. The bucket's own default. *)
 end
-
-(** {1 Diagnostics / observability surface} *)

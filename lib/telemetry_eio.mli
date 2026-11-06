@@ -175,5 +175,3 @@ val track_tool_called :
 (** When [success = false] and [error_kind] is provided, additionally
     emits a paired [Error_occurred] row with a context envelope built
     from the non-empty optional fields (#10358). *)
-
-(** {1 Maintenance} *)

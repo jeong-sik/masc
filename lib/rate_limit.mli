@@ -63,8 +63,6 @@ val headers_agent_global : key:string -> (string * string) list
 (** Rate-limit headers ([X-RateLimit-Limit] / [X-RateLimit-Remaining]) for
     the per-agent limiter at [key]. *)
 
-(** {1 Automatic Cleanup Loop} *)
-
 (** {1 HTTP Helpers} *)
 
 val headers : t -> key:string -> (string * string) list

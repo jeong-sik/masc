@@ -15,8 +15,6 @@ type cache_entry = {
   tags : string list;
 }
 
-(** {1 Configuration} *)
-
 (** {1 Paths} *)
 
 val cache_dir : Workspace_utils.config -> string

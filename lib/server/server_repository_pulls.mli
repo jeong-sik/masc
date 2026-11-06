@@ -197,6 +197,13 @@ val default_http_post : http_post
     ([-H \@-]), never on the command line where other local users could read
     it from the process table. *)
 
+type http_get = url:string -> token:string -> (response, string) result
+(** Injected transport for one GET. Production passes {!default_http_get}. *)
+
+val default_http_get : http_get
+(** curl through {!Process_eio}, the token on stdin as {!default_http_post}
+    sends it. *)
+
 (** {1 Reading} *)
 
 val default_github_host : string
@@ -272,3 +279,30 @@ val lane_addon_github :
     reader Keeper's token. The token never leaves this module. A reader that
     is not ready, an unregistered repository or a remote on another host is
     [Error]; so is an answer that {!refresh} would read as a failure. *)
+
+(** {1 REST reads} *)
+
+val rest_api_url : string
+(** [https://api.github.com]: the REST endpoint of {!default_github_host}. *)
+
+type rest_failure =
+  | Reader_not_ready of reader
+      (** The declared reader cannot be used and the state says why. It is
+          never [Reader_ready]. *)
+  | Reader_host_not_github of string
+      (** The declared reader reads this host, not {!default_github_host}.
+          The REST endpoint of another host is not derived from its GraphQL
+          one. *)
+  | Rest_transport_failed of string
+
+val rest_get :
+  http_get:http_get -> config:Workspace.config -> path:string -> (response, rest_failure) result
+(** One GET of [rest_api_url ^ path] with the token of the reader declared in
+    runtime.toml [\[repositories\] pr_reader]. The reader is resolved again on
+    every call, as {!refresh} does, and the token never leaves this module.
+    [path] starts with ['/'] and the caller built it from parts that cannot
+    change its shape. Any HTTP status is [Ok]: what a status means is the
+    caller's to read, for instance with {!failure_of_status}. *)
+
+val failure_of_status : now_s:float -> response -> failure option
+(** The failure an HTTP status stands for. [None] for a 2xx status. *)

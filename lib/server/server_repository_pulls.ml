@@ -162,25 +162,15 @@ let response_of_curl_output output =
             })
      | _ -> Error "curl status trailer is incomplete")
 
-let default_http_post ~url ~token ~body =
+(* One curl call. The token goes to curl on stdin ([-H @-]), never on the
+   command line where other local users could read it from the process table.
+   The [-H @-] option is written here, so no caller can leave it out; [options]
+   are the ones that differ between calls. *)
+let run_curl ~token ~url options =
   let argv =
-    [ "curl"
-    ; "-q"
-    ; "-sS"
-    ; "--max-time"
-    ; Int.to_string curl_timeout_sec
-    ; "-H"
-    ; "@-"
-    ; "-H"
-    ; "Content-Type: application/json"
-    ; "-H"
-    ; "Accept: application/json"
-    ; "--data-binary"
-    ; Yojson.Safe.to_string body
-    ; "-w"
-    ; curl_write_out
-    ; url
-    ]
+    [ "curl"; "-q"; "-sS"; "--max-time"; Int.to_string curl_timeout_sec; "-H"; "@-" ]
+    @ options
+    @ [ "-w"; curl_write_out; url ]
   in
   let status, stdout, stderr =
     Process_eio.run_argv_with_stdin_and_status_split
@@ -194,6 +184,23 @@ let default_http_post ~url ~token ~body =
     Error (Printf.sprintf "curl exit code %d: %s" code (String.trim stderr))
   | Unix.WSIGNALED signal -> Error (Printf.sprintf "curl killed by signal %d" signal)
   | Unix.WSTOPPED signal -> Error (Printf.sprintf "curl stopped by signal %d" signal)
+
+let default_http_post ~url ~token ~body =
+  run_curl
+    ~token
+    ~url
+    [ "-H"
+    ; "Content-Type: application/json"
+    ; "-H"
+    ; "Accept: application/json"
+    ; "--data-binary"
+    ; Yojson.Safe.to_string body
+    ]
+
+type http_get = url:string -> token:string -> (response, string) result
+
+let default_http_get ~url ~token =
+  run_curl ~token ~url [ "-H"; "Accept: application/vnd.github+json" ]
 
 (* --- Remote slug --- *)
 
@@ -1012,3 +1019,23 @@ let lane_addon_github ~now ~http_post ~(config : Workspace.config) : Lane_addon_
                      | Some _ | None -> Ok json)))
           in
           Ok { Lane_addon_records.owner; name; post }))
+
+(* --- REST reads --- *)
+
+let rest_api_url = "https://api.github.com"
+
+type rest_failure =
+  | Reader_not_ready of reader
+  | Reader_host_not_github of string
+  | Rest_transport_failed of string
+
+let rest_get ~http_get ~(config : Workspace.config) ~path =
+  match resolve_reader ~config with
+  | Error reader -> Error (Reader_not_ready reader)
+  | Ok { token; endpoint; keeper = _ } ->
+    if not (String.equal endpoint.github_host default_github_host)
+    then Error (Reader_host_not_github endpoint.github_host)
+    else (
+      match http_get ~url:(rest_api_url ^ path) ~token with
+      | Ok response -> Ok response
+      | Error message -> Error (Rest_transport_failed message))

@@ -35,6 +35,7 @@
   keeper_memory_os_successor_recall
   keeper_gate_types
   keeper_gate_projection
+  keeper_gate_authorization
   keeper_skill_activation_types
   keeper_skill_activation_summary
   keeper_board_attention_partition_types

@@ -501,7 +501,8 @@ let palette_matches (state : state) =
         (match code_search_current state with
          | Some (_, (Masc_tui_fetched.Ready search | Masc_tui_fetched.Stale (search, _))) ->
              List.map (fun (found : Masc.Tui_decode.workspace_search_match) ->
-               Printf.sprintf "%s:%d  %s" found.wsm_path found.wsm_line found.wsm_text,
+               Printf.sprintf "%s:%d  %s" found.wsm_path found.wsm_line
+                 (fst (Masc_tui_execute_terminal.expand_tabs ~column:0 found.wsm_text)),
                Palette_code_search_match found) search.Masc.Tui_decode.wss_matches
          | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
                     | Masc_tui_fetched.Failed _))

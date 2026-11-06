@@ -45,6 +45,7 @@ let report_editor_abort state ~action ?cancelled (abort : Masc_tui_editor.abort)
 module Code_results = Masc_tui_code_results
 module Context_results = Masc_tui_context_results
 module Fleet_results = Masc_tui_fleet_results
+module Original_results = Masc_tui_original_results
 module Approval = Masc_tui_operator_projection
 module Board_detail = Masc_tui_board_detail
 module Board_hearth = Masc_tui_board_hearth
@@ -1867,6 +1868,14 @@ let deliver_fleet state =
   fun mailbox answer ->
     match Fleet_results.answer_kind answer with
     | Fleet_results.Read -> enqueue mailbox (Fleet_msg answer)
+
+(* Every Original answer is wrapped in [Original_msg] here. Its reads go
+   through [launch_workspace_result], which stamps the answer with the
+   workspace it captured when the read started. That launcher stamps every
+   answer, so a kind that must go unstamped is not sent through it. *)
+let wrap_original answer =
+  match Original_results.answer_kind answer with
+  | Original_results.Read -> Original_msg answer
 
 let check_workspace_request ?schedule_form_action ?refresh_ticket
     ?(prior_contact = Masc_tui_server_lifecycle.Nothing_answered) state ~mailbox ~authority ~identity ~host ~port () =
@@ -11775,7 +11784,7 @@ let launch_original_task_read state ~mailbox =
         Masc_tui_http.fetch_original_task_inspection ~host ~port ~task_id) in
       launch_workspace_result ~key:request.tcr_job ~observation:true state ~mailbox
         ~boundary_error:(fun detail -> Masc_tui_original_task_read.Read_failed detail)
-        ~deliver:(fun result -> Original_msg (Original_task_read_done (request,result))) (fun () ->
+        ~deliver:(fun result -> wrap_original (Original_results.Original_task_read_done (request,result))) (fun () ->
           match read () with
           | Error detail -> Error (Masc_tui_original_task_read.Read_failed detail)
           | Ok result -> result)) (begin_original_task_inspection state)
@@ -11791,7 +11800,7 @@ let launch_original_history_read state ~mailbox ~earlier ~limit =
         Masc_tui_http.fetch_original_task_history ~host ~port ~request:page) in
       launch_workspace_result ~key:request.tcr_job ~observation:true state ~mailbox
         ~boundary_error:(fun detail -> Masc_tui_original_task_read.Read_failed detail)
-        ~deliver:(fun result -> Original_msg (Original_task_history_done (request,result))) (fun () ->
+        ~deliver:(fun result -> wrap_original (Original_results.Original_task_history_done (request,result))) (fun () ->
           read () |> Result.map_error (fun detail -> Masc_tui_original_task_read.Read_failed detail)))
     (begin_original_history_inspection state ~earlier ~limit)
 let original_evidence_failure = function
@@ -11812,7 +11821,7 @@ let launch_original_evidence_read state ~mailbox ~next =
         |> Result.map_error original_evidence_failure |> fun result -> Result.bind result Fun.id)) in
       launch_workspace_result ~key:request.tcr_job ~observation:true state ~mailbox
         ~boundary_error:(fun detail -> Masc_tui_original_task_read.Read_failed detail)
-        ~deliver:(fun result -> Original_msg (Original_task_evidence_done (request,result))) (fun () ->
+        ~deliver:(fun result -> wrap_original (Original_results.Original_task_evidence_done (request,result))) (fun () ->
           match read () with
           | Error detail -> Error (Masc_tui_original_task_read.Workspace_unconfirmed detail)
           | Ok result -> result)) (begin_original_evidence_inspection state ~next)
@@ -22572,6 +22581,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Fleet_msg answer ->
           (match Fleet_results.answer_kind answer with
            | Fleet_results.Read -> ())
+        | Original_msg answer ->
+          (match Original_results.answer_kind answer with
+           | Original_results.Read -> ())
         | Play_msg (Play_invite_issued (_, _, Play_answered (Error _))
         | Play_invite_issued (_, _, (Play_refused _ | Play_not_dispatched _ | Play_unanswered _)))
         | (Approvals_msg Approvals_listing_superseded) | (Keeper_msg Keeper_composer_released)
@@ -22653,7 +22665,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Account_msg (Account_login_event (_, _, _) | Account_login_json (_, _, _, _)
         | Account_login_removal (_, _, _, _, _)) | Github_msg (Github_login_lines (_, _)
         | Github_login_finished (_, _) | Github_token_saved (_, _)) | Observer_msg (Observer_session_ready _ | Observer_opened _
-        | Observer_received (_, _) | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_recovery_identity _) | Task_msg (Task_dispatch_completed _ | Task_creation_read_done _) | Original_msg (Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _) -> ())
+        | Observer_received (_, _) | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_recovery_identity _) | Task_msg (Task_dispatch_completed _ | Task_creation_read_done _) -> ())
   | Chat_command_read_completed (ticket, message) ->
       if List.exists (fun (pending, _, _) -> pending == ticket) state.chat_command_reads then begin
         state.chat_command_reads <- List.filter (fun (pending, _, _) -> pending != ticket) state.chat_command_reads;
@@ -23968,12 +23980,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          | Approvals | Planning | Schedules | Verification | Harness
          | Repositories | Code | Changes | Connectors | Runtime | Config
          | Resources | Tools | System_logs -> ())
-  | Original_msg (Original_task_history_done (request,result)) ->
-      ignore (complete_original_history_inspection state request result)
-  | Original_msg (Original_task_evidence_done (request,result)) ->
-      ignore (complete_original_evidence_inspection state request result)
-  | Original_msg (Original_task_read_done (request,result)) ->
-      ignore (complete_original_task_inspection state request result)
+  | Original_msg answer -> Original_results.apply state answer
   | Task_msg (Task_creation_read_done (request,result)) ->
       ignore (complete_task_creation_inspection state request result)
   | Task_msg (Task_dispatch_completed request) ->

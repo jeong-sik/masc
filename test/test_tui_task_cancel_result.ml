@@ -7,6 +7,7 @@ module Mcp = Masc.Mcp_server_eio
 module Wire = Masc_tui_mcp
 module Results = Masc_tui_workspace_result
 module Protocol = Masc_tui_async_protocol
+module Original_results = Masc_tui_original_results
 
 let () = Mirage_crypto_rng_unix.use_default ()
 let () = Masc.Workspace_metric_hooks.install ()
@@ -640,10 +641,10 @@ let launch_original_inspection results state config request =
   let envelope=Protocol.capture_workspace_message state in
   Results.launch ~key:request.tcr_job ~observation:true state ~results
     ~boundary_error:(fun detail -> Creation_read.Read_failed detail)
-    ~deliver:(fun result -> envelope (Protocol.Original_msg (Protocol.Original_task_read_done (request,result))))
+    ~deliver:(fun result -> envelope (Protocol.Original_msg (Original_results.Original_task_read_done (request,result))))
     (fun () -> actual_task_snapshot config request)
 let admit_original_inspection state = function
-  | Protocol.Workspace_scoped (authority,reading,(Protocol.Original_msg (Protocol.Original_task_read_done (request,result)) as message)) ->
+  | Protocol.Workspace_scoped (authority,reading,(Protocol.Original_msg (Original_results.Original_task_read_done (request,result)) as message)) ->
     if Protocol.workspace_message_admitted state ~authority ~reading message then
       complete_original_task_inspection state request result else false
   | _ -> fail "original Task observation lost its read scope"
@@ -794,10 +795,10 @@ let launch_history results state config request =
   let envelope=Protocol.capture_workspace_message state in
   Results.launch ~key:request.tcr_job ~observation:true state ~results
     ~boundary_error:(fun detail -> Creation_read.Read_failed detail)
-    ~deliver:(fun result -> envelope (Protocol.Original_msg (Protocol.Original_task_history_done (request,result))))
+    ~deliver:(fun result -> envelope (Protocol.Original_msg (Original_results.Original_task_history_done (request,result))))
     (fun () -> history_snapshot config request)
 let admit_history state = function
-  | Protocol.Workspace_scoped (authority,reading,(Protocol.Original_msg (Protocol.Original_task_history_done (request,result)) as message)) ->
+  | Protocol.Workspace_scoped (authority,reading,(Protocol.Original_msg (Original_results.Original_task_history_done (request,result)) as message)) ->
     if Protocol.workspace_message_admitted state ~authority ~reading message then complete_original_history_inspection state request result else false
   | _ -> fail "history response lost original read envelope"
 let rec read_history_prefix results state config original ~earlier =
@@ -827,10 +828,10 @@ let launch_evidence results state config request =
   let envelope=Protocol.capture_workspace_message state in
   Results.launch ~key:request.tcr_job ~observation:true state ~results
     ~boundary_error:(fun detail -> Creation_read.Read_failed detail)
-    ~deliver:(fun result -> envelope (Protocol.Original_msg (Protocol.Original_task_evidence_done (request,result))))
+    ~deliver:(fun result -> envelope (Protocol.Original_msg (Original_results.Original_task_evidence_done (request,result))))
     (fun () -> evidence_snapshot config request)
 let admit_evidence state = function
-  | Protocol.Workspace_scoped (authority,reading,(Protocol.Original_msg (Protocol.Original_task_evidence_done (request,result)) as message)) ->
+  | Protocol.Workspace_scoped (authority,reading,(Protocol.Original_msg (Original_results.Original_task_evidence_done (request,result)) as message)) ->
     if Protocol.workspace_message_admitted state ~authority ~reading message then complete_original_evidence_inspection state request result else false
   | _ -> fail "evidence response lost original read envelope"
 let check_submitted_note original expected = match Creation_read.evidence_observation original.tdr_inspection with

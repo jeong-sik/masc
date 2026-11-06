@@ -825,14 +825,6 @@ type observer_msg =
   | Observer_recovery_identity of workspace_authority * unit ref * bool ref * string * string
       * observer_recovery_origin * Sse_wire.observer_identity
 
-type original_msg =
-  | Original_task_read_done of Masc_tui_types.task_inspection_request
-      * (Masc_tui_original_task_read.task_snapshot, Masc_tui_original_task_read.error) result
-  | Original_task_history_done of Masc_tui_types.task_inspection_request
-      * (Masc_tui_original_task_read.history_snapshot, Masc_tui_original_task_read.error) result
-  | Original_task_evidence_done of Masc_tui_types.task_inspection_request
-      * (Masc_tui_original_task_read.evidence_snapshot, Masc_tui_original_task_read.error) result
-
 type async_msg =
   | Chat_msg of chat_msg
   | Workspace_scoped of workspace_authority * unit ref option * async_msg
@@ -929,7 +921,7 @@ type async_msg =
   | Account_msg of account_msg
   | Observer_msg of observer_msg
   | Fleet_msg of Masc_tui_fleet_results.msg
-  | Original_msg of original_msg
+  | Original_msg of Masc_tui_original_results.msg
 
 (* Every async result carries the instant it was ready, so the loop can say
    how long it sat in the mailbox. A result that arrived in a second and was

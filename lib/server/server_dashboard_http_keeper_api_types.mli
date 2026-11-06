@@ -177,9 +177,6 @@ val manifest_row_matches :
 val unique_present_paths : string option list -> string list
 (** Pure: dedupe + trim filtered string list. *)
 
-val take_last : int -> 'a list -> 'a list
-(** [take_last n xs] returns the last [n] elements of [xs]. *)
-
 val runtime_trace_public_json : Yojson.Safe.t -> Yojson.Safe.t
 (** Pure: recursively redact provider/model identity fields from runtime
     trace JSON before returning to external dashboards. *)

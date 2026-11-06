@@ -2,7 +2,7 @@
 
 PR #49099. The System ▸ Tools screen drew the selected skill, or the selected async request, twice in a row: the highlighted selection row, then a bold `Action Skill:` (or ` 요청:`) row under the divider that named the same thing. With nothing selected the two rows read `Skill: none` and `Action Skill: none`, and `Async request: none` sat over a sentence that said the same.
 
-Before is the proof build of `main` at `6ad837c7cac` (run 42154515127). After is the proof build of this PR's code commit `973425b7cd6` (run 42155231130); the evidence commit that carries this README comes after it and changes no code. Both ran against a fixture server that has no skill profile and no async request, so every screen below is the nothing-selected case. Each pane was read at 80x24 and 100x30. The first pane was read 12 seconds after the screen opened, after the workspace read that the title row shows as `reading workspace` had finished; each next pane was read 2 seconds after its `p` key.
+Before is the proof build of `main` at `6ad837c7cac` (run 42154515127). After is the proof build of this PR's code commit `973425b7cd6` (run 42155231130); the evidence commit that carries this README comes after it and changes no code. The parent of that code commit is `04aab98f33b`; 1 commit lies between it and the before build and changes nothing under `bin/`. Both ran against a fixture server that has no skill profile and no async request, so every screen below is the nothing-selected case. Each pane was read at 80x24 and 100x30. The first pane was read 12 seconds after the screen opened, after the workspace read that the title row shows as `reading workspace` had finished; each next pane was read 2 seconds after its `p` key.
 
 ## The rows on screen
 

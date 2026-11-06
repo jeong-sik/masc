@@ -30,6 +30,7 @@
   keeper_tool_composition_surface_outcome
   keeper_tool_composition_surface_async
   keeper_tool_composition_surface_resume
+  keeper_tool_composition_surface_tools
   keeper_tool_memory_validation
   keeper_tool_execution_journal_types
   keeper_tool_execution_journal_json

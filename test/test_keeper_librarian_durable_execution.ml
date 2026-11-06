@@ -1617,19 +1617,22 @@ let test_counterpart_only_provider_capacity_refusal_is_source_preserving () =
         ~after:1 ~through:1 ~atom:None ~official:None);
     check int "settling the refusal sends no model request" 1 (F.post_count fixture.server);
     no_memory fixture;
+    (* The durable state alone, readable while the Addon is detached. *)
+    let check_state () =
+      check int "a settled refusal sends no model request" 1 (F.post_count fixture.server);
+      check int "a settled refusal stays out of the retained originals" 0
+        (List.length (observed_originals fixture));
+      check bool "the settlement survives every wake" true
+        (Option.is_some (Progress.settlement (archived fixture ~date:(day_of rejected.request_id) rejected))) in
     let check_free () =
       (match run_worker fixture with
        | Ok Consumer.Nothing_to_read -> ()
        | Ok _ -> fail "a settled refusal must leave nothing to read"
        | Error error -> fail (Consumer.error_to_string error));
-      check int "a settled refusal sends no model request on any wake" 1 (F.post_count fixture.server);
-      check int "a settled refusal stays out of the retained originals" 0
-        (List.length (observed_originals fixture));
-      check bool "the settlement survives every wake" true
-        (Option.is_some (Progress.settlement (archived fixture ~date:(day_of rejected.request_id) rejected))) in
+      check_state () in
     check_free ();
     Consumer.For_testing.reset_process_state ();
-    restart_actual_worker ~while_off:check_free fixture ~sw;
+    restart_actual_worker ~while_off:check_state fixture ~sw;
     check_free ();
     let appended="Counterpart appended after the refusal" in
     Keeper_chat_store.append_user_message ~base_dir:fixture.base_path ~keeper_name
@@ -1772,15 +1775,18 @@ let test_refusal_does_not_accept_a_different_equal_chat_row () =
       (Option.is_some (Progress.settlement (archived fixture ~date:(day_of rejected.request_id) rejected)));
     replace_actual_worker_configuration fixture ~sw (fixture.declaration true);
     let calls=F.post_count fixture.server in
+    (* While the Addon is detached no wake can run; only the durable state is readable. *)
+    let check_state () =
+      check int "the settled destination dispatches nothing" calls (F.post_count fixture.server) in
     let check_free () =
       (match run_worker fixture with
        | Ok Consumer.Nothing_to_read -> ()
        | Ok _ -> fail "returning to a settled destination must leave nothing to read"
        | Error error -> fail (Consumer.error_to_string error));
-      check int "the settled destination dispatches nothing" calls (F.post_count fixture.server) in
+      check_state () in
     check_free ();
     Consumer.For_testing.reset_process_state ();
-    restart_actual_worker ~while_off:check_free fixture ~sw;
+    restart_actual_worker ~while_off:check_state fixture ~sw;
     check_free ())
 
 let test_purge_joins_unknown_then_worker_restart_does_not_resubmit history_kind () =

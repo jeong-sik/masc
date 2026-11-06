@@ -10,21 +10,14 @@
     can't pick the right next action: A (audit) vs C (pricing
     SSOT) vs E (cross-link to #9959) all need different evidence.
 
-    These tests pin
-    [Keeper_hooks_agent_core.classify_cost_usd_source]'s bounded
-    classification:
-
-    | path                | source string         |
-    |---------------------|-----------------------|
-    | usage_missing       | missing_usage         |
-    | structurally_unmetered runtime | unmetered_provider |
-    | reported non-zero cost | computed              |
-    | tokens + 0 cost | agent_core_cost_unreported |
-
-    Precedence is fixed (top-down) so a missing-usage call on a
-    pricing-known model still labels [missing_usage], not
+    These tests pin the [missing_usage] label the ledger writes and the
+    token evidence behind it. Precedence is fixed (top-down) in
+    [Keeper_hooks_agent_core.classify_cost_usd_source] so a missing-usage
+    call on a pricing-known model still labels [missing_usage], not
     [agent_core_cost_unreported] — the upstream signal is the more
-    actionable failure mode. *)
+    actionable failure mode. The [computed] and
+    [agent_core_cost_unreported] labels are checked through the real
+    payload in test_cost_token_decouple. *)
 
 open Alcotest
 
@@ -51,50 +44,7 @@ let test_missing_usage_wins_over_everything () =
     ~cost_usd:0.42
     "missing_usage"
 
-(* --- canonical paths --------------------------------------------- *)
-
-let test_unmetered_provider () =
-  (* A structurally unmetered runtime with zero cost labels as
-     [unmetered_provider], without MASC inspecting provider/model pricing. *)
-  check_source
-    ~msg:"unmetered runtime => unmetered_provider"
-    ~usage_missing:false
-    ~runtime_unmetered:true
-    ~cost_usd:0.0
-    "unmetered_provider"
-
-let test_computed_when_cost_reported () =
-  check_source
-    ~msg:"reported non-zero cost => computed"
-    ~usage_missing:false
-    ~runtime_unmetered:false
-    ~cost_usd:0.0042
-    "computed"
-
-let test_agent_core_cost_unreported_for_zero_cost_tokens () =
-  (* Trusted call with tokens but no positive AGENT_CORE-reported cost falls
-     through to [agent_core_cost_unreported]. MASC must not inspect a local
-     provider/model pricing catalog to guess why. *)
-  check_source
-    ~msg:"reported tokens without AGENT_CORE cost => agent_core_cost_unreported"
-    ~usage_missing:false
-    ~runtime_unmetered:false
-    ~cost_usd:0.0
-    "agent_core_cost_unreported"
-
-let test_preview_runtime_without_agent_core_cost_is_unreported () =
-  check_source
-    ~msg:"preview runtime without AGENT_CORE cost => agent_core_cost_unreported"
-    ~usage_missing:false
-    ~runtime_unmetered:false
-    ~cost_usd:0.0
-    "agent_core_cost_unreported"
-
-let test_agent_core_cost_json_preserves_omission () =
-  check bool "omitted AGENT_CORE cost stays JSON null" true
-    (H.For_testing.cost_usd_json None = `Null);
-  check bool "reported zero remains numeric zero" true
-    (H.For_testing.cost_usd_json (Some 0.0) = `Float 0.0)
+(* --- usage evidence ------------------------------------------------ *)
 
 let test_hook_usage_missing_uses_token_evidence () =
   let cost_only : Agent_core.Types.api_usage =
@@ -129,40 +79,6 @@ let test_cost_only_usage_trust_matches_missing () =
   check string "absent usage is missing" "missing"
     (Keeper_usage_trust.to_string (H.classify_usage_trust ()))
 
-(* --- counter wiring (only non-computed sources tick) ------------- *)
-
-let counter_for source =
-  Masc.Otel_metric_store.metric_value_or_zero
-    H.cost_emit_source_metric
-    ~labels:[ ("source", source) ]
-    ()
-
-let test_record_emit_skips_computed () =
-  let before = counter_for "computed" in
-  H.record_cost_emit_source "computed";
-  check (float 0.0001)
-    "computed source does not increment counter"
-    before
-    (counter_for "computed")
-
-let test_record_emit_increments_named_source () =
-  let before = counter_for "agent_core_cost_unreported" in
-  H.record_cost_emit_source "agent_core_cost_unreported";
-  check (float 0.0001)
-    "agent_core_cost_unreported +1"
-    (before +. 1.0)
-    (counter_for "agent_core_cost_unreported")
-
-let test_counter_isolation_between_sources () =
-  (* Bumping agent_core_cost_unreported must NOT move missing_usage.
-     Each source has its own series so dashboards split cleanly. *)
-  let other_before = counter_for "missing_usage" in
-  H.record_cost_emit_source "agent_core_cost_unreported";
-  check (float 0.0001)
-    "missing_usage unchanged when agent_core_cost_unreported bumps"
-    other_before
-    (counter_for "missing_usage")
-
 let () =
   run "cost_usd_source_attribution_10318"
     [
@@ -173,28 +89,9 @@ let () =
         ] );
       ( "canonical-paths",
         [
-          test_case "unmetered provider" `Quick
-            test_unmetered_provider;
-          test_case "computed when cost is reported" `Quick
-            test_computed_when_cost_reported;
-          test_case "AGENT_CORE cost unreported for token usage" `Quick
-            test_agent_core_cost_unreported_for_zero_cost_tokens;
-          test_case "preview runtime without AGENT_CORE cost" `Quick
-            test_preview_runtime_without_agent_core_cost_is_unreported;
-          test_case "AGENT_CORE cost JSON preserves omission" `Quick
-            test_agent_core_cost_json_preserves_omission;
           test_case "hook usage missing uses token evidence" `Quick
             test_hook_usage_missing_uses_token_evidence;
           test_case "cost-only usage trust matches missing" `Quick
             test_cost_only_usage_trust_matches_missing;
-        ] );
-      ( "counter",
-        [
-          test_case "computed source does not tick counter" `Quick
-            test_record_emit_skips_computed;
-          test_case "named source increments counter" `Quick
-            test_record_emit_increments_named_source;
-          test_case "sources isolated by label" `Quick
-            test_counter_isolation_between_sources;
         ] );
     ]

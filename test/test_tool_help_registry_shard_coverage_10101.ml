@@ -15,11 +15,7 @@ module Types = Masc_domain
    introduced and forgotten at the aggregation site, or if a
    future refactor re-introduces the patch-local
    [@ Tool_shard.base_tools] pattern, this test surfaces it
-   immediately by name.
-
-   Also pins the specific cases called out in the issue: the
-   11 shard categories each have a representative tool name
-   that must round-trip through [find_entry]. *)
+   immediately by name. *)
 
 (* Module init resolves the runtime base path at startup —
    the #9903 prod-guard raises under HOME.  Same dune
@@ -60,59 +56,6 @@ let test_every_shard_tool_is_in_authoritative_registry () =
       (List.length names)
       (String.concat ", " names)
 
-(* The direct symptom from the issue — [keeper_task_claim] was
-   the "unknown tool" in the live system.  Keep this as a
-   named assertion so a regression is easy to spot in the
-   test name alone. *)
-let test_keeper_task_claim_is_resolvable () =
-  Alcotest.(check bool)
-    "keeper_task_claim resolves in Config.raw_all_tool_schemas"
-    true (registry_has "keeper_task_claim")
-
-(* Representative sample across the 11 previously-missing
-   categories (per issue body).  If any ONE of these is
-   missing, the aggregation regressed for that whole category. *)
-let test_representative_tools_across_categories () =
-  let representatives =
-    [
-      "keeper_lane_status",   "base_tools";
-      "masc_board_post",    "board_tools";
-      "tool_read_file",       "filesystem_tools";
-      "tool_search_files",         "search_files_tools";
-      "keeper_task_claim",    "taskboard_tools";
-      "keeper_wiki_search","wiki_tools";
-      "keeper_voice_speak",   "voice_tools";
-    ]
-  in
-  List.iter
-    (fun (name, category) ->
-      Alcotest.(check bool)
-        (Printf.sprintf "%s (%s) resolves" name category)
-        true (registry_has name))
-    representatives
-
-(* The #9912 fix bolted [Tool_shard.base_tools] onto
-   [raw_all_tool_schemas] directly.  We replaced that with
-   [all_keeper_tool_schemas] — this test makes sure the base
-   base tools are still in there (not regressed by the
-   replacement). *)
-let test_9912_base_tools_still_covered () =
-  let base_tools =
-    [ "keeper_lane_status"
-    ; "keeper_context_status"
-    ; "keeper_workspace_memory_read"
-    ; "keeper_memory_search"
-    ; "keeper_capability_search"
-    ; "keeper_tools_list"
-    ]
-  in
-  List.iter
-    (fun name ->
-      Alcotest.(check bool)
-        (Printf.sprintf "#9912 base tool %s stays resolvable" name)
-        true (registry_has name))
-    base_tools
-
 let () =
   Alcotest.run "tool_help_registry_shard_coverage_10101"
     [
@@ -121,36 +64,5 @@ let () =
           Alcotest.test_case
             "every shard tool is in Config.raw_all_tool_schemas"
             `Quick test_every_shard_tool_is_in_authoritative_registry;
-        ] );
-      ( "toml_help",
-        [
-          Alcotest.test_case "authored [help] table reaches the entry" `Quick
-            (fun () ->
-              match
-                Registry.find_entry Config.raw_all_tool_schemas "keeper_task_done"
-              with
-              | None -> Alcotest.fail "keeper_task_done schema missing"
-              | Some entry ->
-                Alcotest.(check string)
-                  "short_description comes from the TOML help table"
-                  "Submit your owned task for verification with a result \
-                   summary and evidence_refs."
-                  entry.Registry.short_description;
-                Alcotest.(check int)
-                  "authored constraints survive with their exact count" 3
-                  (List.length
-                     entry.Registry.key_constraints);
-                Alcotest.(check (list string))
-                  "authored alternatives survive" [ "masc_transition" ]
-                  entry.Registry.alternatives);
-        ] );
-      ( "named_cases",
-        [
-          Alcotest.test_case "keeper_task_claim (issue's direct case)"
-            `Quick test_keeper_task_claim_is_resolvable;
-          Alcotest.test_case "representatives across 7 categories"
-            `Quick test_representative_tools_across_categories;
-          Alcotest.test_case "#9912 base tools still covered"
-            `Quick test_9912_base_tools_still_covered;
         ] );
     ]

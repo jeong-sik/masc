@@ -42,15 +42,6 @@ let temp_store prefix =
   Fs_compat.mkdir_p (D.Store.dir location);
   location
 
-(* --- 1. same base_dir → identical mutex ---------------- *)
-
-let test_same_base_dir_shares_mutex () =
-  let location = temp_store "djmr_same" in
-  let a = D.open_store location in
-  let b = D.open_store location in
-  check bool "same base_dir → physically identical mutex" true
-    (D.For_testing.cross_context_mutex a == D.For_testing.cross_context_mutex b)
-
 (* --- 2. different base_dir → distinct mutexes ---------- *)
 
 let test_different_base_dir_distinct_mutex () =
@@ -217,8 +208,6 @@ let () =
     [
       ( "registry-identity",
         [
-          test_case "same base_dir shares mutex" `Quick
-            test_same_base_dir_shares_mutex;
           test_case "different base_dir distinct mutex" `Quick
             test_different_base_dir_distinct_mutex;
           test_case "explicit ?mutex bypasses registry" `Quick

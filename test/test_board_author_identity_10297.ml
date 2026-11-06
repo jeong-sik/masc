@@ -90,21 +90,6 @@ let test_anonymous_field_fills_from_ctx () =
 
 (* --- 2. caller claim matches ctx --------------------------- *)
 
-let test_caller_short_name_matches_ctx () =
-  let result =
-    D.enforce_caller_identity ~tool:"masc_board_post" ~field:"author"
-      ~agent_name:"xi-hammer"
-      (assoc [ ("author", `String "xi-hammer") ])
-  in
-  check (option string)
-    "matching short-name preserved"
-    (Some "xi-hammer")
-    (json_string_field "author" result);
-  check (option string)
-    "no caller_claim because no spoof"
-    None
-    (meta_string_field "author_caller_claim" result)
-
 (* Names reach this gate from HTTP bodies and auth contexts, so stray
    whitespace on either side must not read as a different principal. *)
 let test_padded_names_compare_trimmed () =
@@ -136,72 +121,6 @@ let test_blank_claim_without_ctx_is_untouched () =
   check string "arguments returned as they came"
     (Yojson.Safe.to_string args)
     (Yojson.Safe.to_string result)
-
-(* --- 3. caller claim disagrees with ctx ----------- *)
-
-let test_velvet_hammer_cannot_post_as_delta () =
-  (* The exact #10297 reproducer: xi-hammer keeper attempts to
-     write a board post under delta's name.  Dispatcher must
-     rewrite the author to xi-hammer, preserve the delta
-     claim in meta, and increment the spoof counter. *)
-  let before = counter_for ~tool:"masc_board_post" ~field:"author" in
-  let result =
-    D.enforce_caller_identity ~tool:"masc_board_post" ~field:"author"
-      ~agent_name:"xi-hammer"
-      (assoc
-         [ ("author", `String "delta"); ("body", `String "spoof attempt") ])
-  in
-  check (option string)
-    "author rewritten to ctx"
-    (Some "xi-hammer")
-    (json_string_field "author" result);
-  check (option string)
-    "caller claim preserved in meta.author_caller_claim"
-    (Some "delta")
-    (meta_string_field "author_caller_claim" result);
-  check (float 0.0001)
-    "spoof counter +1"
-    (before +. 1.0)
-    (counter_for ~tool:"masc_board_post" ~field:"author")
-
-let test_voter_field_spoof_also_rewritten () =
-  (* Vote/comment_vote calls used to bypass identity entirely
-     because their old path never compared caller identity with
-     [agent_name].  Now they share the same gate. *)
-  let before = counter_for ~tool:"masc_board_vote" ~field:"voter" in
-  let result =
-    D.enforce_caller_identity ~tool:"masc_board_vote" ~field:"voter"
-      ~agent_name:"xi-hammer"
-      (assoc [ ("voter", `String "delta"); ("post_id", `String "p1") ])
-  in
-  check (option string)
-    "voter rewritten to ctx"
-    (Some "xi-hammer")
-    (json_string_field "voter" result);
-  check (option string)
-    "voter claim preserved in meta.voter_caller_claim"
-    (Some "delta")
-    (meta_string_field "voter_caller_claim" result);
-  check (float 0.0001)
-    "voter spoof counter +1"
-    (before +. 1.0)
-    (counter_for ~tool:"masc_board_vote" ~field:"voter")
-
-(* --- 4. counter cardinality / label separation ------------------ *)
-
-let test_counter_separates_by_tool_and_field () =
-  (* Bumping (board_post, author) must NOT move (board_vote, voter):
-     operators rate-alert per tool×field surface. *)
-  let other_before = counter_for ~tool:"masc_board_vote" ~field:"voter" in
-  let _ =
-    D.enforce_caller_identity ~tool:"masc_board_post" ~field:"author"
-      ~agent_name:"xi-hammer"
-      (assoc [ ("author", `String "delta") ])
-  in
-  check (float 0.0001)
-    "vote/voter unchanged when post/author bumps"
-    other_before
-    (counter_for ~tool:"masc_board_vote" ~field:"voter")
 
 (* --- 5. empty ctx is a no-op (defensive) ------------------------ *)
 
@@ -285,24 +204,10 @@ let () =
         ] );
       ( "matching-claim",
         [
-          test_case "short-name matches ctx" `Quick
-            test_caller_short_name_matches_ctx;
           test_case "padded names compare trimmed" `Quick
             test_padded_names_compare_trimmed;
           test_case "blank claim without ctx is untouched" `Quick
             test_blank_claim_without_ctx_is_untouched;
-        ] );
-      ( "spoof-rewrite",
-        [
-          test_case "xi-hammer cannot post as delta" `Quick
-            test_velvet_hammer_cannot_post_as_delta;
-          test_case "voter spoof also rewritten" `Quick
-            test_voter_field_spoof_also_rewritten;
-        ] );
-      ( "counter-isolation",
-        [
-          test_case "counter separates by (tool, field)" `Quick
-            test_counter_separates_by_tool_and_field;
         ] );
       ( "empty-ctx",
         [

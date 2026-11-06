@@ -121,7 +121,9 @@ val classify_keeper_post_route : string -> keeper_post_route_kind
 
 val extract_keeper_name_for_suffix : string -> string -> string
 (** [extract_keeper_name_for_suffix path suffix] returns the keeper name
-    from a path of shape [/api/v1/keepers/<name>/<suffix>]. *)
+    from a path of shape [/api/v1/keepers/<name>/<suffix>]. A path of any
+    other shape, including one with no name segment between the prefix and
+    [suffix], or an invalid name gives [""]. It does not raise. *)
 
 val extract_keeper_name_for_post : string -> string -> string
 (** [extract_keeper_name_for_post path suffix]: the POST dispatcher's

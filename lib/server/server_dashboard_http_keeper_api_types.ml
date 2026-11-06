@@ -184,14 +184,20 @@ let keeper_path_ends_with req_path suffix =
 
 let is_valid_keeper_name = Keeper_config.validate_name
 
+(* The shape is checked here, not left to the caller: a path where the
+   prefix and the suffix overlap, such as [/api/v1/keepers/github-identity],
+   has no name segment, and [String.sub] on it would raise. *)
 let extract_keeper_name_for_suffix req_path suffix =
-  let plen = String.length keeper_api_prefix in
-  let slen = String.length suffix in
-  let raw =
-    String.trim
-      (String.sub req_path plen (String.length req_path - plen - slen))
-  in
-  if is_valid_keeper_name raw then raw else ""
+  if not (keeper_path_ends_with req_path suffix)
+  then ""
+  else (
+    let plen = String.length keeper_api_prefix in
+    let slen = String.length suffix in
+    let raw =
+      String.trim
+        (String.sub req_path plen (String.length req_path - plen - slen))
+    in
+    if is_valid_keeper_name raw then raw else "")
 
 (* The POST dispatcher's spelling. One grammar, so one body: a second
    definition is a rule that can drift on one side, and a test of the pair can

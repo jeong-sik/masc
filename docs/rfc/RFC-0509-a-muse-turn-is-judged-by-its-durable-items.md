@@ -28,6 +28,12 @@ implementation_prs: []
 `<base>/.masc/logs/system_log_*.jsonl` 8일치(10-30~11-06)에서 셌다.
 `keeper cycle FAILED` 줄 중 `runtime=muse` 이고 `observation_unavailable` 인 줄이다.
 
+```sh
+cd <base>/.masc/logs
+LC_ALL=C rg -N -F 'keeper cycle FAILED' system_log_2026-1*.jsonl \
+  | LC_ALL=C rg -F 'observation_unavailable' | LC_ALL=C rg -F 'runtime=muse' | wc -l
+```
+
 | 날짜 | cycle |
 |---|---:|
 | 10-30 | 83 |
@@ -76,8 +82,10 @@ implementation_prs: []
 
 셋 다 맞다. 셋 다 "턴 안에서 무엇이 시작됐는지 모른다"는 말이다.
 턴의 durable 기록을 읽으면 그것을 안다.
-완료된 턴은 이미 그 기록을 읽는다(`read_durable_turn`, 1152행). 답 글을 증명하려고 읽는다.
-실패한 턴은 읽지 않는다(1433~1434행).
+완료된 턴은 이미 그 기록을 읽는다. 답 글을 증명하려고 읽는다.
+`lib/runtime/runtime_muse_serve.ml` 1152행 `read_durable_turn` 이다.
+실패한 턴은 읽지 않는다.
+같은 파일 1408~1436행의 match 가 `Terminal_completed` 에서만 `read_durable_turn` 을 부른다.
 
 ## 3. MSP 가 보장하는 것
 
@@ -92,7 +100,11 @@ implementation_prs: []
   - `userShell`, 세션 경계의 `hookRun`, `monitorFeed`, `sideChat`, `damagedRange`, `earlierHistory` 다.
   - MASC 가 보내는 요청은 `initialize`, `session/start`, `session/resume`, `session/setModel`, `session/setApprovalMode`, `turn/start`, `approval/decide`, `model/list`, `usage/read`, `view/page` 뿐이다. `session/userShell`, `session/sideChat` 은 보내지 않는다.
   - 세션 경계 hook 은 `turn/start` 앞에서 돈다. 그 구간의 판정은 이 RFC가 바꾸지 않는다(§5).
+  - 이 종류의 event 가 읽은 범위 안에 끼어 있어도 이 턴의 항목이 아니다. 그래서 `turnId` 로 거르면 빠진다.
 - `view/page` 는 durable 기록만 돌려준다. 페이지는 이어져 있어 cursor 를 건너뛰지 않는다(`ViewPageResult`, 3879행).
+- 바깥에 남길 수 있는 항목은 열릴 때부터 durable 이다(item id 규칙, 1134행).
+  - 열릴 때 durable 이 아닌 종류는 `agentMessage`·`reasoning` 둘뿐이다.
+  - 이 둘은 `item/completed` 가 없으면 durable 범위에 없다.
 - `view/gap` 은 다른 알림과의 순서를 약속하지 않는다(3839행). terminal 뒤에 올 수 있다.
   그래서 live 로 받은 항목만으로는 판정하지 않는다.
 
@@ -110,8 +122,11 @@ terminal cursor 에서 거꾸로 이 턴의 `turn/started` 까지 `view/page` �
 | `reasoning` | 모델 안의 추론이다. 바깥에 남는 것이 없다. |
 | 나머지 모든 종류(MASC 가 모르는 종류 포함) | 바깥에 무엇인가 남겼을 수 있다. |
 
-- 이 턴의 항목이 `userMessage`·`reasoning` 뿐이면 그 턴은 조용했다.
+- 이 턴의 항목이 `userMessage`·`reasoning` 뿐이고, 아래 live 조건도 맞으면 그 턴은 조용했다.
   시도의 판정은 `No_effect_observed` 로 남는다.
+- live 조건: 이 턴에서 `agentMessage` 항목이 열리거나 그 글 조각이 온 적이 없다.
+  - 스트리밍되다 끊긴 답 글은 `item/completed` 가 없어 durable 범위에 없다. live 로만 보인다.
+  - live 관측은 조용함을 거부할 때만 쓴다. 조용함을 증명하는 데는 쓰지 않는다.
 - 다른 종류가 하나라도 있으면 `Observation_unavailable` 이다.
 - 읽기가 실패하면 `Observation_unavailable` 이다.
   - 오류 응답, 시간 초과, 다른 세션의 event, 시작 경계를 못 찾음이 모두 여기에 든다.
@@ -153,6 +168,8 @@ PR 하나로 한다. 두 모듈의 타입이 같이 바뀐다.
   - 사용자 입력과 추론 뒤 한도 거절이 오면 `No_effect_observed` 다.
   - `toolCall` 항목 뒤 한도 거절이 오면 `Observation_unavailable` 이다.
   - durable 읽기가 실패하면 `Observation_unavailable` 이다.
+  - durable 범위에 완료된 `agentMessage` 가 있으면 `Observation_unavailable` 이다.
+  - live 로 답 글 조각이 온 뒤 그 글이 완료되지 않은 채 한도 거절이 오면 `Observation_unavailable` 이다.
 
 ## 7. 완료 판정
 

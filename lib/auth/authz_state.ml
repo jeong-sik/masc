@@ -3,11 +3,16 @@
 module K = Authz_record.Kind
 module R = Authz_record
 
+type held =
+  { aborted : R.Hash.t
+  ; subject : Authz_records.Subject.t
+  }
+
 type t =
   { mode : Authz_mode_state.t
   ; invites : Authz_invite_state.t
   ; principals : Authz_principal_state.t
-  ; revocation_pending : Authz_records.Subject.t list
+  ; revocation_pending : held list
   ; latest_at_ms : int option
   }
 
@@ -19,14 +24,25 @@ let empty =
   ; latest_at_ms = None
   }
 
-let is_pending state subject = List.exists (Authz_records.Subject.equal subject) state.revocation_pending
+let is_pending state subject =
+  List.exists (fun held -> Authz_records.Subject.equal subject held.subject) state.revocation_pending
+;;
 
-let hold_revocations state subjects =
+let revocation state subject =
+  if is_pending state subject
+  then Authz_records.Revocation_state.Pending
+  else Authz_records.Revocation_state.Not_pending
+;;
+
+let hold_revocations state helds =
   let revocation_pending =
     List.fold_left
-      (fun held subject -> if List.exists (Authz_records.Subject.equal subject) held then held else subject :: held)
+      (fun pending held ->
+        if List.exists (fun other -> R.Hash.equal other.aborted held.aborted) pending
+        then pending
+        else held :: pending)
       state.revocation_pending
-      subjects
+      helds
   in
   { state with revocation_pending }
 ;;

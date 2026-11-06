@@ -8,9 +8,11 @@ module S = Authz_external_store
 
 let ( let* ) = Result.bind
 
-let reduction_subject (intent : S.intent) =
+(* The block of a reduction, named by the record the intent was for. *)
+let reduction_held (intent : S.intent) =
   match intent.S.change with
-  | S.Change.Authz { subject; event = _ } when S.Change.is_reduction intent.S.change -> Some subject
+  | S.Change.Authz { subject; event = _ } when S.Change.is_reduction intent.S.change ->
+    Some { Authz_state.aborted = intent.S.intended_next_record_digest; subject }
   | S.Change.Authz _ | S.Change.Mode _ -> None
 ;;
 
@@ -18,17 +20,17 @@ let reduction_subject (intent : S.intent) =
    the next record (design 8.3). The intent began where the log ended, so the
    block starts after the record at [previous_record_hash]. *)
 let reduction_hold (intent : S.intent) =
-  Option.map (fun subject -> intent.S.previous_record_hash, subject) (reduction_subject intent)
+  Option.map (fun held -> intent.S.previous_record_hash, held) (reduction_held intent)
 ;;
 
-let held_subjects holds = List.map snd holds
+let helds holds = List.map snd holds
 
 module Replay = struct
   type t =
     { state : Authz_state.t
     ; probe : H.Probe.t
     ; head : R.head
-    ; unreached : (R.Hash.t * Authz_records.Subject.t) list
+    ; unreached : (R.Hash.t * Authz_state.held) list
     }
 
   (* The blocks of the reductions whose intent began at this head. *)
@@ -36,7 +38,7 @@ module Replay = struct
     let here, unreached =
       List.partition (fun (hash, _) -> R.Hash.equal hash (R.head_hash replay.head)) replay.unreached
     in
-    { replay with state = Authz_state.hold_revocations replay.state (held_subjects here); unreached }
+    { replay with state = Authz_state.hold_revocations replay.state (helds here); unreached }
   ;;
 
   let init store =
@@ -58,7 +60,7 @@ module Replay = struct
   (* A log that no longer reaches the head of a reduction still had it given up. *)
   let finish replay =
     { replay with
-      state = Authz_state.hold_revocations replay.state (held_subjects replay.unreached)
+      state = Authz_state.hold_revocations replay.state (helds replay.unreached)
     ; unreached = []
     }
   ;;
@@ -127,6 +129,21 @@ let open_at_start ~now_ms ~log_path ~store_path =
 ;;
 
 let snapshot t = Atomic.get t.current
+
+type revocation =
+  | Known of Authz_records.Revocation_state.t
+  | Unknown_log_stopped of L.stop
+  | Unknown_store_stopped of S.stop
+
+(* A stopped file is not in the published state (plan B3b), and a zone that
+   cannot write cannot close or add a block either, so the gate asks the files
+   first. *)
+let revocation t subject =
+  match L.stopped t.log, S.stopped t.store with
+  | Some stop, (_ : S.stop option) -> Unknown_log_stopped stop
+  | None, Some stop -> Unknown_store_stopped stop
+  | None, None -> Known (Authz_state.revocation (Atomic.get t.current).state subject)
+;;
 
 type draft =
   { author : Authz_records.Author.t
@@ -269,7 +286,7 @@ let in_zone t draft store_writer log_writer head settlement =
   let base =
     match settlement with
     | H.Abort intent ->
-      Authz_state.hold_revocations published.state (Option.to_list (reduction_subject intent))
+      Authz_state.hold_revocations published.state (Option.to_list (reduction_held intent))
     | H.Nothing_to_settle | H.Promote (_ : S.intent) -> published.state
   in
   (* The clock is read inside both locks, so no other commit writes between the
@@ -294,21 +311,34 @@ let in_zone t draft store_writer log_writer head settlement =
   Atomic.set t.current { published with state = base };
   let* () = write_settlement t store_writer settlement in
   let record_hash = record.R.hash in
+  let intent =
+    Option.map
+      (fun change ->
+        { S.previous_record_hash = R.head_hash head; intended_next_record_digest = record_hash; change })
+      high_water
+  in
   let* () =
-    match high_water with
+    match intent with
     | None -> Ok ()
-    | Some change ->
-      let intent =
-        { S.previous_record_hash = R.head_hash head
-        ; intended_next_record_digest = record_hash
-        ; change
-        }
-      in
+    | Some intent ->
       write_entry t store_writer (S.Intent_pending intent) ~not_written:(fun error ->
         Intent_not_written error)
   in
   let* head =
-    Result.map_error (fun error -> Record_not_appended error) (L.append log_writer [ record ])
+    match L.append log_writer [ record ] with
+    | Ok head -> Ok head
+    | Error error ->
+      (* The intent is in the store and the append failed, so the next entry
+         gives the intent up (design 8.2-3), and the block of a reduction
+         stands from now (design 8.3), not from that entry: a gate that reads
+         the published state in between must not find the subject clear. If
+         the failed append left the record in the log, the log is stopped and
+         the gate answers that it does not know. *)
+      Option.iter
+        (fun held ->
+          Atomic.set t.current { published with state = Authz_state.hold_revocations base [ held ] })
+        (Option.bind intent reduction_held);
+      Error (Record_not_appended error)
   in
   t.probe <- H.Probe.add t.probe record;
   let snapshot = { state; head } in

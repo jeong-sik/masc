@@ -32,14 +32,23 @@
     before the bootstrap, and the workspace of the bootstrap reaches a layer
     only from a branch that has one. *)
 
+(** A reduction that the external store gave up (design 8.3). Its subject
+    stays blocked until a record names [aborted]; the zone holds one per
+    given-up intent, so two reductions of one subject are closed apart. *)
+type held =
+  { aborted : Authz_record.Hash.t
+        (** The [intended_next_record_digest] of the intent given up. *)
+  ; subject : Authz_records.Subject.t
+  }
+
 type t = private
   { mode : Authz_mode_state.t
   ; invites : Authz_invite_state.t  (** Plan B3c-1. *)
   ; principals : Authz_principal_state.t  (** Plan B3c-2. *)
-  ; revocation_pending : Authz_records.Subject.t list
-        (** The subjects of reductions whose intent the external store gave up
-            (design 8.3). No record adds one: the writer zone does, from the
-            store ({!hold_revocations}). *)
+  ; revocation_pending : held list
+        (** The reductions whose intent the external store gave up (design
+            8.3). No record adds one: the writer zone does, from the store
+            ({!hold_revocations}). *)
   ; latest_at_ms : int option
         (** The latest [at_ms] of the records read. [None] before the first. *)
   }
@@ -51,8 +60,13 @@ val empty : t
     Design 8.3 blocks such a subject at the gate, without a record, until a
     record that names the aborted intent closes it. No layer writes that record
     yet, so a subject stays blocked. A revoked invitation that is blocked cannot
-    be spent, which is what its revocation was for. *)
-val hold_revocations : t -> Authz_records.Subject.t list -> t
+    be spent, which is what its revocation was for. A reduction already held
+    is held once. *)
+val hold_revocations : t -> held list -> t
+
+(** [Pending] while a reduction of [subject] is held (design 8.3,
+    [revocation_pending(subject)]). *)
+val revocation : t -> Authz_records.Subject.t -> Authz_records.Revocation_state.t
 
 type refusal =
   | Before_bootstrap of Authz_record.Kind.t

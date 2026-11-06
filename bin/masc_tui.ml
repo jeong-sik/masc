@@ -8533,9 +8533,6 @@ let owe_goal_projection_reads state =
   owe_pushed_read state Surface_read_source.Planning;
   owe_pushed_read state Surface_read_source.Overview_goals
 
-let owe_overview_read state =
-  state.overview_owed <- Masc_tui_owed_read.changed state.overview_owed
-
 let owe_runtime_surface_read state =
   state.runtime_surface_owed <- Masc_tui_owed_read.changed state.runtime_surface_owed
 
@@ -9716,17 +9713,6 @@ let launch_owed_harness state ~mailbox =
     if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
       launch_harness_load state ~mailbox
   end
-
-(* Runs on every loop iteration. Every surface draws the line. A read already
-   in flight is let finish first. *)
-let launch_owed_overview state ~mailbox =
-  let read =
-    if state.overview_inflight then state.overview_owed
-    else Masc_tui_owed_read.abandoned state.overview_owed
-  in
-  state.overview_owed <- read;
-  if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not state.overview_inflight then
-    launch_overview_load state ~mailbox
 
 (* Runs on every loop iteration. Off screen nothing is owed: arriving on the
    surface reads it. A read already in flight is let finish first. *)

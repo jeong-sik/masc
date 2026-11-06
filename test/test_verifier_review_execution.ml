@@ -69,8 +69,9 @@ let tool_call id input = `Assoc ["id",`String id;"type",`String "function";
 let valid = `Assoc ["verdict",`String "APPROVE";"reason",`String "checked exact evidence"]
 
 (* Where a server shutdown interrupts the reviewer: while its provider request
-   is open, or while its report handler runs. *)
-type cancel_point = While_provider_answers | While_report_runs
+   is open, while its report handler runs, or on the provider request that
+   follows a settled report. *)
+type cancel_point = While_provider_answers | While_report_runs | After_report_settles
 
 let run_native ?(refuse_publication=false) ?(after_scope_ready=fun () -> ()) ?cancel_at env sw ~base_path ~store ~original ~current calls =
   let provider_calls = ref 0 and handler_calls = ref 0 in
@@ -80,7 +81,10 @@ let run_native ?(refuse_publication=false) ?(after_scope_ready=fun () -> ()) ?ca
     (Exact_output_fixture.Reply_with (fun _ _ ->
       match cancel_at with
       | Some While_provider_answers -> Eio.Promise.resolve cancel_now ();Eio.Fiber.await_cancel ()
-      | Some While_report_runs | None -> `OK, reply (if !provider_calls=1 then calls else []))) in
+      | Some After_report_settles when !provider_calls > 1 ->
+        Eio.Promise.resolve cancel_now ();Eio.Fiber.await_cancel ()
+      | Some (While_report_runs | After_report_settles) | None ->
+        `OK, reply (if !provider_calls=1 then calls else []))) in
   let provider_cfg = Llm_provider.Provider_config.make
     ~kind:Llm_provider.Provider_config.OpenAI_compat ~provider_id:"fixture"
     ~model_id ~base_url:server.base_url ~request_path:"/v1/chat/completions" () in
@@ -94,7 +98,7 @@ let run_native ?(refuse_publication=false) ?(after_scope_ready=fun () -> ()) ?ca
     incr handler_calls;
     match cancel_at with
     | Some While_report_runs -> Eio.Promise.resolve cancel_now ();Eio.Fiber.await_cancel ()
-    | Some While_provider_answers | None ->
+    | Some (While_provider_answers | After_report_settles) | None ->
     let next,answer = AR.step_verdict_call !state input in
     state:=next;
     match answer with
@@ -116,7 +120,7 @@ let run_native ?(refuse_publication=false) ?(after_scope_ready=fun () -> ()) ?ca
     Runtime_agent.run_blocks ~sw:run_sw ~net:env#net ~config [Agent_core.Types.Text "Review"]) in
   let result = match cancel_at with
     | None -> Some (run ())
-    | Some (While_provider_answers | While_report_runs) ->
+    | Some (While_provider_answers | While_report_runs | After_report_settles) ->
       Eio.Fiber.first (fun () -> Some (run ())) (fun () -> Eio.Promise.await cancel_ready;None) in
   (* Discard the returned Agent result: only the original's durable references
      and a newly opened canonical journal are available to recovery. *)
@@ -194,6 +198,16 @@ let test_reviewer_cancelled_inside_its_report_stays_a_repair () = with_fixture (
   | Awaiting | Cancelled_without_verdict _ | Verdict _ ->
     Alcotest.fail "a cancellation inside the report handler authorized a retry or a verdict")
 
+let test_reviewer_cancelled_after_its_report_keeps_the_verdict () = with_fixture (fun env sw base_path store original current ->
+  Eio.Time.with_timeout_exn env#clock Exact_output_fixture.fixture_wait_seconds (fun () ->
+    ignore (run_native ~cancel_at:After_report_settles env sw ~base_path ~store ~original ~current
+      [tool_call "settled-report" valid]));
+  match X.observe ~base_path ~original (O.progress !current) |> get with
+  | Verdict {AR.verdict=Some (Approve reason);_} ->
+    Alcotest.(check string) "the settled report is the verdict" "checked exact evidence" reason
+  | Verdict _ | Awaiting | Repair_required _ | Cancelled_without_verdict _ ->
+    Alcotest.fail "a cancellation after the settled report lost its verdict")
+
 let test_reference_bindings_are_strict () = with_fixture (fun _ _ base_path _ original current ->
   let fact=X.capture ~original ~runtime_id:model_id ~execution:(Types_core.Native_execution {call_id="fixture-call"}) |> get in
   let variants=match fact with
@@ -253,6 +267,7 @@ let () =
     Alcotest.test_case "duplicate report cannot supply a recovered verdict" `Quick test_duplicate_report_cannot_recover;
     Alcotest.test_case "cancelled reviewer without a report retries as a successor" `Quick test_cancelled_reviewer_without_report_retries_as_a_successor;
     Alcotest.test_case "reviewer cancelled inside its report stays a repair" `Quick test_reviewer_cancelled_inside_its_report_stays_a_repair;
+    Alcotest.test_case "reviewer cancelled after its report keeps the verdict" `Quick test_reviewer_cancelled_after_its_report_keeps_the_verdict;
     Alcotest.test_case "unknown and malformed execution bindings are refused" `Quick test_reference_bindings_are_strict;
     Alcotest.test_case "pending original cannot change physical workspace" `Quick test_pending_cannot_change_its_physical_workspace;
     Alcotest.test_case "earlier open call cannot be hidden by a later verdict" `Quick test_earlier_open_call_prevents_later_verdict_recovery]]

@@ -56,7 +56,6 @@ let lane_addon_schemas : tool_schema list =
 let schemas : tool_schema list =
   lane_addon_schemas
   @ [ Tool_schemas_misc_toml.play_room
-    ; Tool_schemas_misc_toml.portrait_read
     ; Tool_schemas_misc_toml.candle_balance
     ; Tool_schemas_misc_toml.candle_catalog
     ; Tool_schemas_misc_toml.candle_purchase
@@ -137,7 +136,6 @@ type misc_operation =
   | Misc_browser_act
   | Misc_browser_interact
   | Misc_msx of Msx_tool.t
-  | Misc_portrait_read
   | Misc_candle_balance
   | Misc_candle_catalog
   | Misc_candle_purchase
@@ -189,7 +187,7 @@ let dos_tool_of_operation : misc_operation -> Machine_controller_contract.dos_to
   | Misc_web_search | Misc_browser_tabs | Misc_browser_read
   | Misc_browser_session | Misc_browser_goto | Misc_browser_act
   | Misc_browser_interact | Misc_msx _
-  | Misc_portrait_read | Misc_candle_balance | Misc_candle_catalog
+  | Misc_candle_balance | Misc_candle_catalog
   | Misc_candle_purchase | Misc_candle_equip | Misc_candle_gift
   | Misc_play_room ->
     None
@@ -234,7 +232,6 @@ let misc_tool_name = function
   | Misc_browser_act -> "masc_browser_act"
   | Misc_browser_interact -> "masc_browser_interact"
   | Misc_msx tool -> Msx_tool.name tool
-  | Misc_portrait_read -> "keeper_portrait_read"
   | Misc_candle_balance -> "keeper_candle_balance"
   | Misc_candle_catalog -> "keeper_candle_catalog"
   | Misc_candle_purchase -> "keeper_candle_purchase"
@@ -313,7 +310,6 @@ let misc_registered_schema operation : tool_schema option =
   | Misc_lane_evidence
   | Misc_lane_act
   | Misc_lane_action_status
-  | Misc_portrait_read
   | Misc_candle_balance
   | Misc_candle_catalog
   | Misc_candle_purchase

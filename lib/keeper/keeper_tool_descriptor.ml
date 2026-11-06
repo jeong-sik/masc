@@ -1500,49 +1500,6 @@ let board_stats_output_schema =
       [ "post_count"; "comment_count"; "expired_pending"; "last_sweep"; "backend" ]
 ;;
 
-let portrait_read_output_schema =
-  let module Item = Keeper_portrait_item in
-  let string_schema = `Assoc [ "type", `String "string" ] in
-  let slot_ids = List.map Item.slot_id Item.slots in
-  let equipment_fields =
-    [ "properties", `Assoc (List.map (fun slot -> Item.slot_id slot, string_schema) Item.slots)
-    ; "required", `List (List.map (fun slot -> `String slot) slot_ids)
-    ; "additionalProperties", `Bool false
-    ]
-  in
-  let equipment = `Assoc (("type", `String "object") :: equipment_fields) in
-  let nullable_equipment =
-    `Assoc (("type", `List [ `String "object"; `String "null" ]) :: equipment_fields)
-  in
-  let item =
-    object_output_schema
-      ~properties:[ "id", string_schema; "slot", string_schema ]
-      ~required:[ "id"; "slot" ]
-  in
-  object_output_schema
-    ~properties:
-      [ "name", `Assoc [ "type", `String "string" ]
-      ; "mode", string_schema
-      ; "preview_item", `Assoc
-          [ "type", `List [ `String "string"; `String "null" ] ]
-      ; "starting_equipment", equipment
-      ; "current_equipment", nullable_equipment
-      ; "equipment_observation", object_output_schema
-          ~properties:["status", string_schema;
-            "detail", `Assoc ["type", `List [`String "string"; `String "null"]]]
-          ~required:["status"; "detail"]
-      ; "equipment", equipment
-      ; "catalog", `Assoc [ "type", `String "array"; "items", item ]
-      ; "artifact", `Assoc [ "type", `String "string" ]
-      ; "media_type", `Assoc [ "type", `String "string" ]
-      ; "width", `Assoc [ "type", `String "integer" ]
-      ; "height", `Assoc [ "type", `String "integer" ]
-      ; "bytes", `Assoc [ "type", `String "integer" ]
-      ]
-    ~required:[ "name"; "mode"; "preview_item"; "starting_equipment"; "current_equipment"; "equipment_observation"; "equipment"
-              ; "catalog"; "artifact"; "media_type"; "width"; "height"; "bytes" ]
-;;
-
 (* Producer: Keeper_tool_lane_status.handle. [lane], [endpoint] and
    [operator_action] are null when unknown; [probe] and [last_dispatch] are
    the typed report's variants spelled out. Docker adds [note]; an unattached
@@ -3052,9 +3009,6 @@ let internal_descriptors : t list =
   ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent "lane_slice" "masc_lane_slice" ~readonly:true
   ; masc_misc_descriptor "lane_detach" "masc_lane_detach" ~readonly:false
   ; masc_misc_descriptor "lane_evidence" "masc_lane_evidence" ~readonly:false
-  ; (masc_misc_descriptor ~ordinary_execution_mode:Concurrent
-       "portrait_read" "keeper_portrait_read" ~readonly:true
-       |> with_composable_output (Json_output { schema = portrait_read_output_schema }))
   ; masc_misc_descriptor "candle_balance" "keeper_candle_balance" ~readonly:false
   ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent "candle_catalog" "keeper_candle_catalog" ~readonly:true
   ; masc_misc_descriptor "candle_purchase" "keeper_candle_purchase" ~readonly:false

@@ -25,7 +25,6 @@ let msx_schema =
   fun tool -> List.assoc tool table
 ;;
 
-let portrait_read = schema_of_name "keeper_portrait_read"
 let candle_balance = schema_of_name "keeper_candle_balance"
 let candle_catalog = schema_of_name "keeper_candle_catalog"
 let candle_purchase = schema_of_name "keeper_candle_purchase"

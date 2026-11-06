@@ -253,7 +253,6 @@ let explicit_metadata : (string * metadata) list =
     ("masc_lane_evidence", mutating_tool);
     ("masc_lane_act", mutating_tool);
     ("masc_lane_action_status", read_state_tool);
-    ("keeper_portrait_read", read_state_tool);
     ("keeper_candle_balance", mutating_tool);
     ("keeper_candle_catalog", read_state_tool);
     ("keeper_candle_purchase", mutating_tool);

@@ -22,7 +22,12 @@
       bring a time from before it, and no other commit appends between the read
       and the append. An admission is judged against the expiry of its
       invitation with that time, and {!Authz_state} refuses one before a record
-      it has read ({!Authz_state.Admission_behind_log}).
+      it has read ({!Authz_state.Admission_behind_log}). A reduction whose
+      change the state holds a block of is a retry (design 8.3): the record is
+      built again with those blocks in its [closes] ({!Authz_state.closable},
+      {!Authz_record.closing}) and read again, so the intent and the hash cover
+      them and a replay closes the same blocks. The caller does not fill
+      [closes].
     + It writes the settlement of the first step: [Committed] for a promoted
       intent, [Aborted_intent] for an aborted one. Before an abort it asks
       {!Authz_log.confirm_end} whether the log still ends where the intent
@@ -39,7 +44,9 @@
       is written, because a write that fails may still have written the line.
       A commit that fails after that point leaves the block in place. A replay starts each block after the
       record its intent began at, as the writer did, and a block whose record
-      the log no longer holds starts once the log is read.
+      the log no longer holds starts once the log is read. A replay closes a
+      block at the record that names it, so a log cut back to before that
+      record holds the block again.
 
     Each step writes only when the steps before it passed, so a commit that is
     refused in the first two steps writes nothing, and the settlement waits for

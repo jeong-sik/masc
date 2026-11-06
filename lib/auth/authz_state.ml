@@ -1,10 +1,12 @@
 (* HIGH-RISK-UNREVIEWED: see the interface. *)
 
+module C = Authz_external_store.Change
 module K = Authz_record.Kind
 module R = Authz_record
 
 type held =
   { aborted : R.Hash.t
+  ; event : C.authz_event
   ; subject : Authz_records.Subject.t
   }
 
@@ -47,6 +49,18 @@ let hold_revocations state helds =
   { state with revocation_pending }
 ;;
 
+let closable state change =
+  if C.is_reduction change
+  then
+    List.filter_map
+      (fun held ->
+        if C.equal (C.Authz { event = held.event; subject = held.subject }) change
+        then Some held.aborted
+        else None)
+      state.revocation_pending
+  else []
+;;
+
 type refusal =
   | Before_bootstrap of K.t
   | Mode_event_unreadable of Authz_mode_event.error
@@ -67,6 +81,8 @@ type refusal =
       { at_ms : int
       ; latest_at_ms : int
       }
+  | Closes_without_reduction
+  | Closes_not_held of R.Hash.t
 
 let refusal_to_string = function
   | Before_bootstrap kind ->
@@ -103,6 +119,11 @@ let refusal_to_string = function
       "the admission is at %d ms, before a record of the log at %d ms: the clock went back"
       at_ms
       latest_at_ms
+  | Closes_without_reduction -> "the record closes given-up reductions but reduces nothing"
+  | Closes_not_held aborted ->
+    Printf.sprintf
+      "the record closes %s, which is not a given-up reduction of the change it makes"
+      (R.Hash.to_hex aborted)
 ;;
 
 type applied =
@@ -333,11 +354,37 @@ let later state (record : R.t) =
   | Some (_ : int) | None -> { state with latest_at_ms = Some record.R.at_ms }
 ;;
 
+(* A record that makes a given-up reduction again closes its block (design
+   8.3). The record names each block it closes, so a replay closes the same
+   ones, and a log cut back to before it no longer closes them. *)
+let close (applied : applied) (record : R.t) =
+  match record.R.closes with
+  | [] -> Ok applied.state
+  | closes ->
+    (match applied.high_water with
+     | Some change when C.is_reduction change ->
+       let held = closable applied.state change in
+       (match List.find_opt (fun aborted -> not (List.exists (R.Hash.equal aborted) held)) closes with
+        | Some aborted -> Error (Closes_not_held aborted)
+        | None ->
+          Ok
+            { applied.state with
+              revocation_pending =
+                List.filter
+                  (fun held -> not (List.exists (R.Hash.equal held.aborted) closes))
+                  applied.state.revocation_pending
+            })
+     | Some (_ : C.t) | None -> Error Closes_without_reduction)
+;;
+
 let apply state (record : R.t) =
   match author_refusal state record.R.author with
   | Some refusal -> Error refusal
   | None ->
-    Result.map (fun applied -> { applied with state = later applied.state record }) (read state record)
+    let ( let* ) = Result.bind in
+    let* applied = read state record in
+    let* closed = close applied record in
+    Ok { applied with state = later closed record }
 ;;
 
 let step state record =

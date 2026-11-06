@@ -10,9 +10,6 @@ type voice_command =
   | Speak
   | Listen
   | Agent
-  | Sessions
-  | Session_start
-  | Session_end
 
 val all_commands : voice_command list
 
@@ -22,8 +19,8 @@ val command_of_string : string -> voice_command option
 
 (** Caller-owned authorization boundary around one concrete voice effect. The
     voice runtime invokes it only at the TTS/playback leaf; the microphone
-    window is wall-clock bound, so listening stays ungated, and local
-    capability and session reads do not become Gate requests either.
+    window is wall-clock bound, so listening stays ungated, and the local
+    capability read does not become a Gate request either.
     [call_summary] is the speak's declared one-line statement
     ({!speak_call_summary}); the authorizer forwards it to the Gate request
     without reading it. *)

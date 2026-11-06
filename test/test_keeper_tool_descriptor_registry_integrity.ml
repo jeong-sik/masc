@@ -1613,9 +1613,8 @@ let test_concurrent_execution_opt_ins_are_exact () =
     ; "keeper_tasks_audit"
     ; "keeper_tasks_list"
     ; "keeper_tools_list"
-    (* Session-manager state is an Atomic over an immutable map. *)
+    (* Reads the voice config and the agent's voice assignment. *)
     ; "keeper_voice_agent"
-    ; "keeper_voice_sessions"
     (* One bridge subprocess per call; script-path cache is mutex-guarded. *)
     ; "keeper_webmcp_list"
     ; "keeper_wiki_read"

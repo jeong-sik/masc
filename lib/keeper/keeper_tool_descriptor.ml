@@ -2904,27 +2904,18 @@ let internal_descriptors : t list =
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_analyze_image
       ()
-    (* ── voice cluster (RFC-0179 PR-3, 6 tools) ───────────────── *)
+    (* ── voice cluster (RFC-0179 PR-3, 3 tools) ───────────────── *)
   ; voice_descriptor
       "keeper_voice_speak"
       ~readonly:false
   ; voice_descriptor
       "keeper_voice_listen"
       ~readonly:false
-  (* Concurrent: both read the voice session manager, whose state is an
-     Atomic over an immutable map; neither starts, ends, nor speaks. *)
+  (* Concurrent: reads the voice config and the agent's voice assignment;
+     it neither speaks nor listens. *)
   ; voice_descriptor ~ordinary_execution_mode:Concurrent
       "keeper_voice_agent"
       ~readonly:true
-  ; voice_descriptor ~ordinary_execution_mode:Concurrent
-      "keeper_voice_sessions"
-      ~readonly:true
-  ; voice_descriptor
-      "keeper_voice_session_start"
-      ~readonly:false
-  ; voice_descriptor
-      "keeper_voice_session_end"
-      ~readonly:false
     (* ── task / broadcast cluster (RFC-0179 PR-3, 6 tools) ────── *)
   ; (task_descriptor
        (* Concurrent: backlog reads go through the mtime/size-keyed cache in

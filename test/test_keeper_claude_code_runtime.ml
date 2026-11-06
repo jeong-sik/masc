@@ -2872,23 +2872,21 @@ let test_quota_enters_typed_recovery () =
          | _ -> fail "quota rejection did not require explicit recovery"))
 ;;
 
-(* The CLI's rate-limit event dated at [resets_at] (Unix seconds).
-   [rate_limit_rejected] dates its reset in 2026-08, already past, so it states
-   no wait. *)
-let rate_limit_rejected_until resets_at =
+(* The CLI's rate-limit event with [status] and a reset at [resets_at] (Unix
+   seconds). [rate_limit_rejected] dates its reset in 2026-08, already past, so
+   it states no wait. *)
+let rate_limit_event ~status resets_at =
   Printf.sprintf
-    {|{"type":"rate_limit_event","session_id":"__SESSION__","uuid":"limit-1","rate_limit_info":{"status":"rejected","rateLimitType":"seven_day","resetsAt":%d,"overageStatus":"rejected","overageDisabledReason":"org_level_disabled_until"}}|}
+    {|{"type":"rate_limit_event","session_id":"__SESSION__","uuid":"limit-1","rate_limit_info":{"status":%S,"rateLimitType":"seven_day","resetsAt":%d,"overageStatus":"rejected","overageDisabledReason":"org_level_disabled_until"}}|}
+    status
     resets_at
 ;;
 
-(* A quota refusal whose reset the CLI states, before any tool ran, rests the
-   Keeper; it is not a turn failure (MASC task-3264). The cycle ends as
-   [Turn_rested] at that reset, and the turn-failure streak and the registry
-   failure cause stay as they were. Before, the same refusal added one to the
-   streak and the Keeper read Failing until its next successful turn. *)
-let test_dated_quota_refusal_rests_the_keeper () =
+(* One autonomous cycle whose CLI answers [frames] after the MCP handshake.
+   [check_cycle] reads the cycle's result; the Keeper's registry entry is still
+   there, so it can read the turn-failure streak and the failure cause. *)
+let run_refused_autonomous_cycle frames check_cycle =
   let base_path = temp_workspace () in
-  let resets_at = int_of_float (Unix.gettimeofday ()) + 3600 in
   Runtime_quota_window.reset_for_testing ();
   Masc_test_deps.with_process_env
     "MASC_KEEPER_AUTONOMOUS_ENABLED"
@@ -2900,47 +2898,95 @@ let test_dated_quota_refusal_rests_the_keeper () =
            cleanup_tree base_path)
          (fun () ->
             with_fixture
-              [ Emit_and_read mcp_initialize
-              ; Emit mcp_initialized_notification
-              ; Emit_and_read mcp_list
-              ; Emit (rate_limit_rejected_until resets_at)
-              ; Emit quota_result
-              ]
+              ([ Emit_and_read mcp_initialize
+               ; Emit mcp_initialized_notification
+               ; Emit_and_read mcp_list
+               ]
+               @ frames)
               (fun cli_path ->
                  with_unified_autonomous_cycle ~base_path ~cli_path
                    (fun ~config ~keeper_name ~meta ~trace_id:_ ~checkpoint_path:_
                         ~shared_context:_ ~run ->
-                      (match run meta with
-                       | Ok
-                           (Keeper_unified_turn.Turn_rested
-                              { rest; meta = _; deferred_runtime_lane = _ }) ->
-                         check bool "the rest ends at the reset the CLI stated" true
-                           (Float.abs
-                              (rest.Keeper_turn_driver.release_at
-                               -. float_of_int resets_at)
-                            < 5.0)
-                       | Ok
-                           ( Keeper_unified_turn.Turn_completed _
-                           | Keeper_unified_turn.Turn_checkpointed _
-                           | Keeper_unified_turn.Turn_input_required _
-                           | Keeper_unified_turn.Turn_cancelled _
-                           | Keeper_unified_turn.Turn_skipped _ ) ->
-                         fail "a refused turn did not end as a rest"
-                       | Error failure ->
-                         fail
-                           ("a dated quota refusal ended as a turn failure: "
-                            ^ Agent_core.Error.to_string
-                                failure.Keeper_unified_turn.error));
-                      let base_path = config.Workspace.base_path in
-                      check int "the turn-failure streak stays at zero" 0
-                        (Keeper_registry.get_turn_failures ~base_path keeper_name);
-                      match Keeper_registry.get ~base_path keeper_name with
-                      | Some { Keeper_registry.last_failure_reason = None; _ } -> ()
-                      | Some { Keeper_registry.last_failure_reason = Some reason; _ } ->
-                        fail
-                          ("a rest set a registry failure cause: "
-                           ^ Keeper_registry.failure_reason_to_string reason)
-                      | None -> fail "the fixture Keeper left the registry"))))
+                      check_cycle
+                        ~base_path:config.Workspace.base_path
+                        ~keeper_name
+                        (run meta)))))
+;;
+
+let an_hour_from_now () = int_of_float (Unix.gettimeofday ()) + 3600
+
+(* A quota refusal whose reset the CLI states, before any tool ran, rests the
+   Keeper; it is not a turn failure (RFC-turn-failure-visible-stop §2.4). The
+   cycle ends as [Turn_rested] at that reset, and the turn-failure streak and
+   the registry failure cause stay as they were. *)
+let test_dated_quota_refusal_rests_the_keeper () =
+  let resets_at = an_hour_from_now () in
+  run_refused_autonomous_cycle
+    [ Emit (rate_limit_event ~status:"rejected" resets_at); Emit quota_result ]
+    (fun ~base_path ~keeper_name cycle ->
+       (match cycle with
+        | Ok (Keeper_unified_turn.Turn_rested { rest; meta; deferred_runtime_lane = _ }) ->
+          check bool "the rest ends at the reset the CLI stated" true
+            (Float.abs (rest.Keeper_turn_driver.release_at -. float_of_int resets_at) < 5.0);
+          check bool "the cycle's proactive outcome is a rest, not an error" true
+            (meta.Keeper_meta_contract.runtime.proactive_rt.last_outcome
+             = Keeper_meta_contract.Proactive_rested)
+        | Ok
+            ( Keeper_unified_turn.Turn_completed _
+            | Keeper_unified_turn.Turn_checkpointed _
+            | Keeper_unified_turn.Turn_input_required _
+            | Keeper_unified_turn.Turn_cancelled _
+            | Keeper_unified_turn.Turn_skipped _ ) ->
+          fail "a refused turn did not end as a rest"
+        | Error failure ->
+          fail
+            ("a dated quota refusal ended as a turn failure: "
+             ^ Agent_core.Error.to_string failure.Keeper_unified_turn.error));
+       check int "the turn-failure streak stays at zero" 0
+         (Keeper_registry.get_turn_failures ~base_path keeper_name);
+       match Keeper_registry.get ~base_path keeper_name with
+       | Some { Keeper_registry.last_failure_reason = None; _ } -> ()
+       | Some { Keeper_registry.last_failure_reason = Some reason; _ } ->
+         fail
+           ("a rest set a registry failure cause: "
+            ^ Keeper_registry.failure_reason_to_string reason)
+       | None -> fail "the fixture Keeper left the registry")
+;;
+
+(* A refusal that does not meet every rest condition stays a turn failure and
+   advances the streak. *)
+let expect_turn_failure label ~base_path ~keeper_name = function
+  | Error _ ->
+    check int (label ^ ": the turn-failure streak advances") 1
+      (Keeper_registry.get_turn_failures ~base_path keeper_name)
+  | Ok (Keeper_unified_turn.Turn_rested _) -> fail (label ^ ": the refusal ended as a rest")
+  | Ok
+      ( Keeper_unified_turn.Turn_completed _
+      | Keeper_unified_turn.Turn_checkpointed _
+      | Keeper_unified_turn.Turn_input_required _
+      | Keeper_unified_turn.Turn_cancelled _
+      | Keeper_unified_turn.Turn_skipped _ ) ->
+    fail (label ^ ": the refusal completed the turn")
+;;
+
+(* The CLI dates allowed events too: there [resetsAt] ends a window that still
+   serves, so a 429 after one is a throttle and states no reset. *)
+let test_a_429_after_an_allowed_event_is_a_turn_failure () =
+  run_refused_autonomous_cycle
+    [ Emit (rate_limit_event ~status:"allowed" (an_hour_from_now ())); Emit quota_result ]
+    (expect_turn_failure "a 429 after an allowed event")
+;;
+
+(* Response text reached the operator before the refusal, so the attempt is
+   fenced: whether it had an effect is not known, and a dated refusal does not
+   rest it. *)
+let test_a_fenced_dated_quota_refusal_is_a_turn_failure () =
+  run_refused_autonomous_cycle
+    [ Emit (response_text ~turn_id:"turn-quota-1" ~message_id:"msg-quota-1" "partial answer")
+    ; Emit (rate_limit_event ~status:"rejected" (an_hour_from_now ()))
+    ; Emit quota_result
+    ]
+    (expect_turn_failure "a dated refusal after response text")
 ;;
 
 let test_access_refusal_uses_status_and_keeps_pre_effect_rotation () =
@@ -6996,6 +7042,10 @@ let () =
         ; test_case "quota enters recovery" `Quick test_quota_enters_typed_recovery
         ; test_case "a dated quota refusal rests the Keeper" `Quick
             test_dated_quota_refusal_rests_the_keeper
+        ; test_case "a 429 after an allowed event is a turn failure" `Quick
+            test_a_429_after_an_allowed_event_is_a_turn_failure
+        ; test_case "a fenced dated quota refusal is a turn failure" `Quick
+            test_a_fenced_dated_quota_refusal_is_a_turn_failure
         ; test_case "access refusal preserves structured status and rotation" `Quick
             test_access_refusal_uses_status_and_keeps_pre_effect_rotation
         ; test_case "access refusal after native tool remains fenced" `Quick

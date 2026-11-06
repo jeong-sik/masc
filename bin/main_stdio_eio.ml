@@ -165,7 +165,15 @@ let run_cmd cli_base_path =
          Log.Misc.warn
            "shutdown: board flush failed: %s"
            (Printexc.to_string exn));
-      Shutdown_hooks.run_all ())
+      Shutdown_hooks.run_all ();
+      (* RFC lane-addon-shutdown-detaches-native-instances §3: this binary
+         detaches the native instances whose cleanup descriptors it wrote. *)
+      (try Shutdown_hooks.run_lane_addon_shutdown () with
+       | Eio.Cancel.Cancelled _ -> ()
+       | exn ->
+         Log.Misc.warn
+           "shutdown: Lane Add-on native detach failed: %s"
+           (Printexc.to_string exn)))
     (fun () -> Mcp_eio.run_stdio ?auth_token:stdio_auth_token ~sw ~env state)
 
 let cmd =

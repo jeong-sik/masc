@@ -382,6 +382,29 @@ val save_declaration : ?access:Lane_addon_sources.access -> config:Workspace.con
 val start_configuration_service : config:Workspace.config -> sw:Eio.Switch.t ->
   clock:_ Eio.Time.clock -> unit
 
+(** One native instance this server detached while stopping. [settlement] is
+    [Ok ()] once its cleanup settled Detached, or the reason it did not. *)
+module Shutdown_detach : sig
+  type t = {
+    instance_id : string;
+    package_id : string;
+    settlement : (unit, string) result;
+    elapsed_s : float;
+  }
+end
+
+(** Graceful stop (RFC lane-addon-shutdown-detaches-native-instances §3). Stop
+    this workspace's configuration maintenance, Detach every live native
+    instance that is not Detached and wait for each cleanup to settle. The next
+    server then attaches its declarations without reading a cleanup
+    descriptor another binary wrote. Container instances are left to the next
+    server's label sweep. No timeout is added: the shutdown process deadline
+    bounds the wait, and an instance it cuts short is recovered from its
+    binding by the next server. [Error] means the server background owner is
+    unavailable and nothing was detached. *)
+val detach_native_for_shutdown : config:Workspace.config ->
+  (Shutdown_detach.t list, string) result
+
 val answer_installation_question :
   config:Workspace.config -> declaration_id:string -> ask_id:string ->
   submissions:(string * Keeper_ask.response) list -> responder:Keeper_ask.responder ->

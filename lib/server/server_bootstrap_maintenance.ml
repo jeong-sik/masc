@@ -413,6 +413,22 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
        ~http_post:Server_repository_pulls.default_http_post ~config);
   Lane_addon_runtime.start_configuration_service ~config ~sw ~clock;
   Lane_addon_runtime.start_fleet_service ~config ~sw ~clock;
+  Shutdown_hooks.register_lane_addon_shutdown (fun () ->
+    match Lane_addon_runtime.detach_native_for_shutdown ~config with
+    | Error message ->
+      Log.Server.warn "[Shutdown] LANE: native instances were not detached: %s" message
+    | Ok [] -> Log.Server.info "[Shutdown] LANE: no native instance to detach"
+    | Ok detached ->
+      List.iter
+        (fun (d : Lane_addon_runtime.Shutdown_detach.t) ->
+          match d.settlement with
+          | Ok () ->
+            Log.Server.info "[Shutdown] LANE: %s (%s) detached (%.2fs)"
+              d.instance_id d.package_id d.elapsed_s
+          | Error reason ->
+            Log.Server.warn "[Shutdown] LANE: %s (%s) did not detach (%.2fs): %s"
+              d.instance_id d.package_id d.elapsed_s reason)
+        detached);
   (* Exclusive startup ownership: before any new server request can submit a
      worker, settle disk-only nonterminal rows left by the prior process.  Poll
      and cancel deliberately cannot infer process death, so this bootstrap

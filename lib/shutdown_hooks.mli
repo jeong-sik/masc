@@ -26,6 +26,16 @@ val register_sse_cleanup : (unit -> int * int) -> unit
 val register_ws_cleanup : (unit -> int * int) -> unit
 (** Register a cleanup callback for WebSocket sessions. Returns (closed_count, remaining_count). *)
 
+val register_lane_addon_shutdown : (unit -> unit) -> unit
+(** Stash the Lane Add-on native detach for {!run_lane_addon_shutdown}.
+    Last writer wins, as with {!register_keeper_shutdown}. *)
+
+val run_lane_addon_shutdown : unit -> unit
+(** Run the registered Lane Add-on native detach, or log that none is
+    registered. The server calls it after {!run_all} and the Board flush and
+    before it cancels its switch, with no phase timeout of its own: the process
+    deadline bounds it (RFC lane-addon-shutdown-detaches-native-instances §3). *)
+
 val run_all : unit -> unit
 (** Run the shutdown sequence in order:
 

@@ -956,6 +956,53 @@ let native_worker_ended_outside_masc () = with_fixture (fun clock root config ->
   wait clock (fun () -> phase ()="detached" && text "runtime_presence" (inspect ())="retained");
   check string "Detach confirms the native release" "native_released"
     (inspect () |> member "lifecycle" |> member "release" |> text "kind"))
+(* RFC lane-addon-shutdown-detaches-native-instances §6. The 11-06 deploy: the
+   stopping server leaves, the operator removes the claim slot as a hard cut
+   says, and the next server must still attach the declaration. *)
+let shutdown_detach_lets_the_next_server_attach () = with_fixture (fun clock root config ->
+  let manifest = write_native_manifest root in
+  let inspect id = dispatch config R.Inspect ["instance_id",`String id]
+    |> member "instances" |> Yojson.Safe.Util.to_list |> List.hd in
+  let ready id = match require (Lane_addon_lifecycle.state_of_json (member "lifecycle" (inspect id))) with
+    | Lane_addon_lifecycle.Failed failure -> fail (Lane_addon_lifecycle.failure_detail failure.cause)
+    | Detaching _ | Detached _ -> fail "native fixture retired before observation"
+    | Attached | Observing -> (inspect id |> member "observation_seq" |> Yojson.Safe.Util.to_int)>0 in
+  let detached id = text "kind" (member "phase" (inspect id))="detached" in
+  let directory = Filename.concat root "declarations" in Unix.mkdir directory 0o700;
+  let configure enabled = write (Filename.concat directory "configured.toml") (Printf.sprintf {|id = "configured-native"
+enabled = %b
+run_id = "native-world"
+manifest_path = %S
+[binding]
+sources = []
+|} enabled manifest) in
+  let reconcile () = ignore (require (R.reconcile_configuration ~config ~directory)) in
+  let configured () = dispatch config R.Inspect [] |> member "instances" |> Yojson.Safe.Util.to_list
+    |> List.find_opt (fun item -> match member "configuration" item with
+      | `Assoc fields -> List.assoc_opt "id" fields=Some (`String "configured-native")
+          && text "kind" (member "phase" item)<>"detached"
+      | _ -> false) in
+  let attached () =
+    wait clock (fun () -> Option.exists (fun item -> ready (text "instance_id" item)) (configured ()));
+    require (Option.to_result ~none:"configured installation missing" (configured ())) |> text "instance_id" in
+  configure true; reconcile ();
+  let first = attached () in
+  let first_pid = inspect first |> member "resource" |> member "pid" |> Yojson.Safe.Util.to_int in
+  let stopped = require (R.detach_native_for_shutdown ~config) in
+  check (list string) "the stopping server detaches its native instance" [first]
+    (List.map (fun (d : R.Shutdown_detach.t) -> d.instance_id) stopped);
+  List.iter (fun (d : R.Shutdown_detach.t) ->
+    check (result unit string) "its cleanup settles" (Ok ()) d.settlement) stopped;
+  check bool "its binding is detached before the server leaves" true (detached first);
+  check bool "its foreground group is gone" false (Posix_spawn_detached.group_id_has_members first_pid);
+  let store = Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+  remove (Filename.concat (Filename.concat (Lane_addon_store.root store) "native-claims")
+    (Lane_addon_store.digest "configured-native"));
+  R.For_testing.reset ();
+  reconcile ();
+  let second = attached () in
+  check bool "the next server attaches a fresh incarnation" true (first<>second);
+  configure false; reconcile (); wait clock (fun () -> detached second))
 let () =
   if Array.length Sys.argv<>2 then fail "expected native admission launcher path";
   launcher := Unix.realpath Sys.argv.(1);
@@ -967,5 +1014,7 @@ let () =
     test_case "the operator retains an unconfirmed native instance" `Quick operator_retain;
     test_case "a native worker that ends outside masc turns failed and Detach releases it" `Quick
       native_worker_ended_outside_masc;
+    test_case "a stopping server detaches its native instance and the next server attaches without its claim slot" `Quick
+      shutdown_detach_lets_the_next_server_attach;
     test_case "browser service concurrent channels exact owner cancellation and failed readiness" `Quick browser_installation;
     test_case "a browser document source reads through the browser Add-on worker" `Quick browser_document_source]]

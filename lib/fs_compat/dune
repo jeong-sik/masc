@@ -22,6 +22,7 @@
   capability_recovery_inventory
   capability_recovery_obligation
   capability_recovery_reconciler_model
+  capability_recovery_reconciler_observation
   capability_recovery_reconciler_text
   capability_recovery_reconciler_json
   capability_recovery_reconciler
@@ -43,6 +44,7 @@
   capability_recovery_record_io
   capability_recovery_inventory
   capability_recovery_reconciler_model
+  capability_recovery_reconciler_observation
   capability_recovery_reconciler_text
   capability_recovery_reconciler_json)
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4) + unused-value ratchet (warning 32)

@@ -68,7 +68,7 @@ let snapshot_service ~config ~access ~service =
   | Browser_addon_wire.Snapshot_result value -> Ok value
   | Service_refusal {message;disposition=Not_started} -> Error (Browser_addon_client.Unavailable message)
   | Service_refusal {message;disposition=Outcome_unknown} -> Error (Browser_addon_client.Outcome_unknown message)
-  | Model_reply _|Download_reply _|Receipt|Issue_result _|Poll_result _ -> Error (Browser_addon_client.Outcome_unknown "unexpected browser snapshot reply")
+  | Download_reply _|Receipt|Issue_result _|Poll_result _ -> Error (Browser_addon_client.Outcome_unknown "unexpected browser snapshot reply")
 let snapshot_of t (served:served) = snapshot_service ~config:t.config ~access:t.access ~service:served.service
 let snapshot t ~backend = match for_backend t backend with
   | Ok served -> snapshot_of t served
@@ -452,7 +452,7 @@ let issue ?goal_space ?upload_paths ?(required_actions=[]) t ~preference verb =
         ~command:(Browser_addon_wire.Upload_stage {id;actor=Lane_addon_call_context.actor_label t.principal;
           route;verb}) with
       | Ok Browser_addon_wire.Receipt -> Ok ()
-      | Ok (Browser_addon_wire.Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Issue_result _|Service_refusal _) ->
+      | Ok (Browser_addon_wire.Snapshot_result _|Download_reply _|Poll_result _|Issue_result _|Service_refusal _) ->
         fail ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect
           "worker upload staging was refused; no browser command was dispatched"
       | Error error -> fail ~class_:Tool_result.Dependency_unavailable ~effect_disposition:Tool_result.Proven_pre_effect
@@ -480,7 +480,7 @@ let issue ?goal_space ?upload_paths ?(required_actions=[]) t ~preference verb =
          | Some (`Bool true),Some data -> Ok {binding;data;raw_result=result}
          | (None|Some _),(None|Some _) -> Error "browser success receipt lacks ok/data")
     | Issue_result (Ok (Answered _|Lane_absent|Timed_out|Refused _|Rejected_before_effect _)|Error _)
-    | Service_refusal _|Receipt|Snapshot_result _|Model_reply _|Download_reply _|Poll_result _ -> Error "unexpected successful browser command receipt" in
+    | Service_refusal _|Receipt|Snapshot_result _|Download_reply _|Poll_result _ -> Error "unexpected successful browser command receipt" in
   match decode () with
   | Ok receipt -> Ok receipt
   | Error detail -> fail ?metadata:result._meta ~data:raw ~class_:Tool_result.Runtime_failure

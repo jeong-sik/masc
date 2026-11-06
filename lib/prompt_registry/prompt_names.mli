@@ -544,7 +544,6 @@ val skill_applicability : string
 val skill_applicability_advice : string
 val skill_applicability_unavailable : string
 val skill_applicability_projection : string
-val browser_locate : string
 
 val librarian_preflight_keep_current : string
 val librarian_preflight_needs_generation : string

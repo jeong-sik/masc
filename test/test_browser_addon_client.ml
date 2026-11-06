@@ -12,7 +12,7 @@ let scenario () = Eio_main.run (fun env ->
       Eio_context.with_test_env ~sw ~clock ~net ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
         let socket=Eio.Net.listen ~sw ~backlog:1 net (`Unix path) in
         let entered,enter=Eio.Promise.create () in
-        let model_waiting,model_wait=Eio.Promise.create () in
+        let retiring,retire=Eio.Promise.create () in
         let workflowing,workflow=Eio.Promise.create () in
         let never,_=Eio.Promise.create () in
         let cancellations=ref 0 in
@@ -27,8 +27,8 @@ let scenario () = Eio_main.run (fun env ->
                 match Yojson.Safe.Util.(request |> member "command" |> member "verb") with
                 | `String "page.native_workflow" -> ignore (Eio.Promise.try_resolve workflow ())
                 | _ -> ignore (Eio.Promise.try_resolve enter ()));
-              if Yojson.Safe.Util.member "operation" request=`String "model_wait" then
-                ignore (Eio.Promise.try_resolve model_wait ());
+              if Yojson.Safe.Util.member "operation" request=`String "retire" then
+                ignore (Eio.Promise.try_resolve retire ());
               Eio.Promise.await never)
           done))
           (fun () ->
@@ -37,11 +37,10 @@ let scenario () = Eio_main.run (fun env ->
               (match result with Error (Client.Outcome_unknown _) -> true | Ok _|Error (Client.Unavailable _) -> false);
             check int "transport timeout is distinct from caller cancellation" 0 !cancellations;
             (match Eio.Fiber.first
-              (fun () -> `Returned (Client.call client ~on_cancel_after_dispatch:(fun () -> ())
-                (W.Model_wait {after=Some "unchanged"})))
-              (fun () -> Eio.Promise.await model_waiting;Eio.Time.sleep clock 0.03;`Waiting) with
+              (fun () -> `Returned (Client.call client ~on_cancel_after_dispatch:(fun () -> ()) W.Retire))
+              (fun () -> Eio.Promise.await retiring;Eio.Time.sleep clock 0.03;`Waiting) with
              | `Waiting -> ()
-             | `Returned _ -> fail "model state watch must outlive the quick control timeout");
+             | `Returned _ -> fail "retirement must outlive the quick control timeout");
             let native=ok (Browser_lane.Native_workflow.of_json (`Assoc ["tabId",`Int 1;
               "expectedUrl",`String "https://example.org";"steps",`List [];"maxChars",`Int 1000])) in
             (match Eio.Fiber.first
@@ -111,7 +110,7 @@ let transport_policy () = Eio_main.run (fun env ->
           let read clients =
             snapshot_reply := Some (snapshot clients);
             match call W.Snapshot with Ok (W.Snapshot_result _) -> ()
-            | Ok (Model_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _|Service_refusal _)
+            | Ok (Download_reply _|Poll_result _|Receipt|Issue_result _|Service_refusal _)
             | Error _ -> fail "valid worker snapshot rejected" in
           Eio.Fiber.first (fun () -> Eio.Switch.run (fun server_sw ->
             while true do
@@ -126,7 +125,7 @@ let transport_policy () = Eio_main.run (fun env ->
                   | Some reply -> Eio.Flow.copy_string (Yojson.Safe.to_string (W.reply_to_json reply) ^ "\n") flow)
                 | W.Issue _ -> incr issues; ignore (Eio.Promise.try_resolve (snd !issue_entered) ()); Eio.Promise.await never
                 | Retire|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _
-                | Model_requests|Model_result _|Model_wait _|Poll _|Deliver _|Disconnect _ -> fail "unexpected fixture request")
+                | Poll _|Deliver _|Disconnect _ -> fail "unexpected fixture request")
             done))
             (fun () ->
               refused "unobserved exact live transport refused" (issue (Live_route (Some ego.client_id)) click);
@@ -147,7 +146,7 @@ let transport_policy () = Eio_main.run (fun env ->
                 read [ego]; snapshot_reply := reply;
                 check bool "unsuccessful snapshot rejected" true (match call W.Snapshot with
                   | Error _|Ok (Service_refusal _) -> true
-                  | Ok (Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _) -> false);
+                  | Ok (Snapshot_result _|Download_reply _|Poll_result _|Receipt|Issue_result _) -> false);
                 refused "failed snapshot clears prior transport" (issue (Live_route (Some ego.client_id)) click))
                 [Some (W.Snapshot_result (`Assoc ["state",`String "serving"]));
                  Some (W.Service_refusal {message="retired";disposition=Not_started});None];
@@ -203,11 +202,11 @@ let private_reply_boundary () = Eio_main.run (fun env ->
             Eio.Flow.copy_string (raw ^ "\n") flow) in
           let result=Client.call client ~on_cancel_after_dispatch:(fun () -> ()) command in
           Eio.Promise.await_exn server;result in
-        check bool "snapshot reply cannot be accepted as a model reply" true
+        check bool "snapshot reply cannot be accepted as a retirement receipt" true
           (once (Yojson.Safe.to_string (W.reply_to_json (W.Snapshot_result (`String "PRIVATE_REFERENCE_MARKER"))))
-            W.Model_requests=Error (Client.Outcome_unknown "unexpected browser service reply"));
+            W.Retire=Error (Client.Outcome_unknown "unexpected browser service reply"));
         check bool "malformed private reply never echoes payload fragments" true
-          (once {|{"reply":"model","value":"PRIVATE_TOKEN_MARKER|} W.Model_requests
+          (once {|{"reply":"snapshot","snapshot":"PRIVATE_TOKEN_MARKER|} W.Retire
             =Error (Client.Outcome_unknown "malformed browser service reply"))))))
 
 let ()=run "browser addon private client" ["transport",[

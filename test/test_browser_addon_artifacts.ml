@@ -43,7 +43,7 @@ let scenario () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
   let base=private_root "browser-artifact-host-" in
   let incarnation="0b000000-0000-4000-8000-000000000051" in
   (* The ego connection's allocation, which holds the downloads this test reads. *)
-  let context=ok (Socket.context ~instance_id:incarnation ~source:Socket.Ego ~models:None) in
+  let context=ok (Socket.context ~instance_id:incarnation ~source:Socket.Ego) in
   let allocation=member "directory" context |> Yojson.Safe.Util.to_string in
   Fun.protect ~finally:(fun () ->
     if Sys.file_exists allocation then Fs_compat.remove_tree allocation;
@@ -79,7 +79,7 @@ let scenario () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
               "tabId",`Int 7;"downloads",`List [`Assoc ["downloadId",`String "download";
                 "status",`String "completed";"path",`String source;"artifact",!marker]]]]}});
           serve ()
-      | W.Service_refusal _|Snapshot_result _|Model_reply _|Download_reply _|Receipt|Issue_result _ -> `Stop_daemon in
+      | W.Service_refusal _|Snapshot_result _|Download_reply _|Receipt|Issue_result _ -> `Stop_daemon in
     serve ());
   let rec registered ()=if B.connected_clients ()=[] then (Eio.Fiber.yield ();registered ()) in registered ();
   let principal=Lane_addon_call_context.Keeper "download-reader" in
@@ -156,12 +156,12 @@ let scenario () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
           (match Eio.Promise.await retired with
            | W.Service_refusal {disposition=W.Outcome_unknown;_} -> true
            | W.Service_refusal {disposition=W.Not_started;_}
-           | Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false);
+           | Snapshot_result _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false);
         check bool "the retired owner refuses a fresh claim" true
           (match Owner.dispatch owner {W.incarnation;command=Download_claim {id;actor;route;verb}} with
            | W.Service_refusal {disposition=W.Not_started;_} -> true
            | W.Service_refusal {disposition=W.Outcome_unknown;_}
-           | Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false);
+           | Snapshot_result _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false);
         check bool "revocation still fences fresh claims" true
           (Result.is_error (Client.call client ~on_cancel_after_dispatch:(fun () -> ())
             (W.Download_claim {id;actor;route;verb})));

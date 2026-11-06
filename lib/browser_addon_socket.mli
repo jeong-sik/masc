@@ -8,8 +8,7 @@ type source =
   | Owned_firefox of Browser_addon_live_bidi.configuration
   | Ego
   | External_host
-val context : instance_id:string -> source:source ->
-  models:Browser_addon_models.configuration option -> (Yojson.Safe.t, string) result
+val context : instance_id:string -> source:source -> (Yojson.Safe.t, string) result
 (** Selects a private per-instance socket directory without creating it. Persist
     this immutable descriptor through Native_addon_lease.prepare before mkdir. *)
 val check_retained : instance_id:string -> slot:string -> Yojson.Safe.t option -> (unit, string) result

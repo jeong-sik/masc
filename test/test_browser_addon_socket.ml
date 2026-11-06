@@ -12,12 +12,11 @@ let kept_root directory = directory ^ "-kept"
 let cleanup ~admission ~directory = Socket.cleanup ~admission ~directory ~kept_root:(kept_root directory)
 (* Without a [source], the allocation is an external host worker's: it starts
    no browser and may hold only its socket. *)
-let with_claim ?(source=fun _ -> Socket.External_host) ?(models=fun _ -> None)
-    ?(context=Fun.id) work =
+let with_claim ?(source=fun _ -> Socket.External_host) ?(context=Fun.id) work =
   let directory=Filename.temp_file "browser-addon-slot-" "" in
   Unix.unlink directory;Unix.mkdir directory 0o700;
   let instance_id=Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ())) in
-  let context=ok (Socket.context ~instance_id ~source:(source directory) ~models:(models directory)) |> context in
+  let context=ok (Socket.context ~instance_id ~source:(source directory)) |> context in
   let root=match context with `Assoc fields -> (match List.assoc_opt "directory" fields with
     | Some (`String root) -> root | _ -> Alcotest.fail "missing allocation directory")
     | _ -> Alcotest.fail "invalid allocation intent" in
@@ -68,24 +67,6 @@ let replaced_directory () = with_claim (fun admission directory root ->
   lease (Lease.retire admission);
   check "different directory identity is retained" true (Result.is_error (cleanup ~admission ~directory));
   check "replacement preserved" true (Sys.file_exists root))
-let model_configuration_cleanup () =
-  let models directory=Some (Masc.Browser_addon_models.prepare_configuration ~store_root:(Filename.concat directory "model-results")
-    ~outputs:[{Masc.Lane_addon_types.name="locate";request_schema=Masc.Lane_addon_types.Package_schema_only;schema=`Assoc ["type",`String "string"]}]) in
-  with_claim ~models (fun admission directory root ->
-    let owned=ok (Socket.acquire ~admission ~directory) in
-    check "worker receives the host model configuration flag" true
-      (List.mem "--models" (Socket.arguments owned ~max_message_bytes:65536));
-    let path=Filename.concat root "models.json" in
-    let original=In_channel.with_open_bin path In_channel.input_all in
-    let retained=Filename.concat directory "model-result-receipt" in
-    Out_channel.with_open_bin retained (fun out -> output_string out "retained independently");
-    Out_channel.with_open_bin path (fun out -> output_string out "{}");
-    lease (Lease.retire admission);
-    check "changed model scope prevents allocation release" true (Result.is_error (cleanup ~admission ~directory));
-    Out_channel.with_open_bin path (fun out -> output_string out original);
-    released (cleanup ~admission ~directory);
-    check "model bootstrap is released with original allocation" false (Sys.file_exists root);
-    check "separate model receipts survive resource cleanup" true (Sys.file_exists retained))
 let owned_backend_cleanup () =
   with_claim ~source:(fun _ -> Socket.Ego)
     (fun admission directory root ->
@@ -474,7 +455,6 @@ let opaque_backends = function
   | `Assoc fields -> `Assoc (List.map (fun (key,value) -> match key with
       | "source" -> key,`Assoc ["backend",`String "ego";
           "configuration",`Assoc ["driver",`String "/fixture/driver";"binary",`Null]]
-      | "models" -> key,`String "operator-owned payload"
       | _ -> key,value) fields)
   | value -> value
 let allocation_record admission directory = Filename.concat directory
@@ -496,7 +476,7 @@ let opaque_payload_handoff () = with_claim ~context:opaque_backends (fun admissi
     (Result.is_error (cleanup ~admission ~directory));
   Alcotest.check Alcotest.string "failed cleanup leaves acquisition unchanged" acquired
     (In_channel.with_open_bin record In_channel.input_all);
-  check "official handoff does not interpret backend or model contents" true
+  check "official handoff does not interpret backend contents" true
     (retain_ok (Socket.retain ~admission ~directory)=Socket.Allocation_retained);
   check "an allocation cannot be projected as an empty reservation" true
     (Result.is_error (Socket.check_retained ~instance_id:(Lease.instance_id admission) ~slot:directory None));
@@ -569,7 +549,6 @@ let () = Alcotest.run "browser addon socket ownership" ["recovery",[
   Alcotest.test_case "crash before acquisition record" `Quick interrupted_acquisition;
   Alcotest.test_case "unconfirmed socket is retained" `Quick unknown_resources;
   Alcotest.test_case "replacement identity is retained" `Quick replaced_directory;
-  Alcotest.test_case "model bootstrap cleanup preserves separate receipts" `Quick model_configuration_cleanup;
   Alcotest.test_case "an owned backend releases once its worker settled" `Quick owned_backend_cleanup;
   Alcotest.test_case "owned cleanup resumes after interrupted file deletion" `Quick interrupted_owned_cleanup;
   Alcotest.test_case "another source's resources retain the allocation" `Quick foreign_source_resources;

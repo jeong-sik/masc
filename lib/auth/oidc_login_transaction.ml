@@ -82,25 +82,46 @@ end
 
 let lifetime_ms = 10 * 60 * 1000
 
-type started =
+type google = { nonce : string }
+
+type _ flow =
+  | Google : google flow
+  | Github : unit flow
+
+type (_, _) same = Same : ('a, 'a) same
+
+(* No wildcard, so a third flow is a compile error here and not a silent
+   [None]. *)
+let same_flow : type a b. a flow -> b flow -> (a, b) same option =
+  fun a b ->
+  match a, b with
+  | Google, Google -> Some Same
+  | Github, Github -> Some Same
+  | Google, Github | Github, Google -> None
+;;
+
+type 'held started =
   { id : Id.t
   ; state : string
-  ; nonce : string
   ; code_challenge : string
+  ; held : 'held
   }
 
-type taken =
-  { nonce : string
+type 'held taken =
+  { held : 'held
   ; code_verifier : string
   ; invite : Invite_token.t option
   ; return_to : Local_path.t
   }
 
 type entry =
-  { started_at_ms : int
-  ; state : string
-  ; held : taken
-  }
+  | Entry :
+      { flow : 'held flow
+      ; started_at_ms : int
+      ; state : string
+      ; taken : 'held taken
+      }
+      -> entry
 
 module Id_map = Map.Make (String)
 
@@ -115,12 +136,26 @@ let create ~capacity =
   { mutex = Mutex.create (); capacity; entries = Id_map.empty }
 ;;
 
-let is_live ~now_ms entry = now_ms - entry.started_at_ms < lifetime_ms
+let is_live ~now_ms (Entry entry) = now_ms - entry.started_at_ms < lifetime_ms
 let live_entries t ~now_ms = Id_map.filter (fun _ entry -> is_live ~now_ms entry) t.entries
 
 type start_error = Full
 
-let start t ~now_ms ~invite ~return_to =
+let draw_held : type held. held flow -> held = function
+  | Google -> { nonce = Random_id.hex ~bytes:random_bytes }
+  | Github -> ()
+;;
+
+let start
+  : type held.
+    t
+    -> now_ms:int
+    -> held flow
+    -> invite:Invite_token.t option
+    -> return_to:Local_path.t
+    -> (held started, start_error) result
+  =
+  fun t ~now_ms flow ~invite ~return_to ->
   Mutex.protect t.mutex (fun () ->
     let live = live_entries t ~now_ms in
     t.entries <- live;
@@ -129,38 +164,45 @@ let start t ~now_ms ~invite ~return_to =
     else (
       let id = Random_id.hex ~bytes:random_bytes in
       let state = Random_id.hex ~bytes:random_bytes in
-      let nonce = Random_id.hex ~bytes:random_bytes in
       let code_verifier = Random_id.hex ~bytes:random_bytes in
-      t.entries
-      <- Id_map.add
-           id
-           { started_at_ms = now_ms; state; held = { nonce; code_verifier; invite; return_to } }
-           live;
-      Ok { id; state; nonce; code_challenge = Auth_oauth.pkce_s256 code_verifier }))
+      let held = draw_held flow in
+      let taken = { held; code_verifier; invite; return_to } in
+      t.entries <- Id_map.add id (Entry { flow; started_at_ms = now_ms; state; taken }) live;
+      Ok { id; state; code_challenge = Auth_oauth.pkce_s256 code_verifier; held }))
 ;;
 
 type take_error =
   | Unknown
+  | Other_flow
   | Expired
   | State_differs
 
 let take_error_to_string = function
   | Unknown -> "no login is in flight with this transaction"
+  | Other_flow -> "this transaction belongs to a login with another provider"
   | Expired -> "the login took too long and has to start again"
   | State_differs -> "the state does not belong to this login"
 ;;
 
-let take t ~now_ms id ~state =
+let take
+  : type held.
+    t -> now_ms:int -> held flow -> Id.t -> state:string -> (held taken, take_error) result
+  =
+  fun t ~now_ms flow id ~state ->
   Mutex.protect t.mutex (fun () ->
     match Id_map.find_opt id t.entries with
     | None -> Error Unknown
-    | Some entry ->
+    | Some (Entry entry as found) ->
       t.entries <- Id_map.remove id t.entries;
-      if not (is_live ~now_ms entry)
-      then Error Expired
-      else if not (Eqaf.equal entry.state state)
-      then Error State_differs
-      else Ok entry.held)
+      (match same_flow flow entry.flow with
+       | None -> Error Other_flow
+       | Some Same ->
+         if not (is_live ~now_ms found)
+         then Error Expired
+         else if not (Eqaf.equal entry.state state)
+         then Error State_differs
+         else Ok entry.taken
+        : (held taken, take_error) result))
 ;;
 
 let live t ~now_ms = Mutex.protect t.mutex (fun () -> Id_map.cardinal (live_entries t ~now_ms))

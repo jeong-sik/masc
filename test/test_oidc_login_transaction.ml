@@ -20,14 +20,15 @@ let path_of text =
 ;;
 
 let started store ~now_ms ?invite ?(return_to = T.Local_path.root) () =
-  match T.start store ~now_ms ~invite ~return_to with
+  match T.start store ~now_ms T.Google ~invite ~return_to with
   | Ok started -> started
   | Error T.Full -> Alcotest.fail "the store is full"
 ;;
 
 let outcome = function
-  | Ok (_ : T.taken) -> "ok"
+  | Ok (_ : _ T.taken) -> "ok"
   | Error T.Unknown -> "unknown"
+  | Error T.Other_flow -> "other flow"
   | Error T.Expired -> "expired"
   | Error T.State_differs -> "state differs"
 ;;
@@ -35,10 +36,10 @@ let outcome = function
 let a_login_takes_back_what_it_started () =
   let store = T.create ~capacity:4 in
   let s = started store ~now_ms:0 ~invite:(invite_of token) ~return_to:(path_of "/board?tab=1") () in
-  match T.take store ~now_ms:1 s.id ~state:s.state with
+  match T.take store ~now_ms:1 T.Google s.id ~state:s.state with
   | Error error -> Alcotest.failf "refused: %s" (T.take_error_to_string error)
   | Ok taken ->
-    Alcotest.(check string) "the nonce sent to Google" s.nonce taken.nonce;
+    Alcotest.(check string) "the nonce sent to Google" s.held.nonce taken.held.nonce;
     Alcotest.(check string)
       "the challenge is S256 of the verifier"
       s.code_challenge
@@ -56,8 +57,8 @@ let a_login_takes_back_what_it_started () =
 let a_transaction_is_taken_once () =
   let store = T.create ~capacity:4 in
   let s = started store ~now_ms:0 () in
-  Alcotest.(check string) "first" "ok" (outcome (T.take store ~now_ms:0 s.id ~state:s.state));
-  Alcotest.(check string) "again" "unknown" (outcome (T.take store ~now_ms:0 s.id ~state:s.state))
+  Alcotest.(check string) "first" "ok" (outcome (T.take store ~now_ms:0 T.Google s.id ~state:s.state));
+  Alcotest.(check string) "again" "unknown" (outcome (T.take store ~now_ms:0 T.Google s.id ~state:s.state))
 ;;
 
 let a_wrong_state_spends_the_transaction () =
@@ -67,12 +68,12 @@ let a_wrong_state_spends_the_transaction () =
   Alcotest.(check string)
     "another login's state"
     "state differs"
-    (outcome (T.take store ~now_ms:0 s.id ~state:other.state));
-  Alcotest.(check string) "then the right one" "unknown" (outcome (T.take store ~now_ms:0 s.id ~state:s.state));
+    (outcome (T.take store ~now_ms:0 T.Google s.id ~state:other.state));
+  Alcotest.(check string) "then the right one" "unknown" (outcome (T.take store ~now_ms:0 T.Google s.id ~state:s.state));
   Alcotest.(check string)
     "the other login is untouched"
     "ok"
-    (outcome (T.take store ~now_ms:0 other.id ~state:other.state))
+    (outcome (T.take store ~now_ms:0 T.Google other.id ~state:other.state))
 ;;
 
 let a_transaction_expires () =
@@ -82,23 +83,57 @@ let a_transaction_expires () =
   Alcotest.(check string)
     "just before its lifetime"
     "ok"
-    (outcome (T.take store ~now_ms:(1000 + T.lifetime_ms - 1) early.id ~state:early.state));
+    (outcome (T.take store ~now_ms:(1000 + T.lifetime_ms - 1) T.Google early.id ~state:early.state));
   Alcotest.(check string)
     "at its lifetime"
     "expired"
-    (outcome (T.take store ~now_ms:(1000 + T.lifetime_ms) late.id ~state:late.state));
+    (outcome (T.take store ~now_ms:(1000 + T.lifetime_ms) T.Google late.id ~state:late.state));
   Alcotest.(check string)
     "an expired one is gone"
     "unknown"
-    (outcome (T.take store ~now_ms:(1000 + T.lifetime_ms) late.id ~state:late.state))
+    (outcome (T.take store ~now_ms:(1000 + T.lifetime_ms) T.Google late.id ~state:late.state))
+;;
+
+(* The callback of one provider cannot take the transaction of another, and
+   the refusal spends it as a wrong state does. *)
+let a_transaction_of_another_flow_is_not_taken () =
+  let store = T.create ~capacity:4 in
+  let github ~invite =
+    match T.start store ~now_ms:0 T.Github ~invite ~return_to:(path_of "/keepers") with
+    | Ok (started : unit T.started) -> started
+    | Error T.Full -> Alcotest.fail "the store is full"
+  in
+  let first = github ~invite:(Some (invite_of token)) in
+  Alcotest.(check string)
+    "a GitHub transaction at the Google callback"
+    "other flow"
+    (outcome (T.take store ~now_ms:0 T.Google first.id ~state:first.state));
+  Alcotest.(check string)
+    "spent by the refusal"
+    "unknown"
+    (outcome (T.take store ~now_ms:0 T.Github first.id ~state:first.state));
+  let google = started store ~now_ms:0 () in
+  Alcotest.(check string)
+    "a Google transaction at the GitHub callback"
+    "other flow"
+    (outcome (T.take store ~now_ms:0 T.Github google.id ~state:google.state));
+  let second = github ~invite:None in
+  match T.take store ~now_ms:1 T.Github second.id ~state:second.state with
+  | Error error -> Alcotest.failf "refused: %s" (T.take_error_to_string error)
+  | Ok (taken : unit T.taken) ->
+    Alcotest.(check string)
+      "the GitHub challenge is S256 of the verifier"
+      second.code_challenge
+      (Auth_oauth.pkce_s256 taken.code_verifier);
+    Alcotest.(check string) "the return path" "/keepers" (T.Local_path.to_string taken.return_to)
 ;;
 
 let a_full_store_refuses_a_start () =
   let store = T.create ~capacity:2 in
   let first = started store ~now_ms:0 () in
-  let (_ : T.started) = started store ~now_ms:5 () in
+  let (_ : T.google T.started) = started store ~now_ms:5 () in
   let full () =
-    match T.start store ~now_ms:10 ~invite:None ~return_to:T.Local_path.root with
+    match T.start store ~now_ms:10 T.Google ~invite:None ~return_to:T.Local_path.root with
     | Error T.Full -> true
     | Ok _ -> false
   in
@@ -107,11 +142,11 @@ let a_full_store_refuses_a_start () =
   Alcotest.(check string)
     "the first one survived the refusal"
     "ok"
-    (outcome (T.take store ~now_ms:10 first.id ~state:first.state));
+    (outcome (T.take store ~now_ms:10 T.Google first.id ~state:first.state));
   Alcotest.(check bool) "a taken one frees a place" false (full ());
   Alcotest.(check bool) "full again" true (full ());
   Alcotest.(check int) "none live after the lifetime" 0 (T.live store ~now_ms:(10 + T.lifetime_ms));
-  match T.start store ~now_ms:(10 + T.lifetime_ms) ~invite:None ~return_to:T.Local_path.root with
+  match T.start store ~now_ms:(10 + T.lifetime_ms) T.Google ~invite:None ~return_to:T.Local_path.root with
   | Ok _ -> ()
   | Error T.Full -> Alcotest.fail "expired transactions were counted"
 ;;
@@ -138,9 +173,11 @@ let secrets_are_drawn_apart () =
   let b = started store ~now_ms:0 () in
   List.iter
     (fun (label, value) -> Alcotest.(check bool) label true (is_lower_hex_of 64 value))
-    [ "id", T.Id.to_string a.id; "state", a.state; "nonce", a.nonce ];
+    [ "id", T.Id.to_string a.id; "state", a.state; "nonce", a.held.nonce ];
   Alcotest.(check int) "the challenge is 43 base64url characters" 43 (String.length a.code_challenge);
-  let values = [ T.Id.to_string a.id; a.state; a.nonce; T.Id.to_string b.id; b.state; b.nonce ] in
+  let values =
+    [ T.Id.to_string a.id; a.state; a.held.nonce; T.Id.to_string b.id; b.state; b.held.nonce ]
+  in
   Alcotest.(check int)
     "no two are the same"
     (List.length values)
@@ -152,7 +189,7 @@ let ids_parse_back () =
   let store = T.create ~capacity:1 in
   let s = started store ~now_ms:0 () in
   (match T.Id.of_string (T.Id.to_string s.id) with
-   | Some id -> Alcotest.(check string) "read back" "ok" (outcome (T.take store ~now_ms:0 id ~state:s.state))
+   | Some id -> Alcotest.(check string) "read back" "ok" (outcome (T.take store ~now_ms:0 T.Google id ~state:s.state))
    | None -> Alcotest.fail "an ID did not read back");
   List.iter
     (fun text -> Alcotest.(check bool) text true (Option.is_none (T.Id.of_string text)))
@@ -211,8 +248,8 @@ let return_paths_parse_by_grammar () =
 ;;
 
 let take_errors_are_told_apart () =
-  let texts = List.map T.take_error_to_string [ T.Unknown; T.Expired; T.State_differs ] in
-  Alcotest.(check int) "each error has its own text" 3 (List.length (List.sort_uniq String.compare texts))
+  let texts = List.map T.take_error_to_string [ T.Unknown; T.Other_flow; T.Expired; T.State_differs ] in
+  Alcotest.(check int) "each error has its own text" 4 (List.length (List.sort_uniq String.compare texts))
 ;;
 
 let () =
@@ -223,6 +260,7 @@ let () =
         ; Alcotest.test_case "taken once" `Quick a_transaction_is_taken_once
         ; Alcotest.test_case "a wrong state spends it" `Quick a_wrong_state_spends_the_transaction
         ; Alcotest.test_case "expires" `Quick a_transaction_expires
+        ; Alcotest.test_case "another flow" `Quick a_transaction_of_another_flow_is_not_taken
         ; Alcotest.test_case "a full store" `Quick a_full_store_refuses_a_start
         ; Alcotest.test_case "capacity" `Quick a_store_holds_at_least_one
         ; Alcotest.test_case "secrets" `Quick secrets_are_drawn_apart

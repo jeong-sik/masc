@@ -597,6 +597,8 @@ with open(os.path.join(HERE, "selected-home.txt"), "w") as handle:
     handle.write(os.environ["HOME"])
 with open(os.path.join(HERE, "managed-config.txt"), "w") as handle:
     handle.write(os.environ["XDG_CONFIG_HOME"])
+with open(os.path.join(HERE, "native-data.txt"), "w") as handle:
+    handle.write(os.environ["XDG_DATA_HOME"])
 FIXTURE = json.load(open(os.path.join(HERE, "fixture.json")))
 SESSION = FIXTURE["session_id"]
 SCENARIO = FIXTURE.get("scenario", "complete")
@@ -2187,6 +2189,57 @@ let test_a_changed_model_starts_a_fresh_session () =
       (read_text (Filename.concat base_path "sessions.log")
        |> String.split_on_char '\n'
        |> List.filter (fun line -> line <> "")))
+;;
+
+(* RFC-0495: the host keeps its native files in one root per Keeper. A new
+   session empties it, a resumed one keeps it, and a root that cannot be
+   prepared fails the turn before the host is launched, leaving the session
+   to resume. *)
+let test_a_new_session_empties_the_keeper_storage_root () =
+  with_scripted_host (fun ~base_path ->
+    let tool = masc_probe_tool (ref `Null) in
+    let root =
+      match Keeper_official_client_paths.muse_storage_dir ~base_path ~keeper_name with
+      | Ok root -> root
+      | Error detail -> fail detail
+    in
+    let left = Filename.concat root "data/left-by-an-earlier-session" in
+    let leave () =
+      Fs_compat.mkdir_p (Filename.dirname left);
+      write_file ~mode:0o600 left ""
+    in
+    let sessions () =
+      read_text (Filename.concat base_path "sessions.log")
+      |> String.split_on_char '\n'
+      |> List.filter (fun line -> line <> "")
+    in
+    let turn label model =
+      match (run_turn_with ~model ~base_path ~tool ()).outcome.result with
+      | Ok _ -> ()
+      | Error error -> failf "%s: %s" label (Agent_core.Error.to_string error)
+    in
+    leave ();
+    turn "first turn" "muse-a";
+    check string "the host's data is under the Keeper root" (Filename.concat root "data")
+      (read_text (Filename.concat base_path "native-data.txt"));
+    check bool "a new session emptied the root" false (Sys.file_exists left);
+    leave ();
+    write_fixture ~base_path [ "resume_model_id", `String "muse-a" ];
+    turn "resumed turn" "muse-a";
+    check bool "a resumed session kept the root" true (Sys.file_exists left);
+    Fs_compat.remove_tree root;
+    write_file ~mode:0o600 root "";
+    (match (run_turn_with ~model:"muse-a" ~base_path ~tool ()).outcome.result with
+     | Error _ -> ()
+     | Ok _ -> fail "a root that is not a directory reached the host");
+    check (list string) "the host was not launched" [ "start"; "resume" ] (sessions ());
+    Fs_compat.remove_tree root;
+    turn "turn after the root is repaired" "muse-a";
+    leave ();
+    turn "turn on another model" "muse-b";
+    check (list string) "the failed preparation left the session to resume"
+      [ "start"; "resume"; "resume"; "start" ] (sessions ());
+    check bool "the next new session emptied the root again" false (Sys.file_exists left))
 ;;
 
 (* The same configuration resumed selects the configured model before the
@@ -4047,6 +4100,8 @@ let () =
             test_resumed_model_is_reselected_before_dispatch
         ; test_case "a changed model starts a fresh session" `Quick
             test_a_changed_model_starts_a_fresh_session
+        ; test_case "a new session empties the Keeper storage root" `Quick
+            test_a_new_session_empties_the_keeper_storage_root
         ] )
     ; ( "owner stops"
       , [ test_case "an operator interrupt keeps the settled session" `Quick

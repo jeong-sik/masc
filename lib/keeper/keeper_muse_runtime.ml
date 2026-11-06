@@ -1505,16 +1505,25 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
     (* The host keeps its native files in this Keeper's own root
        (RFC-0495 §2.2), not in the account home other Keepers share. A root
        that cannot be prepared ends the turn before dispatch rather than
-       opening a session in it. *)
+       opening a session in it.
+
+       HIGH-RISK-UNREVIEWED: a new session empties the root first (§2.3).
+       Every session left in it was dropped by this claim, and the claim was
+       refused while another turn of this Keeper was in Start, Active or
+       Turn_inflight, so no host of this Keeper is using the root. *)
     let prepare_storage () =
       let* root = Keeper_official_client_paths.muse_storage_dir ~base_path ~keeper_name in
       match
+        (match session_mode with
+         | Serve.Start -> Fs_compat.remove_tree root
+         | Serve.Resume _ -> ());
         Eio_guard.run_in_systhread ~label:"muse keeper native storage" (fun () ->
           Serve.ensure_storage_dirs root)
       with
       | () -> Ok (Serve.Keeper_owned root)
       | exception Unix.Unix_error (error, operation, path) ->
         Error (Printf.sprintf "%s %s: %s" operation path (Unix.error_message error))
+      | exception Sys_error detail -> Error detail
     in
     let run_client () =
       Eio.Switch.run (fun sw ->

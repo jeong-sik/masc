@@ -32,7 +32,7 @@ let test_waiting_group_preserves_all_reasons_at_ninety_cells () =
   Alcotest.(check bool) "wide frames keep full labels" false wide.compact
 
 let test_hidden_runtime_preserves_failure_context_in_detail () =
-  let context = Some "streaming · last failed · provider · 3m ago" in
+  let context = Some "◂ 3m · provider · claude_code.claude-sonnet-5-5 · 1 attempt" in
   Alcotest.(check (option string)) "Grouped carries the existing failure reading"
     context
     (Masc_tui_render_schedule.keeper_failure_context_for_detail

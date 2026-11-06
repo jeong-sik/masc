@@ -254,17 +254,31 @@ let group_of_activity = function
   | Idle | Paused | Offline -> Inactive
   | Unknown -> Unobserved
 
-let health_is_failing row = health_reading row = Some Masc.Tui_decode.Health_failing
+let runtime_of_row row =
+  match row.reading.Masc_tui_keeper_control.liveness with
+  | Masc_tui_keeper_control.Present runtime -> Some runtime
+  | Masc_tui_keeper_control.Absent | Masc_tui_keeper_control.Unobserved
+  | Masc_tui_keeper_control.Invalid _ -> None
+
+let trail_of_row row =
+  Masc_tui_keeper_trail.of_readings
+    ~health:(Masc_tui_keeper_control.health row.reading)
+    ~runtime:(runtime_of_row row)
+
+let trail_is_failed row =
+  match trail_of_row row with
+  | Masc_tui_keeper_trail.Trail_failed _ -> true
+  | Masc_tui_keeper_trail.Trail_sound -> false
 
 (* A person's decision outranks a failure, so [Attention] keeps its rows. Any
-   other row whose health is failing is in [Failing], whatever it is doing. *)
+   other row whose trail is failed is in [Failing], whatever it is doing. *)
 let group_of ~failing activity =
   match group_of_activity activity with
   | Attention -> Attention
   | Failing -> Failing
   | (Active | Waiting | Inactive | Unobserved) as group -> if failing then Failing else group
 
-let group_of_row row = group_of ~failing:(health_is_failing row) (primary_activity_of_row row)
+let group_of_row row = group_of ~failing:(trail_is_failed row) (primary_activity_of_row row)
 
 let attention_rank = function
   | Attention -> 0
@@ -308,7 +322,7 @@ type ranked = { row : row; activity : activity; group : attention }
 
 let rank row =
   let activity = primary_activity_of_row row in
-  { row; activity; group = group_of ~failing:(health_is_failing row) activity }
+  { row; activity; group = group_of ~failing:(trail_is_failed row) activity }
 
 let order_rows ~layout ~sort rows =
   List.map rank rows
@@ -368,7 +382,7 @@ let waiting_summary rows =
   List.fold_left
     (fun summary row ->
       let activity = primary_activity_of_row row in
-      match group_of ~failing:(health_is_failing row) activity with
+      match group_of ~failing:(trail_is_failed row) activity with
       | Attention | Failing | Active | Inactive | Unobserved -> summary
       | Waiting -> (
           let running, _, _, _ = async_counts row.async_requests in

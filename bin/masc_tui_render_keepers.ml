@@ -24,6 +24,7 @@ module Render_schedule = Masc_tui_render_schedule
 module Layout = Masc_tui_layout
 module Keeper_control = Masc_tui_keeper_control
 module Keeper_list_model = Masc_tui_keeper_list_model
+module Keeper_trail = Masc_tui_keeper_trail
 module Item_account = Masc_tui_keeper_items
 
 let format_context_tokens = Masc_tui_types.format_context_tokens
@@ -86,28 +87,69 @@ let keeper_failure_cause_word = function
   | Keeper_failure_exception -> "exception"
   | Keeper_failure_operator_interrupt -> "operator interrupt"
 
-let keeper_current_activity_word = function
-  | Keeper_activity_idle -> "idle"
-  | Keeper_activity_waiting -> "waiting"
-  | Keeper_activity_running -> "running"
-  | Keeper_activity_streaming -> "streaming"
-  | Keeper_activity_tool -> "tool"
-  | Keeper_activity_preparing -> "preparing"
-  | Keeper_activity_attempt_failed -> "attempt failed"
-  | Keeper_activity_unknown -> "unknown"
+(* Opens every line about the past: the FAILING heading, its count in the
+   summary, and the sentence that says what a failing Keeper last failed at. *)
+let failing_glyph = "\xe2\x97\x82" (* ◂ *)
 
-let keeper_failure_context ~now status =
-  let cause, age =
-    match status.kfs_last_failure with
-    | None -> ("unknown", "unknown time")
-    | Some failure ->
-        ( keeper_failure_cause_word failure.kf_cause
-        , match failure.kf_at_unix with
-          | None -> "unknown time"
-          | Some since -> Option.value (Message_layout.age_text ~now ~since) ~default:"unknown time" )
-  in
-  keeper_current_activity_word status.kfs_current_activity
-  ^ " · last failed · " ^ cause ^ " · " ^ age
+(* The detail window and the failure sentence name a receipt's state with the
+   same words. *)
+let no_receipt_text = "no receipt"
+let walk_not_captured_text = "candidate walk was not captured"
+let evidence_unreadable_text = "historical evidence unreadable"
+
+let keeper_cause_group_word = function
+  | Keeper_trail.Rate_limited -> "rate limited"
+  | Keeper_trail.Connection -> "connection"
+  | Keeper_trail.Provider -> "provider"
+  | Keeper_trail.Configuration -> "config"
+  | Keeper_trail.Input -> "input too large"
+  | Keeper_trail.Unusable_reply -> "unusable reply"
+  | Keeper_trail.Effect_fenced -> "effect fenced"
+  | Keeper_trail.Recovery -> "recovery needed"
+  | Keeper_trail.Stopped -> "stopped"
+  | Keeper_trail.Server -> "server"
+  | Keeper_trail.Internal -> "internal"
+
+let unknown_time_text = "unknown time"
+
+let keeper_trail_age_text ~now = function
+  | None -> unknown_time_text
+  | Some since ->
+      Option.value (Message_layout.age_text ~now ~since) ~default:unknown_time_text
+
+(* The sentence about a failing Keeper's past. [age] turns the failure time
+   into the text drawn for it. A sentence has one source: the receipt when it
+   holds facts about the turn, the server's own cause word otherwise. *)
+let keeper_trail_sentence ~age = function
+  | Keeper_trail.Trail_sound -> None
+  | Keeper_trail.Trail_failed { ended_at; last; walk } ->
+      let reported =
+        match last with
+        | Some cause -> keeper_failure_cause_word cause
+        | None -> "no failure record"
+      in
+      let rest =
+        match walk with
+        | Keeper_trail.Walk_ended { runtime_id; cause; tried } ->
+            [ keeper_cause_group_word cause
+            ; Terminal_text.single_line runtime_id
+            ; Message_layout.count_noun tried "attempt"
+            ]
+        | Keeper_trail.Walk_no_terminal { tried } ->
+            [ "terminal not observed"; Message_layout.count_noun tried "attempt" ]
+        | Keeper_trail.Walk_not_captured -> [ reported; walk_not_captured_text ]
+        | Keeper_trail.Walk_unreadable -> [ reported; evidence_unreadable_text ]
+        | Keeper_trail.Walk_absent -> [ reported; no_receipt_text ]
+        | Keeper_trail.Walk_not_applicable -> [ reported ]
+      in
+      Some (String.concat " · " ((failing_glyph ^ " " ^ age ended_at) :: rest))
+
+let keeper_row_trail_sentence ~age (row : Keeper_list_model.row) =
+  keeper_trail_sentence ~age (Keeper_list_model.trail_of_row row)
+
+(* The sentence is measured with the widest age the AGE column holds, so the
+   column it widens does not change width as the clock runs. *)
+let widest_age_text = String.make Render_schedule.keeper_last_turn_width '0'
 
 let keeper_runtime_cell ~width ?failure_context (runtime : keeper_runtime option) =
   match failure_context with
@@ -289,15 +331,13 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
     Message_layout.fit_middle columns.kcol_name
       (Terminal_text.single_line keeper.Tui_decode.k_name)
   in
-  let health = Keeper_control.health row.reading in
   let runtime =
     match row.reading.Keeper_control.liveness with
     | Keeper_control.Present runtime -> Some runtime
     | Keeper_control.Absent | Keeper_control.Unobserved | Keeper_control.Invalid _ -> None
   in
   let failure_context =
-    Option.map (keeper_failure_context ~now)
-      (Tui_decode.keeper_failure_status_of_readings ~health ~turn:row.turn ~runtime)
+    keeper_row_trail_sentence ~age:(keeper_trail_age_text ~now) row
   in
   let age =
     match row.last_activity_at with
@@ -525,7 +565,7 @@ let keeper_group_heading_text ~available_cells rows group count =
   let glyph, label =
     match group with
     | Keeper_list_model.Attention -> "!", "ATTENTION"
-    | Keeper_list_model.Failing -> "\xe2\x97\x82", "FAILING" (* ◂ *)
+    | Keeper_list_model.Failing -> failing_glyph, "FAILING"
     | Keeper_list_model.Active -> "\xe2\x96\xb6", "ACTIVE" (* ▶ *)
     | Keeper_list_model.Waiting -> "\xe2\x97\x8c", "WAITING" (* ◌ *)
     | Keeper_list_model.Inactive -> "\xe2\x97\x8b", "INACTIVE" (* ○ *)
@@ -560,7 +600,7 @@ let keeper_view_summary ~cells rows layout sort =
     | Keeper_list_model.Compact | Keeper_list_model.Detailed ->
         let counts : Keeper_list_model.group_counts = Keeper_list_model.group_counts rows in
         [ Printf.sprintf "! %d attention" counts.attention_rows
-        ; Printf.sprintf "\xe2\x97\x82 %d failing" counts.failing_rows
+        ; Printf.sprintf "%s %d failing" failing_glyph counts.failing_rows
         ; Printf.sprintf "\xe2\x96\xb6 %d active" counts.active_rows
         ; Printf.sprintf "\xe2\x97\x8c %d waiting" counts.waiting_rows
         ; Printf.sprintf "\xe2\x97\x8b %d inactive" counts.inactive_rows
@@ -727,14 +767,13 @@ let render_keeper_list (state : state) =
 
   (* Measured over every reading rather than the rows on screen, so the
      columns do not move while a reader scrolls. *)
+  let failure_sentence_cells (row : Keeper_list_model.row) =
+    match keeper_row_trail_sentence ~age:(fun _ -> widest_age_text) row with
+    | Some sentence -> Message_layout.display_width sentence
+    | None -> 0
+  in
   let has_failing_keeper =
-    List.exists
-      (fun (row : Keeper_list_model.row) ->
-        match Keeper_control.health row.reading with
-        | Some value ->
-            Tui_decode.keeper_health_reading value = Tui_decode.Health_failing
-        | None -> false)
-      model_rows
+    List.exists (fun row -> failure_sentence_cells row > 0) model_rows
   in
   let widest_runtime =
     List.fold_left
@@ -746,13 +785,7 @@ let render_keeper_list (state : state) =
           | Keeper_control.Absent | Keeper_control.Unobserved
           | Keeper_control.Invalid _ -> None
         in
-        let failure_context_width =
-          match Keeper_control.health reading with
-          | Some value when
-              Tui_decode.keeper_health_reading value = Tui_decode.Health_failing -> 60
-          | None | Some _ -> 0
-        in
-        max widest (max failure_context_width (keeper_runtime_cells runtime)))
+        max widest (max (failure_sentence_cells row) (keeper_runtime_cells runtime)))
       0 model_rows
   in
   let columns =
@@ -1820,13 +1853,13 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       (match (keeper_reading state k).Keeper_control.liveness with
        | Keeper_control.Present runtime ->
          (match runtime.kr_runtime_lane_observation with
-          | None -> wrap ~tone:Ansi.dim "no receipt"
+          | None -> wrap ~tone:Ansi.dim no_receipt_text
           | Some (Receipt.Runtime_lane_not_observed turn) ->
             source turn;
-            wrap ~tone:Ansi.dim "candidate walk was not captured"
+            wrap ~tone:Ansi.dim walk_not_captured_text
           | Some (Receipt.Runtime_lane_unreadable {turn;field}) ->
             Option.iter source turn;
-            wrap ~tone:(Theme.warn ()) ("historical evidence unreadable: " ^ field)
+            wrap ~tone:(Theme.warn ()) (evidence_unreadable_text ^ ": " ^ field)
           | Some (Receipt.Runtime_lane_observed {turn;evidence}) ->
             source turn;
             (match evidence.failures with

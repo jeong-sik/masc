@@ -882,6 +882,28 @@ let test_shape_changing_post_validation_is_executed () =
   | Ok _ -> Alcotest.fail "translated payload skipped descriptor validation"
 ;;
 
+(* #49485: a model calls tool_execute as Execute. Its rejection is counted
+   with the tool's other calls, under the internal name. *)
+let test_public_name_rejection_belongs_to_the_internal_tool () =
+  let descriptor = required_public_descriptor "Execute" in
+  Alcotest.(check bool)
+    "the public name is not the internal name"
+    false
+    (String.equal descriptor.internal_name "Execute");
+  match
+    Resolution.prepare_model_input_for_descriptor
+      ~tool_name:"Execute"
+      descriptor
+      ~input:(`Assoc [ "unexpected", `Bool true ])
+  with
+  | Error validation_result ->
+    Alcotest.(check string)
+      "the rejection carries the internal name"
+      descriptor.internal_name
+      (Tool_result.tool_name validation_result)
+  | Ok _ -> Alcotest.fail "an undeclared argument must be rejected"
+;;
+
 let test_memory_write_descriptor_schema_is_closed () =
   let descriptor = required_internal_descriptor "keeper_memory_write" in
   Alcotest.(check bool)
@@ -2287,6 +2309,10 @@ let () =
             "shape-changing translations validate their output"
             `Quick
             test_shape_changing_post_validation_is_executed
+        ; test_case
+            "a rejection by public name carries the internal name"
+            `Quick
+            test_public_name_rejection_belongs_to_the_internal_tool
         ; test_case
             "Read validates then translates supported public fields"
             `Quick

@@ -78,8 +78,15 @@ type rejection = private
     [?schema] lets direct AGENT_CORE tool handlers validate against the schema they
     already hold, without depending on the global Tool_dispatch schema registry
     being populated in that execution path. When omitted, validation falls back
-    to [Tool_dispatch.lookup_schema]. *)
+    to [Tool_dispatch.lookup_schema].
+
+    [name] is the name the caller used; the message shows it. [?internal_name]
+    is the tool that name resolves to when they differ, as a Keeper's public
+    tool name does: the rejection's [tool_name], its telemetry and its log line
+    then carry the internal name, the key every tool counter uses. Without it,
+    [name] is the internal name. *)
 val validate :
+  ?internal_name:string ->
   ?schema:Yojson.Safe.t ->
   name:string ->
   args:Yojson.Safe.t ->
@@ -91,6 +98,7 @@ val rejection_result : rejection -> Tool_result.result
 
 (** {!validate} with the rejection already rendered by {!rejection_result}. *)
 val validate_args :
+  ?internal_name:string ->
   ?schema:Yojson.Safe.t ->
   name:string ->
   args:Yojson.Safe.t ->

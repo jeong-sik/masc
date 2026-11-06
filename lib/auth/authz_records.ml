@@ -110,4 +110,12 @@ module Author = struct
     | System_cron
     | System_maintenance
     | System_migration
+
+  let label = function
+    | Authenticated principal -> "the principal " ^ Principal.to_string principal
+    | Local_operator -> "the local operator"
+    | System_cron -> "the system cron"
+    | System_maintenance -> "the system maintenance"
+    | System_migration -> "the system migration"
+  ;;
 end

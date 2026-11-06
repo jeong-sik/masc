@@ -53,20 +53,13 @@ type error =
   | Invalid_user_id of Authz_id.error
   | Invalid_identity of Identity.body_error
 
-let id_error_to_string : Authz_id.error -> string = function
-  | Authz_id.Empty -> "empty"
-  | Authz_id.Too_long -> "too long"
-  | Authz_id.Invalid_byte { index } -> Printf.sprintf "invalid byte at %d" index
-  | Authz_id.Path_segment -> "a path segment"
-;;
-
 let error_to_string = function
   | Not_an_object -> "the body of a principal record is an object"
   | Unknown_event label -> Printf.sprintf "%S is not an event of a principal" label
   | Wrong_members ->
     "a disabled or enabled principal has the members event and user_id, both strings, and a \
      deleted one also identity, an object, in this order"
-  | Invalid_user_id error -> Printf.sprintf "the user id is not valid: %s" (id_error_to_string error)
+  | Invalid_user_id error -> Printf.sprintf "the user id is not valid: %s" (Authz_id.error_to_string error)
   | Invalid_identity error -> "the identity is not valid: " ^ Identity.body_error_to_string error
 ;;
 

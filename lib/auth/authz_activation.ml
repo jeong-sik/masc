@@ -44,15 +44,8 @@ type error =
   | Bootstrap_failed of Authz_bootstrap.error
   | Invitation_not_written of invitation_error
 
-let id_error_to_string = function
-  | Authz_id.Empty -> "it is empty"
-  | Authz_id.Too_long -> "it is too long"
-  | Authz_id.Invalid_byte { index } -> Printf.sprintf "byte %d is outside its alphabet" index
-  | Authz_id.Path_segment -> "it is a path segment"
-;;
-
 let invitation_error_to_string = function
-  | Invite_id_not_built error -> "the invite id was refused: " ^ id_error_to_string error
+  | Invite_id_not_built error -> "the invite id was refused: " ^ Authz_id.error_to_string error
   | Body_not_built error -> "the invitation was refused: " ^ Authz_body.error_to_string error
   | Zone_not_opened error -> "the zone was not opened: " ^ Z.open_error_to_string error
   | Commit_failed error -> Z.error_to_string error
@@ -72,7 +65,7 @@ let error_to_string = function
   | Boot_stops (first, rest) ->
     "a boot stops on this installation, and an activation would not change that: "
     ^ String.concat "; " (first :: rest)
-  | Workspace_id_not_built error -> "the workspace id was refused: " ^ id_error_to_string error
+  | Workspace_id_not_built error -> "the workspace id was refused: " ^ Authz_id.error_to_string error
   | Bootstrap_failed error -> "the bootstrap failed: " ^ Authz_bootstrap.error_to_string error
   | Invitation_not_written error ->
     "the installation is bootstrapped and holds no Admin invitation; masc auth invite writes \

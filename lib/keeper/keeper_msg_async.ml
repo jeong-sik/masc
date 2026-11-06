@@ -10,11 +10,10 @@
     removes them. Startup recovery scans only the active partition; historical
     terminal volume is not on the synchronous recovery path. *)
 
-open Keeper_types
-open Keeper_meta_contract
-open Keeper_types_profile
-
-open Result.Syntax
+(* The items live in the Keeper_msg_async_* modules, included in the order
+   below. Each module reads only the ones above it: Types and Record (the
+   siblings), then State, Locks, Store, Recovery, Lifecycle, Submit, Query and
+   Cancel. Only For_testing is written here. *)
 
 include Keeper_msg_async_types
 open Keeper_msg_async_record

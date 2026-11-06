@@ -273,11 +273,10 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
     - 저장소에 든 항목 수에 상한을 둔다. 가득 차면 새 시작을 503으로 거절한다. 오래된 항목을 밀어내면 다른 사람이 진행 중인 로그인이 사라진다. 상한 값은 이 층이 정한다.
     - 초대 링크(B3d-1의 `/accounts/invite#<token>`)가 폼 POST로 보낸 token은 transaction 안에만 둔다. token은 추상 타입이고, 밖으로 내는 함수는 digest뿐이다. 그래서 로그와 오류 문구에 실리지 않는다(§5.1-4).
     - `return_to`는 접두어로 거르지 않고 RFC 3986 상대 참조로 파싱해 닫힌 타입 `Local_path.t`로 바꾼다(§5.2). scheme과 authority가 없고 path가 `/`로 시작해야 한다. RFC 3986 path에 없는 글자(`\` 등)는 파싱에서 거절한다. 브라우저가 `\`를 `/`로 읽어 `/\host`를 다른 호스트로 보내기 때문이다. 리다이렉트는 `Local_path.t`로만 만든다.
-  - C2a-3 Google과 주고받기. discovery 문서, JWKS, token 교환을 `Masc_http_client`로 한다. token 교환은 code·verifier·client ID·client secret·redirect URI를 보내 `id_token`을 받는다.
+  - C2a-3 Google과 주고받기. discovery 문서, JWKS, token 교환이다. token 교환은 code·verifier·client ID·client secret·redirect URI를 보내 `id_token`을 받는다.
+    - 전송은 함수로 받는다. `lib/auth`는 HTTP 클라이언트에 의존하지 않는다. 서버(C2a-5)가 `Masc_http_client` 호출을 넘긴다(선례 `Keeper_oauth_flow.post`). 시험은 그 함수가 고정 응답을 내고 Google에 접속하지 않는다.
     - ID token은 브라우저에서 받지 않는다. 서버가 TLS로 받은 token 엔드포인트 응답에서만 받는다.
     - JWKS는 `Cache-Control: max-age` 동안 쓴다. token의 `kid`가 그 JWKS에 없으면 한 번 다시 가져온다. `kid`는 Google 응답에서 오므로 밖에서 다시 가져오기를 부추길 수 없다.
-    - 설정은 `auth_config.oidc`이고 client ID, redirect URI, client secret을 담은 환경 변수의 이름을 둔다. secret 값은 `config.json`에 두지 않는다. `save_auth_config`가 그 파일을 다시 쓰고, 백업에도 들어가기 때문이다. `Multi_account`가 아니면 이 필드를 읽지 않는다.
-    - 시험은 고정 응답을 내는 로컬 HTTP 서버로 하고 Google에 접속하지 않는다(C2b와 같다).
   - C2a-4 입장 쓰기. callback의 마지막 판정이다. 구역의 한 snapshot에서 읽는다.
     - 신원이 활성 principal이면 그 `user_id`로 로그인한다. `Disabled`이면 거절한다(§4.1). 초대 token이 함께 오면 409다. 이미 결속된 신원으로 새 User를 만드는 것은 sub 재결속이기 때문이다(§5.1-3). 아무것도 쓰지 않는다.
     - 신원이 없고 초대 token이 있으면 digest로 초대를 찾는다(`find_by_token_digest`). `user_id`와 namespace를 OS CSPRNG로 뽑아 입장 레코드 하나를 `Authz_zone.commit`으로 쓴다.
@@ -289,6 +288,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
   - C2a-5 경로. `POST /auth/oidc/start`와 `GET /auth/oidc/callback`이다.
     - start는 폼으로 초대 token(선택)과 `return_to`를 받는다. transaction을 만들고 Google 인가 URL로 보낸다.
     - callback은 C2a-2, 3, 1, 4 순서로 돌고, 비공개 데이터가 없는 200 HTML 완료 화면을 돌려준다(§5.2).
+    - 설정은 `auth_config.oidc`다. client ID, redirect URI, client secret을 담은 환경 변수의 이름을 둔다. secret 값은 `config.json`에 두지 않는다. `save_auth_config`가 그 파일을 다시 쓰고, 백업에도 들어가기 때문이다. `Multi_account`가 아니면 이 필드를 읽지 않는다.
     - 경로 등록은 구역을 받는 함수 하나다. S1이 부팅에서 연 구역으로 부른다. 그 전에는 다계정 부팅이 멈추므로 등록되지 않는다.
     - 세션 발급은 C3이 한다. 이 층의 callback은 완료 화면까지만 보이고 세션을 만들지 않는다.
 - 시험 벡터는 표의 C2a 행을 따른다. C1이 서명을, C2a-1이 `iss`·`aud`·`nonce`를, C2a-2가 `state`를 맡는다. 만료됐거나 취소된 초대 token, 초대 동시 소비(409), `Disabled` 등록 사용자의 로그인, 미등록 사용자의 거절은 C2a-4가 맡는다.

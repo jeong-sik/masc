@@ -1,5 +1,5 @@
 (** Keeper_turn_up_update_failure_site — closed sum for the [site] label on
-    [metric_keeper_turn_up_update_failures]. *)
+    [masc_keeper_turn_up_update_failures_total]. *)
 
 type t =
   | Config_persistence

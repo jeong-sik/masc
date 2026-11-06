@@ -1,5 +1,5 @@
 (** Keeper_write_meta_cycle_failure_site — closed sum for [site] label on
-    [metric_keeper_write_meta_cycle_failures] (2 sites in
+    [masc_keeper_write_meta_cycle_failures_total] (2 sites in
     keeper_unified_turn.ml). *)
 
 type t =

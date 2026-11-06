@@ -29,6 +29,13 @@ val launch_worktrees :
     repository that owns the directory shown. A late list for another directory
     is dropped by the reading key. *)
 
+val launch_search :
+  Masc_tui_types.state -> host:string ->
+  deliver:(Masc_tui_code_results.msg -> unit) -> unit
+(** Send the search prompt's text as one content search from the directory the
+    search palette opened in. Text under the server's minimum is reported, not
+    sent. A late answer for older text is dropped by the answer key. *)
+
 val open_found_file :
   Masc_tui_types.state -> host:string ->
   deliver:(Masc_tui_code_results.msg -> unit) -> path:string -> unit

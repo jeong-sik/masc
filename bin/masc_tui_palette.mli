@@ -43,6 +43,7 @@ type palette_action =
   | Palette_code_location of Masc_tui_types.code_location_offer * Masc.Tui_decode.lsp_location
   | Palette_code_branch of Masc.Tui_decode.git_branch
   | Palette_code_worktree of Masc.Tui_decode.git_worktree
+  | Palette_code_search_match of Masc.Tui_decode.workspace_search_match
 
 val gate_lane_label : gate_lane -> string
 val gate_mode_label : Masc.Keeper_gate_mode.t -> string
@@ -67,6 +68,8 @@ val worktree_label : Masc.Tui_decode.git_worktree -> string
 (** One palette row for a worktree: main mark, directory name, what is checked
     out (branch, or the short HEAD when detached, or bare) and the locked and
     prunable flags. *)
+val selected_search_match : Masc_tui_types.state ->
+  Masc.Tui_decode.workspace_search_match option
 val palette_starts_with : needle:string -> string -> bool
 val palette_subsequence : needle:string -> string -> bool
 

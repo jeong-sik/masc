@@ -369,7 +369,6 @@ type DashboardExecutionQueueKind = 'operation' | 'keeper'
 
 export interface DashboardExecutionSummary {
   active_operations?: number
-  blocked_operations?: number
   worker_alerts?: number
   continuity_alerts?: number
   priority_items?: number

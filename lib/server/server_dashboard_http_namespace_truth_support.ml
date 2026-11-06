@@ -103,13 +103,9 @@ let execution_summary_json execution_json =
   let execution_worker_support = json_list_field "worker_support_briefs" execution_json in
   let execution_continuity = json_list_field "continuity_briefs" execution_json in
   let execution_keepers = json_list_field "keepers" execution_json in
-  let has_text key json = json_string_field_opt key json |> Option.is_some in
   `Assoc
     [
       ("active_operations", `Int (List.length execution_operation_briefs));
-      ( "blocked_operations",
-        `Int (count_where execution_operation_briefs (has_text "blocker_summary"))
-      );
       ( "worker_alerts",
         `Int
           (count_where execution_worker_support (fun row ->

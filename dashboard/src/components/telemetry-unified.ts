@@ -42,7 +42,6 @@ interface StoreSnapshot {
   agents: number
   tasks: number
   activeOperations: number
-  blockedOperations: number
   continuityAlerts: number
   toolsRegistered: number
   toolsPublic: number
@@ -54,7 +53,7 @@ interface StoreSnapshot {
 
 const EMPTY_STORE: StoreSnapshot = {
   keepers: 0, agents: 0, tasks: 0,
-  activeOperations: 0, blockedOperations: 0, continuityAlerts: 0,
+  activeOperations: 0, continuityAlerts: 0,
   toolsRegistered: 0, toolsPublic: 0, toolsTotalCalls: 0, toolsNeverCalled: 0,
   version: null, uptime: null,
 }
@@ -1169,7 +1168,6 @@ export function TelemetryUnified() {
           agents: counts?.agents ?? 0,
           tasks: counts?.tasks ?? 0,
           activeOperations: execSummary?.active_operations ?? 0,
-          blockedOperations: execSummary?.blocked_operations ?? 0,
           continuityAlerts: execSummary?.continuity_alerts ?? 0,
           toolsRegistered: inv?.count ?? 0,
           toolsPublic: surfacePublic,
@@ -1338,7 +1336,6 @@ export function TelemetryUnified() {
           status=${store.continuityAlerts > 0 ? 'warn' : store.keepers > 0 ? 'ok' : undefined}
           delta=${{ direction: store.continuityAlerts > 0 ? 'down' as const : 'up' as const, text: [
             `${store.activeOperations} 활성 작업`,
-            store.blockedOperations > 0 ? `${store.blockedOperations} 차단 작업` : null,
             `${store.continuityAlerts} continuity 알림`,
             store.version ? `v${store.version}` : null,
             store.uptime != null ? `uptime ${Math.floor(store.uptime / 60)}m` : null,

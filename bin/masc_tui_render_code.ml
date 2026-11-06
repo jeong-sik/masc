@@ -87,7 +87,9 @@ let code_draft_rows state ~cols =
         | Diff.Context text -> "  ", Ansi.dim, text
         | Diff.Removed text -> "- ", Theme.Syntax.diff_removed_bg, text
         | Diff.Added text -> "+ ", Theme.Syntax.diff_added_bg, text in
-      Terminal_text.single_line text |> Message_layout.split_cells
+      Terminal_text.single_line
+        (fst (Masc_tui_execute_terminal.expand_tabs ~column:0 text))
+      |> Message_layout.split_cells
         ~max_cells:(max 1 (framed_inner_width cols - 4))
       |> List.map (fun text -> style ^ marker ^ text ^ Ansi.reset)) in
     List.concat_map wrap [status; comparing; bytes; "e edit · S save · r reread · A adopt compared revision · X discard · Esc close"] @ rows

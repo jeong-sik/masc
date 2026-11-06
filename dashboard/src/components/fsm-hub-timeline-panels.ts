@@ -50,7 +50,7 @@ const SWIMLANE_LANES: Array<{
 ]
 
 // Wire format is lowercase + snake_case for every lane:
-//   - KSM phase: `phase_to_string` in lib/keeper/keeper_state_machine.ml:21-35
+//   - KSM phase: `phase_to_string` in lib/keeper_registry/keeper_state_machine_phase.ml:25-34
 //     emits 'running' | 'failing' | 'draining' etc.
 //   - KTC/KDP/KCL: keeper_composite_observer.ml lowercase.
 // Prior PascalCase entries ('Failing', 'Stable')

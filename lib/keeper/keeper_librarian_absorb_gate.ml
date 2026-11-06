@@ -304,7 +304,7 @@ let questions_per_request = 64
 
 (* The model takes 32k tokens for the state and, per request, 64k at
    TypeSafe but 32k on the OpenRouter route the lane can be pointed at
-   (docs/research/2026-09-21-typesafe-jev-public-usage-evidence-record.md
+   (docs/evidence/research/2026-09-21-typesafe-jev-public-usage-evidence-record.md
    section 6). The bounds are the smaller numbers in bytes: a token is at
    least one byte, so text under the byte bound is under the token bound
    whatever its tokenizer makes of it (JSON escaping is not tokenized). A

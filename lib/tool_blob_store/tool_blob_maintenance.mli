@@ -147,6 +147,10 @@ type classification =
   | In_scope of source
   | Excluded of exclusion
 
+(** Decodes one file with its producer's decoder and gives back the JSON the
+    scan reads references from. An absent file is [Ok None]. *)
+type keeper_file_decoder = string -> (Yojson.Safe.t option, string) result
+
 type entry =
   | Store of
       { name : string
@@ -156,6 +160,13 @@ type entry =
       { suffix : string
       ; reason : exclusion
       }  (** Config [keepers/] files named [<keeper><suffix>]. *)
+  | Decoded_keeper_files of
+      { suffix : string
+      ; decode : keeper_file_decoder
+      }
+      (** Config [keepers/] files named [<keeper><suffix>], in scope. The scan
+          reads each through [decode]; a file that does not decode ends the
+          scan with [Durable_source_parse_failed]. *)
   | Names of
       { matches : string -> bool
       ; reason : exclusion

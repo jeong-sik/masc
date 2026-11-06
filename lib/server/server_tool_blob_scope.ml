@@ -179,6 +179,20 @@ let workspace =
 let config_keepers =
   [ M.Keeper_files { suffix = Config_dir_resolver.keeper_toml_suffix; reason = M.Operator_config }
   ; M.Keeper_files { suffix = Keeper_vision_tool.vision_store_suffix; reason = M.Other_media_store }
+    (* The Librarian working context keeps whole chat operations, media
+       sources included. *)
+  ; M.Decoded_keeper_files
+      { suffix = Keeper_librarian_context.filename_suffix
+      ; decode =
+          (fun path ->
+             Keeper_librarian_context.read_file path
+             |> Result.map (Option.map Keeper_librarian_context.snapshot_json))
+      }
+    (* The recall index names the artifact that recall fetches. *)
+  ; M.Decoded_keeper_files
+      { suffix = Keeper_librarian_context_recall.filename_suffix
+      ; decode = Keeper_librarian_context_recall.index_json_of_file
+      }
   ; finder_metadata
   ; unpublished_writes
   ]

@@ -619,6 +619,8 @@ type classification =
   | In_scope of source
   | Excluded of exclusion
 
+type keeper_file_decoder = string -> (Yojson.Safe.t option, string) result
+
 type entry =
   | Store of
       { name : string
@@ -627,6 +629,10 @@ type entry =
   | Keeper_files of
       { suffix : string
       ; reason : exclusion
+      }
+  | Decoded_keeper_files of
+      { suffix : string
+      ; decode : keeper_file_decoder
       }
   | Names of
       { matches : string -> bool
@@ -660,7 +666,10 @@ let rec sources_of ~dir entries =
     (function
       | Store { name; classification = In_scope Tree } -> [ Tree_source (Filename.concat dir name) ]
       | Store { name; classification = In_scope File } -> [ Optional_file (Filename.concat dir name) ]
-      | Store { classification = Excluded _; name = _ } | Keeper_files _ | Names _ -> []
+      | Store { classification = Excluded _; name = _ }
+      | Keeper_files _
+      | Decoded_keeper_files _
+      | Names _ -> []
       | Place { name; entries } -> sources_of ~dir:(Filename.concat dir name) entries)
     entries
 ;;
@@ -693,15 +702,20 @@ type match_ =
   | Leaf of classification
   | Nested of entry list
 
+(* [<keeper><suffix>] with a nonempty keeper name. *)
+let keeper_file_named ~suffix name =
+  String.length name > String.length suffix && String.ends_with ~suffix name
+;;
+
 let direct_matches entries name =
   List.filter_map
     (function
       | Store { name = store; classification } ->
         if String.equal store name then Some (Leaf classification) else None
       | Keeper_files { suffix; reason } ->
-        if String.length name > String.length suffix && String.ends_with ~suffix name
-        then Some (Leaf (Excluded reason))
-        else None
+        if keeper_file_named ~suffix name then Some (Leaf (Excluded reason)) else None
+      | Decoded_keeper_files { suffix; decode = _ } ->
+        if keeper_file_named ~suffix name then Some (Leaf (In_scope File)) else None
       | Names { matches; reason } -> if matches name then Some (Leaf (Excluded reason)) else None
       | Place { name = place; entries } ->
         if String.equal place name then Some (Nested entries) else None)
@@ -791,6 +805,55 @@ let unclassified_entries ~base_path scope =
 
 let unix_reason fn arg code =
   Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)
+;;
+
+let keeper_file_decoders scope =
+  List.filter_map
+    (function
+      | Decoded_keeper_files { suffix; decode } -> Some (suffix, decode)
+      | Store _ | Keeper_files _ | Names _ | Place _ -> None)
+    scope.config_keepers
+;;
+
+(* Each config [keepers/] file a decoder owns is read through it, and the
+   references come from the JSON it gives back. A name two decoders claim is
+   left unread: [unclassified_entries] lists it, so the record marks nothing
+   deletable. A derived name such as [<file>.lock] ends with no decoder's
+   suffix and is not read. *)
+let scan_decoded_keeper_files ~base_path ~scope references =
+  let open Result.Syntax in
+  match keeper_file_decoders scope with
+  | [] -> Ok references
+  | decoders ->
+    let dir = scope.config_keepers_dir ~base_path in
+    let* names = list_place dir in
+    List.fold_left
+      (fun result name ->
+         let* current = result in
+         match
+           List.filter (fun (suffix, _) -> keeper_file_named ~suffix name) decoders
+         with
+         | [] | _ :: _ :: _ -> Ok current
+         | [ (_, decode) ] ->
+           let path = Filename.concat dir name in
+           (match Unix.lstat path with
+            | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok current
+            | exception Unix.Unix_error (code, fn, arg) ->
+              Error (Durable_source_stat_failed { path; reason = unix_reason fn arg code })
+            | { Unix.st_kind = Unix.S_REG; _ } ->
+              (match decode path with
+               | Ok None -> Ok current
+               | Ok (Some json) -> references_in_json ~path ~line:1 current json
+               | Error detail -> Error (Durable_source_parse_failed { path; line = 1; detail }))
+            | { Unix.st_kind =
+                  Unix.S_DIR | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK
+              ; _
+              } ->
+              Error
+                (Durable_source_stat_failed
+                   { path; reason = "a decoded keeper file must be a regular file" })))
+      (Ok references)
+      names
 ;;
 
 let scan_live_references ~base_path ~scope =
@@ -942,13 +1005,17 @@ let scan_live_references ~base_path ~scope =
          Error (Durable_source_stat_failed { path; reason = unix_reason fn arg code })
        | _ -> scan_entry path references)
   in
-  workspace_sources
-    scope
-    ~workspace_masc_dir:(Common.masc_dir_from_base_path ~base_path)
-  |> List.fold_left
-       (fun result source ->
-          Result.bind result (fun progress -> scan_source progress source))
-       (Ok Live_reference_set.empty)
+  let open Result.Syntax in
+  let* workspace =
+    workspace_sources
+      scope
+      ~workspace_masc_dir:(Common.masc_dir_from_base_path ~base_path)
+    |> List.fold_left
+         (fun result source ->
+            Result.bind result (fun progress -> scan_source progress source))
+         (Ok Live_reference_set.empty)
+  in
+  scan_decoded_keeper_files ~base_path ~scope workspace
 ;;
 
 let expand_artifact_manifests ~store references =

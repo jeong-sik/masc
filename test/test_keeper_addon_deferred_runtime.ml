@@ -63,8 +63,7 @@ let backend env base_path calls : R.For_testing.backend = {
       act=(fun ~arguments -> P.act protocol ~arguments |> Result.map_error protocol_error);
       stop=(fun () -> P.close protocol;Ok (Lane_addon_lifecycle.Released {
         engine=Lane_addon_lifecycle.Docker_engine "python-process-fixture";container_id=Some instance_id}));
-      host=Some {await_change=None;
-        list_requests=(fun () -> P.host_requests protocol |> Result.map_error protocol_error);
+      host=Some {list_requests=(fun () -> P.host_requests protocol |> Result.map_error protocol_error);
         deliver=(fun ~arguments -> P.host_result protocol ~arguments |> Result.map_error protocol_error)}} in
     on_created connection;Ok connection);
   package_ready=(fun ~package:_ -> Ok ());

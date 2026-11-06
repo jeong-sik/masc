@@ -519,10 +519,8 @@ module For_testing : sig
   type host_port = {
     list_requests : unit -> (Yojson.Safe.t, string) result;
     deliver : arguments:Yojson.Safe.t -> (Yojson.Safe.t, string) result;
-    await_change : (after:string option -> (Lane_addon_host_request.availability, string) result) option;
   }
-  (** A worker's private host request tools and optional change-event port.
-      The event port is independent of a command waiting on its model. *)
+  (** A worker's private host request tools. *)
   type connection = {
     observe : binding:Yojson.Safe.t -> sources:Yojson.Safe.t ->
       (Lane_addon_types.output, string) result;

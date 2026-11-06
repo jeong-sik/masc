@@ -14,7 +14,6 @@ exception Fleet_commit_uncertain of string
 exception Fleet_commit_pending of string
 exception Worker_detached
 exception Host_cycle_stopped
-exception Host_request_withdrawn
 exception Action_persistence_failed of string
 type tool_export = Lane_addon_tool_export.t = private
   { owner : Lane_addon_tool_export.owner; instance_id : string; tool : Mcp_protocol.Mcp_types.tool }
@@ -60,7 +59,6 @@ let publish_owner_event ~root ~package_id event =
 type host_port = {
   list_requests : unit -> (Yojson.Safe.t, string) result;
   deliver : arguments:Yojson.Safe.t -> (Yojson.Safe.t, string) result;
-  await_change : (after:string option -> (Lane_addon_host_request.availability, string) result) option;
 }
 type connection = {
   observe : binding:Yojson.Safe.t -> sources:Yojson.Safe.t -> (output, string) result;
@@ -202,7 +200,6 @@ type entry = {
   mutable coalesced_wakes : int;
   mutable cancel_worker : (unit -> unit) option;
   mutable cancel_exact : (exn -> unit) option;
-  mutable exact_request_id : string option;
   mutable configuration : configuration_owner option;
   input_installations : string list;
   action_queue : Lane_addon_action.receipt Queue.t;
@@ -1130,25 +1127,12 @@ let run_host_cycle m e (port : host_port) =
              let result =
                try Eio.Cancel.sub (fun cancellation ->
                  e.cancel_exact <- Some (Eio.Cancel.cancel cancellation);
-                 e.exact_request_id <- Some exact.Lane_addon_exact.request_id;
-                 Fun.protect ~finally:(fun () -> e.cancel_exact <- None;e.exact_request_id <- None) (fun () ->
+                 Fun.protect ~finally:(fun () -> e.cancel_exact <- None) (fun () ->
                    check_live ();
-                   (* A queued listing can arrive after its withdrawal event.
-                      Publish the cancellation scope before a fresh read, so
-                      both that ordering and withdrawal during the read are
-                      covered without replay or a periodic poll. *)
-                   let* ()=match port.await_change with
-                    | None -> Ok ()
-                    | Some _ ->
-                        let* listing=port.list_requests () in
-                        let* requests=Lane_addon_host_request.listing_of_json listing in
-                        if not (List.exists (fun request ->
-                            Lane_addon_host_request.request_id request=exact.Lane_addon_exact.request_id) requests)
-                        then raise Host_cycle_stopped else Ok () in
                    Lane_addon_exact.run ~store:m.store ~declaration_id:owner.id ~package:e.package
                      ~runner ~authorize_request exact))
-               with Eio.Cancel.Cancelled (Worker_detached | Host_request_withdrawn) ->
-                 (* Consume only retirement/withdrawal of this exact call. Worker/root
+               with Eio.Cancel.Cancelled Worker_detached ->
+                 (* Consume only retirement of this exact call. Worker/root
                     cancellation must still propagate through this boundary. *)
                  Eio.Fiber.check ();
                  raise Host_cycle_stopped in
@@ -1312,44 +1296,6 @@ let run_host_cycle m e (port : host_port) =
     exact_waiting = List.rev !exact_waiting; observed_at = Some (Time_compat.now ());
     issue = (match outcome with Ok () -> !request_issue | Error issue -> Some issue) }
 
-let run_host_watch ~sw ~cleanup_sw ~backend m e port await_change =
-  fork_isolated ~sw (fun () ->
-    let rec watch after =
-      if e.stopping then () else
-      let changed =
-        let* state=await_change ~after in
-        let* ()=match e.exact_request_id with
-          | None -> Ok ()
-          | Some id when List.mem id state.Lane_addon_host_request.request_ids -> Ok ()
-          | Some id ->
-              (* The event may have been produced before the current dispatch.
-                 Re-read the concurrent port before withdrawing that exact call. *)
-              let* listing=port.list_requests () in
-              let* requests=Lane_addon_host_request.listing_of_json listing in
-              if e.exact_request_id=Some id && not (List.exists (fun request ->
-                  Lane_addon_host_request.request_id request=id) requests) then
-                Option.iter (fun cancel -> cancel Host_request_withdrawn) e.cancel_exact;
-              Ok () in
-        Ok state in
-      match changed with
-      | Ok state -> if not e.stopping then (wake_host e;watch (Some state.revision))
-      | Error detail -> if not e.stopping then (
-          (* The worker exit's order: the entry stops, records why, and
-             announces that its exports are no longer ready. A cleanup that
-             fails afterwards keeps this cause as the earliest one. *)
-          let cause = Lifecycle.Worker_failed ("model request watcher: " ^ detail) in
-          Log.Misc.warn "Lane Add-on instance %s (package %s): %s" e.instance_id e.package.id
-            (Lifecycle.failure_to_string cause);
-          retire_admission e;
-          e.state <- fail_state e cause;
-          notify_exports m e;
-          (match persist m e with Ok () -> wake_dependents m e | Error persist_detail ->
-            Log.Misc.error "Lane Add-on instance %s watcher failure state persistence: %s"
-              e.instance_id persist_detail);
-          wake e;
-          stop_entry ~sw:cleanup_sw ~backend m e) in
-    watch None)
-
 let observing m e =
   let recovering = match e.state with Lifecycle.Failed _ -> true
     | Lifecycle.Attached | Lifecycle.Observing | Lifecycle.Detaching _ | Lifecycle.Detached _ -> false in
@@ -1411,8 +1357,6 @@ let run ~sw ~read_browser_document backend m e =
                 notify_exports m e;
                 (match persist m e with Ok () -> wake_dependents m e | Error detail ->
                   Log.Misc.error "Lane Add-on instance %s exit state persistence: %s" e.instance_id detail)));
-            Option.iter (fun port -> Option.iter
-              (run_host_watch ~sw:worker_sw ~cleanup_sw:sw ~backend m e port) port.await_change) c.host;
             (match c.host, e.configuration with
              | Some _, Some owner ->
                  (* A publication that changes one of this installation's add-on
@@ -1759,7 +1703,6 @@ let backend ~store ~artifact_store () = match !override with
                 (* The manifest refuses exact outputs and asks in a browser
                    package, so only a tools worker reaches this port. *)
                 host=(if not (uses_host_requests package) then None else Some {
-                  await_change=None;
                   list_requests=(fun () -> Lane_addon_native_worker.host_requests worker
                     |> Result.map_error Lane_addon_native_worker.error_to_string);
                   deliver=(fun ~arguments -> Lane_addon_native_worker.host_result worker ~arguments
@@ -1825,7 +1768,6 @@ let backend ~store ~artifact_store () = match !override with
              resolved_image=Some (Lane_addon_worker.image_identity worker);
             browser=None;
             host=(if not (uses_host_requests package) then None else Some {
-              await_change=None;
               list_requests=(fun () -> Lane_addon_worker.host_requests worker |> Result.map_error Lane_addon_worker.error_to_string);
               deliver=(fun ~arguments -> Lane_addon_worker.host_result worker ~arguments |> Result.map_error Lane_addon_worker.error_to_string)});
             exported_tools=(fun () -> Lane_addon_worker.exported_tools worker);
@@ -3275,7 +3217,7 @@ let attach_entry ~sw m ~run_id ~package ~binding ~configuration ~source_access ~
     running = true; started = false; active_tool_calls = 0; persistence_mutex = Eio.Mutex.create (); coalesced_wakes = 0;
     action_queue = Queue.create (); current_action = None;
     host_due = false; host_status = { cycles = 0; waiting = []; exact_waiting = []; observed_at = None; issue = None };
-    cancel_worker = None; cancel_exact = None; exact_request_id = None; configuration; input_installations } in
+    cancel_worker = None; cancel_exact = None; configuration; input_installations } in
   let* () = validate_live_connections m e in
   (* Construction only validates the registered host boundary. Discard this
      root-switch closure: backend.start constructs the actual callback with
@@ -4561,7 +4503,6 @@ module For_testing = struct
   type nonrec host_port = host_port = {
     list_requests : unit -> (Yojson.Safe.t, string) result;
     deliver : arguments:Yojson.Safe.t -> (Yojson.Safe.t, string) result;
-    await_change : (after:string option -> (Lane_addon_host_request.availability, string) result) option;
   }
   type nonrec connection = connection = {
     observe : binding:Yojson.Safe.t -> sources:Yojson.Safe.t -> (output, string) result;

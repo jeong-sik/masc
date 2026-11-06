@@ -1,7 +1,7 @@
 ---
 rfc: "0508"
 title: "blob 마커는 답 지문을 싣지 않고, 답의 정체성은 저장된 blob 에서 다시 계산한다"
-status: Draft
+status: Dropped
 created: 2026-11-06
 updated: 2026-11-06
 author: claude
@@ -16,6 +16,16 @@ implementation_prs: []
 ## 0. 요약
 
 저장된 도구 결과는 모델에게 `[masc:blob sha256=<산출물> bytes=… mime=… answer_sha256=<답 지문> preview=…]` 한 줄로 간다. Keeper 가 둘째 해시를 `keeper_artifact_read` 에 넣어 실패한다(#49396). 마커가 지문을 싣지 않게 한다. 답의 정체성은 지금도 저장된 blob 에서 다시 계산해 확인하므로, 선언 없이 그 계산만 쓴다.
+
+## 결정: Dropped (2026-11-06)
+
+이 RFC 는 채택하지 않는다. 마커는 지금 모양 그대로 두고, 같은 실수는 #49420 의 거절 문구가 다룬다.
+
+- 아래 D4(디코더가 옛 `answer_sha256=` 토큰을 읽고 버림)와 Q1 (a)(journal 이 옛 행의 필드를 받음)는 옛 데이터를 읽는 길이다. 헌법 `legacy_residue` 는 과거 데이터 호환과 Field 를 살리는 일을 금한다.
+- 헌법대로 hard cut 하면 옛 마커는 `Invalid_marker` 가 되고 tool blob 스캔이 멈춘다. 그래서 옛 마커가 든 저장소를 지우고 설치해야 한다.
+- 2026-11-06 라이브 `<base>/.masc` 에서 `answer_sha256=` 가 든 파일은 4,171개다. `official-clients` 1,961, `tool_blobs` 1,070, `keepers` 370(`request-executions`·`raw-traces`), `traces` 365, `lane-addons` 300 등이다. 지울 범위가 Keeper 실행 기록 거의 전체다.
+- 얻는 것은 `keeper_artifact_read` 실패 1.73%(17,299번 중 299번)를 없애는 것이다. #49420 은 그 실패의 거절 문구에 맞는 필드를 적어 다음 호출에서 고치게 한다.
+- 리더 Keeper 도 이 계산으로 Dropped 를 골랐다.
 
 ## 1. 문제
 

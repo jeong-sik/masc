@@ -62,7 +62,6 @@ val ensure_tree : t -> string -> (unit, Error.t) result
 
 (** {1 Path constructors} *)
 
-val sessions_dir : t -> string
 val session_dir : t -> string -> string
 val session_path : t -> string -> string
 val events_path : t -> string -> string

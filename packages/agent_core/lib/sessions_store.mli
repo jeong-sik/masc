@@ -19,11 +19,6 @@ val first_some : 'a option -> 'a option -> 'a option
 val primary_alias : string list -> string option
 (** {1 Session access} *)
 
-val list_sessions
-  :  ?session_root:string
-  -> unit
-  -> (session_info list, Error.t) result
-
 val get_session
   :  ?session_root:string
   -> string

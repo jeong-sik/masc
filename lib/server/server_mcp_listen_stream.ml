@@ -34,7 +34,7 @@ let serve ~clock ~ping_interval_s ~stalled_after_s ~max_queued_events ~subscript
            Atomic.set ended true;
            Mcp_subscriptions.unregister token);
          (match
-            Server_sse_pump.run ~queue
+            Server_sse_pump.run ~source:(Server_sse_pump.Queue.source queue)
               ~step:(fun frame -> Server_sse_pump.Send frame)
               ~idle:(fun () -> Server_sse_pump.Keepalive)
               ~clock ~ping_interval_s
@@ -42,7 +42,7 @@ let serve ~clock ~ping_interval_s ~stalled_after_s ~max_queued_events ~subscript
           with
           (* [Server_sse_response.send] logs a stalled frame with the request path. *)
           | Client_gone | Stalled | Finished -> ()
-          | Fell_behind ->
+          | Source_stopped ->
             Log.Server.warn
               "subscriptions/listen stream closed: the client was %d notifications behind"
               max_queued_events)))

@@ -3876,7 +3876,8 @@ let serve_accepted_chat ~send ~queue ~acceptance_frame ~replay ~missed_terminal 
          (missed_terminal ~replayed);
        if terminal_written || settled then Server_sse_pump.Queue.push queue Settled;
        Some
-         (Server_sse_pump.run ~queue ~step:(keeper_chat_step ~replayed) ~idle ~clock
+         (Server_sse_pump.run ~source:(Server_sse_pump.Queue.source queue)
+            ~step:(keeper_chat_step ~replayed) ~idle ~clock
             ~ping_interval_s ~send))
 ;;
 
@@ -4053,7 +4054,7 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
          with
          (* [Server_sse_response.send] logs a stalled frame with the request path. *)
          | None | Some (Client_gone | Stalled | Finished) -> ()
-         | Some Fell_behind ->
+         | Some Source_stopped ->
            Log.Keeper.warn ~keeper_name:payload.name
              "keeper chat stream closed operation=%s: the client was %d events behind"
              operation_id keeper_chat_max_queued_events))

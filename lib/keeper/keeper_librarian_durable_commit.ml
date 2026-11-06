@@ -240,13 +240,15 @@ let validate_with ~validate_chain ~validate_preparation ~root ~latest ~latest_re
     let* exact=Request.request request in
     let* schema=Option.to_result ~none:"Original history refusal lacks its schema" exact.schema in
     let* retained=Exact.retained_final_of_json ~schema evidence in
-    let final=Exact.delivered retained in
-    let* ()=Request.confirm_final ~store request final in
-    (match final with
-     | Exact.Call_final (Answered _) -> Error "History refusal contains an answered host result"
-     | Outcome_unknown -> Ok Unfinished
-     | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _)
-     | Not_allowed _ | Request_id_reused -> Ok Settled)
+    let* ()=Request.confirm_final ~store request (Exact.delivered retained) in
+    (match retained with
+     | Exact.Retained_call (Answered _) -> Error "History refusal contains an answered host result"
+     | Retained_unknown (Exact.Cut | Exact.Raised) -> Ok Unfinished
+     (* RFC-0500. The process that started the attempt stopped before it
+        ended. The original settles and the next pass selects its range. *)
+     | Retained_unknown Exact.Interrupted
+     | Retained_call (Invalid_output _ | Input_refused _ | Output_limit_reached _)
+     | Retained_not_allowed _ | Retained_request_id_reused -> Ok Settled)
   | Rejected {stage=Progress.Before_dispatch;_} | Subdividing _ | Subdivided _ ->
     Error "Original history record has an unsupported domain phase"
 let validate ~store ~request ~record =

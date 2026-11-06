@@ -73,6 +73,20 @@ let restore_answer ~store request record =
     Error (Rejected "Original history publication requires an actual answered host result")
 type terminal = Answer of Memory_runtime.durable_proposal * Owner.retained
   | Refusal of Exact.final * Owner.retained
+(* RFC-0500. Whether the retained refusal says the process that started the
+   attempt stopped before it ended. *)
+let interrupted ~schema (record:Owner.retained) =
+  match Progress.phase record.progress with
+  | Progress.Rejected {stage=Progress.Execution;evidence} ->
+    let* retained=rejected (Exact.retained_final_of_json ~schema evidence) in
+    Ok (match retained with
+      | Exact.Retained_unknown Exact.Interrupted -> true
+      | Retained_unknown (Exact.Cut | Exact.Raised)
+      | Retained_call (Answered _ | Invalid_output _ | Input_refused _ | Output_limit_reached _)
+      | Retained_not_allowed _ | Retained_request_id_reused -> false)
+  | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+  | Finished _ | Conflicted _ | Rejected {stage=Progress.Before_dispatch;_}
+  | Subdividing _ | Subdivided _ -> Ok false
 let check_completed ~store ~superseded request ~original completed =
   let* ()=check_request request completed in
   let* ()=require (completed.Owner.request_digest=original.Owner.request_digest)
@@ -176,7 +190,14 @@ let resume ~store ~config ~reserved ~(original:Owner.retained) ~request ~(call:c
   match result with
   | Submit.Awaiting (wait,record) -> Ok (Pending (wait,record))
   | Final (Answer (proposal,record)) -> publish_answer record proposal
-  | Final (Refusal (Exact.Outcome_unknown,record)) -> Ok (Pending (Worker_unknown,record))
+  | Final (Refusal (Exact.Outcome_unknown,record)) ->
+    (* Inventory validation reads an interrupted refusal as settled, so the
+       next pass moves the original and selects its range again. Wake it:
+       no host event follows this refusal. A cut or raised original stays
+       unfinished and every pass resumes it, so waking it would never end. *)
+    let* interrupted=interrupted ~schema record in
+    if interrupted then wake ();
+    Ok (Pending (Worker_unknown,record))
   | Final (Refusal ((Exact.Call_final _ | Not_allowed _ | Request_id_reused as final),record)) ->
     Ok (Refused (final,record))
   | Commit_pending record ->

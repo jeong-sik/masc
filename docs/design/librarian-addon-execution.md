@@ -54,7 +54,8 @@ Read an existing host Exact terminal or the original worker request before any
 new submission. Retain a dispatch intention before the send. An unknown sent
 outcome does not authorize another model call, except when the host retained
 `interrupted`: the process that started the attempt stopped before it ended.
-That original settles and the next evaluation prepares it again (RFC-0500).
+That original settles. Admission evaluates its part again, and history reads
+its range again in the next pass (RFC-0500).
 Package replacement must not
 transfer an old request to different inputs, installation or schema.
 The Workspace Curator and the Librarian share one submit-once journal

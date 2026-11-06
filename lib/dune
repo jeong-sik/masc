@@ -30,6 +30,7 @@
   keeper_msg_async_locks
   keeper_msg_async_store
   keeper_msg_async_recovery
+  keeper_msg_async_lifecycle
   keeper_memory_os_current_types
   keeper_memory_os_receipt_selection
   keeper_memory_os_support_core

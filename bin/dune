@@ -1395,6 +1395,12 @@
  (libraries masc masc_tui_ansi))
 
 (library
+ (name masc_tui_volume_gc)
+ (wrapped false)
+ (modules masc_tui_volume_gc)
+ (libraries masc masc_tui_ansi yojson))
+
+(library
  (name masc_tui_keeper_mark)
  (wrapped false)
  (modules masc_tui_keeper_mark)

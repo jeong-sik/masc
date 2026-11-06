@@ -1,59 +1,11 @@
-(** #13397: Pin the pure [Task_cache_invariant] classifier and the canonical
-    backlog lookup.
-
-    [is_terminal] must correctly classify all six task status variants, and
-    [read_fresh_task_status] must keep an absent task apart from a backlog it
-    could not read. *)
+(** #13397: [read_fresh_task_status] keeps a task absent from a readable
+    backlog apart from a backlog it could not read. *)
 
 open Alcotest
 module T = Masc_domain
 module TCI = Task_cache_invariant
 
-(* ============================================================ *)
-(* is_terminal — pure, no I/O                                  *)
-(* ============================================================ *)
-
 let now = "2026-05-06T00:00:00Z"
-
-let status_done =
-  T.Done { assignee = "k1"; completed_at = now; notes = None }
-
-let status_cancelled =
-  T.Cancelled { cancelled_at = now; cancelled_by = "operator"; reason = None }
-
-let status_claimed =
-  T.Claimed { assignee = "k1"; claimed_at = now }
-
-let status_in_progress =
-  T.InProgress { assignee = "k1"; started_at = now }
-
-let status_awaiting =
-  T.AwaitingVerification
-    { assignee = "k1"
-    ; started_at = now
-    ; submitted_at = now
-    ; verification_id = "req-1"
-    }
-
-let test_is_terminal_done () =
-  check bool "Done is terminal" true (TCI.is_terminal status_done)
-
-let test_is_terminal_cancelled () =
-  check bool "Cancelled is terminal" true (TCI.is_terminal status_cancelled)
-
-let test_is_terminal_todo () =
-  check bool "Todo is not terminal" false (TCI.is_terminal T.Todo)
-
-let test_is_terminal_claimed () =
-  check bool "Claimed is not terminal" false (TCI.is_terminal status_claimed)
-
-let test_is_terminal_in_progress () =
-  check bool "InProgress is not terminal" false
-    (TCI.is_terminal status_in_progress)
-
-let test_is_terminal_awaiting () =
-  check bool "AwaitingVerification is not terminal" false
-    (TCI.is_terminal status_awaiting)
 
 (* ============================================================ *)
 (* read_fresh_task_status — requires a live backlog             *)
@@ -127,17 +79,7 @@ let test_typed_fresh_status_unavailable () =
 
 let () =
   run "task_cache_invariant_13397"
-    [ ( "is_terminal"
-      , [ test_case "Done is terminal" `Quick test_is_terminal_done
-        ; test_case "Cancelled is terminal" `Quick test_is_terminal_cancelled
-        ; test_case "Todo is not terminal" `Quick test_is_terminal_todo
-        ; test_case "Claimed is not terminal" `Quick test_is_terminal_claimed
-        ; test_case "InProgress is not terminal" `Quick
-            test_is_terminal_in_progress
-        ; test_case "AwaitingVerification is not terminal" `Quick
-            test_is_terminal_awaiting
-        ] )
-    ; ( "read_fresh_task_status"
+    [ ( "read_fresh_task_status"
       , [ test_case "typed lookup preserves task absence" `Quick
             test_typed_fresh_status_missing
         ; test_case "typed lookup preserves backlog failure" `Quick

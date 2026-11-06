@@ -61,6 +61,10 @@ type outcome = Disabled | Idle | Recheck_new_input | Settled of {has_more:bool}
 
 type original = {capture:Capture.t;record:Owner.retained}
 type inventory = {parts:Parts.inventory;executions:original list}
+(* What a queue pass holds before it evaluates a part. [discover] reads and
+   validates every record of the Keeper, so the pass reads again only after
+   it may have written since its last read. *)
+type held = Read_after_last_write of inventory | Written_since_read
 let discover ~store ~owner =
   let* parts=Parts.discover ~store ~owner in
   let* records=owned (Owner.load_scope ~store ~scope:(Capture.scope owner)) in
@@ -367,27 +371,31 @@ let run_queue ~base_path ~keeper_name =
      pending candidates stay queued and the pass reports the Add-on off. *)
   let root ?supersession batch =
     if unattached ~config ~reserved then Ok None
-    else let* root=retain_root ~store ~config ~reserved ~owner ?supersession batch in Ok (Some [root]) in
+    else let* root=retain_root ~store ~config ~reserved ~owner ?supersession batch in
+      Ok (Some ([root],Written_since_read)) in
+  (* Finding the frontier and proving a supersession only read, so the
+     existing leaves are walked with the inventory read after recovery. *)
+  let existing=Some (Parts.runnable inventory.parts,Read_after_last_write inventory) in
   let* parts=match Parts.roots inventory.parts,pending with
-    | [],None -> Ok (Some [])
+    | [],None -> Ok (Some ([],Read_after_last_write inventory))
     | [],Some batch -> root batch
-    | _::_,None -> Ok (Some (Parts.runnable inventory.parts))
+    | _::_,None -> Ok existing
     | _::_,Some batch ->
       let* frontier=frontier ~store ~owner inventory in
       (match frontier with
-       | None -> Ok (Some (Parts.runnable inventory.parts))
+       | None -> Ok existing
        | Some frontier ->
          let* supersession=io (fun () -> Parts.prove_supersession ~store ~owner
            ~inventory:inventory.parts ~batch ~frontier) in
          match supersession with
-         | None -> Ok (Some (Parts.runnable inventory.parts))
+         | None -> Ok existing
          | Some supersession -> root ~supersession batch) in
   let addon_unattached () =
     let* pending=read () in
     Ok (Addon_unattached {pending=Option.fold ~none:0 ~some:(fun batch -> List.length (Queue.candidates batch)) pending}) in
   match parts with
   | None -> addon_unattached ()
-  | Some parts ->
+  | Some (parts,held) ->
   let through=List.fold_left (fun through part -> max through (Parts.original_through part)) 0 parts in
   let finish ~committed ~reason =
     let* pending=read () in
@@ -398,10 +406,14 @@ let run_queue ~base_path ~keeper_name =
     else match pending,parts with
       | None,[] -> Ok Idle
       | (None | Some _),(_::_ | []) -> Ok (Pending reason) in
-  let rec walk ~committed = function
+  (* Every evaluation may write (a dispatch, a gate, a commit, a partition or
+     a settle), so each part after the first reads the inventory again. *)
+  let rec walk ~committed ~held = function
     | [] -> finish ~committed ~reason:"Original admission awaits further evidence"
     | part::rest ->
-      let* inventory=io (fun () -> discover ~store ~owner) in
+      let* inventory=match held with
+        | Read_after_last_write inventory -> Ok inventory
+        | Written_since_read -> io (fun () -> discover ~store ~owner) in
       (match evaluate ~store ~config ~reserved ~owner ~inventory part with
        | Error detail -> Error detail
        | Ok (Waiting reason) ->
@@ -410,12 +422,13 @@ let run_queue ~base_path ~keeper_name =
             actual Runtime/candidate events wake waiting originals. *)
          Ok (if committed then Settled {has_more=false} else Pending reason)
        | Ok Addon_off -> if committed then Ok (Settled {has_more=false}) else addon_unattached ()
-       | Ok (Terminal (_,did_commit)) -> walk ~committed:(committed || did_commit) rest
-       | Ok (Children (left,right)) -> walk ~committed (left::right::rest)
+       | Ok (Terminal (_,did_commit)) ->
+         walk ~committed:(committed || did_commit) ~held:Written_since_read rest
+       | Ok (Children (left,right)) -> walk ~committed ~held:Written_since_read (left::right::rest)
        (* The fresh execution's attempt carries this process's incarnation, so
           a cut of it reads as [Cut] and the part does not settle twice. *)
-       | Ok Reprepared -> walk ~committed (part::rest)) in
-  walk ~committed:false parts
+       | Ok Reprepared -> walk ~committed ~held:Written_since_read (part::rest)) in
+  walk ~committed:false ~held parts
 let run_enabled ~base_path ~keeper_name =
   let keepers_dir=Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   let* generation=io (fun () -> Queue.read_generation ~keepers_dir ~keeper_id:keeper_name) in

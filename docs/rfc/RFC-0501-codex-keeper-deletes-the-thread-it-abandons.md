@@ -89,12 +89,18 @@ Muse 에는 세션을 지우는 요청이 없어서 RFC-0495 는 storage root �
 `Keeper_official_client_session_store` 에 순수 함수 하나를 더한다.
 
 ```ocaml
-val forgotten_sessions : before:t option -> after:t -> string list
+type forgotten =
+  | Same_client of string list
+  | Other_client of
+      { client_kind : client_kind; runtime_id : string; session_ids : string list }
+
+val forgotten_sessions : before:t option -> after:t -> forgotten
 ```
 
 - `before` 단계가 담은 thread id 중 `after` 단계가 담지 않은 것을 낸다. 1.3 의 단계별 id 를 쓴다.
-- `before` 와 `after` 의 client 종류나 runtime id 가 다르면 아무것도 내지 않는다(2.4).
-- 단계 match 는 생성자를 모두 적는다. 와일드카드는 없다.
+- `before` 가 `None`(앞 기록 없음)이면 `Same_client []` 다.
+- `before` 와 `after` 의 client 종류와 runtime id 가 같으면 `Same_client`, 다르면 `before` 쪽 정체를 담은 `Other_client` 다(2.4).
+- 단계 match 는 생성자를 모두 적는다. 와일드카드는 없다. 새 단계가 생기면 컴파일러가 이 함수를 고치게 한다.
 
 1.3 의 두 길에 넣으면 이렇다.
 
@@ -119,12 +125,15 @@ val delete_threads :
 ```
 
 - 턴과 같은 계정 home 으로 app-server 를 띄우고 `initialize` 뒤 id 마다 `thread/delete` 를 보낸다. `account/read` 는 보내지 않는다.
-- `Keeper_codex_runtime` 은 claim 과 release 에서 2.1 의 id 를 모은다. `run_turn` 이 돌아온 뒤, 결과와 상관없이 한 번 부른다. 모은 id 가 없으면 부르지 않는다.
-- 결과는 Keeper 로그에 id 마다 한 줄씩 남긴다. 성공, 또는 오류다.
+- `Keeper_codex_runtime` 은 claim 과 release 에서 2.1 의 `Same_client` id 를 모은다. `run_turn` 이 돌아온 뒤, 결과와 상관없이 한 번 부른다. 모은 id 가 없으면 부르지 않는다.
+- 결과는 Keeper 로그에 id 마다 한 줄씩 남긴다. 성공이거나, 오류의 code 와 message 그대로다.
+- `-32600 no rollout found` 를 "이미 없음"으로 따로 나누지 않는다. `-32600` 은 invalid request 일반 코드이고, 둘을 가르는 것은 message 문자열뿐이다. 문자열로 분류하지 않는다. 배포 뒤에는 로그 줄을 code·message 별로 센다.
 - 실패해도 턴 결과는 바꾸지 않는다. 기록이 이미 그 id 를 잊었으니 이어 갈 길이 없다.
 - 다시 시도하지 않는다. 실패한 id 를 저장하는 필드도 두지 않는다. 디스크가 남는 일은 durable truth 를 해치지 않는다.
 
-턴 앞이 아니라 뒤에서 지운다. 앞에서 지우면 새 thread 를 여는 턴마다 app-server 를 한 번 더 띄우는 만큼 늦어진다. release 로 잊는 id 는 턴이 끝나야 생긴다.
+턴 앞이 아니라 뒤에서 지운다. 앞에서 지우면 새 thread 를 여는 턴마다 app-server 를 한 번 더 띄우는 만큼 늦어진다. release 로 잊는 id 는 턴이 끝나야 생긴다. 앞에서 지우려면 지우지 못한 id 를 저장해야 하는데, 이 RFC 는 그 필드를 두지 않는다.
+
+지우는 app-server 와 다른 Keeper 의 app-server 가 같은 계정 home 을 함께 쓸 수 있다. 지금도 Codex Keeper 여럿과 Fusion·probe 가 한 계정 home 을 같이 쓴다. 새로 생기는 겹침이 아니라서 따로 막지 않는다.
 
 ### 2.3 이어 가지 않는 호출은 `Ephemeral`
 
@@ -142,7 +151,9 @@ type thread_mode =
 
 ### 2.4 client 나 계정이 바뀐 thread
 
-runtime id 나 client 종류가 바뀌면 옛 thread 는 다른 계정 home 이나 다른 client 에 있을 수 있다. 지금 runtime 의 app-server 로는 지울 수 없다. 이 경우는 지우지 않는다.
+runtime id 나 client 종류가 바뀌면 옛 thread 는 다른 계정 home 이나 다른 client 에 있을 수 있다. 지금 runtime 의 app-server 로는 지울 수 없다. 옛 home 에서 지우려면 MASC 가 지난 모든 runtime 의 계정을 기억해야 한다. 이 경우는 지우지 않는다.
+
+`Other_client` 를 받으면 Keeper 로그에 한 줄을 남긴다. 옛 client 종류, 옛 runtime id, 잊은 id 수다. 계정 home 경로는 기록에 없어 적지 않는다. 6장의 질문은 이 줄 수로 정한다.
 
 같은 runtime id 인데 운영자가 계정 home 을 바꾸면, 새 home 에 `thread/delete` 를 보내고 `no rollout found` 를 받는다. 로그에 남고 옛 home 의 rollout 은 그대로다.
 
@@ -151,16 +162,16 @@ runtime id 나 client 종류가 바뀌면 옛 thread 는 다른 계정 home 이�
 이미 쌓인 rollout 은 옮기거나 지우는 코드를 만들지 않는다. 운영자가 배포 때 지운다.
 
 1. 서버를 멈춘다.
-2. Codex 계정 home 의 `sessions`, `state_5.sqlite*`, `thread_history_1.sqlite*` 를 지운다.
+2. Codex 계정 home 마다 `sessions`, `state_5.sqlite*`, `thread_history_1.sqlite*` 를 지운다. 지금 어느 runtime 도 쓰지 않는 옛 계정 home 도 같다.
 3. 새 버전으로 서버를 띄운다.
 
-`auth.json`, `config.toml` 은 남긴다. 기억한 thread 가 있던 Keeper 는 다음 `thread/resume` 이 실패하고, 그다음 claim 이 새 thread 를 연다. 이 절차가 로그인 상태를 지키는지는 L4 전에 임시 home 복사본에서 확인한다.
+`auth.json`, `config.toml` 은 남긴다. 기억한 thread 가 있던 Keeper(11-06 측정으로 3개)는 다음 `thread/resume` 이 한 번 실패하고, 그다음 claim 이 새 thread 를 연다. 이 실패는 예상된 것이라고 changelog 에 적는다. 이 절차가 로그인 상태를 지키는지는 L4 전에 임시 home 복사본에서 확인한다.
 
 ## 3. 바뀌는 것
 
 | 모듈 | 바뀌는 것 |
 | --- | --- |
-| `Keeper_official_client_session_store` | `forgotten_sessions` 추가 |
+| `Keeper_official_client_session_store` | `forgotten` 타입과 `forgotten_sessions` 추가 |
 | `Runtime_codex_app_server` | `delete_threads` 추가, `thread_mode` 에 `Ephemeral`, `~thread_mode` 필수, `thread_is_ephemeral` 삭제 |
 | `Keeper_codex_runtime` | claim·release 에서 잊은 id 를 모으고 턴 뒤 `delete_threads` |
 | `Fusion_official_client`, `Keeper_capability_probe`, `Runtime_verification` | `~thread_mode` 를 넘긴다 |
@@ -170,6 +181,7 @@ runtime id 나 client 종류가 바뀌면 옛 thread 는 다른 계정 home 이�
 - 서버 시작 때 모든 thread 를 훑어 기록에 없는 것을 지우지 않는다. `thread/start` 를 보냈지만 아직 기록되지 않은 thread 를 지울 수 있다. 잊는 순간을 아는 쪽이 지우면 이 경합이 없다.
 - `session.json` 에 필드를 더하지 않는다.
 - 실패한 `thread/delete` 를 다시 시도하지 않는다.
+- 삭제 결과를 세는 새 계측(Otel 카운터 등)을 두지 않는다. 배포 뒤 확인은 2.2 의 로그 줄로 한다.
 - 서버의 recovery 해제 엔드포인트처럼 Keeper 턴 밖에서 기록을 바꾸는 곳은 지우지 않는다. 운영자가 손으로 하는 일이고 드물다.
 - Muse 는 RFC-0495 가 다룬다. Claude Code 와 Antigravity 는 이 RFC 밖이다.
 - recovery 뒤에 새 thread 를 여는 규칙은 그대로 둔다. `provider_rejected` 가 많은 것은 #48674 가 다룬다. 이 RFC 는 잊은 thread 의 디스크만 다룬다.
@@ -179,7 +191,7 @@ runtime id 나 client 종류가 바뀌면 옛 thread 는 다른 계정 home 이�
 | 층 | 내용 | 확인 |
 | --- | --- | --- |
 | L1 | 이 RFC | 리뷰 |
-| L2 | `forgotten_sessions`(2.1), `delete_threads` 와 Keeper 턴 뒤 호출(2.2) | type-check. 시험: 1.3 의 두 길에서 낸 id 가 턴 뒤 `thread/delete` 로 나가고, 거절돼도 턴 결과가 그대로다 |
+| L2 | `forgotten_sessions`(2.1), `delete_threads` 와 Keeper 턴 뒤 호출(2.2) | type-check. 시험: 1.3 의 두 길에서 낸 id 가 턴 뒤 `thread/delete` 로 나가고, 거절돼도 턴 결과가 그대로다. runtime id 가 바뀐 기록은 `Other_client` 가 되고 `thread/delete` 를 보내지 않는다 |
 | L3 | `Ephemeral`, `~thread_mode` 필수(2.3) | type-check. 시험: `Ephemeral` 이 `"ephemeral": true` 를 보낸다. 배포 전에 실제 app-server 에서 ephemeral thread 가 `dynamicTools` 를 받는지 확인 |
 | L4 | changelog `Fresh state required`, 운영자 절차(2.5) | `changelog-fragments.py check`, 임시 home 복사본에서 절차 확인 |
 
@@ -187,6 +199,14 @@ runtime id 나 client 종류가 바뀌면 옛 thread 는 다른 계정 home 이�
 
 ## 6. 열린 질문
 
-- `thread/delete` 가 실패하면 턴 결과를 바꾸지 않는다(2.2). 이대로 좋은가?
-- runtime id 가 바뀐 thread(2.4)를 지울 주체가 필요한가? 바뀐 횟수를 로그에서 세어 정한다.
-- 하드컷 대상에 두 SQLite 파일을 넣어도 되나? `thread/delete` 는 행을 지우지만 파일 크기는 VACUUM 없이 줄지 않는다.
+- runtime id 가 바뀐 thread(2.4)를 지울 주체가 필요한가? 배포 뒤 `Other_client` 로그 줄 수로 정한다.
+- 하드컷 대상에 두 SQLite 파일을 넣어도 되나? `thread/delete` 는 행을 지우지만 파일 크기는 VACUUM 없이 줄지 않는다. 그래서 이미 쌓인 5 GB 는 파일을 지워야 돌아온다. L4 의 임시 home 확인에서 정한다.
+
+## 7. 리뷰에서 정한 것
+
+11-06 Keeper 리뷰(5794636677)에서 정했다.
+
+- 실패한 `thread/delete` 는 턴 결과를 바꾸지 않고, 실패 id 를 저장하지 않는다. 기록이 이미 잊은 id 라 이어 갈 길이 없고, 저장하려면 이 RFC 가 피한 필드가 생긴다.
+- 턴 뒤에 지운다. release 로 잊는 id 를 저장 없이 덮는 길은 이것뿐이다.
+- 다른 home 의 thread 를 지울 주체를 두지 않는다. 대신 `Other_client` 로그 한 줄을 남기고, 하드컷 절차가 옛 home 도 다룬다.
+- 서버 시작 때 훑어 지우지 않는다. `thread/start` 뒤 기록 전에 서버가 죽으면, 훑기가 그 thread 를 지워 되살릴 수 있는 크래시를 영구 손실로 바꾼다.

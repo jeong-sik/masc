@@ -578,8 +578,21 @@ let keeper_home_dir ~runtime_root ~owner_leaf =
     [ "official-clients"; "antigravity"; owner_leaf ]
 ;;
 
+let prepare_lock_prefix = "antigravity-"
+let prepare_lock_suffix = ".prepare.lock"
+
 let keeper_prepare_lock_path ~runtime_root ~owner_leaf =
-  Filename.concat runtime_root ("antigravity-" ^ owner_leaf ^ ".prepare.lock")
+  Filename.concat runtime_root (prepare_lock_prefix ^ owner_leaf ^ prepare_lock_suffix)
+;;
+
+let is_keeper_prepare_lock_name name =
+  let prefix = String.length prepare_lock_prefix
+  and suffix = String.length prepare_lock_suffix in
+  let leaf = String.length name - prefix - suffix in
+  leaf > 0
+  && String.starts_with ~prefix:prepare_lock_prefix name
+  && String.ends_with ~suffix:prepare_lock_suffix name
+  && Fs_compat.is_capability_leaf (String.sub name prefix leaf)
 ;;
 
 let prepare_owner_directory ~runtime_root ~owner_leaf =

@@ -171,8 +171,10 @@ let dispatch_status_to_string = function
   | Dispatch_start_rejected -> "start_rejected"
 ;;
 
+let schedules_dirname = "schedules"
+
 let schedules_dir config =
-  Filename.concat (Workspace_utils.masc_dir config) "schedules"
+  Filename.concat (Workspace_utils.masc_dir config) schedules_dirname
 ;;
 
 let signal_location config =
@@ -272,7 +274,7 @@ let make_signal ~now kind (request : Schedule_domain.schedule_request) =
   }
 ;;
 
-let signal_seen_recovery_path config = signal_seen_path config ^ ".last-good"
+let signal_seen_recovery_path config = signal_seen_path config ^ Common.recovery_mirror_suffix
 
 let parse_seen_json = function
   | `List rows ->

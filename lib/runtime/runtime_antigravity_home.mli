@@ -200,3 +200,6 @@ module For_testing : sig
       keychain search list [create-keychain] appends to; pointing it at the
       managed home is what keeps the operator's own list out of it. *)
 end
+
+val is_keeper_prepare_lock_name : string -> bool
+(** Whether [name] is a basename {!keeper_prepare_lock_path} makes. *)

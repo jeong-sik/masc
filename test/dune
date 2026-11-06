@@ -2650,11 +2650,6 @@
  (libraries masc_test_deps))
 
 (executable
- (name tool_matrix_manifest)
- (modules tool_matrix_manifest)
- (libraries masc_test_deps keeper_tool_matrix_cases_lib))
-
-(executable
  (name tool_matrix_case_runner)
  (modules tool_matrix_case_runner)
  (libraries masc_test_deps keeper_tool_matrix_cases_lib))

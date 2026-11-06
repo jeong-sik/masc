@@ -617,19 +617,29 @@ let run_turn
       ?temperature
       ?shared_context
       ?checkpoint:direct_resume_checkpoint
+      ?recorded_system:(Option.map (fun resumed ->
+          { Keeper_run_context.runtime_id = Keeper_direct_native_continuation.runtime_id resumed
+          ; text = Keeper_direct_native_continuation.system_prompt resumed
+          }) native_resume)
       ())
-    |> Result.map_error (function
+    |> Result.map_error (
+      let checkpoint_path () =
+        Keeper_checkpoint_store.agent_core_checkpoint_path
+          ~session_dir:(Filename.concat base_dir
+            (Keeper_id.Trace_id.to_string meta.runtime.trace_id))
+          ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+      in
+      function
       | Keeper_run_context.Checkpoint_unread error ->
         Agent_core.Error.Io
           (FileOpFailed
             { op = "load checkpoint"
-            ; path =
-                Keeper_checkpoint_store.agent_core_checkpoint_path
-                  ~session_dir:(Filename.concat base_dir
-                    (Keeper_id.Trace_id.to_string meta.runtime.trace_id))
-                  ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+            ; path = checkpoint_path ()
             ; detail = Keeper_checkpoint_store.checkpoint_load_error_to_string error
             })
+      | Keeper_run_context.Turn_system_unreadable detail ->
+        Agent_core.Error.Io
+          (FileOpFailed { op = "read keeper turn system"; path = checkpoint_path (); detail })
       (* #38354: the turn is not sent without the world's articles. Nothing is
          recorded against the ledger, so the next turn reads it again and
          runs as soon as it is readable. *)
@@ -780,11 +790,7 @@ let run_turn
       ~user_turn_record:prompt_user_turn_record
       ~start_turn_count)
   in
-  let turn_system = match native_resume with
-    | Some resumed ->
-      Keeper_turn_system.with_bytes ~issued:prompt_ctx.Keeper_run_prompt.turn_system
-        (Keeper_direct_native_continuation.system_prompt resumed)
-    | None -> prompt_ctx.Keeper_run_prompt.turn_system in
+  let turn_system = prompt_ctx.Keeper_run_prompt.turn_system in
   let turn_system_prompt = turn_system.Keeper_turn_system.text in
   let dynamic_context = prompt_ctx.Keeper_run_prompt.dynamic_context in
   let temporal_context = prompt_ctx.Keeper_run_prompt.temporal_context in

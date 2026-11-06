@@ -781,32 +781,6 @@ let with_test_env f =
           Server_request_authority.with_current request_authority (fun () ->
             f ~env ~sw ~config)))
 
-let test_namespace_pause_status_reads_current_workspace () =
-  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
-  let read () =
-    match Server_dashboard_http_core_entities.namespace_pause_status_json config with
-    | Ok json -> json
-    | Error detail -> fail detail
-  in
-  let member field json = Yojson.Safe.Util.member field json in
-  let initial = read () in
-  check bool "uninitialized namespace is initializing" true
-    (member "initializing" initial = `Bool true);
-  check bool "uninitialized namespace has no pause authority" true
-    (member "paused" initial = `Null);
-  ignore (Workspace.init config ~agent_name:None);
-  check bool "initialized namespace is running" true
-    (member "paused" (read ()) = `Bool false);
-  Workspace.pause config ~by:"pause-readback-test" ~reason:"current state";
-  check bool "a later pause is read directly" true
-    (member "paused" (read ()) = `Bool true);
-  ignore (Workspace.resume config ~by:"pause-readback-test");
-  check bool "resume does not reuse the previous paused snapshot" true
-    (member "paused" (read ()) = `Bool false);
-  Workspace.pause config ~by:"another-operator" ~reason:"later mutation";
-  check bool "another operator's pause remains observable" true
-    (member "paused" (read ()) = `Bool true)
-
 (* The production peek, read back as the exact pending selection. *)
 let select_ready ~now ~ready state =
   Option.bind (Keeper_event_queue_state.peek_when ~now ~ready state) (fun source ->
@@ -4777,69 +4751,6 @@ let test_new_skill_authoring_routes_are_read_only () =
     check bool "preview writes no candidate package" false
       (Sys.file_exists (Filename.concat config.base_path "skills/new-draft")))
 
-let test_pause_status_route_preserves_invalid_state () =
-  with_test_env @@ fun ~env ~sw ~config ->
-  with_env "MASC_HTTP_AUTH_STRICT" "true" @@ fun () ->
-  let previous_state = Server_auth.For_testing.snapshot_server_state () in
-  Fun.protect
-    ~finally:(fun () -> Server_auth.For_testing.restore_server_state previous_state)
-    (fun () ->
-      let state = Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path in
-      let config = Lib.Mcp_server.workspace_config state in
-      ignore (Workspace.init config ~agent_name:None);
-      Server_auth.For_testing.restore_server_state (Some state);
-      Auth.save_auth_config config.base_path
-        { Types.default_auth_config with enabled = true; require_token = true };
-      let actor = "pause-status-reader" in
-      let token = match Auth.create_token config.base_path ~agent_name:actor ~role:Types.Worker with
-        | Ok (token, _) -> token
-        | Error error -> fail (Types.masc_error_to_string error)
-      in
-      check bool "worker cannot administer the namespace" true
-        (Result.is_error (Auth.check_permission config.base_path ~agent_name:actor
-          ~token:(Some token) ~permission:Types.CanAdmin));
-      check bool "HTTP read authorization is enforced" true
-        (Server_auth.http_auth_strict_enabled ());
-      let router = Server_routes_http_routes_dashboard.add_routes ~sw
-        ~clock:(Eio.Stdenv.clock env) (Lib.Http_server_eio.Router.create ()) in
-      let path = "/api/v1/operator/pause-status" in
-      let headers = [ "authorization", "Bearer " ^ token ] in
-      let send () =
-        let status, _, body = tools_h1_wire_response ~router ~headers path in
-        status, Yojson.Safe.from_string body
-      in
-      let status, json = send () in
-      check int "read-only worker reads valid state" 200 status;
-      check bool "valid running state is authoritative" true
-        (Yojson.Safe.Util.member "paused" json = `Bool false);
-      let state_path = Workspace.state_path config in
-      let original = Fs_compat.load_file state_path in
-      let wrong_type =
-        match Yojson.Safe.from_string original with
-        | `Assoc fields -> Yojson.Safe.to_string
-            (`Assoc (("paused", `String "false") :: List.remove_assoc "paused" fields))
-        | _ -> fail "initialized state must be an object"
-      in
-      List.iter (fun bytes ->
-        Fs_compat.save_file state_path bytes;
-        let status, json = send () in
-        check int "invalid state is unavailable" 503 status;
-        check bool "invalid state grants no pause authority" true
-          (Yojson.Safe.Util.member "paused" json = `Null);
-        check bool "invalid state does not report success" true
-          (Yojson.Safe.Util.member "ok" json = `Bool false);
-        check string "GET leaves invalid persisted bytes unchanged" bytes
-          (Fs_compat.load_file state_path))
-        [ ""; "{"; "{}"; wrong_type ];
-      Sys.remove state_path;
-      Unix.mkdir state_path 0o700;
-      let status, json = send () in
-      check int "unreadable state is unavailable" 503 status;
-      check bool "unreadable state grants no pause authority" true
-        (Yojson.Safe.Util.member "paused" json = `Null);
-      check bool "GET does not replace the unreadable state object" true
-        (Sys.is_directory state_path))
-
 let test_asks_list_publishes_written_alternative_capability () =
   with_test_env @@ fun ~env ~sw:_ ~config ->
   let module Ask = Masc.Keeper_ask in
@@ -8741,10 +8652,6 @@ let () =
             test_keeper_github_login_stream_frame_names_its_event;
           test_case "GitHub token route refuses an unreadable hostname" `Quick
             test_github_token_post_refuses_an_unreadable_hostname;
-          test_case "pause status read-only route preserves invalid state" `Quick
-            test_pause_status_route_preserves_invalid_state;
-          test_case "namespace pause status reads current workspace" `Quick
-            test_namespace_pause_status_reads_current_workspace;
           test_case "operator snapshot rejects stale publication races" `Quick
             test_operator_snapshot_publication_rejects_stale_races;
           test_case "refreshed operator snapshot encodes on the pool and hands on a newer one" `Quick

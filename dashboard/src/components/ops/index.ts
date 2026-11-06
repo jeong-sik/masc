@@ -140,31 +140,15 @@ function timelineEntries(limit = 10): OpsActivityTimelineEntry[] {
     .slice(0, limit)
 }
 
-export function activityTimelineEmptyState(): { message: string; hint: string | null } {
-  const root = operatorSnapshot.value?.root
-  if (root?.paused) {
-    const reason = root.pause_reason?.trim()
-    const by = root.paused_by?.trim()
-    const parts = [reason, by ? `by ${by}` : null].filter(Boolean).join(' · ')
-    return {
-      message: 'Namespace is paused. New operator activity will not be recorded until resume.',
-      hint: parts || null,
-    }
-  }
-  return {
-    message: 'No operator activity in the last 3 days. Interventions and reviews appear here automatically.',
-    hint: null,
-  }
-}
+const ACTIVITY_TIMELINE_EMPTY_MESSAGE =
+  'No operator activity in the last 3 days. Interventions and reviews appear here automatically.'
 
 function renderActivityTimeline() {
   const entries = timelineEntries()
   if (entries.length === 0) {
-    const { message, hint } = activityTimelineEmptyState()
     return html`
       <div class="v2-command-panel" data-testid="ops-activity-timeline-empty">
-        <${EmptyState} message=${message} compact />
-        ${hint ? html`<div class="mt-0.5 text-center text-2xs text-text-dim">${hint}</div>` : null}
+        <${EmptyState} message=${ACTIVITY_TIMELINE_EMPTY_MESSAGE} compact />
       </div>
     `
   }

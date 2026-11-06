@@ -21,13 +21,12 @@ import {
   type DashboardCompositeHealthVerdict,
 } from '../../lib/dashboard-composite-health'
 // Operational/safety chrome the v2 prototype omits but operators rely on
-// (connection state, transport telemetry, emergency stop, error console, auth,
+// (connection state, transport telemetry, error console, auth,
 // build identity). Re-mounted into the v2 top bar so the reskin does not drop
 // live operational visibility (PR #22081 review P1). These are zero-prop
 // components that read their own signals.
 import { ErrorCounterBadge, BuildIdentityBadge } from '../dashboard-shell'
 import { AuthStatus } from '../auth-status'
-import { EmergencyStopControl } from '../emergency-stop-control'
 import { TransportBeacon } from '../transport-beacon'
 import { FLEET_KEEPER_FILTERS } from '../../lib/fleet-keeper-filter'
 import {
@@ -342,7 +341,6 @@ export function TopBarV2({ dock }: { dock: CopilotDockApi }) {
       ${/* Operational/safety status cluster (review P1: keep operator chrome). */ ''}
       <div class="v2-top-ops" role="group" aria-label="연결과 운영 도구">
         <${TransportBeacon} />
-        <${EmergencyStopControl} />
         <${ErrorCounterBadge} />
         <${AuthStatus} />
         <${BuildIdentityBadge} />

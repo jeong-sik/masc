@@ -62,11 +62,6 @@ let workspace_status_json (config : Workspace.config) : Yojson.Safe.t =
     | Some workspace_state -> workspace_state.project
     | None -> "default"
   in
-  let paused =
-    match workspace_state_opt with
-    | Some workspace_state -> workspace_state.paused
-    | None -> false
-  in
   let tempo = Tempo.get_tempo config in
   `Assoc
     [ "workspace_root", `String (canonical_workspace_root config)
@@ -74,7 +69,6 @@ let workspace_status_json (config : Workspace.config) : Yojson.Safe.t =
     ; "workspace_differs", `Bool (config.workspace_path <> config.base_path)
     ; "project", `String project
     ; "tempo_interval_s", `Float tempo.current_interval_s
-    ; "paused", `Bool paused
     ; "version", `String Runtime_build_version.current
     ]
 ;;

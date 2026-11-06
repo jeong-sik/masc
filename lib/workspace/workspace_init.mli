@@ -1,8 +1,7 @@
-(** Workspace init / pause / resume / reset.
+(** Workspace init / reset.
 
-    Boot-time workspace state initialisation, pause/resume gating for
-    agent claims, and a destructive [reset] helper for tests and explicit
-    internal maintenance. *)
+    Boot-time workspace state initialisation and a destructive [reset]
+    helper for tests and explicit internal maintenance. *)
 
 
 type initialization_error =
@@ -23,17 +22,6 @@ exception Initialization_failed of initialization_error
     replace existing local workspace documents. *)
 val init :
   Workspace_utils_backend_setup.config -> agent_name:'a option -> string
-
-(** Mark workspace automation as paused with metadata for [pause_info]. *)
-val pause :
-  Workspace_utils_backend_setup.config ->
-  by:string -> reason:string -> unit
-
-(** Clear an active pause. [`Already_running] when no pause was
-    set, [`Resumed] otherwise. *)
-val resume :
-  Workspace_utils_backend_setup.config ->
-  by:string -> [> `Already_running | `Resumed ]
 
 (** Destructive reset of workspace state for tests and explicit internal
     maintenance. Symlinks inside the workspace are unlinked without deleting

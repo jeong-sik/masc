@@ -9,9 +9,8 @@
       dashboard can render a placeholder before any keeper has
       bootstrapped the workspace root.
 
-    - When initialized, returns the full snapshot: project,
-      paused state with reason/by/at, tempo interval,
-      agent/task counts, and the current message_seq.
+    - When initialized, returns the full snapshot: project, tempo
+      interval, agent/task counts, and the current message_seq.
 
     Pure helper move — local-only function with no .mli surface. *)
 
@@ -92,10 +91,6 @@ let workspace_json config =
     `Assoc
       [ "initialized", `Bool true
       ; "project", `String state.project
-      ; "paused", `Bool state.paused
-      ; "pause_reason", Json_util.string_opt_to_json state.pause_reason
-      ; "paused_by", Json_util.string_opt_to_json state.paused_by
-      ; "paused_at", Json_util.string_opt_to_json state.paused_at
       ; "tempo_interval_s", `Float tempo.current_interval_s
       ; "agent_count", `Int (List.length agents)
       ; "task_count", task_count

@@ -179,14 +179,8 @@ type workspace_state = {
   started_at : string;
   message_seq : int;
   active_agents : string list;
-  paused : bool;
-  pause_reason : string option;
-  paused_by : string option;
-  paused_at : string option;
 }
 ```
-
-`paused`·`pause_reason`·`paused_by`·`paused_at` 은 MCP 도구 `masc_pause`·`masc_resume` 과 operator action `namespace_pause`·`namespace_resume` 이 쓰고 지운다. 이 기록은 아무것도 멈추지 않는다. 상태 조회가 보여 주고 `resume` 이 지우기 전에 확인할 뿐이며, Keeper·Task·Goal·Gate 전이는 읽지 않는다([03-workspace-state.md](./03-workspace-state.md) §6).
 
 ### 2.10 Backlog
 

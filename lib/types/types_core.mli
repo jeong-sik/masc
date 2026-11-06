@@ -358,10 +358,6 @@ type workspace_state =
   ; started_at : string
   ; message_seq : int
   ; active_agents : string list
-  ; paused : bool [@default false]
-  ; pause_reason : string option [@default None]
-  ; paused_by : string option [@default None]
-  ; paused_at : string option [@default None]
   }
 [@@deriving yojson { strict = false }, show]
 

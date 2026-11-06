@@ -267,16 +267,12 @@ let workspace_state_json config =
     `Assoc
       [
         ("project", `String (Filename.basename config.base_path));
-        ("paused", `Bool false);
-        ("pause_reason", `Null);
       ]
   else
     let state = Workspace.read_state config in
     `Assoc
       [
         ("project", `String state.project);
-        ("paused", `Bool state.paused);
-        ("pause_reason", Json_util.string_opt_to_json state.pause_reason);
       ]
 
 let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_include_workers

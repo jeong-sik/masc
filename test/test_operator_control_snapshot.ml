@@ -638,11 +638,11 @@ let test_snapshot_rejects_pending_confirm_without_confirm_token () =
       [ `Assoc
           [ "trace_id", `String "trace-missing-token"
           ; "actor", `String "operator"
-          ; "action_type", `String "namespace_pause"
+          ; "action_type", `String "broadcast"
           ; "target_type", `String "workspace"
           ; "target_id", `Null
           ; "payload", `Assoc []
-          ; "delegated_tool", `String "masc_pause"
+          ; "delegated_tool", `String "masc_broadcast"
           ; "created_at", `String "2026-08-08T00:00:00Z"
           ; "expires_at", `Null
           ]
@@ -655,11 +655,11 @@ let test_snapshot_rejects_pending_confirm_with_invalid_timestamp () =
           [ "confirm_token", `String "confirm-invalid-time"
           ; "trace_id", `String "trace-invalid-time"
           ; "actor", `String "operator"
-          ; "action_type", `String "namespace_pause"
+          ; "action_type", `String "broadcast"
           ; "target_type", `String "workspace"
           ; "target_id", `Null
           ; "payload", `Assoc []
-          ; "delegated_tool", `String "masc_pause"
+          ; "delegated_tool", `String "masc_broadcast"
           ; "created_at", `String "not-a-timestamp"
           ; "expires_at", `Null
           ]

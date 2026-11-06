@@ -21,12 +21,10 @@ let bindings : (string * Masc_domain.tool_schema) list =
   ; "masc_sandbox_volume_gc", sandbox_volume_gc
   ; "masc_keeper_waiting_inventory", keeper_waiting_inventory
   ; "masc_messages", messages
-  ; "masc_pause", pause
   ; "masc_pause_status", pause_status
   ; "masc_plan_clear_task", plan_clear_task
   ; "masc_plan_get_task", plan_get_task
   ; "masc_plan_set_task", plan_set_task
-  ; "masc_resume", resume
   ; "masc_start", start
   ; "masc_tool_help", tool_help
   ]
@@ -47,20 +45,18 @@ let expected =
   ; "masc_sandbox_volume_gc"
   ; "masc_keeper_waiting_inventory"
   ; "masc_messages"
-  ; "masc_pause"
   ; "masc_pause_status"
   ; "masc_plan_clear_task"
   ; "masc_plan_get_task"
   ; "masc_plan_set_task"
-  ; "masc_resume"
   ; "masc_start"
   ; "masc_tool_help"
   ]
 ;;
 
 let test_every_tool_the_generator_owned_is_declared () =
-  check int "15 tools pinned here" 15 (List.length expected);
-  check int "15 tools bound in the module" 15 (List.length bindings)
+  check int "13 tools pinned here" 13 (List.length expected);
+  check int "13 tools bound in the module" 13 (List.length bindings)
 ;;
 
 (* Three checks that lived in test_tool_descriptors_gen and have nothing to do
@@ -93,13 +89,13 @@ let test_config_category_enum_matches_its_owner () =
     published
 ;;
 
-(* pause / resume / pause_status are Operator_only: reached through
-   control_schema, never through the list a Keeper model reads. *)
+(* pause_status is Operator_only: reached through control_schema, never
+   through the list a Keeper model reads. *)
 let test_control_operations_stay_off_the_published_list () =
   check
     (list string)
     "the typed control projection is exhaustive"
-    [ "masc_pause"; "masc_resume"; "masc_pause_status" ]
+    [ "masc_pause_status" ]
     (List.map
        (fun operation -> (Tool_schemas_misc.control_schema operation).name)
        Tool_schemas_misc.control_operations);
@@ -110,7 +106,7 @@ let test_control_operations_stay_off_the_published_list () =
          (name ^ " absent from the published misc schemas")
          false
          (has_schema name Tool_schemas_misc.schemas))
-    [ "masc_pause"; "masc_resume"; "masc_pause_status" ]
+    [ "masc_pause_status" ]
 ;;
 
 let () =

@@ -298,14 +298,6 @@ val handle_masc_misc_with_outcome
   -> name:string -> args:Yojson.Safe.t
   -> Keeper_tool_execution.t
 
-(** RFC-0182 §3.1 — [handle_masc_control_with_outcome] is the descriptor-projection
-    cluster handler for [masc_pause] / [masc_resume]. Constructs a
-    [Tool_control.context] from [config + meta.name] and calls
-    [Tool_control.dispatch]. *)
-val handle_masc_control_with_outcome
-  : config:Workspace.config -> meta:keeper_meta -> name:string -> args:Yojson.Safe.t
-  -> Keeper_tool_execution.t
-
 (** RFC-0182 §3.1 — [handle_masc_agent_timeline_with_outcome] is the
     descriptor-projection singleton handler for [masc_agent_timeline].
     Constructs a [Tool_agent_timeline.context] from [config + meta.name]

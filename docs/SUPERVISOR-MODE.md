@@ -34,7 +34,7 @@ Supervisor Mode is for:
 
 - reading namespace and keeper state at low cost
 - previewing disruptive actions before a human confirms them
-- issuing namespace broadcasts, pause/resume, keeper probes, and keeper recovery
+- issuing namespace broadcasts, keeper probes, and keeper recovery
 
 ## Golden Loop
 
@@ -42,8 +42,6 @@ Supervisor Mode is for:
 2. Call `masc_operator_digest()`.
 3. Decide whether the next step is:
    - `broadcast`
-   - `namespace_pause`
-   - `namespace_resume`
    - `task_inject`
    - `keeper_message`
    - `keeper_probe`
@@ -63,8 +61,6 @@ that token.
 | Action | Use when |
 |---|---|
 | `broadcast` | Namespace-wide guidance is needed |
-| `namespace_pause` | Automation should stop before more work lands |
-| `namespace_resume` | Recovery after an operator pause |
 | `task_inject` | A backlog task should be added to the namespace |
 | `keeper_message` | One keeper needs direct corrective input |
 | `keeper_probe` | A keeper needs a fresh diagnostic snapshot |

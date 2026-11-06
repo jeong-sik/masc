@@ -187,9 +187,9 @@ let test_full_profile_admission_uses_catalog_direct_call_policy () =
       then incr hidden_disallowed;
       (* Three conditions, not two. The front-door corpus is one of them, and
          it was invisible while this loop only walked names that were in it by
-         construction: masc_pause carries a broadcast policy and is dispatched
-         in process, but tool_control keeps its schema out of Config on
-         purpose, so the Full profile does not admit it and should not. *)
+         construction: masc_pause_status is dispatched in process, but
+         tool_control keeps its schema out of Config on purpose, so the Full
+         profile does not admit it and should not. *)
       let expected =
         Masc.Config.is_raw_tool_name schema.name
         && Tool_catalog.is_visible ~include_hidden:true schema.name

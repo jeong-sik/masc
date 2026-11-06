@@ -15,17 +15,12 @@
 (** {1 Tool schema list} *)
 
 type control_operation =
-  | Pause
-  | Resume
   | Pause_status
 [@@deriving enumerate]
 (** Closed set of operator control tools. *)
 
 val control_operations : control_operation list
 (** Exhaustive typed projection of operator control operations. *)
-
-val control_operation_id : control_operation -> string
-(** Stable descriptor identifier suffix for a control operation. *)
 
 val control_schema : control_operation -> Masc_domain.tool_schema
 (** Canonical generated schema for a control operation. *)

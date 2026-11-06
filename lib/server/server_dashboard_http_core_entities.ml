@@ -1,15 +1,3 @@
-let namespace_pause_status_json (config : Workspace.config) =
-  match Workspace.read_state_strict config with
-  | Error error -> Error (Workspace.state_read_error_to_string error)
-  | Ok state ->
-      Ok (`Assoc
-        [ "ok", `Bool true
-        ; "initializing", `Bool (Option.is_none state)
-        ; "paused", (match state with
-            | None -> `Null | Some state -> `Bool state.paused)
-        ])
-;;
-
 let dashboard_shell_status_json (config : Workspace.config) : Yojson.Safe.t =
   let workspace_state = Workspace.read_state config in
   let tempo = Tempo.get_tempo config in
@@ -21,7 +9,6 @@ let dashboard_shell_status_json (config : Workspace.config) : Yojson.Safe.t =
     ; "workspace_differs", `Bool (config.workspace_path <> config.base_path)
     ; "project", `String workspace_state.project
     ; "tempo_interval_s", `Float tempo.current_interval_s
-    ; "paused", `Bool workspace_state.paused
     ; "version", `String build.release_version
     ; "build", Build_identity.to_yojson build
     ]

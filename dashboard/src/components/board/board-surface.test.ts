@@ -153,7 +153,7 @@ function snapshotWithKeepers(keepers: Array<{
   paused?: boolean | null
 }>): OperatorSnapshot {
   return {
-    root: { paused: false, namespace: 'default' },
+    root: { namespace: 'default' },
     sessions: [],
     keepers,
     recent_messages: [],

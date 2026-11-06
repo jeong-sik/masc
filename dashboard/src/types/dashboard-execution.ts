@@ -755,7 +755,6 @@ export interface ServerStatus {
   workspace_path?: string
   workspace_differs?: boolean
   project?: string
-  paused?: boolean
   version?: string
   generated_at?: string
   build?: ServerBuildIdentity

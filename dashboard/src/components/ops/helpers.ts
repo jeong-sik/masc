@@ -7,7 +7,6 @@ import { workflowActionLabel, type DashboardWorkflowContext } from '../../workfl
 import {
   actorName,
   broadcastMessage,
-  pauseReason,
   taskTitle,
   taskDescription,
   taskPriority,
@@ -20,7 +19,6 @@ import {
 export {
   actorName,
   broadcastMessage,
-  pauseReason,
   taskTitle,
   taskDescription,
   taskPriority,
@@ -96,10 +94,6 @@ function hydrateActionForm(input: {
       taskTitle.value = workflowPayloadString(payload, 'title') ?? 'Operator-injected task'
       taskDescription.value = workflowPayloadString(payload, 'description') ?? input.summary
       taskPriority.value = workflowPayloadString(payload, 'priority') ?? taskPriority.value
-      return
-    }
-    if (actionType === 'namespace_pause' || actionType === 'workspace_pause') {
-      pauseReason.value = workflowPayloadString(payload, 'reason') ?? input.summary
     }
     return
   }

@@ -12,7 +12,6 @@ import type { PendingConfirmEnvelope, OperatorActionDescriptor } from './gate'
 export interface DashboardMissionSummary {
   workspace_health?: string
   project?: string
-  paused?: boolean
   tempo_interval_s?: number
   active_agents?: number
   keeper_pressure?: number
@@ -164,10 +163,6 @@ export interface DashboardMissionBriefingResponse {
 
 export interface OperatorNamespaceSnapshot {
   project?: string
-  paused?: boolean
-  pause_reason?: string | null
-  paused_by?: string | null
-  paused_at?: string | null
 }
 
 export type OperatorContextMetricsUnavailable = KeeperContextMetricsUnavailable

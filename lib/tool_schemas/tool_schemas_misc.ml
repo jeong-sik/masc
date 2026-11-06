@@ -3,22 +3,12 @@
 open Masc_domain
 
 type control_operation =
-  | Pause
-  | Resume
   | Pause_status
 [@@deriving enumerate]
 
 let control_operations = all_of_control_operation
 
-let control_operation_id = function
-  | Pause -> "pause"
-  | Resume -> "resume"
-  | Pause_status -> "pause_status"
-;;
-
 let control_schema = function
-  | Pause -> Tool_schemas_operator_surface.pause
-  | Resume -> Tool_schemas_operator_surface.resume
   | Pause_status -> Tool_schemas_operator_surface.pause_status
 ;;
 

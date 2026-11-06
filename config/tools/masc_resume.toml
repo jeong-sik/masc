@@ -1,3 +1,0 @@
-name = "masc_resume"
-description = "Resume a workspace that was paused by an operator."
-additional_properties = false

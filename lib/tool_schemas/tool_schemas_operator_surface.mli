@@ -12,7 +12,7 @@
     filename so that a value bound to the wrong declaration fails there. It
     also carries the two invariants that suite held which had nothing to do
     with code generation: the masc_config category enum matching its owner,
-    and the Operator_only control trio staying off the Keeper-visible list. *)
+    and the Operator_only [pause_status] staying off the Keeper-visible list. *)
 
 val ask : Masc_domain.tool_schema
 val ask_status : Masc_domain.tool_schema
@@ -30,17 +30,11 @@ val plan_set_task : Masc_domain.tool_schema
 val start : Masc_domain.tool_schema
 val tool_help : Masc_domain.tool_schema
 
-val pause : Masc_domain.tool_schema
+val pause_status : Masc_domain.tool_schema
 (** Operator_only: absent from [schemas], reached through
     [Tool_schemas_misc.control_schema] rather than the list a Keeper model
     reads. *)
 
-val resume : Masc_domain.tool_schema
-(** Operator_only. See [pause]. *)
-
-val pause_status : Masc_domain.tool_schema
-(** Operator_only. See [pause]. *)
-
 val schemas : Masc_domain.tool_schema list
-(** The 16 tools [Tool_schemas_misc] publishes: every value above except the
-    Operator_only trio. *)
+(** The tools [Tool_schemas_misc] publishes: every value above except the
+    Operator_only [pause_status]. *)

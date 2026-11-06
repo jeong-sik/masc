@@ -34,12 +34,10 @@ let test_status_query () =
   let base_path = temp_dir () in
   let config = Workspace_utils.default_config base_path in
   let _ = Workspace.init config ~agent_name:None in
-  let json = graphql_query config "{ status { project paused } }" in
+  let json = graphql_query config "{ status { project } }" in
   let open Yojson.Safe.Util in
   let project = json |> member "data" |> member "status" |> member "project" |> to_string in
-  let paused = json |> member "data" |> member "status" |> member "paused" |> to_bool in
   Alcotest.(check string) "project" (Filename.basename base_path) project;
-  Alcotest.(check bool) "paused" false paused;
   cleanup_dir base_path
 
 let test_tasks_connection () =

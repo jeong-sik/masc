@@ -6,7 +6,6 @@ describe('ops helper state exports', () => {
   it('re-exports the canonical ops state signals', () => {
     expect(helpers.actorName).toBe(opsState.actorName)
     expect(helpers.broadcastMessage).toBe(opsState.broadcastMessage)
-    expect(helpers.pauseReason).toBe(opsState.pauseReason)
     expect(helpers.taskTitle).toBe(opsState.taskTitle)
     expect(helpers.taskDescription).toBe(opsState.taskDescription)
     expect(helpers.taskPriority).toBe(opsState.taskPriority)

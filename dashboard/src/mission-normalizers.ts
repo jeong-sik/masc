@@ -60,7 +60,6 @@ function normalizeSummary(raw: unknown): DashboardMissionSummary {
   return {
     workspace_health: asString(root.workspace_health),
     project: asString(root.project),
-    paused: asBoolean(root.paused),
     tempo_interval_s: asNumber(root.tempo_interval_s),
     active_agents: asNumber(root.active_agents),
     keeper_pressure: asNumber(root.keeper_pressure),

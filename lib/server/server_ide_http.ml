@@ -463,7 +463,6 @@ let add_routes router =
          let json = `Assoc [
            "project", `String workspace_state.project;
            "tempo_interval_s", `Float tempo.current_interval_s;
-           "paused", `Bool workspace_state.paused;
          ] in
          Http.Response.json_value
            ~compress:true

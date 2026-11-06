@@ -1,12 +1,10 @@
-(** Workspace Init - Workspace initialization, reset, pause, and resume.
+(** Workspace Init - Workspace initialization and reset.
 
-    Extracted from Workspace module. Handles workspace directory bootstrapping,
-    state creation, and pause/resume lifecycle. *)
+    Extracted from Workspace module. Handles workspace directory bootstrapping
+    and state creation. *)
 
 open Masc_domain
 open Workspace_utils
-open Workspace_state
-open Workspace_broadcast
 
 type initialization_error =
   | Cold_memory_has_local_document of string
@@ -267,47 +265,6 @@ let init config ~agent_name =
     match agent_name with
     | Some _name -> result (* Caller is responsible for joining after init *)
     | None -> result
-;;
-
-(** Pause workspace automation - stops orchestrator from spawning new agents *)
-let pause config ~by ~reason =
-  let _ =
-    update_state config (fun s ->
-      { s with
-        paused = true
-      ; pause_reason = Some reason
-      ; paused_by = Some by
-      ; paused_at = Some (now_iso ())
-      })
-  in
-  (* Broadcast pause notification *)
-  let _ =
-    broadcast ~audience:System_record
-      config
-      ~from_agent:"system"
-      ~content:(Printf.sprintf "⏸️ Workspace PAUSED by %s: %s" by reason)
-  in
-  ()
-;;
-
-(** Resume workspace automation *)
-let resume config ~by =
-  let state = read_state config in
-  if not state.paused
-  then `Already_running
-  else (
-    let _ =
-      update_state config (fun s ->
-        { s with paused = false; pause_reason = None; paused_by = None; paused_at = None })
-    in
-    (* Broadcast resume notification *)
-    let _ =
-      broadcast ~audience:System_record
-        config
-        ~from_agent:"system"
-        ~content:(Printf.sprintf "▶️ Workspace RESUMED by %s" by)
-    in
-    `Resumed)
 ;;
 
 (** Reset workspace state - delete .masc/ folder *)

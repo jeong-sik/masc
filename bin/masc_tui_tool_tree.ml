@@ -43,8 +43,8 @@ let domain_of_tool name =
     || is "keeper_tasks_audit"
   then Some "work"
   else if
-    is "masc_run" || is "masc_fusion" || is "masc_start" || is "masc_pause"
-    || is "masc_resume" || is "masc_gc"
+    is "masc_run" || is "masc_fusion" || is "masc_start"
+    || is "masc_pause_status" || is "masc_gc"
   then Some "run"
   else if is "masc_keeper" || is "masc_sandbox_volume_gc" then Some "keeper ops"
   else if

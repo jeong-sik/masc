@@ -39,10 +39,6 @@ let default_workspace_state config = {
   started_at = now_iso ();
   message_seq = resume_message_seq config;
   active_agents = [];
-  paused = false;
-  pause_reason = None;
-  paused_by = None;
-  paused_at = None;
 }
 
 (* Pull a counter that fell behind the store back up to it.

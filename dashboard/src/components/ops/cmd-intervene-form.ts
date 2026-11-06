@@ -4,8 +4,8 @@
 // and the Gate/HITL link panel (cmd-gatelinks).
 // Live wiring:
 //   · action dispatch → dispatchOperatorAction (operator action endpoint) via
-//     executeAction; server accepts broadcast / namespace_pause / namespace_resume
-//     (target_type=workspace) and keeper_message (target_type=keeper).
+//     executeAction; server accepts broadcast (target_type=workspace) and
+//     keeper_message (target_type=keeper).
 //   · target options → operatorSnapshot keepers (real snapshot rows).
 //   · Gate pending count → gateData.approval_queue length.
 // Gaps (no live signal, design option omitted): 태스크 인계 요청(handoff) — the
@@ -20,13 +20,11 @@ import { showToast } from '../common/toast'
 import { replaceRoute } from '../../router'
 import { executeAction } from './helpers'
 
-type CmdAction = 'broadcast' | 'keeper_message' | 'namespace_pause' | 'namespace_resume'
+type CmdAction = 'broadcast' | 'keeper_message'
 
 const CMD_ACTIONS: { value: CmdAction; label: string }[] = [
   { value: 'broadcast', label: '브로드캐스트 · 전체' },
   { value: 'keeper_message', label: 'keeper 직접 메시지' },
-  { value: 'namespace_pause', label: '일시정지' },
-  { value: 'namespace_resume', label: '재개' },
 ]
 
 const FLEET_TARGET = 'fleet'
@@ -54,25 +52,12 @@ export function CmdInterveneForm() {
         payload: { message: body },
         successMessage: 'keeper 메시지를 전달했습니다.',
       })
-    } else if (action === 'broadcast') {
+    } else {
       result = await executeAction({
         action_type: 'broadcast',
         target_type: 'workspace',
         payload: { message: body },
         successMessage: '브로드캐스트를 전송했습니다.',
-      })
-    } else {
-      if (target !== FLEET_TARGET) {
-        showToast('keeper 개별 일시정지/재개는 Monitor → Keeper Fleet 에서 실행하세요.', 'warning')
-        return
-      }
-      result = await executeAction({
-        action_type: action,
-        target_type: 'workspace',
-        payload: { reason: body },
-        successMessage: action === 'namespace_pause'
-          ? '네임스페이스를 일시정지했습니다.'
-          : '네임스페이스를 재개했습니다.',
       })
     }
     if (result) setMessage('')

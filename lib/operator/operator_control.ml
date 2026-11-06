@@ -85,21 +85,6 @@ let execute_broadcast (ctx : 'a context) (request : action_request) =
   in
   Ok (Workspace_broadcast.broadcast_delivery_to_yojson result, result_status)
 
-let execute_namespace_pause (ctx : 'a context) (request : action_request) =
-  let reason =
-    get_string request.payload "reason" "Paused by operator action"
-  in
-  Workspace.pause ctx.config ~by:request.actor ~reason;
-  `Assoc [ ("paused", `Bool true); ("reason", `String reason) ]
-
-let execute_namespace_resume (ctx : 'a context) (request : action_request) =
-  let status =
-    match Workspace.resume ctx.config ~by:request.actor with
-    | `Resumed -> "resumed"
-    | `Already_running -> "already_running"
-  in
-  `Assoc [ ("status", `String status) ]
-
 let execute_task_inject (ctx : 'a context) (request : action_request) =
   let* title =
     require_payload_field request.payload "title"
@@ -192,10 +177,6 @@ let execute_action (ctx : 'a context) (request : action_request) :
   let* result, result_status =
     match request.action with
     | Operator_action_catalog.Broadcast -> execute_broadcast ctx request
-    | Operator_action_catalog.Namespace_pause ->
-      completed (execute_namespace_pause ctx request)
-    | Operator_action_catalog.Namespace_resume ->
-      completed (execute_namespace_resume ctx request)
     | Operator_action_catalog.Task_inject ->
       Result.bind (execute_task_inject ctx request) completed
     | Operator_action_catalog.Keeper_message ->

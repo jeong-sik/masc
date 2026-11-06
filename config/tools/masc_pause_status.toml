@@ -1,5 +1,5 @@
 name = "masc_pause_status"
 description = """
-Return the current pause status of the workspace and any paused keepers. \
-Read-only; takes no arguments."""
+Return which keepers are paused and whether the workspace has finished \
+initializing. Read-only; takes no arguments."""
 additional_properties = false

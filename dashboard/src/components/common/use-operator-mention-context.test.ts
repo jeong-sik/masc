@@ -10,7 +10,7 @@ const LISTBOX_ID = 'test-listbox'
 
 function snapshotWithKeepers(keepers: OperatorKeeperSnapshot[]): OperatorSnapshot {
   return {
-    root: { paused: false, namespace: 'default' },
+    root: { namespace: 'default' },
     sessions: [],
     keepers,
     recent_messages: [],

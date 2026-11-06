@@ -3,8 +3,6 @@
 
 type t =
   | Broadcast
-  | Namespace_pause
-  | Namespace_resume
   | Task_inject
   | Keeper_message
   | Keeper_probe

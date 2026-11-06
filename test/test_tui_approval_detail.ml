@@ -62,7 +62,7 @@ let has_control_byte text =
 let test_an_escape_in_a_field_never_reaches_the_terminal () =
   let question = "Run Bash on echo ok" ^ cursor_up_and_erase ^ "rm -rf /?" in
   let summary =
-    "namespace_pause on workspace" ^ csi_c1 ^ "2Kforged\nsecond line\x07"
+    "broadcast on workspace" ^ csi_c1 ^ "2Kforged\nsecond line\x07"
   in
   let lines =
     Detail.of_fields ~width:60
@@ -90,7 +90,7 @@ let test_an_escape_in_a_field_never_reaches_the_terminal () =
     (fun fragment ->
       check_bool ("the pane draws " ^ fragment) true (contains all fragment))
     [ "echo ok\\x1B[1A\\x1B[2Krm -rf /?"
-    ; "namespace_pause on workspace\\u009B2Kforged"
+    ; "broadcast on workspace\\u009B2Kforged"
     ; "second line\\x07"
     ; "key\\x1B[1A\\x1B[2K"
     ];

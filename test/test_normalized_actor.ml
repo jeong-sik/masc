@@ -44,11 +44,11 @@ let pending_confirm_fixture token =
   { Opc.confirm_token = token
   ; trace_id = "ops_test"
   ; actor = "operator"
-  ; action_type = "namespace_pause"
+  ; action_type = "broadcast"
   ; target_type = Operator_action_constants.workspace_target_type
   ; target_id = None
   ; payload = `Assoc []
-  ; delegated_tool = "masc_pause"
+  ; delegated_tool = "masc_broadcast"
   ; created_at = Masc_domain.now_iso ()
   ; expires_at = None
   }

@@ -1,0 +1,12 @@
+[ego-browser:notice] Ego Lite update is available (current 0.6.2.7). Finish the current browser task, then ask the user before running `ego-browser upgrade`; re-read the ego-browser Skill afterward.
+{"step":"space1","at":"2026-11-06T12:05:38.983Z","value":39}
+{"step":"goto1","at":"2026-11-06T12:05:39.082Z","value":{}}
+{"step":"space2","at":"2026-11-06T12:05:39.192Z","value":{"taskId":"masc-l5-windows-b2","id":40,"name":"masc-l5-windows-b2","ownership":"agent"}}
+{"step":"space2Id","at":"2026-11-06T12:05:39.192Z","value":40}
+{"step":"goto2","at":"2026-11-06T12:05:39.301Z","value":{}}
+{"step":"rows1","at":"2026-11-06T12:05:39.303Z","value":[{"label":"p1","targetId":"D7F41C4F8E13A60E702D3C4535E85CA2","openedBy":"agent","url":"http://127.0.0.1:18772/index.html?space1","windowId":1426150651,"error":null}]}
+{"step":"rows2","at":"2026-11-06T12:05:39.305Z","value":[{"label":"p1","targetId":"3ABC01AD1BE785588112F603EBE5A14F","openedBy":"agent","url":"http://127.0.0.1:18772/index.html?space2","windowId":1426150653,"error":null}]}
+{"step":"g.createTarget","at":"2026-11-06T12:05:39.305Z","value":{"error":"Target.createTarget is not allowed"}}
+{"step":"g.pause","at":"2026-11-06T12:05:40.106Z","value":true}
+{"step":"finish1","at":"2026-11-06T12:05:40.109Z","value":{"spaceId":39,"closedSpace":true,"keptManagedLabels":[],"closedManagedLabels":["p1"],"preservedUnmanagedCount":0}}
+{"step":"finish2","at":"2026-11-06T12:05:40.155Z","value":{"spaceId":40,"closedSpace":true,"keptManagedLabels":[],"closedManagedLabels":["p1"],"preservedUnmanagedCount":0}}

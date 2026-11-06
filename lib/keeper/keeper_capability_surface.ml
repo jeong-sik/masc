@@ -189,7 +189,6 @@ let create_with_descriptors
                                          | Keeper_tool_descriptor.Tool_browser_goto
                                          | Keeper_tool_descriptor.Tool_browser_act
                                          | Keeper_tool_descriptor.Tool_browser_interact
-                                         | Keeper_tool_descriptor.Tool_masc_control_dispatch
                                          | Keeper_tool_descriptor.Tool_masc_agent_timeline_dispatch
                                          | Keeper_tool_descriptor.Tool_masc_schedule_dispatch
                                          | Keeper_tool_descriptor.Tool_keeper_composition_result_dispatch
@@ -266,7 +265,6 @@ let create_with_descriptors
       | Keeper_tool_descriptor.Tool_browser_goto
       | Keeper_tool_descriptor.Tool_browser_act
       | Keeper_tool_descriptor.Tool_browser_interact
-      | Keeper_tool_descriptor.Tool_masc_control_dispatch
       | Keeper_tool_descriptor.Tool_masc_agent_timeline_dispatch
       | Keeper_tool_descriptor.Tool_masc_schedule_dispatch
       | Keeper_tool_descriptor.Tool_keeper_composition_result_dispatch

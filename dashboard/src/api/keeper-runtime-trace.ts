@@ -15,8 +15,6 @@ export interface KeeperRuntimeTraceTurnIdentity {
   runtime_failed_count: number
   checkpoint_saved_count: number
   event_bus_correlated_count: number
-  memory_injected_count: number
-  memory_flushed_count: number
   receipt_appended_count: number
   turn_finished_count: number
 }
@@ -25,16 +23,6 @@ export interface KeeperRuntimeTraceEventBusSummary {
   event_bus_correlated_count: number
   correlation_ids: string[]
   run_ids: string[]
-}
-
-export interface KeeperRuntimeTraceMemorySummary {
-  memory_injected_count: number
-  memory_injected_present_count: number
-  memory_flushed_count: number
-  memory_flush_success_count: number
-  memory_flush_error_count: number
-  episodes_flushed: number
-  procedures_flushed: number
 }
 
 export interface KeeperRuntimeManifestEventCount {
@@ -130,8 +118,6 @@ export interface KeeperRuntimeLensContextAxis {
   checkpoint_saved_count: number
 }
 
-export interface KeeperRuntimeLensMemoryAxis extends KeeperRuntimeTraceMemorySummary {}
-
 export interface KeeperRuntimeLensAxes {
   lifecycle: KeeperRuntimeLensLifecycleAxis
   provider_lane: KeeperRuntimeLensProviderLaneAxis
@@ -139,7 +125,6 @@ export interface KeeperRuntimeLensAxes {
   source_clock: KeeperRuntimeLensSourceClockAxis
   config_drift: KeeperRuntimeLensConfigDriftAxis
   context: KeeperRuntimeLensContextAxis
-  memory: KeeperRuntimeLensMemoryAxis
 }
 
 export interface KeeperRuntimeLensLaneEvent {
@@ -257,7 +242,6 @@ export interface KeeperRuntimeTraceResponse {
   manifest_scan_diagnostics: KeeperRuntimeManifestScanDiagnostics
   turn_identity: KeeperRuntimeTraceTurnIdentity
   event_bus: KeeperRuntimeTraceEventBusSummary
-  memory: KeeperRuntimeTraceMemorySummary
   runtime_lens: KeeperRuntimeLens
   linked_artifacts: KeeperRuntimeTraceLinkedArtifacts
   manifest_rows: Record<string, unknown>[]
@@ -436,8 +420,6 @@ function parseRuntimeTraceTurnIdentity(raw: unknown): KeeperRuntimeTraceTurnIden
     runtime_failed_count: numberField(obj, 'runtime_failed_count'),
     checkpoint_saved_count: numberField(obj, 'checkpoint_saved_count'),
     event_bus_correlated_count: numberField(obj, 'event_bus_correlated_count'),
-    memory_injected_count: numberField(obj, 'memory_injected_count'),
-    memory_flushed_count: numberField(obj, 'memory_flushed_count'),
     receipt_appended_count: numberField(obj, 'receipt_appended_count'),
     turn_finished_count: numberField(obj, 'turn_finished_count'),
   }
@@ -449,19 +431,6 @@ function parseRuntimeTraceEventBus(raw: unknown): KeeperRuntimeTraceEventBusSumm
     event_bus_correlated_count: numberField(obj, 'event_bus_correlated_count'),
     correlation_ids: stringListField(obj, 'correlation_ids'),
     run_ids: stringListField(obj, 'run_ids'),
-  }
-}
-
-function parseRuntimeTraceMemory(raw: unknown): KeeperRuntimeTraceMemorySummary {
-  const obj = isRecord(raw) ? raw : {}
-  return {
-    memory_injected_count: numberField(obj, 'memory_injected_count'),
-    memory_injected_present_count: numberField(obj, 'memory_injected_present_count'),
-    memory_flushed_count: numberField(obj, 'memory_flushed_count'),
-    memory_flush_success_count: numberField(obj, 'memory_flush_success_count'),
-    memory_flush_error_count: numberField(obj, 'memory_flush_error_count'),
-    episodes_flushed: numberField(obj, 'episodes_flushed'),
-    procedures_flushed: numberField(obj, 'procedures_flushed'),
   }
 }
 
@@ -562,7 +531,6 @@ function parseRuntimeLensAxes(raw: unknown): KeeperRuntimeLensAxes {
     source_clock: parseRuntimeLensSourceClockAxis(obj.source_clock),
     config_drift: parseRuntimeLensConfigDriftAxis(obj.config_drift),
     context: parseRuntimeLensContextAxis(obj.context),
-    memory: parseRuntimeTraceMemory(obj.memory),
   }
 }
 
@@ -703,7 +671,6 @@ export function parseKeeperRuntimeTrace(raw: unknown): KeeperRuntimeTraceRespons
     manifest_scan_diagnostics: parseManifestScanDiagnostics(raw.manifest_scan_diagnostics),
     turn_identity: parseRuntimeTraceTurnIdentity(raw.turn_identity),
     event_bus: parseRuntimeTraceEventBus(raw.event_bus),
-    memory: parseRuntimeTraceMemory(raw.memory),
     runtime_lens: parseRuntimeLens(raw.runtime_lens, traceId),
     linked_artifacts: parseRuntimeTraceLinkedArtifacts(raw.linked_artifacts),
     manifest_rows: recordListField(raw, 'manifest_rows'),

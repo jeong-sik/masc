@@ -855,8 +855,6 @@ describe('keeper runtime trace', () => {
         runtime_completed_count: 1,
         runtime_failed_count: 0,
         event_bus_correlated_count: 1,
-        memory_injected_count: 1,
-        memory_flushed_count: 1,
         receipt_appended_count: 1,
         turn_finished_count: 1,
 	      },
@@ -864,11 +862,6 @@ describe('keeper runtime trace', () => {
         event_bus_correlated_count: 1,
         correlation_ids: ['corr-1'],
         run_ids: ['run-1'],
-      },
-      memory: {
-        memory_injected_count: 1,
-        memory_flush_success_count: 1,
-        episodes_flushed: 2,
       },
       linked_artifacts: {
         receipts: [
@@ -900,8 +893,6 @@ describe('keeper runtime trace', () => {
 	    expect(result.turn_identity.runtime_completed_count).toBe(1)
 	    expect(result.turn_identity.runtime_failed_count).toBe(0)
 	    expect(result.event_bus.correlation_ids).toEqual(['corr-1'])
-    expect(result.memory.memory_flushed_count).toBe(0)
-    expect(result.memory.episodes_flushed).toBe(2)
     expect(result.manifest_scan_diagnostics.state).toBe('available')
     if (result.manifest_scan_diagnostics.state !== 'available') {
       throw new Error(result.manifest_scan_diagnostics.error)
@@ -939,7 +930,6 @@ describe('keeper runtime trace', () => {
       receipt_returned_rows: 0,
       turn_identity: {},
       event_bus: {},
-      memory: {},
       runtime_lens: {
         axes: {
           provider_lane: {
@@ -1054,17 +1044,11 @@ describe('keeper runtime trace', () => {
           runtime_completed_count: 1,
           runtime_failed_count: 0,
           event_bus_correlated_count: 1,
-          memory_injected_count: 1,
-          memory_flushed_count: 1,
           receipt_appended_count: 1,
           turn_finished_count: 1,
 	        },
 	        event_bus: {
           event_bus_correlated_count: 1,
-        },
-        memory: {
-          memory_injected_count: 1,
-          memory_flushed_count: 1,
         },
         health: 'ok',
       }), {
@@ -1086,7 +1070,6 @@ describe('keeper runtime trace', () => {
     expect(init.method).toBeUndefined()
 	    expect(result.turn_identity.max_agent_core_turn_count).toBe(4)
 	    expect(result.turn_identity.runtime_completed_count).toBe(1)
-	    expect(result.memory.memory_injected_count).toBe(1)
     expect(result.runtime_lens.turn_clock.trace_id).toBe('trace 1')
   })
 })

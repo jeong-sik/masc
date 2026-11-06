@@ -328,8 +328,6 @@ describe('RuntimeLensSection', () => {
         runtime_failed_count: 0,
         checkpoint_saved_count: 1,
         event_bus_correlated_count: 1,
-        memory_injected_count: 1,
-        memory_flushed_count: 1,
         receipt_appended_count: 1,
         turn_finished_count: 1,
       },
@@ -337,15 +335,6 @@ describe('RuntimeLensSection', () => {
         event_bus_correlated_count: 1,
         correlation_ids: ['corr-1'],
         run_ids: ['run-1'],
-      },
-      memory: {
-        memory_injected_count: 1,
-        memory_injected_present_count: 1,
-        memory_flushed_count: 1,
-        memory_flush_success_count: 1,
-        memory_flush_error_count: 0,
-        episodes_flushed: 2,
-        procedures_flushed: 1,
       },
       runtime_lens: {
         turn_clock: {
@@ -394,15 +383,6 @@ describe('RuntimeLensSection', () => {
             event_bus_correlated_count: 1,
             checkpoint_loaded_count: 1,
             checkpoint_saved_count: 1,
-          },
-          memory: {
-            memory_injected_count: 1,
-            memory_injected_present_count: 1,
-            memory_flushed_count: 1,
-            memory_flush_success_count: 1,
-            memory_flush_error_count: 0,
-            episodes_flushed: 2,
-            procedures_flushed: 1,
           },
         },
         swimlanes: {

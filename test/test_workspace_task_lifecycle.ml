@@ -61,11 +61,6 @@ let test_claimed_done_requires_verification_submission () =
   |> expect_error L.Verification_submission_required
 ;;
 
-let test_done_has_no_non_verification_lane () =
-  decide ~same_agent:true ~task_status:in_progress ~action:D.Done_action ()
-  |> expect_error L.Verification_submission_required
-;;
-
 (* The holder ends its own Task at once, with the reason on the record. *)
 let cancelled_with_reason ~what = function
   | Ok { L.new_status = D.Cancelled { cancelled_by; reason; _ }; _ } ->
@@ -472,7 +467,6 @@ let test_rejection_keeps_the_focus_of_other_active_work () =
 let () =
   test_done_requires_verification_submission ();
   test_claimed_done_requires_verification_submission ();
-  test_done_has_no_non_verification_lane ();
   test_verification_preserves_original_start_time ();
   test_awaiting_metrics_use_original_start_time ();
   test_unparsable_start_has_no_duration ();

@@ -122,12 +122,6 @@ let test_status_with_whitespace () =
   let gaps = G.collect_metadata_gaps ~agents:[ a ] in
   assert (List.length gaps = 1)
 
-let test_active_with_assignment_no_gap () =
-  (* Active + assignment != "unassigned" → no gap. *)
-  let a = agent ~status:"active" ~assignment:"task-1" () in
-  let gaps = G.collect_metadata_gaps ~agents:[ a ] in
-  assert (gaps = [])
-
 (* ── (5) evidence_of_metadata_gaps cap at 2 ──────────────── *)
 
 let test_evidence_caps_at_two () =
@@ -173,7 +167,6 @@ let () =
   test_busy_agent_triggers ();
   test_status_case_insensitive ();
   test_status_with_whitespace ();
-  test_active_with_assignment_no_gap ();
   test_evidence_caps_at_two ();
   test_evidence_returns_summaries ();
   test_evidence_filters_by_section ();

@@ -73,6 +73,7 @@
   keeper_approval_queue_grant
   keeper_approval_queue_entry_update
   keeper_approval_queue_summary_exact
+  keeper_approval_queue_summary_attempt
   keeper_skill_activation_types
   keeper_skill_activation_summary
   keeper_skill_activation_ledger_errors

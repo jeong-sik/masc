@@ -13,9 +13,9 @@
 
     The transport is a pair of functions ({!Login_transport}), so this module
     does no I/O of its own and the tests answer for Google. The discovery
-    document and the JWKS are read with no headers. The server passes calls
-    of the shared HTTP client, bounded by {!Login_transport.max_answer_bytes}
-    and a timeout. *)
+    document and the JWKS are read with no headers. The server transport
+    of plan C3 is to make the calls with the shared HTTP client, bounded by
+    {!Login_transport.max_answer_bytes} and a timeout. *)
 
 (** The client of this installation at Google. The secret is in no function
     out of it: it is only sent in the token request. *)

@@ -14,8 +14,8 @@ type get = url:string -> headers:(string * string) list -> (response, string) re
 type post = url:string -> headers:(string * string) list -> body:string -> (response, string) result
 
 (** 64 KiB. A login refuses a longer answer. The documents of Google and of
-    GitHub that a login reads are a few KiB. The server passes the same bound
-    to the shared HTTP client. *)
+    GitHub that a login reads are a few KiB. The server transport of plan C3
+    is to pass the same bound to the shared HTTP client. *)
 val max_answer_bytes : int
 
 (** An [https] URL with a host and no query or fragment. Provider endpoints and

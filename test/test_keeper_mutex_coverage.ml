@@ -63,7 +63,7 @@ let wait_for_active_switch_count clock expected =
    spinning on [Eio.Fiber.yield], which only reschedules fibers already
    runnable in this domain and so handed no time at all to the separate OS
    thread that produces the transition ([Eio_guard.run_in_systhread] in
-   keeper_msg_async.ml). Sampling on a clock instead would only widen the
+   keeper_fs.ml). Sampling on a clock instead would only widen the
    window; the transition still has to be guessed at from outside.
 
    Both transitions announce themselves, so wait on the announcement:
@@ -96,7 +96,7 @@ let resolve_once flag resolver value =
 ;;
 
 (* Resolves on the first settlement carrying a Cancelled status. Every abort
-   path in keeper_msg_async.ml commits the status and then calls
+   path in keeper_msg_async_submit.ml commits the status and then calls
    [notify_settled], so this fires after the transition is durable. *)
 let cancelled_signal () =
   let seen = Atomic.make false in

@@ -1072,7 +1072,7 @@ const recovery = {
 // One active row as the server writes it: Server_async_request_observability
 // .entry_to_yojson (lib/server/server_async_request_observability.ml:86) puts
 // worker_ownership in front of Keeper_msg_async.entry_to_json
-// (lib/keeper/keeper_msg_async.ml:2812), which always writes request_context
+// (lib/keeper/keeper_msg_async_query.ml:184), which always writes request_context
 // as the submitter's object or null.
 function activeRequestRow(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {

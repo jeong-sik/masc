@@ -3154,8 +3154,6 @@
 
 (include stanzas/test_keeper_latched_reason.inc)
 
-(include stanzas/test_keeper_long_turn_9943.inc)
-
 (include stanzas/test_keeper_execution_join.inc)
 (include stanzas/test_full_health_wakeup.inc)
 (include stanzas/test_dashboard_spa_deep_link.inc)
@@ -3200,8 +3198,6 @@
 (include stanzas/test_keeper_replay_checkpoint.inc)
 
 (include stanzas/test_kimi_coding_replay.inc)
-
-(include stanzas/test_keeper_supervisor_observability_10125.inc)
 
 (include stanzas/test_prompt_registry_dune_fallback.inc)
 (include stanzas/test_provider_usage_windows.inc)

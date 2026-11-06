@@ -35,7 +35,8 @@
     + It writes [Intent_pending] to the store, appends the record to the log,
       publishes the state with the record, and writes [Committed]. A record
       whose {!Authz_state.applied} has no change, the issue of an invitation
-      for one, has no intent and no [Committed]: it is appended and published.
+      for one or a cancel of a block, has no intent and no [Committed]: it is
+      appended and published.
       Its settlement is still written before the append, because the append
       moves the head and an intent left behind it could no longer be aborted.
       A reduction that the settlement gives up blocks its subject in the state
@@ -45,8 +46,8 @@
       A commit that fails after that point leaves the block in place. A replay starts each block after the
       record its intent began at, as the writer did, and a block whose record
       the log no longer holds starts once the log is read. A replay closes a
-      block at the record that names it, so a log cut back to before that
-      record holds the block again.
+      block at the record that names it, a retry or a cancel, so a log cut
+      back to before that record holds the block again.
 
     Each step writes only when the steps before it passed, so a commit that is
     refused in the first two steps writes nothing, and the settlement waits for
@@ -122,8 +123,9 @@ module Replay : sig
   val init : Authz_external_store.State.t -> t
 
   (** The fold function for {!Authz_log.open_at_start}. A block that the
-      replay has not reached starts before a record that closes it: the
-      writer that wrote that record held the block from its start. *)
+      replay has not reached starts before a record that closes or cancels it
+      ({!Authz_state.closed_by}): the writer that wrote that record held the
+      block from its start. *)
   val step : t -> Authz_record.t -> (t, Authz_state.refusal) result
 
   (** The replay once the log is read: the blocks it has not reached start

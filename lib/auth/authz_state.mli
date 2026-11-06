@@ -33,7 +33,8 @@
     only from a branch that has one. *)
 
 (** A reduction that the external store gave up (design 8.3). Its subject
-    stays blocked until a record names [aborted] in its [closes]; the zone
+    stays blocked until a record names [aborted] in its [closes], or an
+    eligible Admin cancels it ({!Authz_record.Kind.Revocation_cancel}); the zone
     holds one per given-up intent, so two reductions of one subject are closed
     apart. *)
 type held = private
@@ -56,7 +57,8 @@ type t = private
   ; revocation_pending : held list
         (** The reductions whose intent the external store gave up (design
             8.3). No record adds one: the writer zone does, from the store
-            ({!hold_revocations}). A record removes those it closes. *)
+            ({!hold_revocations}). A record removes those it closes, and a
+            cancel the one it names. *)
   ; latest_at_ms : int option
         (** The latest [at_ms] of the records read. [None] before the first. *)
   }
@@ -67,7 +69,9 @@ val empty : t
     [Aborted_intent] whose change {!Authz_external_store.Change.is_reduction}.
     Design 8.3 blocks such a subject at the gate, without a record, until a
     record that names the aborted intent closes it: a record that makes the
-    same change again, with the digests of {!closable} in its [closes]. A
+    same change again, with the digests of {!closable} in its [closes], or the
+    cancel of an Admin that is eligible for it (design 4.1). The cancel lifts
+    the block and leaves the reduction undone. A
     revoked invitation that is blocked cannot be spent, which is what its
     revocation was for. A reduction already held is held once. *)
 val hold_revocations : t -> held list -> t
@@ -121,6 +125,28 @@ type refusal =
   | Closes_not_held of Authz_record.Hash.t
       (** The record closes this digest, and no held reduction of the change it
           makes has it. *)
+  | Cancel_unreadable of Authz_cancel_event.error
+  | Canceller_is_not_an_admin of Authz_records.Author.t
+      (** The author of a cancel is not a human principal with an Admin
+          assignment in force that is active. A held author is refused before
+          this as {!Revocation_pending}. *)
+  | Cancel_not_held of Authz_record.Hash.t
+      (** No held reduction has this digest: none was given up with it, or a
+          record closed or cancelled it before. *)
+  | Cancel_subject_differs of
+      { aborted : Authz_record.Hash.t
+      ; named : Authz_records.Subject.t  (** The subject the cancel names. *)
+      ; held : Authz_records.Subject.t  (** The subject of the held reduction. *)
+      }
+  | Canceller_issued_the_invitation of Authz_records.Subject.t
+      (** The canceller issued the invitation that is the subject, which makes
+          them its owner, or the one the principal that is the subject joined
+          through, which makes them its original approver (design 4.1). *)
+  | Cancel_owner_unknown of Authz_records.Subject.t
+      (** No invitation stands behind the subject, so this layer cannot tell
+          its owner or its approver, and no Admin is known to be eligible. A
+          block of a grant, a credential, a runtime, or a service stays until
+          the layer that reads them. *)
 
 val refusal_to_string : refusal -> string
 
@@ -135,13 +161,21 @@ val refusal_to_string : refusal -> string
     invitation also raises the role epoch of that principal. The revocation
     of an Admin assignment is a [Revoke] on its principal, a disable a
     [Disable], and a deletion a [Delete]. An enable has none: a log restored
-    from before it leaves the principal disabled. *)
+    from before it leaves the principal disabled. A cancel has none either: a
+    log restored from before it brings the block back. *)
 type applied =
   { state : t
   ; high_water : Authz_external_store.Change.t option
   }
 
 val apply : t -> Authz_record.t -> (applied, refusal) result
+
+(** The given-up reductions that a record names: its [closes], and the one a
+    cancel lifts. The replay holds each one it has not reached before it reads
+    the record ({!Authz_zone.Replay.step}), as the writer of the record held
+    them all. A record cannot name an intent that begins after it, because the
+    digest of the intent covers the head it began at. *)
+val closed_by : Authz_record.t -> Authz_record.Hash.t list
 
 (** {!apply} without the change: the fold function of the replay. *)
 val step : t -> Authz_record.t -> (t, refusal) result

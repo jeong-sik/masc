@@ -61,7 +61,8 @@ let other_kinds =
       && kind <> K.Invite
       && kind <> K.Admission
       && kind <> K.Admin_assignment
-      && kind <> K.Principal)
+      && kind <> K.Principal
+      && kind <> K.Revocation_cancel)
     K.all
 
 let mode = Alcotest.testable (fun fmt m -> Format.pp_print_string fmt (Mode.to_string m)) Mode.equal
@@ -850,6 +851,199 @@ let test_fresh_bootstrap_log () =
           Alcotest.check mode "the workspace of the bootstrap" (Mode.Multi_account workspace) state.S.mode))
 ;;
 
+(* ---- revocation cancels ---- *)
+
+module Cancel = Authz_cancel_event
+
+let human id = Authz_records.Author.Authenticated (Authz_types.Principal.Human id)
+let carol = id_of_string Authz_types.User_id.of_string "user-3"
+let fourth_invite = id_of_string Authz_types.Invite_id.of_string "invite-4"
+
+let record_by ~author kind body =
+  match R.make ~head:R.genesis ~at_ms ~author ~kind ~body with
+  | Ok record -> record
+  | Error _ -> Alcotest.failf "fixture %s record refused" (K.to_string kind)
+;;
+
+let issued_by ~by id token =
+  match
+    I.to_body
+      (I.Issued
+         { invite_id = id
+         ; token_digest = I.Token_digest.of_token token
+         ; expires_at_ms = at_ms + 1000
+         ; role = I.Admin
+         })
+  with
+  | Error _ -> Alcotest.fail "fixture invite refused"
+  | Ok body -> record_by ~author:(human by) K.Invite body
+;;
+
+let cancel_named ?(author = human bob) ~aborted subject =
+  match Cancel.to_body { Cancel.aborted; subject } with
+  | Error _ -> Alcotest.fail "fixture cancel refused"
+  | Ok body -> record_by ~author K.Revocation_cancel body
+;;
+
+let cancel_record ?author (held : S.held) = cancel_named ?author ~aborted:held.S.aborted held.S.subject
+
+let principal_subject id = Authz_records.Subject.Principal (Authz_types.Principal.Human id)
+
+(* user and bob are Admins through invitations of the local operator. user
+   issues invite-3, which carol joins through, and invite-4, which is open. *)
+let three_admins () =
+  let state = step_ok (two_admins ()) (issued_by ~by:user third_invite "token-3") in
+  let state =
+    step_ok state (admission_record ~user_id:carol ~identity:(identity_of "333") ~invite:third_invite ())
+  in
+  step_ok state (issued_by ~by:user fourth_invite "token-4")
+;;
+
+let cancel_word state record =
+  match S.apply state record with
+  | Ok { S.state = (_ : S.t); high_water = None } -> "lifted"
+  | Ok { S.state = (_ : S.t); high_water = Some change } ->
+    "lifted with an intent: " ^ Authz_external_store.Change.to_string change
+  | Error refusal -> S.refusal_to_string refusal
+;;
+
+(* An eligible Admin lifts one block (design 8.3), and the store takes no
+   intent for it. The reduction stays undone: carol is still an Admin, and the
+   invitation is still open. *)
+let test_an_eligible_admin_lifts_a_block () =
+  let carol_held = held (principal_subject carol) in
+  let invite_held = held ~aborted:(String.make 64 'b') (Authz_records.Subject.Invite fourth_invite) in
+  let state = S.hold_revocations (three_admins ()) [ carol_held; invite_held ] in
+  Alcotest.(check string) "bob lifts the block of carol" "lifted" (cancel_word state (cancel_record carol_held));
+  let lifted = step_ok state (cancel_record carol_held) in
+  Alcotest.(check (list string)) "the other block stays" (hex_list [ invite_held.S.aborted ]) (held_digests lifted);
+  Alcotest.(check string) "carol after it" "clear" (revocation_word lifted (principal_subject carol));
+  Alcotest.(check bool) "carol is still an Admin" true (People.is_admin lifted.S.principals carol);
+  let both = step_ok lifted (cancel_record invite_held) in
+  Alcotest.(check (list string)) "both lifted" [] (held_digests both);
+  match Invites.find both.S.invites fourth_invite with
+  | Some { Invites.status = Invites.Open; _ } -> ()
+  | Some _ | None -> Alcotest.fail "the invitation is not open after its block is lifted"
+;;
+
+(* Design 4.1 leaves out the owner of the subject and its original approver:
+   the issuer of the invitation that is the subject, and of the one the
+   principal joined through. The local operator is neither an Admin nor
+   eligible, so an invitation it issued leaves no Admin out. *)
+let test_the_issuer_behind_the_subject_does_not_cancel () =
+  let carol_held = held (principal_subject carol) in
+  let invite_held = held ~aborted:(String.make 64 'b') (Authz_records.Subject.Invite fourth_invite) in
+  let bob_held = held ~aborted:(String.make 64 'c') (principal_subject bob) in
+  let state = S.hold_revocations (three_admins ()) [ carol_held; invite_held ] in
+  let refused subject = S.refusal_to_string (S.Canceller_issued_the_invitation subject) in
+  Alcotest.(check string)
+    "user approved carol"
+    (refused (principal_subject carol))
+    (cancel_word state (cancel_record ~author:(human user) carol_held));
+  Alcotest.(check string)
+    "user owns invite-4"
+    (refused (Authz_records.Subject.Invite fourth_invite))
+    (cancel_word state (cancel_record ~author:(human user) invite_held));
+  Alcotest.(check string)
+    "carol, blocked herself, does not lift the block of invite-4"
+    (S.refusal_to_string (S.Revocation_pending (principal_subject carol)))
+    (cancel_word state (cancel_record ~author:(human carol) invite_held));
+  Alcotest.(check string)
+    "carol lifts it once she is not blocked"
+    "lifted"
+    (cancel_word
+       (S.hold_revocations (three_admins ()) [ invite_held ])
+       (cancel_record ~author:(human carol) invite_held));
+  let bob_blocked = S.hold_revocations (three_admins ()) [ bob_held ] in
+  Alcotest.(check string)
+    "user lifts the block of bob, whom the local operator invited"
+    "lifted"
+    (cancel_word bob_blocked (cancel_record ~author:(human user) bob_held))
+;;
+
+let test_a_cancel_that_is_refused () =
+  let carol_held = held (principal_subject carol) in
+  let bob_held = held ~aborted:(String.make 64 'c') (principal_subject bob) in
+  let grant =
+    held
+      ~aborted:(String.make 64 'e')
+      (Authz_records.Subject.Grant (id_of_string Authz_types.Grant_id.of_string "grant-1"))
+  in
+  let state = S.hold_revocations (three_admins ()) [ carol_held; grant ] in
+  let check label expected record = Alcotest.(check string) label expected (cancel_word state record) in
+  let not_held = held ~aborted:(String.make 64 'd') (principal_subject carol) in
+  check "a digest that no block has" (S.refusal_to_string (S.Cancel_not_held not_held.S.aborted))
+    (cancel_record not_held);
+  check
+    "another subject than the block"
+    (S.refusal_to_string
+       (S.Cancel_subject_differs
+          { aborted = carol_held.S.aborted; named = principal_subject bob; held = principal_subject carol }))
+    (cancel_named ~aborted:carol_held.S.aborted (principal_subject bob));
+  check
+    "a block with no invitation behind it"
+    (S.refusal_to_string (S.Cancel_owner_unknown grant.S.subject))
+    (cancel_record grant);
+  let not_admin author = S.refusal_to_string (S.Canceller_is_not_an_admin author) in
+  let stranger = human (id_of_string Authz_types.User_id.of_string "user-9") in
+  check "a principal that never joined" (not_admin stranger) (cancel_record ~author:stranger carol_held);
+  let service =
+    Authz_records.Author.Authenticated
+      (Authz_types.Principal.Service (id_of_string Authz_types.Service_id.of_string "keeper-1"))
+  in
+  check "a service" (not_admin service) (cancel_record ~author:service carol_held);
+  let bob_blocked = S.hold_revocations state [ bob_held ] in
+  Alcotest.(check string)
+    "a blocked Admin"
+    (S.refusal_to_string (S.Revocation_pending (principal_subject bob)))
+    (cancel_word bob_blocked (cancel_record carol_held));
+  Alcotest.(check string)
+    "a blocked Admin lifting their own block"
+    (S.refusal_to_string (S.Revocation_pending (principal_subject bob)))
+    (cancel_word bob_blocked (cancel_record bob_held));
+  check
+    "a cancel that also closes"
+    (S.refusal_to_string S.Closes_without_reduction)
+    (R.closing (cancel_record carol_held) ~closes:[ carol_held.S.aborted ]);
+  let unreadable = record_by ~author:(human bob) K.Revocation_cancel (body_of_json (`Assoc [])) in
+  check "an unreadable body" (S.refusal_to_string (S.Cancel_unreadable Cancel.Wrong_members)) unreadable;
+  Alcotest.(check (list string))
+    "nothing changed after the refusals"
+    (hex_list [ carol_held.S.aborted; grant.S.aborted ])
+    (held_digests state)
+;;
+
+let test_a_cancel_by_mode () =
+  let carol_held = held (principal_subject carol) in
+  (match S.step S.empty (cancel_record carol_held) with
+   | Error (S.Before_bootstrap K.Revocation_cancel) -> ()
+   | other -> Alcotest.failf "before the bootstrap: %s" (step_label other));
+  let off = S.hold_revocations (step_ok (three_admins ()) (mode_record M.Off workspace)) [ carol_held ] in
+  match S.step off (cancel_record carol_held) with
+  | Error (S.Accounts_off K.Revocation_cancel) -> ()
+  | other -> Alcotest.failf "with the accounts off: %s" (step_label other)
+;;
+
+(* What the replay holds before it reads a record: the closes of a retry, and
+   the digest that a cancel names. *)
+let test_what_a_record_names () =
+  let carol_held = held (principal_subject carol) in
+  let first = held (Authz_records.Subject.Invite invite_id) in
+  Alcotest.(check (list string))
+    "a cancel"
+    (hex_list [ carol_held.S.aborted ])
+    (hex_list (S.closed_by (cancel_record carol_held)));
+  Alcotest.(check (list string))
+    "a retry"
+    (hex_list [ first.S.aborted ])
+    (hex_list (S.closed_by (revoke_record ~closes:[ first ] invite_id)));
+  Alcotest.(check (list string)) "an issue" [] (hex_list (S.closed_by (issue_record third_invite "token-3")));
+  Alcotest.(check (list string))
+    "an unreadable cancel"
+    []
+    (hex_list (S.closed_by (record_by ~author:(human bob) K.Revocation_cancel (body_of_json (`Assoc [])))))
+;;
+
 let () =
   Alcotest.run
     "authz_state"
@@ -890,6 +1084,14 @@ let () =
             test_closes_that_name_no_block_of_the_change_are_refused
         ; Alcotest.test_case "an Admin invites a Member" `Quick test_an_admin_invites_a_member
         ; Alcotest.test_case "by mode" `Quick test_an_admin_assignment_by_mode
+        ] )
+    ; ( "revocation cancels"
+      , [ Alcotest.test_case "an eligible Admin" `Quick test_an_eligible_admin_lifts_a_block
+        ; Alcotest.test_case "the issuer behind the subject" `Quick
+            test_the_issuer_behind_the_subject_does_not_cancel
+        ; Alcotest.test_case "refused" `Quick test_a_cancel_that_is_refused
+        ; Alcotest.test_case "by mode" `Quick test_a_cancel_by_mode
+        ; Alcotest.test_case "what a record names" `Quick test_what_a_record_names
         ] )
     ; ( "principal records"
       , [ Alcotest.test_case "disable, enable, delete" `Quick test_a_principal_record

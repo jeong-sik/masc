@@ -340,6 +340,12 @@ let refusal_name : Authz_state.refusal -> string = function
   | Authz_state.Admission_behind_log _ -> "Admission_behind_log"
   | Authz_state.Closes_without_reduction -> "Closes_without_reduction"
   | Authz_state.Closes_not_held _ -> "Closes_not_held"
+  | Authz_state.Cancel_unreadable _ -> "Cancel_unreadable"
+  | Authz_state.Canceller_is_not_an_admin _ -> "Canceller_is_not_an_admin"
+  | Authz_state.Cancel_not_held _ -> "Cancel_not_held"
+  | Authz_state.Cancel_subject_differs _ -> "Cancel_subject_differs"
+  | Authz_state.Canceller_issued_the_invitation _ -> "Canceller_issued_the_invitation"
+  | Authz_state.Cancel_owner_unknown _ -> "Cancel_owner_unknown"
 ;;
 
 let error_name : Z.error -> string = function
@@ -1217,6 +1223,117 @@ let admit_two_admins zone =
   ()
 ;;
 
+(* ---- revocation cancels ---- *)
+
+let fourth_invite_id = get (Authz_types.Invite_id.of_string "invite-4")
+let fifth_invite_id = get (Authz_types.Invite_id.of_string "invite-5")
+let third_person = get (User_id.of_string "00112233445566778899aabbccddeeff")
+
+let cancel_draft ~by ~aborted ~subject ~at_ms =
+  match Authz_cancel_event.to_body { Authz_cancel_event.aborted; subject } with
+  | Ok body ->
+    timed ~at_ms ~author:(Author.Authenticated (Principal.Human by)) ~kind:R.Kind.Revocation_cancel body
+  | Error _ -> Alcotest.fail "fixture cancel refused"
+;;
+
+(* The first Admin issues an invitation, and its revocation fails. The first
+   Admin owns it and does not lift its block (design 4.1); the second does,
+   with a record that the store takes no intent for. A restart reads the
+   cancel, and a log cut back to before it holds the block again (design 8.3). *)
+let an_eligible_admin_lifts_a_block_and_a_log_cut_back_holds_it_again () =
+  with_dirs (fun dirs ->
+    let (_ : B.completed) = bootstrap dirs in
+    let zone = open_zone dirs in
+    admit_two_admins zone;
+    let issued =
+      commit_ok
+        zone
+        (invite_draft
+           ~author:(Author.Authenticated (Principal.Human first_admin))
+           ~at_ms:(at_ms + 5)
+           ~invite_id:third_invite_id
+           ~token:"token-3"
+           ())
+    in
+    let invitation = Subject.Invite third_invite_id in
+    let revoke = revoke_draft_of ~invite_id:third_invite_id ~at_ms:(at_ms + 6) in
+    let left = revocation_intent ~subject:invitation ~head:(Z.snapshot zone).Z.head revoke in
+    let aborted = left.S.intended_next_record_digest in
+    fail_append zone dirs revoke;
+    check_gate "after the failed revocation" "pending" zone invitation;
+    check_error
+      "the owner of the invitation"
+      "Refused Canceller_issued_the_invitation"
+      zone
+      (cancel_draft ~by:first_admin ~aborted ~subject:invitation ~at_ms:(at_ms + 7));
+    check_gate "after the refused cancel" "pending" zone invitation;
+    let lifted =
+      commit_ok zone (cancel_draft ~by:second_admin ~aborted ~subject:invitation ~at_ms:(at_ms + 8))
+    in
+    check_settled "the cancel gives the revocation up first" ("Abort " ^ intent_name left) lifted;
+    check_gate "after the cancel" "clear" zone invitation;
+    let opened = check_restart "a restart" dirs ~mode:on ~head:lifted.Z.record_hash in
+    check_blocked "the replay lifts the block" [] opened.replay.Z.Replay.state;
+    Alcotest.(check (list string))
+      "the store holds the abort and nothing of the cancel"
+      [ intent_name left ]
+      (List.map intent_name (S.State.aborted opened.store_state));
+    Alcotest.(check (option string))
+      "no intent is pending"
+      None
+      (Option.map intent_name (S.State.pending opened.store_state));
+    drop_last_line (log_file dirs);
+    let opened = check_restart "the log cut back" dirs ~mode:on ~head:issued.Z.record_hash in
+    check_blocked "the block is back" [ "invite:invite-3" ] opened.replay.Z.Replay.state;
+    check_gate "the gate after the log was cut back" "pending" (open_zone dirs) invitation)
+;;
+
+(* A block whose head the log no longer holds starts once the log is read. A
+   cancel written after that lifts it, and the next start reads the cancel
+   with the block it names instead of refusing the log. The token of the
+   invitation then opens it, as the revocation never got in. *)
+let a_cancel_lifts_a_block_the_log_no_longer_reaches () =
+  with_dirs (fun dirs ->
+    let (_ : B.completed) = bootstrap dirs in
+    let zone = open_zone dirs in
+    admit_two_admins zone;
+    let invitation = Subject.Invite third_invite_id in
+    let (_ : Z.committed) =
+      commit_ok zone (invite_draft ~at_ms:(at_ms + 5) ~invite_id:third_invite_id ~token:"token-3" ())
+    in
+    let (_ : Z.committed) =
+      commit_ok zone (invite_draft ~at_ms:(at_ms + 6) ~invite_id:fourth_invite_id ~token:"token-4" ())
+    in
+    let revoke = revoke_draft_of ~invite_id:third_invite_id ~at_ms:(at_ms + 7) in
+    let left = revocation_intent ~subject:invitation ~head:(Z.snapshot zone).Z.head revoke in
+    fail_append zone dirs revoke;
+    let (_ : Z.committed) =
+      commit_ok zone (invite_draft ~at_ms:(at_ms + 8) ~invite_id:fifth_invite_id ~token:"token-5" ())
+    in
+    drop_last_line (log_file dirs);
+    drop_last_line (log_file dirs);
+    let zone = open_zone dirs in
+    check_gate "once the log went back" "pending" zone invitation;
+    let lifted =
+      commit_ok
+        zone
+        (cancel_draft
+           ~by:first_admin
+           ~aborted:left.S.intended_next_record_digest
+           ~subject:invitation
+           ~at_ms:(at_ms + 9))
+    in
+    check_gate "after the cancel" "clear" zone invitation;
+    let opened = check_restart "a restart" dirs ~mode:on ~head:lifted.Z.record_hash in
+    check_blocked "the replay lifts the block" [] opened.replay.Z.Replay.state;
+    let (_ : Z.committed) =
+      commit_ok
+        (open_zone dirs)
+        (admission_draft_of ~person:third_person ~sub:"333" ~invite_id:third_invite_id ~at_ms:(at_ms + 10))
+    in
+    ())
+;;
+
 (* A disable and a deletion go through the store as intents with their answers,
    and a restart reads both back. *)
 let a_disable_and_a_deletion_survive_a_restart () =
@@ -1777,6 +1894,14 @@ let () =
             "a disable and a deletion survive a restart"
             `Quick
             a_disable_and_a_deletion_survive_a_restart
+        ; Alcotest.test_case
+            "an eligible Admin lifts a block, and a log cut back holds it again"
+            `Quick
+            an_eligible_admin_lifts_a_block_and_a_log_cut_back_holds_it_again
+        ; Alcotest.test_case
+            "a cancel lifts a block the log no longer reaches"
+            `Quick
+            a_cancel_lifts_a_block_the_log_no_longer_reaches
         ] )
     ; ( "refusals"
       , [ Alcotest.test_case "refused records write nothing" `Quick refused_records_write_nothing

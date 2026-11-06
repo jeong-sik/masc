@@ -512,6 +512,3 @@ function contextFocusMetaParts(focus: IdeContextFocus): ReadonlyArray<string> {
     routeCount > 0 ? `${routeCount} links` : null,
   ].filter((part): part is string => part !== null)
 }
-
-// Re-exports for backward compatibility
-export { currentFileFindMatches } from './ide-editor-find'

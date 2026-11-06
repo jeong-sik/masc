@@ -181,7 +181,11 @@ runtime id 나 client 종류가 바뀌면 옛 thread 는 다른 계정 home 이�
 2. Codex 계정 home 마다 `sessions`, `state_5.sqlite*`, `thread_history_1.sqlite*` 를 지운다. 지금 어느 runtime 도 쓰지 않는 옛 계정 home 도 같다.
 3. 새 버전으로 서버를 띄운다.
 
-`auth.json`, `config.toml` 은 남긴다. 기억한 thread 가 있던 Keeper(11-06 측정으로 3개)는 다음 `thread/resume` 이 한 번 실패하고, 그다음 claim 이 새 thread 를 연다. 이 실패는 예상된 것이라고 changelog 에 적는다. 이 절차가 로그인 상태를 지키는지는 L4 전에 임시 home 복사본에서 확인한다.
+`auth.json`, `config.toml` 은 남긴다. 기억한 thread 가 있던 Keeper(11-06 측정으로 3개)는 다음 `thread/resume` 이 한 번 실패하고, 그다음 claim 이 새 thread 를 연다. 이 실패는 예상된 것이라고 changelog 에 적는다.
+
+- 실패 경로: `thread/resume` 거절은 `Rpc_error` 다. `recovery_failure_of_client_error` 가 `Protocol_failed` 로 바꾸고, 기록은 `Recovery_required` 가 된다. 다음 claim 은 이 기록을 `Start { previous_settlement = None }` 으로 넘긴다. 8일 로그에서 `protocol_failed` 넘김이 189번 있었다. L2 가 있으면 그 claim 이 잊은 id 로 `thread/delete` 를 한 번 보내고 `-32600` 을 받는다.
+- 로그인: 11-06 에 쓰는 계정 home(`<base>/.masc/official-clients/codex/<digest>`)의 `state_5.sqlite` 를 읽기 전용으로 셌다. 행이 있는 표는 `threads`(7,008) 하나다. `projects`, `project_roots`, `remote_control_enrollments`, `external_agent_config_imports`, `guardian_review_feedback`, `project_idempotency_keys` 는 0행이다. `thread_history_1.sqlite` 의 표는 `thread_turns`·`thread_items`·`thread_history_projection_state`·`thread_realtime_items` 뿐이다. 두 DB 에 계정·로그인 표가 없고, 로그인은 `auth.json` 에 있다. 빈 home 에서 app-server 를 띄우면 두 DB 를 migration 으로 새로 만든다(2.3 의 확인).
+- 이 home 은 masc 전용이다. 사람이 쓰는 `~/.codex` 가 아니다. 모든 rollout 의 `originator` 가 `masc` 다(1.1).
 
 ## 3. 바뀌는 것
 
@@ -209,7 +213,7 @@ runtime id 나 client 종류가 바뀌면 옛 thread 는 다른 계정 home 이�
 | L1 | 이 RFC | 리뷰 |
 | L2 | `forgotten_sessions`(2.1), `delete_threads` 와 Keeper 턴 뒤 호출(2.2) | type-check. 시험: 기록의 실제 전이(resume, 바뀐 도구 면 claim, revert, release, client 전환)에서 2.1 이 내는 id, 그리고 `thread/delete` 가 id 마다 답을 따로 낸다(하나는 성공, 하나는 `-32600`). 삭제는 턴 결과를 다 계산한 뒤 `unit` 을 돌려주는 함수가 하므로 거절이 턴 결과를 바꿀 길이 없다 |
 | L3 | `thread = Ephemeral \| Persistent of thread_mode`, `~thread` 필수(2.3) | type-check. 시험: `Ephemeral` 은 `"ephemeral": true`, `Persistent Start` 는 `false`, `Resume` 은 필드 없음. 실제 app-server 확인은 2.3 의 표 |
-| L4 | changelog `Fresh state required`, 운영자 절차(2.5) | `changelog-fragments.py check`, 임시 home 복사본에서 절차 확인 |
+| L4 | changelog `Fresh state required`, 운영자 절차(2.5) | `changelog-fragments.py check`. 지우는 두 DB 에 계정 표가 없고 `threads` 말고는 행이 없음을 읽기 전용으로 확인(2.5). `auth.json` 원본은 복사하지도 읽지도 않는다 |
 
 배포 뒤 확인: Codex Keeper 가 다시 돌면 계정 home 의 rollout 수가 Codex Keeper 수 근처에 머무는지 본다. 로그의 `thread/delete` 결과 줄 수와 실패 수를 센다.
 

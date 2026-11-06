@@ -136,3 +136,6 @@ val dated_path : location -> ts:float -> dated_path
     [Jsonl_writer.utc_calendar_day] gives. *)
 
 val dated_path_now : location -> dated_path
+
+val decision_audit_dirname : string
+(** The decision audit directory below [<base>/.masc]. *)

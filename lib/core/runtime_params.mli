@@ -138,3 +138,9 @@ val record_audit :
 
 (** Read the most recent [n] audit entries. *)
 val recent_audit : base_path:string -> int -> Yojson.Safe.t list
+
+val params_filename : string
+(** The parameter file below [<base>/.masc]. *)
+
+val audit_filename : string
+(** The parameter change audit below [<base>/.masc]. *)

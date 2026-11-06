@@ -22,9 +22,10 @@ The Collab hub is built into `masc-tui` and accessed directly from the terminal 
 - **DOS Play Invites (`n` / `/play invite`)**: In Collab, press `n` (or run `/play invite <name> <hours>` in chat) to issue a new DOS player invite, `x` to revoke the selected invite, and `r` to refresh the inventory. Invited guests and external AI agents can view and control the shared DOS machine in a browser via `/play#<token>` or over MCP at `/mcp/play` (instructions served at `/play/agent.md`).
 
 ### Key Code & Module Coordinates
-- `bin/masc_tui_collab.ml` / `bin/masc_tui_collab.mli`: Collab hub state machine and layout rendering.
-- `bin/masc_tui_keys.ml`: Navigation key bindings (`&`, `g`, `m`, `d`, `F5`, `F4`, `Tab`).
-- `bin/masc_tui_types.ml`: `Collab_focus` (`Spectator` | `Conversation` | `PlayInvites`).
+- `bin/masc_tui_collab.ml` / `bin/masc_tui_collab.mli`: Collab hub state machine (keys `m`, `d`, `g`, `n`, `x`, `r`, `u`) and layout rendering.
+- `bin/masc_tui_keys.ml`: Key help, including the `&` entry that opens Collab.
+- `bin/masc_tui_msx.ml`: Shared machine screen. While it is open, `F5` (control toggle), `F4` (MSX/DOS switch) and `Tab` (chat focus) are handled in `bin/masc_tui.ml`.
+- `bin/masc_tui_play_room.ml` / `bin/masc_tui_play_room.mli`: Public spectator chat state (draft, focus, send).
 - `bin/masc_tui_play_pending.ml`: Journaling durable invite intents before dispatch (`.masc/tui-play-pending.jsonl`).
 
 ---

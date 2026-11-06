@@ -22,7 +22,7 @@ import {
   type ToolMetricsSeriesResponse,
 } from './schemas/tool-metrics-series'
 
-// The activation ledger's wire schema — keeper_skill_activation_ledger.ml
+// The activation ledger's wire schema — keeper_skill_activation_ledger_encode.ml
 // writes exactly this tag, and every reader below pins it before trusting
 // the rows.
 const SKILL_ACTIVATIONS_SCHEMA = 'masc.skill-activations/v8'

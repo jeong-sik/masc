@@ -4771,7 +4771,8 @@
  (deps
   test_skill_activation_schema_agreement.py
   skill_activation_event_log_fixture.py
-  ../lib/keeper/keeper_skill_activation_ledger.ml
+  ../lib/keeper/keeper_skill_activation_ledger_encode.ml
+  ../lib/keeper/keeper_skill_activation_ledger_events.ml
   ../scripts/harness/workload/skill_activation_events.py)
  (action
   (run python3 %{dep:test_skill_activation_schema_agreement.py})))

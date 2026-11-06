@@ -291,7 +291,7 @@ let validate_payload ~read ~read_body ~owner ~capture ~parent ~record =
     | Dispatch_intended | Admission_declined _ | Execution_observed _ | Judgment_retained _
     | Preparation_intended _ | Preparation_observed _ | Replacement_intended _ | Replacement_observed _
     | Commit_intended _ | Commit_uncertain _ | Commit_retry_observed _ | Commit_observed _
-    | Commit_conflicted _ | Refused _ | Successor_observed _ | Observer _ -> Ok ()) (Ok ()) (Progress.events record.progress)
+    | Commit_conflicted _ | Refused _ | Refusal_settled _ | Successor_observed _ | Observer _ -> Ok ()) (Ok ()) (Progress.events record.progress)
 let validate_preparation_payload ~read ~read_body ~owner ~capture ~(parent:Owner.retained) =
   match Progress.preparation parent.progress with
   | None -> Ok ()
@@ -370,7 +370,7 @@ let rec restore_record_with ~read ~store ~owner ~capture ~visited (record : Owne
     | Admission_declined _ | Execution_observed (Absent _) | Commit_intended _ | Commit_uncertain _
     | Commit_retry_observed _ | Commit_observed _ | Commit_conflicted _
     | Preparation_intended _ | Preparation_observed _ | Replacement_intended _ | Replacement_observed _
-    | Refused {stage=Progress.Before_dispatch;_} | Observer _ -> Error "Unexpected event in original gate journal")
+    | Refused {stage=Progress.Before_dispatch;_} | Refusal_settled _ | Observer _ -> Error "Unexpected event in original gate journal")
     (Ok (empty,None)) (Progress.events record.progress) in
   let* derived = valid_prefix guidance authority input transcript in
   let* complete = match terminal, derived with

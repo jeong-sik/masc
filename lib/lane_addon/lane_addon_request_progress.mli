@@ -27,6 +27,7 @@ type event =
   | Commit_observed of Yojson.Safe.t
   | Commit_conflicted of Yojson.Safe.t
   | Refused of refusal
+  | Refusal_settled of Yojson.Safe.t
   | Successor_intended of successor
   | Successor_observed of string
   | Observer of Lane_addon_request_receipt.event
@@ -51,6 +52,13 @@ val replacement : t -> preparation option
     acknowledgement survive restart without altering the original phase, Gate
     preparation or observer. The host must authenticate the full derivation and
     confirm the retained child before ACK; neither event grants RPC permission. *)
+val settlement : t -> Yojson.Safe.t option
+(** Orthogonal immutable fact, allowed only on an execution refusal: the host
+    abandoned that exact input range after retaining its diagnosis. Phase stays
+    [Rejected]; the refusal evidence is not rewritten. Once present, the
+    original can no longer be subdivided, and a second settlement is an error.
+    The event grants no effect: the host owns the ranges it moves and must have
+    applied them before recording this fact. *)
 val observer : t -> Lane_addon_request_receipt.t
 (** Orthogonal immutable observer intents/acknowledgements. Execution and commit
     transitions preserve them. Completion intent requires an original Finished,

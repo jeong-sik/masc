@@ -4,14 +4,17 @@
 val keeper_of_trace :
   Keeper_registry.registry_entry list -> Keeper_id.Trace_id.t -> string option
 (** The Keeper whose current trace is [trace_id], from registry entries. The
-    ledger knows only the trace; the registry holds each Keeper's trace in
-    [meta.runtime.trace_id]. *)
+    registry holds each Keeper's trace in [meta.runtime.trace_id]. *)
 
 val start :
   sw:Eio.Switch.t ->
-  (config:Workspace.config -> trace_id:Keeper_id.Trace_id.t -> unit)
-(** Starts the announcing fiber on [sw] and returns the observer that feeds
-    it. {!install} hands it to the ledger. *)
+  (config:Workspace.config ->
+   keeper_name:string ->
+   trace_id:Keeper_id.Trace_id.t ->
+   Keeper_skill_activation_ledger.t ->
+   unit)
+(** Starts the announcing fiber on [sw] and returns the commit observer that
+    feeds it. {!install} hands it to the ledger. *)
 
 val install : sw:Eio.Switch.t -> unit
 (** Installs the ledger's commit observer and the fiber that announces for
@@ -22,6 +25,6 @@ val install : sw:Eio.Switch.t -> unit
     entry holds, as for a Keeper removed mid-turn, has no reader and is not
     announced; it is counted on [keeper_sse_broadcast_failures] with reason
     [unnamed_trace]. A failed lookup or broadcast is counted with reason
-    [broadcast] and logged; the fiber goes on. When [sw] ends the ledger's
-    observer is withdrawn, since nothing drains the changes after that; an
-    observer installed later stays. *)
+    [broadcast] and logged; the fiber goes on. When [sw] ends the previous
+    commit observer is restored, since nothing drains the changes after that;
+    an observer installed later stays. *)

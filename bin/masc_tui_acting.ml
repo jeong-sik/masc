@@ -525,7 +525,6 @@ let label_of_event (event : Observer.event) =
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Connectors -> "connectors"
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Skill_activations _) -> "skill record"
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Skill_catalog -> "skills"
-  | Observer.Dataset_changed Masc.Workspace_dataset_event.Workspace_health -> "workspace health"
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Runtime_probe -> "runtime probe"
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Runtime_metrics -> "runtime history"
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Lanes -> "lanes"
@@ -740,8 +739,6 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
       { at; keeper = "server"; glyph = Quiet; label; detail = instance_id }
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Memory_health { keeper }) ->
       { at; keeper; glyph = Quiet; label; detail = "a memory health input was written" }
-  | Observer.Dataset_changed Masc.Workspace_dataset_event.Workspace_health ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = "the Home Health line moved" }
   | Observer.Keeper_event_queue_changed { keeper } ->
       { at; keeper; glyph = Quiet; label; detail = "the event queue changed" }
   | Observer.Board_changed { post_id } ->

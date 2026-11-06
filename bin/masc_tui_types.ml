@@ -7166,8 +7166,9 @@ module Browser_lane_view = struct
     | (Unbound | Live_unbound), _, _ -> false
     | (Bound_automatic | Bound_explicit), Live, None -> false
     | (Bound_automatic | Bound_explicit), Live, Some selected -> List.exists (same_client selected) (listed_clients t)
-  let cadence_operation ?(viewport : screenshot option) t =
-    if busy t || awaiting_browser t || Option.is_some t.refresh_pending || Option.is_some t.client_picker
+  let cadence_operation ?(allow_inflight = false) ?(viewport : screenshot option) t =
+    if (not allow_inflight && (busy t || Option.is_some t.refresh_pending))
+       || awaiting_browser t || Option.is_some t.client_picker || Option.is_some t.url_draft
        || not (selected_client_available t) then None
     else match viewport with
       | Some shot when shot.source = t.source && shot.client_id = client_id t
@@ -7182,6 +7183,34 @@ module Browser_lane_view = struct
                Some (Scene_follow_refresh {tab_id;guard;scene_view})
            | Some _ | None -> Some (Scene_refresh {tab_id;scene_view;scope}))
       | Some _, Text_view -> Some Read_refresh
+  let observation_scope ?(image_open = false) ?viewport t =
+    let operation =
+      match t.load with
+      | Loading (_, operation) when not (operation_is_read operation) -> None
+      | Idle when Option.is_some t.refresh_pending -> None
+      | Loading _ | Idle | No_browser | Failed _ ->
+          cadence_operation ~allow_inflight:true
+            ?viewport:(if image_open then viewport else None) t
+    in
+    match t.selected_tab, operation with
+    | Some tab_id, Some Read_refresh ->
+        Some { Masc.Workspace_dataset_event.source = t.source; client_id = client_id t
+             ; tab_id; view = Masc.Workspace_dataset_event.Read }
+    | Some tab_id, Some (Scene_refresh { scene_view; scope; _ }) ->
+        Some { Masc.Workspace_dataset_event.source = t.source; client_id = client_id t
+             ; tab_id; view = Masc.Workspace_dataset_event.Scene { scene_view; scope } }
+    | Some tab_id, Some (Scene_follow_refresh { scene_view; _ }) ->
+        Some { Masc.Workspace_dataset_event.source = t.source; client_id = client_id t
+             ; tab_id; view = Masc.Workspace_dataset_event.Scene { scene_view; scope = None } }
+    | Some tab_id, Some (Viewport_cadence _) ->
+        Some { Masc.Workspace_dataset_event.source = t.source; client_id = client_id t
+             ; tab_id; view = Masc.Workspace_dataset_event.Viewport }
+    | (Some _ | None),
+      (None | Some
+        ( Discover _ | Read | Open_session | Close_session | Goto _ | Screenshot _ | Read_refresh
+        | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_scroll _ | Scene_focus _
+        | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _
+        | Viewport_cadence _ | Viewport_pointer _ )) -> None
   (* [Viewport_refresh] stays loading: the operator's own [r] key in the viewport
      launches it (bin/masc_tui.ml), [cadence_operation] never does. *)
   let yield_refresh_to_input t =

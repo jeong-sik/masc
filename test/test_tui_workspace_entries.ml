@@ -813,6 +813,47 @@ let test_choosing_a_search_match_opens_it_at_its_line () =
        Alcotest.fail "another file should be read first");
   Alcotest.(check bool) "its palette closes too" false state.palette_open
 
+let enter_opens_a_match state =
+  match Masc_tui_palette.search_enter state with
+  | Masc_tui_palette.Enter_opens found -> Some found
+  | Masc_tui_palette.Enter_searches -> None
+
+(* The overlay's hints and the Enter handler read this one decision: Enter opens
+   the match under the cursor only while the answer on screen is for the text
+   in the prompt and holds a match; every other state searches again. *)
+let test_search_enter_opens_a_match_only_for_the_text_it_answered () =
+  let state, _, here, _ = search_fixture () in
+  (match enter_opens_a_match state with
+   | Some found ->
+       Alcotest.(check bool) "the match under the cursor is the one opened" true (found == here)
+   | None -> Alcotest.fail "an answer for the typed text should open its match");
+  state.palette_cursor <- 1;
+  Alcotest.(check bool) "moving the cursor moves the match" false
+    (match enter_opens_a_match state with Some found -> found == here | None -> true);
+  state.palette_query <- "needle two";
+  Alcotest.(check bool) "text typed after the answer is searched, not opened" true
+    (Option.is_none (enter_opens_a_match state));
+  let state, origin = finder_fixture () in
+  state.palette_mode <- Palette_search origin;
+  state.palette_query <- "needle";
+  let reading, request =
+    start_read ~equal:code_search_key_equal state.code_search (search_key state "needle") in
+  state.code_search <- reading;
+  Alcotest.(check bool) "an answer still being read has nothing to open" true
+    (Option.is_none (enter_opens_a_match state));
+  Code_results.apply_search state request (Ok (search_answer []));
+  Alcotest.(check bool) "an answer with no match is searched again" true
+    (Option.is_none (enter_opens_a_match state));
+  let state, origin = finder_fixture () in
+  state.palette_mode <- Palette_search origin;
+  state.palette_query <- "needle";
+  let reading, request =
+    start_read ~equal:code_search_key_equal state.code_search (search_key state "needle") in
+  state.code_search <- reading;
+  Code_results.apply_search state request (Error "git failed");
+  Alcotest.(check bool) "a failed answer is searched again" true
+    (Option.is_none (enter_opens_a_match state))
+
 let test_search_palette_opens_over_the_current_reading_and_asks_nothing () =
   let state, _ = finder_fixture () in
   state.palette_query <- "stale text";
@@ -2257,6 +2298,8 @@ let () =
             test_search_palette_opens_over_the_current_reading_and_asks_nothing
         ; Alcotest.test_case "search case follows the text and Enter follows the answer" `Quick
             test_search_case_follows_the_text_and_enter_follows_the_answer
+        ; Alcotest.test_case "search Enter opens a match only for the text it answered" `Quick
+            test_search_enter_opens_a_match_only_for_the_text_it_answered
         ; Alcotest.test_case "choosing a search match opens it at its line" `Quick
             test_choosing_a_search_match_opens_it_at_its_line
         ; Alcotest.test_case "catalog decoder keeps identity and refuses malformed data" `Quick

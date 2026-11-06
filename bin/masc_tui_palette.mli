@@ -70,6 +70,19 @@ val worktree_label : Masc.Tui_decode.git_worktree -> string
     prunable flags. *)
 val selected_search_match : Masc_tui_types.state ->
   Masc.Tui_decode.workspace_search_match option
+
+type search_enter =
+  | Enter_opens of Masc.Tui_decode.workspace_search_match
+  | Enter_searches
+(** What Enter does in the "search in files" prompt. It opens the match under
+    the cursor when the answer on screen is for the typed text and holds one.
+    In every other case it searches the typed text: no answer yet, text typed
+    since the answer, an answer that failed, and an answer with no match. The
+    key handler and the overlay's hints both read this, so the text cannot
+    name an Enter the handler does not take. *)
+
+val search_enter : Masc_tui_types.state -> search_enter
+
 val palette_starts_with : needle:string -> string -> bool
 val palette_subsequence : needle:string -> string -> bool
 

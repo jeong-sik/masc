@@ -36246,13 +36246,11 @@ Use relative paths for resources already held in the package. -->
                 | Palette_search _ -> true
                 | Palette_jump | Palette_choice _ | Palette_files _ | Palette_locations _ | Palette_branches _
                 | Palette_worktrees _ -> false) ->
-                if not (code_search_answer_is_for_prompt state) then
-                  Masc_tui_code_requests.launch_search state ~host:server_peer_host
-                    ~deliver:(deliver_code state async_messages)
-                else
-                (match Masc_tui_palette.selected_search_match state with
-                 | None -> ()
-                 | Some found ->
+                (match Masc_tui_palette.search_enter state with
+                 | Masc_tui_palette.Enter_searches ->
+                     Masc_tui_code_requests.launch_search state ~host:server_peer_host
+                       ~deliver:(deliver_code state async_messages)
+                 | Masc_tui_palette.Enter_opens found ->
                      match Code_results.choose_search_match state found with
                      | Code_results.No_followup | Code_results.Choose_location -> ()
                      | Code_results.Reveal_cursor ->

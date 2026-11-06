@@ -1751,29 +1751,45 @@ let timeline_break_row ~(previous : entry option) ~inner_width (entry : entry) =
         ; action = Action_none
         }
 
-(* A body is a document, not a row. [sanitize] is applied to each line rather
-   than to the whole, because escaping a newline the way a terminal escape is
-   escaped turns the document into one unbroken run with the escape printed
-   where each break belonged. Per line the escape still covers what it is there
-   for -- a line cannot carry a control sequence into the terminal -- and the
-   breaks the author wrote survive. A line that wraps to nothing is a blank
-   line: a paragraph break, not an absence. The caller supplies [sanitize] so
-   this module keeps no terminal vocabulary of its own. *)
+(* The text of a document as a renderer is handed it. [sanitize] is applied to
+   each line rather than to the whole, because escaping a newline the way a
+   terminal escape is escaped turns the document into one unbroken run with the
+   escape printed where each break belonged. Per line the escape still covers
+   what it is there for -- a line cannot carry a control sequence into the
+   terminal -- and the breaks the author wrote survive. A tab is expanded
+   first, from column 0 of its line: the indentation of a code fence is the
+   author's own, a distance to the next stop, and the escape would draw it as
+   the four characters of \x09. A line without a tab goes to [sanitize] as it
+   was: it needs no width, and measuring raw text is only done where a tab asks
+   for it. The caller supplies [sanitize] so this module keeps no terminal
+   vocabulary of its own. *)
+let escape_document ~sanitize text =
+  let expand line =
+    if String.contains line '\t' then fst (expand_tabs ~column:0 line) else line
+  in
+  String.split_on_char '\n' text
+  |> List.map (fun line -> sanitize (expand line))
+  |> String.concat "\n"
+
+(* A body is a document, not a row. A line that wraps to nothing is a blank
+   line: a paragraph break, not an absence. *)
 let wrap_body ?markdown ~max_cells ~sanitize text =
-  let safe_lines = text |> String.split_on_char '\n' |> List.map sanitize in
   match markdown with
   | Some render ->
     (* Rendering happens after the escaping, not before: markdown is written in
        printable ASCII, so escaping a control byte first takes nothing the
-       renderer reads, and the renderer never sees a byte that could reach the
-       terminal as a sequence. It owns the wrapping from there -- fenced code
-       keeps its own breaks, which a word wrap would ruin. *)
-    render ~width:max_cells (String.concat "\n" safe_lines)
+       renderer reads (a tab, which it does read, is expanded first), and the
+       renderer never sees a byte that could reach the terminal as a sequence.
+       It owns the wrapping from there -- fenced code keeps its own breaks,
+       which a word wrap would ruin. *)
+    render ~width:max_cells (escape_document ~sanitize text)
   | None ->
     List.concat_map
       (fun line ->
-         match wrap_words ~max_cells line with [] -> [ "" ] | rows -> rows)
-      safe_lines
+         match wrap_words ~max_cells (sanitize line) with
+         | [] -> [ "" ]
+         | rows -> rows)
+      (String.split_on_char '\n' text)
 
 (* Defensive body floor for unsupported viewports. Supported inline metadata
    moves to a heading before it consumes the readable body budget. *)

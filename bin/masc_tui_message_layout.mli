@@ -809,6 +809,14 @@ val pack_clauses : max_cells:int -> string list -> string list
     claims. A clause too wide for a row on its own is wrapped by
     {!wrap_words}; nothing is dropped and nothing is cut. *)
 
+val escape_document : sanitize:(string -> string) -> string -> string
+(** The text of a document as a Markdown renderer is handed it: each line
+    through [sanitize] on its own, so a sanitiser that escapes a newline does
+    not fold the document into one run, and the breaks survive. A tab in a
+    line becomes the spaces up to the next stop first ({!expand_tabs}, from
+    column 0 of that line), because the escape would draw it as [\x09] inside
+    a code fence. *)
+
 val wrap_body :
   ?markdown:(width:int -> string -> string list) ->
   max_cells:int ->
@@ -822,7 +830,8 @@ val wrap_body :
     break is not an absence. [sanitize] is the caller's so this module keeps no
     terminal vocabulary of its own, and so is [markdown]: given one, it renders
     the escaped text and owns the wrapping, because fenced code keeps breaks a
-    word wrap would ruin. *)
+    word wrap would ruin. The renderer is handed the text {!escape_document}
+    makes, so its tabs are spaces; a plain body leaves a tab to [sanitize]. *)
 
 val inbound_indent_cells : int
 (** How far a line someone else wrote steps in: two cells. *)

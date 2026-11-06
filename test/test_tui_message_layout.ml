@@ -297,6 +297,42 @@ let test_a_tab_lands_on_the_next_stop () =
     (expanded "\xea\xb0\x80\tb");
   check int "the stops are eight cells apart" 8 Layout.tab_width
 
+(* The escape writes a tab as the four characters of \x09, which reads as
+   text inside a code fence. A renderer is handed the distance instead, and a
+   body without one keeps the escape so a reader still sees the byte. *)
+let test_a_rendered_body_draws_a_tab_as_spaces () =
+  let seen = ref "" in
+  let renderer ~width text =
+    ignore width;
+    seen := text;
+    String.split_on_char '\n' text
+  in
+  let spaces count = String.make count ' ' in
+  let _rows =
+    Layout.wrap_body
+      ~markdown:renderer
+      ~max_cells:40
+      ~sanitize:escape_control_bytes
+      "```go\n\tif true {\n\t\tx()\n\t}\n```\nab\tc"
+  in
+  check string "each tab reaches the next stop of its own line"
+    (String.concat "\n"
+       [ "```go"
+       ; spaces 8 ^ "if true {"
+       ; spaces 16 ^ "x()"
+       ; spaces 8 ^ "}"
+       ; "```"
+       ; "ab" ^ spaces 6 ^ "c"
+       ])
+    !seen
+
+let test_a_plain_body_leaves_a_tab_to_the_escape () =
+  let rows =
+    Layout.wrap_body ~max_cells:40 ~sanitize:escape_control_bytes "a\tb"
+  in
+  check (list string) "a body without a renderer still shows the byte"
+    [ {|a\x09b|} ] rows
+
 let timeline_bucket ?(is_dst = false) hour : Layout.timeline_bucket =
   { tb_year = 2026
   ; tb_month = 9
@@ -587,6 +623,10 @@ let () =
             test_a_rendered_body_is_escaped_before_it_is_rendered
         ; test_case "a tab lands on the next stop" `Quick
             test_a_tab_lands_on_the_next_stop
+        ; test_case "a rendered body draws a tab as spaces" `Quick
+            test_a_rendered_body_draws_a_tab_as_spaces
+        ; test_case "a plain body leaves a tab to the escape" `Quick
+            test_a_plain_body_leaves_a_tab_to_the_escape
         ; test_case "a second walk pays for what it newly reaches" `Quick
             test_a_second_walk_pays_for_what_it_newly_reaches
         ; test_case "one frame renders capacity + 1 markdown entries once" `Quick

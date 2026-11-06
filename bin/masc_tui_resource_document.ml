@@ -352,8 +352,9 @@ let anchored_layout ~cols (reading : t) =
            (Masc_tui_resource_diagrams.image_for_display ~source diagrams) in
          let rendered = Masc_tui_markdown.render_with_blocks
            ~palette:(Masc_tui_markdown_theme.palette ~closing:Ansi.reset)
-           ~width ~diagram_rows (String.split_on_char '\n' document
-             |> List.map Terminal_text.single_line |> String.concat "\n") in
+           ~width ~diagram_rows
+           (Message_layout.escape_document ~sanitize:Terminal_text.single_line
+              document) in
          List.iter (fun (source : Masc_tui_markdown.source_block) ->
            blocks := {origin; source={source with first_row= !offset + source.first_row}} :: !blocks)
            rendered.source_blocks;

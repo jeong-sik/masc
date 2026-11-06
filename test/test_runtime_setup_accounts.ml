@@ -150,6 +150,39 @@ let client_login_files () =
     (missing (Email.of_google_oauth (Printf.sprintf {|{"id_token_email":"a@example.com","id_token":%S}|}
        (id_token {|{"iss":"https://accounts.google.com","sub":"s","email":"b@example.com"}|})))
      = Email.Source_unrecognized);
+  check bool "an Antigravity login that selects no account shows no email" true
+    (missing (Email.of_google_oauth (Printf.sprintf {|{"id_token":%S}|}
+       (id_token {|{"iss":"https://unknown.invalid","sub":"s","email":"google@example.com"}|})))
+     = Email.Source_unrecognized);
+  check bool "an Antigravity login naming no account reports no email" true
+    (missing (Email.of_google_oauth {|{"auth_method":"consumer","token":{"access_token":"a"}}|})
+     = Email.Not_reported);
+  check bool "an agy 1.2 login without an email claim reports none" true
+    (missing (Email.of_google_oauth (Printf.sprintf {|{"id_token":%S}|}
+       (id_token {|{"iss":"https://accounts.google.com","sub":"s"}|})))
+     = Email.Not_reported);
+  check bool "an agy 1.2 email claim given twice is not guessed" true
+    (missing (Email.of_google_oauth (Printf.sprintf {|{"id_token":%S}|}
+       (id_token {|{"iss":"https://accounts.google.com","sub":"s","email":"a@example.com","email":"b@example.com"}|})))
+     = Email.Source_unrecognized);
+  check bool "an agy 1.2 email claim that is not email text" true
+    (missing (Email.of_google_oauth (Printf.sprintf {|{"id_token":%S}|}
+       (id_token {|{"iss":"https://accounts.google.com","sub":"s","email":"a b@example.com"}|})))
+     = Email.Invalid_email);
+  check bool "an agy 1.5 recorded email that is not email text" true
+    (missing (Email.of_google_oauth {|{"id_token_email":"a b@example.com"}|}) = Email.Invalid_email);
+  check bool "an agy 1.5 recorded email that is not a string" true
+    (missing (Email.of_google_oauth {|{"id_token_email":1}|}) = Email.Source_unrecognized);
+  check bool "an Antigravity login that is not a JSON object is unrecognized" true
+    (missing (Email.of_google_oauth "[]") = Email.Source_unrecognized);
+  check bool "an Antigravity account key given twice is not guessed" true
+    (missing (Email.of_google_oauth {|{"id_token_email":"a@example.com","id_token_email":"b@example.com"}|})
+     = Email.Source_unrecognized);
+  check bool "an agy 1.2 token whose claims are not base64url is unrecognized" true
+    (missing (Email.of_google_oauth {|{"id_token":"h.!!!.s"}|}) = Email.Source_unrecognized);
+  check bool "an agy 1.2 token whose claims are not an object is unrecognized" true
+    (missing (Email.of_google_oauth (Printf.sprintf {|{"id_token":%S}|} (id_token "[]")))
+     = Email.Source_unrecognized);
   check bool "a key given twice is not guessed" true
     (missing (Email.of_claude_account {|{"oauthAccount":{"emailAddress":"a@example.com","emailAddress":"b@example.com"}}|})
      = Email.Source_unrecognized);
@@ -271,7 +304,7 @@ let live_login_emails () = fixture (fun directory _ ->
       unavailable "codex-inherited"; unavailable "muse-inherited" ]
     (rows_under inherited_env);
   write oauth_file (Printf.sprintf {|{"token":{"access_token":"a"},"id_token":%S}|}
-    (id_token {|{"sub":"s","email":"google@example.com"}|}));
+    (id_token {|{"iss":"https://accounts.google.com","sub":"s","email":"google@example.com"}|}));
   write_in account_home [".claude.json"] (claude "selected@example.com");
   (* Claude Code keeps the inherited account in HOME/.claude.json. The
      HOME/.claude directory is its config directory, and a .claude.json there
@@ -402,7 +435,8 @@ let same_path_client_interpretations_remain_separate () = fixture (fun directory
   Unix.mkdir home 0o700;
   let path = Runtime_verification_codex_home.auth_path ~codex_home:home in
   write path (Printf.sprintf {|{"tokens":{"id_token":%S},"id_token":%S}|}
-    (id_token {|{"email":"codex@example.com"}|}) (id_token {|{"email":"google@example.com"}|}));
+    (id_token {|{"email":"codex@example.com"}|})
+    (id_token {|{"iss":"https://accounts.google.com","sub":"s","email":"google@example.com"}|}));
   let base = email_batch_provider ~home "codex" in
   let codex = {base with Runtime_schema.api_format=Codex_app_server_runtime} in
   let google = {base with Runtime_schema.id="google"; api_format=Antigravity_cli_runtime;

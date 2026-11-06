@@ -10,9 +10,13 @@
     - Codex: [auth.json] [tokens.id_token], OpenID claim [email]
     - Claude Code: [.claude.json] [oauthAccount.emailAddress]
     - Muse Code: [.config/muse/auth.json] [providers.meta.user_email]
-    - Antigravity: OAuth JSON [id_token], OpenID claim [email] (agy 1.2.x),
-      or [id_token_email] (agy 1.5.x, key names read on 2026-11-06); a file
-      with both is [Source_unrecognized] *)
+    - Antigravity: the email {!Runtime_antigravity_oauth_credential.account_email}
+      reads, the same value that selects the account generation: the agy
+      1.2.x [id_token]'s OpenID claim [email] or the agy 1.5.x
+      [id_token_email] (key names read on 2026-11-06). A login it refuses
+      is [Source_unrecognized], except one naming no account or no email
+      claim ([Not_reported]) and an email string that is not email text
+      ([Invalid_email]). *)
 
 type t = Runtime_account_email_text.t
 

@@ -23,6 +23,7 @@ module Hash = struct
 
   let to_hex t = t
   let equal = String.equal
+  let compare = String.compare
 end
 
 module Kind = struct
@@ -173,15 +174,30 @@ type t =
   ; author : Author.t
   ; kind : Kind.t
   ; body : Authz_body.t
+  ; closes : Hash.t list
   ; hash : Hash.t
   }
 
 let head_after record = { next_seq = record.seq + 1; head_hash = record.hash }
 
+(* The digests a record closes, as the member that follows the body. A record
+   that closes nothing has no such member, so its line is the line of a record
+   from before the member existed. *)
+let closes_text = function
+  | [] -> ""
+  | closes ->
+    {|,"closes":[|}
+    ^ String.concat "," (List.map (fun hash -> Authz_body.string_literal (Hash.to_hex hash)) closes)
+    ^ "]"
+;;
+
+(* One value has one line: the digests in ascending order, each once. *)
+let canonical_closes closes = List.sort_uniq Hash.compare closes
+
 (* The line without its last member and its closing brace. The hash covers this
    text with the closing brace added back, so a line is this text, then
    [,"hash":"<hex>"}]. *)
-let unsigned_text ~seq ~previous_hash ~at_ms ~author ~kind ~body =
+let unsigned_text ~seq ~previous_hash ~at_ms ~author ~kind ~body ~closes =
   String.concat
     ""
     [ {|{"seq":|}
@@ -196,6 +212,7 @@ let unsigned_text ~seq ~previous_hash ~at_ms ~author ~kind ~body =
     ; Authz_body.string_literal (Kind.to_string kind)
     ; {|,"body":|}
     ; Authz_body.to_string body
+    ; closes_text closes
     ]
 ;;
 
@@ -218,8 +235,25 @@ let make ~head ~at_ms ~author ~kind ~body =
   else (
     let seq = head.next_seq in
     let previous_hash = head.head_hash in
-    let hash = hash_of (unsigned_text ~seq ~previous_hash ~at_ms ~author ~kind ~body) in
-    Ok { seq; previous_hash; at_ms; author; kind; body; hash })
+    let closes = [] in
+    let hash = hash_of (unsigned_text ~seq ~previous_hash ~at_ms ~author ~kind ~body ~closes) in
+    Ok { seq; previous_hash; at_ms; author; kind; body; closes; hash })
+;;
+
+let closing record ~closes =
+  let closes = canonical_closes closes in
+  let hash =
+    hash_of
+      (unsigned_text
+         ~seq:record.seq
+         ~previous_hash:record.previous_hash
+         ~at_ms:record.at_ms
+         ~author:record.author
+         ~kind:record.kind
+         ~body:record.body
+         ~closes)
+  in
+  { record with closes; hash }
 ;;
 
 type decode_error =
@@ -228,6 +262,7 @@ type decode_error =
   | Unknown_kind of string
   | Invalid_author
   | Invalid_hash
+  | Invalid_closes
   | Seq_mismatch of { expected : int; actual : int }
   | Previous_hash_mismatch
   | Author_not_admitted_to_write of { kind : Kind.t; author : Author.t }
@@ -241,6 +276,7 @@ let decode_error_to_string = function
   | Unknown_kind label -> Printf.sprintf "unknown kind %S" label
   | Invalid_author -> "author is not one of the known shapes"
   | Invalid_hash -> "hash is not 64 lowercase hex characters"
+  | Invalid_closes -> "closes is not a list of 64 lowercase hex characters"
   | Seq_mismatch { expected; actual } ->
     Printf.sprintf "seq is %d where %d was expected" actual expected
   | Previous_hash_mismatch -> "previous_hash is not the hash of the line before"
@@ -259,6 +295,7 @@ let to_line record =
     ~author:record.author
     ~kind:record.kind
     ~body:record.body
+    ~closes:record.closes
   ^ {|,"hash":|}
   ^ Authz_body.string_literal (Hash.to_hex record.hash)
   ^ "}"
@@ -271,7 +308,7 @@ let of_line ~head line =
     | json -> Ok json
     | exception Yojson.Json_error _ -> Error Not_json
   in
-  let* seq, previous, at_ms, author_json, kind_label, body, hash_hex =
+  let* seq, previous, at_ms, author_json, kind_label, body, closes_json, hash_hex =
     match json with
     | `Assoc
         [ ("seq", `Int seq)
@@ -281,13 +318,34 @@ let of_line ~head line =
         ; ("kind", `String kind)
         ; ("body", body)
         ; ("hash", `String hash)
-        ] -> Ok (seq, previous, at_ms, author, kind, body, hash)
+        ] -> Ok (seq, previous, at_ms, author, kind, body, [], hash)
+    | `Assoc
+        [ ("seq", `Int seq)
+        ; ("previous_hash", `String previous)
+        ; ("at_ms", `Int at_ms)
+        ; ("author", author)
+        ; ("kind", `String kind)
+        ; ("body", body)
+        ; ("closes", `List (_ :: _ as closes))
+        ; ("hash", `String hash)
+        ] -> Ok (seq, previous, at_ms, author, kind, body, closes, hash)
     | _ -> Error Unexpected_shape
   in
   let* kind = Option.to_result ~none:(Unknown_kind kind_label) (Kind.of_string kind_label) in
   let* author = Option.to_result ~none:Invalid_author (author_of_json author_json) in
   let* previous_hash = Option.to_result ~none:Invalid_hash (Hash.of_hex previous) in
   let* hash = Option.to_result ~none:Invalid_hash (Hash.of_hex hash_hex) in
+  let* closes =
+    List.fold_right
+      (fun json closes ->
+        let* closes = closes in
+        match json with
+        | `String hex ->
+          Option.to_result ~none:Invalid_closes (Option.map (fun hash -> hash :: closes) (Hash.of_hex hex))
+        | _ -> Error Invalid_closes)
+      closes_json
+      (Ok [])
+  in
   let* () =
     if seq = head.next_seq
     then Ok ()
@@ -300,8 +358,11 @@ let of_line ~head line =
     if admits kind author then Ok () else Error (Author_not_admitted_to_write { kind; author })
   in
   let* body = Result.map_error (fun error -> Invalid_body error) (Authz_body.of_yojson body) in
-  let expected = hash_of (unsigned_text ~seq ~previous_hash ~at_ms ~author ~kind ~body) in
+  let expected = hash_of (unsigned_text ~seq ~previous_hash ~at_ms ~author ~kind ~body ~closes) in
   let* () = if Hash.equal expected hash then Ok () else Error Hash_mismatch in
-  let record = { seq; previous_hash; at_ms; author; kind; body; hash } in
+  (* A line with digests out of order or twice is not the line of its record. *)
+  let record =
+    { seq; previous_hash; at_ms; author; kind; body; closes = canonical_closes closes; hash }
+  in
   if String.equal (to_line record) line then Ok record else Error Non_canonical
 ;;

@@ -17,7 +17,9 @@
     This module writes every byte of a line itself, so what it writes does not
     depend on the version of any library. A line holds [seq], [previous_hash],
     [at_ms], [author], [kind], [body], and [hash], in that order and with no
-    spaces. [seq] and [at_ms] are decimal digits and are not range-checked:
+    spaces. A record that closes given-up reductions has [closes] between
+    [body] and [hash]; every other record has no such member. [seq] and
+    [at_ms] are decimal digits and are not range-checked:
     [seq] comes from the head, and [at_ms] from the clock that {!Authz_zone}
     reads, so [at_ms] may be zero or negative, and a tool that reads numbers as
     doubles reads it exactly only up to 2^53 - 1. The hash is
@@ -107,6 +109,12 @@ type t = private
   ; author : Author.t
   ; kind : Kind.t
   ; body : Authz_body.t
+  ; closes : Hash.t list
+        (** The given-up reductions that this record closes (design 8.3), as
+            the [intended_next_record_digest] of each intent, in ascending
+            order and each once. Empty for a record from {!make}. The writer
+            zone fills it ({!closing}), and {!Authz_state} says which
+            records may. The hash covers it. *)
   ; hash : Hash.t
   }
 
@@ -127,12 +135,19 @@ val make
   -> body:Authz_body.t
   -> (t, make_error) result
 
+(** The record with [closes] in their order, and the hash that covers them.
+    Its author passed {!make} already. *)
+val closing : t -> closes:Hash.t list -> t
+
 type decode_error =
   | Not_json
-  | Unexpected_shape  (** Not exactly the fields of a record, in order. *)
+  | Unexpected_shape
+      (** Not exactly the fields of a record, in order, with [closes] only when
+          it holds a digest. *)
   | Unknown_kind of string
   | Invalid_author
   | Invalid_hash
+  | Invalid_closes  (** [closes] holds something other than 64 lowercase hex characters. *)
   | Seq_mismatch of { expected : int; actual : int }
   | Previous_hash_mismatch
   | Author_not_admitted_to_write of { kind : Kind.t; author : Author.t }

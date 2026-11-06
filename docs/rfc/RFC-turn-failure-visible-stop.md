@@ -162,8 +162,12 @@ MASC direct-provider HTTP 레인은 내부 재시도 루프가 없어 턴당 한
 - 옛 면제와 다른 점은 두 가지다.
   - 옛 면제는 실패를 성공(`Turn_succeeded`)으로 보고했다. 쉬는 중은 상태머신에
     턴 event 를 보내지 않는다.
-  - 옛 면제는 바로 다시 시도했다(#31958). 쉬는 중은 provider 가 말한 시각까지
+  - 옛 면제는 바로 다시 시도했다(#31958). 쉬는 중은 walk 가 풀리는 시각까지
     잔다. 그동안 그 경로로 요청을 보내지 않는다.
+- walk 가 풀리는 시각은 `next_dispatch_after_failure` 가 정한다. provider 가 말한
+  시각과 다를 수 있다.
+  - 뒤 경로가 먼저 풀리고 walk 가 그 경로를 앞으로 올리면, 그 시각에 깬다.
+  - 한 경로에 rate limit 과 한도 창이 같이 있으면 늦은 쪽에 깬다.
 - 조건에 들지 않아 계속 실패로 세는 것:
   - 시각이 없는 한도 거절. 크레딧 부족처럼 운영자가 손써야 한다.
   - `Rate_limited`. 짧은 대기를 계속 말하는 throttle 은 실패 기록 없이
@@ -174,6 +178,20 @@ MASC direct-provider HTTP 레인은 내부 재시도 루프가 없어 턴당 한
 - 예약된 자율 cycle 의 proactive outcome 은 이 목록에 들지 않는다. 쉬는 cycle 은
   `Proactive_error` 가 아니라 `Proactive_rested` 를 남긴다. 그래서 화면은 이 cycle 을
   error 로 그리지 않는다.
+- Keepers 목록은 쉬는 Keeper 를 행의 `runtime_path_rest` 로 보여 준다.
+  - 서버는 이 값을 읽을 때마다 `assignment_walk_rest` 로 만든다. 턴이 기다리는
+    바로 그 walk 다. 저장하지 않는다.
+  - 쉬는 walk 는 늘 `release_at`(walk 가 풀리는 Unix 시각)과 `release_basis`
+    (`stated_by_provider`·`bounded_by_masc`, 그 시각을 정한 쪽)를 싣는다.
+    provider 가 끝을 말하지 않은 쉼도 기록할 때 MASC 의 바닥·상한으로 시각이
+    정해져서, 읽을 때마다 움직이지 않는다.
+  - TUI 는 phase 가 Running 이나 Failing 일 때만 "쉬는 중 ~<시각> (<runtime>)" 을
+    그린다. 턴을 받는 phase 만 그 walk 를 기다린다. `release_basis` 는 읽기만 하고
+    그리지 않는다.
+  - 429 로 쉬는 Keeper 와 fence 된 Muse 실패도 walk 가 기다리면 쉬는 중으로 보인다.
+    성공인지 실패인지는 phase 와 streak 이 말한다.
+  - waiting inventory 의 `Runtime_quota_spent` 행은 바꾸지 않는다. 모든 후보의 창이
+    비었으니 운영자가 route 를 바꾸라는 행이다(RFC-0484).
 
 ### 2.5 결정론 경계
 

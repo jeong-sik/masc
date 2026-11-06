@@ -82,6 +82,20 @@ let tool_name_is_kept_as_sent_or_refused () =
     ]
 ;;
 
+(* The store keys rows by the internal name, so a filter by the public name the
+   charts show read no row and the series stayed empty. *)
+let public_tool_name_filters_on_the_internal_one () =
+  check tool_name_result "public" (Ok (Some "tool_execute")) (A.series_tool_filter (Some "Execute"));
+  check tool_name_result "public with a transport prefix" (Ok (Some "tool_execute"))
+    (A.series_tool_filter (Some "mcp__masc__Execute"));
+  check tool_name_result "internal" (Ok (Some "tool_execute")) (A.series_tool_filter (Some "tool_execute"));
+  check tool_name_result "unknown" (Ok (Some "no_such_tool")) (A.series_tool_filter (Some "no_such_tool"));
+  check tool_name_result "absent" (Ok None) (A.series_tool_filter None);
+  match A.series_tool_filter (Some " Execute") with
+  | Ok read -> failf "tool=%S must stay refused, read as %s" " Execute" (Option.value read ~default:"none")
+  | Error msg -> check bool ("names the parameter: " ^ msg) true (String.length msg > 0)
+;;
+
 let () =
   run
     "agent_api_query_params"
@@ -97,6 +111,10 @@ let () =
             "a tool filter is kept as sent or refused"
             `Quick
             tool_name_is_kept_as_sent_or_refused
+        ; test_case
+            "a public tool name filters on the internal one"
+            `Quick
+            public_tool_name_filters_on_the_internal_one
         ] )
     ]
 ;;

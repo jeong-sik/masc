@@ -149,6 +149,17 @@ let tool_name_param = function
            tool_series_max_tool_name_bytes)
 ;;
 
+(* The store keys its rows by the internal tool name, while the charts and the
+   models show the public one ([Execute] for [tool_execute]). A filter by a
+   public name matched no row and drew an empty series. The filter goes through
+   the projection the runtime uses to name a tool, and an internal or unknown
+   name stays as sent. *)
+let series_tool_filter raw =
+  Result.map
+    (Option.map Keeper_tool_descriptor_resolution.canonical_tool_name)
+    (tool_name_param raw)
+;;
+
 type tool_series_request =
   { since_hours : float
   ; width : Tool_metrics_series.width
@@ -186,7 +197,7 @@ let tool_series_request req =
       ~default:0
       (Server_utils.query_param req "utc_offset_min")
   in
-  let* tool_name = tool_name_param (Server_utils.query_param req "tool") in
+  let* tool_name = series_tool_filter (Server_utils.query_param req "tool") in
   let request = { since_hours; width; utc_offset_min; tool_name } in
   let* (_ : Tool_metrics_series.window) =
     tool_series_window request ~until:(Time_compat.now ())

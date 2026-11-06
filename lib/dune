@@ -22,6 +22,7 @@
   keeper_microvm_build_plan
   keeper_connector_post_replay
   keeper_tool_composition_projection
+  keeper_tool_composition_surface_schema
   keeper_tool_memory_validation
   keeper_tool_execution_journal_types
   keeper_tool_execution_journal_json

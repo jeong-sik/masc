@@ -122,21 +122,11 @@ The legend lost its last clause, `v: Trend`. The tab row above the summary (`Pla
 
 ## Test
 
-`test_summary_breaks_between_clauses` in `test/test_tui_overview_providers.ml` draws the section from 40 to 140 cells and compares the summary rows, joined by the clause separator, with the rows of a 300-cell section. It holds no wording of the summary.
-
-The same comparison was run over the layout functions in a scratch program, and the lines below are its output.
-
-```text
-property before: wrap_words on the old text fails at 61 of 101 section widths (40 to 140)
-property after: pack_clauses on the clauses fails at 0 of 101 section widths (40 to 140)
-property mutant: a space joins the clauses  fails at 101 of 101 section widths (40 to 140)
-property mutant: legend loses its last clause fails at 101 of 101 section widths (40 to 140)
-property mutant: a clause is cut to the width fails at 101 of 101 section widths (40 to 140)
-```
+This layer adds no test. `docs/constitution.xml` rules out tests of TUI layout and row order, so the breaks between clauses are shown by the captures and the computed table above.
 
 ## Not changed
 
-- A source search for rows that join literal clauses with the middle dot and pass the result to a wrap function found this one. The two other hits near a wrap call wrap chat text (`masc_tui_play_room.ml`) and a failure detail behind `D:full` (`masc_tui_lane_addons.ml`), which are not clause lists.
+- A source search for rows that join literal clauses with the middle dot and pass the result to a wrap function found this one. The two other hits near a wrap call wrap chat text (`masc_tui_play_room.ml`) and a failure detail behind `D:full` (`masc_tui_lane_addons.ml`), which are not clause lists. The search looked only near wrap calls, so it missed the key hint row at the bottom of the Features summary, which is a constant string passed as an argument. Layer 14 (#49027) fixes that row.
 
 - The footer of this screen reads `Esc:Dashboard`. The key table labels Esc as `Dashboard`, `dashboard` and `back` on different screens. This layer does not touch the label.
 

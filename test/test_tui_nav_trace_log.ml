@@ -119,6 +119,83 @@ let test_hints_announced_for_one_frame_do_not_reach_the_next () =
     Alcotest.(check bool) "advertised" false
       (Yojson.Safe.Util.to_bool (field "advertised" key)))
 
+(* The header clock moves once a second, so a key pressed after the second turned
+   gets a differential repaint of the header row even when the key drew
+   nothing. [note_screen] lets the log see the rows and the cursor, and it
+   decides on those. *)
+let frame ?(cursor = Presenter.Hidden) rows =
+  { Presenter.surface_key = "keepers"
+  ; compact_frame = false
+  ; terminal_rows = List.length rows
+  ; terminal_cols = 80
+  ; cursor
+  ; lines = rows
+  }
+
+let header clock = Printf.sprintf "  MASC Workspace / Keepers  %s  HTTP [connected]" clock
+let rows_idle = [ "  imp    idle"; "  relay  idle" ]
+
+(* A frame, then a key pressed on it with the footer announcing j, then the
+   frame the key led to, which the presenter reported as [result]. *)
+let press_between t ~before ~after ~result =
+  Log.note_screen t before;
+  Log.note_frame t ~surface:"keepers" ~result:presented;
+  Log.announce "j/k:move";
+  Log.note_input t (Log.Key "j");
+  Log.note_screen t after;
+  Log.note_frame t ~surface:"keepers" ~result
+
+let repainted rows = Presenter.Presented (Presenter.Rows rows)
+
+let test_a_key_after_which_only_the_clock_moved_is_written () =
+  with_trace (fun path t ->
+    press_between t
+      ~before:(frame (header "23:51:57" :: rows_idle))
+      ~after:(frame (header "23:51:58" :: rows_idle))
+      ~result:(repainted [ 0 ]);
+    Alcotest.(check (list string)) "kinds" [ "surface"; "key_unchanged" ] (kinds path);
+    Alcotest.(check string) "key" "j" (text "key" (key_line path)))
+
+let test_a_key_after_which_a_row_changed_is_not_written () =
+  with_trace (fun path t ->
+    press_between t
+      ~before:(frame (header "23:51:57" :: rows_idle))
+      ~after:(frame (header "23:51:58" :: [ "  imp    busy"; "  relay  idle" ]))
+      ~result:(repainted [ 0; 1 ]);
+    Alcotest.(check (list string)) "kinds" [ "surface" ] (kinds path))
+
+let test_a_key_that_moved_only_the_cursor_is_not_written () =
+  with_trace (fun path t ->
+    press_between t
+      ~before:(frame (header "23:51:57" :: rows_idle))
+      ~after:(frame ~cursor:(Presenter.Visible_at { row = 3; column = 4 }) (header "23:51:57" :: rows_idle))
+      ~result:(repainted []);
+    Alcotest.(check (list string)) "kinds" [ "surface" ] (kinds path))
+
+let test_a_moved_cursor_is_not_hidden_by_a_clock_that_moved_with_it () =
+  with_trace (fun path t ->
+    press_between t
+      ~before:(frame (header "23:51:57" :: rows_idle))
+      ~after:(frame ~cursor:(Presenter.Visible_at { row = 3; column = 4 }) (header "23:51:58" :: rows_idle))
+      ~result:(repainted [ 0 ]);
+    Alcotest.(check (list string)) "kinds" [ "surface" ] (kinds path))
+
+let test_a_whole_screen_repaint_keeps_its_result () =
+  with_trace (fun path t ->
+    press_between t
+      ~before:(frame (header "23:51:57" :: rows_idle))
+      ~after:(frame (header "23:51:58" :: rows_idle))
+      ~result:presented;
+    Alcotest.(check (list string)) "kinds" [ "surface" ] (kinds path))
+
+let test_a_frame_the_presenter_called_unchanged_stays_unchanged () =
+  with_trace (fun path t ->
+    press_between t
+      ~before:(frame (header "23:51:57" :: rows_idle))
+      ~after:(frame (header "23:51:57" :: [ "  imp    busy"; "  relay  idle" ]))
+      ~result:unchanged;
+    Alcotest.(check (list string)) "kinds" [ "surface"; "key_unchanged" ] (kinds path))
+
 let test_a_surface_event_names_where_the_screen_came_from () =
   with_trace (fun path t ->
     Log.note_frame t ~surface:"keepers" ~result:presented;
@@ -191,6 +268,7 @@ let test_the_environment_variable_names_the_file () =
       Log.from_environment ~clock:(fun () -> Alcotest.fail "the clock was read while off")
     in
     Log.note_input off (Log.Key "j");
+    Log.note_screen off (frame [ header "23:51:57" ]);
     Log.note_frame off ~surface:"changes" ~result:presented;
     Log.note_frame off ~surface:"changes" ~result:unchanged;
     Alcotest.(check (list string)) "still one line" [ "surface" ] (kinds path))
@@ -215,6 +293,20 @@ let () =
             test_hints_announced_for_one_frame_do_not_reach_the_next
         ; Alcotest.test_case "no typed text reaches the file" `Quick
             test_no_typed_text_reaches_the_file
+        ] )
+    ; ( "clock"
+      , [ Alcotest.test_case "a key after which only the clock moved is written" `Quick
+            test_a_key_after_which_only_the_clock_moved_is_written
+        ; Alcotest.test_case "a key after which a row changed is not written" `Quick
+            test_a_key_after_which_a_row_changed_is_not_written
+        ; Alcotest.test_case "a key that moved only the cursor is not written" `Quick
+            test_a_key_that_moved_only_the_cursor_is_not_written
+        ; Alcotest.test_case "a moved cursor is not hidden by a clock that moved with it" `Quick
+            test_a_moved_cursor_is_not_hidden_by_a_clock_that_moved_with_it
+        ; Alcotest.test_case "a whole-screen repaint keeps its result" `Quick
+            test_a_whole_screen_repaint_keeps_its_result
+        ; Alcotest.test_case "a frame the presenter called unchanged stays unchanged" `Quick
+            test_a_frame_the_presenter_called_unchanged_stays_unchanged
         ] )
     ; ( "file"
       , [ Alcotest.test_case "a surface event names where the screen came from" `Quick

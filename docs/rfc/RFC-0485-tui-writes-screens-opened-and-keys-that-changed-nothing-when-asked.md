@@ -58,6 +58,8 @@ related: ["0480", "0484", "tui-single-input-decoder"]
 
 `Unchanged` 는 "키가 아무 일도 안 했다"가 아니라 "키 직후 프레임이 같았다"는 뜻이다. 요청을 보내고 답이 나중에 오는 키(다시 읽기)도 이렇게 찍힌다. 읽는 쪽이 `advertised=true` 인 줄만 보고, 요청을 보내는 키는 거른다.
 
+프레임이 같은지는 헤더 시계(`HH:MM:SS`)를 빼고 본다. 시계는 초마다 움직여서, 빼지 않으면 초가 넘어간 직후에 누른 키는 아무 일을 안 해도 프레임이 달라진다. 프레젠터가 `Rows` 로 일부 줄만 다시 그렸고 그 줄들이 시계만 다르면 `Unchanged` 로 센다. 커서만 움직인 그리기(`Rows []`)와 화면 전체를 다시 그린 것(`Whole_screen`)은 그대로 `Presented` 다. 커서 위치는 시계와 상관없이 앞 프레임과 같아야 한다.
+
 ### 2.2 키 이름은 푸터가 안내한 것만 적는다
 
 - 글자가 아닌 키는 입력 디코더가 붙인 이름(`left`, `esc`, `enter`, `tab`, `up`, `pageup`)을 적는다. 터미널이 한 바이트로 보내는 제어 키(`\r`, `\t`, `\x17`)도 같은 이름(`enter`, `tab`, `ctrl-w`)으로 적는다. `advertised` 는 푸터가 그 키를 안내했는지다. 푸터는 `PgUp`·`Ctrl-W`·`^T`·`←`·`Shift+←`·`1-9` 처럼 쓰고 디코더는 `pageup`·`ctrl-w`·`ctrl-t`·`left`·`shift-left`·`1` 처럼 말해서, 둘을 같은 이름으로 맞추는 규칙이 `bin/masc_tui_nav_trace.ml` 에 있다(숫자 범위는 `Masc_tui_footer.advertised_key_atoms` 가 키 하나씩으로 푼다).

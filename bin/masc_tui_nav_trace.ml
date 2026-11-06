@@ -110,6 +110,36 @@ let classify ~advertised raw =
   then named raw
   else Other_char
 
+let is_digit = function
+  | '0' .. '9' -> true
+  | _ -> false
+
+(* The header clock is eight bytes, [HH:MM:SS], and a longer run of digits
+   around it ([123:45:67]) is something else. *)
+let clock_at line start =
+  let length = String.length line in
+  let digit offset = is_digit line.[start + offset] in
+  let colon offset = Char.equal line.[start + offset] ':' in
+  start + 8 <= length
+  && digit 0 && digit 1 && colon 2 && digit 3 && digit 4 && colon 5 && digit 6
+  && digit 7
+  && (start = 0 || not (is_digit line.[start - 1]))
+  && (start + 8 = length || not (is_digit line.[start + 8]))
+
+let without_clock line =
+  let masked = Bytes.of_string line in
+  let rec scan start =
+    if start + 8 <= String.length line
+    then
+      if clock_at line start
+      then (
+        List.iter (fun offset -> Bytes.set masked (start + offset) '0') [ 0; 1; 3; 4; 6; 7 ];
+        scan (start + 8))
+      else scan (start + 1)
+  in
+  scan 0;
+  Bytes.to_string masked
+
 let observe ~previous_surface ~surface ~key ~result ~advertised =
   let opened =
     match previous_surface with

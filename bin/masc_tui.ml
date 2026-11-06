@@ -29870,6 +29870,7 @@ let main
                         || task_detail_needs_present || tools_task_needs_present)
         ~write ~flush frame
     in
+    Masc_tui_nav_trace_log.note_screen nav_trace frame;
     Masc_tui_nav_trace_log.note_frame nav_trace
       ~surface:frame.Frame_presenter.surface_key ~result;
     match result with

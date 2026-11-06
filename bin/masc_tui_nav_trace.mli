@@ -53,6 +53,13 @@ val observe :
     The surface event comes first. A key is reported only when the frame
     presented nothing: a key that changed the screen needs no line. *)
 
+val without_clock : string -> string
+(** [line] with the digits of every [HH:MM:SS] shape set to zero. The colons
+    and the length stay. The header clock moves once a second, so a frame drawn
+    after a key that did nothing still differs from the frame before it; the
+    trace compares frames through this. A longer run of digits around the
+    shape ([123:45:67]) is not a clock. *)
+
 val to_json_line : at:float -> event -> string
 (** One JSON object, without a newline. [at] is the caller's clock reading in
     seconds. *)

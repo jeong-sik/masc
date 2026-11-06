@@ -261,6 +261,50 @@ let test_each_event_is_one_json_object () =
   Alcotest.(check bool) "first frame has no origin" true
     (List.assoc_opt "from" (parsed line) = Some `Null)
 
+(* The header clock moves once a second. Two frames a key apart are the same
+   frame when the clock is the only thing that moved, so it is set aside; a
+   digit run that is not a clock is not. *)
+let test_a_clock_shape_is_set_to_zero_wherever_it_stands () =
+  let check name expected line =
+    Alcotest.(check string) name expected (Trace.without_clock line)
+  in
+  check "header" "  MASC Workspace / Code  00:00:00  HTTP [connected]"
+    "  MASC Workspace / Code  23:51:57  HTTP [connected]";
+  check "two on one line" "00:00:00 to 00:00:00" "09:15:01 to 18:42:59";
+  check "at both ends" "00:00:00" "12:34:56";
+  check "inside a style" "\027[2m00:00:00\027[0m" "\027[2m23:51:57\027[0m";
+  check "next to a colour code made of digits" "\027[38;5;244m00:00:00 x"
+    "\027[38;5;244m10:20:30 x"
+
+let test_a_digit_run_that_is_not_a_clock_is_left_alone () =
+  List.iter
+    (fun line ->
+      Alcotest.(check string) line line (Trace.without_clock line))
+    [ "12:34"
+    ; "1:23:45"
+    ; "123:45:67"
+    ; "12:34:567"
+    ; "12-34-56"
+    ; "12:34 56"
+    ; "2026-11-06"
+    ; "v1.2.3"
+    ; "lines 1-22 of 41"
+    ; ""
+    ]
+
+let test_the_line_keeps_its_length_and_a_second_pass_changes_nothing () =
+  List.iter
+    (fun line ->
+      let masked = Trace.without_clock line in
+      Alcotest.(check int) line (String.length line) (String.length masked);
+      Alcotest.(check string) (line ^ " twice") masked (Trace.without_clock masked))
+    [ "  MASC Workspace / Code  23:51:57  HTTP [connected]"
+    ; "\xed\x95\x9c\xea\xb8\x80 23:51:57 \xed\x95\x9c"
+    ; "99:99:99 99:99:99 99:99:99"
+    ; "1234:56:78:90"
+    ; "::::::::"
+    ]
+
 let () =
   Alcotest.run "tui_nav_trace"
     [ ( "events"
@@ -285,5 +329,13 @@ let () =
     ; ( "lines"
       , [ Alcotest.test_case "each event is one json object" `Quick
             test_each_event_is_one_json_object
+        ] )
+    ; ( "clock"
+      , [ Alcotest.test_case "a clock shape is set to zero wherever it stands" `Quick
+            test_a_clock_shape_is_set_to_zero_wherever_it_stands
+        ; Alcotest.test_case "a digit run that is not a clock is left alone" `Quick
+            test_a_digit_run_that_is_not_a_clock_is_left_alone
+        ; Alcotest.test_case "the line keeps its length and a second pass changes nothing" `Quick
+            test_the_line_keeps_its_length_and_a_second_pass_changes_nothing
         ] )
     ]

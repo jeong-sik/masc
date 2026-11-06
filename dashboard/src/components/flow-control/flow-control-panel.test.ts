@@ -10,24 +10,14 @@ type MockOperatorSnapshot = {
 } | null
 
 const {
-  fetchPauseStatus,
-  pauseWorkspace,
-  resumeWorkspace,
   runGarbageCollection,
-  flowState,
-  flowLoading,
   maintenanceResult,
   maintenanceLoading,
   shellAuthSummary,
   operatorSnapshot,
   dashboardAuthAccess,
 } = vi.hoisted(() => ({
-  fetchPauseStatus: vi.fn().mockResolvedValue(undefined),
-  pauseWorkspace: vi.fn().mockResolvedValue(undefined),
-  resumeWorkspace: vi.fn().mockResolvedValue(undefined),
   runGarbageCollection: vi.fn().mockResolvedValue(undefined),
-  flowState: { value: 'running' as 'running' | 'paused' | 'initializing' | 'unknown' },
-  flowLoading: { value: false },
   maintenanceResult: { value: null as string | null },
   maintenanceLoading: { value: false },
   shellAuthSummary: { value: null },
@@ -36,13 +26,8 @@ const {
 }))
 
 vi.mock('./flow-control-state', () => ({
-  fetchPauseStatus,
-  flowLoading,
-  flowState,
   maintenanceLoading,
   maintenanceResult,
-  pauseWorkspace,
-  resumeWorkspace,
   runGarbageCollection,
 }))
 
@@ -71,8 +56,6 @@ describe('FlowControlPanel', () => {
   beforeEach(() => {
     container = document.createElement('div')
     document.body.appendChild(container)
-    flowState.value = 'running'
-    flowLoading.value = false
     maintenanceResult.value = null
     maintenanceLoading.value = false
     shellAuthSummary.value = null
@@ -89,17 +72,6 @@ describe('FlowControlPanel', () => {
     render(null, container)
     container.remove()
     vi.clearAllMocks()
-  })
-
-  it('shows core flow controls without a dedicated refresh button', async () => {
-    render(html`<${FlowControlPanel} />`, container)
-    await flushUi()
-
-    expect(container.querySelector('.v2-command-surface')).not.toBeNull()
-    expect(container.textContent).toContain('Flow Control')
-    expect(container.textContent).toContain('Pause')
-    expect(container.textContent).toContain('Resume')
-    expect(container.textContent).not.toContain('Refresh')
   })
 
   it('shows the exact Agent Core inference observation when present', async () => {
@@ -119,24 +91,14 @@ describe('FlowControlPanel', () => {
     expect(status!.textContent).toContain('1 active inference')
   })
 
-  it('disables namespace actions and GC for a worker', async () => {
+  it('disables GC for a worker', async () => {
     render(html`<${FlowControlPanel} />`, container)
     await flushUi()
 
-    const buttons = Array.from(container.querySelectorAll('button'))
-    const pause = buttons.find((button) => button.textContent?.includes('Pause'))
-    const gc = buttons.find((button) => button.textContent?.includes('Run GC'))
-    expect(pause?.disabled).toBe(true)
+    const gc = Array.from(container.querySelectorAll('button'))
+      .find((button) => button.textContent?.includes('Run GC'))
     expect(gc?.disabled).toBe(true)
     expect(dashboardAuthAccess).toHaveBeenCalledWith(null, 'admin')
-  })
-
-  it('enables namespace actions for an admin', async () => {
-    dashboardAuthAccess.mockReturnValue({ allowed: true, required_role: 'admin', effective_role: 'admin', reason: null })
-    render(html`<${FlowControlPanel} />`, container)
-    await flushUi()
-    const pause = Array.from(container.querySelectorAll('button')).find(button => button.textContent?.includes('Pause'))
-    expect(pause?.disabled).toBe(false)
   })
 
 })

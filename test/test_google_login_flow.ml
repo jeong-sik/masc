@@ -77,7 +77,7 @@ let instant_of_ms ms =
   | None -> Alcotest.fail "the clock left the range of Ptime"
 ;;
 
-let answer ?(status = 200) body = Ok { X.status; headers = []; body }
+let answer ?(status = 200) body = Ok { Login_transport.status; headers = []; body }
 
 let discovery_document =
   Yojson.Safe.to_string
@@ -89,7 +89,7 @@ let discovery_document =
         ])
 ;;
 
-let get google ~url =
+let get google ~url ~headers:_ =
   if String.equal url Oidc_google.discovery_url
   then if !(google.discovery_up) then answer discovery_document else answer ~status:503 ""
   else if String.equal url jwks_uri

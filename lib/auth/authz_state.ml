@@ -21,6 +21,7 @@ type t =
   { mode : Authz_mode_state.t
   ; invites : Authz_invite_state.t
   ; principals : Authz_principal_state.t
+  ; registrations : Authz_registration_state.t
   ; revocation_pending : held list
   ; latest_at_ms : int option
   }
@@ -29,6 +30,7 @@ let empty =
   { mode = Authz_mode_state.empty
   ; invites = Authz_invite_state.empty
   ; principals = Authz_principal_state.empty
+  ; registrations = Authz_registration_state.empty
   ; revocation_pending = []
   ; latest_at_ms = None
   }
@@ -98,8 +100,10 @@ type refusal =
       ; named : Authz_records.Subject.t
       ; held : Authz_records.Subject.t
       }
-  | Canceller_issued_the_invitation of Authz_records.Subject.t
+  | Canceller_owns_the_subject of Authz_records.Subject.t
   | Cancel_owner_unknown of Authz_records.Subject.t
+  | Registration_unreadable of Authz_registration_event.error
+  | Registration of Authz_registration_state.refusal
 
 let refusal_to_string = function
   | Before_bootstrap kind ->
@@ -153,14 +157,19 @@ let refusal_to_string = function
       (R.Hash.to_hex aborted)
       (Authz_records.Subject.to_string held)
       (Authz_records.Subject.to_string named)
-  | Canceller_issued_the_invitation subject ->
+  | Canceller_owns_the_subject subject ->
     Printf.sprintf
-      "the canceller issued the invitation behind %s, so another Admin cancels its block"
+      "the canceller issued the invitation or wrote the registration behind %s, so another \
+       Admin cancels its block"
       (Authz_records.Subject.to_string subject)
   | Cancel_owner_unknown subject ->
     Printf.sprintf
-      "no invitation stands behind %s, so no Admin is known to be eligible to cancel its block"
+      "no invitation or registration stands behind %s, so no Admin is known to be eligible \
+       to cancel its block"
       (Authz_records.Subject.to_string subject)
+  | Registration_unreadable error ->
+    "the registration record cannot be read: " ^ Authz_registration_event.error_to_string error
+  | Registration refusal -> Authz_registration_state.refusal_to_string refusal
 ;;
 
 type applied =
@@ -210,6 +219,40 @@ let invite state (record : R.t) =
        in
        Ok { state = { state with invites }; high_water }
      | Error refusal -> Error (Invite refusal))
+;;
+
+(* A registration raises no scoped epoch, so the external store takes no intent
+   for it: a log restored from before it loses the entry, which is the side that
+   keeps the identity out. Its removal closes what the entry opens, so it is a
+   [Revoke] intent, as the revocation of an invitation is (plan C2d): a log
+   restored from before it then disagrees with the store, and the entry does not
+   come back open. *)
+let registration state (record : R.t) =
+  match Authz_registration_event.of_body record.R.body with
+  | Error error -> Error (Registration_unreadable error)
+  | Ok event ->
+    (match
+       Authz_registration_state.apply
+         state.registrations
+         ~author:record.R.author
+         ~is_admin:(Authz_principal_state.is_admin state.principals)
+         ~is_bound:(fun identity ->
+           Option.is_some (Authz_principal_state.find_identity state.principals identity))
+         event
+     with
+     | Ok registrations ->
+       let high_water =
+         match event with
+         | Authz_registration_event.Registered _ -> None
+         | Authz_registration_event.Removed { registration_id } ->
+           Some
+             (Authz_external_store.Change.Authz
+                { event = Authz_external_store.Change.Revoke
+                ; subject = Authz_records.Subject.Registration registration_id
+                })
+       in
+       Ok { state = { state with registrations }; high_water }
+     | Error refusal -> Error (Registration refusal))
 ;;
 
 (* The latest time of the log, when [record] comes before it. An admission is
@@ -314,26 +357,44 @@ let principal_event state (record : R.t) =
        Ok { state = { state with principals }; high_water })
 ;;
 
+(* Who let in what a subject is about: the local operator, which is not an
+   Admin, or an Admin, who is then not eligible to cancel its block. *)
+type owner =
+  | Local_operator_owned
+  | Admin_owned of Authz_types.User_id.t
+
+let owner_of_issuer = function
+  | Authz_invite_state.Local_operator_issued -> Local_operator_owned
+  | Authz_invite_state.Admin_issued user_id -> Admin_owned user_id
+;;
+
 (* Who stands behind a subject (design 4.1): the issuer of the invitation that
-   is the subject, its owner, or of the one a human principal joined through,
-   its original approver. The first stage has no manager, and the beneficiary
-   is the subject or the person an open invitation is for, who has not joined
-   and writes nothing. No invitation stands behind any other subject yet. *)
-let issuer_behind state = function
+   is the subject and the Admin who wrote the registration that is the subject,
+   their owners, or the issuer of the invitation a human principal joined
+   through, its original approver. The first stage has no manager, and the
+   beneficiary is the subject or the person an open invitation or registration
+   is for, who has not joined and writes nothing. Nobody stands behind any
+   other subject yet. *)
+let owner_behind state = function
   | Authz_records.Subject.Invite invite_id ->
     Option.map
-      (fun (invitation : Authz_invite_state.invitation) -> invitation.Authz_invite_state.issuer)
+      (fun (invitation : Authz_invite_state.invitation) ->
+        owner_of_issuer invitation.Authz_invite_state.issuer)
       (Authz_invite_state.find state.invites invite_id)
+  | Authz_records.Subject.Registration registration_id ->
+    Option.map
+      (fun (registration : Authz_registration_state.registration) ->
+        Admin_owned registration.Authz_registration_state.registrar)
+      (Authz_registration_state.find state.registrations registration_id)
   | Authz_records.Subject.Principal (Authz_types.Principal.Human user_id) ->
     Option.map
       (fun ((_ : Authz_types.Invite_id.t), (invitation : Authz_invite_state.invitation)) ->
-        invitation.Authz_invite_state.issuer)
+        owner_of_issuer invitation.Authz_invite_state.issuer)
       (Authz_invite_state.find_consumed_by state.invites user_id)
   | Authz_records.Subject.Principal (Authz_types.Principal.Service _)
   | Authz_records.Subject.Grant _
   | Authz_records.Subject.Credential _
-  | Authz_records.Subject.Runtime _
-  | Authz_records.Subject.Registration _ -> None
+  | Authz_records.Subject.Runtime _ -> None
 ;;
 
 (* An eligible Admin lifts one block (design 8.3). The canceller is never the
@@ -353,12 +414,11 @@ let cancel state (record : R.t) =
         | Some held when not (Authz_records.Subject.equal held.subject subject) ->
           Error (Cancel_subject_differs { aborted; named = subject; held = held.subject })
         | Some (_ : held) ->
-          (match issuer_behind state subject with
+          (match owner_behind state subject with
            | None -> Error (Cancel_owner_unknown subject)
-           | Some (Authz_invite_state.Admin_issued issuer)
-             when Authz_types.User_id.equal issuer canceller ->
-             Error (Canceller_issued_the_invitation subject)
-           | Some (Authz_invite_state.Admin_issued _ | Authz_invite_state.Local_operator_issued) ->
+           | Some (Admin_owned owner) when Authz_types.User_id.equal owner canceller ->
+             Error (Canceller_owns_the_subject subject)
+           | Some (Admin_owned _ | Local_operator_owned) ->
              Ok
                { state =
                    { state with
@@ -393,6 +453,8 @@ let read state (record : R.t) =
   | K.Principal, Authz_mode_state.Off _ -> Error (Accounts_off K.Principal)
   | K.Revocation_cancel, Authz_mode_state.Multi_account _ -> cancel state record
   | K.Revocation_cancel, Authz_mode_state.Off _ -> Error (Accounts_off K.Revocation_cancel)
+  | K.Registration, Authz_mode_state.Multi_account _ -> registration state record
+  | K.Registration, Authz_mode_state.Off _ -> Error (Accounts_off K.Registration)
   | ( ( K.Runtime_grant
       | K.Delegate_policy
       | K.Principal
@@ -417,8 +479,7 @@ let read state (record : R.t) =
       | K.Lease_terminal_evidence
       | K.Preauthorized_expiry
       | K.Migration_diagnostic
-      | K.Local_recovery
-      | K.Registration ) as kind )
+      | K.Local_recovery ) as kind )
     , (Authz_mode_state.Multi_account _ | Off _) -> Error (Kind_not_read kind)
 ;;
 

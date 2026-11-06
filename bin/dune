@@ -539,7 +539,7 @@
  (name masc_tui_artifact_share_pending)
  (wrapped false)
  (modules masc_tui_artifact_share_pending)
- (libraries masc masc.fs_compat yojson unix))
+ (libraries masc masc.masc_core masc.fs_compat yojson unix))
 
 (library
  (name masc_tui_lane_broadcast_pending)
@@ -2259,7 +2259,7 @@
  (name masc_tui_msx_checkpoint_pending)
  (wrapped false)
  (modules masc_tui_msx_checkpoint_pending)
- (libraries masc.keeper_operation_identity masc.machine_checkpoint masc.masc_process yojson unix))
+ (libraries masc.masc_core masc.keeper_operation_identity masc.machine_checkpoint masc.masc_process yojson unix))
 
 (library
  (name masc_tui_artifact_share_attempt)

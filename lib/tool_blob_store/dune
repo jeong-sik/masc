@@ -11,7 +11,8 @@
  (name masc_tool_blob_store)
  (public_name masc.masc_tool_blob_store)
  (wrapped false)
- (modules tool_blob_store tool_output tool_blob_maintenance tool_blob_media_store)
+ (modules tool_blob_store tool_output tool_blob_maintenance tool_blob_media_store
+  tool_blob_sweep)
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4) + unused-value ratchet (warning 32)
  (flags
   (:standard -w +4 -w +33 -w +37))
@@ -24,4 +25,6 @@
   yojson
   fs_compat
   masc_core
+  ; The sweep's period is Masc_time_constants.day (RFC-0499 §4.1).
+  masc.config
   masc.keeper_chat_operations))

@@ -112,6 +112,56 @@ let forget_written path =
   loop ()
 ;;
 
+(* RFC-0499 §4.2: the addresses this process wrote or read since the sweep
+   recorded the scan before its last one. Both generations sit in one value
+   so a sweep rotates them with a single compare-and-set; two separate cells would lose
+   a mark recorded between moving one and clearing the other. Every reader and
+   writer below marks the address before it looks at the file, so a sweep that
+   sees no mark can rely on no read or write of this process having started.
+   A mark keeps both kinds: a read after a write stays a write.
+
+   Like [written_addresses] the ledger has no bound of its own; each scan
+   that writes its record drops the older generation. *)
+type touch =
+  { put : bool
+  ; read : bool
+  }
+
+module Touch_map = Map.Make (String)
+
+type touches =
+  { current : touch Touch_map.t
+  ; previous : touch Touch_map.t
+  }
+
+let touch_ledger : touches Atomic.t =
+  Atomic.make { current = Touch_map.empty; previous = Touch_map.empty }
+;;
+
+let record_touch sha256 (mark : touch) =
+  let rec loop () =
+    let observed = Atomic.get touch_ledger in
+    let merged =
+      match Touch_map.find_opt sha256 observed.current with
+      | None -> Some mark
+      | Some existing ->
+        let merged = { put = existing.put || mark.put; read = existing.read || mark.read } in
+        if Bool.equal merged.put existing.put && Bool.equal merged.read existing.read
+        then None
+        else Some merged
+    in
+    match merged with
+    | None -> ()
+    | Some merged ->
+      let updated = { observed with current = Touch_map.add sha256 merged observed.current } in
+      if not (Atomic.compare_and_set touch_ledger observed updated) then loop ()
+  in
+  loop ()
+;;
+
+let mark_put sha256 = record_touch sha256 { put = true; read = false }
+let mark_read sha256 = record_touch sha256 { put = false; read = true }
+
 (* sha256 validation SSOT lives in {!Tool_output} (the artifact-ref owner);
    re-exported here so the store boundary keeps its historical surface. *)
 type invalid_sha256 = Tool_output.invalid_sha256 =
@@ -263,6 +313,7 @@ let fetch t ~sha256 =
   match validate_sha256 sha256 with
   | Error invalid -> Error (Invalid_sha256 invalid)
   | Ok () ->
+      mark_read sha256;
       let path = shard_path t sha256 in
       (match
          Fs_compat.load_owned_regular_file_with_snapshot
@@ -294,6 +345,7 @@ let fetch_bounded t ~sha256 ~max_bytes =
   | Error invalid -> Error (Invalid_sha256 invalid)
   | Ok () when max_bytes < 0 -> Error (Invalid_max_bytes max_bytes)
   | Ok () ->
+    mark_read sha256;
     let path = shard_path t sha256 in
     (match
        Fs_compat.load_owned_regular_file_prefix
@@ -342,6 +394,7 @@ let fetch_range_with ~after_window_read t ~sha256 ~offset ~max_bytes =
          ; close_failure = None
          })
   | Ok () ->
+    mark_read sha256;
     let path = shard_path t sha256 in
     let cached =
       Validated_file_map.find_opt path (Atomic.get validated_file_snapshots)
@@ -459,6 +512,7 @@ let address_with ~operation t ~bytes ~mime =
          (Tool_output.make_error_to_string err))
 
 let store_addressed ~rewrite ~durability ~atomic_replace ~operation addressed =
+  mark_put addressed.addressed_ref.Tool_output.sha256;
   let path = addressed.addressed_path in
   let write () =
     prepare_owned_parent ~durability ~ownership_root:addressed.addressed_ownership_root path;
@@ -526,6 +580,7 @@ let record_durable path snapshot =
 
 let put_durable_reuse t ~bytes ~mime =
   let addressed = address_with ~operation:"put_durable_reuse" t ~bytes ~mime in
+  mark_put addressed.addressed_ref.Tool_output.sha256;
   let path = addressed.addressed_path in
   let read () = Fs_compat.load_owned_regular_file_with_snapshot
       ~ownership_root:t.ownership_root path in
@@ -626,6 +681,7 @@ let ingest_open_file_blocking ~after_hash ~expected_sha256 t ~source_path ~sourc
         check_source_snapshot ();
         after_hash ();
         let sha256 = Agent_core_sha256.to_hex digest in
+        mark_put sha256;
         (match expected_sha256 with
          | Some expected when not (String.equal expected sha256) ->
              raise (Sys_error "tool_blob_store: descriptor contents do not match the granted digest")
@@ -897,3 +953,58 @@ let delete t ~sha256 =
                   (Unix.error_message code)
             }
         | Sys_error reason -> Error { sha256; path; reason }))
+
+(* RFC-0499 §4.2. Once a scan has written its record, the sweep drops the
+   older generation and starts a new one in one compare-and-set. *)
+let rotate_touches () =
+  let rec loop () =
+    let observed = Atomic.get touch_ledger in
+    let rotated = { current = Touch_map.empty; previous = observed.current } in
+    if not (Atomic.compare_and_set touch_ledger observed rotated) then loop ()
+  in
+  loop ()
+;;
+
+let observe_touches () = Atomic.get touch_ledger
+
+let touch_of (observed : touches) ~sha256 =
+  match Touch_map.find_opt sha256 observed.current, Touch_map.find_opt sha256 observed.previous with
+  | None, None -> None
+  | Some mark, None | None, Some mark -> Some mark
+  | Some current, Some previous ->
+    Some { put = current.put || previous.put; read = current.read || previous.read }
+;;
+
+type touch_counts =
+  { current_addresses : int
+  ; previous_addresses : int
+  }
+
+let touch_counts (observed : touches) =
+  { current_addresses = Touch_map.cardinal observed.current
+  ; previous_addresses = Touch_map.cardinal observed.previous
+  }
+;;
+
+type blob_status =
+  | Present of
+      { bytes : int
+      ; modified_at : float
+      }
+  | Absent
+  | Not_regular of Unix.file_kind
+  | Stat_failed of string
+
+let blob_status t ~sha256 =
+  match validate_sha256 sha256 with
+  | Error invalid -> Stat_failed (invalid_sha256_to_string invalid)
+  | Ok () ->
+    (match Unix.lstat (shard_path t sha256) with
+     | { Unix.st_kind = Unix.S_REG; st_size; st_mtime; _ } ->
+       Present { bytes = st_size; modified_at = st_mtime }
+     | { Unix.st_kind = (Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK) as kind; _ } ->
+       Not_regular kind
+     | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Absent
+     | exception Unix.Unix_error (code, fn, arg) ->
+       Stat_failed (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)))
+;;

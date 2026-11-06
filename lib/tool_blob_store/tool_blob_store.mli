@@ -268,3 +268,59 @@ val delete : t -> sha256:string -> (bool, delete_error) result
     failures remain typed and visible. Bulk retention/deletion is owned
     exclusively by offline {!Tool_blob_maintenance} under the BasePath process
     lease; callers must not synthesize a partial consumer keep-set. *)
+
+(** {1 Sweep ledger (RFC-0499 §4.2)} *)
+
+type touch =
+  { put : bool
+  ; read : bool
+  }
+(** How this process handled one address since the sweep recorded the scan
+    before its last one. Every [put*], [fetch], [fetch_bounded] and [fetch_range] marks the
+    address before it looks at the file; a later mark of another kind is
+    added to the earlier one, never replacing it. *)
+
+type touches
+(** One observation of both ledger generations: the addresses marked since the
+    sweep last wrote a record, and those marked between the two records before
+    that. A process started after the last record holds only the current
+    generation until the sweep rotates. *)
+
+val rotate_touches : unit -> unit
+(** Called by the sweep after a scan has written its record: the current
+    generation becomes the previous one and the older one is dropped, in one
+    compare-and-set, so a mark recorded concurrently lands in exactly one
+    generation. A scan that fails does not rotate, so the two generations
+    together still reach back past the opening of the last recorded scan. *)
+
+val observe_touches : unit -> touches
+(** One atomic read of the ledger. A caller deciding about many addresses
+    takes one observation and asks {!touch_of} against it. *)
+
+val touch_of : touches -> sha256:string -> touch option
+(** The marks of [sha256] across both generations, merged; [None] when this
+    process neither wrote nor read it since the record before the last one. *)
+
+type touch_counts =
+  { current_addresses : int
+  ; previous_addresses : int
+  }
+
+val touch_counts : touches -> touch_counts
+
+type blob_status =
+  | Present of
+      { bytes : int
+      ; modified_at : float
+      }
+  | Absent
+  | Not_regular of Unix.file_kind
+  | Stat_failed of string
+
+val blob_status : t -> sha256:string -> blob_status
+(** [lstat] of the blob file, without following a link. [modified_at] is the
+    file's mtime: a first [put] of an address in a process and every
+    [put_durable] write the file again, so a blob another process wrote after
+    some instant has an mtime after it. An invalid digest is [Stat_failed].
+    It checks no directory ownership and is only an observation: a caller that
+    removes a blob goes through {!delete}, which checks the owned path. *)

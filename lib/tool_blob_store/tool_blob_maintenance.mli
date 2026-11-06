@@ -134,6 +134,12 @@ val live_references :
   (live_references, error) result
 (** The scan {!run} deletes against, with the same arguments and failures. *)
 
+val fold_live_sha256 : live_references -> init:'a -> f:('a -> string -> 'a) -> 'a
+(** Folds the digest of every live reference. A digest named both by a tool
+    artifact reference and by a history source is folded once per reference.
+    The in-server sweep ({!Tool_blob_sweep}) builds its live digest set from
+    this. *)
+
 val holds_history_media : live_references -> sha256:string -> bool
 (** Whether a durable consumer holds a history [Stored] source with this
     digest. A tool artifact reference to the same bytes does not count. *)

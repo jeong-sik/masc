@@ -384,22 +384,6 @@ let workspace_state_typ =
         ~typ:(Schema.non_null (Schema.list (Schema.non_null Schema.string)))
         ~args:Arg.[]
         ~resolve:(fun _ (state : Masc_domain.workspace_state) -> state.active_agents);
-      Schema.field "paused"
-        ~typ:(Schema.non_null Schema.bool)
-        ~args:Arg.[]
-        ~resolve:(fun _ (state : Masc_domain.workspace_state) -> state.paused);
-      Schema.field "pauseReason"
-        ~typ:Schema.string
-        ~args:Arg.[]
-        ~resolve:(fun _ (state : Masc_domain.workspace_state) -> state.pause_reason);
-      Schema.field "pausedBy"
-        ~typ:Schema.string
-        ~args:Arg.[]
-        ~resolve:(fun _ (state : Masc_domain.workspace_state) -> state.paused_by);
-      Schema.field "pausedAt"
-        ~typ:Schema.string
-        ~args:Arg.[]
-        ~resolve:(fun _ (state : Masc_domain.workspace_state) -> state.paused_at);
     ]
 
 let task_edge_typ =

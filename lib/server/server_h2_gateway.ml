@@ -1676,7 +1676,6 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
             let json = `Assoc [
               ("project", `String workspace_state.project);
               ("tempo_interval_s", `Float tempo.current_interval_s);
-              ("paused", `Bool workspace_state.paused);
             ] in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 

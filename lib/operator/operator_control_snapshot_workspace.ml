@@ -92,10 +92,6 @@ let workspace_json config =
     `Assoc
       [ "initialized", `Bool true
       ; "project", `String state.project
-      ; "paused", `Bool state.paused
-      ; "pause_reason", Json_util.string_opt_to_json state.pause_reason
-      ; "paused_by", Json_util.string_opt_to_json state.paused_by
-      ; "paused_at", Json_util.string_opt_to_json state.paused_at
       ; "tempo_interval_s", `Float tempo.current_interval_s
       ; "agent_count", `Int (List.length agents)
       ; "task_count", task_count

@@ -11,9 +11,9 @@
       let lock_timeout = Env_config.Lock.timeout_seconds
 *)
 
-(** Raised by convenience functions ([sb_path],
-    [masc_http_base_url]) when a required environment variable is missing.
-    Prefer the [_result] variants for structured error handling. *)
+(** Raised by convenience functions ([masc_http_base_url]) when a required
+    environment variable is missing.  Prefer the [_result] variants for
+    structured error handling. *)
 exception Config_error of string
 
 let () = Printexc.register_printer (function
@@ -341,9 +341,6 @@ let masc_host () =
   match masc_host_opt () with
   | Some host -> host
   | None -> default_host
-
-(* RFC-0085 PR-10 — [assets_dir_opt] removed (caller 0 after migration).
-   Readers use [(Host_config.from_env ()).assets_dir]. *)
 
 (** SSOT for the MASC_HTTP_BASE_URL env-var name (issue 8352).
     Defined here (above [masc_http_base_url]) so the constant is in scope

@@ -18,10 +18,9 @@
 (** {1 Exception} *)
 
 exception Config_error of string
-(** Raised by convenience functions ([sb_path],
-    [masc_http_base_url]) when a required environment variable is
-    missing.  Prefer the [_result] variants for structured error
-    handling. *)
+(** Raised by convenience functions ([masc_http_base_url]) when a required
+    environment variable is missing.  Prefer the [_result] variants for
+    structured error handling. *)
 
 (** {1 Raw env-var access} *)
 
@@ -131,11 +130,6 @@ val normalize_masc_base_path_input : string -> string
 val existing_dir : string -> bool
 val existing_file : string -> bool
 
-(* RFC-0085 PR-10 — [home_dir_opt] removed from the public surface;
-   callers read from [(Host_config.from_env ()).home] instead.  The
-   function is retained file-private because [base_path] /
-   [sb_path_opt] still call it internally. *)
-
 (** {1 HTTP host + port (SSOT for issue 8352)} *)
 
 val host_env_key : string
@@ -149,12 +143,6 @@ val masc_http_port_int : unit -> int
 val masc_http_port_opt : unit -> string option
 val default_host : string
 val masc_host : unit -> string
-
-(** {1 Assets} *)
-
-(* RFC-0085 PR-10 — [assets_dir_opt] removed completely.  Caller 0
-   after PR-10 migration; readers use
-   [(Host_config.from_env ()).assets_dir]. *)
 
 (** {1 HTTP base URL} *)
 
@@ -256,14 +244,6 @@ val base_path_not_set_message : unit -> string
     module and the workspace resolver in [lib/workspace]. Names the flag, the
     env var, and how to record a default; adds why a recorded default was
     ignored when one was found and is stale. *)
-
-(* RFC-0085 PR-9 — [base_path_raw_opt] and [base_path_opt] are no
-   longer part of the public surface.  External callers read the
-   normalised env-derived base_path from
-   [(Host_config.from_env ()).base_path] instead.  The two functions
-   remain file-private inside [env_config_core.ml] because
-   [base_path] / [sb_path_opt] still reach for the raw value
-   internally; a follow-up RFC migrates those too. *)
 
 val running_under_test_executable : unit -> bool
 val base_path_prod_guard : string -> string

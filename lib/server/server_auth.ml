@@ -464,7 +464,7 @@ let dashboard_actor_resolution_for_request ~base_path request =
   | Parsed_credential token -> (
       (* First 8 hex chars of the bearer token's SHA-256. Lets operators
          correlate a token-mismatch rejection with the keeper credential
-         that holds the matching hash (see [auth.ml:677] credential
+         that holds the matching hash (see [auth.ml] credential
          storage). The hash itself is one-way; the prefix alone is
          insufficient to reconstruct the token but unique enough to
          pinpoint a specific credential rotation event in production

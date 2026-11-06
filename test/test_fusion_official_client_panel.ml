@@ -1624,6 +1624,22 @@ let test_each_absent_handle_is_named () =
     (mentions neither "env" && mentions neither "clock")
 ;;
 
+(* A spent Claude Code window holds the account until the reset it states. A
+   throttle holds only the candidate and states no wait. *)
+let test_a_claude_throttle_is_not_a_spent_quota () =
+  let standing = Masc.Fusion_official_client.For_testing.claude_quota_standing in
+  check bool "a spent window is a hard quota until its reset" true
+    (standing
+       (Runtime_claude_code.Quota_spent { resets_at = Some 1786356000; windows = [ "seven_day" ] })
+     = Runtime_candidate_standing.Hard_quota { resets_at = Some 1786356000. });
+  check bool "a spent window with no reset is a hard quota with no time" true
+    (standing (Runtime_claude_code.Quota_spent { resets_at = None; windows = [] })
+     = Runtime_candidate_standing.Hard_quota { resets_at = None });
+  check bool "a throttle is a rate limit with no stated wait" true
+    (standing Runtime_claude_code.Rate_throttled
+     = Runtime_candidate_standing.Rate_limited { retry_after = None })
+;;
+
 let test_official_client_usage_preserves_vendor_cache_conventions () =
   let module Usage = Masc.Fusion_official_client.For_testing in
   let claude = Usage.claude_usage
@@ -2185,6 +2201,12 @@ let () =
             "setup failures attribute the runtime once"
             `Quick
             test_setup_failure_attribution_is_single
+        ] )
+    ; ( "claude quota standing"
+      , [ test_case
+            "a Claude throttle is not a spent quota"
+            `Quick
+            test_a_claude_throttle_is_not_a_spent_quota
         ] )
     ; ( "eio context diagnostics"
       , [ test_case

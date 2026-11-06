@@ -351,16 +351,13 @@ let claude_stream_callback ?on_provider_retry ?on_child_content_observation ?on_
           emit Agent_core.Types.MessageStop)
 ;;
 
-(* The CLI blocks a turn on a 429 or on a rejected rate-limit event. Only a
-   rejected event says the account's window is spent, and its [resetsAt] is
-   when that window serves again. The CLI puts [resetsAt] on allowed events
-   too, where it ends a window that still serves: a 429 after one, or after
-   no event, is a throttle, and taking that time would rest the Keeper until
-   the window resets. *)
+(* [Runtime_claude_code] has already told a spent window from a throttle.
+   A spent window waits until the reset it states; a throttle states no
+   wait. *)
 let provider_error_of_quota_block ~detail
-  : Runtime_claude_code.rate_limit option -> Llm_provider.Error.provider_error
+  : Runtime_claude_code.quota_block -> Llm_provider.Error.provider_error
   = function
-  | Some { status = Runtime_claude_code.Rejected; resets_at; _ } ->
+  | Runtime_claude_code.Quota_spent { resets_at; windows = _ } ->
     Llm_provider.Error.HardQuota
       { provider = "claude_code"
       ; retry_after =
@@ -369,8 +366,8 @@ let provider_error_of_quota_block ~detail
             resets_at
       ; detail
       }
-  | Some { status = Runtime_claude_code.Allowed | Runtime_claude_code.Allowed_warning; _ }
-  | None -> Llm_provider.Error.RateLimit { provider = "claude_code"; retry_after = None; detail }
+  | Runtime_claude_code.Rate_throttled ->
+    Llm_provider.Error.RateLimit { provider = "claude_code"; retry_after = None; detail }
 ;;
 
 (* Where an unexpected exception left the Claude Code runtime; the internal
@@ -383,11 +380,11 @@ let claude_error_to_core_error = function
   | Runtime_claude_code.Subscription_required detail ->
     Agent_core.Error.Provider
       (Llm_provider.Error.AuthError { provider = "claude_code"; detail })
-  | Runtime_claude_code.Quota_blocked ({ rate_limit; _ } as blocked) ->
+  | Runtime_claude_code.Quota_blocked ({ block; _ } as blocked) ->
     Agent_core.Error.Provider
       (provider_error_of_quota_block
          ~detail:(Runtime_claude_code.error_to_string (Quota_blocked blocked))
-         rate_limit)
+         block)
   (* The CLI reports these denials in a terminal result, even when its
      process subtype is [success]. Preserve the provider's HTTP distinction:
      the existing account-access route asks for operator action after the

@@ -118,7 +118,7 @@ origin/main 기준이다. 설정 검증, 최종 전송 바이트 검사, 로그�
   - Claude Code 는 masc 가 HTTP 본문을 만들지 않는데도 C 가 들어간다.
 - 반론: 브리핑은 창에서 자를 수 없으니 예산이 없으면 창을 잡아먹는다.
 - 결론: 예산을 두지 않는다. 브리핑에서 크기가 정해지지 않은 내용은 거절된 호출의 인자와 사유뿐이다.
-  `input_policy = small`(기본값)인 Keeper 는 artifact 읽기 도구가 있으면 이 둘을 artifact 참조로 보낸다
+  artifact 읽기 도구가 있는 Keeper 는 이 둘을 artifact 참조로 보낸다
   (`Keeper_own_recent_actions.externalize_failures`). 나머지 절은 행 폭과 행 수가 이미 정해져 있다.
 
 **3. HTTP overflow shrink**

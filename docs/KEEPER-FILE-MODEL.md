@@ -40,7 +40,6 @@ Current `[keeper]` fields:
 - `name`
 - `instructions`
 - `activation_mode`
-- `input_policy`
 - `mention_targets`
 - `board_interests`
 - `sandbox_profile`

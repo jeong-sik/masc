@@ -51,6 +51,12 @@ Owner는 정확히 그 재시도가 여전히 Queued일 때만 후보와 `not_be
 Owner의 cooling 관측은 기존 sleep 경계를 사용한다. 상태가 그대로이면 전체 readiness
 조회나 변경 알림을 발생시키지 않는다. 재시도 변경 또는 기한 도달 때만 drain을 깨운다.
 
+### 쉼이 풀리면 순서도 풀린다 (2026-11-06)
+
+시각을 말하지 않은 쉼도 3.3 표의 시각에 순서에서 풀린다. 전에는 그 경로가 성공할
+때까지 뒤로 밀렸다. GLM 이 16분 뒤 돌아왔는데 Keeper 둘이 며칠을 기다리기로 한 일이
+이 규칙에서 나왔다. 까닭과 치르는 값은 3.3 끝의 개정 절에 있다.
+
 ## 1. 지금 동작 (2026-09-15 실측, #36583)
 
 ### 1.1 wake 가 턴이 되기까지
@@ -158,9 +164,11 @@ heartbeat 와 채팅 lane 은 이 표 하나(`Keeper_turn_driver.next_dispatch_a
 
 ```ocaml
 (* 한 경로의 지금 상태 — Keeper_turn_driver *)
+type release_basis = Stated_by_provider | Bounded_by_masc
+
 type path_rest =
   | Path_serving
-  | Path_resting of { release_at : float }
+  | Path_resting of { release_at : float; release_basis : release_basis }
 
 (* 실패한 사이클 뒤 다음 사이클 — Keeper_heartbeat_loop *)
 type wait_basis = Failure_response | Observed_path_rest
@@ -185,12 +193,15 @@ type next_dispatch =
 
 ### 3.3 한 경로가 언제 풀리나
 
-| 증거 | 풀리는 시각 |
-|---|---|
-| 429, provider 가 시간을 말함 (`retry_after = Some h`) | `noted_at + max h 1초` |
-| 429, 시간을 말하지 않음 | `noted_at + rate_limit_backoff_floor_sec` (60초) |
-| 402·HardQuota, 리셋 시각을 말함 (`Until t`) | `t` |
-| 402·HardQuota, 말하지 않음 (`Observed`) | 판단한 시각 + `rate_limit_backoff_cap_sec` (900초) |
+| 증거 | 풀리는 시각 | 시각을 정한 쪽 |
+|---|---|---|
+| 429, provider 가 시간을 말함 (`retry_after = Some h`) | `noted_at + max h 1초` | provider |
+| 429, 시간을 말하지 않음 | `noted_at + rate_limit_backoff_floor_sec` (60초) | masc |
+| 402·HardQuota, 리셋 시각을 말함 (`Until t`) | `t` | provider |
+| 402·HardQuota, 말하지 않음 (`Observed`) | `noted_at + rate_limit_backoff_cap_sec` (900초) | masc |
+
+`Until t` 에는 사용량 조회(usage read)가 찾은 리셋 시각도 들어간다. 그 시각도 provider 의
+답이다.
 
 제공자가 말한 유효한 Retry-After와 quota reset은 그대로 보존한다(#39190).
 `rate_limit_backoff_cap_sec`는 시각을 말하지 않은 경우의 fallback에만 적용한다.
@@ -201,29 +212,72 @@ cadence는 어디에도 들어가지 않는다. Retry-After가 후속 요청 전
 "soft 429 throttle", `Hard_quota` 를 "account-level quota/balance exhaustion" 으로
 구분한다. 분 단위로 풀리는 제한과 결제해야 풀리는 소진을 같은 길이로 쉬게 할 이유가 없다.
 
-`Observed` 는 기록 시각을 갖지 않으므로 판단한 시각부터 센다. 기록 시각을 더하면
-`note_observed_exhausted` 호출처 13곳이 바뀌어 이번 범위에서 뺐다.
+`Observed` 의 `noted_at` 은 `Runtime_quota_window` 가 관찰을 적을 때 찍는다. 호출처는
+그대로다. 같은 scope 가 다시 거절하면 그 시각부터 다시 센다.
 
 단일·미해결 배정의 실패 응답은 저장소에 관측이 없어도 자기 경로의 휴식 근거다.
 여러 후보의 배정에서는 마지막 실패 응답 하나를 다른 후보의 휴식으로 확대하지 않는다.
 
-풀리는 시각과 걷는 순서는 같이 움직이지 않을 수 있다. 다음 턴은
-`resumed_runtime_lane` 순서로 걷는다. 남긴 suffix 뒤에 lane 의 나머지 후보가 오고,
-방금 실패한 후보는 그 뒤에 온다. 이 순서는 쉬는 증거가 있는 경로를 뒤로 민다.
-provider 가 말한 시각은 그 시각에 증거가 지워져 순서도 같이 풀린다. 말하지 않은
-증거는 성공이 올 때까지 뒤로 밀린 채다. 제공자가 말한 시각은 fallback cap으로 자르지
-않으므로 대기와 순서가 같은 시각에 풀린다.
+**풀리는 시각에 걷는 순서도 풀린다.** 다음 턴은 `resumed_runtime_lane` 순서로 걷는다.
+남긴 suffix 뒤에 lane 의 나머지 후보가 오고, 방금 실패한 후보는 그 뒤에 온다.
+순서(`Runtime_candidate_standing.order`)는 위 표의 시각까지만 쉬는 경로를 뒤로 민다.
+그 시각이 지나면 그 증거는 순서를 바꾸지 않는다. 그 경로에 실패 증거(RFC-0458 §3.4)가
+있으면 그 규칙대로 놓이고, 없으면 선언한 자리로 돌아간다.
 
-그래서 suffix 가 쉬면 대기 시각은 **걷는 순서의 첫 경로**가 정한다.
+그래서 suffix 가 쉬면 대기 시각은 **걷는 순서에서 가장 먼저 풀리는 경로**가 정한다.
 
 - 첫 경로가 쉬지 않으면 곧바로 잇는다.
-- 첫 경로가 쉬면 그 경로가 풀리는 시각까지 기다린다. 뒤의 경로가 더 일찍 풀리고 그 시각에
-  순서도 풀린다면(제공자가 말한 시각) 그 시각까지만 기다린다. 그때 그 경로가 앞으로 온다.
-- 뒤의 경로가 일찍 풀려도 순서가 안 풀리면 대기를 줄이지 않는다. 줄이면 다음 턴이 아직
-  쉬는 첫 경로를 부른다.
+- 첫 경로가 쉬면 걷는 순서의 경로 가운데 가장 이른 풀림까지 기다린다. 그때 그 경로가
+  앞으로 온다.
 
 suffix 가 없으면 같은 규칙을 assignment 의 새 walk 순서(선언 순서 → quota·backpressure
 강등)에 적용한다. 단일·미해결 배정만 실패 응답의 쉼과 비교해 늦은 쪽을 쓴다.
+
+`Path_resting.release_basis` 는 풀리는 시각을 정한 쪽이다. 증거가 여럿이면 가장 늦은
+시각을 정한 쪽을 적는다. 완료 검증(`Verification_retry.provider_rest`)이 이 값을 읽는다.
+provider 가 정한 시각이면 그 뒤에 다시 검토한다. masc 가 정한 시각이면 시간만으로는 같은
+거절을 다시 만날 수 있어서 생산자가 움직여야 한다고 본다.
+
+#### 2026-11-06 개정: "성공할 때까지" 를 지운다
+
+전에는 시각을 말하지 않은 증거가 풀린 뒤에도 순서가 그 경로를 성공할 때까지 뒤로
+밀었다. 대기 계산은 그 경로의 풀림으로 대기를 줄이지 않았다.
+
+**무슨 일이 있었나.** 2026-11-06 06:04Z, GLM 이 1308(5시간 사용량 소진)을 HTTP 429 로
+보냈다. 시간을 말하지 않은 rate limit 으로 읽혔다. 그 429 증거가 GLM 을 성공할 때까지
+뒤로 묶었다. 그래서 대기는 GLM 이 풀리는 시각을 쓰지 않고 며칠 쉬는 머리를 따랐다.
+wkbl-front 는 323,727초, masc-productor-owner 는 237,327초를 기다리기로 했다.
+GLM 은 06:20:44Z 에 돌아왔다.
+
+1308 을 hard quota 로 읽게 고쳐도 같은 일이 남는다. 앞서 시각을 말하지 않은 429(1302
+같은 throttle)가 같은 경로에 있으면, 뒤에 사용량 조회가 리셋 시각을 찾아도 그 증거가
+순서를 묶는다.
+
+**그 규칙이 왜 있었나.**
+
+- RFC-0433 §3.1: 끝나는 때를 말하지 않은 소진은 "시계가 아니라 다음 성공이 지운다".
+  RFC-0370 이 거부한 지어낸 기간(15분 쿨다운 같은 것)을 만들지 않으려는 결정이었다.
+- #34059 설계 메모: 힌트가 없으면 만료 시각을 지어내지 않는다.
+- RFC-0458 §3.4 운영자 결정(2026-09-17): 타임아웃·5xx 를 429 와 같은 칸에 두면서 숫자로
+  된 쉼을 새로 만들지 않기로 했다. 그 실패 증거는 쉼이 아니라서 이 개정이 바꾸지 않는다.
+
+**왜 지워도 되나.**
+
+- 새 시각을 만들지 않는다. floor(60초)와 cap(900초)은 이 RFC 가 이미 대기 길이로 쓰는
+  운영자 선언 값이다. RFC-0458 §2.4 도 쉼의 길이는 "provider 가 말한 시각이나 운영자가
+  선언한 floor·cap" 이어야 한다고 적었다.
+- 대기는 그 시각에 이미 끝났다. 순서만 남아 있었다. 같은 증거로 대기와 순서가 다른
+  시각에 풀리니, 대기 계산이 순서를 따로 따라가야 했다. 그 어긋남이 이번 대기를 만들었다.
+- "성공할 때까지" 는 과거 증거를 순서의 Gate 로 만든다. 429 를 한 번 맞은 머리는
+  sibling 이 답하는 동안 불리지 않는다. 그러면 사실상 영원히 뒤에 남고, masc 가 사용자가
+  선언한 순서를 덮는다. RFC-0458 §3.4(#38174)가 실패 증거에서 고친 것과 같은 모양이다.
+
+**치르는 값.** 계속 거절하면서 시각을 말하지 않는 경로는 floor(429, 60초)나 cap(quota
+관찰, 900초)이 지날 때마다 다시 머리에 온다. 그때 걷는 Keeper 가 요청을 한 번 보낸다.
+다시 거절되면 증거가 새로 적히고, 후보 관측은 Keeper 사이에 공유되므로 모든 Keeper 의
+순서가 다시 그 경로를 뒤로 민다.
+
+§4 의 P 는 그대로다. 대기는 전과 같은 시각에 끝나고, wake 는 여전히 잠을 끊지 못한다.
 
 ### 3.4 chat lane
 
@@ -308,7 +362,8 @@ terminal 로 끝내게 한다. RFC-0433 의 "새 fail-closed 경로를 만들지
 ## 8. 검증
 
 - 결정 함수 테스트: 첫 경로가 쉬지 않는 suffix → 이어가기, 모두 쉬는 suffix → 순서가
-  풀리는 가장 이른 시각, 순서가 안 풀리는 뒤 경로는 대기를 줄이지 않음, quota 리셋 시각,
+  풀리는 가장 이른 시각, 시각을 말하지 않은 429 로 쉬는 뒤 경로도 floor 에 대기를 줄임,
+  quota 리셋 시각, 시각 없는 429 뒤 사용량 조회가 찾은 리셋까지만 기다림(2026-11-06),
   suffix 없는 여러 후보의 rate limit → 새 walk 머리가 사용 가능하면 cadence, 쉬면 그 release까지; 단일 경로 힌트 5초 →
   5초(cadence 무관), 그 밖 → cadence.
 - 채팅 lane: 쉬지 않는 머리 → 곧바로 claim, 쉬는 머리 → 풀릴 때까지.

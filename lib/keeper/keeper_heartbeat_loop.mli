@@ -240,9 +240,18 @@ val continuation_settlement_of_cycle_outcome :
     turn whose route satisfies {!Keeper_runtime_failure_route.response_observed}:
     the provider answered the request that carried the replay evidence, so
     the evidence is not carried into the next cycle (#32956). Every other
-    failure, and every cancelled, input-required, or skipped outcome, leaves
-    the continuation unsettled. The queue disposition of a failed turn stays
+    failure, and every cancelled, input-required, skipped, or rested outcome,
+    leaves the continuation unsettled. The queue disposition of a failed turn stays
     [Batch_no_action] either way. *)
+
+val after_failure_of_cycle_outcome :
+  now:float ->
+  Keeper_heartbeat_loop_cycle.cycle_outcome option ->
+  after_failure option
+(** What a cycle leaves the next one. A failed turn's next dispatch is decided
+    at [now] from its route ({!Keeper_turn_driver.next_dispatch_after_failure}).
+    A rested turn waits for the release its rest names, decided when the turn
+    ended. Every other outcome keeps the plain cadence ([None]). *)
 
 (** Pure: post-turn status event derived from the registry
     turn-failure counter. [turn_fail_count > 0] maps to [Turn_failed];

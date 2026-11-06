@@ -388,6 +388,36 @@ let after_failure ~now ~assignment_id (failure : Keeper_unified_turn.turn_failur
     Some (Wait_for_path_release { release_at; waiting_on; basis })
 ;;
 
+(* What a cycle leaves the next one. A failed turn's next dispatch is decided
+   here from its route. A rested turn carries the wait
+   [next_dispatch_after_failure] gave when the turn ended, so it is not
+   decided again. *)
+let after_failure_of_cycle_outcome ~now
+      (cycle_outcome : Keeper_heartbeat_loop_cycle.cycle_outcome option)
+  : after_failure option
+  =
+  match cycle_outcome with
+  | Some (Cycle.Failed { failure; meta }) ->
+    after_failure
+      ~now
+      ~assignment_id:(Keeper_meta_contract.runtime_id_of_meta meta)
+      failure
+  | Some
+      (Cycle.Rested
+         { rest = { Keeper_turn_driver.release_at; waiting_on; basis }
+         ; meta = _
+         ; deferred_runtime_lane = _
+         }) ->
+    Some (Wait_for_path_release { release_at; waiting_on; basis })
+  | Some
+      ( Cycle.Completed _
+      | Cycle.Checkpointed _
+      | Cycle.Input_required _
+      | Cycle.Cancelled _
+      | Cycle.Skipped _ )
+  | None -> None
+;;
+
 exception Event_queue_cycle_failed of string
 
 (* A provider wait belongs to the dispatch that failed. The runtime snapshot
@@ -1412,28 +1442,9 @@ let run_keepalive_unified_turn
              | None -> Turn_cycle_completed)
       ; stimuli_acked = !stimuli_acked
       ; after_failure =
-          (match !cycle_outcome_ref with
-           | Some (Cycle.Failed { failure; meta }) ->
-             after_failure
-               ~now:(Time_compat.now ())
-               ~assignment_id:(Keeper_meta_contract.runtime_id_of_meta meta)
-               failure
-           | Some
-               (Cycle.Rested
-                  { rest = { Keeper_turn_driver.release_at; waiting_on; basis }
-                  ; meta = _
-                  ; deferred_runtime_lane = _
-                  }) ->
-             (* The rest is the wait [next_dispatch_after_failure] gave
-                when the turn ended; it is not decided again here. *)
-             Some (Wait_for_path_release { release_at; waiting_on; basis })
-           | Some
-               ( Cycle.Completed _
-               | Cycle.Checkpointed _
-               | Cycle.Input_required _
-               | Cycle.Cancelled _
-               | Cycle.Skipped _ )
-           | None -> None)
+          after_failure_of_cycle_outcome
+            ~now:(Time_compat.now ())
+            !cycle_outcome_ref
       }
     with
     | exn when Keeper_registry_types.is_operator_interrupt exn ->

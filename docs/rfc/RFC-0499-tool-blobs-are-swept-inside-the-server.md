@@ -289,8 +289,7 @@ u <sha256>
 - 분류는 코드가 만드는 이름을 모두 적는다. 지금 운영에 없는 것도 적는다. 예: `lane-addons/fleet-delivery`(`lane_addon_runtime.ml`), `lane-addons/broadcasts`.
 - 만드는 코드가 없는 운영 잔여 항목은 분류에 넣지 않는다. 그 항목이 남아 있으면 후보 기록의 `unclassified` 에 이름이 남고, 2층은 지우지 않는다. 이 층 PR 의 Upgrade notes 에 목록을 적는다. 운영자가 지우거나 `.masc` 밖으로 옮기면 그다음 스캔부터 지울 수 있다. 11-06 목록:
   - 폴더: `accountability`, `browser-downloads`, `gondolin-work`, `keeper-wake-payload`, `services`, `hardcut-46247-archive-20261027-131821`, `hardcut-46397-archive-20261028-021939`, `hardcut-aside-20261102`
-  - 파일: `autonomy_stats.jsonl`, `board_posts.initialized.jsonl`(와 `.lock`), `verify-after-restart.sh`, `verify-feedback-ratio.py`
-  - `tui-keeper-chat-recovery.json`(와 잠금 둘)은 `scripts/capture-tui-keeper-chat.py` 가 쓴다. 서버 코드는 만들지 않는다. 같은 길로 다룬다.
+  - 파일: `autonomy_stats.jsonl`, `board_posts.initialized.jsonl`(와 `.lock`), `tui-keeper-chat-recovery.json`(와 잠금 둘), `verify-after-restart.sh`, `verify-feedback-ratio.py`
   - `lane-addons/quiz-measure` 는 이름을 그대로 쓰는 코드가 없다. 이 층 PR 이 namespace 로 만드는지 확인한다.
 - 끝 조건은 둘이다.
   - 운영 workspace 의 후보 기록에서 `unclassified` 가 빈다.

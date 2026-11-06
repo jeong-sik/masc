@@ -342,6 +342,7 @@ let member_context member = Printf.sprintf "auth_config_of_yojson: field %S" mem
 
 let login_client_string ~context fields name =
   match List.assoc_opt name fields with
+  | Some (`String "") -> Error (Printf.sprintf "%s: field %S is empty" context name)
   | Some (`String value) -> Ok value
   | None -> Error (Printf.sprintf "%s: field %S is missing" context name)
   | Some value ->

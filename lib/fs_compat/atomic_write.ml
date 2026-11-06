@@ -1753,13 +1753,15 @@ let publish_capability_payload_with
                        Target_unchanged
                      | _ -> Target_state_unknown));
                reraise_fatal_or_cancelled exception_ backtrace;
-               raise
-                 (Capability_write_failed
-                    ( operation_failure
-                        stage
-                        exception_
-                        backtrace
-                    , [] )))
+               let failure =
+                 match publication, exception_ with
+                 | Recovery.Create_exclusive, Unix.Unix_error (code, _, _)
+                   when code = Unix.EEXIST ->
+                   { stage; cause = Target_already_exists }
+                 | Recovery.Create_exclusive, _ | Recovery.Replace, _ ->
+                   operation_failure stage exception_ backtrace
+               in
+               raise (Capability_write_failed (failure, [])))
          in
          (match initial_target with
           | Recovery.Absent -> publish ()

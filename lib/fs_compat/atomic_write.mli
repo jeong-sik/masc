@@ -113,6 +113,9 @@ type capability_write_cause =
   | Invalid_recovery_target of capability_publication_target_error
   | Mutation_contended
   | Target_already_exists
+      (** An exclusive create met an existing entry. [stage] says where:
+          [Inspect_target_entry] saw it before publishing, and
+          [Publish_exclusive] means the no-replace publish itself refused. *)
   | Posix_descriptor_unavailable
   | Unexpected_resource_kind of Eio.File.Stat.kind
   | Resource_identity_unavailable

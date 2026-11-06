@@ -579,7 +579,6 @@
   test_gc_sampler
   test_process_timeout_counter
   test_timeout_origin
-  test_git_fetch_timeout_9587
   test_inference_utils
   test_auth_ambiguous_lookup_9786
   test_auth_load_credential_of
@@ -924,7 +923,6 @@
   test_gc_sampler
   test_process_timeout_counter
   test_timeout_origin
-  test_git_fetch_timeout_9587
   test_inference_utils
   test_auth_ambiguous_lookup_9786
   test_auth_load_credential_of

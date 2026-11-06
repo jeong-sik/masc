@@ -31,6 +31,21 @@ let non_interactive_git_env =
 
 let read_only_git_env = ("GIT_OPTIONAL_LOCKS", "0") :: non_interactive_git_env
 
+(* A remote that accepts the connection and then sends nothing holds a fetch or
+   clone forever, because git sets no deadline of its own. Over HTTP(S), curl
+   ends a transfer that moves fewer than [network_stall_bytes_per_sec] bytes a
+   second for [network_stall_sec] seconds. A slow transfer that keeps moving is
+   not cut, so a large clone has no total-time limit. A git server sends a
+   keepalive every few seconds while it builds a pack, so a quiet minute means
+   the remote stopped. Other transports keep only their own timeouts. *)
+let network_stall_bytes_per_sec = 1
+let network_stall_sec = 60
+
+let network_git_env =
+  ("GIT_HTTP_LOW_SPEED_LIMIT", string_of_int network_stall_bytes_per_sec)
+  :: ("GIT_HTTP_LOW_SPEED_TIME", string_of_int network_stall_sec)
+  :: non_interactive_git_env
+
 let inspection_timeout_sec = 5.0
 
 type origin_lookup_error =
@@ -202,7 +217,7 @@ let run_git ~cwd ?(env = []) ?timeout_sec args : (string list, string) result =
 let run_git_read_only_raw ~cwd args = run_git_raw ~cwd ~env:read_only_git_env args
 
 let clone ~repository =
-  let env = non_interactive_git_env in
+  let env = network_git_env in
   let parent_dir = Filename.dirname repository.local_path in
   Fs_compat.mkdir_p parent_dir;
   match
@@ -259,7 +274,7 @@ let record_target_fetch ~repository =
 ;;
 
 let fetch ~repository : (string list, string) result =
-  let env = non_interactive_git_env in
+  let env = network_git_env in
   match run_git ~env ~cwd:repository.local_path
           [ "-c"; "fetch.append=false"; "fetch"; "--all" ] with
   | Error msg -> Error msg

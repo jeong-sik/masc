@@ -299,11 +299,6 @@ val jsonl_retention_days_env_key : string
 val admin_token_env_key : string
 val admin_token_opt : unit -> string option
 
-(** {1 Git} *)
-
-val git_fetch_timeout_sec_env_key : string
-val git_fetch_timeout_sec : unit -> float
-
 (** {1 Logging / telemetry} *)
 
 val log_level_env_key : string

@@ -2989,6 +2989,52 @@ let test_a_fenced_dated_quota_refusal_is_a_turn_failure () =
     (expect_turn_failure "a dated refusal after response text")
 ;;
 
+(* The CLI blocks a turn on a 429 or on a rejected rate-limit event. Only the
+   rejected event says the account's window is spent, so only it routes as a
+   hard quota, waiting until the reset it states. A 429 after an allowed
+   event, or with no event, is a throttle and states no wait. *)
+let test_only_a_rejected_rate_limit_event_is_a_hard_quota () =
+  let module Route = Keeper_runtime_failure_route in
+  let route_of rate_limit =
+    Route.route_of_error
+      ~boundary:Route.Agent_core_execution
+      (Keeper_claude_code_runtime.For_testing.claude_error_to_core_error
+         (Runtime_claude_code.Quota_blocked
+            { api_error_status = Some 429
+            ; rate_limit
+            ; tool_effect_attempted = false
+            ; response_emitted = false
+            }))
+  in
+  let event ?(resets_at = Some (an_hour_from_now ())) status : Runtime_claude_code.rate_limit =
+    { status
+    ; rate_limit_type = Some "five_hour"
+    ; resets_at
+    ; overage_status = None
+    ; overage_disabled_reason = None
+    }
+  in
+  (match route_of (Some (event Runtime_claude_code.Rejected)) with
+   | Route.Retry_after_observed { retry_class = Route.Hard_quota; retry_after = Some wait } ->
+     check bool "a rejected event waits until the reset it states" true
+       (Float.abs (wait -. 3600.0) < 5.0)
+   | route -> failf "a rejected event routed as %s" (Route.route_class_label route));
+  (match route_of (Some (event ~resets_at:None Runtime_claude_code.Rejected)) with
+   | Route.Retry_after_observed { retry_class = Route.Hard_quota; retry_after = None } -> ()
+   | route ->
+     failf "a rejected event with no reset routed as %s" (Route.route_class_label route));
+  List.iter
+    (fun (label, rate_limit) ->
+       match route_of rate_limit with
+       | Route.Retry_after_observed { retry_class = Route.Rate_limited; retry_after = None } ->
+         ()
+       | route -> failf "%s routed as %s" label (Route.route_class_label route))
+    [ "a 429 after an allowed event", Some (event Runtime_claude_code.Allowed)
+    ; "a 429 after a warning event", Some (event Runtime_claude_code.Allowed_warning)
+    ; "a 429 with no event", None
+    ]
+;;
+
 let test_access_refusal_uses_status_and_keeps_pre_effect_rotation () =
   List.iter (fun status ->
     let base_path = temp_workspace () in
@@ -7044,6 +7090,8 @@ let () =
             test_dated_quota_refusal_rests_the_keeper
         ; test_case "a 429 after an allowed event is a turn failure" `Quick
             test_a_429_after_an_allowed_event_is_a_turn_failure
+        ; test_case "only a rejected rate-limit event is a hard quota" `Quick
+            test_only_a_rejected_rate_limit_event_is_a_hard_quota
         ; test_case "a fenced dated quota refusal is a turn failure" `Quick
             test_a_fenced_dated_quota_refusal_is_a_turn_failure
         ; test_case "access refusal preserves structured status and rotation" `Quick

@@ -2879,6 +2879,9 @@ thinking-support = true
 preserve-thinking = true
 streaming = true
 
+[models.think.capabilities]
+thinking-control-format = "reasoning-enabled"
+
 [models.nothink]
 api-name = "nothink"
 max-context = 128000
@@ -3435,6 +3438,9 @@ thinking-support = true
 reasoning-effort = "high"
 streaming = true
 
+[models.effortful.capabilities]
+thinking-control-format = "reasoning-effort"
+
 [models.bigout]
 api-name = "reasoning-big-out"
 max-context = 1000000
@@ -3448,6 +3454,9 @@ max-context = 128000
 tools-support = true
 thinking-support = true
 streaming = true
+
+[models.think.capabilities]
+thinking-control-format = "reasoning-enabled"
 
 [ollama_cloud.effortful]
 is-default = true

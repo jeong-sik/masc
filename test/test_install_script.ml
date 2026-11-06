@@ -72,6 +72,7 @@ endpoint = "http://localhost:11434"
 path = "/api/tags"
 
 [models.deepseek-v4-flash]
+reasoning-uncontrolled = true
 api-name = "deepseek-v4-flash"
 max-context = 1048576
 tools-support = true

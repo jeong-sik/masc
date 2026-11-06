@@ -16,8 +16,10 @@ let error_message = function
   | Conflict _ -> "artifact check changed; refresh before changing it"
   | Commit_uncertain _ -> "artifact check may have been saved; reread before retrying"
 
+let dirname = "published_artifact_checks"
+
 let root ~base_path =
-  Filename.concat (Common.masc_dir_from_base_path ~base_path) "published_artifact_checks"
+  Filename.concat (Common.masc_dir_from_base_path ~base_path) dirname
 let filename (target : Check.target) =
   target.id ^ "-r" ^ string_of_int target.revision ^ ".json"
 let path ~base_path target = Filename.concat (root ~base_path) (filename target)

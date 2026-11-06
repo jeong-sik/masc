@@ -8304,6 +8304,10 @@ let keeper_execute_stream_max_reconnect_s = 30.0
 
 let monotonic_now_s () = Int64.to_float (Mtime_clock.elapsed_ns ()) /. 1e9
 
+(* The pointer press a drag in the browser picture holds; the cadence read
+   yields to it, so it is defined before the first launch that checks it. *)
+let browser_pointer_press : (int * int * Browser_lane.Pointer.point) option ref = ref None
+
 (* A failed read leaves its record owed and waiting whoever started it, so a
    read on entering a surface retries like an announced one. *)
 let failed_read owed =
@@ -12760,7 +12764,6 @@ let terminal_draws_images = ref None
 let active_graphics_protocol = ref Masc_tui_graphics.Unsupported_protocol
 let image_cell_pixels = ref None
 let browser_image_region : Masc_tui_graphics.image_region option ref = ref None
-let browser_pointer_press : (int * int * Browser_lane.Pointer.point) option ref = ref None
 
 let observer_browser_scope state =
   if Option.is_some !browser_pointer_press then None

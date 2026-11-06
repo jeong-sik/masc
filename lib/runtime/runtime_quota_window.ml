@@ -44,28 +44,14 @@ let observed_rest_sec () =
 let windows : (scope, window) Hashtbl.t = Hashtbl.create 4
 let mu = Stdlib.Mutex.create ()
 
-type stated_window =
-  { scope : scope
-  ; resets_at : float
-  }
-
-let stated_window_sink : (stated_window -> unit) Atomic.t = Atomic.make (fun _ -> ())
-let set_stated_window_sink sink = Atomic.set stated_window_sink sink
-
 let note_exhausted ~scope ~resets_at =
-  let taken =
-    Stdlib.Mutex.protect mu (fun () ->
-      match Hashtbl.find_opt windows scope with
-      | Some (Until existing) when Float.compare existing resets_at >= 0 -> false
-      (* A stated reset is more than an observation, so it replaces one. *)
-      | Some (Until _) | Some (Observed _) | None ->
-        Hashtbl.replace windows scope (Until resets_at);
-        true)
-  in
-  Runtime_path_rest_signal.recorded ();
-  (* The sink writes a file, so it runs last: the table and the path-rest
-     signal already hold the window whatever the write does. *)
-  if taken then (Atomic.get stated_window_sink) { scope; resets_at }
+  Stdlib.Mutex.protect mu (fun () ->
+    match Hashtbl.find_opt windows scope with
+    | Some (Until existing) when Float.compare existing resets_at >= 0 -> ()
+    (* A stated reset is more than an observation, so it replaces one. *)
+    | Some (Until _) | Some (Observed _) | None ->
+      Hashtbl.replace windows scope (Until resets_at));
+  Runtime_path_rest_signal.recorded ()
 
 let note_observed ~scope observation =
   (* NDT-OK: the wall clock is the moment the observation is noted, which
@@ -225,117 +211,6 @@ let scope_of_credential ~provider_id (credential : Runtime_schema.credential opt
   (* The inline carrier is the secret itself, so it cannot name a shared
      account without leaking; the row id is the narrowest honest scope. *)
   | Some (Runtime_schema.Inline _) | None -> Provider_row provider_id
-
-type stated_window_decode_error =
-  | Not_an_object of { path : string }
-  | Missing_field of { path : string }
-  | Unexpected_field of { path : string }
-  | Duplicate_field of { path : string }
-  | Wrong_type of
-      { path : string
-      ; expected : string
-      }
-  | Empty_string of { path : string }
-  | Not_finite of { path : string }
-  | Unknown_scope_kind of string
-
-(* The row itself has the empty path. *)
-let path_label = function "" -> "row" | path -> path
-
-let stated_window_decode_error_to_string = function
-  | Not_an_object { path } -> path_label path ^ ": expected an object"
-  | Missing_field { path } -> path ^ ": missing"
-  | Unexpected_field { path } -> path ^ ": not a field of a stated window"
-  | Duplicate_field { path } -> path ^ ": given more than once"
-  | Wrong_type { path; expected } -> Printf.sprintf "%s: expected %s" path expected
-  | Empty_string { path } -> path ^ ": empty string"
-  | Not_finite { path } -> path ^ ": not a finite number"
-  | Unknown_scope_kind kind -> Printf.sprintf "scope.kind: %S is not a scope kind" kind
-
-(* The wire name of each scope constructor, and the fields it carries. *)
-let scope_to_json = function
-  | Provider_row provider_id ->
-    `Assoc [ "kind", `String "provider_row"; "provider_id", `String provider_id ]
-  | Credential_env name -> `Assoc [ "kind", `String "credential_env"; "name", `String name ]
-  | Credential_file path -> `Assoc [ "kind", `String "credential_file"; "path", `String path ]
-  | Official_client_home (client, home) ->
-    `Assoc
-      [ "kind", `String "official_client_home"
-      ; "client", `String client
-      ; "home", `String home
-      ]
-
-let stated_window_to_json { scope; resets_at } =
-  `Assoc [ "scope", scope_to_json scope; "resets_at", `Float resets_at ]
-
-let rec first_repeated = function
-  | [] -> None
-  | key :: rest -> if List.mem key rest then Some key else first_repeated rest
-
-(* Exactly [names], each once, and nothing else. *)
-let exact_fields ~path names = function
-  | `Assoc members ->
-    let field key = if path = "" then key else path ^ "." ^ key in
-    let keys = List.map fst members in
-    (match
-       ( List.find_opt (fun key -> not (List.mem key names)) keys
-       , first_repeated keys
-       , List.find_opt (fun name -> not (List.mem name keys)) names )
-     with
-     | Some key, _, _ -> Error (Unexpected_field { path = field key })
-     | None, Some key, _ -> Error (Duplicate_field { path = field key })
-     | None, None, Some name -> Error (Missing_field { path = field name })
-     | None, None, None -> Ok (fun name -> field name, List.assoc name members))
-  | _ -> Error (Not_an_object { path })
-
-let string_field (path, value) =
-  match value with
-  | `String "" -> Error (Empty_string { path })
-  | `String text -> Ok text
-  | _ -> Error (Wrong_type { path; expected = "string" })
-
-let scope_of_json json =
-  let ( let* ) = Result.bind in
-  let* kind =
-    match json with
-    | `Assoc members ->
-      (match List.assoc_opt "kind" members with
-       | None -> Error (Missing_field { path = "scope.kind" })
-       | Some value -> string_field ("scope.kind", value))
-    | _ -> Error (Not_an_object { path = "scope" })
-  in
-  let fields names = exact_fields ~path:"scope" ("kind" :: names) json in
-  match kind with
-  | "provider_row" ->
-    let* get = fields [ "provider_id" ] in
-    let* provider_id = string_field (get "provider_id") in
-    Ok (Provider_row provider_id)
-  | "credential_env" ->
-    let* get = fields [ "name" ] in
-    let* name = string_field (get "name") in
-    Ok (Credential_env name)
-  | "credential_file" ->
-    let* get = fields [ "path" ] in
-    let* path = string_field (get "path") in
-    Ok (Credential_file path)
-  | "official_client_home" ->
-    let* get = fields [ "client"; "home" ] in
-    let* client = string_field (get "client") in
-    let* home = string_field (get "home") in
-    Ok (Official_client_home (client, home))
-  | other -> Error (Unknown_scope_kind other)
-
-let stated_window_of_json json =
-  let ( let* ) = Result.bind in
-  let* get = exact_fields ~path:"" [ "scope"; "resets_at" ] json in
-  let* scope = scope_of_json (snd (get "scope")) in
-  let* resets_at =
-    match get "resets_at" with
-    | _, `Float resets_at when Float.is_finite resets_at -> Ok resets_at
-    | path, `Float _ -> Error (Not_finite { path })
-    | path, _ -> Error (Wrong_type { path; expected = "float" })
-  in
-  Ok { scope; resets_at }
 
 let reset_for_testing () =
   Stdlib.Mutex.protect mu (fun () -> Hashtbl.reset windows)

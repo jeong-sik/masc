@@ -1614,24 +1614,6 @@ let install_keeper_gate_persistence state =
       resume_report.failures
 ;;
 
-(* The provider-stated quota windows the previous process held. Auto Judge
-   recovery and the Keeper loops below can call providers, so the table holds
-   these windows, and records new ones durably, before either starts. *)
-let restore_quota_windows state =
-  let base_path = (Mcp_server.workspace_config state).base_path in
-  match Runtime_quota_window_journal.restore_then_record ~base_path ~now:(Time_compat.now ()) with
-  | Error error ->
-    Log.Server.error "quota_windows: none restored; windows stated from now on are kept: %s"
-      (Runtime_quota_window_journal.restore_error_to_string error)
-  | Ok { Runtime_quota_window_journal.ahead; passed; rejected } ->
-    Log.Server.info "quota_windows: restored ahead=%d passed=%d rejected=%d path=%s"
-      ahead passed (List.length rejected) (Runtime_quota_window_journal.path ~base_path);
-    List.iter
-      (fun error ->
-         Log.Server.warn "quota_windows: row not restored: %s"
-           (Runtime_quota_window_journal.row_error_to_string error))
-      rejected
-
 let activate_owner_state
       ?(boot_stage = fun _ -> ())
       ~sw
@@ -1648,9 +1630,6 @@ let activate_owner_state
   (* Auto Judge recovery renders prompts immediately. Prompt state is therefore
      a recovery prerequisite, not an eventually-consistent lazy task. *)
   bootstrap_prompt_state ~boot_stage state;
-  boot_stage "quota_windows.begin";
-  restore_quota_windows state;
-  boot_stage "quota_windows.end";
   boot_stage "gate_persistence.begin";
   install_keeper_gate_persistence state;
   boot_stage "gate_persistence.end";

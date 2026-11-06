@@ -1,4 +1,4 @@
-(** Provider quota windows for runtime lane failover.
+(** Process-local provider quota windows for runtime lane failover.
 
     A hard-quota rejection that carries a provider [retry_after] is a fact
     with a stated end time: the account's quota window is exhausted until
@@ -6,13 +6,9 @@
     the same provider on every turn until the window resets (measured
     2026-08-11: 103 keeper cycle failures in one day from exactly this).
 
-    The table lives in process memory. Each stated window it takes also goes
-    to the sink the server installs ({!set_stated_window_sink}), and the
-    server reads those windows back before any Keeper walks
-    ({!Runtime_quota_window_journal}), so a restart does not forget a reset
-    the provider stated. An observation without a reset is not passed on: it
-    ends at the cap after it was noted or at the next success, and the sink
-    sees neither.
+    The table lives in process memory, so a restart forgets it and the next
+    refusal teaches it again. An observation without a reset ends at the cap
+    after it was noted or at the next success.
 
     This module remembers that fact and lets candidate ordering act on it.
     It is an ordering preference, not an admission gate — a demoted
@@ -43,49 +39,7 @@ val note_exhausted : scope:scope -> resets_at:float -> unit
     [resets_at] (Unix epoch seconds).  A later [resets_at] for the same
     scope extends the window; an earlier one is ignored so a stale
     retry hint cannot shorten a window a fresher response already
-    established. A window the table takes goes to the stated-window sink. *)
-
-type stated_window =
-  { scope : scope
-  ; resets_at : float  (** Unix epoch seconds, as {!note_exhausted} took it. *)
-  }
-(** A reset time a provider stated for a scope's quota. *)
-
-val set_stated_window_sink : (stated_window -> unit) -> unit
-(** Install the server's durable sink. {!note_exhausted} passes it each window
-    the table takes: the scope's first stated reset, or a later one than it
-    held. An equal or earlier reset changes nothing and is not passed. The sink
-    runs on the writer's fiber after the lock is released and after
-    {!Runtime_path_rest_signal.recorded}; it must log its own failures and not
-    raise, because the table already holds the window. *)
-
-type stated_window_decode_error =
-  | Not_an_object of { path : string }
-  | Missing_field of { path : string }
-  | Unexpected_field of { path : string }
-  | Duplicate_field of { path : string }
-  | Wrong_type of
-      { path : string
-      ; expected : string
-      }
-  | Empty_string of { path : string }
-  | Not_finite of { path : string }
-  | Unknown_scope_kind of string
-
-val stated_window_decode_error_to_string : stated_window_decode_error -> string
-
-val stated_window_to_json : stated_window -> Yojson.Safe.t
-(** [{"scope": {"kind": ..., ...}, "resets_at": <float>}]. The scope carries
-    its non-secret name: a provider row id, a credential env name or file
-    path, or an official client and its home. *)
-
-val stated_window_of_json :
-  Yojson.Safe.t -> (stated_window, stated_window_decode_error) result
-(** The inverse of {!stated_window_to_json}. Every field is required, no other
-    field is accepted, no field may repeat, strings must be non-empty and
-    [resets_at] must be a
-    finite float. A [kind] this build does not write is
-    {!Unknown_scope_kind}. *)
+    established. *)
 
 val note_observed_exhausted : scope:scope -> unit
 (** Remember that [scope] answered a hard quota rejection without stating when

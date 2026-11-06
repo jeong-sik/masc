@@ -1398,7 +1398,7 @@
  (name masc_tui_volume_gc)
  (wrapped false)
  (modules masc_tui_volume_gc)
- (libraries masc masc_tui_ansi yojson))
+ (libraries masc yojson))
 
 (library
  (name masc_tui_keeper_mark)
@@ -1910,6 +1910,7 @@
   masc_tui_board_detail
   masc_tui_board_quarantine
   masc_tui_fetched
+  masc_tui_volume_gc
   masc_tui_attachment
   masc_tui_code_lexer
   masc_tui_memo
@@ -2161,6 +2162,7 @@
   masc.time_codec
   masc_types
   masc_tui_ansi
+  masc_tui_volume_gc
   masc_tui_chart
   masc_tui_token_scale
   masc_tui_context_inspector
@@ -2610,6 +2612,7 @@
   masc_tui_evidence_picture
   masc_tui_exact_activity
   masc_tui_fetched
+  masc_tui_volume_gc
   masc_tui_identity_model
   masc_tui_interrupt_signal
   masc_tui_keeper_chat_history
@@ -2933,6 +2936,7 @@
   masc_tui_board_read_layout
   masc_tui_browser_lane_layout
   masc_tui_fetched
+  masc_tui_volume_gc
   masc_tui_magnitude
   masc_tui_board_comment_thread
   masc_tui_board_comment_cursor

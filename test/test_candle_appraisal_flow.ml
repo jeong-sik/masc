@@ -156,9 +156,14 @@ let make_runner ?(relation = fun _ -> A.Related) ?(weight = fun name -> if name=
     | A.Weights w -> A.Weights_decided (List.map (fun name -> name, weight name) w.keepers) in
   Ok {A.decision;trace=trace ~slot:("fixture." ^ A.stage request) (identity.goal_id ^ ":" ^ string_of_int step)}
 
-(* The timeout is a test harness failure bound, never a payout retry policy. *)
+(* The timeout is a test harness failure bound, never a payout retry policy.
+   It is 60s, not 5s: on the CI runner the first [idle] after a pulse in
+   "retained Add-on results resume the original payout" takes longer than 5s
+   once test_tui_volume_gc is built into the test tree (runs 42211248808 and
+   42212155880 failed at 5s; the same commit passed at 60s in run 42217268532).
+   Why that test tree slows the worker is not established. *)
 let await env label predicate =
-  try Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5. (fun () ->
+  try Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 60. (fun () ->
     let rec loop () = if predicate () then () else (Eio.Fiber.yield (); loop ()) in loop ())
   with Eio.Time.Timeout -> fail ("timed out waiting for " ^ label)
 

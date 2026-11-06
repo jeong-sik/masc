@@ -123,7 +123,7 @@ let test_config_default () =
 
 let test_config_to_json () =
   let names = Config.all_tool_names () in
-  check bool "pause omitted from public names" false (List.mem "masc_pause" names)
+  check bool "pause status omitted from public names" false (List.mem "masc_pause_status" names)
 
 let test_config_of_json () =
   let visible = Config.visible_tool_schemas () in
@@ -131,9 +131,9 @@ let test_config_of_json () =
 
 
 let test_config_of_json_invalid () =
-  (* masc_pause is not in public discovery, but remains callable on the admin/catalog surface. *)
-  check bool "pause allowed on admin/catalog surface" true
-    (Config.is_tool_allowed "masc_pause")
+  (* masc_pause_status is not in public discovery, but remains callable on the admin/catalog surface. *)
+  check bool "pause status allowed on admin/catalog surface" true
+    (Config.is_tool_allowed "masc_pause_status")
 
 let test_env_session_max_age () =
   let max_age = Env_config.Session.max_age_seconds in

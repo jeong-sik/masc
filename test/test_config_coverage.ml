@@ -39,8 +39,8 @@ let test_all_tool_schemas_non_empty () =
   check bool "public schemas exist" true (List.length Config.all_tool_schemas > 0)
 
 let test_all_tool_names_omits_hidden_pause () =
-  check bool "masc_pause hidden from public schemas" false
-    (List.mem "masc_pause" (Config.all_tool_names ()))
+  check bool "masc_pause_status hidden from public schemas" false
+    (List.mem "masc_pause_status" (Config.all_tool_names ()))
 
 let test_shard_base_tools_registered_for_help () =
   List.iter
@@ -64,11 +64,11 @@ let test_visible_tool_schemas_subset_of_all () =
     (List.length visible <= List.length Config.all_tool_schemas)
 
 let test_is_tool_allowed_pause () =
-  (* masc_pause is an admin-surface tool with a descriptor. *)
-  check bool "pause allowed on admin/catalog surface" true
-    (Config.is_tool_allowed "masc_pause");
-  check bool "pause included with include_hidden" true
-    (Tool_catalog.is_visible ~include_hidden:true "masc_pause")
+  (* masc_pause_status is an Operator_only control tool on the admin surface. *)
+  check bool "pause status allowed on admin/catalog surface" true
+    (Config.is_tool_allowed "masc_pause_status");
+  check bool "pause status included with include_hidden" true
+    (Tool_catalog.is_visible ~include_hidden:true "masc_pause_status")
 
 (* A malformed retention value used to mean opposite things: two stores kept
    files forever and one began pruning at its own default, while each of the

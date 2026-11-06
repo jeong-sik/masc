@@ -981,7 +981,12 @@ let declared_request_reserve_bytes ~system_prompt ~tools =
    turn's own atoms go out. Nothing here declares a cap.
 
    A message the range already sent goes out again exactly as it went
-   (RFC-0363 §3.4.1). Rewriting an earlier turn's tool result or argument
+   (RFC-0363 §3.4.1), with one exception: a tool result of
+   [aged_result_min_bytes] or more that belongs to a turn that ended leaves
+   as its marker ([finished_turn_results], RFC-tool-results-age-out-of-context).
+   Each such result changes once, on the first request after its turn ended,
+   and goes as the same marker on every later request. Every other result,
+   and every argument, still goes as the range first sent it: rewriting them
    when the turn boundary moves would change the prefix the provider cached
    at that message, on the first request of every turn. The range shrinks
    only where its front moves, or as the answer to a size refusal.
@@ -1006,6 +1011,38 @@ let current_turn_results_to_string = function
   | Current_turn_verbatim -> "verbatim"
   | Current_turn_demoted { refused_atom_count } ->
     Printf.sprintf "demoted_through_%d" refused_atom_count
+;;
+
+(* What a composition does with the tool results of turns that already
+   ended, the atoms before the turn boundary. Arguments are not part of it:
+   they go as the range first sent them outside the resend that answers a
+   size refusal. A Keeper on the small input policy that can read markers
+   back asks for [Finished_turns_as_markers]; the others, and every caller
+   that does not say, keep every result as sent. *)
+type finished_turn_results =
+  | Finished_turns_verbatim
+  | Finished_turns_as_markers
+
+let finished_turn_results_to_string = function
+  | Finished_turns_verbatim -> "verbatim"
+  | Finished_turns_as_markers -> "markers"
+;;
+
+(* The least body, in bytes, of a result of an ended turn that goes as its
+   marker. Smaller results stay readable in the prompt. The replay of stored
+   requests in docs/evidence/aged-tool-results-2026-11 priced the rule at
+   this floor, counted on the whole message (the body plus its framing),
+   while the plan counts the body alone. *)
+let aged_result_min_bytes = 2_048
+
+(* The atoms of turns that ended: the ones before the turn boundary, never
+   the newest atom, which the request always carries as it is
+   ([Keeper_carried_front.clamp]). An unknown boundary names no turn that
+   ended. *)
+let finished_turn_atoms ~atom_count = function
+  | Keeper_carried_front.Turn_boundary { end_atom } ->
+    Keeper_carried_front.clamp ~atom_count end_atom
+  | Keeper_carried_front.Turn_boundary_unknown _ -> 0
 ;;
 
 type composed =
@@ -1081,10 +1118,11 @@ let applied_demote_before ~base_path ~demote_before =
   if String.equal base_path "" then 0 else demote_before
 ;;
 
-let demotion_plan ?completed_arguments ~measure_message_bytes ~base_path ~demote_before messages =
+let demotion_plan ?completed_arguments ?min_result_bytes ~measure_message_bytes ~base_path
+      ~demote_before messages =
   if String.equal base_path ""
   then { Keeper_model_input_demotion.messages; pending = [] }
-  else Keeper_model_input_demotion.plan ?completed_arguments
+  else Keeper_model_input_demotion.plan ?completed_arguments ?min_result_bytes
       ~measure_message_bytes ~demote_before messages
 ;;
 
@@ -1262,6 +1300,7 @@ let project_range_start ~unread ~measure_message_bytes ~atom_count start message
 let compose_carried_model_input
       ?continuity
       ?completed_arguments
+      ?(finished_turn_results = Finished_turns_verbatim)
       ~measure_message_bytes
       ~(front : Keeper_carried_front.seed option)
       ~(accepted : Keeper_carried_front.seed option)
@@ -1281,14 +1320,24 @@ let compose_carried_model_input
   let { start; outlived_seed } =
     choose_range_start ~continuity ~front ~accepted ~history_digest_at ~turn_boundary
   in
-  (* Only the resend that answers a size refusal demotes, and then every atom
-     of the refused request with the completed arguments the attempt bound:
-     the resend is the smallest this range can carry, and the attempt's later
-     requests keep the same markers. Any other request carries what the range
-     already sent, unchanged (RFC-0363 §3.4.1). *)
+  (* The resend that answers a size refusal demotes every atom of the refused
+     request with the completed arguments the attempt bound: the resend is the
+     smallest this range can carry, and the attempt's later requests keep the
+     same markers. Any other request carries what the range already sent,
+     unchanged (RFC-0363 §3.4.1), but for the results of turns that ended when
+     the caller asks for them as markers: those are the same markers on every
+     request after the first one that follows their turn, and no argument is
+     touched. *)
   let planned, demote_before =
     match current_turn_results with
-    | Current_turn_verbatim -> { Keeper_model_input_demotion.messages; pending = [] }, 0
+    | Current_turn_verbatim ->
+      (match finished_turn_results with
+       | Finished_turns_verbatim -> { Keeper_model_input_demotion.messages; pending = [] }, 0
+       | Finished_turns_as_markers ->
+         let finished = finished_turn_atoms ~atom_count:history_atom_count turn_boundary in
+         ( demotion_plan ~min_result_bytes:aged_result_min_bytes ~measure_message_bytes
+             ~base_path ~demote_before:finished messages
+         , applied_demote_before ~base_path ~demote_before:finished ))
     | Current_turn_demoted { refused_atom_count } ->
       ( demotion_plan ?completed_arguments ~measure_message_bytes ~base_path
           ~demote_before:refused_atom_count messages
@@ -1374,6 +1423,7 @@ let unchecked_request_view
       ~tools
       ?continuity
       ?completed_arguments
+      ?finished_turn_results
       ~provider_config
       ~measure_message_bytes
       ~front
@@ -1389,7 +1439,7 @@ let unchecked_request_view
   let composed =
     offload_model_input_cpu (fun () ->
       compose_carried_model_input
-        ?continuity ?completed_arguments
+        ?continuity ?completed_arguments ?finished_turn_results
         ~measure_message_bytes
         ~front
         ~accepted
@@ -1445,13 +1495,13 @@ let carried_source_indices ~messages (view : request_view) =
 ;;
 
 let request_view
-      ?continuity ?completed_arguments
+      ?continuity ?completed_arguments ?finished_turn_results
       ?(tools = []) ~provider_config ~measure_message_bytes ~front ~accepted
       ~history_digest_at ~current_turn_results ~base_path
       ~turn_boundary ~materialize ~to_wire messages =
   let open Result.Syntax in
   let build ?(materialize = materialize) completed_arguments =
-    unchecked_request_view ~tools ?continuity ?completed_arguments
+    unchecked_request_view ~tools ?continuity ?completed_arguments ?finished_turn_results
       ~provider_config ~measure_message_bytes ~front ~accepted ~history_digest_at
       ~current_turn_results ~base_path ~turn_boundary ~materialize
       ~to_wire messages
@@ -1726,10 +1776,15 @@ let bounded_model_input_projection
   (* Demoted results leave as markers only for a Keeper that can open them
      again: the marker names a body [artifact_read] reads back. *)
   let demotion_base_path = if reader_available then ctx.base_path else "" in
+  (* The results of turns that ended go as markers on every request, for a
+     Keeper that can read them back. *)
+  let finished_turn_results =
+    if reader_available then Finished_turns_as_markers else Finished_turns_verbatim in
   Log.Keeper.info ~keeper_name:ctx.keeper_name
-    "model input references runtime=%s context_owner=agent_core turn_boundary=%s blob_reader_available=%b argument_references_enabled=%b"
+    "model input references runtime=%s context_owner=agent_core turn_boundary=%s blob_reader_available=%b argument_references_enabled=%b finished_turn_results=%s"
     ctx.runtime_id
-    (Keeper_carried_front.turn_start_to_string ctx.turn_boundary) reader_available argument_references_enabled;
+    (Keeper_carried_front.turn_start_to_string ctx.turn_boundary) reader_available argument_references_enabled
+    (finished_turn_results_to_string finished_turn_results);
 
   (* Scoped to the attempt, written by the one fiber that drives it. The
      closure below runs per provider request — 62 to 83 of them in one keeper
@@ -1841,6 +1896,7 @@ let bounded_model_input_projection
     let* view =
       request_view
         ?continuity:(input_continuity ctx.request_input) ?completed_arguments:view_arguments
+        ~finished_turn_results
         ~tools:prefix_tools
         ~provider_config
         ~measure_message_bytes
@@ -1962,11 +2018,13 @@ let bounded_model_input_projection
           ; "projected_bytes", `Int transmitted_bytes
           ; "reserved_bytes", `Int reserved_bytes
           ; "current_turn_results", `String (current_turn_results_to_string current_turn_results)
+          ; "finished_turn_results", `String (finished_turn_results_to_string finished_turn_results)
           ]) Keeper_runtime_manifest.History_projection_observed;
       Log.Keeper.info
         ~keeper_name:ctx.keeper_name
         "model input carried range runtime=%s origin=%s first_atom=%d atoms=%d/%d \
-         transmitted_bytes=%d reserved_bytes=%d current_turn_results=%s"
+         transmitted_bytes=%d reserved_bytes=%d current_turn_results=%s \
+         finished_turn_results=%s"
         ctx.runtime_id
         (Keeper_carried_front.origin_to_string composed.origin)
         composed.projection.Runtime_model_input_tail_window.dropped_atoms
@@ -1974,7 +2032,8 @@ let bounded_model_input_projection
         history_atom_count
         transmitted_bytes
         reserved_bytes
-        (current_turn_results_to_string current_turn_results);
+        (current_turn_results_to_string current_turn_results)
+        (finished_turn_results_to_string finished_turn_results);
       (* The cold seed is read only when no ledger answered; when it was, the
          records it could not decode and a refused turn-boundary store are
          part of why the range started where it did. *)
@@ -3508,6 +3567,7 @@ module For_testing = struct
   let memoize_message_measurement = memoize_message_measurement
   let carried_front = carried_front
   let message_measurement_hash = Agent_core.Types.Message_value.hash
+  let aged_result_min_bytes = aged_result_min_bytes
   let compose_carried_model_input = compose_carried_model_input
   let request_view = request_view
   let current_turn_demotion = current_turn_demotion

@@ -1653,8 +1653,10 @@ let current_batch ~id_prefix ~fill sizes =
        sizes
 ;;
 
-let compose_from_the_oldest_atom ~base_path ~current_turn_results ~turn_boundary messages =
+let compose_from_the_oldest_atom ?finished_turn_results ~base_path ~current_turn_results
+      ~turn_boundary messages =
   Try_provider.For_testing.compose_carried_model_input
+    ?finished_turn_results
     ~measure_message_bytes
     ~accepted:None ~front:
       (Some
@@ -1752,6 +1754,324 @@ let a_sent_result_stays_as_sent_when_the_turn_boundary_moves () =
     (List.filteri (fun index _ -> index < List.length sent) carried = sent);
   Alcotest.(check int) "and carries the new atom after it"
     (List.length sent + 2) (List.length carried)
+;;
+
+(* --- Results of turns that ended go as markers (RFC-tool-results-age-out-of-context) --- *)
+
+let as_markers = Try_provider.Finished_turns_as_markers
+
+let finished_turns_through end_atom = Masc.Keeper_carried_front.Turn_boundary { end_atom }
+
+(* The composition's messages with their markers written to a store under
+   [base_path], the way one provider attempt sends them. *)
+let materialized ~base_path (composed : Try_provider.composed) =
+  let outcome =
+    Demotion.materialize
+      ~store:(Tool_blob_store.create ~base_path)
+      ~addresses:(Demotion.create_address_memo ())
+      ~pending:composed.Try_provider.planned.Demotion.pending
+      composed.Try_provider.projection.Window.messages
+  in
+  Alcotest.(check int) "a healthy store reverts nothing" 0 outcome.Demotion.reverted;
+  outcome.Demotion.messages
+;;
+
+let without_preamble messages =
+  List.filter (fun message -> not (Window.is_synthetic_preamble message)) messages
+;;
+
+let call_with_input ~id input : Types.message =
+  { origin = Llm_provider.Types.Conversation;  role = Types.Assistant
+  ; content = [ Types.ToolUse { id; name = "read_file"; input } ]
+  ; name = None
+  ; tool_call_id = None
+  ; metadata = []
+  }
+;;
+
+let take count list = List.filteri (fun index _ -> index < count) list
+
+(* The longest run of messages the two requests share from the start. *)
+let rec shared_prefix first second =
+  match first, second with
+  | a :: rest_a, b :: rest_b when a = b -> 1 + shared_prefix rest_a rest_b
+  | _ -> 0
+;;
+
+(* A result of a turn that ended leaves as a marker the blob store reads back
+   in full, this turn's results stay as they are, and no argument is
+   touched, whatever its size. *)
+let finished_turn_results_leave_as_markers () =
+  let big_input = `Assoc [ "command", `String (String.make 4_000 'h') ] in
+  let earlier_bodies = [ String.make 20_000 'e'; String.make 21_000 'f' ] in
+  let earlier =
+    List.concat
+      (List.mapi
+         (fun i body ->
+            [ call_with_input ~id:(Printf.sprintf "old-%d" i) big_input
+            ; tool_message ~id:(Printf.sprintf "old-%d" i) body
+            ])
+         earlier_bodies)
+  in
+  let messages = earlier @ current_batch ~id_prefix:"search" ~fill:letter newest_bodies in
+  let turn_start =
+    Window.first_atom_at_or_after messages ~message_index:(List.length earlier)
+  in
+  let base_path = Filename.temp_dir "demote" "" in
+  let composed =
+    compose_from_the_oldest_atom ~finished_turn_results:as_markers ~base_path
+      ~current_turn_results:Try_provider.Current_turn_verbatim
+      ~turn_boundary:(finished_turns_through turn_start) messages
+  in
+  Alcotest.(check int) "the demotion stops at the turn boundary" turn_start
+    composed.Try_provider.demote_before;
+  Alcotest.(check int) "each result of an ended turn is planned"
+    (List.length earlier_bodies)
+    (List.length composed.Try_provider.planned.Demotion.pending);
+  let sent = materialized ~base_path composed in
+  let carried = markers sent in
+  List.iter
+    (fun body ->
+       Alcotest.(check bool) "an ended turn's body leaves" false
+         (List.exists (String.equal body) carried);
+       let reference =
+         match
+           List.find_map
+             (fun content ->
+                match Tool_output.decode_from_agent_core content with
+                | Tool_output.Decoded reference
+                  when reference.Tool_output.bytes = String.length body -> Some reference
+                | Tool_output.Decoded _ | Tool_output.Not_marker
+                | Tool_output.Invalid_marker _ -> None)
+             carried
+         with
+         | Some reference -> reference
+         | None -> Alcotest.fail "no marker names this body"
+       in
+       match Tool_blob_store.fetch (Tool_blob_store.create ~base_path)
+               ~sha256:reference.Tool_output.sha256 with
+       | Ok (Some bytes) -> Alcotest.(check string) "the marker reads back the exact body" body bytes
+       | Ok None | Error _ -> Alcotest.fail "the marker's blob is not stored")
+    earlier_bodies;
+  List.iteri
+    (fun i size ->
+       Alcotest.(check bool)
+         (Printf.sprintf "this turn's body %d stays in the prompt" i)
+         true
+         (List.exists (String.equal (String.make size (letter i))) carried))
+    newest_bodies;
+  Alcotest.(check bool) "every argument is exactly as it was" true
+    (List.for_all
+       (fun (message : Types.message) ->
+          List.for_all
+            (function
+              | Types.ToolUse { input; _ } -> input = big_input
+              | Types.Text _ | Types.ToolResult _ | Types.Thinking _
+              | Types.ReasoningDetails _ | Types.RedactedThinking _ | Types.Image _
+              | Types.Document _ | Types.Audio _ -> true)
+            message.Types.content)
+       sent)
+;;
+
+(* A result goes as a marker from [aged_result_min_bytes] on; a smaller one
+   stays readable, and a marker is never written for a body it would not
+   shorten. *)
+let results_below_the_floor_stay_in_the_prompt () =
+  let floor = Try_provider.For_testing.aged_result_min_bytes in
+  let bodies =
+    [ String.make (floor - 1) 'a'; String.make floor 'b'; String.make (floor + 1) 'c' ]
+  in
+  let earlier = history_with_tool_bodies bodies in
+  let messages = earlier @ [ assistant "this turn" ] in
+  let turn_start =
+    Window.first_atom_at_or_after messages ~message_index:(List.length earlier)
+  in
+  let base_path = Filename.temp_dir "demote" "" in
+  let composed =
+    compose_from_the_oldest_atom ~finished_turn_results:as_markers ~base_path
+      ~current_turn_results:Try_provider.Current_turn_verbatim
+      ~turn_boundary:(finished_turns_through turn_start) messages
+  in
+  Alcotest.(check int) "the floor and the sizes above it are planned" 2
+    (List.length composed.Try_provider.planned.Demotion.pending);
+  let carried = markers (materialized ~base_path composed) in
+  Alcotest.(check bool) "one byte under the floor stays" true
+    (List.exists (String.equal (List.nth bodies 0)) carried);
+  Alcotest.(check bool) "the floor itself leaves" false
+    (List.exists (String.equal (List.nth bodies 1)) carried);
+  Alcotest.(check bool) "one byte over the floor leaves" false
+    (List.exists (String.equal (List.nth bodies 2)) carried)
+;;
+
+(* The cache property the rule is priced on. A result is rewritten once, on
+   the first request after its turn ended, and goes as the same marker on
+   every later request: the next turn's request opens with what the last one
+   sent up to the first result that just aged, and a request later in the
+   same turn opens with the whole of the one before it. *)
+let a_finished_turn_result_changes_once_and_its_marker_stays () =
+  let old_turn = history_with_tool_bodies [ String.make 20_000 'e'; String.make 21_000 'f' ] in
+  let turn_a = current_batch ~id_prefix:"a" ~fill:letter [ 9_000; 11_000 ] in
+  let turn_b = current_batch ~id_prefix:"b" ~fill:(fun _ -> 'n') [ 9_000 ] in
+  let later_in_b = current_batch ~id_prefix:"c" ~fill:(fun _ -> 'm') [ 5_000 ] in
+  let base_path = Filename.temp_dir "demote" "" in
+  let request messages ~finished_prefix =
+    let composed =
+      compose_from_the_oldest_atom ~finished_turn_results:as_markers ~base_path
+        ~current_turn_results:Try_provider.Current_turn_verbatim
+        ~turn_boundary:
+          (finished_turns_through
+             (Window.first_atom_at_or_after messages ~message_index:(List.length finished_prefix)))
+        messages
+    in
+    composed, without_preamble (materialized ~base_path composed)
+  in
+  let in_a, sent_in_a = request (old_turn @ turn_a) ~finished_prefix:old_turn in
+  let in_b, sent_in_b =
+    request (old_turn @ turn_a @ turn_b) ~finished_prefix:(old_turn @ turn_a)
+  in
+  let _, sent_later_in_b =
+    request (old_turn @ turn_a @ turn_b @ later_in_b) ~finished_prefix:(old_turn @ turn_a)
+  in
+  Alcotest.(check int) "turn A's request rewrites the old turn's two results" 2
+    (List.length in_a.Try_provider.planned.Demotion.pending);
+  Alcotest.(check int) "turn B's request adds turn A's two" 4
+    (List.length in_b.Try_provider.planned.Demotion.pending);
+  Alcotest.(check bool) "the old turn's markers are the same bytes in turn B" true
+    (take (List.length old_turn) sent_in_b = take (List.length old_turn) sent_in_a);
+  (* The old turn's four messages, then turn A's call: all unchanged. The
+     first message to differ is turn A's first result. *)
+  Alcotest.(check int) "turn B's request first differs at turn A's first result"
+    (List.length old_turn + 1)
+    (shared_prefix sent_in_a sent_in_b);
+  Alcotest.(check bool) "a later request of the same turn opens with the one before it" true
+    (take (List.length sent_in_b) sent_later_in_b = sent_in_b)
+;;
+
+(* Nothing is known about which turns ended, so nothing is demoted; a Keeper
+   with no blob store has nothing a marker could name; and the setting is off
+   unless the caller asks. *)
+let finished_turns_stay_verbatim_unless_they_can_be_read_back () =
+  let earlier = history_with_tool_bodies [ String.make 20_000 'e' ] in
+  let messages = earlier @ [ assistant "this turn" ] in
+  let turn_start =
+    Window.first_atom_at_or_after messages ~message_index:(List.length earlier)
+  in
+  let compose_with ?finished_turn_results ~base_path turn_boundary =
+    compose_from_the_oldest_atom ?finished_turn_results ~base_path
+      ~current_turn_results:Try_provider.Current_turn_verbatim ~turn_boundary messages
+  in
+  let planned (composed : Try_provider.composed) =
+    List.length composed.Try_provider.planned.Demotion.pending
+  in
+  let base_path = Filename.temp_dir "demote" "" in
+  let unknown =
+    compose_with ~finished_turn_results:as_markers ~base_path
+      (Masc.Keeper_carried_front.Turn_boundary_unknown { reason = "unreadable" })
+  in
+  Alcotest.(check int) "an unknown turn boundary plans nothing" 0 (planned unknown);
+  Alcotest.(check int) "and applies no boundary" 0 unknown.Try_provider.demote_before;
+  let no_store =
+    compose_with ~finished_turn_results:as_markers ~base_path:""
+      (finished_turns_through turn_start)
+  in
+  Alcotest.(check int) "no store plans nothing" 0 (planned no_store);
+  Alcotest.(check int) "and applies no boundary" 0 no_store.Try_provider.demote_before;
+  let not_asked = compose_with ~base_path (finished_turns_through turn_start) in
+  Alcotest.(check int) "a caller that does not ask gets every result as sent" 0
+    (planned not_asked);
+  Alcotest.(check int) "with no boundary applied" 0 not_asked.Try_provider.demote_before;
+  let asked = compose_with ~finished_turn_results:as_markers ~base_path (finished_turns_through turn_start) in
+  Alcotest.(check int) "asked, with a known boundary and a store, it plans the result" 1
+    (planned asked)
+;;
+
+(* A turn boundary at the end of the history names the newest atom as ended.
+   That atom is what the request has to answer, so it keeps its results. *)
+let the_newest_atom_keeps_its_results () =
+  let bodies = [ String.make 20_000 'e'; String.make 21_000 'f' ] in
+  let messages = history_with_tool_bodies bodies in
+  let atom_count = snd (Window.annotate messages) in
+  let base_path = Filename.temp_dir "demote" "" in
+  let composed =
+    compose_from_the_oldest_atom ~finished_turn_results:as_markers ~base_path
+      ~current_turn_results:Try_provider.Current_turn_verbatim
+      ~turn_boundary:(finished_turns_through atom_count) messages
+  in
+  Alcotest.(check int) "the boundary stops before the newest atom" (atom_count - 1)
+    composed.Try_provider.demote_before;
+  Alcotest.(check int) "only the older result is planned" 1
+    (List.length composed.Try_provider.planned.Demotion.pending);
+  Alcotest.(check bool) "the newest result is in the prompt as it is" true
+    (List.exists (String.equal (List.nth bodies 1))
+       (markers composed.Try_provider.projection.Window.messages))
+;;
+
+(* The resend that answers a size refusal demotes every result of the refused
+   request whatever the setting: it is the smallest the range can carry. *)
+let a_refusal_resend_ignores_the_finished_turn_setting () =
+  let earlier = history_with_tool_bodies [ String.make 20_000 'e'; "tiny" ] in
+  let messages = earlier @ current_batch ~id_prefix:"search" ~fill:letter newest_bodies in
+  let turn_start =
+    Window.first_atom_at_or_after messages ~message_index:(List.length earlier)
+  in
+  let base_path = Filename.temp_dir "demote" "" in
+  let resend ?finished_turn_results () =
+    compose_from_the_oldest_atom ?finished_turn_results ~base_path
+      ~current_turn_results:(demoted_after_refusal messages)
+      ~turn_boundary:(finished_turns_through turn_start) messages
+  in
+  let plain = resend () and asked = resend ~finished_turn_results:as_markers () in
+  Alcotest.(check int) "the same boundary" plain.Try_provider.demote_before
+    asked.Try_provider.demote_before;
+  Alcotest.(check int) "the same demotions"
+    (List.length plain.Try_provider.planned.Demotion.pending)
+    (List.length asked.Try_provider.planned.Demotion.pending);
+  Alcotest.(check int) "the same bytes" plain.Try_provider.transmitted_bytes
+    asked.Try_provider.transmitted_bytes
+;;
+
+(* A request that carried the ended turns as markers is not itself a reason
+   to resend: only a result still verbatim in it is. *)
+let a_request_with_only_markers_has_nothing_left_to_demote () =
+  let earlier = history_with_tool_bodies [ String.make 20_000 'e' ] in
+  let messages = earlier @ [ assistant "this turn" ] in
+  let turn_start =
+    Window.first_atom_at_or_after messages ~message_index:(List.length earlier)
+  in
+  let base_path = Filename.temp_dir "demote" "" in
+  let compose_under results =
+    compose_from_the_oldest_atom ~finished_turn_results:as_markers ~base_path
+      ~current_turn_results:results
+      ~turn_boundary:(finished_turns_through turn_start) messages
+  in
+  Alcotest.(check (option int)) "the ended turn's result is already a marker" None
+    (Try_provider.For_testing.current_turn_demotion
+       ~refused:(compose_under Try_provider.Current_turn_verbatim)
+       ~demoted:(compose_under (demoted_after_refusal messages)))
+;;
+
+(* The floor is a rule of [plan]: results below it keep their bodies, results
+   at it and above are substituted exactly as without a floor. *)
+let plan_keeps_results_below_the_floor () =
+  let bodies = [ 1_500; 2_047; 2_048; 4_000; 9_000 ] in
+  let messages =
+    history_with_tool_bodies (List.map (fun size -> String.make size 'x') bodies)
+  in
+  let changed ?min_result_bytes () =
+    let planned =
+      Demotion.plan ?min_result_bytes ~measure_message_bytes ~demote_before:max_int messages
+    in
+    List.map2 (fun before after -> before <> after) messages planned.Demotion.messages
+  in
+  let results_only flags =
+    List.filteri (fun index _ -> index mod 2 = 1) flags
+  in
+  let with_floor = results_only (changed ~min_result_bytes:2_048 ()) in
+  let without_floor = results_only (changed ()) in
+  Alcotest.(check (list bool)) "below the floor nothing is substituted"
+    [ false; false; true; true; true ] with_floor;
+  Alcotest.(check bool) "without a floor the large results are substituted as well" true
+    (List.nth without_floor 2 && List.nth without_floor 3 && List.nth without_floor 4)
 ;;
 
 (* Demotion can shrink an atom only down to its non-demotable residue. The
@@ -1944,6 +2264,40 @@ let () =
             "a front that opens with another message starts over"
             `Quick
             a_front_that_opens_with_another_message_starts_over
+        ] )
+    ; ( "finished_turn_results"
+      , [ Alcotest.test_case
+            "results of ended turns leave as markers the store reads back"
+            `Quick
+            finished_turn_results_leave_as_markers
+        ; Alcotest.test_case
+            "results below the floor stay in the prompt"
+            `Quick
+            results_below_the_floor_stay_in_the_prompt
+        ; Alcotest.test_case
+            "a result changes once and its marker stays"
+            `Quick
+            a_finished_turn_result_changes_once_and_its_marker_stays
+        ; Alcotest.test_case
+            "ended turns stay verbatim unless they can be read back"
+            `Quick
+            finished_turns_stay_verbatim_unless_they_can_be_read_back
+        ; Alcotest.test_case
+            "the newest atom keeps its results"
+            `Quick
+            the_newest_atom_keeps_its_results
+        ; Alcotest.test_case
+            "a refusal resend ignores the setting"
+            `Quick
+            a_refusal_resend_ignores_the_finished_turn_setting
+        ; Alcotest.test_case
+            "a request with only markers has nothing left to demote"
+            `Quick
+            a_request_with_only_markers_has_nothing_left_to_demote
+        ; Alcotest.test_case
+            "plan keeps results below the floor"
+            `Quick
+            plan_keeps_results_below_the_floor
         ] )
     ; ( "measurement"
       , [ Alcotest.test_case

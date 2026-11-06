@@ -197,7 +197,7 @@ probe_sse() {
 }
 
 probe_h2c() {
-  if ! curl --version | grep -q "HTTP2"; then
+  if ! grep -q "HTTP2" <<<"$(curl --version)"; then
     return 2
   fi
   local mcp_probe health_probe status version

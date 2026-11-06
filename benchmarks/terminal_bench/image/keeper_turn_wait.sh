@@ -47,7 +47,7 @@ wait_for_keeper_turn() {
   for (( round = 0; round < rounds; round++ )); do
     # The container is checked on every round, so one that dies mid-wait ends
     # the probe with a reason instead of a poll against nothing.
-    if ! docker inspect -f '{{.State.Running}}' "${NAME}" 2>/dev/null | grep -q true; then
+    if ! grep -q true <<<"$(docker inspect -f '{{.State.Running}}' "${NAME}" 2>/dev/null)"; then
       echo "STAGE_FAIL container-died during the keeper turn" >&2
       return 1
     fi

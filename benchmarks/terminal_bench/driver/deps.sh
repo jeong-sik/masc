@@ -199,7 +199,7 @@ bench_install_deps() {
     chmod 0600 "${CODEX_HOME}/auth.json"
     if [[ "${CODEX_AUTH_JSON}" == "preflight-placeholder-no-credential" ]]; then
       codex login status >/dev/null
-    elif ! codex login status 2>&1 | grep -Fq "Logged in using ChatGPT"; then
+    elif ! grep -Fq "Logged in using ChatGPT" <<<"$(codex login status 2>&1)"; then
       echo "codex login status does not report a ChatGPT subscription login:" >&2
       codex login status >&2 || true
       exit 1

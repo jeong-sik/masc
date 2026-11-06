@@ -4343,6 +4343,62 @@ let test_a_fenced_failure_waits_for_the_rest_its_attempt_recorded () =
         "no provider wait" (decide ~now:(now +. 88442.0))))
 ;;
 
+(* 2026-11-06: one-path Muse Keepers resting on a quota stated to reset on
+   11-09 each sent one refused request about two minutes after every server
+   boot. The window lived only in process memory, and a starting loop had no
+   failure of its own to wait on. Now the stated window is read back at boot
+   and the loop's first cycle waits for it. *)
+let test_a_restarted_loop_waits_for_the_quota_window_its_store_kept () =
+  with_runtime_config (runtime_toml_quota_lane_of [ "other.test_model" ]) (fun () ->
+    let base_path = Filename.temp_file "quota-window-restart-" ".dir" in
+    Sys.remove base_path;
+    Unix.mkdir base_path 0o700;
+    Unix.mkdir (Filename.dirname (Runtime_quota_window_journal.path ~base_path)) 0o700;
+    Fun.protect
+      ~finally:(fun () ->
+        Runtime_quota_window.set_stated_window_sink ignore;
+        reset_quota_lane_rests ();
+        Fs_compat.remove_tree base_path)
+      (fun () ->
+        reset_quota_lane_rests ();
+        let now = Unix.gettimeofday () in
+        let restart ~now =
+          Runtime_quota_window.reset_for_testing ();
+          match Runtime_quota_window_journal.restore_then_record ~base_path ~now with
+          | Ok _ -> ()
+          | Error error ->
+            Alcotest.fail (Runtime_quota_window_journal.restore_error_to_string error)
+        in
+        let first_cycle ~now =
+          match
+            Masc.Keeper_heartbeat_loop.For_testing.start_path_wait ~now
+              ~assignment_id:"quota_lane" ~deferred_runtime_lane:None
+          with
+          | None -> "takes its input"
+          | Some (Masc.Keeper_heartbeat_loop.Continue_on_deferred_lane { next_runtime_id }) ->
+            "continues on " ^ next_runtime_id
+          | Some
+              (Masc.Keeper_heartbeat_loop.Wait_for_path_release
+                 { release_at; waiting_on; basis }) ->
+            Printf.sprintf "waits %.0fs for %s on %s" (release_at -. now) waiting_on
+              (match basis with
+               | Driver.Observed_path_rest -> "the observed rest"
+               | Driver.Failure_response -> "the failure response")
+        in
+        restart ~now;
+        Alcotest.(check string) "a loop starting on a serving path takes its input"
+          "takes its input" (first_cycle ~now);
+        Runtime_quota_window.note_exhausted
+          ~scope:(Option.get (Runtime.quota_scope_of_runtime_id "other.test_model"))
+          ~resets_at:(now +. 88441.0);
+        restart ~now;
+        Alcotest.(check string) "after a restart the first cycle waits for the stated reset"
+          "waits 88441s for other.test_model on the observed rest" (first_cycle ~now);
+        restart ~now:(now +. 88442.0);
+        Alcotest.(check string) "a restart after the reset takes its input again"
+          "takes its input" (first_cycle ~now:(now +. 88442.0))))
+;;
+
 (* RFC-provider-path-rest §3.4: the chat lane's deferred retry reads the same
    next dispatch as the heartbeat. A suffix whose walk head serves is claimable
    at once; a resting head holds the retry until its release; a provider's
@@ -7415,6 +7471,8 @@ let () =
             `Quick test_a_failure_without_a_suffix_waits_until_a_fresh_walk_head_serves;
           Alcotest.test_case "a fenced failure waits for the rest its attempt recorded" `Quick
             test_a_fenced_failure_waits_for_the_rest_its_attempt_recorded;
+          Alcotest.test_case "a restarted loop waits for the quota window its store kept" `Quick
+            test_a_restarted_loop_waits_for_the_quota_window_its_store_kept;
           Alcotest.test_case "a chat retry follows the shared next dispatch" `Quick
             test_a_chat_retry_follows_the_shared_next_dispatch;
           Alcotest.test_case "a same-path suffix waits only for a recorded rest" `Quick

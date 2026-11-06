@@ -3,6 +3,7 @@ rfc: "tui-measured-operator-home"
 title: "A measured Dashboard with Work and Usage as distinct destinations"
 status: Accepted
 created: 2026-09-25
+updated: 2026-11-07
 author: dancer + codex
 supersedes: ["0464", "tui-operator-ia:3.1"]
 superseded_by: null
@@ -80,7 +81,12 @@ System exposes Activity and logs without making the event stream the first
 screen. `go System / <pane>` opens each configuration pane.
 
 The TUI guide, key hints, palette, and PTY scenarios follow this decision in
-the same change. A PTY capture must prove the Dashboard summary, Work Goal
-evidence, Usage report coverage, and System Activity path against controlled
-fixtures. Source parsing or API presence alone does not establish that the
-first screen actually shows the intended information.
+the same change. Tests of it look at the requests the TUI sends, the state it
+stores and the decisions it takes; none asserts screen text, layout or row
+order, PTY scenarios included (`docs/constitution.xml`, `build_and_ci`).
+Source parsing or API presence alone does not establish that the first screen
+actually shows the intended information. The change's evidence does
+(`docs/constitution.xml`, `evidence`): a capture of a real TUI session against
+controlled fixtures that shows the Dashboard summary, Work Goal evidence, Usage
+report coverage, and System Activity path. The capture is attached to the PR
+and is not committed as a test.

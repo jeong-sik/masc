@@ -46,6 +46,11 @@ let valid_month month =
   | _ -> false
 ;;
 
+let month_of_unix_time time =
+  let tm = Unix.gmtime time in
+  Printf.sprintf "%04d-%02d" (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1)
+;;
+
 let days_in_month month =
   let year = int_of_string (String.sub month 0 4) in
   let mon = int_of_string (String.sub month 5 2) in

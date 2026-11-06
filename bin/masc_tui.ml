@@ -5718,6 +5718,30 @@ let launch_keeper_board_quarantines state ~mailbox keeper_name =
          (Keeper_msg (Keeper_board_quarantines_loaded
             (request, Error "Eio switch is unavailable"))))
 
+(* The Info tab's month of efficiency. One answer holds every Keeper of the
+   month, so [start] is keyed by the month: moving between Keepers while the
+   month is being read asks nothing more, and the answer serves each of them.
+   The first read of a month is slow on the server, hence its own timeout. *)
+let launch_keeper_efficiency state ~mailbox =
+  if server_authority_ready state then
+    let month = Masc_tui_keeper_efficiency.month_of ~now:(Unix.gettimeofday ()) in
+    match Masc_tui_fetched.start ~equal:String.equal state.keeper_efficiency ~key:month with
+    | Masc_tui_fetched.Already_loading -> ()
+    | Masc_tui_fetched.Started (next, request) ->
+      state.keeper_efficiency <- next;
+      let host = server_peer_host and port = state.port in
+      launch_workspace_json_read state ~mailbox
+        ~deliver:(fun result -> Keeper_msg (Keeper_efficiency_loaded (request, result)))
+        (fun () ->
+          let open Result.Syntax in
+          let* json =
+            Masc_tui_http.get_json_decoded
+              ~timeout_sec:(Some Masc_tui_keeper_efficiency.timeout_sec)
+              ~decode:Masc_tui_http.decode_json ~host ~port
+              ~path:(Masc_tui_keeper_efficiency.path ~month)
+          in
+          Masc_tui_keeper_efficiency.decode json)
+
 (* Q acknowledges the oldest partition through its exact quarantine CAS. *)
 let launch_board_quarantine_requeue state ~mailbox ~keeper_name
     (item : Masc.Keeper_board_attention_quarantine_command.inventory_item) =
@@ -16843,6 +16867,7 @@ let revoke_detail_readings state =
   state.detail_read_authority <- ref ();
   state.keeper_sandbox_view <- None;
   state.keeper_board_quarantines <- Masc_tui_fetched.clear state.keeper_board_quarantines;
+  state.keeper_efficiency <- Masc_tui_fetched.clear state.keeper_efficiency;
   state.keeper_sandbox_logs_generation <- state.keeper_sandbox_logs_generation + 1;
   state.keeper_sandbox_logs_inflight <- None;
   state.keeper_sandbox_logs <- None;
@@ -17334,6 +17359,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.github_token_input <- None;
   state.github_token_save_status <- None;
   state.keeper_board_quarantines <- Masc_tui_fetched.clear state.keeper_board_quarantines;
+  state.keeper_efficiency <- Masc_tui_fetched.clear state.keeper_efficiency;
   state.acting_pane_changes <- Masc_tui_fetched.clear state.acting_pane_changes;
   state.acting_pane_changes_loss_followup <- None;
   state.acting_pane_changes_at <- None;
@@ -18263,7 +18289,8 @@ let launch_detail_tab_reading state ~mailbox (keeper : keeper) =
          both request a current reading, including after a failed refresh;
          the shared launcher retains its single-flight and authority guards. *)
       owe_keeper_composite_read state ~mailbox ~keeper_name:keeper.k_name;
-      launch_keeper_board_quarantines state ~mailbox keeper.k_name
+      launch_keeper_board_quarantines state ~mailbox keeper.k_name;
+      launch_keeper_efficiency state ~mailbox
   | Detail_items ->
       launch_keeper_items state ~mailbox keeper.k_name
   | Detail_sandbox ->
@@ -22650,7 +22677,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Machine_msg (Machine_activity_read (_, _) | Machine_activity_saved (_, _))
         | Runtime_msg (Runtime_config_view_loaded (_, _, _, _, _) | Runtime_params_loaded _
         | Runtime_param_written (_, _)) | Prompts_loaded (_, _)
-        | Keeper_msg (Keeper_board_quarantines_loaded (_, _)) | Board_msg (Board_quarantine_requeued (_, _, _)
+        | Keeper_msg (Keeper_board_quarantines_loaded (_, _) | Keeper_efficiency_loaded (_, _)) | Board_msg (Board_quarantine_requeued (_, _, _)
         | Board_quarantines_bulk_progress (_, _, _, _, _, _)
         | Board_quarantines_bulk_requeued (_, _)) | Preset_msg (Presets_listed (_, _)
         | Preset_detail_loaded (_, _) | Preset_contents_shown (_, _) | Preset_saved (_, _)
@@ -24892,6 +24919,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       state.keeper_board_quarantines <-
         Masc_tui_fetched.complete ~equal:String.equal
           state.keeper_board_quarantines request result
+  | Keeper_msg (Keeper_efficiency_loaded (request, result)) ->
+      state.keeper_efficiency <-
+        Masc_tui_fetched.complete ~equal:String.equal state.keeper_efficiency request result
   | Board_msg (Board_quarantine_requeued (keeper_name, partition_id, outcome)) ->
       state.board_quarantine_requeue_inflight <- None;
       let partition = Terminal_text.single_line partition_id in

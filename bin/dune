@@ -1582,6 +1582,14 @@
  (modules masc_tui_roster_owed)
  (libraries masc_tui_owed_read))
 
+;; A Keeper's month of efficiency on its Info tab, beside the fleet's per-turn
+;; figures. Own library so the request has a test that does not draw a screen.
+(library
+ (name masc_tui_keeper_efficiency)
+ (wrapped false)
+ (modules masc_tui_keeper_efficiency)
+ (libraries masc masc.keeper_efficiency masc_tui_fetched yojson))
+
 ;; A Keeper's Board-attention quarantine rows on its Info tab. Own library so
 ;; the lines and the requeue target have a test that does not draw a screen.
 (library
@@ -2886,6 +2894,7 @@
   masc_tui_gate_text
   masc_tui_wire_age
   masc_tui_board_quarantine
+  masc_tui_keeper_efficiency
   masc_tui_text_block
   masc_tui_preset_text
   masc_tui_mcp

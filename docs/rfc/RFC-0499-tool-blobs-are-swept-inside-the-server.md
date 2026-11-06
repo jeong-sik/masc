@@ -354,6 +354,8 @@ u <sha256>
     | `tool-blob-maintenance` | `live_references` | 명령을 지운다(D7) |
     | `media-reading-maintenance` | `live_references` | 오류로 끝나고 아무것도 지우지 않는다 |
     | `vision-kept-maintenance` | `consumer_paths` | 해당 없음. 목록이 바뀌는 것만 §3.5 대로 센다 |
+
+    표 밖의 소비자는 없다(11-06 `git grep`). `live_references` 는 서버 스윕(`tool_blob_sweep.ml`)과 `deployment_preflight_helper.ml` 의 두 명령만 부른다. `fold_live_sha256` 은 서버 스윕만, `holds_history_media` 는 `keeper_media_reading_maintenance.ml` 만 부른다.
 - Exact 기록: `lane-addons/exact-requests`, `host-results`, `evidence` 를 범위에 넣는다. Exact 호스트는 표시를 풀지 않는다. 하지만 지금 범위의 규칙은 "표시를 담은 기록은 살아 있는 동안 그 blob 을 붙잡는다"이고, `traces`·`wire-capture` 도 그 규칙으로 들어 있다. 같은 규칙을 따른다.
   - 비용: 스캔이 11GB 늘어 27GB 가 된다(§3.4). 1층 로그가 저장소마다 스캔 시간을 따로 남기게 이 층 PR 이 고친다. 시간이 문제면 먼저 `evidence`(6.4GB)를 줄인다. 이 폴더의 파일은 sha256 으로 이름 지은 불변 파일이라, 한 번 읽은 이름의 참조를 기억하면 다음 스캔은 새 파일만 읽는다. `exact-requests`·`host-results` 는 기록이 바뀌어서 이 방법이 맞지 않는다. 그쪽은 Librarian 요청처럼 owner 쪽 구조 목록으로 바꾼다. 범위에서 빼는 것으로 풀지 않는다(§6).
 - 제외는 이유를 variant 로 적는다. 11-06 에 확인한 것:

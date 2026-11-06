@@ -1,6 +1,6 @@
 //! Workspace hub — workspace management, local-storage persistence, and workspace-selector UI.
 
-use serde_json::{json, Value};
+use serde_json::Value;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
@@ -8,11 +8,10 @@ use wasm_bindgen_futures::JsFuture;
 use crate::dom::escape::html_escape;
 use crate::game::lifecycle::TrpgLifecycleState;
 
-use super::mcp_rpc::mcp_tool_call;
 use super::{
     clear_trpg_dom,
     render_auto_round_toggle, set_current_workspace_id, set_element_display,
-    sync_session_pause_buttons, unique_non_empty,
+    sync_session_status, unique_non_empty,
 };
 
 const RECENT_WORKSPACES_STORAGE_KEY: &str = "masc_viewer_recent_workspaces";
@@ -526,18 +525,6 @@ async fn fetch_workspace_runtime(workspace_id: &str) -> Result<(String, u32, Str
         .unwrap_or("-")
         .to_string();
 
-    if let Ok(pause_status) =
-        mcp_tool_call("masc_pause_status", json!({ "workspace_id": workspace_id })).await
-    {
-        if pause_status
-            .get("paused")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-        {
-            status = "paused".to_string();
-        }
-    }
-
     // Staleness detection: fallback override when state stream is stale.
     if status == "active" {
         let last_event_ts = state
@@ -937,7 +924,7 @@ pub(super) async fn refresh_workspaces_from_server(
         crate::game::round_runner::set_auto_round_running(false);
     }
 
-    sync_session_pause_buttons(doc, current_status);
+    sync_session_status(doc, current_status);
     Ok(snapshots)
 }
 

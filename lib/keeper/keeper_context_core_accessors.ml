@@ -82,19 +82,10 @@ let create ~eio ~system_prompt =
   in
   { checkpoint }
 
+(* Only the prompt changes. A System message in history carries its own
+   origin, and the request codec decides how each origin is sent. *)
 let set_system_prompt (ctx : working_context) ~system_prompt =
-  let messages =
-    List.map
-      (fun (m : Agent_core.Types.message) ->
-        if m.role = Agent_core.Types.System
-        then { m with role = Agent_core.Types.Assistant }
-        else m)
-      (messages_of_context ctx)
-  in
-  let checkpoint =
-    { ctx.checkpoint with system_prompt = Some system_prompt; messages }
-  in
-  { checkpoint }
+  { checkpoint = { ctx.checkpoint with system_prompt = Some system_prompt } }
 
 let append ctx (msg : Agent_core.Types.message) =
   let checkpoint =

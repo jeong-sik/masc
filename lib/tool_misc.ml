@@ -106,58 +106,6 @@ let handle_sandbox_volume_gc ~tool_name ~start_time (ctx : context) args : Tool_
         then Ok (Some image)
         else Error (Printf.sprintf "%S is neither a catalog name nor a repository:tag reference" image)
   in
-  let option_volume = function
-    | None -> `Null
-    | Some volume_name -> `String volume_name
-  in
-  let report_json executed image_given (report : Keeper_volume_gc.report) =
-    let keepers =
-      List.map
-        (fun (verdict : Keeper_volume_gc.keeper_verdict) ->
-           `Assoc
-             [ ("keeper_name", `String verdict.keeper_name)
-             ; ("work_volume", option_volume verdict.work_volume)
-             ; ("build_volume", option_volume verdict.build_volume)
-             ; ( "outcome"
-               , `String (Keeper_volume_gc.keeper_outcome_to_string verdict.outcome) )
-             ])
-        report.keepers
-    in
-    let count predicate = List.length (List.filter predicate report.keepers) in
-    `Assoc
-      [ ("executed", `Bool executed)
-      ; ("image_given", `Bool image_given)
-      ; ("foreign_volumes", `List (List.map (fun name -> `String name) report.foreign_volumes))
-      ; ("keepers", `List keepers)
-      ; ( "summary"
-        , `Assoc
-            [ ( "kept"
-              , `Int
-                  (count (fun v ->
-                       match v.outcome with
-                       | Kept _ -> true
-                       | Reclaim_candidate | Reclaimed | Reclaim_failed _ -> false)) )
-            ; ( "reclaim_candidates"
-              , `Int
-                  (count (fun v ->
-                       match v.outcome with
-                       | Reclaim_candidate -> true
-                       | Kept _ | Reclaimed | Reclaim_failed _ -> false)) )
-            ; ( "reclaimed"
-              , `Int
-                  (count (fun v ->
-                       match v.outcome with
-                       | Reclaimed -> true
-                       | Kept _ | Reclaim_candidate | Reclaim_failed _ -> false)) )
-            ; ( "reclaim_failed"
-              , `Int
-                  (count (fun v ->
-                       match v.outcome with
-                       | Reclaim_failed _ -> true
-                       | Kept _ | Reclaim_candidate | Reclaimed -> false)) )
-            ] )
-      ]
-  in
   match get_float_opt args "timeout_sec" with
   | Some seconds when seconds <= 0. ->
     workflow_err ~tool_name ~start_time "timeout_sec must be > 0"
@@ -220,7 +168,12 @@ let handle_sandbox_volume_gc ~tool_name ~start_time (ctx : context) args : Tool_
          Tool_result.make_ok
            ~tool_name
            ~start_time
-           ~data:(report_json execute (Option.is_some claims_image) report)
+           ~data:
+             (Keeper_volume_gc_answer.to_json
+                (Keeper_volume_gc_answer.of_report
+                   ~executed:execute
+                   ~image_given:(Option.is_some claims_image)
+                   report))
            ())
 
 let handle_keeper_waiting_inventory ~tool_name ~start_time ctx args : Tool_result.result =

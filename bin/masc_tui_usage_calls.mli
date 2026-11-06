@@ -26,6 +26,16 @@ val since_hours : window -> int
     hour or day. [of_series] drops it. The same number every time, so the
     server's 30 second cache answers repeated reads. *)
 
+val reread_s : float
+(** Seconds from an answer to the next read while the section stays open. No
+    server push says that the store took a call, so a clock owes the read. The
+    server holds an answer for 30 seconds, then serves it stale while a
+    background fiber computes the next one ([Dashboard_cache]), and a scan of a
+    window costs up to about a second of CPU (its comment on the route). A read
+    a minute after the last one asks for at most one scan a minute and gets the
+    answer that the read before it started, so the numbers are the store as of
+    that read. The heading's time says which. *)
+
 type t = {
   window : window;
   series : Masc.Tui_decode_tool_series.tool_series;

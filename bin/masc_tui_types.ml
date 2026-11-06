@@ -4695,13 +4695,15 @@ let with_source (needs : surface_needs) (source : Surface_read_source.t) wanted 
   | Surface_read_source.Account_emails -> { needs with needs_account_emails = wanted }
   | Surface_read_source.Tool_series -> { needs with needs_tool_series = wanted }
 
-(* The bundle sources a server push re-reads instead of the refresh cadence
-   (RFC-0480 §3.4). A source joins here in the layer that wires its push; the
-   cadence then leaves it out and its read is owed. *)
+(* The bundle sources whose reads are owed (RFC-0480 §3.4): a server push
+   announces a change of them, or a clock the loop keeps says one is due (the
+   provider history when its UTC day ends, the tool series a minute after its
+   last answer). An owed read starts while the source's surface is on screen
+   and is tried again after a failure. *)
 let pushed_sources : Surface_read_source.t list =
   [ Surface_read_source.Transport; Surface_read_source.Account_emails
   ; Surface_read_source.Runtime_quota; Surface_read_source.Provider_history
-  ; Surface_read_source.Keeper_usage ]
+  ; Surface_read_source.Keeper_usage; Surface_read_source.Tool_series ]
 
 (* Full and navigation reads can overlap. Each dataset keeps its own latest
    producer, so a late full bundle cannot overwrite a newer navigation read.
@@ -10244,6 +10246,10 @@ type state = {
   mutable provider_history_reread_at: float option;
   (* Drawn by Usage's Calls section, over the same period as the history. *)
   mutable tool_series: tool_series_reading;
+  (* The series is owed again [Masc_tui_usage_calls.reread_s] after a read of it
+     answered while Calls is drawn, because no push says that the store took a
+     call. Seconds on the loop's monotonic clock. *)
+  mutable tool_series_reread_at: float option;
   mutable overview_account_emails: overview_account_emails_reading;
   mutable overview_goals: overview_goals_reading;
   mutable runtime_lanes: Tui_decode.runtime_resolved_lane list;
@@ -18824,6 +18830,7 @@ let withdraw_usage_workspace (state : state) =
   state.keeper_usage <- Keeper_usage_unread;
   state.provider_history <- Provider_history_unread;
   state.tool_series <- Tool_series_unread;
+  state.tool_series_reread_at <- None;
   state.overview_account_emails <- Account_emails_unread;
   state.usage_scope_id <- None;
   reset_metrics_scroll state
@@ -18865,6 +18872,7 @@ let cycle_usage_history_window (state : state) =
      | 14 | _ -> 1);
   state.provider_history <- Provider_history_unread;
   state.tool_series <- Tool_series_unread;
+  state.tool_series_reread_at <- None;
   reset_metrics_scroll state;
   { nothing with
     needs_provider_history = true;
@@ -18877,6 +18885,26 @@ let cycle_usage_history_window (state : state) =
 let usage_calls_drawn (state : state) =
   state.view = Metrics && state.usage_section = Usage_calls
   && not state.usage_telemetry_open
+
+(* A read of the series answered at [now]: it is owed again after
+   [Masc_tui_usage_calls.reread_s]. *)
+let note_tool_series_read (state : state) ~now =
+  state.tool_series_reread_at <- Some (now +. Masc_tui_usage_calls.reread_s)
+
+(* Whether the series is owed because its time has come, once per moment. While
+   Calls is not drawn the moment is dropped instead: arriving on Calls reads the
+   series, and a moment kept from before would owe a second read right behind
+   that one. *)
+let take_tool_series_due (state : state) ~now =
+  if not (usage_calls_drawn state) then begin
+    state.tool_series_reread_at <- None;
+    false
+  end else
+    match state.tool_series_reread_at with
+    | Some at when at <= now ->
+        state.tool_series_reread_at <- None;
+        true
+    | Some _ | None -> false
 
 let usage_history_reading (state : state) =
   match state.usage_scope_id, state.provider_history with
@@ -20183,6 +20211,7 @@ let create_state
   provider_history_days = 14;
   provider_history_reread_at = None;
   tool_series = Tool_series_unread;
+  tool_series_reread_at = None;
   overview_account_emails = Account_emails_unread;
   overview_goals = Goals_unread;
   runtime_lanes = [];

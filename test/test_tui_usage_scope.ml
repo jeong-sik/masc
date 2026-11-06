@@ -333,6 +333,47 @@ let test_a_moved_workspace_rereads_an_unread_series_only_while_it_is_drawn () =
   check bool "a settled failure is not read again" false
     (revalidate_workspace_surfaces state ~workspace_moved:true ~needs:drawn)
 
+let drawn_calls_state () =
+  let state = state () in
+  state.view <- Metrics;
+  state.usage_section <- Usage_calls;
+  state
+
+let test_the_series_is_owed_once_a_period_after_its_answer () =
+  let state = drawn_calls_state () in
+  check bool "nothing is owed before a read answered" false
+    (take_tool_series_due state ~now:1e9);
+  note_tool_series_read state ~now:100.0;
+  check bool "not owed just before the period ends" false
+    (take_tool_series_due state ~now:(100.0 +. Calls.reread_s -. 0.001));
+  check bool "owed when the period ends" true
+    (take_tool_series_due state ~now:(100.0 +. Calls.reread_s));
+  check bool "owed once for that moment" false
+    (take_tool_series_due state ~now:(100.0 +. (10.0 *. Calls.reread_s)));
+  check bool "a longer wait than a period still owes it once" true
+    (note_tool_series_read state ~now:100.0;
+     take_tool_series_due state ~now:(100.0 +. (10.0 *. Calls.reread_s)))
+
+let test_the_moment_is_dropped_while_calls_is_not_drawn () =
+  let state = drawn_calls_state () in
+  note_tool_series_read state ~now:100.0;
+  state.usage_section <- Usage_keepers;
+  check bool "not owed while another section is up" false
+    (take_tool_series_due state ~now:1e9);
+  check bool "the moment is gone" true (state.tool_series_reread_at = None);
+  state.usage_section <- Usage_calls;
+  check bool "back on Calls the old moment owes no second read behind the one on arrival" false
+    (take_tool_series_due state ~now:1e9)
+
+let test_a_period_change_and_a_withdrawn_workspace_drop_the_moment () =
+  let state = drawn_calls_state () in
+  note_tool_series_read state ~now:100.0;
+  ignore (cycle_usage_history_window state);
+  check bool "the period key drops it" true (state.tool_series_reread_at = None);
+  note_tool_series_read state ~now:100.0;
+  withdraw_usage_workspace state;
+  check bool "a withdrawn workspace drops it" true (state.tool_series_reread_at = None)
+
 let () = run "usage account continuity"
   ["scope", [test_case "exact source identity" `Quick test_exact_scope_filters_both_sources;
              test_case "refresh and window continuity" `Quick test_refresh_does_not_choose_another_account;
@@ -346,4 +387,7 @@ let () = run "usage account continuity"
              test_case "Calls reads only while it is drawn" `Quick test_calls_reads_only_while_it_is_drawn;
              test_case "the period key on Calls rereads Calls" `Quick test_the_period_key_on_calls_rereads_calls;
              test_case "the period key elsewhere lands on Trend" `Quick test_the_period_key_elsewhere_lands_on_trend_without_the_series;
-             test_case "a moved workspace rereads an unread series" `Quick test_a_moved_workspace_rereads_an_unread_series_only_while_it_is_drawn]]
+             test_case "a moved workspace rereads an unread series" `Quick test_a_moved_workspace_rereads_an_unread_series_only_while_it_is_drawn;
+             test_case "the series is owed once a period after its answer" `Quick test_the_series_is_owed_once_a_period_after_its_answer;
+             test_case "the moment is dropped while Calls is not drawn" `Quick test_the_moment_is_dropped_while_calls_is_not_drawn;
+             test_case "a period change and a withdrawn workspace drop the moment" `Quick test_a_period_change_and_a_withdrawn_workspace_drop_the_moment]]

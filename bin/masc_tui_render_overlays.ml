@@ -1360,6 +1360,30 @@ let render_agenda (state : state) =
       Option.iter c.push (overlay_window_row ~scroll ~height count))
 ;;
 
+(* The hint names the rows the terminal needs and the key that leaves. The full
+   sentence is 57 columns wide. Measured on main at 8 rows, 43 columns cut the
+   count to its first digit ("at least 1…"), 40 columns cut it away, and 56
+   columns cut [q: quit] to "q: qu…". Each shorter form keeps both, down to the
+   16 columns of the shortest one that holds the count; under that only the key
+   stays. *)
+let terminal_too_small_hint ~cols ~rows =
+  let full =
+    Printf.sprintf "terminal too small -- resize to at least %d rows; q: quit" rows
+  in
+  let shorter =
+    [ Printf.sprintf "terminal too small -- need %d rows; q: quit" rows
+    ; Printf.sprintf "too small -- need %d rows; q: quit" rows
+    ; Printf.sprintf "need %d rows; q: quit" rows
+    ; Printf.sprintf "%d rows; q: quit" rows
+    ; "q: quit"
+    ]
+  in
+  List.find_opt
+    (fun text -> Message_layout.display_width text <= cols)
+    (full :: shorter)
+  |> Option.value ~default:full
+;;
+
 let render_terminal_too_small state ~recovery_notice ~rows ~cols =
   let now = Unix.gettimeofday () in
   let rejection = Masc_tui_action_notice.rejection state.last_action
@@ -1449,8 +1473,7 @@ let render_terminal_too_small state ~recovery_notice ~rows ~cols =
     | None, Some notice -> Some (Masc_tui_action_notice.rejection_text notice, Some notice)
     | None, None -> Option.map (fun text -> text, None) ordinary_text in
   let resize_hint =
-    Printf.sprintf "terminal too small -- resize to at least %d rows; q: quit"
-      minimum_terminal_rows in
+    terminal_too_small_hint ~cols ~rows:minimum_terminal_rows in
   let buf = Buffer.create 64 in
   let rendered (text, marked) =
     match marked with

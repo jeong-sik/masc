@@ -720,6 +720,19 @@ class MainTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 m.main(["--base-path", raw, "--from-date", "2026-11-05", "--to-date", "2026-11-02"])
 
+    def test_without_top_the_eight_slowest_targets_are_listed(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            base = pathlib.Path(raw)
+            for index in range(1, 10):
+                write_store(base, f"t{index}", [(f"op{index}", source("s"), "succeeded", at(1), at(1, 0, index), at(1, 1))])
+            captured = io.StringIO()
+            with contextlib.redirect_stdout(captured):
+                code = m.main(["--base-path", str(base), "--from-date", "2026-11-02", "--to-date", "2026-11-02"])
+            self.assertEqual(code, 0)
+            printed = cast(dict[str, object], json.loads(captured.getvalue()))
+            rows = cast(list[dict[str, object]], printed["by_target"])
+            self.assertEqual([row["target"] for row in rows], [f"t{index}" for index in range(9, 1, -1)])
+
     def test_a_top_below_one_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as raw, contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit):

@@ -68,6 +68,7 @@ type keychain_state =
 
 type t =
   { home_dir : string
+  ; runtime_root : string
   ; settings_path : string
   ; mcp_config_path : string
   ; oauth_path : string
@@ -610,10 +611,10 @@ let prepare_home_storage ~home_dir ~oauth_seed =
   Ok (home_dir, settings_path, mcp_config_path, oauth_path)
 ;;
 
-let home_with_keychain (home_dir, settings_path, mcp_config_path, oauth_path) =
+let home_with_keychain ~runtime_root (home_dir, settings_path, mcp_config_path, oauth_path) =
   (* Keychain setup may use Eio.Process; keep it on the owning fiber. *)
   let keychain = ensure_login_keychain home_dir in
-  {home_dir; settings_path; mcp_config_path; oauth_path; keychain}
+  {home_dir; runtime_root; settings_path; mcp_config_path; oauth_path; keychain}
 ;;
 
 let generation_error path detail = Invalid_managed_oauth {path; detail}
@@ -896,7 +897,7 @@ let with_prepared_account_using_sync ~sync_store ~publish_pointer ~read_keychain
       | Sys_error detail -> Error (generation_error runtime_root detail)
       | Unix.Unix_error (error, fn, arg) ->
         Error (generation_error runtime_root (unix_error_detail error fn arg))) in
-    let home = home_with_keychain paths in
+    let home = home_with_keychain ~runtime_root paths in
     publish_policy home) with
   | Ok result -> result
   | Error error -> Error (Invalid_runtime_root (File_lock_eio.durable_lock_error_to_string error))
@@ -922,7 +923,7 @@ let prepare_for_login ~runtime_root ~owner_leaf =
   let* paths = Eio_guard.run_in_systhread ~label:"antigravity-login-storage" (fun () ->
     let* home_dir = prepare_owner_directory ~runtime_root ~owner_leaf in
     prepare_home_storage ~home_dir ~oauth_seed:None) in
-  let home = home_with_keychain paths in
+  let home = home_with_keychain ~runtime_root paths in
   let* () = write_private_settings home.settings_path in
   Ok home
 ;;
@@ -952,12 +953,58 @@ let prepare_native_workspace t ~workspace =
   | Shared_workspace path -> canonical_workspace path
 ;;
 
+(* Device and inode, not spelling: realpath keeps a firmlink alias such as
+   [/System/Volumes/Data/Users/...] or a bind mount as its own canonical path,
+   so one directory can carry two canonical strings. *)
+let same_directory (left : Unix.stats) (right : Unix.stats) =
+  Int.equal left.Unix.st_dev right.Unix.st_dev && Int.equal left.Unix.st_ino right.Unix.st_ino
+;;
+
+(* [path] or one of its ancestors is [root]. Both are canonical absolute
+   directories, so [Filename.dirname] walks real ancestors up to [/]. *)
+let lies_within ~root path =
+  let root_stats = Unix.stat root in
+  let rec walk path =
+    same_directory (Unix.stat path) root_stats
+    || (let parent = Filename.dirname path in
+        (not (String.equal parent path)) && walk parent)
+  in
+  walk path
+;;
+
+(* HIGH-RISK-UNREVIEWED: a granted root is a recursive read grant. For a
+   Keeper the runtime root is the masc state directory, which holds every
+   Keeper's credentials and managed HOME. No root may hold it. The Keeper's
+   own cwd sits inside it by construction (the private workspace inside this
+   HOME, or the shared mount under the playground); an operator's extra root
+   has no such reason, so one inside it is refused too. *)
+let refuse_overlap ~holds root detail =
+  match holds () with
+  | false -> Ok ()
+  | true -> Error (Unsafe_directory {path = root; detail})
+  | exception Unix.Unix_error (error, fn, arg) ->
+    Error (Unsafe_directory {path = root; detail = unix_error_detail error fn arg})
+;;
+
+let refuse_runtime_root_holder t root =
+  refuse_overlap root "a native workspace holds the runtime root"
+    ~holds:(fun () -> lies_within ~root t.runtime_root)
+;;
+
+let refuse_root_inside_runtime_root t root =
+  refuse_overlap root "an additional native workspace lies inside the runtime root"
+    ~holds:(fun () -> lies_within ~root:t.runtime_root root)
+;;
+
 let prepare_native_tools t ~posture ~workspace ~additional_workspaces =
   let* cwd = prepare_native_workspace t ~workspace in
+  let* () = refuse_runtime_root_holder t cwd in
   let rec validate = function
     | [] -> Ok []
     | path :: rest ->
       let* path = canonical_workspace path in
+      let* () = refuse_runtime_root_holder t path in
+      let* () = refuse_root_inside_runtime_root t path in
       let* rest = validate rest in
       Ok (path :: rest) in
   let* additional_workspaces = validate additional_workspaces in

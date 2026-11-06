@@ -594,7 +594,8 @@ let test_native_permissions_match_posture_and_workspace () =
   check_policy Runtime_native_tools.Native_full
     ["mcp(masc/*)"; "read_file(" ^ workspace ^ ")";
      "write_file(" ^ workspace ^ ")"] network_denies;
-  let extra = Filename.concat runtime_root "operator-extra" in
+  with_temp_root @@ fun operator_root ->
+  let extra = Filename.concat operator_root "operator-extra" in
   Unix.mkdir extra 0o700;
   ignore (Runtime_antigravity_home.prepare_native_tools home
     ~additional_workspaces:[extra] ~posture:Runtime_native_tools.Native_full
@@ -624,6 +625,80 @@ let test_native_permissions_match_posture_and_workspace () =
     (Result.is_error (Runtime_antigravity_home.prepare_native_tools home ~additional_workspaces:[]
       ~posture:Runtime_native_tools.Native_full
       ~workspace:(Runtime_antigravity_home.Shared_workspace wildcard)))
+;;
+
+(* macOS keeps the data volume's firmlink alias as its own canonical spelling.
+   Hosts without one have no alias, and the alias cases do not run there. *)
+let firmlink_alias path =
+  let alias = "/System/Volumes/Data" ^ path in
+  match Unix.stat alias, Unix.stat path with
+  | exception Unix.Unix_error _ -> None
+  | alias_stats, stats ->
+    if Int.equal alias_stats.Unix.st_dev stats.Unix.st_dev
+       && Int.equal alias_stats.Unix.st_ino stats.Unix.st_ino
+       && String.equal (Unix.realpath alias) alias
+    then Some alias
+    else None
+;;
+
+(* The runtime root stands where a Keeper's is: [<base>/.masc]. A root that
+   holds it, or an extra root inside it, would grant reads over every
+   Keeper's credentials, so each posture refuses it before any write. *)
+let test_native_roots_never_overlap_the_runtime_root () =
+  with_temp_root @@ fun base ->
+  let runtime_root = Filename.concat base ".masc" in
+  Unix.mkdir runtime_root 0o700;
+  let source = Filename.concat base "operator-oauth-token" in
+  write_file ~mode:0o600 source (Masc_test_deps.antigravity_oauth_fixture "synthetic");
+  let home = Runtime_antigravity_home.prepare ~runtime_root ~owner_leaf:"overlap"
+      ~oauth_source:source |> require_ok in
+  let settings_path = (Runtime_antigravity_home.For_testing.paths home).settings_path in
+  let sibling = Filename.concat base "project" in
+  let prefix_named = Filename.concat base ".masc-notes" in
+  List.iter (fun path -> Unix.mkdir path 0o700) [sibling; prefix_named];
+  let inside = Filename.concat runtime_root "official-clients" in
+  (* Inside the runtime root without holding this HOME: a check against the
+     HOME instead of the runtime root lets it through. *)
+  let playground = Filename.concat runtime_root "playground" in
+  Unix.mkdir playground 0o700;
+  let prepare ~posture ~workspace ~extra =
+    Runtime_antigravity_home.prepare_native_tools home ~posture ~workspace
+      ~additional_workspaces:extra in
+  let expect_refused label ~posture ~workspace ~extra refused_root =
+    let before = Fs_compat.load_file settings_path in
+    (match prepare ~posture ~workspace ~extra with
+     | Error (Runtime_antigravity_home.Unsafe_directory { path; _ }) ->
+       check string (label ^ " names the refused root") refused_root path
+     | Error error -> fail (label ^ ": " ^ Runtime_antigravity_home.error_to_string error)
+     | Ok _ -> fail (label ^ " was granted"));
+    check string (label ^ " leaves the settings unchanged") before
+      (Fs_compat.load_file settings_path) in
+  List.iter (fun posture ->
+    let name = Runtime_native_tools.to_string posture in
+    expect_refused (name ^ ": cwd holding the runtime root") ~posture
+      ~workspace:(Runtime_antigravity_home.Shared_workspace base) ~extra:[] base;
+    expect_refused (name ^ ": extra root holding the runtime root") ~posture
+      ~workspace:Runtime_antigravity_home.Private_workspace ~extra:[base] base;
+    expect_refused (name ^ ": the runtime root as an extra root") ~posture
+      ~workspace:Runtime_antigravity_home.Private_workspace ~extra:[runtime_root] runtime_root;
+    expect_refused (name ^ ": extra root inside the runtime root") ~posture
+      ~workspace:Runtime_antigravity_home.Private_workspace ~extra:[inside] inside;
+    expect_refused (name ^ ": later extra root inside the runtime root, beside no HOME")
+      ~posture ~workspace:Runtime_antigravity_home.Private_workspace
+      ~extra:[sibling; playground] playground;
+    Option.iter (fun alias ->
+      expect_refused (name ^ ": alias spelling holding the runtime root") ~posture
+        ~workspace:Runtime_antigravity_home.Private_workspace ~extra:[alias] alias;
+      let alias_inside = Filename.concat (Filename.concat alias ".masc") "playground" in
+      expect_refused (name ^ ": alias spelling inside the runtime root") ~posture
+        ~workspace:Runtime_antigravity_home.Private_workspace ~extra:[alias_inside]
+        alias_inside)
+      (firmlink_alias base);
+    let cwd = prepare ~posture ~workspace:Runtime_antigravity_home.Private_workspace
+        ~extra:[sibling; prefix_named] |> require_ok in
+    check bool (name ^ ": the private cwd lies inside the runtime root") true
+      (String.starts_with ~prefix:(runtime_root ^ "/") cwd))
+    Runtime_native_tools.[Native_none; Native_read; Native_full]
 ;;
 
 let test_unknown_account_identity_causes_no_managed_mutation () =
@@ -1161,6 +1236,8 @@ let () =
             test_prepares_private_home_with_oauth_seed
         ; test_case "native permission and workspace boundaries" `Quick
             test_native_permissions_match_posture_and_workspace
+        ; test_case "native roots never overlap the runtime root" `Quick
+            test_native_roots_never_overlap_the_runtime_root
         ; test_case "Keeper account selection and refresh" `Quick
             test_keeper_account_switch_preserves_each_refreshed_home
         ; test_case "corrupt generation refuses without reseed" `Quick

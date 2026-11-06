@@ -114,6 +114,10 @@ val prepare_native_tools
 (** Apply native permissions to the selected workspace and return its cwd.
     Endpoint-owned trees use [Private_workspace], an isolated host directory;
     this does not claim native access to the endpoint's actual files.
+    In every posture a root that holds the runtime root this HOME was
+    prepared under is refused, and so is an additional root inside it. For a
+    Keeper that root is the masc state directory, which holds every Keeper's
+    credentials. A refusal leaves the published settings unchanged.
     Read posture denies commands and writes; full permits sandboxed effects.
     Both deny native network tools. The caller must enable the CLI sandbox;
     no command allow rule is emitted because it would grant sandbox escapes

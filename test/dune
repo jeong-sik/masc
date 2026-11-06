@@ -6018,8 +6018,8 @@
  (libraries alcotest masc))
 
 (test
- (name test_server_settled_original_census)
- (modules test_server_settled_original_census)
+ (name test_server_settled_archive_sweep)
+ (modules test_server_settled_archive_sweep)
  (libraries alcotest yojson masc masc.server unix))
 
 (test

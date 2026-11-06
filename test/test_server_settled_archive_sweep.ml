@@ -2,7 +2,7 @@ open Masc
 module Owner = Lane_addon_tool_request_owner
 module Store = Lane_addon_store
 module Progress = Lane_addon_request_progress
-module Census = Server_settled_original_census
+module Sweep = Server_settled_archive_sweep
 
 let get = function Ok value -> value | Error detail -> Alcotest.fail detail
 let owned value = get (Result.map_error Owner.error_to_string value)
@@ -14,7 +14,7 @@ let floor = "keeper-librarian-floor-step-owner"
 let floor_gate = "keeper-librarian-floor-step-gate/owner"
 
 let with_store f =
-  let parent = Filename.temp_dir "settled-census" "" in
+  let parent = Filename.temp_dir "settled-sweep" "" in
   let rec remove path = match (Unix.lstat path).Unix.st_kind with
     | Unix.S_DIR -> Unix.chmod path 0o700;
       Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path); Unix.rmdir path
@@ -44,20 +44,28 @@ let gate_request ~kind ~id ~execution = `Assoc [
   "version",`Int 3;"kind",`String kind;"request_id",`String id;"owner",`Null;
   "execution_id",`String execution;"execution_digest",`String "parent-digest";
   "proposal",`Null;"authority",`Null;"guidance",`Null;"predecessor",`Null]
-let run store = match Census.run ~store with
+let run store = match Sweep.run ~store with
   | Ok report -> report
-  | Error error -> Alcotest.fail (Census.error_to_string error)
-let refused store = match Census.run ~store with
-  | Error _ -> ()
-  | Ok _ -> Alcotest.fail "the census counted a store it cannot classify"
-let check_one_unnamed_of_two (report : Census.report) =
-  Alcotest.(check int) "both settled records are counted" 2 report.archived_records;
-  Alcotest.(check int) "only the record no live record names is unnamed" 1 report.unnamed_records;
-  Alcotest.(check int) "a settle removes the body instead of archiving it" 0 report.archived_bodies
+  | Error error -> Alcotest.fail (Sweep.error_to_string error)
+let refused store = match Sweep.run ~store with
+  | Error (Sweep.Sweep_refused _) -> ()
+  | Error (Sweep.Removal_stopped _ as error) -> Alcotest.fail (Sweep.error_to_string error)
+  | Ok _ -> Alcotest.fail "the sweep deleted from a store it cannot classify"
+let archived root ~scope id =
+  Sys.file_exists (Filename.concat root (Store.tool_request_archive_record_path ~scope ~date ~request_id:id))
+let archive_day root ~scope =
+  Filename.concat root (Filename.concat Store.tool_request_archive_directory
+    (Filename.concat (Store.digest scope) date))
+(* The named settled record stays; the stray settled beside it goes. *)
+let check_named_stays root ~scope ~named (report : Sweep.report) =
+  Alcotest.(check int) "the named settled record is kept" 1 report.kept_records;
+  Alcotest.(check int) "only the record no live record names is deleted" 1 report.removed_records;
+  Alcotest.(check bool) "the named record is still archived" true (archived root ~scope named);
+  Alcotest.(check bool) "the stray record is gone" false (archived root ~scope "stray")
 
 (* Server_workspace_memory_addon.finish_settling asks for a Subdivided
    successor. *)
-let test_curator_successor_is_named () = with_store (fun _ store ->
+let test_curator_successor_is_named () = with_store (fun root store ->
   let child = retain store ~scope:curator "child" in
   let parent = retain store ~scope:curator "parent" in
   let parent = advance store parent Progress.Dispatch_intended in
@@ -68,11 +76,11 @@ let test_curator_successor_is_named () = with_store (fun _ store ->
   settle store child;
   settle_stray store ~scope:curator;
   let report = run store in
-  check_one_unnamed_of_two report;
+  check_named_stays root ~scope:curator ~named:"child" report;
   Alcotest.(check int) "the live parent is the only live record" 1 report.live_records)
 
 (* Keeper_librarian_durable_execution asks for a confirmed replacement. *)
-let test_history_replacement_is_named () = with_store (fun _ store ->
+let test_history_replacement_is_named () = with_store (fun root store ->
   let child = retain store ~scope:history "replacement" in
   let parent = retain store ~scope:history "conflicted" in
   let parent = advance store parent Progress.Dispatch_intended in
@@ -85,38 +93,50 @@ let test_history_replacement_is_named () = with_store (fun _ store ->
   ignore (advance store parent (Progress.Replacement_observed "replacement"));
   settle store child;
   settle_stray store ~scope:history;
-  check_one_unnamed_of_two (run store))
+  check_named_stays root ~scope:history ~named:"replacement" (run store))
 
 (* The history and floor gate inventories ask for the execution their
    records name. The floor gate scope also starts with the floor step
    prefix, so this is read as a gate only when gates are asked first. *)
-let gate_names_its_execution ~gate_scope ~kind ~execution_scope () = with_store (fun _ store ->
+let gate_names_its_execution ~gate_scope ~kind ~execution_scope () = with_store (fun root store ->
   let execution = retain store ~scope:execution_scope "execution" in
   ignore (retain store ~scope:gate_scope "gate"
     ~request_json:(gate_request ~kind ~id:"gate" ~execution:"execution"));
   settle store execution;
   settle_stray store ~scope:execution_scope;
-  check_one_unnamed_of_two (run store))
+  check_named_stays root ~scope:execution_scope ~named:"execution" (run store))
 
-let test_unclaimed_scope_refuses () = with_store (fun _ store ->
-  ignore (retain store ~scope:"an-owner-no-census-knows" "original");
-  refused store)
+(* Settles before RFC-0498 layer two left bodies in the archive. *)
+let test_archived_body_is_deleted () = with_store (fun root store ->
+  settle_stray store ~scope:curator;
+  let bodies = Filename.concat (archive_day root ~scope:curator) "bodies" in
+  Unix.mkdir bodies 0o700;
+  let body = Filename.concat bodies "body.json" in
+  Out_channel.with_open_bin body (fun channel -> output_string channel "{}");
+  let report = run store in
+  Alcotest.(check int) "the archived body is deleted" 1 report.removed_bodies;
+  Alcotest.(check bool) "the body file is gone" false (Sys.file_exists body))
+
+let test_unclaimed_scope_refuses () = with_store (fun root store ->
+  settle_stray store ~scope:curator;
+  ignore (retain store ~scope:"an-owner-no-sweep-knows" "original");
+  refused store;
+  Alcotest.(check bool) "a refused pass deletes nothing" true (archived root ~scope:curator "stray"))
 
 let test_unknown_archive_directory_refuses () = with_store (fun root store ->
   settle_stray store ~scope:curator;
-  ignore (run store);
-  let day = Filename.concat root (Filename.concat Store.tool_request_archive_directory
-    (Filename.concat (Store.digest curator) date)) in
-  Unix.mkdir (Filename.concat day "notes") 0o700;
-  refused store)
+  Unix.mkdir (Filename.concat (archive_day root ~scope:curator) "notes") 0o700;
+  refused store;
+  Alcotest.(check bool) "a refused pass deletes nothing" true (archived root ~scope:curator "stray"))
 
-let () = Alcotest.run "settled original census" ["census", [
+let () = Alcotest.run "settled archive sweep" ["sweep", [
   Alcotest.test_case "a Curator successor keeps its settled record" `Quick test_curator_successor_is_named;
   Alcotest.test_case "a history replacement keeps its settled record" `Quick test_history_replacement_is_named;
   Alcotest.test_case "a history gate keeps its settled execution" `Quick
     (gate_names_its_execution ~gate_scope:history_gate ~kind:"librarian-durable-gate" ~execution_scope:history);
   Alcotest.test_case "a floor step gate keeps its settled execution" `Quick
     (gate_names_its_execution ~gate_scope:floor_gate ~kind:"librarian-floor-step-gate" ~execution_scope:floor);
-  Alcotest.test_case "a scope no owner claims refuses the count" `Quick test_unclaimed_scope_refuses;
-  Alcotest.test_case "an unknown archive directory refuses the count" `Quick test_unknown_archive_directory_refuses;
+  Alcotest.test_case "an archived body is deleted" `Quick test_archived_body_is_deleted;
+  Alcotest.test_case "a scope no owner claims refuses the pass" `Quick test_unclaimed_scope_refuses;
+  Alcotest.test_case "an unknown archive directory refuses the pass" `Quick test_unknown_archive_directory_refuses;
 ]]

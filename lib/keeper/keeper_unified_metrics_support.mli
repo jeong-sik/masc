@@ -36,13 +36,6 @@ val record_keeper_total_cost_usd :
   keeper_name:string -> total_cost_usd:float -> unit
 
 val record_keeper_idle_seconds : keeper_name:string -> idle_seconds:int -> unit
-val context_max_bucket : int -> string
-
-val record_context_max_observation :
-  keeper:string ->
-  context_max:int ->
-  unit
-
 val turn_latency_bucket : int -> string
 val long_turn_warn_threshold_ms_default : int
 val long_turn_warn_threshold_ms : unit -> int

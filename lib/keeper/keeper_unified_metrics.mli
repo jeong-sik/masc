@@ -64,23 +64,6 @@ val record_usage_trust :
   trust:usage_trust ->
   unit
 
-val context_max_bucket : int -> string
-(** #9953: bucket a raw [context_max] integer into a bounded
-    label vocabulary [zero | 64k | 128k | 200k | 256k | 1m |
-    other].  Pure helper exposed so dashboards / runbooks can
-    reference the same string mapping the metric uses. *)
-
-val record_context_max_observation :
-  keeper:string ->
-  context_max:int ->
-  unit
-(** #9953: emit the
-    [masc_keeper_context_max_observed_total
-       {keeper, model_used, resolved_model_id, context_max_bucket}]
-    counter for one turn.  The historical model labels are emitted as the
-    neutral ["runtime"] lane. Intended to be called once per snapshot-write so
-    the counter rate equals the per-turn rate. *)
-
 (** {1 #9943: long-turn observer}
 
     [turn_latency_bucket ms] returns the bucket label for a turn that

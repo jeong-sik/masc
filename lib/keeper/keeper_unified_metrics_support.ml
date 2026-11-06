@@ -55,42 +55,6 @@ let classify_usage_trust ~(usage_reported : bool)
     ~(usage : Agent_core.Types.api_usage) : usage_trust =
   Keeper_usage_trust.classify ~usage_reported ~usage
 
-(* #9953: bucket the raw [context_max] integer into a tightly
-   bounded vocabulary so the Otel_metric_store label cardinality stays
-   small AND the dashboards see the same drift the issue
-   reported (42% / 17% / 41% three-way split for one model).
-
-   Boundaries match observed deployments:
-   - [zero]  : context_max = 0 (uninitialised / pre-resolve)
-   - [64k]   : (0, 64_000]
-   - [128k]  : (64_000, 128_000]
-   - [200k]  : (128_000, 200_000]
-   - [256k]  : (200_000, 262_144]
-   - [1m]    : (262_144, 1_048_576]
-   - [other] : everything else (sanity check / future caps) *)
-let context_max_bucket (n : int) : string =
-  if n <= 0 then "zero"
-  else if n <= 64_000 then "64k"
-  else if n <= 128_000 then "128k"
-  else if n <= 200_000 then "200k"
-  else if n <= 262_144 then "256k"
-  else if n <= 1_048_576 then "1m"
-  else "other"
-
-let record_context_max_observation
-    ~(keeper : string)
-    ~(context_max : int) : unit =
-  Otel_metric_store.inc_counter
-    Keeper_metrics.(to_string ContextMaxObserved)
-    ~labels:
-      [
-        ("keeper", keeper);
-        ("model_used", runtime_lane_label);
-        ("resolved_model_id", runtime_lane_label);
-        ("context_max_bucket", context_max_bucket context_max);
-      ]
-    ()
-
 (* #9943: per-keeper turn-latency bucket counter.  Buckets are
    chosen so each name a reachable operator state:
 

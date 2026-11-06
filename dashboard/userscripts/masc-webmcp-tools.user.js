@@ -11,7 +11,7 @@
 // EXPERIMENTAL — read-only only. This script exists to prove the credential
 // delegation pattern: a tool's implementation runs in the page, so it uses the
 // page's own session (cookies) and no token is ever handed to masc. A keeper
-// calls it through keeper_webmcp_call.
+// calls it through dashboard/scripts/webmcp-bridge.mjs call.
 //
 // The framework enforces read-only by construction: registerMascReadTool wraps
 // a `read` function and there is no write counterpart here. Opening an

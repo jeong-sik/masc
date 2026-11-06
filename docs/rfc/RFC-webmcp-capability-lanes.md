@@ -47,7 +47,7 @@ WebMCP 를 켜는 날 신호가 온다.
 
 운영자 브라우저에는 이미 로그인 세션이 있다. userscript(Tampermonkey) 나 확장으로 그
 페이지에 `registerTool` 을 심으면, 도구의 구현은 **페이지 자신의 fetch + 세션 쿠키**다.
-keeper 가 `keeper_webmcp_call` 로 그 도구를 부르면 인증된 행동을 하는데, **토큰이 masc
+keeper 가 WebMCP 소비 경로(RFC-webmcp-keeper-consumption)로 그 도구를 부르면 인증된 행동을 하는데, **토큰이 masc
 store 에 저장되지 않는다.** 자격증명이 브라우저 밖으로 나가지 않는 위임.
 
 ### 2.2 냉정한 절삭 (왜 이게 전부 값은 아닌가)
@@ -66,12 +66,12 @@ JIRA / Slack / GraphQL 은 이미 `sb` CLI 에 토큰이 있어 이 방식과 �
 
 ### 2.3 게이트 — read-only 우선
 
-`keeper_webmcp_call` 은 이미 non-readonly + `Effect_outcome_unknown` 이다(페이지가
+keeper 쪽 소비 도구는 non-readonly + `Effect_outcome_unknown` 이어야 한다(페이지가
 어떤 도구를 등록했는지 브리지가 모르므로). Lane C 페이지 도구를 심을 때:
 
 1. **1단계는 read-only 도구만** (조회/검색). 인증된 write 는 심지 않는다.
 2. `registerTool` 의 `exposedTo` 로 노출 origin 을 제한한다(기본 same-origin).
-3. mutating 을 열기 전, masc Gate 가 `keeper_webmcp_call` 을 외부 효과로 다루는지
+3. mutating 을 열기 전, masc Gate 가 그 소비 도구를 외부 효과로 다루는지
    확인한다(Lane E 의 arming 과 같은 승인 경로를 태운다).
 
 프레임워크(`registerMascReadTool`)는 read-only 만 등록하도록 이름과 시그니처로 강제한다.

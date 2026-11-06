@@ -66,44 +66,12 @@ node dashboard/scripts/webmcp-bridge.mjs loop-check --page localhost:5173
 - TUI: TUI 는 터미널이므로 같은 CLI 를 직접 쓴다. TUI 안에 실행 표면을 새로 파지
   않는다 (Execute 폼 admission 전례 #29813→#31360).
 
-## 3. Lane B — typed 도구 모듈 (구현됨)
+## 3. Lane B — typed 도구 모듈 (트리거 뒤)
 
-처음에는 트리거 뒤로 미뤘으나 owner 결정(2026-08-29)으로 바로 구현했다.
+masc 도구 카탈로그에 typed WebMCP 도구를 넣는 일은 아래 트리거 중 하나가 보이면
+이 RFC 를 다시 검토해서 한다. 그 전까지 keeper 는 Lane A 로 브리지 CLI 를 쓴다.
 
-구현된 모양:
-
-- 도구 이름은 keeper 도구 matrix 의 접두사 계약(`keeper_*`)을 따라
-  `keeper_webmcp_list` / `keeper_webmcp_call` 이다.
-- 브리지 스크립트(`dashboard/scripts/webmcp-bridge.mjs`)는 dune rule 로 빌드 시
-  바이너리에 임베드된다 (`lib/webmcp/`). 배포 바이너리가 repo 체크아웃이나 별도
-  에셋에 의존하지 않는다 — 이 표면에서는 stale-asset 사고 계열이 성립하지 않는다.
-- 실패는 전부 typed 다: 페이지/표면/도구 부재와 잘못된 인자는 결정론적 거절
-  (`Workflow_rejection`), node 부재·CDP 다운·타임아웃은 `Dependency_unavailable`,
-  브리지 자체 버그만 `Runtime_failure`.
-- `keeper_webmcp_call` 실패는 `Effect_outcome_unknown` 을 실어 나른다 — 브리지가
-  죽어도 페이지 도구는 이미 실행됐을 수 있다.
-- 두 도구는 `execute`
-  group 을 탄다 (외부 실행이라는 의미가 같다). `[keeper.tools] groups` 를 선언한
-  keeper 는 `execute` 를 넣어야 받고, 선언이 없는 keeper 는 기본 전체 표면에
-  포함된다 — 열한 번째 group 이나 per-tool gate 는 만들지 않았다.
-
-- 도구 2종, 닫힌 계약:
-  - `keeper_webmcp_list { page, cdp_port? }` → 페이지가 등록한 도구 목록 JSON
-  - `keeper_webmcp_call { page, tool, args_json, cdp_port? }` → `{found, result}` JSON
-- CDP WebSocket 클라이언트를 OCaml 로 새로 만들지 않고 node 브리지 subprocess 를
-  탄다. CDP 엔드포인트 부재는 typed error 로 즉시 반환 — fallback, 재시도, 대체
-  경로 없음.
-
-원안의 "keeper row 명시적 opt-in (기본 미장착)" 은 구현하면서 버렸다. 당시
-표면 의미론이 per-tool opt-in 을 제공하지 않고(그룹 선언이 없는 keeper 는 전체
-표면), per-tool gate 를 새로 만드는 것은 게이트 추가 금지 원칙과 충돌한다. 대신
-`execute` group 승차로 좁혔다. 노는 도구의 헛시도(#26057 계열)가 관측되면 그때
-group 선언으로 좁히는 것이 운영 수단이다.
-
-### 원래의 승격 트리거 (기록용)
-
-owner 결정으로 트리거 전에 구현했지만, 외부 사이트 소비가 실제로 유의미해지는
-시점의 신호로는 여전히 유효하다.
+### 승격 트리거
 
 1. 발표 참여사(Expedia, Shopify, Target 등 9곳) 중 실배포 확인 1곳 이상
 2. Gemini-in-Chrome 또는 Claude-in-Chrome 의 WebMCP 소비 개시

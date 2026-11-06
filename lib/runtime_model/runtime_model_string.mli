@@ -1,5 +1,5 @@
 (** Model-label string → [Provider_config.t] resolution (RFC-0206).
-    Re-homed from deleted [Runtime_config_parser.parse_model_string]; resolves
+    Resolves
     a ["provider:model"] / ["custom:model@url"] label via a resolved AGENT_CORE runtime binding. No runtime routing/weighted-entry machinery. *)
 
 val parse_model_string

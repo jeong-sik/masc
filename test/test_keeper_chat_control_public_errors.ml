@@ -1,7 +1,7 @@
 open Alcotest
 
 module Public = Server_keeper_chat_public_error
-module Control = Server_routes_http_keeper_stream.For_testing
+module Control = Server_routes_http_keeper_control.For_testing
 
 let secret = "orchid river seventy nine"
 let base_path = "/private/keeper-runtime"
@@ -106,7 +106,7 @@ let test_a_command_that_reached_no_owner_was_not_accepted () =
     ; Registry.Command_lookup_failed
         (Registry.Owner_initialization_failed (Owner.Store_unavailable diagnostic)) ] in
   List.iter (fun cause ->
-    let kind = Control.operation_command_error_kind cause in
+    let kind = Shared.of_command_error cause in
     check bool "answered as an unavailable owner" true (kind = Public.Owner_unavailable);
     check bool "nothing was admitted" true
       (Shared.pre_acceptance kind = Shared.Not_accepted);
@@ -117,7 +117,7 @@ let test_a_command_that_reached_no_owner_was_not_accepted () =
     registry;
   let store_failure = Registry.Command_rejected (Owner.Store_unavailable diagnostic) in
   check bool "a store failure inside the Owner stays possibly admitted" true
-    (Shared.pre_acceptance (Control.operation_command_error_kind store_failure)
+    (Shared.pre_acceptance (Shared.of_command_error store_failure)
      = Shared.Acceptance_unknown);
   List.iter (fun kind ->
     check bool ("the code of " ^ Shared.code kind ^ " reads back as its kind") true

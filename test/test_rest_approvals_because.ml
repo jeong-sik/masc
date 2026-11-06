@@ -8,7 +8,7 @@ let approvals_response ~state =
   let output = Buffer.create 512 in
   let connection =
     Httpun.Server_connection.create (fun reqd ->
-        Server_routes_http_keeper_stream.handle_keeper_tool_approvals_list
+        Server_routes_http_keeper_control.handle_keeper_tool_approvals_list
           state
           (Httpun.Reqd.request reqd)
           reqd)

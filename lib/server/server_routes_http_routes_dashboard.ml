@@ -3733,7 +3733,7 @@ let add_routes ~sw ~clock router =
              Keeper_api.handle_keeper_get_subroutes state req request reqd
            ) request reqd))
 
-  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/keepers/turn/run-next" (fun state actor req reqd -> handle_keeper_run_next state ~actor req reqd)
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/keepers/turn/run-next" (fun state actor req reqd -> Server_routes_http_keeper_control.handle_keeper_run_next state ~actor req reqd)
 
   (* Fleet Keeper efficiency month view, same read authority as the
      per-keeper [/metrics] tail: month aggregates over the cost and
@@ -3744,7 +3744,7 @@ let add_routes ~sw ~clock router =
           Server_dashboard_http_keeper_efficiency.handle_get state req reqd)
 
   |> Server_route.post (Server_route.Tool_actor { tool_name = Keeper_tool_name.(to_string Keeper_delegate_cancel) }) "/api/v1/keepers/turn/interrupt" (fun state actor request reqd ->
-         handle_keeper_turn_interrupt ~actor state request reqd)
+         Server_routes_http_keeper_control.handle_keeper_turn_interrupt ~actor state request reqd)
 
   (* Answers a tool call the keeper is holding. Same authority as interrupting
      a turn: both decide what a running turn is allowed to do next. The route
@@ -3752,7 +3752,7 @@ let add_routes ~sw ~clock router =
      borrowing a dispatchable tool's name, so the permission it enforces stays
      reviewable on its own terms. *)
   |> Server_route.post (Server_route.Tool_actor { tool_name = "keeper_tool_approval_route" }) "/api/v1/keepers/tool-approval" (fun state actor request reqd ->
-         handle_keeper_tool_approval ~actor state request reqd)
+         Server_routes_http_keeper_control.handle_keeper_tool_approval ~actor state request reqd)
 
   (* What one Keeper is waiting on a human for. *)
   |> Server_route.get (Server_route.Tool { tool_name = "masc_ask_status" }) "/api/v1/keepers/asks" (fun state request reqd ->
@@ -3769,13 +3769,13 @@ let add_routes ~sw ~clock router =
      read): the listing names what is being asked; answering stays behind
      the authed POST above. *)
   |> Server_route.get Server_route.Public_read "/api/v1/keepers/tool-approvals" (fun state request reqd ->
-         handle_keeper_tool_approvals_list state request reqd)
+         Server_routes_http_keeper_control.handle_keeper_tool_approvals_list state request reqd)
 
   (* Which keepers are mid-turn right now. Read-only Owner projection with
      the same read authority as the listing above: it names activity, and
      every mutation stays behind its own authed route. *)
   |> Server_route.get Server_route.Public_read "/api/v1/keepers/turns" (fun state request reqd ->
-         handle_keeper_turns_list state request reqd)
+         Server_routes_http_keeper_control.handle_keeper_turns_list state request reqd)
 
   (* The per-keeper approval stance the gate consults per call. Reading the
      overrides is a public-read projection like the listing above; setting
@@ -3783,9 +3783,9 @@ let add_routes ~sw ~clock router =
      authority as answering a held call (and its own catalog auth key,
      keeper_tool_approval_mode_route). *)
   |> Server_route.get Server_route.Public_read "/api/v1/keepers/tool-approval-mode" (fun state request reqd ->
-         handle_keeper_tool_approval_mode_get state request reqd)
+         Server_routes_http_keeper_control.handle_keeper_tool_approval_mode_get state request reqd)
   |> Server_route.post (Server_route.Tool_actor { tool_name = "keeper_tool_approval_mode_route" }) "/api/v1/keepers/tool-approval-mode" (fun state agent_name request reqd ->
-           handle_keeper_tool_approval_mode_set ~actor:agent_name state request
+           Server_routes_http_keeper_control.handle_keeper_tool_approval_mode_set ~actor:agent_name state request
              reqd)
 
   (* Keeper POST sub-routes. *)

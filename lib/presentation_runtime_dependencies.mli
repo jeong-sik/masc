@@ -14,3 +14,6 @@ val parser_available : t -> bool
 val renderer_available : t -> bool
 val pdf_available : t -> bool
 val to_json : t -> Yojson.Safe.t
+
+val runtime_tools_dirname : string
+(** The runtime tool directory below [<base>/.masc]. *)

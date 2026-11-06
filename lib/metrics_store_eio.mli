@@ -249,3 +249,6 @@ val get_all_agents : config -> (string list, read_error) result
     \[<masc_dir>/metrics/\]. Returns [Ok []] when the metrics
     directory does not exist. Source/identity failures are errors.
     Inventory is sorted; it does not prove a metric exists for each name. *)
+
+val metrics_dirname : string
+(** The directory metrics sit in below [<base>/.masc]. *)

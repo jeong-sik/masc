@@ -94,7 +94,8 @@ let retained_address (reference : evidence) =
       else if reference.uri = "lane-sequence:" ^ hash then Ok (Sequence, hash)
       else Error "evidence is not retained in this Lane store"
   | _ -> Error "evidence is not retained in this Lane store"
-let sequence_path hash = Filename.concat "sequences" (hash ^ ".json")
+let sequences_directory = "sequences"
+let sequence_path hash = Filename.concat sequences_directory (hash ^ ".json")
 type read_budget = { mutable remaining : int }
 type bounded_read_error = Read_limit_exceeded | Read_failed of string
 let read_budget ~max_bytes = { remaining = max 0 max_bytes }
@@ -368,8 +369,10 @@ let with_tool_request_settlement_barrier t work =
 let save_tool_request_owner t ~scope ~request_id json =
   protect (fun () -> with_tool_request_owner_serialization t ~scope (fun () ->
     save_record_with ~sync_parent:sync_parent_directory t (tool_request_owner_path ~scope ~request_id) json))
+let broadcasts_directory = "broadcasts"
+
 let broadcast_path ~instance_id ~request_id =
-  Filename.concat "broadcasts" (Filename.concat (digest instance_id) (digest request_id ^ ".json"))
+  Filename.concat broadcasts_directory (Filename.concat (digest instance_id) (digest request_id ^ ".json"))
 let save_broadcast t ~instance_id ~request_id json =
   write t (broadcast_path ~instance_id ~request_id) (Yojson.Safe.to_string json)
 let load_broadcast t ~instance_id ~request_id = protect (fun () ->
@@ -478,7 +481,8 @@ let sampling_outcome_directory instance_id = Filename.concat "sampling-outcomes"
 let save_sampling_outcome t ~instance_id ~request_id json =
   write t (Filename.concat (sampling_outcome_directory instance_id) (digest request_id ^ ".json"))
     (Yojson.Safe.to_string json)
-let observation_dir instance_id = Filename.concat "observations" (digest instance_id)
+let observations_directory = "observations"
+let observation_dir instance_id = Filename.concat observations_directory (digest instance_id)
 type record_verification = Visible | Durable
 (* [Republished]: the path names another file by the end of the read, so
    the bytes read belong to a file the path no longer names. *)

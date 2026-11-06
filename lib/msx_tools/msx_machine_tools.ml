@@ -102,7 +102,7 @@ let of_lane ?(extra = []) ?sprites ?metadata ~tool_name ~start_time
    inventories an operator fills by hand — bios/ with the C-BIOS triple and
    carts/ with game images. Names in [cart] resolve in carts/, so a Keeper
    never needs a host path. *)
-let msx_dir ~base_path = Filename.concat (Common.masc_dir_from_base_path ~base_path) "msx"
+let msx_dir ~base_path = Filename.concat (Common.masc_dir_from_base_path ~base_path) Common.msx_dirname
 let carts_dir ~base_path = Filename.concat (msx_dir ~base_path) "carts"
 let bios_dir ~base_path = Filename.concat (msx_dir ~base_path) "bios"
 

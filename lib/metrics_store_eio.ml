@@ -53,9 +53,11 @@ type agent_metrics = {
 (** Config type alias for clarity *)
 type config = Workspace_utils.config
 
+let metrics_dirname = "metrics"
+
 (** Get metrics directory *)
 let metrics_dir (config : config) =
-  Filename.concat (Workspace_utils.masc_dir config) "metrics"
+  Filename.concat (Workspace_utils.masc_dir config) metrics_dirname
 
 (** Get agent-specific metrics directory *)
 let agent_metrics_dir config agent_id =

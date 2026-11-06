@@ -392,3 +392,12 @@ module For_testing : sig
     instance_id:string -> seq:int -> max_bytes:int -> t -> (Lane_addon_types.output, string) result
 
 end
+
+val broadcasts_directory : string
+(** The directory prepared broadcasts sit in below the store root. *)
+
+val observations_directory : string
+(** The directory observations sit in below the store root. *)
+
+val sequences_directory : string
+(** The directory sequences sit in below the store root. *)

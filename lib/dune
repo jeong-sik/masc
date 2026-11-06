@@ -27,6 +27,7 @@
   keeper_msg_async_types
   keeper_msg_async_record
   keeper_msg_async_state
+  keeper_msg_async_locks
   keeper_memory_os_current_types
   keeper_memory_os_receipt_selection
   keeper_memory_os_support_core

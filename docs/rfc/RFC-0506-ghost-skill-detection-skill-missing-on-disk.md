@@ -1,5 +1,5 @@
 ---
-rfc: "0503"
+rfc: "0506"
 title: "카탈로그에서 사라진 스킬을 재발행 때 알아챈다 — skill_missing_on_disk"
 status: Draft
 created: 2026-11-06
@@ -11,7 +11,7 @@ related: ["keeper-writes-own-compositions"]
 implementation_prs: []
 ---
 
-# RFC-0503 — 유령 스킬 감지(skill_missing_on_disk)를 채택한다
+# RFC-0506 — 유령 스킬 감지(skill_missing_on_disk)를 채택한다
 
 ## 0. 요약
 

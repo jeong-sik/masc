@@ -43,8 +43,10 @@ let http_transports ~clock =
           ~mcp_url ());
   }
 
+let identity_dirname = "identity"
+
 let identity_dir ~base_path =
-  Filename.concat (Common.masc_dir_from_base_path ~base_path) "identity"
+  Filename.concat (Common.masc_dir_from_base_path ~base_path) identity_dirname
 ;;
 
 let keeper_file ~base_path ~keeper_name ~provider_id ~under =

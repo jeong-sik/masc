@@ -532,10 +532,34 @@ let same_file_identity a b =
 
 module Path_map = Map.Make (String)
 
+let rejected_marker = ".rejected-"
+
+let is_digits text = text <> "" && String.for_all (function '0' .. '9' -> true | _ -> false) text
+
+(* [unused_rejected_path] writes [<base>.rejected-<epoch>], then
+   [<base>.rejected-<epoch>-<n>] while that name is taken. *)
+let rejected_base name =
+  let marker = String.length rejected_marker in
+  let rec find from =
+    if from + marker > String.length name then None
+    else if String.sub name from marker = rejected_marker then (
+      let rest = String.sub name (from + marker) (String.length name - from - marker) in
+      let stamped =
+        match String.index_opt rest '-' with
+        | None -> is_digits rest
+        | Some dash ->
+          is_digits (String.sub rest 0 dash)
+          && is_digits (String.sub rest (dash + 1) (String.length rest - dash - 1))
+      in
+      if stamped && from > 0 then Some (String.sub name 0 from) else find (from + 1))
+    else find (from + 1)
+  in
+  find 0
+
 (* Moved up from beside the snapshot quarantine: the receipt reconcile below
    quarantines undecodable entries the same way. *)
 let unused_rejected_path ~snapshot_path ~now =
-  let base = Printf.sprintf "%s.rejected-%.0f" snapshot_path now in
+  let base = Printf.sprintf "%s%s%.0f" snapshot_path rejected_marker now in
   if not (Fs_compat.file_exists base)
   then base
   else (

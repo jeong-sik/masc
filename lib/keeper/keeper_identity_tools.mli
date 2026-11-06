@@ -300,3 +300,6 @@ val renew_if_needed :
     a working credential on a guess costs the refresh token and gains
     nothing. A provider that rotates its refresh token has the new one
     written down; one that does not keeps what is on disk. *)
+
+val identity_dirname : string
+(** The directory {!identity_dir} names below [<base>/.masc]. *)

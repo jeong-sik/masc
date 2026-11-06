@@ -139,10 +139,6 @@ let test_env_session_max_age () =
   let max_age = Env_config.Session.max_age_seconds in
   check bool "positive max_age" true (max_age > 0.0)
 
-let test_env_tempo_default () =
-  let default = Env_config.Tempo.default_interval_seconds in
-  check bool "positive default" true (default > 0.0)
-
 let test_env_get_string () =
   let v = Env_config.get_string ~default:"fallback" "NONEXISTENT_VAR_12345" in
   check string "fallback value" "fallback" v
@@ -186,9 +182,6 @@ let () =
     ];
     "env_config.session", [
       test_case "max_age" `Quick test_env_session_max_age;
-    ];
-    "env_config.tempo", [
-      test_case "default" `Quick test_env_tempo_default;
     ];
     "env_config.helpers", [
       test_case "get_string" `Quick test_env_get_string;

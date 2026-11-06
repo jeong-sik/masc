@@ -8120,10 +8120,18 @@ let test_keeper_resume_rpc_refusal_keeps_fresh_recovery () =
           check string "resume refusal still recovers into a replacement thread"
             "replacement-thread" result.session_id;
           check int "replacement thread starts at its own first turn" 1 result.turns);
+    let fresh_requests = captured_requests fresh_capture in
     check (list string) "next wire starts fresh after a rejected resume"
-      ["initialize"; "initialized"; "account/read"; "thread/start"; "turn/start"]
+      [ "initialize"; "initialized"; "account/read"; "thread/start"; "turn/start"
+      ; "initialize"; "initialized"; "thread/delete" ]
       (List.map (fun request -> Yojson.Safe.Util.(request |> member "method" |> to_string))
-        (captured_requests fresh_capture)))
+        fresh_requests);
+    check (list string) "the turn-end delete names the forgotten original thread"
+      ["thread-1"]
+      (List.map (fun request -> Yojson.Safe.Util.(request |> member "params" |> member "threadId" |> to_string))
+        (List.filter
+           (fun request -> Yojson.Safe.Util.(request |> member "method" = `String "thread/delete"))
+           fresh_requests)))
 ;;
 
 let test_keeper_resume_sends_changed_working_state_once () =

@@ -1,10 +1,7 @@
 open Result.Syntax
 
 type t =
-  | Export of {
-      path : string;
-      purpose : string;
-    }
+  | Export of { path : string }
   | Materialize of {
       path : string;
       artifact : Keeper_peer_artifact_ref.t;
@@ -24,12 +21,9 @@ let of_json = function
       | Some (`String path) when relative_path path -> (
           match List.assoc_opt "action" fields with
           | Some (`String "export") -> (
-              match
-                (List.assoc_opt "purpose" fields, List.assoc_opt "artifact" fields)
-              with
-              | Some (`String purpose), None when String.trim purpose <> "" ->
-                Ok (Export { path; purpose })
-              | _ -> Error "Export requires a purpose and no artifact")
+              match List.assoc_opt "artifact" fields with
+              | None -> Ok (Export { path })
+              | Some _ -> Error "Export takes a path and no artifact")
           | Some (`String "materialize") -> (
               match List.assoc_opt "artifact" fields with
               | Some json ->

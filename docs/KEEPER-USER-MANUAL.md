@@ -828,14 +828,11 @@ preserve the outgoing author's handoff and attribution. The recipient can read
 it through `keeper_tasks_list` with `task_ids` and `projection="full"`.
 
 References do not move file bytes or grant access to a peer's sandbox. Export
-files with `keeper_artifact_transfer`. If the export returns a result-manifest
-reference, read it with `keeper_artifact_read` and copy its
-`structured_content.artifact` into `masc_keeper_delegate`'s `artifacts` array.
-Each item has `blob`, `filename`, and `purpose`; keep the entire `blob._blob`,
-including `preview` even when empty. The outer `artifact` key and the result
-manifest's reference are not the exported file descriptor.
-The recipient materializes the descriptor in its own
-sandbox and claims the released Task. A release or a message being queued is
+files with `keeper_artifact_transfer`. The export returns the file's sha256 as
+`artifact`; put that string into `masc_keeper_delegate`'s `artifacts` array.
+The recipient materializes it in its own sandbox with the same tool
+(`action` `materialize`, its own `path`, and that `artifact`) and claims the
+released Task. A release or a message being queued is
 not completion; the finished work still goes through independent verification.
 
 ## The Gate

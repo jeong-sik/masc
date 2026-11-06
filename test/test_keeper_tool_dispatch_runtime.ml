@@ -10286,15 +10286,15 @@ let test_peer_artifact_materializes_exact_binary () =
         String.equal tool.schema.name "keeper_artifact_transfer") bundle.tools in
     let export () = Agent_core.Tool.execute
         ~invocation:(composition_invocation ~completion:Agent_core.Tool_contract.Continue_after_success)
-        transfer (`Assoc ["action", `String "export"; "path", `String "generated.png";
-                         "purpose", `String "Poster image"]) in
+        transfer (`Assoc ["action", `String "export"; "path", `String "generated.png"]) in
     let exported = match export () with
       | Ok output -> output | Error error -> fail error.Agent_core.Types.message in
-    let manifest = match Tool_output.decode_from_agent_core exported.content with
-      | Tool_output.Decoded reference ->
-        check string "model receives durable export manifest" Tool_output.artifact_manifest_mime reference.mime;
-        reference
-      | _ -> fail "export omitted its durable result manifest" in
+    (* The export names the file by sha256 alone, so the model reads the
+       result inline instead of through a result manifest. *)
+    (match Tool_output.decode_from_agent_core exported.content with
+     | Tool_output.Not_marker -> ()
+     | Tool_output.Decoded _ | Tool_output.Invalid_marker _ ->
+       fail "a sha256-only export result was replaced by a marker");
     let exported_json = Yojson.Safe.Util.member "artifact"
         (structured_tool_output_exn ~base_path:config.base_path exported.content) in
     let validate_input name args =
@@ -10309,29 +10309,23 @@ let test_peer_artifact_materializes_exact_binary () =
               "prompt", `String "Reuse this PNG"; "artifacts", `List [artifact]] in
     let delegate_input = validate_input "masc_keeper_delegate" (delegate_args exported_json) in
     let open Yojson.Safe.Util in
-    let blob_fields = exported_json |> member "blob" |> member "_blob" |> to_assoc in
-    let without_preview = `Assoc
-        (("blob", `Assoc ["_blob", `Assoc (List.remove_assoc "preview" blob_fields)])
-         :: List.remove_assoc "blob" (to_assoc exported_json)) in
-    List.iter (fun (artifact, detail) ->
+    List.iter (fun artifact ->
       match Masc.Keeper_invocation_contract.request_of_json (delegate_args artifact) with
       | Ok _ -> fail "malformed exported reference was accepted"
+      | Error (Masc.Keeper_invocation_contract.Invalid_wire_value { field; _ }) ->
+        check string "rejection identifies the artifact item" "artifacts[0]" field
       | Error error ->
-        let message = Masc.Keeper_invocation_contract.request_error_to_string error in
-        check bool "rejection identifies the artifact item" true
-          (String_util.contains_substring message "artifacts[0]");
-        check bool "rejection retains the actual descriptor correction" true
-          (String_util.contains_substring message detail))
-      [ `Assoc ["artifact", exported_json], "exactly blob, filename and purpose";
-        without_preview, "expected exact _blob fields bytes, mime, preview, and sha256" ];
+        fail ("malformed reference was refused for another reason: "
+              ^ Masc.Keeper_invocation_contract.request_error_to_string error))
+      [ `Assoc ["artifact", exported_json];
+        `String (String.uppercase_ascii (to_string exported_json)) ];
     let request = match Masc.Keeper_invocation_contract.request_of_json
         delegate_input with
       | Ok request -> request | Error _ -> fail "typed artifact delegation rejected" in
     let reference = match Masc.Keeper_invocation_contract.artifacts request with
       | [reference] -> reference | _ -> fail "delegation lost reference" in
-    check int "model-visible export preserves complete binary size" (String.length bytes) reference.blob.bytes;
-    check string "model-visible export preserves complete binary digest"
-      Agent_core_sha256.(digest_string bytes |> to_hex) reference.blob.sha256;
+    check string "model-visible export names the complete binary"
+      Agent_core_sha256.(digest_string bytes |> to_hex) (reference :> string);
     let write args = Masc.Keeper_tool_filesystem_runtime.handle_file_write_with_outcome
         ~turn_sandbox_factory:None ~config ~meta:peer ~publication_recovery:recovery ~args () in
     let invoke path = Masc.Keeper_peer_artifact.handle ~config ~meta:peer
@@ -10356,32 +10350,11 @@ let test_peer_artifact_materializes_exact_binary () =
       | Error error -> fail error.Agent_core.Types.message in
     check bool "repeat is verified through actual model bridge" true (repeat |> member "verified" |> to_bool);
     check bool "repeat does not invoke writer" false (repeat |> member "write_attempted" |> to_bool);
-    check bool "repeat manifest keeps the delegated artifact" true (Yojson.Safe.equal (member "artifact" repeat) exported_json);
+    check bool "repeat receipt keeps the delegated artifact" true (Yojson.Safe.equal (member "artifact" repeat) exported_json);
     check string "recipient still has exact bytes" bytes (Fs_compat.load_file path);
     check bool "escape refused" true ((invoke "../outside.png").disposition <> Tool_result.Completed ());
-    (* Block only the already-known manifest destination. The binary export
-       still succeeds, so its post-effect error must preserve the exact handle. *)
-    let manifest_path = Filename.concat
-        (Filename.concat (Tool_blob_store.root_dir store) (String.sub manifest.sha256 0 2))
-        manifest.sha256 in
-    Unix.unlink manifest_path;
-    Fs_compat.mkdir_p manifest_path;
-    (match export () with
-     | Ok _ -> fail "manifest storage failure was disguised as success"
-     | Error error ->
-       let payload = Yojson.Safe.from_string error.Agent_core.Types.message in
-       check string "exported effect remains explicit" "proven_post_effect"
-         Yojson.Safe.Util.(member "effect_disposition" payload |> to_string);
-       let references = Tool_output.normalized_artifact_refs_in_json payload in
-       check int "post-effect failure retains one exported artifact" 1 (List.length references);
-       check string "post-effect failure retains exact exported bytes" bytes
-         (fetch_artifact_exn ~base_path:config.base_path (List.hd references));
-       match bundle.terminal_effect_state () with
-       | Masc.Keeper_tools_agent_core.Terminal_effect_failed failure ->
-         check bool "terminal boundary retains applied export" true
-           (failure.effect_disposition = Tool_result.Proven_post_effect)
-       | _ -> fail "export manifest failure lost terminal effect evidence");
-    let blob = Filename.concat (Filename.concat (Tool_blob_store.root_dir store) (String.sub reference.blob.sha256 0 2)) reference.blob.sha256 in
+    let sha256 = (reference :> string) in
+    let blob = Filename.concat (Filename.concat (Tool_blob_store.root_dir store) (String.sub sha256 0 2)) sha256 in
     Fs_compat.save_file blob "corrupted";
     check bool "corrupt reference refused" true ((invoke "corrupt.png").disposition <> Tool_result.Completed ())))
 
@@ -10393,7 +10366,7 @@ let test_peer_delegate_schema_reaches_model_wires () =
     let expected = descriptor.input_schema in
     let member = Yojson.Safe.Util.member in
     let properties = member "properties" expected in
-    check string "artifact items are objects in the declared tool contract" "object"
+    check string "artifact items are sha256 strings in the declared tool contract" "string"
       (properties |> member "artifacts" |> member "items" |> member "type" |> Yojson.Safe.Util.to_string);
     check bool "target keeper kind constraint is declared" true
       (properties |> member "target" |> member "properties" |> member "kind" |> member "enum"

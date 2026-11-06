@@ -850,11 +850,11 @@ let handle_keeper_delegate ?invocation_ref ~submitted_by ctx args =
         (Turn.preflight_keeper_delegate ctx request)
     in
     let references = Keeper_invocation_contract.artifacts request in
-    let* () = List.fold_left (fun result reference ->
-      let* () = result in
+    let* blobs = List.fold_left (fun result reference ->
+      let* blobs = result in
       Keeper_peer_artifact.fetch ~config:ctx.config reference
-      |> Result.map (fun _ -> ())
-      |> message_error ~class_:Tool_result.Runtime_failure) (Ok ()) references in
+      |> Result.map (fun (fetched : Keeper_peer_artifact.fetched) -> fetched.blob :: blobs)
+      |> message_error ~class_:Tool_result.Runtime_failure) (Ok []) references in
     let message = match references with
       | [] -> Keeper_invocation_contract.prompt request
       | _ -> Keeper_invocation_contract.prompt request ^ "\n\nExported peer artifacts (materialize with keeper_artifact_transfer into your own relative path):\n"
@@ -882,10 +882,15 @@ let handle_keeper_delegate ?invocation_ref ~submitted_by ctx args =
         ~attachments:[]
         ctx
     in
-    Ok (acceptance, target_turn_age)
+    Ok (acceptance, target_turn_age, blobs)
   with
-  | Ok (acceptance, target_turn_age) ->
+  | Ok (acceptance, target_turn_age, blobs) ->
+    (* The message names each artifact by sha256 alone, which the blob GC does
+       not count as a reference. This call's ledger row keeps the blobs alive
+       for as long as the ledger keeps the row (the operator retention
+       window), not until the receiver materializes them. *)
     tool_result_of_operation_acceptance ~extra:target_turn_age acceptance
+    |> Tool_result.with_retained_artifacts blobs
   | Error error -> tool_result_of_handler_error error
 ;;
 

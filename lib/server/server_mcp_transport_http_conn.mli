@@ -77,6 +77,15 @@ val register_sse_conn :
     for the same session — callers responsible for stopping
     the previous connection first via {!stop_sse_session}. *)
 
+val stop_sse_session_before : client_id:int -> string -> unit
+(** Close the current connection only when its client id is strictly lower than
+    [client_id]. A newer or equal-id successor is never closed. *)
+
+val register_sse_conn_if_newer :
+  session_id:string -> info:sse_conn_info -> bool
+(** Atomically publish [info] only when the current entry is absent or strictly
+    older. Returns [false] for an equal or newer current entry. *)
+
 val close_sse_conn : sse_conn_info -> unit
 (** [close_sse_conn info] sets [info.closed = true] / [info.stop = true]
     (via the single-close [compare_and_set] claim), resolves the one-shot

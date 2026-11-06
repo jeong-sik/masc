@@ -39,8 +39,11 @@ type registration_error =
   | Unknown_session of { session_id : string }
   | Session_expired of { session_id : string }
   | Session_owner_mismatch of { session_agent : string; token_agent : string }
+  | Registration_stale of { session_id : string }
 
 let registration_error_to_string = function
+  | Registration_stale { session_id } ->
+      Printf.sprintf "SSE registration for %s was replaced by a newer client" session_id
   | Missing_token -> "SSE registration failed: bearer token is required"
   | Invalid_token { reason } ->
       Printf.sprintf "SSE registration failed: invalid token (%s)" reason
@@ -576,9 +579,7 @@ let validate_registration ~(auth : registration_auth) session_id : (Masc_domain.
               | _ ->
                   Ok credential
 
-(** Register a new SSE client.
-    Returns (client_id, event_stream, evicted_session_id option). *)
-let register ?(kind = Agent_stream) ?on_disconnect ?observer_instance_id
+let register_with_client ?(kind = Agent_stream) ?on_disconnect ?observer_instance_id
     ~(auth : registration_auth) session_id ~last_event_id =
   match validate_registration ~auth session_id with
   | Error e -> Error e
@@ -609,70 +610,87 @@ let register ?(kind = Agent_stream) ?on_disconnect ?observer_instance_id
     last_seen_at = Atomic.make 0.0;
     on_disconnect;
   } in
-  let evicted =
+  let registration =
     Lockfree_atomic.update_with_commit clients (fun state ->
       run_test_hook register_commit_test_hook;
-      let evicted =
-        if state.count >= max_clients && not (SMap.mem session_id state.entries) then
-          let oldest =
-            SMap.fold
-              (fun sid existing acc ->
-                match acc with
-                | None -> Some (sid, existing)
-                | Some (_, current_oldest) ->
-                    if existing.created_at < current_oldest.created_at
-                    then Some (sid, existing)
-                    else acc)
-              state.entries None
-          in
-          oldest
-        else
-          None
-      in
-      let entries_after_eviction =
-        match evicted with
-        | Some (sid, _) -> SMap.remove sid state.entries
-        | None -> state.entries
-      in
-      let install_time = Time_compat.now () in
-      let client = {
-        base_client with
-        created_at = install_time;
-        last_seen_at = Atomic.make install_time;
-      } in
-      let next_entries = SMap.add session_id client entries_after_eviction in
-      let inventory =
-        match evicted with
-        | Some (sid, old_client) ->
-            Sse_queue_inventory.remove state.queue_inventory
-              ~session_id:sid ~client_id:old_client.id
-        | None -> state.queue_inventory
-      in
-      let queue_inventory =
-        Sse_queue_inventory.register inventory ~session_id ~client_id ~kind
-          ~last_event_id:(Atomic.get last_event_id) ~last_seen_at:install_time
-      in
-      {
-        next_state = {
-          entries = next_entries;
-          count = Sse_queue_inventory.count queue_inventory;
-          queue_inventory;
-        };
-        result = evicted;
-      })
+      let previous = SMap.find_opt session_id state.entries in
+      match previous with
+      | Some existing when existing.id >= client_id ->
+          { next_state = state; result = None }
+      | Some _ | None ->
+        let evicted =
+          if state.count >= max_clients && not (SMap.mem session_id state.entries) then
+            let oldest =
+              SMap.fold
+                (fun sid existing acc ->
+                  match acc with
+                  | None -> Some (sid, existing)
+                  | Some (_, current_oldest) ->
+                      if existing.created_at < current_oldest.created_at
+                      then Some (sid, existing)
+                      else acc)
+                state.entries None
+            in
+            oldest
+          else
+            None
+        in
+        let entries_after_eviction =
+          match evicted with
+          | Some (sid, _) -> SMap.remove sid state.entries
+          | None -> state.entries
+        in
+        let install_time = Time_compat.now () in
+        let client = {
+          base_client with
+          created_at = install_time;
+          last_seen_at = Atomic.make install_time;
+        } in
+        let next_entries = SMap.add session_id client entries_after_eviction in
+        let inventory =
+          match evicted with
+          | Some (sid, old_client) ->
+              Sse_queue_inventory.remove state.queue_inventory
+                ~session_id:sid ~client_id:old_client.id
+          | None -> state.queue_inventory
+        in
+        let queue_inventory =
+          Sse_queue_inventory.register inventory ~session_id ~client_id ~kind
+            ~last_event_id:(Atomic.get last_event_id) ~last_seen_at:install_time
+        in
+        {
+          next_state = {
+            entries = next_entries;
+            count = Sse_queue_inventory.count queue_inventory;
+            queue_inventory;
+          };
+          result = Some (evicted, client, previous);
+        })
   in
-  (match evicted with
-   | Some (sid, client) ->
-       Transport_metrics.inc_sse_client_evicted ();
-       Log.Server.info "Evicting oldest client %s (at cap %d)" sid max_clients;
-       (* Wake the connection whose broadcast entry was removed. Callers also
-          stop the evicted session by id for lifecycle reporting; a successor
-          racing that second stop is tracked separately in #47514. *)
-       invoke_disconnect_hook_for sid client
-   | None ->
-       ());
-  sync_transport_snapshot ();
-  Ok (client_id, event_stream, Option.map fst evicted)
+  match registration with
+  | None -> Error (Registration_stale { session_id })
+  | Some (evicted, client, previous) ->
+    (match evicted with
+     | Some (sid, client) ->
+         Transport_metrics.inc_sse_client_evicted ();
+         Log.Server.info "Evicting oldest client %s (at cap %d)" sid max_clients;
+         (* Wake the connection whose broadcast entry was removed. Callers also
+            stop the evicted session by id for lifecycle reporting; a successor
+            racing that second stop is tracked separately in #47514. *)
+         invoke_disconnect_hook_for sid client
+     | None ->
+         ());
+    sync_transport_snapshot ();
+    Ok (client, previous, Option.map fst evicted)
+
+(** Register a new SSE client.
+    Returns (client_id, event_stream, evicted_session_id option). *)
+let register ?kind ?on_disconnect ?observer_instance_id
+    ~(auth : registration_auth) session_id ~last_event_id =
+  match register_with_client ?kind ?on_disconnect ?observer_instance_id
+    ~auth session_id ~last_event_id with
+  | Error _ as error -> error
+  | Ok (client, _, evicted) -> Ok (client.id, client.event_stream, evicted)
 
 (** Unregister an SSE client *)
 let unregister session_id =

@@ -9,6 +9,7 @@ type viewport = { anchors : anchor list; last_top : int }
 type t = {
   client : string; active : bool; joined : bool; focused : bool; draft : string;
   retry : send option; pending : request option; next_read : float;
+  changed_since : bool;
   snapshot : Room.snapshot option; notice : string option;
   viewer : string option;
   before : int option; position : position; viewport : viewport option;
@@ -16,16 +17,19 @@ type t = {
 type intent = Repaint | Send
 type origin = Viewer | Keeper | Peer
 let create () = { client = Random_id.hex ~bytes:16; active = false; joined = false;
-  focused = false; draft = ""; retry = None; pending = None; next_read = 0.;
+  focused = false; draft = ""; retry = None; pending = None; next_read = 0.; changed_since = false;
   snapshot = None; notice = None; viewer = None; before = None; position = Latest; viewport = None }
+let client_id t = t.client
 let focused t = t.focused
 let focus t focused = { t with focused }
 let active t active = if t.active = active then t else {t with active; focused = false; next_read = 0.}
+let revalidate t =
+  {t with next_read = 0.; changed_since = t.changed_since || Option.is_some t.pending}
 let suspend t =
   let joined = t.joined || match t.pending with
     | Some {operation=(Read _ | Say _); _} -> true
     | Some {operation=Leave; _} | None -> false in
-  {t with pending = None; active = false; joined;
+  {t with pending = None; active = false; joined; changed_since = false;
   focused = false; snapshot = None; viewer = None; next_read = 0.; before = None; position = Latest; viewport = None}
 let is_read request = match request.operation with
   | Read _ -> true
@@ -108,10 +112,19 @@ let receive ?viewer t request ~now result = match t.pending with
     let viewer = match result, viewer with
       | Ok _, Some _ -> viewer
       | (Ok _ | Error _), None | Error _, Some _ -> t.viewer in
-    let next_read = match request.operation with
-      | (Read _ | Say _) when not t.active -> now
-      | Read _ | Say _ | Leave -> now +. 2. in
-    let t = {t with pending = None; viewer; next_read} in
+    let next_read =
+      if t.changed_since then now
+      else if not t.active then
+        match request.operation with
+        | Read _ | Say _ -> now
+        | Leave -> now +. 2.
+      else
+        match request.operation, result with
+        | (Read _ | Say _), Ok _ -> infinity
+        | (Read _ | Say _ | Leave), Error _ -> now +. 2.
+        | Leave, Ok _ -> now +. 2.
+    in
+    let t = {t with pending = None; viewer; next_read; changed_since = false} in
     match request.operation, result with
     | Leave, Ok _ -> {t with joined = false}
     | Leave, Error detail ->

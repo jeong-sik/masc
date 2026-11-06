@@ -43,8 +43,11 @@ class SpectatorHandler(lane_fixture.LaneHandler):
                 server.responded(phase, label)
             return
         if request.path == "/mcp":
-            machine = urllib.parse.parse_qs(request.query).get("machine", ["watch"])[0]
+            query = urllib.parse.parse_qs(request.query)
+            machine = query.get("machine", ["watch"])[0]
             server.record("observer:" + machine)
+            if "play_client_id" in query:
+                server.record("observer-play:" + query.get("play_machine", ["unknown"])[0])
         super().do_GET()
 
     def do_POST(self) -> None:
@@ -81,8 +84,13 @@ class SpectatorPushTest(unittest.TestCase):
             step("keys", "jjjjjjjjj\r")
             step("wait", lambda: spectator.response_count("open", "live:msx_capture") >= 1,
                  "MSX did not open from its Lane row")
+            step("wait", lambda: spectator.count("open", "observer-play:msx") == 1,
+                 "the visible room did not attach its Observer Play scope")
+            step("wait", lambda: spectator.response_count("open", "live:msx_capture") == 2,
+                 "the initial Play scope attachment did not finish its bounded trailing read")
             step("drain", 1.2)
-            self.assertEqual(spectator.response_count("open", "live:msx_capture"), 1)
+            self.assertEqual(spectator.response_count("open", "live:msx_capture"), 2,
+                             "the initial Play attachment kept revalidating the machine")
             self.assertEqual(spectator.response_count("open", "live:dos_capture"), 0)
 
             spectator.set_phase("push")

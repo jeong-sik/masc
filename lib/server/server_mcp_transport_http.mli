@@ -203,3 +203,10 @@ val handle_ag_ui_events :
   deps:deps -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 val handle_presence_events :
   deps:deps -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+
+module For_testing : sig
+  val with_ping_interval : float -> (unit -> 'a) -> 'a
+  val with_disconnect_hook :
+    (Server_mcp_transport_http_conn.sse_conn_info option -> unit) ->
+    (unit -> 'a) -> 'a
+end

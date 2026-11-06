@@ -24,7 +24,7 @@ maintained list.
 | Selection kind | Identity fields | Existing management destination |
 | --- | --- | --- |
 | `exact` | `lane_id` | Standalone lane detail, slot editor and retained runs |
-| `browser` | `lane` (`live`, `automation`) | That Browser backend |
+| `browser` | `lane` (`live`) | That Browser backend |
 | `machine` | `machine` (`msx`, `dos`) | That shared machine |
 | `declaration` | `source_path` | The actual installation file, including invalid TOML |
 | `manual_instance` | `instance_id`, `incarnation` | That exact manual Add-on instance |
@@ -37,14 +37,13 @@ Clients use `selection` for navigation, not heuristics over labels or IDs.
 | --- | --- |
 | `exact` | `configuration`: `configured` with `admitted_slots`, `cli_slots`, `declared_slots`, `declared_cli_slots`, `dropped_slots`, nullable `admission_error`; `off` with `declared_slots` and `declared_cli_slots`; or `unconfigured`/`unavailable` with `detail` |
 | `browser_clients` | `addon`: `observed` with `connected_clients`, the clients the browser Add-on's last published observation holds; `absent` (no browser Add-on declared), `off` (declared and switched off) or `not_running` (declared on, no installation running); or `unavailable` with `detail`. `absent` and `off` need every declaration read: with one unread, the reading is `unavailable` |
-| `browser_executor` | `addon`: `observed` with `registered`, from the same observation; or the same `absent`, `off`, `not_running` and `unavailable` readings. Registration does not prove a child process or browser session is alive |
 | `machine` | `publication`: `no_screen`, `stable` or `running`, from the owner's Atomic publication only |
 | `package` | Nullable `declaration` plus `instances`; null is a manual attachment, not a failed declaration read |
 
 An exact registry that cannot be read, including a publication reservation, is
 `unavailable`; it is not interpreted as disabled. Machine reads do not acquire
 the machine lock, capture pixels or infer a controller/program. Browser reads
-never invoke an executor or open a session; they read the browser Add-on's
+send nothing to a browser; they read the browser Add-on's
 cached observation, not the server process's browser tables, which only the
 Add-on worker fills.
 
@@ -149,6 +148,5 @@ explicit editor action. URLs can be reopened directly; drafts survive internal
 screen navigation, not a browser restart.
 
 Navigation never saves configuration or starts/stops workers. Inventory row
-count is not a running-worker count. Executor
-registration is not proof of an active browser session; retained package state
-is not proof of a live process.
+count is not a running-worker count. Retained package state is not proof of a
+live process.

@@ -8,7 +8,7 @@ there is no inverse configuration capability.
 
 The observation vocabulary owns the wire IDs and labels. The Exact registry
 maps its closed set of record kinds to this vocabulary and explicitly refuses
-Verifier and Browser Stagehand registrations on replay. Verifier retains its
+Verifier registrations on replay. Verifier retains its
 separate Task/Goal records. Current configuration parsing still enumerates only
 `Standalone_lane.all`, independently of which identities history accepts.
 
@@ -40,7 +40,7 @@ The existing workspace authority check applies to either target.
 
 Internal Agents reads the selected history source even if the current
 configuration matrix is absent or unavailable. Verifier still reads Task/Goal
-registries, and Stagehand explicitly reports that it retains no history. A
+registries. A
 missing current configuration row is not an error in a valid history selection.
 The original record's run ID and detail endpoint are unchanged; the history
 filter does not derive a run ID from an Addon installation scope.

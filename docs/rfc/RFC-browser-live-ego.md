@@ -4,7 +4,7 @@ title: "Serve ego lite as a live browser connection"
 status: Draft
 created: 2026-10-22
 author: vincent + claude
-related: ["browser-live-one-connection", "browser-keeper-firefox", "browser-lane-stagehand"]
+related: ["browser-live-one-connection", "browser-keeper-firefox"]
 ---
 
 # RFC — ego lite 를 live 브라우저 연결로 쓴다

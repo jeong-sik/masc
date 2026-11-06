@@ -2260,14 +2260,14 @@ status: reference
   [Msx_lane.checkpoint_info](../../lib/msx_lane/msx_lane.mli)
 
 **Browser Lane**
-: 서버가 관리하는 브라우저 세션. Keeper 는 `masc_browser_*` 도구로 탭을 읽고
-  조작한다. Lane Add-on의 `browser_document` 원천이 이 세션을 관측한다.
+: browser Lane Add-on worker 가 붙여 둔 live 브라우저 연결. Keeper 는 `masc_browser_*`
+  도구로 탭을 읽고 조작한다. Lane Add-on의 `browser_document` 원천이 이 연결을 관측한다.
   → [Browser_lane](../../lib/browser_lane/browser_lane.ml)
 
 **Trusted Hover (신뢰 호버)**
 : 브라우저 연결에서 클릭 없이 포인터를 올리는 `hover_at` 조작이, 관측된 URL과 뷰포트
   (`expectedUrl`·`viewport`) 가드를 통과한 뒤에만 실행되는 계약(#41620). 첨부된 live
-  Firefox BiDi 탭과 자동화 레인에서 동작하며, 가드가 낡은 URL이나 뷰포트에서 실패하면
+  Firefox BiDi 탭에서 동작하며, 가드가 낡은 URL이나 뷰포트에서 실패하면
   입력을 보내기 전에 `Rejected_before_effect`로 거절한다 — 포인터 움직임도 효과이므로
   조용한 실패 대신 거절 사유를 남긴다. WebExtension 경로의 hover는 서버에서 큐잉 전에
   거절한다. 경계: 가드 검증과 입력 주입은 원자적 트랜잭션이 아니어서 검증 직후 조작자가
@@ -2304,8 +2304,8 @@ status: reference
 : 한 브라우저 어댑터가 공개 도구로 닿을 수 있는 동작의 표(`Browser_capabilities.catalog`).
   동작(`operation`)은 닫힌 목록이고(`operations`·`operation_of_wire`), 행마다 지원은
   `Available`(어댑터가 구현함)·`Conditional`(구현했으나 제약 목록이 붙음)·
-  `Unsupported`(사유 문자열) 셋 중 하나다. `BrowserTabs`의 `requiredActions`나
-  `BrowserSession`의 요구 동작은 이 동작 이름 목록을 그대로 받고, 어느 후보도 요구를
+  `Unsupported`(사유 문자열) 셋 중 하나다. `BrowserTabs`의 `requiredActions`는 이 동작
+  이름 목록을 그대로 받고, 어느 후보도 요구를
   채우지 못하면 `missingActions`와 함께 `required_browser_actions_unavailable`로
   거절한다. 이 표는 I/O를 하지 않고, 브라우저를 고르거나 명령 권한을 주거나 브라우저를
   바꾸지 않는다.

@@ -435,9 +435,9 @@ JSON data, never supplied JavaScript.
 
 Screenshot coordinate input uses the existing document/viewport guard followed
 by BiDi pointer or wheel actions. `hover_at` uses one `pointerMove`, with no
-button press, on the selected live BiDi tab or the automation lane. Copy the
+button press, on the selected live BiDi tab. Copy the
 observed `expectedUrl`, `viewport` and normalized `point` from a fresh capture.
-BiDi and WebDriver share the native pointer action encoder. A drag moves to its
+BiDi uses the native pointer action encoder. A drag moves to its
 destination twice before releasing, so dragover handlers can observe it where
 the browser supports HTML drag-and-drop. An accepted gesture receipt proves
 the input sequence, not an application drop. Firefox's native HTML draggable
@@ -460,23 +460,7 @@ to BiDi tab IDs. The host declares its mode with `x-browser-transport`. An
 installed host that omits this header uses the WebExtension poll contract;
 BiDi hosts declare `webdriver_bidi`. The server rejects empty or unknown values
 and a transport change on an existing client ID. Interaction receipts identify
-the resolved tab with `tabId`. Stagehand Chromium also serves `hover_at`, semantic
-`hover`, and semantic `drag_to` with the same observed-target resolution and
-URL/viewport checks. It sends the runtime's native `page.hover` or
-`page.drag_and_drop` calls, without a model or synthetic DOM input. Observed
-selector and scene-node clicks resolve into native `page.click` with the
-resolver's current URL and viewport guarded before input. Custom drag
-paths are forwarded as CSS-pixel runtime routes. An omitted path visits the
-midpoint before the destination, so pointer-capture handlers can activate
-before the destination move. For semantic `drag_to`, the resolver can provide
-an additional arrival point inside the observed destination rectangle. It is
-distinct from the destination center and independently hit-tested against the
-same element. Stagehand visits that point after the requested path and before
-the center, allowing native dragenter followed by dragover before release.
-An occluded or pixel-sized destination supplies no invented arrival point.
-Raw coordinate drags carry only their requested/default path; an input receipt
-does not establish HTML drop acceptance. Nonzero `durationMs` is refused before input:
-the runtime pause after a move does not express movement duration.
+the resolved tab with `tabId`.
 This is not an atomic snapshot/input
 transaction: the operator can still change the page after validation. There is
 no write replay. An unknown outcome stops this live client. Reads and interactions
@@ -504,9 +488,9 @@ tab is not required to use another tab.
 This initial peer does not implement live activate_tab, uploads, download
 collection, or the extension's navigation commit barrier. The server refuses
 activate_tab on a BiDi connection before it queues a command, by the same
-table. page.elements runs the automation lane's element script in the
+table. page.elements runs the shared element script in the
 requested tab, so its selectors are the ones the DOM interactions take. A
-page.read with includeHtml runs the automation lane's document helper, which
+page.read with includeHtml runs the shared document helper, which
 leaves the HTML out and says why when the result passes 1 MiB. Both reads
 answer for the whole document, so a document the parser has not finished is
 refused before effect rather than answered with the part that exists.
@@ -545,14 +529,6 @@ a retained Working badge as current. Navigation does not create a new badge for
 an old request's cleanup. A page refusing
 feedback does not authorize a replay or prevent the interaction.
 
-Stagehand Chromium also displays this feedback for an explicitly attributed
-Keeper interaction. The selected actor stays on the backend's queued request
-and owns the serialized guard/input/receipt operation. Each interaction gets
-its own request identity; cancellation-protected cleanup settles that same
-badge without changing the authoritative result. Anonymous direct calls do
-not invent an agent identity. Semantic click, hover and drag receipts preserve
-their originally requested action name.
-
 The marker follows trusted browser pointer/wheel/drag events and displays CSS
 viewport coordinates. Before any event its position is unknown; this is the browser
 input pointer, not the desktop mouse cursor. The inert shadow overlay receives no
@@ -575,9 +551,8 @@ browser's reason, including stale-document/viewport refusals.
 ## Open a tab on the selected BiDi connection
 
 Use `masc_browser_act` with `action:"open_tab"`, `lane:"live"`, the exact
-observed `clientId`, and an absolute HTTP(S) `url`. Live `page.act` serves only
-this action; other automation actions remain outside its capability. The
-WebExtension connection does not serve new-tab creation.
+observed `clientId`, and an absolute HTTP(S) `url`. The WebExtension
+connection does not serve new-tab creation.
 
 The host creates a background tab in the selected Firefox profile, navigates
 only that new context, and returns `tabId`, `created:true`, `url`, and `title`
@@ -601,7 +576,7 @@ connection tab IDs must not be reused on a replacement connection.
 
 ### Trusted semantic clicks
 
-On BiDi and automation, `click` with one observed selector or scene
+On BiDi, `click` with one observed selector or scene
 `documentId`/`nodeId` resolves a visible, unobstructed target and sends native
 pointer move/down/up. This supports menus that open on trusted `pointerdown`
 or `mousedown`, including a control exposed by hover. Re-observe the revealed
@@ -619,13 +594,10 @@ replay after native input. The WebExtension's DOM-click behavior is unchanged.
 ### Drag movement and acceptance
 
 `drag` and `drag_to` accept `via` (ordered normalized viewport points) and
-`durationMs` (milliseconds for each move). Without a path, native BiDi and
-WebDriver visit the midpoint before the destination so controls that activate
+`durationMs` (milliseconds for each move). Without a path, native BiDi visits
+the midpoint before the destination so controls that activate
 on initial movement receive another changed position before release. Custom
 paths must come from the observed viewport; stale geometry fails before input.
-Stagehand forwards custom paths through its native route option. Nonzero movement
-timing is refused before input because the runtime's delay is a pause after a
-move rather than the duration of that movement.
 A successful native input receipt proves dispatch and release, not that a page
 accepted a drop. Re-read the application result before reporting success or
 retrying. HTML5 `draggable`/`DataTransfer` requires separate verification from
@@ -648,17 +620,13 @@ A missing control in a truncated observation is not evidence that hover failed.
 ### Native double clicks, text, and key chords
 
 `masc_browser_interact` supports `double_click` on an observed selector or scene
-node, and `double_click_at` on a captured viewport point. Stagehand sends native
-`page.click` with `click_count: 2`; WebDriver and BiDi send two native button
-press/release pairs in one owned input sequence. These actions use the same
+node, and `double_click_at` on a captured viewport point. BiDi sends two native
+button press/release pairs in one owned input sequence. These actions use the same
 visibility, disabled-control, document, viewport, and URL guards as native click.
 
 `click_at` takes an optional `button`: `primary` (the default), `middle` or
-`secondary`. WebDriver and BiDi press and release the matching pointer button
-(0, 1 or 2) at the observed point. Stagehand sends `page.click` with
-`options.button` set to `middle` or `right`; the pinned 4.1.0 runtime accepts
-those values, but no real-Chromium run of it has been recorded. The
-WebExtension clicks through the DOM and refuses a non-primary button before any
+`secondary`. BiDi presses and releases the matching pointer button
+(0, 1 or 2) at the observed point. The WebExtension clicks through the DOM and refuses a non-primary button before any
 input is sent. A
 `secondary` click opens whatever the page binds to the context menu; observe the
 page afterwards, the receipt does not say what it did.
@@ -674,8 +642,8 @@ way to create or close a window yet.
 and `drag`, from a pointer whose `pointerType` is `touch`. Firefox 158 reported
 `pointerdown`, `touchstart`, `pointerup` and `touchend` to the page for a tap,
 each trusted, followed by the mouse events and a click (probed 2026-10-22), and
-`pointermove` events through a swipe. Stagehand has no touch call and the
-WebExtension clicks through the DOM, so both refuse before any effect.
+`pointermove` events through a swipe. The WebExtension clicks through the DOM,
+so it refuses before any effect.
 
 `back`, `forward`, `reload` and `close_tab` act on a top-level tab only if this
 connection opened it with `open_tab`. A tab the operator opened is refused before
@@ -694,9 +662,8 @@ BiDi connection sends `browsingContext.setViewport` with the size, or with
 Firefox 158 reports the new `innerWidth` and `innerHeight` right after the
 command (probed 2026-10-22), and it accepts widths of 0 and 100000 without an
 error, so the lane bounds each side to 100 to 4096 CSS pixels itself. The
-override stays on the tab until it is cleared. Firefox 158 keeps it after the session ends (probed 2026-10-22: a new session read the old size), so the peer gives each tab it sized its own size back when it ends the session. A host that dies without ending its session leaves the size on the tab. Stagehand sends
-`page.set_viewport_size` and has no call that restores the size; the owned
-Firefox driver and the WebExtension refuse the action before any effect.
+override stays on the tab until it is cleared. Firefox 158 keeps it after the session ends (probed 2026-10-22: a new session read the old size), so the peer gives each tab it sized its own size back when it ends the session. A host that dies without ending its session leaves the size on the tab. The
+WebExtension refuses the action before any effect.
 
 `type_text` sends Unicode text into the currently focused editable control.
 `press_key` sends one named key or Unicode scalar, optionally with explicit
@@ -708,16 +675,10 @@ cannot silently change focus or submit a form. The guard never focuses a
 control or dispatches events: first use an observed native click to focus it.
 Use `Meta` with `a` for select-all on macOS and `Control` with `a` where appropriate.
 
-Stagehand uses its real `page.type` and `page.key_press` methods. WebDriver and
-BiDi use native key down/up input sources and release all held input even after
-cancellation or an unanswered dispatch. Unicode scalars stay intact. W3C's
+BiDi uses native key down/up input sources and releases all held input even
+after cancellation or an unanswered dispatch. Unicode scalars stay intact. W3C's
 reserved special-key scalars U+E000 through U+E05D are refused as text instead of
 becoming commands. An unanswered input remains uncertain and is never replayed.
-Stagehand refuses supplementary Unicode scalars in `press_key` before input;
-use `type_text` for such text. If native Stagehand keyboard input may have
-started without confirmed key release, the backend quarantines that exact owned
-session without closing its pages. Status remains available; explicitly close
-and reopen before further work. Input is never replayed for cleanup.
 Receipts report the original action and page identity without echoing typed text.
 
 WebExtension does not serve these native actions. Actual browser zoom is a
@@ -731,8 +692,8 @@ not establish that an installed browser has completed these interactions.
 
 `masc_browser_interact` action `set_zoom` requires the observed WebExtension
 `clientId`, `tabId`, `expectedUrl`, and an explicit numeric `factor` from 0.3
-through 5. The extension must be version 0.8.0 or later. BiDi, owned WebDriver
-and Stagehand refuse this action before input; the server does not switch
+through 5. The extension must be version 0.8.0 or later. BiDi and ego refuse
+this action before input; the server does not switch
 browsers to perform it.
 
 The extension reads the tab URL, current zoom, and zoom settings, checks the URL
@@ -776,27 +737,3 @@ subscribed: a dialog already open then is not listed. `accept_dialog` and
 person answers a dialog on their own tab. A tab with no dialog gets the
 browser's `no such alert`, which the host reports before any effect. The
 receipt names the dialog that was answered. A dialog's message is page text.
-
-### Owned Chrome tab and history actions
-
-On `lane=stagehand`, BrowserAct serves `open_tab` and top-level `back`,
-`forward`, `reload`, and `close_tab` using the runtime's native
-`context.new_page`, `page.go_back`, `page.go_forward`, `page.reload`, and
-`page.close` methods. These actions do not call a model or simulate navigation
-through page JavaScript. Retain the observed lane and tab ID for all subsequent
-work. Frame actions, dialogs, uploads, and other BrowserAct actions remain
-unsupported on this lane and fail before dispatch.
-
-Creation and initial navigation are separate calls. If the new page is known
-but navigation or metadata fails, the failed answer carries `effectPhase:
-partial` and a receipt with `created:true`, the created `tabId`, and owning
-`lane:stagehand`. A runtime navigation success that exposes a browser error page
-instead of an HTTP(S) page is also partial. The same receipt reaches the tool's
-failed data and model-facing output. Inspect the same owned browser before
-choosing recovery; the executor never creates a replacement automatically.
-An unanswered creation has unknown effect and never invents a tab ID.
-
-A close retires its tab ID only after native `closed:true` confirmation.
-Malformed close replies retain the identity with uncertain outcome, without
-replaying close. IDs increase across closing and reopening pages and across
-owned sessions, so an old tab ID cannot select a newly created page.

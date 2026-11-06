@@ -5,7 +5,7 @@ status: Draft
 created: 2026-09-27
 updated: 2026-09-27
 author: claude
-related: ["event-spine-and-source-contract", "machine-spectating-goes-through-lanes", "0439", "browser-lane-stagehand", "0457"]
+related: ["event-spine-and-source-contract", "machine-spectating-goes-through-lanes", "0439", "0457"]
 ---
 
 # RFC: 모든 Lane 을 한 목록에 모은다

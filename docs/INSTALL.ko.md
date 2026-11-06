@@ -132,23 +132,19 @@ masc prerequisite-actions pdf-tools --execute poppler_install
 나타내며, PDF 검사나 검증 통과를 뜻하지 않습니다. MASC를 서비스로 실행한다면 PDF
 검증을 요청하기 전에 서비스의 PATH에서도 두 명령을 찾을 수 있게 설정하세요.
 
-### 브라우저 도구 (geckodriver, Firefox)
+### 브라우저 도구 (Firefox)
 
-브라우저 레인은 portable 릴리스에 들어 있지 않은 호스트 프로그램 둘을 실행합니다.
-automation 레인이 서버와 함께 띄우는 geckodriver와, geckodriver와 attached-Firefox
-레인이 움직이는 Firefox입니다.
+attached-Firefox(BiDi) 레인은 Firefox 를 띄웁니다. Firefox 는 portable 릴리스에
+들어 있지 않습니다.
 
 ```bash
-masc prerequisite-actions geckodriver                       # 상태와 동작 확인
-masc prerequisite-actions geckodriver --execute geckodriver_brew_install
-masc prerequisite-actions firefox
+masc prerequisite-actions firefox                           # 상태와 동작 확인
 masc prerequisite-actions firefox --execute firefox_brew_install
 ```
 
-macOS에서는 기존 Homebrew의 [`geckodriver`](https://formulae.brew.sh/formula/geckodriver)
-formula와 [`firefox`](https://formulae.brew.sh/cask/firefox) cask를 사용합니다.
+macOS에서는 기존 Homebrew의 [`firefox`](https://formulae.brew.sh/cask/firefox) cask를 사용합니다.
 Linux에서는 배포판마다 패키지 이름이 달라서 프로젝트의 다운로드·설치 안내 페이지를
-엽니다. 기본 MASC 설치 과정은 Homebrew나 이 프로그램들을 자동으로 설치하지 않습니다.
+엽니다. 기본 MASC 설치 과정은 Homebrew나 Firefox를 자동으로 설치하지 않습니다.
 `/Applications`에 `Firefox.app`이 이미 있으면 Homebrew가 Firefox cask 설치를
 거절합니다. 그때는 `firefox` 결과가 그 Firefox를 이미 보여 주므로 설치가 필요
 없습니다.
@@ -156,7 +152,7 @@ Linux에서는 배포판마다 패키지 이름이 달라서 프로젝트의 다
 결과는 현재 프로세스 환경에서 프로그램이 `--version`에 답하는지와 그 절대 경로를
 알려 줍니다. 프로그램은 PDF 검사와 같이 일부만 남긴 환경 변수로 실행합니다.
 버전을 출력하는 데 `DISPLAY` 같은 변수가 필요한 프로그램은 답하지 않는 것으로
-나옵니다. `runtime.toml`은 고치지 않습니다. `[browser.automation]`에 실행 파일을
+나옵니다. `runtime.toml`은 고치지 않습니다. `[browser.live.bidi]`에 실행 파일을
 적는 일과 서버 재시작은 별도 단계입니다.
 
 ## 설치
@@ -416,16 +412,10 @@ MCP 서버만 필요하면 `masc start --base-path "$HOME/masc-workspace"`를 �
 ### `imp`에게 브라우저와 GitHub 로그인 주기
 
 setup 여정은 샌드박스 다음에 **5 · Give imp tools (optional)** 를 묻습니다. 체크 목록 하나이고
-브라우저, GitHub, 웹 검색 줄은 체크된 채로, 직접 고르는 Firefox 연결 두 줄과 ego lite 줄,
+GitHub, 웹 검색 줄은 체크된 채로, 직접 고르는 Firefox 연결 두 줄과 ego lite 줄,
 z.ai 줄, SearXNG 줄은 해제된 채로 시작합니다. 확정하기 전에는 아무것도 설치하거나 쓰지 않습니다.
 모든 줄의 체크를 해제하면 아무것도 하지 않고 넘어갑니다(번호로 고르는 화면에서는 `0`을 입력하세요).
 
-- **브라우저.** `imp`가 자기 Firefox에서 웹 페이지를 읽습니다. geckodriver가 그 Firefox를 움직입니다.
-  geckodriver나 Firefox가 없으면 Homebrew 설치(Linux는 공식 다운로드 페이지)를 안내하고, 다시
-  확인한 뒤 `masc browser-lane-setup --mode automation`을 실행합니다. 이 명령이 geckodriver 경로를
-  `runtime.toml`에 쓰고, 이미 적어 둔 geckodriver 가 있으면 그대로 둡니다. 서버는 시작할 때 이 값을
-  읽으므로, 이 줄은 `masc setup`이 서버를 시작하기 전에 실행합니다. 이미 실행 중인 워크스페이스
-  서버를 그대로 쓰기로 했다면 그 서버는 재시작하기 전까지 예전 설정을 쓰고, 여정이 그렇게 알려 줍니다.
 - **GitHub.** 이 컴퓨터의 `gh`에 로그인이 있으면 계정, 토큰의 scope, 토큰이 있는 곳을 보여 주고
   `imp`가 그 로그인을 써도 되는지 묻습니다. 그러면 `imp`는 그 계정 이름으로 push하고 PR을 엽니다.
   토큰은 복사본이 넘어가므로, 이 컴퓨터에서 토큰을 폐기하거나 갱신하면 `imp`가 끊깁니다.
@@ -471,7 +461,7 @@ z.ai 줄, SearXNG 줄은 해제된 채로 시작합니다. 확정하기 전에�
   - *부가기능*: 평소 쓰는 Firefox 에 MASC 부가기능으로 붙습니다. Firefox 를 다시 켜면 부가기능이
     지워져서 그때마다 `about:debugging` 에서 다시 불러야 합니다.
 
-  둘 다 브라우저 줄처럼 `masc setup` 이 서버를 시작하기 전에 씁니다. 같이 골라도 되고, 그러면
+  둘 다 `masc setup` 이 서버를 시작하기 전에 씁니다. 같이 골라도 되고, 그러면
   연결을 지정하지 않은 요청은 BiDi Firefox 로 갑니다. Firefox 를 못 찾으면 둘 다 나오지 않습니다.
   Zen 은 감지하지 않습니다. 직접 연결하려면
   `masc browser-lane-setup --mode extension --manifest-dir <Zen의 native messaging 폴더>` 를
@@ -494,8 +484,6 @@ z.ai 줄, SearXNG 줄은 해제된 채로 시작합니다. 확정하기 전에�
 확인합니다. 설치하거나 쓰는 것은 없습니다. 나중에 직접 실행하려면 다음과 같이 합니다.
 
 ```bash
-# 브라우저 줄: imp 전용 Firefox 의 geckodriver
-masc browser-lane-setup --mode automation --base-path "$HOME/masc-workspace"
 # BiDi 줄: MASC 가 띄우는 전용 Firefox
 masc browser-lane-setup --mode bidi --base-path "$HOME/masc-workspace"
 # 부가기능 줄: 평소 쓰는 Firefox

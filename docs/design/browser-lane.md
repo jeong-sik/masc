@@ -1,9 +1,8 @@
 # Browser Lane
 
-Browser Lane has two sources: `live`, the operator's Firefox/Zen
-WebExtension; and `automation`, an isolated stock Firefox session controlled
-by MASC's OCaml/Eio WebDriver client. See [native-firefox-lane.md](native-firefox-lane.md)
-for the WebDriver endpoint configuration.
+Browser Lane has one source, `live`: a browser the operator runs, reached
+through the Firefox/Zen WebExtension, an attached WebDriver BiDi connection or
+an ego lite task space.
 
 The live extension bridges typed tab reads, viewport capture and explicit-tab interaction commands through
 native messaging. Its host polls `/browser-lane/poll` and returns results to
@@ -15,10 +14,7 @@ answers the ping and the new address does. A result is sent again only when
 its request may not have reached the server (no connection, a broken exchange
 or no answer in time); a result the server answered with any status is logged
 as undelivered and the host returns to polling.
-They accept only `live`. Automation requires the configured in-process
-WebDriver executor and reports `Lane_absent` when it is not installed.
-Session management belongs to the server-owned browsers. A live BiDi
-connection navigates only a tab it opened with `open_tab` (`BrowserGoto` with
+A live BiDi connection navigates only a tab it opened with `open_tab` (`BrowserGoto` with
 `lane = "live"`, its `clientId` and that `tabId`). On the operator's own tabs
 the live lane can follow an observed same-tab HTTP(S) anchor through
 `BrowserInteract`.
@@ -33,8 +29,7 @@ The operator surface is authenticated independently of the connector:
 | Endpoint | Request | Permission |
 |---|---|---|
 | POST `/api/v1/dashboard/browser-lane/read` | `lane`, optional `tabId` | Read state |
-| POST `/api/v1/dashboard/browser-lane/session` | `lane`: automation/stagehand, `action`: open/close, optional `headless` | Operator admin token |
-| POST `/api/v1/dashboard/browser-lane/goto` | `lane`: automation/stagehand, absolute HTTP(S) `url` | Operator admin token |
+| POST `/api/v1/dashboard/browser-lane/goto` | `lane`, `clientId`, `tabId`, absolute HTTP(S) `url` | Operator admin token |
 
 Read replies contain `tabs`, the selected `page`, `source` and measured
 `elapsed_ms`. The page contains `tabId`, `url`, `title`, `text`, `chars` and
@@ -69,49 +64,21 @@ checking rendered application state, and gathering evidence across tabs.
 
 ## Browser controls
 
-On automation Firefox, `set_emulation` overrides the selected tab's reported
-location, locale or time zone. Setting a location grants geolocation permission
-to the current page origin in the owned browser session. `clear_emulation`
-clears the location override and restores the tab's original locale and time
-zone; it leaves page permissions unchanged, including after navigation to a
-different origin. Geolocation grants persist until the owned browser session
-closes. Setting or clearing only a locale or time zone does not change any
-geolocation permission.
-
-On automation Firefox, `block_requests` makes every request from the selected
-tab and its frames to the listed hosts fail as a network error. It adds a
-WebDriver BiDi intercept for the tab's context with one `hostname` pattern per
-host, so a host matches only itself: `ads.example.com` does not cover
-`cdn.ads.example.com`. The BiDi connection fails each held request with
-`network.failRequest` from its own fiber, because the reply to that command
-arrives on the event loop that saw the request. Every intercept on that
-session comes from `block_requests`, so the connection fails every held
-request without matching intercept ids; the `addIntercept` reply can arrive
-after the first request it holds. `unblock_requests` removes the tab's
-intercepts. When the session ends, BiDi lets held requests continue. Requests
-are never answered or changed. A response the browser cached before the block
-is held too, so the cache is not bypassed: on Firefox 158 the probe loads a
-`max-age` response twice (the server sees one request), blocks its host, and
-the third load fails.
-
 `BrowserInteract` requires an observed `tabId` and accepts these closed actions:
 
 | Action | Observed target | Source |
 |---|---|---|
-| `click`, `fill` | `documentId`/`nodeId`, or one visible CSS `selector`; fill adds `text` | live or automation |
-| `follow_link` | `documentId`/`nodeId` for a same-tab HTTP(S) anchor | live or automation |
-| `scroll` | relative CSS pixels `x`/`y` | live or automation |
-| `hover` | `documentId`/`nodeId` or a unique `selector`, plus `expectedUrl`; resolves the current visible, unobstructed element without clicking | live BiDi or automation |
-| `drag_to` | `source` and `destination`, each `{documentId,nodeId}` or `{selector}`, plus `expectedUrl` | live BiDi or automation |
-| `hover_at` | normalized `point`, captured `viewport`, and `expectedUrl`; moves the trusted pointer without clicking | live BiDi or automation |
-| `click_at`, `scroll_at` | normalized `point` and captured `viewport`; scroll adds `x`/`y`; `click_at` also takes `button` (`primary` by default, `middle`, `secondary`) | live or automation; a `middle` or `secondary` click needs live BiDi, automation or Stagehand |
-| `drag` | normalized `from`/`to` and captured `viewport`; trusted pointer press, move and release | live BiDi or automation |
-| `page.console` (`BrowserRead mode=console`) | `tabId`; the tab's console messages and uncaught errors, oldest first, at most 200 kept with `dropped` counting the rest, each text cut at 4000 bytes (`textCut`) | automation only |
-| `page.cookies` (`BrowserRead mode=cookies`) | `tabId`; the cookies the tab's page can see (W3C `Get All Cookies`), at most 200 with `total`: name, domain, path, secure, httpOnly, sameSite, expiry. The value is removed in `Browser_cookies` before it leaves the driver module (`valuesWithheld`) | automation only |
-| `page.network` (`BrowserRead mode=network`) | `tabId`; the tab's requests, oldest first, at most 200 kept with `dropped` counting the rest: method, address, state and, once completed, status, mimeType and bytesReceived. Header names only, never values, cookies or bodies; every query value in the address is `REDACTED` | automation only |
-| `tap_at`, `swipe` | like `click_at` and `drag` (`point`, or `from`/`to` with `via` and `durationMs`), sent by a touch pointer | live BiDi or automation |
-| `set_viewport` | `expectedUrl`, and `width`/`height` in CSS pixels (100 to 4096) given together; live BiDi or automation Firefox with neither restores the browser's own size; automation Firefox resizes its window (about 500 x 120 outer pixels at least) | live BiDi, automation Firefox or Stagehand |
-| `select_option` | `expectedUrl` is optional; a `selector` for one single-choice `<select>` and the exact `value` of one enabled option. A multiple select, a missing, repeated or disabled option, or a non-select element is refused before any effect. Sets the option and emits `input` and `change`; it is not a trusted click on the list | live or automation |
+| `click`, `fill` | `documentId`/`nodeId`, or one visible CSS `selector`; fill adds `text` | live |
+| `follow_link` | `documentId`/`nodeId` for a same-tab HTTP(S) anchor | live |
+| `scroll` | relative CSS pixels `x`/`y` | live |
+| `hover` | `documentId`/`nodeId` or a unique `selector`, plus `expectedUrl`; resolves the current visible, unobstructed element without clicking | live BiDi |
+| `drag_to` | `source` and `destination`, each `{documentId,nodeId}` or `{selector}`, plus `expectedUrl` | live BiDi |
+| `hover_at` | normalized `point`, captured `viewport`, and `expectedUrl`; moves the trusted pointer without clicking | live BiDi |
+| `click_at`, `scroll_at` | normalized `point` and captured `viewport`; scroll adds `x`/`y`; `click_at` also takes `button` (`primary` by default, `middle`, `secondary`) | live; a `middle` or `secondary` click needs live BiDi |
+| `drag` | normalized `from`/`to` and captured `viewport`; trusted pointer press, move and release | live BiDi |
+| `tap_at`, `swipe` | like `click_at` and `drag` (`point`, or `from`/`to` with `via` and `durationMs`), sent by a touch pointer | live BiDi |
+| `set_viewport` | `expectedUrl`, and `width`/`height` in CSS pixels (100 to 4096) given together; with neither, live BiDi restores the browser's own size | live BiDi |
+| `select_option` | `expectedUrl` is optional; a `selector` for one single-choice `<select>` and the exact `value` of one enabled option. A multiple select, a missing, repeated or disabled option, or a non-select element is refused before any effect. Sets the option and emits `input` and `change`; it is not a trusted click on the list | live |
 | `activate_tab` | the selected live `clientId`/`tabId` | live WebExtension only |
 
 `BrowserRead mode=scene` supplies document-scoped node references and visible
@@ -140,9 +107,9 @@ The browser must echo each requested filter and its nonnegative match count.
 An older running extension that ignores a filter is refused before its controls
 reach the caller. Updating installed extension files or reconnecting a native
 host does not itself reload an already-running background script; reload the
-add-on in the connected browser after setup. Native WebDriver, live BiDi,
-Stagehand and ego use the same page observation script; their existing frame
-and interaction limits still apply.
+add-on in the connected browser after setup. Live BiDi and ego use the same
+page observation script; their existing frame and interaction limits still
+apply.
 
 Use those observations rather than inventing selectors or node IDs. A node
 reference and a CSS selector are alternative targets and cannot be combined.
@@ -217,8 +184,7 @@ input clicks, hovers, scrolls at a point and types. Finding a target and acting
 on it are two runs that share the command's window.
 
 Native adapters share the semantic pointer decoder for observed geometry and
-URL. WebDriver, BiDi and ego also share the action classification; Stagehand
-retains its timing preflight. Native drag adapters share the intermediate
+URL. BiDi and ego also share the action classification. Native drag adapters share the intermediate
 waypoint calculation; each retains its own native input and release handling.
 
 Ego serves `drag_to` and `drag` with its native mouse API on agent pages.
@@ -254,15 +220,14 @@ Fill supports text inputs and textareas through the native value setter plus
 input/change events; it never sends Enter or calls submit. The website's own
 event handlers may react. Missing, ambiguous, disabled and unsupported targets
 return errors. This interface accepts no arbitrary script. `framePath` (selector-based click,
-fill, select_option and scroll) is served by the owned Gecko browser and a live BiDi connection; the extension
-and Stagehand refuse it before any effect.
-Automation frame reads, JS dialogs and file selection use
+fill, select_option and scroll) is served by a live BiDi connection; the extension
+refuses it before any effect.
+Frame reads, JS dialogs and file selection use
 the separate `BrowserRead`/`BrowserAct` contracts described in the
 [advanced browser instruction](../../skills/browser-lanes/references/advanced.md).
 
 Interactions are ordered writes under the same tool permission policy as
-`BrowserGoto`; live interaction uses the operator's logged-in tab. Session
-creation and closure belong to the server-owned browsers. Direct URL
+`BrowserGoto`; live interaction uses the operator's logged-in tab. Direct URL
 navigation on a live connection is limited to a tab that BiDi connection
 opened.
 
@@ -309,8 +274,7 @@ BiDi host's record says ([Live BiDi browser host](browser-bidi-live-host.md)). B
 interactions accept `clientId`. With no ID, only one connected live client can
 be selected; multiple connections return `ambiguous_browser_clients`, and none
 returns `no_live_client`. An explicit missing/retired ID returns
-`selected_client_disconnected`; it never selects a replacement. Automation
-requests omit `clientId` and return it as null.
+`selected_client_disconnected`; it never selects a replacement.
 
 `masc doctor` and the dashboard's setup check (`GET /api/v1/setup/status`)
 report the lane as one `browser_lane` line. Hosts register with the browser
@@ -364,10 +328,6 @@ Page-provided Space metadata is discarded with the other connection fields.
 Read composition rejects a changed Space ID even if its client UUID is reused.
 Missing, duplicate or cross-transport Space context is rejected at decoding.
 
-One answer does not follow that rule. The automation lane's optional document
-read keeps `clientId: "automation:<session>"`, the session its observer read,
-because the document source requires that string.
-
 Native transport requires `x-lane: live`, the lane token, and the identity
 headers: `x-browser-client-id`, `x-browser-name`, `x-browser-version`, and
 `x-browser-engine-version`. Hosts also declare `x-browser-transport` as
@@ -408,7 +368,7 @@ While the viewport is open, wheel up/down or `j`/`k`/arrow keys scroll the actua
 selected page by 120 CSS pixels, then capture it again. Terminal pointer presses
 and releases map the displayed image to normalized click or drag coordinates.
 Either live connection takes point clicks and scrolling; a drag needs the
-BiDi connection or automation.
+BiDi connection.
 `r` captures the same page again; `Esc` returns to the text reader. Other keys
 and pastes are consumed by the viewport and cannot edit a hidden draft. Inputs
 during an in-flight action are not queued. Errors are shown without replaying
@@ -429,9 +389,9 @@ Rendering uses the existing [Kitty graphics protocol](https://sw.kovidgoyal.net/
 or iTerm2 image path; unsupported terminals retain the explicit image diagnostic.
 
 The [native evidence](https://github.com/jeong-sik/masc/pull/35796)
-separates live Keeper navigation/shared textual TUI observations from automation
-TUI gestures. Its automation drag result does not establish live drag support,
-and its captured PNGs are not evidence that a model inspected those images.
+covers live Keeper navigation and shared textual TUI observations. It does not
+establish live drag support, and its captured PNGs are not evidence that a model
+inspected those images.
 
 
 ### Followed document readiness

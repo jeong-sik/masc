@@ -5,7 +5,7 @@ status: Accepted
 created: 2026-10-08
 updated: 2026-10-09
 author: vincent + claude
-related: ["browser-lane-stagehand", "setup-web-search-and-browser-lane", "browser-keeper-firefox"]
+related: ["setup-web-search-and-browser-lane", "browser-keeper-firefox"]
 ---
 
 # RFC — live 브라우저 일 하나를 한 연결로 끝낸다

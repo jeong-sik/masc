@@ -56,11 +56,11 @@ request and validate the returned decision before the existing domain commit.
 | HITL Auto Judge | [`Hitl_summary_request.capture_context_bundle`/`parse_summary`](../../lib/keeper/hitl_summary_request.mli) freeze host facts and decode judgment. [`Hitl_summary_worker.spawn`](../../lib/keeper/hitl_summary_worker.mli) admits a whole ordered exact flow before forking. | Approval queue, source identity, durable bind/release/terminalization and external-effect authority remain host-owned. `on_summary` follows verified provenance and durable completion; a summary is not permission to run an effect. | Candidate boundary is judgment execution. Preserve AGENT_CORE ownership of admission/attempts/failover and the worker's terminalization rules. Required availability must survive replacement; an arbitrary Optional-style Off is insufficient. |
 | Board Attention | [`Keeper_board_attention_exact_flow.prepare`/`execute`](../../lib/keeper/keeper_board_attention_exact_flow.mli) snapshot one resumable durable candidate and execute an affine flow. | [`Keeper_board_attention_worker`](../../lib/keeper/keeper_board_attention_worker.mli), candidate/partition stores and owner intake retain Ready/claim/Blocked/recovery, completed-result delivery and consumption. A delivery failure must not consume its candidate. | Extract execution only after retaining before-dispatch and before-advance provenance callbacks. Host recovery returns cut claims to Ready. Required service replacement must preserve queued work and its owner wake; do not replace durable intake with worker-local queues. |
 | Verifier | [`Completion_authority_agent.start`](../../lib/completion_authority_agent.mli) reads immutable verification requests and submitted evidence, delegates judgment and commits through workspace authority. | Submitted evidence access, Task/Goal transition authority, provenance validation, retry classification and human confirmation stay with the host. | Separate model evaluation from final authority before deciding process extraction. A worker may propose a typed verdict, not manufacture a completed Task/Goal or replace the evidence snapshot with current mutable files. |
-| Browser Stagehand | The Browser Addon stack already supplies worker dispatch and host model mediation. Its consumer request-schema path is the shared dependency described below. | Host caller/workspace authority, model credentials, profile/context ownership, download grants, artifacts and action receipts remain authoritative. | Reuse the existing Browser worker/model path. Do not add another Stagehand executor. Qualify capability selection and real app interaction under worklist F/H. |
 
 The Required/Optional policy comes from
 [`Standalone_lane.obligation`](../../lib/runtime/standalone_lane.ml): HITL Auto
-Judge and Board Attention are Required; the other five are Optional. Addon
+Judge and Board Attention are Required; Librarian, Verifier and Candle
+Appraiser are Optional. Addon
 packaging does not change that policy. Required service replacement must first
 admit a successor or preserve an explicit recoverable unavailable state and all
 pending work. A manifest flag cannot override the host's service obligation.
@@ -78,8 +78,8 @@ pending work. A manifest flag cannot override the host's service obligation.
 
 ## Candle request-schema contract
 
-This is the planned use of the existing Browser grant, not a second schema
-broker. Implement it only against a source revision that includes that grant,
+This is the planned use of the existing consumer request-schema grant, not a
+second schema broker. Implement it only against a source revision that includes that grant,
 either after integration or with an explicit native-stack dependency.
 
 1. The package declares named Grade, Relation and Weights outputs. Their package

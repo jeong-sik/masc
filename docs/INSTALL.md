@@ -132,25 +132,21 @@ current process environment; it does not claim that a PDF has been inspected or
 accepted. If MASC runs as a service, make the tools available on that service's
 PATH before requesting PDF verification.
 
-### Browser tools (geckodriver and Firefox)
+### Browser tools (Firefox)
 
-The browser lanes start two host programs that the portable release does not
-include: geckodriver, which the automation lane starts together with the server,
-and Firefox, which geckodriver and the attached-Firefox lane drive.
+The attached-Firefox (BiDi) lane starts Firefox, which the portable release does
+not include.
 
 ```bash
-masc prerequisite-actions geckodriver                       # state and actions
-masc prerequisite-actions geckodriver --execute geckodriver_brew_install
-masc prerequisite-actions firefox
+masc prerequisite-actions firefox                           # state and actions
 masc prerequisite-actions firefox --execute firefox_brew_install
 ```
 
-On macOS the actions use an existing Homebrew: the
-[`geckodriver`](https://formulae.brew.sh/formula/geckodriver) formula and the
-[`firefox`](https://formulae.brew.sh/cask/firefox) cask. On Linux they open the
+On macOS the action uses an existing Homebrew: the
+[`firefox`](https://formulae.brew.sh/cask/firefox) cask. On Linux it opens the
 project's own download or instruction page, because the package names differ by
-distribution. The default MASC bootstrap does not install Homebrew or these
-programs. Homebrew refuses the Firefox cask when `Firefox.app` is already in
+distribution. The default MASC bootstrap does not install Homebrew or Firefox.
+Homebrew refuses the Firefox cask when `Firefox.app` is already in
 `/Applications`; the `firefox` result then reports that copy and no install is
 needed.
 
@@ -158,7 +154,7 @@ The result says whether the program answers `--version` in the current process
 environment, and at which absolute path. The program runs with the same reduced
 environment the PDF check uses, so a program that needs a display variable to
 print its version is reported as not answering. It does not edit `runtime.toml`: naming
-the executable in `[browser.automation]` and restarting the server are separate
+the executable in `[browser.live.bidi]` and restarting the server are separate
 steps.
 
 ## Install
@@ -444,20 +440,12 @@ For an MCP-only server, use `masc start --base-path "$HOME/masc-workspace"` and 
 ### Giving `imp` a browser and a GitHub login
 
 After the sandbox, the setup journey asks **5 · Give imp tools (optional)**. It is
-one checklist. The Browser, GitHub and Web search rows start marked; the rows
+one checklist. The GitHub and Web search rows start marked; the rows
 that connect a Firefox you choose, the ego lite row, the z.ai row and the
 SearXNG row do not.
 Nothing is installed or written until you confirm it. Unmark every row to continue without any of them (on a terminal
 that shows numbers, type `0`).
 
-- **Browser.** `imp` reads web pages in a Firefox of its own, driven through
-  geckodriver. If geckodriver or Firefox is missing, the journey offers the
-  Homebrew install (the official download page on Linux), checks again, and then
-  runs `masc browser-lane-setup --mode automation`. That writes the geckodriver
-  path into `runtime.toml`, keeping a geckodriver you already wrote there. The
-  server reads it when it starts, so this row runs before `masc setup` starts the
-  server. If a workspace server is already running (you chose to continue with
-  it), it keeps the old setting until you restart it, and the journey says so.
 - **GitHub.** If `gh` on this computer is logged in, the journey shows the
   account, the token's scopes and where the token lives, and asks whether `imp`
   may use that login. `imp` then pushes and opens pull requests as that account.
@@ -516,7 +504,7 @@ that shows numbers, type `0`).
     add-on when it restarts, so you load it again from `about:debugging` each
     time.
 
-  Both write before `masc setup` starts the server, like the browser row, and
+  Both write before `masc setup` starts the server, and
   both can be chosen together: a request that names no connection then goes to
   the BiDi Firefox. With no Firefox found the journey shows neither. A Zen
   browser is not detected: connect it by hand with
@@ -544,8 +532,6 @@ asks Docker about the `masc-searxng` container and the local address for an
 answer, and installs and writes nothing. To run them later:
 
 ```bash
-# Browser row: geckodriver in imp's own Firefox
-masc browser-lane-setup --mode automation --base-path "$HOME/masc-workspace"
 # BiDi row: a Firefox of its own that MASC starts
 masc browser-lane-setup --mode bidi --base-path "$HOME/masc-workspace"
 # Add-on row: your everyday Firefox

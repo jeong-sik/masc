@@ -794,7 +794,11 @@ let test_search_answer_needs_the_search_palette_it_was_asked_in () =
 
 let test_choosing_a_search_match_opens_it_at_its_line () =
   let state, _, here, _ = search_fixture () in
-  let foreign = search_match "src/old.ml" 2 "let b = needle" in
+  (* Same text as [here], but not the record the answer holds. A native build
+     makes two records built from the same constants one static value, and
+     [choose_search_match] compares by identity, so the text goes through
+     [Sys.opaque_identity] to get a record allocated at run time. *)
+  let foreign = search_match "src/old.ml" 2 (Sys.opaque_identity "let b = needle") in
   (match Code_results.choose_search_match state foreign with
    | Code_results.No_followup -> ()
    | Code_results.Reveal_cursor | Code_results.Choose_location

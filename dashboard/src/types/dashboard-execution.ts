@@ -1,7 +1,6 @@
 import type { KeeperActivationMode } from '../lib/keeper-activation-mode'
 import type { GoalProof, Agent, BoardPost, StopCause, ExecutionSignalTruth, EvidenceSourceCore, TrustDisposition } from './core'
 import type {
-  BoardMonitoring,
   KeeperApprovalQueueState,
   PendingConfirmSummary,
 } from './gate'
@@ -462,8 +461,6 @@ export interface DashboardExecutionResponse {
   generated_at?: string
   status?: ServerStatus
   summary?: DashboardExecutionSummary
-  social_tick?: unknown
-  social_checkins?: unknown[]
   execution_queue?: unknown[]
   operation_briefs?: unknown[]
   worker_support_briefs?: unknown[]
@@ -761,29 +758,4 @@ export interface ServerStatus {
   uptime_seconds?: number
   tempo_interval_s?: number
   tempo?: string
-  tool_call_health?: {
-    window_hours: number
-    tool_calls: number
-    failures: number
-    failure_rate: number
-    since_epoch: number
-    distinct_tools?: number
-    top_failures?: Array<{ tool: string; calls: number; failures: number }>
-    top_active?: Array<{ tool: string; calls: number; failures: number }>
-  }
-  alert_thresholds?: {
-    proactive_fallback_warn: number
-    proactive_fallback_bad: number
-    proactive_similarity_warn: number
-    proactive_similarity_bad: number
-    toast_cooldown_sec: number
-  }
-  monitoring?: {
-    board?: BoardMonitoring
-  }
-  data_quality?: {
-    board_contract_ok?: boolean
-    gate_feed_ok?: boolean
-    last_sync_at?: string
-  }
 }

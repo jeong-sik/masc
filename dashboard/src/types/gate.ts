@@ -3,22 +3,6 @@
 import type { KeeperResolvedApprovalDecision } from '../lib/keeper-approval-decision'
 export type { KeeperResolvedApprovalDecision } from '../lib/keeper-approval-decision'
 
-// Wire emit: `lib/dashboard/dashboard_http_monitoring.ml:143–149,170,
-//   195–199,226` — alert_level is computed as exactly one of
-//   {"ok","warn","bad"}. The previous `| string` catch-all hid this
-//   closed vocabulary and let unmapped values flow through.
-export type DashboardAlertLevel = 'ok' | 'warn' | 'bad'
-
-export interface BoardMonitoring {
-  alert_level?: DashboardAlertLevel
-  posts_total?: number
-  new_posts_24h?: number
-  unanswered_posts?: number
-  last_activity_age_s?: number | null
-  slo_target_age_s?: number
-  slo_breached?: boolean
-}
-
 export interface PendingConfirmation {
   confirm_token: string
   trace_id: string

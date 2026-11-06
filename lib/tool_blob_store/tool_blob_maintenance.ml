@@ -610,6 +610,7 @@ type exclusion =
   | Repository_mirror
   | Unpublished_write
   | Writes_no_reference
+  | Repairable_pointer
 
 type source =
   | Tree

@@ -138,6 +138,9 @@ type exclusion =
   | Unpublished_write  (** An atomic write's staging file. *)
   | Writes_no_reference
       (** A store whose producer writes no tool blob reference. *)
+  | Repairable_pointer
+      (** It names a blob that stores in scope own. When the blob is gone,
+          its producer writes it again from another store. *)
 
 type source =
   | Tree  (** Every regular file below the entry is read. *)

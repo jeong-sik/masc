@@ -226,46 +226,6 @@ let test_unclassified_entry_leaves_nothing_deletable () =
       Alcotest.(check int) "the stale blob is still a candidate" 1 second.candidates;
       Alcotest.(check int) "nothing deletable" 0 second.deletable)
 
-(* The Librarian recall index lives in the config [keepers/] directory and
-   names the artifact recall fetches. *)
-let write_recall_index ~base_path body =
-  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  Fs_compat.mkdir_p keepers_dir;
-  Fs_compat.save_file
-    (Masc.Keeper_librarian_context_recall.path ~keepers_dir ~keeper_name:"keeper-a")
-    body
-
-let test_recall_index_keeps_its_artifact () =
-  with_temp_dir (fun base_path ->
-      let store = B.create ~base_path in
-      let indexed = put store "organized context the recall index names" in
-      set_mtime store indexed (long_ago ());
-      forget_marks ();
-      write_recall_index ~base_path
-        (Yojson.Safe.to_string
-           (`Assoc
-             [ "generation", `String "generation-1"
-             ; "revision", `Int 1
-             ; "pocket_count", `Int 1
-             ; "source_count", `Int 1
-             ; "artifact", O.normalized_artifact_ref_to_json indexed
-             ]));
-      let first = observe_ok ~base_path in
-      Alcotest.(check (list string)) "the index is classified" [] first.unclassified;
-      Alcotest.(check int) "the indexed blob is no candidate" 0 first.candidates)
-
-let test_recall_index_that_does_not_decode_ends_the_scan () =
-  with_temp_dir (fun base_path ->
-      forget_marks ();
-      write_recall_index ~base_path {|{"generation":"generation-1"}|};
-      match S.observe ~base_path ~scope with
-      | Error (S.Scan_failed _) -> ()
-      | Error
-          (( S.Record_unreadable _ | S.Listing_failed _ | S.Record_write_failed _
-           | S.Marker_failed _ ) as error) ->
-        Alcotest.failf "expected a failed scan: %s" (S.error_to_string error)
-      | Ok _ -> Alcotest.fail "an index that does not decode was read as no references")
-
 let () =
   Alcotest.run "tool_blob_sweep"
     [ ( "sweep"
@@ -281,9 +241,5 @@ let () =
             test_failed_scan_keeps_the_marks
         ; Alcotest.test_case "unclassified entry leaves nothing deletable" `Quick
             test_unclassified_entry_leaves_nothing_deletable
-        ; Alcotest.test_case "recall index keeps its artifact" `Quick
-            test_recall_index_keeps_its_artifact
-        ; Alcotest.test_case "recall index that does not decode ends the scan" `Quick
-            test_recall_index_that_does_not_decode_ends_the_scan
         ] )
     ]

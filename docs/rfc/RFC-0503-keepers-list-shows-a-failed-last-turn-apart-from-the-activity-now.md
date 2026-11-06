@@ -199,6 +199,11 @@ type attention = Attention | Failing | Active | Waiting | Inactive | Unobserved
 2. `Activity` 정렬에서 failing 행이 위에 모이지 않는다.
 3. `failure` 라는 단어가 화면에서 없어진다.
 
+옛 칸의 흔적이 같은 파일에 남아 있다.
+
+- 도움말의 `Keeper columns`(`bin/masc_tui_keeper_mark.ml:111-119`, 생성 문서 `docs/guides/TUI-KEYS.md:839-843`)는 `HEALTH` 와 `TURN` 칸을 설명한다. 목록 머리글에는 그런 칸이 없고 `NOW` 와 `AGE` 가 있다(`bin/masc_tui_render_keepers.ml:257-274`). L4 에서 `NOW` `AGE` 직전 칸을 설명하는 글로 바꾸고 생성 문서를 다시 만든다.
+- `open_turn` 과 `turn_clock`(`bin/masc_tui_keeper_mark.ml:49-73`)은 그 옛 칸의 값이다. 부르는 곳은 시험(`test/test_tui_keeper_mark.ml`)뿐이다. `Worked_while_failing` 은 이 RFC 의 `trail` 과 같은 사실을 다른 이름으로 적는다. L2 에서 시험과 함께 지운다(D7).
+
 ## 4. 하지 않는 것
 
 - 서버 코드, 와이어 필드, 영수증 형식을 바꾸지 않는다.
@@ -214,9 +219,9 @@ type attention = Attention | Failing | Active | Waiting | Inactive | Unobserved
 | 층 | 내용 | 확인 |
 | --- | --- | --- |
 | L1 | 이 RFC | 운영자가 받아들인다 |
-| L2 | `activity` / `trail` 분리, `Failing` 묶음, `Failure` 삭제 | 결정 시험, §7 의 `rg` 기준선이 0 으로 |
+| L2 | `activity` / `trail` 분리, `Failing` 묶음, `Failure` 삭제, 안 쓰는 `open_turn` `turn_clock` 삭제 | 결정 시험, §7 의 `rg` 기준선이 0 으로 |
 | L3 | `cause_group`, `walk`, 직전 문장 | 생성자 대응표 리뷰, 15행 변환 계산표 |
-| L4 | 색, 묶음 제목, 글리프 | 80 · 120 · 200칸 캡처, 색을 지운 캡처, 질문 6개 표 |
+| L4 | 색, 묶음 제목, 글리프, 도움말의 칸 설명 | 80 · 120 · 200칸 캡처, 색을 지운 캡처, 질문 6개 표 |
 | L5(선택) | `Detailed` 둘째 줄에 시도 목록, `runtime_path_rest` 디코딩 | 캡처 |
 
 - 층마다 `gh stack` 의 한 PR 이고 Draft 다. 한 PR 은 토큰 2만 이하로 둔다.
@@ -271,6 +276,7 @@ L2 가 끝나면 첫째와 셋째는 출력이 없고, 둘째는 제목 문자�
 | D4 | `retry_after` 를 보일까 | `Some` 일 때만 서버가 말한 값 그대로 `▸` 로 보인다. `None` 이면 아무것도 쓰지 않는다. 읽기 A 는 15/15 가 `None` 이라 지금은 거의 안 보인다 |
 | D5 | `Activity` 정렬에서 failing 행이 위에 모이지 않는 것을 받아들일까 | 받아들인다. 모으는 일은 `Priority` 정렬과 `Grouped` 가 맡는다 |
 | D6 | `Detailed` 둘째 줄에 시도 목록을 둘까 | L5 로 미룬다. 1단계는 첫 줄만 바꾼다 |
+| D7 | 옛 `HEALTH` `TURN` 칸의 값(`open_turn` `turn_clock`)을 L2 에서 같이 지울까 | 지운다. 시험만 부르고, 남기면 같은 사실을 두 이름으로 적는다 |
 
 ## 9. 참고
 

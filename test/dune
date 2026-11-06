@@ -3194,10 +3194,6 @@
 
 (include stanzas/test_otel_histogram_bucket_labels.inc)
 
-(include stanzas/test_keeper_receipt_authoritative.inc)
-
-(include stanzas/test_keeper_receipt_authoritative_matrix.inc)
-
 (include stanzas/test_keeper_raw_trace_sink.inc)
 
 (include stanzas/test_keeper_autonomous_turn_source.inc)

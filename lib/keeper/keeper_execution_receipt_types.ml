@@ -23,28 +23,6 @@ type error_kind = Error_kind of string
 let error_kind_of_string value = Error_kind value
 let error_kind_to_string (Error_kind value) = value
 
-(* TLA+ ReceiptIsAuthoritative invariant
-   (specs/keeper-turn-fsm/KeeperTurnFSM.tla:336):
-     receipt_outcome = "receipt_done" => turn_state = "done"
-   Per ReceiptMatchesState the [Done] state also accepts receipt_skipped
-   (PhaseGateSkip path), so this helper enforces the receipt-authoritative
-   direction for both `Ok and `Skipped: a successful-terminal receipt
-   MUST be paired with turn_state = "done". `Error and `Cancelled are
-   left to ReceiptMatchesState (a separate invariant) and accepted here
-   so this helper is single-concern. *)
-type receipt_authority_violation =
-  { outcome : string
-  ; turn_state : string
-  }
-
-let assert_receipt_authoritative ~outcome ~turn_state =
-  match outcome, turn_state with
-  | `Ok, "done" | `Skipped, "done" -> Ok ()
-  | `Ok, other -> Error { outcome = "receipt_done"; turn_state = other }
-  | `Skipped, other -> Error { outcome = "receipt_skipped"; turn_state = other }
-  | (`Error | `Cancelled), _ -> Ok ()
-;;
-
 type tool_surface =
   { turn_lane : Keeper_agent_tool_surface.turn_lane }
 

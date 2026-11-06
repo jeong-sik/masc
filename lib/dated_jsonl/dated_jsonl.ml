@@ -1487,6 +1487,8 @@ let count_cache_of_json = function
   | _ -> []
 ;;
 
+let count_cache_filename = "dated-jsonl-count-cache.json"
+
 let save_count_cache ~path =
   match count_cache_rows () with
   | [] -> Ok ()

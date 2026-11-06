@@ -461,6 +461,9 @@ val count_entries_uncached : t -> int
     trailing unterminated line. Use in tests or rare audit paths that
     must observe the live filesystem byte-for-byte. *)
 
+val count_cache_filename : string
+(** The count cache's file name below [<base>/.masc]. *)
+
 val save_count_cache : path:string -> (unit, string) result
 (** Writes the per-file (path, boundary, count) cache to [path] via a
     temp-file rename. The cache is never an authority: every entry is still

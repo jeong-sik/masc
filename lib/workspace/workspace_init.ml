@@ -5,7 +5,6 @@
 
 open Masc_domain
 open Workspace_utils
-open Workspace_state
 
 type initialization_error =
   | Cold_memory_has_local_document of string

@@ -1,7 +1,6 @@
 (** Single-binding → [Provider_config.t] materialization (RFC-0206 §5).
 
-    Re-homed from the deleted [Runtime_declarative_adapter]. Keeps only the
-    binding materialization path:
+    Covers only the binding materialization path:
 
     - TOML provider.id -> declared provider metadata (via {!Runtime_schema})
     - provider metadata + model spec -> {!Llm_provider.Provider_config.t}
@@ -39,7 +38,7 @@ type execution_materialization =
   ; credential_admission : Runtime_credential_selection.admission option
   }
 
-(* --- Inlined from the deleted [Runtime_config_provider_binding] --- *)
+(* --- Header and request-path helpers --- *)
 
 let normalize_header_key key = String.lowercase_ascii (String.trim key)
 

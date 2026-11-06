@@ -6,8 +6,7 @@ val default_http_request_path :
 
 (** Single-binding → hot-path [Provider_config.t] materialization (RFC-0206 §5).
 
-    Re-homed from the deleted [Runtime_declarative_adapter], keeping only the
-    binding materialization path. Routing layers — aliases, routes,
+    Covers only the binding materialization path. Routing layers — aliases, routes,
     system_targets, capability profiles, [Runtime_strategy] mapping, the
     [adapted_catalog] aggregate, and the typed [adapter_error] list — are
     intentionally dropped (a Runtime is one pre-selected binding, not a

@@ -1,10 +1,7 @@
-(** Provider identity helpers shared across {!Runtime_config} submodules.
+(** Provider identity helpers.
 
     All functions are pure with respect to the runtime binding registry and
-    {!Llm_provider} SSOTs. No I/O. Intentionally kept stdlib-light: the
-    callers in {!Runtime_config_parser}, {!Runtime_config_selection},
-    {!Runtime_config_resolve}, and {!Runtime_config_strategy_resolve} pick up
-    these helpers as their lowest layer.
+    {!Llm_provider} SSOTs. No I/O.
 
     @stability Internal *)
 

@@ -73,7 +73,7 @@ describe('Ops surface', () => {
     operatorError.value = null
     operatorDigestError.value = null
     operatorSnapshot.value = {
-      root: { paused: false, namespace: 'default' },
+      root: { namespace: 'default' },
       sessions: [],
       keepers: [],
       recent_messages: [],
@@ -132,7 +132,7 @@ describe('Ops surface', () => {
     operatorError.value = null
     operatorDigestError.value = null
     operatorSnapshot.value = {
-      root: { paused: false, namespace: 'default' },
+      root: { namespace: 'default' },
       sessions: [],
       keepers: [],
       recent_messages: [],
@@ -170,7 +170,7 @@ describe('Ops surface', () => {
     operatorWorkspaceDigest.value = null
     operatorActionLog.value = []
     operatorSnapshot.value = {
-      root: { paused: false },
+      root: {},
       sessions: [],
       keepers: [{
         name: 'sojin',
@@ -231,7 +231,7 @@ describe('Ops surface', () => {
     operatorError.value = 'Operator error banner'
     operatorDigestError.value = 'Digest error banner'
     operatorSnapshot.value = {
-      root: { paused: false, namespace: 'default' },
+      root: { namespace: 'default' },
       sessions: [],
       keepers: [{ name: 'keeper-a', status: 'online' }],
       recent_messages: [],
@@ -287,7 +287,7 @@ describe('Ops surface', () => {
     operatorError.value = null
     operatorDigestError.value = null
     operatorSnapshot.value = {
-      root: { paused: false, namespace: 'default' },
+      root: { namespace: 'default' },
       sessions: [],
       keepers: [{ name: 'qa-king', status: 'online' }],
       recent_messages: [],
@@ -332,7 +332,7 @@ describe('Ops surface', () => {
     operatorError.value = null
     operatorDigestError.value = null
     operatorSnapshot.value = {
-      root: { paused: true, namespace: 'default' },
+      root: { namespace: 'default' },
       sessions: [],
       keepers: [],
       recent_messages: [],
@@ -361,7 +361,7 @@ describe('Ops surface', () => {
     expect(container.textContent).not.toContain('매뉴얼 처리')
   }, 120000)
 
-  it('shows paused-namespace hint in activity timeline empty state when namespace is paused', async () => {
+  it('shows the standard empty message when there is no recent activity', async () => {
     const {
       Ops,
       route,
@@ -378,47 +378,7 @@ describe('Ops surface', () => {
     operatorError.value = null
     operatorDigestError.value = null
     operatorSnapshot.value = {
-      root: { paused: true, namespace: 'default', pause_reason: '배포 윈도우', paused_by: 'vincent' },
-      sessions: [],
-      keepers: [],
-      recent_messages: [],
-      available_actions: [],
-    } as unknown as OperatorSnapshot
-    operatorWorkspaceDigest.value = {
-      target_type: 'namespace',
-      attention_items: [],
-      recommended_actions: [],
-    } as unknown as OperatorDigest
-    operatorActionLog.value = []
-
-    render(html`<${Ops} />`, container)
-    await flushUi()
-
-    const empty = container.querySelector('[data-testid="ops-activity-timeline-empty"]')
-    expect(empty).toBeTruthy()
-    expect(empty?.textContent).toContain('Namespace is paused')
-    expect(empty?.textContent).toContain('배포 윈도우')
-    expect(empty?.textContent).toContain('by vincent')
-  }, 60000)
-
-  it('shows standard empty message when running namespace has no recent activity', async () => {
-    const {
-      Ops,
-      route,
-      operatorActionLog,
-      operatorDigestError,
-      operatorError,
-      operatorWorkspaceDigest,
-      operatorSnapshot,
-      hydratedWorkflowId,
-    } = await loadOps()
-
-    route.value = { tab: 'command', params: { section: 'operations' }, postId: null } as RouteState
-    hydratedWorkflowId.value = null
-    operatorError.value = null
-    operatorDigestError.value = null
-    operatorSnapshot.value = {
-      root: { paused: false, namespace: 'default' },
+      root: { namespace: 'default' },
       sessions: [],
       keepers: [],
       recent_messages: [],
@@ -437,7 +397,6 @@ describe('Ops surface', () => {
     const empty = container.querySelector('[data-testid="ops-activity-timeline-empty"]')
     expect(empty).toBeTruthy()
     expect(empty?.textContent).toContain('No operator activity in the last 3 days')
-    expect(empty?.textContent).not.toContain('paused')
   }, 60000)
 
   it('separates expected unavailable scope from actionable token evidence without duplicate keepers', async () => {
@@ -450,7 +409,7 @@ describe('Ops surface', () => {
       },
     }
     operatorSnapshot.value = {
-      root: { paused: false }, sessions: [], recent_messages: [], available_actions: [],
+      root: {}, sessions: [], recent_messages: [], available_actions: [],
       keepers: [unobserved, {
         name: 'reported-over-window',
         context_metrics_unavailable: {
@@ -485,7 +444,7 @@ describe('Ops surface', () => {
     // shows up in both sections under the SAME name. Pre-fix this returned 2
     // diagnostics for that one identity (rendered twice: Keeper + Persistent agent).
     const snapshot = {
-      root: { paused: false },
+      root: {},
       sessions: [],
       keepers: [{
         name: 'autoboot-a',
@@ -515,7 +474,7 @@ describe('Ops surface', () => {
     const { contextMetricsDiagnostics } = await loadOps()
 
     const snapshot = {
-      root: { paused: false },
+      root: {},
       sessions: [],
       keepers: [],
       persistent_agents: [{
@@ -539,7 +498,7 @@ describe('Ops surface', () => {
   it('keeps not-observed context typed while ignoring absent diagnostics', async () => {
     const { contextMetricsDiagnostics } = await loadOps()
     const snapshot = {
-      root: { paused: false },
+      root: {},
       sessions: [],
       keepers: [
         {
@@ -588,7 +547,7 @@ describe('Ops surface', () => {
     operatorError.value = null
     operatorDigestError.value = null
     operatorSnapshot.value = {
-      root: { paused: false, namespace: 'default' },
+      root: { namespace: 'default' },
       sessions: [],
       keepers: [],
       recent_messages: [],

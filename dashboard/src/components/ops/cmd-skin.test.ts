@@ -40,7 +40,7 @@ function seedStores(stores: Awaited<ReturnType<typeof loadOps>>, view?: string):
   stores.operatorError.value = null
   stores.operatorDigestError.value = null
   stores.operatorSnapshot.value = {
-    root: { paused: false, namespace: 'default' },
+    root: { namespace: 'default' },
     sessions: [],
     keepers: [{ name: 'keeper-a', status: 'online' }],
     recent_messages: [],
@@ -116,7 +116,7 @@ describe('Ops command-surface skin (keeper-v2 command.jsx parity)', () => {
     seedStores(stores)
     stores.operatorActionLog.value = []
     stores.operatorSnapshot.value = {
-      root: { paused: false },
+      root: {},
       sessions: [],
       keepers: [{
         name: 'sangsu',

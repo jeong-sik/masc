@@ -70,6 +70,7 @@
 (include stanzas/test_oidc_google.inc)
 (include stanzas/test_oidc_login_transaction.inc)
 (include stanzas/test_authz_login.inc)
+(include stanzas/test_auth_config_oidc.inc)
 (include stanzas/test_keeper_chat_store_announces.inc)
 (include stanzas/test_keeper_memory_journal_announces.inc)
 (include stanzas/test_keeper_composite_cleared_before_announce.inc)

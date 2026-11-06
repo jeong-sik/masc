@@ -154,7 +154,7 @@ let keeper_activity_word (activity : Keeper_list_model.activity) =
   | Held_call -> "held call"
   | Question -> "question"
   | Confirmation -> "confirm"
-  | Failure -> "failure"
+  | Attempt_failed -> "try failed"
   | Preparing -> "preparing"
   | Streaming -> "streaming"
   | Running -> "running"
@@ -172,7 +172,7 @@ let keeper_activity_word (activity : Keeper_list_model.activity) =
 
 let keeper_activity_style (activity : Keeper_list_model.activity) =
   match activity with
-  | Held_call | Failure -> Theme.bad ()
+  | Held_call | Attempt_failed -> Theme.bad ()
   | Question | Confirmation | Offline -> Theme.warn ()
   | Preparing | Streaming | Running | Async_working _ | Deferred -> Theme.info ()
   | Tool_waiting -> Theme.warn ()
@@ -281,7 +281,7 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
   let glyph =
     match activity with
     | Preparing | Running -> Masc_tui_answering.running_glyph ~frame
-    | Held_call | Question | Confirmation | Failure | Streaming | Async_working _
+    | Held_call | Question | Confirmation | Attempt_failed | Streaming | Async_working _
     | Deferred | Tool_waiting | Model_waiting | Delegate_result | Verifying | External_waiting
     | Idle | Paused | Offline | Unknown -> Masc_tui_keeper_mark.activity_glyph activity
   in
@@ -503,12 +503,13 @@ let keeper_display_entries rows layout =
   | Keeper_list_model.Compact | Keeper_list_model.Detailed ->
       List.map (fun (position, row) -> Keeper_display_row (position, row)) entries
   | Keeper_list_model.Grouped ->
-      let attention, active, waiting, inactive, unobserved = Keeper_list_model.group_counts rows in
-      [ Keeper_list_model.Attention, attention
-      ; Keeper_list_model.Active, active
-      ; Keeper_list_model.Waiting, waiting
-      ; Keeper_list_model.Inactive, inactive
-      ; Keeper_list_model.Unobserved, unobserved
+      let counts : Keeper_list_model.group_counts = Keeper_list_model.group_counts rows in
+      [ Keeper_list_model.Attention, counts.attention_rows
+      ; Keeper_list_model.Failing, counts.failing_rows
+      ; Keeper_list_model.Active, counts.active_rows
+      ; Keeper_list_model.Waiting, counts.waiting_rows
+      ; Keeper_list_model.Inactive, counts.inactive_rows
+      ; Keeper_list_model.Unobserved, counts.unobserved_rows
       ]
       |> List.concat_map (fun (group, count) ->
         let matching =
@@ -524,6 +525,7 @@ let keeper_group_heading_text ~available_cells rows group count =
   let glyph, label =
     match group with
     | Keeper_list_model.Attention -> "!", "ATTENTION"
+    | Keeper_list_model.Failing -> "\xe2\x97\x82", "FAILING" (* ◂ *)
     | Keeper_list_model.Active -> "\xe2\x96\xb6", "ACTIVE" (* ▶ *)
     | Keeper_list_model.Waiting -> "\xe2\x97\x8c", "WAITING" (* ◌ *)
     | Keeper_list_model.Inactive -> "\xe2\x97\x8b", "INACTIVE" (* ○ *)
@@ -534,13 +536,14 @@ let keeper_group_heading_text ~available_cells rows group count =
     | Keeper_list_model.Waiting ->
         Render_schedule.waiting_group_heading_detail ~available_cells ~group_count:count
           (Keeper_list_model.waiting_summary rows)
-    | Keeper_list_model.Attention | Keeper_list_model.Active
+    | Keeper_list_model.Attention | Keeper_list_model.Failing | Keeper_list_model.Active
     | Keeper_list_model.Inactive | Keeper_list_model.Unobserved -> ""
   in
   Printf.sprintf "%s %s %d%s" glyph label count detail
 
 let keeper_group_heading_style = function
   | Keeper_list_model.Attention -> Theme.bad ()
+  | Keeper_list_model.Failing -> Theme.warn ()
   | Keeper_list_model.Active -> Theme.ok ()
   | Keeper_list_model.Waiting -> Theme.info ()
   | Keeper_list_model.Inactive -> Theme.recede ()
@@ -555,14 +558,13 @@ let keeper_view_summary ~cells rows layout sort =
     match layout with
     | Keeper_list_model.Grouped -> [ mode ]
     | Keeper_list_model.Compact | Keeper_list_model.Detailed ->
-        let attention, active, waiting, inactive, unobserved =
-          Keeper_list_model.group_counts rows
-        in
-        [ Printf.sprintf "! %d attention" attention
-        ; Printf.sprintf "\xe2\x96\xb6 %d active" active
-        ; Printf.sprintf "\xe2\x97\x8c %d waiting" waiting
-        ; Printf.sprintf "\xe2\x97\x8b %d inactive" inactive
-        ; Printf.sprintf "? %d unknown" unobserved
+        let counts : Keeper_list_model.group_counts = Keeper_list_model.group_counts rows in
+        [ Printf.sprintf "! %d attention" counts.attention_rows
+        ; Printf.sprintf "\xe2\x97\x82 %d failing" counts.failing_rows
+        ; Printf.sprintf "\xe2\x96\xb6 %d active" counts.active_rows
+        ; Printf.sprintf "\xe2\x97\x8c %d waiting" counts.waiting_rows
+        ; Printf.sprintf "\xe2\x97\x8b %d inactive" counts.inactive_rows
+        ; Printf.sprintf "? %d unknown" counts.unobserved_rows
         ; mode
         ]
   in

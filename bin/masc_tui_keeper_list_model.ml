@@ -1,6 +1,6 @@
 type layout = Compact | Detailed | Grouped
 type sort = Priority | Recent | Oldest | Activity | Name
-type attention = Attention | Active | Waiting | Inactive | Unobserved
+type attention = Attention | Failing | Active | Waiting | Inactive | Unobserved
 
 type keeper_waiting_state = Masc.Tui_decode.keeper_waiting_state =
   | Keeper_waiting_idle
@@ -45,7 +45,7 @@ type activity =
   | Held_call
   | Question
   | Confirmation
-  | Failure
+  | Attempt_failed
   | Preparing
   | Streaming
   | Running
@@ -190,20 +190,18 @@ let async_counts requests =
       | Masc.Tui_decode.Async_cancelling -> running, ownership_unknown, queued, cancelling + 1)
     (0, 0, 0, 0) requests
 
+(* What the Keeper is doing now. A failing health reading is not an activity:
+   a failing Keeper that runs a probe turn is streaming, and [group_of] puts it
+   in [Failing] by its health. *)
 let primary_activity_of_row row =
   let items = waiting_items row in
   let activity = turn_activity row in
   let health = health_reading row in
   let running, _, queued, cancelling = async_counts row.async_requests in
-  let failed =
-    health = Some Masc.Tui_decode.Health_failing
-    || activity = Some Masc.Tui_decode.Keeper_activity_attempt_failed
-  in
   if Option.is_some row.approval || waiting_has_source Waiting_source_hitl_pending items then
     Held_call
   else if row.open_questions > 0 then Question
   else if waiting_has_source Waiting_source_operator_pending_confirm items then Confirmation
-  else if failed then Failure
   else if row.reading.Masc_tui_keeper_control.paused then Paused
   else if health = Some Masc.Tui_decode.Health_offline then Offline
   else
@@ -227,7 +225,7 @@ let primary_activity_of_row row =
                && not (waiting_unavailable row))
               || waiting_state row = Some Keeper_waiting_idle then Idle
       else Unknown)
-    | Some Masc.Tui_decode.Keeper_activity_attempt_failed -> Failure
+    | Some Masc.Tui_decode.Keeper_activity_attempt_failed -> Attempt_failed
 
 let badges_of_row row =
   let items = waiting_items row in
@@ -249,20 +247,32 @@ let badges_of_row row =
   |> List.filter_map Fun.id
 
 let group_of_activity = function
-  | Held_call | Question | Confirmation | Failure -> Attention
+  | Held_call | Question | Confirmation -> Attention
+  | Attempt_failed -> Failing
   | Preparing | Streaming | Running | Async_working _ | Deferred -> Active
   | Tool_waiting | Model_waiting | Delegate_result | Verifying | External_waiting -> Waiting
   | Idle | Paused | Offline -> Inactive
   | Unknown -> Unobserved
 
-let group_of_row row = group_of_activity (primary_activity_of_row row)
+let health_is_failing row = health_reading row = Some Masc.Tui_decode.Health_failing
+
+(* A person's decision outranks a failure, so [Attention] keeps its rows. Any
+   other row whose health is failing is in [Failing], whatever it is doing. *)
+let group_of ~failing activity =
+  match group_of_activity activity with
+  | Attention -> Attention
+  | Failing -> Failing
+  | (Active | Waiting | Inactive | Unobserved) as group -> if failing then Failing else group
+
+let group_of_row row = group_of ~failing:(health_is_failing row) (primary_activity_of_row row)
 
 let attention_rank = function
   | Attention -> 0
-  | Active -> 1
-  | Waiting -> 2
-  | Inactive -> 3
-  | Unobserved -> 4
+  | Failing -> 1
+  | Active -> 2
+  | Waiting -> 3
+  | Inactive -> 4
+  | Unobserved -> 5
 
 let compare_name left right =
   String.compare left.keeper.Masc.Tui_decode.k_name right.keeper.Masc.Tui_decode.k_name
@@ -286,7 +296,7 @@ let compare_oldest left right =
   | None, None -> compare_name left right
 
 let activity_rank = function
-  | Held_call -> 0 | Question -> 1 | Confirmation -> 2 | Failure -> 3
+  | Held_call -> 0 | Question -> 1 | Confirmation -> 2 | Attempt_failed -> 3
   | Preparing -> 4 | Streaming -> 5 | Running -> 6 | Async_working _ -> 7
   | Deferred -> 8 | Tool_waiting -> 9 | Model_waiting -> 10 | Delegate_result -> 11
   | Verifying -> 12 | External_waiting -> 13 | Idle -> 14 | Paused -> 15
@@ -298,7 +308,7 @@ type ranked = { row : row; activity : activity; group : attention }
 
 let rank row =
   let activity = primary_activity_of_row row in
-  { row; activity; group = group_of_activity activity }
+  { row; activity; group = group_of ~failing:(health_is_failing row) activity }
 
 let order_rows ~layout ~sort rows =
   List.map rank rows
@@ -322,16 +332,28 @@ let order_rows ~layout ~sort rows =
             if order = 0 then compare_recent left.row right.row else order)
   |> List.map (fun ranked -> ranked.row)
 
+type group_counts = {
+  attention_rows : int;
+  failing_rows : int;
+  active_rows : int;
+  waiting_rows : int;
+  inactive_rows : int;
+  unobserved_rows : int;
+}
+
 let group_counts rows =
   List.fold_left
-    (fun (attention, active, waiting, inactive, unobserved) row ->
+    (fun counts row ->
       match group_of_row row with
-      | Attention -> attention + 1, active, waiting, inactive, unobserved
-      | Active -> attention, active + 1, waiting, inactive, unobserved
-      | Waiting -> attention, active, waiting + 1, inactive, unobserved
-      | Inactive -> attention, active, waiting, inactive + 1, unobserved
-      | Unobserved -> attention, active, waiting, inactive, unobserved + 1)
-    (0, 0, 0, 0, 0) rows
+      | Attention -> { counts with attention_rows = counts.attention_rows + 1 }
+      | Failing -> { counts with failing_rows = counts.failing_rows + 1 }
+      | Active -> { counts with active_rows = counts.active_rows + 1 }
+      | Waiting -> { counts with waiting_rows = counts.waiting_rows + 1 }
+      | Inactive -> { counts with inactive_rows = counts.inactive_rows + 1 }
+      | Unobserved -> { counts with unobserved_rows = counts.unobserved_rows + 1 })
+    { attention_rows = 0; failing_rows = 0; active_rows = 0; waiting_rows = 0
+    ; inactive_rows = 0; unobserved_rows = 0 }
+    rows
 
 type waiting_summary = {
   tool : int;
@@ -345,15 +367,20 @@ type waiting_summary = {
 let waiting_summary rows =
   List.fold_left
     (fun summary row ->
-      let running, _, _, _ = async_counts row.async_requests in
-      let background = summary.background + running in
-      match primary_activity_of_row row with
-      | Tool_waiting -> { summary with tool = summary.tool + 1; background }
-      | Model_waiting -> { summary with model = summary.model + 1; background }
-      | External_waiting -> { summary with external_wait = summary.external_wait + 1; background }
-      | Delegate_result -> { summary with delegate = summary.delegate + 1; background }
-      | Verifying -> { summary with verification = summary.verification + 1; background }
-      | Held_call | Question | Confirmation | Failure | Preparing | Streaming | Running
-      | Async_working _ | Deferred | Idle | Paused | Offline | Unknown -> summary)
+      let activity = primary_activity_of_row row in
+      match group_of ~failing:(health_is_failing row) activity with
+      | Attention | Failing | Active | Inactive | Unobserved -> summary
+      | Waiting -> (
+          let running, _, _, _ = async_counts row.async_requests in
+          let background = summary.background + running in
+          match activity with
+          | Tool_waiting -> { summary with tool = summary.tool + 1; background }
+          | Model_waiting -> { summary with model = summary.model + 1; background }
+          | External_waiting ->
+              { summary with external_wait = summary.external_wait + 1; background }
+          | Delegate_result -> { summary with delegate = summary.delegate + 1; background }
+          | Verifying -> { summary with verification = summary.verification + 1; background }
+          | Held_call | Question | Confirmation | Attempt_failed | Preparing | Streaming
+          | Running | Async_working _ | Deferred | Idle | Paused | Offline | Unknown -> summary))
     { tool = 0; model = 0; external_wait = 0; delegate = 0; verification = 0; background = 0 }
     rows

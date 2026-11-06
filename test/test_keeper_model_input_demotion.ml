@@ -723,6 +723,12 @@ let signed_argument_tools =
 
 let signed_user text = { (assistant text) with role = Types.User }
 
+(* The wire folds a user message into the tool result before it only when the
+   message carries the [Tool_result_followup] origin (or [Recovery_instruction]);
+   a [Conversation] user message stays a separate wire message. *)
+let signed_tool_followup text =
+  { (signed_user text) with origin = Llm_provider.Types.Tool_result_followup }
+
 let stamp_signed_call ~config ~prefix ~id input =
   let open Agent_core.Llm_provider in
   let content =
@@ -894,7 +900,7 @@ let signed_prefix_tracks_replay_projection_and_tool_user_merge () =
   let followup = "follow up immediately after the tool result" in
   let prefix = [signed_user "first ask"; excluded]
     @ argument_cycle ~id:"earlier" earlier_input
-    @ [signed_user followup] in
+    @ [signed_tool_followup followup] in
   let signed = stamp_signed_call ~config ~prefix ~id:"signed" (`Assoc []) in
   let source = prefix @ [signed; tool_message ~id:"signed" "done"]
     @ argument_cycle ~id:"later" later_input in

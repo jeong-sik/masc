@@ -4,6 +4,7 @@
 도구 호출 원장(`.masc/tool_calls/YYYY-MM/DD[.NNN].jsonl`)을 읽기만 해요.
 `docs/rfc/RFC-keeper-async-fleet-continuity.md` 가 풀려는 기다림이 얼마나 되는지 재요.
 `docs/rfc/RFC-0379-keeper-monitor-event-wake.md` §6 이 제안하는 `Github_run_completed` 트리거가 겨냥하는 기다림도 재요.
+`measure_schedule_slack.py` 는 Keeper 가 자기를 깨우려고 만든 일정이 실행의 끝을 놓친 크기를 재요(맨 아래 절).
 
 ## 다시 측정하기
 
@@ -158,3 +159,62 @@ JSON 의 `run_waits.top_keepers` 는 막힌 시간이 긴 Keeper 여덟 명(위 
 - 턴 시간은 trace 파일의 첫 줄과 끝 줄 시각으로 어림한 값이에요(`docs/evidence/lane-time-2026-11/README.md`). 호출 시간의 22.3%가 구간 밖이에요. 26.16시간 중 24.72시간은 trace 파일이 없는 턴의 호출이고, 1.44시간은 trace 파일이 있는 턴에 달린 `direct` 호출이에요. 구간 밖 호출은 턴 시간에 대한 비율에서 뺐고, 시간 합계에는 그대로 들어 있어요.
 - 날마다 모습이 많이 달라요. 배포 전후를 비교하려면 날짜마다 따로 보고, 같은 일수로 재야 해요.
 - 시험은 `python3 -m unittest discover -s docs/evidence/execute-waits-2026-11` 로 돌려요.
+
+## 일정이 실행의 끝을 놓친 크기
+
+`measure_schedule_slack.py` 는 Keeper 가 자기를 깨우려고 만든 일정이 메시지에 적은 GitHub Actions 실행의 끝과 얼마나 어긋나는지 재요. 일정의 깨우는 시각(due)과 실행의 끝을 견줘요. `docs/rfc/RFC-0379-keeper-monitor-event-wake.md` §6.5 의 `until_github_run` 이 줄이려는 어긋남이에요.
+원장은 위 스크립트와 같은 규칙으로 읽고(`measure_execute_waits.py` 의 함수를 가져다 써요), 실행은 `gh api repos/<owner>/<name>/actions/runs/<id>` 로 GitHub 에 물어요. 그래서 물어본 날과 `gh` 로그인이 읽을 수 있는 저장소에 따라 값이 달라져요.
+
+```bash
+python3 docs/evidence/execute-waits-2026-11/measure_schedule_slack.py --base-path ~/me \
+    --from-date 2026-11-01 --to-date 2026-11-05 --until 2026-11-05T05:00:00Z --json-out after.json
+```
+
+`result-schedule-slack-2026-11-01_11-05.json` 이 위 명령의 결과예요. 물어본 시각은 JSON 의 `probed_at`(2026-11-05T14:56Z)이에요. 일정 240건과 그중 실행 번호가 있는 81건은 위 "일정으로 깨우는 쪽" 표와 같아요. 53초쯤 걸려요.
+
+### 센 방법
+
+- 일정: 위 "일정 깨움"과 같아요. `masc_schedule_create` 행 중 기록된 결과가 성공이고 `input.keeper_name` 이 행의 Keeper 와 같은 것이에요. 메시지에 실행 번호가 있거나 `until_github_run` 이 있으면 잴 대상이에요.
+- 깨우는 시각(due): 입력이 가진 첫 필드예요. `ts + due_in_sec`, 없으면 `due_at_unix`, 없으면 `due_at_iso`(시간대가 없으면 UTC)예요. `ts` 는 행을 쓴 시각이라 호출이 끝난 뒤예요. 셋 다 없는 일정(날마다 또는 cron 반복)은 깨우는 시각이 없어요.
+- 실행: `--repos`(기본 `jeong-sik/masc`, `jeong-sik/wkbl`)를 차례로 물어서 처음 답한 저장소의 실행이에요. 실행의 끝은 `updated_at` 이에요.
+- 판정은 처음 맞는 하나예요. `watched`: 입력에 `until_github_run` 이 있어요. 서버가 그 실행이 끝날 때 일정을 깨우니, 깨우는 시각은 폴백일 뿐이라 실행과 견주지 않아요. `several_runs`: 메시지에 실행 번호가 여럿이라 어느 실행을 기다리는지 글에서 알 수 없어요. `no_due_time`. `run_unreadable`: 어느 저장소도 답하지 않았어요(404, 권한 없음, 네트워크 모두 같아요). `rerun`: 시도가 둘 이상이라 `updated_at` 이 기다린 시도의 끝이 아닐 수 있어요. `not_completed`: 실행이 아직 안 끝났어요. `already_complete`: 실행이 행의 `ts` 이전에 끝났어요. `late`: 일정을 만들 때 실행이 돌고 있었고 깨우는 시각이 끝과 같거나 뒤예요. 어긋남은 깨우는 시각에서 끝을 뺀 값이에요. `early`: 깨우는 시각이 끝보다 앞이에요. 어긋남은 끝에서 깨우는 시각을 뺀 값이에요.
+- 남은 시간(`remaining_min`): 실행의 끝에서 행의 `ts` 를 뺀 값이에요. 깨우는 시각까지의 시간(`due_in_min`)과 견주려고 `late`·`early` 일정만 세요.
+- 백분위는 위와 같이 가까운 순위예요.
+
+### 결과(11-01T00:00Z ~ 11-05T05:00Z)
+
+| 판정 | 일정 |
+|---|---:|
+| 메시지에 실행 번호가 있는 일정 | 81 |
+| `watched` | 0 |
+| `several_runs` | 13 |
+| `rerun` | 5 |
+| `run_unreadable`, `not_completed`, `no_due_time` | 0 |
+| `already_complete` | 10 |
+| `late` | 41 |
+| `early` | 12 |
+
+잰 일정은 63건이고 실행은 51개예요. 일정을 만들 때 실행이 돌고 있던 것은 53건이에요.
+
+| | 일정 | 합계(시간) | 중앙값(분) | p90(분) | 최대(분) |
+|---|---:|---:|---:|---:|---:|
+| `late`: 끝난 뒤에 깨움 | 41 | 15.21 | 15.5 | 36.9 | 135.4 |
+| `early`: 끝나기 전에 깨움 | 12 | 6.43 | 26.7 | 83.0 | 92.2 |
+
+일정을 만든 때부터 깨우는 시각까지는 중앙값 25.0분(p10 15.0, p90 77.8)이고, 실행이 끝나기까지는 중앙값 11.8분(p10 3.3, p90 78.8)이에요.
+
+| 저장소 | `already_complete` | `late` 일정 | `late` 시간 | `early` 일정 | `early` 시간 |
+|---|---:|---:|---:|---:|---:|
+| `jeong-sik/masc` | 10 | 28 | 8.03 | 5 | 2.05 |
+| `jeong-sik/wkbl` | 0 | 13 | 7.18 | 7 | 4.38 |
+
+Keeper 별 값은 JSON 의 `by_keeper`(일정을 만들 때 실행이 돌고 있던 일정이 많은 여덟 명)에 있어요.
+
+### 조심할 것
+
+- 실행의 끝은 GitHub 실행 객체의 `updated_at` 이에요. 끝난 뒤에 갱신된 실행은 끝이 늦게 잡혀요(미확인).
+- `late` 의 시간은 Keeper 가 결과를 알기까지 늦은 시간이에요. 그동안 Keeper 가 놀았다는 뜻이 아니에요.
+- 일정이 일부러 그 시각에 맞춰졌는지(다른 일 때문에)는 가리지 못해요.
+- 실행이 다시 돌려지면 `rerun` 으로 빠지고, 물어본 시각이 다르면 값이 달라져요. 같은 일정이 같은 실행을 여러 번 가리키면(깨어난 Keeper 가 다시 일정을 만들면) 일정마다 세어요. 63건은 실행 51개에 걸려요.
+- 이 측정이 `until_github_run` 의 효과는 아니에요. 그 인자가 없던 때의 어긋남이고, 배포 뒤에는 인자를 단 일정이 `watched` 로 빠져요.
+- 새 시험 38개는 위 `unittest discover` 에서 기존 116개와 함께 돌아요(합계 154개).

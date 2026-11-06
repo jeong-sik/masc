@@ -1371,9 +1371,8 @@ let test_transport_disconnect_finishes_leave_before_cancellation env =
         | Some info ->
           closing_info := Some info;
           Eio.Fiber.fork ~sw (fun () ->
-            Eio.Mutex.use_rw ~protect:true info.mutex (fun () ->
-              Eio.Promise.resolve mark_acquired ();
-              Eio.Promise.await release));
+            Eio.Promise.resolve mark_acquired ();
+            Eio.Promise.await release);
           Eio.Promise.await acquired)
       (fun () ->
         Eio.Fiber.fork ~sw (fun () ->

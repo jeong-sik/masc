@@ -4,6 +4,54 @@
 open Masc_tui_types
 module Message_layout = Masc_tui_message_layout
 
+type msg =
+  (* The scope travels with the directory. Without it a reply names a
+     relative path, which two scopes can both have, and the handler had no
+     way to tell a late answer for the scope just left from an answer for the
+     scope now open (#33946). *)
+  | Code_catalog_loaded of
+      (Masc_tui_types.code_workspace_scope * string) Masc_tui_fetched.request
+      * (Masc.Tui_decode.workspace_file_catalog, string) result
+  | Code_branches_loaded of
+      (Masc_tui_types.code_workspace_scope * string) Masc_tui_fetched.request
+      * (Masc.Tui_decode.git_branches, string) result
+  | Code_worktrees_loaded of
+      (Masc_tui_types.code_workspace_scope * string) Masc_tui_fetched.request
+      * (Masc.Tui_decode.git_worktrees, string) result
+  | Code_finder_file_loaded of
+      (Masc_tui_types.code_workspace_scope * string) Masc_tui_fetched.request
+      * (Masc.Tui_decode.workspace_file_source, string) result
+  | Code_entries_loaded of
+      (Masc_tui_types.code_workspace_scope * string) Masc_tui_fetched.request
+      * (Masc.Tui_decode.workspace_tree_node list, string) result
+  | Code_draft_saved of Masc_tui_types.code_save_request * Masc_tui_code_draft.outcome
+  | Code_file_loaded of
+      Masc_tui_types.code_file_load_intent
+      * string Masc_tui_fetched.request
+      * (Masc.Tui_decode.workspace_file_source, string) result
+  | Code_history_loaded of
+      (Masc_tui_types.code_workspace_scope * string) Masc_tui_fetched.request
+      * (Masc_tui_types.code_history_listing, string) result
+  | Code_diff_loaded of
+      Masc_tui_types.code_diff_target Masc_tui_fetched.request
+      * (Masc.Tui_decode.git_diff, string) result
+  (* The path the margin describes; stamped so a late answer cannot caption
+     another file. *)
+  | Code_blame_loaded of
+      string Masc_tui_fetched.request
+      * (Masc.Tui_decode.blame_block list, string) result
+  | Code_lsp_answered of
+      Masc_tui_types.code_lsp_query Masc_tui_fetched.request
+      * (Masc.Tui_decode.lsp_answer, string) result
+
+type answer_kind =
+  | Read
+  | Save
+
+type answer_followup =
+  | No_answer_followup
+  | Reload_saved_file of string
+
 type followup =
   | No_followup
   | Reveal_cursor
@@ -713,3 +761,48 @@ let saved_refresh_path state ~input_pending =
   else match code_draft_address state with
     | Some address when List.exists (Draft.equal_address address) state.code_saved_refreshes -> Some address.path
     | Some _ | None -> None
+
+let answer_kind = function
+  | Code_draft_saved _ -> Save
+  | Code_catalog_loaded _ | Code_branches_loaded _ | Code_worktrees_loaded _
+  | Code_finder_file_loaded _ | Code_entries_loaded _ | Code_file_loaded _
+  | Code_history_loaded _ | Code_diff_loaded _ | Code_blame_loaded _
+  | Code_lsp_answered _ -> Read
+
+let apply state = function
+  | Code_catalog_loaded (request, result) ->
+      apply_catalog state request result;
+      No_answer_followup
+  | Code_branches_loaded (request, result) ->
+      apply_branches state request result;
+      No_answer_followup
+  | Code_worktrees_loaded (request, result) ->
+      apply_worktrees state request result;
+      No_answer_followup
+  | Code_finder_file_loaded (request, result) ->
+      (* Publication is not navigation. The loop gives ready keys, pastes and
+         incomplete terminal sequences priority before committing this read. *)
+      ignore (apply_found_file ~input_pending:true state request result);
+      No_answer_followup
+  | Code_entries_loaded (request, result) ->
+      apply_entries state request result;
+      No_answer_followup
+  | Code_draft_saved (request, outcome) ->
+      if complete_draft_save state request outcome
+      then Reload_saved_file request.csr_address.path
+      else No_answer_followup
+  | Code_file_loaded (intent, request, result) ->
+      apply_file ~intent state request result;
+      No_answer_followup
+  | Code_history_loaded (request, result) ->
+      apply_history state request result;
+      No_answer_followup
+  | Code_diff_loaded (request, result) ->
+      apply_diff state request result;
+      No_answer_followup
+  | Code_blame_loaded (request, result) ->
+      apply_blame state request result;
+      No_answer_followup
+  | Code_lsp_answered (request, result) ->
+      apply_lsp_answer state request result;
+      No_answer_followup

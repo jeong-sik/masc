@@ -1838,6 +1838,18 @@ let workspace_enqueue state =
   let envelope = capture_workspace_message state in
   fun mailbox message -> enqueue_async mailbox (envelope message)
 
+(* Every Code answer is wrapped in [Code_msg] here. A read is stamped when its
+   request starts, as in [workspace_enqueue], so a read that arrives after the
+   workspace changed still names the workspace that asked. The draft save goes
+   unstamped: it settles a write already sent, and navigation must not lose
+   its outcome. *)
+let deliver_code state =
+  let enqueue = workspace_enqueue state in
+  fun mailbox answer ->
+    match Code_results.answer_kind answer with
+    | Code_results.Read -> enqueue mailbox (Code_msg answer)
+    | Code_results.Save -> enqueue_async mailbox (Code_msg answer)
+
 let check_workspace_request ?schedule_form_action ?refresh_ticket
     ?(prior_contact = Masc_tui_server_lifecycle.Nothing_answered) state ~mailbox ~authority ~identity ~host ~port () =
   let refresh_ticket = Option.value refresh_ticket ~default:state.http_refresh_order in
@@ -6773,8 +6785,8 @@ let open_repository_change_in_code state ~mailbox ~scope
   state.code_focus_file <- Left_pane;
   close_repository_changes state;
   state.view <- Code;
-  Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox);
-  Masc_tui_code_requests.launch_file_load state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) ~path:change.rc_path
+  Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(deliver_code state mailbox);
+  Masc_tui_code_requests.launch_file_load state ~host:server_peer_host ~deliver:(deliver_code state mailbox) ~path:change.rc_path
 
 (* Where the change is on this machine.
 
@@ -8339,7 +8351,7 @@ let launch_surface_reads state ~mailbox (surface : surface) =
           owe_runtime_config_read state;
           launch_runtime_config_load state ~mailbox)
   | Resources -> launch_resources_load state ~mailbox
-  | Code -> Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox)
+  | Code -> Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(deliver_code state mailbox)
   | Metrics ->
       owe_memory_health_read state;
       launch_memory_health_load state ~mailbox;
@@ -19660,7 +19672,7 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
               launch_skill_evidence_read ?composition_run_id:state.tools_evidence_run_id state ~mailbox reference
           | _ -> state.tools_evidence_reference <- None; state.tools_evidence_run_id <- None)
      | Code ->
-         let deliver = workspace_enqueue state mailbox in
+         let deliver = deliver_code state mailbox in
          let host = server_peer_host in
          let lsp = Masc_tui_fetched.current_key state.code_lsp_query in
          let intent = state.code_file_resume_intent in
@@ -22534,6 +22546,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            with
            | Ok card -> Masc_tui_types.retain_withdrawn_play_invite state request card
            | Error _ -> ())
+        | Code_msg answer ->
+          (match Code_results.answer_kind answer with
+           | Code_results.(Read | Save) -> ())
         | Play_msg (Play_invite_issued (_, _, Play_answered (Error _))
         | Play_invite_issued (_, _, (Play_refused _ | Play_not_dispatched _ | Play_unanswered _)))
         | (Approvals_msg Approvals_listing_superseded) | (Keeper_msg Keeper_composer_released)
@@ -22608,11 +22623,6 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Preset_restored (_, _) | Preset_deleted (_, _)) | Play_msg (Play_room_received (_, _)
         | Play_invites_listed (_, _) | Play_invite_revoked (_, _, _, _))
         | Librarian_input_loaded (_, _) | (Resource_msg (Resources_listed _) | Artifact_msg (Artifact_checks_loaded _))
-        | Code_msg
-            ( Code_draft_saved _ | Code_catalog_loaded (_, _) | Code_branches_loaded (_, _)
-            | Code_worktrees_loaded (_, _) | Code_finder_file_loaded (_, _) | Code_entries_loaded (_, _)
-            | Code_file_loaded (_, _, _) | Code_history_loaded (_, _) | Code_diff_loaded (_, _)
-            | Code_blame_loaded (_, _) | Code_lsp_answered (_, _) )
         | Acting_pane_changes_loaded (_, _)
         | Resource_msg (Resource_exported _ | Resource_share_changed _ | Resource_share_recovery_loaded _ | Resource_read (_, _, _) | Resource_diagram_ready _) | Github_msg (Github_identity_view_loaded (_, _))
         | Identity_msg (Identity_providers_loaded (_, _, _) | Identity_switch_set (_, _, _, _)
@@ -25374,33 +25384,15 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           state.runtime_model_jump <- None;
           state.runtime_config_jump_section <- None;
           state.runtime_config_view_error <- Some detail)
-  | Code_msg (Code_catalog_loaded (request, result)) ->
-      Code_results.apply_catalog state request result
-  | Code_msg (Code_branches_loaded (request, result)) ->
-      Code_results.apply_branches state request result
-  | Code_msg (Code_worktrees_loaded (request, result)) ->
-      Code_results.apply_worktrees state request result
-  | Code_msg (Code_finder_file_loaded (request, result)) ->
-      (* Publication is not navigation. The loop gives ready keys, pastes and
-         incomplete terminal sequences priority before committing this read. *)
-      ignore (Code_results.apply_found_file ~input_pending:true state request result)
-  | Code_msg (Code_entries_loaded (request, result)) ->
-      Code_results.apply_entries state request result
-  | Code_msg (Code_draft_saved (request, outcome)) ->
-      if Code_results.complete_draft_save state request outcome && not (input_pending ()) then
-        Masc_tui_code_requests.launch_file_load ~intent:Refresh_code_file state
-          ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox)
-          ~path:request.csr_address.path
-  | Code_msg (Code_file_loaded (intent, request, result)) ->
-      Code_results.apply_file ~intent state request result
-  | Code_msg (Code_blame_loaded (request, result)) ->
-      Code_results.apply_blame state request result
-  | Code_msg (Code_lsp_answered (request, result)) ->
-      Code_results.apply_lsp_answer state request result
-  | Code_msg (Code_diff_loaded (request, result)) ->
-      Code_results.apply_diff state request result
-  | Code_msg (Code_history_loaded (request, result)) ->
-      Code_results.apply_history state request result
+  | Code_msg answer -> (
+      (* The save settles inside [apply]. With input queued, the reread waits
+         for [Code_results.saved_refresh_path]. *)
+      match Code_results.apply state answer with
+      | Code_results.No_answer_followup -> ()
+      | Code_results.Reload_saved_file path ->
+          if not (input_pending ()) then
+            Masc_tui_code_requests.launch_file_load ~intent:Refresh_code_file state
+              ~host:server_peer_host ~deliver:(deliver_code state mailbox) ~path)
   | Resource_msg (Resources_listed (owner, result)) ->
       withdraw_resource_diagram_pending state;
       Masc_tui_resources_updates.listed state ~owner result
@@ -31588,7 +31580,7 @@ Use relative paths for resources already held in the package. -->
            Render_schedule.request render_schedule Render_schedule.Background
        | Code_results.Read_location_file (owner, request) ->
            Masc_tui_code_requests.launch_navigation_read state ~host:server_peer_host
-             ~deliver:(workspace_enqueue state async_messages) owner request;
+             ~deliver:(deliver_code state async_messages) owner request;
            Render_schedule.request render_schedule Render_schedule.Background);
       let found_file = Code_results.take_ready_found_file state
           ~input_pending:code_navigation_input_pending in
@@ -31596,12 +31588,12 @@ Use relative paths for resources already held in the package. -->
           ~input_pending:code_navigation_input_pending in
       if found_file || navigated_file then begin
         Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host
-          ~deliver:(workspace_enqueue state async_messages);
+          ~deliver:(deliver_code state async_messages);
         Render_schedule.request render_schedule Render_schedule.Background
       end;
       Option.iter (fun path ->
         Masc_tui_code_requests.launch_file_load ~intent:Refresh_code_file state
-          ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~path)
+          ~host:server_peer_host ~deliver:(deliver_code state async_messages) ~path)
         (Code_results.saved_refresh_path state ~input_pending:code_navigation_input_pending);
       (* Check for input *)
       let input_timeout =
@@ -36129,7 +36121,7 @@ Use relative paths for resources already held in the package. -->
                            state.code_file_scroll
                      | Code_results.Read_location_file (owner, request) ->
                          Masc_tui_code_requests.launch_navigation_read state ~host:server_peer_host
-                           ~deliver:(workspace_enqueue state async_messages) owner request)
+                           ~deliver:(deliver_code state async_messages) owner request)
             | "\r" when (match state.palette_mode with
                 | Palette_branches _ | Palette_worktrees _ -> true
                 | Palette_files _ | Palette_jump | Palette_choice _ | Palette_locations _ -> false) ->
@@ -36142,7 +36134,7 @@ Use relative paths for resources already held in the package. -->
                 | Palette_worktrees _ -> false) ->
                 Option.iter (fun path ->
                     Masc_tui_code_requests.open_found_file state ~host:server_peer_host
-                      ~deliver:(workspace_enqueue state async_messages) ~path)
+                      ~deliver:(deliver_code state async_messages) ~path)
                   (Masc_tui_palette.selected_file state)
             | "\r" when Option.is_some typed_question ->
                 (match typed_question with
@@ -36162,7 +36154,7 @@ Use relative paths for resources already held in the package. -->
                   (match chosen with
                   | Some (_, Masc_tui_palette.Palette_lsp (question, symbol))
                     ->
-                      Masc_tui_code_requests.start_lsp_question state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~report:(report_action state) ~question ~symbol
+                      Masc_tui_code_requests.start_lsp_question state ~host:server_peer_host ~deliver:(deliver_code state async_messages) ~report:(report_action state) ~question ~symbol
                   | Some
                       ( _,
                         ( Masc_tui_palette.Palette_browser_lane
@@ -36200,7 +36192,7 @@ Use relative paths for resources already held in the package. -->
                       "hover, def and refs ask about the file open on the \
                        Code surface"
                   else
-                    Masc_tui_code_requests.start_lsp_question state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~report:(report_action state)
+                    Masc_tui_code_requests.start_lsp_question state ~host:server_peer_host ~deliver:(deliver_code state async_messages) ~report:(report_action state)
                       ~question ~symbol)
             | "\r" ->
                 let matches = Masc_tui_palette.palette_matches state in
@@ -36321,7 +36313,7 @@ Use relative paths for resources already held in the package. -->
                       | None -> ())
                  | Some (_, Masc_tui_palette.Palette_lsp (question, symbol))
                    ->
-                     Masc_tui_code_requests.start_lsp_question state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~report:(report_action state)
+                     Masc_tui_code_requests.start_lsp_question state ~host:server_peer_host ~deliver:(deliver_code state async_messages) ~report:(report_action state)
                        ~question ~symbol
                  | Some (_, (Masc_tui_palette.Palette_code_file _
                      | Masc_tui_palette.Palette_code_location _
@@ -37142,8 +37134,8 @@ Use relative paths for resources already held in the package. -->
             | Some repo_id, Some (change, relative_path) ->
                 let path = Playground_paths.bundle_relative_repo_path ~repo_id relative_path in
                 enter_keeper_code_file state ~keeper:change.Tui_decode.fc_keeper ~path;
-                Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages);
-                Masc_tui_code_requests.launch_file_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~path
+                Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(deliver_code state async_messages);
+                Masc_tui_code_requests.launch_file_load state ~host:server_peer_host ~deliver:(deliver_code state async_messages) ~path
             | None, _ | _, None -> ())
        | Some key when state.view = Repositories && Option.is_some state.workspace_activity_repo
            && not (List.mem key ["tab"; "shift-tab"; "\t"; "q"; "?"; ":"]) -> ()
@@ -38273,7 +38265,7 @@ Use relative paths for resources already held in the package. -->
        | Some "e" when state.view = Code && code_edit_focus state -> edit_code_draft ()
        | Some "S" when state.view = Code && code_edit_focus state ->
            (match Masc_tui_code_requests.save_draft state ~host:server_peer_host
-             ~deliver:(enqueue_async async_messages) with
+             ~deliver:(deliver_code state async_messages) with
             | Ok () -> () | Error detail -> report_action state "error" detail)
        | Some "V" when state.view = Code && code_edit_focus state ->
            (match current_code_draft state with
@@ -38290,7 +38282,7 @@ Use relative paths for resources already held in the package. -->
             | Error detail -> report_action state "error" detail)
        | Some ("r" | "R") when state.view = Code && state.code_draft_open && code_edit_focus state ->
            (match Masc_tui_code_requests.reread_draft state ~host:server_peer_host
-               ~deliver:(workspace_enqueue state async_messages) with
+               ~deliver:(deliver_code state async_messages) with
             | Ok () -> () | Error detail -> report_action state "error" detail)
        | Some ("esc" | "left") when state.view = Code && state.code_draft_open ->
            state.code_draft_open <- false
@@ -38316,16 +38308,16 @@ Use relative paths for resources already held in the package. -->
            pan_code_content state ~direction:1
        | Some "\016" when state.view = Code ->
            Masc_tui_code_requests.launch_file_finder state ~host:server_peer_host
-             ~deliver:(workspace_enqueue state async_messages)
+             ~deliver:(deliver_code state async_messages)
        | Some "\018" when state.view = Code ->
            Masc_tui_code_requests.launch_branches state ~host:server_peer_host
-             ~deliver:(workspace_enqueue state async_messages)
+             ~deliver:(deliver_code state async_messages)
        | Some "W" when state.view = Code ->
            Masc_tui_code_requests.launch_worktrees state ~host:server_peer_host
-             ~deliver:(workspace_enqueue state async_messages)
+             ~deliver:(deliver_code state async_messages)
        | Some "B" when state.view = Code ->
            Masc_tui_code_requests.return_to_reading state ~host:server_peer_host
-             ~deliver:(workspace_enqueue state async_messages)
+             ~deliver:(deliver_code state async_messages)
        | Some (("K" | "D" | "R") as key_name)
          when state.view = Code && state.code_focus_file = Right_pane
               && Option.is_some (Masc_tui_fetched.current_key state.code_file)
@@ -38348,7 +38340,7 @@ Use relative paths for resources already held in the package. -->
                 state.code_lsp_note <-
                   Some "the cursor line has no name to ask about"
             | [ symbol ] ->
-                Masc_tui_code_requests.start_lsp_question state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~report:(report_action state)
+                Masc_tui_code_requests.start_lsp_question state ~host:server_peer_host ~deliver:(deliver_code state async_messages) ~report:(report_action state)
                   ~question ~symbol
             | _ :: _ :: _ ->
                 state.palette_open <- true;
@@ -38378,7 +38370,7 @@ Use relative paths for resources already held in the package. -->
                    operator makes when a slow blame is taking too long. *)
                 if Option.is_some (Masc_tui_fetched.current state.code_blame)
                 then state.code_blame <- Masc_tui_fetched.clear state.code_blame
-                else Masc_tui_code_requests.launch_blame_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~path)
+                else Masc_tui_code_requests.launch_blame_load state ~host:server_peer_host ~deliver:(deliver_code state async_messages) ~path)
        | Some ("pageup" | "pagedown" | "home" | "end" as move)
          when state.view = Code && state.code_focus_file = Right_pane
               && state.code_notes_open ->
@@ -38468,7 +38460,7 @@ Use relative paths for resources already held in the package. -->
                  | None ->
                      Masc_tui_code_requests.launch_diff_load state
                        ~host:server_peer_host
-                       ~deliver:(workspace_enqueue state async_messages) ~target)
+                       ~deliver:(deliver_code state async_messages) ~target)
             | None ->
                 if not (Masc_tui_render_code.toggle_history_change state) then
                   report_action state "error"
@@ -38491,7 +38483,7 @@ Use relative paths for resources already held in the package. -->
                   (match Masc_tui_fetched.current state.code_diff with
                    | Some (loaded, _) when code_diff_target_equal loaded target -> ()
                    | Some _ | None ->
-                       Masc_tui_code_requests.launch_diff_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages)
+                       Masc_tui_code_requests.launch_diff_load state ~host:server_peer_host ~deliver:(deliver_code state async_messages)
                          ~target)
                 end)
        | Some ("pageup" | "pagedown" | "home" | "end" as move)
@@ -38528,7 +38520,7 @@ Use relative paths for resources already held in the package. -->
                    | Some key when code_scope_path_equal key (state.code_scope, path)
                      -> ()
                    | Some _ | None ->
-                       Masc_tui_code_requests.launch_history_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages) ~path)
+                       Masc_tui_code_requests.launch_history_load state ~host:server_peer_host ~deliver:(deliver_code state async_messages) ~path)
                 end)
        | Some "\015"
          when state.view = Board
@@ -39390,11 +39382,11 @@ Use relative paths for resources already held in the package. -->
                    | Some path ->
                        Masc_tui_code_requests.launch_history_load state
                          ~host:server_peer_host
-                         ~deliver:(workspace_enqueue state async_messages) ~path)
+                         ~deliver:(deliver_code state async_messages) ~path)
                 else
                   Masc_tui_code_requests.launch_entries_load state
                     ~host:server_peer_host
-                    ~deliver:(workspace_enqueue state async_messages)
+                    ~deliver:(deliver_code state async_messages)
             | Keepers Keeper_list -> ()
             | Keepers Keeper_logs ->
                 ignore (launch_current_keeper_logs state ~mailbox:async_messages ~intent:Snapshot_read.Refresh)
@@ -39577,7 +39569,7 @@ Use relative paths for resources already held in the package. -->
                     (if String.equal parent "." then "" else parent);
                   state.code_cursor <- 0;
                   state.code_listing <- Masc_tui_fetched.clear state.code_listing;
-                  Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages)
+                  Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(deliver_code state async_messages)
                 end
                 else if state.code_scope <> Code_scope_project then begin
                   (* Above a keeper's or a repository's root sits the
@@ -39585,7 +39577,7 @@ Use relative paths for resources already held in the package. -->
                   set_code_scope state Code_scope_project;
                   state.code_cursor <- 0;
                   state.code_listing <- Masc_tui_fetched.clear state.code_listing;
-                  Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages)
+                  Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(deliver_code state async_messages)
                 end
                 else
                   (* Off-ring child: the way out of the project root is the
@@ -39799,13 +39791,13 @@ Use relative paths for resources already held in the package. -->
                     (if String.equal parent "." then "" else parent);
                   state.code_cursor <- 0;
                   state.code_listing <- Masc_tui_fetched.clear state.code_listing;
-                  Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages)
+                  Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(deliver_code state async_messages)
                 end
                 else if state.code_scope <> Code_scope_project then begin
                   set_code_scope state Code_scope_project;
                   state.code_cursor <- 0;
                   state.code_listing <- Masc_tui_fetched.clear state.code_listing;
-                  Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages)
+                  Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(deliver_code state async_messages)
                 end
             | Keepers Keeper_detail ->
                 state.detail_focus_recovery <- None;
@@ -40666,10 +40658,10 @@ Use relative paths for resources already held in the package. -->
                         state.code_dir <- node.Masc.Tui_decode.wt_path;
                         state.code_cursor <- 0;
                         state.code_listing <- Masc_tui_fetched.clear state.code_listing;
-                        Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages)
+                        Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(deliver_code state async_messages)
                       end
                       else
-                        Masc_tui_code_requests.launch_file_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages)
+                        Masc_tui_code_requests.launch_file_load state ~host:server_peer_host ~deliver:(deliver_code state async_messages)
                           ~path:node.Masc.Tui_decode.wt_path
                   | None -> ())
             (* The picker's own arm takes Enter. *)
@@ -40833,7 +40825,7 @@ Use relative paths for resources already held in the package. -->
                         state.code_file_resume_intent <- Refresh_code_file;
                         state.code_focus_file <- Left_pane;
                         state.view <- Code;
-                        Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages)))
+                        Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(deliver_code state async_messages)))
             | Runtime -> Masc_tui_types.open_runtime_row_detail state
             | System_logs -> open_selected_system_log state
             | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_calls
@@ -41114,8 +41106,8 @@ Use relative paths for resources already held in the package. -->
                         state.code_target_line <-
                           Some (Masc.Tui_decode.file_change_target_line change);
                         state.view <- Code;
-                        Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages);
-                        Masc_tui_code_requests.launch_file_load state ~host:server_peer_host ~deliver:(workspace_enqueue state async_messages)
+                        Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(deliver_code state async_messages);
+                        Masc_tui_code_requests.launch_file_load state ~host:server_peer_host ~deliver:(deliver_code state async_messages)
                           ~path)))
        | Some "o" | Some "O" | Some "A" when state.view = Lanes ->
            launch_lane_addons state ~mailbox:async_messages

@@ -7,43 +7,43 @@
 val launch_entries_load
   :  Masc_tui_types.state
   -> host:string
-  -> deliver:(Masc_tui_async_protocol.async_msg -> unit)
+  -> deliver:(Masc_tui_code_results.msg -> unit)
   -> unit
 
 (** Start the path request and deliver its whole-file response with its request key. *)
 val launch_file_finder :
   Masc_tui_types.state -> host:string ->
-  deliver:(Masc_tui_async_protocol.async_msg -> unit) -> unit
+  deliver:(Masc_tui_code_results.msg -> unit) -> unit
 
 val launch_branches :
   Masc_tui_types.state -> host:string ->
-  deliver:(Masc_tui_async_protocol.async_msg -> unit) -> unit
+  deliver:(Masc_tui_code_results.msg -> unit) -> unit
 (** Open the branch palette over Code and read the branches of the checkout
     that owns the directory shown. A late list for another directory is dropped
     by the reading key. *)
 
 val launch_worktrees :
   Masc_tui_types.state -> host:string ->
-  deliver:(Masc_tui_async_protocol.async_msg -> unit) -> unit
+  deliver:(Masc_tui_code_results.msg -> unit) -> unit
 (** Open the worktree palette over Code and read the worktrees of the
     repository that owns the directory shown. A late list for another directory
     is dropped by the reading key. *)
 
 val open_found_file :
   Masc_tui_types.state -> host:string ->
-  deliver:(Masc_tui_async_protocol.async_msg -> unit) -> path:string -> unit
+  deliver:(Masc_tui_code_results.msg -> unit) -> path:string -> unit
 (** Read a selected file without replacing the original file or cursor. Only
     an admitted successful reply commits navigation through Code results. *)
 
 val return_to_reading :
   Masc_tui_types.state -> host:string ->
-  deliver:(Masc_tui_async_protocol.async_msg -> unit) -> unit
+  deliver:(Masc_tui_code_results.msg -> unit) -> unit
 (** Return through jump history using the destination scope and confirmed
     workspace identity, without replacing the current file while reading. *)
 
 val launch_navigation_read :
   Masc_tui_types.state -> host:string ->
-  deliver:(Masc_tui_async_protocol.async_msg -> unit) ->
+  deliver:(Masc_tui_code_results.msg -> unit) ->
   Masc_tui_types.code_navigation_owner -> string Masc_tui_fetched.request -> unit
 (** Send an already-owned return/location read under its destination scope. *)
 
@@ -51,7 +51,7 @@ val launch_file_load
   :  ?intent:Masc_tui_types.code_file_load_intent
   -> Masc_tui_types.state
   -> host:string
-  -> deliver:(Masc_tui_async_protocol.async_msg -> unit)
+  -> deliver:(Masc_tui_code_results.msg -> unit)
   -> path:string
   -> unit
 
@@ -61,7 +61,7 @@ val launch_file_load
 val launch_history_load
   :  Masc_tui_types.state
   -> host:string
-  -> deliver:(Masc_tui_async_protocol.async_msg -> unit)
+  -> deliver:(Masc_tui_code_results.msg -> unit)
   -> path:string
   -> unit
 
@@ -70,7 +70,7 @@ val launch_history_load
 val launch_diff_load
   :  Masc_tui_types.state
   -> host:string
-  -> deliver:(Masc_tui_async_protocol.async_msg -> unit)
+  -> deliver:(Masc_tui_code_results.msg -> unit)
   -> target:Masc_tui_types.code_diff_target
   -> unit
 
@@ -78,7 +78,7 @@ val launch_diff_load
 val launch_blame_load
   :  Masc_tui_types.state
   -> host:string
-  -> deliver:(Masc_tui_async_protocol.async_msg -> unit)
+  -> deliver:(Masc_tui_code_results.msg -> unit)
   -> path:string
   -> unit
 
@@ -90,18 +90,19 @@ val start_lsp_question
   :  ?line:int
   -> Masc_tui_types.state
   -> host:string
-  -> deliver:(Masc_tui_async_protocol.async_msg -> unit)
+  -> deliver:(Masc_tui_code_results.msg -> unit)
   -> report:(string -> string -> unit)
   -> question:string
   -> symbol:string
   -> unit
 
 val save_draft : Masc_tui_types.state -> host:string ->
-  deliver:(Masc_tui_async_protocol.async_msg -> unit) -> (unit, string) result
-(** Deliver this effect acknowledgement unwrapped so navigation cannot lose the
-    submitted draft's outcome. The UI still settles only its original ticket. *)
+  deliver:(Masc_tui_code_results.msg -> unit) -> (unit, string) result
+(** The outcome is a [Save] answer, which the loop delivers without a
+    workspace stamp so navigation cannot lose the submitted draft's outcome.
+    The UI still settles only its original ticket. *)
 
 val reread_draft : Masc_tui_types.state -> host:string ->
-  deliver:(Masc_tui_async_protocol.async_msg -> unit) -> (unit, string) result
+  deliver:(Masc_tui_code_results.msg -> unit) -> (unit, string) result
 (** Supersede an earlier file read and own a new comparison request after a
     conflict/uncertainty. A pre-submission GET cannot supply that comparison. *)

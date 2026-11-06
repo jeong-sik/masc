@@ -1,7 +1,6 @@
 (** Code reads and language-server requests; completion is delivered to the caller. *)
 
 open Masc_tui_types
-open Masc_tui_async_protocol
 
 (* The Code surface's two loads: one directory level, one whole file. Plain
    HTTP GETs forked off the render loop, answered on the async mailbox and
@@ -38,7 +37,7 @@ let launch_file_finder state ~host ~deliver =
         let port = state.port in
         let keeper, repo = code_scope_axes_of origin.cfo_scope in
         Masc_tui_async_read.launch
-          ~deliver:(fun result -> deliver (Code_msg (Code_catalog_loaded (request, result))))
+          ~deliver:(fun result -> deliver (Masc_tui_code_results.Code_catalog_loaded (request, result)))
           (fun () -> match expected_workspace with
              | None -> Error "File finder has no workspace identity"
              | Some expected_workspace -> Masc_tui_http.fetch_workspace_file_catalog
@@ -62,7 +61,7 @@ let launch_branches state ~host ~deliver =
              let port = state.port in
              let keeper, repo = code_scope_axes_of origin.cfo_scope in
              Masc_tui_async_read.launch
-               ~deliver:(fun result -> deliver (Code_msg (Code_branches_loaded (request, result))))
+               ~deliver:(fun result -> deliver (Masc_tui_code_results.Code_branches_loaded (request, result)))
                (fun () -> Masc_tui_http.fetch_git_branches ?keeper ?repo
                    ~expected_workspace ~host ~port ~path:origin.cfo_dir ()))
     | Palette_branches _, None ->
@@ -88,7 +87,7 @@ let launch_worktrees state ~host ~deliver =
              let port = state.port in
              let keeper, repo = code_scope_axes_of origin.cfo_scope in
              Masc_tui_async_read.launch
-               ~deliver:(fun result -> deliver (Code_msg (Code_worktrees_loaded (request, result))))
+               ~deliver:(fun result -> deliver (Masc_tui_code_results.Code_worktrees_loaded (request, result)))
                (fun () -> Masc_tui_http.fetch_git_worktrees ?keeper ?repo
                    ~expected_workspace ~host ~port ~path:origin.cfo_dir ()))
     | Palette_worktrees _, None ->
@@ -110,7 +109,7 @@ let open_found_file state ~host ~deliver ~path =
            let port = state.port in
            let keeper, repo = code_scope_axes_of origin.cfo_scope in
            Masc_tui_async_read.launch
-             ~deliver:(fun result -> deliver (Code_msg (Code_finder_file_loaded (request, result))))
+             ~deliver:(fun result -> deliver (Masc_tui_code_results.Code_finder_file_loaded (request, result)))
              (fun () -> Masc_tui_http.fetch_workspace_file ?keeper ?repo
                  ~expected_workspace ~host ~port ~path ()))
   | (Palette_files _ | Palette_branches _ | Palette_worktrees _ | Palette_locations _ | Palette_jump
@@ -139,7 +138,7 @@ let launch_entries_load state ~host ~deliver =
     state.code_listing <- listing;
     let port = state.port in
     Masc_tui_async_read.launch
-      ~deliver:(fun result -> deliver (Code_msg (Code_entries_loaded (request, result))))
+      ~deliver:(fun result -> deliver (Masc_tui_code_results.Code_entries_loaded (request, result)))
       (fun () ->
          let keeper, repo = code_scope_axes_of scope in
          Masc_tui_http.fetch_workspace_entries ?keeper ?repo ~host ~port ~path:dir ())
@@ -153,7 +152,7 @@ let launch_navigation_read state ~host ~deliver owner request =
   let keeper, repo = code_scope_axes_of owner.cno_destination.cj_scope in
   let path = Masc_tui_fetched.request_key request in
   Masc_tui_async_read.launch
-    ~deliver:(fun result -> deliver (Code_msg (Code_file_loaded (Navigate_code_file owner, request, result))))
+    ~deliver:(fun result -> deliver (Masc_tui_code_results.Code_file_loaded (Navigate_code_file owner, request, result)))
     (fun () -> match expected_workspace with
        | None -> Error "Navigation has no workspace identity"
        | Some expected_workspace ->
@@ -185,7 +184,7 @@ let launch_file_load ?(intent = Open_code_file) state ~host ~deliver ~path =
     state.code_file_resume_intent <- intent;
     let port = state.port in
     Masc_tui_async_read.launch
-      ~deliver:(fun result -> deliver (Code_msg (Code_file_loaded (intent, request, result))))
+      ~deliver:(fun result -> deliver (Masc_tui_code_results.Code_file_loaded (intent, request, result)))
       (fun () ->
          let keeper, repo = code_scope_axes_of scope in
          match expected_workspace with
@@ -232,7 +231,7 @@ let launch_history_load state ~host ~deliver ~path =
     let port = state.port in
     let activity_address = code_file_activity_address scope path in
     Masc_tui_async_read.launch
-      ~deliver:(fun result -> deliver (Code_msg (Code_history_loaded (request, result))))
+      ~deliver:(fun result -> deliver (Masc_tui_code_results.Code_history_loaded (request, result)))
       (fun () ->
          let keeper, repo = code_scope_axes_of scope in
          let git =
@@ -319,7 +318,7 @@ let launch_diff_load state ~host ~deliver ~target =
     state.code_diff <- next;
     let port = state.port in
     Masc_tui_async_read.launch
-      ~deliver:(fun result -> deliver (Code_msg (Code_diff_loaded (request, result))))
+      ~deliver:(fun result -> deliver (Masc_tui_code_results.Code_diff_loaded (request, result)))
       (fun () ->
          let keeper, repo = code_scope_axes state in
          let path, against =
@@ -346,7 +345,7 @@ let launch_blame_load state ~host ~deliver ~path =
     let port = state.port in
     let keeper, repo = code_scope_axes state in
     Masc_tui_async_read.launch
-      ~deliver:(fun result -> deliver (Code_msg (Code_blame_loaded (request, result))))
+      ~deliver:(fun result -> deliver (Masc_tui_code_results.Code_blame_loaded (request, result)))
       (fun () -> Masc_tui_http.fetch_git_blame ?keeper ?repo ~host ~port ~path ())
   end
 
@@ -392,14 +391,14 @@ let start_lsp_question
            | Eio.Cancel.Cancelled _ as exn -> raise exn
            | exn -> Error (Printexc.to_string exn)
          in
-         deliver (Code_msg (Code_lsp_answered (request, result)))
+         deliver (Masc_tui_code_results.Code_lsp_answered (request, result))
        in
        (match Eio_context.get_switch_opt () with
         | Some sw ->
           Eio.Fiber.fork_daemon ~sw (fun () ->
             run ();
             `Stop_daemon)
-        | None -> deliver (Code_msg (Code_lsp_answered (request, Error "Eio switch is unavailable")))))
+        | None -> deliver (Masc_tui_code_results.Code_lsp_answered (request, Error "Eio switch is unavailable"))))
   end
 
 ;;
@@ -411,8 +410,8 @@ let save_draft state ~host ~deliver =
   let reading = state.workspace_read_authority in
   let port = state.port in
   Masc_tui_async_read.launch
-    ~deliver:(fun result -> deliver (Code_msg (Code_draft_saved (request,
-      match result with Ok outcome -> outcome | Error detail -> Masc_tui_code_draft.Save_uncertain detail))))
+    ~deliver:(fun result -> deliver (Masc_tui_code_results.Code_draft_saved (request,
+      match result with Ok outcome -> outcome | Error detail -> Masc_tui_code_draft.Save_uncertain detail)))
     (fun () ->
       if authority <> state.workspace_authority || reading != state.workspace_read_authority then
         Ok (Masc_tui_code_draft.Save_refused "Workspace authority changed before sending the save")

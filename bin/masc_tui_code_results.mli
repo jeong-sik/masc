@@ -1,6 +1,74 @@
 (** Applies Code surface replies. These functions perform no terminal or
     network IO; the caller executes layout and file-read followups. *)
 
+(** The Code pane's async answers. [Masc_tui_async_protocol.async_msg]
+    carries them in [Code_msg]. *)
+type msg =
+  (* The scope travels with the directory. Without it a reply names a
+     relative path, which two scopes can both have, and the handler had no
+     way to tell a late answer for the scope just left from an answer for the
+     scope now open (#33946). *)
+  | Code_catalog_loaded of
+      (Masc_tui_types.code_workspace_scope * string) Masc_tui_fetched.request
+      * (Masc.Tui_decode.workspace_file_catalog, string) result
+  | Code_branches_loaded of
+      (Masc_tui_types.code_workspace_scope * string) Masc_tui_fetched.request
+      * (Masc.Tui_decode.git_branches, string) result
+  | Code_worktrees_loaded of
+      (Masc_tui_types.code_workspace_scope * string) Masc_tui_fetched.request
+      * (Masc.Tui_decode.git_worktrees, string) result
+  | Code_finder_file_loaded of
+      (Masc_tui_types.code_workspace_scope * string) Masc_tui_fetched.request
+      * (Masc.Tui_decode.workspace_file_source, string) result
+  | Code_entries_loaded of
+      (Masc_tui_types.code_workspace_scope * string) Masc_tui_fetched.request
+      * (Masc.Tui_decode.workspace_tree_node list, string) result
+  | Code_draft_saved of Masc_tui_types.code_save_request * Masc_tui_code_draft.outcome
+  | Code_file_loaded of
+      Masc_tui_types.code_file_load_intent
+      * string Masc_tui_fetched.request
+      * (Masc.Tui_decode.workspace_file_source, string) result
+  | Code_history_loaded of
+      (Masc_tui_types.code_workspace_scope * string) Masc_tui_fetched.request
+      * (Masc_tui_types.code_history_listing, string) result
+  | Code_diff_loaded of
+      Masc_tui_types.code_diff_target Masc_tui_fetched.request
+      * (Masc.Tui_decode.git_diff, string) result
+  (* The path the margin describes; stamped so a late answer cannot caption
+     another file. *)
+  | Code_blame_loaded of
+      string Masc_tui_fetched.request
+      * (Masc.Tui_decode.blame_block list, string) result
+  | Code_lsp_answered of
+      Masc_tui_types.code_lsp_query Masc_tui_fetched.request
+      * (Masc.Tui_decode.lsp_answer, string) result
+
+(** The protocol and the loop decide by kind, not by answer: whether an answer
+    is a read, whether it waits for input, whether it carries an operation
+    receipt, what is left to clean up when its workspace has changed, and
+    whether it is stamped with the workspace that asked. A new answer that
+    takes an existing kind takes all of that kind's decisions without a
+    compile error. An answer that needs another decision adds a kind, and
+    then each match on the kind stops compiling until it decides. *)
+type answer_kind =
+  | Read  (** Reads the workspace that asked, and is stamped with it. *)
+  | Save
+      (** The outcome of the draft save. It is not stamped, so navigation
+          cannot lose it. *)
+
+val answer_kind : msg -> answer_kind
+
+(** What is left for the loop after {!apply}. *)
+type answer_followup =
+  | No_answer_followup
+  | Reload_saved_file of string
+      (** The save committed while its file was the reading on screen. The
+          loop reads the file again unless input is waiting; then the demand
+          waits for {!saved_refresh_path}. *)
+
+val apply : Masc_tui_types.state -> msg -> answer_followup
+(** Apply one answer to the Code pane's state. *)
+
 type followup =
   | No_followup
   | Reveal_cursor

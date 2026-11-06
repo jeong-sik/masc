@@ -1,9 +1,13 @@
-(* The Code pane's answers travel in [async_msg] as [Code_msg] (#48617). The
-   classifiers sort each answer as they did when the answers were constructors
-   of [async_msg] themselves: a draft save is a write and every other answer is
-   a read, and no answer waits for input. *)
+(* The Code pane's answers are [Masc_tui_code_results.msg] and travel in
+   [async_msg] as [Code_msg] (#48617). The classifiers sort each answer as they
+   did when the answers were constructors of [async_msg] themselves: a draft
+   save is a write and every other answer is a read, and no answer waits for
+   input. An answer to a request the pane never sent asks the loop for
+   nothing, and a save that commits while its file is on screen asks the loop
+   to read that file again. *)
 
 module Protocol = Masc_tui_async_protocol
+module Code = Masc_tui_code_results
 module Fetched = Masc_tui_fetched
 module Types = Masc_tui_types
 module Draft = Masc_tui_code_draft
@@ -40,29 +44,29 @@ let lsp_query () : Types.code_lsp_query =
 
 (* Which answers write, with every constructor named: a new answer has to be
    placed here before this test compiles. *)
-let is_write : Protocol.code_msg -> bool = function
-  | Protocol.Code_draft_saved _ -> true
-  | Protocol.Code_catalog_loaded _ | Protocol.Code_branches_loaded _
-  | Protocol.Code_worktrees_loaded _ | Protocol.Code_finder_file_loaded _
-  | Protocol.Code_entries_loaded _ | Protocol.Code_file_loaded _
-  | Protocol.Code_history_loaded _ | Protocol.Code_diff_loaded _
-  | Protocol.Code_blame_loaded _ | Protocol.Code_lsp_answered _ -> false
+let is_write : Code.msg -> bool = function
+  | Code.Code_draft_saved _ -> true
+  | Code.Code_catalog_loaded _ | Code.Code_branches_loaded _
+  | Code.Code_worktrees_loaded _ | Code.Code_finder_file_loaded _
+  | Code.Code_entries_loaded _ | Code.Code_file_loaded _
+  | Code.Code_history_loaded _ | Code.Code_diff_loaded _
+  | Code.Code_blame_loaded _ | Code.Code_lsp_answered _ -> false
 
 let answers () =
   let scoped () = request (Types.Code_scope_project, "src") in
-  [ "catalog", Protocol.Code_catalog_loaded (scoped (), unread)
-  ; "branches", Protocol.Code_branches_loaded (scoped (), unread)
-  ; "worktrees", Protocol.Code_worktrees_loaded (scoped (), unread)
-  ; "finder file", Protocol.Code_finder_file_loaded (scoped (), unread)
-  ; "entries", Protocol.Code_entries_loaded (scoped (), unread)
-  ; "draft saved", Protocol.Code_draft_saved (save_request (), Draft.Save_uncertain "no reply")
-  ; "file", Protocol.Code_file_loaded (Types.Open_code_file, request "src/a.ml", unread)
-  ; "history", Protocol.Code_history_loaded (scoped (), unread)
+  [ "catalog", Code.Code_catalog_loaded (scoped (), unread)
+  ; "branches", Code.Code_branches_loaded (scoped (), unread)
+  ; "worktrees", Code.Code_worktrees_loaded (scoped (), unread)
+  ; "finder file", Code.Code_finder_file_loaded (scoped (), unread)
+  ; "entries", Code.Code_entries_loaded (scoped (), unread)
+  ; "draft saved", Code.Code_draft_saved (save_request (), Draft.Save_uncertain "no reply")
+  ; "file", Code.Code_file_loaded (Types.Open_code_file, request "src/a.ml", unread)
+  ; "history", Code.Code_history_loaded (scoped (), unread)
   ; ( "diff"
-    , Protocol.Code_diff_loaded
+    , Code.Code_diff_loaded
         (request (Types.Diff_worktree { path = "src/a.ml"; base_ref = "main" }), unread) )
-  ; "blame", Protocol.Code_blame_loaded (request "src/a.ml", unread)
-  ; "lsp", Protocol.Code_lsp_answered (request (lsp_query ()), unread) ]
+  ; "blame", Code.Code_blame_loaded (request "src/a.ml", unread)
+  ; "lsp", Code.Code_lsp_answered (request (lsp_query ()), unread) ]
 
 let test_a_draft_save_is_the_only_write () =
   List.iter
@@ -85,10 +89,66 @@ let test_no_answer_waits_for_input () =
            (Protocol.Code_msg answer)))
     (answers ())
 
+(* The state never sent these requests and holds no draft, so every answer is
+   dropped and the save has no file of its own to read again. *)
+let test_an_unasked_answer_asks_for_nothing () =
+  List.iter
+    (fun (name, answer) ->
+      let state = Types.create_state ~workspace:"test" ~port:0 ~refresh_interval:0. () in
+      Alcotest.(check bool)
+        (name ^ " asks the loop for nothing")
+        true
+        (match Code.apply state answer with
+         | Code.No_answer_followup -> true
+         | Code.Reload_saved_file _ -> false))
+    (answers ())
+
+(* The server the save's address names, confirmed as the workspace on screen. *)
+let confirm_workspace (state : Types.state) =
+  state.server_identity <- Some
+    { Masc.Tui_decode.sid_version = "test"; sid_binary_commit = "test";
+      sid_binary_commit_age_s = None; sid_runtime_instance_id = None;
+      sid_base_path = Masc.Tui_decode.Canonical_path.of_path "/workspace";
+      sid_masc_root = Masc.Tui_decode.Canonical_path.of_path "/workspace/.masc";
+      sid_executable_in_worktree = None; sid_state_ready = Some true; sid_uptime = None;
+      sid_sse_clients = None; sid_gc = None; sid_scheduler = None; sid_operator_action = None };
+  state.workspace_identity <- Types.Workspace_identity_match;
+  state.view <- Types.Code
+
+let test_a_committed_save_rereads_its_file () =
+  let state = Types.create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  confirm_workspace state;
+  let reading, read =
+    match Fetched.start ~equal:String.equal state.code_file ~key:"src/a.ml" with
+    | Fetched.Started (next, request) -> next, request
+    | Fetched.Already_loading -> Alcotest.fail "a fresh file reported a read in flight"
+  in
+  state.code_file <- reading;
+  let source = { Masc.Tui_decode.wfs_content = "a\n"; wfs_revision = String.make 64 'a' } in
+  Alcotest.(check bool) "the file read asks the loop for nothing" true
+    (match Code.apply state (Code.Code_file_loaded (Types.Refresh_code_file, read, Ok source)) with
+     | Code.No_answer_followup -> true
+     | Code.Reload_saved_file _ -> false);
+  state.code_focus_file <- Types.Right_pane;
+  let must = function Ok value -> value | Error detail -> Alcotest.fail detail in
+  let draft = must (Code.prepare_draft state) in
+  must (Code.edit_draft state draft "b\n");
+  let saving, _ = must (Code.begin_draft_save state) in
+  Alcotest.(check (option string)) "the committed save asks to read its file again"
+    (Some "src/a.ml")
+    (match Code.apply state (Code.Code_draft_saved (saving, Draft.Save_succeeded (String.make 64 'b'))) with
+     | Code.Reload_saved_file path -> Some path
+     | Code.No_answer_followup -> None)
+
 let () =
   Alcotest.run "tui code msg"
     [ ( "classifiers"
       , [ Alcotest.test_case "a draft save is the only Code write" `Quick
             test_a_draft_save_is_the_only_write
         ; Alcotest.test_case "no Code answer waits for input" `Quick
-            test_no_answer_waits_for_input ] ) ]
+            test_no_answer_waits_for_input ] )
+    ; ( "apply"
+      , [ Alcotest.test_case "an unasked Code answer asks the loop for nothing" `Quick
+            test_an_unasked_answer_asks_for_nothing
+        ; Alcotest.test_case "a committed save asks to read its file again" `Quick
+            test_a_committed_save_rereads_its_file ] ) ]

@@ -139,6 +139,14 @@ val json_string_list_member : string -> Yojson.Safe.t -> string list
 (** [json_string_list_member name json] extracts a list of non-empty
     trimmed strings from the JSON array at field [name]. Returns [[]]
     if the field is missing or not an array. *)
+
+val json_string_list_member_strict :
+  string -> Yojson.Safe.t -> string list option
+(** [json_string_list_member_strict name json] decodes the JSON array at
+    field [name] into trimmed strings. Returns [None] when the field is
+    missing, is not an array, or holds a non-string or blank element,
+    where {!json_string_list_member} would drop that element. *)
+
 (** {1 Assoc field validation (Result-returning)}
 
     These take an already-destructured [`Assoc] field list, unlike the

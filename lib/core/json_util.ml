@@ -320,6 +320,19 @@ let json_string_list_member name json =
   with
   | Yojson.Safe.Util.Type_error _ -> []
 
+let json_string_list_member_strict name json =
+  match assoc_member_opt name json with
+  | Some (`List values) ->
+    let rec decode acc = function
+      | [] -> Some (List.rev acc)
+      | `String value :: rest ->
+        let value = String.trim value in
+        if value = "" then None else decode (value :: acc) rest
+      | _ -> None
+    in
+    decode [] values
+  | _ -> None
+
 
 (** {1 Assoc field validation (Result-returning)}
 

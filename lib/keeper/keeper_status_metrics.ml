@@ -146,19 +146,6 @@ let summarize_metrics_lines (lines : string list) : metrics_summary =
     empty_metrics_summary
     lines
 
-let string_list_member_opt key json =
-  match Json_util.assoc_member_opt key json with
-  | Some (`List values) ->
-      let rec decode acc = function
-        | [] -> Some (List.rev acc)
-        | `String value :: rest ->
-            let value = String.trim value in
-            if value = "" then None else decode (value :: acc) rest
-        | _ -> None
-      in
-      decode [] values
-  | _ -> None
-
 module Tool_audit_cache = struct
   type entry =
     { physical_row_count : int
@@ -217,7 +204,7 @@ let latest_tool_audit_snapshot_from_metrics config keeper_name =
         (match Keeper_metrics_record.kind_of_json json with
          | Some Keeper_metrics_record.Turn ->
              (match
-                string_list_member_opt "tools_used" json,
+                Json_util.json_string_list_member_strict "tools_used" json,
                 Safe_ops.json_int_opt "tool_call_count" json,
                 Safe_ops.json_string_nonempty_opt "ts" json
               with

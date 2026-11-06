@@ -31,6 +31,7 @@
   keeper_tool_execution_journal_resolution
   keeper_tool_execution_journal_binding
   keeper_tool_execution_journal_continuation
+  keeper_tool_execution_journal_completion
   keeper_unified_prompt_event_fields
   keeper_msg_async_types
   keeper_msg_async_record

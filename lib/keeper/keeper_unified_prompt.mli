@@ -100,12 +100,15 @@ type held_task_link =
     pursue its success conditions without a second read. [summary_criterion]
     and [summary_phase] are options for a caller that states a summary
     directly; {!active_goal_summaries} always fills both from the store.
-    RFC-0387 stage 2 carries the phase so a [Verifying] goal renders annotated
-    in the Active Goals layer — the gate must not make the goal disappear from
-    the keeper (review P0-1). *)
+    RFC-0387 stage 2 carries the phase so a [Verifying] goal is named in the
+    Goals Awaiting Proof layer — the gate must not make the goal disappear from
+    the keeper (review P0-1). [summary_priority] and [summary_created_at] are
+    the stored values the Active Goals layer orders the Goals by. *)
 type goal_summary = {
   summary_goal_id : string;
   summary_title : string;
+  summary_priority : int;
+  summary_created_at : string;
   summary_phase : Goal_phase.t option;
   summary_criterion : Goal_store.criterion option;
   summary_review_note : string option;
@@ -132,10 +135,12 @@ val active_goal_summaries :
 
 val format_active_goal_summaries :
   (goal_summary list, Goal_store.unavailable) result -> string option
-(** The shared Active Goals prompt layer: each Goal's id, title, verifying
-    marker and current criterion. [Ok []] explicitly renders the empty
-    observation; [Error] renders the authoritative store failure. This
-    projection grants no effect authority. *)
+(** The shared Active Goals prompt layer: each Goal's id, title and current
+    criterion, ordered by (priority, created_at, id) so a phase move or a
+    refuted proof leaves its bytes as they were (RFC-0491 §3.3). [Ok []]
+    explicitly renders the empty observation; [Error] renders the
+    authoritative store failure. This projection grants no effect
+    authority. *)
 
 val format_goal_observation_summaries :
   (goal_summary list, Goal_store.unavailable) result -> string option
@@ -143,6 +148,13 @@ val format_goal_observation_summaries :
     measurement provenance and this keeper's held-Task link, one row per Goal
     id. [None] when there is no Goal or the store is unreadable; the Active
     Goals layer states both. *)
+
+val format_goals_awaiting_proof_summaries :
+  (goal_summary list, Goal_store.unavailable) result -> string option
+(** The Goals Awaiting Proof prompt layer: the id of each Goal in
+    [Verifying] with the proof-pending mark, in the Active Goals order.
+    [None] when no Goal is in [Verifying] or the store is unreadable; the
+    Active Goals layer states the failure. *)
 
 val build_system_prompt :
   workspace_root:string ->

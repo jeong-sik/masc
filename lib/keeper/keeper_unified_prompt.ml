@@ -190,12 +190,15 @@ type held_task_link =
 (* What the prompt knows about one active goal. [phase] and [criterion] are
    options for a caller that states a summary directly;
    [active_goal_summaries] always fills both from the store. RFC-0387 stage 2
-   carries the phase so a [Verifying] goal is annotated rather than reading as
-   ordinary open work — the gate must not make the goal disappear from the
-   keeper's view (review P0-1). *)
+   carries the phase so a [Verifying] goal is named under proof rather than
+   reading as ordinary open work — the gate must not make the goal disappear
+   from the keeper's view (review P0-1). [priority] and [created_at] are the
+   stored values the System orders the Goals by (RFC-0491 §3.3). *)
 type goal_summary =
   { summary_goal_id : string
   ; summary_title : string
+  ; summary_priority : int
+  ; summary_created_at : string
   ; summary_phase : Goal_phase.t option
   ; summary_criterion : Goal_store.criterion option
   ; summary_review_note : string option
@@ -203,15 +206,14 @@ type goal_summary =
   ; summary_held_task_link : held_task_link
   }
 
-(** Format active Goal rows with their titles (RFC-0315): id, title, the
-    verifying marker and the criterion. These change only on a Goal event, so
-    the block can sit in the System prompt. Each Goal's latest review,
-    measurement and this keeper's held-Task link are {!format_goal_observations}.
-    Empty summaries supply no rows; the authoritative observation still carries
-    its heading. Unobserved summaries do not authorize a fallback Goal list.
-    A [Verifying] goal is annotated: completion is requested and the proof is
-    being judged out-of-band, so the keeper keeps working the linked tasks
-    instead of re-requesting completion. *)
+(** Format active Goal rows with their titles (RFC-0315): id, title and the
+    criterion. These change only when a Goal is created or its criterion is
+    edited, so the block can sit in the System prompt. Each Goal's latest
+    review, measurement and this keeper's held-Task link are
+    {!format_goal_observations}; the Goals in [Verifying] are
+    {!format_goals_awaiting_proof}. Empty summaries supply no rows; the
+    authoritative observation still carries its heading. Unobserved summaries
+    do not authorize a fallback Goal list. *)
 let format_goal_summaries (summaries : goal_summary list) : string =
   String.concat "\n"
     (List.map
@@ -235,19 +237,54 @@ let format_goal_summaries (summaries : goal_summary list) : string =
                   [ "criterion", Goal_store.criterion_to_yojson criterion
                     |> Yojson.Safe.to_string ] ]
           in
-          let base = match summary.summary_phase with
-          | Some Goal_phase.Verifying ->
-            base
-            ^ " "
-            ^ render_fragment
-                Prompt_names.keeper_world_active_goals_verifying_annotation
-                []
-          | Some (Goal_phase.Awaiting_confirmation | Goal_phase.Executing | Goal_phase.Completed | Goal_phase.Dropped
-                 | Goal_phase.Paused _ | Goal_phase.Blocked _) | None
-            -> base
-          in
           String.concat "\n" (base :: details))
        summaries)
+
+(* RFC-0491 §3.3: the System lists the Goals by (priority, created_at, id). A
+   completion request, a refuted proof and a reopen each write [updated_at],
+   the store's second sort key, and leave these three as they were. The
+   System rows show no priority, so this order is where it still shows. *)
+let compare_system_order left right =
+  match Int.compare left.summary_priority right.summary_priority with
+  | 0 ->
+    (match String.compare left.summary_created_at right.summary_created_at with
+     | 0 -> String.compare left.summary_goal_id right.summary_goal_id
+     | order -> order)
+  | order -> order
+;;
+
+let in_system_order summaries = List.stable_sort compare_system_order summaries
+
+let is_awaiting_proof summary =
+  match summary.summary_phase with
+  | Some Goal_phase.Verifying -> true
+  | Some
+      ( Goal_phase.Awaiting_confirmation | Goal_phase.Executing | Goal_phase.Completed
+      | Goal_phase.Dropped | Goal_phase.Paused _ | Goal_phase.Blocked _ )
+  | None -> false
+;;
+
+(** The Goals in [Verifying], by id in the System's order: completion is
+    requested and the proof is being judged out-of-band, so the keeper keeps
+    working the linked tasks instead of re-requesting completion. [None] when
+    no Goal is. These rows ride the turn's trailing context, which every round
+    of the turn carries (RFC-0491 §3.3). *)
+let format_goals_awaiting_proof (summaries : goal_summary list) : string option =
+  match List.filter is_awaiting_proof (in_system_order summaries) with
+  | [] -> None
+  | awaiting ->
+    Some
+      (render_fragment Prompt_names.keeper_world_goals_awaiting_proof_heading
+         [ "count", string_of_int (List.length awaiting) ]
+       ^ "\n"
+       ^ String.concat "\n"
+           (List.map
+              (fun summary ->
+                 render_fragment Prompt_names.keeper_world_goals_awaiting_proof_row
+                   [ "goal_id", summary.summary_goal_id ])
+              awaiting)
+       ^ "\n\n")
+;;
 
 (** Each Active Goal's latest review and measurement and this keeper's
     held-Task link, one row per Goal named by its id. A measurement is recorded,
@@ -1133,6 +1170,8 @@ let active_goal_summaries ~(config : Workspace.config) ~(keeper_name : string) =
          (fun (goal : Goal_store.goal) ->
             { summary_goal_id = goal.id
             ; summary_title = goal.title
+            ; summary_priority = goal.priority
+            ; summary_created_at = goal.created_at
             ; summary_phase = Some goal.phase
             ; summary_criterion = Some (Goal_store.criterion_of_goal goal)
             ; summary_review_note = goal.last_review_note
@@ -1166,7 +1205,7 @@ let format_active_goal_summaries = function
     Some
       (render_fragment Prompt_names.keeper_world_active_goals_heading
          [ "count", string_of_int (List.length summaries) ]
-       ^ "\n" ^ format_goal_summaries summaries ^ "\n\n")
+       ^ "\n" ^ format_goal_summaries (in_system_order summaries) ^ "\n\n")
 ;;
 
 let format_goal_observation_summaries = function
@@ -1176,6 +1215,11 @@ let format_goal_observation_summaries = function
       (render_fragment Prompt_names.keeper_world_goal_observations_heading
          [ "count", string_of_int (List.length summaries) ]
        ^ "\n" ^ format_goal_observations summaries ^ "\n\n")
+;;
+
+let format_goals_awaiting_proof_summaries = function
+  | Error (_ : Goal_store.unavailable) -> None
+  | Ok summaries -> format_goals_awaiting_proof summaries
 ;;
 
 let render_system_prompt ~workspace_root ~(meta : Keeper_meta_contract.keeper_meta)
@@ -1489,6 +1533,14 @@ let prepare_prompt_internal
          format_goal_observation_summaries (Error unavailable)
        | Ok _, Some (Ok summaries) -> format_goal_observation_summaries (Ok summaries)
        | Ok _, None -> None)
+    (* 1a'. The Goals in [Verifying]. A completion request, a refuted proof and
+       a reopen move a Goal in or out, so this is its own layer and request
+       assembly turns it into the Goals_awaiting_proof block (RFC-0491 §3.3).
+       An unreadable store is stated by the Active Goals layer. *)
+    | Keeper_context_layers.Goals_awaiting_proof ->
+      (match observation.active_goals, active_goal_summaries with
+       | Ok _, Some summaries -> format_goals_awaiting_proof_summaries summaries
+       | Error (_ : Goal_store.unavailable), _ | Ok _, None -> None)
     (* 1b. Current task — the claim that admitted this turn (RFC-0315).
        Standing context: changes on claim/release, not per cycle. *)
     | Keeper_context_layers.Current_task ->
@@ -1885,7 +1937,8 @@ let project_prompt prepared ?workspace_memory_access ?own_recent_actions
       |> Option.map Keeper_context_layers.prepare_content
     | Own_recent_actions -> own_recent_actions_section
     | Recent_work -> Option.map Keeper_context_layers.prepare_content (format_recent_work recent_work)
-    | Active_goals | Goal_observations | Current_task | Approval_authority | Connected_surfaces
+    | Active_goals | Goal_observations | Goals_awaiting_proof | Current_task | Approval_authority
+    | Connected_surfaces
     | Namespace_state | Lane_updates | Autonomous_trigger | Scheduled_automation
     | Completion_authority | Task_cancellations | Pending_mentions | Scope_messages
     | Own_board_posts | Board_activity | Fleet_messages ->

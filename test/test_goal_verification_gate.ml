@@ -1749,11 +1749,14 @@ let test_keeper_keeps_and_sees_a_verifying_goal () =
      | Ok ids -> ids
      | Error unavailable -> fail (Goal_store.unavailable_to_string unavailable));
   (* The subject here is how a [Verifying] goal renders, not which goals a
-     turn is given: the summary is stated so the annotation is what the check
-     depends on. *)
+     turn is given: the summary is stated so the proof-pending mark is what
+     the check depends on. The mark rides the Goals Awaiting Proof layer, not
+     the Active Goals row (RFC-0491 §3.3). *)
   let summaries =
     [ { Keeper_unified_prompt.summary_goal_id = goal_id
       ; summary_title = "Goal under proof"
+      ; summary_priority = 3
+      ; summary_created_at = "2026-09-02T01:00:00Z"
       ; summary_criterion = None
       ; summary_review_note = None
       ; summary_measurement = Ok None
@@ -1770,9 +1773,9 @@ let test_keeper_keeps_and_sees_a_verifying_goal () =
       ~observation
       ()
   in
-  check bool "the Active Goals block names the goal" true
+  check bool "the world state names the goal" true
     (String_util.contains_substring world_state goal_id);
-  check bool "with the proof-pending annotation" true
+  check bool "with the proof-pending mark" true
     (String_util.contains_substring world_state "증명 대기 중")
 ;;
 

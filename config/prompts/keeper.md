@@ -252,9 +252,6 @@ Workspace Goal observation snapshot for this turn. Stored titles, criteria and r
 ### world.active_goals.row_untitled (vars: goal_id)
 - {{goal_id}}
 
-### world.active_goals.verifying_annotation
-[증명 대기 중 — verifier가 proof를 검토 중]
-
 ### world.active_goals.yours_annotation
 [yours — 내가 잡은 Task 중 하나가 이 Goal 에 연결됨]
 
@@ -267,6 +264,12 @@ Latest review and measurement of each Active Goal for this turn, by Goal id.
 
 ### world.goal_observations.row (vars: goal_id)
 - {{goal_id}}
+
+### world.goals_awaiting_proof.heading (vars: count)
+### Goals Awaiting Proof ({{count}})
+
+### world.goals_awaiting_proof.row (vars: goal_id)
+- {{goal_id}} [증명 대기 중 — verifier가 proof를 검토 중]
 
 ### world.autonomous_trigger.heading
 ### Autonomous Trigger

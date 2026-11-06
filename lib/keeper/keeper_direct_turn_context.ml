@@ -1,6 +1,7 @@
 type t =
   { goal_context : string option
   ; goal_observations : string option
+  ; goals_awaiting_proof : string option
   ; task_context : string option
   ; remaining_context : string option
   ; workspace_memory : Workspace_memory_ledger.observation
@@ -46,14 +47,16 @@ let prepare ~active_goal_summaries ~current_task ~held_task_skills ~task_skill_s
   let goal_context = Keeper_unified_prompt.format_active_goal_summaries active_goal_summaries in
   let goal_observations =
     Keeper_unified_prompt.format_goal_observation_summaries active_goal_summaries in
+  let goals_awaiting_proof =
+    Keeper_unified_prompt.format_goals_awaiting_proof_summaries active_goal_summaries in
   let task_context = prepare_common
       [direct_turn_task_context ~current_task ~held_task_skills ~task_skill_surfaces] in
   let remaining_context = prepare_common
       (Option.to_list (Lane_addon_subscription.render lane_updates)
        @ [approval_authority_text; recent_direct_conversation_text; worktree_text;
           telemetry_feedback_text; turn_instructions_text]) in
-  { goal_context; goal_observations; task_context; remaining_context; workspace_memory
-  ; wiki_contents }
+  { goal_context; goal_observations; goals_awaiting_proof; task_context; remaining_context
+  ; workspace_memory; wiki_contents }
 
 let project_partition prepared ~workspace_memory_access =
   let dynamic =
@@ -70,6 +73,7 @@ let project_partition prepared ~workspace_memory_access =
   let observations = Keeper_context_layers.assemble ~content_of:(function
     | Active_goals -> prepared.goal_context
     | Goal_observations -> prepared.goal_observations
+    | Goals_awaiting_proof -> prepared.goals_awaiting_proof
     | Current_task | Approval_authority | Connected_surfaces | Namespace_state
     | Workspace_memory | Wiki | Lane_updates | Autonomous_trigger
     | Scheduled_automation | Completion_authority | Task_cancellations | Pending_mentions

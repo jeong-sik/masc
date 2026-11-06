@@ -13,6 +13,7 @@ let all_layers =
   [
     L.Active_goals;
     L.Goal_observations;
+    L.Goals_awaiting_proof;
     L.Current_task;
     L.Approval_authority;
     L.Connected_surfaces;

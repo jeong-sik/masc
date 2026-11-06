@@ -162,8 +162,11 @@ let diagnosis stop = match stop.refusal with
       "observation_count",`Int observation_count;"observation_bytes",`Int observation_bytes;
       "atom",optional Current.durable_range_id_to_json atom_range;
       "official",optional Current.official_range_id_to_json official_range;
-      "applied",`List [`String "memory range receipts, no claims";`String "external ACK through the refused frontier";
-        `String "atom and official read positions to the refused range end"];
+      (* Each read position moves only when the refused range has that part
+         (Commit.atom_target / official_target are Option.map over the range). *)
+      "applied",`List ([`String "memory range receipts, no claims";`String "external ACK through the refused frontier"]
+        @ (if Option.is_some atom_range then [`String "atom read position to the refused range end"] else [])
+        @ (if Option.is_some official_range then [`String "official read position to the refused range end"] else []));
       "reports",`List (List.map (fun (report:Runtime.not_committed) -> `String report.detail) reports)])
   | Consumer.Keeper_meta_absent | Original_publication_blocked _ | Source_capture_failed _
   | Keeper_meta_unreadable _ | Boundary_log_unreadable _ | Progress_unreadable _

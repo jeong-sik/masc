@@ -48,6 +48,7 @@
   keeper_approval_queue_summary_attempt
   keeper_approval_queue_delivery
   keeper_approval_queue_submit
+  keeper_approval_queue_journal
   keeper_skill_activation_types
   keeper_skill_activation_summary
   keeper_board_attention_partition_types

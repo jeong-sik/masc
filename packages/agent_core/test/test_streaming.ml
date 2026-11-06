@@ -288,7 +288,7 @@ let openrouter_mid_stream_error ~code =
 ;;
 
 let parse_openai data =
-  Agent_core.Llm_provider.Streaming.parse_openai_sse_chunk
+  Agent_core.Llm_provider.Openai_wire.parse_openai_sse_chunk
     ~streaming_reasoning:Agent_core.Llm_provider.Reasoning_dialect.No_streaming_reasoning
     data
 ;;
@@ -318,7 +318,7 @@ let test_missing_provider_message_does_not_promote_raw () =
          (fun json ->
             let raw = Yojson.Safe.to_string json in
             (match parse_openai raw with
-             | Agent_core.Llm_provider.Streaming.Openai_provider_error
+             | Agent_core.Llm_provider.Openai_wire.Openai_provider_error
                  { message; error_type; provider_status; report; raw = evidence } ->
                check_diagnostic message error_type provider_status report;
                Alcotest.(check string) "raw evidence remains separate and exact" raw evidence
@@ -342,14 +342,14 @@ let test_missing_provider_message_does_not_promote_raw () =
 ;;
 
 let require_provider_error label = function
-  | Agent_core.Llm_provider.Streaming.Openai_provider_error { message; provider_status; _ }
+  | Agent_core.Llm_provider.Openai_wire.Openai_provider_error { message; provider_status; _ }
     -> message, provider_status
-  | Agent_core.Llm_provider.Streaming.Openai_chunk _ ->
+  | Agent_core.Llm_provider.Openai_wire.Openai_chunk _ ->
     Alcotest.failf "%s: read as a chunk, whose finish_reason becomes a stop reason" label
-  | Agent_core.Llm_provider.Streaming.Openai_done
-  | Agent_core.Llm_provider.Streaming.Openai_empty
-  | Agent_core.Llm_provider.Streaming.Openai_parse_failed _
-  | Agent_core.Llm_provider.Streaming.Openai_undeclared_reasoning_member _ ->
+  | Agent_core.Llm_provider.Openai_wire.Openai_done
+  | Agent_core.Llm_provider.Openai_wire.Openai_empty
+  | Agent_core.Llm_provider.Openai_wire.Openai_parse_failed _
+  | Agent_core.Llm_provider.Openai_wire.Openai_undeclared_reasoning_member _ ->
     Alcotest.failf "%s: expected a provider error" label
 ;;
 
@@ -412,16 +412,16 @@ let test_openai_error_finish_with_choice_error () =
 
 let test_openai_normal_finish_stays_a_chunk () =
   match parse_openai {|{"id":"c","model":"m","choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}|} with
-  | Agent_core.Llm_provider.Streaming.Openai_chunk chunk ->
+  | Agent_core.Llm_provider.Openai_wire.Openai_chunk chunk ->
     Alcotest.(check (option string))
       "finish reason"
       (Some "stop")
-      chunk.Agent_core.Llm_provider.Streaming.finish_reason
-  | Agent_core.Llm_provider.Streaming.Openai_done
-  | Agent_core.Llm_provider.Streaming.Openai_empty
-  | Agent_core.Llm_provider.Streaming.Openai_provider_error _
-  | Agent_core.Llm_provider.Streaming.Openai_parse_failed _
-  | Agent_core.Llm_provider.Streaming.Openai_undeclared_reasoning_member _ ->
+      chunk.Agent_core.Llm_provider.Openai_wire.finish_reason
+  | Agent_core.Llm_provider.Openai_wire.Openai_done
+  | Agent_core.Llm_provider.Openai_wire.Openai_empty
+  | Agent_core.Llm_provider.Openai_wire.Openai_provider_error _
+  | Agent_core.Llm_provider.Openai_wire.Openai_parse_failed _
+  | Agent_core.Llm_provider.Openai_wire.Openai_undeclared_reasoning_member _ ->
     Alcotest.fail "a stop finish must stay a chunk"
 ;;
 
@@ -516,16 +516,16 @@ let test_parse_with_explicit_event_type () =
    declares and sends. *)
 let parse_openai_chunk_exn data =
   match
-    Agent_core.Llm_provider.Streaming.parse_openai_sse_chunk
+    Agent_core.Llm_provider.Openai_wire.parse_openai_sse_chunk
       ~streaming_reasoning:(Agent_core.Llm_provider.Reasoning_dialect.Delta_field "reasoning")
       data
   with
-  | Agent_core.Llm_provider.Streaming.Openai_chunk chunk -> chunk
-  | Agent_core.Llm_provider.Streaming.Openai_done
-  | Agent_core.Llm_provider.Streaming.Openai_empty
-  | Agent_core.Llm_provider.Streaming.Openai_provider_error _
-  | Agent_core.Llm_provider.Streaming.Openai_parse_failed _
-  | Agent_core.Llm_provider.Streaming.Openai_undeclared_reasoning_member _ ->
+  | Agent_core.Llm_provider.Openai_wire.Openai_chunk chunk -> chunk
+  | Agent_core.Llm_provider.Openai_wire.Openai_done
+  | Agent_core.Llm_provider.Openai_wire.Openai_empty
+  | Agent_core.Llm_provider.Openai_wire.Openai_provider_error _
+  | Agent_core.Llm_provider.Openai_wire.Openai_parse_failed _
+  | Agent_core.Llm_provider.Openai_wire.Openai_undeclared_reasoning_member _ ->
     Alcotest.fail "expected OpenAI-compatible stream chunk"
 ;;
 

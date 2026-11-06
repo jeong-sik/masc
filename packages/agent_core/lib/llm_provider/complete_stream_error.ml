@@ -299,11 +299,11 @@ let http_error_of_stream_error ?wire_format serr =
    interrupted rather than reporting an envelope that never arrived. *)
 let%test "an errored choice with no object reads as an interrupted generation" =
   match
-    Streaming.parse_openai_sse_chunk
+    Openai_wire.parse_openai_sse_chunk
       ~streaming_reasoning:Reasoning_dialect.No_streaming_reasoning
       {|{"id":"c","choices":[{"index":0,"delta":{"content":"partial"},"finish_reason":"error"}]}|}
   with
-  | Streaming.Openai_provider_error { message; error_type; provider_status; report; raw } ->
+  | Openai_wire.Openai_provider_error { message; error_type; provider_status; report; raw } ->
     report = Types.Unstated_errored_choice
     &&
     (match
@@ -335,11 +335,11 @@ let%test "an errored choice with no object reads as an interrupted generation" =
      | Http_client.HttpError _
      | Http_client.NetworkError _ | Http_client.TimeoutError _
      | Http_client.AcceptRejected _ | Http_client.ProviderTerminal _ -> false)
-  | Streaming.Openai_chunk _
-  | Streaming.Openai_done
-  | Streaming.Openai_empty
-  | Streaming.Openai_parse_failed _
-  | Streaming.Openai_undeclared_reasoning_member _ -> false
+  | Openai_wire.Openai_chunk _
+  | Openai_wire.Openai_done
+  | Openai_wire.Openai_empty
+  | Openai_wire.Openai_parse_failed _
+  | Openai_wire.Openai_undeclared_reasoning_member _ -> false
 ;;
 
 let%test "generic stream provider type stays diagnostic" =
@@ -390,11 +390,11 @@ let%test "a choice-level 429 is a rate limit classified from its error object al
     {|{"id":"c","model":"m","choices":[{"index":0,"delta":{"content":"partial answer","tool_calls":[{"index":0,"function":{"arguments":"{\"token\":\"t\"}"}}]},"finish_reason":"error","error":{"code":429,"message":"slow down","retry_after":7.0}}],"usage":{"prompt_tokens":3}}|}
   in
   match
-    Streaming.parse_openai_sse_chunk
+    Openai_wire.parse_openai_sse_chunk
       ~streaming_reasoning:Reasoning_dialect.No_streaming_reasoning
       chunk
   with
-  | Streaming.Openai_provider_error { message; error_type; provider_status; report; raw } ->
+  | Openai_wire.Openai_provider_error { message; error_type; provider_status; report; raw } ->
     (match
        http_error_of_stream_error
          (Types.Stream_provider_error
@@ -439,32 +439,32 @@ let%test "a choice-level 429 is a rate limit classified from its error object al
              | Http_client.Unknown_provider_failure _ )
          ; _
          } -> false)
-  | Streaming.Openai_chunk _
-  | Streaming.Openai_done
-  | Streaming.Openai_empty
-  | Streaming.Openai_parse_failed _
-  | Streaming.Openai_undeclared_reasoning_member _ -> false
+  | Openai_wire.Openai_chunk _
+  | Openai_wire.Openai_done
+  | Openai_wire.Openai_empty
+  | Openai_wire.Openai_parse_failed _
+  | Openai_wire.Openai_undeclared_reasoning_member _ -> false
 ;;
 
 let%test "a top-level 502 is a server error and a 4xx code stays provider-owned" =
   let parse code =
-    Streaming.parse_openai_sse_chunk
+    Openai_wire.parse_openai_sse_chunk
       ~streaming_reasoning:Reasoning_dialect.No_streaming_reasoning
       (Printf.sprintf
          {|{"id":"c","model":"m","error":{"code":%d,"message":"Provider disconnected","metadata":{"error_type":"provider_unavailable"}},"choices":[{"index":0,"delta":{"content":""},"finish_reason":"error"}]}|}
          code)
   in
   let http_error = function
-    | Streaming.Openai_provider_error { message; error_type; provider_status; report; raw } ->
+    | Openai_wire.Openai_provider_error { message; error_type; provider_status; report; raw } ->
       Some
         (http_error_of_stream_error
            (Types.Stream_provider_error
               { message; error_type; provider_status; report; raw }))
-    | Streaming.Openai_chunk _
-    | Streaming.Openai_done
-    | Streaming.Openai_empty
-    | Streaming.Openai_parse_failed _
-    | Streaming.Openai_undeclared_reasoning_member _ -> None
+    | Openai_wire.Openai_chunk _
+    | Openai_wire.Openai_done
+    | Openai_wire.Openai_empty
+    | Openai_wire.Openai_parse_failed _
+    | Openai_wire.Openai_undeclared_reasoning_member _ -> None
   in
   (match http_error (parse 502) with
    | Some (Http_client.HttpError { code = 502; body; retry_after_header = None }) ->

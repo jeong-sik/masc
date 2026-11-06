@@ -87,11 +87,10 @@ type dashboard_auth_state =
     in an [Atomic.t] field so the single write and many reads are tear-free if
     dashboard serving moves off the main Eio domain (RFC-0204 §8.4, Phase 1). *)
 
-(* RFC-0287: inbound reassembly + UTF-8 validation moved into the ws-direct
+(* RFC-0287: inbound reassembly + UTF-8 validation live in the ws-direct
    Connection layer, which delivers complete messages to the Endpoint
-   [on_message] handler. The [Ws_inbound] reassembler and the manual
-   read/classify machinery are gone; only the [max_inbound_*] size knobs remain,
-   fed to [Endpoint.create]. *)
+   [on_message] handler. The [max_inbound_*] size knobs are fed to
+   [Endpoint.create]. *)
 
 type ws_session = {
   id : string;

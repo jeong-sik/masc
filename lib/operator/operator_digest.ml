@@ -4,7 +4,7 @@ open Result.Syntax
 include Operator_digest_types
 open Operator_digest_guidance
 
-(* Retained from Operator_digest_session — used for workspace-level attention health *)
+(* Used for workspace-level attention health *)
 (* Read off the severities, not off the length. The old shape asked only
    whether any row was [Sev_bad] and called every other non-empty list "warn",
    which had two consequences: a [Sev_critical] row reported as amber, and a

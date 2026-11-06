@@ -69,9 +69,8 @@ let runtime_catalog_error_to_core_error detail =
   Agent_core.Error.Config
     (Agent_core.Error.InvalidConfig { field = "runtime_id"; detail })
 
-(** Resolve runtime provider configs via MASC Runtime_config.
-    Returns Provider_config.t list for the downstream AGENT_CORE runtime,
-    bypassing the old Model_spec facade. *)
+(** Resolve runtime provider configs via [Runtime].
+    Returns Provider_config.t list for the downstream AGENT_CORE runtime. *)
 let resolve_runtime_providers ~runtime_id () =
   (* Audit F8: honor the *requested* runtime id (RFC-0207 catalog lookup).
      The previous RFC-0206 single-binding stub discarded [runtime_id] and

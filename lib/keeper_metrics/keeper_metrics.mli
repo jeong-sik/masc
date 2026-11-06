@@ -16,9 +16,6 @@ type t =
   | SinceLastProgressSeconds
   | StreamProjectionEventCutoff
   | MetricEmitDropped
-  | ContextMaxObserved
-    (* counter: context_max observations; labels keeper, model_used, resolved_model_id,
-       context_max_bucket *)
   | TurnStarts (* counter: turn starts, by keeper *)
   | TurnReattempts (* counter: turn starts that reuse the previous start's turn id, by keeper *)
   | TurnRegressions (* counter: turn starts whose turn id is below the previous start's, by keeper *)

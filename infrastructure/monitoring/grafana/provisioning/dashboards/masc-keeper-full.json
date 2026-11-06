@@ -1373,50 +1373,8 @@
         "y": 102
       },
       "panels": [],
-      "title": "Context & Idle",
+      "title": "Idle",
       "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "description": "Maximum observed context bucket count per keeper.",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 6,
-        "x": 0,
-        "y": 103
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "expr": "masc_keeper_context_max_observed_total{keeper=~\"$keeper\"}",
-          "legendFormat": "{{keeper}}",
-          "refId": "A"
-        }
-      ],
-      "title": "Context Max Observations",
-      "transparent": true,
-      "type": "timeseries"
     },
     {
       "datasource": {
@@ -1452,7 +1410,7 @@
       "gridPos": {
         "h": 8,
         "w": 6,
-        "x": 6,
+        "x": 0,
         "y": 103
       },
       "options": {

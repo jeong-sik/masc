@@ -1026,6 +1026,26 @@ let test_explicit_setup_import_and_login_home () =
      | Error Unsafe_credential -> () | _ -> fail "unsafe canonical source must not fall through to another account"))
 ;;
 
+let test_setup_reports_a_linked_runtime_root_as_the_private_home () =
+  with_temp_root
+  @@ fun root ->
+  let runtime_root = Filename.concat root "runtime" in
+  Unix.mkdir runtime_root 0o700;
+  let linked_root = Filename.concat root "linked-runtime" in
+  Unix.symlink runtime_root linked_root;
+  let oauth_source = Filename.concat root "operator-oauth-token" in
+  write_file ~mode:0o600 oauth_source (Masc_test_deps.antigravity_oauth_fixture "operator-secret-canary");
+  let prepare runtime_root =
+    Runtime_antigravity_setup.prepare_from_credential_file ~runtime_root ~account_id:"catalog" ~oauth_source in
+  (match prepare linked_root with
+   | Error Runtime_antigravity_setup.Private_home_unavailable -> ()
+   | Error error -> fail (Runtime_antigravity_setup.error_message error)
+   | Ok _ -> fail "a linked runtime root was admitted");
+  match prepare runtime_root with
+  | Ok _ -> ()
+  | Error error -> fail (Runtime_antigravity_setup.error_message error)
+;;
+
 let test_keychain_selection_and_private_account_switch () =
   with_temp_root (fun runtime_root ->
     let module S = Runtime_antigravity_setup in
@@ -1151,6 +1171,7 @@ let () =
   run
     "runtime_antigravity_home"
     [ ( "setup", [test_case "explicit private account import" `Quick test_explicit_setup_import_and_login_home;
+      test_case "linked runtime root is a private home failure" `Quick test_setup_reports_a_linked_runtime_root_as_the_private_home;
       test_case "keychain precedence and repeated account switch" `Quick test_keychain_selection_and_private_account_switch;
                        test_case "official model catalog envelope" `Quick test_official_models_response_is_not_model_output;
                        test_case "selected zero-turn context" `Quick test_selected_model_zero_turn_context] )

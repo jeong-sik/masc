@@ -4,8 +4,10 @@
     Source: dashboard/src/
     Build output: assets/dashboard/
 
-    This module is kept for backward compatibility.
-    The actual serving logic is in bin/main_eio.ml (serve_dashboard_index).
+    This module selects the assets root, compares the bundle with the
+    running binary and loads the asset files.
+    The route handlers that serve them are in lib/server/
+    (serve_dashboard_index in server_routes_http_pages.ml).
 *)
 
 let select_assets_root

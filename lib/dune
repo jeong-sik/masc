@@ -77,6 +77,7 @@
   keeper_approval_queue_delivery
   keeper_approval_queue_submit
   keeper_approval_queue_journal
+  keeper_approval_queue_resolve
   keeper_skill_activation_types
   keeper_skill_activation_summary
   keeper_skill_activation_ledger_errors

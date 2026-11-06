@@ -379,7 +379,14 @@ let run_queue ~base_path ~keeper_name =
   let* parts=match Parts.roots inventory.parts,pending with
     | [],None -> Ok (Some ([],Read_after_last_write inventory))
     | [],Some batch -> root batch
-    | _::_,None -> Ok existing
+    | _::_,None ->
+      (* With no pending input and every runnable leaf terminal there is
+         nothing to evaluate: walking would only confirm finished parts
+         again. The walk is empty and the pass reports [Idle]. *)
+      let* frontier=frontier ~store ~owner inventory in
+      (match frontier with
+       | Some _ -> Ok (Some ([],Read_after_last_write inventory))
+       | None -> Ok existing)
     | _::_,Some batch ->
       let* frontier=frontier ~store ~owner inventory in
       (match frontier with

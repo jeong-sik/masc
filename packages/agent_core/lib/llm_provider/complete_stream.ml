@@ -218,12 +218,12 @@ let%test "clean stream finalizes Ok: Ollama done:true" =
   let acc = Complete_stream_acc.create_stream_acc () in
   let st = Streaming.create_openai_stream_state ~provider:"ollama" ~model:"m" () in
   (match
-     Streaming.parse_ollama_ndjson_chunk
+     Ollama_wire.parse_ollama_ndjson_chunk
        {|{"model":"m","done":true,"done_reason":"stop","message":{"role":"assistant","content":""}}|}
    with
-   | Streaming.Ollama_chunk chunk ->
+   | Ollama_wire.Ollama_chunk chunk ->
      accumulate_events acc (fst (Streaming.ollama_chunk_to_events st chunk))
-   | Streaming.Ollama_provider_error _ | Streaming.Ollama_parse_failed _ -> ());
+   | Ollama_wire.Ollama_provider_error _ | Ollama_wire.Ollama_parse_failed _ -> ());
   match Complete_stream_acc.finalize_stream_acc acc with
   | Ok _ -> true
   | Error _ -> false
@@ -233,12 +233,12 @@ let%test "Ollama done without reason finalizes typed incomplete" =
   let acc = Complete_stream_acc.create_stream_acc () in
   let st = Streaming.create_openai_stream_state ~provider:"ollama" ~model:"m" () in
   (match
-     Streaming.parse_ollama_ndjson_chunk
+     Ollama_wire.parse_ollama_ndjson_chunk
        {|{"model":"m","done":true,"message":{"role":"assistant","content":"partial"}}|}
    with
-   | Streaming.Ollama_chunk chunk ->
+   | Ollama_wire.Ollama_chunk chunk ->
      accumulate_events acc (fst (Streaming.ollama_chunk_to_events st chunk))
-   | Streaming.Ollama_provider_error _ | Streaming.Ollama_parse_failed _ -> ());
+   | Ollama_wire.Ollama_provider_error _ | Ollama_wire.Ollama_parse_failed _ -> ());
   match Complete_stream_acc.finalize_stream_acc acc with
   | Error (Types.Stream_incomplete { reason = "stream_terminal_without_stop_reason" })
     -> true
@@ -927,14 +927,15 @@ let complete_stream_http
                        ~on_line:(fun line ->
                          observe_wire_chunk line;
                          let () =
-                           match Streaming.parse_ollama_ndjson_chunk line with
-                           | Streaming.Ollama_parse_failed { raw; reason } ->
+                           match Ollama_wire.parse_ollama_ndjson_chunk line with
+                           | Ollama_wire.Ollama_parse_failed { raw; reason } ->
                              dispatch ([ Types.NDJSONParseFailed { raw; reason } ], None)
-                           | Streaming.Ollama_provider_error { message; error_type; raw }
+                           | Ollama_wire.Ollama_provider_error
+                               { message; error_type; raw }
                              ->
                              dispatch
                                ([ Types.NDJSONError { message; error_type; raw } ], None)
-                           | Streaming.Ollama_chunk chunk ->
+                           | Ollama_wire.Ollama_chunk chunk ->
                              (match chunk.oll_timings with
                               | Some _ as t -> stream_timings := t
                               | None -> ());

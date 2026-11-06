@@ -5,7 +5,7 @@
     [{id, model, choices: [{delta: {content, tool_calls, ...}, finish_reason}]}],
     and a chunk can carry text, reasoning, a refusal flag or tool-call deltas.
     Nothing here keeps state between chunks: {!Streaming.openai_chunk_to_events}
-    turns the chunks into stream events. The Ollama reader in {!Streaming}
+    turns the chunks into stream events. The Ollama reader, {!Ollama_wire},
     builds its tool-call deltas from {!tool_call_arguments} too.
 
     Pure module: no I/O, no env reads. *)

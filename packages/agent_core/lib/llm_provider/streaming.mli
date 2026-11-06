@@ -125,12 +125,8 @@ val gemini_chunk_to_events
 
 (** {1 Ollama NDJSON Streaming}
 
-    Ollama [/api/chat] with [stream:true] emits one JSON object per
-    line (newline-delimited JSON, NDJSON). The final line carries
-    [done:true] together with [done_reason] and the
-    [prompt_eval_count] / [prompt_eval_duration] /
-    [eval_count] / [eval_duration] timing fields that the Openai
-    compat path on [/v1/chat/completions] strips out.
+    {!Ollama_wire} reads one Ollama [/api/chat] line into a chunk. The
+    function below turns the chunk into stream events.
 
     State management reuses {!openai_stream_state} since the block
     tracking pattern is identical. Tool calls in Ollama typically
@@ -139,50 +135,12 @@ val gemini_chunk_to_events
 
     @since 0.171.0 *)
 
-type ollama_tool_call_delta =
-  { oll_tc_index : int
-  ; oll_tc_id : string option
-  ; oll_tc_name : string option
-  ; oll_tc_arguments : Openai_wire.tool_call_arguments option
-    (** Tool-call arguments as they arrive on the wire. *)
-  }
-
-type ollama_chunk =
-  { oll_model : string
-  ; oll_delta_content : string option
-  ; oll_delta_thinking : string option
-  ; oll_tool_calls : ollama_tool_call_delta list
-  ; oll_done_reason : string option
-  ; oll_is_done : bool
-  ; oll_usage : api_usage option
-  ; oll_timings : inference_timings option
-  }
-
-type ollama_ndjson_parse_result =
-  | Ollama_chunk of ollama_chunk
-  | Ollama_provider_error of
-      { message : string
-      ; error_type : string option
-      ; raw : string
-      }
-  | Ollama_parse_failed of
-      { reason : string
-      ; raw : string
-      }
-
-(** Parse one NDJSON line without collapsing provider errors or malformed
-    records into an absent chunk. The Ollama error envelope is a provider
-    fact; missing or incorrectly typed data fields are wire failures. When a
-    provider error object omits [message], [message] stays empty and the
-    original payload remains available only through [raw]. *)
-val parse_ollama_ndjson_chunk : string -> ollama_ndjson_parse_result
-
-(** Convert a parsed {!ollama_chunk} into {!sse_event} list.
+(** Convert a parsed {!Ollama_wire.ollama_chunk} into {!sse_event} list.
     Synthesises [ContentBlockStart] events on first occurrence of
     text / thinking content and on each new tool_call. The terminal
     [done:true] chunk also emits [MessageDelta] carrying the
     stop_reason and any token-count usage. *)
 val ollama_chunk_to_events
   :  openai_stream_state
-  -> ollama_chunk
+  -> Ollama_wire.ollama_chunk
   -> sse_event list * Telemetry_event.t option

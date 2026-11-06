@@ -1,6 +1,7 @@
 open Alcotest
 open Llm_provider.Types
 module S = Llm_provider.Streaming
+module OL = Llm_provider.Ollama_wire
 module OW = Llm_provider.Openai_wire
 module GW = Llm_provider.Gemini_wire
 module RD = Llm_provider.Reasoning_dialect
@@ -46,7 +47,7 @@ let ollama_chunk
       ?timings
       ?(is_done = false)
       ()
-  : S.ollama_chunk
+  : OL.ollama_chunk
   =
   { oll_model = "qwen3:8b"
   ; oll_delta_content = delta_content
@@ -80,9 +81,9 @@ let require_openai_chunk label = function
 ;;
 
 let require_ollama_chunk label = function
-  | S.Ollama_chunk chunk -> chunk
-  | S.Ollama_provider_error _ -> fail (label ^ ": unexpected provider error")
-  | S.Ollama_parse_failed { reason; _ } ->
+  | OL.Ollama_chunk chunk -> chunk
+  | OL.Ollama_provider_error _ -> fail (label ^ ": unexpected provider error")
+  | OL.Ollama_parse_failed { reason; _ } ->
     fail (Printf.sprintf "%s: unexpected parse failure: %s" label reason)
 ;;
 
@@ -1172,14 +1173,14 @@ let test_ollama_parse_edge_shapes () =
   let non_object_message =
     require_ollama_chunk
       "non-object message"
-      (S.parse_ollama_ndjson_chunk {|{"model":"m","message":"text","done":false}|})
+      (OL.parse_ollama_ndjson_chunk {|{"model":"m","message":"text","done":false}|})
   in
   check (option string) "no content" None non_object_message.oll_delta_content;
   check int "no tool calls" 0 (List.length non_object_message.oll_tool_calls);
   let args_variants =
     require_ollama_chunk
       "tool argument variants"
-      (S.parse_ollama_ndjson_chunk
+      (OL.parse_ollama_ndjson_chunk
          {|{"model":"m","message":{"content":"","thinking":"","tool_calls":[{"id":"a","function":{"name":"null_args","arguments":null}},{"function":{"name":"string_args","arguments":"{\"x\":1}"}},{"function":{"name":"bool_args","arguments":true}}]},"done":true,"prompt_eval_duration":1000000,"eval_duration":0}|})
   in
   check (option string) "empty content becomes None" None args_variants.oll_delta_content;
@@ -1206,21 +1207,22 @@ let test_ollama_parse_edge_shapes () =
      check (option (float 0.001)) "prompt ms" (Some 1.0) t.prompt_ms;
      check (option (float 0.001)) "zero eval rate" None t.predicted_per_second
    | None -> fail "expected timings");
-  (match S.parse_ollama_ndjson_chunk {|{"done":false}|} with
-   | S.Ollama_parse_failed _ -> ()
-   | S.Ollama_chunk _ | S.Ollama_provider_error _ -> fail "missing model must fail");
-  (match S.parse_ollama_ndjson_chunk {|{"model":"m"}|} with
-   | S.Ollama_parse_failed _ -> ()
-   | S.Ollama_chunk _ | S.Ollama_provider_error _ -> fail "missing done must fail");
-  (match S.parse_ollama_ndjson_chunk {|{"model":"   ","done":false}|} with
-   | S.Ollama_parse_failed _ -> ()
-   | S.Ollama_chunk _ | S.Ollama_provider_error _ -> fail "blank model must fail");
-  (match S.parse_ollama_ndjson_chunk {|{"error":42,"model":"m","done":false}|} with
-   | S.Ollama_parse_failed _ -> ()
-   | S.Ollama_chunk _ | S.Ollama_provider_error _ -> fail "invalid error field must fail");
-  match S.parse_ollama_ndjson_chunk {|{"model":1,"done":false}|} with
-  | S.Ollama_parse_failed _ -> ()
-  | S.Ollama_chunk _ | S.Ollama_provider_error _ -> fail "type error should fail"
+  (match OL.parse_ollama_ndjson_chunk {|{"done":false}|} with
+   | OL.Ollama_parse_failed _ -> ()
+   | OL.Ollama_chunk _ | OL.Ollama_provider_error _ -> fail "missing model must fail");
+  (match OL.parse_ollama_ndjson_chunk {|{"model":"m"}|} with
+   | OL.Ollama_parse_failed _ -> ()
+   | OL.Ollama_chunk _ | OL.Ollama_provider_error _ -> fail "missing done must fail");
+  (match OL.parse_ollama_ndjson_chunk {|{"model":"   ","done":false}|} with
+   | OL.Ollama_parse_failed _ -> ()
+   | OL.Ollama_chunk _ | OL.Ollama_provider_error _ -> fail "blank model must fail");
+  (match OL.parse_ollama_ndjson_chunk {|{"error":42,"model":"m","done":false}|} with
+   | OL.Ollama_parse_failed _ -> ()
+   | OL.Ollama_chunk _ | OL.Ollama_provider_error _ ->
+     fail "invalid error field must fail");
+  match OL.parse_ollama_ndjson_chunk {|{"model":1,"done":false}|} with
+  | OL.Ollama_parse_failed _ -> ()
+  | OL.Ollama_chunk _ | OL.Ollama_provider_error _ -> fail "type error should fail"
 ;;
 
 let test_ollama_event_edge_branches () =
@@ -1255,14 +1257,14 @@ let test_ollama_event_edge_branches () =
   check_event_count "empty text ignored" 0 text_empty_events;
   let tool_state = S.create_openai_stream_state () in
   let tc_empty =
-    { S.oll_tc_index = 0
+    { OL.oll_tc_index = 0
     ; oll_tc_id = Some "call"
     ; oll_tc_name = Some "lookup"
     ; oll_tc_arguments = Some (OW.Args_fragment "")
     }
   in
   let tc_none =
-    { S.oll_tc_index = 0; oll_tc_id = None; oll_tc_name = None; oll_tc_arguments = None }
+    { OL.oll_tc_index = 0; oll_tc_id = None; oll_tc_name = None; oll_tc_arguments = None }
   in
   let tool_start_events, _ =
     S.ollama_chunk_to_events tool_state (ollama_chunk ~tool_calls:[ tc_empty ] ())

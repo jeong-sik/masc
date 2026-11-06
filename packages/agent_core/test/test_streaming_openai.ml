@@ -2,6 +2,7 @@
 
 open Llm_provider.Types
 module S = Llm_provider.Streaming
+module OL = Llm_provider.Ollama_wire
 module OW = Llm_provider.Openai_wire
 module RD = Llm_provider.Reasoning_dialect
 module Acc = Llm_provider.Complete_stream_acc
@@ -2018,14 +2019,14 @@ let test_stream_tool_args_valid_parsed () =
 ;;
 
 let parse_ollama_line_exn data =
-  match S.parse_ollama_ndjson_chunk data with
-  | S.Ollama_chunk chunk -> chunk
-  | S.Ollama_provider_error { message; error_type; _ } ->
+  match OL.parse_ollama_ndjson_chunk data with
+  | OL.Ollama_chunk chunk -> chunk
+  | OL.Ollama_provider_error { message; error_type; _ } ->
     Alcotest.failf
       "expected Ollama NDJSON stream chunk, got provider error message=%S type=%s"
       message
       (Option.value ~default:"<none>" error_type)
-  | S.Ollama_parse_failed { reason; _ } ->
+  | OL.Ollama_parse_failed { reason; _ } ->
     Alcotest.failf
       "expected Ollama NDJSON stream chunk, got parse failure reason=%S"
       reason

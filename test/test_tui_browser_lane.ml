@@ -360,7 +360,9 @@ let test_observation_scope_tracks_exact_selection () =
   List.iter
     (fun (name, view) -> expect (name ^ " pauses the observation subscription")
       (observation_scope view = None))
-    [ "effect in flight", { initial with load = Loading (8, Goto "https://example.org/new") }
+    [ "effect in flight", { initial with load = Loading (8, Scene_click
+        { tab_id = 2; document_id = "fixture"; node_id = "region-1"
+        ; expected_url = "https://example.org/new"; scope = None }) }
     ; "pending refresh", { initial with refresh_pending = Some 8 }
     ; "client picker", { initial with client_picker = Some 0 } ]
 

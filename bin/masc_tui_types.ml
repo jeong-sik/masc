@@ -18491,7 +18491,7 @@ let current_play_change state origin =
 
 let play_pending_path state =
   Filename.concat (Common.masc_dir_from_base_path ~base_path:state.local_base_path)
-    "tui-play-pending.jsonl"
+    Common.tui_play_pending_filename
 
 let play_pending_entry request : Masc_tui_play_pending.entry =
   {id=request.change_id; base_path=request.change_workspace.wi_base_path;

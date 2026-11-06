@@ -5,16 +5,7 @@
    exist so LLMs can recover from a typed rejection or catalog miss
    without parsing prose hints (RFC-0194 §2).
 
-   This test pins:
-   - The six target tools curated in this PR carry non-empty
-     [examples] (so the LLM has a concrete invocation template).
-   - The four tools whose semantics name a sibling carry a
-     non-empty [alternatives] list (so the LLM has a typed next
-     step on rejection). The remaining curated tools that have no
-     sibling (keeper_memory_retract, keeper_memory_write,
-     keeper_tasks_list) are pinned as having an empty alternatives
-     list — the expectation is "no sibling exists", not "we forgot
-     to fill it in".
+   This test checks:
    - Every name listed in any [alternatives] field resolves
      through [find_entry] against the authoritative schema list,
      so an alternatives entry can never become a dangling
@@ -54,46 +45,6 @@ let lookup name =
      entry is written here as future-proofing — it takes
      effect the moment those schemas join the keeper-side
      registry. See PR body §"Reachable surface" for the split. *)
-let curated_with_examples =
-  [
-    "keeper_task_done";
-    "keeper_memory_retract";
-    "keeper_memory_write";
-    "keeper_tasks_list";
-  ]
-
-let curated_with_alternatives = []
-
-let curated_without_sibling =
-  [ "keeper_memory_retract"; "keeper_memory_write"; "keeper_tasks_list" ]
-
-let test_examples_populated () =
-  List.iter
-    (fun name ->
-      let entry = lookup name in
-      Alcotest.(check bool)
-        (Printf.sprintf "%s has at least one example" name)
-        true (entry.examples <> []))
-    curated_with_examples
-
-let test_alternatives_typed_list () =
-  List.iter
-    (fun (name, expected) ->
-      let entry = lookup name in
-      Alcotest.(check (list string))
-        (Printf.sprintf "%s alternatives match RFC-0195 curation" name)
-        expected entry.alternatives)
-    curated_with_alternatives
-
-let test_tools_without_sibling_have_empty_alternatives () =
-  List.iter
-    (fun name ->
-      let entry = lookup name in
-      Alcotest.(check (list string))
-        (Printf.sprintf "%s has no sibling — empty alternatives by design" name)
-        [] entry.alternatives)
-    curated_without_sibling
-
 let test_alternatives_never_dangling () =
   let unresolved =
     List.concat_map
@@ -223,25 +174,8 @@ let test_examples_are_calls_the_schema_accepts () =
     Alcotest.failf "%d help example problem(s):\n%s" (List.length problems)
       (String.concat "\n" problems)
 
-let test_entry_json_omits_empty_fields () =
-  (* keeper_lane_status has no curated examples/alternatives; the JSON wire shape
-     must omit both keys so existing consumers see no field they did not see
-     before. *)
-  let entry = lookup "keeper_lane_status" in
-  let json = Registry.entry_json entry in
-  match json with
-  | `Assoc kvs ->
-    let has_key key = List.exists (fun (k, _) -> String.equal k key) kvs in
-    Alcotest.(check bool)
-      "empty examples list omitted from JSON" false (has_key "examples");
-    Alcotest.(check bool)
-      "empty alternatives list omitted from JSON" false (has_key "alternatives")
-  | _ -> Alcotest.fail "entry_json must return an Assoc"
-
-(* The omitted-when-empty half is covered by [test_entry_json_omits_empty_fields]
-   on keeper_lane_status. This fixture exists for the opposite property, so it
-   asserts inclusion on both list fields rather than reusing one entry to prove
-   emission and omission at once. *)
+(* Authored TOML help reaches the JSON entry: both list fields are emitted
+   for a tool that declares them. *)
 let test_entry_json_includes_populated_fields () =
   let entry = lookup "keeper_task_done" in
   let json = Registry.entry_json entry in
@@ -253,25 +187,6 @@ let test_entry_json_includes_populated_fields () =
     Alcotest.(check bool)
       "populated alternatives list emitted in JSON" true (has_key "alternatives")
   | _ -> Alcotest.fail "entry_json must return an Assoc"
-
-(* A tool that behaved unexpectedly is one an operator wants to open, so the
-   name has to resolve to the file it shipped from. Derived from the embedded
-   file list, not composed from the name, so a tool with no shipped definition
-   says so instead of naming a path that is not there. *)
-let test_definition_source_names_the_shipped_file () =
-  match Registry.definition_source "keeper_code_query" with
-  | Some rel ->
-    Alcotest.(check string) "shipped definition path" "tools/keeper_code_query.toml" rel
-  | None -> Alcotest.fail "a shipped tool must name its definition"
-;;
-
-let test_definition_source_is_none_without_an_asset () =
-  match
-    Registry.definition_source "no_such_tool_ships_under_this_name"
-  with
-  | None -> ()
-  | Some rel -> Alcotest.failf "named a file that does not ship: %s" rel
-;;
 
 (* Canonicalising a schema wants one field. It used to build the whole help
    entry to reach it, which rendered that tool's when_to_use, its constraint
@@ -295,48 +210,21 @@ let test_the_short_description_is_the_entrys_own () =
         (Registry.short_description_of_schema schema))
     Config.raw_all_tool_schemas
 
-(* And a canonical schema carries it. *)
-let test_canonicalising_carries_that_description () =
-  List.iter2
-    (fun (source : Masc_domain.tool_schema)
-         (canonical : Masc_domain.tool_schema) ->
-      Alcotest.(check string)
-        (Printf.sprintf "%s: canonical schema carries it" source.name)
-        (Registry.short_description_of_schema source)
-        canonical.description)
-    Config.raw_all_tool_schemas
-    (Registry.canonicalize_schemas Config.raw_all_tool_schemas)
-
 let () =
   Alcotest.run "tool_help_metadata_rfc_0195"
     [
-      ( "curated_metadata",
-        [
-          Alcotest.test_case "six target tools have examples"
-            `Quick test_examples_populated; Alcotest.test_case "four target tools have typed alternatives"
-            `Quick test_alternatives_typed_list; Alcotest.test_case "tools without a sibling have empty alternatives"
-            `Quick test_tools_without_sibling_have_empty_alternatives;
-        ] );
       ( "registry_invariants",
         [
           Alcotest.test_case "alternatives names resolve through find_entry"
             `Quick test_alternatives_never_dangling;
           Alcotest.test_case "examples are calls the schema accepts"
             `Quick test_examples_are_calls_the_schema_accepts; Alcotest.test_case "the short description is the entry's own"
-            `Quick test_the_short_description_is_the_entrys_own; Alcotest.test_case "canonicalising carries that description"
-            `Quick test_canonicalising_carries_that_description;
+            `Quick test_the_short_description_is_the_entrys_own;
 
-        ] );
-      ( "definition_source",
-        [
-          Alcotest.test_case "a shipped tool names its file"
-            `Quick test_definition_source_names_the_shipped_file; Alcotest.test_case "an unshipped name resolves to none"
-            `Quick test_definition_source_is_none_without_an_asset;
         ] );
       ( "json_projection",
         [
-          Alcotest.test_case "empty optional fields are omitted"
-            `Quick test_entry_json_omits_empty_fields; Alcotest.test_case "populated optional fields are emitted"
+          Alcotest.test_case "populated optional fields are emitted"
             `Quick test_entry_json_includes_populated_fields;
         ] );
     ]

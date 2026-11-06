@@ -3717,7 +3717,7 @@
 (test
  (name test_tui_footer_detail_state)
  (modules test_tui_footer_detail_state)
- (libraries alcotest masc_tui_keys masc_tui_types masc_tui_footer))
+ (libraries alcotest masc_tui_fetched masc_tui_keys masc_tui_types masc_tui_footer))
 
 (test
  (name test_tui_runtime_config_receipt)

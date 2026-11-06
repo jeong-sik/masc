@@ -4,8 +4,10 @@
 Reads two stores under `<base-path>/.masc` and never writes to them:
 
 - `tool_calls/YYYY-MM/DD.jsonl` and its `DD.NNN.jsonl` segments: rows with
-  `record_kind == "tool_call"`. The fields used are `ts` (when the call started),
-  `keeper`, `tool`, `input`, `output` and `result_bytes`.
+  `record_kind == "tool_call"`. The fields used are `ts` (when the row was written, after the
+  call returned), `keeper`, `tool`, `input`, `output` and `result_bytes`. A call that began before
+  the deploy instant and returned after it counts as after; on 2026-11-05 no call does that for
+  the three boot instants of the README (counted outside the script).
 - `keepers/<keeper>/provider-inputs/YYYY-MM/DD.jsonl`: one captured request per turn.
   The fields used are `captured_at` and `tool_schemas[].name` and `.artifact.bytes`,
   the size of one tool schema as the Keeper sent it.

@@ -4856,7 +4856,7 @@ end = struct
         | Some query -> board_query_to_yojson query | None -> `Null)]
 end
 
-type full_refresh_intent = Cadence | Revalidate
+type full_refresh_intent = Revalidate
 
 (* Full and scoped bundles share one authority order. A later dispatch
    supersedes an earlier result, including failure and booting results. *)
@@ -5294,7 +5294,7 @@ let note_full_refresh_intent ~intent ~full_refresh_inflight
   match intent with
   | Revalidate when full_refresh_inflight || scoped_refresh_inflight ->
       Revalidate_after_scoped
-  | Cadence | Revalidate -> followup
+  | Revalidate -> followup
 
 let take_scoped_refresh_followup ~full_refresh_inflight
     ~scoped_refresh_inflight = function
@@ -10703,7 +10703,6 @@ type state = {
   (* What each part of the Tools read owes after a push: the selected
      Keeper's surface ([/dashboard/tools?keeper=]) and the Skill catalog with
      its usage counts ([/api/v1/skills]). *)
-  mutable tools_surface_owed: Masc_tui_owed_read.t;
   (* What each Tools part read on a push owes (RFC-0483 §4.3): the skills
      catalog, the selected Keeper's activations, and each roster Keeper's
      usage. A roster Keeper with no entry has never been read. *)
@@ -12065,6 +12064,15 @@ let current_ask_followup (state : state) =
   match state.ask_followup with
   | Some (owner, observed) when ask_followup_owner_current state owner -> Some observed
   | Some _ | None -> None
+
+(* Whether the current answer has a follow-up no read has completed yet. *)
+let ask_followup_unfinished (state : state) =
+  match ask_followup_target state with
+  | None -> false
+  | Some _ ->
+      (match Option.bind (current_ask_followup state) Masc_tui_ask_projection.followup_completion with
+       | Some (Ok ()) -> false
+       | Some (Error _) | None -> true)
 
 let take_ask_followup_event (state : state) request submission event =
   if not (Snapshot_read.is_current state.ask_followup_read request
@@ -15014,7 +15022,6 @@ let suspend_workspace_readings state =
   state.tools_read_inflight <- None;
   state.tools_skill_generation <- state.tools_skill_generation + 1;
   state.tools_skill_pending <- [];
-  state.tools_surface_owed <- Masc_tui_owed_read.settled;
   state.tools_catalog_owed <- Masc_tui_owed_read.settled;
   state.overview_inflight <- false;
   state.overview_owed <- Masc_tui_owed_read.settled;
@@ -17411,6 +17418,8 @@ let pending_detail_read (state : state) ~tab ~keeper =
 let identity_login_recovery_poll_ready (state : state) ~now keeper_name =
   identity_login_pending_for_keeper state ~now keeper_name
   && Option.is_none (pending_detail_read state ~tab:Detail_identity ~keeper:keeper_name)
+
+let identity_login_read_ready = identity_login_recovery_poll_ready
 
 let detail_read_started state ~tab ~keeper =
   Option.map (fun request -> request.drr_started_ns)
@@ -20378,7 +20387,6 @@ let create_state
   tools_skill_generation = 0;
   tools_skill_pending = [];
   tools_read_inflight = None;
-  tools_surface_owed = Masc_tui_owed_read.settled;
   tools_catalog_owed = Masc_tui_owed_read.settled;
   tools_error = None;
   tools_activations = None;

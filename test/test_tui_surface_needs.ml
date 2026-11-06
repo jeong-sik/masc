@@ -196,7 +196,7 @@ let test_keeper_detail_drops_only_list_attention_reads () =
 
 let test_authoritative_refresh_waits_for_both_owners_then_runs_once () =
   let pending =
-    Types.note_full_refresh_intent
+    Types.note_full_refresh_intent ~intent:Types.Revalidate
       ~full_refresh_inflight:false ~scoped_refresh_inflight:true
       Types.No_scoped_followup
   in

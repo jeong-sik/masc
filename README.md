@@ -344,7 +344,7 @@ Use MASC's tools to change tasks, records and approval state.
 | `masc start --base-path <dir>` | Run the server explicitly |
 | `masc-tui --base-path <dir>` | Open the TUI explicitly |
 | `masc doctor --base-path <dir>` | Check workspace and `imp` readiness without starting them |
-| `masc browser-lane-setup` | Configure Firefox browser-lane integration (`extension`, `bidi`, `host`, or `automation`) |
+| `masc browser-lane-setup` | Connect the workspace's browser lane (`addon`, `extension`, `bidi`, `ego`, or `host`) |
 | `masc web-search-setup --base-path <dir>` | Inspect or configure workspace web search (`searxng`, `zai`, etc.) |
 | `masc --help` | List commands; use `<command> --help` for details |
 

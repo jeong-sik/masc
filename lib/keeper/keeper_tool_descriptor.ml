@@ -145,7 +145,6 @@ type runtime_handler =
   | Tool_browser_goto
   | Tool_browser_act
   | Tool_browser_interact
-  | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
   | Tool_keeper_job_dispatch
@@ -282,7 +281,6 @@ let runtime_handler_to_string = function
   | Tool_browser_goto -> "tool_browser_goto"
   | Tool_browser_act -> "tool_browser_act"
   | Tool_browser_interact -> "tool_browser_interact"
-  | Tool_masc_control_dispatch -> "tool_masc_control_dispatch"
   | Tool_masc_agent_timeline_dispatch -> "tool_masc_agent_timeline_dispatch"
   | Tool_masc_schedule_dispatch -> "tool_masc_schedule_dispatch"
   | Tool_keeper_job_dispatch -> "tool_keeper_job_dispatch"
@@ -539,7 +537,6 @@ let descriptor
       | Tool_browser_goto
   | Tool_browser_act
       | Tool_browser_interact
-      | Tool_masc_control_dispatch
       | Tool_masc_agent_timeline_dispatch
       | Tool_masc_schedule_dispatch
       | Tool_keeper_job_dispatch
@@ -2171,21 +2168,6 @@ let masc_misc_descriptor
     ()
 ;;
 
-let masc_control_descriptor operation =
-  let schema = Tool_schemas_misc.control_schema operation in
-  cluster_descriptor_with_schema_source
-    ~capability_identity:Internal_name_identity
-    ~keeper_model_projection:Operator_only
-    ~input_schema_source:Canonical_registry
-    ~input_schema:schema.input_schema
-    ~id:("masc.control." ^ Tool_schemas_misc.control_operation_id operation)
-    ~name:schema.name
-    ~description:schema.description
-    ~handler:Tool_masc_control_dispatch
-    ~readonly:false
-    ()
-;;
-
 let masc_agent_timeline_descriptor
     ?(keeper_model_projection = Internal_name)
     ?ordinary_execution_mode
@@ -3195,9 +3177,6 @@ let internal_descriptors : t list =
      MASC-owned web descriptors above. Do not add
      duplicate internal descriptors here; that would make runtime receipt
      projection depend on list order. *)
-  (* ── RFC-0182 §3.1 — masc_control_* cluster (2 entries) ──────── *)
-  ; masc_control_descriptor Tool_schemas_misc.Pause
-  ; masc_control_descriptor Tool_schemas_misc.Resume
   (* ── RFC-0182 §3.1 — masc_agent_timeline singleton (1 entry) ── *)
   ; (masc_agent_timeline_descriptor ~keeper_model_projection:Operator_only
        ~ordinary_execution_mode:Concurrent
@@ -3351,7 +3330,6 @@ let declared_loading descriptor =
   | Tool_browser_goto
   | Tool_browser_act
   | Tool_browser_interact
-  | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
   | Tool_keeper_job_dispatch
@@ -3507,7 +3485,6 @@ let prepared_leaf_admission descriptor =
         | Tool_browser_goto
         | Tool_browser_act
         | Tool_browser_interact
-        | Tool_masc_control_dispatch
         | Tool_masc_agent_timeline_dispatch
         | Tool_masc_schedule_dispatch
         | Tool_keeper_composition_result_dispatch

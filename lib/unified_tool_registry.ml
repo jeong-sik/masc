@@ -73,7 +73,6 @@ let tag_of_runtime_handler
   | Tool_masc_agent_dispatch -> Mod_agent
   | Tool_masc_task_dispatch -> Mod_task
   | Tool_masc_workspace_dispatch -> Mod_state
-  | Tool_masc_control_dispatch -> Mod_control
   | Tool_masc_agent_timeline_dispatch -> Mod_agent_timeline
   | Tool_masc_schedule_dispatch -> Mod_schedule
   | Tool_keeper_code_query_dispatch -> Mod_code_query
@@ -164,18 +163,14 @@ let register_visible_raw_schemas () =
            invalid_arg
              ("visible tool schema has no exact dispatch owner: " ^ schema.name))
 
-(** Resolve a descriptor's validation schema from its runtime owner. Control
-    schemas stay outside the Config front-door inventory and are registered by
-    [Tool_control]; every other descriptor handler resolves through the raw
-    runtime inventory. *)
+(** Resolve a descriptor's validation schema from its runtime owner through
+    the raw runtime inventory. *)
 let runtime_schema_for_descriptor
       (descriptor : Keeper_tool_descriptor.t)
   : Masc_domain.tool_schema option
   =
   let inventory =
     match descriptor.runtime_handler with
-    | Keeper_tool_descriptor.Tool_masc_control_dispatch ->
-      Tool_schemas_misc.control_schemas
     | Keeper_tool_descriptor.Tool_keeper_composition_result_dispatch ->
       [ Tool_schemas_composition_control.result_schema ]
     | Keeper_tool_descriptor.Tool_execute | Keeper_tool_descriptor.Tool_search_files

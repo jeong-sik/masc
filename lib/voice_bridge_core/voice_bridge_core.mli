@@ -183,3 +183,6 @@ val append_provider_metadata :
     public voice APIs stay vendor-neutral. The [endpoint] argument
     is currently unused but kept in the signature for forward
     compatibility. *)
+
+val audio_dirname : string
+(** The directory {!audio_dir} names below [<base>/.masc]. *)

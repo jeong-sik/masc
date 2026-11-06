@@ -658,23 +658,51 @@ let assemble_hooks
     (* The queue is read when a turn starts, so a row that arrives while this
        run goes on waits for it to end. A round that follows tool results lists
        the rows that arrived since the run began, once each
-       ([Keeper_arrived_stimuli]); the rows stay queued. Built with the run,
-       like [recall_memo]: a run that starts again for the same turn lists what
-       arrived since it started. *)
+       ([Keeper_arrived_stimuli]); the rows stay queued. A chat request waits
+       in the owner's operation queue, which no round reads, so the same round
+       also says how many are queued when that count rises
+       ([Keeper_waiting_operations]); they start after this run. Both are built
+       with the run, like [recall_memo]: a run that starts again for the same
+       turn tells what it sees since it started. *)
     let arrived_tracker =
       Keeper_arrived_stimuli.create_tracker ~run_started_at:(Time_compat.now ())
     in
+    let waiting_tracker = Keeper_waiting_operations.create_tracker () in
     let arrived_stimuli_text () =
-      Keeper_arrived_stimuli.block
-        arrived_tracker
-        ~now:(Time_compat.now ())
-        ~read:(fun () ->
-          Keeper_registry_event_queue.pending_selections_result
-            ~base_path:config.base_path
-            meta.name)
-        ~on_unavailable:(fun detail ->
-          Log.Keeper.warn ~keeper_name:meta.name
-            "arrived stimuli unavailable; this round carries none: %s" detail)
+      let arrived =
+        Keeper_arrived_stimuli.block
+          arrived_tracker
+          ~now:(Time_compat.now ())
+          ~read:(fun () ->
+            Keeper_registry_event_queue.pending_selections_result
+              ~base_path:config.base_path
+              meta.name)
+          ~on_unavailable:(fun detail ->
+            Log.Keeper.warn ~keeper_name:meta.name
+              "arrived stimuli unavailable; this round carries none: %s" detail)
+      in
+      let waiting =
+        Keeper_waiting_operations.block
+          waiting_tracker
+          ~read:(fun () ->
+            match
+              Keeper_owner_registry.operation_projection
+                ~base_path:config.base_path
+                ~keeper_name:meta.name
+            with
+            | Error error -> Error (Keeper_owner_registry.lookup_error_to_string error)
+            | Ok (projection : Keeper_owner.operation_projection) ->
+              Keeper_waiting_operations.waiting_of_projection
+                ~store_unavailable:projection.Keeper_owner.store_unavailable
+                ~queued_count:projection.Keeper_owner.queued_count
+                ~has_claimable_queued:projection.Keeper_owner.has_claimable_queued)
+          ~on_unavailable:(fun detail ->
+            Log.Keeper.warn ~keeper_name:meta.name
+              "waiting chat requests unavailable; this round carries none: %s" detail)
+      in
+      match List.filter_map Fun.id [ arrived; waiting ] with
+      | [] -> None
+      | blocks -> Some (String.concat "\n\n" blocks)
     in
     let on_memory_capacity_refusal ~refusal =
       let shared = match !host_memory with
@@ -862,6 +890,7 @@ let assemble_hooks
               match event with
               | Agent_core.Hooks.AfterTurn { turn; _ } ->
                 Keeper_arrived_stimuli.confirm arrived_tracker;
+                Keeper_waiting_operations.confirm waiting_tracker;
                 Keeper_skill_async_action_observer.begin_handoff async_actions;
                 Keeper_composition_result_delivery.commit_provider_response ctx.composition_result_delivery
                   ~agent_core_turn:turn ~observe:observe_composition_result
@@ -1197,9 +1226,11 @@ let assemble_hooks
                    consumed only after the block is assembled, so a turn that
                    fails before this point does not burn the note. *)
                 (* News the first round could not carry: what reached the queue
-                   after this run began. Only a round that follows tool results
-                   asks, because the first round's own assembly is built from
-                   the queue as it stands. *)
+                   after this run began, and how many chat requests wait for it
+                   to end. Only a round that follows tool results asks. The
+                   first round's own assembly is built from the queue as it
+                   stands, and the owner's queue of chat requests is not part
+                   of it. *)
                 (if post_tool_round
                  then Option.iter (record_block Prompt_block_id.Arrived_stimuli) (arrived_stimuli_text ()));
                 let consumed_operator_note =

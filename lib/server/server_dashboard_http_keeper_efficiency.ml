@@ -12,10 +12,7 @@ module Http = Http_server_eio
 
 let route_path = "/api/v1/keeper-efficiency"
 
-let current_month () =
-  let t = Unix.gmtime (Unix.time ()) in
-  Printf.sprintf "%04d-%02d" (t.Unix.tm_year + 1900) (t.Unix.tm_mon + 1)
-;;
+let current_month () = Keeper_efficiency.month_of_unix_time (Unix.time ())
 
 let month_parameter req =
   match Server_utils.query_param req "month" with

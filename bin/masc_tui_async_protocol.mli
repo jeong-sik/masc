@@ -419,6 +419,9 @@ type keeper_msg =
   | Keeper_board_quarantines_loaded of
       string Masc_tui_fetched.request
       * (Masc_tui_board_quarantine.t, string) result
+  | Keeper_efficiency_loaded of
+      string Masc_tui_fetched.request
+      * (Masc.Tui_decode_keeper_efficiency.month_view, string) result
 
 type chat_msg =
   | Chat_search_finished of int * bool * Masc_tui_render_chat.chat_search_plan

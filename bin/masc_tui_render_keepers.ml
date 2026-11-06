@@ -1550,6 +1550,19 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
            Message_layout.wrap_words ~max_cells:(max 1 (inner - 2)) text
            |> List.iter (fun line -> add_line (indent ^ color ^ line ^ Ansi.reset)));
 
+      (* This Keeper's month beside the fleet's per-turn figures: the same
+         numbers for every Keeper, read once per month. *)
+      Masc_tui_keeper_efficiency.lines state.keeper_efficiency ~keeper_name:k.k_name
+      |> List.iter (fun (tone, text) ->
+           let color =
+             match tone with
+             | Masc_tui_keeper_efficiency.Plain -> ""
+             | Masc_tui_keeper_efficiency.Dim -> Ansi.dim
+             | Masc_tui_keeper_efficiency.Bad -> Theme.bad ()
+           in
+           Message_layout.wrap_words ~max_cells:(max 1 (inner - 2)) text
+           |> List.iter (fun line -> add_line (indent ^ color ^ line ^ Ansi.reset)));
+
       (* Gate section. Two settings with similar names decide different things,
          so both are named rather than merged: YOLO is the in-memory stance that
          stops this chat asking and a restart clears, while the Gate mode is

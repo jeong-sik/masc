@@ -69,6 +69,11 @@ type month_view = {
 val valid_month : string -> bool
 (** Whether a string has the ["YYYY-MM"] calendar month shape ([01..12]). *)
 
+val month_of_unix_time : float -> string
+(** The UTC calendar month of a Unix time, as ["YYYY-MM"]. The route answers
+    this month of the server's clock when no month is asked, and the TUI asks
+    for this month of its own clock. *)
+
 val read_month : masc_root:string -> month:string -> (month_view, string) result
 (** Aggregate the requested month, reusing and updating the boundary cache.
     An invalid month string is an [Error]. A missing ledger is an empty

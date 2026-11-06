@@ -10035,6 +10035,10 @@ type state = {
      whose answer is pending, so a second press cannot race that recovery. *)
   mutable keeper_board_quarantines:
     (string, Masc_tui_board_quarantine.t) Masc_tui_fetched.t;
+  (* The Info tab's month of efficiency, keyed by the month: one answer holds
+     every Keeper of that month. *)
+  mutable keeper_efficiency:
+    (string, Masc.Tui_decode_keeper_efficiency.month_view) Masc_tui_fetched.t;
   mutable board_quarantine_requeue_inflight: string option;
   mutable github_token_input: string option;
   mutable github_token_save_status: string option;
@@ -14959,6 +14963,7 @@ let suspend_workspace_readings state =
   state.prompts <- Masc_tui_fetched.suspend state.prompts;
   state.preset_detail <- Masc_tui_fetched.suspend state.preset_detail;
   state.keeper_board_quarantines <- Masc_tui_fetched.suspend state.keeper_board_quarantines;
+  state.keeper_efficiency <- Masc_tui_fetched.suspend state.keeper_efficiency;
   state.workspace_activity <- Masc_tui_fetched.suspend state.workspace_activity;
   state.artifact_checks <- Masc_tui_fetched.suspend state.artifact_checks;
   state.artifact_check_pending <- None;
@@ -20019,6 +20024,7 @@ let create_state
   runtime_assignment_saves = Runtime_assignment_saves.empty;
   github_identity_view = None;
   keeper_board_quarantines = Masc_tui_fetched.initial;
+  keeper_efficiency = Masc_tui_fetched.initial;
   board_quarantine_requeue_inflight = None;
   github_token_input = None;
   github_token_save_status = None;

@@ -4923,6 +4923,11 @@
  masc_tui_connector_state))
 
 (test
+ (name test_tui_keeper_efficiency)
+ (modules test_tui_keeper_efficiency)
+ (libraries alcotest masc masc.keeper_efficiency masc_tui_keeper_efficiency yojson))
+
+(test
  (name test_tui_connector_unbind)
  (modules test_tui_connector_unbind)
  (libraries alcotest masc masc_tui_connector_unbind))

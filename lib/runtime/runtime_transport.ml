@@ -18,9 +18,8 @@ let resolve_provider_config_of_label = Runtime_transport_label_resolution.resolv
 let provider_caps_of_config = Provider_tool_support.agent_core_capabilities_of_config
 let provider_supports_inline_tools = Provider_tool_support.provider_supports_inline_tools
 
-(* provider_label inlined from the removed [Runtime_transport_cli_config].
-   General display label ([kind:model_id]); used by the surviving tool-lane
-   resolver and external consumers, so it outlives the CLI transport purge. *)
+(* General display label ([kind:model_id]); used by the tool-lane resolver
+   and external consumers. *)
 let provider_label (provider_cfg : Llm_provider.Provider_config.t) =
   Printf.sprintf
     "%s:%s"

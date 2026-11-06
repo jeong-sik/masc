@@ -1188,12 +1188,6 @@ let test_fd_pressure_exn_classification () =
        (Unix.Unix_error (Unix.ETIMEDOUT, "connect", "api")))
 
 (* ============================================================ *)
-(* Agent Discovery / Capability Tests                           *)
-(* ============================================================ *)
-
-(* Workspace_vote / Workspace_tempo removed — dead prod code (Epic #7261 Step 5 audit). *)
-
-(* ============================================================ *)
 (* Input Validation Tests                                       *)
 (* ============================================================ *)
 

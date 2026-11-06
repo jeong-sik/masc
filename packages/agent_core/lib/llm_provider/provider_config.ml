@@ -363,10 +363,7 @@ let auth_headers_for_kind_and_key ~(kind : provider_kind) ~(api_key : string)
   auth_headers_for_kind_and_secret ~kind ~api_key:(Secret.of_string api_key)
 ;;
 
-(** Resolve auth headers from the authentication fields alone. A caller that
-    only has a wire kind, a scheme and a credential source (Vertex model
-    discovery, which runs before any model is chosen) uses this instead of
-    building a [Provider_config.t] with placeholder identity fields.
+(** Resolve auth headers from the authentication fields of a config.
     [api_key] is the static secret and is consulted only for
     [Static_credential]; a [Refreshable_credential] supplies its own token. *)
 let auth_headers_for ~(kind : provider_kind) ~(auth_scheme : auth_scheme)

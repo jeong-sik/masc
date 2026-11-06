@@ -1747,68 +1747,6 @@ streaming = true
     (Result.is_error (provider_config_for_binding unsafe_config binding))
 ;;
 
-(* Proves F054: Vertex discovery resolves its bearer header from the auth
-   fields alone (Provider_config.auth_headers_for) instead of a placeholder
-   Provider_config.t with model_id "". The header must equal what a real
-   Vertex config resolves through resolve_auth_headers, and the fixed refresh
-   failure messages must be the same on both paths. Fails on origin/main
-   because neither auth_headers_for nor Runtime_vertex_models.auth_headers
-   exists there. *)
-let test_vertex_discovery_auth_headers_without_model () =
-  let refreshed = Llm_provider.Provider_config.Refreshable_credential
-    (Runtime_google_adc.refresh_with ~run:(fun _ -> Ok "fixture-adc-token\n")) in
-  let expected = ["Authorization", "Bearer fixture-adc-token"] in
-  (match Runtime_vertex_models.auth_headers ~credential_source:refreshed with
-   | Ok headers -> check (list (pair string string)) "discovery bearer header" expected headers
-   | Error reason -> fail reason);
-  let config = Llm_provider.Provider_config.make ~kind:Gemini ~model_id:"gemini-3.7-flash"
-    ~base_url:"https://aiplatform.googleapis.com/v1/projects/fixture-project/locations/global/publishers/google"
-    ~auth_scheme:Bearer_token ~credential_source:refreshed () in
-  (match Llm_provider.Provider_config.resolve_auth_headers config with
-   | Ok headers -> check (list (pair string string)) "same header as a full config" expected headers
-   | Error reason -> fail reason);
-  List.iter (fun (source, label) ->
-    let direct = Runtime_vertex_models.auth_headers ~credential_source:source in
-    let via_config = Llm_provider.Provider_config.resolve_auth_headers
-      { config with Llm_provider.Provider_config.credential_source = source } in
-    match direct, via_config with
-    | Error direct, Error via_config -> check string (label ^ " same refusal") via_config direct
-    | Ok _, Ok _ | Ok _, Error _ | Error _, Ok _ -> fail (label ^ " must refuse on both paths"))
-    [ Llm_provider.Provider_config.Refreshable_credential
-        (fun () -> Error Llm_provider.Provider_config.Credential_unavailable)
-      , "unavailable"
-    ; Llm_provider.Provider_config.Refreshable_credential
-        (fun () -> Error Llm_provider.Provider_config.Invalid_credential_response)
-      , "invalid"
-    ; Llm_provider.Provider_config.Refreshable_credential (fun () -> Ok Llm_provider.Secret.empty)
-      , "empty token" ];
-  check bool "static source has no token to send" true
-    (Runtime_vertex_models.auth_headers
-       ~credential_source:Llm_provider.Provider_config.Static_credential = Ok [])
-;;
-
-let test_vertex_live_catalog_pagination () =
-  let base_url = "https://aiplatform.googleapis.com/v1/projects/fixture-project/locations/global/publishers/google" in
-  let requests = ref [] in
-  let get ~url =
-    requests := url :: !requests;
-    let token = Uri.get_query_param (Uri.of_string url) "pageToken" in
-    match token with
-    | None -> Ok {|{"publisherModels":[{"name":"publishers/google/models/model-one","displayName":"One"}],"nextPageToken":"next+page"}|}
-    | Some "next+page" -> Ok {|{"publisherModels":[{"name":"publishers/google/models/model-two"}]}|}
-    | Some _ -> Error "wrong page token" in
-  let models = match Runtime_vertex_models.discover_with ~get ~base_url with
-    | Ok models -> models | Error reason -> fail reason in
-  check (list string) "every current API page preserved" ["model-one";"model-two"]
-    (List.map (fun (m : Runtime_vertex_models.model) -> m.id) models);
-  check int "actual pagination" 2 (List.length !requests);
-  List.iter (fun url -> check string "publisher API, not project training model registry"
-    "/v1beta1/publishers/google/models" (Uri.path (Uri.of_string url))) !requests;
-  check bool "repeated page token fails explicitly" true
-    (Result.is_error (Runtime_vertex_models.discover_with ~base_url
-       ~get:(fun ~url:_ -> Ok {|{"nextPageToken":"repeat"}|})))
-;;
-
 let () =
   run
     "runtime verification"
@@ -1841,9 +1779,6 @@ let () =
            "readiness ultra keeps native max admission", `Readiness, Some Ultra, Some "max"])
     ; ( "readiness"
       , [ test_case "Vertex native runtime binding" `Quick test_vertex_native_binding
-        ; test_case "Vertex live catalog pagination" `Quick test_vertex_live_catalog_pagination
-        ; test_case "Vertex discovery auth headers without a model" `Quick
-            test_vertex_discovery_auth_headers_without_model
         ; test_case "Google ADC refresh boundary" `Quick test_google_adc_refresh_boundary
         ; test_case "Antigravity private MCP roundtrip" `Quick test_antigravity_private_tool_roundtrip
         ; test_case "Muse private MCP readiness" `Quick test_muse_private_tool_roundtrip

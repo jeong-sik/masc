@@ -40,6 +40,8 @@ type t = private
         (** The subjects of reductions whose intent the external store gave up
             (design 8.3). No record adds one: the writer zone does, from the
             store ({!hold_revocations}). *)
+  ; latest_at_ms : int option
+        (** The latest [at_ms] of the records read. [None] before the first. *)
   }
 
 val empty : t
@@ -76,6 +78,17 @@ type refusal =
           accounts are off (design 10.5). *)
   | Kind_not_read of Authz_record.Kind.t
       (** No layer reads records of this kind yet. *)
+  | Admission_behind_log of
+      { at_ms : int
+      ; latest_at_ms : int
+      }
+      (** The admission is at [at_ms], before a record already read: the clock
+          that wrote it went back. An admission is judged against the expiry
+          of its invitation with its own time, so this time cannot go back.
+          Every other kind is judged with no time, and is read whatever its
+          time is: a clock that ran ahead and came back holds no revocation,
+          disable, or [off] until it catches up. It holds every admission until
+          then, and nothing lifts that early. *)
 
 val refusal_to_string : refusal -> string
 

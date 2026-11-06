@@ -19,7 +19,7 @@ type request =
   ; config_dir : string option
   ; external_store : string
   ; workspace_id : Authz_types.Workspace_id.t
-  ; at_ms : int
+  ; now_ms : unit -> int
   }
 
 type completed =
@@ -367,10 +367,10 @@ let write_bootstrap ~store ~log request =
   Result.map_error
     (fun error -> Zone_failed error)
     (Authz_zone.install
+       ~now_ms:request.now_ms
        ~log
        ~store
-       { Authz_zone.at_ms = request.at_ms
-       ; author = Authz_records.Author.Local_operator
+       { Authz_zone.author = Authz_records.Author.Local_operator
        ; kind = Record.Kind.Mode_event
        ; body
        })

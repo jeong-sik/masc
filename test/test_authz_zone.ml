@@ -44,6 +44,22 @@ let workspace = get (Authz_types.Workspace_id.of_string "workspace-1")
 let other_workspace = get (Authz_types.Workspace_id.of_string "workspace-2")
 let user = Author.Authenticated (Principal.Human (get (User_id.of_string "alice")))
 let at_ms = 1_700_000_000_000
+
+(* The clock of every zone that this file opens from paths. A case sets it
+   to the time of a {!timed} when it calls the commit, and the zone reads it
+   once it holds its locks. Fibers that wait on the locks may move it between
+   the two, so their records can get the time of a later fiber. *)
+let clock = ref at_ms
+let now_ms () = !clock
+
+(* A draft, and what the clock is set to when it is committed. *)
+type timed =
+  { at_ms : int
+  ; draft : Z.draft
+  }
+
+let timed ~at_ms ~author ~kind body = { at_ms; draft = { Z.author; kind; body } }
+let with_author author timed = { timed with draft = { timed.draft with Z.author } }
 let on = Authz_mode_state.Multi_account workspace
 let off = Authz_mode_state.Off workspace
 
@@ -54,12 +70,8 @@ let mode_body ?(workspace_id = workspace) event =
 ;;
 
 (* A mode event from the host-local operator, its only writer (design 6.3). *)
-let mode_draft ?(at_ms = at_ms + 1) ?workspace_id event : Z.draft =
-  { Z.at_ms
-  ; author = Author.Local_operator
-  ; kind = R.Kind.Mode_event
-  ; body = mode_body ?workspace_id event
-  }
+let mode_draft ?(at_ms = at_ms + 1) ?workspace_id event =
+  timed ~at_ms ~author:Author.Local_operator ~kind:R.Kind.Mode_event (mode_body ?workspace_id event)
 ;;
 
 let grant_body =
@@ -69,10 +81,8 @@ let grant_body =
 ;;
 
 (* The record that a commit of [draft] at [head] builds. *)
-let record_at ~head (draft : Z.draft) =
-  match
-    R.make ~head ~at_ms:draft.Z.at_ms ~author:draft.Z.author ~kind:draft.Z.kind ~body:draft.Z.body
-  with
+let record_at ~head { at_ms; draft } =
+  match R.make ~head ~at_ms ~author:draft.Z.author ~kind:draft.Z.kind ~body:draft.Z.body with
   | Ok record -> record
   | Error (R.Author_not_admitted _) -> Alcotest.fail "fixture author not admitted"
 ;;
@@ -159,7 +169,7 @@ let bootstrap dirs =
       ; config_dir = Some dirs.config
       ; external_store = dirs.store_file
       ; workspace_id = workspace
-      ; at_ms
+      ; now_ms = (fun () -> at_ms)
       }
   with
   | Ok completed -> completed
@@ -197,7 +207,7 @@ let open_error_name : Z.open_error -> string = function
 ;;
 
 let open_zone dirs =
-  match Z.open_at_start ~log_path:(log_file dirs) ~store_path:dirs.store_file with
+  match Z.open_at_start ~now_ms ~log_path:(log_file dirs) ~store_path:dirs.store_file with
   | Ok zone -> zone
   | Error error -> Alcotest.failf "zone not opened: %s" (Z.open_error_to_string error)
 ;;
@@ -327,6 +337,7 @@ let refusal_name : Authz_state.refusal -> string = function
   | Authz_state.Author_inactive _ -> "Author_inactive"
   | Authz_state.Accounts_off kind -> "Accounts_off " ^ R.Kind.to_string kind
   | Authz_state.Kind_not_read kind -> "Kind_not_read " ^ R.Kind.to_string kind
+  | Authz_state.Admission_behind_log _ -> "Admission_behind_log"
 ;;
 
 let error_name : Z.error -> string = function
@@ -362,14 +373,19 @@ let settlement_name = function
 
 (* ---- checks ---- *)
 
-let commit_ok zone draft =
-  match Z.commit zone draft with
+let commit zone { at_ms; draft } =
+  clock := at_ms;
+  Z.commit zone draft
+;;
+
+let commit_ok zone timed =
+  match commit zone timed with
   | Ok committed -> committed
   | Error error -> Alcotest.failf "commit refused: %s" (Z.error_to_string error)
 ;;
 
-let check_error label expected zone draft =
-  match Z.commit zone draft with
+let check_error label expected zone timed =
+  match commit zone timed with
   | Ok _ -> Alcotest.failf "%s: the commit succeeded" label
   | Error error -> Alcotest.(check string) label expected (error_name error)
 ;;
@@ -472,7 +488,7 @@ let commits_from_fibers_take_turns () =
         (fun (index, event) ->
           incr in_flight;
           most_in_flight := max !most_in_flight !in_flight;
-          let result = Z.commit zone (mode_draft ~at_ms:(at_ms + 1 + index) event) in
+          let result = commit zone (mode_draft ~at_ms:(at_ms + 1 + index) event) in
           decr in_flight;
           result)
         (List.mapi (fun index event -> index, event) events)
@@ -510,9 +526,9 @@ let refused_records_write_nothing () =
       [ "a second bootstrap", mode_draft M.Fresh_bootstrap, "Refused Mode"
       ; "a reactivation while on", mode_draft M.Reactivate, "Refused Mode"
       ; "an off for another workspace", mode_draft ~workspace_id:other_workspace M.Off, "Refused Mode"
-      ; "a mode event from a user", { (mode_draft M.Off) with Z.author = user }, "Record_not_built"
+      ; "a mode event from a user", with_author user (mode_draft M.Off), "Record_not_built"
       ; ( "a grant, which no layer reads yet"
-        , { Z.at_ms; author = user; kind = R.Kind.Runtime_grant; body = grant_body }
+        , timed ~at_ms ~author:user ~kind:R.Kind.Runtime_grant grant_body
         , "Refused Kind_not_read " ^ R.Kind.to_string R.Kind.Runtime_grant )
       ];
     let next = commit_ok zone (mode_draft M.Off) in
@@ -525,7 +541,7 @@ let refused_records_write_nothing () =
 let the_zone_opens_only_a_bootstrapped_log () =
   with_dirs (fun dirs ->
     let check_refused label =
-      match Z.open_at_start ~log_path:(log_file dirs) ~store_path:dirs.store_file with
+      match Z.open_at_start ~now_ms ~log_path:(log_file dirs) ~store_path:dirs.store_file with
       | Ok (_ : Z.t) -> Alcotest.failf "%s: a zone was opened" label
       | Error error ->
         Alcotest.(check string) (label ^ ": the refusal") "Not_bootstrapped" (open_error_name error)
@@ -550,7 +566,7 @@ let the_zone_opens_only_a_bootstrapped_log () =
    there. *)
 let a_log_that_cannot_be_checked_is_not_opened () =
   with_dirs (fun dirs ->
-    (match Z.open_at_start ~log_path:(log_file dirs ^ "\000") ~store_path:dirs.store_file with
+    (match Z.open_at_start ~now_ms ~log_path:(log_file dirs ^ "\000") ~store_path:dirs.store_file with
      | Ok (_ : Z.t) -> Alcotest.fail "a zone was opened"
      | Error error ->
        Alcotest.(check string) "the refusal" "Log_not_checked" (open_error_name error));
@@ -695,7 +711,6 @@ let invite_draft
   ?(invite_id = invite_id)
   ?(token = "token-1")
   ()
-  : Z.draft
   =
   let event =
     Invite_event.Issued
@@ -706,7 +721,7 @@ let invite_draft
       }
   in
   match Invite_event.to_body event with
-  | Ok body -> { Z.at_ms; author; kind = R.Kind.Invite; body }
+  | Ok body -> timed ~at_ms ~author ~kind:R.Kind.Invite body
   | Error error -> Alcotest.failf "fixture invite refused: %s" (Authz_body.error_to_string error)
 ;;
 
@@ -775,9 +790,9 @@ let an_invite_settles_the_intent_left_before_it () =
       ~aborted:[ left ])
 ;;
 
-let revoke_draft ~at_ms : Z.draft =
+let revoke_draft ~at_ms =
   match Invite_event.to_body (Invite_event.Revoked { invite_id }) with
-  | Ok body -> { Z.at_ms; author = Author.Local_operator; kind = R.Kind.Invite; body }
+  | Ok body -> timed ~at_ms ~author:Author.Local_operator ~kind:R.Kind.Invite body
   | Error error -> Alcotest.failf "fixture revocation refused: %s" (Authz_body.error_to_string error)
 ;;
 
@@ -813,11 +828,11 @@ let an_admin_admission_has_an_intent () =
       | Error _ -> Alcotest.fail "fixture admission refused"
     in
     let draft =
-      { Z.at_ms = at_ms + 2
-      ; author = Author.Authenticated (Principal.Human person)
-      ; kind = R.Kind.Admission
-      ; body
-      }
+      timed
+        ~at_ms:(at_ms + 2)
+        ~author:(Author.Authenticated (Principal.Human person))
+        ~kind:R.Kind.Admission
+        body
     in
     let admitted = commit_ok zone draft in
     check_settled "nothing to close" "Nothing_to_settle" admitted;
@@ -835,13 +850,14 @@ let an_admin_admission_has_an_intent () =
 
 let first_admin = get (User_id.of_string "0123456789abcdef0123456789abcdef")
 
-let admission_draft_of ~person ~sub ~invite_id ~at_ms : Z.draft =
+let admission_draft_of ~person ~sub ~invite_id ~at_ms =
   let identity = get (Authz_external_identity.google ~sub) in
   match
     Authz_admission_event.to_body
       { Authz_admission_event.user_id = person; identity; invite_id; membership = zone_membership ~sub }
   with
-  | Ok body -> { Z.at_ms; author = Author.Authenticated (Principal.Human person); kind = R.Kind.Admission; body }
+  | Ok body ->
+    timed ~at_ms ~author:(Author.Authenticated (Principal.Human person)) ~kind:R.Kind.Admission body
   | Error _ -> Alcotest.fail "fixture admission refused"
 ;;
 
@@ -940,13 +956,13 @@ let second_admin = get (User_id.of_string "fedcba9876543210fedcba9876543210")
 let second_invite_id = get (Authz_types.Invite_id.of_string "invite-2")
 let third_invite_id = get (Authz_types.Invite_id.of_string "invite-3")
 
-let admin_revocation_draft ~by ~user_id ~at_ms : Z.draft =
+let admin_revocation_draft ~by ~user_id ~at_ms =
   match
     Authz_admin_event.to_body
       (Authz_admin_event.Revoked { user_id; cause = Authz_admin_event.Operational })
   with
   | Ok body ->
-    { Z.at_ms; author = Author.Authenticated (Principal.Human by); kind = R.Kind.Admin_assignment; body }
+    timed ~at_ms ~author:(Author.Authenticated (Principal.Human by)) ~kind:R.Kind.Admin_assignment body
   | Error _ -> Alcotest.fail "fixture Admin revocation refused"
 ;;
 
@@ -1003,9 +1019,9 @@ let an_aborted_admin_revocation_starts_after_the_admission () =
 
 (* ---- principal records ---- *)
 
-let principal_draft ~by ~at_ms event : Z.draft =
+let principal_draft ~by ~at_ms event =
   match Authz_principal_event.to_body event with
-  | Ok body -> { Z.at_ms; author = Author.Authenticated (Principal.Human by); kind = R.Kind.Principal; body }
+  | Ok body -> timed ~at_ms ~author:(Author.Authenticated (Principal.Human by)) ~kind:R.Kind.Principal body
   | Error _ -> Alcotest.fail "fixture principal event refused"
 ;;
 
@@ -1072,6 +1088,40 @@ let a_refused_invite_writes_nothing () =
     let (_ : Z.committed) = commit_ok zone (mode_draft ~at_ms:(at_ms + 2) M.Off) in
     check_error "an invitation while the accounts are off" "Refused Accounts_off invite" zone
       (invite_draft ~at_ms:(at_ms + 3) ()))
+;;
+
+(* The zone writes the time of its clock, and an admission cannot be at a time
+   before a record already in the log, so a clock set back cannot spend an
+   invitation that had expired when that record was written (#48716). A record
+   of another kind is not held to that time. *)
+let an_admission_behind_the_log_writes_nothing () =
+  with_dirs (fun dirs ->
+    ignore (bootstrap dirs : B.completed);
+    let zone = open_zone dirs in
+    (* The first invitation expires at [at_ms + 1001], when the second one is
+       written. *)
+    let (_ : Z.committed) = commit_ok zone (invite_draft ()) in
+    let second =
+      commit_ok
+        zone
+        (invite_draft ~at_ms:(at_ms + 1001) ~invite_id:second_invite_id ~token:"token-2" ())
+    in
+    let before = files dirs in
+    let behind = admission_draft ~at_ms:(at_ms + 1000) in
+    check_error "an admission before the second invitation" "Refused Admission_behind_log" zone behind;
+    check_files "both files are as they were" before dirs;
+    check_snapshot "the snapshot" ~mode:on ~head:second.Z.record_hash (Z.snapshot zone);
+    check_error
+      "the admission at the time of the second invitation"
+      "Refused Admission"
+      zone
+      (admission_draft ~at_ms:(at_ms + 1001));
+    let restarted = open_zone dirs in
+    check_error "the same admission after a restart" "Refused Admission_behind_log" restarted behind;
+    let switched = commit_ok restarted (mode_draft ~at_ms:(at_ms + 2) M.Off) in
+    ignore
+      (check_restart "an off from a clock that went back" dirs ~mode:off ~head:switched.Z.record_hash
+       : opened))
 ;;
 
 let a_failed_store_write_stops_every_commit () =
@@ -1166,7 +1216,7 @@ let a_locked_file_is_not_opened () =
     List.iter
       (fun (label, lock_path, expected) ->
         with_foreign_lock ~lock_path (fun release ->
-          (match Z.open_at_start ~log_path:(log_file dirs) ~store_path:dirs.store_file with
+          (match Z.open_at_start ~now_ms ~log_path:(log_file dirs) ~store_path:dirs.store_file with
            | Ok (_ : Z.t) -> Alcotest.failf "%s: a zone was opened" label
            | Error error -> Alcotest.(check string) label expected (open_error_name error));
           release ()))
@@ -1317,14 +1367,19 @@ let disagreements_refuse_every_commit () =
 
 let lines entries = String.concat "" (List.map (fun entry -> S.to_line entry ^ "\n") entries)
 
-let install_ok opened draft =
-  match Z.install ~log:opened.log ~store:opened.store draft with
+let install opened { at_ms; draft } =
+  clock := at_ms;
+  Z.install ~now_ms ~log:opened.log ~store:opened.store draft
+;;
+
+let install_ok opened timed =
+  match install opened timed with
   | Ok installed -> installed
   | Error error -> Alcotest.failf "install refused: %s" (Z.error_to_string error)
 ;;
 
-let check_install_error label expected opened draft =
-  match Z.install ~log:opened.log ~store:opened.store draft with
+let check_install_error label expected opened timed =
+  match install opened timed with
   | Ok (_ : Z.installed) -> Alcotest.failf "%s: the install succeeded" label
   | Error error -> Alcotest.(check string) label expected (error_name error)
 ;;
@@ -1459,10 +1514,10 @@ let an_install_refuses_what_it_cannot_install () =
       [ "an off", mode_draft M.Off, "Refused Mode"
       ; "a reactivation", mode_draft M.Reactivate, "Refused Mode"
       ; ( "a bootstrap from a user"
-        , { bootstrap_draft with Z.author = user }
+        , with_author user bootstrap_draft
         , "Record_not_built" )
       ; ( "a grant"
-        , { Z.at_ms; author = user; kind = R.Kind.Runtime_grant; body = grant_body }
+        , timed ~at_ms ~author:user ~kind:R.Kind.Runtime_grant grant_body
         , "Refused Before_bootstrap" )
       ];
     ignore (install_ok opened bootstrap_draft : Z.installed))
@@ -1529,6 +1584,10 @@ let () =
         ] )
     ; ( "refusals"
       , [ Alcotest.test_case "refused records write nothing" `Quick refused_records_write_nothing
+        ; Alcotest.test_case
+            "an admission behind the log writes nothing"
+            `Quick
+            an_admission_behind_the_log_writes_nothing
         ; Alcotest.test_case
             "the zone opens only a bootstrapped log"
             `Quick

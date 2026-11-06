@@ -16,8 +16,13 @@
       ({!Uncertain}), and so does a store that holds no answer
       ({!Store_holds_no_answer}). Nothing in the zone changes either, so every
       later commit is refused as well, until a restart reads the files again.
-    + It builds the record at the head of the log and runs
-      {!Authz_state.apply} on it.
+    + It reads the clock it was given, builds the record at the head of the
+      log with that time, and runs {!Authz_state.apply} on it. The clock is
+      read here, inside both locks, so a caller that waited for the lock cannot
+      bring a time from before it, and no other commit appends between the read
+      and the append. An admission is judged against the expiry of its
+      invitation with that time, and {!Authz_state} refuses one before a record
+      it has read ({!Authz_state.Admission_behind_log}).
     + It writes the settlement of the first step: [Committed] for a promoted
       intent, [Aborted_intent] for an aborted one. Before an abort it asks
       {!Authz_log.confirm_end} whether the log still ends where the intent
@@ -147,15 +152,21 @@ val open_error_to_string : open_error -> string
     opens the external store at [store_path], then the log, folded with
     {!Replay} from the state of the store. Opening a file makes its directory
     and its lock file, so a store that is not there gets both, and not the
-    store file. *)
-val open_at_start : log_path:string -> store_path:string -> (t, open_error) result
+    store file. [now_ms] is the wall clock in milliseconds. A {!commit} that
+    gets past the judgment of the entry reads it once, for the time of its
+    record. *)
+val open_at_start
+  :  now_ms:(unit -> int)
+  -> log_path:string
+  -> store_path:string
+  -> (t, open_error) result
 
 val snapshot : t -> snapshot
 
-(** The record to append. Its seq and previous hash come from the head. *)
+(** The record to append. Its seq and previous hash come from the head, and its
+    time from the clock of the zone. *)
 type draft =
-  { at_ms : int
-  ; author : Authz_records.Author.t
+  { author : Authz_records.Author.t
   ; kind : Authz_record.Kind.t
   ; body : Authz_body.t
   }
@@ -247,10 +258,11 @@ val commit : t -> draft -> (committed, error) result
       holds no answer. The intent of a [Fresh_bootstrap] that the log never got
       is aborted, after {!Authz_log.confirm_end}, and {!installed} names it.
 
-    The zone lives for this call, and its snapshot is the one in
-    {!installed}. *)
+    The zone lives for this call, reads [now_ms] for the time of the record,
+    and its snapshot is the one in {!installed}. *)
 val install
-  :  log:Authz_log.t
+  :  now_ms:(unit -> int)
+  -> log:Authz_log.t
   -> store:Authz_external_store.t
   -> draft
   -> (installed, error) result

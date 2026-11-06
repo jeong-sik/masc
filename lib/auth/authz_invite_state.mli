@@ -20,7 +20,10 @@
 
     {b Expiry.} Nothing here reads a clock. An admission spends an open
     invitation only if the time of its record is before [expires_at_ms]
-    ({!consume}), so a replay of the log gives the same answer on any day. *)
+    ({!consume}), so a replay of the log gives the same answer on any day. The
+    zone reads that time inside its locks, and {!Authz_state} refuses an
+    admission whose time is before a record it has read
+    ({!Authz_state.Admission_behind_log}). *)
 
 type status =
   | Open

@@ -68,7 +68,7 @@ let bootstrap dirs =
       ; config_dir = Some dirs.config
       ; external_store = dirs.store
       ; workspace_id = workspace
-      ; at_ms
+      ; now_ms = (fun () -> at_ms)
       }
   with
   | Ok _ -> ()

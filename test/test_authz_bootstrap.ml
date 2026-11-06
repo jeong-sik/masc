@@ -216,7 +216,7 @@ let request dirs : B.request =
   ; config_dir = Some dirs.config
   ; external_store = dirs.store
   ; workspace_id = workspace
-  ; at_ms
+  ; now_ms = (fun () -> at_ms)
   }
 ;;
 
@@ -402,7 +402,7 @@ let a_first_run_sets_the_installation_up () =
     match records_of_log dirs with
     | [ record ] ->
       Alcotest.(check int) "the first record of the log" 1 record.R.seq;
-      Alcotest.(check int) "the time of the request" at_ms record.R.at_ms;
+      Alcotest.(check int) "the time of the clock" at_ms record.R.at_ms;
       Alcotest.(check string) "the kind" "mode_event" (R.Kind.to_string record.R.kind);
       (match record.R.author with
        | A.Local_operator -> ()

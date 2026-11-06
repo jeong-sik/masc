@@ -232,7 +232,7 @@ let render_overview (state : state) home =
   let work = " " ^ String.concat work_separator work_items in
   surface_chrome ~overflow:Fits ?sidebar state ~terminal_rows ~cols:full_cols ~surface_key:"overview"
     ~title:(overview_header state ~cols)
-    ~status:[ Masc_tui_footer.Refresh_interval state.refresh_interval ]
+    ~status:[]
     ~hints:(if state.keeper_navigation_open then Masc_tui_keys.keeper_navigation_hints
             else Masc_tui_keys.footer_hints Overview)
     ~body:(fun ~budget:chrome_budget c ->

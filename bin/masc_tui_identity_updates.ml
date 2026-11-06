@@ -92,7 +92,17 @@ let apply_login_status (state : state) ~report ~catalog expectation result =
         report (Printf.sprintf "%s %s login: %s" expectation.ile_keeper
           expectation.ile_provider detail)) notice
 
-let providers_loaded (state : state) request ~report ~now ~attempts result =
+(* What one reading of a Keeper's providers and attempts tells the read that
+   owed it. *)
+type reading =
+  | Reading_succeeded
+  | Reading_failed
+      (** The catalog, or the status of an attempt still waited on, could not be
+          read, or the server says such a consent still waits although its
+          deadline [now] has passed. *)
+  | Reading_superseded  (** A newer read, or a lost authority, owns the answer. *)
+
+let providers_loaded (state : state) request ?(settle = ignore) ~report ~now ~attempts result =
   let keeper_name = request.drr_keeper in
   let current =
     Masc_tui_types.finish_detail_read state request
@@ -165,7 +175,9 @@ let providers_loaded (state : state) request ~report ~now ~attempts result =
          Masc_tui_owed_read.failed
            ~retry_s:Masc_tui_types.identity_login_retry_s
            ~max_retry_s:Masc_tui_types.identity_login_max_retry_s ~now
-       else Masc_tui_owed_read.succeeded)
+       else Masc_tui_owed_read.succeeded);
+    settle (if failed then Reading_failed else Reading_succeeded)
+  else settle Reading_superseded
 ;;
 
 let login_started (state : state) request ~now ~report ~notice result =
@@ -194,7 +206,7 @@ let login_started (state : state) request ~now ~report ~notice result =
       Option.iter (fun origin ->
         remember_identity_login_expectation state
           { ile_origin = origin; ile_keeper = keeper_name; ile_provider = provider_id
-          ; ile_attempt_id = attempt_id })
+          ; ile_attempt_id = attempt_id; ile_expires_at = expires_at })
         request.ilr_origin;
       if keeper_detail_target_matches state keeper_name
       then state.identity_attempt_error <- None;

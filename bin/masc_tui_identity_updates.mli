@@ -21,13 +21,26 @@ val switch_set
   -> (unit, string) result
   -> unit
 
+(** What one reading of a Keeper's providers and attempts tells the read that
+    owed it. *)
+type reading =
+  | Reading_succeeded
+  | Reading_failed
+      (** The catalog, or the status of an attempt still waited on, could not be
+          read, or the server says such a consent still waits although its
+          deadline [now] has passed. *)
+  | Reading_superseded  (** A newer read, or a lost authority, owns the answer. *)
+
 (** Apply catalog and attempt facts under one read admission. Published
     credentials retire only with the paired current successful catalog read;
     immutable failure/expiry facts need no catalog. Present only the selected Keeper.
-    A successful read also holds the callback the server named. *)
+    A successful read also holds the callback the server named. [settle] gets
+    the reading's outcome, [now] being the wall clock it judges consent
+    deadlines by. *)
 val providers_loaded
   :  Masc_tui_types.state
   -> Masc_tui_types.detail_read_request
+  -> ?settle:(reading -> unit)
   -> report:(string -> unit)
   -> now:float
   -> attempts:(Masc_tui_types.identity_login_expectation * (Masc_tui_identity_model.identity_login_status, string) result) list

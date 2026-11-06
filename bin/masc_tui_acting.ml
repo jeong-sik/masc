@@ -434,7 +434,9 @@ let keeper_of_event ~traces (event : Observer.event) =
   | Observer.Keeper_event_queue_changed { keeper }
   | Observer.Keeper_roster_change (Observer.Keeper_row_changed { keeper })
   | Observer.Keeper_turn_changed { keeper; _ }
+  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Keeper_metrics { keeper })
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Keeper_oauth_attempts { keeper })
+  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Skill_activations { keeper })
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Memory_health { keeper })
   | Observer.Fusion_run_status { keeper; _ } ->
       keeper
@@ -442,9 +444,16 @@ let keeper_of_event ~traces (event : Observer.event) =
   | Observer.Keeper_roster_change Observer.Every_row_changed
   | Observer.Internal_agent_runs_changed _ | Observer.Workspace_store_changed _
   | Observer.Dataset_changed
-      Masc.Workspace_dataset_event.(
-        Repositories | Verification_requests | Harness_verdicts | Clients | Account_emails
-        | Provider_usage | Provider_standing | Keeper_costs | Workspace_health)
+      ( Masc.Workspace_dataset_event.Repositories | Masc.Workspace_dataset_event.Verification_requests
+      | Masc.Workspace_dataset_event.Harness_verdicts | Masc.Workspace_dataset_event.Goals
+      | Masc.Workspace_dataset_event.Runtime_config | Masc.Workspace_dataset_event.Connectors
+      | Masc.Workspace_dataset_event.Skill_catalog | Masc.Workspace_dataset_event.Clients
+      | Masc.Workspace_dataset_event.Account_emails | Masc.Workspace_dataset_event.Provider_usage
+      | Masc.Workspace_dataset_event.Provider_standing | Masc.Workspace_dataset_event.Keeper_costs
+      | Masc.Workspace_dataset_event.Workspace_health | Masc.Workspace_dataset_event.Runtime_probe
+      | Masc.Workspace_dataset_event.Runtime_metrics | Masc.Workspace_dataset_event.Lanes
+      | Masc.Workspace_dataset_event.Machine_live _ | Masc.Workspace_dataset_event.Browser_observation _
+      | Masc.Workspace_dataset_event.Lane_addons _ )
   | Observer.Gate_connector_changed _ | Observer.Board_changed _ | Observer.Lane_resource _
   | Observer.Snapshot _ | Observer.Execution_snapshot | Observer.Other _ ->
       "server"
@@ -510,6 +519,19 @@ let label_of_event (event : Observer.event) =
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Workspace_health -> "workspace health"
   | Observer.Dataset_changed
       (Masc.Workspace_dataset_event.Keeper_oauth_attempts _) -> "login"
+  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Keeper_metrics _) -> "metrics"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Goals -> "goals"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Runtime_config -> "runtime config"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Connectors -> "connectors"
+  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Skill_activations _) -> "skill record"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Skill_catalog -> "skills"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Workspace_health -> "workspace health"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Runtime_probe -> "runtime probe"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Runtime_metrics -> "runtime history"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Lanes -> "lanes"
+  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Machine_live _) -> "machine live"
+  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Browser_observation _) -> "browser observation"
+  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Lane_addons _) -> "add-ons"
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Memory_health _) -> "memory health"
   | Observer.Keeper_event_queue_changed _ -> "event queue"
   | Observer.Board_changed _ -> "board"
@@ -689,6 +711,33 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
       { at; keeper = "server"; glyph = Quiet; label; detail = "a runtime's quota or rate-limit standing changed" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Keeper_costs ->
       { at; keeper = "server"; glyph = Quiet; label; detail = "the Keeper cost window took or dropped a row" }
+  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Keeper_metrics { keeper }) ->
+      { at; keeper; glyph = Quiet; label; detail = "the metrics ledger took a row" }
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Goals ->
+      { at; keeper = "server"; glyph = Quiet; label; detail = "the Goal projection changed" }
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Runtime_config ->
+      { at; keeper = "server"; glyph = Quiet; label; detail = "a runtime.toml commit was attempted" }
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Connectors ->
+      { at; keeper = "server"; glyph = Quiet; label; detail = "a connector's status changed" }
+  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Skill_activations { keeper }) ->
+      { at; keeper; glyph = Quiet; label; detail = "the Skill activation ledger took a row" }
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Skill_catalog ->
+      { at; keeper = "server"; glyph = Quiet; label; detail = "a Skill catalog snapshot was published" }
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Workspace_health ->
+      { at; keeper = "server"; glyph = Quiet; label; detail = "the Home Health line moved" }
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Runtime_probe ->
+      { at; keeper = "server"; glyph = Quiet; label; detail = "a runtime probe landed" }
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Runtime_metrics ->
+      { at; keeper = "server"; glyph = Quiet; label; detail = "the runtime history took or dropped a row" }
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Lanes ->
+      { at; keeper = "server"; glyph = Quiet; label; detail = "the Lane inventory changed" }
+  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Machine_live { machine }) ->
+      { at; keeper = "server"; glyph = Quiet; label; detail = Masc.Machine_lane.to_wire machine }
+  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Browser_observation { scope; _ }) ->
+      { at; keeper = "server"; glyph = Quiet; label; detail = Printf.sprintf "%s/%d"
+          (Browser_lane.Lane_name.to_wire scope.source) scope.tab_id }
+  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Lane_addons { instance_id }) ->
+      { at; keeper = "server"; glyph = Quiet; label; detail = instance_id }
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Memory_health { keeper }) ->
       { at; keeper; glyph = Quiet; label; detail = "a memory health input was written" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Workspace_health ->

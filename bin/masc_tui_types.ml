@@ -9993,6 +9993,8 @@ type state = {
      failed read owes one; the record of a Keeper nobody waits on is
      dropped. *)
   mutable identity_login_reads: (string * Masc_tui_owed_read.t) list;
+  (* Attempts whose passed consent deadline already owed one read. *)
+  mutable identity_deadline_reads: string list;
   mutable identity_login_requests: identity_login_request list;
   mutable identity_login_generation: int;
   (* Which provider the arrows are on. Held rather than derived because a
@@ -10260,6 +10262,9 @@ type state = {
   mutable keeper_log_cancel: (unit ref * (unit -> unit)) option;
   mutable keeper_log_refresh_pending: bool;
   mutable keeper_logs_owed: keeper_logs_owed option;
+  (* The read the selected Keeper's metrics tail owes while a logs view
+     shows it. *)
+  mutable keeper_log_owed: Masc_tui_owed_read.t;
   mutable log_scroll: int;
   mutable log_wrap_cols: int option;
   mutable live_context: Masc_tui_context_state.t;
@@ -10659,6 +10664,10 @@ type state = {
   (* The Usage pane's per-Keeper usage readings, in Keeper name order. A
      Keeper that left the roster leaves this list at the next read. *)
   mutable tools_keeper_usage: (string * keeper_skill_usage_reading) list;
+  (* What each part of the Tools read owes after a push: the selected
+     Keeper's surface ([/dashboard/tools?keeper=]) and the Skill catalog with
+     its usage counts ([/api/v1/skills]). *)
+  mutable tools_surface_owed: Masc_tui_owed_read.t;
   (* What each Tools part read on a push owes (RFC-0483 §4.3): the skills
      catalog, the selected Keeper's activations, and each roster Keeper's
      usage. A roster Keeper with no entry has never been read. *)
@@ -11078,6 +11087,9 @@ type state = {
           revalidating the same requested workspace does not end the outage.
           This log key never admits readings or grants request authority. *)
   mutable observer_retry_owner: unit ref option;
+  mutable observer_stream_owner: unit ref option;
+  mutable observer_machine: Masc.Machine_lane.t option;
+  mutable observer_browser: Masc.Workspace_dataset_event.browser_scope option;
   mutable observer_recovery_owner: unit ref option;
   mutable observer_scope_binding: observer_scope_binding;
   mutable mcp_session: string option;
@@ -12413,6 +12425,7 @@ let clear_keeper_logs state =
   state.keeper_execute_output <- Masc_tui_fetched.clear state.keeper_execute_output;
   state.keeper_log_read <- None;
   state.keeper_log_refresh_pending <- false;
+  state.keeper_log_owed <- Masc_tui_owed_read.settled;
   supersede_keeper_log_read state None
 
 let suspend_keeper_logs state =
@@ -12420,6 +12433,7 @@ let suspend_keeper_logs state =
   state.keeper_execute_output <- suspend_keeper_execute state.keeper_execute_output;
   state.keeper_log_read <- None;
   state.keeper_log_refresh_pending <- false;
+  state.keeper_log_owed <- Masc_tui_owed_read.settled;
   supersede_keeper_log_read state None
 
 let keeper_logs_view state =
@@ -14810,6 +14824,9 @@ let suspend_workspace_readings state =
   List.iter (fun (_, cancel) -> cancel ()) cancellations;
   state.observer <- Observer_off;
   state.observer_retry_owner <- None;
+  state.observer_stream_owner <- None;
+  state.observer_machine <- None;
+  state.observer_browser <- None;
   state.fleet_stream_reader <- Fleet_stream_idle;
   state.detail_read_authority <- ref ();
   state.detail_reads <- [];
@@ -14859,6 +14876,7 @@ let suspend_workspace_readings state =
   (* The open post reads again when authority is recovered
      ([resume_reads_after_authority_change]). *)
   state.board_post_owed <- None;
+  state.board_list_owed <- Masc_tui_owed_read.settled;
   state.pushed_reads <- [];
   state.asks_owed <- Masc_tui_owed_read.settled;
   state.async_requests_owed <- Masc_tui_owed_read.settled;
@@ -14956,6 +14974,10 @@ let suspend_workspace_readings state =
   state.tools_read_inflight <- None;
   state.tools_skill_generation <- state.tools_skill_generation + 1;
   state.tools_skill_pending <- [];
+  state.tools_surface_owed <- Masc_tui_owed_read.settled;
+  state.tools_catalog_owed <- Masc_tui_owed_read.settled;
+  state.overview_inflight <- false;
+  state.overview_owed <- Masc_tui_owed_read.settled;
   state.harness_inflight <- false;
   state.harness_owed <- Masc_tui_owed_read.settled;
   state.overview_inflight <- false;
@@ -15140,6 +15162,7 @@ let reconcile_detail_intent_origins (state : state) reading =
 let withdraw_identity_readings (state : state) =
   state.identity_login_requests <- [];
   state.identity_logins <- [];
+  state.identity_deadline_reads <- [];
   state.identity_view <- None;
   state.identity_view_error <- None;
   state.identity_callback <- None;
@@ -15199,6 +15222,23 @@ let update_identity_login_read (state : state) keeper_name f =
    Keeper's attempt read (RFC-0480 §3.4). *)
 let owe_identity_login_read (state : state) keeper_name =
   update_identity_login_read state keeper_name Masc_tui_owed_read.changed
+
+(* The server reports a passed deadline only when the attempt is read, so
+   each attempt still waited on owes its Keeper one read once [now] is past
+   its deadline. A server whose clock has not reached the deadline answers
+   that the consent still waits, which fails that read and retries it. *)
+let owe_identity_deadline_reads (state : state) ~now =
+  let waited = List.map (fun expectation -> expectation.ile_attempt_id)
+      state.identity_login_expectations in
+  state.identity_deadline_reads <-
+    List.filter (fun attempt_id -> List.mem attempt_id waited) state.identity_deadline_reads;
+  List.iter (fun expectation ->
+    if expectation.ile_expires_at <= now
+       && not (List.mem expectation.ile_attempt_id state.identity_deadline_reads)
+    then begin
+      state.identity_deadline_reads <- expectation.ile_attempt_id :: state.identity_deadline_reads;
+      owe_identity_login_read state expectation.ile_keeper
+    end) state.identity_login_expectations
 
 (* The Clients surface's owed read (RFC-0480 §3.4). The state moves live
    here so the settle sequence is testable without the event loop: a read
@@ -19947,6 +19987,7 @@ let create_state
   identity_logins = [];
   identity_login_expectations = [];
   identity_login_reads = [];
+  identity_deadline_reads = [];
   identity_login_requests = [];
   identity_login_generation = 0;
   identity_cursor = 0;
@@ -20087,6 +20128,7 @@ let create_state
   keeper_log_cancel = None;
   keeper_log_refresh_pending = false;
   keeper_logs_owed = None;
+  keeper_log_owed = Masc_tui_owed_read.settled;
   log_scroll = 0;
   log_wrap_cols = None;
   live_context = Masc_tui_context_state.empty;
@@ -20293,11 +20335,12 @@ let create_state
   tools_skill_generation = 0;
   tools_skill_pending = [];
   tools_read_inflight = None;
+  tools_surface_owed = Masc_tui_owed_read.settled;
+  tools_catalog_owed = Masc_tui_owed_read.settled;
   tools_error = None;
   tools_activations = None;
   tools_activations_error = None;
   tools_keeper_usage = [];
-  tools_catalog_owed = Masc_tui_owed_read.settled;
   tools_inventory_owed = Masc_tui_owed_read.settled;
   tools_inventory_keeper = None;
   tools_activations_owed = Masc_tui_owed_read.settled;
@@ -20519,6 +20562,9 @@ let create_state
   observer = Observer_off;
   observer_last_close = None;
   observer_retry_owner = None;
+  observer_stream_owner = None;
+  observer_machine = None;
+  observer_browser = None;
   observer_recovery_owner = None;
   observer_scope_binding = Observer_scope_unbound;
   mcp_session = None;
@@ -20619,6 +20665,17 @@ let create_state
   port;
   refresh_interval;
 }
+
+let observer_machine_of_state state =
+  if state.msx_open && not state.msx_menu_open
+     && state.machine_interaction = Control_machine
+  then Some state.machine_source
+  else None
+
+let observer_browser_scope_of_state state =
+  Option.bind (browser_lane_on_screen state) (fun view ->
+    Browser_lane_view.observation_scope ~image_open:state.image_open
+      ?viewport:(Option.map fst state.browser_viewport) view)
 
 let system_logs_page (state : state) = System_logs_view.current state.system_logs
 let edit_system_logs_page (state : state) change =

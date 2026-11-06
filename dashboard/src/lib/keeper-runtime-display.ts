@@ -1,5 +1,4 @@
 import type { Keeper, KeeperRuntimeBlockerClass } from '../types'
-import { relativeTime } from './format-time'
 import { firstNonEmptyString } from './format-string'
 import { isKeeperPaused } from './keeper-predicates'
 // `fleet-tone` is leaf-level (it imports only `format-string`), so this
@@ -35,14 +34,6 @@ interface KeeperActivityDisplayOptions {
 interface KeeperRuntimeDisplay {
   label: string
   value: string
-}
-
-export interface KeeperPauseDisplay {
-  reason: string
-  nextAction: string | null
-  diagnostic: string | null
-  detail: string
-  title: string
 }
 
 type KeeperRuntimeDisplaySource = {
@@ -277,21 +268,6 @@ function keeperLifecycleStatus(
   }
 }
 
-function codeLabel(value: string | null | undefined): string | null {
-  const text = trimmed(value)
-  return text ? text.replace(/_/g, ' ') : null
-}
-
-function attentionReasonForPause(value: string | null | undefined): string | null {
-  const text = trimmed(value)
-  if (!text || text === 'paused') return null
-  return codeLabel(text)
-}
-
-function diagnosticStateLabel(keeper: Keeper): string | null {
-  return codeLabel(keeper.diagnostic?.health_state)
-}
-
 function transientProviderRuntimeText(value: string | null | undefined): boolean {
   const text = value?.trim().toLowerCase()
   if (!text) return false
@@ -318,51 +294,6 @@ export function isKeeperAutoRecoverPause(keeper: Keeper | null | undefined): boo
     )
   }
   return false
-}
-
-export function keeperPauseDisplay(keeper: Keeper): KeeperPauseDisplay | null {
-  if (!isKeeperPaused(keeper)) return null
-  const autoRecover = isKeeperAutoRecoverPause(keeper)
-  const trust = keeper.trust
-  const blockerLabel = keeperRuntimeBlockerLabel(keeper.runtime_blocker_class)
-  const reason =
-    blockerLabel
-    ?? attentionReasonForPause(keeper.attention_reason)
-    ?? attentionReasonForPause(trust?.attention_reason)
-    ?? firstNonEmptyString(
-      keeper.runtime_blocker_summary,
-      trust?.latest_terminal_reason?.summary,
-      keeper.diagnostic?.summary,
-    )
-    ?? '운영자 일시정지'
-  const nextAction = firstNonEmptyString(
-    codeLabel(keeper.next_human_action),
-    codeLabel(trust?.next_human_action),
-    codeLabel(trust?.latest_next_action),
-    codeLabel(trust?.latest_terminal_reason?.next_action),
-    codeLabel(keeper.diagnostic?.next_action_path),
-  )
-  const diagnostic = diagnosticStateLabel(keeper)
-  const detail = [
-    autoRecover ? '상태 자동 재시도 대기' : null,
-    `원인 ${reason}`,
-    nextAction ? `다음 ${nextAction}` : autoRecover ? '다음 자동 재시도' : null,
-    diagnostic ? `진단 ${diagnostic}` : null,
-  ].filter((part): part is string => part !== null).join(' · ')
-  const title = [
-    detail,
-    `paused=${keeper.paused === true ? 'true' : 'false'}`,
-    `phase=${keeper.phase ?? 'unknown'}`,
-    `status=${keeper.status ?? 'unknown'}`,
-    `pipeline=${keeper.pipeline_stage ?? 'unknown'}`,
-  ].join(' · ')
-  return {
-    reason,
-    nextAction,
-    diagnostic,
-    detail,
-    title,
-  }
 }
 
 /** Distinguish "never booted" from "was running but stopped" keepers.
@@ -437,38 +368,6 @@ export function keeperRuntimeBlockerHint(keeper: Keeper | null | undefined): str
   if (blockerClass === 'exception') {
     return 'Keeper 런타임 예외가 기록되어 로그와 최근 turn 상태 확인이 필요합니다.'
   }
-  return null
-}
-
-export function keeperRecentActionLabel(
-  keeper: Keeper | null | undefined,
-  fallbackLastTurnAgoS?: number | null,
-): string | null {
-  if (keeper?.tool_audit_at) {
-    return `마지막 행동 · ${relativeTime(keeper.tool_audit_at)}`
-  }
-  const seconds = keeper?.last_turn_ago_s ?? fallbackLastTurnAgoS
-  return typeof seconds === 'number' && Number.isFinite(seconds)
-    ? `마지막 턴 · ${Math.round(seconds)}초 전`
-    : null
-}
-
-export function keeperRuntimeHint(keeper: Keeper | null | undefined): string | null {
-  if (!keeper) return null
-  // Use the SSOT predicate so a keeper paused by phase or pipeline_stage —
-  // not just by the `paused` flag — still surfaces the "일시정지" prefix.
-  // The same file already routes the *summary* and *short* axes through
-  // isKeeperPaused (L135, L166); the runtime hint had drifted to raw flag.
-  const paused = isKeeperPaused(keeper)
-  const autoRecover = isKeeperAutoRecoverPause(keeper)
-  const runtimeBlocker = keeperRuntimeBlockerHint(keeper)
-  if (runtimeBlocker) {
-    if (paused && autoRecover) return `자동 재시도 대기 · ${runtimeBlocker}`
-    return paused ? `일시정지 원인 · ${runtimeBlocker}` : runtimeBlocker
-  }
-  if (paused && autoRecover) return '자동 재시도 대기'
-  if (paused && keeper.keepalive_running) return '일시정지 · 하트비트만 유지 중'
-  if (paused) return '일시정지됨'
   return null
 }
 

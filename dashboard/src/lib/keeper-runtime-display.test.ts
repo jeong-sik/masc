@@ -4,8 +4,8 @@ import type { Keeper, KeeperRuntimeBlockerClass } from '../types'
 import {
   keeperActivityDisplay,
   keeperDisplayRuntime,
+  isKeeperAutoRecoverPause,
   keeperDisplayStatus,
-  keeperPauseDisplay,
   keeperRuntimeBlockerHint,
   keeperRuntimeBlockerLabel,
   keeperWorkPreview,
@@ -23,6 +23,10 @@ function makeKeeper(overrides: Partial<Keeper> = {}): Keeper {
 describe('keeperDisplayStatus', () => {
   it('returns paused when keeper.paused is true', () => {
     expect(keeperDisplayStatus(makeKeeper({ paused: true }))).toBe('paused')
+  })
+
+  it('returns paused over an idle status', () => {
+    expect(keeperDisplayStatus(makeKeeper({ status: 'idle', paused: true }), 'idle')).toBe('paused')
   })
 
   it('returns paused when phase or pipeline carries pause truth', () => {
@@ -170,40 +174,6 @@ describe('keeperDisplayRuntime', () => {
   })
 })
 
-describe('keeperPauseDisplay', () => {
-  it('returns null for active keepers', () => {
-    expect(keeperPauseDisplay(makeKeeper({ status: 'active', phase: 'Running' }))).toBeNull()
-  })
-
-  it('surfaces blocker, next action, diagnostic, and raw axes for paused keepers', () => {
-    const display = keeperPauseDisplay(makeKeeper({
-      status: 'paused',
-      phase: 'Paused',
-      pipeline_stage: 'paused',
-      paused: true,
-      runtime_blocker_class: 'fiber_unresolved',
-      attention_reason: 'paused',
-      next_human_action: 'inspect_blocker_before_resume',
-      diagnostic: {
-        health_state: 'offline',
-        next_action_path: 'recover',
-        last_reply_status: 'unknown',
-      },
-    }))
-
-    expect(display).toMatchObject({
-      reason: 'Fiber 미해결',
-      nextAction: 'inspect blocker before resume',
-      diagnostic: 'offline',
-    })
-    expect(display?.detail).toContain('원인 Fiber 미해결')
-    expect(display?.detail).toContain('다음 inspect blocker before resume')
-    expect(display?.detail).toContain('진단 offline')
-    expect(display?.title).toContain('paused=true')
-    expect(display?.title).toContain('status=paused')
-  })
-})
-
 describe('keeperRuntimeBlockerLabel', () => {
   it('labels backend-emitted terminal keeper failure classes', () => {
     expect(keeperRuntimeBlockerLabel('provider_runtime_error')).toBe(
@@ -211,6 +181,13 @@ describe('keeperRuntimeBlockerLabel', () => {
     )
     expect(keeperRuntimeBlockerLabel('runtime_exhausted')).toBe('런타임 후보 소진')
     expect(keeperRuntimeBlockerLabel('official_client_recovery_required')).toBe('공식 클라이언트 세션 복구 필요')
+  })
+
+  it('labels registry-derived and runtime-candidate failure classes', () => {
+    expect(keeperRuntimeBlockerLabel('fiber_unresolved')).toBe('Fiber 미해결')
+    expect(keeperRuntimeBlockerLabel('heartbeat_failures')).toBe('하트비트 실패')
+    expect(keeperRuntimeBlockerLabel('turn_failures')).toBe('턴 실패 반복')
+    expect(keeperRuntimeBlockerLabel('exception')).toBe('런타임 예외')
   })
 
   it('labels a configuration error and an operator stop', () => {
@@ -247,6 +224,24 @@ describe('keeperRuntimeBlockerHint', () => {
     ).toBe('런타임 후보가 모두 소진되어 runtime 상태 확인이 필요합니다.')
   })
 
+  it('returns a summary that differs from the class as written', () => {
+    expect(
+      keeperRuntimeBlockerHint(makeKeeper({
+        runtime_blocker_class: 'fiber_unresolved',
+        runtime_blocker_summary: 'Provider turn timed out.',
+      })),
+    ).toBe('Provider turn timed out.')
+    expect(
+      keeperRuntimeBlockerHint(makeKeeper({
+        runtime_blocker_class: 'heartbeat_failures',
+        runtime_blocker_summary:
+          'Heartbeat failed 8 times in a row; operator investigation is required before restart.',
+      })),
+    ).toBe(
+      'Heartbeat failed 8 times in a row; operator investigation is required before restart.',
+    )
+  })
+
   const registryBlockerHintCases: Array<[KeeperRuntimeBlockerClass, string]> = [
     [
       'heartbeat_failures',
@@ -273,6 +268,20 @@ describe('keeperRuntimeBlockerHint', () => {
       ).toBe(expected)
     },
   )
+})
+
+describe('isKeeperAutoRecoverPause', () => {
+  it('treats a TLS handshake failure under provider_runtime_error as an auto-retry pause', () => {
+    expect(
+      isKeeperAutoRecoverPause(makeKeeper({
+        status: 'paused',
+        paused: true,
+        runtime_blocker_class: 'provider_runtime_error',
+        runtime_blocker_summary:
+          'Provider runtime catch-all (internal_unhandled_exception): TLS alert from peer: handshake failure',
+      })),
+    ).toBe(true)
+  })
 })
 
 describe('keeperActivityDisplay', () => {

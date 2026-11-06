@@ -10,8 +10,10 @@ let error_message = function
   | Invalid message | Unavailable message | Commit_uncertain { message; _ } -> message
   | Missing -> "project build or file not found"
   | Source_error error -> Artifact_project_source_store.error_message error
+let dirname = "artifact_project_builds"
+
 open Result.Syntax
-let root ~base_path = Filename.concat (Common.masc_dir_from_base_path ~base_path) "artifact_project_builds"
+let root ~base_path = Filename.concat (Common.masc_dir_from_base_path ~base_path) dirname
 let path ~base_path id = Filename.concat (root ~base_path) (id ^ ".json")
 let protect f = try f () with
   | Sys_error message -> Error (Unavailable message)

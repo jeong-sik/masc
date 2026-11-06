@@ -623,11 +623,12 @@ let live_transport_of_string = function
    does.
 
    The ego connection runs fixed scripts in one ego lite task space
-   (RFC-browser-live-ego). It reads that space's pages with the same page
-   scripts as the other connections, and opens, moves and closes only the
-   pages an agent opened there. It hands its space to the operator and takes
-   it back, lists downloads saved into the worker's own folder, and sets files
-   on their file inputs from the worker's upload copies;
+   (RFC-browser-live-ego). It reads that space's pages, their document source
+   included, with the same page scripts as the other connections, and opens,
+   moves and closes only the pages an agent opened there. It hands its space
+   to the operator and takes it back, lists downloads saved into the worker's
+   own folder, and sets files on their file inputs from the worker's upload
+   copies;
    test_browser_ego_peer holds its column to what Browser_ego_peer does. *)
 let live_transport_serves transport capability =
   match transport, capability with
@@ -645,13 +646,12 @@ let live_transport_serves transport capability =
                     | Tab_closing | Dialog_answer | Frame_read) -> true
   | Webdriver_bidi, (Dialog_read | Browser_zoom | Accessibility_snapshot | Snapshot_target_input | Native_workflow | Page_recovery | Operator_handoff | Page_management | Download_listing
                     | File_upload) -> false
-  | Ego_task_space, (Tab_listing | Text_read | Element_inventory | Viewport_capture | Scene_read
+  | Ego_task_space, (Tab_listing | Text_read | Document_source | Element_inventory | Viewport_capture | Scene_read
                     | Tab_creation | Tab_navigation | Tab_closing | Dom_interaction | Point_click
                     | Point_scroll | Trusted_hover | Trusted_double_click | Trusted_button_click
                     | Trusted_drag | Trusted_keyboard | Tab_history | Accessibility_snapshot | Dialog_read | Dialog_answer
                     | Snapshot_target_input | Native_workflow | Page_recovery | Operator_handoff | Page_management | Download_listing | File_upload | Tab_activation) -> true
-  | Ego_task_space, (Document_source | Touch_input | Browser_zoom | Viewport_resize
-                    | Frame_read) -> false
+  | Ego_task_space, (Touch_input | Browser_zoom | Viewport_resize | Frame_read) -> false
 ;;
 
 let live_transports_serving capability =

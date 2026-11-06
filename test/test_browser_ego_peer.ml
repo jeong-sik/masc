@@ -1314,7 +1314,7 @@ let test_the_peer_serves_what_the_lane_table_says () =
       answered (obj ["label",str "p1";"path",str path;
         "before",(state ~url:"https://app.slack.com/" ~width:800);
         "after",(state ~url:"https://app.slack.com/" ~width:800)])
-    | "page.read" | "page.elements" | "page.scene" -> page_answer ~label:"p1" (obj ["url",str "https://app.slack.com/"])
+    | "page.read" | "page.document" | "page.elements" | "page.scene" -> page_answer ~label:"p1" (obj ["url",str "https://app.slack.com/"])
     | "page.native_workflow" -> answered (obj ["completed",`List [];"effectStarted",`Bool false;
         "completedEffect",`Bool false;"inputReleased",`Bool true;"failure",`Null;"urlBefore",str "https://app.slack.com/";"url",str "https://app.slack.com/";"title",str "Slack";
         "snapshot",str "root";"truncated",`Bool false;"chars",`Int 4])

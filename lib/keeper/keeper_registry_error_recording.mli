@@ -3,7 +3,7 @@
 (** Record [err] on keeper [name].
     - Every occurrence emits at ERROR with caller-supplied [?details].
     - Exact repeated [(keeper, err)] pairs also increment the observational
-      [metric_keeper_recording_error_dedup] counter.
+      [masc_keeper_recording_error_dedup_total] counter.
     - Finally writes [last_error = Some err] through
       [Keeper_registry.set_last_error_entry] (CAS retry). *)
 val record :

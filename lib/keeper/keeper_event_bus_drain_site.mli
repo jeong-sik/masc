@@ -1,5 +1,5 @@
 (** Keeper_event_bus_drain_site — closed sum for [site] label on
-    [metric_keeper_event_bus_drain].  Currently a single-variant sum
+    [masc_keeper_event_bus_drain_total].  Currently a single-variant sum
     capturing the only emit site in keeper_unified_turn.ml; closing
     the type here so a future emit-site addition surfaces at compile
     time. *)

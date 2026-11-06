@@ -50,7 +50,7 @@ val register : hook -> unit
 
 (** Run every registered hook with the given event. Non-cancellation
     exceptions raised from a hook are caught, counted via
-    [metric_keeper_lifecycle_callback_failures], and logged via
+    [masc_keeper_lifecycle_callback_failures_total], and logged via
     [Log.Server.warn]. When [masc_root] and [meta] are supplied, the
     failure also writes a durable telemetry coverage-gap row under
     [masc_root] (the workspace's [.masc] directory, where

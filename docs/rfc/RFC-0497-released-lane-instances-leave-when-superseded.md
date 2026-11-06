@@ -43,6 +43,7 @@ related: ["lane-addon-observation-commits-at-the-binding", "dated-stores-take-re
 - D4. 지우기는 `reconcile_configuration` 이 configuration 잠금 안에서 한다. 그 pass 가 이미 읽은 binding 과 그 순간의 liveness 로 정한다.
 - D5. 먼저 지울 대상만 세는 층을 내고, 지우는 층은 그 수치를 운영자가 확인한 뒤 낸다(§6).
 - D6. content-addressed blob(`evidence/`, `sequences/`)은 이 RFC 에서 지우지 않는다. blob 을 쓰는 곳이 다섯 모듈에 흩어져 있다. 그래서 어떤 blob 을 아무도 가리키지 않는지 알려면 가리키는 쪽을 모두 모은 목록이 먼저 있어야 한다(§5).
+- D7. 이전 instance 의 관측은 §4.1 대로 다음 pass(최대 60초)에 사라진다. 같은 revision 묶음의 대표 하나만 남는다. 대시보드 Add-on 화면의 과거 목록도 비고, `masc_lane_slice`·`masc_lane_evidence` 로 이전 run 을 읽을 수 없다. 이전 run 의 관측이 필요하면 그 instance 가 살아 있을 때 `masc_lane_evidence` 로 고정한다. 고정한 묶음은 binding 과 관측을 복사해 들고 있어서 남는다. 운영자가 2026-11-06 에 정했다. 근거: 약 8일 동안 과거 관측을 읽은 직접 호출은 0번이다(§2.3).
 
 ## 2. 무슨 일이 났나
 
@@ -95,7 +96,7 @@ instance id 의 SHA-256 을 이름으로 쓰는 폴더를 binding 상태별로 �
 | `attach_entry`, `reconcile_configuration` → `preserve_state_runtime` | 같은 owner·package 의 persistent binding 이 적은 container runtime. 다르면 거절한다 | 묶음의 runtime 값마다 하나. 대표와 같은 runtime 만 지우면 같은 거절이 나온다 |
 | `reconcile_configuration` `runtimes_in_use` | 과거 binding 이 적은 runtime. 죽은 서버가 남긴 container 를 label 로 찾아 훑을 engine 목록에 넣는다 | 없음. 죽은 서버가 남긴 instance 의 기록은 `Attached`·`Detaching` 등이라 남고, 그 runtime 도 목록에 남는다 |
 | `gecko_sweepable` | 자원을 돌려준 instance 는 profile 을 지워도 된다고 본다. binding 이 없는 instance 도 지워도 된다고 본다 | 없음. binding 을 지워도 결과가 같다 |
-| `snapshot` (대시보드 Add-on 화면), `slice`, `freeze`(`masc_lane_evidence`) | 과거 instance 의 binding 과 관측 | 제품 결정(§8 Q1) |
+| `snapshot` (대시보드 Add-on 화면), `slice`, `freeze`(`masc_lane_evidence`) | 과거 instance 의 binding 과 관측 | 없음(D7). 이전 run 이 필요하면 살아 있을 때 `freeze` 로 고정한다 |
 | `persisted_binding` (Observe·Detach·Retain·Act·Action_status 의 visibility 확인, `retain_unconfirmed`) | instance 하나의 binding | 없음. 지워진 instance 에는 "Lane instance is unavailable to this caller" 로 답한다. 지금도 binding 이 없는 instance 에 같은 답을 한다 |
 
 Broadcast 재시도는 binding 을 찾지 않는다. `prepare_broadcast` 는 `broadcasts/` 의 이전 기록에서 visibility 와 고정한 증거를 읽는다. 그래서 이 RFC 는 `broadcasts/` 를 지우지 않는다. freeze 묶음은 `write_blob` 으로 `evidence/` 에 쓰이고, 이 RFC 는 blob 을 지우지 않는다(D6). action 기록은 `action_status` 가 요청 하나씩 읽을 뿐이고, 다시 켤 때 훑어서 이어 하지 않는다(`load_action` 의 호출처는 `lane_addon_runtime.ml` 3572 한 곳이다).
@@ -163,6 +164,7 @@ pass 하나가 binding 전체를 두 번 읽는다(`historical`, gecko sweep). �
    - visibility 나 runtime 이 대표와 달라 남는 binding 수, 그런 묶음 수도 같이 싣는다.
    - 확인: 배포 뒤 inventory 의 대상 수가 §4.2 의 수치(그 사이 늘어난 만큼 더한 값)와 맞는다.
    - L1 만 배포된 동안에는 pass 마다 binding 3,540개(그 사이 늘어난 만큼 더)를 계속 두 번 읽는다. §4.5 의 비용 감소는 L2 부터다.
+   - §2.3 의 0번에는 `Execute` 안의 호출과 대시보드·TUI 화면 조회가 빠져 있다. L1 배포 전후로 서버 요청 로그에서 `GET /api/v1/lane-addons` 수를 세어 운영자에게 같이 보인다.
 2. 운영자 확인: 운영자가 L1 의 수치를 보고 L2 를 병합한다. 설정 스위치는 두지 않는다.
 3. L2 지우기: §4.3 순서로 지운다. 지운 수와 바이트를 pass 마다 한 줄 info 로그에 남긴다.
    - 확인: 첫 pass 뒤 `bindings` 가 약 18개, `observations` 가 약 85MB 다. 서버를 다시 켠 뒤에도 binding 수가 Add-on 수만큼만 늘었다가 다음 pass 에 돌아온다.
@@ -173,17 +175,7 @@ pass 하나가 binding 전체를 두 번 읽는다(`historical`, gecko sweep). �
 - `lane_addon_store_preflight.ml` 은 부팅 때 `actions` 폴더를 검사한다. binding 없이 남은 action 폴더를 거부하는지 확인한다. 거부하면 §4.3 순서가 부팅을 막지 않는지 본다.
 - `Lane_addon_store` 에 instance 하나의 관측·action 폴더를 지우는 함수가 아직 없다. `remove_binding_with` 처럼 부모 디렉터리를 sync 한다.
 
-## 8. 열린 질문
-
-### Q1. 과거 instance 의 관측을 언제까지 보여 줄까 (사용자 결정)
-
-§4.1 을 그대로 적용하면 다시 켠 뒤 이전 instance 의 관측은 다음 pass(최대 60초)에 사라진다. 다만 같은 revision 묶음의 대표 하나는 남는다. 대시보드 Add-on 화면의 과거 목록도 비고, `masc_lane_slice`·`masc_lane_evidence` 로 이전 run 을 읽을 수 없다.
-
-- A (권함): §4.1 그대로. 이전 run 의 관측이 필요하면 그 instance 가 살아 있을 때 `masc_lane_evidence` 로 고정한다. 고정한 묶음은 binding 과 관측을 복사해 들고 있어서 남는다. 약 8일 동안 과거 관측을 읽은 직접 호출은 0번이다(§2.3). 이 수에는 `Execute` 안의 호출과 대시보드·TUI 화면 조회가 빠져 있다. L1 배포 전후로 서버 요청 로그에서 `GET /api/v1/lane-addons` 수를 세어 대시보드 쪽 사용을 확인한다.
-- B: owner 마다 이전 instance 하나를 더 남긴다. 다시 켠 직후 이전 run 을 한 번 볼 수 있다. 남는 크기는 이전 instance 의 관측만큼 는다.
-- C: 기간(예: 7일)으로 남긴다. 기간 안의 다시 켜기 횟수만큼 남는다. 11-05 하루에 9번 다시 켰으므로 Add-on 마다 수십 개가 남는다.
-
-## 9. 리뷰
+## 8. 리뷰
 
 - 키퍼 리뷰어와 먼저 설계를 맞췄다.
   - 받아들인 것: binding 보존 규칙과 settled 보관본 규칙을 RFC 둘로 나눈다. 쌓인 것은 지우고 새로 설치하지 않고, 새 규칙으로 정리한다. 세기만 하는 층 → 운영자 확인 → 지우기 순서로 낸다. 새로 쌓이는 쪽부터 막는다(§4.2: 다시 켤 때마다 남던 것이 다음 pass 에 지워진다).
@@ -194,6 +186,6 @@ pass 하나가 binding 전체를 두 번 읽는다(`historical`, gecko sweep). �
   - P2-B: 시계가 뒤로 가면 UUIDv7 순서가 틀린다. → 대표가 가장 새 것일 필요가 없게 바꿨다(D3). 시각을 읽을 수 없거나 미래인 binding 은 지우지 않는다(조건 6).
   - P2-C: 폴더 목록을 잠금 밖에서 만들면 막 생긴 instance 의 폴더를 지울 수 있다. → 목록을 잠금 안에서 binding 을 읽기 전에 만든다(§4.3, §4.4).
   - 조건 5 의 근거에서 "runtime 이 모두 같다"를 뺐다. 대표의 runtime 과 같아야 한다고 바로 적었다.
-  - L1 만 배포된 동안 두 번 읽기 비용이 그대로라는 점을 §6 에, `Failed` 등이 계속 남는 점을 §5 에 적었다. 대시보드 사용 수를 L1 전후로 세기로 했다(Q1).
+  - L1 만 배포된 동안 두 번 읽기 비용이 그대로라는 점을 §6 에, `Failed` 등이 계속 남는 점을 §5 에 적었다. 대시보드 사용 수를 L1 전후로 세기로 했다(§6).
   - 한 단계 삭제는 P2-A 가 닫히면 받아들인다고 했다. 위 반영으로 닫았다고 본다.
 - 둘째 head(`b853045f91e`) 리뷰(5791182567): P2-A·B·C 는 닫혔다고 봤다. 새 P2-D 는 읽지 못한 binding 의 instance 폴더가 orphan 으로 지워질 수 있다는 것이다. → §4.3 에 `gecko_sweepable` 과 같은 fault 규칙을 더했다.

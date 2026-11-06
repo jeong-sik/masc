@@ -9,9 +9,8 @@
       dashboard can render a placeholder before any keeper has
       bootstrapped the workspace root.
 
-    - When initialized, returns the full snapshot: project,
-      paused state with reason/by/at, tempo interval,
-      agent/task counts, and the current message_seq.
+    - When initialized, returns the full snapshot: project, tempo
+      interval, agent/task counts, and the current message_seq.
 
     Pure helper move — local-only function with no .mli surface. *)
 

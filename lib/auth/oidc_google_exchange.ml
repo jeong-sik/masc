@@ -11,6 +11,13 @@ type response =
 type get = url:string -> (response, string) result
 type post = url:string -> headers:(string * string) list -> body:string -> (response, string) result
 
+let https_url url =
+  let uri = Uri.of_string url in
+  match Uri.scheme uri, Uri.host uri, Uri.query uri, Uri.fragment uri with
+  | Some "https", Some host, [], None when String.length host > 0 -> true
+  | _ -> false
+;;
+
 module Client = struct
   type t =
     { client_id : string
@@ -18,7 +25,27 @@ module Client = struct
     ; redirect_uri : string
     }
 
-  let make ~client_id ~client_secret ~redirect_uri = { client_id; client_secret; redirect_uri }
+  type error =
+    | Client_id_empty
+    | Client_secret_empty
+    | Redirect_uri_not_https
+
+  let make ~client_id ~client_secret ~redirect_uri =
+    if String.equal client_id ""
+    then Error Client_id_empty
+    else if String.equal client_secret ""
+    then Error Client_secret_empty
+    else if not (https_url redirect_uri)
+    then Error Redirect_uri_not_https
+    else Ok { client_id; client_secret; redirect_uri }
+  ;;
+
+  let error_to_string = function
+    | Client_id_empty -> "the client ID is empty"
+    | Client_secret_empty -> "the client secret is empty"
+    | Redirect_uri_not_https -> "the redirect URI is not an https URL with a host and no query or fragment"
+  ;;
+
   let client_id t = t.client_id
   let redirect_uri t = t.redirect_uri
 end
@@ -110,13 +137,6 @@ let fetch ~(get : get) ~url ~unavailable =
   | Ok { status; _ } when status <> http_ok -> Error (unavailable (Printf.sprintf "HTTP %d" status))
   | Ok { body; _ } when String.length body > max_document_bytes -> Error (unavailable "the answer is too long")
   | Ok answer -> Ok answer
-;;
-
-let https_url url =
-  let uri = Uri.of_string url in
-  match Uri.scheme uri, Uri.host uri, Uri.query uri, Uri.fragment uri with
-  | Some "https", Some host, [], None when String.length host > 0 -> true
-  | _ -> false
 ;;
 
 let string_member name members =

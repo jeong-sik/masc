@@ -16,10 +16,14 @@ let now =
 ;;
 
 let client =
-  X.Client.make
-    ~client_id:"test-client.apps.example"
-    ~client_secret:"secret-1"
-    ~redirect_uri:"https://masc.example/auth/oidc/callback"
+  match
+    X.Client.make
+      ~client_id:"test-client.apps.example"
+      ~client_secret:"secret-1"
+      ~redirect_uri:"https://masc.example/auth/oidc/callback"
+  with
+  | Ok client -> client
+  | Error error -> failwith (X.Client.error_to_string error)
 ;;
 
 let discovery_document =
@@ -311,6 +315,33 @@ let errors_are_told_apart () =
        texts)
 ;;
 
+let a_client_that_cannot_work_is_not_made () =
+  let made ?(client_id = "test-client.apps.example") ?(client_secret = "secret-1") redirect_uri =
+    match X.Client.make ~client_id ~client_secret ~redirect_uri with
+    | Ok _ -> None
+    | Error error -> Some error
+  in
+  let callback = "https://masc.example/auth/oidc/callback" in
+  Alcotest.(check bool) "made" true (made callback = None);
+  Alcotest.(check bool) "no client ID" true (made ~client_id:"" callback = Some X.Client.Client_id_empty);
+  Alcotest.(check bool)
+    "no secret"
+    true
+    (made ~client_secret:"" callback = Some X.Client.Client_secret_empty);
+  List.iter
+    (fun redirect_uri ->
+       Alcotest.(check bool)
+         ("refused " ^ redirect_uri)
+         true
+         (made redirect_uri = Some X.Client.Redirect_uri_not_https))
+    [ "http://masc.example/auth/oidc/callback"
+    ; "https:///auth/oidc/callback"
+    ; "/auth/oidc/callback"
+    ; "https://masc.example/auth/oidc/callback#here"
+    ; "https://masc.example/auth/oidc/callback?next=1"
+    ]
+;;
+
 let () =
   Alcotest.run
     "oidc_google_exchange"
@@ -324,6 +355,7 @@ let () =
         ; Alcotest.test_case "failures" `Quick failures_are_named
         ; Alcotest.test_case "cache lifetimes" `Quick cache_lifetimes_are_read_by_grammar
         ; Alcotest.test_case "texts" `Quick errors_are_told_apart
+        ; Alcotest.test_case "client" `Quick a_client_that_cannot_work_is_not_made
         ] )
     ]
 ;;

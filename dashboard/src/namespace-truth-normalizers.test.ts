@@ -73,7 +73,6 @@ describe('normalizeNamespaceTruth', () => {
           workspace_path: '/path/to/ws',
           workspace_differs: true,
           project: 'masc',
-          paused: false,
           version: '1.0.0',
           generated_at: '2026-04-17T10:00:00Z',
           build: { commit: 'abc123', dirty: false, timestamp: '2026-04-17' },
@@ -84,7 +83,6 @@ describe('normalizeNamespaceTruth', () => {
     expect(status).not.toBeNull()
     expect(status!.workspace_root).toBe('/path/to/root')
     expect(status!.workspace_differs).toBe(true)
-    expect(status!.paused).toBe(false)
     expect(status!.version).toBe('1.0.0')
   })
 

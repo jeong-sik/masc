@@ -126,13 +126,9 @@ describe('normalizeOperatorDigest', () => {
     const result = normalizeOperatorDigest({
       root: {
         project: 'masc',
-        paused: true,
-        pause_reason: 'maintenance',
       },
     })
     expect(result.root!.project).toBe('masc')
-    expect(result.root!.paused).toBe(true)
-    expect(result.root!.pause_reason).toBe('maintenance')
   })
 
   it('defaults root namespace to empty object', () => {
@@ -187,10 +183,9 @@ describe('normalizeOperatorSnapshot', () => {
 
   it('extracts root namespace', () => {
     const result = normalizeOperatorSnapshot({
-      root: { project: 'masc', paused: false },
+      root: { project: 'masc' },
     })
     expect(result.root.project).toBe('masc')
-    expect(result.root.paused).toBe(false)
   })
 
   it('extracts keepers with valid name', () => {

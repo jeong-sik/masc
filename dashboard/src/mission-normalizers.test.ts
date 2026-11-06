@@ -42,7 +42,6 @@ describe('normalizeMission', () => {
       summary: {
         workspace_health: 'healthy',
         project: 'masc',
-        paused: false,
         tempo_interval_s: 30,
         active_agents: 3,
         active_operations: 1,
@@ -50,7 +49,6 @@ describe('normalizeMission', () => {
     })
     expect(result.summary.workspace_health).toBe('healthy')
     expect(result.summary.project).toBe('masc')
-    expect(result.summary.paused).toBe(false)
     expect(result.summary.tempo_interval_s).toBe(30)
     expect(result.summary.active_agents).toBe(3)
   })
@@ -58,7 +56,6 @@ describe('normalizeMission', () => {
   it('defaults summary fields to undefined/0', () => {
     const result = normalizeMission({ summary: {} })
     expect(result.summary.workspace_health).toBeUndefined()
-    expect(result.summary.paused).toBeUndefined()
     expect(result.summary.active_agents).toBeUndefined()
   })
 

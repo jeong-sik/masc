@@ -262,13 +262,13 @@ it('queues one post-confirmation read behind both held projection reads', async 
   await mod.confirmOperatorPendingAction('vincent', 'tok-2', 'confirm', { refresh: 'background' })
   expect(apiMocks.fetchOperatorSnapshot).toHaveBeenCalledTimes(1)
   expect(apiMocks.fetchOperatorDigest).toHaveBeenCalledTimes(1)
-  finishSnapshot({ ...validSnapshot, root: { paused: true } })
+  finishSnapshot({ ...validSnapshot, root: { project: 'stale' } })
   finishDigest({})
   await pending
   await vi.waitFor(() => {
     expect(apiMocks.fetchOperatorSnapshot).toHaveBeenCalledTimes(2)
     expect(apiMocks.fetchOperatorDigest).toHaveBeenCalledTimes(2)
-    expect(signals.operatorSnapshot.value?.root.paused).not.toBe(true)
+    expect(signals.operatorSnapshot.value?.root.project).not.toBe('stale')
   })
 })
 

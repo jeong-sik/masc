@@ -40,6 +40,7 @@ let writers_of =
     ; Local_recovery, [ "local operator" ]
     ; Mode_event, [ "local operator" ]
     ; Invite, "local operator" :: authenticated
+    ; Admission, authenticated
     ]
 ;;
 
@@ -69,6 +70,7 @@ let ordinal = function
   | R.Kind.Local_recovery -> 9
   | R.Kind.Mode_event -> 10
   | R.Kind.Invite -> 11
+  | R.Kind.Admission -> 12
 ;;
 
 let kinds_are_all_listed () =
@@ -391,6 +393,7 @@ let kind_labels_are_the_names_on_disk () =
     ; "local_recovery"
     ; "mode_event"
     ; "invite"
+    ; "admission"
     ]
     (List.map R.Kind.to_string R.Kind.all)
 ;;

@@ -61,6 +61,10 @@ module Kind : sig
       (** The issue or the revocation of an invitation to join the
           installation (design 5.1-2b). The body is that of
           {!Authz_invite_event}. *)
+    | Admission
+      (** A person joins through an invitation: the invitation is spent, the
+          identity is bound, and the principal is made, in one record (design
+          5.1-3, plan B3c). The body is that of {!Authz_admission_event}. *)
 
   val all : t list
   val to_string : t -> string
@@ -69,8 +73,9 @@ end
 
 (** Whether [author] may write a record of this kind (design 6.3).
     [Runtime_grant], [Delegate_policy], [Principal],
-    [Internal_service_credential], and [Permission_revocation] need an
-    authenticated principal. Each system author writes only its own records.
+    [Internal_service_credential], [Permission_revocation], and [Admission]
+    need an authenticated principal: the person who joins writes their own
+    admission. Each system author writes only its own records.
     The local operator writes recovery records, mode events, and invites, and an
     authenticated principal writes invites too: the first Admin is invited by
     the local operator and every later one by an Admin. Which authenticated

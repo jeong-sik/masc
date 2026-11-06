@@ -41,18 +41,6 @@ val for_base_path : string -> t
 (** The existing process-local workspace registry, shared by server callbacks
     and identity-tool publishers. No filesystem or network operation occurs. *)
 
-val install_change_observer : (base_path:string -> keeper:string -> unit) -> unit
-(** Called with the table's [base_path] and the Keeper whose attempts a status
-    reader would now see differently: {!remember} held a new attempt,
-    {!take} admitted a callback, {!finish} recorded an outcome,
-    {!publish_credentials} was interrupted, or {!retire_scope} ran. It gets
-    no provider, state, verifier, code or URL. Expiry is a deadline, not a
-    change, and is not reported.
-
-    It runs under the table's lock, so it must not call back into this table,
-    must not yield and must not raise. The last installed observer wins; the
-    default does nothing. *)
-
 type scope = private { base_path : string; keeper : string; provider_id : string }
 type attachment
 type catalog_publication

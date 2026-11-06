@@ -2507,8 +2507,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                      tail_bytes=request.request.tail_bytes + retained_bytes}}) !(state.last_request);
                  state.request_range := Option.map (fun range ->
                    {range with Keeper_continuity_request.custom_projection_changed=true}) !(state.request_range);
-                 List.filter (fun message -> not (Keeper_client_tool_outbox.is_wire_context_message message))
-                   messages @ [message] in
+                 Keeper_client_tool_outbox.place_carrier message messages in
                (* The recorded input is the history this request was resolved
                   from, with the retained-result carrier where the wire puts
                   it, so its media stay [Stored] references. *)
@@ -2516,8 +2515,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                  match retained_message with
                  | None -> history
                  | Some retained ->
-                   List.filter (fun message -> not (Keeper_client_tool_outbox.is_context_message message))
-                     history @ [retained]) !resolved_history;
+                   Keeper_client_tool_outbox.place_carrier retained history) !resolved_history;
                messages) (project messages))
       }
     in

@@ -1,0 +1,95 @@
+{
+ "spaceId": 18,
+ "targetId": "E2067B9FD8D600814A27103E2608C655",
+ "viewport.before": {
+  "w": 1548,
+  "h": 990
+ },
+ "viewport.set": {},
+ "viewport.after": {
+  "w": 800,
+  "h": 600
+ },
+ "touch.enable": {},
+ "touch.start": {},
+ "touch.end": {},
+ "touch.events": [
+  {
+   "kind": "pointerdown",
+   "pointerType": "touch",
+   "trusted": true
+  },
+  {
+   "kind": "touchstart",
+   "pointerType": null,
+   "trusted": true
+  },
+  {
+   "kind": "pointerup",
+   "pointerType": "touch",
+   "trusted": true
+  },
+  {
+   "kind": "touchend",
+   "pointerType": null,
+   "trusted": true
+  },
+  {
+   "kind": "click",
+   "pointerType": "touch",
+   "trusted": true
+  }
+ ],
+ "html.dom": {
+  "bytes": 597,
+  "head": "<!DOCTYPE html><html><head><meta charset=\"utf-8\">\n<title>cap"
+ },
+ "cookies.read": [
+  "probe_cookie"
+ ],
+ "emulation.locale": {},
+ "emulation.timezone": {},
+ "emulation.geo": {},
+ "emulation.after": {
+  "lang": "ko-KR",
+  "intl": "fr-FR",
+  "tz": "America/New_York"
+ },
+ "block.set": {},
+ "block.fetch": {
+  "failed": "TypeError: Failed to fetch"
+ },
+ "network.events": {
+  "count": 105,
+  "methods": [
+   "Network.loadingFinished",
+   "Network.requestWillBeSent",
+   "Network.responseReceived",
+   "Network.dataReceived",
+   "Page.frameStartedNavigating",
+   "Page.frameStartedLoading",
+   "Network.requestWillBeSentExtraInfo",
+   "Network.responseReceivedExtraInfo",
+   "Page.frameNavigated",
+   "Network.policyUpdated",
+   "Page.domContentEventFired",
+   "Page.loadEventFired"
+  ]
+ },
+ "windows.forTarget": {
+  "windowId": 1426150556,
+  "bounds": {
+   "left": 0,
+   "top": 33,
+   "width": 1728,
+   "height": 1031,
+   "windowState": "maximized"
+  }
+ },
+ "zoom.scale": {
+  "visualScale": 2,
+  "dpr": 2,
+  "w": 800
+ },
+ "console.default": 0
+}

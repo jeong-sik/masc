@@ -1,0 +1,28 @@
+{
+ "persist.viewport": {
+  "w": 1548,
+  "h": 990
+ },
+ "persist.emulation": {
+  "intl": "ko",
+  "tz": "Asia/Seoul"
+ },
+ "persist.block": {
+  "status": 404
+ },
+ "persist.scale": 1,
+ "console.disable": {},
+ "console.enable": {},
+ "console.events": [
+  [
+   "probe console line"
+  ],
+  [
+   "after enable"
+  ],
+  [
+   "after disable"
+  ]
+ ],
+ "console.reenable": {}
+}

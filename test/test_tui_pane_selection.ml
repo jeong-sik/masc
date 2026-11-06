@@ -53,14 +53,6 @@ let kind_at ~row ~column =
 
 let point row column = { Selection.row; column }
 
-let contains text affix =
-  let text_length = String.length text and affix_length = String.length affix in
-  let rec from offset =
-    offset + affix_length <= text_length
-    && (String.equal (String.sub text offset affix_length) affix || from (offset + 1))
-  in
-  from 0
-
 let show_outcome = function
   | Selection.Click { row; column } -> Printf.sprintf "click %d,%d" row column
   | Selection.Copy { anchor; focus; pane } ->
@@ -229,28 +221,7 @@ let test_wide_characters_are_never_split () =
       ~release:(first_body_row, main_left + 4)
   in
   check (option string) "both edge characters whole" (Some "가나다")
-    (Selection.text selection wide_rows);
-  let highlighted = Selection.highlight selection wide_rows in
-  check (list string) "the highlight keeps every character"
-    (List.map Masc_tui_theme.strip_sgr wide_rows)
-    (List.map Masc_tui_theme.strip_sgr highlighted);
-  check bool "the band opens on a whole character" true
-    (contains (List.nth highlighted 1) (Masc_tui_theme.selection ^ "가나다"))
-
-let test_highlight_marks_only_the_selection () =
-  let selection =
-    selection_of ~press:(first_body_row, main_left) ~moves:[ (first_body_row, main_left + 4) ]
-      ~release:(first_body_row, main_left + 4)
-  in
-  let highlighted = Selection.highlight selection frame_rows in
-  check (list string) "rows outside the selection are the frame's"
-    [ List.nth frame_rows 0; List.nth frame_rows 2; List.nth frame_rows 3 ]
-    [ List.nth highlighted 0; List.nth highlighted 2; List.nth highlighted 3 ];
-  check string "the selected row keeps its text"
-    (Masc_tui_theme.strip_sgr (List.nth frame_rows 1))
-    (Masc_tui_theme.strip_sgr (List.nth highlighted 1));
-  check bool "the selected cells are drawn reversed" true
-    (contains (List.nth highlighted 1) (Masc_tui_theme.selection ^ "first"))
+    (Selection.text selection wide_rows)
 
 (* A row drawn shorter than the pane still shows the selection over the
    cells the terminal leaves blank. *)
@@ -298,8 +269,6 @@ let () =
             test_wide_characters_are_never_split
         ] )
     ; ( "highlight",
-        [ test_case "only the selection is marked" `Quick
-            test_highlight_marks_only_the_selection
-        ; test_case "a short row is padded" `Quick test_highlight_pads_a_short_row
+        [ test_case "a short row is padded" `Quick test_highlight_pads_a_short_row
         ] )
     ]

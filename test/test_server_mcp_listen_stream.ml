@@ -142,7 +142,7 @@ let test_a_client_that_stops_reading_holds_up_no_other_subscription () =
    sender is waiting on the queue, so the first one goes straight to it; the
    rest are one more than the queue holds. The sender sees the pile-up before
    it sends the one it took and ends, without the clock moving: it ended as
-   [Fell_behind] and not at the stall bound. Nothing is written after the
+   [Source_stopped] and not at the stall bound. Nothing is written after the
    pile-up. *)
 let test_a_client_that_falls_behind_is_closed_at_once () =
   with_streams (fun ~sw ~clock ~before ->

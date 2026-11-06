@@ -161,7 +161,7 @@ val is_closed : t -> bool
 `Server_fleet_stream_pump` 를 이벤트 타입에 대해 일반화해 `Server_sse_pump` 로 바꾼다.
 
 ```ocaml
-type ending = Client_gone | Fell_behind | Stalled | Finished
+type ending = Client_gone | Source_stopped | Stalled | Finished
 
 type step =
   | Skip               (** 이 이벤트는 쓰지 않는다. *)
@@ -174,14 +174,21 @@ type idle =
   | Quiet      (** 쓰지 않고 다음 간격을 기다린다. *)
   | Finish     (** 쓰지 않고 끝낸다. *)
 
+type 'event source =
+  { take : unit -> 'event                     (** 기다려 하나 꺼낸다. *)
+  ; take_nonblocking : unit -> 'event option  (** 기다리지 않고 꺼낸다. *)
+  ; stopped : unit -> bool                    (** 더 쓰지 말지 묻는다. *)
+  }
+
 module Queue : sig
   type 'event t
   val create : max_queued_events:int -> 'event t
   val push : 'event t -> 'event -> unit
+  val source : 'event t -> 'event source  (** [stopped] 는 쌓임이다. *)
 end
 
 val run :
-  queue:'event Queue.t ->
+  source:'event source ->
   step:('event -> step) ->
   idle:(unit -> idle) ->
   clock:_ Eio.Time.clock ->
@@ -200,7 +207,7 @@ val run :
 
 이 pump 를 쓰는 곳은 셋이다.
 
-| 스트림 | `subscribe` | `Fell_behind` 뒤 클라이언트가 하는 일 |
+| 스트림 | `subscribe` | queue 가 차서 `Source_stopped` 로 끝난 뒤 클라이언트가 하는 일 |
 |---|---|---|
 | fleet | `Fleet_stream_hub.subscribe`(지금과 같다) | 다시 붙어서 `Snapshot` 을 받는다(RFC-0477) |
 | Keeper chat | `register_operation_live_sink` | `since_seq` 로 다시 붙어서 journal replay 를 받는다(RFC-0412 §3.2) |
@@ -262,7 +269,7 @@ drain 은 이미 쌓인 frame 을 한 `send` 로 쓴다. 5b층의 pump 와 같�
 - Keeper chat 시험: 느린 송신 중에 producer 가 sink 를 부르면 바로 돌아온다. queue 가 차면 스트림이 닫힌다. acceptance, replay, live 순서가 지금과 같다.
 - MCP 연결 시험: 읽지 않는 클라이언트에게 `send_raw` 는 `stalled_after_s` 뒤 `false` 다. 다른 domain 에서 `close_sse_conn` 을 불러도 response 는 감독 fiber 가 닫는다. 감독 fiber 가 취소되어도 response 는 닫히고 연결은 registry 에서 빠진다.
 - 배포 뒤 시스템 로그에서 MCP `stream full` 과 각 스트림의 `Stalled` 건수를 센다.
-- 5d층 시험: 메모리 위 httpun 연결에서 prime 의 쓰기 답을 막아 둔 동안 512B delivery 200개를 넣는다. queue 256칸보다 적게 넣어야 queue 상한이 아니라 묶음을 본다. 답을 준 뒤 `send` 는 prime 하나와 묶음 둘(128개, 72개)이고, 세션은 등록에서 빠지지 않는다. replay 는 queue 가 아니라 replay buffer 에서 오므로 300개로 같은 방법을 써서 묶음으로 나가는지 본다.
+- 5d층 시험: 메모리 위 httpun 연결에서 prime 의 쓰기 답을 막아 둔 동안 512B delivery 200개를 넣는다. queue 256칸보다 적게 넣어야 queue 상한이 아니라 묶음을 본다. 답을 준 뒤 `send` 는 prime 하나와 묶음 둘(128개, 72개)이고, 세션은 등록에서 빠지지 않는다. replay 는 queue 가 아니라 replay buffer 에서 오므로 300개로 같은 방법을 써서 묶음으로 나가는지 본다. prime 은 replay 의 첫 묶음에 같이 나간다.
 - 5d층 배포 뒤: Observer 스트림을 읽는 curl 클라이언트가 120초 동안 끊기지 않는다. 하루 `stream full` 이 5c층 배포 전처럼 0 에 가깝다.
 
 ## 7. 층

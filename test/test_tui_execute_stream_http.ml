@@ -1024,7 +1024,10 @@ let test_retired_observer_close_keeps_successor env =
     let info = Conn.make_sse_conn ~session_id ~client_id:!opened ~response () in
     Conn.register_sse_conn ~session_id ~info;
     Conn.run_sse_pumps ~sw info ~drain:Eio.Fiber.await_cancel ~ping:Eio.Fiber.await_cancel;
-    Alcotest.(check bool) "the opening frame was sent" true (Conn.send_raw info ": open\n\n");
+    Alcotest.(check bool) "the opening frame was sent" true
+      (match Conn.send_raw info ": open\n\n" with
+       | Written -> true
+       | Closed | Stalled -> false);
     if !opened = 1 then Eio.Promise.resolve first_open info
     else Eio.Promise.resolve second_open info
   in
@@ -1047,7 +1050,10 @@ let test_retired_observer_close_keeps_successor env =
         let successor = await second in
         Conn.stop_sse_conn_if_current old;
         Alcotest.(check bool) "successor stays registered" true (Conn.is_active_sse_session session_id);
-        Alcotest.(check bool) "successor is still writable" true (Conn.send_raw successor "data: {}\n\n");
+        Alcotest.(check bool) "successor is still writable" true
+          (match Conn.send_raw successor "data: {}\n\n" with
+           | Written -> true
+           | Closed | Stalled -> false);
         Conn.stop_sse_conn_if_current successor;
         Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 3. (fun () ->
           Eio.Stream.take ended; Eio.Stream.take ended);

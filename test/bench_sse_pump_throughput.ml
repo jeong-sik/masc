@@ -65,13 +65,13 @@ let waits ~clock frame reqd =
   done;
   Pump.Queue.push queue `Last;
   (match
-     Pump.run ~queue
+     Pump.run ~source:(Pump.Queue.source queue)
        ~step:(function `Frame -> Pump.Send frame | `Last -> Pump.Send_last last_frame)
        ~idle:(fun () -> Pump.Finish)
        ~clock ~ping_interval_s ~send:(Sse.send response)
    with
    | Pump.Finished -> ()
-   | Client_gone | Fell_behind | Stalled -> failwith "the waiting run did not finish");
+   | Client_gone | Source_stopped | Stalled -> failwith "the waiting run did not finish");
   Sse.close response
 ;;
 

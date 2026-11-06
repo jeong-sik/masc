@@ -115,65 +115,36 @@ let handle_ag_ui_events ~deps request reqd =
                       make_event ~thread_id:default_thread_id ~run_id:(Some session_id) Run_started
                       |> event_to_sse)
                   in
-                  (* The drain pump sends the first frames, under the
-                     supervisor, so a stop cancels one that waits for the
-                     socket (RFC-0493 §3.2). *)
-                  let send_first_frames () =
-                    if not (send_raw info prime) then
-                      Log.Server.debug "ag-ui prime send failed for session %s" info.session_id;
-                    (* [List.fold_left] applies its function in list order,
-                       so the replay goes out in order; it keeps the
-                       deliveries sent. *)
-                    let replayed =
-                      match last_event_id with
-                      | Some last_id ->
-                        (* No AG-UI client reads a replay gap yet, so only the
-                           deliveries are sent. *)
-                        (Sse.replay_after_for_session
-                       ~runtime_authority:(Sse.runtime_authority_exn ~base_path) ~session_id
-                           ~kind:Sse.Observer last_id).Sse.deliveries
-                        |> List.fold_left
-                             (fun sent delivery ->
-                                if send_raw info (ag_ui_event_of_masc_event delivery)
-                                then delivery :: sent
-                                else (
-                                  Log.Server.debug
-                                    "ag-ui replay send failed for session %s"
-                                    info.session_id;
-                                  sent))
-                             []
-                        |> List.rev
-                      | None -> []
-                    in
-                    Sse.create_replay_handoff replayed
-                  in
                       let sw = runtime.sw in
                       let clock = runtime.clock in
+                      (* The drain sends the prime and the replay too, under
+                         the supervisor, so a stop cancels one that waits for
+                         the socket (RFC-0493 §3.2). *)
                       run_sse_pumps ~sw info
                         ~drain:(fun () ->
-                          let rec drain replay_handoff =
-                            let delivery = Sse.take_delivery event_stream in
-                            (try
-                              if not (Atomic.get info.closed || (Atomic.get info.stop)) then
-                                if Sse.accept_live_delivery replay_handoff delivery
-                                   && not
-                                        (send_raw
-                                           info
-                                           (ag_ui_event_of_masc_event delivery))
-                                then
-                                  Log.Server.debug "ag-ui drain send failed for session %s"
-                                    info.session_id
-                            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-                              Log.Server.error "ag-ui drain write error: %s"
-                                (Printexc.to_string exn);
-                              stop_sse_session_preserve_guard info.session_id);
-                            if not (Atomic.get info.stop) then drain replay_handoff
-                          in
-                          try drain (send_first_frames ())
-                          with Eio.Cancel.Cancelled _ as e -> raise e
-                             | exn ->
-                               Log.Server.error "ag-ui drain loop error: %s"
-                                 (Printexc.to_string exn))
+                          match
+                            let replay =
+                              match last_event_id with
+                              | Some last_id ->
+                                (* No AG-UI client reads a replay gap yet, so
+                                   only the deliveries are sent. *)
+                                (Sse.replay_after_for_session
+                                   ~runtime_authority:(Sse.runtime_authority_exn ~base_path)
+                                   ~session_id ~kind:Sse.Observer last_id).Sse.deliveries
+                              | None -> []
+                            in
+                            drain_sse info ~clock ~prime ~replay
+                              ~frame_of:ag_ui_event_of_masc_event ~send:(send_raw info)
+                              event_stream
+                          with
+                          | Client_gone | Stalled ->
+                            Log.Server.debug "ag-ui drain send failed for session %s"
+                              info.session_id
+                          | Source_stopped | Finished -> ()
+                          | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+                          | exception exn ->
+                            Log.Server.error "ag-ui drain loop error: %s"
+                              (Printexc.to_string exn))
                         ~ping:(fun () ->
                           let rec loop () =
                             if not (Atomic.get info.stop) then (
@@ -184,9 +155,11 @@ let handle_ag_ui_events ~deps request reqd =
                                  if Atomic.get info.closed then
                                    stop_sse_session_preserve_guard info.session_id
                                  else if not (Atomic.get info.stop) then
-                                   if not (send_raw info ": ping\n\n") then
-                                     Log.Server.debug "ag-ui ping send failed for session %s"
-                                       info.session_id
+                                   (match send_raw info ": ping\n\n" with
+                                    | Written -> ()
+                                    | Closed | Stalled ->
+                                      Log.Server.debug "ag-ui ping send failed for session %s"
+                                        info.session_id)
                                with Eio.Cancel.Cancelled _ as exn -> raise exn
                                   | exn ->
                                       Log.Server.warn "SSE ping send failed for session %s: %s" info.session_id (Printexc.to_string exn);
@@ -269,46 +242,29 @@ let handle_presence_events ~deps request reqd =
           in
           let info = make_sse_conn ~session_id ~client_id ~response () in
           register_sse_conn ~session_id ~info;
-          (* The drain pump sends the prime frame, under the supervisor, so a
-             stop cancels it while it waits for the socket (RFC-0493 §3.2). *)
-          let send_prime () =
-            if
-              not
-                (send_raw info
-                   (Server_mcp_transport_http_headers.sse_comment_with_retry
-                      ~comment:"presence-stream"))
-            then
-              Log.Server.debug "presence prime send failed for session %s"
-                info.session_id
-          in
               let sw = runtime.sw in
               let clock = runtime.clock in
+              (* The drain sends the prime too, under the supervisor, so a
+                 stop cancels it while it waits for the socket (RFC-0493
+                 §3.2). *)
               run_sse_pumps ~sw info
                 ~drain:(fun () ->
-                  let rec drain () =
-                    let delivery = Sse.take_delivery event_stream in
-                    (try
-                       if not (Atomic.get info.closed || (Atomic.get info.stop)) then
-                         if not (send_raw info delivery.Sse.frame) then
-                           Log.Server.debug
-                             "presence drain send failed for session %s"
-                             info.session_id
-                     with
-                     | Eio.Cancel.Cancelled _ as e -> raise e
-                     | exn ->
-                         Log.Server.error "presence drain write error: %s"
-                           (Printexc.to_string exn);
-                         stop_sse_session_preserve_guard info.session_id);
-                    if not (Atomic.get info.stop) then drain ()
-                  in
-                  try
-                    send_prime ();
-                    drain ()
+                  match
+                    drain_sse info ~clock
+                      ~prime:
+                        (Server_mcp_transport_http_headers.sse_comment_with_retry
+                           ~comment:"presence-stream")
+                      ~replay:[] ~frame_of:(fun delivery -> delivery.Sse.frame)
+                      ~send:(send_raw info) event_stream
                   with
-                  | Eio.Cancel.Cancelled _ as e -> raise e
-                  | exn ->
-                      Log.Server.error "presence drain loop error: %s"
-                        (Printexc.to_string exn))
+                  | Client_gone | Stalled ->
+                    Log.Server.debug "presence drain send failed for session %s"
+                      info.session_id
+                  | Source_stopped | Finished -> ()
+                  | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+                  | exception exn ->
+                    Log.Server.error "presence drain loop error: %s"
+                      (Printexc.to_string exn))
                 ~ping:(fun () ->
                   let rec loop () =
                     if not (Atomic.get info.stop) then (
@@ -323,10 +279,12 @@ let handle_presence_events ~deps request reqd =
                          if Atomic.get info.closed then
                            stop_sse_session_preserve_guard info.session_id
                          else if not (Atomic.get info.stop) then
-                           if not (send_raw info ": ping\n\n") then
-                             Log.Server.debug
-                               "presence ping send failed for session %s"
-                               info.session_id
+                           (match send_raw info ": ping\n\n" with
+                            | Written -> ()
+                            | Closed | Stalled ->
+                              Log.Server.debug
+                                "presence ping send failed for session %s"
+                                info.session_id)
                        with
                        | Eio.Cancel.Cancelled _ as e -> raise e
                        | exn ->

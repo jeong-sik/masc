@@ -11,13 +11,19 @@
 type cause_group =
   | Rate_limited  (** The provider throttled the request. *)
   | Connection  (** The transport to the runtime failed or closed. *)
-  | Provider  (** The provider or its API failed the call. *)
-  | Configuration  (** A setting, a credential or a registration has to change. *)
-  | Input  (** The request was too large for the runtime. *)
+  | Provider
+      (** The provider or its API failed the call. Agent-core's [Api] and
+          [Provider] categories land here whatever the status: the failure
+          value carries the category and a message, and the message is not
+          read, so a credential, billing, quota or server failure of those
+          categories is in this group too. *)
+  | Configuration  (** A setting or a registration has to change. *)
+  | Input  (** The request did not fit the runtime's input capacity. *)
   | Unusable_reply  (** The runtime answered and MASC could not use the answer. *)
   | Effect_fenced
-      (** An effect may have happened, so the turn was closed and not replayed. *)
-  | Recovery  (** A session or a client needs a recovery step. *)
+      (** An effect step failed and MASC closed the turn instead of replaying
+          it. The effect may or may not have happened. *)
+  | Recovery  (** A session, its transcript or a client needs a recovery step. *)
   | Stopped  (** A person or the host stopped the turn. *)
   | Server  (** The MASC server was not ready or restarted under the turn. *)
   | Internal  (** MASC or agent-core failed in a way no other group names. *)
@@ -29,9 +35,15 @@ type cause_group =
 type walk =
   | Walk_ended of { runtime_id : string; cause : cause_group; tried : int }
       (** The receipt names the runtime that ended the turn and why. [tried]
-          counts the candidate runtimes the receipt recorded. *)
+          counts the candidate runtimes the walk reached, once each, whether or
+          not the request left MASC for the provider. It is at least 1. *)
   | Walk_no_terminal of { tried : int }
-      (** The receipt records candidate failures and no terminal one. *)
+      (** The receipt records at least one candidate failure and no terminal
+          one. [tried] is counted as for [Walk_ended] and is at least 1. *)
+  | Walk_no_candidate_failure
+      (** The receipt observed the candidate walk and recorded no candidate
+          failure and no terminal one. An ordinary successful turn leaves this
+          receipt, so it names no cause for the failure. *)
   | Walk_not_captured  (** The receipt exists and recorded no candidate walk. *)
   | Walk_unreadable  (** The receipt's walk evidence could not be read. *)
   | Walk_absent  (** The roster row carries no receipt. *)
@@ -57,4 +69,5 @@ val of_readings :
   health:Masc.Tui_decode.keeper_health option ->
   runtime:Masc.Tui_decode.keeper_runtime option ->
   trail
-(** [Trail_failed] exactly when the health reading is failing. *)
+(** [Trail_failed] exactly when the health reading is failing. A health reading
+    that is absent, healthy, idle or offline gives [Trail_sound]. *)

@@ -96,13 +96,14 @@ let failing_glyph = "\xe2\x97\x82" (* ◂ *)
 let no_receipt_text = "no receipt"
 let walk_not_captured_text = "candidate walk was not captured"
 let evidence_unreadable_text = "historical evidence unreadable"
+let no_candidate_failure_text = "no candidate failure recorded"
 
 let keeper_cause_group_word = function
   | Keeper_trail.Rate_limited -> "rate limited"
   | Keeper_trail.Connection -> "connection"
   | Keeper_trail.Provider -> "provider"
   | Keeper_trail.Configuration -> "config"
-  | Keeper_trail.Input -> "input too large"
+  | Keeper_trail.Input -> "input capacity"
   | Keeper_trail.Unusable_reply -> "unusable reply"
   | Keeper_trail.Effect_fenced -> "effect fenced"
   | Keeper_trail.Recovery -> "recovery needed"
@@ -110,16 +111,18 @@ let keeper_cause_group_word = function
   | Keeper_trail.Server -> "server"
   | Keeper_trail.Internal -> "internal"
 
-let unknown_time_text = "unknown time"
-
-let keeper_trail_age_text ~now = function
-  | None -> unknown_time_text
-  | Some since ->
-      Option.value (Message_layout.age_text ~now ~since) ~default:unknown_time_text
+(* The age of a failure, or [None] when its time is missing or ahead of the
+   clock. The sentence leaves its time piece out then. The width measurement
+   asks this same function, so the drawn text and the measured text cannot
+   disagree about whether the piece is there. *)
+let keeper_trail_age ~now = function
+  | None -> None
+  | Some since -> Message_layout.age_text ~now ~since
 
 (* The sentence about a failing Keeper's past. [age] turns the failure time
-   into the text drawn for it. A sentence has one source: the receipt when it
-   holds facts about the turn, the server's own cause word otherwise. *)
+   into the text drawn for it, or into [None] to leave the piece out. A
+   sentence has one source: the receipt when it holds facts about the turn, the
+   server's own cause word otherwise. *)
 let keeper_trail_sentence ~age = function
   | Keeper_trail.Trail_sound -> None
   | Keeper_trail.Trail_failed { ended_at; last; walk } ->
@@ -133,22 +136,24 @@ let keeper_trail_sentence ~age = function
         | Keeper_trail.Walk_ended { runtime_id; cause; tried } ->
             [ keeper_cause_group_word cause
             ; Terminal_text.single_line runtime_id
-            ; Message_layout.count_noun tried "attempt"
+            ; Message_layout.count_noun tried "candidate"
             ]
         | Keeper_trail.Walk_no_terminal { tried } ->
-            [ "terminal not observed"; Message_layout.count_noun tried "attempt" ]
+            [ "terminal not observed"; Message_layout.count_noun tried "candidate" ]
+        | Keeper_trail.Walk_no_candidate_failure -> [ reported; no_candidate_failure_text ]
         | Keeper_trail.Walk_not_captured -> [ reported; walk_not_captured_text ]
         | Keeper_trail.Walk_unreadable -> [ reported; evidence_unreadable_text ]
         | Keeper_trail.Walk_absent -> [ reported; no_receipt_text ]
         | Keeper_trail.Walk_not_applicable -> [ reported ]
       in
-      Some (String.concat " · " ((failing_glyph ^ " " ^ age ended_at) :: rest))
+      Some (failing_glyph ^ " " ^ String.concat " · " (Option.to_list (age ended_at) @ rest))
 
 let keeper_row_trail_sentence ~age (row : Keeper_list_model.row) =
   keeper_trail_sentence ~age (Keeper_list_model.trail_of_row row)
 
 (* The sentence is measured with the widest age the AGE column holds, so the
-   column it widens does not change width as the clock runs. *)
+   column it widens does not change width as the clock runs. A failure with no
+   usable time has no age piece, here as in the drawn sentence. *)
 let widest_age_text = String.make Render_schedule.keeper_last_turn_width '0'
 
 let keeper_runtime_cell ~width ?failure_context (runtime : keeper_runtime option) =
@@ -337,7 +342,7 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
     | Keeper_control.Absent | Keeper_control.Unobserved | Keeper_control.Invalid _ -> None
   in
   let failure_context =
-    keeper_row_trail_sentence ~age:(keeper_trail_age_text ~now) row
+    keeper_row_trail_sentence ~age:(keeper_trail_age ~now) row
   in
   let age =
     match row.last_activity_at with
@@ -768,7 +773,10 @@ let render_keeper_list (state : state) =
   (* Measured over every reading rather than the rows on screen, so the
      columns do not move while a reader scrolls. *)
   let failure_sentence_cells (row : Keeper_list_model.row) =
-    match keeper_row_trail_sentence ~age:(fun _ -> widest_age_text) row with
+    let age ended_at =
+      Option.map (fun _ -> widest_age_text) (keeper_trail_age ~now:now_unix ended_at)
+    in
+    match keeper_row_trail_sentence ~age row with
     | Some sentence -> Message_layout.display_width sentence
     | None -> 0
   in
@@ -1863,7 +1871,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
           | Some (Receipt.Runtime_lane_observed {turn;evidence}) ->
             source turn;
             (match evidence.failures with
-             | [] -> wrap ~tone:Ansi.dim "no candidate failure recorded"
+             | [] -> wrap ~tone:Ansi.dim no_candidate_failure_text
              | failures -> List.iter (fun (failure : Evidence.failure) ->
                  history_row "Candidate:"
                    (Printf.sprintf "%d · %s" failure.attempt failure.runtime_id);

@@ -191,8 +191,8 @@ let async_counts requests =
     (0, 0, 0, 0) requests
 
 (* What the Keeper is doing now. A failing health reading is not an activity:
-   a failing Keeper that runs a probe turn is streaming, and [group_of] puts it
-   in [Failing] by its health. *)
+   a failing Keeper that runs a probe turn is streaming, and [group_of_row]
+   puts it in [Failing] through its trail. *)
 let primary_activity_of_row row =
   let items = waiting_items row in
   let activity = turn_activity row in

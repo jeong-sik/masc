@@ -71,7 +71,31 @@ let failing_trail ?last_failure ?lane_observation () =
     ~health:(Some (health "failing"))
     ~runtime:(Some (runtime ?last_failure ?lane_observation ()))
 
-let receipt_time = Masc_domain.parse_iso8601_opt receipt_ended_at
+(* [receipt_ended_at] as a Unix time, written out so the expectation does not
+   depend on the parser the trail uses. *)
+let receipt_time = Some 1_793_926_800.
+
+let two_candidates =
+  [ candidate ~attempt:0 ~runtime_id:"a" rate_limited
+  ; candidate ~attempt:1 ~runtime_id:"b" rate_limited
+  ]
+
+(* The time and walk read for a provider failure whose receipt ends at candidate
+   "b" with [terminal_cause]. *)
+let walk_of terminal_cause failures =
+  let terminal =
+    Evidence.Candidate_terminal
+      { runtime_id = "b"; attempt = 1; failure = { Request_failure.cause = terminal_cause } }
+  in
+  match
+    failing_trail ~last_failure:(reported Decode.Keeper_failure_provider)
+      ~lane_observation:(observed ~terminal failures) ()
+  with
+  | Trail.Trail_failed { ended_at; walk; _ } -> (ended_at, walk)
+  | Trail.Trail_sound -> (None, Trail.Walk_absent)
+
+let ended group =
+  (receipt_time, Trail.Walk_ended { runtime_id = "b"; cause = group; tried = 2 })
 
 let test_only_a_failing_health_reading_has_a_failed_trail () =
   let lane_observation = observed [ candidate ~attempt:0 ~runtime_id:"a" rate_limited ] in
@@ -150,26 +174,8 @@ let test_a_walk_without_a_terminal_counts_candidates_once_and_takes_the_receipt_
          })
 
 let test_a_terminal_names_the_runtime_and_groups_the_cause_of_its_failure () =
-  let walk_of terminal_cause failures =
-    let terminal =
-      Evidence.Candidate_terminal
-        { runtime_id = "b"; attempt = 1; failure = { Request_failure.cause = terminal_cause } }
-    in
-    match
-      failing_trail ~last_failure:(reported Decode.Keeper_failure_provider)
-        ~lane_observation:(observed ~terminal failures) ()
-    with
-    | Trail.Trail_failed { ended_at; walk; _ } -> (ended_at, walk)
-    | Trail.Trail_sound -> (None, Trail.Walk_absent)
-  in
-  let two_candidates =
-    [ candidate ~attempt:0 ~runtime_id:"a" rate_limited
-    ; candidate ~attempt:1 ~runtime_id:"b" rate_limited
-    ]
-  in
   Alcotest.(check bool) "rate limited" true
-    (walk_of rate_limited two_candidates
-     = (receipt_time, Trail.Walk_ended { runtime_id = "b"; cause = Trail.Rate_limited; tried = 2 }));
+    (walk_of rate_limited two_candidates = ended Trail.Rate_limited);
   Alcotest.(check bool) "a terminal outside the failures still counts" true
     (walk_of Request_failure.Operator_cancelled []
      = (receipt_time, Trail.Walk_ended { runtime_id = "b"; cause = Trail.Stopped; tried = 1 }));
@@ -177,11 +183,65 @@ let test_a_terminal_names_the_runtime_and_groups_the_cause_of_its_failure () =
     Request_failure.Core { Keeper_request_failure_core.category; message = "" }
   in
   Alcotest.(check bool) "a configuration category" true
-    (walk_of (core Agent_core.Error.Config_category) two_candidates
-     = (receipt_time, Trail.Walk_ended { runtime_id = "b"; cause = Trail.Configuration; tried = 2 }));
+    (walk_of (core Agent_core.Error.Config_category) two_candidates = ended Trail.Configuration);
   Alcotest.(check bool) "an api category" true
-    (walk_of (core Agent_core.Error.Api_category) two_candidates
-     = (receipt_time, Trail.Walk_ended { runtime_id = "b"; cause = Trail.Provider; tried = 2 }))
+    (walk_of (core Agent_core.Error.Api_category) two_candidates = ended Trail.Provider)
+
+let test_causes_are_grouped_by_what_an_operator_does_about_them () =
+  let exhausted reason =
+    Request_failure.Masc (Keeper_internal_error.Runtime_exhausted { runtime_id = "b"; reason })
+  in
+  Alcotest.(check bool) "a refused connection joins the connection group" true
+    (walk_of (exhausted Keeper_internal_error.Connection_refused) two_candidates
+     = ended Trail.Connection);
+  Alcotest.(check bool) "a failed name lookup joins the connection group" true
+    (walk_of (exhausted Keeper_internal_error.Dns_failure) two_candidates
+     = ended Trail.Connection);
+  Alcotest.(check bool) "every provider failing stays a provider failure" true
+    (walk_of (exhausted Keeper_internal_error.All_providers_failed) two_candidates
+     = ended Trail.Provider);
+  let transcript =
+    Request_failure.Masc
+      (Keeper_internal_error.Incomplete_tool_transcript
+         { reason = Keeper_internal_error.Unresolved_tool_results
+         ; detail = ""
+         ; tool_use_ids = []
+         })
+  in
+  Alcotest.(check bool) "a transcript that fails validation needs a recovery step" true
+    (walk_of transcript two_candidates = ended Trail.Recovery);
+  Alcotest.(check bool) "an input-capacity failure shares the group of a context overflow" true
+    (walk_of Request_failure.Input_capacity two_candidates = ended Trail.Input
+     && walk_of (Request_failure.Context_overflow { limit = None }) two_candidates
+        = ended Trail.Input)
+
+let test_an_observed_walk_with_no_failure_and_no_terminal_names_no_cause () =
+  Alcotest.(check bool) "the server time and word stay" true
+    (failing_trail ~last_failure:(reported Decode.Keeper_failure_turn)
+       ~lane_observation:(observed []) ()
+     = Trail.Trail_failed
+         { ended_at = Some reported_at
+         ; last = Some Decode.Keeper_failure_turn
+         ; walk = Trail.Walk_no_candidate_failure
+         })
+
+let test_a_receipt_time_that_does_not_parse_does_not_borrow_the_server_time () =
+  let lane_observation =
+    Receipt.Runtime_lane_observed
+      { turn = { receipt_turn with receipt_ended_at = "not a time" }
+      ; evidence =
+          { Evidence.failures = [ candidate ~attempt:0 ~runtime_id:"a" rate_limited ]
+          ; terminal = Evidence.Terminal_not_observed
+          }
+      }
+  in
+  Alcotest.(check bool) "no time" true
+    (failing_trail ~last_failure:(reported Decode.Keeper_failure_provider) ~lane_observation ()
+     = Trail.Trail_failed
+         { ended_at = None
+         ; last = Some Decode.Keeper_failure_provider
+         ; walk = Trail.Walk_no_terminal { tried = 1 }
+         })
 
 let () =
   Alcotest.run "tui_keeper_trail"
@@ -200,5 +260,11 @@ let () =
             test_a_walk_without_a_terminal_counts_candidates_once_and_takes_the_receipt_time
         ; Alcotest.test_case "a terminal names the runtime and groups its cause" `Quick
             test_a_terminal_names_the_runtime_and_groups_the_cause_of_its_failure
+        ; Alcotest.test_case "causes are grouped by what an operator does about them" `Quick
+            test_causes_are_grouped_by_what_an_operator_does_about_them
+        ; Alcotest.test_case "an observed walk with no failure names no cause" `Quick
+            test_an_observed_walk_with_no_failure_and_no_terminal_names_no_cause
+        ; Alcotest.test_case "a receipt time that does not parse is not replaced" `Quick
+            test_a_receipt_time_that_does_not_parse_does_not_borrow_the_server_time
         ] )
     ]

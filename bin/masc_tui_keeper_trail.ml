@@ -21,6 +21,7 @@ type cause_group =
 type walk =
   | Walk_ended of { runtime_id : string; cause : cause_group; tried : int }
   | Walk_no_terminal of { tried : int }
+  | Walk_no_candidate_failure
   | Walk_not_captured
   | Walk_unreadable
   | Walk_absent
@@ -47,13 +48,28 @@ let group_of_core_category : Agent_core.Error.category -> cause_group = function
   | Agent_core.Error.Media_category
   | Agent_core.Error.Internal_category -> Internal
 
+(* The two reasons that name the transport are the facts [Provider_network]
+   groups as [Connection]. The rest end the walk at the provider lane. *)
+let group_of_exhaustion_reason : Internal_error.runtime_exhaustion_reason -> cause_group =
+  function
+  | Internal_error.Connection_refused | Internal_error.Dns_failure -> Connection
+  | Internal_error.No_providers_available
+  | Internal_error.All_providers_failed
+  | Internal_error.Candidates_filtered_after_cycles
+  | Internal_error.Session_conflict
+  | Internal_error.Other_detail _ -> Provider
+
+(* [Incomplete_tool_transcript] is the stored transcript failing validation
+   before any provider dispatch, so no reply exists for it to be unusable.
+   [Keeper_unified_turn] routes it with the two recovery errors as a failure
+   MASC produces itself, so it joins them. *)
 let group_of_masc_error : Internal_error.masc_internal_error -> cause_group = function
   | Internal_error.Official_client_recovery_required _
   | Internal_error.Resumable_cli_session _
-  | Internal_error.Gate_replay_repair_required _ -> Recovery
-  | Internal_error.Runtime_exhausted _ -> Provider
-  | Internal_error.Accept_rejected _
-  | Internal_error.Incomplete_tool_transcript _ -> Unusable_reply
+  | Internal_error.Gate_replay_repair_required _
+  | Internal_error.Incomplete_tool_transcript _ -> Recovery
+  | Internal_error.Runtime_exhausted { reason; _ } -> group_of_exhaustion_reason reason
+  | Internal_error.Accept_rejected _ -> Unusable_reply
   | Internal_error.Internal_unhandled_exception _
   | Internal_error.Internal_bridge_exception _
   | Internal_error.Internal_contract_rejected _
@@ -114,16 +130,22 @@ let tried_of ~terminal_attempt (failures : Evidence.failure list) =
   in
   List.length (List.sort_uniq Int.compare ordinals)
 
-let walk_of_evidence (evidence : Evidence.t) =
-  match evidence.terminal with
-  | Evidence.Terminal_not_observed ->
-      Walk_no_terminal { tried = tried_of ~terminal_attempt:None evidence.failures }
-  | Evidence.Candidate_terminal { runtime_id; attempt; failure } ->
-      Walk_ended
-        { runtime_id
-        ; cause = cause_group_of_failure failure
-        ; tried = tried_of ~terminal_attempt:(Some attempt) evidence.failures
-        }
+(* The walk a receipt records and the time that belongs to it. A walk that holds
+   a candidate fact takes the receipt's own time. A walk that holds none keeps
+   the time the server reported, because an observed walk with no failure and
+   no terminal is what an ordinary successful turn stores. *)
+let read_evidence ~reported_at ~receipt_at (evidence : Evidence.t) =
+  match evidence.terminal, evidence.failures with
+  | Evidence.Terminal_not_observed, [] -> (Walk_no_candidate_failure, reported_at)
+  | Evidence.Terminal_not_observed, (_ :: _ as failures) ->
+      (Walk_no_terminal { tried = tried_of ~terminal_attempt:None failures }, receipt_at)
+  | Evidence.Candidate_terminal { runtime_id; attempt; failure }, failures ->
+      ( Walk_ended
+          { runtime_id
+          ; cause = cause_group_of_failure failure
+          ; tried = tried_of ~terminal_attempt:(Some attempt) failures
+          }
+      , receipt_at )
 
 (* The walk and the time that belongs to its source: a receipt that holds
    facts about the turn gives its own time, and every other case keeps the
@@ -133,7 +155,9 @@ let read_receipt ~reported_at = function
   | Some (Receipt.Runtime_lane_not_observed _) -> (Walk_not_captured, reported_at)
   | Some (Receipt.Runtime_lane_unreadable _) -> (Walk_unreadable, reported_at)
   | Some (Receipt.Runtime_lane_observed { turn; evidence }) ->
-      (walk_of_evidence evidence, Masc_domain.parse_iso8601_opt turn.receipt_ended_at)
+      read_evidence ~reported_at
+        ~receipt_at:(Masc_domain.parse_iso8601_opt turn.receipt_ended_at)
+        evidence
 
 let failed runtime =
   let last =

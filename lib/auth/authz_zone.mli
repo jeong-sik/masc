@@ -106,9 +106,9 @@ module Replay : sig
     { state : Authz_state.t
     ; probe : Authz_high_water.Probe.t
     ; head : Authz_record.head
-    ; unreached : (Authz_record.Hash.t * Authz_records.Subject.t) list
-          (** The blocks of given-up reductions whose record the replay has not
-              read yet. *)
+    ; unreached : (Authz_record.Hash.t * Authz_state.held) list
+          (** The blocks of given-up reductions, each with the head its intent
+              began at, that the replay has not reached yet. *)
     }
 
   (** Over an empty log, for a store in the given state. *)

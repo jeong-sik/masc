@@ -36610,7 +36610,11 @@ Use relative paths for resources already held in the package. -->
                  | Some (_, Masc_tui_palette.Palette_usage_scope scope_id) ->
                      state.usage_scope_id <- scope_id;
                      state.usage_telemetry_open <- false;
-                     if state.usage_section=Usage_keepers then state.usage_section <- Usage_plan;
+                     (* Keepers and Calls read the whole workspace, so an account
+                        chosen there lands on the section it narrows. *)
+                     (match state.usage_section with
+                      | Usage_keepers | Usage_calls -> state.usage_section <- Usage_plan
+                      | Usage_plan | Usage_trend -> ());
                      reset_metrics_scroll state;
                      goto_surface state ~mailbox:async_messages Metrics
                  | Some (_, Masc_tui_palette.Palette_config pane) ->

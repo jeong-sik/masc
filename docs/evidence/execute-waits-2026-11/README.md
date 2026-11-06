@@ -237,11 +237,12 @@ python3 docs/evidence/execute-waits-2026-11/measure_watched_wakes.py --base-path
 ### 센 방법
 
 - 감시한 일정: `masc_schedule_create` 행 중 기록된 결과가 성공이고, `input.keeper_name` 이 행의 Keeper 와 같고, `input.until_github_run` 에 실행 번호가 하나 든 행이에요. 원장은 창보다 하루 앞에서부터 읽어서 전날 저녁에 만든 일정도 짝을 찾아요.
-- 깨움: 서버 로그의 감시 줄 `schedule_run_watch: woke <일정 번호>, <owner/name> run <번호> completed: <결과>` 예요. 일정 번호마다 첫 줄만 세요. 같은 일정 번호의 러너 줄(`schedule_runner: ... dispatch=succeeded`)과 전달 줄(`scheduled wake delivered schedule_id=... (keeper=<이름>)`)은 감시 줄보다 2초 앞 이후에 찍힌 첫 줄이에요. 전달 줄이 없으면 러너 줄까지만 재요(`without_delivery_line`).
-- 실행의 끝: GitHub 실행의 `updated_at` 이에요. 끝나지 않았거나, 시도가 둘 이상이거나, GitHub 이 답하지 않으면 끝을 몰라서 첫 단계가 비어요(`end_unknown`).
+- 깨움: 서버 로그의 감시 줄 `schedule_run_watch: woke <일정 번호>, <owner/name> run <번호> completed: <결과>` 예요. 감시가 시도를 가리키면 `run <번호> attempt <n>` 으로, 결과가 없으면 `completed with no conclusion` 으로, 실행을 못 읽으면 `woke <일정 번호> early, ... cannot be read: ...` 로 찍혀요. 이 둘은 결과 칸에 `no_conclusion`·`unreadable` 로 들어가요. 어느 모양과도 안 맞는 감시 줄은 깨움으로 세지 않고 `unrecognized_watcher_lines` 에 세요. 일정 번호는 호출자가 고른 글자일 수 있어서(공백과 쉼표가 없는 것) `sched-` 로 시작하는 줄만 읽지 않아요. 일정 번호마다 첫 줄만 세요. 같은 일정 번호의 러너 줄(`schedule_runner: ... dispatch=succeeded`)과 전달 줄(`scheduled wake delivered schedule_id=... (keeper=<이름>)`)은 감시 줄보다 60초 앞 이후에 찍힌 첫 줄이에요. 감시는 한 번 돌 때 읽은 실행을 모두 처리한 뒤에 줄을 찍어서 러너가 먼저 그 일정을 가져갈 수 있어요. 감시한 일정은 한 번만 도는 일정이라 러너 줄이 하나이고, 60초는 호출자가 같은 번호를 다시 썼을 때 앞 사용의 줄을 거르는 용도예요. 11-06 로그의 감시 줄 24개는 모두 러너 줄이 감시 줄보다 1~29초 뒤에 찍혔어요. 전달 줄이 없으면 러너 줄까지만 재요(`without_delivery_line`).
+- 실행의 끝: GitHub 실행의 `updated_at` 이에요. 끝나지 않았거나, 실행의 마지막 시도가 감시가 가리킨 시도(가리키지 않았으면 1)가 아니거나, GitHub 이 답하지 않으면 끝을 몰라서 첫 단계가 비어요(`end_unknown`).
 - 단계: 로그 시각이 초 단위라 차가 0보다 작으면 0으로 읽어요. `end_to_woke` 는 감시 줄에서 실행의 끝을 뺀 값이에요. `woke_to_dispatch` 는 러너 줄에서 감시 줄을, `dispatch_to_delivered` 는 전달 줄에서 러너 줄을, `end_to_delivered` 는 전달 줄에서 실행의 끝을 뺀 값이에요.
-- 러너 줄 때 턴 안: 전달된 Keeper 의 턴 구간(`measure_lane_time.py` 와 같은 구간)이 러너 줄이 찍힌 초의 시작 순간을 덮어요. 러너는 그 순간 Keeper 에게 깨움을 넘기고, 턴 안의 Keeper 는 턴이 끝날 때 받아요. 그 초의 나머지는 안 봐요. 깨움이 시작하는 턴이 그 초 안에서 시작할 수 있어서예요. 턴 구간이 하나도 없는 Keeper 는 `turn_state_unknown` 이에요.
-- 기다린 시간(JSON 의 `parked`): 전달 줄에서 일정을 만든 행의 `ts` 를 뺀 값이에요. 짝은 전달된 Keeper 가 같은 실행 번호로, 감시 줄 이전에 만든 일정 중 `ts` 가 가장 늦은 행이에요. 짝이 없는 깨움은 `without_create` 예요.
+- 러너 줄 때 턴 안: 전달된 Keeper 의 턴 구간(`measure_lane_time.py` 와 같은 구간)이 러너 줄이 찍힌 초의 시작 순간을 덮어요. 러너는 그 순간 Keeper 에게 깨움을 넘기고, 턴 안의 Keeper 는 턴이 끝날 때 받아요. 그 초의 나머지는 안 봐요. 깨움이 시작하는 턴이 그 초 안에서 시작할 수 있어서예요. 턴 구간이 하나도 없는 Keeper 와 러너 줄이 없는 깨움은 `turn_state_unknown` 이에요. 턴 구간은 창보다 하루 앞에서부터 읽어요. trace 파일을 남기지 않는 턴(운영자가 직접 말을 거는 턴)은 구간이 아니라서, 그 안의 Keeper 는 턴 밖으로 읽히고 그 턴은 아래 "다른 턴"에도 안 세요.
+- 기다린 시간(JSON 의 `parked`): 전달 줄에서 일정을 만든 행의 `ts` 를 뺀 값이에요. 짝은 전달된 Keeper 가 같은 실행 번호로, 감시 줄 이전에 만든 일정 중 다른 깨움이 아직 안 가져간 `ts` 가 가장 늦은 행이에요. 감시 줄이 이른 깨움부터 가져가므로, 한 Keeper 가 한 실행에 일정 둘을 걸면 하나씩 가져가요. 원장에 일정 번호가 없어서 취소된 일정의 행이 맞는 행 대신 짝이 될 수 있어요. 짝이 없는 깨움은 `without_create` 예요.
+- 빠진 날: JSON 의 `server_log` 가 읽은 서버 로그 파일 수(`files_read`)와 창 안에서 파일이 없는 날(`days_without_file`)을 알려 줘요. 파일이 없는 날의 깨움은 말없이 빠지기 때문이에요.
 - 그동안 시작한 다른 턴: 같은 Keeper 의 턴 구간 중 일정을 만든 `ts` 뒤, 전달 줄 2초 앞 전에 시작한 구간의 수예요. 깨움이 시작하는 턴은 안 세요. 턴 구간이 없는 Keeper 의 깨움은 `parked` 에서 빠져요.
 - 백분위는 위와 같이 가까운 순위예요. 짝짓기는 이 보고서에서 깨움에 이름을 붙이는 용도예요. 서버가 이 값을 읽고 무언가를 정하지 않아요.
 
@@ -290,4 +291,4 @@ python3 docs/evidence/execute-waits-2026-11/measure_watched_wakes.py --base-path
 - 값이 한 날의 227분이라 재시작 4번(09:11Z, 09:50Z, 10:17Z, 12:08Z)이 끼어 있어요. 재시작에 걸린 깨움을 따로 가르지 않았어요.
 - 실행의 끝은 `updated_at` 이라서, 끝난 뒤에 갱신된 실행은 끝이 늦게 잡혀요(미확인). 실행이 다시 돌려지면 끝을 모르는 쪽(`end_unknown`)으로 빠져요.
 - 이 스크립트는 감시한 일정의 길이만 재요. 감시가 `sleep` 폴링을 얼마나 줄이는지는 `measure_execute_waits.py` 로 같은 길이의 창을 견줘야 알아요.
-- 시험 37개가 합성 장부·로그·턴 파일로 단계 계산과 짝짓기 규칙을 확인해요.
+- 시험 50개가 합성 장부·로그·턴 파일로 단계 계산과 짝짓기 규칙을 확인해요. 감시 줄의 모양 넷(결과, 시도, 결과 없음, 읽지 못한 실행)과 어느 모양도 아닌 줄, 호출자가 고른 일정 번호, 한 실행에 일정 둘을 건 Keeper, 러너 줄이 감시 줄보다 앞서는 경우, 파일이 없는 날, 인자 검사가 거절하는 경우마다 거절 메시지를 포함해요.

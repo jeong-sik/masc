@@ -34,3 +34,6 @@ val view_of_json : Yojson.Safe.t -> (string * snapshot, string) result
 (** Decode the authenticated viewer and snapshot together. Missing viewer
     identity is an error, never inferred from message text or ordering. *)
 val error_message : error -> string
+
+val dirname : string
+(** The Play directory below [<base>/.masc]. *)

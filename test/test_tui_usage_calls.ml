@@ -43,6 +43,19 @@ let kept_exn window answer =
   | Error reason -> Alcotest.failf "the answer was refused: %s" reason
 ;;
 
+let test_the_request_names_the_width_and_the_hours_and_nothing_else () =
+  let path window =
+    Masc_tui_http.tool_series_path ~width:(Calls.width window)
+      ~since_hours:(Calls.since_hours window)
+  in
+  check (list string) "path per window"
+    [ "/api/v1/tool-metrics/series?bucket=hour&since_hours=24"
+    ; "/api/v1/tool-metrics/series?bucket=day&since_hours=168"
+    ; "/api/v1/tool-metrics/series?bucket=day&since_hours=336"
+    ]
+    (List.map path [ Calls.Last_day; Calls.Last_week; Calls.Last_fortnight ])
+;;
+
 let test_windows_follow_the_days_the_usage_view_cycles_through () =
   List.iter
     (fun (days, window) ->
@@ -149,6 +162,8 @@ let () =
             test_windows_follow_the_days_the_usage_view_cycles_through
         ; test_case "the request asks for the hours of the window" `Quick
             test_the_request_asks_for_the_hours_of_the_window
+        ; test_case "the request names the width and the hours and nothing else" `Quick
+            test_the_request_names_the_width_and_the_hours_and_nothing_else
         ; test_case "the server answers the request with one partial bucket more" `Quick
             test_the_server_answers_the_request_with_one_partial_bucket_more
         ; test_case "the partial first bucket of an answer is dropped" `Quick

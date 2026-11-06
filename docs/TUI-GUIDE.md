@@ -644,6 +644,14 @@ separately. The 1/7/14 UTC-day plot uses the latest stored provider report for
 each day; `·` means no report was stored for that day, and `w` changes the
 window. A failed read is labeled unavailable rather than drawn as zero.
 
+Calls draws the tool calls of the same 1/7/14 UTC-day window from
+`GET /api/v1/tool-metrics/series`: one bar each for calls, failed calls and p95,
+one column per UTC hour (1d) or UTC day (7d, 14d), and a table of the same
+numbers with the newest bucket first. `·` is a bucket in which no call ran; it
+has no p95 and is not zero milliseconds. A column is red only when every call in
+it failed. The newest column is still open. `w` changes the window; the Calls
+section reads only while it is on screen.
+
 Keeper rows show recorded 24-hour token and cost totals with the number of
 turns that reported each value and the number missing it. Transport delivery
 is also here. `p` opens Telemetry, retaining the engine, work outcome, and
@@ -3296,9 +3304,9 @@ body text or the current list cursor.
 ### Following an account through Usage
 
 On Usage, `f` searches accounts through the command palette. Choose an account
-from current inventory or recorded history; `v` switches Plan/Trend/Keepers and
-`w` changes the history window while retaining the exact quota scope ID. Plan
-and Trend show that account; `a` restores all accounts. Keepers usage remains a
-workspace-wide reading. If an account disappears from current inventory, its
+from current inventory or recorded history; `v` switches Plan/Trend/Keepers/Calls
+(`V` goes back) and `w` changes the history window while retaining the exact
+quota scope ID. Plan and Trend show that account; `a` restores all accounts.
+Keepers usage and Calls remain workspace-wide readings. If an account disappears from current inventory, its
 selection remains explicit instead of jumping to a different account. Missing
 history, unreadable reports and failed reads keep their distinct states.

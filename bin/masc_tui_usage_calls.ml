@@ -136,16 +136,23 @@ let note_gap = 2
 let widest_load_bar = 24
 let narrowest_load_bar = 6
 
+let span_text = function
+  | Last_day -> "last 24 hours · per UTC hour"
+  | Last_week -> "7 UTC days · per UTC day"
+  | Last_fortnight -> "14 UTC days · per UTC day"
+
 let heading t =
   let as_of = Unix.gmtime t.series.Series.tsr_generated_at in
-  let span =
-    match t.window with
-    | Last_day -> "last 24 hours · per UTC hour"
-    | Last_week -> "7 UTC days · per UTC day"
-    | Last_fortnight -> "14 UTC days · per UTC day"
-  in
-  Printf.sprintf " Tool calls (%s) · as of %02d-%02d %02d:%02d UTC" span
+  Printf.sprintf " Tool calls (%s) · as of %02d-%02d %02d:%02d UTC" (span_text t.window)
     (as_of.Unix.tm_mon + 1) as_of.Unix.tm_mday as_of.Unix.tm_hour as_of.Unix.tm_min
+
+let note_lines ~days note =
+  let span =
+    match window_of_days days with
+    | Some window -> span_text window
+    | None -> Printf.sprintf "%d UTC days" days
+  in
+  [ Printf.sprintf " Tool calls (%s) · %s" span note ]
 
 let totals_line ~calls ~failures ~deferred =
   Printf.sprintf " %s calls · %s failed (%s)%s" (grouped_digits calls)

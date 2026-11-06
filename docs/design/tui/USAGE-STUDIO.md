@@ -2,7 +2,7 @@
 
 The operator screenshot mixed quota windows, per-scope history and Keeper metrics into one scroll list. Long catalogue explanations widened every quota row and pushed reset times away from the measurements.
 
-Usage now has three views. `v` cycles Plan, Trend and Keepers. `w` opens Trend and cycles its 1/7/14 UTC day range. `p` enters or leaves Telemetry; the chosen Usage view survives that round trip. Each view resets scroll when selected.
+Usage now has four views. `v` cycles Plan, Trend, Keepers and Calls (`V` goes back). `w` opens Trend, or stays on Calls, and cycles the 1/7/14 UTC day range both draw. `p` enters or leaves Telemetry; the chosen Usage view survives that round trip. Each view resets scroll when selected.
 
 Plan groups windows and identity metadata into account cards. Cards pair when the width holds two columns of them, from about 107 cells; narrower terminals keep the account rows. Cards preserve scope IDs, provider labels, reported utilization, reset times and observation ages. Catalogue exhaustion has its own wrapped line and remains independent of provider window utilization and reset. A full limit classified as counting other use stays dim. Failed reads remain unavailable rather than becoming zero.
 

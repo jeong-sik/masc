@@ -1394,7 +1394,7 @@ let usage_lines ~cols ~rows (state : state) =
   in
   let selection_lines = match state.usage_scope_id, state.usage_section with
     | None, (Usage_plan | Usage_trend) -> []
-    | (None | Some _), Usage_keepers -> []
+    | (None | Some _), (Usage_keepers | Usage_calls) -> []
     | Some scope_id, (Usage_plan | Usage_trend) ->
         let accounts = match state.overview_providers with
           | Providers_unread | Providers_failed _ -> []
@@ -1421,6 +1421,20 @@ let usage_lines ~cols ~rows (state : state) =
             @ [ Theme.recede () ^ draw_hline (framed_inner_width cols) ^ Ansi.reset ]
       in
       wrap_evidence (currency @ keepers ())
+  (* Tool calls belong to the workspace, not to an account, so the account
+     selection does not narrow them. *)
+  | Usage_calls ->
+      (match state.tool_series with
+       | Tool_series_read calls ->
+           Masc_tui_usage_calls.lines ~width:(max 1 (framed_inner_width cols)) calls
+       | Tool_series_unread ->
+           wrap_evidence
+             (Masc_tui_usage_calls.note_lines ~days:state.provider_history_days
+                "not observed")
+       | Tool_series_error reason ->
+           wrap_evidence
+             (Masc_tui_usage_calls.note_lines ~days:state.provider_history_days
+                ("unavailable: " ^ Terminal_text.single_line reason)))
 
 let render_metrics (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -1492,17 +1506,20 @@ let render_metrics (state : state) =
         in
         let wide_navigation =
           pill Usage_plan "Plan" ^ "  " ^ pill Usage_trend "Trend"
-          ^ "  " ^ pill Usage_keepers "Keepers" ^ "   v:next view" in
+          ^ "  " ^ pill Usage_keepers "Keepers" ^ "  " ^ pill Usage_calls "Calls"
+          ^ "   v:next view" in
         let compact_navigation =
           pill Usage_plan "Plan" ^ " " ^ pill Usage_trend "Trend"
-          ^ " " ^ pill Usage_keepers "Keepers" ^ " v:next" in
+          ^ " " ^ pill Usage_keepers "Keepers" ^ " " ^ pill Usage_calls "Calls"
+          ^ " v:next" in
         let navigation =
           if Message_layout.display_width wide_navigation <= width then wide_navigation
           else if Message_layout.display_width compact_navigation <= width then
             compact_navigation
           else
             let current = match state.usage_section with
-              | Usage_plan -> "Plan" | Usage_trend -> "Trend" | Usage_keepers -> "Keepers" in
+              | Usage_plan -> "Plan" | Usage_trend -> "Trend" | Usage_keepers -> "Keepers"
+              | Usage_calls -> "Calls" in
             let current_width = Message_layout.display_width current in
             let hint =
               if current_width + 1 + Message_layout.display_width "v:next" <= width

@@ -15,6 +15,10 @@ val series_width_seconds : tool_series_width -> int
 (** The step between two buckets: 3600 for [Series_hour], 86400 for
     [Series_day]. The answer's [bucket_seconds] must equal it. *)
 
+val series_width_name : tool_series_width -> string
+(** The [bucket] the request names and the answer's [window.bucket] repeats:
+    ["hour"] or ["day"]. *)
+
 (** A bucket in which at least one call ran. *)
 type tool_series_calls = {
   tsc_calls : int;

@@ -40,6 +40,11 @@ val of_series :
     than the window draws is an error: its labels would be wrong or its chart
     shorter than the window it names. *)
 
+val note_lines : days:int -> string -> string list
+(** The heading followed by [note], drawn while there is no series to chart:
+    before the first read and when a read failed. A number of days the section
+    does not draw is named by its days. *)
+
 val lines : width:int -> t -> string list
 (** The section as styled rows, none wider than [width] cells: a heading, the
     window's totals, a bar for calls, failed calls and p95, and a table of the

@@ -6325,9 +6325,19 @@ let test_main_eio_rejects_same_base_path_on_second_server () =
             Alcotest.skip ()
           end;
           let lease_path =
-            Server_startup_takeover.For_testing.lease_path
-              ~run_dir:(Unix.realpath (Host_config.from_env ()).base_path_lease_dir)
-              ~canonical_base_path
+            match
+              Server_startup_takeover.lease_run_dir
+                (Host_config.from_env ()).base_path_lease_root
+                ~base_path:canonical_base_path
+            with
+            | Ok run_dir ->
+              Server_startup_takeover.For_testing.lease_path
+                ~run_dir:(Unix.realpath run_dir)
+                ~canonical_base_path
+            | Error rejection ->
+              Alcotest.failf
+                "the primary's lease root cannot be named: %s"
+                (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
           in
           let secondary_fd = open_log secondary_log in
           let pid =

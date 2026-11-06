@@ -44,6 +44,12 @@ let inspect ~base_path ~port =
       (match Upgrade.suggest_loopback_port () with Ok port -> ["suggested_port", `Int port] | Error _ -> []) in
   emit (`Assoc (["schema", `String "masc.setup_server.v1"; "read_only", `Bool true;
     "installed_version", `String Runtime_build_version.current] @ fields @ alternative)); 0
+(* The owner is found through the lease root of its BasePath. A root that
+   cannot be made holds no lease to find, as a lease that cannot be read. *)
+let owner_lease_run_dir ~base_path =
+  Server_startup_takeover.lease_run_dir (Host_config.host ()).base_path_lease_root ~base_path
+  |> Result.map_error (fun (_ : Server_startup_takeover.base_path_lock_rejection) ->
+    Upgrade.Owner_unavailable)
 let with_selected_owner ~sw ~clock ~base_path ~port ~agent ~expected_version ~login use =
   let open Result.Syntax in
   let* () = match Masc_http_client.get_sync ~clock ~headers:[]
@@ -53,7 +59,7 @@ let with_selected_owner ~sw ~clock ~base_path ~port ~agent ~expected_version ~lo
     | Ok _ | Error _ -> Error Upgrade.Invalid_health in
   let* token = match Auth_login.read_persisted_http_token ~base_path ~agent_name:agent with
     | None -> Error Upgrade.Admin_required | Some token -> Ok token in
-  let run_dir = (Host_config.host ()).base_path_lease_dir in
+  let* run_dir = owner_lease_run_dir ~base_path in
   let headers = ["authorization", "Bearer " ^ token; "x-masc-agent", agent] in
   let* owner = Upgrade.prepare ~sw ~clock ~headers ~run_dir ~base_path ~port in
   Fun.protect ~finally:(fun () -> Upgrade.close owner) (fun () ->
@@ -66,7 +72,7 @@ let stop ~base_path ~port ~agent ~expected_version ~login =
     let base_path = Unix.realpath (Env_config.normalize_masc_base_path_input base_path) in
     with_http (fun sw clock ->
       let open Result.Syntax in
-      let run_dir = (Host_config.host ()).base_path_lease_dir in
+      let* run_dir = owner_lease_run_dir ~base_path in
       with_selected_owner ~sw ~clock ~base_path ~port ~agent ~expected_version ~login (fun owner ->
         match Upgrade.request_termination_and_observe owner ~observe:(fun () ->
           phase := Request_confirmed;

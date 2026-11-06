@@ -597,12 +597,16 @@ let announce_wait_for_previous_owner ~base_path owner =
         Nothing is signalled from here; stopping this process ends the wait."
        base_path recorded)
 
-let acquire_base_path_lock ~previous_owner ~run_dir base_path =
+let acquire_base_path_lock ~previous_owner ~lease_root base_path =
   let acquired =
-    match previous_owner with
-    | Refuse_previous_owner ->
+    match
+      Server_startup_takeover.lease_run_dir lease_root ~base_path, previous_owner
+    with
+    | Error rejection, (Refuse_previous_owner | Wait_for_previous_owner) ->
+      Server_startup_takeover.Base_path_rejected rejection
+    | Ok run_dir, Refuse_previous_owner ->
       Server_startup_takeover.acquire_base_path_lock ~run_dir base_path
-    | Wait_for_previous_owner ->
+    | Ok run_dir, Wait_for_previous_owner ->
       (match
          Server_startup_takeover.acquire_base_path_lock_after_owner_exits ~run_dir
            ~on_wait:(announce_wait_for_previous_owner ~base_path) base_path
@@ -703,9 +707,9 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
      | Workspace_root.Recorded _ -> ())
   in
   let masc_dir = Filename.concat canonical_base_path Common.masc_dirname in
-  let lease_dir = (Host_config.host ()).base_path_lease_dir in
   let base_path_lease =
-    acquire_base_path_lock ~previous_owner ~run_dir:lease_dir canonical_base_path
+    acquire_base_path_lock ~previous_owner
+      ~lease_root:(Host_config.host ()).base_path_lease_root canonical_base_path
   in
   (* The lease has established the canonical .masc boundary. OCaml read its
      event-directory environment before entering ML, so the default needs a

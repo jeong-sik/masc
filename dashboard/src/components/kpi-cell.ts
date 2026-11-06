@@ -28,14 +28,6 @@ import {
 
 const DEFAULT_BAR_KIND: BarKind = 'default'
 
-export {
-  kpiCellAriaLabel,
-  type KpiCellProps,
-  type KpiCellKind,
-  type KpiCellVariant,
-  type KpiCellDelta,
-} from './kpi-shared'
-
 const surfaceStyle = {
   background: 'var(--bg-panel)',
   border: '1px solid var(--border-base)',

@@ -11,7 +11,7 @@ import {
   type AnchoredThread,
 } from '../../../design-system/headless-core/anchored-thread-rail'
 
-export type { AnchoredThread, ThreadAnchor, ThreadKind } from '../../../design-system/headless-core/anchored-thread-rail'
+export type { AnchoredThread, ThreadKind } from '../../../design-system/headless-core/anchored-thread-rail'
 
 export interface AnchoredThreadRailStore {
   readonly filePath: () => string | null

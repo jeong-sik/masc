@@ -19,7 +19,6 @@ import { Plus, GitBranch, AlertCircle, PauseCircle, CheckCircle2, HelpCircle, Se
 
 export type { Repository, RepoStatus } from '../api/repositories'
 export {
-  discoverRepositories,
   normalizeRepoStatus,
   repositoryRows,
   normalizeRepository,

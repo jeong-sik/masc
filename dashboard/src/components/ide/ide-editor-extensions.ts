@@ -23,9 +23,7 @@ export {
   languageIdForFilePath,
 } from './ide-editor-language'
 export {
-  type EditorKeeperTraceLineEvent,
   type EditorKeeperTraceLine,
-  type KeeperTraceLineGutterOptions,
   keeperTraceLineGutterExt,
   keeperTraceLineChipExt,
   pushKeeperTraceLines,

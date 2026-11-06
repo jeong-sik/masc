@@ -1038,12 +1038,16 @@ let attempt_runtime_candidates
           candidate outlives it. The quota/usage read above owns that evidence;
           a callback before it cannot observe the refusal's newly stated end.
           A turn cancelled during that read still reports the failure, with
-          the rest recorded before the read, and then ends as cancelled. *)
+          the rest recorded before the read, and then ends as cancelled. In
+          a fiber the report runs shielded from that cancellation, so a report
+          that suspends cannot raise a new [Cancelled] over the original. *)
        (match record_route_evidence () with
         | () -> report_attempt_error ()
         | exception (Eio.Cancel.Cancelled _ as cancelled) ->
           let backtrace = Printexc.get_raw_backtrace () in
-          report_attempt_error ();
+          (match Fs_compat.execution_context () with
+           | Fs_compat.Eio_fiber -> Eio.Cancel.protect report_attempt_error
+           | Fs_compat.Non_eio -> report_attempt_error ());
           Printexc.raise_with_backtrace cancelled backtrace);
        (* Stable demotion retains every declared candidate, including when
           all are observed unavailable. Neither hint causes a wait or gate. *)

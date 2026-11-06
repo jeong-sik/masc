@@ -37,7 +37,7 @@ let rest_retry_after_s = 3600.0
 (* How long the test listens to show that a record moved nothing. *)
 let quiet_wait_s = 0.5
 
-let test_the_six_writers_report_a_record () =
+let test_the_seven_writers_report_a_record () =
   let calls = ref 0 in
   Runtime_path_rest_signal.install (fun () -> incr calls);
   Fun.protect ~finally:(fun () -> Runtime_path_rest_signal.install ignore) (fun () ->
@@ -52,9 +52,10 @@ let test_the_six_writers_report_a_record () =
     Runtime_candidate_backpressure.note_candidate_success ~candidate;
     let scope = Runtime_quota_window.scope_of_muse_home "provider-rest-announce" in
     Runtime_quota_window.note_observed_exhausted ~scope;
+    Runtime_quota_window.note_read_without_reset ~scope;
     Runtime_quota_window.note_succeeded ~scope;
     Runtime_quota_window.note_exhausted ~scope ~resets_at:(Unix.gettimeofday () +. rest_retry_after_s);
-    check int "each write reports once" 6 !calls)
+    check int "each write reports once" 7 !calls)
 ;;
 
 let test_moved_rests_announce_their_keepers () =
@@ -153,7 +154,8 @@ let test_moved_rests_announce_their_keepers () =
 let () =
   run "provider_rest_announce"
     [ ( "records"
-      , [ test_case "the six writers report a record" `Quick test_the_six_writers_report_a_record ] )
+      , [ test_case "the seven writers report a record" `Quick
+            test_the_seven_writers_report_a_record ] )
     ; ( "rows"
       , [ test_case "moved rests announce their Keepers" `Quick
             test_moved_rests_announce_their_keepers ] )

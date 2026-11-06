@@ -2604,6 +2604,7 @@
  (modules masc_tui_async_protocol)
  (libraries masc.masc_candle masc_tui_fleet_stream masc_tui_pele masc_tui_resource_diagrams masc_tui_attachment_action masc_tui_image_cache masc_tui_board_reader masc_tui_detail_reading masc_tui_artifact_check_action masc_tui_artifact_checks masc_tui_artifact_share_pending masc_tui_resource_catalog masc_tui_observation_store masc_tui_observation_origin masc_tui_ask_projection masc_tui_original_task_read
   masc_tui_code_results
+  masc_tui_context_results
   masc_tui_task_dispatch
   masc_tui_board_publication
   masc
@@ -2619,7 +2620,6 @@
   masc_tui_child_content
   masc_tui_collab
   masc_tui_connector_unbind
-  masc_tui_context_inspector
   masc_tui_context_state
   masc_tui_evidence_picture
   masc_tui_exact_activity
@@ -2818,6 +2818,7 @@
   masc_tui_input_reader
   masc_tui_code_lexer
   masc_tui_code_results
+  masc_tui_context_results
   masc_tui_memo
   masc_tui_span
   masc_tui_diff
@@ -3289,6 +3290,12 @@
   masc_tui_code_lexer
   masc_tui_memo
   masc_tui_message_layout))
+
+(library
+ (name masc_tui_context_results)
+ (wrapped false)
+ (modules masc_tui_context_results)
+ (libraries masc_tui_types masc_tui_context_inspector masc_tui_fetched unix))
 
 (library
  (name masc_tui_presented)

@@ -280,8 +280,9 @@ type memory_health_read =
 (* The answers of one domain share one type named after it, and [async_msg]
    carries that type in one constructor: [keeper_msg] in [Keeper_msg]. A
    domain whose module applies its own answers declares the type there:
-   [Code_msg] carries [Masc_tui_code_results.msg]. One variant takes at most
-   244 constructors with arguments (#48617). A domain with a single answer
+   [Code_msg] carries [Masc_tui_code_results.msg], and [Context_msg] carries
+   [Masc_tui_context_results.msg]. One variant takes at most 244
+   constructors with arguments (#48617). A domain with a single answer
    keeps it in [async_msg], and so does a constructor that carries another
    [async_msg]. *)
 
@@ -585,13 +586,6 @@ type board_msg =
   | Board_quarantines_bulk_requeued of
       string * (string * Masc_tui_http.post_outcome) list
 
-type context_msg =
-  | Context_inspector_loaded of
-      int * string * Masc_tui_context_inspector.reading
-  | Context_inspector_part_loaded of
-      Masc_tui_context_inspector.part_key Masc_tui_fetched.request
-      * (string, string) result
-
 type local_msg =
   | Local_keepers_read of local_workspace_request * (Masc_tui_loader.local_keeper_reading, string) result
   | Local_workspace_read of local_workspace_request * (Masc_tui_loader.local_reading, string) result
@@ -869,7 +863,7 @@ type async_msg =
   | Http_surface_read_completed of Surface_read_context.t * async_msg
   | Approvals_msg of approvals_msg
   | Board_msg of board_msg
-  | Context_msg of context_msg
+  | Context_msg of Masc_tui_context_results.msg
   | Live_context_loaded of Masc_tui_context_state.request * int64
       * (Masc.Tui_decode.context_observation, string) result
   | Local_msg of local_msg
@@ -1059,6 +1053,9 @@ let rec workspace_message_is_read = function
       (match Masc_tui_code_results.answer_kind answer with
        | Masc_tui_code_results.Read -> true
        | Masc_tui_code_results.Save -> false)
+  | Context_msg answer ->
+      (match Masc_tui_context_results.answer_kind answer with
+       | Masc_tui_context_results.Read -> true)
   | Board_msg (Board_attachment_saved _) | Resource_msg (Resource_exported _ | Resource_share_changed _) | Verification_msg (Verification_evidence_exported _) -> false
   | (Keeper_msg (Keeper_logs_loaded _ | Keeper_execute_streamed _)) -> true
   | Chat_msg (Chat_search_finished _) -> true
@@ -1103,8 +1100,6 @@ let rec workspace_message_is_read = function
   | Keeper_child_content_loaded _
   | Keeper_preparation_loaded _
   | Keeper_chat_journal_loaded _)
-  | Context_msg (Context_inspector_loaded _
-  | Context_inspector_part_loaded _)
   | Keeper_msg (Keeper_chat_older_loaded _)
   | Local_msg (Local_workspace_read _
   | Local_keepers_read _)
@@ -1287,6 +1282,9 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Code_msg answer ->
       (match Masc_tui_code_results.answer_kind answer with
        | Masc_tui_code_results.(Read | Save) -> false)
+  | Context_msg answer ->
+      (match Masc_tui_context_results.answer_kind answer with
+       | Masc_tui_context_results.Read -> false)
   | Sent_image_ready _ | Image_render_ready _ -> true
   | Board_msg (Board_attachment_saved (_, result)) ->
       (match result with
@@ -1314,8 +1312,7 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Keeper_run_next_done _ | Keeper_observed_interrupt_done _ | Keeper_chat_interrupt_done _
   | Keeper_chat_history_loaded _ | Keeper_chat_first_page_loaded _ | Keeper_chat_copy_loaded _
   | Keeper_chat_operation_loaded _ | Keeper_chat_journal_loaded _ | Keeper_native_tasks_loaded _
-  | Keeper_preparation_loaded _ | Keeper_child_content_loaded _) | Context_msg (Context_inspector_loaded _
-  | Context_inspector_part_loaded _) | Keeper_msg (Keeper_chat_older_loaded _) | Live_context_loaded _
+  | Keeper_preparation_loaded _ | Keeper_child_content_loaded _) | Keeper_msg (Keeper_chat_older_loaded _) | Live_context_loaded _
   | Local_msg (Local_keepers_read _ | Local_workspace_read _) | Keeper_msg (Keeper_composite_loaded _) | Lane_msg (Lane_inventory_loaded _)
   | Clients_loaded _ | Lane_msg (Lane_runs_loaded _ | Lane_run_detail_loaded _)
   | Measurement_artifact_loaded _ | Verification_msg (Verification_loaded _) | Harness_msg (Harness_loaded _)
@@ -1416,6 +1413,9 @@ let retired_operation_observation state ~authority ~reading message =
     | Code_msg answer ->
         (match Masc_tui_code_results.answer_kind answer with
          | Masc_tui_code_results.(Read | Save) -> None)
+    | Context_msg answer ->
+        (match Masc_tui_context_results.answer_kind answer with
+         | Masc_tui_context_results.Read -> None)
     | Browser_msg (Browser_lane_scene_loaded (generation, Ok _)) ->
         (match state.browser_lane with
          | Some ({load=Browser_lane_view.Loading (current, operation); _} as view)
@@ -1460,8 +1460,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Keeper_chat_history_loaded (_, _, _)
     | Keeper_chat_copy_loaded (_, _, _) | Keeper_chat_operation_loaded _
     | Keeper_chat_journal_loaded _ | Keeper_native_tasks_loaded (_, _)
-    | Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _)) | Context_msg (Context_inspector_loaded (_, _, _)
-    | Context_inspector_part_loaded (_, _))
+    | Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _))
     | Keeper_msg (Keeper_chat_older_loaded (_, _, _, _)) | Local_msg (Local_workspace_read (_, _) | Local_keepers_read (_, _)) | Live_context_loaded (_, _, _)
     | Keeper_msg (Keeper_composite_loaded (_, _, _)) | Lane_msg (Lane_inventory_loaded (_, _)) | Clients_loaded (_, _)
     | Lane_msg (Lane_runs_loaded (_, _, _, _) | Lane_run_detail_loaded (_, _, _))
@@ -1540,6 +1539,9 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Code_msg answer ->
       (match Masc_tui_code_results.answer_kind answer with
        | Masc_tui_code_results.(Read | Save) -> message)
+  | Context_msg answer ->
+      (match Masc_tui_context_results.answer_kind answer with
+       | Masc_tui_context_results.Read -> message)
   | Approvals_msg (Approval_decision_done (approval, decision, receipt, generation, observation)) ->
       let receipt, observation = project receipt observation in
       Approvals_msg (Approval_decision_done (approval, decision, receipt, generation, observation))
@@ -1599,8 +1601,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Keeper_chat_history_loaded (_, _, _) | Keeper_chat_copy_loaded (_, _, _)
   | Keeper_chat_operation_loaded _ | Keeper_chat_journal_loaded _
   | Keeper_native_tasks_loaded (_, _) | Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _))
-  | Context_msg (Context_inspector_loaded (_, _, _)
-  | Context_inspector_part_loaded (_, _)) | Keeper_msg (Keeper_chat_older_loaded (_, _, _, _))
+  | Keeper_msg (Keeper_chat_older_loaded (_, _, _, _))
   | Local_msg (Local_workspace_read (_, _) | Local_keepers_read (_, _)) | Live_context_loaded (_, _, _) | Keeper_msg (Keeper_composite_loaded (_, _, _))
   | Lane_msg (Lane_inventory_loaded (_, _)) | Clients_loaded (_, _)
   | Lane_msg (Lane_runs_loaded (_, _, _, _) | Lane_run_detail_loaded (_, _, _))

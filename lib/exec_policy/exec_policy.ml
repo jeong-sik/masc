@@ -14,7 +14,6 @@ let validate_path = Paths.validate_path
 
 type block_reason =
   | Empty_command
-  | Chain_or_redirect
   | Injection
   | Process_substitution
   | Unsafe_redirect
@@ -22,7 +21,6 @@ type block_reason =
 
 let block_reason_tag = function
   | Empty_command -> "empty_command"
-  | Chain_or_redirect -> "chain_or_redirect"
   | Injection -> "injection"
   | Process_substitution -> "process_substitution"
   | Unsafe_redirect -> "unsafe_redirect"
@@ -33,7 +31,7 @@ let block_reason_tag = function
    sentences live in managed templates (config/prompts/exec_policy.md) and
    this module only picks the key. A template that does not render is logged
    and falls back to the bare variant tag, never to prose written here
-   (#32848 precedent). The long chaining/injection/redirect wording stays
+   (#32848 precedent). The long injection/redirect wording stays
    inline for now: it is multi-paragraph setup documentation, outside the
    class-(ii) sentence slice. *)
 let render_block_reason key reason =
@@ -50,12 +48,6 @@ let render_block_reason key reason =
 let block_reason_to_string = function
   | Empty_command ->
     render_block_reason Prompt_names.exec_policy_block_reason_empty_command Empty_command
-  | Chain_or_redirect ->
-    "Blocked: chaining (&&/||/;) and redirects (|/>) are not allowed. Run ONE command \
-     per call. To change directory, use the `cwd` argument instead of `cd` - Good: \
-     cwd='<dir>', cmd='ls'. Bad: cmd='cd <dir> && ls'. For pipelines \
-     like `rg foo | wc -l`, run the primary command and process \
-     output at the LLM layer. To write files, use Write."
   | Injection ->
     "This shell surface could not parse the command or rejects a construct in it, \
      such as an unquoted glob, background execution, control flow, or an unsupported \
@@ -150,16 +142,14 @@ let block_reason_of_exec_too_complex
       | `Unknown_construct _ ) -> Injection
 ;;
 
-type parse_mode = Strict | Tool_execute
-
-let parse_string_to_ir ~mode cmd =
+let parse_string_to_ir cmd =
   let trimmed = String.trim cmd in
   if trimmed = ""
   then Error Empty_command
   else (
     match Masc_exec_bash_parser.Bash.parse_string trimmed with
     | (Masc_exec.Parsed.Parse_error _ | Masc_exec.Parsed.Parse_aborted _) ->
-      Error (match mode with Strict -> Chain_or_redirect | Tool_execute -> Injection)
+      Error Injection
     | Masc_exec.Parsed.Too_complex reason ->
       Error (block_reason_of_exec_too_complex (Unsupported_construct reason))
     | Masc_exec.Parsed.Parsed ir -> Ok ir)

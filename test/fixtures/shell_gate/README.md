@@ -22,7 +22,7 @@ Each line is a single object:
 {
   "raw_cmd": "<the input string>",
   "category": "<corpus category>",
-  "expected_policy_verdict": "<ok | injection | chain_or_redirect | ...>",
+  "expected_policy_verdict": "<ok | injection | ...>",
   "expected_ir_verdict": "<allow | reject | cannot_parse | too_complex>",
   "ir_detail": "<optional tag — reject_reason, parse_reason, or too_complex_reason>",
   "note": "<one-line rationale>"
@@ -49,7 +49,6 @@ Each line is a single object:
 
 - `ok` — `validate_command_tool_execute` returned `Ok ()`.
 - `empty_command` — `Error Empty_command`.
-- `chain_or_redirect` — `Error Chain_or_redirect`.
 - `injection` — `Error Injection`.
 - `process_substitution` — `Error Process_substitution`.
 - `unsafe_redirect` — `Error Unsafe_redirect`.

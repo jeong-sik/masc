@@ -102,7 +102,6 @@ let policy_tag (result : (unit, Policy.block_reason) result) : string =
   match result with
   | Ok () -> "ok"
   | Error Policy.Empty_command -> "empty_command"
-  | Error Policy.Chain_or_redirect -> "chain_or_redirect"
   | Error Policy.Injection -> "injection"
   | Error Policy.Process_substitution -> "process_substitution"
   | Error Policy.Unsafe_redirect -> "unsafe_redirect"
@@ -110,7 +109,7 @@ let policy_tag (result : (unit, Policy.block_reason) result) : string =
 ;;
 
 let validate_policy_execute_raw raw =
-  match Policy.parse_string_to_ir ~mode:Tool_execute raw with
+  match Policy.parse_string_to_ir raw with
   | Ok ir -> Policy.validate_command_tool_execute ir
   | Error reason -> Error reason
 ;;

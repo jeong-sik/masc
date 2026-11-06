@@ -684,6 +684,13 @@ let rec fit_with_conflicts ?literal_prefix ?position ~mark_omission ~max_cells
       fit_with_conflicts ?literal_prefix ?position ~mark_omission ~max_cells
         ~conflicts ~hints ~omissions:[] []
 
+(* Every notice that has a shorter text, in that text; the others stay as they
+   are. *)
+let notices_in_their_shorter_text conflicts =
+  List.map
+    (fun conflict -> Option.value (shortened conflict) ~default:conflict)
+    conflicts
+
 (* Dropping a notice hands its cells back to everything that gave way for it,
    the status facts included, so each conflict set is fitted from the whole
    status list and the whole key row again. Shrinking in one pass left a row
@@ -709,6 +716,24 @@ let rec fit_body ?literal_prefix ?action_text ?position ~max_cells ~conflicts ~h
   match complete with
   | Some fitted -> fitted
   | None ->
+  (* What the last key did is what the operator is looking for, and it stays
+     for [last_action_window_s]; a standing notice is on the row every frame.
+     So an outcome that does not fit whole beside the notices at full length
+     is offered the room their reasons take before it is cut: the notices step
+     down to their count, as they do where the keys need the room. Measured on
+     the Code pane at 100 cells with ACTION NEEDED naming a 47-cell reason, the
+     outcome of [y] kept one cell of 92 ([d…]) and the reason kept all of
+     its cells. *)
+  let shorter_notices = notices_in_their_shorter_text conflicts in
+  let outcome_present =
+    match action_text with
+    | Some action -> not (String.equal action "")
+    | None -> false
+  in
+  if outcome_present && shorter_notices <> conflicts then
+    fit_body ?literal_prefix ?action_text ?position ~max_cells
+      ~conflicts:shorter_notices ~hints ~omissions statuses
+  else
   let displayed_prefix, mark_omission =
     match action_text with
     | None | Some "" -> literal_prefix, false
@@ -872,10 +897,16 @@ let line ?literal_prefix ?action_text ?preferred_action ?position ?(status = [])
       | Some _, _ -> None
       | None, Some (Outcome (text, mark)) ->
         let prefix = String.concat "  " (Option.to_list literal_prefix @ [text]) in
-        (match fit_with_conflicts ~literal_prefix:prefix ?position ~mark_omission:false
-                 ~max_cells ~conflicts ~hints ~omissions:omission_order statuses with
-         | Some _ -> Some (mark text)
-         | None -> action_text)
+        let fits_beside conflicts =
+          Option.is_some
+            (fit_with_conflicts ~literal_prefix:prefix ?position ~mark_omission:false
+               ~max_cells ~conflicts ~hints ~omissions:omission_order statuses)
+        in
+        (* Whole beside the notices at full length, or beside their shorter
+           text: [fit_body] gives the outcome that room before cutting it. *)
+        if fits_beside conflicts || fits_beside (notices_in_their_shorter_text conflicts)
+        then Some (mark text)
+        else action_text
       | None, (Some (Pending_question _) | None) -> action_text
     in
     let fitted =

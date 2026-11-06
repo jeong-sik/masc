@@ -119,7 +119,8 @@ let event_of_json : Yojson.Safe.t -> (event, string) result = function
      | other -> Error ("an installation question event has no kind " ^ other))
   | _ -> Error "an installation question event must be an object"
 
-let directory store = Filename.concat (Lane_addon_store.root store) "asks"
+let dirname = "asks"
+let directory store = Filename.concat (Lane_addon_store.root store) dirname
 let log_path store ~declaration_id =
   Filename.concat (directory store) (Lane_addon_store.digest declaration_id ^ ".jsonl")
 

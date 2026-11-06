@@ -101,13 +101,13 @@ Firefox 의 `block_requests` 설명("unblock_requests 까지 실패한다")은 e
 | touch (tap_at, swipe) | touch 흉내를 켠 뒤 `dispatchTouchEvent` 로 누르고 뗀다. swipe 는 `touchMove` 를 경유점마다 보낸다. `touchEnd` 의 답을 받지 못하면 mouse 와 같이 `inputReadiness: release_uncertain` 으로 답한다(RFC-browser-ego-input-lock) |
 | list_windows | `task.tabs()` 의 각 탭에 `Browser.getWindowForTarget` 을 불러 `windowId` 를 붙인다. 같은 windowId 는 같은 창이다 |
 | read_storage | `Network.getCookies` 로 그 페이지가 보는 쿠키의 이름·도메인·속성만 준다. 값은 Firefox 처럼 돌려주지 않는다. localStorage·sessionStorage 키 이름과 IndexedDB 이름은 `page.evaluate` 로 읽는다 |
-| emulate_environment | locale·timezone·좌표를 `Emulation.*Override` 로 건다. locale 은 Intl 만 바뀐다는 것을 답에 적는다. 위치 권한은 주지 않는다(§4 D3) |
+| emulate_environment | locale·timezone·좌표를 `Emulation.*Override` 로 건다. locale 은 Intl 만 바뀐다는 것을 답에 적는다. 좌표를 주면 Firefox 처럼 그 origin 에 위치 권한도 준다(§4 D3) |
 | intercept_network | `Network.setBlockedURLs` 에 정확한 호스트를 `*://<host>/*` 와 `*://<host>:*/*` 로 넣는다. 하위 도메인은 따로 적어야 한다는 Firefox 규칙을 그대로 둔다 |
 | read_network | 아래 §3.4 |
 | page_zoom | 붙이지 않는다. CDP 에는 브라우저 확대가 없고 핀치 배율만 있다. masc 의 확대 계약은 "측정한 브라우저 확대, CSS 배율은 쓰지 않음" 이다. `missing` 을 이유를 적은 `Unsupported` 로 바꾼다 |
-| read_console | §4 D1 결정 뒤 |
-| write_storage | §4 D2 결정 뒤 |
-| create_window, close_window | §4 D4 측정 뒤 |
+| read_console | 한 명령 안에서 숨김을 끄고, 읽고, 되돌린다(§4 D1) |
+| write_storage | `Network.setCookie`·`deleteCookies` 로 Firefox 와 같은 규칙을 따른다. 답에 운영자 프로필의 쿠키가 바뀐다고 적는다(§4 D2) |
+| create_window, close_window | 측정한 뒤 붙인다(§4 D4) |
 
 ### 3.4 network 기록
 
@@ -124,14 +124,14 @@ Firefox 의 `block_requests` 설명("unblock_requests 까지 실패한다")은 e
 
 `Network.enable` 이 사이트에 자동화를 드러내는지는 재지 않았다. 구현 층에서 먼저 잰다.
 
-## 4. 사용자 결정이 필요한 것
+## 4. 운영자 결정 (2026-11-06)
 
-| 번호 | 질문 | 제안 |
+| 번호 | 질문 | 결정 |
 |---|---|---|
-| D1 | console 을 읽으려면 ego 의 자동화 숨김을 잠깐 꺼야 한다. 그동안 사이트가 자동화를 알아챌 수 있다 | 한 명령 안에서 끄고, 읽고, `Runtime.disable` 과 `egoAutomated.enable` 로 되돌린다. 답에 숨김을 끈 구간을 적는다. 되돌리기가 실패하면 그 사실을 답에 적는다 |
-| D2 | 쿠키 쓰기·지우기는 운영자의 실제 로그인을 바꾼다 | ego 에서는 붙이지 않고, 이유를 적은 `Unsupported` 로 둔다 |
-| D3 | 위치 권한을 주면 운영자 프로필의 사이트 권한이 바뀐다 | 좌표만 흉내 내고 권한은 주지 않는다. 페이지가 권한을 물으면 운영자가 답한다 |
-| D4 | `Target.createTarget({newWindow: true})` 로 만든 탭을 ego task space 가 관리하는지 모른다. close_window 는 어떤 연결에도 없는 새 동작이다 | 시험 space 에서 먼저 잰다. 관리하면 create_window 를 붙이고, 관리하지 않으면 `Unsupported` 로 둔다. close_window 는 agent 가 연 탭만 있는 창에만 붙이고, 그 창의 탭을 `page.close()` 로 닫는다 |
+| D1 | console 을 읽으려면 ego 의 자동화 숨김을 잠깐 꺼야 한다. 그동안 사이트가 자동화를 알아챌 수 있다 | 붙인다. 한 명령 안에서 끄고, 읽고, `Runtime.disable` 과 `egoAutomated.enable` 로 되돌린다. 답에 숨김을 끈 구간을 적는다. 되돌리기가 실패하면 그 사실을 답에 적는다 |
+| D2 | 쿠키 쓰기·지우기는 운영자의 실제 로그인을 바꾼다 | 붙인다. 답과 도구 설명에 운영자 프로필의 쿠키가 바뀐다고 적는다 |
+| D3 | 위치 권한을 주면 운영자 프로필의 사이트 권한이 바뀐다 | 권한도 준다. `clear_emulation` 은 Firefox 처럼 그 권한을 그대로 둔다. 권한이 브라우저를 다시 켠 뒤에도 남는지는 L3 에서 재서 설명에 적는다 |
+| D4 | `Target.createTarget({newWindow: true})` 로 만든 탭을 ego task space 가 관리하는지 모른다. close_window 는 어떤 연결에도 없는 새 동작이다 | 붙인다. L10 에서 먼저 잰다. 관리되지 않으면 그 결과를 들고 운영자에게 다시 묻는다. close_window 는 agent 가 연 탭만 있는 창에만 붙이고, 그 창의 탭을 `page.close()` 로 닫는다 |
 
 ## 5. 구현 순서
 
@@ -147,8 +147,9 @@ gh stack 한 스택에 층을 쌓는다. 층마다 기능 목록(`lib/browser_ca
 | L6 | intercept_network | 차단한 호스트의 fetch 실패와 풀린 뒤 성공을 본다 |
 | L7 | read_storage | 쿠키 이름과 저장소 키 이름. 값이 없는지 본다 |
 | L8 | events 버퍼 함수 하나와 read_network | workflow `events` 와 read_network 를 번갈아 불러 이벤트가 사라지지 않는지 본다 |
-| L9 | read_console (D1 결정 뒤) | 페이지가 쓴 줄과 되돌린 뒤 숨김 상태 |
-| L10 | create_window·close_window (D4 측정 뒤) | 새 창 탭의 label 과 관리 여부 |
+| L9 | read_console | 페이지가 쓴 줄과 되돌린 뒤 숨김 상태 |
+| L10 | create_window·close_window | 새 창 탭의 label 과 관리 여부를 먼저 잰다 |
+| L11 | write_storage | 시험 origin 에 쿠키를 쓰고 지운 뒤 이름 목록 |
 
 시험은 헌법 `testing` 에 맞춰 기능 단위로 쓴다. ego 를 대신하는 시험 실행기가 스크립트 첫 줄의 단계 이름을 읽는 기존 방식을 쓴다(`lib/browser_ego_peer.ml` 의 `frame`).
 

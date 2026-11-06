@@ -1,7 +1,13 @@
 type key = Enter | Tab | Escape | Backspace | Delete | ArrowUp | ArrowDown | ArrowLeft | ArrowRight | Home | End
+type geolocation = { latitude : float; longitude : float; accuracy_m : float }
+type emulation = { geolocation : geolocation option; locale : string option; timezone : string option }
+let default_accuracy_m = 10.
+let max_accuracy_m = 10_000.
 type upload_target = File_input of string | Chooser_opener of string
 type interaction =
   | Upload of { target : upload_target; paths : string list }
+  | Set_emulation of emulation
+  | Clear_emulation
   | Accept_dialog of string option | Dismiss_dialog
   | Back | Forward | Reload | Stop_loading | Close_tab
 type control_wait = { interval_ms : float option; timeout_ms : float option }
@@ -45,6 +51,48 @@ let parse_frame_path = function
   | `Assoc fields -> (match List.assoc_opt "framePath" fields with
       | None -> Ok [] | Some value -> string_list "framePath" value)
   | _ -> Error "browser arguments must be an object"
+(* Locale and time zone names are checked for shape only; the page's own Intl
+   on the ego connection decides which ones exist and refuses the rest before
+   any change. *)
+let is_locale text =
+  let parts = String.split_on_char '-' text in
+  String.length text <= 35 && parts <> []
+  && List.for_all (fun part -> part <> "" && String.length part <= 8
+       && String.for_all (fun c -> (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) part) parts
+  && String.length (List.hd parts) >= 2
+let is_timezone text =
+  String.length text <= 64 && text <> ""
+  && String.for_all (fun c -> (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+       || c = '/' || c = '_' || c = '-' || c = '+') text
+let parse_emulation fields =
+  let number key = match List.assoc_opt key fields with
+    | None -> Ok None
+    | Some (`Int n) -> Ok (Some (float_of_int n))
+    | Some (`Float f) when Float.is_finite f -> Ok (Some f)
+    | Some _ -> Error (key ^ " must be a number") in
+  let* latitude = number "latitude" in
+  let* longitude = number "longitude" in
+  let* accuracy = number "accuracyMeters" in
+  let* geolocation = match latitude, longitude with
+    | None, None -> if accuracy = None then Ok None else Error "accuracyMeters needs latitude and longitude"
+    | Some latitude, Some longitude ->
+      if latitude < -90. || latitude > 90. then Error "latitude must be between -90 and 90"
+      else if longitude < -180. || longitude > 180. then Error "longitude must be between -180 and 180"
+      else
+        let accuracy_m = Option.value accuracy ~default:default_accuracy_m in
+        if accuracy_m <= 0. || accuracy_m > max_accuracy_m
+        then Error (Printf.sprintf "accuracyMeters must be above 0 and at most %.0f" max_accuracy_m)
+        else Ok (Some {latitude; longitude; accuracy_m})
+    | Some _, None | None, Some _ -> Error "latitude and longitude are given together" in
+  let text key ok message = match List.assoc_opt key fields with
+    | None -> Ok None
+    | Some (`String value) when ok value -> Ok (Some value)
+    | Some _ -> Error message in
+  let* locale = text "locale" is_locale "locale must be a language tag such as ko-KR" in
+  let* timezone = text "timezone" is_timezone "timezone must be an IANA name such as Asia/Seoul" in
+  if geolocation = None && locale = None && timezone = None
+  then Error "set_emulation needs a location, a locale or a timezone"
+  else Ok {geolocation; locale; timezone}
 let control_wait_of_json = function
   | `Assoc fields when List.for_all (fun (key,_) -> List.mem key ["interval";"timeout"]) fields
       && List.length fields=List.length (List.sort_uniq String.compare (List.map fst fields)) ->
@@ -76,8 +124,10 @@ let parse = function
       let* () = exact ("tabId" :: "framePath" :: allowed) in
       let* frame_path = parse_frame_path (`Assoc fields) in
       let* () = match interaction, frame_path with
-        | (Back | Forward | Reload | Stop_loading | Close_tab | Accept_dialog _ | Dismiss_dialog), _ :: _ -> Error "this action operates on the top-level tab"
-        | (Back | Forward | Reload | Stop_loading | Close_tab | Accept_dialog _ | Dismiss_dialog), []
+        | (Back | Forward | Reload | Stop_loading | Close_tab | Accept_dialog _ | Dismiss_dialog
+          | Set_emulation _ | Clear_emulation), _ :: _ -> Error "this action operates on the top-level tab"
+        | (Back | Forward | Reload | Stop_loading | Close_tab | Accept_dialog _ | Dismiss_dialog
+          | Set_emulation _ | Clear_emulation), []
         | Upload _, _ -> Ok () in
       let* tab_id = integer "tabId" in
       if tab_id < 0 then Error "tabId must be nonnegative"
@@ -131,6 +181,10 @@ let parse = function
        let* text = match List.assoc_opt "text" fields with
          | None -> Ok None | Some (`String text) -> Ok (Some text) | _ -> Error "text must be a string" in
        on_tab ["text"] (Accept_dialog text)
+     | "set_emulation" ->
+       let* emulation = parse_emulation fields in
+       on_tab ["latitude";"longitude";"accuracyMeters";"locale";"timezone"] (Set_emulation emulation)
+     | "clear_emulation" -> on_tab [] Clear_emulation
      | "dismiss_dialog" -> on_tab [] Dismiss_dialog
      | "back" -> on_tab [] Back | "forward" -> on_tab [] Forward
      | "stop_loading" -> on_tab [] Stop_loading
@@ -158,6 +212,15 @@ let to_json = function
           "paths",`List (List.map (fun p -> `String p) paths)]
       | Accept_dialog text -> "accept_dialog", Option.to_list (Option.map (fun s -> "text",`String s) text)
       | Dismiss_dialog -> "dismiss_dialog", []
+      | Clear_emulation -> "clear_emulation", []
+      | Set_emulation {geolocation;locale;timezone} ->
+        "set_emulation",
+        (match geolocation with
+         | Some {latitude;longitude;accuracy_m} ->
+           ["latitude",`Float latitude;"longitude",`Float longitude;"accuracyMeters",`Float accuracy_m]
+         | None -> [])
+        @ Option.to_list (Option.map (fun l -> "locale",`String l) locale)
+        @ Option.to_list (Option.map (fun z -> "timezone",`String z) timezone)
       | Back -> "back", [] | Forward -> "forward", [] | Reload -> "reload", [] | Stop_loading -> "stop_loading", [] | Close_tab -> "close_tab", [] in
     `Assoc (["action",`String action;"tabId",`Int tab_id] @
       (if frame_path = [] then [] else ["framePath",`List (List.map (fun s -> `String s) frame_path)]) @ args)

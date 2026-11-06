@@ -1,5 +1,15 @@
 (** Closed Firefox interactions. Arguments are parsed before any browser effect. *)
 type key = Enter | Tab | Escape | Backspace | Delete | ArrowUp | ArrowDown | ArrowLeft | ArrowRight | Home | End
+type geolocation = { latitude : float; longitude : float; accuracy_m : float }
+(** A tab's reported environment. Each part is optional, at least one is set;
+    [Clear_emulation] restores its location, language and time zone overrides
+    only. On an ego connection each part is a CDP override on that Page, and
+    setting geolocation also grants the page's origin geolocation in the ego
+    profile; clearing leaves that grant. Overrides and grant end with the ego
+    SDK process that set them. *)
+type emulation = { geolocation : geolocation option; locale : string option; timezone : string option }
+val default_accuracy_m : float
+val max_accuracy_m : float
 (** Where an upload puts its files: [File_input] is a CSS selector for one
     [<input type=file>]; [Chooser_opener] is a CSS selector for the one
     control whose click opens the page's file chooser, as a button that
@@ -7,6 +17,8 @@ type key = Enter | Tab | Escape | Backspace | Delete | ArrowUp | ArrowDown | Arr
 type upload_target = File_input of string | Chooser_opener of string
 type interaction =
   | Upload of { target : upload_target; paths : string list }
+  | Set_emulation of emulation
+  | Clear_emulation
   | Accept_dialog of string option | Dismiss_dialog
   | Back | Forward | Reload
   | Stop_loading

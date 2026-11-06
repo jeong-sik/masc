@@ -11,7 +11,7 @@ type operation =
   | Read_frames | Frame_interaction | Read_dialog | Accept_dialog | Dismiss_dialog
   | Hand_off | Take_over | Space_status | Finish_space | Wait_for_control | Adopt_tab | Release_tab
   | Upload_file | List_downloads | Page_zoom | Resize_viewport | Touch
-  | Read_clipboard | Write_clipboard
+  | Read_clipboard | Write_clipboard | Emulate_environment
 [@@deriving enumerate]
 type tool = Tabs | Read | Interact | Act | Session | Goto
 type invocation = { tool : tool; action : string option; mode : string option }
@@ -366,6 +366,13 @@ let support backend operation = match backend with
       | Connected Browser_lane.Ego_task_space | Safari_unavailable -> missing)
     | Pointer_down | Pointer_up -> missing
     | Read_clipboard | Write_clipboard -> missing
+    | Emulate_environment -> (match backend with
+      | Connected Browser_lane.Ego_task_space -> conditional ~action:"set_emulation" Act
+          [observed;"Sets the Page's reported location (latitude and longitude together, optional accuracyMeters up to 10000), locale and IANA time zone, any of the three, through CDP overrides on that Page. The page's own Intl checks the locale and time zone first: a name it does not know is refused before any change, and a time zone the page does not report afterwards is a failure.";
+           "The locale changes Intl only; navigator.language and Accept-Language stay. A location also grants the page's origin geolocation for every tab of that origin in the ego profile. Overrides and grant stay while the SDK process that set them runs; every answer's sdkProcessStartedAt names that process, and another value means they are gone. clear_emulation restores the overrides only and leaves the grant.";
+           "A page that already read its location, language or time zone keeps what it read: reload it afterwards.";
+           ego_agent_pages]
+      | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Safari_unavailable -> missing)
 let catalog backend = List.map (fun operation -> {operation;support=support backend operation}) operations
 let operation_name = function
   | List_tabs -> "list_tabs" | Open_tab -> "open_tab" | Close_tab -> "close_tab"
@@ -388,6 +395,7 @@ let operation_name = function
   | Upload_file -> "upload_file"
   | List_downloads -> "list_downloads" | Page_zoom -> "page_zoom" | Resize_viewport -> "resize_viewport"
   | Touch -> "touch" | Read_clipboard -> "read_clipboard" | Write_clipboard -> "write_clipboard"
+  | Emulate_environment -> "emulate_environment"
 let operation_of_wire name = List.find_opt (fun operation -> String.equal (operation_name operation) name) operations
 let parse_required_actions = function
   | `List values ->

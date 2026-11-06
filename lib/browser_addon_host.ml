@@ -424,7 +424,7 @@ let issue ?goal_space ?upload_paths ?(required_actions=[]) t ~preference verb =
     | Browser_lane.Page_act (Browser_lane.Action.On_tab {interaction=Upload {paths;_};_}) -> Some paths
     | Tabs_list|Page_read _|Page_document _|Page_downloads _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _
     | Page_goto _|Page_elements _
-    |Page_act (Open_tab _|Open_window _|Control _|On_tab {interaction=Close_tab|Back|Forward|Reload|Stop_loading|Accept_dialog _|Dismiss_dialog;_})
+    |Page_act (Open_tab _|Open_window _|Control _|On_tab {interaction=Close_tab|Back|Forward|Reload|Stop_loading|Accept_dialog _|Dismiss_dialog|Set_emulation _|Clear_emulation;_})
     |Page_context _ -> None in
   (* The grant is staged for the exact route the command goes to: a live
      connection the worker runs, which the selection names. *)

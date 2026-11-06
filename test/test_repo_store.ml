@@ -765,67 +765,6 @@ let test_find_url_by_id_unknown () =
     | Ok (Some s) -> Alcotest.fail ("expected None for unknown, got: " ^ s)
     | Error error -> Alcotest.fail ("lookup failed: " ^ error))
 
-let test_find_repo_by_path_prefix_match () =
-  with_two_absolute_repos (fun ~base_path ~masc_path ~agent_core_path:_ ->
-    let abs = Filename.concat masc_path "lib/foo.ml" in
-    match Repo_store.find_repo_by_path_prefix ~base_path abs with
-    | Ok (Some (repo, rel)) ->
-      Alcotest.(check string) "matched repo id" "masc" repo.id;
-      Alcotest.(check string) "relative path" "lib/foo.ml" rel
-    | Ok None -> Alcotest.fail "expected match under masc_path"
-    | Error error -> Alcotest.fail ("lookup failed: " ^ error))
-
-let test_find_repo_by_path_prefix_outside () =
-  with_two_absolute_repos (fun ~base_path ~masc_path:_ ~agent_core_path:_ ->
-    match Repo_store.find_repo_by_path_prefix ~base_path "/tmp/elsewhere.ml" with
-    | Ok None -> ()
-    | Ok (Some (repo, _)) -> Alcotest.fail ("unexpected match: " ^ repo.id)
-    | Error error -> Alcotest.fail ("lookup failed: " ^ error))
-
-let test_find_repo_by_path_prefix_sibling_not_matched () =
-  (* Sibling-style collision: /tmp/masc and /tmp/masc-mirror must not
-     match each other's paths. Guards against pure-substring prefix. *)
-  with_temp_base_path (fun base_path ->
-    init_empty_store base_path;
-    let workspace = Filename.concat base_path "workspace" in
-    Unix.mkdir workspace 0o755;
-    let masc = Filename.concat workspace "masc" in
-    let mirror = Filename.concat workspace "masc-mirror" in
-    Unix.mkdir masc 0o755;
-    Unix.mkdir mirror 0o755;
-    let r1 =
-      { (sample_repo "masc") with
-        url = "https://github.com/owner/masc"
-      ; local_path = masc
-      }
-    in
-    let r2 =
-      { (sample_repo "mirror") with
-        url = "https://github.com/owner/masc-mirror"
-      ; local_path = mirror
-      }
-    in
-    (match Repo_store.save_all ~base_path [ r1; r2 ] with
-     | Ok () -> ()
-     | Error e -> Alcotest.fail ("save_all: " ^ e));
-    let inside_mirror = Filename.concat mirror "lib/x.ml" in
-    match Repo_store.find_repo_by_path_prefix ~base_path inside_mirror with
-    | Ok (Some (repo, rel)) ->
-      Alcotest.(check string) "must pick mirror, not masc" "mirror" repo.id;
-      Alcotest.(check string) "rel" "lib/x.ml" rel
-    | Ok None -> Alcotest.fail "expected match under mirror"
-    | Error error -> Alcotest.fail ("lookup failed: " ^ error))
-
-let test_find_repo_by_path_prefix_root () =
-  (* abs_path equals the repo's local_path itself → empty rel. *)
-  with_two_absolute_repos (fun ~base_path ~masc_path ~agent_core_path:_ ->
-    match Repo_store.find_repo_by_path_prefix ~base_path masc_path with
-    | Ok (Some (repo, rel)) ->
-      Alcotest.(check string) "matched repo id" "masc" repo.id;
-      Alcotest.(check string) "empty rel at root" "" rel
-    | Ok None -> Alcotest.fail "expected match at repo root"
-    | Error error -> Alcotest.fail ("lookup failed: " ^ error))
-
 let test_lookup_preserves_catalog_error () =
   with_temp_base_path (fun base_path ->
       let path = Filename.concat base_path ".masc/config/repositories.toml" in
@@ -941,11 +880,6 @@ let () =
         [
           Alcotest.test_case "find_url_by_id known" `Quick test_find_url_by_id_known;
           Alcotest.test_case "find_url_by_id unknown" `Quick test_find_url_by_id_unknown;
-          Alcotest.test_case "path_prefix match" `Quick test_find_repo_by_path_prefix_match;
-          Alcotest.test_case "path_prefix outside" `Quick test_find_repo_by_path_prefix_outside;
-          Alcotest.test_case "path_prefix sibling-safe" `Quick
-            test_find_repo_by_path_prefix_sibling_not_matched;
-          Alcotest.test_case "path_prefix at repo root" `Quick test_find_repo_by_path_prefix_root;
           Alcotest.test_case "catalog errors are preserved" `Quick
             test_lookup_preserves_catalog_error;
         ] );

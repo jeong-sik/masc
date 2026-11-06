@@ -98,3 +98,6 @@ val apply : plan -> applied
     whose table this run was to write and did not, since its worker fails
     without that table. *)
 val without : Browser_lane.Backend.t list -> plan -> plan
+
+val packages_dirname : string
+(** The package directory below [<base>/.masc]. *)

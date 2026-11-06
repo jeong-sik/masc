@@ -321,37 +321,43 @@ let test_unchanged_facts_are_no_work () =
   Alcotest.(check int) "no vanished facts" 0 (List.length result.vanished);
   Alcotest.check json "ledger unchanged" (Ledger.to_json ledger) (Ledger.to_json result.ledger)
 
-let test_vanished_members_leave_and_empty_entries_go () =
+let test_an_entry_that_loses_a_member_goes_and_its_other_members_are_new () =
   let ledger =
     decode (ledger_json
-              ~claims:["c1", "Build uses dune"]
+              ~claims:["c1", "Build uses dune"; "c2", "Tests run from the worktree root"]
               ~conflicts:["x1", "Owners disagree on the port"]
               [ ordinary_ref "writer" "Build uses dune", claim_member "c1"
               ; ordinary_ref "reviewer" "Build uses dune", claim_member "c1"
+              ; ordinary_ref "writer" "Tests run from the worktree root", claim_member "c2"
+              ; ordinary_ref "tester" "Tests run from the worktree root", claim_member "c2"
               ; ordinary_ref "reviewer" "Port is 8935", conflict_member "x1"
-              ; ordinary_ref "auditor" "Port is 8936", conflict_member "x1" ])
+              ; ordinary_ref "auditor" "Port is 8936", conflict_member "x1"
+              ; ordinary_ref "gone" "Old local note", excluded "local detail" ])
   in
   let result =
     Ledger.reconcile ledger
-      [ keeper "writer" ~ordinary:(Context.Available (ordinary ["Build uses dune"]))
+      [ keeper "writer"
+          ~ordinary:(Context.Available (ordinary ["Build uses dune"; "Tests run from the worktree root"]))
       ; keeper "reviewer" ~ordinary:(Context.Available (ordinary ["Port is 8935"]))
+      ; keeper "tester" ~ordinary:(Context.Available (ordinary ["Tests run from the worktree root"]))
       ; keeper "auditor" ~ordinary:(Context.Available (ordinary [])) ]
   in
   Alcotest.(check (list fact_ref)) "vanished facts"
-    [ ordinary_ref "auditor" "Port is 8936"; ordinary_ref "reviewer" "Build uses dune" ]
+    [ ordinary_ref "auditor" "Port is 8936"
+    ; ordinary_ref "gone" "Old local note"
+    ; ordinary_ref "reviewer" "Build uses dune" ]
     result.vanished;
-  Alcotest.(check (list string)) "claim keeps its remaining member" ["c1"]
+  Alcotest.(check (list string)) "only the claim that kept every member stays" ["c2"]
     (List.map fst (Ledger.claims result.ledger));
-  Alcotest.(check (list string)) "conflict keeps its remaining member" ["x1"]
+  Alcotest.(check (list string)) "the conflict that lost a member goes" []
     (List.map fst (Ledger.conflicts result.ledger));
-  let second =
-    Ledger.reconcile result.ledger
-      [ keeper "writer" ~ordinary:(Context.Available (ordinary []))
-      ; keeper "reviewer" ~ordinary:(Context.Available (ordinary [])) ]
-  in
-  Alcotest.(check int) "claim without members is removed" 0 (List.length (Ledger.claims second.ledger));
-  Alcotest.(check int) "conflict without members is removed" 0 (List.length (Ledger.conflicts second.ledger));
-  Alcotest.(check int) "no dispositions left" 0 (List.length (Ledger.dispositions second.ledger))
+  Alcotest.(check (list fact_ref)) "the kept claim's members keep their disposition"
+    [ ordinary_ref "tester" "Tests run from the worktree root"
+    ; ordinary_ref "writer" "Tests run from the worktree root" ]
+    (List.map fst (Ledger.dispositions result.ledger));
+  Alcotest.(check (list fact_ref)) "the other members of a gone entry are new again"
+    [ ordinary_ref "reviewer" "Port is 8935"; ordinary_ref "writer" "Build uses dune" ]
+    (new_refs result)
 
 let test_unavailable_store_keeps_its_facts () =
   let ledger =
@@ -379,10 +385,10 @@ let test_unavailable_store_keeps_its_facts () =
 let test_same_claim_in_two_files_is_two_facts () =
   let claim = "Port is 8935" in
   let ledger =
-    decode (ledger_json ~claims:["c1", claim]
-              [ source_ref "writer" "notes/a.md" claim, claim_member "c1"
-              ; source_ref "writer" "notes/b.md" claim, claim_member "c1"
-              ; ordinary_ref "reviewer" claim, claim_member "c1" ])
+    decode (ledger_json
+              [ source_ref "writer" "notes/a.md" claim, excluded "local detail"
+              ; source_ref "writer" "notes/b.md" claim, excluded "local detail"
+              ; ordinary_ref "reviewer" claim, excluded "local detail" ])
   in
   let result =
     Ledger.reconcile ledger
@@ -513,8 +519,8 @@ let () =
     ; ( "reconcile"
       , [ Alcotest.test_case "new facts are oldest first" `Quick test_new_facts_are_oldest_first
         ; Alcotest.test_case "unchanged facts are no work" `Quick test_unchanged_facts_are_no_work
-        ; Alcotest.test_case "vanished members leave and empty entries go" `Quick
-            test_vanished_members_leave_and_empty_entries_go
+        ; Alcotest.test_case "an entry that loses a member goes and its other members are new" `Quick
+            test_an_entry_that_loses_a_member_goes_and_its_other_members_are_new
         ; Alcotest.test_case "unavailable store keeps its facts" `Quick
             test_unavailable_store_keeps_its_facts ] )
     ; ( "apply"

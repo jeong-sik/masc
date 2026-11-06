@@ -112,12 +112,16 @@ type pending_fact =
   }
 
 type reconciliation =
-  { ledger : t  (** the input ledger without the [vanished] facts *)
+  { ledger : t
+        (** the input ledger without the [vanished] facts and without every
+            claim or conflict that lost a member *)
   ; current_facts : pending_fact list
         (** All readable current facts, in discovery and store order. *)
   ; new_facts : pending_fact list
-        (** Oldest store [first_seen] first; facts first seen at the same
-            instant follow Keeper, store, path and hash order. *)
+        (** Current facts [ledger] has no disposition for, including the
+            other members of a claim or conflict that lost a member. Oldest
+            store [first_seen] first; facts first seen at the same instant
+            follow Keeper, store, path and hash order. *)
   ; vanished : fact_ref list  (** in [dispositions] order *)
   }
 
@@ -125,8 +129,10 @@ val reconcile : t -> Workspace_memory_context.keeper list -> reconciliation
 (** Compare the ledger with what the stores hold now. A disposition vanishes
     when its store was read and no longer holds the fact, when the store has
     no file, or when its Keeper is not in the list. An [Unavailable] store
-    adds no new facts and loses none. Removing a vanished member drops a
-    claim or conflict left with no members. Makes no model call. *)
+    adds no new facts and none of its facts vanish. A claim's or conflict's
+    text is written once and never rewritten, so a claim or conflict that
+    loses any member is dropped, and its other members lose their
+    disposition, also in an [Unavailable] store. Makes no model call. *)
 
 (** One model decision for a changed fact. A new claim or conflict receives a
     stable id derived from its text; existing ids must already be in [t]. *)

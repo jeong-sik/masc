@@ -112,6 +112,7 @@
   keeper_checkpoint_store_save
   keeper_sqlite_observation_io
   keeper_fs_durable_directory
+  keeper_chat_store_paths
   keeper_runtime_trust_snapshot_core)
  (libraries
   masc.sse_queue_inventory

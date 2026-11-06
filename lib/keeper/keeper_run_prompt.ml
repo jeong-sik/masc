@@ -41,8 +41,10 @@ let assemble_extra_system_context = Keeper_context_assembly.assemble
    Only the Goal observation is a System suffix. A later round of the same
    turn carries this turn's authority block again because the post-tool
    assembly drops the [Dynamic_context] it came from (#45853). RFC-0491
-   §3.2: the articles changed since the System was rendered ride every round
-   with it. *)
+   §3.3: the Goals Awaiting Proof layer moves with Goal phases, so it is a
+   context block too, carried to later rounds the same way. RFC-0491 §3.2:
+   the articles changed since the System was rendered ride every round with
+   it. *)
 let assemble_request_context ~(system : Keeper_turn_system.t) ~post_tool_round ~previous_assembly
     ~dynamic_context_partition ~existing_extra_system_context ~blocks =
   let observations, blocks, dynamic_context_partition =
@@ -52,9 +54,10 @@ let assemble_request_context ~(system : Keeper_turn_system.t) ~post_tool_round ~
       | Some (previous : Keeper_context_assembly.t) ->
         let observations = match previous.system_prompt with
           | None -> [] | Some issued -> issued.observations in
-        let authority = List.filter (fun (id, _) ->
-            Prompt_block_id.equal id Prompt_block_id.Completion_authority) previous.blocks in
-        observations, authority @ blocks, dynamic_context_partition
+        let carried = List.filter (fun (id, _) ->
+            Prompt_block_id.equal id Prompt_block_id.Completion_authority
+            || Prompt_block_id.equal id Prompt_block_id.Goals_awaiting_proof) previous.blocks in
+        observations, carried @ blocks, dynamic_context_partition
     else
       match dynamic_context_partition,
         List.filter (fun (id, _) -> Prompt_block_id.equal id Prompt_block_id.Dynamic_context) blocks with
@@ -62,16 +65,19 @@ let assemble_request_context ~(system : Keeper_turn_system.t) ~post_tool_round ~
         let sections = Keeper_context_layers.sections partition in
         let unique layer = List.length (List.filter (fun (section : Keeper_context_layers.section) ->
           section.section_source = Keeper_context_layers.Layer layer) sections) <= 1 in
-        if not (unique Active_goals && unique Completion_authority)
+        if not (unique Active_goals && unique Goals_awaiting_proof && unique Completion_authority)
         then [], blocks, dynamic_context_partition
         else
           let goals, remaining = Keeper_context_layers.partition_layer Active_goals partition in
+          let awaiting, remaining = Keeper_context_layers.partition_layer Goals_awaiting_proof remaining in
           let authority, remaining = Keeper_context_layers.partition_layer Completion_authority remaining in
           let observations = match Keeper_context_layers.text goals with
             | "" -> [] | text -> [Keeper_context_assembly.Active_goals (Inference_utils.sanitize_text_utf8 text)] in
-          let authority = match Keeper_context_layers.text authority with
-            | "" -> [] | text -> [Prompt_block_id.Completion_authority, Inference_utils.sanitize_text_utf8 text] in
-          observations, authority @ List.map (fun (id, text) ->
+          let block id layer = match Keeper_context_layers.text layer with
+            | "" -> [] | text -> [id, Inference_utils.sanitize_text_utf8 text] in
+          let split = block Prompt_block_id.Goals_awaiting_proof awaiting
+            @ block Prompt_block_id.Completion_authority authority in
+          observations, split @ List.map (fun (id, text) ->
             if Prompt_block_id.equal id Prompt_block_id.Dynamic_context
             then id, Keeper_context_layers.text remaining else id, text) blocks, Some remaining
       | Some _, _ | None, _ -> [], blocks, dynamic_context_partition

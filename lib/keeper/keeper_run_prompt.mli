@@ -50,14 +50,16 @@ val assemble_request_context :
   existing_extra_system_context:string option ->
   blocks:(Prompt_block_id.t * string) list -> extra_system_context_assembly
 (** Split uniquely renderer-attributed Active Goals into a stable system
-    suffix and Completion Authority into its own context block. Missing, stale
-    or duplicate renderer sections acquire neither identity.
+    suffix, and Goals Awaiting Proof and Completion Authority into context
+    blocks of their own. Missing, stale or duplicate renderer sections acquire
+    none of these identities.
     [system] is the System the request sends: the turn's own, or
     {!Keeper_turn_system.with_bytes} of a pre-existing override. Its
     amendments ride every round as the
     {!Prompt_block_id.Constitution_amendments} block. Later tool rounds
-    retain only that exact issued observation, the Completion Authority block
-    the previous round of this turn carried, and permitted extra blocks.
+    retain only that exact issued observation, the Goals Awaiting Proof and
+    Completion Authority blocks the previous round of this turn carried, and
+    permitted extra blocks.
     Other world state stays first-round only. No store read or
     conversation-history write. *)
 

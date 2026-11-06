@@ -14,9 +14,10 @@ val internal_error : string -> Agent_core.Error.t
     provider behaviour. *)
 
 type turn_observation
-(** The Completion Authority block an official turn takes out of its context
-    carrier (RFC-0491 §3.1): an event the vendor's persistent System must not
-    keep. It is delivered as current-turn User input on Start and on every
+(** The Completion Authority and Goals Awaiting Proof blocks an official turn
+    takes out of its context carrier (RFC-0491 §3.1, §3.3): an event, and a
+    Goal phase, that the vendor's persistent System must not keep past the
+    turn. Each is delivered as current-turn input on Start and on every
     Resume, with the issuer's carrier span as its source. *)
 
 type prepared_turn =
@@ -30,7 +31,7 @@ type prepared_turn =
   ; composed_context : Keeper_context_assembly.t option
     (** The issuer snapshot read once after the hook, shared by Start and Resume.
         A stale issued System invalidates the snapshot for both projections.
-        It is the issuer re-issued without [turn_observation]'s block. *)
+        It is the issuer re-issued without [turn_observation]'s blocks. *)
   ; turn_observation : turn_observation option
   ; tools : Agent_core.Tool.t list
   ; reasoning_effort : Llm_provider.Reasoning_effort.t option
@@ -282,9 +283,9 @@ val transmitted_carrier_receipt :
   composed_context -> Keeper_context_assembly.receipt option
 (** [transmitted_carrier_receipt issuer] is the receipt of the carrier
     {!prepare_turn} leaves in the messages when it finds [issuer]'s carrier
-    there: the carrier without the Completion Authority block, which goes out
-    as current-turn input instead. [None] when that block was the carrier's
-    only block, or [issuer] has no carrier. *)
+    there: the carrier without the Completion Authority and Goals Awaiting
+    Proof blocks, which go out as current-turn input instead. [None] when
+    those were the carrier's only blocks, or [issuer] has no carrier. *)
 (** The immutable renderer-issued assembly behind a turn's context carrier.
     Only exact carrier bytes without an existing prefix and with unique block
     identities permit splitting. Otherwise the whole carrier is retained. *)

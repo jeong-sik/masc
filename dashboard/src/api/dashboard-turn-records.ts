@@ -18,6 +18,7 @@ export const TURN_PROMPT_BLOCK_IDS = [
   'dynamic_context',
   'active_goals',
   'completion_authority',
+  'goals_awaiting_proof',
   'constitution_amendments',
   'temporal_summary',
   'memory_os_recall',

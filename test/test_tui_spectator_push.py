@@ -64,6 +64,7 @@ class SpectatorServer(lane_fixture.LaneServer):
     def __init__(self, base: str) -> None:
         super().__init__(base)
         self.RequestHandlerClass = SpectatorHandler
+        self.machines_first = True
         self.observer_restart_on_resume = False
 
 
@@ -81,7 +82,7 @@ class SpectatorPushTest(unittest.TestCase):
             step("wait", lambda: spectator.response_count("open", lane_fixture.LANES) >= 1,
                  "Lanes did not open")
             step("drain", 0.3)
-            step("keys", "jjjjjjj\r")
+            step("keys", "\r")
             step("wait", lambda: spectator.response_count("open", "live:msx_capture") >= 1,
                  "MSX did not open from its Lane row")
             step("wait", lambda: spectator.count("open", "observer-play:msx") == 1,

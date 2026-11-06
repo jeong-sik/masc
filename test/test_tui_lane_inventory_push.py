@@ -104,14 +104,23 @@ def machine_row(machine: str) -> dict:
     }
 
 
-def lane_payload() -> dict:
+def lane_payload(machines_first: bool = False) -> dict:
     lanes = ["librarian", "hitl_auto_judge", "board_attention", "verifier", "candle_appraiser"]
     return {
         "schema": "masc.lane-inventory/v1",
         "observed_at": 1.0,
-        "rows": [exact_row(name) for name in lanes]
-        + [browser_row("live")]
-        + [machine_row("msx"), machine_row("dos")],
+        # Rows without a ui_category keep payload order and the cursor starts on
+        # the first one, so the Lane tests that open MSX put the machines first
+        # instead of counting key presses past the other rows.
+        "rows": (
+            [machine_row("msx"), machine_row("dos")]
+            + [exact_row(name) for name in lanes]
+            + [browser_row("live")]
+            if machines_first
+            else [exact_row(name) for name in lanes]
+            + [browser_row("live")]
+            + [machine_row("msx"), machine_row("dos")]
+        ),
         "exact_snapshot": {
             "schema": "masc.standalone_llm_lanes.v2",
             "generated_at": "2026-10-04T00:00:00Z",
@@ -163,7 +172,10 @@ class LaneHandler(owed.ChatHandler):
             with server.condition:
                 fail = server.failures_left > 0
                 server.failures_left = max(0, server.failures_left - 1)
-            sent = self.respond(503 if fail else 200, lane_payload())
+            sent = self.respond(
+                503 if fail else 200,
+                lane_payload(getattr(server, "machines_first", False)),
+            )
             if sent:
                 server.responded(phase, request.path)
             return
@@ -178,6 +190,7 @@ class LaneHandler(owed.ChatHandler):
 class LaneServer(owed.ChatServer):
     def __init__(self, base: str) -> None:
         super().__init__(base)
+        self.machines_first = False
         self.RequestHandlerClass = LaneHandler
         self.hold_lanes = threading.Event()
         self.lanes_held = threading.Event()

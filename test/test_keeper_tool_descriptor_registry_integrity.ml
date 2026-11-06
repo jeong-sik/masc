@@ -383,8 +383,6 @@ let test_registered_cluster_model_projections_are_explicit () =
          and the screen's only Keeper-specific line is a false "session is not
          bound" warning. The tool stays registered for MCP/HTTP consumers. *)
       "masc_status"
-    ; "masc_pause"
-    ; "masc_resume"
       (* Completion-backed runtime verification and the native Ollama timing
          probe are explicit Admin diagnostics, distinct from
          [/api/v1/dashboard/runtime-probe], which reads metadata only. Both can

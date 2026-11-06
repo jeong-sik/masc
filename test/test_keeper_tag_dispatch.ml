@@ -53,24 +53,6 @@ let test_pause_status_allowed () =
     | None ->
         fail "masc_pause_status returned None (tool not recognized)")
 
-let test_pause_allowed () =
-  with_workspace (fun config ->
-    match dispatch config "masc_pause" with
-    | Some tr when Tool_result.is_success tr -> ()
-    | Some tr ->
-        failf "masc_pause should succeed: %s" (Tool_result.message tr)
-    | None ->
-        fail "masc_pause returned None")
-
-let test_resume_allowed () =
-  with_workspace (fun config ->
-    match dispatch config "masc_resume" with
-    | Some tr when Tool_result.is_success tr -> ()
-    | Some tr ->
-        failf "masc_resume should succeed: %s" (Tool_result.message tr)
-    | None ->
-        fail "masc_resume returned None")
-
 let test_other_inline_blocked () =
   with_workspace (fun config ->
     match dispatch_inline config "masc_get_metrics" with
@@ -177,8 +159,6 @@ let () =
   Alcotest.run "Keeper_tag_dispatch" [
     "Mod_control routing", [
       test_case "masc_pause_status allowed" `Quick test_pause_status_allowed;
-      test_case "masc_pause allowed" `Quick test_pause_allowed;
-      test_case "masc_resume allowed" `Quick test_resume_allowed;
     ];
     "Mod_inline gate", [
       test_case "inline tools blocked" `Quick test_other_inline_blocked;

@@ -101,8 +101,8 @@ let test_empty_directory_is_a_complete_read () =
     Yojson.Safe.Util.(json |> member "truncated" |> to_bool);
   let pause = pause_status config in
   check bool "empty pause census succeeds" true (Tool_result.is_success pause);
-  check bool "no pause is known active" false
-    Yojson.Safe.Util.(Tool_result.data pause |> member "any_pause_active" |> to_bool);
+  check bool "no keeper is known paused" false
+    Yojson.Safe.Util.(Tool_result.data pause |> member "keeper_pause" |> member "paused" |> to_bool);
   List.iter
     (fun (label, project, expected_status) ->
       let json = project () in

@@ -22,10 +22,7 @@ type prepared_kind =
       omitted : int;
       row_count : int;
     }
-  | Materialized of {
-      sha256 : string;
-      bytes : int;
-    }
+  | Materialized of { sha256 : string }
 
 type prepared_change = {
   change : Masc.Tui_decode.file_change;
@@ -118,10 +115,10 @@ let prepare (change : Masc.Tui_decode.file_change) =
           Diff.preview ~context:0 ~max_rows:preview_rows rows
         in
         Written { preview; omitted; row_count = List.length rows }
-    | Masc.Tui_decode.Fc_materialized { sha256; bytes } ->
+    | Masc.Tui_decode.Fc_materialized { sha256 } ->
         (* The call names the blob, not its text, so there is no body to
-           diff. The coordinates are all the log holds. *)
-        Materialized { sha256; bytes }
+           diff. The blob's identity is all the log holds. *)
+        Materialized { sha256 }
   in
   { change; kind }
 
@@ -412,10 +409,9 @@ let written_section ~max_line_cells (change : Masc.Tui_decode.file_change)
                           @ omission_row ~max_line_cells omitted)
 
 let materialized_section ~max_line_cells (change : Masc.Tui_decode.file_change)
-      ~sha256 ~bytes =
+      ~sha256 =
   let summary =
-    if change.fc_succeeded then Printf.sprintf "(%d bytes materialized)" bytes
-    else Printf.sprintf "(%d-byte materialize attempt)" bytes
+    if change.fc_succeeded then "(materialized)" else "(materialize attempt)"
   in
   let address = address_row ~max_line_cells ~summary change in
   let evidence_rows =
@@ -428,7 +424,7 @@ let materialized_section ~max_line_cells (change : Masc.Tui_decode.file_change)
   in
   let detail =
     Printf.sprintf
-      "  materialized blob %s · the log holds the blob's coordinates, not its bytes%s"
+      "  materialized blob %s · the log holds the blob's identity, not its bytes%s"
       (short_sha256 sha256) (attempted_suffix change)
     |> clipped ~max_cells:max_line_cells
   in
@@ -442,8 +438,8 @@ let section ~max_line_cells prepared =
         ~replace_all ~numbered
   | Written { preview; omitted; row_count } ->
       written_section ~max_line_cells change ~preview ~omitted ~row_count
-  | Materialized { sha256; bytes } ->
-      materialized_section ~max_line_cells change ~sha256 ~bytes
+  | Materialized { sha256 } ->
+      materialized_section ~max_line_cells change ~sha256
 
 let rows ~mode ~max_line_cells ?(activity_details = fun _ -> []) indexed
     (projection : Transcript.tool_projection) =

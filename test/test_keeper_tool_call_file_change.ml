@@ -671,9 +671,7 @@ let test_materialize_is_a_file_change () =
          (materialize_input ()))
   in
   match change.Change.kind with
-  | Change.Materialized { sha256; bytes } ->
-      check string "blob sha256" (String.make 64 'a') sha256;
-      check int "blob bytes" 4096 bytes
+  | Change.Materialized { sha256 } -> check string "blob sha256" (String.make 64 'a') sha256
   | Change.Edited _ | Change.Written _ | Change.Inserted _ -> fail "expected Materialized"
 ;;
 

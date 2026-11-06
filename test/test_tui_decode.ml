@@ -13961,7 +13961,7 @@ let test_decode_file_change_reads_an_insert () =
 
 let test_decode_file_change_reads_a_materialize () =
   (* [keeper_artifact_transfer materialize] writes a blob's bytes into a file.
-     The projection sends the blob's coordinates, not its text, so the reader
+     The projection sends the blob's identity, not its text, so the reader
      must accept the kind instead of rejecting the whole snapshot. *)
   let sha256 = String.make 64 'a' in
   let change =
@@ -13977,10 +13977,7 @@ let test_decode_file_change_reads_a_materialize () =
             [ ("kind", `String "absolute"); ("path", `String "/tmp/poster.png") ] )
       ; ( "change"
         , `Assoc
-            [ ("kind", `String "materialize")
-            ; ("sha256", `String sha256)
-            ; ("bytes", `Int 4096)
-            ] )
+            [ ("kind", `String "materialize"); ("sha256", `String sha256) ] )
       ; ("succeeded", `Bool true)
       ]
   in
@@ -14000,9 +13997,8 @@ let test_decode_file_change_reads_a_materialize () =
     (match snapshot.Tui_decode.fcs_changes with
      | [ change ] ->
        (match change.Tui_decode.fc_kind with
-        | Tui_decode.Fc_materialized { sha256 = got; bytes } ->
-          Alcotest.(check string) "the blob's sha256" sha256 got;
-          Alcotest.(check int) "the blob's byte count" 4096 bytes
+        | Tui_decode.Fc_materialized { sha256 = got } ->
+          Alcotest.(check string) "the blob's sha256" sha256 got
         | Tui_decode.Fc_edited _ | Tui_decode.Fc_written _
         | Tui_decode.Fc_inserted _ -> Alcotest.fail "expected a materialize")
      | [] | _ :: _ :: _ -> Alcotest.fail "expected one change")

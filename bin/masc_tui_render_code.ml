@@ -162,7 +162,7 @@ let history_change_rows ~cols (change : Masc.Tui_decode.file_change) =
         (if replace_all then ["replace_all: recorded text once; every occurrence was targeted"] else [])
     | Fc_inserted { text; _ } -> "", text, ["Inserted text; surrounding file is not recorded"]
     | Fc_written { content } -> "", content, ["Written content; previous file bytes are not recorded"]
-    | Fc_materialized _ -> "", "", ["Blob coordinates only; no recorded text to compare"]
+    | Fc_materialized _ -> "", "", ["Blob identity only; no recorded text to compare"]
   in
   let rows = Diff.rows ~before ~after |> List.concat_map (fun row ->
     let marker, style, text = match row with

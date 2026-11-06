@@ -123,7 +123,7 @@ type 'identity http_scoped_surface_readings = {
     option;
   http_keeper_usage: (Masc.Tui_decode_usage.keeper_usage_window, string) result option;
   http_provider_history: provider_history_reading option;
-  (* [None] off the Overview, the one surface that draws the GOALS section. *)
+  (* [None] off Work, the one surface that reads the Goal measurement tree. *)
   http_overview_goals: (Masc.Tui_decode.overview_goal list, string) result option;
   (* [None] off Usage, the surface that draws account emails. *)
   http_account_emails: ((string * string) list * int, string) result option;

@@ -13,7 +13,8 @@ Reads three things under `<base-path>/.masc` and never writes to them:
   `request_latency_ms`, `input_tokens`, `non_cached_input_tokens`, `output_tokens` and
   `runtime_id`.
 - `tool_calls/YYYY-MM/DD.jsonl` and its `DD.NNN.jsonl` segments: `keeper`,
-  `keeper_turn_id`, `ts` (when the call started), `tool` and `input_fingerprint`.
+  `keeper_turn_id`, `ts` (when the row was written, after the call returned), `tool` and
+  `input_fingerprint`.
 
 Definitions:
 
@@ -56,8 +57,10 @@ Definitions:
   turn that a shutdown stops records nothing, so the next turn of that Keeper takes the same
   number. "Resumed" therefore means the Keeper ran another turn after the restart. It does not
   show that the stopped work went on.
-- repeated call: a tool call that starts after the stop and has the same tool and
-  `input_fingerprint` as a call of the same turn that started before it.
+- repeated call: a tool call whose `ts` is more than `CLOCK_SLACK_S` after the stop and that has
+  the same tool and `input_fingerprint` as a call of the same turn whose `ts` is at or before the
+  stop. Reading each call at `ts - duration_ms`, its start, instead gives the same counts in the
+  three windows of 2026-11-01 to 2026-11-05 (counted outside the script).
 - turn span: the first request start to the last request end of a turn. It leaves out
   the time before the first and after the last model request.
 - finish share for a wait of D seconds: for a cut turn that had run e seconds, take the

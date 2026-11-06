@@ -52,13 +52,8 @@ type t = {
 
 open Result.Syntax
 
-let assoc_opt key = function
-  | `Assoc fields -> List.assoc_opt key fields
-  | _ -> None
-;;
-
 let require_field key json =
-  match assoc_opt key json with
+  match Json_util.assoc_member_opt key json with
   | Some value -> Ok value
   | None -> Error (Printf.sprintf "missing field: %s" key)
 ;;
@@ -78,7 +73,7 @@ let require_string key json =
 ;;
 
 let optional_string key json =
-  match assoc_opt key json with
+  match Json_util.assoc_member_opt key json with
   | None | Some `Null -> Ok None
   | Some (`String s) -> Ok (Some s)
   | Some _ -> Error (Printf.sprintf "%s must be string or null" key)

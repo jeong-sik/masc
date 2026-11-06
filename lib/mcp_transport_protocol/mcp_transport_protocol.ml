@@ -101,12 +101,8 @@ let has_field key = function
   | `Assoc fields -> List.exists (fun (k, _) -> k = key) fields
   | _ -> false
 
-let get_field key = function
-  | `Assoc fields -> List.assoc_opt key fields
-  | _ -> None
-
 let is_jsonrpc_v2 json =
-  match get_field "jsonrpc" json with
+  match Json_util.assoc_member_opt "jsonrpc" json with
   | Some (`String "2.0") -> true
   | _ -> false
 
@@ -151,11 +147,23 @@ let initialize_protocol_version params =
   match params with
   | None -> Error "Missing params"
   | Some (`Assoc _ as p) ->
-      let* requested = require_string "protocolVersion" (get_field "protocolVersion" p) in
-      let* client_info = require_assoc "clientInfo" (get_field "clientInfo" p) in
-      let* _ = require_string "clientInfo.name" (get_field "name" client_info) in
-      let* _ = require_string "clientInfo.version" (get_field "version" client_info) in
-      let* _ = require_assoc "capabilities" (get_field "capabilities" p) in
+      let* requested =
+        require_string "protocolVersion" (Json_util.assoc_member_opt "protocolVersion" p)
+      in
+      let* client_info =
+        require_assoc "clientInfo" (Json_util.assoc_member_opt "clientInfo" p)
+      in
+      let* _ =
+        require_string "clientInfo.name" (Json_util.assoc_member_opt "name" client_info)
+      in
+      let* _ =
+        require_string
+          "clientInfo.version"
+          (Json_util.assoc_member_opt "version" client_info)
+      in
+      let* _ =
+        require_assoc "capabilities" (Json_util.assoc_member_opt "capabilities" p)
+      in
       Ok requested
   | Some _ -> Error "Invalid params: expected object"
 

@@ -37,17 +37,13 @@ let read_json_file path =
   | Ok json -> Ok json
   | Error err -> errorf "failed to read %s: %s" path err
 
-let member_opt key = function
-  | `Assoc fields -> List.assoc_opt key fields
-  | _ -> None
-
 let required_string_field json key =
   match Json_util.get_string json key with
   | Some value when not (String.equal (String.trim value) "") -> Ok value
   | _ -> errorf "missing required string field %s" key
 
 let list_field json key =
-  match member_opt key json with
+  match Json_util.assoc_member_opt key json with
   | Some (`List items) -> Ok items
   | Some `Null | None -> Ok []
   | Some _ -> errorf "field %s must be a list" key
@@ -70,7 +66,7 @@ let parse_json_check json =
   let* path = required_string_field json "path" in
   Ok {
     path;
-    equals = member_opt "equals" json;
+    equals = Json_util.assoc_member_opt "equals" json;
     contains = Json_util.get_string json "contains";
     min_int = Json_util.get_int json "min_int";
     present = Json_util.get_bool json "present";
@@ -78,7 +74,7 @@ let parse_json_check json =
 
 let parse_arg_check json =
   let* selector =
-    match member_opt "selector" json with
+    match Json_util.assoc_member_opt "selector" json with
     | Some value ->
         (match Eval_tool_selector.of_yojson value with
          | Ok selector -> Ok selector
@@ -89,7 +85,7 @@ let parse_arg_check json =
   Ok {
     selector;
     path;
-    equals = member_opt "equals" json;
+    equals = Json_util.assoc_member_opt "equals" json;
     contains = Json_util.get_string json "contains";
     min_int = Json_util.get_int json "min_int";
     present = Json_util.get_bool json "present";
@@ -140,7 +136,7 @@ let benchmark_case_of_yojson json =
   let* arg_check_items = list_field json "arg_checks" in
   let* arg_checks = map_m parse_arg_check arg_check_items in
   let recovery_policy =
-    match member_opt "recovery_policy" json with
+    match Json_util.assoc_member_opt "recovery_policy" json with
     | Some (`Assoc _ as value) -> Some (parse_recovery_policy value)
     | _ -> None
   in
@@ -167,9 +163,12 @@ let tool_call_of_yojson json =
   Ok {
     tool_name;
     success = Json_util.get_bool json "success" |> Option.value ~default:false;
-    input = (match member_opt "input" json with Some value -> value | None -> `Assoc []);
-    output = member_opt "output" json;
-    route_evidence = member_opt "route_evidence" json;
+    input =
+      (match Json_util.assoc_member_opt "input" json with
+       | Some value -> value
+       | None -> `Assoc []);
+    output = Json_util.assoc_member_opt "output" json;
+    route_evidence = Json_util.assoc_member_opt "route_evidence" json;
     duration_ms = Json_util.get_float json "duration_ms";
   }
 
@@ -190,7 +189,7 @@ let evidence_run_of_yojson json =
     prompt_fingerprint = Json_util.get_string json "prompt_fingerprint";
     task_success = Json_util.get_bool json "task_success";
     final_output = Json_util.get_string json "final_output";
-    final_result = member_opt "final_result" json;
+    final_result = Json_util.assoc_member_opt "final_result" json;
     latency_ms = Json_util.get_int json "latency_ms";
     input_tokens = Json_util.get_int json "input_tokens";
     output_tokens = Json_util.get_int json "output_tokens";

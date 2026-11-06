@@ -19,27 +19,25 @@ type context = {
   arguments : Yojson.Safe.t;
 }
 
-let field key = function
-  | `Assoc fields -> List.assoc_opt key fields
-  | _ -> None
-
 let string_field key json =
-  match field key json with
+  match Json_util.assoc_member_opt key json with
   | Some (`String s) -> Ok s
   | Some _ -> Error (key ^ " must be a string")
   | None -> Error (key ^ " is required")
 
 let string_option_field key json =
-  match field key json with
+  match Json_util.assoc_member_opt key json with
   | None | Some `Null -> None
   | Some (`String s) -> Some s
   | Some _ -> None
 
 let bool_field key json =
-  match field key json with Some (`Bool b) -> b | Some _ | None -> false
+  match Json_util.assoc_member_opt key json with
+  | Some (`Bool b) -> b
+  | Some _ | None -> false
 
 let list_field key json =
-  match field key json with
+  match Json_util.assoc_member_opt key json with
   | None | Some `Null -> Ok []
   | Some (`List items) -> Ok items
   | Some _ -> Error (key ^ " must be an array")

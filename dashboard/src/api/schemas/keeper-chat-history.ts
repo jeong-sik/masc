@@ -37,8 +37,8 @@ import type {
   KeeperChatDeliveryProvenanceDecode,
 } from '../../keeper-delivery-provenance'
 
-// Attachment row shape persisted by keeper_chat_store.ml (to_json_array
-// :848-861): snake_case mime_type and an open `type` string. Normalized to
+// Attachment row shape that Keeper_chat_store.to_json_array emits:
+// snake_case mime_type and an open `type` string. Normalized to
 // the camelCase KeeperConversationAttachment at the consume boundary.
 export const KeeperChatHistoryAttachmentSchema = object({
   id: string(),
@@ -232,7 +232,7 @@ export const KeeperChatHistoryStreamContractSchema = object({
   lifecycle_events: optional(array(string())),
   lifecycleEvents: optional(array(string())),
   reason: optional(string()),
-  // keeper_chat_store.ml stream_delivery_receipt_field (#28225): names how the
+  // Keeper_chat_projection.stream_delivery_receipt_field (#28225): names how the
   // persisted row relates to live delivery (e.g. "no_delivery_receipt",
   // "server_lifecycle_replay_only"). Open string for the same deploy-window
   // reason as `source`/`status`.
@@ -255,7 +255,7 @@ export const KeeperChatHistoryMessageSchema = object({
   // backend keeps that distinct as null while still projecting the work trace.
   content: nullable(string()),
   ts: number(),
-  // Tool-call rows (role === 'tool') persisted by keeper_chat_store.ml
+  // Tool-call rows (role === 'tool') persisted by Keeper_chat_store
   // carry the executed tool's id/name; `content` holds the accumulated
   // argument JSON. `source` names the originating connector
   // ('dashboard' | 'discord' | 'slack' | 'agent') on every row of a
@@ -280,7 +280,7 @@ export const KeeperChatHistoryMessageSchema = object({
   speaker_name: optional(string()),
   speaker_authority: optional(string()),
   // RFC-0233 §7: turn join key "<trace_id>#<absolute_turn>" the keeper minted
-  // onto every row of the turn (keeper_chat_store.ml to_json_array emits it).
+  // onto every row of the turn (Keeper_chat_store.to_json_array emits it).
   // Read-only here; the board post that the same turn produced carries the
   // identical string in its origin, so a board post can anchor to the exact
   // chat turn. Optional for the deploy window and legacy rows (absent ->
@@ -291,9 +291,9 @@ export const KeeperChatHistoryMessageSchema = object({
   // `unknown` at the boundary so malformed clips do not cause the whole
   // message to be dropped; `normalizeAudioClip` validates before use.
   audio: optional(unknown()),
-  // Persisted file/image uploads (keeper_chat_store.ml to_json_array
-  // :848-861). Without decoding these, a user's upload appears live but
-  // vanishes on reload even though it is on disk.
+  // Persisted file/image uploads (Keeper_chat_store.to_json_array). Without
+  // decoding these, a user's upload appears live but vanishes on reload even
+  // though it is on disk.
   attachments: optional(array(KeeperChatHistoryAttachmentSchema)),
   // The raw provenance pair is decoded together immediately after this
   // row-level tolerant schema succeeds. Keeping the two raw fields unknown at

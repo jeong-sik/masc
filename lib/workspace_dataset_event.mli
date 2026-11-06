@@ -153,6 +153,7 @@ module Kind : sig
     | Lanes
     | Machine_live
     | Memory_health
+    | Play_room
     | Lane_addons
     | Browser_observation
 

@@ -88,6 +88,7 @@ module Kind = struct
     | Lanes
     | Machine_live
     | Memory_health
+    | Play_room
     | Lane_addons
     | Browser_observation
 
@@ -113,6 +114,7 @@ module Kind = struct
     | Lanes -> lanes_name
     | Machine_live -> machine_live_name
     | Memory_health -> memory_health_name
+    | Play_room -> play_room_name
     | Lane_addons -> lane_addons_name
     | Browser_observation -> browser_observation_name
 
@@ -138,6 +140,7 @@ module Kind = struct
     | wire when String.equal wire lanes_name -> Some Lanes
     | wire when String.equal wire machine_live_name -> Some Machine_live
     | wire when String.equal wire memory_health_name -> Some Memory_health
+    | wire when String.equal wire play_room_name -> Some Play_room
     | wire when String.equal wire lane_addons_name -> Some Lane_addons
     | wire when String.equal wire browser_observation_name -> Some Browser_observation
     | _ -> None
@@ -165,6 +168,7 @@ let kind = function
   | Lanes -> Kind.Lanes
   | Machine_live _ -> Kind.Machine_live
   | Memory_health _ -> Kind.Memory_health
+  | Play_room _ -> Kind.Play_room
   | Lane_addons _ -> Kind.Lane_addons
   | Browser_observation _ -> Kind.Browser_observation
 

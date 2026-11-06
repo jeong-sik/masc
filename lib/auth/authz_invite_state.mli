@@ -57,6 +57,15 @@ val find_by_token_digest
   -> Authz_invite_event.Token_digest.t
   -> (Authz_types.Invite_id.t * invitation) option
 
+(** The invitation that an admission spent for this principal: the one the
+    principal joined through. Its issuer is the original approver of the
+    principal (design 4.1). {!Authz_principal_state} gives a user id to one
+    admission only, so at most one invitation has it. *)
+val find_consumed_by
+  :  t
+  -> Authz_types.User_id.t
+  -> (Authz_types.Invite_id.t * invitation) option
+
 type refusal =
   | Already_issued of Authz_types.Invite_id.t
   | Token_digest_taken of Authz_types.Invite_id.t

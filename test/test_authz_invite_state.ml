@@ -228,6 +228,28 @@ let an_invitation_keeps_who_issued_it () =
   | Error _ -> Alcotest.fail "the admission was refused"
 ;;
 
+let spent_by_name t user_id =
+  match I.find_consumed_by t user_id with
+  | None -> "none"
+  | Some (invite_id, invitation) -> Invite_id.to_string invite_id ^ " " ^ status_name (Some invitation)
+;;
+
+(* The invitation a principal joined through is found by that principal, and
+   only once it is spent: an open or revoked invitation names no one. *)
+let an_invitation_is_found_by_who_spent_it () =
+  let bob = get (User_id.of_string "bob") in
+  let t = apply_ok I.empty (issued ()) in
+  let t = apply_ok t (issued ~invite_id:second ~token:"token-2" ()) in
+  Alcotest.(check string) "before any admission" "none" (spent_by_name t bob);
+  let t = apply_ok t (E.Revoked { invite_id = second }) in
+  Alcotest.(check string) "a revoked invitation" "none" (spent_by_name t bob);
+  match I.consume t first ~user_id:bob ~at_ms:1 with
+  | Error refusal -> Alcotest.failf "refused: %s" (I.consume_refusal_to_string refusal)
+  | Ok (spent, _role) ->
+    Alcotest.(check string) "the one bob spent" "invite-1 consumed by bob" (spent_by_name spent bob);
+    Alcotest.(check string) "another principal" "none" (spent_by_name spent alice_id)
+;;
+
 let refusals_are_told_apart () =
   let texts =
     List.map
@@ -261,6 +283,7 @@ let () =
         ; Alcotest.test_case "by an Admin" `Quick an_admin_invites_and_revokes
         ; Alcotest.test_case "spent once" `Quick an_admission_spends_an_invitation_once
         ; Alcotest.test_case "who issued it" `Quick an_invitation_keeps_who_issued_it
+        ; Alcotest.test_case "who spent it" `Quick an_invitation_is_found_by_who_spent_it
         ; Alcotest.test_case "texts" `Quick refusals_are_told_apart
         ] )
     ]

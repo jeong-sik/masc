@@ -320,69 +320,6 @@ let tool_usage_fields summary tool_name =
      | None -> `Null);
   ]
 
-(** Metrics calculation functions (pure) *)
-
-(* [count_active_agents] = session_bound \ left,
-   [count_tasks_in_progress] = started \ completed.
-   Kernel lives in [Set_util.count_difference] (lib/core/set_util.ml). *)
-let count_active_agents events =
-  Set_util.count_difference events
-    ~present:(fun r ->
-      match r.event with
-      | Agent_session_bound { agent_id; _ } -> Some agent_id
-      | Agent_unbound _ | Task_started _ | Task_completed _ | Error_occurred _
-      | Tool_called _ | Tool_assigned _ -> None)
-    ~absent:(fun r ->
-      match r.event with
-      | Agent_unbound { agent_id; _ } -> Some agent_id
-      | Agent_session_bound _ | Task_started _ | Task_completed _ | Error_occurred _
-      | Tool_called _ | Tool_assigned _ -> None)
-
-let count_tasks_in_progress events =
-  Set_util.count_difference events
-    ~present:(fun r ->
-      match r.event with
-      | Task_started { task_id; _ } -> Some task_id
-      | Agent_session_bound _ | Agent_unbound _ | Task_completed _ | Error_occurred _
-      | Tool_called _ | Tool_assigned _ -> None)
-    ~absent:(fun r ->
-      match r.event with
-      | Task_completed { task_id; _ } -> Some task_id
-      | Agent_session_bound _ | Agent_unbound _ | Task_started _ | Error_occurred _
-      | Tool_called _ | Tool_assigned _ -> None)
-
-let count_completed_tasks events =
-  List_util.count_if (fun r ->
-    match r.event with
-    | Task_completed _ -> true
-    | Agent_session_bound _ | Agent_unbound _ | Task_started _ | Error_occurred _
-    | Tool_called _ | Tool_assigned _ -> false
-  ) events
-
-let avg_duration events =
-  let durations = List.filter_map (fun r ->
-    match r.event with
-    | Task_completed { duration_ms; _ } -> Some (float_of_int duration_ms)
-    | Agent_session_bound _ | Agent_unbound _ | Task_started _ | Error_occurred _
-    | Tool_called _ | Tool_assigned _ -> None
-  ) events in
-  match durations with
-  | [] -> 0.0
-  | times ->
-      let sum = List.fold_left (+.) 0.0 times in
-      sum /. float_of_int (List.length times)
-
-let calculate_error_rate events =
-  let errors = List_util.count_if (fun r ->
-    match r.event with
-    | Error_occurred _ -> true
-    | Agent_session_bound _ | Agent_unbound _ | Task_started _ | Task_completed _
-    | Tool_called _ | Tool_assigned _ -> false
-  ) events in
-  let total = List.length events in
-  if total = 0 then 0.0
-  else float_of_int errors /. float_of_int total
-
 (** Convenience tracking functions *)
 let track_agent_session_bound ?fs config ~agent_id ?(capabilities=[]) () =
   track ?fs config (Agent_session_bound { agent_id; capabilities })

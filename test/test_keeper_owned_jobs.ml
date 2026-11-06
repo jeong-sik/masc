@@ -905,6 +905,27 @@ let composition_nodes fixture data =
 
 let composition_node name nodes = List.find (fun row -> row |> member "node_id" |> to_string = name) nodes
 
+(* The roots a failed child result read keeps: the read's result manifest and
+   the references in its data. The manifest sits in metadata, not in data. *)
+let failed_read_roots ~config ~meta binding =
+  match Masc.Keeper_composition_dependency_result.read ~config ~meta ~args:(`Assoc ["binding",binding]) with
+  | Ok ({ disposition = Tool_result.Failed _; _ } as observed : Masc.Keeper_tool_execution.t) ->
+    observed.retained_artifacts
+  | Ok _ | Error _ -> fail "a failed child result read did not fail"
+
+(* A failed node has no result payload, so its call-log row is where the roots
+   its execution kept stay reachable. *)
+let row_keeps_roots ~node_id ~run (roots : Tool_output.artifact_ref list) =
+  Call_log.flush_now ();
+  let kept row = List.map (fun (reference : Tool_output.artifact_ref) -> reference.sha256)
+      (Tool_output.normalized_artifact_refs_in_json (member "artifact_refs" row)) in
+  roots <> []
+  && Call_log.read_recent ~keeper_name:keeper () |> require "composition node rows"
+     |> List.exists (fun row ->
+       member "composition_node_id" row = node_id
+       && member "composition_run_id" row = member "composition_run_id" run
+       && List.for_all (fun (root : Tool_output.artifact_ref) -> List.mem root.sha256 (kept row)) roots)
+
 let test_named_async_result_parent ?(child_waits=false) ?(child_cancelled=false) ~child_fails () = with_fixture @@ fun env initialize fixture ->
   let module Async = Masc.Keeper_msg_async in
   let module Surface = Masc.Keeper_capability_surface in
@@ -1230,7 +1251,11 @@ value = { sha256 = %S }
     else check_json "failed child keeps its canonical structured diagnostic" child_result
       (failure |> member "data" |> member "request" |> member "result");
     check bool "child failure supplies no successful downstream stdout" true
-      (completed |> member "exports" |> member "child_result" |> member "available" = `Bool false))
+      (completed |> member "exports" |> member "child_result" |> member "available" = `Bool false);
+    if child_fails then
+      check bool "failed child read row keeps every root the read kept" true
+        (row_keeps_roots ~node_id:(`String "await") ~run:accepted
+           (failed_read_roots ~config ~meta:fixture.meta binding_json)))
   else (
     let manifest = completed |> member "exports" |> member "child_result" |> member "value" |> to_string |> Yojson.Safe.from_string in
     let selected = match Tool_output.artifact_manifest_of_json manifest with
@@ -4522,9 +4547,13 @@ let test_fixed_async_skill_child ?(child_failure=false) ?(dynamic_arguments=fals
       (List.exists (fun continuation ->
         (Journal.continuation_source continuation).composition_run_id = parent_run) discovery.ready))
   else (
-  if child_failure then
+  if child_failure then (
     check_json "failed canonical child provides no successful parent export" (`Bool false)
-      (completed |> member "exports" |> member "stdout" |> member "available")
+      (completed |> member "exports" |> member "stdout" |> member "available");
+    check bool "failed child result row keeps every root the read kept" true
+      (row_keeps_roots ~node_id:(nested_calls_json prepared |> List.hd |> member "scope" |> member "result")
+         ~run:accepted
+         (failed_read_roots ~config ~meta:fixture.meta (Dependency.composition_to_json binding))))
   else
     check_json "parent consumes exact completed dependency output" (`String expected_stdout)
       (completed |> member "exports" |> member "stdout" |> member "value");

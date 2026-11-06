@@ -170,6 +170,7 @@ type node_result =
   ; deferred_kind : Keeper_tool_execution.deferred_kind option
   ; result_bytes : int
   ; truncated_to : int option
+  ; retained_artifacts : Tool_output.artifact_ref list
   }
 
 type dispatch_result =
@@ -179,6 +180,7 @@ type dispatch_result =
   ; deferred_kind : Keeper_tool_execution.deferred_kind option
   ; result_bytes : int option
   ; truncated_to : int option
+  ; retained_artifacts : Tool_output.artifact_ref list
   }
 
 type admission_rejection =
@@ -194,6 +196,7 @@ let dispatch_result
       ?deferred_kind
       ?result_bytes
       ?truncated_to
+      ?retained_artifacts
       result
   =
   { result
@@ -202,6 +205,10 @@ let dispatch_result
   ; deferred_kind
   ; result_bytes
   ; truncated_to
+  ; retained_artifacts =
+      (match retained_artifacts with
+       | Some references -> references
+       | None -> Tool_result.retained_artifacts result)
   }
 ;;
 
@@ -534,6 +541,7 @@ let execute_one
       ; deferred_kind = result.deferred_kind
       ; result_bytes
       ; truncated_to = result.truncated_to
+      ; retained_artifacts = result.retained_artifacts
       }
     in
     let output, cause, output_validation_error =
@@ -1206,7 +1214,17 @@ let execute_keeper_with_authority
         (Tool_result.make_err_of_exn ~class_:Tool_result.Runtime_failure
           ~tool_name:node.tool_name ~start_time:invocation_started exn))
       (fun () ->
-        let result = handler ~agent_core_invocation:invocation input in
+        (* The handler leaves its roots in the invocation carrier for the
+           Agent Core post-tool hook, which never runs for a composition
+           child. Take them here, for every result: a failed result has no
+           payload to carry them. *)
+        let result, retained_artifacts =
+          Fun.protect
+            ~finally:(fun () -> Keeper_tool_call_log.clear_retained_artifacts ~invocation ())
+            (fun () ->
+              let result = handler ~agent_core_invocation:invocation input in
+              result, Keeper_tool_call_log.peek_retained_artifacts ~invocation ())
+        in
         let original_bytes, truncated_to =
           Keeper_tool_call_log.consume_truncation_info ~invocation ()
         in
@@ -1223,6 +1241,7 @@ let execute_keeper_with_authority
           ; deferred_kind
           ; result_bytes = Some result_bytes
           ; truncated_to
+          ; retained_artifacts
           }
         | None ->
           dispatch_result
@@ -1230,6 +1249,7 @@ let execute_keeper_with_authority
             ~failure_effect_disposition:Tool_result.Effect_outcome_unknown
             ~result_bytes
             ?truncated_to
+            ~retained_artifacts
             result)
   in
   (* Mirror the actual handler's source snapshot priority for the K coordinate,

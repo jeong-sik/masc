@@ -230,6 +230,67 @@ let test_failed_sibling_stops_downstream_after_batch_settlement () =
        fail "tool failure became a plan error")
 ;;
 
+let test_root ~sha =
+  match Tool_output.make_artifact_ref ~sha256:(String.make 64 sha) ~bytes:3 ~preview:""
+          ~mime:"application/octet-stream" with
+  | Ok root -> root
+  | Error error -> fail (Tool_output.make_error_to_string error)
+;;
+
+let root_shas roots = List.map (fun (root : Tool_output.artifact_ref) -> root.sha256) roots
+
+(* A failed result has no payload to carry the roots its producer kept, so
+   the settlement carries them to the node observer, which writes the row
+   that keeps them alive. *)
+let test_failed_node_keeps_its_producer_roots () =
+  Eio_main.run @@ fun _env ->
+  let plan = fixture () in
+  let root = test_root ~sha:'a' in
+  let observed = ref [] in
+  let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () =
+    Executor.dispatch_result ~retained_artifacts:[ root ]
+      ~failure_effect_disposition:Tool_result.Proven_pre_effect
+      (Tool_result.make_err ~tool_name:node.Plan.tool_name ~start_time:(Tool_timing.start ())
+         ~class_:Tool_result.Workflow_rejection ~effect_disposition:Tool_result.Proven_pre_effect
+         "refused after keeping a blob")
+  in
+  let observe_node_result result = observed := result :: !observed; Ok () in
+  match Executor.execute ~plan ~run_id:(Plan.Run_id.fresh ()) ~dispatch ~observe_node_result () with
+  | Ok _ -> fail "a failed producer must not complete the plan"
+  | Error failure ->
+    (match !observed with
+     | [ node ] ->
+       check bool "the node failed" true (Tool_result.is_failed node.Executor.result);
+       check (list string) "the observer receives the failed node's roots"
+         [ root.sha256 ] (root_shas node.Executor.retained_artifacts)
+     | _ -> fail "expected exactly the failed producer to be observed");
+    check (list (list string)) "the settled failure keeps the same roots"
+      [ [ root.sha256 ] ]
+      (List.map (fun (node : Executor.node_result) -> root_shas node.retained_artifacts)
+         failure.settled)
+;;
+
+(* Without producer-supplied roots, a node keeps the roots of its result's own
+   payload, which only a completed or deferred result has. *)
+let test_completed_node_roots_come_from_its_payload () =
+  Eio_main.run @@ fun _env ->
+  let plan = fixture () in
+  let root = test_root ~sha:'b' in
+  let observed = ref [] in
+  let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () =
+    Executor.dispatch_result
+      (Tool_result.with_retained_artifacts [ root ]
+         (completed ~tool_name:node.Plan.tool_name ~data:(valid_data_for_node node)))
+  in
+  let observe_node_result result = observed := result :: !observed; Ok () in
+  match Executor.execute ~plan ~run_id:(Plan.Run_id.fresh ()) ~dispatch ~observe_node_result () with
+  | Error _ -> fail "valid plan stopped"
+  | Ok _ ->
+    check (list (list string)) "every completed node keeps its payload roots"
+      [ [ root.sha256 ]; [ root.sha256 ]; [ root.sha256 ]; [ root.sha256 ] ]
+      (List.map (fun (node : Executor.node_result) -> root_shas node.retained_artifacts) !observed)
+;;
+
 let test_output_validation_precedes_node_observation () =
   Eio_main.run @@ fun _env ->
   let plan = fixture () in
@@ -1938,6 +1999,55 @@ let test_compiled_child_requires_parent_occurrence () =
   check int "compiled producer is never entered without parent authority" 0 !compiled;
   check (list string) "independent ordinary work still progresses" ["independent"] !ordinary
 
+(* The production node observer writes the failed node's row with the roots
+   its producer kept, which the failed result's payload cannot hold. *)
+let test_failed_node_row_keeps_its_producer_roots () =
+  let module Log = Masc.Keeper_tool_call_log in
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Time_compat.set_clock (Eio.Stdenv.clock env);
+  with_export_base @@ fun base_path ->
+  Fun.protect ~finally:(fun () -> Log.reset_for_testing ()) @@ fun () ->
+  Log.reset_for_testing ();
+  Log.init ~base_path ();
+  let root : Tool_output.artifact_ref =
+    Tool_blob_store.put_durable (Tool_blob_store.create ~base_path)
+      ~bytes:"kept before the refusal" ~mime:"application/octet-stream" in
+  let meta = Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ "name", `String "root-keeper"; "activation_mode", `String "manual" ]) |> Result.get_ok in
+  let parent_invocation = Agent_core.Tool_contract.Invocation.create
+      ~tool_use_id:"root-fixture" ~turn:1
+      ~schedule:{ planned_index = 0; batch_index = 0; batch_size = 1
+                ; execution_mode = Agent_core.Tool_contract.Serial }
+      ~completion:Agent_core.Tool_contract.Continue_after_success in
+  let observe_node_result =
+    Masc.Keeper_tool_composition_surface_observation.observe_node_result
+      ~composition_tool:"keeper_compose_root-fixture"
+      ~composition_execution:Masc.Keeper_tool_composition_catalog.Inline
+      ~composition_tool_kind:Masc.Keeper_tool_descriptor.Composition_tool
+      ~composition_run_id:(Plan.Composition_run_id.fresh ())
+      ~parent_invocation ~meta
+      ~turn_context:Masc.Keeper_tool_call_log_context.empty_turn_context in
+  let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () =
+    Executor.dispatch_result ~retained_artifacts:[ root ]
+      ~failure_effect_disposition:Tool_result.Proven_pre_effect
+      (Tool_result.make_err ~tool_name:node.Plan.tool_name ~start_time:(Tool_timing.start ())
+         ~class_:Tool_result.Workflow_rejection ~effect_disposition:Tool_result.Proven_pre_effect
+         "refused after keeping a blob")
+  in
+  (match Executor.execute ~plan:(fixture ()) ~run_id:(Plan.Run_id.fresh ())
+           ~dispatch ~observe_node_result () with
+   | Ok _ -> fail "a failed producer must not complete the plan"
+   | Error _ -> ());
+  let rows = match Log.read_recent ~keeper_name:"root-keeper" () with
+    | Ok rows -> rows
+    | Error _ -> fail "tool-call log is unreadable" in
+  let row = match rows with [ row ] -> row | _ -> fail "expected one row for the failed node" in
+  check (list string) "the failed node's row keeps the producer's root" [ root.sha256 ]
+    (Tool_output.normalized_artifact_refs_in_json (Yojson.Safe.Util.member "artifact_refs" row)
+     |> List.map (fun (reference : Tool_output.artifact_ref) -> reference.sha256))
+;;
+
 let () =
   run ~and_exit:false
     "keeper_tool_plan_executor"
@@ -1963,6 +2073,12 @@ let () =
             "output validation precedes node observation"
             `Quick
             test_output_validation_precedes_node_observation
+        ; test_case "failed node keeps its producer roots" `Quick
+            test_failed_node_keeps_its_producer_roots
+        ; test_case "completed node roots come from its payload" `Quick
+            test_completed_node_roots_come_from_its_payload
+        ; test_case "failed node row keeps its producer roots" `Quick
+            test_failed_node_row_keeps_its_producer_roots
         ; Alcotest.test_case
             "observation failure settles siblings and stops downstream"
             `Quick

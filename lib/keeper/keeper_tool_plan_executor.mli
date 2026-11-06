@@ -48,11 +48,14 @@ type node_result = private
   ; deferred_kind : Keeper_tool_execution.deferred_kind option
   ; result_bytes : int
   ; truncated_to : int option
+  ; retained_artifacts : Tool_output.artifact_ref list
   }
 (** [execution_id] is the stable logical occurrence, including rechecks.
     [physical_execution_id] comes from a fresh dispatched invocation. [None]
     means this settlement supplies no physical dispatch identity, including
-    retained completions and compiled pure operands; observers must not mint it. *)
+    retained completions and compiled pure operands; observers must not mint it.
+    [retained_artifacts] are the roots the producer kept for this node,
+    whatever its disposition; a failed [result] has no payload to carry them. *)
 
 type dispatch_result
 
@@ -65,13 +68,17 @@ type admission_rejection =
 (** Construct a low-level dispatch settlement. Callers that own more precise
     producer evidence must supply it; absent failure evidence is conservatively
     treated as an unknown effect outcome. Supply [physical_execution_id] only
-    from the invocation actually dispatched, never from its logical node id. *)
+    from the invocation actually dispatched, never from its logical node id.
+    [retained_artifacts] defaults to the roots in the result's own payload,
+    which a failed result does not have; a producer that kept roots for a
+    failed result supplies them. *)
 val dispatch_result
   :  ?physical_execution_id:Ids.Execution_id.t
   -> ?failure_effect_disposition:Tool_result.failure_effect_disposition
   -> ?deferred_kind:Keeper_tool_execution.deferred_kind
   -> ?result_bytes:int
   -> ?truncated_to:int
+  -> ?retained_artifacts:Tool_output.artifact_ref list
   -> Tool_result.result
   -> dispatch_result
 

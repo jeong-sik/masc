@@ -21,7 +21,7 @@ related: ["durable-tool-result-markers", "0476"]
 
 `<base>/.masc/tool_blobs` 에 blob 2,462,539개, 20.0GB 가 있다. 가장 오래된 파일은 07-28 이다. 8월 초에는 54MB 였다.
 
-정리 코드 `Tool_blob_maintenance.run` 은 있다. 두 번 스캔 규칙도 있다. 앞 스캔의 후보이면서 이번 스캔에서도 참조가 없는 blob 만 지운다. 하지만 이 코드는 BasePath lease 를 잡은 오프라인 명령에서만 돈다. 운영 서버는 lease 를 늘 쥐고 있다. 이 명령을 부르는 스크립트도 없다. 그래서 08-12 이후 한 번도 돌지 않았다.
+정리 코드 `Tool_blob_maintenance.run` 은 있다. 두 번 스캔 규칙도 있다. 앞 스캔의 후보이면서 이번 스캔에서도 참조가 없는 blob 만 지운다. 하지만 이 코드는 BasePath lease 를 잡은 오프라인 명령에서만 돈다. 운영 서버는 lease 를 늘 쥐고 있다. 이 명령을 부르는 스크립트도 없다. 그래서 08-12 이후 한 번도 돌지 않았다. 이 명령은 스캔을 끝낼 때마다 `<base>/.masc/tool_blob_maintenance/candidates.json` 을 쓴다(지우지 않는 모드도 같다). 운영 BasePath 에는 이 파일이 없다(11-06 확인, `tool_blobs/` 는 07-30 부터 있다).
 
 이 RFC 는 같은 규칙을 서버 안에서 돌린다. 서버가 쓰는 중에도 지우면 안 되는 blob 을 지우지 않도록 두 가지를 더한다.
 
@@ -39,6 +39,9 @@ related: ["durable-tool-result-markers", "0476"]
 - D5. 스캔과 지우기는 Eio 메인 domain 밖에서 돈다. 스캔이 실패하면 지금처럼 후보를 기록하지 않고, 아무것도 지우지 않는다.
 - D6. 1층은 지우지 않는다. 후보 수, 지울 수 있는 수와 크기, 지웠다면 깨졌을 참조 수, 스캔 시간, 실패 종류를 로그와 후보 기록에 남긴다(§5).
 - D7. 오프라인 명령 `tool-blob-maintenance` 는 범위층의 `unreadable` PR 이 지운다. 그 명령은 서버 스윕과 같은 스캔으로 지우기 모드를 부른다. 스캔이 읽지 못한 것을 두고도 끝까지 돌게 되면, 그 모드가 더 작은 참조 집합으로 후보를 만들어 지울 수 있다. 그 뒤 2층이 서버 스윕에 처음으로 지우기를 켠다. 정리하는 곳은 서버 하나만 남는다.
+  - 같은 PR 에서 `Tool_blob_maintenance.live_references` 의 결과를 닫힌 합타입으로 바꾼다: 다 읽은 스캔(`Complete`)과 읽지 못한 것이 남은 스캔(`Partial`, `unreadable`·`reader_pending` 을 가짐). 이 참조 집합으로 무언가를 지우는 소비자는 `Partial` 에서 지우지 않는다. 타입이 갈라져 있어서, 지금 소비자와 나중 소비자 모두 컴파일러가 이 선택을 요구한다(§5.3 소비자 표).
+  - `Observe_only`·`Delete_previous_candidates`·`Tool_blob_maintenance.run` 을 쓰는 시험은 main 에 13개 파일이다(`git grep -l`, 11-06). `test_tool_blob_store` 가 가장 많다. 지우기 루프는 함수로 꺼내 2층 서버 스윕이 쓰고, 그 시험들은 꺼낸 함수로 옮긴다. 지우기 규칙의 시험을 지우고 다시 짜지 않는다.
+  - 명령 이름을 가리키는 주석(`deployment_preflight_helper.ml` 430행, 1465행 근처)도 같은 PR 에서 고친다.
 - D8. 2층보다 먼저 스캔 범위를 닫는다. 범위는 값 하나로 둔다. `.masc`·`lane-addons`·config `keepers` 아래 항목마다 "범위"나 "이유 있는 제외" 중 하나에 속하지 않으면 그 이름이 후보 기록의 `unclassified` 에 남고, 그 기록은 아무것도 지울 수 없다(§5.3).
 
 ## 2. 지금 모습
@@ -137,7 +140,12 @@ mtime 으로 센 주별 증가는 09-21 주가 3.41GB 로 가장 크다. 10-05 �
 
 ### 3.5 다른 정리 명령
 
-`vision-kept-maintenance` 와 `media-reading-maintenance` 도 lease 를 잡는 오프라인 명령이고, 부르는 곳이 없다. 이 둘은 `tool_blobs` 가 아닌 다른 저장소를 지운다. 비전 보관 이미지(`config/keepers/<keeper>.vision`)는 지금 약 700MB 다. 이 RFC 의 범위가 아니다. #39331, #46721 이 다룬다.
+`vision-kept-maintenance` 와 `media-reading-maintenance` 도 lease 를 잡는 오프라인 명령이고, 부르는 곳이 없다. 이 둘은 `tool_blobs` 가 아닌 다른 저장소를 지운다. 비전 보관 이미지(`config/keepers/<keeper>.vision`)는 지금 약 700MB 다. 그 저장소를 언제 어떻게 정리할지는 이 RFC 의 범위가 아니다. #39331, #46721 이 다룬다.
+
+다만 둘 다 이 RFC 가 바꾸는 스캔을 입력으로 쓴다.
+
+- `media-reading-maintenance` 는 `live_references ~scope:Server_tool_blob_scope.scope` 로 참조 집합을 만들고, `holds_history_media` 에 걸리지 않는 기록을 두 번 스캔의 교집합으로 지운다(`keeper_media_reading_maintenance.ml` `run`). 범위층이 스캔을 "읽지 못해도 끝까지 돈다"로 바꾸면, 이 명령도 더 작은 참조 집합으로 지울 수 있다. 그래서 D7 의 합타입이 이 명령에도 걸린다. `Partial` 이면 오류로 끝난다.
+- `vision-kept-maintenance` 는 `consumer_paths` 의 파일과 트리를 통째 바이트로 읽어 handle 문자열을 찾는다. 범위층이 범위에서 빼는 곳(CLI 홈 등)은 이 목록에서도 빠진다. 그래서 빼는 PR 은 그곳에 vision handle 이 몇 개 있는지 같이 센다. journal 같은 바이너리 파일에서 문자열 찾기가 맞는지는 확인하지 않았다. 이 명령의 문제이고, 이 RFC 는 그 목록에 무엇을 더하거나 빼는지만 적는다.
 
 ### 3.6 1층 스캔이 끝나지 않는다
 
@@ -338,6 +346,14 @@ u <sha256>
   - `wire-capture/*/manual-*.sse.txt` 는 만드는 코드가 없다. 남아 있는 동안 `unreadable` 에 남는다. Upgrade notes 에 적고 운영자가 지운다.
   - 작업 맥락이 격리한 `<keeper>.working-context.json.invalid-<hash>` 는 주인이 다시 읽지 않는다. 지금 운영에 0개다. 생기면 `unclassified` 로 남아 지우기를 계속 막는다. 이름 규칙을 주인이 내보내고, 다시 읽지 않는 사본이라는 제외 이유로 분류한다.
   - 순서: 잠금 → Finder → `unreadable` 기록·journal "reader 대기"·주인 폴더 한 단계 분류·오프라인 명령 삭제(D7) → journal reader. 셋째가 들어가면 1층 스캔이 끝까지 돌아 기록이 쌓인다. 넷째가 들어가고 잔여 파일이 지워져야 `deletable` 이 0 을 벗어난다.
+  - `live_references` 소비자 표(D7). 범위층 PR 은 이 표의 모든 줄을 같은 PR 에서 고친다.
+
+    | 소비자 | 입력 | `Partial` 일 때 |
+    |---|---|---|
+    | 서버 스윕(`tool_blob_sweep.ml`) | `live_references` | 기록을 쓰고 `deletable` 은 0. 2층도 지우지 않는다 |
+    | `tool-blob-maintenance` | `live_references` | 명령을 지운다(D7) |
+    | `media-reading-maintenance` | `live_references` | 오류로 끝나고 아무것도 지우지 않는다 |
+    | `vision-kept-maintenance` | `consumer_paths` | 해당 없음. 목록이 바뀌는 것만 §3.5 대로 센다 |
 - Exact 기록: `lane-addons/exact-requests`, `host-results`, `evidence` 를 범위에 넣는다. Exact 호스트는 표시를 풀지 않는다. 하지만 지금 범위의 규칙은 "표시를 담은 기록은 살아 있는 동안 그 blob 을 붙잡는다"이고, `traces`·`wire-capture` 도 그 규칙으로 들어 있다. 같은 규칙을 따른다.
   - 비용: 스캔이 11GB 늘어 27GB 가 된다(§3.4). 1층 로그가 저장소마다 스캔 시간을 따로 남기게 이 층 PR 이 고친다. 시간이 문제면 먼저 `evidence`(6.4GB)를 줄인다. 이 폴더의 파일은 sha256 으로 이름 지은 불변 파일이라, 한 번 읽은 이름의 참조를 기억하면 다음 스캔은 새 파일만 읽는다. `exact-requests`·`host-results` 는 기록이 바뀌어서 이 방법이 맞지 않는다. 그쪽은 Librarian 요청처럼 owner 쪽 구조 목록으로 바꾼다. 범위에서 빼는 것으로 풀지 않는다(§6).
 - 제외는 이유를 variant 로 적는다. 11-06 에 확인한 것:

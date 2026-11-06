@@ -208,9 +208,8 @@ Candle 전용 정책 편집 화면, 환불·재판매·미귀속 판정 재개. 
 | keeper_candle_purchase | item, 선택적 expected_price_milli 0 이상 정수 상한 | 실제 구매 금액과 구매 뒤 계정. 구매만으로 착용하지 않음 |
 | keeper_candle_equip | slot=face/neck/head/hand/base, item=id 또는 default | 현재 equipment와 changed. 소유권 구매는 하지 않음 |
 | keeper_candle_gift | to + (amount_milli와 reason 또는 item); item에는 reason 불가 | 송수신자·이전 내역·양쪽 잔액. 두 이전 종류를 한 요청에 섞지 않음 |
-| keeper_portrait_read | 선택적 size(48–512, 기본160), preview_item | PNG artifact·시작/현재/그림 장비·카탈로그. 구매 소유 목록은 아님. ledger 불가용은 명시하고 기본 외형 PNG로 fallback 가능 |
 | GET /api/v1/keepers/{name}/items | 선택적 expected_workspace, CanReadState | ready/off/disabled 계정 또는 오류. ready는 account_revision/balance_milli/owned_items/catalog |
-| GET /api/v1/keepers/{name}/portrait.png | size(16–512, 기본160), preview, expected_equipment와 서버 read 정책 | PNG/ETag/304 또는 refusal. Item API와 MCP portrait의 파라미터·fallback 계약은 다름 |
+| GET /api/v1/keepers/{name}/portrait.png | size(16–512, 기본160), preview, expected_equipment와 서버 read 정책 | PNG/ETag/304 또는 refusal. Item API와 파라미터·fallback 계약이 다름 |
 | masc-candle-grant | --keeper, --amount-milli, --reason, 선택적 --base DIR | 로컬 grant와 stdout 영수증. 다른 CLI의 --base-path가 아닌 --base 사용 |
 
 `masc-candle-grant`는 `bin/dune`의 별도 public executable이다. 현재 기본 binary installer의
@@ -310,7 +309,7 @@ Fixed가 기본이며 선택적 `Supply_scaled`는 다음을 따른다. 이 공�
 | 최초 복구 불가 | 경고 후 생략 | 해당 원장 사용 거절 | 거절 | 오류/Disabled | 오류 |
 | 복구 성공 뒤 append 실패/lock | 해당 전이 거절 | 금전·장착 변경 거절 | 거절 | 원장 관측 실패면 오류 | 원장 관측 실패면 오류 |
 
-PNG/MCP portrait의 persisted 장비 읽기와 roster/TUI의 Candle observation은 gate가
+PNG portrait의 persisted 장비 읽기와 roster/TUI의 Candle observation은 gate가
 다르다. 따라서 Off/Disabled에서 모든 표면이 동일한 외형을 표시한다고 보장할 수 없다.
 조회와 소유권 표시를 appraiser에서 분리할지는 CFG-06의 정책 결정에 포함한다.
 

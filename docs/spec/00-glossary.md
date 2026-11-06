@@ -847,9 +847,7 @@ status: reference
   Crown·Beanie 4종), `hand`(Empty_hand·Book·Mug·Quill 4종), `base`(No_dish·Dish of Gilt/Silver/Oak 4종).
   시작 장비는 이름의 별도 해시로 정해져 몸체와 독립적이다. MASC 자체의 고유 양초인 `mascot`은
   TUI `/about`에 표시된다(Ivory 왁스, Ember 불꽃, Long Crimson 뿔, Bean 눈, "w" 입,
-  Blush, Gilt 접시, 무착용). MCP 도구 `keeper_portrait_read`는 PNG 아티팩트와 시작 장비,
-  액세서리 카탈로그를 반환하며 `preview_item`으로 장착 권한 변경 없이 임시 미리보기가 가능하다.
-  소유한 장신구의 실제 착용은 `keeper_candle_equip` 도구를 통해 슬롯별로 반영되며, `default`는
+  Blush, Gilt 접시, 무착용). 소유한 장신구의 실제 착용은 `keeper_candle_equip` 도구를 통해 슬롯별로 반영되며, `default`는
   이름 기반 시작 장비로 복원한다. 서버와 원격 TUI, 대시보드는 `Keeper_portrait_equipment` 스냅숏을
   공유해 일관된 착용 모습을 렌더한다.
   TUI Keeper Info와 대화 머리글에는 얼굴 중심의 작은 식별 아이콘을 표시한다. 대화 화면의 아이콘과

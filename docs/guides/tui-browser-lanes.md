@@ -4,9 +4,8 @@ Open `:` → `go Browser Lane`, or press `B` from Connectors. **Automatic** asks
 server which available browser can supply the reader, then binds the concrete
 browser and lists its open tabs. Select any page by title and URL; websites have
 no dedicated views or filters. Entering the reader never opens a browser window.
-Only an explicit `no_available_browser` browse decision can offer a work-browser
-recommendation with `o:open`. Ambiguous browsers or other selection refusals keep
-their cause and require a choice; they never become a work-browser suggestion.
+No available browser, ambiguous browsers and other selection refusals keep their
+cause and require a choice.
 The reader occupies the full content width and shows its selected browser. Keeper panels and the composer return
 when leaving the reader.
 
@@ -19,8 +18,8 @@ including a transcript awaiting delivery. An existing Keeper draft is preserved.
 
 | Key | Action |
 | --- | --- |
-| `b` | Choose Automatic, Work browser, or a connected browser by its actual identity |
-| `A` | Show advanced browser overrides and transport diagnostics |
+| `b` | Choose Automatic or a connected browser by its actual identity |
+| `A` | Show transport limits and BiDi host diagnostics in the browser picker |
 | `[` / `]` | Previous / next tab and read its page |
 | `1` … `9` | Select the corresponding observed tab directly when it is listed |
 | `j` / `k`, arrows | Scroll page text |
@@ -30,13 +29,10 @@ including a transcript awaiting delivery. An existing Keeper draft is preserved.
 | `m` | Observe semantic landmarks, then focus the unique `main` (or fallback `article`) region |
 | `N` / `P` | Select the next / previous observed `article` region or article ancestor |
 | `Ctrl-O` | Open the selected tab screenshot; Esc or q returns |
-| `g` | Enter a URL in the selected work browser; Enter navigates, Esc cancels |
-| `o` / `x` | Open a visible work browser / close the currently selected owned session |
 | Ctrl-^ / Esc / Left | Hide the reader and return to the previous surface |
 
 Browser belongs to Config. Its title shows Automatic or an explicit selection,
-the actual connected browser identity (or the known work-browser identity), and
-the latest HTTP request status. Automatic uses the server's browse decision only
+the actual connected browser identity, and the latest HTTP request status. Automatic uses the server's browse decision only
 while unbound. Once bound, reads, captures, navigation and gestures retain that
 concrete source, client and tab. A later recommendation, disconnect or unsupported
 gesture never switches browsers or replays an action. Select another browser
@@ -64,27 +60,15 @@ clients from other workers remain available for a manual choice; a client UUID
 reported by different workers is omitted from those choices and reported as a
 duplicate. Any issue refuses automatic selection, rather than reporting that no
 browser exists. With multiple complete workers, browse can recommend a concrete
-live UUID; owned work routes require a worker scope and are not recommended.
+live UUID.
 Observations grant no authority: a later explicit request revalidates the worker.
 The TUI keeps the current Page and pending read while updating inventory issues.
 An unreadable issue report preserves validated client rows and refuses automatic
 fallback. `inventoryComplete` is the server's derived summary of its issue list.
 
-The picker keeps **Automatic**, **Work browser**, and connected browser identities
-in the primary choices. Work browser uses the server's work decision, with a
-separate login session. Merely selecting it does not launch a new window; `o`
-explicitly requests a visible window (`headless=false`). If the current selection
-already owns a work session, `o`, `g` and `x` keep that session's concrete source.
-Otherwise `o` discovers and binds the server's work choice before requesting one
-open. A stale discovery cannot consume that open continuation or replace a later
-manual selection.
-
-Press `A` in the picker for the native automation override used in
-troubleshooting. Within advanced mode, `l` / `a` select the live / automation
-source directly. These are implementation choices, not additional browser
-brands. The native automation session remains labelled generically when the
-server does not report its browser brand. Safari is not currently an
-implemented browser choice.
+The picker lists **Automatic** and the connected browser identities. Press `A`
+in the picker to show what each connection's transport does not serve and where
+the BiDi host stands. Safari is not currently an implemented browser choice.
 
 The current browser is marked; choosing it again retains the current tab and
 scroll. Switching to another browser clears old page and screenshot references.
@@ -106,7 +90,7 @@ refused, partially performed, or unknown result. An operator's read does not era
 a Keeper's last result. These are observations from the last connection-list
 read, rather than a claim that a completed request is still running. Page cadence
 refreshes the activity list independently of page content, preserving the selected
-connection, tab, scroll, pending read and URL draft. A failed activity refresh keeps
+connection, tab, scroll and pending read. A failed activity refresh keeps
 the previous observation and displays its failure separately.
 
 Ego's native cursor label still identifies pointer actions. This activity list
@@ -179,7 +163,7 @@ its application reports `Inactive` and cleanup is confirmed, then switch it on
 again ([package activity](lane-package-activity.md)). This restarts the whole
 worker, including its managed Firefox. A list refresh alone does not restart
 it. After the restart, `b` opens and refreshes the Browser connection list;
-use `r` if the picker is already open, or Esc before `b` when editing a URL.
+use `r` if the picker is already open.
 The list reports the worker's startup observation. If the listing itself fails,
 or a conflict arises after the listing, the
 original startup failure behavior still applies.
@@ -313,27 +297,24 @@ shown. What keeps its place depends on whether the rows report a host:
   screen has rows left. A workspace that has not run a BiDi host sees every
   row it saw before these existed.
 
-The URL editor accepts bracketed paste, Unicode backspace and Ctrl-U. Typing
-belongs to the editor and cannot trigger Browser commands or the Keeper composer.
-The URL editor controls the isolated automation session. Keepers can separately
-use `BrowserInteract` to click, fill, or scroll an explicitly selected live tab;
+Keepers use `BrowserInteract` to click, fill, or scroll an explicitly selected live tab;
 the TUI scene supports observed-element clicks, and the screenshot view supports
 mouse clicks and scrolling. Text entry into the page remains a Keeper tool action.
 
 Requests use the authenticated TUI HTTP client. Reading allows 45 seconds for
-the tab-list and page-read phases; automation startup and navigation allow 65.
+the tab-list and page-read phases.
 Requests run in switch-owned Eio daemon fibers and return through the TUI mailbox.
 
 `Ctrl-O` captures the explicitly selected tab through the authenticated screenshot
-endpoint. The preview keeps the source, tab, text position, and URL draft. A closed tab produces a visible failure rather
+endpoint. The preview keeps the source, tab and text position. A closed tab produces a visible failure rather
 than capturing a different active tab. Use `r` to rediscover available tabs.
 The image is not staged or sent to a Keeper. PNG preview uses the terminal's
 existing image support; unsupported terminals receive an explanation in Browser.
 
 In screenshot view, click a visible link to activate it. Mouse wheel, arrows and
-`j`/`k` scroll the actual page, and `r` refreshes the screenshot. The automation
-lane and a live BiDi connection also support pressing the left button, moving,
-and releasing to drag with trusted browser pointer actions. A live WebExtension
+`j`/`k` scroll the actual page, and `r` refreshes the screenshot. A live BiDi
+connection also supports pressing the left button, moving, and releasing to drag
+with trusted browser pointer actions. A live WebExtension
 connection refuses a drag and names the connection that serves it; the footer
 says which applies to the screenshot on screen.
 Each completed action captures the resulting page again in the same Lane.
@@ -347,8 +328,7 @@ before another pointer action can execute.
 See [setup and Keeper usage](../design/browser-lane-examples.md).
 
 All Lanes shows each Browser row from its browser Add-on alone: the clients the
-live worker last published, or whether the automation executor is
-registered. With no observation the row says why: no browser Add-on serves the
+live worker last published. With no observation the row says why: no browser Add-on serves the
 lane (not set up), every one that serves it is switched off (off), one is
 declared on and its worker is not running (waiting), or the declarations could
 not all be read (failing). Executable, extension and profile paths in
@@ -363,10 +343,9 @@ Lanes: `Enter` opens its declaration, `Space` changes `enabled`, and `s` saves.
 
 `test/test_browser_surface.ml` covers page selection, empty browsers and failures.
 `test/test_tui_browser_lane.ml` covers decoding, source changes, stale replies and
-retained evidence. Related TUI tests cover URL input and multiline text projection.
-`scripts/capture-browser-proof.py` captures a public page and automation session
-recovery on a scratch runtime. Use a binary built from the changed source;
-historical captures are not evidence of the current UI.
+retained evidence. Related TUI tests cover multiline text projection. Use a binary
+built from the changed source; historical captures are not evidence of the
+current UI.
 
 ### Native browser selection
 
@@ -380,8 +359,7 @@ Each live read and Ctrl-O screenshot pins that connection UUID. Switching browse
 clears the previous tab, text, and scroll before reading the new browser. A missing
 selected connection opens the chooser without silently rebinding to another browser,
 even when only one remains or both browsers use the same tab number. Select a
-connection explicitly to recover. Automation retains its separate browser session. Its label stays generic because
-the automation response does not report the browser brand.
+connection explicitly to recover.
 
 Validation: the production pure Browser state module was interpreted against 14
 fixtures, including equal tab IDs across clients, stale discovery, disconnected pins,
@@ -503,8 +481,7 @@ In screenshot view, the mouse wheel scrolls the area under the pointer, allowing
 message lists and sidebars to scroll independently. `j/k` and the up/down keys
 scroll the area at the center of the viewport. When terminal cell geometry is
 unavailable, the wheel also uses the center and the footer shows `wheel:center`.
-The automation lane sends native browser wheel input; the live lane finds the
-scrollable DOM ancestor under the pointer. After scrolling, MASC captures the
+The live lane finds the scrollable DOM ancestor under the pointer. After scrolling, MASC captures the
 same tab again.
 
 `v` lists the page's observed semantic regions -- `main`, `navigation`,
@@ -538,7 +515,6 @@ clientId/tabId with required expectedUrl. It selects the tab without focusing it
 browser window or changing/reloading its URL. This is a tool action; reads do not
 automatically activate tabs and no TUI shortcut is added. A successful receipt
 includes active=true, but callers must read again to verify rendered content.
-Automation rejects activation before selecting a tab.
 
 Action traversal follows [w3m's hyperlink navigation](https://w3m.sourceforge.net/eng/MANUAL.html)
 and the [agent-browser interactive snapshot pattern](https://agent-browser.dev/snapshots):

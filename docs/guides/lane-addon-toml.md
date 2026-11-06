@@ -88,7 +88,6 @@ Ego 설치는 `[binding]`의 `space`에 작업별 이름 또는 이미 관측한
 같은 client 또는 같은 native Space를 여러 controller가 광고하면 입력 전에 거절한다.
 live publisher 관측이 실패했거나 아직 준비되지 않았으면 다른 Ego controller가
 숨겨져 있을 수 있으므로 명시한 Ego 연결·Goal 경로와 document read도 거절한다.
-Automation 관측 실패는 명시한 Ego 경로를 막지 않는다.
 Space ID는 이 workspace가 사용하는 단일 Ego native runtime 안의 식별자다.
 
 선언 예제와 Goal binding·종료 의미는 [Browser 패키지 안내](../../addons/browser/README.md)를
@@ -118,7 +117,7 @@ Add-on 실행 파일 3개(`masc-native-addon-launcher`, `masc-browser-addon-work
 ```toml
 id = "checked-browser"
 run_id = "browser-work"
-manifest_path = "../packages/browser-automation/lane.toml"
+manifest_path = "../packages/browser-ego/lane.toml"
 tool_hooks = ["validate_input", "validate_output"]
 
 [binding]
@@ -303,9 +302,9 @@ detach가 확인되면 해당 source는 이후 discovery에서 빠진다. 이미
 공개 도구가 아니라서 이 목록에 오르지 않는다. Keeper 는 host 의 `Browser*` 도구를 쓰고,
 host 가 고른 설치의 export 를 그 신원으로 부른다.
 Browser 서비스 패키지는 `browser_backend` 로 자기 worker 가 맡는 browser 출처 하나를 적는다
-(`automation`, `owned_firefox`, `ego`, `external_host`). 이 키가 없는 browser 패키지는
-manifest 오류다. masc 가 가진 패키지는 출처마다 하나다(`browser-automation`,
-`browser-firefox`, `browser-ego`, `browser-external`). 한 출처는 붙은 설치 하나만 맡는다. 맡은 설치가 없거나 둘이면 그 출처만 쓰지 못하고, 다른
+(`owned_firefox`, `ego`, `external_host`). 이 키가 없는 browser 패키지는
+manifest 오류다. masc 가 가진 패키지는 출처마다 하나다(`browser-firefox`, `browser-ego`,
+`browser-external`). 한 출처는 붙은 설치 하나만 맡는다. 맡은 설치가 없거나 둘이면 그 출처만 쓰지 못하고, 다른
 출처는 그대로 쓴다. live 출처를 두 설치가 맡으면 그 두 설치가 올린 연결은 쓰지 않는다. 연결은 자기가
 어느 출처에서 왔는지 말하지 않기 때문이다.
 설치별 도구 접근 권한과 Keeper의 `tool_deny`는 검색 전에 적용한다.

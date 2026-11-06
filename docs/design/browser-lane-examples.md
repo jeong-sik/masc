@@ -8,8 +8,8 @@ Browser는 사이트 구분 없이 페이지를 읽는 공통 도구다. Keeper�
 
 ## 연결
 
-운영자가 사용하는 Firefox/Zen은 `live`, Keeper가 URL을 열어 조사하는
-설정한 Gecko 브라우저의 격리 세션은 `automation`이다. 두 브라우저는 로그인 세션을 공유하지 않는다.
+Browser 의 출처는 `live` 하나다. 운영자가 쓰는 Firefox/Zen 확장, 붙인 Firefox 의 BiDi
+연결, ego lite 의 task space 가 모두 `live` 연결이다.
 
 Live 호스트를 설치하고 Firefox 또는 Zen의 `about:debugging`에서 확장을 적재한다.
 
@@ -18,38 +18,12 @@ masc browser-lane-setup --mode extension --base-path /path/to/workspace
 ```
 
 확장 manifest: `<base-path>/.masc/browser-lane/extension/manifest.json`.
-Automation은 resolved configuration directory의 `runtime.toml`에 geckodriver
-실행 파일 경로를 적고 MASC를 재시작한다. 서버가 그 geckodriver를 빈 loopback
-포트로 직접 띄우고, 서버가 끝날 때 같이 내린다.
-`masc browser-lane-setup --mode automation` 이 이 표를 쓴다. 이미 있는 값은 바꾸지
-않고(있던 자리 `[browser.automation]` 또는 `[browser]` 에서 고친다), host 와 확장은
-설치하지 않는다.
-
-```toml
-[browser.automation]
-geckodriver = "/absolute/path/to/geckodriver"
-# Optional: an absolute path to the installed Zen executable/app bundle.
-# binary = "/path/to/Zen.app/Contents/MacOS/zen"
-```
-
-자세한 연결 계약은 [native Firefox](native-firefox-lane.md)에 있다.
-TUI에서는 `:` → `go Browser Lane`, `l` / `a`로 source를 선택한다.
+TUI에서는 `:` → `go Browser Lane`으로 연다.
 
 ## 출처별 설정과 켜고 끄기
 
-browser 출처마다 Lane Add-on 패키지와 worker 가 따로 있다(`browser-automation`,
-`browser-stagehand`, `browser-firefox`, `browser-ego`, `browser-external`). `runtime.toml`
-의 표는 출처를 어떻게 띄울지만 담는다.
-
-```toml
-[browser.automation]
-geckodriver = "/absolute/path/to/geckodriver"
-
-[browser.stagehand]
-chrome = "/absolute/path/to/chromium"
-extension = "/absolute/path/to/stagehand-extension"
-# profile = "/absolute/path/to/profile"
-```
+browser 출처마다 Lane Add-on 패키지와 worker 가 따로 있다(`browser-firefox`,
+`browser-ego`, `browser-external`). `runtime.toml` 의 표는 출처를 어떻게 띄울지만 담는다.
 
 출처를 켜고 끄는 것은 그 출처 선언(`browser-<출처>.toml`)의 최상위 `enabled` 하나다.
 TUI 의 Lanes 화면에서 `browser-<출처>` 패키지 줄을 골라 선언 편집기로 바꾸거나, 웹 All Lanes
@@ -72,13 +46,10 @@ profile = "/absolute/path/to/keeper-profile"
 # port = 9222
 ```
 
-실행 파일·확장·프로필 경로는 worker 가 붙을 때 읽으므로, 경로를 바꾼 뒤에는 서버를
+실행 파일·프로필 경로는 worker 가 붙을 때 읽으므로, 경로를 바꾼 뒤에는 서버를
 재시작하고 기존 설치를 detach 한 뒤 다시 붙인다. All Lanes 의 browser 줄은 그 lane 의
-출처 중 켜진 선언이 있는지와, 관측한 연결 수·executor 등록 여부를 따로 보여 준다.
-등록됐다는 표시는 세션이나 브라우저 프로세스의 정상 동작을 보장하지 않는다.
-
-Automation 경로는 `[browser.automation]`이 정본이다. 기존 `[browser]
-geckodriver/binary`도 읽지만 두 자리를 함께 쓰면 거절한다.
+출처 중 켜진 선언이 있는지와, 관측한 연결 수를 따로 보여 준다.
+연결이 보인다는 표시는 브라우저 프로세스의 정상 동작을 보장하지 않는다.
 
 ## 열린 업무 화면에서 근거 찾기
 
@@ -108,17 +79,19 @@ BrowserRead {"lane":"live","clientId":<관측한 UUID>,"tabId":73,"maxChars":120
 
 ## 직접 URL을 열어 조사
 
+BiDi 연결과 ego 연결은 `open_tab` 으로 작업용 탭을 연다. 확장 연결은 탭을 열지 않는다.
+
 ```text
-BrowserSession {"action":"open"}
-BrowserAct {"action":"open_tab","url":"https://ocaml.org/releases"}
-BrowserRead {"lane":"automation","tabId":<반환된 id>,"maxChars":12000}
+BrowserTabs {"lane":"live"}
+BrowserAct {"lane":"live","clientId":<관측한 UUID>,"action":"open_tab","url":"https://ocaml.org/releases"}
+BrowserRead {"lane":"live","clientId":<관측한 UUID>,"tabId":<반환된 id>,"maxChars":12000}
 ```
 
 여러 Keeper가 동시에 조사할 수 있으므로 작업별 탭을 열고, 반환된 `tabId`를
 읽기와 조작에 계속 사용한다. 같은 탭의 URL을 바꿀 때는 `BrowserGoto`에도
-해당 id를 전달한다. 이동 후 실제 읽기 결과로 내용을 확인하고 출처를 붙인다.
-작업이 끝나면 `BrowserAct close_tab`으로 해당 탭을 닫는다. 세션 자체를 닫으면
-다른 작업의 탭도 종료되므로 공유 중인 세션을 임의로 닫지 않는다.
+해당 id를 전달한다. BiDi 연결은 자기가 연 탭만 이동한다. 이동 후 실제 읽기
+결과로 내용을 확인하고 출처를 붙인다. 작업이 끝나면 `BrowserAct close_tab`으로
+해당 탭을 닫는다.
 
 ## 입력과 화면 확인
 
@@ -128,11 +101,11 @@ scroll을 호출하고 다시 읽어 결과를 확인한다. `BrowserAct`는 탭
 back, forward, reload, 대화상자, 업로드처럼 브라우저 수준 동작만 맡는다.
 
 ```text
-BrowserRead {"lane":"automation","tabId":<id>,"mode":"elements"}
-BrowserInteract {"lane":"automation","action":"fill","tabId":<id>,"selector":<관측한 selector>,"text":"검색어"}
-BrowserInteract {"lane":"automation","action":"press_key","tabId":<id>,"expectedUrl":<읽은 URL>,"key":"Enter"}
-BrowserRead {"lane":"automation","tabId":<id>}
-BrowserRead {"lane":"automation","tabId":<id>,"mode":"screenshot"}
+BrowserRead {"lane":"live","clientId":<id>,"tabId":<tab>,"mode":"elements"}
+BrowserInteract {"lane":"live","clientId":<id>,"action":"fill","tabId":<tab>,"selector":<관측한 selector>,"text":"검색어"}
+BrowserInteract {"lane":"live","clientId":<id>,"action":"press_key","tabId":<tab>,"expectedUrl":<읽은 URL>,"key":"Enter"}
+BrowserRead {"lane":"live","clientId":<id>,"tabId":<tab>}
+BrowserRead {"lane":"live","clientId":<id>,"tabId":<tab>,"mode":"screenshot"}
 keeper_image_read {"artifact":<반환된 artifact>}
 ```
 
@@ -180,7 +153,7 @@ BrowserInteract {"lane":"live","clientId":<관측한 UUID>,"tabId":73,"action":"
 현재 DOM 컨트롤과 selector를 관측하거나 `mode=scene`의 documentId/nodeId를 쓴다.
 좌표 클릭·스크롤은 screenshot의 현재 `viewport`와 정규화된 `point`를 전달하는
 `click_at`·`scroll_at`으로 수행한다. `web_extension` 연결의 클릭은 DOM activation이다.
-trusted `hover_at`·`drag`는 automation과 live의 `webdriver_bidi` 연결이 한다. fill은
+trusted `hover_at`·`drag`는 live의 `webdriver_bidi` 연결이 한다. fill은
 input/change 이벤트를 발생시키며 Enter나 submit을 호출하지 않는다.
 페이지의 이벤트 핸들러는 동작할 수 있으므로 결과를 다시 읽거나 캡처한다.
 
@@ -193,19 +166,21 @@ input/change 이벤트를 발생시키며 Enter나 submit을 호출하지 않는
 
 ## 관측 범위
 
-| 기능 | live Firefox 확장 | automation Firefox |
+| 기능 | live Firefox 확장 | live Firefox BiDi |
 |---|---|---|
 | 탭 목록·텍스트·컨트롤 관측 | 지원 | 지원 |
 | 명시한 탭의 viewport 캡처 | 지원 | 지원 |
-| 세션 관리·직접 URL 이동·탭 열기/닫기 | 미지원 | 지원 |
+| 직접 URL 이동·탭 열기/닫기 | 미지원 | 이 연결이 연 탭만 |
 | 관측된 같은 탭 링크 따라가기 | 지원 | 지원 |
 | 클릭·입력·스크롤 (`BrowserInteract`) | 지원 | 지원 |
 | screenshot 좌표 클릭·스크롤 | 지원 | 지원 |
 | trusted pointer drag | 미지원 | 지원 |
-| 네이티브 키·선택·히스토리 (`BrowserAct`) | 미지원 | 지원 |
-| framePath로 중첩 iframe 대상 지정·JavaScript 대화상자·파일 업로드 | 미지원 | 지원 |
-| 다운로드 완료 관측·artifact 읽기 | 미지원 | 지원 |
+| framePath로 중첩 iframe 대상 지정 | 미지원 | 지원 |
+| JavaScript 대화상자 | 미지원 | 이 연결이 연 탭만 |
+| 파일 업로드·다운로드 artifact 읽기 | 미지원 | 미지원 |
 | 전용 shadow-root locator | 미지원 | 미지원 |
+
+ego 연결이 하는 일은 [ego SDK coverage](../guides/ego-sdk-coverage.md)에 있다.
 
 텍스트 모드는 URL, 제목, 전체 문자 수(`chars`)와 잘림 여부(`truncated`)를
 반환하며 기본 한도는 50,000 code points다. 컨트롤 관측은 최대 200개이며
@@ -214,11 +189,10 @@ input/change 이벤트를 발생시키며 Enter나 submit을 호출하지 않는
 URL 변경을 검출한다. live에서는 documentId·viewport 크기·스크롤 위치도 비교하지만,
 이 값들이 같은 상태의 모든 픽셀 변경을 검출하는 것은 아니다.
 
-다운로드 링크를 클릭한 뒤 `BrowserRead`에 `lane=automation`, 관측한 `tabId`,
+ego 연결에서 다운로드 링크를 클릭한 뒤 `BrowserRead`에 그 `clientId`, 관측한 `tabId`,
 `mode=downloads`를 전달하면 완료 상태와 artifact 참조를 읽는다. 반환된
 `artifact.arguments`로 `keeper_artifact_read`를 호출하고 `next_offset`부터
 `eof=true`까지 이어 읽는다. 바이너리 페이지는 `encoding`을 확인한다.
-자세한 수명과 실패 계약은 [Firefox downloads](firefox-downloads.md)를 참고한다.
 
 동작별 필드와 검증 범위는 [Firefox interaction support](firefox-controls.md)를
 참고한다. CI 통과, 배포된 실행 파일, 실제 Keeper/Vision 모델의 성공은 각각

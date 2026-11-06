@@ -7,7 +7,7 @@ updated: 2026-10-23
 author: claude
 supersedes: []
 superseded_by: null
-related: ["browser-keeper-firefox", "browser-live-one-connection", "browser-lane-stagehand", "browser-live-ego"]
+related: ["browser-keeper-firefox", "browser-live-one-connection", "browser-live-ego"]
 ---
 
 # RFC: browser 연결 출처마다 worker 하나 (browser-backends-end-alone)

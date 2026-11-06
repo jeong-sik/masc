@@ -138,7 +138,7 @@ MASC는 최상위 public library(`masc`)와 `lib/` 아래의 도메인별 내부
 | `masc_browser_addon_worker` | `masc-browser-addon-worker` | `bin/masc_browser_addon_worker.ml` | Browser Lane Add-on worker. 한 번에 browser 출처 하나만 맡는다. |
 | `masc_browser_process_owner` | `masc-browser-process-owner` | `bin/masc_browser_process_owner.ml` | 인스턴스 ID와 브라우저 절대 경로를 받아 브라우저 프로세스를 소유하는 실행기. |
 
-내부용 실행 파일 (`public_name` 없음, 빌드 산출물로 직접 실행, 5종):
+내부용 실행 파일 (`public_name` 없음, 빌드 산출물로 직접 실행, 4종):
 
 | Executable | Entry Point | 역할 |
 |------------|-------------|------|

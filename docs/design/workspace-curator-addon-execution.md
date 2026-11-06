@@ -351,8 +351,8 @@ strict wire object `{"status":"output_limit_reached","detail":<nonblank text>}`.
 Only Agent Core's typed `Output_limit_reached` maps to the new shared
 `Exact_lane_failure.Output_limit`. Invalid JSON, schema/domain rejection,
 incomplete/missing output and an oversized transport response stay separate.
-The common worker codec, retained host replay, original Curator refusal journal,
-Candle appraisal and Browser/Stagehand consumers all explicitly consume it.
+The common worker codec, retained host replay, original Curator refusal journal
+and Candle appraisal all explicitly consume it.
 Operator Quiz maps it to its existing failed-author / waiting-grade policy;
 it does not reduce input or create another request for this output result.
 
@@ -381,7 +381,7 @@ Verification maps changed interfaces to their direct consumers:
 | --- | --- |
 | Shared failure classification and Exact final codec | `test_exact_lane_failure`, `test_lane_addon_exact`, real HTTP/CLI-edge and capacity-evidence cases in `test_lane_addon_exact_runner` |
 | Original Curator terminal/refused restoration | `test_workspace_curator_addon_contract`: actual journal reopen, original refusal, no worker replay, no replacement write |
-| Candle and browser final translation | `test_candle_appraiser_transport`, `test_browser_addon_models`, `test_browser_addon_locate`, `test_browser_addon_stagehand_model` |
+| Candle final translation | `test_candle_appraiser_transport` |
 | Actual shared-worker persistence and separate Quiz consumer | Python Curator 7, Candle 14, Quiz Flow 68 cases passed on hashed working-tree Python source; actual worker subprocess restarts, controlled model answers |
 
 The earlier [eight-suite run39674624863](../evidence/2026-10-22-curator-owner-wakes/selected-execution.json)

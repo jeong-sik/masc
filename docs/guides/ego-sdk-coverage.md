@@ -140,12 +140,10 @@ local Space is visible or that its login is complete.
 
 ## Current evidence and next work
 
-The current Dashboard source renders personal-browser caller/Space observations
-and separate server-owned Automation session observations. It decodes
-an Ego user-owned-name refusal without discarding healthy clients. Owned-session
-registration does not imply an open browser, and those session observations do
-not identify a current caller. Component tests and frontend build manifests are
-not installed or rendered UI proof.
+The current Dashboard source renders personal-browser caller/Space observations.
+It decodes an Ego user-owned-name refusal without discarding healthy clients.
+Component tests and frontend build manifests are not installed or rendered UI
+proof.
 
 Recent local checks exercise the actual workflow/Release codecs and production
 JavaScript with SDK stand-ins. Cancellation component checks also use the actual

@@ -1,0 +1,402 @@
+{
+  "params": {
+    "from": "2026-11-01T00:00:00+00:00",
+    "deploy_at": "2026-11-05T06:02:38+00:00",
+    "until": "2026-11-06T07:15:00+00:00",
+    "excluded_days": [
+      "2026-11-01"
+    ],
+    "min_keeper_requests": 5
+  },
+  "hours": {
+    "before": 78.04388888888889,
+    "after": 25.20611111111111
+  },
+  "workload": {
+    "before": {
+      "calls": 102060,
+      "result_bytes": 601076009,
+      "keepers": 27,
+      "calls_per_hour": 1307.7257098925818,
+      "result_bytes_per_hour": 7701769.062991622
+    },
+    "after": {
+      "calls": 15694,
+      "result_bytes": 48056526,
+      "keepers": 25,
+      "calls_per_hour": 622.626788036411,
+      "result_bytes_per_hour": 1906542.65499989
+    }
+  },
+  "tools": {
+    "masc_schedule_notes_list": {
+      "before": {
+        "calls": 799,
+        "result_bytes": 73241129,
+        "bytes_per_call": 91665.99374217773,
+        "contains_calls": 0,
+        "contains_share": 0.0,
+        "contains_bytes_per_call": null,
+        "plain_bytes_per_call": 91665.99374217773
+      },
+      "after": {
+        "calls": 16,
+        "result_bytes": 647052,
+        "bytes_per_call": 40440.75,
+        "contains_calls": 2,
+        "contains_share": 0.125,
+        "contains_bytes_per_call": 25526.5,
+        "plain_bytes_per_call": 42571.357142857145
+      }
+    },
+    "keeper_artifact_read": {
+      "before": {
+        "calls": 7049,
+        "result_bytes": 81771770,
+        "bytes_per_call": 11600.478081997446,
+        "contains_calls": 8,
+        "contains_share": 0.0011349127535820683,
+        "contains_bytes_per_call": 492.875,
+        "plain_bytes_per_call": 11613.098565544668
+      },
+      "after": {
+        "calls": 137,
+        "result_bytes": 577469,
+        "bytes_per_call": 4215.1021897810215,
+        "contains_calls": 45,
+        "contains_share": 0.3284671532846715,
+        "contains_bytes_per_call": 725.0222222222222,
+        "plain_bytes_per_call": 5922.20652173913
+      }
+    },
+    "masc_keeper_delegate_status": {
+      "before": {
+        "calls": 155,
+        "result_bytes": 512630,
+        "bytes_per_call": 3307.2903225806454,
+        "contains_calls": 0,
+        "contains_share": 0.0,
+        "contains_bytes_per_call": null,
+        "plain_bytes_per_call": 3307.2903225806454
+      },
+      "after": {
+        "calls": 37,
+        "result_bytes": 4977,
+        "bytes_per_call": 134.51351351351352,
+        "contains_calls": 0,
+        "contains_share": 0.0,
+        "contains_bytes_per_call": null,
+        "plain_bytes_per_call": 134.51351351351352
+      }
+    }
+  },
+  "delegate_status_by_state": {
+    "before": {
+      "Failed": {
+        "calls": 18,
+        "result_bytes": 19225,
+        "mean": 1068.0555555555557,
+        "p50": 988,
+        "min": 984,
+        "max": 1582
+      },
+      "Queued": {
+        "calls": 40,
+        "result_bytes": 105227,
+        "mean": 2630.675,
+        "p50": 2066,
+        "min": 1572,
+        "max": 4107
+      },
+      "Running": {
+        "calls": 58,
+        "result_bytes": 164629,
+        "mean": 2838.4310344827586,
+        "p50": 2090,
+        "min": 1533,
+        "max": 9571
+      },
+      "Succeeded": {
+        "calls": 37,
+        "result_bytes": 223299,
+        "mean": 6035.108108108108,
+        "p50": 5939,
+        "min": 1548,
+        "max": 9575
+      },
+      "no_state": {
+        "calls": 2,
+        "result_bytes": 250,
+        "mean": 125.0,
+        "p50": 173,
+        "min": 77,
+        "max": 173
+      }
+    },
+    "after": {
+      "Failed": {
+        "calls": 2,
+        "result_bytes": 544,
+        "mean": 272.0,
+        "p50": 273,
+        "min": 271,
+        "max": 273
+      },
+      "Queued": {
+        "calls": 10,
+        "result_bytes": 1035,
+        "mean": 103.5,
+        "p50": 104,
+        "min": 103,
+        "max": 104
+      },
+      "Running": {
+        "calls": 25,
+        "result_bytes": 3398,
+        "mean": 135.92,
+        "p50": 136,
+        "min": 135,
+        "max": 136
+      }
+    }
+  },
+  "delegate_status_repeats": {
+    "before": {
+      "polls": 154,
+      "operations": 99,
+      "repeat_polls": 33,
+      "repeat_share": 0.21428571428571427
+    },
+    "after": {
+      "polls": 37,
+      "operations": 15,
+      "repeat_polls": 19,
+      "repeat_share": 0.5135135135135135
+    }
+  },
+  "by_day": {
+    "keeper_artifact_read|2026-11-01|before": {
+      "calls": 10070,
+      "result_bytes": 130347091,
+      "bytes_per_call": 12944.100397219463,
+      "contains_calls": 0,
+      "contains_share": 0.0,
+      "contains_bytes_per_call": null,
+      "plain_bytes_per_call": 12944.100397219463
+    },
+    "keeper_artifact_read|2026-11-02|before": {
+      "calls": 6320,
+      "result_bytes": 77310371,
+      "bytes_per_call": 12232.653639240507,
+      "contains_calls": 0,
+      "contains_share": 0.0,
+      "contains_bytes_per_call": null,
+      "plain_bytes_per_call": 12232.653639240507
+    },
+    "keeper_artifact_read|2026-11-03|before": {
+      "calls": 389,
+      "result_bytes": 2451389,
+      "bytes_per_call": 6301.7712082262215,
+      "contains_calls": 0,
+      "contains_share": 0.0,
+      "contains_bytes_per_call": null,
+      "plain_bytes_per_call": 6301.7712082262215
+    },
+    "keeper_artifact_read|2026-11-04|before": {
+      "calls": 267,
+      "result_bytes": 1514779,
+      "bytes_per_call": 5673.329588014982,
+      "contains_calls": 0,
+      "contains_share": 0.0,
+      "contains_bytes_per_call": null,
+      "plain_bytes_per_call": 5673.329588014982
+    },
+    "keeper_artifact_read|2026-11-05|after": {
+      "calls": 104,
+      "result_bytes": 489479,
+      "bytes_per_call": 4706.528846153846,
+      "contains_calls": 37,
+      "contains_share": 0.3557692307692308,
+      "contains_bytes_per_call": 801.2432432432432,
+      "plain_bytes_per_call": 6863.179104477612
+    },
+    "keeper_artifact_read|2026-11-05|before": {
+      "calls": 73,
+      "result_bytes": 495231,
+      "bytes_per_call": 6783.986301369863,
+      "contains_calls": 8,
+      "contains_share": 0.1095890410958904,
+      "contains_bytes_per_call": 492.875,
+      "plain_bytes_per_call": 7558.276923076923
+    },
+    "keeper_artifact_read|2026-11-06|after": {
+      "calls": 33,
+      "result_bytes": 87990,
+      "bytes_per_call": 2666.3636363636365,
+      "contains_calls": 8,
+      "contains_share": 0.24242424242424243,
+      "contains_bytes_per_call": 372.5,
+      "plain_bytes_per_call": 3400.4
+    },
+    "masc_keeper_delegate_status|2026-11-01|before": {
+      "calls": 36,
+      "result_bytes": 56741,
+      "bytes_per_call": 1576.138888888889,
+      "contains_calls": 0,
+      "contains_share": 0.0,
+      "contains_bytes_per_call": null,
+      "plain_bytes_per_call": 1576.138888888889
+    },
+    "masc_keeper_delegate_status|2026-11-02|before": {
+      "calls": 21,
+      "result_bytes": 46638,
+      "bytes_per_call": 2220.8571428571427,
+      "contains_calls": 0,
+      "contains_share": 0.0,
+      "contains_bytes_per_call": null,
+      "plain_bytes_per_call": 2220.8571428571427
+    },
+    "masc_keeper_delegate_status|2026-11-03|before": {
+      "calls": 14,
+      "result_bytes": 22845,
+      "bytes_per_call": 1631.7857142857142,
+      "contains_calls": 0,
+      "contains_share": 0.0,
+      "contains_bytes_per_call": null,
+      "plain_bytes_per_call": 1631.7857142857142
+    },
+    "masc_keeper_delegate_status|2026-11-04|before": {
+      "calls": 112,
+      "result_bytes": 385741,
+      "bytes_per_call": 3444.1160714285716,
+      "contains_calls": 0,
+      "contains_share": 0.0,
+      "contains_bytes_per_call": null,
+      "plain_bytes_per_call": 3444.1160714285716
+    },
+    "masc_keeper_delegate_status|2026-11-05|after": {
+      "calls": 18,
+      "result_bytes": 2446,
+      "bytes_per_call": 135.88888888888889,
+      "contains_calls": 0,
+      "contains_share": 0.0,
+      "contains_bytes_per_call": null,
+      "plain_bytes_per_call": 135.88888888888889
+    },
+    "masc_keeper_delegate_status|2026-11-05|before": {
+      "calls": 8,
+      "result_bytes": 57406,
+      "bytes_per_call": 7175.75,
+      "contains_calls": 0,
+      "contains_share": 0.0,
+      "contains_bytes_per_call": null,
+      "plain_bytes_per_call": 7175.75
+    },
+    "masc_keeper_delegate_status|2026-11-06|after": {
+      "calls": 19,
+      "result_bytes": 2531,
+      "bytes_per_call": 133.21052631578948,
+      "contains_calls": 0,
+      "contains_share": 0.0,
+      "contains_bytes_per_call": null,
+      "plain_bytes_per_call": 133.21052631578948
+    },
+    "masc_schedule_notes_list|2026-11-01|before": {
+      "calls": 19707,
+      "result_bytes": 152149627,
+      "bytes_per_call": 7720.587963667732,
+      "contains_calls": 0,
+      "contains_share": 0.0,
+      "contains_bytes_per_call": null,
+      "plain_bytes_per_call": 7720.587963667732
+    },
+    "masc_schedule_notes_list|2026-11-02|before": {
+      "calls": 768,
+      "result_bytes": 72201462,
+      "bytes_per_call": 94012.3203125,
+      "contains_calls": 0,
+      "contains_share": 0.0,
+      "contains_bytes_per_call": null,
+      "plain_bytes_per_call": 94012.3203125
+    },
+    "masc_schedule_notes_list|2026-11-03|before": {
+      "calls": 6,
+      "result_bytes": 37943,
+      "bytes_per_call": 6323.833333333333,
+      "contains_calls": 0,
+      "contains_share": 0.0,
+      "contains_bytes_per_call": null,
+      "plain_bytes_per_call": 6323.833333333333
+    },
+    "masc_schedule_notes_list|2026-11-04|before": {
+      "calls": 10,
+      "result_bytes": 431383,
+      "bytes_per_call": 43138.3,
+      "contains_calls": 0,
+      "contains_share": 0.0,
+      "contains_bytes_per_call": null,
+      "plain_bytes_per_call": 43138.3
+    },
+    "masc_schedule_notes_list|2026-11-05|after": {
+      "calls": 15,
+      "result_bytes": 645400,
+      "bytes_per_call": 43026.666666666664,
+      "contains_calls": 2,
+      "contains_share": 0.13333333333333333,
+      "contains_bytes_per_call": 25526.5,
+      "plain_bytes_per_call": 45719.0
+    },
+    "masc_schedule_notes_list|2026-11-05|before": {
+      "calls": 15,
+      "result_bytes": 570341,
+      "bytes_per_call": 38022.73333333333,
+      "contains_calls": 0,
+      "contains_share": 0.0,
+      "contains_bytes_per_call": null,
+      "plain_bytes_per_call": 38022.73333333333
+    },
+    "masc_schedule_notes_list|2026-11-06|after": {
+      "calls": 1,
+      "result_bytes": 1652,
+      "bytes_per_call": 1652.0,
+      "contains_calls": 0,
+      "contains_share": 0.0,
+      "contains_bytes_per_call": null,
+      "plain_bytes_per_call": 1652.0
+    }
+  },
+  "schema_surface": {
+    "before": {
+      "requests": 3194,
+      "surface_median": 91526.0,
+      "surface_mean": 99122.53663118347,
+      "rides": {
+        "BrowserSession": 3194,
+        "BrowserInstruct": 3194,
+        "keeper_candle_gift": 3194,
+        "keeper_candle_equip": 3194
+      }
+    },
+    "after": {
+      "requests": 802,
+      "surface_median": 83552.0,
+      "surface_mean": 89621.57356608479,
+      "rides": {
+        "BrowserSession": 14,
+        "BrowserInstruct": 0,
+        "keeper_candle_gift": 0,
+        "keeper_candle_equip": 0
+      }
+    },
+    "keeper_delta": {
+      "keepers": 21,
+      "median_delta_bytes": -7230,
+      "keepers_smaller": 19
+    }
+  },
+  "skipped": {
+    "bad_lines": 0,
+    "unusable_rows": 0,
+    "missing_days": []
+  }
+}

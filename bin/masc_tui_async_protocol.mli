@@ -263,9 +263,10 @@ type memory_health_read =
       ; result : (Masc.Tui_decode_memory_health.memory_health_row_answer, string) result
       }
 
-(* The Code pane's answers, carried in [async_msg] by one constructor,
-   [Code_msg]. One variant takes at most 244 constructors with arguments,
-   so answers that belong together share one (#48617). *)
+(* The answers of one domain share one type named after it, and [async_msg]
+   carries that type in one constructor: [code_msg] in [Code_msg],
+   [keeper_msg] in [Keeper_msg]. One variant takes at most 244 constructors
+   with arguments (#48617). *)
 type code_msg =
   (* The scope travels with the directory. Without it a reply names a
      relative path, which two scopes can both have, and the handler had no
@@ -305,6 +306,145 @@ type code_msg =
       Masc_tui_types.code_lsp_query Masc_tui_fetched.request
       * (Masc.Tui_decode.lsp_answer, string) result
 
+type keeper_msg =
+  | Keeper_queue_resume_confirmed of string * int * resume_confirmation * string list
+      (** The last field identifies only input held when this resume began. *)
+  | Keeper_queue_action_received of string * string list
+  | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list * (Masc_tui_queue_inspection.observation, string) result, string) result
+  | Keeper_deletions_loaded of int * (Masc_tui_keeper_control.deletion_inventory, string) result
+  | Keeper_deletion_retry_done of string * (unit, string) result
+  | Keeper_chat_dispatch_started of
+      Masc_tui_keeper_chat_projection.request * bool * bool Eio.Promise.u
+  | Keeper_chat_done of
+      Masc_tui_keeper_chat_projection.request
+      * bool
+      * (Masc_tui_keeper_chat_projection.response, Masc_tui_keeper_chat_projection.error) result
+      * unit Eio.Promise.u
+  | Keeper_chat_stream_deltas of
+      Masc_tui_keeper_chat_projection.request * Masc_tui_keeper_chat_live.observed_delta list
+  | Keeper_chat_stream_unavailable of Masc_tui_keeper_chat_projection.request * string
+  | Keeper_run_next_done of Masc_tui_keeper_chat_projection.request * (string, string) result
+  | Keeper_observed_interrupt_done of
+      string * string * int * (Masc_tui_interrupt_signal.interrupt_signal, string) result
+  | Keeper_chat_interrupt_done of
+      Masc_tui_keeper_chat_projection.request * int * (Masc_tui_interrupt_signal.interrupt_signal, string) result
+  | Keeper_chat_history_loaded of
+      Keeper_history_read.t * Keeper_history_read.source * Keeper_history_read.result
+  | Keeper_chat_first_page_loaded of
+      Keeper_history_read.t * Keeper_history_read.page_result
+  | Keeper_chat_copy_loaded of
+      int * string * (Masc_tui_keeper_chat_history.decoded, string) result
+  | Keeper_chat_operation_loaded of
+      { keeper_name : string
+      ; operation_id : string
+      ; operation_state : (Keeper_chat_operation.state, string) result
+      }
+  | Keeper_chat_journal_loaded of
+      { keeper_name : string
+      ; source : Masc_tui_keeper_chat_log.journal_source
+      ; started_at : float
+      ; terminal_replay : Masc_tui_keeper_chat_log.terminal_replay
+      ; operation_state : (Keeper_chat_operation.state option, string) result
+      ; journal :
+          ( Masc.Keeper_chat_event_log.journaled_event list
+          , Masc_tui_keeper_chat_log.events_error )
+          result
+      }
+  | Keeper_native_tasks_loaded of
+      string * (Masc_tui_native_tasks.t, Masc_tui_native_tasks.error) result
+  | Keeper_preparation_loaded of
+      Masc_tui_preparation_details.request * (Masc_tui_preparation_details.snapshot, string) result
+  | Keeper_child_content_loaded of
+      string * (Masc_tui_child_content.t, Masc_tui_child_content.error) result
+  | Keeper_chat_older_loaded of
+      int * string * string option * (Masc_tui_keeper_chat_history.page, Masc_tui_keeper_chat_history.page_error) result
+  | Keeper_composite_loaded of
+      unit ref * string
+      * ( Masc.Tui_decode.keeper_lane * Masc.Tui_decode.keeper_secret_projection option,
+          string )
+        result
+  | Keeper_chat_file_changes_loaded of
+      int * string * (Masc.Tui_decode.file_change_snapshot, string) result
+      (** Generation and keeper-stamped answer for the chat-only cache. The
+          Changes surface owns [File_changes_loaded] and is never populated by
+          this response. *)
+  | Keeper_chat_approval_answered of
+      Masc_tui_keeper_chat_projection.request
+      * string
+      * bool
+      * (Masc_tui_http.tool_approval_answer, string) result
+  | Keeper_tool_approvals_loaded of
+      Snapshot_read.request * Masc.Tui_decode.server_identity * (Masc.Tui_decode.keeper_tool_approval list, string) result
+  | Keeper_roster_reloaded of keeper_roster_observation
+      (** The whole roster read on its own, after a change or a failure. *)
+  | Keeper_row_reloaded of keeper_row_observation
+      (** One Keeper's row read on its own, after the server named it. *)
+  | Keeper_turns_loaded of (string * int) list * keeper_waiting_snapshot * (int * int) option
+      * (Masc.Tui_decode.keeper_turns_projection, string) result
+  | Keeper_waiting_loaded of Keeper_waiting_read.request * keeper_waiting_snapshot
+      * (Masc.Tui_decode.keeper_turns_projection, string) result
+  | Keeper_chat_control_received of string * int * string
+      (** Which keepers are mid-turn right now, for the "answering now"
+          badge drawn from every surface. *)
+  (* Its own message rather than a field on the stance one: the two come from
+     different endpoints and one failing must not blank the other. *)
+  | Keeper_gate_settings_loaded of
+      (((string * Masc.Tui_decode.gate_mode) list * Masc.Tui_decode.keeper_exact_lane_first list), string) result
+  | Keeper_tool_modes_loaded of
+      ((string * Masc.Keeper_tool_approval_mode.mode) list, string) result
+      * Masc_tui_operator_projection.Listing_order.ticket
+      (** The stance listing replaces the whole yolo set, so a fetch that
+          started before an operator armed a gate would put the pre-press
+          answer back. This no longer rides a generation that every reader
+          advances for itself: that made two unrelated listings invalidate
+          each other, so a tool-modes fetch racing any unrelated background
+          poll (not only a press) was dropped even with no press ever armed
+          (#37461). The generation carried here is only ever advanced by
+          [Masc_tui_operator_projection.Flow.begin_action] (a press), and is observed -- not
+          reserved -- at dispatch time, so [Masc_tui_operator_projection.Flow.is_current] at
+          arrival answers exactly "did a press open since this fetch went
+          out", including one that opened and closed in between (#37609
+          review: a dispatch-time-only [action_inflight] check cannot see
+          that). The ticket also numbers the fetch: a full and a scoped
+          refresh each launch one, so two can be out at once and the older
+          answer may land last (task-1672). *)
+  | Keeper_tool_mode_set of
+      string
+      * Masc.Keeper_tool_approval_mode.mode
+      * (unit, string) result
+      * Masc_tui_operator_projection.Flow.generation
+      (** keeper, tool call id, allow, and whether a wait was released — the
+          Approvals-surface twin of [Keeper_chat_approval_answered], which
+          needs the chat request this path does not have. *)
+  | Keeper_chat_dispatch_blocked of Masc_tui_keeper_chat_projection.request * string
+  | Keeper_logs_loaded of keeper_log_request * (Masc_tui_metrics_tail.snapshot, string) result
+  | Keeper_execute_streamed of keeper_execute_follow * keeper_execute_follow_event
+  | Keeper_settings_save_changed of keeper_settings_save_request * keeper_settings_save_status * int64
+  | Keeper_creation_changed of keeper_creation_request * keeper_creation_status
+  | Keeper_action_done of
+      Masc.Tui_decode.server_identity option
+      * string
+      * Masc_tui_keeper_control.action
+      * (Masc_tui_keeper_control.outcome, string) result
+  (* Carries the keeper it was asked about: the roster cursor can move while a
+     load is in flight, and an answer that did not say whose it was would be
+     filed under whoever is selected when it lands. *)
+  | Keeper_schedules_loaded of keeper_schedule_page_request * (schedule_snapshot, string) result
+  | Keeper_calls_loaded of
+      int * string * (Masc.Tui_decode.keeper_calls_snapshot, string) result
+  | Keeper_settings_editor_loaded of Masc_tui_types.keeper_settings_request *
+      (Masc_tui_types.keeper_settings_snapshot, string) result
+  | Keeper_config_view_loaded of Masc_tui_types.detail_read_request * (string list, string) result
+  | Keeper_items_loaded of
+      Masc_tui_types.detail_read_request * (string option * Masc_tui_keeper_items.t, string) result
+  | Keeper_sandbox_view_loaded of
+      Masc_tui_types.detail_read_request * Masc_tui_keeper_sandbox.load_result
+  | Keeper_sandbox_logs_loaded of
+      string * int * (Masc_tui_keeper_sandbox.logs, string) result
+  | Keeper_board_quarantines_loaded of
+      string Masc_tui_fetched.request
+      * (Masc_tui_board_quarantine.t, string) result
+
 type async_msg =
   | Chat_search_finished of int * bool * Masc_tui_render_chat.chat_search_plan
       * (Masc_tui_render_chat.chat_search_work * Masc_tui_render_chat.chat_search_match, string) result
@@ -323,19 +463,14 @@ type async_msg =
           guard's withdrawal, then the refusal kept on the Schedules surface. *)
   | Lane_package_catalog_loaded of int * string option * (Yojson.Safe.t, string) result
   | Lane_package_preview_loaded of int * string * (Yojson.Safe.t, string) result
-  | Keeper_queue_resume_confirmed of string * int * resume_confirmation * string list
-      (** The last field identifies only input held when this resume began. *)
-  | Keeper_queue_action_received of string * string list
-  | Keeper_queue_loaded of string * int option * Masc_tui_queue_inspection.action * (string list * (Masc_tui_queue_inspection.observation, string) result, string) result
+  | Keeper_msg of keeper_msg
   | Lane_addons_loaded of int * Masc_tui_lane_addons.read_target * (lane_addons_reply, lane_addons_failure) result
   | Lane_application_loaded of Masc_tui_lane_application.ticket
       * (Masc_tui_lane_addons.configuration, string) result
   | Lane_subscriptions_loaded of int * (Masc_tui_lane_subscriptions.snapshot,string) result
   | Lane_declaration_loaded of int * Masc_tui_lane_declaration.request * bool * string option
       * (Masc_tui_lane_declaration.response, string) result
-  | Keeper_deletions_loaded of int * (Masc_tui_keeper_control.deletion_inventory, string) result
   | Msx_tick_withdrawn of msx_poll_request * string
-  | Keeper_deletion_retry_done of string * (unit, string) result
   | Msx_frame_loaded of msx_poll_request
       * (Masc_tui_msx_tick.response, string) result
   | Msx_activity_loaded of msx_poll_request
@@ -420,65 +555,15 @@ type async_msg =
       ask_submission
       * (Masc.Tui_decode_asks.answer_receipt, string) result
       * (Masc.Tui_decode_asks.asks_snapshot, string) result
-  | Keeper_chat_dispatch_started of
-      Masc_tui_keeper_chat_projection.request * bool * bool Eio.Promise.u
-  | Keeper_chat_done of
-      Masc_tui_keeper_chat_projection.request
-      * bool
-      * (Masc_tui_keeper_chat_projection.response, Masc_tui_keeper_chat_projection.error) result
-      * unit Eio.Promise.u
-  | Keeper_chat_stream_deltas of
-      Masc_tui_keeper_chat_projection.request * Masc_tui_keeper_chat_live.observed_delta list
-  | Keeper_chat_stream_unavailable of Masc_tui_keeper_chat_projection.request * string
-  | Keeper_run_next_done of Masc_tui_keeper_chat_projection.request * (string, string) result
-  | Keeper_observed_interrupt_done of
-      string * string * int * (Masc_tui_interrupt_signal.interrupt_signal, string) result
-  | Keeper_chat_interrupt_done of
-      Masc_tui_keeper_chat_projection.request * int * (Masc_tui_interrupt_signal.interrupt_signal, string) result
-  | Keeper_chat_history_loaded of
-      Keeper_history_read.t * Keeper_history_read.source * Keeper_history_read.result
-  | Keeper_chat_first_page_loaded of
-      Keeper_history_read.t * Keeper_history_read.page_result
-  | Keeper_chat_copy_loaded of
-      int * string * (Masc_tui_keeper_chat_history.decoded, string) result
-  | Keeper_chat_operation_loaded of
-      { keeper_name : string
-      ; operation_id : string
-      ; operation_state : (Keeper_chat_operation.state, string) result
-      }
-  | Keeper_chat_journal_loaded of
-      { keeper_name : string
-      ; source : Masc_tui_keeper_chat_log.journal_source
-      ; started_at : float
-      ; terminal_replay : Masc_tui_keeper_chat_log.terminal_replay
-      ; operation_state : (Keeper_chat_operation.state option, string) result
-      ; journal :
-          ( Masc.Keeper_chat_event_log.journaled_event list
-          , Masc_tui_keeper_chat_log.events_error )
-          result
-      }
-  | Keeper_native_tasks_loaded of
-      string * (Masc_tui_native_tasks.t, Masc_tui_native_tasks.error) result
-  | Keeper_preparation_loaded of
-      Masc_tui_preparation_details.request * (Masc_tui_preparation_details.snapshot, string) result
-  | Keeper_child_content_loaded of
-      string * (Masc_tui_child_content.t, Masc_tui_child_content.error) result
   | Context_inspector_loaded of
       int * string * Masc_tui_context_inspector.reading
   | Context_inspector_part_loaded of
       Masc_tui_context_inspector.part_key Masc_tui_fetched.request
       * (string, string) result
-  | Keeper_chat_older_loaded of
-      int * string * string option * (Masc_tui_keeper_chat_history.page, Masc_tui_keeper_chat_history.page_error) result
   | Live_context_loaded of Masc_tui_context_state.request * int64
       * (Masc.Tui_decode.context_observation, string) result
   | Local_keepers_read of local_workspace_request * (Masc_tui_loader.local_keeper_reading, string) result
   | Local_workspace_read of local_workspace_request * (Masc_tui_loader.local_reading, string) result
-  | Keeper_composite_loaded of
-      unit ref * string
-      * ( Masc.Tui_decode.keeper_lane * Masc.Tui_decode.keeper_secret_projection option,
-          string )
-        result
   | Lane_inventory_loaded of
       int * (Masc.Tui_decode_lane_inventory.snapshot, string) result
   | Clients_loaded of
@@ -533,11 +618,6 @@ type async_msg =
      lands. *)
   | File_changes_loaded of
       string * (Masc.Tui_decode.file_change_snapshot, string) result
-  | Keeper_chat_file_changes_loaded of
-      int * string * (Masc.Tui_decode.file_change_snapshot, string) result
-      (** Generation and keeper-stamped answer for the chat-only cache. The
-          Changes surface owns [File_changes_loaded] and is never populated by
-          this response. *)
   (* Keyed by the path it answers for, for the same reason the file-change
      message carries a keeper: an answer for a file the operator has since
      left is not this view's answer. *)
@@ -585,19 +665,8 @@ type async_msg =
         string )
       result
   | Runtime_assignment_changed of runtime_assignment_request * runtime_assignment_status * int64
-  | Keeper_chat_approval_answered of
-      Masc_tui_keeper_chat_projection.request
-      * string
-      * bool
-      * (Masc_tui_http.tool_approval_answer, string) result
-  | Keeper_tool_approvals_loaded of
-      Snapshot_read.request * Masc.Tui_decode.server_identity * (Masc.Tui_decode.keeper_tool_approval list, string) result
   | Asks_reloaded of asks_observation
       (** The questions read again on their own, after a change or a failure. *)
-  | Keeper_roster_reloaded of keeper_roster_observation
-      (** The whole roster read on its own, after a change or a failure. *)
-  | Keeper_row_reloaded of keeper_row_observation
-      (** One Keeper's row read on its own, after the server named it. *)
   | Listen_prepared of listen_request * (Masc_tui_attachment_action.prepared, string) result
   | Resource_diagram_ready of Masc_tui_resource_diagrams.request * string * Masc_tui_resource_diagrams.claim * (string, string) result
   | Sent_image_ready of {
@@ -624,13 +693,6 @@ type async_msg =
           itself. [image_url] is what was fetched; [page_url] is the link the
           operator chose, and the one a browser gets when drawing fails
           (see [Masc_tui_browser.browser_url]). *)
-  | Keeper_turns_loaded of (string * int) list * keeper_waiting_snapshot * (int * int) option
-      * (Masc.Tui_decode.keeper_turns_projection, string) result
-  | Keeper_waiting_loaded of Keeper_waiting_read.request * keeper_waiting_snapshot
-      * (Masc.Tui_decode.keeper_turns_projection, string) result
-  | Keeper_chat_control_received of string * int * string
-      (** Which keepers are mid-turn right now, for the "answering now"
-          badge drawn from every surface. *)
   | Gate_snapshot_loaded of Snapshot_read.request * Masc.Tui_decode.server_identity *
       (Masc.Tui_decode.gate_snapshot, string) result
       (** The durable Gate beside the held calls: pending approvals that
@@ -656,47 +718,7 @@ type async_msg =
       * bool
       * (Masc_tui_http.tool_approval_answer, string) result
       * Masc_tui_operator_projection.Flow.generation
-  (* Its own message rather than a field on the stance one: the two come from
-     different endpoints and one failing must not blank the other. *)
-  | Keeper_gate_settings_loaded of
-      (((string * Masc.Tui_decode.gate_mode) list * Masc.Tui_decode.keeper_exact_lane_first list), string) result
-  | Keeper_tool_modes_loaded of
-      ((string * Masc.Keeper_tool_approval_mode.mode) list, string) result
-      * Masc_tui_operator_projection.Listing_order.ticket
-      (** The stance listing replaces the whole yolo set, so a fetch that
-          started before an operator armed a gate would put the pre-press
-          answer back. This no longer rides a generation that every reader
-          advances for itself: that made two unrelated listings invalidate
-          each other, so a tool-modes fetch racing any unrelated background
-          poll (not only a press) was dropped even with no press ever armed
-          (#37461). The generation carried here is only ever advanced by
-          [Masc_tui_operator_projection.Flow.begin_action] (a press), and is observed -- not
-          reserved -- at dispatch time, so [Masc_tui_operator_projection.Flow.is_current] at
-          arrival answers exactly "did a press open since this fetch went
-          out", including one that opened and closed in between (#37609
-          review: a dispatch-time-only [action_inflight] check cannot see
-          that). The ticket also numbers the fetch: a full and a scoped
-          refresh each launch one, so two can be out at once and the older
-          answer may land last (task-1672). *)
-  | Keeper_tool_mode_set of
-      string
-      * Masc.Keeper_tool_approval_mode.mode
-      * (unit, string) result
-      * Masc_tui_operator_projection.Flow.generation
-      (** keeper, tool call id, allow, and whether a wait was released — the
-          Approvals-surface twin of [Keeper_chat_approval_answered], which
-          needs the chat request this path does not have. *)
-  | Keeper_chat_dispatch_blocked of Masc_tui_keeper_chat_projection.request * string
-  | Keeper_logs_loaded of keeper_log_request * (Masc_tui_metrics_tail.snapshot, string) result
-  | Keeper_execute_streamed of keeper_execute_follow * keeper_execute_follow_event
-  | Keeper_settings_save_changed of keeper_settings_save_request * keeper_settings_save_status * int64
   | Runtime_form_save_changed of runtime_form_save_request * runtime_form_save_status * int64
-  | Keeper_creation_changed of keeper_creation_request * keeper_creation_status
-  | Keeper_action_done of
-      Masc.Tui_decode.server_identity option
-      * string
-      * Masc_tui_keeper_control.action
-      * (Masc_tui_keeper_control.outcome, string) result
   | Board_publication_done of
       Masc_tui_types.workspace_authority Masc_tui_board_publication.outcome
   | Board_comment_done of {
@@ -716,10 +738,6 @@ type async_msg =
      not say whose it was would be filed under whoever is open when it lands. *)
   | Schedule_wake_history_loaded of
       string * (schedule_wake_history, string) result
-  (* Carries the keeper it was asked about: the roster cursor can move while a
-     load is in flight, and an answer that did not say whose it was would be
-     filed under whoever is selected when it lands. *)
-  | Keeper_schedules_loaded of keeper_schedule_page_request * (schedule_snapshot, string) result
   | System_logs_loaded of Surface_read_order.request * (system_log_snapshot, string) result
   | Schedule_cancel_done of string * (string, string) result
   (* (message, noop): [noop = true] says the verdict already stood. *)
@@ -729,8 +747,6 @@ type async_msg =
   | Board_attachment_loaded of Masc_tui_board_reader.request * (Masc_tui_board_reader.content, string) result
   | Board_attachment_prepared of Masc_tui_board_reader.preparation_request * (Masc_tui_detail_reading.row list, string) result
   | Board_attachment_saved of Masc_tui_board_reader.request * (board_attachment_action_result, string) result
-  | Keeper_calls_loaded of
-      int * string * (Masc.Tui_decode.keeper_calls_snapshot, string) result
   | Goal_timeline_loaded of
       string Masc_tui_fetched.request * (Masc.Tui_decode.goal_timeline, string) result
   | Goal_candle_loaded of
@@ -742,15 +758,6 @@ type async_msg =
   | Verification_evidence_loaded of
       Masc_tui_types.verification_evidence_request * (Masc_tui_evidence_picture.evidence,
                 Masc_tui_types.Verification_evidence_read.failure) result
-  | Keeper_settings_editor_loaded of Masc_tui_types.keeper_settings_request *
-      (Masc_tui_types.keeper_settings_snapshot, string) result
-  | Keeper_config_view_loaded of Masc_tui_types.detail_read_request * (string list, string) result
-  | Keeper_items_loaded of
-      Masc_tui_types.detail_read_request * (string option * Masc_tui_keeper_items.t, string) result
-  | Keeper_sandbox_view_loaded of
-      Masc_tui_types.detail_read_request * Masc_tui_keeper_sandbox.load_result
-  | Keeper_sandbox_logs_loaded of
-      string * int * (Masc_tui_keeper_sandbox.logs, string) result
   | Exact_activity_read of Masc_tui_exact_activity.request * (Masc_tui_exact_activity.document, string) result
   | Exact_activity_saved of Masc_tui_exact_activity.request * Masc_tui_exact_activity.write_result
   | Machine_activity_read of Masc_tui_machine_activity.request * (Masc_tui_machine_activity.reading, string) result
@@ -766,9 +773,6 @@ type async_msg =
       runtime_param_edit option * (string, string) result
   | Prompts_loaded of
       unit Masc_tui_fetched.request * (Masc.Tui_decode.prompts_snapshot, string) result
-  | Keeper_board_quarantines_loaded of
-      string Masc_tui_fetched.request
-      * (Masc_tui_board_quarantine.t, string) result
   (* Keeper, partition, and what is known about the requeue's effect. *)
   | Board_quarantine_requeued of string * string * Masc_tui_http.post_outcome
   | Board_quarantines_bulk_progress of

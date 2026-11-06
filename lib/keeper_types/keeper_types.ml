@@ -33,7 +33,7 @@ type tool_call_entry =
   }
 
 (* ================================================================ *)
-(* Working Context Types (moved from Keeper_working_context)         *)
+(* Working Context Types                                             *)
 (* ================================================================ *)
 
 type working_context =

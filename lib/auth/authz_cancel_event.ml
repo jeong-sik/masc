@@ -35,6 +35,7 @@ let subject_body = function
     Authz_body.object_ [ "type", label; "principal", principal ]
   | Subject.Runtime id -> id_object "runtime" (Runtime_id.to_string id)
   | Subject.Invite id -> id_object "invite" (Invite_id.to_string id)
+  | Subject.Registration id -> id_object "registration" (Registration_id.to_string id)
 ;;
 
 let to_body { aborted; subject } =
@@ -94,6 +95,8 @@ let subject_of_body body =
     Option.map (fun principal -> Subject.Principal principal) (principal_of_body principal)
   | Some ("runtime", members) -> id_of Runtime_id.of_string (fun id -> Subject.Runtime id) members
   | Some ("invite", members) -> id_of Invite_id.of_string (fun id -> Subject.Invite id) members
+  | Some ("registration", members) ->
+    id_of Registration_id.of_string (fun id -> Subject.Registration id) members
   | Some _ | None -> None
 ;;
 

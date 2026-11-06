@@ -79,6 +79,7 @@ module Subject = struct
     | Principal of Principal.t
     | Runtime of Runtime_id.t
     | Invite of Invite_id.t
+    | Registration of Registration_id.t
 
   let equal a b =
     match a, b with
@@ -87,8 +88,9 @@ module Subject = struct
     | Principal x, Principal y -> Principal.equal x y
     | Runtime x, Runtime y -> Runtime_id.equal x y
     | Invite x, Invite y -> Invite_id.equal x y
-    | ( (Grant _ | Credential _ | Principal _ | Runtime _ | Invite _)
-      , (Grant _ | Credential _ | Principal _ | Runtime _ | Invite _) ) -> false
+    | Registration x, Registration y -> Registration_id.equal x y
+    | ( (Grant _ | Credential _ | Principal _ | Runtime _ | Invite _ | Registration _)
+      , (Grant _ | Credential _ | Principal _ | Runtime _ | Invite _ | Registration _) ) -> false
   ;;
 
   let to_string = function
@@ -97,6 +99,7 @@ module Subject = struct
     | Principal principal -> "principal:" ^ Principal.to_string principal
     | Runtime id -> "runtime:" ^ Runtime_id.to_string id
     | Invite id -> "invite:" ^ Invite_id.to_string id
+    | Registration id -> "registration:" ^ Registration_id.to_string id
   ;;
 end
 

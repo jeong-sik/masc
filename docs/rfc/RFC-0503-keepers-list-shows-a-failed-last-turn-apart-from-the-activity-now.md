@@ -1,7 +1,7 @@
 ---
 rfc: "0503"
 title: "Keepers 목록은 지난 턴의 실패와 지금 하는 일을 따로 보여 준다"
-status: Draft
+status: Accepted
 created: 2026-11-06
 updated: 2026-11-06
 author: claude
@@ -11,6 +11,8 @@ related: ["tui-operator-workbench", "0418"]
 ---
 
 # RFC-0503 — Keepers 목록은 지난 턴의 실패와 지금 하는 일을 따로 보여 준다
+
+- Status: **Accepted (2026-11-06).** 운영자가 D1~D7 을 §8 의 제안값으로 정했다.
 
 ## 0. 요약
 
@@ -198,8 +200,8 @@ type attention = Attention | Failing | Active | Waiting | Inactive | Unobserved
 
 | 파일 | 변화 | 층 |
 | --- | --- | --- |
-| `bin/masc_tui_keeper_list_model.ml(i)` | `Failure` → `Attempt_failed`. `failed` 분기를 지운다. `:230` 의 갈래는 `Attempt_failed` 를 만드는 유일한 갈래로 남긴다(와일드카드가 없어 지우면 비망라가 된다). `attention` 에 `Failing`. `group_of_activity`(:251)는 활동 하나만 받는데 `Failing` 은 건강도 읽어야 해서, 묶음은 `group_of_row` 와 `rank`(:258, :299)가 정한다. `group_counts` 레코드 | L2 |
-| `bin/masc_tui_keeper_trail.ml(i)` (새 파일) | `trail` `walk` `cause_group` 과 이를 만드는 순수 함수. 기존 모델 파일은 359줄이라 새 코드를 거기에 넣지 않는다. `bin/dune` 에 새 `library` stanza 를 두고(`masc` `masc.masc_types`), 모델 stanza 의 `libraries` 에 더한다(`bin/dune:1559-1563`). `dune-project:37` 이 `implicit_transitive_deps false` 라서 `masc-tui` 실행 파일의 `libraries`(`bin/dune:2714` 이하)에도 이름을 적어야 한다. `masc_tui_render_keepers` 는 라이브러리가 아니라 그 실행 파일의 모듈이다(`bin/dune:2708`) | L2 타입, L3 내용 |
+| `bin/masc_tui_keeper_list_model.ml(i)` | `Failure` → `Attempt_failed`. `failed` 분기를 지운다. `:230` 의 갈래는 `Attempt_failed` 를 만드는 유일한 갈래로 남긴다(와일드카드가 없어 지우면 비망라가 된다). `attention` 에 `Failing`. `group_of_activity`(:251)는 활동 하나만 받는데 `Failing` 은 건강도 읽어야 해서, 묶음은 `group_of_row` 와 `rank`(:258, :299)가 정한다. L2 에서 `Failing` 은 `Health_failing` 을 직접 읽고, `trail` 이 들어오는 L3 에서 `trail_of_row` 를 읽도록 바꾼다. `group_counts` 레코드 | L2 |
+| `bin/masc_tui_keeper_trail.ml(i)` (새 파일) | `trail` `walk` `cause_group` 과 이를 만드는 순수 함수. 기존 모델 파일은 359줄이라 새 코드를 거기에 넣지 않는다. `bin/dune` 에 새 `library` stanza 를 두고(`masc` `masc.masc_types`), 모델 stanza 의 `libraries` 에 더한다(`bin/dune:1559-1563`). `dune-project:37` 이 `implicit_transitive_deps false` 라서 `masc-tui` 실행 파일의 `libraries`(`bin/dune:2714` 이하)에도 이름을 적어야 한다. `masc_tui_render_keepers` 는 라이브러리가 아니라 그 실행 파일의 모듈이다(`bin/dune:2708`) | L3 |
 | `bin/masc_tui_keeper_mark.ml` | `activity_glyph` 의 `Failure` 갈래를 지우고 `Attempt_failed` 를 더한다 | L2, L4 |
 | `bin/masc_tui_render_keepers.ml` | 단어 · 스타일 · 묶음 제목 · `keeper_failure_context` 를 새 값으로 바꾼다. 실패 문장 폭에 묶인 값 둘도 새 문장에 맞춘다(아래) | L2 ~ L4 |
 | `test/test_tui_keeper_list_model.ml` | 기존 시험 둘이 바뀐다(아래). 결정 시험을 더한다(§7) | L2, L3 |
@@ -241,14 +243,14 @@ type attention = Attention | Failing | Active | Waiting | Inactive | Unobserved
 
 | 층 | 내용 | 확인 |
 | --- | --- | --- |
-| L1 | 이 RFC | 운영자가 받아들인다 |
-| L2 | `activity` / `trail` 분리, `Failing` 묶음, `Failure` 삭제, 안 쓰는 `open_turn` `turn_clock` 삭제 | 결정 시험, §7 의 `rg` 기준선이 0 으로 |
-| L3 | `cause_group`, `walk`, 직전 문장 | 생성자 대응표 리뷰, 15행 변환 계산표 |
+| L1 | 이 RFC | 운영자가 받아들였다(2026-11-06) |
+| L2 | `Failure` → `Attempt_failed`, `Failing` 묶음(`Health_failing` 을 직접 읽는다), `group_counts` 레코드, 안 쓰는 `open_turn` `turn_clock` 삭제 | 결정 시험, §7 의 `rg` 기준선이 0 으로 |
+| L3 | `trail` `walk` `cause_group` 새 모듈, 직전 문장, 묶음이 `trail` 을 읽도록 바꾸기 | 생성자 대응표 리뷰, 15행 변환 계산표 |
 | L4 | 색, 묶음 제목, 글리프, 도움말의 칸 설명 | 80 · 120 · 200칸 캡처, 색을 지운 캡처, 질문 6개 표 |
 | L5(선택) | `Detailed` 둘째 줄에 시도 목록, `runtime_path_rest` 디코딩 | 캡처 |
 
 - 층마다 `gh stack` 의 한 PR 이고 Draft 다. 한 PR 은 토큰 2만 이하로 둔다.
-- L2 부터는 이 RFC 를 운영자가 받아들인 뒤, 따로 승인받고 시작한다.
+- L2 부터는 층마다 범위를 먼저 알리고 승인받은 뒤 시작한다.
 
 ## 6. 서버 후속(2단계)
 
@@ -300,6 +302,8 @@ L2 가 끝나면 첫째와 셋째는 출력이 없고, 둘째는 제목 문자�
 | D5 | `Activity` 정렬에서 failing 행이 위에 모이지 않는 것을 받아들일까 | 받아들인다. 모으는 일은 `Priority` 정렬과 `Grouped` 가 맡는다 |
 | D6 | `Detailed` 둘째 줄에 시도 목록을 둘까 | L5 로 미룬다. 1단계는 첫 줄만 바꾼다 |
 | D7 | 옛 `HEALTH` `TURN` 칸의 값(`open_turn` `turn_clock`)을 L2 에서 같이 지울까 | 지운다. 시험만 부르고, 남기면 같은 사실을 두 이름으로 적는다 |
+
+2026-11-06 운영자가 일곱 항목을 모두 제안값으로 정했다.
 
 ## 9. 참고
 

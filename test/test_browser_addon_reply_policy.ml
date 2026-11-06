@@ -47,7 +47,7 @@ let policy_at_the_actual_tool_boundary () =
                 ignore (send (W.Deliver {client_id;id=command.id;
                   payload=`Assoc ["ok", `Bool true; "data", `Assoc ["scripted", `Bool true]]})));
               serve ()
-          | W.Service_refusal _|Snapshot_result _|Model_reply _|Download_reply _|Receipt|Issue_result _ -> `Stop_daemon in
+          | W.Service_refusal _|Snapshot_result _|Download_reply _|Receipt|Issue_result _ -> `Stop_daemon in
         serve ());
       let rec registered () = if B.connected_clients () = [] then (Eio.Fiber.yield (); registered ()) in
       registered ();
@@ -75,7 +75,7 @@ let policy_at_the_actual_tool_boundary () =
                  | Rejected_before_effect _), (true | false) ->
                   fail (label ^ ": expected the original typed answer or timeout"))
          | W.Issue_result (Error _) | Service_refusal _ | Receipt | Snapshot_result _
-         | Model_reply _ | Download_reply _ | Poll_result _ ->
+         | Download_reply _ | Poll_result _ ->
              fail (label ^ ": expected the original typed answer or timeout"));
         if not answered then
           check bool (label ^ ": timeout keeps the original effect uncertainty") true

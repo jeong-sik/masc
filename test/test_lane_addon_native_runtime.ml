@@ -230,7 +230,7 @@ let operator_retain () = with_fixture (fun clock root config ->
       (Lane_addon_store.digest instance_id) in
     Unix.mkdir slot 0o700;
     let lease result = result |> Result.map_error Native_addon_lease.error_to_string |> require in
-    let context = require (Browser_addon_socket.context ~instance_id ~models:None
+    let context = require (Browser_addon_socket.context ~instance_id
       ~source:Browser_addon_socket.Ego) in
     let admission = lease (Native_addon_lease.prepare ~directories:[slot] ~instance_id ~cleanup_context:(Some context)) in
     let allocation = require (Browser_addon_socket.acquire ~admission ~directory:slot) in
@@ -930,7 +930,7 @@ max_reply_bytes = 65536
     (match Option.map (fun service -> R.call_browser_service ~config ~access ~service
         ~command:Browser_addon_wire.Snapshot) (service browser) with
      | Some (Ok (Browser_addon_wire.Snapshot_result _)) -> true
-     | Some (Ok (Browser_addon_wire.(Model_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _|Service_refusal _)))
+     | Some (Ok (Browser_addon_wire.(Download_reply _|Poll_result _|Receipt|Issue_result _|Service_refusal _)))
      | Some (Error (Browser_addon_client.(Unavailable _|Outcome_unknown _))) | None -> false);
   Unix.unlink (Filename.concat root "hold-idle");
   ignore (dispatch config R.Detach ["instance_id",`String browser]);

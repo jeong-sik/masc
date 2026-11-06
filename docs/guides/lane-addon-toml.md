@@ -150,9 +150,9 @@ revision과 worker 교체에 반영된다. 이 선택은 LLM을 호출하거나 
 선택하고 선택적인 도구 입력·출력 검사는 끈다.
 
 ```toml
-id = "browser-planner"
-run_id = "browser-work"
-manifest_path = "../packages/browser-planner/lane.toml"
+id = "planner"
+run_id = "planner-work"
+manifest_path = "../packages/planner/lane.toml"
 exact_outputs = ["plan"]
 tool_hooks = []
 
@@ -160,9 +160,7 @@ tool_hooks = []
 sources = []
 ```
 
-이 예제는 `plan`을 선언한 별도 패키지를 가정한다. 함께 제공하는
-[`browser-automation`](../../addons/browser/automation/lane.toml)은 `locate`를 선언한다.
-`locate`는 Gecko에서 관측한 노드를 고르는 읽기 전용 소비자다.
+이 예제는 `plan`을 선언한 도구 패키지를 가정한다.
 선택 배열에는 패키지가 선언한 이름만 한 번씩 쓴다. 스키마나 모델·자격 증명을
 설치 배열에서 주입할 수 없다. 이름 순서는 패키지 순서로 정규화하며, 유효 선택이
 같으면 worker revision도 같다. 선택을 바꾸면 설치 revision에 반영돼 기존 worker와
@@ -172,32 +170,22 @@ sources = []
 설치의 유효 패키지에 허용된 출력만 남긴다. 공용 Exact-output 실행기는 native와
 container worker의 비공개 host 요청 포트에 연결된다. `exact_outputs = []`이면 그 설치에
 host 요청 포트를 만들지 않고 모델 호출도 하지 않는다. 패키지 worker가 요청 목록과 결과
-소비 포트를 구현해야 실제로 사용한다. Browser worker는 별도 비공개 소켓으로 모델 요청,
-결과 전달, 요청 변경 대기를 처리한다. 브라우저 명령이 모델을 기다리는 동안에도 이 경로는
-열려 있다. 원래 명령을 취소하면 해당 요청을 철회하고, detach는 남은 모델 대기를 닫는다.
-결과 수신 영수증은 브라우저 임시 할당 밖의 Add-on 저장소에 보존하며, 브라우저 동작 완료와
-구분한다. 번들 Gecko 소비자는 관측한 scene의 nodeId를 모델이 고르게 하고, 같은 탭을 다시
-읽어 문서·URL·관측 의미를 확인한 뒤 현재 target과 별도 inference를 반환한다.
-해당 설치의 `runtime.addon_exact_lanes.<설치 ID>.locate`에 운영자가 실제 모델 slot을
-선택해야 한다. `exact_outputs = []`이면 소비자를 설치하지 않으며, 다른 도구 검증 Hook은
-계속 따로 선택한다. 모델 route가 아직 준비되지 않으면 기존 Exact Output 정책에 따라
-요청을 남긴다. `locate` inventory는 선택된 소비자의 유무이고 provider 준비 완료가 아니다.
-실제 검증과 남은 브라우저 범위는 [실행 증거](../design/browser-addon-lifecycle.md#completion-evidence)와
-[#44150](https://github.com/jeong-sik/masc/issues/44150)에서 확인한다.
+소비 포트를 구현해야 실제로 사용한다.
 
-### Browser의 독립 선택
+브라우저 패키지(`service = "browser"`)는 Exact Output과 operator asks를 선언할 수 없다.
+브라우저 worker는 host 요청 포트를 열지 않으므로, 선언하면 manifest를 읽을 때 거절한다.
 
-`browser-lane-setup`이 만든 출처별 선언에 다음 두 배열을 독립적으로 더한다. `locate`는
-`browser-automation.toml`이 선언한다. `manifest_path`는
+### Browser의 도구 검사 선택
+
+`browser-lane-setup`이 만든 출처별 선언에 `tool_hooks` 배열을 더한다. `manifest_path`는
 setup이 쓴 값을 그대로 둔다.
 
 ```toml
-id = "browser-automation"
+id = "browser-ego"
 enabled = true
-run_id = "browser-automation"
-manifest_path = "/absolute/path/to/workspace/.masc/packages/browser-automation/lane.toml"
+run_id = "browser-ego"
+manifest_path = "/absolute/path/to/workspace/.masc/packages/browser-ego/lane.toml"
 tool_hooks = ["validate_input", "validate_output"]
-exact_outputs = ["locate"]
 
 [binding]
 sources = []
@@ -209,18 +197,15 @@ sources = []
 | `tool_hooks = ["validate_output"]` | 성공 응답 스키마 검사 |
 | `tool_hooks = ["validate_input", "validate_output"]` | 두 도구 검사 |
 | `tool_hooks = []` | 선택적인 도구 검사 끄기 |
-| `exact_outputs = ["locate"]` | Gecko 노드 선택 모델 소비자 |
-| `exact_outputs = []` | 모델 소비자 끄기 |
 
-두 배열을 생략하면 패키지 기본 선택을 따른다. 모델 소비자를 꺼도 브라우저가
-제공하는 비모델 기능은 사용할 수 있으며, 지원 기능은 연결된 backend의 inventory로
-확인한다. 두 배열을 비워도 caller 권한·worker incarnation·필수 wire decode·문서와
+배열을 생략하면 패키지 기본 선택을 따른다. 지원 기능은 연결된 backend의 inventory로
+확인한다. 배열을 비워도 caller 권한·worker incarnation·필수 wire decode·문서와
 viewport 결속·정리 검사는 계속 적용된다. Hook을 임의 코드로 삽입하는 설정은 없으며,
-현재 제공하는 middleware 이름과 패키지가 선언한 Exact Output만 선택할 수 있다.
+현재 제공하는 middleware 이름만 선택할 수 있다.
 
-완료된 owned Gecko 다운로드는 이 선택과 별개로 호스트가 아티팩트로 보관한다.
+완료된 다운로드는 이 선택과 별개로 호스트가 아티팩트로 보관한다.
 원본 응답 기록 뒤 파일 전달을 끝내고, 그 최종 응답에 선택한 출력 검증을 적용한다.
-`tool_hooks = []`, `exact_outputs = []`에서도 같은 파일 권한·전달·정리 경계를 거친다.
+`tool_hooks = []`에서도 같은 파일 권한·전달·정리 경계를 거친다.
 전달이 끝난 응답은 worker 경로 대신 `keeper_artifact_read` 참조를 제공한다.
 
 ## 반영 시점과 화면 읽기

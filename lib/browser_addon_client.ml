@@ -19,10 +19,9 @@ let expected command reply = match command,reply with
   | _,W.Service_refusal _ | W.Snapshot,W.Snapshot_result _
   | W.Poll _,W.Poll_result _ | (W.Deliver _|W.Disconnect _|W.Retire|W.Upload_stage _|W.Upload_discard _|W.Download_commit _|W.Download_release _),W.Receipt
   | W.Issue _,W.Issue_result _ -> true
-  | (W.Model_requests|Model_result _|Model_wait _),W.Model_reply _ -> true
   | W.Download_claim _,W.Download_reply _ -> true
-  | (W.Snapshot|Retire|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _|Model_requests|Model_result _|Model_wait _|Poll _|Deliver _|Disconnect _|Issue _),
-    (W.Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _) -> false
+  | (W.Snapshot|Retire|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _|Poll _|Deliver _|Disconnect _|Issue _),
+    (W.Snapshot_result _|Download_reply _|Poll_result _|Receipt|Issue_result _) -> false
 let issue_policy t route verb =
   let open Browser_lane in
   match route with
@@ -51,11 +50,11 @@ let raw_exchange t ~settlement ~on_cancel_after_dispatch command =
       let writing = ref false in
       let allowance=t.control_timeout_sec +. (match command with
         | W.Issue {timeout_sec;_} -> timeout_sec | W.Poll {window_sec;_} -> window_sec
-        | W.Snapshot|Retire|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _|Model_requests|Model_result _|Model_wait _|Deliver _|Disconnect _ -> 0.) in
+        | W.Snapshot|Retire|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _|Deliver _|Disconnect _ -> 0.) in
       let policy=match command with
         | W.Issue {route;verb;_} -> issue_policy t route verb
         | Snapshot|Retire|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _
-        | Model_requests|Model_result _|Model_wait _|Poll _|Deliver _|Disconnect _ -> Ok Browser_lane.Reply_window in
+        | Poll _|Deliver _|Disconnect _ -> Ok Browser_lane.Reply_window in
       match policy with
       | Error error -> Error error
       | Ok policy ->
@@ -74,7 +73,7 @@ let raw_exchange t ~settlement ~on_cancel_after_dispatch command =
           | Ok _ -> Error (Outcome_unknown "unexpected browser service reply")
           | Error _ -> Error (Outcome_unknown "invalid browser service reply"))) in
       try (match command with
-        | W.Retire | W.Model_wait _ -> exchange ()
+        | W.Retire -> exchange ()
         | W.Issue _ ->
           (* Policy was fixed before dispatch from the original worker's
              validated metadata, never from a caller-supplied transport. *)
@@ -82,7 +81,7 @@ let raw_exchange t ~settlement ~on_cancel_after_dispatch command =
             | Executor_owned -> true | Reply_window -> false in
           if executor_owned then exchange ()
           else Eio.Time.with_timeout_exn clock allowance exchange
-        | Snapshot|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _|Model_requests|Model_result _|Poll _|Deliver _|Disconnect _ -> Eio.Time.with_timeout_exn clock allowance exchange)
+        | Snapshot|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _|Poll _|Deliver _|Disconnect _ -> Eio.Time.with_timeout_exn clock allowance exchange)
       with
       | Eio.Cancel.Cancelled _ as cancelled ->
         if !writing then Eio.Cancel.protect on_cancel_after_dispatch;
@@ -99,7 +98,7 @@ let exchange t ~settlement ~on_cancel_after_dispatch command =
      let token=ref () in
      t.snapshot_token <- Some token; t.live_transports <- None; Some token
    | Retire|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _
-   | Model_requests|Model_result _|Model_wait _|Poll _|Deliver _|Disconnect _|Issue _ -> None in
+   | Poll _|Deliver _|Disconnect _|Issue _ -> None in
   let result=raw_exchange t ~settlement ~on_cancel_after_dispatch command in
   match command with
   | W.Snapshot ->
@@ -114,10 +113,10 @@ let exchange t ~settlement ~on_cancel_after_dispatch command =
             t.live_transports <- Some (List.map (fun (client:Browser_lane.client_info) -> client.client_id,client.transport) published.clients);
           result
         | Error detail -> Error (Outcome_unknown ("invalid browser transport snapshot: " ^ detail)))
-     | Ok (Model_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _|Service_refusal _)
+     | Ok (Download_reply _|Poll_result _|Receipt|Issue_result _|Service_refusal _)
      | Error _ -> result)
   | Retire|Upload_stage _|Upload_discard _|Download_claim _|Download_commit _|Download_release _
-  | Model_requests|Model_result _|Model_wait _|Poll _|Deliver _|Disconnect _|Issue _ -> result
+  | Poll _|Deliver _|Disconnect _|Issue _ -> result
 
 let call t ~on_cancel_after_dispatch command =
   exchange t ~settlement:false ~on_cancel_after_dispatch command
@@ -129,7 +128,7 @@ let transfer_download t ~id ~actor ~route ~verb ~publish =
   let receipt = function
     | W.Receipt -> Ok ()
     | W.Service_refusal {message;_} -> Error message
-    | Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Issue_result _ ->
+    | Snapshot_result _|Download_reply _|Poll_result _|Issue_result _ ->
         Error "unexpected download settlement receipt" in
   let ( let* )=Result.bind in
   let released=ref None in
@@ -141,7 +140,7 @@ let transfer_download t ~id ~actor ~route ~verb ~publish =
       | W.Download_reply (Browser_addon_downloads.Published value) -> Ok value
       | Download_reply (Snapshot descriptor) -> publish descriptor
       | Service_refusal {message;_} -> Error message
-      | Snapshot_result _|Model_reply _|Poll_result _|Receipt|Issue_result _ ->
+      | Snapshot_result _|Poll_result _|Receipt|Issue_result _ ->
           Error "unexpected download claim receipt" in
     let* reply=call ~settlement:true (W.Download_commit {id;actor;route;verb;receipt=artifact}) in
     let* ()=receipt reply in Ok artifact) in

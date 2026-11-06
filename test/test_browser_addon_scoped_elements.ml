@@ -37,7 +37,7 @@ let scoped_answers_need_their_match_count () =
               ignore (send (W.Deliver {client_id;id=command.id;
                 payload=`Assoc ["ok", `Bool true; "data", !answer]}));
               serve ()
-          | W.Service_refusal _|Snapshot_result _|Model_reply _|Download_reply _|Receipt|Issue_result _ -> `Stop_daemon in
+          | W.Service_refusal _|Snapshot_result _|Download_reply _|Receipt|Issue_result _ -> `Stop_daemon in
         serve ());
       let rec registered () = if B.connected_clients () = [] then (Eio.Fiber.yield (); registered ()) in
       registered ();

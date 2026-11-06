@@ -6,7 +6,7 @@ let ok = function Ok value -> value | Error message -> fail message
 let unknown = function
   | W.Service_refusal {disposition=W.Outcome_unknown;_} -> true
   | W.Service_refusal {disposition=W.Not_started;_}
-  | W.Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false
+  | W.Snapshot_result _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false
 
 let scenario () =
   let root=Unix.realpath (Filename.temp_dir ~perms:0o700 "browser-owner-download-" "") in
@@ -41,7 +41,7 @@ let scenario () =
       engine_version="fixture";transport=B.Webdriver_bidi;space=None} in
     (match Owner.dispatch owner {W.incarnation;command=W.Poll {client;window_sec=0.001}} with
      | W.Poll_result _ -> ()
-     | Service_refusal _|Snapshot_result _|Model_reply _|Download_reply _|Receipt|Issue_result _ -> fail "live registration refused");
+     | Service_refusal _|Snapshot_result _|Download_reply _|Receipt|Issue_result _ -> fail "live registration refused");
     ok (Owner.attach_live owner ~client_id ~cleanup:(fun () ->
       incr live_calls;Eio.Promise.resolve start_live ();Eio.Promise.await live_settled;Error "live settlement unconfirmed"));
     (* The owner ends its own connection, so the lane does not time it. *)
@@ -56,7 +56,7 @@ let scenario () =
       engine_version="fixture";transport=B.Ego_task_space;space=Some {B.id=51;name="cleanup Space"}} in
     (match Owner.dispatch owner {W.incarnation;command=W.Poll {client=ego;window_sec=0.001}} with
      | W.Poll_result _ -> ()
-     | Service_refusal _|Snapshot_result _|Model_reply _|Download_reply _|Receipt|Issue_result _ -> fail "ego registration refused");
+     | Service_refusal _|Snapshot_result _|Download_reply _|Receipt|Issue_result _ -> fail "ego registration refused");
     ok (Owner.attach_live owner ~client_id:ego_id
       ~cleanup:(fun () -> incr ego_calls;Eio.Promise.resolve start_ego ();
         Eio.Promise.await ego_settled;raise (Failure "private backend diagnostic")));
@@ -84,7 +84,7 @@ let scenario () =
       (match reply with
        | W.Service_refusal {message;_} ->
          message="live ego_task_space backend cleanup raised; settlement is unconfirmed; live settlement unconfirmed; download cleanup requires confirmed backend teardown"
-       | W.Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false);
+       | W.Snapshot_result _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false);
     check bool "repeated Retire retains the same failure" true (send ()=reply);
     check int "raised ego cleanup is not replayed" 1 !ego_calls;
     check int "failed live cleanup is not replayed" 1 !live_calls;
@@ -110,7 +110,7 @@ let an_ended_live_connection_yields_its_transport () =
         engine_version="fixture";transport=B.Webdriver_bidi;space=None} in
       (match Owner.dispatch owner {W.incarnation;command=W.Poll {client;window_sec=0.001}} with
        | W.Poll_result _ -> ()
-       | Service_refusal _|Snapshot_result _|Model_reply _|Download_reply _|Receipt|Issue_result _ ->
+       | Service_refusal _|Snapshot_result _|Download_reply _|Receipt|Issue_result _ ->
          fail "live registration refused");
       client_id in
     let settled=ref 0 in
@@ -126,7 +126,7 @@ let an_ended_live_connection_yields_its_transport () =
       (match Owner.dispatch owner {W.incarnation;command=W.Retire} with
        | W.Service_refusal {disposition=W.Outcome_unknown;message} -> message="the first connection's Space was gone"
        | W.Service_refusal {disposition=W.Not_started;_}
-       | W.Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false);
+       | W.Snapshot_result _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false);
     check int "each attached connection is settled once" 2 !settled)))
 
 (* A process holds one browser owner, so this case runs in its own process.

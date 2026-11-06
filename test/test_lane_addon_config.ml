@@ -862,6 +862,16 @@ max_reply_bytes = 4096
     (Yojson.Safe.Util.member "service" (Lane_addon_types.package_to_json ego)=`String "browser");
   check bool "its source survives revision serialization" true
     (Yojson.Safe.Util.member "browser_backend" (Lane_addon_types.package_to_json ego)=`String "ego");
+  (* A browser worker answers no host requests, so a browser package that
+     declares an exact output or operator asks is refused. *)
+  write (Filename.concat packages "answer.json")
+    {|{"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"],"additionalProperties":false}|};
+  List.iter (fun (label, world) -> match load "\"browser\"\nbrowser_backend = \"ego\"" world with
+    | Ok _ -> failf "a browser package with %s was accepted" label
+    | Error error -> check bool ("a browser package with " ^ label ^ " is refused") true
+        (contains (Lane_addon_manifest.error_to_string error) "omit exact_outputs and asks"))
+    [ "an exact output", "[world.exact_outputs.answer]\nschema = \"answer.json\"";
+      "operator asks", "[world.asks]\noperator = true" ];
   List.iter (fun (label, service) -> match load service "" with
     | Ok _ -> failf "%s was accepted" label
     | Error error -> check bool (label ^ " is refused as a browser_backend error") true

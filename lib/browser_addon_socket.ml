@@ -11,7 +11,7 @@ let source_backend = function
   | Owned_firefox _ -> Browser_lane.Backend.Owned_firefox
   | Ego -> Browser_lane.Backend.Ego
   | External_host -> Browser_lane.Backend.External_host
-type t = {path:string;incarnation:string;backend:Browser_lane.Backend.t;models:bool;device:int;inode:int}
+type t = {path:string;incarnation:string;backend:Browser_lane.Backend.t;device:int;inode:int}
 type acquisition = Missing | Acquired of int * int | Cleaning of int * int | Retained of int * int | Released
 type settlement = Allocation_released | Allocation_retained
 type cleanup_result =
@@ -21,7 +21,6 @@ type cleanup_result =
 let socket_path t = t.path
 let arguments t ~max_message_bytes = ["--socket";t.path;"--incarnation";t.incarnation;
   "--max-message-bytes";string_of_int max_message_bytes;"--backend";Browser_lane.Backend.to_wire t.backend]
-  @ (if t.models then ["--models"] else [])
 let protect run = try run () with
   | (Unix.Unix_error _|Sys_error _|Yojson.Json_error _) as exn -> Error (Printexc.to_string exn)
 let sync directory =
@@ -58,14 +57,13 @@ let source_of_json = function
      | Some found -> Error ("browser source descriptor backend must be a string; it is " ^ Yojson.Safe.to_string found)
      | None -> Error "browser source descriptor has no backend")
   | value -> Error ("browser source descriptor must be an object; it is " ^ Yojson.Safe.to_string value)
-let context ~instance_id ~source ~models = protect (fun () ->
+let context ~instance_id ~source = protect (fun () ->
   let* leaf=leaf instance_id in
   let root=Unix.realpath (Filename.get_temp_dir_name ()) in
   Ok (`Assoc ["kind",`String "browser_socket";"directory",`String (Filename.concat root leaf);
-    "source",source_to_json source;
-    "models",(match models with None -> `Null | Some configuration -> Browser_addon_models.configuration_to_json configuration)]))
+    "source",source_to_json source]))
 let cleanup_descriptor_label = "native cleanup descriptor"
-let cleanup_descriptor_keys = ["directory";"kind";"models";"source"]
+let cleanup_descriptor_keys = ["directory";"kind";"source"]
 let context_envelope_of_json ~instance_id = function
   | None -> Ok None
   | Some (`Assoc fields) when List.sort String.compare (List.map fst fields)=cleanup_descriptor_keys ->
@@ -84,12 +82,9 @@ let context_envelope_of_json ~instance_id = function
     Error (Requirement.keys ~label:cleanup_descriptor_label ~found:(List.map fst fields) ~required:cleanup_descriptor_keys)
   | Some value ->
     Error (Printf.sprintf "%s must be a JSON object; it is %s" cleanup_descriptor_label (Yojson.Safe.to_string value))
-let optional_configuration decode fields name = match List.assoc name fields with
-  | `Null -> Ok None
-  | value -> decode value |> Result.map Option.some
 let decode_source fields = source_of_json (List.assoc "source" fields)
 (* Only the source's name, without its configuration: a handoff reads no
-   browser or model payload. *)
+   browser payload. *)
 let decode_backend fields = match List.assoc "source" fields with
   | `Assoc source ->
     (match List.assoc_opt "backend" source with
@@ -101,8 +96,7 @@ let decode_backend fields = match List.assoc "source" fields with
   | value -> Error ("browser source descriptor must be an object; it is " ^ Yojson.Safe.to_string value)
 let decode_context (root,fields) =
   let* source=decode_source fields in
-  let* models=optional_configuration Browser_addon_models.configuration_of_json fields "models" in
-  Ok (root,source,models)
+  Ok (root,source)
 let context_envelope admission =
   let* context=Native_addon_lease.cleanup_context admission |> Result.map_error Native_addon_lease.error_to_string in
   context_envelope_of_json ~instance_id:(Native_addon_lease.instance_id admission) context
@@ -131,7 +125,7 @@ let acquire ~admission ~directory = protect (fun () ->
     | Native_addon_lease.Awaiting_exec -> Ok ()
     | Live _|Cleanup_pending _|Settled -> Error "browser resource requires an unstarted original admission" in
   let* root=context_path admission in
-  let* root,source,models=Option.to_result ~none:"native reservation has no browser allocation intent" root in
+  let* root,source=Option.to_result ~none:"native reservation has no browser allocation intent" root in
   let file=record admission directory in
   let* ()=match Unix.lstat file with
     | _ -> Error "browser socket resource was already acquired"
@@ -144,12 +138,8 @@ let acquire ~admission ~directory = protect (fun () ->
     | Owned_firefox c -> Fs_compat.save_file_atomic_strict (Filename.concat root "live-bidi.json")
         (Yojson.Safe.to_string (Browser_addon_live_bidi.configuration_to_json c))
     | Ego | External_host -> Ok () in
-  let* ()=match models with
-    | None -> Ok ()
-    | Some configuration -> Fs_compat.save_file_atomic_strict (Filename.concat root "models.json")
-        (Yojson.Safe.to_string (Browser_addon_models.configuration_to_json configuration)) in
   Ok {path=Filename.concat root "s";incarnation=Native_addon_lease.instance_id admission;
-    backend=source_backend source;models=Option.is_some models;
+    backend=source_backend source;
     device=info.st_dev;inode=info.st_ino})
 let with_download_snapshot t (descriptor:Browser_addon_downloads.descriptor) consume = protect (fun () ->
   let allocation=Filename.dirname t.path in
@@ -266,7 +256,7 @@ let move_keeper_files ~kept_root ~into ~root (allocation : Unix.stats) =
 (* What an allocation of [source] may hold besides its socket: the files and
    folders its browser writes. [None] is an allocation whose acquisition was
    never confirmed, which may hold only its socket. *)
-let cleanup_contents ~admission ~root ~source ~models ~confirmed ~confirm =
+let cleanup_contents ~admission ~root ~source ~confirmed ~confirm =
   let read name =
     let* text=Fs_compat.load_owned_regular_file ~ownership_root:root (Filename.concat root name)
       |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string in
@@ -275,15 +265,6 @@ let cleanup_contents ~admission ~root ~source ~models ~confirmed ~confirm =
   let* ()=empty_tree (Filename.concat root "uploads") in
   let* ()=empty_tree (Filename.concat root "download-snapshots") in
   let names=Sys.readdir root |> Array.to_list in
-  let* ()=match models with
-    | None -> if List.mem "models.json" names then Error "undeclared browser model configuration" else Ok ()
-    | Some configuration ->
-        if confirmed && not (List.mem "models.json" names) then Ok () else
-        let* value=read "models.json" in
-        let* actual=Browser_addon_models.configuration_of_json value in
-        if Browser_addon_models.configuration_to_json actual=Browser_addon_models.configuration_to_json configuration
-        then Ok () else Error "browser model configuration changed" in
-  let names=List.filter (fun name -> name<>"models.json") names in
   let only allowed what = if List.for_all (fun name -> List.mem name ("s" :: allowed)) names then Ok ()
     else Error (what ^ " allocation contains unknown resources") in
   let* ()=match source with
@@ -307,7 +288,7 @@ let cleanup_contents ~admission ~root ~source ~models ~confirmed ~confirm =
     let info=Unix.lstat path in
     match info.Unix.st_kind with
     | Unix.S_SOCK when name="s" -> Unix.unlink path;Ok ()
-    | Unix.S_REG when List.mem name ["models.json";"live-bidi.json";"live-firefox.log"] ->
+    | Unix.S_REG when List.mem name ["live-bidi.json";"live-firefox.log"] ->
         let* ()=Requirement.check ~label:"owned browser file" socket_record ~path info in
         Unix.unlink path;Ok ()
     | Unix.S_DIR|Unix.S_REG|Unix.S_LNK|Unix.S_CHR|Unix.S_BLK|Unix.S_FIFO|Unix.S_SOCK as kind ->
@@ -375,7 +356,7 @@ let check_retained ~instance_id ~slot context = protect (fun () ->
     | Retained _ -> Ok ()
     | Released -> released_directory_absent root
     | Missing|Acquired _|Cleaning _ ->
-    let* _,source,_models=decode_context (root,fields) in
+    let* _,source=decode_context (root,fields) in
     match source with
     | Owned_firefox c -> Browser_addon_live_bidi.check_retained_child c ~incarnation:instance_id ~directory:root
     | Ego | External_host -> Ok ())
@@ -398,7 +379,7 @@ let cleanup ~admission ~directory ~kept_root = protect (fun () ->
     | Retained _ -> Ok Cleanup_retained
     | Released -> let* ()=released_directory_absent root in Ok Cleanup_released
     | Missing|Acquired _|Cleaning _ ->
-    let* _,source,models=decode_context (root,fields) in
+    let* _,source=decode_context (root,fields) in
     let* ()=match source with
       | Owned_firefox c -> Browser_addon_live_bidi.settle c ~incarnation:(Native_addon_lease.instance_id admission) ~directory:root
       | Ego | External_host -> Ok () in
@@ -434,9 +415,8 @@ let cleanup ~admission ~directory ~kept_root = protect (fun () ->
           Fs_compat.save_file_atomic_strict file
             (Yojson.Safe.to_string (acquired_json admission root info ~state:"cleaning")) in
         let source=match identity with Missing -> None | Acquired _|Cleaning _|Retained _|Released -> Some source in
-        let models=match identity with Missing -> None | Acquired _|Cleaning _|Retained _|Released -> models in
         let finish ()=
-          let* ()=cleanup_contents ~admission ~root ~source ~models ~confirmed ~confirm in
+          let* ()=cleanup_contents ~admission ~root ~source ~confirmed ~confirm in
           Unix.rmdir root;release () in
         (match moved with
          | None -> let* ()=finish () in Ok Cleanup_released

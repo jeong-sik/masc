@@ -23,7 +23,6 @@ type t = {
      recovery runs at a time. *)
   mutable ego_recovery : (Browser_addon_observation.unavailable -> (ego_recovered, string) result) option;
   mutable ego_claim_active : bool;
-  mutable models : Browser_addon_models.t option;
   mutable uploads : Browser_addon_uploads.t option;
   mutable downloads : Browser_addon_downloads.t option;
   retired : unit Eio.Promise.t;
@@ -40,7 +39,7 @@ let create ~incarnation =
       Error "a browser owner already exists in this process"
     else
       let retired, retire = Eio.Promise.create () in
-      let t = {incarnation;gate=Eio.Mutex.create ();phase=Serving;clients=[];live=[];ego_space=None;unavailable=[];ego_recovery=None;ego_claim_active=false;models=None;uploads=None;downloads=None;retired;retire} in
+      let t = {incarnation;gate=Eio.Mutex.create ();phase=Serving;clients=[];live=[];ego_space=None;unavailable=[];ego_recovery=None;ego_claim_active=false;uploads=None;downloads=None;retired;retire} in
       B.install_activity_observer (Some (fun lane -> match t.phase,lane with
         | Serving,B.Lane_name.Live -> B.Enabled
         | Retired,B.Lane_name.Live -> B.Disabled));
@@ -92,14 +91,6 @@ let attach_ego_recovery t claim =
 let detach_ego_recovery t =
   Eio.Mutex.use_rw ~protect:true t.gate (fun () ->
     t.ego_recovery <- None)
-let models_enabled t = Option.is_some t.models
-let attach_models t models =
-  Eio.Mutex.use_rw ~protect:true t.gate (fun () ->
-    if Browser_addon_models.incarnation models<>t.incarnation then Error "wrong browser model incarnation" else
-    match t.phase,t.models with
-    | Retired,_ -> Error "browser owner is retired"
-    | Serving,Some _ -> Error "browser model broker is already attached"
-    | Serving,None -> t.models<-Some models;Ok ())
 let attach_uploads t uploads =
   Eio.Mutex.use_rw ~protect:true t.gate (fun () -> match t.phase,t.uploads with
     | Retired,_ -> Error "browser owner is retired"
@@ -123,18 +114,6 @@ let publish_download t path = match t.phase,t.downloads with
 let cleanup_downloads t = match t.downloads with
   | None -> Ok ()
   | Some downloads -> Eio_unix.run_in_systhread (fun () -> Browser_addon_downloads.cleanup downloads)
-let admitted_models t =
-  Eio.Mutex.use_rw ~protect:true t.gate (fun () -> match t.phase,t.models with
-    | Retired,_ -> Error Browser_addon_models.Retired
-    | Serving,None -> Error (Browser_addon_models.Output_disabled "model broker")
-    | Serving,Some models -> Ok models)
-let generate t request = Result.bind (admitted_models t) (fun models -> Browser_addon_models.request models request)
-let model_output t ~name = match admitted_models t with
-  | Error _ -> None
-  | Ok models -> Browser_addon_models.output models ~name
-let locate_system t = match admitted_models t with
-  | Error error -> Error (Browser_addon_models.error_to_string error)
-  | Ok models -> Browser_addon_models.locate_system models
 let owned_cleanup backend cleanup =
   Eio.Lazy.from_fun ~cancel:`Protect (fun () -> match cleanup () with
     | result -> result
@@ -177,7 +156,6 @@ let revoke t =
       t.ego_space <- None;
       t.ego_recovery <- None;
       t.ego_claim_active <- false;
-      Option.iter Browser_addon_models.retire t.models;
       Option.iter Browser_addon_uploads.revoke t.uploads;
       Option.iter Browser_addon_downloads.revoke t.downloads;
       Eio.Promise.resolve t.retire ();
@@ -318,14 +296,6 @@ let dispatch_upload t ~id ~actor ~route ~verb =
         ~only_if_idle:false) with
     | Ok reply -> reply | Error detail -> refusal detail
 
-let model_port t incarnation run =
-  let models=with_admission t incarnation (fun () -> match t.models with
-    | Some models -> Ok models | None -> Error (refusal "browser model broker is disabled")) in
-  match models with
-  | Error reply -> reply
-  | Ok models -> (match run models with
-      | Ok value -> W.Model_reply value
-      | Error error -> refusal (Browser_addon_models.error_to_string error))
 let dispatch t (request : W.request) =
   match request.command with
   | W.Retire ->
@@ -365,12 +335,6 @@ let dispatch t (request : W.request) =
       | Some downloads -> (match Eio_unix.run_in_systhread (fun () ->
           Browser_addon_downloads.release downloads ~id ~actor ~route ~verb) with
           | Ok () -> W.Receipt | Error detail -> refusal ~disposition:W.Outcome_unknown detail))
-  | W.Model_requests -> model_port t request.incarnation Browser_addon_models.listing
-  | W.Model_result arguments -> model_port t request.incarnation (fun models ->
-      Browser_addon_models.deliver models ~arguments
-      |> Result.map (fun accepted -> `Assoc ["accepted",`Bool accepted]))
-  | W.Model_wait {after} -> model_port t request.incarnation (fun models ->
-      Browser_addon_models.wait models ~after |> Result.map Lane_addon_host_request.availability_to_json)
   | W.Poll {client;window_sec} ->
     (match with_admission t request.incarnation (fun () ->
       match B.register client with
@@ -404,7 +368,7 @@ let live t command = dispatch t {W.incarnation=t.incarnation;command}
 let poll_live t ~client ~window_sec = match live t (W.Poll {client;window_sec}) with
   | W.Poll_result {command;_} -> Ok command
   | W.Service_refusal {message;_} -> if is_retired t then Ok None else Error message
-  | W.Snapshot_result _|Model_reply _|Download_reply _|Receipt|Issue_result _ -> Error "unexpected reply to a live poll"
+  | W.Snapshot_result _|Download_reply _|Receipt|Issue_result _ -> Error "unexpected reply to a live poll"
 let live_request_window t ~client_id ~id =
   Eio.Mutex.use_ro t.gate (fun () ->
     match t.phase with
@@ -415,5 +379,5 @@ let live_request_window t ~client_id ~id =
 let deliver_live t ~client_id ~id ~payload = match live t (W.Deliver {client_id;id;payload}) with
   | W.Receipt -> Ok ()
   | W.Service_refusal {message;_} -> Error message
-  | W.Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Issue_result _ -> Error "unexpected reply to a live delivery"
+  | W.Snapshot_result _|Download_reply _|Poll_result _|Issue_result _ -> Error "unexpected reply to a live delivery"
 let disconnect_live t client_id = ignore (live t (W.Disconnect client_id))

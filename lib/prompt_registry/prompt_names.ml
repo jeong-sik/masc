@@ -809,7 +809,6 @@ let skill_applicability = "skill.applicability"
 let skill_applicability_advice = "skill.applicability_advice"
 let skill_applicability_unavailable = "skill.applicability_unavailable"
 let skill_applicability_projection = "skill.applicability_projection"
-let browser_locate = "browser.locate"
 
 let librarian_preflight_keep_current = "librarian.preflight.keep_current"
 let librarian_preflight_needs_generation = "librarian.preflight.needs_generation"

@@ -100,24 +100,18 @@ let results () =
     (ok (W.reply_of_json (W.reply_to_json reply))=reply))
     [W.Poll_result {command=None;state_id="snapshot-1"};
      W.Poll_result {command=Some {B.id="command";verb_json=B.verb_json B.Tabs_list};state_id="snapshot-2"};
-     W.Receipt;W.Snapshot_result (`Assoc []);W.Model_reply (`Assoc ["requests",`List []]);
+     W.Receipt;W.Snapshot_result (`Assoc []);
      W.Issue_result (Ok (B.Answered payload));
      W.Service_refusal {message="retired";disposition=W.Outcome_unknown}]
 let retirement () =
   let request={W.incarnation;command=W.Retire} in
   check bool "private retirement retains incarnation" true (W.of_json (W.to_json request)=Ok request)
-let model_ports () =
-  List.iter (fun command -> let request={W.incarnation;command} in
-    check bool "private model port retains exact incarnation and payload" true
-      (W.of_json (W.to_json request)=Ok request))
-    [W.Model_requests;W.Model_result (`Assoc ["request_id",`String "one";"result",`Assoc []]);
-     W.Model_wait {after=None};W.Model_wait {after=Some "revision"}]
 (* A read the host makes before it chooses a browser must not decide the
    worker's lifetime; a browser command that may have started must. *)
 let commands_that_change_nothing () =
   let issue only_if_idle=W.Issue {route;verb=B.Page_document {tab_id=7};actor=None;timeout_sec=3.;only_if_idle} in
   List.iter (fun (name,command,expected) -> check bool name expected (W.changes_nothing command))
-    ["snapshot",W.Snapshot,true;"model listing",W.Model_requests,true;"model wait",W.Model_wait {after=None},true;
+    ["snapshot",W.Snapshot,true;
      "idle document read",issue true,true;"browser command",issue false,false;"retire",W.Retire,false;
      "native poll",W.Poll {client={B.client_id=id;browser=B.Firefox;version="158";engine_version="158";transport=B.Webdriver_bidi;space=None};window_sec=0.},false;
      "disconnect",W.Disconnect id,false;
@@ -126,7 +120,6 @@ let commands_that_change_nothing () =
      "download claim",W.Download_claim {id="dl";actor="keeper";route;verb=B.Tabs_list},false;
      "download commit",W.Download_commit {id="dl";actor="keeper";route;verb=B.Tabs_list;receipt=`Null},false;
      "download release",W.Download_release {id="dl";actor="keeper";route;verb=B.Tabs_list},false;
-     "model result",W.Model_result `Null,false;
      "native delivery",W.Deliver {client_id=id;id="cmd";payload=`Null},false]
 let client_space_context () =
   let space : B.ego_space = {id=51;name="SDK Space"} in
@@ -149,5 +142,4 @@ let () = run "browser addon wire" ["boundary",[
   test_case "a native host cannot poll as ego" `Quick a_native_host_cannot_poll_as_ego;
   test_case "partial effects and receipts" `Quick results;
   test_case "private retirement retains incarnation" `Quick retirement;
-  test_case "private model ports preserve incarnation" `Quick model_ports;
   test_case "commands that change nothing" `Quick commands_that_change_nothing]]

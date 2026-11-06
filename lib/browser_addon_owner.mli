@@ -30,14 +30,6 @@ val attach_ego_recovery : t ->
 val detach_ego_recovery : t -> unit
 (** Admission observation only. It grants neither a new poll nor process cleanup
     authority; an owned resource still waits for its original cleanup request. *)
-val attach_models : t -> Browser_addon_models.t -> (unit, string) result
-val models_enabled : t -> bool
-val model_output : t -> name:string -> Lane_addon_types.exact_output option
-val locate_system : t -> (string, string) result
-val generate : t -> Lane_addon_exact.request ->
-  (Browser_addon_models.outcome, Browser_addon_models.error) result
-(** An original browser command owns the waiting scope. Cancellation withdraws
-    its model request. Never hold the admission lock while waiting. *)
 type ego_space = {
   space_observation : unit -> Browser_ego_space_observation.t option;
   space_presence : unit -> Browser_ego_space_observation.presence;

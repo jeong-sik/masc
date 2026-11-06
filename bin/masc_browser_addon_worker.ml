@@ -1,5 +1,5 @@
 let () =
-  let socket = ref None and incarnation = ref None and bound = ref None and backend = ref None and models = ref false
+  let socket = ref None and incarnation = ref None and bound = ref None and backend = ref None
     and live_ego_command = ref None and live_ego_space = ref None and live_ego_space_id = ref None in
   Arg.parse [
     "--backend",Arg.String (fun value -> backend:=Some value),
@@ -7,7 +7,6 @@ let () =
     "--live-ego-command",Arg.String (fun value -> live_ego_command:=Some value),"Serve an ego lite task space with this ego-browser";
     "--live-ego-space",Arg.String (fun value -> live_ego_space:=Some value),"The ego lite task space to serve";
     "--live-ego-space-id",Arg.Int (fun value -> live_ego_space_id:=Some value),"An existing ego lite Space ID to resume exactly";
-    "--models",Arg.Set models,"Attach the host-selected model request broker";
     "--socket",Arg.String (fun value -> socket:=Some value),"Host-selected private Unix socket";
     "--incarnation",Arg.String (fun value -> incarnation:=Some value),"Host-selected worker UUID";
     "--max-message-bytes",Arg.Int (fun value -> bound:=Some value),"Native installation reply bound"]
@@ -52,19 +51,12 @@ let () =
         {Masc.Browser_addon_wire.incarnation;command=Retire} with
       | Receipt -> ()
       | Service_refusal {message;_} -> Printf.eprintf "browser cleanup unconfirmed: %s\n%!" message
-      | Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Issue_result _ ->
+      | Snapshot_result _|Download_reply _|Poll_result _|Issue_result _ ->
           Printf.eprintf "browser cleanup returned no settlement receipt\n%!");
     if transfers then (
       let downloads=Eio_unix.run_in_systhread (fun () ->
         Masc.Browser_addon_downloads.create ~directory:(Filename.dirname socket_path)) in
       match Result.bind downloads (Masc.Browser_addon_owner.attach_downloads owner) with
-      | Ok () -> () | Error detail -> raise (Arg.Bad detail));
-    if !models then (
-      let directory=Filename.dirname socket_path in
-      let configuration=Eio_unix.run_in_systhread (fun () ->
-        Masc.Browser_addon_models.load_configuration ~directory) in
-      let queue=Result.bind configuration (fun configuration -> Masc.Browser_addon_models.create ~incarnation ~configuration) in
-      match Result.bind queue (Masc.Browser_addon_owner.attach_models owner) with
       | Ok () -> () | Error detail -> raise (Arg.Bad detail));
     let revoke () = Masc.Browser_addon_owner.revoke owner in
     Eio.Switch.on_release sw revoke;

@@ -1,7 +1,6 @@
-(** The browser worker refuses a malformed backend or model configuration
-    before it starts anything. *)
+(** The browser worker refuses a malformed backend configuration before it
+    starts anything. *)
 module Live = Masc.Browser_addon_live_bidi
-module Models = Masc.Browser_addon_models
 let check label expected actual = Alcotest.(check bool) label expected actual
 let refused label result = check label true (Result.is_error result)
 let admitted label result = check label true (Result.is_ok result)
@@ -17,14 +16,7 @@ let decoders () =
     (Live.configuration_of_json (firefox ~port:9222 ~profile:"/p" ~root:(`Assoc ["device",`Int 1])));
   refused "a Firefox identity with a string inode is refused"
     (Live.configuration_of_json (firefox ~port:9222 ~profile:"/p" ~root:(`Assoc ["device",`Int 1;"inode",`String "2"])));
-  refused "a Firefox key set without slot is refused" (Live.configuration_of_json (`Assoc ["firefox",`String "/f"]));
-  admitted "a model broker configuration decodes"
-    (Models.configuration_of_json (`Assoc ["locate_system",`Null;"store_root",`String "/r";"outputs",`Assoc []]));
-  refused "a relative model receipt root is refused"
-    (Models.configuration_of_json (`Assoc ["locate_system",`Null;"store_root",`String "r";"outputs",`Assoc []]));
-  refused "a model output without request_schema is refused"
-    (Models.configuration_of_json (`Assoc ["locate_system",`Null;"store_root",`String "/r";"outputs",`Assoc ["result",`Assoc ["schema",`Assoc []]]]));
-  refused "a model key set without outputs is refused" (Models.configuration_of_json (`Assoc ["store_root",`String "/r"]))
+  refused "a Firefox key set without slot is refused" (Live.configuration_of_json (`Assoc ["firefox",`String "/f"]))
 let () =
   Alcotest.run "browser add-on decoders"
     ["decoders",[Alcotest.test_case "configuration decoders refuse wrong keys and fields" `Quick decoders]]

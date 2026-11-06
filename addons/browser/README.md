@@ -227,20 +227,10 @@ settlement releases the private allocation while persistent profile contents
 and stable claims are preserved. External extension/manual browsers remain
 operator-owned. Interrupted issued input stays uncertain and is never replayed.
 
-Input/output middleware validates tool contracts without calling an LLM. LLM
-Exact Output is selected separately through a package's declared outputs and an
-installation's `exact_outputs` override. For selected outputs, the host supplies
-an immutable private model configuration. Worker requests use concurrent private
-socket ports, so a command waiting for a model does not block its result. An
-event wait wakes the shared Exact Output runner without periodic polling.
-Cancelling the original command withdraws its request and cancels that Exact
-scope; detach fences all pending model work. No input is replayed.
-
-Before waking the original waiter, the worker retains a receipt under the host's
-Add-on store, outside the disposable browser allocation. This records model
-result receipt, not browser action completion. Identical duplicate deliveries
-are acknowledged and conflicting results are refused. The worker has no model
-credentials or provider route resolution.
+Input/output middleware validates tool contracts without calling an LLM. A
+browser package declares no Exact Output and no operator asks; the manifest
+refuses either, so the worker opens no host request port and holds no model
+configuration, credentials or provider route.
 
 The host passes an explicit operational environment to the browser launcher,
 worker and its browser/driver children: process paths and temporary directories,
@@ -250,14 +240,6 @@ Allowed values are preserved; `HOME` is not rewritten. Browser configuration
 still comes from the private admission. This prevents unnecessary environment
 inheritance; the native worker runs as the same OS user and is not a sandbox
 against reading that user's files.
-
-A package can explicitly grant `request_schema = true` for a selected model
-output. The model requirement then uses the original canonical request schema;
-the package baseline remains mandatory. The shared broker and worker receipt
-check required object keys, visited primitive types and `anyOf` before accepting
-the result. The consuming SDK owns complete validation of its schema dialect;
-this partial guard is not a full JSON Schema validator. Baseline and grant are
-both pinned to the worker incarnation.
 
 Scripted protocol cases, actual isolated BiDi/Gecko cases and installed
 browser behavior are separate evidence scopes. New production changes require

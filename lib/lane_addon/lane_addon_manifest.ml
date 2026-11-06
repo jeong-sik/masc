@@ -384,6 +384,8 @@ let load ~path =
             | Persistent -> Error "browser service requires ephemeral execution" in
           let* () = match model_access with Model_disabled -> Ok ()
             | Host_sampling -> Error "browser service sampling is not attached" in
+          let* () = match exact_outputs,operator_asks with [],false -> Ok ()
+            | (_ :: _),_ | [],true -> Error "browser service must omit exact_outputs and asks" in
           let* ()=match action_tool with None -> Ok ()
             | Some _ -> Error "browser service must omit MCP actions" in
           (match exported_tools,tool_invocation with [],(Direct|Host_context) | (_::_),Host_context -> Ok ()

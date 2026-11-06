@@ -36,7 +36,7 @@ type id_token_rejection =
   | Not_a_jwt
       (** not a string of three [.]-separated segments with a non-empty
           header and signature *)
-  | Claims_not_base64url  (** the middle segment is not unpadded base64url *)
+  | Claims_not_base64url  (** the middle segment does not decode as base64url *)
   | Claims_not_json_object
   | Issuer_not_google
       (** [iss] is not one string equal to an issuer Google documents *)
@@ -49,26 +49,34 @@ type rejection =
   | Both_account_keys
       (** No login read on 2026-11-06 held both, and agy 1.5.1 drops
           [id_token] when it writes, so such a login is not one the CLI
-          wrote. It is refused even when both name one email. *)
+          wrote. It is refused even when both name one email, and when one
+          of them is an empty string. *)
   | Invalid_id_token of id_token_rejection
-  | Unreadable_email of email_key  (** the email repeats or is not a string *)
+  | Unreadable_email of email_key
+      (** [id_token_email] is not a string, or the [email] claim repeats or
+          is not a string. A repeated [id_token_email] is
+          [Repeated_account_key]. *)
   | Not_email_text of email_key
       (** a string {!Runtime_account_email_text.of_string} refuses *)
-(** An absent key and a [null] value both hold no value. *)
+(** An absent key and a [null] value both hold no value. Any other value,
+    an empty string included, is a value. *)
 
 val account_email : string -> (Runtime_account_email_text.t, rejection) result
 (** The email one login JSON document names. *)
 
 type keychain_rejection =
   | Not_go_keyring_base64
-      (** not [go-keyring-base64:] followed by padded standard base64 *)
+      (** not [go-keyring-base64:] followed by text that decodes as padded
+          standard base64 *)
   | Keychain_login of rejection  (** the decoded login JSON *)
 
 val login_of_keychain_value : string -> string option
 (** The login JSON inside a keychain value. go-keyring's macOS [Set] stores
     [go-keyring-base64:] and the padded standard base64 of the given text;
     the operator's agy 1.5.1 item had that prefix on 2026-11-06. [None] for
-    any other value. *)
+    any other value. go-keyring's [Get] also reads a hex
+    [go-keyring-encoded:] value and a value with no prefix, but [Set], which
+    agy writes through, writes neither, so those are [None] too. *)
 
 val keychain_account_email :
   string -> (Runtime_account_email_text.t, keychain_rejection) result

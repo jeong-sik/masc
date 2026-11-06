@@ -17,15 +17,16 @@ open Result.Syntax
 let prepare ~runtime_root ~account_id =
   Runtime_antigravity_home.prepare_for_login ~runtime_root ~owner_leaf:account_id
   |> Result.map_error (fun _ -> Private_home_unavailable)
+let credential_file_error = function
+  | Runtime_antigravity_home.Invalid_oauth_source _ -> Unsafe_credential
+  | Unrecognized_oauth_source _ -> Unrecognized_credential
+  | Unrecognized_managed_oauth _ | Unrecognized_managed_keychain _ -> Unrecognized_managed_credential
+  | Invalid_runtime_root _ | Invalid_owner_leaf _ | Unsafe_directory _ | Invalid_managed_oauth _
+  | Settings_write_failed _ | Mcp_config_write_failed _ | Mcp_config_cleanup_failed _ ->
+    Private_home_unavailable
 let prepare_from_credential_file ~runtime_root ~account_id ~oauth_source =
   Runtime_antigravity_home.prepare ~runtime_root ~owner_leaf:account_id ~oauth_source
-  |> Result.map_error (function
-    | Runtime_antigravity_home.Invalid_oauth_source _ -> Unsafe_credential
-    | Unrecognized_oauth_source _ -> Unrecognized_credential
-    | Unrecognized_managed_oauth _ | Unrecognized_managed_keychain _ -> Unrecognized_managed_credential
-    | Invalid_runtime_root _ | Invalid_owner_leaf _ | Unsafe_directory _ | Invalid_managed_oauth _
-    | Settings_write_failed _ | Mcp_config_write_failed _ | Mcp_config_cleanup_failed _ ->
-      Private_home_unavailable)
+  |> Result.map_error credential_file_error
 let home_dir = Runtime_antigravity_home.home_dir
 let environment home = Runtime_antigravity.official_client_environment ~home_dir:(home_dir home) ()
 let private_file path =
@@ -53,8 +54,10 @@ let import_with ~read_keychain ~clear_keychain ~source_home home =
   let* contents = match selected with
     | Apple_keychain.Found value ->
       (* The fallback file holds the login JSON; the keychain holds
-         go-keyring's encoding of it. *)
+         go-keyring's encoding of it. A blank login is no sign-in, as a blank
+         fallback file is. *)
       (match Runtime_antigravity_oauth_credential.login_of_keychain_value value with
+       | Some login when String.trim login = "" -> Error Sign_in_required
        | Some login -> Ok login
        | None -> Error Unrecognized_credential)
     | Unavailable -> Error Keychain_unavailable
@@ -74,6 +77,7 @@ let import_signed_in ~source_home home =
   import_with ~read_keychain:Apple_keychain.read ~clear_keychain:Apple_keychain.clear ~source_home home
 module For_testing = struct
   let import_with = import_with
+  let credential_file_error = credential_file_error
 end
 let capture_login home = import_signed_in ~source_home:(home_dir home) home
 let credential_reference home =

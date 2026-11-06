@@ -587,6 +587,13 @@ let test_managed_keychain_principal_must_match_selected_generation () =
     (Apple_keychain.Found (login "account-a")) (`Unrecognized C.Not_go_keyring_base64);
   refuses "go-keyring prefix without base64"
     (Apple_keychain.Found "go-keyring-base64:not base64") (`Unrecognized C.Not_go_keyring_base64);
+  (* A length that is not a multiple of three needs padding. *)
+  let unpadded_login =
+    let text = login "account-a" in
+    if String.length text mod 3 = 0 then text ^ " " else text in
+  refuses "go-keyring base64 without its padding"
+    (Apple_keychain.Found ("go-keyring-base64:" ^ Base64.encode_string ~pad:false unpadded_login))
+    (`Unrecognized C.Not_go_keyring_base64);
   refuses "encoded bytes that are no login"
     (saved "{broken") (`Unrecognized (C.Keychain_login C.Not_json_object));
   let refreshed = prepare_with (saved (login ~revision:"native-refresh" "account-a")) |> require_ok in
@@ -785,6 +792,10 @@ let test_unknown_account_identity_causes_no_managed_mutation () =
       edit openid (add "id_token_email" (`String "other@example.test")), C.Both_account_keys
     ; "a broken id_token beside the email",
       edit recorded (add "id_token" (`String "broken")), C.Both_account_keys
+    ; "an empty id_token beside the email",
+      edit recorded (add "id_token" (`String "")), C.Both_account_keys
+    ; "an empty email beside the id_token",
+      edit openid (add "id_token_email" (`String "")), C.Both_account_keys
     ; "blank recorded email", edit recorded (replace "id_token_email" (`String " ")),
       C.Not_email_text C.Id_token_email
     ; "recorded email with a space",
@@ -795,6 +806,8 @@ let test_unknown_account_identity_causes_no_managed_mutation () =
     ; "non-string id_token", edit openid (replace "id_token" (`Int 1)), id_token C.Not_a_jwt
     ; "two-segment JWT", with_id_token "synthetic-header.synthetic-payload", id_token C.Not_a_jwt
     ; "empty JWT signature", with_id_token ("synthetic-header." ^ encode "{}" ^ "."),
+      id_token C.Not_a_jwt
+    ; "empty JWT header", with_id_token ("." ^ encode "{}" ^ ".synthetic-signature"),
       id_token C.Not_a_jwt
     ; "claims not base64url", with_id_token "synthetic-header.!!!.synthetic-signature",
       id_token C.Claims_not_base64url
@@ -836,6 +849,28 @@ let test_login_account_ignores_the_token_envelope () =
     check string label (principal fixture) (principal (without_envelope fixture)))
     [ "agy 1.2 login", Masc_test_deps.antigravity_oauth_fixture "fixture"
     ; "agy 1.5 login", Masc_test_deps.antigravity_id_token_email_fixture "fixture" ]
+;;
+
+(* Generation records on disk (#49194) name the account by this digest, so
+   its bytes stay fixed: the lowercase hex SHA-256 of the JSON text
+   ["id_token_email","fixture@example.test"]. *)
+let test_both_login_shapes_name_the_stored_principal () =
+  let module C = Runtime_antigravity_oauth_credential in
+  let stored = "9bcb24816ab9d7a20129e38468fc7ed101108a2a97dd8c30ee535c7ee730e0d1" in
+  let email = Masc_test_deps.antigravity_account_email "fixture" in
+  let encode text = Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet text in
+  let openid issuer =
+    Yojson.Safe.to_string
+      (`Assoc [ "id_token", `String ("synthetic-header."
+          ^ encode (Yojson.Safe.to_string (`Assoc [ "iss", `String issuer; "email", `String email ]))
+          ^ ".synthetic-signature") ]) in
+  List.iter (fun (label, login) ->
+    match C.account_email login with
+    | Ok account -> check string label stored (C.principal_sha256 account)
+    | Error rejection -> fail (label ^ ": " ^ C.rejection_to_string rejection))
+    [ "agy 1.5 id_token_email", Yojson.Safe.to_string (`Assoc [ "id_token_email", `String email ])
+    ; "agy 1.2 id_token from https://accounts.google.com", openid "https://accounts.google.com"
+    ; "agy 1.2 id_token from accounts.google.com", openid "accounts.google.com" ]
 ;;
 
 (* agy 1.5 rewrote the operator's login file without [id_token] on
@@ -933,7 +968,15 @@ let test_setup_names_which_login_it_cannot_read () =
     | Ok (Runtime_schema.File path) -> path
     | _ -> fail "setup must reference its private copy" in
   write_file ~mode:0o600 saved_copy "{broken";
-  expect "a saved copy masc cannot read" Runtime_antigravity_setup.Unrecognized_managed_credential
+  expect "a saved copy masc cannot read" Runtime_antigravity_setup.Unrecognized_managed_credential;
+  (* The managed keychain is read only through macOS, so its refusal is
+     mapped directly. *)
+  check bool "a saved keychain item masc cannot read" true
+    (Runtime_antigravity_setup.For_testing.credential_file_error
+       (Runtime_antigravity_home.Unrecognized_managed_keychain
+          { path = "login.keychain-db"
+          ; rejection = Runtime_antigravity_oauth_credential.Not_go_keyring_base64 })
+     = Runtime_antigravity_setup.Unrecognized_managed_credential)
 ;;
 
 let test_rejects_non_private_or_indirect_oauth_source () =
@@ -1379,6 +1422,11 @@ let test_keychain_selection_and_private_account_switch () =
       (apply () = Error S.Unrecognized_credential);
     check int "an unrecognized keychain value leaves the destination untouched" 2 !clears;
     check string "an unrecognized keychain value preserves B" "selected-account-B" (reference ());
+    selected_account := saved "   ";
+    check bool "a keychain item encoding a blank login asks for sign-in" true
+      (apply () = Error S.Sign_in_required);
+    check int "a blank keychain login leaves the destination untouched" 2 !clears;
+    check string "a blank keychain login preserves B" "selected-account-B" (reference ());
     selected_account := Apple_keychain.Missing;
     check bool "true missing item permits canonical fallback" true (apply () = Ok ());
     check string "explicit fallback captured" "stale-file-account" (reference ());
@@ -1503,6 +1551,8 @@ let () =
             test_unknown_account_identity_causes_no_managed_mutation
         ; test_case "login account ignores the token envelope" `Quick
             test_login_account_ignores_the_token_envelope
+        ; test_case "both login shapes name the stored principal" `Quick
+            test_both_login_shapes_name_the_stored_principal
         ; test_case "agy 1.5 login file selects its account generation" `Quick
             test_cli_1_5_login_file_selects_its_account_generation
         ; test_case "CLI shape rewrite keeps the account generation" `Quick

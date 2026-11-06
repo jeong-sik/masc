@@ -39,8 +39,11 @@ let mention ~masc_dir ~rel handle =
   write ~dir:masc_dir ~rel (Printf.sprintf {|{"artifact":"%s"}|} handle)
 ;;
 
+(* Every mention below is written under messages/. *)
+let consumer_paths ~masc_dir = [ Filename.concat masc_dir "messages" ]
+
 let sweep ~masc_dir ~dir =
-  Multimodal.Vision_kept_maintenance.run ~masc_dir ~dir
+  Multimodal.Vision_kept_maintenance.run ~consumer_paths:(consumer_paths ~masc_dir) ~dir
   |> Result.map_error Multimodal.Vision_kept_maintenance.error_to_string
 ;;
 
@@ -139,7 +142,7 @@ let test_symlinked_store_root_keeps_external_files () =
   store_kept_file ~dir:outside handle_a;
   Unix.symlink outside dir;
   for _ = 1 to 2 do
-    (match Multimodal.Vision_kept_maintenance.run ~masc_dir ~dir with
+    (match Multimodal.Vision_kept_maintenance.run ~consumer_paths:(consumer_paths ~masc_dir) ~dir with
      | Error (Multimodal.Vision_kept_maintenance.Invalid_store_root rejected) ->
        check string "error names the symlinked store" dir rejected.dir;
        check string "error identifies the symlink" "symlinked store root" rejected.detail

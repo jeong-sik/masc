@@ -212,7 +212,7 @@ let test_gc_and_missing_blob_repair () = with_store @@ fun ~base_path ~keepers_d
     | Ok None -> fail "referenced working context was collected"
     | Error error -> fail (Tool_blob_store.fetch_error_to_string error) in
   let sweep mode = match Tool_blob_maintenance.run ~base_path
-      ~board_posts_file:Masc_board_handlers.Board_paths.posts_file ~mode with
+      ~scope:Server_tool_blob_scope.scope ~mode with
     | Ok _ -> ()
     | Error error -> fail (Tool_blob_maintenance.error_to_string error) in
   let first = commit ~keepers_dir ~previous:None "historical working context" in
@@ -279,7 +279,7 @@ let librarian_pin ~base_path =
 let sweep_blobs ~base_path =
   List.iter (fun mode ->
     match Tool_blob_maintenance.run ~base_path
-        ~board_posts_file:Masc_board_handlers.Board_paths.posts_file ~mode with
+        ~scope:Server_tool_blob_scope.scope ~mode with
     | Ok _ -> ()
     | Error error -> fail (Tool_blob_maintenance.error_to_string error))
     [Tool_blob_maintenance.Observe_only; Delete_previous_candidates]

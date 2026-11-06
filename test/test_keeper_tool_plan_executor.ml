@@ -1755,7 +1755,7 @@ let check_export_retention ~base_path ~child result =
   let dead = Tool_blob_store.put_durable store ~bytes:"unowned export artifact" ~mime:"text/plain" in
   let maintain mode =
     match Tool_blob_maintenance.run ~base_path
-            ~board_posts_file:Masc_board_handlers.Board_paths.posts_file ~mode with
+            ~scope:Server_tool_blob_scope.scope ~mode with
     | Ok report -> report
     | Error error -> fail (Tool_blob_maintenance.error_to_string error) in
   ignore (maintain Tool_blob_maintenance.Observe_only);

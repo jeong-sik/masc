@@ -344,7 +344,7 @@ let test_create_and_revise () = with_base (fun base_path ->
   Alcotest.(check int) "healthy listing" 0 (List.length listing.diagnostics);
   let maintenance mode =
     match Tool_blob_maintenance.run ~base_path
-      ~board_posts_file:Masc_board_handlers.Board_paths.posts_file ~mode with
+      ~scope:Server_tool_blob_scope.scope ~mode with
     | Ok report -> report
     | Error error -> Alcotest.fail (Tool_blob_maintenance.error_to_string error) in
   let observed = maintenance Tool_blob_maintenance.Observe_only in

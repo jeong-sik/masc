@@ -1056,7 +1056,7 @@ let test_recall_artifacts_follow_history_retention () =
   in
   let sweep mode =
     match Tool_blob_maintenance.run ~base_path
-        ~board_posts_file:Masc_board_handlers.Board_paths.posts_file ~mode with
+        ~scope:Server_tool_blob_scope.scope ~mode with
     | Ok _ -> ()
     | Error error -> Alcotest.fail (Tool_blob_maintenance.error_to_string error)
   in
@@ -1145,7 +1145,7 @@ let test_superseded_recall_pin_releases_only_after_history_retention () =
     Alcotest.(check bool) "superseded current root is empty" true
       (Yojson.Safe.from_string (Fs_compat.load_file pin) = `Null);
     let sweep () = List.iter (fun mode -> match Tool_blob_maintenance.run ~base_path
-          ~board_posts_file:Masc_board_handlers.Board_paths.posts_file ~mode with
+          ~scope:Server_tool_blob_scope.scope ~mode with
       | Ok _ -> () | Error error -> Alcotest.fail (Tool_blob_maintenance.error_to_string error))
         [Tool_blob_maintenance.Observe_only; Delete_previous_candidates] in
     let present () = match Tool_blob_store.fetch store ~sha256:reference.sha256 with
@@ -1186,7 +1186,7 @@ let test_late_pin_retirement_preserves_new_same_artifact_publication () =
   Alcotest.(check string) "late retirement cannot release newer same-hash publication" newer (Fs_compat.load_file pin);
   ignore (Dated_jsonl.prune (recall_history config ~keeper:(Filename.basename keeper_dir)) ~days:1);
   let sweep () = List.iter (fun mode -> match Tool_blob_maintenance.run ~base_path
-        ~board_posts_file:Masc_board_handlers.Board_paths.posts_file ~mode with
+        ~scope:Server_tool_blob_scope.scope ~mode with
     | Ok _ -> () | Error error -> Alcotest.fail (Tool_blob_maintenance.error_to_string error))
       [Tool_blob_maintenance.Observe_only; Delete_previous_candidates] in
   let present () = match Tool_blob_store.fetch store ~sha256:artifact.sha256 with

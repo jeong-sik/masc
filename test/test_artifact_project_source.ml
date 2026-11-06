@@ -45,7 +45,7 @@ let test_durable_source () = with_base (fun base_path ->
   let _, unchanged = S.read ~base_path ~id:first.id |> stored in
   check_request request unchanged;
   let maintain mode = Tool_blob_maintenance.run ~base_path
-    ~board_posts_file:(fun ~workspace_masc_dir -> Filename.concat workspace_masc_dir "absent-board.json")
+    ~scope:Server_tool_blob_scope.scope
     ~mode |> Result.map_error Tool_blob_maintenance.error_to_string |> ok in
   let observation = maintain Tool_blob_maintenance.Observe_only in
   Alcotest.(check int) "shared source blobs are retention roots" 5 observation.live_references;
@@ -146,7 +146,7 @@ let test_manifest_references () = with_base (fun base_path ->
   write (metadata base_path source.id) (Yojson.Safe.to_string malformed);
   S.read ~base_path ~id:source.id |> unavailable;
   match Tool_blob_maintenance.run ~base_path
-    ~board_posts_file:(fun ~workspace_masc_dir -> Filename.concat workspace_masc_dir "absent-board.json")
+    ~scope:Server_tool_blob_scope.scope
     ~mode:Tool_blob_maintenance.Delete_previous_candidates with
   | Error _ -> () | Ok _ -> Alcotest.fail "retention ignored a malformed owned reference")
 let test_blob_parent_symlinks () =

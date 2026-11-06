@@ -401,7 +401,7 @@ let run_tool_blob_maintenance base_path delete_previous_candidates =
              else Tool_blob_maintenance.Observe_only
            in
            (match
-              Tool_blob_maintenance.run ~board_posts_file:Masc_board_handlers.Board_paths.posts_file
+              Tool_blob_maintenance.run ~scope:Server_tool_blob_scope.scope
                 ~base_path:canonical_base_path
                 ~mode
             with
@@ -460,8 +460,9 @@ let run_vision_kept_maintenance base_path =
              base_path
              (Printexc.to_string exn)
          | canonical_base_path ->
-           let masc_dir =
-             Common.masc_dir_from_base_path ~base_path:canonical_base_path
+           let consumer_paths =
+             Tool_blob_maintenance.consumer_paths Server_tool_blob_scope.scope
+               ~base_path:canonical_base_path
            in
            let keepers_dir =
              Config_dir_resolver.keepers_dir_for_base_path
@@ -482,7 +483,7 @@ let run_vision_kept_maintenance base_path =
              List.map
                (fun dir ->
                   let keeper = Filename.basename dir in
-                  keeper, dir, Multimodal.Vision_kept_maintenance.run ~masc_dir ~dir)
+                  keeper, dir, Multimodal.Vision_kept_maintenance.run ~consumer_paths ~dir)
                vision_dirs
            in
            let failed =
@@ -594,7 +595,7 @@ let run_media_reading_maintenance base_path =
            (match
               ( M.keeper_dirs ~masc_dir
               , Tool_blob_maintenance.live_references
-                  ~board_posts_file:Masc_board_handlers.Board_paths.posts_file
+                  ~scope:Server_tool_blob_scope.scope
                   ~base_path:canonical_base_path )
             with
             | Error error, _ ->

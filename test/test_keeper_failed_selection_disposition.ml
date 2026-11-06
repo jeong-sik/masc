@@ -41,6 +41,20 @@ let failed_outcome ?deferred_runtime_lane route =
     }
 ;;
 
+(* A provider's dated quota refusal: the turn neither finished nor failed,
+   and the input it carried waits for the turn after the rest. *)
+let rested_outcome meta =
+  Cycle.Rested
+    { meta
+    ; rest =
+        { Masc.Keeper_turn_driver.release_at = 1060.0
+        ; waiting_on = "lane-a"
+        ; basis = Masc.Keeper_turn_driver.Failure_response
+        }
+    ; deferred_runtime_lane = None
+    }
+;;
+
 let deferred_lane =
   Masc.Keeper_turn_driver.For_testing.make_deferred_runtime_lane
     ~assignment_id:"assignment-1"
@@ -397,12 +411,22 @@ let test_recorded_settlement_follows_the_batch_disposition () =
        | Loop.Continuation_unsettled -> ()
        | Loop.Continuation_settled_recorded | Loop.Continuation_settled_failed _ ->
          fail "an unfinished turn settled the continuation")
-    [ None; Some (Cycle.Input_required meta); Some (Cycle.Cancelled meta); Some (Cycle.Skipped meta) ]
+    [ None
+    ; Some (Cycle.Input_required meta)
+    ; Some (Cycle.Cancelled meta)
+    ; Some (Cycle.Skipped meta)
+    ; Some (rested_outcome meta)
+    ]
 ;;
 
 let test_nonterminal_outcomes_preserve_batch () =
   let meta = test_meta () in
-  [ None; Some (Cycle.Input_required meta); Some (Cycle.Cancelled meta); Some (Cycle.Skipped meta) ]
+  [ None
+  ; Some (Cycle.Input_required meta)
+  ; Some (Cycle.Cancelled meta)
+  ; Some (Cycle.Skipped meta)
+  ; Some (rested_outcome meta)
+  ]
   |> List.iter (fun outcome ->
     match Loop.batch_disposition_of_cycle_outcome outcome with
     | Loop.Batch_no_action -> ()

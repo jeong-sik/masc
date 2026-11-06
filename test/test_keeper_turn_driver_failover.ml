@@ -4629,6 +4629,75 @@ let test_a_fenced_failure_waits_for_the_rest_its_attempt_recorded () =
         "no provider wait" (decide ~now:(now +. 88442.0))))
 ;;
 
+(* A provider's dated quota refusal rests the Keeper; it is not a turn failure
+   (MASC task-3264). On 2026-11-06, 26 of the 37 refused cycles after 03:00Z
+   had this shape, and each one added to the turn-failure streak and put the
+   Keeper in the Failing phase. [provider_rest_of_failure] answers [Some] only
+   for [Hard_quota] with a usable reset whose next dispatch waits, and the
+   rest it names is that wait. *)
+let test_a_dated_quota_refusal_is_a_rest () =
+  let hard_quota retry_after =
+    Keeper_runtime_failure_route.Retry_after_observed
+      { retry_class = Keeper_runtime_failure_route.Hard_quota; retry_after }
+  in
+  let describe_rest ~now = function
+    | None -> "no rest"
+    | Some { Driver.release_at; waiting_on; basis } ->
+      Printf.sprintf
+        "rest %.0fs on %s (%s)"
+        (release_at -. now)
+        waiting_on
+        (match basis with
+         | Driver.Failure_response -> "failure response"
+         | Driver.Observed_path_rest -> "observed rest")
+  in
+  with_runtime_config (runtime_toml_quota_lane_of [ "other.test_model" ]) (fun () ->
+    Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
+      reset_quota_lane_rests ();
+      let now = Unix.gettimeofday () in
+      let rest route =
+        describe_rest ~now
+          (Driver.provider_rest_of_failure ~now ~route ~assignment_id:"quota_lane" None)
+      in
+      Alcotest.(check string) "a dated quota refusal rests until the stated reset"
+        "rest 3600s on quota_lane (failure response)"
+        (rest (hard_quota (Some 3600.)));
+      Alcotest.(check string) "a quota refusal with no stated reset is a failure"
+        "no rest" (rest (hard_quota None));
+      Alcotest.(check string) "a zero reset hint states no time"
+        "no rest" (rest (hard_quota (Some 0.)));
+      Alcotest.(check string) "a rate limit is a failure even with a stated wait"
+        "no rest"
+        (rest
+           (Keeper_runtime_failure_route.Retry_after_observed
+              { retry_class = Keeper_runtime_failure_route.Rate_limited
+              ; retry_after = Some 3600.
+              }));
+      Runtime_quota_window.note_exhausted
+        ~scope:(Option.get (Runtime.quota_scope_of_runtime_id "other.test_model"))
+        ~resets_at:(now +. 7200.);
+      Alcotest.(check string) "the rest is the walk's later release when its path records one"
+        "rest 7200s on other.test_model (observed rest)"
+        (rest (hard_quota (Some 3600.)));
+      Alcotest.(check string) "a fenced quota refusal is a failure though its path rests"
+        "no rest"
+        (rest
+           (Keeper_runtime_failure_route.Exhausted_visible_alive
+              { terminal =
+                  Keeper_runtime_failure_route.Provider_attempt_effect_fenced
+                    Keeper_runtime_failure_route.Fenced_observation_unavailable
+              }))));
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
+      reset_quota_lane_rests ();
+      let now = Unix.gettimeofday () in
+      Alcotest.(check string) "a lane whose next walk serves does not rest"
+        "no rest"
+        (describe_rest ~now
+           (Driver.provider_rest_of_failure ~now ~route:(hard_quota (Some 3600.))
+              ~assignment_id:"quota_lane" None))))
+;;
+
 (* RFC-provider-path-rest §3.4: the chat lane's deferred retry reads the same
    next dispatch as the heartbeat. A suffix whose walk head serves is claimable
    at once; a resting head holds the retry until its release; a provider's
@@ -7719,6 +7788,8 @@ let () =
             `Quick test_a_failure_without_a_suffix_waits_until_a_fresh_walk_head_serves;
           Alcotest.test_case "a fenced failure waits for the rest its attempt recorded" `Quick
             test_a_fenced_failure_waits_for_the_rest_its_attempt_recorded;
+          Alcotest.test_case "a dated quota refusal is a rest" `Quick
+            test_a_dated_quota_refusal_is_a_rest;
           Alcotest.test_case "a chat retry follows the shared next dispatch" `Quick
             test_a_chat_retry_follows_the_shared_next_dispatch;
           Alcotest.test_case "a same-path suffix waits only for a recorded rest" `Quick

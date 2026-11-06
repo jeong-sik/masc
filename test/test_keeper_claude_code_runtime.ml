@@ -527,7 +527,9 @@ let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = [
                        invalid_arg "event_capture requires event_bus"))))))
 ;;
 
-let run_unified_autonomous_read_cycles ~base_path ~cli_path =
+(* One registered autonomous Keeper on the fixture CLI, inside the real Owner
+   child: [f] receives [run], which runs one unified cycle on a meta. *)
+let with_unified_autonomous_cycle ~base_path ~cli_path f =
   let keeper_name = "claude-fixture" in
   let meta =
     match
@@ -662,10 +664,19 @@ let run_unified_autonomous_read_cycles ~base_path ~cli_path =
                       | Ok `Interrupted -> fail "fixture autonomous child was interrupted"
                       | Error error -> fail (Keeper_owner_registry.command_error_to_string error)
                     in
+                    f ~config ~keeper_name ~meta ~trace_id ~checkpoint_path
+                      ~shared_context ~run)))))
+;;
+
+let run_unified_autonomous_read_cycles ~base_path ~cli_path =
+  with_unified_autonomous_cycle ~base_path ~cli_path
+    (fun ~config:_ ~keeper_name ~meta ~trace_id ~checkpoint_path
+         ~shared_context ~run ->
                     let completed meta = match run meta with
                       | Error failure -> fail (Agent_core.Error.to_string failure.error)
                       | Ok (Keeper_unified_turn.Turn_completed {meta; _}) -> meta
-                      | Ok (Turn_checkpointed _ | Turn_input_required _ | Turn_cancelled _ | Turn_skipped _) ->
+                      | Ok (Turn_checkpointed _ | Turn_input_required _ | Turn_cancelled _ | Turn_skipped _
+                           | Turn_rested _) ->
                         fail "provider terminal did not complete the autonomous cycle" in
                     let next_meta = completed meta in
                     check bool "first official cycle writes no AGENT_CORE checkpoint" false
@@ -689,7 +700,7 @@ let run_unified_autonomous_read_cycles ~base_path ~cli_path =
                     List.iter (fun field -> match List.map (Yojson.Safe.Util.member field) rows with
                       | [first;second;third] -> check bool ("same actual " ^ field ^ " is retained across cycles")
                           true (first=second && second=third)
-                      | _ -> fail "expected three actual retained reads") ["input";"output"])))))
+                      | _ -> fail "expected three actual retained reads") ["input";"output"])
 ;;
 
 let check_usage_scope ~frames ~expected_scope ~input_tokens ~output_tokens
@@ -2859,6 +2870,77 @@ let test_quota_enters_typed_recovery () =
              (Option.is_some required.observed_session_id);
            check (option string) "no fabricated turn" None required.observed_turn_id
          | _ -> fail "quota rejection did not require explicit recovery"))
+;;
+
+(* The CLI's rate-limit event dated at [resets_at] (Unix seconds).
+   [rate_limit_rejected] dates its reset in 2026-08, already past, so it states
+   no wait. *)
+let rate_limit_rejected_until resets_at =
+  Printf.sprintf
+    {|{"type":"rate_limit_event","session_id":"__SESSION__","uuid":"limit-1","rate_limit_info":{"status":"rejected","rateLimitType":"seven_day","resetsAt":%d,"overageStatus":"rejected","overageDisabledReason":"org_level_disabled_until"}}|}
+    resets_at
+;;
+
+(* A quota refusal whose reset the CLI states, before any tool ran, rests the
+   Keeper; it is not a turn failure (MASC task-3264). The cycle ends as
+   [Turn_rested] at that reset, and the turn-failure streak and the registry
+   failure cause stay as they were. Before, the same refusal added one to the
+   streak and the Keeper read Failing until its next successful turn. *)
+let test_dated_quota_refusal_rests_the_keeper () =
+  let base_path = temp_workspace () in
+  let resets_at = int_of_float (Unix.gettimeofday ()) + 3600 in
+  Runtime_quota_window.reset_for_testing ();
+  Masc_test_deps.with_process_env
+    "MASC_KEEPER_AUTONOMOUS_ENABLED"
+    (Some "true")
+    (fun () ->
+       Fun.protect
+         ~finally:(fun () ->
+           Runtime_quota_window.reset_for_testing ();
+           cleanup_tree base_path)
+         (fun () ->
+            with_fixture
+              [ Emit_and_read mcp_initialize
+              ; Emit mcp_initialized_notification
+              ; Emit_and_read mcp_list
+              ; Emit (rate_limit_rejected_until resets_at)
+              ; Emit quota_result
+              ]
+              (fun cli_path ->
+                 with_unified_autonomous_cycle ~base_path ~cli_path
+                   (fun ~config ~keeper_name ~meta ~trace_id:_ ~checkpoint_path:_
+                        ~shared_context:_ ~run ->
+                      (match run meta with
+                       | Ok
+                           (Keeper_unified_turn.Turn_rested
+                              { rest; meta = _; deferred_runtime_lane = _ }) ->
+                         check bool "the rest ends at the reset the CLI stated" true
+                           (Float.abs
+                              (rest.Keeper_turn_driver.release_at
+                               -. float_of_int resets_at)
+                            < 5.0)
+                       | Ok
+                           ( Keeper_unified_turn.Turn_completed _
+                           | Keeper_unified_turn.Turn_checkpointed _
+                           | Keeper_unified_turn.Turn_input_required _
+                           | Keeper_unified_turn.Turn_cancelled _
+                           | Keeper_unified_turn.Turn_skipped _ ) ->
+                         fail "a refused turn did not end as a rest"
+                       | Error failure ->
+                         fail
+                           ("a dated quota refusal ended as a turn failure: "
+                            ^ Agent_core.Error.to_string
+                                failure.Keeper_unified_turn.error));
+                      let base_path = config.Workspace.base_path in
+                      check int "the turn-failure streak stays at zero" 0
+                        (Keeper_registry.get_turn_failures ~base_path keeper_name);
+                      match Keeper_registry.get ~base_path keeper_name with
+                      | Some { Keeper_registry.last_failure_reason = None; _ } -> ()
+                      | Some { Keeper_registry.last_failure_reason = Some reason; _ } ->
+                        fail
+                          ("a rest set a registry failure cause: "
+                           ^ Keeper_registry.failure_reason_to_string reason)
+                      | None -> fail "the fixture Keeper left the registry"))))
 ;;
 
 let test_access_refusal_uses_status_and_keeps_pre_effect_rotation () =
@@ -6912,6 +6994,8 @@ let () =
             `Quick
             test_pre_effect_provider_rejection_keeps_failover_open
         ; test_case "quota enters recovery" `Quick test_quota_enters_typed_recovery
+        ; test_case "a dated quota refusal rests the Keeper" `Quick
+            test_dated_quota_refusal_rests_the_keeper
         ; test_case "access refusal preserves structured status and rotation" `Quick
             test_access_refusal_uses_status_and_keeps_pre_effect_rotation
         ; test_case "access refusal after native tool remains fenced" `Quick

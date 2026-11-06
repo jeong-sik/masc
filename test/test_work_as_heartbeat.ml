@@ -213,6 +213,22 @@ let test_busy_cycle_defers_typed_block () =
   | _ -> fail "busy cycle must preserve its typed admission block"
 ;;
 
+(* A provider's dated quota refusal neither succeeded nor failed: the rested
+   cycle renews the lease and dispatches no turn status, so the Keeper's phase
+   and failure cause stay where they were. *)
+let test_rested_cycle_records_no_turn_status () =
+  match
+    Masc.Keeper_heartbeat_loop.decide_keepalive_cycle_action
+      Masc.Keeper_heartbeat_loop.Turn_cycle_rested
+  with
+  | Masc.Keeper_heartbeat_loop.Rest_without_turn_status -> ()
+  | Masc.Keeper_heartbeat_loop.Record_turn_status _ ->
+    fail "a rested cycle must not dispatch Turn_succeeded or Turn_failed"
+  | Masc.Keeper_heartbeat_loop.Skip_interrupted_turn
+  | Masc.Keeper_heartbeat_loop.Defer_autonomous_work _ ->
+    fail "a rested cycle ran its turn and renews the work-health lease"
+;;
+
 (* ── Percentile function (Phase 0 profiling) ────────────── *)
 
 let test_percentile_empty () =
@@ -298,6 +314,10 @@ let () =
         "busy defers with its typed admission block"
         `Quick
         test_busy_cycle_defers_typed_block;
+      test_case
+        "rested records no turn status"
+        `Quick
+        test_rested_cycle_records_no_turn_status;
     ];
     "config_invariants", [
       test_case "sweep interval positive" `Quick test_config_invariant_sweep_independent;

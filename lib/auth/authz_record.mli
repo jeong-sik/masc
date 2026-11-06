@@ -75,6 +75,10 @@ module Kind : sig
     | Revocation_cancel
       (** An eligible Admin lifts the block of a given-up reduction (design
           8.3, plan B2e-2b). The body is that of {!Authz_cancel_event}. *)
+    | Registration
+      (** An Admin registers an identity on the allowlist, or removes the
+          registration (plan C2d). The first sign-in of a registered identity
+          makes a Member. The body is that of {!Authz_registration_event}. *)
 
   val all : t list
   val to_string : t -> string
@@ -84,10 +88,12 @@ end
 (** Whether [author] may write a record of this kind (design 6.3).
     [Runtime_grant], [Delegate_policy], [Principal],
     [Internal_service_credential], [Permission_revocation], [Admission],
-    [Admin_assignment], and [Revocation_cancel] need an authenticated
-    principal: the person who joins writes their own admission, and an Admin
-    writes the revocation of an Admin assignment and the cancel of a block.
-    Which Admin may cancel which block is a question of the state. Each system author writes only its own records.
+    [Admin_assignment], [Revocation_cancel], and [Registration] need an
+    authenticated principal: the person who joins writes their own admission,
+    and an Admin writes the revocation of an Admin assignment, the cancel of a
+    block, and the allowlist. Which Admin may cancel which block, and that the
+    writer of the allowlist is an Admin, are questions of the state. The local
+    operator does not write the allowlist: its way in is the invite. Each system author writes only its own records.
     The local operator writes recovery records, mode events, and invites, and an
     authenticated principal writes invites too: the first Admin is invited by
     the local operator and every later one by an Admin. Which authenticated

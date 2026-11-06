@@ -10,9 +10,11 @@
 
     The header and the rows are drawn from one description here, through
     {!Masc_tui_table}, which is what keeps them at the same offsets. The last
-    column of each table is the one reading with no widest form and is left to
-    the frame: nothing follows it that a long one could push, and
-    [box_line_styled] cuts what will not fit. *)
+    column of the other tables is the one reading with no widest form and is
+    left to the frame: nothing follows it that a long one could push, and
+    [box_line_styled] cuts what will not fit. The catalog's last column is the
+    flexible column of {!Masc_tui_table.fit} instead, because its counts
+    leave when the line is too narrow for them. *)
 
 val effective_tool_header : string
 (** [TOOL] over the selected Keeper's turn surface, then [ORIGIN]. *)
@@ -20,14 +22,36 @@ val effective_tool_header : string
 val effective_tool_line : name:string -> origin:string -> string
 (** One tool on that surface. [origin] is the free last column. *)
 
-val catalog_tool_header : string
-(** [TOOL DIRECT] over the process-wide catalog, then [SURFACES]. *)
+(** What the server counted about one tool's calls, as the catalog row draws
+    it. Three answers, because "no counts were sent" and "counts were sent and
+    this tool has none" are different facts and one zero cannot say both. *)
+type usage_reading =
+  | Usage_unread
+      (** The server sent no per-tool counts, so no tool has an answer. *)
+  | Never_called
+      (** Counts were sent and this tool has no row in them. *)
+  | Called of { calls : int; failures : int; p95_ms : float option }
+
+val catalog_tool_header : width:int -> string
+(** [TOOL CALLS FAIL P95 DIRECT SURFACES] over the process-wide catalog.
+    [width] is the cells the line has, indent included. [SURFACES] keeps the
+    width it had at 80 columns before the counts were read, so when the line
+    cannot hold every column [P95] goes first, then [FAIL], then [CALLS], and
+    at 80 columns the table is [TOOL DIRECT SURFACES] as it was. *)
 
 val catalog_tool_line :
-  metadata:string -> name:string -> direct:string -> surfaces:string -> string
-(** One registered tool. [metadata] dresses the two columns that answer about
-    the tool rather than the name being answered about: a tool on no surface is
-    unreachable, and [surfaces] is the column that says so. *)
+  width:int ->
+  metadata:string ->
+  name:string ->
+  direct:string ->
+  usage:usage_reading ->
+  surfaces:string ->
+  string
+(** One registered tool, on the columns {!catalog_tool_header} names at the
+    same [width]. [metadata] dresses the two columns that answer about the tool
+    rather than the name being answered about: a tool on no surface is
+    unreachable, and [surfaces] is the column that says so. A tool with
+    failures says so in the [FAIL] reading and nowhere else on the row. *)
 
 val skill_usage_keeper_header : string
 (** The column names over the keeper rows below one skill. *)

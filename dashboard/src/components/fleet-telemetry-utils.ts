@@ -202,15 +202,6 @@ function keeperLastLatencyMs(keeper: Keeper): number {
   return lastMetric?.latency_ms ?? 0
 }
 
-export function healthStatusColor(status: string | undefined): string {
-  switch (status) {
-    case 'healthy': return 'var(--good)'
-    case 'degraded': return 'var(--amber-bright)'
-    case 'unhealthy': return 'var(--color-status-bad)'
-    default: return 'var(--color-fg-disabled)'
-  }
-}
-
 export function successClass(rate: number | null): string {
   if (rate == null || !Number.isFinite(rate)) return 'text-[var(--color-fg-disabled)]'
   if (rate >= 97) return 'text-[var(--color-status-ok)]'

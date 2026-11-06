@@ -10,12 +10,6 @@ import {
 
 const bannerDismissed = signal(false)
 
-// Test-only helper, mirroring auth-status.ts: module-level signals need a
-// reset seam so *.test.ts files stay isolated.
-export function __resetForTests(): void {
-  bannerDismissed.value = false
-}
-
 export interface BundleStaleBannerModel {
   message: string
   nextAction: string

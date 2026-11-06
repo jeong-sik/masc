@@ -9,8 +9,5 @@
 /** Viewbox width in SVG units. */
 export const SPARKLINE_W = 200
 
-/** Viewbox height in SVG units. */
-export const SPARKLINE_H = 40
-
 /** Inner padding (top/bottom and left/right) in SVG units. */
 export const SPARKLINE_PAD = 2

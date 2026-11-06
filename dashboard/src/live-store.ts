@@ -7,8 +7,6 @@ import type { PipelineStage } from './types/core'
 import type { AuditEntry } from './api/dashboard'
 import type { StatusChipTone } from './components/common/status-chip'
 
-export type PulseState = 'working' | 'idle'
-
 export interface KeeperPressure {
   name: string
   ratio: number | null

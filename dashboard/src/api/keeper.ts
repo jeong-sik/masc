@@ -31,22 +31,9 @@ import type {
 export type {
   KeeperCompositeSnapshot,
   KeeperCompositeInvariants,
-  KeeperCompositeMeasurement,
-  KeeperLastOutcome,
-  KeeperLiveTurn,
-  KeeperLastSkip,
-  KeeperTurnAttempt,
-  KeeperBoardCursor,
   KeeperCompositeExecution,
   KeeperRuntimeAttention,
   KeeperSecretProjection,
-  KeeperSecretFileMount,
-  KeeperPhaseDiagnosis,
-  KeeperPhaseDiagnosisRow,
-  KeeperCompositePhase,
-  KeeperCompositeTurnPhase,
-  KeeperCompositeDecisionStage,
-  KeeperCompositeRuntimeState,
   FleetCompositeSnapshot,
 } from './schemas/keeper-composite'
 export type { KeeperChatHistoryMessage } from './schemas/keeper-chat-history'

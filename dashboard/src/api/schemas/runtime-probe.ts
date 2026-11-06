@@ -130,20 +130,8 @@ const DashboardRuntimeProbeResponseSchema = Schema.Struct({
   probe: DashboardRuntimeProbeValidatedPayloadSchema,
 })
 
-export type DashboardRuntimeProviderProbeStatus = Schema.Schema.Type<
-  typeof DashboardRuntimeProviderProbeStatusSchema
->
-export type DashboardRuntimeProbeStatus = Schema.Schema.Type<
-  typeof DashboardRuntimeProbeStatusSchema
->
-export type DashboardRuntimeProbeRefreshState = Schema.Schema.Type<
-  typeof DashboardRuntimeProbeRefreshStateSchema
->
 export type DashboardRuntimeProviderProbe = Schema.Schema.Type<
   typeof DashboardRuntimeProviderProbeSchema
->
-export type DashboardRuntimeProviderProbeSummary = Schema.Schema.Type<
-  typeof DashboardRuntimeProviderProbeSummarySchema
 >
 export type DashboardRuntimeProbePayload = Schema.Schema.Type<
   typeof DashboardRuntimeProbeValidatedPayloadSchema

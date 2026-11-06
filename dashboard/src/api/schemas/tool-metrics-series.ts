@@ -44,7 +44,6 @@ const ToolMetricsSeriesResponseSchema = Schema.Struct({
 })
 
 export type ToolMetricsSeriesBucket = Schema.Schema.Type<typeof ToolMetricsSeriesBucketSchema>
-export type ToolMetricsSeriesTool = Schema.Schema.Type<typeof ToolMetricsSeriesToolSchema>
 export type ToolMetricsSeriesResponse = Schema.Schema.Type<typeof ToolMetricsSeriesResponseSchema>
 
 /** Throws a `ParseError` that names the field that drifted. */

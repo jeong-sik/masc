@@ -25,7 +25,5 @@ export const DECK_PANEL =
 export const DECK_LABEL =
   'font-mono text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]'
 
-export const DECK_META = 'font-mono text-3xs text-[var(--color-fg-disabled)]'
-
 export const DECK_CHIP =
   'rounded-[var(--r-0)] border border-[var(--color-border-strong)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 font-mono text-3xs'

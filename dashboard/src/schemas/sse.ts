@@ -1411,18 +1411,6 @@ export const SSEMessageSchema = schema<SSEMessage>((value) => {
   return ok(value as unknown as SSEMessage)
 })
 
-/** Schema drift error for SSE boundary.
- *  Matches the GateStatusSchemaDriftError pattern used by Valibot schemas. */
-export class SSESchemaDriftError extends Error {
-  constructor(
-    public readonly issues: readonly SchemaIssue[],
-    public readonly raw: unknown,
-  ) {
-    super(`SSE schema drift: ${issues.map((i) => i.message).join('; ')}`)
-    this.name = 'SSESchemaDriftError'
-  }
-}
-
 // ── Schema-drift log aggregation ──────────────────────────────────────────
 // A rejected event is still dropped either way — this section only bounds
 // how much console noise a burst of same-kind drops produces. It is a log

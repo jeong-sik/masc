@@ -22,9 +22,6 @@ export type ExplicitIdeFileFocusAvailability =
   | 'not_found'
   | 'unavailable'
 export type ObservedIdeFileFocusAvailability = 'available' | 'unavailable'
-export type IdeFileFocusAvailability =
-  | ExplicitIdeFileFocusAvailability
-  | ObservedIdeFileFocusAvailability
 
 export type IdeWorkspaceIdentity =
   | { readonly kind: 'project' }

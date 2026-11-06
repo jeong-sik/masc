@@ -449,6 +449,25 @@ val reconcile_context : claim_plan -> expected:t option -> snapshot_sha256:strin
     [Canonical_source_guard]. A Gate continuation, bound to its original
     session, does not use this: it refuses with {!validate_unchanged_context}. *)
 
+(** The vendor sessions one transition left unnamed (RFC-0501 §2.1).
+    [Same_client] ids belong to the client and runtime that wrote [after], so
+    that runtime can delete them. [Other_client] names the client and runtime
+    the ids belong to; the runtime writing [after] cannot reach them. *)
+type forgotten =
+  | Same_client of string list
+  | Other_client of
+      { client_kind : client_kind
+      ; runtime_id : string
+      ; session_ids : string list
+      }
+
+val forgotten_sessions : before:t option -> after:t -> forgotten
+(** The session ids [before]'s phase names and [after]'s phase does not, in
+    [before]'s order without repeats. No [before] names none. A fresh claim
+    forgets the settled or recovered session; a transient release to [Ready]
+    forgets the session its fresh turn opened; a resume or a settlement of the
+    same session forgets none. Nothing reads a forgotten id again. *)
+
 val claim_with_context_frontier :
   context_frontier:context_frontier option ->
   base_path:string ->

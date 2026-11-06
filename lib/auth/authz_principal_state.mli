@@ -57,6 +57,12 @@ val find_namespace : t -> Authz_types.Account_home_namespace.t -> Authz_types.Us
 (** Whether the principal was deleted. Its id is never given again. *)
 val is_deleted : t -> Authz_types.User_id.t -> bool
 
+(** Whether a deleted principal was bound to this identity: the
+    [previously_deleted] mark of an admission (design 5.1-6). It is read from
+    the [Deleted] events of the log and is in no principal record. It does not
+    stop the identity from joining again, as a new principal. *)
+val was_deleted : t -> Authz_external_identity.t -> bool
+
 (** Whether the principal exists and is [Active]. *)
 val is_active : t -> Authz_types.User_id.t -> bool
 

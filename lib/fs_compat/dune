@@ -21,6 +21,7 @@
   capability_recovery_record_io
   capability_recovery_inventory
   capability_recovery_obligation
+  capability_recovery_reconciler_model
   capability_recovery_reconciler
   publication_recovery_access
   atomic_temp_name
@@ -38,7 +39,8 @@
   capability_recovery_store_layout
   capability_recovery_store_scope
   capability_recovery_record_io
-  capability_recovery_inventory)
+  capability_recovery_inventory
+  capability_recovery_reconciler_model)
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4) + unused-value ratchet (warning 32)
  (flags
   (:standard -w +4 -w +33 -w +37))

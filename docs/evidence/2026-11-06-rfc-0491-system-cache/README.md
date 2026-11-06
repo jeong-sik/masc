@@ -70,6 +70,33 @@ RFC-0491 2층(#48786)과 3층(#49004)이 배포된 날을 같은 방법으로 �
 - `completion_authority / no` 의 미적중률은 35.4% 지만 이어진 쌍이 3개라서 결론에 쓰지 않아요.
 - 그래서 RFC-0491 §7 의 4층(`Active_goals`)을 열어요.
 
+## 4층 배포 뒤 (2026-11-06)
+
+4층(#49257)은 10:18:20Z 부팅부터 서버에 있어요. 그 부팅이 `prompts/keeper.md` 를 바이너리에서 다시 써서 `world.goals_awaiting_proof` 조각이 생겼어요. 09:51:25Z 부팅은 `keeper.md` 를 쓰지 않았어요. 12:08:32Z 에 다시 부팅해서 구간을 둘로 나눠 쟀어요. 재시작을 건너는 쌍은 재시작 때문에 미적중이 나기 때문이에요.
+
+`python3 -I measure_first_request_miss.py ~/me/.masc 2026-11/06 --start 2026-11-06T10:18:20Z --end 2026-11-06T12:08:00Z` (2026-11-06 실행)
+
+| 바뀐 System 블록 | 앞부분 움직임 | 쌍 | 이어진 쌍 | 첫 요청 미적중 토큰 | 몫 | 미적중률 |
+|---|---|---|---|---|---|---|
+| completion_authority | yes | 3 | 0 | 0 | 0.0% | - |
+| completion_authority | no | 1 | 1 | 583,200 | 6.5% | 97.2% |
+| none | no | 188 | 146 | 8,281,875 | 92.2% | 23.3% |
+| none | yes | 7 | 3 | 120,595 | 1.3% | 29.6% |
+
+`python3 -I measure_first_request_miss.py ~/me/.masc 2026-11/06 --start 2026-11-06T12:08:32Z --end 2026-11-06T16:10:00Z` (2026-11-07 실행)
+
+| 바뀐 System 블록 | 앞부분 움직임 | 쌍 | 이어진 쌍 | 첫 요청 미적중 토큰 | 몫 | 미적중률 |
+|---|---|---|---|---|---|---|
+| completion_authority | no | 5 | 3 | 182,607 | 1.5% | 8.4% |
+| completion_authority | yes | 1 | 1 | 245,288 | 2.1% | 93.5% |
+| none | no | 510 | 168 | 10,746,335 | 90.7% | 21.6% |
+| none | yes | 44 | 5 | 675,691 | 5.7% | 72.7% |
+
+- 두 구간 모두 `active_goals` 행이 없어요. 하지만 `goals.json` 의 마지막 `updated_at` 이 09:08:46Z 라서, 두 구간에는 Goal 단계 변경도 Goal 추가도 없었어요. 그래서 이 표는 4층이 단계 변경을 System 밖으로 뺐다는 증거가 아니에요. Goal 말고 다른 것이 System 을 바꾸지 않았다는 것만 보여요.
+- 표시가 옮겨 갔는지는 `keepers/<name>/last-prompt.json` 으로 봤어요. 10:18:20Z 뒤에 찍힌 Keeper 23명 모두, System 에는 Verifying Goal(`goal-1790780641079-d40a7f59`)의 줄이 표시 없이 있고, `증명 대기 중` 표시는 `goals_awaiting_proof` 블록에만 있어요.
+- `none / no` 미적중률은 23.3%·21.6% 예요. 3층 뒤 구간은 30.5% 였어요. 구간과 작업량이 달라서 4층 효과로 돌리지 않아요.
+- Goal 이 Verifying 에 들어가거나 나오는 구간을 같은 방법으로 다시 재요. 그 구간에 `active_goals / no` 행이 없으면 4층이 의도대로 동작한 거예요. §7 의 5층(Goal 기준점)은 Goal 추가가 그 표에 남는지 보고 정해요.
+
 ## 한계
 
 - 미적중률은 provider 가 돌려준 `cache_miss_input_tokens` 를 그대로 써요. provider 의 캐시 정책이 바뀌면 같은 코드에서도 값이 달라져요.

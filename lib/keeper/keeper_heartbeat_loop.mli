@@ -359,6 +359,17 @@ module For_testing : sig
     Keeper_unified_turn.turn_failure ->
     after_failure option
 
+  (** What a loop's first cycle waits for before it takes any input: the rest
+      of the walk its next dispatch starts, as the stores hold it when the
+      loop starts (a quota window read back at boot). The wait is on the
+      observed rest, so {!provider_wait_interrupt} ends it when that walk
+      serves. [None] when the walk's head serves. *)
+  val start_path_wait :
+    now:float ->
+    assignment_id:string ->
+    deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane option ->
+    after_failure option
+
   (** Whether the loop starts another cycle without sleeping. A serving
       deferred suffix is itself unfinished input and starts immediately;
       ordinary cadence and path-release outcomes retain the existing

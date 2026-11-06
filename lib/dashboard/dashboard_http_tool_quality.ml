@@ -101,8 +101,8 @@ let tool_outcome_of_record record =
   | _ -> Malformed_outcome
 
 (* Every invocation-result producer writes [result_bytes] (the [log_call]
-   callers in keeper_hooks_agent_core, keeper_tool_composition_surface and
-   mcp_server_eio_call_tool all pass it). A result row without it is malformed:
+   callers in keeper_hooks_agent_core, keeper_tool_composition_surface_observation
+   and mcp_server_eio_call_tool all pass it). A result row without it is malformed:
    it is dropped from every aggregate and counted in [malformed]. Lifecycle
    markers are classified and excluded before this requirement is applied. *)
 let result_bytes_of_record record =

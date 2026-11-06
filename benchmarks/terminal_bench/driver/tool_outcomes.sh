@@ -4,7 +4,8 @@
 # The tool-call ledger (.masc/tool_calls/<yyyy-mm>/<dd>.jsonl) holds more than
 # calls. keeper_tool_call_log.ml writes record_kind and tool on every row.
 # "tool_call" is one tool execution: a model's call, or one step a composition
-# ran, which keeper_tool_composition_surface.ml writes as its own row.
+# ran, which keeper_tool_composition_surface_observation.ml writes as its own
+# row.
 # "composition_run" summarizes a run whose steps are already rows, and
 # "lifecycle_event" marks what happened around a call. Only tool_call rows
 # are counted.

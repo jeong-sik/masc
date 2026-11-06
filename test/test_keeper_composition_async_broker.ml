@@ -114,7 +114,7 @@ let submit ~base_path ~result () =
       ~base_path
       ~caller:submitter
       ~keeper_name:submitter
-        (* The exact wiring keeper_tool_composition_surface.ml passes. *)
+        (* The exact wiring keeper_tool_composition_surface_async.ml passes. *)
       ~on_worker_settled:(Wake.on_worker_settled ~base_path ~composition_tool)
       ~f:(fun ~request_id:_ _request_sw -> result)
       ()

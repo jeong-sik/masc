@@ -19,7 +19,7 @@ let glyph ~paused reading =
   | Some value -> health_glyph value
 
 let activity_glyph : Masc_tui_keeper_list_model.activity -> string = function
-  | Held_call | Failure -> "!"
+  | Held_call | Attempt_failed -> "!"
   | Question -> "?"
   | Confirmation | Verifying -> "\xe2\x97\x87" (* ◇ *)
   | Preparing | Running -> "\xe2\x97\x8f" (* ●; the list substitutes its animated mark *)

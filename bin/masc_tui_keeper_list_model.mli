@@ -2,7 +2,10 @@
 
 type layout = Compact | Detailed | Grouped
 type sort = Priority | Recent | Oldest | Activity | Name
-type attention = Attention | Active | Waiting | Inactive | Unobserved
+type attention = Attention | Failing | Active | Waiting | Inactive | Unobserved
+(** [Attention] holds what a person has to answer. [Failing] holds the other
+    rows whose health is failing, whatever they are doing now, and the rows
+    whose open turn failed an attempt. *)
 
 type keeper_waiting_state = Masc.Tui_decode.keeper_waiting_state =
   | Keeper_waiting_idle
@@ -47,7 +50,9 @@ type activity =
   | Held_call
   | Question
   | Confirmation
-  | Failure
+  | Attempt_failed
+      (** An attempt in the turn that is open now failed. A failing health
+          reading is not an activity: that Keeper shows what it does now. *)
   | Preparing
   | Streaming
   | Running
@@ -128,9 +133,19 @@ val group_of_row : row -> attention
 val order_rows : layout:layout -> sort:sort -> row list -> row list
 (** Grouped layout orders groups first and applies [sort] within each group.
     The same order is used for drawing, navigation, and search. *)
-val group_counts : row list -> int * int * int * int * int
-(** Counts in [Attention, Active, Waiting, Inactive, Unobserved] order. *)
+type group_counts = {
+  attention_rows : int;
+  failing_rows : int;
+  active_rows : int;
+  waiting_rows : int;
+  inactive_rows : int;
+  unobserved_rows : int;
+}
+(** The number of rows in each {!attention} group. *)
+
+val group_counts : row list -> group_counts
 val waiting_summary : row list -> waiting_summary
 (** Count each primary waiting reason and, only for those rows, async running.
-    Queued and cancelling async work, and async running on Active rows, does not
-    contribute to [background]. *)
+    Only rows in the [Waiting] group count: a failing row that waits on a tool
+    is in [Failing]. Queued and cancelling async work, and async running on
+    other rows, does not contribute to [background]. *)

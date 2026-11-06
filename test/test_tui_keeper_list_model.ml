@@ -153,8 +153,8 @@ let test_priority_orders_attention_activity_waiting_then_inactive () =
         ~waiting:(waiting ~items:[waiting_item ~producer:Model.Wake_keeper_delegate ()] "delegate") "delegate"
     ]
   in
-  Alcotest.(check (list string)) "attention, activity, waiting, inactive"
-    [ "failure"; "held"; "question"; "async"; "stream"; "delegate"; "model"; "verify"; "idle"; "paused"; "unknown" ]
+  Alcotest.(check (list string)) "attention, failing, activity, waiting, inactive"
+    [ "held"; "question"; "failure"; "async"; "stream"; "delegate"; "model"; "verify"; "idle"; "paused"; "unknown" ]
     (names (Model.order_rows ~layout:Model.Compact ~sort:Model.Priority rows))
 
 let test_recent_and_name_have_deterministic_ties () =
@@ -360,16 +360,69 @@ let test_a_submitter_without_a_current_task_waits_for_its_verdict () =
   Alcotest.(check bool) "without a submitted task the Keeper stays idle" true
     (Model.primary_activity_of_row idle = Model.Idle)
 
+let test_a_failing_keeper_shows_what_it_does_and_sits_in_the_failing_group () =
+  let failing = health "failing" in
+  let working = row ~health:failing ~turn:streaming "working" in
+  let quiet =
+    row ~health:failing ~turn:Decode.Keeper_turn_idle
+      ~waiting:(waiting ~state:Model.Keeper_waiting_idle "quiet") "quiet"
+  in
+  let stopped = row ~health:failing ~paused:true "stopped" in
+  Alcotest.(check bool) "a failing Keeper with an open turn shows the turn" true
+    (Model.primary_activity_of_row working = Model.Streaming
+     && Model.group_of_row working = Model.Failing);
+  Alcotest.(check bool) "a failing Keeper with nothing to wait on shows idle" true
+    (Model.primary_activity_of_row quiet = Model.Idle
+     && Model.group_of_row quiet = Model.Failing);
+  Alcotest.(check bool) "a failing Keeper a person paused shows paused" true
+    (Model.primary_activity_of_row stopped = Model.Paused
+     && Model.group_of_row stopped = Model.Failing)
+
+let test_a_decision_for_a_person_outranks_a_failing_health_reading () =
+  let failing = health "failing" in
+  let asked = row ~health:failing ~open_questions:1 "asked" in
+  let held = row ~health:failing ~approval:(approval "held") "held" in
+  Alcotest.(check bool) "an open question keeps the row in attention" true
+    (Model.primary_activity_of_row asked = Model.Question
+     && Model.group_of_row asked = Model.Attention);
+  Alcotest.(check bool) "a held call keeps the row in attention" true
+    (Model.primary_activity_of_row held = Model.Held_call
+     && Model.group_of_row held = Model.Attention)
+
+let test_a_failed_attempt_in_the_open_turn_does_not_need_a_failing_health_reading () =
+  let attempt =
+    row ~health:(health "healthy") ~turn:(turn Masc.Keeper_turn_preview.Failed) "attempt"
+  in
+  Alcotest.(check bool) "the failed attempt is the activity and the group follows it" true
+    (Model.primary_activity_of_row attempt = Model.Attempt_failed
+     && Model.group_of_row attempt = Model.Failing)
+
+let test_waiting_summary_leaves_out_a_failing_keeper () =
+  let rows =
+    [ row ~turn:tool_waiting "tool"
+    ; row ~health:(health "failing") ~turn:tool_waiting
+        ~async_requests:[ async_request Decode.Async_running "failing-running" ]
+        "failing-tool"
+    ]
+  in
+  let summary = Model.waiting_summary rows in
+  Alcotest.(check int) "a failing Keeper that waits on a tool is not counted as waiting" 1
+    summary.tool;
+  Alcotest.(check int) "its background async work is left out too" 0 summary.background
+
 let test_group_counts () =
   let rows =
     [ row ~approval:(approval "held") "held"
+    ; row ~health:(health "failing") ~turn:streaming "failing"
     ; row ~turn:streaming "active"
     ; row ~turn:model_waiting "waiting"
     ; row "unknown"
     ]
   in
   Alcotest.(check bool) "counts use the same classification" true
-    (Model.group_counts rows = (1, 1, 1, 0, 1))
+    (Model.group_counts rows
+     = { Model.attention_rows = 1; failing_rows = 1; active_rows = 1; waiting_rows = 1
+       ; inactive_rows = 0; unobserved_rows = 1 })
 
 let () =
   Alcotest.run "tui_keeper_list_model"
@@ -389,6 +442,14 @@ let () =
         ; Alcotest.test_case "a submitter is found by assignee" `Quick test_a_submitter_is_found_by_assignee
         ; Alcotest.test_case "a submitter without a current task waits for its verdict" `Quick
             test_a_submitter_without_a_current_task_waits_for_its_verdict
+        ; Alcotest.test_case "a failing Keeper shows what it does and sits in the failing group" `Quick
+            test_a_failing_keeper_shows_what_it_does_and_sits_in_the_failing_group
+        ; Alcotest.test_case "a decision for a person outranks a failing health reading" `Quick
+            test_a_decision_for_a_person_outranks_a_failing_health_reading
+        ; Alcotest.test_case "a failed attempt does not need a failing health reading" `Quick
+            test_a_failed_attempt_in_the_open_turn_does_not_need_a_failing_health_reading
+        ; Alcotest.test_case "waiting summary leaves out a failing Keeper" `Quick
+            test_waiting_summary_leaves_out_a_failing_keeper
         ; Alcotest.test_case "group counts" `Quick test_group_counts
         ] )
     ]

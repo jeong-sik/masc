@@ -1247,10 +1247,12 @@ let earliest_stated_reset spent =
     spent
 ;;
 
-(* A running Keeper whose every candidate has spent its quota waits for the
-   earliest stated reset. The operator can move it to a route with quota left,
-   which is why this row exists. A Keeper the server is not running does not
-   dispatch and is not counted. *)
+(* A running Keeper whose every candidate has spent its quota cannot dispatch
+   until a window resets. The row names the earliest stated reset. The walk
+   can release later than that, and the roster row's [runtime_path_rest]
+   shows when ([Keeper_turn_driver.assignment_walk_rest]). The operator can
+   move the Keeper to a route with quota left, which is why this row exists.
+   A Keeper the server is not running does not dispatch and is not counted. *)
 let runtime_quota_spent_rows ~now ~base_path keeper_name =
   if not (Keeper_registry.is_running ~base_path keeper_name)
   then []

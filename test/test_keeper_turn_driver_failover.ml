@@ -4397,8 +4397,9 @@ let test_a_deferred_suffix_waits_only_while_its_walk_head_rests () =
         ~candidate:(quota_lane_candidate "shared_b.test_model") ~retry_after:(Some 120.);
       let describe = function
         | Driver.Walk_head_serving { runtime_id } -> "serving " ^ runtime_id
-        | Driver.Walk_waits_until { release_at; resting_runtime_id } ->
-          Printf.sprintf "resting %s for %.0fs" resting_runtime_id (release_at -. now)
+        | Driver.Walk_waits_until { release_at; release_basis; resting_runtime_id } ->
+          Printf.sprintf "resting %s for %.0fs (%s)" resting_runtime_id (release_at -. now)
+            (Driver.release_basis_to_wire release_basis)
       in
       let all_three = [ "shared_a.test_model"; "shared_b.test_model"; "other.test_model" ] in
       let both_shared = [ "shared_a.test_model"; "shared_b.test_model" ] in
@@ -4406,13 +4407,13 @@ let test_a_deferred_suffix_waits_only_while_its_walk_head_rests () =
         "serving other.test_model"
         (describe (Driver.deferred_lane_rest ~now (quota_lane_suffix all_three)));
       Alcotest.(check string) "a resting head waits for the earliest promoted release"
-        "resting shared_b.test_model for 120s"
+        "resting shared_b.test_model for 120s (stated_by_provider)"
         (describe (Driver.deferred_lane_rest ~now (quota_lane_suffix both_shared)));
       Runtime_quota_window.note_exhausted
         ~scope:(Option.get (Runtime.quota_scope_of_runtime_id "other.test_model"))
         ~resets_at:(now +. 30.);
       Alcotest.(check string) "a stated quota reset is a release too"
-        "resting other.test_model for 30s"
+        "resting other.test_model for 30s (stated_by_provider)"
         (describe (Driver.deferred_lane_rest ~now (quota_lane_suffix all_three)));
       (* An unstated rest ends at the throttle floor, and the walk promotes the
          path then (RFC-provider-path-rest §3.3, 2026-11-06): its release
@@ -4422,7 +4423,7 @@ let test_a_deferred_suffix_waits_only_while_its_walk_head_rests () =
       Runtime_candidate_backpressure.note_rate_limit
         ~candidate:(quota_lane_candidate "shared_b.test_model") ~retry_after:None;
       Alcotest.(check string) "an unstated rest behind the head shortens the wait to its floor"
-        (Printf.sprintf "resting shared_b.test_model for %.0fs"
+        (Printf.sprintf "resting shared_b.test_model for %.0fs (bounded_by_masc)"
            Env_config_keeper.KeeperKeepalive.rate_limit_backoff_floor_sec)
         (describe (Driver.deferred_lane_rest ~now (quota_lane_suffix both_shared)));
       Alcotest.(check (list string)) "and at the floor the walk leads with that path"
@@ -4475,10 +4476,12 @@ let test_provider_resets_outlive_the_fallback_cap () =
         ~resets_at:(now +. cap +. 3600.);
       let suffix = quota_lane_suffix [head; next] in
       (match Driver.deferred_lane_rest ~now suffix with
-       | Driver.Walk_waits_until { release_at; resting_runtime_id } ->
+       | Driver.Walk_waits_until { release_at; release_basis; resting_runtime_id } ->
          Alcotest.(check (float 0.01)) "wait until the earliest stated reset"
            (now +. cap +. 3600.) release_at;
-         Alcotest.(check string) "the quota path releases first" next resting_runtime_id
+         Alcotest.(check string) "the quota path releases first" next resting_runtime_id;
+         Alcotest.(check string) "the provider stated that release" "stated_by_provider"
+           (Driver.release_basis_to_wire release_basis)
        | Driver.Walk_head_serving _ -> Alcotest.fail "both paths are resting");
       (match Driver.deferred_lane_rest ~now:(now +. cap +. 3601.) suffix with
        | Driver.Walk_head_serving { runtime_id } ->
@@ -4488,20 +4491,38 @@ let test_provider_resets_outlive_the_fallback_cap () =
 
 (* The Keeper list publishes the same walk the failed-cycle wait reads, so a
    Keeper whose lane is out of quota no longer looks the same as one that can
-   dispatch. The row carries no release time: for a quota the provider did not
-   date, the release is MASC's own cap, a time no provider stated. *)
-let quota_lane_path_rest_json ~now =
-  Yojson.Safe.to_string
-    (Masc.Keeper_tool_surface_ops.runtime_path_rest_json ~now "quota_lane")
+   dispatch. A resting row carries the time the walk releases and who set it.
+   A quota the provider did not date ends at MASC's cap, fixed when it was
+   noted, so the row does not move between reads. *)
+let quota_lane_path_rest ~now =
+  Masc.Keeper_tool_surface_ops.runtime_path_rest_json ~now "quota_lane"
+;;
+
+let check_path_rest label ~status ~runtime_id ~release_basis json =
+  let member key = Yojson.Safe.Util.member key json in
+  Alcotest.(check string) (label ^ ": status") status
+    (Yojson.Safe.Util.to_string (member "status"));
+  Alcotest.(check string) (label ^ ": runtime") runtime_id
+    (Yojson.Safe.Util.to_string (member "runtime_id"));
+  Alcotest.(check bool) (label ^ ": release basis") true
+    (Yojson.Safe.equal release_basis (member "release_basis"))
+;;
+
+let row_release_at json =
+  match Yojson.Safe.Util.member "release_at" json with
+  | `Float at -> Some at
+  | _ -> None
 ;;
 
 let test_the_list_row_says_serving_when_no_path_rests () =
   with_runtime_config runtime_toml_quota_lane (fun () ->
     Fun.protect ~finally:reset_quota_lane_rests (fun () ->
       reset_quota_lane_rests ();
-      Alcotest.(check string) "the declared head serves"
-        {|{"status":"serving","runtime_id":"shared_a.test_model"}|}
-        (quota_lane_path_rest_json ~now:(Unix.gettimeofday ()))))
+      let row = quota_lane_path_rest ~now:(Unix.gettimeofday ()) in
+      check_path_rest "the declared head serves"
+        ~status:"serving" ~runtime_id:"shared_a.test_model" ~release_basis:`Null row;
+      Alcotest.(check (option (float 0.))) "a serving row names no release" None
+        (row_release_at row)))
 ;;
 
 let test_the_list_row_says_resting_when_every_path_is_out_of_quota () =
@@ -4515,12 +4536,15 @@ let test_the_list_row_says_resting_when_every_path_is_out_of_quota () =
              ~scope:(Option.get (Runtime.quota_scope_of_runtime_id id))
              ~resets_at:(now +. 600.))
         [ "shared_a.test_model"; "shared_b.test_model"; "other.test_model" ];
-      Alcotest.(check string) "a lane whose paths all rest is resting"
-        {|{"status":"resting","runtime_id":"shared_a.test_model"}|}
-        (quota_lane_path_rest_json ~now);
-      Alcotest.(check string) "the row is serving again once the window ends"
-        {|{"status":"serving","runtime_id":"shared_a.test_model"}|}
-        (quota_lane_path_rest_json ~now:(now +. 601.))))
+      let row = quota_lane_path_rest ~now in
+      check_path_rest "a lane whose paths all rest is resting"
+        ~status:"resting" ~runtime_id:"shared_a.test_model"
+        ~release_basis:(`String "stated_by_provider") row;
+      Alcotest.(check (option (float 0.01))) "until the stated reset" (Some (now +. 600.))
+        (row_release_at row);
+      check_path_rest "the row is serving again once the window ends"
+        ~status:"serving" ~runtime_id:"shared_a.test_model" ~release_basis:`Null
+        (quota_lane_path_rest ~now:(now +. 601.))))
 ;;
 
 let test_an_undated_quota_row_does_not_move_between_reads () =
@@ -4533,11 +4557,18 @@ let test_an_undated_quota_row_does_not_move_between_reads () =
            Runtime_quota_window.note_observed_exhausted
              ~scope:(Option.get (Runtime.quota_scope_of_runtime_id id)))
         [ "shared_a.test_model"; "shared_b.test_model"; "other.test_model" ];
-      let first = quota_lane_path_rest_json ~now in
-      Alcotest.(check string) "an undated quota is resting"
-        {|{"status":"resting","runtime_id":"shared_a.test_model"}|} first;
-      Alcotest.(check string) "a later read says the same thing" first
-        (quota_lane_path_rest_json ~now:(now +. 60.))))
+      let first = quota_lane_path_rest ~now in
+      check_path_rest "an undated quota is resting until MASC's cap"
+        ~status:"resting" ~runtime_id:"shared_a.test_model"
+        ~release_basis:(`String "bounded_by_masc") first;
+      Alcotest.(check bool) "at the cap after it was noted" true
+        (match row_release_at first with
+         | Some at ->
+           Float.abs (at -. (now +. Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec))
+           < 5.0
+         | None -> false);
+      Alcotest.(check bool) "a later read says the same thing" true
+        (Yojson.Safe.equal first (quota_lane_path_rest ~now:(now +. 60.)))))
 ;;
 
 (* Exhausting a lane does not turn the last candidate's quota reset into a

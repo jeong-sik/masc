@@ -78,7 +78,7 @@ RFC-0477 의 fleet 처럼 행을 타입 스트림으로 보내면, 지금 경로
 읽는 시각으로 바뀌는 값이 둘 더 있다.
 
 - Candle 잔액은 반감기에 따라 줄어들고, 줄어든 만큼 workspace 의 `burned` 가 늘고 `circulating` 이 준다(§1.6). `Candle_decay.remaining ~half_life ~since ~at ~amount_milli` 는 시계도 파일도 쓰지 않는 순수 함수다.
-- provider 쉼은 기록된 시각에 쓰기 없이 끝난다(RFC-provider-path-rest §3.3). 행은 끝나는 시각을 싣지 않는다(`keeper_tool_surface_ops.ml` 의 `runtime_path_rest_json`).
+- provider 쉼은 기록된 시각에 쓰기 없이 끝난다(RFC-provider-path-rest §3.3). 행은 walk 가 풀리는 시각(`release_at`)과 그 시각을 정한 쪽(`release_basis`)을 싣는다(`keeper_tool_surface_ops.ml` 의 `runtime_path_rest_json`). 그 시각은 쉼을 기록할 때 정해져서 읽는 시각으로 움직이지 않는다.
 
 ### 1.5 미리보기
 

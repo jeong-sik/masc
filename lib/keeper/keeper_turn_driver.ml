@@ -346,6 +346,17 @@ type release_basis =
   | Stated_by_provider
   | Bounded_by_masc
 
+let release_basis_to_wire = function
+  | Stated_by_provider -> "stated_by_provider"
+  | Bounded_by_masc -> "bounded_by_masc"
+;;
+
+let release_basis_of_wire = function
+  | "stated_by_provider" -> Some Stated_by_provider
+  | "bounded_by_masc" -> Some Bounded_by_masc
+  | _ -> None
+;;
+
 type path_rest =
   | Path_serving
   | Path_resting of
@@ -357,6 +368,7 @@ type walk_rest =
   | Walk_head_serving of { runtime_id : string }
   | Walk_waits_until of
       { release_at : float
+      ; release_basis : release_basis
       ; resting_runtime_id : string
       }
 
@@ -452,19 +464,19 @@ let path_rest ~now runtime_id =
 let walk_rest ~now ~head ~later =
   match path_rest ~now head with
   | Path_serving -> Walk_head_serving { runtime_id = head }
-  | Path_resting { release_at = head_release_at; release_basis = _ } ->
-    let release_at, resting_runtime_id =
+  | Path_resting { release_at = head_release_at; release_basis = head_basis } ->
+    let release_at, release_basis, resting_runtime_id =
       List.fold_left
-        (fun ((earliest, _) as found) runtime_id ->
+        (fun ((earliest, _, _) as found) runtime_id ->
            match path_rest ~now runtime_id with
-           | Path_resting { release_at; release_basis = _ }
+           | Path_resting { release_at; release_basis }
              when Float.compare release_at earliest < 0 ->
-             release_at, runtime_id
+             release_at, release_basis, runtime_id
            | Path_resting { release_at = _; release_basis = _ } | Path_serving -> found)
-        (head_release_at, head)
+        (head_release_at, head_basis, head)
         later
     in
-    Walk_waits_until { release_at; resting_runtime_id }
+    Walk_waits_until { release_at; release_basis; resting_runtime_id }
 ;;
 
 (* The walk a turn resuming the deferred suffix dispatches
@@ -559,7 +571,7 @@ let next_dispatch_after_failure ~now ~route ~assignment_id deferred =
   let observed_walk_rest () =
     match assignment_walk_rest ~now assignment_id with
     | Walk_head_serving _ -> None
-    | Walk_waits_until { release_at; resting_runtime_id } ->
+    | Walk_waits_until { release_at; release_basis = _; resting_runtime_id } ->
       Some (Wait_until { release_at; waiting_on = resting_runtime_id; basis = Observed_path_rest })
   in
   match route, deferred with
@@ -576,7 +588,7 @@ let next_dispatch_after_failure ~now ~route ~assignment_id deferred =
     Some
       (match deferred_lane_rest ~now hint with
        | Walk_head_serving { runtime_id } -> Dispatch_now { runtime_id }
-       | Walk_waits_until { release_at; resting_runtime_id } ->
+       | Walk_waits_until { release_at; release_basis = _; resting_runtime_id } ->
          Wait_until { release_at; waiting_on = resting_runtime_id; basis = Observed_path_rest })
   | ( Route.Retry_after_observed
         { retry_class = (Route.Rate_limited | Route.Hard_quota) as retry_class; retry_after }
@@ -593,10 +605,10 @@ let next_dispatch_after_failure ~now ~route ~assignment_id deferred =
        let failed_release_at = route_release retry_class retry_after in
        let release_at, waiting_on, basis =
          match assignment_walk_rest ~now assignment_id with
-         | Walk_waits_until { release_at; resting_runtime_id }
+         | Walk_waits_until { release_at; release_basis = _; resting_runtime_id }
            when Float.compare release_at failed_release_at > 0 ->
            release_at, resting_runtime_id, Observed_path_rest
-         | Walk_waits_until { release_at = _; resting_runtime_id = _ } ->
+         | Walk_waits_until { release_at = _; release_basis = _; resting_runtime_id = _ } ->
            failed_release_at, assignment_id, Observed_path_rest
          | Walk_head_serving _ ->
            failed_release_at, assignment_id, Failure_response

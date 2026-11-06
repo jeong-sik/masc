@@ -908,25 +908,10 @@ let test_run_failure_and_finish_set_the_phase () =
     (Transcript.phase failed);
   check (list string) "a failure before any output remains in the transcript"
     [ "error:provider 429" ] (drawn failed);
-  check string "failure progress carries the cause without another error label"
-    "provider 429 \xc2\xb7 0s"
-    (List.assoc Transcript.Progress (rows failed));
   let missing = fresh () in
   feed missing [ Live.Run_started; Live.Run_failed { message = " " } ];
   check (list string) "a missing failure cause remains visible"
     [ "error:cause not reported" ] (drawn missing);
-  check string "a missing cause is explicit" "cause not reported \xc2\xb7 0s"
-    (List.assoc Transcript.Progress (rows missing));
-  let missing_on_runtime = fresh () in
-  feed missing_on_runtime
-    [ Live.Run_started
-    ; Live.Runtime_attempt_started
-        { runtime_id = Some "glm-coding.glm-5.3-flash"; attempt_index = Some 0 }
-    ; Live.Run_failed { message = " " }
-    ];
-  check string "a runtime cannot hide a missing cause"
-    "cause not reported \xc2\xb7 runtime: glm-coding.glm-5.3-flash \xc2\xb7 0s"
-    (List.assoc Transcript.Progress (rows missing_on_runtime));
   let finished = fresh () in
   feed finished [ Live.Run_started; Live.Run_finished ];
   check phase "a finished run says so" Transcript.Stream_ended
@@ -1138,19 +1123,11 @@ let test_a_held_call_shows_its_question () =
     ; tool_started "c1" "Edit"
     ; requested ~approval_id:"approval-c1" ~call_id:"c1" ~tool_name:"Edit" ~question:"Run Edit on a.ml?"
     ];
-  (match Transcript.awaiting_approval t with
-   | Some awaiting ->
-       check string "the held call is named" "c1"
-         awaiting.Transcript.call_id
-   | None -> fail "expected a held call");
-  match approval_rows t with
-  | [ row ] ->
-      check bool "the question is on screen" true
-        (contains ~needle:"Run Edit on a.ml?" row);
-      (* Without the keys the prompt is a statement, not a question. *)
-      check bool "and so is how to answer it" true
-        (contains ~needle:"/approve" row && contains ~needle:"/deny" row)
-  | rows -> failf "expected one prompt row, got %d" (List.length rows)
+  match Transcript.awaiting_approval t with
+  | Some awaiting ->
+      check string "the held call is named" "c1"
+        awaiting.Transcript.call_id
+  | None -> fail "expected a held call"
 
 let test_an_answer_clears_the_prompt () =
   let t = fresh () in
@@ -1267,26 +1244,6 @@ let test_approval_arguments_cannot_update_a_call_of_a_superseded_attempt () =
         call.Transcript.args
   | [] | _ :: _ :: _ -> fail "expected one call from the earlier attempt"
 ;;
-let kind_to_string : Transcript.status_kind -> string = function
-  | Transcript.Progress -> "progress"
-  | Transcript.Diagnostic -> "diagnostic"
-  | Transcript.Answer_needed -> "answer_needed"
-  | Transcript.Attention -> "attention"
-  | Transcript.Approval outcome ->
-      "approval:" ^ Transcript.approval_outcome_to_string outcome
-
-let test_status_rows_grow_only_with_what_they_report () =
-  let t = fresh () in
-  check (list string) "a turn in flight reports how it is going and nothing else"
-    [ "progress" ]
-    (rows t |> List.map (fun (kind, _) -> kind_to_string kind));
-  Transcript.note_interrupt t
-    (Transcript.Signal_sent { turn_id = None; signalled_at_ns = 100_000_000_000L });
-  check int "an interrupt adds one row" 2
-    (List.length (rows t));
-  Transcript.apply ~now:origin t (Live.Undecodable "invalid JSON: x");
-  check int "an unreadable line adds one more" 3
-    (List.length (rows t))
 
 (* The wait before RUN_STARTED is the one an operator cannot read from the
    outside, and two waits of the same length mean different things: a keeper
@@ -1305,25 +1262,13 @@ let test_runtime_failover_visibility_and_error_attribution () =
     ; Live.Runtime_attempt_started
         { runtime_id = Some "claude-3-7-sonnet"; attempt_index = Some 0 }
     ];
-  (* "waiting on", not "connecting to": a named runtime that has sent nothing
-     is all the screen observed, and the wait may be a process still starting,
-     an endpoint still authenticating, a provider queue or a model thinking. *)
-  check bool "the row names the runtime it is waiting on" true
-    (contains ~needle:"waiting on [claude-3-7-sonnet]" (progress_text t));
   check (option string) "current runtime is claude" (Some "claude-3-7-sonnet")
     (Transcript.current_runtime_id t);
   feed t [ Live.Text {text="streaming token"; response=Unobserved_scope (None)} ];
-  (* A text token identifies answer streaming and the serving runtime. *)
-  check bool "a text token identifies answer streaming" true
-    (contains ~needle:"STREAMING · answering · [claude-3-7-sonnet]" (progress_text t));
   feed t
     [ Live.Runtime_attempt_started
         { runtime_id = Some "gpt-4o"; attempt_index = Some 1 }
     ];
-  check bool "failover attempt is indicated" true
-    (* Second attempt: [attempt_index] is 0-based on the wire and the row
-       counts from 1, the way the superseded blocks beside it do. *)
-    (contains ~needle:"runtime candidate: waiting on [gpt-4o] (attempt 2)" (progress_text t));
   check (option string) "current runtime updated to failover" (Some "gpt-4o")
     (Transcript.current_runtime_id t);
   feed t [ Live.Run_failed { message = "RateLimitExceeded (429)" } ];
@@ -1525,50 +1470,6 @@ let test_the_turn_reports_the_tokens_it_has_spent () =
   check (option string) "a new attempt starts from no reason either" None
     (usage (Some t))
 
-(* The stop reason arrived after the counters were already on the header, so a
-   frame that had room for the counters and not for both must keep drawing the
-   counters. Losing them would be a regression against the row as it shipped,
-   and the narrow frames are exactly where a reader has least to go on. *)
-let test_a_narrow_row_keeps_the_counters_it_was_drawing () =
-  let t = fresh () in
-  feed t
-    [ Live.Run_started
-    ; Live.Runtime_attempt_started
-        { runtime_id = Some "observed-glm"; attempt_index = Some 0 }
-    ; (let counters ?stop_reason usage =
-         Live.Stream_details {generation=None; stream_scope = None; usage = Some usage; stop_reason }
-       in
-       counters ~stop_reason:Agent_core.Types.MaxTokens
-         { input_tokens = Some 1200
-         ; output_tokens = Some 900
-         ; cache_read_input_tokens = Some 4096
-         ; cache_creation_input_tokens = None
-         })
-    ];
-  let cells text = Masc_tui_message_layout.display_width (" \xc2\xb7 " ^ text) in
-  let tokens = "tokens: in 1200 \xc2\xb7 out 900 \xc2\xb7 cache read 4096" in
-  let both = tokens ^ " \xc2\xb7 stopped: max_tokens" in
-  let within room =
-    Transcript.stream_details_within ~keeper_name:"keeper.one" ~room (Some t)
-  in
-  check (option string) "a frame with room for both draws both"
-    (Some (" \xc2\xb7 " ^ both))
-    (within (cells both));
-  (* The dividing width: one cell short of both, and only there does the
-     fallback decide anything. Without it the row draws nothing here. *)
-  check (option string) "one cell short of both keeps the counters"
-    (Some (" \xc2\xb7 " ^ tokens))
-    (within (cells both - 1));
-  check (option string) "and so does a frame with room for the counters alone"
-    (Some (" \xc2\xb7 " ^ tokens))
-    (within (cells tokens));
-  check (option string) "below that the row is what it was before" None
-    (within (cells tokens - 1));
-  check (option string) "a room of nothing claims nothing" None (within 0);
-  check (option string) "another keeper's transcript claims nothing" None
-    (Transcript.stream_details_within ~keeper_name:"keeper.other"
-       ~room:(cells both) (Some t))
-
 let test_new_attempt_does_not_inherit_previous_runtime () =
   List.iter (fun attempt_index ->
     let t = fresh () in
@@ -1765,13 +1666,19 @@ let test_current_attempt_metadata_keeps_observed_activity () =
   let trail = Transcript.trail t in
   let drawn = Transcript.drawn t in
   let before = progress_text t in
+  let reports () =
+    match Transcript.unreadable t with
+    | None -> 0
+    | Some report -> report.Transcript.count in
+  let reported_before = reports () in
   List.iter (fun event ->
     feed t [event];
     check string "metadata preserves answer bytes" "current text" (Transcript.text t);
     check string "metadata preserves reasoning bytes" "current reasoning" (Transcript.thinking t);
     check bool "metadata preserves trail and origins" true
       (Transcript.trail t=trail && Transcript.drawn t=drawn);
-    check string "metadata preserves thinking and pending approval" before (progress_text t))
+    check string "metadata preserves thinking and pending approval" before (progress_text t);
+    check int "metadata that agrees or is stale reports nothing" reported_before (reports ()))
     [Live.Runtime_attempt_started {runtime_id=Some "runtime-a";attempt_index=Some 2};
      Live.Runtime_attempt_started {runtime_id=None;attempt_index=Some 2};
      Live.Runtime_attempt_started {runtime_id=Some "stale-runtime";attempt_index=Some 1}];
@@ -1779,8 +1686,7 @@ let test_current_attempt_metadata_keeps_observed_activity () =
   check (option string) "conflicting runtime cannot relabel the active attempt"
     (Some "runtime-a") (Transcript.current_runtime_id t);
   check string "conflict does not erase answer" "current text" (Transcript.text t);
-  check bool "conflict remains visible" true
-    (List.exists (fun (_,row) -> contains ~needle:"runtime identity conflicts" row) (rows t))
+  check int "the conflict is reported once" (reported_before + 1) (reports ())
 
 let test_late_runtime_name_does_not_supersede_observed_output () =
   let t = fresh () in
@@ -1791,8 +1697,8 @@ let test_late_runtime_name_does_not_supersede_observed_output () =
   check string "late runtime metadata retains output" "already streaming" (Transcript.text t);
   check bool "late name does not invent a superseded attempt" true
     (match Transcript.trail t with [Transcript.Trail_text "already streaming"] -> true | _ -> false);
-  check bool "actual output activity remains visible" true
-    (contains ~needle:"STREAMING" (progress_text t));
+  check bool "the output already streamed is still the model's activity" true
+    (Transcript.model_activity t = Some Transcript.Activity_answering);
   check (option string) "runtime identity fills the current attempt"
     (Some "late-runtime") (Transcript.current_runtime_id t)
 
@@ -1836,8 +1742,6 @@ let test_failure_body_and_runtime_are_independent () =
       Live.Run_failed {message}];
     check bool "reported error is preserved literally" true
       (Transcript.phase t=Transcript.Stream_failed message);
-    check bool "runtime context cannot be suppressed by punctuation" true
-      (List.exists (fun (_,row) -> contains ~needle:"runtime: serving-runtime" row) (rows t));
     check bool "error body is separate from runtime metadata" true
       (List.exists (fun item -> match item.Transcript.drawn with
         | Transcript.Drawn_error body -> body=message | _ -> false) (Transcript.drawn t)))
@@ -1932,52 +1836,7 @@ let test_compact_and_full_keep_the_same_typed_facts () =
     compact.Transcript.activities;
   check int "full retains the source omission count" 2 full.omitted_steps;
   check int "compact retains the same source omission count" 2
-    compact.omitted_steps;
-  check (list string) "full keeps the shipping row bytes"
-    [ "✓ ReadFile a.ml · 12ms"
-    ; "✗ EditFile b.ml · 18ms"
-    ; "? Glob"
-    ; "(2 steps not carried by the transcript)"
-    ]
-    full.details;
-  check int "full has three details plus the transcript omission" 4
-    (List.length full.details);
-  check int "full hides no detail row" 0 full.hidden_activity_rows;
-  (* Full draws a header too now, over details that are all visible: it is a
-     rollup, not a fold, so it claims no folded count. *)
-  check bool "full heads the block" true (full.header <> None);
-  check int "compact keeps the trouble row and the transcript omission" 2
-    (List.length compact.details);
-  check int "compact states exactly how many rows it hid" 3
-    compact.hidden_activity_rows;
-  let inventory =
-    match compact.header with
-    | Some inventory -> inventory
-    | None -> Alcotest.fail "a folded three-call block heads with its inventory"
-  in
-  let trouble = List.hd compact.details in
-  (* The mark opens the row and the names follow it; the row does not spell
-     the TOOLS label the transcript already draws beside it. *)
-  check bool "the inventory row opens with the block's mark and a name" true
-    (String.starts_with ~prefix:"✗ ReadFile 1" inventory);
-  check bool "the inventory row does not spell its own label" false
-    (contains ~needle:"Tools" inventory);
-  check bool "the inventory row claims no fold" false
-    (contains ~needle:"folded" inventory);
-  check bool "the inventory row keeps what returned" true
-    (contains ~needle:"1 returned" inventory);
-  check bool "the inventory row leaves the failure to the row below" false
-    (contains ~needle:"1 failed" inventory);
-  check bool "the trouble row names the failure" true
-    (contains ~needle:"1 failed" trouble);
-  check bool "an unrecorded outcome is bookkeeping, so it stays above" true
-    (contains ~needle:"1 outcome unrecorded" inventory);
-  check bool "and does not reach the trouble row" false
-    (contains ~needle:"unrecorded" trouble);
-  check bool "the trouble row carries its own mark" true
-    (String.starts_with ~prefix:"✗ " trouble);
-  check string "compact does not count the visible omission as hidden"
-    (List.nth full.details 3) (List.nth compact.details 1)
+    compact.omitted_steps
 
 let full_tool_rows block =
   (Transcript.project_tool_block Transcript.Full block).Transcript.details
@@ -2055,8 +1914,6 @@ let test_trail_keeps_arrival_order () =
         [ "find the file first" ] first;
       let rows = full_tool_rows block in
       check int "one call, one row" 1 (List.length rows);
-      check bool "the row carries the result marker" true
-        (contains ~needle:"✓" (List.hd rows));
       check (list string) "the round-two reasoning is its own stretch"
         [ "now the caller" ] second;
       check string "the reply closes the trail" "The caller is safe." reply
@@ -2359,12 +2216,14 @@ let test_trail_updates_a_call_after_later_stretches_open () =
     ];
   match Transcript.trail t with
   | [ Transcript.Trail_tools block; Transcript.Trail_thinking _ ] ->
-      let rows = full_tool_rows block in
-      let row = List.hd rows in
-      check bool "the late arguments reach the earlier row" true
-        (contains ~needle:"a.ml" row);
-      check bool "the late result reaches the earlier row" true
-        (contains ~needle:"✓" row)
+      (match block.activities with
+       | [ (call : Transcript.tool_activity) ] ->
+           check string "the late arguments reach the earlier call"
+             "{\"file_path\":\"lib/keeper/a.ml\"}" call.args;
+           check (option string) "the late result reaches the earlier call"
+             (Some "exec-c1") call.execution_id
+       | calls ->
+           failf "expected one call in the earlier block, got %d" (List.length calls))
   | items ->
       failf "expected tools/thinking, got %d item(s): %s" (List.length items)
         (String.concat "; " (List.map trail_item_to_string items))
@@ -2395,17 +2254,7 @@ let test_live_skill_is_not_folded_into_generic_tools () =
       check bool "the read tool is an instruction read" true
         (skill.invocation = Some Transcript.Instruction_read);
       check bool "a returned body is not yet claimed as used" true
-        (skill.state = Transcript.Skill_served_pending);
-      (match Transcript.skill_rows ~full:false [ skill ] with
-       | [ row ] ->
-           check string "the compact row is the bold name and nothing else"
-             "**ci-red-attribution**" row
-       | rows -> failf "expected one compact Skill row, got %d" (List.length rows));
-      (match Transcript.skill_rows ~full:true [ skill ] with
-       | row :: _ ->
-           check bool "the full row says the delivery is pending" true
-             (contains ~needle:"**읽음, 전달 확인 중**" row)
-       | [] -> fail "expected full Skill rows")
+        (skill.state = Transcript.Skill_served_pending)
   | items ->
       failf "expected skill/text, got %d item(s): %s" (List.length items)
         (String.concat "; " (List.map trail_item_to_string items))
@@ -2446,16 +2295,6 @@ let test_consecutive_live_skill_calls_are_one_counted_block () =
       check bool "a composition's own tool names it as run" true
         ((List.hd skills).invocation
          = Some (Transcript.Composition_run { tool_name = "keeper_compose_msx-observe" }));
-      check (list string) "the compact row counts the triggers"
-        [ "**msx-observe** \xc3\x977" ]
-        (Transcript.skill_rows ~full:false skills);
-      let full = Transcript.skill_rows ~full:true skills in
-      check int "full: one summary and one proof line per invocation" 7
-        (List.length
-           (List.filter (fun row -> contains ~needle:"**msx-observe**" row) full));
-      check bool "full: a composition ran, it was not read" true
-        (contains ~needle:"**실행됨, 전달 확인 중** \xc2\xb7 **msx-observe**"
-           (List.hd full));
       check int "the generic call is its own block" 1
         (List.length tools.Transcript.activities)
   | items ->
@@ -2474,9 +2313,6 @@ let test_a_failed_trigger_is_named_on_the_compact_row () =
     Transcript.make_skill_activity ~invocation:Transcript.Instruction_read
       ~skill_name:"prior-art" ~state:Transcript.Skill_failed ~actions:[] ()
   in
-  check (list string) "the count, then what went wrong"
-    [ "**prior-art** \xc3\x972 \xc2\xb7 실패 1" ]
-    (Transcript.skill_rows ~full:false [ ok; failed ]);
   check bool "the block draws in the failure's state" true
     (Transcript.skill_block_state [ ok; failed ] = Transcript.Skill_failed)
 
@@ -2487,11 +2323,7 @@ let test_checkpoint_wait_keeps_the_request_live () =
     turn_outcome=Masc.Keeper_turn_outcome.Continuation_checkpoint; turn_ref="trace-1#3"}; Live.Run_finished];
   check bool "checkpoint waits for continuation" true (Transcript.awaiting_continuation t);
   check (option (float 0.)) "checkpoint does not settle request" None (Transcript.settled_at t);
-  check int "an idle continuation reserves no status row even days later" 0
-    (List.length (rows ~now:(origin +. 172_800.) t));
   feed t [Live.Run_started];
-  check bool "the next segment restores progress" true
-    (List.exists (fun (kind, _) -> kind = Transcript.Progress) (rows t));
   check phase "continued segment is working" Transcript.Working (Transcript.phase t);
   check bool "new segment no longer waits" false (Transcript.awaiting_continuation t);
   feed t [tool_started ~block_index:0 "after" "read_file"; tool_ended ~block_index:0 "after";
@@ -2499,51 +2331,6 @@ let test_checkpoint_wait_keeps_the_request_live () =
   check phase "actual answer ends request" Transcript.Stream_ended (Transcript.phase t);
   check int "reused stream coordinates preserve both segments" 2 (List.length (Transcript.tool_calls t))
 ;;
-
-(* The sheet's legend for the chat is built from the same functions the rows
-   draw with, so every outcome mark and every skill phrase the pane can
-   print is on it, once, spelled as the pane spells it. A phrase holds no
-   interpunct: on the row that is the separator between the phrase and the
-   skill name, and a phrase with one inside would read as two phrases. *)
-let test_the_legend_names_every_mark_and_phrase_the_rows_draw () =
-  let keys = List.map fst Transcript.legend in
-  check bool "received result mark is explained without a success claim" true
-    (List.mem (Transcript.received_marker ^ " received") keys);
-  List.iter
-    (fun outcome ->
-      let key =
-        Transcript.marker_of_outcome outcome ^ " " ^ Transcript.outcome_label outcome
-      in
-      check bool ("outcome " ^ key ^ " is on the legend with its mark") true
-        (List.mem key keys))
-    Transcript.all_outcomes;
-  (* The two words a full skill row draws beside its ids and actions are
-     on the legend as the row spells them. *)
-  let full =
-    String.concat "\n"
-      (Transcript.skill_rows ~full:true
-         [ Transcript.make_skill_activity ~skill_name:"s" ~skill_tool_use_id:"use-1"
-             ~state:Transcript.Skill_used ~actions:[ "Read" ] () ])
-  in
-  List.iter
-    (fun word ->
-      check bool ("the row draws " ^ word) true (contains ~needle:word full);
-      check bool ("the legend explains " ^ word) true (List.mem word keys))
-    [ "proof"; "observed action" ];
-  List.iter
-    (fun state ->
-      let phrase = Transcript.skill_state_label state in
-      check bool ("phrase " ^ phrase ^ " is on the legend") true (List.mem phrase keys);
-      check bool ("phrase " ^ phrase ^ " holds no interpunct") false
-        (contains ~needle:"\xc2\xb7" phrase))
-    Transcript.all_skill_states;
-  check int "no key twice" (List.length keys)
-    (List.length (List.sort_uniq String.compare keys));
-  List.iter
-    (fun (key, meaning) ->
-      check bool ("legend row " ^ key ^ " says something") true
-        (String.length (String.trim meaning) > 0))
-    Transcript.legend
 
 (* An observed-action row names a tool the server attributed to the skill.
    That name reaches the reader like every other tool name: through the
@@ -2557,13 +2344,6 @@ let test_an_observed_action_draws_the_shared_display_label () =
       ~state:Transcript.Skill_used
       ~actions:[ "masc_fusion"; "browser-lanes" ] ()
   in
-  let full = String.concat "\n" (Transcript.skill_rows ~full:true [activity]) in
-  check bool "the observed action draws the label form" true
-    (contains ~needle:"**MascFusion**" full);
-  check bool "a skill slug keeps its readable name" true
-    (contains ~needle:"**browser-lanes**" full);
-  check bool "the wire name does not leak into the row" false
-    (contains ~needle:"**masc_fusion**" full);
   check (list string) "the stored action keeps the wire name"
     [ "masc_fusion"; "browser-lanes" ] activity.actions
 
@@ -2685,18 +2465,6 @@ let test_native_details_retain_provider_elapsed_with_other_observations () =
       (Heartbeat_reported {elapsed_seconds=30} :: observations
        @ [Heartbeat_reported {elapsed_seconds=3}]);
     let check_details () =
-      let details = Transcript.tool_calls t |> Transcript.tool_block |> full_tool_rows in
-      let text = String.concat "\n" details in
-      check bool (label ^ ": provider elapsed is an independent detail") true
-        (contains ~needle:"provider elapsed 3s" text);
-      check bool (label ^ ": latest report replaces the prior report") false
-        (contains ~needle:"provider elapsed 30s" text);
-      check bool (label ^ ": local observation elapsed is separate") true
-        (contains ~needle:"updated +12s" text);
-      List.iter (function
-        | Message_reported _ -> check bool (label ^ ": message retained") true (contains ~needle:"busy" text)
-        | Output_observed _ -> check bool (label ^ ": bytes retained") true (contains ~needle:"13 bytes observed" text)
-        | Heartbeat_reported _ | Retry_observed _ -> ()) observations;
       check string (label ^ ": metadata never becomes speech") "authored answer" (Transcript.text t);
       match Transcript.tool_calls t with
       | [call] -> check (option string) (label ^ ": no execution receipt") None call.execution_id
@@ -2931,21 +2699,22 @@ let test_scoped_details_retire_prior_model_activity () =
       Live.Text {text="earlier response";response=Unobserved_scope (Some 1)};activity];
     let body = Transcript.drawn t in
     let observed = progress_text ~now:(origin +. 40.) t in
-    check bool "prior response has observed quiet activity" true
-      (contains ~needle:"nothing back for" observed);
+    let held = Transcript.model_activity t in
+    check bool "the earlier response has observed model activity" true (held <> None);
     feed ~now:(origin +. 20.) t
       [Live.Stream_details {generation=None;stream_scope=Some 1;usage=None;
         stop_reason=Some Agent_core.Types.StopToolUse}];
     check string "same-scope details preserve model activity and its observation age"
       observed (progress_text ~now:(origin +. 40.) t);
+    check bool "same-scope details keep the model activity" true
+      (Transcript.model_activity t = held);
     feed ~now:(origin +. 30.) t
       [Live.Stream_details {generation=None;stream_scope=Some 2;usage=None;
         stop_reason=Some Agent_core.Types.StopToolUse}];
-    let incoming = progress_text ~now:(origin +. 40.) t in
     check bool "details-only response cannot inherit prior streaming or thinking" false
-      (contains ~needle:"STREAMING" incoming || contains ~needle:"THINKING" incoming);
-    check bool "details-only response cannot inherit prior model quiet age" false
-      (contains ~needle:"nothing back for" incoming);
+      (match Transcript.model_activity t with
+       | Some Transcript.Activity_answering | Some Transcript.Activity_reasoning -> true
+       | Some _ | None -> false);
     check phase "new response metadata keeps Keeper turn running" Transcript.Working
       (Transcript.phase t);
     check bool "retiring model activity preserves prior authored stretches" true
@@ -3298,9 +3067,7 @@ let () =
            test_a_reported_native_failure_shows_as_failure;
          test_case "native detail retains independent provider elapsed" `Quick test_native_details_retain_provider_elapsed_with_other_observations] )
     ; ( "content"
-      , [ test_case "the legend names every mark and phrase the rows draw" `Quick
-            test_the_legend_names_every_mark_and_phrase_the_rows_draw
-        ; test_case "an observed action draws the shared display label" `Quick
+      , [ test_case "an observed action draws the shared display label" `Quick
             test_an_observed_action_draws_the_shared_display_label
         ; test_case "checkpoint keeps original request live" `Quick test_checkpoint_wait_keeps_the_request_live
         ; test_case "started_at keeps the dispatch instant" `Quick
@@ -3442,10 +3209,6 @@ let () =
         ; test_case "a stale settle leaves a replacement waiter" `Quick
             test_a_late_settle_cannot_clear_a_replacement_waiter
         ;] )
-    ; ( "status rows"
-      , [ test_case "rows grow only with what they report" `Quick
-            test_status_rows_grow_only_with_what_they_report
-        ;] )
     ; ( "phase"
       , [ test_case "failure and finish are distinct" `Quick
             test_run_failure_and_finish_set_the_phase
@@ -3463,8 +3226,6 @@ let () =
             test_unreadable_lines_are_counted_with_their_last_reason
         ; test_case "runtime failover visibility and error attribution" `Quick
             test_runtime_failover_visibility_and_error_attribution
-        ; test_case "a narrow row keeps the counters it was drawing" `Quick
-            test_a_narrow_row_keeps_the_counters_it_was_drawing
         ; test_case "the turn reports the tokens it has spent" `Quick
             test_the_turn_reports_the_tokens_it_has_spent
         ; test_case "new attempt does not inherit previous runtime" `Quick

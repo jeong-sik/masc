@@ -322,7 +322,6 @@ let descriptions_owned_elsewhere =
   ; "keeper_workspace_memory_read"
   ; "keeper_memory_search"
   ; "keeper_memory_write"
-  ; "keeper_person_note_set"
   ; "keeper_tools_list"
   ; "keeper_capability_search"
   ]

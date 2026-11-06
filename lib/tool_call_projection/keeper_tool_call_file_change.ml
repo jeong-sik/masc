@@ -276,7 +276,6 @@ let kind_of_row ~(handler : Keeper_tool_descriptor.runtime_handler) row =
   | Keeper_tool_descriptor.Tool_wiki_read
   | Keeper_tool_descriptor.Tool_surface_read
   | Keeper_tool_descriptor.Tool_surface_post
-  | Keeper_tool_descriptor.Tool_person_note_set
   | Keeper_tool_descriptor.Tool_voice_dispatch
   | Keeper_tool_descriptor.Tool_task_dispatch
   | Keeper_tool_descriptor.Tool_board_dispatch

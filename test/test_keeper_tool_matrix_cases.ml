@@ -473,10 +473,6 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
       `Assoc
         [ ("surface", `String "dashboard");
           ("content", `String "tool matrix surface post") ]
-  | "keeper_person_note_set" ->
-      `Assoc
-        [ ("speaker_id", `String "98791450001");
-          ("note", `String "tool matrix person note") ]
   | "keeper_tasks_list" -> `Assoc [ ("include_done", `Bool true) ]
   | "keeper_artifact_transfer" ->
       `Assoc ["action", `String "export"; "path", `String "lib/sample.ml"]

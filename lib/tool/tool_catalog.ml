@@ -575,7 +575,6 @@ let explicit_metadata : (string * metadata) list =
     ("keeper_wiki_read", keeper_shard_read);
     ("keeper_surface_read", keeper_shard_read);
     ("keeper_surface_post", keeper_shard_write);
-    ("keeper_person_note_set", keeper_shard_write);
     ("keeper_ide_annotate", keeper_shard_write);
     ("keeper_voice_speak", keeper_shard_write);
     ("keeper_voice_listen", keeper_shard_write);

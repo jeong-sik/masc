@@ -118,7 +118,6 @@ type t =
   | ChatStoreFailures
   | ChatJournalAuditMismatches
   | ChatTransportFailures
-  | PersonNoteStoreFailures
   | KeeperMaterializationFailures
   | ObservationQueryFailures
   | Agent_coreOnStop
@@ -301,7 +300,6 @@ let to_string = function
   | ChatJournalAuditMismatches ->
     "masc_keeper_chat_journal_audit_mismatches_total"
   | ChatTransportFailures -> "masc_keeper_chat_transport_failures_total"
-  | PersonNoteStoreFailures -> "masc_keeper_person_note_store_failures_total"
   | KeeperMaterializationFailures -> "masc_keeper_materialization_failures_total"
   | ObservationQueryFailures -> "masc_keeper_observation_query_failures_total"
   | Agent_coreOnStop -> "masc_keeper_agent_core_on_stop_total"
@@ -404,7 +402,7 @@ let collection = function
   | Agent_coreEnvKeyRejections | MemoryLaneUnitFailures | MemoryLaneSubmitted | MemoryLaneRanInline
   | MemoryLaneDropped | MemoryLaneCoalesced | MemoryLanePending | MemoryLaneInFlight
   | MemoryLaneLatestPending | WriteMetaCycleFailures | MetricsSseFailures | ChatStoreFailures
-  | ChatJournalAuditMismatches | ChatTransportFailures | PersonNoteStoreFailures
+  | ChatJournalAuditMismatches | ChatTransportFailures
   | KeeperMaterializationFailures | ObservationQueryFailures | Agent_coreOnStop
   | InvariantViolations | FsmEdgeTransitions | TurnFsmTransitions | TurnPhaseDuration
   | LifecycleTransitions | LifecycleCallbackFailures | EventBusDrain | SupervisorCleanupFailures

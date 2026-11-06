@@ -133,7 +133,6 @@ let handle_filesystem ?prepared_read ?prepared_edit ?prepared_write ctx descript
   | Tool_wiki_read
   | Tool_surface_read
   | Tool_surface_post
-  | Tool_person_note_set
   | Tool_voice_dispatch
   | Tool_task_dispatch
   | Tool_board_dispatch
@@ -218,7 +217,6 @@ let handle_shell_ir ctx ~(dispatch : Keeper_shell_tool_command.dispatch) descrip
   | Tool_wiki_read
   | Tool_surface_read
   | Tool_surface_post
-  | Tool_person_note_set
   | Tool_ide_annotate
   | Tool_voice_dispatch
   | Tool_task_dispatch
@@ -414,12 +412,6 @@ let handle_in_process ctx descriptor args =
          ?gate_grant:ctx.gate_grant
          ~args
          ())
-  | Tool_person_note_set ->
-    Some
-      (Keeper_tool_in_process_runtime.handle_person_note_set_with_outcome
-         ~config:ctx.config
-         ~meta:ctx.meta
-         ~args)
   | Tool_voice_dispatch ->
     Some
       (Keeper_tool_in_process_runtime.handle_voice_with_outcome

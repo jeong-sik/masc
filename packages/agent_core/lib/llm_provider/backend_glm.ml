@@ -49,7 +49,10 @@ type glm_error =
     - 1304,1308,1310: quota exhausted. 1304 is not in the docs.z.ai or
       docs.bigmodel.cn code tables (checked 2026-09-24); its only record
       here is the inline test naming it a daily limit.
-    - 1309,1311,1313: subscription/plan (quota)
+    - 1316-1321: a spent 5-hour or 7-day usage window that extra usage
+      cannot cover (docs.z.ai, checked 2026-11-06)
+    - 1309,1311,1313,1314: subscription/plan (quota). 1314 is an expired
+      enterprise package (docs.z.ai, checked 2026-11-06)
     - 1230,1234,500: server error *)
 let classify_glm_error ~code : glm_error_class =
   match code with
@@ -65,8 +68,20 @@ let classify_glm_error ~code : glm_error_class =
   | "1120"
   | "1220" -> Glm_auth_error
   | "1302" | "1303" | "1305" | "1312" -> Glm_rate_limited
-  | "1113" | "1304" | "1308" | "1309" | "1310" | "1311" | "1313" ->
-    Glm_quota_exceeded
+  | "1113"
+  | "1304"
+  | "1308"
+  | "1309"
+  | "1310"
+  | "1311"
+  | "1313"
+  | "1314"
+  | "1316"
+  | "1317"
+  | "1318"
+  | "1319"
+  | "1320"
+  | "1321" -> Glm_quota_exceeded
   | "1230" | "1234" | "500" -> Glm_server_error
   | "1300"
   | "1301"
@@ -213,9 +228,10 @@ let check_glm_error body : glm_error option =
    provider identity is still known; every other class keeps the HTTP path.
    A context overflow carries no token limit in the envelope. Arrears, an
    exhausted package, an expired plan or a spent usage window (1113, 1304,
-   1308-1311, 1313) take the hard-quota route; 1308 and 1310 state their
-   reset time only inside the message prose, which is not parsed, so the
-   failure carries no retry_after. *)
+   1308-1311, 1313, 1314, 1316-1321) take the hard-quota route. The usage
+   window codes state their reset only inside the message prose, which is not
+   parsed, so the failure carries no retry_after; the provider's declared
+   usage read dates the reset. *)
 let provider_failure_of_glm_error (error : glm_error) : Http_client.http_error option =
   match error.error_class with
   | Glm_context_overflow ->
@@ -268,7 +284,8 @@ let%test "glm quota envelopes promote to hard quota" =
                 ; _
                 }) -> false)
       | None -> false)
-    [ "1113"; "1304"; "1308"; "1309"; "1310"; "1311"; "1313" ]
+    [ "1113"; "1304"; "1308"; "1309"; "1310"; "1311"; "1313"; "1314"; "1316"; "1317"
+    ; "1318"; "1319"; "1320"; "1321" ]
 ;;
 
 let%test "glm rate limit keeps the http path" =

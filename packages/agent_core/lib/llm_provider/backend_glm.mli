@@ -57,9 +57,10 @@ val classify_glm_error : code:string -> glm_error_class
 val http_code_of_glm_error_class : glm_error_class -> int
 
 (** Parse glm's structured error envelope from a raw response body.
-    [None] when the body is not JSON or carries no error object. Used by the
-    streaming path to classify a non-200 rejection by its documented [code]
-    field before provider identity is erased (agent-core boundary). *)
+    [None] when the body is not JSON or carries no error object. Every seam
+    reads a non-200 rejection by its documented [code] field through
+    {!Complete_common.provider_refusal}, before provider identity is erased
+    (agent-core boundary). *)
 val check_glm_error : string -> glm_error option
 
 (** The typed failure a GLM provider error is promoted to, or [None] when its

@@ -786,12 +786,18 @@ let complete_http
               let body =
                 http_error_diagnostic_body ~provider_name ~config ~url ~code ~body
               in
+              (* The codec reads the refusal while the provider identity is
+                 still known, as the stream seam does: GLM sends a spent usage
+                 window as a 429 that the status alone reads as a rate limit
+                 (2026-11-06: code 1308 on this path rested GLM as a throttle). *)
               Error
-                (Http_client.HttpError
-                   { code
-                   ; body = Http_client.Received body
-                   ; retry_after_header = response.retry_after_header
-                   }))
+                (Complete_common.provider_refusal
+                   ~http_codec
+                   (Http_client.HttpError
+                      { code
+                      ; body = Http_client.Received body
+                      ; retry_after_header = response.retry_after_header
+                      })))
         in
         let latency_ms = latency_ms_int latency_counter in
         result, latency_ms))

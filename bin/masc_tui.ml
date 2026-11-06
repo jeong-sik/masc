@@ -32864,6 +32864,16 @@ Use relative paths for resources already held in the package. -->
           state.machine_interaction <- Observe_machine;
           state.msx_notice <- Some machine_change_refusal;
           render_spectator state
+      (* A watched machine has no key of its own, so [r] is the operator's
+         manual refresh: it owes the visible machine one more read instead of
+         only repainting. A machine under Control keeps [r] for the game. *)
+      | Some "r"
+        when (match state.machine_source with
+              | Masc.Machine_lane.Dos -> true
+              | Masc.Machine_lane.Msx -> state.machine_interaction = Observe_machine) ->
+          owe_machine_live_read state state.machine_source;
+          launch_owed_machine_live state ~mailbox:async_messages;
+          render_spectator state
       | Some name
         when (match state.machine_source with
               | Masc.Machine_lane.Dos -> true

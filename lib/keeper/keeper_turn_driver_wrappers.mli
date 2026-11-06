@@ -1,13 +1,8 @@
 (** Keeper_turn_driver_wrappers — convenience wrappers around
     {!Keeper_turn_driver.run_named}.
 
-    Extracted from keeper_turn_driver.ml as RFC-0048 PR-2 to reduce the
-    1347-LOC hotspot.
-
     @since RFC-0048 PR-2 *)
 
-
-(** {1 Model-label execution} *)
 
 (** {1 MASC tool bridging} *)
 

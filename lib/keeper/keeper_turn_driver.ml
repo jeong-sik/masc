@@ -1,9 +1,7 @@
-(** Keeper_turn_driver — MASC named-runtime and model-label execution entry points.
+(** Keeper_turn_driver — MASC named-runtime execution entry points.
 
     Public API for running AGENT_CORE agents through MASC-managed named runtime
-    profiles ([run_named])
-    or explicit model label ([run_model_by_label]), with optional MASC
-    tool bridging variants.
+    profiles ([run_named]), with optional MASC tool bridging variants.
 
     Owns one Keeper turn over the MASC runtime boundary. *)
 

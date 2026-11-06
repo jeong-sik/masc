@@ -133,11 +133,11 @@ PY
 
 ## 구현 방향 (RFC 승인 뒤)
 
-구현은 Draft PR #49185 에 있어요. 이 RFC 가 승인되기 전에는 병합하지 않아요.
+구현은 PR #49185 에 있어요. GitHub 스택 #49240 의 맨 위 층이에요.
 
 - 규칙: 현재 턴(마지막 user 메시지)보다 앞이고, 이미지가 없고, 크기가 문턱 이상인 도구 결과를 마커로 바꿔요. 이 문턱은 늙은 결과를 바꾸는 문턱이고, 만들 때 blob 으로 넘기는 상한(64 KB)과 별개예요. 재생은 2 KB 로 했어요.
 - 한 번 바뀐 결과는 이후 요청에서도 같은 바이트여야 해요. 히스토리는 뒤로만 자라니 요청마다 같은 함수를 부르면 그렇게 돼요. 저장된 체크포인트는 원문 그대로 두고, 제공자로 가는 복사본에서만 바꿔요.
-- 자리: `current_turn_results` 에 변종을 더하지 않고 `compose_carried_model_input` 에 `?finished_turn_results`(`Finished_turns_verbatim` / `Finished_turns_as_markers`, 기본은 verbatim)를 더했어요. `Current_turn_verbatim` 일 때 `Keeper_carried_front` 의 턴 경계(끝난 턴의 끝 atom)를 `Keeper_model_input_demotion.plan` 의 `demote_before` 로 넘겨요. 크기 거절에 답하는 재전송(`Current_turn_demoted`)은 이 값과 상관없이 전과 같아요. 드라이버의 요청 조립은 small 정책이고 `artifact_read` 를 쓸 수 있을 때만 켜요. `completed_arguments` 를 빼서 호출 인자는 그대로 남아요.
+- 자리: `current_turn_results` 에 변종을 더하지 않고 `compose_carried_model_input` 에 `?finished_turn_results`(`Finished_turns_verbatim` / `Finished_turns_as_markers`, 기본은 verbatim)를 더했어요. `Current_turn_verbatim` 일 때 `Keeper_carried_front` 의 턴 경계(끝난 턴의 끝 atom)를 `Keeper_model_input_demotion.plan` 의 `demote_before` 로 넘겨요. 크기 거절에 답하는 재전송(`Current_turn_demoted`)은 이 값과 상관없이 전과 같아요. 드라이버의 요청 조립은 `artifact_read` 를 쓸 수 있을 때만 켜요. `completed_arguments` 를 빼서 호출 인자는 그대로 남아요.
 - 문턱: `plan` 에 `?min_result_bytes`(기본 0)를 더했고 드라이버가 2,048 을 넘겨요. 본문이 문턱보다 짧은 결과는 건너뛰어요. 호출 인자에는 이 문턱을 적용하지 않아요. 문턱을 더 낮추거나 없애는 것도 선택지예요(재생 값은 1 KB 35.7%, 2 KB 33.7%예요. 11-01 ~ 11-05 평균이고, 1 KB 아래는 재지 않았어요).
 - 확인: 같은 히스토리의 두 요청에서 앞 메시지 바이트가 같은지(prefix 안정성), 이미 마커인 결과를 다시 바꾸지 않는지.
 - 효과: 규칙을 넣은 뒤 `measure_aged_tool_results.py` 로 "현재 턴보다 앞선 도구 결과의 몫" 이 0 에 가까워졌는지, `measure_turn_requests.py` 로 첫 요청의 캐시 적중이 같은 간격 구간에서 안 내려갔는지 봐요. 적중이 내려가면 규칙을 되돌려요.

@@ -1,0 +1,2001 @@
+<title>MASC Keepers 목록 · 직전·지금·다음 · 설계 비교</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600&family=JetBrains+Mono:wght@400;700&family=Nanum+Gothic+Coding:wght@400;700&display=swap" rel="stylesheet">
+<style>
+/* A quiet specimen sheet on a cool grey ground. The terminal slabs carry all the saturated color; the page chrome stays neutral. */
+:root{
+  --bg:#eaeef1; --surface:#f7f9fa; --ink:#13202b; --muted:#53646f; --line:#cfd8de; --accent:#08717a;
+  --good:#22704a; --caution:#8a5300; --alert:#b0243a;
+  --ui:'IBM Plex Sans KR',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --mono:'JetBrains Mono','Nanum Gothic Coding',ui-monospace,'SF Mono',Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){--bg:#091015; --surface:#0f171d; --ink:#e3eaef; --muted:#8a9ca8; --line:#202d36; --accent:#55c8d2; --good:#7fd18b; --caution:#f2b84b; --alert:#ff6b7f; color-scheme:dark}
+}
+:root[data-theme="dark"]{--bg:#091015; --surface:#0f171d; --ink:#e3eaef; --muted:#8a9ca8; --line:#202d36; --accent:#55c8d2; --good:#7fd18b; --caution:#f2b84b; --alert:#ff6b7f; color-scheme:dark}
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--ui);font-size:15px;line-height:1.65;margin:0;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:36px 96px}
+.wrap{max-width:1120px;margin:0 auto;display:flex;flex-direction:column;gap:72px}
+h1,h2,h3{font-weight:600;line-height:1.2;text-wrap:balance;margin:0}
+h1{font-size:clamp(34px,6vw,56px);letter-spacing:-.02em}
+h2{font-size:24px;letter-spacing:-.01em}
+h3{font-size:15px}
+p{margin:0;max-width:68ch}
+code{font-family:var(--mono);font-size:.88em;background:color-mix(in srgb,var(--ink) 8%,transparent);padding:.05em .35em;border-radius:4px}
+.kicker{font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.lede{font-size:17px;margin-top:14px}
+.sec{display:flex;flex-direction:column;gap:20px}
+.sec>header{display:flex;flex-direction:column;gap:8px}
+.sub{color:var(--muted)}
+.small{font-size:13px;color:var(--muted)}
+
+/* ---------- terminal slab ---------- */
+.term{--t-bg:#0c1319;--t-fg:#d3dce6;--t-dim:#8795a8;--t-ok:#7fd18b;--t-okd:#5aa56a;--t-warn:#f2b84b;--t-bad:#ff6b7f;--t-info:#6fd3ff;--t-sel:#1b2a39;--t-band:#111b25;--t-warnbg:#3a2d12;--t-line:#2b3a49;
+  background:var(--t-bg);color:var(--t-fg);border-radius:10px;padding:14px 16px;border:1px solid color-mix(in srgb,var(--t-fg) 14%,transparent);overflow-x:auto}
+.term[data-term="light"]{--t-bg:#f7f7f2;--t-fg:#1d2832;--t-dim:#586875;--t-ok:#1f7a3d;--t-okd:#1f7a3d;--t-warn:#8f5700;--t-bad:#bf2a40;--t-info:#0a6a96;--t-sel:#dfe9f2;--t-band:#edf2f0;--t-warnbg:#f6e6c4;--t-line:#c3ced6}
+#term{width:fit-content;max-width:100%}
+#term:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.scr{--fs:13px;--lh:17px;--bar:calc(var(--lh)*.78);--gap:calc(var(--lh)*.11);margin:0;font-family:var(--mono);font-size:var(--fs);line-height:var(--lh);white-space:pre;font-variant-ligatures:none;width:max-content;min-width:100%}
+.scr .r{display:block;height:var(--lh);white-space:nowrap}
+.scr .g{display:inline-block;height:var(--lh);vertical-align:top;white-space:pre}
+.scr i{display:inline-flex;align-items:center;justify-content:center;height:var(--lh);vertical-align:top;font-style:normal;position:relative;z-index:1}
+.scr i.u1{width:1ch}.scr i.u2{width:2ch}
+/* box drawing and block elements are painted with CSS so rows join without depending on fallback font metrics */
+.scr i.x-full{background:linear-gradient(currentColor,currentColor) left 0 bottom var(--gap)/100% var(--bar) no-repeat}
+.scr i.x-b{background:linear-gradient(currentColor,currentColor) left 0 bottom var(--gap)/100% max(2px,calc(var(--bar)*var(--k)/8)) no-repeat}
+.scr i.x-lh{background:linear-gradient(currentColor,currentColor) 0 0/50% 100% no-repeat}
+.scr i.x-h1{background:linear-gradient(currentColor,currentColor) 0 50%/100% 1px no-repeat}
+.scr i.x-h2{background:linear-gradient(currentColor,currentColor) 0 50%/100% 2px no-repeat}
+.scr i.x-v1{background:linear-gradient(currentColor,currentColor) 50% 0/1px 100% no-repeat}
+.scr i.x-v2{background:linear-gradient(currentColor,currentColor) 50% 0/2px 100% no-repeat}
+.scr i.x-tl{background:linear-gradient(currentColor,currentColor) 100% 50%/50% 1px no-repeat,linear-gradient(currentColor,currentColor) 50% 100%/1px 50% no-repeat}
+.scr i.x-tr{background:linear-gradient(currentColor,currentColor) 0 50%/50% 1px no-repeat,linear-gradient(currentColor,currentColor) 50% 100%/1px 50% no-repeat}
+.scr i.x-bl{background:linear-gradient(currentColor,currentColor) 100% 50%/50% 1px no-repeat,linear-gradient(currentColor,currentColor) 50% 0/1px 50% no-repeat}
+.scr i.x-br{background:linear-gradient(currentColor,currentColor) 0 50%/50% 1px no-repeat,linear-gradient(currentColor,currentColor) 50% 0/1px 50% no-repeat}
+.scr i.x-dash{background:repeating-linear-gradient(90deg,currentColor 0 2px,transparent 2px 4px) 0 50%/100% 1px no-repeat}
+.scr .fg{color:var(--t-fg)}.scr .dim{color:var(--t-dim)}.scr .ok{color:var(--t-ok)}.scr .okd{color:var(--t-okd)}.scr .warn{color:var(--t-warn)}.scr .bad{color:var(--t-bad)}.scr .info{color:var(--t-info)}.scr .line{color:var(--t-line)}
+.scr .b{font-weight:700}
+.scr .sel{background:var(--t-sel)}.scr .band{background:var(--t-band)}.scr .fbg{background:var(--t-warnbg)}
+.term.nocolor .scr .g{color:var(--t-fg)!important}
+.term.nocolor .scr .dim,.term.nocolor .scr .okd,.term.nocolor .scr .line{opacity:.62}
+.term.nocolor .scr .band,.term.nocolor .scr .fbg{background:transparent}
+.term.nocolor .scr .sel{background:var(--t-fg);color:var(--t-bg)!important}
+
+/* ---------- controls ---------- */
+.bar{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--surface);flex-wrap:wrap}
+.seg button,.btn{font:inherit;font-size:13px;color:var(--ink);background:transparent;border:0;padding:7px 12px;cursor:pointer}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button[aria-pressed="true"],.btn[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+.btn{border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+.btn:hover,.seg button:hover{border-color:var(--accent)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.keys{font-family:var(--mono);font-size:12px;color:var(--muted);max-width:none}
+.keys kbd{font:inherit;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 5px;color:var(--ink);background:var(--surface)}
+
+/* ---------- repaint meter ---------- */
+.meter{display:grid;grid-template-columns:minmax(0,1fr) minmax(220px,360px);gap:12px 28px;align-items:end;border:1px solid var(--line);border-radius:8px;background:var(--surface);padding:14px 16px}
+.meter .nums{font-family:var(--mono);font-size:13px;display:flex;flex-wrap:wrap;gap:6px 22px;color:var(--muted)}
+.meter .nums b{font-size:22px;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums;margin:0 2px}
+.mbars{display:flex;align-items:flex-end;gap:2px;height:42px;border-bottom:1px solid var(--line)}
+.mbars i{flex:1;min-width:2px;border-radius:1px 1px 0 0;background:var(--muted);opacity:.55;display:block}
+.mbars i.key{background:var(--accent);opacity:.95}
+.mbars i.tick{background:var(--caution);opacity:.95}
+.mbars i.lens{background:var(--alert);opacity:.9}
+.meter .ctl{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:8px 10px;align-items:center}
+.meter .ctl .small{flex:1 1 280px}
+.mb{height:8px;background:color-mix(in srgb,var(--ink) 9%,transparent);border-radius:4px;overflow:hidden;min-width:96px}
+.mb i{display:block;height:100%;background:var(--accent);border-radius:4px}
+td.barc{width:150px}
+
+/* ---------- hero and grammar ---------- */
+.duo{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,440px),1fr));gap:18px}
+.duo figure,.tri figure{margin:0;display:flex;flex-direction:column;gap:8px;min-width:0}
+.duo figcaption,.tri figcaption{font-size:13px;color:var(--muted)}
+.duo figcaption b,.tri figcaption b{color:var(--ink);font-weight:600}
+.tri{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:18px}
+.tri>div{display:flex;flex-direction:column;gap:10px;min-width:0}
+.tri h3{display:flex;gap:10px;align-items:baseline}
+.tri h3 span{font-family:var(--mono);font-size:12px;color:var(--muted);font-weight:400}
+.rules{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;align-items:baseline;font-size:14px;margin:0}
+.rules dt{font-size:13px;white-space:nowrap;font-weight:600}
+.rules dd{margin:0;color:var(--muted)}
+.tw{overflow-x:auto;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;min-width:560px;font-size:14px}
+th,td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:0}
+th{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500;white-space:nowrap}
+td.num{font-family:var(--mono);font-size:13px;white-space:nowrap}
+td.num.low{color:var(--alert);font-weight:700}
+td.tier{font-family:var(--mono);font-size:13px;white-space:nowrap}
+.t-a{color:var(--good)}.t-b{color:var(--caution)}.t-c{color:var(--ink);font-weight:700}
+.src{display:inline-block;font-size:11px;font-family:var(--mono);border:1px solid var(--line);border-radius:999px;padding:0 8px;color:var(--muted);margin-right:4px;white-space:nowrap}
+
+/* ---------- dashboard board ---------- */
+.board{display:flex;flex-direction:column;gap:18px}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{display:inline-flex;gap:8px;align-items:center;padding:4px 12px;border-radius:999px;border:1px solid var(--line);background:var(--surface);font-size:13px}
+.chip i{width:8px;height:8px;border-radius:50%;background:currentColor;display:inline-block}
+.chip.good{color:var(--good)}.chip.warn{color:var(--caution)}.chip.off{color:var(--muted)}.chip.rec{color:var(--good)}.chip.rec i{opacity:.5}
+.chip span{color:var(--ink)}
+.chart{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:14px 16px}
+.chart svg{display:block;width:100%;height:auto}
+.chart .cap{font-size:13px;color:var(--muted);margin-bottom:6px}
+.lane{border:1px solid var(--line);border-radius:8px;background:var(--surface);overflow:hidden}
+.lane-h{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line);background:color-mix(in srgb,var(--ink) 4%,transparent)}
+.lane-h .rt{font-family:var(--mono);font-size:13px;font-weight:700}
+.pillx{font-size:12px;border-radius:999px;padding:1px 10px;border:1px solid currentColor}
+.pillx.fault{color:var(--caution)}
+.pillx.ok{color:var(--good)}
+.pillx.count{color:var(--muted);border-color:var(--line)}
+.lane-h .sp{flex:1}
+.nextsum{font-size:12px;color:var(--accent);border:1px dashed var(--accent);border-radius:999px;padding:1px 10px}
+.colh,.row{display:grid;grid-template-columns:minmax(170px,1.15fr) minmax(190px,1.1fr) 150px minmax(190px,1.15fr);align-items:center}
+.colh{font-size:12px;color:var(--muted);padding:6px 14px 4px;border-bottom:1px solid var(--line)}
+.colh .nowh{color:var(--ink);font-weight:600;padding-left:14px}
+.colh .nexth{color:var(--accent);padding-left:14px}
+.row{padding:0 14px;min-height:46px;cursor:pointer;border:0;border-bottom:1px solid color-mix(in srgb,var(--line) 60%,transparent);text-align:left;width:100%;background:transparent;font:inherit;color:inherit;appearance:none}
+.row:last-child{border-bottom:0}
+.row:hover{background:color-mix(in srgb,var(--ink) 4%,transparent)}
+.row[aria-pressed="true"]{background:color-mix(in srgb,var(--accent) 9%,transparent)}
+.row .nm{display:flex;gap:8px;align-items:baseline;min-width:0}
+.row .nm b{font-weight:600;overflow-wrap:anywhere}
+.row .mode{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.pulse{display:flex;align-items:flex-end;gap:2px;height:26px}
+.pulse i{width:5px;border-radius:1px;display:block;background:var(--muted);opacity:.35;height:12%}
+.pulse i.k1{background:var(--good);opacity:.55;height:26%}
+.pulse i.k2{background:var(--caution);opacity:1;height:100%}
+.pulse i.k3{background:var(--caution);opacity:.85;height:62%}
+.nowc{align-self:stretch;display:flex;align-items:center;padding:0 12px;border-inline:2px solid var(--accent);background:color-mix(in srgb,var(--accent) 7%,transparent)}
+.pill{font-size:13px;border-radius:999px;padding:2px 12px;font-weight:600;white-space:nowrap}
+.pill.idle{background:var(--ink);color:var(--bg)}
+.pill.ok{background:color-mix(in srgb,var(--good) 16%,transparent);color:var(--good)}
+.nextc{padding:6px 0 6px 14px;font-size:13px;display:flex;flex-wrap:wrap;gap:4px 6px;align-items:center}
+.nextc span{display:inline-block;border:1px dashed var(--accent);color:var(--accent);border-radius:999px;padding:1px 10px}
+.nextc span.rest{border-color:var(--muted);color:var(--muted)}
+.nextc span.sch{border-style:solid}
+.nextc span.late{border:1px solid var(--caution);color:var(--caution);font-weight:600}
+.nextc span.lag{border:1px dotted var(--muted);color:var(--muted)}
+.nextc span.none{border:0;color:var(--muted);padding-left:0}
+.more{padding:8px 14px;color:var(--muted);font-size:13px;border-top:1px solid color-mix(in srgb,var(--line) 60%,transparent)}
+.drawer{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:18px 20px;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);gap:24px}
+.drawer h3{font-size:18px;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+.drawer .meta{color:var(--muted);font-size:13px;font-weight:400}
+.hops-h{margin:14px 0 0;font-size:12px;color:var(--muted)}
+.hops{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:6px;font-family:var(--mono);font-size:12.5px}
+.hops li{display:flex;gap:10px;align-items:baseline;border:1px solid var(--line);border-radius:6px;padding:3px 10px;width:fit-content;max-width:100%}
+.hops .n{color:var(--muted)}
+.hops b{color:var(--caution);font-weight:700}
+.tl{list-style:none;margin:0;padding:0;font-size:14px}
+.tl li{position:relative;margin-left:7px;padding:6px 0 6px 22px;border-left:2px solid var(--line);display:flex;gap:12px;align-items:baseline}
+.tl li::before{content:"";position:absolute;left:-7px;top:12px;width:12px;height:12px;border-radius:50%;background:var(--muted);box-shadow:0 0 0 3px var(--surface)}
+.tl time{font-family:var(--mono);font-size:12.5px;min-width:64px}
+.tl li.past{color:var(--muted)}
+.tl li.past.fail::before{background:var(--caution)}
+.tl li.nowrule{border-left-color:var(--accent);padding:12px 0 12px 22px;color:var(--accent);font-weight:600;font-size:13px;align-items:center}
+.tl li.nowrule::before{display:none}
+.tl li.nowrule::after{content:"";flex:1;height:2px;background:var(--accent)}
+.tl li.nowc2{border-left-color:var(--accent);font-weight:600}
+.tl li.nowc2::before{background:var(--ink);box-shadow:0 0 0 3px var(--surface),0 0 0 5px color-mix(in srgb,var(--accent) 45%,transparent)}
+.tl li.next{border-left:2px dashed var(--accent);color:var(--accent)}
+.tl li.next::before{background:var(--surface);border:2px solid var(--accent);width:8px;height:8px;left:-6px;top:13px;box-shadow:none}
+.tl li.next.rest{color:var(--muted);border-left-color:var(--muted)}
+.tl li.next.rest::before{border-color:var(--muted)}
+.tl li.next.late{color:var(--caution);border-left-color:var(--caution)}
+.tl li.next.late::before{border-color:var(--caution)}
+.narrow-hint{display:none}
+@media (max-width:760px){
+  .narrow-hint{display:block}
+  .drawer{grid-template-columns:1fr}
+  .colh{display:none}
+  .meter{grid-template-columns:1fr}
+  .row{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"nm now" "pulse now" "next now";gap:6px 12px;padding:10px 14px;min-height:0}
+  .row .nm{grid-area:nm}.row .pulse{grid-area:pulse}.row .nowc{grid-area:now;padding:0 10px}.row .nextc{grid-area:next;padding-left:0}
+}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.decisions{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:18px}
+.decisions>div{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:16px 18px;display:flex;flex-direction:column;gap:8px}
+.decisions h3{font-size:16px}
+.decisions p{font-size:14px;color:var(--muted)}
+.decisions p b{color:var(--ink)}
+.facts{margin:0;padding-left:1.2em;display:flex;flex-direction:column;gap:6px;max-width:80ch;font-size:14px}
+.facts li::marker{color:var(--accent)}
+.pipe{display:grid;grid-template-columns:1fr auto 1fr auto 1fr;gap:10px;align-items:stretch}
+.stage{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:12px 14px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.stage b{font-size:14px}.stage span{font-size:13px;color:var(--muted);overflow-wrap:anywhere}
+.stage.ing{border-color:var(--accent)}.stage.warn{border-color:var(--caution)}
+.arrow{align-self:center;color:var(--muted);font-family:var(--mono)}
+@media (max-width:720px){.pipe{grid-template-columns:1fr}.arrow{transform:rotate(90deg);justify-self:center}}
+.stack{display:flex;flex-direction:column;gap:28px}
+.stack figure{margin:0;display:flex;flex-direction:column;gap:8px;min-width:0}
+.stack figcaption{font-size:13px;color:var(--muted)}
+.stack figcaption b{color:var(--ink);font-weight:600}
+.legend{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:13px;color:var(--muted)}
+.legend b{color:var(--ink);font-weight:600}
+</style>
+
+<div class="wrap">
+
+<header>
+  <p class="kicker">MASC · Keepers · Schedules · Memory</p>
+  <h1>Keeper Pulse</h1>
+  <p class="small" id="preview-note" style="margin-top:10px">설계 보조 자료예요. 실행되는 TUI가 아니라 브라우저 레이아웃으로 그린 모형이에요. 행은 2026-11-06 13:30 KST 라이브 스냅샷에서 왔고 Keeper 이름과 계정 이름은 가렸어요. <code>[sim]</code> 표시는 시뮬레이션이에요. 근거와 한계는 연구 문서에 있어요.</p>
+  <p class="lede">Keepers 목록의 <code>! failure</code>는 방금 한 번 실패한 건지 반나절째 실패하는 건지 알려 주지 않아요. 서버의 턴 기록 12시간을 맥박으로 붙이고, 직전·지금·다음을 한 축에 놓았어요. 앞 판은 같은 축에 Schedules의 다음 실행과 Memory의 따라잡기(lag)를 올렸고, 이번 판은 기억이 낡아 가는 모습(<code>age</code>)과 갱신된 순간, 그리고 월드 전체의 기억(<code>■ world</code>)을 올렸어요. 나이는 사실의 강도가 아니라서, 서버가 직접 말하는 stale과 화면이 계산한 나이를 따로 보여 줘요.</p>
+  <div class="duo" style="margin-top:28px">
+    <figure>
+      <figcaption><b>지금 화면</b> 세 줄이 같은 글자예요(글자는 실제 화면 그대로, 배치는 모형)</figcaption>
+      <div class="term" id="t-before" data-cols="84"><pre class="scr" id="s-before" role="img" aria-label="현재 TUI 목록 모형: 세 Keeper 모두 failure 로 표시"></pre></div>
+    </figure>
+    <figure>
+      <figcaption><b>맥박을 붙이면</b> 같은 세 줄이 서로 달라 보여요. 실패한 키퍼는 카드가 두 줄이에요</figcaption>
+      <div class="term" id="t-after" data-cols="84"><pre class="scr" id="s-after" role="img" aria-label="맥박을 붙인 목록 모형: 왼쪽이 과거, 가운데가 지금, 오른쪽이 다음"></pre></div>
+    </figure>
+  </div>
+  <p class="small" id="hero-note" style="margin-top:6px"></p>
+  <p class="small" id="meas-note"></p>
+</header>
+
+<section class="sec" id="ia">
+  <header>
+    <h2>세 화면, 한 축</h2>
+    <p class="sub">Keepers, Schedules, Memory는 키퍼 이름이 열쇠인 세 표예요. 시간 값은 화면마다 글자 열(DUE, WAKE, UPDATED)로 따로 있어서 나란히 읽을 수 없어요. 시간을 축으로 올리면 세 표가 한 줄로 합쳐져요.</p>
+  </header>
+  <div class="tw"><table>
+    <thead><tr><th>지금 화면</th><th>열(코드와 화면 기준)</th><th>시간 값</th><th>합친 뒤 자리</th></tr></thead>
+    <tbody>
+      <tr><td><b>Keepers</b></td><td>표지 · 이름 · 건강(<code>! failure</code>) · 활동 문장</td><td>마지막 시도 나이(글자)</td><td>가운데 지금 띠, 왼쪽 맥박</td></tr>
+      <tr><td><b>Schedules</b></td><td>STATUS · DUE · TARGET · WAKE · DELIVERY · RECURRENCE</td><td>DUE(다음), WAKE(마지막)</td><td>오른쪽 눈금 <code>◷</code>, Story의 wake 줄</td></tr>
+      <tr><td><b>Memory</b></td><td>ST · KEEPER · UPDATED · FACTS · STORED · SOURCE · Δ</td><td>UPDATED(마지막)</td><td>오른쪽 끝 lag 막대, Story의 digest 줄, <code>age</code> 보기의 갱신 시계</td></tr>
+      <tr><td><b>World</b></td><td>TUI 화면 없음(<code>bin/</code>에서 쓰는 곳은 키퍼 채팅 두 파일). 웹 대시보드에 API 클라이언트가 있어요(UI는 확인 안 함). 장부 claims · conflicts · 브리핑 Current/Stale</td><td>브리핑 저장 시각, 장부 저장 시각</td><td>목록 맨 위 <code>■ world</code> 줄, Story의 파이프라인</td></tr>
+    </tbody>
+  </table></div>
+  <div class="tri">
+    <div>
+      <h3>◂ 직전 <span>past</span></h3>
+      <div class="term" data-cols="36"><pre class="scr" id="ia-past" role="img" aria-label="직전 표기: 턴 맥박, 마지막 wake, 마지막 digest"></pre></div>
+      <dl class="rules"><dt>턴</dt><dd>30분 칸 맥박, 12시간.</dd><dt>wake</dt><dd>Schedules의 마지막 실행(<code>last_wake</code>).</dd><dt>digest</dt><dd>Memory의 마지막 Librarian 성공(<code>last_success_at</code>).</dd></dl>
+    </div>
+    <div>
+      <h3>● 지금 <span>now</span></h3>
+      <div class="term" data-cols="36"><pre class="scr" id="ia-now" role="img" aria-label="지금 표기 예시"></pre></div>
+      <dl class="rules"><dt>한 단어</dt><dd>하는 일 하나. 도는 턴은 <code>◐◓◑◒</code>가 돌아요(TUI의 기존 running 표지).</dd><dt>늦은 wake</dt><dd>시각이 지났는데 <code>due</code>로 남은 스케줄이 이 띠에 올라와요.</dd></dl>
+    </div>
+    <div>
+      <h3>▹ 다음 <span>next</span></h3>
+      <div class="term" data-cols="36"><pre class="scr" id="ia-next" role="img" aria-label="다음 표기 예시"></pre></div>
+      <dl class="rules"><dt>▹</dt><dd>다음 probe가 갈 runtime. 시각은 서버가 말하지 않아요.</dd><dt>◷ 눈금</dt><dd>스케줄이 말한 다음 실행, 30분 칸.</dd><dt>lag</dt><dd>Librarian이 아직 안 읽은 턴 수.</dd></dl>
+    </div>
+  </div>
+  <div class="tw"><table>
+    <thead><tr><th>묻는 것</th><th>보기</th><th>같은 줄에 올라오는 것</th><th>묶는 기준</th></tr></thead>
+    <tbody>
+      <tr><td>왜 실패해</td><td><code>cause</code></td><td>맥박 · 지금 · 다음 probe · 눈금</td><td>마지막 시도의 종착 runtime + typed 원인</td></tr>
+      <tr><td>언제 일해</td><td><code>time</code></td><td>맥박 · 지금 · 눈금 · lag</td><td>다음 일정까지 남은 시간(늦음 / 1시간 / 12시간 / 그 뒤 / 없음)</td></tr>
+      <tr><td>기억이 따라오나</td><td><code>memory</code></td><td>맥박 · Librarian · lag 막대 · gap · <code>■ world</code></td><td>gap 있음 / pending / drained / 없음</td></tr>
+      <tr><td>기억이 식어 가나</td><td><code>age</code></td><td>사실 나이 사다리 · 갱신 시계 · stale ×N · lag · <code>■ world</code></td><td>스냅샷 갱신 나이(3시간 / 24시간 / 3일)</td></tr>
+      <tr><td>어느 runtime이 막혔나</td><td><code>runtime</code></td><td>✗ 사슬 · 맥박</td><td>runtime × keeper</td></tr>
+      <tr><td>반나절 동안 어땠나</td><td><code>24h</code></td><td>48칸 맥박</td><td>실패한 칸 수</td></tr>
+    </tbody>
+  </table></div>
+  <p class="small">합치는 건 시간 축과 Story 창이에요. Schedules와 Memory의 전체 화면은 그대로 두고, 키퍼 줄에서 Enter 뒤 <kbd>s</kbd> · <kbd>m</kbd>으로 그 키퍼 행만 들어가는 깊은 보기로 연결해요. Schedules는 키퍼 아닌 대상(<code>lane:</code>)도 담고, Memory는 사실 검사기와 필터·정렬이 있어서 한 표로 합치면 둘 다 망가져요. 이 시안의 <kbd>s</kbd> · <kbd>m</kbd>은 Story 창 안의 요약 쪽이고, 실제 화면으로 들어가는 건 구현 때 정해요.</p>
+</section>
+
+<section class="sec" id="memory">
+  <header>
+    <h2>기억은 어떻게 낡고 새로워지나</h2>
+    <p class="sub">MASC의 Memory OS는 나이로 사실의 힘을 바꾸지 않아요. 같은 내용을 다시 보는 것(재관찰)도 강도 신호가 아니라고 코드 주석이 적어 두었어요(<code>keeper_memory_os_types.mli</code> · <code>keeper_memory_os_current.mli</code>, RFC-0418). 그래서 이 화면은 &quot;오래됐다&quot;와 &quot;stale이다&quot;를 다른 줄에 그려요.</p>
+  </header>
+  <figure style="margin:0;display:flex;flex-direction:column;gap:8px">
+    <figcaption class="small"><b style="color:var(--ink);font-weight:600">사실 나이 사다리</b> 가로축은 사실을 처음 본 지 얼마나 됐나(오른쪽 끝이 지금, 왼쪽 끝이 30일 이상)이고, 로그 눈금이에요. 막대 높이는 그 칸의 사실 수예요. 맨 위 <code>■ world</code>가 모든 Keeper의 합이에요. 아래 세 줄은 갱신 시계가 fresh · cooling · dormant인 키퍼예요.</figcaption>
+    <div class="term" data-cols="100"><pre class="scr" id="m-age" role="img" aria-label="나이 사다리 예시: 월드 줄과 세 키퍼"></pre></div>
+  </figure>
+  <div class="legend"><span><b>청록</b> 하루 안에 배운 것</span><span><b>기본색</b> 하루~7일</span><span><b>흐림</b> 7일보다 오래된 것</span><span><b>+ 47m</b> 마지막 스냅샷 갱신 나이</span><span><b>×17</b> 서버가 기록한 stale 사건 수</span></div>
+  <p class="small" id="mem-note"></p>
+  <div class="stack">
+    <figure>
+      <figcaption><b>갱신된 순간</b> 같은 키퍼의 갱신 전(위)과 Librarian이 한 번 돈 뒤(아래, 시뮬레이션). 새 사실 둘이 오른쪽 끝에 서고 lag가 비어요.</figcaption>
+      <div class="term" data-cols="100"><pre class="scr" id="m-renew" role="img" aria-label="갱신 전후 비교"></pre></div>
+    </figure>
+    <figure>
+      <figcaption><b>월드 전체의 기억</b> Keeper 기억 → 장부 → 브리핑 세 단계예요. 맨 위 줄에서 <kbd>Enter</kbd>를 누르면 이 창이 열려요.</figcaption>
+      <div class="term" data-cols="100"><pre class="scr" id="m-world" role="img" aria-label="월드 기억 파이프라인"></pre></div>
+    </figure>
+  </div>
+  <div class="tw"><table>
+    <thead><tr><th>화면에 보이는 것</th><th>누가 말하나</th><th>근거</th></tr></thead>
+    <tbody>
+      <tr><td><code>+ 47m</code> 갱신 시계, <code>+1 −0 ~84</code></td><td><span class="src">서버 값</span>스냅샷 <code>updated_at</code>과 마지막 revision의 added · removed · retained.</td><td><code>keeper-memory-health</code>에 <code>updated_at</code> · added · removed가 있어서 가벼워요(retained는 context에만).</td></tr>
+      <tr><td><code>×17</code> stale 사건</td><td><span class="src">서버 값</span>근거 파일이 바뀌었거나(<code>source_changed</code>) 사라진(<code>source_unavailable</code>) 사실의 무효화 기록 <code>{source_path, invalidated_at, reason}</code>. 지금 기록의 reason은 이 둘뿐이에요.</td><td><code>workspace-memory-context</code>의 <code>source_bound.invalidations</code></td></tr>
+      <tr><td>월드 <code>current</code> · <code>stale</code> · <code>building</code></td><td><span class="src">서버 값</span>브리핑 신선도 <code>Missing | Current | Stale</code>(근거 집합이나 계약이 바뀌면 Stale)와 파일의 <code>building</code>(열린 한 번의 작업). <code>remaining</code>이 <code>target</code>과 같으면 이전 요약을 하나도 못 이어받고 처음부터 짓는 중이에요. 발행된 근거 중 하나라도 장부에서 사라지거나 해시가 바뀌면 그래요(<code>workspace_memory_briefing.ml</code>의 <code>start_pass</code>). HTTP 필드는 없어요(확인: 대시보드 라우트와 응답에서 못 찾음).</td><td>이 시안은 <code>~/.masc/workspace-memory</code> 파일과 장부를 읽어 같은 규칙으로 계산했어요.</td></tr>
+      <tr><td>나이 사다리, <code>fresh</code> · <code>today</code> · <code>cooling</code> · <code>dormant</code></td><td><span class="src">화면 계산</span><code>first_seen</code>과 <code>updated_at</code>의 나이. 3시간 · 24시간 · 3일, 1일 · 7일 색 경계는 제가 정한 표시용 값이에요. 서버 상태가 아니에요.</td><td>나이를 stale이라고 부르지 않은 이유는 위 RFC-0418이에요.</td></tr>
+      <tr><td><code>465 absent</code></td><td><span class="src">화면 계산</span>Keeper 사실의 claim 해시가 장부에 없는 수. 없는 사실은 전부 1~5일 전에 생긴 것이에요. 이유는 서버가 말하지 않아요(확인 필요).</td><td><code>workspace-memory-context</code> × <code>workspace-memory-ledger</code>(둘 다 약 3~4MB)</td></tr>
+    </tbody>
+  </table></div>
+  <ul class="facts">
+    <li><b>사실 하나의 갱신은 지금 데이터로 못 그려요.</b> <code>last_seen</code>은 같은 claim 바이트를 다시 볼 때만 움직이는데, 지금 모든 사실이 처음 본 시각 그대로예요(재관찰 0개). 그래서 갱신은 스냅샷(revision) 단위로만 보여요.</li>
+    <li><b>장부에 없는 사실은 &quot;기다리는 중&quot;이 아니에요.</b> 하루 안에 생긴 사실은 모두 장부에 있고, 없는 건 전부 1~5일 전에 생긴 것이에요(3~4일 전 사실은 하나도 안 들어 있어요). 왜 비었는지는 서버 기록으로 확인하지 못했어요(확인 필요).</li>
+    <li><b>서버는 읽을 때 근거 파일을 다시 확인하지 않아요.</b> 응답이 스스로 <code>stored_bindings_not_revalidated</code>라고 적어요. 이미 바뀌었는데 아직 무효화 기록이 없는 사실은 이 화면도 못 봐요.</li>
+    <li><b>장부는 검증된 진실이 아니에요.</b> 장부 응답이 <code>semantic_verification: not_performed</code>라고 적어요. 월드 줄의 숫자는 기록의 크기이고 사실 여부가 아니에요.</li>
+    <li>키퍼별 사실 수와 나이를 한 번에 받으려면 지금은 3MB 안팎 응답이 필요해요. 화면에 올리려면 서버가 칸별 개수(<code>age_bins</code>)를 주는 게 가벼워요.</li>
+  </ul>
+</section>
+
+<section class="sec" id="proto">
+  <header>
+    <h2>TUI 프로토타입</h2>
+    <p class="sub">스냅샷의 실제 값으로 그렸어요. 터미널을 클릭하고 키를 눌러 보세요. 맨 윗줄의 보기 이름도 눌려요.</p>
+  </header>
+  <div class="bar" role="group" aria-label="프로토타입 조작">
+    <div class="seg" role="group" aria-label="보기">
+      <button type="button" data-lens="cause" aria-pressed="true">원인별</button>
+      <button type="button" data-lens="time" aria-pressed="false">시간별</button>
+      <button type="button" data-lens="memory" aria-pressed="false">기억별</button>
+      <button type="button" data-lens="age" aria-pressed="false">나이별</button>
+      <button type="button" data-lens="matrix" aria-pressed="false">runtime × keeper</button>
+      <button type="button" data-lens="wall" aria-pressed="false">24h 벽</button>
+    </div>
+    <div class="seg" role="group" aria-label="폭">
+      <button type="button" data-cols="80" aria-pressed="false">80</button>
+      <button type="button" data-cols="100" aria-pressed="true">100</button>
+      <button type="button" data-cols="120" aria-pressed="false">120</button>
+    </div>
+    <button type="button" class="btn" id="b-nocolor" aria-pressed="false">NO_COLOR</button>
+    <button type="button" class="btn" id="b-light" aria-pressed="false">밝은 터미널</button>
+    <button type="button" class="btn" id="b-story" aria-pressed="false">Story 창</button>
+    <button type="button" class="btn" id="b-fail">실패하는 probe</button>
+    <button type="button" class="btn" id="b-rec">복구하는 probe</button>
+    <button type="button" class="btn" id="b-renew">Librarian 한 번 (u)</button>
+    <button type="button" class="btn" id="b-cur">Curator 한 번 (c)</button>
+    <button type="button" class="btn" id="b-reset">처음으로</button>
+  </div>
+  <p class="small narrow-hint">화면이 좁으면 터미널 상자를 옆으로 밀어서 오른쪽의 지금·다음 열을 볼 수 있어요.</p>
+  <div class="term" id="term" tabindex="0" role="application" aria-label="Keepers 목록 프로토타입. 화살표로 이동, Enter로 Story 창, o로 보기 전환" data-cols="100">
+    <pre class="scr" id="scr"></pre>
+  </div>
+  <p class="keys"><kbd>↑</kbd><kbd>↓</kbd> 이동 · <kbd>←</kbd><kbd>→</kbd> 접기 · <kbd>[</kbd><kbd>]</kbd> 묶음 이동 · <kbd>Enter</kbd> Story · <kbd>s</kbd> 스케줄 · <kbd>m</kbd> 기억 · <kbd>Esc</kbd> 닫기 · <kbd>o</kbd> 보기 · <kbd>n</kbd> NO_COLOR · <kbd>t</kbd> 테마 · <kbd>f</kbd> 실패 · <kbd>r</kbd> 복구 · <kbd>u</kbd> 갱신 · <kbd>c</kbd> Curator · <kbd>d</kbd> <kbd>D</kbd> 기억 시계 ±1일 · <kbd>w</kbd> 월드 · <kbd>x</kbd> 처음으로</p>
+  <div class="meter" id="meter">
+    <div class="nums">
+      <span>이번 갱신<b id="m-last">—</b>줄 다시 그림</span>
+      <span>최근 48번 평균<b id="m-avg">—</b></span>
+      <span>최대<b id="m-peak">—</b></span>
+      <span>초당<b id="m-rate">0.00</b>줄</span>
+      <span>2초 폴링<b id="m-poll">0번 · 0줄</b></span>
+    </div>
+    <div class="mbars" id="m-bars" role="img" aria-label="최근 갱신마다 다시 그린 줄 수"></div>
+    <div class="ctl">
+      <button type="button" class="btn" id="c-run" aria-pressed="false">◐ 도는 턴 3개</button>
+      <button type="button" class="btn" id="c-lapse" aria-pressed="false">⏩ 시간 ×600</button>
+      <button type="button" class="btn" id="c-shift" aria-pressed="false">v1 방식: 고른 줄만 펼침</button>
+      <button type="button" class="btn" id="c-age" aria-pressed="false">⏩ 기억 시계 하루/초</button>
+      <span class="small">줄 단위 diff를 가정해 센 값이에요(실제 바이트·지연이 아니에요). 막대 색은 청록 = 키 입력, 노랑 = 타이머, 빨강 = 보기 전환이에요. 시간 ×600 중 초당 줄 수는 실제 시간으로 환산해요.</span>
+    </div>
+  </div>
+  <p class="small">맥박은 각 Keeper의 decisions 로그에서 <code>event=turn</code>의 <code>success</code>/<code>error</code>와 시각만 읽어 30분 칸으로 만들었어요. 아직 roster API 필드가 아니라서 서버 후속이 필요해요(아래 표). 도는 턴, 시간 ×600, <kbd>f</kbd> · <kbd>r</kbd> · <kbd>u</kbd> · <kbd>c</kbd>는 시뮬레이션이고 켜면 머리줄에 <code>[sim]</code>이 떠요. 기억 시계(<kbd>d</kbd>)는 &quot;아무도 갱신하지 않고 하루가 지나면&quot;을 계산하는 보기이고 머리줄에 <code>[what-if +1d]</code>가 떠요. Librarian과 Curator가 도는 시간은 연출이에요. 순서(갱신 → 장부에 새 소스 → 브리핑 Stale → 다시 짓기)는 Stale의 정의(발행된 브리핑의 근거 집합이 장부와 다르면 Stale)에서 읽은 것이고, 시간 순서로 지켜본 것은 아니에요. 짓는 도중에 장부가 더 자라면 끝난 뒤에 다시 Stale이 돼요.</p>
+  <div class="sr" id="live" aria-live="polite"></div>
+</section>
+
+<section class="sec" id="alive">
+  <header>
+    <h2>끊김 없이 움직이나</h2>
+    <p class="sub">움직임마다 몇 줄을 다시 그리는지 이 페이지의 렌더러로 셌어요. TUI의 프레젠터는 바뀐 줄만 지우고 다시 쓰고, 바뀐 줄이 없으면 아무것도 쓰지 않아요.</p>
+  </header>
+  <div class="tw"><table>
+    <thead><tr><th>움직임</th><th>얼마나 자주</th><th>다시 그린 줄</th><th></th><th>왜 그 수인지</th></tr></thead>
+    <tbody id="alive-rows"></tbody>
+  </table></div>
+  <ul class="facts">
+    <li>움직이는 표지는 도는 턴에만 써요. 도는 턴이 없으면 화면은 아예 다시 그리지 않아요(<code>anything_running</code>). 기존 규칙 그대로예요.</li>
+    <li>한 걸음은 150ms이고 네 걸음이 한 바퀴예요(<code>motion_step_ns</code>, <code>◐◓◑◒</code>). 새로 만든 움직임은 없어요.</li>
+    <li>시각 카운트다운은 분 단위로만 바뀌어요. 초 단위로 줄어드는 숫자를 줄마다 붙이지 않았어요.</li>
+    <li>고른 줄이 늘어나지 않아요. 키 한 번에 다시 쓰는 줄은 고른 줄·이전 줄과 위 띠, 맨 아래 상세 줄이에요. 아래 줄은 밀리지 않아요. 고정 높이의 이득은 다시 쓰는 줄 수가 아니라 줄 위치가 안 움직이는 것이에요.</li>
+    <li>30분 경계에서는 맥박과 눈금이 한 칸 밀려요. 보이는 키퍼 줄이 거의 다 바뀌지만 30분에 한 번이에요.</li>
+    <li>Memory는 서버가 <code>Memory_health</code> 사건을 밀어 주고(<code>Dataset_changed</code>), roster와 스케줄은 <code>--refresh</code> 기본 2초로 읽어요.</li>
+  </ul>
+  <p class="small">근거: <code>bin/masc_tui_types.ml</code> <code>motion_step_ns</code>=150ms · <code>bin/masc_tui_frame_presenter.mli</code> <code>repaint = Whole_screen | Rows</code>, 한 프레임에 write·flush 한 번 · <code>bin/masc_tui.ml</code> <code>anything_running</code> · <code>docs/research/tui-frame-cost-and-terminal-output-prior-art-20261104.md</code>(목록 한 프레임 build p50 0.9~1.3ms, 키퍼 목록 기준). 이 표는 렌더러 출력의 줄 비교이고 실제 터미널 쓰기량은 측정하지 않았어요.</p>
+</section>
+
+<section class="sec" id="grammar">
+  <header>
+    <h2>문법</h2>
+    <p class="sub">모양이 시제를, 색이 누가 움직이는지를 말해요. 색이 없어도 같은 뜻으로 읽혀요.</p>
+  </header>
+  <figure style="margin:0;display:flex;flex-direction:column;gap:8px">
+    <figcaption class="small"><b style="color:var(--ink);font-weight:600">줄 하나의 해부</b> 위는 실패한 키퍼 카드(두 줄), 아래는 일정과 lag가 있는 정상 키퍼예요.</figcaption>
+    <div class="term" data-cols="100"><pre class="scr" id="g-anatomy" role="img" aria-label="한 줄의 구성: 이름, 과거 맥박, 지금 띠, 다음 눈금, 시각, lag"></pre></div>
+  </figure>
+  <div class="duo">
+    <figure>
+      <figcaption><b>색은 누가 움직이나</b> 기존 토큰 Warn · Muted · Bad만 써요. 새 색은 없어요.</figcaption>
+      <div class="term" data-cols="46"><pre class="scr" id="g-who" role="img" aria-label="색의 의미 예시"></pre></div>
+      <p class="small">빨강은 서버가 닫힌 값으로 &quot;사람이 해야 함&quot;이라고 말할 때만 써요. 지금 roster에는 그 값이 없어요.</p>
+    </figure>
+    <figure>
+      <figcaption><b>색을 끄면</b> NO_COLOR · 굵기, 흐림, 기호 모양, 단어가 남아서 같은 줄이 그대로 읽혀요.</figcaption>
+      <div class="term nocolor" data-cols="56"><pre class="scr" id="g-nc" role="img" aria-label="NO_COLOR 예시"></pre></div>
+    </figure>
+  </div>
+  <div class="tw"><table>
+    <thead><tr><th>흐림의 대비</th><th>dim</th><th>warn</th><th>ok</th><th>info</th><th>bad</th><th>기준</th></tr></thead>
+    <tbody id="contrast"></tbody>
+  </table></div>
+  <p class="small">코드의 recede 규칙(WCAG 1.4.3, 글자 대비 4.5:1)을 지키는지 이 시안의 색으로 배경 대비를 계산했어요. 새로 쓰는 글리프는 <code>◷</code>(기존 Badge_schedule)와 <code>+</code>(Memory ST의 &quot;현재 스냅샷&quot;) 둘이고 둘 다 기존 어휘예요.</p>
+</section>
+
+<section class="sec" id="web">
+  <header>
+    <h2>대시보드 시안</h2>
+    <p class="sub">같은 문법을 웹에 옮겼어요. 가운데 띠가 지금이고, 왼쪽 막대가 직전이고, 오른쪽 알약이 다음(일정 · lag)이에요. 행을 눌러 보세요. 맨 아래는 기억 요약(갱신 시계 묶음, 월드 파이프라인, stale 사건)이에요.</p>
+  </header>
+  <div class="board" id="board"></div>
+  <div class="board" id="mboard" aria-label="기억 요약" style="margin-top:6px"></div>
+</section>
+
+<section class="sec" id="data">
+  <header>
+    <h2>어디까지 진짜인가</h2>
+    <p class="sub">A는 지금 데이터로 가능, B는 화면이 요청할 때 가져옴, C는 서버 필드가 필요해요.</p>
+  </header>
+  <div class="tw"><table>
+    <thead><tr><th>요소</th><th>값의 출처</th><th>단계</th></tr></thead>
+    <tbody>
+      <tr><td>원인 묶음, 시도 사슬 ✗ › ✗</td><td><span class="src">Keepers</span>roster의 <code>runtime_lane_observation</code> evidence(typed). TUI가 이미 decode해요.</td><td class="tier t-a">A</td></tr>
+      <tr><td>지금 단어 분리</td><td><span class="src">Keepers</span>활동(<code>attempt_failed</code>, 도는 턴)과 건강(<code>Failing</code>)을 따로 읽기. 목록 모델이 <code>failed</code>를 먼저 판정하는 순서를 바꿔요.</td><td class="tier t-a">A</td></tr>
+      <tr><td>다음 <code>▹ runtime</code> / <code>◌ wait</code></td><td><span class="src">Keepers</span>roster의 <code>runtime_path_rest{status,runtime_id}</code>. TUI는 아직 읽지 않아요.</td><td class="tier t-a">A</td></tr>
+      <tr><td>눈금 <code>◷</code>, 늦음 <code>late</code></td><td><span class="src">Schedules</span><code>/api/v1/dashboard/scheduled-automation</code>의 <code>next_due_at_iso</code> · <code>status</code> · <code>payload_target</code>. Schedules 화면이 이미 읽어요. 한 쪽이 20행이고 활성 스케줄이 50개 넘어서 키퍼별로 보려면 3쪽을 읽거나 <code>payload_target</code> 조회(<code>fetch_schedules_for_target</code>)를 써요.</td><td class="tier t-a">A</td></tr>
+      <tr><td>wake 줄(마지막 실행)</td><td><span class="src">Schedules</span>같은 응답의 <code>last_wake</code>. 스케줄마다 하나만 와요. 이력은 <code>schedule_id</code>로 따로 읽어요.</td><td class="tier t-b">B</td></tr>
+      <tr><td>lag 막대, gap, digest 줄</td><td><span class="src">Memory</span><code>/api/v1/dashboard/keeper-memory-health</code>의 <code>librarian.unread_atom_turns</code> · <code>stalled{kind:gap}</code> · <code>last_success_at</code>. TUI memory decode가 이미 있고, 서버가 <code>Memory_health</code> 사건을 밀어 줘요.</td><td class="tier t-a">A</td></tr>
+      <tr><td>failing since</td><td><span class="src">Keepers</span>transitions의 <code>wall_clock_at_decision</code>을 화면이 요청할 때 읽어요. 이 시안은 턴 기록에서 같은 시각을 뽑았어요.</td><td class="tier t-b">B</td></tr>
+      <tr><td>맥박 칸(12~24시간), 복구됨 묶음</td><td><span class="src">Keepers</span>decisions 로그의 <code>event=turn</code> 결과와 시각. 서버 파일에는 있고 API 필드는 없어요. roster는 복구하면 <code>last_failure</code>를 지워서 이 값 없이는 과거를 못 보여줘요.</td><td class="tier t-c">C</td></tr>
+      <tr><td>한도가 풀리는 시각</td><td>제공자가 말한 값만. opencode는 typed <code>retry_after</code>가 있고, glm·muse는 문장 안에만 있어요.</td><td class="tier t-c">C</td></tr>
+      <tr><td>갱신 시계 <code>+ 47m</code>, <code>+1 −0</code></td><td><span class="src">Memory</span><code>keeper-memory-health</code>의 <code>updated_at</code> · <code>added</code> · <code>removed</code>. 가벼운 응답(약 50KB)에 이미 있어요.</td><td class="tier t-a">A</td></tr>
+      <tr><td>stale ×N(근거 무효화)</td><td><span class="src">Memory</span><code>memory-health</code>는 개수(<code>source_invalidations</code>)만, 시각과 reason은 <code>workspace-memory-context</code>에 있어요(약 3MB).</td><td class="tier t-b">B</td></tr>
+      <tr><td>사실 나이 사다리, 월드 <code>absent</code></td><td><span class="src">Memory</span><code>workspace-memory-context</code>와 <code>-ledger</code> 둘을 받아 화면이 계산해요. 칸별 개수(<code>age_bins</code>)와 장부 미반영 수를 서버가 주면 가벼워요.</td><td class="tier t-c">C</td></tr>
+      <tr><td>월드 <code>current</code> · <code>stale</code> · <code>building</code></td><td><span class="src">World</span>브리핑 신선도는 코드에 타입이 있고 HTTP 필드가 없어요. 이 시안은 저장 파일에서 계산했어요.</td><td class="tier t-c">C</td></tr>
+      <tr><td>빨강(사람이 움직임)</td><td>영수증의 <code>operator_disposition</code>이 이미 닫힌 값이에요. roster 행에는 없어요.</td><td class="tier t-c">C</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section class="sec" id="decide">
+  <header><h2>결정이 필요한 것</h2></header>
+  <div class="decisions">
+    <div><h3>색</h3><p><b>Failing을 빨강에서 노랑·흐림으로.</b> 실패가 노랑이 되면 기존 Question·Confirmation 색과 겹치는지는 구현 때 확인해요.</p></div>
+    <div><h3>범위</h3><p><b>1단계는 A와 B만.</b> 맥박과 빨강은 서버 후속 이슈로 남기고, 맥박 자리는 비워 둔 채 먼저 낼 수도 있어요.</p></div>
+    <div><h3>순서</h3><p><b>연구 문서 → RFC → 스택 PR.</b> 외부 연구에서 가져온 아이디어라서 RFC가 먼저예요. 파일이 2개 이상이라 확인받아요.</p></div>
+    <div><h3>stale이라는 말</h3><p><b>서버가 기록한 stale만 stale이라고 불러요.</b> 근거 무효화와 브리핑 Stale이에요. 나이로 낡은 정도는 <code>cooling</code> · <code>dormant</code>로 따로 적어요. 며칠 넘으면 stale이라고 부르자고 하면 RFC-0418과 부딪혀요.</p></div>
+    <div><h3>월드 줄 자리</h3><p><b>기억 보기(<code>memory</code> · <code>age</code>) 맨 위에만 둬요.</b> 다른 보기에서는 <kbd>w</kbd>로 불러요. 모든 보기에 두면 원인·시간 보기가 흐려져요.</p></div>
+    <div><h3>화면 합치기</h3><p><b>Schedules·Memory 표는 남기고 Keepers에 시간 축을 더해요.</b> 새 키 <kbd>s</kbd> · <kbd>m</kbd>이 기존 키와 겹치는지는 확인 필요예요.</p></div>
+  </div>
+</section>
+
+</div>
+
+<script>
+(function(){
+'use strict';
+/* ===== p1: data, time model, cell screen ===== */
+const DATA = {"now":{"label":"13:30:33","hm":"13:30","date":"11-06","epoch":1793939433.126547},"buckets":{"n":48,"min":30,"labels":["14:00","14:30","15:00","15:30","16:00","16:30","17:00","17:30","18:00","18:30","19:00","19:30","20:00","20:30","21:00","21:30","22:00","22:30","23:00","23:30","00:00","00:30","01:00","01:30","02:00","02:30","03:00","03:30","04:00","04:30","05:00","05:30","06:00","06:30","07:00","07:30","08:00","08:30","09:00","09:30","10:00","10:30","11:00","11:30","12:00","12:30","13:00","13:30"],"endEpoch":1793941200.0},"fut":{"n":24},"runtimes":{"r0":{"label":"agy·sonnet-low","fam":"agy"},"r1":{"label":"haiku·acct-a","fam":"claude"},"r2":{"label":"sonnet·acct-b","fam":"claude"},"r3":{"label":"sonnet·acct-c","fam":"claude"},"r4":{"label":"sonnet·acct-d","fam":"claude"},"r5":{"label":"sonnet·acct-e","fam":"claude"},"r6":{"label":"sonnet·acct-f","fam":"claude"},"r7":{"label":"glm-5.3","fam":"glm"},"r8":{"label":"glm-5.3-flash","fam":"glm"},"r9":{"label":"muse-spark","fam":"muse"},"r10":{"label":"ollama·deepseek","fam":"ollama"},"r11":{"label":"opencode·deepseek","fam":"opencode"},"r12":{"label":"opencode·mimo","fam":"opencode"},"r13":{"label":"opencode·minimax","fam":"opencode"}},"keepers":[{"name":"keeper-01-al","state":"failing","mode":"on_demand","cells":[0,0,0,0,0,0,0,0,0,0,0,0,2,2,2,2,2,2,0,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,0,0,2,2,2,0,2,0,0,0],"lastTurns":[{"e":1793918461,"o":"fail"},{"e":1793920283,"o":"fail"},{"e":1793922109,"o":"fail"},{"e":1793927144,"o":"fail"},{"e":1793929001,"o":"fail"},{"e":1793930860,"o":"fail"},{"e":1793931632,"o":"fail"},{"e":1793934831,"o":"fail"}],"idleS":4602,"sch":[],"mem":{"lag":0,"gap":0,"facts":19,"add":5,"rem":1,"upd":1793937003.318807,"ok":1793937003.318807,"lib":"pending","lf":null},"fr":{"n":19,"s":2,"fb":[1793585786,1793614955,1793626388,1793626388,1793626646,1793628745,1793629782,1793630002,1793662225,1793676885,1793676885,1793676885,1793694079,1793699390,1793934696,1793934696,1793934696,1793934696,1793934696],"upd":1793937003,"rev":24,"ch":[5,1,14],"un":14,"inv":[],"ro":0},"lastFailAgeS":4601,"cause":"provider","nextAction":"probe","hops":[{"rt":"r9","fault":"provider","retryAfterS":null}],"term":{"rt":"r9","fault":"provider"},"rest":{"st":"resting","head":"r9"},"since":{"e":1793876658,"lb":false}},{"name":"keeper-02-alp","state":"healthy","mode":"autonomous","cells":[0,2,0,0,0,3,1,3,0,2,0,0,0,3,1,1,3,1,1,3,1,1,1,1,1,3,1,1,1,1,1,1,1,3,1,1,1,3,0,0,3,1,1,1,1,1,1,1],"lastTurns":[{"e":1793938347,"o":"ok"},{"e":1793938431,"o":"ok"},{"e":1793938628,"o":"ok"},{"e":1793938797,"o":"ok"},{"e":1793939044,"o":"ok"},{"e":1793939105,"o":"ok"},{"e":1793939269,"o":"ok"},{"e":1793939415,"o":"ok"}],"idleS":18,"sch":[{"e":1793939518.0,"st":"scheduled","rec":"every 5m","iv":300,"lw":{"st":"ok","e":1793939224.0},"od":false}],"mem":{"lag":118,"gap":3691,"facts":135,"add":0,"rem":1,"upd":1793866100.053134,"ok":1793934696.695288,"lib":"pending","lf":null},"fr":{"n":135,"s":0,"fb":[1790158009,1791483666,1791878975,1791887066,1791917445,1791918148,1791933447,1791948739,1791953834,1791961143,1791978702,1791990027,1791994655,1792161679,1792172752,1792476756,1792482575,1792491441,1792538113,1792548015,1792554269,1792561340,1792572054,1792574308,1792576273,1792582603,1792587278,1792588261,1792592072,1792592749,1792594907,1792596389,1792597525,1792622285,1792622796,1792625665,1792649995,1792666639,1792671475,1792671475,1792981160,1793452341,1793467615,1793476187,1793479706,1793482799,1793517757,1793593011,1793597800,1793599735,1793601422,1793612182,1793617819,1793617917,1793618786,1793619005,1793619191,1793619333,1793620353,1793620840,1793624952,1793627962,1793628897,1793629627,1793629627,1793631662,1793634649,1793634816,1793635240,1793636317,1793636772,1793637215,1793647088,1793649863,1793650074,1793650195,1793652730,1793653887,1793654355,1793656964,1793657036,1793657525,1793658989,1793659190,1793659190,1793665796,1793723458,1793726098,1793726202,1793726980,1793727414,1793733252,1793733498,1793734570,1793735280,1793735409,1793735643,1793735802,1793736139,1793736372,1793738854,1793739120,1793740304,1793740304,1793740517,1793741143,1793741315,1793741384,1793741893,1793742369,1793742763,1793743105,1793743273,1793743444,1793743681,1793743695,1793744039,1793744533,1793744739,1793745405,1793747446,1793750296,1793750412,1793762409,1793762409,1793772024,1793772356,1793772356,1793800104,1793800104,1793800104,1793800104,1793800104,1793800104,1793800104],"upd":1793866100,"rev":2211,"ch":[0,1,135],"un":54,"inv":[],"ro":0}},{"name":"keeper-03-alpha-bravo","state":"paused","mode":"autonomous","cells":[1,1,1,2,2,0,1,0,1,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"lastTurns":[{"e":1793858671,"o":"ok"},{"e":1793860509,"o":"fail"},{"e":1793861316,"o":"fail"},{"e":1793862875,"o":"fail"},{"e":1793866441,"o":"ok"},{"e":1793866690,"o":"ok"},{"e":1793869760,"o":"ok"},{"e":1793871836,"o":"fail"}],"idleS":67597,"sch":[],"mem":{"lag":16,"gap":259,"facts":79,"add":1,"rem":0,"upd":1793866612.480918,"ok":1793866612.480918,"lib":"pending","lf":null},"fr":{"n":79,"s":0,"fb":[1792566969,1792574479,1792584165,1792584275,1792584668,1792586932,1792588746,1792588746,1792589339,1792589454,1792592004,1792597229,1792604363,1792612225,1792641476,1792643851,1792644674,1792673120,1792700511,1792700511,1792702813,1792704841,1792729182,1792731623,1792735933,1792740170,1792752231,1792752231,1792752231,1792752231,1792752231,1792755100,1792755100,1792755415,1792981159,1792983680,1792987285,1793121763,1793121763,1793121763,1793121763,1793121763,1793128248,1793142374,1793142374,1793142374,1793143808,1793147922,1793148001,1793151260,1793151260,1793154853,1793158284,1793158284,1793158284,1793159926,1793159926,1793162350,1793162350,1793549356,1793549356,1793549356,1793549356,1793549356,1793562176,1793577686,1793585790,1793585790,1793693752,1793693752,1793693752,1793722199,1793722202,1793740724,1793756427,1793777604,1793777604,1793777604,1793866612],"upd":1793866612,"rev":177,"ch":[1,0,78],"un":9,"inv":[],"ro":0}},{"name":"keeper-04-alpha-brav","state":"healthy","mode":"autonomous","cells":[1,1,1,2,2,0,1,1,1,2,0,0,1,2,1,3,0,0,0,1,1,1,1,1,1,1,2,0,0,0,0,1,1,1,1,0,2,0,0,0,2,1,1,1,1,0,0,0],"lastTurns":[{"e":1793919812,"o":"fail"},{"e":1793927129,"o":"fail"},{"e":1793929301,"o":"ok"},{"e":1793930484,"o":"ok"},{"e":1793930721,"o":"ok"},{"e":1793932272,"o":"ok"},{"e":1793932769,"o":"ok"},{"e":1793935710,"o":"ok"}],"idleS":3723,"sch":[],"mem":{"lag":56,"gap":0,"facts":26,"add":1,"rem":0,"upd":1793866415.896999,"ok":1793866415.896999,"lib":"pending","lf":null},"fr":{"n":26,"s":0,"fb":[1793029582,1793050100,1793053300,1793053300,1793055086,1793071112,1793079834,1793094195,1793094195,1793094597,1793105319,1793587269,1793589236,1793589236,1793723442,1793727299,1793730285,1793736738,1793740553,1793747140,1793747140,1793747140,1793747140,1793747140,1793749124,1793866415],"upd":1793866415,"rev":61,"ch":[1,0,25],"un":12,"inv":[],"ro":0}},{"name":"keeper-05-alpha-brav","state":"paused","mode":"autonomous","cells":[1,0,1,2,2,0,1,1,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"lastTurns":[{"e":1793856595,"o":"ok"},{"e":1793858738,"o":"ok"},{"e":1793860572,"o":"fail"},{"e":1793861285,"o":"fail"},{"e":1793862832,"o":"fail"},{"e":1793866450,"o":"ok"},{"e":1793868739,"o":"ok"},{"e":1793871836,"o":"fail"}],"idleS":67597,"sch":[],"mem":{"lag":18,"gap":225,"facts":36,"add":3,"rem":0,"upd":1793763349.320313,"ok":1793934695.690584,"lib":"pending","lf":null},"fr":{"n":36,"s":0,"fb":[1793033342,1793041281,1793096657,1793121753,1793124335,1793126704,1793128121,1793129384,1793451670,1793500760,1793500760,1793500760,1793505641,1793509852,1793510317,1793549356,1793549356,1793549356,1793665648,1793665741,1793693745,1793693745,1793693745,1793693745,1793695000,1793720945,1793722123,1793722123,1793722123,1793722123,1793726302,1793753316,1793753316,1793763349,1793763349,1793763349],"upd":1793763349,"rev":36,"ch":[3,0,33],"un":15,"inv":[],"ro":0}},{"name":"keeper-06-alpha-brav","state":"healthy","mode":"autonomous","cells":[0,0,0,0,0,0,1,1,0,2,0,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,3,0,0,2,0,2,3,1,1,1,0],"lastTurns":[{"e":1793933355,"o":"fail"},{"e":1793934803,"o":"ok"},{"e":1793935374,"o":"ok"},{"e":1793935492,"o":"ok"},{"e":1793936757,"o":"ok"},{"e":1793936877,"o":"ok"},{"e":1793938968,"o":"ok"},{"e":1793939167,"o":"ok"}],"idleS":266,"sch":[],"mem":{"lag":0,"gap":0,"facts":85,"add":1,"rem":1,"upd":1793932691.673904,"ok":1793933554.333923,"lib":"pending","lf":null},"fr":{"n":85,"s":0,"fb":[1792584259,1792586761,1792588883,1792589756,1792591977,1792595883,1792596935,1792600523,1792604515,1792608225,1792619514,1792619514,1792666365,1792669444,1792715120,1792816933,1792981159,1792985300,1792985300,1792985641,1793074820,1793077246,1793077473,1793121763,1793549355,1793576660,1793580199,1793583481,1793665765,1793728834,1793741661,1793758485,1793798722,1793806237,1793809950,1793810574,1793813244,1793813244,1793814404,1793814404,1793826269,1793828661,1793828661,1793829777,1793832563,1793832916,1793834415,1793834415,1793835444,1793835723,1793837095,1793838071,1793838071,1793851099,1793852667,1793854895,1793858734,1793858734,1793869120,1793876506,1793876506,1793877779,1793878468,1793878468,1793880970,1793882920,1793883777,1793885059,1793890775,1793890775,1793891178,1793893386,1793894592,1793895721,1793895721,1793910612,1793910612,1793910612,1793910612,1793914881,1793916736,1793920289,1793929622,1793929622,1793932314],"upd":1793932691,"rev":216,"ch":[1,1,84],"un":16,"inv":[],"ro":0}},{"name":"keeper-07-alpha-bra","state":"healthy","mode":"autonomous","cells":[1,0,3,2,2,0,1,1,0,2,0,0,0,2,1,1,0,0,1,1,0,1,1,1,1,0,1,2,0,0,2,0,1,1,1,1,2,0,0,0,3,1,0,1,0,0,1,0],"lastTurns":[{"e":1793921253,"o":"fail"},{"e":1793927124,"o":"fail"},{"e":1793928451,"o":"ok"},{"e":1793929425,"o":"ok"},{"e":1793932712,"o":"ok"},{"e":1793933078,"o":"ok"},{"e":1793938074,"o":"ok"},{"e":1793938961,"o":"ok"}],"idleS":472,"sch":[],"mem":{"lag":36,"gap":506,"facts":28,"add":1,"rem":0,"upd":1793866919.698742,"ok":1793866919.698742,"lib":"pending","lf":null},"fr":{"n":28,"s":0,"fb":[1793041916,1793046659,1793046659,1793074818,1793075904,1793075904,1793075904,1793075904,1793075904,1793451669,1793451669,1793549351,1793549351,1793582076,1793582076,1793582076,1793582493,1793583441,1793587997,1793589575,1793591663,1793593592,1793693748,1793720432,1793750495,1793750495,1793750495,1793866919],"upd":1793866919,"rev":33,"ch":[1,0,27],"un":14,"inv":[],"ro":0}},{"name":"keeper-08-alphax","state":"healthy","mode":"autonomous","cells":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,3,1,1],"lastTurns":[{"e":1793937348,"o":"fail"},{"e":1793937708,"o":"ok"},{"e":1793938113,"o":"ok"},{"e":1793938316,"o":"ok"},{"e":1793938549,"o":"ok"},{"e":1793938737,"o":"ok"},{"e":1793939055,"o":"ok"},{"e":1793939407,"o":"ok"}],"idleS":26,"sch":[{"e":1793939678.0,"st":"scheduled","rec":"every 5m","iv":300,"lw":{"st":"ok","e":1793939393.0},"od":false}],"mem":{"lag":236,"gap":4169,"facts":108,"add":3,"rem":0,"upd":1793764675.778466,"ok":1793764675.778466,"lib":"pending","lf":"lane_cancelled"},"fr":{"n":108,"s":13,"fb":[1790505687,1790563416,1791072177,1791145688,1791275205,1791797165,1791822171,1791899913,1791917357,1791922116,1791925058,1791935112,1791955401,1791964656,1791976373,1791981670,1791982421,1792008854,1792151140,1792199054,1792239608,1792297837,1792447466,1792459549,1792473607,1792479680,1792480561,1792484974,1792507226,1792507696,1792512815,1792513272,1792513581,1792513791,1792513894,1792516260,1792520171,1792520656,1792530805,1792551713,1792552854,1792553227,1792562461,1792562684,1792563051,1792563051,1792565357,1792566693,1792571390,1792572419,1792584364,1792587642,1792589827,1792591095,1792591422,1792592694,1792594694,1792596890,1792600344,1792600798,1792604259,1792611165,1792619804,1792665672,1792705188,1792792044,1792793831,1792803513,1792954457,1793043245,1793059943,1793074820,1793080343,1793081872,1793082372,1793087441,1793090931,1793091292,1793092966,1793094129,1793094449,1793096059,1793096443,1793096629,1793121757,1793451672,1793469505,1793521522,1793530620,1793538821,1793580249,1793580249,1793580520,1793595469,1793665773,1793665773,1793693771,1793726420,1793727655,1793735410,1793736718,1793739614,1793740703,1793742650,1793744738,1793759491,1793759491,1793759491],"upd":1793764675,"rev":2153,"ch":[3,0,105],"un":12,"inv":[[1790422079,0],[1791274289,0],[1793665615,1],[1793665615,1],[1793665625,1]],"ro":0}},{"name":"keeper-09-alpha-b","state":"healthy","mode":"autonomous","cells":[1,1,3,2,2,0,1,1,1,2,0,1,1,1,1,1,1,3,1,1,1,1,1,1,1,1,2,0,0,0,1,1,1,1,1,1,2,0,0,0,3,1,1,1,1,3,1,1],"lastTurns":[{"e":1793937292,"o":"fail"},{"e":1793937563,"o":"ok"},{"e":1793937715,"o":"ok"},{"e":1793938026,"o":"ok"},{"e":1793938240,"o":"ok"},{"e":1793938348,"o":"ok"},{"e":1793938736,"o":"ok"},{"e":1793939428,"o":"ok"}],"idleS":5,"sch":[{"e":1793940813.0,"st":"scheduled","rec":"once","iv":null,"lw":null,"od":false},{"e":1793941529.0,"st":"scheduled","rec":"once","iv":null,"lw":null,"od":false},{"e":1793941736.0,"st":"scheduled","rec":"once","iv":null,"lw":null,"od":false},{"e":1793942199.0,"st":"scheduled","rec":"once","iv":null,"lw":null,"od":false},{"e":1793952000.0,"st":"scheduled","rec":"daily 08:00:00 UTC","iv":null,"lw":{"st":"ok","e":1793865602.0},"od":false}],"mem":{"lag":125,"gap":163,"facts":116,"add":0,"rem":1,"upd":1793867123.13414,"ok":1793857081.981047,"lib":"pending","lf":null},"fr":{"n":116,"s":0,"fb":[1789947478,1789961091,1791302149,1791458885,1791458886,1791458886,1791795637,1791849609,1791876545,1791920979,1791920979,1791946665,1791985408,1792006275,1792171534,1792242005,1792391178,1792472377,1792472502,1792474707,1792475115,1792476852,1792477092,1792477092,1792481029,1792481029,1792483637,1792484261,1792486683,1792487562,1792488064,1792491322,1792491778,1792493707,1792493707,1792497006,1792507284,1792570399,1792573853,1792582942,1792582942,1792584214,1792591324,1792591363,1792599134,1792600154,1792601634,1792603465,1792604005,1792613848,1792643673,1792643673,1792651315,1792651315,1792661917,1792681756,1792699102,1792731029,1792816824,1792994758,1792997562,1793009621,1793012811,1793014416,1793014416,1793019538,1793021319,1793074818,1793085610,1793093003,1793097906,1793097906,1793107133,1793110555,1793137442,1793142283,1793142489,1793142611,1793144028,1793144766,1793144766,1793144914,1793145475,1793146680,1793146847,1793549366,1793549366,1793589230,1793589419,1793589893,1793591835,1793593122,1793596272,1793596272,1793596272,1793597024,1793597501,1793597582,1793597682,1793597769,1793598091,1793599893,1793601173,1793601310,1793601683,1793601854,1793665761,1793665761,1793665761,1793693755,1793693755,1793693755,1793693755,1793857081,1793857081,1793857081],"upd":1793867123,"rev":3561,"ch":[0,1,116],"un":26,"inv":[[1790533053,0],[1790913032,1],[1790913032,1]],"ro":0}},{"name":"keeper-10-alpha-bravo-charli","state":"healthy","mode":"on_demand","cells":[0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,3,0,0],"lastTurns":[{"e":1793876876,"o":"ok"},{"e":1793876886,"o":"ok"},{"e":1793879191,"o":"ok"},{"e":1793879899,"o":"ok"},{"e":1793881073,"o":"ok"},{"e":1793935942,"o":"ok"},{"e":1793936594,"o":"fail"},{"e":1793936718,"o":"ok"}],"idleS":2715,"sch":[],"mem":{"lag":2,"gap":0,"facts":4,"add":1,"rem":1,"upd":1793884149.514246,"ok":1793884149.514246,"lib":"pending","lf":null},"fr":{"n":4,"s":0,"fb":[1793503869,1793507232,1793507232,1793883562],"upd":1793884149,"rev":6,"ch":[1,1,3],"un":0,"inv":[],"ro":0}},{"name":"keeper-11-alphax","state":"paused","mode":"autonomous","cells":[0,1,1,1,1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"lastTurns":[{"e":1793861325,"o":"ok"},{"e":1793862970,"o":"ok"},{"e":1793864883,"o":"ok"},{"e":1793867015,"o":"ok"},{"e":1793867664,"o":"ok"},{"e":1793869617,"o":"ok"},{"e":1793871215,"o":"ok"},{"e":1793871583,"o":"ok"}],"idleS":67850,"sch":[],"mem":{"lag":0,"gap":0,"facts":26,"add":1,"rem":2,"upd":1793675714.322602,"ok":1793936136.654959,"lib":"drained","lf":null},"fr":{"n":26,"s":3,"fb":[1790712058,1790735307,1790763639,1790782114,1790784227,1790792805,1790865099,1792378341,1792388346,1792395843,1792409839,1792416581,1792417544,1792421223,1792424562,1792450282,1793585786,1793612525,1793612525,1793616509,1793616509,1793621013,1793621013,1793636162,1793651244,1793675691],"upd":1793675714,"rev":189,"ch":[1,2,25],"un":10,"inv":[[1791225690,0],[1791240405,0],[1791279390,0],[1791291834,0],[1791322358,0],[1791326151,0],[1791328259,0],[1791330271,0]],"ro":0}},{"name":"keeper-12x","state":"paused","mode":"autonomous","cells":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"lastTurns":[{"e":1792854683,"o":"ok"},{"e":1792858270,"o":"ok"},{"e":1792860538,"o":"ok"},{"e":1792861231,"o":"ok"},{"e":1792862238,"o":"ok"},{"e":1792864197,"o":"ok"},{"e":1792886849,"o":"fail"},{"e":1792888092,"o":"ok"}],"idleS":1051341,"sch":[{"e":1793976900.0,"st":"scheduled","rec":"daily 14:55:00 UTC","iv":null,"lw":{"st":"ok","e":1793890501.0},"od":false},{"e":1794011100.0,"st":"scheduled","rec":"daily 09:25:00 +09:00","iv":null,"lw":{"st":"ok","e":1793924711.0},"od":false},{"e":1794012900.0,"st":"scheduled","rec":"daily 00:55:00 UTC","iv":null,"lw":{"st":"ok","e":1793927024.0},"od":false}],"mem":{"lag":0,"gap":0,"facts":0,"add":0,"rem":0,"upd":null,"ok":1792981159.051819,"lib":"drained","lf":"exact_execution_failure"},"fr":null},{"name":"keeper-13-alpha-b","state":"healthy","mode":"autonomous","cells":[1,1,0,0,1,0,1,2,0,2,3,1,0,0,0,0,0,1,1,0,0,0,0,0,0,1,3,1,1,2,1,0,1,0,0,1,3,2,2,0,3,0,0,0,0,0,0,0],"lastTurns":[{"e":1793927474,"o":"fail"},{"e":1793927485,"o":"fail"},{"e":1793927495,"o":"fail"},{"e":1793927504,"o":"fail"},{"e":1793927538,"o":"ok"},{"e":1793927602,"o":"ok"},{"e":1793927613,"o":"ok"},{"e":1793927644,"o":"ok"}],"idleS":11789,"sch":[],"mem":{"lag":0,"gap":0,"facts":20,"add":8,"rem":3,"upd":1793938819.43361,"ok":1793938819.43361,"lib":"yielded_to_waiting_unit","lf":null},"fr":{"n":20,"s":0,"fb":[1793723442,1793728457,1793738559,1793738559,1793739774,1793742795,1793743606,1793746959,1793767822,1793767822,1793769021,1793779930,1793934697,1793934697,1793934697,1793934697,1793934697,1793934697,1793934697,1793934697],"upd":1793938819,"rev":45,"ch":[8,3,12],"un":2,"inv":[],"ro":0}},{"name":"keeper-14-alpha","state":"paused","mode":"autonomous","cells":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"lastTurns":[{"e":1792835645,"o":"fail"},{"e":1792846272,"o":"ok"},{"e":1792851406,"o":"ok"},{"e":1792852292,"o":"ok"},{"e":1792860244,"o":"ok"},{"e":1792863323,"o":"ok"},{"e":1792864736,"o":"ok"},{"e":1792886954,"o":"ok"}],"idleS":1052479,"sch":[{"e":1793944304.0,"st":"scheduled","rec":"every 12h","iv":43200,"lw":{"st":"ok","e":1793901108.0},"od":false},{"e":1793979138.0,"st":"scheduled","rec":"every 12h","iv":43200,"lw":{"st":"ok","e":1793935949.0},"od":false}],"mem":{"lag":0,"gap":0,"facts":48,"add":1,"rem":0,"upd":1792825324.392518,"ok":1792825324.392518,"lib":"drained","lf":null},"fr":{"n":48,"s":1,"fb":[1790020765,1790101778,1790973844,1790975804,1790977740,1790977745,1790977750,1790979637,1791361394,1791794413,1791989027,1792178724,1792510431,1792523934,1792533480,1792539291,1792539368,1792539368,1792539368,1792539368,1792539587,1792539587,1792542281,1792542281,1792542353,1792542353,1792542387,1792545218,1792584555,1792584555,1792594603,1792596530,1792597004,1792598074,1792598620,1792599635,1792599764,1792599955,1792601190,1792601510,1792604398,1792607843,1792680757,1792703897,1792721187,1792752286,1792752286,1792825324],"upd":1792825324,"rev":2054,"ch":[1,0,47],"un":0,"inv":[[1790680239,1],[1791800331,0]],"ro":0}},{"name":"keeper-15-alp","state":"paused","mode":"autonomous","cells":[0,2,2,2,2,2,1,1,1,3,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"lastTurns":[{"e":1793872984,"o":"fail"},{"e":1793873047,"o":"fail"},{"e":1793873106,"o":"fail"},{"e":1793873164,"o":"fail"},{"e":1793873223,"o":"fail"},{"e":1793873283,"o":"fail"},{"e":1793873345,"o":"fail"},{"e":1793873410,"o":"fail"}],"idleS":66023,"sch":[{"e":1793944073.0,"st":"scheduled","rec":"every 2h","iv":7200,"lw":{"st":"ok","e":1793936903.0},"od":false}],"mem":{"lag":84,"gap":1064,"facts":89,"add":0,"rem":1,"upd":1793867102.068602,"ok":1793807714.583829,"lib":"pending","lf":null},"fr":{"n":89,"s":0,"fb":[1789966656,1790004165,1790109050,1790113132,1790181257,1790659092,1791872626,1791880428,1791893679,1792336834,1792412532,1792431359,1792431359,1792490897,1792506795,1792506795,1792507540,1792507540,1792520410,1792539265,1792543195,1792548713,1792549535,1792549637,1792551483,1792551574,1792551914,1792552067,1792553045,1792553348,1792553441,1792553441,1792553441,1792553619,1792553619,1792564025,1792594241,1792599557,1792599599,1792599667,1792599725,1792600063,1792600683,1792601573,1792720925,1792720925,1792772080,1792797572,1792930368,1792983885,1792983885,1792983885,1793074818,1793074818,1793451670,1793451670,1793451670,1793585794,1793603293,1793603293,1793607601,1793662759,1793662759,1793662759,1793662759,1793699837,1793720676,1793725906,1793725906,1793727310,1793734248,1793735746,1793738700,1793738700,1793745773,1793746485,1793746972,1793749992,1793751625,1793754677,1793754677,1793766908,1793771626,1793771626,1793795173,1793798561,1793799265,1793806847,1793807714],"upd":1793867102,"rev":2949,"ch":[0,1,89],"un":19,"inv":[[1790912233,1],[1790912233,1],[1790912233,1],[1790912233,1],[1790912233,1],[1790912233,1],[1790912233,1],[1790912233,1],[1791437399,0],[1791973990,1],[1792563928,0],[1793114932,1],[1793114932,1],[1793114932,1],[1793114932,1],[1793114932,1],[1793114932,1],[1793114932,1],[1793114932,1],[1793114932,1],[1793114932,1],[1793114932,1],[1793114932,1],[1793114932,1]],"ro":0}},{"name":"keeper-16-alpha-bravo-charli","state":"healthy","mode":"autonomous","cells":[1,1,1,1,1,1,1,1,1,2,0,0,0,1,1,1,0,1,1,0,1,1,1,1,1,1,2,0,0,0,1,0,1,1,1,1,2,0,0,0,2,1,1,0,1,1,1,0],"lastTurns":[{"e":1793928783,"o":"ok"},{"e":1793929971,"o":"ok"},{"e":1793932193,"o":"ok"},{"e":1793934376,"o":"ok"},{"e":1793935603,"o":"ok"},{"e":1793936408,"o":"ok"},{"e":1793937054,"o":"ok"},{"e":1793937603,"o":"ok"}],"idleS":1830,"sch":[{"e":1794009600.0,"st":"scheduled","rec":"daily 09:00:00 Asia/Seoul","iv":null,"lw":{"st":"ok","e":1793923216.0},"od":false},{"e":1794528000.0,"st":"scheduled","rec":"cron 0 9 * * 5 Asia/Seoul","iv":null,"lw":{"st":"ok","e":1793923216.0},"od":false}],"mem":{"lag":92,"gap":582,"facts":15,"add":1,"rem":1,"upd":1793803472.753354,"ok":1793803472.753354,"lib":"pending","lf":null},"fr":{"n":15,"s":0,"fb":[1791841996,1791869166,1792389533,1792404299,1792465740,1792477686,1792554244,1792592393,1793121758,1793147697,1793694827,1793721623,1793723896,1793732768,1793803472],"upd":1793803472,"rev":169,"ch":[1,1,14],"un":5,"inv":[[1791348716,0]],"ro":0}},{"name":"keeper-17-alpha-brav","state":"paused","mode":"autonomous","cells":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"lastTurns":[{"e":1793164450,"o":"fail"},{"e":1793173993,"o":"fail"},{"e":1793174070,"o":"fail"},{"e":1793174256,"o":"fail"},{"e":1793174707,"o":"fail"},{"e":1793175842,"o":"fail"},{"e":1793177401,"o":"fail"},{"e":1793183272,"o":"fail"}],"idleS":756161,"sch":[{"e":1794011400.0,"st":"scheduled","rec":"daily 09:30:00 Asia/Seoul","iv":null,"lw":{"st":"ok","e":1793927022.0},"od":false},{"e":1794015000.0,"st":"scheduled","rec":"daily 10:30:00 Asia/Seoul","iv":null,"lw":{"st":"ok","e":1793928606.0},"od":false}],"mem":{"lag":0,"gap":0,"facts":23,"add":2,"rem":1,"upd":1793455568.430229,"ok":1793455568.430229,"lib":"drained","lf":"exact_execution_failure"},"fr":{"n":23,"s":2,"fb":[1791820399,1791868090,1791903212,1792153557,1792460617,1792472252,1792720568,1792827114,1792827114,1792886888,1792981158,1792981158,1792981158,1793085784,1793097458,1793107338,1793109174,1793112939,1793115572,1793119572,1793129704,1793451670,1793451670],"upd":1793455568,"rev":92,"ch":[2,1,21],"un":0,"inv":[],"ro":0}},{"name":"keeper-18-alpha-bravo-c","state":"paused","mode":"autonomous","cells":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"lastTurns":[{"e":1793351401,"o":"ok"},{"e":1793353155,"o":"ok"},{"e":1793353311,"o":"ok"},{"e":1793353479,"o":"fail"},{"e":1793355505,"o":"ok"},{"e":1793357358,"o":"fail"},{"e":1793357832,"o":"ok"},{"e":1793361373,"o":"ok"}],"idleS":578060,"sch":[],"mem":{"lag":0,"gap":0,"facts":12,"add":1,"rem":1,"upd":1793494963.04282,"ok":1793494963.04282,"lib":"drained","lf":"exact_execution_failure"},"fr":{"n":12,"s":0,"fb":[1792496002,1792805207,1792823898,1793027992,1793045732,1793074041,1793117370,1793119572,1793119572,1793119572,1793127094,1793451671],"upd":1793494963,"rev":18,"ch":[1,1,11],"un":0,"inv":[[1793207137,0]],"ro":0}},{"name":"keeper-19-alpha-bravo","state":"healthy","mode":"autonomous","cells":[0,1,1,1,1,1,1,1,2,2,0,0,1,1,1,1,1,3,1,1,1,1,1,1,1,3,1,1,1,1,1,1,1,1,1,1,1,2,0,0,3,1,1,1,1,1,1,0],"lastTurns":[{"e":1793934191,"o":"ok"},{"e":1793934734,"o":"ok"},{"e":1793934752,"o":"ok"},{"e":1793935357,"o":"ok"},{"e":1793935476,"o":"ok"},{"e":1793936717,"o":"ok"},{"e":1793936777,"o":"ok"},{"e":1793938838,"o":"ok"}],"idleS":595,"sch":[{"e":1793940061.0,"st":"scheduled","rec":"every 1h","iv":3600,"lw":{"st":"ok","e":1793936493.0},"od":false}],"mem":{"lag":0,"gap":0,"facts":22,"add":2,"rem":0,"upd":1793934140.5031,"ok":1793934573.510213,"lib":"pending","lf":null},"fr":{"n":22,"s":0,"fb":[1793693755,1793693755,1793760594,1793760594,1793760594,1793769864,1793770689,1793798722,1793800745,1793805827,1793809231,1793817246,1793852620,1793877458,1793878554,1793886769,1793900503,1793932443,1793932969,1793933372,1793933783,1793933783],"upd":1793934140,"rev":67,"ch":[2,0,20],"un":9,"inv":[],"ro":0}},{"name":"keeper-20-alp","state":"paused","mode":"autonomous","cells":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"lastTurns":[{"e":1793350346,"o":"ok"},{"e":1793352205,"o":"ok"},{"e":1793354084,"o":"ok"},{"e":1793355953,"o":"ok"},{"e":1793357675,"o":"ok"},{"e":1793361044,"o":"ok"},{"e":1793362184,"o":"ok"},{"e":1793362252,"o":"ok"}],"idleS":577181,"sch":[],"mem":{"lag":0,"gap":0,"facts":40,"add":5,"rem":1,"upd":1793456564.529179,"ok":1793456564.529179,"lib":"drained","lf":null},"fr":{"n":40,"s":4,"fb":[1792153137,1792153217,1792208606,1792348885,1792494105,1792494105,1792534502,1792535919,1792537815,1792539656,1792541575,1792577595,1792584007,1792631900,1792653434,1792723284,1792752238,1792981343,1792981343,1793001129,1793001129,1793005043,1793009772,1793010911,1793028975,1793053400,1793059404,1793068589,1793080004,1793089988,1793095949,1793144555,1793149784,1793149784,1793150107,1793451669,1793451669,1793451669,1793451669,1793451669],"upd":1793456564,"rev":190,"ch":[5,1,35],"un":0,"inv":[],"ro":0}},{"name":"keeper-21-alpha-brav","state":"healthy","mode":"autonomous","cells":[1,1,1,3,1,1,1,1,1,3,2,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,2,2,2,2,2,1,1,1,1,1,2,2,2,0,2,1,1,0,1,3,1,0],"lastTurns":[{"e":1793934453,"o":"ok"},{"e":1793935218,"o":"ok"},{"e":1793936041,"o":"ok"},{"e":1793936494,"o":"ok"},{"e":1793937047,"o":"fail"},{"e":1793937535,"o":"ok"},{"e":1793937817,"o":"ok"},{"e":1793938459,"o":"ok"}],"idleS":974,"sch":[{"e":1793945580.0,"st":"scheduled","rec":"cron 13 */2 * * * UTC","iv":null,"lw":{"st":"ok","e":1793938393.0},"od":false},{"e":1793952000.0,"st":"scheduled","rec":"daily 08:00:00 UTC","iv":null,"lw":{"st":"ok","e":1793865601.0},"od":false}],"mem":{"lag":180,"gap":1098,"facts":61,"add":0,"rem":1,"upd":1793866153.758656,"ok":1793751853.218723,"lib":"pending","lf":null},"fr":{"n":61,"s":3,"fb":[1793451669,1793451669,1793471697,1793490455,1793503090,1793510670,1793510670,1793517219,1793549367,1793549367,1793587028,1793588304,1793588962,1793589445,1793594772,1793594772,1793596976,1793596976,1793596976,1793596976,1793596976,1793597776,1793601650,1793601650,1793602309,1793606066,1793611977,1793693986,1793693986,1793693986,1793693986,1793693986,1793722042,1793722439,1793722439,1793723592,1793727860,1793728013,1793728106,1793728414,1793728998,1793729430,1793730196,1793730196,1793730196,1793731340,1793731858,1793737777,1793737777,1793737777,1793743053,1793743053,1793743053,1793743053,1793743053,1793743053,1793746011,1793749334,1793751190,1793751641,1793751641],"upd":1793866153,"rev":94,"ch":[0,1,61],"un":41,"inv":[[1793647744,1]],"ro":0}},{"name":"keeper-22-alpha","state":"healthy","mode":"autonomous","cells":[2,2,2,2,2,2,0,2,2,2,3,3,2,2,2,2,0,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,0,2,1,3,3,1,1,1,1],"lastTurns":[{"e":1793937608,"o":"ok"},{"e":1793937932,"o":"ok"},{"e":1793938214,"o":"ok"},{"e":1793938511,"o":"ok"},{"e":1793938554,"o":"ok"},{"e":1793938806,"o":"ok"},{"e":1793939111,"o":"ok"},{"e":1793939433,"o":"ok"}],"idleS":0,"sch":[{"e":1793939685.0,"st":"scheduled","rec":"every 5m","iv":300,"lw":{"st":"ok","e":1793939399.0},"od":false},{"e":1794009600.0,"st":"scheduled","rec":"daily 09:00:00 Asia/Seoul","iv":null,"lw":{"st":"ok","e":1793923215.0},"od":false}],"mem":{"lag":8,"gap":1254,"facts":63,"add":1,"rem":1,"upd":1793818079.309016,"ok":1793818079.309016,"lib":"pending","lf":null},"fr":{"n":63,"s":0,"fb":[1789710135,1790031275,1790354335,1790913039,1791300300,1791876607,1791876831,1791885069,1791912599,1791929676,1792147191,1792321507,1792382452,1792536706,1792536982,1792536982,1792537139,1792537139,1792537339,1792537727,1792538856,1792538856,1792539196,1792539471,1792541169,1792541421,1792541421,1792541941,1792542905,1792546067,1792573888,1792573888,1792582359,1792583533,1792587057,1792784807,1792784807,1792816843,1793018295,1793031209,1793043443,1793060261,1793071699,1793078102,1793083872,1793096212,1793451673,1793451673,1793451673,1793587013,1793588724,1793588724,1793693759,1793693759,1793693759,1793750540,1793751582,1793751786,1793751786,1793753504,1793793252,1793801661,1793818079],"upd":1793818079,"rev":4111,"ch":[1,1,62],"un":13,"inv":[[1790066370,0],[1793585698,1]],"ro":0}},{"name":"keeper-23-al","state":"healthy","mode":"autonomous","cells":[1,1,1,1,1,1,0,1,1,2,3,1,1,1,1,1,0,1,0,0,0,0,0,0,0,0,3,1,1,1,1,1,1,0,0,0,3,1,2,0,2,1,1,1,1,1,1,0],"lastTurns":[{"e":1793933380,"o":"ok"},{"e":1793934745,"o":"ok"},{"e":1793935347,"o":"ok"},{"e":1793935483,"o":"ok"},{"e":1793935546,"o":"ok"},{"e":1793936623,"o":"ok"},{"e":1793936699,"o":"ok"},{"e":1793938776,"o":"ok"}],"idleS":657,"sch":[{"e":1794021900.0,"st":"scheduled","rec":"daily 03:25:00 UTC","iv":null,"lw":{"st":"ok","e":1793935502.0},"od":false}],"mem":{"lag":65,"gap":1617,"facts":32,"add":1,"rem":0,"upd":1793840767.659051,"ok":1793840767.659051,"lib":"pending","lf":null},"fr":{"n":32,"s":0,"fb":[1792313481,1792324398,1792385259,1792411549,1792421676,1792523866,1792584062,1792635075,1792635075,1792816829,1792853049,1792981159,1793019989,1793045812,1793143592,1793145991,1793163028,1793451669,1793451669,1793451669,1793451669,1793533117,1793693765,1793722304,1793747279,1793749197,1793749197,1793749197,1793753293,1793770343,1793818040,1793840767],"upd":1793840767,"rev":124,"ch":[1,0,31],"un":8,"inv":[[1793273829,1],[1793273829,1],[1793273829,1],[1793461658,1],[1793693887,1]],"ro":0}},{"name":"keeper-24-alpha-bravo-charlie-de","state":"paused","mode":"on_demand","cells":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"lastTurns":[],"idleS":null,"sch":[],"mem":{"lag":0,"gap":0,"facts":0,"add":0,"rem":0,"upd":null,"ok":null,"lib":"drained","lf":"exact_execution_failure"},"fr":null},{"name":"keeper-25-alph","state":"failing","mode":"autonomous","cells":[1,1,1,1,1,1,1,1,3,3,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,0,2,2,2,0,2,0,0,0],"lastTurns":[{"e":1793931182,"o":"fail"},{"e":1793931209,"o":"fail"},{"e":1793931239,"o":"fail"},{"e":1793931255,"o":"fail"},{"e":1793931300,"o":"fail"},{"e":1793931362,"o":"fail"},{"e":1793931607,"o":"fail"},{"e":1793934788,"o":"fail"}],"idleS":4645,"sch":[{"e":1793927415.0,"st":"due","rec":"every 10m","iv":600,"lw":{"st":"ok","e":1793927025.0},"od":true},{"e":1793939618.0,"st":"scheduled","rec":"every 10m","iv":600,"lw":{"st":"ok","e":1793939022.0},"od":false},{"e":1793939821.0,"st":"scheduled","rec":"every 10m","iv":600,"lw":{"st":"ok","e":1793939223.0},"od":false}],"mem":{"lag":1,"gap":0,"facts":103,"add":2,"rem":0,"upd":1793865997.218767,"ok":1793865997.218767,"lib":"pending","lf":null},"fr":{"n":103,"s":1,"fb":[1790107200,1790128957,1790361568,1790505686,1790650702,1791500629,1791849317,1791878319,1791893600,1791899310,1791901183,1791907225,1791921633,1791928020,1791941085,1791943523,1791950526,1791953417,1791953888,1791980733,1791981916,1791989290,1791993361,1792166106,1792188810,1792212268,1792214856,1792221895,1792478111,1792484040,1792506517,1792511345,1792513195,1792514158,1792520873,1792521004,1792521139,1792527440,1792530516,1792531818,1792541918,1792546417,1792548153,1792552847,1792560567,1792566114,1792567025,1792567315,1792567315,1792569342,1792571330,1792571330,1792577488,1792581376,1792582855,1792583295,1792635596,1792651152,1792651152,1792656436,1792706745,1792710291,1792739727,1792820528,1792822712,1792826735,1792853855,1792981159,1792997614,1793023501,1793033669,1793074818,1793077813,1793078352,1793081053,1793091956,1793127013,1793129489,1793661962,1793663052,1793724847,1793725646,1793726687,1793726687,1793729058,1793729600,1793730087,1793730629,1793731539,1793736451,1793738714,1793743871,1793746046,1793746046,1793747072,1793749331,1793751422,1793751422,1793753645,1793865897,1793865897,1793865997,1793865997],"upd":1793865997,"rev":2443,"ch":[2,0,101],"un":15,"inv":[[1790362861,0],[1790575022,0],[1791240738,0],[1791500429,0],[1791533684,0],[1791555115,1],[1793662377,1],[1793662377,1],[1793662377,1],[1793662377,1],[1793662377,1],[1793662377,1],[1793662377,1],[1793662377,1],[1793662377,1],[1793865724,1],[1793866403,1]],"ro":0},"lastFailAgeS":4643,"cause":"provider","nextAction":"probe","hops":[{"rt":"r9","fault":"provider","retryAfterS":null}],"term":{"rt":"r9","fault":"provider"},"rest":{"st":"resting","head":"r9"},"since":{"e":1793872268,"lb":false}},{"name":"k26-agen","state":"paused","mode":"autonomous","cells":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"lastTurns":[{"e":1793350661,"o":"ok"},{"e":1793352667,"o":"ok"},{"e":1793354664,"o":"ok"},{"e":1793354693,"o":"ok"},{"e":1793356552,"o":"ok"},{"e":1793357640,"o":"ok"},{"e":1793361014,"o":"ok"},{"e":1793362137,"o":"ok"}],"idleS":577296,"sch":[{"e":1793944800.0,"st":"scheduled","rec":"cron 0 */2 * * * UTC","iv":null,"lw":{"st":"ok","e":1793937615.0},"od":false}],"mem":{"lag":0,"gap":0,"facts":87,"add":0,"rem":1,"upd":1793625570.335229,"ok":1793586208.2537,"lib":"drained","lf":"exact_execution_failure"},"fr":{"n":87,"s":2,"fb":[1788316400,1788650738,1788654250,1789865205,1789883228,1789896818,1789900428,1789922293,1789957682,1789982922,1789985119,1790068347,1790081594,1790081594,1790090033,1790106073,1790589490,1790589490,1790595787,1790650534,1790858133,1790999055,1791275612,1791291182,1791314963,1791314963,1791324841,1791650598,1791794506,1791826993,1791866798,1791872423,1791873483,1791899712,1791901341,1791904920,1791912216,1791950815,1791950815,1791962850,1791968252,1791981026,1791981026,1791985758,1791996475,1792190389,1792380887,1792380887,1792380887,1792380887,1792385200,1792391253,1792469663,1792569756,1792570259,1792575618,1792581791,1792582696,1792680350,1792707425,1792707425,1792730517,1792730517,1792730517,1792981801,1793006147,1793008791,1793014078,1793016321,1793016321,1793083510,1793083510,1793088072,1793096151,1793096420,1793124646,1793133110,1793139943,1793142169,1793143605,1793144963,1793144963,1793146814,1793147613,1793151049,1793161279,1793177426],"upd":1793625570,"rev":4391,"ch":[0,1,87],"un":0,"inv":[[1788232909,0],[1788318098,1],[1788318098,1],[1788318098,1],[1788318098,1],[1791483476,0]],"ro":0}},{"name":"keeper-27x","state":"healthy","mode":"autonomous","cells":[1,1,3,3,1,1,1,3,0,2,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,3,1,1,1,1,1,1,0],"lastTurns":[{"e":1793938287,"o":"ok"},{"e":1793938315,"o":"ok"},{"e":1793938572,"o":"ok"},{"e":1793938596,"o":"ok"},{"e":1793938734,"o":"ok"},{"e":1793938917,"o":"ok"},{"e":1793939187,"o":"ok"},{"e":1793939233,"o":"ok"}],"idleS":200,"sch":[{"e":1793939455.0,"st":"scheduled","rec":"every 5m","iv":300,"lw":{"st":"ok","e":1793939162.0},"od":false},{"e":1794009600.0,"st":"scheduled","rec":"daily 09:00:00 Asia/Seoul","iv":null,"lw":{"st":"ok","e":1793923215.0},"od":false}],"mem":{"lag":58,"gap":203,"facts":73,"add":1,"rem":0,"upd":1793866804.08066,"ok":1793866804.08066,"lib":"pending","lf":null},"fr":{"n":73,"s":2,"fb":[1789897412,1790068379,1791365073,1791624157,1791798765,1791811532,1791916276,1791929779,1791995354,1792169195,1792176471,1792233179,1792305497,1792459562,1792471923,1792530061,1792538056,1792571905,1792571905,1792588451,1792697120,1792730445,1792984307,1792987624,1792989015,1792996774,1793007522,1793009314,1793056560,1793067663,1793072201,1793089876,1793090492,1793112972,1793128101,1793332045,1793581585,1793585793,1793594821,1793595639,1793616889,1793616889,1793624323,1793626673,1793633897,1793635317,1793635317,1793635317,1793662143,1793662143,1793662143,1793662143,1793662143,1793662143,1793662143,1793662143,1793662143,1793662143,1793665924,1793670140,1793670502,1793693929,1793724472,1793724472,1793729676,1793734068,1793737804,1793739742,1793740838,1793750536,1793750536,1793866563,1793866804],"upd":1793866804,"rev":5154,"ch":[1,0,72],"un":32,"inv":[],"ro":0}},{"name":"k28-a","state":"paused","mode":"autonomous","cells":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"lastTurns":[{"e":1792857428,"o":"ok"},{"e":1792858194,"o":"ok"},{"e":1792861819,"o":"ok"},{"e":1792862693,"o":"ok"},{"e":1792863280,"o":"ok"},{"e":1792886754,"o":"fail"},{"e":1792886882,"o":"fail"},{"e":1792888975,"o":"ok"}],"idleS":1050458,"sch":[],"mem":{"lag":0,"gap":0,"facts":64,"add":1,"rem":0,"upd":1792862519.199756,"ok":1792862519.199756,"lib":"drained","lf":"exact_execution_failure"},"fr":{"n":64,"s":0,"fb":[1789317805,1789827878,1789924656,1790187829,1790530966,1790647247,1790647640,1790676851,1790683217,1791904358,1791926034,1791930933,1791953809,1791957528,1791967664,1792158624,1792378495,1792378495,1792380931,1792389424,1792410300,1792512352,1792555424,1792555424,1792567193,1792567193,1792567358,1792567358,1792567358,1792567421,1792567458,1792567571,1792567622,1792567622,1792567832,1792567914,1792567988,1792568346,1792568412,1792568412,1792568412,1792568513,1792569886,1792570508,1792570636,1792585139,1792585199,1792588666,1792595965,1792595965,1792595965,1792595965,1792597627,1792602996,1792602996,1792665358,1792705803,1792718652,1792718652,1792720931,1792721489,1792816795,1792816795,1792829251],"upd":1792862519,"rev":7653,"ch":[1,0,63],"un":0,"inv":[[1788335555,1],[1791424559,0],[1791910553,1],[1791910553,1],[1791910553,1],[1791910553,1],[1791910553,1],[1791910553,1],[1791943021,1],[1791943021,1]],"ro":0}},{"name":"k29-ag","state":"healthy","mode":"autonomous","cells":[3,1,1,1,1,1,0,3,0,2,0,0,0,2,0,0,3,3,3,1,1,1,3,1,1,1,1,1,1,1,1,1,1,0,0,1,1,2,0,0,2,0,3,1,1,1,1,0],"lastTurns":[{"e":1793934739,"o":"ok"},{"e":1793934862,"o":"ok"},{"e":1793935374,"o":"ok"},{"e":1793935486,"o":"ok"},{"e":1793936613,"o":"ok"},{"e":1793936696,"o":"ok"},{"e":1793938493,"o":"ok"},{"e":1793938511,"o":"ok"}],"idleS":922,"sch":[{"e":1793942044.0,"st":"scheduled","rec":"every 1h","iv":3600,"lw":{"st":"ok","e":1793938457.0},"od":false},{"e":1793955600.0,"st":"scheduled","rec":"cron 0 0,6,12,18 * * * Asia/Seoul","iv":null,"lw":{"st":"ok","e":1793934014.0},"od":false},{"e":1793964000.0,"st":"scheduled","rec":"daily 20:20:00 Asia/Seoul","iv":null,"lw":{"st":"ok","e":1793877616.0},"od":false},{"e":1794009600.0,"st":"scheduled","rec":"daily 09:00:00 Asia/Seoul","iv":null,"lw":{"st":"ok","e":1793923214.0},"od":false}],"mem":{"lag":100,"gap":2536,"facts":59,"add":1,"rem":2,"upd":1793875282.228502,"ok":1793875282.228502,"lib":"pending","lf":null},"fr":{"n":59,"s":0,"fb":[1788471643,1788528379,1788669455,1788704070,1788756520,1788817678,1788834869,1788835934,1788842150,1788852404,1790157126,1790856945,1791302712,1791342701,1791367827,1791371688,1791384635,1792401789,1792416243,1792435116,1792472817,1792476959,1792477540,1792477540,1792477540,1792477540,1792477540,1792477540,1792477540,1792477540,1792477540,1792477934,1792478283,1792478445,1792478627,1792480484,1792496474,1792496574,1792496918,1792925373,1792981159,1792981159,1793002840,1793009060,1793451670,1793690222,1793690222,1793691621,1793693751,1793723813,1793724568,1793726310,1793733807,1793733807,1793744266,1793747363,1793761645,1793766655,1793875282],"upd":1793875282,"rev":4906,"ch":[1,2,58],"un":11,"inv":[[1790904511,0]],"ro":0}},{"name":"keeper-30-alpha-bravo-charlie-del","state":"paused","mode":"on_demand","cells":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"lastTurns":[{"e":1793349385,"o":"ok"},{"e":1793349432,"o":"ok"},{"e":1793349491,"o":"ok"},{"e":1793349756,"o":"ok"},{"e":1793349849,"o":"ok"},{"e":1793349996,"o":"ok"},{"e":1793350238,"o":"ok"},{"e":1793350400,"o":"ok"}],"idleS":589033,"sch":[],"mem":{"lag":0,"gap":0,"facts":2,"add":1,"rem":1,"upd":1793351416.065797,"ok":1793351416.065797,"lib":"drained","lf":"exact_execution_failure"},"fr":{"n":2,"s":0,"fb":[1793348962,1793350886],"upd":1793351416,"rev":4,"ch":[1,1,1],"un":0,"inv":[],"ro":0}},{"name":"keeper-31-alp","state":"paused","mode":"autonomous","cells":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"lastTurns":[{"e":1792993917,"o":"ok"},{"e":1792994003,"o":"ok"},{"e":1792995186,"o":"ok"},{"e":1792995299,"o":"ok"},{"e":1792995891,"o":"ok"},{"e":1792997986,"o":"ok"},{"e":1793001774,"o":"ok"},{"e":1793002210,"o":"ok"}],"idleS":937223,"sch":[],"mem":{"lag":0,"gap":0,"facts":112,"add":6,"rem":3,"upd":1793085779.932423,"ok":1793085779.932423,"lib":"drained","lf":null},"fr":{"n":112,"s":12,"fb":[1790053969,1790116184,1790117512,1790196446,1790197417,1790342796,1790374035,1790422139,1790464983,1790485524,1790495401,1790504357,1790638926,1790648511,1790652018,1790685196,1790690586,1790709718,1790781620,1790811985,1791060842,1791063171,1791104516,1791264745,1791291676,1791332064,1791709791,1791713655,1791713655,1791713655,1791717437,1791783230,1791783353,1791799229,1791801950,1791835889,1791843722,1791859498,1791867997,1791868229,1791930774,1791935894,1791943961,1791944010,1791952188,1791957877,1791969542,1791969717,1791975917,1792004340,1792004503,1792004802,1792004802,1792053552,1792156290,1792194408,1792386215,1792388254,1792408764,1792429064,1792436160,1792485835,1792512323,1792523783,1792523824,1792541175,1792545408,1792546906,1792564845,1792569936,1792581994,1792586942,1792587108,1792587108,1792587108,1792587108,1792587193,1792587193,1792587193,1792587404,1792587404,1792587451,1792587451,1792587520,1792587685,1792587685,1792587761,1792587865,1792587865,1792587954,1792588106,1792596074,1792596074,1792628466,1792631148,1792650314,1792652117,1792655537,1792666127,1792668217,1792684018,1792715129,1792730835,1792731901,1792735309,1792735309,1793074819,1793074819,1793074819,1793074819,1793074819,1793074819],"upd":1793085779,"rev":1206,"ch":[6,3,106],"un":0,"inv":[[1791223637,0],[1791685697,0],[1791969076,0],[1792404417,0],[1792656332,0],[1792656332,0]],"ro":0}},{"name":"keeper-32","state":"healthy","mode":"autonomous","cells":[1,1,2,2,0,1,1,0,2,2,0,0,0,2,0,1,0,0,0,1,1,0,0,0,0,0,2,0,0,0,0,2,0,0,0,0,2,0,0,0,2,0,0,0,1,1,1,0],"lastTurns":[{"e":1793919829,"o":"fail"},{"e":1793927110,"o":"fail"},{"e":1793934838,"o":"ok"},{"e":1793935370,"o":"ok"},{"e":1793935483,"o":"ok"},{"e":1793936666,"o":"ok"},{"e":1793936733,"o":"ok"},{"e":1793938812,"o":"ok"}],"idleS":621,"sch":[{"e":1793968800.0,"st":"scheduled","rec":"once","iv":null,"lw":null,"od":false},{"e":1794009600.0,"st":"scheduled","rec":"daily 09:00:00 Asia/Seoul","iv":null,"lw":{"st":"ok","e":1793923215.0},"od":false},{"e":1796104800.0,"st":"scheduled","rec":"once","iv":null,"lw":null,"od":false},{"e":1799128800.0,"st":"scheduled","rec":"once","iv":null,"lw":null,"od":false}],"mem":{"lag":114,"gap":740,"facts":71,"add":1,"rem":0,"upd":1793822595.950155,"ok":1793822595.950155,"lib":"pending","lf":null},"fr":{"n":71,"s":3,"fb":[1790740847,1791802503,1791827733,1791913654,1791968849,1791993458,1792053198,1792171477,1792300330,1792466163,1792475961,1792477727,1792481543,1792497030,1792507560,1792513022,1792515015,1792522386,1792530651,1792535123,1792548408,1792550219,1792560581,1792582695,1792674524,1793014512,1793015111,1793022923,1793032816,1793032816,1793034979,1793320150,1793549356,1793549356,1793549356,1793549356,1793560289,1793570069,1793576188,1793585808,1793585808,1793585808,1793586590,1793587719,1793595436,1793595610,1793601130,1793601708,1793601855,1793627187,1793628604,1793632123,1793640725,1793660561,1793661137,1793661436,1793662605,1793662605,1793693762,1793693762,1793693762,1793693762,1793727820,1793727858,1793730034,1793731722,1793741637,1793749005,1793752841,1793752841,1793822595],"upd":1793822595,"rev":894,"ch":[1,0,70],"un":31,"inv":[[1791115423,0],[1793249129,1],[1793249129,1],[1793249129,1],[1793249129,1],[1793249129,1],[1793249129,1],[1793249129,1],[1793249129,1],[1793249129,1],[1793249129,1],[1793249129,1],[1793362718,1],[1793362718,1],[1793362718,1],[1793362718,1],[1793362718,1]],"ro":0}},{"name":"keeper-33x","state":"healthy","mode":"autonomous","cells":[1,1,1,2,2,0,1,1,1,2,0,0,0,1,1,0,1,1,1,1,3,1,0,1,1,1,1,2,0,0,1,1,1,1,1,1,2,0,0,0,2,1,1,0,1,1,0,0],"lastTurns":[{"e":1793931091,"o":"ok"},{"e":1793932008,"o":"ok"},{"e":1793934177,"o":"ok"},{"e":1793935374,"o":"ok"},{"e":1793935899,"o":"ok"},{"e":1793936439,"o":"ok"},{"e":1793936783,"o":"ok"},{"e":1793937497,"o":"ok"}],"idleS":1936,"sch":[{"e":1793942527.0,"st":"scheduled","rec":"every 6h","iv":21600,"lw":{"st":"ok","e":1793920938.0},"od":false},{"e":1793959800.0,"st":"scheduled","rec":"once","iv":null,"lw":null,"od":false},{"e":1793962800.0,"st":"scheduled","rec":"once","iv":null,"lw":null,"od":false},{"e":1793967300.0,"st":"scheduled","rec":"once","iv":null,"lw":null,"od":false},{"e":1793969400.0,"st":"scheduled","rec":"once","iv":null,"lw":null,"od":false}],"mem":{"lag":54,"gap":79,"facts":85,"add":1,"rem":0,"upd":1793914337.783329,"ok":1793914337.783329,"lib":"pending","lf":null},"fr":{"n":85,"s":0,"fb":[1790441892,1791319553,1791356897,1791708644,1791768510,1791828865,1791957807,1792307645,1792308549,1792425656,1792509324,1792509391,1792509676,1792510411,1792510594,1792510645,1792510734,1792510789,1792527656,1792528283,1792528657,1792529224,1792529337,1792538041,1792538370,1792552092,1792566936,1792571616,1792580539,1792580755,1792581156,1792586065,1792586906,1792591950,1792592003,1792592131,1792593291,1792598343,1792981159,1793080864,1793121753,1793124251,1793124251,1793292517,1793367528,1793580610,1793591905,1793630431,1793646959,1793647329,1793648585,1793650808,1793651052,1793651672,1793652984,1793653211,1793653370,1793653560,1793656248,1793665955,1793729012,1793730780,1793730780,1793732663,1793737790,1793737790,1793737790,1793737790,1793737790,1793739291,1793739488,1793740865,1793745934,1793746096,1793747057,1793748460,1793748460,1793748625,1793761174,1793761174,1793767799,1793769413,1793769413,1793894262,1793914337],"upd":1793914337,"rev":1179,"ch":[1,0,84],"un":24,"inv":[[1791802568,0],[1791964943,0],[1792191490,0],[1793269302,1],[1793269302,1],[1793290882,1],[1793291095,1],[1793291095,1],[1793632124,1],[1793647282,1]],"ro":0}},{"name":"keeper-34-a","state":"healthy","mode":"autonomous","cells":[1,1,1,1,3,1,0,2,0,2,0,0,0,2,0,0,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,1,1,1,1,1,1,2,0,0,3,1,1,0,1,3,0,0],"lastTurns":[{"e":1793929634,"o":"ok"},{"e":1793932021,"o":"ok"},{"e":1793934328,"o":"ok"},{"e":1793935139,"o":"ok"},{"e":1793935917,"o":"fail"},{"e":1793936914,"o":"fail"},{"e":1793937244,"o":"fail"},{"e":1793937459,"o":"ok"}],"idleS":1974,"sch":[{"e":1793955600.0,"st":"scheduled","rec":"daily 09:00:00 UTC","iv":null,"lw":null,"od":false},{"e":1793955600.0,"st":"scheduled","rec":"daily 09:00:00 UTC","iv":null,"lw":{"st":"ok","e":1793869210.0},"od":false},{"e":1793965200.0,"st":"scheduled","rec":"once","iv":null,"lw":null,"od":false},{"e":1794269700.0,"st":"scheduled","rec":"cron 15 9 * * 2 Asia/Seoul","iv":null,"lw":null,"od":false}],"mem":{"lag":114,"gap":870,"facts":61,"add":1,"rem":0,"upd":1793803738.496598,"ok":1793803738.496598,"lib":"pending","lf":null},"fr":{"n":61,"s":0,"fb":[1790267674,1790619737,1790678730,1791335748,1791794573,1791799609,1791846832,1791848188,1791925274,1791936014,1791952288,1791992579,1791999868,1791999868,1792006568,1792155733,1792155733,1792188237,1792308774,1792308774,1792324977,1792375769,1792432629,1792432629,1792434383,1792485843,1792491513,1792522332,1792594903,1792733318,1792752233,1792773011,1792796888,1792799046,1792822509,1792852490,1792925273,1792988314,1793017928,1793165851,1793585795,1793588657,1793592888,1793698359,1793698359,1793723483,1793723483,1793723483,1793723483,1793723483,1793736122,1793747119,1793747119,1793747119,1793799210,1793799210,1793799210,1793799210,1793799210,1793799210,1793803738],"upd":1793803738,"rev":945,"ch":[1,0,60],"un":11,"inv":[[1790527080,0],[1790547414,0],[1790649803,0],[1790650046,0],[1790656573,0],[1791907174,0],[1793333998,1],[1793581220,1],[1793783861,1],[1793792394,1],[1793792394,1],[1793792394,1],[1793792394,1],[1793792394,1],[1793792394,1]],"ro":0}},{"name":"keeper-35-alpha","state":"healthy","mode":"autonomous","cells":[1,1,2,2,2,1,1,1,0,2,0,0,0,1,0,0,0,1,1,1,1,3,1,1,1,1,0,2,0,0,1,1,1,1,1,1,2,0,0,0,3,1,1,0,1,3,1,0],"lastTurns":[{"e":1793932097,"o":"ok"},{"e":1793934165,"o":"ok"},{"e":1793935136,"o":"ok"},{"e":1793935600,"o":"ok"},{"e":1793936250,"o":"ok"},{"e":1793936686,"o":"fail"},{"e":1793937097,"o":"ok"},{"e":1793939196,"o":"ok"}],"idleS":237,"sch":[{"e":1793944800.0,"st":"scheduled","rec":"once","iv":null,"lw":null,"od":false},{"e":1793968800.0,"st":"scheduled","rec":"once","iv":null,"lw":null,"od":false},{"e":1793972100.0,"st":"scheduled","rec":"once","iv":null,"lw":null,"od":false},{"e":1794015000.0,"st":"scheduled","rec":"daily 10:30:00 Asia/Seoul","iv":null,"lw":{"st":"ok","e":1793928605.0},"od":false},{"e":1794182400.0,"st":"scheduled","rec":"cron 0 9 * * 1 Asia/Seoul","iv":null,"lw":{"st":"ok","e":1793577604.0},"od":false}],"mem":{"lag":154,"gap":738,"facts":92,"add":1,"rem":1,"upd":1793788646.116508,"ok":1793788646.116508,"lib":"pending","lf":null},"fr":{"n":92,"s":0,"fb":[1790130461,1790446670,1791162052,1791782181,1791821829,1791878551,1791936343,1792509689,1792509826,1792510770,1792511637,1792516318,1792527108,1792527955,1792528081,1792528389,1792529017,1792529733,1792530002,1792530092,1792558595,1792562417,1792562999,1792565120,1792584805,1792584859,1792584934,1792585630,1792585847,1792585902,1792585978,1792588286,1792594258,1792671345,1792766134,1792981159,1793145477,1793585796,1793585796,1793585796,1793589654,1793593677,1793595296,1793613753,1793613753,1793613753,1793618548,1793618705,1793625513,1793626504,1793630460,1793631761,1793631986,1793631986,1793662293,1793662293,1793662293,1793662293,1793662293,1793666045,1793666045,1793666153,1793666259,1793666914,1793667804,1793667804,1793667804,1793700940,1793720579,1793723425,1793723425,1793723718,1793724391,1793725840,1793726653,1793731913,1793731913,1793738295,1793745955,1793746157,1793746897,1793746897,1793747009,1793748159,1793748479,1793748694,1793750522,1793750701,1793750830,1793751180,1793751507,1793788646],"upd":1793788646,"rev":1441,"ch":[1,1,91],"un":48,"inv":[[1790497407,1],[1790497407,1],[1790502211,1],[1790912258,1],[1790912258,1],[1790912258,1],[1790912258,1],[1790912258,1],[1790912258,1],[1790912258,1],[1790912258,1],[1790912258,1],[1790912258,1],[1790912258,1],[1790912258,1],[1790912258,1],[1790912258,1],[1790912258,1],[1790912258,1],[1790912258,1],[1790912258,1],[1790912258,1],[1790912258,1],[1790912258,1],[1793260145,1],[1793260145,1],[1793260145,1],[1793260145,1],[1793260145,1],[1793596831,0]],"ro":0}},{"name":"keeper-36-alphax","state":"healthy","mode":"autonomous","cells":[1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,0,2,2,2,2,2,2,2,2,0,3,1,3,1,1,1,1,0],"lastTurns":[{"e":1793935850,"o":"ok"},{"e":1793936633,"o":"ok"},{"e":1793936716,"o":"ok"},{"e":1793937664,"o":"ok"},{"e":1793937922,"o":"ok"},{"e":1793938072,"o":"ok"},{"e":1793938563,"o":"ok"},{"e":1793938582,"o":"ok"}],"idleS":851,"sch":[{"e":1793942118.0,"st":"scheduled","rec":"every 1h","iv":3600,"lw":{"st":"ok","e":1793938523.0},"od":false}],"mem":{"lag":0,"gap":0,"facts":20,"add":1,"rem":0,"upd":1793864944.775926,"ok":1793864944.775926,"lib":"pending","lf":null},"fr":{"n":20,"s":0,"fb":[1793451671,1793451671,1793451671,1793585786,1793595079,1793599120,1793662045,1793662045,1793726996,1793729664,1793729734,1793731452,1793734188,1793739748,1793740871,1793747559,1793748595,1793751253,1793755604,1793864944],"upd":1793864944,"rev":30,"ch":[1,0,19],"un":14,"inv":[],"ro":0}}],"fleet":[2,3,7,12,10,3,0,6,4,21,7,3,4,11,4,5,6,7,4,5,5,5,5,4,4,6,12,8,5,6,5,5,4,5,4,4,14,11,6,0,20,2,6,2,2,6,0,0],"sched":{"active":52,"overdue":1,"keepers":21,"serverCounts":{"scheduled":53,"due":1,"running":0,"succeeded":312,"failed":2,"cancelled":805,"expired":0}},"world":{"gen":1793939429,"claims":1400,"conflicts":3,"ledgerFacts":1613,"excluded":10,"facts":2031,"src":49,"kn":37,"un":465,"unOldestS":361742,"unNewestS":109651,"fbx":[1787714002,1787764944,1787812572,1787845685,1787851325,1787852386,1787872335,1787888076,1787893689,1787898922,1787903636,1787918027,1787923466,1787929511,1787993510,1787994247,1787994247,1788013322,1788013322,1788013322,1788013624,1788014082,1788014916,1788014916,1788014916,1788017701,1788017701,1788018887,1788020034,1788020392,1788021688,1788021793,1788025484,1788029998,1788032239,1788032705,1788033133,1788035408,1788036381,1788048320,1788052839,1788055413,1788065538,1788069224,1788071702,1788072918,1788080330,1788084365,1788089501,1788098895,1788101015,1788105288,1788107517,1788112435,1788125310,1788126601,1788128126,1788130841,1788132624,1788139216,1788142000,1788145849,1788147673,1788148306,1788160001,1788189159,1788189159,1788189159,1788194858,1788196476,1788219993,1788226109,1788227890,1788229888,1788231379,1788233089,1788233614,1788233614,1788233890,1788234027,1788234173,1788234280,1788234593,1788235319,1788237716,1788238151,1788238184,1788238939,1788239143,1788239254,1788240055,1788240121,1788241312,1788242740,1788243032,1788243419,1788244150,1788244432,1788245139,1788246445,1788246445,1788246645,1788247122,1788247122,1788247188,1788247364,1788248484,1788248524,1788248567,1788248614,1788248714,1788248734,1788248853,1788248904,1788249023],"briefing":{"state":"building","saved":1793938826,"sources":1398,"chars":17438,"new":8,"changed":0,"gone":3,"building":{"target":1395,"remaining":1395}},"ledgerSaved":1793939211,"invDays":[2,7,1,16,2,1,5,25,1,13,0,0,0,0,2,1,0,1,0,0],"invTotal":164,"invChanged":43,"invGone":121,"invOlder":87,"reobs":0,"says":{"validation":"stored_bindings_not_revalidated","consistency":"individual_store_snapshots","semantic":"not_performed"}},"mem":{"keepers":36,"pending":24,"drained":11,"gap":17,"facts":1916}};
+const NB = DATA.buckets.n, MIN = DATA.buckets.min, FUTN = DATA.fut.n, RT = DATA.runtimes;
+const BS = MIN * 60, KST_OFF = 9 * 3600, REC_N = 24;
+const rtl = r => (RT[r] || {label: r}).label;
+const FAIL = c => c === 2 || c === 3;
+/* the TUI's running mark: Masc_tui_answering.running_frames, and the still form for a surface that is not repainting */
+const RUN = ['◐', '◓', '◑', '◒'];
+const STILL = '◌';
+const STEP_MS = 150;          /* Masc_tui_types.motion_step_ns */
+const LEVELS = '▁▂▃▄▅▆▇█';
+const RM = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+const clone = o => JSON.parse(JSON.stringify(o));
+const pad2 = n => (n < 10 ? '0' : '') + n;
+const kfmt = n => n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k' : String(n);
+
+/* ---------- time model: one clock for the whole screen ---------- */
+const T = {now: DATA.now.epoch, end: DATA.buckets.endEpoch};
+const LABELS = DATA.buckets.labels.slice();
+function hm(e){ const d = new Date((e + KST_OFF) * 1000); return pad2(d.getUTCHours()) + ':' + pad2(d.getUTCMinutes()); }
+/* a time of day is ambiguous after half a day: older events carry the date */
+function when(e){ const d = new Date((e + KST_OFF) * 1000); return T.now - e < 12 * 3600 ? hm(e) : pad2(d.getUTCMonth() + 1) + '-' + pad2(d.getUTCDate()) + ' ' + hm(e); }
+function hms(e){ const d = new Date((e + KST_OFF) * 1000); return pad2(d.getUTCHours()) + ':' + pad2(d.getUTCMinutes()) + ':' + pad2(d.getUTCSeconds()); }
+function dur(s){
+  s = Math.max(0, Math.round(s));
+  if(s < 90) return s + 's';
+  const m = Math.round(s / 60);
+  if(m < 100) return m + 'm';
+  const h = Math.floor(m / 60), mm = m % 60;
+  if(h < 10) return h + 'h' + (mm ? pad2(mm) + 'm' : '');
+  if(h < 48) return h + 'h';
+  return Math.round(h / 24) + 'd';
+}
+
+/* ---------- cell width helpers ---------- */
+function isWide(cp){
+  return (cp>=0x1100&&cp<=0x115F)||(cp>=0x2E80&&cp<=0x303E)||(cp>=0x3041&&cp<=0x33FF)||(cp>=0x3400&&cp<=0x4DBF)||(cp>=0x4E00&&cp<=0xA4CF)||(cp>=0xAC00&&cp<=0xD7A3)||(cp>=0xF900&&cp<=0xFAFF)||(cp>=0xFE30&&cp<=0xFE6F)||(cp>=0xFF00&&cp<=0xFF60)||(cp>=0xFFE0&&cp<=0xFFE6);
+}
+function strw(s){ let n = 0; for(const ch of s) n += isWide(ch.codePointAt(0)) ? 2 : 1; return n; }
+function clip(s, w){
+  if(w <= 0) return '';
+  if(strw(s) <= w) return s;
+  let out = '', n = 0;
+  for(const ch of s){ const cw = isWide(ch.codePointAt(0)) ? 2 : 1; if(n + cw > w - 1) break; out += ch; n += cw; }
+  return out + '…';
+}
+const esc = c => c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : c;
+const GFX = {'█':['full'],'▁':['b',1],'▂':['b',2],'▃':['b',3],'▄':['b',4],'▅':['b',5],'▆':['b',6],'▇':['b',7],'▌':['lh'],'─':['h1'],'━':['h2'],'│':['v1'],'┃':['v2'],'┌':['tl'],'┐':['tr'],'└':['bl'],'┘':['br'],'┄':['dash']};
+function cellHtml(ch){
+  const cp = ch.codePointAt(0);
+  if(cp < 127) return esc(ch);
+  const g = GFX[ch];
+  if(g) return '<i class="x x-' + g[0] + ' u1"' + (g[1] ? ' style="--k:' + g[1] + '"' : '') + '></i>';
+  return '<i class="u' + (isWide(cp) ? 2 : 1) + '">' + ch + '</i>';
+}
+
+class Screen{
+  constructor(w, h){ this.w = w; this.h = h; this.g = Array.from({length: h}, () => Array.from({length: w}, () => ({c: ' ', k: '', b: '', x: false}))); }
+  put(x, y, s, k, max){
+    k = k || '';
+    if(y < 0 || y >= this.h) return x;
+    const lim = Math.min(this.w, max === undefined ? this.w : x + max);
+    for(const ch of s){
+      const cw = isWide(ch.codePointAt(0)) ? 2 : 1;
+      if(x < 0){ x += cw; continue; }
+      if(x + cw > lim) break;
+      const cell = this.g[y][x]; cell.c = ch; cell.k = k; cell.x = false;
+      if(cw === 2){ const n = this.g[y][x + 1]; n.c = ''; n.k = k; n.x = true; }
+      x += cw;
+    }
+    return x;
+  }
+  bg(x, y, w, b){ if(y < 0 || y >= this.h) return; for(let i = 0; i < w; i++){ const xx = x + i; if(xx >= 0 && xx < this.w) this.g[y][xx].b = b; } }
+  /* what the terminal would hold for row y: used to decide which rows a frame rewrites */
+  sig(y){ let s = ''; const row = this.g[y]; for(let x = 0; x < this.w; x++){ const c = row[x]; s += c.c + '\u0001' + c.k + '\u0001' + c.b + '\u0002'; } return s; }
+  sigs(){ return Array.from({length: this.h}, (_, y) => this.sig(y)); }
+  html(){
+    const out = [];
+    for(let y = 0; y < this.h; y++){
+      const row = this.g[y]; let line = '<div class="r">', run = '', rk = null, rb = null;
+      const flush = () => { if(run !== ''){ const cl = ((rk || '') + (rb ? ' ' + rb : '')).trim(); line += '<span class="g' + (cl ? ' ' + cl : '') + '">' + run + '</span>'; run = ''; } };
+      for(let x = 0; x < this.w; x++){
+        const c = row[x]; if(c.x) continue;
+        if(c.k !== rk || c.b !== rb){ flush(); rk = c.k; rb = c.b; }
+        run += cellHtml(c.c);
+      }
+      flush(); out.push(line + '</div>');
+    }
+    return out.join('');
+  }
+}
+
+/* ---------- keepers: derived fields the screen needs ---------- */
+const K0 = DATA.keepers.map(k => {
+  const lastE = k.lastTurns.length ? k.lastTurns[k.lastTurns.length - 1].e : null;
+  const lastFailE = k.lastFailAgeS != null ? DATA.now.epoch - k.lastFailAgeS : (k.state === 'failing' && k.lastTurns.length && k.lastTurns[k.lastTurns.length - 1].o === 'fail' ? lastE : null);
+  return Object.assign({}, k, {lastE, lastFailE});
+});
+const LAGMAX = Math.max(1, ...K0.map(k => k.mem ? k.mem.lag : 0));
+const GAPMAX = Math.max(1, ...K0.map(k => k.mem ? k.mem.gap : 0));
+const failCount = (k, n) => k.cells.slice(-n).filter(FAIL).length;
+const idleAge = k => k.lastE == null ? null : T.now - k.lastE;
+const failAge = k => k.lastFailE == null ? null : T.now - k.lastFailE;
+const isRec = k => k.state === 'healthy' && k.cells.slice(-REC_N).some(FAIL);
+const kindOf = k => k.state === 'paused' ? 'paused' : k.state === 'failing' ? 'fail' : isRec(k) ? 'rec' : 'ok';
+const sinceText = k => k.since ? (k.since.lb ? '≥ ' : '') + when(k.since.e) : null;
+const levelChar = (v, max) => v <= 0 ? '▁' : LEVELS[Math.max(0, Math.min(7, Math.ceil(v / max * 8) - 1))];
+const soonest = k => { const f = k.sch.filter(s => !s.od); return f.length ? f.reduce((a, b) => a.e <= b.e ? a : b) : null; };
+const overdue = k => { const f = k.sch.filter(s => s.od); return f.length ? f.reduce((a, b) => a.e <= b.e ? a : b) : null; };
+
+function lanesOf(KK){
+  const m = new Map();
+  for(const k of KK) if(k.state === 'failing'){
+    const title = rtl(k.term.rt) + ' · ' + k.term.fault;
+    if(!m.has(title)) m.set(title, {key: title, title, ks: []});
+    m.get(title).ks.push(k);
+  }
+  const arr = [...m.values()];
+  arr.forEach(l => { l.ks.sort((a, b) => failCount(b, 24) - failCount(a, 24) || a.name.localeCompare(b.name)); l.rest = l.ks.filter(k => k.rest.st === 'resting').length; });
+  arr.sort((a, b) => b.ks.length - a.ks.length || a.key.localeCompare(b.key));
+  return arr;
+}
+
+/* ===== p2: state, layout, rows, lenses, header, dock ===== */
+let K = clone(K0);
+const S = {lens: 'cause', cols: 100, rows: 36, selKey: null, top: 0, dock: false, page: 'feed', nocolor: false, light: false, simulated: false, lapse: false, shift: false, folded: {}, ageShift: 0};
+const CLK = {ms: 0, frame: -1};      /* frame < 0: nothing is animating, so the running mark is the still one */
+const RUNS = new Map();               /* keeper name -> {t0, until, fail} while a turn is shown as running */
+let sim = null;
+let rowAt = [];
+let TABS = [];
+const LENSES = [['cause', 'cause'], ['time', 'time'], ['memory', 'memory'], ['age', 'age'], ['matrix', 'runtime'], ['wall', '24h']];
+const GROUP_LENSES = ['cause', 'time', 'memory', 'age'];
+const spinGlyph = () => (RM || CLK.frame < 0) ? STILL : RUN[CLK.frame % RUN.length];
+
+/* ---------- layout: columns are anchored to the right edge, the name column takes what is left ---------- */
+function layout(cols){
+  const L = {cols};
+  const showMem = cols >= 96;
+  L.memW = showMem ? 7 : 0; L.timeW = 5; L.bandW = 12;
+  const nameMin = cols >= 96 ? 22 : 18;
+  const fixed = 30 + (showMem ? 1 + L.memW : 0);
+  const side = Math.min(24, Math.floor((cols - fixed - nameMin) / 2));
+  L.pulseW = side; L.futW = side;
+  L.memX = showMem ? cols - L.memW : -1;
+  L.timeX = (showMem ? L.memX - 1 : cols) - L.timeW;
+  L.futX = L.timeX - 1 - L.futW;
+  L.slotX = L.futX - 1;
+  L.ph2 = L.slotX - 2;
+  L.nowX = L.ph2 - 1 - L.bandW;
+  L.ph1 = L.nowX - 2;
+  L.pulseX = L.ph1 - 1 - L.pulseW;
+  L.nameX = 4;
+  L.nameW = L.pulseX - 1 - L.nameX;
+  return L;
+}
+function playhead(scr, L, y){
+  scr.bg(L.ph1, y, L.ph2 - L.ph1 + 1, 'band');
+  scr.put(L.ph1, y, '┃', 'info'); scr.put(L.ph2, y, '┃', 'info');
+}
+function drawPulse(scr, x, y, cells, n){
+  cells.slice(-n).forEach((c, i) => {
+    const [ch, k] = c === 0 ? ['·', 'dim'] : c === 1 ? ['▁', 'okd'] : c === 2 ? ['█', 'warn'] : ['▄', 'warn'];
+    scr.put(x + i, y, ch, k);
+  });
+}
+
+/* ---------- words: past is a pulse, now is one word, next is a ruler ---------- */
+const actsOf = k => k.state === 'failing' ? (k.rest.st === 'resting' ? 'dim' : 'warn') : k.state === 'healthy' ? (isRec(k) ? 'okd' : 'ok') : 'dim';
+function nowOf(k){
+  const r = RUNS.get(k.name);
+  if(r) return {g: spinGlyph(), gk: 'info b', w: dur((CLK.ms - r.t0) / 1000), wk: 'info b'};
+  if(sim && sim.k === k){
+    if(sim.phase === 1) return {g: spinGlyph(), gk: 'warn b', w: 'retrying', wk: 'warn b'};
+    return sim.kind === 'recover' ? {g: '✓', gk: 'ok b', w: 'recovered', wk: 'ok b'} : {g: '✗', gk: 'warn b', w: 'failover', wk: 'warn b'};
+  }
+  if(k.state === 'paused') return {g: '○', gk: 'dim', w: 'paused', wk: 'dim'};
+  if(k.state === 'failing'){ const a = failAge(k); return {g: '○', gk: 'fg', w: a == null ? 'idle' : 'idle ' + dur(a), wk: 'fg b'}; }
+  const od = overdue(k);
+  if(od) return {g: '!', gk: 'warn b', w: 'due ' + dur(T.now - od.e), wk: 'warn'};
+  const a = idleAge(k);
+  return {g: '●', gk: 'ok', w: a == null ? 'ok' : 'idle ' + dur(a), wk: 'dim'};
+}
+function headOf(k){
+  if(sim && sim.k === k){
+    if(sim.phase === 1) return {g: '…', w: 'trying ' + rtl(k.rest.head), k: 'dim'};
+    return sim.kind === 'recover' ? {g: '', w: '', k: 'dim'} : {g: '▹', w: 'next candidate', k: 'info'};
+  }
+  if(k.state !== 'failing') return {g: '', w: '', k: 'dim'};
+  if(k.rest.st === 'resting') return {g: '◌', w: 'wait ' + rtl(k.rest.head), k: 'dim'};
+  return {g: '▹', w: rtl(k.rest.head), k: 'info'};
+}
+const nowText = n => n.g + ' ' + n.w;
+const headText = n => n.w ? n.g + ' ' + n.w : '';
+const chainText = k => k.hops.map(h => rtl(h.rt) + ' ✗' + (h.retryAfterS ? ' (retry in ' + dur(h.retryAfterS) + ')' : '')).join(' › ');
+
+/* ---------- pieces of a row ---------- */
+function drawNow(scr, L, y, k){
+  const n = nowOf(k);
+  scr.put(L.nowX, y, n.g, n.gk);
+  scr.put(L.nowX + 2, y, n.w, n.wk, L.bandW - 2);
+}
+function futCounts(ks, w){
+  const cnt = new Array(w).fill(0); let soon = 0;
+  for(const k of ks) for(const s of k.sch){
+    if(s.od) continue;
+    if(s.e < T.end) soon++;
+    else { const j = Math.floor((s.e - T.end) / BS); if(j < w) cnt[j]++; }
+  }
+  return {soon, cnt};
+}
+function drawRuler(scr, L, y, k){
+  const dim = k.state === 'paused', {soon, cnt} = futCounts([k], L.futW);
+  scr.put(L.slotX, y, soon ? '◷' : '·', soon ? (dim ? 'dim b' : 'info b') : 'line');
+  cnt.forEach((c, i) => scr.put(L.futX + i, y, c ? '◷' : '·', c ? (dim ? 'dim' : 'info') : 'line'));
+}
+function drawTime(scr, L, y, k){
+  if(overdue(k)){ scr.put(L.timeX, y, 'late', 'warn b', L.timeW); return; }
+  const s = soonest(k); if(!s) return;
+  scr.put(L.timeX, y, hm(s.e), k.state === 'paused' ? 'dim' : 'info', L.timeW);
+}
+function drawLag(scr, L, y, k){
+  if(!L.memW) return;
+  const m = k.mem;
+  if(!m){ scr.put(L.memX, y, '—', 'line'); return; }
+  const kk = m.lag > 0 ? (m.gap > 0 ? 'info' : 'dim') : 'line';
+  scr.put(L.memX, y, String(m.lag).padStart(L.memW - 2), kk);
+  scr.put(L.memX + L.memW - 1, y, levelChar(m.lag, LAGMAX), kk);
+}
+function gutter(scr, L, y, k, mark){
+  const acts = actsOf(k);
+  scr.put(0, y, '▌', acts);
+  scr.put(2, y, mark, acts + ' b');
+}
+const markOf = (k, lens) => k.state === 'failing' ? '!' : k.state === 'paused' ? '○' : (lens === 'cause' && kindOf(k) === 'rec') ? '✓' : '●';
+
+function paintKeeper(scr, L, y, k, sel){
+  playhead(scr, L, y);
+  gutter(scr, L, y, k, markOf(k, S.lens));
+  scr.put(L.nameX, y, clip(k.name, L.nameW), k.state === 'paused' ? 'dim' : (sel ? 'fg b' : 'fg'));
+  drawPulse(scr, L.pulseX, y, k.cells, L.pulseW);
+  drawNow(scr, L, y, k);
+  drawRuler(scr, L, y, k); drawTime(scr, L, y, k); drawLag(scr, L, y, k);
+  if(sel) scr.bg(0, y, L.cols, 'sel');
+}
+function paintLine2(scr, L, y, k, sel){
+  playhead(scr, L, y);
+  scr.put(0, y, '▌', actsOf(k));
+  const s = sinceText(k), fa = failAge(k), room = L.nameW - 2;
+  let txt = s ? (k.since.lb ? '' : 'since ') + s : fa != null ? dur(fa) + ' ago' : '';
+  if(s && strw(txt) > room) txt = s;        /* the word "since" goes first, so a cut-off minute never reads as data */
+  scr.put(L.nameX, y, '◂ ' + clip(txt, room), 'dim', L.nameW);
+  let x = L.pulseX;
+  const show = k.hops.slice(0, 4);
+  show.forEach((h, i) => { x = scr.put(x, y, '✗', 'warn'); if(i < show.length - 1) x = scr.put(x, y, '━', 'dim'); });
+  if(k.hops.length > show.length) x = scr.put(x, y, '…', 'dim');
+  scr.put(x + 1, y, k.term.fault, 'dim', Math.max(0, L.ph1 - x - 2));
+  const hd = headOf(k); if(hd.w) scr.put(L.slotX, y, headText(hd), hd.k, L.cols - L.slotX);
+  if(sel) scr.bg(0, y, L.cols, 'sel');
+}
+/* memory lens: same skeleton, the right half answers "is memory keeping up" */
+function paintKeeperMem(scr, L, y, k, sel){
+  playhead(scr, L, y);
+  gutter(scr, L, y, k, markOf(k, 'memory'));
+  scr.put(L.nameX, y, clip(k.name, L.nameW), k.state === 'paused' ? 'dim' : (sel ? 'fg b' : 'fg'));
+  drawPulse(scr, L.pulseX, y, k.cells, L.pulseW);
+  const m = k.mem;
+  const lib = !m ? 'no data' : m.lib === 'pending' ? 'pending' : m.lib === 'drained' ? 'drained' : 'no librarian';
+  scr.put(L.nowX + 1, y, lib, !m || !m.lib ? 'line' : m.lib === 'drained' ? 'okd' : 'fg', L.bandW);
+  if(m){
+    const w = L.futW + 1;
+    scr.put(L.slotX, y, '·'.repeat(w), 'line');
+    if(m.lag > 0) scr.put(L.slotX, y, '█'.repeat(Math.max(1, Math.round(m.lag / LAGMAX * w))), m.gap > 0 ? 'info' : 'dim');
+    scr.put(L.timeX, y, m.ok ? dur(T.now - m.ok) : '—', m.ok ? 'dim' : 'line', L.timeW);
+    if(L.memW && m.gap > 0) scr.put(L.memX, y, kfmt(m.gap).padStart(L.memW), 'info');
+  }
+  if(sel) scr.bg(0, y, L.cols, 'sel');
+}
+
+/* ---------- group rows ---------- */
+function aggPulse(scr, L, y, ks, w){
+  const x0 = L.pulseX + L.pulseW - w, n = Math.max(1, ks.length);
+  for(let i = 0; i < w; i++){
+    const v = ks.filter(k => FAIL(k.cells[NB - w + i])).length;
+    scr.put(x0 + i, y, v ? levelChar(v, n) : '·', v ? (i === w - 1 ? 'warn b' : 'warn') : 'line');
+  }
+}
+function aggRuler(scr, L, y, ks){
+  const {soon, cnt} = futCounts(ks, L.futW), mx = Math.max(1, soon, ...cnt);
+  scr.put(L.slotX, y, soon ? levelChar(soon, mx) : '·', soon ? 'info b' : 'line');
+  cnt.forEach((c, i) => scr.put(L.futX + i, y, c ? levelChar(c, mx) : '·', c ? 'info' : 'line'));
+}
+const isFolded = r => S.folded[r.id] !== undefined ? S.folded[r.id] : !!r.fold0;
+function paintLane(scr, L, y, r, sel){
+  const folded = isFolded(r), aggW = (L.pulseW >= 20 && S.lens !== 'memory') ? 12 : 0;
+  playhead(scr, L, y);
+  scr.put(0, y, '▌', r.gut);
+  scr.put(2, y, folded ? '+' : '−', 'b');
+  scr.put(4, y, clip(r.title, L.nameW + 1 + L.pulseW - aggW - 1), 'b');
+  if(aggW) aggPulse(scr, L, y, r.ks, aggW);
+  scr.put(L.nowX, y, clip(r.band.text, L.bandW + 2), r.band.k, L.bandW + 2);
+  if(r.fut) scr.put(L.slotX, y, r.fut.text, r.fut.k, L.cols - L.slotX);
+  else if(S.lens === 'memory'){
+    const lag = r.ks.reduce((a, k) => a + (k.mem ? k.mem.lag : 0), 0), gap = r.ks.reduce((a, k) => a + (k.mem ? k.mem.gap : 0), 0);
+    scr.put(L.slotX, y, 'Σ lag ' + lag, 'dim', L.futW + 1);
+    if(L.memW && gap) scr.put(L.memX, y, kfmt(gap).padStart(L.memW), 'info');
+  } else aggRuler(scr, L, y, r.ks);
+  if(sel) scr.bg(0, y, L.cols, 'sel');
+}
+
+const ORDER = {fail: 0, rec: 1, ok: 2, paused: 3};
+function rowsCause(){
+  const rows = [], lanes = lanesOf(K);
+  const push = (r, ks, fn) => { rows.push(r); if(!isFolded(r)) ks.forEach(k => rows.push({t: 'k', k, kind: fn})); };
+  lanes.forEach(l => {
+    const n = l.ks.length, retry = n - l.rest, parts = [];
+    if(retry) parts.push('▹ retry ' + retry); if(l.rest) parts.push('◌ wait ' + l.rest);
+    push({t: 'lane', id: 'c:' + l.key, title: l.title, ks: l.ks, kind: 'fail', gut: l.rest === n ? 'dim' : 'warn', band: {text: '! ' + n + ' failing', k: 'warn b'}, fut: {text: parts.join('  '), k: retry ? 'info' : 'dim'}}, l.ks, 'fail');
+  });
+  const rec = K.filter(k => kindOf(k) === 'rec').sort((a, b) => failCount(b, 24) - failCount(a, 24) || a.name.localeCompare(b.name));
+  const ok = K.filter(k => kindOf(k) === 'ok'), pz = K.filter(k => kindOf(k) === 'paused');
+  if(rec.length) push({t: 'lane', id: 'c:rec', title: 'recovered · failed in 12h', ks: rec, kind: 'rec', gut: 'okd', band: {text: '✓ ' + rec.length, k: 'okd b'}, fold0: true}, rec, 'rec');
+  if(ok.length) push({t: 'lane', id: 'c:ok', title: 'ok · no failure in 12h', ks: ok, kind: 'ok', gut: 'ok', band: {text: '● ' + ok.length, k: 'ok'}, fold0: ok.length > 4}, ok, 'ok');
+  if(pz.length) push({t: 'lane', id: 'c:paused', title: 'paused', ks: pz, kind: 'paused', gut: 'dim', band: {text: '○ ' + pz.length, k: 'dim'}, fold0: true}, pz, 'paused');
+  return rows;
+}
+function rowsTime(){
+  const defs = [
+    {id: 'late', title: 'late · past due', gut: 'warn', bk: 'warn b', test: k => !!overdue(k), key: k => overdue(k).e},
+    {id: 'h1', title: 'within 1h', gut: 'info', bk: 'info', test: k => { const s = soonest(k); return s && s.e - T.now <= 3600; }, key: k => soonest(k).e},
+    {id: 'h12', title: 'within 12h', gut: 'info', bk: 'info', test: k => { const s = soonest(k); return s && s.e - T.now <= 43200; }, key: k => soonest(k).e},
+    {id: 'later', title: 'later than 12h', gut: 'dim', bk: 'dim', test: k => !!soonest(k), key: k => soonest(k).e},
+    {id: 'none', title: 'nothing scheduled', gut: 'dim', bk: 'dim', test: () => true, key: k => ORDER[kindOf(k)] * 1e12, fold0: true}
+  ];
+  const buckets = defs.map(() => []);
+  K.forEach(k => { const i = defs.findIndex(d => d.test(k)); buckets[i].push(k); });
+  const rows = [];
+  defs.forEach((d, i) => {
+    const ks = buckets[i]; if(!ks.length) return;
+    ks.sort((a, b) => d.key(a) - d.key(b) || a.name.localeCompare(b.name));
+    const r = {t: 'lane', id: 't:' + d.id, title: d.title, ks, kind: 'time', gut: d.gut, band: {text: String(ks.length), k: d.bk}, fold0: d.fold0};
+    rows.push(r); if(!isFolded(r)) ks.forEach(k => rows.push({t: 'k', k, kind: kindOf(k)}));
+  });
+  return rows;
+}
+function rowsMem(){
+  const defs = [
+    {id: 'gap', title: 'gap · requests skip atoms', gut: 'info', bk: 'info b', test: k => k.mem && k.mem.gap > 0, key: k => -k.mem.gap},
+    {id: 'pending', title: 'pending · no gap', gut: 'dim', bk: 'dim', test: k => k.mem && k.mem.lib === 'pending', key: k => -k.mem.lag},
+    {id: 'drained', title: 'drained', gut: 'okd', bk: 'okd', test: k => k.mem && k.mem.lib === 'drained', key: () => 0, fold0: true},
+    {id: 'none', title: 'no librarian', gut: 'dim', bk: 'dim', test: () => true, key: () => 0, fold0: true}
+  ];
+  const buckets = defs.map(() => []);
+  K.forEach(k => { const i = defs.findIndex(d => d.test(k)); buckets[i].push(k); });
+  const rows = [{t: 'world'}];
+  defs.forEach((d, i) => {
+    const ks = buckets[i]; if(!ks.length) return;
+    ks.sort((a, b) => d.key(a) - d.key(b) || a.name.localeCompare(b.name));
+    const r = {t: 'lane', id: 'm:' + d.id, title: d.title, ks, kind: 'mem', gut: d.gut, band: {text: String(ks.length), k: d.bk}, fold0: d.fold0};
+    rows.push(r); if(!isFolded(r)) ks.forEach(k => rows.push({t: 'k', k, kind: kindOf(k)}));
+  });
+  return rows;
+}
+const keyOf = r => r.t === 'lane' ? 'L:' + r.id : r.t === 'world' ? 'W:world' : 'K:' + r.k.name;
+const rowsOf = lens => lens === 'cause' ? rowsCause() : lens === 'time' ? rowsTime() : lens === 'memory' ? rowsMem() : lens === 'age' ? rowsAge() : null;
+function heightOf(r, sel){
+  if(S.lens !== 'cause' || r.t !== 'k' || r.kind !== 'fail') return 1;
+  return S.shift ? (sel ? 2 : 1) : 2;
+}
+function paintRow(scr, L, y, r, sel, h){
+  if(r.t === 'world') return paintWorld(scr, L, y, sel, S.lens === 'age');
+  if(r.t === 'lane') return S.lens === 'age' ? paintLaneAge(scr, L, y, r, sel) : paintLane(scr, L, y, r, sel);
+  if(S.lens === 'age') return paintKeeperAge(scr, L, y, r.k, sel);
+  if(S.lens === 'memory') return paintKeeperMem(scr, L, y, r.k, sel);
+  paintKeeper(scr, L, y, r.k, sel);
+  if(h === 2) paintLine2(scr, L, y + 1, r.k, sel);
+}
+function drawList(scr, L, y0, y1){
+  const rows = rowsOf(S.lens);
+  if(!S.selKey || !rows.some(r => keyOf(r) === S.selKey)) S.selKey = keyOf(rows[0]);
+  let line = 0, selLine = 0, selH = 1; const lines = [];
+  rows.forEach(r => { const sel = keyOf(r) === S.selKey, h = heightOf(r, sel); lines.push({r, line, h, sel}); if(sel){ selLine = line; selH = h; } line += h; });
+  const listH = y1 - y0 + 1;
+  let top = S.top;
+  if(selLine < top) top = selLine;
+  if(selLine + selH > top + listH) top = selLine + selH - listH;
+  top = Math.max(0, Math.min(top, Math.max(0, line - listH)));
+  const snap = lines.map(l => l.line).find(s => s >= top);
+  S.top = snap === undefined ? top : snap;
+  rowAt = [];
+  for(const {r, line: ln, h, sel} of lines){
+    const y = y0 + ln - S.top;
+    if(y < y0 || y + h - 1 > y1) continue;
+    paintRow(scr, L, y, r, sel, h);
+    for(let i = 0; i < h; i++) rowAt[y + i] = keyOf(r);
+  }
+  const used = Math.min(listH, line - S.top);
+  for(let y = y0 + used; y <= y1; y++) playhead(scr, L, y);
+}
+
+/* ---------- runtime × keeper lens ---------- */
+function drawMatrix(scr, L, y0, y1){
+  const lanes = lanesOf(K), fk = lanes.flatMap(l => l.ks);
+  rowAt = [];
+  if(!fk.length){ scr.put(4, y0, 'no failing keepers', 'dim'); return; }
+  const cnt = new Map();
+  fk.forEach(k => new Set([...k.hops.map(h => h.rt), k.rest.head]).forEach(r => cnt.set(r, (cnt.get(r) || 0) + 1)));
+  const cols = [...cnt.entries()].sort((a, b) => b[1] - a[1] || rtl(a[0]).localeCompare(rtl(b[0]))).map(e => e[0]);
+  const letters = 'ABCDEFGHIJKLMNOP', cw = S.cols >= 100 ? 3 : 2, nameW = 24;
+  const mx = L.nameX + nameW + 1, lastX = mx + cols.length * cw + 1, pulseX = lastX + 5, pulseN = S.cols >= 100 ? 12 : 8;
+  if(!S.selKey || !fk.some(k => 'K:' + k.name === S.selKey)) S.selKey = 'K:' + fk[0].name;
+  scr.put(L.nameX, 4, 'keeper', 'dim');
+  cols.forEach((r, i) => scr.put(mx + i * cw, 4, letters[i], 'fg b'));
+  scr.put(lastX, 4, 'last', 'dim'); scr.put(pulseX, 4, '◂ ' + (pulseN * MIN / 60) + 'h', 'dim');
+  let y = y0;
+  lanes.forEach(l => {
+    if(y > y1) return;
+    scr.put(0, y, '▌', l.rest === l.ks.length ? 'dim' : 'warn'); scr.put(4, y, clip(l.title + ' ×' + l.ks.length, nameW + cols.length * cw), 'b'); y++;
+    l.ks.forEach(k => {
+      if(y > y1) return;
+      const isSel = 'K:' + k.name === S.selKey, acts = actsOf(k);
+      scr.put(0, y, '▌', acts); scr.put(2, y, '!', acts + ' b'); scr.put(4, y, clip(k.name, nameW), isSel ? 'fg b' : 'fg');
+      cols.forEach((r, i) => {
+        const failed = k.hops.some(h => h.rt === r), head = k.rest.head === r, x = mx + i * cw;
+        if(failed) scr.bg(x, y, cw, 'fbg');
+        if(failed) scr.put(x, y, '✗', 'warn b');
+        if(head) scr.put(x + 1, y, k.rest.st === 'resting' ? '◌' : '▹', k.rest.st === 'resting' ? 'dim' : 'info');
+      });
+      const fa = failAge(k); scr.put(lastX, y, fa == null ? '—' : dur(fa), 'dim', 4);
+      drawPulse(scr, pulseX, y, k.cells, pulseN);
+      if(isSel) scr.bg(0, y, L.cols, 'sel');
+      rowAt[y] = 'K:' + k.name; y++;
+    });
+  });
+  y++;
+  let gx = 1;
+  [['✗', 'warn b', 'failed in last walk'], ['▹', 'info', 'next head'], ['◌', 'dim', 'head is resting']].forEach(([g, gk, t]) => {
+    gx = scr.put(gx, y, g, gk); gx = scr.put(gx, y, ' ' + t + '   ', 'dim');
+  });
+  y++;
+  const lw = Math.max(...cols.map(r => rtl(r).length)) + 4, per = Math.max(1, Math.floor((L.cols - 2) / lw));
+  cols.forEach((r, i) => { const x = 1 + (i % per) * lw, yy = y + Math.floor(i / per); scr.put(x, yy, letters[i], 'fg b'); scr.put(x + 2, yy, rtl(r), 'dim'); });
+}
+
+/* ---------- 24h wall lens ---------- */
+function wallOrder(){
+  const by = (a, b) => failCount(b, NB) - failCount(a, NB) || a.name.localeCompare(b.name);
+  return {fails: K.filter(k => k.state === 'failing').sort(by), others: K.filter(k => k.state !== 'failing' && k.state !== 'paused' && k.cells.some(FAIL)).sort(by), clean: K.filter(k => k.state === 'healthy' && !k.cells.some(FAIL)).sort(by)};
+}
+function drawWall(scr, L, y0, y1){
+  const {fails, others, clean} = wallOrder(), all = [...fails, ...others, ...clean];
+  const cx = L.nameX + L.nameW + 1, w = Math.min(NB, L.cols - cx - 10), off = NB - w;
+  rowAt = [];
+  if(!S.selKey || !all.some(k => 'K:' + k.name === S.selKey)) S.selKey = 'K:' + all[0].name;
+  scr.put(L.nameX, 4, 'keeper', 'dim');
+  for(let i = 0; i < w; i += 12) scr.put(cx + i, 4, LABELS[off + i], 'dim');
+  scr.put(cx + w - 3, 4, 'now', 'info b'); scr.put(cx + w + 2, 4, 'fail', 'dim');
+  let y = y0;
+  const fleetCnt = Array.from({length: w}, (_, i) => K.filter(k => FAIL(k.cells[off + i])).length), mx = Math.max(1, ...fleetCnt);
+  scr.put(4, y, 'fleet', 'dim'); fleetCnt.forEach((v, i) => scr.put(cx + i, y, levelChar(v, mx), v > 0 ? 'warn' : 'dim')); scr.put(cx + w, y, '┃', 'info'); scr.put(cx + w + 2, y, 'peak ' + mx, 'dim'); y++;
+  const draw = k => {
+    if(y > y1) return;
+    const isSel = 'K:' + k.name === S.selKey, acts = actsOf(k);
+    scr.put(0, y, '▌', acts); scr.put(2, y, markOf(k, 'wall'), acts + ' b'); scr.put(4, y, clip(k.name, L.nameW), isSel ? 'fg b' : 'fg');
+    drawPulse(scr, cx, y, k.cells.slice(off), w);
+    scr.put(cx + w, y, '┃', 'info'); scr.put(cx + w + 2, y, failCount(k, w) + '/' + w, 'dim');
+    if(isSel) scr.bg(0, y, L.cols, 'sel');
+    rowAt[y] = 'K:' + k.name; y++;
+  };
+  fails.forEach(draw);
+  if(y <= y1 && others.length){ scr.put(0, y, '─'.repeat(L.cols), 'line'); y++; }
+  others.forEach(draw);
+  if(y <= y1 && clean.length){ scr.put(0, y, '─'.repeat(L.cols), 'line'); y++; }
+  clean.forEach(draw);
+  y++;
+  let lx = 1;
+  [['█', 'warn', 'failed turn'], ['▄', 'warn', 'failed then ok in the same 30m'], ['▁', 'okd', 'ok'], ['·', 'dim', 'no turn (server down or idle)']].forEach(([g, gk, t]) => {
+    lx = scr.put(lx, y, g, gk); lx = scr.put(lx, y, ' ' + t + '   ', 'dim');
+  });
+}
+
+/* ---------- header: counts and minimap in one line, fleet ruler aligned with the columns below ---------- */
+function stripGroups(){
+  return [
+    {w: 'failing', g: '!', gk: 'warn b', ks: lanesOf(K).flatMap(l => l.ks), ch: k => k.rest.st === 'resting' ? ['▫', 'dim'] : ['▪', 'warn']},
+    {w: 'recovered', g: '✓', gk: 'okd b', ks: K.filter(k => kindOf(k) === 'rec'), ch: () => ['▪', 'okd']},
+    {w: 'ok', g: '●', gk: 'ok', ks: K.filter(k => kindOf(k) === 'ok'), ch: () => ['▪', 'ok']},
+    {w: 'paused', g: '○', gk: 'dim', ks: K.filter(k => kindOf(k) === 'paused'), ch: () => ['·', 'dim']}
+  ].filter(g => g.ks.length);
+}
+function drawHeader(scr, L){
+  const selName = S.selKey && S.selKey.startsWith('K:') ? S.selKey.slice(2) : null;
+  /* row 0: title, lenses, clock */
+  let x = scr.put(1, 0, 'KEEPERS ' + K.length, 'b');
+  x += 3; TABS = [];
+  LENSES.forEach(([id, label], i) => {
+    if(i === 4) x = scr.put(x, 0, '│ ', 'line');
+    const on = S.lens === id, t = ' ' + label + ' ';
+    if(on) scr.bg(x, 0, t.length, 'sel');
+    TABS.push({x0: x, x1: x + t.length, lens: id});
+    x = scr.put(x, 0, t, on ? 'fg b' : 'dim');
+  });
+  const clock = hms(T.now), cx = L.cols - 1 - clock.length;
+  scr.put(cx, 0, clock, 'dim');
+  let bx = cx - 1;
+  for(const t of [(S.simulated || S.lapse) ? (S.lapse ? '[sim ×600]' : '[sim]') : '', S.ageShift ? '[what-if +' + (S.ageShift / 86400) + 'd]' : '']){ if(!t) continue; bx -= t.length; scr.put(bx, 0, t, 'warn b'); bx -= 1; }
+  /* row 1: one cell per keeper, grouped by state, each group carries its own count */
+  const groups = S.lens === 'age' ? stripAge() : stripGroups();
+  const lenOf = (g, long) => (long ? (g.g + ' ' + g.ks.length + ' ' + g.w) : (g.g + g.ks.length)).length + 1 + g.ks.length + 2;
+  const long = groups.reduce((a, g) => a + lenOf(g, true), 1) <= L.cols - 1;
+  let sx = 1;
+  for(const g of groups){
+    sx = scr.put(sx, 1, long ? g.g + ' ' + g.ks.length + ' ' + g.w : g.g + g.ks.length, g.gk) + 1;
+    for(const k of g.ks){
+      const [ch, ck] = g.ch(k);
+      sx = scr.put(sx, 1, ch, ck + (k.name === selName ? ' b sel' : ''));
+    }
+    sx += 2;
+  }
+  if(S.lens === 'age') drawAgeSummary(scr, L, 2);
+  else {
+  /* row 2: the same time axis as the list, summed over the fleet */
+  const n = L.pulseW, fleet = Array.from({length: NB}, (_, i) => K.filter(k => FAIL(k.cells[i])).length), tail = fleet.slice(-n), mx = Math.max(1, ...tail);
+  scr.put(L.nameX, 2, 'fleet', 'dim');
+  scr.put(L.nameX + 6, 2, L.nameW >= 21 ? 'fail/30m max ' + mx : 'max ' + mx, 'dim', L.nameW - 6);
+  tail.forEach((v, i) => scr.put(L.pulseX + i, 2, v ? levelChar(v, mx) : '·', v ? (i === n - 1 ? 'warn b' : 'warn') : 'line'));
+  playhead(scr, L, 2);
+  const {soon, cnt} = futCounts(K.filter(k => k.state !== 'paused'), L.futW), fm = Math.max(1, soon, ...cnt);
+  scr.put(L.slotX, 2, soon ? levelChar(soon, fm) : '·', soon ? 'info b' : 'line');
+  cnt.forEach((c, i) => scr.put(L.futX + i, 2, c ? levelChar(c, fm) : '·', c ? 'info' : 'line'));
+  scr.put(L.timeX, 2, 'max ' + fm, 'dim', L.timeW);
+  }
+  scr.put(0, 3, '─'.repeat(L.cols), 'line');
+}
+function drawColHeader(scr, L, y){
+  if(S.lens === 'age'){ drawAgeHeader(scr, L, y); return; }
+  scr.put(L.nameX, y, 'keeper', 'dim');
+  scr.put(L.pulseX, y, S.lens === 'memory' ? '◂ turns ' + (L.pulseW * MIN / 60) + 'h' : '◂ ' + (L.pulseW * MIN / 60) + 'h', 'dim');
+  scr.put(L.pulseX + L.pulseW - 3, y, MIN + 'm', 'dim');
+  scr.put(L.ph1, y, '┃', 'info'); scr.put(L.nowX, y, S.lens === 'memory' ? 'librarian' : '● now', 'fg b'); scr.put(L.ph2, y, '┃', 'info');
+  if(S.lens === 'memory'){
+    scr.put(L.slotX, y, lagLabel(L), 'info');
+    scr.put(L.timeX, y, 'digest', 'dim', L.timeW + 1);
+    if(L.memW) scr.put(L.memX + L.memW - 3, y, 'gap', 'dim');
+  } else {
+    scr.put(L.slotX, y, 'next ▹ ' + (L.futW * MIN / 60) + 'h', 'info');
+    scr.put(L.timeX, y, 'due', 'dim');
+    if(L.memW) scr.put(L.memX + 2, y, 'lag', 'dim');
+  }
+}
+
+/* ---------- story dock: one feed from three sources ---------- */
+function currentKeeper(){ const key = S.selKey || ''; return key.startsWith('K:') ? K.find(x => x.name === key.slice(2)) : null; }
+function evAge(e){ return when(e); }
+function feedPast(k){
+  const turns = k.lastTurns.slice(-3).map(t => ({e: t.e, g: t.o === 'ok' ? '✓' : '✗', gk: t.o === 'ok' ? 'okd' : 'warn', w: t.o === 'ok' ? 'turn ok' : 'turn failed', wk: t.o === 'ok' ? 'dim' : 'warn', fail: t.o === 'fail'}));
+  const wakes = k.sch.filter(s => s.lw && s.lw.e).map(s => ({e: s.lw.e, g: '◷', gk: s.lw.st === 'ok' ? 'dim' : 'warn', w: 'wake ' + s.lw.st + ' · ' + s.rec, wk: s.lw.st === 'ok' ? 'dim' : 'warn'})).sort((a, b) => b.e - a.e).slice(0, 2);
+  const dig = k.mem && k.mem.ok ? [{e: k.mem.ok, g: '+', gk: 'dim', w: 'digest ok · librarian', wk: 'dim'}] : [];
+  const ev = [...turns, ...wakes, ...dig].sort((a, b) => a.e - b.e);
+  if(k.state === 'failing'){ const i = ev.map(x => x.fail).lastIndexOf(true); if(i >= 0) ev[i].w += '   ' + chainText(k); }
+  return ev;
+}
+function box(scr, L, top, h){
+  const bot = top + h - 1;
+  scr.put(0, top, '┌' + '─'.repeat(L.cols - 2) + '┐', 'line');
+  for(let y = top + 1; y < bot; y++){ scr.put(0, y, '│', 'line'); scr.put(L.cols - 1, y, '│', 'line'); }
+  scr.put(0, bot, '└' + '─'.repeat(L.cols - 2) + '┘', 'line');
+  return bot;
+}
+function drawDock(scr, L, top, h){
+  const bot = box(scr, L, top, h), inner = L.cols - 4;
+  const k = currentKeeper(), key = S.selKey || '';
+  if(key === 'W:world') return dockWorld(scr, L, top, h);
+  let y = top + 1;
+  const line = (s, kk, x) => { if(y < bot){ scr.put(2 + (x || 0), y, clip(s, inner - (x || 0)), kk); y++; } };
+  const ev = (e, g, gk, w, wk) => { if(y < bot){ scr.put(4, y, e, 'dim'); scr.put(16, y, g, gk); scr.put(18, y, clip(w, inner - 16), wk); y++; } };
+  if(k){
+    scr.put(2, top, ' ' + k.name + ' · ' + (k.mode || '') + (k.state === 'failing' ? ' · ' + rtl(k.term.rt) + ' ' + k.term.fault : '') + ' ', 'b');
+    const tabs = [['feed', 'story'], ['sch', 's schedules'], ['mem', 'm memory']];
+    let tx = L.cols - 3 - tabs.reduce((a, t) => a + t[1].length + 3, 0);
+    tabs.forEach(([id, label]) => { const t = ' ' + label + ' '; if(S.page === id) scr.bg(tx, top, t.length, 'sel'); tx = scr.put(tx, top, t, S.page === id ? 'fg b' : 'dim') + 1; });
+    if(S.page === 'sch') dockSchedules(scr, L, k, y, bot);
+    else if(S.page === 'mem') dockMemory(scr, L, k, y, bot);
+    else {
+      line('◂ past · turns, wakes, digests in one order', 'dim');
+      feedPast(k).slice(-5).forEach(x => ev(evAge(x.e), x.g, x.gk, x.w, x.wk));
+      const lab = ' now ' + hms(T.now) + ' ', fill = Math.max(0, inner - strw(lab));
+      if(y < bot){ scr.put(2, y, '━'.repeat(Math.floor(fill / 2)) + lab + '━'.repeat(fill - Math.floor(fill / 2)), 'info b'); y++; }
+      const n = nowOf(k), s = sinceText(k);
+      line(nowText(n) + (k.state === 'failing' && s ? ' · failing since ' + s + ' (turn log)' : ''), k.state === 'failing' ? 'fg b' : k.state === 'healthy' ? 'ok b' : 'dim');
+      const od = overdue(k); if(od) line('! due since ' + hm(od.e) + ' · ' + dur(T.now - od.e) + ' late · ' + od.rec, 'warn', 2);
+      line('▹ next', 'info');
+      const hd = headOf(k), nxt = k.sch.filter(s2 => !s2.od).sort((a, b) => a.e - b.e);
+      if(k.state === 'failing') ev('—', hd.g, hd.k, k.rest.st === 'resting' ? 'waits for ' + rtl(k.rest.head) + ' to leave its quota window · end not stated' : 'next turn goes to ' + rtl(k.rest.head) + ' · time not stated', hd.k);
+      nxt.slice(0, 2).forEach(s2 => ev(hm(s2.e), '◷', k.state === 'paused' ? 'dim' : 'info', 'wake in ' + dur(s2.e - T.now) + ' · ' + s2.rec, k.state === 'paused' ? 'dim' : 'info'));
+      if(k.mem && k.mem.lag > 0) ev('—', '+', 'dim', 'lag ' + k.mem.lag + ' turns wait for the librarian · time not stated', 'dim');
+      if(k.state !== 'failing' && !nxt.length && !(k.mem && k.mem.lag > 0)) ev('—', '┄', 'dim', 'nothing scheduled · next turn is not announced', 'dim');
+    }
+  } else if(key.startsWith('L:')){
+    const r = rowsOf(S.lens).find(x => keyOf(x) === key);
+    if(r){
+      scr.put(2, top, ' ' + r.title + ' ', 'b');
+      line(r.ks.length + ' keepers', 'fg');
+      if(r.kind === 'fail'){
+        line('last attempts: ' + r.ks.map(x => { const a = failAge(x); return a == null ? '—' : dur(a); }).join(', '), 'dim', 2);
+        line('same terminal runtime and typed fault: ' + r.title, 'dim', 2);
+        const rest = r.ks.filter(x => x.rest.st === 'resting').length; line('▹ retry ' + (r.ks.length - rest) + (rest ? '   ◌ wait ' + rest : ''), 'info');
+      } else if(r.kind === 'time'){
+        const {soon, cnt} = futCounts(r.ks, FUTN);
+        line('wakes this half hour: ' + soon + ' · next ' + (FUTN * MIN / 60) + 'h: ' + cnt.reduce((a, b) => a + b, 0), 'dim', 2);
+      } else if(r.kind === 'age'){
+        line('facts ' + r.ks.reduce((a, x) => a + (x.fr ? x.fr.n : 0), 0) + ' · stale events ×' + r.ks.reduce((a, x) => a + (x.fr ? x.fr.inv.length : 0), 0) + ' · not in the ledger ' + r.ks.reduce((a, x) => a + (x.fr ? x.fr.un : 0), 0), 'dim', 2);
+        line('classes come from the snapshot updated_at age; the edges 3h / 24h / 3d are display choices', 'dim', 2);
+      } else if(r.kind === 'mem'){
+        line('lag ' + r.ks.reduce((a, x) => a + (x.mem ? x.mem.lag : 0), 0) + ' turns · gap ' + kfmt(r.ks.reduce((a, x) => a + (x.mem ? x.mem.gap : 0), 0)) + ' atoms', 'dim', 2);
+      }
+    }
+  }
+}
+function dockSchedules(scr, L, k, y, bot){
+  const put = (s, kk) => { if(y < bot){ scr.put(2, y, clip(s, L.cols - 4), kk); y++; } };
+  put('◷ schedules aimed at ' + k.name + ' · ' + k.sch.length + ' active', 'dim');
+  put('   due    ' + 'in'.padEnd(11) + 'recurrence'.padEnd(33) + 'last wake', 'dim');
+  if(!k.sch.length) put('  nothing scheduled: this keeper runs on its own cadence or when asked', 'dim');
+  [...k.sch].sort((a, b) => a.e - b.e).slice(0, bot - y - 1).forEach(s => {
+    const when = s.od ? 'late ' + dur(T.now - s.e) : 'in ' + dur(s.e - T.now);
+    const lw = s.lw ? (s.lw.st === 'ok' ? '✓ ' : '✗ ') + (s.lw.e ? hm(s.lw.e) : '') : '—';
+    put('  ' + (s.od ? '!' : ' ') + hm(s.e) + '  ' + when.padEnd(11) + clip(s.rec, 32).padEnd(33) + lw, s.od ? 'warn' : 'fg');
+  });
+  put('  full table: Schedules screen, rows aimed at this keeper', 'line');
+}
+function dockMemory(scr, L, k, y, bot){
+  const put = (a, b, kk) => { if(y < bot){ scr.put(2, y, a, 'dim'); scr.put(18, y, clip(b, L.cols - 20), kk || 'fg'); y++; } };
+  const m = k.mem;
+  if(!m){ put('+ memory', 'no memory-health row for this keeper', 'dim'); return; }
+  put('+ memory', '', 'dim');
+  put('  facts', m.facts + '   Δ +' + m.add + ' −' + m.rem);
+  dockMemoryAge(put, k);
+  put('  librarian', (m.lib || 'none') + (m.lib === 'pending' ? ' · lag ' + m.lag + ' unread turns' : ''));
+  put('  gap', m.gap > 0 ? 'requests skip ' + m.gap + ' atoms the librarian has not digested' : 'none', m.gap > 0 ? 'info' : 'dim');
+  put('  last digest', m.ok ? dur(ageClock() - m.ok) + ' ago' : 'never', 'dim');
+  if(m.lf) put('  last failure', m.lf + ' · time not stated', 'dim');
+  if(y < bot) scr.put(2, y, clip('  facts, filters, inspector: Memory screen, this keeper', L.cols - 4), 'line');
+}
+
+/* ---------- detail line and footer ---------- */
+function drawDetail(scr, L){
+  const ys = S.rows - 3, y = S.rows - 2, k = currentKeeper();
+  scr.put(0, ys, '─'.repeat(L.cols), 'line');
+  if(!k){
+    const r = (S.selKey || '').startsWith('L:') && rowsOf(S.lens) ? rowsOf(S.lens).find(x => keyOf(x) === S.selKey) : null;
+    if((S.selKey || '') === 'W:world'){ const wb = worldWord(); let wx = scr.put(1, y, 'world · shared', 'b'); wx = scr.put(wx + 2, y, wb.g + ' briefing ' + wb.w, wb.wk); scr.put(wx + 2, y, WS.un + ' keeper facts absent from the ledger', 'dim'); return; }
+    scr.put(1, y, r ? r.title + ' · ' + r.ks.length + ' keepers' : 'select a keeper', 'dim'); return;
+  }
+  const n = nowOf(k), s = sinceText(k), hd = headOf(k), sc = soonest(k);
+  let x = 1;
+  x = scr.put(x, y, k.name, 'b');
+  x = scr.put(x + 2, y, nowText(n), n.wk);
+  if(s) x = scr.put(x + 2, y, 'since ' + s, 'dim');
+  if(hd.w) x = scr.put(x + 2, y, headText(hd), hd.k);
+  if(sc) x = scr.put(x + 2, y, '◷ ' + hm(sc.e) + ' ' + sc.rec, 'info');
+  if(S.lens === 'age' && k.fr) x = scr.put(x + 2, y, '+ renewed ' + dur(renAge(k)) + ' ago', 'dim');
+  if(k.mem && k.mem.lag > 0) scr.put(x + 2, y, 'lag ' + k.mem.lag, 'dim');
+}
+function drawFooter(scr, L){
+  const sp = L.cols >= 90 ? '  ' : ' ';
+  const grp = GROUP_LENSES.includes(S.lens);
+  const base = (S.dock ? ['↑↓ move', '⏎ feed', 's schedules', 'm memory', 'esc close', 'o lens'] : grp ? ['↑↓ move', '←→ fold', '[ ] group', '⏎ story', 'o lens'] : ['↑↓ move', '⏎ open in list', 'o lens']);
+  const cur = (WS.phase === 'stale' || WS.phase === 'building') ? 'c curator' : 'c curator (idle)';
+  const t = base.concat(S.lens === 'age' ? ['u renew', cur, 'd +1d', 'w world', 'x reset'] : ['n color', 't theme', 'f/r sim', 'x reset']).join(sp);
+  if(flashMsg){ scr.put(1, S.rows - 1, clip(flashMsg, L.cols - 2), 'info'); return; }
+  scr.put(1, S.rows - 1, clip(t, L.cols - 2), 'dim');
+}
+
+/* ---------- one frame, no DOM ---------- */
+function buildScreen(){
+  const L = layout(S.cols), scr = new Screen(S.cols, S.rows);
+  drawHeader(scr, L);
+  const dockH = 15, dockOn = S.dock && GROUP_LENSES.includes(S.lens);
+  const grp = GROUP_LENSES.includes(S.lens);
+  if(grp){ drawColHeader(scr, L, 4); drawList(scr, L, 5, dockOn ? S.rows - 2 - dockH : S.rows - 4); }
+  else if(S.lens === 'matrix') drawMatrix(scr, L, 5, S.rows - 4);
+  else drawWall(scr, L, 5, S.rows - 4);
+  if(dockOn) drawDock(scr, L, S.rows - 1 - dockH, dockH);
+  else drawDetail(scr, L);
+  drawFooter(scr, L);
+  return scr;
+}
+
+/* ===== p2b: fact age, renewal clock, typed stale events, and the world row ===== */
+/* What the server states (typed): snapshot updated_at and the last revision's +added -removed; source invalidations {at, reason};
+   briefing freshness Missing | Current | Stale. What this file computes for display only: the age ladder, the renewal classes, the what-if clock.
+   An age never marks a fact weaker or stale: the memory OS says re-observation is not a strength signal (RFC-0418). */
+const AGE_LO = 3600, AGE_HI = 30 * 86400, ZONE_NEW = 86400, ZONE_MID = 7 * 86400;
+const RENEW_EDGES = [3 * 3600, 24 * 3600, 72 * 3600];
+const AGE_CLASSES = [
+  {id: 'fresh', title: 'fresh <3h', gut: 'info', bk: 'info b'},
+  {id: 'today', title: 'today <24h', gut: 'fg', bk: 'fg', fold0: true},
+  {id: 'cooling', title: 'cooling 1–3d', gut: 'dim', bk: 'dim'},
+  {id: 'dormant', title: 'dormant ≥3d', gut: 'dim', bk: 'dim'},
+  {id: 'none', title: 'no snapshot', gut: 'dim', bk: 'dim', fold0: true}
+];
+const W0 = DATA.world, WB = W0.briefing;
+const WS0 = {phase: WB.state, saved: WB.saved, ledgerSaved: W0.ledgerSaved, un: W0.un, claims: W0.claims, conflicts: W0.conflicts, ledgerFacts: W0.ledgerFacts,
+  sources: WB.sources, chars: WB.chars, target: WB.building ? WB.building.target : WB.sources, remaining: WB.building ? WB.building.remaining : 0, moving: false};
+let WS = clone(WS0);
+const RENEW = new Map();                 /* keeper name -> {add, rem} while a renewal is shown (simulation) */
+let curTok = 0, ageTimer = null;
+let flashMsg = null;                     /* one footer line for a key that had nothing to do; cleared after 1.7 s */
+function flash(msg){ flashMsg = msg; render('key'); setTimeout(() => { if(flashMsg === msg){ flashMsg = null; render('key'); } }, 1700); }
+const NMAX = Math.max(1, ...K0.map(k => k.fr ? k.fr.n : 0));
+
+const ageClock = () => T.now + (S.ageShift || 0);              /* real clock + what-if shift, used only by memory-age figures */
+const renAge = k => k.fr ? Math.max(0, ageClock() - k.fr.upd) : null;
+const classOf = k => { const a = renAge(k); return a == null ? 'none' : a < RENEW_EDGES[0] ? 'fresh' : a < RENEW_EDGES[1] ? 'today' : a < RENEW_EDGES[2] ? 'cooling' : 'dormant'; };
+const oddDormant = k => classOf(k) === 'dormant' && k.state !== 'paused' && k.mode === 'autonomous';   /* an autonomous keeper that should be renewing is not */
+const allBirths = () => K.flatMap(k => k.fr ? k.fr.fb : []).concat(W0.fbx);
+const factsTotal = () => allBirths().length;
+const ledgerSources = () => WS.claims + WS.conflicts;
+const invAll = () => K.flatMap(k => k.fr ? k.fr.inv : []);
+
+/* ---------- the age ladder: log axis from 1h to 30d, oldest left, newest right (the same direction as the turn pulse) ---------- */
+function ladderBins(births, n){
+  const bins = new Array(n).fill(0), clk = ageClock(), lr = Math.log(AGE_HI / AGE_LO) / Math.max(1, n - 2);
+  for(const b of births){
+    const age = Math.max(0, clk - b);
+    const k = age < AGE_LO ? 0 : Math.min(n - 1, Math.floor(Math.log(age / AGE_LO) / lr) + 1);
+    bins[n - 1 - k]++;
+  }
+  return bins;
+}
+function cellZone(x, n){
+  const k = n - 1 - x; if(k === 0) return 'info';
+  const lo = AGE_LO * Math.exp((k - 1) * Math.log(AGE_HI / AGE_LO) / Math.max(1, n - 2));
+  return lo < ZONE_NEW ? 'info' : lo < ZONE_MID ? 'fg' : 'dim';
+}
+function drawLadder(scr, x0, y, bins, mx, n, flash){
+  bins.forEach((c, i) => {
+    if(!c){ scr.put(x0 + i, y, '·', 'line'); return; }
+    const hot = flash && i >= n - 2;                         /* a renewal in progress: the new facts stand full height for a moment */
+    scr.put(x0 + i, y, hot ? '█' : levelChar(c, mx), hot ? 'info b' : cellZone(i, n));
+  });
+}
+function ladderTicks(n){
+  const lr = Math.log(AGE_HI / AGE_LO) / Math.max(1, n - 2), out = []; let last = n + 1;
+  for(const [age, text] of [[3600, '1h'], [6 * 3600, '6h'], [86400, '1d'], [7 * 86400, '7d'], [AGE_HI, '30d']]){
+    const x = n - 2 - Math.round(Math.log(age / AGE_LO) / lr);
+    if(x < 0 || x + text.length + 1 > last) continue;
+    out.push({x, text}); last = x;
+  }
+  return out;
+}
+
+/* ---------- rows ---------- */
+function renewWord(k){
+  const fr = k.fr; if(!fr) return {g: '—', gk: 'line', w: 'no snapshot', wk: 'line'};
+  const rn = RENEW.get(k.name); if(rn) return {g: '+', gk: 'info b', w: 'renewed +' + rn.add, wk: 'info b'};
+  const c = classOf(k), kk = c === 'fresh' ? 'info b' : c === 'today' ? 'fg' : oddDormant(k) ? 'warn b' : 'dim';
+  return {g: '+', gk: kk, w: dur(renAge(k)), wk: kk};
+}
+function paintKeeperAge(scr, L, y, k, sel){
+  playhead(scr, L, y);
+  gutter(scr, L, y, k, markOf(k, 'memory'));
+  scr.put(L.nameX, y, clip(k.name, L.nameW), k.state === 'paused' ? 'dim' : (sel ? 'fg b' : 'fg'));
+  const fr = k.fr, n = L.pulseW;
+  if(fr){ const bins = ladderBins(fr.fb, n); drawLadder(scr, L.pulseX, y, bins, Math.max(1, ...bins), n, RENEW.has(k.name)); }
+  else scr.put(L.pulseX, y, '—', 'line');
+  const w = renewWord(k); scr.put(L.nowX, y, w.g, w.gk); scr.put(L.nowX + 2, y, w.w, w.wk, L.bandW - 2);
+  const m = k.mem;
+  if(m){ const bw = L.futW + 1; scr.put(L.slotX, y, '·'.repeat(bw), 'line'); if(m.lag > 0) scr.put(L.slotX, y, '█'.repeat(Math.max(1, Math.round(m.lag / LAGMAX * bw))), m.gap > 0 ? 'info' : 'dim'); }
+  const iv = fr ? fr.inv.length : 0;
+  if(iv) scr.put(L.timeX, y, '×' + iv, fr.inv.some(e => ageClock() - e[0] < 86400) ? 'warn' : 'dim', L.timeW);
+  if(L.memW && fr){ scr.put(L.memX, y, String(fr.n).padStart(L.memW - 2), 'dim'); scr.put(L.memX + L.memW - 1, y, levelChar(fr.n, NMAX), 'dim'); }
+  if(sel) scr.bg(0, y, L.cols, 'sel');
+}
+function worldWord(){
+  switch(WS.phase){
+    case 'current': return {g: '●', gk: 'ok', w: 'current', wk: 'ok'};
+    case 'stale': return {g: '!', gk: 'warn b', w: 'stale', wk: 'warn b'};
+    case 'building': return {g: WS.moving ? spinGlyph() : STILL, gk: 'info b', w: 'building', wk: 'info b'};
+    default: return {g: '○', gk: 'dim', w: 'missing', wk: 'dim'};
+  }
+}
+function paintWorld(scr, L, y, sel, inAge){
+  playhead(scr, L, y);
+  scr.put(0, y, '▌', 'info'); scr.put(2, y, '■', 'info b');
+  scr.put(L.nameX, y, clip('world · shared', L.nameW), sel ? 'fg b' : 'fg');
+  const n = L.pulseW;
+  if(inAge){ const bins = ladderBins(allBirths(), n); drawLadder(scr, L.pulseX, y, bins, Math.max(1, ...bins), n, false); }
+  else scr.put(L.pulseX, y, 'ledger + briefing', 'dim', n);
+  const b = worldWord(); scr.put(L.nowX, y, b.g, b.gk); scr.put(L.nowX + 2, y, b.w, b.wk, L.bandW - 2);
+  const bw = L.futW + 1, tot = factsTotal(), txt = WS.un + ' absent', room = bw - txt.length - 1;
+  scr.put(L.slotX, y, '·'.repeat(bw), 'line');
+  if(room >= 4 && WS.un > 0) scr.put(L.slotX, y, '█'.repeat(Math.max(1, Math.round(WS.un / tot * room))), 'info');
+  scr.put(L.slotX + Math.max(0, bw - txt.length), y, txt, WS.un ? 'info' : 'dim');
+  scr.put(L.timeX, y, inAge ? '×' + invAll().length : dur(ageClock() - WS.saved), inAge ? 'dim' : 'dim', L.timeW);
+  if(L.memW){ const v = inAge ? kfmt(factsTotal()) : kfmt(WS.un); scr.put(L.memX, y, v.padStart(L.memW), inAge ? 'dim' : (WS.un ? 'info' : 'line')); }
+  if(sel) scr.bg(0, y, L.cols, 'sel');
+}
+function paintLaneAge(scr, L, y, r, sel){
+  const folded = isFolded(r), n = L.pulseW;
+  playhead(scr, L, y);
+  scr.put(0, y, '▌', r.gut); scr.put(2, y, folded ? '+' : '−', 'b');
+  scr.put(4, y, clip(r.title, L.nameW), 'b');
+  const bins = ladderBins(r.ks.flatMap(k => k.fr ? k.fr.fb : []), n);
+  drawLadder(scr, L.pulseX, y, bins, Math.max(1, ...bins), n, false);
+  scr.put(L.nowX, y, clip(r.band.text, L.bandW + 2), r.band.k, L.bandW + 2);
+  scr.put(L.slotX, y, r.fut.text, r.fut.k, L.cols - L.slotX);
+  if(sel) scr.bg(0, y, L.cols, 'sel');
+}
+function rowsAge(){
+  const rows = [{t: 'world'}];
+  const by = AGE_CLASSES.map(() => []);
+  K.forEach(k => by[AGE_CLASSES.findIndex(c => c.id === classOf(k))].push(k));
+  AGE_CLASSES.forEach((c, i) => {
+    const ks = by[i]; if(!ks.length) return;
+    ks.sort((a, b) => (renAge(a) || 0) - (renAge(b) || 0) || a.name.localeCompare(b.name));
+    const odd = ks.filter(oddDormant).length, facts = ks.reduce((a, k) => a + (k.fr ? k.fr.n : 0), 0), lag = ks.reduce((a, k) => a + (k.mem ? k.mem.lag : 0), 0);
+    const r = {t: 'lane', id: 'a:' + c.id, title: c.title, ks, kind: 'age', gut: c.gut, band: {text: odd ? ks.length + ' · ' + odd + '!' : String(ks.length), k: odd ? 'warn b' : c.bk}, fold0: c.fold0,
+      fut: {text: 'Σ ' + kfmt(facts) + ' facts · lag ' + lag, k: 'dim'}};
+    rows.push(r); if(!isFolded(r)) ks.forEach(k => rows.push({t: 'k', k, kind: kindOf(k)}));
+  });
+  return rows;
+}
+function stripAge(){
+  const mk = (id, w, g, gk, ch) => ({w, g, gk, ks: K.filter(k => classOf(k) === id), ch});
+  return [mk('fresh', 'fresh', '█', 'info b', () => ['▪', 'info']), mk('today', 'today', '▆', 'fg', () => ['▪', 'fg']), mk('cooling', 'cooling', '▃', 'dim', () => ['▪', 'dim']),
+    mk('dormant', 'dormant', '▁', 'dim', k => oddDormant(k) ? ['▪', 'warn'] : ['▫', 'dim'])].filter(g => g.ks.length);
+}
+function drawAgeSummary(scr, L, y){
+  const n = L.pulseW, inv = invAll(), clk = ageClock();
+  const days = Array.from({length: n}, (_, i) => { const d = n - 1 - i; return inv.filter(e => { const a = clk - e[0]; return a >= d * 86400 && a < (d + 1) * 86400; }).length; });
+  const mx = Math.max(1, ...days), chg = inv.filter(e => e[1] === 0).length;
+  scr.put(L.nameX, y, 'stale events/day', 'dim', L.nameW);
+  days.forEach((v, i) => scr.put(L.pulseX + i, y, v ? levelChar(v, mx) : '·', v ? (i === n - 1 ? 'warn b' : 'warn') : 'line'));
+  playhead(scr, L, y);
+  scr.put(L.nowX, y, 'max ' + mx, 'dim', L.bandW);
+  const full = 'Σ ' + inv.length + ' · changed ' + chg + ' · gone ' + (inv.length - chg);
+  scr.put(L.slotX, y, full.length <= L.cols - L.slotX ? full : 'Σ ' + inv.length, 'dim', L.cols - L.slotX);
+}
+const lagLabel = L => L.futW + 1 >= 20 ? 'lag · unread turns ▹' : 'lag ▹';
+function drawAgeHeader(scr, L, y){
+  scr.put(L.nameX, y, 'keeper', 'dim');
+  if(L.nameW >= 20) scr.put(L.nameX + 8, y, 'facts by age ▸', 'dim');
+  ladderTicks(L.pulseW).forEach(t => scr.put(L.pulseX + t.x, y, t.text, 'dim'));
+  scr.put(L.ph1, y, '┃', 'info'); scr.put(L.nowX, y, 'renewed', 'fg b'); scr.put(L.ph2, y, '┃', 'info');
+  scr.put(L.slotX, y, lagLabel(L), 'info');
+  scr.put(L.timeX, y, 'stale', 'dim');
+  if(L.memW) scr.put(L.memX + L.memW - 5, y, 'facts', 'dim');
+}
+
+/* ---------- dock pages ---------- */
+function ageStats(k){
+  const fr = k.fr; if(!fr || !fr.fb.length) return null;
+  const clk = ageClock(), a = fr.fb.map(b => Math.max(0, clk - b)).sort((x, y) => x - y);
+  return {newest: a[0], median: a[a.length >> 1], oldest: a[a.length - 1], old7: Math.round(100 * a.filter(v => v >= ZONE_MID).length / a.length)};
+}
+function dockWorld(scr, L, top, h){
+  const bot = top + h - 1, inner = L.cols - 4; let y = top + 1;
+  scr.put(2, top, ' world · shared workspace memory ', 'b');
+  const line = (a, b, kk, ak) => { if(y < bot){ scr.put(2, y, a, ak || 'dim'); scr.put(18, y, clip(b, inner - 16), kk || 'fg'); y++; } };
+  const tot = factsTotal(), ages = allBirths().map(b => Math.max(0, ageClock() - b));
+  line('◂ keepers', tot + ' facts (+' + W0.src + ' source-bound) · ' + W0.kn + ' keepers · newest ' + dur(Math.min(...ages)) + ' · re-observed ' + W0.reobs + ' of ' + tot);
+  line('  ↓ ledger', WS.ledgerFacts + ' facts → ' + WS.claims + ' claims · ' + WS.conflicts + ' conflicts · ' + W0.excluded + ' excluded · saved ' + when(WS.ledgerSaved) + ' (' + dur(ageClock() - WS.ledgerSaved) + ')');
+  line('  ↓ absent', WS.un + ' keeper facts are absent from the ledger (' + Math.round(100 * WS.un / tot) + '%)' + (WS.un ? ' · ' + dur(W0.unNewestS + (S.ageShift || 0)) + '–' + dur(W0.unOldestS + (S.ageShift || 0)) + ' old, none newer' : ''), WS.un ? 'info' : 'dim');
+  const src2 = ledgerSources();
+  const now = WS.phase === 'current' ? 'briefing current · saved ' + hm(WS.saved) + ' (' + dur(ageClock() - WS.saved) + ') · ' + WS.sources + ' sources · ' + kfmt(WS.chars) + ' chars'
+    : WS.phase === 'stale' ? 'briefing stale · the ledger has ' + src2 + ' sources, the published briefing was built from ' + WS.sources
+    : WS.phase === 'building' ? 'building ' + (WS.target - WS.remaining) + '/' + WS.target + ' · ' + (WS.remaining === WS.target ? 'from scratch' : 'incremental') + (src2 !== WS.target ? ' · ledger ' + src2 : '') + ' · published ' + hm(WS.saved)
+    : 'no briefing published';
+  line('● now', now, WS.phase === 'current' ? 'ok b' : WS.phase === 'stale' ? 'warn b' : WS.phase === 'building' ? 'info b' : 'dim', WS.phase === 'current' ? 'ok' : 'dim');
+  line('▹ next', 'no time announced · rebuilds when the source set or contract changes', 'info', 'info');
+  line('  server says', W0.says.validation + ' · ' + W0.says.consistency, 'dim');
+  line('', 'ledger semantic_verification: ' + W0.says.semantic, 'dim');
+  const inv = invAll(), days = Array.from({length: 20}, (_, d) => inv.filter(e => { const a = ageClock() - e[0]; return a >= d * 86400 && a < (d + 1) * 86400; }).length), mx = Math.max(1, ...days);
+  line('✗ stale events', inv.length + ' source invalidations · source_changed ' + inv.filter(e => e[1] === 0).length + ' · source_unavailable ' + inv.filter(e => e[1] === 1).length, 'fg', 'warn');
+  if(y < bot){ scr.put(2, y, '  last 20 days', 'dim'); days.slice().reverse().forEach((v, i) => scr.put(18 + i, y, v ? levelChar(v, mx) : '·', v ? 'warn' : 'line')); scr.put(18 + 21, y, 'oldest ◂ today', 'dim'); y++; }
+  if(y < bot) scr.put(2, y, clip('  older than 20 days: ' + Math.max(0, W0.invTotal - W0.invDays.reduce((a, b) => a + b, 0)) + ' · stale = the source file changed or vanished', inner), 'dim');
+}
+function dockMemoryAge(put, k){
+  const fr = k.fr, st = ageStats(k);
+  if(!fr){ put('  renewed', 'no snapshot for this keeper', 'line'); return; }
+  const c = fr.ch, rn = RENEW.get(k.name);
+  put('  renewed', dur(renAge(k)) + ' ago (' + when(fr.upd) + ') · rev ' + fr.rev + ' · last revision +' + c[0] + ' −' + c[1] + ' ~' + c[2] + (rn ? '   [sim]' : ''), rn ? 'info b' : 'fg');
+  if(st) put('  age', 'median ' + dur(st.median) + ' · newest ' + dur(st.newest) + ' · oldest ' + dur(st.oldest) + ' · ≥7d ' + st.old7 + '%   (display, not a state)', 'dim');
+  put('  re-observed', fr.ro + ' of ' + fr.n + ' facts · last_seen moves only on the same claim bytes', 'dim');
+  if(fr.s || fr.inv.length){
+    const ch = fr.inv.filter(e => e[1] === 0).length, gone = fr.inv.length - ch, last = fr.inv.length ? Math.max(...fr.inv.map(e => e[0])) : 0;
+    put('  sources', 'live ' + fr.s + ' · stale ×' + fr.inv.length + ' (changed ' + ch + ' · unavailable ' + gone + ')' + (last ? ' · last ' + dur(ageClock() - last) + ' ago' : ''), fr.inv.length ? 'fg' : 'dim');
+  }
+  put('  world', fr.un + ' of ' + fr.n + ' facts are absent from the ledger', fr.un ? 'info' : 'dim');
+}
+
+/* ---------- simulations: pure state changes first, so scenarios can measure them without timers ---------- */
+function applyRenew(k){
+  if(!k || !k.fr || RENEW.has(k.name)) return false;
+  const fr = k.fr, add = 2, rem = fr.fb.length > 2 ? 1 : 0, now = Math.round(ageClock());
+  for(let i = 0; i < add; i++) fr.fb.push(now);
+  if(rem) fr.fb.shift();
+  fr.n += add - rem; fr.upd = now; fr.rev += 1; fr.ch = [add, rem, fr.n - add];
+  if(k.mem){ k.mem.lag = 0; k.mem.gap = 0; k.mem.ok = now; k.mem.upd = now; k.mem.facts = fr.n; k.mem.add = add; k.mem.rem = rem; }
+  /* every fact younger than a day is already in the real ledger, so the new facts join it and the source set grows: the briefing becomes Stale */
+  WS.ledgerFacts += add; WS.claims += add; WS.ledgerSaved = now;
+  if(WS.phase === 'current') WS.phase = 'stale';
+  RENEW.set(k.name, {add, rem});
+  return true;
+}
+function applyCuratorStep(step){
+  if(step === 'build'){
+    if(WS.phase === 'current' || WS.phase === 'missing') return false;
+    /* a new pass starts from the ledger as it is now; renewals only add sources, so the published ones are a subset and only the new ones remain */
+    if(WS.phase === 'stale'){ WS.target = ledgerSources(); WS.remaining = WS.target - WS.sources; }
+    WS.phase = 'building'; WS.moving = true; return true;
+  }
+  WS.sources = WS.target; WS.remaining = 0; WS.saved = Math.round(ageClock()); WS.moving = false;
+  WS.phase = WS.target === ledgerSources() ? 'current' : 'stale';      /* the ledger may have grown while the pass ran */
+  return true;
+}
+function renewKeeper(k){
+  if(!k.fr){ flash(k.name + ' has no memory snapshot: nothing to renew'); return; }
+  if(!applyRenew(k)) return;                /* a second press while the renewed mark is still up */
+  S.simulated = true; S.folded['a:fresh'] = false;
+  const name = k.name;
+  setTimeout(() => { RENEW.delete(name); render('key'); }, 1700);
+  render('key');
+}
+function curatorPass(){
+  if(WS.moving){ flash('the briefing is already being built'); return; }
+  if(!applyCuratorStep('build')){ flash(WS.phase === 'missing' ? 'no briefing yet: the Curator has published none' : 'the briefing is current: nothing to build'); return; }
+  const tok = ++curTok;
+  S.simulated = true; ensureTimer(); render('key');
+  setTimeout(() => { if(curTok !== tok) return; applyCuratorStep('done'); ensureTimer(); render('key'); }, 2000);
+}
+function setAgeShift(sec){ S.ageShift = Math.max(0, sec); render('key'); }
+function setAgePlay(on){
+  if(ageTimer){ clearInterval(ageTimer); ageTimer = null; }
+  if(on){ ageTimer = setInterval(() => { S.ageShift = (S.ageShift || 0) + 86400; if(S.ageShift >= 60 * 86400) setAgePlay(false); render('key'); }, 900); }
+  const b = document.getElementById('c-age'); if(b) b.setAttribute('aria-pressed', String(on));
+}
+function selectWorld(){
+  if(!['memory', 'age'].includes(S.lens)){ S.lens = 'age'; S.top = 0; }
+  S.selKey = 'W:world'; S.dock = true; S.page = 'feed'; render('key');
+}
+
+/* ===== p3: render + repaint meter, selection, simulation ===== */
+const term = document.getElementById('term'), pre = document.getElementById('scr'), live = document.getElementById('live');
+function fitAll(){
+  document.querySelectorAll('.term[data-cols]').forEach(t => {
+    const p = t.querySelector('.scr'); if(!p) return;
+    const avail = t.parentElement.clientWidth - 34, cols = +t.dataset.cols;
+    const fs = Math.max(9.5, Math.min(13.5, avail / (cols * 0.6)));
+    p.style.setProperty('--fs', fs.toFixed(2) + 'px');
+    p.style.setProperty('--lh', Math.round(fs * 1.34) + 'px');
+  });
+}
+
+/* ---------- repaint meter: counts the rows a row-diff presenter would rewrite ---------- */
+const METER = {hist: [], total: 0, frames: 0, prev: null, prevCols: 0, prevLight: null, win: [], polls: {n: 0, rows: 0}};
+const POLL_MS = 2000;          /* the TUI's default --refresh */
+function changedRows(prev, cur){ const r = []; for(let i = 0; i < cur.length; i++) if(prev[i] !== cur[i]) r.push(i); return r; }
+function diffRows(prev, cur){ return changedRows(prev, cur).length; }
+function recordFrame(scr, reason){
+  const sig = scr.sigs();
+  const whole = !METER.prev || METER.prev.length !== sig.length || METER.prevCols !== S.cols || METER.prevLight !== S.light;
+  const changed = whole ? scr.h : diffRows(METER.prev, sig);
+  METER.prev = sig; METER.prevCols = S.cols; METER.prevLight = S.light;
+  /* a poll is not a user movement: it only counts how many rows it had to write */
+  if(reason === 'poll'){ METER.polls.n++; METER.polls.rows += changed; return changed; }
+  const now = performance.now();
+  METER.frames++; METER.total += changed;
+  METER.hist.push({n: changed, h: scr.h, why: reason, t: now});
+  if(METER.hist.length > 48) METER.hist.shift();
+  METER.win.push({t: now, n: changed, sim: S.lapse ? LAPSE_X : 1});
+  while(METER.win.length && now - METER.win[0].t > 3000) METER.win.shift();
+  return changed;
+}
+function paintMeter(){
+  const el = document.getElementById('meter'); if(!el) return;
+  const last = METER.hist[METER.hist.length - 1];
+  const bars = METER.hist.map(h => '<i class="' + h.why + '" style="height:' + Math.max(3, Math.round(h.n / h.h * 100)) + '%" title="' + h.why + ' ' + h.n + '/' + h.h + '"></i>').join('');
+  const avg = METER.hist.length ? METER.hist.reduce((a, h) => a + h.n, 0) / METER.hist.length : 0;
+  const peak = METER.hist.reduce((a, h) => Math.max(a, h.n), 0);
+  const rate = METER.win.reduce((a, w) => a + w.n, 0) / 3 / (S.lapse ? LAPSE_X : 1);
+  document.getElementById('m-last').textContent = last ? last.n + '/' + last.h : '—';
+  document.getElementById('m-avg').textContent = avg.toFixed(1);
+  document.getElementById('m-peak').textContent = String(peak);
+  document.getElementById('m-rate').textContent = rate.toFixed(rate < 10 ? 2 : 1);
+  const mp = document.getElementById('m-poll'); if(mp) mp.textContent = METER.polls.n + '번 · ' + METER.polls.rows + '줄';
+  document.getElementById('m-bars').innerHTML = bars;
+}
+
+/* ---------- render ---------- */
+function paint(scr){
+  pre.innerHTML = scr.html();
+  term.classList.toggle('nocolor', S.nocolor);
+  term.dataset.term = S.light ? 'light' : 'dark';
+  term.dataset.cols = String(S.cols);
+  fitAll();
+  const k = currentKeeper();
+  live.textContent = k ? (k.name + ' ' + nowOf(k).w + (k.state === 'failing' && headOf(k).w ? ', next ' + headOf(k).w : '')) : '';
+  document.querySelectorAll('[data-lens]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.lens === S.lens)));
+  document.querySelectorAll('.seg [data-cols]').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.cols === S.cols)));
+  for(const [id, on] of [['b-nocolor', S.nocolor], ['b-light', S.light], ['b-story', S.dock], ['c-shift', S.shift], ['c-run', RUNNING.on], ['c-lapse', S.lapse]]){
+    const b = document.getElementById(id); if(b) b.setAttribute('aria-pressed', String(on));
+  }
+}
+function render(reason){
+  const scr = buildScreen();
+  const changed = recordFrame(scr, reason || 'key');
+  if(!(reason === 'poll' && changed === 0)) paint(scr);     /* nothing changed: the presenter writes nothing */
+  paintMeter();
+}
+
+/* ---------- selection and actions ---------- */
+function selectable(){
+  if(GROUP_LENSES.includes(S.lens)) return rowsOf(S.lens).map(keyOf);
+  if(S.lens === 'matrix') return lanesOf(K).flatMap(l => l.ks).map(k => 'K:' + k.name);
+  const {fails, others, clean} = wallOrder();
+  return [...fails, ...others, ...clean].map(k => 'K:' + k.name);
+}
+function move(d){ const s = selectable(); let i = s.indexOf(S.selKey); if(i < 0) i = 0; i = Math.max(0, Math.min(s.length - 1, i + d)); S.selKey = s[i]; render('key'); }
+function laneOfSelection(rows){
+  const i = rows.findIndex(x => keyOf(x) === S.selKey); if(i < 0) return null;
+  for(let j = i; j >= 0; j--) if(rows[j].t === 'lane') return rows[j];
+  return null;
+}
+function toggleFold(force){
+  if(!GROUP_LENSES.includes(S.lens) || !S.selKey) return;
+  const rows = rowsOf(S.lens), r = laneOfSelection(rows);
+  if(!r) return;
+  S.selKey = keyOf(r);
+  S.folded[r.id] = force === undefined ? !isFolded(r) : force;
+  render('key');
+}
+function jumpGroup(d){
+  if(!GROUP_LENSES.includes(S.lens)) return;
+  const rows = rowsOf(S.lens), lanes = rows.filter(x => x.t === 'lane');
+  const cur = laneOfSelection(rows), i = lanes.indexOf(cur);
+  const n = lanes[Math.max(0, Math.min(lanes.length - 1, (i < 0 ? 0 : i) + d))];
+  if(n){ S.selKey = keyOf(n); render('key'); }
+}
+/* when the lens changes, the selected keeper must not end up inside a folded group: open only the group that holds it */
+function revealSelected(){
+  if(!S.selKey || !S.selKey.startsWith('K:') || !GROUP_LENSES.includes(S.lens)) return;
+  const keep = S.folded;
+  S.folded = new Proxy({}, {get: () => false});
+  const r = laneOfSelection(rowsOf(S.lens));
+  S.folded = keep;
+  if(r) S.folded[r.id] = false;
+}
+function setLens(l){
+  S.lens = l; S.top = 0;
+  revealSelected();
+  const s = selectable(); if(!s.includes(S.selKey)) S.selKey = s[0];
+  render('lens');
+}
+function cycleLens(){ const ids = LENSES.map(x => x[0]); setLens(ids[(ids.indexOf(S.lens) + 1) % ids.length]); }
+function openStory(page){
+  if(!currentKeeper()){ if(page) return; }
+  if(!GROUP_LENSES.includes(S.lens)){ S.lens = 'cause'; S.top = 0; }
+  S.dock = true; S.page = page || 'feed'; render('key');
+}
+function ensureFailing(){
+  const k = currentKeeper(); if(k && k.state === 'failing') return true;
+  const f = K.find(x => x.state === 'failing'); if(!f) return false;
+  S.selKey = 'K:' + f.name; revealSelected(); return true;
+}
+
+/* ---------- animation clock: only runs while something moves, like the TUI ---------- */
+const LAPSE_X = 600;                 /* one real second of the lapse covers ten simulated minutes */
+const LAPSE_STEP_S = LAPSE_X * STEP_MS / 1000;
+const RUNNING = {on: false};
+let timer = null;
+function anyMoving(){ return RUNS.size > 0 || (sim && sim.phase === 1) || S.lapse || WS.moving; }
+function ensureTimer(){
+  if(RM){ stopTimer(); return; }
+  if(anyMoving() && !timer) timer = setInterval(tick, STEP_MS);
+  if(!anyMoving()) stopTimer();
+}
+function stopTimer(){ if(timer){ clearInterval(timer); timer = null; } if(!anyMoving()) CLK.frame = -1; }
+function rollBucket(){
+  K.forEach(k => { k.cells.shift(); k.cells.push(0); });
+  LABELS.shift(); LABELS.push(hm(T.end));
+  T.end += BS;
+}
+function endRun(k, r){
+  RUNS.delete(k.name);
+  const o = r.fail ? 'fail' : 'ok';
+  k.lastTurns = [...k.lastTurns, {e: Math.round(T.now), o}].slice(-8);
+  k.lastE = Math.round(T.now);
+  const c = k.cells[NB - 1]; k.cells[NB - 1] = o === 'fail' ? (c === 1 ? 3 : 2) : (FAIL(c) ? 3 : 1);
+  if(r.s){
+    r.s.lw = {st: o === 'ok' ? 'ok' : 'failed', e: Math.round(T.now)};
+    if(r.s.iv){ const miss = Math.max(1, Math.ceil((T.now - r.s.e + 1) / r.s.iv)); r.s.e += r.s.iv * miss; }
+    else k.sch = k.sch.filter(x => x !== r.s);
+  }
+}
+function fireDue(){
+  K.forEach(k => {
+    if(k.state === 'paused' || RUNS.has(k.name)) return;
+    const s = k.sch.find(x => !x.od && x.e <= T.now);
+    if(s) RUNS.set(k.name, {t0: CLK.ms, until: CLK.ms + 1600, fail: k.state === 'failing', s});
+  });
+}
+let reasonNext = 'tick';
+function tick(){
+  CLK.ms += STEP_MS;
+  if(S.lapse){ T.now += LAPSE_STEP_S; while(T.now >= T.end) rollBucket(); }
+  RUNS.forEach((r, name) => { if(CLK.ms >= r.until){ const k = K.find(x => x.name === name); if(k) endRun(k, r); } });
+  if(S.lapse) fireDue();
+  if(RUNNING.on) runningTopUp();
+  if(anyMoving()) CLK.frame = CLK.frame < 0 ? 0 : CLK.frame + 1;
+  render('tick');
+  if(!anyMoving()) stopTimer();
+}
+/* "3 turns running": three healthy keepers show the running mark; as one finishes another starts */
+function runningTopUp(){
+  const want = 3;
+  let have = 0; RUNS.forEach(r => { if(r.manual) have++; });
+  if(have >= want) return;
+  /* keepers that are on screen go first, so the marks can be seen; folded groups come last */
+  const visible = () => new Set(GROUP_LENSES.includes(S.lens) ? rowsOf(S.lens).filter(r => r.t === 'k').map(r => r.k.name) : selectable().filter(x => x.startsWith('K:')).map(x => x.slice(2)));
+  let shown = visible();
+  /* when too few healthy keepers are on screen the recovered group opens, so the running marks are visible */
+  if(S.lens === 'cause' && K.filter(k => k.state === 'healthy' && !RUNS.has(k.name) && shown.has(k.name)).length < want - have){ S.folded['c:rec'] = false; shown = visible(); }
+  const pool = K.filter(k => k.state === 'healthy' && !RUNS.has(k.name)).sort((a, b) => (shown.has(b.name) - shown.has(a.name)) || (idleAge(b) || 0) - (idleAge(a) || 0));
+  for(let i = have; i < want && pool.length; i++){
+    const k = pool.shift(), life = 4200 + i * 1700;
+    RUNS.set(k.name, {t0: CLK.ms, until: CLK.ms + life, fail: false, s: null, manual: true});
+  }
+}
+function setRunning(on){
+  RUNNING.on = on;
+  if(!on){ RUNS.forEach((r, name) => { if(r.manual) RUNS.delete(name); }); }
+  else runningTopUp();
+  if(on) CLK.frame = Math.max(CLK.frame, 0);
+  ensureTimer(); render('tick');
+}
+function setLapse(on){
+  S.lapse = on;
+  if(on) CLK.frame = Math.max(CLK.frame, 0);
+  ensureTimer(); render('tick');
+}
+
+/* ---------- f / r: one failing keeper retries, then fails over or recovers (simulation) ---------- */
+let simTok = 0;
+function startSim(kind){
+  if(sim || !ensureFailing()) return;
+  if(!GROUP_LENSES.includes(S.lens)) S.lens = 'cause';
+  const k = currentKeeper(), tok = ++simTok;
+  S.simulated = true; sim = {k, kind, phase: 1, tok};
+  CLK.frame = Math.max(CLK.frame, 0);
+  ensureTimer();
+  setTimeout(() => { if(sim && sim.tok === tok){ sim.phase = 2; ensureTimer(); render('key'); } }, 1400);
+  setTimeout(() => { if(sim && sim.tok === tok) finishSim(); }, 3000);
+  render('key');
+}
+function finishSim(){
+  const k = sim.k, last = NB - 1, kind = sim.kind;
+  sim = null;
+  if(kind === 'fail'){
+    k.cells[last] = k.cells[last] === 1 ? 3 : 2; k.lastFailE = Math.round(T.now); k.lastE = Math.round(T.now);
+    k.lastTurns = [...k.lastTurns, {e: Math.round(T.now), o: 'fail'}].slice(-8);
+  } else {
+    k.cells[last] = FAIL(k.cells[last]) ? 3 : 1; k.state = 'healthy'; k.lastE = Math.round(T.now);
+    k.lastTurns = [...k.lastTurns, {e: Math.round(T.now), o: 'ok'}].slice(-8);
+    S.selKey = 'K:' + k.name; S.folded['c:rec'] = false;
+  }
+  ensureTimer(); render('key');
+}
+function reset(){
+  sim = null; simTok++; RUNS.clear(); RUNNING.on = false; S.lapse = false;
+  if(timer){ clearInterval(timer); timer = null; }
+  CLK.frame = -1;
+  K = clone(K0); LABELS.splice(0, LABELS.length, ...DATA.buckets.labels); T.now = DATA.now.epoch; T.end = DATA.buckets.endEpoch;
+  S.folded = {}; S.top = 0; S.selKey = null; S.dock = false; S.page = 'feed'; S.simulated = false; S.ageShift = 0;
+  WS = clone(WS0); RENEW.clear(); curTok++; setAgePlay(false);
+  setLens('cause');
+}
+
+/* ---------- input ---------- */
+term.addEventListener('keydown', e => {
+  if(e.ctrlKey || e.metaKey || e.altKey) return;
+  const key = e.key; let used = true;
+  if(key === 'ArrowDown' || key === 'j') move(1);
+  else if(key === 'ArrowUp' || key === 'k') move(-1);
+  else if(key === 'ArrowRight' || key === 'l') toggleFold(false);
+  else if(key === 'ArrowLeft' || key === 'h') toggleFold(true);
+  else if(key === '[') jumpGroup(-1);
+  else if(key === ']') jumpGroup(1);
+  else if(key === 'Enter' || key === ' '){
+    if(!GROUP_LENSES.includes(S.lens)) openStory('feed');
+    else if(currentKeeper() || (S.selKey || '').startsWith('W:')){ if(S.dock && S.page === 'feed') S.dock = false; else { S.dock = true; S.page = 'feed'; } render('key'); }
+    else toggleFold();
+  }
+  else if(key === 's' && currentKeeper()) openStory('sch');
+  else if(key === 'm' && currentKeeper()) openStory('mem');
+  else if(key === 'Escape' && S.dock){ S.dock = false; render('key'); }
+  else if(key === 'o') cycleLens();
+  else if(key === 'u'){ if(!GROUP_LENSES.includes(S.lens)) flash('u renews a keeper in the list lenses'); else if(!currentKeeper()) flash('select a keeper row to renew'); else renewKeeper(currentKeeper()); }
+  else if(key === 'c') curatorPass();
+  else if(key === 'd') setAgeShift((S.ageShift || 0) + 86400);
+  else if(key === 'D') setAgeShift((S.ageShift || 0) - 86400);
+  else if(key === 'w') selectWorld();
+  else if(key === 'n'){ S.nocolor = !S.nocolor; render('key'); }
+  else if(key === 't'){ S.light = !S.light; render('key'); }
+  else if(key === 'f') startSim('fail');
+  else if(key === 'r') startSim('recover');
+  else if(key === 'x') reset();
+  else used = false;
+  if(used) e.preventDefault();
+});
+let charW = 0;
+function measureChar(){
+  const probe = document.createElement('span');
+  probe.className = 'scr'; probe.style.cssText = 'position:absolute;visibility:hidden;width:auto;min-width:0;display:inline-block';
+  probe.style.setProperty('--fs', getComputedStyle(pre).getPropertyValue('--fs')); probe.textContent = 'MMMMMMMMMM';
+  term.appendChild(probe); charW = probe.getBoundingClientRect().width / 10; term.removeChild(probe);
+}
+term.addEventListener('click', e => {
+  term.focus();
+  const rect = pre.getBoundingClientRect(), lh = rect.height / S.rows;
+  const y = Math.floor((e.clientY - rect.top) / lh);
+  if(y === 0){
+    measureChar();
+    if(charW > 0){ const x = Math.floor((e.clientX - rect.left) / charW); const t = TABS.find(t => x >= t.x0 && x < t.x1); if(t) setLens(t.lens); }
+    return;
+  }
+  if(rowAt[y]){ S.selKey = rowAt[y]; render('key'); }
+});
+document.querySelectorAll('[data-lens]').forEach(b => b.addEventListener('click', () => setLens(b.dataset.lens)));
+document.querySelectorAll('.seg [data-cols]').forEach(b => b.addEventListener('click', () => { S.cols = +b.dataset.cols; render('key'); }));
+document.getElementById('b-nocolor').addEventListener('click', () => { S.nocolor = !S.nocolor; render('key'); });
+document.getElementById('b-light').addEventListener('click', () => { S.light = !S.light; render('key'); });
+document.getElementById('b-story').addEventListener('click', () => { S.dock = !S.dock; if(S.dock && !GROUP_LENSES.includes(S.lens)) S.lens = 'cause'; S.page = 'feed'; render('key'); });
+document.getElementById('b-fail').addEventListener('click', () => startSim('fail'));
+document.getElementById('b-rec').addEventListener('click', () => startSim('recover'));
+document.getElementById('b-reset').addEventListener('click', reset);
+document.getElementById('c-shift').addEventListener('click', () => { S.shift = !S.shift; render('key'); });
+document.getElementById('c-run').addEventListener('click', () => setRunning(!RUNNING.on));
+document.getElementById('c-lapse').addEventListener('click', () => setLapse(!S.lapse));
+document.getElementById('b-renew').addEventListener('click', () => { if(!GROUP_LENSES.includes(S.lens)) S.lens = 'age'; const k = currentKeeper() || K.find(x => x.fr && x.state !== 'failing'); if(k){ S.selKey = 'K:' + k.name; revealSelected(); renewKeeper(k); } });
+document.getElementById('b-cur').addEventListener('click', curatorPass);
+document.getElementById('c-age').addEventListener('click', () => { if(!['age', 'memory'].includes(S.lens)) setLens('age'); setAgePlay(!ageTimer); });
+window.addEventListener('resize', fitAll);
+if('ResizeObserver' in window) new ResizeObserver(fitAll).observe(document.querySelector('.wrap'));
+if(document.fonts && document.fonts.ready) document.fonts.ready.then(fitAll);
+
+/* ===== p4: page sections that use the same renderer ===== */
+const h = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
+const byFail = (a, b) => failCount(b, 24) - failCount(a, 24) || a.name.localeCompare(b.name);
+
+/* ---------- hero: today's list vs. the same rows on the axis ---------- */
+(function hero(){
+  const KB = clone(K0), fails = KB.filter(k => k.state === 'failing').sort(byFail);
+  const want = ['keeper-25-alph', 'keeper-06-alpha-brav', 'keeper-01-al'];
+  let pick = want.map(n => fails.find(k => k.name === n && k.cause === 'provider')).filter(Boolean);
+  for(const f of fails){ if(pick.length >= 3) break; if(!pick.includes(f) && f.cause === 'provider') pick.push(f); }
+  pick = pick.slice(0, 3);
+  const a = new Screen(84, 4);
+  a.put(1, 0, 'KEEPERS ' + KB.length, 'b'); a.put(14, 0, 'failing ' + fails.length + ' (retrying ' + fails.length + ')', 'bad b');
+  pick.forEach((k, i) => {
+    const y = i + 1, fa = failAge(k);
+    a.put(2, y, '!', 'bad b'); a.put(4, y, k.name, 'fg'); a.put(33, y, '! failure', 'bad');
+    a.put(43, y, 'idle · last failed · ' + k.cause + (fa != null ? ' · ' + dur(fa) : ''), 'dim');
+  });
+  document.getElementById('s-before').innerHTML = a.html();
+  const L = layout(84), b = new Screen(84, 4);
+  const lens = S.lens; drawColHeader(b, L, 0);
+  pick.forEach((k, i) => paintKeeper(b, L, i + 1, k, false));
+  S.lens = lens;
+  document.getElementById('s-after').innerHTML = b.html();
+  const cnts = fails.map(k => failCount(k, 24)).sort((x, y) => y - x);
+  const healthy = KB.filter(k => k.state === 'healthy'), rec = healthy.filter(isRec);
+  document.getElementById('hero-note').textContent =
+    DATA.now.hm + ' 기준 failing ' + fails.length + '명의 최근 12시간(24칸) 실패 칸 수는 ' + cnts.join(' · ') + '칸이에요.' + (cnts.length && cnts[0] - cnts[cnts.length - 1] >= 10 ? ' 같은 failing인데 방금 한 번 실패한 키퍼와 반나절째 실패하는 키퍼가 섞여 있어요.' : '') + ' 지금 정상인 ' + healthy.length + '명 중 ' + rec.length + '명도 12시간 안에 실패한 적이 있어요. roster는 복구하면 last_failure를 지워서 지금 목록에는 이 과거가 남지 않아요.';
+  document.getElementById('meas-note').textContent =
+    '측정: 2026-11-06 ' + DATA.now.label + ' KST. roster, 스케줄 집계(활성 ' + DATA.sched.active + '개), 메모리 건강(' + DATA.mem.keepers + '명), 월드 기억(장부·브리핑·Keeper 스냅샷 ' + DATA.world.kn + '명)을 연달아 읽었고 각 Keeper의 decisions 로그에서 맥박을 만들었어요. 읽기만 했고 한 시점 값이라 신뢰도는 High예요.';
+})();
+
+/* ---------- information architecture specimens ---------- */
+(function ia(){
+  const KB = clone(K0), g = KB.find(k => k.state === 'failing' && k.sch.some(x => x.lw) && k.mem && k.mem.ok) || KB.find(k => k.state === 'failing');
+  let s = new Screen(36, 5);
+  s.put(0, 0, 'turn', 'dim'); drawPulse(s, 7, 0, g.cells, 24);
+  const wk = g.sch.find(x => x.lw && x.lw.e);
+  s.put(0, 1, 'wake', 'dim'); s.put(7, 1, wk ? '✓ ' + hm(wk.lw.e) + ' ' + clip(wk.rec.replace(/ Asia\/Seoul$/, ''), 24) : '—', 'dim', 29);
+  s.put(0, 2, 'digest', 'dim'); s.put(7, 2, g.mem && g.mem.ok ? '+ ' + dur(T.now - g.mem.ok) + ' ago' : '—', 'dim');
+  s.put(0, 4, 'what already happened', 'dim');
+  document.getElementById('ia-past').innerHTML = s.html();
+  s = new Screen(36, 5);
+  [['○ idle 22m', 'fg b', 'last attempt failed'], ['◐ 41s', 'info b', 'a turn is running'], ['! due 1h47m', 'warn', 'a wake is late']].forEach(([t, kk, note], i) => {
+    s.bg(0, i, 14, 'band'); s.put(0, i, '┃', 'info'); s.put(2, i, t, kk); s.put(13, i, '┃', 'info'); s.put(16, i, note, 'dim');
+  });
+  s.put(0, 4, 'one bold word', 'dim');
+  document.getElementById('ia-now').innerHTML = s.html();
+  s = new Screen(36, 5);
+  s.put(0, 0, '▹ glm-5.3-flash', 'info'); s.put(18, 0, 'next probe', 'dim');
+  s.put(0, 1, '·◷···◷······◷···', 'info'); s.put(18, 1, 'scheduled wakes', 'dim');
+  s.put(0, 2, '▅ 113', 'dim'); s.put(8, 2, 'lag: turns waiting', 'dim');
+  s.put(0, 4, 'what is announced', 'dim');
+  document.getElementById('ia-next').innerHTML = s.html();
+})();
+
+/* ---------- grammar ---------- */
+(function grammar(){
+  const KB = clone(K0), fails = KB.filter(k => k.state === 'failing');
+  const wk = fails.find(k => k.sch.some(x => x.lw) && k.mem && k.mem.ok) || fails[0], pick = fails.find(k => k !== wk) || wk;
+  /* anatomy of one row: a failing card and an idle keeper, both at 100 columns */
+  const L = layout(100), an = new Screen(100, 7);
+  const ok = KB.find(k => k.state === 'healthy' && k.sch.length && k.mem && k.mem.lag > 0) || KB.find(k => k.state === 'healthy');
+  const lens = S.lens; S.lens = 'cause';
+  drawColHeader(an, L, 0);
+  paintKeeper(an, L, 1, wk, false); paintLine2(an, L, 2, wk, false);
+  paintKeeper(an, L, 3, ok, false);
+  S.lens = lens;
+  an.put(L.nameX, 5, 'name', 'dim'); an.put(L.pulseX, 5, '└ past · turn pulse', 'dim');
+  an.put(L.nowX - 1, 5, '└ now · one word', 'dim'); an.put(L.slotX, 5, '└ next · schedule ruler', 'dim');
+  an.put(L.timeX, 5, '└ due', 'dim'); if(L.memW) an.put(L.memX, 5, '└ lag', 'dim');
+  an.put(L.nameX, 6, '2nd line, failing only: since · tried runtimes · fault · next probe', 'dim');
+  document.getElementById('g-anatomy').innerHTML = an.html();
+  const who = new Screen(46, 4);
+  who.put(0, 0, '▌', 'warn'); who.put(2, 0, '!', 'warn b'); who.put(4, 0, 'auto retry', 'fg'); who.put(20, 0, '스스로 다시 시도', 'dim');
+  who.put(0, 1, '▌', 'dim'); who.put(2, 1, '!', 'dim b'); who.put(4, 1, '◌ quota wait', 'dim'); who.put(20, 1, '제공자 한도를 기다림', 'dim');
+  who.put(0, 2, '▌', 'bad'); who.put(2, 2, '◆', 'bad b'); who.put(4, 2, 'needs you', 'fg'); who.put(20, 2, '사람이 해야 함', 'dim');
+  who.put(0, 3, 'Warn · Muted · Bad', 'dim');
+  document.getElementById('g-who').innerHTML = who.html();
+  const nc = new Screen(56, 4);
+  nc.put(0, 0, '▌', 'fg'); nc.put(2, 0, '!', 'fg b'); nc.put(4, 0, wk.name, 'fg'); drawPulse(nc, 19, 0, wk.cells, 20); nc.put(41, 0, '▹ sonnet·acct-c', 'fg');
+  nc.put(0, 1, '▌', 'fg'); nc.put(2, 1, '!', 'fg b'); nc.put(4, 1, pick.name, 'fg'); drawPulse(nc, 19, 1, pick.cells, 20); nc.put(41, 1, '◌ wait muse-spark', 'dim');
+  nc.put(0, 3, 'NO_COLOR=1', 'dim');
+  document.getElementById('g-nc').innerHTML = nc.html();
+})();
+(function contrast(){
+  const hex = c => { c = c.trim().replace('#', ''); return [0, 2, 4].map(i => parseInt(c.slice(i, i + 2), 16)); };
+  const lum = rgb => { const f = c => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); }; return 0.2126 * f(rgb[0]) + 0.7152 * f(rgb[1]) + 0.0722 * f(rgb[2]); };
+  const ratio = (a, b) => { const x = lum(hex(a)), y = lum(hex(b)); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
+  const row = (name, light) => {
+    const probe = document.createElement('div'); probe.className = 'term'; if(light) probe.dataset.term = 'light'; probe.style.display = 'none'; document.body.appendChild(probe);
+    const cs = getComputedStyle(probe), bg = cs.getPropertyValue('--t-bg');
+    const rs = ['--t-dim', '--t-warn', '--t-okd', '--t-info', '--t-bad'].map(v => ratio(cs.getPropertyValue(v), bg));
+    document.body.removeChild(probe);
+    const low = rs.filter(r => r < 4.5).length;
+    return '<tr><td>' + name + '</td>' + rs.map(r => '<td class="num' + (r < 4.5 ? ' low' : '') + '">' + r.toFixed(1) + ':1</td>').join('') + '<td>' + (low ? '4.5:1 미만 ' + low + '개' : '모두 4.5:1 이상') + '</td></tr>';
+  };
+  document.getElementById('contrast').innerHTML = row('어두운 터미널', false) + row('밝은 터미널', true);
+})();
+
+/* ---------- how many rows each movement rewrites, counted with this page's own renderer ---------- */
+function withState(fn){
+  const saved = {K: clone(K), S: clone(S), T: Object.assign({}, T), LABELS: LABELS.slice(), CLK: Object.assign({}, CLK), RUNS: new Map(RUNS), sim, rowAt: rowAt.slice(), TABS: TABS.slice(), WS: clone(WS), RENEW: new Map(RENEW)};
+  try { return fn(); }
+  finally {
+    K = saved.K; Object.keys(S).forEach(k => delete S[k]); Object.assign(S, saved.S);
+    Object.assign(T, saved.T); LABELS.splice(0, LABELS.length, ...saved.LABELS); Object.assign(CLK, saved.CLK);
+    RUNS.clear(); saved.RUNS.forEach((v, k) => RUNS.set(k, v)); sim = saved.sim; rowAt = saved.rowAt; TABS = saved.TABS;
+    WS = saved.WS; RENEW.clear(); saved.RENEW.forEach((v, k) => RENEW.set(k, v));
+  }
+}
+function scenarios(){
+  return withState(() => {
+    S.cols = 100; S.lens = 'cause'; S.dock = false; S.shift = false; S.folded = {}; S.top = 0; S.selKey = null; sim = null; RUNS.clear(); CLK.frame = -1;
+    const out = [], total = () => S.rows;
+    const fk = rowsCause().filter(r => r.t === 'k' && r.kind === 'fail');
+    const diff = (setup, change) => { setup && setup(); const A = buildScreen().sigs(); change(); const B = buildScreen().sigs(); return changedRows(A, B); };
+    /* where the rewritten rows sit: the three top rows and the rule above them are the summary band, the last three are the detail and footer lines */
+    const where = rows => {
+      const top = rows.filter(i => i <= 3).length, bottom = rows.filter(i => i >= S.rows - 3).length, list = rows.length - top - bottom;
+      return [list ? '목록 ' + list : '', top ? '위 띠 ' + top : '', bottom ? '맨 아래 ' + bottom : ''].filter(Boolean).join(' · ');
+    };
+    const add = (name, when, rows, note) => out.push({name, when, n: rows.length, total: total(), note: (rows.length ? where(rows) + '. ' : '') + note});
+    add('키 ↑↓ 한 칸 (고정 높이)', '키 한 번', diff(() => { S.selKey = keyOf(fk[0]); }, () => { S.selKey = keyOf(fk[1]); }), '고른 줄 둘이 바뀌고, 나머지 줄은 제자리예요.');
+    add('키 ↑↓ 한 칸 (고른 줄만 펼침, v1 방식)', '키 한 번', diff(() => { S.shift = true; S.selKey = keyOf(fk[0]); }, () => { S.selKey = keyOf(fk[1]); }), '다시 쓰는 줄 수는 비슷해요. 달라지는 건 두 줄 사이 줄이 한 줄씩 밀리는 점이에요.');
+    S.shift = false;
+    S.folded = {'c:rec': false, 'c:ok': false};
+    const vis = rowsCause().filter(r => r.t === 'k' && (r.kind === 'rec' || r.kind === 'ok')).slice(0, 3).map(r => r.k.name);
+    add('스피너 한 걸음 (도는 턴 ' + vis.length + '개)', '150ms마다, 도는 동안만', diff(() => { vis.forEach(n => RUNS.set(n, {t0: 0, until: 1e12})); CLK.frame = 0; CLK.ms = 0; }, () => { CLK.frame = 1; CLK.ms = 150; }), '도는 턴이 있는 줄만 바뀌어요.');
+    RUNS.clear(); CLK.frame = -1; S.folded = {};
+    add('폴링 때 값이 그대로', '2초마다', diff(null, () => {}), '바뀐 줄이 없으면 아무것도 쓰지 않아요(Unchanged).');
+    add('1분이 지날 때', '1분마다', diff(null, () => { T.now += 60; }), 'idle 나이와 늦은 시간 글자가 있는 줄이 바뀌어요.');
+    add('30분 경계를 넘을 때', '30분마다', diff(null, () => { T.now = T.end; rollBucket(); }), '맥박과 눈금이 한 칸 밀려서 보이는 키퍼 줄이 거의 다 바뀌어요.');
+    add('failing 키퍼 한 명이 복구될 때', '드물게', diff(() => { S.selKey = keyOf(fk[0]); }, () => { const k = K.find(x => x.name === fk[fk.length - 1].k.name); k.state = 'healthy'; }), '묶음 구성이 바뀌어서 아래 줄이 밀려요.');
+    add('보기(lens) 바꾸기', '입력 때', diff(null, () => { S.lens = 'time'; S.top = 0; S.selKey = null; }), '화면 전체가 다른 표예요.');
+    add('Story 창 열기', '입력 때', diff(() => { S.lens = 'cause'; S.selKey = keyOf(fk[0]); }, () => { S.dock = true; }), '창이 덮는 줄이 바뀌어요.');
+    /* age lens: the what-if clock, one librarian pass, one curator pass */
+    S.dock = false; S.folded = {}; S.top = 0; S.lens = 'age'; S.selKey = null; S.ageShift = 0; WS = clone(WS0); RENEW.clear();
+    add('기억 시계 +1일 (나이별 보기)', '입력 때', diff(null, () => { S.ageShift = 86400; }), '나이 사다리가 한 칸씩 밀려서 보이는 키퍼 줄이 거의 다 바뀌어요. 맥박과 달리 키 입력 때만 일어나요.');
+    S.ageShift = 0;
+    const cool = rowsAge().find(r => r.t === 'lane' && r.id === 'a:cooling'), pickK = (cool ? cool.ks[0] : K.find(x => x.fr)).name;
+    add('Librarian 한 번 (renew) · 키퍼 하나', '드물게', diff(() => { S.selKey = 'K:' + pickK; }, () => { applyRenew(K.find(x => x.name === pickK)); }), '그 키퍼 줄, 줄이 fresh 묶음으로 옮겨 가며 밀리는 줄, 월드 줄이 바뀌어요.');
+    K = clone(K0); RENEW.clear(); WS = clone(WS0); S.selKey = 'W:world';
+    /* a stale briefing: finish the open pass, then renew one keeper so the ledger is ahead of what was published */
+    applyCuratorStep('done'); applyRenew(K.find(x => x.fr && x.state !== 'failing')); RENEW.clear();
+    add('Curator가 짓기 시작할 때 (브리핑 stale → building)', '드물게', diff(null, () => { applyCuratorStep('build'); }), '월드 줄 하나와 맨 아래 상세 줄만 바뀌어요.');
+    add('브리핑 짓는 중 스피너 한 걸음', '150ms마다, 짓는 동안만', diff(() => { applyCuratorStep('build'); CLK.frame = 0; CLK.ms = 0; }, () => { CLK.frame = 1; CLK.ms = 150; }), '월드 줄의 표지 하나만 돌아요.');
+    return out;
+  });
+}
+(function alive(){
+  const rows = scenarios();
+  document.getElementById('alive-rows').innerHTML = rows.map(r =>
+    '<tr><td>' + h(r.name) + '</td><td class="small">' + h(r.when) + '</td><td class="num">' + r.n + ' / ' + r.total + '</td><td class="barc"><div class="mb"><i style="width:' + Math.max(2, Math.round(r.n / r.total * 100)) + '%"></i></div></td><td class="small">' + h(r.note) + '</td></tr>'
+  ).join('');
+})();
+
+/* ---------- dashboard: the same row on the web ---------- */
+(function board(){
+  const KB = clone(K0), lanes = lanesOf(KB), root = document.getElementById('board');
+  const healthy = KB.filter(k => k.state === 'healthy'), rec = healthy.filter(isRec), paused = KB.filter(k => k.state === 'paused'), failing = KB.filter(k => k.state === 'failing').length;
+  const fleet = DATA.fleet, mx = Math.max(...fleet), W = 960, H = 150, bw = 16, gap = 4, base = H - 26, scale = H - 44;
+  let bars = '', ticks = '';
+  fleet.forEach((v, i) => {
+    const hh = Math.max(2, Math.round(v / mx * scale)), x = i * (bw + gap) + 2, last = i === fleet.length - 1;
+    bars += '<rect x="' + x + '" y="' + (base - hh) + '" width="' + bw + '" height="' + hh + '" rx="2" fill="' + (last ? 'var(--accent)' : 'var(--caution)') + '" opacity="' + (last ? 1 : .72) + '"/>';
+  });
+  for(let i = 0; i < fleet.length; i += 12) ticks += '<text x="' + (i * (bw + gap) + 2) + '" y="' + (H - 8) + '" font-size="11" fill="var(--muted)" font-family="var(--mono)">' + DATA.buckets.labels[i] + '</text>';
+  const peakI = fleet.indexOf(mx), lastV = fleet[fleet.length - 1];
+  const annot = '<text x="' + (peakI * (bw + gap) + 2 + bw / 2) + '" y="' + (base - scale - 6) + '" font-size="11" text-anchor="middle" fill="var(--ink)" font-family="var(--mono)">' + mx + '</text>'
+    + '<text x="' + ((fleet.length - 1) * (bw + gap) + 2 + bw) + '" y="' + (base - Math.round(lastV / mx * scale) - 6) + '" font-size="11" text-anchor="end" fill="var(--accent)" font-family="var(--mono)" font-weight="700">' + lastV + '</text>';
+  let html = '<div class="chips"><span class="chip good"><i></i><span>정상 ' + (healthy.length - rec.length) + '</span></span><span class="chip rec"><i></i><span>복구 ' + rec.length + '</span></span><span class="chip warn"><i></i><span>실패 ' + failing + '</span></span><span class="chip off"><i></i><span>일시정지 ' + paused.length + '</span></span></div>';
+  html += '<div class="chart"><div class="cap">30분 칸마다 실패한 턴이 있었던 Keeper 수 · 최근 24시간 · 마지막 칸은 ' + DATA.buckets.labels[NB - 1] + '~' + hm(DATA.buckets.endEpoch) + '(진행 중)</div><svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="최근 24시간 30분 칸별 실패한 Keeper 수">'
+    + '<line x1="0" x2="' + W + '" y1="' + base + '" y2="' + base + '" stroke="var(--line)"/>' + bars + annot + ticks + '</svg></div>';
+  const nextCell = k => {
+    let s = '';
+    if(k.state === 'failing') s += k.rest.st === 'resting' ? '<span class="rest">◌ ' + h(rtl(k.rest.head)) + ' 한도 대기</span>' : '<span>▹ ' + h(rtl(k.rest.head)) + '</span>';
+    const sc = soonest(k), od = overdue(k);
+    if(od) s += '<span class="late">늦음 ' + h(dur(T.now - od.e)) + '</span>';
+    if(sc) s += '<span class="sch">◷ ' + hm(sc.e) + '</span>';
+    if(k.mem && k.mem.lag > 0) s += '<span class="lag">lag ' + k.mem.lag + '</span>';
+    return s || '<span class="none">예정 없음</span>';
+  };
+  const nowCell = k => k.state === 'failing' ? '<span class="pill idle">대기 ' + h(failAge(k) == null ? '' : dur(failAge(k))) + '</span>' : '<span class="pill ok">정상 · ' + h(idleAge(k) == null ? '' : dur(idleAge(k))) + ' 전 턴</span>';
+  const rowHtml = k => {
+    const pb = k.cells.slice(-24).map(c => '<i class="k' + c + '"></i>').join('');
+    return '<button type="button" class="row" data-k="' + h(k.name) + '" aria-pressed="false"><div class="nm"><b>' + h(k.name) + '</b><span class="mode">' + (k.mode === 'autonomous' ? 'auto' : k.mode === 'on_demand' ? 'on-demand' : h(k.mode)) + '</span></div><div class="pulse" role="img" aria-label="최근 12시간 턴 결과">' + pb + '</div><div class="nowc">' + nowCell(k) + '</div><div class="nextc">' + nextCell(k) + '</div></button>';
+  };
+  const colh = '<div class="colh"><span>Keeper</span><span>◂ 직전 12시간 (30분 칸)</span><span class="nowh">● 지금</span><span class="nexth">다음 ▹ 예정 · lag</span></div>';
+  lanes.forEach(l => {
+    const rest = l.rest, ser = l.ks.length - rest, parts = l.title.split(' · ');
+    html += '<div class="lane"><div class="lane-h"><span class="rt">' + h(parts[0]) + '</span><span class="pillx fault">' + h(parts[1]) + '</span><span class="pillx count">' + l.ks.length + '명</span><span class="sp"></span><span class="nextsum">다음 ' + (ser ? '재시도 ' + ser : '') + (ser && rest ? ' · ' : '') + (rest ? '한도 대기 ' + rest : '') + '</span></div>' + colh + l.ks.map(rowHtml).join('') + '</div>';
+  });
+  const recS = rec.slice().sort(byFail);
+  html += '<div class="lane"><div class="lane-h"><span class="rt">복구됨</span><span class="pillx ok">12시간 안에 실패 → 지금 정상</span><span class="pillx count">' + recS.length + '명</span></div>' + colh + recS.slice(0, 4).map(rowHtml).join('') + (recS.length > 4 ? '<div class="more">외 ' + (recS.length - 4) + '명 · 접힘</div>' : '') + '</div>';
+  html += '<div class="drawer" id="drawer"></div>';
+  root.innerHTML = html;
+  const drawer = document.getElementById('drawer');
+  function openK(name){
+    const k = KB.find(x => x.name === name); if(!k) return;
+    root.querySelectorAll('.row').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.k === name)));
+    const since = sinceText(k);
+    let tl = '';
+    feedPast(k).forEach(x => { tl += '<li class="past' + (x.g === '✗' ? ' fail' : '') + '"><time>' + h(evAge(x.e)) + '</time><span>' + h(x.g + ' ' + x.w) + '</span></li>'; });
+    tl += '<li class="nowrule">지금 ' + DATA.now.label + '</li>';
+    tl += '<li class="nowc2"><span>' + (k.state === 'failing' ? '대기 · 도는 턴 없음' + (since ? ' · ' + since + '부터 실패(턴 기록)' : '') : k.state === 'paused' ? '일시정지' : '정상 · 도는 턴 없음') + '</span></li>';
+    const od = overdue(k); if(od) tl += '<li class="next late"><time>' + hm(od.e) + '</time><span>◷ 늦음 ' + h(dur(T.now - od.e)) + ' · ' + h(od.rec) + '</span></li>';
+    if(k.state === 'failing') tl += '<li class="next' + (k.rest.st === 'resting' ? ' rest' : '') + '"><time></time><span>' + (k.rest.st === 'resting' ? h(rtl(k.rest.head)) + ' 한도가 풀릴 때까지 대기 · 끝나는 시각은 서버가 말하지 않음' : '다음 턴은 ' + h(rtl(k.rest.head)) + '로 시도 · 시각은 서버가 말하지 않음') + '</span></li>';
+    k.sch.filter(s => !s.od).sort((a, b) => a.e - b.e).slice(0, 3).forEach(s => { tl += '<li class="next"><time>' + hm(s.e) + '</time><span>◷ ' + h(dur(s.e - T.now)) + ' 뒤 wake · ' + h(s.rec) + '</span></li>'; });
+    if(k.mem && k.mem.lag > 0) tl += '<li class="next rest"><time></time><span>+ Librarian이 읽을 턴 ' + k.mem.lag + '개' + (k.mem.gap > 0 ? ' · gap ' + kfmt(k.mem.gap) + ' atoms' : '') + ' · 시각은 서버가 말하지 않음</span></li>';
+    const chain = k.state === 'failing' ? '<p class="hops-h">마지막 턴에서 시도한 순서</p><ol class="hops">' + k.hops.map((hp, i) => '<li><span class="n">' + (i + 1) + '</span><span>' + h(rtl(hp.rt)) + '</span><b>✗ ' + h(hp.fault) + '</b></li>').join('') + '</ol>' : '';
+    const ra = (k.hops || []).filter(x => x.retryAfterS);
+    const mem = k.mem ? '<p class="small" style="margin-top:10px">기억 · facts ' + k.mem.facts + ' (Δ +' + k.mem.add + ' −' + k.mem.rem + ') · Librarian ' + h(k.mem.lib || '없음') + (k.mem.ok ? ' · 마지막 digest ' + h(dur(T.now - k.mem.ok)) + ' 전' : '') + '</p>' : '';
+    drawer.innerHTML = '<div><h3>' + h(k.name) + '<span class="meta">' + (k.mode === 'autonomous' ? '자율 턴' : h(k.mode)) + (failAge(k) != null ? ' · 마지막 시도 ' + h(dur(failAge(k))) + ' 전' : '') + '</span></h3>' + chain + (ra.length ? '<p class="small" style="margin-top:10px">제공자가 직접 알려 준 값: ' + ra.map(x => h(rtl(x.rt)) + ' ' + h(dur(x.retryAfterS)) + ' 뒤').join(', ') + ' (typed <code>retry_after</code>)</p>' : '') + mem + '</div><ol class="tl">' + tl + '</ol>';
+  }
+  root.addEventListener('click', e => { const b = e.target.closest('.row'); if(b) openK(b.dataset.k); });
+  openK((lanes[0] && lanes[0].ks[0] ? lanes[0].ks[0] : KB[0]).name);
+})();
+
+/* ---------- memory section: age ladder, one renewal, and the world pipeline ---------- */
+(function memorySection(){
+  const L = layout(100), pickBy = (id, st) => K.filter(k => k.fr && classOf(k) === id && k.state === st).sort((a, b) => b.fr.n - a.fr.n)[0] || K.filter(k => k.fr && classOf(k) === id).sort((a, b) => b.fr.n - a.fr.n)[0];
+  const trio = [pickBy('fresh', 'healthy'), pickBy('cooling', 'healthy'), pickBy('dormant', 'paused')].filter(Boolean);
+  const a = new Screen(100, 2 + trio.length);
+  drawAgeHeader(a, L, 0); paintWorld(a, L, 1, false, true);
+  trio.forEach((k, i) => paintKeeperAge(a, L, 2 + i, k, false));
+  document.getElementById('m-age').innerHTML = a.html();
+  const target = pickBy('cooling', 'healthy') || trio[0], r = new Screen(100, 3);
+  withState(() => {
+    S.lens = 'age'; drawAgeHeader(r, L, 0);
+    const kk = () => K.find(x => x.name === target.name);
+    paintKeeperAge(r, L, 1, kk(), false); applyRenew(kk()); paintKeeperAge(r, L, 2, kk(), false);
+  });
+  document.getElementById('m-renew').innerHTML = r.html();
+  const w = new Screen(100, 12); box(w, L, 0, 12); dockWorld(w, L, 0, 12);
+  document.getElementById('m-world').innerHTML = w.html();
+  /* numbers for the note: how much of the memory is older than a week, and where the renewals cluster */
+  const births = allBirths(), old7 = Math.round(100 * births.filter(b => T.now - b >= ZONE_MID).length / births.length);
+  const ups = K.filter(k => k.fr).map(k => k.fr.upd).sort((x, y) => x - y);
+  let best = 0, bi = 0; for(let i = 0; i < ups.length; i++){ let j = i; while(j < ups.length && ups[j] - ups[i] <= 1800) j++; if(j - i > best){ best = j - i; bi = i; } }
+  const dorm = K.filter(k => classOf(k) === 'dormant'), dormPaused = dorm.filter(k => k.state === 'paused').length;
+  document.getElementById('mem-note').textContent = DATA.now.hm + ' 기준 사실 ' + births.length + '개 중 ' + old7 + '%가 7일보다 오래됐어요. dormant ' + dorm.length + '명 중 ' + dormPaused + '명이 paused라서 갱신이 멈춘 게 정상이에요' + (dorm.length > dormPaused ? '(나머지 ' + (dorm.length - dormPaused) + '명은 확인 필요)' : '') + '. 스냅샷 갱신이 가장 몰린 30분에는 ' + best + '명이 들어 있어요(' + (dur(T.now - ups[bi + best - 1]) === dur(T.now - ups[bi]) ? dur(T.now - ups[bi]) : dur(T.now - ups[bi + best - 1]) + '~' + dur(T.now - ups[bi])) + ' 전). 같이 갱신된 이유는 서버 기록으로 확인하지 못했어요(확인 필요).';
+})();
+(function webMemory(){
+  const root = document.getElementById('mboard'); if(!root) return;
+  const tone = {fresh: 'good', today: 'rec', cooling: 'off', dormant: 'off', none: 'off'};
+  const chips = AGE_CLASSES.map(c => '<span class="chip ' + tone[c.id] + '"><i></i><span>' + h(c.title) + ' ' + K.filter(k => classOf(k) === c.id).length + '</span></span>').join('');
+  const b = WS, bw = b.phase === 'building' ? '짓는 중 ' + (b.target - b.remaining) + '/' + b.target + (b.remaining === b.target ? ' · 처음부터' : ' · 새 근거만') : b.phase === 'current' ? '최신' : b.phase === 'stale' ? '낡음(Stale)' : '없음';
+  const stage = (cls, t, l1, l2) => '<div class="stage ' + cls + '"><b>' + t + '</b><span>' + l1 + '</span>' + (l2 ? '<span>' + l2 + '</span>' : '') + '</div>';
+  const pipe = '<div class="pipe">' + stage('', 'Keeper 기억', factsTotal() + '개 사실 · ' + W0.kn + '명', '재관찰 ' + W0.reobs + '개')
+    + '<span class="arrow">→</span>' + stage(WS.un ? 'warn' : '', '장부', WS.ledgerFacts + '개 → claim ' + WS.claims + ' · 충돌 ' + WS.conflicts, '장부에 없음 ' + WS.un + '개 (' + Math.round(100 * WS.un / factsTotal()) + '%)')
+    + '<span class="arrow">→</span>' + stage(b.phase === 'building' ? 'ing' : b.phase === 'stale' ? 'warn' : '', '브리핑', b.sources + '개 소스 · ' + bw, hm(b.saved) + ' 발행 · ' + kfmt(b.chars) + '자') + '</div>';
+  const days = W0.invDays, mx = Math.max(1, ...days), Wd = 960, Hd = 110, bwid = 30, gap = 18, base = Hd - 24, sc = Hd - 44;
+  let bars = '';
+  days.slice().reverse().forEach((v, i) => { const hh = v ? Math.max(2, Math.round(v / mx * sc)) : 1; bars += '<rect x="' + (i * (bwid + gap) + 4) + '" y="' + (base - hh) + '" width="' + bwid + '" height="' + hh + '" rx="2" fill="var(--caution)" opacity="' + (v ? .8 : .25) + '"/>' + (v ? '<text x="' + (i * (bwid + gap) + 4 + bwid / 2) + '" y="' + (base - hh - 5) + '" font-size="11" text-anchor="middle" fill="var(--ink)" font-family="var(--mono)">' + v + '</text>' : ''); });
+  const rain = '<div class="chart"><div class="cap">서버가 stale이라고 기록한 사건 · 근거 파일이 바뀌거나(<code>source_changed</code> ' + W0.invChanged + ') 사라진(<code>source_unavailable</code> ' + W0.invGone + ') 사실의 무효화 · 최근 20일 · 오른쪽이 오늘</div><svg viewBox="0 0 ' + Wd + ' ' + Hd + '" role="img" aria-label="최근 20일 하루별 stale 사건 수"><line x1="0" x2="' + Wd + '" y1="' + base + '" y2="' + base + '" stroke="var(--line)"/>' + bars
+    + '<text x="4" y="' + (Hd - 6) + '" font-size="11" fill="var(--muted)" font-family="var(--mono)">20일 전</text><text x="' + (19 * (bwid + gap) + 4 + bwid) + '" y="' + (Hd - 6) + '" font-size="11" text-anchor="end" fill="var(--muted)" font-family="var(--mono)">오늘</text></svg></div>';
+  root.innerHTML = '<div class="chips">' + chips + '</div>' + pipe + rain;
+})();
+
+/* ---------- boot ---------- */
+(function boot(){
+  const rich = k => k.state === 'failing' && k.sch.some(s => s.lw) && k.mem && k.mem.ok;
+  const f = K.find(rich) || K.find(k => k.state === 'failing');
+  if(f) S.selKey = 'K:' + f.name;
+  if(RM) ['c-run', 'c-lapse'].forEach(id => { const b = document.getElementById(id); b.disabled = true; b.title = '움직임 줄이기 설정이 켜져 있어서 꺼 두었어요'; });
+  render('boot');
+  /* 처음 그리는 한 번은 화면 전체라서 평균에 넣지 않아요 */
+  METER.hist.length = 0; METER.frames = 0; METER.total = 0; METER.win.length = 0; METER.polls.n = 0; METER.polls.rows = 0; paintMeter();
+  setInterval(() => { if(!document.hidden) render('poll'); }, POLL_MS);
+  /* 화면 확인용 손잡이: 주소에 #qa 가 있을 때만 열려요 */
+  if(location.hash === '#qa') window.__qa = {S, get K(){ return K; }, render, revealSelected, openStory, setLens, rowsOf, withState, buildScreen, diffRows, changedRows, keyOf, rowsCause, scenarios, rowsAge, applyRenew, applyCuratorStep, renewKeeper, curatorPass, setAgeShift, ladderBins, classOf, get WS(){ return WS; }, WS0};
+})();
+
+})();
+</script>

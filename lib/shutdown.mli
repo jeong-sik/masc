@@ -141,6 +141,16 @@ val mark_shutting_down : unit -> unit
     graceful shutdown (see [Keeper_registry_types_failure.fiber_drop_cause]
     [Graceful_shutdown]). *)
 
+(** {1 Termination Signals} *)
+
+(** The signals masc handles itself by starting a graceful shutdown. *)
+type signal =
+  | Sigterm
+  | Sigint
+
+val signal_name : signal -> string
+(** Wire name: [SIGTERM] or [SIGINT]. *)
+
 (** {1 Phase Execution} *)
 
 val initiate :

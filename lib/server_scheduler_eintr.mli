@@ -13,14 +13,8 @@
     bump to. This module renders the report; [bin/main_eio.ml] installs the
     narrow catch around the server scheduler and exits. *)
 
-(** Shutdown signal masc handles itself. Mirrors the bin-local signal type;
-    the report maps each case to its [SIGTERM]/[SIGINT] wire name. *)
-type shutdown_signal =
-  | Sigterm
-  | Sigint
-
 type context = {
-  pending_shutdown : shutdown_signal option;
+  pending_shutdown : Shutdown.signal option;
       (** First shutdown signal still awaiting consumption by the shutdown
           watcher. [None] means no [SIGTERM]/[SIGINT] was observed; a
           runtime-internal delivery (OCaml [SIGURG] domain signalling,
@@ -48,9 +42,6 @@ type context = {
 (** Process state sampled at the escape. Every field must be readable without
     the Eio scheduler: plain atomics, [Stdlib.Mutex] counters, and module-init
     constants only. *)
-
-val shutdown_signal_name : shutdown_signal -> string
-(** Wire name: [SIGTERM] or [SIGINT]. *)
 
 val describe : context -> syscall:string -> backtrace:string -> string
 (** [describe ctx ~syscall ~backtrace] renders the multi-line fatal report.

@@ -576,14 +576,6 @@ let login_expiry_hours =
     [Switch.run] wait forever. *)
 exception Graceful_shutdown
 
-type shutdown_signal =
-  | Sigterm
-  | Sigint
-
-let shutdown_signal_name = function
-  | Sigterm -> "SIGTERM"
-  | Sigint -> "SIGINT"
-
 let announce_wait_for_previous_owner ~base_path owner =
   let recorded =
     match owner with
@@ -863,7 +855,9 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
   (* Hoisted above [Eio_main.run]: the scheduler-EINTR fatal handler reads
      the pending signal after the scheduler has escaped (#43225), so the cell
      must outlive the run. The watcher fiber inside still owns consumption. *)
-  let pending_shutdown_signal = Atomic.make None in
+  let pending_shutdown_signal : Masc.Shutdown.signal option Atomic.t =
+    Atomic.make None
+  in
   let run_inside_scheduler env =
   Crypto_rng.ensure_default ();
 
@@ -902,8 +896,12 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
     if Option.is_none (Atomic.get pending_shutdown_signal) then
       Atomic.set pending_shutdown_signal (Some signal)
   in
-  Sys.set_signal Sys.sigterm (Sys.Signal_handle (fun _ -> request_shutdown Sigterm));
-  Sys.set_signal Sys.sigint (Sys.Signal_handle (fun _ -> request_shutdown Sigint));
+  Sys.set_signal
+    Sys.sigterm
+    (Sys.Signal_handle (fun _ -> request_shutdown Masc.Shutdown.Sigterm));
+  Sys.set_signal
+    Sys.sigint
+    (Sys.Signal_handle (fun _ -> request_shutdown Masc.Shutdown.Sigint));
 
   let start () =
     (try
@@ -917,7 +915,7 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
         | Some signal ->
             let force_timeout = shutdown_cfg.force_timeout_s in
             let t_shutdown_start = Unix.gettimeofday () in
-            let signal_name = shutdown_signal_name signal in
+            let signal_name = Masc.Shutdown.signal_name signal in
             let watchdog =
               Masc.Shutdown.start_process_deadline_watchdog_or_exit
                 ~timeout_s:force_timeout
@@ -1168,15 +1166,10 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
   (match Eio_main.run run_observed with
    | () -> ()
    | exception Unix.Unix_error (Unix.EINTR, func, _) ->
-     let pending =
-       match Atomic.get pending_shutdown_signal with
-       | None -> None
-       | Some Sigterm -> Some Masc.Server_scheduler_eintr.Sigterm
-       | Some Sigint -> Some Masc.Server_scheduler_eintr.Sigint
-     in
      let ctx : Masc.Server_scheduler_eintr.context =
        {
-         Masc.Server_scheduler_eintr.pending_shutdown = pending;
+         Masc.Server_scheduler_eintr.pending_shutdown =
+           Atomic.get pending_shutdown_signal;
          uptime_s = Masc.Server_startup_state.elapsed_since_start ();
          mcp_sessions = Server_mcp_transport_http_conn.active_session_count ();
          ws_sessions = Server_mcp_transport_ws.try_session_count ();

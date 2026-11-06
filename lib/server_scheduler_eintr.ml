@@ -1,9 +1,5 @@
-type shutdown_signal =
-  | Sigterm
-  | Sigint
-
 type context = {
-  pending_shutdown : shutdown_signal option;
+  pending_shutdown : Shutdown.signal option;
   uptime_s : float;
   mcp_sessions : int;
   ws_sessions : int option;
@@ -13,16 +9,11 @@ type context = {
   pid : int;
 }
 
-let shutdown_signal_name = function
-  | Sigterm -> "SIGTERM"
-  | Sigint -> "SIGINT"
-;;
-
 let describe ctx ~syscall ~backtrace =
   let pending =
     match ctx.pending_shutdown with
     | None -> "none"
-    | Some signal -> shutdown_signal_name signal
+    | Some signal -> Shutdown.signal_name signal
   in
   let git_commit =
     match ctx.git_commit with

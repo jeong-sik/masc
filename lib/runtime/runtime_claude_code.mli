@@ -501,7 +501,10 @@ val probe_subscription :
   config ->
   (subscription, error) result
 (** Measure the official CLI login without submitting a model turn. The child
-    receives the same credential-preserving allowlisted environment as [run_turn]. *)
+    receives the same credential-preserving allowlisted environment as [run_turn].
+    Its stdout is a private file in the temporary directory, which [cwd]'s
+    directory capability opens: one built from [Eio.Stdenv.fs] reaches it.
+    [run_turn] probes the same way when it is not given a subscription. *)
 
 val cli_admitted_reasoning_effort :
   Llm_provider.Reasoning_effort.t -> Llm_provider.Reasoning_effort.t

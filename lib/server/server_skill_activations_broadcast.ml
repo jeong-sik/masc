@@ -45,8 +45,7 @@ let start ~sw =
   let wake = Eio.Stream.create 1 in
   let pending_mu = Stdlib.Mutex.create () in
   let pending : (string * string, string * Keeper_id.Trace_id.t) Hashtbl.t = Hashtbl.create 8 in
-  let observer ~(config : Workspace.config) ~keeper_name:_ ~trace_id
-      (_ : Keeper_skill_activation_ledger.t) =
+  let observer ~(config : Workspace.config) ~trace_id =
     Stdlib.Mutex.protect pending_mu (fun () ->
       Hashtbl.replace pending
         (config.base_path, Keeper_id.Trace_id.to_string trace_id)
@@ -71,7 +70,8 @@ let start ~sw =
 
 let install ~sw =
   let observer = start ~sw in
-  let restore = Keeper_skill_activation_ledger.install_commit_observer observer in
+  Keeper_skill_activation_ledger.install_commit_observer observer;
   (* Nothing drains the changes once the fiber's switch ends. *)
-  Eio.Switch.on_release sw restore
+  Eio.Switch.on_release sw (fun () ->
+    Keeper_skill_activation_ledger.withdraw_commit_observer observer)
 ;;

@@ -410,7 +410,7 @@ let activation_row value =
 let test_each_appending_write_announces_once () =
   with_session @@ fun config trace_id _session_dir ->
   let heard = ref [] in
-  let restore = Ledger.install_commit_observer
+  let restore = Ledger.install_commit_state_observer
       (fun ~config:_ ~keeper_name:_ ~trace_id:changed _ ->
         heard := Keeper_id.Trace_id.to_string changed :: !heard) in
   Fun.protect ~finally:restore

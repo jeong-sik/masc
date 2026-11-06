@@ -199,6 +199,23 @@ let apply_catalog (state : state) request result =
           state.code_catalog request result
   | Palette_files _ | Palette_branches _ | Palette_worktrees _ | Palette_search _ | Palette_locations _ | Palette_jump | Palette_choice _ -> ()
 
+(* A tab is the spaces up to the next tab stop, counted from the row's start
+   across its segments, so a tab after a keyword lands where a terminal would
+   have put it. Left to [sanitize_terminal_text] it draws as the four
+   characters of [\x09], and a tab-indented file reads as noise. *)
+let expand_row_tabs segments =
+  if not (List.exists (fun (text, _) -> String.contains text '\t') segments)
+  then segments
+  else
+    snd
+      (List.fold_left_map
+         (fun column (text, kind) ->
+           let text, column =
+             Masc_tui_execute_terminal.expand_tabs ~column text
+           in
+           (column, (text, kind)))
+         0 segments)
+
 let apply_open_file ~preserve_view (state : state) request result = (
   let path = Masc_tui_fetched.request_key request in
   (* An answer for a file the operator has moved past describes bytes
@@ -225,6 +242,7 @@ let apply_open_file ~preserve_view (state : state) request result = (
       in
       let rows =
         Masc_tui_code_lexer.rows_of_source ~language content
+        |> List.map expand_row_tabs
         |> List.map
              (List.map (fun (text, kind) ->
                   (Masc.Tui_terminal_text.sanitize_terminal_text text, kind)))

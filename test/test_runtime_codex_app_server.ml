@@ -2488,6 +2488,59 @@ let test_rate_limits_read_without_turn () =
           (List.map (fun json -> json |> member "method" |> to_string) requests)))
 ;;
 
+(* RFC-0501 §2.2: [initialize], then one [thread/delete] per id and no
+   [account/read]. A refusal stays with its own id. *)
+let test_thread_delete_answers_each_id () =
+  let capture = Filename.temp_file "masc-thread-delete-capture-" ".jsonl" in
+  Fun.protect ~finally:(fun () -> Sys.remove capture) (fun () ->
+    with_fixture ~close_before_turn:true ~capture_path:capture
+      [ init_result
+      ; {|{"id":2,"result":{}}|}
+      ; {|{"id":3,"error":{"code":-32600,"message":"no rollout found for thread id thread-gone"}}|}
+      ]
+      (fun path ->
+        let outcome = Eio_main.run (fun env ->
+          let config = { (Runtime_codex_app_server.default_config ()) with cli_path=path; admission_timeout_s=2. } in
+          Runtime_codex_app_server.delete_threads ~mgr:(Eio.Stdenv.process_mgr env)
+            ~clock:(Eio.Stdenv.clock env) ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp") config
+            [ "thread-kept"; "thread-gone" ]) in
+        let answers = match outcome with
+          | Ok answers -> answers
+          | Error error -> fail (Runtime_codex_app_server.error_to_string error) in
+        let seen =
+          List.map
+            (fun (thread_id, answer) ->
+              ( thread_id
+              , match answer with
+                | Ok () -> "deleted"
+                | Error (Runtime_codex_app_server.Rpc_error { method_; code; message; _ }) ->
+                  Printf.sprintf "%s %s %s" method_
+                    (Option.fold ~none:"-" ~some:string_of_int code) message
+                | Error error -> Runtime_codex_app_server.error_to_string error ))
+            answers
+        in
+        check (list (pair string string)) "one answer per id, in order"
+          [ ("thread-kept", "deleted")
+          ; ("thread-gone", "thread/delete -32600 no rollout found for thread id thread-gone")
+          ]
+          seen;
+        let channel = open_in capture in
+        let requests = Fun.protect ~finally:(fun () -> close_in channel) (fun () ->
+          let rec read acc = match input_line channel with
+            | line -> read (Yojson.Safe.from_string line :: acc)
+            | exception End_of_file -> List.rev acc in read []) in
+        let open Yojson.Safe.Util in
+        check (list string) "initialize then one delete per id"
+          ["initialize";"initialized";"thread/delete";"thread/delete"]
+          (List.map (fun json -> json |> member "method" |> to_string) requests);
+        check (list string) "each delete names its thread"
+          ["thread-kept";"thread-gone"]
+          (List.filter_map (fun json ->
+             match json |> member "method" |> to_string with
+             | "thread/delete" -> Some (json |> member "params" |> member "threadId" |> to_string)
+             | _ -> None) requests)))
+;;
+
 (* The read after a quota refusal is asked for by a turn that ends at once.
    It must outlive that turn: a fiber on the turn's switch would be
    cancelled when the turn returns, before the app-server answered. A
@@ -9932,6 +9985,7 @@ let () =
         ; test_case "account reasoning effort admission" `Quick test_account_reasoning_effort_admission
         ; test_case "reasoning metadata refuses before input" `Quick test_reasoning_metadata_refusal_precedes_input
         ; test_case "rate limits read without turn" `Quick test_rate_limits_read_without_turn
+        ; test_case "thread delete answers each id" `Quick test_thread_delete_answers_each_id
         ; test_case "background read outlives the turn" `Quick test_background_read_outlives_the_turn
         ; test_case "unattributed single bucket preserves refusal" `Quick
             test_spent_usage_read_unattributed_reset_keeps_the_observation

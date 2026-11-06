@@ -19234,7 +19234,7 @@ let launch_observer state ~(expected_workspace : Tui_decode.server_identity) ~ho
                 Masc_tui_http.observe_runtime_events_with_scopes ~machine ~browser ~clock
                   ~expected_base_path:expected_workspace.sid_base_path
                   ~expected_masc_root:expected_workspace.sid_masc_root ~host ~port
-                  ~session_id ~cursor ~on_identity:(fun _ -> ()) ~on_open ~on_chunk ())
+                  ~session_id ~cursor ~on_identity:(fun _ -> ()) ~on_open ~on_chunk)
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Masc_tui_http.Transport_failed (Printexc.to_string exn))

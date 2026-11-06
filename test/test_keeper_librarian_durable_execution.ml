@@ -1650,6 +1650,10 @@ let test_counterpart_only_provider_capacity_refusal_is_source_preserving () =
        | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
        | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false);
     let _,_,fresh_counterparts=observations fresh_capture in
+    check (list string) "the later input's counterparts (length:head)" []
+      (List.map (fun (o:Keeper_counterpart_observation.t) ->
+        Printf.sprintf "%d:%s" (String.length o.content) (String.sub o.content 0 (min 40 (String.length o.content))))
+        fresh_counterparts);
     check bool "the later input carries the counterpart appended after the refusal" true
       (List.exists (fun (observation:Keeper_counterpart_observation.t) ->
         observation.content=appended) fresh_counterparts);

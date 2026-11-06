@@ -539,8 +539,8 @@ let test_registry_shutdown_projects_every_claimed_batch_member () =
     | None -> fail "shutdown returned without invoking the production settle hook" in
   check int "settle hook receives both immutable batch members" 2 (List.length operations);
   (match execution with
-   | Owner.Operation_failed {kind=Keeper_chat_operation.Turn_cancelled; _} -> ()
-   | _ -> fail "shutdown did not accept the typed cancellation verdict");
+   | Owner.Operation_failed {kind=Keeper_chat_operation.Interrupted_by_restart; _} -> ()
+   | _ -> fail "shutdown did not settle the batch as interrupted by restart");
   let store_path = Store.path_for_keeper
     ~keepers_runtime_dir:(Workspace.keepers_runtime_dir config) ~keeper_name in
   let store_ok = function Ok value -> value | Error error -> fail (Store.error_to_string error) in
@@ -549,8 +549,8 @@ let test_registry_shutdown_projects_every_claimed_batch_member () =
   List.iter (fun id ->
     let operation = Option.get (store_ok (Store.get store id)) in
     let completed_at = match operation.state with
-      | Keeper_chat_operation.Failed {completed_at; failure={kind=Turn_cancelled; _}} -> completed_at
-      | _ -> fail "a batch member was not durably cancelled" in
+      | Keeper_chat_operation.Failed {completed_at; failure={kind=Interrupted_by_restart; _}} -> completed_at
+      | _ -> fail "a batch member was not durably interrupted by restart" in
     let delivered = List.find (fun (observed : Keeper_chat_operation.t) ->
       Keeper_chat_operation.Operation_id.equal observed.operation_id id) operations in
     let member = match operation.batch_membership with

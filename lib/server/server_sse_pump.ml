@@ -1,6 +1,6 @@
 type ending =
   | Client_gone
-  | Fell_behind
+  | Source_stopped
   | Stalled
   | Finished
 
@@ -14,6 +14,12 @@ type idle =
   | Keepalive
   | Quiet
   | Finish
+
+type 'event source =
+  { take : unit -> 'event
+  ; take_nonblocking : unit -> 'event option
+  ; stopped : unit -> bool
+  }
 
 type 'event wake =
   | Event of 'event
@@ -65,23 +71,28 @@ module Queue = struct
       Some event
   ;;
 
-  let fell_behind t = Atomic.get t.behind
+  let source t =
+    { take = (fun () -> take t)
+    ; take_nonblocking = (fun () -> take_nonblocking t)
+    ; stopped = (fun () -> Atomic.get t.behind)
+    }
+  ;;
 end
 
-let run ~queue ~step ~idle ~clock ~ping_interval_s ~send =
+let run ~source ~step ~idle ~clock ~ping_interval_s ~send =
   let rec serve () =
-    if Queue.fell_behind queue
-    then Fell_behind
+    if source.stopped ()
+    then Source_stopped
     else (
       (* An event taken as the interval ran out is that event: it has left
-         the queue, and the idle answer used in its place would drop it.
+         the source, and the idle answer used in its place would drop it.
          [Watched_work.run] keeps the work's outcome. *)
       match
         Watched_work.run
           ~watcher:(fun () ->
             Eio.Time.sleep clock ping_interval_s;
             Ping)
-          (fun () -> Event (Queue.take queue))
+          (fun () -> Event (source.take ()))
       with
       | Event event ->
         (match step event with
@@ -94,16 +105,16 @@ let run ~queue ~step ~idle ~clock ~ping_interval_s ~send =
          | Keepalive -> write ~last:false [ keepalive_frame ]
          | Quiet -> serve ()
          | Finish -> Finished))
-  (* The events already queued go out in the same send, so a burst waits for
-     the socket once per batch instead of once per frame. Each take first
-     looks for a pile-up, so no event queued after a dropped one is taken. *)
+  (* The events already waiting go out in the same send, so a burst waits for
+     the socket once per batch instead of once per frame. Each take first asks
+     whether to stop, so nothing is taken after a stop. *)
   and batch frames ~bytes =
-    if Queue.fell_behind queue
-    then Fell_behind
+    if source.stopped ()
+    then Source_stopped
     else if bytes >= max_batch_bytes
     then write ~last:false frames
     else (
-      match Queue.take_nonblocking queue with
+      match source.take_nonblocking () with
       | None -> write ~last:false frames
       | Some event ->
         (match step event with
@@ -111,12 +122,12 @@ let run ~queue ~step ~idle ~clock ~ping_interval_s ~send =
          | Send frame -> batch (frame :: frames) ~bytes:(bytes + String.length frame)
          | Send_last frame -> write ~last:true (frame :: frames)
          | Stop -> write ~last:true frames))
-  (* The last look for a pile-up is here, right before the frames go to
-     [send]. A producer on another domain can still mark one after it; that
-     pile-up is acted on when this [send] returns. *)
+  (* The last look at the stop is here, right before the frames go to [send].
+     A stop on another domain can still come after it; it is acted on when
+     this [send] returns. *)
   and write ~last frames =
-    if Queue.fell_behind queue
-    then Fell_behind
+    if source.stopped ()
+    then Source_stopped
     else (
       match (send (String.concat "" (List.rev frames)) : Server_sse_response.outcome) with
       | Written -> if last then Finished else serve ()

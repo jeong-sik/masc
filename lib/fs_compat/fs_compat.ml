@@ -3395,7 +3395,13 @@ let private_jsonl_with_fd ~close_operation ~close_fd ~success fd f =
     Error (private_jsonl_add_cleanup_failure error cleanup_failure)
 ;;
 
-let private_jsonl_lock_path path = path ^ ".lock"
+let lock_suffix = ".lock"
+
+let is_lock_name name =
+  String.length name > String.length lock_suffix && String.ends_with ~suffix:lock_suffix name
+;;
+
+let private_jsonl_lock_path path = path ^ lock_suffix
 
 type private_jsonl_transaction_io_for_testing =
   { before_sync_parent : string -> unit

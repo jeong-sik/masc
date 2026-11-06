@@ -957,7 +957,7 @@ let test_stopping_cancels_and_joins_active_child () =
        (Some (Ids.Turn_ref.to_string original_turn)) outcome_ref;
      check string
        "stopped active child is terminal"
-       "Turn_cancelled"
+       "Interrupted_by_restart"
        (Chat_operation.failure_kind_to_string kind)
    | state ->
      fail
@@ -975,7 +975,7 @@ let test_stopping_cancels_and_joins_active_child () =
     check
       string
       "settle hook failure kind"
-      "Turn_cancelled"
+      "Interrupted_by_restart"
       (Chat_operation.failure_kind_to_string kind);
     check
       string

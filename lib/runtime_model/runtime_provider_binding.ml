@@ -1,9 +1,4 @@
-(** Provider identity helpers shared across {!Runtime_config} submodules.
-
-    Extracted from the original [runtime_config.ml] godfile to give the
-    parsing/selection/resolve/strategy submodules a stable lowest layer.
-    Surface is unchanged: {!Runtime_config} re-exports every function in
-    this module so external callers continue to use the facade.
+(** Provider identity helpers.
 
     @stability Internal *)
 

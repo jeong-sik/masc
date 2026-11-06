@@ -13,10 +13,7 @@
     process-wide fallback preserves legacy lookup semantics for domains
     that have not installed their own bus yet.  Kept in this module
     (rather than inline in keeper modules) to avoid dependency cycles
-    between Keeper_keepalive and Keeper_agent_run.
-
-    @since 2.353.0 (as [Masc_event_bus] / [Keeper_event_bus]; merged
-           into one module with two named slots) *)
+    between Keeper_keepalive and Keeper_agent_run. *)
 
 (** {1 masc slot — MASC-owned bus, process-wide [Atomic.t]} *)
 

@@ -340,7 +340,7 @@ let split_frames bytes =
 
 let ending_name = function
   | Pump.Client_gone -> "Client_gone"
-  | Pump.Fell_behind -> "Fell_behind"
+  | Pump.Source_stopped -> "Source_stopped"
   | Pump.Stalled -> "Stalled"
   | Pump.Finished -> "Finished"
 
@@ -353,7 +353,7 @@ let serve_chat ~replayed items =
     let send bytes = written := List.rev_append (split_frames bytes) !written; Sse.Written in
     List.iter (Pump.Queue.push queue) items;
     let ending =
-      Pump.run ~queue
+      Pump.run ~source:(Pump.Queue.source queue)
         ~step:(Stream.For_testing.keeper_chat_step ~replayed)
         ~idle:(fun () -> Pump.Finish)
         ~clock:(Eio.Stdenv.clock env)

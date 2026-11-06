@@ -13,8 +13,8 @@
     on [Printexc.to_string], which is the classifier shape #26770 removed. *)
 
 (** The owner stopped a turn it had started. Not an ambiguity: the owner knows
-    the turn did not complete and knows why, and classifies it as
-    [Turn_cancelled] on the operation side. *)
+    the turn did not complete and knows why. Only server shutdown stops an
+    owner, so the operation side records [Interrupted_by_restart]. *)
 exception Stop_active_child
 
 let rec is_owner_cancel_reason = function

@@ -200,16 +200,65 @@ let close_all_sse_connections () =
   Log.Server.info "MASC MCP: Closed %d SSE connections"
     (List.length infos)
 
-let send_raw info data =
-  if Atomic.get info.closed || Atomic.get info.stop then false
+let send_raw info data : Server_sse_response.outcome =
+  if Atomic.get info.closed || Atomic.get info.stop then Closed
   else
     match Server_sse_response.send info.response data with
     | Written ->
       Sse.touch info.session_id;
-      true
-    | Closed | Stalled ->
+      Written
+    | (Closed | Stalled) as refused ->
       close_sse_conn info;
-      false
+      refused
+
+(* What a drain writes, in order (RFC-0493 §3.2). *)
+type drain_item =
+  | Prime of string
+  | Replayed of Sse.delivery
+  | Live of Sse.delivery
+
+(* The prime and the replay come first, then the connection's Sse queue.
+   Taking a first item does not suspend, and [Sse.take_delivery] suspends
+   only before it takes, so a take the pump cancels takes nothing. *)
+let drain_source info ~prime ~replay event_stream : drain_item Server_sse_pump.source =
+  let first = ref (Prime prime :: List.map (fun delivery -> Replayed delivery) replay) in
+  let take_first () =
+    match !first with
+    | [] -> None
+    | item :: rest ->
+      first := rest;
+      Some item
+  in
+  { take =
+      (fun () ->
+        match take_first () with
+        | Some item -> item
+        | None -> Live (Sse.take_delivery event_stream))
+  ; take_nonblocking =
+      (fun () ->
+        match take_first () with
+        | Some _ as item -> item
+        | None ->
+          Option.map (fun delivery -> Live delivery) (Sse.take_delivery_nonblocking event_stream))
+  ; stopped = (fun () -> Atomic.get info.stop || Atomic.get info.closed)
+  }
+
+let drain_sse info ~clock ~prime ~replay ~frame_of ~send event_stream =
+  (* Every replayed delivery goes in the handoff: one that is not written
+     ends the stream, so no live delivery is taken after it. *)
+  let handoff = Sse.create_replay_handoff replay in
+  Server_sse_pump.run
+    ~source:(drain_source info ~prime ~replay event_stream)
+    ~step:(function
+      | Prime frame -> Server_sse_pump.Send frame
+      | Replayed delivery -> Send (frame_of delivery)
+      | Live delivery ->
+        if Sse.accept_live_delivery handoff delivery then Send (frame_of delivery) else Skip)
+    (* The ping pump writes the keepalive. *)
+    ~idle:(fun () -> Server_sse_pump.Quiet)
+    ~clock
+    ~ping_interval_s:Server_mcp_transport_http_headers.sse_ping_interval_s
+    ~send
 
 (* Run the SSE drain + ping pumps for a connection under a switch scoped to
    that connection's lifetime, rather than directly on the server-lifetime

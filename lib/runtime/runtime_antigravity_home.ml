@@ -21,6 +21,10 @@ type error =
       { path : string
       ; rejection : Runtime_antigravity_oauth_credential.rejection
       }
+  | Unrecognized_managed_keychain of
+      { path : string
+      ; rejection : Runtime_antigravity_oauth_credential.keychain_rejection
+      }
   | Settings_write_failed of
       { path : string
       ; detail : string
@@ -99,6 +103,9 @@ let error_to_string = function
   | Unrecognized_managed_oauth { path; rejection } ->
     Printf.sprintf "unrecognized managed Antigravity OAuth file %s: %s" path
       (Runtime_antigravity_oauth_credential.rejection_to_string rejection)
+  | Unrecognized_managed_keychain { path; rejection } ->
+    Printf.sprintf "unrecognized managed Antigravity keychain item in %s: %s" path
+      (Runtime_antigravity_oauth_credential.keychain_rejection_to_string rejection)
   | Settings_write_failed { path; detail } ->
     Printf.sprintf "failed to write Antigravity settings %s: %s" path detail
   | Mcp_config_write_failed { path; detail } ->
@@ -645,12 +652,12 @@ let home_with_keychain ~runtime_root (home_dir, settings_path, mcp_config_path, 
 ;;
 
 let generation_error path detail = Invalid_managed_oauth {path; detail}
-(* The generation's principal is the account the CLI login file names; see
+(* The generation's principal is the email the CLI login names; see
    {!Runtime_antigravity_oauth_credential} for the shapes it reads and why the
-   sign-in email is the principal. Tokens and expiry are never identity.
+   email is the principal. Tokens and expiry are never identity.
    HIGH-RISK-UNREVIEWED: a human must review this identity boundary. *)
 let account_digest ~unrecognized ~path bytes =
-  Runtime_antigravity_oauth_credential.parse bytes
+  Runtime_antigravity_oauth_credential.account_email bytes
   |> Result.map Runtime_antigravity_oauth_credential.principal_sha256
   |> Result.map_error (fun rejection -> unrecognized path rejection)
 ;;
@@ -678,19 +685,24 @@ let parse_generation_record ~path body =
    reads cannot ignore a freshly copied file). A managed HOME the CLI
    reauthenticated as another account would therefore resume that account even
    when the fallback file still names the selected one. Refuse a readable
-   divergent keychain item the same way a divergent file refuses. A missing,
-   unsupported, or unreadable item proves no divergence: under the same
-   conditions the CLI falls back to the file or fails the turn without a
-   wrong-account admission. Refusing on [Unavailable] would also brick the
-   reboot path, where the stale locked keychain is only rebuilt after admission
-   by [ensure_login_keychain]. *)
+   divergent keychain item the same way a divergent file refuses, and refuse a
+   readable item that is not go-keyring's encoding of a known login.
+   The CLI writes the item through /usr/bin/security, and on 2026-11-06 the
+   operator item's ACL admitted only that tool, so this no-UI read returns
+   [Unavailable] for an item the CLI wrote and the check sees no account
+   there (#49243). Refusing on [Unavailable] would refuse every HOME the CLI
+   saved a token in, and would also brick the reboot path, where the stale
+   locked keychain is only rebuilt after admission by [ensure_login_keychain]. *)
 let check_managed_keychain ~home_dir ~account_sha256 ~read_keychain =
   let keychain_path = login_keychain_path home_dir in
   match read_keychain ~path:keychain_path with
   | Apple_keychain.Missing | Apple_keychain.Unsupported | Apple_keychain.Unavailable -> Ok ()
   | Apple_keychain.Found contents ->
-    let* keychain_sha256 =
-      account_digest ~unrecognized:managed_unrecognized ~path:keychain_path contents in
+    let* email =
+      Runtime_antigravity_oauth_credential.keychain_account_email contents
+      |> Result.map_error (fun rejection ->
+        Unrecognized_managed_keychain { path = keychain_path; rejection }) in
+    let keychain_sha256 = Runtime_antigravity_oauth_credential.principal_sha256 email in
     if String.equal keychain_sha256 account_sha256 then Ok ()
     else Error (generation_error keychain_path "managed keychain principal differs from the selected generation")
 ;;

@@ -138,16 +138,40 @@ val close_all_sse_connections : unit -> unit
 
 (** {1 SSE I/O} *)
 
-val send_raw : sse_conn_info -> string -> bool
+val send_raw : sse_conn_info -> string -> Server_sse_response.outcome
 (** [send_raw info data] sends [data] with {!Server_sse_response.send},
     which returns once the frame reached the socket, the response
     closed, or the stall bound passed.  On [Written] it touches the SSE
-    timestamp via {!Sse.touch} and returns [true].  Otherwise it closes
-    the connection via {!close_sse_conn} and returns [false].  A
-    stopped connection returns [false] without writing.
+    timestamp via {!Sse.touch}.  Otherwise it closes the connection via
+    {!close_sse_conn} and returns the refusal.  A stopped connection
+    returns [Closed] without writing.
 
     Call it only on the connection's domain.  A waiting send can be
     cancelled; the cancellation propagates. *)
+
+val drain_sse :
+  sse_conn_info ->
+  clock:_ Eio.Time.clock ->
+  prime:string ->
+  replay:Sse.delivery list ->
+  frame_of:(Sse.delivery -> string) ->
+  send:(string -> Server_sse_response.outcome) ->
+  Sse.delivery_stream ->
+  Server_sse_pump.ending
+(** [drain_sse info ~clock ~prime ~replay ~frame_of ~send stream] is the
+    drain of an MCP GET, AG-UI or presence connection (RFC-0493 §3.2):
+    {!Server_sse_pump.run} over [prime], then the [replay] deliveries,
+    then the live deliveries of [stream], each live or replayed one
+    written as [frame_of] makes it.  The frames already waiting go out
+    in one [send], within {!Server_sse_pump.max_batch_bytes}, so a burst
+    waits for the client once per batch.  A live delivery the replay
+    carried is skipped.  It writes nothing on a quiet stream (the ping
+    pump writes the keepalive) and ends with [Source_stopped] once
+    [info] is stopped.
+
+    [send] is {!send_raw} on [info], or a wrapper that refuses when the
+    connection's workspace scope ended.  Run it as the [drain] of
+    {!run_sse_pumps}, on the connection's domain. *)
 
 val make_sse_conn :
   session_id:string ->
@@ -186,8 +210,8 @@ val run_sse_pumps :
     response handed to [run_sse_pumps] is closed.
 
     [drain] sends the stream's first frames (prime, replay) before its live
-    events, so a stop also cancels a first frame that waits for the
-    socket. *)
+    events ({!drain_sse}), so a stop also cancels a first frame that waits
+    for the socket. *)
 
 (** {1 Connect-rate guard} *)
 

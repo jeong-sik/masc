@@ -10,8 +10,10 @@ type index =
   ; artifact : Tool_output.artifact_ref
   }
 
+let filename_suffix = ".working-context-recall.json"
+
 let path ~keepers_dir ~keeper_name =
-  Filename.concat keepers_dir (keeper_name ^ ".working-context-recall.json")
+  Filename.concat keepers_dir (keeper_name ^ filename_suffix)
 
 let index_json index =
   `Assoc

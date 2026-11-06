@@ -1,6 +1,6 @@
 (** Declarative Runtime TOML parser (RFC-0206, runtime→Runtime rebirth).
 
-    Re-homed from the deleted [Runtime_declarative_parser]. Parses only
+    Parses only
     RFC-0058 layers 1-3 plus [\[runtime\].default] into a self-standing
     {!Runtime_schema.config}:
 

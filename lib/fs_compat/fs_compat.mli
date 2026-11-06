@@ -1605,9 +1605,18 @@ val private_jsonl_transaction_error_to_string :
 val private_jsonl_transaction_error_is_incomplete_tail :
   private_jsonl_transaction_error -> bool
 
-(** Stable sibling lock owned by the private JSONL transaction protocol. It is
-    created with mode [0600] and must never be renamed or removed while the
-    store may be in use. *)
+(** What a lock file's name adds to the path it locks: [<path>.lock]. The
+    private JSONL lock and [File_lock_eio] both use it. *)
+val lock_suffix : string
+
+(** Whether [name] is [<nonempty><lock_suffix>]. A lock file holds no record:
+    a [File_lock_eio] lock is empty, and a private JSONL lock holds one ready
+    marker byte. *)
+val is_lock_name : string -> bool
+
+(** Stable sibling lock owned by the private JSONL transaction protocol,
+    [<path><lock_suffix>]. It is created with mode [0600] and must never be
+    renamed or removed while the store may be in use. *)
 val private_jsonl_lock_path : string -> string
 
 (** Remove a store under its stable sibling lock and fsync its parent. Success

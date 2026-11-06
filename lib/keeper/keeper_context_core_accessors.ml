@@ -2,8 +2,7 @@
     checkpoint management, serialization, and AGENT_CORE checkpoint operations.
 
     Working context types live in {!Keeper_types}.
-    Pure context operations (previously in Keeper_working_context)
-    are inlined below.
+    Pure context operations are defined below.
 
     Extracted from Keeper_context_runtime as part of #4955 god-file split. *)
 
@@ -25,7 +24,7 @@ type working_context = Keeper_types.working_context
 type session_context = Keeper_types.session_context
 
 (* ================================================================ *)
-(* Working Context Operations (inlined from Keeper_working_context)  *)
+(* Working Context Operations                                        *)
 (* ================================================================ *)
 
 let text_of_message = Agent_core.Types.text_of_message
@@ -123,7 +122,7 @@ let create_session ~session_id ~base_dir =
 include Keeper_context_core_history
 
 (* ================================================================ *)
-(* End of inlined Keeper_working_context operations                  *)
+(* End of working context operations                                 *)
 (* ================================================================ *)
 
 (* ================================================================ *)

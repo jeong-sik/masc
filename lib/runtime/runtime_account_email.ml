@@ -1,18 +1,8 @@
-type t = string
+type t = Runtime_account_email_text.t
 
-let max_bytes = 254
+let of_string = Runtime_account_email_text.of_string
 
-let displayable_byte char =
-  let code = Char.code char in
-  code > 0x20 && code <> 0x7f
-
-let of_string text =
-  let length = String.length text in
-  if length = 0 || length > max_bytes || not (String.is_valid_utf_8 text) then None
-  else if String.for_all displayable_byte text then Some text
-  else None
-
-let to_string email = email
+let to_string = Runtime_account_email_text.to_string
 
 type missing =
   | Source_unavailable
@@ -101,18 +91,22 @@ let of_muse_auth bytes =
   let* json = parse bytes in
   email_at [ "providers"; "meta"; "user_email" ] json
 
-(* agy 1.2 keeps the sign-in OpenID [id_token]. agy 1.5 keeps only its
-   [email] claim as [id_token_email] and drops the token on its next write.
-   The CLI writes one of the two. *)
+(* The reader that names the account generation reads the email too, so the
+   email shown and the account selected come from one parse. *)
 let of_google_oauth bytes =
-  let* json = parse bytes in
-  let* id_token_email = at [ "id_token_email" ] json in
-  let* id_token = at [ "id_token" ] json in
-  match id_token_email, id_token with
-  | Some _, None -> email_at [ "id_token_email" ] json
-  | None, Some _ -> email_in_id_token [ "id_token" ] json
-  | None, None -> Error Not_reported
-  | Some _, Some _ -> Error Source_unrecognized
+  let module Login = Runtime_antigravity_oauth_credential in
+  match Login.account_email bytes with
+  | Ok email -> Ok email
+  | Error (Login.No_account_key | Login.Invalid_id_token Login.No_email_claim) ->
+    Error Not_reported
+  | Error (Login.Not_email_text _) -> Error Invalid_email
+  | Error
+      ( Login.Not_json_object | Login.Repeated_account_key | Login.Both_account_keys
+      | Login.Unreadable_email _
+      | Login.Invalid_id_token
+          ( Login.Not_a_jwt | Login.Claims_not_base64url | Login.Claims_not_json_object
+          | Login.Issuer_not_google ) ) ->
+    Error Source_unrecognized
 
 (* A regular file only: opening a FIFO would block the reading thread. The
    bytes are parsed on that thread too. *)
@@ -210,7 +204,7 @@ let observe_providers ~read providers =
 let row_json ~integration_id read =
   let state =
     match read with
-    | Ok email -> [ "state", `String "read"; "email", `String email ]
+    | Ok email -> [ "state", `String "read"; "email", `String (to_string email) ]
     | Error missing -> [ "state", `String "not_read"; "cause", `String (missing_to_wire missing) ]
   in
   `Assoc (("integration_id", `String integration_id) :: state)

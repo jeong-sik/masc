@@ -208,9 +208,8 @@ type conn_state =
   ; dispatch_queue : inbound_dispatch_msg Eio.Stream.t
   ; clock : float Eio.Time.clock_ty Eio.Resource.t
   ; disconnected : bool Atomic.t
-        (* RFC-0287: fragment reassembly + size caps now live in the ws-direct
-           Endpoint, which delivers complete messages to [on_message]; the
-           former shared [Ws_inbound] reassembler field is gone. *)
+        (* RFC-0287: fragment reassembly + size caps live in the ws-direct
+           Endpoint, which delivers complete messages to [on_message]. *)
   }
 
 let base_path_of_state state = (Mcp_server.workspace_config state).base_path

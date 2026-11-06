@@ -27,10 +27,7 @@
 
     Both slots hold the same type, [Agent_core.Event_bus.t] — we re-use
     the library rather than re-inventing the transport.  Different
-    instances, different subscribers, different lifecycles.
-
-    @since 2.353.0 (as [Masc_event_bus] / [Keeper_event_bus]; merged
-           into one module with two named slots) *)
+    instances, different subscribers, different lifecycles. *)
 
 (* masc slot — process-wide Atomic policy.  Do not merge this storage
    with the keeper slot: the DLS-vs-Atomic difference is semantic, not

@@ -50,12 +50,10 @@ type dashboard_auth_state =
   | Unauthenticated
   | Authenticated of { agent : string option }
 
-(* RFC-0287: inbound frame reassembly + UTF-8 validation now live in the
+(* RFC-0287: inbound frame reassembly + UTF-8 validation live in the
    ws-direct Connection layer, which delivers complete messages via the
-   Endpoint [on_message] handler. The former [Ws_inbound] reassembler and the
-   manual [read_data_frame] / [read_payload_string] machinery are gone; only the
-   size-cap knobs survive, fed to [Endpoint.create] as [max_message] /
-   [max_frame]. *)
+   Endpoint [on_message] handler. The size-cap knobs are fed to
+   [Endpoint.create] as [max_message] / [max_frame]. *)
 
 (** Active WebSocket session state. *)
 type ws_session = {

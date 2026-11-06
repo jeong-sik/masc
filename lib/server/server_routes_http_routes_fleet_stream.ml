@@ -48,7 +48,7 @@ let serve ?(scope_is_current = fun () -> true) ?scope_replaced
         let unsubscribe = subscribe ~on_event:(Server_sse_pump.Queue.push queue) in
         Eio.Switch.on_release stream_sw unsubscribe;
         let pump () =
-          Server_sse_pump.run ~queue
+          Server_sse_pump.run ~source:(Server_sse_pump.Queue.source queue)
             ~step:(fun event -> Server_sse_pump.Send (frame event))
             ~idle:(fun () -> Server_sse_pump.Keepalive)
             ~clock ~ping_interval_s ~send
@@ -63,7 +63,7 @@ let serve ?(scope_is_current = fun () -> true) ?scope_replaced
     (* [Server_sse_response.send] logs a stalled frame with the request path. *)
     | `Scope_replaced
     | `Ended (Server_sse_pump.Client_gone | Server_sse_pump.Stalled | Server_sse_pump.Finished) -> ()
-    | `Ended Server_sse_pump.Fell_behind ->
+    | `Ended Server_sse_pump.Source_stopped ->
       Log.Server.warn
         "Fleet stream closed: the client was %d events behind"
         max_queued_events

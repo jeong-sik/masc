@@ -3884,7 +3884,7 @@ type overview_quota_reading =
   | Quota_read of Tui_decode.runtime_option list
   | Quota_failed of string
 
-(** The Overview's reading of [GET /api/v1/dashboard/goals]. A failed read and
+(** Work's reading of [GET /api/v1/dashboard/goals]. A failed read and
     one not made yet are each drawn as what they are, never as an empty
     section. *)
 type overview_goals_reading =

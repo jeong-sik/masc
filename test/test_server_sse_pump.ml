@@ -58,7 +58,7 @@ let ending_t =
          fmt
          (match ending with
           | Pump.Client_gone -> "Client_gone"
-          | Pump.Fell_behind -> "Fell_behind"
+          | Pump.Source_stopped -> "Source_stopped"
           | Pump.Stalled -> "Stalled"
           | Pump.Finished -> "Finished"))
     ( = )
@@ -148,7 +148,8 @@ let serve ~sw ~clock ~live ?(stop_after = max_int) ?(refusal = Sse.Closed) ?gate
     Eio.Promise.resolve
       resolve_ending
       (with_subscribed_queue ~live hub (fun queue ->
-         Pump.run ~queue ~step ~idle ~clock ~ping_interval_s ~send)));
+         Pump.run ~source:(Pump.Queue.source queue) ~step ~idle ~clock ~ping_interval_s
+           ~send)));
   { frames; ending }
 ;;
 
@@ -352,7 +353,7 @@ let stalled_client ~hub ~changes =
 
 let test_a_client_that_stops_reading_is_closed_once_the_queue_is_full () =
   let ending, sent, live = stalled_client ~hub:(new_hub ()) ~changes:(queue_bound + 1) in
-  check ending_t "closed" Pump.Fell_behind ending;
+  check ending_t "closed" Pump.Source_stopped ending;
   check int "only the Snapshot was sent, the queued events were dropped" 1 sent;
   check int "the subscription is removed" 0 live
 ;;
@@ -531,7 +532,8 @@ let sends_of ?(capacity = 64) ?(on_send = fun _ _ -> ()) ~step events =
     List.iter (Pump.Queue.push queue) events;
     let sends = ref [] in
     let ending =
-      Pump.run ~queue ~step:(step queue) ~idle:(fun () -> Pump.Finish) ~clock ~ping_interval_s
+      Pump.run ~source:(Pump.Queue.source queue) ~step:(step queue) ~idle:(fun () -> Pump.Finish)
+        ~clock ~ping_interval_s
         ~send:(fun bytes ->
           sends := split_frames bytes :: !sends;
           on_send queue (List.length !sends);
@@ -574,7 +576,7 @@ let test_a_batch_stops_at_a_pile_up () =
     Pump.Send (frame_for n)
   in
   let ending, sends = sends_of ~capacity:2 ~step [ 1; 2 ] in
-  check ending_t "the client fell behind" Pump.Fell_behind ending;
+  check ending_t "the client fell behind" Pump.Source_stopped ending;
   check (list (list string)) "nothing is written after the pile-up" [] sends
 ;;
 
@@ -589,14 +591,14 @@ let test_a_pile_up_marked_before_a_send_writes_nothing () =
     Pump.Send_last (frame_for n)
   in
   let ending, sends = sends_of ~capacity:2 ~step [ 1 ] in
-  check ending_t "a last frame: the client fell behind" Pump.Fell_behind ending;
+  check ending_t "a last frame: the client fell behind" Pump.Source_stopped ending;
   check (list (list string)) "the last frame is not written" [] sends;
   let ending, sends =
     Eio_mock.Backend.run_full (fun env ->
       let queue = Pump.Queue.create ~max_queued_events:2 in
       let sends = ref [] in
       let ending =
-        Pump.run ~queue
+        Pump.run ~source:(Pump.Queue.source queue)
           ~step:(fun n -> Pump.Send (frame_for n))
           ~idle:(fun () ->
             overflow queue;
@@ -608,7 +610,7 @@ let test_a_pile_up_marked_before_a_send_writes_nothing () =
       in
       ending, !sends)
   in
-  check ending_t "a keepalive: the client fell behind" Pump.Fell_behind ending;
+  check ending_t "a keepalive: the client fell behind" Pump.Source_stopped ending;
   check (list string) "the keepalive is not written" [] sends
 ;;
 
@@ -646,7 +648,7 @@ let test_producers_on_several_domains_lose_no_event () =
     let ending, () =
       Eio.Fiber.pair
         (fun () ->
-           Pump.run ~queue:fits
+           Pump.run ~source:(Pump.Queue.source fits)
              ~step:(fun n ->
                taken := n :: !taken;
                incr count;
@@ -668,8 +670,9 @@ let test_producers_on_several_domains_lose_no_event () =
        with
        | Ok () -> ()
        | Error `Timeout -> fail "a push past the bound waited");
-      check ending_t "past the bound the client is behind" Pump.Fell_behind
-        (Pump.run ~queue:overflow ~step:(fun _ -> Pump.Send "") ~idle:(fun () -> Pump.Finish)
+      check ending_t "past the bound the client is behind" Pump.Source_stopped
+        (Pump.run ~source:(Pump.Queue.source overflow) ~step:(fun _ -> Pump.Send "")
+           ~idle:(fun () -> Pump.Finish)
            ~clock ~ping_interval_s ~send:(fun _ -> Sse.Written))
     done)
 ;;
@@ -700,7 +703,8 @@ let test_a_send_that_raises_removes_the_subscription_and_propagates () =
     Hub.observe hub ~measured_at:10.0 (fleet ());
     (match
        with_subscribed_queue ~live hub (fun queue ->
-         Pump.run ~queue ~step:fleet_step ~idle:always_keepalive ~clock ~ping_interval_s
+         Pump.run ~source:(Pump.Queue.source queue) ~step:fleet_step ~idle:always_keepalive
+           ~clock ~ping_interval_s
            ~send:(fun _ -> failwith "socket write failed"))
      with
      | (_ : Pump.ending) -> fail "the failure should propagate"

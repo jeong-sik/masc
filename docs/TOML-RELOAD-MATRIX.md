@@ -30,8 +30,8 @@ The key distinction is:
 | `<base_path>/.masc/config/runtime.toml` | startup env seeding for `MASC_KEEPER_*` and WebSearch knobs | server bootstrap before env-backed consumers initialize | none | `boot_static` | values are recorded in a process-local boot override store; edits require restart |
 | `<resolved-config-root>/keepers/*.toml` | declarative keeper profile defaults | keeper create/up, explicit keeper operations, supervisor reconcile | next supervisor sweep or next keeper create/up | `sweep_dynamic` | running keepers re-sync declarative fields; no standalone file watcher |
 | `<resolved-config-root>/lane-addons/*.toml` | declarative observer installations | independent Lane configuration Pulse | startup, existing maintenance cadence, and owned worker cleanup | `maintenance_dynamic` | malformed declarations preserve their applied installations; complete removal detaches the owned worker and preserves history |
-| `<resolved-config-root>/runtime.toml` | runtime catalog source (model rows and their capabilities) | server bootstrap; `POST /api/v1/runtime/setup/resume` (CanAdmin) | process restart or the setup resume request | `boot_static` | a hand edit to a model row does not reach the next turn; the resume request re-reads the file and replaces the loaded catalog; invalid TOML blocks runtime load; `runtime.json` is retired |
-| `<resolved-config-root>/runtime.toml` `[fusion]` | fusion policy | `masc_fusion` handler (`Fusion_config_loader.load`) | next `masc_fusion` request | `request_dynamic` | invalid TOML blocks fusion policy load |
+| `<resolved-config-root>/runtime.toml` | runtime catalog: providers, models (`preserve-thinking`, `thinking-support`, ...), bindings, lanes | server bootstrap (`Runtime.init_default_*`); `POST /api/v1/runtime/setup/resume` (CanAdmin); a committed write through `POST /api/v1/runtime/config/raw`, `/config/routing`, or `/config/assignment` | process restart, the setup resume request, or a committed write | `boot_static` | a hand edit to a model row is not read by a running server until restart or the resume request (2026-11-06, #49298); the resume request re-reads the file and replaces the loaded catalog; a committed write publishes the text it wrote; invalid TOML blocks the runtime load; `runtime.json` is retired |
+| `<resolved-config-root>/runtime.toml` `[fusion]` | fusion policy | `masc_fusion` handler (`Fusion_config_loader.load`) | next `masc_fusion` request | `request_dynamic` | invalid TOML blocks the fusion policy load |
 | `<resolved-config-root>/candle.toml` | explicit Candle payout policy and portrait accessory prices | each Candle request (`Candle_config.load`) | next request | `request_dynamic` | no file means off; enabling requires the complete [payout policy](guides/candle-payout-policy.md), including nonempty grade amounts and matching criteria, explicit sharing/tie/deduction rounding policies and half_life; optional `shop.prices_milli` entries use canonical Item ids, and omitted prices stay Unpriced; empty, incomplete, unreadable, malformed, unknown-key or overflowing policies disable Candle with a reason without stopping the server |
 
 ## Current Behavior by File
@@ -98,7 +98,8 @@ Operational meaning:
   the shared runtime config commit path. Full-source editor saves enter through
   `Runtime.save_config_text_if_current`, comparing `expected_source_path` and
   `expected_source_revision` under the config write lock before validating and committing.
-  A hand edit to the file takes effect at the next restart.
+  It is also replaced when `POST /api/v1/runtime/setup/resume` re-reads the file.
+  A hand edit to the file takes effect at the next restart or resume request.
 - `POST /api/v1/runtime/config/raw` requires `source_text`,
   `expected_source_revision` from the original GET's `source_revision`, and
   `expected_source_path` from that same GET's `path`.
@@ -114,8 +115,9 @@ Operational meaning:
 - If `runtime.toml` exists, it is the authoring SSOT and invalid edits fail
   closed instead of falling back to stale JSON.
 - Path selection is still tied to cached config-root resolution.
-- Runtime and lane catalog changes apply at restart or through a committed
-  write; a plain file edit does not update the next resolve/turn.
+- Runtime and lane catalog changes apply at restart, at the setup resume
+  request, or through a committed write; a plain file edit does not update the
+  next resolve/turn.
 - `[fusion]` is also read from this file by `Fusion_config_loader.load` at
   `masc_fusion` handler time. Fusion edits therefore take effect on the next
   `masc_fusion` request, including `staged_judge_group_size`, and invalid

@@ -1,9 +1,9 @@
 (** Self-standing Runtime configuration types (RFC-0206, runtime→Runtime rebirth).
 
     Provider × Model × Binding declarative schema (RFC-0058 layers 1-3),
-    re-homed from the deleted [Runtime_declarative_types] as types owned by
+    as types owned by
     [lib/runtime/]. The routing layers (RFC-0058 layer 4 aliases, layer 5
-    routes/profiles, and the strategy ADT) are intentionally NOT ported: a
+    routes/profiles, and the strategy ADT) are intentionally NOT modelled: a
     Runtime is a single pre-selected (provider × model) binding, so there is
     no routing indirection to model. *)
 

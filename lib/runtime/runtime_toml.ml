@@ -1,6 +1,6 @@
 (** Declarative Runtime TOML parser.
 
-    Re-homed from the deleted [Runtime_declarative_parser]. Parses RFC-0058
+    Parses RFC-0058
     layers 1-3 plus [[runtime].default] into a self-standing
     {!Runtime_schema.config}. Reserved top-level namespaces: providers,
     models, model_sets, runtime, web_search, exec (the [\[exec.ssh.endpoints.*\]] SSH

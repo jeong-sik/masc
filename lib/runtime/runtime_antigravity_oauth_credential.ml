@@ -1,133 +1,158 @@
 open Result.Syntax
 
-type field =
-  | Auth_method
-  | Token
-  | Token_access_token
-  | Token_token_type
-  | Token_refresh_token
-  | Token_expiry
-  | Id_token
-  | Id_token_issuer
-  | Id_token_email_claim
+type email_key =
   | Id_token_email
+  | Id_token_email_claim
+
+type id_token_rejection =
+  | Not_a_jwt
+  | Claims_not_base64url
+  | Claims_not_json_object
+  | Issuer_not_google
+  | No_email_claim
 
 type rejection =
   | Not_json_object
-  | No_known_shape of
-      { openid_id_token : field
-      ; id_token_email : field
-      }
-  | Both_shapes
+  | Repeated_account_key
+  | No_account_key
+  | Both_account_keys
+  | Invalid_id_token of id_token_rejection
+  | Unreadable_email of email_key
+  | Not_email_text of email_key
 
-type principal = Sign_in_email of string
+type keychain_rejection =
+  | Not_go_keyring_base64
+  | Keychain_login of rejection
 
-let field_to_string = function
-  | Auth_method -> "auth_method"
-  | Token -> "token"
-  | Token_access_token -> "token.access_token"
-  | Token_token_type -> "token.token_type"
-  | Token_refresh_token -> "token.refresh_token"
-  | Token_expiry -> "token.expiry"
-  | Id_token -> "id_token"
-  | Id_token_issuer -> "id_token.iss"
-  | Id_token_email_claim -> "id_token.email"
+let email_key_to_string = function
   | Id_token_email -> "id_token_email"
+  | Id_token_email_claim -> "id_token.email"
+;;
+
+let id_token_rejection_to_string = function
+  | Not_a_jwt -> "is not a three-segment JWT"
+  | Claims_not_base64url -> "claims do not decode as base64url"
+  | Claims_not_json_object -> "claims are not a JSON object"
+  | Issuer_not_google -> "iss is not a Google issuer"
+  | No_email_claim -> "has no email claim"
 ;;
 
 let rejection_to_string = function
   | Not_json_object -> "not a JSON object"
-  | No_known_shape { openid_id_token; id_token_email } ->
-    Printf.sprintf
-      "matches no known agy login shape: the agy 1.2 id_token shape cannot read %s, \
-       the agy 1.5 id_token_email shape cannot read %s"
-      (field_to_string openid_id_token)
-      (field_to_string id_token_email)
-  | Both_shapes ->
-    "reads as both the agy 1.2 id_token shape and the agy 1.5 id_token_email shape"
+  | Repeated_account_key -> "id_token or id_token_email appears twice"
+  | No_account_key ->
+    "names no account: neither id_token (agy 1.2) nor id_token_email (agy 1.5) holds a value"
+  | Both_account_keys -> "holds both id_token (agy 1.2) and id_token_email (agy 1.5)"
+  | Invalid_id_token problem -> "id_token " ^ id_token_rejection_to_string problem
+  | Unreadable_email Id_token_email -> "id_token_email is not a string"
+  | Unreadable_email Id_token_email_claim -> "id_token.email repeats or is not a string"
+  | Not_email_text key -> email_key_to_string key ^ " is not email text"
 ;;
 
-(* Exactly one non-blank string under [name]. *)
-let string_member name fields =
+let keychain_rejection_to_string = function
+  | Not_go_keyring_base64 -> "not go-keyring-base64: followed by padded standard base64"
+  | Keychain_login rejection -> "decoded login " ^ rejection_to_string rejection
+;;
+
+type member =
+  | Absent
+  | Present of Yojson.Safe.t
+  | Repeated
+
+let member name fields =
   match List.filter (fun (key, _) -> String.equal key name) fields with
-  | [ (_, `String value) ] when String.trim value <> "" -> Some value
-  | _ -> None
+  | [] | [ (_, `Null) ] -> Absent
+  | [ (_, value) ] -> Present value
+  | _ :: _ :: _ -> Repeated
 ;;
 
-let required field = function
-  | Some value -> Ok value
-  | None -> Error field
+let email_text key (value : Yojson.Safe.t) =
+  match value with
+  | `String text ->
+    (match Runtime_account_email_text.of_string text with
+     | Some email -> Ok email
+     | None -> Error (Not_email_text key))
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ ->
+    Error (Unreadable_email key)
 ;;
 
-let token_envelope fields =
-  let* _auth_method = required Auth_method (string_member "auth_method" fields) in
-  let* credentials =
-    match List.filter (fun (key, _) -> String.equal key "token") fields with
-    | [ (_, `Assoc credentials) ] -> Ok credentials
-    | _ -> Error Token
-  in
-  List.fold_left
-    (fun read (name, field) ->
-      let* () = read in
-      let* _value = required field (string_member name credentials) in
-      Ok ())
-    (Ok ())
-    [ "access_token", Token_access_token
-    ; "token_type", Token_token_type
-    ; "refresh_token", Token_refresh_token
-    ; "expiry", Token_expiry
-    ]
+(* Google documents [iss] as one of these two values:
+   https://developers.google.com/identity/openid-connect/openid-connect
+   Only the claims segment is decoded. *)
+let id_token_email (value : Yojson.Safe.t) =
+  match value with
+  | `String token ->
+    let* claims =
+      match String.split_on_char '.' token with
+      | [ header; payload; signature ] when header <> "" && signature <> "" ->
+        (match Base64.decode ~pad:false ~alphabet:Base64.uri_safe_alphabet payload with
+         | Error _ -> Error (Invalid_id_token Claims_not_base64url)
+         | Ok payload ->
+           (match Yojson.Safe.from_string payload with
+            | `Assoc claims -> Ok claims
+            | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+              Error (Invalid_id_token Claims_not_json_object)
+            | exception Yojson.Json_error _ -> Error (Invalid_id_token Claims_not_json_object)))
+      | _ -> Error (Invalid_id_token Not_a_jwt)
+    in
+    let* () =
+      match member "iss" claims with
+      | Present (`String ("accounts.google.com" | "https://accounts.google.com")) -> Ok ()
+      | Present _ | Absent | Repeated -> Error (Invalid_id_token Issuer_not_google)
+    in
+    (match member "email" claims with
+     | Present email -> email_text Id_token_email_claim email
+     | Absent -> Error (Invalid_id_token No_email_claim)
+     | Repeated -> Error (Unreadable_email Id_token_email_claim))
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ ->
+    Error (Invalid_id_token Not_a_jwt)
 ;;
 
-(* Only the claims segment is decoded. Google documents [iss] as one of these
-   two values: https://developers.google.com/identity/openid-connect/openid-connect *)
-let openid_id_token_email fields =
-  let* token = required Id_token (string_member "id_token" fields) in
-  let* claims =
-    match String.split_on_char '.' token with
-    | [ header; payload; signature ] when header <> "" && signature <> "" ->
-      (match Base64.decode ~pad:false ~alphabet:Base64.uri_safe_alphabet payload with
-       | Error _ -> Error Id_token
-       | Ok payload ->
-         (match Yojson.Safe.from_string payload with
-          | `Assoc claims -> Ok claims
-          | _ -> Error Id_token
-          | exception Yojson.Json_error _ -> Error Id_token))
-    | _ -> Error Id_token
-  in
-  let* () =
-    match string_member "iss" claims with
-    | Some ("accounts.google.com" | "https://accounts.google.com") -> Ok ()
-    | Some _ | None -> Error Id_token_issuer
-  in
-  required Id_token_email_claim (string_member "email" claims)
-;;
-
-let read_openid_id_token fields =
-  let* () = token_envelope fields in
-  openid_id_token_email fields
-;;
-
-let read_id_token_email fields =
-  let* () = token_envelope fields in
-  required Id_token_email (string_member "id_token_email" fields)
-;;
-
-(* HIGH-RISK-UNREVIEWED: account continuity reads a credential file. A human
-   must review which shapes are admitted and what the principal is. *)
-let parse bytes =
+(* HIGH-RISK-UNREVIEWED: account continuity reads a credential. A human must
+   review which login shapes are admitted and what names the account. *)
+let account_email bytes =
   match Yojson.Safe.from_string bytes with
   | `Assoc fields ->
-    (match read_openid_id_token fields, read_id_token_email fields with
-     | Ok email, Error _ | Error _, Ok email -> Ok (Sign_in_email email)
-     | Ok _, Ok _ -> Error Both_shapes
-     | Error openid_id_token, Error id_token_email ->
-       Error (No_known_shape { openid_id_token; id_token_email }))
-  | _ -> Error Not_json_object
+    (match member "id_token" fields, member "id_token_email" fields with
+     | Repeated, (Absent | Present _ | Repeated) | (Absent | Present _), Repeated ->
+       Error Repeated_account_key
+     | Absent, Absent -> Error No_account_key
+     | Present _, Present _ -> Error Both_account_keys
+     | Present token, Absent -> id_token_email token
+     | Absent, Present email -> email_text Id_token_email email)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Error Not_json_object
   | exception Yojson.Json_error _ -> Error Not_json_object
 ;;
 
-let principal_sha256 (Sign_in_email email) =
-  let canonical = Yojson.Safe.to_string (`List [ `String "id_token_email"; `String email ]) in
+(* go-keyring's macOS [Set] writes every value as this header and the padded
+   standard base64 of the text. Its [Get] also reads a [go-keyring-encoded:]
+   hex value and a value with no header, which [Set] does not write:
+   https://github.com/zalando/go-keyring/blob/master/keyring_darwin.go
+   agy writes through [Set], so masc reads only what [Set] writes. *)
+let go_keyring_base64_prefix = "go-keyring-base64:"
+
+let login_of_keychain_value value =
+  if String.starts_with ~prefix:go_keyring_base64_prefix value
+  then (
+    let offset = String.length go_keyring_base64_prefix in
+    match Base64.decode ~pad:true (String.sub value offset (String.length value - offset)) with
+    | Ok login -> Some login
+    | Error _ -> None)
+  else None
+;;
+
+(* HIGH-RISK-UNREVIEWED: the keychain item is the login the CLI reads first. *)
+let keychain_account_email value =
+  match login_of_keychain_value value with
+  | None -> Error Not_go_keyring_base64
+  | Some login ->
+    account_email login |> Result.map_error (fun rejection -> Keychain_login rejection)
+;;
+
+let principal_sha256 email =
+  let canonical =
+    Yojson.Safe.to_string
+      (`List [ `String "id_token_email"; `String (Runtime_account_email_text.to_string email) ])
+  in
   Agent_core_sha256.(to_hex (digest_string canonical))
 ;;

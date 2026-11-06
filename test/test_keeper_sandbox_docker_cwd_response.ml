@@ -1,17 +1,11 @@
-(** Integration pin for PR-2 of the [Keeper_cwd_response] series.
+(** A Docker keeper is shown container paths, never the host path.
 
-    Asserts that the helper functions wired into
-    [keeper_sandbox_docker.ml] response builders produce the
-    in-container path (not the host abs path) when composed.
+    Pins the Docker cwd translation, the typed Execute response and the base
+    prompt, so a refactor cannot silently echo the host absolute path.
 
-    Background: PR #11080 removed [sandbox_host_root] /
-    [playground_path] from [execution_context], but sibling
-    [cwd] response fields in Docker bash routes still echoed the host abs path.
-    PR-1 introduced [Keeper_cwd_response]; this PR (PR-2)
-    replaces the four [("cwd", `String cwd)] literals with
-    [Keeper_cwd_response.to_yojson_response]. This test pins
-    the composition contract so a future refactor cannot
-    silently revert to host-path echo. *)
+    Background: PR #11080 removed [sandbox_host_root] / [playground_path] from
+    [execution_context], but sibling [cwd] response fields still echoed the
+    host absolute path. *)
 
 open Alcotest
 open Masc
@@ -84,25 +78,6 @@ let test_container_path_translation_under_sandbox () =
         true
         (Astring.String.is_prefix ~affix:"/home/keeper/playground"
            container_cwd);
-      let cwd_response =
-        Keeper_cwd_response.of_sandbox
-          ~sandbox:(Keeper_sandbox.of_meta ~config ~meta)
-          ~host_cwd
-          ~container_cwd_for_docker:container_cwd
-      in
-      let json_str =
-        Keeper_cwd_response.to_yojson_response cwd_response
-        |> Yojson.Safe.to_string
-      in
-      check bool "response JSON does NOT contain host base dir" false
-        (Astring.String.is_infix ~affix:base json_str);
-      check bool "response JSON does NOT contain host_cwd" false
-        (Astring.String.is_infix ~affix:host_cwd json_str);
-      check bool "response JSON does contain container_cwd" true
-        (Astring.String.is_infix ~affix:container_cwd json_str);
-      check string "operator_host accessor returns the host_cwd"
-        host_cwd
-        (Keeper_cwd_response.operator_host cwd_response);
       let explicit_cwd =
         Keeper_sandbox_repo_path.normalize_path
           (Filename.concat base "explicit-local-allowed")
@@ -346,7 +321,7 @@ let () =
       ( "translation"
       , [
           test_case
-            "host_cwd → container_cwd → JSON does not leak host"
+            "host_cwd translates to a container path; unresolved SSH has no cwd"
             `Quick test_container_path_translation_under_sandbox
         ; test_case
             "typed Execute Docker cwd response does not leak host"

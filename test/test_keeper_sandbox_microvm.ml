@@ -727,8 +727,8 @@ let test_docker_shaped_exec_refuses_a_microvm_keeper () =
 ;;
 
 (* What the keeper is shown: its host root is the bookkeeping bundle, not a
-   guest path, and the cwd echo and execution location repeat that bundle
-   -- the remote lane owns the guest spelling. *)
+   guest path, and the execution location repeats that bundle -- the remote
+   lane owns the guest spelling. *)
 let test_echoes_name_the_host_bundle () =
   let base = temp_dir "microvm_echo_bundle_" in
   let config = Masc.Workspace.default_config base in
@@ -740,12 +740,6 @@ let test_echoes_name_the_host_bundle () =
   let sandbox = Masc.Keeper_sandbox.of_meta ~config ~meta in
   Alcotest.(check bool) "no container root for a tree the guest owns" true
     (Option.is_none sandbox.container_root);
-  let response =
-    Masc.Keeper_cwd_response.of_sandbox ~sandbox ~host_cwd:host_root
-      ~container_cwd_for_docker:"/home/keeper/playground/vm-echo-bundle"
-  in
-  Alcotest.(check string) "cwd echo is the host bundle" host_root
-    (Masc.Keeper_cwd_response.keeper_visible response);
   let location =
     Masc.Keeper_sandbox_repo_path.execution_location_json ~remote_workspace_root:None
       ~config ~meta ~args:(`Assoc []) ~cwd:host_root

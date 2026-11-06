@@ -1715,6 +1715,16 @@ let run_heartbeat_loop
         in
         (match entry with
          | Hold (Wait_at_loop_start { release_at; waiting_on }) ->
+           (* The wait can last days (a weekly quota). The registry shows why
+              the Keeper takes no turn, the way the lifecycle branch below
+              does for a pause. *)
+           Keeper_registry.record_skip_reasons
+             ~base_path:ctx.config.base_path
+             meta_current.name
+             ~reasons:[ "provider_path_rest_" ^ waiting_on ];
+           Keeper_registry.touch_last_turn_ts
+             ~base_path:ctx.config.base_path
+             meta_current.name;
            Log.Keeper.info
              ~keeper_name:m.name
              "%s: the loop starts while %s rests until %.0f; the first cycle takes \

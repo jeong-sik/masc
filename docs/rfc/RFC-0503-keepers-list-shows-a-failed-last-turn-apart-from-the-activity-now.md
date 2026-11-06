@@ -155,7 +155,7 @@ type walk =
 | 칸 | 담는 것 | 지금과 다른 점 |
 | --- | --- | --- |
 | NOW | `activity` 의 글리프와 단어 | failing 행도 `failure` 대신 살아 있는 활동을 보인다 |
-| AGE | `last_activity_at`(마지막으로 움직인 시각) | 그대로. 실패 시각이 아니다 |
+| AGE | `last_activity_at`(마지막으로 움직인 시각) | 그대로. 열린 턴이 있으면 그 턴의 마지막 움직임이고, 없으면 마지막으로 기록된 턴과 대기 시작 중 늦은 쪽이다(`bin/masc_tui_types.ml:12623-12633`) |
 | 직전 | `◂ <나이> · <원인 묶음> · <끝낸 런타임> · <시도 수>` | `keeper_failure_context` 를 이 문장으로 바꾼다. 건강이 failing 인 행에만 있다. 자리는 지금 문장과 같다 |
 | 다음 | `▸ <상대 시각>` | 서버가 시각이나 사유를 말한 행에만 붙는다. 없으면 만들지 않는다 |
 
@@ -163,6 +163,7 @@ type walk =
 - 값이 없는 조각은 자리를 비우지 않고 문장에서 뺀다. 영수증이 없으면 상세 창이 쓰는 말(`no receipt`, `candidate walk was not captured`)을 쓴다. 문구는 L3 에서 상세 창과 맞춘다.
 - `다음` 은 `kwi_due_at` 이 있는 대기, `Waiting_source_runtime_quota_spent`, `retry_after` 가 `Some` 인 한도에서만 나온다. `kr_next_action` 으로 행마다 `probe` 를 쓰지 않는다. 같은 단어가 줄마다 되풀이된다.
 - 한 줄 안에서 왼쪽은 지금, 가운데는 직전, 오른쪽은 다음이다.
+- 열린 턴이 없는 failing 행은 마지막으로 기록된 턴이 곧 실패라서(`bin/masc_tui_keeper_mark.ml:61-65` 주석) AGE 와 `◂ <나이>` 가 비슷한 시각을 가리킨다. 열린 턴이 있는 행은 AGE 가 그 턴을 따라가서 둘이 다른 시각이 된다. 같은 나이가 두 번 나오는 모양이 읽기에 거슬리는지는 L4 캡처에서 본다.
 - 이 표는 정보의 순서만 정한다. 칸 폭별 모양은 L4 의 80·120·200칸 캡처로 확인한다. 시각 모형은 시안 HTML 에 있다. 브라우저 모형이라 TUI 의 칸 폭과 다르다.
 
 ### 2.3 색
@@ -197,17 +198,29 @@ type attention = Attention | Failing | Active | Waiting | Inactive | Unobserved
 
 | 파일 | 변화 | 층 |
 | --- | --- | --- |
-| `bin/masc_tui_keeper_list_model.ml(i)` | `Failure` → `Attempt_failed`. `failed` 분기를 지운다. `:230` 의 갈래는 `Attempt_failed` 를 만드는 유일한 갈래로 남긴다(와일드카드가 없어 지우면 비망라가 된다). `attention` 에 `Failing`. `group_counts` 레코드 | L2 |
-| `bin/masc_tui_keeper_trail.ml(i)` (새 파일) | `trail` `walk` `cause_group` 과 이를 만드는 순수 함수. 기존 모델 파일은 359줄이라 새 코드를 거기에 넣지 않는다. `bin/dune` 에 새 `library` stanza 를 두고(`masc` `masc.masc_types`), 모델 stanza 의 `libraries` 에 더한다(`bin/dune:1559-1563`) | L2 타입, L3 내용 |
+| `bin/masc_tui_keeper_list_model.ml(i)` | `Failure` → `Attempt_failed`. `failed` 분기를 지운다. `:230` 의 갈래는 `Attempt_failed` 를 만드는 유일한 갈래로 남긴다(와일드카드가 없어 지우면 비망라가 된다). `attention` 에 `Failing`. `group_of_activity`(:251)는 활동 하나만 받는데 `Failing` 은 건강도 읽어야 해서, 묶음은 `group_of_row` 와 `rank`(:258, :299)가 정한다. `group_counts` 레코드 | L2 |
+| `bin/masc_tui_keeper_trail.ml(i)` (새 파일) | `trail` `walk` `cause_group` 과 이를 만드는 순수 함수. 기존 모델 파일은 359줄이라 새 코드를 거기에 넣지 않는다. `bin/dune` 에 새 `library` stanza 를 두고(`masc` `masc.masc_types`), 모델 stanza 의 `libraries` 에 더한다(`bin/dune:1559-1563`). `dune-project:37` 이 `implicit_transitive_deps false` 라서 `masc-tui` 실행 파일의 `libraries`(`bin/dune:2714` 이하)에도 이름을 적어야 한다. `masc_tui_render_keepers` 는 라이브러리가 아니라 그 실행 파일의 모듈이다(`bin/dune:2708`) | L2 타입, L3 내용 |
 | `bin/masc_tui_keeper_mark.ml` | `activity_glyph` 의 `Failure` 갈래를 지우고 `Attempt_failed` 를 더한다 | L2, L4 |
-| `bin/masc_tui_render_keepers.ml` | 단어 · 스타일 · 묶음 제목 · `keeper_failure_context` 를 새 값으로 바꾼다 | L2 ~ L4 |
-| `test/test_tui_keeper_list_model.ml` 외 | 결정 시험만 더한다(§7) | L2, L3 |
+| `bin/masc_tui_render_keepers.ml` | 단어 · 스타일 · 묶음 제목 · `keeper_failure_context` 를 새 값으로 바꾼다. 실패 문장 폭에 묶인 값 둘도 새 문장에 맞춘다(아래) | L2 ~ L4 |
+| `test/test_tui_keeper_list_model.ml` | 기존 시험 둘이 바뀐다(아래). 결정 시험을 더한다(§7) | L2, L3 |
 
 동작이 바뀌는 곳이 셋이다.
 
 1. failing 행의 NOW 칸이 `row.turn` 의 활동을 보인다. 활동을 읽지 못하면 대기 목록이 말하는 상태를 보이고, 그것도 없으면 `unknown` 이다.
 2. `Activity` 정렬에서 failing 행이 위에 모이지 않는다.
 3. `failure` 라는 단어가 화면에서 없어진다.
+
+기존 시험 둘이 바뀐다. 둘 다 `Failing` 묶음이 `Attention` 에서 갈라진 결과다.
+
+- 순서 시험(`test/test_tui_keeper_list_model.ml:139-158`)은 failing 행 `failure` 를 `Attention` 묶음 안에 둔다(:150, :157). 세 행의 `last_activity_at` 이 같아 이름순으로 `failure` `held` `question` 이 나온다. `Failing` 이 `Attention` 다음 묶음이 되면 `failure` 는 `held` `question` 뒤로 간다. 기대 목록만 고치고 새 순서 단언은 더하지 않는다(`docs/constitution.xml:354`).
+- `group_counts` 시험(:363-372)은 5개 값 튜플 `(1, 1, 1, 0, 1)` 을 비교한다. 레코드로 바꾸면 비교 모양이 바뀐다.
+
+실패 문장의 폭에 묶인 값이 둘 있다.
+
+- `bin/masc_tui_render_keepers.ml:747-751` 은 failing 행이 하나라도 있으면 RUNTIME 칸 폭의 상한을 리터럴 `60` 으로 올린다. 실패 문장이 그 칸 안에 그려지기 때문이다(:323).
+- `has_failing_keeper`(:728-735)는 그때 RUNTIME 칸이 이름 칸보다 먼저 남는 폭을 받게 한다(`~prioritize_runtime` :763, `bin/masc_tui_render_schedule.ml:219`).
+
+새 직전 문장은 길이가 다르다. L3 가 최대 길이를 재서 `60` 을 이름 있는 상수로 바꾼다.
 
 옛 칸의 흔적이 같은 파일에 남아 있다.
 
@@ -251,7 +264,7 @@ type attention = Attention | Failing | Active | Waiting | Inactive | Unobserved
 
 화면 시험은 만들지 않는다. 증거는 캡처와 계산표다.
 
-**결정 시험(L2, L3)**: failing 행의 `activity` 가 `Failure` 가 아니라 살아 있는 활동이다. `Held_call` 이 failing 보다 앞선다. failing + `Idle` 은 `Failing` 이고 failing + `Question` 은 `Attention` 이다. `Attempt_failed` 는 `Failing` 이다. `trail_of_row` 는 `Health_failing` 일 때만 `Trail_failed` 를 준다. 지금 시험은 `Failure` 를 한 번도 단언하지 않는다.
+**결정 시험(L2, L3)**: failing 행의 `activity` 가 `Failure` 가 아니라 살아 있는 활동이다. `Held_call` 이 failing 보다 앞선다. failing + `Idle` 은 `Failing` 이고 failing + `Question` 은 `Attention` 이다. `Attempt_failed` 는 `Failing` 이다. `trail_of_row` 는 `Health_failing` 일 때만 `Trail_failed` 를 준다. 지금 시험은 `Failure` 라는 이름을 단언하지 않는다. 다만 순서 시험과 `group_counts` 시험이 L2 에서 바뀐다(§3).
 
 **기준선**(main `e1001bccf3a`):
 

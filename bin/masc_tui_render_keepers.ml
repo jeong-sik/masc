@@ -1550,19 +1550,6 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
            Message_layout.wrap_words ~max_cells:(max 1 (inner - 2)) text
            |> List.iter (fun line -> add_line (indent ^ color ^ line ^ Ansi.reset)));
 
-      (* This Keeper's month beside the fleet's per-turn figures: the same
-         numbers for every Keeper, read once per month. *)
-      Masc_tui_keeper_efficiency.lines state.keeper_efficiency ~keeper_name:k.k_name
-      |> List.iter (fun (tone, text) ->
-           let color =
-             match tone with
-             | Masc_tui_keeper_efficiency.Plain -> ""
-             | Masc_tui_keeper_efficiency.Dim -> Ansi.dim
-             | Masc_tui_keeper_efficiency.Bad -> Theme.bad ()
-           in
-           Message_layout.wrap_words ~max_cells:(max 1 (inner - 2)) text
-           |> List.iter (fun line -> add_line (indent ^ color ^ line ^ Ansi.reset)));
-
       (* Gate section. Two settings with similar names decide different things,
          so both are named rather than merged: YOLO is the in-memory stance that
          stops this chat asking and a restart clears, while the Gate mode is
@@ -1772,9 +1759,29 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                        tool.Keeper_activity.tu_calls)
               |> String.concat "  "));
 
+      (* This Keeper's month beside the fleet's per-turn figures: the same
+         numbers for every Keeper, read once per month. The month is neither
+         the current failure of section 1 nor the 24 hours of section 3, and
+         under section 1 it read as part of the failure. *)
+      add_numbered_section "4. 이번 달 효율 (This Month's Efficiency)";
+      (match Masc_tui_keeper_efficiency.lines state.keeper_efficiency ~keeper_name:k.k_name with
+       | [] -> wrap ~tone:Ansi.dim "unread"
+       | lines ->
+         List.iter
+           (fun (tone, text) ->
+             let color =
+               match tone with
+               | Masc_tui_keeper_efficiency.Plain -> ""
+               | Masc_tui_keeper_efficiency.Dim -> Ansi.dim
+               | Masc_tui_keeper_efficiency.Bad -> Theme.bad ()
+             in
+             Message_layout.wrap_words ~max_cells:(max 1 (inner - 2)) text
+             |> List.iter (fun line -> add_line (indent ^ color ^ line ^ Ansi.reset)))
+           lines);
+
       (* Historical receipt evidence is a separate reading. A successful
          fallback may retain earlier refusals while the live blocker is clear. *)
-      add_numbered_section "4. 최근 후보 모델 폴백 이력 (Recorded Runtime Walk)";
+      add_numbered_section "5. 최근 후보 모델 폴백 이력 (Recorded Runtime Walk)";
       let module Receipt = Masc.Keeper_execution_receipt in
       let module Evidence = Keeper_runtime_walk_evidence in
       let module Fault = Llm_provider.Candidate_fault in
@@ -1843,7 +1850,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
          wrap ~tone:(Theme.warn ()) ("roster unavailable: " ^ detail));
 
       (* Lifetime totals & Timestamps section *)
-      add_numbered_section "5. 누적 통계 · 생성 이력 (Lifetime Totals & Timestamps)";
+      add_numbered_section "6. 누적 통계 · 생성 이력 (Lifetime Totals & Timestamps)";
       (match k.k_activity with
        | None -> add_row "Activity:" "not observed"
        | Some activity ->

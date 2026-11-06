@@ -298,12 +298,6 @@ let starts_with ~prefix s =
 ;;
 
 
-let message_text_exn (msg : Types.message) =
-  match msg.content with
-  | [ Types.Text text ] -> text
-  | _ -> Alcotest.fail "expected single text message"
-;;
-
 (* ── accumulate_usage tests ──────────────────────────────── *)
 
 let test_accumulate_usage_with_response () =

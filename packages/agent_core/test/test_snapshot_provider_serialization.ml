@@ -277,17 +277,6 @@ let check_reasoning_content label expected body =
   check bool label expected (has_field "reasoning_content" msg)
 ;;
 
-let check_thinking_enabled_clear label expected_clear body =
-  let open Yojson.Safe.Util in
-  let thinking = body |> json_body |> member "thinking" in
-  check string (label ^ " type") "enabled" (thinking |> member "type" |> to_string);
-  check
-    bool
-    (label ^ " clear_thinking")
-    expected_clear
-    (thinking |> member "clear_thinking" |> to_bool)
-;;
-
 (* ── OpenAI-compatible ──────────────────────────────── *)
 
 let openai_forced_expected =

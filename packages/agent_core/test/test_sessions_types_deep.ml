@@ -447,28 +447,6 @@ let test_record_minimal () =
     v
 ;;
 
-let mk_runtime_session () : Runtime.session =
-  { session_id = "s-001"
-  ; goal = "verify proof bundle"
-  ; title = Some "Proof"
-  ; tag = Some "coverage"
-  ; phase = Runtime.Completed
-  ; created_at = 1.0
-  ; updated_at = 2.0
-  ; provider = Some "anthropic"
-  ; model = Some "claude-sonnet"
-  ; system_prompt = Some "system"
-  ; workdir = Some "/tmp"
-  ; planned_participants = [ "tester" ]
-  ; participants = []
-  ; artifacts = []
-  ; pending_input = None
-  ; turn_count = 1
-  ; last_seq = 3
-  ; outcome = Some "ok"
-  }
-;;
-
 let () =
   Alcotest.run
     "Sessions_types_deep"

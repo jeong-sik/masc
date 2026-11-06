@@ -181,58 +181,6 @@ let require_list label key json =
     Alcotest.failf "expected %s.%s list, got %s" label key (Yojson.Safe.to_string value)
 ;;
 
-let role_of_fixture = function
-  | "assistant" -> Assistant
-  | "user" -> User
-  | "tool" -> Tool
-  | "system" -> System
-  | role -> Alcotest.failf "unknown fixture role: %s" role
-;;
-
-let block_of_fixture json =
-  match require_string "block" "type" json with
-  | "text" -> Text (require_string "block" "text" json)
-  | "thinking" ->
-    Thinking { signature = None; content = require_string "block" "text" json }
-  | "tool_use" ->
-    ToolUse
-      { id = require_string "block" "id" json
-      ; name = require_string "block" "name" json
-      ; input = require_field "block" "input" json
-      }
-  | "tool_result" ->
-    let outcome =
-      if optional_bool ~default:false "block" "is_error" json
-      then Tool_failed { failure_kind = Reported_tool_error; error_class = None }
-      else Tool_succeeded
-    in
-    ToolResult
-      { tool_use_id = require_string "block" "tool_use_id" json
-      ; content = require_string "block" "content" json
-      ; outcome
-      ; json = None
-      ; content_blocks = None
-      }
-  | block_type -> Alcotest.failf "unknown fixture block type: %s" block_type
-;;
-
-let message_of_fixture json =
-  { origin = Llm_provider.Types.Conversation;  role = role_of_fixture (require_string "message" "role" json)
-  ; content = List.map block_of_fixture (require_list "message" "blocks" json)
-  ; name = None
-  ; tool_call_id = None
-  ; metadata = []
-  }
-;;
-
-let masc_agent_core_replay_fixture_messages () =
-  let json =
-    Yojson.Safe.from_file
-      (source_path "test/fixtures/masc-agent-core-replay-interleaving.v1.json")
-  in
-  List.map message_of_fixture (require_list "fixture" "messages" json)
-;;
-
 let response_json ?(content = `String "ok") ?(finish_reason = "stop") ?message_fields () =
   let message_fields =
     match message_fields with

@@ -8476,15 +8476,6 @@ let owe_goal_projection_reads state =
 let owe_runtime_surface_read state =
   state.runtime_surface_owed <- Masc_tui_owed_read.changed state.runtime_surface_owed
 
-let owe_tools_read_for_keeper state keeper =
-  if Option.exists (fun (row : keeper) -> String.equal row.k_name keeper) (selected_keeper state)
-  then owe_tools_inventory_read state;
-  match state.tools_pane with
-  | Tools_usage ->
-      set_keeper_skill_usage_owed state keeper
-        (Masc_tui_owed_read.changed (keeper_skill_usage_owed state keeper))
-  | Tools_activations -> owe_tools_inventory_read state
-
 let owe_ask_followup_read state =
   state.ask_followup_owed <- Masc_tui_owed_read.changed state.ask_followup_owed
 
@@ -8518,8 +8509,10 @@ let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
   | Masc.Workspace_dataset_event.Connectors -> owe_connectors_read state
   | Masc.Workspace_dataset_event.Keeper_oauth_attempts { keeper } ->
       Masc_tui_types.owe_identity_login_read state keeper
-  | Masc.Workspace_dataset_event.Skill_activations { keeper } -> owe_tools_read_for_keeper state keeper
-  | Masc.Workspace_dataset_event.Skill_catalog -> owe_tools_read state
+  | Masc.Workspace_dataset_event.Skill_activations { keeper } -> owe_skill_activations_read state keeper
+  | Masc.Workspace_dataset_event.Skill_catalog ->
+      owe_tools_catalog_read state;
+      owe_every_skill_usage_read state
   | Masc.Workspace_dataset_event.Clients -> owe_clients_read state
   | Masc.Workspace_dataset_event.Account_emails ->
       owe_pushed_read state Surface_read_source.Account_emails

@@ -7187,6 +7187,7 @@
 (include stanzas/test_authz_principal_state.inc)
 (include stanzas/test_authz_admin_event.inc)
 (include stanzas/test_authz_principal_event.inc)
+(include stanzas/test_authz_cancel_event.inc)
 
 (include stanzas/test_authz_log.inc)
 

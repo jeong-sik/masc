@@ -40,7 +40,6 @@ type endpoints =
   ; jwks_uri : string
   }
 
-let max_document_bytes = 64 * 1024
 let http_ok = 200
 
 type kept =
@@ -114,12 +113,12 @@ let error_to_string = function
   | Claims_refused error -> Oidc_google.error_to_string error
 ;;
 
-(* The answer of a GET, as a body of at most [max_document_bytes]. *)
+(* The answer of a GET, as a body of at most [Login_transport.max_answer_bytes]. *)
 let fetch ~(get : Login_transport.get) ~url ~unavailable =
   match get ~url ~headers:[] with
   | Error detail -> Error (unavailable detail)
   | Ok { status; _ } when status <> http_ok -> Error (unavailable (Printf.sprintf "HTTP %d" status))
-  | Ok { body; _ } when String.length body > max_document_bytes -> Error (unavailable "the answer is too long")
+  | Ok { body; _ } when String.length body > Login_transport.max_answer_bytes -> Error (unavailable "the answer is too long")
   | Ok answer -> Ok answer
 ;;
 
@@ -214,7 +213,7 @@ let id_token_of_code ~(post : Login_transport.post) endpoints (client : Client.t
     Error (Token_refused { status; error = Option.bind (json_members body) (string_member "error") })
   | Ok { body; _ } ->
     (match Option.bind (json_members body) (string_member "id_token") with
-     | Some token when String.length token <= max_document_bytes -> Ok token
+     | Some token when String.length token <= Login_transport.max_answer_bytes -> Ok token
      | Some _ | None -> Error Token_answer_malformed)
 ;;
 

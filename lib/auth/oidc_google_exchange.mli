@@ -13,8 +13,9 @@
 
     The transport is a pair of functions ({!Login_transport}), so this module
     does no I/O of its own and the tests answer for Google. The discovery
-    document and the JWKS are read with no headers. The server passes calls of the shared HTTP client,
-    bounded by {!max_document_bytes} and a timeout. *)
+    document and the JWKS are read with no headers. The server passes calls
+    of the shared HTTP client, bounded by {!Login_transport.max_answer_bytes}
+    and a timeout. *)
 
 (** The client of this installation at Google. The secret is in no function
     out of it: it is only sent in the token request. *)
@@ -48,10 +49,6 @@ type endpoints = private
   ; jwks_uri : string
   }
 
-(** 64 KiB. A discovery document, a JWKS, or a token answer longer than this is
-    refused. Google's are a few KiB. *)
-val max_document_bytes : int
-
 (** The discovery document and the JWKS that were read, each kept as long as
     its [Cache-Control] allows. Reads and writes take a lock; the fetches run
     outside it. *)
@@ -77,7 +74,7 @@ type error =
       }
   | Token_answer_malformed
       (** Status 200, and no [id_token] string of at most
-          {!max_document_bytes}. *)
+          {!Login_transport.max_answer_bytes}. *)
   | Keys_unavailable of string  (** The transport failed, or the status was not 200. *)
   | Signature_refused of Oidc_id_token_signature.error
   | Claims_refused of Oidc_google.error

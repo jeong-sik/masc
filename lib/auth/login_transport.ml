@@ -7,6 +7,8 @@ type response =
 type get = url:string -> headers:(string * string) list -> (response, string) result
 type post = url:string -> headers:(string * string) list -> body:string -> (response, string) result
 
+let max_answer_bytes = 64 * 1024
+
 (* An https URL with a host and no query or fragment: the rule for a
    provider endpoint and for the redirect URI of a client. *)
 let is_https_url url =

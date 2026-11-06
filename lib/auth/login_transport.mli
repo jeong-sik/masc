@@ -13,6 +13,11 @@ type response =
 type get = url:string -> headers:(string * string) list -> (response, string) result
 type post = url:string -> headers:(string * string) list -> body:string -> (response, string) result
 
+(** 64 KiB. A login refuses a longer answer. The documents of Google and of
+    GitHub that a login reads are a few KiB. The server passes the same bound
+    to the shared HTTP client. *)
+val max_answer_bytes : int
+
 (** An [https] URL with a host and no query or fragment. Provider endpoints and
     the redirect URI of a client follow this rule. *)
 val is_https_url : string -> bool

@@ -5,7 +5,6 @@ import {
   authHeaders,
   captureDashboardCredentialOwner,
   clearStoredToken,
-  confirmOperatorAction,
   currentDashboardActor,
   currentStoredTokenRevision,
   dashboardBearerToken,
@@ -493,30 +492,6 @@ describe('post', () => {
     expect(init.signal).toBe(controller.signal)
   })
 
-  it('uses the confirmation actor for operator confirm headers when query agent differs', async () => {
-    window.history.replaceState({}, '', '/?agent=dashboard-url-actor')
-
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response('{"status":"ok","result":{}}', {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    const controller = new AbortController()
-    await confirmOperatorAction(
-      'dashboard-manual-actor',
-      'opc_test_token',
-      'confirm',
-      { signal: controller.signal },
-    )
-
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
-    const headers = init.headers as Record<string, string>
-    expect(headers['X-MASC-Agent'] ?? headers['x-masc-agent']).toBe('dashboard-manual-actor')
-    expect(init.signal).toBe(controller.signal)
-  })
   it('surfaces invalid JSON in 200 operator action responses as ApiRequestError', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response('not-json', {
@@ -541,7 +516,7 @@ describe('post', () => {
     })
   })
 
-  it('surfaces empty JSON in 200 operator confirm responses as ApiRequestError', async () => {
+  it('surfaces empty JSON in 200 operator action responses as ApiRequestError', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response('', {
         status: 200,
@@ -551,15 +526,17 @@ describe('post', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(confirmOperatorAction(
-      'dashboard-manual-actor',
-      'opc_test_token',
-      'deny',
-    )).rejects.toMatchObject({
+    await expect(runOperatorAction({
+      actor: 'dashboard-manual-actor',
+      action_type: 'keeper_probe',
+      target_type: 'keeper',
+      target_id: 'keeper-one',
+      payload: {},
+    })).rejects.toMatchObject({
       name: 'ApiRequestError',
       status: 200,
       detail: 'empty JSON response',
-      message: 'POST /api/v1/operator/confirm: empty JSON response',
+      message: 'POST /api/v1/operator/action: empty JSON response',
     })
   })
 

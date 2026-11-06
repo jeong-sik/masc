@@ -4,7 +4,6 @@ import type { OperatorActionResult } from './api/schemas/operator-action'
 
 const apiMocks = vi.hoisted(() => ({
   runOperatorAction: vi.fn(),
-  confirmOperatorAction: vi.fn(),
   fetchOperatorSnapshot: vi.fn(),
   fetchOperatorDigest: vi.fn(),
 }))
@@ -72,7 +71,6 @@ const validSnapshot = {
 
 beforeEach(() => {
   apiMocks.runOperatorAction.mockResolvedValue(executedResult)
-  apiMocks.confirmOperatorAction.mockResolvedValue(executedResult)
   apiMocks.fetchOperatorSnapshot.mockResolvedValue(validSnapshot)
   apiMocks.fetchOperatorDigest.mockResolvedValue({})
 })
@@ -191,57 +189,16 @@ describe('dispatchOperatorAction', () => {
   })
 })
 
-describe('confirmOperatorPendingAction', () => {
-  it('confirms with the default decision and logs a confirmed entry', async () => {
-    const { mod, signals } = await load()
-
-    const result = await mod.confirmOperatorPendingAction('vincent', 'tok-1')
-
-    expect(result).toEqual(executedResult)
-    expect(apiMocks.confirmOperatorAction).toHaveBeenCalledExactlyOnceWith('vincent', 'tok-1', 'confirm')
-    expect(apiMocks.fetchOperatorSnapshot).toHaveBeenCalledTimes(1)
-    expect(apiMocks.fetchOperatorDigest).toHaveBeenCalledTimes(1)
-    expect(signals.operatorActionLog.value[0]).toMatchObject({
-      actor: 'vincent',
-      action_type: 'confirm',
-      target_label: 'tok-1',
-      outcome: 'confirmed',
-    })
-  })
-
-  it('passes an explicit deny decision through to the API and the log', async () => {
-    const { mod, signals } = await load()
-
-    await mod.confirmOperatorPendingAction('vincent', 'tok-1', 'deny')
-
-    expect(apiMocks.confirmOperatorAction).toHaveBeenCalledExactlyOnceWith('vincent', 'tok-1', 'deny')
-    expect(signals.operatorActionLog.value[0]?.action_type).toBe('deny')
-  })
-
-  it('on failure sets the error signals, logs an error entry, and rethrows', async () => {
-    apiMocks.confirmOperatorAction.mockRejectedValue(new Error('denied upstream'))
-    const { mod, signals } = await load()
-
-    await expect(mod.confirmOperatorPendingAction('vincent', 'tok-1')).rejects.toThrow('denied upstream')
-
-    expect(signals.operatorError.value).toBe('denied upstream')
-    expect(signals.operatorActionBusy.value).toBe(false)
-    expect(signals.operatorActionLog.value[0]).toMatchObject({ outcome: 'error', target_label: 'tok-1' })
-  })
-})
-
 describe('background action projections', () => {
-  it.each(['dispatch', 'confirm'] as const)('returns %s receipt while both projection reads remain pending', async operation => {
+  it('returns the dispatch receipt while both projection reads remain pending', async () => {
     let finishSnapshot!: (value: unknown) => void
     let finishDigest!: (value: unknown) => void
     apiMocks.fetchOperatorSnapshot.mockImplementation(() => new Promise(resolve => { finishSnapshot = resolve }))
     apiMocks.fetchOperatorDigest.mockImplementation(() => new Promise(resolve => { finishDigest = resolve }))
     apiMocks.runOperatorAction.mockResolvedValue(previewResult)
     const { mod, signals } = await load()
-    const result = operation === 'dispatch'
-      ? await mod.dispatchOperatorAction(makeRequest(), { refresh: 'background' })
-      : await mod.confirmOperatorPendingAction('vincent', 'tok-1', 'confirm', { refresh: 'background' })
-    expect(result).toEqual(operation === 'dispatch' ? previewResult : executedResult)
+    const result = await mod.dispatchOperatorAction(makeRequest(), { refresh: 'background' })
+    expect(result).toEqual(previewResult)
     expect(apiMocks.fetchOperatorSnapshot).toHaveBeenCalledTimes(1)
     expect(apiMocks.fetchOperatorDigest).toHaveBeenCalledTimes(1)
     expect(signals.operatorActionBusy.value).toBe(false)
@@ -251,15 +208,15 @@ describe('background action projections', () => {
   })
 })
 
-it('queues one post-confirmation read behind both held projection reads', async () => {
+it('queues one post-action read behind both held projection reads', async () => {
   let finishSnapshot!: (value: unknown) => void
   let finishDigest!: (value: unknown) => void
   apiMocks.fetchOperatorSnapshot.mockImplementationOnce(() => new Promise(resolve => { finishSnapshot = resolve }))
   apiMocks.fetchOperatorDigest.mockImplementationOnce(() => new Promise(resolve => { finishDigest = resolve }))
   const { mod, signals } = await load()
   const pending = Promise.all([mod.refreshOperatorSnapshot(), mod.refreshOperatorWorkspaceDigest()])
-  await mod.confirmOperatorPendingAction('vincent', 'tok-1', 'confirm', { refresh: 'background' })
-  await mod.confirmOperatorPendingAction('vincent', 'tok-2', 'confirm', { refresh: 'background' })
+  await mod.dispatchOperatorAction(makeRequest(), { refresh: 'background' })
+  await mod.dispatchOperatorAction(makeRequest(), { refresh: 'background' })
   expect(apiMocks.fetchOperatorSnapshot).toHaveBeenCalledTimes(1)
   expect(apiMocks.fetchOperatorDigest).toHaveBeenCalledTimes(1)
   finishSnapshot({ ...validSnapshot, root: { project: 'stale' } })

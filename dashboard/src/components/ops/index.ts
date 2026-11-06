@@ -104,7 +104,6 @@ function actionLogTone(entry: OperatorActionLogEntry): ActivityTone {
     case 'error':
       return 'bad'
     case 'executed':
-    case 'confirmed':
       return 'ok'
     default:
       return ''

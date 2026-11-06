@@ -1192,26 +1192,6 @@ export async function runOperatorAction(
   return parseOperatorActionResult(raw)
 }
 
-export async function confirmOperatorAction(
-  actor: string,
-  confirmToken: string,
-  decision: 'confirm' | 'deny' = 'confirm',
-  opts: AbortableRequestOptions = {},
-): Promise<OperatorActionResult> {
-  const raw = await postControlPlane<unknown>(
-    '/api/v1/operator/confirm',
-    {
-      actor,
-      confirm_token: confirmToken,
-      decision,
-    },
-    authHeaders({ actorName: actor }),
-    opts,
-  )
-  const { parseOperatorActionResult } = await import('./schemas/operator-action')
-  return parseOperatorActionResult(raw)
-}
-
 export function fetchOperatorSnapshot(): Promise<OperatorSnapshot> {
   return get('/api/v1/operator', { includeActorHeader: false })
 }

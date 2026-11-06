@@ -97,38 +97,33 @@ type transition_source =
   ; stimulus_kind : stimulus_kind
   }
 
-let assoc_field name = function
-  | `Assoc fields -> List.assoc_opt name fields
-  | _ -> None
-;;
-
 let string_field name json =
-  match assoc_field name json with
+  match Json_util.assoc_member_opt name json with
   | Some (`String value) -> Some value
   | _ -> None
 ;;
 
 let float_field name json =
-  match assoc_field name json with
+  match Json_util.assoc_member_opt name json with
   | Some (`Float value) -> Some value
   | Some (`Int value) -> Some (float_of_int value)
   | _ -> None
 ;;
 
 let int_field name json =
-  match assoc_field name json with
+  match Json_util.assoc_member_opt name json with
   | Some (`Int value) -> value
   | _ -> 0
 ;;
 
 let int_field_opt name json =
-  match assoc_field name json with
+  match Json_util.assoc_member_opt name json with
   | Some (`Int value) -> Some value
   | _ -> None
 ;;
 
 let list_field name json =
-  match assoc_field name json with
+  match Json_util.assoc_member_opt name json with
   | Some (`List values) -> values
   | _ -> []
 ;;
@@ -342,7 +337,7 @@ let decode_transition_reaction
     else Error Transition_source_index_out_of_bounds
   in
   let* transition_source =
-    match assoc_field "transition_source" reaction with
+    match Json_util.assoc_member_opt "transition_source" reaction with
     | None -> Error Missing_transition_source
     | Some json -> decode_transition_source json
   in
@@ -355,7 +350,7 @@ let decode_transition_reaction
     else Error Transition_source_identity_mismatch
   in
   let* receipt_json =
-    match assoc_field "transition_receipt" reaction with
+    match Json_util.assoc_member_opt "transition_receipt" reaction with
     | Some value -> Ok value
     | None -> Error Missing_transition_receipt
   in
@@ -461,7 +456,7 @@ let decode_current_row ~keeper_name row =
   match record_kind with
   | "stimulus" ->
     let* stimulus =
-      match assoc_field "stimulus" row with
+      match Json_util.assoc_member_opt "stimulus" row with
       | Some value -> Ok value
       | None -> Error Missing_stimulus
     in
@@ -511,7 +506,7 @@ let decode_current_row ~keeper_name row =
     else Error Event_identity_mismatch
   | "reaction" ->
     let* reaction =
-      match assoc_field "reaction" row with
+      match Json_util.assoc_member_opt "reaction" row with
       | Some value -> Ok value
       | None -> Error Missing_reaction
     in

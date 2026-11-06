@@ -4,4 +4,4 @@
 (copy_files ../../../lib/keeper/keeper_tasks_list_cursor.mli)
 (executable
  (name probe)
- (libraries masc.masc_types masc.string_util yojson base64))
+ (libraries masc.masc_core masc.masc_types masc.string_util yojson base64))

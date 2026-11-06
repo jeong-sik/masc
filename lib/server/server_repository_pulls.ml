@@ -259,10 +259,6 @@ let request_body ~owner ~name ~after =
           ] )
     ]
 
-let field name = function
-  | `Assoc fields -> List.assoc_opt name fields
-  | _ -> None
-
 (* The wire enums are read once, here. An unknown member is [None]: the row
    is counted as undecodable rather than shown as a state GitHub did not
    report. *)
@@ -287,29 +283,37 @@ let mergeable_of_wire = function
 (* The check state is the head commit's, merge commit or not: the head is
    what GitHub ran the checks on. *)
 let decode_checks node =
-  match Option.bind (field "head" node) (field "nodes") with
+  match
+    Option.bind
+      (Json_util.assoc_member_opt "head" node)
+      (Json_util.assoc_member_opt "nodes")
+  with
   | Some (`List []) -> Some Checks_none
   | Some (`List (last :: _)) ->
     (* The query asks for [statusCheckRollup], so only an explicit [null]
        means "no checks"; a missing key is a shape this reader does not know. *)
-    (match Option.bind (field "commit" last) (field "statusCheckRollup") with
+    (match
+       Option.bind
+         (Json_util.assoc_member_opt "commit" last)
+         (Json_util.assoc_member_opt "statusCheckRollup")
+     with
      | None -> None
      | Some `Null -> Some Checks_none
      | Some rollup ->
-       (match field "state" rollup with
+       (match Json_util.assoc_member_opt "state" rollup with
         | Some (`String state) -> check_state_of_wire state
         | _ -> None))
   | _ -> None
 
 let decode_review node =
-  match field "reviewDecision" node with
+  match Json_util.assoc_member_opt "reviewDecision" node with
   | Some `Null -> Some Review_none
   | None -> None
   | Some (`String decision) -> review_state_of_wire decision
   | Some _ -> None
 
 let decode_mergeable node =
-  match field "mergeable" node with
+  match Json_util.assoc_member_opt "mergeable" node with
   | Some (`String state) -> mergeable_of_wire state
   | _ -> None
 
@@ -318,18 +322,22 @@ let decode_mergeable node =
    for both keys, so a missing one is a shape this reader does not know and
    reads [None]. *)
 let decode_authored_commit node =
-  let commit = field "commit" node in
+  let commit = Json_util.assoc_member_opt "commit" node in
   let parents =
-    match Option.bind (Option.bind commit (field "parents")) (field "totalCount") with
+    match
+      Option.bind
+        (Option.bind commit (Json_util.assoc_member_opt "parents"))
+        (Json_util.assoc_member_opt "totalCount")
+    with
     | Some (`Int count) -> Some count
     | _ -> None
   in
   let author =
-    match Option.bind commit (field "author") with
+    match Option.bind commit (Json_util.assoc_member_opt "author") with
     | None -> None
     | Some `Null -> Some None
     | Some author ->
-      (match field "name" author with
+      (match Json_util.assoc_member_opt "name" author with
        | Some `Null -> Some None
        | Some (`String name) -> Some (Some name)
        | _ -> None)
@@ -344,7 +352,11 @@ let decode_authored_commit node =
    [Some None] is no such commit in the window, or GitHub giving that
    commit no author name. *)
 let decode_author node =
-  match Option.bind (field "authored" node) (field "nodes") with
+  match
+    Option.bind
+      (Json_util.assoc_member_opt "authored" node)
+      (Json_util.assoc_member_opt "nodes")
+  with
   | Some (`List nodes) ->
     let rec newest_single_parent = function
       | [] -> Some None
@@ -358,7 +370,9 @@ let decode_author node =
   | _ -> None
 
 let decode_pull ~repo_slug node =
-  match field "number" node, field "isDraft" node with
+  match
+    Json_util.assoc_member_opt "number" node, Json_util.assoc_member_opt "isDraft" node
+  with
   | Some (`Int number), Some (`Bool draft) ->
     (match decode_checks node, decode_review node, decode_mergeable node, decode_author node with
      | Some checks, Some review, Some mergeable, Some author ->
@@ -374,7 +388,9 @@ type graphql_error_kind =
 (* Only a NOT_FOUND on the repository itself means the reader cannot see the
    repository; one on a nested field says nothing about the repository. *)
 let graphql_error_kind error =
-  match field "type" error, field "path" error with
+  match
+    Json_util.assoc_member_opt "type" error, Json_util.assoc_member_opt "path" error
+  with
   | Some (`String "NOT_FOUND"), Some (`List [ `String "repository" ]) -> Error_not_found
   | Some (`String "RATE_LIMITED"), _ -> Error_rate_limited
   | _ -> Error_other
@@ -396,7 +412,7 @@ let failure_of_graphql_errors ~(response : response) errors =
       { messages =
           List.map
             (fun error ->
-              match field "message" error with
+              match Json_util.assoc_member_opt "message" error with
               | Some (`String message) -> message
               | _ -> Yojson.Safe.to_string error)
             errors
@@ -406,20 +422,30 @@ let decode_page ~repo_slug (response : response) =
   match Yojson.Safe.from_string response.body with
   | exception Yojson.Json_error message -> Error (Response_unreadable message)
   | json ->
-    (match field "errors" json with
+    (match Json_util.assoc_member_opt "errors" json with
      | Some (`List (_ :: _ as errors)) -> Error (failure_of_graphql_errors ~response errors)
      | _ ->
        let connection =
-         Option.bind (Option.bind (field "data" json) (field "repository")) (field "pullRequests")
+         Option.bind
+           (Option.bind
+              (Json_util.assoc_member_opt "data" json)
+              (Json_util.assoc_member_opt "repository"))
+           (Json_util.assoc_member_opt "pullRequests")
        in
        (match connection with
         | None -> Error (Response_unreadable "data.repository.pullRequests is absent")
         | Some connection ->
-          (match field "nodes" connection, field "pageInfo" connection with
+          (match
+             Json_util.assoc_member_opt "nodes" connection,
+             Json_util.assoc_member_opt "pageInfo" connection
+           with
            | Some (`List nodes), Some page_info ->
              let pulls = List.filter_map (decode_pull ~repo_slug) nodes in
              let undecodable = List.length nodes - List.length pulls in
-             (match field "hasNextPage" page_info, field "endCursor" page_info with
+             (match
+                Json_util.assoc_member_opt "hasNextPage" page_info,
+                Json_util.assoc_member_opt "endCursor" page_info
+              with
               | Some (`Bool false), _ ->
                 Ok { page_pulls = pulls; page_undecodable = undecodable; next_cursor = None }
               | Some (`Bool true), Some (`String cursor) ->
@@ -981,7 +1007,7 @@ let lane_addon_github ~now ~http_post ~(config : Workspace.config) : Lane_addon_
                  (match Yojson.Safe.from_string response.body with
                   | exception Yojson.Json_error message -> failed (Response_unreadable message)
                   | json ->
-                    (match field "errors" json with
+                    (match Json_util.assoc_member_opt "errors" json with
                      | Some (`List (_ :: _ as errors)) -> failed (failure_of_graphql_errors ~response errors)
                      | Some _ | None -> Ok json)))
           in

@@ -7,14 +7,8 @@ type outcome =
   ; unwritten_turns : int
   }
 
-(* A ledger line can be any JSON value; only an object has fields. *)
-let member key = function
-  | `Assoc fields -> List.assoc_opt key fields
-  | _ -> None
-;;
-
 let belongs_to ~agent_name json =
-  match member "agent" json with
+  match Json_util.assoc_member_opt "agent" json with
   | Some (`String agent) -> String.equal agent agent_name
   | Some _ | None -> false
 ;;
@@ -47,13 +41,13 @@ type placed =
   }
 
 let int_member key json =
-  match member key json with
+  match Json_util.assoc_member_opt key json with
   | Some (`Int value) -> Some value
   | Some _ | None -> None
 ;;
 
 let string_member key json =
-  match member key json with
+  match Json_util.assoc_member_opt key json with
   | Some (`String value) when not (String.equal (String.trim value) "") -> Some value
   | Some _ | None -> None
 ;;
@@ -74,7 +68,7 @@ let attempt_of_json json =
    already covers it. An observation that does not decode is its own case: the
    row says it was a reading, but not one this build can hand back. *)
 let observation_of_json json =
-  match member Keeper_spend_observation.field json with
+  match Json_util.assoc_member_opt Keeper_spend_observation.field json with
   | None | Some `Null -> Ok None
   | Some observation_json ->
     (match Keeper_spend_observation.of_json observation_json with

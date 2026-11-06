@@ -44,7 +44,6 @@ type transition_source =
 val event_queue_transition_event_id :
   Keeper_event_queue_state.transition_receipt -> int -> string
 
-val assoc_field : string -> Yojson.Safe.t -> Yojson.Safe.t option
 val string_field : string -> Yojson.Safe.t -> string option
 val float_field : string -> Yojson.Safe.t -> float option
 val int_field : string -> Yojson.Safe.t -> int

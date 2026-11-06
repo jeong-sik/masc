@@ -10795,6 +10795,9 @@ type state = {
   mutable connector_unbind_all_armed:
     (string * Masc_tui_connector_unbind.target list) option;
   mutable connector_unbind_all_inflight: bool;
+  (* The catalog pane's volume GC: what the next [V] sends and the last
+     answer, which the pane draws in place. *)
+  mutable volume_gc: Masc_tui_volume_gc.t;
   (* A Keeper the operator just paused or shut down, waiting for a fresh
      connector read to learn whether it still holds bindings to offer to
      remove. *)
@@ -20428,6 +20431,7 @@ let create_state
   connector_unbind_armed = None;
   connector_unbind_all_armed = None;
   connector_unbind_all_inflight = false;
+  volume_gc = Masc_tui_volume_gc.initial;
   connector_unbind_offer_pending = [];
   connector_unbind_offer_origin = None;
   connector_unbind_offer = None;

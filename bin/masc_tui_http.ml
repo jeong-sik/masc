@@ -2015,8 +2015,8 @@ let observe_execute_output_stream ~clock ~expected_workspace ~host ~port ~keeper
     this is how the dashboard calls them and now how the TUI does. The
     session is the one the observer feed opened, or one the caller opened
     for this call; the server keeps sessions across requests. *)
-let call_mcp_tool ~(host : string) ~(port : int) ~(session_id : string)
-    ~(request_id : string) ~(tool : string)
+let call_mcp_tool_within ~(timeout_sec : float) ~(host : string) ~(port : int)
+    ~(session_id : string) ~(request_id : string) ~(tool : string)
     ~(arguments : (string * Yojson.Safe.t) list) :
     (Masc_tui_mcp.outcome, string) result =
   let headers =
@@ -2026,12 +2026,16 @@ let call_mcp_tool ~(host : string) ~(port : int) ~(session_id : string)
       :: auth_headers ())
   in
   let body = Masc_tui_mcp.request_body ~request_id ~tool ~arguments in
-  match http_post ~headers ~host ~port ~path:mcp_path ~body with
+  match http_post_with_timeout ~timeout_sec ~headers ~host ~port ~path:mcp_path ~body with
   | Error detail -> Error detail
   | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
     ->
       Error (named_refusal "tools/call" ~status ~body)
   | Ok (_, body) -> Masc_tui_mcp.outcome_of_body ~request_id body
+
+let call_mcp_tool ~host ~port ~session_id ~request_id ~tool ~arguments =
+  call_mcp_tool_within ~timeout_sec:(request_timeout_sec ()) ~host ~port ~session_id
+    ~request_id ~tool ~arguments
 
 (** Fetch a keeper's durable chat transcript.
 

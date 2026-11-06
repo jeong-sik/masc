@@ -42,7 +42,10 @@
     the running turn began. The queue is read between turns, so a row that
     arrives during a turn waited for the turn to end; this block shows it on
     the next provider round that follows tool results, once, and the row stays
-    queued (docs/rfc/RFC-arrived-stimuli-reach-the-running-turn.md). It is
+    queued (docs/rfc/RFC-arrived-stimuli-reach-the-running-turn.md). A chat
+    request waits in the owner's operation queue, which no round reads; the
+    same block says how many are queued each time that count rises
+    (docs/rfc/RFC-backlog-never-preempts-a-running-turn.md, 3.5). It is
     produced only on those rounds of an Agent Core turn. *)
 
 type t =
@@ -124,7 +127,8 @@ val injected_on_post_tool_round : t -> bool
     [Arrived_stimuli] answers [true] and is produced only on a round that
     follows tool results: it holds what arrived after the turn began, which no
     earlier round could carry. It is not re-broadcast state, because a row is
-    listed on the first round after it arrives and never again in that turn.
+    listed on the first round after it arrives and never again in that turn,
+    and a count of waiting chat requests is told again only when it rises.
 
     [Temporal_summary] is one of those first-round blocks for the same
     reason, so the clock a Keeper reads is the one rendered for its turn's

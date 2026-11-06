@@ -1,7 +1,7 @@
 ---
 rfc: "0491"
 title: "System 은 범위 앞부분이 움직일 때만 다시 만들고, 그 사이 바뀐 세계 상태는 끝 문맥으로 보낸다"
-status: Draft
+status: Active
 created: 2026-11-05
 updated: 2026-11-06
 author: claude
@@ -31,7 +31,7 @@ related: ["0442", "goal-observations-leave-the-system-prompt", "0488"]
 
 1. `Completion_authority` 는 System 에 붙이지 않는다. 그 턴의 끝 문맥 블록으로 보내고, 같은 턴의 뒤 round 에도 다시 싣는다(§3.1).
 2. 조항이 바뀌어도 System 은 그 Keeper 가 마지막으로 보낸 조항으로 렌더한다. 그 뒤 바뀐 조항은 끝 문맥 블록 `Constitution_amendments` 로 보낸다. 범위 앞부분이 움직이면 System 을 지금 조항으로 다시 만든다(§3.2).
-3. `Active_goals` 도 2 와 같은 규칙을 따른다. 2 를 배포한 뒤 다시 재고 층을 연다(§3.3).
+3. Goal 의 증명 대기 표시는 System 이 아니라 끝 문맥 블록이 싣고, System 의 Goal 순서는 바뀌지 않는 키로 정한다. 2 를 배포한 뒤 다시 재서, `active_goals` 변화의 81% 가 이 둘에서 나온다는 것을 보고 정했다(§3.3).
 
 ## 1. 측정
 
@@ -148,10 +148,27 @@ Keeper 세션은 기준점을 runtime 마다 하나씩 든다. 앞부분을 runt
 
 `Constitution_amendments` 는 끝 문맥이라 System 보다 뒤에 읽힌다. 뒤에 온 글이 지금 상태로 읽힌다는 것은 RFC-0366 이 운영자 메모를 맨 뒤에 둔 근거와 같다(`lib/keeper/keeper_run_tools_hooks.ml` `Operator_note` 주석). 끝 문맥은 런타임이 조립하는 `[system context]` 다. 모델이 쓴 글은 조항 본문뿐이고, 그 본문은 System 에서와 같은 escape 를 거친다.
 
-### 3.3 `Active_goals` 는 같은 규칙을 따른다
+### 3.3 Goal 단계와 순서는 System 을 바꾸지 않는다
 
-- System 의 `Active_goals` 관측도 "만들 때 쓴 Goal 목록"으로 렌더하고, 그 뒤 바뀐 Goal 은 끝 문맥 layer 로 보낸다. 범위 앞부분이 움직이면 지금 목록으로 다시 만든다.
-- Goal 하나의 렌더는 조항보다 크다(11-05 `active_goals` 평균 31,799B). 차이 layer 가 매 요청 커질 수 있으므로, 3.2 를 배포한 뒤 같은 방법으로 다시 재고 층을 연다.
+3층이 들어간 서버(2026-11-06 03:10:41Z 부팅)에서 §1.1 과 같은 방법으로 07:20Z 까지 다시 쟀다(`docs/evidence/2026-11-06-rfc-0491-system-cache/README.md` 「3층 배포 뒤」). 앞부분이 그대로인데 `active_goals` 만 바뀐 쌍이 70개다. 첫 요청 미적중 토큰의 45.7% 이고, 미적중률은 97.6% 다. 아무 블록도 바뀌지 않은 쌍은 30.5% 다.
+
+같은 시간에 Keeper 별 `active_goals` digest 가 바뀐 78건을 바이트 차이로 나눴다.
+
+| 원인 | 건 |
+|---|---|
+| 증명 대기 표시(56B)가 붙거나 떨어졌다 | 60 |
+| Goal 이 늘었다 | 15 |
+| 바이트는 같고 순서만 바뀌었다 | 3 |
+
+- 증명 대기 표시는 Goal 이 `Verifying` 일 때 System 의 Goal 줄 끝에 붙는다(`keeper_unified_prompt.ml` `format_goal_summaries`). 완료 요청(`Request_complete`)으로 붙고, verifier 의 반박(`Record_proof_refuted`)이나 `Reopen` 으로 떨어진다. 10-30 뒤 `Verifying` 으로 간 33건 중 30건이 masc-tui 운영자 요청이고, 다시 `Executing` 으로 돌아온 28건은 verifier 반박이다. 둘은 12~20분 간격으로 오간다. 한 번 오갈 때마다 모든 Keeper 의 System 이 두 번 바뀐다.
+- 순서는 `updated_at` 내림차순이다. 반박을 쓰면 `updated_at` 이 바뀐다. 그래서 표시가 붙었다 떨어진 Goal 이 같은 priority 무리의 맨 앞으로 가고, 바이트가 같은 채 순서만 바뀐다.
+
+그래서 이렇게 한다.
+
+- System 의 Goal 줄은 증명 대기 표시를 싣지 않는다. 표시는 새 끝 문맥 블록 `Goals_awaiting_proof` 가 싣는다. 블록에는 지금 `Verifying` 인 Goal 의 id 와 표시 문구가 들어간다. 그런 Goal 이 없으면 블록도 없다.
+- 이 블록은 §3.1 의 `Completion_authority` 처럼 같은 턴의 뒤 round 에도 싣는다(`injected_on_post_tool_round`). 뒤 round 가 증명 대기 Goal 을 보통 일로 읽으면 RFC-0387 P0-1 이 막은 결함이 돌아온다. resume 도 블록을 다시 보낸다(`resent_when_held`). 단계는 resume 사이에도 바뀐다.
+- System 의 Goal 순서는 (priority, created_at, id) 다. System 줄에는 priority 가 없어서, 순서가 priority 를 보여 주는 유일한 신호다. 그래서 id 만으로 정렬하지 않는다. 이 정렬은 System 렌더에서만 한다. `Goal_store.list_goals_result` 의 순서를 쓰는 다른 곳은 그대로다.
+- 이 둘로 78건 중 63건(81%)이 System 을 바꾸지 않는다. Goal 추가와 성공 기준 수정은 여전히 System 을 바꾼다. Goal 목록을 기준점으로 드는 방법(§4)은 이 층을 배포하고 다시 잰 뒤 연다.
 
 ## 4. 검토한 대안
 
@@ -163,6 +180,9 @@ Keeper 세션은 기준점을 runtime 마다 하나씩 든다. 앞부분을 runt
 - **기준점을 프로세스 메모리에 둔다.** 하지 않는다. native 이어가기는 seed 가 기록한 System 을 다시 보낸다. 재시작으로 프로세스 메모리가 비면 그 System 이 어느 조항으로 만들어졌는지 모른다. 그러면 옛 조항 System 이 차이 블록 없이 나간다(#49004 리뷰 F1). 기준점은 그 System 과 같은 checkpoint 에 있어야 한다.
 - **기준점에 조항 본문을 적는다.** 하지 않는다. 11-06 원장의 조항 34개를 JSON 으로 적으면 기준점 하나가 14,762B 다. checkpoint 중앙값은 7,907B 다(최근 세션 42개). runtime 마다 하나씩이면 checkpoint 가 몇 배로 커진다. 원장 위치로 적으면 이번 턴 기준점이 186B, runtime 하나가 226B 다.
 - **System 기준점을 턴 기록에 저장한다.** 하지 않는다. native 이어가기는 checkpoint 를 복원한다. 턴 기록에 두면 seed 와 기준점이 다른 곳에서 따로 쓰인다.
+- **증명 대기 표시를 `Goal_observations` 로 옮긴다.** 하지 않는다. 그 layer 는 `Dynamic_context` 라서 뒤 round 에 실리지 않는다(`prompt_block_id.ml` `injected_on_post_tool_round`).
+- **Goal 목록을 기준점으로 든다(§3.2 와 같은 방식).** 지금은 하지 않는다. Goal 저장소(`goals.json`)는 덮어쓰는 파일이다. `goal_events.jsonl` 은 삭제를 적지 않고, 지금 Goal 59개 중 4개는 `goal_created` 가 없다. 그래서 원장 위치로 옛 목록을 얻을 수 없다. 기준점은 Goal 마다 criterion revision 을 렌더 순서대로 들면 된다(열린 Goal 30개 기준 약 1.1KB). 성공 기준이 바뀌면 revision 이 새로 생기므로, 같은 revision 의 Goal 은 같은 줄로 렌더된다. 다만 checkpoint 의 기준점 schema 를 바꿔야 하고, 고칠 코드가 +600줄 안팎이다. §3.3 의 두 변경이 81% 를 없애므로, 남은 Goal 추가·성공 기준 수정의 몫을 잰 뒤 정한다.
+- **기준점에 Goal 줄 본문을 적는다.** 하지 않는다. 열린 Goal 30개면 기준점 하나가 약 38KB 로, checkpoint 중앙값 7,907B 의 다섯 배다.
 - **provider 캐시 breakpoint 로 System 을 따로 캐시한다.** 해당 없다. Z.AI 문서는 캐시가 설정 없이 걸린다고 쓰고, opencode Go 문서에는 breakpoint 가 없다(§1.4).
 
 ## 5. 영향
@@ -178,6 +198,8 @@ Keeper 세션은 기준점을 runtime 마다 하나씩 든다. 앞부분을 runt
 
 - 시험: `assemble_request_context` 가 `Completion_authority` 를 System 이 아닌 블록으로 내고, 뒤 round 에도 같은 블록을 싣는다. official Start 의 System 과 carrier 에는 그 블록이 없고, Start prompt 앞과 Resume 마다 carrier span 증명과 함께 실린다. 조항이 바뀐 턴에서 범위 앞부분이 같으면 System 바이트가 같고 차이 layer 가 생긴다. 앞부분이 다르면 System 이 지금 조항을 담고 차이 layer 가 없다. 지시문이 바뀌면 System 이 바로 바뀐다.
 - 시험: native 이어가기가 재시작 뒤에도 seed checkpoint 의 기준점으로 차이 블록을 낸다. 기준점이 없는 seed 는 블록 없이 기록된 System 을 보낸다. 두 runtime 을 번갈아 쓰는 세션은 runtime 마다 자기 기준점을 받는다. 원장 위치는 그 뒤 덧붙인 조항과 제자리 수정에도 같은 조항을 돌려주고, 앞 바이트가 바뀌면 아무것도 돌려주지 않는다.
+- 시험(4층): `Verifying` 인 Goal 은 System 줄에 표시가 없고 `Goals_awaiting_proof` 블록에 id 가 있다. 블록은 뒤 round 와 resume 에도 실린다. 표시가 붙거나 떨어져도, 반박이 `updated_at` 을 바꿔도 System 바이트가 같다. 같은 priority 의 Goal 은 created_at, id 순이다.
+- 4층 배포 뒤: 같은 스크립트로 `active_goals / no` 쌍을 다시 센다. 증명 대기 표시와 순서 때문에 바뀐 쌍은 0 이어야 한다. 남은 쌍의 원인(Goal 추가, 성공 기준 수정)과 몫을 적고, §4 의 Goal 기준점을 열지 정한다.
 - 배포 뒤: §1.1 과 같은 방법으로 "앞부분 그대로, System 바뀜" 쌍과 그 몫을 다시 센다. 기대값은 `completion_authority` 쌍 0, 조항 추가로 바뀐 `keeper_instructions` 쌍 0 이다. 지시문 수정과 배포로 바뀐 쌍은 남는다.
 
 ## 7. 층
@@ -185,4 +207,5 @@ Keeper 세션은 기준점을 runtime 마다 하나씩 든다. 앞부분을 runt
 1. 이 문서.
 2. §3.1 `Completion_authority` 를 끝 문맥 블록으로.
 3. §3.2 조항 기준점과 `Constitution_amendments`. 예상 앞부분은 forecast 의 `carry` 로 구한다.
-4. §3.3 `Active_goals`. 3 을 배포하고 다시 잰 뒤 연다.
+4. §3.3 증명 대기 표시를 `Goals_awaiting_proof` 블록으로 옮기고, System 의 Goal 순서를 (priority, created_at, id) 로 한다. 3층을 배포하고 잰 결과(§3.3)로 연다.
+5. §4 의 Goal 기준점. 4층을 배포하고 다시 잰 뒤 연다.

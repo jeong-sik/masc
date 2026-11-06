@@ -232,7 +232,7 @@ let write_recall_index ~base_path body =
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   Fs_compat.mkdir_p keepers_dir;
   Fs_compat.save_file
-    (Keeper_librarian_context_recall.path ~keepers_dir ~keeper_name:"keeper-a")
+    (Masc.Keeper_librarian_context_recall.path ~keepers_dir ~keeper_name:"keeper-a")
     body
 
 let test_recall_index_keeps_its_artifact () =

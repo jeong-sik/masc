@@ -686,7 +686,7 @@ let parse_generation_record ~path body =
    reauthenticated as another account would therefore resume that account even
    when the fallback file still names the selected one. Refuse a readable
    divergent keychain item the same way a divergent file refuses, and refuse a
-   readable item that is not go-keyring's encoding of a known login.
+   readable item that does not decode, as go-keyring reads it, to a known login.
    The CLI writes the item through /usr/bin/security, and on 2026-11-06 the
    operator item's ACL admitted only that tool, so this no-UI read returns
    [Unavailable] for an item the CLI wrote and the check sees no account

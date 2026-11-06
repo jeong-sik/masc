@@ -53,13 +53,14 @@ let import_with ~read_keychain ~clear_keychain ~source_home home =
   let selected = if exists then read_keychain ~path:source_keychain else Apple_keychain.Missing in
   let* contents = match selected with
     | Apple_keychain.Found value ->
-      (* The fallback file holds the login JSON; the keychain holds
-         go-keyring's encoding of it. A blank login is no sign-in, as a blank
+      (* The fallback file holds the login JSON; the keychain holds it as
+         go-keyring stores it. A blank login is no sign-in, as a blank
          fallback file is. *)
       (match Runtime_antigravity_oauth_credential.login_of_keychain_value value with
-       | Some login when String.trim login = "" -> Error Sign_in_required
-       | Some login -> Ok login
-       | None -> Error Unrecognized_credential)
+       | Ok login when String.trim login = "" -> Error Sign_in_required
+       | Ok login -> Ok login
+       | Error Runtime_antigravity_oauth_credential.(Not_hex | Not_base64) ->
+         Error Unrecognized_credential)
     | Unavailable -> Error Keychain_unavailable
     | Missing | Unsupported ->
       let* file = private_file (canonical_file source_home) in

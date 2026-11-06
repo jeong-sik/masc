@@ -2277,6 +2277,11 @@ supports_native_streaming = true
 # list-shaped ThinkChunk/TextChunk message.content -- this model has no
 # plain-string mode, so the disable that mistral-small encodes as "none"
 # (#38564) is not sayable here and the ladder carries no "none".
+# Streaming stays off for the same measured reason: a streamed turn at
+# effort "low" (captured 2026-11-06) delivered the whole answer inside
+# list-shaped delta.content and no plain-string delta at all, and the
+# streaming consumer reads only plain-string deltas -- turning streaming
+# on silently drops the entire answer (#49352 covers the delta parser).
 [[models]]
 model_id = "mistral-large-4"
 base = "openai_chat_extended"
@@ -2294,7 +2299,7 @@ supports_response_format_json = true
 supports_structured_output = true
 supports_multimodal_inputs = true
 supports_image_input = true
-supports_native_streaming = true
+supports_native_streaming = false
 
 # Cohere Command Models
 [[models]]

@@ -1777,7 +1777,9 @@ let test_mistral_small_declares_none_reasoning_effort () =
    supported values high/low/medium, checked 2026-11-06) and answers every
    admissible effort with list-shaped ThinkChunk/TextChunk content -- unlike
    mistral-small (#38564) there is no plain-string mode, so the ladder carries
-   no "none" and the explicit disable must be refused before dispatch. *)
+   no "none" and the explicit disable must be refused before dispatch. Every
+   declared rung is admitted, so a rung silently omitted from the row fails
+   here rather than at dispatch. *)
 let test_mistral_large_4_declares_measured_effort_ladder () =
   with_repository_model_catalog (fun () ->
     let cfg effort =
@@ -1789,12 +1791,19 @@ let test_mistral_large_4_declares_measured_effort_ladder () =
         ~reasoning_effort:effort
         ()
     in
-    (match Provider_config.validate_reasoning_effort_request_typed (cfg Reasoning_effort.Low) with
-     | Ok () -> ()
-     | Error rejection ->
-       Alcotest.failf
-         "mistral-large-4 should accept low: %s"
-         (Provider_config.reasoning_effort_request_rejection_to_message rejection));
+    List.iter
+      (fun (name, effort) ->
+         match Provider_config.validate_reasoning_effort_request_typed (cfg effort) with
+         | Ok () -> ()
+         | Error rejection ->
+           Alcotest.failf
+             "mistral-large-4 should accept %s: %s"
+             name
+             (Provider_config.reasoning_effort_request_rejection_to_message rejection))
+      [ "low", Reasoning_effort.Low
+      ; "medium", Reasoning_effort.Medium
+      ; "high", Reasoning_effort.High
+      ];
     check_bool
       "mistral-large-4 refuses the none disable the API itself rejects"
       true

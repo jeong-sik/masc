@@ -88,8 +88,10 @@ val login_of_keychain_value : string -> (string, undecodable) result
     https://github.com/apple-oss-distributions/Security/blob/ef677c3d667a44e1737c1b0245e9ed04d11c51c1/SecurityTool/macOS/keychain_find.c#L408-L443
     - A value with any other byte is [Not_printable].
     - Spaces around the value are trimmed, as [strings.TrimSpace] does.
-    - [go-keyring-encoded:] is followed by hex digits in either case.
-    - [go-keyring-base64:] is followed by padded standard base64.
+    - [go-keyring-encoded:] is followed by an even count of hex digits in
+      either case.
+    - [go-keyring-base64:] is followed by padded standard base64, [+] and
+      [/] included.
     - Any other value is the login itself.
 
     [Set], which agy writes through, always writes [go-keyring-base64:]; the

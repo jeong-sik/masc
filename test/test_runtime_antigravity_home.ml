@@ -649,6 +649,31 @@ let test_managed_keychain_principal_must_match_selected_generation () =
     [Apple_keychain.Missing; Apple_keychain.Unsupported; Apple_keychain.Unavailable]
 ;;
 
+(* Each case is what go-keyring's [Get] hands the CLI for those stored bytes. *)
+let test_keychain_value_reads_as_go_keyring_get () =
+  let module C = Runtime_antigravity_oauth_credential in
+  let undecodable =
+    testable
+      (fun ppf problem ->
+        Format.pp_print_string ppf (C.keychain_rejection_to_string (C.Undecodable problem)))
+      ( = )
+  in
+  List.iter (fun (label, stored, expected) ->
+    check (result string undecodable) label expected (C.login_of_keychain_value stored))
+    [ "standard base64 letters + and /", "go-keyring-base64:Pz8/", Ok "???"
+    ; "URL-safe letters are not standard base64", "go-keyring-base64:Pz8_", Error C.Not_base64
+    ; "nonzero trailing bits are read", "go-keyring-base64:QR==", Ok "A"
+    ; "three = after a group", "go-keyring-base64:QUJDA===", Error C.Not_base64
+    ; "a whole group of =", "go-keyring-base64:QUJD====", Error C.Not_base64
+    ; "a space after the prefix", "go-keyring-base64: QUJD", Error C.Not_base64
+    ; "empty base64", "go-keyring-base64:", Ok ""
+    ; "empty hex", "go-keyring-encoded:", Ok ""
+    ; "mixed-case hex", "go-keyring-encoded:4a4B", Ok "JK"
+    ; "a tilde is printable", " ~ ", Ok "~"
+    ; "DEL is not printable", "{}\127", Error C.Not_printable
+    ; "a byte below space is not printable", "\031{}", Error C.Not_printable ]
+;;
+
 let test_native_permissions_match_posture_and_workspace () =
   with_temp_root @@ fun runtime_root ->
   let source = Filename.concat runtime_root "source" in
@@ -1598,6 +1623,8 @@ let () =
             test_interrupted_generation_creation_leaves_no_orphan
         ; test_case "managed keychain principal matches selection" `Quick
             test_managed_keychain_principal_must_match_selected_generation
+        ; test_case "keychain value reads as go-keyring Get" `Quick
+            test_keychain_value_reads_as_go_keyring_get
         ; test_case "every hierarchy link reconfirms parent sync" `Quick
             test_every_managed_hierarchy_link_reconfirms_parent_sync
         ; test_case "failed parent sync retries visible child" `Quick

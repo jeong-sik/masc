@@ -216,7 +216,7 @@ let decode_hex digits =
 
 (* Go's [base64.StdEncoding] takes whole four-character groups with at most
    two [=], all at the end. ocaml-base64 also admits longer padding, such as
-   [QUJD====]. *)
+   [QUJD====] and [QUJDA===]. *)
 let go_base64_shape text =
   let length = String.length text in
   let padding =

@@ -14,16 +14,16 @@ related: ["tui-operator-workbench", "0418"]
 
 ## 0. 요약
 
-- Keepers 목록의 `! failure` 한 칸이 서로 다른 두 사실을 같은 글자로 보인다. 마지막으로 끝난 턴이 실패했다(직전). 열린 턴에서 시도 하나가 실패했다(지금).
+- Keepers 목록의 `! failure` 한 칸이 서로 다른 사실 셋을 같은 글자로 보인다. 마지막으로 끝난 턴이 실패했다(직전). heartbeat 가 실패했다(직전). 열린 턴에서 시도 하나가 실패했다(지금). 앞의 둘은 서버가 `Health_failing` 하나로 합쳐 보낸다.
 - 두 값을 `||` 로 묶은 `failed` 가 살아 있는 활동보다 먼저 검사된다(`bin/masc_tui_keeper_list_model.ml:198-206`). 실패 중인 Keeper 가 probe 턴을 돌려도 행에는 `failure` 만 남는다.
 - 11-06 01:26 UTC 한 시점에 40행 중 15행이 failing 이었다. 서버가 주는 원인 글자는 15행 모두 `provider` 다. 턴 영수증(receipt)의 typed 값으로 보면 종료 원인이 5묶음으로 갈린다.
-- 제안: 행을 `지금`(활동)과 `직전`(마지막으로 끝난 턴의 실패)으로 나눈다. `Failure` variant 를 지우고 실패 행은 `Failing` 묶음으로 모은다. 서버는 바꾸지 않는다.
+- 제안: 행을 `지금`(활동)과 `직전`(마지막으로 끝난 턴이나 heartbeat 의 실패)으로 나눈다. `Failure` variant 를 지우고 실패 행은 `Failing` 묶음으로 모은다. 서버는 바꾸지 않는다.
 - 빨강은 운영자가 해야 하는 `Held_call` 에만 남긴다. 실패 표지는 경고색이다.
 - 서버가 말하지 않는 값은 지어내지 않고 비운다. 그런 값은 서버 후속 후보(§6)로만 적는다.
 
 ## 1. 지금
 
-### 1.1 한 칸이 두 뜻을 낸다
+### 1.1 한 칸이 세 뜻을 낸다
 
 `primary_activity_of_row` 의 앞부분이다(`bin/masc_tui_keeper_list_model.ml:198-207`).
 
@@ -40,14 +40,17 @@ else if failed then Failure
 else if row.reading.Masc_tui_keeper_control.paused then Paused
 ```
 
-`failed` 가 묶은 두 값은 뜻이 다르다.
+`failed` 는 두 값을 묶고, 앞의 값은 다시 둘로 갈린다. 서버는 `heartbeat_healthy` 와 `turn_healthy` 중 하나만 거짓이어도 phase 를 `Failing` 으로 정한다(`lib/keeper_registry/keeper_state_machine.ml:61-64`).
 
 | 값 | 뜻 | 되돌아오는 때 |
 | --- | --- | --- |
-| `Health_failing` | 마지막으로 끝난 턴이 실패했다. 서버의 `turn_healthy = false` 에서 온다(`lib/keeper/keeper_registry.ml:397-399`) | 깨끗이 끝난 턴이 `Running` 으로 되돌린다(`lib/keeper/keeper_status_runtime.ml:292`) |
+| `Health_failing` ← `turn_healthy = false` | 마지막으로 끝난 턴이 실패했다(`keeper_state_machine.ml:84-87`) | 성공한 턴(`:83`) |
+| `Health_failing` ← `heartbeat_healthy = false` | heartbeat 가 실패했다(`:76-82`) | heartbeat 성공(`:75`) |
 | `Keeper_activity_attempt_failed` | 열린 턴에서 provider 시도 하나가 실패했다. 턴은 아직 열려 있다. `row.turn` 이 `Keeper_turn_running` 이고 preview 가 `Failed` 일 때만 나온다(`lib/tui_decode.ml:4876-4882`) | 턴이 닫히거나 preview 가 바뀔 때 |
 
-두 값은 화면에서 네 군데가 겹친다.
+목록이 받는 `Health_failing` 은 앞의 둘 중 무엇인지 말하지 않는다. 가장 최근 실패의 종류는 `kr_last_failure.kf_cause` 가 말한다. `heartbeat` `turn` `provider` 등 8갈래이고 서버가 정한다(`lib/keeper/keeper_tool_surface_ops.ml:292-300`). 읽기 A 의 15행은 모두 `provider` 였다. 두 조건을 따로 담은 `kl_conditions`(`lib/tui_decode.mli:872-884`)는 이미 디코딩되지만 지금은 상세 창만 쓴다(`bin/masc_tui_render_keepers.ml:396-408`).
+
+세 값은 화면에서 네 군데가 겹친다.
 
 | 겹치는 것 | 위치 | 같이 쓰는 것 |
 | --- | --- | --- |
@@ -95,6 +98,7 @@ else if row.reading.Masc_tui_keeper_control.paused then Paused
 | 운영자 질문 | 값 | 출처 | 1단계 |
 | --- | --- | --- | --- |
 | 지금 실패하고 있나, 지난 턴이 실패했나 | `Keeper_activity_attempt_failed` / `Health_failing` | 디코딩됨 | 된다 |
+| 턴 때문인가, heartbeat 때문인가 | `kr_last_failure.kf_cause`(가장 최근 실패 하나), `kl_conditions`(두 조건) | `kf_cause` 는 행에 있다. `kl_conditions` 는 디코딩됐지만 행에는 없다 | 된다 |
 | 지금 무엇을 하나 | `row.turn` → `keeper_current_activity_of_turn` | 디코딩됨 | 된다 |
 | 마지막 턴은 언제 끝났나 | `kf_at_unix`, 영수증의 `receipt_ended_at` | 디코딩됨 | 된다 |
 | 왜, 어디서 끝났나 | `terminal.runtime_id`, `terminal.failure.cause`, 시도마다 `api_candidate_fault` | 디코딩됨. 상세 창만 그린다 | 된다 |
@@ -120,10 +124,13 @@ type activity =
   | Tool_waiting | Model_waiting | Delegate_result | Verifying | External_waiting
   | Idle | Paused | Offline | Unknown
 
-(* 직전: 마지막으로 끝난 턴이 실패했는가. Health_failing 일 때만 Trail_failed 다. *)
+(* 직전: Keeper 가 failing 인 까닭이 되는 마지막 실패. Health_failing 일 때만 Trail_failed 다. *)
 type trail =
   | Trail_sound
-  | Trail_failed of { ended_at : float option; walk : walk }
+  | Trail_failed of
+      { ended_at : float option
+      ; last : Masc.Tui_decode.keeper_failure_cause option  (* kr_last_failure.kf_cause *)
+      ; walk : walk }
 
 type walk =
   | Walk_ended of { runtime_id : string; cause : cause_group; tried : int }
@@ -131,10 +138,12 @@ type walk =
   | Walk_not_captured                      (* Runtime_lane_not_observed *)
   | Walk_unreadable                        (* Runtime_lane_unreadable *)
   | Walk_absent                            (* kr_runtime_lane_observation = None *)
+  | Walk_not_applicable                    (* 가장 최근 실패가 턴의 실패가 아니다: heartbeat 등 *)
 ```
 
-- `primary_activity_of_row` 에서 `failed` 분기를 지운다. failing 행도 `Paused` `Offline` 과 살아 있는 활동 갈래를 그대로 지난다. `Held_call` `Question` `Confirmation` 이 앞서는 순서는 그대로다.
+- `primary_activity_of_row` 에서 `failed` 분기를 지운다. failing 행도 `Paused` 와 살아 있는 활동 갈래를 그대로 지난다. `Offline` 은 health 가 한 값이라 failing 과 겹치지 않는다. 끝의 `Some Keeper_activity_attempt_failed` 갈래(`:230`)가 그때부터 `Attempt_failed` 를 만든다. `Held_call` `Question` `Confirmation` 이 앞서는 순서는 그대로다.
 - `trail_of_row` 는 `Health_failing` 일 때만 `Trail_failed` 를 준다. 건강한 행은 영수증에 거절이 남아 있어도 `Trail_sound` 다.
+- `walk` 는 가장 최근 실패가 턴의 실패일 때만 만든다. 어느 `kf_cause` 가 턴의 실패인지는 L3 가 `lib/keeper/keeper_registry_types_failure.ml` 의 정의를 읽고 와일드카드 없는 `match` 로 정한다. heartbeat 실패는 `Walk_not_applicable` 이다. 마지막 영수증은 성공한 폴백 턴의 거절을 담을 수 있어서(`bin/masc_tui_render_keepers.ml:1782-1783`), heartbeat 실패 옆에 그 기록을 붙이면 원인처럼 읽힌다.
 - `cause_group` 은 닫힌 variant 다. `terminal.failure.cause` 를 와일드카드 없는 `match` 로 옮겨 만든다. `Keeper_request_failure.cause` 의 생성자는 22개다(`lib/keeper_runtime/keeper_request_failure.mli:54`). 문자열은 읽지 않는다. 생성자가 늘면 빌드가 깨진다. 시도마다 달린 `api_candidate_fault`(닫힌 값)를 쓸지는 L3 가 정한다.
 - 묶음의 수와 이름은 L3 에서 생성자 하나씩 문서 주석을 읽고 정한다. 기준은 하나다. 운영자가 할 행동이 다르면 가르고, 같으면 합친다. 대응표는 L3 PR 에 싣고 리뷰는 그 표로 한다.
 - 영수증이 건강 판정과 같은 턴이라는 보장은 서버가 하지 않는다. 그래서 `Walk_ended` 의 값은 영수증 한 장에서만 가져온다. 서로 다른 출처의 조각을 한 문장에 섞지 않는다(D3).
@@ -150,6 +159,7 @@ type walk =
 | 직전 | `◂ <나이> · <원인 묶음> · <끝낸 런타임> · <시도 수>` | `keeper_failure_context` 를 이 문장으로 바꾼다. 건강이 failing 인 행에만 있다. 자리는 지금 문장과 같다 |
 | 다음 | `▸ <상대 시각>` | 서버가 시각이나 사유를 말한 행에만 붙는다. 없으면 만들지 않는다 |
 
+- heartbeat 실패 행은 `◂ <나이> · heartbeat` 만 보인다. 런타임과 시도 수는 턴에만 있다.
 - 값이 없는 조각은 자리를 비우지 않고 문장에서 뺀다. 영수증이 없으면 상세 창이 쓰는 말(`no receipt`, `candidate walk was not captured`)을 쓴다. 문구는 L3 에서 상세 창과 맞춘다.
 - `다음` 은 `kwi_due_at` 이 있는 대기, `Waiting_source_runtime_quota_spent`, `retry_after` 가 `Some` 인 한도에서만 나온다. `kr_next_action` 으로 행마다 `probe` 를 쓰지 않는다. 같은 단어가 줄마다 되풀이된다.
 - 한 줄 안에서 왼쪽은 지금, 가운데는 직전, 오른쪽은 다음이다.
@@ -180,15 +190,15 @@ type attention = Attention | Failing | Active | Waiting | Inactive | Unobserved
 - `Attention` 은 `Held_call` `Question` `Confirmation` 만 모은다. 사람이 해야 하는 일이다.
 - `Failing` 은 `trail` 이 `Trail_failed` 이거나 `activity` 가 `Attempt_failed` 인 행이다. 위 셋이 아니면 이 묶음이다. 일시 정지(`Paused`)한 failing 행도 같은 규칙을 따른다.
 - 묶음 순서는 `Attention` → `Failing` → `Active` → `Waiting` → `Inactive` → `Unobserved` 다. `Priority` 정렬이 이 순서를 따른다.
-- `group_counts` 는 5개 값 튜플에서 이름 있는 필드의 레코드로 바꾼다. 호출처는 `bin/masc_tui_render_keepers.ml` 두 곳과 시험 세 줄이다.
+- `group_counts` 는 5개 값 튜플에서 이름 있는 필드의 레코드로 바꾼다. 호출처는 `bin/masc_tui_render_keepers.ml:506,559` 두 곳과 시험 한 줄(`test/test_tui_keeper_list_model.ml:372`)이다.
 - `Activity` 정렬은 지금 `Failure` 에 순위 3을 준다. `Attempt_failed` 가 그 순위를 이어받는다. failing 행은 이제 지금 하는 일의 순위를 따른다. 위로 모으는 일은 `Priority` 정렬과 `Grouped` 가 맡는다(D5).
 
 ## 3. 바뀌는 것
 
 | 파일 | 변화 | 층 |
 | --- | --- | --- |
-| `bin/masc_tui_keeper_list_model.ml(i)` | `Failure` → `Attempt_failed`. `failed` 분기와 `:230` 의 죽은 갈래를 지운다. `attention` 에 `Failing`. `group_counts` 레코드 | L2 |
-| `bin/masc_tui_keeper_trail.ml(i)` (새 파일) | `trail` `walk` `cause_group` 과 이를 만드는 순수 함수. 기존 모델 파일은 359줄이라 새 코드를 거기에 넣지 않는다 | L2 타입, L3 내용 |
+| `bin/masc_tui_keeper_list_model.ml(i)` | `Failure` → `Attempt_failed`. `failed` 분기를 지운다. `:230` 의 갈래는 `Attempt_failed` 를 만드는 유일한 갈래로 남긴다(와일드카드가 없어 지우면 비망라가 된다). `attention` 에 `Failing`. `group_counts` 레코드 | L2 |
+| `bin/masc_tui_keeper_trail.ml(i)` (새 파일) | `trail` `walk` `cause_group` 과 이를 만드는 순수 함수. 기존 모델 파일은 359줄이라 새 코드를 거기에 넣지 않는다. `bin/dune` 에 새 `library` stanza 를 두고(`masc` `masc.masc_types`), 모델 stanza 의 `libraries` 에 더한다(`bin/dune:1559-1563`) | L2 타입, L3 내용 |
 | `bin/masc_tui_keeper_mark.ml` | `activity_glyph` 의 `Failure` 갈래를 지우고 `Attempt_failed` 를 더한다 | L2, L4 |
 | `bin/masc_tui_render_keepers.ml` | 단어 · 스타일 · 묶음 제목 · `keeper_failure_context` 를 새 값으로 바꾼다 | L2 ~ L4 |
 | `test/test_tui_keeper_list_model.ml` 외 | 결정 시험만 더한다(§7) | L2, L3 |
@@ -209,7 +219,7 @@ type attention = Attention | Failing | Active | Waiting | Inactive | Unobserved
 - 서버 코드, 와이어 필드, 영수증 형식을 바꾸지 않는다.
 - 원인을 문자열로 가르지 않는다. `runtime_blocker_summary` 를 읽지 않는다.
 - 서버가 말하지 않은 시각 · 횟수 · 상태 이름을 만들지 않는다. "만성" "회복 중" "다음 시도 16:06" 같은 말을 쓰지 않는다.
-- `Health_failing` 의 뜻(마지막으로 끝난 턴이 실패했다)을 바꾸지 않는다.
+- `Health_failing` 의 뜻(턴이나 heartbeat 가 건강하지 않다)을 바꾸지 않는다.
 - 화면 문구 · 배치 · 행 순서를 확인하는 시험을 만들지 않는다(`docs/constitution.xml:354-355`).
 - 새 차트 부품을 만들지 않는다. 12시간 맥박은 서버 값이 생긴 뒤 워크벤치 RFC §6.3 의 부품으로 그린다.
 - Memory · Schedule 열 합치기, 오래된 기억(stale)과 갱신(renew) 표시, 월드 전체 기억은 이 RFC 밖이다. 나중에 붙일 때 나이는 표시 전용이다(RFC-0418, `lib/keeper/keeper_memory_os_types.mli:333-334`).
@@ -248,7 +258,7 @@ type attention = Attention | Failing | Active | Waiting | Inactive | Unobserved
 ```sh
 rg -c '\bFailure\b' bin/masc_tui_keeper_list_model.ml bin/masc_tui_keeper_list_model.mli bin/masc_tui_keeper_mark.ml   # list_model.ml 6, list_model.mli 1, keeper_mark.ml 1
 rg -n '\bFailure\b' bin/masc_tui_render_keepers.ml                                       # 4줄. 1512 줄은 화면 제목 문자열
-rg -n 'Keeper_activity_attempt_failed -> Failure' bin/masc_tui_keeper_list_model.ml      # 1줄(죽은 갈래)
+rg -n 'Keeper_activity_attempt_failed -> Failure' bin/masc_tui_keeper_list_model.ml      # 1줄. L2 뒤에는 이 갈래가 Attempt_failed 를 만든다
 ```
 
 L2 가 끝나면 첫째와 셋째는 출력이 없고, 둘째는 제목 문자열 한 줄만 남는다.
@@ -272,7 +282,7 @@ L2 가 끝나면 첫째와 셋째는 출력이 없고, 둘째는 제목 문자�
 | --- | --- | --- |
 | D1 | 실패 표지의 색 | `Theme.warn`. `Question` `Confirmation` 과 같은 색이지만 글리프와 묶음으로 가른다. 더 흐린 색은 실패를 가린다(LAYOUT-LANGUAGE) |
 | D2 | `Failing` 을 따로 묶을까 | 따로 묶는다. 대안은 지금처럼 `Attention` 안이다. 따로 두면 `Attention` 에 사람이 해야 하는 행만 남는다. 대신 묶음이 5개에서 6개가 되고 `group_counts` 의 형태가 바뀐다 |
-| D3 | 직전 나이의 기준 시각 | 영수증이 있으면 영수증 시각(`Masc_domain.parse_iso8601_opt` 로 읽는다. 대시보드가 이미 쓴다, `lib/dashboard/dashboard_goals_types_builder.ml:197`). 없으면 `kf_at_unix` 와 8갈래 원인 단어다. 한 문장에는 한 출처만 쓴다. L3 가 15행에서 두 시각의 차이를 재서 표로 남긴다 |
+| D3 | 직전 나이의 기준 시각 | 턴의 실패이고 영수증이 있으면 영수증 시각(`Masc_domain.parse_iso8601_opt` 로 읽는다. 대시보드가 이미 쓴다, `lib/dashboard/dashboard_goals_types_builder.ml:197`). 그 밖(영수증 없음, heartbeat 실패)은 `kf_at_unix` 와 8갈래 원인 단어다. 한 문장에는 한 출처만 쓴다. L3 가 15행에서 두 시각의 차이를 재서 표로 남긴다 |
 | D4 | `retry_after` 를 보일까 | `Some` 일 때만 서버가 말한 값 그대로 `▸` 로 보인다. `None` 이면 아무것도 쓰지 않는다. 읽기 A 는 15/15 가 `None` 이라 지금은 거의 안 보인다 |
 | D5 | `Activity` 정렬에서 failing 행이 위에 모이지 않는 것을 받아들일까 | 받아들인다. 모으는 일은 `Priority` 정렬과 `Grouped` 가 맡는다 |
 | D6 | `Detailed` 둘째 줄에 시도 목록을 둘까 | L5 로 미룬다. 1단계는 첫 줄만 바꾼다 |

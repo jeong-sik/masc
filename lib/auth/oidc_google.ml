@@ -5,6 +5,9 @@ let ( let* ) = Result.bind
 (* The two values of [iss] that Google documents for its ID tokens. *)
 let issuers = [ "https://accounts.google.com"; "accounts.google.com" ]
 
+let is_issuer text = List.exists (String.equal text) issuers
+let discovery_url = "https://accounts.google.com/.well-known/openid-configuration"
+
 type error =
   | Payload_not_an_object
   | Issuer_not_google
@@ -36,7 +39,7 @@ let check condition error = if condition then Ok () else Error error
 let issuer members =
   check
     (match string_member "iss" members with
-     | Some iss -> List.exists (String.equal iss) issuers
+     | Some iss -> is_issuer iss
      | None -> false)
     Issuer_not_google
 ;;

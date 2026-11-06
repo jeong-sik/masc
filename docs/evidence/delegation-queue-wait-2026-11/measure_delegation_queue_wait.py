@@ -47,6 +47,8 @@ Definitions:
   after it. The replayed wait is the smaller of the real wait and the pickup. The saved time is
   an upper bound for a pickup at a tool-result boundary: it assumes the target starts the
   operation at that instant and that the run takes as long as it did. No built change does that.
+  `pickup_also_long` counts the long waits whose pickup is itself at least `LONG_WAIT_S`: the
+  target's next return was that far away, so one long call kept it from a boundary.
 - submit count: the `queued_count` in the result of the `masc_keeper_delegate` call that created
   the operation, read from the `output` of that tool call and joined by `operation_id`. It counts
   the operations that are queued, so the turn the target is running is not in it. A call whose
@@ -486,6 +488,8 @@ def boundary_replay(delegations: Sequence[Delegation], spans: Spans, returns: Re
             "n": len(long_cases),
             "wait_hours": sum(wait for wait, _ in long_cases) / SECONDS_PER_HOUR,
             "replayed_wait_hours": sum(min(wait, pickup) for wait, pickup in long_cases) / SECONDS_PER_HOUR,
+            "pickup_s": spread([pickup for _, pickup in long_cases]),
+            "pickup_also_long": sum(1 for _, pickup in long_cases if pickup >= LONG_WAIT_S),
         },
     }
 

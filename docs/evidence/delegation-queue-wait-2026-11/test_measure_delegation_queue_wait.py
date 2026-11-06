@@ -671,6 +671,19 @@ class BoundaryReplayTests(unittest.TestCase):
         self.assertAlmostEqual(cast(float, long_waits["wait_hours"]), 4050.0 / 3600.0)
         self.assertAlmostEqual(cast(float, long_waits["replayed_wait_hours"]), 3550.0 / 3600.0)
 
+    def test_the_long_waits_report_their_pickup_and_how_many_pickups_are_long_too(self) -> None:
+        long_waits = cast(dict[str, object], self.replay()["long_waits"])
+        pickup = cast(dict[str, object], long_waits["pickup_s"])
+        self.assertEqual((pickup["n"], pickup["max"]), (3, 2500.0))
+        self.assertAlmostEqual(cast(float, pickup["hours"]), 4900.0 / 3600.0)
+        self.assertEqual(long_waits["pickup_also_long"], 2)
+
+    def test_a_pickup_exactly_at_the_long_threshold_is_long(self) -> None:
+        at_edge = m.boundary_replay([delegation(1400.0, 2200.0, target="busy")], self.spans, self.returns)
+        below = m.boundary_replay([delegation(1401.0, 2200.0, target="busy")], self.spans, self.returns)
+        self.assertEqual(cast(dict[str, object], at_edge["long_waits"])["pickup_also_long"], 1)
+        self.assertEqual(cast(dict[str, object], below["long_waits"])["pickup_also_long"], 0)
+
     def test_a_wait_exactly_at_the_long_threshold_is_long(self) -> None:
         found = [delegation(100.0, 100.0 + m.LONG_WAIT_S, target="busy")]
         block = m.boundary_replay(found, self.spans, self.returns)

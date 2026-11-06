@@ -513,6 +513,108 @@ let test_completion_observation_survives_tool_reply approved () =
     | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _
     | Image _ | Document _ | Audio _ -> ()) message.content) checkpoint.messages
 
+(* RFC-0491 §3.3: a Goal under proof is named in the end context of every
+   request of a tool loop, so a later round does not read it as ordinary open
+   work (RFC-0387 review P0-1), and its System row carries no mark. *)
+let test_goal_under_proof_survives_tool_reply () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.init_eio_clock ~sw env;
+  Fs_compat.set_fs env#fs;
+  install_catalog ~sw;
+  let base_path = Filename.temp_dir "goal-proof-tool-loop-wire-" "" in
+  Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree base_path);
+  let config = Workspace.default_config base_path in
+  ignore (Workspace.init config ~agent_name:None);
+  install_prompts base_path;
+  let goal = { (create_goal config) with phase = Goal_phase.Verifying } in
+  Goal_store.write_state config
+    { pending_events = []; pending_notifications = []; version = 1
+    ; updated_at = Masc_domain.now_iso (); goals = [ goal ] };
+  let mark = match Prompt_registry.render_prompt_template
+      Prompt_names.keeper_world_goals_awaiting_proof_row [ "goal_id", goal.id ] with
+    | Ok text -> text | Error detail -> fail detail in
+  let partition = Direct.project_partition (prepare config) ~workspace_memory_access:None in
+  let dynamic = Keeper_context_layers.text partition in
+  let previous = ref None in
+  let issued_requests = ref [] in
+  let hooks = {Agent_core.Hooks.empty with before_turn_params=Some (function
+    | Agent_core.Hooks.BeforeTurnParams {current_params;messages;_} ->
+      let issued = Keeper_run_prompt.assemble_request_context ~system:(system_of_text "BASE_PROOF_WIRE")
+          ~post_tool_round:(Keeper_run_prompt.is_later_round_of_this_turn
+            ~injected_this_turn:(Option.is_some !previous) messages)
+          ~previous_assembly:!previous ~dynamic_context_partition:(Some partition)
+          ~existing_extra_system_context:current_params.extra_system_context
+          ~blocks:[Prompt_block_id.Dynamic_context,dynamic;
+                   Prompt_block_id.Temporal_summary,"INITIAL_CLOCK"] in
+      previous := Some issued;
+      issued_requests := issued :: !issued_requests;
+      AdjustParams {current_params with extra_system_context=issued.extra_system_context;
+        system_prompt_override=Keeper_context_assembly.system_prompt_override
+          ~previous:current_params.system_prompt_override issued}
+    | BeforeTurn _ | AfterTurn _ | PreToolUse _ | PostToolUse _ | PostToolUseFailure _
+    | OnStop _ | OnError _ | OnToolError _ -> Continue)} in
+  let reply message finish = Yojson.Safe.to_string (`Assoc ["id",`String "proof-wire";
+    "model",`String model_id;"choices",`List [`Assoc ["index",`Int 0;"message",message;
+      "finish_reason",`String finish]]]) in
+  let responses = [|
+    reply (`Assoc ["role",`String "assistant";"content",`Null;"tool_calls",`List [`Assoc [
+      "id",`String "read-under-proof";"type",`String "function";"function",`Assoc [
+        "name",`String "Read";"arguments",`String "{}"]]]]) "tool_calls";
+    reply (`Assoc ["role",`String "assistant";"content",`String "Observed."]) "stop" |] in
+  let received = ref [] in
+  let server = Exact_output_fixture.start_server ~sw ~net:env#net ~clock:env#clock
+      (Exact_output_fixture.Reply_with (fun index body ->
+        received := body :: !received;
+        if index < Array.length responses then `OK,responses.(index)
+        else `Bad_request,"unexpected provider request")) in
+  let provider_cfg = Llm_provider.Provider_config.make ~kind:Llm_provider.Provider_config.OpenAI_compat ~provider_id:"fixture"
+      ~model_id ~base_url:server.base_url ~request_path:"/v1/chat/completions" ~tool_stream:false () in
+  let read_tool = Agent_core.Tool.create ~name:"Read" ~description:"Fixture linked work read"
+      ~parameters:[] (fun _ -> Ok {Agent_core.Types.content="linked work read under proof";
+                                  content_blocks=None;_meta=None}) in
+  let runtime = Runtime_agent.default_config ~media_store:(Agent_core.History.Memory_store.create ())
+      ~name:"proof-wire" ~provider_cfg ~system_prompt:"BASE_PROOF_WIRE" ~tools:[read_tool] in
+  (match Runtime_agent.run ~sw ~net:env#net ~config:{runtime with hooks=Some hooks}
+      "Keep working the linked Tasks." with
+   | Ok {stop_reason=Runtime_agent.Completed _;_} -> ()
+   | Ok _ -> fail "proof fixture did not complete"
+   | Error error -> fail (Agent_core.Error.to_string error));
+  let requests = List.rev !received and assemblies = List.rev !issued_requests in
+  check int "a tool result follows the first request" 2 (List.length requests);
+  let systems = List.mapi (fun index (body, issued) ->
+    let messages = Json.member "messages" (Yojson.Safe.from_string body) |> Json.to_list in
+    let system = match List.filter (fun message -> Json.member "role" message = `String "system") messages with
+      | [message] -> Json.member "content" message |> Json.to_string
+      | _ -> fail "one System carrier required" in
+    let newest, before_newest = match List.rev messages with
+      | newest :: before_newest :: _ -> newest, before_newest
+      | [_] | [] -> fail "a context carrier after the conversation required" in
+    let carrier = Json.member "content" newest |> Json.to_string in
+    check bool "the context carrier is the request's tail" true
+      (Json.member "role" newest = `String "user"
+       && String.starts_with ~prefix:"[system context] " carrier);
+    check bool "every request names the Goal under proof with its mark" true
+      (contains ~needle:mark carrier);
+    check bool "the System names the Goal" true (contains ~needle:goal.id system);
+    check bool "the System carries no proof-pending mark" false (contains ~needle:mark system);
+    let issued_system = match issued.Keeper_context_assembly.system_prompt with
+      | Some issued -> issued | None -> fail "physical System receipt missing" in
+    check string "physical issuer bytes match the received System carrier" issued_system.text system;
+    let receipt = match issued.Keeper_context_assembly.receipt with
+      | Some receipt -> receipt | None -> fail "carrier receipt missing" in
+    check int "exactly one Goals_awaiting_proof span in the carrier" 1
+      (List.length (List.filter (fun (span : Keeper_context_assembly.span) ->
+        span.kind = Keeper_context_assembly.Block Prompt_block_id.Goals_awaiting_proof) receipt.spans));
+    if index > 0 then (
+      check bool "tool feedback is the newest conversation message" true
+        (Json.member "role" before_newest = `String "tool");
+      check bool "clock is not rebroadcast" false (contains ~needle:"INITIAL_CLOCK" body));
+    system)
+    (List.combine requests assemblies) in
+  match systems with
+  | [first; later] -> check string "both rounds send the same System" first later
+  | _ -> fail "two requests expected"
+
 let () = run "direct Goal context on actual provider wire"
   ["direct owner requests",[
     test_case "current criterion and measurement reach HTTP receiver" `Quick (run_case Current);
@@ -525,4 +627,6 @@ let () = run "direct Goal context on actual provider wire"
     test_case "Task approval survives the following tool reply" `Quick
       (test_completion_observation_survives_tool_reply true);
     test_case "Task rejection survives the following tool reply" `Quick
-      (test_completion_observation_survives_tool_reply false)]]
+      (test_completion_observation_survives_tool_reply false);
+    test_case "a Goal under proof survives the following tool reply" `Quick
+      test_goal_under_proof_survives_tool_reply]]

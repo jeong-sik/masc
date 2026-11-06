@@ -675,6 +675,167 @@ let test_a_measurement_or_a_claim_moves_only_the_goal_observations () =
     (String.equal observed_measured observed_claimed)
 ;;
 
+(* RFC-0491 §3.3. The Active Goals layer becomes the System that precedes the
+   history. A completion request, a refuted proof and a reopen move a Goal in
+   and out of [Verifying] and write its [updated_at]; none of them may change
+   the System. The proof-pending mark rides the Goals Awaiting Proof block,
+   which every round of the turn carries. *)
+let system_of_text text =
+  match
+    Keeper_turn_system.issue ~held:None ~lane:Keeper_turn_system.Without_basis
+      ~render:(fun (_ : World_constitution_types.t list) -> text) ~current:[]
+      ~at:{ World_constitution_store.end_offset = 0; digest = "" }
+      ~articles_at:(fun (_ : World_constitution_store.position) -> Ok None)
+  with
+  | Ok (system, (_ : Keeper_turn_system.held)) -> system
+  | Error () -> fail "a turn without a basis reads no ledger"
+;;
+
+let goal_at phase ~priority ~created_at ~updated_at id =
+  { (goal_in phase id ("title of " ^ id)) with priority; created_at; updated_at }
+;;
+
+let write_goals config goals =
+  Goal_store.write_state config
+    { pending_events = []; pending_notifications = []; version = 1
+    ; updated_at = Masc_domain.now_iso (); goals }
+;;
+
+(* The first request of a turn as request assembly issues it, and the world
+   state it was assembled from. *)
+let first_request config =
+  let meta = keeper_meta () in
+  let observation =
+    Keeper_world_observation.observe ~pending_board_events:(Some []) ~config ~meta
+  in
+  let { Keeper_unified_prompt.world_state; world_partition; _ } =
+    Keeper_unified_prompt.build_prompt
+      ~turn_decision:(Keeper_world_observation.keeper_cycle_decision ~meta observation)
+      ~current_task:Keeper_world_observation_inputs.No_current_task
+      ~active_goal_summaries:
+        (Keeper_unified_prompt.active_goal_summaries ~config ~keeper_name:meta.name)
+      ~observation ()
+  in
+  ( Keeper_run_prompt.assemble_request_context ~system:(system_of_text "BASE")
+      ~post_tool_round:false ~previous_assembly:None
+      ~dynamic_context_partition:(Some world_partition) ~existing_extra_system_context:None
+      ~blocks:[ Prompt_block_id.Dynamic_context, world_state ]
+  , world_partition )
+;;
+
+let issued_system (assembly : Keeper_context_assembly.t) =
+  match assembly.system_prompt with
+  | Some issued -> issued.text
+  | None -> fail "the request issues no System"
+;;
+
+let awaiting_blocks (assembly : Keeper_context_assembly.t) =
+  List.filter_map
+    (fun (id, text) ->
+       if Prompt_block_id.equal id Prompt_block_id.Goals_awaiting_proof then Some text else None)
+    assembly.blocks
+;;
+
+let awaiting_row goal_id =
+  fragment Prompt_names.keeper_world_goals_awaiting_proof_row [ "goal_id", goal_id ]
+;;
+
+let test_a_goal_under_proof_leaves_the_system_as_it_was () =
+  with_workspace @@ fun config ->
+  let at hour = Printf.sprintf "2026-11-06T%02d:00:00Z" hour in
+  let goal phase ~updated = goal_at phase ~priority:3 ~created_at:(at 1) ~updated_at:(at updated) in
+  let store_order () =
+    summary_ids (Keeper_unified_prompt.active_goal_summaries ~config ~keeper_name) in
+  write_goals config
+    [ goal Goal_phase.Executing ~updated:3 "goal-a"; goal Goal_phase.Executing ~updated:2 "goal-b" ];
+  let executing, _ = first_request config in
+  check (list string) "the store lists the newer update first" [ "goal-a"; "goal-b" ] (store_order ());
+  check (list string) "no Goal under proof, no block" [] (awaiting_blocks executing);
+  (* A completion request moves goal-b to Verifying and writes its
+     [updated_at], which puts it first in the store's order. *)
+  write_goals config
+    [ goal Goal_phase.Executing ~updated:3 "goal-a"; goal Goal_phase.Verifying ~updated:4 "goal-b" ];
+  check (list string) "the completion request reorders the store" [ "goal-b"; "goal-a" ]
+    (store_order ());
+  let verifying, _ = first_request config in
+  check string "entering Verifying leaves the System bytes" (issued_system executing)
+    (issued_system verifying);
+  let row = fragment Prompt_names.keeper_world_active_goals_row
+      [ "goal_id", "goal-b"; "title", "title of goal-b" ] in
+  check bool "the System row of the Goal under proof is the plain row" true
+    (List.mem row (String.split_on_char '\n' (issued_system verifying)));
+  check bool "the System carries no proof-pending mark" false
+    (contains_in (issued_system verifying) (awaiting_row "goal-b"));
+  (match awaiting_blocks verifying with
+   | [ block ] ->
+     check bool "the block names the Goal under proof with its mark" true
+       (contains_in block (awaiting_row "goal-b"));
+     check bool "and no other Goal" false (contains_in block "goal-a")
+   | blocks -> failf "one Goals_awaiting_proof block expected, got %d" (List.length blocks));
+  check bool "the block reaches the end context" true
+    (match verifying.extra_system_context with
+     | Some carrier -> contains_in carrier (awaiting_row "goal-b")
+     | None -> false);
+  let later =
+    Keeper_run_prompt.assemble_request_context ~system:(system_of_text "BASE")
+      ~post_tool_round:true ~previous_assembly:(Some verifying) ~dynamic_context_partition:None
+      ~existing_extra_system_context:None ~blocks:[]
+  in
+  check (list string) "a later round of the turn carries the same block"
+    (awaiting_blocks verifying) (awaiting_blocks later);
+  (* The verifier refutes the proof: goal-b is back in Executing and its
+     [updated_at] moved again. *)
+  write_goals config
+    [ goal Goal_phase.Executing ~updated:3 "goal-a"; goal Goal_phase.Executing ~updated:5 "goal-b" ];
+  let refuted, _ = first_request config in
+  check string "a refuted proof leaves the System bytes" (issued_system executing)
+    (issued_system refuted);
+  check (list string) "and the block leaves" [] (awaiting_blocks refuted)
+;;
+
+let test_the_system_orders_goals_by_priority_created_at_and_id () =
+  with_workspace @@ fun config ->
+  let at hour = Printf.sprintf "2026-11-06T%02d:00:00Z" hour in
+  write_goals config
+    [ goal_at Goal_phase.Executing ~priority:3 ~created_at:(at 1) ~updated_at:(at 9) "goal-d"
+    ; goal_at Goal_phase.Executing ~priority:3 ~created_at:(at 2) ~updated_at:(at 5) "goal-a"
+    ; goal_at Goal_phase.Executing ~priority:3 ~created_at:(at 1) ~updated_at:(at 3) "goal-b"
+    ; goal_at Goal_phase.Executing ~priority:1 ~created_at:(at 3) ~updated_at:(at 1) "goal-c"
+    ];
+  let assembly, world_partition = first_request config in
+  let system = issued_system assembly in
+  let position goal_id =
+    let row = fragment Prompt_names.keeper_world_active_goals_row
+        [ "goal_id", goal_id; "title", "title of " ^ goal_id ] in
+    match
+      List.find_index (String.equal row) (String.split_on_char '\n' system)
+    with
+    | Some index -> index
+    | None -> fail ("no System row for " ^ goal_id)
+  in
+  check (list string) "priority, then created_at, then id"
+    [ "goal-c"; "goal-b"; "goal-d"; "goal-a" ]
+    (List.sort (fun left right -> Int.compare (position left) (position right))
+       [ "goal-a"; "goal-b"; "goal-c"; "goal-d" ]);
+  check (list string) "the summaries keep the store's (priority, updated_at) order"
+    [ "goal-c"; "goal-d"; "goal-a"; "goal-b" ]
+    (summary_ids (Keeper_unified_prompt.active_goal_summaries ~config ~keeper_name));
+  let observations = goal_observations_of world_partition in
+  let observation_position goal_id =
+    let row = fragment Prompt_names.keeper_world_goal_observations_row [ "goal_id", goal_id ] in
+    match
+      List.find_index (String.starts_with ~prefix:row) (String.split_on_char '\n' observations)
+    with
+    | Some index -> index
+    | None -> fail ("no Goal Observations row for " ^ goal_id)
+  in
+  check (list string) "the Goal Observations rows keep the store's order"
+    [ "goal-c"; "goal-d"; "goal-a"; "goal-b" ]
+    (List.sort (fun left right ->
+         Int.compare (observation_position left) (observation_position right))
+       [ "goal-a"; "goal-b"; "goal-c"; "goal-d" ])
+;;
+
 let () =
   run "keeper_goal_phase_projection"
     [ ( "prompt surfaces"
@@ -690,6 +851,10 @@ let () =
             test_held_tasks_mark_their_goals_without_hiding_others
         ; test_case "a measurement or a claim moves only the Goal observations" `Quick
             test_a_measurement_or_a_claim_moves_only_the_goal_observations
+        ; test_case "a Goal under proof leaves the System as it was" `Quick
+            test_a_goal_under_proof_leaves_the_system_as_it_was
+        ; test_case "the System orders Goals by priority, created_at and id" `Quick
+            test_the_system_orders_goals_by_priority_created_at_and_id
         ; test_case "world observation drops terminal goals" `Quick
             test_world_observation_drops_terminal_goals
         ; test_case "all-terminal yields no goals at either surface" `Quick

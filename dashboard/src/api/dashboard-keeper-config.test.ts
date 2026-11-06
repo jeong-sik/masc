@@ -14,7 +14,7 @@ describe('keeper config source projection', () => {
     }
     const read = async (preview: unknown) => {
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
-        name: 'rtprobe', activation_mode: 'manual', input_policy: 'small',
+        name: 'rtprobe', activation_mode: 'manual',
         max_context_override: null, skills: { names: null },
         config_revision: { manifest: { state: 'missing' }, runtime_assignment: { state: 'runtime_config_missing' } },
         prompt: { instructions: 'retain keeper instructions', system_prompt: preview },
@@ -44,7 +44,7 @@ describe('keeper config source projection', () => {
     }
     const read = async (catalog: unknown) => {
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
-        name: 'rtprobe', activation_mode: 'autonomous', input_policy: 'small',
+        name: 'rtprobe', activation_mode: 'autonomous',
         max_context_override: null, skills: { names: null },
         config_revision: { manifest: { state: 'missing' }, runtime_assignment: { state: 'runtime_config_missing' } },
         remote_ssh_endpoints: catalog,
@@ -85,7 +85,6 @@ describe('keeper config source projection', () => {
           manifest: { state: 'sha256', value: 'a'.repeat(64) },
           runtime_assignment: { state: 'runtime_config_missing' },
         },
-        input_policy: 'small',
         max_context_override: null,
         skills: { names: null },
         sources: {
@@ -185,7 +184,6 @@ describe('keeper config source projection', () => {
           code: 'keeper_manifest_lock_release_unconfirmed',
           detail: 'unlock failed',
         }],
-        input_policy: 'small',
         max_context_override: null,
         skills: { names: null },
       }), {
@@ -221,7 +219,6 @@ describe('keeper config source projection', () => {
         name: 'rtprobe',
         activation_mode: 'autonomous',
         config_revision: { state: 'unavailable', detail: 'manifest store offline' },
-        input_policy: 'small',
         max_context_override: null,
         skills: { names: null },
       }), {
@@ -251,7 +248,6 @@ describe('keeper config source projection', () => {
           applied: true,
           warnings: [],
         },
-        input_policy: 'small',
         max_context_override: null,
         skills: { names: null },
       }), {
@@ -283,7 +279,6 @@ describe('keeper config source projection', () => {
         activation_mode: 'autonomous',
         config_revision: revision,
         config_write: configWrite(revision),
-        input_policy: 'small',
         max_context_override: null,
         skills: { names: null },
       }), {
@@ -308,7 +303,6 @@ describe('keeper config source projection', () => {
         manifest: { state: 'sha256', value: 'a'.repeat(64) },
         runtime_assignment: { state: 'runtime_config_missing' },
       },
-      input_policy: 'small',
       max_context_override: null,
       skills: { names: null },
       ...extra,
@@ -335,7 +329,6 @@ describe('keeper config source projection', () => {
         manifest: { state: 'sha256', value: 'a'.repeat(64) },
         runtime_assignment: { state: 'runtime_config_missing' },
       },
-      input_policy: 'small',
       max_context_override: null,
       skills: { names: null },
       ...extra,
@@ -355,25 +348,5 @@ describe('keeper config source projection', () => {
 
     respond(body({}))
     expect((await fetchKeeperConfig('sangsu')).voice_always_allow).toBeNull()
-  })
-})
-
-describe('keeper input policy wire contract', () => {
-  afterEach(() => vi.unstubAllGlobals())
-  it.each(['small', 'wide'])('accepts %s', async input_policy => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      name: 'policy', activation_mode: 'manual', input_policy,
-      max_context_override: null, skills: { names: null },
-      config_revision: { manifest: { state: 'missing' }, runtime_assignment: { state: 'runtime_config_missing' } },
-    }))))
-    expect((await fetchKeeperConfig('policy')).input_policy).toBe(input_policy)
-  })
-  it.each([undefined, null, 'compact', 1])('rejects invalid policy %s', async input_policy => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      name: 'policy', activation_mode: 'manual', input_policy,
-      max_context_override: null, skills: { names: null },
-      config_revision: { manifest: { state: 'missing' }, runtime_assignment: { state: 'runtime_config_missing' } },
-    }))))
-    await expect(fetchKeeperConfig('policy')).rejects.toThrow('input_policy')
   })
 })

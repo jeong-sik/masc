@@ -3796,7 +3796,6 @@ describe('fetchKeeperConfig', () => {
       name: 'keeper-sangsu',
       config_revision: configRevision,
       activation_mode: 'manual',
-      input_policy: 'small',
       max_context_override: 64_000,
       sandbox_profile: 'docker',
       network_mode: 'none',
@@ -3943,7 +3942,7 @@ describe('fetchKeeperConfig', () => {
       detail: 'Sys_error("Is a directory")',
     }
     const body = (value: unknown) =>
-      `{"name":"keeper-sangsu","config_revision":{"manifest":{"state":"missing"},"runtime_assignment":{"state":"runtime_config_missing"}},"max_context_override":null,"input_policy":"small","activation_mode":"manual","skills":{"names":null},"prompt":{"instructions":"be exact","system_prompt":${JSON.stringify(value)}}}`
+      `{"name":"keeper-sangsu","config_revision":{"manifest":{"state":"missing"},"runtime_assignment":{"state":"runtime_config_missing"}},"max_context_override":null,"activation_mode":"manual","skills":{"names":null},"prompt":{"instructions":"be exact","system_prompt":${JSON.stringify(value)}}}`
     const fetchWith = (value: unknown) => vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
       new Response(body(value), { status: 200, headers: { 'Content-Type': 'application/json' } }),
     ))
@@ -3974,7 +3973,7 @@ describe('fetchKeeperConfig', () => {
 
   it('decodes the constitution lines a built prompt left out, and never reads an absent answer as none (#35415)', async () => {
     const body = (value: unknown) =>
-      `{"name":"keeper-sangsu","config_revision":{"manifest":{"state":"missing"},"runtime_assignment":{"state":"runtime_config_missing"}},"max_context_override":null,"input_policy":"small","activation_mode":"manual","skills":{"names":null},"prompt":{"instructions":"be exact","system_prompt":${JSON.stringify(value)}}}`
+      `{"name":"keeper-sangsu","config_revision":{"manifest":{"state":"missing"},"runtime_assignment":{"state":"runtime_config_missing"}},"max_context_override":null,"activation_mode":"manual","skills":{"names":null},"prompt":{"instructions":"be exact","system_prompt":${JSON.stringify(value)}}}`
     const fetchWith = (value: unknown) => vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
       new Response(body(value), { status: 200, headers: { 'Content-Type': 'application/json' } }),
     ))
@@ -4074,7 +4073,6 @@ describe('fetchKeeperConfig', () => {
         JSON.stringify({
           name: 'keeper-sangsu',
           activation_mode: 'autonomous',
-          input_policy: 'small',
           config_revision: configRevision,
           max_context_override: null,
           skills: { names: null },
@@ -4106,7 +4104,6 @@ describe('fetchKeeperConfig', () => {
         JSON.stringify({
           name: 'keeper-sangsu',
           activation_mode: 'autonomous',
-          input_policy: 'small',
           config_revision: configRevision,
           max_context_override: null,
           skills: { names: null },
@@ -4150,7 +4147,6 @@ describe('fetchKeeperConfig', () => {
           JSON.stringify({
             name: 'keeper-sangsu',
             activation_mode: 'autonomous',
-            input_policy: 'small',
             config_revision: configRevision,
             max_context_override: null,
             skills: { names: null },
@@ -4186,7 +4182,6 @@ describe('fetchKeeperConfig', () => {
           JSON.stringify({
             name: 'keeper-sangsu',
             activation_mode: 'autonomous',
-            input_policy: 'small',
             config_revision: configRevision,
             max_context_override: null,
             skills: { names: null },
@@ -4223,7 +4218,6 @@ describe('keeper config mutation API', () => {
       new Response(JSON.stringify({
         name: 'keeper-sangsu',
         activation_mode: 'autonomous',
-        input_policy: 'small',
         config_revision: configRevision,
         max_context_override: null,
         skills: { names: null },
@@ -4270,7 +4264,6 @@ describe('keeper config mutation API', () => {
       new Response(JSON.stringify({
         name: 'keeper-sangsu',
         activation_mode: 'autonomous',
-        input_policy: 'small',
         config_revision: configRevision,
         max_context_override: null,
         skills: { names: ['ocaml-coding'] },
@@ -4298,7 +4291,6 @@ describe('keeper config mutation API', () => {
     const body = (runtimeSync: unknown) => JSON.stringify({
       name: 'keeper-sangsu',
       activation_mode: 'autonomous',
-      input_policy: 'small',
       config_revision: configRevision,
       max_context_override: null,
       skills: { names: [] },

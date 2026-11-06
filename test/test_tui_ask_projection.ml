@@ -505,7 +505,7 @@ let decode_answer_receipt ~status_code body =
 
 let test_recording_and_wake_delivery_are_separate () =
   let response delivered =
-    Server_routes_http_keeper_stream.ask_answer_response
+    Server_routes_http_keeper_asks.ask_answer_response
       ~ask_id:"wire-ask" ~actor:"operator" ~answer_count:1 ~open_remaining:0
       ~delivered
   in
@@ -526,7 +526,7 @@ let test_recording_and_wake_delivery_are_separate () =
 
 let test_conflict_keeps_the_canonical_winner () =
   List.iter (fun delivered ->
-    let status, body = Server_routes_http_keeper_stream.ask_already_answered_response
+    let status, body = Server_routes_http_keeper_asks.ask_already_answered_response
         ~ask_id:"wire-ask" ~answers:[] ~answered_at:123. ~delivered in
     (match status with
      | `Conflict -> ()

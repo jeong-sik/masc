@@ -258,7 +258,7 @@ let test_the_row_is_not_a_board_post () =
    stops thinking about it while the Keeper waits forever. *)
 let test_an_undelivered_answer_is_not_reported_as_success () =
   let status, body =
-    Server_routes_http_keeper_stream.ask_answer_response ~ask_id:"ask-1"
+    Server_routes_http_keeper_asks.ask_answer_response ~ask_id:"ask-1"
       ~actor:"test-operator" ~answer_count:1 ~open_remaining:0 ~delivered:false
   in
   check bool "not a success" true (status = `Internal_server_error);
@@ -272,7 +272,7 @@ let test_an_undelivered_answer_is_not_reported_as_success () =
 
 let test_a_delivered_answer_is_a_success () =
   let status, body =
-    Server_routes_http_keeper_stream.ask_answer_response ~ask_id:"ask-1"
+    Server_routes_http_keeper_asks.ask_answer_response ~ask_id:"ask-1"
       ~actor:"test-operator" ~answer_count:1 ~open_remaining:0 ~delivered:true
   in
   check bool "success" true (status = `OK);
@@ -576,7 +576,7 @@ let test_recorded_answer_recovers_once_on_original_continuation () =
    | Error (Wake.Queue_storage_failed _) -> ()
    | Error error -> fail (Wake.error_to_string error)
    | Ok _ -> fail "failed queue storage acknowledged answer delivery");
-  let status, receipt = Server_routes_http_keeper_stream.ask_answer_response
+  let status, receipt = Server_routes_http_keeper_asks.ask_answer_response
       ~ask_id:ask.ask_id ~actor:"operator" ~answer_count:1 ~open_remaining:0 ~delivered:false in
   check bool "recorded but undelivered remains HTTP500" true (status = `Internal_server_error);
   check bool "receipt preserves the recorded answer" true
@@ -1041,7 +1041,7 @@ let test_already_answered_receipt_keeps_the_conflict () =
   let ask = ask_with [ question ~id:"q1" ~header:"deploy" ~choices:[ choice ~id:"c1" ~label:"yes" ] ] in
   let answers = answers_for ask [ "q1", Keeper_ask.Chose { choice_ids = [ "c1" ] } ] in
   List.iter (fun delivered ->
-    let status, body = Server_routes_http_keeper_stream.ask_already_answered_response
+    let status, body = Server_routes_http_keeper_asks.ask_already_answered_response
         ~ask_id:ask.ask_id ~answers ~answered_at:200. ~delivered in
     check bool "canonical answer remains HTTP409" true (status = `Conflict);
     let open Yojson.Safe.Util in

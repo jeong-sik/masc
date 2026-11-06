@@ -4816,7 +4816,7 @@ let test_asks_list_publishes_written_alternative_capability () =
       let state = Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path in
       let router = Lib.Http_server_eio.Router.create ()
         |> Server_route.get Server_route.Always_public "/api/v1/keepers/asks"
-             (Server_routes_http_keeper_stream.handle_keeper_asks_list
+             (Server_routes_http_keeper_asks.handle_keeper_asks_list
                 ~clock:(Eio.Stdenv.clock env) state)
       in
       let status, _, body = tools_h1_wire_response ~router ~headers:[]

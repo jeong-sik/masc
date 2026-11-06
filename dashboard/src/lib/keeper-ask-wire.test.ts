@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { parseAsksSnapshot } from './keeper-ask-wire'
 
-// The server encodes these rows in server_routes_http_keeper_stream.ml. The
+// The server encodes these rows in server_routes_http_keeper_asks.ml. The
 // fixture below is that encoder's output field for field, so a rename on
 // either side fails here instead of drawing an empty panel in front of an
 // operator who is waiting to answer.

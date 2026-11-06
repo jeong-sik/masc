@@ -38,10 +38,12 @@ let request_sha argv (inputs : Store.input list) =
        "inputs", `List (List.map (fun (input : Store.input) ->
            `Assoc ["path", `String input.path;
                    "artifact", Tool_output.normalized_artifact_ref_to_json input.artifact]) inputs)])
+let requests_dirname = "keeper_msg_requests"
+
 let path ~base_path ~keeper_name invocation =
   Filename.concat
     (Filename.concat
-       (Filename.concat (Common.masc_dir_from_base_path ~base_path) "keeper_msg_requests")
+       (Filename.concat (Common.masc_dir_from_base_path ~base_path) requests_dirname)
        "owned_job_invocations")
     (sha (invocation_json keeper_name invocation) ^ ".json")
 let reservation_json (reservation : reservation) =

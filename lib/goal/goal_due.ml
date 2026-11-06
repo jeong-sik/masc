@@ -2,10 +2,7 @@
 
 type t =
   | No_due_date
-  | Due_date of
-      { date : Ptime.date
-      ; instant : Ptime.t
-      }
+  | Due_date of { instant : Ptime.t }
   | Unreadable_due_date of string
 
 (* A due date falls due at the last second of its day, in UTC. *)
@@ -45,24 +42,5 @@ let read = function
        (* [Ptime.of_date_time] is what refuses 2026-13-01 and 2026-02-30. *)
        (match Ptime.of_date_time (date, last_second_of_the_day) with
         | None -> Unreadable_due_date raw
-        | Some instant -> Due_date { date; instant }))
-;;
-
-let instant = function
-  | Due_date { instant; _ } -> Some instant
-  | No_due_date | Unreadable_due_date _ -> None
-;;
-
-let is_overdue ~now = function
-  | Due_date { instant; _ } -> Ptime.is_later now ~than:instant
-  | No_due_date | Unreadable_due_date _ -> false
-;;
-
-let days_left ~now = function
-  | Due_date { date; _ } ->
-    (match Ptime.of_date date, Ptime.of_date (Ptime.to_date now) with
-     | Some due_day, Some today ->
-       Some (fst (Ptime.Span.to_d_ps (Ptime.diff due_day today)))
-     | None, _ | _, None -> None)
-  | No_due_date | Unreadable_due_date _ -> None
+        | Some instant -> Due_date { instant }))
 ;;

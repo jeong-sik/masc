@@ -1689,8 +1689,7 @@
  (modules test_goal_timeline_projection)
  (libraries masc_test_deps))
 
-; Goal_due: the one reading of a Goal's due date (the day it names, the UTC
-; instant it falls due, the UTC days left).
+; Goal_due: the one reading of a Goal's due date (the UTC instant it falls due).
 
 (test
  (name test_goal_due)
@@ -4568,19 +4567,9 @@
  (libraries alcotest yojson masc.runtime masc_tui_model_runtime_table masc_tui_message_layout))
 
 (test
- (name test_tui_overview_goals)
- (modules test_tui_overview_goals)
- (libraries
-  alcotest
-  masc
-  masc.masc_goal
-  masc_types
-  masc_tui_message_layout
-  masc_tui_types
-  masc_tui_overview_goals
-  masc_tui_overview_tasks
-  unix
-  yojson))
+ (name test_tui_decode_overview_goals)
+ (modules test_tui_decode_overview_goals)
+ (libraries masc_test_deps masc.masc_goal))
 
 (test
  (name test_tui_chart_shares)

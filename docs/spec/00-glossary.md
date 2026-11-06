@@ -176,7 +176,7 @@ status: reference
 : TUI 최상단 대시보드(Overview) 탭에서 제공되는 운영자 중심의 의사결정·대화 진입 화면.
   전체 통계와 차트 나열 위주의 집계형 구성을 대체하여, 사람 운영자의 직접 판단과 처리가 필요한
   개별 의사결정(Decisions) 카드, 마지막 방문 대화 상대 재개(Continue), Keeper 선택/생성,
-  간결한 작업 흐름 요약(Dashboard Goals 등)을 제공한다(#39817·#40137·#40152).
+  간결한 작업 흐름 요약을 제공한다(#39817·#40137·#40152).
   - 요청 식별과 탐색(`home_request`·`home_action`): 사람이 판단해야 하는 대기 요청은
     `home_request` 닫힌 합타입 5개(`Home_held_call`·`Home_gate_request`·`Home_operator_request`·
     `Home_question`·`Home_goal_confirmation`)로 식별한다. 탐색 액션 대상
@@ -547,15 +547,14 @@ status: reference
   [tools/alphatex/native/MidiTransport.swift](../../tools/alphatex/native/MidiTransport.swift)
 
 **Dashboard Goals**
-: TUI 첫 화면에서 Goal의 기록된 측정값과 연결된 Task 완료 수를 별도로 요약한다.
+: Goal 트리(`/api/v1/dashboard/goals`)가 Goal의 기록된 측정값과 연결된 Task 완료 수를 따로 싣는다.
   Goal의 실제 값은 동일한 Goal ID·기준 개정·지표·목표를 가진 관측 기록에서만 읽는다.
   Task 개수나 제목을 Goal의 실제 값으로 환산하지 않는다. 각 Goal의 자세한 근거는
   Work에서 연다.
   Goal의 정체 시간(`stagnation_seconds`)은 연결 Task 갱신·승인 요청·Keeper 영수증·
   runtime trust 이벤트·Goal 메타데이터 중 가장 최근에 관측된 활동 이후 지난 시간이다.
   Keeper의 작업 배정 상태와는 별개이며, Goal의 실제 측정값으로 환산하지 않는다.
-  → [측정 중심 TUI 구성](../rfc/RFC-tui-measured-operator-home.md),
-  [Masc_tui_overview_goals](../../bin/masc_tui_overview_goals.mli)
+  → [측정 중심 TUI 구성](../rfc/RFC-tui-measured-operator-home.md)
 
 **Fleet (Keeper fleet)**
 : 한 워크스페이스에 등록된 Keeper 묶음. `fleet ok` 상태 줄과 fleet scan은 이 묶음을
@@ -2887,20 +2886,17 @@ status: reference
   `drop`으로 `Dropped`로, `reopen`으로 `Executing`으로 옮길 수 있다. 그 뒤에
   도착한 verdict는 거절된다. 완료 verdict는 verifier가 기록하고, 사람의
   확인이 `Completed` 전이를 확정한다. `goal_phase.mli`의
-  `admits_self_directed_progress`가 이 경계를 정의한다. TUI 첫 화면의 투영은
-  `Dashboard Goals`를 따른다.
+  `admits_self_directed_progress`가 이 경계를 정의한다.
   → [Goal_phase](../../lib/goal/goal_phase.mli) · [Goal_store](../../lib/goal/goal_store.mli)
 
 **Goal Creation Input Check (목표 생성 입력 검증)**
 : 새 Goal 생성 입력의 제목·측정 조건·마감일을 검증하는 입력 불변식 계약(#41399).
   RFC-0387 B1의 측정 가능한 성공 조건(`metric` 및 `target_value`) 필수 선언에 더해,
   새 Goal 생성의 모든 진입 경로에서 빈 제목(`title` 누락 또는 공백 문자열)을 거절하며
-  알 수 없는 ID 단독 지정 시 `"Untitled goal"`로 기본 명명하던 폴백을 금지한다. 또한 이미
-  경과한 마감일(`due_date`)을 지정한 목표 생성은 본질적으로 도달 불가능(unreachable by
-  construction)하므로 `Rejected`(`Validation_error`)로 즉시 거절한다. 마감일은 UTC 역일 기준
-  당일 23:59:59 UTC에 만료되는 것으로 판정하며 운영자 로컬 타임존과 무관하다. 반면 기존 Goal의
-  수정(`upsert_goal` 업데이트) 시에는 마감일 경과가 정상적인 생명주기 진행이고 과거 날짜 소급
-  지정 역시 기록 정정이므로 이 검증으로 차단되지 않는다.
+  알 수 없는 ID 단독 지정 시 `"Untitled goal"`로 기본 명명하던 폴백을 금지한다. 또한
+  `YYYY-MM-DD`로 읽을 수 없는 마감일(`due_date`)은 생성과 수정(`upsert_goal` 업데이트) 모두
+  `Rejected`로 거절하고 아무것도 쓰지 않는다. 읽을 수 있는 마감일은 UTC 역일 기준 당일
+  23:59:59 UTC에 만료되는 것으로 읽으며 운영자 로컬 타임존과 무관하다.
   → [Goal_store](../../lib/goal/goal_store.mli) · [Goal_due](../../lib/goal/goal_due.mli)
 
 **Goal Measurement (목표 관측값)**

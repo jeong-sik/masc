@@ -12,6 +12,7 @@
   task_history_page
   task_history_reader
   task_history_row
+  task_history_scan
   task_history_types
   tool_task
   tool_task_args
@@ -26,6 +27,7 @@
   task_history_inventory
   task_history_reader
   task_history_row
+  task_history_scan
   task_history_types)
  (flags
   (:standard -w +37))

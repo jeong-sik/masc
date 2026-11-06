@@ -1,5 +1,5 @@
 (** Keeper_metric_emit_dropped_site — closed sum for [site] label on
-    [metric_keeper_metric_emit_dropped]. *)
+    [masc_keeper_metric_emit_dropped_total]. *)
 
 type t =
   | Keeper_unified_turn

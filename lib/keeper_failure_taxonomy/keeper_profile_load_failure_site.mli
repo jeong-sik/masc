@@ -1,5 +1,5 @@
 (** Keeper_profile_load_failure_site — closed sum for the [site] label on
-    [metric_keeper_profile_load_failures].
+    [masc_keeper_profile_load_failures_total].
 
     Replaces 7 hardcoded literals scattered across 7 emit sites in
     [keeper_types_profile.ml].  Each `site` corresponds to a distinct

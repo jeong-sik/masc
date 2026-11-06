@@ -1,5 +1,5 @@
 (** Keeper_paused_state_persist_phase — closed sum for the [phase] label on
-    [metric_keeper_paused_state_persist_errors].
+    [masc_keeper_paused_state_persist_errors_total].
 
     Replaces hardcoded string literals in the dashboard Keeper API.
     Each phase corresponds to a distinct write path; closing the set

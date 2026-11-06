@@ -655,6 +655,27 @@ let assemble_hooks
        starts again for the same turn, from a checkpoint, builds a new memo and
        may judge again. *)
     let recall_memo = Keeper_memory_recall_turn.create_memo () in
+    (* The queue is read when a turn starts, so a row that arrives while this
+       run goes on waits for it to end. A round that follows tool results lists
+       the rows that arrived since the run began, once each
+       ([Keeper_arrived_stimuli]); the rows stay queued. Built with the run,
+       like [recall_memo]: a run that starts again for the same turn lists what
+       arrived since it started. *)
+    let arrived_tracker =
+      Keeper_arrived_stimuli.create_tracker ~run_started_at:(Time_compat.now ())
+    in
+    let arrived_stimuli_text () =
+      Keeper_arrived_stimuli.block
+        arrived_tracker
+        ~now:(Time_compat.now ())
+        ~read:(fun () ->
+          Keeper_registry_event_queue.pending_selections_result
+            ~base_path:config.base_path
+            meta.name)
+        ~on_unavailable:(fun detail ->
+          Log.Keeper.warn ~keeper_name:meta.name
+            "arrived stimuli unavailable; this round carries none: %s" detail)
+    in
     let on_memory_capacity_refusal ~refusal =
       let shared = match !host_memory with
         | None -> Ok Keeper_memory_delivery_reprojection.Unchanged
@@ -840,6 +861,7 @@ let assemble_hooks
             (fun event ->
               match event with
               | Agent_core.Hooks.AfterTurn { turn; _ } ->
+                Keeper_arrived_stimuli.confirm arrived_tracker;
                 Keeper_skill_async_action_observer.begin_handoff async_actions;
                 Keeper_composition_result_delivery.commit_provider_response ctx.composition_result_delivery
                   ~agent_core_turn:turn ~observe:observe_composition_result
@@ -1174,6 +1196,12 @@ let assemble_hooks
                    the later text is the one that reads as current. Stamped
                    consumed only after the block is assembled, so a turn that
                    fails before this point does not burn the note. *)
+                (* News the first round could not carry: what reached the queue
+                   after this run began. Only a round that follows tool results
+                   asks, because the first round's own assembly is built from
+                   the queue as it stands. *)
+                (if post_tool_round
+                 then Option.iter (record_block Prompt_block_id.Arrived_stimuli) (arrived_stimuli_text ()));
                 let consumed_operator_note =
                   match Keeper_operator_note.pending ~config ~keeper:meta.name with
                   | None -> false

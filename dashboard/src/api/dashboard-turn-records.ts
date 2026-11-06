@@ -26,6 +26,7 @@ export const TURN_PROMPT_BLOCK_IDS = [
   'recalled_memory_status',
   'operator_note',
   'skill_compositions',
+  'arrived_stimuli',
 ] as const
 
 export type TurnPromptBlockId = (typeof TURN_PROMPT_BLOCK_IDS)[number]

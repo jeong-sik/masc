@@ -93,6 +93,9 @@ const PROMPT_BLOCK_META: Readonly<Record<TurnPromptBlockId, BlockMeta>> = {
   // The names of the composition Skills this turn carries (Prompt_block_id
   // Skill_compositions). A roster line, not recalled memory.
   skill_compositions: { lbl: '스킬 구성', color: 'var(--text-dim)', mem: false },
+  // Queue rows that reached the Keeper's queue after the running turn began
+  // (Prompt_block_id Arrived_stimuli). News about the world, not memory.
+  arrived_stimuli: { lbl: '도착한 알림', color: 'var(--info)', mem: false },
 }
 export function promptBlockMeta(token: TurnPromptBlockId): BlockMeta {
   return PROMPT_BLOCK_META[token]
@@ -137,6 +140,7 @@ const INPUT_COMPONENT_META: Readonly<Record<TurnInputComponentId, BlockMeta>> = 
   'prompt.recalled_memory_status': PROMPT_BLOCK_META.recalled_memory_status,
   'prompt.operator_note': PROMPT_BLOCK_META.operator_note,
   'prompt.skill_compositions': PROMPT_BLOCK_META.skill_compositions,
+  'prompt.arrived_stimuli': PROMPT_BLOCK_META.arrived_stimuli,
   tool_schemas: { lbl: '도구 스키마', color: 'var(--status-warn)', mem: false },
   message_user: { lbl: '사용자 메시지', color: 'var(--info)', mem: false },
   message_system: { lbl: '시스템 메시지', color: 'var(--text-dim)', mem: false },

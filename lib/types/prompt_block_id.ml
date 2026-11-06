@@ -11,6 +11,7 @@ type t =
   | Recalled_memory_status
   | Operator_note
   | Skill_compositions
+  | Arrived_stimuli
 [@@deriving enumerate]
 
 let equal a b =
@@ -26,10 +27,11 @@ let equal a b =
   | Recalled_memory, Recalled_memory
   | Recalled_memory_status, Recalled_memory_status
   | Operator_note, Operator_note
-  | Skill_compositions, Skill_compositions -> true
+  | Skill_compositions, Skill_compositions
+  | Arrived_stimuli, Arrived_stimuli -> true
   | ( Keeper_instructions | Dynamic_context | Active_goals | Completion_authority | Constitution_amendments
     | Temporal_summary | Memory_os_recall | Librarian_working_context | Recalled_memory
-    | Recalled_memory_status | Operator_note | Skill_compositions )
+    | Recalled_memory_status | Operator_note | Skill_compositions | Arrived_stimuli )
   , _ -> false
 
 let to_string = function
@@ -45,6 +47,7 @@ let to_string = function
   | Recalled_memory_status -> "recalled_memory_status"
   | Operator_note -> "operator_note"
   | Skill_compositions -> "skill_compositions"
+  | Arrived_stimuli -> "arrived_stimuli"
 
 let of_string name =
   match List.find_opt (fun v -> String.equal (to_string v) name) all with
@@ -64,6 +67,7 @@ let all_known =
   ; Recalled_memory_status
   ; Operator_note
   ; Skill_compositions
+  ; Arrived_stimuli
   ]
 ;;
 
@@ -98,9 +102,11 @@ let cache_rank = function
   | Dynamic_context -> 8
   | Recalled_memory_status -> 9
   | Temporal_summary -> 10
-  (* An operator speaking mid-turn is the newest thing in the assembly and the
-     newest instruction in a post-tool round; it stays last on both counts. *)
-  | Operator_note -> 11
+  (* A queue row that arrived while the turn ran is news about the world and
+     comes in front of an operator speaking, who stays the newest thing in the
+     assembly and the newest instruction in a post-tool round. *)
+  | Arrived_stimuli -> 11
+  | Operator_note -> 12
 ;;
 
 (* See the mli. [Keeper_instructions] never enters the extra-context
@@ -112,7 +118,7 @@ let injected_on_post_tool_round = function
   | Dynamic_context | Temporal_summary | Memory_os_recall | Librarian_working_context
   | Recalled_memory | Recalled_memory_status | Skill_compositions -> false
   | Keeper_instructions | Active_goals | Completion_authority | Constitution_amendments
-  | Operator_note -> true
+  | Operator_note | Arrived_stimuli -> true
 ;;
 
 (* See the mli. [Keeper_instructions] never enters the extra-context assembly
@@ -121,6 +127,6 @@ let injected_on_post_tool_round = function
 let resent_when_held = function
   | Keeper_instructions | Dynamic_context | Active_goals | Constitution_amendments
   | Temporal_summary | Memory_os_recall | Librarian_working_context | Recalled_memory
-  | Skill_compositions -> false
+  | Skill_compositions | Arrived_stimuli -> false
   | Completion_authority | Recalled_memory_status | Operator_note -> true
 ;;

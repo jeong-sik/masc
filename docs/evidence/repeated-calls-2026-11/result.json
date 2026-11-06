@@ -1,0 +1,427 @@
+{
+  "window": {
+    "first_run_utc": "2026-10-17",
+    "last_run_utc": "2026-11-05"
+  },
+  "read_at_utc": "2026-11-05T20:36Z",
+  "unreadable_lines": 0,
+  "unreadable_files": 0,
+  "calls": {
+    "runs": 5410,
+    "runs_with_calls": 3826,
+    "rounds": 32349,
+    "calls": 43639,
+    "repeats": 1663,
+    "share_of_calls": 0.0381,
+    "repeats_that_were_errors": 170,
+    "result_bytes": 124501392,
+    "repeated_result_bytes": 1636270,
+    "share_of_result_bytes": 0.0131
+  },
+  "by_tool": [
+    {
+      "tool": "masc_board_list",
+      "calls": 2135,
+      "repeats": 1440,
+      "share_of_calls": 0.6745,
+      "result_bytes": 2545322,
+      "repeated_result_bytes": 881264
+    },
+    {
+      "tool": "Execute",
+      "calls": 22257,
+      "repeats": 82,
+      "share_of_calls": 0.0037,
+      "result_bytes": 39865104,
+      "repeated_result_bytes": 74272
+    },
+    {
+      "tool": "masc_board_post_get",
+      "calls": 2669,
+      "repeats": 39,
+      "share_of_calls": 0.0146,
+      "result_bytes": 19727558,
+      "repeated_result_bytes": 71157
+    },
+    {
+      "tool": "keeper_artifact_read",
+      "calls": 676,
+      "repeats": 28,
+      "share_of_calls": 0.0414,
+      "result_bytes": 4403379,
+      "repeated_result_bytes": 458752
+    },
+    {
+      "tool": "masc_board_comment",
+      "calls": 1915,
+      "repeats": 27,
+      "share_of_calls": 0.0141,
+      "result_bytes": 4035422,
+      "repeated_result_bytes": 4275
+    },
+    {
+      "tool": "Read",
+      "calls": 1564,
+      "repeats": 10,
+      "share_of_calls": 0.0064,
+      "result_bytes": 9680443,
+      "repeated_result_bytes": 1698
+    },
+    {
+      "tool": "keeper_tasks_list",
+      "calls": 965,
+      "repeats": 7,
+      "share_of_calls": 0.0073,
+      "result_bytes": 1954309,
+      "repeated_result_bytes": 92193
+    },
+    {
+      "tool": "Grep",
+      "calls": 285,
+      "repeats": 5,
+      "share_of_calls": 0.0175,
+      "result_bytes": 485660,
+      "repeated_result_bytes": 495
+    },
+    {
+      "tool": "github_pull_request_review_write",
+      "calls": 26,
+      "repeats": 5,
+      "share_of_calls": 0.1923,
+      "result_bytes": 2988,
+      "repeated_result_bytes": 1640
+    },
+    {
+      "tool": "masc_schedule_list",
+      "calls": 164,
+      "repeats": 4,
+      "share_of_calls": 0.0244,
+      "result_bytes": 249346,
+      "repeated_result_bytes": 628
+    },
+    {
+      "tool": "BrowserGoto",
+      "calls": 320,
+      "repeats": 3,
+      "share_of_calls": 0.0094,
+      "result_bytes": 166836,
+      "repeated_result_bytes": 1254
+    },
+    {
+      "tool": "github_search_code",
+      "calls": 22,
+      "repeats": 3,
+      "share_of_calls": 0.1364,
+      "result_bytes": 35531,
+      "repeated_result_bytes": 333
+    },
+    {
+      "tool": "github_get_file_contents",
+      "calls": 21,
+      "repeats": 2,
+      "share_of_calls": 0.0952,
+      "result_bytes": 430915,
+      "repeated_result_bytes": 308
+    },
+    {
+      "tool": "masc_board_search",
+      "calls": 608,
+      "repeats": 2,
+      "share_of_calls": 0.0033,
+      "result_bytes": 649353,
+      "repeated_result_bytes": 220
+    },
+    {
+      "tool": "Edit",
+      "calls": 1009,
+      "repeats": 1,
+      "share_of_calls": 0.001,
+      "result_bytes": 232790,
+      "repeated_result_bytes": 170
+    },
+    {
+      "tool": "WebFetch",
+      "calls": 220,
+      "repeats": 1,
+      "share_of_calls": 0.0045,
+      "result_bytes": 1417725,
+      "repeated_result_bytes": 99
+    },
+    {
+      "tool": "Write",
+      "calls": 1465,
+      "repeats": 1,
+      "share_of_calls": 0.0007,
+      "result_bytes": 204378,
+      "repeated_result_bytes": 599
+    },
+    {
+      "tool": "github_issue_read",
+      "calls": 21,
+      "repeats": 1,
+      "share_of_calls": 0.0476,
+      "result_bytes": 92705,
+      "repeated_result_bytes": 98
+    },
+    {
+      "tool": "github_pull_request_read",
+      "calls": 176,
+      "repeats": 1,
+      "share_of_calls": 0.0057,
+      "result_bytes": 2938758,
+      "repeated_result_bytes": 46464
+    },
+    {
+      "tool": "masc_dos_screen",
+      "calls": 419,
+      "repeats": 1,
+      "share_of_calls": 0.0024,
+      "result_bytes": 340533,
+      "repeated_result_bytes": 351
+    }
+  ],
+  "streaks": {
+    "count": 128,
+    "length": {
+      "p50": 4.0,
+      "p90": 16.0,
+      "p99": 61.0,
+      "max": 895.0
+    },
+    "by_length": {
+      "2-9": {
+        "streaks": 106,
+        "repeats": 307
+      },
+      "10-99": {
+        "streaks": 21,
+        "repeats": 462
+      },
+      "100+": {
+        "streaks": 1,
+        "repeats": 894
+      }
+    },
+    "wall_hours": 6.34
+  },
+  "by_profile": [
+    {
+      "profile": "glm-5.3-flash",
+      "calls": 12045,
+      "repeats": 1456,
+      "share_of_calls": 0.1209,
+      "result_bytes": 33708748,
+      "repeated_result_bytes": 961679
+    },
+    {
+      "profile": "you-never-change",
+      "calls": 1096,
+      "repeats": 52,
+      "share_of_calls": 0.0474,
+      "result_bytes": 2697396,
+      "repeated_result_bytes": 38085
+    },
+    {
+      "profile": "glm-5-3",
+      "calls": 3115,
+      "repeats": 29,
+      "share_of_calls": 0.0093,
+      "result_bytes": 7878830,
+      "repeated_result_bytes": 6286
+    },
+    {
+      "profile": "glossary-maniac",
+      "calls": 309,
+      "repeats": 27,
+      "share_of_calls": 0.0874,
+      "result_bytes": 894848,
+      "repeated_result_bytes": 21853
+    },
+    {
+      "profile": "kidsnote-job-manager",
+      "calls": 55,
+      "repeats": 27,
+      "share_of_calls": 0.4909,
+      "result_bytes": 661597,
+      "repeated_result_bytes": 442368
+    },
+    {
+      "profile": "kidsnote-qa-hub-manager",
+      "calls": 77,
+      "repeats": 15,
+      "share_of_calls": 0.1948,
+      "result_bytes": 120606,
+      "repeated_result_bytes": 10308
+    },
+    {
+      "profile": "goo-yang-bong",
+      "calls": 118,
+      "repeats": 12,
+      "share_of_calls": 0.1017,
+      "result_bytes": 148774,
+      "repeated_result_bytes": 4357
+    },
+    {
+      "profile": "polisher",
+      "calls": 978,
+      "repeats": 12,
+      "share_of_calls": 0.0123,
+      "result_bytes": 7902707,
+      "repeated_result_bytes": 48843
+    },
+    {
+      "profile": "rondo",
+      "calls": 145,
+      "repeats": 7,
+      "share_of_calls": 0.0483,
+      "result_bytes": 570774,
+      "repeated_result_bytes": 28606
+    },
+    {
+      "profile": "build-maniac",
+      "calls": 251,
+      "repeats": 6,
+      "share_of_calls": 0.0239,
+      "result_bytes": 464121,
+      "repeated_result_bytes": 1385
+    },
+    {
+      "profile": "masc-productor-owner",
+      "calls": 129,
+      "repeats": 6,
+      "share_of_calls": 0.0465,
+      "result_bytes": 440105,
+      "repeated_result_bytes": 676
+    },
+    {
+      "profile": "gayo-yoga-leader",
+      "calls": 377,
+      "repeats": 5,
+      "share_of_calls": 0.0133,
+      "result_bytes": 848812,
+      "repeated_result_bytes": 65865
+    },
+    {
+      "profile": "music-sensei",
+      "calls": 53,
+      "repeats": 4,
+      "share_of_calls": 0.0755,
+      "result_bytes": 113979,
+      "repeated_result_bytes": 4399
+    },
+    {
+      "profile": "opencode-go-deepseek-flash",
+      "calls": 11992,
+      "repeats": 3,
+      "share_of_calls": 0.0003,
+      "result_bytes": 26646635,
+      "repeated_result_bytes": 1254
+    },
+    {
+      "profile": "sangsu",
+      "calls": 152,
+      "repeats": 2,
+      "share_of_calls": 0.0132,
+      "result_bytes": 233683,
+      "repeated_result_bytes": 306
+    }
+  ],
+  "runs_with_the_most_repeats": [
+    {
+      "keeper": "music-sensei",
+      "profile": "glm-5.3-flash",
+      "day": "2026-11-05",
+      "rounds": 903,
+      "hours": 3.63,
+      "calls": 904,
+      "repeats": 897,
+      "repeated_result_bytes": 453882,
+      "top_repeated_tool": "masc_board_list",
+      "ended_by": "Rate limited: Usage limit reached for 5 "
+    },
+    {
+      "keeper": "masc-productor-owner",
+      "profile": "glm-5.3-flash",
+      "day": "2026-11-04",
+      "rounds": 508,
+      "hours": 1.03,
+      "calls": 507,
+      "repeats": 427,
+      "repeated_result_bytes": 331369,
+      "top_repeated_tool": "masc_board_list",
+      "ended_by": null
+    },
+    {
+      "keeper": "masc-productor-owner",
+      "profile": "glm-5.3-flash",
+      "day": "2026-11-04",
+      "rounds": 151,
+      "hours": 0.96,
+      "calls": 150,
+      "repeats": 104,
+      "repeated_result_bytes": 81265,
+      "top_repeated_tool": "masc_board_list",
+      "ended_by": "Provider 'glm-coding' timeout phase=firs"
+    },
+    {
+      "keeper": "kidsnote-job-manager",
+      "profile": "kidsnote-job-manager",
+      "day": "2026-10-26",
+      "rounds": 0,
+      "hours": 0.06,
+      "calls": 33,
+      "repeats": 27,
+      "repeated_result_bytes": 442368,
+      "top_repeated_tool": "keeper_artifact_read",
+      "ended_by": null
+    },
+    {
+      "keeper": "kidsnote-job-manager",
+      "profile": "glm-5-3",
+      "day": "2026-10-26",
+      "rounds": 29,
+      "hours": 0.62,
+      "calls": 28,
+      "repeats": 23,
+      "repeated_result_bytes": 3657,
+      "top_repeated_tool": "masc_board_comment",
+      "ended_by": null
+    },
+    {
+      "keeper": "glossary-maniac",
+      "profile": "glossary-maniac",
+      "day": "2026-10-23",
+      "rounds": 1,
+      "hours": 0.39,
+      "calls": 30,
+      "repeats": 18,
+      "repeated_result_bytes": 13956,
+      "top_repeated_tool": "Execute",
+      "ended_by": null
+    },
+    {
+      "keeper": "masc-productor-owner",
+      "profile": "glm-5.3-flash",
+      "day": "2026-11-04",
+      "rounds": 30,
+      "hours": 0.81,
+      "calls": 36,
+      "repeats": 12,
+      "repeated_result_bytes": 66179,
+      "top_repeated_tool": "masc_board_post_get",
+      "ended_by": null
+    },
+    {
+      "keeper": "kidsnote-qa-hub-manager",
+      "profile": "kidsnote-qa-hub-manager",
+      "day": "2026-10-30",
+      "rounds": 0,
+      "hours": 0.1,
+      "calls": 12,
+      "repeats": 9,
+      "repeated_result_bytes": 5028,
+      "top_repeated_tool": "Execute",
+      "ended_by": null
+    }
+  ]
+}

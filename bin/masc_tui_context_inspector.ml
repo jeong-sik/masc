@@ -702,6 +702,7 @@ let prompt_block_label = function
   | Prompt_block_id.Recalled_memory_status -> "Recall status line"
   | Prompt_block_id.Operator_note -> "Operator note"
   | Prompt_block_id.Skill_compositions -> "Skill compositions"
+  | Prompt_block_id.Arrived_stimuli -> "Arrived stimuli"
 
 let input_component_label = function
   | Turn_record.Prompt_block block -> prompt_block_label block
@@ -842,7 +843,8 @@ let input_map_rows (record : Turn_record.t) (provider_input : provider_input opt
                  | Prompt_block_id.Recalled_memory
                  | Prompt_block_id.Recalled_memory_status
                  | Prompt_block_id.Operator_note
-                 | Prompt_block_id.Skill_compositions )
+                 | Prompt_block_id.Skill_compositions
+                 | Prompt_block_id.Arrived_stimuli )
              | Turn_record.Tool_schemas
              | Turn_record.Message_user
              | Turn_record.Message_system

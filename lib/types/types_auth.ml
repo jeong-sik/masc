@@ -192,6 +192,15 @@ let account_mode_of_json = function
   | `String "Multi_account" -> Some Multi_account
   | _ -> None
 
+(* A client that a multi-account installation registered at a login provider.
+   The secret is not here: the file is rewritten by [save_auth_config] and
+   copied by backups, so it names the environment variable that holds it. *)
+type login_client = {
+  client_id: string;
+  redirect_uri: string;
+  client_secret_env: string;
+} [@@deriving show]
+
 (** Auth configuration *)
 type auth_config = {
   enabled: bool;
@@ -199,6 +208,7 @@ type auth_config = {
   require_token: bool; [@default true]
   token_expiry_hours: int; [@default 24]
   account_mode: account_mode option; [@default None]
+  google: login_client option; [@default None]
 } [@@deriving show]
 
 let default_auth_config = {
@@ -207,6 +217,7 @@ let default_auth_config = {
   require_token = true;
   token_expiry_hours = 24;
   account_mode = None;
+  google = None;
 }
 
 let auth_config_to_yojson c =
@@ -218,28 +229,44 @@ let auth_config_to_yojson c =
   ]
   @ (match c.account_mode with
      | None -> []
-     | Some mode -> [ ("account_mode", `String (account_mode_label mode)) ]))
+     | Some mode -> [ ("account_mode", `String (account_mode_label mode)) ])
+  @ (match c.google with
+     | None -> []
+     | Some client ->
+       [ ( "google"
+         , `Assoc
+             [ ("client_id", `String client.client_id)
+             ; ("redirect_uri", `String client.redirect_uri)
+             ; ("client_secret_env", `String client.client_secret_env)
+             ] )
+       ]))
 
 let auth_config_field_names =
-  [ "enabled"; "workspace_secret_hash"; "require_token"; "token_expiry_hours"; "account_mode" ]
+  [ "enabled"; "workspace_secret_hash"; "require_token"; "token_expiry_hours"; "account_mode"; "google" ]
 
-let validate_auth_config_fields = function
+let login_client_field_names = [ "client_id"; "redirect_uri"; "client_secret_env" ]
+
+let validate_object_fields ~context ~names = function
   | `Assoc fields ->
     let rec loop seen = function
       | [] -> Ok fields
       | (name, _) :: rest ->
-        if not (List.mem name auth_config_field_names)
-        then Error (Printf.sprintf "auth_config_of_yojson: unknown field %S" name)
+        if not (List.mem name names)
+        then Error (Printf.sprintf "%s: unknown field %S" context name)
         else if List.mem name seen
-        then Error (Printf.sprintf "auth_config_of_yojson: duplicate field %S" name)
+        then Error (Printf.sprintf "%s: duplicate field %S" context name)
         else loop (name :: seen) rest
     in
     loop [] fields
   | other ->
     Error
       (Printf.sprintf
-         "auth_config_of_yojson: expected JSON object, got %s"
+         "%s: expected JSON object, got %s"
+         context
          (Json_util.kind_name other))
+
+let validate_auth_config_fields =
+  validate_object_fields ~context:"auth_config_of_yojson" ~names:auth_config_field_names
 
 let auth_config_bool fields name ~default =
   match List.assoc_opt name fields with
@@ -306,6 +333,49 @@ let validate_token_expiry_hours value =
          max_token_expiry_hours)
 ;;
 
+let member_context member = Printf.sprintf "auth_config_of_yojson: field %S" member
+
+let login_client_string ~context fields name =
+  match List.assoc_opt name fields with
+  | Some (`String value) -> Ok value
+  | None -> Error (Printf.sprintf "%s: field %S is missing" context name)
+  | Some value ->
+    Error
+      (Printf.sprintf
+         "%s: field %S must be a string, got %s"
+         context
+         name
+         (Json_util.kind_name value))
+
+(* POSIX.1-2017 8.1: a name of the portable character set, which is letters,
+   digits and underscores, and does not begin with a digit. *)
+let is_environment_variable_name text =
+  String.length text > 0
+  && (match text.[0] with
+      | 'A' .. 'Z' | 'a' .. 'z' | '_' -> true
+      | _ -> false)
+  && String.for_all
+       (function
+         | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_' -> true
+         | _ -> false)
+       text
+
+let login_client_of_json ~member json =
+  let open Result.Syntax in
+  let context = member_context member in
+  let* fields = validate_object_fields ~context ~names:login_client_field_names json in
+  let* client_id = login_client_string ~context fields "client_id" in
+  let* redirect_uri = login_client_string ~context fields "redirect_uri" in
+  let* client_secret_env = login_client_string ~context fields "client_secret_env" in
+  if is_environment_variable_name client_secret_env
+  then Ok { client_id; redirect_uri; client_secret_env }
+  else
+    Error
+      (Printf.sprintf
+         "%s: field \"client_secret_env\" must be an environment variable name: letters, \
+          digits and underscores, not beginning with a digit"
+         context)
+
 let auth_config_of_yojson json =
   let open Result.Syntax in
   let* fields = validate_auth_config_fields json in
@@ -325,7 +395,12 @@ let auth_config_of_yojson json =
          Error
            "auth_config_of_yojson: field \"account_mode\" must be the string \"Single_user\" or \"Multi_account\"")
   in
-  Ok { enabled; workspace_secret_hash; require_token; token_expiry_hours; account_mode }
+  let* google =
+    match List.assoc_opt "google" fields with
+    | None -> Ok None
+    | Some json -> Result.map Option.some (login_client_of_json ~member:"google" json)
+  in
+  Ok { enabled; workspace_secret_hash; require_token; token_expiry_hours; account_mode; google }
 
 (** Permission matrix - what each role can do *)
 type permission =

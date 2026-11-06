@@ -28,6 +28,7 @@
   keeper_tool_composition_surface_request_control
   keeper_tool_composition_surface_instruction_skill
   keeper_tool_composition_surface_outcome
+  keeper_tool_composition_surface_async
   keeper_tool_memory_validation
   keeper_tool_execution_journal_types
   keeper_tool_execution_journal_json

@@ -53,7 +53,8 @@ let mode_record event workspace_id =
   | Error error -> Alcotest.failf "fixture mode event refused: %s" (Authz_body.error_to_string error)
 ;;
 
-let other_kinds = List.filter (fun kind -> kind <> K.Mode_event) K.all
+(* The kinds that no layer reads yet. *)
+let other_kinds = List.filter (fun kind -> kind <> K.Mode_event && kind <> K.Invite) K.all
 
 let mode = Alcotest.testable (fun fmt m -> Format.pp_print_string fmt (Mode.to_string m)) Mode.equal
 
@@ -165,9 +166,9 @@ let test_mode_events_are_intents () =
          match S.apply state (mode_record event workspace) with
          | Error refusal -> Alcotest.failf "%s refused: %s" (M.event_label event) (S.refusal_to_string refusal)
          | Ok { S.state = next; high_water } ->
-           Alcotest.check change
+           Alcotest.check (Alcotest.option change)
              (M.event_label event)
-             (Authz_external_store.Change.Mode { event; workspace_id = workspace })
+             (Some (Authz_external_store.Change.Mode { event; workspace_id = workspace }))
              high_water;
            next)
        S.empty
@@ -212,6 +213,102 @@ let test_kinds_not_read () =
           | other -> Alcotest.failf "%s while %s: %s" name mode_name (step_label other))
         after)
     other_kinds
+;;
+
+(* ---- invitations ---- *)
+
+module I = Authz_invite_event
+module Invites = Authz_invite_state
+
+let invite_id = id_of_string Authz_types.Invite_id.of_string "invite-1"
+
+let invite_record ?(author = Authz_records.Author.Local_operator) ?(role = I.Admin) () =
+  let event =
+    I.Issued
+      { invite_id
+      ; token_digest = I.Token_digest.of_token "token-1"
+      ; expires_at_ms = at_ms + 1
+      ; role
+      }
+  in
+  match I.to_body event with
+  | Error error -> Alcotest.failf "fixture invite refused: %s" (Authz_body.error_to_string error)
+  | Ok body ->
+    (match R.make ~head:R.genesis ~at_ms ~author ~kind:K.Invite ~body with
+     | Ok record -> record
+     | Error _ -> Alcotest.fail "fixture invite record refused")
+;;
+
+let test_an_invitation_after_the_bootstrap () =
+  match S.apply (bootstrapped ()) (invite_record ()) with
+  | Error refusal -> Alcotest.failf "the invitation was refused: %s" (S.refusal_to_string refusal)
+  | Ok { S.state; high_water } ->
+    Alcotest.(check bool) "no intent for the store" true (Option.is_none high_water);
+    Alcotest.check mode "the mode stays" (Mode.Multi_account workspace) state.S.mode;
+    (match Invites.find state.S.invites invite_id with
+     | Some { Invites.status = Invites.Open; role = I.Admin; _ } -> ()
+     | Some _ | None -> Alcotest.fail "the invitation is not open with the role Admin")
+;;
+
+let test_a_revocation_is_an_intent () =
+  let revoked =
+    match I.to_body (I.Revoked { invite_id }) with
+    | Error error -> Alcotest.failf "fixture revocation refused: %s" (Authz_body.error_to_string error)
+    | Ok body ->
+      (match
+         R.make ~head:R.genesis ~at_ms ~author:Authz_records.Author.Local_operator ~kind:K.Invite ~body
+       with
+       | Ok record -> record
+       | Error _ -> Alcotest.fail "fixture revocation record refused")
+  in
+  match S.apply (step_ok (bootstrapped ()) (invite_record ())) revoked with
+  | Error refusal -> Alcotest.failf "the revocation was refused: %s" (S.refusal_to_string refusal)
+  | Ok { S.state; high_water } ->
+    Alcotest.(check (option string))
+      "a revocation of the invitation for the store"
+      (Some "revoke of invite:invite-1")
+      (Option.map Authz_external_store.Change.to_string high_water);
+    (match Invites.find state.S.invites invite_id with
+     | Some { Invites.status = Invites.Revoked; _ } -> ()
+     | Some _ | None -> Alcotest.fail "the invitation is not revoked")
+;;
+
+let test_an_invitation_by_mode () =
+  (match S.step S.empty (invite_record ()) with
+   | Error (S.Before_bootstrap K.Invite) -> ()
+   | other -> Alcotest.failf "before the bootstrap: %s" (step_label other));
+  match S.step (switched_off ()) (invite_record ()) with
+  | Error (S.Accounts_off K.Invite) -> ()
+  | other -> Alcotest.failf "while the accounts are off: %s" (step_label other)
+;;
+
+let test_an_invitation_that_is_refused () =
+  let refused label record expected =
+    match S.step (bootstrapped ()) record with
+    | Error refusal when expected refusal -> ()
+    | other -> Alcotest.failf "%s: %s" label (step_label other)
+  in
+  refused
+    "a member invited by the local operator"
+    (invite_record ~role:I.Member ())
+    (function
+      | S.Invite Invites.Local_operator_invites_only_admins -> true
+      | _ -> false);
+  refused
+    "an invitation by an authenticated principal"
+    (invite_record ~author:(Authz_records.Author.Authenticated (Authz_types.Principal.Human user)) ())
+    (function
+      | S.Invite (Invites.Authenticated_author_not_read _) -> true
+      | _ -> false);
+  let unreadable =
+    match R.make ~head:R.genesis ~at_ms ~author:Authz_records.Author.Local_operator ~kind:K.Invite
+            ~body:(body_of_json (`Assoc [ "note", `String "x" ])) with
+    | Ok record -> record
+    | Error _ -> Alcotest.fail "fixture record refused"
+  in
+  refused "a body that is not an invite record" unreadable (function
+    | S.Invite_unreadable _ -> true
+    | _ -> false)
 ;;
 
 (* ---- the log of a real bootstrap ---- *)
@@ -269,6 +366,12 @@ let () =
         ; Alcotest.test_case "mode event out of order" `Quick test_mode_event_out_of_order
         ; Alcotest.test_case "mode event unreadable" `Quick test_mode_event_unreadable
         ; Alcotest.test_case "kinds no layer reads" `Quick test_kinds_not_read
+        ] )
+    ; ( "invitations"
+      , [ Alcotest.test_case "after the bootstrap" `Quick test_an_invitation_after_the_bootstrap
+        ; Alcotest.test_case "a revocation is an intent" `Quick test_a_revocation_is_an_intent
+        ; Alcotest.test_case "by mode" `Quick test_an_invitation_by_mode
+        ; Alcotest.test_case "refused" `Quick test_an_invitation_that_is_refused
         ] )
     ; "log", [ Alcotest.test_case "of a real bootstrap" `Quick test_fresh_bootstrap_log ]
     ]

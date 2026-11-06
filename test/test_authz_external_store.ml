@@ -33,7 +33,8 @@ let human = Subject.Principal (Principal.Human (get (User_id.of_string "alice"))
 let service = Subject.Principal (Principal.Service (get (Service_id.of_string "keeper-1")))
 let workspace = get (Workspace_id.of_string "workspace-1")
 let other_workspace = get (Workspace_id.of_string "workspace-2")
-let subjects = [ grant; credential; runtime; human; service ]
+let invite = Subject.Invite (get (Invite_id.of_string "invite-1"))
+let subjects = [ grant; credential; runtime; human; service; invite ]
 let authz event subject = C.Authz { event; subject }
 let mode event workspace_id = C.Mode { event; workspace_id }
 
@@ -277,6 +278,11 @@ let lines_are_pinned () =
      ^ {|{"type":"authz","event":"disable","subject":{"type":"principal","principal":{"type":"service","id":"keeper-1"}}}}|})
     (pending (authz C.Disable service));
   check
+    "an intent about an invitation"
+    (intent_prefix "intent_pending"
+     ^ {|{"type":"authz","event":"revoke","subject":{"type":"invite","id":"invite-1"}}}|})
+    (pending (authz C.Revoke invite));
+  check
     "an intent about the mode"
     (intent_prefix "intent_pending"
      ^ {|{"type":"mode","event":"fresh_bootstrap","workspace_id":"workspace-1"}}|})
@@ -358,8 +364,8 @@ let check_reads_back label state entry =
 
 let every_change_reads_back () =
   Alcotest.(check int)
-    "eight authorization events with five subjects each, and three mode events"
-    43
+    "eight authorization events with six subjects each, and three mode events"
+    51
     (List.length all_changes);
   with_path (fun path ->
     let store, _, _ = open_ok ~path in

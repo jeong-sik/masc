@@ -1982,7 +1982,6 @@
   test_prompt_preset
   test_managed_assets_sync_from_binary
   test_system_error_class
-  test_set_util
   test_board_core_payload)
  (modules
   test_keeper_turn_interrupt
@@ -2131,7 +2130,6 @@
   test_prompt_preset
   test_managed_assets_sync_from_binary
   test_system_error_class
-  test_set_util
  test_board_core_payload)
  (libraries
   uucp

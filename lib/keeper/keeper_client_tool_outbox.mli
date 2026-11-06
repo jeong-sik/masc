@@ -87,8 +87,17 @@ val context_message : snapshot -> Agent_core.Types.message option
     It cannot collide with the ordinary composed-context or Librarian carrier. *)
 val is_context_message : Agent_core.Types.message -> bool
 
-(** {!is_context_message} for a request message. *)
-val is_wire_context_message : Llm_provider.Types.message -> bool
+(** [place_carrier carrier messages] removes any result-data carrier from
+    [messages] and puts [carrier] right after the latest caller query (the
+    last [User] row of [Conversation] origin), or first when there is none.
+    Every round of a turn reproduces that position, so signed reasoning bound
+    to an earlier round's request still replays, and on a turn-scoped lane
+    the context rows that close the request stay last. Used for the request
+    and for the input record of the same request. *)
+val place_carrier :
+  'source Llm_provider.Types.message_with ->
+  'source Llm_provider.Types.message_with list ->
+  'source Llm_provider.Types.message_with list
 
 val acknowledge : snapshot -> (unit, string) result
 (** Remove only the exact loaded receipts after the consumer completes.

@@ -3109,6 +3109,7 @@
 
 (include stanzas/test_keeper_turn_system.inc)
 (include stanzas/test_keeper_turn_start_history_roles.inc)
+(include stanzas/test_keeper_retained_results_turn_scoped_lane.inc)
 (include stanzas/test_keeper_turn_up_args.inc)
 (include stanzas/test_keeper_turn_up_create_response.inc)
 

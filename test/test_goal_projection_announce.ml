@@ -88,7 +88,7 @@ let test_every_source_announces_after_dropping_planning () =
    | Ok _ -> ()
    | Error _ -> fail "measurement was refused");
   planning_dropped "a measurement write";
-  check bool "a measurement write announces" true (changes_heard stream > 0)
+  check int "a measurement write announces once" 1 (changes_heard stream)
 
 let () =
   run "goal_projection_announce"

@@ -13,6 +13,7 @@ module Kind = struct
     | Provider_usage
     | Provider_standing
     | Keeper_costs
+    | Workspace_health
     | Keeper_oauth_attempts
     | Memory_health
 
@@ -25,6 +26,7 @@ module Kind = struct
     | Provider_usage -> "provider_usage"
     | Provider_standing -> "provider_standing"
     | Keeper_costs -> "keeper_costs"
+    | Workspace_health -> "workspace_health"
     | Keeper_oauth_attempts -> "keeper_oauth_attempts"
     | Memory_health -> "memory_health"
   ;;
@@ -38,6 +40,7 @@ module Kind = struct
     | "provider_usage" -> Some Provider_usage
     | "provider_standing" -> Some Provider_standing
     | "keeper_costs" -> Some Keeper_costs
+    | "workspace_health" -> Some Workspace_health
     | "keeper_oauth_attempts" -> Some Keeper_oauth_attempts
     | "memory_health" -> Some Memory_health
     | _ -> None
@@ -53,6 +56,7 @@ type dataset =
   | Provider_usage
   | Provider_standing
   | Keeper_costs
+  | Workspace_health
   | Keeper_oauth_attempts of { keeper : string }
   | Memory_health of { keeper : string }
 
@@ -65,6 +69,7 @@ let kind = function
   | Provider_usage -> Kind.Provider_usage
   | Provider_standing -> Kind.Provider_standing
   | Keeper_costs -> Kind.Keeper_costs
+  | Workspace_health -> Kind.Workspace_health
   | Keeper_oauth_attempts _ -> Kind.Keeper_oauth_attempts
   | Memory_health _ -> Kind.Memory_health
 ;;
@@ -76,7 +81,7 @@ let dataset_to_wire dataset = Kind.to_wire (kind dataset);;
    name an instance instead, and joins here. *)
 let subject_fields = function
   | Repositories | Verification_requests | Harness_verdicts | Clients | Account_emails
-  | Provider_usage | Provider_standing | Keeper_costs -> []
+  | Provider_usage | Provider_standing | Keeper_costs | Workspace_health -> []
   | Keeper_oauth_attempts { keeper } | Memory_health { keeper } ->
     [ ("keeper", `String keeper) ]
 ;;
@@ -101,6 +106,7 @@ let of_fields fields =
      | Some Kind.Provider_usage -> Ok Provider_usage
      | Some Kind.Provider_standing -> Ok Provider_standing
      | Some Kind.Keeper_costs -> Ok Keeper_costs
+     | Some Kind.Workspace_health -> Ok Workspace_health
      | Some Kind.Keeper_oauth_attempts ->
        (match keeper_field ~wire fields with
         | Ok keeper -> Ok (Keeper_oauth_attempts { keeper })

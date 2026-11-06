@@ -153,7 +153,8 @@ let summary = function
          | Masc.Workspace_dataset_event.Account_emails
          | Masc.Workspace_dataset_event.Provider_usage
          | Masc.Workspace_dataset_event.Provider_standing
-         | Masc.Workspace_dataset_event.Keeper_costs -> "")
+         | Masc.Workspace_dataset_event.Keeper_costs
+         | Masc.Workspace_dataset_event.Workspace_health -> "")
       ^ ")"
   | Observer.Event (Observer.Workspace_store_changed Observer.Goal_projection) -> "goal_projection"
   | Observer.Event (Observer.Workspace_store_changed Observer.Runtime_config) -> "runtime_config"
@@ -960,6 +961,7 @@ let test_a_verification_or_run_push_reads_the_requests () =
                   | Masc.Workspace_dataset_event.Provider_usage
                   | Masc.Workspace_dataset_event.Provider_standing
                   | Masc.Workspace_dataset_event.Keeper_costs
+                  | Masc.Workspace_dataset_event.Workspace_health
                   | Masc.Workspace_dataset_event.Keeper_oauth_attempts _
                   | Masc.Workspace_dataset_event.Memory_health _ )
               | None -> false)
@@ -1029,6 +1031,7 @@ let test_a_repository_push_reads_the_list () =
                   | Masc.Workspace_dataset_event.Provider_usage
                   | Masc.Workspace_dataset_event.Provider_standing
                   | Masc.Workspace_dataset_event.Keeper_costs
+                  | Masc.Workspace_dataset_event.Workspace_health
                   | Masc.Workspace_dataset_event.Keeper_oauth_attempts _
                   | Masc.Workspace_dataset_event.Memory_health _ )
               | None -> false)
@@ -1049,6 +1052,7 @@ let test_a_repository_push_reads_the_list () =
               | Masc.Workspace_dataset_event.Provider_usage
               | Masc.Workspace_dataset_event.Provider_standing
               | Masc.Workspace_dataset_event.Keeper_costs
+              | Masc.Workspace_dataset_event.Workspace_health
               | Masc.Workspace_dataset_event.Keeper_oauth_attempts _
               | Masc.Workspace_dataset_event.Memory_health _ )
           | None -> true)

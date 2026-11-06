@@ -1,0 +1,67 @@
+{
+  "schema": "masc.play-room-sse.independent-review.v1",
+  "reviewer": "agent-10",
+  "base": "4479aab8c1719d78ce2d4de193366d9c5887074c",
+  "reviewed_head": "dd115df84b56ad6e51b887497d0747d663dc2f2b",
+  "scope": {
+    "files": 45,
+    "committed_diff_lines": 3317,
+    "complete_branch_review": true,
+    "uncommitted_plan_and_spec_edits_excluded": true
+  },
+  "previous_p1": {
+    "finding": "tool Join/Leave bypassed the Observer presence lease",
+    "red_run_id": 42076439238,
+    "red_observed_machine": "msx",
+    "expected_machine": "dos",
+    "resolved": true,
+    "implementation": "Tool_misc and Server_play_room_events share Play_room_presence lease state and mutex"
+  },
+  "strengths": [
+    "Active-lease tool Join/Leave returns the current snapshot with no change",
+    "Tool Say retains verified lane_caller and Keeper attribution and announces actual effects",
+    "No remaining direct production Play_room.perform bypass was found",
+    "Transaction idempotency, expiry, reconnect ordering, cancellation, and source-loss revalidation remain intact",
+    "Pending trailing, successful idle, and hidden room read behavior remain correct"
+  ],
+  "findings": {
+    "critical_p0_p1": [],
+    "important_p2": [],
+    "minor_p3": [
+      {
+        "finding": "Play_room_presence is Eio-only; a direct raw-Domain caller outside Eio would raise Effect.Unhandled",
+        "production_defect": false,
+        "evidence": [
+          "MCP dispatch enters Eio_context.with_turn_switch in lib/mcp_server_eio_execute.ml:63-83",
+          "Keeper in-process and concurrent tool execution use Eio switches/fibers",
+          "No in-tree production caller executes masc_play_room outside an Eio fiber",
+          "Eio.Mutex.use_rw ~protect:true enters Cancel.protect even on the uncontended path"
+        ],
+        "source_ready_verdict_unchanged": true
+      }
+    ]
+  },
+  "recommendations": [
+    "Record selected GREEN and type-check only for the reviewed head",
+    "Keep exact-source PTY request-count evidence separate from source review",
+    "Optionally add direct change-option and event-count assertions for guarded and no-lease actions"
+  ],
+  "declined_to_judge": [
+    "Outcomes of the then-running selected GREEN and type-check and uncompleted native PTY",
+    "Browser server sampling outside this PR",
+    "Whole-stack merge readiness beyond PR 48678 source"
+  ],
+  "source_ready_for_exact_head": true,
+  "github_approval": {
+    "review_id": "PRR_kwDOQ7_DYc8AAAABWRejbg",
+    "reviewer": "be-sleepers",
+    "state": "APPROVED",
+    "reviewed_head": "dd115df84b56ad6e51b887497d0747d663dc2f2b",
+    "submitted_at": "2026-11-05T18:08:09Z"
+  },
+  "merge_authorized": false,
+  "stack_limitations": [
+    "Parent PR 48677 remains Draft",
+    "This independent source verdict is not merge authorization"
+  ]
+}

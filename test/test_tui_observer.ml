@@ -149,7 +149,9 @@ let summary = function
          | Masc.Workspace_dataset_event.Keeper_oauth_attempts { keeper }
          | Masc.Workspace_dataset_event.Skill_activations { keeper }
          | Masc.Workspace_dataset_event.Memory_health { keeper } -> ":" ^ keeper
-         | Masc.Workspace_dataset_event.Machine_live { machine } -> ":" ^ Masc.Machine_lane.to_wire machine
+         | Masc.Workspace_dataset_event.Machine_live { machine }
+         | Masc.Workspace_dataset_event.Play_room { machine } ->
+             ":" ^ Masc.Machine_lane.to_wire machine
          | Masc.Workspace_dataset_event.Browser_observation _ -> ""
          | Masc.Workspace_dataset_event.Repositories
          | Masc.Workspace_dataset_event.Verification_requests
@@ -987,6 +989,7 @@ let test_a_verification_or_run_push_reads_the_requests () =
                   | Masc.Workspace_dataset_event.Lanes
                   | Masc.Workspace_dataset_event.Memory_health _
                   | Masc.Workspace_dataset_event.Machine_live _
+                  | Masc.Workspace_dataset_event.Play_room _
                   | Masc.Workspace_dataset_event.Browser_observation _
                   | Masc.Workspace_dataset_event.Lane_addons _ )
               | None -> false)
@@ -1089,6 +1092,7 @@ let test_a_repository_push_reads_the_list () =
                   | Masc.Workspace_dataset_event.Lanes
                   | Masc.Workspace_dataset_event.Memory_health _
                   | Masc.Workspace_dataset_event.Machine_live _
+                  | Masc.Workspace_dataset_event.Play_room _
                   | Masc.Workspace_dataset_event.Browser_observation _
                   | Masc.Workspace_dataset_event.Lane_addons _ )
               | None -> false)
@@ -1122,6 +1126,7 @@ let test_a_repository_push_reads_the_list () =
               | Masc.Workspace_dataset_event.Lanes
               | Masc.Workspace_dataset_event.Memory_health _
               | Masc.Workspace_dataset_event.Machine_live _
+              | Masc.Workspace_dataset_event.Play_room _
               | Masc.Workspace_dataset_event.Browser_observation _
               | Masc.Workspace_dataset_event.Lane_addons _ )
           | None -> true)
@@ -1669,6 +1674,26 @@ let test_lane_inventory_pushes_decode_with_their_scope () =
     [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"lane_addons\"}\n\n"
     ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"lane_addons\",\"instance_id\":\"\"}\n\n" ]
 
+let test_play_room_pushes_share_cross_machine_changes () =
+  List.iter
+    (fun expected ->
+      let fields = [ "type", `String "workspace_dataset_changed"
+                   ; "dataset", `String "play_room"; "machine", `String expected ] in
+      match Masc.Workspace_dataset_event.of_fields fields with
+      | Ok (Masc.Workspace_dataset_event.Play_room { machine }) ->
+          check string "the source machine is preserved" expected
+            (Masc.Machine_lane.to_wire machine)
+      | Ok _ | Error _ -> fail "a Play room push lost its source machine")
+    [ "msx"; "dos" ];
+  List.iter
+    (fun fields ->
+      match Masc.Workspace_dataset_event.of_fields fields with
+      | Error _ -> ()
+      | Ok _ -> fail "a Play room push with invalid scope was accepted")
+    [ [ "type", `String "workspace_dataset_changed"; "dataset", `String "play_room" ]
+    ; [ "type", `String "workspace_dataset_changed"; "dataset", `String "play_room"
+      ; "machine", `String "other" ] ]
+
 let test_memory_health_pushes_require_their_keeper () =
   let fields = [ "type", `String "workspace_dataset_changed"
                ; "dataset", `String "memory_health"; "keeper", `String "alpha" ] in
@@ -1766,6 +1791,8 @@ let () =
             test_a_repository_push_reads_the_list
         ; test_case "Lane inventory pushes decode with their scope" `Quick
             test_lane_inventory_pushes_decode_with_their_scope
+        ; test_case "Play room pushes share cross-machine changes" `Quick
+            test_play_room_pushes_share_cross_machine_changes
         ; test_case "Memory health pushes require their Keeper" `Quick
             test_memory_health_pushes_require_their_keeper
         ; test_case "Machine live pushes name their machine" `Quick

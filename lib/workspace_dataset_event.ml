@@ -36,6 +36,7 @@ type dataset =
   | Lanes
   | Machine_live of { machine : Machine_lane.t }
   | Memory_health of { keeper : string }
+  | Play_room of { machine : Machine_lane.t }
   | Lane_addons of { instance_id : string }
   | Browser_observation of browser_observation
 
@@ -60,6 +61,7 @@ let runtime_metrics_name = "runtime_metrics"
 let lanes_name = "lanes"
 let machine_live_name = "machine_live"
 let memory_health_name = "memory_health"
+let play_room_name = "play_room"
 let lane_addons_name = "lane_addons"
 let browser_observation_name = "browser_observation"
 
@@ -86,6 +88,7 @@ module Kind = struct
     | Lanes
     | Machine_live
     | Memory_health
+    | Play_room
     | Lane_addons
     | Browser_observation
 
@@ -111,6 +114,7 @@ module Kind = struct
     | Lanes -> lanes_name
     | Machine_live -> machine_live_name
     | Memory_health -> memory_health_name
+    | Play_room -> play_room_name
     | Lane_addons -> lane_addons_name
     | Browser_observation -> browser_observation_name
 
@@ -136,6 +140,7 @@ module Kind = struct
     | wire when String.equal wire lanes_name -> Some Lanes
     | wire when String.equal wire machine_live_name -> Some Machine_live
     | wire when String.equal wire memory_health_name -> Some Memory_health
+    | wire when String.equal wire play_room_name -> Some Play_room
     | wire when String.equal wire lane_addons_name -> Some Lane_addons
     | wire when String.equal wire browser_observation_name -> Some Browser_observation
     | _ -> None
@@ -163,6 +168,7 @@ let kind = function
   | Lanes -> Kind.Lanes
   | Machine_live _ -> Kind.Machine_live
   | Memory_health _ -> Kind.Memory_health
+  | Play_room _ -> Kind.Play_room
   | Lane_addons _ -> Kind.Lane_addons
   | Browser_observation _ -> Kind.Browser_observation
 
@@ -278,7 +284,8 @@ let keeper_field = function
   | Repositories | Verification_requests | Harness_verdicts | Goals | Runtime_config | Connectors
   | Skill_catalog | Clients | Account_emails | Provider_usage | Provider_standing | Keeper_costs
   | Workspace_health | Runtime_probe | Runtime_metrics | Lanes -> []
-  | Machine_live { machine } -> [ "machine", `String (Machine_lane.to_wire machine) ]
+  | Machine_live { machine } | Play_room { machine } ->
+      [ "machine", `String (Machine_lane.to_wire machine) ]
   | Lane_addons { instance_id } -> [ "instance_id", `String instance_id ]
   | Browser_observation { scope; revision } ->
       browser_scope_fields scope @ [ "revision", `String revision ]
@@ -323,6 +330,8 @@ let of_fields fields =
   | Some (`String name) when String.equal name lanes_name -> Ok Lanes
   | Some (`String name) when String.equal name machine_live_name ->
     Result.map (fun machine -> Machine_live { machine }) (machine_of_fields fields)
+  | Some (`String name) when String.equal name play_room_name ->
+    Result.map (fun machine -> Play_room { machine }) (machine_of_fields fields)
   | Some (`String name) when String.equal name lane_addons_name ->
     Result.map (fun instance_id -> Lane_addons { instance_id }) (instance_of_fields fields)
   | Some (`String name) when String.equal name browser_observation_name ->

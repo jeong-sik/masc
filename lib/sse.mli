@@ -105,6 +105,7 @@ type registration_error =
   | Unknown_session of { session_id : string }
   | Session_expired of { session_id : string }
   | Session_owner_mismatch of { session_agent : string; token_agent : string }
+  | Registration_stale of { session_id : string }
 
 val registration_error_to_string : registration_error -> string
 
@@ -132,6 +133,14 @@ val register :
     On validation failure a typed [registration_error] is returned so the
     transport layer can respond with an auth error and close the connection
     without leaking a half-registered SSE client. *)
+
+val register_with_client :
+  ?kind:session_kind -> ?on_disconnect:(unit -> unit) -> ?observer_instance_id:string ->
+  auth:registration_auth -> string -> last_event_id:int ->
+  (client * client option * string option, registration_error) result
+(** As {!register}, but returns the exact committed client, the replaced
+    same-session client, and any cap-evicted session. An older registration
+    cannot replace a newer same-session client and returns [Registration_stale]. *)
 
 val unregister : string -> unit
 val unregister_if_current : string -> int -> unit

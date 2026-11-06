@@ -11131,6 +11131,7 @@ type state = {
   mutable observer_stream_owner: unit ref option;
   mutable observer_machine: Masc.Machine_lane.t option;
   mutable observer_browser: Masc.Workspace_dataset_event.browser_scope option;
+  mutable observer_play: (Masc.Machine_lane.t * string) option;
   mutable observer_recovery_owner: unit ref option;
   mutable observer_scope_binding: observer_scope_binding;
   mutable mcp_session: string option;
@@ -14881,6 +14882,7 @@ let suspend_workspace_readings state =
   state.observer_stream_owner <- None;
   state.observer_machine <- None;
   state.observer_browser <- None;
+  state.observer_play <- None;
   state.fleet_stream_reader <- Fleet_stream_idle;
   state.detail_read_authority <- ref ();
   state.detail_reads <- [];
@@ -20629,6 +20631,7 @@ let create_state
   observer_stream_owner = None;
   observer_machine = None;
   observer_browser = None;
+  observer_play = None;
   observer_recovery_owner = None;
   observer_scope_binding = Observer_scope_unbound;
   mcp_session = None;
@@ -20739,6 +20742,11 @@ let observer_browser_scope_of_state state =
   Option.bind (browser_lane_on_screen state) (fun view ->
     Browser_lane_view.observation_scope ~image_open:state.image_open
       ?viewport:(Option.map fst state.browser_viewport) view)
+
+let observer_play_of_state state =
+  if state.msx_open && not state.msx_menu_open then
+    Option.map (fun room -> state.machine_source, Masc_tui_play_room.client_id room) state.play_room
+  else None
 
 let system_logs_page (state : state) = System_logs_view.current state.system_logs
 let edit_system_logs_page (state : state) change =

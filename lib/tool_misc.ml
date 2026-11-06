@@ -360,10 +360,15 @@ let dispatch ?ask_source_turn_ref ?dos_admission ?(lane_access = Lane_addon_sour
         | Lane_addon_sources.Keeper _ -> Play_room.Keeper
         | Operator_configuration | Unauthenticated -> Play_room.Participant in
       Some (match Result.bind (Play_room.parse_action args) (fun action ->
-        Play_room.perform ~base_path:ctx.config.base_path ~who:lane_caller ~speaker
-          ~now:(Time_compat.now ()) action) with
-        | Ok snapshot -> Tool_result.make_ok ~tool_name:name ~start_time:start
-            ~data:(Play_room.snapshot_json ~viewer:lane_caller snapshot) ()
+        Play_room_presence.perform_with_change ~base_path:ctx.config.base_path ~who:lane_caller ~speaker action) with
+        | Ok (snapshot, change) ->
+            (match change with
+             | Some change when change.message_committed || change.membership_changed ->
+               Workspace_dataset_event.announce ~base_path:ctx.config.base_path
+                 (Workspace_dataset_event.Play_room { machine = change.machine })
+             | Some _ | None -> ());
+            Tool_result.make_ok ~tool_name:name ~start_time:start
+              ~data:(Play_room.snapshot_json ~viewer:lane_caller snapshot) ()
         | Error error ->
             let class_ = match error with
               | Play_room.Invalid_request _ | Conflict _ -> Tool_result.Workflow_rejection

@@ -1788,19 +1788,24 @@ let workspace_read_attested headers =
 (** Stream headers are delivered before body chunks. A transport disconnect
     and an explicit HTTP refusal remain distinct so a quiet connection does
     not invalidate an otherwise usable MCP session or scoped replay cursor. *)
-let observe_runtime_events_with_scopes ~machine ~browser ~on_identity ~clock ~expected_base_path ~expected_masc_root
+let observe_runtime_events_with_scopes ?play ~machine ~browser ~on_identity ~clock ~expected_base_path ~expected_masc_root
     ~(host : string) ~(port : int)
     ~(session_id : string) ~(cursor : Sse_wire.observer_cursor option)
-    ~on_open ~(on_chunk : string -> unit) : (unit, observer_error) result =
+    ~on_open ~(on_chunk : string -> unit) () : (unit, observer_error) result =
   let machine_query = match machine with
     | None -> ""
     | Some machine -> "&machine=" ^ Masc.Machine_lane.to_wire machine in
   let browser_query = match browser with
     | None -> ""
     | Some scope -> "&" ^ Masc.Workspace_dataset_event.browser_scope_query scope in
+  let play_query = match play with
+    | None -> ""
+    | Some (machine, client) ->
+        Printf.sprintf "&play_machine=%s&play_client_id=%s"
+          (Masc.Machine_lane.to_wire machine) (Uri.pct_encode ~component:`Query_value client) in
   let url =
     url_of ~host ~port
-      ~path:(observer_stream_path ^ machine_query ^ browser_query ^ "&" ^ expected_workspace_paths_query
+      ~path:(observer_stream_path ^ machine_query ^ browser_query ^ play_query ^ "&" ^ expected_workspace_paths_query
                ~base_path:expected_base_path ~masc_root:expected_masc_root)
   in
   let headers =
@@ -1846,7 +1851,7 @@ let observe_runtime_events_with_machine ~machine ~on_identity ~clock ~expected_b
     ~(session_id : string) ~(cursor : Sse_wire.observer_cursor option)
     ~on_open ~(on_chunk : string -> unit) : (unit, observer_error) result =
   observe_runtime_events_with_scopes ~machine ~browser:None ~on_identity ~clock
-    ~expected_base_path ~expected_masc_root ~host ~port ~session_id ~cursor ~on_open ~on_chunk
+    ~expected_base_path ~expected_masc_root ~host ~port ~session_id ~cursor ~on_open ~on_chunk ()
 
 let observe_runtime_events ~on_identity ~clock ~expected_base_path ~expected_masc_root
     ~(host : string) ~(port : int)

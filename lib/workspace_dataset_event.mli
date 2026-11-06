@@ -117,6 +117,9 @@ type dataset =
       (** An input of [keeper]'s row in
           [GET /api/v1/dashboard/keeper-memory-health] was written. A reader
           reads that row alone ([?keeper=]); a Keeper that left has no row. *)
+  | Play_room of { machine : Machine_lane.t }
+      (** A public Play room message or public membership changed. [machine]
+          is the source, not a filter: the transcript is shared across machines. *)
   | Lane_addons of { instance_id : string }
       (** The open Add-on Inspect of [instance_id] has a newly committed
           observation. The event carries the instance and its reader
@@ -150,6 +153,7 @@ module Kind : sig
     | Lanes
     | Machine_live
     | Memory_health
+    | Play_room
     | Lane_addons
     | Browser_observation
 

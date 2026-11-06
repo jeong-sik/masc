@@ -85,6 +85,7 @@
 (include stanzas/test_keeper_trust_disposition.inc)
 (include stanzas/test_keeper_attention_reason.inc)
 (include stanzas/test_play_room.inc)
+(include stanzas/test_server_play_room_events.inc)
 (include stanzas/test_h2_play_room.inc)
 (include stanzas/test_h2_artifact_routes.inc)
 (test
@@ -2919,6 +2920,15 @@
 
 (include stanzas/test_docker_playground_gc_script.inc)
 
+(include stanzas/test_tui_lane_read_decision.inc)
+(include stanzas/test_tui_lane_inventory_notifications.inc)
+(include stanzas/test_tui_lane_inventory_push.inc)
+(include stanzas/test_tui_spectator_push.inc)
+(include stanzas/test_machine_spectator.inc)
+(include stanzas/test_browser_spectator.inc)
+(include stanzas/test_tui_browser_push.inc)
+(include stanzas/test_tui_memory_push.inc)
+(include stanzas/test_tui_play_room_push.inc)
 ; nofile-status reads the process table: which finds scan the caller's home,
 ; which lock waiters lost their parent, which dune runs outside a wrapper.
 (rule

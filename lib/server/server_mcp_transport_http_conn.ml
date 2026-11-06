@@ -100,6 +100,18 @@ let guard_expired ~now ~session_id state =
 let register_sse_conn ~session_id ~info =
   Atomic_util.update sse_conn_by_session (fun map -> SMap.add session_id info map)
 
+let register_sse_conn_if_newer ~session_id ~info =
+  let rec install () =
+    let current = Atomic.get sse_conn_by_session in
+    match SMap.find_opt session_id current with
+    | Some existing when existing.client_id >= info.client_id -> false
+    | Some _ | None ->
+      let next = SMap.add session_id info current in
+      if Atomic.compare_and_set sse_conn_by_session current next then true
+      else install ()
+  in
+  install ()
+
 (* Claim the single close of [info]: returns [true] for exactly one caller even
    under concurrent close paths (a disconnect on one domain racing eviction or
    shutdown on another).  The close body below — including
@@ -145,6 +157,19 @@ let stop_sse_session_impl ~clear_guard session_id =
   );
   if clear_guard then
     Atomic_util.update sse_connect_guard_by_session (fun map -> SMap.remove session_id map);
+  match !info_opt with
+  | None -> ()
+  | Some info -> close_sse_conn info
+
+let stop_sse_session_before ~client_id session_id =
+  let info_opt = ref None in
+  Atomic_util.update sse_conn_by_session (fun map ->
+    match SMap.find_opt session_id map with
+    | Some info when info.client_id < client_id ->
+        info_opt := Some info;
+        SMap.remove session_id map
+    | Some _ | None -> map);
+  Atomic_util.update sse_connect_guard_by_session (fun map -> SMap.remove session_id map);
   match !info_opt with
   | None -> ()
   | Some info -> close_sse_conn info

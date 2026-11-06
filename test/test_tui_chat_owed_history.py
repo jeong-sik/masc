@@ -75,6 +75,7 @@ class ChatServer(FixtureServer):
         self.history_times: list[float] = []
         self.events = ObserverEvents()
         self.observer_connections = 0
+        self.observer_event_id = 0
         self.observer_restart_on_resume = True
         self.observer_gap_on_resume = False
 
@@ -92,6 +93,9 @@ class ChatHandler(FixtureHandler):
             self.wfile.write(payload)
         except (BrokenPipeError, ConnectionResetError):
             pass
+
+    def observer_event_label(self) -> str:
+        return "observer-event-written"
 
     def observe(self, server: ChatServer) -> None:
         with server.condition:
@@ -123,18 +127,19 @@ class ChatHandler(FixtureHandler):
         self.wfile.flush()
         subscription = server.events.subscribe()
         server.observer_ready.set()
-        cursor = 0
         while True:
             event = subscription.get()
             if event is None or event == "close":
                 break
-            cursor += 1
+            with server.condition:
+                server.observer_event_id += 1
+                cursor = server.observer_event_id
             try:
                 self.wfile.write(
                     f"id: {cursor}\ndata: ".encode() + json.dumps(event).encode() + b"\n\n"
                 )
                 self.wfile.flush()
-                server.record("observer-event-written")
+                server.record(self.observer_event_label())
             except (BrokenPipeError, ConnectionResetError):
                 break
         self.close_connection = True

@@ -453,6 +453,7 @@ let keeper_of_event ~traces (event : Observer.event) =
       | Masc.Workspace_dataset_event.Workspace_health | Masc.Workspace_dataset_event.Runtime_probe
       | Masc.Workspace_dataset_event.Runtime_metrics | Masc.Workspace_dataset_event.Lanes
       | Masc.Workspace_dataset_event.Machine_live _ | Masc.Workspace_dataset_event.Browser_observation _
+      | Masc.Workspace_dataset_event.Play_room _
       | Masc.Workspace_dataset_event.Lane_addons _ )
   | Observer.Gate_connector_changed _ | Observer.Board_changed _ | Observer.Lane_resource _
   | Observer.Snapshot _ | Observer.Execution_snapshot | Observer.Other _ ->
@@ -530,6 +531,7 @@ let label_of_event (event : Observer.event) =
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Lanes -> "lanes"
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Machine_live _) -> "machine live"
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Browser_observation _) -> "browser observation"
+  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Play_room _) -> "play room"
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Lane_addons _) -> "add-ons"
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Memory_health _) -> "memory health"
   | Observer.Keeper_event_queue_changed _ -> "event queue"
@@ -735,6 +737,8 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Browser_observation { scope; _ }) ->
       { at; keeper = "server"; glyph = Quiet; label; detail = Printf.sprintf "%s/%d"
           (Browser_lane.Lane_name.to_wire scope.source) scope.tab_id }
+  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Play_room { machine }) ->
+      { at; keeper = "server"; glyph = Quiet; label; detail = Masc.Machine_lane.to_wire machine }
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Lane_addons { instance_id }) ->
       { at; keeper = "server"; glyph = Quiet; label; detail = instance_id }
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Memory_health { keeper }) ->

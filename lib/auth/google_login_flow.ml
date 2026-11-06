@@ -5,23 +5,6 @@ let ( let* ) = Result.bind
 module Exchange = Oidc_google_exchange
 module Transaction = Oidc_login_transaction
 
-type client_error =
-  | Secret_variable_unset of string
-  | Client_refused of Login_client.error
-
-let client_error_to_string = function
-  | Secret_variable_unset name -> Printf.sprintf "the environment variable %s is not set" name
-  | Client_refused error -> Login_client.error_to_string error
-;;
-
-let client ~getenv ~client_id ~redirect_uri ~client_secret_env =
-  match getenv client_secret_env with
-  | None -> Error (Secret_variable_unset client_secret_env)
-  | Some client_secret ->
-    Login_client.make ~client_id ~client_secret ~redirect_uri
-    |> Result.map_error (fun error -> Client_refused error)
-;;
-
 type started =
   { id : Transaction.Id.t
   ; authorization_url : string

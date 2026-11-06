@@ -23,6 +23,23 @@ val make
   -> (t, error) result
 
 val error_to_string : error -> string
+
+type environment_error =
+  | Secret_variable_unset of string
+      (** The environment variable named by the configuration is not set. *)
+  | Client_refused of error
+
+val environment_error_to_string : environment_error -> string
+
+(** The client of an [auth_config] login client ([google] or [github]). The
+    secret is read through [getenv] from the variable [client_secret_env] at
+    this call, and is held only by the client. *)
+val of_environment
+  :  getenv:(string -> string option)
+  -> client_id:string
+  -> redirect_uri:string
+  -> client_secret_env:string
+  -> (t, environment_error) result
 val client_id : t -> string
 val redirect_uri : t -> string
 

@@ -10,23 +10,6 @@
     The transport, the clock and the draws are arguments. This module does no
     I/O of its own; the zone writes the admission. *)
 
-type client_error =
-  | Secret_variable_unset of string
-      (** The environment variable named by the configuration is not set. *)
-  | Client_refused of Login_client.error
-
-val client_error_to_string : client_error -> string
-
-(** The client of a configuration. The secret is read through [getenv] from
-    the variable [client_secret_env] at this call, and is held only by the
-    client. *)
-val client
-  :  getenv:(string -> string option)
-  -> client_id:string
-  -> redirect_uri:string
-  -> client_secret_env:string
-  -> (Login_client.t, client_error) result
-
 (** What a start gives the route: the ID for the cookie, and where to send the
     browser. *)
 type started =

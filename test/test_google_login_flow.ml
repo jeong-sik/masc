@@ -218,14 +218,14 @@ let with_installation ?(capacity = 8) f =
            | Error error -> Alcotest.failf "invitation refused: %s" (Z.error_to_string error));
           let client =
             match
-              Flow.client
+              Login_client.of_environment
                 ~getenv:(fun name -> if String.equal name secret_variable then Some client_secret else None)
                 ~client_id
                 ~redirect_uri
                 ~client_secret_env:secret_variable
             with
             | Ok client -> client
-            | Error error -> Alcotest.fail (Flow.client_error_to_string error)
+            | Error error -> Alcotest.fail (Login_client.environment_error_to_string error)
           in
           f
             { zone
@@ -396,23 +396,23 @@ let a_token_for_another_login_is_refused () =
 
 let the_client_needs_its_secret () =
   let made getenv redirect_uri =
-    Flow.client ~getenv ~client_id ~redirect_uri ~client_secret_env:secret_variable
+    Login_client.of_environment ~getenv ~client_id ~redirect_uri ~client_secret_env:secret_variable
   in
   (match made (fun _ -> None) redirect_uri with
-   | Error (Flow.Secret_variable_unset name) -> Alcotest.(check string) "names the variable" secret_variable name
-   | Error error -> Alcotest.fail (Flow.client_error_to_string error)
+   | Error (Login_client.Secret_variable_unset name) -> Alcotest.(check string) "names the variable" secret_variable name
+   | Error error -> Alcotest.fail (Login_client.environment_error_to_string error)
    | Ok _ -> Alcotest.fail "made without a secret");
   (match made (fun _ -> Some "") redirect_uri with
-   | Error (Flow.Client_refused Login_client.Client_secret_empty) -> ()
-   | Error error -> Alcotest.fail (Flow.client_error_to_string error)
+   | Error (Login_client.Client_refused Login_client.Client_secret_empty) -> ()
+   | Error error -> Alcotest.fail (Login_client.environment_error_to_string error)
    | Ok _ -> Alcotest.fail "made with an empty secret");
   (match made (fun _ -> Some client_secret) "http://masc.example/auth/oidc/callback" with
-   | Error (Flow.Client_refused Login_client.Redirect_uri_not_https) -> ()
-   | Error error -> Alcotest.fail (Flow.client_error_to_string error)
+   | Error (Login_client.Client_refused Login_client.Redirect_uri_not_https) -> ()
+   | Error error -> Alcotest.fail (Login_client.environment_error_to_string error)
    | Ok _ -> Alcotest.fail "made with an http redirect");
   match made (fun name -> if String.equal name secret_variable then Some client_secret else None) redirect_uri with
   | Ok client -> Alcotest.(check string) "redirect" redirect_uri (Login_client.redirect_uri client)
-  | Error error -> Alcotest.fail (Flow.client_error_to_string error)
+  | Error error -> Alcotest.fail (Login_client.environment_error_to_string error)
 ;;
 
 let () =

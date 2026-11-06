@@ -285,8 +285,8 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
     - 구역이 멈췄거나 `Uncertain`이면 입장시키지 않는다(§4.1 "ledger를 읽지 못하면 principal을 만들지 않는다").
     - 신원도 초대 token도 없으면 아무것도 쓰지 않고 거절한다. 1단계에는 입장 요청 (c)가 없다.
     - `previously_deleted`: `Authz_principal_state`가 `Deleted` 사건의 신원을 모은다. `authz.jsonl`을 읽어 만드는 값이고 principal 레코드에는 없다(§5.1-6). 입장 결과가 이 표지를 싣고, 화면은 C6 ③이 보인다.
-  - C2a-5 설정과 흐름. `auth_config.oidc` 설정과, 로그인 하나를 시작부터 입장 판정까지 도는 함수다. HTTP 경로는 C3이 만든다(2026-11-06 범위 조정). 경로는 transaction ID를 `__Host-masc_oidc_txn` 쿠키로 주고받는데 그 쿠키가 C3의 것이라, 이 층에 경로를 두면 callback이 transaction을 찾지 못한다.
-    - 설정은 `auth_config.oidc`다. client ID, redirect URI, client secret을 담은 환경 변수의 이름을 둔다. secret 값은 `config.json`에 두지 않는다. `save_auth_config`가 그 파일을 다시 쓰고, 백업에도 들어가기 때문이다. 이 필드를 쓰는 곳은 다계정 경로뿐이다.
+  - C2a-5 설정과 흐름. `auth_config.google` 설정과, 로그인 하나를 시작부터 입장 판정까지 도는 함수다. HTTP 경로는 C3이 만든다(2026-11-06 범위 조정). 경로는 transaction ID를 `__Host-masc_oidc_txn` 쿠키로 주고받는데 그 쿠키가 C3의 것이라, 이 층에 경로를 두면 callback이 transaction을 찾지 못한다.
+    - 설정은 `auth_config.google`다. client ID, redirect URI, client secret을 담은 환경 변수의 이름을 둔다. 멤버 이름은 프로토콜이 아니라 provider다. C2b의 GitHub client는 같은 모양의 `github` 멤버다. secret 값은 `config.json`에 두지 않는다. `save_auth_config`가 그 파일을 다시 쓰고, 백업에도 들어가기 때문이다. 이 필드를 쓰는 곳은 다계정 경로뿐이다.
     - client는 이 설정과 환경 변수로 만든다. redirect URI는 `https` URL이어야 한다. `__Host-` 쿠키는 `Secure`라서 다계정 로그인은 `https`에서만 돈다.
     - start는 초대 token(선택)과 `return_to`를 받는다. discovery를 먼저 읽고 transaction을 만든다. discovery가 실패하면 저장소에 아무것도 남지 않는다. 결과는 transaction ID와 Google 인가 URL이다.
     - callback은 C2a-2, 3, 1, 4 순서로 돈다. transaction을 먼저 꺼내므로, Google이 거절을 돌려보낸 callback도 transaction을 지운다. 결과는 입장 판정과 `return_to`다.

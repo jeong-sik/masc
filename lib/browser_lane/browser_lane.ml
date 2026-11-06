@@ -850,7 +850,6 @@ let client_json info =
   "space",client_space_to_json info.space;
   "interactions",`List (List.map interaction_activity_json active);
   "lastActivities",`List (List.map settled_activity_json settled)]
-let target_client_id = function Live_client client -> Some client.info.client_id
 (* Where an answer came from, as every successful answer states it: a live
    connection's ID and how its browser is reached. *)
 let client_id_field = "clientId"

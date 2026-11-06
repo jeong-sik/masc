@@ -119,8 +119,10 @@ let is_valid_name name =
        name
 ;;
 
+let presets_dirname = "presets"
+
 let presets_dir ~base_path =
-  Filename.concat (Config_dir_resolver.masc_root ~base_path) "presets"
+  Filename.concat (Config_dir_resolver.masc_root ~base_path) presets_dirname
 ;;
 
 let preset_dir ~base_path name = Filename.concat (presets_dir ~base_path) name
@@ -621,11 +623,13 @@ let remove_quietly dir =
   | Ok () | Error _ -> ()
 ;;
 
+let staging_dirname = "presets-staging"
+
 (* Holders for presets being written, beside [presets/] so the list never
    reads one and on the same file system so a holder's directory can be
    renamed into [presets/]. *)
 let staging_dir ~base_path =
-  Filename.concat (Config_dir_resolver.masc_root ~base_path) "presets-staging"
+  Filename.concat (Config_dir_resolver.masc_root ~base_path) staging_dirname
 ;;
 
 (* Every file of [s] into [dir], which does not exist yet. *)

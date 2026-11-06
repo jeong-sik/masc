@@ -639,3 +639,9 @@ val browser_observations : config:Workspace.config -> access:Lane_addon_sources.
     installation is left out, and a detaching incarnation gives way to its
     replacement. Runs on the Lane
     Add-on owner domain and waits for no browser command. *)
+
+val lane_addons_dirname : string
+(** The Lane add-on store directory below [<base>/.masc]. *)
+
+val kept_files_dirname : string
+(** The directory native kept files sit in below the Lane add-on store. *)

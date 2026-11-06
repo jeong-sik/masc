@@ -15,7 +15,7 @@ module B = Tool_blob_store
 module M = Tool_blob_maintenance
 
 (* Maintenance reads each workspace's posts where Board writes them. *)
-let board_posts_file = Masc_board_handlers.Board_paths.posts_file
+let scope = Server_tool_blob_scope.scope
 module O = Tool_output
 
 (* --- Helpers --- *)
@@ -872,7 +872,7 @@ let test_sharding_layout () =
 (* Fixtures here hold a handful of small files and compete with no startup
    watchdog, so they scan unbounded; the budget path has its own tests. *)
 let maintenance_ok ~base_path ~mode =
-  match M.run ~base_path ~board_posts_file ~mode with
+  match M.run ~base_path ~scope ~mode with
   | Ok report -> report
   | Error error ->
     Alcotest.failf "maintenance failed: %s" (M.error_to_string error)
@@ -1284,7 +1284,7 @@ let test_maintenance_opaque_payloads_preserve_fail_closed_boundaries () =
              ["message",message])
          | _ -> Alcotest.fail "invalid official fixture envelope") in
     ignore (save_maintenance_source base_path "keepers/reviewer/refused.json" source);
-    (match M.run ~base_path ~board_posts_file ~mode:M.Delete_previous_candidates with
+    (match M.run ~base_path ~scope ~mode:M.Delete_previous_candidates with
      | Error (M.Malformed_structured_artifact_reference _) -> ()
      | Error error -> Alcotest.fail (M.error_to_string error)
      | Ok _ -> Alcotest.fail "malformed or unrecognized owner authorized deletion");
@@ -1376,7 +1376,7 @@ let test_maintenance_outbox_opacity_requires_complete_receipt_authority () =
     let filename = match shape with `Wrong_filename -> "unbound.json" | _ -> Codec.filename json in
     ignore (save_maintenance_source base_path
       ("keepers/reviewer/official-client-runtime/undelivered-tools/" ^ filename) json);
-    (match M.run ~base_path ~board_posts_file ~mode:M.Delete_previous_candidates with
+    (match M.run ~base_path ~scope ~mode:M.Delete_previous_candidates with
      | Error (M.Malformed_structured_artifact_reference _) -> ()
      | Error error -> Alcotest.fail (M.error_to_string error)
      | Ok _ -> Alcotest.fail "an invalid receipt made its arbitrary payload opaque");
@@ -1405,7 +1405,7 @@ let test_maintenance_outbox_payloads_preserve_reserved_reference_failures () =
         ~tool_name:"fixture" ~arguments:`Null ~response:payload))
     else require (Outbox.retain ~base_path ~keeper_name:"reviewer"
       (outbox_vendor_receipt payload `Null));
-    (match M.run ~base_path ~board_posts_file ~mode:M.Delete_previous_candidates with
+    (match M.run ~base_path ~scope ~mode:M.Delete_previous_candidates with
      | Error (M.Malformed_structured_artifact_reference _) -> ()
      | Error error -> Alcotest.fail (M.error_to_string error)
      | Ok _ -> Alcotest.fail "opaque tool data swallowed a malformed reserved reference");
@@ -1591,7 +1591,7 @@ let test_maintenance_malformed_reference_fails_closed () =
       in
       Fs_compat.mkdir_p (Filename.dirname source);
       Fs_compat.save_file source "{\"output\":\"[masc:blob sha256=garbage]\"}\n";
-      (match M.run ~base_path ~board_posts_file ~mode:M.Delete_previous_candidates with
+      (match M.run ~base_path ~scope ~mode:M.Delete_previous_candidates with
        | Error (M.Malformed_artifact_reference { path; line; _ }) ->
          Alcotest.(check string) "exact malformed source" source path;
          Alcotest.(check int) "exact malformed line" 1 line
@@ -1623,7 +1623,7 @@ let test_maintenance_noncanonical_reference_fails_closed () =
         (Yojson.Safe.to_string
            (`String
              (O.encode_for_agent_core (O.Stored blob) ^ " trailing text")));
-      (match M.run ~base_path ~board_posts_file ~mode:M.Delete_previous_candidates with
+      (match M.run ~base_path ~scope ~mode:M.Delete_previous_candidates with
        | Error (M.Malformed_artifact_reference { path; line; offset; _ }) ->
          Alcotest.(check string) "exact noncanonical source" source path;
          Alcotest.(check int) "exact malformed line" 1 line;
@@ -2198,7 +2198,7 @@ let test_maintenance_reads_chat_operation_store_and_prepared_gate_checkpoint () 
           Store.close op_store |> ok;
           Sys.remove db_path;
           Fs_compat.save_file (db_path ^ "-wal") "\x37\x7f\x06\x82";
-          match M.run ~base_path ~board_posts_file ~mode:M.Observe_only with
+          match M.run ~base_path ~scope ~mode:M.Observe_only with
           | Error (M.Durable_source_parse_failed _) -> ()
           | Error error ->
             Alcotest.failf
@@ -2285,7 +2285,7 @@ let test_maintenance_rejects_malformed_typed_result_manifest () =
         checkpoint
         (Yojson.Safe.to_string
            (`String (O.encode_for_agent_core (O.Stored manifest))));
-      (match M.run ~base_path ~board_posts_file ~mode:M.Delete_previous_candidates with
+      (match M.run ~base_path ~scope ~mode:M.Delete_previous_candidates with
        | Error (M.Artifact_manifest_invalid { sha256; _ }) ->
          Alcotest.(check string) "exact malformed manifest" manifest.sha256 sha256
        | Error error ->
@@ -2320,7 +2320,7 @@ let test_maintenance_malformed_normalized_blob_fails_closed () =
                    ] )
              ])
          ^ "\n");
-      (match M.run ~base_path ~board_posts_file ~mode:M.Delete_previous_candidates with
+      (match M.run ~base_path ~scope ~mode:M.Delete_previous_candidates with
        | Error
            (M.Malformed_structured_artifact_reference
              { path; line; _ }) ->
@@ -2418,7 +2418,7 @@ let test_maintenance_truncated_normalized_blob_fails_closed () =
       Fs_compat.save_file
         tool_call_log
         ("{\"output\":" ^ complete_reference);
-      (match M.run ~base_path ~board_posts_file ~mode:M.Delete_previous_candidates with
+      (match M.run ~base_path ~scope ~mode:M.Delete_previous_candidates with
        | Error
            (M.Durable_source_parse_failed
              { path; line; _ }) ->
@@ -2456,7 +2456,7 @@ let test_maintenance_undecodable_rows_preserve_candidate_and_blob () =
             "tool_calls/2026-10/17.jsonl" in
         Fs_compat.mkdir_p (Filename.dirname source);
         Fs_compat.save_file source ("{\"complete_prior_row\":true}\n" ^ incomplete ^ "\n");
-        (match M.run ~base_path ~board_posts_file ~mode:M.Delete_previous_candidates with
+        (match M.run ~base_path ~scope ~mode:M.Delete_previous_candidates with
          | Error (M.Durable_source_parse_failed { path; line; _ }) ->
            Alcotest.(check string) "exact unreadable source" source path;
            Alcotest.(check int) "exact unreadable row" 2 line
@@ -2495,7 +2495,7 @@ let test_maintenance_unlink_failure_is_typed () =
       Fs_compat.mkdir_p shard_dir;
       Unix.mkdir (Filename.concat shard_dir sha256) 0o755;
       ignore (maintenance_ok ~base_path ~mode:M.Observe_only);
-      match M.run ~base_path ~board_posts_file ~mode:M.Delete_previous_candidates with
+      match M.run ~base_path ~scope ~mode:M.Delete_previous_candidates with
       | Error
           (M.Blob_delete_failed
             { Tool_blob_store.sha256 = actual; _ }) ->
@@ -2516,7 +2516,7 @@ let test_maintenance_rejects_symbolic_link_shard () =
         (Filename.concat outside (String.make 64 'a'))
         "outside";
       Unix.symlink outside (Filename.concat (B.root_dir store) "aa");
-      match M.run ~base_path ~board_posts_file ~mode:M.Observe_only with
+      match M.run ~base_path ~scope ~mode:M.Observe_only with
       | Error (M.Blob_listing_failed { Tool_blob_store.path; _ }) ->
         Alcotest.(check string)
           "exact symbolic-link shard"
@@ -2548,7 +2548,7 @@ let test_maintenance_rejects_symbolic_link_durable_source () =
       in
       Fs_compat.mkdir_p (Filename.dirname linked_source);
       Unix.symlink outside linked_source;
-      (match M.run ~base_path ~board_posts_file ~mode:M.Observe_only with
+      (match M.run ~base_path ~scope ~mode:M.Observe_only with
        | Error (M.Durable_source_stat_failed { path; _ }) ->
          Alcotest.(check string) "exact linked source" linked_source path
        | Error error ->
@@ -2580,7 +2580,7 @@ let test_maintenance_rejects_symbolic_link_candidate_snapshot () =
              ]));
       Sys.remove candidate_path;
       Unix.symlink outside candidate_path;
-      (match M.run ~base_path ~board_posts_file ~mode:M.Delete_previous_candidates with
+      (match M.run ~base_path ~scope ~mode:M.Delete_previous_candidates with
        | Error (M.Candidate_snapshot_read_failed { path; _ }) ->
          Alcotest.(check string) "exact linked snapshot" candidate_path path
        | Error error ->

@@ -5,7 +5,7 @@ module B = Tool_blob_store
 module O = Tool_output
 module S = Tool_blob_sweep
 
-let board_posts_file = Masc_board_handlers.Board_paths.posts_file
+let scope = Server_tool_blob_scope.scope
 
 let with_temp_dir f =
   let dir = Filename.temp_file "masc_blob_sweep_test" "" in
@@ -66,7 +66,7 @@ let reference_in_history ~base_path references =
           references))
 
 let observe_ok ~base_path =
-  match S.observe ~base_path ~board_posts_file with
+  match S.observe ~base_path ~scope with
   | Ok report -> report
   | Error error -> Alcotest.failf "sweep failed: %s" (S.error_to_string error)
 
@@ -200,7 +200,7 @@ let test_failed_scan_keeps_the_marks () =
       let record = S.record_path ~base_path in
       Sys.remove record;
       Unix.mkdir record 0o755;
-      (match S.observe ~base_path ~board_posts_file with
+      (match S.observe ~base_path ~scope with
        | Error (S.Record_unreadable _) -> ()
        | Error
            (( S.Scan_failed _ | S.Listing_failed _ | S.Record_write_failed _
@@ -209,6 +209,22 @@ let test_failed_scan_keeps_the_marks () =
        | Ok _ -> Alcotest.fail "a directory is not a record");
       Alcotest.(check bool) "the mark survives the failed scan" true
         (Option.is_some (B.touch_of (B.observe_touches ()) ~sha256:marked.sha256)))
+
+(* An entry the scope does not name may hold references the scan never
+   reads, so the scan names it and marks nothing deletable. *)
+let test_unclassified_entry_leaves_nothing_deletable () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let stale = put store "output older than an unclassified entry" in
+      set_mtime store stale (long_ago ());
+      forget_marks ();
+      let _first = observe_ok ~base_path in
+      let unlisted = "a-store-the-scope-does-not-name" in
+      Unix.mkdir (Filename.concat (Common.masc_dir_from_base_path ~base_path) unlisted) 0o755;
+      let second = observe_ok ~base_path in
+      Alcotest.(check (list string)) "the entry is named" [ unlisted ] second.unclassified;
+      Alcotest.(check int) "the stale blob is still a candidate" 1 second.candidates;
+      Alcotest.(check int) "nothing deletable" 0 second.deletable)
 
 let () =
   Alcotest.run "tool_blob_sweep"
@@ -223,5 +239,7 @@ let () =
             test_invalid_record_is_replaced_and_compares_nothing
         ; Alcotest.test_case "failed scan keeps the marks" `Quick
             test_failed_scan_keeps_the_marks
+        ; Alcotest.test_case "unclassified entry leaves nothing deletable" `Quick
+            test_unclassified_entry_leaves_nothing_deletable
         ] )
     ]

@@ -94,3 +94,6 @@ val reference : t -> Skill_reference.t
 val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, error) result
 val error_to_string : error -> string
+
+val store_dirname : string
+(** The evidence store directory below [<base>/.masc]. *)

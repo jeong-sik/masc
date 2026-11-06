@@ -126,15 +126,19 @@ let register ~key ~default ~validate ~serialize ~deserialize ?meta () =
 
 (* ── persistence ─────────────────────────────────────────────── *)
 
+let params_filename = "runtime_params.json"
+
 let params_file base_path =
   Filename.concat
     (Common.masc_dir_from_base_path ~base_path)
-    "runtime_params.json"
+    params_filename
+
+let audit_filename = "param_audit.jsonl"
 
 let audit_file base_path =
   Filename.concat
     (Common.masc_dir_from_base_path ~base_path)
-    "param_audit.jsonl"
+    audit_filename
 
 let ensure_dir path =
   let dir = Filename.dirname path in

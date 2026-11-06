@@ -1063,3 +1063,6 @@ module For_testing : sig
   (** How many times this process has decoded receipt sidecar bytes. A read
       answered from the verified receipt cache does not count. *)
 end
+
+val rejected_base : string -> string option
+(** The name a quarantined [<name>.rejected-<epoch>] or [<name>.rejected-<epoch>-<n>] was moved from. *)

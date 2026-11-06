@@ -27,3 +27,6 @@ module For_testing : sig
     (Published_artifact_check.t, error) result
   (** The production transaction with injected rewrite descriptor settlement. *)
 end
+
+val dirname : string
+(** The directory checks sit in below [<base>/.masc]. *)

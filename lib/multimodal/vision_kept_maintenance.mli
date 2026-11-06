@@ -50,9 +50,8 @@ type report =
   ; remaining_bytes : Int64.t
   }
 
-val run : masc_dir:string -> dir:string -> (report, error) result
-(** [run ~masc_dir ~dir] sweeps the kept vision store at [dir].
-    [masc_dir] is the runtime root the reference scan reads the durable
-    consumers from (the same value [Vision_artifact_reference.is_referenced]
-    takes). Absent [dir] is an empty report, not an error: a Keeper with no
+val run : consumer_paths:string list -> dir:string -> (report, error) result
+(** [run ~consumer_paths ~dir] sweeps the kept vision store at [dir].
+    [consumer_paths] are the files and trees the reference scan reads (the
+    same value [Vision_artifact_reference.is_referenced] takes). Absent [dir] is an empty report, not an error: a Keeper with no
     vision store has nothing to sweep. *)

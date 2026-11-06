@@ -365,3 +365,6 @@ val heap_root : (Obj.t -> 'a) -> 'a
 (** Run [walk] on this module's retained state, under the lock that guards
     it, for [Heap_roots.measure] to size with [Obj.reachable_words].
     Diagnostics only: the walk stalls the process for its duration. *)
+
+val dirname : string
+(** The directory {!directory} names below [<base>/.masc]. *)

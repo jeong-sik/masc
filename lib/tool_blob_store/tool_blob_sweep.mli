@@ -4,8 +4,12 @@
     A scan writes a marker file and takes the marker's mtime as the scan's
     start, so later comparisons with blob mtimes read one filesystem clock.
     It then scans the durable consumers through
-    {!Tool_blob_maintenance.live_references}, lists the blobs and writes the
-    candidate record [<base>/.masc/tool_blob_maintenance/candidates-v2].
+    {!Tool_blob_maintenance.live_references}, lists the entries the scope
+    leaves unclassified ({!Tool_blob_maintenance.unclassified_entries}),
+    lists the blobs and writes the candidate record
+    [<base>/.masc/tool_blob_maintenance/candidates-v2]. The record header
+    names the unclassified entries. A record that names one has no deletable
+    blob: the scan does not read that entry.
 
     Against the previous record it computes what layer two would delete: the
     blobs that were candidates then and are candidates now, that this process
@@ -58,6 +62,9 @@ type report =
   ; unstatable : int
       (** Candidates of both scans whose file was neither a regular file nor
           absent; never deletable. *)
+  ; unclassified : string list
+      (** {!Tool_blob_maintenance.unclassified_entry_to_string} of each
+          unclassified entry. Non-empty, [deletable] is 0. *)
   ; previous : previous
   ; touches : Tool_blob_store.touch_counts
   }
@@ -95,6 +102,6 @@ val schedule : base_path:string -> now:float -> (schedule, error) result
 
 val observe :
   base_path:string ->
-  board_posts_file:(workspace_masc_dir:string -> string) ->
+  scope:Tool_blob_maintenance.scope ->
   (report, error) result
 (** One scan. Blocking, with no Eio effects: run it off the main domain. *)

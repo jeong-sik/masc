@@ -25,10 +25,12 @@ let max_secret_file_bytes = 64 * 1024
 let stream_emit_bytes = 4 * 1024
 let structural_pattern_overlap_bytes = 4 * 1024
 
+let ssh_dirname = "ssh"
+
 let ssh_remote_token_file ~base_path ~keeper_name =
   Filename.concat
     (Filename.concat
-       (Filename.concat (Common.masc_dir_from_base_path ~base_path) "ssh")
+       (Filename.concat (Common.masc_dir_from_base_path ~base_path) ssh_dirname)
        "redaction")
     (Workspace_utils.safe_filename keeper_name ^ ".token")
 ;;

@@ -217,3 +217,12 @@ val source_directory : base_path:string -> snapshot -> string
 val matches_saved_settings : base_path:string -> snapshot -> (bool, string) result
 (** Compare fresh durable override, Keeper TOML and runtime files. An unreadable
     input makes the comparison unavailable. Does not change the live registry. *)
+
+val presets_dirname : string
+(** The preset directory below [<base>/.masc]. *)
+
+val staging_dirname : string
+(** The preset staging directory below [<base>/.masc]. *)
+
+val overrides_file : string
+(** The prompt override file below [<base>/.masc]. *)

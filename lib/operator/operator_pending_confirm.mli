@@ -80,3 +80,6 @@ val available_actions : available_action list
 val available_actions_json : Yojson.Safe.t
 val pending_confirm_summary_json_of_scope : pending_confirm_scope -> Yojson.Safe.t
 val pending_confirm_summary_json : ?actor:string -> Workspace.config -> Yojson.Safe.t
+
+val operator_dirname : string
+(** The directory {!operator_dir} names below [<base>/.masc]. *)

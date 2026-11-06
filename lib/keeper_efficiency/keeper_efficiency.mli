@@ -86,3 +86,6 @@ val month_view_to_json : month_view -> Yojson.Safe.t
 val cache_path : masc_root:string -> month:string -> (string, string) result
 (** Where the month's boundary cache lives. Exposed for tooling that wants
     to inspect or precompute it; [read_month] needs no help from it. *)
+
+val cache_dirname : string
+(** The cache directory below [<base>/.masc]. *)

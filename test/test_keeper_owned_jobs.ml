@@ -465,7 +465,7 @@ let test_running_restart_exit_and_artifacts () = with_fixture @@ fun _env initia
   List.iter (fun reference -> check bool "canonical owner journal retains exact output reference" true
       (List.exists (fun retained -> retained.Tool_output.sha256 = reference.Tool_output.sha256) owner_rows)) outputs;
   let observe () = Tool_blob_maintenance.run ~base_path:fixture.base_path
-      ~board_posts_file:Masc_board_handlers.Board_paths.posts_file ~mode:Tool_blob_maintenance.Observe_only
+      ~scope:Server_tool_blob_scope.scope ~mode:Tool_blob_maintenance.Observe_only
       |> function Ok report -> report | Error error -> fail (Tool_blob_maintenance.error_to_string error) in
   let candidates () = read (Tool_blob_maintenance.candidate_snapshot_path ~base_path:fixture.base_path)
       |> Yojson.Safe.from_string |> member "unreferenced_candidates" |> to_list |> List.map to_string in
@@ -6588,7 +6588,7 @@ let test_terminal_cleanup_preserves_result_and_gc () = with_fixture @@ fun _env 
   let owner = read (owner_path fixture id) in
   check bool "canonical owner journal remains after data cleanup" true (String.length owner > 0);
   ignore (Tool_blob_maintenance.run ~base_path:fixture.base_path
-    ~board_posts_file:Masc_board_handlers.Board_paths.posts_file ~mode:Tool_blob_maintenance.Observe_only
+    ~scope:Server_tool_blob_scope.scope ~mode:Tool_blob_maintenance.Observe_only
     |> require "GC observation after cleanup");
   let candidates = read (Tool_blob_maintenance.candidate_snapshot_path ~base_path:fixture.base_path)
     |> Yojson.Safe.from_string |> member "unreferenced_candidates" |> to_list |> List.map to_string in

@@ -22,10 +22,12 @@ let state_file_source_to_string = function
   | Canonical_env -> Env_config_core.host_fd_pressure_state_file_env_key
   | Default -> "default"
 
+let state_filename = "masc-host-pressure.state"
+
 let default_state_file_path ~base_path =
   Filename.concat
     (Common.masc_dir_from_base_path ~base_path)
-    "masc-host-pressure.state"
+    state_filename
 ;;
 
 let resolve_state_file_path ~base_path () =

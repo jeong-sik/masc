@@ -11,7 +11,7 @@ let backlog_lock_path config =
   Filename.concat (Filename.dirname (backlog_path config)) ".backlog"
 
 let backlog_recovery_path config =
-  backlog_path config ^ ".last-good"
+  backlog_path config ^ Common.recovery_mirror_suffix
 
 let decode_backlog ~path json =
   match backlog_of_yojson_with_diagnostics json with

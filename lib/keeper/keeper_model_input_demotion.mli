@@ -224,4 +224,4 @@ val materialize
     store is written again after a read of it fails, and a new process starts
     by writing every address it puts. The body is still verbatim in the
     checkpoint, so the blob is derived data that a later put restores. Nothing
-    needs adding to [durable_consumer_basenames]: no reference is persisted. *)
+    needs adding to the sweep's scope: no reference is persisted. *)

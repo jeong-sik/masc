@@ -104,3 +104,6 @@ val restore : t -> unit
     skipped. Valid session ID bytes are preserved. *)
 
 (** {1 Status} *)
+
+val sessions_dirname : string
+(** The session directory below [<base>/.masc]. *)

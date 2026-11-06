@@ -211,3 +211,6 @@ val tick :
 
     [retention_days] goes straight to {!Schedule_store.refresh_due}: how long a
     finished schedule stays in the ledger. *)
+
+val schedules_dirname : string
+(** The directory schedules sit in below [<base>/.masc]. *)

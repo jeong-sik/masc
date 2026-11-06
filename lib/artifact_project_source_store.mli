@@ -15,3 +15,6 @@ val read : base_path:string -> id:string ->
 (** Validate owned metadata and every content address before reconstructing the
     worker request. Missing/damaged referenced files are unavailable, not missing
     project sources. Authorization belongs to the eventual authenticated caller. *)
+
+val dirname : string
+(** The directory project sources sit in below [<base>/.masc]. *)

@@ -125,7 +125,7 @@ let core_field = ("core", Dos_lane.core_to_yojson Dos_lane.core)
    name in programs/ may be a directory: its executable boots and everything
    beside it is mounted where the guest opens files. A keeper never needs a
    host path. *)
-let dos_dir ~base_path = Filename.concat (Common.masc_dir_from_base_path ~base_path) "dos"
+let dos_dir ~base_path = Filename.concat (Common.masc_dir_from_base_path ~base_path) Common.dos_dirname
 let programs_dir ~base_path = Filename.concat (dos_dir ~base_path) "programs"
 
 (* Named whole-machine checkpoints. Beside saves/, not inside it: saves/

@@ -43,3 +43,6 @@ val resolve : t -> installation:Lane_addon_tool_request_owner.installation ->
     reattaches with a new instance. The caller must supply the unique current
     publisher's own clients and retain its live instance/export authority.
     Never claims or takes over. *)
+
+val filename : string
+(** The goal space file below [<base>/.masc]. *)

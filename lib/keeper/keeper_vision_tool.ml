@@ -103,8 +103,10 @@ let vision_keepers_dir ?base_path () =
   | None -> Config_dir_resolver.keepers_dir ()
   | Some base_path -> Config_dir_resolver.keepers_dir_for_base_path ~base_path
 
+let vision_store_suffix = ".vision"
+
 let vision_store_dir ?base_path ~keeper_name () =
-  Filename.concat (vision_keepers_dir ?base_path ()) (keeper_name ^ ".vision")
+  Filename.concat (vision_keepers_dir ?base_path ()) (keeper_name ^ vision_store_suffix)
 
 let frames_dir ?base_path ~keeper_name () =
   Store.frames_dir ~dir:(vision_store_dir ?base_path ~keeper_name ())

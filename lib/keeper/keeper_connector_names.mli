@@ -44,3 +44,6 @@ val entries :
 
 val path : base_dir:string -> connector:string -> scope:scope -> string
 (** Durable JSONL path for this connector/scope mapping. *)
+
+val dirname : string
+(** The directory connector names sit in below [<base>/.masc]. *)

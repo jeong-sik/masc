@@ -1,8 +1,10 @@
 type 'a context = 'a Tool_operator.context
 
 
+let operator_dirname = "operator"
+
 let operator_dir config =
-  Filename.concat (Workspace.masc_dir config) "operator"
+  Filename.concat (Workspace.masc_dir config) operator_dirname
 
 let pending_confirms_path config =
   Filename.concat (operator_dir config) "pending_confirms.json"

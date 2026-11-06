@@ -66,3 +66,6 @@ val withdraw :
   Lane_addon_store.t -> declaration_id:string -> ask_id:string -> reason:string -> now:float ->
   (withdraw_outcome, string) result
 (** Only the package withdraws its own question, through its host request. *)
+
+val dirname : string
+(** The directory asks sit in below the Lane add-on store. *)

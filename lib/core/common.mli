@@ -39,6 +39,14 @@ val searxng_dirname : string
 (** The directory under [.masc] that is mounted into the SearXNG container as
     [/etc/searxng]. *)
 
+val dos_dirname : string
+(** The DOS machine's directory under [.masc]: its programs, saves and
+    checkpoints. Value is ["dos"]. *)
+
+val msx_dirname : string
+(** The MSX machine's directory under [.masc]: its BIOS and cartridges.
+    Value is ["msx"]. *)
+
 val browser_lane_token_name : string
 (** The lane token's file name in {!browser_lane_dirname}. Value is
     ["token"]. [masc browser-lane-setup] writes it under the same name. *)
@@ -221,3 +229,33 @@ val is_chat_operation_store_sidecar_file : string -> bool
     ([-wal], [-shm], [-journal]). Unlike {!is_tool_call_read_index_file}, the
     database file itself is authoritative and must be inspected rather than
     skipped. *)
+
+val auth_dirname : string
+(** The directory {!auth_dir_from_base_path} names below [<base>/.masc]. *)
+
+val sqlite_wal_suffix : string
+(** The suffix SQLite gives a database's write-ahead log. *)
+
+val sqlite_shm_suffix : string
+(** The suffix SQLite gives a database's shared-memory index. *)
+
+val sqlite_journal_suffix : string
+(** The suffix SQLite gives a database's rollback journal. *)
+
+val recovery_mirror_suffix : string
+(** The suffix of the last good copy a ledger keeps beside itself. *)
+
+val tui_dirname : string
+(** The TUI's directory below [<base>/.masc]. *)
+
+val tui_music_dirname : string
+(** The TUI music player's directory below [<base>/.masc]. *)
+
+val tui_account_login_filename : string
+(** The TUI's pending account login below [<base>/.masc]. *)
+
+val tui_play_pending_filename : string
+(** The TUI's pending Play requests below [<base>/.masc]. *)
+
+val tui_artifact_share_pending_filename : string
+(** The TUI's pending artifact shares below [<base>/.masc]. *)

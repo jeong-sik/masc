@@ -4819,7 +4819,7 @@ let pr_number_of_subject subject =
    describes the checkout on screen rather than whichever one the server
    would default to. *)
 let account_login_resume_path state =
-  Filename.concat (Common.masc_dir_from_base_path ~base_path:state.local_base_path) "tui-account-login.json"
+  Filename.concat (Common.masc_dir_from_base_path ~base_path:state.local_base_path) Common.tui_account_login_filename
 
 let remember_account_login state (view : Masc_tui_account_login.t) =
   match view.provider, view.login_id with
@@ -29890,13 +29890,13 @@ let main
     flush stdout in
   music_terminal_handoff := Some (fun () ->
     let root = Filename.concat
-      (Common.masc_dir_from_base_path ~base_path:state.local_base_path) "music" in
+      (Common.masc_dir_from_base_path ~base_path:state.local_base_path) Common.tui_music_dirname in
     Masc_tui_score.launch_music ~restore:restore_music_terminal ~reenter:reenter_music_terminal
       ~project_root:(Filename.concat root "projects") ~session_root:(Filename.concat root "sessions")
       ~soundfont:!boot_midi_soundfont);
   music_midi_terminal_handoff := Some (fun ~path ->
     let root = Filename.concat
-      (Common.masc_dir_from_base_path ~base_path:state.local_base_path) "music" in
+      (Common.masc_dir_from_base_path ~base_path:state.local_base_path) Common.tui_music_dirname in
     Masc_tui_score.launch_midi ~restore:restore_music_terminal ~reenter:reenter_music_terminal
       ~project_root:(Filename.concat root "projects") ~session_root:(Filename.concat root "sessions")
       ~soundfont:!boot_midi_soundfont ~path);

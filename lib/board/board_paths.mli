@@ -17,10 +17,7 @@ val capture_workspace_masc_dir : string -> string
 type persisted_file = Posts | Comments | Reactions | Sub_boards | Votes
 val file_path : workspace_masc_dir:string -> persisted_file -> string
 val posts_file : workspace_masc_dir:string -> string
-(** [file_path ~workspace_masc_dir Posts]. The shared blob store's maintenance
-    pass takes this to read every workspace's posts
-    ([Tool_blob_maintenance.run ~board_posts_file]); that library sits below
-    Board and does not repeat the name. *)
+(** [file_path ~workspace_masc_dir Posts]. *)
 val workspace_masc_dir : Board_types.store -> string
 (** Derive the state path from the store's sole immutable BasePath binding.
     This getter grants no filesystem authority. *)
@@ -47,3 +44,6 @@ val ensure_masc_dir :
     cause, comes back as a [Raised] rejection. A later refusal can follow
     directory creation; it is not a claim that all filesystem effects were
     absent. *)
+
+val persisted_filename : persisted_file -> string
+(** The basename {!file_path} gives a file below the workspace. *)

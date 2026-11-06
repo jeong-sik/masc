@@ -3,6 +3,8 @@
     neither skips a day nor scans twice. The scan runs on a thread of
     {!Systhread_host}'s domain, off the main domain, and its report or error
     goes to the server log. A scan that raises is logged and the loop goes on.
+    The scan reads the places {!Server_tool_blob_scope.scope} classifies; a
+    scan that leaves entries unclassified logs a warning naming them.
     Layer one deletes nothing. *)
 
 val start :

@@ -738,3 +738,6 @@ val load_turn_transcript_result :
     A single row exceeding the existing page window remains an explicit error.
     Two passes may read the whole transcript; no latency improvement is implied.
     Redaction is captured once for both passes. *)
+
+val chat_dirname : string
+(** The directory {!chat_dir} names below [<base>/.masc]. *)

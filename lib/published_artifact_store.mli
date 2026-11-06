@@ -82,3 +82,6 @@ module For_testing : sig
     base_path:string -> id:string -> Published_artifact_share.request ->
     (Published_artifact_share.receipt, share_error) result
 end
+
+val dirname : string
+(** The directory published artifacts sit in below [<base>/.masc]. *)

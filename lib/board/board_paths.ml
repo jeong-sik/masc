@@ -21,14 +21,15 @@ let capture_workspace_masc_dir workspace_masc_dir =
 ;;
 
 type persisted_file = Posts | Comments | Reactions | Sub_boards | Votes
+let persisted_filename = function
+  | Posts -> "board_posts.jsonl"
+  | Comments -> "board_comments.jsonl"
+  | Reactions -> "board_reactions.jsonl"
+  | Sub_boards -> "board_sub_boards.jsonl"
+  | Votes -> "board_votes.jsonl"
+
 let file_path ~workspace_masc_dir file =
-  let filename = match file with
-    | Posts -> "board_posts.jsonl"
-    | Comments -> "board_comments.jsonl"
-    | Reactions -> "board_reactions.jsonl"
-    | Sub_boards -> "board_sub_boards.jsonl"
-    | Votes -> "board_votes.jsonl" in
-  Filename.concat workspace_masc_dir filename
+  Filename.concat workspace_masc_dir (persisted_filename file)
 
 let posts_file ~workspace_masc_dir = file_path ~workspace_masc_dir Posts
 

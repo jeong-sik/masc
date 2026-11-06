@@ -29,6 +29,7 @@ type report =
   ; deletable : int
   ; deletable_bytes : int
   ; unstatable : int
+  ; unclassified : string list
   ; previous : previous
   ; touches : Tool_blob_store.touch_counts
   }
@@ -77,7 +78,7 @@ let report_to_string report =
   in
   Printf.sprintf
     "scan_seconds=%.1f live_digests=%d blobs=%d candidates=%d deletable=%d \
-     deletable_bytes=%d unstatable=%d %s touched_current=%d touched_previous=%d"
+     deletable_bytes=%d unstatable=%d unclassified=%d %s touched_current=%d touched_previous=%d"
     report.scan_seconds
     report.live_digests
     report.blobs
@@ -85,13 +86,14 @@ let report_to_string report =
     report.deletable
     report.deletable_bytes
     report.unstatable
+    (List.length report.unclassified)
     previous
     report.touches.Tool_blob_store.current_addresses
     report.touches.previous_addresses
 ;;
 
 let maintenance_dir ~base_path =
-  Filename.concat (Common.masc_dir_from_base_path ~base_path) "tool_blob_maintenance"
+  Filename.concat (Common.masc_dir_from_base_path ~base_path) Tool_blob_maintenance.dirname
 ;;
 
 let record_path ~base_path = Filename.concat (maintenance_dir ~base_path) "candidates-v2"
@@ -131,13 +133,14 @@ type record =
   ; recorded_deletable : String_set.t
   }
 
-let header_json ~scan_started_at ~candidates ~deletable ~untouched_live =
+let header_json ~scan_started_at ~candidates ~deletable ~untouched_live ~unclassified =
   `Assoc
     [ "schema_version", `Int 2
     ; "scan_started_at", `Float scan_started_at
     ; "candidates", `Int candidates
     ; "deletable", `Int deletable
     ; "untouched_live", `Int untouched_live
+    ; "unclassified", `List (List.map (fun name -> `String name) unclassified)
     ]
 ;;
 
@@ -146,7 +149,21 @@ type header =
   ; candidates : int
   ; deletable : int
   ; untouched_live : int
+  ; unclassified : int
   }
+
+let unclassified_names names =
+  List.fold_left
+    (fun count name ->
+       match count with
+       | None -> None
+       | Some count ->
+         (match name with
+          | `String _ -> Some (count + 1)
+          | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> None))
+    (Some 0)
+    names
+;;
 
 let header_of_json = function
   | `Assoc
@@ -155,7 +172,11 @@ let header_of_json = function
       ; "candidates", `Int candidates
       ; "deletable", `Int deletable
       ; "untouched_live", `Int untouched_live
-      ] -> Some { scan_started_at; candidates; deletable; untouched_live }
+      ; "unclassified", `List names
+      ] ->
+    (match unclassified_names names with
+     | Some unclassified -> Some { scan_started_at; candidates; deletable; untouched_live; unclassified }
+     | None -> None)
   | _ -> None
 ;;
 
@@ -242,6 +263,8 @@ let parse_record payload =
        then invalid 1 "header counts do not match the lines"
        else if not (String_set.subset tally.deletable_lines tally.candidate_lines)
        then invalid 1 "a deletable digest is not a candidate"
+       else if header.unclassified > 0 && header.deletable > 0
+       then invalid 1 "a record with unclassified entries names deletable digests"
        else
          Ok
            { recorded_scan_started_at = header.scan_started_at
@@ -294,7 +317,7 @@ let ensure_maintenance_dir ~base_path ~on_error =
      | exception Sys_error detail -> Error (on_error detail))
 ;;
 
-let write_record ~base_path ~scan_started_at ~candidates ~deletable ~untouched_live =
+let write_record ~base_path ~scan_started_at ~candidates ~deletable ~untouched_live ~unclassified =
   let path = record_path ~base_path in
   let on_error detail = Record_write_failed { path; detail } in
   let open Result.Syntax in
@@ -311,7 +334,8 @@ let write_record ~base_path ~scan_started_at ~candidates ~deletable ~untouched_l
           ~scan_started_at
           ~candidates:(String_set.cardinal candidates)
           ~deletable:(String_set.cardinal deletable)
-          ~untouched_live:(String_set.cardinal untouched_live)));
+          ~untouched_live:(String_set.cardinal untouched_live)
+          ~unclassified));
   Buffer.add_char buffer '\n';
   let add kind set =
     String_set.iter
@@ -427,7 +451,7 @@ let compare_previous ~store ~touches ~(previous : record) ~live =
   , untouched )
 ;;
 
-let observe ~base_path ~board_posts_file =
+let observe ~base_path ~scope =
   let open Result.Syntax in
   let store = Tool_blob_store.create ~base_path in
   (* The marker comes first: a scan that cannot read its previous record still
@@ -439,8 +463,16 @@ let observe ~base_path ~board_posts_file =
   let* live_references =
     Result.map_error
       (fun error -> Scan_failed error)
-      (Tool_blob_maintenance.live_references ~base_path ~board_posts_file)
+      (Tool_blob_maintenance.live_references ~base_path ~scope)
   in
+  (* An entry no rule classifies is a place the scan does not read. The scan
+     still records, but names nothing deletable (RFC-0499 §5.3). *)
+  let* unclassified =
+    Result.map_error
+      (fun error -> Scan_failed error)
+      (Tool_blob_maintenance.unclassified_entries ~base_path scope)
+  in
+  let unclassified = List.map Tool_blob_maintenance.unclassified_entry_to_string unclassified in
   let live =
     Tool_blob_maintenance.fold_live_sha256
       live_references
@@ -469,7 +501,9 @@ let observe ~base_path ~board_posts_file =
       , String_set.empty )
     | Record_loaded previous ->
       let comparison, untouched = compare_previous ~store ~touches ~previous ~live in
-      ( deletable_now ~store ~touches ~previous ~candidates
+      ( (match unclassified with
+         | [] -> deletable_now ~store ~touches ~previous ~candidates
+         | _ :: _ -> nothing_deletable)
       , Compared_with_previous comparison
       , untouched )
   in
@@ -480,6 +514,7 @@ let observe ~base_path ~board_posts_file =
       ~candidates
       ~deletable:deletable.deletable_set
       ~untouched_live
+      ~unclassified
   in
   Tool_blob_store.rotate_touches ();
   Ok
@@ -491,6 +526,7 @@ let observe ~base_path ~board_posts_file =
     ; deletable = String_set.cardinal deletable.deletable_set
     ; deletable_bytes = deletable.bytes
     ; unstatable = deletable.unstatable_count
+    ; unclassified
     ; previous = comparison
     ; touches = Tool_blob_store.touch_counts touches
     }

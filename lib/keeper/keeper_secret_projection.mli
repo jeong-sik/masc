@@ -104,3 +104,6 @@ val delete_file_entry :
 
 val dashboard_status_json :
   base_path:string -> keeper_name:string -> Yojson.Safe.t
+
+val secrets_dirname : string
+(** The default secret directory below [<base>/.masc]. *)

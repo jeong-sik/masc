@@ -60,8 +60,10 @@ let run_record_of_json (json : Yojson.Safe.t) : run_record option =
       (match updated_at with Some s -> s | None -> "(absent)");
     None
 
+let runs_dirname = "runs"
+
 let runs_dir (config : config) =
-  Filename.concat (masc_dir config) "runs"
+  Filename.concat (masc_dir config) runs_dirname
 
 let run_dir (config : config) task_id =
   Filename.concat (runs_dir config) task_id

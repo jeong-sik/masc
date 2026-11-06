@@ -49,7 +49,7 @@ let hold ~base_path ~rel stored =
 let sweep ~base_path ~dir =
   match
     Tool_blob_maintenance.live_references
-      ~board_posts_file:Masc_board_handlers.Board_paths.posts_file ~base_path
+      ~scope:Server_tool_blob_scope.scope ~base_path
   with
   | Error error -> Error (Tool_blob_maintenance.error_to_string error)
   | Ok live -> Sweep.run ~live ~dir |> Result.map_error Sweep.error_to_string

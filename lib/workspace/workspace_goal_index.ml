@@ -21,7 +21,7 @@ let goal_task_links_path config =
 ;;
 
 let goal_task_links_recovery_path config =
-  goal_task_links_path config ^ ".last-good"
+  goal_task_links_path config ^ Common.recovery_mirror_suffix
 ;;
 
 (* [Goal_id_map] is defined locally because [masc_workspace] is an upstream

@@ -29,3 +29,6 @@ val set_note :
     absent. Missing file is []. Unparseable lines are skipped and
     counted as persistence read drops. *)
 val notes : base_dir:string -> keeper_name:string -> (string * string) list
+
+val dirname : string
+(** The directory notes sit in below [<base>/.masc]. *)

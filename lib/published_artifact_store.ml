@@ -17,8 +17,10 @@ let error_message = function
   | Conflict { expected; actual } ->
     Printf.sprintf "artifact changed: expected revision %d, current revision %d" expected actual
 
+let dirname = "published_artifacts"
+
 let root ~base_path =
-  Filename.concat (Common.masc_dir_from_base_path ~base_path) "published_artifacts"
+  Filename.concat (Common.masc_dir_from_base_path ~base_path) dirname
 let path ~base_path id = Filename.concat (root ~base_path) (id ^ ".json")
 let share_path ~base_path id = Filename.concat (root ~base_path) (id ^ ".share")
 let share_guard_path ~base_path id = Filename.concat (root ~base_path) (id ^ ".share-v3")

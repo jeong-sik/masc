@@ -100,3 +100,6 @@ module For_testing : sig
   val active_directory : base_path:string -> (string, error) result
   val staging_directory : base_path:string -> (string, error) result
 end
+
+val root_dirname : string
+(** The directory obligations sit in below [<base>/.masc]. *)

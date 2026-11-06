@@ -47,3 +47,6 @@ val tool_approval_modes : base_path:string -> string
     this stance decides whether the chat asks at all, and the two are read by
     different loops. Holds only keepers an operator has moved off [Auto], so
     the file is also the list of them. *)
+
+val dirname : string
+(** The directory {!dir} names below [<base>/.masc]. *)

@@ -19,3 +19,6 @@ val read_file : base_path:string -> id:string -> path:string option ->
 (** Read one exact graph path, or the entry HTML for None. This function does not
     execute content or serve HTTP. Auth/ACL and isolated browser origins belong
     to the eventual caller; source and dependency records may contain secrets. *)
+
+val dirname : string
+(** The directory project builds sit in below [<base>/.masc]. *)

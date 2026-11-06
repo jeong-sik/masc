@@ -146,3 +146,6 @@ module For_testing : sig
     reason:string -> now:float -> (unit, withdraw_failure) result
   (** The same canonical confirmation boundary for withdrawal. *)
 end
+
+val dirname : string
+(** The directory asks sit in below [<base>/.masc]. *)

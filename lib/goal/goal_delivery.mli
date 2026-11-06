@@ -15,3 +15,6 @@ val flush : Workspace_utils.config -> (unit, string) result
 module For_testing : sig
   val replace_backend : backend option -> backend option
 end
+
+val notification_lock_key : string
+(** The name below [<base>/.masc] that notification delivery locks. Only its {!File_lock_eio.lock_file_path} exists. *)

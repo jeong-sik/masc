@@ -68,7 +68,7 @@ let test_html_retention () = with_base (fun base_path ->
   Alcotest.(check string) "HTML BOM/CRLF preserved" compiled_html file.content;
   check_result expected (S.restore ~base_path ~id:first.id |> stored);
   let maintenance mode = Tool_blob_maintenance.run ~base_path
-    ~board_posts_file:(fun ~workspace_masc_dir -> Filename.concat workspace_masc_dir "absent-board.json") ~mode
+    ~scope:Server_tool_blob_scope.scope ~mode
     |> Result.map_error Tool_blob_maintenance.error_to_string |> ok in
   let observed = maintenance Tool_blob_maintenance.Observe_only in
   Alcotest.(check int) "generated HTML and resolved lock have independent retention roots" 4 observed.live_references;
@@ -91,7 +91,7 @@ let test_site_graph () = with_base (fun base_path ->
   Alcotest.(check string) "nested HTML entry" "nested/index.html" entry.path;
   check_result expected (S.restore ~base_path ~id:build.id |> stored);
   let maintenance mode = Tool_blob_maintenance.run ~base_path
-    ~board_posts_file:(fun ~workspace_masc_dir -> Filename.concat workspace_masc_dir "absent-board.json") ~mode
+    ~scope:Server_tool_blob_scope.scope ~mode
     |> Result.map_error Tool_blob_maintenance.error_to_string |> ok in
   let observed = maintenance Tool_blob_maintenance.Observe_only in
   Alcotest.(check int) "site files and lock outlive source-only references" 7 observed.live_references;

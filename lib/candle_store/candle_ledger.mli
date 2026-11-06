@@ -105,3 +105,6 @@ val update :
     or a write that failed, is returned and not retried. New [Paid] rows pass
     {!Candle_payment.validate_for_append}; reading existing rows never invokes
     that check or changes their recorded allocations. *)
+
+val file_name : string
+(** The ledger file below [<base>/.masc]. *)

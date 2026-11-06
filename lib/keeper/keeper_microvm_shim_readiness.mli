@@ -84,3 +84,6 @@ val forget : backend:Keeper_microvm_backend.t -> guest_name:string -> unit
     Invalidate every matching base conservatively, including an in-flight
     check: its old result cannot authorize the replacement. No TTL or retry
     scheduler is involved. *)
+
+val recovery_namespace : string
+(** The recovery namespace directory below [<base>/.masc]. *)

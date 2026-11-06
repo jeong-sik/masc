@@ -94,10 +94,12 @@ let receipt_fields receipt =
   ; "completion_effect", `String "unchanged"
   ]
 
-let path config =
-  Filename.concat (Workspace_utils.masc_dir config) "goal_measurements.json"
+let filename = "goal_measurements.json"
 
-let mirror_path config = path config ^ ".last-good"
+let path config =
+  Filename.concat (Workspace_utils.masc_dir config) filename
+
+let mirror_path config = path config ^ Common.recovery_mirror_suffix
 
 let read_optional config file =
   match Workspace_utils.key_of_path config file with

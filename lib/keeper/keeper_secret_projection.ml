@@ -33,13 +33,15 @@ let trim_env_opt key =
   | None -> None
 ;;
 
+let secrets_dirname = "secrets"
+
 let secret_root_info_of_dir ~base_path ~keeper_dir =
   match trim_env_opt "MASC_SECRET_DIR" with
   | Some root -> { root = Filename.concat root keeper_dir; source = "MASC_SECRET_DIR" }
   | None ->
     { root =
         Filename.concat
-          (Filename.concat (Common.masc_dir_from_base_path ~base_path) "secrets")
+          (Filename.concat (Common.masc_dir_from_base_path ~base_path) secrets_dirname)
           keeper_dir
     ; source = "workspace_masc_secrets"
     }

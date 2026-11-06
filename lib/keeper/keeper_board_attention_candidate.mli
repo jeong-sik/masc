@@ -453,3 +453,5 @@ val prune_consumed_behind_cursor :
     partition reads the row. A ledger with rejected rows is never rewritten.
     Returns the number of removed rows, [0] when nothing changed. *)
 
+val dirname : string
+(** The directory candidates sit in below [<base>/.masc]. *)

@@ -92,3 +92,6 @@ val record_json :
   Workspace_utils.config -> actor:string -> Yojson.Safe.t -> (receipt, error) result
 (** Strict four-field request decoder shared by the operator and Keeper HTTP
     routes. The authenticated actor is supplied by the route. *)
+
+val filename : string
+(** The measurement ledger below [<base>/.masc]. *)

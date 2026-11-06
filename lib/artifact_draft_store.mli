@@ -33,3 +33,6 @@ val checkpoint : ?runner:Artifact_document_engine.runner -> base_path:string -> 
     observes that the requested publication is already the draft's base; it
     does not certify which request installed it or discard later edits. A later
     publication or draft edit can occur after this observation returns. *)
+
+val dirname : string
+(** The directory drafts sit in below [<base>/.masc]. *)

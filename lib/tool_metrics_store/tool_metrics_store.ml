@@ -28,9 +28,11 @@ type store = {
    underlying mutex. The SQLite calls are blocking C calls and do not suspend. *)
 let store_lock = Cross_context_mutex.create ()
 let current_store : store option ref = ref None
+let database_filename = "tool-metrics.sqlite3"
+
 open Result.Syntax
 
-let database_path ~masc_root = Filename.concat masc_root "tool-metrics.sqlite3"
+let database_path ~masc_root = Filename.concat masc_root database_filename
 
 let sqlite_error db operation rc =
   Printf.sprintf

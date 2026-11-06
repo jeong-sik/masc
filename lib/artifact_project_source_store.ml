@@ -9,8 +9,10 @@ let error_message = function
   | Invalid message | Unavailable message | Commit_uncertain { message; _ } -> message
   | Missing -> "project source not found"
 open Result.Syntax
+let dirname = "artifact_project_sources"
+
 let root ~base_path =
-  Filename.concat (Common.masc_dir_from_base_path ~base_path) "artifact_project_sources"
+  Filename.concat (Common.masc_dir_from_base_path ~base_path) dirname
 let path ~base_path id = Filename.concat (root ~base_path) (id ^ ".json")
 let protect f =
   try f () with

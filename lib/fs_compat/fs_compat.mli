@@ -643,6 +643,9 @@ val directory_payload
 val directory_payload_error_to_string : directory_payload_error -> string
 
 module Publication_recovery : sig
+  val directory_leaf : string
+  (** The directory {!open_registry} keeps below its registry root. *)
+
   type registry = Fs_compat_internal.Publication_recovery_access.registry
   type t = Fs_compat_internal.Publication_recovery_access.t
   type owner = Fs_compat_internal.Publication_recovery_access.owner

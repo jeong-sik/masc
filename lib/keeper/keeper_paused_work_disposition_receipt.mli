@@ -86,3 +86,6 @@ val durable_receipt_exists :
     from the queue's projected dispositions, one that a standing paused-work
     receipt can still re-ask stays). Existence only: no decode, no lock.
     [masc_root] is [<base>/.masc]. *)
+
+val store_dirname : string
+(** The receipt store directory below [<base>/.masc]. *)

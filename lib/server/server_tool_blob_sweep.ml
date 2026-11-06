@@ -4,20 +4,32 @@ let touch_ledger_detail () =
     counts.previous_addresses
 ;;
 
+(* An entry the scope does not name may hold references the scan never
+   reads, so the record marks nothing deletable until the scope names it. *)
+let warn_unclassified (report : Tool_blob_sweep.report) =
+  match report.unclassified with
+  | [] -> ()
+  | names ->
+    Log.Server.warn "tool blob sweep: %d unclassified entries, nothing deletable: %s"
+      (List.length names) (String.concat ", " names)
+;;
+
 (* The scan parses every durable consumer. [Systhread_host] runs it on the
    host domain's thread, so the main domain keeps serving requests; the
    caller's own systhread would hold the main domain's lock while it parses. *)
 let scan ~base_path =
   match
     Systhread_host.run ~label:"tool-blob-sweep" (fun () ->
-      Tool_blob_sweep.observe ~base_path
-        ~board_posts_file:Masc_board_handlers.Board_paths.posts_file)
+      Tool_blob_sweep.observe ~base_path ~scope:Server_tool_blob_scope.scope)
   with
   | Ok ({ previous = Tool_blob_sweep.Previous_record_invalid _; _ } as report) ->
     Log.Server.warn "tool blob sweep replaced an invalid record: %s"
-      (Tool_blob_sweep.report_to_string report)
+      (Tool_blob_sweep.report_to_string report);
+    warn_unclassified report
   | Ok ({ previous = Tool_blob_sweep.(No_previous_record | Compared_with_previous _); _ } as report)
-    -> Log.Server.info "tool blob sweep: %s" (Tool_blob_sweep.report_to_string report)
+    ->
+    Log.Server.info "tool blob sweep: %s" (Tool_blob_sweep.report_to_string report);
+    warn_unclassified report
   | Error error ->
     Log.Server.warn "tool blob sweep recorded nothing: %s %s"
       (Tool_blob_sweep.error_to_string error) (touch_ledger_detail ())

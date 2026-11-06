@@ -42,11 +42,13 @@ let deliver config host (notice : Goal_store.pending_notification) =
          append or acknowledgement leaves the same identity for the next drain. *)
       Goal_store.acknowledge_notification config notice |> store_result
 
+let notification_lock_key = "goal-notification-delivery"
+
 let flush config =
   let audit = protect (fun () -> Goal_store.flush_pending_events config)
     |> Result.map_error (fun detail -> "Goal audit: " ^ detail) in
   let notifications = protect (fun () ->
-    let path = Filename.concat (Workspace_utils.masc_dir config) "goal-notification-delivery" in
+    let path = Filename.concat (Workspace_utils.masc_dir config) notification_lock_key in
     File_lock_eio.with_lock path (fun () ->
       let* notices = Goal_store.pending_notifications config |> store_result in
       match notices, Atomic.get backend with

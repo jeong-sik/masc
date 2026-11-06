@@ -14,13 +14,6 @@ let error_to_string = function
       path
 ;;
 
-(* Kept in sync by hand with Tool_blob_maintenance.durable_consumer_basenames
-   (lib/tool_blob_store/tool_blob_maintenance.ml); that list is not exported,
-   so this is a deliberate, documented duplication rather than a dependency. *)
-let durable_consumer_basenames =
-  [ "gate"; "keepers"; "keeper_chat"; "messages"; "tool_calls"; "traces"; "wire-capture" ]
-;;
-
 exception Found
 exception Error_exn of error
 
@@ -66,39 +59,9 @@ let rec walk_tree ~handle path =
      | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK -> ())
 ;;
 
-(* Only the direct children of [root] can be named [exclude_suffix]-excluded:
-   that is where a vision store's own [<keeper>.vision] directory sits as a
-   sibling of the keeper's own state directory under [masc_dir/keepers]. *)
-let walk_root ~handle ~exclude_suffix root =
-  match Unix.lstat root with
-  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
-  | exception Unix.Unix_error (err, fn, arg) ->
-    raise (Error_exn (Durable_source_read_failed { path = root; reason = unix_reason fn arg err }))
-  | stat ->
-    (match stat.Unix.st_kind with
-     | Unix.S_DIR ->
-       (match Sys.readdir root with
-        | exception Sys_error reason -> raise (Error_exn (Durable_source_read_failed { path = root; reason }))
-        | entries ->
-          Array.iter
-            (fun name ->
-              match exclude_suffix with
-              | Some suffix when Filename.check_suffix name suffix -> ()
-              | Some _ | None -> walk_tree ~handle (Filename.concat root name))
-            entries)
-     | Unix.S_REG -> walk_tree ~handle root
-     | Unix.S_LNK -> raise (Error_exn (Symlink_encountered { path = root }))
-     | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK -> ())
-;;
-
-let is_referenced ~masc_dir ~handle =
+let is_referenced ~consumer_paths ~handle =
   try
-    List.iter
-      (fun basename ->
-        let root = Filename.concat masc_dir basename in
-        let exclude_suffix = if String.equal basename "keepers" then Some ".vision" else None in
-        walk_root ~handle ~exclude_suffix root)
-      durable_consumer_basenames;
+    List.iter (walk_tree ~handle) consumer_paths;
     Ok false
   with
   | Found -> Ok true

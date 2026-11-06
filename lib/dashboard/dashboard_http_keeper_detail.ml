@@ -36,7 +36,6 @@ let string_list_member_opt key json =
 
 let compute_metrics_window
     ~(parsed_metrics : Yojson.Safe.t list)
-    ~(compact : bool)
     ~(series_points : int)
   : Yojson.Safe.t list * Yojson.Safe.t =
   let member key source =
@@ -114,47 +113,41 @@ let compute_metrics_window
                  let tool_counts =
                    List.fold_left count_map_incr tool_counts tools_used
                  in
-                 let output_item =
-                   if compact
-                   then None
-                   else
-                     Some
-                       (`Assoc
-                         [ "ts_unix", `Float ts_unix
-                         ; "trace_id", `String trace_id
-                         ; "channel", `String channel_wire
-                         ; "context_ratio", `Null
-                         ; "context_tokens", `Null
-                         ; "context_max", `Null
-                         ; ( "message_count"
-                           , Json_util.int_opt_to_json
-                               (Safe_ops.json_int_opt "message_count" json) )
-                         ; "usage", usage_obj
-                         ; "latency_ms", `Int latency_ms
-                         ; ( "cost_usd"
-                           , Json_util.float_opt_to_json
-                               (Safe_ops.json_float_opt "cost_usd" json) )
-                         ; "prompt_fingerprint", member "prompt_fingerprint" json
-                         ; "prompt", member "prompt" json
-                         ; "ctx_composition", member "ctx_composition" json
-                         ; "runtime", runtime_obj
-                         ; "work_kind", `String work_kind
-                         ; "tool_call_count", `Int tool_call_count
-                         ; ( "tools_used"
-                           , `List
-                               (List.map
-                                  (fun tool -> `String tool)
-                                  tools_used) )
-                         ; ( "inference_telemetry"
-                           , json
-                             |> member "inference_telemetry"
-                             |> Keeper_hooks_agent_core
-                                  .redact_inference_telemetry_json )
-                         ])
+                 let item =
+                   `Assoc
+                     [ "ts_unix", `Float ts_unix
+                     ; "trace_id", `String trace_id
+                     ; "channel", `String channel_wire
+                     ; "context_ratio", `Null
+                     ; "context_tokens", `Null
+                     ; "context_max", `Null
+                     ; ( "message_count"
+                       , Json_util.int_opt_to_json
+                           (Safe_ops.json_int_opt "message_count" json) )
+                     ; "usage", usage_obj
+                     ; "latency_ms", `Int latency_ms
+                     ; ( "cost_usd"
+                       , Json_util.float_opt_to_json
+                           (Safe_ops.json_float_opt "cost_usd" json) )
+                     ; "prompt_fingerprint", member "prompt_fingerprint" json
+                     ; "prompt", member "prompt" json
+                     ; "ctx_composition", member "ctx_composition" json
+                     ; "runtime", runtime_obj
+                     ; "work_kind", `String work_kind
+                     ; "tool_call_count", `Int tool_call_count
+                     ; ( "tools_used"
+                       , `List
+                           (List.map
+                              (fun tool -> `String tool)
+                              tools_used) )
+                     ; ( "inference_telemetry"
+                       , json
+                         |> member "inference_telemetry"
+                         |> Keeper_hooks_agent_core
+                              .redact_inference_telemetry_json )
+                     ]
                  in
-                 (match output_item with
-                  | Some item -> acc, work_kinds, tool_counts, item :: items
-                  | None -> acc, work_kinds, tool_counts, items)
+                 acc, work_kinds, tool_counts, item :: items
              | _ -> acc, work_kinds, tool_counts, items))
       (init_acc, Count_map.empty, Count_map.empty, [])
       parsed_metrics

@@ -114,7 +114,7 @@ let keeper_metrics_response ~config ~keeper_name req =
           | Dated_jsonl.Malformed_json _ -> None) entries in
         let series, window_summary =
           Dashboard_http_keeper_detail.compute_metrics_window
-            ~parsed_metrics ~compact:false ~series_points:limit
+            ~parsed_metrics ~series_points:limit
         in
         (* The projection counts accepted turns and heartbeats. Compare that
            count with physical coverage, so malformed and retired rows remain

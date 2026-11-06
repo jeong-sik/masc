@@ -115,7 +115,6 @@ let test_metrics_window_does_not_classify_execute_as_pr_work () =
             ];
           metric ~channel:"heartbeat" [ "tool_execute" ];
         ]
-      ~compact:false
       ~series_points:80
   in
   check int "tool calls remain generic" 3 (summary_int "tool_call_count" summary);
@@ -131,7 +130,6 @@ let test_metrics_series_preserves_current_turn_telemetry () =
           current_turn_metric ();
           sparse_tool_event ();
         ]
-      ~compact:false
       ~series_points:80
   in
   check int "series skips sparse rows" 1 (List.length items);
@@ -174,7 +172,6 @@ let test_metrics_window_omits_retired_labels () =
   let items, summary =
     Detail.compute_metrics_window
       ~parsed_metrics:[ row ]
-      ~compact:false
       ~series_points:80
   in
   let has_field key = function
@@ -201,7 +198,6 @@ let test_producer_shaped_turn_rows_enter_the_window () =
   let items, summary =
     Detail.compute_metrics_window
       ~parsed_metrics:[ metric [ "tool_execute" ]; metric [ "tool_read" ] ]
-      ~compact:false
       ~series_points:80
   in
   check int "producer-shaped rows reach the series" 2 (List.length items);

@@ -1829,10 +1829,14 @@ let start
                               Eio.Switch.fail child_sw
                                 Keeper_registry_types.Operator_interrupt)
                        });
+                  (* Only the server shutdown hook stops an Owner
+                     ([begin_stopping_all]), so both stop branches name the
+                     restart. A row whose process died without this commit
+                     settles as the same kind at the next boot. *)
                   if (Atomic.get t.projection).Keeper_owner_reducer.stopping
                   then
                     ( Operation_failed
-                        { kind = Chat_operation.Turn_cancelled
+                        { kind = Chat_operation.Interrupted_by_restart
                         ; detail = "Keeper owner is stopping"
                         ; outcome_ref = None
                         }
@@ -1841,7 +1845,7 @@ let start
               with
               | Stop_active_child ->
                 ( Operation_failed
-                    { kind = Chat_operation.Turn_cancelled
+                    { kind = Chat_operation.Interrupted_by_restart
                     ; detail = "Keeper owner stopped the active turn"
                     ; outcome_ref = None
                     }

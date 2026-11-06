@@ -100,7 +100,6 @@ val config : prepared -> Runtime_agent.config
 val prepared_checkpoint : prepared -> Agent_core.Checkpoint.t option
 val prepared_input : prepared -> input
 val binding_effect_observation : binding:binding -> Keeper_provider_attempt_effect.t
-val effect_observation : prepared -> Keeper_provider_attempt_effect.t
 (** Owner/journal read failure, an active scope, an unknown-effect terminal,
     or a retained checkpoint missing canonically settled ToolResults keeps
     provider fallback fenced. A known Retire receipt permits the existing

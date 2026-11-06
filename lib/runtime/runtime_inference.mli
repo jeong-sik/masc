@@ -14,10 +14,6 @@ val turn_timeout_s_of_declared : default:float -> float option -> float option
 (** Apply one declared value: [None] keeps [default]; a non-positive value
     removes the bound ([None]); anything else stands. *)
 
-val resolve_turn_timeout_s_or : runtime_id:string -> default:float -> float option
-(** [turn_timeout_s_of_declared] applied to the model's declaration. The one
-    spelling every official-client boundary uses. *)
-
 val resolve_temperature :
   runtime_id:string -> fallback:(unit -> float) -> float
 (** Use the runtime.toml model override when present; evaluate [fallback] only

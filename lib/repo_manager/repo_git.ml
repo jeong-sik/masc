@@ -528,9 +528,6 @@ let status_files_at ?(timeout_sec = inspection_timeout_sec) ~local_path () =
   | Stdlib.Error msg -> Stdlib.Error msg
   | Stdlib.Ok output -> status_files_of_porcelain_z output
 
-let status_files ?timeout_sec ~repository () =
-  status_files_at ?timeout_sec ~local_path:repository.local_path ()
-
 type upstream_state =
   | No_upstream
   | Upstream_gone of string

@@ -248,9 +248,6 @@ val resume_direct_runtime_retry : base_path:string -> keeper_name:string ->
 val pause_observed_turn : base_path:string -> keeper_name:string ->
   interrupt_token:Keeper_interrupt_token.t ->
   (Keeper_owner.pause_result * string, command_error) result
-val interrupt_observed_turn : base_path:string -> keeper_name:string ->
-  interrupt_token:Keeper_interrupt_token.t ->
-  (Keeper_owner.pause_result * string, command_error) result
 val pause_running_operation : ?expected_control_token:string -> base_path:string -> keeper_name:string ->
   Keeper_chat_operation.Operation_id.t -> (Keeper_owner.pause_result * string, command_error) result
 val run_next_operation : ?priority_predecessors:Keeper_chat_operation.Operation_id.t list ->

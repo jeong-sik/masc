@@ -34,8 +34,7 @@ type admission =
   | Terminal_pending of Native.t * Agent.execution_terminal_disposition
 
 type prepared =
-  { binding : binding
-  ; config : Runtime_agent.config
+  { config : Runtime_agent.config
   ; checkpoint : Agent_core.Checkpoint.t option
   ; input : input
   }
@@ -248,8 +247,6 @@ let binding_effect_observation ~binding =
   | Error _ | Ok false ->
     Keeper_provider_attempt_effect.Observation_unavailable
 
-let effect_observation prepared = binding_effect_observation ~binding:prepared.binding
-
 let retain binding (checkpoint : Agent_core.Checkpoint.t) =
   let* session_id = Keeper_id.Trace_id.of_string binding.session_id in
   let* snapshot = Checkpoint.exact_snapshot_of_value ~expected_session_id:session_id checkpoint
@@ -446,8 +443,8 @@ let prepare ~binding ~runtime_id ~config ~agent_core_checkpoint ~input ~agent_re
     Ok () in
   let execution_store = Agent.execution_store ~runtime ~dir ?resume
       ~on_scope_ready ~on_terminal_disposition () in
-  Ok {binding; config={config with execution_store=Some execution_store;
-                                  checkpoint_sink=Some checkpoint_sink};
+  Ok {config={config with execution_store=Some execution_store;
+                         checkpoint_sink=Some checkpoint_sink};
       checkpoint=agent_core_checkpoint; input}
 
 

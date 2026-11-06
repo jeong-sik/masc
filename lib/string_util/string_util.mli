@@ -15,11 +15,6 @@ val string_contains_substring : needle:string -> string -> bool
     [string_contains_substring ~needle haystack] is equivalent to
     [contains_substring haystack needle]. *)
 
-val string_contains_substring_ci : needle:string -> string -> bool
-(** Labeled-arg wrapper around [contains_substring_ci].
-    [string_contains_substring_ci ~needle haystack] is equivalent to
-    [contains_substring_ci haystack needle]. *)
-
 val query_tokens : string -> string list
 (** [query_tokens query] splits a free-text query on ASCII whitespace
     (space, tab, CR, LF) into non-empty tokens. UTF-8 bytes pass

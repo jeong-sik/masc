@@ -444,20 +444,26 @@ let emit_cost_event
      the ledger does not have; an exception after it landed (retention
      pruning) leaves it written. *)
   let landed = ref false in
-  match
-    Dated_jsonl.append_notifying_commit store entry
-      ~on_committed:(fun () -> landed := true)
-  with
-  | () -> Ok ()
-  | exception (Eio.Cancel.Cancelled _ as e) -> raise e
-  | exception Dated_jsonl.Append_guard_skipped ->
-    dropped "the append guard declined the append";
-    Error Append_declined
-  | exception exn when !landed ->
-    Log.Keeper.warn "emit_cost_event: wrote a row to %s, then: %s"
-      (Dated_jsonl.base_dir store) (Printexc.to_string exn);
-    Ok ()
-  | exception exn ->
-    let detail = Printexc.to_string exn in
-    dropped detail;
-    Error (Append_raised detail)
+  let result =
+    match
+      Dated_jsonl.append_notifying_commit store entry
+        ~on_committed:(fun () -> landed := true)
+    with
+    | () -> Ok ()
+    | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+    | exception Dated_jsonl.Append_guard_skipped ->
+      dropped "the append guard declined the append";
+      Error Append_declined
+    | exception exn when !landed ->
+      Log.Keeper.warn "emit_cost_event: wrote a row to %s, then: %s"
+        (Dated_jsonl.base_dir store) (Printexc.to_string exn);
+      Ok ()
+    | exception exn ->
+      let detail = Printexc.to_string exn in
+      dropped detail;
+      Error (Append_raised detail)
+  in
+  (match result with
+   | Ok () -> Cost_ledger_row_signal.appended ~masc_root
+   | Error _ -> ());
+  result

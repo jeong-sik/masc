@@ -2147,6 +2147,29 @@ let test_failed_read_keeps_followup_and_withdrawal_retires_it () =
   Alcotest.(check bool) "reconfirmed workspace can observe a new source read" true
     (take_local_workspace_read state ~source:Local_work resumed (Ok ()) = Some (Ok ()))
 
+let test_observer_machine_only_follows_control () =
+  let open Masc_tui_types in
+  let state = create_state ~workspace:"observer-machine" ~port:8935 ~refresh_interval:0. () in
+  state.msx_open <- true;
+  state.msx_menu_open <- false;
+  state.machine_source <- Masc.Machine_lane.Msx;
+  state.machine_interaction <- Observe_machine;
+  Alcotest.(check bool) "watching does not advance the machine" true
+    (observer_machine_of_state state = None);
+  state.machine_interaction <- Control_machine;
+  Alcotest.(check bool) "control advances only this machine" true
+    (observer_machine_of_state state = Some Masc.Machine_lane.Msx);
+  state.machine_source <- Masc.Machine_lane.Dos;
+  Alcotest.(check bool) "a source change replaces the query" true
+    (observer_machine_of_state state = Some Masc.Machine_lane.Dos);
+  state.msx_menu_open <- true;
+  Alcotest.(check bool) "the media menu owns no ticker" true
+    (observer_machine_of_state state = None);
+  state.msx_menu_open <- false;
+  state.msx_open <- false;
+  Alcotest.(check bool) "a closed spectator owns no ticker" true
+    (observer_machine_of_state state = None)
+
 let test_observer_retry_retires_with_workspace_read_authority () =
   let open Masc_tui_types in
   let state = create_state ~workspace:"observer-retry" ~local_base_path:"/workspace/a"
@@ -6732,6 +6755,8 @@ let () =
             test_failed_read_keeps_followup_and_withdrawal_retires_it
         ; Alcotest.test_case "concurrent creations retain individual refresh coverage" `Quick
             test_concurrent_created_keepers_retain_individual_refresh_coverage
+        ; Alcotest.test_case "observer machine only follows control" `Quick
+            test_observer_machine_only_follows_control
         ; Alcotest.test_case "observer retry retires with workspace authority" `Quick
             test_observer_retry_retires_with_workspace_read_authority
         ; Alcotest.test_case "observer recovery belongs to unconfirmed workspace" `Quick

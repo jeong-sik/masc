@@ -1,4 +1,5 @@
 open Alcotest
+open Masc
 
 module Observer = Masc_tui_observer
 
@@ -144,17 +145,29 @@ let summary = function
   | Observer.Event (Observer.Dataset_changed dataset) ->
       "dataset(" ^ Masc.Workspace_dataset_event.dataset_to_wire dataset
       ^ (match dataset with
+         | Masc.Workspace_dataset_event.Keeper_metrics { keeper }
          | Masc.Workspace_dataset_event.Keeper_oauth_attempts { keeper }
+         | Masc.Workspace_dataset_event.Skill_activations { keeper }
          | Masc.Workspace_dataset_event.Memory_health { keeper } -> ":" ^ keeper
+         | Masc.Workspace_dataset_event.Machine_live { machine } -> ":" ^ Masc.Machine_lane.to_wire machine
+         | Masc.Workspace_dataset_event.Browser_observation _ -> ""
          | Masc.Workspace_dataset_event.Repositories
          | Masc.Workspace_dataset_event.Verification_requests
          | Masc.Workspace_dataset_event.Harness_verdicts
+         | Masc.Workspace_dataset_event.Goals
+         | Masc.Workspace_dataset_event.Runtime_config
+         | Masc.Workspace_dataset_event.Connectors
+         | Masc.Workspace_dataset_event.Skill_catalog
          | Masc.Workspace_dataset_event.Clients
          | Masc.Workspace_dataset_event.Account_emails
          | Masc.Workspace_dataset_event.Provider_usage
          | Masc.Workspace_dataset_event.Provider_standing
          | Masc.Workspace_dataset_event.Keeper_costs
-         | Masc.Workspace_dataset_event.Workspace_health -> "")
+         | Masc.Workspace_dataset_event.Workspace_health
+         | Masc.Workspace_dataset_event.Runtime_probe
+         | Masc.Workspace_dataset_event.Runtime_metrics
+         | Masc.Workspace_dataset_event.Lanes
+         | Masc.Workspace_dataset_event.Lane_addons _ -> "")
       ^ ")"
   | Observer.Event (Observer.Workspace_store_changed Observer.Goal_projection) -> "goal_projection"
   | Observer.Event (Observer.Workspace_store_changed Observer.Runtime_config) -> "runtime_config"
@@ -955,15 +968,27 @@ let test_a_verification_or_run_push_reads_the_requests () =
               | Some Masc.Workspace_dataset_event.Verification_requests -> true
               | Some
                   ( Masc.Workspace_dataset_event.Repositories
-                  | Masc.Workspace_dataset_event.Harness_verdicts
+                  | Masc.Workspace_dataset_event.Keeper_metrics _
+                  | Masc.Workspace_dataset_event.Keeper_oauth_attempts _
+                  | Masc.Workspace_dataset_event.Skill_activations _
+                  | Masc.Workspace_dataset_event.Skill_catalog
                   | Masc.Workspace_dataset_event.Clients
                   | Masc.Workspace_dataset_event.Account_emails
                   | Masc.Workspace_dataset_event.Provider_usage
                   | Masc.Workspace_dataset_event.Provider_standing
                   | Masc.Workspace_dataset_event.Keeper_costs
                   | Masc.Workspace_dataset_event.Workspace_health
-                  | Masc.Workspace_dataset_event.Keeper_oauth_attempts _
-                  | Masc.Workspace_dataset_event.Memory_health _ )
+                  | Masc.Workspace_dataset_event.Runtime_probe
+                  | Masc.Workspace_dataset_event.Runtime_metrics
+                  | Masc.Workspace_dataset_event.Harness_verdicts
+                  | Masc.Workspace_dataset_event.Goals
+                  | Masc.Workspace_dataset_event.Runtime_config
+                  | Masc.Workspace_dataset_event.Connectors
+                  | Masc.Workspace_dataset_event.Lanes
+                  | Masc.Workspace_dataset_event.Memory_health _
+                  | Masc.Workspace_dataset_event.Machine_live _
+                  | Masc.Workspace_dataset_event.Browser_observation _
+                  | Masc.Workspace_dataset_event.Lane_addons _ )
               | None -> false)
          | Observer.Undecodable _ -> false)
     |> List.length
@@ -974,6 +999,9 @@ let test_a_verification_or_run_push_reads_the_requests () =
     [ "internal_runs(goal_verification)"; "internal_runs(exact_lane)" ]
     (List.map summary (decode_all other_run_registry_frames));
   check int "and owe the verification requests nothing" 0 (count other_run_registry_frames);
+  check (list string) "a Goal projection push decodes by name" [ "dataset(goals)" ]
+    (List.map summary
+       (decode_all [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"goals\"}\n\n" ]));
   List.iter
     (fun frame ->
        match decode_all [ frame ] with
@@ -985,6 +1013,23 @@ let test_a_verification_or_run_push_reads_the_requests () =
     [ "data: {\"type\":\"internal_agent_runs_changed\"}\n\n"
     ; "data: {\"type\":\"internal_agent_runs_changed\",\"registry\":\"elsewhere\"}\n\n"
     ]
+
+let test_browser_observation_decodes_the_exact_scope () =
+  let frame =
+    "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"browser_observation\",\
+     \"source\":\"live\",\"clientId\":\"01a16363-ef67-7000-ad62-05bcd0320d99\",\
+     \"tabId\":2,\"view\":\"read\",\"revision\":\"" ^ String.make 64 'a' ^ "\"}\n\n"
+  in
+  match decode_all [ frame ] with
+  | [ Observer.Event (Observer.Dataset_changed
+        (Masc.Workspace_dataset_event.Browser_observation observation)) ] ->
+      check string "the exact Browser client survives" "01a16363-ef67-7000-ad62-05bcd0320d99"
+        (Option.get observation.scope.client_id);
+      check int "the exact tab survives" 2 observation.scope.tab_id;
+      check string "the revision survives" (String.make 64 'a') observation.revision
+  | decoded ->
+      fail ("a matching Browser observation did not decode: "
+        ^ String.concat ", " (List.map summary decoded))
 
 let event_queue_frame =
   {|data: {"type":"keeper_event_queue_changed","keeper":"alpha"}
@@ -1025,15 +1070,27 @@ let test_a_repository_push_reads_the_list () =
               | Some Masc.Workspace_dataset_event.Repositories -> true
               | Some
                   ( Masc.Workspace_dataset_event.Verification_requests
-                  | Masc.Workspace_dataset_event.Harness_verdicts
+                  | Masc.Workspace_dataset_event.Keeper_metrics _
+                  | Masc.Workspace_dataset_event.Keeper_oauth_attempts _
+                  | Masc.Workspace_dataset_event.Skill_activations _
+                  | Masc.Workspace_dataset_event.Skill_catalog
                   | Masc.Workspace_dataset_event.Clients
                   | Masc.Workspace_dataset_event.Account_emails
                   | Masc.Workspace_dataset_event.Provider_usage
                   | Masc.Workspace_dataset_event.Provider_standing
                   | Masc.Workspace_dataset_event.Keeper_costs
                   | Masc.Workspace_dataset_event.Workspace_health
-                  | Masc.Workspace_dataset_event.Keeper_oauth_attempts _
-                  | Masc.Workspace_dataset_event.Memory_health _ )
+                  | Masc.Workspace_dataset_event.Runtime_probe
+                  | Masc.Workspace_dataset_event.Runtime_metrics
+                  | Masc.Workspace_dataset_event.Harness_verdicts
+                  | Masc.Workspace_dataset_event.Goals
+                  | Masc.Workspace_dataset_event.Runtime_config
+                  | Masc.Workspace_dataset_event.Connectors
+                  | Masc.Workspace_dataset_event.Lanes
+                  | Masc.Workspace_dataset_event.Memory_health _
+                  | Masc.Workspace_dataset_event.Machine_live _
+                  | Masc.Workspace_dataset_event.Browser_observation _
+                  | Masc.Workspace_dataset_event.Lane_addons _ )
               | None -> false)
          | Observer.Undecodable _ -> false)
     |> List.length
@@ -1046,15 +1103,27 @@ let test_a_repository_push_reads_the_list () =
           | Some Masc.Workspace_dataset_event.Verification_requests -> false
           | Some
               ( Masc.Workspace_dataset_event.Repositories
-              | Masc.Workspace_dataset_event.Harness_verdicts
+              | Masc.Workspace_dataset_event.Keeper_metrics _
+              | Masc.Workspace_dataset_event.Keeper_oauth_attempts _
+              | Masc.Workspace_dataset_event.Skill_activations _
+              | Masc.Workspace_dataset_event.Skill_catalog
               | Masc.Workspace_dataset_event.Clients
               | Masc.Workspace_dataset_event.Account_emails
               | Masc.Workspace_dataset_event.Provider_usage
               | Masc.Workspace_dataset_event.Provider_standing
               | Masc.Workspace_dataset_event.Keeper_costs
               | Masc.Workspace_dataset_event.Workspace_health
-              | Masc.Workspace_dataset_event.Keeper_oauth_attempts _
-              | Masc.Workspace_dataset_event.Memory_health _ )
+              | Masc.Workspace_dataset_event.Runtime_probe
+              | Masc.Workspace_dataset_event.Runtime_metrics
+              | Masc.Workspace_dataset_event.Harness_verdicts
+              | Masc.Workspace_dataset_event.Goals
+              | Masc.Workspace_dataset_event.Runtime_config
+              | Masc.Workspace_dataset_event.Connectors
+              | Masc.Workspace_dataset_event.Lanes
+              | Masc.Workspace_dataset_event.Memory_health _
+              | Masc.Workspace_dataset_event.Machine_live _
+              | Masc.Workspace_dataset_event.Browser_observation _
+              | Masc.Workspace_dataset_event.Lane_addons _ )
           | None -> true)
      | _ -> false);
   check int "a verification or run push does not" 0 (count verification_frames);
@@ -1068,8 +1137,11 @@ let test_a_repository_push_reads_the_list () =
               ^ String.concat ", " (List.map summary decoded)))
     [ "data: {\"type\":\"workspace_dataset_changed\"}\n\n"
     ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"elsewhere\"}\n\n"
+    ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"keeper_metrics\"}\n\n"
+    ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"keeper_metrics\",\"keeper\":\"\"}\n\n"
     ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"keeper_oauth_attempts\"}\n\n"
     ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"keeper_oauth_attempts\",\"keeper\":\"\"}\n\n"
+    ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"skill_activations\"}\n\n"
     ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"memory_health\"}\n\n"
     ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"memory_health\",\"keeper\":\"\"}\n\n"
     ];
@@ -1078,33 +1150,41 @@ let test_a_repository_push_reads_the_list () =
     (List.map summary
        (decode_all
           [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"harness_verdicts\"}\n\n" ]));
+  check (list string) "a Keeper's metrics push names its Keeper"
+    [ "dataset(keeper_metrics:alpha)" ]
+    (List.map summary
+       (decode_all
+          [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"keeper_metrics\",\"keeper\":\"alpha\"}\n\n" ]));
   check (list string) "a Keeper's login attempts decode with the Keeper"
     [ "dataset(keeper_oauth_attempts:largo)" ]
     (List.map summary
        (decode_all
           [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"keeper_oauth_attempts\",\"keeper\":\"largo\"}\n\n" ]));
-  check (list string) "a clients push decodes by name"
-    [ "dataset(clients)" ]
+  check (list string) "Clients and provider usage and standing pushes decode by name"
+    [ "dataset(clients)"; "dataset(provider_usage)"; "dataset(provider_standing)" ]
     (List.map summary
        (decode_all
-          [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"clients\"}\n\n" ]));
+          [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"clients\"}\n\n"
+          ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"provider_usage\"}\n\n"
+          ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"provider_standing\"}\n\n"
+          ]));
   check (list string) "an account emails push decodes by name"
     [ "dataset(account_emails)" ]
     (List.map summary
        (decode_all
           [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"account_emails\"}\n\n" ]));
-  check (list string) "provider usage and standing pushes decode by name"
-    [ "dataset(provider_usage)"; "dataset(provider_standing)" ]
-    (List.map summary
-       (decode_all
-          [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"provider_usage\"}\n\n"
-          ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"provider_standing\"}\n\n"
-          ]));
-  check (list string) "a Keeper costs push decodes by name"
+  check (list string) "A Keeper costs push decodes by name"
     [ "dataset(keeper_costs)" ]
     (List.map summary
        (decode_all
           [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"keeper_costs\"}\n\n" ]));
+  check (list string) "Skill pushes decode with the Keeper a ledger row names"
+    [ "dataset(skill_activations:alpha)"; "dataset(skill_catalog)" ]
+    (List.map summary
+       (decode_all
+          [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"skill_activations\",\"keeper\":\"alpha\"}\n\n"
+          ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"skill_catalog\"}\n\n"
+          ]));
   check (list string) "a Keeper's memory health push decodes with the Keeper"
     [ "dataset(memory_health:largo)" ]
     (List.map summary
@@ -1549,6 +1629,83 @@ let test_multiline_frame_preserves_payload_and_cursor () =
       check string "multiline canonical SSE data preserved" "alpha" call.kt_keeper
   | _ -> fail "expected one multiline event with cursor 44"
 
+let test_lane_inventory_pushes_decode_with_their_scope () =
+  let lanes = "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"lanes\"}\n\n" in
+  let addon = "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"lane_addons\",\"instance_id\":\"inst-7\"}\n\n" in
+  check (list string) "Lane and Add-on pushes decode by name"
+    [ "dataset(lanes)"; "dataset(lane_addons)" ]
+    (List.map summary (decode_all [ lanes; addon ]));
+  List.iter
+    (fun (frame, expected_name) ->
+      match decode_all [ frame ] with
+      | [ Observer.Event event ] ->
+          (match Observer.dataset_owed event with
+           | Some dataset ->
+               check string "the owed dataset survives" expected_name
+                 (Masc.Workspace_dataset_event.dataset_name dataset)
+           | None -> fail "a Lane push owes no read")
+      | decoded -> failf "a Lane push was not read: %s"
+          (String.concat ", " (List.map summary decoded)))
+    [ lanes, "lanes"; addon, "lane_addons" ];
+  let fields = match Yojson.Safe.from_string
+    "{\"type\":\"workspace_dataset_changed\",\"dataset\":\"lane_addons\",\"instance_id\":\"inst-7\"}" with
+    | `Assoc fields -> fields
+    | _ -> fail "the Add-on fixture is not an object"
+  in
+  (match Masc.Workspace_dataset_event.of_fields fields with
+   | Ok dataset ->
+       check string "the Add-on dataset name" "lane_addons"
+         (Masc.Workspace_dataset_event.dataset_name dataset);
+       check (option string) "the open instance is preserved" (Some "inst-7")
+         (Option.bind (List.assoc_opt "instance_id" fields)
+           Yojson.Safe.Util.to_string_option)
+   | Error detail -> fail detail);
+  List.iter
+    (fun frame ->
+      match decode_all [ frame ] with
+      | [ Observer.Undecodable _ ] -> ()
+      | decoded -> failf "an Add-on push without a valid instance was read: %s"
+          (String.concat ", " (List.map summary decoded)))
+    [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"lane_addons\"}\n\n"
+    ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"lane_addons\",\"instance_id\":\"\"}\n\n" ]
+
+let test_memory_health_pushes_require_their_keeper () =
+  let fields = [ "type", `String "workspace_dataset_changed"
+               ; "dataset", `String "memory_health"; "keeper", `String "alpha" ] in
+  (match Masc.Workspace_dataset_event.of_fields fields with
+   | Ok (Masc.Workspace_dataset_event.Memory_health { keeper }) ->
+       check string "the changed Keeper is preserved" "alpha" keeper
+   | Ok _ | Error _ -> fail "a Memory health push lost its Keeper");
+  List.iter
+    (fun frame ->
+      match decode_all [ frame ] with
+      | [ Observer.Undecodable _ ] -> ()
+      | decoded -> failf "a Memory health push without a valid Keeper was read: %s"
+          (String.concat ", " (List.map summary decoded)))
+    [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"memory_health\"}\n\n"
+    ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"memory_health\",\"keeper\":\"\"}\n\n" ]
+
+let test_machine_live_pushes_scope_the_machine () =
+  List.iter
+    (fun expected ->
+      let fields = [ "type", `String "workspace_dataset_changed"
+                   ; "dataset", `String "machine_live"; "machine", `String expected ] in
+      match Masc.Workspace_dataset_event.of_fields fields with
+      | Ok (Masc.Workspace_dataset_event.Machine_live { machine }) ->
+          check string "only the selected machine is named" expected
+            (Masc.Machine_lane.to_wire machine)
+      | Ok _ | Error _ -> fail "a machine push was not decoded")
+    [ "msx"; "dos" ];
+  List.iter
+    (fun frame ->
+      match decode_all [ frame ] with
+      | [ Observer.Undecodable _ ] -> ()
+      | decoded -> failf "a machine push without a valid machine was read: %s"
+          (String.concat ", " (List.map summary decoded)))
+    [ "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"machine_live\"}\n\n"
+    ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"machine_live\",\"machine\":\"\"}\n\n"
+    ; "data: {\"type\":\"workspace_dataset_changed\",\"dataset\":\"machine_live\",\"machine\":\"other\"}\n\n" ]
+
 let () =
   run "tui observer"
     [ ( "session"
@@ -1607,6 +1764,14 @@ let () =
             test_a_verification_or_run_push_reads_the_requests
         ; test_case "a repository push reads the list" `Quick
             test_a_repository_push_reads_the_list
+        ; test_case "Lane inventory pushes decode with their scope" `Quick
+            test_lane_inventory_pushes_decode_with_their_scope
+        ; test_case "Memory health pushes require their Keeper" `Quick
+            test_memory_health_pushes_require_their_keeper
+        ; test_case "Machine live pushes name their machine" `Quick
+            test_machine_live_pushes_scope_the_machine
+        ; test_case "Browser observation pushes decode their exact scope" `Quick
+            test_browser_observation_decodes_the_exact_scope
         ; test_case "a queue push names its Keeper" `Quick
             test_a_queue_push_names_its_keeper
         ; test_case "a connector push names its connector" `Quick

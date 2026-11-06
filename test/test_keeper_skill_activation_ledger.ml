@@ -178,7 +178,7 @@ let test_empty_record_and_idempotent_readback () =
   check int "empty session" 0 (List.length (Ledger.activations initial));
   let activation = activation () in
   let first, first_outcome =
-    match Ledger.record ~config ~trace_id activation with
+    match Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id activation with
     | Ok value -> value
     | Error error ->
       fail ("first activation record failed: " ^ Ledger.store_error_to_string error)
@@ -188,7 +188,7 @@ let test_empty_record_and_idempotent_readback () =
    | Already_recorded _ -> fail "first activation was already present");
   check int "one activation" 1 (List.length (Ledger.activations first));
   let second, second_outcome =
-    match Ledger.record ~config ~trace_id activation with
+    match Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id activation with
     | Ok value -> value
     | Error _ -> fail "idempotent activation record failed"
   in
@@ -209,7 +209,7 @@ let ok label = function
 let first_turn = Ids.Turn_ref.make ~trace_id:"trace-one" ~absolute_turn:1
 
 let deliver config trace_id ids =
-  Ledger.observe_delivery
+  Ledger.observe_delivery ~keeper_name:"skill-keeper-fixture"
     ~config
     ~trace_id
     ~turn_ref:first_turn
@@ -220,7 +220,7 @@ let deliver config trace_id ids =
 ;;
 
 let act config trace_id ~call ids =
-  Ledger.observe_action
+  Ledger.observe_action ~keeper_name:"skill-keeper-fixture"
     ~config
     ~trace_id
     ~turn_ref:first_turn
@@ -249,6 +249,35 @@ let check_the_file_replays_the_held_ledger config trace_id =
     (ledger_json held)
     (ledger_json (replayed_from_file config trace_id))
 
+(* A committed row tells the workspace's readers whose Skill record moved;
+   an idempotent re-record commits nothing and says nothing. *)
+let test_a_committed_row_announces_its_keeper () =
+  with_session @@ fun config trace_id _session_dir ->
+  let heard = ref [] in
+  let id = "skill-activation-announce" in
+  Sse.subscribe_external
+    ~runtime_authority:(Sse.runtime_authority_exn ~base_path:config.Workspace.base_path) ~id
+    ~callback:(fun (event : Sse.external_event) ->
+      match event.ext_payload with
+      | `Assoc fields ->
+        (match Workspace_dataset_event.of_fields fields with
+         | Ok (Workspace_dataset_event.Skill_activations { keeper }) -> heard := keeper :: !heard
+         | Ok _ | Error _ -> ())
+      | _ -> ())
+    ();
+  Fun.protect ~finally:(fun () -> Sse.unsubscribe_external id) (fun () ->
+    let recorded = activation () in
+    let record () =
+      match Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id recorded with
+      | Ok _ -> ()
+      | Error error -> fail (Ledger.store_error_to_string error)
+    in
+    record ();
+    check (list string) "the commit names its Keeper" [ "skill-keeper-fixture" ] !heard;
+    record ();
+    check (list string) "a repeated record announces nothing" [ "skill-keeper-fixture" ] !heard)
+;;
+
 (* A mutation returns the ledger it appended to, and a reader with no memory
    of the session rebuilds the ledger from the file's rows. After every kind
    of event -- activations, deliveries, actions, a rejected transition --
@@ -257,7 +286,7 @@ let test_the_held_ledger_is_the_one_the_file_replays () =
   with_session @@ fun config trace_id _session_dir ->
   List.iter
     (fun candidate ->
-       match Ledger.record ~config ~trace_id candidate with
+       match Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id candidate with
        | Ok (_, Ledger.Recorded _) -> ()
        | Ok (_, Ledger.Already_recorded _) -> fail "a distinct activation was a repeat"
        | Error error -> fail ("record failed: " ^ Ledger.store_error_to_string error))
@@ -322,7 +351,7 @@ let line_count contents =
 let test_each_mutation_appends_one_row () =
   with_session @@ fun config trace_id session_dir ->
   let file = events_file session_dir in
-  let _ = ok "first record" (Ledger.record ~config ~trace_id (activation ())) in
+  let _ = ok "first record" (Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id (activation ())) in
   let after_first = read_file file in
   check int "the header and the first activation" 2 (line_count after_first);
   let expect_one_more label previous =
@@ -332,9 +361,9 @@ let test_each_mutation_appends_one_row () =
       (String.starts_with ~prefix:previous current);
     current
   in
-  let _ = ok "second record" (Ledger.record ~config ~trace_id (activation ~revision:'b' ())) in
+  let _ = ok "second record" (Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id (activation ~revision:'b' ())) in
   let after_second = expect_one_more "an activation" after_first in
-  let _ = ok "repeat record" (Ledger.record ~config ~trace_id (activation ())) in
+  let _ = ok "repeat record" (Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id (activation ())) in
   check string "an identical activation adds nothing" after_second (read_file file);
   let _ = ok "delivery" (deliver config trace_id [ "call-workspace-a" ]) in
   let after_delivery = expect_one_more "a delivery" after_second in
@@ -343,7 +372,7 @@ let test_each_mutation_appends_one_row () =
   (* A repeated recording is judged on what the activation recorded when it
      was made. The delivery and action that followed do not make it another
      invocation, and the stored activation keeps them. *)
-  (match Ledger.record ~config ~trace_id (activation ()) with
+  (match Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id (activation ()) with
    | Ok (_, Ledger.Already_recorded (existing : Ledger.activation)) ->
      check bool "the stored activation keeps its delivery" true
        (Option.is_some existing.delivery);
@@ -427,7 +456,7 @@ let test_legacy_composition_reports_exact_row_without_appending () =
     | Ok _ -> fail "legacy composition was accepted without physical execution identity" in
   check_error (Ledger.load ~config ~trace_id);
   (* A later instruction is not appended past evidence the reader cannot decode. *)
-  (match Ledger.record ~config ~trace_id (activation ~revision:'b' ()) with
+  (match Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id (activation ~revision:'b' ()) with
    | Error error -> check_error (Error error)
    | Ok _ -> fail "later instruction silently skipped the undecodable composition");
   check string "diagnosis neither skips nor rewrites original evidence" bytes (read_file file)
@@ -454,7 +483,7 @@ let test_previous_generation_log_is_refused_at_its_header () =
     | Error error -> fail (Ledger.store_error_to_string error)
     | Ok _ -> fail "a previous-generation log was accepted" in
   check_error (Ledger.load ~config ~trace_id);
-  (match Ledger.record ~config ~trace_id (activation ~revision:'b' ()) with
+  (match Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id (activation ~revision:'b' ()) with
    | Error error -> check_error (Error error)
    | Ok _ -> fail "a record was appended to a previous-generation log");
   check string "the previous-generation log is left as it was" bytes (read_file file)
@@ -474,7 +503,7 @@ let test_a_torn_last_row_is_cut_on_first_read () =
   let loaded = ok "first locked read" (Ledger.load ~config ~trace_id) in
   check int "the committed activation is kept" 1 (List.length (Ledger.activations loaded));
   check string "the torn row is cut off the file" committed (read_file file);
-  let _ = ok "record after recovery" (Ledger.record ~config ~trace_id (activation ~revision:'b' ())) in
+  let _ = ok "record after recovery" (Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id (activation ~revision:'b' ())) in
   check int "writing carries on after the cut" 2
     (List.length (Ledger.activations (replayed_from_file config trace_id)))
 ;;
@@ -550,11 +579,11 @@ let test_an_unterminated_first_row_is_refused_and_kept () =
    them. *)
 let test_rows_another_writer_appends_are_read_after_the_cursor () =
   with_session @@ fun config trace_id session_dir ->
-  let _ = ok "record" (Ledger.record ~config ~trace_id (activation ())) in
+  let _ = ok "record" (Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id (activation ())) in
   append_to_file (events_file session_dir) (activation_row (activation ~revision:'b' ()) ^ "\n");
   check int "the appended row is read" 2
     (activation_count (ok "load" (Ledger.load ~config ~trace_id)));
-  let _ = ok "record after" (Ledger.record ~config ~trace_id (activation ~revision:'c' ())) in
+  let _ = ok "record after" (Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id (activation ~revision:'c' ())) in
   check int "writing carries on after it" 3
     (activation_count (ok "load" (Ledger.load ~config ~trace_id)));
   check_the_file_replays_the_held_ledger config trace_id
@@ -564,7 +593,7 @@ let test_rows_another_writer_appends_are_read_after_the_cursor () =
    same path -- is replayed from its first byte. *)
 let test_a_replaced_store_is_replayed_from_its_first_byte () =
   with_session @@ fun config trace_id session_dir ->
-  let _ = ok "record" (Ledger.record ~config ~trace_id (activation ())) in
+  let _ = ok "record" (Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id (activation ())) in
   let file = events_file session_dir in
   let replacement = file ^ ".replacement" in
   write_file
@@ -581,14 +610,14 @@ let test_a_replaced_store_is_replayed_from_its_first_byte () =
    replays the store instead of failing until a restart. *)
 let test_a_torn_tail_after_a_warm_read_is_cut () =
   with_session @@ fun config trace_id session_dir ->
-  let _ = ok "record" (Ledger.record ~config ~trace_id (activation ())) in
+  let _ = ok "record" (Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id (activation ())) in
   let file = events_file session_dir in
   let committed = read_file file in
   append_to_file file "{\"kind\":\"activation_rec";
   check int "the committed activation is kept" 1
     (activation_count (ok "load" (Ledger.load ~config ~trace_id)));
   check string "the torn row is cut off the file" committed (read_file file);
-  let _ = ok "record after" (Ledger.record ~config ~trace_id (activation ~revision:'b' ())) in
+  let _ = ok "record after" (Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id (activation ~revision:'b' ())) in
   check_the_file_replays_the_held_ledger config trace_id
 ;;
 
@@ -627,11 +656,11 @@ let test_the_replay_holds_rows_to_the_writers_shapes () =
    session. *)
 let test_a_row_the_replay_could_not_read_is_never_written () =
   with_session @@ fun config trace_id session_dir ->
-  let _ = ok "record" (Ledger.record ~config ~trace_id (activation ())) in
+  let _ = ok "record" (Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id (activation ())) in
   let file = events_file session_dir in
   let before = read_file file in
   (match
-     Ledger.observe_delivery
+     Ledger.observe_delivery ~keeper_name:"skill-keeper-fixture"
        ~config
        ~trace_id
        ~turn_ref:first_turn
@@ -654,7 +683,7 @@ let test_same_name_different_identity_or_revision_is_distinct () =
   in
   List.iter
     (fun value ->
-       match Ledger.record ~config ~trace_id value with
+       match Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id value with
        | Ok (_, Ledger.Recorded _) -> ()
        | Ok (_, Already_recorded _) -> fail "distinct activation was deduplicated"
        | Error error ->
@@ -674,7 +703,7 @@ let test_same_skill_different_invocations_are_distinct () =
   in
   List.iter
     (fun value ->
-       match Ledger.record ~config ~trace_id value with
+       match Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id value with
        | Ok (_, Ledger.Recorded _) -> ()
        | Ok (_, Already_recorded _) -> fail "distinct invocation was deduplicated"
        | Error error -> fail (Ledger.store_error_to_string error))
@@ -703,7 +732,7 @@ let test_session_origins_roundtrip () =
   in
   List.iter
     (fun value ->
-       match Ledger.record ~config ~trace_id value with
+       match Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id value with
        | Ok (_, Ledger.Recorded _) -> ()
        | Ok (_, Already_recorded _) -> fail "session origin was deduplicated"
        | Error error -> fail (Ledger.store_error_to_string error))
@@ -727,13 +756,13 @@ let test_session_origins_roundtrip () =
 let test_delivery_and_later_action_form_one_exact_chain () =
   with_session @@ fun config trace_id _session_dir ->
   let value = activation ~skill_tool_use_id:"call-skill" ~agent_core_turn:0 () in
-  (match Ledger.record ~config ~trace_id value with
+  (match Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id value with
    | Ok _ -> ()
    | Error error -> fail (Ledger.store_error_to_string error));
   let turn_ref = Ids.Turn_ref.make ~trace_id:"trace-one" ~absolute_turn:1 in
   let delivered, matching_ids =
     match
-      Ledger.observe_delivery
+      Ledger.observe_delivery ~keeper_name:"skill-keeper-fixture"
         ~config
         ~trace_id
         ~turn_ref
@@ -763,7 +792,7 @@ let test_delivery_and_later_action_form_one_exact_chain () =
    | None -> fail "matching provider input did not record delivery");
   let with_action, added =
     match
-      Ledger.observe_action
+      Ledger.observe_action ~keeper_name:"skill-keeper-fixture"
         ~config
         ~trace_id
         ~turn_ref
@@ -818,7 +847,7 @@ let test_delivery_and_later_action_form_one_exact_chain () =
    | _ -> fail "one invocation produced the wrong scoped summary count");
   let _, repeated =
     match
-      Ledger.observe_action
+      Ledger.observe_action ~keeper_name:"skill-keeper-fixture"
         ~config
         ~trace_id
         ~turn_ref
@@ -839,13 +868,13 @@ let test_delivery_and_later_action_form_one_exact_chain () =
 let test_demoted_skill_result_is_not_delivery_or_invalid_transition () =
   with_session @@ fun config trace_id _session_dir ->
   let value = activation ~skill_tool_use_id:"call-demoted" () in
-  (match Ledger.record ~config ~trace_id value with
+  (match Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id value with
    | Ok _ -> ()
    | Error error -> fail (Ledger.store_error_to_string error));
   let turn_ref = Ids.Turn_ref.make ~trace_id:"trace-one" ~absolute_turn:1 in
   let ledger, matched =
     match
-      Ledger.observe_delivery
+      Ledger.observe_delivery ~keeper_name:"skill-keeper-fixture"
         ~config
         ~trace_id
         ~turn_ref
@@ -868,13 +897,13 @@ let test_demoted_skill_result_is_not_delivery_or_invalid_transition () =
 let test_official_client_handoff_delivers_in_invocation_turn () =
   with_session @@ fun config trace_id _session_dir ->
   let value = activation ~skill_tool_use_id:"call-official" ~agent_core_turn:0 () in
-  (match Ledger.record ~config ~trace_id value with
+  (match Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id value with
    | Ok _ -> ()
    | Error error -> fail (Ledger.store_error_to_string error));
   let turn_ref = Ids.Turn_ref.make ~trace_id:"trace-one" ~absolute_turn:1 in
   let ledger, matched =
     match
-      Ledger.observe_delivery
+      Ledger.observe_delivery ~keeper_name:"skill-keeper-fixture"
         ~config
         ~trace_id
         ~turn_ref
@@ -915,7 +944,7 @@ let test_official_client_handoff_delivers_in_invocation_turn () =
    | _ -> fail "official handoff produced the wrong scoped summary")
   ; let completed, added =
       match
-        Ledger.observe_action
+        Ledger.observe_action ~keeper_name:"skill-keeper-fixture"
           ~config
           ~trace_id
           ~turn_ref
@@ -946,13 +975,13 @@ let test_official_client_handoff_delivers_in_invocation_turn () =
 let test_cross_turn_tool_result_replay_is_not_delivery_or_rejection () =
   with_session @@ fun config trace_id _session_dir ->
   let value = activation ~skill_tool_use_id:"call-replayed" () in
-  (match Ledger.record ~config ~trace_id value with
+  (match Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id value with
    | Ok _ -> ()
    | Error error -> fail (Ledger.store_error_to_string error));
   let replay_turn = Ids.Turn_ref.make ~trace_id:"trace-one" ~absolute_turn:2 in
   let ledger, matched =
     match
-      Ledger.observe_delivery
+      Ledger.observe_delivery ~keeper_name:"skill-keeper-fixture"
         ~config
         ~trace_id
         ~turn_ref:replay_turn
@@ -975,12 +1004,12 @@ let test_cross_turn_tool_result_replay_is_not_delivery_or_rejection () =
 let test_conflicting_delivery_is_durable_transition_evidence () =
   with_session @@ fun config trace_id _session_dir ->
   let value = activation ~skill_tool_use_id:"call-conflict" () in
-  (match Ledger.record ~config ~trace_id value with
+  (match Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id value with
    | Ok _ -> ()
    | Error error -> fail (Ledger.store_error_to_string error));
   let turn_ref = Ids.Turn_ref.make ~trace_id:"trace-one" ~absolute_turn:1 in
   (match
-     Ledger.observe_delivery
+     Ledger.observe_delivery ~keeper_name:"skill-keeper-fixture"
        ~config
        ~trace_id
        ~turn_ref
@@ -992,7 +1021,7 @@ let test_conflicting_delivery_is_durable_transition_evidence () =
    | Ok _ -> ()
    | Error error -> fail (Ledger.store_error_to_string error));
   (match
-     Ledger.observe_delivery
+     Ledger.observe_delivery ~keeper_name:"skill-keeper-fixture"
        ~config
        ~trace_id
        ~turn_ref
@@ -1024,12 +1053,12 @@ let test_conflicting_delivery_is_durable_transition_evidence () =
 let test_action_before_delivery_is_durable_transition_evidence () =
   with_session @@ fun config trace_id _session_dir ->
   let value = activation ~skill_tool_use_id:"call-undelivered" () in
-  (match Ledger.record ~config ~trace_id value with
+  (match Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id value with
    | Ok _ -> ()
    | Error error -> fail (Ledger.store_error_to_string error));
   let turn_ref = Ids.Turn_ref.make ~trace_id:"trace-one" ~absolute_turn:1 in
   (match
-     Ledger.observe_action
+     Ledger.observe_action ~keeper_name:"skill-keeper-fixture"
        ~config
        ~trace_id
        ~turn_ref
@@ -1070,7 +1099,7 @@ let test_catalog_usage_preserves_exact_reference_and_time () =
     ~revision:'b' ~activated_at:"2026-08-26T23:00:00Z" () in
   let foreign_source = activation ~skill_tool_use_id:"foreign-source"
     ~source:"user" ~activated_at:"2026-08-26T23:30:00Z" () in
-  List.iter (fun value -> Ledger.record ~config ~trace_id value |> Result.get_ok |> ignore)
+  List.iter (fun value -> Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id value |> Result.get_ok |> ignore)
     [first; latest; foreign_revision; foreign_source];
   let ledger = Ledger.load ~config ~trace_id |> Result.get_ok in
   let reference = Skill_reference.make ~identity:first.identity ~content_revision:first.content_revision in
@@ -1103,13 +1132,13 @@ let test_scoped_summaries_do_not_mix_runtime_or_exact_reference () =
   in
   List.iter
     (fun value ->
-       match Ledger.record ~config ~trace_id value with
+       match Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id value with
        | Ok _ -> ()
        | Error error -> fail (Ledger.store_error_to_string error))
     [ first; second ];
   let turn_ref = Ids.Turn_ref.make ~trace_id:"trace-one" ~absolute_turn:1 in
   (match
-     Ledger.observe_delivery
+     Ledger.observe_delivery ~keeper_name:"skill-keeper-fixture"
        ~config
        ~trace_id
        ~turn_ref
@@ -1121,7 +1150,7 @@ let test_scoped_summaries_do_not_mix_runtime_or_exact_reference () =
    | Ok _ -> ()
    | Error error -> fail (Ledger.store_error_to_string error));
   (match
-     Ledger.observe_delivery
+     Ledger.observe_delivery ~keeper_name:"skill-keeper-fixture"
        ~config
        ~trace_id
        ~turn_ref
@@ -1182,7 +1211,7 @@ let test_corrupt_ledger_is_typed () =
 let test_copied_ledger_is_rejected_by_session_identity () =
   with_session @@ fun config trace_one session_one ->
   let value = activation () in
-  (match Ledger.record ~config ~trace_id:trace_one value with
+  (match Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id:trace_one value with
    | Ok _ -> ()
    | Error error -> fail (Ledger.store_error_to_string error));
   let trace_two = trace_id "trace-two" in
@@ -1199,7 +1228,7 @@ let test_copied_ledger_is_rejected_by_session_identity () =
 let test_duplicate_exact_key_is_rejected_during_decode () =
   with_session @@ fun config trace _session_dir ->
   let activation_json, workspace_key =
-    match Ledger.record ~config ~trace_id:trace (activation ()) with
+    match Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id:trace (activation ()) with
     | Error error -> fail (Ledger.store_error_to_string error)
     | Ok (stored, _) ->
       (match Ledger.to_yojson stored with
@@ -1242,7 +1271,7 @@ let test_duplicate_exact_key_is_rejected_during_decode () =
 
 let test_cross_workspace_copy_is_rejected () =
   with_session @@ fun source_config trace source_session ->
-  (match Ledger.record ~config:source_config ~trace_id:trace (activation ()) with
+  (match Ledger.record ~keeper_name:"skill-keeper-fixture" ~config:source_config ~trace_id:trace (activation ()) with
    | Ok _ -> ()
    | Error error -> fail (Ledger.store_error_to_string error));
   let target_root = Filename.temp_file "skill-activation-target-" "" in
@@ -1319,7 +1348,7 @@ let test_task_id_sets_are_nonempty_and_unique () =
 
 let test_record_rejects_another_trace () =
   with_session @@ fun config trace _session_dir ->
-  match Ledger.record ~config ~trace_id:trace (activation ~trace:"trace-two" ()) with
+  match Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id:trace (activation ~trace:"trace-two" ()) with
   | Error (Ledger.Decode_failed Ledger.Turn_ref_session_mismatch) -> ()
   | Error _ -> fail "cross-trace record returned wrong store error"
   | Ok _ -> fail "cross-trace activation was recorded"
@@ -1472,10 +1501,10 @@ let test_nested_dispatch_identity_and_parent_delivery_survive_reload () =
   let values = [ make ~id:"child-left" ~parent:"outer-run" ~alias:"left/~name"
                ; make ~id:"child-right" ~parent:"outer-run" ~alias:"right"
                ; make ~id:"child-unrelated" ~parent:"different-outer-run" ~alias:"left/~name" ] in
-  List.iter (fun value -> match Ledger.record ~config ~trace_id value with
+  List.iter (fun value -> match Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id value with
     | Ok _ -> () | Error error -> fail (Ledger.store_error_to_string error)) values;
   let turn_ref = Ids.Turn_ref.make ~trace_id:"trace-one" ~absolute_turn:1 in
-  let deliver ?(turn_ref = turn_ref) ids = match Ledger.observe_delivery ~config ~trace_id ~turn_ref
+  let deliver ?(turn_ref = turn_ref) ids = match Ledger.observe_delivery ~keeper_name:"skill-keeper-fixture" ~config ~trace_id ~turn_ref
       ~tool_results:(List.map receipt ids) ~boundary:(Ledger.Model_response { agent_core_turn = 1 })
       ~runtime_id:"runtime-delivery" ~delivered_at:"2026-08-26T00:00:01Z" with
     | Ok value -> value | Error error -> fail (Ledger.store_error_to_string error) in
@@ -1526,11 +1555,11 @@ let test_nested_scope_integrity_and_invocation_conflict () =
    | Error (Ledger.Invalid_nested_composition_scope _) -> ()
    | Error _ | Ok _ -> fail "child invocation was allowed to alias its parent");
   let original = activation ~skill_tool_use_id:"child-call" ~invocation:(invocation scope) () in
-  (match Ledger.record ~config ~trace_id original with
+  (match Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id original with
    | Ok _ -> () | Error error -> fail (Ledger.store_error_to_string error));
   let changed_scope = nested_scope ~parent_tool_use_id:"another-parent" ~composition_run_id ~alias:"child" in
   let changed = activation ~skill_tool_use_id:"child-call" ~invocation:(invocation changed_scope) () in
-  (match Ledger.record ~config ~trace_id changed with
+  (match Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id changed with
    | Error (Ledger.Invocation_id_collision "child-call") -> ()
    | Error _ | Ok _ -> fail "changed nested scope was rebound to an existing invocation");
   let encoded = Ledger.activation_to_yojson original in
@@ -1551,11 +1580,143 @@ let test_nested_scope_integrity_and_invocation_conflict () =
     ; (("unknown", `Bool true), (function Ledger.Unexpected_field { object_name = "scope"; field = "unknown" } -> true | _ -> false)) ]
 ;;
 
+let test_usage_reads_only_the_committed_session () =
+  with_session @@ fun config trace_one _session_one ->
+  let trace_two = trace_id "trace-two" in
+  let session_two = Keeper_fs.keeper_session_dir config "trace-two" in
+  Unix.mkdir session_two 0o700;
+  let seeded = activation () in
+  let reference = Skill_reference.make ~identity:seeded.identity
+      ~content_revision:seeded.content_revision in
+  ignore (ok "alpha seed" (Ledger.record ~keeper_name:"alpha" ~config ~trace_id:trace_one seeded));
+  ignore (ok "beta seed" (Ledger.record ~keeper_name:"beta" ~config ~trace_id:trace_two
+    (activation ~trace:"trace-two" ())));
+  let loads = Hashtbl.create 2 in
+  let count trace = let key = Keeper_id.Trace_id.to_string trace in
+    Hashtbl.replace loads key (1 + Option.value ~default:0 (Hashtbl.find_opt loads key)) in
+  let load_count key = Option.value ~default:0 (Hashtbl.find_opt loads key) in
+  let projections = ref 0 in
+  Server_skill_usage_runtime.For_testing.with_runtime
+    ~usage_projection:(fun ledger reference ->
+      incr projections;
+      Ledger.usage_for_reference ledger reference)
+    ~ledger_loader:(fun ~config ~trace_id -> count trace_id; Ledger.load ~config ~trace_id)
+    (fun () ->
+      let sessions = [ "alpha", trace_one; "beta", trace_two ] in
+      let read () =
+        let ledgers, unavailable = Server_skill_usage_runtime.read_sessions ~config sessions in
+        check (list string) "both ledgers are readable" [] unavailable;
+        List.map (fun (keeper, ledger) -> keeper, (Ledger.summarize ledger).instruction_invocations) ledgers
+      in
+      let usage () =
+        match Server_skill_usage_runtime.usage_for_reference ~config ~trace_id:trace_one ~reference with
+        | Some usage -> usage.invocations
+        | None -> fail "the seeded reference has no usage"
+      in
+      ignore (read ());
+      ignore (read ());
+      check int "alpha is cold once" 1 (load_count "trace-one");
+      check int "beta is cold once" 1 (load_count "trace-two");
+      check int "one usage projection" 1 (usage ());
+      check int "the same projection is reused" 1 (usage ());
+      check int "one reference computation" 1 !projections;
+      ignore (ok "alpha second activation" (Ledger.record ~keeper_name:"alpha" ~config ~trace_id:trace_one
+        (activation ~skill_tool_use_id:"call-two" ())));
+      check (list (pair string int)) "the writer's latest ledger is visible"
+        [ "alpha", 2; "beta", 1 ] (read ());
+      check int "the committed reference is recomputed once" 2 (usage ());
+      check int "only the changed session is recomputed" 2 !projections;
+      check int "alpha did not reload" 1 (load_count "trace-one");
+      check int "beta did not reload" 1 (load_count "trace-two");
+      ignore (ok "alpha duplicate" (Ledger.record ~keeper_name:"alpha" ~config ~trace_id:trace_one
+        (activation ~skill_tool_use_id:"call-two" ())));
+      check (list (pair string int)) "idempotent observation preserves usage"
+        [ "alpha", 2; "beta", 1 ] (read ());
+      check int "idempotent projection is reused" 2 (usage ());
+      check int "idempotent observation does not recompute" 2 !projections;
+      check int "idempotent alpha stays cached" 1 (load_count "trace-one");
+      check int "idempotent beta stays cached" 1 (load_count "trace-two"))
+;;
+
+let test_a_failed_session_load_is_retried () =
+  with_session @@ fun config trace _session_dir ->
+  let valid = ok "valid session" (Ledger.load ~config ~trace_id:trace) in
+  let attempts = ref 0 in
+  Server_skill_usage_runtime.For_testing.with_runtime
+    ~ledger_loader:(fun ~config:_ ~trace_id:_ ->
+      incr attempts;
+      if !attempts = 1 then
+        Error (Ledger.Decode_failed (Ledger.Missing_string { field = "skill_name" }))
+      else Ok valid)
+    (fun () ->
+      let read () = Server_skill_usage_runtime.read_sessions ~config [ "alpha", trace ] in
+      let first_loaded, first_unavailable = read () in
+      check (list string) "the failed session is not loaded" [] (List.map fst first_loaded);
+      check int "the failure remains explicit" 1 (List.length first_unavailable);
+      let second_loaded, second_unavailable = read () in
+      check (list string) "the recovered session loads" [ "alpha" ] (List.map fst second_loaded);
+      check (list string) "the recovered read has no old failure" [] second_unavailable;
+      check int "the failed session was retried" 2 !attempts)
+;;
+
+let test_cold_read_and_commit_do_not_deadlock () =
+  with_session @@ fun config trace _session_dir ->
+  let cold_ledger = ok "initial cold read" (Ledger.load ~config ~trace_id:trace) in
+  let read_started = Atomic.make false in
+  let allow_return = Atomic.make false in
+  let writer_finished = Atomic.make false in
+  let wait_for_commit () =
+    let deadline = Unix.gettimeofday () +. 2.0 in
+    let rec wait () =
+      if Atomic.get writer_finished then true
+      else if Unix.gettimeofday () >= deadline then false
+      else (Unix.sleepf 0.005; wait ())
+    in
+    wait ()
+  in
+  Server_skill_usage_runtime.For_testing.with_runtime
+    ~ledger_loader:(fun ~config:_ ~trace_id:_ ->
+      Atomic.set read_started true;
+      while not (Atomic.get allow_return) do Unix.sleepf 0.001 done;
+      Ok cold_ledger)
+    (fun () ->
+      let reader = Domain.spawn (fun () ->
+        Server_skill_usage_runtime.read_sessions ~config [ "alpha", trace ])
+      in
+      while not (Atomic.get read_started) do Unix.sleepf 0.001 done;
+      let writer = Domain.spawn (fun () ->
+        Fun.protect
+          ~finally:(fun () -> Atomic.set writer_finished true)
+          (fun () -> Ledger.record ~keeper_name:"alpha" ~config ~trace_id:trace (activation ())))
+      in
+      let finished_before_return = wait_for_commit () in
+      Atomic.set allow_return true;
+      let writer_result = Domain.join writer in
+      let loaded, unavailable = Domain.join reader in
+      check bool "commit finished before the cold read resumed" true finished_before_return;
+      (match writer_result with
+       | Ok _ -> ()
+       | Error error -> fail (Ledger.store_error_to_string error));
+      check (list string) "the committed read has no error" [] unavailable;
+      check int "the newer commit wins over the cold read" 1
+        (match loaded with
+         | [ _, ledger ] -> (Ledger.summarize ledger).instruction_invocations
+         | _ -> 0))
+;;
+
 let () =
   run
     "keeper skill activation ledger"
     [ ( "session ledger"
-      , [ test_case "legacy composition identifies its row and refuses later append" `Quick
+      , [ test_case "usage reloads only the committed session" `Quick
+            test_usage_reads_only_the_committed_session
+        ; test_case "a failed session load is retried" `Quick
+            test_a_failed_session_load_is_retried
+        ; test_case "cold read and commit do not deadlock" `Quick
+            test_cold_read_and_commit_do_not_deadlock
+        ; test_case "a committed row announces its Keeper" `Quick
+            test_a_committed_row_announces_its_keeper
+        ; test_case "legacy composition identifies its row and refuses later append" `Quick
             test_legacy_composition_reports_exact_row_without_appending
         ; test_case "a previous-generation log is refused at its header" `Quick
             test_previous_generation_log_is_refused_at_its_header

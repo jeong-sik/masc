@@ -743,6 +743,33 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
   let origin = deps.get_origin request in
   let session_id = Mcp_session.get_or_generate (get_session_id_any request) in
   let protocol_version = get_protocol_version_for_session ~session_id request in
+  let machine =
+    match Server_machine_spectator.machine_of_request_target request.target with
+    | Error _ as error -> error
+    | Ok machine ->
+        (match machine, sse_kind with
+         | Some _, (Sse.Agent_stream | Sse.Presence) ->
+             Error "the machine query requires an observer stream"
+         | None, (Sse.Agent_stream | Sse.Presence) -> Ok None
+         | (Some _ | None), Sse.Observer -> Ok machine)
+  in
+  let browser =
+    match Server_browser_spectator.scope_of_request_target request.target with
+    | Error _ as error -> error
+    | Ok browser ->
+        (match browser, sse_kind with
+         | Some _, (Sse.Agent_stream | Sse.Presence) ->
+             Error "a browser query requires an observer stream"
+         | None, (Sse.Agent_stream | Sse.Presence) -> Ok None
+         | (Some _ | None), Sse.Observer -> Ok browser)
+  in
+  match machine, browser with
+  | Error detail, _ | _, Error detail ->
+      respond_mcp_error ~code:Mcp_error_code.Invalid_request ~deps
+        ~request_authority request reqd ~session_id ~protocol_version detail
+  | Ok (Some _), Ok _ when Result.is_error (deps.get_runtime_result ()) ->
+      respond_not_ready ~deps request reqd
+  | Ok machine, Ok browser ->
   let observer_scope =
     match sse_kind with
     | Sse.Observer ->
@@ -930,7 +957,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                 Option.map
                   (Sse.replay_after_for_session
                      ~runtime_authority:(Sse.runtime_authority_exn ~base_path)
-                     ?observer_instance_id ~session_id ~kind:sse_kind)
+                     ?observer_instance_id ~client_id ~session_id ~kind:sse_kind)
                   last_event_id
               in
               let observer_headers =
@@ -1014,6 +1041,14 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
           in
               let sw = runtime.sw in
               let clock = runtime.clock in
+              Option.iter (fun machine ->
+                Option.iter (fun (_, (scope : Mcp_server.workspace_scope)) ->
+                  Server_machine_spectator.start ~sw ~clock ~stop_promise:info.stop_promise
+                    ~machine ~config:scope.config) observer_scope) machine;
+              Option.iter (fun browser ->
+                Option.iter (fun (_, (scope : Mcp_server.workspace_scope)) ->
+                  Server_browser_spectator.start ~sw ~clock ~stop_promise:info.stop_promise
+                    ~scope:browser ~config:scope.config) observer_scope) browser;
               Option.iter (fun (_, scope) ->
                 Eio.Fiber.fork_daemon ~sw (fun () ->
                   (match Eio.Fiber.first

@@ -118,3 +118,7 @@ val maybe_rotate_file : string -> unit
 (** Append [json] as a single UTF-8-repaired JSONL line to [path],
     rotating first if needed. *)
 val append_jsonl_line : string -> Yojson.Safe.t -> unit
+
+val append_decision_record : Workspace.config -> string -> Yojson.Safe.t -> unit
+(** Append a row to the Keeper's [decisions.jsonl] ({!keeper_decision_log_path})
+    and announce [runtime_metrics]. Raises as {!append_jsonl_line} does. *)

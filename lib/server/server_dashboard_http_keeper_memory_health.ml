@@ -477,6 +477,80 @@ let alert ~code ~severity ~target ~label ~message =
       ; "label", `String label
       ; "message", `String message
       ] )
+
+type cached_keeper_health = {
+  mutex : Mutex.t;
+  mutable generation : int;
+  mutable value : keeper_health option;
+}
+
+let health_cache : (string * string, cached_keeper_health) Hashtbl.t = Hashtbl.create 16
+let health_cache_mutex = Mutex.create ()
+let health_base_paths : (string, string) Hashtbl.t = Hashtbl.create 4
+let health_reader = ref keeper_health
+
+let health_directory_identity path =
+  try Unix.realpath path with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> path
+
+let cache_entry ~keepers_dir keeper_id =
+  Stdlib.Mutex.protect health_cache_mutex (fun () ->
+    let key = health_directory_identity keepers_dir, keeper_id in
+    match Hashtbl.find_opt health_cache key with
+    | Some entry -> entry
+    | None ->
+        let entry = { mutex = Mutex.create (); generation = 0; value = None } in
+        Hashtbl.add health_cache key entry;
+        entry)
+
+let cached_keeper_health ~config ~keepers_dir keeper_id =
+  let entry = cache_entry ~keepers_dir keeper_id in
+  let rec read () =
+    let cached, generation = Stdlib.Mutex.protect entry.mutex (fun () ->
+      entry.value, entry.generation)
+    in
+    match cached with
+    | Some health when health.read_error = None -> health
+    | Some _ | None ->
+        let health = !health_reader ~config ~keepers_dir keeper_id in
+        let current = Stdlib.Mutex.protect entry.mutex (fun () ->
+          if entry.generation = generation then begin
+            entry.value <- (if health.read_error = None then Some health else None);
+            true
+          end else
+            false)
+        in
+        if current then health else read ()
+  in
+  read ()
+
+let invalidate_after_write ~keepers_dir ~keeper_id =
+  let keepers_dir = health_directory_identity keepers_dir in
+  let base_path = Stdlib.Mutex.protect health_cache_mutex (fun () ->
+    Hashtbl.find_opt health_base_paths keepers_dir) in
+  match base_path with
+  | None -> ()
+  | Some _ ->
+      let entry = cache_entry ~keepers_dir keeper_id in
+      Stdlib.Mutex.protect entry.mutex (fun () ->
+        entry.generation <- entry.generation + 1;
+        entry.value <- None)
+
+let install () =
+  let retained = ref [] in
+  let register restore = retained := restore :: !retained in
+  register (Keeper_memory_os_current.install_commit_observer invalidate_after_write);
+  register (Keeper_memory_source_current.install_commit_observer invalidate_after_write);
+  register (Keeper_librarian_progress.install_commit_observer invalidate_after_write);
+  let refresh ~config ~keeper_name =
+    invalidate_after_write
+      ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path
+        ~base_path:config.Workspace.base_path)
+      ~keeper_id:keeper_name
+  in
+  register (Keeper_librarian_continuity.install_commit_observer refresh);
+  register (Keeper_continuity_observation.install_change_observer refresh);
+  register (Keeper_librarian_queue_refresh.install_change_observer refresh)
 ;;
 
 let alerts (h : keeper_health) =
@@ -718,9 +792,11 @@ let keeper_memory_health_http_json ~base_path =
   let keepers_dir =
     Config_dir_resolver.keepers_dir_for_base_path ~base_path
   in
+  Stdlib.Mutex.protect health_cache_mutex (fun () ->
+    Hashtbl.replace health_base_paths (health_directory_identity keepers_dir) base_path);
   let entries =
     health_keeper_ids ~keepers_dir
-    |> List.map (keeper_health ~config ~keepers_dir)
+    |> List.map (cached_keeper_health ~config ~keepers_dir)
     |> List.sort (fun (left : keeper_health) (right : keeper_health) ->
       compare
         (right.snapshot_bytes + right.source_snapshot_bytes)
@@ -758,3 +834,20 @@ let keeper_memory_health_row_http_json ~base_path ~keeper =
 (* Preserve each store's own revision and evidence rather than synthesizing a
    fleet-wide revision or treating collected claims as independently verified. *)
 let workspace_memory_context_http_json = Workspace_memory_context.http_json
+
+module For_testing = struct
+  let keeper_health = keeper_health
+
+  let with_runtime ~keeper_health:reader f =
+    let previous_reader = !health_reader in
+    Stdlib.Mutex.protect health_cache_mutex (fun () ->
+      Hashtbl.reset health_cache;
+      Hashtbl.reset health_base_paths);
+    health_reader := reader;
+    let restore = Keeper_memory_os_current.install_commit_observer invalidate_after_write in
+    Fun.protect
+      ~finally:(fun () ->
+        restore ();
+        health_reader := previous_reader)
+      f
+end

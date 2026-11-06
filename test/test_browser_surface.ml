@@ -305,6 +305,9 @@ let test_scoped_scene_acknowledgement () =
     | Ok request -> request | Error detail -> fail detail in
   let project request data = Masc.Browser_scene.project request ~binding:connected ~started:0L data in
   let scope = `Assoc ["documentId",`String "fixture";"nodeId",`String "region"] in
+  check bool "the lane boundary decodes the observed node identity" true
+    (Browser_lane.node_ref_of_json scope =
+     Ok { Browser_lane.document_id = "fixture"; node_id = "region" });
   let scoped = request ["scope",scope] and regions = request ["view",`String "regions"] in
   check bool "exact scoped scene accepted" true
     (Result.is_ok (project scoped (scene ~view:"content" ~scope ())));

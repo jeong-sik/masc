@@ -541,9 +541,12 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   let config = Mcp_server.workspace_config state in
   Server_provider_rest_broadcast.install ~sw ~clock ~config;
   Server_keeper_cost_broadcast.install ~sw ~clock ~config;
+  Server_runtime_metrics.install ~sw ~clock ~config;
   Server_turn_preview_broadcast.install ~sw ~clock;
   Workspace_dataset_event.install_store_observers ();
+  Server_lane_inventory.install ();
   Server_memory_health_broadcast.install ~sw ~config;
+  Server_dashboard_http_keeper_memory_health.install ();
   (* The harness health read is cached per workspace and query window. The
      verdict store belongs to the workspace that wrote the record, so its
      base_path is the one announced; every cached window goes first because

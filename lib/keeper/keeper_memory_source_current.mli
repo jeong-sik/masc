@@ -86,6 +86,9 @@ type source_read_failure =
 
 val source_read_failure_to_string : source_read_failure -> string
 
+val install_commit_observer :
+  (keepers_dir:string -> keeper_id:string -> unit) -> (unit -> unit)
+
 (** The command a source read runs on an endpoint-owned tree (microVM,
     remote): at most [max_bytes] of [path], exiting
     [endpoint_source_missing_exit] when the path does not exist,

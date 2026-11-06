@@ -137,7 +137,7 @@ let with_session operation =
 
 let make_context ?(task_selection = Keeper_task_skill_turn.empty) ~trace_id () =
   match
-    Recorder.make
+    Recorder.make ~keeper_name:"skill-keeper-fixture"
       ~trace_id
       ~runtime_id:(fun () -> Some "test.runtime")
       ~turn_ref:
@@ -288,7 +288,7 @@ let test_invalid_task_scope_fails_closed () =
   let snapshot, task_reference, _ = task_snapshot () in
   let task_selection = resolve_for_task snapshot ~task_id:"" [ task_reference ] in
   match
-    Recorder.make
+    Recorder.make ~keeper_name:"skill-keeper-fixture"
       ~trace_id
       ~runtime_id:(fun () -> Some "test.runtime")
       ~turn_ref:
@@ -345,7 +345,7 @@ let test_resource_receipt_keeps_path_size_and_digest () =
 let test_turn_scope_mismatch_is_rejected_before_recording () =
   let trace = trace_id "trace-recorder" in
   match
-    Recorder.make
+    Recorder.make ~keeper_name:"skill-keeper-fixture"
       ~trace_id:trace
       ~runtime_id:(fun () -> Some "test.runtime")
       ~turn_ref:(Ids.Turn_ref.make ~trace_id:"another-trace" ~absolute_turn:1)
@@ -361,7 +361,7 @@ let test_runtime_attempt_is_required_before_recording () =
   with_session @@ fun config trace_id ->
   let context =
     match
-      Recorder.make
+      Recorder.make ~keeper_name:"skill-keeper-fixture"
         ~trace_id
         ~runtime_id:(fun () -> None)
         ~turn_ref:
@@ -392,7 +392,7 @@ let test_runtime_provider_tracks_candidate_failover () =
   let selected_runtime = Atomic.make (Some "runtime-a") in
   let context =
     match
-      Recorder.make
+      Recorder.make ~keeper_name:"skill-keeper-fixture"
         ~trace_id
         ~runtime_id:(fun () -> Atomic.get selected_runtime)
         ~turn_ref:

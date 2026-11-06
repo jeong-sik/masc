@@ -1,6 +1,8 @@
 (** Read-only fleet health over the ordinary and source-bound current snapshots
     recall consumes. *)
 
+type keeper_health
+
 val keeper_memory_health_http_json : base_path:string -> Yojson.Safe.t
 
 val fleet_cache_key : base_path:string -> string
@@ -15,6 +17,18 @@ val keeper_memory_health_row_http_json : base_path:string -> keeper:string -> Yo
     it under ["keepers"], or [null] when the fleet answer has no row for
     [keeper] (it left, or never had one). The name is matched against the
     Keepers that answer lists, so it never names a file on its own. *)
+
+val install : unit -> unit
+(** Invalidate only the changed Keeper after a durable journal commit. The next
+    visible read recomputes that Keeper outside the store locks, not the fleet. *)
+
+module For_testing : sig
+  val keeper_health : config:Workspace.config -> keepers_dir:string -> string -> keeper_health
+
+  val with_runtime :
+    keeper_health:(config:Workspace.config -> keepers_dir:string -> string -> keeper_health) ->
+    (unit -> 'a) -> 'a
+end
 
 (** Complete current snapshots grouped by canonical keeper identity for a
     workspace memory curator. Read-only: source file bindings are reported as

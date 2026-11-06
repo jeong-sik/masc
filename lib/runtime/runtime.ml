@@ -2510,7 +2510,12 @@ let record_exact_output_commit ~path ~previous_view (receipt : config_commit_rec
   receipt
 ;;
 
-let commit_config_text_locked
+let config_commit_observer : (runtime_config_path:string -> unit) Atomic.t =
+  Atomic.make (fun ~runtime_config_path:_ -> ())
+
+let install_config_commit_observer observer = Atomic.set config_commit_observer observer
+
+let commit_config_text_locked_attempt
     ?(replace_file = Fs_compat.save_file_atomic_strict_staged)
     ~runtime_config_path:path
     content
@@ -2603,6 +2608,15 @@ let commit_config_text_locked
          ~content
          failure
        |> Result.map committed)
+;;
+
+
+(* A failed commit can still have replaced the file (an atomic rename that
+   lands before a later stage fails), so every attempt is reported. *)
+let commit_config_text_locked ?replace_file ~runtime_config_path content =
+  Fun.protect
+    ~finally:(fun () -> (Atomic.get config_commit_observer) ~runtime_config_path)
+    (fun () -> commit_config_text_locked_attempt ?replace_file ~runtime_config_path content)
 ;;
 
 let commit_runtime_config_text ?replace_file ~path content =

@@ -81,6 +81,14 @@ let with_lock (t : t) f =
   Mutex.lock t.mutex;
   Fun.protect ~finally:(fun () -> Mutex.unlock t.mutex) f
 
+let changed_observer : (base_path:string -> keeper:string -> unit) Atomic.t =
+  Atomic.make (fun ~base_path:_ ~keeper:_ -> ())
+
+let install_change_observer observer = Atomic.set changed_observer observer
+
+(* Called under [t]'s lock, after the change it reports. *)
+let notify_changed (t : t) ~keeper = (Atomic.get changed_observer) ~base_path:t.base_path ~keeper
+
 let registry_mutex = Mutex.create ()
 let by_workspace = Hashtbl.create 1
 let for_base_path base_path =

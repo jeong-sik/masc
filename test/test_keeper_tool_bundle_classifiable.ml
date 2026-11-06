@@ -363,7 +363,7 @@ let with_bundle_tools
            | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
          in
          match
-           Keeper_skill_activation_recorder.make
+           Keeper_skill_activation_recorder.make ~keeper_name:"skill-keeper-fixture"
              ~trace_id
              ~runtime_id:(fun () -> Some "test.runtime")
              ~turn_ref:

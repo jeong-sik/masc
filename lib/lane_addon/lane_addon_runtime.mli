@@ -368,6 +368,22 @@ val inventory : config:Workspace.config -> inventory
     Does not create a manager/store, start workers, reconcile or clean resources.
     [owner_present=false] means no manager has been observed in this process,
     not that there are no retained bindings or declarations. *)
+
+type inventory_change = Observation_commit | Configuration_changed | Retained_changed
+
+val install_inventory_change_observer :
+  (base_path:string -> inventory_change -> unit) -> unit
+(** Install the server projection bridge after a durable visible change.
+    Observation commits carry no rows or image bytes. *)
+
+val inventory_live : config:Workspace.config -> inventory
+(** Read only live, in-memory instance metadata. No retained file read or
+    reconciliation is performed. *)
+
+val configuration_applications :
+  config:Workspace.config -> inventory:inventory -> configuration_application list
+(** Project the last reconciled declarations against the supplied live and
+    retained inventory without rereading that inventory. *)
 val read_declaration : ?access:Lane_addon_sources.access -> config:Workspace.config -> Yojson.Safe.t ->
   (Yojson.Safe.t, Lane_addon_declaration.error) result
 val save_declaration : ?access:Lane_addon_sources.access -> config:Workspace.config -> Yojson.Safe.t ->
@@ -505,6 +521,9 @@ val host_issue_to_json : host_issue -> Yojson.Safe.t
 (** The [issue] of an instance's [host_requests] in the inspect payload. *)
 
 module For_testing : sig
+  val machine_live_changed : previous:Yojson.Safe.t option -> current:Yojson.Safe.t -> bool
+  val with_inventory_change_observer :
+    (base_path:string -> inventory_change -> unit) -> (unit -> 'a) -> 'a
   val browser_source_table :
     Browser_configuration.t option -> backend:Browser_lane.Backend.t ->
     'table Browser_configuration.source -> ('table, string) result

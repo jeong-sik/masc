@@ -128,6 +128,10 @@ type commit_effect =
   | Rewritten
   | Unchanged
 
+val install_commit_observer :
+  (keepers_dir:string -> keeper_id:string -> unit) -> (unit -> unit)
+(** Observe a successful durable journal append. Returns the previous
+    observer's restoration function. *)
 (** Classified outcome of one snapshot read so callers can tell a decode
     rejection apart from a filesystem failure without matching on message
     text. [Undecodable] is the state the write-path quarantine recovers;

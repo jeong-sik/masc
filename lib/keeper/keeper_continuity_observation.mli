@@ -27,6 +27,9 @@ type t =
             the carried range in the canonical encoding, before the client
             assembles its own request. *)
   }
+val install_change_observer :
+  (config:Workspace.config -> keeper_name:string -> unit) -> (unit -> unit)
+
 val record : config:Workspace.config -> keeper_name:string -> t -> unit
 val latest : config:Workspace.config -> keeper_name:string -> t option
 val forget : config:Workspace.config -> keeper_name:string -> unit

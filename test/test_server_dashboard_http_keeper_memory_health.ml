@@ -1397,11 +1397,124 @@ let test_a_merged_row_is_the_fleet_read_after_the_write () =
      | Decode.Row_present _ | Decode.Row_refused _ -> false)
 ;;
 
+let test_memory_health_reloads_only_the_changed_keeper () =
+  let base = fresh_dir "masc-memory-health-incremental" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  ignore (write_snapshot ~keepers_dir ~keeper_id:"alpha" [fact "alpha one"]);
+  ignore (write_snapshot ~keepers_dir ~keeper_id:"beta" [fact "beta one"]);
+  let reads = Hashtbl.create 2 in
+  let count keeper_id =
+    Hashtbl.replace reads keeper_id (1 + Option.value ~default:0 (Hashtbl.find_opt reads keeper_id))
+  in
+  let read_count keeper_id = Option.value ~default:0 (Hashtbl.find_opt reads keeper_id) in
+  Health.For_testing.with_runtime
+    ~keeper_health:(fun ~config ~keepers_dir keeper_id ->
+      count keeper_id;
+      Health.For_testing.keeper_health ~config ~keepers_dir keeper_id)
+    (fun () ->
+      ignore (Health.keeper_memory_health_http_json ~base_path:base);
+      ignore (Health.keeper_memory_health_http_json ~base_path:base);
+      Alcotest.(check int) "alpha is cold once" 1 (read_count "alpha");
+      Alcotest.(check int) "beta is cold once" 1 (read_count "beta");
+      ignore (write_snapshot ~keepers_dir ~keeper_id:"alpha" [fact "alpha one"; fact "alpha two"]);
+      let json = Health.keeper_memory_health_http_json ~base_path:base in
+      Alcotest.(check int) "only alpha is refreshed" 2 (read_count "alpha");
+      Alcotest.(check int) "beta is not reloaded" 1 (read_count "beta");
+      Alcotest.(check int) "the committed alpha revision is visible" 2
+        (int_field "revision" (keeper_obj "alpha" json));
+      ignore (Health.keeper_memory_health_http_json ~base_path:base);
+      Alcotest.(check int) "alpha is warm too" 2 (read_count "alpha");
+      Alcotest.(check int) "beta remains warm" 1 (read_count "beta"))
+;;
+
+let test_failed_health_reads_are_retried () =
+  let base = fresh_dir "masc-memory-health-retry" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  ignore (write_snapshot ~keepers_dir ~keeper_id:"alpha" [fact "recovered fact"]);
+  let valid_json =
+    match Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"alpha" with
+    | Ok (Some snapshot) -> Yojson.Safe.to_string (Current.to_json snapshot)
+    | Ok None -> Alcotest.fail "the valid snapshot is missing"
+    | Error detail -> Alcotest.fail detail
+  in
+  let path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"alpha" in
+  let attempts = ref 0 in
+  Health.For_testing.with_runtime
+    ~keeper_health:(fun ~config ~keepers_dir keeper_id ->
+      incr attempts;
+      Fs_compat.save_file path (if !attempts = 1 then {|{"schema":"wrong"}|} else valid_json);
+      Health.For_testing.keeper_health ~config ~keepers_dir keeper_id)
+    (fun () ->
+      let first = Health.keeper_memory_health_http_json ~base_path:base in
+      Alcotest.(check bool) "the failed read is explicit" false
+        (is_null (member "read_error" (keeper_obj "alpha" first)));
+      let second = Health.keeper_memory_health_http_json ~base_path:base in
+      Alcotest.(check bool) "the recovered read has no old error" true
+        (is_null (member "read_error" (keeper_obj "alpha" second)));
+      Alcotest.(check int) "the failed health read was retried" 2 !attempts)
+;;
+
+let test_cold_health_read_and_commit_do_not_deadlock () =
+  let base = fresh_dir "masc-memory-health-lock-order" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  ignore (write_snapshot ~keepers_dir ~keeper_id:"alpha" [fact "before commit"]);
+  let cold_health = Health.For_testing.keeper_health
+      ~config:(Masc.Workspace.default_config base) ~keepers_dir "alpha" in
+  let read_started = Atomic.make false in
+  let allow_return = Atomic.make false in
+  let writer_finished = Atomic.make false in
+  let attempts = ref 0 in
+  let wait_for_commit () =
+    let deadline = Unix.gettimeofday () +. 2.0 in
+    let rec wait () =
+      if Atomic.get writer_finished then true
+      else if Unix.gettimeofday () >= deadline then false
+      else (Unix.sleepf 0.005; wait ())
+    in
+    wait ()
+  in
+  Health.For_testing.with_runtime
+    ~keeper_health:(fun ~config ~keepers_dir keeper_id ->
+      incr attempts;
+      if !attempts = 1 then begin
+        Atomic.set read_started true;
+        while not (Atomic.get allow_return) do Unix.sleepf 0.001 done;
+        cold_health
+      end else
+        Health.For_testing.keeper_health ~config ~keepers_dir keeper_id)
+    (fun () ->
+      let reader = Domain.spawn (fun () ->
+        Health.keeper_memory_health_http_json ~base_path:base)
+      in
+      while not (Atomic.get read_started) do Unix.sleepf 0.001 done;
+      let writer = Domain.spawn (fun () ->
+        Fun.protect
+          ~finally:(fun () -> Atomic.set writer_finished true)
+          (fun () ->
+            ignore (write_snapshot ~keepers_dir ~keeper_id:"alpha"
+              [fact "before commit"; fact "after commit"])))
+      in
+      let finished_before_return = wait_for_commit () in
+      Atomic.set allow_return true;
+      Domain.join writer;
+      let json = Domain.join reader in
+      Alcotest.(check bool) "commit finished before the cold read resumed" true finished_before_return;
+      Alcotest.(check int) "the newer commit wins over the cold read" 2
+        (int_field "revision" (keeper_obj "alpha" json));
+      Alcotest.(check int) "the superseded read was retried" 2 !attempts)
+;;
+
 let () =
   Alcotest.run
     "server_dashboard_http_keeper_memory_health"
     [ ( "current snapshot"
-      , [ Alcotest.test_case "one Keeper's row is its fleet row" `Quick
+      , [ Alcotest.test_case "a write reloads only its own Keeper" `Quick
+            test_memory_health_reloads_only_the_changed_keeper
+        ; Alcotest.test_case "failed health reads are retried" `Quick
+            test_failed_health_reads_are_retried
+        ; Alcotest.test_case "cold health read and commit do not deadlock" `Quick
+            test_cold_health_read_and_commit_do_not_deadlock
+        ; Alcotest.test_case "one Keeper's row is its fleet row" `Quick
             test_one_keepers_row_is_its_fleet_row
         ; Alcotest.test_case "the totals count the rows" `Quick test_totals_count_the_rows
         ; Alcotest.test_case "a merged row is the fleet read after the write" `Quick

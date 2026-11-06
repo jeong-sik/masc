@@ -752,9 +752,221 @@ let test_cold_receipt_requires_sync_and_same_file_identity () = with_fixture (fu
   check int "all strict reads and repair retain one external action" 1 !(fixture.calls);
   detach clock fixture id)
 
+let test_machine_live_announces_only_changed_evidence () =
+  let blob = `Assoc ["sha256", `String "frame-a"] in
+  check bool "the first machine observation is announced" true
+    (Runtime.For_testing.machine_live_changed ~previous:None ~current:blob);
+  check bool "identical screen evidence does not announce a read" false
+    (Runtime.For_testing.machine_live_changed ~previous:(Some blob) ~current:blob);
+  check bool "new screen or incarnation evidence is announced" true
+    (Runtime.For_testing.machine_live_changed ~previous:(Some blob)
+      ~current:(`Assoc ["sha256", `String "frame-b"]))
+
+let test_observation_commit_announces_lane_inventory () = with_fixture (fun clock fixture ->
+  Runtime.For_testing.with_inventory_change_observer Server_lane_inventory.refresh (fun () ->
+  let heard = ref [] in
+  let subscription = "lane-inventory-announce" in
+  Sse.subscribe_external
+    ~runtime_authority:(Sse.runtime_authority_exn ~base_path:fixture.config.Workspace.base_path)
+    ~id:subscription
+    ~callback:(fun (event : Sse.external_event) ->
+      match event.ext_payload with
+      | `Assoc fields
+        when Option.equal String.equal
+               (Json_util.assoc_string_opt "type" event.ext_payload)
+               (Some Workspace_dataset_event.event_type) ->
+          (match Workspace_dataset_event.of_fields fields with
+           | Ok dataset ->
+               let instance = match Workspace_dataset_event.dataset_name dataset with
+                 | "lane_addons" ->
+                     Option.bind (List.assoc_opt "instance_id" fields)
+                       Yojson.Safe.Util.to_string_option
+                 | _ -> None in
+               heard := (Workspace_dataset_event.dataset_name dataset, instance) :: !heard
+           | Error _ -> ())
+      | _ -> ())
+    ();
+  Fun.protect ~finally:(fun () -> Sse.unsubscribe_external subscription) (fun () ->
+    let instance = attach clock fixture ~acting:true in
+    let names = List.map fst !heard in
+    check bool "the durable commit announces Lanes" true (List.mem "lanes" names);
+    check bool "the durable commit announces the open Add-on" true (List.mem "lane_addons" names);
+    let announced_instances = List.filter_map (fun (name, instance) ->
+      if String.equal name "lane_addons" then Some instance else None) !heard in
+    check bool "every Add-on notification names its instance" true
+      (announced_instances <> []
+       && List.for_all (Option.equal String.equal (Some instance)) announced_instances);
+    heard := [];
+    let before = number "observation_seq" (inspect fixture instance) in
+    ignore (dispatch fixture Runtime.Observe ["instance_id", str instance] |> unwrap);
+    await clock (fun () -> number "observation_seq" (inspect fixture instance) > before);
+    ignore (dispatch fixture Runtime.Observe ["instance_id", str instance] |> unwrap);
+    await clock (fun () -> number "observation_seq" (inspect fixture instance) > before + 1);
+    check int "an unchanged inventory does not announce another Lanes read" 0
+      (List.filter (fun (name, _) -> String.equal name "lanes") !heard |> List.length);
+    check int "every committed observation still announces Inspect" 2
+      (List.filter (fun (name, _) -> String.equal name "lane_addons") !heard |> List.length);
+    detach clock fixture instance)))
+
+let test_private_addon_events_are_scoped_to_their_readers () =
+  let workspace = Masc_test_deps.setup_test_workspace () in
+  let owner_auth = Masc_test_deps.make_sse_auth workspace "owner" in
+  let other_auth = Masc_test_deps.make_sse_auth workspace "other" in
+  Masc_test_deps.ensure_rng_initialized ();
+  let admin_auth =
+    match Auth.create_token workspace ~agent_name:"operator" ~role:Masc_domain.Admin with
+    | Ok (raw_token, _) -> { Masc.Sse.config = workspace; token = Some raw_token }
+    | Error error -> fail (Masc_domain.masc_error_to_string error)
+  in
+  let owner_session = "private-owner-" ^ string_of_int (Random.bits ()) in
+  let other_session = "private-other-" ^ string_of_int (Random.bits ()) in
+  let admin_session = "private-admin-" ^ string_of_int (Random.bits ()) in
+  let subscription = "private-addon-external-" ^ string_of_int (Random.bits ()) in
+  let register session_id auth =
+    ignore (Session.McpSessionStore.get_or_create ~id:session_id ());
+    match Sse.register ~kind:Sse.Observer ~auth session_id ~last_event_id:0 with
+    | Ok (client_id, stream, _) -> client_id, stream
+    | Error error -> fail (Sse.registration_error_to_string error)
+  in
+  let owner_client_id, owner_stream = register owner_session owner_auth in
+  let other_client_id, other_stream = register other_session other_auth in
+  let admin_client_id, admin_stream = register admin_session admin_auth in
+  Fun.protect
+    ~finally:(fun () ->
+      Sse.unsubscribe_external subscription;
+      Sse.unregister owner_session;
+      Sse.unregister other_session;
+      Sse.unregister admin_session;
+      Masc_test_deps.cleanup_test_workspace workspace)
+    (fun () ->
+      let visibility kind = `Assoc [ "kind", `String kind ] in
+      let payload visibility =
+        `Assoc
+          [ "type", `String Workspace_dataset_event.event_type
+          ; "dataset", `String "lane_addons"
+          ; "instance_id", `String "private-instance"
+          ; "visibility", visibility ]
+      in
+      let shared_external = ref 0 in
+      let private_external = ref 0 in
+      Sse.subscribe_external
+        ~runtime_authority:(Sse.runtime_authority_exn ~base_path:workspace)
+        ~id:subscription
+        ~callback:(fun (event : Sse.external_event) ->
+          match event.ext_payload with
+          | `Assoc fields ->
+              (match List.assoc_opt "visibility" fields with
+               | Some (`Assoc [ "kind", `String "shared" ]) ->
+                   incr shared_external
+               | Some _ | None -> incr private_external)
+          | _ -> incr private_external)
+        ();
+      let owner_only = payload (`Assoc [ "kind", `String "keeper"; "keeper", `String "owner" ]) in
+      let operator_only = payload (visibility "operator") in
+      let shared = payload (visibility "shared") in
+      List.iter (Sse.broadcast_to Sse.Observers) [ owner_only; operator_only; shared ];
+      let received stream =
+        let rec drain acc =
+          match Sse.take_delivery_nonblocking stream with
+          | Some delivery -> drain (delivery :: acc)
+          | None -> List.rev acc
+        in
+        drain []
+      in
+      let ids deliveries = List.map (fun (delivery : Sse.delivery) -> delivery.payload) deliveries in
+      let owner_events = ids (received owner_stream) in
+      let other_events = ids (received other_stream) in
+      let admin_events = ids (received admin_stream) in
+      check (list bool) "owner reads only owner and shared" [ true; false; true ]
+        (List.map (fun payload -> List.mem payload owner_events)
+          [ owner_only; operator_only; shared ]);
+      check (list bool) "another Keeper reads neither private event" [ false; false ]
+        (List.map (fun payload -> List.mem payload other_events) [ owner_only; operator_only ]);
+      check (list bool) "operator reads all events" [ true; true; true ]
+        (List.map (fun payload -> List.mem payload admin_events)
+          [ owner_only; operator_only; shared ]);
+      check int "an external subscriber without identity sees shared" 1 !shared_external;
+      check int "an external subscriber without identity sees no private event" 0 !private_external;
+      let replay (session_id, client_id) =
+        (Sse.replay_after_for_session
+          ~runtime_authority:(Sse.runtime_authority_exn ~base_path:workspace)
+          ~client_id ~session_id ~kind:Sse.Observer 0).deliveries
+        |> List.map (fun (delivery : Sse.delivery) -> delivery.payload)
+      in
+      check (list bool) "replay keeps owner-only identity" [ true; false ]
+        (List.map (fun payload -> List.mem payload (replay (owner_session, owner_client_id)))
+          [ owner_only; operator_only ]);
+      check (list bool) "replay hides private events from another Keeper" [ false; false ]
+        (List.map (fun payload -> List.mem payload (replay (other_session, other_client_id)))
+          [ owner_only; operator_only ]);
+      check (list bool) "replay retains operator access" [ true; true; true ]
+        (List.map (fun payload -> List.mem payload (replay (admin_session, admin_client_id)))
+          [ owner_only; operator_only; shared ]);
+      check (list bool) "replay without a registered identity sees only shared" [ false; true ]
+        (List.map (fun payload -> List.mem payload (replay ("private-unregistered", 0)))
+          [ owner_only; shared ]))
+
+let test_replay_rejects_replaced_session_identity () =
+  let workspace = Masc_test_deps.setup_test_workspace () in
+  let owner_auth = Masc_test_deps.make_sse_auth workspace "owner" in
+  Masc_test_deps.ensure_rng_initialized ();
+  let admin_auth =
+    match Auth.create_token workspace ~agent_name:"replacement-admin" ~role:Masc_domain.Admin with
+    | Ok (raw_token, _) -> { Masc.Sse.config = workspace; token = Some raw_token }
+    | Error error -> fail (Masc_domain.masc_error_to_string error)
+  in
+  let session_id = "private-replacement-" ^ string_of_int (Random.bits ()) in
+  ignore (Session.McpSessionStore.get_or_create ~id:session_id ());
+  let register auth =
+    match Sse.register ~kind:Sse.Observer ~auth session_id ~last_event_id:0 with
+    | Ok (client_id, _, _) -> client_id
+    | Error error -> fail (Sse.registration_error_to_string error)
+  in
+  let owner_client_id = register owner_auth in
+  let _replacement_client_id = register admin_auth in
+  Fun.protect
+    ~finally:(fun () ->
+      Sse.unregister session_id;
+      Masc_test_deps.cleanup_test_workspace workspace)
+    (fun () ->
+      let owner_only =
+        `Assoc
+          [ "type", `String Workspace_dataset_event.event_type
+          ; "dataset", `String "lane_addons"
+          ; "instance_id", `String "owner-instance"
+          ; "visibility", `Assoc [ "kind", `String "keeper"; "keeper", `String "owner" ] ]
+      in
+      let operator_only =
+        `Assoc
+          [ "type", `String Workspace_dataset_event.event_type
+          ; "dataset", `String "lane_addons"
+          ; "instance_id", `String "operator-instance"
+          ; "visibility", `Assoc [ "kind", `String "operator" ] ]
+      in
+      let shared =
+        `Assoc
+          [ "type", `String Workspace_dataset_event.event_type
+          ; "dataset", `String "lane_addons"
+          ; "instance_id", `String "shared-instance"
+          ; "visibility", `Assoc [ "kind", `String "shared" ] ]
+      in
+      List.iter (Sse.broadcast_to Sse.Observers) [ owner_only; operator_only; shared ];
+      let replay =
+        (Sse.replay_after_for_session
+          ~runtime_authority:(Sse.runtime_authority_exn ~base_path:workspace)
+          ~client_id:owner_client_id ~session_id ~kind:Sse.Observer 0).deliveries
+        |> List.map (fun (delivery : Sse.delivery) -> delivery.payload)
+      in
+      check (list bool) "a replaced session cannot inherit the next credential" [ false; false; true ]
+        (List.map (fun payload -> List.mem payload replay) [ owner_only; operator_only; shared ]))
+
 let () = run "Lane action workflow" ["canonical request identity",[
   test_case "retained bytes, digest and original refusal order" `Quick test_canonical_request_identity];
   "optional world actions",[
+  test_case "machine live announces only changed evidence" `Quick test_machine_live_announces_only_changed_evidence;
+  test_case "observation commit announces Lane inventory and its instance" `Quick test_observation_commit_announces_lane_inventory;
+  test_case "private Add-on events stay with their readers" `Quick test_private_addon_events_are_scoped_to_their_readers;
+  test_case "replay rejects a replaced session identity" `Quick test_replay_rejects_replaced_session_identity;
   test_case "action creation stays below workspace anchor" `Quick test_action_creates_only_owned_hierarchy;
   test_case "first action directory must be durable before dispatch and on retry" `Quick test_first_action_requires_durable_directory;
   test_case "terminal and fallback publication failures keep hot uncertainty without replay" `Quick test_failed_terminal_and_fallback_keep_hot_uncertainty;

@@ -6004,7 +6004,7 @@
 (test
  (name test_workspace_memory_revision)
  (modules test_workspace_memory_revision)
- (libraries alcotest  masc.agent_core.digest yojson unix masc))
+ (libraries alcotest  masc.agent_core.digest yojson unix masc masc.fs_compat))
 
 (test
  (name test_keeper_memory_search_index)

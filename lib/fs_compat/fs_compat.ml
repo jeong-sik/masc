@@ -20,6 +20,7 @@ type cleanup_directory = Owned_tree_cleanup.directory =
 let remove_owned_tree = Owned_tree_cleanup.remove
 
 module Atomic_orphan_size_class = Atomic_orphan_size_class
+module Durable_file_identity = Durable_file_identity
 
 (** Global fs — WORM Atomic (write-once at startup, read from any domain).
     Using Atomic.t is required for OCaml 5 multi-domain safety:

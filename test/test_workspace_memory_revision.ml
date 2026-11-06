@@ -113,11 +113,11 @@ let test_ledger_revision_is_the_bytes_save_writes () = with_base (fun base_path 
 
 let test_write_receipt_binds_the_physical_workspace () = with_base (fun base_path ->
   let stored = written (Revision.write_ledger ~base_path ledger) in
-  let path, device, inode = Revision.stored_ledger_workspace stored in
+  let workspace = Revision.stored_ledger_workspace stored in
   let stat = Unix.stat base_path in
-  Alcotest.(check string) "receipt uses the canonical observed workspace" (Unix.realpath base_path) path;
-  Alcotest.(check int) "receipt binds its device" stat.Unix.st_dev device;
-  Alcotest.(check int) "receipt binds its directory inode" stat.Unix.st_ino inode;
+  Alcotest.(check string) "receipt uses the canonical observed workspace" (Unix.realpath base_path)
+    workspace.Fs_compat.Durable_file_identity.path;
+  Alcotest.(check int) "receipt binds its directory inode" stat.Unix.st_ino workspace.inode;
   Alcotest.check json "the receipt names a file already readable in that workspace"
     (Ledger.to_json ledger)
     (Ledger.to_json (read_back (Revision.read_ledger ~base_path (Revision.stored_ledger_revision stored)))))

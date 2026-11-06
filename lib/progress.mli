@@ -55,8 +55,6 @@ val start_tracking : task_id:string -> ?total_steps:int -> unit -> Tracker.t
 val get_tracker : string -> Tracker.t option
 val stop_tracking : string -> unit
 
-(** {1 Tool handler} *)
-
 (** {1 Testing} *)
 
 val reset_for_testing : unit -> unit

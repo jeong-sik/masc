@@ -117,8 +117,6 @@ val format_few_shot_block : calibration_example list -> string
 (** Format examples into a text block for prompt injection.
     Returns [""] for an empty list. *)
 
-(** {1 AGENT_CORE Integration} *)
-
 (** {1 Statistics} *)
 
 val calibration_stats :

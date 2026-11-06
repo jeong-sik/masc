@@ -63,8 +63,6 @@ val record_keeper_tool_duration_metric :
   keeper_name:string -> tool_execution_summary -> unit
 (** Emit the per-tool duration histogram for the summary. *)
 
-(** {1 Throughput metrics} *)
-
 (** {1 Cost emit source} *)
 
 val cost_emit_source_metric : string

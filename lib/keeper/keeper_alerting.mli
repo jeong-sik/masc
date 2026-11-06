@@ -9,8 +9,6 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_memory
 
-(** {1 Usage Merging} *)
-
 (** {1 Included: Keeper_alerting_path} *)
 
 val project_root_of_config : Workspace.config -> string

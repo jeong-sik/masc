@@ -11,8 +11,6 @@ type context = {
   agent_name: string option;
 }
 
-(** {1 Individual Handlers} *)
-
 (** {1 Dispatcher} *)
 
 (** Dispatch run tool by name. Returns None if not a run tool. *)

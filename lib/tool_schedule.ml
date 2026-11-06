@@ -694,6 +694,7 @@ let refusal_of_service_error (err : Schedule_service.service_error) =
       | Schedule_store.Schedule_not_due_candidate
       | Schedule_store.Running_attempt_superseded _
       | Schedule_store.Running_attempt_unavailable _
+      | Schedule_store.Stale_instance _
       | Schedule_store.Persistence_failed _
       | Schedule_store.Corrupt_ledger _ )
   | Schedule_service.Invalid_request _
@@ -1418,6 +1419,7 @@ let handle_note_add ~tool_name ~start_time ctx args =
           | Schedule_store.Running_wake_absent _
           | Schedule_store.Running_wake_settled _
           | Schedule_store.Schedule_not_due_candidate
+          | Schedule_store.Stale_instance _
           | Schedule_store.Running_attempt_superseded _) as err) ->
        workflow_error ~tool_name ~start_time (Schedule_store.store_error_to_string err)
      | Ok (note, note_count) ->

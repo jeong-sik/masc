@@ -44,6 +44,7 @@ val update :
   now:float ->
   runner_tick_sec:float ->
   ?timing_update:Schedule_store.timing_update ->
+  ?expected_instance_id:string ->
   schedule_id:string ->
   ?requested_at:float ->
   ?expires_at:float ->
@@ -65,7 +66,10 @@ val update :
     [Keep_recurrence] preserves only the latest recurrence under the lock;
     due time and expiry come from this replacement.
     [authority] comes from the trusted caller; the store checks ownership of
-    the current row and the replacement under that same lock. *)
+    the current row and the replacement under that same lock.
+    [expected_instance_id] is {!Schedule_store.update_request}'s: the update
+    is refused with {!Schedule_store.Stale_instance} when the stored row is
+    not that instance. *)
 
 val cancel :
   Workspace_utils.config ->

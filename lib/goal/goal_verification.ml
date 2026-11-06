@@ -274,11 +274,13 @@ let validate_state_json json = Result.map (fun _ -> ()) (state_of_yojson json)
 
 (* {1 Persistence} *)
 
+let verifications_filename = "goal_verifications.json"
+
 let verifications_path config =
-  Filename.concat (Workspace_utils.masc_dir config) "goal_verifications.json"
+  Filename.concat (Workspace_utils.masc_dir config) verifications_filename
 
 let verifications_recovery_path config =
-  verifications_path config ^ ".last-good"
+  verifications_path config ^ Common.recovery_mirror_suffix
 
 let ensure_dirs config =
   Workspace_utils.mkdir_p (Workspace_utils.masc_dir config)

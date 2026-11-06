@@ -460,3 +460,9 @@ val acknowledge_notification : Workspace_utils.config -> pending_notification ->
 (** Acknowledge only after the exact workspace row is committed and every
     snapshotted recipient was durably accepted. Refuses uninitialised/nonempty
     recipient obligations. External delivery always happens outside the Goal lock. *)
+
+val goals_filename : string
+(** The goal ledger below [<base>/.masc]. *)
+
+val goal_events_filename : string
+(** The goal event log below [<base>/.masc]. *)

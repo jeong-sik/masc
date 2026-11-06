@@ -28,14 +28,18 @@ type rollup = {
 }
 [@@deriving yojson]
 
+let goals_filename = "goals.json"
+
 let goals_path config =
-  Filename.concat (Workspace_utils.masc_dir config) "goals.json"
+  Filename.concat (Workspace_utils.masc_dir config) goals_filename
 
 let goals_recovery_path config =
-  goals_path config ^ ".last-good"
+  goals_path config ^ Common.recovery_mirror_suffix
+
+let goal_events_filename = "goal_events.jsonl"
 
 let goal_events_path config =
-  Filename.concat (Workspace_utils.masc_dir config) "goal_events.jsonl"
+  Filename.concat (Workspace_utils.masc_dir config) goal_events_filename
 
 let ensure_dirs config =
   Workspace_utils.mkdir_p (Workspace_utils.masc_dir config)

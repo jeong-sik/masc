@@ -193,8 +193,13 @@ let parse_sync_response_observed
      | Backend_glm.Provider_response ->
        (* agent-core boundary: an overflow or a quota exhaustion stays typed
           (Backend_glm.provider_failure_of_glm_error, shared with the stream
-          seam); every other class keeps the HTTP path. *)
-       (match Backend_glm.provider_failure_of_glm_error error with
+          seam); every other class keeps the HTTP path. A 200 brings no
+          refusal header here, so only the body can state a wait. *)
+       (match
+          Backend_glm.provider_failure_of_glm_error
+            ~retry_after:(Retry.resolve_retry_after ~body ~header:None)
+            error
+        with
         | Some failure -> Error failure
         | None ->
           let semantic_code =
@@ -783,21 +788,42 @@ let complete_http
                        ~max_bytes:error_body_log_max_bytes
                        body
                      ^ "..."));
-              let body =
-                http_error_diagnostic_body ~provider_name ~config ~url ~code ~body
-              in
               (* The codec reads the refusal while the provider identity is
                  still known, as the stream seam does: GLM sends a spent usage
                  window as a 429 that the status alone reads as a rate limit
-                 (2026-11-06: code 1308 on this path rested GLM as a throttle). *)
-              Error
-                (Complete_common.provider_refusal
-                   ~http_codec
-                   (Http_client.HttpError
-                      { code
-                      ; body = Http_client.Received body
-                      ; retry_after_header = response.retry_after_header
-                      })))
+                 (2026-11-06: code 1308 on this path rested GLM as a throttle).
+                 It reads the body as sent; only a refusal that stays an
+                 [HttpError] carries the redacted diagnostic body. *)
+              match
+                Complete_common.provider_refusal
+                  ~http_codec
+                  (Http_client.HttpError
+                     { code
+                     ; body = Http_client.Received body
+                     ; retry_after_header = response.retry_after_header
+                     })
+              with
+              | Http_client.HttpError
+                  { code; body = Http_client.Received body; retry_after_header } ->
+                Error
+                  (Http_client.HttpError
+                     { code
+                     ; body =
+                         Http_client.Received
+                           (http_error_diagnostic_body
+                              ~provider_name
+                              ~config
+                              ~url
+                              ~code
+                              ~body)
+                     ; retry_after_header
+                     })
+              | ( Http_client.HttpError { body = Http_client.Not_received_in_window; _ }
+                | Http_client.NetworkError _
+                | Http_client.TimeoutError _
+                | Http_client.AcceptRejected _
+                | Http_client.ProviderTerminal _
+                | Http_client.ProviderFailure _ ) as typed -> Error typed)
         in
         let latency_ms = latency_ms_int latency_counter in
         result, latency_ms))

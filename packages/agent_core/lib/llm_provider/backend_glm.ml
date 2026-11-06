@@ -230,9 +230,11 @@ let check_glm_error body : glm_error option =
    exhausted package, an expired plan or a spent usage window (1113, 1304,
    1308-1311, 1313, 1314, 1316-1321) take the hard-quota route. The usage
    window codes state their reset only inside the message prose, which is not
-   parsed, so the failure carries no retry_after; the provider's declared
-   usage read dates the reset. *)
-let provider_failure_of_glm_error (error : glm_error) : Http_client.http_error option =
+   parsed; the failure carries only the wait the response stated elsewhere
+   ([retry_after]), and the provider's declared usage read dates the reset. *)
+let provider_failure_of_glm_error ~retry_after (error : glm_error)
+  : Http_client.http_error option
+  =
   match error.error_class with
   | Glm_context_overflow ->
     Some
@@ -241,7 +243,7 @@ let provider_failure_of_glm_error (error : glm_error) : Http_client.http_error o
   | Glm_quota_exceeded ->
     Some
       (Http_client.ProviderFailure
-         { kind = Http_client.Hard_quota { retry_after = None }
+         { kind = Http_client.Hard_quota { retry_after }
          ; message =
              (match error.code with
               | Some code -> Printf.sprintf "Glm error %s: %s" code error.message
@@ -258,7 +260,7 @@ let%test "glm quota envelopes promote to hard quota" =
           (Printf.sprintf {|{"error":{"code":"%s","message":"quota"}}|} code)
       with
       | Some error ->
-        (match provider_failure_of_glm_error error with
+        (match provider_failure_of_glm_error ~retry_after:None error with
          | Some
              (Http_client.ProviderFailure
                 { kind = Http_client.Hard_quota { retry_after = None }; _ }) -> true
@@ -290,7 +292,7 @@ let%test "glm quota envelopes promote to hard quota" =
 
 let%test "glm rate limit keeps the http path" =
   match check_glm_error {|{"error":{"code":"1305","message":"busy"}}|} with
-  | Some error -> Option.is_none (provider_failure_of_glm_error error)
+  | Some error -> Option.is_none (provider_failure_of_glm_error ~retry_after:None error)
   | None -> false
 ;;
 

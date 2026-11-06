@@ -13,8 +13,14 @@ module T = Keeper_memory_os_types
 
 (* A System with no amendments, as a turn without a basis issues it. *)
 let system_of_text text =
-  Keeper_turn_system.issue ~base_path:"" ~keeper_name:"" ~lane:Keeper_turn_system.Without_basis
-    ~render:(fun (_ : World_constitution_types.t list) -> text) ~current:[]
+  match
+    Keeper_turn_system.issue ~held:None ~lane:Keeper_turn_system.Without_basis
+      ~render:(fun (_ : World_constitution_types.t list) -> text) ~current:[]
+      ~at:{ World_constitution_store.end_offset = 0; digest = "" }
+      ~articles_at:(fun (_ : World_constitution_store.position) -> Ok None)
+  with
+  | Ok (system, (_ : Keeper_turn_system.held)) -> system
+  | Error () -> Alcotest.fail "a turn without a basis reads no ledger"
 module Codec = Keeper_memory_recall_jev_codec
 module Eval = Keeper_memory_recall_evaluation
 module Types = Typesafeai_types

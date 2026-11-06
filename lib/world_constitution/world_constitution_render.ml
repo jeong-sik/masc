@@ -16,24 +16,23 @@ type amendments =
   ; removed : World_constitution_types.Article_id.t list
   }
 
-let holds articles id =
-  List.exists
-    (fun (article : World_constitution_types.t) ->
-       World_constitution_types.Article_id.equal article.id id)
-    articles
+(* [article_line] renders an article's id and text and nothing else, so two
+   articles read the same in a prompt exactly when both are equal. *)
+let renders_as (left : World_constitution_types.t) (right : World_constitution_types.t) =
+  World_constitution_types.Article_id.equal left.id right.id && String.equal left.text right.text
 
-(* Articles are never edited in place: a changed norm is a removal and a new
-   id, so comparing ids finds every change. *)
+let holds articles article = List.exists (renders_as article) articles
+
+(* The store re-adds a held id as an edit in place
+   ([World_constitution_store.apply]), so an id alone does not tell whether
+   the norm changed. An edited article is the old line taken back and the new
+   line added. *)
 let amendments ~built_with current =
-  let added =
-    List.filter
-      (fun (article : World_constitution_types.t) -> not (holds built_with article.id))
-      current
-  in
+  let added = List.filter (fun article -> not (holds built_with article)) current in
   let removed =
     List.filter_map
       (fun (article : World_constitution_types.t) ->
-         if holds current article.id then None else Some article.id)
+         if holds current article then None else Some article.id)
       built_with
   in
   match added, removed with

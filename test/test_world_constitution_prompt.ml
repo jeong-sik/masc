@@ -138,6 +138,28 @@ let test_the_same_ids_have_no_amendments () =
   Alcotest.(check bool) "an empty world against an empty System is no change" true
     (Option.is_none (Render.amendments ~built_with:[] []))
 
+(* The store re-adds a held id as an edit in place
+   (World_constitution_store.apply). The System rendered the old text, so the
+   edited article is its old line taken back and its new line added. *)
+let test_an_article_edited_in_place_is_taken_back_and_added () =
+  let held = article "open before you record" in
+  let edited =
+    match
+      Types.make ~id:held.id ~text:"open and read before you record" ~author:"lane-smith"
+        ~at:2.0 ~evidence:[]
+    with
+    | Ok article -> article
+    | Error invalid -> Alcotest.failf "article rejected: %s" (Types.invalid_to_string invalid)
+  in
+  match Render.amendments ~built_with:[ held ] [ edited ] with
+  | None -> Alcotest.fail "an edited text is a change the System does not render"
+  | Some amendments ->
+    Alcotest.(check string) "the old line is taken back"
+      (Printf.sprintf "- [%s]" (Types.Article_id.to_string held.id))
+      (Render.removed_lines amendments);
+    Alcotest.(check string) "the new line is added" (Render.articles [ edited ])
+      (Render.added_lines amendments)
+
 (* The block the end context carries: the added line as the System renders
    it, the removed id, and nothing for the side that did not change. *)
 let test_the_amendments_block_carries_the_changed_articles () =
@@ -171,6 +193,8 @@ let () =
             test_amendments_name_added_and_removed_articles_by_id;
           Alcotest.test_case "the same ids have no amendments" `Quick
             test_the_same_ids_have_no_amendments;
+          Alcotest.test_case "an article edited in place is taken back and added" `Quick
+            test_an_article_edited_in_place_is_taken_back_and_added;
         ] );
       ( "assembly",
         [ Alcotest.test_case "a world without articles moves no bytes" `Quick

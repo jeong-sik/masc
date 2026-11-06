@@ -323,7 +323,6 @@ let full_fields
     ; "mention_targets", Keeper_toml_loader.Toml_string_array meta.mention_targets
     ; "board_interests", Keeper_toml_loader.Toml_string_array meta.board_interests
     ; "activation_mode", Keeper_toml_loader.Toml_string (Keeper_activation_mode.to_string meta.activation_mode)
-    ; "input_policy", Keeper_toml_loader.Toml_string (Keeper_input_policy.to_string meta.input_policy)
     ]
   in
   let fields = match meta.sandbox_image with
@@ -415,7 +414,6 @@ let explicit_edits (parsed : Keeper_turn_up_args.parsed_args) =
      ; network_mode = parsed.network_mode_opt
      ; mention_targets = parsed.mention_targets_opt
      ; board_interests = parsed.board_interests_opt
-     ; input_policy = parsed.input_policy_opt
      ; activation_mode = parsed.activation_mode_opt
      ; sandbox_image = parsed.sandbox_image_patch
      ; microvm_backend = parsed.microvm_backend_patch

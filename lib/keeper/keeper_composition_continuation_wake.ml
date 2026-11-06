@@ -101,7 +101,6 @@ let resume_with_profiles ?on_recovery_held ~profiles ~context continuation =
         ; microvm_memory = None; microvm_cpus = None; mention_targets = []
         ; board_interests = []; created_at = ""; updated_at = ""
         ; max_context_override = None; paused = false; latched_reason = None
-        ; input_policy = Keeper_input_policy.default
         ; activation_mode = Keeper_activation_mode.default; current_task_id = None
         ; telemetry_feedback_enabled = None; telemetry_feedback_window_hours = None
         ; always_allow = None; voice_always_allow = None

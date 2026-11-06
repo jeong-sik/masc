@@ -3019,24 +3019,6 @@ let test_parse_requires_a_sandbox_profile () =
     fail "a keeper_up call that states no sandbox_profile must be rejected"
 ;;
 
-(* task-895: parse used to read its fields and silently drop the rest — a
-   caller sending merge_existing / keep_warm / stash_untracked watched the
-   field vanish with no error. The gate must reject every key the parse body
-   does not consume, and the known set must stay derived from that body,
-   not from a stale schema list. *)
-let test_input_policy () =
-  with_test_context @@ fun ctx ->
-  List.iter (fun (wire, expected) ->
-    match parse_stating_a_profile ctx (`Assoc ["name", `String "input-policy"; "input_policy", `String wire]) with
-    | Ok parsed -> check bool "typed input policy" true (parsed.input_policy_opt = Some expected)
-    | Error result -> fail (Keeper_types_profile.tool_result_body result))
-    ["small", Masc.Keeper_input_policy.Small; "wide", Masc.Keeper_input_policy.Wide];
-  List.iter (fun value ->
-    match parse_stating_a_profile ctx (`Assoc ["name", `String "input-policy"; "input_policy", value]) with
-    | Error _ -> () | Ok _ -> fail "invalid input policy accepted")
-    [`String "automatic"; `String "Wide"; `Null; `Int 1; `Bool true]
-;;
-
 (* [parse] reads the profile once and hands the typed value on, so a value it
    cannot read is refused here; create and update never see one. *)
 let test_parse_types_the_sandbox_profile () =
@@ -3094,6 +3076,11 @@ let test_parse_refuses_non_string_instructions () =
   | Error result -> fail (Keeper_types_profile.tool_result_body result)
 ;;
 
+(* task-895: parse used to read its fields and silently drop the rest — a
+   caller sending merge_existing / keep_warm / stash_untracked watched the
+   field vanish with no error. The gate must reject every key the parse body
+   does not consume, and the known set must stay derived from that body,
+   not from a stale schema list. *)
 let test_parse_rejects_unknown_keys () =
   with_test_context @@ fun ctx ->
   List.iter
@@ -3114,7 +3101,7 @@ let test_parse_rejects_unknown_keys () =
     ];
   check (list string) "known set is exactly the parse-consumed keys"
     (List.sort String.compare
-       [ "name"; "runtime_id"; "activation_mode"; "input_policy"; "mention_targets"
+       [ "name"; "runtime_id"; "activation_mode"; "mention_targets"
        ; "board_interests"
        ; "max_context_override"; "sandbox_profile"; "sandbox_image"
        ; "microvm_backend"; "remote_endpoint"; "network_mode"; "egress_allow"; "tools"; "skills"
@@ -3271,7 +3258,6 @@ let () =
             "unknown arguments are rejected, not silently dropped"
             `Quick
             test_parse_rejects_unknown_keys
-        ; test_case "typed input policy" `Quick test_input_policy
         ; test_case "non-string instructions are refused" `Quick
             test_parse_refuses_non_string_instructions
         ] )

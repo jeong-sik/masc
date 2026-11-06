@@ -350,7 +350,6 @@ type toml_field_patch =
   ; network_mode : network_mode option
   ; mention_targets : string list option
   ; board_interests : string list option
-  ; input_policy : Keeper_input_policy.t option
   ; activation_mode : Keeper_activation_mode.t option
   ; sandbox_image : string option option
   ; microvm_backend : Keeper_microvm_backend.t option option
@@ -391,10 +390,6 @@ let toml_edits_of_patch (patch : toml_field_patch) =
        (Option.map network_mode_to_string patch.network_mode)
   |> toml_edits_append_optional "mention_targets" toml_edit_set_strings patch.mention_targets
   |> toml_edits_append_optional "board_interests" toml_edit_set_strings patch.board_interests
-  |> toml_edits_append_optional
-       "input_policy"
-       toml_edit_set_string
-       (Option.map Keeper_input_policy.to_string patch.input_policy)
   |> toml_edits_append_optional
        "activation_mode"
        toml_edit_set_string

@@ -796,7 +796,6 @@ type dashboard_config_field =
   | Field_sandbox_profile
   | Field_network_mode
   | Field_activation_mode
-  | Field_input_policy
   | Field_mention_targets
   | Field_board_interests
 [@@deriving enumerate]
@@ -815,7 +814,6 @@ let dashboard_config_field_key = function
   | Field_sandbox_profile -> "sandbox_profile"
   | Field_network_mode -> "network_mode"
   | Field_activation_mode -> "activation_mode"
-  | Field_input_policy -> "input_policy"
   | Field_mention_targets -> "mention_targets"
   | Field_board_interests -> "board_interests"
 
@@ -977,8 +975,7 @@ let validate_dashboard_config_field field value =
   | Field_instructions
   | Field_sandbox_profile
   | Field_network_mode
-  | Field_activation_mode
-  | Field_input_policy ->
+  | Field_activation_mode ->
     persisted
       (match value with
        | `String _ -> Ok ()

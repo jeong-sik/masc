@@ -24,7 +24,6 @@ let keeper_toml_fields =
   [ "name", Field_string
   ; "instructions", Field_string
   ; "activation_mode", Field_string
-  ; "input_policy", Field_string
   ; "mention_targets", Field_string_array
   ; "board_interests", Field_string_array
   ; "sandbox_profile", Field_string
@@ -357,10 +356,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
     closed "activation_mode" Keeper_activation_mode.of_string ~invalid:(fun _ ->
       "keeper.activation_mode must be manual, on_demand, or autonomous")
   in
-  let* input_policy =
-    closed "input_policy" Keeper_input_policy.of_string ~invalid:(fun _ ->
-      "keeper.input_policy must be small or wide")
-  in
   let* sandbox_image =
     match str "sandbox_image" with
     | None -> Ok None
@@ -404,7 +399,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
       manifest_path = None;
       instructions = str "instructions";
       activation_mode;
-      input_policy;
       mention_targets = strs "mention_targets";
       board_interests = normalize_board_interests (strs "board_interests");
       sandbox_profile;

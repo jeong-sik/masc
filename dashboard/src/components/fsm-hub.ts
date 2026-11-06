@@ -42,7 +42,7 @@ import { OperationalMeaningPanel, HeroPhase, TurnPipelineStrip, CompositeGraphPa
 import { DwellHistogramPanel, SwimlaneTimeline, TopTransitionsPanel, TransitionTrail } from './fsm-hub-timeline-panels'
 import { MeasurementCard, InvariantsPanel } from './fsm-hub-health-panels'
 import { ringFocusClasses } from './common/ring'
-import { formatIndependentCounters, formatRatioPair } from './counter-format'
+import { formatRatioPair } from './counter-format'
 
 export function shouldUseGateKeeperFallback(
   executionLoadedValue: boolean,
@@ -225,7 +225,6 @@ function runtimeTraceTurnLabel(trace: KeeperRuntimeTraceResponse): string {
 function runtimeTraceTitle(trace: KeeperRuntimeTraceResponse): string {
   const turn = trace.turn_identity
   const eventBus = trace.event_bus
-  const memory = trace.memory
   return [
     `trace_id: ${trace.trace_id || '(unknown)'}`,
     trace.stale_reason ? `stale_reason: ${trace.stale_reason}` : '',
@@ -238,23 +237,6 @@ function runtimeTraceTitle(trace: KeeperRuntimeTraceResponse): string {
 	    `runtime dispatch: completed ${turn.runtime_completed_count} · failed ${turn.runtime_failed_count}`,
 	    eventBus.correlation_ids.length > 0 ? `correlation_ids: ${eventBus.correlation_ids.join(', ')}` : '',
     eventBus.run_ids.length > 0 ? `run_ids: ${eventBus.run_ids.join(', ')}` : '',
-    // memory_injected_count and memory_flushed_count are independent monotonic
-    // lifetime counters — no invariant relation between them. Avoid slash UI
-    // (e.g. "909/722" would read as 126% ratio).
-    `memory: ${formatIndependentCounters({
-      leftLabel: 'injected',
-      leftValue: memory.memory_injected_count,
-      rightLabel: 'flushed',
-      rightValue: memory.memory_flushed_count,
-    })}`,
-    // memory_flush_success_count and memory_flush_error_count are independent
-    // outcome tallies (one or the other increments per flush), not a ratio.
-    `memory flush: ${formatIndependentCounters({
-      leftLabel: 'ok',
-      leftValue: memory.memory_flush_success_count,
-      rightLabel: 'error',
-      rightValue: memory.memory_flush_error_count,
-    })}`,
   ].filter(Boolean).join('\n')
 }
 
@@ -265,7 +247,6 @@ function RuntimeEvidenceSummary({
 }) {
   if (!trace) return null
   const eventBus = trace.event_bus
-  const memory = trace.memory
   const commonClass = 'px-1.5 py-0.5 rounded-[var(--r-1)] border text-3xs font-mono'
   const title = runtimeTraceTitle(trace)
   return html`
@@ -280,9 +261,6 @@ function RuntimeEvidenceSummary({
 	    </span>
 	    <span class=${`${commonClass} border-[var(--info-border)] text-[var(--info-fg)]`} title=${title}>
       evt ${eventBus.event_bus_correlated_count}
-    </span>
-    <span class=${`${commonClass} border-[var(--color-border-default)] text-[var(--color-fg-muted)]`} title=${title}>
-      mem ${formatIndependentCounters({ leftLabel: 'inj', leftValue: memory.memory_injected_count, rightLabel: 'flush', rightValue: memory.memory_flushed_count })}
     </span>
   `
 }

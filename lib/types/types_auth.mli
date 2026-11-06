@@ -133,7 +133,7 @@ val account_mode_label : account_mode -> string
 val account_mode_of_json : Yojson.Safe.t -> account_mode option
 
 (** A client that a multi-account installation registered at a login provider
-    (plan C2a-5). Only the multi-account login reads it.
+    (plans C2a-5 and C2b-3). Only the multi-account login reads it.
 
     The secret is not in the file. [save_auth_config] rewrites the file and
     backups copy it, so [client_secret_env] names the environment variable
@@ -159,6 +159,9 @@ type auth_config = {
       (** The Google client. [None] when the file has no [google] member, which the encoder also
           writes only for [Some]. A member is an object with exactly the three
           fields, each a non-empty string. *)
+  github : login_client option;  [@default None]
+      (** The GitHub client, read and written as [google] is, under the member
+          [github]. *)
 }
 [@@deriving show]
 
@@ -171,7 +174,8 @@ val max_token_expiry_hours : int
 
 val default_auth_config : auth_config
 (** [enabled = true; workspace_secret_hash = None; require_token = true;
-       token_expiry_hours = 24; account_mode = None; google = None]. Decoding accepts a workspace hash only as 64
+       token_expiry_hours = 24; account_mode = None; google = None;
+       github = None]. Decoding accepts a workspace hash only as 64
     lowercase hexadecimal characters and an expiry only in [1..8760]. *)
 
 val auth_config_to_yojson : auth_config -> Yojson.Safe.t

@@ -33,16 +33,6 @@ let task_is_linked_to_goal ?(goal_task_index = Hashtbl.create 0) (task : Masc_do
   in
   List.mem goal_id task_goal_ids
 
-(* A Task appears under a Goal only when the link table says so, so every row
-   carried the same constant "explicit". The other three documented values —
-   "title_tag", "mixed", "none" — had no producer at all: [link_source_of_values]
-   could only ever see one distinct value, and no code ever emitted a title-tag
-   linkage. The field conveyed nothing and the frontend still branched on it,
-   printing "title tag" for a case that could not occur. Linkage is now the
-   membership itself. *)
-let task_is_linked_opt ?(goal_task_index = Hashtbl.create 0) (task : Masc_domain.task) goal_id =
-  if task_is_linked_to_goal ~goal_task_index task goal_id then Some () else None
-
 (* The tree feeds the same Work surface as the execution payload, so it must
    answer the same question: who did or is doing the work. Using the ownership
    helper here made a completed Task show its performer via execution and
@@ -65,11 +55,6 @@ let dedupe_sort values =
 let receipt_error_kind json =
   match Json_util.assoc_member_opt "error" json with
   | Some (`Assoc _ as error) -> Json_util.get_string error "kind"
-  | _ -> None
-
-let receipt_error_message json =
-  match Json_util.assoc_member_opt "error" json with
-  | Some (`Assoc _ as error) -> Json_util.get_string error "message"
   | _ -> None
 
 let receipt_runtime_id json =

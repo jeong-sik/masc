@@ -124,11 +124,6 @@ let parsed_toml_cache : (string, parsed_toml_cache_entry) Hashtbl.t =
   Hashtbl.create 64
 let parsed_toml_mu = Stdlib.Mutex.create ()
 
-let invalidate_parsed_toml_cache () =
-  Stdlib.Mutex.protect parsed_toml_mu (fun () ->
-    Hashtbl.reset parsed_toml_cache)
-;;
-
 let inspect_keeper_toml_content ~(path : string) content =
   let cached =
     Stdlib.Mutex.protect parsed_toml_mu (fun () ->

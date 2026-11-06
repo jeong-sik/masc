@@ -357,7 +357,8 @@ max-concurrent = 1
 let runtime_thinking_lane_model_catalog =
   {|
 [[models]]
-model_id = "openai_compat/reasoning-big-out"
+model_id = "reasoning-big-out"
+provider_name = "thinking"
 base = "openai_chat"
 max_context_tokens = 1000000
 max_output_tokens = 200000

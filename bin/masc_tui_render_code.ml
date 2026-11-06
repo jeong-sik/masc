@@ -576,6 +576,35 @@ let render_code (state : state) =
        ^ Ansi.reset);
     box_divider pane_buf pane_cols;
     let content_height = code_pane_content_height state in
+    let file_scroll total_lines =
+      max 0 (min state.code_file_scroll (max 0 (total_lines - content_height)))
+    in
+    (* The row under the pane's rows. A file longer than its window says there
+       where the window is, like the other panes' "rows X-Y of Z" line; with
+       nothing to say it is the gap above the footer. [content_height] budgets
+       that one row, so a position drawn beside the gap made the surface one
+       row too tall and [finish_surface] cut its last row, the footer. *)
+    let position_row =
+      if hover_showing || draft_showing || notes_showing || diff_showing
+         || history_showing
+      then None
+      else
+        match Masc_tui_fetched.current state.code_file with
+        | Some (_, Masc_tui_fetched.Ready { cfd_rows = file_rows; _ })
+          when Array.length file_rows > content_height ->
+            let total_lines = Array.length file_rows in
+            let scroll = file_scroll total_lines in
+            Some
+              (Printf.sprintf "lines %d-%d of %d" (scroll + 1)
+                 (min total_lines (scroll + content_height))
+                 total_lines)
+        | Some (_, Masc_tui_fetched.Ready _)
+        | Some
+            ( _,
+              ( Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
+              | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _ ) )
+        | None -> None
+    in
     (if hover_showing then
        let rendered = code_hover_rows state ~cols:pane_cols in
        let height = max 1 (content_height - 1) in
@@ -767,9 +796,7 @@ let render_code (state : state) =
              box_empty pane_buf pane_cols
            done
        | Some (open_path, Masc_tui_fetched.Ready { cfd_rows = file_rows; _ }) ->
-           let total_lines = Array.length file_rows in
-           let max_scroll = max 0 (total_lines - content_height) in
-           let scroll = max 0 (min state.code_file_scroll max_scroll) in
+           let scroll = file_scroll (Array.length file_rows) in
            let hscroll =
              max 0
                (min state.code_file_hscroll
@@ -886,18 +913,11 @@ let render_code (state : state) =
                       (blame_cell (row_index + 1))
                       mark gutter_style (row_index + 1) Ansi.reset body)
              | None -> box_empty pane_buf pane_cols
-           done;
-           (* A file pane without a position is a corridor without doors:
-              the same "rows X-Y of Z" line the reading surfaces carry. The
-              fetched-match closes with this loop's done-paren, so the line
-              belongs inside the arm, before box_bottom draws for every
-              arm. *)
-           if total_lines > content_height then
-             box_line_styled pane_buf pane_cols ~style:(Theme.recede ())
-               (Printf.sprintf "lines %d-%d of %d" (scroll + 1)
-                  (min total_lines (scroll + content_height))
-                  total_lines));
-    box_bottom pane_buf pane_cols
+           done);
+    (match position_row with
+     | Some text ->
+         box_line_styled pane_buf pane_cols ~style:(Theme.recede ()) text
+     | None -> box_bottom pane_buf pane_cols)
   in
   (if split then begin
      let left_cols = keeper_roster_pane_cols in

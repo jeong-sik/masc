@@ -395,6 +395,10 @@ let recover_keeper_msg_requests_on_startup ~base_path =
   report
 ;;
 
+let count_cache_filename = "dated-jsonl-count-cache.json"
+
+let trajectory_summary_cache_filename = "trajectory-summary-cache.json"
+
 let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_state) =
   let config = Mcp_server.workspace_config state in
   Server_keeper_build_maintenance.start ~sw ~clock ~config;
@@ -447,7 +451,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      save exists because a crash is a restart too, and the whole point is the
      restart path. *)
   let count_cache_path =
-    Filename.concat (Workspace.masc_dir config) "dated-jsonl-count-cache.json"
+    Filename.concat (Workspace.masc_dir config) count_cache_filename
   in
   (match Dated_jsonl.load_count_cache ~path:count_cache_path with
    | Ok 0 -> ()
@@ -465,7 +469,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
   let trajectory_cache_path =
     Filename.concat
       (Workspace.masc_dir config)
-      "trajectory-summary-cache.json"
+      trajectory_summary_cache_filename
   in
   (match
      Telemetry_unified.load_trajectory_summary_cache ~path:trajectory_cache_path

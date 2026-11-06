@@ -157,10 +157,12 @@ let forget_mcp_session session_id =
 
 (* ===== File persistence ===== *)
 
+let sessions_filename = "mcp_transport_sessions.json"
+
 let sessions_file_path ~base_path () =
   Filename.concat
     (Config_dir_resolver.masc_root ~base_path)
-    "mcp_transport_sessions.json"
+    sessions_filename
 
 (** Serialize current session state to JSON and write to disk atomically.
     Uses write-then-rename to avoid partial writes on crash. *)

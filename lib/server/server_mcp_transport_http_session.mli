@@ -324,3 +324,6 @@ val query_param :
 (** [query_param request key] extracts a query parameter from
     the request URL via [Uri.get_query_param].  Pure — no side
     effects. *)
+
+val sessions_filename : string
+(** The session file below [<base>/.masc]. *)

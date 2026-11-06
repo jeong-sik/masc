@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { LogEntry } from '../api/dashboard-logs'
-import { logDisplayKind, type LogDisplayKind } from './log-classification'
+import { logDisplayKind, type LogDisplayKind, logKindCategories } from './log-classification'
 
 function entry(overrides: Partial<LogEntry>): LogEntry {
   return {
@@ -38,5 +38,11 @@ describe('logDisplayKind', () => {
     expect(logDisplayKind(entry({ details: { tool_name: 'masc_status' } }))).toBe('log')
     expect(logDisplayKind(entry({ hasTurn: true }))).toBe('log')
     expect(logDisplayKind(entry({ category: 'fsm', hasTurn: true }))).toBe('lifecycle')
+  })
+})
+
+describe('logKindCategories', () => {
+  it('asks for the plain log chip\'s rows with no category too', () => {
+    expect(logKindCategories('log')).toEqual(['routine', 'uncategorized'])
   })
 })

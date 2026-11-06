@@ -94,18 +94,19 @@ val with_test_env :
     so the override does not outlive the test scope. *)
 
 val get_net_opt : unit -> eio_net option
+(** Get the Eio network handle if available. *)
+
 val get_clock_opt : unit -> float Eio.Time.clock_ty Eio.Resource.t option
 (** Get the Eio clock if available. *)
 
 val get_switch_opt : unit -> Eio.Switch.t option
-(** Get the Eio network handle.
-    Returns Error if not initialized. *)
+(** Get the Eio switch if available: the turn's switch inside
+    {!with_turn_switch}, otherwise the root switch. [None] when the root
+    switch is unset or no longer live. *)
 
 val get_clock : unit -> (float Eio.Time.clock_ty Eio.Resource.t, string) result
 (** Get the Eio clock.
     Returns Error if not initialized. *)
-
-(** [get_https_connector] removed — use [get_https_connector_result] instead. *)
 
 val get_https_connector_result :
   unit ->

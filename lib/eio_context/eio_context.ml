@@ -297,6 +297,3 @@ let get_https_connector_result () =
           match Atomic.get _https_connector_cache with
           | Some other -> other
           | None -> result))
-
-(* get_https_connector (crash variant) removed — all callers use
-   get_https_connector_result which returns (connector, string) result. *)

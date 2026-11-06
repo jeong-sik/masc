@@ -98,9 +98,6 @@ let dispatch ctx ~name ~args : Tool_result.result option =
   | Some Tool_schemas_misc.Plan_clear_task ->
     lift (handle_plan_clear_task ~tool_name:name ~start_time:start ctx args)
 
-(* RFC-0057 PR-2: schemas binding removed; plan tools now emitted via
-   config/tools/masc_plan_*.toml (Tool_schemas_misc.schemas chain). *)
-
 (* ================================================================ *)
 (* Tool_spec registration                                           *)
 (* ================================================================ *)

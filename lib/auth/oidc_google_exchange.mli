@@ -30,7 +30,21 @@ type post = url:string -> headers:(string * string) list -> body:string -> (resp
 module Client : sig
   type t
 
-  val make : client_id:string -> client_secret:string -> redirect_uri:string -> t
+  type error =
+    | Client_id_empty
+    | Client_secret_empty
+    | Redirect_uri_not_https
+        (** Not an [https] URL with a host and no query or fragment. A
+            multi-account login runs on [https] only: its cookies are
+            [__Host-], which needs [Secure]. *)
+
+  val make
+    :  client_id:string
+    -> client_secret:string
+    -> redirect_uri:string
+    -> (t, error) result
+
+  val error_to_string : error -> string
   val client_id : t -> string
   val redirect_uri : t -> string
 end

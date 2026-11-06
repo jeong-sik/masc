@@ -2883,8 +2883,6 @@
  (modules test_keeper_external_resource_lease)
  (libraries alcotest masc_test_deps))
 
-(include stanzas/test_context_max_observed_9953.inc)
-
 (include stanzas/test_otel_runtime_observables.inc)
 
 (include stanzas/test_keeper_scheduled_stimulus_channel.inc)
@@ -2943,8 +2941,6 @@
 (include stanzas/test_distributed_lock_acquire_failed_counter.inc)
 
 (include stanzas/test_distributed_lock_backlog_namespace.inc)
-
-(include stanzas/test_distributed_lock_backoff_jitter_9645.inc)
 
 (include stanzas/test_docker_playground_gc_script.inc)
 

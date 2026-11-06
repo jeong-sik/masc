@@ -127,7 +127,9 @@ let completed_history_end ~trace_id ~lines ~messages =
    hand does not match, is [Turn_boundary_unknown]: the range then opens on
    the newest atom alone and the origin says so, rather than on the whole
    history under a boundary that was never read (§13.4 does not fold an
-   unknown start into 0). Reading it logs nothing: a request
+   unknown start into 0). The same boundary names the turns whose tool
+   results go as markers ([finished_turn_results]); an unknown boundary names
+   none. Reading it logs nothing: a request
    whose range it opens says so ([Keeper_carried_front.warn_range_opens_on_newest_atom]),
    and the dispatches that read it but start from a seed or a Librarian
    point, or the forecast that only looks, have nothing to report. *)
@@ -1016,9 +1018,9 @@ let current_turn_results_to_string = function
 (* What a composition does with the tool results of turns that already
    ended, the atoms before the turn boundary. Arguments are not part of it:
    they go as the range first sent them outside the resend that answers a
-   size refusal. A Keeper on the small input policy that can read markers
-   back asks for [Finished_turns_as_markers]; the others, and every caller
-   that does not say, keep every result as sent. *)
+   size refusal. A Keeper that can read markers back asks for
+   [Finished_turns_as_markers]; the others, and every caller that does not
+   say, keep every result as sent. *)
 type finished_turn_results =
   | Finished_turns_verbatim
   | Finished_turns_as_markers
@@ -1028,17 +1030,24 @@ let finished_turn_results_to_string = function
   | Finished_turns_as_markers -> "markers"
 ;;
 
+(* Markers for a Keeper that can read them back ([reader_available]); a
+   Keeper without the reader keeps every result as the range first sent it. *)
+let finished_turn_results_for ~reader_available =
+  if reader_available then Finished_turns_as_markers else Finished_turns_verbatim
+;;
+
 (* The least body, in bytes, of a result of an ended turn that goes as its
-   marker. Smaller results stay readable in the prompt. The replay of stored
-   requests in docs/evidence/aged-tool-results-2026-11 priced the rule at
-   this floor, counted on the whole message (the body plus its framing),
-   while the plan counts the body alone. *)
+   marker. Smaller results stay readable in the prompt. The number is the
+   threshold the replay of stored requests priced in
+   RFC-tool-results-age-out-of-context; the replay counted the whole message
+   (the body plus its framing), the plan counts the body alone. *)
 let aged_result_min_bytes = 2_048
 
 (* The atoms of turns that ended: the ones before the turn boundary, never
    the newest atom, which the request always carries as it is
    ([Keeper_carried_front.clamp]). An unknown boundary names no turn that
-   ended. *)
+   ended: every result goes as the range first sent it, and goes as its
+   marker again at the next dispatch that reads a boundary. *)
 let finished_turn_atoms ~atom_count = function
   | Keeper_carried_front.Turn_boundary { end_atom } ->
     Keeper_carried_front.clamp ~atom_count end_atom
@@ -1054,7 +1063,9 @@ type composed =
   ; outlived_seed : (Keeper_carried_front.seed * Keeper_carried_front.dropped_front) option
   ; demote_before : int
         (* The boundary the demotion actually applied: 0 when nothing is
-           demoted, the refused request's atom count after a size refusal. *)
+           demoted, the end of the last turn that ended (never the newest
+           atom) when its results go as markers, the refused request's atom
+           count after a size refusal. *)
   }
 
 (* A request as the ledger reads it, with the history it was composed from:
@@ -1778,8 +1789,7 @@ let bounded_model_input_projection
   let demotion_base_path = if reader_available then ctx.base_path else "" in
   (* The results of turns that ended go as markers on every request, for a
      Keeper that can read them back. *)
-  let finished_turn_results =
-    if reader_available then Finished_turns_as_markers else Finished_turns_verbatim in
+  let finished_turn_results = finished_turn_results_for ~reader_available in
   Log.Keeper.info ~keeper_name:ctx.keeper_name
     "model input references runtime=%s context_owner=agent_core turn_boundary=%s blob_reader_available=%b argument_references_enabled=%b finished_turn_results=%s"
     ctx.runtime_id

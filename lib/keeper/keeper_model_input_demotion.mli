@@ -120,8 +120,8 @@ val plan
       from that message on. A boundary at the current turn moves once per turn,
       so each result changes once, on the first request after its turn ended,
       and costs the cache from that message on. The keeper's agent_core
-      assembly passes the turn boundary for a Keeper on the small input policy
-      that can read markers back, and the refused request's atom count for the
+      assembly passes the turn boundary for a Keeper that can read markers
+      back, and the refused request's atom count for the
       one resend that answers a size refusal, so every result in the refused
       request leaves as a marker rather than failing the turn (#28845).
     - its body has at least [min_result_bytes] bytes. The floor is 0 when the
@@ -153,8 +153,9 @@ type materialize_outcome =
   { messages : Agent_core.Types.message list
   ; reverted : int
         (** Planned demotions whose blob write failed and whose body was
-            restored. Non-zero means the list is larger than the plan the cut
-            was chosen against, so the caller must run the cut again. *)
+            restored. Non-zero means the list is larger than the plan
+            measured. The range is a position, not a size, so the same atoms
+            go out and the caller reports the failure. *)
   }
 
 type materialized_replay

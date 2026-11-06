@@ -1653,9 +1653,10 @@ let current_batch ~id_prefix ~fill sizes =
        sizes
 ;;
 
-let compose_from_the_oldest_atom ?finished_turn_results ~base_path ~current_turn_results
-      ~turn_boundary messages =
+let compose_from_the_oldest_atom ?completed_arguments ?finished_turn_results ~base_path
+      ~current_turn_results ~turn_boundary messages =
   Try_provider.For_testing.compose_carried_model_input
+    ?completed_arguments
     ?finished_turn_results
     ~measure_message_bytes
     ~accepted:None ~front:
@@ -1674,10 +1675,16 @@ let compose_from_the_oldest_atom ?finished_turn_results ~base_path ~current_turn
 let letter i = Char.chr (Char.code 'a' + i)
 
 (* A refused request goes again with every result it carried as a marker,
-   earlier turns' included: the resend is the smallest this range can carry,
-   whichever turn boundary the history reports. *)
+   earlier turns' included and the ones under the finished-turn floor too:
+   the resend is the smallest this range can carry, whichever turn boundary
+   the history reports. *)
 let a_refusal_demotes_every_result_it_carried () =
-  let earlier_bodies = [ String.make 20_000 'e'; String.make 21_000 'f' ] in
+  let under_the_floor = String.make 1_000 'g' in
+  Alcotest.(check bool) "one earlier body is under the finished-turn floor" true
+    (String.length under_the_floor < Try_provider.For_testing.aged_result_min_bytes);
+  let earlier_bodies =
+    [ String.make 20_000 'e'; String.make 21_000 'f'; under_the_floor ]
+  in
   let earlier = history_with_tool_bodies earlier_bodies in
   let messages = earlier @ current_batch ~id_prefix:"search" ~fill:letter newest_bodies in
   let turn_start =
@@ -1722,7 +1729,10 @@ let a_refusal_demotes_every_result_it_carried () =
 (* RFC-0363 §6 test 1 across a turn boundary: the next turn's first request
    carries every message the last one sent, unchanged, ahead of the new atoms.
    The bodies are large enough that a marker would shorten each of them, so a
-   boundary that demoted completed turns would rewrite them here. *)
+   boundary that demoted completed turns would rewrite them here. This is the
+   default path, [Finished_turns_verbatim]; what a Keeper that asks for the
+   results of ended turns as markers sends instead is
+   [a_finished_turn_result_changes_once_and_its_marker_stays]. *)
 let a_sent_result_stays_as_sent_when_the_turn_boundary_moves () =
   let earlier = history_with_tool_bodies [ String.make 20_000 'e'; String.make 21_000 'f' ] in
   let this_turn = earlier @ current_batch ~id_prefix:"search" ~fill:letter newest_bodies in
@@ -1800,7 +1810,8 @@ let rec shared_prefix first second =
 
 (* A result of a turn that ended leaves as a marker the blob store reads back
    in full, this turn's results stay as they are, and no argument is
-   touched, whatever its size. *)
+   touched, whatever its size. The ended turns' arguments are bound the way
+   a size refusal's resend binds them; this composition still leaves them. *)
 let finished_turn_results_leave_as_markers () =
   let big_input = `Assoc [ "command", `String (String.make 4_000 'h') ] in
   let earlier_bodies = [ String.make 20_000 'e'; String.make 21_000 'f' ] in
@@ -1818,9 +1829,12 @@ let finished_turn_results_leave_as_markers () =
     Window.first_atom_at_or_after messages ~message_index:(List.length earlier)
   in
   let base_path = Filename.temp_dir "demote" "" in
+  let completed_arguments =
+    bind_arguments ~completed_before:turn_start ~seed:messages messages
+  in
   let composed =
-    compose_from_the_oldest_atom ~finished_turn_results:as_markers ~base_path
-      ~current_turn_results:Try_provider.Current_turn_verbatim
+    compose_from_the_oldest_atom ~completed_arguments ~finished_turn_results:as_markers
+      ~base_path ~current_turn_results:Try_provider.Current_turn_verbatim
       ~turn_boundary:(finished_turns_through turn_start) messages
   in
   Alcotest.(check int) "the demotion stops at the turn boundary" turn_start
@@ -1870,12 +1884,23 @@ let finished_turn_results_leave_as_markers () =
               | Types.ReasoningDetails _ | Types.RedactedThinking _ | Types.Image _
               | Types.Document _ | Types.Audio _ -> true)
             message.Types.content)
-       sent)
+       sent);
+  (* Control: the same bound arguments are demoted by the resend that answers
+     a size refusal, so the check above would fail if this composition used
+     them. *)
+  let refused =
+    compose_from_the_oldest_atom ~completed_arguments ~base_path
+      ~current_turn_results:(demoted_after_refusal messages)
+      ~turn_boundary:(finished_turns_through turn_start) messages
+  in
+  Alcotest.(check bool) "a size refusal's resend does demote these arguments" true
+    (List.exists
+       (fun input -> input <> big_input)
+       (argument_inputs refused.Try_provider.projection.Window.messages))
 ;;
 
 (* A result goes as a marker from [aged_result_min_bytes] on; a smaller one
-   stays readable, and a marker is never written for a body it would not
-   shorten. *)
+   stays readable. *)
 let results_below_the_floor_stay_in_the_prompt () =
   let floor = Try_provider.For_testing.aged_result_min_bytes in
   let bodies =
@@ -1985,6 +2010,15 @@ let finished_turns_stay_verbatim_unless_they_can_be_read_back () =
     (planned asked)
 ;;
 
+(* The driver asks for markers only for a Keeper that can read them back. *)
+let only_a_keeper_with_a_reader_asks_for_markers () =
+  let asks reader_available =
+    Try_provider.finished_turn_results_for ~reader_available = as_markers
+  in
+  Alcotest.(check bool) "with a reader" true (asks true);
+  Alcotest.(check bool) "without a reader" false (asks false)
+;;
+
 (* A turn boundary at the end of the history names the newest atom as ended.
    That atom is what the request has to answer, so it keeps its results. *)
 let the_newest_atom_keeps_its_results () =
@@ -2070,8 +2104,10 @@ let plan_keeps_results_below_the_floor () =
   let without_floor = results_only (changed ()) in
   Alcotest.(check (list bool)) "below the floor nothing is substituted"
     [ false; false; true; true; true ] with_floor;
-  Alcotest.(check bool) "without a floor the large results are substituted as well" true
-    (List.nth without_floor 2 && List.nth without_floor 3 && List.nth without_floor 4)
+  (* Without a floor the two small results are substituted as well: the floor
+     alone keeps them in the prompt. *)
+  Alcotest.(check (list bool)) "without a floor every result is substituted"
+    [ true; true; true; true; true ] without_floor
 ;;
 
 (* Demotion can shrink an atom only down to its non-demotable residue. The
@@ -2282,6 +2318,10 @@ let () =
             "ended turns stay verbatim unless they can be read back"
             `Quick
             finished_turns_stay_verbatim_unless_they_can_be_read_back
+        ; Alcotest.test_case
+            "only a Keeper with a reader asks for markers"
+            `Quick
+            only_a_keeper_with_a_reader_asks_for_markers
         ; Alcotest.test_case
             "the newest atom keeps its results"
             `Quick

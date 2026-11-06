@@ -697,6 +697,11 @@ type finished_turn_results =
           (RFC-tool-results-age-out-of-context). An unknown turn boundary
           names no ended turn and demotes nothing. *)
 
+val finished_turn_results_for : reader_available:bool -> finished_turn_results
+(** {!Finished_turns_as_markers} for a Keeper that can read markers back
+    ([reader_available]); {!Finished_turns_verbatim} for a Keeper without the
+    reader. *)
+
 val current_turn_demotion_sequence :
   same_run_retry_authorized:(unit -> bool) ->
   demotable:(unit -> int option) ->

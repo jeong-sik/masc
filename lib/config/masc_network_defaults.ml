@@ -37,10 +37,8 @@ let ollama_default_url =
   Printf.sprintf "http://127.0.0.1:%d" ollama_default_port
 
 (** Ollama native API path for the running-models ("process status")
-    endpoint.  Used by both {!Runtime_http_probe} (runtime-level
-    capacity probe) and {!Tool_local_runtime_probe} (tool-level KV
-    assessment); anchoring the suffix in one place prevents the two
-    call sites from drifting if Ollama ever renames the route. *)
+    endpoint.  Used by {!Tool_local_runtime_probe} (tool-level KV
+    assessment). *)
 let ollama_api_ps_path = "/api/ps"
 
 (** Ollama native API path for text generation.  Used by the

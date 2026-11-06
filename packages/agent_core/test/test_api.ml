@@ -830,7 +830,7 @@ let test_openai_messages_with_image () =
 ;;
 
 (* ------------------------------------------------------------------ *)
-(* F1: Openai API error → Openai_api_error exception                    *)
+(* F1: Openai API error returns Error                                   *)
 (* ------------------------------------------------------------------ *)
 
 let test_openai_api_error_returns_error () =

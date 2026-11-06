@@ -21,8 +21,7 @@ val trim_trailing_slashes : string -> string
 val ollama_default_url : string
 
 (** Ollama native API path for the running-models ("process status")
-    endpoint. Used by {!Runtime_http_probe} and
-    {!Tool_local_runtime_probe}. *)
+    endpoint. Used by {!Tool_local_runtime_probe}. *)
 val ollama_api_ps_path : string
 
 (** Ollama native API path for text generation. Used by the tool-level

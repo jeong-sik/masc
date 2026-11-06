@@ -3,7 +3,7 @@
 open Masc
 
 (* ================================================================ *)
-(* Message roundtrip tests via Llm_client to/from AGENT_CORE               *)
+(* Message roundtrip tests to/from AGENT_CORE                       *)
 (* ================================================================ *)
 
 let test_roundtrip_user_msg () =

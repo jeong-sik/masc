@@ -1,7 +1,7 @@
 ---
 rfc: "0504"
 title: "헌법 원장에 조항을 합치는 기록(Replaced)을 둔다"
-status: Draft
+status: Accepted
 created: 2026-11-06
 updated: 2026-11-06
 author: masc-productor-owner

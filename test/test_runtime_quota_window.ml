@@ -78,29 +78,77 @@ let test_an_observation_demotes_and_a_success_clears_it () =
     (Q.is_exhausted ~scope ~now:100.0)
 ;;
 
+(* An observation compares a held reset with the wall clock, so a window it
+   must keep ends after the wall clock: 2096-10-02. *)
+let reset_after_the_wall_clock = 4_000_000_000.0
+
 (* The provider's own answer outranks an observation in both directions, and a
    success inside a stated window does not make that window untrue. *)
 let test_a_stated_window_outranks_an_observation () =
   reset ();
   let scope = provider_scope "api_z_ai" in
+  let resets_at = reset_after_the_wall_clock in
   Q.note_observed_exhausted ~scope;
-  Q.note_exhausted ~scope ~resets_at:500.0;
+  Q.note_exhausted ~scope ~resets_at;
   Alcotest.(check (option (float 0.0)))
     "a stated reset replaces an observation"
-    (Some 500.0)
+    (Some resets_at)
     (Q.active_until ~scope ~now:100.0);
   Q.note_observed_exhausted ~scope;
   Alcotest.(check (option (float 0.0)))
     "an observation does not weaken a stated window"
-    (Some 500.0)
+    (Some resets_at)
     (Q.active_until ~scope ~now:100.0);
   Q.note_succeeded ~scope;
   Alcotest.(check (option (float 0.0)))
     "a success does not end a stated window"
-    (Some 500.0)
+    (Some resets_at)
     (Q.active_until ~scope ~now:100.0);
   Alcotest.(check bool) "and the stated window still expires on time" false
-    (Q.is_exhausted ~scope ~now:500.1)
+    (Q.is_exhausted ~scope ~now:(resets_at +. 0.1))
+;;
+
+(* A stated window that has passed but that no read has pruned yet names no
+   rest. A refusal without a reset after it must still rest the scope: kept
+   in its place, the passed window would be pruned on the next read and the
+   refusal would leave nothing (a failed usage read then rests nothing). *)
+let test_a_passed_window_gives_way_to_a_later_observation () =
+  reset ();
+  let scope = provider_scope "api_z_ai" in
+  let now = Unix.gettimeofday () in
+  Q.note_exhausted ~scope ~resets_at:(now -. 10.0);
+  Q.note_observed_exhausted ~scope;
+  Alcotest.(check bool) "the refusal rests the scope" true (Q.is_exhausted ~scope ~now);
+  Alcotest.(check (option (float 0.0))) "and names no reset" None
+    (Q.active_until ~scope ~now)
+;;
+
+(* Who named no reset decides whether a usage read can still add to the rest:
+   a refusal leaves the question open, a read that found no reset answered
+   it, and a later refusal does not reopen it. *)
+let test_a_read_without_reset_answers_what_a_refusal_asks () =
+  reset ();
+  let scope = provider_scope "api_z_ai" in
+  let answered () =
+    match Q.answered_rest ~scope ~now:100.0 with
+    | None -> "open"
+    | Some Q.Stated_reset_ahead -> "stated reset ahead"
+    | Some Q.Read_found_no_reset -> "read found no reset"
+  in
+  Q.note_observed_exhausted ~scope;
+  Alcotest.(check string) "a refusal leaves the question open" "open" (answered ());
+  Q.note_read_without_reset ~scope;
+  Alcotest.(check string) "a read that found no reset answers it" "read found no reset"
+    (answered ());
+  Q.note_observed_exhausted ~scope;
+  Alcotest.(check string) "a later refusal does not reopen it" "read found no reset"
+    (answered ());
+  Alcotest.(check bool) "the scope rests either way" true (Q.is_exhausted ~scope ~now:100.0);
+  Q.note_succeeded ~scope;
+  Alcotest.(check string) "a success clears the answer" "open" (answered ());
+  Q.note_exhausted ~scope ~resets_at:500.0;
+  Alcotest.(check string) "a stated reset still ahead is an answer" "stated reset ahead"
+    (answered ())
 ;;
 
 (* The safety line. Demotion is ordering, not admission: an observed scope is
@@ -536,6 +584,14 @@ let () =
             "a stated window outranks an observation"
             `Quick
             test_a_stated_window_outranks_an_observation
+        ; Alcotest.test_case
+            "a passed window gives way to a later observation"
+            `Quick
+            test_a_passed_window_gives_way_to_a_later_observation
+        ; Alcotest.test_case
+            "a read without reset answers what a refusal asks"
+            `Quick
+            test_a_read_without_reset_answers_what_a_refusal_asks
         ; Alcotest.test_case
             "an observed scope is demoted, not excluded"
             `Quick

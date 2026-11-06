@@ -4,8 +4,8 @@
     stopped picking. Codex, HTTP and Antigravity reads record provider reports
     in [Runtime_provider_usage_window] for the operator projection. Routing
     and admission do not read that observation table. An HTTP account read
-    after a 403, or after a 429 that states no wait
-    ({!read_after_account_refusal}), can also rest a spent scope on
+    after a 403, a 429 that states no wait, or a hard quota that states no
+    reset ({!read_after_account_refusal}), can also rest a spent scope on
     {!Runtime_quota_window}. A Muse [usage/read] records the
     account's rolling and weekly windows in [Runtime_provider_usage_window]
     ({!Runtime_muse_usage.observe}), and a provider-stated exhausted window
@@ -176,7 +176,9 @@ module For_testing : sig
 end
 
 (** What a usage read said after the provider refused the account: an HTTP
-    403, or an HTTP 429 that states no wait ({!read_after_account_refusal}).
+    403, an HTTP 429 that states no wait, or a provider's hard quota that
+    states no reset ({!read_after_account_refusal}); an HTTP 402 payment
+    refusal names no usage window and is not read.
     Only windows whose role is
     {!Runtime_provider_usage_window.Gates_model_calls} count. *)
 type account_refusal_read =
@@ -188,12 +190,13 @@ type account_refusal_read =
       (** Spent gating windows belong to more than one limit (their limit
           ids, sorted; [None] for a window that names none). A refusal does
           not name the limit that refused it, so no reset is the rest: the
-          scope keeps the refusal's observation, as [Spent_without_reset]. *)
+          scope rests until its next success, as [Spent_without_reset]. *)
   | No_window_spent
       (** Every gating window has headroom, and the read rests nothing.
           After a 403 the refusal is not a spent quota (a blocked client, a
           suspended account); after a 429 it is a throttle, which the walk
-          rests on the throttle floor. *)
+          rests on the throttle floor; after a hard quota the refusal's own
+          observation rests the scope until its next success. *)
 
 val account_refusal_read_of_report :
   Runtime_provider_usage_window.report -> account_refusal_read
@@ -212,7 +215,7 @@ val read_after_account_refusal :
     the windows as {!read_scopes} does, and rest the scope on
     {!Runtime_quota_window} when a gating window is spent: [Spent_until t]
     is {!Runtime_quota_window.note_exhausted} until [t],
-    [Spent_without_reset] is {!Runtime_quota_window.note_observed_exhausted}.
+    [Spent_without_reset] is {!Runtime_quota_window.note_read_without_reset}.
     A [t] not after the answer's arrival names no rest and is returned and
     recorded as [Spent_without_reset].
     This read affects the walk order; the startup read ({!read_all}) stays an operator
@@ -222,10 +225,14 @@ val http_read_of_runtime : Runtime_instance.t -> http_read option
 (** The runtime's HTTP usage read when its provider declares [usage-read]. *)
 
 type account_refusal_skip =
-  | No_usage_read  (** The provider declares no [usage-read]. *)
-  | Scope_already_resting
-      (** The scope already has a live quota mark, e.g. from a sibling's
-          read in the same walk. *)
+  | Scope_rest_dated
+      (** The scope already rests until a stated reset, e.g. from a sibling's
+          read in the same walk. A refusal's undated rest is read: the read
+          dates it. *)
+  | Scope_read_found_no_reset
+      (** A read already found the scope's gating window spent with no reset
+          ({!Runtime_quota_window.note_read_without_reset}); another read
+          would find the same until a success clears it. *)
   | Already_reading  (** A read for this scope is running. *)
   | No_net_or_clock  (** No Eio net or clock is installed. *)
 
@@ -238,9 +245,12 @@ type account_refusal_outcome =
 val read_runtime_after_account_refusal :
   ?fetch:(api_key:Llm_provider.Secret.t -> string -> (string, http_error) result) ->
   Runtime_instance.t ->
+  http_read ->
   account_refusal_outcome
-(** {!read_after_account_refusal} for [rt]'s materialized scope, in the
+(** {!read_after_account_refusal} for [rt]'s materialized scope with the
+    usage read its provider declares ({!http_read_of_runtime}), in the
     caller's fiber, at most one per scope at a time (shared with
-    {!read_codex_after_spent_usage_refusal}). [fetch] defaults to one GET on the
-    process's Eio net and clock. The outcome is logged without the body or
-    the key, and returned. *)
+    {!read_codex_after_spent_usage_refusal}). A runtime whose provider
+    declares none has no [http_read] and never reaches this read. [fetch]
+    defaults to one GET on the process's Eio net and clock. The outcome is
+    logged without the body or the key, and returned. *)

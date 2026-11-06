@@ -3376,10 +3376,12 @@ let attempt_failure : Runtime_candidate_backpressure.attempt_failure option Alco
     ( = )
 ;;
 
-let walk_once ?provider_answered ?read_usage_after_account_refusal outcomes ids =
+let walk_once ?provider_answered ?read_usage_after_account_refusal ?on_attempt_error outcomes
+    ids =
   Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
     ?provider_answered
     ?read_usage_after_account_refusal
+    ?on_attempt_error
     ~runtime_id:"quota_lane" ~runtime_id_of:Fun.id
     ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
     ~run_attempt:(fun ~idx:_ ~runtime_id _ -> attempt_without_effect (outcomes runtime_id) None)
@@ -3639,15 +3641,19 @@ let with_env key value f =
 module Usage_read = Runtime_provider_usage_read
 
 (* The production read ([read_runtime_after_account_refusal]) with only the
-   GET replaced. *)
+   GET replaced, asked as the walk asks it: only for a runtime whose provider
+   declares a usage read. *)
 let read_usage_with ~fetch runtime_id =
   match Runtime.get_runtime_by_id runtime_id with
   | None -> Alcotest.failf "no runtime %s" runtime_id
   | Some runtime ->
-    let (_ : Usage_read.account_refusal_outcome) =
-      Usage_read.read_runtime_after_account_refusal ~fetch runtime
-    in
-    ()
+    (match Usage_read.http_read_of_runtime runtime with
+     | None -> ()
+     | Some http ->
+       let (_ : Usage_read.account_refusal_outcome) =
+         Usage_read.read_runtime_after_account_refusal ~fetch runtime http
+       in
+       ())
 ;;
 
 let outcome_label : Usage_read.account_refusal_outcome -> string = function
@@ -3657,8 +3663,8 @@ let outcome_label : Usage_read.account_refusal_outcome -> string = function
   | Read No_window_spent -> "read: no window spent"
   | Read_failed _ -> "read failed"
   | Read_raised name -> "raised " ^ name
-  | Skipped No_usage_read -> "skipped: no usage-read"
-  | Skipped Scope_already_resting -> "skipped: scope already resting"
+  | Skipped Scope_rest_dated -> "skipped: scope rest already dated"
+  | Skipped Scope_read_found_no_reset -> "skipped: a read found no reset"
   | Skipped Already_reading -> "skipped: already reading"
   | Skipped No_net_or_clock -> "skipped: no net or clock"
 ;;
@@ -3859,13 +3865,206 @@ let test_a_429_that_states_its_wait_reads_nothing () =
         (Runtime_quota_window.is_exhausted ~scope:refused_scope ~now))
 ;;
 
+(* [quota_lane] as the 2026-11-06 chain [sonnet-500k-then-glm]: a head whose
+   account rests for days, then [other] standing for GLM with Z.AI's usage
+   endpoint declared. The fetch is injected, so no request leaves the test. *)
+let runtime_toml_resting_head_then_glm =
+  runtime_toml_quota_lane_of [ "shared_a.test_model"; "other.test_model" ]
+  ^ {|
+[providers.other.usage-read]
+shape = "zai-quota-limit"
+url = "https://127.0.0.1/api/monitor/usage/quota/limit"
+|}
+;;
+
+(* The shape GET /api/monitor/usage/quota/limit answers while the 5-hour
+   token window is spent (the reset is the test's). *)
+let zai_spent_five_hour_body ~resets_at =
+  Printf.sprintf
+    {|{"code":200,"msg":"Operation successful","success":true,"data":{"limits":[{"type":"TOKENS_LIMIT","unit":3,"number":5,"percentage":100,"nextResetTime":%.0f}]}}|}
+    (resets_at *. 1000.0)
+;;
+
+(* The same answer when Z.AI names no reset for the spent window. *)
+let zai_spent_five_hour_body_without_reset =
+  {|{"code":200,"msg":"Operation successful","success":true,"data":{"limits":[{"type":"TOKENS_LIMIT","unit":3,"number":5,"percentage":100}]}}|}
+;;
+
+(* What Agent Core returns for GLM's 1308 (a spent usage window): a hard quota
+   whose reset is not stated, because Z.AI writes it only in the message. *)
+let glm_spent_window_refusal () =
+  Agent_core.Provider_failure_attribution.core_error_of_http_error
+    ~provider:"glm-coding"
+    (Llm_provider.Http_client.ProviderFailure
+       { kind = Llm_provider.Http_client.Hard_quota { retry_after = None }
+       ; message =
+           "Glm error 1308: Usage limit reached for 5 hour. Your limit will reset at \
+            2026-11-06 14:20:44"
+       })
+;;
+
+(* The 2026-11-06 chain at the moment GLM refused it: the head's account rests
+   for three days, GLM's 5-hour window resets in 976 s. [f] gets the two
+   runtime ids, GLM's quota scope, GLM's reset, a walk of GLM alone that
+   answers [refusal] (GLM's 1308 unless named) and reads its usage with
+   [read], and the runtimes whose failure the walks reported, in order. *)
+let with_glm_refusing_behind_a_resting_head f =
+  with_refusal_lane ~toml:runtime_toml_resting_head_then_glm (fun () ->
+    let head = "shared_a.test_model" and glm = "other.test_model" in
+    let now = Unix.gettimeofday () in
+    let glm_resets_at = Float.round (now +. 976.0) in
+    Runtime_quota_window.note_exhausted
+      ~scope:(Option.get (Runtime.quota_scope_of_runtime_id head))
+      ~resets_at:(now +. (3.0 *. 86400.0));
+    let refusal = glm_spent_window_refusal () in
+    (match refusal with
+     | Agent_core.Error.Provider (Llm_provider.Error.HardQuota { retry_after = None; _ }) -> ()
+     | other ->
+       Alcotest.failf "the refusal is not a hard quota without a reset: %s"
+         (Agent_core.Error.to_string other));
+    let reported = ref [] in
+    let walk ?(refusal = refusal) ~read () =
+      match
+        walk_once
+          ~read_usage_after_account_refusal:read
+          ~on_attempt_error:(fun ~runtime_id ~attempt:_ ~dispatch:_ _ ->
+            reported := runtime_id :: !reported)
+          (fun _ -> Error refusal)
+          [ glm ]
+      with
+      | Error _ -> ()
+      | Ok () -> Alcotest.fail "the refused candidate unexpectedly answered"
+    in
+    f ~now ~head ~glm
+      ~glm_scope:(Option.get (Runtime.quota_scope_of_runtime_id glm))
+      ~glm_resets_at ~walk ~reported:(fun () -> List.rev !reported))
+;;
+
+let hard_quota_without_a_reset =
+  Keeper_runtime_failure_route.Retry_after_observed
+    { retry_class = Keeper_runtime_failure_route.Hard_quota; retry_after = None }
+;;
+
+let quota_lane_wait ~now =
+  describe_dispatch ~now
+    (Driver.next_dispatch_after_failure ~now ~route:hard_quota_without_a_reset
+       ~assignment_id:"quota_lane" None)
+;;
+
+(* 2026-11-06 06:04:32Z: GLM refused wkbl-front's chain with 1308 and came back
+   at 06:20:44Z, but the failed cycle planned a 323,727 s wait for the resting
+   head, because GLM's rest named no time and the walk does not promote such a
+   path at its release. The usage read dates GLM's rest, so the wait ends when
+   GLM's window resets. *)
+let test_a_hard_quota_without_a_reset_waits_for_the_dated_usage_window () =
+  with_glm_refusing_behind_a_resting_head
+    (fun ~now ~head:_ ~glm ~glm_scope:_ ~glm_resets_at ~walk ~reported:_ ->
+      let fetched = ref [] in
+      let fetch ~api_key:_ url =
+        fetched := url :: !fetched;
+        Ok (zai_spent_five_hour_body ~resets_at:glm_resets_at)
+      in
+      walk ~read:(read_usage_with ~fetch) ();
+      Alcotest.(check (list string)) "the declared usage endpoint is read once"
+        [ "https://127.0.0.1/api/monitor/usage/quota/limit" ] (List.rev !fetched);
+      (match Driver.path_rest ~now glm with
+       | Driver.Path_resting { release_at; walk_promotes_at_release } ->
+         Alcotest.(check (float 0.0)) "GLM rests until its window resets" glm_resets_at
+           release_at;
+         Alcotest.(check bool) "the walk promotes GLM at that reset" true
+           walk_promotes_at_release
+       | Driver.Path_serving -> Alcotest.fail "the refused path serves again");
+      Alcotest.(check string) "the failed cycle waits for GLM, not for the resting head"
+        (Printf.sprintf "wait %.0fs for %s" (glm_resets_at -. now) glm)
+        (quota_lane_wait ~now))
+;;
+
+(* A read that fails leaves the refusal's undated rest. That rest must not stop
+   the next refusal's read, or the rest stays undated until GLM answers. *)
+let test_an_undated_rest_from_a_failed_read_is_dated_by_the_next_refusal () =
+  with_glm_refusing_behind_a_resting_head
+    (fun ~now ~head:_ ~glm ~glm_scope ~glm_resets_at ~walk ~reported:_ ->
+      walk ~read:(read_usage_with ~fetch:(fun ~api_key:_ _ -> failwith "usage read timed out")) ();
+      Alcotest.(check bool) "the failed read leaves the refusal's rest" true
+        (Runtime_quota_window.is_exhausted ~scope:glm_scope ~now);
+      Alcotest.(check (option (float 0.0))) "that rest names no time" None
+        (Runtime_quota_window.active_until ~scope:glm_scope ~now);
+      let fetched = ref 0 in
+      let fetch ~api_key:_ _ =
+        incr fetched;
+        Ok (zai_spent_five_hour_body ~resets_at:glm_resets_at)
+      in
+      walk ~read:(read_usage_with ~fetch) ();
+      Alcotest.(check int) "the next refusal reads the undated scope" 1 !fetched;
+      Alcotest.(check string) "the dated rest lets the cycle wait for GLM"
+        (Printf.sprintf "wait %.0fs for %s" (glm_resets_at -. now) glm)
+        (quota_lane_wait ~now))
+;;
+
+(* A read that found the window spent with no reset has answered what the
+   refusal asks; the next refusal reads nothing until a success clears it. A
+   read on every refusal would only find the same. *)
+let test_a_read_that_found_no_reset_is_not_asked_again () =
+  with_glm_refusing_behind_a_resting_head
+    (fun ~now ~head:_ ~glm:_ ~glm_scope ~glm_resets_at:_ ~walk ~reported:_ ->
+      let fetched = ref 0 in
+      let fetch ~api_key:_ _ =
+        incr fetched;
+        Ok zai_spent_five_hour_body_without_reset
+      in
+      walk ~read:(read_usage_with ~fetch) ();
+      Alcotest.(check int) "the first refusal reads the usage endpoint" 1 !fetched;
+      Alcotest.(check bool) "the read rests GLM" true
+        (Runtime_quota_window.is_exhausted ~scope:glm_scope ~now);
+      walk ~read:(read_usage_with ~fetch) ();
+      Alcotest.(check int) "the next refusal does not read again" 1 !fetched)
+;;
+
+(* A payment refusal (HTTP 402) takes the hard-quota route but names no usage
+   window, so a usage read cannot date its rest; it is not asked. *)
+let test_a_payment_refusal_reads_no_usage () =
+  with_glm_refusing_behind_a_resting_head
+    (fun ~now ~head:_ ~glm:_ ~glm_scope ~glm_resets_at ~walk ~reported:_ ->
+      let fetched = ref 0 in
+      let fetch ~api_key:_ _ =
+        incr fetched;
+        Ok (zai_spent_five_hour_body ~resets_at:glm_resets_at)
+      in
+      walk
+        ~refusal:(Agent_core.Error.Api (Agent_core.Retry.PaymentRequired { message = "pay" }))
+        ~read:(read_usage_with ~fetch)
+        ();
+      Alcotest.(check int) "a 402 reads no usage" 0 !fetched;
+      Alcotest.(check bool) "the 402 still rests the account" true
+        (Runtime_quota_window.is_exhausted ~scope:glm_scope ~now))
+;;
+
+(* The read is an HTTP GET inside the walk. A turn cancelled while it runs (a
+   person queued, a yield) must still leave the refusal recorded, or the next
+   turn starts on the spent path, and must still report the failure, or the
+   turn's walk evidence loses the refusal that ended it. *)
+let test_a_turn_cancelled_during_the_read_still_records_the_refusal () =
+  with_glm_refusing_behind_a_resting_head
+    (fun ~now ~head:_ ~glm ~glm_scope ~glm_resets_at:_ ~walk ~reported ->
+      (match walk ~read:(fun _ -> raise (Eio.Cancel.Cancelled Exit)) () with
+       | exception Eio.Cancel.Cancelled _ -> ()
+       | () -> Alcotest.fail "the cancelled read did not end the walk");
+      Alcotest.(check bool) "the refusal rests GLM before the read starts" true
+        (Runtime_quota_window.is_exhausted ~scope:glm_scope ~now);
+      Alcotest.(check (list string)) "the cancelled walk still reports GLM's failure"
+        [ glm ] (reported ()))
+;;
+
 (* The seams of the production read: no Eio context, a raising GET, one read
    per scope at a time, and no second read once the scope rests. *)
 let test_the_read_after_a_403_skips_and_contains_its_failures () =
   with_refusal_lane ~toml:runtime_toml_quota_lane_with_usage_read (fun () ->
     let refused = Option.get (Runtime.get_runtime_by_id "other.test_model") in
     let scope = Runtime_instance.quota_scope_of_runtime refused in
-    let read ?fetch () = outcome_label (Usage_read.read_runtime_after_account_refusal ?fetch refused) in
+    let http = Option.get (Usage_read.http_read_of_runtime refused) in
+    let read ?fetch () =
+      outcome_label (Usage_read.read_runtime_after_account_refusal ?fetch refused http)
+    in
     Alcotest.(check string) "outside a server there is no net or clock to read with"
       "skipped: no net or clock" (read ());
     Alcotest.(check string) "a raising GET is contained and named by its constructor"
@@ -3883,8 +4082,8 @@ let test_the_read_after_a_403_skips_and_contains_its_failures () =
     Alcotest.(check string) "the first read rests the scope" "read: spent until" (read ~fetch ());
     Alcotest.(check string) "a read for the same scope while one runs is skipped"
       "skipped: already reading" !inner;
-    Alcotest.(check string) "a scope that already rests is not read again"
-      "skipped: scope already resting"
+    Alcotest.(check string) "a scope whose rest is dated is not read again"
+      "skipped: scope rest already dated"
       (read ~fetch:(fun ~api_key:_ _ -> Alcotest.fail "a resting scope was read again") ()))
 ;;
 
@@ -7515,6 +7714,19 @@ let () =
             test_a_429_without_a_wait_and_headroom_rests_only_the_floor;
           Alcotest.test_case "a 429 that states its wait reads nothing" `Quick
             test_a_429_that_states_its_wait_reads_nothing;
+          Alcotest.test_case "a hard quota without a reset waits for the dated usage window"
+            `Quick
+            test_a_hard_quota_without_a_reset_waits_for_the_dated_usage_window;
+          Alcotest.test_case "an undated rest from a failed read is dated by the next refusal"
+            `Quick
+            test_an_undated_rest_from_a_failed_read_is_dated_by_the_next_refusal;
+          Alcotest.test_case "a read that found no reset is not asked again" `Quick
+            test_a_read_that_found_no_reset_is_not_asked_again;
+          Alcotest.test_case "a payment refusal reads no usage" `Quick
+            test_a_payment_refusal_reads_no_usage;
+          Alcotest.test_case "a turn cancelled during the read still records the refusal"
+            `Quick
+            test_a_turn_cancelled_during_the_read_still_records_the_refusal;
           Alcotest.test_case "the read after a 403 skips and contains its failures" `Quick
             test_the_read_after_a_403_skips_and_contains_its_failures;
           Alcotest.test_case "the read after a 403 does not refresh a credential" `Quick

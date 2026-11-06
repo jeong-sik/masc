@@ -87,8 +87,16 @@ val note_observed_exhausted : scope:scope -> unit
 (** Remember that [scope] answered a hard quota rejection without stating when
     it resets.  No end time is claimed and none is invented: the record stands
     until {!note_succeeded} clears it.  A scope that already has a stated
-    window keeps it — the provider's own answer says more than an
-    observation. *)
+    window still ahead keeps it — the provider's own answer says more than an
+    observation; a stated window that has already passed names no rest and
+    gives way.  A scope a usage read found spent without a reset
+    ({!note_read_without_reset}) keeps that answer. *)
+
+val note_read_without_reset : scope:scope -> unit
+(** Remember that a usage read found [scope]'s gating window spent and stated
+    no reset.  It rests the scope as {!note_observed_exhausted} does, and it
+    answers the question that refusal leaves: {!answered_rest} reports it, so
+    another read is not asked for the same scope until a success clears it. *)
 
 val note_succeeded : scope:scope -> unit
 (** A call on [scope] got through, so an observation recorded by
@@ -102,6 +110,16 @@ val is_exhausted : scope:scope -> now:float -> bool
     {!demote_order} asks; {!active_until} answers the narrower question of
     when a stated window ends, and is [None] for an observation because an
     observation names no time. *)
+
+type answered_rest =
+  | Stated_reset_ahead  (** a stated window that has not passed at [now] *)
+  | Read_found_no_reset  (** {!note_read_without_reset}, not yet cleared *)
+
+val answered_rest : scope:scope -> now:float -> answered_rest option
+(** What a provider answer already says about [scope]'s rest, for a caller
+    deciding whether a usage read could add to it. [None] when nothing rests
+    the scope or only a refusal without a reset does: that refusal is the
+    question a read answers. Expired entries are pruned on read. *)
 
 val active_until : scope:scope -> now:float -> float option
 (** [Some resets_at] when [scope] has a recorded window that has not

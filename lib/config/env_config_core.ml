@@ -752,10 +752,6 @@ let telemetry_enabled () =
 (** Whether malformed env parses are escalated to a hard [Config_error]
     (fail-fast boot) instead of a warn + default. Controlled by
     [MASC_PARSE_WARN]. Default: false (warn + use default). *)
-(** PubSub max messages per read. Default: 1000. *)
-let pubsub_max_messages () =
-  get_int ~default:1000 "MASC_PUBSUB_MAX_MESSAGES"
-
 (** Day-file retention for the JSONL stores under [.masc]. Default: 30.
 
     Read by the startup prune and the periodic maintenance prune. Both decide

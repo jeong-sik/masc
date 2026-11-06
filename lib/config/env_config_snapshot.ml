@@ -104,8 +104,6 @@ let rate_limiting_entries =
 
 let storage_entries =
   [
-    entry ~default:"1000" "MASC_PUBSUB_MAX_MESSAGES"
-      "Max pubsub messages per batch";
     (* Named through Env_config_core's own constants rather than restated here.
        Env_setting cannot declare these: it reads through Env_config_core, so a
        knob that module reads for itself would be a dependency cycle. This is

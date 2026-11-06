@@ -43,10 +43,6 @@ function normalizeNamespace(raw: unknown): OperatorNamespaceSnapshot {
   if (!isRecord(raw)) return {}
   return {
     project: asString(raw.project),
-    paused: asBoolean(raw.paused),
-    pause_reason: asString(raw.pause_reason) ?? null,
-    paused_by: asString(raw.paused_by) ?? null,
-    paused_at: asString(raw.paused_at) ?? null,
   }
 }
 

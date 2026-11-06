@@ -1646,11 +1646,6 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                let json = Server_diagnostics_heap_roots.report_json () in
                h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
-      | `GET, "/api/v1/dashboard/perf" ->
-          h2_gate_state h2_reqd (fun state ->
-            let json = dashboard_perf_http_json (Mcp_server.workspace_config state) in
-            h2_respond_json_value h2_reqd json ~extra_headers:cors)
-
       | `GET, "/api/v1/dashboard/agent_core/telemetry/recent" ->
           h2_gate_state h2_reqd (fun _state ->
             let provider = agent_core_telemetry_provider_param httpun_request in

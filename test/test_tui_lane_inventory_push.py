@@ -21,7 +21,6 @@ def exact_lane_id(name: str) -> str:
         "hitl_auto_judge": "hitl_auto_judge",
         "board_attention": "board_attention_exact",
         "verifier": "verifier_exact",
-        "browser_automation": "browser_automation_exact",
         "candle_appraiser": "candle_appraiser",
     }[name]
 
@@ -81,18 +80,16 @@ def exact_row(name: str) -> dict:
 
 
 def browser_row(name: str) -> dict:
-    live = name == "live"
+    # The live lane is the only browser lane (#48803 removed the automation
+    # one together with its browser_executor row state).
     return {
         "id": f"browser/{name}",
         "label": name,
         "purpose": name,
         "selection": {"kind": "browser", "lane": name},
         "state": {
-            "kind": "browser_clients" if live else "browser_executor",
-            "addon": {
-                "kind": "observed",
-                **({"connected_clients": 0} if live else {"registered": False}),
-            },
+            "kind": "browser_clients",
+            "addon": {"kind": "observed", "connected_clients": 0},
         },
     }
 
@@ -108,12 +105,12 @@ def machine_row(machine: str) -> dict:
 
 
 def lane_payload() -> dict:
-    lanes = ["librarian", "hitl_auto_judge", "board_attention", "verifier", "browser_automation", "candle_appraiser"]
+    lanes = ["librarian", "hitl_auto_judge", "board_attention", "verifier", "candle_appraiser"]
     return {
         "schema": "masc.lane-inventory/v1",
         "observed_at": 1.0,
         "rows": [exact_row(name) for name in lanes]
-        + [browser_row(name) for name in ["live", "automation"]]
+        + [browser_row("live")]
         + [machine_row("msx"), machine_row("dos")],
         "exact_snapshot": {
             "schema": "masc.standalone_llm_lanes.v2",

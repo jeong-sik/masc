@@ -81,7 +81,7 @@ class SpectatorPushTest(unittest.TestCase):
             step("wait", lambda: spectator.response_count("open", lane_fixture.LANES) >= 1,
                  "Lanes did not open")
             step("drain", 0.3)
-            step("keys", "jjjjjjjjj\r")
+            step("keys", "jjjjjjj\r")
             step("wait", lambda: spectator.response_count("open", "live:msx_capture") >= 1,
                  "MSX did not open from its Lane row")
             step("wait", lambda: spectator.count("open", "observer-play:msx") == 1,

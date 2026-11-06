@@ -466,8 +466,10 @@ let test_selected_decisions_update_one_durable_ledger () =
        keeper "auditor" ~ordinary:(Context.Available (ordinary [newcomer.claim]))] in
   Alcotest.(check (list fact_ref)) "only the vanished review member leaves"
     [reviewer.fact] retained.vanished;
-  Alcotest.(check int) "claim with remaining members stays" 1
+  Alcotest.(check int) "the claim that lost a member goes" 0
     (List.length (Ledger.claims retained.ledger));
+  Alcotest.(check (list fact_ref)) "its other members are new again"
+    [newcomer.fact; writer.fact] (new_refs retained);
   Alcotest.check json "applied ledger is valid on disk" (Ledger.to_json retained.ledger)
     (Ledger.to_json (decode (Ledger.to_json retained.ledger)))
 

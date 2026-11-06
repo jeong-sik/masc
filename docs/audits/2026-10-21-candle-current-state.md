@@ -141,7 +141,7 @@ operator 구매 버튼·Candle 전용 설정 편집기·환불·재판매·미�
 | T05 | dashboard/src/components/{keeper-items-panel,keeper-portrait,candle-economy}.test.ts; test/test_tui_portrait_view.ml |
 | H01 | [과거 양성 지급 통합 실행](../evidence/2026-09-30-candle-confirmed-paid/README.md), [정책 fixture 실행과 미해결 transport 한계](../evidence/2026-10-02-candle-configured-policy/README.md) |
 | H02 | [과거 native PNG/browser component 실행](../evidence/2026-09-30-equipped-portrait-browser/README.md); 전체 Dashboard·현재 TUI 실행 증거와 구분 |
-| H03 | [사람 기준 보정 현황](../testing/candle-appraiser-calibration-proposal/README.md), [Grade 후보 비교](../evidence/2026-09-30-candle-grade-explicit-outcome/README.md) |
+| H03 | [사람 기준 보정 현황](../evidence/candle-appraiser-calibration-proposal/README.md), [Grade 후보 비교](../evidence/2026-09-30-candle-grade-explicit-outcome/README.md) |
 
 ## 관련 진행 상황
 

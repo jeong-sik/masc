@@ -1,19 +1,14 @@
-// MASC Dashboard — Overview (slim home)
+// MASC Dashboard — Overview (operations home)
 //
-// "What's the party doing today?" in one glance, no scroll.
-// 5 sections, top-to-bottom (V2):
-//   0. Alert Panel     — failing agents and stalled tasks, actionable alerts first
-//   1. (Removed: Highlight moved to Lab)
-//   2. Funnel          — 5 task-count cells (new/active/verify/done/target)
-//   3. Mission party   — one active session (goal, members, progress bar, blocker)
-//   4. Keeper strip    — top three keepers by recency
-//
-// Keeper-v2 port additions:
-//   - Header surface  — namespace, keeper count, operator, live clock
-//   - KPI strip       — running / attention / context pressure / avg ctx / tasks / traces
+// One screen of fleet state, top to bottom:
+//   - Header          — eyebrow, title and the KST clock
+//   - KPI strip       — running keepers, attention, open Gate, top goal, connectors,
+//                       scheduled HITL, Fusion runs
+//   - Candle summary  — wallet reading; unavailable until workspace authority is verified
 //   - Attention queue — keepers flagged for operator attention with reason + action
-//   - Telemetry bars  — deterministic 28-bar trace histogram
-//   - Keeper fleet    — full keeper grid with status, runtime, context meter
+//   - Telemetry bars  — 28-bar trace histogram built from real telemetry timestamps
+//   - Runtime stats   — runtime model metrics and provider usage
+//   - Domain cards    — work and goals, Gate, schedule, Fusion, board, connectors, fleet
 
 import { CandleSummary } from '../candle-economy'
 import { candleObservation, executionWorkspaceAuthority } from '../../store'
@@ -23,28 +18,15 @@ import { AgentAvatar } from './agent-avatar'
 import { OverviewRuntimeStats } from './runtime-stats'
 import { SCHED_TERMINAL_SET } from '../v2/schedule-constants'
 import { tasks, keepers, boardPosts, boardTotal, lastBoardRefreshAt, goals, fusionRuns, shellRuntimeResolution } from '../../store'
-import type { Agent, Task, Keeper, Message, BoardPost, Goal, KeeperRuntimeBlockerClass } from '../../types/core'
+import type { Task, Keeper, Goal, KeeperRuntimeBlockerClass } from '../../types/core'
 import type {
   DashboardScheduledAutomationProjection,
   DashboardScheduledAutomationRequest,
   FusionRunRecord,
 } from '../../api/dashboard'
-import { SYSTEM_ACTOR_NAME } from '../../types/core'
 import { useNowSecondsTicker } from '../../lib/now-signal'
-import { keeperActivityDisplay, keeperDisplayRuntime, keeperDisplayStatus, keeperRuntimeBlockerLabel } from '../../lib/keeper-runtime-display'
-import { isKeeperPaused } from '../../lib/keeper-predicates'
-import { keeperRecencyMs } from '../../lib/keeper-recency'
+import { keeperDisplayStatus, keeperRuntimeBlockerLabel } from '../../lib/keeper-runtime-display'
 import { attentionReasonLabel, nextHumanActionLabel } from '../../lib/keeper-attention-labels'
-import { isAgentOffline } from '../../lib/agent-status'
-import {
-  KEEPER_STATUS_LABEL_KO,
-  type KeeperStatusLabelKey,
-} from '../../lib/keeper-operational-state'
-import {
-  PHASE_LABEL_KO,
-  type KeeperPhaseToken,
-} from '../../lib/fleet-tone'
-import { UNKNOWN_STATUS_LABEL } from '../../lib/format-string'
 import {
   keeperRowLooksRunning,
   resolveKeeperFleetExecutionCounts,
@@ -160,10 +142,6 @@ export interface OverviewStats {
 
 function keeperTraceCount(keeper: Keeper): number {
   return keeper.total_turns ?? keeper.turn_count ?? 0
-}
-
-export function keeperRuntimeLabel(keeper: Keeper): string {
-  return keeperDisplayRuntime(keeper)?.value ?? ''
 }
 
 export function computeOverviewStats(keeperList: readonly Keeper[], taskList: readonly Task[]): OverviewStats {
@@ -685,301 +663,6 @@ export function buildOverviewTelemetrySnapshot({
     sourceCount: sources.length,
     truncated,
   }
-}
-
-// ─── Alert Panel ─────────────────────────────────────────────────────────────
-
-export interface AgentAlert {
-  name: string
-  display: string
-  reason: string
-  severity: 'critical' | 'warn'
-}
-
-export interface TaskAlert {
-  id: string
-  title: string
-  status: string
-  assignee: string | null
-  severity: 'critical' | 'warn'
-  task: Task
-}
-
-/** Derive a list of failing / offline agent alerts from the live agent list. */
-export function deriveAgentAlerts(agentList: readonly Agent[]): AgentAlert[] {
-  return agentList
-    .filter(a => isAgentOffline(a))
-    .map(a => ({
-      name: a.name,
-      display: a.koreanName && a.koreanName !== '' ? a.koreanName : a.name,
-      reason: a.status === 'offline' ? 'Offline' : 'Inactive',
-      severity: 'critical',
-    }))
-}
-
-/** Derive a list of stalled tasks or tasks needing attention. */
-export function deriveTaskAlerts(taskList: readonly Task[], nowMs: number): TaskAlert[] {
-  const STALL_THRESHOLD_MS = 10 * 60 * 1000
-  const alerts: TaskAlert[] = []
-  for (const t of taskList) {
-    if (t.status !== 'awaiting_verification') continue
-    const updated = parseIsoMs(t.updated_at)
-    if (updated !== null && nowMs - updated <= STALL_THRESHOLD_MS) continue
-    alerts.push({
-      id: t.id,
-      title: t.title,
-      status: 'awaiting_verification',
-      assignee: t.assignee ?? null,
-      severity: 'warn',
-      task: t,
-    })
-  }
-  return alerts
-}
-
-export function severityToneClass(severity?: string | null): string {
-  switch ((severity ?? '').toLowerCase()) {
-    case 'critical':
-    case 'high':
-      return 'text-destructive'
-    case 'warn':
-    case 'medium':
-      return 'text-warning'
-    default:
-      return 'text-text-tertiary'
-  }
-}
-
-// ─── Fleet ticker ───────────────────────────────────────────────────────────
-
-export type FleetTickerKind = 'task' | 'message' | 'board' | 'keeper'
-
-export interface FleetTickerEvent {
-  id: string
-  timestamp: string
-  timestampMs: number
-  actor: string
-  label: string
-  text: string
-  kind: FleetTickerKind
-  tone: 'ok' | 'warn' | 'err' | 'info' | 'idle'
-}
-
-function trimTickerText(text: string, max = 96): string {
-  const normalized = text.replace(/\s+/g, ' ').trim()
-  if (normalized.length <= max) return normalized
-  return `${normalized.slice(0, max - 3)}...`
-}
-
-function firstNonEmptyTrimmed(...values: Array<string | null | undefined>): string | null {
-  for (const value of values) {
-    if (typeof value !== 'string') continue
-    const trimmed = value.trim()
-    if (trimmed !== '') return trimmed
-  }
-  return null
-}
-
-function taskTickerTone(status?: Task['status']): FleetTickerEvent['tone'] {
-  switch (status) {
-    case 'done':
-      return 'ok'
-    case 'awaiting_verification':
-      return 'warn'
-    case 'cancelled':
-      return 'err'
-    case 'claimed':
-    case 'in_progress':
-      return 'info'
-    default:
-      return 'idle'
-  }
-}
-
-function keeperTickerTone(status?: string | null): FleetTickerEvent['tone'] {
-  switch ((status ?? '').toLowerCase()) {
-    case 'active':
-    case 'live':
-      return 'ok'
-    case 'busy':
-    case 'executing':
-      return 'info'
-    case 'offline':
-    case 'stopped':
-    case 'unbooted':
-      return 'err'
-    case 'paused':
-    case 'inactive':
-      return 'warn'
-    default:
-      return 'idle'
-  }
-}
-
-function pushTickerEvent(out: FleetTickerEvent[], event: Omit<FleetTickerEvent, 'timestampMs'>) {
-  const timestampMs = parseIsoMs(event.timestamp)
-  if (timestampMs === null) return
-  const text = trimTickerText(event.text)
-  if (text === '') return
-  out.push({ ...event, timestampMs, text })
-}
-
-// Human-readable keeper status, used in the fleet ticker event text.
-// Labels come from the KEEPER_STATUS_LABEL_KO SSOT
-// (lib/keeper-operational-state.ts), falling back to the fleet-tone
-// PHASE_LABEL_KO for lifecycle phase tokens (running, handoff, …)
-// that `keeperDisplayStatus` can emit — the dashboard is Korean-only, so
-// the former English pass-through ('Active'/'Busy'/…) is gone.
-function keeperStatusLabel(status?: string | null): string {
-  const key = (status ?? '').toLowerCase()
-  if (Object.prototype.hasOwnProperty.call(KEEPER_STATUS_LABEL_KO, key)) {
-    return KEEPER_STATUS_LABEL_KO[key as KeeperStatusLabelKey]
-  }
-  if (Object.prototype.hasOwnProperty.call(PHASE_LABEL_KO, key)) {
-    return PHASE_LABEL_KO[key as KeeperPhaseToken]
-  }
-  return status ?? UNKNOWN_STATUS_LABEL
-}
-
-export function deriveFleetTickerEvents({
-  taskList,
-  messageList,
-  boardPostList,
-  keeperList,
-  max = 6,
-}: {
-  taskList: readonly Task[]
-  messageList: readonly Message[]
-  boardPostList: readonly BoardPost[]
-  keeperList: readonly Keeper[]
-  max?: number
-}): FleetTickerEvent[] {
-  const events: FleetTickerEvent[] = []
-  for (const task of taskList) {
-    const timestamp = task.updated_at ?? task.completed_at ?? task.created_at
-    if (!timestamp) continue
-    pushTickerEvent(events, {
-      id: `task:${task.id}`,
-      timestamp,
-      actor: task.assignee ?? 'unassigned',
-      label: task.status ?? '(unknown status)',
-      text: task.title,
-      kind: 'task',
-      tone: taskTickerTone(task.status),
-    })
-  }
-  for (const message of messageList) {
-    if (!message.timestamp) continue
-    pushTickerEvent(events, {
-      id: `message:${message.id ?? message.seq ?? message.timestamp}`,
-      timestamp: message.timestamp,
-      actor: message.from ?? SYSTEM_ACTOR_NAME,
-      label: message.type ?? '(unknown type)',
-      text: message.content,
-      kind: 'message',
-      tone: 'info',
-    })
-  }
-  for (const post of boardPostList) {
-    pushTickerEvent(events, {
-      id: `board:${post.id}`,
-      timestamp: post.updated_at || post.created_at,
-      actor: firstNonEmptyTrimmed(post.author) ?? 'board',
-      label: post.post_kind ?? '(unknown post_kind)',
-      text: firstNonEmptyTrimmed(post.title, post.body) ?? '',
-      kind: 'board',
-      tone: post.post_kind === 'system' ? 'warn' : 'info',
-    })
-  }
-  for (const keeper of keeperList) {
-    // A ticker row is something the keeper did. Creation and metadata
-    // updates are not activity, so a keeper that never acted has no row.
-    const activity = keeperActivityDisplay(keeper, null, { includeCreated: false })
-    if (activity.timestamp === null) continue
-    const displayStatus = keeperDisplayStatus(keeper)
-    pushTickerEvent(events, {
-      id: `keeper:${keeper.name}`,
-      timestamp: activity.timestamp,
-      actor: keeper.koreanName && keeper.koreanName !== '' ? keeper.koreanName : keeper.name,
-      label: 'keeper',
-      text: keeperStatusLabel(displayStatus),
-      kind: 'keeper',
-      tone: keeperTickerTone(displayStatus),
-    })
-  }
-  return events
-    .sort((a, b) => b.timestampMs - a.timestampMs)
-    .slice(0, Math.max(0, max))
-}
-
-// ─── Funnel ──────────────────────────────────────────────────────────────────
-
-export interface FunnelCounts {
-  created: number
-  inProgress: number
-  awaiting: number
-  completed: number
-  target: number | null
-}
-
-export function computeFunnelCounts(taskList: readonly Task[], nowMs = Date.now()): FunnelCounts {
-  const todayMs = startOfTodayMs(nowMs)
-  let created = 0
-  let inProgress = 0
-  let awaiting = 0
-  let completed = 0
-  for (const t of taskList) {
-    const createdMs = parseIsoMs(t.created_at)
-    if (createdMs !== null && createdMs >= todayMs) created += 1
-    switch (t.status) {
-      case 'claimed':
-      case 'in_progress':
-        inProgress += 1
-        break
-      case 'awaiting_verification':
-        awaiting += 1
-        break
-      case 'done': {
-        const completedMs = parseIsoMs(t.completed_at)
-        if (completedMs !== null && completedMs >= todayMs) completed += 1
-        break
-      }
-    }
-  }
-  return { created, inProgress, awaiting, completed, target: null }
-}
-
-function startOfTodayMs(nowMs: number): number {
-  const d = new Date(nowMs)
-  d.setHours(0, 0, 0, 0)
-  return d.getTime()
-}
-
-function parseIsoMs(iso: string | null | undefined): number | null {
-  if (iso === null || iso === undefined || iso === '') return null
-  const ms = Date.parse(iso)
-  return Number.isFinite(ms) ? ms : null
-}
-
-export function formatTargetRatio(counts: FunnelCounts): string {
-  if (counts.target === null) return String(counts.completed)
-  const pct = Math.min(100, Math.round((counts.completed / counts.target) * 100))
-  return `${counts.completed}/${counts.target} (${pct}%)`
-}
-
-// ─── Keeper Strip ────────────────────────────────────────────────────────────
-
-export function pickActiveKeepers(keeperList: readonly Keeper[], max = 3): Keeper[] {
-  const nowMs = Date.now()
-  return [...keeperList]
-    .sort((a, b) => {
-      const tsA = keeperRecencyMs(a, nowMs)
-      const tsB = keeperRecencyMs(b, nowMs)
-      const pausedA = isKeeperPaused(a) ? -1e15 : 0
-      const pausedB = isKeeperPaused(b) ? -1e15 : 0
-      return tsB + pausedB - (tsA + pausedA)
-    })
-    .slice(0, max)
 }
 
 // ─── Surface Readiness Summary ───────────────────────────────────────────────

@@ -415,8 +415,8 @@ let test_stop_records_the_cancelled_terminal ?(cancel_hook=false) ?(settled_tool
        | Some (call, _) ->
          not (Keeper_checkpoint_ref.equal call.Keeper_native_call.checkpoint call.seed_checkpoint)
        | None -> false);
-    check bool "the stopped operation failed as cancelled instead of staying Running" true
-      (failed_kind stopped.operation = Some Keeper_chat_operation.Turn_cancelled);
+    check bool "the stopped operation failed as interrupted by restart instead of staying Running" true
+      (failed_kind stopped.operation = Some Keeper_chat_operation.Interrupted_by_restart);
     check bool "its settlement acknowledged the retired call" true
       (Keeper_native_call.equal_state Keeper_native_call.No_native_call stopped.native_call);
     check bool "the inventory refuses a new native call behind the stop fence" true
@@ -433,7 +433,7 @@ let test_stop_records_the_cancelled_terminal ?(cancel_hook=false) ?(settled_tool
        | Error (Keeper_owner.Reducer_rejected _ | Keeper_owner.Operation_rejected _
                | Keeper_owner.Store_unavailable _ | Keeper_owner.Owner_closed) -> false);
     check bool "the next process finds it settled, not requeued for a dead journal" true
-      (failed_kind restarted = Some Keeper_chat_operation.Turn_cancelled))
+      (failed_kind restarted = Some Keeper_chat_operation.Interrupted_by_restart))
 
 let () =
   run "native receipt during stop"

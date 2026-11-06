@@ -36,13 +36,18 @@
     stays blocked until a record names [aborted] in its [closes]; the zone
     holds one per given-up intent, so two reductions of one subject are closed
     apart. *)
-type held =
+type held = private
   { aborted : Authz_record.Hash.t
         (** The [intended_next_record_digest] of the intent given up. *)
   ; event : Authz_external_store.Change.authz_event
   ; subject : Authz_records.Subject.t
         (** The change of the intent given up is [Authz { event; subject }]. *)
   }
+
+(** The block of an intent, if its change
+    {!Authz_external_store.Change.is_reduction}. A block is made only here, so
+    every block is of a reduction, which a retry of it can close. *)
+val held_of_intent : Authz_external_store.intent -> held option
 
 type t = private
   { mode : Authz_mode_state.t

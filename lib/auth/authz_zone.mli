@@ -121,11 +121,15 @@ module Replay : sig
   (** Over an empty log, for a store in the given state. *)
   val init : Authz_external_store.State.t -> t
 
-  (** The fold function for {!Authz_log.open_at_start}. *)
+  (** The fold function for {!Authz_log.open_at_start}. A block that the
+      replay has not reached starts before a record that closes it: the
+      writer that wrote that record held the block from its start. *)
   val step : t -> Authz_record.t -> (t, Authz_state.refusal) result
 
   (** The replay once the log is read: the blocks it has not reached start
-      too. A start reads the state of this. *)
+      too, and so does the block of a reduction whose intent is still pending
+      and that the next entry gives up (design 8.2-3), as the writer held it
+      when its append failed. A start reads the state of this. *)
   val finish : t -> t
 end
 
@@ -175,13 +179,25 @@ type revocation =
   | Known of Authz_records.Revocation_state.t
       (** [Pending] while the published state holds a reduction of the
           subject. A reduction whose record did not append is held from the
-          failed commit on, not from the next entry. *)
+          failed commit on, not from the next entry, and from the start when
+          the zone opens with its intent still pending. *)
   | Unknown_log_stopped of Authz_log.stop
       (** The log is stopped: its head is not trusted and no commit runs, so
           the zone cannot say whether a reduction was given up
           ([AuthorizationUncertain], plan B2). *)
   | Unknown_store_stopped of Authz_external_store.stop
       (** The external store is stopped, with the same consequence. *)
+  | Unknown_files_disagree of
+      { first : Authz_high_water.reason
+      ; rest : Authz_high_water.reason list
+      }
+      (** The store and the log disagree ({!Authz_high_water.Mismatch}): the
+          log went back, or was replaced. Every commit is refused
+          ({!Uncertain}), so the same consequence (design 8.2-4 and 8.2-5). *)
+  | Unknown_store_holds_no_answer
+      (** The store holds no answer for a bootstrapped log: it was emptied, or
+          is not the store of this log. Every commit is refused
+          ({!Store_holds_no_answer}), so the same consequence. *)
 
 val revocation : t -> Authz_records.Subject.t -> revocation
 

@@ -231,10 +231,46 @@ module Invites = Authz_invite_state
 let invite_id = id_of_string Authz_types.Invite_id.of_string "invite-1"
 
 (* A reduction that the store gave up, named by the record it was for. *)
-let held ?(aborted = String.make 64 'a') ?(event = Authz_external_store.Change.Revoke) subject =
+let intent_for ~aborted change =
   match Authz_record.Hash.of_hex aborted with
-  | Some aborted -> { S.aborted; event; subject }
+  | Some aborted ->
+    { Authz_external_store.previous_record_hash = R.Hash.genesis
+    ; intended_next_record_digest = aborted
+    ; change
+    }
   | None -> Alcotest.fail "fixture digest refused"
+;;
+
+let held ?(aborted = String.make 64 'a') ?(event = Authz_external_store.Change.Revoke) subject =
+  match S.held_of_intent (intent_for ~aborted (Authz_external_store.Change.Authz { event; subject })) with
+  | Some held -> held
+  | None -> Alcotest.fail "fixture change reduces nothing"
+;;
+
+(* Only the intent of a reduction is a block, so every block is one that a
+   retry of its change can close. *)
+let test_only_a_reduction_is_a_block () =
+  let invite = Authz_records.Subject.Invite invite_id in
+  let block change = Option.is_some (S.held_of_intent (intent_for ~aborted:(String.make 64 'a') change)) in
+  List.iter
+    (fun event ->
+      Alcotest.(check bool)
+        (Authz_external_store.Change.to_string (Authz_external_store.Change.Authz { event; subject = invite }))
+        (match event with
+         | Authz_external_store.Change.Grant -> false
+         | Authz_external_store.Change.Revoke
+         | Authz_external_store.Change.Disable
+         | Authz_external_store.Change.Delete
+         | Authz_external_store.Change.Block
+         | Authz_external_store.Change.Purge
+         | Authz_external_store.Change.Policy_revoke
+         | Authz_external_store.Change.Credential_replace -> true)
+        (block (Authz_external_store.Change.Authz { event; subject = invite })))
+    Authz_external_store.Change.authz_events;
+  Alcotest.(check bool)
+    "a mode event"
+    false
+    (block (Authz_external_store.Change.Mode { event = M.Off; workspace_id = workspace }))
 ;;
 
 let invite_record ?(author = Authz_records.Author.Local_operator) ?(role = I.Admin) () =
@@ -847,6 +883,7 @@ let () =
             test_a_principal_whose_revocation_was_given_up_writes_nothing
         ; Alcotest.test_case "one block per given-up reduction" `Quick
             test_a_block_is_one_per_given_up_reduction
+        ; Alcotest.test_case "only a reduction is a block" `Quick test_only_a_reduction_is_a_block
         ; Alcotest.test_case "a retry closes the blocks it names" `Quick
             test_a_retry_closes_the_blocks_it_names
         ; Alcotest.test_case "closes that name no block of the change" `Quick

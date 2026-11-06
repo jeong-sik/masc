@@ -174,11 +174,12 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 - 두 층으로 낸다.
   - B2e-1: 게이트 값, 즉시 차단, 재시도 출구. 1a(digest로 든 막힘, 게이트 값, 즉시 차단)와 1b(`closes` 출구)로 나눠 낸다. 1b는 레코드 줄 형식(`Authz_record`)에 `closes`를 더한다.
     - 막힘은 subject 목록이 아니라 포기한 intent마다 한 항목(`intended_next_record_digest`와 change)이다. 어느 intent가 닫혔는지 가려야 해서다.
-    - 게이트 값은 구역의 함수로 묻는다. 그 subject의 항목이 남아 있으면 `Pending`이다. 로그나 외부 저장소가 멈춘 구역(`Log_stopped`, `Store_stopped`)은 모든 subject에 `Uncertain`으로 답한다(B2 범위의 "`Authz_log`가 멈추면 `AuthorizationUncertain`"). snapshot은 파일이 멈춘 것을 담지 않아서(B3b), 값을 snapshot에서 바로 읽지 않는다. D2가 이 값을 `facts.revocation`에 넣는다.
+    - 게이트 값은 구역의 함수로 묻는다. 그 subject의 항목이 남아 있으면 `Pending`이다. 로그나 외부 저장소가 멈춘 구역(`Log_stopped`, `Store_stopped`)은 모든 subject에 `Uncertain`으로 답한다(B2 범위의 "`Authz_log`가 멈추면 `AuthorizationUncertain`"). 저장소와 로그가 어긋난 구역(설계 §8.2-4·5)과, 부트스트랩한 로그인데 저장소에 답이 하나도 없는 구역도 모든 commit을 거절하므로 같게 답한다. snapshot은 파일이 멈춘 것을 담지 않아서(B3b), 값을 snapshot에서 바로 읽지 않는다. D2가 이 값을 `facts.revocation`에 넣는다.
     - 재시도 출구(설계 §8.3): 레코드에 닫는 digest 목록 `closes`를 더한다. 본문이 아니라 `seq`·`previous_hash`·`at_ms`처럼 구역이 채우는 겉 필드다. 부른 쪽은 본문만 주고 `closes`를 채우지 않는다. 줄에서는 `body`와 `hash` 사이에 오고, 비면 쓰지 않는다. 그래서 닫는 것이 없는 레코드의 줄과 해시는 전과 같다. 빈 목록, 순서가 틀리거나 겹친 digest는 거절한다.
     - 구역은 레코드를 한 번 읽어 change를 얻는다. 같은 change(사건과 subject)의 남은 항목이 있으면 그 digest로 레코드를 다시 만들고 다시 읽는다. 그래서 intent의 digest와 해시가 `closes`를 덮는다. `apply`는 `closes`가 가리키는 항목만 지운다. 그 change의 남은 항목이 아닌 digest(`Closes_not_held`)와, 축소가 아닌 레코드의 `closes`(`Closes_without_reduction`)는 거절한다. replay도 같은 `step`을 쓰므로 재기동한 결과가 같다. 로그를 되감으면 닫는 레코드도 사라져 막힘이 돌아온다.
     - 같은 change가 두 번 막히는 길은 잠긴 로그로 첫 시도가 실패하고, 둘째 시도가 첫 시도를 포기하고 쓰기에 실패해 로그가 멈춘 뒤 재기동하는 경우다. 재시도는 둘을 다 닫는다.
-    - 즉시 차단(설계 §8.2 판정 3): 축소의 `Intent_pending`을 쓴 뒤 append가 실패하면(`Record_not_appended`) 구역은 그 자리에서 subject를 막은 상태를 발행한다. 다음 진입의 판정 3이 같은 intent를 포기하면 같은 항목이 된다.
+    - 즉시 차단(설계 §8.2 판정 3): 축소의 `Intent_pending`을 쓴 뒤 append가 실패하면(`Record_not_appended`) 구역은 그 자리에서 subject를 막은 상태를 발행한다. 다음 진입의 판정 3이 같은 intent를 포기하면 같은 항목이 된다. 그 사이에 재기동하면 replay가 끝날 때 같은 판정으로 막는다.
+    - replay는 로그가 더는 닿지 않는 머리에서 시작한 막힘을 로그를 다 읽은 뒤 세운다. 그 막힘을 닫는 레코드를 만나면 그 레코드 앞에서 세운다. 그 레코드를 쓴 구역은 열 때부터 막힘을 들고 있었기 때문이다. 레코드는 자기보다 뒤에서 시작하는 intent를 가리킬 수 없다(intent digest가 시작 머리의 해시를 덮는다).
   - B2e-2: 적격 Admin의 취소. 2a(초대를 쓴 사람 기록)와 2b(취소 Kind·본문·판정)로 나눠 낸다.
     - 2a: 초대는 그것을 쓴 사람(`issuer`: 로컬 운영자이거나 그 Admin)을 기록한다. 초대를 쓸 수 있는 쪽이 이 둘뿐이라 닫힌 타입으로 둔다.
     - 2b: 새 Kind와 본문 `{ aborted; subject }`를 더한다. `admits`는 인증된 principal만 받는다.

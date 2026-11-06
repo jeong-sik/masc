@@ -10,6 +10,13 @@ type held =
   ; subject : Authz_records.Subject.t
   }
 
+let held_of_intent (intent : Authz_external_store.intent) =
+  match intent.Authz_external_store.change with
+  | C.Authz { event; subject } when C.is_reduction intent.Authz_external_store.change ->
+    Some { aborted = intent.Authz_external_store.intended_next_record_digest; event; subject }
+  | C.Authz _ | C.Mode _ -> None
+;;
+
 type t =
   { mode : Authz_mode_state.t
   ; invites : Authz_invite_state.t

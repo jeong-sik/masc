@@ -235,9 +235,20 @@ val code_back_step : Masc_tui_types.state -> code_back
     history, the open file, a directory, a keeper's or repository's root, and
     last the project root. *)
 
+type code_file_presence =
+  | No_file  (** no file read is current: none is loading, shown or failed *)
+  | File_current  (** a file read is current: loading, shown or failed *)
+
+val code_file_is_current : Masc_tui_types.state -> bool
+(** Whether [h] and [l] have a pane to move to on Code. The dispatcher and the
+    footer read this one answer, so the pair is named exactly where it
+    answers. *)
+
 type code_pane =
-  | Code_tree  (** the file list has focus below the project root *)
-  | Code_root  (** the file list has focus at the project root *)
+  | Code_tree of code_file_presence
+      (** the file list has focus below the project root *)
+  | Code_root of code_file_presence
+      (** the file list has focus at the project root *)
   | Code_file  (** a file is open and nothing covers it *)
   | Code_diff
   | Code_notes  (** wrapped memo document is drawn over the file *)

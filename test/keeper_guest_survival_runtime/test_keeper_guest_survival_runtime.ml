@@ -203,6 +203,21 @@ let fixture_build_input_fields input =
   | "" :: fields -> List.rev fields
   | _ -> fail "fixture received an unterminated build input"
 
+(* The fields a build helper received in argv after its name and count,
+   framed as the NUL-terminated input the rest of the fixture records. *)
+let fixture_build_input_of_argv ~name argv =
+  let rec after = function
+    | helper :: count :: fields when String.equal helper name ->
+      if int_of_string_opt count <> Some (List.length fields)
+      then fail "the build helper count does not match its fields"
+      else (match fields with
+        | [] -> ""
+        | _ :: _ -> String.concat "\000" fields ^ "\000")
+    | _ :: rest -> after rest
+    | [] -> fail "the build helper name is missing"
+  in
+  after argv
+
 let fixture_apply_build_input root kind input =
   let fields = fixture_build_input_fields input in
   match kind with
@@ -384,9 +399,10 @@ let provider root args =
       else if Sys.file_exists (file "scan-output") then print_string (read (file "scan-output"));
       flush stdout)
     else if List.mem "masc-build-mkdir" rest || List.mem "masc-build-link" rest then (
-      if not (List.mem "-i" rest) then fail "build input was not attached";
-      let input = In_channel.input_all stdin in
+      if List.mem "-i" rest then fail "a build input was sent on stdin";
       let kind = if List.mem "masc-build-mkdir" rest then "mkdir" else "link" in
+      let input =
+        fixture_build_input_of_argv ~name:(if kind = "mkdir" then "masc-build-mkdir" else "masc-build-link") rest in
       append (file "build-inputs") (`Assoc [
         "kind", `String kind;
         "bytes", `Int (String.length input);

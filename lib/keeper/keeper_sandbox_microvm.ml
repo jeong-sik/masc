@@ -2742,31 +2742,25 @@ let build_link_warning plan =
   | Link_already_correct | Link_create _ -> None
 ;;
 
-(** Input paths are passed on stdin, not as host CLI arguments. The guest
-    keeps the bounded payload in memory and checks its framing and digest
-    before any effect. Python isolated mode excludes the guest cwd and user
-    Python paths; site initialization is also disabled. An image without a
-    working supported interpreter cannot prepare build links. This does not
-    fence checkout parent paths. *)
-let checked_build_input_script consumer =
-  {py|import hashlib, os, sys
-size, digest, count = int(sys.argv[2]), sys.argv[3], int(sys.argv[4])
-data = sys.stdin.buffer.read(size + 1)
-if len(data) != size or hashlib.sha256(data).hexdigest() != digest:
-    sys.exit(1)
-if data:
-    if not data.endswith(b'\0'):
-        sys.exit(1)
-    fields = data[:-1].split(b'\0')
-else:
-    fields = []
+(** Input paths are guest argv values after the helper name and their count.
+    They are not sent on stdin: each [container exec -i] leaves one pipe end
+    open in the VM runtime (RFC microvm-guest-agent-over-socket sections 3.7
+    and 4.1), and the paths are not secret. The guest checks the count and
+    that no field is empty before any effect. Python isolated mode excludes
+    the guest cwd and user Python paths; site initialization is also
+    disabled. An image without a working supported interpreter cannot prepare
+    build links. This does not fence checkout parent paths. *)
+let checked_build_argv_script consumer =
+  {py|import os, sys
+count = int(sys.argv[2])
+fields = [os.fsencode(field) for field in sys.argv[3:]]
 if len(fields) != count or any(not field for field in fields):
     sys.exit(1)
 |py} ^ consumer ^ "\n"
 ;;
 
 let build_link_apply_script =
-  checked_build_input_script
+  checked_build_argv_script
     {py|if len(fields) % 2:
     sys.exit(1)
 failed = False
@@ -2776,12 +2770,6 @@ for checkout, target in zip(fields[::2], fields[1::2]):
     except OSError:
         failed = True
 sys.exit(1 if failed else 0)|py}
-;;
-
-let build_input values =
-  match values with
-  | [] -> ""
-  | _ :: _ -> String.concat "\000" values ^ "\000"
 ;;
 
 let build_input_interpreter =
@@ -2794,18 +2782,17 @@ fi
 exit 127|sh}
 ;;
 
-let build_input_command script name input ~fields =
-  let digest = Agent_core_sha256.(digest_string input |> to_hex) in
+let build_argv_command script name fields =
   [ "/bin/sh"; "-c"; build_input_interpreter; "masc-build-helper";
-    script; name; string_of_int (String.length input); digest; string_of_int fields ]
+    script; name; string_of_int (List.length fields) ] @ fields
 ;;
 
 let build_link_apply_request_for backend ~container_name ~keeper_work_root ~uid ~gid ~actions =
-  let input = build_input (List.concat_map (fun (checkout, target) -> [ checkout; target ]) actions) in
-  let argv = exec_argv_for backend ~container_name ~uid ~gid ~container_cwd:keeper_work_root
-      ~stdin:true ~command_argv:(build_input_command build_link_apply_script "masc-build-link" input
-        ~fields:(List.length actions * 2)) in
-  argv, input
+  exec_argv_for backend ~container_name ~uid ~gid ~container_cwd:keeper_work_root
+    ~stdin:false
+    ~command_argv:
+      (build_argv_command build_link_apply_script "masc-build-link"
+         (List.concat_map (fun (checkout, target) -> [ checkout; target ]) actions))
 ;;
 
 (** Create the link targets inside the guest.
@@ -2825,8 +2812,7 @@ let build_link_apply_request_for backend ~container_name ~keeper_work_root ~uid 
 let build_target_dir_mode = "0777"
 
 let build_target_mkdir_request ~container_name ~targets =
-  let input = build_input targets in
-  let script = checked_build_input_script
+  let script = checked_build_argv_script
       (Printf.sprintf {py|os.umask(0)
 failed = False
 for target in fields:
@@ -2835,15 +2821,14 @@ for target in fields:
     except OSError:
         failed = True
 sys.exit(1 if failed else 0)|py} build_target_dir_mode) in
-  let argv = exec_argv_for
+  exec_argv_for
     Backend.Apple_container
     ~container_name
     ~uid:0
     ~gid:0
     ~container_cwd:build_volume_guest_root
-    ~stdin:true
-    ~command_argv:(build_input_command script "masc-build-mkdir" input ~fields:(List.length targets)) in
-  argv, input
+    ~stdin:false
+    ~command_argv:(build_argv_command script "masc-build-mkdir" targets)
 ;;
 
 (** The keeper's root on the work volume, created inside the guest.

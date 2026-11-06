@@ -39,7 +39,7 @@ let test_scope_round_trip_and_strict_identity () =
     [ viewport client_a; viewport client_b; region
     ; { (viewport client_a) with
         view = Dataset.Scene { scene_view = Browser_lane.Content; scope = None } }
-    ; { source = Browser_lane.Lane_name.Automation; client_id = None; tab_id = 4; view = Dataset.Read } ];
+    ; { (viewport client_b) with view = Dataset.Read } ];
   (match Spectator.scope_of_request_target "/mcp?sse_kind=observer" with
    | Ok None -> ()
    | Ok (Some _) | Error _ -> fail "an ordinary observer acquired a browser watcher");
@@ -51,8 +51,7 @@ let test_scope_round_trip_and_strict_identity () =
     ; ("tabId", `String "2")
       :: List.remove_assoc "tabId" (browser_event (viewport client_a) revision_a)
     ; ("clientId", `String client_a)
-      :: browser_event { source = Browser_lane.Lane_name.Automation
-                       ; client_id = None; tab_id = 4; view = Dataset.Read } revision_a
+      :: browser_event (viewport client_b) revision_a
     ; ("revision", `String "short")
       :: List.remove_assoc "revision" (browser_event (viewport client_a) revision_a) ]
   in

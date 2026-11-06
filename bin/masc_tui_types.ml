@@ -7168,7 +7168,7 @@ module Browser_lane_view = struct
     | (Bound_automatic | Bound_explicit), Live, Some selected -> List.exists (same_client selected) (listed_clients t)
   let cadence_operation ?(allow_inflight = false) ?(viewport : screenshot option) t =
     if (not allow_inflight && (busy t || Option.is_some t.refresh_pending))
-       || awaiting_browser t || Option.is_some t.client_picker || Option.is_some t.url_draft
+       || awaiting_browser t || Option.is_some t.client_picker
        || not (selected_client_available t) then None
     else match viewport with
       | Some shot when shot.source = t.source && shot.client_id = client_id t

@@ -1709,9 +1709,10 @@ let test_failed_append_notifies_and_invalidates_cache () =
   with_session @@ fun config trace_id session_dir ->
   let cold = ok "cold session" (Ledger.load ~config ~trace_id) in
   let heard = ref [] in
-  let restore = Ledger.install_commit_observer
-      (fun ~config:_ ~trace_id:changed -> heard := changed :: !heard) in
-  Fun.protect ~finally:restore @@ fun () ->
+  let observer ~config:_ ~trace_id:changed = heard := changed :: !heard in
+  Ledger.install_commit_observer observer;
+  Fun.protect ~finally:(fun () -> Ledger.withdraw_commit_observer observer)
+  @@ fun () ->
   let loads = ref 0 in
   Server_skill_usage_runtime.For_testing.with_runtime
     ~ledger_loader:(fun ~config:_ ~trace_id:_ -> incr loads; Ok cold)

@@ -10,7 +10,7 @@ val slack : Slack_gateway_state.trigger_policy Runtime_params.param
 val set_discord_configured : Discord_gateway_state.trigger_policy -> unit
 (** Install the successfully resolved startup value before transport credential
     admission. Clearing an override returns to this value. Announced through
-    {!Channel_gate_change.notify}. *)
+    {!Gate_connector_announce.changed}. *)
 
 val set_slack_configured : Slack_gateway_state.trigger_policy -> unit
 (** Install the successfully resolved Slack startup value, announced the same

@@ -252,10 +252,7 @@ type manager = { store : Lane_addon_store.t; base_path : string; artifact_store 
   mutable swept : runtime list;
   sweep_retries : (runtime, sweep_retry list) Hashtbl.t;
   sweep_warned : (runtime, (string * string option * Lifecycle.failure) list) Hashtbl.t;
-  machine_announced : (Machine_lane.t, Yojson.Safe.t) Hashtbl.t;
-  gecko_sweep : Browser_gecko_sweep.t;
-  (* What the latest Gecko profile pass kept, as the next reading's issues. *)
-  mutable gecko_kept : string list }
+  machine_announced : (Machine_lane.t, Yojson.Safe.t) Hashtbl.t }
 let managers : (string, manager) Hashtbl.t = Hashtbl.create 4
 let installation_id (e : entry) = Lane_addon_tool_request_owner.installation_id (match e.configuration with
   | Some owner -> Lane_addon_tool_request_owner.Configuration owner.id
@@ -1874,10 +1871,7 @@ let manager config =
                      fleet_operations=Hashtbl.create 8; fleet_recipients=Hashtbl.create 16; fleet_nudge=(fun () -> ());
                      configuration_status = None; configuration_nudge = (fun () -> ()); configuration_visibility=[];
                      swept = []; sweep_retries = Hashtbl.create 2; sweep_warned = Hashtbl.create 2;
-                     machine_announced = Hashtbl.create 2;
-                     gecko_sweep = Browser_gecko_sweep.create
-                       ~termination_grace_seconds:Browser_gecko_sweep.termination_grace_seconds;
-                     gecko_kept = [] } in
+                     machine_announced = Hashtbl.create 2 } in
       Hashtbl.add managers root m; m
 let installation_exports ((e : entry), connection) =
   connection.worker.exported_tools () |> List.filter_map (fun (tool : Mcp_protocol.Mcp_types.tool) ->
@@ -4455,16 +4449,6 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
     m.configuration_status <- Some reading;
     Ok (configuration_json m ~access:Lane_addon_sources.Operator_configuration,changed)) in
   List.iter (fun package_id -> publish_owner_event ~root:(Lane_addon_store.root m.store) ~package_id Configuration_observed) changed;
-  Option.iter (fun plan ->
-      let outcomes = offload (fun () -> Browser_gecko_sweep.pass m.gecko_sweep plan) in
-      m.gecko_kept <- List.filter_map (fun (outcome : Browser_gecko_sweep.outcome) ->
-          let text = Browser_gecko_sweep.outcome_to_string outcome in
-          match outcome with
-          | Removed _ -> Log.Misc.info "Lane Add-on %s" text; None
-          | Terminated _ | Killed _ -> Log.Misc.warn "Lane Add-on %s" text; None
-          | Kept _ -> Some text)
-        outcomes)
-    gecko_plan;
   notify_inventory m Configuration_changed;
   Ok result)
 

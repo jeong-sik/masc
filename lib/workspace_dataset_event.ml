@@ -230,9 +230,6 @@ let browser_scope_of_fields fields =
     | Browser_lane.Lane_name.Live, Some _ -> Ok ()
     | Browser_lane.Lane_name.Live, None ->
         Error (event_type ^ " browser_observation requires a live client")
-    | Browser_lane.Lane_name.Automation, None -> Ok ()
-    | Browser_lane.Lane_name.Automation, Some _ ->
-        Error (event_type ^ " browser_observation gives an owned browser a client")
   in
   let* tab_id =
     match List.assoc_opt "tabId" fields with

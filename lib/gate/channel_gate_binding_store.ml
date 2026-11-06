@@ -303,7 +303,10 @@ let append_audit_event_result store event =
    even when it then reports an error, so every such attempt is announced. *)
 let mutate_bindings store ~decide =
   let reached_write = ref false in
-  Fun.protect ~finally:(fun () -> if !reached_write then Channel_gate_change.notify ())
+  Fun.protect
+    ~finally:(fun () ->
+      if !reached_write then
+        Gate_connector_announce.changed ~connector_id:store.connector_id)
   @@ fun () ->
   Cross_context_mutex.with_durable_lock store.mutation_lock (fun () ->
     match read_bindings_result store with
@@ -317,19 +320,13 @@ let mutate_bindings store ~decide =
           | Error detail -> Error (Mutation_write_failed detail)
           | Ok () ->
             (match append_audit_event_result store audit_event with
-             | Ok () ->
-               Gate_connector_announce.changed ~connector_id:store.connector_id;
-               Ok committed_value
+             | Ok () -> Ok committed_value
              | Error audit_error ->
                let binding_rollback_error =
                  match save_bindings_result store original_bindings with
                  | Ok () -> None
                  | Error detail -> Some detail
                in
-               (* A failed rollback leaves the new bindings on disk. *)
-               (match binding_rollback_error with
-                | Some _ -> Gate_connector_announce.changed ~connector_id:store.connector_id
-                | None -> ());
                Error
                  (Mutation_audit_failed
                     { audit_error; binding_rollback_error })))))

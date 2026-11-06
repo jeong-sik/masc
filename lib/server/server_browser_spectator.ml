@@ -56,9 +56,6 @@ let client_binding (scope : Event.browser_scope) fields =
   | Browser_lane.Lane_name.Live, Some expected, Some (`String actual) ->
       if String.equal expected actual then Ok () else Error "browser observation belongs to another client"
   | Browser_lane.Lane_name.Live, (None | Some _), _ -> Error "invalid browser observation identity"
-  | Browser_lane.Lane_name.Automation, None, Some `Null -> Ok ()
-  | Browser_lane.Lane_name.Automation, _, _ ->
-      Error "invalid browser observation identity"
 
 let tab_identity (scope : Event.browser_scope) fields =
   let tab =

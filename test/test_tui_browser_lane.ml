@@ -344,9 +344,8 @@ let test_observation_scope_tracks_exact_selection () =
   expect "the next tab belongs to the new observation owner"
     (observation_scope { changed with selected_tab = Some 2 }
      = Some { expected with client_id = Some zen.client_id });
-  expect "an owned browser has no fabricated client id"
-    (observation_scope { initial with source = Automation; selected_client = None }
-     = Some { expected with source = Automation; client_id = None });
+  expect "an unselected live lane has no fabricated client id"
+    (observation_scope { initial with selected_client = None } = None);
   let shot = success (decode_screenshot (screenshot_response ())) in
   expect "the open image is observed as a viewport"
     (observation_scope ~image_open:true ~viewport:shot initial
@@ -363,8 +362,7 @@ let test_observation_scope_tracks_exact_selection () =
       (observation_scope view = None))
     [ "effect in flight", { initial with load = Loading (8, Goto "https://example.org/new") }
     ; "pending refresh", { initial with refresh_pending = Some 8 }
-    ; "client picker", { initial with client_picker = Some 0 }
-    ; "URL draft", { initial with url_draft = Some "https://example.org/new" } ]
+    ; "client picker", { initial with client_picker = Some 0 } ]
 
 let test_activity_refresh_preserves_pending_read () =
   let original = {(loaded ()) with scroll=9; load=Loading (42, Read_refresh);

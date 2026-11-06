@@ -16,7 +16,7 @@ type binding = Store.binding = {
   keeper_name : string;
 }
 
-let connector_id = "slack"
+let connector_id = Gate_connector_announce.slack
 let display_name = "Slack"
 let channel = "slack"
 

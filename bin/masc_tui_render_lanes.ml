@@ -766,12 +766,8 @@ let render_lanes_overview (state : state) =
           title (title_missing_reading ~error:state.standalone_lanes_error) timestamp
           (connection_badge state)
     | Some _ ->
-        let after = "  " ^ timestamp ^ "  " ^ connection_badge state in
-        Printf.sprintf "%s  %s%s"
-          title
-          (runtime_substrate_tab_strip state ~cols
-             ~before:(title ^ tab_strip_gap) ~after ~current:`Features)
-          after
+        runtime_substrate_heading state ~cols ~title ~current:`Features
+          ~after:[ "  " ^ timestamp ]
   in
   box_top buf cols;
   box_line buf cols header;
@@ -2236,12 +2232,8 @@ let render_clients (state : state) =
           title (title_missing_reading ~error:state.clients_surface_error) timestamp
           (connection_badge state)
     | Some _ ->
-        let after = "  " ^ timestamp ^ "  " ^ connection_badge state in
-        Printf.sprintf "%s  %s%s"
-          title
-          (runtime_substrate_tab_strip state ~cols
-             ~before:(title ^ tab_strip_gap) ~after ~current:`Clients)
-          after
+        runtime_substrate_heading state ~cols ~title ~current:`Clients
+          ~after:[ "  " ^ timestamp ]
   in
   box_top buf cols;
   box_line buf cols header;

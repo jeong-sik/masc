@@ -790,12 +790,15 @@ val split_summary_columns :
     no title rows, for a caller that is short of rows and whose rows each name
     themselves; on a narrow viewport the rows then start where a title would. *)
 
-val runtime_substrate_tab_strip :
+val runtime_substrate_heading :
   Masc_tui_types.state ->
   cols:int ->
-  before:string ->
-  after:string ->
+  title:string ->
   current:[ `Runtime_lanes | `Runtime_all | `Features | `Clients ] ->
+  after:string list ->
   string
-(** Shared clickable tab strip across [System / Runtime] ([Candidate orders] and
-    [All runtimes]), [Features], and [Clients]. *)
+(** The title row of [System / Runtime] ([Candidate orders] and [All runtimes]),
+    [Features] and [Clients]: [title], the clickable tab strip the three share,
+    the pieces of [after] (each carrying its own leading gap) and the connection
+    badge last. The badge stays whole, the pieces of [after] are left out whole
+    from the end, and the strip draws in the cells they leave. *)

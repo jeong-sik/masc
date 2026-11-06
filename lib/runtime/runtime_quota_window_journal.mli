@@ -9,11 +9,9 @@
 
     This store appends each stated window the table takes to one private
     JSONL file, {!path}, and reads them back before any Keeper starts. Rows
-    are only appended, and only as rows the reader takes back: a window
-    whose reset is not a finite number, or whose scope names an empty string,
-    is logged and not written. A row whose reset has passed is not taken on
-    read and stays in the file. A row this build cannot read is reported and
-    not taken; it is never replaced by a default.
+    are only appended. A row whose reset has passed is not taken on read and
+    stays in the file. A row this build cannot read is reported and not
+    taken; it is never replaced by a default.
 
     Only stated windows reach the store ({!Runtime_quota_window.set_stated_window_sink}).
     An observation without a reset ends at its fallback cap or with the next

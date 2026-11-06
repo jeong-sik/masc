@@ -10833,6 +10833,7 @@ type state = {
   mutable runtime_surface_generation: int;
   mutable runtime_surface_inflight: int option;
   mutable runtime_surface_force_pending: bool;
+  mutable runtime_surface_owed: Masc_tui_owed_read.t;
   mutable repositories: Tui_decode.repository_snapshot option;
   mutable repositories_error: string option;
   mutable repositories_inflight: bool;
@@ -15025,6 +15026,7 @@ let suspend_workspace_readings state =
   state.lanes_owed <- Masc_tui_owed_read.settled;
   state.runtime_surface_inflight <- None;
   state.runtime_surface_force_pending <- false;
+  state.runtime_surface_owed <- Masc_tui_owed_read.settled;
   state.clients_surface_inflight <- false;
   state.repositories_inflight <- false;
   state.repositories_owed <- Masc_tui_owed_read.settled;
@@ -20482,6 +20484,7 @@ let create_state
   runtime_surface_generation = 0;
   runtime_surface_inflight = None;
   runtime_surface_force_pending = false;
+  runtime_surface_owed = Masc_tui_owed_read.settled;
   repositories = None;
   repositories_error = None;
   repositories_inflight = false;

@@ -7,7 +7,6 @@ module Lane = Lane_addon_runtime
 module Snapshot = Skill_catalog_snapshot
 module Service = Skill_catalog_snapshot_service
 module Catalog = Keeper_skill_catalog
-module Surface = Standalone_skill_tools
 
 let get = function Ok value -> value | Error _ -> fail "fixture operation failed"
 let unwrap = function Ok value -> value | Error message -> fail message
@@ -147,10 +146,18 @@ let skill snapshot name =
   | Some entry -> entry
   | None -> failf "Skill %s is absent: %s" name (Yojson.Safe.to_string (Snapshot.to_public_yojson snapshot))
 let absent snapshot name = Option.is_none (Snapshot.find_effective_by_name snapshot name)
+(* The keeper tool surface builds its Skill tool the same way: the published
+   snapshot's catalog becomes instruction Skills, and those become one tool. *)
 let tool fixture =
-  match Surface.for_workspace ~config:fixture.config () |> unwrap with
-  | [tool] -> tool
-  | _ -> fail "expected the existing keeper_skill tool"
+  match Service.current ~workspace:fixture.workspace with
+  | None -> fail "no published Skill snapshot"
+  | Some snapshot ->
+      let catalog, _diagnostics = Catalog.of_snapshot snapshot in
+      (match Keeper_tool_composition_surface.instruction_skills_of_catalog catalog with
+       | [] -> fail "expected the existing keeper_skill tool"
+       | instruction_skills ->
+           Keeper_tool_composition_surface.make_instruction_skill_tool
+             ~config:fixture.config ~instruction_skills ())
 let invoke tool id input =
   let invocation = Agent_core.Tool_contract.Invocation.create
     ~tool_use_id:id ~turn:0

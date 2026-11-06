@@ -47,6 +47,10 @@ let list_footer_refusals =
   ; ("System_logs", Masc_tui_types.System_logs, [ "[ / ]" ])
   ]
 
+(* Surfaces that draw their two states from builders of their own, not from
+   [Keys.footer_hints ~detail_open]. [scoped_keys] holds their rows. *)
+let builder_surfaces = [ ("Approvals", Masc_tui_types.Approvals) ]
+
 let test_each_list_footer_names_no_key_it_refuses () =
   List.iter
     (fun (name, surface, keys) ->
@@ -110,6 +114,20 @@ let scoped_keys =
   ; search_keys "Verification" Masc_tui_types.Verification
   ; search_keys "Harness" Masc_tui_types.Harness
   ; search_keys "System_logs" Masc_tui_types.System_logs
+  (* The Approvals queue and an open approval draw from two builders of their
+     own ([footer_hints_approvals], [footer_hints_approval_detail]), so no
+     [footer_hints ~detail_open] call reaches them. [v] reads a Gate string's
+     decoded values as bytes: the dispatcher answers it only once an approval
+     is open, and that footer names it whenever the approval has values to
+     read, as "string bytes" or, once they are shown, as "text". *)
+  ; ( "Approvals string bytes",
+      Keys.footer_hints_approval_detail ~value_hint:Keys.Readable_values,
+      Keys.footer_hints_approvals Keys.Approval_browsing,
+      [ "v" ] )
+  ; ( "Approvals text",
+      Keys.footer_hints_approval_detail ~value_hint:Keys.Byte_values,
+      Keys.footer_hints_approvals Keys.Approval_browsing,
+      [ "v" ] )
   ]
   @ back_keys "Planning"
       ~list:Keys.footer_hints_planning_goal_list
@@ -251,6 +269,7 @@ let test_every_scoped_surface_is_named () =
   let named =
     List.map (fun (_, surface, _) -> surface) list_footer_refusals
     @ List.map snd detail_surfaces
+    @ List.map snd builder_surfaces
   in
   List.iter
     (fun (label, surface) ->

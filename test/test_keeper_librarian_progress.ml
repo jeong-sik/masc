@@ -4,6 +4,7 @@
 open Alcotest
 
 module Progress = Masc.Keeper_librarian_progress
+module Progress_file = Masc.Keeper_librarian_progress_file
 module Wire = Masc.Keeper_memory_os_types
 
 let keeper_id = "keeper"
@@ -154,8 +155,8 @@ let test_a_value_no_reader_decodes_is_not_written () =
   with_temp_keepers
   @@ fun keepers_dir ->
   (match Progress.write ~keepers_dir ~keeper_id (progress ~end_atom:0 ()) with
-   | Error (Progress.Invalid_progress _) -> ()
-   | Error (Progress.Write_failed _ as error) ->
+   | Error (Progress_file.Invalid_progress _) -> ()
+   | Error (Progress_file.Write_failed _ as error) ->
      failf "refused for another reason: %s" (Progress.write_error_to_string error)
    | Ok () -> fail "wrote a position no reader decodes");
   match read ~keepers_dir with
@@ -170,14 +171,14 @@ let test_an_undecodable_file_is_an_error_not_an_empty_state () =
   @@ fun keepers_dir ->
   plant ~keepers_dir "{";
   (match read ~keepers_dir with
-   | Error (Progress.Not_json _) -> ()
-   | Error ((Progress.Unreadable _ | Progress.Malformed _) as error) ->
+   | Error (Progress_file.Not_json _) -> ()
+   | Error ((Progress_file.Unreadable _ | Progress_file.Malformed _) as error) ->
      failf "refused for another reason: %s" (Progress.read_error_to_string error)
    | Ok _ -> fail "read a file that is not JSON");
   plant ~keepers_dir {|{"trace_id":"trace"}|};
   match read ~keepers_dir with
-  | Error (Progress.Malformed _) -> ()
-  | Error ((Progress.Unreadable _ | Progress.Not_json _) as error) ->
+  | Error (Progress_file.Malformed _) -> ()
+  | Error ((Progress_file.Unreadable _ | Progress_file.Not_json _) as error) ->
     failf "refused for another reason: %s" (Progress.read_error_to_string error)
   | Ok _ -> fail "read a file without its fields"
 ;;

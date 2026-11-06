@@ -36,82 +36,23 @@ let of_json (json : Yojson.Safe.t) =
     W.wire_here W.Expected_object
 ;;
 
-type read_error =
-  | Unreadable of
-      { path : string
-      ; message : string
-      }
-  | Not_json of
-      { path : string
-      ; message : string
-      }
-  | Malformed of
-      { path : string
-      ; error : W.wire_error
-      }
+type read_error = Keeper_librarian_progress_file.read_error
+type write_error = Keeper_librarian_progress_file.write_error
 
-let read_error_to_string = function
-  | Unreadable { path; message } ->
-    Printf.sprintf "librarian official progress unreadable path=%s: %s" path message
-  | Not_json { path; message } ->
-    Printf.sprintf "librarian official progress is not valid JSON path=%s: %s" path message
-  | Malformed { path; error } ->
-    Printf.sprintf
-      "librarian official progress rejected path=%s: %s"
-      path
-      (W.wire_error_to_string error)
-;;
-
-let decode ~path content =
-  match Yojson.Safe.from_string content with
-  | json ->
-    (match of_json json with
-     | Ok progress -> Ok (Some progress)
-     | Error error -> Error (Malformed { path; error }))
-  | exception Yojson.Json_error message -> Error (Not_json { path; message })
-;;
+let subject = "librarian official progress"
+let read_error_to_string = Keeper_librarian_progress_file.read_error_to_string ~subject
+let write_error_to_string = Keeper_librarian_progress_file.write_error_to_string ~subject
 
 let read ~keepers_dir ~keeper_id =
-  let path = path_for_keepers_dir ~keepers_dir ~keeper_id in
-  match Fs_compat.load_file_opt path with
-  | None -> Ok None
-  | Some content -> decode ~path content
-  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-  | exception Sys_error message -> Error (Unreadable { path; message })
-  | exception Unix.Unix_error (code, fn, arg) ->
-    Error
-      (Unreadable
-         { path; message = Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code) })
-;;
-
-type write_error =
-  | Invalid_progress of W.wire_error
-  | Write_failed of
-      { path : string
-      ; message : string
-      }
-
-let write_error_to_string = function
-  | Invalid_progress error ->
-    "librarian official progress rejected: " ^ W.wire_error_to_string error
-  | Write_failed { path; message } ->
-    Printf.sprintf "librarian official progress write failed path=%s: %s" path message
+  Keeper_librarian_progress_file.read
+    ~path:(path_for_keepers_dir ~keepers_dir ~keeper_id)
+    ~of_json
 ;;
 
 let write ~keepers_dir ~keeper_id progress =
-  match validate progress with
-  | Error error -> Error (Invalid_progress error)
-  | Ok progress ->
-    let path = path_for_keepers_dir ~keepers_dir ~keeper_id in
-    let failed message = Error (Write_failed { path; message }) in
-    (match
-       Fs_compat.mkdir_p (Filename.dirname path);
-       Fs_compat.save_file_atomic_strict path (Yojson.Safe.to_string (to_json progress))
-     with
-     | Ok () -> Ok ()
-     | Error message -> failed message
-     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-     | exception Sys_error message -> failed message
-     | exception Unix.Unix_error (code, fn, arg) ->
-       failed (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)))
+  Keeper_librarian_progress_file.write
+    ~path:(path_for_keepers_dir ~keepers_dir ~keeper_id)
+    ~validate
+    ~to_json
+    progress
 ;;

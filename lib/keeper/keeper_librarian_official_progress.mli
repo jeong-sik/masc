@@ -29,29 +29,12 @@ val path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
 val to_json : t -> Yojson.Safe.t
 val of_json : Yojson.Safe.t -> (t, Keeper_memory_os_types.wire_error) result
 
-type read_error =
-  | Unreadable of
-      { path : string
-      ; message : string
-      }
-  | Not_json of
-      { path : string
-      ; message : string
-      }
-  | Malformed of
-      { path : string
-      ; error : Keeper_memory_os_types.wire_error
-      }
+type read_error = Keeper_librarian_progress_file.read_error
 
 val read_error_to_string : read_error -> string
 val read : keepers_dir:string -> keeper_id:string -> (t option, read_error) result
 
-type write_error =
-  | Invalid_progress of Keeper_memory_os_types.wire_error
-  | Write_failed of
-      { path : string
-      ; message : string
-      }
+type write_error = Keeper_librarian_progress_file.write_error
 
 val write_error_to_string : write_error -> string
 

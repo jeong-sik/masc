@@ -133,7 +133,8 @@ val settle_chains : config:Workspace.config -> Workspace_memory_execution_captur
     ({!Workspace_memory_execution_capture.settled_chains}) from the scope a
     pass reads into the settled archive, under the UTC date of each chain's
     root: [tool-request-owners-settled/<scope digest>/<YYYY-MM-DD>/]. Each
-    chain moves leaf first and each original record first, then its body.
+    chain settles leaf first: each original's record moves, then its body is
+    removed.
     [originals] is the list the same pass discovered; a record that changed
     since is [Uncertain] and stays. A settled request the worker still lists
     has no original, so the host ends it as [not_allowed]. Caller holds the

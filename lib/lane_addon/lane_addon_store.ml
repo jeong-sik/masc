@@ -742,9 +742,8 @@ let save_tool_request_body t ~scope ~request_digest bytes =
     else Error "a request body must be named by the digest of its bytes" in
   protect (fun () -> with_tool_request_owner_serialization t ~scope (fun () ->
     write_with ~sync_parent:sync_parent_directory t (tool_request_body_path ~scope ~request_digest) bytes))
-(* Settled originals: each record and the body it names, under the date its
-   chain began. Only the startup body inventory lists and reads it, and only when a
-   live body is not protected by a live record. *)
+(* Settled originals: each record, under the date its chain began. The body
+   its record names does not move here; the settle removes it. *)
 let tool_request_archive_directory = "tool-request-owners-settled"
 (* A day names a directory, so only [YYYY-MM-DD] is accepted. *)
 let settled_day date =
@@ -757,8 +756,6 @@ let tool_request_archive_path ~scope ~date kind name =
     (Filename.concat (digest scope) (Filename.concat date (Filename.concat kind name)))
 let tool_request_archive_record_path ~scope ~date ~request_id =
   tool_request_archive_path ~scope ~date "records" (digest request_id ^ ".json")
-let tool_request_archive_body_path ~scope ~date ~request_digest =
-  tool_request_archive_path ~scope ~date "bodies" (request_digest ^ ".json")
 let owned_regular_file (stat : Unix.stats) =
   stat.st_kind = Unix.S_REG && stat.st_nlink = 1 && stat.st_uid = Unix.geteuid ()
 (* A rename may have happened before a directory sync failed. Both a repeated
@@ -786,6 +783,17 @@ let move_into_archive t ~source ~target =
     | _ -> Error ("a settled original request file is not a regular file this process owns: " ^ target)
     | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
       Error ("an original request file is in neither its scope nor the settled archive: " ^ source)
+(* HIGH-RISK-UNREVIEWED: unlinks a request body; a human reviews before merge.
+   Remove one settled original's body, or find it gone. An unlink may have
+   happened before its directory sync failed, so a body already gone still
+   syncs its first surviving parent. *)
+let remove_settled_body t ~source =
+  let source = Filename.concat t.root source in
+  let sync () = sync_existing_parent ~sync_parent:sync_parent_directory (Filename.dirname source) in
+  match Unix.lstat source with
+  | stat when owned_regular_file stat -> Unix.unlink source; sync (); Ok ()
+  | _ -> Error ("an original request body to settle is not a regular file this process owns: " ^ source)
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> sync (); Ok ()
 let settle_tool_request t ~scope ~date ~request_id ~request_digest ~check_record =
   let* () = settled_day date in
   let* outcome = with_tool_request_settlement_barrier t (fun () ->
@@ -798,8 +806,7 @@ let settle_tool_request t ~scope ~date ~request_id ~request_digest ~check_record
        record without its body. *)
     let* () = move_into_archive t ~source:(tool_request_owner_path ~scope ~request_id)
         ~target:(tool_request_archive_record_path ~scope ~date ~request_id) in
-    let* () = move_into_archive t ~source:(tool_request_body_path ~scope ~request_digest)
-      ~target:(tool_request_archive_body_path ~scope ~date ~request_digest) in
+    let* () = remove_settled_body t ~source:(tool_request_body_path ~scope ~request_digest) in
     Ok true))) in
   outcome
 let tool_request_settled t ~scope ~date ~request_id =

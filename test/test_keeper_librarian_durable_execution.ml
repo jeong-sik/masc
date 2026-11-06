@@ -392,7 +392,6 @@ let latest fixture capture = io (fun () ->
 let no_memory fixture = check (list string) "uncommitted original has no Memory facts" []
   (io (fun () -> claims fixture.keepers_dir))
 module Gate = Keeper_librarian_durable_gate
-let canonical request=Lane_addon_action.canonical request |> get
 let day_of request_id=Capture.minted_on request_id |> get
 (* The same history request ID minted one UTC day earlier, for a chain whose
    root and successor fall on different days. *)
@@ -500,14 +499,19 @@ let settled_on fixture ~date (record:Owner.retained) =
 let settle_only fixture ~date (record:Owner.retained) =
   io (fun () -> Owner.settle ~store:fixture.store ~date (Owner.listed record))
   |> Result.map_error Owner.settle_error_to_string |> get
-(* A settled original as the archive holds it: its progress, and the request
-   body its record names. *)
+(* A settled original as the archive holds it: its progress. The request body
+   its record names is in neither its scope nor the settled day. *)
 let archived fixture ~date (record:Owner.retained) =
-  let read path=io (fun () -> Yojson.Safe.from_file (Filename.concat (Store.root fixture.store) path)) in
-  let stored=read (Store.tool_request_archive_record_path ~scope:record.scope ~date ~request_id:record.request_id) in
-  Progress.of_json (member "progress" stored) |> get,
-  read (Store.tool_request_archive_body_path ~scope:record.scope ~date
-    ~request_digest:(Yojson.Safe.Util.to_string (member "request_digest" stored)))
+  let root=Store.root fixture.store in
+  let record_path=Filename.concat root
+    (Store.tool_request_archive_record_path ~scope:record.scope ~date ~request_id:record.request_id) in
+  let stored=io (fun () -> Yojson.Safe.from_file record_path) in
+  let request_digest=Yojson.Safe.Util.to_string (member "request_digest" stored) in
+  check bool "the settled body left its scope" false (io (fun () ->
+    Sys.file_exists (Filename.concat root (Store.tool_request_body_path ~scope:record.scope ~request_digest))));
+  check (list string) "the settled day keeps no body" ["records"] (io (fun () ->
+    Sys.readdir (Filename.dirname (Filename.dirname record_path)) |> Array.to_list));
+  Progress.of_json (member "progress" stored) |> get
 let assert_unattached = function
   | Error error ->
     check bool "attachment is a blocked original publication" true (Consumer.publication_unfinished error);
@@ -603,8 +607,8 @@ let test_terminal_refusal_allows_fresh_original () = with_fixture (fun ~sw:_ fix
    | Ok (Consumer.Memory_not_committed ([] | _::_::_) | Nothing_to_read | Pending
          | Baseline_advanced _ | Progress_advanced _ | Official_advanced _) ->
      fail "terminal refusal must retain a nonempty diagnostic report");
-  let rejected,capture=only_original fixture in
-  let request_before=Capture.to_json capture and progress_before=Progress.to_json rejected.progress in
+  let rejected,_=only_original fixture in
+  let progress_before=Progress.to_json rejected.progress in
   check bool "terminal refusal is retained as Rejected" true
     (match Progress.phase rejected.progress with Rejected _ -> true
      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
@@ -615,8 +619,7 @@ let test_terminal_refusal_allows_fresh_original () = with_fixture (fun ~sw:_ fix
   drive_advanced fixture;
   let fresh,_=only_original fixture in
   check bool "fresh selection retains a separate original ID" true (fresh.Owner.request_id<>rejected.request_id);
-  let settled,request=archived fixture ~date:(day_of rejected.request_id) rejected in
-  check json "settled refused request remains exact" (canonical request_before) request;
+  let settled=archived fixture ~date:(day_of rejected.request_id) rejected in
   check json "old refusal never redispatched or rewritten" progress_before (Progress.to_json settled);
   check int "one refused and one successful provider call" 2 (F.post_count fixture.server);
   check (list string) "new original alone publishes Memory"
@@ -713,15 +716,13 @@ let test_actual_completed_history_path () = with_fixture (fun ~sw:_ fixture ->
    | No_completed_latest
    | Completed_latest {execution={outcome=Call_ended (Invalid_output _ | Input_refused _ | Output_limit_reached _) | Call_refused _;_};_} ->
      fail "no actual original provider proof");
-  let request_before=Capture.to_json capture in
   let posts=F.post_count fixture.server in
   let gates=gate_records fixture capture in
   check bool "the finished original has gate records to settle" true (List.length gates>0);
   ignore (run_worker fixture);
   check int "the next pass settles the finished original" 0 (List.length (observed_originals fixture));
   let date=day_of record.Owner.request_id in
-  let settled,restored=archived fixture ~date record in
-  check json "settled original keeps the full retained input/preparation" (canonical request_before) restored;
+  let settled=archived fixture ~date record in
   check json "settled original keeps its finished progress" (Progress.to_json record.progress) (Progress.to_json settled);
   check bool "its gate records settle under the same day" true (List.for_all (settled_on fixture ~date) gates);
   check int "no gate record stays for validation" 0 (List.length (gate_records fixture capture));
@@ -1726,8 +1727,7 @@ let test_counterpart_only_provider_capacity_refusal_is_source_preserving () =
      | Ok Consumer.Nothing_to_read -> ()
      | Ok _ -> fail "the consumed larger range should leave no fresh source"
      | Error error -> fail (Consumer.error_to_string error));
-    let settled,retained=archived fixture ~date:(day_of rejected.request_id) rejected in
-    check json "old refusal and complete source remain in the ordinary archive" (canonical request_json) retained;
+    let settled=archived fixture ~date:(day_of rejected.request_id) rejected in
     check json "settlement never rewrites the original rejection" rejected_progress (Progress.to_json settled);
     check bool "the witness remains live until the refusal has left" true
       (List.exists (fun ((record:Owner.retained),_) -> record.request_id=fresh.request_id)

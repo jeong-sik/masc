@@ -35,6 +35,12 @@ val runner : session -> Browser_ego_peer.runner
     waits retain their own timeouts; cancellation stops and reaps the process. *)
 val native_runner : session -> string -> (string, Browser_ego_peer.run_failure) result
 
+(** When the session's current process connected, or [None] while none runs:
+    before the first script and after a script that stopped it. The next
+    script's process has another time. What a script set through CDP, such as
+    a viewport override, lives as long as that process. *)
+val sdk_process_started_at : session -> float option
+
 (** Closes the session's socket, so its process leaves its loop and exits,
     and stops what is left of it. *)
 val end_session : session -> unit

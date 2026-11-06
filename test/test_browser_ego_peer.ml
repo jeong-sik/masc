@@ -790,10 +790,10 @@ let public_input_result = function
   | Error (Live.Observed_failure {message;receipt;_}|Live.Partial_failure {message;receipt;_}) -> message,receipt
   | Error (Live.Before_effect message|Live.Outcome_unknown message) -> message,`Null
 
-(* The readiness [with_input_state] stamps on what leaves the peer. *)
-let reported_readiness peer result = match Peer.with_input_state peer result with
+(* The readiness [with_session_state] stamps on what leaves the peer. *)
+let reported_readiness peer result = match Peer.with_session_state peer ~sdk_process_started_at:None result with
   | Ok receipt | Error (Live.Observed_failure {receipt;_}|Live.Partial_failure {receipt;_}) -> text (field "inputReadiness" receipt)
-  | Error (Live.Before_effect _|Live.Outcome_unknown _) -> fail "with_input_state left a failure without its receipt"
+  | Error (Live.Before_effect _|Live.Outcome_unknown _) -> fail "with_session_state left a failure without its receipt"
 
 let private_native_data_stays_private result =
   let message,receipt=public_input_result result in
@@ -1113,7 +1113,8 @@ let test_a_gesture_refused_before_its_press_keeps_input () =
        ["urlBefore",str observed_url;"receipt",obj [];"error",str "native click failed";
         "thrown",obj ["name",str "ElementResolutionError";"kind",str "permanent"]]]
 
-(* What leaves the peer says where input stands, failures included. *)
+(* What leaves the peer says where input stands and which SDK process ran
+   it, failures included. *)
 let test_every_answer_carries_the_input_state () =
   let module Input=Masc.Browser_ego_input in
   let dialog=ego_dialog "alert" "mousedown interrupted" in
@@ -1132,28 +1133,32 @@ let test_every_answer_carries_the_input_state () =
   let receipt_of label = function
     | Error (Live.Observed_failure {receipt;_} | Live.Partial_failure {receipt;_}) -> receipt
     | Ok _ | Error (Live.Before_effect _ | Live.Outcome_unknown _) -> fail (label ^ ": no failure receipt") in
+  let stamped result = Peer.with_session_state peer ~sdk_process_started_at:(Some 12.5) result in
   let held label receipt =
-    check string (label ^ ": readiness") "release_uncertain" (text (field "inputReadiness" receipt)) in
-  (match Peer.with_input_state peer (dispatch peer Live.Page_interact gesture) with
+    check string (label ^ ": readiness") "release_uncertain" (text (field "inputReadiness" receipt));
+    check bool (label ^ ": SDK process") true (field "sdkProcessStartedAt" receipt = `Float 12.5) in
+  (match stamped (dispatch peer Live.Page_interact gesture) with
    | Ok value -> held "the next input" value
    | Error _ as other -> failf "the next input while release is uncertain was %s" (failure_kind other));
-  let refusal=Peer.with_input_state peer (Error (Live.Before_effect "refused")) in
+  let refusal=stamped (Error (Live.Before_effect "refused")) in
   check string "a refusal stays before any effect" "before effect" (failure_kind refusal);
   held "a refusal" (receipt_of "a refusal" refusal);
-  let unknown=Peer.with_input_state peer (Error (Live.Outcome_unknown "lost answer")) in
+  let unknown=stamped (Error (Live.Outcome_unknown "lost answer")) in
   check string "an unknown outcome stays unknown" "unknown" (failure_kind unknown);
   held "an unknown outcome" (receipt_of "an unknown outcome" unknown);
-  (match Peer.with_input_state peer (dispatch peer Live.Browser_info (obj [])) with
+  (match stamped (dispatch peer Live.Browser_info (obj [])) with
    | Ok value -> held "a read while held" value
    | Error _ -> fail "a read while input is held was not served");
   let partial=receipt_of "a partial failure"
-    (Peer.with_input_state peer (Error (Live.Partial_failure {tab_id=1;message="partial";receipt=obj ["step",`Int 1]}))) in
+    (stamped (Error (Live.Partial_failure {tab_id=1;message="partial";receipt=obj ["step",`Int 1]}))) in
   held "a partial failure" partial;
   check int "a partial receipt keeps its own fields" 1 (Yojson.Safe.Util.to_int (field "step" partial));
   reply:=input_reply (obj []);
   ignore (dispatch peer Live.Page_interact gesture);
-  let after=receipt_of "a failure after a clean receipt" (Peer.with_input_state peer (Error (Live.Before_effect "refused"))) in
-  check string "after a clean receipt the readiness is settled" "command_settled" (text (field "inputReadiness" after))
+  let after=receipt_of "a failure after a clean receipt"
+    (Peer.with_session_state peer ~sdk_process_started_at:None (Error (Live.Before_effect "refused"))) in
+  check string "after a clean receipt the readiness is settled" "command_settled" (text (field "inputReadiness" after));
+  check bool "no running SDK process answers null" true (field "sdkProcessStartedAt" after = `Null)
 
 let test_chooser_upload_runs_after_uncertain_pointer_release () =
   let directory = Unix.realpath (capture_directory ()) in

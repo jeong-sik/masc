@@ -85,10 +85,12 @@ CDP 로 바꾼 설정(화면 크기, 터치 흉내, 언어·시간대·위치, �
 
 대신 수명을 답에 적는다.
 
-- 설정을 건 답에 `lifetime: "ego_sdk_process"` 와 그 프로세스의 번호 `sdkProcess` 를 넣는다.
-- 번호는 `lib/browser_addon_live_ego.ml` 의 session 이 새 프로세스를 띄울 때마다 하나씩 올린다. 메모리에만 있는 값이다.
-- 모든 ego 답에 지금 `sdkProcess` 를 넣는다. Keeper 는 설정을 걸었을 때의 번호와 지금 번호가 다르면 설정이 사라진 것을 안다.
-- 화면 크기는 scene·screenshot 의 viewport 로 다시 확인된다. 요청 차단은 다시 확인할 길이 없어서 번호가 유일한 근거다.
+- 모든 ego 답에 `sdkProcessStartedAt` 을 넣는다. 객체인 답과 실패 receipt 모두다. 그 명령을 돌린 SDK 프로세스가 연결된 시각(초)이다. 명령이 프로세스를 멈췄으면 `null` 이다.
+- 설정을 건 답에는 `lifetime: "ego_sdk_process"` 도 넣는다.
+- Keeper 는 설정을 걸었을 때의 시각과 지금 답의 시각이 다르면 설정이 사라진 것을 안다.
+- 하나씩 올리는 번호 대신 시각을 쓴다. `lib/browser_addon_live_ego.ml` 의 `serve_space` 는 연결 cycle 마다 session 을 새로 만든다. 서버가 다시 켜져도 처음부터다. 번호는 그때마다 1 부터 다시 시작해서, 다른 프로세스가 같은 번호를 가진다. 시각은 되풀이되지 않는다.
+- 화면 크기는 scene·screenshot 의 viewport 로 다시 확인된다. 요청 차단은 다시 확인할 길이 없어서 시각이 유일한 근거다.
+- 탭 목록처럼 배열인 답에는 붙지 않는다. `inputReadiness` 와 같다.
 
 Firefox 의 `block_requests` 설명("unblock_requests 까지 실패한다")은 ego 에서는 "unblock_requests 를 부르거나 SDK 프로세스가 바뀔 때까지" 로 적는다.
 
@@ -119,7 +121,7 @@ Firefox 의 `block_requests` 설명("unblock_requests 까지 실패한다")은 e
 - 그 함수는 `page.events()` 를 부르고, `Network.*` 이벤트를 페이지별 network 기록에 옮긴다. 나머지는 workflow `events` 에 돌려준다.
 - network 기록은 Firefox 와 같이 오래된 것부터 200개를 남기고, 넘친 개수를 `dropped` 에 적는다.
 - 주소의 질의 값은 `REDACTED` 로 바꾼다. 헤더는 이름만 남기고, 쿠키와 본문은 넣지 않는다.
-- 기록은 `Network.enable` 을 처음 부른 때부터 시작한다. 답의 `watchingSince` 에 그 시각과 `sdkProcess` 를 적는다. 프로세스가 바뀌면 기록도 새로 시작한다.
+- 기록은 `Network.enable` 을 처음 부른 때부터 시작한다. 답의 `watchingSince` 에 그 시각과 `sdkProcessStartedAt` 을 적는다. 프로세스가 바뀌면 기록도 새로 시작한다.
 - workflow `events` 설명의 "not a full history" 는 그대로 맞다. 여기에 "Network 이벤트는 read_network 로 간다" 를 더한다.
 
 `Network.enable` 이 사이트에 자동화를 드러내는지는 재지 않았다. 구현 층에서 먼저 잰다.
@@ -140,7 +142,7 @@ gh stack 한 스택에 층을 쌓는다. 층마다 기능 목록(`lib/browser_ca
 | 층 | 내용 | 확인 |
 |---|---|---|
 | L1 | read_html. page_zoom 을 이유 있는 `Unsupported` 로 바꿈 | masc 가 만드는 문서 스크립트를 ego SDK 로 로컬 페이지에서 돌려 `html` 바이트 수와 `htmlComplete` 를 본다([결과](../evidence/ego-cdp-capabilities-2026-11-06/l1-read-html/README.md)) |
-| L2 | `sdkProcess` 번호와 `lifetime` 필드. resize_viewport | 크기를 바꾸고 scene viewport 로 확인한다. 세션 프로세스를 바꾼 뒤 번호가 바뀌고 크기가 돌아오는지 본다 |
+| L2 | `sdkProcessStartedAt` 과 `lifetime` 필드. resize_viewport | 크기를 바꾸고 scene viewport 로 확인한다. 세션 프로세스를 바꾼 뒤 시각이 바뀌고 크기가 돌아오는지 본다 |
 | L3 | emulate_environment (D3 반영) | Intl locale·시간대를 읽는다 |
 | L4 | touch (tap_at, swipe) | 페이지가 기록한 pointerType 과 touch 이벤트를 본다 |
 | L5 | list_windows | 탭마다 windowId 를 본다 |

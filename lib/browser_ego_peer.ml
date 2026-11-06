@@ -2066,10 +2066,14 @@ let dispatch ?command_id ?actor t ~verb args =
   | Ok (Error (Live.Before_effect _|Outcome_unknown _) as failure) -> failure
 
 (* What leaves the peer. A failure that is only a message becomes the observed
-   failure with the same effect phase, so its receipt can say where input stands. *)
-let with_input_state t result =
+   failure with the same effect phase, so its receipt can say where input
+   stands and which SDK process holds this connection's CDP settings. *)
+let with_session_state t ~sdk_process_started_at result =
+  let started = match sdk_process_started_at with Some at -> `Float at | None -> `Null in
   let stamp = function
-    | `Assoc fields -> `Assoc (("inputReadiness",str (Input.readiness_wire t.input)) :: List.remove_assoc "inputReadiness" fields)
+    | `Assoc fields -> `Assoc (("inputReadiness",str (Input.readiness_wire t.input))
+        :: ("sdkProcessStartedAt",started)
+        :: List.remove_assoc "sdkProcessStartedAt" (List.remove_assoc "inputReadiness" fields))
     | value -> value in
   match result with
   | Ok value -> Ok (stamp value)

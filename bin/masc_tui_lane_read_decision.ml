@@ -23,6 +23,7 @@ let of_dataset ~view (dataset : Masc.Workspace_dataset_event.dataset) =
     | Masc.Workspace_dataset_event.Skill_activations _
     | Masc.Workspace_dataset_event.Skill_catalog
     | Masc.Workspace_dataset_event.Clients
+    | Masc.Workspace_dataset_event.Account_emails
     | Masc.Workspace_dataset_event.Provider_usage
     | Masc.Workspace_dataset_event.Provider_standing
     | Masc.Workspace_dataset_event.Keeper_costs

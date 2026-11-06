@@ -193,16 +193,28 @@ let keeper_history_path config trace_id =
 let keeper_internal_history_path config trace_id =
   Filename.concat (keeper_session_dir config trace_id) internal_history_file_name
 
-let normalize_history_source (source : string) =
-  source |> String.trim |> String.lowercase_ascii
+type history_source =
+  | Direct_user
+  | Direct_assistant
+  | World_state_prompt
+  | Internal_assistant
 
-let is_prompt_history_source (source : string) =
-  String.equal (normalize_history_source source) "world_state_prompt"
+let history_source_to_string = function
+  | Direct_user -> "direct_user"
+  | Direct_assistant -> "direct_assistant"
+  | World_state_prompt -> "world_state_prompt"
+  | Internal_assistant -> "internal_assistant"
 
-let is_internal_history_source (source : string) =
-  match normalize_history_source source with
-  | "world_state_prompt" | "internal_assistant" -> true
-  | _ -> false
+let history_source_of_string = function
+  | "direct_user" -> Some Direct_user
+  | "direct_assistant" -> Some Direct_assistant
+  | "world_state_prompt" -> Some World_state_prompt
+  | "internal_assistant" -> Some Internal_assistant
+  | _ -> None
+
+let is_internal_history_source = function
+  | Direct_user | Direct_assistant -> false
+  | World_state_prompt | Internal_assistant -> true
 
 let keeper_decision_log_path config name =
   Filename.concat

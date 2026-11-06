@@ -4403,6 +4403,10 @@ type identity_login_expectation = {
   ile_keeper: string;
   ile_provider: string;
   ile_attempt_id: string;
+  ile_expires_at: float;
+      (** The consent deadline the server gave the attempt when it began.
+          The server applies it when the attempt is next read and announces
+          nothing when it passes. *)
 }
 
 (** Where [Esc] returns after the chat pane was opened. Keeping only the legal
@@ -15342,7 +15346,7 @@ let remember_identity_login (state : state) login =
    | Some origin when server_authority_ready state ->
        remember_identity_login_expectation state
          { ile_origin=origin; ile_keeper=login.ils_keeper; ile_provider=login.ils_provider;
-           ile_attempt_id=login.ils_attempt_id }
+           ile_attempt_id=login.ils_attempt_id; ile_expires_at=login.ils_expires_at }
    | _ -> ())
 
 (* A terminal observation retires both the browser URL and its background

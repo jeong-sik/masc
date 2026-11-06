@@ -5329,6 +5329,7 @@
   alcotest
    masc.agent_core.digest
   masc
+  masc_server
   masc.keeper_registry
   masc.masc_types
   masc.skill_reference

@@ -68,7 +68,8 @@ let original_nested_context (journal : t) =
     | `Assoc fields -> (match List.assoc_opt "nested_activation" fields with
         | Some value -> Ok value | None -> Error (Invalid_source "original nested recorder is absent"))
     | _ -> Error (Invalid_source "original nested run is not an object") in
-  Keeper_skill_activation_recorder.bound_context_of_yojson json
+  Keeper_skill_activation_recorder.bound_context_of_yojson
+    ~keeper_name:journal.immutable_source.keeper_name json
   |> Result.map_error (fun error -> Invalid_source (Keeper_skill_activation_recorder.error_to_string error))
 
 let child_origin (attempt : attempt) ~plan ~activation =

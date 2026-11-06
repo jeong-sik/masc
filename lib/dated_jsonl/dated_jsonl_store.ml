@@ -164,33 +164,6 @@ let retention = function
   | Keeper store -> keeper_retention store
   | Reaction_ledger | Decision_audit -> Operator_window
 
-let existing location = if Sys.file_exists location.dir then [ location ] else []
-
-let locations_on_disk (Masc_dir dir as root) store =
-  let keepers = Filename.concat dir Common.keepers_runtime_dirname in
-  match store with
-  | Root store -> existing (at root store)
-  | Keeper store ->
-    Fs_compat.subdirectory_names keepers
-    |> List.concat_map (fun keeper_name ->
-      existing (keeper root ~keeper:keeper_name store))
-  | Reaction_ledger ->
-    Fs_compat.subdirectory_names keepers
-    |> List.concat_map (fun keeper_name ->
-      let ledger =
-        List.fold_left
-          Filename.concat
-          keepers
-          [ keeper_name
-          ; Common.keeper_runtime_store_dirname Common.Keeper_reaction_ledger
-          ]
-      in
-      Fs_compat.subdirectory_names ledger
-      |> List.map (fun generation -> reaction_ledger root ~keeper:keeper_name ~generation))
-  | Decision_audit ->
-    Fs_compat.subdirectory_names (Filename.concat dir decision_audit_dirname)
-    |> List.map (fun keeper_dirname -> decision_audit root ~keeper_dirname)
-
 let with_retention_root (Masc_dir dir) f =
   (* BasePath admission allows aliases, including macOS /var and /tmp.
      Resolve that trusted base only; the runtime root and every descendant

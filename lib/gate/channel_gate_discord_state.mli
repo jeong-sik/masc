@@ -8,8 +8,7 @@
     the [default_*_path] resolvers, the shared binding-store wrappers, and
     binding transaction helpers) are hidden — only the {!Channel_gate_connector.S} surface
     is public.  The status label comes from
-    {!Channel_gate_connector.connector_state_label} and the observed
-    channel row from {!Json_util.find_assoc_row_by_string_field}. *)
+    {!Channel_gate_connector.connector_state_label}. *)
 
 (** {1 Connector identity} *)
 

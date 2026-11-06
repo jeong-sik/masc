@@ -306,21 +306,6 @@ let assoc_object_opt name json =
   | Some (`Assoc _ as obj) -> Some obj
   | _ -> None
 
-(** Scans a JSON array for the first [`Assoc] row whose [field] member is
-    the string [value].  Rows that are not objects, and rows without a
-    string [field], are skipped. *)
-let find_assoc_row_by_string_field ~field ~value = function
-  | `List rows ->
-    List.find_map
-      (function
-        | (`Assoc _ as row) -> (
-          match assoc_member_opt field row with
-          | Some (`String candidate) when String.equal candidate value -> Some row
-          | _ -> None)
-        | _ -> None)
-      rows
-  | _ -> None
-
 let json_string_list_member name json =
   try
     match Yojson.Safe.Util.member name json with

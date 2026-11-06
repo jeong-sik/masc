@@ -165,10 +165,7 @@ type server_spec =
   }
 
 type transport =
-  | Stdio of
-      { client : t
-      ; spec : server_spec
-      }
+  | Stdio of { client : t }
   | Http of
       { close_fn : unit -> unit
       ; base_url : string
@@ -195,12 +192,6 @@ val connect_all
   -> mgr:_ Eio.Process.mgr
   -> server_spec list
   -> (managed list, Error.t) result
-
-val reconnect
-  :  sw:Eio.Switch.t
-  -> mgr:_ Eio.Process.mgr
-  -> managed
-  -> (managed, Error.t) result
 
 val close_managed : managed -> unit
 val close_all : managed list -> unit

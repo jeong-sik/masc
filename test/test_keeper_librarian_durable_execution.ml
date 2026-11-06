@@ -1581,7 +1581,6 @@ let test_counterpart_only_provider_capacity_refusal_is_source_preserving () =
     let rejected,original=only_original fixture in
     check_complete ~messages:[] ~tools:[] original;
     let source_json=Source.to_json (Capture.source original) in
-    let request_json=Capture.to_json original in
     let restored=Source.of_json source_json |> Result.map_error Source.error_to_string |> get in
     check json "the whole refused original survives strict restoration" source_json (Source.to_json restored);
     check int "only one actual provider request was refused" 1 (F.post_count fixture.server);
@@ -1591,16 +1590,17 @@ let test_counterpart_only_provider_capacity_refusal_is_source_preserving () =
     (match run_worker fixture with
      | Ok _ -> ()
      | Error error -> fail (Consumer.error_to_string error));
-    let settled_record,settled_original=only_original fixture in
-    check string "settlement keeps the refused original's durable ID" rejected.request_id
-      settled_record.Owner.request_id;
+    (* A settled original leaves its scope for the settled day: the archive
+       holds its progress, and nothing is left to retain or read. *)
+    check int "a settled refusal leaves no retained original" 0 (List.length (observed_originals fixture));
+    let settled_progress=archived fixture ~date:(day_of rejected.request_id) rejected in
     check bool "settlement leaves the refusal phase alone" true
-      (Progress.phase settled_record.progress=Progress.phase rejected.progress);
+      (Progress.phase settled_progress=Progress.phase rejected.progress);
     check bool "settlement keeps every earlier progress event in order" true
       (let before_events=Progress.events rejected.progress in
        List.filteri (fun index _ -> index<List.length before_events)
-         (Progress.events settled_record.progress)=before_events);
-    (match Progress.settlement settled_record.progress with
+         (Progress.events settled_progress)=before_events);
+    (match Progress.settlement settled_progress with
      | Some diagnosis ->
        check string "the diagnosis names its kind" "librarian-capacity-refusal-settled"
          (diagnosis |> member "kind" |> Yojson.Safe.Util.to_string);
@@ -1611,7 +1611,6 @@ let test_counterpart_only_provider_capacity_refusal_is_source_preserving () =
             (Source.input (Capture.source original)).counterpart_observations)
          (diagnosis |> member "counterpart_digest" |> Yojson.Safe.Util.to_string)
      | None -> fail "the permanent capacity refusal was not settled");
-    check json "settlement never rewrites the refused original" request_json (Capture.to_json settled_original);
     check bool "official history reaches the end of the abandoned range" true (official ()<>before);
     check bool "the external row is acknowledged through the abandoned range" true
       (Keeper_external_read_cursor.observation_matches_preparation (cursor ())
@@ -1624,8 +1623,10 @@ let test_counterpart_only_provider_capacity_refusal_is_source_preserving () =
        | Ok _ -> fail "a settled refusal must leave nothing to read"
        | Error error -> fail (Consumer.error_to_string error));
       check int "a settled refusal sends no model request on any wake" 1 (F.post_count fixture.server);
+      check int "a settled refusal stays out of the retained originals" 0
+        (List.length (observed_originals fixture));
       check bool "the settlement survives every wake" true
-        (Option.is_some (Progress.settlement (fst (only_original fixture)).Owner.progress)) in
+        (Option.is_some (Progress.settlement (archived fixture ~date:(day_of rejected.request_id) rejected))) in
     check_free ();
     Consumer.For_testing.reset_process_state ();
     restart_actual_worker ~while_off:check_free fixture ~sw;
@@ -1654,8 +1655,7 @@ let test_counterpart_only_provider_capacity_refusal_is_source_preserving () =
         observation.content=content) fresh_counterparts);
     check int "one refused and one successful request" 2 (F.post_count fixture.server);
     check bool "the settlement is untouched by the later original" true
-      (List.exists (fun ((record:Owner.retained),_) -> record.request_id=rejected.request_id
-        && Option.is_some (Progress.settlement record.progress)) (observed_originals fixture)))
+      (Option.is_some (Progress.settlement (archived fixture ~date:(day_of rejected.request_id) rejected))))
 
 (* The same projected chat observation can come from a different source row.
    The later delivery suppresses the refused row in the successful question's
@@ -1746,9 +1746,10 @@ let test_refusal_does_not_accept_a_different_equal_chat_row () =
     let equal_content_rows input=List.length (List.filter
       (fun (observation:Keeper_counterpart_observation.t) -> observation.content=content) input) in
     check int "the original input held the equal chat content once" 1 (equal_content_rows original_input);
-    check int (Printf.sprintf "the later input holds the different row's equal content once (contents: %s)"
-      (String.concat " | " (List.map (fun (o:Keeper_counterpart_observation.t) -> o.content) witness_input)))
-      1 (equal_content_rows witness_input);
+    check int "the later input does not hold the abandoned row's content" 0 (equal_content_rows witness_input);
+    check (list string) "the later input holds only the different delivery"
+      ["separate delivery preview"]
+      (List.map (fun (o:Keeper_counterpart_observation.t) -> o.content) witness_input);
     check bool "the same value does not establish the selected original row" false
       (Sources.counterpart_selection_covers ~original:(Sources.select_counterparts original_snapshot)
         ~witness:(Sources.select_counterparts witness_snapshot));
@@ -1765,67 +1766,10 @@ let test_refusal_does_not_accept_a_different_equal_chat_row () =
       (Keeper_external_read_cursor.observation_offset (cursor ()));
     check bool "the original source frontier is otherwise past" true
       (io (fun () -> Keeper_librarian_refusal_frontier.past_original original |> get));
-    let stopped=memory_action fixture (fun () ->
-      let inventory=io (fun () -> Gate.Inventory.read ~store:fixture.store
-        ~owner:(Capture.physical_owner original)) |> get in
-      io (fun () -> List.iter (fun (record,request) ->
-        match Keeper_librarian_durable_commit.validate_inventory ~inventory ~store:fixture.store ~request ~record |> get with
-        | Settled -> () | Unfinished -> fail "the test originals must be settled")
-          [rejected,original;witness,witness_capture]);
-      let module Refusal = Keeper_librarian_durable_refusal in
-      check bool "a record cannot be paired with another request" true
-        (Result.is_error (io (fun () -> Refusal.inventory [rejected,witness_capture])));
-      check bool "a duplicate request ID makes the inventory invalid" true
-        (Result.is_error (io (fun () -> Refusal.inventory [rejected,original;rejected,original])));
-      let changed,changed_request=io (fun () ->
-        let destination=Capture.destination original in
-        let destination={destination with source_revision=destination.source_revision ^ "-alternate"} in
-        let changed_request=Capture.create ~request_id:(Capture.request_id original)
-          ~owner:(Capture.physical_owner original) ~destination ~source:(Capture.source original)
-          ~preparation:(Capture.preparation original) () |> get in
-        let alternate=Store.create ~root:(Filename.concat fixture.base_path "alternate-owner-store") in
-        Owner.retain ~store:alternate ~scope:rejected.scope ~request_id:rejected.request_id
-          ~installation_id:rejected.installation_id ~package_id:rejected.package_id
-          ~tool:rejected.tool ~summary:rejected.summary ~request:(Capture.to_json changed_request) |> owned;
-        match Owner.load ~store:alternate ~scope:rejected.scope ~request_id:rejected.request_id |> owned with
-        | Some record -> record,changed_request | None -> fail "alternate original was not retained") in
-      check bool "the alternate record has the same ID and another digest" true
-        (changed.request_id=rejected.request_id && changed.request_digest<>rejected.request_digest);
-      check bool "the alternate record binds its own valid request" true
-        (Result.is_ok (io (fun () -> Refusal.inventory [changed,changed_request])));
-      check bool "the same ID with another request digest cannot bind the original" true
-        (Result.is_error (io (fun () -> Refusal.inventory [changed,original])));
-      check bool "different digests do not make duplicate IDs admissible" true
-        (Result.is_error (io (fun () -> Refusal.inventory [rejected,original;changed,changed_request])));
-      let only_original=io (fun () -> Refusal.inventory [rejected,original]) |> get in
-      check bool "another record with the same ID is not an inventory member" true
-        (Result.is_error (Refusal.retained_stop ~store:fixture.store ~completed:only_original
-          ~record:changed ~request:original));
-      check bool "an unbound same-ID record is preserved" true
-        (Refusal.preserves_completed ~settled:only_original ~record:changed ~request:original);
-      let only_witness=io (fun () -> Refusal.inventory [witness,witness_capture]) |> get in
-      check bool "a missing refused original cannot be released" true
-        (Result.is_error (Refusal.retained_stop ~store:fixture.store ~completed:only_witness
-          ~record:rejected ~request:original));
-      check bool "an unbound finished original must be preserved" true
-        (Refusal.preserves_completed ~settled:only_witness ~record:witness ~request:original);
-      Keeper_librarian_durable_refusal.retained_stop ~store:fixture.store
-        ~completed:(io (fun () -> Keeper_librarian_durable_refusal.inventory
-          [rejected,original;witness,witness_capture]) |> get)
-        ~record:rejected ~request:original |> get) in
-    check bool "an unsettled refusal is not released by a different source row" true (Option.is_some stopped);
-    let settled_rejected=observed_originals fixture
-      |> List.find_map (fun ((record:Owner.retained),_) ->
-        if record.request_id=rejected.request_id then Some record else None)
-      |> function Some record -> record | None -> fail "the settled refusal must still be retained" in
+    check int "a settled refusal leaves only the later original retained" 1
+      (List.length (observed_originals fixture));
     check bool "the refusal was settled by abandoning its range" true
-      (Option.is_some (Progress.settlement settled_rejected.progress));
-    check bool "a settled refusal no longer stops its destination" true
-      (Option.is_none (memory_action fixture (fun () ->
-        Keeper_librarian_durable_refusal.retained_stop ~store:fixture.store
-          ~completed:(io (fun () -> Keeper_librarian_durable_refusal.inventory
-            [settled_rejected,original;witness,witness_capture]) |> get)
-          ~record:settled_rejected ~request:original |> get)));
+      (Option.is_some (Progress.settlement (archived fixture ~date:(day_of rejected.request_id) rejected)));
     replace_actual_worker_configuration fixture ~sw (fixture.declaration true);
     let calls=F.post_count fixture.server in
     let check_free () =

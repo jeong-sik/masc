@@ -627,8 +627,9 @@ let live_transport_of_string = function
    included, with the same page scripts as the other connections, and opens,
    moves and closes only the pages an agent opened there. It hands its space
    to the operator and takes it back, lists downloads saved into the worker's
-   own folder, and sets files on their file inputs from the worker's upload
-   copies;
+   own folder, sets files on their file inputs from the worker's upload
+   copies, and sets a page's viewport through a CDP override that lasts as
+   long as the ego SDK process;
    test_browser_ego_peer holds its column to what Browser_ego_peer does. *)
 let live_transport_serves transport capability =
   match transport, capability with
@@ -650,8 +651,9 @@ let live_transport_serves transport capability =
                     | Tab_creation | Tab_navigation | Tab_closing | Dom_interaction | Point_click
                     | Point_scroll | Trusted_hover | Trusted_double_click | Trusted_button_click
                     | Trusted_drag | Trusted_keyboard | Tab_history | Accessibility_snapshot | Dialog_read | Dialog_answer
-                    | Snapshot_target_input | Native_workflow | Page_recovery | Operator_handoff | Page_management | Download_listing | File_upload | Tab_activation) -> true
-  | Ego_task_space, (Touch_input | Browser_zoom | Viewport_resize | Frame_read) -> false
+                    | Snapshot_target_input | Native_workflow | Page_recovery | Operator_handoff | Page_management | Download_listing | File_upload | Tab_activation
+                    | Viewport_resize) -> true
+  | Ego_task_space, (Touch_input | Browser_zoom | Frame_read) -> false
 ;;
 
 let live_transports_serving capability =

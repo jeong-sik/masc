@@ -41,43 +41,6 @@ let reasoning_effort_option_of_json ~scope = function
          (JsonParseError { detail = scope ^ ": reasoning_effort must be string or null" }))
 ;;
 
-let validate_exact_object_fields ~scope ~expected = function
-  | `Assoc fields ->
-    let names = List.map fst fields in
-    let duplicates =
-      names
-      |> List.sort String.compare
-      |> List.fold_left
-           (fun (previous, duplicates) name ->
-              match previous with
-              | Some previous when String.equal previous name ->
-                Some name, name :: duplicates
-              | Some _ | None -> Some name, duplicates)
-           (None, [])
-      |> snd
-      |> List.sort_uniq String.compare
-    in
-    let missing = List.filter (fun name -> not (List.mem name names)) expected in
-    let unknown = List.filter (fun name -> not (List.mem name expected)) names in
-    if duplicates = [] && missing = [] && unknown = []
-    then Ok ()
-    else
-      Error
-        (Error.Serialization
-           (JsonParseError
-              { detail =
-                  Printf.sprintf
-                    "%s schema mismatch (missing=[%s], unknown=[%s], duplicate=[%s])"
-                    scope
-                    (String.concat "," missing)
-                    (String.concat "," unknown)
-                    (String.concat "," duplicates)
-              }))
-  | _ ->
-    Error
-      (Error.Serialization (JsonParseError { detail = scope ^ " must be a JSON object" }))
-;;
-
 let pricing_gap_to_json = function
   | Usage_not_reported -> `Assoc [ "kind", `String "usage_not_reported" ]
   | Model_identity_unavailable -> `Assoc [ "kind", `String "model_identity_unavailable" ]
@@ -664,7 +627,6 @@ let checkpoint_json_result cp =
   json
 ;;
 
-let validate_checkpoint cp = Result.map ignore (checkpoint_json_result cp)
 let to_json_result = checkpoint_json_result
 
 (* #31677: one provider-authored unencodable payload — a duplicate object key

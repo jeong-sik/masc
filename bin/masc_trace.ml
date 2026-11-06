@@ -46,10 +46,6 @@ let turn_fsm_transition_detail json =
          Keeper_transition_audit_types.turn_fsm_transition_of_json
   | _ -> None
 
-let decision_int_field json key =
-  Yojson.Safe.Util.member "decision" json |> fun decision ->
-  int_field decision key
-
 let decision_string_field json key =
   Yojson.Safe.Util.member "decision" json |> fun decision ->
   string_field decision key

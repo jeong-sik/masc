@@ -119,7 +119,9 @@ let observe_call ~base_path ~original reference =
        let reports = List.filter (fun (invocation:Agent.Execution_projection.settled_tool_invocation) ->
          invocation.tool_name="report_review_verdict") invocations in
        match terminal.disposition.outcome, reports with
-       | Terminal_succeeded, [report] ->
+       (* A cancellation after the report handler settled successfully stops
+          the run, not the judgment: the handler already recorded it. *)
+       | (Terminal_succeeded | Terminal_cancelled), [report] ->
          let successful = report.attempt_admitted && (match report.result with
            | Llm_provider.Types.ToolResult {outcome=Tool_succeeded;_} -> true
            | ToolResult {outcome=Tool_failed _;_} | Text _ | Thinking _ | ReasoningDetails _
@@ -132,8 +134,7 @@ let observe_call ~base_path ~original reference =
          else Ok (Call_repair "report invocation has no successful handler settlement")
        | (Terminal_failed | Terminal_succeeded), [] -> Ok Call_no_verdict
        | Terminal_cancelled, [] -> Ok Call_cancelled
-       | Terminal_cancelled, _ :: _ -> Ok (Call_repair "original reviewer was cancelled without a retained judgment")
-       | (Terminal_succeeded | Terminal_failed), _ ->
+       | (Terminal_succeeded | Terminal_failed | Terminal_cancelled), _ ->
          Ok (Call_repair "original report history cannot establish one accepted verdict"))
 
 let observe ~base_path ~original progress =

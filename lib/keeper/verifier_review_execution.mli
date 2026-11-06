@@ -23,8 +23,9 @@ type observation =
 val observe : base_path:string -> original:Verifier_review_original.t ->
   Lane_addon_request_progress.t -> (observation, string) result
 (** Validate all recorded call bindings and read their exact root journals.
-    Only a terminal success with a single admitted, successfully settled
-    report invocation may supply a verdict. Unknown effects, ambiguous report
+    Only a terminal success or a settled cancellation with a single admitted,
+    successfully settled report invocation may supply a verdict. A failed
+    terminal never does. Unknown effects, ambiguous report
     histories and missing historical locators never authorize execution. A
     cancelled call whose effects are settled and that never invoked the report
     tool is [Cancelled_without_verdict], not a repair.

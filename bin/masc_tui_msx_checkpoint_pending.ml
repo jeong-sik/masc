@@ -1,7 +1,7 @@
 type binding = { operation_id : Keeper_operation_id.t; restore : bool; slot : string;
   base_path : string; masc_root : string }
 open Result.Syntax
-let directory ~masc_root = Filename.concat (Filename.concat masc_root "tui") "checkpoint-pending"
+let directory ~masc_root = Filename.concat (Filename.concat masc_root Common.tui_dirname) "checkpoint-pending"
 let name binding = Keeper_operation_id.to_string binding.operation_id ^ ".json"
 let fsync_directory path =
   let fd = Unix.openfile path [Unix.O_RDONLY; Unix.O_CLOEXEC] 0 in

@@ -10,7 +10,7 @@ type preparation = Prepared | Already_pending of entry | Not_prepared of string
 type prepare_stage = Before_decision | Append_requested | Existing of entry
 open Result.Syntax
 
-let journal_path ~masc_root = Filename.concat masc_root "tui-artifact-share-pending.jsonl"
+let journal_path ~masc_root = Filename.concat masc_root Common.tui_artifact_share_pending_filename
 
 let same_resource a b =
   a.base_path = b.base_path && a.masc_root = b.masc_root && a.artifact_id = b.artifact_id

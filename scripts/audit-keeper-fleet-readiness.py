@@ -414,19 +414,6 @@ def output_json(row: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
-def tool_succeeded_in_row(row: dict[str, Any], tool_name: str) -> bool:
-    if row.get("tool") == tool_name:
-        return row.get("ok") is True
-    calls = row.get("tool_calls")
-    if isinstance(calls, list):
-        for call in calls:
-            if not isinstance(call, dict):
-                continue
-            if call.get("tool_name") == tool_name and call.get("outcome") == "ok":
-                return True
-    return False
-
-
 def explicit_success(row: dict[str, Any]) -> bool:
     for key in ("ok", "success"):
         value = row.get(key)

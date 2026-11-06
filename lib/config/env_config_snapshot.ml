@@ -241,12 +241,6 @@ let decision_entries =
       "Decision audit ring buffer capacity";
   ]
 
-let docker_playground_entries =
-  [
-    entry ~default:"false" "MASC_KEEPER_DOCKER_PLAYGROUND"
-      "Route Execute through Docker container (feature flag)";
-  ]
-
 let keeper_sandbox_entries =
   [
     entry ~default:"128" "MASC_KEEPER_SANDBOX_PIDS_LIMIT"
@@ -377,8 +371,7 @@ let worker_entries =
 let category_specs () =
   [
     ( "server"
-    , server_entries @ path_entries
-      @ docker_playground_entries @ test_entries
+    , server_entries @ path_entries @ test_entries
       @ declared_entries "server" );
     "auth", auth_entries;
     "transport", transport_entries @ declared_entries "transport";
@@ -394,7 +387,6 @@ let category_specs () =
     "inference", agent_core_sse_entries @ local_runtime_entries;
     ( "keeper"
     , keeper_runtime_entries @ keeper_entries
-      @ docker_playground_entries
       @ keeper_sandbox_entries );
     ( "keeper_execution"
     , keeper_execution_entries @ decision_entries );

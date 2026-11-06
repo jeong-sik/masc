@@ -229,7 +229,6 @@ for suite_path in "${suites[@]}"; do
   # set -u on every bash, not only 4.4 and later.
   env MASC_BASE_PATH= GRAPHQL_API_KEY= ZAI_API_KEY= \
       MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false \
-      MASC_KEEPER_DOCKER_PLAYGROUND=false \
       ALCOTEST_VERBOSE=1 ${suite_env[@]+"${suite_env[@]}"} \
       "${timeout_command}" -s TERM -k "${TARGET_SUITE_KILL_GRACE_SEC}" "${TARGET_SUITE_TIMEOUT_SEC}" \
       "./${suite}.exe" 2>&1 | tee -a "${CI_TEST_LOG_FILE}" || rc=$?

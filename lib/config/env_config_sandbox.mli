@@ -166,11 +166,6 @@ module Runtime : sig
       Default names the keeper image's opam switch ahead of the system
       directories. *)
 
-  val docker_playground_enabled : unit -> bool
-  (** Route Execute through a Docker container instead of local
-      subprocess.
-      Env: [MASC_KEEPER_DOCKER_PLAYGROUND].  Default: [false]. *)
-
   val docker_playground_container_root : unit -> string
   (** Container-side root under which keeper playground bundles are
       mounted.  Host [<base_path>/.masc/playground/<keeper>/…] maps to

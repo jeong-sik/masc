@@ -10,17 +10,7 @@ include Keeper_tool_filesystem_runtime_read
 include Keeper_tool_filesystem_runtime_owned_read
 include Keeper_tool_filesystem_runtime_write_target
 include Keeper_tool_filesystem_runtime_write_types
-
-type created_directory_dispatch_fault =
-  { fault_stage : created_directory_stage
-  ; fault_exception : exn
-  }
-
-let created_directory_dispatch_fault_key
-      : created_directory_dispatch_fault Eio.Fiber.key
-  =
-  Eio.Fiber.create_key ()
-;;
+include Keeper_tool_filesystem_runtime_test_seams
 
 let append_capability ~on_cancelled file content =
   let outcome =
@@ -506,16 +496,6 @@ let confined_write_is_keeper_playground
     (normalized (Keeper_alerting_path.confined_root confined))
     (normalized (Keeper_sandbox.host_root_abs_of_meta ~config meta))
 ;;
-
-let before_write_authorization_key : (unit -> unit) Eio.Fiber.key =
-  Eio.Fiber.create_key ()
-;;
-
-let before_edit_snapshot_key : (unit -> unit) Eio.Fiber.key =
-  Eio.Fiber.create_key ()
-;;
-
-let before_result_manifest_key : (unit -> unit) Eio.Fiber.key = Eio.Fiber.create_key ()
 
 let store_edit_snapshots ~config ~before ~after =
   let store = Tool_blob_store.create ~base_path:config.Workspace.base_path in

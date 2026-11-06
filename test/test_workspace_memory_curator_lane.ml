@@ -197,8 +197,7 @@ let backend env base_path delivery : Runtime.For_testing.backend = {
       act=(fun ~arguments -> Protocol.act protocol ~arguments |> Result.map_error protocol_error);
       stop=(fun () -> Protocol.close protocol;Ok (Lane_addon_lifecycle.Released
         {engine=Lane_addon_lifecycle.Docker_engine "fixture-resource-launch";container_id=Some instance_id}));
-      host=Some {await_change=None;
-        list_requests=(fun () -> Protocol.host_requests protocol |> Result.map_error protocol_error);
+      host=Some {list_requests=(fun () -> Protocol.host_requests protocol |> Result.map_error protocol_error);
         deliver=(fun ~arguments -> if !delivery then Error "controlled reply loss before worker delivery"
           else Protocol.host_result protocol ~arguments |> Result.map_error protocol_error)}} in
     on_created connection;Ok connection);

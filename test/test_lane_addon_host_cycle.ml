@@ -81,8 +81,7 @@ let runner state : Exact.runner = fun ~before_dispatch:_ ~admission_class:_ ~lan
         | Ok output -> executed (Exact.Call_ended (Exact.Answered { output; slot = "fixture"; usage = None }))
         | Error detail -> executed (Exact.Call_ended (Exact.Invalid_output { detail })))
 
-let port ?await_change ?deliver_reply ?(during_delivery=fun _ -> ()) ?(before_listing = fun _ -> ()) worker : Runtime.For_testing.host_port = {
-  await_change;
+let port ?deliver_reply ?(during_delivery=fun _ -> ()) ?(before_listing = fun _ -> ()) worker : Runtime.For_testing.host_port = {
   list_requests = (fun () ->
     let requests= !(worker.listing) in
     before_listing requests;
@@ -100,7 +99,7 @@ let port ?await_change ?deliver_reply ?(during_delivery=fun _ -> ()) ?(before_li
     | Some reply -> reply arguments));
 }
 
-let backend ?await_change ?deliver_reply ?during_delivery ?before_listing ?exported_tool ?(before_stop = fun () -> ()) worker : Runtime.For_testing.backend = {
+let backend ?deliver_reply ?during_delivery ?before_listing ?exported_tool ?(before_stop = fun () -> ()) worker : Runtime.For_testing.backend = {
   start = (fun ~sw:_ ~state_owner:_ ~instance_id ~installation_id:_ ~package:_ ~binding:_ ~on_authority ~is_live_instance:_ ~on_created ->
     let connection : Runtime.For_testing.connection = {browser=None;
         await_exit = (fun () -> Eio.Fiber.await_cancel ());
@@ -124,7 +123,7 @@ let backend ?await_change ?deliver_reply ?during_delivery ?before_listing ?expor
       stop = (fun () -> before_stop (); Ok (Lane_addon_lifecycle.Released
         { engine = Lane_addon_lifecycle.Docker_engine "fixture-engine"; container_id = Some instance_id }));
       resource = Lane_addon_lifecycle.Container_resource instance_id;
-      host = Some (port ?await_change ?deliver_reply ?during_delivery ?before_listing worker) } in
+      host = Some (port ?deliver_reply ?during_delivery ?before_listing worker) } in
     ignore (on_authority (Lane_addon_lifecycle.Container_authority
       { runtime = Lane_addon_types.Docker; engine = Lane_addon_lifecycle.Docker_engine "fixture-engine" }));
     on_created connection; Ok connection);
@@ -162,7 +161,7 @@ let permit : Exact.execution_authority = fun ~store:_ ~declaration_id:_ ~package
   Ok {Exact.admission_class=Agent_core.Llm_provider.Admission_class.Standard;
       before_dispatch=(fun () -> Ok ()); with_execution=(fun run -> run ()); validate_output=(fun _ -> Ok ())}
 
-let with_installation ?await_change ?deliver_reply ?during_delivery ?owner_setup ?before_listing ?before_stop ?exported_tool ?(make_runner = runner) ?(authorize_request = permit) ?(manifest = manifest) ?(declaration = declaration) ?(listing = []) ?(mode = Answer (`Assoc [ "question", `String "Q?" ])) ?(consume = true) f =
+let with_installation ?deliver_reply ?during_delivery ?owner_setup ?before_listing ?before_stop ?exported_tool ?(make_runner = runner) ?(authorize_request = permit) ?(manifest = manifest) ?(declaration = declaration) ?(listing = []) ?(mode = Answer (`Assoc [ "question", `String "Q?" ])) ?(consume = true) f =
   let root = Filename.temp_dir "lane-host-cycle-" "" |> Unix.realpath in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
     let config_root = Filename.concat root ".masc/config" in
@@ -190,7 +189,7 @@ let with_installation ?await_change ?deliver_reply ?during_delivery ?owner_setup
                 let state = { mode = ref mode; resolutions = ref 0 } in
                 Runtime.register_exact_runner ~authorize_request (make_runner state);
                 let config = Workspace.default_config root in
-                Runtime.For_testing.with_backend (backend ?await_change ?deliver_reply ?during_delivery ?before_listing ?before_stop ?exported_tool worker) (fun () ->
+                Runtime.For_testing.with_backend (backend ?deliver_reply ?during_delivery ?before_listing ?before_stop ?exported_tool worker) (fun () ->
                   let unsubscribe=match owner_setup with None -> (fun () -> ()) | Some setup -> setup clock config in
                   Fun.protect ~finally:unsubscribe (fun () ->
                   ignore (Runtime.reconcile_configuration ~config ~directory |> unwrap);
@@ -397,92 +396,6 @@ let test_only_accepted_exact_results_wake_owner kind () =
     check int "no successful Exact delivery fact is invented" 0 !received)
 
 
-let test_withdrawal_event_before_stale_listing () =
-  let revision=ref 0 and ids=ref [] and changed=Eio.Condition.create () in
-  let listing_entered,listing_enter=Eio.Promise.create () in
-  let release_listing,release=Eio.Promise.create () in
-  let withdrawal_seen,seen=Eio.Promise.create () in
-  let held=ref false in
-  let before_listing requests=if requests<>[] && not !held then (
-    held:=true;Eio.Promise.resolve listing_enter ();Eio.Promise.await release_listing) in
-  let await_change ~after=Eio.Condition.loop_no_mutex changed (fun () ->
-    let state={Lane_addon_host_request.revision=string_of_int !revision;request_ids= !ids} in
-    if after=Some state.revision then None else (
-      if !revision=2 then ignore (Eio.Promise.try_resolve seen ());
-      Some (Ok state))) in
-  with_installation ~await_change ~before_listing (fun clock config worker state _root ->
-    Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve release ())) (fun () ->
-    await clock (fun () -> cycles config>=1);
-    worker.listing:=[exact "already-withdrawn"];ids:=["already-withdrawn"];
-    revision:=1;Eio.Condition.broadcast changed;
-    Eio.Promise.await listing_entered;
-    worker.listing:=[];ids:=[];revision:=2;Eio.Condition.broadcast changed;
-    Eio.Promise.await withdrawal_seen;
-    let previous=cycles config in
-    Eio.Promise.resolve release ();
-    await clock (fun () -> cycles config>previous);
-    check int "a stale listing cannot start an already withdrawn model call" 0 !(state.resolutions);
-    check int "a stale listing cannot deliver an answer" 0 (List.length !(worker.delivered))))
-
-let test_model_events_admit_and_withdraw_an_exact_scope () =
-  let revision=ref 0 and ids=ref [] and changed=Eio.Condition.create () in
-  let availability ()={Lane_addon_host_request.revision=string_of_int !revision;request_ids= !ids} in
-  let await_change ~after=Eio.Condition.loop_no_mutex changed (fun () ->
-    let state=availability () in if after=Some state.revision then None else Some (Ok state)) in
-  let cancelled, cancel=Eio.Promise.create () in
-  let entered, enter=Eio.Promise.create () in
-  let make_runner state ~before_dispatch ~admission_class ~lane_key:_ ~schema:_ (request:Exact.request) =
-    incr state.resolutions;
-    if request.request_id="withdraw" then Ok (fun ~validate:_ ->
-      Fun.protect ~finally:(fun () -> Eio.Promise.resolve cancel ()) (fun () ->
-        Eio.Promise.resolve enter ();
-        Eio.Fiber.await_cancel ()))
-    else runner {state with resolutions=ref 0} ~before_dispatch ~admission_class ~lane_key:"fixture" ~schema:(`Assoc []) request in
-  with_installation ~await_change ~make_runner (fun clock config worker state _root ->
-    await clock (fun () -> cycles config>=1);
-    let publish requests =
-      worker.listing:=requests;
-      ids:=List.map (text "request_id") requests;
-      incr revision;Eio.Condition.broadcast changed in
-    publish [exact "withdraw"];
-    Eio.Promise.await entered;
-    publish [];
-    Eio.Promise.await cancelled;
-    check int "one scoped model call was cancelled" 1 !(state.resolutions);
-    check int "a withdrawn command receives no late answer" 0 (List.length !(worker.delivered));
-    publish [exact "next-command"];
-    await clock (fun () -> List.length !(worker.delivered)=1);
-    check string "the original worker still receives a later command" "next-command"
-      (text "request_id" (List.hd !(worker.delivered)));
-    check int "events admit a later request without replaying the first" 2 !(state.resolutions))
-
-(* The entry a failed watcher stops names the watcher's failure while its
-   cleanup runs, so a cleanup that fails afterwards keeps it as the first. *)
-let test_a_failed_watcher_names_its_cause_during_cleanup () =
-  let broken, break = Eio.Promise.create () in
-  let stopping, stop = Eio.Promise.create () and released, release = Eio.Promise.create () in
-  let await_change ~after:_ = Eio.Promise.await broken; Error "watch stream closed" in
-  let before_stop () = ignore (Eio.Promise.try_resolve stop ()); Eio.Promise.await released in
-  with_installation ~await_change ~before_stop (fun clock config _worker _state _root ->
-    Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve release ())) (fun () ->
-    await clock (fun () -> cycles config >= 1);
-    Eio.Promise.resolve break ();
-    Eio.Promise.await stopping;
-    let expected =
-      Lane_addon_lifecycle.failed
-        (Lane_addon_lifecycle.Worker_failed "model request watcher: watch stream closed")
-      |> Lane_addon_lifecycle.failed_to_string
-      |> (fun message -> Lane_addon_types.phase_to_json (Lane_addon_types.Failed message))
-    in
-    let phases =
-      Runtime.dispatch ~access:Lane_addon_sources.Operator_configuration ~config ~operation:Runtime.Inspect (`Assoc [])
-      |> Result.map_error Runtime.error_to_string |> unwrap
-      |> member "instances" |> Yojson.Safe.Util.to_list
-      |> List.map (fun instance -> Yojson.Safe.to_string (member "phase" instance))
-    in
-    check (list string) "the stopping entry names the watcher's failure"
-      [ Yojson.Safe.to_string expected ] phases))
-
 let test_retirement_cancels_exact_before_worker_cleanup_finishes () =
   let entered, enter = Eio.Promise.create () and finished, finish = Eio.Promise.create () in
   let cleaning, clean = Eio.Promise.create () and released, release = Eio.Promise.create () in
@@ -563,7 +476,7 @@ export=["queue_question"]
     (fun clock config worker state _root ->
       current_worker := Some worker;
       (* Finish initialization before submitting, so startup cannot discover
-         this request. There is no await_change, registry event or reconcile. *)
+         this request. There is no registry event or reconcile. *)
       await clock (fun () -> cycles config >= 1 && !(worker.observations) >= 1);
       let before = cycles config in
       let export = match (Runtime.tool_export_snapshot ~config
@@ -1757,9 +1670,6 @@ let () =
             (test_an_exported_reply_starts_its_pending_host_work ~is_error:false)
         ; test_case "an exported worker error can retain pending host work" `Quick
             (test_an_exported_reply_starts_its_pending_host_work ~is_error:true)
-        ; test_case "model events admit and withdraw one exact scope" `Quick test_model_events_admit_and_withdraw_an_exact_scope
-        ; test_case "withdrawal event can precede a stale listing" `Quick test_withdrawal_event_before_stale_listing
-        ; test_case "a failed watcher names its cause during cleanup" `Quick test_a_failed_watcher_names_its_cause_during_cleanup
         ; test_case "retirement cancels exact before worker cleanup finishes" `Quick test_retirement_cancels_exact_before_worker_cleanup_finishes
         ; test_case "original tool destination survives replacement and reattachment" `Quick
             test_original_tool_destination_survives_replacement_and_reattachment

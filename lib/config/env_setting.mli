@@ -60,7 +60,6 @@ module String_opt_knob : sig
     | Imessage_self_chat_guid
     | Imessage_poll_interval_sec
     | Imessage_cursor_path
-    | Voice_realtime_ws_url
   [@@deriving enumerate]
 
   val env_name : t -> string

@@ -167,6 +167,25 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 - 남은 intent 포기, `Intent_pending`, 로그 레코드, `Committed`는 `Authz_zone.install`이 쓴다(B3b의 둘째 층). 구역의 commit과 같은 순서이고, append 전에 `Authz_state.apply`를 돌린다(`Authz_log.append`는 접기 함수를 돌리지 않는다).
 - 시험은 첫 실행이 남긴 것(설치 기록, 저장소 줄의 바이트와 0600, 로그 줄의 바이트, 값 `맞음`), 거절마다 파일이 그대로인 것(링크, 디렉터리, 설치 기록과 로그와 base path 안의 경로, 링크를 거친 경로, 정규 형태가 아닌 경로, NUL 포함), 죽은 상태마다 다시 불렀을 때의 결과(기록만, 빈 저장소, 남은 intent, 포기만 한 것, 잘린 intent 줄, 잘린 레코드 줄, 다른 저장소를 가리키는 기록), 두 단계 사이에 파일이 바뀐 경우(로그, 저장소의 intent, 저장소의 포기 줄, 설치 기록, 새로 생긴 저장소 파일)의 오류와 쓰는 순서(intent가 레코드보다 먼저다), 만들 수 없는 저장소와 쓸 수 없는 기록의 고장, 되감긴 로그의 거절(잃은 `Committed`의 해시)을 본다. `Committed`를 쓸 때만 실패하는 경우는 시험하지 못한다. 같은 구역 안이라 두 단계 사이에 끼어들 수 없다.
 
+**B2e 범위** (`Revocation_pending` 게이트, 2026-11-06)
+
+- B3c가 권한 축소 사건(Admin 회수, principal 비활성·삭제, 초대 취소)을 더했다. 구역은 들어올 때 포기한 축소 intent의 subject를 이미 막는다(`Authz_zone.Replay`, `Authz_state.hold_revocations`). 남은 것은 셋이다. 막힘을 푸는 출구가 없다. 쓰기가 실패한 직후에는 막지 않는다. 막힘을 묻는 공개 함수가 없다.
+- 실행 경로는 D2 전에 이 값을 읽지 않는다. lib과 bin에서 `Authz_decision`을 부르는 곳은 없다. 그래서 이 층에서 보이는 것은 구역의 거절, 게이트 값, `Authz_decision.allowed`의 `Revocation_pending` 거부까지다. `Single_user`는 구역을 열지 않으므로 동작이 같다.
+- 두 층으로 낸다.
+  - B2e-1: 게이트 값, 즉시 차단, 재시도 출구.
+    - 막힘은 subject 목록이 아니라 포기한 intent마다 한 항목(`intended_next_record_digest`와 change)이다. 어느 intent가 닫혔는지 가려야 해서다.
+    - 게이트 값은 구역의 함수로 묻는다. 그 subject의 항목이 남아 있으면 `Pending`이다. 로그나 외부 저장소가 멈춘 구역(`Log_stopped`, `Store_stopped`)은 모든 subject에 `Uncertain`으로 답한다(B2 범위의 "`Authz_log`가 멈추면 `AuthorizationUncertain`"). snapshot은 파일이 멈춘 것을 담지 않아서(B3b), 값을 snapshot에서 바로 읽지 않는다. D2가 이 값을 `facts.revocation`에 넣는다.
+    - 재시도 출구(설계 §8.3): 축소 사건 본문에 닫는 digest 목록 `closes`를 더한다. 구역은 축소 change를 commit할 때 같은 change(사건과 subject)의 남은 항목 digest를 `closes`에 채운다. 부른 쪽은 채우지 않는다. `apply`는 `closes`가 가리키는 항목만 지우고, 남은 항목이 아닌 digest는 거절한다. replay도 같은 `step`을 쓰므로 재기동한 결과가 같다. 로그를 되감으면 닫는 레코드도 사라져 막힘이 돌아온다. 2026-11-06에 라이브 `authz.jsonl`과 설치 기록이 없음을 확인했다. 축소 사건 본문만 바꾸는 hard cut이고 읽기 호환 코드는 두지 않는다.
+    - 즉시 차단(설계 §8.2 판정 3): 축소의 `Intent_pending`을 쓴 뒤 append가 실패하면(`Record_not_appended`) 구역은 그 자리에서 subject를 막은 상태를 발행한다. 다음 진입의 판정 3이 같은 intent를 포기하면 같은 항목이 된다.
+  - B2e-2: 적격 Admin의 취소.
+    - 새 Kind와 본문 `{ aborted; subject }`를 더한다. `admits`는 인증된 principal만 받는다.
+    - 적격(설계 §4.1)은 활성 Admin이고, 자신이 막히지 않았고, subject가 아닌 사람이다. subject가 초대면 그 초대를 쓴 Admin(owner)도 뺀다. 1단계에는 manager 관계가 없어 더 뺄 사람이 없다.
+    - 적격 Admin이 없으면 막힌 채 둔다. Local_operator가 쓰는 `Quarantined(No_eligible_admin)`는 2단계 F2다.
+    - 취소는 intent를 쓰지 않는다. 되감기면 막힘이 돌아오는 쪽이라서다.
+- 막힌 subject가 author인 레코드는 모두 거절한다(B3c, `Authz_state`). 설계 §8.3은 실행만 말한다. 막힌 Admin이 다른 사람의 권한을 바꾸는 것도 같은 회수를 무르는 일이라 같이 막는다. 이 결정을 여기 적는다.
+- 시험은 구역 표면(`commit`, `snapshot`, `open_at_start`)에서 한다. append가 실패한 직후의 막힘, 로그가 멈춘 뒤의 `Uncertain`, 재시도가 성공한 뒤의 풀림과 재기동 결과의 일치, 다른 change로는 풀리지 않음, 부적격 취소의 거절을 본다. `Authz_state`의 갈래는 단위 시험으로 본다. 실제 구역의 게이트 값을 `Authz_decision.allowed`에 넣어 `Revocation_pending` 거부가 나오는 것을 한 건 본다.
+- 남은 질문: 1단계 근거로 든 Admin의 사용자 `Disable`을 서버에서 쓰는 층이 표에 없다. C6 ③은 초대 발급·취소와 allowlist뿐이다. 그 길을 C6에 더할지는 C6을 시작할 때 정한다.
+
 **B3 범위**
 
 - 층은 넷이다(2026-11-05).
@@ -182,7 +201,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
   - `apply`는 새 상태와 함께 고수위에 쓸 변경을 돌려준다. 지금 받는 레코드는 mode 사건뿐이라 모두 변경이 있고, 구역은 늘 `Intent_pending` → append → `Committed`로 쓴다. 변경 없는 종류는 그 종류를 읽는 층이 타입을 바꿔 더한다.
   - 판정에 쓰는 `Probe`는 구역이 들고 있다. 로그에 붙인 레코드는 `Probe.add`로, 저장소에 쓴 항목은 새 함수 `Probe.store_moved`로 넣는다. 구역은 intent를 언제나 로그 head에서 쓰고, 저장소는 `Committed`가 intent의 digest(그 append의 첫 레코드)와 같아야 받는다. 그래서 로그를 다시 읽지 않고도 probe가 저장소와 로그를 함께 따라간다.
   - 상태는 `Atomic`에 든 불변 값 `{ state; head }` 하나로 발행한다. 읽는 쪽은 잠금 없이 읽는다. append가 성공하면 `Committed`를 쓰지 못해도 그 레코드를 넣은 상태를 발행한다. 로그에 있는 레코드를 빼면 다음 `apply`가 틀린 상태 위에서 돈다. 이때 부른 쪽은 실패를 받고, 다음 진입의 `Promote`가 `Committed`를 채운다. 그 실패로 저장소가 멈췄으면 다음 기동이 채운다.
-  - 발행한 상태는 파일이 멈췄다는 것을 담지 않고, 구역에는 그것을 읽는 함수도 아직 없다. `/health`의 `Recovery_store_unavailable`(§8.4)과, 권한 축소 사건의 intent가 남았을 때 바로 세우는 §8.3 차단이 필요한 층이 그 함수를 구역에 더한다. 지금 받는 레코드는 mode 사건뿐이라 아직 해당하는 층이 없다.
+  - 발행한 상태는 파일이 멈췄다는 것을 담지 않고, 구역에는 그것을 읽는 함수도 아직 없다. `/health`의 `Recovery_store_unavailable`(§8.4)과, 권한 축소 사건의 intent가 남았을 때 바로 세우는 §8.3 차단이 필요한 층이 그 함수를 구역에 더한다. §8.3 차단은 B2e가 더한다.
   - 이 층의 append는 레코드 하나다. 한 레코드에 사건 여럿을 담을지, 여러 레코드를 한 intent로 묶을지는 처음 필요한 층(B3c의 초대 소비)이 정한다. `Authz_log.append`는 중간에 끊기면 앞 레코드만 남을 수 있다.
   - B3b의 둘째 층: `Authz_bootstrap`이 첫 레코드를 `Authz_zone.install`로 쓴다. `install`은 부른 쪽이 연 두 손잡이 위에 그 호출 동안만 구역을 세우고, `commit`과 같은 함수로 쓴다. 다른 것은 들어갈 때의 판정 하나다. `commit`은 저장소에 답이 있어야 하고(`Answered`), `install`은 답이 없어야 한다(`Nothing_answered`). `Nothing_answered`는 포기할 `Fresh_bootstrap` intent를 함께 돌려준다. 그래서 bootstrap도 append 전에 `Authz_state.apply`를 돌리고(빈 상태는 `Fresh_bootstrap`만 받는다), 남은 intent를 포기하기 전에 `confirm_end`로 로그 끝을 확인한다. 확인하기 전에 그 intent의 레코드가 로그에 들어왔으면 포기하지 않고 로그를 멈춘다. 다음 부팅이 그 intent를 승격한다. 손잡이가 아는 로그에 레코드가 있으면(`Log_holds_records`) 아무것도 쓰지 않는다. bootstrap의 쓰기 오류는 구역 오류 하나(`Zone_failed`)로 받는다.
   - 부팅 판정은 지금 두 파일을 구역과 같은 접기(`Authz_zone.Replay`)로 읽고 손잡이를 버린다. 다계정이 된 로그는 `Multi_account_not_served`로 멈추므로 구역을 쥘 곳이 없다. 구역의 열기는 두 파일이 다 있을 때만 구역을 만들고, 부팅은 하나가 없는 경우(설치 기록 없음, 로그 없음, 빈 로그)도 판정한다. 그 경우들을 구역의 열기가 어떤 값으로 돌려줄지는 S1이 `Multi_account_uncertain`에서 무엇을 서빙할지와 함께 정하고, S1이 부팅에서 연 구역을 쥔다.

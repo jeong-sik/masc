@@ -114,6 +114,7 @@ type keepalive_cycle_status =
   | Turn_cycle_interrupted
   | Turn_cycle_crashed
   | Turn_cycle_busy of Keeper_owner.autonomous_block
+  | Turn_cycle_rested
 
 type work_heartbeat_action =
   | Refresh_work_heartbeat
@@ -123,12 +124,14 @@ type keepalive_cycle_action =
   | Defer_autonomous_work of Keeper_owner.autonomous_block
   | Skip_interrupted_turn
   | Record_turn_status of work_heartbeat_action
+  | Rest_without_turn_status
 
 let decide_keepalive_cycle_action = function
   | Turn_cycle_completed -> Record_turn_status Refresh_work_heartbeat
   | Turn_cycle_interrupted -> Skip_interrupted_turn
   | Turn_cycle_crashed -> Record_turn_status Preserve_work_heartbeat
   | Turn_cycle_busy block -> Defer_autonomous_work block
+  | Turn_cycle_rested -> Rest_without_turn_status
 ;;
 
 (* Which cycle status an Owner-registry rejection of the autonomous turn
@@ -185,8 +188,8 @@ type keepalive_turn_outcome = {
       (** The cycle admitted at least one event-queue stimulus and acked
           every entry of that batch on completion. *)
   after_failure : after_failure option;
-      (** What the cycle's turn failure leaves the next cycle; [None] keeps
-          the plain cadence. *)
+      (** What the cycle's turn failure or provider rest leaves the next
+          cycle; [None] keeps the plain cadence. *)
 }
 
 (* The loop-local hint is the in-process view of
@@ -692,6 +695,7 @@ let batch_disposition_of_cycle_outcome
     Batch_ack_attention_only
   | Some
       ( Cycle.Failed _
+      | Cycle.Rested _
       | Cycle.Input_required _
       | Cycle.Cancelled _
       | Cycle.Skipped _ )
@@ -730,6 +734,10 @@ let continuation_settlement_of_cycle_outcome
         failure.Keeper_unified_turn.route
     then Continuation_settled_failed { route = failure.Keeper_unified_turn.route }
     else Continuation_unsettled
+  | Some (Cycle.Rested _) ->
+    (* The provider refused the request that carried the evidence, so the
+       model never saw it; a fresh turn after the rest carries it again. *)
+    Continuation_unsettled
   | Some
       ( Cycle.Completed _
       | Cycle.Checkpointed _
@@ -927,6 +935,7 @@ let run_keepalive_unified_turn
           | Cycle.Input_required _
           | Cycle.Cancelled _
           | Cycle.Skipped _
+          | Cycle.Rested _
           )
       | None ->
         record_crashed_cycle_failure
@@ -1388,7 +1397,19 @@ let run_keepalive_unified_turn
            | Batch_no_action -> ());
       { meta = meta_after_cycle
       ; cycle_status =
-          (if !event_queue_failed then Turn_cycle_crashed else Turn_cycle_completed)
+          (if !event_queue_failed
+           then Turn_cycle_crashed
+           else
+             match !cycle_outcome_ref with
+             | Some (Cycle.Rested _) -> Turn_cycle_rested
+             | Some
+                 ( Cycle.Completed _
+                 | Cycle.Checkpointed _
+                 | Cycle.Input_required _
+                 | Cycle.Cancelled _
+                 | Cycle.Skipped _
+                 | Cycle.Failed _ )
+             | None -> Turn_cycle_completed)
       ; stimuli_acked = !stimuli_acked
       ; after_failure =
           (match !cycle_outcome_ref with
@@ -1397,6 +1418,15 @@ let run_keepalive_unified_turn
                ~now:(Time_compat.now ())
                ~assignment_id:(Keeper_meta_contract.runtime_id_of_meta meta)
                failure
+           | Some
+               (Cycle.Rested
+                  { rest = { Keeper_turn_driver.release_at; waiting_on; basis }
+                  ; meta = _
+                  ; deferred_runtime_lane = _
+                  }) ->
+             (* The rest is the wait [next_dispatch_after_failure] gave
+                when the turn ended; it is not decided again here. *)
+             Some (Wait_for_path_release { release_at; waiting_on; basis })
            | Some
                ( Cycle.Completed _
                | Cycle.Checkpointed _
@@ -1459,7 +1489,8 @@ let run_keepalive_unified_turn
          ~keeper_name:meta_after_triage.name
          "keeper owner rejected autonomous turn: %s"
          (Keeper_owner_registry.command_error_to_string error)
-     | Turn_cycle_completed | Turn_cycle_interrupted | Turn_cycle_busy _ -> ());
+     | Turn_cycle_completed | Turn_cycle_interrupted | Turn_cycle_busy _
+     | Turn_cycle_rested -> ());
     { meta = meta_after_triage
     ; cycle_status
     ; stimuli_acked = false
@@ -1778,6 +1809,17 @@ let run_heartbeat_loop
              ~keeper_name:m.name
              "%s: operator-interrupted cycle records no turn status or work-health refresh"
              m.name
+         | Rest_without_turn_status ->
+           (* The provider stated when its quota resets and the turn had no
+              effect: neither [Turn_succeeded] nor [Turn_failed] is true of
+              it, so the Keeper's phase and failure cause stay as they were.
+              The cycle itself ran, so it renews the work-health lease. *)
+           refresh_work_as_heartbeat
+             ~ctx
+             ~meta_after_proactive
+             ~proactive_warmup_elapsed
+             ~work_as_hb
+             ~consecutive_failures
          | Record_turn_status _ when lifecycle_blocked -> ()
          | Record_turn_status work_heartbeat_action ->
              (* The registry tracks failure count as observation. A

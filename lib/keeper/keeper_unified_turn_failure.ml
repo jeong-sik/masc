@@ -7,7 +7,9 @@
    fleet health stayed [ok] (#31958), and its "every exemption carries its
    own compensating accounting" invariant was enforced only by a comment
    that drifted from the code. Failure classification still exists for
-   telemetry and routing; it no longer decides crash accounting. *)
+   telemetry and routing; it no longer decides crash accounting. A provider's
+   dated quota refusal with no tool effect is not a turn failure: the turn
+   ends as [Turn_rested] and never reaches this function (RFC §2.4). *)
 let record_failure_observation
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)

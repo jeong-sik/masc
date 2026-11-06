@@ -3,7 +3,7 @@ rfc: "turn-failure-visible-stop"
 title: "턴 실패를 숨기지 않고 상태로 보여준다 — 실패 면제와 예산 계정을 걷어낸다"
 status: Implemented
 created: 2026-08-31
-updated: 2026-09-01
+updated: 2026-11-06
 author: claude
 supersedes: []
 superseded_by: null
@@ -121,7 +121,37 @@ MASC direct-provider HTTP 레인은 내부 재시도 루프가 없어 턴당 한
 케이던스(5초)당 1회의 실패 기록은 유한하고 가시적이다. 재시도 속도를 더
 줄이고 싶다면 그때 계약 supersession을 별도로 제안한다.
 
-### 2.4 결정론 경계
+### 2.4 provider 가 리셋 시각을 말한 한도 거절 (2026-11-06, MASC task-3264)
+
+이 경우는 실패를 면제하는 것이 아니라 턴의 다른 끝이다.
+
+- 조건 세 가지가 모두 맞으면 턴은 실패가 아니라 `Turn_rested` 로 끝난다.
+  - provider 가 자기 한도를 이유로 요청을 거절했고, 리셋 시각을 말했다.
+  - 거절된 시도는 도구 효과를 내지 않았다.
+  - 다음 dispatch 가 그 경로가 쉬는 동안 기다린다.
+- 판정은 typed route 하나로 한다.
+  - route 가 `Retry_after_observed { retry_class = Hard_quota; retry_after }` 이다.
+  - `usable_retry_after` 가 시각을 준다.
+  - 효과를 냈거나 효과를 관측하지 못한 시도는 fence 가 걸린다. fence 가 걸린
+    시도의 route 는 `Exhausted_visible_alive` 라서 조건에 들지 않는다.
+  - 쉬는 시각은 `next_dispatch_after_failure` 가 준 대기와 같다.
+- 쉬는 중인 cycle 은 streak 를 올리지도 지우지도 않는다.
+  - 상태머신에 `Turn_succeeded` 도 `Turn_failed` 도 보내지 않는다.
+  - registry 실패 원인과 `Health` 도 그대로다.
+  - 앞선 실패가 있었다면 다음 성공까지 Failing 으로 남는다.
+- 옛 면제와 다른 점은 두 가지다.
+  - 옛 면제는 실패를 `Turn_succeeded` 로 보고했다. 쉬는 중은 성공으로 보고하지 않는다.
+  - 옛 면제는 다음 케이던스에 같은 요청을 다시 보냈다(#31958). 쉬는 중에는
+    provider 가 말한 시각까지 그 경로로 요청을 보내지 않는다.
+- 조건에 들지 않아 계속 실패로 세는 것:
+  - 시각이 없는 한도 거절. 크레딧 부족처럼 운영자가 손써야 한다.
+  - `Rate_limited`. 짧은 대기를 계속 말하는 throttle 은 실패 기록 없이
+    영원히 쉬게 된다.
+  - fence 가 걸린 거절.
+- 턴 수준 기록은 거절 사실이라 그대로 남는다. turn FSM `Failed`,
+  decision record `Failed`, `FailureRoute` 지표가 그렇다.
+
+### 2.5 결정론 경계
 
 - 결정론: streak 카운트, 리셋, 상태머신 전이. 전부 순수 계산이며 단위
   테스트로 증명한다.

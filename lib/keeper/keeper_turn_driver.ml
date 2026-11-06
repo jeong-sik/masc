@@ -614,6 +614,42 @@ let next_dispatch_after_failure ~now ~route ~assignment_id deferred =
     observed_walk_rest ()
 ;;
 
+type provider_rest =
+  { release_at : float
+  ; waiting_on : string
+  ; basis : wait_basis
+  }
+
+(* The route carries every fact the rest needs. [Hard_quota] comes only from
+   the typed [PaymentRequired] and [HardQuota] constructors. An attempt whose
+   tool effect was attempted, or could not be observed, is fenced, and a
+   fenced attempt routes as [Exhausted_visible_alive] at either boundary. A
+   usable [retry_after] is the time the provider stated. The wait is the one
+   [next_dispatch_after_failure] gives, so the rest names the time the
+   heartbeat sleeps until. *)
+let provider_rest_of_failure ~now ~route ~assignment_id deferred =
+  let module Route = Keeper_runtime_failure_route in
+  let rest_of_wait () =
+    match next_dispatch_after_failure ~now ~route ~assignment_id deferred with
+    | Some (Wait_until { release_at; waiting_on; basis }) ->
+      Some { release_at; waiting_on; basis }
+    | Some (Dispatch_now _) | None -> None
+  in
+  match route with
+  | Route.Retry_after_observed { retry_class = Route.Hard_quota; retry_after } ->
+    (match Route.usable_retry_after retry_after with
+     | Some _ -> rest_of_wait ()
+     | None -> None)
+  | Route.Retry_after_observed
+      { retry_class =
+          ( Route.Rate_limited | Route.Provider_capacity | Route.Empty_completion _
+          | Route.Server_error | Route.Network_transient | Route.Provider_timeout
+          | Route.Local_admission_timeout )
+      ; retry_after = _
+      }
+  | Route.Rotate_now _ | Route.Exhausted_visible_alive _ -> None
+;;
+
 (* Two lanes name the same hint. The order a resumed lane fixed is not part of
    the hint. *)
 let equal_deferred_runtime_lane left right =

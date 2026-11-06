@@ -487,6 +487,33 @@ scripts/measure-tool-efficiency.py --base-path <base> --from-date <배포 다음
 - `docs/evidence/request-context-2026-11/measure_request_context.py` 결과의 `model_requests.mean_input_tokens`(357,004)와 `captured_request_bodies.by_keeper` 의 `msx-retro-mania` 행(`body_bytes_p50` 11,551,143, `unanswered_body_bytes` 2,786,260,898, `images_p50` 113)
 - `docs/evidence/blob-input-2026-11/measure_blob_inputs.py` 결과의 `blob_calls.outcome_alone.refused_before_run`(2,463)과 `by_day`, `by_model.with_stored_demotion_percent`(83.4), `turns_by_model`. `turns_by_model` 은 `deepseek-v4.1-flash` 의 `stored_demotion` 행(1,093턴, 호출 951건)과 `no_stored_demotion` 행(388턴, 호출 0건)을 봐요. 배포 시각 전후는 `--split <시각>` 으로 나눠요. 창이 길어서 날짜별 `by_day` 로 비교해요.
 
+## 10. 배포 뒤 첫 값 (11-06, UTC)
+
+서버는 이 날 08:53Z, 09:11Z, 09:50Z, 10:17Z 에 다시 떴어요. 끝난 턴의 도구 결과를 마커로 보내는 규칙(#49185)은 09:50:51Z 부팅부터 돌고, `until_github_run` 일정 감시는 08:53Z 부팅부터 돌아요. 아래는 가장 이른 값이라 창이 짧고(85분 안팎) 재시작이 끼어 있어요. 24시간 이상 쌓이면 §9 의 명령으로 다시 재요.
+
+### 마커 규칙
+
+- 2 KB 이상 늙은 도구 결과가 프롬프트 바이트에서 차지하는 몫은 앞 창(08:00~09:50Z) 18.95%(103요청)에서 뒤 창(09:52~11:17Z) 1.72%(136요청)로 내려갔어요. 두 창에 다 나온 Keeper 다섯으로 맞추면 20.7% 에서 0.9% 예요.
+- 턴 첫 요청의 캐시 적중은 턴이 19개 이상인 두 간격 구간에서 내려가지 않았어요. 1분 미만 58.5% → 57.1%, 1~5분 72.2% → 75.6% 예요.
+- 뒤 창 89분 동안 `keeper_artifact_read` 는 도구 호출 1,253개 중 8개(0.64%)였고, 1개가 `artifact does not exist` 로 실패했어요. 그 해시는 같은 Keeper 의 약 29일 전 기록에도 있어요.
+- 표, 조심할 점, 재는 명령은 `docs/evidence/aged-tool-results-2026-11/README.md` 의 "규칙을 넣은 뒤"에 있어요.
+
+### 일정 감시의 첫 채택
+
+- 09:02:50Z 에 `sangsu` 가 run 42192032416 을 `until_github_run` 으로 걸었어요(대체 기한은 40분 뒤). run 은 09:12:03Z 에 끝났고, 일정은 54초 뒤에 당겨지고, 91초 뒤에 Keeper 의 이벤트 큐에 들어가고, 135초 뒤에 턴이 시작됐어요. 한 번의 측정이고 중간에 서버 재시작이 끼었어요. 그 턴은 `claude_code` 한도(429)로 바로 끝났어요.
+- 11-05~06 의 60초 이상 Execute 306호출(27.72시간) 가운데 `sleep` 을 낀 실행 상태 조회가 101호출 12.71시간(45.8%)이고 Keeper 8명이 불렀어요. 이 시간이 줄었는지는 24시간 이상 지나야 알 수 있어요.
+
+### 위임 실패
+
+- 11-01 ~ 11-06T09Z 의 agent 채널 작업 1,371개 중 233개(17.0%)가 실패했어요.
+- 가장 큰 원인은 서버 재시작이에요. SIGTERM 은 68번이고, 그 60초 안에 `Turn_cancelled` 로 끝난 위임이 106개예요. 죽은 위임이 돈 시간은 중앙값 23분이고 합계 61.8시간이에요. 위임을 보낸 쪽은 "The operation was cancelled." 를 받아요. 이슈 #49289 에 측정과 후보를 적었고 코드는 바꾸지 않았어요. `Turn_cancelled` 가 owner 종료 의미로 `test_keeper_owner`·`test_keeper_wire_terminal` 에 굳어 있어서예요.
+- 나머지는 한도·쿼터 54, `auth status` 잘림 26, `provider_attempt_effect_fenced` 19, `reasoning_replay` 11, DNS 7 이에요.
+
+### 통계 API
+
+- `GET /api/v1/tool-metrics/series` 는 배포 서버에서 값을 줘요. 24시간 합계는 13,711호출이고, `tool_execute` 가 7,742호출로 기록된 시간의 96.4% 예요.
+- `tool=Execute` 처럼 공개 이름으로 부르면 25칸이 모두 비었어요(`tool=tool_execute` 는 7,821호출). 필터가 내부 이름만 맞춰서예요. #49287 이 공개 이름도 받게 해요.
+
 ## 부록: #47642 에 달 코멘트 초안
 
 원장을 10-19 ~ 11-04T19:10Z 로 넓혀 다시 세고, 요청 기록을 열어 `_blob` 이 모델 눈에 들어오는 길을 확인했어요. 이슈 본문에 적힌 원인 가운데 Recent Actions 는 두 번째 길이에요.

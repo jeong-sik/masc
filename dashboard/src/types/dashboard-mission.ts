@@ -46,19 +46,6 @@ export interface DashboardMissionAttentionQueueItem {
   related_agent_names: string[]
   evidence?: unknown
   evidence_preview: string[]
-  grounded_verdict?: GroundedVerdict | null
-}
-
-export interface GroundedVerdictEvidenceRef {
-  path: string
-  line?: number | null
-  quote: string
-}
-
-export interface GroundedVerdict {
-  verdict: string
-  reason?: string | null
-  evidence: GroundedVerdictEvidenceRef[]
 }
 
 export interface DashboardMissionAgentBrief {
@@ -268,9 +255,7 @@ export interface OperatorDigest {
   active_guidance_layer?: string | null
   active_summary?: OperatorGuidanceSummary | null
   active_recommended_actions?: OperatorRecommendedAction[]
-  active_recommendation_source?: string | null
   active_recommendation_summary?: OperatorGuidanceSummary | null
-  fallback_recommended_actions?: OperatorRecommendedAction[]
   recommendation_summary?: OperatorGuidanceSummary | null
   root?: OperatorNamespaceSnapshot
   attention_items: OperatorAttentionItem[]

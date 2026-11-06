@@ -1,4 +1,4 @@
-import { isRecord, asString, asNumber, asStringArray, extractArray } from './components/common/normalize'
+import { isRecord, asString, asNumber, asStringArray } from './components/common/normalize'
 import {
   normalizeAttentionItem,
   normalizeRecommendedAction,
@@ -8,53 +8,7 @@ import type {
   DashboardMissionAgentBrief,
   DashboardMissionInternalSignal,
   DashboardMissionKeeperBrief,
-  GroundedVerdict,
-  GroundedVerdictEvidenceRef,
 } from './types'
-
-function parseJsonPayload(raw: unknown): unknown {
-  if (typeof raw !== 'string') return raw
-  try {
-    return JSON.parse(raw) as unknown
-  } catch {
-    return raw
-  }
-}
-
-function normalizeGroundedVerdictEvidenceRef(raw: unknown): GroundedVerdictEvidenceRef | null {
-  if (!isRecord(raw)) return null
-  const path = asString(raw.path)
-  const quote = asString(raw.quote)
-  if (!path || !quote) return null
-  const line = asNumber(raw.line)
-  return {
-    path,
-    line: typeof line === 'number' && Number.isInteger(line) && line > 0 ? line : null,
-    quote,
-  }
-}
-
-function normalizeGroundedVerdict(raw: unknown): GroundedVerdict | null {
-  const parsed = parseJsonPayload(raw)
-  if (!isRecord(parsed)) return null
-  const verdict = asString(parsed.verdict)
-  if (!verdict) return null
-  return {
-    verdict,
-    reason: asString(parsed.reason) ?? null,
-    evidence: extractArray(parsed.evidence)
-      .map(normalizeGroundedVerdictEvidenceRef)
-      .filter((item): item is GroundedVerdictEvidenceRef => item !== null),
-  }
-}
-
-function normalizeGroundedVerdictFromEvidence(evidence: unknown): GroundedVerdict | null {
-  const parsed = parseJsonPayload(evidence)
-  const direct = normalizeGroundedVerdict(parsed)
-  if (direct) return direct
-  if (!isRecord(parsed)) return null
-  return normalizeGroundedVerdict(parsed.grounded_verdict)
-}
 
 export function normalizeAttentionQueueItem(raw: unknown): DashboardMissionAttentionQueueItem | null {
   if (!isRecord(raw)) return null
@@ -63,10 +17,6 @@ export function normalizeAttentionQueueItem(raw: unknown): DashboardMissionAtten
   const summary = asString(raw.summary)
   const targetType = asString(raw.target_type)
   if (!id || !kind || !summary || !targetType) return null
-  const evidence = raw.evidence
-  const groundedVerdict =
-    normalizeGroundedVerdict(raw.grounded_verdict)
-    ?? normalizeGroundedVerdictFromEvidence(evidence)
   return {
     id,
     kind,
@@ -75,9 +25,8 @@ export function normalizeAttentionQueueItem(raw: unknown): DashboardMissionAtten
     target_type: targetType,
     target_id: asString(raw.target_id) ?? null,
     related_agent_names: asStringArray(raw.related_agent_names),
-    evidence,
+    evidence: raw.evidence,
     evidence_preview: asStringArray(raw.evidence_preview),
-    grounded_verdict: groundedVerdict,
   }
 }
 

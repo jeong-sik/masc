@@ -120,11 +120,7 @@ export function normalizeOperatorDigest(raw: unknown): OperatorDigest {
     active_recommended_actions: extractArray(root.active_recommended_actions)
       .map(normalizeRecommendedAction)
       .filter((item): item is OperatorRecommendedAction => item !== null),
-    active_recommendation_source: asString(root.active_recommendation_source) ?? null,
     active_recommendation_summary: normalizeGuidanceSummary(root.active_recommendation_summary),
-    fallback_recommended_actions: extractArray(root.fallback_recommended_actions)
-      .map(normalizeRecommendedAction)
-      .filter((item): item is OperatorRecommendedAction => item !== null),
     recommendation_summary: normalizeGuidanceSummary(root.recommendation_summary),
     root: normalizeNamespace(root.root),
     attention_items: extractArray(root.attention_items)

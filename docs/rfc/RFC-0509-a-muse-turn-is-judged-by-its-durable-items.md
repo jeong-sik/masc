@@ -159,14 +159,19 @@ PR 하나로 한다. 두 모듈의 타입이 같이 바뀐다.
 - `Runtime_muse_serve`
   - durable 범위 읽기와 그 해석을 나눈다. 답 글 해석은 완료된 턴에만 쓴다.
   - 실패한 typed terminal 에도 범위를 읽는다.
-  - 이 턴이 조용했는지를 terminal 결과에 닫힌 합타입으로 싣는다. 조용함, 바깥 항목 있음, 읽지 못함의 세 경우다.
+  - 이 턴이 조용했는지를 닫힌 합타입 `turn_items` 로 만든다.
+    - 조용함, 바깥 항목 있음, 읽지 못함의 세 경우다.
+    - terminal 직후 stream event `Turn_items_read` 로 한 번 보낸다.
 - `Keeper_muse_runtime`
-  - `on_turn_started` 의 무조건 표시를 지운다.
-  - 턴이 끝날 때 조용하다는 증명이 없으면 `observe_transport_uncertain` 을 부른다.
+  - `on_turn_started` 의 표시는 남긴다.
+    - 증명 없이 끝나는 길은 모두 `Observation_unavailable` 로 남는다.
+    - 예외, 연결 끊김, 시간 초과, host 종료, 취소가 여기에 든다.
+  - 조용하다는 증명이 오면 그 표시를 `No_effect_observed` 로 되돌린다.
+    - compare-and-set 이라 `Effect_attempted` 는 되돌리지 않는다.
   - `failure_leaves_effects_unknown` 은 `Acknowledged` 에서 조용하다고 증명된 terminal 오류만 `false` 로 둔다.
-- 시험(기존 `test_keeper_muse_runtime`, `test_runtime_muse_serve` 의 가짜 호스트)
+- 시험(`test_keeper_muse_runtime` 의 가짜 호스트)
   - 사용자 입력과 추론 뒤 한도 거절이 오면 `No_effect_observed` 다.
-  - `toolCall` 항목 뒤 한도 거절이 오면 `Observation_unavailable` 이다.
+  - `toolCall` 항목 뒤 실패가 오면 `Observation_unavailable` 이다. 기존 시험이 이미 본다.
   - durable 읽기가 실패하면 `Observation_unavailable` 이다.
   - durable 범위에 완료된 `agentMessage` 가 있으면 `Observation_unavailable` 이다.
   - live 로 답 글 조각이 온 뒤 그 글이 완료되지 않은 채 한도 거절이 오면 `Observation_unavailable` 이다.

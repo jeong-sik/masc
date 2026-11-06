@@ -155,10 +155,12 @@ type record_acceptance =
 
 exception Candidate_unavailable of string
 
+let dirname = "board_attention_candidates"
+
 let candidate_dir base_path =
   Filename.concat
     (Common.masc_dir_from_base_path ~base_path)
-    "board_attention_candidates"
+    dirname
 ;;
 
 let candidate_path ~base_path ~keeper_name =

@@ -50,10 +50,6 @@ let metric_grpc_events_delivered = Otel_metric_store_core.declare_counter "masc_
 let metric_grpc_events_dropped = Otel_metric_store_core.declare_counter "masc_grpc_events_dropped_total"
 let metric_ws_sessions = Otel_metric_store_core.declare_gauge "masc_ws_sessions_total"
 
-let metric_sidecar_schema_field_types_json_parse_failures =
-  Otel_metric_store_core.declare_counter "masc_sidecar_schema_field_types_json_parse_failures_total"
-;;
-
 let metric_ws_bytes_cache_hits = Otel_metric_store_core.declare_counter "masc_ws_bytes_cache_hits_total"
 let metric_ws_bytes_cache_misses = Otel_metric_store_core.declare_counter "masc_ws_bytes_cache_misses_total"
 let metric_ws_dashboard_hello_latency_seconds = "masc_ws_dashboard_hello_latency_seconds"

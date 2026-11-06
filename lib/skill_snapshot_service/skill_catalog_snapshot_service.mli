@@ -63,15 +63,6 @@ val install_publication_observer : (unit -> unit) -> unit
     skills again. An
     observer failure is logged and never changes the publication. *)
 
-val refresh_with_sources :
-  workspace:workspace -> user_home:string option ->
-  sources:additional_source list ->
-  read_config:(unit -> config_observation) -> publication
-(** Atomically replace explicitly provided package sources and publish them
-    with the normal configured sources. Later [refresh] calls retain this
-    source selection. Invalid additions are diagnosed individually and cannot
-    replace the configured catalog with an error. No source or read bound is
-    written into runtime.toml. *)
 val additional_source_diagnostics :
   workspace:workspace -> additional_source_diagnostic list
 val has_additional_sources : workspace:workspace -> bool

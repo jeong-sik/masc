@@ -60,11 +60,6 @@ val with_initial_configuration :
     that lock: early recovery's [No_journal] is not a later read permit. The
     callback's own missing/invalid-model result is preserved as its value. *)
 
-val latest_keeper_config_journal_recovery_report :
-  unit -> Keeper_config_journal.report option
-(** Last config-journal startup recovery observed by this process.
-    Read-only process-local projection, not recovery authority. *)
-
 val latest_keeper_msg_recovery_observation :
   unit -> Keeper_msg_async.recovery_report option
 (** Last startup recovery report observed by this process. This is a read-only

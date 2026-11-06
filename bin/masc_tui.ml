@@ -4100,6 +4100,8 @@ let settle_tools_skill_read state ~generation part =
   if generation = state.tools_skill_generation then
     state.tools_skill_pending <- List.filter (fun pending -> pending <> part) state.tools_skill_pending
 
+(* [true] when the answer belongs to the request still in flight; an answer
+   for a superseded generation settles nothing and reports [false]. *)
 let settle_tools_read state ~generation part =
   match state.tools_read_inflight with
   | Some request when request.tri_generation = generation ->
@@ -4107,8 +4109,9 @@ let settle_tools_read state ~generation part =
       state.tools_read_inflight <-
         (match pending with
          | [] -> None
-         | _ -> Some { request with tri_pending = pending })
-  | Some _ | None -> ()
+         | _ -> Some { request with tri_pending = pending });
+      true
+  | Some _ | None -> false
 
 let normalize_tools_skill_cursor state =
   let count = List.length (tools_skill_profiles state) in
@@ -27772,7 +27775,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Error detail -> report_action state "error" ("Skill evidence lookup failed: " ^ detail)
         | Ok json -> state.tools_skill_evidence <- Some (key, json))
   | Tools_msg (Tools_read_loaded (Tools_activations_loaded { generation; keeper; result })) ->
-      settle_tools_read state ~generation Tools_activations_read;
+      let (_ : bool) = settle_tools_read state ~generation Tools_activations_read in
       let selected_name = Option.map (fun (row : keeper) -> row.k_name) (selected_keeper state) in
       if generation = state.tools_request_generation
          && Option.equal String.equal (Some keeper) selected_name then (

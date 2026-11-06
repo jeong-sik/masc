@@ -98,3 +98,6 @@ val write_error_to_string : write_error -> string
     {!read} says which. A write that succeeded is told to
     {!Keeper_memory_health_input}. *)
 val write : keepers_dir:string -> keeper_id:string -> t -> (unit, write_error) result
+
+val install_commit_observer :
+  (keepers_dir:string -> keeper_id:string -> unit) -> (unit -> unit)

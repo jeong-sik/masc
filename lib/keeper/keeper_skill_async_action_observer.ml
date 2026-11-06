@@ -4,7 +4,11 @@ module Delivery = Keeper_composition_result_delivery
 module Fact = Keeper_skill_async_action
 module Invocation = Agent_core.Tool_contract.Invocation
 
-type handle = { trace_id : Keeper_id.Trace_id.t; delivery : Keeper_skill_async_delivery.t }
+type handle =
+  { trace_id : Keeper_id.Trace_id.t
+  ; keeper_name : string  (** The Keeper whose original run recorded the delivery. *)
+  ; delivery : Keeper_skill_async_delivery.t
+  }
 type scope = unit ref * unit ref
 type pending = { invocation : Invocation.t; tool_name : string; runtime_id : string; handles : handle list; scope : scope }
 type snapshot = { active : handle list; pending : pending list; scope : scope }
@@ -42,7 +46,9 @@ let record_delivery state (observation : Delivery.observation) =
       (match delivery.presentation with
        | Manifest_reference -> ()
        | Inline_result ->
-         let handle = {trace_id=Recorder.bound_trace_id (Delivery.original_recorder observation.binding);delivery} in
+         let original = Delivery.original_recorder observation.binding in
+         let handle =
+           {trace_id=Recorder.bound_trace_id original;keeper_name=Recorder.bound_keeper_name original;delivery} in
          if same_scope state.snapshot.scope scope && Recorder.current_runtime_id state.context = Some delivery.runtime_id
          then begin
            (* Read the owner again after the runtime callback: it may have
@@ -62,7 +68,8 @@ let record state ~handles ~runtime_id ~tool_name ~occurrence =
     let* fact = Fact.make ~delivery_sha256:(Keeper_skill_async_delivery.identity handle.delivery)
       ~physical_turn_ref:(Recorder.physical_turn_ref state.context) ~runtime_id ~tool_name
       ~occurrence ~observed_at:(Masc_domain.now_iso ()) |> Result.map_error (fun detail -> Invalid_evidence detail) in
-    let* _ = Keeper_skill_activation_ledger.observe_async_action ~config:state.config ~trace_id:handle.trace_id fact
+    let* _ = Keeper_skill_activation_ledger.observe_async_action ~config:state.config
+      ~keeper_name:handle.keeper_name ~trace_id:handle.trace_id fact
       |> Result.map_error (fun error -> Ledger_failed error) in
     Ok (count+1)) (Ok 0) handles
 let take_pending state ~invocation ~tool_name =

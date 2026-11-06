@@ -103,7 +103,7 @@ let test_no_answer_waits_for_input () =
 let test_an_unasked_answer_asks_for_nothing () =
   List.iter
     (fun (name, answer) ->
-      let state = Types.create_state ~workspace:"test" ~port:0 ~refresh_interval:0. () in
+      let state = Types.create_state ~workspace:"test" ~port:0 () in
       Alcotest.(check bool)
         (name ^ " asks the loop for nothing")
         true
@@ -125,7 +125,7 @@ let confirm_workspace (state : Types.state) =
   state.view <- Types.Code
 
 let test_a_committed_save_rereads_its_file () =
-  let state = Types.create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = Types.create_state ~workspace:"" ~port:0 () in
   confirm_workspace state;
   let reading, read =
     match Fetched.start ~equal:String.equal state.code_file ~key:"src/a.ml" with

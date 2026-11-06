@@ -7,7 +7,7 @@
 open Masc_tui_types
 open Masc_tui_render_prim
 
-let make_state () = create_state ~workspace:"" ~port:0 ~refresh_interval:0. ()
+let make_state () = create_state ~workspace:"" ~port:0 ()
 
 let notch state ~drawn direction =
   Option.iter (apply_clamped_scroll state)

@@ -99,7 +99,7 @@ let producer_json = function
        "activation",option_json Keeper_skill_activation_recorder.bound_context_to_yojson activation;
        "origin",named_origin_to_yojson origin]
 
-let producer_of_json json =
+let producer_of_json ~keeper_name json =
   match json with
   | `Assoc fields ->
     (match List.assoc_opt "kind" fields with
@@ -109,7 +109,7 @@ let producer_of_json json =
        let skill_reference = match Skill_reference.of_yojson (field "skill_reference" fields) with
          | Ok reference -> reference | Error _ -> refuse "invalid exact named Skill reference" in
        let activation = optional (fun json ->
-         match Keeper_skill_activation_recorder.bound_context_of_yojson json with
+         match Keeper_skill_activation_recorder.bound_context_of_yojson ~keeper_name json with
          | Ok context -> context | Error error -> refuse (Keeper_skill_activation_recorder.error_to_string error))
            (field "activation" fields) in
        let origin = named_origin_of_json ~activation (field "origin" fields) in
@@ -165,13 +165,14 @@ let source_of_json json =
   let fields = object_fields ["keeper_name"; "composition_run_id"; "draft_reference"; "run_reference"; "parent_tool_use_id"; "source_turn"; "source_task_id"; "producer"] json in
   let composition_run_id = match Plan.Composition_run_id.of_string (string (field "composition_run_id" fields)) with
     | Ok id -> id | Error _ -> refuse "invalid UUIDv7 composition run identity" in
-  let source = {keeper_name = string (field "keeper_name" fields); composition_run_id;
+  let keeper_name = string (field "keeper_name" fields) in
+  let source = {keeper_name; composition_run_id;
     draft_reference = reference_of_json (field "draft_reference" fields);
     run_reference = reference_of_json (field "run_reference" fields);
     parent_tool_use_id = string (field "parent_tool_use_id" fields);
     source_turn = nonnegative (field "source_turn" fields);
     source_task_id = optional string (field "source_task_id" fields);
-    producer=producer_of_json (field "producer" fields)} in
+    producer=producer_of_json ~keeper_name (field "producer" fields)} in
   validate_source source; source
 
 let source_to_yojson = source_json

@@ -15,4 +15,3 @@ include Keeper_skill_activation_ledger_replay
 include Keeper_skill_activation_ledger_load
 include Keeper_skill_activation_ledger_commit
 include Keeper_skill_activation_ledger_observe
-

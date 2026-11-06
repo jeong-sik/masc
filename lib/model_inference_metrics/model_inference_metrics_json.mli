@@ -12,10 +12,10 @@ val compute_cost_latency_json :
     its lane reports that field. Explicit reported zero remains zero. Global
     cost is null for no samples or any lane with incomplete cost evidence. *)
 
-(** Operator-only runtime history. Groups by the exact executed runtime from
-    decision records; unpaired cost observations and records without an answerer
-    remain unattributed. The window and store diagnostics accompany the samples.
-    A failed decision-log read returns an unavailable history, never empty or
-    partial totals labelled as ready.
-    Call this from an asynchronous cached producer, never on a request's I/O path. *)
+(** Operator-only runtime history of a reading; see
+    {!Model_inference_metrics.runtime_metrics_json}. *)
+val runtime_metrics_json :
+  observed_at:float -> window_minutes:int -> Model_inference_metrics_kept.reading -> Yojson.Safe.t
+
+(** {!runtime_metrics_json} of a reading from nothing kept. *)
 val compute_runtime_metrics_json : base_path:string -> window_minutes:int -> Yojson.Safe.t

@@ -10,7 +10,7 @@ module Types = Masc_tui_types
    floor is for. *)
 
 let fresh () =
-  Types.create_state ~workspace:"me" ~port:8935 ~refresh_interval:2.0 ()
+  Types.create_state ~workspace:"me" ~port:8935 ()
 
 let second = 1_000_000_000L
 let ns seconds = Int64.mul (Int64.of_int seconds) second

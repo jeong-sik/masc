@@ -14,7 +14,7 @@
 
 open Masc_tui_types
 
-let state () = create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+let state () = create_state ~workspace:"test" ~port:8935 ()
 
 (* A read that answered with nothing. Enough to make the view row exist,
    which is what the row budget turns on. *)

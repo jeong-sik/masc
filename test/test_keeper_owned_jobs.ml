@@ -975,7 +975,7 @@ value = { sha256 = %S }
       ~sandbox_profile:fixture.meta.sandbox_profile ~skill_names:None ~global_skill_catalog:catalog
       ~skill_inventory:(Masc.Keeper_skill_inventory.of_snapshot ~descriptors snapshot)
       ~task_skills:(Masc.Keeper_task_skill_turn.skills selection) in
-  let recorder = Recorder.make ~trace_id:fixture.meta.runtime.trace_id
+  let recorder = Recorder.make ~keeper_name:"skill-keeper-fixture" ~trace_id:fixture.meta.runtime.trace_id
       ~turn_ref:(Ids.Turn_ref.make ~trace_id:(Keeper_id.Trace_id.to_string fixture.meta.runtime.trace_id) ~absolute_turn:1)
       ~runtime_id:(fun () -> Some "original.runtime")
       ~snapshot_revision:(Surface.skill_snapshot_revision surface) ~task_selection:selection
@@ -1320,7 +1320,7 @@ pointer = "/artifacts/0/_blob/sha256"
     ~skill_inventory:(Masc.Keeper_skill_inventory.of_snapshot ~descriptors snapshot) ~task_skills:[] in
   let selection = Masc.Keeper_task_skill_turn.resolve_for_task ~snapshot ~task_id:"task-A" [reference]
     |> require "named producer original Task selection" in
-  let recorder = Recorder.make ~trace_id:fixture.meta.runtime.trace_id
+  let recorder = Recorder.make ~keeper_name:"skill-keeper-fixture" ~trace_id:fixture.meta.runtime.trace_id
     ~turn_ref:(Ids.Turn_ref.make ~trace_id:(Keeper_id.Trace_id.to_string fixture.meta.runtime.trace_id) ~absolute_turn:41)
     ~runtime_id:(fun () -> Some "original.runtime")
     ~snapshot_revision:(Surface.skill_snapshot_revision surface) ~task_selection:selection
@@ -4294,7 +4294,7 @@ pointer = "/artifacts/0/_blob/sha256"
       ~skill_inventory:(Masc.Keeper_skill_inventory.of_snapshot ~descriptors snapshot)
       ~task_skills:(Masc.Keeper_task_skill_turn.skills selection) in
   let runtime = ref "original.runtime" and runtime_reads = ref 0 in
-  let recorder = Recorder.make ~trace_id:fixture.meta.runtime.trace_id
+  let recorder = Recorder.make ~keeper_name:"skill-keeper-fixture" ~trace_id:fixture.meta.runtime.trace_id
       ~turn_ref:(Ids.Turn_ref.make ~trace_id:(Keeper_id.Trace_id.to_string fixture.meta.runtime.trace_id) ~absolute_turn:41)
       ~runtime_id:(fun () -> incr runtime_reads; Some !runtime)
       ~snapshot_revision:(Surface.skill_snapshot_revision surface) ~task_selection:selection
@@ -5458,7 +5458,7 @@ let test_nested_skill_job_continuation ?(fault_after_acceptance=false) ?(dynamic
   let physical_runtime = ref observation.runtime_id in
   let physical_selection = Masc.Keeper_task_skill_turn.resolve_for_task ~snapshot ~task_id:"task-B" []
     |> require "receiving Task has independent Skill selection" in
-  let receiving_recorder = Recorder.make ~trace_id:fixture.meta.runtime.trace_id ~turn_ref:physical_turn_ref
+  let receiving_recorder = Recorder.make ~keeper_name:"skill-keeper-fixture" ~trace_id:fixture.meta.runtime.trace_id ~turn_ref:physical_turn_ref
     ~runtime_id:(fun () -> Some !physical_runtime) ~snapshot_revision:(Surface.skill_snapshot_revision surface)
     ~task_selection:physical_selection |> require "physical receiving recorder" in
   let action_observer = Action_observer.create ~config ~context:receiving_recorder in
@@ -5509,7 +5509,7 @@ let test_nested_skill_job_continuation ?(fault_after_acceptance=false) ?(dynamic
   execute_action ~turn:3 ~id:"invalid-follow-on" validating |> ignore;
   check int "schema refusal never enters the handler" 0 !validation_effects;
   check int "schema refusal is not executed action evidence" (before_actions+3) (action_count ());
-  let repeated = Ledger.observe_async_action ~config ~trace_id:fixture.meta.runtime.trace_id first_action
+  let repeated = Ledger.observe_async_action ~keeper_name:"skill-keeper-fixture" ~config ~trace_id:fixture.meta.runtime.trace_id first_action
     |> require "idempotent actual action replay" |> snd in
   check_json "re-observation preserves the first actual result clock" (Action.to_json first_action) (Action.to_json repeated);
   let changed = Action.make ~delivery_sha256:first_action.delivery_sha256 ~physical_turn_ref
@@ -5518,7 +5518,7 @@ let test_nested_skill_job_continuation ?(fault_after_acceptance=false) ?(dynamic
       Sdk_result {invocation;result=Action.sdk_result (Ok {Agent_core.Types.content="changed";content_blocks=None;_meta=None})}
       | Native_started _ -> fail "expected actual SDK occurrence") ~observed_at:first_action.observed_at
     |> require "changed actual result candidate" in
-  (match Ledger.observe_async_action ~config ~trace_id:fixture.meta.runtime.trace_id changed with
+  (match Ledger.observe_async_action ~keeper_name:"skill-keeper-fixture" ~config ~trace_id:fixture.meta.runtime.trace_id changed with
    | Error (Ledger.Decode_failed (Ledger.Invalid_async_action_evidence _)) -> ()
    | Ok _ | Error _ -> fail "same occurrence accepted a different actual result");
   Action_observer.clear action_observer;
@@ -5576,7 +5576,7 @@ let test_nested_skill_job_continuation ?(fault_after_acceptance=false) ?(dynamic
   let conflicting_link = Action.make ~delivery_sha256:linked.delivery_sha256 ~physical_turn_ref
     ~runtime_id:linked.runtime_id ~tool_name:"different-tool-for-same-sibling-occurrence"
     ~occurrence:linked.occurrence ~observed_at:linked.observed_at |> require "contradictory sibling link candidate" in
-  (match Ledger.observe_async_action ~config ~trace_id:fixture.meta.runtime.trace_id conflicting_link with
+  (match Ledger.observe_async_action ~keeper_name:"skill-keeper-fixture" ~config ~trace_id:fixture.meta.runtime.trace_id conflicting_link with
    | Error (Ledger.Decode_failed (Ledger.Invalid_async_action_evidence _)) -> ()
    | Ok _ | Error _ -> fail "same physical sibling occurrence accepted contradictory tool facts");
   let linked_events = read events in

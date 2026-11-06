@@ -140,7 +140,7 @@ let test_narrow_chat_notice_has_no_old_row_action () =
       Masc_tui_render_prim.acting_pane_reserved_cols := previous_reserved)
     (fun () ->
       Masc_tui_render_prim.acting_pane_reserved_cols := 0;
-      let state = Types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+      let state = Types.create_state ~workspace:"test" ~port:8935 () in
       state.view <- Types.Keepers Types.Keeper_message;
       state.msg_target_keeper_name <- Some "k";
       state.msg_tool_visibility <- Types.Tools_compact;

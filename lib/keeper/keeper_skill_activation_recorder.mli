@@ -14,6 +14,7 @@ type result_child =
   ; skill_tool_use_id : string
   ; activation_frame_sha256 : string
   }
+val bound_keeper_name : bound_context -> string
 val bound_trace_id : bound_context -> Keeper_id.Trace_id.t
 val bound_turn_ref : bound_context -> Ids.Turn_ref.t
 
@@ -46,9 +47,10 @@ val bind_async : t -> (bound_context, error) result
 (** Resolve the selected runtime once, keeping the original trace, turn,
     snapshot and exact Task provenance. This records no activation. *)
 val bound_context_to_yojson : bound_context -> Yojson.Safe.t
-val bound_context_of_yojson : Yojson.Safe.t -> (bound_context, error) result
+val bound_context_of_yojson : keeper_name:string -> Yojson.Safe.t -> (bound_context, error) result
 (** Strict immutable run-evidence codec. Only a sealed owned run supplies this
-    authority; a model's recipe cannot supply or replace it. *)
+    authority; a model's recipe cannot supply or replace it. The Keeper is the
+    run's own and is not part of the evidence. *)
 val bound_task_references : bound_context -> Skill_reference.t list
 val find_bound_nested : config:Workspace.config -> bound_context ->
   invocation:Agent_core.Tool_contract.Invocation.t -> tool_name:string ->
@@ -64,6 +66,7 @@ val record_bound_nested : config:Workspace.config -> bound_context ->
     the canonical ledger transaction. New children activate only at admission. *)
 
 val make :
+  keeper_name:string ->
   trace_id:Keeper_id.Trace_id.t ->
   turn_ref:Ids.Turn_ref.t ->
   runtime_id:(unit -> string option) ->
@@ -72,7 +75,8 @@ val make :
   (t, error) result
 (** Capture the immutable facts used by every Skill call in one turn. The
     runtime provider resolves the concrete candidate selected for the active
-    attempt; recording fails before that selection exists. *)
+    attempt; recording fails before that selection exists. [keeper_name] is
+    the Keeper whose turn it is, whose Skill record each write announces. *)
 
 val record_instruction :
   config:Workspace.config ->

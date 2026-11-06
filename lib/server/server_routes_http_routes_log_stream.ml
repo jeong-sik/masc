@@ -40,9 +40,12 @@ let next_frame (query : Server_logs_query.t) ~after =
   in
   let since_seq = if evicted then None else after in
   let entries =
-    Server_logs_query.read { query with since_seq; before_seq = Some upto }
+    Server_logs_query.read
+      { query with limit = query.limit + 1; since_seq; before_seq = Some upto }
   in
-  let reset = evicted || List.length entries >= query.limit in
+  let overflow = List.length entries > query.limit in
+  let entries = if overflow then List.take query.limit entries else entries in
+  let reset = evicted || overflow in
   { reset; entries; ring_bounds = Log.Ring.bounds (); after = upto - 1 }
 ;;
 

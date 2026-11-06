@@ -498,10 +498,10 @@ let load_nested_run_fields ~base_path (source : Keeper_tool_execution_journal.so
   Ok fields
 ;;
 
-let nested_activation_from_fields fields =
+let nested_activation_from_fields ~keeper_name fields =
   match List.assoc "nested_calls" fields,List.assoc "nested_activation" fields with
   | `List [],`Null -> Ok None
-  | `List (_::_),json -> Keeper_skill_activation_recorder.bound_context_of_yojson json
+  | `List (_::_),json -> Keeper_skill_activation_recorder.bound_context_of_yojson ~keeper_name json
       |> Result.map Option.some |> Result.map_error (fun error ->
           Malformed_draft (Keeper_skill_activation_recorder.error_to_string error))
   | _ -> Error (Malformed_draft "original child activation binding is incoherent")
@@ -509,12 +509,14 @@ let nested_activation_from_fields fields =
 
 let load_nested_activation ~base_path source =
   let* fields = load_nested_run_fields ~base_path source in
-  nested_activation_from_fields fields
+  nested_activation_from_fields ~keeper_name:source.Keeper_tool_execution_journal.keeper_name fields
 ;;
 
 let load_nested_result_children ~base_path source ~result =
   let* fields = load_nested_run_fields ~base_path source in
-  let* activation = nested_activation_from_fields fields in
+  let* activation =
+    nested_activation_from_fields ~keeper_name:source.Keeper_tool_execution_journal.keeper_name fields
+  in
   match activation with
   | None -> Ok None
   | Some activation ->

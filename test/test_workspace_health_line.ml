@@ -81,7 +81,7 @@ let test_only_a_moved_line_is_announced () =
     ignore (Workspace.init (Workspace.default_config base_path) ~agent_name:None);
     let heard = ref 0 in
     let id = "workspace-health-line" in
-    let name = Workspace_dataset_event.dataset_to_wire Workspace_dataset_event.Workspace_health in
+    let name = Workspace_dataset_event.dataset_name Workspace_dataset_event.Workspace_health in
     Sse.subscribe_external ~runtime_authority:(Sse.runtime_authority_exn ~base_path) ~id
       ~callback:(fun (event : Sse.external_event) ->
         match

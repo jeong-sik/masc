@@ -109,7 +109,7 @@ let snapshot ?(failures = []) () : Masc.Tui_decode.clients_snapshot =
   }
 
 let test_an_owed_read_that_answers_settles () =
-  let state = Masc_tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  let state = Masc_tui_types.create_state ~workspace:"test" ~port:8935 () in
   Masc_tui_types.owe_clients_read state;
   Masc_tui_types.begin_clients_read state;
   Masc_tui_types.settle_clients_read state ~now:0. (Ok (snapshot ()));
@@ -119,7 +119,7 @@ let test_an_owed_read_that_answers_settles () =
     (Masc_tui_owed_read.due ~now:0. state.Masc_tui_types.clients_owed)
 
 let test_an_answer_with_unread_rows_backs_off () =
-  let state = Masc_tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  let state = Masc_tui_types.create_state ~workspace:"test" ~port:8935 () in
   Masc_tui_types.owe_clients_read state;
   Masc_tui_types.begin_clients_read state;
   Masc_tui_types.settle_clients_read state ~now:0.

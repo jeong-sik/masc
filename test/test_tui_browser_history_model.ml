@@ -14,7 +14,7 @@ let () =
   expect "choosing the lane again cannot inherit the previous route's deferred read"
     (Masc_tui_types.Browser_lane_view.pending_read
        (Masc_tui_types.Browser_lane_view.switch_source Live deferred) = None);
-  let state = Masc_tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = Masc_tui_types.create_state ~workspace:"test" ~port:8935 () in
   state.view <- Keepers Keeper_message;
   state.search <- Some "original search";
   state.composer_focused <- true;

@@ -1,0 +1,247 @@
+{
+  "schema": "masc.tui.sse-transition-evidence.v2",
+  "captured_on": "2026-11-05",
+  "pr": 48180,
+  "pr_state": "CLOSED",
+  "open_replacement_pr": null,
+  "complete": false,
+  "fully_sse_converted": false,
+  "production_source": "473386e4609917d3129867a895637bb9ed969879",
+  "native_proof_run": 41960928980,
+  "native_binary_sha256": "02f9cec046fdd0f07b5ba0abc762c460ce3eef716b4695f842fba745796394b2",
+  "type_check": {
+    "run": 41963753486,
+    "source": "5c1420fb9703c78ff403929d3f04563539a4a478",
+    "result": "success",
+    "production_previous": {
+      "run": 41960925440,
+      "source": "473386e4609917d3129867a895637bb9ed969879",
+      "result": "success"
+    }
+  },
+  "targeted_remote_behavior": {
+    "run": 41963750774,
+    "source": "5c1420fb9703c78ff403929d3f04563539a4a478",
+    "suite_count": 20,
+    "result": "success",
+    "suite_evidence": "remote-targeted-suites.txt",
+    "lane_inventory_pty_ok_seconds": 498,
+    "spectator_pty_ok_seconds": 20,
+    "memory_pty_ok_seconds": 23,
+    "browser_pty_ok_seconds": 21,
+    "previous": {
+      "run": 41961038163,
+      "result": "failure",
+      "browser": "hidden notification raced the Escape transition",
+      "lane_inventory": "the first cold Dune build exceeded 600 seconds before the PTY executed"
+    }
+  },
+  "browser_fixed_idle": {
+    "scenario": "One 35x200 PTY run per binary; go Browser Lane; wait initial selected-tab read; one 2.4-second drain",
+    "before": {
+      "build_commit": "b7a4aa5a81f5fe935fd19a9f4a7b1fb23752be7d",
+      "idle_elapsed_seconds": 2.434741875011241,
+      "selected_tab_read_posts": 2,
+      "clients_gets": 3,
+      "scoped_observer_opens": 0
+    },
+    "after": {
+      "build_commit": "473386e4609917d3129867a895637bb9ed969879",
+      "idle_elapsed_seconds": 2.4011407080106437,
+      "selected_tab_read_posts": 1,
+      "clients_gets": 2,
+      "scoped_observer_opens": 1
+    },
+    "comparison": "The initial read remains. The baseline made one additional selected-tab read during the drain; the candidate made none. One sample per side, not a latency estimate."
+  },
+  "pty": {
+    "source": "473386e4609917d3129867a895637bb9ed969879",
+    "browser": {
+      "result": "pass",
+      "seconds": 12.139,
+      "open_selected_reads": 1,
+      "unrelated_selected_reads": 0,
+      "changed_selected_reads": 1,
+      "trailing_selected_reads": 2,
+      "retry_selected_reads": 2,
+      "reconnect_selected_reads": 2,
+      "hidden_selected_reads": 0,
+      "observer_connections": 7
+    },
+    "memory": {
+      "result": "pass",
+      "seconds": 13.698,
+      "open_health_reads": 1,
+      "unrelated_health_reads": 0,
+      "changed_health_reads": 1,
+      "trailing_health_reads": 2,
+      "retry_health_reads": 2,
+      "reconnect_health_reads": 2,
+      "hidden_health_reads": 0,
+      "observer_connections": 3
+    },
+    "machine": {
+      "result": "pass",
+      "seconds": 7.204,
+      "open_msx_live_reads": 1,
+      "push_msx_live_reads": 1,
+      "dos_live_reads": 0,
+      "control_scoped_observers": 1,
+      "watch_unscoped_observers": 1,
+      "legacy_msx_tick_posts": 0,
+      "observer_connections": 3
+    },
+    "lane_inventory": {
+      "result": "pass",
+      "seconds": 14.285,
+      "open_lane_reads": 1,
+      "open_addon_reads_including_detail": 2,
+      "matching_inspect_addon_reads": 1,
+      "trailing_lane_reads": 2,
+      "retry_lane_reads": 2,
+      "hidden_lane_or_addon_reads": 0,
+      "observer_connections": 1
+    }
+  },
+  "baselines": {
+    "machine": {
+      "build_commit": "b7a4aa5a81f5fe935fd19a9f4a7b1fb23752be7d",
+      "initial_window_seconds": 1.2,
+      "live_msx_capture_responses": 4
+    },
+    "memory": {
+      "build_commit": "b7a4aa5a81f5fe935fd19a9f4a7b1fb23752be7d",
+      "fixed_idle_health_responses": 2
+    }
+  },
+  "cli": {
+    "baseline_help_refresh": "--refresh Refresh interval in seconds (default: 2)",
+    "candidate_help_refresh_present": false
+  },
+  "native_behavior": {
+    "behavior_passed": false,
+    "failed_suites": [
+      "test_browser_addon_tool",
+      "test_browser_ego_peer",
+      "test_browser_native_workflow",
+      "test_keeper_vision_tool"
+    ],
+    "passing_directly_relevant_suites": [
+      "test_browser_lane",
+      "test_browser_lane_watched_work",
+      "test_browser_addon_observation",
+      "test_tui_browser_lane",
+      "test_browser_addon_live_ego",
+      "test_browser_addon_wire",
+      "test_browser_selection",
+      "test_server_lane_inventory"
+    ],
+    "use_of_artifact": "Exact-source macOS executable for isolated PTY measurements only; not an all-suite green claim or installation proof."
+  },
+  "cache_regressions": {
+    "skill": {
+      "red_run": 41965753071,
+      "red_result": "the recovered session loads failed",
+      "fix_source": "bea45f2c591ed1aa7250bfab9ce8081d5a5b03ec",
+      "green_run": 41966485936,
+      "green_result": "success",
+      "type_check_run": 41966489387,
+      "type_check_result": "cancelled_superseded_by_newer_head",
+      "rule": "Failed cold session loads remain retryable; committed ledgers and projections stay cached."
+    },
+    "memory": {
+      "red_run": 41966147270,
+      "red_result": "the recovered read has no old error failed",
+      "fix_source": "881854d58d27d9a8096fd79b31cfc4765fed18fd",
+      "green_run": 41966803734,
+      "green_result": "success",
+      "type_check_run": 41966807144,
+      "type_check_result": "success",
+      "rule": "Only health with no read_error is reused; failed health reads remain retryable and write invalidation is unchanged."
+    }
+  },
+  "rendering_performance": {
+    "evidence": "docs/evidence/tui-smoothness-20261104/summary.json",
+    "scroll_samples": 80,
+    "mean_ms": { "before": 5.06, "after": 3.86 },
+    "p95_ms": { "before": 16.41, "after": 11.74 },
+    "p99_ms": { "before": 60.0, "after": 23.23 },
+    "max_ms": { "before": 84.37, "after": 33.22 },
+    "estimated_words": { "before": 261360000, "after": 228560000 },
+    "limit": "Frame Build/Present timings, not causal key-to-physical-display latency; observation caps are retained in the linked bundle."
+  },
+  "followup": {
+    "source": "2329a5b18e0",
+    "native_red_run": 41976321616,
+    "skill_memory_lock_order": {
+      "fix_source": "e6d923a0734",
+      "green_run": 41977170917,
+      "skill_tests": 44,
+      "memory_tests": 27
+    },
+    "machine_watch_r_source": "68cd397b9be",
+    "machine_step_and_log_source": "c9b89f65b3b",
+    "addon_visibility_source": "843119b65f4",
+    "addon_detail_fixture_source": "4156f5ee74b",
+    "type_check": { "run": 41977992916, "result": "success" },
+    "behavior": {
+      "run": 41977989608,
+      "suite_count": 10,
+      "passed": 7,
+      "failed": 3,
+      "result": "fixture_failure",
+      "manual_machine_and_addon_reads": "one each; passed",
+      "replay_gap": "invalid missed-through lower than Last-Event-ID",
+      "privacy": "live stream was drained once per payload"
+    },
+    "corrected_behavior": { "run": 41980035709, "suite_count": 3, "result": "success" },
+    "native_proof": {
+      "run": 41979508701,
+      "production_source": "843119b65f48aeaf53f0fa19f8992236da9b1b71",
+      "binary_sha256": "24b75a43376c2690b70f572eaf4c1b6d5caedcb21109662436da41ef8f78f307",
+      "result": "failure",
+      "behavior_suites_passed": 8,
+      "behavior_suites_failed": 4,
+      "local_machine_pty": { "result": "pass", "seconds": 9.185, "manual_reads": 1, "reconnect_reads": 1 },
+      "local_addon_pty": { "result": "pass", "seconds": 17.527, "manual_reads": 1, "reconnect_reads": 1 },
+      "request_evidence": [
+        "artifacts/tui-sse-lanes-20261104/41979508701/followup-spectator-requests.json",
+        "artifacts/tui-sse-lanes-20261104/41979508701/followup-lane-requests.json"
+      ]
+    },
+    "independent_review": {
+      "verdict": "With fixes",
+      "evidence": "followup-independent-review.json",
+      "replacement_identity_regression": "7909513a9f9",
+      "replacement_identity_red_run": 41981658955,
+      "repair_source": "2329a5b18e0",
+      "repair": "exact current client_id and kind only; absent/stale ids receive unrestricted/shared events",
+      "green_run": 41982732418,
+      "type_check_run": 41982736264,
+      "verification": "success",
+      "independent_rereview": "Approve; no P0-P3 findings",
+      "full_regression": {
+        "run": 41983585123,
+        "source": "2329a5b18e0479725fb281bb2eb74cbe5d35b101",
+        "suite_count": 24,
+        "result": "success",
+        "failed_suites": 0,
+        "timeouts": 0,
+        "evidence": "followup-targeted-suites.txt",
+        "lane_pty_seconds": 709,
+        "spectator_pty_seconds": 22,
+        "memory_pty_seconds": 27,
+        "browser_pty_seconds": 25
+      }
+    }
+  },
+  "remaining_work": [
+    "Play room still polls POST /api/v1/play/room every two seconds while active, including presence renewal; server-owned presence and change notification design is still required.",
+    "Browser change detection is server sampling every two seconds, not backend-native browser events.",
+    "Real Browser backends were not exercised; PTY peers are HTTP/SSE fixtures.",
+    "Native browser-lane proof retains the four failed suites named above; missing Node fixture modules and Browser tool/vision assertion failures are not claimed to be pre-existing.",
+    "PR #48180 is closed with no open replacement at capture time; merge/conflict handling belongs to another owner.",
+    "No merge, rebase, production installation, restart, or ~/me/.masc change was performed.",
+    "One final PTY run per surface and one fixed-idle sample per binary bound the measurement; no statistical latency or universal request-rate claim is made."
+  ]
+}

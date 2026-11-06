@@ -20,7 +20,7 @@ let identity base_path : Tui_decode.server_identity =
 let test_goal_candle_read_rejects_stale_authority_and_refusals () =
   let open Masc_tui_types in
   let state = create_state ~workspace:"goal-candle" ~local_base_path:"/workspace/a"
-      ~port:8935 ~refresh_interval:0. () in
+      ~port:8935 () in
   let instance name = { (identity "/workspace/a") with sid_runtime_instance_id = Some name } in
   state.server_identity <- Some (instance "server-a");
   let owner = ref () in
@@ -163,7 +163,7 @@ let test_keeper_purge_header_and_body_share_workspace () =
 let test_chat_file_observation_retains_its_read_epoch () =
   let open Masc_tui_types in
   let state = create_state ~workspace:"chat-files" ~local_base_path:"/workspace/a"
-      ~port:8935 ~refresh_interval:0. () in
+      ~port:8935 () in
   state.server_identity <- Some (identity "/workspace/a");
   state.workspace_identity <- Workspace_identity_match;
   state.msg_target_keeper_name <- Some "alpha";
@@ -542,7 +542,7 @@ let test_broadcast_retry_scope_follows_verified_workspace () =
 
 let test_detail_intents_wait_for_comparable_identity () =
   let state = Masc_tui_types.create_state ~workspace:"a"
-    ~local_base_path:"/workspace/a" ~port:0 ~refresh_interval:0. () in
+    ~local_base_path:"/workspace/a" ~port:0 () in
   let origin = identity "/workspace/a" in
   state.detail_focus_recovery <- Some (origin, "same-keeper", Masc_tui_types.Detail_instructions);
   state.connector_unbind_offer_pending <- ["same-keeper"];
@@ -604,7 +604,7 @@ let test_same_base_with_different_masc_root_cannot_restore_inputs () =
 let test_local_rows_are_unread_until_the_workspace_is_read () =
   let state =
     Masc_tui_types.create_state ~workspace:"local"
-      ~local_base_path:"/workspace/local" ~port:0 ~refresh_interval:0. ()
+      ~local_base_path:"/workspace/local" ~port:0 ()
   in
   let page error =
     match Masc_tui_types.local_rows_page state ~error with
@@ -645,7 +645,7 @@ let test_detail_focus_waits_for_authoritative_roster () =
     k_paused = false; k_identity = Error "not needed for navigation"; k_activity = None } in
   let suspended () =
     let state = create_state ~workspace:"local" ~local_base_path:"/workspace/a"
-      ~port:0 ~refresh_interval:0. () in
+      ~port:0 () in
     state.workspace_identity <- Workspace_identity_match;
     state.server_identity <- Some origin;
     state.local_workspace <- Local_workspace_read;
@@ -745,7 +745,7 @@ let test_unread_after_a_match_keeps_it_unconfirmed () =
    and the server identity is confirmed. *)
 let test_writes_wait_for_a_confirmed_identity () =
   let state = Masc_tui_types.create_state ~workspace:"a"
-    ~local_base_path:"/workspace/a" ~port:0 ~refresh_interval:0. () in
+    ~local_base_path:"/workspace/a" ~port:0 () in
   state.server_identity <- Some (identity "/workspace/a");
   state.workspace_identity <- Masc_tui_types.Workspace_identity_match;
   let authority = state.workspace_authority in
@@ -798,7 +798,7 @@ let test_deletion_inventory_waits_for_reconfirmed_workspace () =
   let open Masc_tui_types in
   let module Deletions = Masc_tui_keeper_control in
   let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
-      ~port:0 ~refresh_interval:0. () in
+      ~port:0 () in
   state.server_identity <- Some (identity "/workspace/a");
   state.workspace_identity <- Workspace_identity_match;
   let record keeper_name : Deletions.deletion_row =
@@ -854,7 +854,7 @@ let test_deletion_inventory_waits_for_reconfirmed_workspace () =
 let test_suspension_retires_the_keeper_composite_read () =
   let open Masc_tui_types in
   let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
-      ~port:0 ~refresh_interval:0. () in
+      ~port:0 () in
   state.keeper_composite_inflight <- Some "alpha";
   state.keeper_composite_owed <-
     Some { kco_keeper = "alpha"; kco_reading = state.detail_read_authority
@@ -869,7 +869,7 @@ let test_uncertain_identity_retires_reads_not_admitted_operations () =
   let open Masc_tui_types in
   let module Detail = Masc_tui_board_detail in
   let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
-      ~port:0 ~refresh_interval:0. () in
+      ~port:0 () in
   state.server_identity <- Some (identity "/workspace/a");
   state.workspace_identity <- Workspace_identity_match;
   let post body : board_post =
@@ -968,7 +968,7 @@ let test_uncertain_identity_retires_reads_not_admitted_operations () =
 let test_operation_receipt_outlives_queued_followup_read () =
   let open Masc_tui_types in
   let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
-      ~port:0 ~refresh_interval:0. () in
+      ~port:0 () in
   state.server_identity <- Some (identity "/workspace/a");
   state.workspace_identity <- Workspace_identity_match;
   let authority = state.workspace_authority in
@@ -1001,7 +1001,7 @@ let test_unknown_voice_save_read_retirement () =
   let open Masc_tui_types in
   let module Wizard = Masc_tui_voice_wizard_session in
   let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
-      ~port:0 ~refresh_interval:0. () in
+      ~port:0 () in
   let opened = Wizard.voice_wizard_open ~section:Voice_setup.Tts
       ~provider:Voice_wizard.Elevenlabs ~revision:"before-save" in
   let sending = Wizard.voice_wizard_sending opened ~request:7 in
@@ -1031,7 +1031,7 @@ let test_nested_read_owners_retire_without_losing_selection () =
   let open Masc_tui_types in
   let module Wizard = Masc_tui_voice_wizard_session in
   let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
-      ~port:0 ~refresh_interval:0. () in
+      ~port:0 () in
   let opened = Wizard.voice_wizard_open ~section:Voice_setup.Tts
       ~provider:Voice_wizard.Elevenlabs ~revision:"saved" in
   state.voice_wizard <- Some {opened with vws_save=Wizard.Save_probing 7};
@@ -1074,7 +1074,7 @@ let test_nested_read_owners_retire_without_losing_selection () =
 let test_discarded_bundle_retires_readings_before_reconfirming_a () =
   let open Masc_tui_types in
   let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
-      ~port:0 ~refresh_interval:0. () in
+      ~port:0 () in
   state.server_identity <- Some (identity "/workspace/a");
   state.workspace_identity <- Workspace_identity_match;
   let authority = state.workspace_authority in
@@ -1096,7 +1096,7 @@ let test_discarded_bundle_retires_readings_before_reconfirming_a () =
 let test_preset_selection_waits_without_owning_an_unconfirmed_read () =
   let open Masc_tui_types in
   let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
-      ~port:0 ~refresh_interval:0. () in
+      ~port:0 () in
   state.server_identity <- Some (identity "/workspace/a");
   state.workspace_identity <- next_workspace_identity ~previous:Workspace_identity_match
       ~local_paths:state.local_workspace_paths (Error "health unavailable");
@@ -1113,7 +1113,7 @@ let test_preset_selection_waits_without_owning_an_unconfirmed_read () =
 let test_pending_nested_reader_intents_survive_repeated_suspension () =
   let open Masc_tui_types in
   let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
-      ~port:0 ~refresh_interval:0. () in
+      ~port:0 () in
   state.msg_target_keeper_name <- Some "alpha";
   state.msg_older_cursor <- Some "server-cursor-42";
   state.msg_older_loading <- true;
@@ -1135,7 +1135,7 @@ let test_pending_nested_reader_intents_survive_repeated_suspension () =
 let test_unconfirmed_cancellation_stays_unconfirmed_after_workspace_change () =
   let open Masc_tui_types in
   let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
-      ~port:0 ~refresh_interval:0. () in
+      ~port:0 () in
   let origin = identity "/workspace/a" in
   state.server_identity <- Some origin;
   state.workspace_identity <- Workspace_identity_match;
@@ -1150,7 +1150,7 @@ let test_task_receipts_wait_for_identity_and_roster () =
   test_unconfirmed_cancellation_stays_unconfirmed_after_workspace_change ();
   let open Masc_tui_types in
   let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
-      ~port:0 ~refresh_interval:0. () in
+      ~port:0 () in
   let origin = identity "/workspace/a" in
   state.server_identity <- Some origin;
   state.workspace_identity <- Workspace_identity_match_unconfirmed "health timed out";
@@ -1196,7 +1196,7 @@ let test_account_read_intents_survive_repeated_suspension () =
   let provider : Login.provider = {id="codex"; label="Codex"; client=Login.Codex;
     origin=Login.Configured; enabled=true; setup_supported=true} in
   List.iter (fun action ->
-    let state = create_state ~workspace:"a" ~port:0 ~refresh_interval:0. () in
+    let state = create_state ~workspace:"a" ~port:0 () in
     let view = Login.create "codex" in
     view.generation <- 7;
     view.account_ref <- Some "selected-account";
@@ -1230,7 +1230,7 @@ let test_account_read_intents_survive_repeated_suspension () =
 let test_unsent_resource_and_log_intents_survive_reconfirmation () =
   let open Masc_tui_types in
   let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
-      ~port:0 ~refresh_interval:0. () in
+      ~port:0 () in
   state.server_identity <- Some (identity "/workspace/a");
   state.workspace_identity <- Workspace_identity_match_unconfirmed "health failed";
   state.resource_content <- Some (Masc_tui_resource_catalog.Mcp_uri "masc://old", []);
@@ -1257,7 +1257,7 @@ let test_effect_observations_resume_without_repeating_effects () =
   let open Masc_tui_types in
   let module Browser = Browser_lane_view in
   let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
-      ~port:0 ~refresh_interval:0. () in
+      ~port:0 () in
   state.server_identity <- Some (identity "/workspace/a");
   state.workspace_identity <- Workspace_identity_match_unconfirmed "health failed";
   let initial = Browser.create () in
@@ -1299,7 +1299,7 @@ let test_effect_observations_resume_without_repeating_effects () =
 let test_child_read_epoch_retains_running_audit () =
   let open Masc_tui_types in
   let state=create_state ~workspace:"a" ~local_base_path:"/workspace/a"
-      ~port:0 ~refresh_interval:0. () in
+      ~port:0 () in
   state.server_identity <- Some (identity "/workspace/a");
   state.workspace_identity <- Workspace_identity_match;
   let authority=state.workspace_authority in
@@ -1335,7 +1335,7 @@ let test_child_read_epoch_retains_running_audit () =
 let test_native_task_read_epoch_retirement () =
   let open Masc_tui_types in
   let state=create_state ~workspace:"a" ~local_base_path:"/workspace/a"
-      ~port:0 ~refresh_interval:0. () in
+      ~port:0 () in
   state.server_identity <- Some (identity "/workspace/a");
   state.workspace_identity <- Workspace_identity_match;
   let authority=state.workspace_authority in
@@ -1368,7 +1368,7 @@ let test_native_task_read_epoch_retirement () =
 let early_asks_fixture () =
   let open Masc_tui_types in
   let state = create_state ~workspace:"asks" ~local_base_path:"/workspace/asks"
-      ~port:0 ~refresh_interval:0. () in
+      ~port:0 () in
   state.server_identity <- Some (identity state.local_base_path);
   state.workspace_identity <- Workspace_identity_match;
   let ticket = Http_refresh_order.dispatch state.http_refresh_order in
@@ -1546,7 +1546,7 @@ let test_refresh_progress_tracks_independent_sources_and_interruption () =
   let open Masc_tui_types in
   let module Progress = Http_refresh_progress in
   let state = create_state ~workspace:"progress" ~local_base_path:"/workspace/progress"
-      ~port:0 ~refresh_interval:0. () in
+      ~port:0 () in
   let ticket = Http_refresh_order.dispatch state.http_refresh_order in
   let authority = state.workspace_authority in
   let original_identity = state.workspace_identity in
@@ -1600,7 +1600,7 @@ let test_refresh_progress_retains_partial_runtime_receipt () =
   let open Masc_tui_types in
   let module Progress = Http_refresh_progress in
   let state = create_state ~workspace:"partial" ~local_base_path:"/workspace/partial"
-      ~port:0 ~refresh_interval:0. () in
+      ~port:0 () in
   let ticket = Http_refresh_order.dispatch state.http_refresh_order in
   let authority = state.workspace_authority and identity = state.workspace_identity in
   let needs = {nothing with needs_runtime_quota=true} in
@@ -1685,7 +1685,7 @@ let test_board_child_receipts_survive_parent_interruption () =
   let open Masc_tui_types in
   let module Progress = Http_refresh_progress in
   let state = create_state ~workspace:"board-progress" ~local_base_path:"/workspace/board-progress"
-      ~port:0 ~refresh_interval:0. () in
+      ~port:0 () in
   let ticket = Http_refresh_order.dispatch state.http_refresh_order in
   let authority=state.workspace_authority and identity=state.workspace_identity in
   let needs={nothing with needs_board=true} in
@@ -1784,7 +1784,7 @@ let test_progress_inbox_cannot_cross_refresh_or_workspace () =
   let open Masc_tui_types in
   let module Progress=Http_refresh_progress in
   let state=create_state ~workspace:"inbox" ~local_base_path:"/workspace/inbox"
-    ~port:0 ~refresh_interval:0. () in
+    ~port:0 () in
   let first=Http_refresh_order.dispatch state.http_refresh_order in
   let authority=state.workspace_authority in
   begin_http_refresh_state state ~ticket:first ~started_ns:0L;
@@ -1812,7 +1812,7 @@ let test_refresh_progress_rejects_old_request_and_workspace () =
   let open Masc_tui_types in
   let module Progress = Http_refresh_progress in
   let state = create_state ~workspace:"progress" ~local_base_path:"/workspace/progress"
-      ~port:0 ~refresh_interval:0. () in
+      ~port:0 () in
   let old_ticket = Http_refresh_order.dispatch state.http_refresh_order in
   let authority = state.workspace_authority in
   begin_http_refresh_state state ~ticket:old_ticket ~started_ns:0L;
@@ -1836,7 +1836,7 @@ let early_roster_fixture () =
   let open Masc_tui_types in
   let base = "/workspace/early-roster" in
   let state = create_state ~workspace:"early-roster" ~local_base_path:base
-      ~port:0 ~refresh_interval:0. () in
+      ~port:0 () in
   let server = identity base in
   state.workspace_identity <- Workspace_identity_match;
   state.server_identity <- Some server;
@@ -2147,10 +2147,46 @@ let test_failed_read_keeps_followup_and_withdrawal_retires_it () =
   Alcotest.(check bool) "reconfirmed workspace can observe a new source read" true
     (take_local_workspace_read state ~source:Local_work resumed (Ok ()) = Some (Ok ()))
 
+let test_observer_machine_only_follows_control () =
+  let open Masc_tui_types in
+  let state = create_state ~workspace:"observer-machine" ~port:8935 () in
+  state.msx_open <- true;
+  state.msx_menu_open <- false;
+  state.machine_source <- Masc.Machine_lane.Msx;
+  state.machine_interaction <- Observe_machine;
+  Alcotest.(check bool) "watching does not advance the machine" true
+    (observer_machine_of_state state = None);
+  state.machine_interaction <- Control_machine;
+  Alcotest.(check bool) "control advances only this machine" true
+    (observer_machine_of_state state = Some Masc.Machine_lane.Msx);
+  state.machine_source <- Masc.Machine_lane.Dos;
+  Alcotest.(check bool) "a source change replaces the query" true
+    (observer_machine_of_state state = Some Masc.Machine_lane.Dos);
+  state.msx_menu_open <- true;
+  Alcotest.(check bool) "the media menu owns no ticker" true
+    (observer_machine_of_state state = None);
+  state.msx_menu_open <- false;
+  state.msx_open <- false;
+  Alcotest.(check bool) "a closed spectator owns no ticker" true
+    (observer_machine_of_state state = None)
+
+let test_observer_messages_belong_to_current_stream () =
+  let open Masc_tui_types in
+  let state = create_state ~workspace:"observer-close" ~port:8935 () in
+  let owner = ref () in
+  state.observer_stream_owner <- Some owner;
+  Alcotest.(check bool) "the current stream owns its messages" true
+    (Masc_tui_async_protocol.observer_stream_owned state owner);
+  Alcotest.(check bool) "a replaced stream rejects old messages" false
+    (Masc_tui_async_protocol.observer_stream_owned state (ref ()));
+  state.observer_stream_owner <- None;
+  Alcotest.(check bool) "a closed stream owns no later messages" false
+    (Masc_tui_async_protocol.observer_stream_owned state owner)
+
 let test_observer_retry_retires_with_workspace_read_authority () =
   let open Masc_tui_types in
   let state = create_state ~workspace:"observer-retry" ~local_base_path:"/workspace/a"
-      ~port:8935 ~refresh_interval:0. () in
+      ~port:8935 () in
   state.server_identity <- Some (identity "/workspace/a");
   state.workspace_identity <- Workspace_identity_match;
   let authority = state.workspace_authority in
@@ -2186,7 +2222,7 @@ let test_observer_retry_retires_with_workspace_read_authority () =
 let test_observer_recovery_belongs_to_unconfirmed_workspace () =
   let open Masc_tui_types in
   let state = create_state ~workspace:"observer-recovery" ~local_base_path:"/workspace/a"
-      ~port:8935 ~refresh_interval:0. () in
+      ~port:8935 () in
   state.server_identity <- Some (identity "/workspace/a");
   state.workspace_identity <- Workspace_identity_match_unconfirmed "unavailable";
   let authority = state.workspace_authority in
@@ -2245,7 +2281,7 @@ let test_observer_initial_identity_ownership () =
   let open Masc_tui_types in
   let open Masc_tui_async_protocol in
   let state = create_state ~workspace:"observer-cold" ~local_base_path:"/workspace/a"
-      ~port:8935 ~refresh_interval:0. () in
+      ~port:8935 () in
   let authority = state.workspace_authority in
   let owner = ref () and live = ref true in
   let paths = Option.get state.local_workspace_paths in
@@ -2708,7 +2744,7 @@ let test_answer_receipt_has_one_original_submission_owner () =
   let module Decode = Masc.Tui_decode_asks in
   let module O = Ask_answer_observation in
   let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
-    ~port:0 ~refresh_interval:0. () in
+    ~port:0 () in
   state.workspace_identity <- Workspace_identity_match;
   state.server_identity <- Some (identity "/workspace/a");
   let submission ask_id : ask_submission =
@@ -2781,7 +2817,7 @@ let test_answer_receipt_survives_full_mailbox_and_worker_cancellation () =
   let module P = Masc_tui_async_protocol in
   let module Decode = Masc.Tui_decode_asks in
   let state = create_state ~workspace:"receipt" ~local_base_path:"/workspace/receipt"
-      ~port:0 ~refresh_interval:0. () in
+      ~port:0 () in
   state.workspace_identity <- Workspace_identity_match;
   state.server_identity <- Some (identity state.local_base_path);
   let source = Ids.Turn_ref.make ~trace_id:"question-before-cancellation" ~absolute_turn:17 in
@@ -2938,7 +2974,7 @@ let original_answer_followup_identity ?(at=200.) ?(stimulus="original-source") (
 let answer_followup_state () =
   let open Masc_tui_types in
   let state = create_state ~workspace:"followup" ~local_base_path:"/workspace/followup"
-      ~port:0 ~refresh_interval:0. () in
+      ~port:0 () in
   state.workspace_identity <- Workspace_identity_match;
   state.server_identity <- Some (identity state.local_base_path);
   let submission name : ask_submission = {as_request=ref ();as_started_ns=0L;as_receipt=Ask_answer_receipt.create ();
@@ -3130,7 +3166,7 @@ let test_answer_followup_withdraws_reader_without_borrowing_successor () =
 let test_datasets_settle_independently_under_original_request () =
   let open Masc_tui_types in
   let state = create_state ~workspace:"datasets" ~local_base_path:"/workspace/datasets"
-      ~port:0 ~refresh_interval:0. () in
+      ~port:0 () in
   let observed = identity "/workspace/datasets" in
   state.server_identity <- Some observed;
   state.workspace_identity <- Workspace_identity_match;
@@ -3176,7 +3212,7 @@ let test_datasets_settle_independently_under_original_request () =
 let board_dataset_fixture kind =
   let open Masc_tui_types in
   let state=create_state ~workspace:"board-delivery" ~local_base_path:"/workspace/board-delivery"
-    ~port:0 ~refresh_interval:0. () in
+    ~port:0 () in
   let observed=identity "/workspace/board-delivery" in
   state.server_identity <- Some observed;
   state.workspace_identity <- Workspace_identity_match;
@@ -3270,7 +3306,7 @@ let test_board_delivery_preserves_workspace_and_refresh_guards () =
 let test_board_census_distinguishes_unread_loading_empty_and_failure () =
   let open Masc_tui_types in
   let unread=create_state ~workspace:"census" ~local_base_path:"/workspace/census"
-    ~port:0 ~refresh_interval:0. () in
+    ~port:0 () in
   Alcotest.(check bool) "unread census has no observed zero or total" true
     (board_census_reading unread=(Masc_tui_fetched.Absent,false)
      && board_census_holding unread ~hearth:unread.board_hearth=None);
@@ -3373,7 +3409,7 @@ let test_board_census_old_cleanup_and_workspace_withdrawal () =
 let test_dataset_admission_rejects_retired_workspace_and_refresh () =
   let open Masc_tui_types in
   let state = create_state ~workspace:"datasets" ~local_base_path:"/workspace/datasets"
-      ~port:0 ~refresh_interval:0. () in
+      ~port:0 () in
   let observed = identity "/workspace/datasets" in
   state.server_identity <- Some observed;
   state.workspace_identity <- Workspace_identity_match;
@@ -3453,7 +3489,7 @@ let test_response_decode_keeps_cache_and_typed_results () = with_response_decode
 let test_decode_completion_cannot_consume_new_navigation () = with_response_decode_pool (fun () ->
   let open Masc_tui_types in
   let state = create_state ~workspace:"decode" ~local_base_path:"/workspace/decode"
-      ~port:0 ~refresh_interval:0. () in
+      ~port:0 () in
   let observed = identity "/workspace/decode" in
   state.server_identity <- Some observed;
   state.workspace_identity <- Workspace_identity_match;
@@ -3521,7 +3557,7 @@ let test_response_decode_without_runtime_stays_synchronous () =
 
 let creation_state () =
   let state = Masc_tui_types.create_state ~workspace:"creation"
-      ~local_base_path:"/workspace/creation" ~port:0 ~refresh_interval:0. () in
+      ~local_base_path:"/workspace/creation" ~port:0 () in
   state.workspace_identity <- Masc_tui_types.Workspace_identity_match;
   state.server_identity <- Some (identity "/workspace/creation");
   state
@@ -4906,7 +4942,7 @@ let task_detail_scroll_fixture () =
       ["id", `String task_id; "title", `String task_id; "description", `String "fixture";
        "status", `String "todo"; "created_at", `String "2026-10-19T00:00:00Z"]) with
     | Ok task -> task | Error detail -> Alcotest.fail detail in
-  let state = create_state ~workspace:"task-scroll" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"task-scroll" ~port:0 () in
   state.view <- Planning;
   state.planning_mode <- Planning_list;
   state.task_detail_id <- Some task_id;
@@ -4932,7 +4968,7 @@ let task_scroll_history task_id =
 let tools_task_scroll_fixture () =
   let open Masc_tui_types in
   let module Async = Masc.Tui_decode_async_request in
-  let state = create_state ~workspace:"tools-task-scroll" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"tools-task-scroll" ~port:0 () in
   let target : Async.target =
     {submitted_by="operator"; request_id="request-1"; keeper_name="keeper"} in
   let source : tools_async_task_source =
@@ -5516,7 +5552,7 @@ let test_detail_histories_follow_refresh_and_workspace_owners () =
   let open Masc_tui_types in
   let module Fetched = Masc_tui_fetched in
   let state = create_state ~workspace:"history" ~local_base_path:"/workspace/history"
-      ~port:0 ~refresh_interval:0. () in
+      ~port:0 () in
   state.workspace_identity <- Workspace_identity_match;
   state.server_identity <- Some (identity state.local_base_path);
   let required = function Some request -> request | None -> Alcotest.fail "detail read did not acquire its owner" in
@@ -5624,7 +5660,7 @@ let test_keeper_history_request_sources_are_owned_and_independent () =
   let open Masc_tui_types in
   let module Read = Keeper_history_read in
   let module Protocol = Masc_tui_async_protocol in
-  let state = create_state ~workspace:"history" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"history" ~port:0 () in
   let make generation = Read.create ~generation ~keeper:"alpha"
     ~authority:state.workspace_authority ~reading:state.workspace_read_authority ~first_page:false in
   let owner = make 1 in
@@ -5669,7 +5705,7 @@ let test_keeper_history_request_sources_are_owned_and_independent () =
 let test_keeper_initial_page_is_not_an_explicit_older_demand () =
   let open Masc_tui_types in
   let module Read = Keeper_history_read in
-  let state = create_state ~workspace:"history" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"history" ~port:0 () in
   state.msg_target_keeper_name <- Some "alpha";
   let make ~first_page generation = Read.create ~generation ~keeper:"alpha"
     ~authority:state.workspace_authority ~reading:state.workspace_read_authority ~first_page in
@@ -5769,7 +5805,7 @@ let empty_async_observation =
 
 let test_async_observation_has_an_independent_generation () =
   let open Masc_tui_types in
-  let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a" ~port:0 () in
   let first = Option.get (begin_tools_async_observation_read state) in
   Alcotest.(check int) "the first async read owns its generation" 1 first;
   Alcotest.(check bool) "the first read is in flight" true state.tools_async_observation_inflight;
@@ -5794,7 +5830,7 @@ let test_async_observation_has_an_independent_generation () =
 
 let test_turn_observation_replaces_and_refuses_atomically () =
   let open Masc_tui_types in
-  let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a" ~port:0 () in
   let turn name : Tui_decode.keeper_turn_row =
     { ktr_keeper_name = name; ktr_chat_control_token = None; ktr_state = Tui_decode.Keeper_turn_idle }
   in
@@ -5889,7 +5925,7 @@ let test_turn_observation_replaces_and_refuses_atomically () =
 
 let test_empty_fleet_failure_requires_explicit_recovery () =
   let open Masc_tui_types in
-  let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a" ~port:0 () in
   let failure = Tui_decode.Keeper_waiting_invalid "prior fleet failure" in
   state.keeper_waiting_failure <- Some failure;
   let projection json =
@@ -5926,7 +5962,7 @@ let test_queue_play_input_authority () =
   let module Inbox = Masc_tui_queue_inspection in
   let module Press = Masc_tui_press in
   let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
-      ~port:0 ~refresh_interval:0. () in
+      ~port:0 () in
   let panel = {qp_keeper="keeper"; qp_layout=Masc_tui_queue_layout.Adaptive; qp_reading=Queue_current; qp_observation=None;
     qp_notice=None; qp_receipt=None; qp_selected=None; qp_scroll=0; qp_detail=None;
     qp_detail_scroll=0; qp_refresh_after_priority=false} in
@@ -6038,7 +6074,7 @@ let test_queue_presented_selection_authority () =
   let module Inbox = Masc_tui_queue_inspection in
   let module Press = Masc_tui_press in
   let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
-      ~port:0 ~refresh_interval:0. () in
+      ~port:0 () in
   state.server_identity <- Some (identity "/workspace/a");
   state.workspace_identity <- Workspace_identity_match;
   let id = Inbox.Server_message "message-a" in
@@ -6732,6 +6768,10 @@ let () =
             test_failed_read_keeps_followup_and_withdrawal_retires_it
         ; Alcotest.test_case "concurrent creations retain individual refresh coverage" `Quick
             test_concurrent_created_keepers_retain_individual_refresh_coverage
+        ; Alcotest.test_case "observer machine only follows control" `Quick
+            test_observer_machine_only_follows_control
+        ; Alcotest.test_case "observer messages belong to current stream" `Quick
+            test_observer_messages_belong_to_current_stream
         ; Alcotest.test_case "observer retry retires with workspace authority" `Quick
             test_observer_retry_retires_with_workspace_read_authority
         ; Alcotest.test_case "observer recovery belongs to unconfirmed workspace" `Quick

@@ -130,7 +130,7 @@ let handle_ag_ui_events ~deps request reqd =
                                    only the deliveries are sent. *)
                                 (Sse.replay_after_for_session
                                    ~runtime_authority:(Sse.runtime_authority_exn ~base_path)
-                                   ~session_id ~kind:Sse.Observer last_id).Sse.deliveries
+                                   ~client_id ~session_id ~kind:Sse.Observer last_id).Sse.deliveries
                               | None -> []
                             in
                             drain_sse info ~clock ~prime ~replay

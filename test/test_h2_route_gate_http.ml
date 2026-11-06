@@ -242,13 +242,13 @@ let test_physical_skill_turn_evidence () =
     let origin_dir = Masc.Keeper_fs.keeper_session_dir config (Keeper_id.Trace_id.to_string origin) in
     Unix.mkdir origin_dir 0o700;
     let activations = Ledger.activations canonical in
-    List.iter (fun activation -> match Ledger.record ~config ~trace_id:origin activation with
+    List.iter (fun activation -> match Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id:origin activation with
       | Ok _ -> () | Error error -> fail (Ledger.store_error_to_string error)) activations;
-    List.iter (fun delivery -> match Ledger.observe_async_result_delivery ~config ~trace_id:origin
+    List.iter (fun delivery -> match Ledger.observe_async_result_delivery ~keeper_name:"skill-keeper-fixture" ~config ~trace_id:origin
         ~expected_activations:activations delivery with
       | Ok _ -> () | Error error -> fail (Ledger.store_error_to_string error))
       (Ledger.async_result_deliveries canonical);
-    List.iter (fun action -> match Ledger.observe_async_action ~config ~trace_id:origin action with
+    List.iter (fun action -> match Ledger.observe_async_action ~keeper_name:"skill-keeper-fixture" ~config ~trace_id:origin action with
       | Ok _ -> () | Error error -> fail (Ledger.store_error_to_string error)) (Ledger.async_actions canonical);
     let path = "/api/v1/dashboard/skill-activations/physical-turn" in
     let target ?(workspace = []) turn =

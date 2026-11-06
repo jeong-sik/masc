@@ -177,7 +177,7 @@ let test_connector_write_demand_survives_repeated_read_withdrawal () =
   with_sidecar_paths "slack" dir @@ fun () ->
   Unix.mkdir (Filename.concat dir ".masc") 0o700;
   let state = Tui.create_state ~workspace:"connector-read"
-      ~local_base_path:dir ~port:0 ~refresh_interval:0. () in
+      ~local_base_path:dir ~port:0 () in
   connector_read_ready state dir;
   connector_fixture_write
     (Channel_gate_slack_state.bind ~channel_id:"C123" ~keeper_name:"first"
@@ -233,7 +233,7 @@ let test_connector_held_read_start_failure_and_scope_reset () =
   with_sidecar_paths "slack" dir @@ fun () ->
   Unix.mkdir (Filename.concat dir ".masc") 0o700;
   let state = Tui.create_state ~workspace:"connector-read"
-      ~local_base_path:dir ~port:0 ~refresh_interval:0. () in
+      ~local_base_path:dir ~port:0 () in
   connector_read_ready state dir;
   connector_read_uncertain state;
   connector_fixture_write
@@ -298,7 +298,7 @@ let test_connector_status_and_names_keep_original_binding_operation () =
   with_sidecar_paths "slack" dir @@ fun () ->
   Unix.mkdir (Filename.concat dir ".masc") 0o700;
   let state = Tui.create_state ~workspace:"connector-stages"
-      ~local_base_path:dir ~port:0 ~refresh_interval:0. () in
+      ~local_base_path:dir ~port:0 () in
   connector_read_ready state dir;
   connector_fixture_write
     (Channel_gate_slack_state.bind ~channel_id:"C123" ~keeper_name:"first"
@@ -391,7 +391,7 @@ let test_connector_write_reactivates_before_retired_names_cleanup () =
     with_sidecar_paths "slack" dir @@ fun () ->
     Unix.mkdir (Filename.concat dir ".masc") 0o700;
     let state = Tui.create_state ~workspace:"connector-retirement"
-        ~local_base_path:dir ~port:0 ~refresh_interval:0. () in
+        ~local_base_path:dir ~port:0 () in
     connector_read_ready state dir;
     connector_fixture_write
       (Channel_gate_slack_state.bind ~channel_id:"C123" ~keeper_name:"before"

@@ -503,9 +503,6 @@ class ObserverHandshakeTest(unittest.TestCase):
                         base,
                         "--port",
                         str(server.server_port),
-                        "--refresh",
-                        # Reconnects must not wait for this refresh cadence.
-                        "1000",
                     ],
                     stdin=slave,
                     stdout=slave,

@@ -1529,7 +1529,7 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
   let activation_config = Workspace.default_config log_root in
   let activation_trace = Keeper_id.Trace_id.of_string "skill-body-projection" |> Result.get_ok in
   Fs_compat.mkdir_p (Keeper_fs.keeper_session_dir activation_config (Keeper_id.Trace_id.to_string activation_trace));
-  let recorder = Keeper_skill_activation_recorder.make ~trace_id:activation_trace
+  let recorder = Keeper_skill_activation_recorder.make ~keeper_name:"skill-keeper-fixture" ~trace_id:activation_trace
       ~turn_ref:(Ids.Turn_ref.make ~trace_id:(Keeper_id.Trace_id.to_string activation_trace) ~absolute_turn:1)
       ~runtime_id:(fun () -> Some "fixture-runtime")
       ~snapshot_revision:(Snapshot.snapshot_revision captured_snapshot) ~task_selection:Selection.empty

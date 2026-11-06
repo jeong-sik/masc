@@ -16,6 +16,9 @@ type measurement =
   ; unread : Keeper_librarian_durable_consumer.unread option
   }
 
+val install_change_observer :
+  (config:Workspace.config -> keeper_name:string -> unit) -> (unit -> unit)
+
 val last_measurement : config:Workspace.config -> keeper_name:string -> measurement option
 (** Latest completed durable drain observation in this process, scoped to the
     runtime Keeper directory. [None] means no observation; this is never used

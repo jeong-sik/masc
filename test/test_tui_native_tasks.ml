@@ -116,7 +116,7 @@ let test_real_chat_projection_preserves_flags_and_terminal_safety () =
   let ambient=registered ~origin:(origin ~run:"ambient" ()) ~ambient:true "ambient" in
   let native,_=load Native.empty ~store:"store\027[2J" ~through:3
     ~rows:[1,visible;2,hidden;3,ambient] ~after:None in
-  let state=Masc_tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state=Masc_tui_types.create_state ~workspace:"test" ~port:8935 () in
   state.msg_target_keeper_name <- Some keeper;
   state.msg_native_tasks <- [keeper,native];
   state.msg_tool_visibility <- Masc_tui_types.Tools_full;

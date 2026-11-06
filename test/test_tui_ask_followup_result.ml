@@ -54,7 +54,7 @@ let with_answer f =
     | Ok Missing_log | Error _ -> fail "canonical answer did not persist" in
   ignore (Wake.deliver ~base_path:base ~keeper_name:keeper ~ask_id:ask.ask_id
     |> Result.map_error Wake.error_to_string |> require);
-  let state=Ui.create_state ~workspace:"followup-resource" ~local_base_path:base ~port:0 ~refresh_interval:2. () in
+  let state=Ui.create_state ~workspace:"followup-resource" ~local_base_path:base ~port:0 () in
   state.server_identity <- Some (identity base);state.workspace_identity <- Ui.Workspace_identity_match;
   state.view <- Ui.Approvals;
   let submission : Ui.ask_submission = {as_request=ref ();as_started_ns=0L;
@@ -174,6 +174,7 @@ let test_full_queue_keeps_partial_and_terminal () = with_answer @@ fun base conf
   let left,left_resolve=Eio.Promise.create () in
   let before=Masc.Workspace.get_tasks_raw config in
   let parts=ref [] and seen=ref [] in
+  check bool "a recorded Keeper answer owes a follow-up read" true (Ui.ask_followup_unfinished state);
   let request,submission=begin_read state in
   launch state results request submission ~released:(fun () -> ignore (Eio.Promise.try_resolve left_resolve ()))
     (actual_read base ask resolution ~parts ~before_source:(function
@@ -188,6 +189,7 @@ let test_full_queue_keeps_partial_and_terminal () = with_answer @@ fun base conf
   Masc_tui_message_input.insert state.msg_input "new input while follow-up is observed";
   Eio.Promise.resolve release ();Eio.Promise.await left;
   check bool "terminal retained without taking shared notification" true (terminal state results seen=Ok ());
+  check bool "a completed read ends the follow-up" false (Ui.ask_followup_unfinished state);
   Ui.retire_ask_followup_read state;
   check bool "retiring completed actual read preserves its original terminal cause" true
     (Option.bind (Ui.current_ask_followup state) Projection.followup_completion=Some (Ok ()));
@@ -214,6 +216,7 @@ let test_failure_and_reopened_scope_keep_original_facts () = with_answer @@ fun 
   (match terminal state results seen with
    | Error (Projection.Followup_read_failed _) -> ()
    | Ok () | Error (Followup_cancelled | Followup_not_started _ | Followup_withdrawn) -> fail "actual disconnect lost its failed cause");
+  check bool "a failed read leaves the follow-up owed" true (Ui.ask_followup_unfinished state);
   Ui.retire_ask_followup_read state;
   (match Option.bind (Ui.current_ask_followup state) Projection.followup_completion with
    | Some (Error (Projection.Followup_read_failed _)) -> ()

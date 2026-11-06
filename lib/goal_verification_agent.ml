@@ -363,16 +363,21 @@ let original_read_binding config ~goal_id =
   | Error _ -> None
 
 let observe_original_read config ~goal_id read =
+  let before = capture_observations () in
   let observed = Option.map (begin_original_read config) (original_read_binding config ~goal_id) in
   Fun.protect ~finally:(fun () -> Option.iter (abandon_original_read config) observed) (fun () ->
     match read () with
     | Ok _ as result ->
-      Option.iter (fun observed -> ignore (finish_original_read config observed None)) observed;
+      Option.iter (fun observed ->
+        ignore (finish_original_read config observed None);
+        announce_if_shown_changed config ~before ~after:(capture_observations ())) observed;
       result
     | Error error as result ->
       (* Keep the failure. Unknown authority is not a successful original
          read. Projection checks the current binding. *)
-      Option.iter (fun observed -> ignore (finish_original_read config observed (Some error))) observed;
+      Option.iter (fun observed ->
+        ignore (finish_original_read config observed (Some error));
+        announce_if_shown_changed config ~before ~after:(capture_observations ())) observed;
       result)
 
 let new_run () : Worker.run_identity =

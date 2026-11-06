@@ -85,6 +85,11 @@ val set : ?base_path:string -> ?actor:string -> 'a param -> 'a -> (unit, string)
 val set_by_key :
   ?base_path:string -> ?actor:string -> string -> Yojson.Safe.t -> (unit, string) result
 
+val install_change_observer : (key:string -> unit) -> unit
+(** Install the process-wide observer every override set or clear calls with
+    the parameter's key, after the in-memory value changed and before it is
+    persisted (RFC-0480 §3.4). It must not yield and must not raise. *)
+
 val set_by_key_with_change :
   ?base_path:string ->
   ?actor:string ->

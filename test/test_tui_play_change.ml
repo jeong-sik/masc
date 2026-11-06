@@ -12,7 +12,7 @@ let current state name =
   state.T.server_identity <- Some (identity name);
   state.T.workspace_identity <- T.Workspace_identity_match
 let fresh local_base_path =
-  let state = T.create_state ~workspace:"test" ~local_base_path ~port:8935 ~refresh_interval:2. () in
+  let state = T.create_state ~workspace:"test" ~local_base_path ~port:8935 () in
   current state "a";
   state
 let admitted = function Ok request -> request | Error detail -> fail detail

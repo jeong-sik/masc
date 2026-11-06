@@ -130,8 +130,6 @@ class FusionSseTest(unittest.TestCase):
                     base,
                     "--port",
                     str(server.server_port),
-                    "--refresh",
-                    "1000",
                 ],
                 stdin=slave,
                 stdout=slave,

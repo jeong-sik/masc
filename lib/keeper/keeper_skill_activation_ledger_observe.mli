@@ -18,6 +18,7 @@ open Keeper_skill_activation_ledger_model
 
 val observe_delivery :
   config:Workspace.config ->
+  keeper_name:string ->
   trace_id:Keeper_id.Trace_id.t ->
   turn_ref:Ids.Turn_ref.t ->
   tool_results:tool_result_receipt list ->
@@ -27,16 +28,17 @@ val observe_delivery :
   (t * string list, store_error) result
 
 val observe_async_result_delivery :
-  config:Workspace.config -> trace_id:Keeper_id.Trace_id.t ->
+  config:Workspace.config -> keeper_name:string -> trace_id:Keeper_id.Trace_id.t ->
   expected_activations:activation list -> Keeper_skill_async_delivery.t ->
   (t * Keeper_skill_async_delivery.t, store_error) result
 
 val observe_async_action :
-  config:Workspace.config -> trace_id:Keeper_id.Trace_id.t ->
+  config:Workspace.config -> keeper_name:string -> trace_id:Keeper_id.Trace_id.t ->
   Keeper_skill_async_action.t -> (t * Keeper_skill_async_action.t, store_error) result
 
 val observe_action :
   config:Workspace.config ->
+  keeper_name:string ->
   trace_id:Keeper_id.Trace_id.t ->
   turn_ref:Ids.Turn_ref.t ->
   active_skill_tool_use_ids:string list ->

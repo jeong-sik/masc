@@ -33,7 +33,7 @@ let detail selected revisions content = `Assoc [
 let rewrite name value = function
   | `Assoc fields -> `Assoc (List.map (fun (key, original) -> key, if key=name then value else original) fields)
   | _ -> fail "expected object"
-let state () = Masc_tui_types.create_state ~workspace:"reports" ~port:0 ~refresh_interval:0. ()
+let state () = Masc_tui_types.create_state ~workspace:"reports" ~port:0 ()
 let listed state result =
   let owner = Updates.begin_listing state in
   Updates.listed state ~owner result

@@ -31,6 +31,38 @@ HISTORY_PATH = "/api/v1/keepers/analyst/chat/history"
 WAIT_SECONDS = 25.0
 
 
+class ObserverEvents:
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.current: queue.Queue[dict[str, object] | str | None] | None = None
+        self.closed = False
+
+    def subscribe(self) -> queue.Queue[dict[str, object] | str | None]:
+        subscription: queue.Queue[dict[str, object] | str | None] = queue.Queue()
+        with self.lock:
+            if self.current is not None:
+                self.current.put("close")
+            self.current = subscription
+            if self.closed:
+                subscription.put(None)
+        return subscription
+
+    def unsubscribe(self, subscription: queue.Queue[dict[str, object] | str | None]) -> None:
+        with self.lock:
+            if self.current is subscription:
+                self.current = None
+
+    def put(self, event: dict[str, object] | str | None) -> None:
+        with self.lock:
+            subscription = self.current
+            if event is None:
+                self.closed = True
+            elif event == "close" and subscription is not None:
+                self.current = None
+            if subscription is not None:
+                subscription.put(event)
+
+
 class ChatServer(FixtureServer):
     def __init__(self, base: str) -> None:
         super().__init__(base)
@@ -41,9 +73,10 @@ class ChatServer(FixtureServer):
         self.release_history = threading.Event()
         self.failures_left = 0
         self.history_times: list[float] = []
-        # A dict is sent as an event, "close" ends this connection, None ends the test.
-        self.events: queue.Queue[dict[str, object] | str | None] = queue.Queue()
+        self.events = ObserverEvents()
         self.observer_connections = 0
+        self.observer_restart_on_resume = True
+        self.observer_gap_on_resume = False
 
 
 class ChatHandler(FixtureHandler):
@@ -63,30 +96,37 @@ class ChatHandler(FixtureHandler):
     def observe(self, server: ChatServer) -> None:
         with server.condition:
             server.observer_connections += 1
-        # A reconnect after the first stream names a restarted server, so the
-        # TUI cannot resume and reads the visible surfaces again.
         resuming = self.headers.get("Last-Event-ID") is not None
+        restarted = resuming and server.observer_restart_on_resume
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header(
             "x-masc-sse-instance-id",
-            "chat-fixture-successor" if resuming else "chat-fixture-instance",
+            "chat-fixture-successor" if restarted else "chat-fixture-instance",
         )
-        self.send_header(
-            "x-masc-sse-replay", "reset-instance-changed" if resuming else "fresh"
+        replay = (
+            "reset-instance-changed"
+            if restarted
+            else "resumed-after-gap"
+            if resuming and server.observer_gap_on_resume
+            else "resumed"
+            if resuming
+            else "fresh"
         )
+        self.send_header("x-masc-sse-replay", replay)
+        if replay == "resumed-after-gap":
+            missed_through = int(self.headers["Last-Event-ID"]) + 1
+            self.send_header("x-masc-sse-replay-missed-through", str(missed_through))
         self.send_header("x-masc-workspace-read", "matched-v1")
         self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.flush()
+        subscription = server.events.subscribe()
         server.observer_ready.set()
         cursor = 0
         while True:
-            event = server.events.get()
-            if event is None:
-                server.events.put(None)
-                break
-            if event == "close":
+            event = subscription.get()
+            if event is None or event == "close":
                 break
             cursor += 1
             try:
@@ -98,6 +138,7 @@ class ChatHandler(FixtureHandler):
             except (BrokenPipeError, ConnectionResetError):
                 break
         self.close_connection = True
+        server.events.unsubscribe(subscription)
 
     def do_GET(self) -> None:
         server = cast(ChatServer, self.server)
@@ -182,8 +223,6 @@ class ChatOwedHistoryTest(unittest.TestCase):
                     base,
                     "--port",
                     str(server.server_port),
-                    "--refresh",
-                    str(refresh_seconds),
                 ],
                 stdin=slave,
                 stdout=slave,
@@ -199,13 +238,18 @@ class ChatOwedHistoryTest(unittest.TestCase):
                 close_fds=True,
             )
             os.close(slave)
+            transcript_path = os.environ.get("MASC_TUI_TEST_TRANSCRIPT")
+            transcript = open(transcript_path, "wb") if transcript_path else None
 
             def drain_for(seconds: float) -> None:
                 deadline = time.monotonic() + seconds
                 while time.monotonic() < deadline:
                     if select.select([master], [], [], 0.05)[0]:
                         try:
-                            os.read(master, 65536)
+                            chunk = os.read(master, 65536)
+                            if transcript:
+                                transcript.write(chunk)
+                                transcript.flush()
                         except OSError:
                             return
 
@@ -264,6 +308,8 @@ class ChatOwedHistoryTest(unittest.TestCase):
                 except subprocess.TimeoutExpired:
                     process.kill()
                     process.wait()
+                if transcript:
+                    transcript.close()
                 os.close(master)
                 server.shutdown()
                 server.server_close()

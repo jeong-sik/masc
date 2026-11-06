@@ -156,7 +156,7 @@ let explicit_target () =
 
 let write_ownership () =
   let report = report "body" in
-  let state = Types.create_state ~workspace:"confirmations" ~port:0 ~refresh_interval:0. () in
+  let state = Types.create_state ~workspace:"confirmations" ~port:0 () in
   state.artifact_checks <- ready (inventory []);
   refused (Updates.begin_check state ~report);
   state.server_identity <- Some (identity "/workspace");
@@ -242,7 +242,7 @@ let uncertain_navigation () =
 
 let navigation_retains_read_owner () =
   let first = report "first" and second = report ~report_id:("artifact-" ^ String.make 32 'b') "second" in
-  let state = Types.create_state ~workspace:"confirmations" ~port:0 ~refresh_interval:0. () in
+  let state = Types.create_state ~workspace:"confirmations" ~port:0 () in
   state.view <- Types.Resources;
   state.server_identity <- Some (identity "/workspace");
   state.resources_list <- Some [Catalog.Report first;Catalog.Report second];

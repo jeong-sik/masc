@@ -631,7 +631,7 @@ let test_public_nested_run_records_only_admitted_children ?(execution=Masc.Keepe
   let task_selection = Masc.Keeper_task_skill_turn.resolve_for_task ~snapshot ~task_id:"task-nested" [ reference ]
       |> require "task-bound exact child" in
   let runtime = ref "fixture.runtime" and runtime_reads = ref 0 in
-  let recorder = Recorder.make ~trace_id ~turn_ref ~runtime_id:(fun () -> incr runtime_reads; Some !runtime)
+  let recorder = Recorder.make ~keeper_name:"skill-keeper-fixture" ~trace_id ~turn_ref ~runtime_id:(fun () -> incr runtime_reads; Some !runtime)
       ~snapshot_revision:(Surface.skill_snapshot_revision surface) ~task_selection |> require "turn recorder" in
   let calls = ref 0 in
   let barrier, release = Eio.Promise.create () in

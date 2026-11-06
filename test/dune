@@ -3261,9 +3261,12 @@
 (include stanzas/test_keeper_skill_activations_read.inc)
 (include stanzas/test_gate_connector_announce.inc)
 (include stanzas/test_repository_catalog_announce.inc)
+(include stanzas/test_keeper_metrics_announce.inc)
 (include stanzas/test_keeper_oauth_attempts_announce.inc)
 (include stanzas/test_memory_health_input_announce.inc)
 (include stanzas/test_harness_verdicts_announce.inc)
+(include stanzas/test_runtime_config_commit_announce.inc)
+(include stanzas/test_gate_change_notify.inc)
 (include stanzas/test_keeper_event_queue_announce.inc)
 (include stanzas/test_keeper_metrics_appended_announce.inc)
 
@@ -5308,7 +5311,9 @@
  (libraries
   alcotest
    masc.agent_core.digest
+  masc.fs_compat
   masc
+  masc_server
   masc.keeper_registry
   masc.masc_types
   masc.skill_reference

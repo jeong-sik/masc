@@ -8,12 +8,12 @@ open Keeper_skill_activation_ledger_events
 open Keeper_skill_activation_ledger_replay
 open Keeper_skill_activation_ledger_load
 
-(* A write transaction. Every append goes through [commit_event_locked], which
-   takes the writer of its transaction and marks it, so a write that may have
-   changed the store is announced once its session lock is released
-   (RFC-0483 §4.2). A write that only re-observes what is stored appends
-   nothing and announces nothing. *)
-type writer = { mutable appended : bool }
+(* A write transaction has two observations. The commit observer hears every
+   append attempt after the session lock is released, including an uncertain
+   failure. The commit-state observer receives the exact ledger after a
+   successful commit under the lock, or [None] for an uncertain append after
+   the lock, so a cached projection can invalidate instead of guessing. *)
+type writer = { mutable appended : bool; mutable committed : bool }
 
 let no_commit_observer ~config:_ ~trace_id:_ = ()
 
@@ -25,11 +25,32 @@ let install_commit_observer observer = Atomic.set commit_observer observer
 let withdraw_commit_observer observer =
   ignore (Atomic.compare_and_set commit_observer observer no_commit_observer : bool)
 
-let with_write_lock ~config ~trace_id operation =
-  let writer = { appended = false } in
-  (* The observer only records the trace, so it runs on a raise too: a row
-     appended before the raise is on disk all the same. *)
-  let announce () = if writer.appended then (Atomic.get commit_observer) ~config ~trace_id in
+let no_commit_state_observer ~config:_ ~keeper_name:_ ~trace_id:_ (_ : t option) = ()
+
+let commit_state_observer :
+  (config:Workspace.config -> keeper_name:string -> trace_id:Keeper_id.Trace_id.t -> t option -> unit) Atomic.t =
+  Atomic.make no_commit_state_observer
+
+let install_commit_state_observer observer =
+  let previous = Atomic.get commit_state_observer in
+  Atomic.set commit_state_observer observer;
+  fun () ->
+    ignore (Atomic.compare_and_set commit_state_observer observer previous : bool)
+
+let announce_commit_state ~config ~keeper_name trace_id state =
+  (Atomic.get commit_state_observer) ~config ~keeper_name ~trace_id state
+
+let with_write_lock ~config ~keeper_name ~trace_id operation =
+  let writer = { appended = false; committed = false } in
+  (* An attempted append may have landed even when the write raised. *)
+  let announce () =
+    if writer.appended then begin
+      (Atomic.get commit_observer) ~config ~trace_id;
+      Workspace_dataset_event.announce ~base_path:config.Workspace.base_path
+        (Workspace_dataset_event.Skill_activations { keeper = keeper_name });
+      if not writer.committed then announce_commit_state ~config ~keeper_name trace_id None
+    end
+  in
   match with_lock ~config ~trace_id (operation writer) with
   | result ->
     announce ();
@@ -47,7 +68,7 @@ let with_write_lock ~config ~trace_id operation =
    builds. The header goes first when the store has none. A failed append
    leaves the store's end unknown to this process, so the next read replays
    it from the first byte. *)
-let commit_event_locked (writer : writer) session_dir (log : session_log) event =
+let commit_event_locked ~(config : Workspace.config) ~keeper_name (writer : writer) session_dir (log : session_log) event =
   let row = event_to_yojson event in
   let* ledger =
     (let* decoded = decode_event ~expected_trace_id:log.ledger.session_id row in
@@ -80,13 +101,15 @@ let commit_event_locked (writer : writer) session_dir (log : session_log) event 
   | Ok cursor ->
     remember_session_log path { ledger; cursor; header_written = true };
     writer.appended <- true;
+    writer.committed <- true;
+    announce_commit_state ~config ~keeper_name log.ledger.session_id (Some ledger);
     Ok ledger
 ;;
 
 type activation_clock = Exact_activation_clock | Original_activation_clock
 
-let record_with_clock ~activation_clock ~config ~trace_id (activation : activation) =
-  with_write_lock ~config ~trace_id (fun writer ~ownership_root session_dir ->
+let record_with_clock ~activation_clock ~config ~keeper_name ~trace_id (activation : activation) =
+  with_write_lock ~config ~keeper_name ~trace_id (fun writer ~ownership_root session_dir ->
     let* () =
       if
         String.equal
@@ -110,22 +133,22 @@ let record_with_clock ~activation_clock ~config ~trace_id (activation : activati
       else Error (Invocation_id_collision activation.skill_tool_use_id)
     | None ->
       let* stored =
-        commit_event_locked writer session_dir log (Activation_recorded activation)
+        commit_event_locked ~config ~keeper_name writer session_dir log (Activation_recorded activation)
       in
       Ok (stored, Recorded activation))
 ;;
 
-let record ~config ~trace_id activation =
-  record_with_clock ~activation_clock:Exact_activation_clock ~config ~trace_id activation
+let record ~config ~keeper_name ~trace_id activation =
+  record_with_clock ~activation_clock:Exact_activation_clock ~config ~keeper_name ~trace_id activation
 ;;
 
-let record_original_invocation ~config ~trace_id activation =
-  record_with_clock ~activation_clock:Original_activation_clock ~config ~trace_id activation
+let record_original_invocation ~config ~keeper_name ~trace_id activation =
+  record_with_clock ~activation_clock:Original_activation_clock ~config ~keeper_name ~trace_id activation
 ;;
 
 (* The rejection is evidence in its own right: it is recorded, and the
    observation that produced it still fails. *)
-let reject_transition_locked writer session_dir log rejection error =
-  let* _stored = commit_event_locked writer session_dir log (Transition_rejected rejection) in
+let reject_transition_locked ~config ~keeper_name writer session_dir log rejection error =
+  let* _stored = commit_event_locked ~config ~keeper_name writer session_dir log (Transition_rejected rejection) in
   Error error
 ;;

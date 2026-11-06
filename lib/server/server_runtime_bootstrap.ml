@@ -429,6 +429,7 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   in
   let base_path = Env_config_core.normalize_masc_base_path_input base_path in
   Runtime_params.initialize ~base_path;
+  Runtime_params.install_change_observer Connector_trigger_params.announce_param_change;
   Fs_compat.set_fs fs;
   Mcp_eio.set_net net;
   Mcp_eio.set_clock clock;
@@ -541,9 +542,13 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   let config = Mcp_server.workspace_config state in
   Server_provider_rest_broadcast.install ~sw ~clock ~config;
   Server_keeper_cost_broadcast.install ~sw ~clock ~config;
+  Server_runtime_metrics.install ~sw ~clock ~config;
   Server_turn_preview_broadcast.install ~sw ~clock;
   Workspace_dataset_event.install_store_observers ();
+  Server_lane_inventory.install ();
+  Server_skill_usage_runtime.install ();
   Server_memory_health_broadcast.install ~sw ~config;
+  Server_dashboard_http_keeper_memory_health.install ();
   (* The harness health read is cached per workspace and query window. The
      verdict store belongs to the workspace that wrote the record, so its
      base_path is the one announced; every cached window goes first because

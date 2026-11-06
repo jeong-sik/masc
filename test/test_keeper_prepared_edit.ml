@@ -163,7 +163,7 @@ let public_bundle ?snapshot ?(sourceful = true) ?(with_read = false) ?(with_writ
   let selection = Keeper_task_skill_turn.resolve_for_task ~snapshot ~task_id:task.task_id references
       |> function Ok value -> value | Error error -> fail (Keeper_task_skill_turn.error_to_string error) in
   let skill_activation_context = if references = [] then None else
-    Some (Keeper_skill_activation_recorder.make ~trace_id:meta.runtime.trace_id
+    Some (Keeper_skill_activation_recorder.make ~keeper_name:"skill-keeper-fixture" ~trace_id:meta.runtime.trace_id
       ~turn_ref:(Ids.Turn_ref.make ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id) ~absolute_turn:13)
       ~runtime_id:(fun () -> Some "fixture.resource-edit")
       ~snapshot_revision:(Skill_catalog_snapshot.snapshot_revision snapshot) ~task_selection:selection

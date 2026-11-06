@@ -6,7 +6,7 @@ type binding = Store.binding = {
   keeper_name : string;
 }
 
-let connector_id = "discord"
+let connector_id = Gate_connector_announce.discord
 let display_name = "Discord"
 let channel = "discord"
 

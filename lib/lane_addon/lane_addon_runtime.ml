@@ -251,7 +251,8 @@ type manager = { store : Lane_addon_store.t; base_path : string; artifact_store 
   mutable configuration_visibility : (string * visibility) list;
   mutable swept : runtime list;
   sweep_retries : (runtime, sweep_retry list) Hashtbl.t;
-  sweep_warned : (runtime, (string * string option * Lifecycle.failure) list) Hashtbl.t }
+  sweep_warned : (runtime, (string * string option * Lifecycle.failure) list) Hashtbl.t;
+  machine_announced : (Machine_lane.t, Yojson.Safe.t) Hashtbl.t }
 let managers : (string, manager) Hashtbl.t = Hashtbl.create 4
 let installation_id (e : entry) = Lane_addon_tool_request_owner.installation_id (match e.configuration with
   | Some owner -> Lane_addon_tool_request_owner.Configuration owner.id
@@ -712,6 +713,12 @@ let failed_state state cause = match state with
   | Lifecycle.Attached | Lifecycle.Observing | Lifecycle.Detaching None | Lifecycle.Detached _ ->
       Lifecycle.Failed (Lifecycle.failed cause)
 let fail_state (e : entry) cause = failed_state e.state cause
+type inventory_change = Observation_commit | Configuration_changed | Retained_changed
+
+let inventory_change_observer = ref (fun ~base_path:_ (_ : inventory_change) -> ())
+let install_inventory_change_observer observer = inventory_change_observer := observer
+let notify_inventory m kind = !inventory_change_observer ~base_path:m.base_path kind
+
 type binding_writer = store:Lane_addon_store.t -> instance_id:string -> Yojson.Safe.t ->
   (unit, Lane_addon_store.binding_write_error) result
 let binding_writer_key : binding_writer Eio.Fiber.key = Eio.Fiber.create_key ()
@@ -724,6 +731,31 @@ let binding_writer_key : binding_writer Eio.Fiber.key = Eio.Fiber.create_key ()
    is released, with no yield in between. So no reader sees the commit
    without its wake, no later write names an earlier sequence, and a state
    change made while the write was in flight is not overwritten. *)
+let machine_live_changed ~previous ~current =
+  match previous with
+  | None -> true
+  | Some previous -> not (Yojson.Safe.equal previous current)
+
+let announce_machine m e machine exported_tool =
+  if List.mem exported_tool e.package.exported_tools then
+    match List.filter_map (fun (row : Lane_addon_types.row) ->
+      List.assoc_opt "machine_live" row.fields) e.output.rows with
+    | [current] ->
+        let previous = Hashtbl.find_opt m.machine_announced machine in
+        if machine_live_changed ~previous ~current then begin
+          Hashtbl.replace m.machine_announced machine current;
+          Workspace_dataset_event.announce ~base_path:m.base_path
+            (Workspace_dataset_event.Machine_live { machine })
+        end
+    | [] | _ :: _ :: _ -> ()
+
+let notify_commit m e =
+  notify_inventory m Observation_commit;
+  announce_machine m e Machine_lane.Msx "masc_msx_screen";
+  announce_machine m e Machine_lane.Dos "masc_dos_screen";
+  Workspace_dataset_event.announce_lane_addon ~base_path:m.base_path
+    ~instance_id:e.instance_id ~visibility:(visibility_to_json e.visibility)
+
 let persist m e = Eio.Mutex.use_ro e.persistence_mutex (fun () ->
   (* Capture mutable state on the owning domain after serializing writes.
      The I/O thread sees only the immutable snapshot. Every write, including
@@ -746,7 +778,7 @@ let persist m e = Eio.Mutex.use_ro e.persistence_mutex (fun () ->
       if not e.stopping then e.state <- unconfirmed (settle e.state);
       wake_dependents m e) held in
     match offload (fun () -> write ~store:m.store ~instance_id:e.instance_id json) with
-    | Ok () -> commit ~unconfirmed:Fun.id; Ok ()
+    | Ok () -> commit ~unconfirmed:Fun.id; notify_commit m e; Ok ()
     | Error (Lane_addon_store.Binding_rejected detail) -> Error detail
     | Error (Lane_addon_store.Binding_publication_failed failure) ->
         let detail = Fs_compat.atomic_replace_failure_to_string failure in
@@ -756,6 +788,9 @@ let persist m e = Eio.Mutex.use_ro e.persistence_mutex (fun () ->
               let detail = "binding published with unconfirmed durability: " ^ detail in
               commit ~unconfirmed:(fun state -> failed_state state (Lifecycle.Persistence_failed detail));
               detail in
+        (match failure.Fs_compat.stage with
+         | Fs_compat.After_rename -> notify_commit m e
+         | Fs_compat.Before_rename -> ());
         (match failure.exception_ with
          | Eio.Cancel.Cancelled _ -> Printexc.raise_with_backtrace failure.exception_ failure.backtrace
          | _ -> Error detail))
@@ -1835,7 +1870,8 @@ let manager config =
                      fleet_journals=Hashtbl.create 8;
                      fleet_operations=Hashtbl.create 8; fleet_recipients=Hashtbl.create 16; fleet_nudge=(fun () -> ());
                      configuration_status = None; configuration_nudge = (fun () -> ()); configuration_visibility=[];
-                     swept = []; sweep_retries = Hashtbl.create 2; sweep_warned = Hashtbl.create 2 } in
+                     swept = []; sweep_retries = Hashtbl.create 2; sweep_warned = Hashtbl.create 2;
+                     machine_announced = Hashtbl.create 2 } in
       Hashtbl.add managers root m; m
 let installation_exports ((e : entry), connection) =
   connection.worker.exported_tools () |> List.filter_map (fun (tool : Mcp_protocol.Mcp_types.tool) ->
@@ -2697,6 +2733,32 @@ let inventory ~config = Eio_context.run_on_owner_domain (fun () ->
            application=configuration_application m ~reading ~inventory:(Some inventory) d})
           reading.snapshot.declarations in
   {inventory with applications})
+
+let inventory_live ~config = Eio_context.run_on_owner_domain (fun () ->
+  let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+  match Hashtbl.find_opt managers root with
+  | None -> { owner_present = false; instances = []; issues = []; complete = true; applications = [] }
+  | Some m ->
+      let instances = entries m |> List.map (fun (e : entry) ->
+        { instance_id = e.instance_id; incarnation = e.instance_id; run_id = e.run_id
+        ; package_id = e.package.id; title = e.package.title; package_revision = e.package.revision
+        ; ui_category = e.package.ui_category; configuration = e.configuration
+        ; presence = Live; phase = phase_of e }) in
+      { owner_present = true; instances; issues = []; complete = true; applications = [] })
+
+let configuration_applications ~config ~inventory = Eio_context.run_on_owner_domain (fun () ->
+  let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+  match Hashtbl.find_opt managers root with
+  | None -> []
+  | Some m ->
+      (match m.configuration_status with
+       | None -> []
+       | Some reading -> List.map (fun (d : Lane_addon_config.declaration) ->
+         { owner = { id = d.id; source_path = d.source_path; revision = d.revision }
+         ; source_revision = d.source_revision; enabled = d.enabled
+         ; application = configuration_application m ~reading ~inventory:(Some inventory) d })
+         reading.snapshot.declarations))
+
 let persisted_binding m id =
   let* reading = runtime_result (read_retained_binding m ~instance_id:id) in
   let named (binding : retained_binding) = match text binding.binding_fields "instance_id" with
@@ -2723,6 +2785,7 @@ let publish_cleanup m ~id ~writer publication =
   match persisted with
   | Ok () ->
       Hashtbl.remove m.recovering id;
+      notify_inventory m Retained_changed;
       if is_detached publication.terminal_state then m.configuration_nudge ()
   | Error message ->
       (* Keep the owner even after rename/unlink. The next maintenance beat
@@ -2800,7 +2863,7 @@ let historical_detach ~sw ?(wait = false) m fields =
           raise exn
       | exn -> Error (Printexc.to_string exn) in
     let* () = match intent with
-      | Ok () -> Ok ()
+      | Ok () -> notify_inventory m Retained_changed; Ok ()
       | Error message -> Hashtbl.replace m.recovering id (Cleanup_request_failed (fields,message)); Error message in
     let backend = backend ~store:m.store ~artifact_store:m.artifact_store () in
     let finished = ref None in
@@ -4386,6 +4449,7 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
     m.configuration_status <- Some reading;
     Ok (configuration_json m ~access:Lane_addon_sources.Operator_configuration,changed)) in
   List.iter (fun package_id -> publish_owner_event ~root:(Lane_addon_store.root m.store) ~package_id Configuration_observed) changed;
+  notify_inventory m Configuration_changed;
   Ok result)
 
 let fleet_services : (string,unit -> unit) Hashtbl.t = Hashtbl.create 4
@@ -4513,6 +4577,11 @@ let installation_questions ~config =
       loop [] ids))
 
 module For_testing = struct
+  let machine_live_changed = machine_live_changed
+  let with_inventory_change_observer observer f =
+    let previous = !inventory_change_observer in
+    inventory_change_observer := observer;
+    Fun.protect ~finally:(fun () -> inventory_change_observer := previous) f
   let browser_source_table = browser_source_table
   type nonrec visibility = visibility = Shared | Operator_only | Keeper_only of string
   type nonrec 'service document_service = 'service document_service =

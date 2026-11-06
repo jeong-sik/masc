@@ -905,6 +905,51 @@ let test_mcp_rejects_duplicate_cursors_before_registration env =
     ; [ "last-event-id", "20"; "Last-Event-ID", "20" ] ]
 ;;
 
+let test_mcp_rejects_unknown_machine_and_non_observer_machine env =
+  let module Transport = Server_mcp_transport_http in
+  let workspace = Masc_test_deps.setup_test_workspace () in
+  Fun.protect ~finally:(fun () -> Masc_test_deps.cleanup_test_workspace workspace) (fun () ->
+    let state = Masc.Mcp_server.For_testing.create_state ~base_path:workspace in
+    let auth = Masc_test_deps.make_sse_auth workspace "machine-observer" in
+    let token = Option.get auth.Masc.Sse.token in
+    ignore (Masc.Session.McpSessionStore.get_or_create ~id:"observer-machine-test" ());
+    let authority = match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
+      | Ok authority -> authority | Error `Malformed -> Alcotest.fail "fixture authority" in
+    let admit ~base_path:_ _request = Ok () in
+    let deps : Transport.deps =
+      { get_origin = (fun _ -> "")
+      ; cors_headers = (fun _ -> [])
+      ; auth_token_from_request = (fun _ -> None)
+      ; is_ready = (fun () -> true)
+      ; get_runtime_result = (fun () -> Error "runtime unavailable")
+      ; get_base_path = (fun () -> workspace)
+      ; get_server_state = (fun () -> Some state)
+      ; verify_mcp_auth = admit
+      ; verify_mcp_observer_stream_auth = admit
+      ; verify_operator_mcp_auth = admit
+      ; verify_seat_mcp_auth = admit
+      } in
+    List.iter (fun (target, sse_kind, expected_status) ->
+      let handler reqd =
+        let request = Httpun.Reqd.request reqd in
+        Server_request_authority.with_current authority (fun () ->
+          Transport.handle_get_mcp ~deps ~sse_kind request reqd) in
+      with_server env ~handler (fun ~port ->
+        let before = Masc.Sse.client_count () in
+        let url = Printf.sprintf "http://127.0.0.1:%d%s" port target in
+        match Masc_http_client.get_response_sync ~clock:(Eio.Stdenv.clock env) ~timeout_sec:3.
+                ~url ~headers:[ "Accept", "text/event-stream"; "Mcp-Session-Id", "observer-machine-test"
+                              ; "Authorization", "Bearer " ^ token ] () with
+        | Error detail -> Alcotest.failf "MCP request failed: %s" detail
+        | Ok response ->
+          if response.status <> expected_status then
+            Alcotest.failf "%s: expected %d, got %d: %s" target expected_status response.status response.body;
+          Alcotest.(check int) "no observer was registered" before (Masc.Sse.client_count ())))
+      [ "/mcp?sse_kind=observer&machine=other", Masc.Sse.Observer, 400
+      ; "/mcp?sse_kind=agent&machine=msx", Masc.Sse.Agent_stream, 400
+      ; "/mcp?sse_kind=observer&machine=msx", Masc.Sse.Observer, 503 ])
+;;
+
 let test_mcp_observer_refuses_foreign_and_retired_workspaces env =
   let module Transport = Server_mcp_transport_http in
   let workspace = Masc_test_deps.setup_test_workspace () in
@@ -1229,6 +1274,24 @@ let test_mcp_future_cursor_resets_before_live_delivery env =
         Transport.stop_sse_session successor_id)))
 ;;
 
+let test_observer_names_controlled_machine env =
+  let target = ref "" in
+  let handler reqd =
+    target := (Httpun.Reqd.request reqd).Httpun.Request.target;
+    stream_response ~receipts:[ receipt ] [ "data: {}\n\n" ] reqd
+  in
+  with_server env ~handler (fun ~port ->
+    let result = Http.observe_runtime_events_with_machine ~clock:(Eio.Stdenv.clock env)
+        ~machine:(Some Masc.Machine_lane.Msx)
+        ~on_identity:(fun _ -> ()) ~expected_base_path:identity.sid_base_path
+        ~expected_masc_root:identity.sid_masc_root ~host:"127.0.0.1" ~port
+        ~session_id:"observer-machine" ~cursor:None ~on_open:(fun _ -> ())
+        ~on_chunk:(fun _ -> ()) in
+    Alcotest.(check bool) "the controlled observer opens" true (Result.is_ok result);
+    Alcotest.(check (option string)) "the query names only the controlled machine"
+      (Some "msx") (Uri.get_query_param (Uri.of_string !target) "machine"))
+;;
+
 let () =
   let case name test = Alcotest.test_case name `Quick (with_env test) in
   Alcotest.run
@@ -1263,7 +1326,9 @@ let () =
       , [ case "invalid handshake is not opened or read" test_observer_rejects_bad_replay_before_delivering_bytes
         ; case "unusable replay retries without the requested cursor" test_observer_retries_without_cursor
         ; case "valid and unadvertised live streams still open" test_observer_accepts_valid_and_unadvertised_live_streams
+        ; case "a controlled observer names its machine" test_observer_names_controlled_machine
         ; case "observer requires the workspace receipt" test_observer_requires_workspace_receipt
+        ; case "unknown and non-observer machine queries are rejected" test_mcp_rejects_unknown_machine_and_non_observer_machine
         ; case "identity requires scoped admission" test_observer_identity_requires_scoped_admission
         ; case "workspace refusal differs from session conflict" test_observer_workspace_refusal_is_not_a_session_conflict
         ; case "MCP rejects duplicate cursor headers" test_mcp_rejects_duplicate_cursors_before_registration

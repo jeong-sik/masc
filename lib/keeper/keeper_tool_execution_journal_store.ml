@@ -79,7 +79,10 @@ let validate_artifacts ~base_path immutable_source =
     (match field "nested_calls" fields,field "nested_activation" fields with
      | `List [],`Null -> ()
      | `List (_::_),binding ->
-       (match Keeper_skill_activation_recorder.bound_context_of_yojson binding with
+       (match
+          Keeper_skill_activation_recorder.bound_context_of_yojson
+            ~keeper_name:immutable_source.keeper_name binding
+        with
         | Ok _ -> () | Error error -> refuse (Keeper_skill_activation_recorder.error_to_string error))
      | _ -> refuse "run artifact original child activation binding mismatch");
     require (field "composition_run_id" fields = `String (Plan.Composition_run_id.to_string immutable_source.composition_run_id)

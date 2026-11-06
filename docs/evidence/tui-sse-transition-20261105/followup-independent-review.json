@@ -1,0 +1,42 @@
+{
+  "schema": "masc.tui.followup-independent-review-evidence.v1",
+  "captured_on": "2026-11-05",
+  "reviewer": "fresh-context coder agent-4",
+  "range": "d2453b39e49..843119b65f4",
+  "reviewed_head": "843119b65f48aeaf53f0fa19f8992236da9b1b71",
+  "verdict": "With fixes; independent re-review approved 2329a5b18e0 with no P0-P3 findings",
+  "read_only": true,
+  "source_only": true,
+  "findings": [
+    {
+      "id": "P1-replay-replacement-identity",
+      "severity": "P1",
+      "location": "lib/sse.ml:425-436; lib/server/server_mcp_transport_http.ml:947-964; lib/server/server_mcp_transport_http_agui.ml:75-117",
+      "behavior": "Replay looks up the current session instead of the exact registered client, so a same-session replacement can lend its credentials to an earlier connection.",
+      "status": "RED 41981658955 confirmed replacement Admin leaked both private events; FIXED: 2329a5b18e0; GREEN 41982732418; type-check 41982736264 passed; independent re-review approved with no P0-P3 findings"
+    },
+    {
+      "id": "P2-live-test-repeated-drain",
+      "severity": "P2",
+      "location": "test/test_lane_addon_actions.ml:869-885",
+      "behavior": "The live visibility test drained each stream once per payload and made later assertions depend on an already-empty queue.",
+      "status": "FIXED: 33721ddc4d1; GREEN 41980035709"
+    }
+  ],
+  "source_checks": [
+    "Cache generations prevent stale cold-read commits.",
+    "Only typed Unavailable is retried for spectator steps.",
+    "Log lookahead preserves exact pages.",
+    "Public/shared events remain deliverable.",
+    "Live and external fanout decode visibility once per event, not once per client."
+  ],
+  "unverified_by_reviewer": [
+    "Missing/malformed visibility and Outcome_unknown/Host_refusal non-retry behavior were checked only in source.",
+    "The test-only delta through 33721ddc4d1 was inspected, not fully re-reviewed."
+  ],
+  "rereview_non_blocking_coverage": [
+    "No explicit shared Add-on replay call omits client_id entirely; the anonymous fixture uses invalid id 0.",
+    "No transport-level forced register/replacement/replay interleaving or direct kind-mismatch case."
+  ],
+  "integration": "Independent re-review approved the source, not a merge. No merge, rebase, installation, or runtime configuration change was performed."
+}

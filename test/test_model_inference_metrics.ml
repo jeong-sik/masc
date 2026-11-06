@@ -2309,6 +2309,83 @@ let test_unrenderable_decision_timestamp () =
     check string "invalid epoch makes runtime history incomplete" "unavailable"
       Yojson.Safe.Util.(json |> member "state" |> to_string))
 
+module Kept = Model_inference_metrics_kept
+
+let append_decisions path entries =
+  Out_channel.with_open_gen [ Open_append; Open_creat; Open_binary ] 0o644 path (fun oc ->
+    List.iter (fun json ->
+      output_string oc (Yojson.Safe.to_string json);
+      output_char oc '\n') entries)
+
+let attributed runtime json = match json with
+  | `Assoc fields -> `Assoc (("provider_context", `Assoc [
+      "executed_runtime_id", `String runtime]) :: fields)
+  | _ -> fail "fixture is not an object"
+
+let history_text ~now reading =
+  Yojson.Safe.to_string (M.runtime_metrics_json ~observed_at:now ~window_minutes:1440 reading)
+
+(* A kept read that continues from an earlier one answers what a read from
+   nothing gives at the same moment: through rows appended to the decision log
+   and the cost ledger, a schema-invalid row, and a rotation of the log. *)
+let test_runtime_history_kept_reads_match_one_pass () =
+  let base = test_dir () in
+  let before = List.map (fun name -> name, Sys.getenv_opt name)
+    ["MASC_KEEPER_METRICS_MAX_BYTES"; "MASC_KEEPER_METRICS_MAX_ROTATED"] in
+  Fun.protect ~finally:(fun () ->
+    List.iter (fun (name, value) -> match value with
+      | Some value -> Unix.putenv name value | None -> Unix.unsetenv name) before;
+    cleanup_dir base) (fun () ->
+    Unix.putenv "MASC_KEEPER_METRICS_MAX_BYTES" "1";
+    Unix.putenv "MASC_KEEPER_METRICS_MAX_ROTATED" "2";
+    let path = make_keeper_dir base "kept.history" in
+    let now = now_unix () in
+    let row ?identity_seed at =
+      attributed "account.model" (success_entry ~model:"model" ~ts:at ?identity_seed ()) in
+    write_decisions path [row (now -. 90000.); row ~identity_seed:"paired" (now -. 60.)];
+    write_costs base [cost_entry ~model:"model" ~ts:(now -. 60.) ~identity_seed:"paired" ()];
+    let kept, _ = Kept.refresh ~base_path:base ~now ~window_minutes:1440 Kept.empty in
+    let continue_and_compare label kept =
+      let now = now_unix () in
+      let kept, reading = Kept.refresh ~base_path:base ~now ~window_minutes:1440 kept in
+      let _, fresh = Kept.refresh ~base_path:base ~now ~window_minutes:1440 Kept.empty in
+      check string label (history_text ~now fresh) (history_text ~now reading);
+      kept in
+    append_decisions path
+      [row (now -. 30.); `Assoc ["ts_unix", `Float now; "telemetry", `Assoc []]];
+    write_costs base [cost_entry ~model:"model" ~ts:(now -. 20.) ~identity_seed:"cost-only" ()];
+    let kept = continue_and_compare "appended rows read as a whole read does" kept in
+    Masc.Keeper_types_support.maybe_rotate_file path;
+    append_decisions path [row (now -. 10.)];
+    ignore (continue_and_compare "a rotated log reads as a whole read does" kept))
+
+(* A kept row stops counting once it leaves the window, with no write; the
+   earliest such instant is the next change. *)
+let test_runtime_history_rows_leave_the_window () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let path = make_keeper_dir base "leaving.history" in
+    let now = now_unix () in
+    let window_s = 1440. *. 60. in
+    let leaving_ts = now -. window_s +. 100. in
+    write_decisions path [
+      attributed "account.model" (success_entry ~model:"model" ~ts:leaving_ts ());
+      `Assoc ["ts_unix", `Float (leaving_ts +. 50.); "telemetry", `Assoc []] ];
+    let state ~now reading =
+      M.runtime_metrics_json ~observed_at:now ~window_minutes:1440 reading
+      |> Yojson.Safe.Util.member "state" |> Yojson.Safe.Util.to_string in
+    let kept, reading = Kept.refresh ~base_path:base ~now ~window_minutes:1440 Kept.empty in
+    check string "a schema-invalid row in the window keeps the history incomplete"
+      "unavailable" (state ~now reading);
+    check (option (float 0.)) "the valid row leaves first"
+      (Some (Float.succ (leaving_ts +. window_s)))
+      (Kept.next_change kept ~window_minutes:1440 ~after:now);
+    let later = leaving_ts +. 50. +. window_s +. 1. in
+    let kept, reading = Kept.refresh ~base_path:base ~now:later ~window_minutes:1440 kept in
+    check string "once both rows left, the history is complete" "ready" (state ~now:later reading);
+    check (option (float 0.)) "nothing kept is left to leave" None
+      (Kept.next_change kept ~window_minutes:1440 ~after:later))
+
 let test_runtime_history_reads_rotated_decisions () =
   let base = test_dir () in
   let before = List.map (fun name -> name, Sys.getenv_opt name)
@@ -2357,6 +2434,8 @@ let () =
       test_case "decision outcome validation" `Quick test_decision_outcome_validation;
       test_case "unrenderable timestamp is a typed invalid row" `Quick test_unrenderable_decision_timestamp;
       test_case "runtime history includes retained rotated logs" `Quick test_runtime_history_reads_rotated_decisions;
+      test_case "runtime history kept reads match a whole read" `Quick test_runtime_history_kept_reads_match_one_pass;
+      test_case "runtime history rows leave the window" `Quick test_runtime_history_rows_leave_the_window;
       test_case "empty dir" `Quick test_empty_dir;
       test_case "single model success" `Quick test_single_model_success;
       test_case "provider_kind is not reconstructed" `Quick

@@ -6,15 +6,18 @@
     the web Tools panel draw for the Keeper they show. [GET
     /api/v1/keepers/skill-usage?keeper=<name>] answers with {!usage_json}: one
     row per catalog surface the Keeper used, which the Usage pane reads for
-    every Keeper. The usage answer leaves the ledger behind, so reading every
-    Keeper does not carry every ledger. A reader that heard
+    every Keeper. Usage rows come from the runtime's cached session ledger,
+    so reading every Keeper does not reload every ledger. A reader that heard
     [keeper_skill_activations_changed] for a Keeper reads that Keeper again. *)
 
 val usage_rows :
-  Keeper_skill_catalog.skill list -> Keeper_skill_activation_ledger.t -> Yojson.Safe.t list
-(** For each catalog surface the ledger used, its reference and how many
-    times it was invoked, delivered and acted on, and when it was last used.
-    A surface the ledger never used has no row. *)
+  config:Workspace.config ->
+  trace_id:Keeper_id.Trace_id.t ->
+  Keeper_skill_catalog.skill list ->
+  Yojson.Safe.t list
+(** For each catalog surface the cached session ledger used, its reference and
+    how many times it was invoked, delivered and acted on, and when it was last
+    used. A surface the ledger never used has no row. *)
 
 val activations_json : config:Workspace.config -> keeper_name:string -> Yojson.Safe.t
 (** The activation projection for [keeper_name], the answer of

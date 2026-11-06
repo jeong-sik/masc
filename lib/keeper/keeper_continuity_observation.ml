@@ -40,15 +40,18 @@ type synthesis =
 let syntheses : ((string * string), synthesis) Hashtbl.t = Hashtbl.create 16
 let observations : ((string * string), t) Hashtbl.t = Hashtbl.create 16
 let mutex = Stdlib.Mutex.create ()
+let change_observer = ref (fun ~config:_ ~keeper_name:_ -> ())
+let install_change_observer observer =
+  let previous = !change_observer in
+  change_observer := observer;
+  fun () -> change_observer := previous
 let key ~config ~keeper_name = Workspace.keepers_runtime_dir config, keeper_name
-(* Both tables are read by the Keeper's memory health row (RFC-0487). *)
-let moved ~config ~keeper_name =
-  Keeper_memory_health_input.written
-    ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
 let record ~config ~keeper_name observation =
   Stdlib.Mutex.protect mutex (fun () ->
     Hashtbl.replace observations (key ~config ~keeper_name) observation);
-  moved ~config ~keeper_name
+  !change_observer ~config ~keeper_name;
+  Keeper_memory_health_input.written
+    ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
 let latest ~config ~keeper_name =
   Stdlib.Mutex.protect mutex (fun () ->
     Hashtbl.find_opt observations (key ~config ~keeper_name))
@@ -56,12 +59,16 @@ let forget ~config ~keeper_name =
   Stdlib.Mutex.protect mutex (fun () ->
     Hashtbl.remove observations (key ~config ~keeper_name);
     Hashtbl.remove syntheses (key ~config ~keeper_name));
-  moved ~config ~keeper_name
+  !change_observer ~config ~keeper_name;
+  Keeper_memory_health_input.written
+    ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
 
 let record_synthesis ~config ~keeper_name observation =
   Stdlib.Mutex.protect mutex (fun () ->
     Hashtbl.replace syntheses (key ~config ~keeper_name) observation);
-  moved ~config ~keeper_name
+  !change_observer ~config ~keeper_name;
+  Keeper_memory_health_input.written
+    ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
 let latest_synthesis ~config ~keeper_name =
   Stdlib.Mutex.protect mutex (fun () ->
     Hashtbl.find_opt syntheses (key ~config ~keeper_name))

@@ -406,7 +406,6 @@ let build_at ~now ~generated_at_iso ~(config : Workspace.config) : Yojson.Safe.t
 
 let build ~generated_at_iso ~config =
   build_at ~now:(Time_compat.now ()) ~generated_at_iso ~config
-;;
 
 (* The document as of [now] without the time of the read, so two readings
    compare equal unless something they show changed. *)

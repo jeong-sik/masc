@@ -37,7 +37,7 @@ let entry_at ?(keeper = "alpha") ?(request_id = "") at : Tui_types.msg_entry =
 
 let fresh_state () =
   let state =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+    Tui_types.create_state ~workspace:"test" ~port:8935 ()
   in
   state.Tui_types.msg_target_keeper_name <- Some "alpha";
   state.Tui_types.msg_loaded_keeper <- Some "alpha";

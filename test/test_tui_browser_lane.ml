@@ -332,6 +332,40 @@ let test_viewport_cadence_skip_inputs () =
     [ "pending refresh", {settled with refresh_pending = Some 9};
       "client picker", {settled with client_picker = Some 0} ]
 
+let test_observation_scope_tracks_exact_selection () =
+  let open Masc.Workspace_dataset_event in
+  let initial = loaded () in
+  let expected = { source = Live; client_id = Some firefox.client_id; tab_id = 2; view = Read } in
+  expect "text observation follows the selected live client and tab"
+    (observation_scope initial = Some expected);
+  let changed = choose_client zen initial in
+  expect "choosing another client does not observe the previous client's tab"
+    (observation_scope changed = None);
+  expect "the next tab belongs to the new observation owner"
+    (observation_scope { changed with selected_tab = Some 2 }
+     = Some { expected with client_id = Some zen.client_id });
+  expect "an unselected live lane has no fabricated client id"
+    (observation_scope { initial with selected_client = None } = None);
+  let shot = success (decode_screenshot (screenshot_response ())) in
+  expect "the open image is observed as a viewport"
+    (observation_scope ~image_open:true ~viewport:shot initial
+     = Some { expected with view = Viewport });
+  let target = { Browser_lane.document_id = "fixture"; node_id = "region-1" } in
+  let focused = { initial with read_view = Scene_view { scene_view = Browser_lane.Regions; scope = Some target } } in
+  expect "the focused scene retains its exact region"
+    (observation_scope focused
+     = Some { expected with view = Scene { scene_view = Browser_lane.Regions; scope = Some target } });
+  expect "an in-flight read keeps its observation identity without revalidating it"
+    (observation_scope { initial with load = Loading (8, Read) } = Some expected);
+  List.iter
+    (fun (name, view) -> expect (name ^ " pauses the observation subscription")
+      (observation_scope view = None))
+    [ "effect in flight", { initial with load = Loading (8, Scene_click
+        { tab_id = 2; document_id = "fixture"; node_id = "region-1"
+        ; expected_url = "https://example.org/new"; scope = None }) }
+    ; "pending refresh", { initial with refresh_pending = Some 8 }
+    ; "client picker", { initial with client_picker = Some 0 } ]
+
 let test_activity_refresh_preserves_pending_read () =
   let original = {(loaded ()) with scroll=9; load=Loading (42, Read_refresh);
     refresh_pending=Some 42} in
@@ -1114,6 +1148,7 @@ let () =
      "a refused gesture stays until the next input", test_unserved_gesture;
      "screenshot ownership and stale tab", test_screenshot_ownership;
      "viewport cadence skip inputs", test_viewport_cadence_skip_inputs;
+     "observation scope follows exact selection", test_observation_scope_tracks_exact_selection;
      "read and tab selection", test_read_and_selection;
      "closed-tab refresh recovery", test_refresh_rediscovers_tabs;
      "stale response and provenance", test_stale_response;

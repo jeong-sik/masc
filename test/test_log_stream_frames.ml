@@ -45,6 +45,13 @@ let test_frames_follow_the_cursor () =
   check bool "and resets nothing" false third.reset;
   check bool "the cursor still moves past it" true (third.after > second.after)
 
+let test_an_exact_page_appends () =
+  let start = (Log.Ring.bounds ()).total - 1 in
+  List.iter push [ "a"; "b"; "c" ];
+  let frame = Stream.next_frame (query ~limit:3 ()) ~after:(Some start) in
+  check bool "an exact page does not discard prior history" false frame.reset;
+  check (list string) "all exact-page entries arrive newest first" [ "c"; "b"; "a" ] (messages frame)
+
 let test_more_than_a_page_resets () =
   let start = (Log.Ring.bounds ()).total - 1 in
   List.iter push [ "a"; "b"; "c"; "d" ];
@@ -77,6 +84,7 @@ let () =
   run "log_stream_frames"
     [ ( "frames"
       , [ test_case "frames follow the cursor" `Quick test_frames_follow_the_cursor
+        ; test_case "an exact page appends" `Quick test_an_exact_page_appends
         ; test_case "more than a page resets" `Quick test_more_than_a_page_resets
         ; test_case "a cursor older than the ring resets" `Quick
             test_a_cursor_older_than_the_ring_resets

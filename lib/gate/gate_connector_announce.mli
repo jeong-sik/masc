@@ -13,6 +13,11 @@
     observer must not yield and must not raise. The server's observer only
     records which connector changed and wakes the fiber that sends. *)
 
+val discord : string
+val slack : string
+(** Canonical connector ids shared with the trigger-policy parameters without
+    depending on either connector's state module. *)
+
 val install : (connector_id:string -> unit) -> unit
 (** Replace the observer. The server installs one per process at boot. *)
 

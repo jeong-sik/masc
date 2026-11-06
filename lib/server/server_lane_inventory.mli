@@ -66,10 +66,23 @@ val snapshot : config:Workspace.config -> t
 val browser_presence :
   config:Workspace.config -> access:Lane_addon_sources.access -> Browser_addon_presence.t
 val to_json : t -> Yojson.Safe.t
+
+val refresh : base_path:string -> Lane_addon_runtime.inventory_change -> unit
+(** Update the served projection after a durable change and announce Lanes
+    only when the displayed projection changes. *)
+
+val install : unit -> unit
+(** Connect Lane runtime changes to the served projection. *)
 (** Built-in row [ui_category] is the shared display role consumed by operator
     clients. It has no effect on selection, execution or configuration identity.
     Package roles remain on the current declaration and original workers. *)
 module For_testing : sig
+  val runtime_snapshot : config:Workspace.config ->
+    declarations:Lane_addon_config.snapshot -> inventory:Lane_addon_runtime.inventory ->
+    browser_observations:Lane_addon_runtime.browser_observation list -> t
+  val publish_if_changed : base_path:string -> t option -> t -> bool
+  val merge_inventory : live:Lane_addon_runtime.inventory ->
+    retained:Lane_addon_runtime.inventory -> Lane_addon_runtime.inventory
   val machine_publication :
     (Lane_addon_runtime.export_observation option, Lane_addon_runtime.export_refusal) result -> machine_publication
   val browser_state : Browser_addon_presence.t -> Browser_lane.Lane_name.t -> state

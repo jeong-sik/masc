@@ -236,7 +236,7 @@ let test_comment_vote_body () =
    list is refreshed. *)
 let test_completion_refreshes_the_open_post () =
   let run ~mode target result =
-    let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+    let state = create_state ~workspace:"" ~port:0 () in
     state.board_mode <- mode;
     state.board_vote_armed <- Some (target, true);
     let lists = ref 0 in

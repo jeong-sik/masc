@@ -56,11 +56,15 @@ let discord_configured =
 let slack_configured =
   ref (Slack_gateway_state.Mention_or_thread : Slack_gateway_state.trigger_policy)
 
+(* The connectors status shows the effective policy, which falls back to
+   this value. A gateway sets it once as it starts. *)
 let set_discord_configured policy =
-  discord_configured := policy
+  discord_configured := policy;
+  Gate_connector_announce.changed ~connector_id:Gate_connector_announce.discord
 
 let set_slack_configured policy =
-  slack_configured := policy
+  slack_configured := policy;
+  Gate_connector_announce.changed ~connector_id:Gate_connector_announce.slack
 
 (* [user_only:<id>] is left out of [choices] on purpose: it carries an id, so
    it is not a value a picker can offer.  Both parsers still accept it, and the
@@ -93,4 +97,10 @@ let slack =
     ~choices:trigger_policy_choices
     ~description:trigger_policy_description
     ()
+
+let announce_param_change ~key =
+  if String.equal key (Runtime_params.key slack)
+  then Gate_connector_announce.changed ~connector_id:Gate_connector_announce.slack
+  else if String.equal key (Runtime_params.key discord)
+  then Gate_connector_announce.changed ~connector_id:Gate_connector_announce.discord
 

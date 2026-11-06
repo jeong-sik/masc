@@ -213,14 +213,7 @@ let test_authoritative_refresh_waits_for_both_owners_then_runs_once () =
   check bool "the authoritative revalidate launches once" true
     launch_after_both;
   check bool "the launch consumes the pending intent" true
-    (after_both = Types.No_scoped_followup);
-  let cadence =
-    Types.note_full_refresh_intent ~intent:Types.Cadence
-      ~full_refresh_inflight:true ~scoped_refresh_inflight:true
-      Types.No_scoped_followup
-  in
-  check bool "cadence does not manufacture an authoritative followup" true
-    (cadence = Types.No_scoped_followup)
+    (after_both = Types.No_scoped_followup)
 ;;
 
 (* Work owns exact Goal measurement; Home reads the confirmation projection. *)

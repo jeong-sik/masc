@@ -208,12 +208,7 @@ let node json =
      unmapped element, so it fails the scene decode. *)
   let* source_context = Result.map Browser_source_context.of_json (field "sourceContext" json) in
   Ok {node_id;kind;tag;text;heading_level;ancestor_region;rects;color;font_size;font_weight;white_space;source_context}
-let scope_of_json = function
-  | `Assoc fields when List.sort String.compare (List.map fst fields) = ["documentId";"nodeId"] ->
-      let* document_id = get nonempty "documentId" (`Assoc fields) in
-      let* node_id = get nonempty "nodeId" (`Assoc fields) in
-      Ok ({document_id;node_id} : Browser_lane.node_ref)
-  | _ -> Error "scope requires exactly documentId and nodeId from an observed region"
+let scope_of_json = Browser_lane.node_ref_of_json
 
 let navigation_source_of_json = function
   | `Assoc fields when List.sort String.compare (List.map fst fields) = ["documentId";"url"] ->

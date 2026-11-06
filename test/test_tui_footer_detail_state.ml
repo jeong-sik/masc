@@ -262,7 +262,7 @@ let test_the_footer_pane_follows_the_ladder_rung () =
   List.iter
     (fun (name, edit, step, pane) ->
       let state =
-        T.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+        T.create_state ~workspace:"test" ~port:8935 ()
       in
       edit state;
       check string (name ^ ": the step Esc and Left take") step

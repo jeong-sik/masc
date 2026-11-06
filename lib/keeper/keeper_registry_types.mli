@@ -117,8 +117,8 @@ type packed_turn_phase = Packed : 'a turn_phase_witness -> packed_turn_phase
     snake_case form for dashboards. *)
 val packed_turn_phase_label : packed_turn_phase -> string
 
-(** RFC-0072 Phase 4: GADT-encoded turn_phase transitions, aligned with
-    [Runtime_transition].  Enumerates the 23 valid cross-state transitions
+(** RFC-0072 Phase 4: GADT-encoded turn_phase transitions.  Enumerates the
+    23 valid cross-state transitions
     of the 7-variant [turn_phase] FSM.  The 19 forbidden pairs have no
     constructor and are therefore type-unrepresentable.  Idempotent
     self-loops are not represented (mutator-boundary no-ops). *)
@@ -182,7 +182,7 @@ exception
     }
 
 (** RFC-0072 Phase 4: resolve a (from, target) packed pair to one of three
-    outcomes.  Mirrors [resolve_runtime_transition]. *)
+    outcomes. *)
 type turn_phase_resolve_outcome =
   | Resolved_turn_transition of Turn_phase_transition.packed
   | Resolved_turn_idempotent

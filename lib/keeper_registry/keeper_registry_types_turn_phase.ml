@@ -54,11 +54,11 @@ let packed_turn_phase_label : packed_turn_phase -> string = function
   | Packed Turn_exhausted -> "Turn_exhausted"
 ;;
 
-(* RFC-0072 Phase 4: GADT-encoded turn_phase transitions, aligned with
-   [Runtime_transition] shape — idempotent self-loops are NOT represented
-   (they are mutator-boundary no-ops; the resolver returns
-   [Resolved_idempotent] for them).  This module enumerates the 23 valid
-   cross-state transitions of the 7-variant [turn_phase] FSM.  The 19
+(* RFC-0072 Phase 4: GADT-encoded turn_phase transitions.  Idempotent
+   self-loops are NOT represented (they are mutator-boundary no-ops; the
+   resolver returns [Resolved_turn_idempotent] for them).  This module
+   enumerates the 23 valid cross-state transitions of the 7-variant
+   [turn_phase] FSM.  The 19
    forbidden pairs have no constructor and are therefore
    type-unrepresentable.  Adding a new [turn_phase] variant will trigger
    Warning 8 in [to_tag] and in [resolve_turn_phase_transition]. *)
@@ -119,8 +119,7 @@ module Turn_phase_transition = struct
 end
 
 (* RFC-0072 Phase 4: typed error for turn_phase transition spec violations.
-   Each of the 19 forbidden pairs has its own constructor; mirrors the
-   runtime-side [runtime_transition_spec_violation] (PR #14903). *)
+   Each of the 19 forbidden pairs has its own constructor. *)
 type turn_phase_transition_spec_violation =
   | Idle_to_routing
   | Idle_to_executing
@@ -149,9 +148,8 @@ let turn_phase_transition_spec_violation_to_tag = function
 ;;
 
 (* RFC-0072 Phase 5: typed exception for forbidden turn_phase transitions.
-   Mirrors [Runtime_transition_violation] — the typed
-   [turn_phase_transition_spec_violation] payload travels on the exception
-   instead of through a string message. Raised by
+   The typed [turn_phase_transition_spec_violation] payload travels on the
+   exception instead of through a string message. Raised by
    [validate_turn_phase_transition] / [set_turn_phase]. The registered
    [Printexc] printer reproduces the original message for generic catchers
    and log output. *)
@@ -183,7 +181,7 @@ let () =
     | _ -> None)
 ;;
 
-(* RFC-0072 Phase 4: resolver mirroring [resolve_runtime_transition]. *)
+(* RFC-0072 Phase 4: resolver for turn_phase transitions. *)
 type turn_phase_resolve_outcome =
   | Resolved_turn_transition of Turn_phase_transition.packed
   | Resolved_turn_idempotent

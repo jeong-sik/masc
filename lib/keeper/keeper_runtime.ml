@@ -854,23 +854,6 @@ let start_supervisor_sweep ctx =
     Log.Keeper.info "keeper supervisor sweep started (interval %.0fs)" sweep_sec
   end
 
-(** #10125: supervisor sweep age helper.  Returns the wall-clock
-    seconds since the last successful sweep beat, or [None] if the
-    gauge was never set (i.e., the sweep never started in this
-    process).  Dashboards use this to render a [stale] badge when
-    the sweep stalls; tests use it to verify the gauge advances. *)
-let supervisor_sweep_age_seconds ~(base_path : string) : float option =
-  match
-    Otel_metric_store.get_metric_value
-      Keeper_metrics.(to_string SupervisorLastSweepUnixtime)
-      ~labels:[ ("base_path", base_path) ]
-      ()
-  with
-  | None -> None
-  | Some last ->
-    let now = Unix.gettimeofday () in
-    Some (now -. last)
-
 let stop_keepalive ?base_path name =
   Keeper_keepalive.stop_keepalive ?base_path name
 

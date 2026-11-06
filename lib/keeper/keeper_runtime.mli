@@ -162,10 +162,6 @@ val start_supervisor_sweep :
 (** Spawn a supervisor sweep fiber for the keeper bound to [context];
     no-op when one is already running. *)
 
-val supervisor_sweep_age_seconds : base_path:string -> float option
-(** Seconds since the supervisor-sweep marker was last touched, or
-    [None] when no marker exists. *)
-
 val stop_keepalive : ?base_path:string -> string -> unit
 (** Stop the keepalive fiber for [keeper_name]. *)
 

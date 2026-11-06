@@ -249,7 +249,6 @@ type tool_route_failure =
   | Late_provider_identity
   | Provider_identity_route_conflict
   | Identity_index_conflict
-  | Block_index_collision
   | Missing_block_identity
 
 type tool_block_resolution =
@@ -275,9 +274,6 @@ let tool_route_failure_reason = function
      routes"
   | Identity_index_conflict ->
     "tool_identity_index_conflict: identity lookup and block authority disagree"
-  | Block_index_collision ->
-    "tool_block_index_collision: distinct tool identities require the same normalized \
-     block"
   | Missing_block_identity ->
     "missing_tool_block_identity: tool route references a block without identity state"
 ;;
@@ -300,38 +296,27 @@ let register_tool_block_identity ?tx state ~block_index identity =
     Hashtbl.replace state.tool_block_identities block_index identity
 ;;
 
-let open_tool_block
-      ?tx
-      state
-      ~protocol
-      ~wire_index
-      ~provider_tool_id
-      ~tool_name
-      ~index_policy
-  =
+let open_tool_block ?tx state ~provider_tool_id ~tool_name ~index_policy =
   let block_index =
     match index_policy with
     | Next_available -> state.next_block_index
     | Next_after_carrier -> state.next_block_index + 1
   in
-  if Hashtbl.mem state.tool_block_identities block_index
-  then reject_tool_block ~protocol ~wire_index Block_index_collision, None
-  else (
-    let identity =
-      match non_blank_provider_tool_id provider_tool_id with
-      | Some id -> { id; origin = Provider_supplied }
-      | None -> { id = Api_common.fresh_tool_use_id (); origin = Agent_core_allocated }
-    in
-    register_tool_block_identity ?tx state ~block_index identity;
-    state.next_block_index <- max state.next_block_index (block_index + 1);
-    ( Tool_block_resolved { block_index; identity }
-    , Some
-        (ContentBlockStart
-           { index = block_index
-           ; content_type = "tool_use"
-           ; tool_id = Some identity.id
-           ; tool_name
-           }) ))
+  let identity =
+    match non_blank_provider_tool_id provider_tool_id with
+    | Some id -> { id; origin = Provider_supplied }
+    | None -> { id = Api_common.fresh_tool_use_id (); origin = Agent_core_allocated }
+  in
+  register_tool_block_identity ?tx state ~block_index identity;
+  state.next_block_index <- block_index + 1;
+  ( block_index
+  , identity
+  , ContentBlockStart
+      { index = block_index
+      ; content_type = "tool_use"
+      ; tool_id = Some identity.id
+      ; tool_name
+      } )
 ;;
 
 let resolve_tool_block
@@ -346,21 +331,11 @@ let resolve_tool_block
   =
   let reject failure = reject_tool_block ~protocol ~wire_index failure, None in
   let open_and_record () =
-    let resolution, start =
-      open_tool_block
-        ?tx
-        state
-        ~protocol
-        ~wire_index
-        ~provider_tool_id
-        ~tool_name
-        ~index_policy
+    let block_index, identity, start =
+      open_tool_block ?tx state ~provider_tool_id ~tool_name ~index_policy
     in
-    (match resolution with
-     | Tool_block_resolved { block_index; _ } ->
-       record_tool_index_route ?tx state wire_index block_index
-     | Tool_block_rejected _ -> ());
-    resolution, start
+    record_tool_index_route ?tx state wire_index block_index;
+    Tool_block_resolved { block_index; identity }, Some start
   in
   let route_contains_block route block_index =
     match route with

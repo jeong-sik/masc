@@ -136,7 +136,7 @@ type tool_block_resolution =
       }
   | Tool_block_rejected of sse_event
       (** An [SSEParseFailed] naming the conflict: a late provider identity, an
-          ambiguous id-less continuation, a block index collision and so on. *)
+          ambiguous id-less continuation and so on. *)
 
 (** [Some id] for a non-blank provider tool id, [None] for a blank or missing one. *)
 val non_blank_provider_tool_id : string option -> string option

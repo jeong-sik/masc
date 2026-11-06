@@ -168,10 +168,12 @@ let canonical_base_path base_path =
     | exn -> Error (Invalid_base_path (Printexc.to_string exn))
 ;;
 
+let root_dirname = "fusion_delivery_obligations"
+
 let obligation_root ~base_path =
   Filename.concat
     (Common.masc_dir_from_base_path ~base_path)
-    "fusion_delivery_obligations"
+    root_dirname
 ;;
 
 let active_dir ~base_path =

@@ -408,6 +408,8 @@ let directory_payload_error_to_string = Atomic_write.directory_payload_error_to_
 module Publication_recovery = struct
   include Publication_recovery_access
 
+  let directory_leaf = Capability_recovery_store_model.recovery_directory_leaf
+
   type lane_open_error_category =
     | Invalid_owner_category
     | Reconciliation_blocked_category

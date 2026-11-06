@@ -1348,7 +1348,7 @@ describe('ConnectorStatusPanel v2 surface layout', () => {
     expect(container.querySelector('[data-testid="connector-readonly-bot-row"]')?.textContent).toContain('server bot initial')
 
     last.value = { type: 'connector_refresh' }
-    // The refetch sits behind a 2000ms debounce (connector-status.ts:2157).
+    // The refetch sits behind a 2000ms debounce (timer in ConnectorStatusPanel).
     // Sleeping 2100ms and then asserting leaves 100ms of slack for a timer to
     // be late in, which a parallel suite run spends easily. Waiting for the
     // call returns as soon as it lands -- usually well before 2.1s -- and

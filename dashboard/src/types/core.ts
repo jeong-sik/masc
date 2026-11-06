@@ -472,7 +472,7 @@ export interface KeeperCurrentGate {
   disposition_reason?: string | null
 }
 
-// Wire emit: `lib/keeper/keeper_status_bridge.ml:720` —
+// Wire emit: `lib/keeper/keeper_status_bridge.ml` —
 //   `pause_state = if meta.paused then "paused" else "active"`.
 // Closed 2-arm; the previous `| string` catch-all hid the fact that
 // the wire vocabulary is exhaustive and let unmapped values flow
@@ -1131,7 +1131,7 @@ export interface KeeperStatusDetail {
 }
 
 // Backend SSOT: `Keeper_status_runtime.pipeline_stage_of_phase`
-// (lib/keeper/keeper_status_runtime.ml:537) deterministic mapping from
+// (lib/keeper/keeper_status_runtime.ml) deterministic mapping from
 // the KeeperPhase lifecycle. Emits the closed set below;
 // values; `unknown` is a dashboard-side marker for missing data
 // (`asString(row.pipeline_stage) ?? 'unknown'`). Removed legacy

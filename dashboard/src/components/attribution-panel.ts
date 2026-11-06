@@ -27,11 +27,11 @@ const POLL_INTERVAL_MS = 5_000
 const RECENT_LIMIT = 50
 
 // The gates the backend emits. Every Attribution constructor call in masc
-// passes gate:"keeper_fsm" (keeper_state_machine.ml:544/547 and the
-// policy_failed sites), so this is the whole set. A gate outside this list
-// still gets a card from the live data (see gatesToRender), which is what
-// makes listing a gate ahead of its first emission unnecessary: the six
-// entries that used to sit here rendered a zero card forever.
+// passes gate:"keeper_fsm" (the passed, transition_blocked and policy_failed
+// calls in keeper_state_machine.ml), so this is the whole set. A gate
+// outside this list still gets a card from the live data (see gatesToRender),
+// which is what makes listing a gate ahead of its first emission unnecessary:
+// the six entries that used to sit here rendered a zero card forever.
 const KNOWN_GATES = ['keeper_fsm'] as const
 
 // Render order: the known set first (stable, including empty placeholders), then

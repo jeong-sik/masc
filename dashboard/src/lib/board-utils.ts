@@ -1,4 +1,4 @@
-// Board display utilities — shared between memory.ts and memory-post-detail.ts
+// Board display utilities — shared by the components under components/board/
 
 /**
  * User-visible fallback shown when a board message arrives without a

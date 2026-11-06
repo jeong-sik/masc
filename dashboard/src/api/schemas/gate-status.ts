@@ -132,12 +132,6 @@ function parseArrayOfEntries<TSchema extends typeof ChannelInfoRawSchema
   return result
 }
 
-// Exposed for `api/gate.ts`'s sibling connector decoder, which still
-// consumes a single channel payload through a null-returning wrapper.
-export function safeParseChannelInfo(data: unknown) {
-  return safeParse(ChannelInfoRawSchema, data, { abortEarly: true })
-}
-
 export function parseGateStatusData(data: unknown): GateStatusData {
   const outer = safeParse(GateStatusOuterSchema, data, { abortEarly: true })
   if (!outer.success) {

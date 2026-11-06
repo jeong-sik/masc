@@ -132,6 +132,21 @@ val account_mode_label : account_mode -> string
     [null], another case or another JSON kind, is [None]. *)
 val account_mode_of_json : Yojson.Safe.t -> account_mode option
 
+(** The Google OpenID Connect client of a multi-account installation (plan
+    C2a-5). Only the multi-account login reads it.
+
+    The secret is not in the file. [save_auth_config] rewrites the file and
+    backups copy it, so [client_secret_env] names the environment variable
+    that holds the secret. *)
+type oidc_config = {
+  client_id : string;
+  redirect_uri : string;  (** Where Google sends the browser back. *)
+  client_secret_env : string;
+      (** A POSIX name: letters, digits and underscores, not beginning with a
+          digit. *)
+}
+[@@deriving show]
+
 type auth_config = {
   enabled : bool;
   workspace_secret_hash : string option;  [@default None]
@@ -140,6 +155,10 @@ type auth_config = {
   account_mode : account_mode option;  [@default None]
       (** [None] when the file has no [account_mode] member. The encoder writes
           the member only for [Some], so a file without it stays without it. *)
+  oidc : oidc_config option;  [@default None]
+      (** [None] when the file has no [oidc] member, which the encoder also
+          writes only for [Some]. A member is an object with exactly the three
+          fields, each a non-empty string. *)
 }
 [@@deriving show]
 
@@ -152,7 +171,7 @@ val max_token_expiry_hours : int
 
 val default_auth_config : auth_config
 (** [enabled = true; workspace_secret_hash = None; require_token = true;
-       token_expiry_hours = 24; account_mode = None]. Decoding accepts a workspace hash only as 64
+       token_expiry_hours = 24; account_mode = None; oidc = None]. Decoding accepts a workspace hash only as 64
     lowercase hexadecimal characters and an expiry only in [1..8760]. *)
 
 val auth_config_to_yojson : auth_config -> Yojson.Safe.t

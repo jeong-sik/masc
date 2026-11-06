@@ -190,3 +190,6 @@ val bind_review : Workspace_utils.config -> goal_id:string ->
 (** Admit a verifier against the complete current lifecycle and exact pending
     proof under the Goal lock. Suspended Goals admit no new work. A binding
     acquired before suspension may still commit its exact ledger result. *)
+
+val verifications_filename : string
+(** The verification ledger below [<base>/.masc]. *)

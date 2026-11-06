@@ -15,7 +15,7 @@ related: ["librarian-history-settles-finished-originals", "workspace-curator-ori
 - 상태: 초안
 - 이슈: #48946
 - 근거: §2 의 수치는 2026-11-06 04시(KST) 운영 workspace 에서 쟀다. 보관 위치는 파일 이름과 크기만 셌다. 살아 있는 기록은 문자열 값 중 요청 ID 모양인 것만 뽑아 digest 를 비교했다. 요청 본문은 열지 않았다. §3 의 코드는 `origin/main` `f2d98655513` 이다.
-- 앞선 문서: RFC "librarian-history-settles-finished-originals" 는 보관 위치를 만들고 정리 규칙을 Q3 으로 미뤘다. RFC "workspace-curator-originals-name-ledger-revisions" 의 Q1 도 같은 결정을 기다린다.
+- 앞선 문서: RFC "librarian-history-settles-finished-originals" 는 보관 위치를 만들고 정리 규칙을 Q3 으로 미뤘다. RFC "workspace-curator-originals-name-ledger-revisions" 의 Q1 도 같은 결정을 기다렸다. D7 이 두 질문에 답한다.
 - 짝 문서: RFC-0497 은 Lane instance 의 binding 과 관측을 다룬다. 이 문서와 독자도, 잘못 지웠을 때의 비용도 다르다.
 
 ## 0. 요약
@@ -40,6 +40,7 @@ related: ["librarian-history-settles-finished-originals", "workspace-curator-ori
 - D4. 이미 쌓인 12,456개도 같은 규칙으로 지운다. 먼저 대상만 세는 층을 내고, 운영자가 수치를 확인한 뒤 지우는 층을 낸다(§6).
 - D5. 표시를 두 단계("표시 → 다음 주기 재확인 → 삭제")로 지우지 않는다. 이유는 §4.3 에 있다.
 - D6. Librarian·Curator declaration 의 Exact 요청 기록과 원본 실행 증명은 그 요청 ID 를 가진 살아 있는 원본이 없으면 지운다(§4.4). 다른 declaration 의 기록은 건드리지 않는다.
+- D7. 보관 위치를 디버깅용으로 남기지 않는다. 끝난 Librarian·Curator 일의 결과는 workspace memory 원장과 Keeper 기록에 남는다. 운영 문서 중 보관 위치를 읽으라고 하는 것은 Curator hard cut 절차 하나다. 그 절차는 보관 위치를 다른 곳으로 옮겨 두라고 한다. 운영자가 2026-11-06 에 정했다.
 
 ## 2. 무슨 일이 났나
 
@@ -236,16 +237,7 @@ type owner_family =
 - 시험은 바뀌는 계약만 고친다. 지금 보관 본문이 생기는지 보는 시험(`test_workspace_memory_curator_lane.ml`, `test_keeper_librarian_durable_execution.ml`)은 본문이 지워지는지 보게 바꾼다. `test_lane_addon_original_body_inventory.ml`, `test_lane_addon_request_discovery.ml` 도 보관 경로를 쓴다.
 - `bench_keeper_librarian_pass.ml` 은 보관 기록과 본문을 읽는다. Librarian Goal 의 측정 도구라서 D1 이 들어가면 그 단계가 실패한다. L2 에서 같이 고친다.
 
-## 8. 열린 질문
-
-### Q1. 보관 위치를 사람이 디버깅에 쓰는가 (사용자 결정)
-
-앞선 RFC 는 "증거는 보관 위치에 남는다"고 적었다. 코드는 그 증거를 읽지 않는다. 운영 문서 중 보관 위치를 읽으라고 하는 것은 Curator hard cut 절차 하나다. 그 절차는 보관 위치를 다른 곳으로 옮겨 두라고 한다.
-
-- A (권함): 이 RFC 대로 지운다. 끝난 Librarian·Curator 일의 결과는 workspace memory 원장과 Keeper 기록에 남는다.
-- B: 기록은 이 RFC 대로 지우고, 본문만 날짜별 store 처럼 운영자 창(예: 7일) 동안 남긴다. 지금 하루 보관량이 0.5~0.9GB 라서 7일이면 4~6GB 다.
-
-## 9. 리뷰
+## 8. 리뷰
 
 - 키퍼 리뷰어와 먼저 방향을 맞췄다.
   - 받아들인 것: RFC-0497 과 따로 쓴다. 기간이나 개수가 아니라 가리키는 쪽이 없을 때 지운다. 가리키는 쪽의 범위에 Librarian durable 실행, floor 정리, Curator 가 모두 들어간다. 세기 → 운영자 확인 → 지우기 순서로 낸다.

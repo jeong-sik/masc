@@ -70,6 +70,7 @@
   keeper_approval_queue_registry
   keeper_approval_queue_persist
   keeper_approval_queue_load
+  keeper_approval_queue_grant
   keeper_skill_activation_types
   keeper_skill_activation_summary
   keeper_skill_activation_ledger_errors

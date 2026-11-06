@@ -97,7 +97,7 @@ let model_sees_verdict ~base_path (result : Keeper_tool_execution.t) data =
     check bool "model reads the rejection code" true (contains message code)
 ;;
 
-let with_fixture ?(tool_deny = []) f =
+let with_fixture ?(tool_deny = []) ?(damage_exports = false) f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_path = Filename.temp_dir "keeper-skill-validate-" "" in
@@ -152,8 +152,15 @@ let with_fixture ?(tool_deny = []) f =
       let artifact source_text =
         (* The actual durable export producer and exact exported reference shape.
            These are synthetic bytes, not a claim that a Keeper generated them. *)
-        let blob = Tool_blob_store.put_durable store ~bytes:source_text
+        let blob : Tool_output.artifact_ref = Tool_blob_store.put_durable store ~bytes:source_text
             ~mime:"application/octet-stream" in
+        (* A damaged export keeps its address but holds other bytes. *)
+        if damage_exports then begin
+          let file = Filename.concat (Filename.concat (Tool_blob_store.root_dir store)
+              (String.sub blob.sha256 0 2)) blob.sha256 in
+          Unix.unlink file;
+          Out_channel.with_open_bin file (fun channel -> Out_channel.output_string channel "damaged")
+        end;
         Keeper_peer_artifact_ref.(to_json (of_blob blob))
       in
       let call args =
@@ -253,12 +260,22 @@ let test_size_limit () = with_fixture @@ fun artifact call ->
    is not an address. *)
 let test_reference_integrity () = with_fixture @@ fun artifact call ->
   let exported = artifact (instruction "proposed") in
-  let absent = call (args (`String (String.make 64 '0'))) in
-  failed "artifact_read_failed" absent;
+  let sha256 = String.make 64 '0' in
+  let absent = call (args (`String sha256)) in
+  failed "artifact_not_found" absent;
   check bool "an absent artifact is a workflow rejection" true
     ((fst absent).Keeper_tool_execution.disposition = Tool_result.Failed Tool_result.Workflow_rejection);
+  check bool "the refusal names the absent sha256" true
+    (String_util.contains_substring (string_field "message" (snd absent)) sha256);
   call (args (`String (String.uppercase_ascii (Yojson.Safe.Util.to_string exported))))
   |> failed "invalid_skill_validation_request"
+;;
+
+let test_unreadable_artifact () = with_fixture ~damage_exports:true @@ fun artifact call ->
+  let damaged = call (args (artifact (instruction "proposed"))) in
+  failed "artifact_read_failed" damaged;
+  check bool "a damaged artifact is a runtime failure" true
+    ((fst damaged).Keeper_tool_execution.disposition = Tool_result.Failed Tool_result.Runtime_failure)
 ;;
 
 let () =
@@ -272,4 +289,5 @@ let () =
       ; test_case "invalid request" `Quick test_invalid_request
       ; test_case "shared authoring size limit" `Quick test_size_limit
       ; test_case "artifact reference integrity" `Quick test_reference_integrity
+      ; test_case "damaged artifact is a runtime failure" `Quick test_unreadable_artifact
       ] ]

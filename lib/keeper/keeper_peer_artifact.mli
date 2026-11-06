@@ -6,8 +6,9 @@ type fetched = private { blob : Tool_output.artifact_ref; content : string }
 
 type fetch_error =
   | Absent of Keeper_peer_artifact_ref.t
-      (** The store holds no blob with this sha256: nobody exported it, or the
-          blob GC removed it after every ledger row naming it expired. *)
+      (** The store holds no blob with this sha256, for example because
+          nobody exported it or the blob GC removed it after every ledger row
+          naming it expired. *)
   | Unreadable of string
       (** The store could not return bytes that match the sha256. *)
 

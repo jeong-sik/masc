@@ -1,0 +1,11 @@
+{
+ "floor": 2048,
+ "checkpoints": 38,
+ "structured_results": 4759,
+ "whole_result_reaches_floor": 4664,
+ "some_text_block_reaches_floor": 4664,
+ "hole": 0,
+ "hole_text_bytes": 0,
+ "hole_by_trace": {},
+ "unreadable": []
+}

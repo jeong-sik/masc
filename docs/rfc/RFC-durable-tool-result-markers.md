@@ -3,7 +3,7 @@ rfc: "durable-tool-result-markers"
 title: "지난 턴의 도구 결과는 체크포인트에도 blob 주소로 저장한다"
 status: Draft
 created: 2026-09-15
-updated: 2026-09-15
+updated: 2026-11-06
 author: claude
 supersedes: []
 superseded_by: null
@@ -77,7 +77,7 @@ blob 은 내용 주소라서 2번이 쓰는 파일은 매번 같은 내용이다
 
 체크포인트를 저장할 때마다, 저장할 메시지 목록에서 아래를 **모두** 만족하는 도구 결과를 marker 로 바꿔 저장한다.
 
-1. `ToolResult` 이고 `content_blocks = None` 이다. `Some` 이면 provider 인코더가 `content` 를 내보내지 않으므로 바꿔도 줄지 않는다(RFC-0363 §3.1 과 같은 이유).
+1. `ToolResult` 이고 `content_blocks = None` 이다. `Some` 결과는 이 RFC 범위 밖이다(§6). `Some` 결과의 글 본문은 `content` 와 안쪽 `Text` 블록 둘이고, 인코더마다 보내는 쪽이 다르다(RFC-0363 §3.1.2). 저장 사본에서 둘을 함께 바꾸는 규칙은 정하지 않았다.
 2. `Tool_output.decode_from_agent_core content = Not_marker` 다. `Decoded` 는 이미 marker 이고, `Invalid_marker` 는 손상을 고정하지 않도록 그대로 둔다.
 3. 현재 턴보다 앞선 원자에 속한다. 경계는 모델 입력이 이미 쓰는 `Runtime_model_input_tail_window.first_atom_at_or_after messages ~message_index:<현재 턴 시작 메시지 수>` 로 계산한다. 현재 턴의 결과는 본문 그대로 저장한다. 턴이 쓰고 있는 결과를 marker 로 받으면 모델이 자기 출력을 다시 읽으려 artifact read 를 부르게 된다(RFC-0363 §4 안 B 의 문제).
 4. 실제 marker 가 본문보다 작다. 저장 시점엔 진짜 marker 를 만들 수 있으니 포화 후보가 아니라 실제 값으로 비교한다.
@@ -172,7 +172,7 @@ blob 은 내용 주소라서 2번이 쓰는 파일은 매번 같은 내용이다
 ## 6. 하지 않는 것
 
 - 스트리밍 `reasoning_details` 조각 합치기. 별도 PR 이다.
-- `content_blocks = Some` 결과, `Invalid_marker` 결과를 바꾸는 일.
+- `content_blocks = Some` 결과, `Invalid_marker` 결과를 체크포인트에서 바꾸는 일. `Some` 결과의 전송 사본은 RFC-0363 §3.1.2 가 마커로 바꾼다(2026-11-06). 그 개정은 요청에 실리는 사본만 바꾸고 체크포인트는 그대로 두므로, 이 제외는 그대로 성립한다.
 - 히스토리 보존 기간·길이 정책.
 - 현재 턴 결과를 marker 로 바꾸는 일.
 - 체크포인트 버전 변경, 옛 형식 reader, 변환 코드.

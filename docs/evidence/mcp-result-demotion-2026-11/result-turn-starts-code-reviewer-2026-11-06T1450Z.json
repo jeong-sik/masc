@@ -1,0 +1,247 @@
+{
+ "at": "2026-11-06T12:12:10+00:00",
+ "end_lines": 2155,
+ "finished_end_atom_before_at": 8257,
+ "first_line_after_at": {
+  "turn_ref": "trace-1790137685250-00000#14313",
+  "start_atom": 8257,
+  "end_atom": 8265
+ },
+ "turns_started_past_the_line_before": 39,
+ "gaps": [
+  {
+   "turn_ref": "trace-1790137685250-00000#12123",
+   "previous_end_atom": 35,
+   "start_atom": 52,
+   "atoms_without_end_line": 17
+  },
+  {
+   "turn_ref": "trace-1790137685250-00000#12189",
+   "previous_end_atom": 513,
+   "start_atom": 517,
+   "atoms_without_end_line": 4
+  },
+  {
+   "turn_ref": "trace-1790137685250-00000#12196",
+   "previous_end_atom": 553,
+   "start_atom": 562,
+   "atoms_without_end_line": 9
+  },
+  {
+   "turn_ref": "trace-1790137685250-00000#12198",
+   "previous_end_atom": 570,
+   "start_atom": 574,
+   "atoms_without_end_line": 4
+  },
+  {
+   "turn_ref": "trace-1790137685250-00000#12223",
+   "previous_end_atom": 709,
+   "start_atom": 713,
+   "atoms_without_end_line": 4
+  },
+  {
+   "turn_ref": "trace-1790137685250-00000#12225",
+   "previous_end_atom": 720,
+   "start_atom": 725,
+   "atoms_without_end_line": 5
+  },
+  {
+   "turn_ref": "trace-1790137685250-00000#12243",
+   "previous_end_atom": 823,
+   "start_atom": 833,
+   "atoms_without_end_line": 10
+  },
+  {
+   "turn_ref": "trace-1790137685250-00000#12251",
+   "previous_end_atom": 886,
+   "start_atom": 892,
+   "atoms_without_end_line": 6
+  },
+  {
+   "turn_ref": "trace-1790137685250-00000#12269",
+   "previous_end_atom": 995,
+   "start_atom": 1022,
+   "atoms_without_end_line": 27
+  },
+  {
+   "turn_ref": "trace-1790137685250-00000#12289",
+   "previous_end_atom": 1124,
+   "start_atom": 1131,
+   "atoms_without_end_line": 7
+  },
+  {
+   "turn_ref": "trace-1790137685250-00000#12358",
+   "previous_end_atom": 1658,
+   "start_atom": 1663,
+   "atoms_without_end_line": 5
+  },
+  {
+   "turn_ref": "trace-1790137685250-00000#12432",
+   "previous_end_atom": 3423,
+   "start_atom": 3614,
+   "atoms_without_end_line": 191
+  },
+  {
+   "turn_ref": "trace-1790137685250-00000#12453",
+   "previous_end_atom": 3676,
+   "start_atom": 3678,
+   "atoms_without_end_line": 2
+  },
+  {
+   "turn_ref": "trace-1790137685250-00000#12463",
+   "previous_end_atom": 3678,
+   "start_atom": 3680,
+   "atoms_without_end_line": 2
+  },
+  {
+   "turn_ref": "trace-1790137685250-00000#13557",
+   "previous_end_atom": 3682,
+   "start_atom": 3688,
+   "atoms_without_end_line": 6
+  },
+  {
+   "turn_ref": "trace-1790137685250-00000#13785",
+   "previous_end_atom": 3717,
+   "start_atom": 3731,
+   "atoms_without_end_line": 14
+  },
+  {
+   "turn_ref": "trace-1790137685250-00000#13789",
+   "previous_end_atom": 3731,
+   "start_atom": 3735,
+   "atoms_without_end_line": 4
+  },
+  {
+   "turn_ref": "trace-1790137685250-00000#13814",
+   "previous_end_atom": 3742,
+   "start_atom": 3779,
+   "atoms_without_end_line": 37
+  },
+  {
+   "turn_ref": "trace-1790137685250-00000#13815",
+   "previous_end_atom": 3815,
+   "start_atom": 3827,
+   "atoms_without_end_line": 12
+  },
+  {
+   "turn_ref": "trace-1790137685250-00000#13848",
+   "previous_end_atom": 4093,
+   "start_atom": 4102,
+   "atoms_without_end_line": 9
+  },
+  {
+   "turn_ref": "trace-1790137685250-00000#13864",
+   "previous_end_atom": 4297,
+   "start_atom": 4301,
+   "atoms_without_end_line": 4
+  },
+  {
+   "turn_ref": "trace-1790137685250-00000#13873",
+   "previous_end_atom": 4434,
+   "start_atom": 4451,
+   "atoms_without_end_line": 17
+  },
+  {
+   "turn_ref": "trace-1790137685250-00000#13925",
+   "previous_end_atom": 5825,
+   "start_atom": 5929,
+   "atoms_without_end_line": 104
+  },
+  {
+   "turn_ref": "trace-1790137685250-00000#13929",
+   "previous_end_atom": 6071,
+   "start_atom": 6082,
+   "atoms_without_end_line": 11
+  },
+  {
+   "turn_ref": "trace-1790137685250-00000#13930",
+   "previous_end_atom": 6129,
+   "start_atom": 6166,
+   "atoms_without_end_line": 37
+  },
+  {
+   "turn_ref": "trace-1790137685250-00000#13937",
+   "previous_end_atom": 6250,
+   "start_atom": 6262,
+   "atoms_without_end_line": 12
+  },
+  {
+   "turn_ref": "trace-1790137685250-00000#13939",
+   "previous_end_atom": 6278,
+   "start_atom": 6301,
+   "atoms_without_end_line": 23
+  },
+  {
+   "turn_ref": "trace-1790137685250-00000#13949",
+   "previous_end_atom": 6442,
+   "start_atom": 6457,
+   "atoms_without_end_line": 15
+  },
+  {
+   "turn_ref": "trace-1790137685250-00000#13959",
+   "previous_end_atom": 6593,
+   "start_atom": 6775,
+   "atoms_without_end_line": 182
+  },
+  {
+   "turn_ref": "trace-1790137685250-00000#13963",
+   "previous_end_atom": 6882,
+   "start_atom": 6894,
+   "atoms_without_end_line": 12
+  },
+  {
+   "turn_ref": "trace-1790137685250-00000#13969",
+   "previous_end_atom": 7116,
+   "start_atom": 7691,
+   "atoms_without_end_line": 575
+  },
+  {
+   "turn_ref": "trace-1790137685250-00000#13971",
+   "previous_end_atom": 7760,
+   "start_atom": 7789,
+   "atoms_without_end_line": 29
+  },
+  {
+   "turn_ref": "trace-1790137685250-00000#13976",
+   "previous_end_atom": 7860,
+   "start_atom": 7924,
+   "atoms_without_end_line": 64
+  },
+  {
+   "turn_ref": "trace-1790137685250-00000#14263",
+   "previous_end_atom": 7952,
+   "start_atom": 7966,
+   "atoms_without_end_line": 14
+  },
+  {
+   "turn_ref": "trace-1790137685250-00000#14265",
+   "previous_end_atom": 8014,
+   "start_atom": 8040,
+   "atoms_without_end_line": 26
+  },
+  {
+   "turn_ref": "trace-1790137685250-00000#14268",
+   "previous_end_atom": 8066,
+   "start_atom": 8068,
+   "atoms_without_end_line": 2
+  },
+  {
+   "turn_ref": "trace-1790137685250-00000#14292",
+   "previous_end_atom": 8170,
+   "start_atom": 8172,
+   "atoms_without_end_line": 2
+  },
+  {
+   "turn_ref": "trace-1790137685250-00000#14312",
+   "previous_end_atom": 8246,
+   "start_atom": 8249,
+   "atoms_without_end_line": 3
+  },
+  {
+   "turn_ref": "trace-1790137685250-00000#14324",
+   "previous_end_atom": 8308,
+   "start_atom": 8310,
+   "atoms_without_end_line": 2
+  }
+ ]
+}

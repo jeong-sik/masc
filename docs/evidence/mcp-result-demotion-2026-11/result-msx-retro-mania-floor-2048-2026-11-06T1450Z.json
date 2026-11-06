@@ -1,0 +1,37 @@
+{
+ "messages_total": 10282,
+ "atom_count": 5263,
+ "first_atom": 5197,
+ "end_atom": 5263,
+ "min_result_bytes": 2048,
+ "carried_messages": 132,
+ "tool_results": 138,
+ "tool_result_shapes": {
+  "text": 87,
+  "image+text": 51
+ },
+ "inner_text_blocks_demoted": 138,
+ "string_bodies_demoted": 0,
+ "plain_copies_demoted": 88,
+ "bodies_kept_shorter_than_marker": 0,
+ "image_blocks_by_png_size": {
+  "640x480": 51
+ },
+ "image_reference_bytes": 8057,
+ "measured_before": 2306538,
+ "measured_after": 526634,
+ "wire_before": 1209154,
+ "wire_after": 467428,
+ "copy_before": 1034288,
+ "copy_after": 48442,
+ "openai_chat_before": 881315,
+ "openai_chat_after": 94105,
+ "wire_bytes_by_role_and_block": {
+  "tool:tool_result": 824354,
+  "system:text": 277007,
+  "assistant:thinking": 54596,
+  "assistant:tool_use": 15710,
+  "user:text": 6204,
+  "assistant:text": 2742
+ }
+}

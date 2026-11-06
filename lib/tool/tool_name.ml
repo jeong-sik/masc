@@ -185,11 +185,3 @@ module Operator_name = struct
 
   let pp fmt t = Format.pp_print_string fmt (to_string t)
 end
-
-
-(** Domain_tool — the single domain-owned grouping of Task/Board/Goal/Operator
-    tool names.
-
-    This module owns only name construction and string round-tripping. Dispatch
-    and execution decisions are supplied by their explicit boundaries instead
-    of being inferred from this typed name carrier. *)

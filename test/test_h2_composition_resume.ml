@@ -246,7 +246,7 @@ let measure_attempt ~crash_spec =
 (* 시나리오                                                            *)
 
 (* H2-S1: 같은 root 에서 crash 직후 재시작하면 무엇이 관측되는가.
-   현재 코드에는 plan 진행 상태의 디스크 표현이 없다(Compose_run_id 는
+   현재 코드에는 plan 진행 상태의 디스크 표현이 없다(Plan.Run_id 는
    fresh, output 토큰은 비직렬화). 따라서 재시작한 프로세스는 a 가 이미
    효과를 냈는지 알 수 없다. 이 관측을 기록한다. *)
 let s1_restart_after_effect () =

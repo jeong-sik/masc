@@ -22,7 +22,7 @@ module Compression = Backend_compression
 
 (** {1 Types} *)
 
-(* Types are shared with Backend_pg via Backend_types
+(* Types are shared with Backend_memory via Backend_types
    to avoid circular dependency. Re-exported here for API compatibility. *)
 include Backend_types
 

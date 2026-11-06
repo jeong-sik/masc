@@ -12,10 +12,10 @@
     - No silent retry — caller decides. (RFC-0107 §"Workaround
       Rejection Bar" anti-pattern.)
 
-    Sub-modules:
+    Parts:
     - [Host_key]: pure host identity (scheme, host, port) — pool key.
-    - [Idle_entry]: idle piaf [Client.t] + last_used timestamp.
-    - [Stats]: monotonically increasing counters for telemetry. *)
+    - [idle_entry]: idle piaf [Client.t] + last_used timestamp.
+    - [stats_counters]: monotonically increasing counters for telemetry. *)
 
 (* ── Config ────────────────────────────────────────────────────── *)
 

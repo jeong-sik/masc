@@ -1,8 +1,7 @@
 (** Sandbox config SSOT tests.
 
     Pin defaults, env-override semantics, and JSON shape for
-    {!Env_config_sandbox}.  Pattern mirrors
-    {!Test_env_config_exec_timeout_10426}. *)
+    {!Env_config_sandbox}. *)
 
 open Alcotest
 

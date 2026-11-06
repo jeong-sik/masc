@@ -600,6 +600,7 @@ status: reference
   기록한 증거. 계정 단위의 **닫힌 quota 창**과 구분한다. 같은 자격 증명을 쓰는 다른
   후보까지 소진으로 표시하지 않고 해당 후보만 순서 뒤로 보낸다. 유효한 `Retry-After`
   기한이 지나거나 그 후보가 성공하면 해제되며, 기한이 없으면 성공 전까지 남는다.
+  순서는 그 기한이나 바닥 시간(60초)까지만 뒤로 보낸다(**Path Rest**).
   런타임 카탈로그는 이를 `rate_limited`·`rate_limit_resets_at`으로 따로 싣고, TUI는
   quota와 속도 제한 상태를 구분해 표시한다(#39815).
   → [Runtime_candidate_backpressure](../../lib/runtime/runtime_candidate_backpressure.mli) ·
@@ -607,25 +608,21 @@ status: reference
 
 **Path Rest (경로 휴식)**
 : Keeper turn의 runtime walk가 한 경로를 지금 보내지 않고 기다리게 두는 상태와 그 해제
-  규칙. 드라이버는 경로마다 `Path_resting { release_at; walk_promotes_at_release }`로
+  규칙. 드라이버는 경로마다 `Path_resting { release_at; release_basis }`로
   적고(`lib/keeper/keeper_turn_driver.ml`의 `type path_rest`, `keeper_turn_driver.mli`가
   `val path_rest`로 공개한다), 기다릴 때는 다음 발송 시각을
   `Wait_until { release_at; waiting_on; basis }`로 남긴다. walk는 head부터
-  보내므로 head가 쉬면 head의 해제 시각까지 기다리고, 뒤 경로가 walk 순서에서 그
-  시각에 다시 올라오는 경우에만 기다림이 짧아진다(`walk_rest`).
+  보내므로 head가 쉬면 head의 해제 시각까지 기다린다. 뒤 경로가 더 일찍 풀리면 그
+  시각까지만 기다린다. walk 순서는 해제 시각에 그 경로를 다시 올린다(`walk_rest`).
   - 세 층을 구분한다: **닫힌 quota 창**은 provider가 보고한 관측이고, **Runtime Rate
     Limit**은 그 후보의 프로세스 로컬 증거이며, 경로 휴식은 그 증거를 읽어 드라이버가
     정한 대기 결정이다.
-  - 해제가 무엇을 푸는지는 이름(`Rest_dated`/`Rest_until_answered`)이 아니라 표시
-    `walk_promotes_at_release`가 정한다. provider가 실제로 시각을 말한 휴식
-    (쓸 만한 retry-after가 있는 rate limit, 재개 시각이 관측된 quota 창)만 그 시각에
-    walk가 그 경로를 다시 올린다. provider가 시각을 말하지 않은 rate limit은 바닥 시각을
-    둔 `Rest_dated`가 되고, 시각 없는 quota 관측은 `Rest_until_answered`가 되어
-    해제 때 기다림만 끝나며 순서 강등은 성공 답까지 남는다
-    (`Keeper_turn_driver.runtime_path_rest`). 두 이름은 내부 `type path_rest_part`의
-    변종이고, 경로 단위 공개 투영은 `type path_rest`의 `Path_resting`이다.
-    `Rest_until_answered` 의 대기 자체도
-    `now`에서 굴러가는 바닥 시각으로 풀린다.
+  - 휴식마다 해제 시각이 있다(RFC-provider-path-rest §3.3). 쓸 만한 retry-after가 있는
+    rate limit과 재개 시각이 관측된 quota 창은 provider가 정한 시각에 풀린다
+    (`Stated_by_provider`). 시각을 말하지 않은 rate limit은 기록 시각 + 바닥 시간(60초),
+    시각 없는 quota 관측은 기록 시각 + cap(900초)에 풀린다. 이 시각은 MASC가 정한다
+    (`Bounded_by_masc`). 증거가 여럿이면 가장 늦은 시각과 그 시각을 정한 쪽이
+    `release_basis`가 된다(`Keeper_turn_driver.runtime_path_rest`).
   - 실패한 시도는 휴식이 아니다. 그 경로를 후보가 답할 때까지 뒤로 미룰 뿐, 발송을
     기다리게 하지 않는다(`RFC-0458 §3.4`).
   - 완료 검증도 같은 저장소를 읽는다. 검증 루프는 한 후보의 실패를

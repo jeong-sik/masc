@@ -3,7 +3,7 @@ rfc: "0481"
 title: "키퍼 행은 2초마다 통째로 읽지 않고, 바뀐 키퍼만 다시 읽는다"
 status: Draft
 created: 2026-11-03
-updated: 2026-11-03
+updated: 2026-11-06
 author: vincent + claude
 supersedes: []
 superseded_by: null
@@ -78,7 +78,7 @@ RFC-0477 의 fleet 처럼 행을 타입 스트림으로 보내면, 지금 경로
 읽는 시각으로 바뀌는 값이 둘 더 있다.
 
 - Candle 잔액은 반감기에 따라 줄어들고, 줄어든 만큼 workspace 의 `burned` 가 늘고 `circulating` 이 준다(§1.6). `Candle_decay.remaining ~half_life ~since ~at ~amount_milli` 는 시계도 파일도 쓰지 않는 순수 함수다.
-- provider 쉼은 두 가지다. `Rest_until_answered` 는 provider 가 다시 응답해야(쉼 기록이 바뀌어야) 끝나고, 읽을 때마다 끝나는 시각이 `now` 뒤로 밀린다. `Rest_dated` 는 기록된 시각에 쓰기 없이 끝난다. 행은 끝나는 시각을 싣지 않는다(`keeper_tool_surface_ops.ml:307~316`).
+- provider 쉼은 기록된 시각에 쓰기 없이 끝난다(RFC-provider-path-rest §3.3). 행은 끝나는 시각을 싣지 않는다(`keeper_tool_surface_ops.ml` 의 `runtime_path_rest_json`).
 
 ### 1.5 미리보기
 
@@ -192,7 +192,7 @@ turns 응답(`GET /api/v1/keepers/turns`, `handle_keeper_turns_list`, `server_ro
   - `circulating` = `issued` − `burned`
 
   서버가 같은 시각에 접는 것과 같은 함수에 같은 입력이라 값이 같다. 한 번 줄인 값을 다시 줄이면 내림이 겹쳐 서버 값과 1 milli 쯤 달라질 수 있어서, 읽는 시각의 값이 아니라 줄이기 전 기준을 싣는다. TUI 는 행의 `candle_balance_milli` 를 읽지 않는다. 그 필드는 웹 대시보드가 쓰므로 투영에 남는다. Items 탭은 잔액 대신 그 키퍼의 기준(`since`, `amount_milli`)으로 바뀜을 알아본다. 서버 타이머도, 다시 읽기도 없다.
-- provider 쉼: §3.2 의 서버 fiber 가 `Rest_dated` 중 가장 이른 끝나는 시각에 한 번 깨어 다시 계산한다. 키퍼마다 타이머를 두지 않고, fiber 하나가 다음 시각 하나만 기다린다. 행에는 끝나는 시각을 싣지 않고, TUI 에도 타이머가 없다. `Rest_until_answered` 는 시각으로 끝나지 않으므로 쓰기 신호로만 맞춘다.
+- provider 쉼: §3.2 의 서버 fiber 가 가장 이른 쉼 끝 시각에 한 번 깨어 다시 계산한다. 키퍼마다 타이머를 두지 않고, fiber 하나가 다음 시각 하나만 기다린다. 행에는 끝나는 시각을 싣지 않고, TUI 에도 타이머가 없다.
 
 ## 4. 규모
 
@@ -209,7 +209,7 @@ turns 응답(`GET /api/v1/keepers/turns`, `handle_keeper_turns_list`, `server_ro
 | L0 | 이 RFC | 리뷰 |
 | L1 | roster 경로의 `name=` 키퍼 하나 읽기 | 같은 키퍼의 행이 전체 읽기의 행과 같은지, 오류 행, 인증 |
 | L2a~ | §3.2 의 신호. 쓰기 하나가 층 하나다 | 쓰기마다 신호가 한 번 나가는지 |
-| L2f | provider 쉼 신호: 여섯 쓰기 함수의 hook, 서버 fiber 의 다시 계산과 비교, 가장 이른 `Rest_dated` 시각에 깨기(§3.2, §3.7) | 쓰기·시각마다 값이 바뀐 키퍼에게만 신호, 바뀌지 않으면 없음 |
+| L2f | provider 쉼 신호: 여섯 쓰기 함수의 hook, 서버 fiber 의 다시 계산과 비교, 가장 이른 쉼 끝 시각에 깨기(§3.2, §3.7) | 쓰기·시각마다 값이 바뀐 키퍼에게만 신호, 바뀌지 않으면 없음 |
 | L3 | TUI roster: 키퍼 하나 읽기(L3a), 키퍼별 빚 읽기와 목록 변화 전체 읽기(L3b), 2초 roster 읽기 삭제(L3c, L6·L6b 뒤) | 신호 하나 → 요청 하나, 실패 재시도 |
 | L4a | `keeper_turn_changed`: 턴 자리, turn ref, chat control token, shutdown id, Owner 사용 가능 여부의 쓰기 뒤 신호(§3.4) | 쓰기마다 신호가 한 번, 값이 바뀐 뒤에 나가는지 |
 | L4b | TUI turns 빚 읽기(신호, 다시 읽기, 권한 회복, 실패 재시도), 일정·확인 대기·fusion 알림의 대기 목록 빚 | §1.8 의 일들이 신호 뒤에 도는지 |

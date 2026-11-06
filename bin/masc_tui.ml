@@ -8298,7 +8298,18 @@ let owe_provider_history_day state ~now =
 
 (* Owed reads wait on this clock, so a wall-clock step cannot stretch a
    retry. *)
+let stream_reconnect_s = 2.0
+let keeper_execute_stream_reconnect_s = 2.0
+let keeper_execute_stream_max_reconnect_s = 30.0
+
 let monotonic_now_s () = Int64.to_float (Mtime_clock.elapsed_ns ()) /. 1e9
+
+(* A failed read leaves its record owed and waiting whoever started it, so a
+   read on entering a surface retries like an announced one. *)
+let failed_read owed =
+  Masc_tui_owed_read.failed ~retry_s:stream_reconnect_s
+    ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(monotonic_now_s ())
+    (Masc_tui_owed_read.started (Masc_tui_owed_read.changed owed))
 
 (* runtime.toml reads when the server says it committed a text of it, on
    arrival and on a revalidation, and again after a failed read (RFC-0482
@@ -8857,10 +8868,6 @@ let launch_keeper_child_content_load ?(mode=Masc_tui_child_content.Poll) state ~
           result))
   end
 
-let stream_reconnect_s = 2.0
-let keeper_execute_stream_reconnect_s = 2.0
-let keeper_execute_stream_max_reconnect_s = 30.0
-
 (* The owed history read of [keeper_name] under the current workspace
    reading, when the record is theirs. *)
 let current_history_owed state ~keeper_name =
@@ -9224,13 +9231,6 @@ let owe_board_post_read state ~mailbox ~post_id =
    surface refresh. *)
 let owe_board_list_read state =
   state.board_list_owed <- Masc_tui_owed_read.changed state.board_list_owed
-
-(* A failed read leaves its record owed and waiting whoever started it, so a
-   read on entering a surface retries like an announced one. *)
-let failed_read owed =
-  Masc_tui_owed_read.failed ~retry_s:stream_reconnect_s
-    ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(monotonic_now_s ())
-    (Masc_tui_owed_read.started (Masc_tui_owed_read.changed owed))
 
 let fail_board_list_read state = state.board_list_owed <- failed_read state.board_list_owed
 

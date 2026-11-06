@@ -416,8 +416,15 @@ let next_standing_change_at ~now =
   let snapshot = Runtime.dashboard_runtime_resolved_snapshot () in
   Option.to_list snapshot.rs_default_runtime @ snapshot.rs_runtimes
   |> List.concat_map (fun (rt : Runtime_instance.t) ->
+       (* An observation without a reset stops counting as exhausted at its
+          fallback cap with no write, so its end wakes the loop like a stated
+          reset does. *)
        let quota =
-         Runtime_quota_window.active_until ~scope:(Runtime_instance.quota_scope_of_runtime rt) ~now
+         Option.map
+           (function
+             | Runtime_quota_window.Reset_stated ends_at
+             | Runtime_quota_window.Observed_until ends_at -> ends_at)
+           (Runtime_quota_window.rest ~scope:(Runtime_instance.quota_scope_of_runtime rt) ~now)
        in
        let observed =
          Runtime_candidate_backpressure.candidate_backpressure ~now

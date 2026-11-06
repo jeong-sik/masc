@@ -320,7 +320,7 @@ let test_an_unknown_slot_fails_the_reading () =
 let test_the_old_schema_is_refused () =
   let json =
     Yojson.Safe.from_string
-      {|{"schema":"masc.keeper.next-request-forecast.v4","checkpoint_messages":1,"wake_line_bytes":131,"candidates":[]}|}
+      {|{"schema":"masc.keeper.next-request-forecast.v6","checkpoint_messages":1,"wake_line_bytes":131,"candidates":[]}|}
   in
   match Inspector.decode_forecast json with
   | Error _ -> ()

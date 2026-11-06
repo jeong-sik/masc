@@ -23,7 +23,7 @@ val standing : now:float -> config:Workspace.config -> Yojson.Safe.t
     unless a runtime's standing, a usage window or the catalog changed. *)
 
 val next_standing_change_at : now:float -> float option
-(** The earliest future time a runtime's quota window or provider-stated
-    rate limit ends, when its standing in {!standing} changes with no
-    write. *)
+(** The earliest future time a runtime's quota rest (a stated window, or an
+    observation without a reset at its fallback cap) or provider-stated rate
+    limit ends, when its standing in {!standing} changes with no write. *)
 

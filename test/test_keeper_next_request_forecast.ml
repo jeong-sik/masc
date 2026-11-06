@@ -1251,6 +1251,23 @@ let test_the_json_carries_the_walk_and_each_place () =
     (List.nth places 1 |> member "rest" |> member "release_at" |> to_number);
   Alcotest.(check string) "and who set that release" "stated_by_provider"
     (List.nth places 1 |> member "rest" |> member "release_basis" |> to_string);
+  let bounded =
+    Keeper_next_request_forecast.to_json
+      { forecast with
+        candidates =
+          [ candidate "glm"
+              { walks_at = 0
+              ; declared_at = Some 0
+              ; rest =
+                  Keeper_turn_driver.Path_resting
+                    { release_at = 60_000.; release_basis = Keeper_turn_driver.Bounded_by_masc }
+              }
+          ]
+      }
+  in
+  Alcotest.(check string) "a release no provider stated is MASC's" "bounded_by_masc"
+    (bounded |> member "candidates" |> index 0 |> member "place" |> member "rest"
+     |> member "release_basis" |> to_string);
   let refused =
     Keeper_next_request_forecast.to_json
       { forecast with walk = Error Keeper_turn_driver.Assignment_missing; candidates = [] }

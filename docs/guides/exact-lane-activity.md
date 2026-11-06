@@ -18,9 +18,7 @@ duplicate candidates remain configuration errors even when off.
 
 The existing Required lanes, Board Attention and HITL auto-judge, cannot be
 disabled. Loading or saving such a declaration is refused. Librarian, Workspace
-Curator, Verifier, Browser Stagehand Exact and Candle Appraiser are Optional.
-Stagehand Exact activity controls its model requests; Browser executor/session
-activity is a separate owner.
+Curator, Verifier and Candle Appraiser are Optional.
 
 Save through the existing runtime TOML editor. Its revision check, validation
 and commit receipt still apply. A saved file alone does not establish that the
@@ -42,8 +40,8 @@ binding for execution.
 TUI and Web observations show `off` separately from unavailable/unconfigured.
 Declared candidates and retained run evidence remain visible, including accepted
 work still finishing. `running_count` describes retained observation coverage,
-not an atomic census of all processes. Browser Stagehand has no standalone run
-history. The inventory read never starts or stops work.
+not an atomic census of all processes. The inventory read never starts or stops
+work.
 
 The TUI and Web provide the activity drafts described below. Publishing an
 enabled Workspace Curator declaration wakes its parked owner to reconsider

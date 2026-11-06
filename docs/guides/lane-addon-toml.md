@@ -88,7 +88,7 @@ Ego 설치는 `[binding]`의 `space`에 작업별 이름 또는 이미 관측한
 같은 client 또는 같은 native Space를 여러 controller가 광고하면 입력 전에 거절한다.
 live publisher 관측이 실패했거나 아직 준비되지 않았으면 다른 Ego controller가
 숨겨져 있을 수 있으므로 명시한 Ego 연결·Goal 경로와 document read도 거절한다.
-Automation·Stagehand 관측 실패는 명시한 Ego 경로를 막지 않는다.
+Automation 관측 실패는 명시한 Ego 경로를 막지 않는다.
 Space ID는 이 workspace가 사용하는 단일 Ego native runtime 안의 식별자다.
 
 선언 예제와 Goal binding·종료 의미는 [Browser 패키지 안내](../../addons/browser/README.md)를
@@ -161,12 +161,8 @@ sources = []
 ```
 
 이 예제는 `plan`을 선언한 별도 패키지를 가정한다. 함께 제공하는
-[`browser-automation`](../../addons/browser/automation/lane.toml)은 `locate`를,
-[`browser-stagehand`](../../addons/browser/stagehand/lane.toml)는 `stagehand`를 선언한다.
-`locate`는 Gecko에서 관측한 노드를 고르는 읽기 전용 소비자이고, `stagehand`는
-Chrome의 구조화된 observe/act/extract 모델 요청을 기존 Exact Output route로 보낸다.
-Stagehand의 act는 실제 브라우저 입력을 수행할 수 있다. Text/tool generation이나
-임의 모델 설정 전체를 지원하는 것은 아니다.
+[`browser-automation`](../../addons/browser/automation/lane.toml)은 `locate`를 선언한다.
+`locate`는 Gecko에서 관측한 노드를 고르는 읽기 전용 소비자다.
 선택 배열에는 패키지가 선언한 이름만 한 번씩 쓴다. 스키마나 모델·자격 증명을
 설치 배열에서 주입할 수 없다. 이름 순서는 패키지 순서로 정규화하며, 유효 선택이
 같으면 worker revision도 같다. 선택을 바꾸면 설치 revision에 반영돼 기존 worker와
@@ -182,20 +178,17 @@ host 요청 포트를 만들지 않고 모델 호출도 하지 않는다. 패키
 결과 수신 영수증은 브라우저 임시 할당 밖의 Add-on 저장소에 보존하며, 브라우저 동작 완료와
 구분한다. 번들 Gecko 소비자는 관측한 scene의 nodeId를 모델이 고르게 하고, 같은 탭을 다시
 읽어 문서·URL·관측 의미를 확인한 뒤 현재 target과 별도 inference를 반환한다.
-`BrowserInstruct action="observe" lane="automation" tabId=<관측한 ID>`로 호출한다.
 해당 설치의 `runtime.addon_exact_lanes.<설치 ID>.locate`에 운영자가 실제 모델 slot을
 선택해야 한다. `exact_outputs = []`이면 소비자를 설치하지 않으며, 다른 도구 검증 Hook은
 계속 따로 선택한다. 모델 route가 아직 준비되지 않으면 기존 Exact Output 정책에 따라
 요청을 남긴다. `locate` inventory는 선택된 소비자의 유무이고 provider 준비 완료가 아니다.
-Chrome의 `stagehand` 소비자도 `runtime.addon_exact_lanes.<설치 ID>.stagehand` route를
-사용한다. 선택한 소비자가 보인다는 사실과 provider의 준비·실제 동작 완료는 구분한다.
 실제 검증과 남은 브라우저 범위는 [실행 증거](../design/browser-addon-lifecycle.md#completion-evidence)와
 [#44150](https://github.com/jeong-sik/masc/issues/44150)에서 확인한다.
 
 ### Browser의 독립 선택
 
 `browser-lane-setup`이 만든 출처별 선언에 다음 두 배열을 독립적으로 더한다. `locate`는
-`browser-automation.toml`, `stagehand`는 `browser-stagehand.toml`이 선언한다. `manifest_path`는
+`browser-automation.toml`이 선언한다. `manifest_path`는
 setup이 쓴 값을 그대로 둔다.
 
 ```toml
@@ -217,11 +210,9 @@ sources = []
 | `tool_hooks = ["validate_input", "validate_output"]` | 두 도구 검사 |
 | `tool_hooks = []` | 선택적인 도구 검사 끄기 |
 | `exact_outputs = ["locate"]` | Gecko 노드 선택 모델 소비자 |
-| `exact_outputs = ["stagehand"]` | Chrome 구조화 모델 소비자 |
-| `exact_outputs = ["locate", "stagehand"]` | 두 모델 소비자 |
-| `exact_outputs = []` | 두 모델 소비자 끄기 |
+| `exact_outputs = []` | 모델 소비자 끄기 |
 
-두 배열을 생략하면 패키지 기본 선택을 따른다. 모델 소비자를 모두 꺼도 브라우저가
+두 배열을 생략하면 패키지 기본 선택을 따른다. 모델 소비자를 꺼도 브라우저가
 제공하는 비모델 기능은 사용할 수 있으며, 지원 기능은 연결된 backend의 inventory로
 확인한다. 두 배열을 비워도 caller 권한·worker incarnation·필수 wire decode·문서와
 viewport 결속·정리 검사는 계속 적용된다. Hook을 임의 코드로 삽입하는 설정은 없으며,
@@ -327,8 +318,8 @@ detach가 확인되면 해당 source는 이후 discovery에서 빠진다. 이미
 공개 도구가 아니라서 이 목록에 오르지 않는다. Keeper 는 host 의 `Browser*` 도구를 쓰고,
 host 가 고른 설치의 export 를 그 신원으로 부른다.
 Browser 서비스 패키지는 `browser_backend` 로 자기 worker 가 맡는 browser 출처 하나를 적는다
-(`automation`, `stagehand`, `owned_firefox`, `ego`, `external_host`). 이 키가 없는 browser 패키지는
-manifest 오류다. masc 가 가진 패키지는 출처마다 하나다(`browser-automation`, `browser-stagehand`,
+(`automation`, `owned_firefox`, `ego`, `external_host`). 이 키가 없는 browser 패키지는
+manifest 오류다. masc 가 가진 패키지는 출처마다 하나다(`browser-automation`,
 `browser-firefox`, `browser-ego`, `browser-external`). 한 출처는 붙은 설치 하나만 맡는다. 맡은 설치가 없거나 둘이면 그 출처만 쓰지 못하고, 다른
 출처는 그대로 쓴다. live 출처를 두 설치가 맡으면 그 두 설치가 올린 연결은 쓰지 않는다. 연결은 자기가
 어느 출처에서 왔는지 말하지 않기 때문이다.

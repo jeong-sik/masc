@@ -109,7 +109,7 @@ MASC는 최상위 public library(`masc`)와 `lib/` 아래의 도메인별 내부
 
 ## 6. Executable Inventory
 
-공개 실행 파일 (`bin/dune`의 `public_name` 기준 20종):
+공개 실행 파일 (`bin/dune`의 `public_name` 기준 24종):
 
 | Executable | Public Name | Entry Point | 역할 |
 |------------|-------------|-------------|------|
@@ -133,6 +133,10 @@ MASC는 최상위 public library(`masc`)와 `lib/` 아래의 도메인별 내부
 | `masc_librarian_preflight_eval` | `masc-librarian-preflight-eval` | `bin/masc_librarian_preflight_eval.ml` | Librarian 사전 평가 실행기. |
 | `masc_msx_addon_worker` | `masc-msx-addon-worker` | `bin/masc_msx_addon_worker.ml` | MSX 공유 머신 Add-on worker. |
 | `masc_dos_addon_worker` | `masc-dos-addon-worker` | `bin/masc_dos_addon_worker.ml` | DOS 공유 머신 Add-on worker. |
+| `masc_candle_grant` | `masc-candle-grant` | `bin/masc_candle_grant.ml` | Goal 밖에서 Keeper에게 Candle을 선물하는 운영자 CLI. 원장에 한 줄을 더하고 영수증을 출력한다. |
+| `masc_native_addon_launcher` | `masc-native-addon-launcher` | `bin/masc_native_addon_launcher.ml` | native Add-on worker를 인스턴스 ID와 비공개 slot 디렉터리를 잡고 실행하는 런처. |
+| `masc_browser_addon_worker` | `masc-browser-addon-worker` | `bin/masc_browser_addon_worker.ml` | Browser Lane Add-on worker. 한 번에 browser 출처 하나만 맡는다. |
+| `masc_browser_process_owner` | `masc-browser-process-owner` | `bin/masc_browser_process_owner.ml` | 인스턴스 ID와 브라우저 절대 경로를 받아 브라우저 프로세스를 소유하는 실행기. |
 
 내부용 실행 파일 (`public_name` 없음, 빌드 산출물로 직접 실행, 5종):
 
@@ -141,7 +145,7 @@ MASC는 최상위 public library(`masc`)와 `lib/` 아래의 도메인별 내부
 | `public_tool_manifest` | `bin/public_tool_manifest.ml` | Tool manifest 생성 |
 | `keeper_store_layout_manifest` | `bin/keeper_store_layout_manifest.ml` | Keeper 런타임 저장소 레이아웃 manifest 생성 |
 | `gen_board_tool_registry` | `bin/gen_board_tool_registry.ml` | Board 도구 레지스트리 미러 코드 생성 |
-| `stagehand_model_probe` | `bin/stagehand_model_probe.ml` | Stagehand 모델 프로브 |
+| `lane_fusion_container_probe` | `bin/lane_fusion_container_probe.ml` | Fusion 컨테이너 격리 검증. Docker와 합성 HTTP 모델 응답을 쓴다. |
 | `masc_tui_keys_doc_cli` | `bin/masc_tui_keys_doc_cli.ml` | TUI 키바인딩 문서 생성/검증 CLI |
 
 ## 7. Canonical Front Door and Internal Supporting Substrates

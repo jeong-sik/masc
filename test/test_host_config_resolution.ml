@@ -2,15 +2,13 @@ open Alcotest
 
 (** RFC-0084 PR-12 — Host_config typed record invariants.
 
-    PR-12 introduces the typed [Host_config.t] record + [resolve]
-    accessor; the 11 hardcode-site migrations are scoped to
-    *follow-up cleanup PRs* (one per sub-domain).
+    PR-12 introduces the typed [Host_config.t] record; the 11 hardcode-site
+    migrations are scoped to *follow-up cleanup PRs* (one per sub-domain).
 
     Tests cover:
     - host defaults and host-derived temporary directories
     - is_test_mode round-trips through the typed sum (no
       String.starts_with leak)
-    - resolve ~base_path returns base-path-relative runtime roots
 *)
 
 let test_host_field_values () =
@@ -49,31 +47,6 @@ let test_is_test_mode_typed () =
     (Host_config.is_test_mode Host_config.Production)
 ;;
 
-let test_resolve_with_base_path () =
-  match Host_config.resolve ~base_path:"/tmp/test-masc" () with
-  | Error msg -> failf "resolve failed: %s" msg
-  | Ok t ->
-    (check bool)
-      "agent_runtime_root is base-path-relative \
-       (RFC-0084 §1.5 typed runtime root)"
-      true
-      (String.length t.agent_runtime_root > 0
-       && String.starts_with ~prefix:"/tmp/test-masc/" t.agent_runtime_root);
-    (check bool)
-      "cred_root is base-path-relative when explicit base provided"
-      true
-      (t.cred_root <> "/tmp/keeper-creds")
-;;
-
-let test_resolve_default_base_path () =
-  match Host_config.resolve () with
-  | Error msg -> failf "resolve (default base) failed: %s" msg
-  | Ok _ ->
-    (* Default-base resolve must succeed; concrete path content is
-       host-specific. *)
-    ()
-;;
-
 let () =
   Alcotest.run
     "RFC-0084 PR-12 Host_config typed"
@@ -84,8 +57,6 @@ let () =
             test_host_field_values
 
         ; test_case "is-test-mode-typed" `Quick test_is_test_mode_typed
-        ; test_case "resolve-with-base-path" `Quick test_resolve_with_base_path
-        ; test_case "resolve-default-base-path" `Quick test_resolve_default_base_path
         ] )
     ]
 ;;

@@ -19,6 +19,9 @@ type error =
       (** [index] is the offset of the first byte outside the alphabet. *)
   | Path_segment  (** The id is [.] or [..]. *)
 
+(** [empty], [too long], [invalid byte at <index>], or [a path segment]. *)
+val error_to_string : error -> string
+
 module type S = sig
   type t
 

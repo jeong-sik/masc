@@ -395,6 +395,36 @@ let test_the_palette_goes_to_both_halves_of_task_review () =
     (goes_to "go Task Verdicts" Harness)
 ;;
 
+(* A row typed whole comes first, wherever it sits in the list. "go Board" is
+   also the start of "go Board Attention history", and "go Workspace" of "go
+   Workspace Curator history"; both history rows are listed before the
+   surfaces, so a prefix rank alone sent Enter on the typed name to a Feature's
+   history. Every row is typed as it is written, so a row added later that
+   starts with an existing one cannot take its place. *)
+let test_a_row_typed_whole_leads () =
+  let state =
+    create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  List.iter
+    (fun (label, _) ->
+      state.palette_query <- label;
+      match palette_matches state with
+      | (first, _) :: _ when String.equal first label -> ()
+      | (first, _) :: _ ->
+        Alcotest.fail (Printf.sprintf "%S leads with %S" label first)
+      | [] -> Alcotest.fail (Printf.sprintf "%S matches nothing" label))
+    (palette_entries state);
+  List.iter
+    (fun (surface, name) ->
+      state.palette_query <- name;
+      match palette_matches state with
+      | (_, Palette_goto first) :: _ when first = surface -> ()
+      | _ ->
+        Alcotest.fail
+          (Printf.sprintf "%S does not lead with its surface" name))
+    surface_ring
+;;
+
 let test_goal_and_candle_queries_select_their_destinations () =
   let state = create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
   List.iter (fun query ->
@@ -650,6 +680,8 @@ let () =
             test_friendly_runtime_param_editing
         ; Alcotest.test_case "both halves of Task Review are reachable" `Quick
             test_the_palette_goes_to_both_halves_of_task_review
+        ; Alcotest.test_case "a row typed whole leads" `Quick
+            test_a_row_typed_whole_leads
         ; Alcotest.test_case "Goal and Candle queries select their destinations" `Quick
             test_goal_and_candle_queries_select_their_destinations
         ; Alcotest.test_case "msx is reached by its name" `Quick

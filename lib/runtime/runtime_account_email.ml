@@ -101,9 +101,18 @@ let of_muse_auth bytes =
   let* json = parse bytes in
   email_at [ "providers"; "meta"; "user_email" ] json
 
+(* agy 1.2 keeps the sign-in OpenID [id_token]. agy 1.5 keeps only its
+   [email] claim as [id_token_email] and drops the token on its next write.
+   The CLI writes one of the two. *)
 let of_google_oauth bytes =
   let* json = parse bytes in
-  email_in_id_token [ "id_token" ] json
+  let* id_token_email = at [ "id_token_email" ] json in
+  let* id_token = at [ "id_token" ] json in
+  match id_token_email, id_token with
+  | Some _, None -> email_at [ "id_token_email" ] json
+  | None, Some _ -> email_in_id_token [ "id_token" ] json
+  | None, None -> Error Not_reported
+  | Some _, Some _ -> Error Source_unrecognized
 
 (* A regular file only: opening a FIFO would block the reading thread. The
    bytes are parsed on that thread too. *)

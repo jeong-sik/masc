@@ -10,7 +10,9 @@
     - Codex: [auth.json] [tokens.id_token], OpenID claim [email]
     - Claude Code: [.claude.json] [oauthAccount.emailAddress]
     - Muse Code: [.config/muse/auth.json] [providers.meta.user_email]
-    - Antigravity: OAuth JSON [id_token], OpenID claim [email] *)
+    - Antigravity: OAuth JSON [id_token], OpenID claim [email] (agy 1.2.x),
+      or [id_token_email] (agy 1.5.x, key names read on 2026-11-06); a file
+      with both is [Source_unrecognized] *)
 
 type t = private string
 

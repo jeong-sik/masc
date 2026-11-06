@@ -51,6 +51,16 @@
 - 읽기 수가 11-01 에 10,070건으로 많은 까닭은 보지 않았어요.
 - 마커의 `answer_sha256=` 를 모델이 어떻게 해석했는지는 모델의 생각 기록으로 보지 않았어요.
 
+## 스크립트 밖에서 맞춰 본 값
+
+스크립트와 다른 길로 날짜 파일(조각 포함)을 셌어요. 읽기 수는 `"tool":"keeper_artifact_read"` 가 든 줄 수와 같아요(11-01~11-05: 10,070 / 6,320 / 389 / 267 / 177). 실패 수는 `artifact does not exist` 가 든 줄 수(97 / 148 / 27 / 20 / 8)에서 이 문구를 글자로만 담은 다른 도구의 줄을 뺀 값과 같아요. 뺀 줄은 일정 메모(`masc_schedule_note_add`) 4줄과 `Execute` 출력 2줄이에요. 11-06 은 재 본 시각(14:35Z)까지 읽기 76건과 실패 5건으로 같고, 문구만 세면 7줄이라 `Execute` 1줄과 게시판 댓글(`masc_board_comment`) 1줄이 더 들어요.
+
+```bash
+cd ~/me/.masc/tool_calls/2026-11
+rg -a -c '"tool":"keeper_artifact_read"' 01.jsonl 01.[0-9][0-9][0-9].jsonl
+rg -a -c 'artifact does not exist' 01.jsonl 01.[0-9][0-9][0-9].jsonl
+```
+
 ## 다시 만들기
 
 ```bash

@@ -1,18 +1,8 @@
-type t = string
+type t = Runtime_account_email_text.t
 
-let max_bytes = 254
+let of_string = Runtime_account_email_text.of_string
 
-let displayable_byte char =
-  let code = Char.code char in
-  code > 0x20 && code <> 0x7f
-
-let of_string text =
-  let length = String.length text in
-  if length = 0 || length > max_bytes || not (String.is_valid_utf_8 text) then None
-  else if String.for_all displayable_byte text then Some text
-  else None
-
-let to_string email = email
+let to_string = Runtime_account_email_text.to_string
 
 type missing =
   | Source_unavailable
@@ -210,7 +200,7 @@ let observe_providers ~read providers =
 let row_json ~integration_id read =
   let state =
     match read with
-    | Ok email -> [ "state", `String "read"; "email", `String email ]
+    | Ok email -> [ "state", `String "read"; "email", `String (to_string email) ]
     | Error missing -> [ "state", `String "not_read"; "cause", `String (missing_to_wire missing) ]
   in
   `Assoc (("integration_id", `String integration_id) :: state)

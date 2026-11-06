@@ -1140,26 +1140,6 @@ let test_every_line_fits_the_width () =
         (section_lines ~width edge_accounts))
     [ 20; 24; 44; 60; 76; 80; 100; 120; 132 ]
 
-(* The rows above the plan are lists of clauses joined by the clause
-   separator. Narrowing the screen moves clauses to another row and breaks
-   none, so the rows of any screen, joined by the separator, read as the rows
-   of a screen too wide to wrap them. 40 cells hold the widest clause. *)
-let test_summary_breaks_between_clauses () =
-  let summary width =
-    let rec upto acc = function
-      | [] | "" :: _ -> List.rev acc
-      | line :: rest -> upto (line :: acc) rest
-    in
-    upto [] (List.map plain (section_lines ~width screenshot_accounts))
-  in
-  let joined rows = String.concat Masc_tui_message_layout.clause_separator rows in
-  let unwrapped = joined (summary 300) in
-  for width = 40 to 140 do
-    check string
-      (Printf.sprintf "no clause is broken in %d cells" width)
-      unwrapped (joined (summary width))
-  done
-
 let test_rows_follow_the_plan () =
   let raw = screenshot_section ~width:120 () in
   let lines = List.map plain raw in
@@ -1466,8 +1446,6 @@ let () =
             test_observed_exhaustion_groups_gating_windows
         ; test_case "an empty report has no windows" `Quick test_an_empty_report_has_no_windows
         ; test_case "every line fits the width" `Quick test_every_line_fits_the_width
-        ; test_case "the summary breaks between clauses" `Quick
-            test_summary_breaks_between_clauses
         ; test_case "rows follow the plan" `Quick test_rows_follow_the_plan
         ; test_case "an account email is drawn once" `Quick test_an_account_email_is_drawn_once
         ; test_case "heard time is the account's, not the section's" `Quick

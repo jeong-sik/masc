@@ -998,6 +998,8 @@ let trajectory_summary_of_json = function
   | _ -> []
 ;;
 
+let trajectory_summary_cache_filename = "trajectory-summary-cache.json"
+
 let save_trajectory_summary_cache ~path =
   match trajectory_summary_rows () with
   | [] -> Ok ()

@@ -149,8 +149,8 @@ let workspace =
     ; no_reference Candle_ledger.file_name
     ; no_reference Task.Planning_eio.current_task_filename
     ; no_reference Task.Planning_eio.trash_dirname
-    ; no_reference Server_bootstrap_maintenance.count_cache_filename
-    ; no_reference Server_bootstrap_maintenance.trajectory_summary_cache_filename
+    ; no_reference Dated_jsonl.count_cache_filename
+    ; no_reference Telemetry_unified.trajectory_summary_cache_filename
     ; no_reference Server_mcp_transport_http_session.sessions_filename
     ; no_reference Host_fd_pressure_poller.state_filename
     ; no_reference Builtin_skill_package.skills_dirname

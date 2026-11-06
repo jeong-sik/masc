@@ -76,8 +76,3 @@ module Otel_for_testing : sig
   (** Fork [setup] under [sw] and return without waiting for it. *)
 end
 
-val count_cache_filename : string
-(** The dated JSONL count cache below [<base>/.masc]. *)
-
-val trajectory_summary_cache_filename : string
-(** The trajectory summary cache below [<base>/.masc]. *)

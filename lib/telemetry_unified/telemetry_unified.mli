@@ -142,6 +142,9 @@ val replay_retention_json :
     provenance block for the dashboard telemetry replay endpoint, including
     the selected source list and durable stores read for each source. *)
 
+val trajectory_summary_cache_filename : string
+(** The trajectory summary cache's file name below [<base>/.masc]. *)
+
 val save_trajectory_summary_cache : path:string -> (unit, string) result
 (** Writes the per-file (path, boundary, tool_calls, latest_ts) trajectory
     cache to [path] via a temp-file rename. The cache is never an authority:

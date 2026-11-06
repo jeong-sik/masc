@@ -397,10 +397,14 @@ let test_a_passed_window_does_not_come_back () =
   with_store @@ fun base_path ->
   ignore (restart ~base_path ~now:0.0 : J.restore_report);
   Q.note_exhausted ~scope:claude_row ~resets_at:1500.0;
+  Q.note_exhausted ~scope:key_file ~resets_at:1600.0;
   Q.note_exhausted ~scope:muse ~resets_at:2000.0;
   let report = restart ~base_path ~now:1600.0 in
-  Alcotest.(check (pair int int)) "one row passed, one still ahead" (1, 1)
+  Alcotest.(check (pair int int))
+    "a reset at the restart instant has passed, as the table reads it" (2, 1)
     (report.passed, report.ahead);
+  Alcotest.(check (option (float 0.0))) "the window that reset at the restart is not taken"
+    None (Q.active_until ~scope:key_file ~now:1599.0);
   Alcotest.(check bool) "the passed window is not in the table at any time" false
     (Q.is_exhausted ~scope:claude_row ~now:1400.0);
   Alcotest.(check (option (float 0.0))) "the window still ahead rests" (Some 2000.0)
@@ -433,6 +437,8 @@ let test_an_unreadable_row_is_reported_and_not_taken () =
     ; {|{"scope":{"kind":"provider_row","provider_id":""},"resets_at":2000.0}|}
     ; {|{"scope":{"kind":"provider_row","provider_id":"x"},"resets_at":2000}|}
     ; {|{"scope":{"kind":"provider_row","provider_id":"x"},"resets_at":2000.0,"resets_at":3000.0}|}
+    ; {|{"scope":{"kind":"provider_row","provider_id":"x"},"resets_at":Infinity}|}
+    ; {|{"scope":{"kind":"provider_row","provider_id":"x","name":"y"},"resets_at":2000.0}|}
     ; {|[]|}
     ; valid muse 2000.0
     ]
@@ -450,6 +456,8 @@ let test_an_unreadable_row_is_reported_and_not_taken () =
     ; "empty scope.provider_id"
     ; "wrong type resets_at"
     ; "duplicate resets_at"
+    ; "not finite resets_at"
+    ; "unexpected scope.name"
     ; "not an object"
     ; "incomplete tail"
     ]
@@ -458,6 +466,39 @@ let test_an_unreadable_row_is_reported_and_not_taken () =
     (Q.active_until ~scope:muse ~now:1000.0);
   Alcotest.(check bool) "a rejected row rests nothing" false
     (Q.is_exhausted ~scope:(provider_scope "x") ~now:1000.0)
+
+(* The store holds only rows the reader takes back. *)
+let test_a_window_the_reader_would_reject_is_not_written () =
+  with_store @@ fun base_path ->
+  ignore (restart ~base_path ~now:0.0 : J.restore_report);
+  Q.note_exhausted ~scope:muse ~resets_at:Float.infinity;
+  Q.note_exhausted ~scope:(provider_scope "") ~resets_at:2000.0;
+  Q.note_exhausted ~scope:claude_row ~resets_at:Float.nan;
+  let report = restart ~base_path ~now:1000.0 in
+  Alcotest.(check (triple int int (list string))) "no row was written to reject later"
+    (0, 0, [])
+    (report.ahead, report.passed, List.map row_error_kind report.rejected);
+  Alcotest.(check bool) "the store file was never created" false
+    (Sys.file_exists (J.path ~base_path))
+
+(* A turn cancelled right after its refusal still keeps the window, and the
+   note does not raise from the store. *)
+let test_a_cancelled_turn_still_keeps_its_window () =
+  with_store @@ fun base_path ->
+  ignore (restart ~base_path ~now:0.0 : J.restore_report);
+  let noted =
+    Eio_main.run @@ fun _env ->
+    match
+      Eio.Cancel.sub (fun turn ->
+        Eio.Cancel.cancel turn (Failure "turn cancelled");
+        Q.note_exhausted ~scope:muse ~resets_at:2000.0)
+    with
+    | () -> "noted"
+    | exception Eio.Cancel.Cancelled _ -> "the note raised Cancelled"
+  in
+  Alcotest.(check string) "the note returns in a cancelled turn" "noted" noted;
+  Alcotest.(check int) "the window is kept across a restart" 1
+    (restart ~base_path ~now:1000.0).ahead
 
 let () =
   Alcotest.run
@@ -535,5 +576,9 @@ let () =
             test_a_passed_window_does_not_come_back
         ; Alcotest.test_case "an unreadable row is reported and not taken" `Quick
             test_an_unreadable_row_is_reported_and_not_taken
+        ; Alcotest.test_case "a window the reader would reject is not written" `Quick
+            test_a_window_the_reader_would_reject_is_not_written
+        ; Alcotest.test_case "a cancelled turn still keeps its window" `Quick
+            test_a_cancelled_turn_still_keeps_its_window
         ] )
     ]

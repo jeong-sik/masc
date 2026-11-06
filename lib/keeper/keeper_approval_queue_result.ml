@@ -72,17 +72,6 @@ type grant_error =
   | Grant_resolution_missing of string
   | Grant_replay_not_consumed of string
   | Grant_replay_outcome_conflict of string
-  | Grant_settlement_keeper_mismatch of
-      { approval_id : string
-      ; requested_keeper : string
-      ; stored_keeper : string
-      }
-  | Grant_settlement_fence_mismatch of
-      { approval_id : string
-      ; requested_sequence : int
-      ; stored_sequence : int
-      }
-  | Grant_settlement_conflict of string
 
 type resolution_absence =
   | Resolution_missing
@@ -100,39 +89,10 @@ type resolution_replay_outcome =
   | Replay_failed of Tool_output.artifact_ref
   | Replay_indeterminate of Tool_output.artifact_ref
 
-(* #26191. An authenticated operator's terminal judgement on a grant whose
-   replay outcome stayed absent after a restart: the raw effect result lived
-   only in the replaying process's [pending_repairs] map and died with it, so
-   no automatic path can classify the effect. The settlement is the
-   operator's answer, recorded beside — never over — the replay outcome:
-   [Replay_indeterminate] says the machine could not tell, the settlement
-   says what the operator found out. *)
-type operator_settlement_kind =
-  | Effect_confirmed_applied of Tool_output.artifact_ref
-  | Effect_confirmed_failed of Tool_output.artifact_ref
-  | Terminally_abandoned
-
-type operator_settlement =
-  { kind : operator_settlement_kind
-  ; resolution_sequence : int
-        (* The delivery row the operator saw when settling. A different
-           sequence is a different delivery and refuses with a fence
-           conflict instead of overwriting the earlier judgement. *)
-  ; admitted_revision : int64
-        (* The wake queue revision that carried the unresolved approval. *)
-  ; source_post_id : string
-        (* The wake row identity the settlement retires. *)
-  ; stage : string
-        (* The typed repair stage the operator settled, from
-           [Keeper_internal_error.gate_replay_repair_stage]. *)
-  ; settled_at : float
-  }
-
 type approved_resolution_delivery =
   { request : approved_resolution_request
   ; state : approved_resolution_state
   ; replay_outcome : resolution_replay_outcome option
-  ; operator_settlement : operator_settlement option
   }
 
 type continuation_readiness =
@@ -140,17 +100,11 @@ type continuation_readiness =
   | Continuation_ready of string option
 
 let continuation_readiness_of_delivery (delivery : approved_resolution_delivery) =
-  match delivery.state, delivery.replay_outcome, delivery.operator_settlement with
-  | Resolution_consumed, Some _, _ ->
+  match delivery.state, delivery.replay_outcome with
+  | Resolution_consumed, Some _ ->
     Continuation_ready (Some delivery.request.tool_name)
-  (* A settlement retires the wake without a replay outcome: the operator's
-     terminal judgement replaces the outcome as the durable fact, and the
-     tool is done — nothing more will be replayed (#26191). *)
-  | Resolution_consumed, None, Some _ ->
-    Continuation_ready (Some delivery.request.tool_name)
-  | Resolution_consumed, None, None
-  | Resolution_unconsumed, (None | Some _), _ ->
-    Continuation_waiting_for_replay
+  | Resolution_unconsumed, (None | Some _)
+  | Resolution_consumed, None -> Continuation_waiting_for_replay
 ;;
 
 type continuation_projection_result =
@@ -175,24 +129,6 @@ type pending_submission =
 type replay_recording =
   | Replay_recorded
   | Replay_already_recorded
-
-type settlement_recording =
-  | Settlement_recorded
-  | Settlement_already_recorded
-
-(* Idempotence key for an operator settlement: every fence field and the
-   judgement itself. [settled_at] is the moment of the first write and is
-   not part of the identity — a re-submitted identical judgement with a new
-   clock still matches the recorded one. *)
-let operator_settlement_equal
-      (left : operator_settlement)
-      (right : operator_settlement) =
-  left.kind = right.kind
-  && left.resolution_sequence = right.resolution_sequence
-  && Int64.equal left.admitted_revision right.admitted_revision
-  && String.equal left.source_post_id right.source_post_id
-  && String.equal left.stage right.stage
-;;
 
 type delivery_replay_failure =
   { approval_id : string
@@ -369,25 +305,6 @@ let grant_error_to_string = function
     Printf.sprintf
       "approval %s already has a different durable replay outcome"
       approval_id
-  | Grant_settlement_keeper_mismatch
-      { approval_id; requested_keeper; stored_keeper } ->
-    Printf.sprintf
-      "approval %s belongs to keeper %s, not %s"
-      approval_id
-      stored_keeper
-      requested_keeper
-  | Grant_settlement_fence_mismatch
-      { approval_id; requested_sequence; stored_sequence } ->
-    Printf.sprintf
-      "approval %s settlement fence names resolution sequence %d but the \
-       durable delivery is sequence %d"
-      approval_id
-      requested_sequence
-      stored_sequence
-  | Grant_settlement_conflict approval_id ->
-    Printf.sprintf
-      "approval %s already has a different durable operator settlement"
-      approval_id
 ;;
 
 let resolution_absence_of_grant_error = function
@@ -399,10 +316,7 @@ let resolution_absence_of_grant_error = function
   | Grant_store_unavailable _
   | Grant_replay_projection_unavailable _
   | Grant_replay_not_consumed _
-  | Grant_replay_outcome_conflict _
-  | Grant_settlement_keeper_mismatch _
-  | Grant_settlement_fence_mismatch _
-  | Grant_settlement_conflict _ -> None
+  | Grant_replay_outcome_conflict _ -> None
 ;;
 
 let resolution_absence_to_string = function

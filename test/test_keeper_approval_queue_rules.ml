@@ -586,7 +586,7 @@ let test_resolution_order_wire_refuses_unproven_order () =
     in
     { entry; resolution_sequence; decision = Rule_types.Decision.Approve
     ; source = Rule_types.Human_operator; remember_rule = true; rule_expires_at = Some 2000.0
-    ; created_by = Some "operator"; grant_consumed = false; replay_outcome = None; operator_settlement = None }
+    ; created_by = Some "operator"; grant_consumed = false; replay_outcome = None }
   in
   let snapshot ~next_sequence deliveries =
     let module SMap = Set_util.StringMap in
@@ -679,7 +679,7 @@ let test_origin_dedup_and_retained_delivery_wire () =
   let delivery : Queue_codec.persisted_delivery =
     { entry; resolution_sequence = 2; decision = Rule_types.Decision.Approve
     ; source = Rule_types.Human_operator; remember_rule = false; rule_expires_at = None
-    ; created_by = None; grant_consumed = false; replay_outcome = None; operator_settlement = None } in
+    ; created_by = None; grant_consumed = false; replay_outcome = None } in
   let encoded = Queue_codec.persisted_delivery_to_yojson delivery in
   let entry_json = Yojson.Safe.Util.member "entry" encoded in
   check bool "resolved delivery omits private request context" true

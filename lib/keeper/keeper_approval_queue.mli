@@ -77,20 +77,6 @@ val record_consumed_resolution_replay :
   outcome:resolution_replay_outcome ->
   (replay_recording, grant_error) result
 
-(** #26191. Durably record the operator's terminal judgement on a consumed
-    approval whose replay outcome stayed absent after a restart. The fence
-    binds the judgement to the exact delivery: [keeper_name] and the
-    settlement's [resolution_sequence] must match the stored delivery. An
-    identical judgement is idempotent; a different judgement or fence is an
-    explicit conflict. The settlement sits beside any replay outcome and
-    never displaces one, and recording it re-runs no external effect. *)
-val record_operator_settlement :
-  base_path:string ->
-  keeper_name:string ->
-  id:string ->
-  Keeper_approval_queue_result.operator_settlement ->
-  (settlement_recording, grant_error) result
-
 (** Idempotently project durable approval truth into the originating Keeper's
     visible chat. These receipts never authorize or replay an effect; they are
     the presentation acknowledgement required before the wake event may be

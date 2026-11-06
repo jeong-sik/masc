@@ -84,17 +84,6 @@ type grant_error =
   | Grant_resolution_missing of string
   | Grant_replay_not_consumed of string
   | Grant_replay_outcome_conflict of string
-  | Grant_settlement_keeper_mismatch of
-      { approval_id : string
-      ; requested_keeper : string
-      ; stored_keeper : string
-      }
-  | Grant_settlement_fence_mismatch of
-      { approval_id : string
-      ; requested_sequence : int
-      ; stored_sequence : int
-      }
-  | Grant_settlement_conflict of string
 
 (** What the durable Gate store says when a queued approved resolution has
     nothing behind it. Each constructor is a fact about the store, not a read
@@ -131,34 +120,10 @@ type resolution_replay_outcome =
     [Replay_indeterminate] is terminal and fail-closed: the effect may already
     have happened, so it must never be replayed. *)
 
-type operator_settlement_kind =
-  | Effect_confirmed_applied of Tool_output.artifact_ref
-  | Effect_confirmed_failed of Tool_output.artifact_ref
-  | Terminally_abandoned
-(** #26191. The operator's terminal judgement on a grant whose replay outcome
-    stayed absent after a restart. [Effect_confirmed_applied] carries a
-    bounded artifact reference, [Effect_confirmed_failed] a bounded detail
-    reference; [Terminally_abandoned] records an explicit give-up. No
-    settlement re-runs the external effect. *)
-
-type operator_settlement =
-  { kind : operator_settlement_kind
-  ; resolution_sequence : int
-  ; admitted_revision : int64
-  ; source_post_id : string
-  ; stage : string
-  ; settled_at : float
-  }
-(** The judgement plus the fence that pinned it: the delivery row's
-      [resolution_sequence], the wake queue's [admitted_revision], the wake
-      row's [source_post_id], and the typed repair [stage] the operator
-      settled. *)
-
 type approved_resolution_delivery =
   { request : approved_resolution_request
   ; state : approved_resolution_state
   ; replay_outcome : resolution_replay_outcome option
-  ; operator_settlement : operator_settlement option
   }
 
 type continuation_readiness =
@@ -166,10 +131,8 @@ type continuation_readiness =
   | Continuation_ready of string option
 (** [Continuation_ready None] is a rejection, which needs no replay or tool
     name. An approved replay is ready with its tool name only after its grant
-    is consumed and its outcome is durable — or after a durable operator
-    settlement replaced the absent outcome (#26191). Native instruction
-    delivery has a separate admission authority and may construct readiness
-    without replay. *)
+    is consumed and its outcome is durable. Native instruction delivery has
+    a separate admission authority and may construct readiness without replay. *)
 
 val continuation_readiness_of_delivery :
   approved_resolution_delivery -> continuation_readiness
@@ -202,14 +165,6 @@ type pending_submission =
 type replay_recording =
   | Replay_recorded
   | Replay_already_recorded
-
-type settlement_recording =
-  | Settlement_recorded
-  | Settlement_already_recorded
-
-val operator_settlement_equal :
-  operator_settlement -> operator_settlement -> bool
-(** Idempotence key: judgement and fence fields, never [settled_at]. *)
 
 type delivery_replay_failure =
   { approval_id : string

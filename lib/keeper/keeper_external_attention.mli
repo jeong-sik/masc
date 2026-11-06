@@ -208,3 +208,6 @@ val store_read_error : base_path:string -> keeper_name:string -> string option
 module For_testing : sig
   val record_with_clock : now:(unit -> float) -> base_path:string -> item -> record_result
 end
+
+val dirname : string
+(** The directory external attention sits in below [<base>/.masc]. *)

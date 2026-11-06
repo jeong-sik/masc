@@ -1,5 +1,7 @@
+let dirname = "gate"
+
 let dir ~base_path =
-  Filename.concat (Common.masc_dir_from_base_path ~base_path) "gate"
+  Filename.concat (Common.masc_dir_from_base_path ~base_path) dirname
 ;;
 
 let mode ~base_path = Filename.concat (dir ~base_path) "mode.json"

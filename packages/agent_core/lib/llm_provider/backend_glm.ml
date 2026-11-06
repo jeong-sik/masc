@@ -46,9 +46,8 @@ type glm_error =
     - 1300: policy block (terminal)
     - 1301: unsafe content (terminal)
     - 1302,1303,1305,1312: rate/load limit
-    - 1304,1308,1310: quota exhausted. 1304 is not in the docs.z.ai or
-      docs.bigmodel.cn code tables (checked 2026-09-24); its only record
-      here is the inline test naming it a daily limit.
+    - 1308,1310: a spent usage window (docs.z.ai and docs.bigmodel.cn,
+      checked 2026-11-06)
     - 1316-1321: a spent 5-hour or 7-day usage window that extra usage
       cannot cover (docs.z.ai, checked 2026-11-06)
     - 1309,1311,1313,1314: subscription/plan (quota). 1314 is an expired
@@ -69,7 +68,6 @@ let classify_glm_error ~code : glm_error_class =
   | "1220" -> Glm_auth_error
   | "1302" | "1303" | "1305" | "1312" -> Glm_rate_limited
   | "1113"
-  | "1304"
   | "1308"
   | "1309"
   | "1310"
@@ -227,7 +225,7 @@ let check_glm_error body : glm_error option =
    envelope by. A class that names a typed failure is promoted while the
    provider identity is still known; every other class keeps the HTTP path.
    A context overflow carries no token limit in the envelope. Arrears, an
-   exhausted package, an expired plan or a spent usage window (1113, 1304,
+   exhausted package, an expired plan or a spent usage window (1113,
    1308-1311, 1313, 1314, 1316-1321) take the hard-quota route. The usage
    window codes state their reset only inside the message prose, which is not
    parsed; the failure carries only the wait the response stated elsewhere
@@ -286,7 +284,7 @@ let%test "glm quota envelopes promote to hard quota" =
                 ; _
                 }) -> false)
       | None -> false)
-    [ "1113"; "1304"; "1308"; "1309"; "1310"; "1311"; "1313"; "1314"; "1316"; "1317"
+    [ "1113"; "1308"; "1309"; "1310"; "1311"; "1313"; "1314"; "1316"; "1317"
     ; "1318"; "1319"; "1320"; "1321" ]
 ;;
 
@@ -677,8 +675,8 @@ let%test "classify auth from code 1001" =
   classify_glm_error ~code:"1001" = Glm_auth_error
 ;;
 
-let%test "classify quota from code 1304 (daily limit)" =
-  classify_glm_error ~code:"1304" = Glm_quota_exceeded
+let%test "code 1304, absent from both code tables, names no quota" =
+  classify_glm_error ~code:"1304" <> Glm_quota_exceeded
 ;;
 
 let%test "classify quota from code 1308 (usage limit)" =

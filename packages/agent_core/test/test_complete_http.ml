@@ -779,6 +779,7 @@ let test_glm_throttle_and_unknown_codes_keep_the_status () =
               (refusal_on ~seam body))
          [ "code 1302 is a throttle", glm_refusal_body "1302"
          ; "an undocumented code names nothing", glm_refusal_body "1399"
+         ; "1304, in neither Z.AI code table, names nothing", glm_refusal_body "1304"
          ; "a body without a code names nothing", {|{"error":{"message":"busy"}}|}
          ; "a bare error string names nothing", {|{"error":"busy"}|}
          ];

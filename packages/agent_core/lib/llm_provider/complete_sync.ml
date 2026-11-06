@@ -432,7 +432,7 @@ let%test "glm quota exhaustion is a typed hard quota" =
                | Http_client.Unknown_provider_failure _ )
            ; _
            }) -> false)
-    [ "1113"; "1304"; "1308"; "1309"; "1310"; "1311"; "1313" ]
+    [ "1113"; "1308"; "1309"; "1310"; "1311"; "1313" ]
 ;;
 
 let%test "glm rate limit stays an http 429" =

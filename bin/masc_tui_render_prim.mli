@@ -800,5 +800,6 @@ val runtime_substrate_heading :
 (** The title row of [System / Runtime] ([Candidate orders] and [All runtimes]),
     [Features] and [Clients]: [title], the clickable tab strip the three share,
     the pieces of [after] (each carrying its own leading gap) and the connection
-    badge last. The badge stays whole, the pieces of [after] are left out whole
-    from the end, and the strip draws in the cells they leave. *)
+    badge last. The badge stays whole, every piece of [after] is whole or left
+    out (from the end, never cut), and the strip draws in the cells they
+    leave. *)

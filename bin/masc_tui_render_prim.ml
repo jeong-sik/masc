@@ -6143,7 +6143,12 @@ let runtime_substrate_tabs (state : state)
    what they leave. The strip is whole or it is not drawn, and a strip that
    draws nothing takes its separator with it. Each row used to hand the strip
    the cells that were left after [after] and drew the row with [box_line],
-   which cut the badge when [after] alone was wider than the row. *)
+   which cut the badge when [after] alone was wider than the row.
+
+   [detail_heading] keeps the first piece of [after] and cuts it at its end
+   when it does not fit, which leaves a clock as "1…". A reading time is no
+   use cut, so an empty piece goes first: every real piece is then whole or
+   left out. *)
 let runtime_substrate_heading (state : state) ~cols ~title ~current ~after =
   let tabs = runtime_substrate_tabs state ~current in
   let cells text =
@@ -6160,4 +6165,4 @@ let runtime_substrate_heading (state : state) ~cols ~title ~current ~after =
                if room < tab_strip_min_width tabs then title
                else before ^ tab_strip ~width:room ~press:pressable tabs)
          })
-    ~id:"" ~after ~tail:(connection_badge state)
+    ~id:"" ~after:("" :: after) ~tail:(connection_badge state)

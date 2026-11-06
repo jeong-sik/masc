@@ -745,7 +745,8 @@ let emails_for_the_overview () =
    hand-kept spellings on both sides stay in step. *)
 let server_email_rows_round_trip () =
   let module Email = Runtime_account_email in
-  let email = match Email.of_string "operator@example.com" with Some email -> email | None -> fail "fixture" in
+  let email = match Runtime_account_email_text.of_string "operator@example.com" with
+    | Some email -> email | None -> fail "fixture" in
   List.iter (fun (server, expected) ->
     let fields = match inventory with `Assoc fields -> List.remove_assoc "account_emails" fields | _ -> [] in
     let t = Login.create "" in

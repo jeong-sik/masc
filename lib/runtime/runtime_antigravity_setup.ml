@@ -1,12 +1,15 @@
 type t = Runtime_antigravity_home.t
 type error = Private_home_unavailable | Sign_in_required | Unsafe_credential
-  | Unrecognized_credential | Command_failed | Invalid_catalog | Keychain_unavailable
+  | Unrecognized_credential | Unrecognized_managed_credential | Command_failed | Invalid_catalog
+  | Keychain_unavailable
 let error_message = function
   | Private_home_unavailable -> "Antigravity's private account directory is unavailable."
   | Sign_in_required -> "Sign in with the official Antigravity CLI, then continue setup."
   | Unsafe_credential -> "The selected Antigravity credential is not a private owned file."
   | Unrecognized_credential ->
-    "The selected Antigravity credential names no account in a login file shape masc reads."
+    "The selected Antigravity login is not in a login shape masc reads."
+  | Unrecognized_managed_credential ->
+    "The private Antigravity account's saved login is not in a login shape masc reads. No other account was selected."
   | Command_failed -> "The official Antigravity account command did not complete."
   | Invalid_catalog -> "The official Antigravity model catalog has an unsupported response format."
   | Keychain_unavailable -> "The selected Antigravity keychain could not be read or its private account could not be switched. Unlock that account and retry; no fallback account was selected."
@@ -14,15 +17,16 @@ open Result.Syntax
 let prepare ~runtime_root ~account_id =
   Runtime_antigravity_home.prepare_for_login ~runtime_root ~owner_leaf:account_id
   |> Result.map_error (fun _ -> Private_home_unavailable)
+let credential_file_error = function
+  | Runtime_antigravity_home.Invalid_oauth_source _ -> Unsafe_credential
+  | Unrecognized_oauth_source _ -> Unrecognized_credential
+  | Unrecognized_managed_oauth _ | Unrecognized_managed_keychain _ -> Unrecognized_managed_credential
+  | Invalid_runtime_root _ | Invalid_owner_leaf _ | Unsafe_directory _ | Invalid_managed_oauth _
+  | Settings_write_failed _ | Mcp_config_write_failed _ | Mcp_config_cleanup_failed _ ->
+    Private_home_unavailable
 let prepare_from_credential_file ~runtime_root ~account_id ~oauth_source =
   Runtime_antigravity_home.prepare ~runtime_root ~owner_leaf:account_id ~oauth_source
-  |> Result.map_error (function
-    | Runtime_antigravity_home.Invalid_oauth_source _ -> Unsafe_credential
-    | Unrecognized_oauth_source _ -> Unrecognized_credential
-    | Invalid_runtime_root _ | Invalid_owner_leaf _ | Unsafe_directory _ | Invalid_managed_oauth _
-    | Unrecognized_managed_oauth _
-    | Settings_write_failed _ | Mcp_config_write_failed _ | Mcp_config_cleanup_failed _ ->
-      Private_home_unavailable)
+  |> Result.map_error credential_file_error
 let home_dir = Runtime_antigravity_home.home_dir
 let environment home = Runtime_antigravity.official_client_environment ~home_dir:(home_dir home) ()
 let private_file path =
@@ -48,7 +52,14 @@ let import_with ~read_keychain ~clear_keychain ~source_home home =
   let* exists = keychain_present source_keychain in
   let selected = if exists then read_keychain ~path:source_keychain else Apple_keychain.Missing in
   let* contents = match selected with
-    | Apple_keychain.Found contents -> Ok contents
+    | Apple_keychain.Found value ->
+      (* The fallback file holds the login JSON; the keychain holds
+         go-keyring's encoding of it. A blank login is no sign-in, as a blank
+         fallback file is. *)
+      (match Runtime_antigravity_oauth_credential.login_of_keychain_value value with
+       | Some login when String.trim login = "" -> Error Sign_in_required
+       | Some login -> Ok login
+       | None -> Error Unrecognized_credential)
     | Unavailable -> Error Keychain_unavailable
     | Missing | Unsupported ->
       let* file = private_file (canonical_file source_home) in
@@ -66,6 +77,7 @@ let import_signed_in ~source_home home =
   import_with ~read_keychain:Apple_keychain.read ~clear_keychain:Apple_keychain.clear ~source_home home
 module For_testing = struct
   let import_with = import_with
+  let credential_file_error = credential_file_error
 end
 let capture_login home = import_signed_in ~source_home:(home_dir home) home
 let credential_reference home =

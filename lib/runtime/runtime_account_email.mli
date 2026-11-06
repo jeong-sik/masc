@@ -14,14 +14,7 @@
       or [id_token_email] (agy 1.5.x, key names read on 2026-11-06); a file
       with both is [Source_unrecognized] *)
 
-type t = private string
-
-val max_bytes : int
-(** 254, the longest forward path RFC 5321 section 4.5.3.1.3 admits. *)
-
-val of_string : string -> t option
-(** Valid UTF-8 of 1 to [max_bytes] bytes with no ASCII space or control
-    byte. Anything else is not displayable email text. *)
+type t = Runtime_account_email_text.t
 
 val to_string : t -> string
 
@@ -29,7 +22,7 @@ type missing =
   | Source_unavailable  (** the login file could not be read *)
   | Source_unrecognized  (** not the document shape this reader knows *)
   | Not_reported  (** the document names no email for this account *)
-  | Invalid_email  (** the reported value fails {!of_string} *)
+  | Invalid_email  (** the reported value fails {!Runtime_account_email_text.of_string} *)
   | Environment_credential
       (** the client is given a credential it uses before its login file's
           account, so that file's email is not the account it runs on *)

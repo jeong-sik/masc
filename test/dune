@@ -5328,6 +5328,7 @@
  (libraries
   alcotest
    masc.agent_core.digest
+  masc.fs_compat
   masc
   masc_server
   masc.keeper_registry

@@ -7207,7 +7207,7 @@ module Browser_lane_view = struct
              ; tab_id; view = Masc.Workspace_dataset_event.Viewport }
     | (Some _ | None),
       (None | Some
-        ( Discover _ | Read | Open_session | Close_session | Goto _ | Screenshot _ | Read_refresh
+        ( Discover _ | Read | Goto _ | Screenshot _ | Read_refresh
         | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_scroll _ | Scene_focus _
         | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _
         | Viewport_cadence _ | Viewport_pointer _ )) -> None

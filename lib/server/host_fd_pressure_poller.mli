@@ -38,3 +38,6 @@ val start : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> base_path:string -> uni
 (** [start ~sw ~clock ~base_path] forks the poller fiber under [sw]. Wired from
     [Server_bootstrap_loops.start_background_maintenance]. Cancelled
     when [sw] terminates. *)
+
+val state_filename : string
+(** The default state file below [<base>/.masc]. *)

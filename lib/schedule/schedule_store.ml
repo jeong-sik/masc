@@ -245,15 +245,17 @@ let read_error_to_string = function
    persisted [updated_at] value instead of recomputing it. *)
 let now () = Unix.gettimeofday ()
 
+let schedules_filename = "schedules.json"
+
 let schedules_path config =
-  Filename.concat (Workspace_utils.masc_dir config) "schedules.json"
+  Filename.concat (Workspace_utils.masc_dir config) schedules_filename
 ;;
 
 let with_ledger_lock config f =
   Workspace_utils.with_file_lock config (schedules_path config) f
 ;;
 
-let recovery_path config = schedules_path config ^ ".last-good"
+let recovery_path config = schedules_path config ^ Common.recovery_mirror_suffix
 
 let ensure_dirs config = Workspace_utils.mkdir_p (Workspace_utils.masc_dir config)
 

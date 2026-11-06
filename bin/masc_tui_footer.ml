@@ -779,6 +779,32 @@ let rec fit_body ?literal_prefix ?action_text ?position ~max_cells ~conflicts ~h
        if room <= 0 then Masc_tui_message_layout.fit_width rendered max_cells
        else Masc_tui_message_layout.fit_width rendered room ^ more_key)
 
+(** What the caller would rather the notice slot said than [action_text],
+    once it has resolved priority.
+
+    An [Outcome] says what the last key did or why it did nothing. It replaces
+    [action_text] only when it fits whole beside the conflicts and the pinned
+    keys.
+
+    A [Pending_question] is one that a single further key answers, such as the
+    quit confirmation. It is the only thing on the row the next keypress can
+    lose, so it leads the row as an armed Keeper action does ({!conflict_order}):
+    the notices and the keys that can be dropped give way to it. It is drawn
+    beside the pinned keys and the cut marker, or alone when even those do not
+    fit, or not at all, and then [action_text] stands. The mark turns a drawn
+    text into a press target and is applied only to a text that is drawn. *)
+type preferred_action =
+  | Outcome of string * (string -> string)
+  | Pending_question of string * (string -> string)
+
+(** Where a [Pending_question] goes on the row, decided once from the widths:
+    in front of the notices and the keys that can be dropped, on a row of its
+    own where it fits beside nothing else, or nowhere. *)
+type question_place =
+  | Leads_the_row of projected_status
+  | Alone of string
+  | Not_drawn
+
 (** [line ~dim ~reset ~max_cells ~hints] is one footer line, terminated by a
     newline. A diagnostic caller can explicitly supply [port]; normal working
     surfaces keep connection identity on System.
@@ -796,36 +822,72 @@ let rec fit_body ?literal_prefix ?action_text ?position ~max_cells ~conflicts ~h
 
     A conflict notice is the exception: it is rendered in front of the hints
     ({!leads_the_row}) rather than left in the tail, so it outlives the keys
-    instead of going before them. *)
+    instead of going before them.
+
+    [preferred_action] is the caller's choice for the notice slot once it has
+    resolved priority; {!preferred_action} says what each kind does. *)
 let line ?literal_prefix ?action_text ?preferred_action ?position ?(status = []) ?port ~dim ~reset
     ~max_cells ~hints () =
+  let max_cells = max 0 max_cells in
   let hints = prepare_hints hints in
   let statuses =
     List.filter_map status_item_projection
       (status @ Option.to_list (Option.map (fun port -> Port port) port))
   in
   let conflicts, statuses = List.partition leads_the_row statuses in
-  let conflicts =
-    drawable_conflicts ?literal_prefix ~max_cells:(max 0 max_cells) ~hints
-      (ordered_conflicts conflicts)
+  (* A question is drawn where it fits whole: beside the keys that cannot be
+     dropped and the mark that says the row was cut (the narrowest row the
+     fitter can carry, as in [without_a_blocking_conflict]), or alone on the
+     row. Where neither holds the caller's [action_text] says why. The mark is
+     applied only to a text that is drawn. *)
+  let beside_the_pinned_keys text =
+    Masc_tui_message_layout.display_width
+      (with_position position
+         ("  "
+          ^ String.concat "  "
+              ((text :: Option.to_list literal_prefix) @ undroppable_keys hints))
+       ^ "  " ^ cut_marker)
+    <= max_cells
   in
-  (* The caller offers a preferred action only after resolving priority. It
-     replaces the fallback here only when it fits whole. The marker is added
-     after fitting so a clipped marker cannot count as complete evidence. *)
-  let action_text = match preferred_action with
-    | None -> action_text
-    | Some (text, mark) ->
+  let alone text = Masc_tui_message_layout.display_width ("  " ^ text) <= max_cells in
+  let place =
+    match preferred_action with
+    | Some (Pending_question (text, mark)) ->
+      if beside_the_pinned_keys text then
+        Leads_the_row { text = mark text; retention = Armed_action; shorter = [] }
+      else if alone text then Alone (mark text)
+      else Not_drawn
+    | Some (Outcome _) | None -> Not_drawn
+  in
+  let fit_row question =
+    let conflicts =
+      drawable_conflicts ?literal_prefix ~max_cells ~hints
+        (ordered_conflicts (Option.to_list question @ conflicts))
+    in
+    (* The caller offers an outcome only after resolving priority. It replaces
+       the fallback here only when it fits whole. The marker is added after
+       fitting so a clipped marker cannot count as complete evidence. *)
+    let action_text =
+      match question, preferred_action with
+      | Some _, _ -> None
+      | None, Some (Outcome (text, mark)) ->
         let prefix = String.concat "  " (Option.to_list literal_prefix @ [text]) in
         (match fit_with_conflicts ~literal_prefix:prefix ?position ~mark_omission:false
-                 ~max_cells:(max 0 max_cells) ~conflicts ~hints
-                 ~omissions:omission_order statuses with
+                 ~max_cells ~conflicts ~hints ~omissions:omission_order statuses with
          | Some _ -> Some (mark text)
-         | None -> action_text) in
-  let fitted =
-    fit_body ?literal_prefix ?action_text ?position ~max_cells:(max 0 max_cells)
-      ~conflicts ~hints ~omissions:omission_order statuses
+         | None -> action_text)
+      | None, (Some (Pending_question _) | None) -> action_text
+    in
+    let fitted =
+      fit_body ?literal_prefix ?action_text ?position ~max_cells
+        ~conflicts ~hints ~omissions:omission_order statuses
+    in
+    Printf.sprintf "%s%s%s\n" dim fitted reset
   in
-  Printf.sprintf "%s%s%s\n" dim fitted reset
+  match place with
+  | Alone drawn -> Printf.sprintf "%s  %s%s\n" dim drawn reset
+  | Leads_the_row question -> fit_row (Some question)
+  | Not_drawn -> fit_row None
 
 (** The chat pane's key hints, with the fixed keys owned here beside the
     fitting machinery. The pane supplies only the holes it alone can answer:

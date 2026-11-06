@@ -489,6 +489,114 @@ let test_a_malformed_settling_listing_does_not_prove_reclamation () =
   Alcotest.(check int) "verdict, confirmation, and settling inventories were read" 3 !listings
 ;;
 
+(* The tool answer and its reader share Keeper_volume_gc_answer. A reader
+   branches on [outcome_kind], so the kind has to come back as written, and
+   the sentence stays only for display. *)
+module Answer = Masc.Keeper_volume_gc_answer
+
+let answer_after ~execute =
+  let volumes =
+    {|["masc-keeper-build-retired","masc-keeper-work-registered","unrelated-volume"]|}
+  in
+  let call =
+    scripted_gc ~volumes ~containers:"[]"
+      ~claims:(fun _ -> Unix.WEXITED 0, "[]\n", "")
+      ~delete_answers:[] ()
+  in
+  let report, _sent = call ~registered:(fun name -> String.equal name "registered") ~execute () in
+  Answer.of_report ~executed:execute ~image_given:true report
+;;
+
+let kind_name = function
+  | Answer.Kept -> "kept"
+  | Answer.Reclaim_candidate -> "reclaim_candidate"
+  | Answer.Reclaimed -> "reclaimed"
+  | Answer.Reclaim_failed -> "reclaim_failed"
+;;
+
+let kinds (answer : Answer.t) =
+  List.map
+    (fun (verdict : Answer.verdict) -> verdict.Answer.keeper_name, kind_name verdict.Answer.kind)
+    answer.Answer.keepers
+  |> List.sort compare
+;;
+
+let summary_counts (summary : Answer.summary) =
+  [ summary.Answer.kept; summary.reclaim_candidates; summary.reclaimed; summary.reclaim_failed ]
+;;
+
+let test_the_answer_reads_back_what_the_tool_writes () =
+  List.iter
+    (fun (execute, retired_kind, counts) ->
+       let written = answer_after ~execute in
+       let json = Answer.to_json written in
+       let read = ok_exn (Answer.of_json json) in
+       Alcotest.(check bool) "executed comes back" execute read.Answer.executed;
+       Alcotest.(check bool) "image_given comes back" true read.Answer.image_given;
+       Alcotest.(check (list string)) "a foreign volume comes back"
+         [ "unrelated-volume" ] read.Answer.foreign_volumes;
+       Alcotest.(check (list (pair string string))) "every keeper comes back with its kind"
+         [ "registered", "kept"; "retired", retired_kind ]
+         (kinds read);
+       Alcotest.(check (list int)) "the summary counts the kinds" counts
+         (summary_counts (Answer.summary read));
+       let retired =
+         List.find (fun (v : Answer.verdict) -> String.equal v.Answer.keeper_name "retired")
+           read.Answer.keepers
+       in
+       Alcotest.(check (option string)) "the build volume comes back"
+         (Some "masc-keeper-build-retired") retired.Answer.build_volume;
+       Alcotest.(check (option string)) "an absent work volume is null"
+         None retired.Answer.work_volume)
+    [ false, "reclaim_candidate", [ 1; 1; 0; 0 ]
+    ; true, "reclaimed", [ 1; 0; 1; 0 ] ]
+;;
+
+let map_object f = function
+  | `Assoc fields -> `Assoc (f fields)
+  | _ -> Alcotest.fail "the answer is an object"
+;;
+
+let replace name value fields =
+  List.map (fun (key, old) -> key, if String.equal key name then value else old) fields
+;;
+
+let map_first_keeper f =
+  map_object (fun fields ->
+    List.map
+      (fun (key, value) ->
+         if String.equal key "keepers"
+         then (
+           match value with
+           | `List (first :: rest) -> key, `List (map_object f first :: rest)
+           | _ -> Alcotest.fail "the answer has a keeper")
+         else key, value)
+      fields)
+;;
+
+let test_the_answer_reader_refuses_what_it_cannot_trust () =
+  let json = Answer.to_json (answer_after ~execute:false) in
+  let refused label broken =
+    match Answer.of_json broken with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.failf "%s is refused" label
+  in
+  refused "an unknown field" (map_object (fun fields -> fields @ [ "extra", `Bool true ]) json);
+  refused "a missing summary"
+    (map_object (List.filter (fun (key, _) -> not (String.equal key "summary"))) json);
+  refused "a summary that disagrees with the keepers"
+    (map_object
+       (replace "summary"
+          (`Assoc
+              [ "kept", `Int 0; "reclaim_candidates", `Int 2; "reclaimed", `Int 0
+              ; "reclaim_failed", `Int 0 ]))
+       json);
+  refused "an unknown outcome kind"
+    (map_first_keeper (replace "outcome_kind" (`String "deleted")) json);
+  refused "a blank keeper name" (map_first_keeper (replace "keeper_name" (`String " ")) json);
+  refused "a blank volume name" (map_first_keeper (replace "build_volume" (`String "")) json)
+;;
+
 let () =
   Alcotest.run
     "keeper_volume_gc"
@@ -517,6 +625,12 @@ let () =
             test_a_malformed_initial_listing_never_starts_reclamation
         ; Alcotest.test_case "a malformed settling listing does not prove reclamation" `Quick
             test_a_malformed_settling_listing_does_not_prove_reclamation
+        ] )
+    ; ( "answer"
+      , [ Alcotest.test_case "the answer reads back what the tool writes" `Quick
+            test_the_answer_reads_back_what_the_tool_writes
+        ; Alcotest.test_case "the answer reader refuses what it cannot trust" `Quick
+            test_the_answer_reader_refuses_what_it_cannot_trust
         ] )
     ]
 ;;

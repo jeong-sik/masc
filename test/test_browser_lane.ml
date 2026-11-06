@@ -86,8 +86,7 @@ let test_worker_held_client_outlives_the_poll_window () = with_clients (fun sw c
   and held = connect ~transport:Lane.Webdriver_bidi Lane.Zen
   and extension = connect Lane.Firefox in
   let live (info : Lane.client_info) = match target info.client_id with
-    | Lane.Live_client client -> client
-    | Lane.Automation -> fail "expected live target" in
+    | Lane.Live_client client -> client in
   let polled_client = live polled and held_client = live held in
   let is_held () = match held_client.liveness with Lane.Worker_held -> true | Lane.Polled _ -> false in
   check bool "the worker holds its own connected client" true (Lane.hold_client ~client_id:held.client_id = Ok ());
@@ -117,7 +116,7 @@ let test_worker_held_client_outlives_the_poll_window () = with_clients (fun sw c
 let test_expired_resolved_target_is_pre_dispatch () = with_clients (fun _ connect ->
   let info = connect Lane.Firefox in
   let pinned = target info.client_id in
-  let client = match pinned with Lane.Live_client client -> client | Lane.Automation -> fail "expected live target" in
+  let client = match pinned with Lane.Live_client client -> client in
   (* Expire the captured target between resolution and issue, without sleeps
      or a clock-dependent scheduling race. No command has been dispatched. *)
   client.liveness <- Lane.Polled (Monotonic_deadline.after ~seconds:0.);
@@ -213,10 +212,7 @@ let test_sources_and_live_policy () = with_clients (fun _ connect ->
     (Lane.issue_for_actor ~actor:None ~target:(target client.client_id) ~verb:(Lane.Page_goto {url="https://example.org";tab_id=Some 2})
        ~timeout_sec:0.1
      = Error (Lane.Transport_unsupported
-         {client_id=client.client_id; transport=client.transport; capability=Lane.Tab_navigation}));
-  Lane.install_automation_executor None;
-  check bool "automation still needs its native executor" true
-    (Lane.issue_automation ~verb:Lane.Tabs_list ~timeout_sec:0.1 = Lane.Lane_absent))
+         {client_id=client.client_id; transport=client.transport; capability=Lane.Tab_navigation})))
 
 (* One live verb for each capability, so a capability added to the lane has
    to be given a verb here before this file's table checks pass. *)
@@ -297,8 +293,7 @@ let test_unserved_work_queues_nothing () = with_clients (fun sw connect ->
   Eio.Switch.on_release sw (fun () -> ignore (Lane.disconnect_client ~client_id:ego.client_id));
   List.iter (fun (info : Lane.client_info) ->
     let selected = target info.client_id in
-    let client = match selected with Lane.Live_client client -> client
-      | Lane.Automation -> fail "expected live target" in
+    let client = match selected with Lane.Live_client client -> client in
     List.iter (fun capability ->
       let verb = verb_asking_for capability in
       let name = Lane.live_transport_to_string info.transport ^ " " ^ Lane.live_capability_to_wire capability in
@@ -339,8 +334,7 @@ let test_unserved_work_queues_nothing () = with_clients (fun sw connect ->
   answered document "document")
 
 (* A successful answer states its connection through one function: a live
-   browser's client ID and transport, a null client for the server's own
-   browsers. Where an answer is rebuilt around those fields, a value the page
+   browser's client ID and transport. Where an answer is rebuilt around those fields, a value the page
    or browser supplied under the same names is dropped. *)
 let test_answers_state_their_connection () = with_clients (fun sw connect ->
   let extension = connect Lane.Firefox in
@@ -353,37 +347,30 @@ let test_answers_state_their_connection () = with_clients (fun sw connect ->
   check bool "an extension answer names its client and its transport" true
     (stated extension = expected extension "web_extension");
   check bool "a BiDi answer names its own" true (stated bidi = expected bidi "webdriver_bidi");
-  check bool "the server's own browser has no client and no transport" true
-    (Lane.target_connection_fields Lane.Automation = ["clientId", `Null]);
   let supplied = ["transport", `String "carrier_pigeon"; "tabId", `Int 2; "clientId", `String "forged";
     "browserSpace",`Assoc ["id",`Int 999;"name",`String "forged"]] in
   check bool "a value supplied under those names is replaced, not kept beside the route's" true
     (Lane.with_connection_fields (target bidi.client_id) supplied = expected bidi "webdriver_bidi" @ ["tabId", `Int 2]);
-  check bool "also for the server's own browsers" true
-    (Lane.with_connection_fields Lane.Automation supplied = ["clientId", `Null; "tabId", `Int 2]);
   (* A holder that keeps only checked fields reads back exactly what was
      stated, and refuses half a live connection. *)
   List.iter (fun (name, written) ->
     check bool (name ^ " reads back as written") true
       (Lane.connection_fields_of_json (written @ ["tabId", `Int 2]) = Ok written))
     ["an extension connection", stated extension; "a BiDi connection", stated bidi;
-     "the server's own browser", Lane.target_connection_fields Lane.Automation;
      "an answer that states no connection", []];
   let client_id = `String (Lane.client_id_to_string bidi.client_id) in
   List.iter (fun (name, fields, expected) ->
     check (result reject string) name (Error expected) (Lane.connection_fields_of_json fields))
     ["a client without its transport", ["clientId", client_id], "client_without_transport";
      "a transport without its client", ["transport", `String "webdriver_bidi"], "invalid_connection_fields";
-     "a transport on the server's own browser",
+     "a transport on a null client",
      ["clientId", `Null; "transport", `String "webdriver_bidi"], "invalid_connection_fields";
      "a transport no connection has",
      ["clientId", client_id; "transport", `String "carrier_pigeon"], "unsupported_browser_transport";
      "a client that is not an ID",
      ["clientId", `String "forged"; "transport", `String "webdriver_bidi"], "invalid_client_id";
      "a client of another JSON type", ["clientId", `Int 7], "invalid_connection_fields"];
-  (* The live optional document read attaches the same fields. The automation
-     lane's keeps the session ID its own observer wrote, which the document
-     source requires. *)
+  (* The live optional document read attaches the same fields. *)
   let document = Eio.Fiber.fork_promise ~sw (fun () ->
     Lane.issue_document_if_idle ~target:(target bidi.client_id) ~tab_id:2 ~timeout_sec:1.) in
   let command = take bidi in
@@ -415,7 +402,7 @@ let test_optional_document_preserves_existing_work () = with_clients (fun sw con
   let primary = Eio.Fiber.fork_promise ~sw (fun () ->
     Lane.issue_for_actor ~actor:None ~target:selected ~verb:Lane.Tabs_list ~timeout_sec:1.) in
   let primary_command = take info in
-  let client = match selected with Lane.Live_client client -> client | Lane.Automation -> fail "live target expected" in
+  let client = match selected with Lane.Live_client client -> client in
   check bool "optional observation refuses while primary request waits" true
     (Lane.issue_document_if_idle ~target:selected ~tab_id:1 ~timeout_sec:1.
        = Ok (Lane.Refused "optional_document_observation_busy"));
@@ -442,8 +429,7 @@ let test_optional_document_preserves_existing_work () = with_clients (fun sw con
 let test_inventory_does_not_prune () = with_clients (fun sw connect ->
   let info = connect Lane.Firefox in
   let selected = target info.client_id in
-  let client = match selected with Lane.Live_client client -> client
-    | Lane.Automation -> fail "expected live target" in
+  let client = match selected with Lane.Live_client client -> client in
   let pending = Eio.Fiber.fork_promise ~sw (fun () ->
     Lane.issue_for_actor ~actor:None ~target:selected ~verb:Lane.Tabs_list ~timeout_sec:1.) in
   ignore (take info);
@@ -620,9 +606,8 @@ let test_native_control_wait_contract () =
   check bool "native wait owns its reply clock" true (Lane.ego_reply_policy verb=Lane.Executor_owned);
   check string "wait activity names the Space operation" "wait_for_control" (Lane.activity_name verb);
   check (option int) "wait has Space scope" None (Lane.activity_scope verb);
-  check bool "other browser backends refuse Space waits" true
-    (Option.is_some (Lane.automation_refusal verb)
-      && not (Lane.live_transport_serves Lane.Web_extension Lane.Operator_handoff)
+  check bool "other live transports refuse Space waits" true
+    (not (Lane.live_transport_serves Lane.Web_extension Lane.Operator_handoff)
       && not (Lane.live_transport_serves Lane.Webdriver_bidi Lane.Operator_handoff));
   List.iter (fun fields -> check bool "invalid wait input fails before dispatch" true
     (Result.is_error (parse fields)))
@@ -646,8 +631,7 @@ let test_native_page_management_contract () =
       (Lane.live_capability verb=Some Lane.Page_management
         && Lane.live_transport_serves Ego_task_space Page_management
         && not (Lane.live_transport_serves Webdriver_bidi Page_management)
-        && not (Lane.live_transport_serves Web_extension Page_management)
-        && not (Lane.verb_allowed_on_automation verb)))
+        && not (Lane.live_transport_serves Web_extension Page_management)))
     [Lane.Action.Control (Adopt_tab {tab_id=2;label=None});Control (Adopt_tab {tab_id=2;label=Some "login"});Control (Release_tab 2)];
   List.iter (fun (action,fields) -> check bool "invalid lifecycle input is refused" true
     (Result.is_error (parse action fields)))
@@ -657,8 +641,47 @@ let test_native_page_management_contract () =
      "adopt_tab",["tabId",`Int 2;"tabId",`Int 3];
      "release_tab",["tabId",`Int 2;"pageLabel",`String "login"]]
 
+let test_action_parser () =
+  let valid = `Assoc ["action",`String "upload";"tabId",`Int 2;"selector",`String "#name";"paths",`List [`String "a.txt"]] in
+  (match Lane.Action.parse valid with Ok action -> check bool "round trip" true (Lane.Action.parse (Lane.Action.to_json action)=Ok action) | Error e -> fail e);
+  let opener = `Assoc ["action",`String "upload";"tabId",`Int 2;"opener",`String "#attach";"paths",`List [`String "a.txt"]] in
+  (match Lane.Action.parse opener with
+   | Ok (Lane.Action.On_tab {interaction=Lane.Action.Upload {target=Lane.Action.Chooser_opener "#attach";_};_} as action) ->
+     check bool "an opener round trips" true (Lane.Action.parse (Lane.Action.to_json action)=Ok action)
+   | Ok _ -> fail "an opener was read as another target" | Error e -> fail e);
+  List.iter (fun fields -> check bool "invalid action rejected" true (Result.is_error (Lane.Action.parse (`Assoc fields))))
+    [["action",`String "click";"tabId",`Int 1;"selector",`String "button"];
+     ["action",`String "fill";"tabId",`Int 1;"selector",`String "#name";"text",`String ""];
+     ["action",`String "press";"tabId",`Int 1;"selector",`String "#name";"key",`String "Enter"];
+     ["action",`String "select";"tabId",`Int 1;"selector",`String "select";"value",`String "x"];
+     ["action",`String "scroll";"tabId",`Int 1;"x",`Int 0;"y",`Int 1];
+     ["action",`String "upload";"tabId",`Int 1;"selector",`String "";"paths",`List [`String "a.txt"]];
+     ["action",`String "upload";"tabId",`Int 1;"opener",`String " ";"paths",`List [`String "a.txt"]];
+     ["action",`String "upload";"tabId",`Int 1;"selector",`String "#f";"opener",`String "#b";"paths",`List [`String "a.txt"]];
+     ["action",`String "upload";"tabId",`Int 1;"paths",`List [`String "a.txt"]];
+     ["action",`String "reload";"tabId",`Int 1;"text",`String "ignored?"];
+     ["action",`String "reload";"tabId",`Int 1;"tabId",`Int 2]]
+let test_action_context_arguments () =
+  let valid action args = `Assoc (["action",`String action;"tabId",`Int 1] @ args) in
+  List.iter (fun input -> match Lane.Action.parse input with
+    | Ok action -> check bool "context round trip" true (Lane.Action.parse (Lane.Action.to_json action) = Ok action)
+    | Error detail -> fail detail)
+    [valid "upload" ["selector",`String "#apply";"paths",`List [`String "a.txt"];"framePath",`List [`String "iframe";`String "#nested"]];
+     valid "accept_dialog" ["text",`String "한글"];
+     valid "dismiss_dialog" [];
+     valid "upload" ["selector",`String "input";"paths",`List [`String "relative.txt"]];
+     valid "upload" ["selector",`String "input";"paths",`List [`String "/fixture/file.txt"]]];
+  List.iter (fun input -> check bool "invalid context rejected" true (Result.is_error (Lane.Action.parse input)))
+    [valid "upload" ["selector",`String "input";"paths",`List [`String "a.txt"];"framePath",`List [`Int 1]];
+     valid "upload" ["selector",`String "input";"paths",`List [`String "a.txt"];"framePath",`List [`String ""]];
+     valid "accept_dialog" ["framePath",`List [`String "iframe"]];
+     valid "upload" ["selector",`String "input";"paths",`List []];
+     valid "upload" ["selector",`String "input";"paths",`List [`String "/file\n/other"]]]
+
 let () = run "browser client routing" ["ownership", [
   test_case "native Page management retains exact tab binding" `Quick test_native_page_management_contract;
+  test_case "actions are parsed before effects" `Quick test_action_parser;
+  test_case "context and file arguments are explicit" `Quick test_action_context_arguments;
   test_case "native Space wait keeps SDK ownership and options" `Quick test_native_control_wait_contract;
   test_case "reads retain caller, scope and settled results" `Quick test_read_activity;
   test_case "agent activity follows queue ownership and cleanup" `Quick test_agent_activity;

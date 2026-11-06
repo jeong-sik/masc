@@ -38,16 +38,6 @@ val generate : t -> Lane_addon_exact.request ->
   (Browser_addon_models.outcome, Browser_addon_models.error) result
 (** An original browser command owns the waiting scope. Cancellation withdraws
     its model request. Never hold the admission lock while waiting. *)
-val attach_automation : t -> locate:bool -> execute:(Browser_lane.verb -> Browser_lane.answer) ->
-  session:(unit -> Browser_lane.session_observation) ->
-  document:(tab_id:int -> Browser_lane.answer) ->
-  cleanup:(unit -> (unit, string) result) -> (unit, string) result
-(** Publish a ready worker-owned backend. Revocation removes all three callbacks
-    before resource teardown. A retired owner cannot acquire a backend. Retire
-    fences the backend, starts its cleanup and waits for it before answering.
-    Each attached cleanup runs once; concurrent or repeated Retire requests
-    observe the same result. An error or exception from a cleanup prevents a
-    successful retirement receipt. *)
 type ego_space = {
   space_observation : unit -> Browser_ego_space_observation.t option;
   space_presence : unit -> Browser_ego_space_observation.presence;

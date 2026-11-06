@@ -63,7 +63,7 @@ let rejections () =
     (Result.is_error (decode "page.act" ["action",`String "wait_for_control";
       "controlOptions",`Assoc ["timeout",`Int 1;"timeout",`Int 2]]));
   check bool "nested action route cannot override selected browser" true
-    (Result.is_error (decode "page.act" ["action",`String "open_tab";"url",`String "https://example.org";"lane",`String "automation"]));
+    (Result.is_error (decode "page.act" ["action",`String "open_tab";"url",`String "https://example.org";"lane",`String "live"]));
   check bool "nested action client cannot conflict" true
     (Result.is_error (decode "page.act" ["action",`String "open_tab";"url",`String "https://example.org";"clientId",`String (B.client_id_to_string id)]));
   check bool "duplicate verb rejected" true (Result.is_error (W.verb_of_json ~route

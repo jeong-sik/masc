@@ -29,9 +29,7 @@ type snapshot_failure = Snapshot_unavailable of string | Snapshot_unreadable of 
 (** The worker gave no snapshot, or gave one the host cannot decode. *)
 val selection_snapshot : t -> (Browser_addon_observation.published * Browser_selection.snapshot, snapshot_failure) result
 (** Every service's [Snapshot] reply, asked side by side, merged as the host
-    chooses from it: nonconflicting live clients of every live service,
-    and automation as its own
-    service answered. A
+    chooses from it: nonconflicting live clients of every live service. A
     service that did not answer is left out of this choice only; no answer
     at all is the failure. A worker answers only while it serves, so a live
     lane it reports is on. A lost reply leaves the worker serving
@@ -84,8 +82,7 @@ val issue : ?goal_space:Browser_goal_space.t -> ?upload_paths:string list -> ?re
     effect. *)
 
 (** [upload_paths] must be an exact pending host snapshot batch, not caller
-    paths, and the selection the owned automation route or an explicit live
-    browser. The host prepares worker-owned copies over the original private
+    paths, and the selection an explicit live browser. The host prepares worker-owned copies over the original private
     connection, then uses the ordinary exported tool/hooks once. A failed or
     cancelled call is never replayed. *)
 val parse_command : Yojson.Safe.t ->

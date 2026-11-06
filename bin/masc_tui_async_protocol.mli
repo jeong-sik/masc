@@ -636,7 +636,6 @@ type browser_msg =
   | Browser_lane_clients_loaded of int * (Browser_lane_view.discovered, string) result
   | Browser_lane_loaded of
       int * (Browser_lane_view.reading, string) result
-  | Browser_lane_action_done of int * (unit, string) result
   | Browser_lane_scene_loaded of int * (Browser_lane_view.scene, string) result
   | Browser_lane_follow_loaded of int *
       ((Masc_tui_http.browser_follow_receipt *

@@ -43,17 +43,9 @@ const unavailable = Schema.Struct({
   observedAt: Schema.Number.pipe(Schema.filter(value => Number.isFinite(value) && value >= 0)),
   recheck: Schema.Literal('take_over'),
 })
-const ownedBrowser = Schema.Struct({
-  activity: Schema.Literal('enabled', 'disabled', 'unobserved'),
-  registered: Schema.Boolean,
-  session: Schema.Literal('closed', 'open', 'changing', 'unknown'),
-  locate: Schema.Boolean,
-})
 const connections = Schema.Struct({
   state: Schema.Literal('serving', 'retired'),
   clients: Schema.Array(client).pipe(Schema.filter(clients => new Set(clients.map(item => item.clientId)).size === clients.length)),
-  // Server-owned sessions are distinct from connected personal browsers.
-  owned_backends: Schema.Struct({ automation: ownedBrowser }),
   unavailable: Schema.optional(Schema.Array(unavailable)),
 })
 export type BrowserConnection = Schema.Schema.Type<typeof client>

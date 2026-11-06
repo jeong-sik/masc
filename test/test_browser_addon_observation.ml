@@ -17,13 +17,10 @@ let invalid_time () = check bool "invalid time rejected before publication" true
   (Result.is_error (Observation.of_snapshot ~observed_at:Float.nan (`Assoc [])))
 let invalid_snapshot () = check bool "non-object snapshot rejected before publication" true
   (Result.is_error (Observation.of_snapshot ~observed_at:0. (`List [])))
-let work registered = `Assoc ["activity",`String "enabled";"registered",`Bool registered;
-  "session",`String "closed";"locate",`Bool false]
 let client id browser = `Assoc ["clientId",`String id;"browser",`String browser;
   "version",`String "158.0.1";"engineVersion",`String "158.0.1";"transport",`String "web_extension";"space",`Null;
   "interactions",`List [];"lastActivities",`List [];"spaceObservation",`Null;"spacePresence",`Null]
-let serving clients = `Assoc ["state",`String "serving";"clients",`List clients;
-  "owned_backends",`Assoc ["automation",work true]]
+let serving clients = `Assoc ["state",`String "serving";"clients",`List clients]
 (* The server reads the browser rows of the Lanes list from this cached
    observation, so what the worker published must read back whole. *)
 let published_reads_back () =
@@ -31,8 +28,7 @@ let published_reads_back () =
     (serving [client "01a16363-ef67-7000-ad62-05bcd0320d99" "firefox";
               client "01a16363-ef68-7000-aee1-37e1be230202" "zen"])) in
   let published=ok (Observation.read output) in
-  check int "both connected clients read back" 2 (List.length published.clients);
-  check bool "the automation backend reads as registered" true published.automation.registered
+  check int "both connected clients read back" 2 (List.length published.clients)
 (* The runtime keeps an observation with its row renamed under the
    installation (Lane_addon_runtime.namespace); the reader must find it. *)
 let namespaced_row_reads_back () =
@@ -41,12 +37,10 @@ let namespaced_row_reads_back () =
   let cached={output with rows=List.map (fun (row:Types.row) ->
     {row with id="browser-work/7/" ^ row.id;lane_id="browser-work/" ^ row.lane_id}) output.rows} in
   let published=ok (Observation.read cached) in
-  check int "the renamed row still reads back its client" 1 (List.length published.clients);
-  check bool "the renamed row still reads back the registration" true published.automation.registered
+  check int "the renamed row still reads back its client" 1 (List.length published.clients)
 let retired_is_not_connected () =
   let output=ok (Observation.of_snapshot ~observed_at:1.
-    (`Assoc ["state",`String "retired";"clients",`List [];
-      "owned_backends",`Assoc ["automation",work false]])) in
+    (`Assoc ["state",`String "retired";"clients",`List []])) in
   check bool "a retired worker's observation does not read as a connected browser" true
     (Result.is_error (Observation.read output))
 let duplicate_client () =
@@ -194,9 +188,9 @@ let merge_keeps_the_live_workers_unavailability () =
     { (ok (Observation.read (ok (Observation.of_snapshot ~observed_at:1. (serving []))))) with unavailable } in
   let ego = published [unavailable] and firefox = published [] in
   let module B = Browser_lane.Backend in
-  let merged = Observation.merge ~among:[B.Ego; B.Owned_firefox] [B.Ego, Some ego; B.Owned_firefox, Some firefox] in
+  let merged = Observation.merge [B.Ego, Some ego; B.Owned_firefox, Some firefox] in
   check bool "the live Ego worker's unavailability survives the merge" true (merged.unavailable=[unavailable]);
-  let doubled = Observation.merge ~among:[B.Ego; B.Ego] [B.Ego, Some ego] in
+  let doubled = Observation.merge [B.Ego, Some ego; B.Ego, None] in
   check bool "another live worker does not suppress known unavailability" true (doubled.unavailable=[unavailable])
 let ()=run "browser addon observation" ["publication",[
   test_case "native inventory distinguishes missing and observation unknown" `Quick native_space_presence;

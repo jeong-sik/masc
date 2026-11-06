@@ -7390,6 +7390,18 @@ let composition_failure_output_exn ~base_path content =
   | _ -> failf "composition failure has no effect evidence: %s" (Yojson.Safe.to_string payload)
 ;;
 
+(* The live BiDi connection the browser compositions and output probes go
+   through. The scripted worker lists it, so the host resolves an explicit
+   route to it as it would to any connected browser. *)
+let browser_fixture_client_id = "01a16363-ef6b-7000-aee1-37e1be230205"
+let browser_fixture_client : Browser_lane.client_info =
+  { client_id =
+      (match Browser_lane.client_id_of_string browser_fixture_client_id with
+       | Ok id -> id
+       | Error detail -> failwith detail)
+  ; browser = Browser_lane.Firefox; version = "158.0.1"; engine_version = "158.0.1"
+  ; transport = Browser_lane.Webdriver_bidi; space = None }
+
 let test_composition_read_failure_preserves_same_turn
     ?(break_evidence = false) ~observe ~break_receipt ~terminal ~unknown_write () =
   let reads = ref 0 and navigations = ref 0 in
@@ -7413,7 +7425,8 @@ let test_composition_read_failure_preserves_same_turn
     | _ -> fail "unexpected browser effect in recovery fixture" in
   with_exec_fixture ~process:true ~always_allow:true ~bind_eio_context:true
     ~with_browser:(fun ~env ~config run ->
-      Browser_addon_fixture.with_worker ~env ~config ~respond (fun _ -> run ()))
+      Browser_addon_fixture.with_worker ~env ~config ~clients:[browser_fixture_client] ~respond
+        (fun _ -> run ()))
     "composition-read-recovery"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
       let declaration = {|[[compositions]]
@@ -7424,14 +7437,14 @@ id = "navigate"
 tool = "BrowserGoto"
 [compositions.nodes.input]
 kind = "literal"
-value = {lane="automation", tabId=7, url="https://example.org/next"}
+value = {lane="live", clientId="|} ^ browser_fixture_client_id ^ {|", tabId=7, url="https://example.org/next"}
 [[compositions.nodes]]
 id = "read"
 tool = "BrowserRead"
 after = ["navigate"]
 [compositions.nodes.input]
 kind = "literal"
-value = {lane="automation", tabId=7, mode="scene", expectedUrl="https://example.org/next"}
+value = {lane="live", clientId="|} ^ browser_fixture_client_id ^ {|", tabId=7, mode="scene", expectedUrl="https://example.org/next"}
 |} ^ (if terminal then {|[[compositions.nodes]]
 id = "terminal"
 tool = "keeper_surface_post"
@@ -7486,7 +7499,7 @@ value = {surface="dashboard", content="must not run"}
             check int "the read after it never ran" 0 !reads)
           else (
             let retried = (find "BrowserRead").call ~call_id:"same-turn-read-retry"
-              (`Assoc ["lane",`String "automation";"tabId",`Int 7;"mode",`String "scene";
+              (`Assoc ["lane",`String "live";"clientId",`String browser_fixture_client_id;"tabId",`Int 7;"mode",`String "scene";
                        "expectedUrl",`String "https://example.org/next"]) in
             check bool "next read succeeds in the same materialized provider turn" true retried.success;
             check int "navigation is never replayed" 1 !navigations;
@@ -7528,7 +7541,8 @@ let test_composition_failure_after_navigation_follows_the_failed_node ~second ()
     | _ -> fail "unexpected browser effect in node boundary fixture" in
   with_exec_fixture ~process:true ~always_allow:true ~bind_eio_context:true
     ~with_browser:(fun ~env ~config run ->
-      Browser_addon_fixture.with_worker ~env ~config ~respond (fun _ -> run ()))
+      Browser_addon_fixture.with_worker ~env ~config ~clients:[browser_fixture_client] ~respond
+        (fun _ -> run ()))
     "composition-node-boundary"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
       let name, second_node =
@@ -7539,7 +7553,7 @@ let test_composition_failure_after_navigation_follows_the_failed_node ~second ()
 after = ["navigate"]
 [compositions.nodes.input]
 kind = "literal"
-value = {lane="automation", tabId=7, action="scroll", x=0, y=100, expectedUrl="https://example.org/next"}
+value = {lane="live", clientId="|} ^ browser_fixture_client_id ^ {|", tabId=7, action="scroll", x=0, y=100, expectedUrl="https://example.org/next"}
 |} )
         | `Act ->
           ( "navigate-then-act"
@@ -7547,7 +7561,7 @@ value = {lane="automation", tabId=7, action="scroll", x=0, y=100, expectedUrl="h
 after = ["navigate"]
 [compositions.nodes.input]
 kind = "literal"
-value = {lane="automation", tabId=7, action="reload"}
+value = {lane="live", clientId="|} ^ browser_fixture_client_id ^ {|", tabId=7, action="reload"}
 |} )
       in
       let declaration =
@@ -7559,10 +7573,10 @@ id = "navigate"
 tool = "BrowserGoto"
 [compositions.nodes.input]
 kind = "literal"
-value = {lane="automation", tabId=7, url="https://example.org/next"}
+value = {lane="live", clientId="%s", tabId=7, url="https://example.org/next"}
 [[compositions.nodes]]
 id = "second"
-%s|} name second_node
+%s|} name browser_fixture_client_id second_node
       in
       let skill_catalog = skill_catalog_of_composition ~name declaration in
       Masc.Keeper_tool_call_log.reset_for_testing ();
@@ -9105,9 +9119,10 @@ let probe ?(needs_sandbox = false) tool_name args =
   { tool_name; needs_sandbox; prepare = (fun ~config:_ ~meta:_ -> args) }
 
 let composable_output_probes =
-  [ probe "BrowserRead" (`Assoc ["lane",`String "automation";"tabId",`Int 1])
-  ; probe "BrowserGoto" (`Assoc ["lane",`String "automation";"url", `String "https://example.org/probe"])
-  ; probe "BrowserInteract" (`Assoc ["lane",`String "automation";"tabId",`Int 1;
+  [ probe "BrowserRead" (`Assoc ["lane",`String "live";"clientId",`String browser_fixture_client_id;"tabId",`Int 1])
+  ; probe "BrowserGoto" (`Assoc ["lane",`String "live";"clientId",`String browser_fixture_client_id;"tabId",`Int 1;
+      "url", `String "https://example.org/probe"])
+  ; probe "BrowserInteract" (`Assoc ["lane",`String "live";"clientId",`String browser_fixture_client_id;"tabId",`Int 1;
       "action",`String "scroll";"x",`Int 0;"y",`Int 100;
       "expectedUrl",`String "https://example.org/probe"])
   ; probe
@@ -9440,60 +9455,26 @@ let test_composable_outputs_satisfy_declared_schema () =
     ~always_allow:true
     ~bind_eio_context:true
     ~with_browser:(fun ~env ~config run ->
-       (* The seam is the primitive WebDriver HTTP transport. Execute/sync
-          evaluates the actual production JavaScript, then Browser_webdriver
-          constructs the response consumed by Keeper and the schema validator. *)
-       let module Driver = Masc.Browser_webdriver in
-       let request ~method_ ~path ~body =
-         match method_, path with
-         | `POST, "/session" -> Ok (`Assoc [
-             "sessionId", `String "owned";
-             "capabilities", `Assoc ["webSocketUrl",
-               `String "ws://localhost:1234/session/owned"]])
-         | `GET, "/session/owned/window/handles" -> Ok (`List [`String "fixture"])
-         | `GET, "/session/owned/window" -> Ok (`String "fixture")
-         | `POST, "/session/owned/window"
-         | `POST, "/session/owned/frame"
-         (* Navigation: WebDriver answers null and the landing page is read
-            back through execute/sync, which the node fixture already serves. *)
-         | `POST, "/session/owned/url"
-         | `DELETE, "/session/owned" -> Ok `Null
-         | `POST, "/session/owned/execute/sync" ->
-           let input = match body with
-             | Some json -> Yojson.Safe.to_string json
-             | None -> fail "execute/sync requires script and args" in
-           let channel = Unix.open_process_args_in "node"
-             [|"node"; "fixtures/browser-webdriver-script.cjs"; input|] in
-           let output = Buffer.create 256 in
-           (try while true do
-              Buffer.add_string output (input_line channel);
-              Buffer.add_char output '\n'
-            done with End_of_file -> ());
-           (match Unix.close_process_in channel with
-            | Unix.WEXITED 0 -> Ok (Yojson.Safe.from_string (Buffer.contents output))
-            | _ -> fail "production browser JavaScript fixture failed")
-         | _ -> fail ("unexpected primitive WebDriver request: " ^ path)
-       in
-       let start_downloads ~session_id:_ ~websocket_url:_ =
-         Ok Masc.Browser_downloads.{
-           read=(fun ~context:_ -> Ok (`Assoc ["downloads",`List []]));
-           console=(fun ~context:_ -> Ok (`Assoc ["entries",`List [];"dropped",`Int 0]));
-           network=(fun ~context:_ -> Ok (`Assoc ["requests",`List [];"dropped",`Int 0]));
-           check=(fun () -> Ok ());command=(fun _ _ -> Error "no BiDi command in this fixture"); block=(fun ~context:_ ~hosts:_ -> Error "no BiDi block in this fixture");unblock=(fun ~intercept:_ -> Error "no BiDi block in this fixture");close=(fun () -> ())}
-       in
-       let driver = Driver.create ~start_downloads ~request () in
+       (* The scripted live BiDi connection answers each browser probe with
+          the page fields that adapter returns. What the probe observes is
+          the receipt the host and the browser tool build from that answer:
+          the browser identity, the selection and the declared shape. *)
        Fun.protect ~finally:(fun () ->
          Msx_lane.install_activity_observer None;
-         ignore (Driver.close driver);
          ignore (Msx_lane.eject ()))
        @@ fun () ->
        Msx_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
-       List.iter (fun verb -> match Driver.execute driver verb with
-         | Browser_lane.Answered _ -> ()
-         | _ -> fail "browser producer fixture initialization failed")
-         [Browser_lane.Session_open {headless=Some true}; Browser_lane.Tabs_list];
-       Browser_addon_fixture.with_worker ~env ~config
-         ~respond:(fun ~route:_ verb -> Driver.execute driver verb)
+       let url = "https://example.org/probe" in
+       let answered data = Browser_lane.Answered (`Assoc ["ok",`Bool true;"data",`Assoc data]) in
+       Browser_addon_fixture.with_worker ~env ~config ~clients:[browser_fixture_client]
+         ~respond:(fun ~route:_ -> function
+           | Browser_lane.Page_read _ ->
+             answered ["url",`String url;"title",`String "Probe page";"text",`String "probe";
+                       "chars",`Int 5;"truncated",`Bool false]
+           | Browser_lane.Page_goto _ -> answered ["url",`String url;"title",`String "Probe page"]
+           | Browser_lane.Page_interact _ ->
+             answered ["tabId",`Int 1;"url",`String url;"urlBefore",`String url;"action",`String "scroll"]
+           | _ -> fail "unexpected browser command in the output probe fixture")
          (fun _ -> run ())
     )
     "keeper_tool_dispatch_runtime_composable_output"
@@ -10769,10 +10750,6 @@ let () =
         test_composition_plan_failure_exposes_typed_cause;
       test_case "composition enum param is refused before the handler" `Quick
         test_composition_enum_param_is_refused_before_the_handler;
-      test_case "shipped navigate-read refuses mode text" `Quick
-        (test_shipped_browser_composition_refuses_text_mode
-           "browser-navigate-read"
-           [ "tabId", `Int 7; "url", `String "https://example.org/start" ]);
       test_case "shipped live-follow-read refuses mode text" `Quick
         (test_shipped_browser_composition_refuses_text_mode
            "browser-live-follow-read"

@@ -313,7 +313,7 @@ let inventory_row_summary_lines ~titled ~cols ~standing ~selected_output
       , "모델 호출 순서 (Failover)"
       , right_rows
       , exact_lane_overview_actions )
-    | Browser_clients _ | Browser_executor _ ->
+    | Browser_clients _ ->
       ( "현재 상태"
       , [ state_line ]
       , "백엔드 · 식별자"

@@ -8,9 +8,8 @@ let same_connection left right = left.selected.route=right.selected.route
   && left.backend=right.backend && B.same_space_id left.space right.space
 let of_browser selected browser = {selected=Browser_selection.bind selected browser;
   connection_fields=(match browser with
-    | Browser_selection.Connected info -> B.live_connection_fields ~client_id:info.client_id ~transport:info.transport ~space:info.space
-    | Owned_automation -> [B.client_id_field,`Null]);
-  space=(match browser with Browser_selection.Connected info -> info.space | Owned_automation -> None);
+    | Browser_selection.Connected info -> B.live_connection_fields ~client_id:info.client_id ~transport:info.transport ~space:info.space);
+  space=(match browser with Browser_selection.Connected info -> info.space);
   backend=Browser_selection.backend_of_browser browser}
 (* A lane-level command the lane answers without a client: the live lane
    itself is the browser, and the transport it reports is the ego task

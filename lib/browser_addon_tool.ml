@@ -9,11 +9,11 @@ let object_schema ?(open_fields=false) ~required properties = `Assoc [
 let text_schema = `Assoc ["type",`String "string"]
 let enum names = `Assoc ["type",`String "string";"enum",`List (List.map (fun value -> `String value) names)]
 let input_schema = object_schema ~required:["lane";"command"] [
-  "lane",enum ["live";"automation"];"clientId",text_schema;"uploadId",text_schema;
+  "lane",enum ["live"];"clientId",text_schema;"uploadId",text_schema;
   "command",object_schema ~required:["verb";"args"] [
     "verb",enum ["tabs.list";"page.read";"page.downloads";"page.console";"page.network";"page.cookies";"page.capture";
       "page.scene";"page.snapshot";"page.interact";"page.native_workflow";"session.open";"session.close";"session.status";
-      "page.goto";"page.elements";"page.act";"page.context";"page.instruct";"page.locate";"page.extract"];
+      "page.goto";"page.elements";"page.act";"page.context";"page.locate"];
     "args",object_schema ~open_fields:true ~required:[] []]]
 let output_schema = object_schema ~required:["reply";"answer"] [
   "reply",enum ["issue"];
@@ -37,7 +37,6 @@ let parse json =
   let* route=match List.assoc_opt "lane" fields,client with
     | Some (`String "live"),Some client -> Ok (B.Live_route (Some client))
     | Some (`String "live"),None -> Ok (B.Live_route None)
-    | Some (`String "automation"),None -> Ok B.Automation_route
     | (None|Some _),(None|Some _) ->
         Error "lane must name the browser the host chose; a live lane also names its clientId" in
   let* raw=Option.to_result ~none:"command is required" (List.assoc_opt "command" fields) in
@@ -54,16 +53,7 @@ let parse json =
          |B.Page_native_workflow _|B.Page_interact _|B.Page_goto _|B.Page_elements _
          |B.Page_context _|B.Page_locate _ ->
              Error "a live lane without a clientId answers only its task Space reclaim")
-    | B.Live_route (Some _)|B.Automation_route -> Ok () in
-  let* ()=match route,verb with
-    | B.Automation_route,B.Page_act (B.Action.Control _) ->
-        Error B.handoff_refused
-    | B.Live_route (Some _|None),B.Page_act (B.Action.Control _) -> Ok ()
-    | (B.Live_route _|Automation_route),
-      (Tabs_list|Page_read _|Page_document _|Page_downloads _|Page_console _|Page_network _|Page_cookies _
-      |Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _|Session_open _|Session_close|Session_status
-      |Page_goto _|Page_elements _|Page_act (B.Action.Open_tab _|Open_window _|On_tab _)|Page_context _
-      | Page_locate _) -> Ok () in
+    | B.Live_route (Some _) -> Ok () in
   let* upload_id=match List.assoc_opt "uploadId" fields with
     | None -> Ok None
     | Some (`String raw) -> let* id=B.client_id_of_string raw in Ok (Some (B.client_id_to_string id))

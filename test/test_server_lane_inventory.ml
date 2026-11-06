@@ -415,14 +415,11 @@ let suffix_only_declaration_is_editable () = with_fixture (fun _ _ config root d
    browser rows read the browser Add-on's cached observation, and say why
    when there is none. *)
 let browser_rows_read_the_addon_observation () =
-  let work registered = `Assoc ["activity",`String "enabled";"registered",`Bool registered;
-    "session",`String "closed";"locate",`Bool false] in
   let client id = `Assoc ["clientId",`String id;"browser",`String "firefox";"version",`String "158.0.1";
     "engineVersion",`String "158.0.1";"transport",`String "web_extension";"space",`Null;"interactions",`List [];"lastActivities",`List [];"spaceObservation",`Null;"spacePresence",`Null] in
   let output = match Browser_addon_observation.of_snapshot ~observed_at:1.
       (`Assoc ["state",`String "serving";
-        "clients",`List [client "01a16363-ef67-7000-ad62-05bcd0320d99"; client "01a16363-ef68-7000-aee1-37e1be230202"];
-        "owned_backends",`Assoc ["automation",work true]]) with
+        "clients",`List [client "01a16363-ef67-7000-ad62-05bcd0320d99"; client "01a16363-ef68-7000-aee1-37e1be230202"]]) with
     | Ok output -> output | Error detail -> fail detail in
   let snapshot : Addon.export_observation = {instance_id="browser-worker";observation_seq=2;
     max_bytes=4096;refreshing=false;output} in
@@ -431,18 +428,14 @@ let browser_rows_read_the_addon_observation () =
   let reading observations = Browser_addon_presence.of_observations ~declarations
       ~applications:(fun () -> fail "only an Add-on declared on and not running asks how it was applied")
       observations in
-  (* The automation and external host workers each publish this
-     observation; each lane reads its own source's. *)
-  let every observation = List.map (fun backend -> {Addon.backend;observation})
-      Browser_lane.Backend.[Automation; External_host] in
+  (* The external host worker publishes this observation. *)
+  let every observation = [{Addon.backend=Browser_lane.Backend.External_host;observation}] in
   let read observation lane = Browser_addon_presence.lane (reading (every observation)) lane in
   let state observation lane = Inventory.For_testing.browser_state
       (read observation lane) lane in
   let observed = Ok (Some snapshot) in
   check bool "the live row counts the clients the Add-on published" true
     (state observed Browser_lane.Lane_name.Live = Inventory.Browser_clients (Inventory.Browser_observed 2));
-  check bool "the automation row reads its registration from the Add-on" true
-    (state observed Browser_lane.Lane_name.Automation = Inventory.Browser_executor (Inventory.Browser_observed true));
   check bool "no browser Add-on is not zero connected clients" true
     (state (Ok None) Browser_lane.Lane_name.Live
      = Inventory.Browser_clients (Inventory.Browser_addon_absent));
@@ -477,8 +470,6 @@ let browser_rows_read_the_addon_observation () =
    names: a lane reads only the installations that answer for it, as the
    host uses them, and is unreadable only when none of them published. *)
 let browser_lanes_read_their_own_sources () =
-  let work registered = `Assoc ["activity",`String "enabled";"registered",`Bool registered;
-    "session",`String "closed";"locate",`Bool false] in
   let client id transport =
     let client_id=match Browser_lane.client_id_of_string id with
       | Ok id -> id | Error detail -> fail detail in
@@ -491,8 +482,7 @@ let browser_lanes_read_their_own_sources () =
   (* A worker answers its snapshot whatever its package serves; the host
      reads only the sources the package names. *)
   let published clients = match Browser_addon_observation.of_snapshot ~observed_at:1.
-      (`Assoc ["state",`String "serving";"clients",`List clients;
-        "owned_backends",`Assoc ["automation",work true]]) with
+      (`Assoc ["state",`String "serving";"clients",`List clients]) with
     | Ok output -> Ok (Some ({instance_id="worker";observation_seq=1;max_bytes=4096;refreshing=false;output}
                              : Addon.export_observation))
     | Error detail -> fail detail in
@@ -501,27 +491,16 @@ let browser_lanes_read_their_own_sources () =
   let state observations lane = Inventory.For_testing.browser_state
       (Browser_addon_presence.lane (Browser_addon_presence.of_observations ~declarations
          ~applications:(fun () -> fail "no browser Add-on is declared") observations) lane) lane in
-  (* An automation worker that reports a client: it serves no live source,
-     so the live row does not count it. *)
-  let automation = serving Browser_lane.Backend.Automation
-      (published [client "01a16363-ef6a-7000-aee1-37e1be230204" Browser_lane.Webdriver_bidi])
-  and ego = serving Browser_lane.Backend.Ego
+  let ego = serving Browser_lane.Backend.Ego
       (published [client "01a16363-ef67-7000-ad62-05bcd0320d99" Browser_lane.Ego_task_space])
   and extension = serving Browser_lane.Backend.External_host
       (published [client "01a16363-ef68-7000-aee1-37e1be230202" Browser_lane.Web_extension;
                   client "01a16363-ef69-7000-aee1-37e1be230203" Browser_lane.Web_extension]) in
-  let workers = [automation; ego; extension] in
+  let workers = [ego; extension] in
   check bool "the live row counts the clients of every live installation" true
     (state workers Browser_lane.Lane_name.Live = Inventory.Browser_clients (Inventory.Browser_observed 3));
-  check bool "the automation row reads the installation that serves automation" true
-    (state workers Browser_lane.Lane_name.Automation
-     = Inventory.Browser_executor (Inventory.Browser_observed true));
-  check bool "a source no installation serves reads as no Add-on, though another worker reported it" true
-    (state [ego; extension] Browser_lane.Lane_name.Automation
-     = Inventory.Browser_executor (Inventory.Browser_addon_absent));
   (* Two installations of one source reach presence as one ambiguous
-     observation: that source's lane cannot be read, and the others read as
-     usual. *)
+     observation. *)
   let ambiguous = Error (Addon.Ambiguous_installations ["first"; "second"]) in
   let is_ambiguous = function
     | Browser_addon_presence.Unavailable (Refused (Addon.Ambiguous_installations _)) -> true
@@ -530,15 +509,9 @@ let browser_lanes_read_their_own_sources () =
                               | Observed _ | Absent | Off | Not_running _) -> false in
   let lane_of observations lane = Browser_addon_presence.lane
       (Browser_addon_presence.of_observations ~declarations ~applications:(fun () -> []) observations) lane in
-  let doubled_automation = serving Browser_lane.Backend.Automation ambiguous :: [ego; extension] in
-  check bool "a source two installations serve leaves its lane unreadable" true
-    (is_ambiguous (lane_of doubled_automation Browser_lane.Lane_name.Automation));
-  check bool "the other lanes read as before" true
-    (state doubled_automation Browser_lane.Lane_name.Live
-     = Inventory.Browser_clients (Inventory.Browser_observed 3));
   (* Two installations of ego beside one of external hosts: the host uses
      no ego client and every external one, and the live row says the same. *)
-  let ego_twice = [automation; serving Browser_lane.Backend.Ego ambiguous; extension] in
+  let ego_twice = [serving Browser_lane.Backend.Ego ambiguous; extension] in
   check bool "a doubled live source leaves out only its own clients" true
     (state ego_twice Browser_lane.Lane_name.Live
      = Inventory.Browser_clients (Inventory.Browser_observed 2));
@@ -547,7 +520,7 @@ let browser_lanes_read_their_own_sources () =
      | Browser_lane_launcher.Polling clients -> List.length clients = 2
      | Browser_lane_launcher.(Unlisted _ | Not_observed) -> false);
   check bool "a live lane whose only source is doubled says so" true
-    (is_ambiguous (lane_of [automation; serving Browser_lane.Backend.Ego ambiguous]
+    (is_ambiguous (lane_of [serving Browser_lane.Backend.Ego ambiguous]
                      Browser_lane.Lane_name.Live));
   (* A live installation that withholds its observation has no client the
      host can reach, so the live row counts the others. *)
@@ -555,17 +528,14 @@ let browser_lanes_read_their_own_sources () =
     declared_tools=[];service=Lane_addon_types.Browser_service Browser_lane.Backend.Ego;
     reason=Failed {Lane_addon_lifecycle.cause=Cleanup_unconfirmed "cleanup incomplete";first=None}} in
   let refusal = Addon.Unready_installations (failed, []) in
-  let withheld = [automation; serving Browser_lane.Backend.Ego (Error refusal); extension] in
+  let withheld = [serving Browser_lane.Backend.Ego (Error refusal); extension] in
   check bool "a withheld live installation leaves out only its own clients" true
     (state withheld Browser_lane.Lane_name.Live
      = Inventory.Browser_clients (Inventory.Browser_observed 2));
   check bool "a live lane whose only installation withholds says why" true
-    (state [automation; serving Browser_lane.Backend.Ego (Error refusal)] Browser_lane.Lane_name.Live
+    (state [serving Browser_lane.Backend.Ego (Error refusal)] Browser_lane.Lane_name.Live
      = Inventory.Browser_clients (
-         Inventory.Browser_addon_unavailable (Addon.export_refusal_operator_message refusal)));
-  check bool "and leaves automation as it was" true
-    (state withheld Browser_lane.Lane_name.Automation
-     = Inventory.Browser_executor (Inventory.Browser_observed true))
+         Inventory.Browser_addon_unavailable (Addon.export_refusal_operator_message refusal)))
 
 (* The live lane with no browser installation running: the declarations
    alone say which absence it is. *)
@@ -672,8 +642,6 @@ max_reply_bytes = 4096
     | None -> failf "no %s row" id in
   write path (declaration browser "browser-external");
   check string "a live source declared on waits for its worker" "not_running" (reading Browser_lane.Lane_name.Live);
-  check string "a lane none of whose sources is declared needs one set up" "absent"
-    (reading Browser_lane.Lane_name.Automation);
   write path ("enabled = false\n" ^ declaration browser "browser-external");
   check string "switching its declaration off turns the lane off" "off" (reading Browser_lane.Lane_name.Live))
 

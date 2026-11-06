@@ -2357,15 +2357,7 @@ let test_browser_screenshot_reaches_vision_reader () =
     let base_path = Filename.concat ambient_base "served-workspace" in
     Unix.mkdir base_path 0o700;
     let config = Masc.Workspace.default_config base_path in
-    (* The scripted native worker owns an Automation allocation but never
-       launches its driver or browser. Make an accidental launch fail locally,
-       and declare that exact source rather than borrowing installed settings. *)
-    let unused_browser=Filename.concat base_path "unexpected-browser" in
-    write_file unused_browser "#!/bin/sh\nexit 1\n";
-    Unix.chmod unused_browser 0o700;
-    let runtime = single_vision_runtime_toml ^ Printf.sprintf
-      "\n[browser.automation]\ngeckodriver = %S\nbinary = %S\n" unused_browser unused_browser in
-    with_temp_runtime_toml runtime (fun () ->
+    with_temp_runtime_toml single_vision_runtime_toml (fun () ->
       let meta = make_meta "browser-screenshot" in
       let encoded = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" in
       let image_bytes = Base64.decode_exn encoded in
@@ -2408,7 +2400,6 @@ let test_browser_screenshot_reaches_vision_reader () =
             (match route with
              | Browser_lane.Live_route (Some id) -> live_calls:=id::!live_calls;
                  assert (id=first.client_id)
-             | Automation_route -> ()
              | Live_route None -> failwith "unexpected screenshot route");
             let data=match verb with
               | Browser_lane.Page_capture {tab_id=73;options=None} -> `Assoc ["tabId",`Int 73;
@@ -2418,31 +2409,31 @@ let test_browser_screenshot_reaches_vision_reader () =
               | _ -> failwith "unexpected screenshot command" in
             Browser_lane.Answered (`Assoc ["ok",`Bool true;"data",data]) in
           Browser_addon_fixture.with_workers ~env ~config
-            ~workers:[{serves=Browser_lane.Backend.Automation;clients=[];exports=true};
-              {serves=External_host;clients=[first;second];exports=true}]
+            ~workers:[{serves=Browser_lane.Backend.External_host;clients=[first;second];exports=true}]
             ~respond:(fun ~serves:_ ~route verb -> respond ~route verb) (fun _workers ->
+          let client_id = Browser_lane.client_id_to_string first.client_id in
+          let screenshot = `Assoc ["lane",`String "live";"clientId",`String client_id;
+            "mode",`String "screenshot";"tabId",`Int 73] in
           let result = Masc.Keeper_tool_in_process_runtime.handle_browser_read_with_outcome
-            ~config ~meta ~args:(`Assoc ["lane",`String "automation";"mode",`String "screenshot";"tabId",`Int 73]) in
+            ~config ~meta ~args:screenshot in
           assert (result.disposition = Tool_result.Completed ());
           let data = match result.data with Some data -> data | None -> failwith "no screenshot metadata" in
           assert (not (String_util.contains_substring result.raw_output encoded));
-          verify_pointer_receipt "automation" data;
-          assert (Yojson.Safe.Util.member "clientId" data = `Null);
-          assert (Yojson.Safe.Util.member "transport" data = `Null);
+          verify_pointer_receipt "live" data;
           (* A caller with no Keeper workspace gets the observation as text and
              the checked PNG as an image block, and the observation without
              the bytes. *)
           (match Masc.Browser_addon_tools.handle ~config ~access:Masc.Lane_addon_sources.Operator_configuration
               ~principal:Lane_addon_call_context.Operator ~reserved:[] ~keeper_name:None
               ~tool:Masc.Browser_capabilities.Read ~tool_name:"masc_browser_read" ~start_time:(Tool_timing.start ())
-              (`Assoc ["lane",`String "automation";"mode",`String "screenshot";"tabId",`Int 73]) with
+              screenshot with
            | Tool_result.Completed {content_blocks=Some [Llm_provider.Types.Text text;
                Llm_provider.Types.Image {media_type="image/png";source=Base64 image}];data=observed;_} ->
                assert (image=encoded);
                assert (Yojson.Safe.from_string text=observed);
                assert (Yojson.Safe.Util.member "data" observed=`Null);
                assert (Yojson.Safe.Util.member "viewport" observed=viewport);
-               assert (Yojson.Safe.Util.(observed |> member "browserSelection" |> member "lane")=`String "automation");
+               assert (Yojson.Safe.Util.(observed |> member "browserSelection" |> member "lane")=`String "live");
                assert (assoc_string "url" observed="https://example.org/form")
            | Tool_result.Completed _|Deferred _|Failed _ -> failwith "a screenshot without a Keeper did not return its image block");
           let handle = assoc_string "artifact" data in
@@ -2517,7 +2508,8 @@ let test_browser_screenshot_reaches_vision_reader () =
           ignore (Result.get_ok (Store.prune ~max_entries:1 ~dir:frames_dir ()));
           assert (not (Sys.file_exists frame_path));
           assert (Store.load ~dir:root_dir (Store.of_string handle) = Ok image_bytes);
-          let client_id = Browser_lane.client_id_to_string first.client_id in
+          (* Each read below goes to the named client once. *)
+          live_calls := [];
           List.iter (fun mode ->
             let result=Masc.Keeper_tool_in_process_runtime.handle_browser_read_with_outcome ~config ~meta
               ~args:(`Assoc ["lane",`String "live";"clientId",`String client_id;

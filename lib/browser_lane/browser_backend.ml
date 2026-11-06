@@ -1,12 +1,10 @@
-type t = Automation | Owned_firefox | Ego | External_host [@@deriving enumerate]
+type t = Owned_firefox | Ego | External_host [@@deriving enumerate]
 
 let lane = function
-  | Automation -> Browser_lane_name.Automation
   | Owned_firefox | Ego | External_host -> Browser_lane_name.Live
 ;;
 
 let to_wire = function
-  | Automation -> "automation"
   | Owned_firefox -> "owned_firefox"
   | Ego -> "ego"
   | External_host -> "external_host"

@@ -24,16 +24,16 @@ let scenario () =
     ok (Owner.attach_downloads owner downloads);
     ignore (ok (Eio_unix.run_in_systhread (fun () -> Owner.publish_download owner source)));
     let send ()=Owner.dispatch owner {W.incarnation;command=W.Retire} in
-    let automation_started,start_automation=Eio.Promise.create ()
+    let ego_started,start_ego=Eio.Promise.create ()
     and live_started,start_live=Eio.Promise.create ()
     and live_settled,settle_live=Eio.Promise.create ()
-    and automation_settled,settle_automation=Eio.Promise.create () in
+    and ego_settled,settle_ego=Eio.Promise.create () in
     Fun.protect ~finally:(fun () ->
       (* These test barriers must not outlive a failed assertion or cancellation;
          protected production cleanup is joined by the enclosing switch. *)
-      ignore (Eio.Promise.try_resolve settle_automation ());
+      ignore (Eio.Promise.try_resolve settle_ego ());
       ignore (Eio.Promise.try_resolve settle_live ())) (fun () ->
-    let automation_calls=ref 0 and live_calls=ref 0 in
+    let ego_calls=ref 0 and live_calls=ref 0 in
     let client_id=ok (B.client_id_of_string "0b000000-0000-4000-8000-000000000004") in
     check bool "unregistered clients grant no owned cleanup" true
       (Result.is_error (Owner.attach_live owner ~client_id ~cleanup:(fun () -> fail "foreign cleanup")));
@@ -49,27 +49,31 @@ let scenario () =
       (match B.resolve_target ~verb:B.Tabs_list (B.Live_route (Some client_id)) with
        | Ok (B.Live_client attached) ->
          (match attached.liveness with B.Worker_held -> true | B.Polled _ -> false)
-       | Ok (B.Automation) | Error _ -> false);
-    ok (Owner.attach_automation owner ~locate:false
-      ~execute:(fun _ -> fail "retirement must not dispatch browser input")
-      ~session:(fun () -> B.Browser_closed)
-      ~document:(fun ~tab_id:_ -> fail "retirement must not read a page")
-      ~cleanup:(fun () -> incr automation_calls;Eio.Promise.resolve start_automation ();
-        Eio.Promise.await automation_settled;raise (Failure "private backend diagnostic")));
+       | Error _ -> false);
+    (* A second connection this worker runs, on the other transport. *)
+    let ego_id=ok (B.client_id_of_string "0b000000-0000-4000-8000-000000000008") in
+    let ego:B.client_info={client_id=ego_id;browser=B.Ego_lite;version="fixture";
+      engine_version="fixture";transport=B.Ego_task_space;space=Some {B.id=51;name="cleanup Space"}} in
+    (match Owner.dispatch owner {W.incarnation;command=W.Poll {client=ego;window_sec=0.001}} with
+     | W.Poll_result _ -> ()
+     | Service_refusal _|Snapshot_result _|Model_reply _|Download_reply _|Receipt|Issue_result _ -> fail "ego registration refused");
+    ok (Owner.attach_live owner ~client_id:ego_id
+      ~cleanup:(fun () -> incr ego_calls;Eio.Promise.resolve start_ego ();
+        Eio.Promise.await ego_settled;raise (Failure "private backend diagnostic")));
     let cancelling,cancel=Eio.Promise.create () in
     let first=Eio.Fiber.fork_promise ~sw (fun () ->
       try Eio.Cancel.sub (fun context ->
         Eio.Promise.resolve cancel context;
         let reply=send () in Eio.Fiber.check ();Some reply)
       with Eio.Cancel.Cancelled _ -> Eio.Fiber.check ();None) in
-    Eio.Promise.await automation_started;Eio.Promise.await live_started;
+    Eio.Promise.await ego_started;Eio.Promise.await live_started;
     check bool "retirement fences original live client before joining it" true
       (not (List.exists (fun (client:B.client_info) -> client.client_id=client_id) (B.active_clients ())));
     Eio.Cancel.cancel (Eio.Promise.await cancelling) Exit;
     let second=Eio.Fiber.fork_promise ~sw send in
     Eio.Fiber.yield ();
     check bool "cancelled Retire still joins its original cleanup" true (Eio.Promise.peek first=None);
-    Eio.Promise.resolve settle_automation ();
+    Eio.Promise.resolve settle_ego ();
     Eio.Fiber.yield ();
     check bool "one failed cleanup cannot skip the other" true (Eio.Promise.peek second=None);
     Eio.Promise.resolve settle_live ();
@@ -79,10 +83,10 @@ let scenario () =
     check bool "cleanup exceptions do not leak private diagnostics" true
       (match reply with
        | W.Service_refusal {message;_} ->
-         message="live settlement unconfirmed; automation backend cleanup raised; settlement is unconfirmed; download cleanup requires confirmed backend teardown"
+         message="live ego_task_space backend cleanup raised; settlement is unconfirmed; live settlement unconfirmed; download cleanup requires confirmed backend teardown"
        | W.Snapshot_result _|Model_reply _|Download_reply _|Poll_result _|Receipt|Issue_result _ -> false);
     check bool "repeated Retire retains the same failure" true (send ()=reply);
-    check int "raised automation cleanup is not replayed" 1 !automation_calls;
+    check int "raised ego cleanup is not replayed" 1 !ego_calls;
     check int "failed live cleanup is not replayed" 1 !live_calls;
     let result=Eio_unix.run_in_systhread (fun () -> Masc.Browser_addon_downloads.cleanup downloads) in
     check bool "owner abandoned pins without authorizing file cleanup" true

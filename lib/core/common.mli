@@ -30,8 +30,8 @@ val owner_lease_dirname : string
 
 val browser_lane_dirname : string
 (** The browser lane's directory under the MASC directory: its token, the
-    BiDi host's record and lock, the launcher, the automation drivers'
-    records and profiles. Value is ["browser-lane"].
+    BiDi host's record and lock, and the launcher. Value is
+    ["browser-lane"].
     [masc browser-lane-setup] writes the token and the launcher under the same
     name in every mode, so the two change together. *)
 

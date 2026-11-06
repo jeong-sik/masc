@@ -8,9 +8,7 @@
     launcher and writes the [\[browser.live.bidi\]] table of runtime.toml, so
     the MASC server starts a Firefox of its own. [--mode host] installs the host
     and its launcher and nothing else: no browser is connected, and no
-    runtime.toml is needed or written. [--mode automation] writes the
-    geckodriver of the automation lane ([\[browser.automation\]]) and installs
-    no host: that lane needs none. [--mode ego] writes the
+    runtime.toml is needed or written. [--mode ego] writes the
     [\[browser.live.ego\]] table, so the browser Add-on serves an ego lite task
     space ({!Masc.Browser_lane_ego_setup}); it installs no host. Besides asking
     [ego-browser] for its versions and for ego lite's list of task spaces,
@@ -31,7 +29,7 @@
 
     An option that the chosen modes do not use is refused, not ignored. *)
 
-type mode = Addon | Extension | Bidi | Ego | Host | Automation
+type mode = Addon | Extension | Bidi | Ego | Host
 
 val all_modes : mode list
 
@@ -53,8 +51,6 @@ val run
   -> firefox:string option
   -> profile:string option
   -> port:int option
-  -> geckodriver:string option
-  -> browser:string option
   -> ego_command:string option
   -> ego_space:string option
   -> int

@@ -21,8 +21,8 @@ description = "bind_goal stores an observed Ego Space for goalId (lane=live and 
 [[params]]
 name = "lane"
 type = "string"
-enum = ["live", "automation"]
-description = "Optional advanced browser override. Omit only for initial discovery or opening a work browser; MASC selects an eligible browser and reports browserSelection. For every observed tab, retain browserSelection.lane and its clientId on subsequent calls; tab IDs are local to a browser."
+enum = ["live"]
+description = "Optional advanced browser override. Omit only for initial discovery; MASC selects an eligible browser and reports browserSelection. For every observed tab, retain browserSelection.lane and its clientId on subsequent calls; tab IDs are local to a browser."
 
 [[params]]
 name = "clientId"

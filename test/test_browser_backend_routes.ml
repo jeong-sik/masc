@@ -13,8 +13,6 @@ let client n browser transport = {B.client_id=require (B.client_id_of_string
 let bidi=client 1 B.Firefox B.Webdriver_bidi
 let ego=client 2 B.Ego_lite B.Ego_task_space
 let extension=client 3 B.Zen B.Web_extension
-(* A client an automation worker reports; it serves no live source. *)
-let stray=client 4 B.Firefox B.Webdriver_bidi
 let one backend clients={F.serves=backend;clients;exports=true}
 let tabs=B.Answered (`Assoc ["ok",`Bool true;"data",`Assoc ["tabs",`List []]])
 let run_with workers check_routes =
@@ -68,21 +66,14 @@ let refuses_before_dispatch name attached class_ call =
   check bool (name ^ ": no worker received a command") true (ledger attached=before)
 
 let every_source_reaches_its_own_worker () =
-  run_with [one Automation [stray];one Owned_firefox [bidi];one Ego [ego];
-            one External_host [extension]]
+  run_with [one Owned_firefox [bidi];one Ego [ego];one External_host [extension]]
     (fun ~config:_ ~host ~issue ~attached:_ ->
-      reaches "automation reaches the automation worker" ~issue B.Automation_route B.Backend.Automation;
       reaches "a BiDi client reaches the owned Firefox worker" ~issue (live bidi) B.Backend.Owned_firefox;
       reaches "an ego client reaches the ego worker" ~issue (live ego) B.Backend.Ego;
       reaches "an extension client reaches the external host worker" ~issue (live extension)
         B.Backend.External_host;
-      refused "a client a worker of no live source reports is not routed" ~issue (live stray);
-      let published=snapshot host in
-      check (list string) "the choice lists the clients of the live workers only"
-        (ids [bidi;ego;extension]) (ids published.clients);
-      (* Each worker reports only its own source registered, so a report read
-         from the wrong worker would say unregistered. *)
-      check bool "automation is read from its own worker" true published.automation.registered;
+      check (list string) "the choice lists the clients of every worker"
+        (ids [bidi;ego;extension]) (ids (snapshot host).clients);
       List.iter (fun backend -> check bool (B.Backend.to_wire backend ^ " is observed on its own worker") true
         (Result.is_ok (Browser_addon_host.snapshot host ~backend))) B.Backend.all)
 
@@ -101,21 +92,17 @@ let a_user_owned_refusal_routes_its_reclaim () =
 let a_missing_source_fails_alone () =
   run_with [one Owned_firefox [bidi]]
     (fun ~config:_ ~host ~issue ~attached:_ ->
-      refused "a source no worker serves is refused" ~issue B.Automation_route;
       refused "a live client no worker lists is refused" ~issue (live ego);
       reaches "the BiDi client is still served" ~issue (live bidi) B.Backend.Owned_firefox;
       check bool "the missing source has no snapshot" true
-        (Result.is_error (Browser_addon_host.snapshot host ~backend:B.Backend.Automation));
-      check bool "and is unobserved in the choice" false (snapshot host).automation.registered)
+        (Result.is_error (Browser_addon_host.snapshot host ~backend:B.Backend.Ego)))
 
 let a_doubled_source_fails_alone () =
-  run_with [one Automation [];one Automation [];one Ego [ego]]
+  run_with [one External_host [];one External_host [];one Ego [ego]]
     (fun ~config:_ ~host ~issue ~attached:_ ->
-      refused "a source two workers serve is refused" ~issue B.Automation_route;
       reaches "the ego client is still served" ~issue (live ego) B.Backend.Ego;
       check bool "the doubled source has no snapshot" true
-        (Result.is_error (Browser_addon_host.snapshot host ~backend:B.Backend.Automation));
-      check bool "and is unobserved in the choice" false (snapshot host).automation.registered)
+        (Result.is_error (Browser_addon_host.snapshot host ~backend:B.Backend.External_host)))
 
 let independent_ego_spaces_route_exact_clients () =
   let first={ego with space=Some {B.id=51;name="First Goal"}} in
@@ -152,10 +139,10 @@ let unreadable_live_controller_never_authorizes_ego_input () =
   let first={ego with space=Some {B.id=51;name="First Goal"}} in
   let second={ego with client_id=(client 5 B.Ego_lite B.Ego_task_space).client_id;
     space=Some {B.id=52;name="Second Goal"}} in
-  run_with [one Ego [first];one Ego [second];one External_host [extension];one Automation []]
+  run_with [one Ego [first];one Ego [second];one External_host [extension]]
     (fun ~config ~host ~issue:_ ~attached ->
       let first_worker=List.nth attached 0 and second_worker=List.nth attached 1
-      and extension_worker=List.nth attached 2 and automation=List.nth attached 3 in
+      and extension_worker=List.nth attached 2 in
       let bind title client =
         let goal=match Goal_store.upsert_goal_with_events ~actor:"test" config ~title ~metric:"verified" ~target_value:"1" () with
           | Ok (goal, _, _) -> goal.id | Error error -> fail (Goal_store.write_error_to_string error) in
@@ -188,10 +175,9 @@ let unreadable_live_controller_never_authorizes_ego_input () =
       reaches_instance "exact extension input remains independent" attached extension_worker (live extension) goto
         (exact extension goto);
       second_worker.set_snapshot (F.Snapshot_clients [second]);
-      automation.set_snapshot F.Snapshot_unavailable;
-      reaches_instance "unreadable Automation does not block exact Ego input" attached first_worker (live first) goto
+      reaches_instance "a readable sibling admits exact Ego input again" attached first_worker (live first) goto
         (exact first goto);
-      reaches_instance "unreadable Automation does not block a stored Goal" attached first_worker (live first) open_session
+      reaches_instance "and a stored Goal again" attached first_worker (live first) open_session
         (goal first_goal open_session);
       reaches_instance "second distinct Space reaches its exact instance" attached second_worker (live second) goto
         (exact second goto);
@@ -204,15 +190,18 @@ let unreadable_live_controller_never_authorizes_ego_input () =
    it is counted, so the source is not given to another, and a command to it
    is refused before any worker. *)
 let a_service_without_its_command_still_counts () =
-  run_with [{F.serves=B.Backend.Automation;clients=[];exports=false};one Automation [];one Ego [ego]]
-    (fun ~config:_ ~host:_ ~issue ~attached:_ ->
-      refused "a source one exporting and one silent service serve is doubled"
-        ~because:"more than one attached browser Add-on serves" ~issue B.Automation_route;
+  run_with [{F.serves=B.Backend.External_host;clients=[];exports=false};one External_host [];one Ego [ego]]
+    (fun ~config:_ ~host ~issue ~attached:_ ->
+      check bool "a source one exporting and one silent service serve is doubled" true
+        (match Browser_addon_host.snapshot host ~backend:B.Backend.External_host with
+         | Error (Browser_addon_client.Unavailable detail) ->
+             String_util.string_contains_substring ~needle:"more than one attached browser Add-on serves" detail
+         | Ok _|Error (Browser_addon_client.Outcome_unknown _) -> false);
       reaches "the other source is served" ~issue (live ego) B.Backend.Ego);
-  run_with [{F.serves=B.Backend.Automation;clients=[];exports=false};one Ego [ego]]
+  run_with [{F.serves=B.Backend.External_host;clients=[extension];exports=false};one Ego [ego]]
     (fun ~config:_ ~host:_ ~issue ~attached:_ ->
       refused "a command to the silent service is refused" ~because:"advertises no browser command"
-        ~issue B.Automation_route;
+        ~issue (live extension);
       reaches "and the other source is served" ~issue (live ego) B.Backend.Ego)
 
 let a_client_two_workers_list_is_refused () =
@@ -227,7 +216,7 @@ let a_first_poll_needs_the_one_external_host_worker () =
   let poll ~config=
     Unix.mkdir (Filename.concat (Workspace.masc_dir config) Common.browser_lane_dirname) 0o700;
     Browser_addon_ingress.poll ~config ~client:extension ~window_sec:0.001 in
-  run_with [one Automation [];one Ego [ego];one External_host []] (fun ~config ~host:_ ~issue:_ ~attached ->
+  run_with [one Ego [ego];one External_host []] (fun ~config ~host:_ ~issue:_ ~attached ->
     check bool "the poll is answered" true (poll ~config=Ok None);
     List.iter (fun (worker:F.attached) ->
       let expected=if worker.serves=B.Backend.External_host then [B.client_id_to_string extension.client_id] else [] in
@@ -237,7 +226,7 @@ let a_first_poll_needs_the_one_external_host_worker () =
       | Error (Browser_addon_ingress.Unavailable reason) -> reason=expected
       | Ok _|Error (Browser_addon_ingress.Registration_refused _|Outcome_unknown _) -> false)) in
   unavailable "no external host worker among the browser workers"
-    [one Automation [];one Owned_firefox [bidi];one Ego [ego]] Browser_addon_ingress.No_addon;
+    [one Owned_firefox [bidi];one Ego [ego]] Browser_addon_ingress.No_addon;
   unavailable "two external host workers" [one External_host [];one External_host []]
     Browser_addon_ingress.Ambiguous_addons
 

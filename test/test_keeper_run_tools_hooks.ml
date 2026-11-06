@@ -2246,7 +2246,7 @@ let test_no_trailing_tool_message_yields_no_receipt () =
     0 (List.length receipts)
 ;;
 
-let navigate = "keeper_compose_browser-navigate-read"
+let prior_art = "keeper_compose_prior-art"
 let follow = "keeper_compose_browser-live-follow-read"
 let github = "keeper_compose_github-pr-read"
 
@@ -2258,10 +2258,10 @@ let test_skills_block_names_a_deferred_composition_for_search () =
        ("[Skills] 1 composition tools on this turn — each is one call whose reads \
          run in parallel: " ^ github
         ^ "\n[Skills] 2 more composition tools load by name through \
-           keeper_tool_search: " ^ navigate ^ ", " ^ follow))
+           keeper_tool_search: " ^ prior_art ^ ", " ^ follow))
     (Masc.Keeper_run_tools_hooks.skill_compositions_block
-       ~compositions:[ navigate; follow; github ]
-       ~deferred:[ navigate; follow ]
+       ~compositions:[ prior_art; follow; github ]
+       ~deferred:[ prior_art; follow ]
        ~on_the_wire:[ github ])
 ;;
 
@@ -2274,13 +2274,13 @@ let test_skills_block_counts_a_loaded_composition_on_this_turn () =
     "a deferred composition already on the wire is on this turn"
     (Some
        ("[Skills] 2 composition tools on this turn — each is one call whose reads \
-         run in parallel: " ^ navigate ^ ", " ^ github
+         run in parallel: " ^ prior_art ^ ", " ^ github
         ^ "\n[Skills] 1 more composition tools load by name through \
            keeper_tool_search: " ^ follow))
     (Masc.Keeper_run_tools_hooks.skill_compositions_block
-       ~compositions:[ navigate; follow; github ]
-       ~deferred:[ navigate; follow ]
-       ~on_the_wire:[ navigate; github ])
+       ~compositions:[ prior_art; follow; github ]
+       ~deferred:[ prior_art; follow ]
+       ~on_the_wire:[ prior_art; github ])
 ;;
 
 let test_skills_block_is_absent_without_compositions () =
@@ -2290,7 +2290,7 @@ let test_skills_block_is_absent_without_compositions () =
     None
     (Masc.Keeper_run_tools_hooks.skill_compositions_block
        ~compositions:[]
-       ~deferred:[ navigate ]
+       ~deferred:[ prior_art ]
        ~on_the_wire:[])
 ;;
 

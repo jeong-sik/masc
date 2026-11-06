@@ -32,8 +32,8 @@ let test_builtin_wire_ids_are_distinct () =
     (List.length (List.sort_uniq String.compare wires))
 ;;
 
-(* Six exact-output lanes, three Browser Lane backends, two machines: the
-   three types' own enumerations, joined. *)
+(* The exact-output lanes, the Browser Lane, two machines: the three types'
+   own enumerations, joined. *)
 let test_builtins_are_the_three_families () =
   check int "every exact, browser and machine lane once"
     (List.length Standalone_lane.all
@@ -135,16 +135,12 @@ let tool_names builtin =
   List.map Tool_schemas_misc.misc_tool_name (Lane_manifest.tools builtin)
 ;;
 
-(* Sessions and navigation belong to the backends whose browser the server
-   owns; the live browser belongs to the operator. *)
+(* Every browser tool goes to the live browser lane: its connections read,
+   act, navigate the tabs they opened, and bind a Goal to an ego Space. *)
 let test_browser_tools_follow_the_lane_argument () =
-  let session_lanes = Lane_manifest.lanes_of_misc_operation Tool_schemas_misc.Misc_browser_session in
-  check bool "the live browser takes no session" false
-    (List.exists (Lane_id.equal_builtin (Lane_id.Browser Browser_lane.Lane_name.Live)) session_lanes);
-  check bool "automation takes sessions" true
-    (List.exists (Lane_id.equal_builtin (Lane_id.Browser Browser_lane.Lane_name.Automation)) session_lanes);
-  check (list string) "the live browser is read and acted on"
-    [ "masc_browser_tabs"; "masc_browser_read"; "masc_browser_act"; "masc_browser_interact" ]
+  check (list string) "the live browser takes every browser tool"
+    [ "masc_browser_tabs"; "masc_browser_read"; "masc_browser_session"; "masc_browser_goto";
+      "masc_browser_act"; "masc_browser_interact" ]
     (tool_names (Lane_id.Browser Browser_lane.Lane_name.Live))
 ;;
 

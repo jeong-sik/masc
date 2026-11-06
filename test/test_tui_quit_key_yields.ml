@@ -6,7 +6,6 @@ open Masc_tui_types
 let every_text_target =
   [ ("Collab form", Text_collab_form)
   ; ("account login", Text_account_login)
-  ; ("browser url", Text_browser_url)
   ; ("ask answer", Text_ask_answer)
   ; ("fusion launch", Text_fusion_launch)
   ; ("preset name", Text_preset_name)

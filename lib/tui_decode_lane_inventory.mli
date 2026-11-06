@@ -61,7 +61,6 @@ type 'a browser_reading =
 type state =
   | Exact_state of configuration
   | Browser_clients of int browser_reading
-  | Browser_executor of bool browser_reading
   | Machine_state of machine_activity * machine_publication
   | Package_state of { declaration : declaration option; instances : instance list }
 type row = {

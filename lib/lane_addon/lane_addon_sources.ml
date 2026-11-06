@@ -1,8 +1,7 @@
 open Result.Syntax
-type browser_selection = Live of Browser_lane.client_id | Automation
+type browser_selection = Live of Browser_lane.client_id
 let browser_selection_lane = function
   | Live _ -> Browser_lane.Lane_name.(to_wire Live)
-  | Automation -> Browser_lane.Lane_name.(to_wire Automation)
 type lane_output = {
   installation_id : string;
   instance_id : string;
@@ -44,11 +43,9 @@ let kind_of_string s = List.find_opt (fun v -> String.equal (kind_to_string v) s
    how. [offers] and [parse] both read this one match. *)
 type document_observer =
   | Operator_client_observer
-  | Automation_observer
 
 let document_observer = function
   | Browser_lane.Lane_name.Live -> Operator_client_observer
-  | Browser_lane.Lane_name.Automation -> Automation_observer
 
 let kind_of_machine = function
   | Machine_lane.Msx -> Msx_capture_kind
@@ -62,7 +59,7 @@ let offers : Lane_id.builtin -> kind list = function
       | Standalone_lane.Candle_appraiser ) -> []
   | Lane_id.Browser lane ->
     (match document_observer lane with
-     | Operator_client_observer | Automation_observer -> [ Browser_document_kind ])
+     | Operator_client_observer -> [ Browser_document_kind ])
   | Lane_id.Machine machine -> [ kind_of_machine machine ]
 
 let observable_browser_lanes =
@@ -123,9 +120,7 @@ let parse_source = function
              | Some lane ->
                (match document_observer lane, client_id with
                 | Operator_client_observer, Some client -> Ok (Live client)
-                | Operator_client_observer, None -> Error "live browser observation requires an explicit client_id"
-                | Automation_observer, None -> Ok Automation
-                | Automation_observer, Some _ -> Error "automation does not use a live client_id") in
+                | Operator_client_observer, None -> Error "live browser observation requires an explicit client_id") in
            let* tab_id = match List.assoc_opt "tab_id" fields with
              | Some (`Int value) when value >= 0 -> Ok value
              | _ -> Error "tab_id requires a nonnegative integer" in
@@ -451,8 +446,7 @@ let machine_capture ~store ~resolve_machine_output ~machine ~id =
   Ok (envelope ~id ~incarnation ~cursor ~complete:true ~detail:`Null [observation])
 let browser_document ~store ~max_bytes ~read_browser_document ~id ~selection ~tab_id ~target_id ~environment ~request_id =
   let route = match selection with
-    | Live client -> Browser_lane.Live_route (Some client)
-    | Automation -> Browser_lane.Automation_route in
+    | Live client -> Browser_lane.Live_route (Some client) in
   let* fields = match read_browser_document ~route ~tab_id with
     | Error message -> Error message
     | Ok (Browser_lane.Answered (`Assoc envelope)) ->
@@ -468,7 +462,7 @@ let browser_document ~store ~max_bytes ~read_browser_document ~id ~selection ~ta
   let* () = match selection with
     | Live expected when not (String.equal client (Browser_lane.client_id_to_string expected)) ->
         Error "document belongs to a different browser client"
-    | Live _ | Automation -> Ok () in
+    | Live _ -> Ok () in
   let* observed_at = match List.assoc_opt "observedAt" fields with
     | Some (`Float n) when Float.is_finite n -> Ok n
     | Some (`Int n) -> Ok (float_of_int n) | _ -> Error "document timestamp missing" in

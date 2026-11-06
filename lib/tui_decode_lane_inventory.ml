@@ -49,7 +49,6 @@ type 'a browser_reading =
 type state =
   | Exact_state of configuration
   | Browser_clients of int browser_reading
-  | Browser_executor of bool browser_reading
   | Machine_state of machine_activity * machine_publication
   | Package_state of { declaration : declaration option; instances : instance list }
 type row = { id : string; label : string; purpose : string;
@@ -242,9 +241,6 @@ let state json =
   | "browser_clients" -> let* f = fields ["kind";"addon"] json in
       Result.map (fun reading -> Browser_clients reading)
         (get (browser_reading "connected_clients" count) "addon" f)
-  | "browser_executor" -> let* f = fields ["kind";"addon"] json in
-      Result.map (fun reading -> Browser_executor reading)
-        (get (browser_reading "registered" bool) "addon" f)
   | "machine" -> let* f = fields ["kind";"activity";"publication"] json in
       let* activity = get machine_activity "activity" f in
       let* value = get (function `String "no_screen" -> Ok No_screen | `String "stable" -> Ok Stable | `String "running" -> Ok Running | `String "unavailable" -> Ok Publication_unavailable | _ -> error "unknown machine publication") "publication" f in
@@ -262,20 +258,17 @@ let selection_id = function
   | Manual_instance {instance_id;_} -> "instance/" ^ instance_id
 let compatible selection state = match selection,state with
   | Exact _,Exact_state _ | Browser Browser_lane.Lane_name.Live,Browser_clients _
-  | Browser Browser_lane.Lane_name.Automation,Browser_executor _
   | Machine _,Machine_state _ -> true
   | Declaration _,Package_state {declaration=Some _;instances} ->
       List.for_all (fun (item : instance) -> Option.is_some item.applied_revision) instances
   | Manual_instance {instance_id;incarnation},Package_state {declaration=None;instances=[item]} ->
       item.instance_id=instance_id && item.incarnation=incarnation && item.applied_revision=None
-  | Exact _,(Browser_clients _ | Browser_executor _ | Machine_state _ | Package_state _)
-  | Browser Browser_lane.Lane_name.Live,(Exact_state _ | Browser_executor _ | Machine_state _ | Package_state _)
-  | Browser Browser_lane.Lane_name.Automation,
-    (Exact_state _ | Browser_clients _ | Machine_state _ | Package_state _)
-  | Machine _,(Exact_state _ | Browser_clients _ | Browser_executor _ | Package_state _)
-  | Declaration _,(Exact_state _ | Browser_clients _ | Browser_executor _ | Machine_state _
+  | Exact _,(Browser_clients _ | Machine_state _ | Package_state _)
+  | Browser Browser_lane.Lane_name.Live,(Exact_state _ | Machine_state _ | Package_state _)
+  | Machine _,(Exact_state _ | Browser_clients _ | Package_state _)
+  | Declaration _,(Exact_state _ | Browser_clients _ | Machine_state _
                   | Package_state {declaration=None;_})
-  | Manual_instance _,(Exact_state _ | Browser_clients _ | Browser_executor _ | Machine_state _
+  | Manual_instance _,(Exact_state _ | Browser_clients _ | Machine_state _
                       | Package_state {declaration=Some _;_}
                       | Package_state {declaration=None;instances=([] | _ :: _ :: _)}) -> false
 let row json =
@@ -319,10 +312,9 @@ let exact_matches snapshot (row : row) = match row.selection,row.state with
                && item.sl_admission_error=c.admission_error)
   | ((Browser _ | Machine _ | Declaration _ | Manual_instance _), Exact_state _)
   | ((Browser _ | Machine _ | Declaration _ | Manual_instance _), Browser_clients _)
-  | ((Browser _ | Machine _ | Declaration _ | Manual_instance _), Browser_executor _)
   | ((Browser _ | Machine _ | Declaration _ | Manual_instance _), Machine_state (_, _))
   | ((Browser _ | Machine _ | Declaration _ | Manual_instance _), Package_state _) -> true
-  | (Exact _, Browser_clients _) | (Exact _, Browser_executor _)
+  | (Exact _, Browser_clients _)
   | (Exact _, Machine_state (_, _)) | (Exact _, Package_state _) -> false
 
 let decode json =
@@ -335,7 +327,7 @@ let decode json =
   let* () = unique_ids "row id" (List.map (fun (row : row) -> row.id) rows) in
   let* () = unique_ids "instance id" (List.concat_map (fun (row : row) -> match row.state with
     | Package_state {instances;_} -> List.map (fun (i : instance) -> i.instance_id) instances
-    | Exact_state _ | Browser_clients _ | Browser_executor _ | Machine_state _ -> []) rows) in
+    | Exact_state _ | Browser_clients _ | Machine_state _ -> []) rows) in
   let* () = if List.for_all (fun lane ->
     List.exists (fun (row : row) -> row.id=Lane_id.to_wire (Lane_id.Builtin lane)) rows) Lane_id.all_of_builtin
     then Ok () else error "missing built-in lane" in

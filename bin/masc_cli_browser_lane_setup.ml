@@ -1,14 +1,13 @@
 module Launcher = Masc.Browser_lane_launcher
 module Setup = Masc.Browser_lane_setup
 module Bidi_setup = Masc.Browser_lane_bidi_setup
-module Automation_setup = Masc.Browser_lane_automation_setup
 module Addon_setup = Masc.Browser_addon_setup
 module Ego_setup = Masc.Browser_lane_ego_setup
 module Table_writes = Masc.Browser_lane_table_writes
 
-type mode = Addon | Extension | Bidi | Ego | Host | Automation
+type mode = Addon | Extension | Bidi | Ego | Host
 
-let all_modes = [ Addon; Extension; Bidi; Ego; Host; Automation ]
+let all_modes = [ Addon; Extension; Bidi; Ego; Host ]
 
 let mode_name = function
   | Addon -> "addon"
@@ -16,10 +15,8 @@ let mode_name = function
   | Bidi -> "bidi"
   | Ego -> "ego"
   | Host -> "host"
-  | Automation -> "automation"
 
-(* These modes install the native host and launcher assets. Automation uses
-   the attached browser Add-on's geckodriver and needs neither asset. *)
+(* These modes install the native host and launcher assets. *)
 let host_modes = [ Extension; Bidi; Host ]
 let installs_host modes = List.exists (fun mode -> List.mem mode modes) host_modes
 
@@ -101,16 +98,6 @@ let bidi_plan ~modes ~store ~firefox ~profile ~port =
       }
     |> Result.map Option.some
     |> Result.map_error Bidi_setup.error_message
-
-let automation_plan ~modes ~store ~geckodriver ~browser =
-  if not (List.mem Automation modes)
-  then Ok None
-  else
-    Automation_setup.plan
-      ~find_geckodriver:Automation_setup.installed_geckodriver
-      { Automation_setup.store; geckodriver; browser }
-    |> Result.map Option.some
-    |> Result.map_error Automation_setup.error_message
 
 let ego_plan ~modes ~store ~ego_command ~ego_space =
   if not (List.mem Ego modes)
@@ -198,43 +185,6 @@ let print_bidi_state ~base_path ~(store : Masc.Runtime_table_edit.store) =
     (Masc.Browser_bidi_host_status.message
        (Masc.Browser_bidi_host_status.observe ~access:Masc.Lane_addon_sources.Operator_configuration
           ~base_path ~configuration))
-
-let automation_key_names keys = String.concat ", " (List.map Automation_setup.key_name keys)
-
-let print_automation ~runtime_config_path plan =
-  let { Browser_configuration.driver; binary } = Automation_setup.table plan in
-  let where =
-    match Automation_setup.location plan with
-    | Automation_setup.New_table | Automation_setup.Automation_table -> "[browser.automation]"
-    | Automation_setup.Browser_table -> "[browser]"
-  in
-  print_endline "";
-  (match Automation_setup.change plan with
-   | Automation_setup.Created -> Printf.printf "Wrote %s to %s:\n" where runtime_config_path
-   | Automation_setup.Updated keys ->
-     Printf.printf "Changed %s in %s of %s:\n" (automation_key_names keys) where
-       runtime_config_path
-   | Automation_setup.Unchanged ->
-     Printf.printf
-       "%s in %s was already there and is left as it is. To change a value, name it with \
-        --geckodriver or --browser:\n"
-       where runtime_config_path);
-  Printf.printf "  geckodriver  %s\n" driver;
-  Printf.printf "  browser      %s\n"
-    (match binary with
-     | Some path -> path
-     | None -> "(geckodriver finds it)");
-  List.iter (Printf.printf "Note: %s\n") (Automation_setup.notes plan);
-  print_endline "";
-  print_endline "Next, for the automation lane:";
-  print_endline
-    "  Restart the MASC server to load the updated runtime.toml. A browser Add-on that was \
-     attached before keeps its old settings until it is detached; the server attaches its \
-     declaration again on the next maintenance pass. The attached Add-on owns this \
-     geckodriver and stops it during detach. Each new automation session uses a fresh \
-     profile; logins do not carry over to a new session.";
-  print_endline
-    "  A browser that needs a login is another route: --mode bidi or --mode extension."
 
 let ego_key_names keys = String.concat ", " (List.map Ego_setup.key_name keys)
 
@@ -361,18 +311,16 @@ let addon_sources ~base_path ~(configuration : Browser_configuration.t) ~modes =
     | Launcher.Not_installed | Launcher.Undeclared | Launcher.Unreadable
     | Launcher.Describes_another_launcher -> false in
   let table_present : Browser_lane.Backend.t -> bool = function
-    | Automation -> Option.is_some configuration.automation
     | Owned_firefox -> Option.is_some configuration.live_bidi
     | Ego -> Option.is_some configuration.live_ego
     | External_host -> false in
   let written_here : Browser_lane.Backend.t -> bool = function
-    | Automation -> List.mem Automation modes
     | Owned_firefox -> List.mem Bidi modes
     | Ego -> List.mem Ego modes
     | External_host -> false in
   let sources = List.filter (fun (backend : Browser_lane.Backend.t) -> match backend with
       | External_host -> installs_host modes || host_installed
-      | Automation | Owned_firefox | Ego -> table_present backend || written_here backend)
+      | Owned_firefox | Ego -> table_present backend || written_here backend)
       Browser_lane.Backend.all in
   sources, List.filter (fun backend -> written_here backend && not (table_present backend)) sources
 
@@ -428,8 +376,6 @@ let install
       ~firefox
       ~profile
       ~port
-      ~geckodriver
-      ~browser
       ~ego_command
       ~ego_space
   =
@@ -441,15 +387,12 @@ let install
     let* addon = plan_addon ~base_path ~store ~modes addon_choice in
     let* extension = refused (extension_route ~modes ~manifest_dir ~host_name) in
     let* bidi = refused (bidi_plan ~modes ~store ~firefox ~profile ~port) in
-    let* automation =
-      refused (automation_plan ~modes ~store ~geckodriver ~browser)
-    in
     let* ego = refused (ego_plan ~modes ~store ~ego_command ~ego_space) in
-    Ok (addon, extension, bidi, automation, ego)
+    Ok (addon, extension, bidi, ego)
   in
   match planned with
   | Error (status, message) -> refuse_with status message
-  | Ok (addon, extension, bidi, automation, ego) ->
+  | Ok (addon, extension, bidi, ego) ->
     (* Install the requested host assets, then write the configuration
        tables, then each browser source's package and declaration. A source
        whose table this run writes is declared only once that table is
@@ -483,14 +426,6 @@ let install
               |> Result.map_error Bidi_setup.error_message)
            bidi
        in
-       let automation_step =
-         Option.map
-           (fun plan ~after_write ->
-              (let* plan = if after_write then Automation_setup.replan plan else Ok plan in
-               Automation_setup.apply plan |> Result.map (fun () -> plan))
-              |> Result.map_error Automation_setup.error_message)
-           automation
-       in
        let ego_step =
          Option.map
            (fun plan ~after_write ->
@@ -500,7 +435,7 @@ let install
            ego
        in
        let { Table_writes.written; refusal } =
-         Table_writes.write ~bidi:bidi_step ~automation:automation_step ~ego:ego_step
+         Table_writes.write ~bidi:bidi_step ~ego:ego_step
        in
        Option.iter
          (fun (installed : Setup.installed) -> Option.iter print_extension_steps installed.extension)
@@ -510,13 +445,11 @@ let install
             print_table ~runtime_config_path:store.path plan applied;
             print_bidi_steps plan)
          written.bidi;
-       Option.iter (print_automation ~runtime_config_path:store.path) written.automation;
        Option.iter (print_ego ~runtime_config_path:store.path) written.ego;
        (* A source whose table this run was to write and did not is left out.
           The others are declared even after a table refusal, since their
           workers do not start from that table. *)
        let table_written : Browser_lane.Backend.t -> bool = function
-         | Automation -> Option.is_some written.automation
          | Owned_firefox -> Option.is_some written.bidi
          | Ego -> Option.is_some written.ego
          | External_host -> false
@@ -570,7 +503,7 @@ let install
 
 (* The modes that write a table of runtime.toml. *)
 let writes_a_table = function
-  | Bidi | Automation | Ego -> true
+  | Bidi | Ego -> true
   | Addon | Extension | Host -> false
 
 let run
@@ -588,8 +521,6 @@ let run
       ~firefox
       ~profile
       ~port
-      ~geckodriver
-      ~browser
       ~ego_command
       ~ego_space
   =
@@ -604,12 +535,10 @@ let run
       ; "--firefox", Option.is_some firefox, [ Bidi ]
       ; "--profile", Option.is_some profile, [ Bidi ]
       ; "--port", Option.is_some port, [ Bidi ]
-      ; "--geckodriver", Option.is_some geckodriver, [ Automation ]
-      ; "--browser", Option.is_some browser, [ Automation ]
       ; "--ego-command", Option.is_some ego_command, [ Ego ]
       ; "--ego-space", Option.is_some ego_space, [ Ego ]
-      ; "--no-addon", no_addon, [ Extension; Bidi; Ego; Host; Automation ]
-      ; "--agent", agent_named, [ Bidi; Automation; Ego ]
+      ; "--no-addon", no_addon, [ Extension; Bidi; Ego; Host ]
+      ; "--agent", agent_named, [ Bidi; Ego ]
       ]
   with
   | Some message -> refuse message
@@ -635,8 +564,6 @@ let run
            ~firefox
            ~profile
            ~port
-           ~geckodriver
-           ~browser
            ~ego_command
            ~ego_space
        in

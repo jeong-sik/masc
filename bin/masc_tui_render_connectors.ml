@@ -122,11 +122,9 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
        ^ Option.value (connection_label view) ~default:"no browser")
       read_style (Browser_lane_view.read_status_label read_status) Ansi.reset in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"connectors" ~title
-    ~hints:(match view.client_picker, view.url_draft with
-      | Some _, _ -> "↑/↓:choose  Enter:use browser  r:reload connections  A:advanced  Esc:cancel"
-      | None, Some _ when busy view -> "Capture in flight • Enter after completion • Esc:cancel URL"
-      | None, Some _ -> "Enter:go  Esc:cancel  Ctrl-U:clear  Ctrl-O:screenshot"
-      | None, None when Option.is_some view.scene ->
+    ~hints:(match view.client_picker with
+      | Some _ -> "↑/↓:choose  Enter:use browser  r:reload connections  A:advanced  Esc:cancel"
+      | None when Option.is_some view.scene ->
           let action = match Option.bind (selected_scene_target view) scene_target_action with
             | Some Read_region -> "Enter:read region  "
             | Some Follow_link -> "Enter:follow link  "
@@ -135,9 +133,9 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
           let article_hint =
             if Browser_lane_view.scene_has_articles view then "N/P:article  " else "" in
           "b:choose browser  " ^ action ^ "m:main  J/K:page scroll  Tab/Shift-Tab:action  " ^ article_hint ^ "n/p:element  v:regions  s:text  y:copy  h:observations  Ctrl-O:image"
-      | None, None when Option.is_some view.scene_guard ->
+      | None when Option.is_some view.scene_guard ->
           "b:choose browser  m:main  J/K:page scroll  r:recheck followed destination  s:recheck text  h:observations  Ctrl-O:image"
-      | None, None -> Masc_tui_keys.footer_hints_browser_lane ^ "  s:scene  v:regions  h:observations")
+      | None -> Masc_tui_keys.footer_hints_browser_lane ^ "  s:scene  v:regions  h:observations")
     ~body:(fun ~budget c ->
       let status, style = match view.load with
         | Loading (_, Discover _) -> "Reading browser connections…", Theme.info ()
@@ -146,9 +144,6 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
              | Some browser -> "Reading " ^ browser ^ "…"
              | None -> "Reading…"), Theme.info ()
         | Loading (_, Read_refresh) -> "Refreshing browser text…", Theme.info ()
-        | Loading (_, Open_session) -> "Opening work browser…", Theme.info ()
-        | Loading (_, Close_session) -> "Closing work browser…", Theme.info ()
-        | Loading (_, Goto _) -> "Navigating selected browser…", Theme.info ()
         | Loading (_, Scene_regions _) -> "Reading page regions…", Theme.info ()
         | Loading (_, Scene_scroll _) -> "Scrolling page and refreshing scene…", Theme.info ()
         | Loading (_, Scene_focus _) -> "Reading selected page region…", Theme.info ()
@@ -184,10 +179,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
               | Some _ -> " · followed destination pending · r:recheck"
               | None -> "" in
             "Cause: " ^ Terminal_text.single_line detail ^ retry, Theme.bad ()
-        | No_browser ->
-            (match view.source with
-             | Live -> "Browser bridge not connected"
-             | Automation -> "Browser session closed • o:open"), Theme.recede ()
+        | No_browser -> "Browser bridge not connected", Theme.recede ()
         | Idle when Option.is_some view.scene ->
             (match view.scene with
              | Some scene ->
@@ -217,7 +209,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       List.iter (fun (style, row) -> c.push_styled ~style row) connection_rows;
       match view.client_picker with
       | Some cursor ->
-          c.push_styled ~style:(Theme.info ()) "  Choose browser · separate sessions do not share login";
+          c.push_styled ~style:(Theme.info ()) "  Choose browser";
           c.push_divider ();
           (* The rows under the choices cannot be scrolled to. Where they
              report a BiDi host, one that runs or ran, the first of them
@@ -289,9 +281,8 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       List.iter (fun row -> c.push_styled ~style:(Theme.warn ()) ("  " ^ row))
         (Browser_lane_view.unserved_rows view);
       c.push_styled ~style:(Theme.info ())
-        (match view.url_draft with
-         | Some draft -> browser_lane_url_line ~cols draft
-         | None when Option.is_some view.scene ->
+        (match view.scene with
+         | Some _ ->
              (match List.nth_opt (scene_targets view) view.scene_cursor with
               | Some node ->
                   let label = match node.kind with
@@ -300,9 +291,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
                   Printf.sprintf "  %s %d/%d: %s • n/p:select • y:copy context"
                     label (view.scene_cursor + 1) (List.length (scene_targets view)) (Terminal_text.single_line node.text)
               | None -> "  No observed elements in this viewport • Ctrl-O:image")
-         | None -> match view.source with
-             | Live -> live_connection_row view
-             | Automation -> "  Work browser • b:choose browser • g:URL • o:open / x:close • A:advanced");
+         | None -> live_connection_row view);
       let tabs, page = match view.reading with
         | None -> [], None
         | Some reading -> reading.tabs, reading.page

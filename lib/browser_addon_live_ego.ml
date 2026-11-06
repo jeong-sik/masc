@@ -304,8 +304,8 @@ let remove_capture_directory directory = Eio_unix.run_in_systhread (fun () ->
     | () -> Ok ()
     | exception Unix.Unix_error (code, _, _) -> unix_error directory code)
 
-(* The ego connection's downloads sit beside the owned Gecko's, in the
-   worker's download folder the broker publishes from. *)
+(* The ego connection's downloads sit in the worker's download folder the
+   broker publishes from. *)
 let downloads_folder = "ego"
 type user_owned_name = { space : string; ids : int list; observed_at : float }
 (* The bound Space ego no longer lists, as the connection last saw it. *)

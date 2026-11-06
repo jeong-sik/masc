@@ -8,7 +8,7 @@ type searxng_container =
   | Searxng_unusable of string
 type dependency = Sandbox of Sandbox_readiness.backend | Codex_cli | Claude_cli | Antigravity_cli
   | Muse_cli | Pdf_tools | Presentation_tools of {base_path:string} | Whisper_cli
-  | Geckodriver | Firefox | Ego_browser | Searxng of { config_dir : string }
+  | Firefox | Ego_browser | Searxng of { config_dir : string }
 type action_effect = Open_official_installer of { url : string; argv : string list }
   | Run_commands of string list list
   | Install_official_cli of Runtime_official_cli_install.client
@@ -55,8 +55,6 @@ let whisper_formula_source = "https://formulae.brew.sh/formula/whisper-cpp"
 let whisper_models_source = "https://huggingface.co/ggerganov/whisper.cpp"
 let sox_formula_source = "https://formulae.brew.sh/formula/sox"
 let sox_source = "https://sourceforge.net/projects/sox/"
-let geckodriver_formula_source = "https://formulae.brew.sh/formula/geckodriver"
-let geckodriver_source = "https://github.com/mozilla/geckodriver/releases"
 let searxng_docker_source = "https://docs.searxng.org/admin/installation-docker.html"
 let firefox_cask_source = "https://formulae.brew.sh/cask/firefox"
 let firefox_linux_source = "https://support.mozilla.org/en-US/kb/install-firefox-linux"
@@ -294,20 +292,10 @@ let rec catalog ?model_dir ?(apple_builder=Builder_unchecked)
           ~source_url:"https://www.libreoffice.org/installation-instructions/" "https://www.libreoffice.org/installation-instructions/"]
       | Unsupported, _ -> [] in
     renderer @ [parser] @ catalog ?model_dir ~host ~distribution Pdf_tools
-  (* The automation lane starts geckodriver itself, and geckodriver starts
-     Firefox, so a workspace needs both on the host. One action each: neither
-     is a service, and neither action writes runtime.toml -- naming the
-     executable there is a separate step, which needs the absolute path this
-     install leaves behind and so has to follow it. *)
-  | Geckodriver, Macos _ ->
-    [commands ~id:"geckodriver_brew_install" ~label:"Install geckodriver with Homebrew"
-       ~detail:"Install the geckodriver formula through the existing Homebrew package manager. Homebrew must already be installed; MASC does not install Homebrew or developer tools. The executable is checked after installation. Naming it in runtime.toml and restarting the server are separate steps."
-       ~source_url:geckodriver_formula_source ~requires_admin:false
-       [[homebrew;"install";"geckodriver"]]]
-  | Geckodriver, Linux _ ->
-    [open_ ~id:"geckodriver_releases" ~label:"Open the geckodriver releases"
-       ~detail:"Download the release for this machine and put its geckodriver executable on the PATH of the shell that runs this check, then refresh detection. Detection reports the absolute path it found; that path is what runtime.toml names. Distributions package it under different names, so this opens the project's own releases instead of guessing one."
-       ~source_url:geckodriver_source geckodriver_source]
+  (* The live BiDi connection starts Firefox itself. The action is not a
+     service and does not write runtime.toml -- naming the executable there is
+     a separate step, which needs the absolute path this install leaves behind
+     and so has to follow it. *)
   | Firefox, Macos _ ->
     [commands ~id:"firefox_brew_install" ~label:"Install Firefox with Homebrew"
        ~detail:"Install the Firefox cask through the existing Homebrew package manager. Homebrew must already be installed; MASC does not install Homebrew or developer tools. Homebrew stops without changing anything when Firefox.app is already in /Applications; that Firefox is used as it is. The executable is checked after installation."

@@ -22,8 +22,8 @@ let finalize ~socket ~client ~store ~name ~arguments ~principal ~result =
     (* The worker's own receipt names no browser; the route is the one the
        host chose and sent in the arguments. *)
     let* ()=match route with
-      | B.Automation_route|Live_route (Some _) -> Ok ()
-      | Live_route None -> Error "download artifacts require the owned Gecko or a selected live connection" in
+      | B.Live_route (Some _) -> Ok ()
+      | Live_route None -> Error "download artifacts require a selected live connection" in
     let* reply=W.reply_of_json value in
 
     let* payload=match reply with

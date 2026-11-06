@@ -171,7 +171,7 @@ let addon_result_targets (state : state) =
         | Inventory.Package_state
             { declaration = (Some (Inventory.Invalid _ | Inventory.Absent | Inventory.Unobserved) | None); _ }
         | Inventory.Exact_state _ | Inventory.Browser_clients _
-        | Inventory.Browser_executor _ | Inventory.Machine_state _ -> None) snapshot.rows in
+        | Inventory.Machine_state _ -> None) snapshot.rows in
   let from_addons =
     let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
     match view.snapshot with

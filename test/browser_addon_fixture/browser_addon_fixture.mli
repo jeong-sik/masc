@@ -12,9 +12,8 @@ val with_worker :
   env:Eio_unix.Stdenv.base -> config:Masc.Workspace.config ->
   respond:(route:Browser_lane.route -> Browser_lane.verb -> Browser_lane.answer) ->
   (t -> 'a) -> 'a
-(** One scripted worker per source the old single browser worker served: the
-    owned automation source and the external hosts that list
-    [clients], each of its own one-source package and answered by [respond].
+(** One scripted worker of the external hosts that list [clients], with its
+    own one-source package and answered by [respond].
     Owns attachment and confirmed detach of every one, and restores the prior
     PATH and Runtime snapshot. Owns the Eio test context, an inert browser
     configuration and full environment for that lifetime; scripted workers
@@ -28,9 +27,8 @@ val with_worker :
     acknowledged. *)
 
 (** One scripted worker of a package that serves [serves], reporting
-    [clients] in its snapshot and, as registered, the automation source it
-    serves. Its package exports the browser command only when
-    [exports]. *)
+    [clients] in its snapshot. Its package exports the browser command only
+    when [exports]. *)
 type worker = { serves : Browser_lane.Backend.t; clients : Browser_lane.client_info list; exports : bool }
 
 type snapshot_state = Snapshot_clients of Browser_lane.client_info list | Snapshot_unavailable

@@ -40,7 +40,7 @@ const instance = Schema.Struct({ instance_id: text, incarnation: text, run_id: t
   title: text, package_revision: text, presence: Schema.Literal('live', 'retained'), phase,
   ui_category: optionalLaneAddonCategory,
   applied_revision: Schema.NullOr(text) })
-// The server reads the three built-in browser rows from the browser Add-on's
+// The server reads the built-in browser row from the browser Add-on's
 // published observation: the observed value; with none, whether no Add-on is
 // declared, it is switched off or it is declared on and not running; or why
 // it is unreadable.
@@ -48,16 +48,12 @@ const browserAddonUnobserved = Schema.Struct({ kind: Schema.Literal('absent', 'o
 const browserAddonUnavailable = Schema.Struct({ kind: Schema.Literal('unavailable'), detail: Schema.String })
 const browserClientsAddon = Schema.Union(
   Schema.Struct({ kind: Schema.Literal('observed'), connected_clients: count }), browserAddonUnobserved, browserAddonUnavailable)
-const browserExecutorAddon = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal('observed'), registered: Schema.Boolean }), browserAddonUnobserved, browserAddonUnavailable)
 const common = { id: text, label: text, purpose: text, ui_category: optionalLaneAddonCategory }
 const row = Schema.Union(
   Schema.Struct({ ...common, selection: Schema.Struct({ kind: Schema.Literal('exact'), lane_id: Schema.Literal(...LANE_IDS) }),
     state: Schema.Struct({ kind: Schema.Literal('exact'), configuration }) }),
   Schema.Struct({ ...common, selection: Schema.Struct({ kind: Schema.Literal('browser'), lane: Schema.Literal('live') }),
     state: Schema.Struct({ kind: Schema.Literal('browser_clients'), addon: browserClientsAddon }) }),
-  Schema.Struct({ ...common, selection: Schema.Struct({ kind: Schema.Literal('browser'), lane: Schema.Literal('automation') }),
-    state: Schema.Struct({ kind: Schema.Literal('browser_executor'), addon: browserExecutorAddon }) }),
   Schema.Struct({ ...common, selection: Schema.Struct({ kind: Schema.Literal('machine'), machine: Schema.Literal('msx', 'dos') }),
     state: Schema.Struct({ kind: Schema.Literal('machine'), activity: Schema.Literal('on', 'off', 'unobserved'),
       publication: Schema.Literal('no_screen', 'stable', 'running', 'unavailable') }) }),
@@ -76,7 +72,7 @@ export function parseLaneInventory(raw: unknown) {
   const parsed = Schema.decodeUnknownSync(snapshot)(raw)
   const exact = parseStandaloneLanesSnapshot(parsed.exact_snapshot)
   const ids = new Set<string>(), workers = new Set<string>()
-  const builtins = new Set([...LANE_IDS.map(id => `exact/${id}`), 'browser/live', 'browser/automation',
+  const builtins = new Set([...LANE_IDS.map(id => `exact/${id}`), 'browser/live',
     'machine/msx', 'machine/dos'])
   for (const item of parsed.rows) {
     const selection = item.selection

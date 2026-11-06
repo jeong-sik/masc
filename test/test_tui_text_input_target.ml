@@ -32,7 +32,6 @@ let target =
       | Some Tui_types.Text_identity_app_form -> "identity-app-form"
       | Some Tui_types.Text_identity_filter -> "identity-filter"
       | Some Tui_types.Text_github_token -> "github-token"
-      | Some Tui_types.Text_browser_url -> "browser-url"
       | Some Tui_types.Text_ask_answer -> "ask-answer"
       | Some Tui_types.Text_board_draft -> "board-draft"
       | Some Tui_types.Text_board_attach_path -> "board-attach-path"
@@ -516,21 +515,6 @@ let test_the_palette_claims_over_a_board_draft () =
   check target "palette first" (Some Tui_types.Text_palette) (resolved state)
 ;;
 
-let test_browser_url_input_ownership () =
-  let state = fresh_state () in
-  let open Tui_types.Browser_lane_view in
-  Tui_types.show_browser_lane state;
-  state.Tui_types.browser_lane <- Some
-    { (switch_source Automation (create ())) with url_draft = Some "https://example.org" };
-  check target "URL owns typing and paste" (Some Tui_types.Text_browser_url) (resolved state);
-  state.Tui_types.palette_open <- true;
-  check target "palette takes priority" (Some Tui_types.Text_palette) (resolved state);
-  state.Tui_types.palette_open <- false;
-  check target "hidden compact URL does not take input" None (resolved ~compact_viewport:true state);
-  state.Tui_types.view <- Tui_types.Overview;
-  check target "hidden URL does not capture another surface" None (resolved state)
-;;
-
 let test_browser_reader_chrome_scope () =
   let state = fresh_state () in
   let module Lane = Tui_types.Browser_lane_view in
@@ -545,7 +529,7 @@ let test_browser_reader_chrome_scope () =
     state.Tui_types.view <- Tui_types.Keepers Tui_types.Keeper_detail;
     check bool "retained browser does not hide Keeper chrome" true
       (Option.is_none (Tui_types.browser_lane_on_screen state)))
-    [Lane.Live; Lane.Automation];
+    [Lane.Live];
   state.Tui_types.view <- Tui_types.Connectors;
   state.Tui_types.browser_lane <- None;
   check bool "connector routing retains Keeper context" true
@@ -902,7 +886,6 @@ let () =
           test_case "reader discards active and queued voice" `Quick test_reader_discards_active_and_queued_voice;
           test_case "workspace withdrawal discards queued voice" `Quick test_workspace_withdrawal_discards_queued_voice;
           test_case "browser reader chrome scope" `Quick test_browser_reader_chrome_scope;
-          test_case "browser URL input ownership" `Quick test_browser_url_input_ownership;
           test_case "github token claims input when active" `Quick test_github_token_claims_input_when_active;
           test_case "nothing claims a plain surface" `Quick
             test_nothing_claims_a_plain_surface;

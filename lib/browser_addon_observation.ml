@@ -67,16 +67,13 @@ type published = {
   clients : Browser_lane.client_info list;
   space_presence : (Browser_lane.client_id * Browser_ego_space_observation.presence) list;
   client_rows : Yojson.Safe.t list;
-  automation : Browser_selection.work_browser;
   unavailable : unavailable list;
 }
 
 let decode_snapshot = function
   | `Assoc fields ->
-      (match List.assoc_opt "state" fields,List.assoc_opt "owned_backends" fields,
-         List.assoc_opt "clients" fields with
-       | Some (`String "serving"),Some owned,Some (`List rows) ->
-           let* automation=Browser_addon_inventory.owned_of_json owned in
+      (match List.assoc_opt "state" fields,List.assoc_opt "clients" fields with
+       | Some (`String "serving"),Some (`List rows) ->
            let rec decode acc = function
              | [] -> Ok (List.rev acc)
              | `Assoc row::rest ->
@@ -121,9 +118,9 @@ let decode_snapshot = function
              | None -> Ok []
              | Some (`List rows) -> unavailable [] rows
              | Some _ -> Error "invalid unavailable browser backends" in
-           Ok {clients;space_presence;client_rows=rows;automation;unavailable}
-       | Some (`String "retired"),(None|Some _),(None|Some _) -> Error "the browser worker is retired"
-       | (None|Some _),(None|Some _),(None|Some _) -> Error "browser inventory is unavailable")
+           Ok {clients;space_presence;client_rows=rows;unavailable}
+       | Some (`String "retired"),(None|Some _) -> Error "the browser worker is retired"
+       | (None|Some _),(None|Some _) -> Error "browser inventory is unavailable")
   | _ -> Error "browser inventory is unavailable"
 
 (* The runtime stores an observation with every row id and lane id prefixed
@@ -133,8 +130,6 @@ let read (output : Lane_addon_types.output) = match output.rows with
   | [ row ] -> decode_snapshot (`Assoc row.fields)
   | [] | _::_::_ -> Error "the browser observation does not hold exactly the browser worker row"
 
-let unobserved : Browser_selection.work_browser =
-  {activity=Browser_lane.Unobserved;registered=false;session=Browser_lane.Browser_unknown;locate=false}
 let serves_live backend = Browser_lane.Backend.lane backend = Browser_lane.Lane_name.Live
 type live_conflict = Duplicate_client of Browser_lane.client_id | Duplicate_ego_space of int
 module Client_map = Map.Make (struct type t=Browser_lane.client_id let compare=compare end)
@@ -172,7 +167,7 @@ let check_ego_identity knowledge (client:Browser_lane.client_info) =
       Error "live browser controller identities are incomplete; the Ego Space may have another controller, so no browser command was dispatched"
   | Known_ego_identities,(Ego_task_space|Web_extension|Webdriver_bidi)
   | Unknown_ego_identities,(Web_extension|Webdriver_bidi) -> Ok ()
-let merge ~among workers =
+let merge workers =
   let live=List.filter_map (fun (backend,published) -> if serves_live backend then published else None) workers in
   let clients=List.concat_map (fun published -> published.clients) live in
   let conflicts=live_conflicts clients in
@@ -185,12 +180,7 @@ let merge ~among workers =
       | client::clients,row::rows -> align (if usable client then row::acc else acc) clients rows
       | [],_::_ | _::_,[] -> [] in
     align [] published.clients published.client_rows in
-  let owned source pick =
-    match List.filter ((=) source) among,List.filter (fun (backend,_) -> backend=source) workers with
-    | [_],[_,Some published] -> pick published
-    | ([]|_::_),([]|_::_) -> unobserved in
   { clients;
     space_presence=List.concat_map (fun published -> List.filter (fun (id,_) -> has_id id) published.space_presence) live;
     client_rows=List.concat_map rows live;
-    unavailable=List.concat_map (fun published -> published.unavailable) live;
-    automation=owned Browser_lane.Backend.Automation (fun published -> published.automation) }
+    unavailable=List.concat_map (fun published -> published.unavailable) live }

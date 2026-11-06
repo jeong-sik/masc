@@ -747,7 +747,7 @@ let test_browser_lanes_highlight_config () =
         (Masc_tui_surface_navigation.surface_ring_index state Config) index;
       check Alcotest.bool "the selected ring entry is Config, not the fallback"
         true (fst (List.nth (Masc_tui_types.surface_ring) index) = Config))
-    [Browser_lane_view.Live; Browser_lane_view.Automation];
+    [Browser_lane_view.Live];
   state.browser_lane <- None;
   check Alcotest.int "closing the reader restores the Keeper parent"
     (Masc_tui_surface_navigation.surface_ring_index state (Keepers Keeper_list))

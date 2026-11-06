@@ -3,9 +3,7 @@
  (modules test_keeper_tool_dispatch_runtime)
  (deps
   ../bin/masc_native_addon_launcher.exe
-  fixtures/browser-webdriver-script.cjs
-  ../skills/browser-live-follow-read/SKILL.md
-  ../skills/browser-navigate-read/SKILL.md)
+  ../skills/browser-live-follow-read/SKILL.md)
  (libraries
   browser_addon_fixture
   mtime

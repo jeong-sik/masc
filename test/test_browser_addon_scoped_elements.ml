@@ -1,11 +1,12 @@
 (* The exported browser_command tool relays a scoped elements read. An
    extension built before [within] answers it with every control; the tool
-   refuses that answer instead of returning it as scoped. The backend is
-   scripted; no browser runs. *)
+   refuses that answer instead of returning it as scoped. The live connection
+   is scripted; no browser runs. *)
 open Alcotest
 module B = Browser_lane
 module Owner = Masc.Browser_addon_owner
 module Tool = Masc.Browser_addon_tool
+module W = Masc.Browser_addon_wire
 
 let ok = function Ok value -> value | Error detail -> fail detail
 
@@ -23,14 +24,27 @@ let scoped_answers_need_their_match_count () =
       let owner = ok (Owner.create ~incarnation:"0b000000-0000-4000-8000-000000000072") in
       Eio.Switch.on_release sw (fun () -> Owner.revoke owner);
       let answer = ref `Null in
-      let execute _verb = B.Answered (`Assoc ["ok", `Bool true; "data", !answer]) in
-      ignore (ok (Owner.attach_automation owner ~locate:false ~execute
-        ~session:(fun () -> B.Browser_open)
-        ~document:(fun ~tab_id:_ -> B.Lane_absent)
-        ~cleanup:(fun () -> Ok ())));
+      (* A BiDi connection this worker polls: it answers every command with
+         [answer] until the owner retires. *)
+      let client_id = ok (B.client_id_of_string "0c000000-0000-4000-8000-000000000072") in
+      let client = {B.client_id;browser=B.Firefox;version="fixture";engine_version="fixture";
+        transport=B.Webdriver_bidi;space=None} in
+      let send command = Owner.dispatch owner {W.incarnation=Owner.incarnation owner;command} in
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+        let rec serve () = match send (W.Poll {client;window_sec=3600.}) with
+          | W.Poll_result {command=None;_} -> serve ()
+          | W.Poll_result {command=Some command;_} ->
+              ignore (send (W.Deliver {client_id;id=command.id;
+                payload=`Assoc ["ok", `Bool true; "data", !answer]}));
+              serve ()
+          | W.Service_refusal _|Snapshot_result _|Model_reply _|Download_reply _|Receipt|Issue_result _ -> `Stop_daemon in
+        serve ());
+      let rec registered () = if B.connected_clients () = [] then (Eio.Fiber.yield (); registered ()) in
+      registered ();
       let invoke verb =
         Tool.invoke ~owner ~principal:(Lane_addon_call_context.Host_actor "scoped-elements-test")
-          (`Assoc ["lane", `String "automation"; "command", B.verb_json verb]) in
+          (`Assoc ["lane", `String "live"; "clientId", `String (B.client_id_to_string client_id);
+            "command", B.verb_json verb]) in
       let every_control = `Assoc ["tabId", `Int 7; "total", `Int 744; "truncated", `Bool true;
         "elements", `List [`Assoc ["selector", `String "#outside"]]] in
       let scoped = `Assoc ["tabId", `Int 7; "within", `String "nav"; "withinMatches", `Int 1;

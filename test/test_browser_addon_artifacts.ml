@@ -42,9 +42,8 @@ let scenario () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
   Time_compat.set_clock clock;
   let base=private_root "browser-artifact-host-" in
   let incarnation="0b000000-0000-4000-8000-000000000051" in
-  (* The owned Gecko's allocation, which holds the downloads this test reads. *)
-  let gecko={Masc.Browser_addon_automation.driver="/fixture/geckodriver";binary=None;profiles="/fixture/gecko-profiles"} in
-  let context=ok (Socket.context ~instance_id:incarnation ~source:(Socket.Automation gecko) ~models:None) in
+  (* The ego connection's allocation, which holds the downloads this test reads. *)
+  let context=ok (Socket.context ~instance_id:incarnation ~source:Socket.Ego ~models:None) in
   let allocation=member "directory" context |> Yojson.Safe.Util.to_string in
   Fun.protect ~finally:(fun () ->
     if Sys.file_exists allocation then Fs_compat.remove_tree allocation;
@@ -62,19 +61,32 @@ let scenario () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
   write source bytes;Unix.chmod source 0o600;
   let marker=ref (ok (Owner.publish_download owner source)) in
   let calls=ref 0 in
-  let closed,set_closed=Eio.Promise.create () in
-  ok (Owner.attach_automation owner ~locate:false ~session:(fun () -> B.Browser_open)
-    ~document:(fun ~tab_id:_ -> fail "downloads do not read a document")
-    ~execute:(function
-      | B.Page_downloads _ -> incr calls;B.Answered (`Assoc ["ok",`Bool true;"data",`Assoc [
-          "sessionId",`String "session";"downloads",`List [`Assoc ["downloadId",`String "download";
-            "status",`String "completed";"path",`String source;"artifact",!marker]]]])
-      | _ -> fail "only the original download read may execute")
-    ~cleanup:(fun () -> ignore (Eio.Promise.try_resolve set_closed ());Ok ()));
+  (* The ego connection this worker runs, polled here: it answers every
+     download read with the file the broker published, until retirement
+     refuses its next poll. *)
+  let ego_id=ok (B.client_id_of_string "0b000000-0000-4000-8000-000000000053") in
+  let ego={B.client_id=ego_id;browser=B.Ego_lite;version="fixture";engine_version="fixture";
+    transport=B.Ego_task_space;space=Some {B.id=51;name="artifact Space"}} in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    let rec serve ()=match Owner.dispatch owner {W.incarnation;command=W.Poll {client=ego;window_sec=0.05}} with
+      | W.Poll_result {command=None;_} -> serve ()
+      | W.Poll_result {command=Some command;_} ->
+          check bool "only the original download read may execute" true
+            (Yojson.Safe.Util.member "verb" command.verb_json=`String "page.downloads");
+          incr calls;
+          ignore (Owner.dispatch owner {W.incarnation;command=W.Deliver {client_id=ego_id;id=command.id;
+            payload=`Assoc ["ok",`Bool true;"data",`Assoc [
+              "tabId",`Int 7;"downloads",`List [`Assoc ["downloadId",`String "download";
+                "status",`String "completed";"path",`String source;"artifact",!marker]]]]}});
+          serve ()
+      | W.Service_refusal _|Snapshot_result _|Model_reply _|Download_reply _|Receipt|Issue_result _ -> `Stop_daemon in
+    serve ());
+  let rec registered ()=if B.connected_clients ()=[] then (Eio.Fiber.yield ();registered ()) in registered ();
   let principal=Lane_addon_call_context.Keeper "download-reader" in
   let actor=Lane_addon_call_context.actor_label principal in
-  let route=B.Automation_route and verb=B.Page_downloads {tab_id=7} in
-  let arguments=`Assoc ["lane",`String "automation";"command",B.verb_json verb] in
+  let route=B.Live_route (Some ego_id) and verb=B.Page_downloads {tab_id=7} in
+  let arguments=`Assoc ["lane",`String "live";"clientId",`String (B.client_id_to_string ego_id);
+    "command",B.verb_json verb] in
   let command ()=Masc.Browser_addon_tool.invoke ~owner ~principal arguments in
   let client=ok (Client.create ~socket_path:(Socket.socket_path socket) ~incarnation
     ~max_message_bytes:65536 ~control_timeout_sec:2. ~available:(fun () -> true)) in
@@ -110,8 +122,7 @@ let scenario () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
       check bool "successful live activation passes through unchanged" true
         (ok (Masc.Browser_addon_artifacts.finalize ~socket ~client ~store
           ~name:Masc.Browser_addon_tool.definition.name ~arguments:live ~principal ~result:live_result)=live_result);
-      (* A live connection's download listing is finalized like the owned
-         Gecko's; a row without a grant passes through as it came. *)
+      (* A live listing whose rows carry no grant passes through as it came. *)
       let listing = `Assoc ["reply",`String "issue";"answer",`Assoc ["status",`String "answered";
         "payload",`Assoc ["ok",`Bool true;"data",`Assoc ["tabId",`Int 7;"watchingSince",`Null;
           "downloads",`List [`Assoc ["downloadId",`String "1b000000-0000-4000-8000-000000000003";
@@ -141,7 +152,6 @@ let scenario () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
           (Result.is_error (Socket.with_download_snapshot socket {descriptor with inode=descriptor.inode+1} (fun _ -> Ok ())));
         Client.revoke client;
         Eio.Promise.resolve start_retiring ();
-        Eio.Promise.await closed;
         check bool "retirement refuses deletion before the held transfer settles" true
           (match Eio.Promise.await retired with
            | W.Service_refusal {disposition=W.Outcome_unknown;_} -> true

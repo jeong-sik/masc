@@ -18,8 +18,15 @@ let data document text = `Assoc [
     "fontSize", `Int 16; "fontWeight", `String "400"; "whiteSpace", `String "normal";
     "sourceContext", `Null;
     "rects", `List [`Assoc ["x", `Int 0; "y", `Int 0; "width", `Int 600; "height", `Int 20]]]]]
+(* The live connection the scripted worker lists, and the route a read names it by. *)
+let client_id = ok (Browser_lane.client_id_of_string "0c000000-0000-4000-8000-000000000007")
+let client : Browser_lane.client_info = {client_id;browser=Browser_lane.Firefox;version="fixture";
+  engine_version="fixture";transport=Browser_lane.Web_extension;space=None}
+let client_wire = Browser_lane.client_id_to_string client_id
+let read_args mode = `Assoc ["lane",`String "live";"clientId",`String client_wire;"tabId",`Int 7;"mode",`String mode]
 let routed json = match json with
-  | `Assoc fields -> `Assoc (fields @ ["source",`String "automation";"clientId",`Null])
+  | `Assoc fields -> `Assoc (fields @ ["source",`String "live";"clientId",`String client_wire;
+      "transport",`String "web_extension"])
   | _ -> fail "fixture object required"
 let retained_reference result = match Tool_result.retained_artifacts result with
   | [reference] -> reference | _ -> fail "one retained observation required"
@@ -47,9 +54,9 @@ let test_runtime_retains_inline_scene_and_log_roots () = with_base (fun base ->
           Browser_lane.Answered (`Assoc ["ok",`Bool true;"data",data])
         | _ -> fail "observation used an unexpected browser action" in
       let config = Masc.Workspace.default_config base in
-      Browser_addon_fixture.with_worker ~env ~config ~respond (fun browser ->
+      Browser_addon_fixture.with_worker ~clients:[client] ~env ~config ~respond (fun browser ->
       let meta = Masc_test_deps.meta_of_json_fixture (`Assoc ["name",`String "reader"]) |> ok in
-      let args = `Assoc ["lane",`String "automation";"tabId",`Int 7;"mode",`String "scene"] in
+      let args = read_args "scene" in
       let execution = Runtime.handle_browser_read_with_outcome ~config ~meta ~args in
       check bool "actual Keeper producer completed" true (execution.disposition=Tool_result.Completed ());
       let result = Tool_result.make_ok ~tool_name:"BrowserRead" ~start_time:(Tool_timing.start ())
@@ -63,18 +70,18 @@ let test_runtime_retains_inline_scene_and_log_roots () = with_base (fun base ->
         | `Assoc fields -> fields | _ -> fail "retained scene must be an object" in
       List.iter (fun key -> check int (key ^ " has exactly one authoritative value") 1
         (List.length (List.filter (fun (name, _) -> name = key) fields)))
-        ["source"; "clientId"; "elapsed_ms"];
-      check bool "backend cannot override actual automation source" true
-        (List.assoc "source" fields = `String "automation");
-      check bool "backend cannot attach a live client to automation" true
-        (List.assoc "clientId" fields = `Null);
-      check bool "nor a transport: the server's own browser has none" true
-        (not (List.mem_assoc "transport" fields));
+        ["source"; "clientId"; "transport"; "elapsed_ms"];
+      check bool "backend cannot override the actual live source" true
+        (List.assoc "source" fields = `String "live");
+      check bool "backend cannot replace the routed client" true
+        (List.assoc "clientId" fields = `String client_wire);
+      check bool "nor its transport" true
+        (List.assoc "transport" fields = `String "web_extension");
       check bool "elapsed time belongs to the local read" true
         (match List.assoc "elapsed_ms" fields with `Float value -> value >= 0. | _ -> false);
       let canonical = Observation.of_json (Yojson.Safe.from_string original) |> ok in
       check bool "durable decoder sees the actual read route" true
-        (canonical.source = Masc.Browser_surface.Automation && canonical.client_id = None);
+        (canonical.source = Masc.Browser_surface.Live && canonical.client_id = Some client_id);
       let provider = match Masc.Tool_bridge.to_agent_core_typed_result ~base_path:base
           ~model_projection:(Tool_output.Inline_up_to {maximum_bytes=100000}) result with
         | Ok value -> value | Error error -> fail error.message in
@@ -82,7 +89,7 @@ let test_runtime_retains_inline_scene_and_log_roots () = with_base (fun base ->
       check bool "composition serialization does not inject model artifact references" true
         (Tool_output.normalized_artifact_refs_in_json (Tool_result.to_json result)=[]);
       let generic_read mode =
-        let args = `Assoc ["lane",`String "automation";"tabId",`Int 7;"mode",`String mode] in
+        let args = read_args mode in
         match Masc.Tool_misc.dispatch ~browser_principal:(Lane_addon_call_context.Host_actor "reader")
           { config; agent_name="reader"; help_schemas=[] }
           ~name:"masc_browser_read" ~args with
@@ -145,7 +152,7 @@ let test_invalid_or_unpersisted_scene_has_no_reference () = with_base (fun base 
   let scene = routed (data "alpha" "visible") in
   let result = Tool_result.make_ok ~tool_name:"BrowserRead" ~start_time:(Tool_timing.start ()) ~data:scene () in
   let bad = match scene with `Assoc fields -> `Assoc (("clientId",`String "bad")::List.remove_assoc "clientId" fields) | _ -> assert false in
-  check bool "unresolved automation identity is rejected" true (Result.is_error (Observation.of_json bad));
+  check bool "an unreadable client identity is rejected" true (Result.is_error (Observation.of_json bad));
   check bool "view mismatch is rejected" true
     (Result.is_error (Observation.retain ~base_path:base ~view:Regions result));
   let root = Tool_blob_store.root_dir (Tool_blob_store.create ~base_path:base) in
@@ -184,14 +191,14 @@ let test_generic_retention_failure_preserves_read_receipt () = with_base (fun ba
         Browser_lane.Answered (`Assoc ["ok",`Bool true;"data",data "alpha" "Already read"])
       | _ -> fail "retention failure must not replay navigation or interaction" in
     let config=Masc.Workspace.default_config base in
-    Browser_addon_fixture.with_worker ~env ~config ~respond (fun _browser ->
+    Browser_addon_fixture.with_worker ~clients:[client] ~env ~config ~respond (fun _browser ->
       let root = Tool_blob_store.root_dir (Tool_blob_store.create ~base_path:base) in
       Fs_compat.mkdir_p (Filename.dirname root);
       Out_channel.with_open_bin root (fun out -> output_string out "occupied");
       let result = match Masc.Tool_misc.dispatch ~browser_principal:(Lane_addon_call_context.Host_actor "reader")
         {config=Masc.Workspace.default_config base;agent_name="reader";help_schemas=[]}
         ~name:"masc_browser_read"
-        ~args:(`Assoc ["lane",`String "automation";"tabId",`Int 7;"mode",`String "scene"]) with
+        ~args:(read_args "scene") with
         | Some result -> result | None -> fail "generic dispatch missing" in
       check bool "external read needs no blob storage" true (Tool_result.is_success result);
       let result = Masc.Tool_misc_browser_lane.retain_read_result ~base_path:base
@@ -218,8 +225,8 @@ let test_external_read_creates_no_hidden_blob () = with_base (fun base ->
           Browser_lane.Answered (`Assoc ["ok",`Bool true;"data",data "external" "visible"])
       | _ -> fail "unexpected external action" in
     let config=Masc.Workspace.default_config base in
-    Browser_addon_fixture.with_worker ~env ~config ~respond (fun _browser ->
-      let args = `Assoc ["lane",`String "automation";"tabId",`Int 7;"mode",`String "scene"] in
+    Browser_addon_fixture.with_worker ~clients:[client] ~env ~config ~respond (fun _browser ->
+      let args = read_args "scene" in
       let result = match Masc.Tool_misc.dispatch ~browser_principal:(Lane_addon_call_context.Host_actor "reader")
           {config=Masc.Workspace.default_config base;agent_name="reader";help_schemas=[]}
           ~name:"masc_browser_read" ~args with

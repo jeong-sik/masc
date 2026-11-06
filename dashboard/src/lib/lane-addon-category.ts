@@ -25,7 +25,7 @@ export function categoryLabel(group: AddonCategoryGroup): string {
 /** A current declaration never inherits the category of an older worker. */
 export function inventoryCategory(row: LaneInventoryRow): AddonCategoryGroup {
   switch (row.state.kind) {
-    case 'browser_clients': case 'browser_executor': case 'machine': case 'exact':
+    case 'browser_clients': case 'machine': case 'exact':
       return categoryGroup(row.ui_category)
     case 'package': break
   }

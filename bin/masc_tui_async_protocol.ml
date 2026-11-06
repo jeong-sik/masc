@@ -643,7 +643,6 @@ type browser_msg =
   | Browser_lane_clients_loaded of int * (Browser_lane_view.discovered, string) result
   | Browser_lane_loaded of
       int * (Browser_lane_view.reading, string) result
-  | Browser_lane_action_done of int * (unit, string) result
   | Browser_lane_scene_loaded of int * (Browser_lane_view.scene, string) result
   | Browser_lane_follow_loaded of int *
       ((Masc_tui_http.browser_follow_receipt *
@@ -1209,8 +1208,7 @@ let rec workspace_message_is_read = function
   | Keeper_observed_interrupt_done _
   | Keeper_chat_interrupt_done _)
   | Fusion_msg (Fusion_launched _)
-  | Browser_msg (Browser_lane_action_done _
-  | Browser_lane_follow_loaded _)
+  | Browser_msg (Browser_lane_follow_loaded _)
   | Connectors_msg (Connector_unbind_all_done _) | Tools_msg (Tools_volume_gc_reclaimed _)
   | Runtime_msg (Runtime_lane_slots_written _
   | Runtime_assignment_changed _)
@@ -1320,7 +1318,7 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Memory_facts_loaded _) | Repository_msg (Repository_changes_loaded _ | Repository_changes_diff_loaded _)
   | File_changes_loaded _ | Keeper_msg (Keeper_chat_file_changes_loaded _) | Git_diff_loaded _
   | Browser_msg (Browser_history_list_loaded _ | Browser_history_page_loaded _
-  | Browser_lane_clients_loaded _ | Browser_lane_loaded _ | Browser_lane_action_done _
+  | Browser_lane_clients_loaded _ | Browser_lane_loaded _
   | Browser_lane_scene_loaded _ | Browser_lane_follow_loaded _ | Browser_lane_screenshot_ready _)
   | Connectors_msg (Connectors_status_loaded _ | Connectors_loaded _ | Connector_unbind_all_done _) | Tools_msg (Tools_volume_gc_reclaimed _)
   | Runtime_msg (Runtime_surface_loaded _) | Tools_msg (Tools_read_loaded _)
@@ -1477,7 +1475,7 @@ let retired_operation_observation state ~authority ~reading message =
     | File_changes_loaded (_, _) | Keeper_msg (Keeper_chat_file_changes_loaded (_, _, _))
     | Git_diff_loaded (_, _) | Browser_msg (Browser_history_list_loaded (_, _)
     | Browser_history_page_loaded (_, _) | Browser_lane_clients_loaded (_, _)
-    | Browser_lane_loaded (_, _) | Browser_lane_action_done (_, _)
+    | Browser_lane_loaded (_, _)
     | Browser_lane_scene_loaded (_, Error _) | Browser_lane_follow_loaded (_, _)
     | Browser_lane_screenshot_ready _) | Connectors_msg (Connectors_status_loaded (_, _) | Connectors_loaded (_, _)
     | Connector_unbind_all_done _) | Tools_msg (Tools_volume_gc_reclaimed _) | Runtime_msg (Runtime_surface_loaded (_, _))
@@ -1623,7 +1621,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | File_changes_loaded (_, _) | Keeper_msg (Keeper_chat_file_changes_loaded (_, _, _))
   | Git_diff_loaded (_, _) | Browser_msg (Browser_history_list_loaded (_, _)
   | Browser_history_page_loaded (_, _) | Browser_lane_clients_loaded (_, _)
-  | Browser_lane_loaded (_, _) | Browser_lane_action_done (_, _)
+  | Browser_lane_loaded (_, _)
   | Browser_lane_follow_loaded (_, Error _)) | Connectors_msg (Connectors_status_loaded (_, _) | Connectors_loaded (_, _)
   | Connector_unbind_all_done _) | Tools_msg (Tools_volume_gc_reclaimed _) | Runtime_msg (Runtime_surface_loaded (_, _))
   | Tools_msg (Tools_read_loaded _)

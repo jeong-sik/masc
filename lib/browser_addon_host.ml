@@ -106,9 +106,8 @@ let published_of t served =
 (* What the host chooses from: each service's answer at the time of the
    request, asked side by side. A service that did not answer is left out of
    this choice only. Live clients are the clients of the services that serve
-   a live source, with the service that listed each one; automation is what
-   its own service answered. A worker answers only while
-   it serves (decode_snapshot), so a live lane it reports is on. *)
+   a live source, with the service that listed each one. A worker answers only
+   while it serves (decode_snapshot), so a live lane it reports is on. *)
 type gathered = {
   published : Browser_addon_observation.published;
   selection : Browser_selection.snapshot;
@@ -134,7 +133,6 @@ let gather t ~reach =
     else Ok () in
   let current=R.browser_service_reading ~config:t.config ~access:t.access in
   let* ()=check_topology current.services in
-  let among=List.map (fun (served:served) -> served.service.backend) t.services in
   match List.filter reach t.services with
   | [] -> Error (Snapshot_unavailable "no attached browser Add-on serves the requested browser")
   | reached ->
@@ -148,7 +146,7 @@ let gather t ~reach =
   | [],(_,Error failure)::_ -> Error failure
   | [],((_,Ok _)::_|[]) -> Error (Snapshot_unavailable "no browser Add-on answered its snapshot")
   | _::_,_ ->
-    let published=Browser_addon_observation.merge ~among (List.map (fun ((served:served),answer) ->
+    let published=Browser_addon_observation.merge (List.map (fun ((served:served),answer) ->
       served.service.backend,Result.to_option answer) answers) in
     let live=List.filter_map (fun ((served:served),answer) -> match answer with
       | Ok (listed:Browser_addon_observation.published)
@@ -168,7 +166,7 @@ let gather t ~reach =
     Ok {published;conflicts;listed;incomplete;ego_identities;
         unavailable=List.filter (fun (_, (listed:Browser_addon_observation.published)) -> listed.unavailable<>[]) live;
         selection={live_activity=(match live with [] -> Browser_lane.Unobserved | _::_ -> Browser_lane.Enabled);
-          live_clients=published.clients;live_space_presence=published.space_presence;automation=published.automation};
+          live_clients=published.clients;live_space_presence=published.space_presence};
         holders=List.concat_map (fun (served,(listed:Browser_addon_observation.published)) ->
           List.map (fun (client:Browser_lane.client_info) ->
             Browser_lane.client_id_to_string client.client_id,served) listed.clients) live}
@@ -179,10 +177,8 @@ let client_conflict gathered id =
 let selection_snapshot t = gather t ~reach:(fun _ -> true) |> Result.map (fun gathered -> gathered.published,gathered.selection)
 (* The service a chosen browser is run on. A client two services list cannot
    be told apart, so it is refused rather than sent to one of them. *)
-let served_for t gathered = function
-  | Browser_selection.Owned_automation ->
-      for_backend t Browser_lane.Backend.Automation |> Result.map_error backend_failure_message
-  | Connected (client:Browser_lane.client_info) ->
+let served_for gathered = function
+  | Browser_selection.Connected (client:Browser_lane.client_info) ->
       let id=Browser_lane.client_id_to_string client.client_id in
       (match List.filter_map (fun (holder,served) -> if String.equal holder id then Some served else None) gathered.holders with
        | [served] -> Ok served
@@ -228,7 +224,6 @@ let bind_goal_space t ~goal_id ~client_id =
 let route_arguments = function
   | Browser_lane.Live_route client -> ["lane",`String "live"] @
       (match client with None -> []|Some id -> ["clientId",`String (Browser_lane.client_id_to_string id)])
-  | Automation_route -> ["lane",`String "automation"]
 (* The worker states no browser identity; the receipt names the browser the
    host chose, in success and failure alike. *)
 let stamp binding (result : Mcp_protocol.Mcp_types.tool_result) =
@@ -266,25 +261,13 @@ let resolve ?goal_space ~required_actions t ~preference verb ~start_time =
         Control (Hand_off|Space_status|Finish_space _|Wait_for_control _|Adopt_tab _|Release_tab _))
     | Automatic,Browser_lane.Page_act (Browser_lane.Action.Control _) ->
         refuse "live creation, control and Page management actions require an explicit observed clientId"
-    | Exact Browser_lane.Automation_route,Browser_lane.Page_act (Browser_lane.Action.Control _) ->
-        refuse Browser_lane.handoff_refused
     | Exact (Browser_lane.Live_route (Some _)),Browser_lane.Page_act (Browser_lane.Action.Control _) -> Ok ()
-    | (Automatic|Exact (Live_route _|Automation_route)),
+    | (Automatic|Exact (Live_route _)),
       (Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_native_workflow _|Page_interact _
       |Session_open _|Session_close|Session_status|Page_goto _|Page_elements _|Page_act (Browser_lane.Action.Open_tab _|Open_window _|On_tab _)|Page_context _
       | Page_locate _) -> Ok () in
-  let owned backend browser route=match for_backend t backend with
-    | Ok served -> Ok (Browser_binding.of_browser {Browser_selection.route;
-        reason=Browser_selection.Explicit_browser} browser,served)
-    | Error failure -> fail ~class_:Tool_result.Dependency_unavailable
-        ~effect_disposition:Tool_result.Proven_pre_effect (backend_failure_message failure) in
   match preference,required_actions with
-    (* An explicit owned route with nothing to check against its snapshot
-       names its browser already; the worker checks the lane again before it
-       dispatches (RFC #45368 4.2). *)
-    | Browser_selection.Exact Browser_lane.Automation_route,[] ->
-        owned Browser_lane.Backend.Automation Browser_selection.Owned_automation Browser_lane.Automation_route
-    | Exact (Browser_lane.Live_route None),[]
+    | Browser_selection.Exact (Browser_lane.Live_route None),[]
       when (match verb with
             | Browser_lane.Page_act action -> Browser_lane.Action.is_take_over action
             |Browser_lane.Tabs_list|Session_open _|Session_close|Session_status
@@ -318,12 +301,11 @@ let resolve ?goal_space ~required_actions t ~preference verb ~start_time =
               refuse "take_over without a clientId recovers an ego task space a worker reports as user-owned or missing; no live worker reports one"
           | _::_::_ ->
               refuse "more than one live worker reports an unavailable ego task space; inspect the inventory issues"))
-    | (Automatic|Exact (Live_route _)),_ | Exact Automation_route,_::_ ->
+    | (Automatic|Exact (Live_route _)),_ ->
       let reach=match preference with
         | Browser_selection.Automatic -> (fun _ -> true)
         | Exact (Browser_lane.Live_route _) ->
-            (fun (served:served) -> Browser_addon_observation.serves_live served.service.backend)
-        | Exact Browser_lane.Automation_route -> (fun served -> serves served Browser_lane.Backend.Automation) in
+            (fun (served:served) -> Browser_addon_observation.serves_live served.service.backend) in
       let* gathered=match gather t ~reach with
         | Ok value -> Ok value
         | Error (Snapshot_unavailable detail) -> fail ~class_:Tool_result.Dependency_unavailable
@@ -337,7 +319,7 @@ let resolve ?goal_space ~required_actions t ~preference verb ~start_time =
         | Browser_selection.Automatic,None when gathered.incomplete ->
             fail ~class_:Tool_result.Dependency_unavailable ~effect_disposition:Tool_result.Proven_pre_effect
               "browser worker observations are incomplete; no automatic browser fallback was dispatched"
-        | (Automatic|Exact (Browser_lane.Live_route _|Automation_route)),(None|Some _) -> Ok () in
+        | (Automatic|Exact (Browser_lane.Live_route _)),(None|Some _) -> Ok () in
       (* A Goal Space resolves only among the connections the service of its
          own installation lists; the chosen client then meets the same
          native identity conflict refusal as an explicit one. *)
@@ -366,7 +348,7 @@ let resolve ?goal_space ~required_actions t ~preference verb ~start_time =
             (match gathered.conflicts with
              | conflict::_ -> refuse (Browser_addon_observation.conflict_message conflict)
              | [] -> Ok ())
-        | Exact (Browser_lane.Live_route None|Automation_route) -> Ok () in
+        | Exact (Browser_lane.Live_route None) -> Ok () in
       let* selected=Browser_selection.choose ~required_actions ~verb ~bound:(Browser_selection.bound verb) ~snapshot preference
         |> Result.fold ~ok:Result.ok ~error:(unchosen ~clients:published.clients) in
       let* browser=Browser_selection.target ~verb ~snapshot selected.route
@@ -376,11 +358,10 @@ let resolve ?goal_space ~required_actions t ~preference verb ~start_time =
             Browser_addon_observation.check_ego_identity gathered.ego_identities client
             |> Result.map_error (fun detail -> Tool_result.make_err
                 ~tool_name:Browser_addon_tool.definition.name ~start_time
-                ~class_:Tool_result.Dependency_unavailable ~effect_disposition:Tool_result.Proven_pre_effect detail)
-        | Owned_automation -> Ok () in
+                ~class_:Tool_result.Dependency_unavailable ~effect_disposition:Tool_result.Proven_pre_effect detail) in
       let* ()=Browser_selection.require required_actions browser
         |> Result.fold ~ok:Result.ok ~error:(unchosen ~clients:published.clients) in
-      let* served=served_for t gathered browser |> Result.fold ~ok:Result.ok ~error:refuse in
+      let* served=served_for gathered browser |> Result.fold ~ok:Result.ok ~error:refuse in
       Ok (Browser_binding.of_browser selected browser,served)
 (* Run the command once on the chosen service and route. *)
 let invoke ?upload_id t served binding verb ~start_time =
@@ -407,7 +388,6 @@ let parse_command json =
     | (None|Some (`String "live")),Some client ->
         let route=Browser_lane.Live_route (Some client) in Ok (Browser_selection.Exact route,route)
     | Some (`String "live"),None -> Ok (Browser_selection.Exact (Browser_lane.Live_route None),Browser_lane.Live_route None)
-    | Some (`String "automation"),None -> Ok (Browser_selection.Exact Browser_lane.Automation_route,Browser_lane.Automation_route)
     | Some _,(None|Some _) -> Error "lane must name a browser backend; clientId belongs only to live" in
   let* raw=Option.to_result ~none:"command is required" (List.assoc_opt "command" fields) in
   let* verb=Browser_addon_wire.verb_of_json ~route raw in
@@ -433,7 +413,7 @@ let issue ?goal_space ?upload_paths ?(required_actions=[]) t ~preference verb =
       ?metadata ~data ~class_ ~effect_disposition message) in
   let initial=match preference,verb with
     | Browser_selection.Automatic,(Browser_lane.Tabs_list|Session_open _) -> true
-    | (Automatic|Exact (Live_route _|Automation_route)),
+    | (Automatic|Exact (Live_route _)),
       (Tabs_list|Session_open _|Session_close|Session_status|Page_read _|Page_document _|Page_downloads _
       |Page_console _|Page_network _|Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _
       |Page_native_workflow _|Page_interact _|Page_goto _|Page_elements _|Page_act _|Page_context _
@@ -450,15 +430,15 @@ let issue ?goal_space ?upload_paths ?(required_actions=[]) t ~preference verb =
     |Session_open _|Session_close|Session_status|Page_goto _|Page_elements _
     |Page_act (Open_tab _|Open_window _|Control _|On_tab {interaction=Close_tab|Back|Forward|Reload|Stop_loading|Accept_dialog _|Dismiss_dialog|Set_cookie _|Delete_cookie _|Set_emulation _|Clear_emulation|Block_requests _|Unblock_requests;_})
     |Page_context _|Page_locate _ -> None in
-  (* The grant is staged for the exact route the command goes to: the owned
-     Gecko, or a live connection the worker runs, which the selection names. *)
+  (* The grant is staged for the exact route the command goes to: a live
+     connection the worker runs, which the selection names. *)
   let preparation=match upload,upload_paths,preference with
     | None,None,_ -> Ok None
-    | Some paths,Some supplied,Browser_selection.Exact (Browser_lane.Automation_route|Live_route (Some _) as route)
+    | Some paths,Some supplied,Browser_selection.Exact (Browser_lane.Live_route (Some _) as route)
         when paths=supplied && Browser_lane.Upload_lease.pending ~paths ->
         Ok (Some (Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ())),route))
-    | (None|Some _),(None|Some _),(Browser_selection.Automatic|Exact (Live_route _|Automation_route)) ->
-        Error "upload requires an exact pending host snapshot batch and the owned automation route or an explicit live browser" in
+    | (None|Some _),(None|Some _),(Browser_selection.Automatic|Exact (Live_route _)) ->
+        Error "upload requires an exact pending host snapshot batch and an explicit live browser" in
   let* upload_id=match preparation with
     | Ok id -> Ok id | Error detail -> fail ~class_:Tool_result.Workflow_rejection
         ~effect_disposition:Tool_result.Proven_pre_effect detail in

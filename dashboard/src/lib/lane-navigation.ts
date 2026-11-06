@@ -6,7 +6,7 @@ import type { LaneInventoryRow } from '../api/lane-inventory'
 export type LaneNavigationTarget = { workspace: string } & (
   | { kind: 'exact'; lane: typeof LANE_IDS[number] }
   | { kind: 'run_history'; lane: LaneRunIdentity }
-  | { kind: 'browser'; lane: 'live' | 'automation' }
+  | { kind: 'browser'; lane: 'live' }
   | { kind: 'machine'; machine: 'msx' | 'dos' }
   | { kind: 'declaration'; path: string; installation: string | null }
   | { kind: 'instance'; instance: string; incarnation: string }
@@ -30,7 +30,7 @@ export function parseLaneTarget(raw: string | undefined): ParsedLaneTarget {
         if (!isLaneRunIdentity(fields.lane)) throw new Error()
         target = { kind: 'run_history', workspace: fields.workspace, lane: fields.lane }; break
       case 'browser':
-        if (fields.lane !== 'live' && fields.lane !== 'automation') throw new Error()
+        if (fields.lane !== 'live') throw new Error()
         target = { kind: 'browser', workspace: fields.workspace, lane: fields.lane }; break
       case 'machine':
         if (fields.machine !== 'msx' && fields.machine !== 'dos') throw new Error()
@@ -106,13 +106,11 @@ export function declarationIdentity(source: string): string {
 export function runtimeTargetRange(source: string, target: Exclude<RuntimeLaneTarget, { kind: 'exact' }>): [number, number] | null {
   const wanted = target.kind === 'browser' ? ['browser', target.lane] : ['machines', target.machine]
   const ast = parseTOML(source, { tomlVersion: '1.0' })
-  let exact: [number, number] | null = null, flatAutomation: [number, number] | null = null
+  let exact: [number, number] | null = null
   const visit = (path: string[], node: AST.TOMLTable | AST.TOMLKeyValue) => {
     const full = [...path, ...node.key.keys.map(part => part.type === 'TOMLBare' ? part.name : part.value)]
     if (full[0] !== wanted[0]) return
     if (full[1] === wanted[1]) exact ??= node.range
-    if (target.kind === 'browser' && target.lane === 'automation' && full.length === 2
-      && (full[1] === 'geckodriver' || full[1] === 'binary')) flatAutomation ??= node.range
     if (node.type === 'TOMLKeyValue' && node.value.type === 'TOMLInlineTable')
       for (const entry of node.value.body) visit(full, entry)
   }
@@ -123,5 +121,5 @@ export function runtimeTargetRange(source: string, target: Exclude<RuntimeLaneTa
       for (const entry of node.body) visit(base, entry)
     }
   }
-  return exact ?? flatAutomation
+  return exact
 }

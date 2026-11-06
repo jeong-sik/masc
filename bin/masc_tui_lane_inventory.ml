@@ -8,7 +8,7 @@ let row_category (row : row) = match row.selection with
       (match row.state with
        | Package_state {declaration=Some (Valid value);_} -> value.ui_category
        | Package_state {declaration=Some (Invalid _ | Absent | Unobserved) | None;_}
-       | Exact_state _ | Browser_clients _ | Browser_executor _ | Machine_state _ -> None)
+       | Exact_state _ | Browser_clients _ | Machine_state _ -> None)
   | Manual_instance {instance_id;incarnation} ->
       (match row.state with
        | Package_state {declaration=None;instances} ->
@@ -16,7 +16,7 @@ let row_category (row : row) = match row.selection with
              item.instance_id=instance_id && item.incarnation=incarnation) instances)
              (fun item -> item.ui_category)
        | Package_state {declaration=Some _;_}
-       | Exact_state _ | Browser_clients _ | Browser_executor _ | Machine_state _ -> None)
+       | Exact_state _ | Browser_clients _ | Machine_state _ -> None)
 let category_label = function
   | Some Category.Memory_and_judgment -> "기억 · 판단"
   | Some Category.Browser -> "브라우저"
@@ -44,7 +44,7 @@ let identity (row : row) =
     | Declaration _ -> (match row.state with
         | Package_state {declaration=Some (Valid value);_} -> Some value.installation_id
         | Package_state {declaration=Some (Invalid _ | Absent | Unobserved) | None;_}
-        | Exact_state _ | Browser_clients _ | Browser_executor _ | Machine_state _ -> None)
+        | Exact_state _ | Browser_clients _ | Machine_state _ -> None)
     | Exact _ | Browser _ | Machine _ | Manual_instance _ -> None in
   {row_id=row.id;target=row.selection;installation_id}
 let identity_matches selected row =
@@ -105,8 +105,6 @@ let row_summary (row : row) = match row.state with
       else if Option.is_some c.admission_error then "admission issue"
       else Printf.sprintf "%d admitted slots" (List.length c.admitted_slots + List.length c.cli_slots)
   | Browser_clients reading -> browser_reading_label (Printf.sprintf "%d connected clients") reading
-  | Browser_executor reading -> browser_reading_label (fun registered ->
-          if registered then "executor registered" else "executor not registered") reading
   | Machine_state (activity,publication) -> machine_activity_label activity ^ "; " ^ machine_publication_label publication
   | Package_state {declaration;instances} ->
       let declared = match declaration with
@@ -149,16 +147,14 @@ let row_standing (row : row) = match row.state with
       else Standing.Ready
   | Browser_clients (Browser_observed connected) ->
       if connected > 0 then Standing.Ready else Standing.Waiting
-  | Browser_executor (Browser_observed registered) ->
-      if registered then Standing.Ready else Standing.Waiting
   (* With no observation, a lane no browser Add-on serves needs one set up;
      one whose Add-ons are all switched off is off; one whose Add-on is
      declared on and not running waits for it; one whose Add-on cannot be
      read is failing. *)
-  | Browser_clients Browser_addon_absent | Browser_executor Browser_addon_absent -> Standing.Not_set_up
-  | Browser_clients Browser_addon_off | Browser_executor Browser_addon_off -> Standing.Off
-  | Browser_clients Browser_addon_not_running | Browser_executor Browser_addon_not_running -> Standing.Waiting
-  | Browser_clients (Browser_addon_unavailable _) | Browser_executor (Browser_addon_unavailable _) -> Standing.Failing
+  | Browser_clients Browser_addon_absent -> Standing.Not_set_up
+  | Browser_clients Browser_addon_off -> Standing.Off
+  | Browser_clients Browser_addon_not_running -> Standing.Waiting
+  | Browser_clients (Browser_addon_unavailable _) -> Standing.Failing
   | Machine_state (Machine_disabled, Running) -> Standing.Changing
   | Machine_state (Machine_disabled, (No_screen | Stable | Publication_unavailable)) -> Standing.Off
   | Machine_state (Machine_unobserved, _) -> Standing.Unobserved
@@ -261,8 +257,6 @@ let detail_lines (row : row) =
          @ (match c.admission_error with None -> [] | Some detail -> ["Admission: " ^ detail])
      | Exact_state (Unconfigured detail | Registry_unavailable detail) -> [detail]
      | Browser_clients _ -> [browser_switch_line]
-     | Browser_executor _ -> ["Registration does not prove browser process health or an open session.";
-         "Executable and profile paths apply at server startup.";browser_switch_line]
      | Machine_state _ -> ["Off refuses new execution and input; existing machine state and checkpoints are retained.";
          "Select this machine in All Lanes and press Space for activity settings."]
      | Package_state {declaration;instances} ->
@@ -283,7 +277,7 @@ let exact_outputs (row : row) = match row.state with
       | [] -> None
       | first :: rest -> Some (value.installation_id, first, rest))
   | Package_state {declaration = Some (Invalid _ | Absent | Unobserved) | None; _}
-  | Exact_state _ | Browser_clients _ | Browser_executor _ | Machine_state _ -> None
+  | Exact_state _ | Browser_clients _ | Machine_state _ -> None
 
 let selected_exact_output ~selected (row : row) =
   Option.map (fun (installation_id, first, rest) ->

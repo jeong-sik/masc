@@ -372,8 +372,8 @@ let read t context args =
   let* cap = match field "maxChars" args with None -> Ok 50000
     | Some (`Int n) when n > 0 && n <= 100000 -> Ok n | _ -> Error "invalid maxChars" in
   match field "includeHtml" args with
-  (* The automation lane's document helper: it drops HTML over 1 MiB and says
-     so, instead of returning a cut document. *)
+  (* The shared document helper: it drops HTML over 1 MiB and says so,
+     instead of returning a cut document. *)
   | Some (`Bool true) ->
     parsed_document t context (Browser_lane.Document.runtime ^ "\nreturn browserDocument();") (obj [])
   | None | Some (`Bool false) -> script t context
@@ -618,8 +618,8 @@ let dispatch_with_window ?actor ?request_id t ~verb args =
   | Page_downloads -> Error (Before_effect "a connected Firefox saves downloads where the person using it chose, so this connection does not list them")
   | Page_goto -> goto t args
   | Page_context -> on_tab (fun context id -> pre (
-      (* The automation lane's contextual reads (text, elements, frames) inside
-         the frame chain named by framePath, resolved to a child browsing context. *)
+      (* Contextual reads (text, elements, frames) inside the frame chain
+         named by framePath, resolved to a child browsing context. *)
       let* frame_path = Browser_lane.Action.parse_frame_path args in
       let* context = frame_context t context frame_path in
       let* data = match field "mode" args with
@@ -675,8 +675,8 @@ let dispatch_with_window ?actor ?request_id t ~verb args =
     in
     rows 0 [] [] current
   | Page_elements -> on_tab (fun context id -> pre (
-        (* The inventory the automation lane reads, so its selectors mean the
-           same thing to the DOM interactions below. *)
+        (* The shared element inventory, so its selectors mean the same thing
+           to the DOM interactions below. *)
         let* filter = Browser_page_script.elements_filter_of_json (fun key -> field key args) in
         let* p=parsed_document t context Browser_page_script.elements
             (Browser_page_script.elements_args filter) in with_tab id p))

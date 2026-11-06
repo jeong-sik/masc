@@ -146,7 +146,7 @@ let test_only_declarations_serving_native_hosts_count () =
   with_workspace @@ fun base ->
   install_host base;
   let declare = declare_one_source base in
-  declare "browser-automation" "automation";
+  declare "browser-firefox" "owned_firefox";
   check bool "a package of another source answers no native host" true
     (match P.judge ~base_path:base with
      | P.Missing _ -> true
@@ -160,15 +160,15 @@ let test_only_declarations_serving_native_hosts_count () =
    declaration per source passes. *)
 let test_a_source_two_declarations_serve_is_refused () =
   with_workspace @@ fun base ->
-  declare_one_source base "browser-automation" "automation";
+  declare_one_source base "browser-firefox" "owned_firefox";
   declare_one_source base "browser-ego" "ego";
   check bool "one declaration per source passes" true
     (P.doubled_sources ~base_path:base = [] && P.report_doubled [] = Ok ());
-  declare_one_source base "browser-automation-second" "automation";
+  declare_one_source base "browser-firefox-second" "owned_firefox";
   check bool "the doubled source is named with its declarations" true
     (match P.doubled_sources ~base_path:base with
-     | [ { P.source = Browser_lane.Backend.Automation; ids } ] ->
-       List.sort String.compare ids = [ "browser-automation"; "browser-automation-second" ]
+     | [ { P.source = Browser_lane.Backend.Owned_firefox; ids } ] ->
+       List.sort String.compare ids = [ "browser-firefox"; "browser-firefox-second" ]
      | _ :: _ | [] -> false);
   check bool "and the deployment is refused" true
     (Result.is_error (P.report_doubled (P.doubled_sources ~base_path:base)))

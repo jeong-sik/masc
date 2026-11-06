@@ -888,7 +888,7 @@ max_reply_bytes = 4096
     (match Lane_addon_manifest.load ~path with
      | Ok _ -> false
      | Error error -> contains (Lane_addon_manifest.error_to_string error) "browser_backend");
-  let exported=match load "\"browser\"\nbrowser_backend = \"automation\"" "[world.tools]\nexport = [\"browser_command\"]\ninvocation = \"host_context\"\nhooks = [\"validate_input\", \"validate_output\"]" with
+  let exported=match load "\"browser\"\nbrowser_backend = \"external_host\"" "[world.tools]\nexport = [\"browser_command\"]\ninvocation = \"host_context\"\nhooks = [\"validate_input\", \"validate_output\"]" with
     | Ok package -> package | Error error -> fail (Lane_addon_manifest.error_to_string error) in
   check (list string) "browser exports require host caller context" ["browser_command"] exported.exported_tools;
   check bool "browser selects independent input/output middleware" true
@@ -898,9 +898,9 @@ max_reply_bytes = 4096
     (Result.is_error (load service extra)))
     (* Each browser case names its source, so it is refused for its own
        reason rather than for naming none. *)
-    ["\"unknown\"","";"true","";"\"browser\"\nbrowser_backend = \"automation\"","[world.state]\nmode = \"persistent\"";
-     "\"browser\"\nbrowser_backend = \"automation\"","[interface]\nmodel_access = \"host_sampling\"";
-     "\"browser\"\nbrowser_backend = \"automation\"","[world.tools]\nexport = [\"arbitrary_tool\"]"])
+    ["\"unknown\"","";"true","";"\"browser\"\nbrowser_backend = \"external_host\"","[world.state]\nmode = \"persistent\"";
+     "\"browser\"\nbrowser_backend = \"external_host\"","[interface]\nmodel_access = \"host_sampling\"";
+     "\"browser\"\nbrowser_backend = \"external_host\"","[world.tools]\nexport = [\"arbitrary_tool\"]"])
 
 let tool_exports_are_explicit_and_revisioned () = with_directory (fun _root packages directory ->
   let manifest = install_package packages in
@@ -967,7 +967,7 @@ let ui_category_is_strict_display_metadata () = with_directory (fun _root packag
     (Lane_addon_types.same_execution_package original.package package))
     [{changed with command=["different-worker"]};
      {changed with model_access=Lane_addon_types.Host_sampling};
-     {changed with worker_service=Lane_addon_types.Browser_service Browser_lane.Backend.Automation};
+     {changed with worker_service=Lane_addon_types.Browser_service Browser_lane.Backend.Owned_firefox};
      {changed with worker_service=Lane_addon_types.Browser_service Browser_lane.Backend.Ego};
      {changed with tool_hooks=[Lane_addon_types.Validate_input]}];
   List.iter (fun category ->

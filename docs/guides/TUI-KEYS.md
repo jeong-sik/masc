@@ -815,7 +815,7 @@ or completion.
 
 | Keys | What it does |
 |---|---|
-| `B` | read browser tabs and page text; choose Automatic, Work browser, or a connected browser |
+| `B` | read browser tabs and page text; choose Automatic or a connected browser |
 | `Ctrl-O` | inside Browser Lane: preview the selected tab; any key returns |
 | `j/k` | scroll |
 | `b / u` | bind / unbind a channel |

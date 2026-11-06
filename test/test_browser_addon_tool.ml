@@ -24,23 +24,23 @@ let hook_contract () =
     | `Assoc fields -> `Assoc (("actor",`String "forged")::fields) | _ -> assert false in
   check bool "selected input hook rejects undeclared identity" true
     (Result.is_error (Hooks.before_call hooks closed_extra));
-  let automation fields=`Assoc (("lane",`String "automation")::fields) in
-  ignore (ok (Hooks.before_call hooks (automation ["command",B.verb_json B.Tabs_list])));
+  let live fields=`Assoc (("lane",`String "live")::("clientId",`String (B.client_id_to_string client_id))::fields) in
+  ignore (ok (Hooks.before_call hooks (live ["command",B.verb_json B.Tabs_list])));
   check bool "command fields stay closed" true
-    (Result.is_error (Hooks.before_call hooks (automation ["command",`Assoc [
+    (Result.is_error (Hooks.before_call hooks (live ["command",`Assoc [
       "verb",`String "tabs.list";"args",`Assoc [];"other",`Bool true]])));
   (* The host chooses the browser, so the worker takes neither an automatic
      choice nor the actions a choice must cover. *)
   check bool "the worker needs the lane the host chose" true
     (Result.is_error (Hooks.before_call hooks (`Assoc ["command",B.verb_json B.Tabs_list])));
   check bool "the worker takes no requiredActions" true
-    (Result.is_error (Hooks.before_call hooks (automation ["requiredActions",`List [`String "hover"];
+    (Result.is_error (Hooks.before_call hooks (live ["requiredActions",`List [`String "hover"];
       "command",B.verb_json B.Tabs_list])));
   check bool "open args still require an object" true
-    (Result.is_error (Hooks.before_call hooks (automation ["command",`Assoc [
+    (Result.is_error (Hooks.before_call hooks (live ["command",`Assoc [
       "verb",`String "page.read";"args",`List []]])));
   check bool "nested duplicate JSON fields stay invalid" true
-    (Result.is_error (Hooks.before_call hooks (automation ["command",`Assoc [
+    (Result.is_error (Hooks.before_call hooks (live ["command",`Assoc [
       "verb",`String "page.read";"args",`Assoc ["tabId",`Int 7;"tabId",`Int 8]]])));
   let no_hooks=ok (Hooks.prepare ~hooks:[] Tool.definition) in
   ignore (ok (Hooks.before_call no_hooks closed_extra));
@@ -92,8 +92,7 @@ let control_identity ~sw ~owner =
             (Lane_addon_tool_result.failure result=
               (Tool_result.Workflow_rejection,Tool_result.Proven_pre_effect))
         | Ok _ -> fail (label ^ ": control reached selection without an observed client"))
-        ["automatic",[];"unnamed live",["lane",`String "live"];
-         "automation",["lane",`String "automation"]];
+        ["automatic",[];"unnamed live",["lane",`String "live"]];
       check bool "the named host-selected client admits control" true
         (ok (Tool.command (arguments verb))=(B.Live_route (Some client_id),verb));
       check bool "a worker route still requires its lane" true
@@ -177,7 +176,7 @@ let scenario () = Eio_main.run (fun env ->
       (Masc.Browser_selection.Connected client) in
     let projected=Masc.Browser_binding.annotate binding (`Assoc [
       "clientId",`String "forged";"clientId",`String "forged-again";
-      "transport",`String "web_extension";"lane",`String "automation"]) in
+      "transport",`String "web_extension";"lane",`String "forged"]) in
     check string "page fields cannot forge the admitted client" (B.client_id_to_string client_id)
       Yojson.Safe.Util.(projected |> member "clientId" |> to_string);
     check string "page fields cannot forge its transport" "webdriver_bidi"

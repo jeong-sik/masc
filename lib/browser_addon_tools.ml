@@ -17,7 +17,7 @@ let bound request=match request.Browser_surface.route,request.tab_id with
   | (Browser_selection.Automatic|Exact (B.Live_route None)),Some _ ->
       Error (Browser_selection.error_message Binding_required)
   | (Automatic|Exact (B.Live_route None)),None
-  | Exact (B.Live_route (Some _)|Automation_route),(None|Some _) -> Ok ()
+  | Exact (B.Live_route (Some _)),(None|Some _) -> Ok ()
 let prepared ?(required_actions=[]) request projection verb=
   let* ()=bound request in
   Ok {preference=request.Browser_surface.route;verb;projection;required_actions}
@@ -65,11 +65,10 @@ let prepare_read json =
     | `Text|`Html|`Elements|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads|`Console|`Network|`Cookies -> false) in
   if contextual then
     let* ()=match request.route,mode with
-      | Browser_selection.Exact B.Automation_route,_ -> Ok ()
-      | Exact (Live_route _),(`Text|`Elements|`Frames|`Dialog) -> Ok ()
+      | Browser_selection.Exact (Live_route _),(`Text|`Elements|`Frames|`Dialog) -> Ok ()
       | Exact (Live_route _),(`Html|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads|`Console|`Network|`Cookies) ->
           Error "a live contextual read supports text, elements, frames, or a top-level native dialog"
-      | Automatic,_ -> Error "frame and dialog reads require an explicit automation or live browser" in
+      | Automatic,_ -> Error "frame and dialog reads require an explicit live browser" in
     let* tab_id=tab request in
     let* mode=match mode with
       | `Text -> Ok (`Text max_chars) | `Elements -> Ok (`Elements filter) | `Frames -> Ok `Frames
@@ -86,9 +85,6 @@ let prepare_read json =
       let* tab_id=tab request in
       prepared request (Scene scene) (B.Page_scene {tab_id;max_chars;view=scene.view;scope=scene.scope})
   | `Snapshot ->
-      let* ()=match request.route with
-        | Browser_selection.Automatic | Exact (B.Live_route _) -> Ok ()
-        | Exact Automation_route -> Error B.snapshot_refused in
       let* scope=match List.assoc_opt "snapshotScope" fields,List.assoc_opt "root" fields with
         | (None|Some (`String _) as scope),(None|Some (`String _) as root) ->
           let text=function Some (`String value) -> Some value | Some _ | None -> None in
@@ -100,21 +96,10 @@ let prepare_read json =
   | `Downloads ->
       (* A live connection that does not list downloads refuses at selection
          (Browser_lane.live_transport_serves). *)
-      let* ()=match request.route with Browser_selection.Exact (B.Automation_route|Live_route _) -> Ok ()
-        | Automatic -> Error "downloads require automation or an explicit live browser" in
+      let* ()=match request.route with Browser_selection.Exact (B.Live_route _) -> Ok ()
+        | Automatic -> Error "downloads require an explicit live browser" in
       let* tab_id=tab request in prepared request Raw (B.Page_downloads {tab_id})
-  | `Console ->
-      let* ()=match request.route with Browser_selection.Exact B.Automation_route -> Ok ()
-        | Automatic|Exact (Live_route _) -> Error "console reads require automation" in
-      let* tab_id=tab request in prepared request Raw (B.Page_console {tab_id})
-  | `Network ->
-      let* ()=match request.route with Browser_selection.Exact B.Automation_route -> Ok ()
-        | Automatic|Exact (Live_route _) -> Error "network reads require automation" in
-      let* tab_id=tab request in prepared request Raw (B.Page_network {tab_id})
-  | `Cookies ->
-      let* ()=match request.route with Browser_selection.Exact B.Automation_route -> Ok ()
-        | Automatic|Exact (Live_route _) -> Error "cookie reads require automation" in
-      let* tab_id=tab request in prepared request Raw (B.Page_cookies {tab_id})
+  | `Console|`Network|`Cookies -> Error "no connected browser serves console, network or cookie reads"
   | `Text -> prepared request Raw (B.Page_read {tab_id=request.tab_id;max_chars=Some max_chars})
   (* The source of the top document, never cut: when the JSON reply would
      pass 1 MiB it says htmlComplete false instead. A browser that cannot read it refuses at
@@ -147,10 +132,6 @@ let prepare ~upload_paths tool json =
       Ok {preference=request.route;required_actions=[];projection=Raw;verb=B.Page_native_workflow workflow}
      | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _) ->
       let* request=Browser_interaction.parse json in
-      let* ()=match request.route with
-        | Browser_selection.Exact B.Automation_route when B.acts_on_snapshot_target request.action ->
-            Error B.snapshot_target_refused
-        | Automatic|Exact (Live_route _|Automation_route) -> Ok () in
       Ok {preference=request.route;required_actions=[];projection=Raw;
         verb=B.Page_interact {tab_id=request.tab_id;frame_path=request.frame_path;expected_url=request.expected_url;action=request.action}})
   | Act ->
@@ -166,8 +147,7 @@ let prepare ~upload_paths tool json =
         | (B.Action.Open_tab _|Open_window _|Control _),Browser_selection.Exact (B.Live_route None)
         | Control _,Automatic ->
             Error "live creation, control and Page management actions require an explicit observed clientId"
-        | Control _,Exact B.Automation_route -> Error B.handoff_refused
-        | (Open_tab _|Open_window _|On_tab _),(Automatic|Exact (Live_route _|Automation_route))
+        | (Open_tab _|Open_window _|On_tab _),(Automatic|Exact (Live_route _))
         | Control _,Exact (Live_route (Some _)) -> Ok () in
       prepared request Raw (B.Page_act action)
 
@@ -198,7 +178,7 @@ let prepare ~upload_paths tool json =
       let* ()=match request.route,request.tab_id with
         | Browser_selection.Exact (B.Live_route _),None ->
             Error "live navigation needs the tabId of a tab this connection opened with open_tab"
-        | (Automatic|Exact (B.Live_route _|Automation_route)),(None|Some _) -> Ok () in
+        | (Automatic|Exact (B.Live_route _)),(None|Some _) -> Ok () in
       prepared request Raw (B.Page_goto {url;tab_id=request.tab_id})
 type metadata_request = Connections | Bind_goal of {goal_id:string;client_id:B.client_id} | Goal_status of string
   | Unbind_goal of string
@@ -226,7 +206,7 @@ let prepare_request ~upload_paths tool json =
          (match request.route with
           | Browser_selection.Exact (B.Live_route (Some client_id)) ->
               Ok (Metadata (Bind_goal {goal_id;client_id}))
-          | Automatic|Exact (Live_route None|Automation_route) ->
+          | Automatic|Exact (Live_route None) ->
               Error "bind_goal requires lane=live and an observed Ego clientId")
        | Some (`String "goal_status") ->
          let* _=fields ["action";"goalId"] json in
@@ -245,7 +225,7 @@ let initial_goal_space initial_goal_ids config request =
      | [] -> Ok None
      | [goal_id] -> Browser_goal_space.find config ~goal_id |> Result.map_error Browser_goal_space.error_message
      | _::_::_ -> Error "current Task belongs to multiple Goals; choose an explicit browser lane and clientId")
-  | (Automatic|Exact (B.Live_route _|Automation_route)),
+  | (Automatic|Exact (B.Live_route _)),
     (Tabs_list|Session_open _|Session_close|Session_status|Page_read _|Page_document _|Page_downloads _
     |Page_console _|Page_network _|Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _
     |Page_native_workflow _|Page_interact _|Page_goto _|Page_elements _|Page_act _|Page_context _

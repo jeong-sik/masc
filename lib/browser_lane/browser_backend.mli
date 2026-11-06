@@ -9,13 +9,12 @@
 
 (** [all] (derived) lists every source in constructor order. *)
 type t =
-  | Automation  (** the Gecko browser masc drives through geckodriver *)
   | Owned_firefox  (** the live Firefox masc launches and reaches over BiDi *)
   | Ego  (** the ego lite task space masc opens *)
   | External_host  (** the clients an outside native host brings: a browser extension or a BiDi host *)
 [@@deriving enumerate]
 
-(** The lane a Keeper names for this source. Several sources share [Live]. *)
+(** The lane a Keeper names for this source. *)
 val lane : t -> Browser_lane_name.t
 
 val to_wire : t -> string

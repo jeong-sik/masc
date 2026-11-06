@@ -20,7 +20,7 @@ type = "string"
 required = true
 description = """
 Literal phrase from the task, capability name or description. Names such as \
-browser-navigate-read need no query-language quoting. SQLite tokenization and \
+browser-live-follow-read need no query-language quoting. SQLite tokenization and \
 ranking still apply; no match is not evidence that the capability is absent. \
 For boolean, prefix or column expressions, select syntax=fts5 explicitly."""
 

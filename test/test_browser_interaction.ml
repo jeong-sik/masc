@@ -53,10 +53,9 @@ let test_activate_tab () =
   let wire = Browser_lane.interaction_args ~tab_id:7 ~frame_path:[] ~expected_url:request.expected_url request.action in
   check bool "wire pins tab URL and activation only" true
     (wire = `Assoc ["tabId",`Int 7;"action",`String "activate_tab";"expectedUrl",`String "https://example.org"]);
-  List.iter (fun input -> check bool "activation rejects missing URL, unrelated inputs and automation" true
+  List.iter (fun input -> check bool "activation rejects missing URL and unrelated inputs" true
     (Result.is_error (Interaction.parse (`Assoc input))))
-    [fields "activate_tab"; args @ ["selector",`String "button"];
-     fields "activate_tab" @ ["lane",`String "automation";"expectedUrl",`String "https://example.org"]]
+    [fields "activate_tab"; args @ ["selector",`String "button"]]
 let test_scene_reference () =
   let target : Browser_lane.node_ref = {document_id="doc";node_id="node"} in
   let reference = ["documentId",`String "doc";"nodeId",`String "node"] in

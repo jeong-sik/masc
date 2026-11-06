@@ -2,11 +2,9 @@
     filesystem operations must be offloaded by the server caller. *)
 type t
 (** The one browser source an allocation's worker serves, with the browser it
-    starts: an owned Gecko for automation, a live Firefox for the owned BiDi
-    connection. Ego's settings ride the worker's
-    arguments, and an external host worker starts no browser. *)
+    starts: a live Firefox for the owned BiDi connection. Ego's settings ride
+    the worker's arguments, and an external host worker starts no browser. *)
 type source =
-  | Automation of Browser_addon_automation.configuration
   | Owned_firefox of Browser_addon_live_bidi.configuration
   | Ego
   | External_host
@@ -92,7 +90,7 @@ val retain : admission:Native_addon_lease.t -> directory:string -> (settlement, 
     becomes [retained] with the recorded directory identity, or, with no
     record, the identity of the private directory found at this instance's own
     path. Only the child configurations needed to confirm settlement are
-    decoded; automation/model payloads are not execution authority for this
+    decoded; browser and model payloads are not execution authority for this
     handoff. A repeated retain reads only the envelope and retained record.
     With no acquisition record, the full current descriptor is still required.
     An allocation already released is reported as [Allocation_released] and

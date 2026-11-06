@@ -28,7 +28,7 @@ let required_actions args = match args with
   | _ -> Error "body must be a JSON object"
 
 (* The [mode] argument of BrowserRead, read once. The top-level reads take
-   the page as a whole; [frames] and [dialog] read the automation lane's page
+   the page as a whole; [frames] and [dialog] read a live connection's page
    context. The tool schema's enum names the same values. *)
 type top_level_read =
   [ `Text | `Html | `Elements | `Scene | `Regions | `Snapshot | `Screenshot | `Downloads | `Console | `Network | `Cookies ]

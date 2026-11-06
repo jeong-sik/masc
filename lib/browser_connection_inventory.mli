@@ -23,8 +23,7 @@ val build : observations:observation list -> issues:issue list -> t
 (** Keep valid rows from readable workers; exclude every duplicate client ID
     and every controller advertising a conflicting native Ego Space ID.
     Any issue refuses automatic selection without claiming no browser exists.
-    With several workers only concrete live UUIDs can be recommended; owned
-    work routes still require an unambiguous worker scope. *)
+    With several workers only concrete live UUIDs can be recommended. *)
 val to_json : t -> Yojson.Safe.t
 (** [clients], [inventoryIssues], [inventoryComplete], [automatic]. One-worker
     complete observations retain the existing browser-selection policy. *)

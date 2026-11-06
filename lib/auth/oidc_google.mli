@@ -26,6 +26,13 @@
 
     No network, no clock. *)
 
+(** Whether [text] is one of the two values of [iss] above. *)
+val is_issuer : string -> bool
+
+(** The discovery document of Google. Google tells clients to fix this address
+    in code and to read the endpoints and the [jwks_uri] from the document. *)
+val discovery_url : string
+
 type error =
   | Payload_not_an_object
   | Issuer_not_google  (** [iss] is missing, not a string, or another value. *)

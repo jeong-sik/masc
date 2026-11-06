@@ -102,7 +102,6 @@ type misc_operation =
   | Misc_browser_act
   | Misc_browser_interact
   | Misc_msx of Msx_tool.t
-  | Misc_portrait_read
   | Misc_candle_balance
   | Misc_candle_catalog
   | Misc_candle_purchase

@@ -284,7 +284,6 @@ let dispatch ?ask_source_turn_ref ?dos_admission ?(lane_access = Lane_addon_sour
         | Tool_schemas_misc.Misc_browser_session | Tool_schemas_misc.Misc_browser_goto
         | Tool_schemas_misc.Misc_browser_act | Tool_schemas_misc.Misc_browser_interact
         | Tool_schemas_misc.Misc_msx _
-        | Tool_schemas_misc.Misc_portrait_read
         | Tool_schemas_misc.Misc_candle_balance | Tool_schemas_misc.Misc_candle_catalog
         | Tool_schemas_misc.Misc_candle_purchase | Tool_schemas_misc.Misc_candle_equip
         | Tool_schemas_misc.Misc_candle_gift | Tool_schemas_misc.Misc_dos_load
@@ -309,8 +308,7 @@ let dispatch ?ask_source_turn_ref ?dos_admission ?(lane_access = Lane_addon_sour
         | Ok data -> Tool_result.make_ok ~tool_name:name ~start_time:start ~data ()
         | Error message -> Tool_result.make_err ~tool_name:name ~start_time:start
             ~class_:Tool_result.Workflow_rejection message)
-  | Some (Tool_schemas_misc.Misc_portrait_read
-      | Tool_schemas_misc.Misc_candle_balance | Tool_schemas_misc.Misc_candle_catalog
+  | Some (Tool_schemas_misc.Misc_candle_balance | Tool_schemas_misc.Misc_candle_catalog
       | Tool_schemas_misc.Misc_candle_purchase
       | Tool_schemas_misc.Misc_candle_equip
       | Tool_schemas_misc.Misc_candle_gift) -> None
@@ -447,7 +445,6 @@ let is_read_only = function
   | Tool_schemas_misc.Misc_dashboard
   | Tool_schemas_misc.Misc_keeper_waiting_inventory
   | Tool_schemas_misc.Misc_tool_help
-  | Tool_schemas_misc.Misc_portrait_read
   | Tool_schemas_misc.Misc_candle_catalog
   (* Read-back only: records nothing, matching the descriptor's readonly flag
      and the MCP lane's runtime_tool_policy. *)

@@ -481,22 +481,6 @@ let execute_tool_eio
                    let misc_operation = Tool_schemas_misc.misc_operation_of_tool_name name in
                    (match misc_operation, Option.bind misc_operation Keeper_candle_tools.operation_of_misc with
                     | _, Some operation -> candle operation
-                    (* Keeper-only, like spawn and code_query above: the
-                       portrait is the Keeper's own, drawn from its name, and
-                       this endpoint has no Keeper turn to name. The name is
-                       registered and this endpoint cannot run it, so it says
-                       that rather than answering "Unknown tool". *)
-                    | Some Tool_schemas_misc.Misc_portrait_read, None ->
-                      Some
-                        (Tool_result.error
-                           ~failure_class:Tool_result.Workflow_rejection
-                           ~tool_name:name
-                           ~start_time
-                           (Printf.sprintf
-                              "tool '%s' is keeper-internal; not available on this MCP endpoint \
-                               (a Keeper's portrait is drawn from its own name, which this \
-                               endpoint does not have)"
-                              name))
                     | ((Some (Tool_schemas_misc.Misc_lane_declaration_read) | None), None)
                     | (Some (Tool_schemas_misc.Misc_lane_declaration_save), None)
                     | (Some (Tool_schemas_misc.Misc_lane_updates), None)

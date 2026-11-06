@@ -470,7 +470,7 @@ let test_nothing_reaches_the_border () =
 
 (* This valid name receives a medal and a short, wide body. Its disc used to
    end at y=1.0832 while the image ended at y=0.97, cutting it across the
-   middle on the dashboard, TUI and portrait-read tool alike. *)
+   middle on the dashboard and TUI alike. *)
 let test_name_derived_medal_is_whole () =
   let name = "audit-keeper-79" in
   let body = body_of_name name and equipment = equipment_of_name name in

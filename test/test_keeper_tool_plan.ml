@@ -811,7 +811,6 @@ let test_composable_output_registry_is_closed () =
     ; "keeper_job_start"
     ; "keeper_job_status"
     ; "keeper_lane_status"
-    ; "keeper_portrait_read"
     ; "keeper_tasks_list"
       (* masc_agent_card and masc_agent_timeline left this list with #29681:
          off the model surface, so no plan can name them and a composable

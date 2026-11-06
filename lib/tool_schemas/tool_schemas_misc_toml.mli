@@ -19,7 +19,6 @@ val browser_interact : Masc_domain.tool_schema
     config/tools/masc_msx_*.toml. Every {!Msx_tool.t} is read when the module
     initializes, so a missing definition refuses the boot. *)
 val msx_schema : Msx_tool.t -> Masc_domain.tool_schema
-val portrait_read : Masc_domain.tool_schema
 val candle_balance : Masc_domain.tool_schema
 val candle_catalog : Masc_domain.tool_schema
 val candle_purchase : Masc_domain.tool_schema

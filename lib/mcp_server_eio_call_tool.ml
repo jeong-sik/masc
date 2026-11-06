@@ -401,7 +401,7 @@ let retain_runtime_mcp_observation ~keeper_entry ~tool_name ~arguments ~start_ti
           | Misc_keeper_waiting_inventory | Misc_tool_help | Misc_web_fetch
           | Misc_web_search | Misc_browser_tabs | Misc_browser_session | Misc_browser_goto
           | Misc_browser_act | Misc_browser_interact | Misc_msx _
-          | Misc_portrait_read | Misc_candle_balance | Misc_candle_catalog
+          | Misc_candle_balance | Misc_candle_catalog
           | Misc_candle_purchase | Misc_candle_equip | Misc_candle_gift | Misc_dos_load
           | Misc_dos_meta | Misc_dos_inventory | Misc_dos_eject | Misc_dos_screen
           | Misc_dos_step | Misc_dos_press | Misc_dos_click | Misc_dos_type | Misc_dos_peek

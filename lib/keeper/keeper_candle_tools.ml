@@ -47,7 +47,6 @@ let operation_of_misc : Tool_schemas_misc.misc_operation -> operation option = f
   | Tool_schemas_misc.Misc_browser_act
   | Tool_schemas_misc.Misc_browser_interact
   | Tool_schemas_misc.Misc_msx _
-  | Tool_schemas_misc.Misc_portrait_read
   | Tool_schemas_misc.Misc_dos_load
   | Tool_schemas_misc.Misc_dos_meta
   | Tool_schemas_misc.Misc_dos_inventory

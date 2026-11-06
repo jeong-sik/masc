@@ -1605,7 +1605,6 @@ let test_concurrent_execution_opt_ins_are_exact () =
        lock, and evaluation/retrieval appends use per-path locks. Current
        evidence and permission are rechecked after the yielding model call. *)
     ; "keeper_memory_select"
-    ; "keeper_portrait_read"
     (* Artifact fetch plus static validation; catalog cache is Atomic. *)
     ; "keeper_skill_validate"
     ; "keeper_surface_read"

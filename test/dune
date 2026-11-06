@@ -3655,11 +3655,6 @@
  (action (run %{exe:test_keeper_vision_tool.exe} --browser-screenshot)))
 
 (test
- (name test_keeper_portrait_read)
- (modules test_keeper_portrait_read)
- (libraries alcotest masc_test_deps masc masc_keeper_portrait masc_config_dir_resolver masc_tool_types masc_candle_store))
-
-(test
  (name test_keeper_image_dimensions)
  (modules test_keeper_image_dimensions)
  (libraries alcotest masc))

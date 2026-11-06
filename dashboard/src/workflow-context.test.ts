@@ -239,22 +239,6 @@ describe('workflowActionLabel', () => {
     expect(workflowActionLabel('broadcast')).toBe('Broadcast')
   })
 
-  it('returns "Pause Namespace" for namespace_pause', () => {
-    expect(workflowActionLabel('namespace_pause')).toBe('Pause Namespace')
-  })
-
-  it('returns "Pause Namespace" for workspace_pause', () => {
-    expect(workflowActionLabel('workspace_pause')).toBe('Pause Namespace')
-  })
-
-  it('returns "Resume Namespace" for namespace_resume', () => {
-    expect(workflowActionLabel('namespace_resume')).toBe('Resume Namespace')
-  })
-
-  it('returns "Resume Namespace" for workspace_resume', () => {
-    expect(workflowActionLabel('workspace_resume')).toBe('Resume Namespace')
-  })
-
   it('returns "Inject Task" for task_inject', () => {
     expect(workflowActionLabel('task_inject')).toBe('Inject Task')
   })

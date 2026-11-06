@@ -23,7 +23,7 @@ import { CmdGateLinks, CmdInterveneForm } from './cmd-intervene-form'
 
 function seedSnapshot(keepers: { name: string }[]): void {
   operatorSnapshot.value = {
-    root: { paused: false, namespace: 'default' },
+    root: { namespace: 'default' },
     sessions: [],
     keepers,
     recent_messages: [],
@@ -75,11 +75,9 @@ describe('CmdInterveneForm (keeper-v2 command parity)', () => {
       .toBe('되돌릴 수 없는 행동 지시는 Gate 로 라우팅됩니다')
 
     const options = Array.from(container.querySelectorAll('.cmd-form select option')).map(o => o.textContent)
-    expect(options.slice(0, 4)).toEqual([
+    expect(options.slice(0, 2)).toEqual([
       '브로드캐스트 · 전체',
       'keeper 직접 메시지',
-      '일시정지',
-      '재개',
     ])
     // handoff(태스크 인계 요청) has no live operator action type — omitted on purpose.
     expect(options).not.toContain('태스크 인계 요청')
@@ -157,42 +155,6 @@ describe('CmdInterveneForm (keeper-v2 command parity)', () => {
       payload: { message: '오늘 18:00 배포 창' },
       successMessage: '브로드캐스트를 전송했습니다.',
     })
-  })
-
-  it('dispatches namespace_pause with payload.reason on the fleet target', async () => {
-    render(html`<${CmdInterveneForm} />`, container)
-    await flushUi()
-
-    setSelect(container, '.cmd-form .lab-f:nth-of-type(1) select', 'namespace_pause')
-    setTextarea(container, '비용 원장 정리 전까지 정지')
-    await flushUi()
-    ;(container.querySelector('.lab-run') as HTMLButtonElement).click()
-    await flushUi()
-
-    expect(executeAction).toHaveBeenCalledWith({
-      action_type: 'namespace_pause',
-      target_type: 'workspace',
-      payload: { reason: '비용 원장 정리 전까지 정지' },
-      successMessage: '네임스페이스를 일시정지했습니다.',
-    })
-  })
-
-  it('redirects keeper-scoped pause to Monitor instead of pausing the namespace', async () => {
-    render(html`<${CmdInterveneForm} />`, container)
-    await flushUi()
-
-    setSelect(container, '.cmd-form .lab-f:nth-of-type(1) select', 'namespace_pause')
-    setSelect(container, '.cmd-form .lab-f:nth-of-type(2) select', 'nick0cave')
-    setTextarea(container, '개별 정지 시도')
-    await flushUi()
-    ;(container.querySelector('.lab-run') as HTMLButtonElement).click()
-    await flushUi()
-
-    expect(executeAction).not.toHaveBeenCalled()
-    expect(showToast).toHaveBeenCalledWith(
-      'keeper 개별 일시정지/재개는 Monitor → Keeper Fleet 에서 실행하세요.',
-      'warning',
-    )
   })
 })
 

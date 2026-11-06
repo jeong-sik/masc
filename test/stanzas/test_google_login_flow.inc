@@ -8,6 +8,6 @@
 ; executable before the suite starts and only the run is under the timeout.
 
 (test
- (name test_oidc_login_flow)
- (modules test_oidc_login_flow)
+ (name test_google_login_flow)
+ (modules test_google_login_flow)
  (libraries masc_test_deps jose mirage-crypto-pk digestif ptime))

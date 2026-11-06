@@ -10,7 +10,7 @@ open Authz_types
 open Authz_records
 module B = Authz_bootstrap
 module E = Authz_invite_event
-module Flow = Oidc_login_flow
+module Flow = Google_login_flow
 module Login = Authz_login
 module T = Oidc_login_transaction
 module X = Oidc_google_exchange
@@ -177,7 +177,7 @@ let now t () = instant_of_ms !(t.google.clock)
 
 let with_installation ?(capacity = 8) f =
   Eio_main.run (fun _env ->
-    let root = Filename.temp_dir "oidc-login-flow-" "" in
+    let root = Filename.temp_dir "google-login-flow-" "" in
     Fun.protect
       ~finally:(fun () -> remove_tree root)
       (fun () ->
@@ -417,7 +417,7 @@ let the_client_needs_its_secret () =
 
 let () =
   Alcotest.run
-    "oidc_login_flow"
+    "google_login_flow"
     [ ( "flow"
       , [ Alcotest.test_case "invited, then back" `Quick an_invited_person_joins_and_signs_in_later
         ; Alcotest.test_case "not invited" `Quick a_person_without_an_invitation_writes_nothing

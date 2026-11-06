@@ -82,7 +82,7 @@ RFC-0351 §4 타입 수명이 이미 이 줄을 적어놓았다:
 
 ```
 raw = project_with_drop ~measure_message_bytes ~capacity_bytes ~reserved_bytes messages
-demote ~demote_before:(* §3.4.1: 크기 거절 뒤에만 거절된 요청의 원자 수, 그 밖에는 0 *) messages
+demote ~demote_before:(* §3.4.1: 크기 거절 뒤에만 거절된 요청의 원자 수, 그 밖에는 0. 예외: 끝난 턴의 결과는 그 턴의 끝 *) messages
   |> project_with_drop ~measure_message_bytes ~capacity_bytes ~reserved_bytes
 ```
 
@@ -94,10 +94,10 @@ demote ~demote_before:(* §3.4.1: 크기 거절 뒤에만 거절된 요청의 �
    `api_common.ml:304-321` — `content_blocks = Some blocks` 이면 `content` 는 **직렬화되지 않는다**. 그런 메시지의 `content` 를 마커로 바꾸면 크기가 전혀 줄지 않는데 추정기는 감소를 계상한다. 즉 추정이 **하한**이 되어, window 가 과소평가로 cut 하고 물질화된 요청이 예산을 넘는다. `Some` 은 이미지·문서를 담으며 마커로 표현할 수도 없다.
 2. `Tool_output.decode_from_oas content = Not_marker`
    `Decoded` 는 이미 강등된 것이고, **`Invalid_marker` 는 강등하지 않는다** — 마커 모양인데 파싱에 실패한 payload 를 blob 으로 다시 저장하면 손상을 고착시킨다. 세 경우를 exhaustive match 로 다룬다.
-3. 원자 인덱스 < `demote_before` 경계 (§3.4.1: 크기 거절 뒤의 재전송에서만 거절된 요청의 원자 수)
+3. 원자 인덱스 < `demote_before` 경계 (§3.4.1: 크기 거절 뒤의 재전송에서만 거절된 요청의 원자 수. 예외로 끝난 턴의 결과는 그 턴의 끝이 경계다)
 4. `upper_bound_demoted_bytes msg < measure_message_bytes msg`
 
-판단은 (a) 타입, (b) 정수 비교, (c) 바이트 비교뿐이다. 중요도 점수·문자열 분류·휴리스틱 임계값 없음 (RFC-0351 §2 원칙 2).
+판단은 (a) 타입, (b) 정수 비교, (c) 바이트 비교뿐이다. 중요도 점수·문자열 분류·휴리스틱 임계값 없음 (RFC-0351 §2 원칙 2). 끝난 턴의 결과에만 고정 문턱(본문 2,048바이트)이 있다(§3.4.1 끝 단락).
 
 ### 3.1.1 알려진 틈 — 타입이 있는 블록으로 오는 결과 (2026-11-05)
 
@@ -291,7 +291,7 @@ reasoning 제거는 이 RFC 의 조립 코드가 아니라 runtime 선언이 정
 
 필수 회귀 테스트:
 
-1. **prefix 불변식** — 원자를 1 개씩 늘리며 전송 리스트의 *머리*가 `drop` 이 바뀔 때만 바뀌는지. 턴 경계가 움직여도 이미 보낸 tool 결과와 완료 인자가 그대로인지. 초안의 "60 원자 경계에서만 바뀌는지"는 **잘못된 불변식**이었다: 오늘 그 경계에서는 prefix 가 아예 안 바뀌므로 버그가 있어도 통과한다.
+1. **prefix 불변식** — 원자를 1 개씩 늘리며 전송 리스트의 *머리*가 `drop` 이 바뀔 때만 바뀌는지. 턴 경계가 움직여도 이미 보낸 tool 결과와 완료 인자가 그대로인지(끝난 턴의 결과를 마커로 보내는 Keeper 는 예외다. 그 결과가 한 번만 바뀌고 마커가 이후 요청에서 같은 바이트로 남는지를 본다). 초안의 "60 원자 경계에서만 바뀌는지"는 **잘못된 불변식**이었다: 오늘 그 경계에서는 prefix 가 아예 안 바뀌므로 버그가 있어도 통과한다.
 2. **상한 건전성** — 임의 payload(ASCII / 한국어 / 0x00–0xFF 전 범위)에 대해 `upper_bound_demoted_bytes ≥ measure_message_bytes (물질화된 마커 메시지)`.
 3. **`content_blocks = Some` 제외** — 그런 메시지는 강등되지 않고 크기가 변하지 않는다.
 4. **`Invalid_marker` 제외** — 손상된 마커 모양 payload 는 그대로 둔다.
@@ -303,7 +303,7 @@ reasoning 제거는 이 RFC 의 조립 코드가 아니라 runtime 선언이 정
 |---|---|
 | 상한이 하한이 되어 요청 초과 | §3.2 포화 후보를 실제 측정기로 통과. §6 테스트 2 |
 | `content_blocks = Some` 오계상 | §3.1 조건 1. §6 테스트 3 |
-| prompt-cache 회귀 | §3.4.1 크기 거절 뒤에만 강등. §6 테스트 1. 실패 시 머지 금지 |
+| prompt-cache 회귀 | §3.4.1 크기 거절 뒤에만 강등. 끝난 턴의 결과는 한 번만 바뀐다(§3.4.1 끝 단락). §6 테스트 1. 실패 시 머지 금지 |
 | `preview_max` 변경이 상한을 깸 | §3.3 export 후 단일 참조 |
 | `put` 실패 후 조용한 초과 | §3.5 재측정 필수. §6 테스트 5 |
 | 강등 blob GC 후 not-found | §3.6 — 파생 데이터, 다음 강등이 복원. typed not-found 필요 |

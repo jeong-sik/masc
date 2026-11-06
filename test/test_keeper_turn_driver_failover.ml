@@ -4343,6 +4343,29 @@ let test_a_fenced_failure_waits_for_the_rest_its_attempt_recorded () =
         "no provider wait" (decide ~now:(now +. 88442.0))))
 ;;
 
+module Loop = Masc.Keeper_heartbeat_loop
+
+(* What a cycle that entered with [entry] does: take its input, or the wait
+   its held outcome leaves the next cycle. *)
+let cycle_entry_to_string ~now = function
+  | Loop.Take_input -> "takes its input"
+  | Loop.Hold held ->
+    let meta =
+      match Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String "held-cycle" ]) with
+      | Ok meta -> meta
+      | Error message -> Alcotest.failf "held cycle meta failed: %s" message
+    in
+    (match (Loop.For_testing.held_cycle_outcome ~meta held).after_failure with
+     | None -> "holds with no wait"
+     | Some (Loop.Continue_on_deferred_lane { next_runtime_id }) ->
+       "continues on " ^ next_runtime_id
+     | Some (Loop.Wait_for_path_release { release_at; waiting_on; basis }) ->
+       Printf.sprintf "waits %.0fs for %s on %s" (release_at -. now) waiting_on
+         (match basis with
+          | Driver.Observed_path_rest -> "the observed rest"
+          | Driver.Failure_response -> "the failure response"))
+;;
+
 (* 2026-11-06: one-path Muse Keepers resting on a quota stated to reset on
    11-09 each sent one refused request about two minutes after every server
    boot. The window lived only in process memory, and a starting loop had no
@@ -4369,21 +4392,14 @@ let test_a_restarted_loop_waits_for_the_quota_window_its_store_kept () =
           | Error error ->
             Alcotest.fail (Runtime_quota_window_journal.restore_error_to_string error)
         in
+        (* The first cycle of a loop that just started. *)
         let first_cycle ~now =
-          match
-            Masc.Keeper_heartbeat_loop.For_testing.start_path_wait ~now
-              ~assignment_id:"quota_lane" ~deferred_runtime_lane:None
-          with
-          | None -> "takes its input"
-          | Some (Masc.Keeper_heartbeat_loop.Continue_on_deferred_lane { next_runtime_id }) ->
-            "continues on " ^ next_runtime_id
-          | Some
-              (Masc.Keeper_heartbeat_loop.Wait_for_path_release
-                 { release_at; waiting_on; basis }) ->
-            Printf.sprintf "waits %.0fs for %s on %s" (release_at -. now) waiting_on
-              (match basis with
-               | Driver.Observed_path_rest -> "the observed rest"
-               | Driver.Failure_response -> "the failure response")
+          Loop.For_testing.cycle_entry ~loop_start:(ref Loop.Loop_starting)
+            ~intake_admission:Loop.Intake_admitted
+            ~walk_rest:(fun () ->
+              Loop.For_testing.next_walk_rest ~now ~assignment_id:"quota_lane"
+                ~deferred_runtime_lane:None)
+          |> cycle_entry_to_string ~now
         in
         restart ~now;
         Alcotest.(check string) "a loop starting on a serving path takes its input"
@@ -4397,6 +4413,60 @@ let test_a_restarted_loop_waits_for_the_quota_window_its_store_kept () =
         restart ~now:(now +. 88442.0);
         Alcotest.(check string) "a restart after the reset takes its input again"
           "takes its input" (first_cycle ~now:(now +. 88442.0))))
+;;
+
+(* Only the first cycle the lifecycle admits reads the rest its loop starts
+   in. A later cycle never does: an undated rest is released at now + cap, so
+   reading it every cycle would renew the wait forever. A paused cycle reads
+   nothing, so a Keeper paused at boot still waits after its resume. *)
+let test_only_the_first_admitted_cycle_reads_the_rest_its_loop_starts_in () =
+  let now = 100.0 in
+  let reads = ref 0 in
+  let walk_rest rest () =
+    incr reads;
+    rest
+  in
+  let resting = Driver.Walk_waits_until { release_at = 500.0; resting_runtime_id = "muse" } in
+  let serving = Driver.Walk_head_serving { runtime_id = "muse" } in
+  let paused =
+    Loop.classify_turn_intake_admission
+      ~lifecycle:
+        (Masc.Keeper_lifecycle_admission.admit_autonomous
+           (Masc.Keeper_lifecycle_admission.state ~paused:true ~latched_reason:None))
+  in
+  (* Cycles of one loop, in order. *)
+  let cycles loop_start inputs =
+    List.fold_left
+      (fun entered (intake_admission, rest) ->
+         let entry =
+           Loop.For_testing.cycle_entry ~loop_start ~intake_admission ~walk_rest:(walk_rest rest)
+         in
+         cycle_entry_to_string ~now entry :: entered)
+      [] inputs
+    |> List.rev
+  in
+  let paused_at_boot = ref Loop.Loop_starting in
+  Alcotest.(check (list string)) "a loop paused at boot waits once after its resume"
+    [ "holds with no wait"
+    ; "waits 400s for muse on the observed rest"
+    ; "takes its input"
+    ; "holds with no wait"
+    ; "takes its input"
+    ]
+    (cycles paused_at_boot
+       [ paused, resting
+       ; Loop.Intake_admitted, resting
+       ; Loop.Intake_admitted, resting
+       ; paused, resting
+       ; Loop.Intake_admitted, resting
+       ]);
+  Alcotest.(check int) "the rest is read by the first admitted cycle only" 1 !reads;
+  let serving_at_start = ref Loop.Loop_starting in
+  Alcotest.(check (list string)) "a loop that starts serving never reads the rest again"
+    [ "takes its input"; "takes its input" ]
+    (cycles serving_at_start
+       [ Loop.Intake_admitted, serving; Loop.Intake_admitted, resting ]);
+  Alcotest.(check int) "the serving start was the second and last read" 2 !reads
 ;;
 
 (* RFC-provider-path-rest §3.4: the chat lane's deferred retry reads the same
@@ -7473,6 +7543,8 @@ let () =
             test_a_fenced_failure_waits_for_the_rest_its_attempt_recorded;
           Alcotest.test_case "a restarted loop waits for the quota window its store kept" `Quick
             test_a_restarted_loop_waits_for_the_quota_window_its_store_kept;
+          Alcotest.test_case "only the first admitted cycle reads the rest its loop starts in"
+            `Quick test_only_the_first_admitted_cycle_reads_the_rest_its_loop_starts_in;
           Alcotest.test_case "a chat retry follows the shared next dispatch" `Quick
             test_a_chat_retry_follows_the_shared_next_dispatch;
           Alcotest.test_case "a same-path suffix waits only for a recorded rest" `Quick

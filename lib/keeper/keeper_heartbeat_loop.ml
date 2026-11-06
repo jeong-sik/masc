@@ -413,25 +413,59 @@ let provider_wait_interrupt
           | Keeper_turn_driver.Walk_waits_until _ -> false)
 ;;
 
-(* What a loop's first cycle waits for. A loop that starts -- a server
-   restart, keeper_up -- holds no failure of its own, so nothing would make it
-   wait, yet its stores can already rest the walk it sends next: a quota window
-   a provider stated before the restart, read back at boot
-   ([Runtime_quota_window_journal]). That is the wait the previous process's
-   loop was in. The first cycle takes it up the way the cycle after that
-   failure did, on the observed rest, so a change that frees the walk still
-   ends it ([provider_wait_interrupt]). On 2026-11-06 three Keepers resting
-   on stated quotas each sent one refused request after every boot. *)
-let start_path_wait ~now ~assignment_id ~deferred_runtime_lane =
-  match next_walk_rest ~now ~assignment_id ~deferred_runtime_lane with
-  | Keeper_turn_driver.Walk_head_serving _ -> None
-  | Keeper_turn_driver.Walk_waits_until { release_at; resting_runtime_id } ->
-    Some
-      (Wait_for_path_release
-         { release_at
-         ; waiting_on = resting_runtime_id
-         ; basis = Keeper_turn_driver.Observed_path_rest
-         })
+type loop_start =
+  | Loop_starting
+  | Loop_started
+
+type held_cycle =
+  | Lifecycle_holds
+  | Wait_at_loop_start of
+      { release_at : float
+      ; waiting_on : string
+      }
+
+type cycle_entry =
+  | Take_input
+  | Hold of held_cycle
+
+(* How a cycle enters. A loop that starts -- a server restart, keeper_up --
+   holds no failure of its own, so nothing would make it wait, yet its stores
+   can already rest the walk it sends next: a quota window a provider stated
+   before the restart, read back at boot ([Runtime_quota_window_journal]).
+   That is the wait the previous process's loop was in. The first cycle the
+   lifecycle admits reads [walk_rest] once; every later wait follows the
+   failed cycle that left it, so an undated rest (released at now + cap) is
+   never re-read into a wait that renews itself. A paused cycle reads
+   nothing and leaves the loop starting, so the cycle after a resume still
+   waits. On 2026-11-06 three Keepers resting on stated quotas each sent one
+   refused request after every boot. *)
+let cycle_entry ~loop_start ~intake_admission ~walk_rest =
+  match intake_admission, !loop_start with
+  | Intake_lifecycle_blocked _, (Loop_starting | Loop_started) -> Hold Lifecycle_holds
+  | Intake_admitted, Loop_started -> Take_input
+  | Intake_admitted, Loop_starting ->
+    loop_start := Loop_started;
+    (match walk_rest () with
+     | Keeper_turn_driver.Walk_head_serving _ -> Take_input
+     | Keeper_turn_driver.Walk_waits_until { release_at; resting_runtime_id } ->
+       Hold (Wait_at_loop_start { release_at; waiting_on = resting_runtime_id }))
+;;
+
+(* A held cycle runs no turn. A wait at loop start sleeps the way the cycle
+   after a failure does, on the observed rest, so a change that frees the walk
+   still ends it ([provider_wait_interrupt]). *)
+let held_cycle_outcome ~meta held =
+  { meta
+  ; cycle_status = Turn_cycle_completed
+  ; stimuli_acked = false
+  ; after_failure =
+      (match held with
+       | Lifecycle_holds -> None
+       | Wait_at_loop_start { release_at; waiting_on } ->
+         Some
+           (Wait_for_path_release
+              { release_at; waiting_on; basis = Keeper_turn_driver.Observed_path_rest }))
+  }
 ;;
 
 
@@ -1586,9 +1620,7 @@ let run_heartbeat_loop
   let cadence_now () = Monotonic_deadline.elapsed_seconds cadence_clock in
   let periodic_cadence = ref (Keeper_keepalive_signal.Initial_due
       (float_of_int (max 0 proactive_warmup_sec))) in
-  (* Only the loop's first cycle reads [start_path_wait]; every later wait
-     follows the failed cycle that left it. *)
-  let first_cycle = ref true in
+  let loop_start = ref Loop_starting in
   let rec loop () =
     if Atomic.get stop
     then ()
@@ -1674,21 +1706,15 @@ let run_heartbeat_loop
             ~lifecycle:
               (Keeper_lifecycle_admission.admit_autonomous lifecycle_state)
         in
-        let start_wait =
-          if not !first_cycle
-          then None
-          else (
-            first_cycle := false;
-            match intake_admission with
-            | Intake_lifecycle_blocked _ -> None
-            | Intake_admitted ->
-              let assignment_id = Keeper_meta_contract.runtime_id_of_meta meta_current in
-              start_path_wait ~now:now_ts ~assignment_id
-                ~deferred_runtime_lane:
-                  (Deferred_lane_slot.for_assignment deferred_runtime_lane_slot ~assignment_id))
+        let entry =
+          cycle_entry ~loop_start ~intake_admission ~walk_rest:(fun () ->
+            let assignment_id = Keeper_meta_contract.runtime_id_of_meta meta_current in
+            next_walk_rest ~now:now_ts ~assignment_id
+              ~deferred_runtime_lane:
+                (Deferred_lane_slot.for_assignment deferred_runtime_lane_slot ~assignment_id))
         in
-        (match start_wait with
-         | Some (Wait_for_path_release { release_at; waiting_on; basis = _ }) ->
+        (match entry with
+         | Hold (Wait_at_loop_start { release_at; waiting_on }) ->
            Log.Keeper.info
              ~keeper_name:m.name
              "%s: the loop starts while %s rests until %.0f; the first cycle takes \
@@ -1696,13 +1722,11 @@ let run_heartbeat_loop
              m.name
              waiting_on
              release_at
-         | Some (Continue_on_deferred_lane _) | None -> ());
-        (* A turn runs only when the lifecycle admits one and the walk it would
-           send is not already resting when the loop starts. *)
+         | Hold Lifecycle_holds | Take_input -> ());
         let admitted_turn =
-          match intake_admission, start_wait with
-          | Intake_admitted, None -> true
-          | Intake_admitted, Some _ | Intake_lifecycle_blocked _, _ -> false
+          match entry with
+          | Take_input -> true
+          | Hold _ -> false
         in
         (match intake_admission with
          | Intake_admitted -> ()
@@ -1758,14 +1782,9 @@ let run_heartbeat_loop
           Runtime.keeper_dispatch_snapshot ~keeper_name:m.name
         in
         let turn_outcome =
-          if not admitted_turn
-          then (
-            { meta = meta_current
-            ; cycle_status = Turn_cycle_completed
-            ; stimuli_acked = false
-            ; after_failure = start_wait
-            })
-          else (
+          match entry with
+          | Hold held -> held_cycle_outcome ~meta:meta_current held
+          | Take_input -> (
             (* Cycle 43: KeeperHeartbeat.tla TurnComplete bracket — the
                [turn_running] flag toggles around the dispatch and the
                pre/post guards mirror the spec's [turn_state] transition
@@ -2009,7 +2028,9 @@ module For_testing = struct
   ;;
 
   let after_failure = after_failure
-  let start_path_wait = start_path_wait
+  let next_walk_rest = next_walk_rest
+  let cycle_entry = cycle_entry
+  let held_cycle_outcome = held_cycle_outcome
   let next_cycle_starts_now = next_cycle_starts_now
   let cycle_wake = cycle_wake
   let periodic_cadence_after_cycle = periodic_cadence_after_cycle

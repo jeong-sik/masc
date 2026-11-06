@@ -29,7 +29,7 @@ let browser clients =
       (`Assoc
         [ "state", `String "serving"
         ; "clients", `List (List.map client clients)
-        ; "owned_backends", `Assoc [ "automation", work true; "stagehand", work true ] ])
+        ; "owned_backends", `Assoc [ "automation", work true ] ])
   with Ok output -> output | Error detail -> fail detail in
   { Addon.backend = Browser_lane.Backend.External_host
   ; observation = Ok (Some { instance_id = "worker"; observation_seq = 1

@@ -21,7 +21,7 @@ def exact_lane_id(name: str) -> str:
         "hitl_auto_judge": "hitl_auto_judge",
         "board_attention": "board_attention_exact",
         "verifier": "verifier_exact",
-        "browser_stagehand": "browser_stagehand_exact",
+        "browser_automation": "browser_automation_exact",
         "candle_appraiser": "candle_appraiser",
     }[name]
 
@@ -108,12 +108,12 @@ def machine_row(machine: str) -> dict:
 
 
 def lane_payload() -> dict:
-    lanes = ["librarian", "hitl_auto_judge", "board_attention", "verifier", "browser_stagehand", "candle_appraiser"]
+    lanes = ["librarian", "hitl_auto_judge", "board_attention", "verifier", "browser_automation", "candle_appraiser"]
     return {
         "schema": "masc.lane-inventory/v1",
         "observed_at": 1.0,
         "rows": [exact_row(name) for name in lanes]
-        + [browser_row(name) for name in ["live", "automation", "stagehand"]]
+        + [browser_row(name) for name in ["live", "automation"]]
         + [machine_row("msx"), machine_row("dos")],
         "exact_snapshot": {
             "schema": "masc.standalone_llm_lanes.v2",

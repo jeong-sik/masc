@@ -1705,6 +1705,29 @@ let test_cold_read_and_commit_do_not_deadlock () =
          | _ -> 0))
 ;;
 
+let test_failed_append_notifies_and_invalidates_cache () =
+  with_session @@ fun config trace_id session_dir ->
+  let cold = ok "cold session" (Ledger.load ~config ~trace_id) in
+  let heard = ref [] in
+  let restore = Ledger.install_commit_observer
+      (fun ~config:_ ~trace_id:changed -> heard := changed :: !heard) in
+  Fun.protect ~finally:restore @@ fun () ->
+  let loads = ref 0 in
+  Server_skill_usage_runtime.For_testing.with_runtime
+    ~ledger_loader:(fun ~config:_ ~trace_id:_ -> incr loads; Ok cold)
+    (fun () ->
+      let read () = ignore (Server_skill_usage_runtime.read_sessions ~config [ "alpha", trace_id ]) in
+      read ();
+      check int "the first read is cold" 1 !loads;
+      Fs_compat.mkdir_p (events_file session_dir);
+      (match Ledger.record ~keeper_name:"alpha" ~config ~trace_id (activation ()) with
+       | Ok _ -> fail "a directory accepted the event log"
+       | Error _ -> ());
+      check int "the attempted append notifies the legacy observer" 1 (List.length !heard);
+      read ();
+      check int "the uncertain append invalidates the cached ledger" 2 !loads)
+;;
+
 let () =
   run
     "keeper skill activation ledger"
@@ -1717,6 +1740,8 @@ let () =
             test_cold_read_and_commit_do_not_deadlock
         ; test_case "a committed row announces its Keeper" `Quick
             test_a_committed_row_announces_its_keeper
+        ; test_case "a failed append notifies and invalidates the cache" `Quick
+            test_failed_append_notifies_and_invalidates_cache
         ; test_case "legacy composition identifies its row and refuses later append" `Quick
             test_legacy_composition_reports_exact_row_without_appending
         ; test_case "a previous-generation log is refused at its header" `Quick

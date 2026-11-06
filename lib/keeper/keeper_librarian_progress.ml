@@ -157,6 +157,7 @@ let write ~keepers_dir ~keeper_id progress =
      with
      | Ok () ->
          !commit_observer ~keepers_dir ~keeper_id;
+         Keeper_memory_health_input.written ~keepers_dir ~keeper_id;
          Ok ()
      | Error message -> failed message
      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn

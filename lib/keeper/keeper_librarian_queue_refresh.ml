@@ -85,7 +85,9 @@ let forget_measurement ~config ~keeper_name =
     List.iter
       (fun site -> Hashtbl.remove reported_problems (key, site))
       all_problem_sites);
-  !change_observer ~config ~keeper_name
+  !change_observer ~config ~keeper_name;
+  Keeper_memory_health_input.written
+    ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
 ;;
 
 let limited_read ~config ~keeper_name ~trace_id =
@@ -162,7 +164,9 @@ let publish_measurement ~config ~keeper_name ~last_pass ~unread =
   let key = measurement_key ~config ~keeper_name in
   let measurement = { measured_at = Time_compat.now (); last_pass; unread } in
   Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.replace measurements key measurement);
-  !change_observer ~config ~keeper_name
+  !change_observer ~config ~keeper_name;
+  Keeper_memory_health_input.written
+    ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
 ;;
 
 let measure_unread ~config ~keeper_name =

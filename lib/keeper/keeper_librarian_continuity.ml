@@ -442,6 +442,8 @@ let save_snapshot ~config ~keeper_name snapshot =
   match S.save ~path:(path ~config ~keeper_name) snapshot |> Result.map_error S.error_to_string with
   | Ok snapshot ->
       !commit_observer ~config ~keeper_name;
+      Keeper_memory_health_input.written
+        ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name;
       Ok snapshot
   | Error _ as error -> error
 let with_original_source ~config ~keeper_name ~prepared publish =

@@ -17,6 +17,6 @@ val set_slack_configured : Slack_gateway_state.trigger_policy -> unit
     way. *)
 
 val announce_param_change : key:string -> unit
-(** {!Channel_gate_change.notify} when [key] is {!discord}'s or {!slack}'s
-    parameter key; any other parameter is not a connector change. For
-    {!Runtime_params.install_change_observer}. *)
+(** {!Gate_connector_announce.changed} with the matching connector id when
+    [key] is {!discord}'s or {!slack}'s parameter key; any other parameter is
+    not a connector change. For {!Runtime_params.install_change_observer}. *)

@@ -429,6 +429,7 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   in
   let base_path = Env_config_core.normalize_masc_base_path_input base_path in
   Runtime_params.initialize ~base_path;
+  Runtime_params.install_change_observer Connector_trigger_params.announce_param_change;
   Fs_compat.set_fs fs;
   Mcp_eio.set_net net;
   Mcp_eio.set_clock clock;

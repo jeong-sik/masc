@@ -6,8 +6,8 @@ open Alcotest
 
 let with_counter f =
   let notified = ref 0 in
-  Channel_gate_change.install (fun () -> incr notified);
-  Fun.protect ~finally:(fun () -> Channel_gate_change.install (fun () -> ())) (fun () ->
+  Gate_connector_announce.install (fun ~connector_id:_ -> incr notified);
+  Fun.protect ~finally:(fun () -> Gate_connector_announce.install (fun ~connector_id:_ -> ())) (fun () ->
     f notified)
 ;;
 

@@ -8466,6 +8466,9 @@ let owe_tools_read_for_keeper state keeper =
         (Masc_tui_owed_read.changed (keeper_skill_usage_owed state keeper))
   | Tools_activations -> owe_tools_inventory_read state
 
+let owe_ask_followup_read state =
+  state.ask_followup_owed <- Masc_tui_owed_read.changed state.ask_followup_owed
+
 let owe_open_lane_addon_read state =
   match state.lane_addons with
   | Some { Masc_tui_lane_addons.screen = Masc_tui_lane_addons.Detail (open_id, incarnation); _ } ->
@@ -8477,6 +8480,13 @@ let owe_open_lane_addon_read state =
       state.lane_addons_owed <-
         Some ((open_id, incarnation), Masc_tui_owed_read.changed owed)
   | Some { Masc_tui_lane_addons.screen = Masc_tui_lane_addons.Overview; _ } | None -> ()
+
+let owe_push_owned_revalidation state =
+  if state.view = Lanes then
+    state.lanes_owed <- Masc_tui_owed_read.changed state.lanes_owed;
+  owe_open_lane_addon_read state;
+  owe_machine_live_read state state.machine_source;
+  if Masc_tui_types.ask_followup_unfinished state then owe_ask_followup_read state
 
 let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
   match dataset with
@@ -19511,10 +19521,9 @@ let log_http_surface_read_finished state context =
 let start_http_refresh state ~host ~port ~intent ~refresh_inflight
     ~scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
   (* The chat pane's history comes down its own generation-guarded path, not
-     in the surface bundle. A revalidation owes it a read; the cadence does
-     not, because an appended turn announces itself (RFC-0480 §4 L2). Owed,
-     so a pane scrolled into older rows or a read in flight takes it when it
-     can; the owed read brings the tool details with it. *)
+     in the surface bundle. A revalidation owes it a read. Owed, so a pane
+     scrolled into older rows or a read in flight takes it when it can; the
+     owed read brings the tool details with it. *)
   begin
     Option.iter
          (fun keeper_name ->
@@ -19553,7 +19562,8 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        owe_schedules_read state;
        owe_keeper_schedules_read state;
        owe_chat_journal_reads state;
-       owe_overview_read state
+       owe_overview_read state;
+       owe_push_owned_revalidation state
   end;
   scoped_refresh_followup :=
     note_full_refresh_intent ~intent
@@ -23776,14 +23786,6 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            visible surfaces read once more (RFC-0480 §3.3). *)
         if not (Masc_tui_types.observer_replay_is_complete handshake) then begin
           if state.view = Memory then owe_memory_health_read state;
-          if state.view = Lanes then
-            owe_dataset_read state Masc.Workspace_dataset_event.Lanes;
-          Option.iter (fun (view : Masc_tui_lane_addons.t) ->
-            match view.screen with
-            | Masc_tui_lane_addons.Detail (instance_id, _) ->
-                owe_dataset_read state
-                  (Masc.Workspace_dataset_event.Lane_addons { instance_id })
-            | Masc_tui_lane_addons.Overview -> ()) state.lane_addons;
           start_http_refresh state ~host:server_peer_host ~port:state.port
             ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
             ~scoped_refresh_inflight:http_scoped_refresh_inflight

@@ -60,11 +60,11 @@ let slack_configured =
    this value. A gateway sets it once as it starts. *)
 let set_discord_configured policy =
   discord_configured := policy;
-  Channel_gate_change.notify ()
+  Gate_connector_announce.changed ~connector_id:Channel_gate_discord_state.connector_id
 
 let set_slack_configured policy =
   slack_configured := policy;
-  Channel_gate_change.notify ()
+  Gate_connector_announce.changed ~connector_id:Channel_gate_slack_state.connector_id
 
 (* [user_only:<id>] is left out of [choices] on purpose: it carries an id, so
    it is not a value a picker can offer.  Both parsers still accept it, and the
@@ -99,6 +99,8 @@ let slack =
     ()
 
 let announce_param_change ~key =
-  if String.equal key (Runtime_params.key discord) || String.equal key (Runtime_params.key slack)
-  then Channel_gate_change.notify ()
+  if String.equal key (Runtime_params.key slack)
+  then Gate_connector_announce.changed ~connector_id:Channel_gate_slack_state.connector_id
+  else if String.equal key (Runtime_params.key discord)
+  then Gate_connector_announce.changed ~connector_id:Channel_gate_discord_state.connector_id
 

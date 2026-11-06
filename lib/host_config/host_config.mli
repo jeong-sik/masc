@@ -15,9 +15,8 @@
     use the auto-generated [pp_t], [show_t], [equal] without writing
     bespoke formatters. *)
 
-(** Resolved coreutils binary paths.  Each field is the absolute path
-    discovered through [PATH] resolution (fallback to the
-    [coreutils_defaults] record if [PATH] lookup fails — see [resolve]). *)
+(** Coreutils binary paths.  [host ()] fills every field from the
+    [coreutils_defaults] record. *)
 type coreutils =
   { ls : string
   ; cat : string
@@ -57,19 +56,17 @@ type t =
         (** ls / cat / pwd / head / tail / wc absolute paths. *)
   ; agent_runtime_root : string
         (** Runtime root for cross-process agent identity files.
-            Maps to [<tmp>] from [host ()] and [<base_path>/.masc/runtime/agent]
-            from [resolve]. *)
+            [<tmp>] from [host ()]. *)
   ; sandbox_workspace_root : string
         (** Fleet sandbox root.  [host ()] takes the base path
             ([MASC_BASE_PATH], else the one an install recorded), then
-            [<tmp>/masc-fleet].  [resolve] takes [MASC_SANDBOX_ROOT], then
-            [MASC_BASE_PATH], then [<base_path>/fleet]. *)
+            [<tmp>/masc-fleet]. *)
   ; test_mode : test_mode_kind
         (** Typed test-mode boundary. *)
   ; log_dir : string
         (** Directory for runtime log files
-            ([auto-responder.log], [auto_debug.log], ...).  Default [<tmp>]
-            from [host ()]; configurable via env in [resolve]. *)
+            ([auto-responder.log], [auto_debug.log], ...).  [<tmp>] from
+            [host ()]. *)
   ; run_dir : string
         (** Host-selected root for runtime state files (PID locks, sockets).
             Default [<tmp>]. This process-local root must not cross PID
@@ -102,12 +99,6 @@ type t =
             RFC-0085 PR-10 replaces [Env_config_core.assets_dir_opt]. *)
   }
 [@@deriving show, eq]
-
-(** [resolve ?base_path ()] builds a [t] by resolving each field
-    against the host environment ([PATH] lookup for binaries,
-    [base_path] for runtime roots).  [base_path] defaults to the host
-    temp directory (typically [TMPDIR] or [/tmp]). *)
-val resolve : ?base_path:string -> unit -> (t, string) result
 
 (** [host ()] returns the canonical default [t].  Used by 60+ keeper /
     dispatch / shell call-sites.  Tmp-directory roots are resolved via

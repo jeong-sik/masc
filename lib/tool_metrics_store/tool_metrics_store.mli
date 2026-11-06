@@ -48,3 +48,6 @@ val read_series :
 val summary : masc_root:string -> (summary, string) result
 val row_to_json : row -> Yojson.Safe.t
 val reset_for_testing : unit -> unit
+
+val database_filename : string
+(** The database {!database_path} names below [<base>/.masc]. *)

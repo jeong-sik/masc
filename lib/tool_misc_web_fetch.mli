@@ -136,3 +136,6 @@ val with_http_get_for_test :
     Test-only: URL validation, cache, rate-limit, status handling, HTML
     cleanup, title/description extraction, and result construction still
     run; only the external network request is replaced. *)
+
+val artifacts_dirname : string
+(** The directory fetched artifacts sit in below [<base>/.masc]. *)

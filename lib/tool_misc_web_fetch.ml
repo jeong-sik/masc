@@ -362,6 +362,8 @@ let web_artifact_index_append ~dir ~sha256 ~source_url ~title ~bytes
   | Unix.Unix_error (err, _, _) -> Error (Unix.error_message err)
   | Sys_error message -> Error message
 
+let artifacts_dirname = "artifacts"
+
 let offload_full_text ~source_url ~title ~fetched_at_unix text =
   match Env_config_core.base_path () with
   | exception Env_config_core.Config_error message -> Error message
@@ -370,7 +372,7 @@ let offload_full_text ~source_url ~title ~fetched_at_unix text =
         List.fold_left
           Filename.concat
           base
-          [ Common.masc_dirname; "artifacts"; "web-fetch" ]
+          [ Common.masc_dirname; artifacts_dirname; "web-fetch" ]
       in
       (* #28820: the full text lives in the content-addressed
          [Tool_blob_store], so the sha carried by the marker and the index

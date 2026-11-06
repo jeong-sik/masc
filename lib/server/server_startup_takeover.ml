@@ -223,9 +223,10 @@ let close_acquisition_fd ~operation ~path ~context fd =
 
 let private_lease_directory_permissions = 0o700
 let private_lease_directory_prefix = "masc-base-path-leases-v1"
-let owner_lease_root_dirname = ".masc-owner"
 
-(* Beside [.masc], not in it: a Fresh state that deletes [.masc] state while
+(* HIGH-RISK-UNREVIEWED: makes the directory every process of a BasePath
+   trusts for its owner lease.
+   Beside [.masc], not in it: a Fresh state that deletes [.masc] state while
    an owner runs must not take that owner's lease with it. *)
 let lease_run_dir (root : Host_config.base_path_lease_root) ~base_path =
   match root with
@@ -237,7 +238,7 @@ let lease_run_dir (root : Host_config.base_path_lease_root) ~base_path =
          (Base_path_canonicalization_failed
             { base_path; reason = Unix.error_message error })
      | canonical_base_path ->
-       let dir = Filename.concat canonical_base_path owner_lease_root_dirname in
+       let dir = Filename.concat canonical_base_path Common.owner_lease_dirname in
        (match Unix.mkdir dir private_lease_directory_permissions with
         | () -> Ok dir
         | exception Unix.Unix_error (Unix.EEXIST, _, _) -> Ok dir

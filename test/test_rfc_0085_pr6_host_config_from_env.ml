@@ -38,26 +38,40 @@ let test_config_dir_field_reads_env () =
     check (option string) "config_dir field reflects env" (Some "/etc/masc") h.config_dir)
 ;;
 
-let test_base_path_lease_dir_field_reads_env () =
+let lease_root =
+  testable Host_config.pp_base_path_lease_root Host_config.equal_base_path_lease_root
+;;
+
+let test_base_path_lease_root_reads_env () =
   with_env "MASC_BASE_PATH_LEASE_DIR" (Some "/run/masc-lease") (fun () ->
     let h = Host_config.host () in
     check
-      string
-      "base_path_lease_dir field reflects env"
-      "/run/masc-lease"
-      h.base_path_lease_dir)
+      lease_root
+      "MASC_BASE_PATH_LEASE_DIR overrides the lease root"
+      (Host_config.Lease_dir_override "/run/masc-lease")
+      h.base_path_lease_root)
 ;;
 
-let test_resolve_base_path_lease_dir_field_reads_env () =
+let test_resolve_base_path_lease_root_reads_env () =
   with_env "MASC_BASE_PATH_LEASE_DIR" (Some "/run/masc-lease-resolved") (fun () ->
     match Host_config.resolve () with
     | Error msg -> failf "resolve failed: %s" msg
     | Ok h ->
       check
-        string
-        "resolved base_path_lease_dir reflects env"
-        "/run/masc-lease-resolved"
-        h.base_path_lease_dir)
+        lease_root
+        "resolved MASC_BASE_PATH_LEASE_DIR overrides the lease root"
+        (Host_config.Lease_dir_override "/run/masc-lease-resolved")
+        h.base_path_lease_root)
+;;
+
+let test_unset_lease_dir_puts_the_lease_beside_the_base_path () =
+  with_env "MASC_BASE_PATH_LEASE_DIR" None (fun () ->
+    let h = Host_config.host () in
+    check
+      lease_root
+      "no MASC_BASE_PATH_LEASE_DIR leaves the lease beside the BasePath"
+      Host_config.Beside_base_path
+      h.base_path_lease_root)
 ;;
 
 let test_empty_env_yields_none () =
@@ -80,13 +94,17 @@ let () =
       , [ test_case "base_path" `Quick test_base_path_field_reads_env
         ; test_case "config_dir" `Quick test_config_dir_field_reads_env
         ; test_case
-            "base path lease dir"
+            "base path lease root override"
             `Quick
-            test_base_path_lease_dir_field_reads_env
+            test_base_path_lease_root_reads_env
         ; test_case
-            "resolved base path lease dir"
+            "resolved base path lease root override"
             `Quick
-            test_resolve_base_path_lease_dir_field_reads_env
+            test_resolve_base_path_lease_root_reads_env
+        ; test_case
+            "unset lease dir is beside the base path"
+            `Quick
+            test_unset_lease_dir_puts_the_lease_beside_the_base_path
         ] )
     ; ( "empty env semantics"
       , [ test_case "empty -> None" `Quick test_empty_env_yields_none ] )

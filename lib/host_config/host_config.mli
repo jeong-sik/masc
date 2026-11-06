@@ -74,12 +74,6 @@ type t =
         (** Host-selected root for runtime state files (PID locks, sockets).
             Default [<tmp>]. This process-local root must not cross PID
             namespaces. *)
-  ; base_path_lease_dir : string
-        (** Host-selected root for the cross-process BasePath ownership lease.
-            [MASC_BASE_PATH_LEASE_DIR] overrides the default [<tmp>] root.
-            Ownership establishes its current-UID private lease directory
-            below this root and rejects an unprotected group/world-writable
-            root; callers do not select a fallback. *)
   ; base_path_lease_root : base_path_lease_root
         (** [Lease_dir_override] when [MASC_BASE_PATH_LEASE_DIR] is set,
             otherwise [Beside_base_path]. *)
@@ -120,7 +114,7 @@ val resolve : ?base_path:string -> unit -> (t, string) result
     [Filename.get_temp_dir_name ()] (honours [TMPDIR]).  Binary paths
     fall back to the [coreutils_defaults] record.
 
-    The path env-var-derived fields, including [base_path_lease_dir] from
+    The path env-var-derived fields, including [base_path_lease_root] from
     [MASC_BASE_PATH_LEASE_DIR], are populated from [Sys.getenv_opt] at call
     time; [host ()] reflects the *current* process environment, not a snapshot
     from boot. *)

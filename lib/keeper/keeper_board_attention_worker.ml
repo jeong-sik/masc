@@ -1625,6 +1625,24 @@ let reconcile_quarantines ~now ~worker_epoch ~base_path ~keeper_name =
   loop initial_candidates partitions
 ;;
 
+(* A Consumed candidate whose partition is not yet Settled or Abandoned is
+   still read when that partition settles or blocks; without its row the
+   drain blocks the partition and then cannot quarantine it, which stopped the
+   worker (#48785). Once its candidate is Consumed a partition only moves
+   toward Settled or Abandoned, so reading the partitions before the
+   candidate prune can keep a row one wake too long, never drop it too soon. *)
+let open_partition_candidates partitions =
+  List.filter_map
+    (fun (partition : Partition.t) ->
+       match partition.state with
+       | Partition.Ready
+       | Partition.Running _
+       | Partition.Completed _
+       | Partition.Blocked _ -> Some partition.candidate_id
+       | Partition.Settled _ | Partition.Abandoned _ -> None)
+    partitions
+;;
+
 (* The prunes-plus-read body the wake shares, so a test can re-run the
    whole seam while landing an owner settlement in the overlap through
    [?hook]. The hook fires on the line immediately above the first prune —
@@ -1645,9 +1663,11 @@ let prunes_and_read ~base_path ~keeper_name ?hook ?before_receipt_prune () =
      row. A prune failure must not stop judgment work, so it is observed and
      retried on the next wake. *)
   (match
+     let* partitions = Partition.load ~base_path ~keeper_name in
      Candidate.prune_consumed_behind_cursor
        ~base_path
        ~keeper_name
+       ~open_partition_candidates:(open_partition_candidates partitions)
        (cursor_ts, cursor_post_id)
    with
    | Ok 0 -> ()

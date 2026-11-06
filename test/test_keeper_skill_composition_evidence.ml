@@ -321,6 +321,8 @@ let test_canonical_failed_results () =
         ~composition_execution:Keeper_tool_composition_catalog.Inline
         ~result ~executor_settlements:settlements in
       let evidence = make [settled] |> Result.get_ok in
+      Alcotest.(check string) "failed record summarizes as failed" "failed"
+        (Tool_result.string_of_disposition (E.run_summary evidence).disposition);
       E.save_latest config evidence |> Result.get_ok |> ignore;
       let loaded = E.load_latest config reference |> Result.get_ok |> Option.get |> E.to_yojson in
       let open Yojson.Safe.Util in
@@ -394,6 +396,16 @@ let test_duration_statistics () =
   Alcotest.(check (option (float 0.00001))) "window includes deferred result" (Some 400.) stats.last_recorded_at;
   Alcotest.(check int) "deferred separately" 1 stats.deferred;
   Alcotest.(check (option (float 0.00001))) "missing failures are unknown" None stats.failed.mean_ms;
+  let summary_disposition evidence =
+    Tool_result.string_of_disposition (E.run_summary evidence).disposition in
+  Alcotest.(check string) "completed record summarizes as completed" "completed"
+    (summary_disposition latest);
+  Alcotest.(check string) "deferred record summarizes as deferred" "deferred"
+    (summary_disposition deferred);
+  Alcotest.(check (float 0.00001)) "completed summary keeps the stored duration" 10.
+    (E.run_summary latest).duration_ms;
+  Alcotest.(check (float 0.00001)) "deferred summary keeps the stored duration" 900.
+    (E.run_summary deferred).duration_ms;
   let tail = List.init 20 (fun index ->
     let duration = if index = 19 then 1000. else float_of_int index in
     make_evidence reference [] (Keeper_tool_plan.Composition_run_id.fresh ()) ~recorded_at:500.

@@ -6,8 +6,7 @@ let file name = M.Store { name; classification = M.In_scope M.File }
 let excluded reason name = M.Store { name; classification = M.Excluded reason }
 let no_reference = excluded M.Writes_no_reference
 
-(* Written by the macOS Finder, so no MASC module names it. *)
-let finder_metadata = excluded M.Finder_metadata ".DS_Store"
+let finder_metadata = excluded M.Finder_metadata M.finder_metadata_name
 
 let unpublished_writes =
   M.Names { matches = Fs_compat.is_atomic_orphan_name; reason = M.Unpublished_write }

@@ -3,6 +3,14 @@ type t =
   | After_history of string
   | Empty_history
 
+let equal left right =
+  match left, right with
+  | At_atom left, At_atom right | After_history left, After_history right ->
+    String.equal left right
+  | Empty_history, Empty_history -> true
+  | (At_atom _ | After_history _ | Empty_history), _ -> false
+;;
+
 let to_json = function
   | At_atom digest -> `Assoc [ "kind", `String "at_atom"; "digest", `String digest ]
   | After_history digest ->

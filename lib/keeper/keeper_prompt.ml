@@ -23,6 +23,32 @@ let system_prompt_body () : string =
       "keeper_prompt: observed an empty shared [keeper] body; empty primary prompts are refused");
   render_instruction Prompt_names.keeper []
 
+(* RFC-0491 §3.2: a System rendered with older articles travels with this
+   block, which says how the articles held now differ from its [<norms>]. A
+   section is rendered only when it has lines. *)
+let constitution_amendments_block (amendments : World_constitution_render.amendments) =
+  let section key lines =
+    String.trim (render_instruction key [ "articles", lines ])
+  in
+  let added =
+    match amendments.added with
+    | [] -> []
+    | _ :: _ ->
+      [ section Prompt_names.keeper_constitution_amendments_added
+          (World_constitution_render.added_lines amendments) ]
+  in
+  let removed =
+    match amendments.removed with
+    | [] -> []
+    | _ :: _ ->
+      [ section Prompt_names.keeper_constitution_amendments_removed
+          (World_constitution_render.removed_lines amendments) ]
+  in
+  String.trim
+    (render_instruction Prompt_names.keeper_constitution_amendments
+       [ "changes", String.concat "\n" (added @ removed) ])
+;;
+
 let build_keeper_system_prompt
     ~instructions ?(keeper_name = "") ?(workspace_root = "")
     ?(constitution = "") () =

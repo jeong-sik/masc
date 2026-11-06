@@ -3,6 +3,7 @@ type t =
   | Dynamic_context
   | Active_goals
   | Completion_authority
+  | Constitution_amendments
   | Temporal_summary
   | Memory_os_recall
   | Librarian_working_context
@@ -18,6 +19,7 @@ let equal a b =
   | Dynamic_context, Dynamic_context
   | Active_goals, Active_goals
   | Completion_authority, Completion_authority
+  | Constitution_amendments, Constitution_amendments
   | Temporal_summary, Temporal_summary
   | Librarian_working_context, Librarian_working_context
   | Memory_os_recall, Memory_os_recall
@@ -25,8 +27,9 @@ let equal a b =
   | Recalled_memory_status, Recalled_memory_status
   | Operator_note, Operator_note
   | Skill_compositions, Skill_compositions -> true
-  | ( Keeper_instructions | Dynamic_context | Active_goals | Completion_authority | Temporal_summary | Memory_os_recall
-    | Librarian_working_context | Recalled_memory | Recalled_memory_status | Operator_note | Skill_compositions )
+  | ( Keeper_instructions | Dynamic_context | Active_goals | Completion_authority | Constitution_amendments
+    | Temporal_summary | Memory_os_recall | Librarian_working_context | Recalled_memory
+    | Recalled_memory_status | Operator_note | Skill_compositions )
   , _ -> false
 
 let to_string = function
@@ -34,6 +37,7 @@ let to_string = function
   | Dynamic_context -> "dynamic_context"
   | Active_goals -> "active_goals"
   | Completion_authority -> "completion_authority"
+  | Constitution_amendments -> "constitution_amendments"
   | Temporal_summary -> "temporal_summary"
   | Memory_os_recall -> "memory_os_recall"
   | Librarian_working_context -> "librarian_working_context"
@@ -52,6 +56,7 @@ let all_known =
   ; Dynamic_context
   ; Active_goals
   ; Completion_authority
+  ; Constitution_amendments
   ; Temporal_summary
   ; Memory_os_recall
   ; Librarian_working_context
@@ -68,25 +73,34 @@ let all_known =
 let cache_rank = function
   | Keeper_instructions -> 0
   | Skill_compositions -> 1
+  (* RFC-0491 §3.2: the articles written or taken back since the System's
+     <norms>. Its text changes only when the world's article ledger is
+     written (0 to 7 times a day, 2026-10-08 to 11-05), and it leaves when the
+     System is rendered again, which happens when the range front moves and
+     the history cache is lost anyway. That is less often than the memory
+     recall body (65 contents in 386 turns) and more often than the Skill
+     compositions (1), so it sits between them, ahead of every block that
+     changes on most turns. *)
+  | Constitution_amendments -> 2
   (* The split retains their prior assembly position: ordinary facts first,
      then the independently versioned Librarian index. *)
-  | Memory_os_recall -> 2
-  | Librarian_working_context -> 3
-  | Active_goals -> 4
-  | Completion_authority -> 5
+  | Memory_os_recall -> 3
+  | Librarian_working_context -> 4
+  | Active_goals -> 5
+  | Completion_authority -> 6
   (* The two recall blocks are placed before their first measurement (RFC
      keeper-recall-reaches-the-turn, section 4.4). The body changes only when
      the set of carried memories does, so it is in front of the context that
      changes on nearly every turn. The status line names the turn, so it
      changes every turn and sits behind that context and in front of the
      clock. The canary measures how often each really changes. *)
-  | Recalled_memory -> 6
-  | Dynamic_context -> 7
-  | Recalled_memory_status -> 8
-  | Temporal_summary -> 9
+  | Recalled_memory -> 7
+  | Dynamic_context -> 8
+  | Recalled_memory_status -> 9
+  | Temporal_summary -> 10
   (* An operator speaking mid-turn is the newest thing in the assembly and the
      newest instruction in a post-tool round; it stays last on both counts. *)
-  | Operator_note -> 10
+  | Operator_note -> 11
 ;;
 
 (* See the mli. [Keeper_instructions] never enters the extra-context
@@ -97,14 +111,16 @@ let cache_rank = function
 let injected_on_post_tool_round = function
   | Dynamic_context | Temporal_summary | Memory_os_recall | Librarian_working_context
   | Recalled_memory | Recalled_memory_status | Skill_compositions -> false
-  | Keeper_instructions | Active_goals | Completion_authority | Operator_note -> true
+  | Keeper_instructions | Active_goals | Completion_authority | Constitution_amendments
+  | Operator_note -> true
 ;;
 
 (* See the mli. [Keeper_instructions] never enters the extra-context assembly
    a resume carries; it answers [false] because a resumed session already holds
    the system prompt it recorded at its first launch. *)
 let resent_when_held = function
-  | Keeper_instructions | Dynamic_context | Active_goals | Temporal_summary | Memory_os_recall
-  | Librarian_working_context | Recalled_memory | Skill_compositions -> false
+  | Keeper_instructions | Dynamic_context | Active_goals | Constitution_amendments
+  | Temporal_summary | Memory_os_recall | Librarian_working_context | Recalled_memory
+  | Skill_compositions -> false
   | Completion_authority | Recalled_memory_status | Operator_note -> true
 ;;

@@ -11,6 +11,11 @@ open Masc
 module Effort = Llm_provider.Reasoning_effort
 module Host = Keeper_official_client_host
 
+(* A System with no amendments, as a turn without a basis issues it. *)
+let system_of_text text =
+  Keeper_turn_system.issue ~base_path:"" ~keeper_name:"" ~lane:Keeper_turn_system.Without_basis
+    ~render:(fun (_ : World_constitution_types.t list) -> text) ~current:[]
+
 (* What the operator's window currently says. The store takes the window as an
    argument -- it is reachable from a raw Domain, where reading a setting
    raises -- so every caller names it. These cases are not about the window and
@@ -1516,7 +1521,7 @@ let test_goal_observation_cannot_mask_blank_keeper_instructions () =
         let base_system_prompt = Option.value ~default:initial current_params.system_prompt_override in
         let partition = Keeper_context_layers.singleton Keeper_context_layers.Active_goals
             "Goal observation: current revision and reported measurement 1/3" in
-        let assembly = Keeper_run_prompt.assemble_request_context ~base_system_prompt
+        let assembly = Keeper_run_prompt.assemble_request_context ~system:(system_of_text base_system_prompt)
             ~post_tool_round:false ~previous_assembly:None ~dynamic_context_partition:(Some partition)
             ~existing_extra_system_context:None
             ~blocks:[Prompt_block_id.Dynamic_context, Keeper_context_layers.text partition] in
@@ -2842,7 +2847,7 @@ let test_a_changed_system_goal_reaches_a_held_official_session () =
       | Some text -> Layers.singleton Layers.Active_goals text
           |> fun goals -> Layers.append_unattributed goals Direct_turn "TASK GATE LANE" in
     let assembly = Keeper_run_prompt.assemble_request_context
-        ~base_system_prompt:"BASE_INSTRUCTIONS" ~post_tool_round:false ~previous_assembly:None
+        ~system:(system_of_text "BASE_INSTRUCTIONS") ~post_tool_round:false ~previous_assembly:None
         ~dynamic_context_partition:(Some partition) ~existing_extra_system_context:None
         ~blocks:[Prompt_block_id.Dynamic_context, Layers.text partition] in
     let hooks = {Agent_core.Hooks.empty with before_turn_params=Some (function
@@ -2933,7 +2938,7 @@ let test_carrier_authority_is_current_turn_input_on_official_start_and_resume ()
       | Layers.Completion_authority -> authority
       | Layers.Fleet_messages -> Some "FLEET-WORLD"
       | _ -> None) in
-    Keeper_run_prompt.assemble_request_context ~base_system_prompt:"BASE"
+    Keeper_run_prompt.assemble_request_context ~system:(system_of_text "BASE")
       ~post_tool_round:false ~previous_assembly:None ~dynamic_context_partition:(Some partition)
       ~existing_extra_system_context:None
       ~blocks:[Prompt_block_id.Dynamic_context, Layers.text partition] in
@@ -3074,7 +3079,7 @@ let test_carrier_authority_block_is_valid_utf8 () =
     | Layers.Completion_authority ->
       Some ("Approved task-cut " ^ truncated_dash ^ "; verification vrf-cut")
     | _ -> None) in
-  let assembly = Keeper_run_prompt.assemble_request_context ~base_system_prompt:"BASE"
+  let assembly = Keeper_run_prompt.assemble_request_context ~system:(system_of_text "BASE")
       ~post_tool_round:false ~previous_assembly:None ~dynamic_context_partition:(Some partition)
       ~existing_extra_system_context:None
       ~blocks:[Prompt_block_id.Dynamic_context, Layers.text partition] in
@@ -3095,7 +3100,7 @@ let test_authority_leaves_the_carrier_when_the_sent_system_is_not_the_issued_one
     | Layers.Completion_authority -> Some authority_text
     | Layers.Fleet_messages -> Some "FLEET-WORLD"
     | _ -> None) in
-  let assembly = Keeper_run_prompt.assemble_request_context ~base_system_prompt:"ISSUED BASE"
+  let assembly = Keeper_run_prompt.assemble_request_context ~system:(system_of_text "ISSUED BASE")
       ~post_tool_round:false ~previous_assembly:None ~dynamic_context_partition:(Some partition)
       ~existing_extra_system_context:None
       ~blocks:[Prompt_block_id.Dynamic_context, Layers.text partition] in
@@ -3112,6 +3117,64 @@ let test_authority_leaves_the_carrier_when_the_sent_system_is_not_the_issued_one
   check bool "the authority goes out with the Start prompt" true
     (contains (Host.start_prompt prepared "NEXT" |> Keeper_context_submission_link.text)
        authority_text)
+;;
+
+(* RFC-0491 §3.2 (f): a System kept with older articles sends the articles
+   changed since it was rendered in the end context, on the turn's first
+   round and again on every later round. *)
+let amended_system () =
+  use_markdown_prompts ();
+  let article text =
+    match
+      World_constitution_types.make ~id:(World_constitution_types.Article_id.generate ()) ~text
+        ~author:"lane-smith" ~at:1.0 ~evidence:[]
+    with
+    | Ok article -> article
+    | Error invalid -> fail (World_constitution_types.invalid_to_string invalid) in
+  let kept = article "open before you record" in
+  let written = article "cite the ledger row, not the frame" in
+  let issue front current =
+    Keeper_turn_system.issue ~base_path:"official-host-amendments" ~keeper_name:"amended"
+      ~lane:(Keeper_turn_system.Agent_core front)
+      ~render:(fun articles -> "BASE\n" ^ World_constitution_render.articles articles) ~current in
+  let (_ : Keeper_turn_system.t) = issue Keeper_turn_system.No_previous_request [kept] in
+  issue Keeper_turn_system.Same_front [kept; written], written
+
+let amendments_blocks (assembly : Keeper_context_assembly.t) =
+  List.filter_map (fun (id, text) ->
+      if Prompt_block_id.equal id Prompt_block_id.Constitution_amendments then Some text else None)
+    assembly.blocks
+
+let assemble_world_round ~system ~post_tool_round previous_assembly =
+  let partition = Layers.assemble ~content_of:(function
+    | Layers.Fleet_messages -> Some "FLEET-WORLD"
+    | _ -> None) in
+  Keeper_run_prompt.assemble_request_context ~system ~post_tool_round ~previous_assembly
+    ~dynamic_context_partition:(Some partition) ~existing_extra_system_context:None
+    ~blocks:[Prompt_block_id.Dynamic_context, Layers.text partition]
+
+let test_the_amendments_ride_every_round_of_the_turn () =
+  let system, written = amended_system () in
+  let amendments = match system.Keeper_turn_system.amendments with
+    | Some text -> text
+    | None -> fail "the written article is an amendment" in
+  let first = assemble_world_round ~system ~post_tool_round:false None in
+  check (list string) "the first round carries the block" [amendments] (amendments_blocks first);
+  check bool "the block reaches the end context" true
+    (match first.extra_system_context with
+     | Some carrier -> contains carrier amendments
+     | None -> false);
+  check bool "the block names the written article" true
+    (contains amendments (World_constitution_types.Article_id.to_string written.id));
+  let later = assemble_world_round ~system ~post_tool_round:true (Some first) in
+  check (list string) "a later round carries it again" [amendments] (amendments_blocks later)
+;;
+
+let test_a_system_without_amendments_carries_no_block () =
+  let first = assemble_world_round ~system:(system_of_text "BASE") ~post_tool_round:false None in
+  check int "no amendments, no block" 0 (List.length (amendments_blocks first));
+  let later = assemble_world_round ~system:(system_of_text "BASE") ~post_tool_round:true (Some first) in
+  check int "on no round" 0 (List.length (amendments_blocks later))
 ;;
 
 (* A carrier whose only block is the authority leaves the messages whole; the
@@ -3542,6 +3605,10 @@ let () =
             test_carrier_authority_block_is_valid_utf8
         ; test_case "authority leaves the carrier when the sent System is not the issued one" `Quick
             test_authority_leaves_the_carrier_when_the_sent_system_is_not_the_issued_one
+        ; test_case "(f) the constitution amendments ride every round of the turn" `Quick
+            test_the_amendments_ride_every_round_of_the_turn
+        ; test_case "a System without amendments carries no block" `Quick
+            test_a_system_without_amendments_carries_no_block
         ; test_case "an authority-only carrier is not expected among the messages" `Quick
             test_an_authority_only_carrier_is_not_expected_among_the_messages
         ; test_case

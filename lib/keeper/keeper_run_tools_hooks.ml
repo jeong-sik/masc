@@ -461,7 +461,7 @@ let assemble_hooks
       ?observation_token
       ~(ctx : ctx)
       ~(session : Keeper_types.session_context)
-      ~(turn_system_prompt : string)
+      ~(turn_system : Keeper_turn_system.t)
       ~(model_message : Keeper_gate_replay.model_message)
       ~(dynamic_context : string)
       ~(history_messages : Agent_core.Types.message list)
@@ -1076,7 +1076,7 @@ let assemble_hooks
                     Keeper_workspace_memory_host_recall.render_prepared prepared in
                 let dynamic_context, emit_request_prompt_metrics =
                   prepare_request_dynamic_context
-                    ~meta ~turn_kind ~system_prompt:turn_system_prompt ~user_message
+                    ~meta ~turn_kind ~system_prompt:turn_system.Keeper_turn_system.text ~user_message
                     ~post_tool_round ~dynamic_context ~dynamic_context_for_tools
                     ~deferred_names:deferred_tool_names
                     ~loader_alive:attempt_surface.loader_alive ~host_recall offered_tools in
@@ -1184,11 +1184,13 @@ let assemble_hooks
                        record_block Prompt_block_id.Operator_note block;
                        true)
                 in
-                let base_system_prompt = Option.value
-                    ~default:turn_system_prompt current_params.system_prompt_override in
+                let system = match current_params.system_prompt_override with
+                  | None -> turn_system
+                  | Some text -> Keeper_turn_system.with_bytes ~issued:turn_system text in
+                let base_system_prompt = system.Keeper_turn_system.text in
                 let extra_system_context_assembly =
                   Keeper_run_prompt.assemble_request_context
-                    ~base_system_prompt
+                    ~system
                     ~post_tool_round
                     ~previous_assembly:acc.extra_system_context_assembly
                     ~dynamic_context_partition:(Some dynamic_context_partition)

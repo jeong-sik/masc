@@ -76,6 +76,9 @@ const PROMPT_BLOCK_META: Readonly<Record<TurnPromptBlockId, BlockMeta>> = {
   dynamic_context: { lbl: '동적 컨텍스트', color: 'var(--volt)', mem: false },
   active_goals: { lbl: '현재 Goal', color: 'var(--volt)', mem: false },
   completion_authority: { lbl: 'Task 검증 판정', color: 'var(--volt)', mem: false },
+  // RFC-0491 §3.2: the articles written or taken back since the System's
+  // <norms> were rendered. Instructions, not recalled memory.
+  constitution_amendments: { lbl: '조항 변경', color: 'var(--text-dim)', mem: false },
   temporal_summary: { lbl: '시간 요약', color: 'var(--status-warn)', mem: false },
   librarian_working_context: { lbl: 'Librarian 작업 맥락', color: 'var(--info)', mem: false },
   memory_os_recall: { lbl: '메모리 회상', color: 'var(--volt-strong)', mem: true },
@@ -126,6 +129,7 @@ const INPUT_COMPONENT_META: Readonly<Record<TurnInputComponentId, BlockMeta>> = 
   'prompt.dynamic_context': PROMPT_BLOCK_META.dynamic_context,
   'prompt.active_goals': PROMPT_BLOCK_META.active_goals,
   'prompt.completion_authority': PROMPT_BLOCK_META.completion_authority,
+  'prompt.constitution_amendments': PROMPT_BLOCK_META.constitution_amendments,
   'prompt.temporal_summary': PROMPT_BLOCK_META.temporal_summary,
   'prompt.memory_os_recall': PROMPT_BLOCK_META.memory_os_recall,
   'prompt.librarian_working_context': PROMPT_BLOCK_META.librarian_working_context,

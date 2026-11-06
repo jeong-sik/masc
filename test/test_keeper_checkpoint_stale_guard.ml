@@ -750,7 +750,7 @@ description: Keeper refusal fixture
       write valid_body valid_worldview;
       let resumed = require_prepared () in
       check bool "the next preparation reads the repaired primary slot" true
-        (String_util.contains_substring resumed.base_system_prompt valid_body);
+        (String_util.contains_substring resumed.system.Keeper_turn_system.text valid_body);
       check string "repair preparation also preserves checkpoint bytes"
         original_checkpoint (Fs_compat.load_file path));
   check (option string) "the prompt directory is restored" (Some original_dir)
@@ -890,7 +890,7 @@ let test_unreadable_constitution_stops_turn_and_the_next_tick_resumes () =
   | Error error -> fail (prepare_error_to_string error)
   | Ok ctx ->
     check bool "the next tick's prompt carries the article" true
-      (carries ctx.base_system_prompt)
+      (carries ctx.system.Keeper_turn_system.text)
 ;;
 
 (* #38354: an autonomous turn sends the base prompt the run context built, not
@@ -923,7 +923,8 @@ let test_autonomous_turn_sends_the_run_context_base_prompt () =
         ~start_turn_count:ctx.start_turn_count
     in
     check string "the request's system prompt is the run context's base prompt"
-      ctx.base_system_prompt prompt_ctx.Keeper_run_prompt.turn_system_prompt;
+      ctx.system.Keeper_turn_system.text
+      prompt_ctx.Keeper_run_prompt.turn_system.Keeper_turn_system.text;
     check string "the callback's text rides the dynamic context"
       world_state prompt_ctx.Keeper_run_prompt.dynamic_context
 ;;

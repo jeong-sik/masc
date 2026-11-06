@@ -7,3 +7,26 @@ val articles : World_constitution_types.t list -> string
     Empty for an empty list. That is what keeps a world which never wrote an
     article byte-identical to one from before this existed — the prompt slot
     renders nothing rather than an empty heading. *)
+
+(** How the articles a world holds now differ from the ones a System was
+    rendered with (RFC-0491 §3.2), by article id. At least one of the two
+    lists is non-empty. *)
+type amendments = private
+  { added : World_constitution_types.t list
+        (** Held now and not in the System, in the order the world holds them. *)
+  ; removed : World_constitution_types.Article_id.t list
+        (** In the System and no longer held, in the System's order. *)
+  }
+
+val amendments :
+  built_with:World_constitution_types.t list ->
+  World_constitution_types.t list ->
+  amendments option
+(** [None] when both lists hold the same ids. *)
+
+val added_lines : amendments -> string
+(** The added articles as {!articles} renders them: id and text, with the
+    same escape. Empty when none was added. *)
+
+val removed_lines : amendments -> string
+(** One ["- \[id\]"] line per removed article. Empty when none was removed. *)

@@ -3,6 +3,11 @@ open Alcotest
 module WO = Masc.Keeper_world_observation
 module UM = Masc.Keeper_unified_metrics
 
+(* A System with no amendments, as a turn without a basis issues it. *)
+let system_of_text text =
+  Masc.Keeper_turn_system.issue ~base_path:"" ~keeper_name:"" ~lane:Masc.Keeper_turn_system.Without_basis
+    ~render:(fun (_ : Masc.World_constitution_types.t list) -> text) ~current:[]
+
 (* Use the same embedded prompt assets as runtime bootstrap, in an isolated
    directory. Catalog initialization resolves a registered directory or the
    Dune source-root fallback; direct execution registers these assets explicitly. *)
@@ -1141,12 +1146,12 @@ let test_scheduled_request_survives_discovery_and_checkpoint () =
           outcome = Agent_core.Types.Tool_succeeded; json = None; content_blocks = None } ] } in
     let transcript = [ original; search; tool_result ] in
     let first = Masc.Keeper_run_prompt.assemble_request_context
-        ~base_system_prompt:"stable keeper contract" ~post_tool_round:false
+        ~system:(system_of_text "stable keeper contract") ~post_tool_round:false
         ~previous_assembly:None ~dynamic_context_partition:(Some prompt.world_partition)
         ~existing_extra_system_context:None
         ~blocks:[ Prompt_block_id.Dynamic_context, prompt.world_state ] in
     let after_search = Masc.Keeper_run_prompt.assemble_request_context
-        ~base_system_prompt:"stable keeper contract" ~post_tool_round:true
+        ~system:(system_of_text "stable keeper contract") ~post_tool_round:true
         ~previous_assembly:(Some first)
         ~dynamic_context_partition:(Some prompt.world_partition)
         ~existing_extra_system_context:None

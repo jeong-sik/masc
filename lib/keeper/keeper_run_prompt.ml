@@ -8,7 +8,7 @@
     @since 0.120.0 *)
 
 type turn_prompt_context =
-  { turn_system_prompt : string
+  { turn_system : Keeper_turn_system.t
   ; dynamic_context : string
   ; dynamic_context_for_tools : (Keeper_request_tool_access.t -> Keeper_context_layers.rendered) option
   ; temporal_context : string
@@ -40,8 +40,10 @@ let assemble_extra_system_context = Keeper_context_assembly.assemble
    goes between turns, so it is a context block, not a System observation.
    Only the Goal observation is a System suffix. A later round of the same
    turn carries this turn's authority block again because the post-tool
-   assembly drops the [Dynamic_context] it came from (#45853). *)
-let assemble_request_context ~base_system_prompt ~post_tool_round ~previous_assembly
+   assembly drops the [Dynamic_context] it came from (#45853). RFC-0491
+   §3.2: the articles changed since the System was rendered ride every round
+   with it. *)
+let assemble_request_context ~(system : Keeper_turn_system.t) ~post_tool_round ~previous_assembly
     ~dynamic_context_partition ~existing_extra_system_context ~blocks =
   let observations, blocks, dynamic_context_partition =
     if post_tool_round then
@@ -74,13 +76,16 @@ let assemble_request_context ~base_system_prompt ~post_tool_round ~previous_asse
             then id, Keeper_context_layers.text remaining else id, text) blocks, Some remaining
       | Some _, _ | None, _ -> [], blocks, dynamic_context_partition
   in
-  let blocks = blocks
+  let amendments = match system.amendments with
+    | None -> []
+    | Some text -> [Prompt_block_id.Constitution_amendments, Inference_utils.sanitize_text_utf8 text] in
+  let blocks = amendments @ blocks
     |> List.filter (fun (id, _) -> not post_tool_round || Prompt_block_id.injected_on_post_tool_round id)
     |> List.stable_sort (fun (left, _) (right, _) ->
          Int.compare (Prompt_block_id.cache_rank left) (Prompt_block_id.cache_rank right)) in
   assemble_extra_system_context ~dynamic_context_partition ~existing_extra_system_context ~blocks
   |> Keeper_context_assembly.with_system_observations
-       ~base_text:(Inference_utils.sanitize_text_utf8 base_system_prompt) ~observations
+       ~base_text:(Inference_utils.sanitize_text_utf8 system.text) ~observations
 
 (* See the mli: a position question about the last message, deliberately not
    [Hooks.last_tool_results], which answers containment over the whole
@@ -129,18 +134,18 @@ let build_turn_context
       ~(start_turn_count : int)
   : turn_prompt_context
   =
-  let base_system_prompt = ctx.Keeper_run_context.base_system_prompt in
   let ctx_work = ctx.Keeper_run_context.ctx_work in
   let session = ctx.Keeper_run_context.session in
   let shared_context = ctx.Keeper_run_context.shared_context in
-  (* 5. The turn sends the run context's base prompt, direct or autonomous;
-     the caller's callback supplies only the dynamic context (#38354). *)
-  let turn_system_prompt = base_system_prompt in
+  (* 5. The turn sends the run context's System, direct or autonomous; the
+     caller's callback supplies only the dynamic context (#38354). *)
+  let turn_system = ctx.Keeper_run_context.system in
+  let turn_system_prompt = turn_system.Keeper_turn_system.text in
   let { Keeper_agent_prompt_metrics.dynamic_context
       ; dynamic_context_for_tools
       } =
     build_turn_prompt
-      ~base_system_prompt
+      ~base_system_prompt:turn_system_prompt
       ~messages:(Keeper_context_runtime.messages_of_context ctx_work)
   in
   let temporal_context =
@@ -201,7 +206,7 @@ let build_turn_context
        session
        user_msg
    | Skip_already_checkpointed_user_turn -> ());
-  { turn_system_prompt
+  { turn_system
   ; dynamic_context
   ; dynamic_context_for_tools
   ; temporal_context

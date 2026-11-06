@@ -72,6 +72,7 @@ type refusal =
       ; user_id : User_id.t
       }
   | Invitation of Authz_invite_state.consume_refusal
+  | Registration of Authz_registration_state.consume_refusal
   | User_id_taken of User_id.t
   | Identity_bound of
       { identity : Identity.t
@@ -101,6 +102,7 @@ let refusal_to_string = function
       (author_label author)
       (User_id.to_string user_id)
   | Invitation refusal -> Authz_invite_state.consume_refusal_to_string refusal
+  | Registration refusal -> Authz_registration_state.consume_refusal_to_string refusal
   | User_id_taken user_id -> Printf.sprintf "the user id %s was given before" (User_id.to_string user_id)
   | Identity_bound { identity; user_id } ->
     Printf.sprintf
@@ -122,8 +124,26 @@ let refusal_to_string = function
 type admitted =
   { principals : t
   ; invites : Authz_invite_state.t
+  ; registrations : Authz_registration_state.t
   ; role : Authz_invite_event.role
   }
+
+(* What the admission spends, and the role it gives. An invitation gives its
+   role and also spends the open registration of the identity, so the identity
+   has no entry left to come back through once the person is deleted. A
+   registration gives a Member (plan C2d). *)
+let spend ~invites ~registrations ~identity ~user_id ~at_ms (through : Authz_admission_event.through) =
+  match through with
+  | Authz_admission_event.Invite invite_id ->
+    (match Authz_invite_state.consume invites invite_id ~user_id ~at_ms with
+     | Error refusal -> Error (Invitation refusal)
+     | Ok (invites, role) ->
+       Ok (invites, Authz_registration_state.spend_open registrations identity ~user_id, role))
+  | Authz_admission_event.Registration registration_id ->
+    (match Authz_registration_state.consume registrations registration_id ~identity ~user_id with
+     | Error refusal -> Error (Registration refusal)
+     | Ok registrations -> Ok (invites, registrations, Authz_invite_event.Member))
+;;
 
 let author_is_the_person (author : Author.t) user_id =
   match author with
@@ -138,17 +158,18 @@ let author_is_the_person (author : Author.t) user_id =
 let admit
   t
   ~invites
+  ~registrations
   ~workspace_id
   ~author
   ~at_ms
-  ({ Authz_admission_event.user_id; identity; invite_id; membership } : Authz_admission_event.t)
+  ({ Authz_admission_event.user_id; identity; through; membership } : Authz_admission_event.t)
   =
   if not (author_is_the_person author user_id)
   then Error (Author_is_not_the_person { author; user_id })
   else (
-    match Authz_invite_state.consume invites invite_id ~user_id ~at_ms with
-    | Error refusal -> Error (Invitation refusal)
-    | Ok (invites, role) ->
+    match spend ~invites ~registrations ~identity ~user_id ~at_ms through with
+    | Error refusal -> Error refusal
+    | Ok (invites, registrations, role) ->
       let { Authz_admission_event.workspace_id = given; account_home_namespace = namespace } = membership in
       (match
          User_map.mem user_id t.by_id, find_identity t identity, find_namespace t namespace
@@ -179,7 +200,7 @@ let admit
            ; deleted_identities = t.deleted_identities
            }
          in
-         Ok { principals; invites; role }))
+         Ok { principals; invites; registrations; role }))
 ;;
 
 type revocation_refusal =

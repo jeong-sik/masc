@@ -139,6 +139,12 @@ let write_error_to_string = function
     Printf.sprintf "librarian progress write failed path=%s: %s" path message
 ;;
 
+let commit_observer = ref (fun ~keepers_dir:_ ~keeper_id:_ -> ())
+let install_commit_observer observer =
+  let previous = !commit_observer in
+  commit_observer := observer;
+  fun () -> commit_observer := previous
+
 let write ~keepers_dir ~keeper_id progress =
   match validate progress with
   | Error error -> Error (Invalid_progress error)
@@ -150,8 +156,8 @@ let write ~keepers_dir ~keeper_id progress =
        Fs_compat.save_file_atomic_strict path (Yojson.Safe.to_string (to_json progress))
      with
      | Ok () ->
-       Keeper_memory_health_input.written ~keepers_dir ~keeper_id;
-       Ok ()
+         !commit_observer ~keepers_dir ~keeper_id;
+         Ok ()
      | Error message -> failed message
      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
      | exception Sys_error message -> failed message

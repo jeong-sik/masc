@@ -2,7 +2,8 @@
     and JSONL append/rotation helpers.
 
     Extracted from keeper_types.ml to reduce file size.
-    Depends only on Keeper_config (no Keeper_types dependency). *)
+    Depends on Keeper_config and, for the metrics ledger's write
+    announcement, Workspace_dataset_event (no Keeper_types dependency). *)
 
 include Keeper_config
 
@@ -44,9 +45,10 @@ let keeper_metrics_storage config name =
 let keeper_metrics_store config name : Dated_jsonl.t =
   Keeper_metrics_storage.read_store (keeper_metrics_storage config name)
 
-let append_keeper_metrics config name json =
+let append_keeper_metrics (config : Workspace.config) name json =
   Keeper_metrics_storage.append (keeper_metrics_storage config name) json;
-  Keeper_metrics_broadcast.appended ~base_path:config.Workspace.base_path ~name;
+  Workspace_dataset_event.announce ~base_path:config.base_path
+    (Workspace_dataset_event.Keeper_metrics { keeper = name });
   (* The cost window counts every row but a heartbeat: a turn, or a row of a
      kind it cannot read, which may have been one. *)
   match Keeper_metrics_record.kind_of_json json with
@@ -191,28 +193,16 @@ let keeper_history_path config trace_id =
 let keeper_internal_history_path config trace_id =
   Filename.concat (keeper_session_dir config trace_id) internal_history_file_name
 
-type history_source =
-  | Direct_user
-  | Direct_assistant
-  | World_state_prompt
-  | Internal_assistant
+let normalize_history_source (source : string) =
+  source |> String.trim |> String.lowercase_ascii
 
-let history_source_to_string = function
-  | Direct_user -> "direct_user"
-  | Direct_assistant -> "direct_assistant"
-  | World_state_prompt -> "world_state_prompt"
-  | Internal_assistant -> "internal_assistant"
+let is_prompt_history_source (source : string) =
+  String.equal (normalize_history_source source) "world_state_prompt"
 
-let history_source_of_string = function
-  | "direct_user" -> Some Direct_user
-  | "direct_assistant" -> Some Direct_assistant
-  | "world_state_prompt" -> Some World_state_prompt
-  | "internal_assistant" -> Some Internal_assistant
-  | _ -> None
-
-let is_internal_history_source = function
-  | Direct_user | Direct_assistant -> false
-  | World_state_prompt | Internal_assistant -> true
+let is_internal_history_source (source : string) =
+  match normalize_history_source source with
+  | "world_state_prompt" | "internal_assistant" -> true
+  | _ -> false
 
 let keeper_decision_log_path config name =
   Filename.concat
@@ -282,3 +272,10 @@ let append_jsonl_line path (json : Yojson.Safe.t) =
   maybe_rotate_file path;
   let line = utf8_repair_string (Yojson.Safe.to_string json) ^ "\n" in
   Fs_compat.append_file path line
+
+(* The runtime history reads every Keeper's decision log, so a row written
+   moves it. *)
+let append_decision_record config name json =
+  append_jsonl_line (keeper_decision_log_path config name) json;
+  Workspace_dataset_event.announce ~base_path:config.Workspace.base_path
+    Workspace_dataset_event.Runtime_metrics

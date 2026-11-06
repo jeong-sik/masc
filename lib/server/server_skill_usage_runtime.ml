@@ -76,16 +76,16 @@ let usage_for_reference ~config ~trace_id ~reference =
              Hashtbl.add entry.usage key usage;
              usage))
 
-let retain_committed ~config ~keeper_name:_ ~trace_id ledger =
+let retain_commit_state ~config ~keeper_name:_ ~trace_id ledger =
   let entry = entry ~config trace_id in
   Stdlib.Mutex.protect entry.mutex (fun () ->
     entry.generation <- entry.generation + 1;
-    entry.ledger <- Some ledger;
+    entry.ledger <- ledger;
     Hashtbl.reset entry.usage)
 
 let install () =
   let retained = ref [] in
-  retained := (Keeper_skill_activation_ledger.install_commit_observer retain_committed) :: !retained
+  retained := (Keeper_skill_activation_ledger.install_commit_state_observer retain_commit_state) :: !retained
 
 module For_testing = struct
   let with_runtime ?usage_projection:projection ~ledger_loader:loader f =
@@ -94,7 +94,7 @@ module For_testing = struct
     Stdlib.Mutex.protect sessions_mutex (fun () -> Hashtbl.reset sessions);
     ledger_loader := loader;
     usage_projection := Option.value ~default:Keeper_skill_activation_ledger.usage_for_reference projection;
-    let restore = Keeper_skill_activation_ledger.install_commit_observer retain_committed in
+    let restore = Keeper_skill_activation_ledger.install_commit_state_observer retain_commit_state in
     Fun.protect ~finally:(fun () ->
       restore ();
       ledger_loader := previous_loader;

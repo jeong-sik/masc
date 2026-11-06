@@ -254,10 +254,14 @@ type store_error =
   | Invalid_action_observed_at of string
   | Event_log_failed of Fs_compat.private_jsonl_transaction_error
 
-val install_commit_observer :
-  (config:Workspace.config -> keeper_name:string -> trace_id:Keeper_id.Trace_id.t -> t -> unit) ->
+val install_commit_state_observer :
+  (config:Workspace.config -> keeper_name:string -> trace_id:Keeper_id.Trace_id.t -> t option -> unit) ->
   (unit -> unit)
-(** Retain the immutable ledger returned by a successful commit. *)
+(** Observe the cacheable state of an append. [Some ledger] is the exact
+    successful commit, delivered under the session lock. [None] means an
+    append was attempted but its outcome is uncertain, delivered after the
+    lock; consumers must invalidate rather than retain a guessed ledger.
+    Returns a restoration that affects only this registration. *)
 
 val store_error_to_string : store_error -> string
 val store_error_code : store_error -> string
@@ -404,10 +408,11 @@ val load_existing_read_only_from_root :
     independently for every session. *)
 
 (** The writers below take the Keeper whose turn writes the session. Every
-    row one of them commits, a rejected transition included, announces
-    {!Workspace_dataset_event.Skill_activations} for that Keeper to the
-    workspace's runtime observers; an idempotent re-observation commits
-    nothing and announces nothing. *)
+    append attempt, a rejected transition or uncertain failure included,
+    announces {!Workspace_dataset_event.Skill_activations} after the session
+    lock. A successful commit supplies its exact ledger to the commit-state
+    observer under the lock; an uncertain append supplies [None] after the
+    lock. An idempotent re-observation appends nothing and announces nothing. *)
 
 val record :
   config:Workspace.config -> keeper_name:string ->

@@ -11,7 +11,7 @@ open Keeper_skill_activation_ledger_commit
 
 let observe_delivery
       ~config
-      ~trace_id
+      ~keeper_name ~trace_id
       ~turn_ref
       ~tool_results
       ~boundary
@@ -42,7 +42,7 @@ let observe_delivery
       (Ok ())
       tool_results
   in
-  with_write_lock ~config ~trace_id (fun writer ~ownership_root session_dir ->
+  with_write_lock ~config ~keeper_name ~trace_id (fun writer ~ownership_root session_dir ->
     let* () =
       Time_codec.parse_rfc3339 delivered_at
       |> Result.map ignore
@@ -132,7 +132,7 @@ let observe_delivery
     in
     match rejected with
     | Some (rejection, error) ->
-      reject_transition_locked writer session_dir log rejection error
+      reject_transition_locked ~config ~keeper_name writer session_dir log rejection error
     | None ->
       (* The activations this request's results belong to, including ones
          already marked; the event carries only the deliveries not yet on
@@ -164,13 +164,13 @@ let observe_delivery
        | [] -> Ok (current, matched)
        | deliveries ->
          let* stored =
-           commit_event_locked writer session_dir log (Deliveries_observed deliveries)
+           commit_event_locked ~config ~keeper_name writer session_dir log (Deliveries_observed deliveries)
          in
          Ok (stored, matched)))
 ;;
 
-let observe_async_result_delivery ~config ~trace_id ~expected_activations (delivery : Keeper_skill_async_delivery.t) =
-  with_write_lock ~config ~trace_id (fun writer ~ownership_root session_dir ->
+let observe_async_result_delivery ~config ~keeper_name ~trace_id ~expected_activations (delivery : Keeper_skill_async_delivery.t) =
+  with_write_lock ~config ~keeper_name ~trace_id (fun writer ~ownership_root session_dir ->
     let* log = read_locked ~ownership_root ~expected_trace_id:trace_id session_dir in
     let current = log.ledger in
     let* () = validate_async_result ~expected_trace_id:trace_id ~activations:current.activations delivery
@@ -186,12 +186,12 @@ let observe_async_result_delivery ~config ~trace_id ~expected_activations (deliv
     match List.find_opt (fun known -> String.equal (Keeper_skill_async_delivery.identity known)
         (Keeper_skill_async_delivery.identity delivery)) current.async_result_deliveries with
     | Some known -> Ok (current,known)
-    | None -> commit_event_locked writer session_dir log (Async_result_delivered delivery)
+    | None -> commit_event_locked ~config ~keeper_name writer session_dir log (Async_result_delivered delivery)
       |> Result.map (fun ledger -> ledger,delivery))
 ;;
 
-let observe_async_action ~config ~trace_id action =
-  with_write_lock ~config ~trace_id (fun writer ~ownership_root session_dir ->
+let observe_async_action ~config ~keeper_name ~trace_id action =
+  with_write_lock ~config ~keeper_name ~trace_id (fun writer ~ownership_root session_dir ->
     let* log = read_locked ~ownership_root ~expected_trace_id:trace_id session_dir in
     let current = log.ledger in
     let* () = validate_async_action ~expected_trace_id:trace_id ~activations:current.activations
@@ -201,13 +201,13 @@ let observe_async_action ~config ~trace_id action =
         (Keeper_skill_async_action.identity action)) current.async_actions with
     | Some known when Keeper_skill_async_action.same_fact known action -> Ok (current,known)
     | Some _ -> Error (Decode_failed (Invalid_async_action_evidence "causal occurrence result differs"))
-    | None -> commit_event_locked writer session_dir log (Async_action_observed action)
+    | None -> commit_event_locked ~config ~keeper_name writer session_dir log (Async_action_observed action)
       |> Result.map (fun ledger -> ledger,action))
 ;;
 
 let observe_action
       ~config
-      ~trace_id
+      ~keeper_name ~trace_id
       ~turn_ref
       ~active_skill_tool_use_ids
       ~action_identity
@@ -228,7 +228,7 @@ let observe_action
     match Time_codec.parse_rfc3339 observed_at with
     | Error _ -> Error (Invalid_action_observed_at observed_at)
     | Ok _ ->
-      with_write_lock ~config ~trace_id (fun writer ~ownership_root session_dir ->
+      with_write_lock ~config ~keeper_name ~trace_id (fun writer ~ownership_root session_dir ->
         let* log =
           read_locked ~ownership_root ~expected_trace_id:trace_id session_dir
         in
@@ -275,7 +275,7 @@ let observe_action
         in
         match rejected with
         | Some (rejection, error) ->
-          reject_transition_locked writer session_dir log rejection error
+          reject_transition_locked ~config ~keeper_name writer session_dir log rejection error
         | None ->
           (* Every active Skill that has been delivered and has not seen
              this action yet; the same identity already recorded with other
@@ -310,6 +310,8 @@ let observe_action
            | skill_tool_use_ids ->
              let* stored =
                commit_event_locked
+                 ~config
+                 ~keeper_name
                  writer
                  session_dir
                  log

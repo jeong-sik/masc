@@ -228,18 +228,8 @@ let modify_allowed = function
   | Running | Succeeded | Failed | Cancelled | Expired -> false
 ;;
 
-let rec canonical_json = function
-  | `Assoc fields ->
-    fields
-    |> List.map (fun (key, value) -> key, canonical_json value)
-    |> List.sort (fun (left, _) (right, _) -> String.compare left right)
-    |> fun fields -> `Assoc fields
-  | `List items -> `List (List.map canonical_json items)
-  | other -> other
-;;
-
 let sha256_json json =
-  json |> canonical_json |> Yojson.Safe.to_string
+  json |> Yojson.Safe.sort |> Yojson.Safe.to_string
   |> Agent_core_sha256.(fun stable -> digest_string stable |> to_hex)
 ;;
 

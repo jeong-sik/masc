@@ -40,6 +40,7 @@ module Kind = struct
     | Mode_event
     | Invite
     | Admission
+    | Admin_assignment
 
   let all =
     [ Runtime_grant
@@ -55,6 +56,7 @@ module Kind = struct
     ; Mode_event
     ; Invite
     ; Admission
+    ; Admin_assignment
     ]
   ;;
 
@@ -72,6 +74,7 @@ module Kind = struct
     | Mode_event -> "mode_event"
     | Invite -> "invite"
     | Admission -> "admission"
+    | Admin_assignment -> "admin_assignment"
   ;;
 
   let of_string label = List.find_opt (fun kind -> String.equal (to_string kind) label) all
@@ -106,7 +109,8 @@ let writers : Kind.t -> writer list = function
   | Kind.Principal
   | Kind.Internal_service_credential
   | Kind.Permission_revocation
-  | Kind.Admission -> [ Authenticated_principal ]
+  | Kind.Admission
+  | Kind.Admin_assignment -> [ Authenticated_principal ]
   | Kind.Trigger_evidence -> [ Cron ]
   | Kind.Lease_terminal_evidence | Kind.Preauthorized_expiry -> [ Maintenance ]
   | Kind.Migration_diagnostic -> [ Migration ]

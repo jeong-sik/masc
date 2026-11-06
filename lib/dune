@@ -34,6 +34,7 @@
   keeper_tool_memory_validation
   keeper_tool_filesystem_runtime_shared
   keeper_tool_filesystem_runtime_read
+  keeper_tool_filesystem_runtime_owned_read
   keeper_tool_execution_journal_types
   keeper_tool_execution_journal_json
   keeper_tool_execution_journal_model

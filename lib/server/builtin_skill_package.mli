@@ -191,3 +191,9 @@ module For_testing : sig
   val export : sync_parent:(string -> unit) -> destination:string -> package -> (unit, error) result
   (** Inject a parent sync failure after real no-replace publication. *)
 end
+
+val skills_dirname : string
+(** The skill directory below [<base>/.masc]. *)
+
+val state_dirname : string
+(** The package state directory below [<base>/.masc]. *)

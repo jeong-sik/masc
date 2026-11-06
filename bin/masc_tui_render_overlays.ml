@@ -578,7 +578,7 @@ let render_palette (state : state) =
                | Palette_search search_origin ->
                    (match search_place search_origin with
                     | None -> ""
-                    | Some dir -> " under " ^ dir)
+                    | Some dir -> " under " ^ Terminal_text.single_line dir)
                | Palette_files _ | Palette_branches _ | Palette_worktrees _ | Palette_locations _
                | Palette_jump | Palette_choice _ -> "")
               (if total = 0 then 0 else cursor + 1) total

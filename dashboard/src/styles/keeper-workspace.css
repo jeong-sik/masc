@@ -874,9 +874,6 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 .kw-vitals { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--color-border-divider); border: 1px solid var(--color-border-default); border-radius: var(--r-2); overflow: hidden; }
 .kw-vitals.single { grid-template-columns: 1fr; }
 .kw-vital { background: var(--color-bg-elevated); padding: 10px 12px; min-width: 0; }
-.kw-vital.muted .vv { color: var(--color-fg-muted); }
-.kw-vital .vk { font-size: var(--fs-11); letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-fg-secondary); font-weight: var(--fw-bold); }
-.kw-vital .vv { font-family: var(--font-mono); font-size: var(--fs-15); font-weight: var(--fw-semi); color: var(--color-fg-primary); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .kw-meter-wrap { position: relative; margin-top: 20px; }
 .kw-meter { height: 7px; border-radius: 9999px; background: var(--color-bg-page); border: 1px solid var(--color-border-divider); overflow: hidden; }
@@ -953,17 +950,6 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   -webkit-box-orient: vertical;
   line-height: 1.35;
 }
-.kw-tasktag .tstate {
-  align-self: start;
-  max-width: 10rem;
-  min-width: 0;
-  overflow: hidden;
-  color: var(--color-fg-secondary);
-  font-size: var(--fs-11);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.kw-tasktag .tstate.review { color: var(--color-status-warn); }
 
 /* Recent tool calls: compact rows (status dot + name + duration + age) that
  * expand on click to reveal input/output. Replaces the old names-only .kw-tool. */
@@ -1040,7 +1026,6 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   /* Edge-to-edge on mobile keeper detail — the wrapper card (with its 6px
      inset and rounded corners) was removed for the full-bleed shell, so the
      stage padding and body border-radius that protected the card are gone. */
-  [data-keeper-detail-mode="true"] .v2-header-brand { max-width: calc(100vw - 86px); }
 
   .kw-mobile-rail-drawer {
     width: min(330px, 88vw);
@@ -1109,7 +1094,6 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
  * single source of truth for roster/chat switching.
  */
 @media (max-width: 900px) {
-  .v2-app[data-reading="true"] .v2-mobile-bottom-bar,
   .v2-app[data-reading="true"] .v2-nav.is-mnav,
   .v2-app[data-reading="true"] .v2-health-strip,
   .v2-app[data-reading="true"] > .v2-shell-panel,
@@ -1130,14 +1114,6 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   .v2-app[data-keeper-detail-mode="true"] {
     height: 100dvh;
     min-height: 100dvh;
-  }
-
-  [data-keeper-detail-mode="true"] .v2-shell-stage {
-    padding:
-      max(6px, env(safe-area-inset-top, 0px))
-      max(6px, env(safe-area-inset-right, 0px))
-      max(6px, env(safe-area-inset-bottom, 0px))
-      max(6px, env(safe-area-inset-left, 0px));
   }
 
   [data-keeper-detail-mode="true"] .v2-body,
@@ -1474,10 +1450,6 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
-  }
-
-  .kw-composer-inner .composer-foot .queue-badge {
-    flex: none;
   }
 
   .kw-composer-inner .composer-tray {

@@ -9,9 +9,7 @@
  * no pure black. Semantic tokens only; no hardcoded hex in shell chrome.
  */
 
-.v2-shell-rail,
 .v2-status-tray,
-.v2-shell-header,
 .v2-health-strip {
   /* Shell palette — aliased to the global dark-fantasy tokens (owned by
      v2-theme.css) so the shell chrome stays in lockstep with the rest of
@@ -418,31 +416,6 @@ aside.v2-status-tray .tray-action-link:hover {
 }
 
 /* ── Header chrome ── */
-.v2-shell-header {
-  /* Subtle brand hairline at the bottom edge. */
-  box-shadow: 0 1px 0 var(--ss-border-subtle);
-}
-
-.v2-shell-header .v2-header-brand {
-  border-color: var(--ss-border);
-  background: var(--ss-surface-subtle);
-}
-
-.v2-shell-header .v2-header-mark {
-  border-color: var(--ss-border);
-  background: var(--ss-brand-tint);
-  color: var(--ss-brand);
-  font-size: var(--fs-12);
-  font-weight: 700;
-  letter-spacing: 0.12em;
-}
-
-.v2-shell-header .v2-header-crumb {
-  color: var(--ss-text-tertiary);
-  font-size: var(--fs-11);
-  font-weight: 500;
-  letter-spacing: 0.05em;
-}
 
 .v2-shell-header .v2-header-crumb .text-\[var\(--color-warn\)\] {
   color: var(--ss-brand);
@@ -474,11 +447,6 @@ aside.v2-status-tray .tray-action-link:hover {
   color: var(--ss-brand);
   font-weight: 600;
   box-shadow: inset 0 -1px 0 var(--ss-brand);
-}
-
-/* Header action area (emergency stop, auth, connection, theme, build) */
-.v2-shell-header .v2-header-actions {
-  color: var(--ss-text-secondary);
 }
 
 /* ── Health strip chrome ── */

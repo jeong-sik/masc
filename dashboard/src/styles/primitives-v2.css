@@ -80,11 +80,6 @@
   font-weight: 600;
 }
 
-.rfilter-n {
-  opacity: 0.7;
-  font-variant-numeric: tabular-nums;
-}
-
 /* ════════════════════════════════════════════════════════════════
    LogFilter — flat label-only filter used in log/level strips
    ════════════════════════════════════════════════════════════════ */
@@ -232,62 +227,3 @@
   background: var(--color-bg-elevated);
   padding: 10px 12px;
 }
-
-.vital .vk {
-  font-size: var(--fs-9);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--color-fg-muted);
-  font-weight: var(--fw-semi);
-}
-
-.vital .vv {
-  font-family: var(--font-mono);
-  font-size: var(--fs-16);
-  color: var(--color-fg-primary);
-  margin-top: 3px;
-  font-variant-numeric: tabular-nums;
-}
-
-.vital .vv.volt {
-  color: var(--color-accent-fg);
-}
-
-.vital .vv small {
-  font-size: var(--fs-10);
-  color: var(--color-fg-muted);
-}
-
-/* ════════════════════════════════════════════════════════════════
-   StatCell — single stat tile (keeper-v2 overview family)
-   ════════════════════════════════════════════════════════════════ */
-.stat-cell {
-  background: var(--color-bg-surface);
-  padding: 14px 16px;
-}
-
-.stat-cell-k {
-  font-size: var(--fs-9);
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--color-fg-muted);
-  font-weight: var(--fw-semi);
-}
-
-.stat-cell-v {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  font-size: var(--fs-20);
-  color: var(--color-fg-primary);
-  margin-top: 6px;
-}
-
-.stat-cell-v small {
-  font-size: var(--fs-11);
-  color: var(--color-fg-muted);
-}
-
-.stat-cell-v.ok { color: var(--color-status-ok); }
-.stat-cell-v.warn { color: var(--color-status-warn); }
-.stat-cell-v.bad { color: var(--color-status-err); }
-.stat-cell-v.volt { color: var(--color-accent-fg); }

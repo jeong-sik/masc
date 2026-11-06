@@ -914,15 +914,6 @@
   color: var(--text-mid);
 }
 
-.ide-v2-drawer-h .chev {
-  transition: transform 0.18s;
-  font-size: var(--fs-9);
-}
-
-.ide-v2-drawer.closed .ide-v2-drawer-h .chev {
-  transform: rotate(-90deg);
-}
-
 .ide-v2-drawer-h .ok {
   color: var(--status-ok);
 }

@@ -223,12 +223,14 @@ let make_preview bytes =
   done;
   Buffer.contents buf
 
+let dirname = "tool_blobs"
+
 let create ~base_path =
   {
     root =
       Filename.concat
         (Common.masc_dir_from_base_path ~base_path)
-        "tool_blobs";
+        dirname;
     ownership_root = base_path;
   }
 

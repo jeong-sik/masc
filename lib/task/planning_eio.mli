@@ -21,3 +21,9 @@ val set_current_task : Workspace_core.config -> task_id:string -> (unit, string)
 val clear_current_task : Workspace_core.config -> unit
 (** [clear_current_task config] removes the persisted current task
     file. *)
+
+val current_task_filename : string
+(** The current task file below [<base>/.masc]. *)
+
+val trash_dirname : string
+(** The directory quarantined task files go to below [<base>/.masc]. *)

@@ -402,6 +402,7 @@ let rec consume_one ~config ~keeper_name ~wake =
               its destination stays blocked: request=%s: %s"
              (Refusal.request_id stop) detail;
            count,stop::kept)) (0,[]) stops in
+    let stops=List.rev stops in
     if abandoned>0 then consume_one ~config ~keeper_name ~wake else
     let is_candidate ((record:Retained.retained),_) =
       List.exists (fun candidate -> (Descent.record candidate).request_id=record.request_id) candidates in

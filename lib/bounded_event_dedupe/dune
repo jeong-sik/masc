@@ -1,7 +1,6 @@
-; Bounded_event_dedupe — shared stdlib-only event dedupe state machine
-; for keeper/task log-noise reducers. Domain modules keep their typed
-; public APIs; this leaf owns the repeated Hashtbl + Mutex + threshold
-; mechanics so future reducers do not fork another bespoke state clone.
+; Bounded_event_dedupe — stdlib-only per-fingerprint event counter.
+; Domain modules keep their typed public APIs; this leaf owns the
+; Hashtbl + Mutex mechanics.
 
 (include_subdirs no)
 

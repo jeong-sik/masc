@@ -515,6 +515,22 @@ let skill_source_lines ~config ~(sources : Masc.Tui_decode_tools.skill_catalog_s
 ;;
 ;;
 
+(* The catalog pane's volume GC block, drawn above the catalog: what the
+   next press sends and the last answer. A reading would own every key and
+   its closing key would take an armed reclaim back. *)
+let volume_gc_lines (state : state) =
+  List.map
+    (fun (tone, text) ->
+       let color =
+         match tone with
+         | Masc_tui_volume_gc.Plain -> ""
+         | Masc_tui_volume_gc.Dim -> Ansi.dim
+         | Masc_tui_volume_gc.Bad -> Theme.bad ()
+       in
+       color, " " ^ text)
+    (Masc_tui_volume_gc.lines state.volume_gc)
+;;
+
 (* Through [tab_strip], the one drawing every in-screen strip shares. This one
    was left out when the others moved: a bar between names, a space before the
    unmarked ones and the mark without the information colour, so the Tools
@@ -2087,7 +2103,7 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
     | Masc_tui_types.Tools_async -> async_request_observation_lines ~cols state
     | Masc_tui_types.Tools_activations -> Lazy.force activation_lines
     | Masc_tui_types.Tools_usage -> Lazy.force usage_matrix_lines
-    | Masc_tui_types.Tools_catalog -> Lazy.force catalog_lines
+    | Masc_tui_types.Tools_catalog -> volume_gc_lines state @ [ "", "" ] @ Lazy.force catalog_lines
   in
   (* Each pane follows its own independent read. Retained rows are still
      useful during refresh; neither unread nor failed means a successful zero. *)

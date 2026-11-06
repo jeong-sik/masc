@@ -5951,6 +5951,61 @@ let launch_connector_unbind_all state ~mailbox ~keeper_name targets =
              { keeper_name; results = not_sent "Eio switch is unavailable" }))
   end
 
+(* The catalog pane's volume GC. A reclaim deletes volumes, so it is an
+   operation, and an interruption is answered as "no answer", which the pane
+   reads as "may have deleted". A report gets the same receipt so its press
+   does not stay running. The MCP session is the one the observer feed
+   keeps; without one, this call opens one. *)
+let launch_volume_gc state ~mailbox request =
+  let authority = state.workspace_authority in
+  let identity = state.server_identity in
+  let host = server_peer_host and port = state.port and session = state.mcp_session in
+  let execute = Masc_tui_volume_gc.execute request in
+  let deliver result =
+    match request with
+    | Masc_tui_volume_gc.Report_request -> Tools_msg (Tools_volume_gc_reported result)
+    | Masc_tui_volume_gc.Reclaim_request names ->
+      Tools_msg (Tools_volume_gc_reclaimed (names, result))
+  in
+  state.volume_gc <- Masc_tui_volume_gc.sending state.volume_gc request;
+  launch_workspace_request ~operation:execute state ~mailbox ~boundary_error:Fun.id
+    ~cancelled:(deliver (Error "interrupted before the server answered"))
+    ~deliver
+    (fun () ->
+      let open Result.Syntax in
+      let* session_id =
+        match session with
+        | Some session_id -> Ok session_id
+        | None ->
+          Masc_tui_http.open_mcp_session ~host ~port
+            ~client_version:Runtime_build_version.current
+      in
+      let* () =
+        check_workspace_request ~prior_contact:Masc_tui_server_lifecycle.Server_reached
+          state ~mailbox ~authority ~identity ~host ~port ()
+      in
+      let+ outcome =
+        Masc_tui_http.call_mcp_tool_within ~timeout_sec:Masc_tui_volume_gc.timeout_sec
+          ~host ~port ~session_id ~request_id:("tui-volume-gc-" ^ Random_id.uuid_v7 ())
+          ~tool:Masc_tui_volume_gc.tool ~arguments:(Masc_tui_volume_gc.arguments ~execute)
+      in
+      Masc_tui_volume_gc.answer_of_text ~is_error:outcome.Masc_tui_mcp.is_error
+        outcome.Masc_tui_mcp.text)
+
+(* The pane draws the answer; the footer says it once. A failure without an
+   answer is an error line, since after a reclaim it may hide a deletion. *)
+let settle_volume_gc state request result =
+  state.volume_gc <-
+    (match result with
+     | Ok answer -> Masc_tui_volume_gc.answered answer
+     | Error detail -> Masc_tui_volume_gc.unanswered request detail);
+  let kind =
+    match result with
+    | Ok (Masc_tui_volume_gc.Report _) -> "system"
+    | Ok (Masc_tui_volume_gc.Refused _ | Masc_tui_volume_gc.Unreadable _) | Error _ -> "error"
+  in
+  report_action state kind (Masc_tui_volume_gc.status_line state.volume_gc)
+
 let map_lane_addons state f =
   match state.lane_addons with
   | Some view -> state.lane_addons <- Some (f view)
@@ -16886,6 +16941,7 @@ let revoke_detail_readings state =
   state.connector_unbind_offer <- None;
   state.connector_unbind_armed <- None;
   state.connector_unbind_all_armed <- None;
+  state.volume_gc <- Masc_tui_volume_gc.initial;
   Masc_tui_types.withdraw_identity_readings state;
   state.keeper_schedules <- None;
   state.keeper_schedules_error <- None;
@@ -17217,6 +17273,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.connector_unbind_armed <- None;
   state.connector_unbind_all_armed <- None;
   state.connector_unbind_all_inflight <- false;
+  state.volume_gc <- Masc_tui_volume_gc.initial;
   (* Origin-bound intent survives an unread probe. Reconciliation clears it
      only when a comparable server identity confirms another workspace. *)
   state.connector_unbind_offer <- None;
@@ -22654,9 +22711,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Browser_lane_clients_loaded (_, _) | Browser_lane_loaded (_, _)
         | Browser_lane_action_done (_, _) | Browser_lane_scene_loaded (_, _)
         | Browser_lane_follow_loaded (_, _) | Browser_lane_screenshot_ready _)
-        | Connectors_msg (Connectors_status_loaded (_, _) | Connectors_loaded (_, _) | Connector_unbind_all_done _) | Runtime_msg (Runtime_surface_loaded (_, _))
+        | Connectors_msg (Connectors_status_loaded (_, _) | Connectors_loaded (_, _) | Connector_unbind_all_done _) | Tools_msg (Tools_volume_gc_reclaimed _) | Runtime_msg (Runtime_surface_loaded (_, _))
         | Tools_msg (Tools_read_loaded _) | Skill_evidence_loaded (_, _, _)
-        | (Tools_msg (Tools_async_observation_loaded (_, _)) | ((Tools_msg (Tools_async_detail_loaded _) | Task_msg (Task_document_prepared _)) | Tools_msg (Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _))) | Runtime_msg (Runtime_lane_slots_written (_, _, _)
+        | (Tools_msg (Tools_async_observation_loaded (_, _)) | ((Tools_msg (Tools_async_detail_loaded _) | Task_msg (Task_document_prepared _)) | Tools_msg (Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _ | Tools_volume_gc_reported _))) | Runtime_msg (Runtime_lane_slots_written (_, _, _)
         | Runtime_catalog_loaded (_, _) | Runtime_assignment_changed (_, _, _))
         | Keeper_msg (Keeper_chat_approval_answered (_, _, _, _) | Keeper_tool_approvals_loaded (_, _, _)) | Ask_msg (Asks_reloaded _)
         | Listen_prepared _ | Sent_image_ready _ | Image_render_ready _ | Keeper_msg (Keeper_turns_loaded _ | Keeper_waiting_loaded _
@@ -27682,6 +27739,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                     | Viewport_cadence _ | Viewport_pointer _ ))
             | Idle | No_browser | Failed _ -> ())
        | None -> ())
+  | Tools_msg (Tools_volume_gc_reported result) ->
+      settle_volume_gc state Masc_tui_volume_gc.Report_request result
+  | Tools_msg (Tools_volume_gc_reclaimed (names, result)) ->
+      settle_volume_gc state (Masc_tui_volume_gc.Reclaim_request names) result
   | Connectors_msg (Connector_unbind_all_done { keeper_name; results }) ->
       state.connector_unbind_all_inflight <- false;
       List.iter
@@ -33471,7 +33532,10 @@ Use relative paths for resources already held in the package. -->
       if state.view <> Config && input_seen then state.preset_armed <- None;
       (* Same rule for the Skills list: a surface change with no key, such as
          a dispatched task opening its view, must not keep a delete armed. *)
-      if state.view <> Tools && input_seen then state.tools_skill_delete_armed <- None;
+      if state.view <> Tools && input_seen then begin
+        state.tools_skill_delete_armed <- None;
+        state.volume_gc <- Masc_tui_volume_gc.disarm state.volume_gc
+      end;
       (match state.view with
        | Approvals ->
            if cancelled [ "y"; "Y"; "n"; "N" ] then
@@ -33537,7 +33601,9 @@ Use relative paths for resources already held in the package. -->
        | Tools ->
            (* A Skill deletion arm ends the same way every armed destructive
               action here does: any input that is not its own second press. *)
-           if cancelled [ "d"; "D" ] then state.tools_skill_delete_armed <- None
+           if cancelled [ "d"; "D" ] then state.tools_skill_delete_armed <- None;
+           if cancelled [ Masc_tui_volume_gc.key ] then
+             state.volume_gc <- Masc_tui_volume_gc.disarm state.volume_gc
        | Overview | Acting | Metrics | Lanes | Clients | Harness | Memory | Fusion
        | Repositories
        | Changes | Connectors | Resources
@@ -37567,6 +37633,16 @@ Use relative paths for resources already held in the package. -->
                 state.tools_pane <- Tools_surface;
                 tools_task_user_scroll state 0;
                 handle_skill_evidence ())
+       | Some k
+         when String.equal k Masc_tui_volume_gc.key
+              && state.view = Tools && state.tools_pane = Tools_catalog ->
+           (* The catalog lists every registered tool; this one is the
+              operator's own reclamation of retired Keepers' volumes. *)
+           (match Masc_tui_volume_gc.press state.volume_gc with
+            | Masc_tui_volume_gc.Still_running ->
+                report_action state "info" "volume GC: the previous request is still running"
+            | Masc_tui_volume_gc.Send request ->
+                launch_volume_gc state ~mailbox:async_messages request)
        | Some "J" when state.view = Tools -> move_tools_skill_cursor state 1
        | Some "K" when state.view = Tools -> move_tools_skill_cursor state (-1)
        | Some "d" when state.view = Tools && state.tools_pane <> Tools_async ->

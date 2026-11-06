@@ -699,6 +699,8 @@ type tools_msg =
   | Tools_async_detail_loaded of Masc_tui_types.tools_async_detail_request * (Masc.Tui_decode_async_request.reading, string) result
   | Tools_async_task_body_loaded of Masc_tui_types.tools_async_task_request * (Masc.Tui_decode_task_inspection.detail, string) result
   | Tools_async_task_history_loaded of Masc_tui_types.tools_async_task_source Masc_tui_types.task_history_request * (Masc.Tui_decode_task_inspection.history, string) result
+  | Tools_volume_gc_reported of (Masc_tui_volume_gc.answer, string) result
+  | Tools_volume_gc_reclaimed of string list * (Masc_tui_volume_gc.answer, string) result
 
 type task_msg =
   | Task_document_prepared of Masc_tui_types.task_document_request * (string list, string) result
@@ -1132,7 +1134,7 @@ let rec workspace_message_is_read = function
   | Tools_msg (Tools_read_loaded _)
   | Skill_evidence_loaded _
   | Tools_msg (Tools_async_observation_loaded _)
-  | ((Tools_msg (Tools_async_detail_loaded _) | Task_msg (Task_document_prepared _)) | Tools_msg (Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _))
+  | ((Tools_msg (Tools_async_detail_loaded _) | Task_msg (Task_document_prepared _)) | Tools_msg (Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _ | Tools_volume_gc_reported _))
   | Runtime_msg (Runtime_catalog_loaded _)
   | Keeper_msg (Keeper_tool_approvals_loaded _)
   | Ask_msg (Asks_reloaded _) | Keeper_msg (Keeper_roster_reloaded _ | Keeper_row_reloaded _)
@@ -1211,7 +1213,7 @@ let rec workspace_message_is_read = function
   | Fusion_msg (Fusion_launched _)
   | Browser_msg (Browser_lane_action_done _
   | Browser_lane_follow_loaded _)
-  | Connectors_msg (Connector_unbind_all_done _)
+  | Connectors_msg (Connector_unbind_all_done _) | Tools_msg (Tools_volume_gc_reclaimed _)
   | Runtime_msg (Runtime_lane_slots_written _
   | Runtime_assignment_changed _)
   | Keeper_msg (Keeper_chat_approval_answered _
@@ -1322,11 +1324,11 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Browser_msg (Browser_history_list_loaded _ | Browser_history_page_loaded _
   | Browser_lane_clients_loaded _ | Browser_lane_loaded _ | Browser_lane_action_done _
   | Browser_lane_scene_loaded _ | Browser_lane_follow_loaded _ | Browser_lane_screenshot_ready _)
-  | Connectors_msg (Connectors_status_loaded _ | Connectors_loaded _ | Connector_unbind_all_done _)
+  | Connectors_msg (Connectors_status_loaded _ | Connectors_loaded _ | Connector_unbind_all_done _) | Tools_msg (Tools_volume_gc_reclaimed _)
   | Runtime_msg (Runtime_surface_loaded _) | Tools_msg (Tools_read_loaded _)
   | Skill_evidence_loaded _ | Tools_msg (Tools_async_observation_loaded _ | Tools_async_detail_loaded _)
   | Task_msg (Task_document_prepared _) | Tools_msg (Tools_async_task_body_loaded _
-  | Tools_async_task_history_loaded _) | Runtime_msg (Runtime_lane_slots_written _ | Runtime_catalog_loaded _
+  | Tools_async_task_history_loaded _ | Tools_volume_gc_reported _) | Runtime_msg (Runtime_lane_slots_written _ | Runtime_catalog_loaded _
   | Runtime_assignment_changed _) | Keeper_msg (Keeper_chat_approval_answered _
   | Keeper_tool_approvals_loaded _) | Ask_msg (Asks_reloaded _) | Keeper_msg (Keeper_roster_reloaded _ | Keeper_row_reloaded _) | Listen_prepared _ | Resource_msg (Resource_diagram_ready _)
   | Keeper_msg (Keeper_turns_loaded _ | Keeper_waiting_loaded _
@@ -1480,9 +1482,9 @@ let retired_operation_observation state ~authority ~reading message =
     | Browser_lane_loaded (_, _) | Browser_lane_action_done (_, _)
     | Browser_lane_scene_loaded (_, Error _) | Browser_lane_follow_loaded (_, _)
     | Browser_lane_screenshot_ready _) | Connectors_msg (Connectors_status_loaded (_, _) | Connectors_loaded (_, _)
-    | Connector_unbind_all_done _) | Runtime_msg (Runtime_surface_loaded (_, _))
+    | Connector_unbind_all_done _) | Tools_msg (Tools_volume_gc_reclaimed _) | Runtime_msg (Runtime_surface_loaded (_, _))
     | Tools_msg (Tools_read_loaded _)
-    | Skill_evidence_loaded (_, _, _) | (Tools_msg (Tools_async_observation_loaded (_, _)) | ((Tools_msg (Tools_async_detail_loaded _) | Task_msg (Task_document_prepared _)) | Tools_msg (Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _)))
+    | Skill_evidence_loaded (_, _, _) | (Tools_msg (Tools_async_observation_loaded (_, _)) | ((Tools_msg (Tools_async_detail_loaded _) | Task_msg (Task_document_prepared _)) | Tools_msg (Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _ | Tools_volume_gc_reported _)))
     | Runtime_msg (Runtime_lane_slots_written (_, _, _) | Runtime_catalog_loaded (_, _)
     | Runtime_assignment_changed (_, _, _))
     | Keeper_msg (Keeper_chat_approval_answered (_, _, _, _)
@@ -1625,9 +1627,9 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Browser_history_page_loaded (_, _) | Browser_lane_clients_loaded (_, _)
   | Browser_lane_loaded (_, _) | Browser_lane_action_done (_, _)
   | Browser_lane_follow_loaded (_, Error _)) | Connectors_msg (Connectors_status_loaded (_, _) | Connectors_loaded (_, _)
-  | Connector_unbind_all_done _) | Runtime_msg (Runtime_surface_loaded (_, _))
+  | Connector_unbind_all_done _) | Tools_msg (Tools_volume_gc_reclaimed _) | Runtime_msg (Runtime_surface_loaded (_, _))
   | Tools_msg (Tools_read_loaded _)
-  | Skill_evidence_loaded (_, _, _) | (Tools_msg (Tools_async_observation_loaded (_, _)) | ((Tools_msg (Tools_async_detail_loaded _) | Task_msg (Task_document_prepared _)) | Tools_msg (Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _)))
+  | Skill_evidence_loaded (_, _, _) | (Tools_msg (Tools_async_observation_loaded (_, _)) | ((Tools_msg (Tools_async_detail_loaded _) | Task_msg (Task_document_prepared _)) | Tools_msg (Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _ | Tools_volume_gc_reported _)))
   | Runtime_msg (Runtime_lane_slots_written (_, _, _) | Runtime_catalog_loaded (_, _)
   | Runtime_assignment_changed (_, _, _))
   | Keeper_msg (Keeper_chat_approval_answered (_, _, _, _)

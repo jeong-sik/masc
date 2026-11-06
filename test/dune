@@ -4928,6 +4928,11 @@
  (libraries alcotest masc masc_tui_connector_unbind))
 
 (test
+ (name test_tui_volume_gc)
+ (modules test_tui_volume_gc)
+ (libraries alcotest masc masc_tui_volume_gc yojson))
+
+(test
  (name test_tui_fleet_line)
  (modules test_tui_fleet_line)
  (libraries alcotest masc masc_tui_fleet_line masc_tui_fleet_stream))

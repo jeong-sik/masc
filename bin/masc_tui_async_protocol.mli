@@ -692,6 +692,8 @@ type tools_msg =
   | Tools_async_detail_loaded of Masc_tui_types.tools_async_detail_request * (Masc.Tui_decode_async_request.reading, string) result
   | Tools_async_task_body_loaded of Masc_tui_types.tools_async_task_request * (Masc.Tui_decode_task_inspection.detail, string) result
   | Tools_async_task_history_loaded of Masc_tui_types.tools_async_task_source Masc_tui_types.task_history_request * (Masc.Tui_decode_task_inspection.history, string) result
+  | Tools_volume_gc_reported of (Masc_tui_volume_gc.answer, string) result
+  | Tools_volume_gc_reclaimed of string list * (Masc_tui_volume_gc.answer, string) result
 
 type task_msg =
   | Task_document_prepared of Masc_tui_types.task_document_request * (string list, string) result

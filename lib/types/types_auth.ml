@@ -192,10 +192,10 @@ let account_mode_of_json = function
   | `String "Multi_account" -> Some Multi_account
   | _ -> None
 
-(* The Google client of a multi-account installation. The secret is not here:
-   the file is rewritten by [save_auth_config] and copied by backups, so it
-   names the environment variable that holds the secret. *)
-type oidc_config = {
+(* A client that a multi-account installation registered at a login provider.
+   The secret is not here: the file is rewritten by [save_auth_config] and
+   copied by backups, so it names the environment variable that holds it. *)
+type login_client = {
   client_id: string;
   redirect_uri: string;
   client_secret_env: string;
@@ -208,7 +208,7 @@ type auth_config = {
   require_token: bool; [@default true]
   token_expiry_hours: int; [@default 24]
   account_mode: account_mode option; [@default None]
-  oidc: oidc_config option; [@default None]
+  google: login_client option; [@default None]
 } [@@deriving show]
 
 let default_auth_config = {
@@ -217,7 +217,7 @@ let default_auth_config = {
   require_token = true;
   token_expiry_hours = 24;
   account_mode = None;
-  oidc = None;
+  google = None;
 }
 
 let auth_config_to_yojson c =
@@ -230,21 +230,21 @@ let auth_config_to_yojson c =
   @ (match c.account_mode with
      | None -> []
      | Some mode -> [ ("account_mode", `String (account_mode_label mode)) ])
-  @ (match c.oidc with
+  @ (match c.google with
      | None -> []
-     | Some oidc ->
-       [ ( "oidc"
+     | Some client ->
+       [ ( "google"
          , `Assoc
-             [ ("client_id", `String oidc.client_id)
-             ; ("redirect_uri", `String oidc.redirect_uri)
-             ; ("client_secret_env", `String oidc.client_secret_env)
+             [ ("client_id", `String client.client_id)
+             ; ("redirect_uri", `String client.redirect_uri)
+             ; ("client_secret_env", `String client.client_secret_env)
              ] )
        ]))
 
 let auth_config_field_names =
-  [ "enabled"; "workspace_secret_hash"; "require_token"; "token_expiry_hours"; "account_mode"; "oidc" ]
+  [ "enabled"; "workspace_secret_hash"; "require_token"; "token_expiry_hours"; "account_mode"; "google" ]
 
-let oidc_config_field_names = [ "client_id"; "redirect_uri"; "client_secret_env" ]
+let login_client_field_names = [ "client_id"; "redirect_uri"; "client_secret_env" ]
 
 let validate_object_fields ~context ~names = function
   | `Assoc fields ->
@@ -333,18 +333,17 @@ let validate_token_expiry_hours value =
          max_token_expiry_hours)
 ;;
 
-let oidc_context = "auth_config_of_yojson: field \"oidc\""
+let member_context member = Printf.sprintf "auth_config_of_yojson: field %S" member
 
-let oidc_string fields name =
+let login_client_string ~context fields name =
   match List.assoc_opt name fields with
-  | Some (`String "") -> Error (Printf.sprintf "%s: field %S is empty" oidc_context name)
   | Some (`String value) -> Ok value
-  | None -> Error (Printf.sprintf "%s: field %S is missing" oidc_context name)
+  | None -> Error (Printf.sprintf "%s: field %S is missing" context name)
   | Some value ->
     Error
       (Printf.sprintf
          "%s: field %S must be a string, got %s"
-         oidc_context
+         context
          name
          (Json_util.kind_name value))
 
@@ -361,12 +360,13 @@ let is_environment_variable_name text =
          | _ -> false)
        text
 
-let oidc_config_of_json json =
+let login_client_of_json ~member json =
   let open Result.Syntax in
-  let* fields = validate_object_fields ~context:oidc_context ~names:oidc_config_field_names json in
-  let* client_id = oidc_string fields "client_id" in
-  let* redirect_uri = oidc_string fields "redirect_uri" in
-  let* client_secret_env = oidc_string fields "client_secret_env" in
+  let context = member_context member in
+  let* fields = validate_object_fields ~context ~names:login_client_field_names json in
+  let* client_id = login_client_string ~context fields "client_id" in
+  let* redirect_uri = login_client_string ~context fields "redirect_uri" in
+  let* client_secret_env = login_client_string ~context fields "client_secret_env" in
   if is_environment_variable_name client_secret_env
   then Ok { client_id; redirect_uri; client_secret_env }
   else
@@ -374,7 +374,7 @@ let oidc_config_of_json json =
       (Printf.sprintf
          "%s: field \"client_secret_env\" must be an environment variable name: letters, \
           digits and underscores, not beginning with a digit"
-         oidc_context)
+         context)
 
 let auth_config_of_yojson json =
   let open Result.Syntax in
@@ -395,12 +395,12 @@ let auth_config_of_yojson json =
          Error
            "auth_config_of_yojson: field \"account_mode\" must be the string \"Single_user\" or \"Multi_account\"")
   in
-  let* oidc =
-    match List.assoc_opt "oidc" fields with
+  let* google =
+    match List.assoc_opt "google" fields with
     | None -> Ok None
-    | Some json -> Result.map Option.some (oidc_config_of_json json)
+    | Some json -> Result.map Option.some (login_client_of_json ~member:"google" json)
   in
-  Ok { enabled; workspace_secret_hash; require_token; token_expiry_hours; account_mode; oidc }
+  Ok { enabled; workspace_secret_hash; require_token; token_expiry_hours; account_mode; google }
 
 (** Permission matrix - what each role can do *)
 type permission =

@@ -1,4 +1,4 @@
-(* The [oidc] member of the auth configuration (plan C2a-5): how it is read
+(* The [google] member of the auth configuration (plan C2a-5): how it is read
    and written back. *)
 
 module D = Masc_domain
@@ -11,7 +11,7 @@ let client =
     ]
 ;;
 
-let with_oidc value = `Assoc [ "enabled", `Bool true; "oidc", value ]
+let with_google value = `Assoc [ "enabled", `Bool true; "google", value ]
 
 let client_with field value =
   match client with
@@ -36,30 +36,30 @@ let refused label json =
   | Ok _ -> Alcotest.failf "%s: decoded" label
   | Error message ->
     Alcotest.(check bool)
-      (label ^ ": names the oidc field")
+      (label ^ ": names the google field")
       true
-      (String_util.contains_substring message "\"oidc\"")
+      (String_util.contains_substring message "\"google\"")
 ;;
 
 let absent () =
   match decode (`Assoc [ "enabled", `Bool true ]) with
   | Error message -> Alcotest.fail message
   | Ok cfg ->
-    Alcotest.(check bool) "no member, no client" true (cfg.D.oidc = None);
+    Alcotest.(check bool) "no member, no client" true (cfg.D.google = None);
     (match D.auth_config_to_yojson cfg with
      | `Assoc fields ->
-       Alcotest.(check bool) "not written" false (List.mem_assoc "oidc" fields)
+       Alcotest.(check bool) "not written" false (List.mem_assoc "google" fields)
      | _ -> Alcotest.fail "the encoder wrote something that is not an object")
 ;;
 
 let read_and_written_back () =
-  match decode (with_oidc client) with
+  match decode (with_google client) with
   | Error message -> Alcotest.fail message
   | Ok cfg ->
     Alcotest.(check bool)
       "the three values"
       true
-      (cfg.D.oidc
+      (cfg.D.google
        = Some
            { D.client_id = "test-client.apps.example"
            ; redirect_uri = "https://masc.example/auth/oidc/callback"
@@ -69,27 +69,27 @@ let read_and_written_back () =
        [masc auth enable] keeps the client. *)
     (match decode (D.auth_config_to_yojson { cfg with D.require_token = false }) with
      | Error message -> Alcotest.fail message
-     | Ok back -> Alcotest.(check bool) "kept by a rewrite" true (back.D.oidc = cfg.D.oidc))
+     | Ok back -> Alcotest.(check bool) "kept by a rewrite" true (back.D.google = cfg.D.google))
 ;;
 
 let shape_refused () =
-  refused "null" (with_oidc `Null);
-  refused "a string" (with_oidc (`String "test-client.apps.example"));
-  refused "an unknown field" (with_oidc (client_and "client_secret" (`String "s")));
-  refused "a duplicate field" (with_oidc (client_and "client_id" (`String "other")));
+  refused "null" (with_google `Null);
+  refused "a string" (with_google (`String "test-client.apps.example"));
+  refused "an unknown field" (with_google (client_and "client_secret" (`String "s")));
+  refused "a duplicate field" (with_google (client_and "client_id" (`String "other")));
   List.iter
     (fun field ->
-       refused (field ^ " missing") (with_oidc (client_without field));
-       refused (field ^ " empty") (with_oidc (client_with field (`String "")));
-       refused (field ^ " a number") (with_oidc (client_with field (`Int 1))))
+       refused (field ^ " missing") (with_google (client_without field));
+       refused (field ^ " empty") (with_google (client_with field (`String "")));
+       refused (field ^ " a number") (with_google (client_with field (`Int 1))))
     [ "client_id"; "redirect_uri"; "client_secret_env" ]
 ;;
 
 let variable_names () =
   let accepts name =
-    match decode (with_oidc (client_with "client_secret_env" (`String name))) with
+    match decode (with_google (client_with "client_secret_env" (`String name))) with
     | Ok cfg ->
-      Option.map (fun (oidc : D.oidc_config) -> oidc.client_secret_env) cfg.D.oidc = Some name
+      Option.map (fun (client : D.login_client) -> client.client_secret_env) cfg.D.google = Some name
     | Error _ -> false
   in
   List.iter
@@ -102,8 +102,8 @@ let variable_names () =
 
 let () =
   Alcotest.run
-    "auth_config_oidc"
-    [ ( "oidc"
+    "auth_config_google"
+    [ ( "google"
       , [ Alcotest.test_case "absent" `Quick absent
         ; Alcotest.test_case "read and written back" `Quick read_and_written_back
         ; Alcotest.test_case "shape refused" `Quick shape_refused

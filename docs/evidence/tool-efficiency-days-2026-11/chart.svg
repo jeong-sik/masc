@@ -1,0 +1,314 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 552" role="img" aria-labelledby="t d">
+<title id="t">Tool call waste by day and by hour</title>
+<desc id="d">Three daily panels and one hourly panel drawn from the tool-efficiency JSON. Each bar has a title with its numbers.</desc>
+<style>text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-size:10px}.title{font-size:13px;font-weight:600}.panel{font-size:11px;font-weight:600}.surface{fill:#fcfcfb}.ink{fill:#0b0b0b}.ink2{fill:#52514e}.muted{fill:#898781}.accent{fill:#2a78d6}.context{fill:#898781}.grid{stroke:#e1e0d9;stroke-width:1;fill:none}.axis{stroke:#c3c2b7;stroke-width:1;fill:none}.mark{stroke:#898781;stroke-width:1;fill:none}@media (prefers-color-scheme:dark){.surface{fill:#1a1a19}.ink{fill:#f0efec}.ink2{fill:#c3c2b7}.muted{fill:#898781}.accent{fill:#3987e5}.context{fill:#898781}.grid{stroke:#2c2c2a;stroke-width:1;fill:none}.axis{stroke:#383835;stroke-width:1;fill:none}.mark{stroke:#898781;stroke-width:1;fill:none}}@media (forced-colors:active){.surface{fill:Canvas}.ink{fill:CanvasText}.ink2{fill:CanvasText}.muted{fill:CanvasText}.accent{fill:Highlight}.context{fill:GrayText}.grid{stroke:GrayText;stroke-width:1;fill:none}.axis{stroke:GrayText;stroke-width:1;fill:none}.mark{stroke:CanvasText;stroke-width:1;fill:none}}</style>
+<rect width="760" height="552" class="surface"/>
+<text x="56.0" y="22.0" class="title ink" text-anchor="start">Tool call waste by day and by hour</text>
+<text x="56.0" y="38.0" class="ink2" text-anchor="start">UTC, 2026-11-01 to 2026-11-05; each day is measured on its own</text>
+<text x="56.0" y="70.0" class="panel ink" text-anchor="start">Identical re-reads, % of result bytes</text>
+<line x1="90.0" y1="184.0" x2="260.0" y2="184.0" class="axis"/>
+<text x="84.0" y="187.5" class="muted" text-anchor="end">0%</text>
+<line x1="90.0" y1="150.7" x2="260.0" y2="150.7" class="grid"/>
+<text x="84.0" y="154.2" class="muted" text-anchor="end">20%</text>
+<line x1="90.0" y1="117.3" x2="260.0" y2="117.3" class="grid"/>
+<text x="84.0" y="120.8" class="muted" text-anchor="end">40%</text>
+<line x1="90.0" y1="84.0" x2="260.0" y2="84.0" class="grid"/>
+<text x="84.0" y="87.5" class="muted" text-anchor="end">60%</text>
+<g><title>11-01 · identical re-reads 58.0% of 398.09 MB (230.95 MB)</title>
+<rect x="90.00" y="84.00" width="34.00" height="100.00" fill="none" pointer-events="all"/>
+<path d="M95.00,184.00V91.31A4.00,4.00 0 0 1 99.00,87.31H115.00A4.00,4.00 0 0 1 119.00,91.31V184.00Z" class="accent"/>
+</g>
+<text x="107.0" y="82.3" class="ink2" text-anchor="middle">58.0%</text>
+<text x="107.0" y="200.0" class="muted" text-anchor="middle">11-01</text>
+<g><title>11-02 · identical re-reads 19.0% of 355.79 MB (67.68 MB)</title>
+<rect x="124.00" y="84.00" width="34.00" height="100.00" fill="none" pointer-events="all"/>
+<path d="M129.00,184.00V156.30A4.00,4.00 0 0 1 133.00,152.30H149.00A4.00,4.00 0 0 1 153.00,156.30V184.00Z" class="accent"/>
+</g>
+<text x="141.0" y="147.3" class="ink2" text-anchor="middle">19.0%</text>
+<text x="141.0" y="200.0" class="muted" text-anchor="middle">11-02</text>
+<g><title>11-03 · identical re-reads 3.3% of 96.92 MB (3.16 MB)</title>
+<rect x="158.00" y="84.00" width="34.00" height="100.00" fill="none" pointer-events="all"/>
+<path d="M163.00,184.00V182.57A4.00,4.00 0 0 1 167.00,178.57H183.00A4.00,4.00 0 0 1 187.00,182.57V184.00Z" class="accent"/>
+</g>
+<text x="175.0" y="173.6" class="ink2" text-anchor="middle">3.3%</text>
+<text x="175.0" y="200.0" class="muted" text-anchor="middle">11-03</text>
+<g><title>11-04 · identical re-reads 7.5% of 126.41 MB (9.48 MB)</title>
+<rect x="192.00" y="84.00" width="34.00" height="100.00" fill="none" pointer-events="all"/>
+<path d="M197.00,184.00V175.51A4.00,4.00 0 0 1 201.00,171.51H217.00A4.00,4.00 0 0 1 221.00,175.51V184.00Z" class="accent"/>
+</g>
+<text x="209.0" y="166.5" class="ink2" text-anchor="middle">7.5%</text>
+<text x="209.0" y="200.0" class="muted" text-anchor="middle">11-04</text>
+<g><title>11-05 · identical re-reads 3.3% of 47.14 MB (1.56 MB)</title>
+<rect x="226.00" y="84.00" width="34.00" height="100.00" fill="none" pointer-events="all"/>
+<path d="M231.00,184.00V182.47A4.00,4.00 0 0 1 235.00,178.47H251.00A4.00,4.00 0 0 1 255.00,182.47V184.00Z" class="accent"/>
+</g>
+<text x="243.0" y="173.5" class="ink2" text-anchor="middle">3.3%</text>
+<text x="243.0" y="200.0" class="muted" text-anchor="middle">11-05*</text>
+<text x="294.0" y="70.0" class="panel ink" text-anchor="start">Spilled to a blob, % of result bytes</text>
+<line x1="328.0" y1="184.0" x2="498.0" y2="184.0" class="axis"/>
+<text x="322.0" y="187.5" class="muted" text-anchor="end">0%</text>
+<line x1="328.0" y1="150.7" x2="498.0" y2="150.7" class="grid"/>
+<text x="322.0" y="154.2" class="muted" text-anchor="end">20%</text>
+<line x1="328.0" y1="117.3" x2="498.0" y2="117.3" class="grid"/>
+<text x="322.0" y="120.8" class="muted" text-anchor="end">40%</text>
+<line x1="328.0" y1="84.0" x2="498.0" y2="84.0" class="grid"/>
+<text x="322.0" y="87.5" class="muted" text-anchor="end">60%</text>
+<g><title>11-01 · spilled 31.9% of 398.09 MB (127.13 MB)</title>
+<rect x="328.00" y="84.00" width="34.00" height="100.00" fill="none" pointer-events="all"/>
+<path d="M333.00,184.00V134.77A4.00,4.00 0 0 1 337.00,130.77H353.00A4.00,4.00 0 0 1 357.00,134.77V184.00Z" class="accent"/>
+</g>
+<text x="345.0" y="125.8" class="ink2" text-anchor="middle">31.9%</text>
+<text x="345.0" y="200.0" class="muted" text-anchor="middle">11-01</text>
+<g><title>11-02 · spilled 47.0% of 355.79 MB (167.05 MB)</title>
+<rect x="362.00" y="84.00" width="34.00" height="100.00" fill="none" pointer-events="all"/>
+<path d="M367.00,184.00V109.75A4.00,4.00 0 0 1 371.00,105.75H387.00A4.00,4.00 0 0 1 391.00,109.75V184.00Z" class="accent"/>
+</g>
+<text x="379.0" y="100.7" class="ink2" text-anchor="middle">47.0%</text>
+<text x="379.0" y="200.0" class="muted" text-anchor="middle">11-02</text>
+<g><title>11-03 · spilled 44.5% of 96.92 MB (43.09 MB)</title>
+<rect x="396.00" y="84.00" width="34.00" height="100.00" fill="none" pointer-events="all"/>
+<path d="M401.00,184.00V113.89A4.00,4.00 0 0 1 405.00,109.89H421.00A4.00,4.00 0 0 1 425.00,113.89V184.00Z" class="accent"/>
+</g>
+<text x="413.0" y="104.9" class="ink2" text-anchor="middle">44.5%</text>
+<text x="413.0" y="200.0" class="muted" text-anchor="middle">11-03</text>
+<g><title>11-04 · spilled 39.4% of 126.41 MB (49.84 MB)</title>
+<rect x="430.00" y="84.00" width="34.00" height="100.00" fill="none" pointer-events="all"/>
+<path d="M435.00,184.00V122.28A4.00,4.00 0 0 1 439.00,118.28H455.00A4.00,4.00 0 0 1 459.00,122.28V184.00Z" class="accent"/>
+</g>
+<text x="447.0" y="113.3" class="ink2" text-anchor="middle">39.4%</text>
+<text x="447.0" y="200.0" class="muted" text-anchor="middle">11-04</text>
+<g><title>11-05 · spilled 5.5% of 47.14 MB (2.60 MB)</title>
+<rect x="464.00" y="84.00" width="34.00" height="100.00" fill="none" pointer-events="all"/>
+<path d="M469.00,184.00V178.79A4.00,4.00 0 0 1 473.00,174.79H489.00A4.00,4.00 0 0 1 493.00,178.79V184.00Z" class="accent"/>
+</g>
+<text x="481.0" y="169.8" class="ink2" text-anchor="middle">5.5%</text>
+<text x="481.0" y="200.0" class="muted" text-anchor="middle">11-05*</text>
+<text x="532.0" y="70.0" class="panel ink" text-anchor="start">Execute blocked on sleep or poll, hours</text>
+<line x1="566.0" y1="184.0" x2="736.0" y2="184.0" class="axis"/>
+<text x="560.0" y="187.5" class="muted" text-anchor="end">0</text>
+<line x1="566.0" y1="150.7" x2="736.0" y2="150.7" class="grid"/>
+<text x="560.0" y="154.2" class="muted" text-anchor="end">5</text>
+<line x1="566.0" y1="117.3" x2="736.0" y2="117.3" class="grid"/>
+<text x="560.0" y="120.8" class="muted" text-anchor="end">10</text>
+<line x1="566.0" y1="84.0" x2="736.0" y2="84.0" class="grid"/>
+<text x="560.0" y="87.5" class="muted" text-anchor="end">15</text>
+<g><title>11-01 · Execute blocked 0.6 h (2,142 s)</title>
+<rect x="566.00" y="84.00" width="34.00" height="100.00" fill="none" pointer-events="all"/>
+<path d="M571.00,184.00V184.00A3.97,3.97 0 0 1 574.97,180.03H591.03A3.97,3.97 0 0 1 595.00,184.00V184.00Z" class="accent"/>
+</g>
+<text x="583.0" y="175.0" class="ink2" text-anchor="middle">0.6</text>
+<text x="583.0" y="200.0" class="muted" text-anchor="middle">11-01</text>
+<g><title>11-02 · Execute blocked 13.4 h (48,101 s)</title>
+<rect x="600.00" y="84.00" width="34.00" height="100.00" fill="none" pointer-events="all"/>
+<path d="M605.00,184.00V98.92A4.00,4.00 0 0 1 609.00,94.92H625.00A4.00,4.00 0 0 1 629.00,98.92V184.00Z" class="accent"/>
+</g>
+<text x="617.0" y="89.9" class="ink2" text-anchor="middle">13.4</text>
+<text x="617.0" y="200.0" class="muted" text-anchor="middle">11-02</text>
+<g><title>11-03 · Execute blocked 8.7 h (31,382 s)</title>
+<rect x="634.00" y="84.00" width="34.00" height="100.00" fill="none" pointer-events="all"/>
+<path d="M639.00,184.00V129.88A4.00,4.00 0 0 1 643.00,125.88H659.00A4.00,4.00 0 0 1 663.00,129.88V184.00Z" class="accent"/>
+</g>
+<text x="651.0" y="120.9" class="ink2" text-anchor="middle">8.7</text>
+<text x="651.0" y="200.0" class="muted" text-anchor="middle">11-03</text>
+<g><title>11-04 · Execute blocked 12.4 h (44,716 s)</title>
+<rect x="668.00" y="84.00" width="34.00" height="100.00" fill="none" pointer-events="all"/>
+<path d="M673.00,184.00V105.19A4.00,4.00 0 0 1 677.00,101.19H693.00A4.00,4.00 0 0 1 697.00,105.19V184.00Z" class="accent"/>
+</g>
+<text x="685.0" y="96.2" class="ink2" text-anchor="middle">12.4</text>
+<text x="685.0" y="200.0" class="muted" text-anchor="middle">11-04</text>
+<g><title>11-05 · Execute blocked 13.4 h (48,316 s)</title>
+<rect x="702.00" y="84.00" width="34.00" height="100.00" fill="none" pointer-events="all"/>
+<path d="M707.00,184.00V98.53A4.00,4.00 0 0 1 711.00,94.53H727.00A4.00,4.00 0 0 1 731.00,98.53V184.00Z" class="accent"/>
+</g>
+<text x="719.0" y="89.5" class="ink2" text-anchor="middle">13.4</text>
+<text x="719.0" y="200.0" class="muted" text-anchor="middle">11-05*</text>
+<text x="56.0" y="256.0" class="panel ink" text-anchor="start">Result bytes per hour (MB)</text>
+<rect x="650.4" y="248" width="8" height="8" rx="2" class="context"/>
+<text x="662.4" y="256.0" class="ink2" text-anchor="start">kept inline</text>
+<rect x="531.2" y="248" width="8" height="8" rx="2" class="accent"/>
+<text x="543.2" y="256.0" class="ink2" text-anchor="start">spilled to a blob</text>
+<line x1="90.0" y1="452.0" x2="736.0" y2="452.0" class="axis"/>
+<text x="84.0" y="455.5" class="muted" text-anchor="end">0</text>
+<line x1="90.0" y1="405.3" x2="736.0" y2="405.3" class="grid"/>
+<text x="84.0" y="408.8" class="muted" text-anchor="end">5</text>
+<line x1="90.0" y1="358.7" x2="736.0" y2="358.7" class="grid"/>
+<text x="84.0" y="362.2" class="muted" text-anchor="end">10</text>
+<line x1="90.0" y1="312.0" x2="736.0" y2="312.0" class="grid"/>
+<text x="84.0" y="315.5" class="muted" text-anchor="end">15</text>
+<g><title>11-04T10Z · 1,131 calls · spilled 1.05 MB (27.4% of 3.82 MB) · inline 2.77 MB</title>
+<rect x="90.00" y="312.00" width="17.94" height="140.00" fill="none" pointer-events="all"/>
+<path d="M91.00,452.00V426.15H106.94V452.00Z" class="context"/>
+<path d="M91.00,424.15V420.37A4.00,4.00 0 0 1 95.00,416.37H102.94A4.00,4.00 0 0 1 106.94,420.37V424.15Z" class="accent"/>
+</g>
+<g><title>11-04T11Z · 990 calls · spilled 3.16 MB (51.7% of 6.12 MB) · inline 2.96 MB</title>
+<rect x="107.94" y="312.00" width="17.94" height="140.00" fill="none" pointer-events="all"/>
+<path d="M108.94,452.00V424.41H124.89V452.00Z" class="context"/>
+<path d="M108.94,422.41V398.92A4.00,4.00 0 0 1 112.94,394.92H120.89A4.00,4.00 0 0 1 124.89,398.92V422.41Z" class="accent"/>
+</g>
+<g><title>11-04T12Z · 718 calls · spilled 1.36 MB (42.2% of 3.22 MB) · inline 1.86 MB</title>
+<rect x="125.89" y="312.00" width="17.94" height="140.00" fill="none" pointer-events="all"/>
+<path d="M126.89,452.00V434.62H142.83V452.00Z" class="context"/>
+<path d="M126.89,432.62V425.95A4.00,4.00 0 0 1 130.89,421.95H138.83A4.00,4.00 0 0 1 142.83,425.95V432.62Z" class="accent"/>
+</g>
+<text x="134.9" y="468.0" class="muted" text-anchor="middle">12</text>
+<g><title>11-04T13Z · 1,000 calls · spilled 1.10 MB (31.7% of 3.46 MB) · inline 2.36 MB</title>
+<rect x="143.83" y="312.00" width="17.94" height="140.00" fill="none" pointer-events="all"/>
+<path d="M144.83,452.00V429.94H160.78V452.00Z" class="context"/>
+<path d="M144.83,427.94V423.70A4.00,4.00 0 0 1 148.83,419.70H156.78A4.00,4.00 0 0 1 160.78,423.70V427.94Z" class="accent"/>
+</g>
+<g><title>11-04T14Z · 1,495 calls · spilled 1.47 MB (30.0% of 4.92 MB) · inline 3.44 MB</title>
+<rect x="161.78" y="312.00" width="17.94" height="140.00" fill="none" pointer-events="all"/>
+<path d="M162.78,452.00V419.86H178.72V452.00Z" class="context"/>
+<path d="M162.78,417.86V410.10A4.00,4.00 0 0 1 166.78,406.10H174.72A4.00,4.00 0 0 1 178.72,410.10V417.86Z" class="accent"/>
+</g>
+<g><title>11-04T15Z · 1,683 calls · spilled 2.16 MB (30.6% of 7.07 MB) · inline 4.91 MB</title>
+<rect x="179.72" y="312.00" width="17.94" height="140.00" fill="none" pointer-events="all"/>
+<path d="M180.72,452.00V406.18H196.67V452.00Z" class="context"/>
+<path d="M180.72,404.18V390.00A4.00,4.00 0 0 1 184.72,386.00H192.67A4.00,4.00 0 0 1 196.67,390.00V404.18Z" class="accent"/>
+</g>
+<g><title>11-04T16Z · 1,064 calls · spilled 0.51 MB (15.7% of 3.28 MB) · inline 2.76 MB</title>
+<rect x="197.67" y="312.00" width="17.94" height="140.00" fill="none" pointer-events="all"/>
+<path d="M198.67,452.00V426.19H214.61V452.00Z" class="context"/>
+<path d="M198.67,424.19V424.19A2.80,2.80 0 0 1 201.47,421.39H211.81A2.80,2.80 0 0 1 214.61,424.19V424.19Z" class="accent"/>
+</g>
+<g><title>11-04T17Z · 1,854 calls · spilled 1.54 MB (21.6% of 7.14 MB) · inline 5.60 MB</title>
+<rect x="215.61" y="312.00" width="17.94" height="140.00" fill="none" pointer-events="all"/>
+<path d="M216.61,452.00V399.78H232.56V452.00Z" class="context"/>
+<path d="M216.61,397.78V389.40A4.00,4.00 0 0 1 220.61,385.40H228.56A4.00,4.00 0 0 1 232.56,389.40V397.78Z" class="accent"/>
+</g>
+<g><title>11-04T18Z · 1,947 calls · spilled 3.32 MB (39.0% of 8.51 MB) · inline 5.19 MB</title>
+<rect x="233.56" y="312.00" width="17.94" height="140.00" fill="none" pointer-events="all"/>
+<path d="M234.56,452.00V403.54H250.50V452.00Z" class="context"/>
+<path d="M234.56,401.54V376.55A4.00,4.00 0 0 1 238.56,372.55H246.50A4.00,4.00 0 0 1 250.50,376.55V401.54Z" class="accent"/>
+</g>
+<text x="242.5" y="468.0" class="muted" text-anchor="middle">18</text>
+<g><title>11-04T19Z · 2,048 calls · spilled 4.27 MB (44.9% of 9.50 MB) · inline 5.23 MB</title>
+<rect x="251.50" y="312.00" width="17.94" height="140.00" fill="none" pointer-events="all"/>
+<path d="M252.50,452.00V403.18H268.44V452.00Z" class="context"/>
+<path d="M252.50,401.18V367.31A4.00,4.00 0 0 1 256.50,363.31H264.44A4.00,4.00 0 0 1 268.44,367.31V401.18Z" class="accent"/>
+</g>
+<g><title>11-04T20Z · 1,719 calls · spilled 6.53 MB (56.5% of 11.56 MB) · inline 5.03 MB</title>
+<rect x="269.44" y="312.00" width="17.94" height="140.00" fill="none" pointer-events="all"/>
+<path d="M270.44,452.00V405.06H286.39V452.00Z" class="context"/>
+<path d="M270.44,403.06V348.08A4.00,4.00 0 0 1 274.44,344.08H282.39A4.00,4.00 0 0 1 286.39,348.08V403.06Z" class="accent"/>
+</g>
+<g><title>11-04T21Z · 1,337 calls · spilled 4.08 MB (53.2% of 7.66 MB) · inline 3.58 MB</title>
+<rect x="287.39" y="312.00" width="17.94" height="140.00" fill="none" pointer-events="all"/>
+<path d="M288.39,452.00V418.56H304.33V452.00Z" class="context"/>
+<path d="M288.39,416.56V384.50A4.00,4.00 0 0 1 292.39,380.50H300.33A4.00,4.00 0 0 1 304.33,384.50V416.56Z" class="accent"/>
+</g>
+<g><title>11-04T22Z · 1,453 calls · spilled 5.85 MB (53.9% of 10.84 MB) · inline 4.99 MB</title>
+<rect x="305.33" y="312.00" width="17.94" height="140.00" fill="none" pointer-events="all"/>
+<path d="M306.33,452.00V405.40H322.28V452.00Z" class="context"/>
+<path d="M306.33,403.40V354.83A4.00,4.00 0 0 1 310.33,350.83H318.28A4.00,4.00 0 0 1 322.28,354.83V403.40Z" class="accent"/>
+</g>
+<g><title>11-04T23Z · 1,334 calls · spilled 1.45 MB (27.6% of 5.28 MB) · inline 3.82 MB</title>
+<rect x="323.28" y="312.00" width="17.94" height="140.00" fill="none" pointer-events="all"/>
+<path d="M324.28,452.00V416.34H340.22V452.00Z" class="context"/>
+<path d="M324.28,414.34V406.76A4.00,4.00 0 0 1 328.28,402.76H336.22A4.00,4.00 0 0 1 340.22,406.76V414.34Z" class="accent"/>
+</g>
+<g><title>11-05T00Z · 1,506 calls · spilled 0.02 MB (0.6% of 3.58 MB) · inline 3.56 MB</title>
+<rect x="341.22" y="312.00" width="17.94" height="140.00" fill="none" pointer-events="all"/>
+<path d="M342.22,452.00V422.79A4.00,4.00 0 0 1 346.22,418.79H354.17A4.00,4.00 0 0 1 358.17,422.79V452.00Z" class="context"/>
+</g>
+<text x="350.2" y="468.0" class="muted" text-anchor="middle">00</text>
+<text x="350.2" y="481.0" class="ink2" text-anchor="middle">11-05</text>
+<g><title>11-05T01Z · 1,431 calls · spilled 0.13 MB (3.5% of 3.78 MB) · inline 3.65 MB</title>
+<rect x="359.17" y="312.00" width="17.94" height="140.00" fill="none" pointer-events="all"/>
+<path d="M360.17,452.00V417.93H376.11V452.00Z" class="context"/>
+</g>
+<g><title>11-05T02Z · 1,122 calls · spilled 0.16 MB (5.0% of 3.18 MB) · inline 3.02 MB</title>
+<rect x="377.11" y="312.00" width="17.94" height="140.00" fill="none" pointer-events="all"/>
+<path d="M378.11,452.00V423.80H394.06V452.00Z" class="context"/>
+</g>
+<g><title>11-05T03Z · 1,526 calls · spilled 0.10 MB (2.7% of 3.68 MB) · inline 3.58 MB</title>
+<rect x="395.06" y="312.00" width="17.94" height="140.00" fill="none" pointer-events="all"/>
+<path d="M396.06,452.00V422.61A4.00,4.00 0 0 1 400.06,418.61H408.00A4.00,4.00 0 0 1 412.00,422.61V452.00Z" class="context"/>
+</g>
+<g><title>11-05T04Z · 1,606 calls · spilled 0.13 MB (3.5% of 3.71 MB) · inline 3.58 MB</title>
+<rect x="413.00" y="312.00" width="17.94" height="140.00" fill="none" pointer-events="all"/>
+<path d="M414.00,452.00V418.56H429.94V452.00Z" class="context"/>
+</g>
+<g><title>11-05T05Z · 1,623 calls · spilled 0.32 MB (8.1% of 3.91 MB) · inline 3.59 MB</title>
+<rect x="430.94" y="312.00" width="17.94" height="140.00" fill="none" pointer-events="all"/>
+<path d="M431.94,452.00V418.45H447.89V452.00Z" class="context"/>
+</g>
+<g><title>11-05T06Z · 1,464 calls · spilled 0.36 MB (9.8% of 3.62 MB) · inline 3.27 MB</title>
+<rect x="448.89" y="312.00" width="17.94" height="140.00" fill="none" pointer-events="all"/>
+<path d="M449.89,452.00V421.49H465.83V452.00Z" class="context"/>
+<path d="M449.89,419.49V419.49A1.32,1.32 0 0 1 451.21,418.17H464.51A1.32,1.32 0 0 1 465.83,419.49V419.49Z" class="accent"/>
+</g>
+<text x="457.9" y="468.0" class="muted" text-anchor="middle">06</text>
+<g><title>11-05T07Z · 1,824 calls · spilled 0.07 MB (1.7% of 4.34 MB) · inline 4.26 MB</title>
+<rect x="466.83" y="312.00" width="17.94" height="140.00" fill="none" pointer-events="all"/>
+<path d="M467.83,452.00V416.21A4.00,4.00 0 0 1 471.83,412.21H479.78A4.00,4.00 0 0 1 483.78,416.21V452.00Z" class="context"/>
+</g>
+<g><title>11-05T08Z · 1,704 calls · spilled 0.48 MB (10.7% of 4.44 MB) · inline 3.96 MB</title>
+<rect x="484.78" y="312.00" width="17.94" height="140.00" fill="none" pointer-events="all"/>
+<path d="M485.78,452.00V415.04H501.72V452.00Z" class="context"/>
+<path d="M485.78,413.04V413.04A2.45,2.45 0 0 1 488.23,410.59H499.27A2.45,2.45 0 0 1 501.72,413.04V413.04Z" class="accent"/>
+</g>
+<g><title>11-05T09Z · 453 calls · spilled 0.26 MB (16.6% of 1.54 MB) · inline 1.28 MB</title>
+<rect x="502.72" y="312.00" width="17.94" height="140.00" fill="none" pointer-events="all"/>
+<path d="M503.72,452.00V440.02H519.67V452.00Z" class="context"/>
+</g>
+<g><title>11-05T10Z · 131 calls · spilled 0.30 MB (39.7% of 0.75 MB) · inline 0.45 MB</title>
+<rect x="520.67" y="312.00" width="17.94" height="140.00" fill="none" pointer-events="all"/>
+<path d="M521.67,452.00V447.77H537.61V452.00Z" class="context"/>
+</g>
+<g><title>11-05T11Z · 414 calls · spilled 0.18 MB (12.2% of 1.45 MB) · inline 1.27 MB</title>
+<rect x="538.61" y="312.00" width="17.94" height="140.00" fill="none" pointer-events="all"/>
+<path d="M539.61,452.00V440.13H555.56V452.00Z" class="context"/>
+</g>
+<g><title>11-05T12Z · 274 calls · spilled 0.03 MB (3.9% of 0.85 MB) · inline 0.82 MB</title>
+<rect x="556.56" y="312.00" width="17.94" height="140.00" fill="none" pointer-events="all"/>
+<path d="M557.56,452.00V448.34A4.00,4.00 0 0 1 561.56,444.34H569.50A4.00,4.00 0 0 1 573.50,448.34V452.00Z" class="context"/>
+</g>
+<text x="565.5" y="468.0" class="muted" text-anchor="middle">12</text>
+<g><title>11-05T13Z · 263 calls · spilled 0.04 MB (3.7% of 0.97 MB) · inline 0.94 MB</title>
+<rect x="574.50" y="312.00" width="17.94" height="140.00" fill="none" pointer-events="all"/>
+<path d="M575.50,452.00V447.24A4.00,4.00 0 0 1 579.50,443.24H587.44A4.00,4.00 0 0 1 591.44,447.24V452.00Z" class="context"/>
+</g>
+<g><title>11-05T14Z · 423 calls · spilled 0.00 MB (0.1% of 1.26 MB) · inline 1.26 MB</title>
+<rect x="592.44" y="312.00" width="17.94" height="140.00" fill="none" pointer-events="all"/>
+<path d="M593.44,452.00V444.26A4.00,4.00 0 0 1 597.44,440.26H605.39A4.00,4.00 0 0 1 609.39,444.26V452.00Z" class="context"/>
+</g>
+<g><title>11-05T15Z · 623 calls · spilled 0.00 MB (0.0% of 1.25 MB) · inline 1.25 MB</title>
+<rect x="610.39" y="312.00" width="17.94" height="140.00" fill="none" pointer-events="all"/>
+<path d="M611.39,452.00V444.29A4.00,4.00 0 0 1 615.39,440.29H623.33A4.00,4.00 0 0 1 627.33,444.29V452.00Z" class="context"/>
+</g>
+<g><title>11-05T16Z · 1,128 calls · spilled 0.03 MB (1.7% of 2.03 MB) · inline 2.00 MB</title>
+<rect x="628.33" y="312.00" width="17.94" height="140.00" fill="none" pointer-events="all"/>
+<path d="M629.33,452.00V437.37A4.00,4.00 0 0 1 633.33,433.37H641.28A4.00,4.00 0 0 1 645.28,437.37V452.00Z" class="context"/>
+</g>
+<g><title>11-05T17Z · 1,299 calls · spilled 0.00 MB (0.0% of 1.13 MB) · inline 1.13 MB</title>
+<rect x="646.28" y="312.00" width="17.94" height="140.00" fill="none" pointer-events="all"/>
+<path d="M647.28,452.00V445.49A4.00,4.00 0 0 1 651.28,441.49H659.22A4.00,4.00 0 0 1 663.22,445.49V452.00Z" class="context"/>
+</g>
+<g><title>11-05T18Z · 268 calls · spilled 0.00 MB (0.0% of 0.26 MB) · inline 0.26 MB</title>
+<rect x="664.22" y="312.00" width="17.94" height="140.00" fill="none" pointer-events="all"/>
+<path d="M665.22,452.00V452.00A2.41,2.41 0 0 1 667.64,449.59H678.75A2.41,2.41 0 0 1 681.17,452.00V452.00Z" class="context"/>
+</g>
+<text x="673.2" y="468.0" class="muted" text-anchor="middle">18</text>
+<g><title>11-05T19Z · 92 calls · spilled 0.00 MB (0.0% of 0.29 MB) · inline 0.29 MB</title>
+<rect x="682.17" y="312.00" width="17.94" height="140.00" fill="none" pointer-events="all"/>
+<path d="M683.17,452.00V452.00A2.68,2.68 0 0 1 685.84,449.32H696.43A2.68,2.68 0 0 1 699.11,452.00V452.00Z" class="context"/>
+</g>
+<g><title>11-05T20Z · 447 calls · spilled 0.00 MB (0.0% of 0.73 MB) · inline 0.73 MB</title>
+<rect x="700.11" y="312.00" width="17.94" height="140.00" fill="none" pointer-events="all"/>
+<path d="M701.11,452.00V449.18A4.00,4.00 0 0 1 705.11,445.18H713.06A4.00,4.00 0 0 1 717.06,449.18V452.00Z" class="context"/>
+</g>
+<g><title>11-05T21Z · 238 calls · spilled 0.00 MB (0.0% of 0.38 MB) · inline 0.38 MB</title>
+<rect x="718.06" y="312.00" width="17.94" height="140.00" fill="none" pointer-events="all"/>
+<path d="M719.06,452.00V452.00A3.55,3.55 0 0 1 722.61,448.45H731.45A3.55,3.55 0 0 1 735.00,452.00V452.00Z" class="context"/>
+</g>
+<line x1="353.6" y1="274.0" x2="353.6" y2="452.0" class="mark"/>
+<text x="357.6" y="282.0" class="ink2" text-anchor="start">00:41 boot</text>
+<line x1="382.8" y1="285.0" x2="382.8" y2="452.0" class="mark"/>
+<text x="386.8" y="293.0" class="ink2" text-anchor="start">02:19 keeper_artifact_read contains</text>
+<line x1="494.2" y1="296.0" x2="494.2" y2="452.0" class="mark"/>
+<text x="498.2" y="304.0" class="ink2" text-anchor="start">08:31 notes_list contains</text>
+<text x="56.0" y="516.0" class="muted" text-anchor="start">Source: scripts/measure-tool-efficiency.py. Identical re-read: same Keeper, tool, input and result bytes within one hour.</text>
+<text x="56.0" y="530.0" class="muted" text-anchor="start">Blocked: Execute calls whose command sleeps, polls or watches (a reporting heuristic).</text>
+<text x="56.0" y="544.0" class="muted" text-anchor="start">* 11-05 is still being written: the last hour read starts at 21:00Z.</text>
+</svg>

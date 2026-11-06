@@ -208,7 +208,7 @@ L1 과 L1b 가 들어가기 전에는 어떤 2초 분기도 지우지 않는다.
 | harness | 판정·라벨 기록 뒤, 서버가 캐시를 먼저 지움. stale 시각은 응답이 알려 준 시각에 한 번 | 읽기 빚 | #48008 |
 | planning, Goal 트리 | `Goal_store.notify_projection_change`, task 쓰기 전에 planning 캐시 지움 | 묶음 출처 빚 | #48011 |
 | runtime.toml | 서버의 commit 시도마다, 계정 로그인 끝 | Config 화면 빚 | #48017 |
-| connectors | 상태 기록 함수가 값이 바뀔 때만(`Channel_gate_change.store`), 이름 배치당 한 번 | 읽기 빚 | #48032 |
+| connectors | 상태 기록 함수가 값이 바뀔 때만 `Gate_connector_announce.changed`, 이름 배치당 한 번 | 읽기 빚 | #48032 |
 | OAuth 로그인 시도 | `Keeper_oauth_pending` 다섯 곳, Keeper 이름만 | 기다리는 Keeper 별 빚 + 동의 마감 한 번 | #48055 |
 | Skill 기록·카탈로그 | 원장 커밋마다 `skill_activations {keeper}`, snapshot 게시 때 `skill_catalog` | 선택 Keeper 범위와 카탈로그를 따로 | #48062 |
 | async 요청 상세 | 실행 저널 쓰기 시도마다 기존 `keeper_async_requests_changed` | 열린 상세만 | #48065 |

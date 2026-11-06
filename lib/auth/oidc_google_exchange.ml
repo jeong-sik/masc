@@ -197,7 +197,11 @@ let encode text =
 
 let form pairs = String.concat "&" (List.map (fun (key, value) -> encode key ^ "=" ^ encode value) pairs)
 
-let authorization_url endpoints (client : Client.t) (started : Oidc_login_transaction.started) =
+let authorization_url
+  endpoints
+  (client : Client.t)
+  (started : Oidc_login_transaction.google Oidc_login_transaction.started)
+  =
   endpoints.authorization_endpoint
   ^ "?"
   ^ form
@@ -206,7 +210,7 @@ let authorization_url endpoints (client : Client.t) (started : Oidc_login_transa
       ; "redirect_uri", client.redirect_uri
       ; "scope", "openid"
       ; "state", started.state
-      ; "nonce", started.nonce
+      ; "nonce", started.held.nonce
       ; "code_challenge", started.code_challenge
       ; "code_challenge_method", "S256"
       ]
@@ -286,11 +290,20 @@ let verified ~get cache ~now ~now_ms endpoints token =
      | Error error -> Error (Signature_refused error))
 ;;
 
-let identity ~get ~post cache ~now ~now_ms (client : Client.t) ~code (taken : Oidc_login_transaction.taken) =
+let identity
+  ~get
+  ~post
+  cache
+  ~now
+  ~now_ms
+  (client : Client.t)
+  ~code
+  (taken : Oidc_login_transaction.google Oidc_login_transaction.taken)
+  =
   let* endpoints = endpoints ~get cache ~now_ms in
   let* token = id_token_of_code ~post endpoints client ~code ~code_verifier:taken.code_verifier in
   let* payload = verified ~get cache ~now ~now_ms endpoints token in
   Result.map_error
     (fun error -> Claims_refused error)
-    (Oidc_google.identity ~client_id:client.client_id ~nonce:taken.nonce payload)
+    (Oidc_google.identity ~client_id:client.client_id ~nonce:taken.held.nonce payload)
 ;;

@@ -48,7 +48,7 @@ let start ~get cache transactions client ~now ~invite ~return_to =
     Exchange.endpoints ~get cache ~now_ms:(ms_of (now ()))
     |> Result.map_error (fun error -> Google_unavailable error)
   in
-  match Transaction.start transactions ~now_ms:(ms_of (now ())) ~invite ~return_to with
+  match Transaction.start transactions ~now_ms:(ms_of (now ())) Transaction.Google ~invite ~return_to with
   | Error Transaction.Full -> Error Transactions_full
   | Ok started ->
     Ok { id = started.id; authorization_url = Exchange.authorization_url endpoints client started }
@@ -79,7 +79,7 @@ let callback_error_to_string = function
 let callback ~get ~post cache transactions zone client ~now ~draw id ~state answer =
   let instant = now () in
   let* taken =
-    Transaction.take transactions ~now_ms:(ms_of instant) id ~state
+    Transaction.take transactions ~now_ms:(ms_of instant) Transaction.Google id ~state
     |> Result.map_error (fun error -> Transaction_refused error)
   in
   let* code =

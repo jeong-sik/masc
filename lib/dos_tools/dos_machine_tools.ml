@@ -776,36 +776,23 @@ let resolve_program ?boot ~base_path name =
    call returns. One Eio mutex lets one fiber drain at a time, so the queue's
    order is the board's order. A line left behind by a failed drain goes out
    with the next one. *)
-type announcement = { author : string; content : string; ready : bool Atomic.t }
+type announcement = { author : string; content : string }
 let announcements : announcement Queue.t = Queue.create ()
 let announcements_lock = Mutex.create ()
 let posting = Eio.Mutex.create ()
 
-let enqueue ~ready ~author content () =
-  Mutex.protect announcements_lock (fun () -> Queue.push {author;content;ready} announcements)
-;;
-let announce ~author content () = enqueue ~ready:(Atomic.make true) ~author content ()
-;;
-
-(* Queue in machine order, but keep this transaction's notices invisible to
-   every flusher until its Auth admission has exited, including on exception. *)
-let with_deferred_announcements f =
-  let ready = Atomic.make false in
-  Fun.protect ~finally:(fun () -> Atomic.set ready true)
-    (fun () -> f (enqueue ~ready))
+let announce ~author content () =
+  Mutex.protect announcements_lock (fun () -> Queue.push {author;content} announcements)
 ;;
 
 let flush_announcements () =
-  let next () = Mutex.protect announcements_lock (fun () ->
-    match Queue.peek_opt announcements with
-    | Some notice when Atomic.get notice.ready -> Queue.take_opt announcements
-    | Some _ | None -> None) in
+  let next () = Mutex.protect announcements_lock (fun () -> Queue.take_opt announcements) in
   try
     Eio.Mutex.use_rw ~protect:false posting (fun () ->
       let rec drain () =
         match next () with
         | None -> ()
-        | Some {author;content;ready=_} ->
+        | Some {author;content} ->
           Host.relay ~author content;
           drain ()
       in
@@ -820,36 +807,6 @@ let flush_announcements () =
 let after_announcing result =
   flush_announcements ();
   result
-;;
-
-(* A game can run for hours, and the Keeper holding the controller can stop
-   in that time, or an invite holding it can run out or be revoked. Such a
-   holder will never pass, and every other caller would be refused until a
-   restart. [holder_left] says whether and why a holder can no longer act;
-   the Keeper boundary supplies it from Keeper and credential state, which this
-   tool surface does not read (RFC-0194). Called before a call that needs the
-   controller, it frees a departed holder's controller and tells the board.
-
-   The caller holds the credential transaction through this read and release,
-   and flushes the queued announcement after that transaction. Keeper registry
-   state can still change between the two lane calls: a resumed Keeper must
-   wait for a pass like any other player. The name is
-   the caller's own: an MCP client named like a stopped Keeper is let go as
-   that Keeper would be. *)
-(* A revoked invite can never pass the controller its name holds (RFC
-   play-link-for-the-shared-machine §2.4), so revoking lets it go and tells
-   the board. [by] is the operator who revoked. The credential is deleted
-   first: a request the invitee sent before that and that reaches the lane
-   after this can still take the freed controller. Where every request needs
-   a credential, the next move by anyone else lets it go again
-   ([No_credential]). The caller holds the Auth transaction until this release
-   completes, and flushes the Board announcement after leaving it. *)
-let release_revoked_invite ~holder ~by =
-  off_domain (fun () ->
-    Dos_lane.release_left ~holder
-      ~announce:
-        (announce ~author:by
-           (Printf.sprintf "%s 님의 초대가 회수되어 DOS 조종권이 풀렸어요" holder)))
 ;;
 
 type holder_departure = Machine_controller_contract.holder_departure =
@@ -867,44 +824,6 @@ let departure_notice holder = function
     Printf.sprintf "%s 님은 접속 권한이 없어서 DOS 조종권이 풀렸어요" holder
   | Participant_departed ->
     Printf.sprintf "%s 님이 연결을 끊어서 DOS 조종권이 풀렸어요" holder
-;;
-
-let free_left_controller ?(announce = announce) ~holder_left ~who () =
-  match off_domain Dos_lane.screen with
-  | Ok { Dos_lane.controller = Some holder; _ }
-    when not (String.equal holder who) ->
-    (match holder_left holder with
-     | None -> ()
-     | Some reason ->
-    (match
-       off_domain (fun () ->
-         Dos_lane.release_left ~holder
-           ~announce:
-             (announce ~author:who
-                (departure_notice holder reason)))
-     with
-     (* The caller publishes the queued notice after its transaction, even
-        when the subsequent machine operation is refused. *)
-     | Ok true -> ()
-     (* A hand-off that landed after the read above: that pass stands. *)
-     | Ok false -> ()
-     (* The machine went away; the call that follows reports it. *)
-     | Error _ -> ()))
-  | Ok _ | Error _ -> ()
-;;
-
-(* A Keeper removed for good cannot pass either, but the next move cannot
-   always tell that it left: with its meta gone, its own credential, which
-   has no expiry, reads like an agent that is coming back. The shutdown that
-   removes it lets its controller go here and tells the board, with the notice
-   a stopped Keeper's controller gets. [by] is who asked for the removal. No
-   credential transaction is held here, so the notice is posted before this
-   returns. *)
-let release_retired_keeper ~holder ~by =
-  after_announcing
-    (off_domain (fun () ->
-       Dos_lane.release_left ~holder
-         ~announce:(announce ~author:by (departure_notice holder Keeper_stopped))))
 ;;
 
 (* The wire carries a boolean; the lane takes a variant, so every call site

@@ -505,7 +505,7 @@ scripts/measure-tool-efficiency.py --base-path <base> --from-date <배포 다음
 - 마커는 `[masc:blob sha256=<산출물> bytes=… mime=… answer_sha256=<답의 지문> preview=…]` 모양이에요. 읽을 수 있는 것은 `sha256=` 하나이고, `answer_sha256=` 는 매니페스트 안 답을 정렬한 JSON의 sha256이라 저장된 산출물이 없어요. 지문은 `Keeper_tool_progress_identity` 가 같은 답의 반복 호출을 같은 정체성으로 묶는 데 써요(`lib/tool_blob_store/tool_output.ml` 의 `encode_for_agent_core`, `lib/keeper/keeper_tool_answer.ml` 의 `verified_stored_answer`). 모델이 보는 문자열에 하네스용 값이 같이 실려 있어요.
 - 11-03~06 에는 `keeper_artifact_read` 909건 중 58건(6.4%)이 이 오류예요. 11-06 은 76건 중 5건이에요.
 - 실패한 뒤 같은 Keeper 의 다음 읽기(10분 안)는 다른 해시로 성공이 182건(61%, 중앙값 4.5초 뒤, p90 150.5초), 또 실패가 45건(15%), 읽기 없음이 48건(16%), 같은 해시로 성공이 21건(7%, 모두 11-02 `context-reviewer` 의 일시 실패), 다른 이유의 실패가 3건(1%)이에요. 오류가 낸 비용은 요청 왕복 한 번이고, 31%는 읽으려던 결과를 못 읽고 넘어간 것으로 보여요.
-- 고치는 방법 후보는 셋이에요. 이 PR 은 구현하지 않아요.
+- 고치는 방법 후보는 셋이에요. 이 PR 은 구현하지 않고 이슈 #49396 에 적었어요.
   1. 모델이 보는 마커에서 `answer_sha256=` 를 뺀다. `verified_stored_answer` 가 이미 블롭에서 답의 지문을 다시 계산하니 선언값 없이도 정체성을 만들 수 있어 보여요. 다만 선언값이 하는 일(저장된 매니페스트와 마커가 같은 답인지 확인)을 블롭의 내용 주소가 대신하는지는 확인하지 못했어요. `answer_fingerprint` 를 쓰는 파일이 9개(lib 7, 시험 2)예요.
   2. `keeper_artifact_read` 가 지문을 받으면 매니페스트를 읽어 주는 별칭. 지문에서 매니페스트 해시를 찾는 색인이 없어서 새 저장 상태가 필요해요.
   3. 도구 설명(`config/tools/keeper_artifact_read.toml`)에 문장을 더한다. 모든 Keeper 의 모든 요청에 바이트가 붙어서 고르지 않았어요.

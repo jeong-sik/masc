@@ -1,0 +1,9 @@
+[ego-browser:notice] Ego Lite update is available (current 0.6.2.7). Finish the current browser task, then ask the user before running `ego-browser upgrade`; re-read the ego-browser Skill afterward.
+{"step":"space","at":"2026-11-06T11:21:10.295Z","value":35}
+{"step":"eventsSoFar","at":"2026-11-06T11:21:10.665Z","value":"pointerdown(100,100) touchstart(100,100)"}
+{"step":"tapStart","at":"2026-11-06T11:21:11.264Z","value":{}}
+{"step":"tapEnd","at":"2026-11-06T11:21:13.560Z","value":{}}
+{"step":"eventsTap","at":"2026-11-06T11:21:13.563Z","value":"pointerdown(300,100) touchstart(300,100) pointerup(300,100) touchend(300,100) click(300,100)"}
+{"step":"cancel","at":"2026-11-06T11:21:13.566Z","value":{"error":"Must send a TouchStart first to start a new touch."}}
+{"step":"eventsCancel","at":"2026-11-06T11:21:13.572Z","value":""}
+{"step":"finish","at":"2026-11-06T11:21:13.577Z","value":{"spaceId":35,"closedSpace":true,"keptManagedLabels":[],"closedManagedLabels":["p1"],"preservedUnmanagedCount":0}}

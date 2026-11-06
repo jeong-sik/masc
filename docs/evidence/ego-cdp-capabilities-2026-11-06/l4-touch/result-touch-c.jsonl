@@ -1,0 +1,15 @@
+[ego-browser:notice] Ego Lite update is available (current 0.6.2.7). Finish the current browser task, then ask the user before running `ego-browser upgrade`; re-read the ego-browser Skill afterward.
+{"step":"space","at":"2026-11-06T11:20:33.777Z","value":34}
+{"step":"goto","at":"2026-11-06T11:20:33.905Z","value":{}}
+{"step":"j.touchCancel","at":"2026-11-06T11:20:33.909Z","value":{"error":"Must send a TouchStart first to start a new touch."}}
+{"step":"j.events","at":"2026-11-06T11:20:33.911Z","value":[]}
+{"step":"j.touchCancelAgain","at":"2026-11-06T11:20:33.914Z","value":{"error":"Must send a TouchStart first to start a new touch."}}
+{"step":"j.eventsAgain","at":"2026-11-06T11:20:33.916Z","value":[]}
+{"step":"k.tapStart","at":"2026-11-06T11:20:33.920Z","value":{}}
+{"step":"k.tapEnd","at":"2026-11-06T11:20:34.092Z","value":{}}
+{"step":"k.events","at":"2026-11-06T11:20:34.095Z","value":[{"kind":"pointerdown","pointerType":"touch","trusted":true,"x":100,"y":100,"at":1793964033920},{"kind":"touchstart","pointerType":null,"trusted":true,"x":100,"y":100,"at":1793964033920},{"kind":"pointerup","pointerType":"touch","trusted":true,"x":100,"y":100,"at":1793964034087},{"kind":"touchend","pointerType":null,"trusted":true,"x":100,"y":100,"at":1793964034087},{"kind":"click","pointerType":"touch","trusted":true,"x":100,"y":100,"at":1793964034091}]}
+{"step":"l.cancel","at":"2026-11-06T11:20:34.099Z","value":{"error":"Must send a TouchStart first to start a new touch."}}
+{"step":"l.tapStart","at":"2026-11-06T11:20:34.106Z","value":{}}
+{"step":"l.tapEnd","at":"2026-11-06T11:20:34.115Z","value":{}}
+{"step":"l.events","at":"2026-11-06T11:20:34.116Z","value":[{"kind":"pointerdown","pointerType":"touch","trusted":true,"x":120,"y":100,"at":1793964034105},{"kind":"touchstart","pointerType":null,"trusted":true,"x":120,"y":100,"at":1793964034105},{"kind":"pointerup","pointerType":"touch","trusted":true,"x":120,"y":100,"at":1793964034113},{"kind":"touchend","pointerType":null,"trusted":true,"x":120,"y":100,"at":1793964034113},{"kind":"click","pointerType":"touch","trusted":true,"x":120,"y":100,"at":1793964034113}]}
+{"step":"finish","at":"2026-11-06T11:20:34.123Z","value":{"spaceId":34,"closedSpace":true,"keptManagedLabels":[],"closedManagedLabels":["p1"],"preservedUnmanagedCount":0}}

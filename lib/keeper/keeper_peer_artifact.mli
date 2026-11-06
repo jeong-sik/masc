@@ -4,13 +4,27 @@ type fetched = private { blob : Tool_output.artifact_ref; content : string }
 (** The exported bytes and the blob reference built from them. Only {!fetch}
     builds one, so [blob] always describes [content]. *)
 
-val fetch : config:Workspace.config -> Keeper_peer_artifact_ref.t -> (fetched, string) result
+type fetch_error =
+  | Absent of Keeper_peer_artifact_ref.t
+      (** The store holds no blob with this sha256: nobody exported it, or the
+          blob GC removed it after every ledger row naming it expired. *)
+  | Unreadable of string
+      (** The store could not return bytes that match the sha256. *)
+
+val fetch_error_to_string : fetch_error -> string
+
+val fetch_error_class : fetch_error -> Tool_result.tool_failure_class
+(** An absent blob is a [Workflow_rejection]: the call names bytes the store
+    does not hold, and the same call fails until that file is exported again.
+    An unreadable blob is a [Runtime_failure]. *)
+
+val fetch : config:Workspace.config -> Keeper_peer_artifact_ref.t -> (fetched, fetch_error) result
 (** Read an exported artifact from the workspace blob store. The store checks
     the bytes against the sha256; the reference carries nothing else. *)
 
 val materialize :
   base_path:string -> artifact:Keeper_peer_artifact_ref.t -> path:string ->
-  fetch:(unit -> (fetched, string) result) ->
+  fetch:(unit -> (fetched, fetch_error) result) ->
   read:(max_bytes:int -> (string, Keeper_sandbox_read_backend.read_error) result) ->
   write:(Tool_output.artifact_ref -> Keeper_tool_execution.t) -> Keeper_tool_execution.t
 (** Reconcile the requested recipient path through its contained read/write

@@ -253,7 +253,10 @@ let test_size_limit () = with_fixture @@ fun artifact call ->
    is not an address. *)
 let test_reference_integrity () = with_fixture @@ fun artifact call ->
   let exported = artifact (instruction "proposed") in
-  call (args (`String (String.make 64 '0'))) |> failed "artifact_read_failed";
+  let absent = call (args (`String (String.make 64 '0'))) in
+  failed "artifact_read_failed" absent;
+  check bool "an absent artifact is a workflow rejection" true
+    ((fst absent).Keeper_tool_execution.disposition = Tool_result.Failed Tool_result.Workflow_rejection);
   call (args (`String (String.uppercase_ascii (Yojson.Safe.Util.to_string exported))))
   |> failed "invalid_skill_validation_request"
 ;;

@@ -9,16 +9,26 @@ let mime = "application/octet-stream"
 
 type fetched = { blob : Tool_output.artifact_ref; content : string }
 
+type fetch_error = Absent of Keeper_peer_artifact_ref.t | Unreadable of string
+
+let fetch_error_to_string = function
+  | Absent artifact -> Printf.sprintf "Exported artifact %s is absent" (artifact :> string)
+  | Unreadable detail -> detail
+
+let fetch_error_class = function
+  | Absent _ -> Tool_result.Workflow_rejection
+  | Unreadable _ -> Tool_result.Runtime_failure
+
 let fetch ~config (artifact : Keeper_peer_artifact_ref.t) =
   let sha256 = (artifact :> string) in
   let* content = Tool_blob_store.fetch (Tool_blob_store.create ~base_path:config.Workspace.base_path)
-      ~sha256 |> Result.map_error Tool_blob_store.fetch_error_to_string in
+      ~sha256 |> Result.map_error (fun error -> Unreadable (Tool_blob_store.fetch_error_to_string error)) in
   match content with
-  | None -> Error "Exported artifact is absent"
+  | None -> Error (Absent artifact)
   | Some content ->
     Tool_output.make_artifact_ref ~sha256 ~bytes:(String.length content) ~preview:"" ~mime
     |> Result.map (fun blob -> { blob; content })
-    |> Result.map_error Tool_output.make_error_to_string
+    |> Result.map_error (fun error -> Unreadable (Tool_output.make_error_to_string error))
 
 let materialize ~base_path ~(artifact : Keeper_peer_artifact_ref.t) ~path ~fetch ~read ~write =
   let carried_data = function None -> [] | Some data -> ["write_result", data] in
@@ -44,9 +54,9 @@ let materialize ~base_path ~(artifact : Keeper_peer_artifact_ref.t) ~path ~fetch
     in
     Keeper_tool_execution.with_retained_artifacts roots execution
   in
-  let failure ~blobs ?metadata ?write_result ?file_change_evidence ?(retained_artifacts = []) ~effect_disposition detail =
+  let failure ~class_ ~blobs ?metadata ?write_result ?file_change_evidence ?(retained_artifacts = []) ~effect_disposition detail =
     Tool_result.make_err ~tool_name:"keeper_artifact_transfer" ~start_time:(Tool_timing.start ())
-      ~class_:Tool_result.Runtime_failure ~effect_disposition ?metadata
+      ~class_ ~effect_disposition ?metadata
       ~data:(`Assoc (["path", `String path;
                 "artifact", Keeper_peer_artifact_ref.to_json artifact] @ carried_data write_result
         @ (match file_change_evidence with
@@ -56,7 +66,9 @@ let materialize ~base_path ~(artifact : Keeper_peer_artifact_ref.t) ~path ~fetch
     |> persist_result ~blobs ~effect_disposition ~retained_artifacts
   in
   match fetch () with
-  | Error detail -> failure ~blobs:[] ~effect_disposition:Tool_result.Proven_pre_effect detail
+  | Error error ->
+    failure ~class_:(fetch_error_class error) ~blobs:[] ~effect_disposition:Tool_result.Proven_pre_effect
+      (fetch_error_to_string error)
   | Ok { blob; content = expected } ->
     (* From here on every result this call builds, and a verified writer
        success, keeps the fetched blob in this call's ledger row: the call
@@ -95,12 +107,12 @@ let materialize ~base_path ~(artifact : Keeper_peer_artifact_ref.t) ~path ~fetch
          | Ok actual when String.equal actual expected ->
            Keeper_tool_execution.with_retained_artifacts (blobs @ result.retained_artifacts) result
          | Ok _ ->
-           failure ~blobs ?metadata:result.metadata ?write_result:result.data ~retained_artifacts:result.retained_artifacts
+           failure ~class_:Tool_result.Runtime_failure ~blobs ?metadata:result.metadata ?write_result:result.data ~retained_artifacts:result.retained_artifacts
              ?file_change_evidence:result.file_change_evidence
              ~effect_disposition:Tool_result.Proven_post_effect
              "Artifact write completed, but recipient bytes differ. Inspect the recipient; do not blindly repeat the write."
          | Error error ->
-           failure ~blobs ?metadata:result.metadata ?write_result:result.data ~retained_artifacts:result.retained_artifacts
+           failure ~class_:Tool_result.Runtime_failure ~blobs ?metadata:result.metadata ?write_result:result.data ~retained_artifacts:result.retained_artifacts
              ?file_change_evidence:result.file_change_evidence
              ~effect_disposition:Tool_result.Proven_post_effect
              ("Artifact write completed, but recipient verification failed: "
@@ -115,7 +127,7 @@ let materialize ~base_path ~(artifact : Keeper_peer_artifact_ref.t) ~path ~fetch
         ~effect_disposition:Tool_result.Proven_pre_effect detail
       |> Keeper_tool_execution.with_retained_artifacts blobs
     | Error (Keeper_sandbox_read_backend.Read_failed detail) ->
-      failure ~blobs ~effect_disposition:Tool_result.Proven_pre_effect detail
+      failure ~class_:Tool_result.Runtime_failure ~blobs ~effect_disposition:Tool_result.Proven_pre_effect detail
 
 let handle ~config ~meta ~turn_sandbox_factory ~write ~args =
   let fail class_ detail = Keeper_tool_execution.failure ~class_ detail in

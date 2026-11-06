@@ -836,14 +836,14 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
   (* RFC-0498 layer one: what the settled-archive pass would delete, counted
      under the same lease before any settle can run. *)
   let census_started = Unix.gettimeofday () in
-  (match Masc.Server_settled_original_census.run_at_startup ~base_path:canonical_base_path with
+  (match Server_settled_original_census.run_at_startup ~base_path:canonical_base_path with
    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
    | exception _ ->
      Log.Server.warn "[Startup] settled original census unavailable elapsed_s=%.3f"
        (Unix.gettimeofday () -. census_started)
    | Error error ->
      Log.Server.warn "[Startup] settled original census elapsed_s=%.3f: %s"
-       (Unix.gettimeofday () -. census_started) (Masc.Server_settled_original_census.error_to_string error)
+       (Unix.gettimeofday () -. census_started) (Server_settled_original_census.error_to_string error)
    | Ok report ->
      Log.Server.info
        "[Startup] settled original census: live_records=%d named_ids=%d archived_records=%d archived_record_bytes=%Ld unnamed_records=%d unnamed_record_bytes=%Ld archived_bodies=%d archived_body_bytes=%Ld elapsed_s=%.3f"

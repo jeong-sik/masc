@@ -43,7 +43,7 @@ main 증명 빌드(`6ad837c7cac`, run 42154515127)를 시험용 서버에 붙여
 | Task 검토 상세, 다섯 크기 모두 | `MASC 작업  목표  ▸작업 검토·1  작업 판정 ▸ details  task-002` | 없음 |
 | Keeper 상세, 다섯 크기 모두 | `Keepers ▸ imp  ▸Info  Items  Sandbox  Settings  7›` (56열) | 없음 |
 
-읽은 136줄(56 + 80) 중 배지가 온전한 곳은 116줄이다. 잘린 곳은 5줄(화면 4개)이고 모두 56열이나 64열이다. 80x24 와 100x30 에서는 잘린 줄이 없다. 배지가 없는 곳은 15줄(화면 3개)이고 다섯 크기 모두에서 같다. 배지가 없는 세 화면은 다섯 크기 모두에서 화면 어디에도 `HTTP [` 가 없다.
+읽은 136줄(56 + 80) 중 배지가 온전한 곳은 116줄이다. 잘린 곳은 5줄(화면 4개)이고 모두 56열이나 64열이다. 80x24 와 100x30 에서는 잘린 줄이 없다. 배지가 없는 곳은 15줄(화면 3개)이고 다섯 크기 모두에서 같다. 배지가 없는 세 화면은 다섯 크기 모두에서 화면 어디에도 `HTTP [` 가 없다. Keeper 상세는 길이 둘이다. 키퍼를 고른 길(`keeper_detail_pane`)은 탭 줄만 그리고 배지가 없다. 고른 키퍼가 없는 길(`render_keeper_detail`)은 `surface_chrome ~title` 로 배지를 붙인다. 읽은 것은 앞의 길이다.
 
 이 빌드 뒤 main(`059ffb7d3e7`)까지 `bin/` 파일 13개가 바뀌었지만 `connection_badge`, `screen_title`, `detail_heading`, `surface_chrome`, `runtime_substrate_heading`, `pane_surface_title` 를 건드린 줄은 0줄이다(`git diff` 로 센 값). 이 RFC 의 줄 수와 함수 이름은 `059ffb7d3e7` 기준이다.
 
@@ -194,7 +194,7 @@ val screen_chrome :
 6. Runtime(2곳).
 7. Verification(6곳).
 8. Work(3곳), Board(2곳), Connectors(2곳), Approvals(1곳), Chat(1곳), Activity(2곳), Repositories 목록(Workspace 화면, 2곳).
-9. 배지가 없는 Board 글 상세(`board_read_title`), Task 검토 상세(`verification_detail_pane`), Keeper 상세(`render_keeper_detail` 의 탭 줄). 이 층 전에 세 화면을 만든 쪽에 배지를 뺀 뜻이 있었는지 묻는다.
+9. 배지가 없는 Board 글 상세(`board_read_title`), Task 검토 상세(`verification_detail_pane`), Keeper 상세(`keeper_detail_pane` 의 탭 줄). 이 층 전에 세 화면을 만든 쪽에 배지를 뺀 뜻이 있었는지 묻는다.
 10. 마지막: `connection_badge`·`usage_connection_badge` 를 `.mli` 에서 빼고 `Chrome_screen` 갈래를 지운다.
 
 층 수와 묶음은 파일 단위 추정이다. 층 1 을 만들 때 32곳의 `lead`·`id`·`after` 나눔을 표로 먼저 낸다.

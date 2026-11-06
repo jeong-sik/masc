@@ -172,7 +172,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 - B3c가 권한 축소 사건(Admin 회수, principal 비활성·삭제, 초대 취소)을 더했다. 구역은 들어올 때 포기한 축소 intent의 subject를 이미 막는다(`Authz_zone.Replay`, `Authz_state.hold_revocations`). 남은 것은 셋이다. 막힘을 푸는 출구가 없다. 쓰기가 실패한 직후에는 막지 않는다. 막힘을 묻는 공개 함수가 없다.
 - 실행 경로는 D2 전에 이 값을 읽지 않는다. lib과 bin에서 `Authz_decision`을 부르는 곳은 없다. 그래서 이 층에서 보이는 것은 구역의 거절, 게이트 값, `Authz_decision.allowed`의 `Revocation_pending` 거부까지다. `Single_user`는 구역을 열지 않으므로 동작이 같다.
 - 두 층으로 낸다.
-  - B2e-1: 게이트 값, 즉시 차단, 재시도 출구.
+  - B2e-1: 게이트 값, 즉시 차단, 재시도 출구. 1a(digest로 든 막힘, 게이트 값, 즉시 차단)와 1b(`closes` 출구)로 나눠 낸다. 1b는 축소 사건 본문 셋(초대 취소, Admin 회수, principal 비활성·삭제)의 코덱을 바꾼다.
     - 막힘은 subject 목록이 아니라 포기한 intent마다 한 항목(`intended_next_record_digest`와 change)이다. 어느 intent가 닫혔는지 가려야 해서다.
     - 게이트 값은 구역의 함수로 묻는다. 그 subject의 항목이 남아 있으면 `Pending`이다. 로그나 외부 저장소가 멈춘 구역(`Log_stopped`, `Store_stopped`)은 모든 subject에 `Uncertain`으로 답한다(B2 범위의 "`Authz_log`가 멈추면 `AuthorizationUncertain`"). snapshot은 파일이 멈춘 것을 담지 않아서(B3b), 값을 snapshot에서 바로 읽지 않는다. D2가 이 값을 `facts.revocation`에 넣는다.
     - 재시도 출구(설계 §8.3): 축소 사건 본문에 닫는 digest 목록 `closes`를 더한다. 구역은 축소 change를 commit할 때 같은 change(사건과 subject)의 남은 항목 digest를 `closes`에 채운다. 부른 쪽은 채우지 않는다. `apply`는 `closes`가 가리키는 항목만 지우고, 남은 항목이 아닌 digest는 거절한다. replay도 같은 `step`을 쓰므로 재기동한 결과가 같다. 로그를 되감으면 닫는 레코드도 사라져 막힘이 돌아온다. 2026-11-06에 라이브 `authz.jsonl`과 설치 기록이 없음을 확인했다. 축소 사건 본문만 바꾸는 hard cut이고 읽기 호환 코드는 두지 않는다.
@@ -183,7 +183,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
     - 적격 Admin이 없으면 막힌 채 둔다. Local_operator가 쓰는 `Quarantined(No_eligible_admin)`는 2단계 F2다.
     - 취소는 intent를 쓰지 않는다. 되감기면 막힘이 돌아오는 쪽이라서다.
 - 막힌 subject가 author인 레코드는 모두 거절한다(B3c, `Authz_state`). 설계 §8.3은 실행만 말한다. 막힌 Admin이 다른 사람의 권한을 바꾸는 것도 같은 회수를 무르는 일이라 같이 막는다. 이 결정을 여기 적는다.
-- 시험은 구역 표면(`commit`, `snapshot`, `open_at_start`)에서 한다. append가 실패한 직후의 막힘, 로그가 멈춘 뒤의 `Uncertain`, 재시도가 성공한 뒤의 풀림과 재기동 결과의 일치, 다른 change로는 풀리지 않음, 부적격 취소의 거절을 본다. `Authz_state`의 갈래는 단위 시험으로 본다. 실제 구역의 게이트 값을 `Authz_decision.allowed`에 넣어 `Revocation_pending` 거부가 나오는 것을 한 건 본다.
+- 시험은 구역 표면(`commit`, `snapshot`, `open_at_start`)에서 한다. append가 실패한 직후의 막힘, 로그가 멈춘 뒤의 `Uncertain`, 재시도가 성공한 뒤의 풀림과 재기동 결과의 일치, 다른 change로는 풀리지 않음, 부적격 취소의 거절을 본다. `Authz_state`의 갈래는 단위 시험으로 본다. 게이트 값을 `Authz_decision.allowed`의 `facts.revocation`으로 옮기는 adapter는 D2가 만들므로, 그 둘을 잇는 시험도 D2가 한다. 판정식의 `Revocation_pending` 거부는 `test_authz_decision`이 이미 subject마다 본다.
 - 남은 질문: 1단계 근거로 든 Admin의 사용자 `Disable`을 서버에서 쓰는 층이 표에 없다. C6 ③은 초대 발급·취소와 allowlist뿐이다. 그 길을 C6에 더할지는 C6을 시작할 때 정한다.
 
 **B3 범위**

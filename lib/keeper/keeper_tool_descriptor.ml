@@ -150,7 +150,6 @@ type runtime_handler =
   | Tool_keeper_job_dispatch
   | Tool_keeper_composition_result_dispatch
   | Tool_keeper_code_query_dispatch
-  | Tool_keeper_webmcp_dispatch
   | Tool_masc_keeper_dispatch
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
@@ -286,7 +285,6 @@ let runtime_handler_to_string = function
   | Tool_keeper_job_dispatch -> "tool_keeper_job_dispatch"
   | Tool_keeper_composition_result_dispatch -> "tool_keeper_composition_result_dispatch"
   | Tool_keeper_code_query_dispatch -> "tool_keeper_code_query_dispatch"
-  | Tool_keeper_webmcp_dispatch -> "tool_keeper_webmcp_dispatch"
   | Tool_masc_keeper_dispatch -> "tool_masc_keeper_dispatch"
   | Tool_masc_fusion_dispatch -> "tool_masc_fusion_dispatch"
   | Tool_masc_fusion_status -> "tool_masc_fusion_status"
@@ -499,7 +497,6 @@ let descriptor
       | Tool_constitution_remove
       | Tool_keeper_composition_result_dispatch
       | Tool_keeper_code_query_dispatch
-      | Tool_keeper_webmcp_dispatch
       | Tool_search_files
       | Tool_read_file
       | Tool_edit_file
@@ -2324,44 +2321,6 @@ let keeper_code_query_descriptor () =
     ()
 ;;
 
-(* RFC-webmcp-keeper-consumption Lane B: relay to WebMCP tools a browser page
-   registered, through the embedded node bridge and an operator-run Chrome. *)
-let keeper_webmcp_list_descriptor () =
-  let schema : Masc_domain.tool_schema = Tool_schemas_webmcp.list_schema in
-  cluster_descriptor_with_schema_source
-    ~capability_identity:Internal_name_identity
-    ~keeper_model_projection:Internal_name
-    ~input_schema_source:Canonical_registry
-    ~input_schema:schema.input_schema
-    ~id:"masc.webmcp_list"
-    ~name:schema.name
-    ~description:schema.description
-    ~handler:Tool_keeper_webmcp_dispatch
-    (* Discovery only: reads the page's registered tool catalog. *)
-    (* Concurrent: one bridge subprocess per call; the only shared state is
-       the mutex-guarded script-path cache. *)
-    ~ordinary_execution_mode:Concurrent
-    ~readonly:true
-    ()
-;;
-
-let keeper_webmcp_call_descriptor () =
-  let schema : Masc_domain.tool_schema = Tool_schemas_webmcp.call_schema in
-  cluster_descriptor_with_schema_source
-    ~capability_identity:Internal_name_identity
-    ~keeper_model_projection:Internal_name
-    ~input_schema_source:Canonical_registry
-    ~input_schema:schema.input_schema
-    ~id:"masc.webmcp_call"
-    ~name:schema.name
-    ~description:schema.description
-    ~handler:Tool_keeper_webmcp_dispatch
-    (* Executes whatever the page tool does — a page may register mutating
-       tools, and the bridge cannot know which kind it called. *)
-    ~readonly:false
-    ()
-;;
-
 let masc_keeper_descriptor
     ?(polling_read = false)
     ?ordinary_execution_mode
@@ -3179,8 +3138,6 @@ let internal_descriptors : t list =
   @ [ keeper_composition_result_descriptor () ]
   (* ── RFC a-language-server-the-keeper-can-ask (1 entry) ───────── *)
   @ [ keeper_code_query_descriptor () ]
-  (* ── RFC-webmcp-keeper-consumption Lane B (2 entries) ─────────── *)
-  @ [ keeper_webmcp_list_descriptor (); keeper_webmcp_call_descriptor () ]
   @ [
   (* ── RFC-0182 §3.1 — masc_keeper cluster ──── *)
     masc_keeper_descriptor ~keeper_model_projection:Internal_name
@@ -3323,7 +3280,6 @@ let declared_loading descriptor =
   | Tool_keeper_job_dispatch
   | Tool_keeper_composition_result_dispatch
   | Tool_keeper_code_query_dispatch
-  | Tool_keeper_webmcp_dispatch
   | Tool_masc_keeper_dispatch
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
@@ -3477,7 +3433,6 @@ let prepared_leaf_admission descriptor =
         | Tool_masc_schedule_dispatch
         | Tool_keeper_composition_result_dispatch
         | Tool_keeper_code_query_dispatch
-        | Tool_keeper_webmcp_dispatch
         | Tool_masc_keeper_dispatch
         | Tool_masc_fusion_dispatch
         | Tool_masc_fusion_status

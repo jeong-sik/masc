@@ -579,10 +579,9 @@ type activity_kind =
   | Tool_activity
 
 (* Which family a registered tool belongs to, read from the descriptor that
-   owns it. The spelling tests this replaces counted [keeper_code_query] and
-   [keeper_webmcp_call] as Keeper work because their names begin with the
-   process that hosts them; one is a code search and the other an MCP call,
-   and they now count as the tools they are.
+   owns it. The spelling tests this replaces counted [keeper_code_query] as
+   Keeper work because its name begins with the process that hosts it; it is
+   a code search, and it now counts as the tool it is.
 
    Written out rather than left to a catch-all so a new handler stops the
    build here and is placed on purpose. *)
@@ -641,7 +640,6 @@ let handler_activity_kind handler =
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
   | Tool_keeper_code_query_dispatch
-  | Tool_keeper_webmcp_dispatch
   | Tool_masc_file_dispatch
   | Tool_masc_wiki_dispatch
   | Tool_masc_local_runtime_dispatch

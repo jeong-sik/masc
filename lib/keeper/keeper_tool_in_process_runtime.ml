@@ -1738,9 +1738,9 @@ let handle_voice_with_outcome
    [None] means the dispatcher does not recognise the name (the descriptor →
    dispatcher mapping is misconfigured if this fires for a tool reachable via
    [descriptors_for_internal]). *)
-let dispatch_option_to_execution ?failure_effect_disposition ~name = function
+let dispatch_option_to_execution ~name = function
   | Some result ->
-    Keeper_tool_execution.of_tool_result ?failure_effect_disposition result
+    Keeper_tool_execution.of_tool_result result
   | None ->
     (* A descriptor the dispatcher does not know is this runtime's mapping,
        not the caller's name. *)
@@ -1889,19 +1889,6 @@ let handle_masc_agent_timeline_with_outcome ~(config : Workspace.config) ~(meta 
 let handle_keeper_code_query_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
   Keeper_tool_code_query.dispatch ~config ~meta ~name ~args
   |> dispatch_option_to_execution ~name
-;;
-
-(* A failed webmcp call cannot prove the page's tool did not run — the bridge
-   may die after executeTool started — so call failures carry
-   [Effect_outcome_unknown]; the list tool never executes anything. *)
-let handle_keeper_webmcp_with_outcome ~name ~args =
-  let failure_effect_disposition =
-    if String.equal name Keeper_tool_webmcp.call_tool_name
-    then Some Tool_result.Effect_outcome_unknown
-    else None
-  in
-  Keeper_tool_webmcp.dispatch ~name ~args
-  |> dispatch_option_to_execution ?failure_effect_disposition ~name
 ;;
 
 let handle_masc_schedule_with_outcome

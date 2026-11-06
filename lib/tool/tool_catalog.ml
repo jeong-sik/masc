@@ -478,16 +478,6 @@ let explicit_metadata : (string * metadata) list =
         "Keeper code-query runtime tool; it asks the turn's language server, so it is \
          callable from a keeper and hidden from the public MCP schema surface."
         read_state_tool );
-    (* Keeper-only WebMCP consumption (RFC-webmcp-keeper-consumption): the
-       bridge targets an operator-run Chrome, which the MCP boundary has no
-       business reaching. *)
-    ( "keeper_webmcp_list",
-      hidden_runtime_tool
-        "Keeper WebMCP discovery tool; lists tools a browser page registered, callable \
-         from a keeper and hidden from the public MCP schema surface."
-        read_state_tool );
-    ( "keeper_webmcp_call",
-      keeper_shard_write );
     ("masc_fusion", broadcast_tool);
     ("masc_fusion_status", read_state_tool);
     ("masc_fusion_decision", broadcast_tool);

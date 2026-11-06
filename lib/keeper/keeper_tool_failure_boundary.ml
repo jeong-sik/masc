@@ -13,11 +13,7 @@ let of_handler (handler : Keeper_tool_descriptor.runtime_handler) =
   | Keeper_tool_descriptor.Tool_execute
   (* An unconfirmed owned-job launch may have started its process. A failed
      call cannot authorize issuing a replacement command in this turn. *)
-  | Keeper_tool_descriptor.Tool_keeper_job_dispatch
-  (* A failed webmcp call may have already executed the page's
-     tool — the bridge cannot prove otherwise — which is the
-     same effect-outcome-unknown shape Execute has. *)
-  | Keeper_tool_descriptor.Tool_keeper_webmcp_dispatch ->
+  | Keeper_tool_descriptor.Tool_keeper_job_dispatch ->
     Any_effect_ends_turn
   | Keeper_tool_descriptor.Tool_peer_artifact
   | Keeper_tool_descriptor.Tool_edit_file

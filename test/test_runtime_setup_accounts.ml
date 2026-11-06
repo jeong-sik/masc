@@ -173,6 +173,16 @@ let client_login_files () =
     (missing (Email.of_google_oauth {|{"id_token_email":"a b@example.com"}|}) = Email.Invalid_email);
   check bool "an agy 1.5 recorded email that is not a string" true
     (missing (Email.of_google_oauth {|{"id_token_email":1}|}) = Email.Source_unrecognized);
+  check bool "an Antigravity login that is not a JSON object is unrecognized" true
+    (missing (Email.of_google_oauth "[]") = Email.Source_unrecognized);
+  check bool "an Antigravity account key given twice is not guessed" true
+    (missing (Email.of_google_oauth {|{"id_token_email":"a@example.com","id_token_email":"b@example.com"}|})
+     = Email.Source_unrecognized);
+  check bool "an agy 1.2 token whose claims are not base64url is unrecognized" true
+    (missing (Email.of_google_oauth {|{"id_token":"h.!!!.s"}|}) = Email.Source_unrecognized);
+  check bool "an agy 1.2 token whose claims are not an object is unrecognized" true
+    (missing (Email.of_google_oauth (Printf.sprintf {|{"id_token":%S}|} (id_token "[]")))
+     = Email.Source_unrecognized);
   check bool "a key given twice is not guessed" true
     (missing (Email.of_claude_account {|{"oauthAccount":{"emailAddress":"a@example.com","emailAddress":"b@example.com"}}|})
      = Email.Source_unrecognized);

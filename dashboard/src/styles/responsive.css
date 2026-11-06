@@ -1,21 +1,5 @@
 /* MASC Dashboard — Responsive Overrides (Task 292) */
 
-@media (max-width: 1024px) {
-  .dashboard-header {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: var(--sp-4);
-    padding: var(--sp-4);
-    min-height: auto;
-  }
-
-  .header-right {
-    width: 100%;
-    justify-content: space-between;
-    flex-wrap: wrap;
-  }
-}
-
 @media (max-width: 768px) {
   /* Mobile font-size scale-down — overrides the canonical @theme tokens
      so BOTH Tailwind utilities (text-sm, text-base, ...) AND legacy CSS
@@ -39,29 +23,14 @@
   .text-sm { font-size: var(--font-size-sm); }
   .text-base { font-size: var(--font-size-base); }
 
-  .header-title-wrap h1 {
-    font-size: var(--fs-22);
-  }
-
   /* Stack all common grids */
-  .monitor-grid, 
-  .control-row,
-  .dashboard-main-grid,
-  .agent-monitor-layout,
+  .agent-monitor-layout, 
   .ops-triple-column {
     grid-template-columns: 1fr !important;
     gap: 12px !important;
   }
 
   /* Responsive cards and panels */
-  .monitor-surface-card {
-    min-height: auto !important;
-    padding: 16px !important;
-  }
-
-  .dashboard-panel {
-    padding: 12px !important;
-  }
 
   .dashboard-main-scroll {
     padding-bottom: calc(7rem + env(safe-area-inset-bottom, 0px));
@@ -74,13 +43,6 @@
 }
 
 @media (max-width: 480px) {
-  .dashboard-header {
-    padding: var(--sp-3);
-  }
-
-  .header-title-wrap h1 {
-    font-size: var(--fs-18);
-  }
 
   .header-subtitle {
     font-size: var(--fs-11);

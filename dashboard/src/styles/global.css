@@ -104,43 +104,6 @@
 @utility border-border { border-color: var(--border-border); }
 @utility border-strong { border-color: var(--border-strong); }
 
-@utility monitor-headline {
-  font: var(--type-title);
-  font-weight: var(--fw-semi);
-  color: var(--color-fg-primary);
-  letter-spacing: var(--track-normal);
-  line-height: 1.25;
-  padding-bottom: 4px;
-  border-bottom: 1px solid var(--color-border-default);
-}
-
-@utility monitor-subheadline {
-  font-size: var(--fs-xs);
-  color: var(--color-fg-muted);
-  line-height: 1.35;
-  margin-top: 4px;
-}
-
-@utility monitor-surface-card {
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--r-1);
-  background: var(--color-bg-surface);
-}
-
-@utility monitor-surface-card-strong {
-  box-shadow: var(--shadow-inset);
-}
-
-@utility monitor-surface-card-medium {
-  box-shadow: var(--shadow-inset);
-}
-
-@utility monitor-muted-panel {
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--r-1);
-  background: color-mix(in srgb, var(--color-bg-panel-alt) 72%, transparent);
-}
-
 /* ── Section header (reusable pattern) ─────────────────────── */
 
 @utility section-header {

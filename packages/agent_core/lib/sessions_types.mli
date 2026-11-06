@@ -11,18 +11,6 @@ type trace_capability =
   | No_trace [@name "none"]
 [@@deriving yojson, show]
 
-type session_info =
-  { session_id : string
-  ; title : string option
-  ; tag : string option
-  ; goal : string
-  ; updated_at : float
-  ; phase : Runtime.phase
-  ; participant_count : int
-  ; path : string
-  }
-[@@deriving yojson, show]
-
 type telemetry_event_count =
   { name : string
   ; count : int

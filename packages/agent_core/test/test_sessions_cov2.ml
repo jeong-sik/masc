@@ -64,60 +64,6 @@ let test_worker_status_invalid () =
   | Ok _ -> Alcotest.fail "expected error for invalid worker_status"
 ;;
 
-(* ── session_info with edge values ────────────────────────────── *)
-
-let test_session_info_edge () =
-  let v : Sessions.session_info =
-    { session_id = ""
-    ; title = None
-    ; tag = None
-    ; goal = ""
-    ; updated_at = 0.0
-    ; phase = Runtime.Bootstrapping
-    ; participant_count = 0
-    ; path = ""
-    }
-  in
-  roundtrip
-    ~to_yojson:Sessions.session_info_to_yojson
-    ~of_yojson:Sessions.session_info_of_yojson
-    ~show:Sessions.show_session_info
-    ~name:"session_info_empty"
-    v
-;;
-
-let test_session_info_all_phases () =
-  List.iter
-    (fun phase ->
-       let v : Sessions.session_info =
-         { session_id = "s1"
-         ; title = Some "t"
-         ; tag = Some "tg"
-         ; goal = "g"
-         ; updated_at = 1.0
-         ; phase
-         ; participant_count = 1
-         ; path = "/p"
-         }
-       in
-       roundtrip
-         ~to_yojson:Sessions.session_info_to_yojson
-         ~of_yojson:Sessions.session_info_of_yojson
-         ~show:Sessions.show_session_info
-         ~name:("session_info_phase_" ^ Runtime.show_phase phase)
-         v)
-    Runtime.
-      [ Bootstrapping
-      ; Running
-      ; Input_required
-      ; Waiting_on_workers
-      ; Finalizing
-      ; Completed
-      ; Failed
-      ; Cancelled
-      ]
-;;
-
 (* ── telemetry types ──────────────────────────────────────────── *)
 
 let test_telemetry_event_count () =
@@ -585,10 +531,6 @@ let () =
     ; ( "worker_status"
       , [ Alcotest.test_case "all variants" `Quick test_worker_status_all
         ; Alcotest.test_case "invalid" `Quick test_worker_status_invalid
-        ] )
-    ; ( "session_info"
-      , [ Alcotest.test_case "edge values" `Quick test_session_info_edge
-        ; Alcotest.test_case "all phases" `Quick test_session_info_all_phases
         ] )
     ; ( "telemetry"
       , [ Alcotest.test_case "event_count" `Quick test_telemetry_event_count

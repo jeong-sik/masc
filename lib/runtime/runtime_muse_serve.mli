@@ -267,6 +267,21 @@ val reported_model : turn_result -> string option
     model is unknown; the session's selection, [model], when the host
     reported no call (hosts before 1.4.0 send no [session/tokenUsage]). *)
 
+(** What a turn that ended with a typed terminal ([completed] or [failed])
+    shows it may have done outside the host's own session (RFC-0509). *)
+type turn_items =
+  | Turn_quiet
+      (** The turn's contiguous durable range holds only [userMessage] and
+          [reasoning] items, and live delivery saw no tool call and no
+          answer open. *)
+  | Turn_item_may_have_acted of Runtime_muse_msp.item_kind
+      (** The first item seen whose kind can leave something outside the
+          session: a tool call, a subagent, a workflow, a hook run, an
+          answer, or a kind MASC does not know. Live delivery may name it
+          without a durable read; it only ever refuses quiet. *)
+  | Turn_items_unread of string
+      (** The durable range could not be read, so nothing is proven. *)
+
 type stream_event =
   | Turn_started of
       { session_id : string
@@ -309,6 +324,10 @@ type stream_event =
   | Turn_terminal_received of Runtime_muse_msp.terminal
       (** The matching durable terminal has been decoded. Emitted
           before usage callbacks; [Turn_finished] still closes output afterward. *)
+  | Turn_items_read of turn_items
+      (** Once after [Turn_terminal_received] for a [failed] terminal, and
+          for a [completed] terminal whose durable range was read. No other
+          ending emits it. *)
   | Model_call_reported of
       { session_id : string
       ; turn_id : string

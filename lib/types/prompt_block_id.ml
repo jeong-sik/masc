@@ -3,6 +3,7 @@ type t =
   | Dynamic_context
   | Active_goals
   | Completion_authority
+  | Goals_awaiting_proof
   | Constitution_amendments
   | Temporal_summary
   | Memory_os_recall
@@ -20,6 +21,7 @@ let equal a b =
   | Dynamic_context, Dynamic_context
   | Active_goals, Active_goals
   | Completion_authority, Completion_authority
+  | Goals_awaiting_proof, Goals_awaiting_proof
   | Constitution_amendments, Constitution_amendments
   | Temporal_summary, Temporal_summary
   | Librarian_working_context, Librarian_working_context
@@ -29,9 +31,10 @@ let equal a b =
   | Operator_note, Operator_note
   | Skill_compositions, Skill_compositions
   | Arrived_stimuli, Arrived_stimuli -> true
-  | ( Keeper_instructions | Dynamic_context | Active_goals | Completion_authority | Constitution_amendments
-    | Temporal_summary | Memory_os_recall | Librarian_working_context | Recalled_memory
-    | Recalled_memory_status | Operator_note | Skill_compositions | Arrived_stimuli )
+  | ( Keeper_instructions | Dynamic_context | Active_goals | Completion_authority
+    | Goals_awaiting_proof | Constitution_amendments | Temporal_summary | Memory_os_recall
+    | Librarian_working_context | Recalled_memory | Recalled_memory_status | Operator_note
+    | Skill_compositions | Arrived_stimuli )
   , _ -> false
 
 let to_string = function
@@ -39,6 +42,7 @@ let to_string = function
   | Dynamic_context -> "dynamic_context"
   | Active_goals -> "active_goals"
   | Completion_authority -> "completion_authority"
+  | Goals_awaiting_proof -> "goals_awaiting_proof"
   | Constitution_amendments -> "constitution_amendments"
   | Temporal_summary -> "temporal_summary"
   | Memory_os_recall -> "memory_os_recall"
@@ -59,6 +63,7 @@ let all_known =
   ; Dynamic_context
   ; Active_goals
   ; Completion_authority
+  ; Goals_awaiting_proof
   ; Constitution_amendments
   ; Temporal_summary
   ; Memory_os_recall
@@ -91,22 +96,28 @@ let cache_rank = function
   | Memory_os_recall -> 3
   | Librarian_working_context -> 4
   | Active_goals -> 5
-  | Completion_authority -> 6
+  (* RFC-0491 §3.3: the ids of the Goals in [Verifying]. Its text changes when
+     a Goal is asked to complete or the verifier refutes the proof: after
+     10-30 the two came 12 to 20 minutes apart. A Task decision is new on the
+     turn it lands and gone on the next, so this block sits just in front of
+     [Completion_authority]. *)
+  | Goals_awaiting_proof -> 6
+  | Completion_authority -> 7
   (* The two recall blocks are placed before their first measurement (RFC
      keeper-recall-reaches-the-turn, section 4.4). The body changes only when
      the set of carried memories does, so it is in front of the context that
      changes on nearly every turn. The status line names the turn, so it
      changes every turn and sits behind that context and in front of the
      clock. The canary measures how often each really changes. *)
-  | Recalled_memory -> 7
-  | Dynamic_context -> 8
-  | Recalled_memory_status -> 9
-  | Temporal_summary -> 10
+  | Recalled_memory -> 8
+  | Dynamic_context -> 9
+  | Recalled_memory_status -> 10
+  | Temporal_summary -> 11
   (* A queue row that arrived while the turn ran is news about the world and
      comes in front of an operator speaking, who stays the newest thing in the
      assembly and the newest instruction in a post-tool round. *)
-  | Arrived_stimuli -> 11
-  | Operator_note -> 12
+  | Arrived_stimuli -> 12
+  | Operator_note -> 13
 ;;
 
 (* See the mli. [Keeper_instructions] never enters the extra-context
@@ -117,8 +128,8 @@ let cache_rank = function
 let injected_on_post_tool_round = function
   | Dynamic_context | Temporal_summary | Memory_os_recall | Librarian_working_context
   | Recalled_memory | Recalled_memory_status | Skill_compositions -> false
-  | Keeper_instructions | Active_goals | Completion_authority | Constitution_amendments
-  | Operator_note | Arrived_stimuli -> true
+  | Keeper_instructions | Active_goals | Completion_authority | Goals_awaiting_proof
+  | Constitution_amendments | Operator_note | Arrived_stimuli -> true
 ;;
 
 (* See the mli. [Keeper_instructions] never enters the extra-context assembly
@@ -128,5 +139,5 @@ let resent_when_held = function
   | Keeper_instructions | Dynamic_context | Active_goals | Constitution_amendments
   | Temporal_summary | Memory_os_recall | Librarian_working_context | Recalled_memory
   | Skill_compositions | Arrived_stimuli -> false
-  | Completion_authority | Recalled_memory_status | Operator_note -> true
+  | Completion_authority | Goals_awaiting_proof | Recalled_memory_status | Operator_note -> true
 ;;

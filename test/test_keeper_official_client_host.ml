@@ -3218,6 +3218,98 @@ let test_an_authority_only_carrier_is_not_expected_among_the_messages () =
           ^ Keeper_agent_prompt_metrics.provenance_failure_reason failure)
 ;;
 
+(* RFC-0491 §3.3: the Goals awaiting proof leave the official carrier with the
+   authority, so the vendor's persistent System never keeps a Goal's phase
+   past its turn. Both go out as current-turn input on Start, in carrier
+   order, each proved by its own span of the issuer's carrier, and again on
+   every Resume. *)
+let test_goals_awaiting_proof_are_current_turn_input_on_official_start_and_resume () =
+  let module A = Keeper_context_assembly in
+  let open Yojson.Safe.Util in
+  let awaiting_text = "### Goals Awaiting Proof (1)\n- goal-under-proof [proof pending]" in
+  (* An official client JSON-encodes each message, so a containment check
+     looks for a line of the block, not the block with its newline. *)
+  let awaiting_line = "- goal-under-proof [proof pending]" in
+  let issue ~awaiting =
+    let partition = Layers.assemble ~content_of:(function
+      | Layers.Goals_awaiting_proof -> awaiting
+      | Layers.Completion_authority -> Some authority_text
+      | Layers.Fleet_messages -> Some "FLEET-WORLD"
+      | _ -> None) in
+    Keeper_run_prompt.assemble_request_context ~system:(system_of_text "BASE")
+      ~post_tool_round:false ~previous_assembly:None ~dynamic_context_partition:(Some partition)
+      ~existing_extra_system_context:None
+      ~blocks:[Prompt_block_id.Dynamic_context, Layers.text partition] in
+  let assembly = issue ~awaiting:(Some awaiting_text) in
+  check string "the Agent Core System carries no Goal phase" "BASE"
+    (A.effective_system_prompt ~base_text:"BASE" assembly);
+  check (option string) "the Agent Core carrier holds the block" (Some awaiting_text)
+    (List.assoc_opt Prompt_block_id.Goals_awaiting_proof assembly.blocks);
+  let prepared = prepare_authority_turn ~system_prompt:"BASE" assembly in
+  let carried needle = List.exists (fun message ->
+      contains (Host.encode_history_message message) needle) prepared.messages in
+  check bool "the System-role carrier no longer holds the Goals under proof" false
+    (carried awaiting_line);
+  check bool "nor the authority" false (carried authority_text);
+  check bool "the rest of the carrier stays" true (carried "FLEET-WORLD");
+  let start = Host.start_prompt prepared "OWNER" in
+  let start_text = Keeper_context_submission_link.text start in
+  check bool "the Start prompt carries both, the Goals under proof first" true
+    (match String_util.find_substring start_text "goal-under-proof",
+           String_util.find_substring start_text "vrf-approved" with
+     | Some awaiting, Some authority -> awaiting < authority
+     | None, _ | _, None -> false);
+  check bool "and ends with the owner's prompt" true
+    (String.starts_with ~prefix:"SYSTEM:\n" start_text
+     && String.ends_with ~suffix:"\n\nOWNER" start_text);
+  let receipt = match assembly.receipt with Some receipt -> receipt | None -> fail "carrier receipt missing" in
+  let binding piece = Keeper_context_submission_link.binding_to_json
+      ~slot:Runtime_official_client_write.Whole_write piece
+      (Runtime_official_client_write.raw (Keeper_context_submission_link.text piece)) in
+  let sourced_blocks piece = List.map (fun occurrence ->
+      let source = member "source" occurrence in
+      check string "the proof hashes the issuer's carrier" receipt.sha256
+        (source |> member "assembly" |> member "sha256" |> to_string);
+      match source |> member "source_span_indices" |> to_list with
+      | [index] ->
+        (match (List.nth receipt.spans (to_int index)).kind with
+         | A.Block block -> Prompt_block_id.to_string block
+         | A.Unattributed _ -> fail "a turn block proof names an unattributed span")
+      | _ -> fail "one span per turn block")
+      (binding piece |> member "occurrences" |> to_list) in
+  check (list string) "each block is proved by its own carrier span"
+    [ "goals_awaiting_proof"; "completion_authority" ] (sourced_blocks start);
+  let turn_observation = prepared.turn_observation in
+  let composed_context = prepared.composed_context in
+  let held = Host.start_held_context ~turn_observation ?composed_context prepared.messages in
+  check bool "the session never holds the Goals under proof" false
+    (List.exists (fun (held : Keeper_official_client_session_store.held_context) ->
+       held.context = Context_block Prompt_block_id.Goals_awaiting_proof) held);
+  let deliver held =
+    Host.resume_prompt ~goal:"OWNER" ~held ~turn_observation ?composed_context prepared.messages in
+  let first = deliver held in
+  let second = deliver first.held_context in
+  check bool "every Resume carries the Goals under proof" true
+    (contains first.prompt awaiting_line && contains second.prompt awaiting_line);
+  check string "with the same bytes" first.prompt second.prompt;
+  check (list string) "the Resume proofs name both spans"
+    [ "goals_awaiting_proof"; "completion_authority" ] (sourced_blocks second.context_projection);
+  let next = prepare_authority_turn ~system_prompt:"BASE" (issue ~awaiting:None) in
+  check bool "a turn without a Goal under proof starts without the block" false
+    (contains (Host.start_prompt next "NEXT" |> Keeper_context_submission_link.text) awaiting_line);
+  check bool "and resumes without the old one" false
+    (contains (Host.resume_prompt ~goal:"NEXT" ~held:second.held_context
+                 ~turn_observation:next.turn_observation ?composed_context:next.composed_context
+                 next.messages).prompt awaiting_line);
+  let only_turn_blocks =
+    A.assemble ~dynamic_context_partition:None ~existing_extra_system_context:None
+      ~blocks:[Prompt_block_id.Goals_awaiting_proof, awaiting_text;
+               Prompt_block_id.Completion_authority, authority_text]
+    |> A.with_system_observations ~base_text:"BASE" ~observations:[] in
+  check bool "a carrier holding only turn blocks is not expected among the messages" false
+    (Option.is_some (Host.transmitted_carrier_receipt only_turn_blocks))
+;;
+
 (* One session: the wiki, the memory ledger and the Board posts stay the same
    from turn to turn while the fleet messages change. Only the changed section
    goes out, under the frame, and one line names the sections left out. *)
@@ -3629,6 +3721,8 @@ let () =
             test_a_system_without_amendments_carries_no_block
         ; test_case "an authority-only carrier is not expected among the messages" `Quick
             test_an_authority_only_carrier_is_not_expected_among_the_messages
+        ; test_case "Goals awaiting proof are current-turn input on official Start and Resume" `Quick
+            test_goals_awaiting_proof_are_current_turn_input_on_official_start_and_resume
         ; test_case
             "a resume sends only the changed sections"
             `Quick

@@ -127,25 +127,43 @@ let history_role_label = function
   | Agent_core.Types.Tool -> "TOOL:\n"
 ;;
 
-(* RFC-0491 §3.1. The issuer carries a Completion Authority event as a block
-   of its context carrier, which the Agent Core lane sends at the request's
-   tail. An official client puts the System-role carrier where the vendor
-   keeps it for the session (Claude Code's recorded [--system-prompt], Codex
-   [developerInstructions]), and an event kept there outlives its turn. The
-   official turn therefore takes the block out of the carrier once and
-   delivers it as current-turn input: in front of the Start prompt and on
-   every Resume. Its source proof is the issuer's own carrier span. *)
-type turn_observation =
+(* RFC-0491 §3.1, §3.3. The issuer carries a Completion Authority event and
+   the Goals awaiting proof as blocks of its context carrier, which the Agent
+   Core lane sends at the request's tail. An official client puts the
+   System-role carrier where the vendor keeps it for the session (Claude
+   Code's recorded [--system-prompt], Codex [developerInstructions]), and what
+   is kept there outlives its turn: an event, or a Goal's phase after the Goal
+   left it. The official turn therefore takes these blocks out of the carrier
+   once and delivers them as current-turn input: in front of the Start prompt
+   and on every Resume. Each block's source proof is the issuer's own carrier
+   span. *)
+type turn_block =
   { block : Prompt_block_id.t
   ; text : string
   ; issuer : Keeper_context_assembly.t
   }
 
-let turn_observation_message observation = extra_system_context_message observation.text
+(* The blocks one official turn took out of its carrier, in carrier order. *)
+type turn_observation = { first : turn_block; others : turn_block list }
 
-let turn_observation_piece observation =
-  Keeper_context_submission_link.encoded_carrier ~assembly:(Some observation.issuer)
-    ~selected_blocks:(Some [ observation.block ]) (turn_observation_message observation)
+let turn_blocks observation = observation.first :: observation.others
+
+let is_turn_block = function
+  | Prompt_block_id.(Completion_authority | Goals_awaiting_proof) -> true
+  | Prompt_block_id.(
+      Keeper_instructions | Dynamic_context | Active_goals | Constitution_amendments
+      | Temporal_summary | Memory_os_recall | Librarian_working_context | Recalled_memory
+      | Recalled_memory_status | Operator_note | Skill_compositions | Arrived_stimuli) -> false
+;;
+
+let turn_block_message turn_block = extra_system_context_message turn_block.text
+
+(* A blank line between rendered messages and before the goal. *)
+let resume_section_separator = "\n\n"
+
+let turn_block_piece turn_block =
+  Keeper_context_submission_link.encoded_carrier ~assembly:(Some turn_block.issuer)
+    ~selected_blocks:(Some [ turn_block.block ]) (turn_block_message turn_block)
 ;;
 
 let carrier_text (message : Agent_core.Types.message) =
@@ -162,12 +180,31 @@ let carrier_text (message : Agent_core.Types.message) =
       | Tool_result_followup | Agent_instruction), _ -> None
 ;;
 
+(* Take every turn block out of [issuer]'s carrier, one after another in
+   carrier order: [rest] is the issuer re-issued without them, and each block
+   names [issuer], whose carrier holds its span. [None] when a turn block
+   cannot be taken out exactly once ({!Keeper_context_assembly.split_block}),
+   which keeps the carrier whole. *)
+let split_turn_blocks (issuer : Keeper_context_assembly.t) =
+  List.fold_left
+    (fun split (id, _) ->
+       match split with
+       | None -> None
+       | Some (current, taken) when is_turn_block id ->
+         Option.map
+           (fun (rest, text) -> rest, { block = id; text; issuer } :: taken)
+           (Keeper_context_assembly.split_block id current)
+       | Some _ -> split)
+    (Some (issuer, []))
+    issuer.blocks
+  |> Option.map (fun (rest, taken) -> rest, List.rev taken)
+;;
+
 (* The receipt of the carrier an official turn hands its client when the
-   issuer's carrier is in the messages: what is left after the authority block
-   leaves it, which is [None] when the authority was the carrier's only
-   block. *)
+   issuer's carrier is in the messages: what is left after the turn blocks
+   leave it, which is [None] when they were the carrier's only blocks. *)
 let transmitted_carrier_receipt (issuer : Keeper_context_assembly.t) =
-  match Keeper_context_assembly.split_block Prompt_block_id.Completion_authority issuer with
+  match split_turn_blocks issuer with
   | Some (rest, _) -> rest.receipt
   | None -> issuer.receipt
 ;;
@@ -179,9 +216,8 @@ let split_turn_observation ~composed_context messages =
   match composed_context with
   | None -> unsplit
   | Some (issuer : Keeper_context_assembly.t) ->
-    (match issuer.extra_system_context,
-           Keeper_context_assembly.split_block Prompt_block_id.Completion_authority issuer with
-     | Some carrier, Some (rest, text) ->
+    (match issuer.extra_system_context, split_turn_blocks issuer with
+     | Some carrier, Some (rest, first :: others) ->
        let is_issued message = Option.equal String.equal (carrier_text message) (Some carrier) in
        (match List.filter is_issued messages with
         | [ _ ] ->
@@ -194,16 +230,16 @@ let split_turn_observation ~composed_context messages =
           in
           ( List.concat_map replace messages
           , Some rest
-          , Some { block = Prompt_block_id.Completion_authority; text; issuer } )
+          , Some { first; others } )
         | [] | _ :: _ :: _ -> unsplit)
-     | None, _ | Some _, None -> unsplit)
+     | None, _ | Some _, (None | Some (_, [])) -> unsplit)
 ;;
 
 (* A vendor may keep its first System for the whole session, so Start sends
    the issued System as it is: its only observation is the Goal, which keeps
-   its Start/held policy. The authority leaves the carrier whenever the
+   its Start/held policy. The turn blocks leave the carrier whenever the
    issuer's carrier is found exactly once; the System plays no part in that,
-   because the authority is not in the System. The composition names the
+   because they are not in the System. The composition names the
    issuer only when its issued System is exactly the System sent; never borrow
    a receipt from another composition. *)
 let project_start_system ~system_prompt ~composed_context messages =
@@ -220,16 +256,17 @@ let project_start_system ~system_prompt ~composed_context messages =
     match turn_observation with
     | None -> Keeper_context_submission_link.literal ""
     | Some observation ->
-      Keeper_context_submission_link.concat ~separator:""
-        [ Keeper_context_submission_link.literal
-            (history_role_label (turn_observation_message observation).role)
-        ; turn_observation_piece observation ]
+      Keeper_context_submission_link.concat ~separator:resume_section_separator
+        (List.map
+           (fun turn_block ->
+              Keeper_context_submission_link.concat ~separator:""
+                [ Keeper_context_submission_link.literal
+                    (history_role_label (turn_block_message turn_block).role)
+                ; turn_block_piece turn_block ])
+           (turn_blocks observation))
   in
   messages, start_context, composed_context, turn_observation
 ;;
-
-(* A blank line between rendered messages and before the goal. *)
-let resume_section_separator = "\n\n"
 
 let is_carried_on_resume message =
   is_composed_system_context message || Keeper_official_task_reference.is_reference message
@@ -282,7 +319,7 @@ type carried_body =
 type carried_source =
   | Message_context
   | Issued_system_observation of Prompt_block_id.t
-  | Turn_observation of turn_observation
+  | Turn_observation of turn_block
 type rendered_source = Carried_source of carried_source | Host_notice
 
 (* One carried context a turn composes: its name and digest, whether a resume
@@ -358,8 +395,8 @@ let block_body assembly = function
      | Some sections -> World_state_sections (List.map world_state_section sections)
      | None -> Whole_text)
   | Prompt_block_id.(
-      Keeper_instructions | Active_goals | Completion_authority | Constitution_amendments
-      | Temporal_summary | Memory_os_recall | Librarian_working_context | Recalled_memory
+      Keeper_instructions | Active_goals | Completion_authority | Goals_awaiting_proof
+      | Constitution_amendments | Temporal_summary | Memory_os_recall | Librarian_working_context | Recalled_memory
       | Recalled_memory_status | Operator_note | Skill_compositions | Arrived_stimuli) -> Whole_text
 ;;
 
@@ -425,12 +462,14 @@ let carried_context ~turn_observation ~composed_context messages =
   let turn = match turn_observation with
     | None -> []
     | Some observation ->
-      [ { held = { Session_store.context = Session_store.Context_block observation.block
-                 ; sha256 = sha256_hex observation.text }
-        ; resent_when_held = Prompt_block_id.resent_when_held observation.block
-        ; message = turn_observation_message observation
-        ; body = Whole_text
-        ; source = Turn_observation observation } ] in
+      List.map (fun turn_block ->
+          { held = { Session_store.context = Session_store.Context_block turn_block.block
+                   ; sha256 = sha256_hex turn_block.text }
+          ; resent_when_held = Prompt_block_id.resent_when_held turn_block.block
+          ; message = turn_block_message turn_block
+          ; body = Whole_text
+          ; source = Turn_observation turn_block })
+        (turn_blocks observation) in
   observations @ turn @ List.concat_map (carried_of_message ~composed_context) messages
 ;;
 
@@ -803,7 +842,7 @@ let resume_prompt ~goal ~held ~turn_observation ?composed_context messages =
           | Host_notice -> Keeper_context_submission_link.literal (encode_history_message message)
           | Carried_source (Issued_system_observation block) -> Keeper_context_submission_link.encoded_system_observation
               ~block ~assembly:composed_context message
-          | Carried_source (Turn_observation observation) -> turn_observation_piece observation
+          | Carried_source (Turn_observation turn_block) -> turn_block_piece turn_block
           | Carried_source Message_context -> Keeper_context_submission_link.encoded_carrier ~assembly:composed_context
               ~selected_blocks:(Option.map (fun (ids, _, _) -> ids) selection)
               ?omitted_sections:(Option.map (fun (_, unchanged, _) -> unchanged) selection)
@@ -831,8 +870,8 @@ let resume_prompt ~goal ~held ~turn_observation ?composed_context messages =
     | World_state_sections _,
       ( Session_store.Context_block
           Prompt_block_id.(
-            Keeper_instructions | Active_goals | Completion_authority | Constitution_amendments
-            | Temporal_summary | Memory_os_recall | Librarian_working_context | Recalled_memory
+            Keeper_instructions | Active_goals | Completion_authority | Goals_awaiting_proof
+            | Constitution_amendments | Temporal_summary | Memory_os_recall | Librarian_working_context | Recalled_memory
             | Recalled_memory_status | Operator_note | Skill_compositions | Arrived_stimuli)
       | Session_store.Librarian_working_state
       | Session_store.Librarian_unread
@@ -882,8 +921,8 @@ let resume_prompt ~goal ~held ~turn_observation ?composed_context messages =
     match item.source with
     | Issued_system_observation block -> Keeper_context_submission_link.omit_held_system_observation
         ~block ~assembly:composed_context item.message projection
-    | Turn_observation observation -> Keeper_context_submission_link.omit_held
-        ~assembly:(Some observation.issuer) ~blocks:(Some [ observation.block ]) item.message projection
+    | Turn_observation turn_block -> Keeper_context_submission_link.omit_held
+        ~assembly:(Some turn_block.issuer) ~blocks:(Some [ turn_block.block ]) item.message projection
     | Message_context -> Keeper_context_submission_link.omit_held ~assembly:composed_context
         ~blocks:(Option.map (fun id -> [id]) (block_id item)) item.message projection)
     context_projection omitted in

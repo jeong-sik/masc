@@ -1262,6 +1262,8 @@ let test_goal_summaries_render_titles () =
       ~active_goal_summaries:(Ok
         [ { Prompt.summary_goal_id = "goal-x"
           ; summary_title = "Improve wake context"
+          ; summary_priority = 3
+          ; summary_created_at = "2026-09-02T01:00:00Z"
           ; summary_criterion = None
           ; summary_review_note = None
       ; summary_measurement = Ok None
@@ -1296,6 +1298,8 @@ let test_goal_heading_counts_what_the_block_lists () =
       ~active_goal_summaries:(Ok
         [ { Prompt.summary_goal_id = "goal-a"
           ; summary_title = "Improve wake context"
+          ; summary_priority = 3
+          ; summary_created_at = "2026-09-02T01:00:00Z"
           ; summary_criterion = None
           ; summary_review_note = None
       ; summary_measurement = Ok None

@@ -3,6 +3,7 @@
 type layer_id =
   | Active_goals
   | Goal_observations
+  | Goals_awaiting_proof
   | Current_task
   | Approval_authority
   | Connected_surfaces
@@ -26,7 +27,8 @@ type layer_id =
    can reuse a longer shared prefix across cycles; highly volatile reactive
    signals stay later in the same user message. [Goal_observations] follows
    [Active_goals] so each Goal's latest review and measurement read next to
-   the Goals they name. [Current_task] sits directly
+   the Goals they name, and [Goals_awaiting_proof] names the ones under proof
+   right after. [Current_task] sits directly
    after them: the claimed task is standing context that changes on
    claim/release, not per cycle. [Own_board_posts] changes only when the
    keeper itself publishes, so it sits just ahead of the per-cycle reactive
@@ -37,6 +39,7 @@ type layer_id =
 let ordered =
   [ Active_goals
   ; Goal_observations
+  ; Goals_awaiting_proof
   ; Current_task
   ; Approval_authority
   ; Connected_surfaces
@@ -64,24 +67,25 @@ let ordered =
 let order_index = function
   | Active_goals -> 0
   | Goal_observations -> 1
-  | Current_task -> 2
-  | Approval_authority -> 3
-  | Connected_surfaces -> 4
-  | Namespace_state -> 5
-  | Workspace_memory -> 6
-  | Wiki -> 7
-  | Lane_updates -> 8
-  | Autonomous_trigger -> 9
-  | Scheduled_automation -> 10
-  | Completion_authority -> 11
-  | Task_cancellations -> 12
-  | Pending_mentions -> 13
-  | Scope_messages -> 14
-  | Own_board_posts -> 15
-  | Board_activity -> 16
-  | Own_recent_actions -> 17
-  | Recent_work -> 18
-  | Fleet_messages -> 19
+  | Goals_awaiting_proof -> 2
+  | Current_task -> 3
+  | Approval_authority -> 4
+  | Connected_surfaces -> 5
+  | Namespace_state -> 6
+  | Workspace_memory -> 7
+  | Wiki -> 8
+  | Lane_updates -> 9
+  | Autonomous_trigger -> 10
+  | Scheduled_automation -> 11
+  | Completion_authority -> 12
+  | Task_cancellations -> 13
+  | Pending_mentions -> 14
+  | Scope_messages -> 15
+  | Own_board_posts -> 16
+  | Board_activity -> 17
+  | Own_recent_actions -> 18
+  | Recent_work -> 19
+  | Fleet_messages -> 20
 ;;
 
 type unattributed = World_frame | Host_workspace_recall | Direct_turn | Unprojected_input
@@ -150,6 +154,7 @@ let assemble ~content_of =
 let layer_name = function
   | Active_goals -> "active_goals"
   | Goal_observations -> "goal_observations"
+  | Goals_awaiting_proof -> "goals_awaiting_proof"
   | Current_task -> "current_task"
   | Approval_authority -> "approval_authority"
   | Connected_surfaces -> "connected_surfaces"
@@ -189,6 +194,8 @@ let source_of_name name =
 (* See the mli. The inbox layers carry rows delivered for this turn (pending
    messages, Board and authority events, the schedule-store attention rows) and the
    trigger says why this turn ran, so a repeat of their bytes is a new arrival.
+   [Goals_awaiting_proof] is sent every resume as its block is
+   ({!Prompt_block_id.resent_when_held}): a Goal's phase moves between resumes.
    Every other layer projects state that holds until it changes. A whole
    dynamic context the renderer did not partition into layers
    ([Direct_turn], [Unprojected_input]) keeps the class the whole
@@ -201,7 +208,7 @@ let resend_on_resume = function
   | Unattributed (Host_workspace_recall | Direct_turn | Unprojected_input) ->
     Sent_when_changed
   | Layer
-      ( Autonomous_trigger | Scheduled_automation | Completion_authority
+      ( Goals_awaiting_proof | Autonomous_trigger | Scheduled_automation | Completion_authority
       | Task_cancellations | Pending_mentions | Scope_messages | Board_activity ) ->
     Sent_every_resume
   | Unattributed World_frame -> Sent_with_other_sections

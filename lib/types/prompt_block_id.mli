@@ -10,6 +10,10 @@
     per-turn world context, including current criterion and measurement.
     [Completion_authority] is the existing completion-authority renderer's
     Task approval/rejection event observations with their correlation keys.
+    [Goals_awaiting_proof] names the Goals in [Verifying]: completion was
+    requested and the verifier is judging the proof. It exists only while one
+    is. The [Active_goals] rows carry no such mark, so a Goal entering or
+    leaving [Verifying] does not change the System (RFC-0491 §3.3).
     [Constitution_amendments] names the world articles written or taken back
     since the turn's System rendered its [<norms>] (RFC-0491 §3.2). It exists
     only beside a System rendered with articles the world has since changed.
@@ -53,6 +57,7 @@ type t =
   | Dynamic_context
   | Active_goals
   | Completion_authority
+  | Goals_awaiting_proof
   | Constitution_amendments
   | Temporal_summary
   | Memory_os_recall
@@ -92,6 +97,10 @@ val cache_rank : t -> int
     when the world's article ledger is written, and leaves when the System is
     rendered again.
 
+    [goals_awaiting_proof] sits just in front of [completion_authority]: it
+    changes when a Goal is asked to complete or its proof is refuted, a few
+    times an hour, while a Task decision is new on the turn it lands.
+
     [recalled_memory] and [recalled_memory_status] have not been measured yet:
     the body is placed in front of [dynamic_context] because it changes only
     when the carried set does, and the status line behind it because it names
@@ -112,12 +121,14 @@ val injected_on_post_tool_round : t -> bool
     result instead, and re-broadcasting the world state there made models
     re-answer it on every round (task-514, 2026-08-24). Recurring state
     blocks therefore stay on the first round only. [Active_goals] is the
-    separately produced immutable Goal snapshot. [Completion_authority] carries
-    this turn's approval/rejection correlation keys. Both remain in the System
-    carrier after tools without rebroadcasting Task, Gate, Lane or other inbox
-    state. [Constitution_amendments] rides every round of the turn, as the
-    System it amends does: without it a later round reads only the older
-    norms that System holds. Operator
+    separately produced immutable Goal snapshot and stays in the System after
+    tools. [Completion_authority] carries this turn's approval/rejection
+    correlation keys and rides every round of its turn, without rebroadcasting
+    Task, Gate, Lane or other inbox state. [Goals_awaiting_proof] rides every
+    round as well: a later round that lost it would read a Goal under proof as
+    ordinary open work (RFC-0387 review P0-1). [Constitution_amendments]
+    rides every round of the turn, as the System it amends does: without it a
+    later round reads only the older norms that System holds. Operator
     speech remains [Operator_note] (RFC-0366). A new constructor must declare
     its class here before it can ride a post-tool round.
 
@@ -151,8 +162,10 @@ val resent_when_held : t -> bool
 
     [Completion_authority] also answers [true], preserving its producer
     layer's [Sent_every_resume] semantics even when the session saw identical
-    bytes. [Constitution_amendments] answers [false]: the same bytes name the
-    same articles the session already holds.
+    bytes. [Goals_awaiting_proof] answers [true]: a Goal's phase moves between
+    resumes, so each resume states the Goals under proof now.
+    [Constitution_amendments] answers [false]: the same bytes name the same
+    articles the session already holds.
 
     [Arrived_stimuli] answers [false]: an official-client resume never carries
     it, so the answer only completes the match.

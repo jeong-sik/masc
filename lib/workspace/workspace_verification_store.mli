@@ -219,11 +219,14 @@ val read_binary_body_for_operator_base64 :
 val snapshot_submitted_evidence_json :
   ?artifact_read:(worker:string -> relative:string -> artifact_read_result) ->
   ?request_id:string ->
+  ?collaboration:submitted_evidence_item list ->
   base_path:string ->
   worker:string ->
   string list ->
   Yojson.Safe.t
 (** Materialize submitted evidence once at the producer's submit boundary.
+    The items for the references come first, then the [collaboration] items,
+    already resolved by the caller.
     ["artifact:<relative-path>"] is rooted at the producer's declared sandbox;
     ["note:<text>"] preserves non-file evidence explicitly. [bytes] reports the
     source size, which exceeds the persisted [content] length when [truncated]

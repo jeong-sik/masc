@@ -409,8 +409,8 @@ let snapshot_submitted_evidence_item ?artifact_read ?request_id ?index ~base_pat
   | Note_reference note -> Evidence_note note
   | Collaboration_reference _ | Unresolvable_reference -> Evidence_invalid_reference
 
-let snapshot_submitted_evidence_json ?artifact_read ?request_id ~base_path ~worker
-    references =
+let snapshot_submitted_evidence_json ?artifact_read ?request_id ?(collaboration = [])
+    ~base_path ~worker references =
   `List
     (List.mapi
        (fun index reference ->
@@ -422,7 +422,8 @@ let snapshot_submitted_evidence_json ?artifact_read ?request_id ~base_path ~work
            ~worker
            reference
          |> submitted_evidence_item_to_yojson)
-       references)
+       references
+     @ List.map submitted_evidence_item_to_yojson collaboration)
 
 
 let submission_receipt ~base_path ~request_id ~task_id ~worker =

@@ -582,7 +582,9 @@ let task_canonical_goal_id goal_task_index (task : Masc_domain.task) =
   | Some (goal_id :: _) -> Some goal_id
 ;;
 
-let task_json ~goal_task_index (task : Masc_domain.task) =
+(* The fields of [task_json], so a caller can put more fields in front of them
+   without taking the object apart. *)
+let task_fields ~goal_task_index (task : Masc_domain.task) =
   let fields =
     match Masc_domain.task_to_yojson task with
     | `Assoc assoc -> assoc
@@ -603,8 +605,10 @@ let task_json ~goal_task_index (task : Masc_domain.task) =
     | Some timestamp -> assoc_upsert fields "completed_at" (`String timestamp)
     | None -> List.remove_assoc "completed_at" fields
   in
-  `Assoc fields
+  fields
 ;;
+
+let task_json ~goal_task_index task = `Assoc (task_fields ~goal_task_index task)
 
 (* Card previews show a short description; full text is fetched only for
    detail expansion or search. This byte bound preserves UTF-8 boundaries and
@@ -618,11 +622,10 @@ let task_list_json ~goal_task_index (task : Masc_domain.task) =
     let preview = String_util.utf8_prefix
       ~max_bytes:task_description_preview_bytes task.description in
     let revision = Agent_core_sha256.(digest_string task.description |> to_hex) in
-    match task_json ~goal_task_index {task with description = preview} with
-    | `Assoc fields -> `Assoc
-        (("detail_level", `String "summary")
-         :: ("description_revision", `String revision) :: fields)
-    | _ -> assert false
+    `Assoc
+      (("detail_level", `String "summary")
+       :: ("description_revision", `String revision)
+       :: task_fields ~goal_task_index {task with description = preview})
 ;;
 
 let agent_json ~model_map (agent : Masc_domain.agent) =

@@ -31,6 +31,13 @@ val policy_network_name : keeper_name:string -> string
     name, preserving identity through case folding, escaping, truncation, and
     digest-shaped inputs. *)
 
+val boot_plan_network :
+  keeper_name:string
+  -> Keeper_types_profile_sandbox.network_mode
+  -> Keeper_microvm_boot_plan.network
+(** The boot plan's network for a keeper's mode. [Network_policy] names
+    {!policy_network_name}. *)
+
 val policy_network_create_argv_for :
   Keeper_microvm_backend.t -> keeper_name:string -> (string list, string) result
 (** Create the host-only network the policy lane attaches to. Only the

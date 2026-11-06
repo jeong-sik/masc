@@ -121,14 +121,6 @@ val summarize_agent_activity :
 val tool_usage_fields :
   tool_usage_summary -> string -> (string * Yojson.Safe.t) list
 
-(** {1 Pure metric calculators} *)
-
-val count_active_agents : event_record list -> int
-val count_tasks_in_progress : event_record list -> int
-val count_completed_tasks : event_record list -> int
-val avg_duration : event_record list -> float
-val calculate_error_rate : event_record list -> float
-
 (** {1 Convenience emitters} *)
 
 val track_agent_session_bound :

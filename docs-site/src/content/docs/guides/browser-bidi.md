@@ -5,7 +5,7 @@ description: Configure a dedicated Firefox, attach the browser Addon, and verify
 
 The browser Addon can start a dedicated Firefox and own its WebDriver BiDi
 connection. Configure the backend, then attach the Addon using the
-[Browser Lane guide](../browser-lanes/#install-the-browser-addon). The server
+[Browser Lane guide](../browser-lanes/#install-the-browser-addons). The server
 loads the configuration; the attached worker owns the browser's lifetime.
 
 ## Prepare Firefox and its profile
@@ -46,7 +46,7 @@ cookies, so use a profile limited to the sites the agent needs.
 
 1. Restart MASC after changing `runtime.toml` so it loads the backend settings.
 2. Install the bundled browser package in the active config root's
-   `lane-addons/` directory as described in the [installation guide](../browser-lanes/#install-the-browser-addon).
+   `lane-addons/` directory as described in the [installation guide](../browser-lanes/#install-the-browser-addons).
    For an existing installation, detach it and attach a new instance to capture
    changed backend settings.
 3. Inspect the installation's `desired_revision`, `applied_revision`, `phase`,

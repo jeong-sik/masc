@@ -265,14 +265,18 @@ val dispatch
   -> Yojson.Safe.t
   -> (Yojson.Safe.t, Browser_live_peer.failure) result
 
-val with_input_state
+val with_session_state
   :  t
+  -> sdk_process_started_at:float option
   -> (Yojson.Safe.t, Browser_live_peer.failure) result
   -> (Yojson.Safe.t, Browser_live_peer.failure) result
 (** What leaves the peer. Every object result and every failure receipt
-    carries [inputReadiness]. A [Before_effect] or [Outcome_unknown] failure
-    becomes the [Observed_failure] with the same effect phase so its receipt
-    can carry it. [dispatch] keeps its own failure classification. *)
+    carries [inputReadiness] and [sdkProcessStartedAt]: when the SDK process
+    that ran the command connected, or [null] when none runs any more. A CDP
+    setting lives as long as that process, so a later answer with another
+    time says the setting is gone. A [Before_effect] or [Outcome_unknown]
+    failure becomes the [Observed_failure] with the same effect phase so its
+    receipt can carry both. [dispatch] keeps its own failure classification. *)
 
 (** Explicit completion with [keep: []], sharing dispatch's exactly-once state.
     Ego protects unknown-origin Pages and unmanaged tabs. Only a validated

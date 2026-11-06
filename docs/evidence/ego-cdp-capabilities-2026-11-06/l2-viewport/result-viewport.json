@@ -1,0 +1,55 @@
+{
+ "spaceId": 23,
+ "before": {
+  "w": 1548,
+  "h": 990,
+  "dpr": 2
+ },
+ "set": {},
+ "sameScript": {
+  "w": 800,
+  "h": 600,
+  "dpr": 2
+ },
+ "reopened": {
+  "w": 800,
+  "h": 600,
+  "dpr": 2
+ },
+ "afterTwoSeconds": {
+  "w": 800,
+  "h": 600,
+  "dpr": 2
+ },
+ "afterGoto": {
+  "w": 800,
+  "h": 600,
+  "dpr": 2
+ },
+ "afterReload": {
+  "w": 800,
+  "h": 600,
+  "dpr": 2
+ },
+ "clear": {},
+ "cleared": {
+  "w": 1548,
+  "h": 990,
+  "dpr": 2
+ },
+ "small": {
+  "w": 100,
+  "h": 100,
+  "dpr": 2
+ },
+ "large": {
+  "w": 4096,
+  "h": 4096,
+  "dpr": 2
+ },
+ "end": {
+  "w": 4096,
+  "h": 4096,
+  "dpr": 2
+ }
+}

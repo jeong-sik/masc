@@ -790,10 +790,10 @@ let public_input_result = function
   | Error (Live.Observed_failure {message;receipt;_}|Live.Partial_failure {message;receipt;_}) -> message,receipt
   | Error (Live.Before_effect message|Live.Outcome_unknown message) -> message,`Null
 
-(* The readiness [with_input_state] stamps on what leaves the peer. *)
-let reported_readiness peer result = match Peer.with_input_state peer result with
+(* The readiness [with_session_state] stamps on what leaves the peer. *)
+let reported_readiness peer result = match Peer.with_session_state peer ~sdk_process_started_at:None result with
   | Ok receipt | Error (Live.Observed_failure {receipt;_}|Live.Partial_failure {receipt;_}) -> text (field "inputReadiness" receipt)
-  | Error (Live.Before_effect _|Live.Outcome_unknown _) -> fail "with_input_state left a failure without its receipt"
+  | Error (Live.Before_effect _|Live.Outcome_unknown _) -> fail "with_session_state left a failure without its receipt"
 
 let private_native_data_stays_private result =
   let message,receipt=public_input_result result in
@@ -1113,7 +1113,53 @@ let test_a_gesture_refused_before_its_press_keeps_input () =
        ["urlBefore",str observed_url;"receipt",obj [];"error",str "native click failed";
         "thrown",obj ["name",str "ElementResolutionError";"kind",str "permanent"]]]
 
-(* What leaves the peer says where input stands, failures included. *)
+(* An ego viewport is a CDP override on its Page: the URL guard runs first,
+   the receipt reads the size the page took, and the answer says the size
+   lives with the SDK process and that snapshot refs are stale. *)
+let test_viewport_is_a_cdp_override_on_the_page () =
+  let asked = ref [] in
+  let reply = ref (input_answer ()) in
+  let peer = opened (fun sent ->
+    asked := sent :: !asked;
+    match sent.step with
+    | "tabs.list" -> answered tabs
+    | "page.viewport" -> !reply
+    | other -> failf "unexpected viewport step %s" other) in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  let size width height = in_page (obj ["url",str observed_url;"title",str "Slack";
+    "innerWidth",`Int width;"innerHeight",`Int height;"devicePixelRatio",`Int 2]) in
+  let resize viewport = dispatch peer Live.Page_interact (interact_args (Lane.Set_viewport viewport)) in
+  reply := answered (obj ["guard",page_summary;"receipt",size 800 600;"error",`Null]);
+  (match resize (Lane.Fit {width=800;height=600}) with
+   | Ok receipt ->
+     check string "the action" "set_viewport" (text (field "action" receipt));
+     check string "the page it was set on" observed_url (text (field "urlBefore" receipt));
+     check (pair int int) "the size the page took" (800, 600)
+       (to_int (field "innerWidth" receipt), to_int (field "innerHeight" receipt));
+     check bool "snapshot refs are stale" true (field "refsInvalidated" receipt = `Bool true);
+     check string "the size lives with the SDK process" "ego_sdk_process" (text (field "lifetime" receipt))
+   | other -> failf "the viewport was %s" (failure_kind other));
+  let sent = List.hd !asked in
+  check string "the override names the size" {|{"width":800,"height":600}|} (Yojson.Safe.to_string (field "metrics" sent.args));
+  check bool "the guard is the URL guard the BiDi connection runs" true
+    (String_util.contains_substring (text (field "guard" sent.args)) Masc.Browser_interaction.url_guard_script);
+  check bool "the receipt is its viewport receipt" true
+    (String_util.contains_substring (text (field "receipt" sent.args)) Masc.Browser_interaction.viewport_receipt_script);
+  reply := answered (obj ["guard",page_summary;"receipt",size 1548 990;"error",`Null]);
+  (match resize Lane.Browser_default with
+   | Ok receipt ->
+     check bool "restoring sends no size" true (field "metrics" (List.hd !asked).args = `Null);
+     check bool "and the restored size holds nothing of the process" true
+       (not (List.mem_assoc "lifetime" (Yojson.Safe.Util.to_assoc receipt)))
+   | other -> failf "the restore was %s" (failure_kind other));
+  reply := refused "page_url_changed";
+  check string "a page that moved is refused before the override" "page_url_changed"
+    (before_effect "a moved page" (resize (Lane.Fit {width=800;height=600})));
+  reply := answered (obj ["guard",page_summary;"receipt",size 1548 990;"error",str "Emulation.setDeviceMetricsOverride failed"]);
+  check string "a CDP failure leaves the size unknown" "unknown" (failure_kind (resize (Lane.Fit {width=800;height=600})))
+
+(* What leaves the peer says where input stands and which SDK process ran
+   it, failures included. *)
 let test_every_answer_carries_the_input_state () =
   let module Input=Masc.Browser_ego_input in
   let dialog=ego_dialog "alert" "mousedown interrupted" in
@@ -1132,28 +1178,33 @@ let test_every_answer_carries_the_input_state () =
   let receipt_of label = function
     | Error (Live.Observed_failure {receipt;_} | Live.Partial_failure {receipt;_}) -> receipt
     | Ok _ | Error (Live.Before_effect _ | Live.Outcome_unknown _) -> fail (label ^ ": no failure receipt") in
+  let stamped result = Peer.with_session_state peer ~sdk_process_started_at:(Some 12.5) result in
   let held label receipt =
-    check string (label ^ ": readiness") "release_uncertain" (text (field "inputReadiness" receipt)) in
-  (match Peer.with_input_state peer (dispatch peer Live.Page_interact gesture) with
+    check string (label ^ ": readiness") "release_uncertain" (text (field "inputReadiness" receipt));
+    check bool (label ^ ": SDK process") true (field "sdkProcessStartedAt" receipt = `Float 12.5) in
+  (match stamped (dispatch peer Live.Page_interact gesture) with
    | Ok value -> held "the next input" value
    | Error _ as other -> failf "the next input while release is uncertain was %s" (failure_kind other));
-  let refusal=Peer.with_input_state peer (Error (Live.Before_effect "refused")) in
+  let refusal=stamped (Error (Live.Before_effect "refused")) in
   check string "a refusal stays before any effect" "before effect" (failure_kind refusal);
   held "a refusal" (receipt_of "a refusal" refusal);
-  let unknown=Peer.with_input_state peer (Error (Live.Outcome_unknown "lost answer")) in
+  let unknown=stamped (Error (Live.Outcome_unknown "lost answer")) in
   check string "an unknown outcome stays unknown" "unknown" (failure_kind unknown);
   held "an unknown outcome" (receipt_of "an unknown outcome" unknown);
-  (match Peer.with_input_state peer (dispatch peer Live.Browser_info (obj [])) with
+  (match stamped (dispatch peer Live.Browser_info (obj [])) with
    | Ok value -> held "a read while held" value
    | Error _ -> fail "a read while input is held was not served");
   let partial=receipt_of "a partial failure"
-    (Peer.with_input_state peer (Error (Live.Partial_failure {tab_id=1;message="partial";receipt=obj ["step",`Int 1]}))) in
+    (stamped (Error (Live.Partial_failure {tab_id=1;message="partial";receipt=obj ["step",`Int 1]}))) in
   held "a partial failure" partial;
   check int "a partial receipt keeps its own fields" 1 (Yojson.Safe.Util.to_int (field "step" partial));
   reply:=input_reply (obj []);
   ignore (dispatch peer Live.Page_interact gesture);
-  let after=receipt_of "a failure after a clean receipt" (Peer.with_input_state peer (Error (Live.Before_effect "refused"))) in
-  check string "after a clean receipt the readiness is settled" "command_settled" (text (field "inputReadiness" after))
+  let after=receipt_of "a failure after a clean receipt"
+    (Peer.with_session_state peer ~sdk_process_started_at:None (Error (Live.Before_effect "refused"))) in
+  check string "after a clean receipt the readiness is settled" "command_settled" (text (field "inputReadiness" after));
+  check bool "no running SDK process answers null" true
+    (List.assoc_opt "sdkProcessStartedAt" (Yojson.Safe.Util.to_assoc after) = Some `Null)
 
 let test_chooser_upload_runs_after_uncertain_pointer_release () =
   let directory = Unix.realpath (capture_directory ()) in
@@ -1245,6 +1296,7 @@ let test_the_scripts_parse_as_modules () =
       Live.Page_interact, interact_args (Lane.Press_key {document_id="d1";key=enter});
       Live.Page_interact, interact_args (Lane.Fill_node {target={document_id="d1";node_id="message"};text="hi"});
       Live.Page_interact, interact_args (Lane.Fill_target {target=Lane.Target_ref 5;text="hi"});
+      Live.Page_interact, interact_args (Lane.Set_viewport (Lane.Fit {width=800;height=600}));
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=3;frame_path=[];interaction=Lane.Action.Close_tab});
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Reload});
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Stop_loading});
@@ -1258,7 +1310,7 @@ let test_the_scripts_parse_as_modules () =
   check (result unit string) "finish" (Ok ()) (Peer.finish peer);
   check (list string) "every step"
     ["space.open";"tabs.list";"page.read";"page.document";"page.elements";"page.scene";"page.snapshot";"page.downloads";"page.capture";
-     "page.open";"page.goto";"page.target";"page.pointer";"page.pointer";"page.pointer";"page.keyboard";"page.input";"page.target_input";
+     "page.open";"page.goto";"page.target";"page.pointer";"page.pointer";"page.pointer";"page.keyboard";"page.input";"page.target_input";"page.viewport";
      "page.close";"page.reload";"page.stop_loading";"page.history";"page.dialog";"page.dialog";"page.upload";"page.choose_files";"space.finish"]
     (List.rev_map fst !scripts);
   List.iter (fun (step, script) ->
@@ -3949,6 +4001,7 @@ let () =
       test_case "target dialog keeps release uncertain until a clean receipt" `Quick test_target_dialog_keeps_release_uncertain_until_a_clean_receipt;
       test_case "a gesture refused before its press keeps input" `Quick test_a_gesture_refused_before_its_press_keeps_input;
       test_case "every answer carries the input state" `Quick test_every_answer_carries_the_input_state;
+      test_case "an ego viewport is a CDP override on its Page" `Quick test_viewport_is_a_cdp_override_on_the_page;
       test_case "a dialog-interrupted workflow stays uncertain until a new click settles, without replay" `Quick test_dialog_interrupted_workflow_stays_uncertain_until_a_new_click_settles;
       test_case "native workflows retain input ownership after a lost result" `Quick test_native_workflow_pointer_ownership;
       test_case "a workflow that never held input keeps the previous readiness" `Quick test_a_workflow_that_never_held_input_keeps_the_previous_readiness;

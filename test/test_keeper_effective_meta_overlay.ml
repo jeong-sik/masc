@@ -1461,6 +1461,54 @@ let test_status_reads_live_registry_each_call () =
         (Some "second live error")
         (json_string_field "keeper_last_error" (status ())))
 
+let test_status_shows_the_turn_running_now () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  let name = "status-live-turn" in
+  write_keeper_toml
+    ~keepers_dir
+    ~name
+    ~sandbox_profile:"docker"
+    ~instructions:"live turn observation";
+  let config = Workspace.default_config base in
+  let meta = seed_runtime_meta config name in
+  Masc.Keeper_registry.For_testing.clear ();
+  Fun.protect
+    ~finally:Masc.Keeper_registry.For_testing.clear
+    (fun () ->
+      ignore
+        (Masc.Keeper_registry.For_testing.register
+           ~base_path:config.base_path
+           name
+           meta);
+      let status () =
+        status_json_with_args config
+          (`Assoc [ "name", `String name; "fast", `Bool true ])
+      in
+      Alcotest.(check bool)
+        "no turn runs before mark_turn_started"
+        true
+        (json_field "live_turn" (status ()) = Some `Null);
+      let observation_token = Masc.Keeper_turn_observation_token.fresh () in
+      Masc.Keeper_registry.mark_turn_started
+        ~observation_token
+        ~base_path:config.base_path
+        ~wake:Masc.Keeper_registry.Proactive_tick
+        name;
+      Masc.Keeper_registry.record_turn_tool_inflight
+        ~observation_token
+        ~base_path:config.base_path
+        name
+        ~count:2;
+      let live = json_assoc_field "live_turn" (status ()) in
+      Alcotest.(check bool)
+        "the running turn carries its id"
+        true
+        (Option.is_some (json_int_field "turn_id" live));
+      Alcotest.(check (option int))
+        "the running turn carries its in-flight tool count"
+        (Some 2)
+        (json_int_field "active_tool_count" live))
+
 let test_status_surfaces_chat_operation_runtime () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "chat-operation-status" in
@@ -2111,6 +2159,8 @@ let () =
             `Quick test_status_tracks_persisted_meta_without_updated_at;
           Alcotest.test_case "status reads live registry each call" `Quick
             test_status_reads_live_registry_each_call;
+          Alcotest.test_case "status shows the turn running now" `Quick
+            test_status_shows_the_turn_running_now;
           Alcotest.test_case "status surfaces chat operation runtime" `Quick
             test_status_surfaces_chat_operation_runtime;
           Alcotest.test_case "keeper list surfaces effective meta errors"

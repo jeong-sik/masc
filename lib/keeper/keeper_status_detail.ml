@@ -595,10 +595,31 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
               }
           | None -> empty_tool_audit_snapshot
         in
+         let registry_entry = Keeper_registry.get ~base_path:config.base_path m.name in
          let keeper_last_error =
-           match Keeper_registry.get ~base_path:config.base_path m.name with
+           match registry_entry with
            | Some entry -> entry.last_error
            | None -> None
+         in
+         (* [last_turn_ago_s] counts from the last finished turn, so a Keeper
+            ninety minutes into one turn read as ninety minutes silent (#29000).
+            This is the registry's observation of the turn running now, the
+            one the dashboard composite serves; [Null] when none runs. *)
+         let live_turn =
+           match Option.bind registry_entry Keeper_composite_observer.live_turn_observation with
+           | None -> `Null
+           | Some (live : Keeper_registry.turn_observation) ->
+             `Assoc
+               [ ("turn_id", `Int live.turn_id);
+                 ( "elapsed_s",
+                   Json_util.float_opt_to_json
+                     (Keeper_status_metrics.age_seconds_opt ~now_ts live.started_at) );
+                 ( "last_progress_ago_s",
+                   Json_util.float_opt_to_json
+                     (Keeper_status_metrics.age_seconds_opt ~now_ts live.last_progress_at) );
+                 ("last_progress_kind", Json_util.string_opt_to_json live.last_progress_kind);
+                 ("active_tool_count", `Int live.active_tool_count);
+               ]
          in
          let sandbox_live =
            Keeper_sandbox_control.live_status_json
@@ -663,6 +684,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            ("keepalive_running", `Bool keepalive_running);
            ("keeper_age_s", Json_util.float_opt_to_json keeper_age_s);
            ("last_turn_ago_s", Json_util.float_opt_to_json last_turn_ago_s);
+           ("live_turn", live_turn);
            ("last_proactive_ago_s", Json_util.float_opt_to_json last_proactive_ago_s);
            ("last_visible_proactive_ago_s", Json_util.float_opt_to_json last_visible_proactive_ago_s);
            ("active_model", `Null);

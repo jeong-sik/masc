@@ -10,6 +10,7 @@
   complete_stream_diagnostic
   complete_stream_state
   openai_error_envelope
+  openai_stream_state
   model_catalog_embedded
   provider_http_codec
   tool_result_projection

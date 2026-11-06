@@ -591,7 +591,7 @@ let complete_stream_http
         | Types.NDJSONError _ -> `Provider_reported_error
         (* [SSEParseFailed] is emitted by format-agnostic producers — the
            Ollama (NDJSON) tool-routing path raises it via
-           [Streaming.reject_tool_block ~protocol:"ollama"] — so the format
+           [Openai_stream_state.resolve_tool_block ~protocol:"ollama"] — so the format
            comes from the stream, not from the variant's legacy name. *)
         | Types.SSEParseFailed _ -> `Wire_error active_wire_format
         (* Event types exist only in SSE; NDJSON has no event field. *)

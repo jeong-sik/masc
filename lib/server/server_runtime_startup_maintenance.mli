@@ -48,6 +48,10 @@ val startup_sweep_microvm_guests : Mcp_server.server_state -> unit
 (** Collect abandoned guests with the runtime lifecycle lock. Failure is
     logged without failing server readiness. *)
 
+val startup_count_unowned_exact : Mcp_server.server_state -> unit
+(** Log one {!Server_unowned_exact_census} line, counted on a worker domain.
+    Moves and deletes nothing. *)
+
 val declared_keeper_names :
   keepers_dir:string -> (string list, string) result
 (** The keepers a directory declares: the basenames of its [.toml] files, or
@@ -80,7 +84,7 @@ val report_unarmed_typesafeai_destinations : unit -> unit
 (** One warning per destination {!Typesafeai_config.unarmed_destinations}
     finds. Called once the runtime table is loaded. *)
 
-type task = Jsonl_retention | Microvm_guest_sweep
+type task = Jsonl_retention | Microvm_guest_sweep | Unowned_exact_census
 
 val start_maintenance :
   sw:Eio.Switch.t -> task:task -> run:(unit -> unit) -> unit

@@ -1530,6 +1530,8 @@ let start_post_ready_owner_lanes
     ~run:(fun () -> startup_prune_jsonl state);
   start_maintenance ~sw ~task:Microvm_guest_sweep
     ~run:(fun () -> startup_sweep_microvm_guests state);
+  start_maintenance ~sw ~task:Unowned_exact_census
+    ~run:(fun () -> startup_count_unowned_exact state);
   Server_runtime_startup_maintenance.report_unknown_typesafeai_exclusions
     ~base_path:(Mcp_server.workspace_config state).base_path;
   Server_runtime_startup_maintenance.report_unknown_memory_recall_keepers

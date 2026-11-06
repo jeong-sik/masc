@@ -557,10 +557,14 @@ let observe_retained ~store ~declaration_id ~schema request =
 
 (* The host link belongs to the original request owner, not to a worker
    evidence address. Canonical tagged tuples keep both ID spaces unambiguous. *)
+let proof_tuple values = Yojson.Safe.to_string (`List values)
+let proof_instance_id ~declaration_id =
+  proof_tuple [`String "exact-original-execution"; `String declaration_id]
 let proof_key ~declaration_id request =
-  let tuple values = Yojson.Safe.to_string (`List values) in
-  tuple [`String "exact-original-execution"; `String declaration_id],
-  tuple [`String "original-request"; `String request.request_id; `String (digest request)]
+  proof_instance_id ~declaration_id,
+  proof_tuple [`String "original-request"; `String request.request_id; `String (digest request)]
+let proof_directory ~declaration_id =
+  Lane_addon_store.host_result_directory ~instance_id:(proof_instance_id ~declaration_id)
 
 let outcome_to_json = function
   | Call_ended final -> final_to_json (Call_final final)
@@ -672,6 +676,21 @@ let load_proofs ~store ~declaration_id request =
     let* encoded=Lane_addon_action.canonical (proofs_to_json ~store ~declaration_id request proofs) in
     if Yojson.Safe.equal normalized encoded then Ok proofs
     else Error "original execution link has unknown or conflicting fields"
+
+let proof_request_id ~declaration_id ~file_name json =
+  let* request = match json with
+    | `Assoc fields -> (match List.assoc_opt "executions" fields with
+        | Some (`List (`Assoc first :: _)) ->
+          (match List.assoc_opt "request" first with
+           | Some request -> request_of_json request
+           | None -> Error "missing original execution request")
+        | Some _ | None -> Error "original execution link requires nonempty completed attempts")
+    | _ -> Error "original execution link must be an object" in
+  let instance_id, request_key = proof_key ~declaration_id request in
+  if String.equal file_name
+      (Filename.basename (Lane_addon_store.host_result_path ~instance_id ~request_id:request_key))
+  then Ok request.request_id
+  else Error "original execution link is stored under another request's name"
 
 let selected_proof ~attempt_ordinal proofs =
   List.find_map (fun (ordinal,schema,execution) ->

@@ -206,6 +206,10 @@ type owner_family =
 
 원본이 없는 ID 는 `Unowned` 계약상 다시 허가되지 않는다. 그래서 두 단계로 지울 까닭이 없다. 이 pass 도 settlement barrier 와 workspace process lease 안에서 돈다.
 
+실행 증명은 내용을 읽어야 요청 ID 를 안다. 11-06 운영 workspace 에서 Librarian·Curator 증명 7,000개(2.67GB)를 Python 으로 읽는 데 13초가 걸렸다. 같은 주 시작 로그에서 checkpoint sweep 은 p50 1.36초, 본문 inventory 는 p50 1.96초다(11-01~11-06, 61·48번). 그래서 이 절의 세기는 시작 단계에 넣지 않는다. 시작 정비(`Server_runtime_startup_maintenance.start_maintenance`)로 worker domain 에서 돌고, 끝나면 로그 한 줄을 남긴다. 세기는 아무것도 지우지 않아서 lease 와 barrier 를 잡지 않는다. L3 의 지우기는 이 절의 규칙대로 barrier 안에서 돈다.
+
+권한 검사와 같은 결정을 쓴다. `Server_workspace_memory_addon_validation.original_required` 와 `Server_librarian_addon_validation.original_required` 가 그 함수다. `authorize` 의 "원본 없음" 갈래가 이 함수를 부른다. Librarian package 는 namespace 밖 요청을 바로 `Unowned` 로 끝내고, namespace 안 요청도 원본이 없으면 `Unowned` 로 끝낸다. 그래서 package 하나로 답할 수 있다. 다른 package 의 namespace 요청은 세지 않는다. 그 기록은 지우지 않는 쪽으로 남는다.
+
 ## 5. 이 RFC 가 하지 않는 것
 
 - Lane instance 의 binding 과 관측: RFC-0497.
@@ -216,7 +220,7 @@ type owner_family =
 
 ## 6. 구현 순서
 
-1. L1 계획: §4.2·§4.4 의 pass 가 지울 대상만 센다. 아무것도 지우지 않는다. 기록 수·바이트, 본문 수·바이트, 남는 수를 시작 로그 한 줄과 본문 inventory 보고에 싣는다. `owner_family` 와 항목마다의 답 함수도 이 층에 들어간다.
+1. L1 계획: §4.2·§4.4 의 pass 가 지울 대상만 센다. 아무것도 지우지 않는다. §4.2 의 기록 수·바이트, 본문 수·바이트, 남는 수는 시작 로그 한 줄에 싣는다(L1a). §4.4 의 Exact 기록·실행 증명 수와 바이트는 시작 정비의 로그 한 줄에 싣는다(L1b, §4.4 끝). 기록 종류와 종류마다의 답 함수도 이 층에 들어간다.
    - 확인: 배포 뒤 대상 수가 §2.2 와 같은 방법으로 잰 값과 맞는다.
 2. L2 본문: D1. `settle` 이 본문을 지운다. 이미 쌓인 본문은 L3 이 지운다.
    - 확인: 배포 뒤 새 날짜 디렉터리에 `bodies/` 가 생기지 않는다.

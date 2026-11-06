@@ -39,6 +39,12 @@ val load_host_result : t -> instance_id:string -> request_id:string ->
   (Yojson.Safe.t option, string) result
 (** Durable host-result authority link, addressed by instance and original request,
     never by a package-supplied blob hash. Same verification as action receipts. *)
+val host_result_directory : instance_id:string -> string
+(** The directory below {!root} that holds every host-result link of
+    [instance_id]. *)
+val host_result_path : instance_id:string -> request_id:string -> string
+(** The path below {!root} of one host-result link, inside
+    {!host_result_directory}. *)
 type read_budget
 type bounded_read_error = Read_limit_exceeded | Read_failed of string
 val read_budget : max_bytes:int -> read_budget
@@ -117,6 +123,12 @@ val load_exact_request : t -> declaration_id:string -> request_id:string ->
     The owning run republishes the record at each transition, and an observer
     reads it without the run's claim. A read that ends on a file the path no
     longer names reads the newer record, instead of failing. *)
+val exact_request_directory : declaration_id:string -> string
+(** The directory below {!root} that holds every Exact record of
+    [declaration_id]. *)
+val exact_request_path : declaration_id:string -> request_id:string -> string
+(** The path below {!root} of one Exact record, inside
+    {!exact_request_directory}. *)
 val save_tool_request_owner : t -> scope:string -> request_id:string -> Yojson.Safe.t -> (unit, string) result
 (** Cooperative publication is serialized with known-ID reads and complete
     inventories of the same original scope, across Store objects and aliases

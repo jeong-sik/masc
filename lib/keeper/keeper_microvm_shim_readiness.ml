@@ -161,6 +161,8 @@ let check_startup_binary ~base =
       Error (Initialization_failed (Startup_shim_missing error))
     | () -> Ok ())
 
+let recovery_namespace = "microvm-shim-recovery"
+
 (* Startup replacement and missing-file creation use the same durable owner.
    A fresh registry is opened for each attempted publication: a cached ready
    registry cannot discover an obligation created by a failed attempt. *)
@@ -176,7 +178,7 @@ let with_config_lane ~fs ~base f =
           ~parent_components:[] ~target_leaf:Shim.shim_config_name ~permissions:0o600
         |> Result.map_error (fun error -> Config_unavailable (Recovery_target_invalid error)) in
       let* registry = Fs_compat.Publication_recovery.open_namespaced_registry ~sw ~fs
-          ~registry_root:Eio.Path.(fs / registry_root) ~namespace:"microvm-shim-recovery"
+          ~registry_root:Eio.Path.(fs / registry_root) ~namespace:recovery_namespace
         |> Result.map_error (fun error -> Config_unavailable (Recovery_registry_failed error)) in
       match Fs_compat.Publication_recovery.with_lane ~registry ~owner:"microvm-shim-config"
           (fun recovery -> f ~sw ~parent ~target ~recovery) with

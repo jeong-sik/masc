@@ -49,3 +49,6 @@ val lookup :
 (** Read-only exact source lookup, including a reservation whose job journal
     is not available yet. Absence never authorizes replay of an existing
     execution attempt. No backend command or job inventory is consulted. *)
+
+val requests_dirname : string
+(** The asynchronous Keeper request directory below [<base>/.masc]. *)

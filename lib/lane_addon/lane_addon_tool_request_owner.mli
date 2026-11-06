@@ -183,10 +183,10 @@ val listed : retained -> Record.t
 (** The record {!discover} lists for this retained original, without its body. *)
 type settle_error = Settle_unavailable of string | Settle_changed
 val settle : store:Lane_addon_store.t -> date:string -> Record.t -> (unit, settle_error) result
-(** Move one original, its record and then its body, into the settled archive
-    under [date], if the scope still holds exactly this record; [Settle_changed]
-    otherwise, and nothing moves. A record already in the archive completes
-    the move of whatever is left. The caller settles only originals no pass
+(** Move one original's record into the settled archive under [date], then
+    remove its body, if the scope still holds exactly this record;
+    [Settle_changed] otherwise, and nothing changes. A record already in the
+    archive completes the settle, removing a body still left. The caller settles only originals no pass
     needs again and whose body no other record names. The expected-record check
     and move share the scope serializer, under the caller's workspace lease. *)
 val settled : store:Lane_addon_store.t -> scope:string -> date:string -> request_id:string ->

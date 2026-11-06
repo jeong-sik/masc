@@ -53,13 +53,13 @@ let test_unprotected_body_and_owned_bodies_survive () =
     ignore (advance store refused (Progress.Successor_intended successor));
     retain store ~scope:"archived-scope" ~id:"archive-id" ~request:archived;
     let record = Owner.listed (load store ~scope:"archived-scope" ~id:"archive-id") in
+    let original_path = body_path root ~scope:"archived-scope" ~request:archived in
+    let archived_bytes = Fs_compat.load_file original_path in
     (match Owner.settle ~store ~date:"2026-10-27" record with
      | Ok () -> () | Error error -> Alcotest.fail (Owner.settle_error_to_string error));
-    let archived_digest = get (Owner.request_digest archived) in
-    let archive_path = Filename.concat root (Store.tool_request_archive_body_path
-      ~scope:"archived-scope" ~date:"2026-10-27" ~request_digest:archived_digest) in
-    let original_path = body_path root ~scope:"archived-scope" ~request:archived in
-    Unix.rename archive_path original_path;
+    (* What a settle interrupted after its record move leaves: the body still
+       beside the scope. *)
+    get (Fs_compat.save_file_atomic_strict original_path archived_bytes);
     stage_orphan store ~scope:"orphan-scope" orphan;
     let report = run store in
     Alcotest.(check int) "the orphan and the body only a settled record names are counted" 2
@@ -71,10 +71,10 @@ let test_unprotected_body_and_owned_bodies_survive () =
     Alcotest.(check bool) "active original still loads" true ((load store ~scope ~id:"parent-id").request = parent);
     Alcotest.(check bool) "intent in a different scope still restores its exact body" true
       (owned (Owner.load_successor_request ~store ~scope:child_scope successor) = child);
-    Alcotest.(check bool) "interrupted archive body remains available" true (exists original_path);
+    Alcotest.(check bool) "an interrupted settle's body remains" true (exists original_path);
     (match Owner.settle ~store ~date:"2026-10-27" record with
      | Ok () -> () | Error error -> Alcotest.fail (Owner.settle_error_to_string error));
-    Alcotest.(check bool) "the original settlement can still be retried" true (exists archive_path))
+    Alcotest.(check bool) "retrying the settle removes that body" false (exists original_path))
 
 (* Settled records are never read: a settled record that would refuse the
    inventory changes nothing, with or without an unprotected live body. *)

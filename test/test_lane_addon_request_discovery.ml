@@ -372,7 +372,7 @@ let test_held_root_through_a_symlink_reads_entries_by_relative_path () =
         (String.length (Fs_compat.load_file (path root "original"))) bytes
     | Error error -> Alcotest.fail (Fs_compat.owned_regular_file_read_error_to_string error))
 
-(* Each original with its own body, so settling one moves no body another
+(* Each original with its own body, so settling one removes no body another
    record names. *)
 let request_of id = `Assoc ["input",`String ("original evidence of " ^ id)]
 let retain_own store id = owned (Owner.retain ~store ~scope ~request_id:id
@@ -382,8 +382,9 @@ let own_body root id = Filename.concat root
     (Store.tool_request_body_path ~scope ~request_digest:(get (Owner.request_digest (request_of id))))
 let day = "2026-10-23"
 let settled_path root id = Filename.concat root (Store.tool_request_archive_record_path ~scope ~date:day ~request_id:id)
-let settled_body root id = Filename.concat root
-    (Store.tool_request_archive_body_path ~scope ~date:day ~request_digest:(get (Owner.request_digest (request_of id))))
+(* What the settled day holds: only records, never a body. *)
+let settled_day_entries root id =
+  Sys.readdir (Filename.dirname (Filename.dirname (settled_path root id))) |> Array.to_list
 let listed store id = match List.find_opt (fun record -> Owner.Record.request_id record=id)
     (owned (Owner.discover ~store ~scope)) with
   | Some record -> record | None -> Alcotest.fail "the original is not in its scope"
@@ -393,11 +394,10 @@ let settled_ok value = match value with
   | Error error -> Alcotest.fail (Owner.settle_error_to_string error)
 let is_settled ?(date=day) store id = owned (Owner.settled ~store ~scope ~date ~request_id:id)
 
-let test_a_settled_original_leaves_the_scope_with_its_body () = with_store (fun root store ->
+let test_a_settled_original_leaves_the_scope_and_its_body_is_removed () = with_store (fun root store ->
   retain_own store "settled";retain_own store "kept";
   let record = listed store "settled" in
-  let record_bytes = Fs_compat.load_file (path root "settled")
-  and body_bytes = Fs_compat.load_file (own_body root "settled") in
+  let record_bytes = Fs_compat.load_file (path root "settled") in
   settled_ok (settle store record);
   Alcotest.(check (list string)) "discovery no longer lists it" ["kept"]
     (List.map Owner.Record.request_id (owned (Owner.discover ~store ~scope)));
@@ -405,11 +405,11 @@ let test_a_settled_original_leaves_the_scope_with_its_body () = with_store (fun 
   Alcotest.(check bool) "its record is under the date" true (is_settled store "settled");
   Alcotest.(check bool) "and under no other date" false (is_settled ~date:"2026-10-24" store "settled");
   Alcotest.(check string) "the record moved unchanged" record_bytes (Fs_compat.load_file (settled_path root "settled"));
-  Alcotest.(check string) "the body moved unchanged" body_bytes (Fs_compat.load_file (settled_body root "settled"));
+  Alcotest.(check (list string)) "the day keeps no body" ["records"] (settled_day_entries root "settled");
   Alcotest.(check bool) "no body is left beside the scope" false (Sys.file_exists (own_body root "settled"));
   Alcotest.check json "the other original keeps its body" (request_of "kept") (some (owned (load store "kept"))).request;
   settled_ok (settle store record);
-  Alcotest.(check string) "settling again finds it moved and changes nothing" record_bytes
+  Alcotest.(check string) "settling again finds it settled and changes nothing" record_bytes
     (Fs_compat.load_file (settled_path root "settled")))
 
 let test_a_changed_record_is_not_settled () = with_store (fun root store ->
@@ -427,17 +427,18 @@ let test_a_changed_record_is_not_settled () = with_store (fun root store ->
   Alcotest.(check bool) "its body stays" true (Sys.file_exists (own_body root "original"));
   Alcotest.(check bool) "nothing is under the date" false (is_settled store "original"))
 
-let test_settling_again_finishes_a_move_that_stopped_after_the_record () = with_store (fun root store ->
+let test_settling_again_removes_a_body_left_after_the_record_moved () = with_store (fun root store ->
   retain_own store "original";
   let record = listed store "original" in
+  let body_bytes = Fs_compat.load_file (own_body root "original") in
   settled_ok (settle store record);
-  (* What a settle interrupted between its two moves leaves: the record under
-     the date, the body still beside the scope. *)
-  Unix.rename (settled_body root "original") (own_body root "original");
+  (* What a settle interrupted between the record move and the body removal
+     leaves: the record under the date, the body still beside the scope. *)
+  save (own_body root "original") body_bytes;
   Alcotest.(check int) "the scope no longer lists it" 0 (List.length (owned (Owner.discover ~store ~scope)));
   settled_ok (settle store record);
-  Alcotest.(check bool) "the body is under the date" true (Sys.file_exists (settled_body root "original"));
-  Alcotest.(check bool) "and no longer beside the scope" false (Sys.file_exists (own_body root "original")))
+  Alcotest.(check bool) "the body is gone from beside the scope" false (Sys.file_exists (own_body root "original"));
+  Alcotest.(check (list string)) "and the day still keeps no body" ["records"] (settled_day_entries root "original"))
 
 (* The record moves first, so a settle that cannot move it moves nothing:
    the original stays whole in its scope, never a record without its body. *)
@@ -452,8 +453,7 @@ let test_a_settle_that_cannot_move_the_record_moves_nothing () = with_store (fun
    | Error (Owner.Settle_unavailable _) -> ()
    | Error Owner.Settle_changed | Ok () -> Alcotest.fail "a settle that could not move its record succeeded");
   Alcotest.check json "the original still loads with its body" (request_of "original")
-    (some (owned (load store "original"))).request;
-  Alcotest.(check bool) "its body is not under the date" false (Sys.file_exists (settled_body root "original")))
+    (some (owned (load store "original"))).request)
 
 let test_a_settle_refuses_a_date_that_is_not_a_day_and_a_missing_original () = with_store (fun root store ->
   retain_own store "original";
@@ -684,11 +684,11 @@ let () =
   Alcotest.test_case "actual held read serializes aliased publication without blocking other scopes" `Quick
     test_original_publication_waits_for_actual_read_across_store_aliases];
   "settle",[
-  Alcotest.test_case "a settled original leaves the scope with its body" `Quick
-    test_a_settled_original_leaves_the_scope_with_its_body;
+  Alcotest.test_case "a settled original leaves the scope and its body is removed" `Quick
+    test_a_settled_original_leaves_the_scope_and_its_body_is_removed;
   Alcotest.test_case "a changed record is not settled" `Quick test_a_changed_record_is_not_settled;
-  Alcotest.test_case "settling again finishes a move that stopped after the record" `Quick
-    test_settling_again_finishes_a_move_that_stopped_after_the_record;
+  Alcotest.test_case "settling again removes a body left after the record moved" `Quick
+    test_settling_again_removes_a_body_left_after_the_record_moved;
   Alcotest.test_case "a settle that cannot move the record moves nothing" `Quick
     test_a_settle_that_cannot_move_the_record_moves_nothing;
   Alcotest.test_case "a date that is not a day and a missing original are refused" `Quick

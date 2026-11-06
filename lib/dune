@@ -41,6 +41,7 @@
   keeper_gate_auto_judge_recovery
   keeper_approval_queue_registry
   keeper_approval_queue_persist
+  keeper_approval_queue_load
   keeper_skill_activation_types
   keeper_skill_activation_summary
   keeper_board_attention_partition_types

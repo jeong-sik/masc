@@ -17,13 +17,13 @@
     for the inbound platform message. The store does not interpret these
     values.
 
+    The code lives in the [Keeper_chat_store_*] modules included below.
+    Each include uses only the ones above it, and [keeper_chat_store.mli]
+    is the interface callers see.
+
     @since 2.145.0 *)
 
-open Keeper_approval_lifecycle
-
 include Keeper_chat_types
-
-open Keeper_chat_projection
 include Keeper_chat_store_paths
 include Keeper_chat_store_redaction
 include Keeper_chat_store_row_codec

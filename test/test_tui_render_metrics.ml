@@ -6,7 +6,7 @@ module Render_metrics = Masc_tui_render_metrics
 module Render_prim = Masc_tui_render_prim
 
 let make_state () =
-  Types.create_state ~workspace:"" ~port:0 ~refresh_interval:0. ()
+  Types.create_state ~workspace:"" ~port:0 ()
 ;;
 
 let test_compact_connection_priority () =

@@ -48,7 +48,7 @@ let async_of_json () =
   | Error detail -> failwith ("async: " ^ detail)
 
 let tools_state () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   state.view <- Tools;
   state.agenda_open <- false;
   state.schedules <- None;

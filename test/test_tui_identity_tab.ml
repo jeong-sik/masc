@@ -105,8 +105,7 @@ let pending_urls state keeper =
   |> List.map (fun login -> login.Masc_tui_identity_model.ils_url)
 
 let identity_state () =
-  Masc_tui_types.create_state ~workspace:"test" ~port:8935
-    ~refresh_interval:2.0 ()
+  Masc_tui_types.create_state ~workspace:"test" ~port:8935 ()
 
 module Decode = Masc.Tui_decode
 

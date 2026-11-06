@@ -28,7 +28,7 @@ let runtime id : Masc.Tui_decode.runtime_option =
     ro_rate_limited = false; ro_rate_limit_resets_at = None;
     ro_failed_attempt = None }
 
-let state () = create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+let state () = create_state ~workspace:"test" ~port:8935 ()
 
 (* A Keeper outcome names the runtime that answered by exact id. The join to
    the catalog is an equality on that id; an id the catalog lacks is kept raw

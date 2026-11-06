@@ -68,7 +68,7 @@ let reading_of texts : Tui_types.keeper_execute_reading =
 
 (* The Terminal tab open on [analyst], in a workspace this terminal confirmed. *)
 let terminal_state () =
-  let state = Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
   state.workspace_identity <- Tui_types.Workspace_identity_match;
   state.server_identity <- Some server_identity;
   state.local_keepers <- Tui_types.Local_workspace_read;

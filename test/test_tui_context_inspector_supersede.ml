@@ -9,7 +9,7 @@
 module Tui_types = Masc_tui_types
 
 let state () =
-  Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  Tui_types.create_state ~workspace:"test" ~port:8935 ()
 ;;
 
 let test_a_launch_stops_the_read_it_replaced () =

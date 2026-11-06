@@ -38,7 +38,7 @@ let scenario ok () = with_base @@ fun base_path -> Eio_main.run @@ fun _env -> E
   let wire () = Server_async_request_observability.project_request ~base_path
       ~submitted_by:target.submitted_by ~request_id in
   let read () = Detail.decode ~target (wire ()) in
-  let state=create_state ~workspace:"fixture" ~local_base_path:base_path ~port:0 ~refresh_interval:0. () in
+  let state=create_state ~workspace:"fixture" ~local_base_path:base_path ~port:0 () in
   state.view <- Tools;state.tools_pane <- Tools_async;
   state.tools_async_observation <- Some (Server_async_request_observability.project ~base_path
     |> Masc.Tui_decode.decode_async_request_observation |> value);

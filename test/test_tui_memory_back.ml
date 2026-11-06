@@ -4,7 +4,7 @@
 
 open Masc_tui_types
 
-let state () = create_state ~workspace:"" ~port:0 ~refresh_interval:0. ()
+let state () = create_state ~workspace:"" ~port:0 ()
 
 let check_back what expected actual =
   Alcotest.(check bool) what true (expected = actual)

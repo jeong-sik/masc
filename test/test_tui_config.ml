@@ -310,7 +310,7 @@ let test_home_visit_stays_with_local_workspace () =
         Ok (Writer.Committed { durability = Runtime.Durable; ignored_legacy_keys = [] })
       in
       let state = State.create_state ~workspace:"visits" ~local_base_path:base_path
-          ~preference_send ~port:0 ~refresh_interval:0. () in
+          ~preference_send ~port:0 () in
       let admit keeper = State.remember_local_chat_visit state ~sw:(Some sw) keeper in
       Alcotest.(check bool) "unread workspace admits no visit" false (admit beta);
       let local = identity base_path in

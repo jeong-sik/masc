@@ -24393,7 +24393,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       schedule_observer_retry state ~mailbox owner;
       if was_opening then resume_fusion_after_observer_failure state ~mailbox
       end
-  | Observer_msg ((Observer_opened _ | Observer_received _ | Observer_closed _)) -> ()
+  | Observer_msg (Observer_opened _ | Observer_received _) -> ()
   | Observer_msg (Observer_retry_due (authority, expected)) ->
       if Masc_tui_async_protocol.observer_retry_owned state ~authority expected then
            (match state.workspace_identity, state.connection_status with
@@ -29273,8 +29273,7 @@ let main
   in
   let state =
     create_state ~reasoning_visibility ~tool_visibility ~workspace
-      ~local_base_path:base_path ~preference_send ~preference_read:read_settings ~port
-      ~refresh_interval:refresh ()
+      ~local_base_path:base_path ~preference_send ~preference_read:read_settings ~port ()
   in
   state.observation_store <- Result.to_option observation_store;
   state.view <- Overview;

@@ -31,7 +31,7 @@ let review_row item =
     Rows.lane_id = "01a1785b/quiz/review"; Rows.kind = Rows.Event }
 
 let state_with quiz error =
-  let state = Types.create_state ~workspace:"quiz-reading" ~port:0 ~refresh_interval:0. () in
+  let state = Types.create_state ~workspace:"quiz-reading" ~port:0 () in
   state.Types.quiz_scorecard <- quiz;
   state.Types.quiz_scorecard_error <- error;
   state

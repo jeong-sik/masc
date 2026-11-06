@@ -197,7 +197,7 @@ let test_an_outage_event_after_an_unavailable_snapshot_asks_for_a_new_connection
    view lives inside the following state, so a job that is gone leaves nothing
    behind: withdrawing the readings ends the follow and the screen with it. *)
 let test_the_screen_draws_only_what_a_following_job_posted () =
-  let state = Masc_tui_types.create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = Masc_tui_types.create_state ~workspace:"" ~port:0 () in
   check view_t "no job" Client.Awaiting_first_reading (Masc_tui_types.fleet_stream_view state);
   let posted = following (reading ~revision:1 ~measured_at:10.0 (fleet ())) in
   state.Masc_tui_types.fleet_stream_reader <- Masc_tui_types.Fleet_stream_following posted;

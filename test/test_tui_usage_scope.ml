@@ -12,7 +12,7 @@ let history_row id : Trend.row =
   {scope_id=id; kind="window";limit_id=None;marks="";samples=[];reported_days=0}
 
 let state () =
-  let state = create_state ~workspace:"usage-scope-test" ~port:8935 ~refresh_interval:2. () in
+  let state = create_state ~workspace:"usage-scope-test" ~port:8935 () in
   state.overview_providers <- Providers_read {puws_since=123.;puws_accounts=[account "A";account "B"]};
   state.provider_history <- Provider_history_read
       {days=7;generated_at=456.;unreadable_reports=2;rows=[history_row "B";history_row "historical-only"]};

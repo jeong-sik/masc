@@ -6,7 +6,7 @@ let snapshot rows={bl_query=initial_query;bl_posts=rows}
 let receipt result={bpr_query=initial_query;bpr_result=result}
 
 let state () = create_state ~workspace:"test" ~local_base_path:"/workspace/board-list"
-    ~port:0 ~refresh_interval:0. ()
+    ~port:0 ()
 
 let post id : board_post =
   {bp_id=id;bp_author="author";bp_title=id;bp_body="body";bp_votes=0;bp_comment_count=0;

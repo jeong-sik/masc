@@ -106,7 +106,7 @@ let test_accepted_cancel_outlives_workspace_withdrawal env () =
   with_server ~clock ~sw ~owner:"cancel-owner-a" @@ fun base_a config_a expected_a original_a _call_a ->
   with_server ~clock ~sw ~owner:"cancel-owner-b" @@ fun _base_b config_b expected_b _original_b _call_b ->
   let foreign_before = Masc.Workspace.get_tasks_raw config_b in
-  let state = create_state ~workspace:"cancel-resource" ~local_base_path:base_a ~port:8935 ~refresh_interval:2. () in
+  let state = create_state ~workspace:"cancel-resource" ~local_base_path:base_a ~port:8935 () in
   state.server_identity <- Some expected_a;
   let results = Results.create () and shared,notification = seed_shared () in
   Fun.protect ~finally:(fun () -> Results.close results) @@ fun () ->
@@ -221,7 +221,7 @@ let test_created_task_survives_workspace_withdrawal env () = Eio.Switch.run @@ f
   with_server ~clock ~sw ~owner:"creation-session-a" @@ fun base_a config_a expected_a _original call_a ->
   with_server ~clock ~sw ~owner:"creation-session-b" @@ fun _base_b config_b expected_b _other _call_b ->
   let before_b = Masc.Workspace.get_tasks_raw config_b in
-  let state = create_state ~workspace:"task-resource" ~local_base_path:base_a ~port:8935 ~refresh_interval:2. () in
+  let state = create_state ~workspace:"task-resource" ~local_base_path:base_a ~port:8935 () in
   state.server_identity <- Some expected_a;
   state.workspace_identity <- Workspace_identity_match;
   state.msg_target_keeper_name <- Some "creation-keeper";
@@ -290,7 +290,7 @@ let test_created_task_survives_workspace_withdrawal env () = Eio.Switch.run @@ f
 let test_unknown_task_and_original_input_recovery env () = Eio.Switch.run @@ fun sw ->
   let clock = Eio.Stdenv.clock env in
   with_server ~clock ~sw ~owner:"creation-session-original" @@ fun base config expected _original call ->
-  let state = create_state ~workspace:"task-resource" ~local_base_path:base ~port:8935 ~refresh_interval:2. () in
+  let state = create_state ~workspace:"task-resource" ~local_base_path:base ~port:8935 () in
   state.server_identity <- Some expected;
   state.workspace_identity <- Workspace_identity_match;
   state.msg_target_keeper_name <- Some "creation-keeper";
@@ -478,7 +478,7 @@ let original_unconfirmed original = match Dispatch.progress original.tdr_dispatc
   | Completed {outcome=Unconfirmed _;_} -> ()
   | _ -> fail "inspection rewrote original creation transport evidence"
 let creation_state base workspace =
-  let state=create_state ~workspace:"creation-inspection" ~local_base_path:base ~port:8935 ~refresh_interval:2. () in
+  let state=create_state ~workspace:"creation-inspection" ~local_base_path:base ~port:8935 () in
   state.server_identity <- Some workspace;state.workspace_identity <- Workspace_identity_match;
   state.msg_target_keeper_name <- Some "creation-keeper";state
 let begin_inspection state = match begin_task_creation_inspection state with

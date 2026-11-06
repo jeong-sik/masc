@@ -12,7 +12,7 @@ module Fetched = Masc_tui_fetched
 module Types = Masc_tui_types
 module Asks = Masc.Tui_decode_asks
 
-let fresh () = Types.create_state ~workspace:"test" ~port:0 ~refresh_interval:0. ()
+let fresh () = Types.create_state ~workspace:"test" ~port:0 ()
 
 let base_path = "/workspace/original"
 let masc_root = "/workspace/original/.masc"

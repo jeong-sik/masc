@@ -267,8 +267,7 @@ let test_retired_writer_cannot_damage_prepared_audio () =
           bytes (In_channel.with_open_bin path In_channel.input_all)))
 
 let listen_state () =
-  let state = Masc_tui_types.create_state ~workspace:"test" ~port:8935
-    ~refresh_interval:2. () in
+  let state = Masc_tui_types.create_state ~workspace:"test" ~port:8935 () in
   state.view <- Keepers Keeper_message;
   Masc_tui_types.retarget_message state (Some "music");
   state

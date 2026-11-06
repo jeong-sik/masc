@@ -15,7 +15,7 @@ let blob = { Mcp.rc_uri=Some "file:///never-decoded";
 let raw = "{\r\n\t\"원문🎵\": 1\r\n}\000\027[31m"
 let parts = [blob;text raw;blob;text "<p>second\tpart</p>";text ""]
 let state () =
-  let s=Types.create_state ~workspace:"copy" ~port:0 ~refresh_interval:0. () in
+  let s=Types.create_state ~workspace:"copy" ~port:0 () in
   s.server_identity <- Some {Tui_decode.sid_version="test";sid_binary_commit="test";
     sid_binary_commit_age_s=None; sid_runtime_instance_id = None;sid_base_path=Tui_decode.Canonical_path.of_path "/workspace";
     sid_masc_root=Tui_decode.Canonical_path.of_path "/workspace/.masc";

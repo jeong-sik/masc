@@ -74,7 +74,7 @@ let answer_memory_facts (state : Types.state) (snapshot : Masc.Tui_decode_memory
 ;;
 
 let make_state () =
-  Types.create_state ~workspace:"" ~port:0 ~refresh_interval:0. ()
+  Types.create_state ~workspace:"" ~port:0 ()
 ;;
 
 let test_category_toggle_obeys_visible_surface_width () =

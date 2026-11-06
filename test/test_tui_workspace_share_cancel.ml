@@ -8,7 +8,7 @@ module Attempt = Masc_tui_artifact_share_attempt
 
 type receipt = Not_sent | Unknown | Completed
 
-let state () = Types.create_state ~workspace:"share-cancel" ~port:0 ~refresh_interval:0. ()
+let state () = Types.create_state ~workspace:"share-cancel" ~port:0 ()
 let classify attempt = if Attempt.dispatched attempt then Unknown else Not_sent
 let take_one results = match Results.take_ready results with
   | [{ Results.message; _ }] ->

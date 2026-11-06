@@ -22,7 +22,7 @@ let row ?(keeper = "alpha") ~id ~request_id ~role ~text at : T.msg_entry =
 let user = T.Message_user (T.Sent_by_operator {surface=None})
 
 let state origin =
-  let state = T.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2. () in
+  let state = T.create_state ~workspace:"test" ~port:8935 () in
   state.view <- T.Keepers T.Keeper_message;
   state.msg_target_keeper_name <- Some "alpha";
   state.msg_loaded_keeper <- Some "alpha";

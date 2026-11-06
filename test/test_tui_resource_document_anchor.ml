@@ -22,7 +22,7 @@ let parts () = List.map (fun source ->
   {Masc_tui_mcp.rc_uri=Some "masc://anchor";rc_mime_type=Some "text/markdown";
    rc_kind=Masc_tui_mcp.Resource_text source}) [original;"# Part two\r\nOriginal\tbytes\r"]
 let loaded () =
-  let state=Types.create_state ~workspace:"test" ~port:0 ~refresh_interval:0. () in
+  let state=Types.create_state ~workspace:"test" ~port:0 () in
   let contents=parts () in
   state.view <- Types.Resources;
   state.resource_focus <- Types.Right_pane;

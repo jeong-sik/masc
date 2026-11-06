@@ -8,7 +8,7 @@ module Fleet = Masc_tui_fleet_results
 module Stream = Masc_tui_fleet_stream
 module Types = Masc_tui_types
 
-let fresh () = Types.create_state ~workspace:"test" ~port:0 ~refresh_interval:0. ()
+let fresh () = Types.create_state ~workspace:"test" ~port:0 ()
 
 (* [name] matches every constructor, so a new answer does not compile until it
    is named here. [answers] is written by hand: a new answer goes there too. *)

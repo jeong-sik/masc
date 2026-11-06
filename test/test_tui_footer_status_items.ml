@@ -14,7 +14,7 @@ let action_message =
   "skill \"reviewed-skill\": composition name \"new-skill\" must equal the skill name"
 
 let action_state view =
-  let state = Masc_tui_types.create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = Masc_tui_types.create_state ~workspace:"" ~port:0 () in
   state.view <- view;
   Masc_tui_types.set_last_action state (Some (action_message, Unix.gettimeofday ()));
   state
@@ -141,7 +141,7 @@ let contains ~needle haystack =
    [?] answers now names it, and a row too full for the item ends in the cut
    marker, which names the same key. *)
 let plain_surface_state view =
-  let state = Masc_tui_types.create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = Masc_tui_types.create_state ~workspace:"" ~port:0 () in
   state.view <- view;
   state
 

@@ -11339,7 +11339,6 @@ type state = {
   mutable detail_scroll: int;
   workspace: string;
   port: int;
-  refresh_interval: float;
 }
 
 (* The target a refresh of the open diff asks for. A commit diff already on
@@ -19720,7 +19719,6 @@ let create_state
         Error (Masc_tui_preference_writer.Not_started "This session has no server to store picks"))
     ?(preference_read = fun () -> Error "This session has no server to read settings from")
     ~port
-    ~refresh_interval
     ()
   =
   {
@@ -20729,7 +20727,6 @@ let create_state
   detail_scroll = 0;
   workspace;
   port;
-  refresh_interval;
 }
 
 let observer_machine_of_state state =

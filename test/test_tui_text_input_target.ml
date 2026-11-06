@@ -42,7 +42,7 @@ let target =
 ;;
 
 let fresh_state () =
-  Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  Tui_types.create_state ~workspace:"test" ~port:8935 ()
 ;;
 
 let test_collab_input_ownership () =

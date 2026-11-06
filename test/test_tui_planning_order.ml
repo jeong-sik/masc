@@ -49,14 +49,14 @@ let test_lifecycle_then_priority_then_server_recency () =
     actual
 
 let test_default_filter_is_active () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   check bool "the default filter is Active" true
     (state.planning_filter = Planning_filter_active);
   check bool "the default sort is phase/priority" true
     (state.planning_sort = Planning_sort_phase_priority)
 
 let test_candle_scroll_follows_until_manual_navigation () =
-  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let state = create_state ~workspace:"" ~port:0 () in
   state.planning_scroll <- Planning_scroll_candle 12;
   apply_clamped_scroll state (Planning_confirmation_scroll (23, None));
   check bool "a new frame keeps the Candle destination" true

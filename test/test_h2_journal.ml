@@ -986,7 +986,7 @@ let test_first_loss_retains_unproven_effects mode () =
          supplies a current Task/list row or inspects rendered text. *)
       let module Ui = Masc_tui_types in
       let module Task_read = Masc.Tui_decode_task_inspection in
-      let ui=Ui.create_state ~workspace:"source-task" ~local_base_path:base_path ~port:0 ~refresh_interval:0. () in
+      let ui=Ui.create_state ~workspace:"source-task" ~local_base_path:base_path ~port:0 () in
       ui.tools_async_selection <- Some target;ui.tools_async_detail_open <- true;
       let request=Ui.begin_tools_async_detail ui ~force:false |> Option.get in
       Ui.complete_tools_async_detail ui request (Detail.decode ~target projected);

@@ -226,6 +226,34 @@ let test_unclassified_entry_leaves_nothing_deletable () =
       Alcotest.(check int) "the stale blob is still a candidate" 1 second.candidates;
       Alcotest.(check int) "nothing deletable" 0 second.deletable)
 
+(* A private JSONL store keeps a sibling lock that holds one ready marker
+   byte. The gate journals are such stores, inside a store the scan reads. *)
+let test_private_jsonl_lock_does_not_end_the_scan () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      forget_marks ();
+      let kept = put store "output a gate journal row names" in
+      let journal =
+        Filename.concat
+          (Common.masc_dir_from_base_path ~base_path)
+          "gate/late-approval.log.jsonl"
+      in
+      Fs_compat.mkdir_p (Filename.dirname journal);
+      let row =
+        Yojson.Safe.to_string
+          (`Assoc [ "output_ref", `String (O.encode_for_agent_core (O.Stored kept)) ])
+        ^ "\n"
+      in
+      (match Fs_compat.append_private_jsonl_durable_stable_result journal row with
+       | Ok _ -> ()
+       | Error error ->
+         Alcotest.failf "append failed: %s"
+           (Fs_compat.private_jsonl_transaction_error_to_string error));
+      Alcotest.(check bool) "the journal has its lock" true
+        (Sys.file_exists (Fs_compat.private_jsonl_lock_path journal));
+      let first = observe_ok ~base_path in
+      Alcotest.(check int) "the named blob is live" 0 first.candidates)
+
 let () =
   Alcotest.run "tool_blob_sweep"
     [ ( "sweep"
@@ -241,5 +269,7 @@ let () =
             test_failed_scan_keeps_the_marks
         ; Alcotest.test_case "unclassified entry leaves nothing deletable" `Quick
             test_unclassified_entry_leaves_nothing_deletable
+        ; Alcotest.test_case "private JSONL lock does not end the scan" `Quick
+            test_private_jsonl_lock_does_not_end_the_scan
         ] )
     ]

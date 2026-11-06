@@ -854,6 +854,10 @@ let scan_live_references ~base_path ~scope =
            online writers or rescan a target renamed after [read_directory]. *)
         if Fs_compat.is_atomic_orphan_name basename
         then Ok references
+        (* A lock holds no record. A private JSONL lock holds one ready
+           marker byte, which no row codec decodes. *)
+        else if Fs_compat.is_lock_name basename
+        then Ok references
         else if Common.is_tool_call_read_index_file basename
         then Ok references
         else if String.equal basename Common.chat_operation_store_basename

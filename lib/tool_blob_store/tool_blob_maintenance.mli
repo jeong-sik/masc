@@ -40,6 +40,8 @@
     it only while holding the BasePath process lease, so two complete offline
     scans are required. Registered sources must decode as JSON documents,
     JSONL rows, or exact canonical marker rows; blank rows carry no references.
+    A lock file below a store ({!Fs_compat.is_lock_name}) holds no record and
+    is not read.
     An undecodable row, malformed reference, scan failure, or candidate-store
     failure aborts visibly before deletion. Parse failure leaves the previous
     candidate snapshot intact. An unlink failure is reported during deletion;

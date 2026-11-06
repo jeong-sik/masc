@@ -40,9 +40,6 @@ let body_bytes = 1_200
 let image_raw_bytes = 60_000
 let rounds = 5
 
-(* After_assistant_collected, After_tool_results_appended,
-   After_context_injection. *)
-let saves_per_round = 3
 let keeper_name = "bench-checkpoint-keeper"
 let session_id = "session"
 let default_cases = [ "1000"; "5000"; "16000"; "9000:1500" ]

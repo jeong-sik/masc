@@ -3,18 +3,6 @@ module Types = Masc_domain
 open Masc
 open Test_operator_control_support
 
-let claim_and_start config ~agent_name ~task_id =
-  (match
-     Workspace.transition_task_r config ~agent_name ~task_id ~action:Masc_domain.Claim ()
-   with
-  | Ok _ -> ()
-  | Error err -> Alcotest.fail (Masc_domain.show_masc_error err));
-  match
-    Workspace.transition_task_r config ~agent_name ~task_id ~action:Masc_domain.Start ()
-  with
-  | Ok _ -> ()
-  | Error err -> Alcotest.fail (Masc_domain.show_masc_error err)
-
 let write_text path content =
   let oc = open_out path in
   Fun.protect

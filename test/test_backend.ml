@@ -17,13 +17,6 @@ let make_test_dir () =
   (try Unix.mkdir tmp_dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   tmp_dir
 
-let unique_suffix () =
-  Printf.sprintf "%d-%.0f" (Unix.getpid ()) (Unix.gettimeofday () *. 1_000_000.)
-
-let bool_to_int = function
-  | true -> 1
-  | false -> 0
-
 (** Run test with Eio environment *)
 let with_eio_env f =
   Eio_main.run @@ fun env ->

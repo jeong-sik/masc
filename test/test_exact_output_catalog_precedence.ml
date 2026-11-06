@@ -39,18 +39,6 @@ let require_lane_slots label ~lane_id ~expected registry =
          selected_slots)
 ;;
 
-let require_lane_unconfigured label ~lane_id registry =
-  match Registry.resolve_lane registry ~lane_id with
-  | Error (Registry.Exact_lane_unconfigured { lane_id = actual_lane_id }) ->
-    Alcotest.(check string) label lane_id actual_lane_id
-  | Error error ->
-    Alcotest.failf
-      "%s returned the wrong failure: %s"
-      label
-      (Registry.lane_resolution_error_to_string error)
-  | Ok _ -> Alcotest.failf "%s unexpectedly resolved" label
-;;
-
 let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
   with_temp_dir "exact-output-catalog-precedence" @@ fun root ->
   let config_root = Filename.concat root "config" in

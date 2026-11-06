@@ -1311,10 +1311,6 @@ module For_testing = struct
   let eye_centres b = eye_centre_list (geometry b)
   let freckle_centres b = freckle_centre_list (geometry b)
 
-  let mouth_centre b =
-    let g = geometry b in
-    (0.0, g.fy +. (mouth_drop *. g.s))
-
   let flame_probe b =
     let g = geometry b in
     let ox = if b.twin_flame then fst twin_offsets else 0.0 in

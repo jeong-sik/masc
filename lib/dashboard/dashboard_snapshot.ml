@@ -3,8 +3,7 @@
     RFC-0138 Phase 3 implementation.  The refresh fiber populates all
     four projections ([shell], [tools], [namespace_truth],
     [telemetry_summary]) and publishes via the lock-free atomic
-    [slot].  Handler wiring lives in [Server_dashboard_shell_snapshot]
-    (renamed to [Server_dashboard_snapshot_select] in #16761). *)
+    [slot].  Handler wiring lives in [Server_dashboard_snapshot_select]. *)
 
 type tools_projection = {
   base_path : string;

@@ -31,8 +31,7 @@ val browser_principal_for_caller :
     [silent_auth_token_error_kind],
     [direct_call_block_message]).  Caller-name origin classification
     now lives in {!Mcp_server_eio_caller_identity.minted_name_is_transient}
-    (a total match over the carried origin), replacing the deleted
-    [Client_name_kind] string classifier.  The [execute_tool_eio]
+    (a total match over the carried origin).  The [execute_tool_eio]
     body itself contains many internal sub-helpers
     (audit wrappers, tool dispatchers, error formatters)
     that are local to its lexical scope. *)

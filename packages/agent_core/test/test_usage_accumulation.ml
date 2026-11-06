@@ -2,9 +2,7 @@
 
     Uses a mock HTTP server to verify [Agent.run] accumulates response
     usage into [Agent.state.usage] across the multi-turn tool loop.
-    Restored from test_cost_integration.ml's accumulation section when
-    Cost_tracker was removed (2026-07-21 test-only surface cut) — these
-    cases never touched Cost_tracker and are the only end-to-end guard
+    These cases are the only end-to-end guard
     on the run-loop usage wiring.
 
     Pattern: test_integration.ml (Anthropic Messages API mock) *)

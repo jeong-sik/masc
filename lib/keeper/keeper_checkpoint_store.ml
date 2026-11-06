@@ -1,9 +1,8 @@
 (** Keeper_checkpoint_store — checkpoint file I/O.
 
     Handles saving, loading, listing, and pruning AGENT_CORE checkpoint JSON files
-    within a session directory. Separated from [Keeper_working_context]
-    so that file I/O concerns do not mix with context types and
-    pure operations.
+    within a session directory. File I/O concerns stay apart from context
+    types and pure operations.
 
     The code lives in the [Keeper_checkpoint_store_*] modules included below.
     Each include uses only the ones above it, and [keeper_checkpoint_store.mli]

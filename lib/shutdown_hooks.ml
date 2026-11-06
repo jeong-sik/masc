@@ -24,8 +24,8 @@ let register_ws_cleanup (f : unit -> int * int) =
   Atomic.set ws_cleanup_ref (Some f)
 ;;
 
-(** Registered Lane Add-on native detach — WORM Atomic. It runs after
-    [run_all] and the Board flush, outside the hook phase timeout (RFC
+(** Registered Lane Add-on native detach — WORM Atomic. The HTTP server runs
+    it alongside [run_all] under the same cleanup timeout (RFC
     lane-addon-shutdown-detaches-native-instances §3). *)
 let lane_addon_shutdown_ref : (unit -> unit) option Atomic.t = Atomic.make None
 

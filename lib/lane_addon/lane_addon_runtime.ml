@@ -4446,11 +4446,11 @@ let start_configuration_service ~config ~sw ~clock =
       m.configuration_nudge <- (fun () -> ()));
     Pulse.run ~sw pulse)
 
-(* RFC lane-addon-shutdown-detaches-native-instances §3. A native cleanup
-   descriptor is read by the binary that wrote it, so the next server finds a
-   Detached record and attaches without reading it. Configuration maintenance
-   stops first: a settled Detach nudges reconciliation, and an enabled
-   declaration would attach a replacement while this server stops. *)
+(* RFC lane-addon-shutdown-detaches-native-instances §3. The binary that
+   wrote a native cleanup descriptor settles it, so the next server finds a
+   Detached record and attaches instead of retiring the record. Configuration
+   maintenance stops first: a settled Detach nudges reconciliation, and an
+   enabled declaration would attach a replacement while this server stops. *)
 module Shutdown_detach = struct
   type t = {
     instance_id : string;
@@ -4467,21 +4467,29 @@ let detach_native_for_shutdown ~config = Eio_context.run_on_owner_domain (fun ()
   match Eio_context.get_root_switch_opt () with
   | None -> Error "server background owner unavailable"
   | Some sw ->
-      let started = Eio.Mutex.use_ro m.configuration_mutex (fun () ->
-        entries m |> List.filter_map (fun e ->
+      (* Held until every cleanup settles, as managed Detach holds it: an
+         Attach during the wait would start an instance this pass never
+         detaches. The cleanup path does not take this mutex. *)
+      Eio.Mutex.use_ro m.configuration_mutex (fun () ->
+        let started = entries m |> List.filter_map (fun e ->
           match e.package.execution with
           | Container _ -> None
           | Host_process _ when is_detached e.state -> None
           | Host_process _ ->
               let stopwatch = Monotonic_deadline.start () in
-              Some (e, stopwatch, detach_entry ~sw m e))) in
-      Ok (Eio.Fiber.List.map (fun ((e : entry), stopwatch, detaching) ->
-        let settlement = match detaching, await_settled e with
-          | Ok (_ : Yojson.Safe.t), settled -> settled
-          | Error message, Ok () -> Error ("cleanup settled, but its Detaching record was not written: " ^ message)
-          | Error _, (Error _ as failed) -> failed in
-        {Shutdown_detach.instance_id = e.instance_id; package_id = e.package.id; settlement;
-         elapsed_s = Monotonic_deadline.elapsed_seconds stopwatch}) started))
+              Some (e, stopwatch, detach_entry ~sw m e)) in
+        Ok (Eio.Fiber.List.map (fun ((e : entry), stopwatch, detaching) ->
+          (* The settled cleanup persists its own terminal state, so a lost
+             Detaching write does not change what the next server reads. *)
+          (match detaching with
+           | Ok (_ : Yojson.Safe.t) -> ()
+           | Error message ->
+               Log.Misc.warn "Lane Add-on instance %s: its Detaching record was not written at shutdown: %s"
+                 e.instance_id message);
+          let settlement = await_settled e in
+          let elapsed_s = Monotonic_deadline.elapsed_seconds stopwatch in
+          {Shutdown_detach.instance_id = e.instance_id; package_id = e.package.id; settlement; elapsed_s})
+          started)))
 
 (* RFC operator-quiz §4.6. An answer is a host event (§4.4, event 3); a worker
    that is down lists the question again when it starts and receives the

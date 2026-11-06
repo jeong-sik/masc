@@ -1,13 +1,13 @@
 (test
  (name test_artifact_project_build)
  (modules test_artifact_project_build)
- (libraries masc masc.masc_core masc.masc_tool_blob_store
+ (libraries masc masc.masc_core masc.masc_tool_blob_store masc.server
   alcotest base64 masc.agent_core.digest eio_main unix yojson))
 
 (test
  (name test_artifact_project_source)
  (modules test_artifact_project_source)
- (libraries masc masc.masc_core masc.masc_tool_blob_store
+ (libraries masc masc.masc_core masc.masc_tool_blob_store masc.server
   alcotest base64 masc.agent_core.digest eio_main unix yojson))
 
 (test

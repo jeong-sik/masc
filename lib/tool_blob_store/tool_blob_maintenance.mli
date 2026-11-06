@@ -1,9 +1,7 @@
 (** Single maintenance owner for the shared {!Tool_blob_store}.
 
     Live references are the union of exact {!Tool_output} markers in the
-    closed durable-consumer registry: Keeper state/checkpoints, Gate replay,
-    tool-call logs, traces, messages, Keeper chat, Board posts, bounded wire captures,
-    Skill composition evidence, and durable asynchronous Keeper requests.
+    stores a {!scope} puts in scope.
     A marker whose media type is {!Tool_output.artifact_manifest_mime} adds the
     manifest's strictly decoded normalized children transitively. A JSON
     object that decodes as an agent history [Stored] media source
@@ -30,10 +28,9 @@
     Unrecognized envelopes retain the generic reference scan. A reference that
     its existing codec recognizes as malformed still aborts before deletion;
     this is not complete validation of every durable-owner schema.
-    Trajectory previews, repository mirrors, build products, operator config,
-    and unrelated observational logs are not blob consumers and are never
-    traversed. A new durable consumer must be added to this registry in the
-    same change that persists a reference.
+    Only the stores a {!scope} puts in scope are traversed. A new durable
+    consumer must be added to the scope in the same change that persists a
+    reference.
 
     Retention is an explicit two-state policy, not an age/count heuristic:
     [Observe_only] records every currently unreferenced blob as a durable
@@ -103,6 +100,10 @@ type error =
       }
   | Blob_listing_failed of Tool_blob_store.list_error
   | Blob_delete_failed of Tool_blob_store.delete_error
+  | Scope_place_unreadable of
+      { path : string
+      ; reason : string
+      }
 
 type report =
   { live_references : int
@@ -112,16 +113,103 @@ type report =
   }
 
 val error_to_string : error -> string
+
+(** {1 Scope}
+
+    What a scan reads (RFC-0499 §5.3). Every direct entry of three places is
+    classified: [<base>/.masc], the directories a {!Place} names below it,
+    and the config [keepers/] directory. This library sits below the modules
+    that make the names, so the value comes from the caller
+    ([Server_tool_blob_scope.scope] in production). *)
+
+(** Why a store holds no reference the scan must read. *)
+type exclusion =
+  | Blob_store  (** The blob store a sweep deletes from. *)
+  | Sweep_record  (** This sweep's own records. *)
+  | Truncated_copies
+      (** Tool results cut to 500 bytes. A cut reference cannot be decoded,
+          and no code reads one back. *)
+  | Settled_archive  (** Archived request bodies no code reads back. *)
+  | Finder_metadata  (** A [.DS_Store] the macOS Finder writes. *)
+  | Other_media_store  (** A store its own maintenance command sweeps. *)
+  | Operator_config  (** Configuration an operator edits. *)
+  | Repository_mirror
+      (** Source repository clones. A reference there is source text. *)
+  | Unpublished_write  (** An atomic write's staging file. *)
+  | Writes_no_reference
+      (** A store whose producer writes no tool blob reference. *)
+
+type source =
+  | Tree  (** Every regular file below the entry is read. *)
+  | File  (** The entry is one file; absent, it holds nothing. *)
+
+type classification =
+  | In_scope of source
+  | Excluded of exclusion
+
+type entry =
+  | Store of
+      { name : string
+      ; classification : classification
+      }  (** The entry with this exact name. *)
+  | Keeper_files of
+      { suffix : string
+      ; reason : exclusion
+      }  (** Config [keepers/] files named [<keeper><suffix>]. *)
+  | Names of
+      { matches : string -> bool
+      ; reason : exclusion
+      }  (** Names a producer's own grammar recognizes. *)
+  | Place of
+      { name : string
+      ; entries : entry list
+      }  (** A directory whose direct entries are classified one by one. *)
+
+(** A name made from another entry's name. It takes that entry's
+    classification. *)
+type derived_name =
+  | Suffix of string  (** [<base><suffix>]. *)
+  | Parsed of (string -> string option)
+      (** A producer's grammar returns the base name. *)
+
+type scope =
+  { workspace : entry list  (** Direct entries of [<base>/.masc]. *)
+  ; config_keepers_dir : base_path:string -> string
+  ; config_keepers : entry list
+  ; derived : derived_name list
+  }
+
+val dirname : string
+(** The directory below [<base>/.masc] that holds this sweep's records. *)
+
+type place =
+  | Workspace of string list
+      (** The directory these segments name below [<base>/.masc]. *)
+  | Config_keepers
+
+type unclassified_entry =
+  { place : place
+  ; name : string
+  }
+
+val unclassified_entry_to_string : unclassified_entry -> string
+
+val unclassified_entries :
+  base_path:string -> scope -> (unclassified_entry list, error) result
+(** The direct entries of every place that no entry of [scope] classifies,
+    sorted by name within a place. A name that matches two entries, directly
+    or through two derived names, is unclassified. An absent place has no
+    entries. *)
+
+val consumer_paths : scope -> base_path:string -> string list
+(** The path of every store [scope] puts in scope. *)
+
 val candidate_snapshot_path : base_path:string -> string
 val run :
   base_path:string ->
-  board_posts_file:(workspace_masc_dir:string -> string) ->
+  scope:scope ->
   mode:mode ->
   (report, error) result
-(** [board_posts_file ~workspace_masc_dir] names the Board posts file of one
-    workspace. Production passes [Board_paths.file_path ~workspace_masc_dir
-    Posts] ([Masc_board_handlers.Board_paths.posts_file]); this library sits
-    below Board, so it takes the name instead of repeating it. *)
 
 type live_references
 (** What one complete scan of the durable-consumer registry holds live: tool
@@ -130,7 +218,7 @@ type live_references
 
 val live_references :
   base_path:string ->
-  board_posts_file:(workspace_masc_dir:string -> string) ->
+  scope:scope ->
   (live_references, error) result
 (** The scan {!run} deletes against, with the same arguments and failures. *)
 

@@ -78,6 +78,10 @@ type error =
       }
   | Blob_listing_failed of Tool_blob_store.list_error
   | Blob_delete_failed of Tool_blob_store.delete_error
+  | Scope_place_unreadable of
+      { path : string
+      ; reason : string
+      }
 
 type report =
   { live_references : int
@@ -134,13 +138,17 @@ let error_to_string = function
       error.Tool_blob_store.sha256
       error.path
       error.reason
+  | Scope_place_unreadable { path; reason } ->
+    Printf.sprintf "scope place unreadable path=%s: %s" path reason
 ;;
+
+let dirname = "tool_blob_maintenance"
 
 let candidate_snapshot_path ~base_path =
   Filename.concat
     (Filename.concat
        (Common.masc_dir_from_base_path ~base_path)
-       "tool_blob_maintenance")
+       dirname)
     "candidates.json"
 ;;
 
@@ -581,30 +589,6 @@ let references_in_chat_operation_store ~ownership_root path =
          semantic_executions)
 ;;
 
-let durable_consumer_basenames =
-  [ "gate"
-  ; Common.keepers_runtime_dirname
-  ; "keeper_chat"
-  ; "messages"
-  (* Prepared evidence remains owned even before its message commits. *)
-  ; "lane-addons/broadcasts"
-  ; "tool_calls"
-  ; "traces"
-  (* The bounded diagnostic store owns every blob reference for as long as
-     its dated JSONL row remains inside wire-capture retention. *)
-  ; "wire-capture"
-  (* These stores can be the sole durable owners of a completed composition,
-     independently of a surviving Keeper transcript or tool-call row. *)
-  ; "skill-composition-evidence-v1"
-  ; "keeper_msg_requests"
-  (* Published reports own all revisions independently of chat/log retention. *)
-  ; "published_artifacts"
-  (* Imported project sources may outlive their originating tool or chat row. *)
-  ; "artifact_project_sources"
-  ; "artifact_project_builds"
-  ]
-;;
-
 let same_directory_snapshot (left : Unix.stats) (right : Unix.stats) =
   left.st_dev = right.st_dev
   && left.st_ino = right.st_ino
@@ -615,28 +599,201 @@ let same_directory_snapshot (left : Unix.stats) (right : Unix.stats) =
   && left.st_ctime = right.st_ctime
 ;;
 
+type exclusion =
+  | Blob_store
+  | Sweep_record
+  | Truncated_copies
+  | Settled_archive
+  | Finder_metadata
+  | Other_media_store
+  | Operator_config
+  | Repository_mirror
+  | Unpublished_write
+  | Writes_no_reference
+
+type source =
+  | Tree
+  | File
+
+type classification =
+  | In_scope of source
+  | Excluded of exclusion
+
+type entry =
+  | Store of
+      { name : string
+      ; classification : classification
+      }
+  | Keeper_files of
+      { suffix : string
+      ; reason : exclusion
+      }
+  | Names of
+      { matches : string -> bool
+      ; reason : exclusion
+      }
+  | Place of
+      { name : string
+      ; entries : entry list
+      }
+
+type derived_name =
+  | Suffix of string
+  | Parsed of (string -> string option)
+
+type scope =
+  { workspace : entry list
+  ; config_keepers_dir : base_path:string -> string
+  ; config_keepers : entry list
+  ; derived : derived_name list
+  }
+
 (* Where blob references live, as data. Every durable consumer writes under
    the workspace root [<base>/.masc], the same BasePath the blob store
    belongs to. *)
 type consumer_source =
-  | Tree of string (* scanned recursively; an absent root holds no references *)
+  | Tree_source of string (* scanned recursively; an absent root holds no references *)
   | Optional_file of string (* a single file; absent means no references *)
 
-(* The Board posts file comes from the caller ([Board_paths] in production):
-   this library sits below Board, so it neither names the file nor depends on
-   the module that does. *)
-let workspace_sources ~board_posts_file ~workspace_masc_dir =
-  List.map
-    (fun basename -> Tree (Filename.concat workspace_masc_dir basename))
-    durable_consumer_basenames
-  @ [ Optional_file (board_posts_file ~workspace_masc_dir) ]
+let rec sources_of ~dir entries =
+  List.concat_map
+    (function
+      | Store { name; classification = In_scope Tree } -> [ Tree_source (Filename.concat dir name) ]
+      | Store { name; classification = In_scope File } -> [ Optional_file (Filename.concat dir name) ]
+      | Store { classification = Excluded _; name = _ } | Keeper_files _ | Names _ -> []
+      | Place { name; entries } -> sources_of ~dir:(Filename.concat dir name) entries)
+    entries
+;;
+
+let workspace_sources scope ~workspace_masc_dir =
+  sources_of ~dir:workspace_masc_dir scope.workspace
+;;
+
+let consumer_paths scope ~base_path =
+  workspace_sources scope ~workspace_masc_dir:(Common.masc_dir_from_base_path ~base_path)
+  |> List.map (function Tree_source path | Optional_file path -> path)
+;;
+
+type place =
+  | Workspace of string list
+  | Config_keepers
+
+type unclassified_entry =
+  { place : place
+  ; name : string
+  }
+
+let unclassified_entry_to_string { place; name } =
+  match place with
+  | Workspace segments -> String.concat "/" (segments @ [ name ])
+  | Config_keepers -> "config-keepers/" ^ name
+;;
+
+type match_ =
+  | Leaf of classification
+  | Nested of entry list
+
+let direct_matches entries name =
+  List.filter_map
+    (function
+      | Store { name = store; classification } ->
+        if String.equal store name then Some (Leaf classification) else None
+      | Keeper_files { suffix; reason } ->
+        if String.length name > String.length suffix && String.ends_with ~suffix name
+        then Some (Leaf (Excluded reason))
+        else None
+      | Names { matches; reason } -> if matches name then Some (Leaf (Excluded reason)) else None
+      | Place { name = place; entries } ->
+        if String.equal place name then Some (Nested entries) else None)
+    entries
+;;
+
+let base_of derived name =
+  match derived with
+  | Suffix suffix ->
+    if String.length name > String.length suffix && String.ends_with ~suffix name
+    then Some (String.sub name 0 (String.length name - String.length suffix))
+    else None
+  | Parsed parse -> parse name
+;;
+
+(* A name matches its own entry, or, through one derived rule, the entry of
+   the name it was derived from. Two matches are no classification: the rules
+   disagree, so the entry stays unclassified instead of picking one. *)
+let classify scope entries name =
+  match direct_matches entries name with
+  | [ found ] -> Some found
+  | _ :: _ :: _ -> None
+  | [] ->
+    (match
+       List.concat_map
+         (fun derived ->
+            match base_of derived name with
+            | None -> []
+            | Some base ->
+              List.filter_map
+                (function
+                  | Leaf classification -> Some classification
+                  | Nested _ -> None)
+                (direct_matches entries base))
+         scope.derived
+     with
+     | [ classification ] -> Some (Leaf classification)
+     | [] | _ :: _ :: _ -> None)
+;;
+
+let list_place path =
+  match Sys.readdir path with
+  | entries -> Ok (List.sort String.compare (Array.to_list entries))
+  | exception Sys_error reason ->
+    if Sys.file_exists path then Error (Scope_place_unreadable { path; reason }) else Ok []
+;;
+
+let unclassified_entries ~base_path scope =
+  let open Result.Syntax in
+  let rec walk ~dir ~segments ~place_of entries =
+    let* names = list_place dir in
+    List.fold_left
+      (fun acc name ->
+         let* unclassified = acc in
+         match classify scope entries name with
+         | Some (Leaf (In_scope _ | Excluded _)) -> Ok unclassified
+         | Some (Nested nested) ->
+           let path = Filename.concat dir name in
+           (match Sys.is_directory path with
+            | true ->
+              let* below =
+                walk ~dir:path ~segments:(segments @ [ name ]) ~place_of nested
+              in
+              Ok (unclassified @ below)
+            | false -> Ok (unclassified @ [ { place = place_of segments; name } ])
+            | exception Sys_error reason -> Error (Scope_place_unreadable { path; reason }))
+         | None -> Ok (unclassified @ [ { place = place_of segments; name } ]))
+      (Ok [])
+      names
+  in
+  let* workspace =
+    walk
+      ~dir:(Common.masc_dir_from_base_path ~base_path)
+      ~segments:[]
+      ~place_of:(fun segments -> Workspace segments)
+      scope.workspace
+  in
+  let* config_keepers =
+    walk
+      ~dir:(scope.config_keepers_dir ~base_path)
+      ~segments:[]
+      ~place_of:(fun _ -> Config_keepers)
+      scope.config_keepers
+  in
+  Ok (workspace @ config_keepers)
 ;;
 
 let unix_reason fn arg code =
   Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)
 ;;
 
-let scan_live_references ~base_path ~board_posts_file =
+let scan_live_references ~base_path ~scope =
   let read_directory path =
     let inspect () =
       match
@@ -777,7 +934,7 @@ let scan_live_references ~base_path ~board_posts_file =
            (Ok references)
   in
   let scan_source references = function
-    | Tree root -> scan_directory root references
+    | Tree_source root -> scan_directory root references
     | Optional_file path ->
       (match Unix.lstat path with
        | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok references
@@ -786,7 +943,7 @@ let scan_live_references ~base_path ~board_posts_file =
        | _ -> scan_entry path references)
   in
   workspace_sources
-    ~board_posts_file
+    scope
     ~workspace_masc_dir:(Common.masc_dir_from_base_path ~base_path)
   |> List.fold_left
        (fun result source ->
@@ -984,9 +1141,9 @@ let save_candidate_snapshot ~base_path candidates =
 
 type live_references = Live_reference_set.t
 
-let live_references ~base_path ~board_posts_file =
+let live_references ~base_path ~scope =
   let open Result.Syntax in
-  let* direct_live = scan_live_references ~base_path ~board_posts_file in
+  let* direct_live = scan_live_references ~base_path ~scope in
   expand_artifact_manifests ~store:(Tool_blob_store.create ~base_path) direct_live
 ;;
 
@@ -1011,10 +1168,10 @@ let holds_history_media references ~sha256 =
   | Some (Artifact _) | None -> false
 ;;
 
-let run ~base_path ~board_posts_file ~mode =
+let run ~base_path ~scope ~mode =
   let open Result.Syntax in
   let store = Tool_blob_store.create ~base_path in
-  let* live_references = live_references ~base_path ~board_posts_file in
+  let* live_references = live_references ~base_path ~scope in
   let live =
     Live_reference_set.fold
       (fun reference hashes -> String_set.add (live_reference_sha256 reference) hashes)

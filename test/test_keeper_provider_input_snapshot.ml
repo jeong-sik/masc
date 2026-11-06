@@ -472,7 +472,7 @@ let test_a_snapshot_keeps_its_history_media_live () =
     for _pass = 1 to 2 do
       match
         Tool_blob_maintenance.run ~base_path
-          ~board_posts_file:Masc_board_handlers.Board_paths.posts_file
+          ~scope:Server_tool_blob_scope.scope
           ~mode:Tool_blob_maintenance.Delete_previous_candidates
       with
       | Ok _ -> ()

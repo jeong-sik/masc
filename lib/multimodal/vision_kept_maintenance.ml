@@ -15,7 +15,7 @@
    (for example a turn restored from an older checkpoint) is therefore kept.
 
    The scan itself is [Vision_artifact_reference.is_referenced] over the
-   store's own durable-consumer list. Unknowns are not candidates: any
+   caller's consumer paths. Unknowns are not candidates: any
    [Error] from the predicate aborts the sweep before anything is deleted,
    because an unknown is exactly where a live handle would be missed. The
    previous-run contract must stay alive for a sweep to delete: a missing
@@ -178,11 +178,11 @@ let save_candidates ~dir handles =
   | Error detail -> Error (Snapshot_write_failed { detail })
 ;;
 
-let scan_live ~masc_dir entries =
+let scan_live ~consumer_paths entries =
   let rec loop live = function
     | [] -> Ok live
     | (handle, _) :: rest -> (
-      match Vision_artifact_reference.is_referenced ~masc_dir ~handle with
+      match Vision_artifact_reference.is_referenced ~consumer_paths ~handle with
       | Ok true -> loop (Handle_set.add handle live) rest
       | Ok false -> loop live rest
       | Error error ->
@@ -247,7 +247,7 @@ let store_root_is_directory dir =
        Error (Invalid_store_root { dir; detail = "store root is not a directory" }))
 ;;
 
-let run ~masc_dir ~dir =
+let run ~consumer_paths ~dir =
   let* present = store_root_is_directory dir in
   if not present then Ok empty_report else
     try
@@ -259,7 +259,7 @@ let run ~masc_dir ~dir =
           entries
       in
       let scanned = List.length entries in
-      let* live = scan_live ~masc_dir entries in
+      let* live = scan_live ~consumer_paths entries in
       let candidates =
         List.fold_left
           (fun acc (handle, _) ->

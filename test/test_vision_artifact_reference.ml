@@ -25,8 +25,11 @@ let write ~dir ~rel content =
    enough to exercise the substring scan. *)
 let handle = String.make 64 'a'
 
+(* The places the tests below write mentions to. *)
+let consumer_paths ~masc_dir = List.map (Filename.concat masc_dir) [ "gate"; "keepers"; "messages" ]
+
 let referenced ~masc_dir =
-  Multimodal.Vision_artifact_reference.is_referenced ~masc_dir ~handle
+  Multimodal.Vision_artifact_reference.is_referenced ~consumer_paths:(consumer_paths ~masc_dir) ~handle
   |> Result.map_error Multimodal.Vision_artifact_reference.error_to_string
 ;;
 
@@ -45,24 +48,6 @@ let test_mention_in_messages_is_referenced () =
   let masc_dir = fresh_dir () in
   write ~dir:masc_dir ~rel:"messages/turn1.json" (Printf.sprintf {|{"artifact": "%s"}|} handle);
   check (result bool string) "mentioned under messages/" (Ok true) (referenced ~masc_dir)
-;;
-
-let test_own_vision_store_content_is_skipped () =
-  let masc_dir = fresh_dir () in
-  (* A regular content scan cannot self-match on the filename (only content is
-     read), so this deliberately embeds the handle text INSIDE the payload --
-     a degenerate case real image bytes will not produce, but the one case
-     that actually exercises the keepers/*.vision skip below. Without the
-     skip this would be Ok true; the next test proves that with a red run. *)
-  write
-    ~dir:masc_dir
-    ~rel:(Filename.concat "keepers/some-keeper.vision" handle)
-    (Printf.sprintf "raw-bytes-%s-embedded" handle);
-  check
-    (result bool string)
-    "content under keepers/*.vision is not scanned"
-    (Ok false)
-    (referenced ~masc_dir)
 ;;
 
 let test_keeper_state_sibling_is_referenced () =
@@ -91,7 +76,7 @@ let test_symlinked_tree_blocks_eviction () =
   let real_target = fresh_dir () in
   write ~dir:real_target ~rel:"note.txt" (Printf.sprintf "artifact=%s" handle);
   Unix.symlink real_target (Filename.concat masc_dir "gate");
-  match Multimodal.Vision_artifact_reference.is_referenced ~masc_dir ~handle with
+  match Multimodal.Vision_artifact_reference.is_referenced ~consumer_paths:(consumer_paths ~masc_dir) ~handle with
   | Ok false -> failwith "a symlink hiding the sole reference must not read as unreferenced"
   | Ok true -> failwith "is_referenced should not silently resolve through a symlink either"
   | Error (Multimodal.Vision_artifact_reference.Symlink_encountered _) -> ()
@@ -108,10 +93,6 @@ let () =
       , [ test_case "absent masc_dir" `Quick test_absent_masc_dir_is_unreferenced
         ; test_case "no mention" `Quick test_no_mention_is_unreferenced
         ; test_case "mention in messages" `Quick test_mention_in_messages_is_referenced
-        ; test_case
-            "own vision store content skipped"
-            `Quick
-            test_own_vision_store_content_is_skipped
         ; test_case "keeper state sibling counts" `Quick test_keeper_state_sibling_is_referenced
         ; test_case "symlink blocks eviction" `Quick test_symlinked_tree_blocks_eviction
         ] )

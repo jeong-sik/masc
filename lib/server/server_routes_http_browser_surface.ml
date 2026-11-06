@@ -92,7 +92,5 @@ let add_routes router =
       (read Browser_addon_view.capture)
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/browser-lane/interact"
       (write Browser_addon_view.interact)
-  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/browser-lane/session"
-      (write Browser_addon_view.session)
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/browser-lane/goto"
       (write Browser_addon_view.goto)

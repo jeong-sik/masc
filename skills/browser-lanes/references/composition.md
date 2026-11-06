@@ -58,7 +58,7 @@ newer and the currently advertised action schema. Preserve the observed clientId
 tabId and expectedUrl. This is an explicit action, not an automatic step in every
 read or composition. It does not change the URL or reload. The extension does not
 focus the browser window; a webdriver_bidi connection does, which can take focus
-from what the operator is doing. Automation rejects this action.
+from what the operator is doing.
 
 An active=true receipt confirms tab selection only. Read the same tab again and
 verify the requested channel body and scope before collecting context. If activation

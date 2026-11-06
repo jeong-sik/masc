@@ -150,19 +150,19 @@ let unreadable_live_controller_never_authorizes_ego_input () =
         | Ok commit -> commit.binding | Error error -> fail (Browser_goal_space.error_message error) in
       let first_goal=bind "First owned Space" first and second_goal=bind "Second owned Space" second in
       let goto=B.Page_goto {url="https://fixture.invalid/owned";tab_id=Some 1}
-      and open_session=B.Session_open {headless=None} in
+      and discover=B.Tabs_list in
       let exact client verb ()=Browser_addon_host.issue host ~preference:(Browser_selection.Exact (live client)) verb in
       let goal binding verb ()=Browser_addon_host.issue ~goal_space:binding host ~preference:Browser_selection.Automatic verb in
       second_worker.set_snapshot (F.Snapshot_clients [{second with space=first.space}]);
       refuses_before_dispatch "known duplicate Space refuses exact Page navigation" attached Tool_result.Workflow_rejection
         (exact first goto);
-      refuses_before_dispatch "known duplicate Space refuses stored Goal open" attached Tool_result.Workflow_rejection
-        (goal first_goal open_session);
+      refuses_before_dispatch "known duplicate Space refuses stored Goal discovery" attached Tool_result.Workflow_rejection
+        (goal first_goal discover);
       second_worker.set_snapshot F.Snapshot_unavailable;
       refuses_before_dispatch "unreadable sibling cannot authorize exact Ego Page navigation" attached Tool_result.Dependency_unavailable
         (exact first goto);
-      refuses_before_dispatch "unreadable sibling cannot authorize stored Goal open" attached Tool_result.Dependency_unavailable
-        (goal first_goal open_session);
+      refuses_before_dispatch "unreadable sibling cannot authorize stored Goal discovery" attached Tool_result.Dependency_unavailable
+        (goal first_goal discover);
       refuses_before_dispatch "unreadable sibling cannot authorize exact Ego document read" attached Tool_result.Dependency_unavailable
         (exact first (B.Page_document {tab_id=1}));
       let unbound_goal=match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"Unknown controller pin" ~metric:"verified" ~target_value:"1" () with
@@ -177,8 +177,8 @@ let unreadable_live_controller_never_authorizes_ego_input () =
       second_worker.set_snapshot (F.Snapshot_clients [second]);
       reaches_instance "a readable sibling admits exact Ego input again" attached first_worker (live first) goto
         (exact first goto);
-      reaches_instance "and a stored Goal again" attached first_worker (live first) open_session
-        (goal first_goal open_session);
+      reaches_instance "and a stored Goal again" attached first_worker (live first) discover
+        (goal first_goal discover);
       reaches_instance "second distinct Space reaches its exact instance" attached second_worker (live second) goto
         (exact second goto);
       let reconnected={second with client_id=(client 6 B.Ego_lite B.Ego_task_space).client_id} in

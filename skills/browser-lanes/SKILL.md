@@ -10,15 +10,13 @@ description: "Reads and operates the requested browser page, reusing its observe
 
 ## 브라우저 선택
 
-처음 탐색할 때는 lane을 생략한 BrowserTabs로 시작한다. 서버가 현재 연결과 열린 작업
-세션을 확인해 선택하며, 이 호출이 새 창을 열지는 않는다. 새 작업 창이 필요하면
-lane을 생략한 BrowserSession open을 사용한다. 여러 작업 세션이 열려 있으면 선택을
-요구하고, 하나도 없으면 설정된 Chrome, 다음 Gecko 순으로 연다.
+처음 탐색할 때는 lane을 생략한 BrowserTabs로 시작한다. 서버가 현재 연결을 확인해
+선택하며, 이 호출이 새 창을 열지는 않는다.
 
 응답의 browserSelection에 있는 lane과 clientId를 이후 요청에 유지한다. tabId와
 문서·좌표는 그 브라우저의 관측이며 다른 연결에 재사용하지 않는다. 작업 중인 브라우저가
 끊겼거나 조작을 지원하지 않으면 현재 연결의 상태부터 확인한다. 다른 연결에서 이어가려면
-그곳에서 새로 관측한다. BrowserSession/Goto도 반환된 lane으로 이어간다.
+그곳에서 새로 관측한다. BrowserGoto도 반환된 lane으로 이어간다.
 명시한 lane/clientId는 자동 선택보다 우선한다.
 
 ## Ego Lite에서 관측하고 입력하기
@@ -157,12 +155,9 @@ clientId/tabId 쌍을 유지한다. `complete=false`이면 `unavailableTabs`의 
 live BiDi 연결의 로그인을 써야 하면 BrowserAct `open_tab`(그 clientId)으로 탭을 열고,
 그 탭에서만 BrowserGoto(`lane=live`, clientId, tabId)로 URL을 옮긴다. 운영자가 연 탭은
 URL로 옮기지 않는다.
-독립 조사에는 BrowserSession open과 BrowserGoto를 사용한다. 반환된
-browserSelection.lane을 읽기·조작에 유지하고 clientId가 null이면 생략한다.
-live 인증 화면을 연결 오류 때문에 automation이나 별도 API·수집 버퍼로 대체하지 않는다.
-다른 사람의 세션을 닫거나 덮어쓰지 않으며, 자신이 만든 임시 세션의 정리·인계만 한다.
+live 인증 화면을 연결 오류 때문에 별도 API·수집 버퍼로 대체하지 않는다.
 
-- 연결·세션 문제: [연결과 소유권](references/connection.md).
+- 연결 문제: [연결과 소유권](references/connection.md).
 - scene 범위·참조 오류, CSS selector, screenshot·큰 artifact: [읽기와 관측 복구](references/observation.md).
 - iframe, JS 대화상자, 업로드·다운로드: [고급 조작](references/advanced.md).
 - RSS/Atom 등 별도 추출 경로 검토: [추출 선택지](references/extraction.md).
@@ -175,16 +170,8 @@ live 인증 화면을 연결 오류 때문에 automation이나 별도 API·수�
 ### 작업 기능으로 최초 브라우저 선택
 
 첫 BrowserTabs에 `requiredActions: ["hover", "type_text"]`를 주면 해당 기능을
-모두 구현한 연결/열린 브라우저를 찾는다. HTML5 드롭은 `html5_drop`, 프레임과
-다운로드는 `read_frames`, `list_downloads`, 콘솔은 `read_console`, 네트워크는 `read_network`, 쿠키는 `read_storage`(쿠키만, 웹 스토리지는 아님), 실제 브라우저 확대는 `page_zoom`이다.
-`read_console`은 자동화 Firefox만 되고 `BrowserRead mode=console`로 읽는다. 세션이 열린 뒤 그 탭이 찍은 메시지와
-잡히지 않은 오류를 오래된 것부터 주고, 최대 200개만 남긴다(`dropped`가 밀려난 수). 글자는 페이지가 찍은 그대로다.
-`read_network`도 자동화 Firefox만 되고 `mode=network`로 읽는다. 요청마다 method, 주소, 상태(pending·completed·failed)와
-응답 코드·mimeType·받은 바이트를 주고, 헤더는 이름만 준다. 헤더 값·쿠키·본문은 읽지 않고, 주소의 쿼리 값은 REDACTED로 바뀐다.
-경로에 토큰이 들어 있는 사이트는 경로까지는 가리지 못한다.
-`mode=cookies`도 자동화 Firefox만 되고, 탭의 페이지가 볼 수 있는 쿠키를 최대 200개 준다. 이름·도메인·경로·secure·httpOnly·sameSite·만료만
-주고 값은 주지 않는다(`valuesWithheld`).
-작업 세션을 새로 열 때만 BrowserSession `action: "open"`에도 같은 배열을 쓴다.
+모두 구현한 연결을 찾는다. HTML5 드롭은 `html5_drop`, 프레임과
+다운로드는 `read_frames`, `list_downloads`, 실제 브라우저 확대는 `page_zoom`이다.
 선택 과정은 브라우저를 열거나 탭을 이동하지 않는다. 불가능한 조합은 입력 전
 `required_browser_actions_unavailable`와 후보별 `missingActions`로 거절한다.
 

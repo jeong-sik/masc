@@ -1175,7 +1175,8 @@ let test_unordered_graph_preserves_execution ~fail_serial () =
   let source_path = "/keeper/probe/a.ml" in
   let source = make_node ~tool_name:"keeper_lane_status" ~after:[] ~input:empty_input "z-source" in
   let independent = make_node ~tool_name:"keeper_lane_status" ~after:[] ~input:empty_input "independent" in
-  let session_input = Plan.Json_template.literal (`Assoc ["action",`String "status"]) in
+  let session_input = Plan.Json_template.literal
+      (`Assoc ["action",`String "goal_status";"goalId",`String "goal-probe"]) in
   let serial_before = make_node ~tool_name:"BrowserSession" ~after:["z-source"]
       ~input:session_input "z-serial" in
   let serial_after = make_node ~tool_name:"BrowserSession" ~after:["z-source"]

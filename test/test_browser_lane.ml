@@ -204,8 +204,6 @@ let test_disconnect_releases_waiter () = with_clients (fun sw connect ->
 let test_sources_and_live_policy () = with_clients (fun _ connect ->
   let client = connect Lane.Firefox in
   check bool "missing transport UUID rejected" true (Result.is_error (Lane.client_id_of_string ""));
-  (match Lane.issue_for_actor ~actor:None ~target:(target client.client_id) ~verb:(Lane.Session_open {headless=None}) ~timeout_sec:0.1 with
-   | Ok (Lane.Rejected_before_effect _) -> () | _ -> fail "a live session must be rejected before effect");
   (* Navigation is BiDi work on a tab that connection opened; the extension is
      refused as a selection, with nothing queued. *)
   check bool "extension navigation is refused as a selection" true
@@ -278,7 +276,7 @@ let test_transport_table () =
     check bool (Lane.live_capability_to_wire capability ^ " is reachable on some connection") true
       (Lane.live_transports_serving capability <> []);
     check bool (Lane.live_capability_to_wire capability ^ " is what its verb asks for") true
-      (Lane.live_capability (verb_asking_for capability) = Some capability))
+      (Lane.live_capability (verb_asking_for capability) = capability))
     Lane.all_of_live_capability
 
 (* Every transport and capability: served work reaches that connection's
@@ -582,7 +580,7 @@ let test_native_control_wait_contract () =
     (Lane.Action.parse (Lane.Action.to_json finish)=Ok finish);
   check bool "Space completion uses native execution and explicit live identity" true
     (Lane.ego_reply_policy (Lane.Page_act finish)=Lane.Executor_owned
-      && Lane.live_capability (Lane.Page_act finish)=Some Lane.Operator_handoff);
+      && Lane.live_capability (Lane.Page_act finish)=Lane.Operator_handoff);
   check (option int) "completion has Space scope" None (Lane.activity_scope (Lane.Page_act finish));
   check string "completion activity" "finish_space" (Lane.activity_name (Lane.Page_act finish));
   let keep_all=Lane.Action.Control (Lane.Action.Finish_space Lane.Action.Keep_all) in
@@ -628,7 +626,7 @@ let test_native_page_management_contract () =
     check (option int) "activity belongs to the observed tab" (Some 2) (Lane.activity_scope verb);
     check bool "native SDK owns management execution" true (Lane.ego_reply_policy verb=Lane.Executor_owned);
     check bool "only Ego serves Page management" true
-      (Lane.live_capability verb=Some Lane.Page_management
+      (Lane.live_capability verb=Lane.Page_management
         && Lane.live_transport_serves Ego_task_space Page_management
         && not (Lane.live_transport_serves Webdriver_bidi Page_management)
         && not (Lane.live_transport_serves Web_extension Page_management)))

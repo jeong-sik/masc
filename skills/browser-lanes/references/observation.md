@@ -224,16 +224,15 @@ BrowserRead `mode=regions`는 화면의 의미 영역을 관측한다. 반환된
 
 `click_at`·`scroll_at`은 현재 screenshot의 `viewport`와 정규화된 `point`를 쓴다.
 `click_at`은 `button`(`primary` 기본, `middle`, `secondary`)으로 가운데·오른쪽 클릭도 한다.
-`webdriver_bidi` 연결과 automation이 눌러 주고, 확장은 입력을 보내기 전에 거절한다.
-`tap_at`·`swipe`는 마우스가 아니라 터치 포인터로 `click_at`·`drag`와 같은 좌표를 쓴다. `webdriver_bidi` 연결과 automation만 되고 확장은 거절한다.
+`webdriver_bidi` 연결이 눌러 주고, 확장은 입력을 보내기 전에 거절한다.
+`tap_at`·`swipe`는 마우스가 아니라 터치 포인터로 `click_at`·`drag`와 같은 좌표를 쓴다. `webdriver_bidi` 연결만 되고 확장은 거절한다.
 `set_viewport`는 `expectedUrl`과 함께 `width`·`height`(100~4096 CSS px)를 같이 주면 그 탭의 viewport 크기를 바꾼다.
 `webdriver_bidi` 연결에서는 둘 다 빼면 브라우저 원래 크기로 돌아간다.
 바꾼 뒤에는 screenshot을 다시 찍는다.
 `web_extension` 연결의 클릭은 DOM activation이며 trusted 포인터 입력을 보장하지
-않는다. `hover_at`과 `drag`의 trusted 입력은 automation과 live의 `webdriver_bidi`
+않는다. `hover_at`과 `drag`의 trusted 입력은 live의 `webdriver_bidi`
 연결이 한다. `live_transport_unsupported`로 거절되면 `references/connection.md`의
-같은 항목대로 한다. 로그인된 탭을 automation 세션으로 바꾸거나 같은 요청을 같은
-연결에 반복하지 않는다. 필요한 조작을 지원하는 현재 페이지의 관측된 컨트롤이 있으면
+같은 항목대로 한다. 같은 요청을 같은 연결에 반복하지 않는다. 필요한 조작을 지원하는 현재 페이지의 관측된 컨트롤이 있으면
 요청 범위 안에서 사용하고, 그렇지 않으면 미수행 상태를 남긴다.
 
 Ego 이외의 연결에서 `select_option`은 CSS로 고른 `<select>` 하나를 조작한다.

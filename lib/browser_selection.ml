@@ -57,9 +57,8 @@ let choose_candidates ~verb ~bound ~snapshot preference =
     | routes -> Error (Ambiguous_browsers routes) in
   let connected transport =
     if not (enabled snapshot.live_activity) then [] else
-    match Lane.live_capability verb with
-    | None -> []
-    | Some capability -> List.filter_map (fun (info : Lane.client_info) ->
+    let capability = Lane.live_capability verb in
+    List.filter_map (fun (info : Lane.client_info) ->
       let space_available=match info.transport with
         | Lane.Web_extension|Webdriver_bidi -> true
         | Ego_task_space ->
@@ -118,7 +117,7 @@ let target ~verb ~snapshot route =
           |> List.sort (fun left right -> String.compare (Lane.client_id_to_string left) (Lane.client_id_to_string right))))
 let bound = function
   | Lane.Page_read {tab_id;_} | Lane.Page_elements {tab_id;_} -> Option.is_some tab_id
-  | Lane.Page_act (Lane.Action.Open_tab _ | Lane.Action.Open_window _ | Lane.Action.Control _) | Lane.Tabs_list | Lane.Session_open _ | Lane.Session_status -> false
-  | Lane.Page_document _ | Lane.Page_downloads _ | Lane.Page_console _ | Lane.Page_network _ | Lane.Page_cookies _ | Lane.Page_capture _
-  | Lane.Page_scene _ | Lane.Page_snapshot _ | Lane.Page_native_workflow _ | Lane.Page_interact _ | Lane.Session_close | Lane.Page_goto _ | Lane.Page_act (Lane.Action.On_tab _)
-  | Lane.Page_context _ | Lane.Page_locate _ -> true
+  | Lane.Page_act (Lane.Action.Open_tab _ | Lane.Action.Open_window _ | Lane.Action.Control _) | Lane.Tabs_list -> false
+  | Lane.Page_document _ | Lane.Page_downloads _ | Lane.Page_capture _
+  | Lane.Page_scene _ | Lane.Page_snapshot _ | Lane.Page_native_workflow _ | Lane.Page_interact _ | Lane.Page_goto _ | Lane.Page_act (Lane.Action.On_tab _)
+  | Lane.Page_context _ -> true

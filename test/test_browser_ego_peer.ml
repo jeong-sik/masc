@@ -286,12 +286,6 @@ let test_a_tab_that_left_the_listing_loses_its_number () =
     [2; 3];
   ignore (before_effect "an unsupported browser window" (dispatch peer Live.Page_act
     (Lane.Action.to_json (Lane.Action.Open_window "https://example.test/window"))));
-  let cookie : Lane.Action.cookie = {name="session";value="fixture";path="/";
-    secure=true;http_only=true;same_site=Some Lane.Action.Strict;max_age_sec=None} in
-  List.iter (fun interaction -> ignore (before_effect "an unsupported cookie write"
-    (dispatch peer Live.Page_act (Lane.Action.to_json
-      (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction})))))
-    [Lane.Action.Set_cookie cookie;Lane.Action.Delete_cookie "session"];
   check (list string) "no script ran" [] !ran
 
 (* What ego threw reaches the Keeper cut, where a character starts. *)
@@ -405,15 +399,6 @@ let test_refusals_run_no_script () =
   ignore (before_effect "a cap past the limit" (dispatch peer Live.Page_read (obj ["tabId",`Int 1;"maxChars",`Int 100_001])));
   List.iter (fun verb -> ignore (before_effect (Live.verb_to_wire verb) (dispatch peer verb (obj ["tabId",`Int 1]))))
     [Live.Page_interact; Live.Page_act; Live.Page_goto];
-  let emulation : Lane.Action.emulation = {geolocation=None;locale=Some "ko-KR";timezone=None} in
-  List.iter (fun interaction -> ignore (before_effect "an unsupported emulation"
-    (dispatch peer Live.Page_act (Lane.Action.to_json
-      (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction})))))
-    [Lane.Action.Set_emulation emulation;Lane.Action.Clear_emulation];
-  List.iter (fun interaction -> ignore (before_effect "an unsupported request block"
-    (dispatch peer Live.Page_act (Lane.Action.to_json
-      (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction})))))
-    [Lane.Action.Block_requests ["ads.example.com"];Lane.Action.Unblock_requests];
   check (list string) "no script ran" [] !ran
 
 let test_answers_outside_the_frame () =
@@ -505,8 +490,6 @@ let test_effects_answer_what_happened () =
     (failure_kind (dispatch peer Live.Page_goto (obj ["tabId",`Int 2;"url",str "https://slack.com/"])));
   check string "a move without a tab" "before effect"
     (failure_kind (dispatch peer Live.Page_goto (obj ["url",str "https://slack.com/"])));
-  check string "a request block is not served" "before effect"
-    (failure_kind (dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Block_requests ["ads.example"]}))));
   check int "none of those ran a script" before (runs ());
   reply := (fun _ -> refused "the SDK refused native navigation before acting");
   check string "a native navigation refusal remains before-effect" "before effect"
@@ -1395,7 +1378,7 @@ let test_the_peer_serves_what_the_lane_table_says () =
   List.iter (fun capability ->
     let name = Lane.live_capability_to_wire capability in
     let asked = verb_asking_for capability in
-    check bool (name ^ " is what its verb asks for") true (Lane.live_capability asked = Some capability);
+    check bool (name ^ " is what its verb asks for") true (Lane.live_capability asked = capability);
     let wire = Lane.verb_json asked in
     let verb = match Live.verb_of_wire Yojson.Safe.Util.(wire |> member "verb" |> to_string) with
       | Some verb -> verb

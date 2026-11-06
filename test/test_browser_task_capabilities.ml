@@ -115,8 +115,8 @@ let test_invalid_required_actions_reach_no_browser () =
     ; "an operation that is not a name", `List [`Int 1] ];
   check bool "a repeated requiredActions field" true
     (refused_as_input (invoke Cap.Tabs ["requiredActions",`List [];"requiredActions",`List [`String "hover"]]));
-  check bool "requirements cannot ride a session status" true
-    (refused_as_input (invoke Cap.Session ["action",`String "status";"requiredActions",`List []]));
+  check bool "requirements cannot ride a Goal status read" true
+    (refused_as_input (invoke Cap.Session ["action",`String "goal_status";"goalId",`String "goal-probe";"requiredActions",`List []]));
   check bool "an accepted list goes on to find the browser Add-on" true
     (Tool_result.failure_class (invoke Cap.Tabs ["requiredActions",`List [`String "hover"]])
      = Some Tool_result.Dependency_unavailable);

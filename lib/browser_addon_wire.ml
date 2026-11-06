@@ -76,9 +76,6 @@ let verb_of_json ~route value =
            (match tab_id with Some tab_id -> Ok (B.Page_document {tab_id}) | None -> Error "document requires tabId")
        | Some _ -> Error "invalid document request")
   | "page.downloads" -> one_tab (fun tab_id -> B.Page_downloads {tab_id})
-  | "page.console" -> one_tab (fun tab_id -> B.Page_console {tab_id})
-  | "page.network" -> one_tab (fun tab_id -> B.Page_network {tab_id})
-  | "page.cookies" -> one_tab (fun tab_id -> B.Page_cookies {tab_id})
   | "page.capture" ->
       let* fields=fields ["tabId";"options"] in
       let* value=required fields "tabId" in let* tab_id=tab value in
@@ -114,9 +111,6 @@ let verb_of_json ~route value =
       let* fields = object_fields Browser_interaction.wire_fields args in
       let* request = Browser_interaction.parse (`Assoc (route_fields route @ fields)) in
       Ok (B.Page_interact {tab_id=request.tab_id;frame_path=request.frame_path;expected_url=request.expected_url;action=request.action})
-  | "session.open" -> let* fields = fields ["headless"] in let* headless = optional_field fields "headless" boolean in Ok (B.Session_open {headless})
-  | "session.close" -> let* _ = exact [] args in Ok B.Session_close
-  | "session.status" -> let* _ = exact [] args in Ok B.Session_status
   | "page.goto" -> let* fields = fields ["url";"tabId"] in let* url = text_field fields "url" in
       let* tab_id = optional_tab fields in Ok (B.Page_goto {url;tab_id})
   | "page.act" ->
@@ -138,9 +132,6 @@ let verb_of_json ~route value =
         | "frames",None,None,None -> Ok `Frames | "dialog",None,None,None -> Ok `Dialog
         | _ -> Error "invalid context read mode" in
       Ok (B.Page_context {tab_id;frame_path;mode})
-  | "page.locate" -> let* fields = fields ["tabId";"instruction"] in
-      let* raw = required fields "tabId" in let* tab_id = tab raw in let* instruction = optional_field fields "instruction" text in
-      Ok (B.Page_locate {tab_id;instruction})
   | _ -> Error "unknown browser verb"
 
 type command = Snapshot | Retire
@@ -160,12 +151,11 @@ let ends_with_caller = function
   | Issue {route=B.Live_route (Some _);verb;_} ->
     (match verb with
      | B.Page_downloads _ -> false
-     | B.Tabs_list | Page_read _ | Page_document _ | Page_console _
-     | Page_network _ | Page_cookies _ | Page_capture _ | Page_scene _
+     | B.Tabs_list | Page_read _ | Page_document _
+     | Page_capture _ | Page_scene _
      | Page_snapshot _ | Page_native_workflow _ | Page_interact _
-     | Session_open _ | Session_close | Session_status | Page_goto _
-     | Page_elements _ | Page_act _ | Page_context _
-     | Page_locate _ -> true)
+     | Page_goto _
+     | Page_elements _ | Page_act _ | Page_context _ -> true)
   | Issue {route=B.Live_route None;_}
   | Snapshot | Retire | Upload_stage _ | Upload_discard _ | Download_claim _
   | Download_commit _ | Download_release _ | Model_requests | Model_result _
@@ -248,7 +238,7 @@ let of_json value =
         let* raw = required fields "timeout_sec" in let* timeout_sec = positive raw in
         let* raw = required fields "only_if_idle" in let* only_if_idle = boolean raw in
         let* () = if only_if_idle then (match verb with B.Page_document _ -> Ok ()
-          | B.Tabs_list|Page_read _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _|Session_open _|Session_close|Session_status|Page_goto _|Page_elements _|Page_act _|Page_context _|Page_locate _ -> Error "idle admission supports document reads only") else Ok () in
+          | B.Tabs_list|Page_read _|Page_downloads _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _|Page_goto _|Page_elements _|Page_act _|Page_context _ -> Error "idle admission supports document reads only") else Ok () in
         Ok (Issue {route;verb;actor;timeout_sec;only_if_idle})
     | _ -> Error "unknown browser worker operation" in
   Ok {incarnation;command}

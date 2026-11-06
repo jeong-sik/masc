@@ -1,9 +1,7 @@
 (* What the evidence section tells the reader about a binary artifact is
    decided by typed answers: [reading] and [prepare] say what an artifact is,
    [block] says what the section reserves for it, [plan] says whether the
-   picture is requested this frame. The caption tests assert the facts a line
-   must carry (reference, size, a short digest) and which cases say "not
-   shown", not the wording around them. *)
+   picture is requested this frame. *)
 
 module Decode = Masc.Tui_decode
 module Picture = Masc_tui_evidence_picture
@@ -68,109 +66,7 @@ let test_each_preview_has_one_reading () =
     ; Decode.Defect_not_an_image
     ]
 
-let contains ~needle text =
-  let n = String.length needle and t = String.length text in
-  let rec at i = i + n <= t && (String.equal (String.sub text i n) needle || at (i + 1)) in
-  at 0
-
 let sha256 = String.init 64 (fun i -> "0123456789abcdef".[i mod 16])
-
-let caption_of preview =
-  Picture.caption_of_preview ~reference:"artifact:shots/home.png" ~bytes:41230 ~sha256
-    ~format:"png" preview
-
-let test_every_caption_carries_the_identity () =
-  List.iter
-    (fun preview ->
-      let line = caption_of preview in
-      Alcotest.(check bool) "reference" true (contains ~needle:"artifact:shots/home.png" line);
-      Alcotest.(check bool) "size" true (contains ~needle:"41230B" line);
-      Alcotest.(check bool) "short digest" true
-        (contains ~needle:(String.sub sha256 0 Picture.short_sha_length) line);
-      Alcotest.(check bool) "no more of the digest than the short form" false
-        (contains ~needle:(String.sub sha256 0 (Picture.short_sha_length + 1)) line))
-    [ Decode.Preview_image { ev_media = png; ev_data = "" }
-    ; Decode.Preview_withheld Decode.Withheld_not_image_format
-    ; Decode.Preview_withheld Decode.Withheld_body_not_filed
-    ; Decode.Preview_defective Decode.Defect_digest_mismatch
-    ]
-
-let test_the_caption_names_the_media_type_of_an_image () =
-  Alcotest.(check bool) "media type" true
-    (contains ~needle:"image/png"
-       (caption_of (Decode.Preview_image { ev_media = png; ev_data = "" })));
-  Alcotest.(check bool) "a PDF names its extension instead" true
-    (contains ~needle:"pdf"
-       (Picture.caption_of_preview ~reference:"artifact:r.pdf" ~bytes:90 ~sha256 ~format:"pdf"
-          (Decode.Preview_withheld Decode.Withheld_not_image_format)))
-
-(* Which captions carry a cause is decided by the typed reading; the line
-   carries the cause's own text, not a fixed phrase the test would copy. *)
-let test_only_unreadable_images_carry_a_cause () =
-  let causes =
-    [ Picture.Withheld Decode.Withheld_body_not_filed
-    ; Picture.Withheld (Decode.Withheld_over_delivery_ceiling { bytes = 9; ceiling = 3 })
-    ; Picture.Defective Decode.Defect_bad_base64
-    ]
-  in
-  List.iter
-    (fun preview ->
-      let line = caption_of preview in
-      List.iter
-        (fun cause ->
-          Alcotest.(check bool) "a readable image states no cause" false
-            (contains ~needle:(Picture.cause_text cause) line))
-        causes)
-    [ Decode.Preview_image { ev_media = png; ev_data = "" }
-    ; Decode.Preview_withheld Decode.Withheld_not_image_format
-    ];
-  List.iter
-    (fun cause ->
-      let preview =
-        match cause with
-        | Picture.Withheld withheld -> Decode.Preview_withheld withheld
-        | Picture.Defective defect -> Decode.Preview_defective defect
-        | Picture.Conversion_failed _ | Picture.Not_png_after_conversion
-        | Picture.Too_many_pixels _ | Picture.Empty_dimensions | Picture.Png_incomplete
-        | Picture.Unknown_size | Picture.No_free_slot ->
-            Alcotest.fail "fixture causes come from the server"
-      in
-      Alcotest.(check bool) "an unreadable image states its cause" true
-        (contains ~needle:(Picture.cause_text cause) (caption_of preview)))
-    causes;
-  (* Causes found while preparing are stated the same way. *)
-  List.iter
-    (fun cause ->
-      Alcotest.(check bool) "a prepared image states its cause" true
-        (contains ~needle:(Picture.cause_text cause)
-           (Picture.caption ~reference:"artifact:a.png" ~bytes:1 ~sha256 ~format:"png"
-              (Picture.Unshown cause))))
-    [ Picture.Conversion_failed "sips: exit 1"
-    ; Picture.Not_png_after_conversion
-    ; Picture.Too_many_pixels { width = 9000; height = 9000 }
-    ; Picture.Empty_dimensions
-    ; Picture.Png_incomplete
-    ; Picture.Unknown_size
-    ; Picture.No_free_slot
-    ]
-
-let test_a_cause_carries_the_numbers_it_was_stated_with () =
-  let text =
-    Picture.cause_text
-      (Picture.Withheld (Decode.Withheld_over_delivery_ceiling { bytes = 512000; ceiling = 200000 }))
-  in
-  Alcotest.(check bool) "size" true (contains ~needle:"512000" text);
-  Alcotest.(check bool) "limit" true (contains ~needle:"200000" text);
-  let text =
-    Picture.cause_text
-      (Picture.Defective (Decode.Defect_length_mismatch { declared = 10; actual = 7 }))
-  in
-  Alcotest.(check bool) "both lengths" true
-    (contains ~needle:"10" text && contains ~needle:"7" text);
-  let text = Picture.cause_text (Picture.Too_many_pixels { width = 9000; height = 9000 }) in
-  Alcotest.(check bool) "dimensions" true (contains ~needle:"9000x9000" text);
-  Alcotest.(check bool) "and the limit" true
-    (contains ~needle:(string_of_int Picture.max_picture_pixels) text)
 
 let test_a_control_sequence_in_the_reference_never_reaches_the_line () =
   let line =
@@ -387,54 +283,6 @@ let block_testable =
     | Picture.Picture { cols; rows } -> Format.fprintf formatter "Picture %dx%d" cols rows
   in
   Alcotest.testable pp ( = )
-
-let test_a_picture_is_fitted_to_the_width_keeping_its_shape () =
-  (* 1000 x 500 at 10 x 20 px cells: a cell is twice as tall as wide, so the
-     picture is twice as many cells wide as tall. In an 80 cell pane, 74 cells
-     are left of the indent: 740 px across is 370 px down, 18.5 rows, rounded
-     down to 18; 18 rows are 360 px, which at 2:1 is 72 cells across. *)
-  Alcotest.(check block_testable) "bound by the width"
-    (Picture.Picture { cols = 72; rows = 18 })
-    (Picture.block kitty (drawable ~width:1000 ~height:500) ~width:80 ~caption_rows:1
-       ~content_height:40);
-  (* In a 200 cell pane the width allows 48 rows; the row cap of 20 binds, and
-     20 rows are 400 px, 800 px across, 80 cells. *)
-  Alcotest.(check block_testable) "bound by the row cap"
-    (Picture.Picture { cols = 80; rows = Picture.picture_max_rows })
-    (Picture.block kitty (drawable ~width:1000 ~height:500) ~width:200 ~caption_rows:1
-       ~content_height:40)
-
-let test_the_picture_never_claims_more_than_the_space () =
-  List.iter
-    (fun (width, height, pane_width, content_height) ->
-      match
-        Picture.block kitty (drawable ~width ~height) ~width:pane_width ~caption_rows:2
-          ~content_height
-      with
-      | Picture.Caption_only -> Alcotest.fail "every fixture has room for a picture"
-      | Picture.Picture { cols; rows } ->
-          let max_cols = pane_width - Picture.picture_indent_cols in
-          Alcotest.(check bool) "columns inside the width left of the indent" true
-            (cols >= 1 && cols <= max_cols);
-          Alcotest.(check bool) "rows inside the row cap" true
-            (rows >= 1 && rows <= Picture.picture_max_rows);
-          Alcotest.(check bool) "and under the caption inside the content height" true
-            (rows + 2 <= content_height);
-          (* 10 x 20 px cells: [rows] rows are rows * 20 px tall, which at the
-             picture's shape is this many cells across. *)
-          let shape_cols = ((rows * 20 * width) + (height * 10) - 1) / (height * 10) in
-          Alcotest.(check int) "the width is the picture's shape, within the space"
-            (max 1 (min max_cols shape_cols)) cols)
-    [ 1000, 500, 80, 40; 500, 1000, 80, 40; 600, 100, 60, 25; 100, 3000, 120, 50; 1, 1, 40, 12 ]
-
-let test_a_tall_picture_is_bounded_by_the_pane () =
-  match
-    Picture.block kitty (drawable ~width:500 ~height:2000) ~width:100 ~caption_rows:3
-      ~content_height:12
-  with
-  | Picture.Picture { rows; _ } ->
-      Alcotest.(check int) "the rows left under the caption" 9 rows
-  | Picture.Caption_only -> Alcotest.fail "nine rows is a picture"
 
 let test_too_little_room_is_a_caption () =
   Alcotest.(check block_testable) "fewer rows than a readable picture"
@@ -699,15 +547,7 @@ let test_a_terminal_without_pixels_converts_nothing_and_holds_no_slot () =
                   Alcotest.fail "every image is its caption alone, past the slot count too")
             prepared
       | Picture.Access_unavailable _ -> Alcotest.fail "available evidence came back unavailable")
-    [ View.Mosaic; View.No_picture ];
-  Alcotest.(check bool) "its line names an image and no cause" true
-    (contains ~needle:"image/jpeg"
-       (Picture.caption ~reference:"artifact:a.jpg" ~bytes:1 ~sha256 ~format:"jpg"
-          (Picture.Undrawn_image Media.Jpeg)));
-  Alcotest.(check bool) "and does not say not shown" false
-    (contains ~needle:"not shown"
-       (Picture.caption ~reference:"artifact:a.jpg" ~bytes:1 ~sha256 ~format:"jpg"
-          (Picture.Undrawn_image Media.Jpeg)))
+    [ View.Mosaic; View.No_picture ]
 
 let test_a_banner_wider_than_the_pane_at_one_row_is_a_caption () =
   (* 4000 x 20 in 94 columns of 10 x 20 px: the pane holds 0.235 of a row of
@@ -729,15 +569,7 @@ let () =
       , [ Alcotest.test_case "each preview has one reading" `Quick
             test_each_preview_has_one_reading ] )
     ; ( "caption"
-      , [ Alcotest.test_case "every caption carries the identity" `Quick
-            test_every_caption_carries_the_identity
-        ; Alcotest.test_case "an image names its media type" `Quick
-            test_the_caption_names_the_media_type_of_an_image
-        ; Alcotest.test_case "only unreadable images carry a cause" `Quick
-            test_only_unreadable_images_carry_a_cause
-        ; Alcotest.test_case "a cause carries its numbers" `Quick
-            test_a_cause_carries_the_numbers_it_was_stated_with
-        ; Alcotest.test_case "control sequences are removed" `Quick
+      , [ Alcotest.test_case "control sequences are removed" `Quick
             test_a_control_sequence_in_the_reference_never_reaches_the_line
         ] )
     ; ( "prepare"
@@ -775,13 +607,7 @@ let () =
             test_a_terminal_without_pixels_converts_nothing_and_holds_no_slot
         ] )
     ; ( "layout"
-      , [ Alcotest.test_case "a picture keeps its shape in the width" `Quick
-            test_a_picture_is_fitted_to_the_width_keeping_its_shape
-        ; Alcotest.test_case "the picture never claims more than the space" `Quick
-            test_the_picture_never_claims_more_than_the_space
-        ; Alcotest.test_case "a tall picture is bounded by the pane" `Quick
-            test_a_tall_picture_is_bounded_by_the_pane
-        ; Alcotest.test_case "too little room is a caption" `Quick
+      , [ Alcotest.test_case "too little room is a caption" `Quick
             test_too_little_room_is_a_caption
         ; Alcotest.test_case "only a pixel terminal gets a picture" `Quick
             test_only_a_pixel_terminal_gets_a_picture

@@ -280,31 +280,6 @@ let browser_observation_of_fields fields =
   in
   Ok { scope; revision }
 
-let dataset_name = function
-  | Repositories -> repositories_name
-  | Verification_requests -> verification_requests_name
-  | Keeper_metrics _ -> keeper_metrics_name
-  | Harness_verdicts -> harness_verdicts_name
-  | Goals -> goals_name
-  | Runtime_config -> runtime_config_name
-  | Connectors -> connectors_name
-  | Keeper_oauth_attempts _ -> keeper_oauth_attempts_name
-  | Skill_activations _ -> skill_activations_name
-  | Skill_catalog -> skill_catalog_name
-  | Clients -> clients_name
-  | Provider_usage -> provider_usage_name
-  | Provider_standing -> provider_standing_name
-  | Keeper_costs -> keeper_costs_name
-  | Workspace_health -> workspace_health_name
-  | Runtime_probe -> runtime_probe_name
-  | Runtime_metrics -> runtime_metrics_name
-  | Lanes -> lanes_name
-  | Machine_live _ -> machine_live_name
-  | Memory_health _ -> memory_health_name
-  | Play_room _ -> play_room_name
-  | Lane_addons _ -> lane_addons_name
-  | Browser_observation _ -> browser_observation_name
-;;
 let keeper_field = function
   | Repositories | Verification_requests | Harness_verdicts | Goals | Runtime_config | Connectors
   | Skill_catalog | Clients | Account_emails | Provider_usage | Provider_standing | Keeper_costs

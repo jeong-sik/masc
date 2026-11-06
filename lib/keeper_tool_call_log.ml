@@ -167,7 +167,9 @@ let peek_file_change_artifact_refs ~invocation () =
 ;;
 
 (* Complete observation artifacts must outlive their truncated log preview.
-   Keep this carrier until the owning hook commits the exact invocation row. *)
+   The Agent Core hook keeps this carrier until it commits the exact
+   invocation row; a composition executor takes a child call's entry and
+   carries it to that node's row. *)
 let pending_retained_artifacts : Tool_output.artifact_ref list Invocation_table.t =
   Invocation_table.create 8
 let retained_artifacts_mu = Stdlib.Mutex.create ()

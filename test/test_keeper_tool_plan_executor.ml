@@ -2048,6 +2048,61 @@ let test_failed_node_row_keeps_its_producer_roots () =
      |> List.map (fun (reference : Tool_output.artifact_ref) -> reference.sha256))
 ;;
 
+(* Only its row keeps a failed node's roots. When that row cannot be written,
+   execution stops, as it does for a completed node with roots. A failed node
+   without roots keeps its own failure. *)
+let test_unwritten_failed_node_row_stops_only_with_roots () =
+  let module Log = Masc.Keeper_tool_call_log in
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Time_compat.set_clock (Eio.Stdenv.clock env);
+  with_export_base @@ fun base_path ->
+  Fun.protect ~finally:(fun () -> Log.reset_for_testing ()) @@ fun () ->
+  (* No Log.init: the row store is unavailable. *)
+  Log.reset_for_testing ();
+  let root : Tool_output.artifact_ref =
+    Tool_blob_store.put_durable (Tool_blob_store.create ~base_path)
+      ~bytes:"kept before the refusal" ~mime:"application/octet-stream" in
+  let meta = Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ "name", `String "root-keeper"; "activation_mode", `String "manual" ]) |> Result.get_ok in
+  let parent_invocation = Agent_core.Tool_contract.Invocation.create
+      ~tool_use_id:"root-fixture" ~turn:1
+      ~schedule:{ planned_index = 0; batch_index = 0; batch_size = 1
+                ; execution_mode = Agent_core.Tool_contract.Serial }
+      ~completion:Agent_core.Tool_contract.Continue_after_success in
+  let cause roots =
+    let observe_node_result =
+      Masc.Keeper_tool_composition_surface_observation.observe_node_result
+        ~composition_tool:"keeper_compose_root-fixture"
+        ~composition_execution:Masc.Keeper_tool_composition_catalog.Inline
+        ~composition_tool_kind:Masc.Keeper_tool_descriptor.Composition_tool
+        ~composition_run_id:(Plan.Composition_run_id.fresh ())
+        ~parent_invocation ~meta
+        ~turn_context:Masc.Keeper_tool_call_log_context.empty_turn_context in
+    let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () =
+      Executor.dispatch_result ~retained_artifacts:roots
+        ~failure_effect_disposition:Tool_result.Proven_pre_effect
+        (Tool_result.make_err ~tool_name:node.Plan.tool_name ~start_time:(Tool_timing.start ())
+           ~class_:Tool_result.Workflow_rejection ~effect_disposition:Tool_result.Proven_pre_effect
+           "refused after keeping a blob")
+    in
+    match Executor.execute ~plan:(fixture ()) ~run_id:(Plan.Run_id.fresh ())
+            ~dispatch ~observe_node_result () with
+    | Ok _ -> fail "a failed producer must not complete the plan"
+    | Error failure -> failure.cause
+  in
+  (match cause [ root ] with
+   | Executor.Node_observation_failed _ -> ()
+   | Executor.Tool_did_not_complete _ | Executor.Plan_execution_failed _
+   | Executor.Run_journal_rejected _ | Executor.Outer_completion_mismatch _ ->
+     fail "an unwritten row that had to keep roots did not stop execution");
+  match cause [] with
+  | Executor.Tool_did_not_complete _ -> ()
+  | Executor.Node_observation_failed _ | Executor.Plan_execution_failed _
+  | Executor.Run_journal_rejected _ | Executor.Outer_completion_mismatch _ ->
+    fail "an unwritten row without roots replaced the node's own failure"
+;;
+
 let () =
   run ~and_exit:false
     "keeper_tool_plan_executor"
@@ -2079,6 +2134,8 @@ let () =
             test_completed_node_roots_come_from_its_payload
         ; test_case "failed node row keeps its producer roots" `Quick
             test_failed_node_row_keeps_its_producer_roots
+        ; test_case "unwritten failed node row stops only when it kept roots" `Quick
+            test_unwritten_failed_node_row_stops_only_with_roots
         ; Alcotest.test_case
             "observation failure settles siblings and stops downstream"
             `Quick

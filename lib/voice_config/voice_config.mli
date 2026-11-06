@@ -367,3 +367,6 @@ val public_json : t -> Yojson.Safe.t
 
     An absent [tts] or [stt] section renders as [null], so a reader finds
     no model there rather than a model named [""]. *)
+
+val filename : string
+(** The voice config file below [<base>/.masc]. *)

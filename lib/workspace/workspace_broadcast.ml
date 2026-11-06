@@ -314,11 +314,15 @@ let message_file config (message : Masc_domain.message) =
        message.request_id
        committed_message_suffix)
 
+let mention_outbox_dirname = "message-mention-outbox"
+
 let mention_outbox_dir config =
-  Filename.concat (masc_dir config) "message-mention-outbox"
+  Filename.concat (masc_dir config) mention_outbox_dirname
+
+let mention_outbox_quarantine_dirname = "message-mention-outbox-quarantine"
 
 let mention_outbox_quarantine_dir config =
-  Filename.concat (masc_dir config) "message-mention-outbox-quarantine"
+  Filename.concat (masc_dir config) mention_outbox_quarantine_dirname
 
 let mention_outbox_file config request_id =
   Filename.concat (mention_outbox_dir config) (request_id ^ ".json")

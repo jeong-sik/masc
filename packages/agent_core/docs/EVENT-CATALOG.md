@@ -9,10 +9,8 @@ relate, and the contracts downstream consumers can rely on.
 deprecation notice.
 **Last updated**: v0.216.0.
 
-> **Note (v0.217.x)**: The former `Runtime_server_*` subprocess protocol
-> cluster and `Runtime_sync.window` replay surface have been removed from
-> `agent_core`; only `Runtime_store` (durable event/snapshot store) and
-> `Runtime.event` remain as the live runtime surface.
+> **Note**: The runtime surface is `Runtime_store` (file-based session
+> store) and `Runtime.event`.
 
 ---
 
@@ -322,8 +320,7 @@ provider. Missing credentials / endpoints skip gracefully.
    `lib/event_bus.ml` and other `match` sites on `Event_bus.payload`
    cover the new variant (they use explicit arms, not `_`, so the
    compiler will flag omissions under the repo's `warn-error +8` flag
-   set). `lib/eval_collector.ml` was removed in PR #2689 and is no
-   longer a match site to update.
+   set).
 
 ## 8. How to add a new provider
 

@@ -217,12 +217,6 @@ v8. Candidate and partition stores follow the fresh-state hard-cut contract.
 | `comment_added` | post_id, comment_id, optional parent_id, author |
 | `comment_voted` | comment_id, voter, direction |
 
-### 7.2 SSE Dispatch (formerly Board_listener)
-
-`Board_listener` (pg_notify polling) is removed. SSE events are now emitted
-directly via `Board_dispatch` at write time — no polling, no PG dependency
-for real-time updates.
-
 ---
 
 ## 8. Hearth (토픽 카테고리)

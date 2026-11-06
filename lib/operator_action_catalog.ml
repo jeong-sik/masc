@@ -6,8 +6,6 @@
 
 type t =
   | Broadcast
-  | Namespace_pause
-  | Namespace_resume
   | Task_inject
   | Keeper_message
   | Keeper_probe
@@ -16,8 +14,6 @@ type t =
 
 let to_string = function
   | Broadcast -> "broadcast"
-  | Namespace_pause -> "namespace_pause"
-  | Namespace_resume -> "namespace_resume"
   | Task_inject -> "task_inject"
   | Keeper_message -> "keeper_message"
   | Keeper_probe -> "keeper_probe"
@@ -29,7 +25,7 @@ let to_string = function
 let of_string raw = List.find_opt (fun action -> String.equal (to_string action) raw) all
 
 let target_type = function
-  | Broadcast | Namespace_pause | Namespace_resume | Task_inject ->
+  | Broadcast | Task_inject ->
     Operator_action_constants.Workspace
   | Keeper_message | Keeper_probe | Keeper_recover -> Operator_action_constants.Keeper
 ;;

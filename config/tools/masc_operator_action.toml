@@ -5,14 +5,14 @@ this when you need guided control with preview-confirm safety for \
 disruptive actions."""
 operator_remote_description = """
 Preview or run a structured operator action. Use this when you need to \
-broadcast, pause a namespace, inject work, or message a keeper through \
+broadcast, inject work, or message, probe or recover a keeper on \
 the remote operator surface."""
 
 [[params]]
 name = "action_type"
 type = "string"
 required = true
-enum = ["broadcast", "namespace_pause", "namespace_resume", "task_inject", "keeper_message", "keeper_probe", "keeper_recover"]
+enum = ["broadcast", "task_inject", "keeper_message", "keeper_probe", "keeper_recover"]
 
 [[params]]
 name = "target_type"

@@ -86,12 +86,9 @@ let target_of_entry (entry : pending_confirm) =
    describes itself. Each function is total over the catalog: a new action
    stops the build here instead of going without a row in
    [available_actions]. The name is a label. [keeper_recover] runs
-   [masc_keeper_down] and [masc_keeper_up], and the namespace actions call
-   [Workspace] without dispatching a tool. *)
+   [masc_keeper_down] and [masc_keeper_up]. *)
 let delegated_tool_name = function
   | Operator_action_catalog.Broadcast -> "masc_broadcast"
-  | Operator_action_catalog.Namespace_pause -> "masc_pause"
-  | Operator_action_catalog.Namespace_resume -> "masc_resume"
   | Operator_action_catalog.Task_inject -> "masc_add_task"
   | Operator_action_catalog.Keeper_message ->
     Keeper_tool_name.(to_string Keeper_delegate)
@@ -101,9 +98,6 @@ let delegated_tool_name = function
 
 let action_description = function
   | Operator_action_catalog.Broadcast -> "Namespace-wide operator broadcast."
-  | Operator_action_catalog.Namespace_pause ->
-    "Pause namespace automation and spawning."
-  | Operator_action_catalog.Namespace_resume -> "Resume a paused namespace."
   | Operator_action_catalog.Task_inject ->
     "Inject a backlog task into the namespace."
   | Operator_action_catalog.Keeper_message ->

@@ -143,3 +143,18 @@ val is_initialized : config -> bool
 (** Invalidate the is_initialized cache. Call when workspace state
     changes (init, reset, cleanup). *)
 val invalidate_initialized_cache : unit -> unit
+
+val agents_dirname : string
+(** The directory {!agents_dir} names below [<base>/.masc]. *)
+
+val messages_dirname : string
+(** The directory {!messages_dir} names below [<base>/.masc]. *)
+
+val state_filename : string
+(** The file {!state_path} names below [<base>/.masc]. *)
+
+val archive_filename : string
+(** The file {!archive_path} names below [<base>/.masc]. *)
+
+val tasks_dirname : string
+(** The directory {!tasks_dir} names below [<base>/.masc]. *)

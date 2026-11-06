@@ -225,6 +225,8 @@ let seed_state_if_missing config =
         raise (Initialization_failed (State_seed_lease_refused refusal)))
 ;;
 
+let traces_dirname = "traces"
+
 (** Initialize MASC workspace state. On a workspace that is already
     initialized, the server's boot path, it raises a message counter that
     fell behind the filed messages. *)
@@ -235,7 +237,7 @@ let init config ~agent_name =
     mkdir_p
     [ agents_dir config
     ; keepers_runtime_dir config
-    ; Filename.concat (masc_dir config) "traces"
+    ; Filename.concat (masc_dir config) traces_dirname
     ; tasks_dir config
     ; messages_dir config
     ; Filename.concat config.base_path Playground_paths.all_playgrounds_prefix

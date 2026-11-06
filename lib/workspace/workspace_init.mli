@@ -39,3 +39,6 @@ val resume :
     maintenance. Symlinks inside the workspace are unlinked without deleting
     their targets. Removed directories can be recreated by memoized writers. *)
 val reset : Workspace_utils_backend_setup.config -> string
+
+val traces_dirname : string
+(** The trace directory init creates below [<base>/.masc]. *)

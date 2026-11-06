@@ -33,14 +33,17 @@ let validate_expected_workspace ~config args =
      | _ -> Error Invalid_workspace_precondition)
   | _ -> Error Invalid_workspace_precondition
 
-let agents_dir config = Filename.concat (masc_dir config) "agents"
+let agents_dirname = "agents"
+let agents_dir config = Filename.concat (masc_dir config) agents_dirname
 (* Segment names for the task store, exposed so a reader holding only a
    masc_dir string composes the same path this accessor does. *)
 let tasks_dirname = "tasks"
 let backlog_filename = "backlog.json"
 let tasks_dir config = Filename.concat (masc_dir config) tasks_dirname
-let messages_dir config = Filename.concat (masc_dir config) "messages"
-let state_path config = Filename.concat (masc_dir config) "state.json"
+let messages_dirname = "messages"
+let messages_dir config = Filename.concat (masc_dir config) messages_dirname
+let state_filename = "state.json"
+let state_path config = Filename.concat (masc_dir config) state_filename
 
 (* A committed message is filed as
    "<seq>_<agent>_<request-id>" ^ [committed_message_suffix], the sequence
@@ -73,7 +76,8 @@ let message_seq_of_filename name =
         | Some seq when seq > 0 -> Some seq
         | Some _ | None -> None)
 let backlog_path config = Filename.concat (tasks_dir config) backlog_filename
-let archive_path config = Filename.concat (masc_dir config) "tasks-archive.json"
+let archive_filename = "tasks-archive.json"
+let archive_path config = Filename.concat (masc_dir config) archive_filename
 
 (* Keeper OUTPUT directory (server-written state + sidecars). The
    trailing segment is [Common.keepers_runtime_dirname] — the single literal,

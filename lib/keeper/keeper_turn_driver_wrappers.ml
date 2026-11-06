@@ -1,23 +1,16 @@
-(** Keeper_turn_driver_wrappers — convenience wrappers extracted from
-    [Keeper_turn_driver].
+(** Keeper_turn_driver_wrappers — convenience wrappers around
+    {!Keeper_turn_driver.run_named}.
 
-    These are sibling entry points to {!Keeper_turn_driver.run_named}:
-    - [run_model_by_label]: explicit model-label variant
     - [run_named_with_masc_tools]: runtime variant + MASC tool bridging
-
-    Extracted from keeper_turn_driver.ml as RFC-0048 PR-2 to reduce the
-    1347-LOC hotspot file.
 
     @since RFC-0048 PR-2 *)
 
 open Result.Syntax
 include Keeper_turn_driver
 
-(* RFC-0206: re-homed from the deleted Runtime_config_builder.  Resolves a model
-   label to its provider config and builds a Runtime_agent.config; no runtime
-   catalog involved. *)
-(* RFC-0206: the runtime CLI-preflight wrapper is gone; run the attempt
-   directly.  Kept as a thin pass-through so the two call sites read unchanged. *)
+(* Bridges [masc_tools] into agent-core tools, appends [native_tools], runs
+   [Keeper_turn_driver.run_named], and reports the selected runtime id through
+   [on_selected_runtime]. *)
 let run_named_with_masc_tools
     ~runtime_id
     ?(keeper_name = "")

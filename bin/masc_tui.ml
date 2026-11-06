@@ -8296,6 +8296,10 @@ let owe_provider_history_day state ~now =
       owe_pushed_read state Surface_read_source.Provider_history
   | Some _ | None -> ()
 
+(* Owed reads wait on this clock, so a wall-clock step cannot stretch a
+   retry. *)
+let monotonic_now_s () = Int64.to_float (Mtime_clock.elapsed_ns ()) /. 1e9
+
 (* runtime.toml reads when the server says it committed a text of it, on
    arrival and on a revalidation, and again after a failed read (RFC-0482
    L4). *)
@@ -8856,10 +8860,6 @@ let launch_keeper_child_content_load ?(mode=Masc_tui_child_content.Poll) state ~
 let stream_reconnect_s = 2.0
 let keeper_execute_stream_reconnect_s = 2.0
 let keeper_execute_stream_max_reconnect_s = 30.0
-
-(* Owed reads wait on this clock, so a wall-clock step cannot stretch a
-   retry. *)
-let monotonic_now_s () = Int64.to_float (Mtime_clock.elapsed_ns ()) /. 1e9
 
 (* The owed history read of [keeper_name] under the current workspace
    reading, when the record is theirs. *)

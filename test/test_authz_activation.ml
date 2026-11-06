@@ -220,6 +220,72 @@ let a_second_activation_is_refused () =
     Alcotest.(check string) "the store is as it was" store (read_file dirs.store))
 ;;
 
+(* ---- one more invitation ---- *)
+
+let invite dirs =
+  A.invite ~base_path:dirs.base ~config_dir:(Some dirs.config) ~anonymous_mutations:false ~now_ms
+;;
+
+let invite_error_name : A.invite_error -> string = function
+  | A.Not_activated -> "Not_activated"
+  | A.Not_served_as_active _ -> "Not_served_as_active"
+  | A.Store_not_located _ -> "Store_not_located"
+  | A.Invite_not_written _ -> "Invite_not_written"
+;;
+
+let check_invite_refused label expected result =
+  match result with
+  | Ok (_ : A.invitation) -> Alcotest.failf "%s: the invitation was written" label
+  | Error error -> Alcotest.(check string) label expected (invite_error_name error)
+;;
+
+let an_invite_adds_one_open_admin_invitation () =
+  with_dirs (fun dirs ->
+    ask_for_multi_account dirs;
+    let { A.invitation = first; workspace_id = _ } = activated_exn dirs in
+    match invite dirs with
+    | Error error -> Alcotest.failf "the invite was refused: %s" (A.invite_error_to_string error)
+    | Ok second ->
+      Alcotest.(check int) "three records" 3 (count_lines (read_file (log_path dirs)));
+      Alcotest.(check bool)
+        "another invite id"
+        false
+        (Authz_types.Invite_id.equal (A.invite_id first) (A.invite_id second));
+      Alcotest.(check bool)
+        "another token"
+        false
+        (String.equal (token_of first) (token_of second));
+      (match Z.open_at_start ~now_ms ~log_path:(log_path dirs) ~store_path:dirs.store with
+       | Error error -> Alcotest.failf "zone not opened: %s" (Z.open_error_to_string error)
+       | Ok zone ->
+         let invites = (Z.snapshot zone).Z.state.Authz_state.invites in
+         List.iter
+           (fun (label, (invitation : A.invitation)) ->
+             match Authz_invite_state.find invites (A.invite_id invitation) with
+             | Some { Authz_invite_state.status = Authz_invite_state.Open; role = E.Admin; token_digest; _ } ->
+               Alcotest.(check bool)
+                 (label ^ ": the digest of its token")
+                 true
+                 (E.Token_digest.equal token_digest (E.Token_digest.of_token (token_of invitation)))
+             | Some _ | None -> Alcotest.failf "%s is not an open Admin invitation" label)
+           [ "the first invitation", first; "the second invitation", second ]))
+;;
+
+let an_invite_needs_an_active_installation () =
+  with_dirs (fun dirs ->
+    check_invite_refused "no config.json" "Not_activated" (invite dirs);
+    ask_for_multi_account dirs;
+    check_invite_refused "before the activation" "Not_activated" (invite dirs);
+    Alcotest.(check bool) "no log" false (Sys.file_exists (log_path dirs));
+    Alcotest.(check bool) "no store" false (Sys.file_exists dirs.store);
+    let (_ : A.activated) = activated_exn dirs in
+    let log = read_file (log_path dirs) in
+    Sys.remove dirs.store;
+    check_invite_refused "a store that is gone" "Not_served_as_active" (invite dirs);
+    Alcotest.(check string) "the log is as it was" log (read_file (log_path dirs));
+    Alcotest.(check bool) "no store is made" false (Sys.file_exists dirs.store))
+;;
+
 let () =
   Alcotest.run
     "authz_activation"
@@ -243,6 +309,16 @@ let () =
             `Quick
             a_boot_that_would_stop_writes_nothing
         ; Alcotest.test_case "a second activation" `Quick a_second_activation_is_refused
+        ] )
+    ; ( "invite"
+      , [ Alcotest.test_case
+            "one more open Admin invitation"
+            `Quick
+            an_invite_adds_one_open_admin_invitation
+        ; Alcotest.test_case
+            "an active installation"
+            `Quick
+            an_invite_needs_an_active_installation
         ] )
     ]
 ;;

@@ -53,46 +53,74 @@ let anonymous_mutations () =
 
 (* Both are read before anything is written, so a link that could not be
    printed, or a setting a server would refuse, writes nothing. *)
-let activate ~external_store base_path =
-  let* base_url = public_base_url () in
-  let* anonymous_mutations = anonymous_mutations () in
-  let* activated =
-    Result.map_error
-      A.error_to_string
-      (Eio_main.run (fun _env ->
-         A.activate
-           ~base_path
-           ~config_dir:(Env_config_core.masc_config_dir_opt ())
-           ~external_store
-           ~anonymous_mutations
-           ~now_ms))
-  in
-  Ok (base_url, activated)
+let under_lease ~base_path write =
+  with_lease ~base_path (fun base_path ->
+    let* base_url = public_base_url () in
+    let* anonymous_mutations = anonymous_mutations () in
+    let* written =
+      Eio_main.run (fun _env ->
+        write
+          ~base_path
+          ~config_dir:(Env_config_core.masc_config_dir_opt ())
+          ~anonymous_mutations
+          ~now_ms)
+    in
+    Ok (base_url, written))
+;;
+
+(* The invitation is committed by now. A link that did not reach the output is
+   reported, so the exit code does not claim it was printed. *)
+let print_link ~command ~base_url invitation =
+  Printf.printf
+    "The person signs in once with this link before %s. It is not shown again:\n%s\n"
+    (Time_codec.rfc3339_of_unix (float_of_int (A.expires_at_ms invitation) /. 1000.))
+    (A.link ~base_url invitation);
+  match flush stdout with
+  | () -> 0
+  | exception Sys_error detail ->
+    Printf.eprintf
+      "masc auth %s: the invitation is written, and its link did not reach the standard \
+       output: %s; masc auth invite writes another\n"
+      command
+      detail;
+    1
+;;
+
+let refused command reason =
+  Printf.eprintf "masc auth %s: %s\n" command reason;
+  1
 ;;
 
 let bootstrap ~base_path ~external_store =
-  match with_lease ~base_path (activate ~external_store) with
-  | Error reason ->
-    Printf.eprintf "masc auth bootstrap: %s\n" reason;
-    1
+  let activate ~base_path ~config_dir ~anonymous_mutations ~now_ms =
+    Result.map_error
+      A.error_to_string
+      (A.activate ~base_path ~config_dir ~external_store ~anonymous_mutations ~now_ms)
+  in
+  match under_lease ~base_path activate with
+  | Error reason -> refused "bootstrap" reason
   | Ok (base_url, { A.workspace_id; invitation }) ->
     Printf.printf
       "The installation is activated for multi-account use, workspace %s.\n\
        This build does not serve multi-account yet, so a server stops at boot on this \
        workspace. No command undoes the activation.\n\
-       The first Admin signs in once with this link before %s. It is not shown again:\n\
-       %s\n"
-      (Authz_types.Workspace_id.to_string workspace_id)
-      (Time_codec.rfc3339_of_unix (float_of_int (A.expires_at_ms invitation) /. 1000.))
-      (A.link ~base_url invitation);
-    (* The invitation is committed by now. A link that did not reach the output
-       is reported, so the exit code does not claim it was printed. *)
-    (match flush stdout with
-     | () -> 0
-     | exception Sys_error detail ->
-       Printf.eprintf
-         "masc auth bootstrap: the installation is activated, and its link did not reach \
-          the standard output: %s\n"
-         detail;
-       1)
+       The first Admin is invited.\n"
+      (Authz_types.Workspace_id.to_string workspace_id);
+    print_link ~command:"bootstrap" ~base_url invitation
+;;
+
+let invite ~base_path =
+  let invite ~base_path ~config_dir ~anonymous_mutations ~now_ms =
+    Result.map_error
+      A.invite_error_to_string
+      (A.invite ~base_path ~config_dir ~anonymous_mutations ~now_ms)
+  in
+  match under_lease ~base_path invite with
+  | Error reason -> refused "invite" reason
+  | Ok (base_url, invitation) ->
+    (* No flush here: [print_link] flushes once and reports a failure. *)
+    print_string
+      "One more Admin is invited. Earlier invitations stay open until they are spent or \
+       expire.\n";
+    print_link ~command:"invite" ~base_url invitation
 ;;

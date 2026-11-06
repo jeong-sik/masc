@@ -95,3 +95,36 @@ val activate
   -> anonymous_mutations:bool
   -> now_ms:(unit -> int)
   -> (activated, error) result
+
+(** Why {!invite} wrote nothing, or what it left. *)
+type invite_error =
+  | Not_activated
+      (** A boot starts a single user, or asks for the activation that
+          {!activate} runs: there is no active installation to invite to.
+          Nothing was written. *)
+  | Not_served_as_active of string * string list
+      (** A boot stops on this installation, and not on an active one whose
+          external store matches the log, with the lines it prints. Nothing
+          was written. *)
+  | Store_not_located of string
+      (** The install record that names the external store could not be read,
+          or names none. Nothing was written. *)
+  | Invite_not_written of invitation_error
+
+val invite_error_to_string : invite_error -> string
+
+(** [masc auth invite]: one more Admin invitation, written by the host-local
+    operator, on an installation that {!activate} activated. A first invitation
+    may expire before it is spent, or its link may be lost. It goes on only
+    where a boot finds [Multi_account] with an external store that matches the
+    log, and writes through the zone over the store that the install record
+    names. It revokes no invitation, so an earlier link stays open until it is
+    spent or expires. Revoking an invitation and inviting a Member are not in
+    this build (plan C6). The caller holds the BasePath lease, as for
+    {!activate}. *)
+val invite
+  :  base_path:string
+  -> config_dir:string option
+  -> anonymous_mutations:bool
+  -> now_ms:(unit -> int)
+  -> (invitation, invite_error) result

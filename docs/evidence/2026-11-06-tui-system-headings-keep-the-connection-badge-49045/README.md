@@ -1,6 +1,6 @@
 # The Runtime, Features and Clients headings keep the connection badge whole
 
-PR #49045 of stack #48922. The title row of three System screens joined its parts by hand (title, tab strip, reading time, connection badge). When the parts after the tab strip were wider than the row, the tab strip got no cells and the frame cut the row at its end, and the end of the row is the connection badge.
+PR #49045. The title row of three System screens joined its parts by hand (title, tab strip, reading time, connection badge). When the parts after the tab strip were wider than the row, the tab strip got no cells and the frame cut the row at its end, and the end of the row is the connection badge.
 
 Before is the proof build of the stack head before this PR (code commit `d1569dc589c`, run 42138077129). After is the proof build of this PR's code up to its last code commit (`ce423e3db49`, run 42147433996); the evidence commit that carries this README comes after it and changes no code. The branch was rebased onto a newer `main` after that build; the changed lines are the same. Both ran against a fixture server. Each screen was read at six terminal sizes, a few seconds after the screen opened. The Runtime probe state on screen in those reads was `일부 실패 / 최신`.
 

@@ -13,14 +13,6 @@
 
 include Keeper_sandbox_runtime_setup
 
-type inspected_container =
-  { owner_pid : int option
-  ; started_at : float option
-  ; running : bool option
-  ; ttl_sec : float option
-  ; container_kind : string option
-  }
-
 type live_container =
   { id : string
   ; name : string
@@ -98,69 +90,11 @@ let string_opt text =
   | value -> Some value
 ;;
 
-let invalid_cleanup_field ~field ~value =
-  Error
-    (Printf.sprintf
-       "invalid docker inspect cleanup field %s=%S"
-       field
-       (Exec_policy.truncate_for_log value))
-;;
-
-let required_positive_int ~field text =
-  match int_opt text with
-  | Some value when value > 0 -> Ok (Some value)
-  | None | Some _ -> invalid_cleanup_field ~field ~value:text
-;;
-
-let required_positive_float ~field text =
-  match float_opt text with
-  | Some value when Float.is_finite value && value > 0.0 -> Ok (Some value)
-  | None | Some _ -> invalid_cleanup_field ~field ~value:text
-;;
-
-let required_bool ~field text =
-  match bool_opt text with
-  | Some value -> Ok (Some value)
-  | None -> invalid_cleanup_field ~field ~value:text
-;;
-
-let optional_positive_float ~field text =
-  match string_opt text with
-  | None -> Ok None
-  | Some value -> required_positive_float ~field value
-;;
-
 let strip_leading_slash text =
   let text = String.trim text in
   if String.length text > 0 && text.[0] = '/'
   then String.sub text 1 (String.length text - 1)
   else text
-;;
-
-let parse_inspect_line line =
-  (* docker inspect --format emits a trailing empty field as either
-     ["<no value>"] or an empty final field when a label is unset.
-     [nonempty_lines] preserves that trailing tab, so every current
-     cleanup payload has exactly five fields. *)
-  match String.split_on_char '\t' line with
-  | [ owner_pid; started_at; running; ttl_sec; container_kind ] ->
-    let open Result.Syntax in
-    let* owner_pid = required_positive_int ~field:"owner_pid" owner_pid in
-    let* started_at = required_positive_float ~field:"started_at" started_at in
-    let* running = required_bool ~field:"running" running in
-    let* ttl_sec = optional_positive_float ~field:"ttl_sec" ttl_sec in
-    Ok
-      { owner_pid
-      ; started_at
-      ; running
-      ; ttl_sec
-      ; container_kind = string_opt container_kind
-      }
-  | _ ->
-    Error
-      (Printf.sprintf
-         "unexpected docker inspect cleanup payload: %s"
-         (Exec_policy.truncate_for_log line))
 ;;
 
 let parse_live_container_line line =
@@ -855,13 +789,4 @@ let docker_preflight ~image ~timeout_sec () =
 
 module For_testing = struct
   let nonempty_lines = nonempty_lines
-
-  (* Project the internal [inspected_container] record onto a tuple so
-     the test does not need a re-exported type. Order:
-     (owner_pid, started_at, running, ttl_sec, container_kind). *)
-  let parse_inspect_line line =
-    parse_inspect_line line
-    |> Result.map (fun (ic : inspected_container) ->
-      ic.owner_pid, ic.started_at, ic.running, ic.ttl_sec, ic.container_kind)
-  ;;
 end

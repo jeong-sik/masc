@@ -23,7 +23,8 @@ type membership =
 (* [by_identity] and [by_namespace] name, for each bound identity and each
    namespace given, the principal it belongs to. The maps grow together in
    [admit]. A deletion takes the principal, its identity, its membership, and
-   its assignment out, and puts its id in [deleted]; its namespace stays given.
+   its assignment out, and puts its id in [deleted] and its identity in
+   [deleted_identities]; its namespace stays given.
    [admins] holds the assignments in force; an Admin acts only while Active. *)
 type t =
   { by_id : principal User_map.t
@@ -32,6 +33,7 @@ type t =
   ; by_namespace : User_id.t Namespace_map.t
   ; admins : User_id.Set.t
   ; deleted : User_id.Set.t
+  ; deleted_identities : unit Identity.Map.t
   }
 
 let empty =
@@ -41,6 +43,7 @@ let empty =
   ; by_namespace = Namespace_map.empty
   ; admins = User_id.Set.empty
   ; deleted = User_id.Set.empty
+  ; deleted_identities = Identity.Map.empty
   }
 ;;
 
@@ -49,6 +52,7 @@ let find_identity t identity = Identity.Map.find_opt identity t.by_identity
 let find_membership t user_id = User_map.find_opt user_id t.memberships
 let find_namespace t namespace = Namespace_map.find_opt namespace t.by_namespace
 let is_deleted t user_id = User_id.Set.mem user_id t.deleted
+let was_deleted t identity = Identity.Map.mem identity t.deleted_identities
 
 let is_active t user_id =
   match find t user_id with
@@ -172,6 +176,7 @@ let admit
            ; by_namespace = Namespace_map.add namespace user_id t.by_namespace
            ; admins
            ; deleted = t.deleted
+           ; deleted_identities = t.deleted_identities
            }
          in
          Ok { principals; invites; role }))
@@ -275,6 +280,7 @@ let apply_event t ~author ~held (event : Authz_principal_event.t) =
         ; memberships = User_map.remove user_id t.memberships
         ; admins = User_id.Set.remove user_id t.admins
         ; deleted = User_id.Set.add user_id t.deleted
+        ; deleted_identities = Identity.Map.add identity () t.deleted_identities
         })
 ;;
 

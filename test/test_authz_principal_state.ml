@@ -363,7 +363,10 @@ let a_deletion () =
     "another identity"
     "the deletion of bob names the identity google:999, which is not the one it is bound to"
     (event t ~by:alice (Pe.Deleted { user_id = bob; identity = google "999" }));
+  Alcotest.(check bool) "not marked before the deletion" false (P.was_deleted t (google "222"));
   let deleted = applied_ok (event t ~by:alice (Pe.Deleted { user_id = bob; identity = google "222" })) in
+  Alcotest.(check bool) "the identity is marked as deleted" true (P.was_deleted deleted (google "222"));
+  Alcotest.(check bool) "another identity is not" false (P.was_deleted deleted (google "111"));
   Alcotest.(check string) "bob" "deleted" (status_name deleted bob);
   Alcotest.(check bool) "no Admin assignment" false (P.is_admin deleted bob);
   Alcotest.(check bool) "not active" false (P.is_active deleted bob);
@@ -398,7 +401,8 @@ let a_deletion () =
     "the identity names the new principal"
     (Some "bob-2")
     (Option.map User_id.to_string (P.find_identity rejoined (google "222")));
-  Alcotest.(check bool) "the new principal is an Admin" true (P.is_admin rejoined bob_again)
+  Alcotest.(check bool) "the new principal is an Admin" true (P.is_admin rejoined bob_again);
+  Alcotest.(check bool) "the mark stays after the identity joins again" true (P.was_deleted rejoined (google "222"))
 ;;
 
 let who_may_revoke () =

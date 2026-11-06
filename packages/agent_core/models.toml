@@ -2271,17 +2271,21 @@ supports_native_streaming = true
 # 2026-11-06: 1M context, multimodal with a 1.6B vision encoder, function
 # calling, structured outputs, prefix caching with cached input at 0.1x
 # ($0.7 input / $0.07 cached / $2.1 output per M tokens)
-# (https://docs.mistral.ai/models/mistral-large-4). The reasoning page names
-# mistral-large-4-0 as adjustable via reasoning_effort and documents "none"
-# and "high" for Mistral models
-# (https://docs.mistral.ai/studio/conversations/reasoning). ["none"] only,
-# same policy as mistral-small: the openai_chat_extended response parser is
-# not yet verified against Mistral's list-shaped ThinkChunk/TextChunk
-# message.content (#38564).
+# (https://docs.mistral.ai/models/mistral-large-4).
+# Effort ladder measured live 2026-11-06: the API rejects "none" with code
+# 3051 ("supported values: high, low, medium") and answers "low" with a
+# list-shaped ThinkChunk/TextChunk message.content -- this model has no
+# plain-string mode, so the disable that mistral-small encodes as "none"
+# (#38564) is not sayable here and the ladder carries no "none".
+# Streaming stays off for the same measured reason: a streamed turn at
+# effort "low" (captured 2026-11-06) delivered the whole answer inside
+# list-shaped delta.content and no plain-string delta at all, and the
+# streaming consumer reads only plain-string deltas -- turning streaming
+# on silently drops the entire answer (#49352 covers the delta parser).
 [[models]]
 model_id = "mistral-large-4"
 base = "openai_chat_extended"
-accepted_reasoning_efforts = ["none"]
+accepted_reasoning_efforts = ["low", "medium", "high"]
 provider_name = "mistral"
 max_context_tokens = 1000000
 input_per_million = 0.7
@@ -2295,7 +2299,7 @@ supports_response_format_json = true
 supports_structured_output = true
 supports_multimodal_inputs = true
 supports_image_input = true
-supports_native_streaming = true
+supports_native_streaming = false
 
 # Cohere Command Models
 [[models]]

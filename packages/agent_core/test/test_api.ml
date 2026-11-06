@@ -348,6 +348,48 @@ let test_parse_openai_response_reasoning_content () =
      | _ -> Alcotest.fail "expected [Thinking; Text]")
 ;;
 
+(* Mistral Large 4 answers every admissible effort with a list-shaped
+   message.content of ThinkChunk/TextChunk objects (recorded live 2026-11-06,
+   reasoning_effort=low, api.mistral.ai; the API rejects "none" with code
+   3051 so there is no plain-string mode). The thinking text lives under
+   thinking[].text with no top-level "text" field, so it extracts no visible
+   text; the answer TextChunk carries the visible answer alone. The trace is
+   dropped rather than typed [Thinking] -- replaying it needs a follow-up that
+   feeds ThinkChunk through reasoning_content_blocks (#38564). *)
+let test_parse_openai_response_mistral_chunk_list_content () =
+  let json_str =
+    {|{
+    "id": "0e5b1e4f5a0a4a12b0a2b42a7de1c6bf",
+    "model": "mistral-large-4",
+    "choices": [{
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": [
+          { "type": "thinking",
+            "thinking": [ { "type": "text", "text": "The user wants me to reply with the single word \"ok\"." } ] },
+          { "type": "text", "text": "ok" }
+        ]
+      }
+    }],
+    "usage": {"prompt_tokens": 22, "completion_tokens": 34, "total_tokens": 56}
+  }|}
+  in
+  match Llm_provider.Backend_openai_parse.parse_openai_response_result json_str with
+  | Error msg ->
+    Alcotest.fail
+      ("unexpected error: " ^ Llm_provider.Backend_openai_parse.parse_error_to_string msg)
+  | Ok resp ->
+    (match resp.content with
+     | [ Types.Text text ] ->
+       check string "visible answer from the text chunk" "ok" text
+     | _ ->
+       Alcotest.failf
+         "expected the thinking chunk to extract no visible block, got %d block(s)"
+         (List.length resp.content))
+;;
+
 let test_parse_openai_response_reasoning_with_tools () =
   let json_str =
     {|{
@@ -971,6 +1013,10 @@ let () =
             "reasoning_content"
             `Quick
             test_parse_openai_response_reasoning_content
+        ; test_case
+            "mistral chunk-list content"
+            `Quick
+            test_parse_openai_response_mistral_chunk_list_content
         ; test_case
             "reasoning_content with tools"
             `Quick

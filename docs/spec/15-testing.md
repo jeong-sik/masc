@@ -8,7 +8,7 @@ status: reference
 |------|-----|
 | Status | Draft |
 | Team | Foundation |
-| Maps to | `test/`, `lib/keeper/keeper_gate.ml`, `lib/keeper/keeper_approval_queue.ml`, `lib/eval_harness.ml`, `lib/trajectory/trajectory.ml` |
+| Maps to | `test/`, `lib/keeper/keeper_gate.ml`, `lib/keeper/keeper_approval_queue*.ml`, `lib/eval_harness.ml`, `lib/trajectory/trajectory.ml` |
 | Dependencies | (all subsystem specs) |
 | Test Files | `test/dune`와 포함 stanza가 SSOT |
 

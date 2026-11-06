@@ -156,7 +156,8 @@ let parse_rearm_fields fields =
      [Summary_attempt_persistence_uncertain] over
      [Exact_released_recovery_required] — the single combination the
      queue's CAS unlatches
-     ([reserve_summary_attempt_retry] in keeper_approval_queue.ml). *)
+     ([reserve_summary_attempt_retry] in
+     keeper_approval_queue_summary_attempt.ml). *)
   let* disposition_json = required "summary_attempt_disposition" in
   let* expected_disposition =
     Keeper_approval_queue_rules_types.summary_attempt_disposition_of_yojson_with_error

@@ -842,9 +842,9 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
   let sweep_started = Unix.gettimeofday () in
   (match Server_settled_archive_sweep.run_at_startup ~base_path:canonical_base_path with
    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-   | exception _ ->
-     Log.Server.warn "[Startup] settled archive sweep unavailable elapsed_s=%.3f"
-       (Unix.gettimeofday () -. sweep_started)
+   | exception exn ->
+     Log.Server.warn "[Startup] settled archive sweep unavailable elapsed_s=%.3f: %s"
+       (Unix.gettimeofday () -. sweep_started) (Printexc.to_string exn)
    | Error error ->
      Log.Server.warn "[Startup] %s elapsed_s=%.3f"
        (Server_settled_archive_sweep.error_to_string error) (Unix.gettimeofday () -. sweep_started)

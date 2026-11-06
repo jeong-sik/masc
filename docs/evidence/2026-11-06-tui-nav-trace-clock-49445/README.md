@@ -38,5 +38,5 @@ The screen is the same before and after; only the trace differs.
 ## Not shown
 
 - A frame that changes every few hundred milliseconds for another reason (a spinner, an age counted in seconds) is still a new frame. Only the clock is set aside.
-- A key whose only effect is a change of input authority is drawn as a whole-screen repaint even though the rows are the same (`force_present` in `Masc_tui_frame_presenter.present`), so it keeps its `Presented` result and leaves no line.
+- A whole-screen repaint keeps its `Presented` result and leaves no line. The presenter draws the whole screen for the first frame, after a resize, after `invalidate`, and when `force_present` is set because input authority changed while the rows stayed the same (`Masc_tui_frame_presenter.present`).
 - Cursor handling is covered by `test_tui_nav_trace_log`: a repaint that moved only the cursor, and one that moved the cursor and the clock together, leave no line. Run 42252635747 of `test.yml` on the PR head ran test_tui_nav_trace, test_tui_nav_trace_log: success.

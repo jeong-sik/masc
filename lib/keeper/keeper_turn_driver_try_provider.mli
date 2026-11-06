@@ -671,13 +671,36 @@ type current_turn_results =
   | Current_turn_verbatim
       (** No size refusal yet: every message goes as the range first sent it,
           tool results and arguments of earlier turns included (RFC-0363
-          §3.4.1). *)
+          §3.4.1), but for the results {!finished_turn_results} asks to send
+          as markers. *)
   | Current_turn_demoted of { refused_atom_count : int }
       (** A request carrying [refused_atom_count] atoms was refused for size:
           every tool result below [refused_atom_count], and every completed
           argument the attempt bound, goes as its externalized marker
           (#28845). Atoms appended after the refused ones, the results a
           resent attempt produces, go as they are. *)
+
+(** What a composition under {!Current_turn_verbatim} does with the tool
+    results of turns that already ended, the atoms before the turn boundary.
+    Arguments are never part of it. The resend that answers a size refusal
+    ignores it: {!Current_turn_demoted} covers every result of the refused
+    request. *)
+type finished_turn_results =
+  | Finished_turns_verbatim
+      (** Every result goes as the range first sent it (RFC-0363 §3.4.1). *)
+  | Finished_turns_as_markers
+      (** A result of turns that ended, in an atom before the turn boundary
+          and never the newest atom, goes as its externalized marker when its
+          body is at least [For_testing.aged_result_min_bytes] bytes. The
+          same result is the same marker on every later request, so it changes
+          once, on the first request after its turn ended
+          (RFC-tool-results-age-out-of-context). An unknown turn boundary
+          names no ended turn and demotes nothing. *)
+
+val finished_turn_results_for : reader_available:bool -> finished_turn_results
+(** {!Finished_turns_as_markers} for a Keeper that can read markers back
+    ([reader_available]); {!Finished_turns_verbatim} for a Keeper without the
+    reader. *)
 
 val current_turn_demotion_sequence :
   same_run_retry_authorized:(unit -> bool) ->
@@ -754,15 +777,17 @@ type composed =
             request started over. *)
   ; demote_before : int
         (** The boundary the demotion applied: 0 under {!Current_turn_verbatim}
-            or with no store, the refused request's atom count under
-            {!Current_turn_demoted}. *)
+            with {!Finished_turns_verbatim} or with no store, the last ended
+            turn's end under {!Finished_turns_as_markers}, the refused
+            request's atom count under {!Current_turn_demoted}. *)
   }
 (** One request as {!For_testing.compose_carried_model_input} composes it
     (RFC keeper-context-window-in-tokens §10.4): under {!Current_turn_demoted}
     RFC-0363 demotion over every atom up to the refused request's end, then
     the carried range from where {!choose_range_start} opens it (§13.4,
     §13.6). Under {!Current_turn_verbatim} nothing the range already sent is
-    rewritten. Nothing here measures the request against a limit. *)
+    rewritten but the results {!Finished_turns_as_markers} asks for. Nothing
+    here measures the request against a limit. *)
 
 type request_view =
   { composed : composed
@@ -853,9 +878,14 @@ module For_testing : sig
 
   val message_measurement_hash : Agent_core.Types.message -> int
 
+  val aged_result_min_bytes : int
+  (** The least body, in bytes, of a result {!Finished_turns_as_markers}
+      sends as a marker. *)
+
   val compose_carried_model_input :
     ?continuity:continuity ->
     ?completed_arguments:Keeper_model_input_demotion.completed_arguments ->
+    ?finished_turn_results:finished_turn_results ->
     measure_message_bytes:(Agent_core.Types.message -> int) ->
     front:Keeper_carried_front.seed option ->
     accepted:Keeper_carried_front.seed option ->
@@ -869,6 +899,7 @@ module For_testing : sig
   val request_view :
     ?continuity:continuity ->
     ?completed_arguments:Keeper_model_input_demotion.completed_arguments ->
+    ?finished_turn_results:finished_turn_results ->
     ?tools:Yojson.Safe.t list ->
     provider_config:Agent_core.Llm_provider.Provider_config.t ->
     measure_message_bytes:(Agent_core.Types.message -> int) ->

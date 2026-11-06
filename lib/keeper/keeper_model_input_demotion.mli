@@ -11,8 +11,11 @@
     The caller selects the conversation range and verified completed boundary.
     Substitution reduces body bytes inside that range without adding or removing
     atoms. Every substitution rewrites a message a provider may already hold in
-    its prompt cache, so the keeper's agent_core assembly calls this only for the
-    resend that answers a size refusal (RFC-0363 §3.4.1).
+    its prompt cache, so the keeper's agent_core assembly asks for it in two
+    places only: the results of turns that already ended, once each, on the
+    first request after their turn ended (RFC-tool-results-age-out-of-context,
+    an exception to RFC-0363 §3.4.1), and every result of the resend that
+    answers a size refusal.
 
     Durable state is untouched. This runs on the provider-bound copy, like the
     window, so a blob written here has no durable referrer — see
@@ -90,6 +93,7 @@ type plan_result =
 
 val plan
   :  ?completed_arguments:completed_arguments
+  -> ?min_result_bytes:int
   -> measure_message_bytes:(Agent_core.Types.message -> int)
   -> demote_before:int
   -> Agent_core.Types.message list
@@ -114,16 +118,23 @@ val plan
       owns the consequence: a boundary that moves while the range's front stays
       rewrites a message the provider already holds and costs its prompt cache
       from that message on. A boundary at the current turn moves once per turn,
-      so it costs the cache on the first request of every turn. The keeper's
-      agent_core assembly passes 0 until a size refusal, then the refused
-      request's atom count for the one resend that answers it, so every result
-      in the refused request leaves as a marker rather than failing the turn
-      (#28845).
+      so each result changes once, on the first request after its turn ended,
+      and costs the cache from that message on. The keeper's agent_core
+      assembly passes the turn boundary for a Keeper that can read markers
+      back, and the refused request's atom count for the
+      one resend that answers a size refusal, so every result in the refused
+      request leaves as a marker rather than failing the turn (#28845).
+    - its body has at least [min_result_bytes] bytes. The floor is 0 when the
+      argument is omitted, so a result is demoted whenever the next bullet
+      allows it. It applies to results only; [completed_arguments] are chosen
+      by their own eligibility.
     - the placeholder measures strictly smaller than the message does now.
-      This replaces a size threshold: the encoded marker runs from about 125
-      bytes to 1,154 depending on the preview's bytes, because
-      {!Tool_output.encode_for_agent_core} escapes the preview and the JSON encoder
-      escapes it again, so any fixed floor is wrong for one of the two ends.
+      This is the rule that decides whether a marker saves bytes at all: the
+      encoded marker runs from about 125 bytes to 1,154 depending on the
+      preview's bytes, because {!Tool_output.encode_for_agent_core} escapes the
+      preview and the JSON encoder escapes it again, so a fixed floor cannot
+      stand in for it. [min_result_bytes] is a floor on what the caller wants
+      to trade for a marker, checked in addition to this rule.
 
     [measure_message_bytes] must be the encoder the window will use. The bound
     is obtained by measuring a real placeholder message through it rather than
@@ -142,8 +153,9 @@ type materialize_outcome =
   { messages : Agent_core.Types.message list
   ; reverted : int
         (** Planned demotions whose blob write failed and whose body was
-            restored. Non-zero means the list is larger than the plan the cut
-            was chosen against, so the caller must run the cut again. *)
+            restored. Non-zero means the list is larger than the plan
+            measured. The range is a position, not a size, so the same atoms
+            go out and the caller reports the failure. *)
   }
 
 type materialized_replay

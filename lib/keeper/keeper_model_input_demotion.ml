@@ -145,14 +145,18 @@ type materialize_outcome =
    credited a saving — an under-estimate, which is the direction that lets a
    materialized request exceed the cap. [Invalid_marker] is marker-shaped
    content that failed to parse; storing it would give a corrupt payload a
-   permanent content address, so it is left untouched and stays visible. *)
-let demotable_body (block : Agent_core.Types.content_block) =
+   permanent content address, so it is left untouched and stays visible. A
+   body shorter than [min_bytes] is left as it is before any of that is read. *)
+let demotable_body ~min_bytes (block : Agent_core.Types.content_block) =
   match block with
   | Agent_core.Types.ToolResult { content; content_blocks = None; _ }
     ->
-    (match Tool_output.decode_from_agent_core content with
-     | Tool_output.Not_marker -> Some content
-     | Tool_output.Decoded _ | Tool_output.Invalid_marker _ -> None)
+    if String.length content < min_bytes
+    then None
+    else
+      (match Tool_output.decode_from_agent_core content with
+       | Tool_output.Not_marker -> Some content
+       | Tool_output.Decoded _ | Tool_output.Invalid_marker _ -> None)
   | Agent_core.Types.ToolResult { content_blocks = Some _; _ }
   | Agent_core.Types.Text _
   | Agent_core.Types.Thinking _
@@ -186,7 +190,7 @@ let planned_reference ~kind ~sha256 ~bytes =
   |> Result.to_option
 ;;
 
-let plan ?(completed_arguments = Occurrences.empty)
+let plan ?(completed_arguments = Occurrences.empty) ?(min_result_bytes = 0)
     ~measure_message_bytes ~demote_before messages =
   let labelled, _atom_count = Runtime_model_input_tail_window.annotate messages in
   if demote_before <= 0 && Occurrences.is_empty completed_arguments
@@ -217,7 +221,10 @@ let plan ?(completed_arguments = Occurrences.empty)
                       match Occurrences.find_opt (message_index, block_index) completed_arguments with
                       | Some (original, bytes) when original == block -> Some (Call_arguments, bytes)
                       | Some _ | None ->
-                        if aged then Option.map (fun bytes -> Result_body, bytes) (demotable_body block)
+                        if aged
+                        then
+                          Option.map (fun bytes -> Result_body, bytes)
+                            (demotable_body ~min_bytes:min_result_bytes block)
                         else None
                     in
                     match payload with

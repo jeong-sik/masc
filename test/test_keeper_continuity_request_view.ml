@@ -542,10 +542,12 @@ let body_for id messages =
     | _ -> None) m.content) messages |> Option.get
 ;;
 
-(* A completed exchange still in the range goes out raw on every ordinary
-   request; only the resend that answers a size refusal sends the refused
-   request's bodies as markers, the unfinished exchange's included (#28845,
-   RFC-0363 §3.4.1). *)
+(* With [Finished_turns_verbatim], the [request_view] default, a completed
+   exchange still in the range goes out raw on every ordinary request; only
+   the resend that answers a size refusal sends the refused request's bodies
+   as markers, the unfinished exchange's included (#28845, RFC-0363 §3.4.1).
+   The driver asks for [Finished_turns_as_markers] when the reader is
+   offered; [test_keeper_model_input_demotion] covers that request. *)
 let test_completed_bodies_go_raw_until_a_size_refusal () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);

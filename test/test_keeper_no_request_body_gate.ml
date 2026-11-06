@@ -201,12 +201,14 @@ candidates = ["overflow.sample", "fixture.sample"]
       latest.Turn_record.runtime_profile
   | [] -> fail "the fallback response observation is missing"
 
-(* Every condition under which a completed turn's tool results and arguments
-   once left as markers holds here: a recorded turn boundary, a
-   Librarian behind on that turn, the canonical reader, and a completed raw
-   seed. The second request still carries them exactly as the first one sent
-   them (RFC-0363 §3.4.1). *)
-let test_historical_tool_results_go_as_first_sent () =
+(* Every condition under which a completed turn's tool results leave as
+   markers holds here: a recorded turn boundary, a Librarian behind on that
+   turn, the canonical reader, and a completed raw seed. The result of the
+   turn that ended goes as a marker the reader opens, and as the same marker
+   on both requests. Its call keeps the arguments it was made with, and this
+   turn's result stays in the prompt (RFC-0363 §3.4.1, with the exception of
+   RFC-tool-results-age-out-of-context). *)
+let test_historical_tool_results_go_as_markers () =
   let module Observation = Agent_core.Base.Schema_observation in
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -486,7 +488,7 @@ streaming = false
     (List.exists (fun event ->
        is_span "span_finished" "sdk_byte_count_publication" event && in_reserve event) events);
   let second_body = List.nth (Exact_output_fixture.request_bodies server) 1 in
-  check bool "the historical body goes raw on the second HTTP request" true
+  check bool "the historical body leaves the second HTTP request" false
     (String_util.contains_substring second_body historical_payload);
   check bool "current-turn tool body remained verbatim inline" true
     (String_util.contains_substring second_body active_payload);
@@ -526,7 +528,17 @@ streaming = false
   check int "exactly 2 tool messages on the wire" 2 (List.length tool_messages);
   let historical_content =
     Yojson.Safe.Util.(member "content" (tool_message messages "call-demote-1") |> to_string) in
-  check string "the historical tool result is verbatim" historical_payload historical_content;
+  check bool "the historical tool result is a marker" true
+    (Tool_output.is_marker historical_content);
+  (match Tool_output.decode_from_agent_core historical_content with
+   | Tool_output.Decoded reference ->
+     (match Tool_blob_store.fetch (Tool_blob_store.create ~base_path)
+              ~sha256:reference.Tool_output.sha256 with
+      | Ok (Some bytes) ->
+        check string "the marker reads back the exact historical result" historical_payload bytes
+      | Ok None | Error _ -> fail "the marker's blob is not stored")
+   | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
+     fail "the historical result is not a decodable marker");
   let active_content =
     Yojson.Safe.Util.(member "content" (tool_message messages "active-call-1") |> to_string) in
   check bool "current turn tool message is not a marker" false
@@ -540,7 +552,7 @@ let () =
     [ "actual-dispatch",
       [ test_case "a large request reaches the peer and a refusal moves the lane" `Quick
           test_a_large_request_reaches_the_peer_and_a_refusal_moves_the_lane
-      ; test_case "historical tool results and arguments go as first sent" `Quick
-          test_historical_tool_results_go_as_first_sent
+      ; test_case "historical tool results go as markers and arguments as first sent" `Quick
+          test_historical_tool_results_go_as_markers
       ]
     ]

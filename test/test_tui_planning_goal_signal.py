@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """The Planning screen reads its Goals again when the server announces a Goal
-projection change, and the refresh cadence does not read them (RFC-0480).
+projection change, and a quiet stretch does not read them (RFC-0480).
 
 The fixture answers both Planning reads with the smallest body each decoder
 accepts, so a read never fails and is never retried.
@@ -126,17 +126,14 @@ class PlanningGoalSignalTest(unittest.TestCase):
 
         self.run_planning(scenario)
 
-    def test_the_cadence_does_not_read_planning(self) -> None:
+    def test_a_quiet_stretch_does_not_read_planning(self) -> None:
         def scenario(server: owed.ChatServer, step: Callable[..., None]) -> None:
-            server.set_phase("cadence")
+            server.set_phase("quiet")
             step("drain", 3.5)
-            self.assertGreaterEqual(
-                server.count("cadence", "/health"), 2, "the cadence did not run"
-            )
-            self.assertEqual(server.count("cadence", PLANNING_PATH), 0)
-            self.assertEqual(server.count("cadence", GOALS_PATH), 0)
+            self.assertEqual(server.count("quiet", PLANNING_PATH), 0)
+            self.assertEqual(server.count("quiet", GOALS_PATH), 0)
 
-        self.run_planning(scenario, refresh_seconds=1.0)
+        self.run_planning(scenario)
 
 
 if __name__ == "__main__":

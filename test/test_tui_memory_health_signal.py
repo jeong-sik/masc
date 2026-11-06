@@ -2,9 +2,9 @@
 """A Keeper's memory health push reads that Keeper's row, not the fleet, while
 the Memory surface is on screen (RFC-0487).
 
-The refresh cadence is pushed out of the test's lifetime, so every read after
-the surface opens comes from a push or from arriving on the surface; one test
-runs the cadence at a second and sees it read nothing. The row read answers no
+The TUI has no refresh cadence (#48677), so every read after the surface opens
+comes from a push or from arriving on the surface; one test waits through a
+quiet stretch and sees it read nothing. The row read answers no
 row, the answer for a Keeper the fleet does not list, so merging it changes
 nothing and owes no fleet read. One test serves a fleet that lists the Keeper,
 so its row merges and the input pane reads the Keeper's turn records.
@@ -267,18 +267,14 @@ class MemoryHealthSignalTest(unittest.TestCase):
 
         self.run_memory(scenario)
 
-    def test_the_cadence_does_not_read_memory_health(self) -> None:
+    def test_a_quiet_stretch_does_not_read_memory_health(self) -> None:
         def scenario(server: HealthServer, step: Callable[..., None]) -> None:
-            server.set_phase("cadence")
-            step(
-                "wait",
-                lambda: server.response_count("cadence", "/health") >= 2,
-                "the cadence did not run",
-            )
-            self.assertEqual(server.count("cadence", HEALTH_PATH), 0)
-            self.assertEqual(server.count("cadence", ROW_READ), 0)
+            server.set_phase("quiet")
+            step("drain", 3.5)
+            self.assertEqual(server.count("quiet", HEALTH_PATH), 0)
+            self.assertEqual(server.count("quiet", ROW_READ), 0)
 
-        self.run_memory(scenario, refresh_seconds=1.0)
+        self.run_memory(scenario)
 
     def test_a_failed_input_read_is_read_again_until_it_succeeds(self) -> None:
         def scenario(server: HealthServer, step: Callable[..., None]) -> None:

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The Connectors list reads again when the server announces a connector
-change while it is on screen and when a reopened feed revalidates it, and the
-refresh cadence does not read it (RFC-0480).
+change while it is on screen and when a reopened feed revalidates it, and a
+quiet stretch does not read it (RFC-0480).
 
 The fixture serves an empty connector list, so a read is one request and no
 name pages follow.
@@ -109,17 +109,13 @@ class ConnectorsSignalTest(unittest.TestCase):
 
         self.run_connectors(scenario)
 
-    def test_the_cadence_does_not_read_the_list(self) -> None:
+    def test_a_quiet_stretch_does_not_read_the_list(self) -> None:
         def scenario(server: ConnectorsServer, step: Callable[..., None]) -> None:
-            server.set_phase("cadence")
-            step(
-                "wait",
-                lambda: server.response_count("cadence", "/health") >= 2,
-                "the cadence did not run",
-            )
-            self.assertEqual(server.count("cadence", CONNECTORS_PATH), 0)
+            server.set_phase("quiet")
+            step("drain", 3.5)
+            self.assertEqual(server.count("quiet", CONNECTORS_PATH), 0)
 
-        self.run_connectors(scenario, refresh_seconds=1.0)
+        self.run_connectors(scenario)
 
 
 if __name__ == "__main__":

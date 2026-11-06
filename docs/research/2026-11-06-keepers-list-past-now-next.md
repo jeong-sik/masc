@@ -29,11 +29,17 @@ in
 
 The two inputs describe different times.
 
-- `Health_failing` is the server phase `Failing`. The server derives it from
-  `turn_healthy = false`, "the record of a turn that already ended"
-  (`lib/keeper/keeper_registry.ml:397`). One failed turn sets it. Only a later
-  successful turn clears it, and while no turn runs it stays. It describes the
-  past: the last ended turn failed.
+- `Health_failing` is the server phase `Failing`. The server sets it when
+  `turn_healthy` or `heartbeat_healthy` is false
+  (`lib/keeper_registry/keeper_state_machine.ml:61-64`). The turn flag is "the
+  record of a turn that already ended" (`lib/keeper/keeper_registry.ml:397`):
+  one failed turn turns it false and only a later successful turn turns it
+  true again (`keeper_state_machine.ml:83-87`), and while no turn runs it
+  stays. The heartbeat flag follows `Heartbeat_failed` and `Heartbeat_ok` the
+  same way (`:75-82`). Both describe the past: the last ended turn failed, or a
+  heartbeat failed. The list does not say which. The kind of the most recent
+  failure is in `kr_last_failure.kf_cause` (`heartbeat`, `turn`, `provider` and
+  five more, `lib/keeper/keeper_tool_surface_ops.ml:292-300`).
 - `Keeper_activity_attempt_failed` means "The turn is still open after a
   provider attempt failed" (`lib/tui_decode.mli:1420`). It describes now: a turn
   is running and one attempt inside it has failed.
@@ -159,7 +165,7 @@ below is met today:
 | Need | Source | In the TUI today |
 | --- | --- | --- |
 | Show the live activity of a failing row | `kfs_current_activity` from `keeper_failure_status_of_readings` | Yes. It is decoded and the RUNTIME cell prints it as text. The NOW column and the group do not use it |
-| Mark "the last ended turn failed" without hiding the activity | `Health_failing` | Yes |
+| Mark "the last ended turn or a heartbeat failed" without hiding the activity | `Health_failing`; the kind of the latest failure in `kf_cause`; the two flags in `kl_conditions` (`lib/tui_decode.mli:872-884`, read today only by the detail pane) | Yes |
 | Tell an operator-owned stop from an automatic retry (colour, group) | the readings above with `Held_call`, `Question`, `Confirmation` | Yes |
 | Age of the last failure | `kr_last_failure.kf_at_unix` (`float option`) | Yes |
 | Why the last turn ended: the ending runtime, its typed cause and how many candidates were tried | `kr_runtime_lane_observation` (`lib/tui_decode.mli:780`), a `Keeper_runtime_walk_evidence.t` with `terminal` and `failures` | Yes. The detail pane prints it (`bin/masc_tui_render_keepers.ml:1820`) and the list does not read it. The server binds it to the receipt's turn, "never to the Keeper's current runtime or a newer decision" (`lib/keeper/keeper_execution_receipt.mli`), so it must be shown with that turn's time |

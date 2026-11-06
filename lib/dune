@@ -24,6 +24,7 @@
   keeper_tool_composition_projection
   keeper_tool_composition_surface_schema
   keeper_tool_composition_surface_observation
+  keeper_tool_composition_surface_execution
   keeper_tool_memory_validation
   keeper_tool_execution_journal_types
   keeper_tool_execution_journal_json

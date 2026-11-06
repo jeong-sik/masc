@@ -27,6 +27,7 @@
   capability_recovery_reconciler_json
   capability_recovery_reconciler
   publication_recovery_access_model
+  publication_recovery_access_text
   publication_recovery_access
   atomic_temp_name
   atomic_orphan_cleanup
@@ -48,7 +49,8 @@
   capability_recovery_reconciler_observation
   capability_recovery_reconciler_text
   capability_recovery_reconciler_json
-  publication_recovery_access_model)
+  publication_recovery_access_model
+  publication_recovery_access_text)
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4) + unused-value ratchet (warning 32)
  (flags
   (:standard -w +4 -w +33 -w +37))

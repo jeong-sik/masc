@@ -1,0 +1,176 @@
+{
+  "by_conclusion": {
+    "cancelled": 4,
+    "failure": 11,
+    "success": 7
+  },
+  "by_keeper": {
+    "code-reviewer-mother": {
+      "parked": {
+        "hours": 0.11,
+        "max_min": 3.5,
+        "median_min": 3.2,
+        "other_turns": 0,
+        "other_turns_per_wake": {
+          "max": 0.0,
+          "median": 0.0,
+          "n": 2,
+          "p90": 0.0
+        },
+        "p90_min": 3.5,
+        "wakes": 2,
+        "wakes_with_other_turns": 0
+      },
+      "wakes": 2
+    },
+    "sangsu": {
+      "parked": {
+        "hours": 3.33,
+        "max_min": 128.4,
+        "median_min": 7.7,
+        "other_turns": 18,
+        "other_turns_per_wake": {
+          "max": 6.0,
+          "median": 1.0,
+          "n": 10,
+          "p90": 4.0
+        },
+        "p90_min": 11.3,
+        "wakes": 10,
+        "wakes_with_other_turns": 8
+      },
+      "wakes": 10
+    },
+    "you-never-change": {
+      "parked": {
+        "hours": 1.56,
+        "max_min": 19.7,
+        "median_min": 9.8,
+        "other_turns": 19,
+        "other_turns_per_wake": {
+          "max": 3.0,
+          "median": 3.0,
+          "n": 9,
+          "p90": 3.0
+        },
+        "p90_min": 19.7,
+        "wakes": 9,
+        "wakes_with_other_turns": 8
+      },
+      "wakes": 9
+    }
+  },
+  "delivered": 21,
+  "end_unknown": 0,
+  "idle_at_dispatch": {
+    "stages_s": {
+      "dispatch_to_delivered": {
+        "max": 7264.0,
+        "median": 0.0,
+        "n": 14,
+        "p90": 33.0
+      },
+      "end_to_delivered": {
+        "max": 7288.0,
+        "median": 25.0,
+        "n": 14,
+        "p90": 125.0
+      },
+      "end_to_woke": {
+        "max": 71.0,
+        "median": 12.0,
+        "n": 14,
+        "p90": 58.0
+      },
+      "woke_to_dispatch": {
+        "max": 21.0,
+        "median": 12.0,
+        "n": 14,
+        "p90": 21.0
+      }
+    },
+    "wakes": 14
+  },
+  "inside_a_turn_at_dispatch": {
+    "stages_s": {
+      "dispatch_to_delivered": {
+        "max": 643.0,
+        "median": 165.0,
+        "n": 7,
+        "p90": 643.0
+      },
+      "end_to_delivered": {
+        "max": 700.0,
+        "median": 183.0,
+        "n": 7,
+        "p90": 700.0
+      },
+      "end_to_woke": {
+        "max": 34.0,
+        "median": 27.0,
+        "n": 7,
+        "p90": 34.0
+      },
+      "woke_to_dispatch": {
+        "max": 29.0,
+        "median": 17.0,
+        "n": 7,
+        "p90": 29.0
+      }
+    },
+    "wakes": 7
+  },
+  "parked": {
+    "hours": 5.0,
+    "max_min": 128.4,
+    "median_min": 8.6,
+    "other_turns": 37,
+    "other_turns_per_wake": {
+      "max": 6.0,
+      "median": 1.0,
+      "n": 21,
+      "p90": 3.0
+    },
+    "p90_min": 15.8,
+    "wakes": 21,
+    "wakes_with_other_turns": 16
+  },
+  "probed_at": "2026-11-06T12:46:04+00:00",
+  "stages_s": {
+    "dispatch_to_delivered": {
+      "max": 7264.0,
+      "median": 0.0,
+      "n": 21,
+      "p90": 446.0
+    },
+    "end_to_delivered": {
+      "max": 7288.0,
+      "median": 45.0,
+      "n": 21,
+      "p90": 484.0
+    },
+    "end_to_woke": {
+      "max": 71.0,
+      "median": 13.0,
+      "n": 22,
+      "p90": 34.0
+    },
+    "woke_to_dispatch": {
+      "max": 29.0,
+      "median": 13.0,
+      "n": 22,
+      "p90": 21.0
+    }
+  },
+  "turn_state_unknown": 0,
+  "unreadable_log_lines": 0,
+  "wakes": 22,
+  "watched_creates": 22,
+  "window": {
+    "from": "2026-11-06",
+    "to": "2026-11-06",
+    "until": "2026-11-06T12:40:00+00:00"
+  },
+  "without_create": 0,
+  "without_delivery_line": 1
+}

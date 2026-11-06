@@ -217,6 +217,10 @@ class GhRun(unittest.TestCase):
         with mock.patch.object(slack.subprocess, "run", return_value=self.completed(0, "<html>")):
             self.assertIsNone(slack.gh_run(MASC, RUN_A))
 
+    def test_a_command_that_does_not_answer_in_time_gives_none(self) -> None:
+        with mock.patch.object(slack.subprocess, "run", side_effect=subprocess.TimeoutExpired(["gh"], slack.GH_TIMEOUT_SECONDS)):
+            self.assertIsNone(slack.gh_run(MASC, RUN_A))
+
 
 class Judge(unittest.TestCase):
     def verdict_of(self, due: float | None, run: slack.Run | None, *run_ids: str) -> slack.Judged:

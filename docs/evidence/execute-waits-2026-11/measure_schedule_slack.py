@@ -28,7 +28,7 @@ Definitions:
 - verdict, the first that fits:
   `watched`. `several_runs`: the message names more than one run, and the text does not say
   which one the wake waits for. `no_due_time`. `run_unreadable`: no repository
-  answers, for whatever reason (404, no access, no network). `rerun`: the run has
+  answers, for whatever reason (404, no access, no network, no answer within 60 seconds). `rerun`: the run has
   more than one attempt, so its `updated_at` may be the end of an attempt the
   Keeper did not wait for. `not_completed`: the run has not completed.
   `already_complete`: the run ended at or before the row's `ts`, so there was
@@ -189,13 +189,16 @@ def run_of(repo: str, answer: object) -> Run | None:
 
 
 def gh_run(repo: str, run_id: str) -> Run | None:
-    done = subprocess.run(
-        ["gh", "api", f"repos/{repo}/actions/runs/{run_id}"],
-        capture_output=True,
-        text=True,
-        timeout=GH_TIMEOUT_SECONDS,
-        check=False,
-    )
+    try:
+        done = subprocess.run(
+            ["gh", "api", f"repos/{repo}/actions/runs/{run_id}"],
+            capture_output=True,
+            text=True,
+            timeout=GH_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return None
     if done.returncode != 0:
         return None
     try:

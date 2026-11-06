@@ -48,8 +48,13 @@ val authorize_post :
   (authorization_post_outcome, Auth_oauth.error) result
 (** The approval or denial. A document client's document is fetched here, so
     call it only for a same-origin browser request. An approval fetches only
-    after the MASC bearer is accepted; a denial fetches first because it
-    redirects. *)
+    after the MASC bearer is accepted; a denial redirects from the checked
+    request alone and fetches nothing.
+
+    Once an approval's client and callback are checked, a refusal to issue
+    its code (scope, access, pending-code limit, store failure) is an
+    [Authorization_redirect] carrying [error], [state] and [iss]. [Error] is
+    left for a request whose callback is not established. *)
 
 val register_client :
   base_path:string -> string -> (Auth_oauth.client, Auth_oauth.error) result

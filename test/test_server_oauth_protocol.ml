@@ -823,6 +823,65 @@ let test_step_up_names_the_scope_an_oauth_token_lacks () =
       (Server_oauth_metadata.insufficient_scope_challenge (authority ()) Auth_oauth.Mcp_admin))
 ;;
 
+(* A Worker bearer cannot approve mcp:admin. The client and its callback are
+   already checked at that point, so the refusal reaches the callback with
+   [error], [state] and [iss] instead of a JSON body the browser shows while
+   the client's loopback callback waits for its timeout. *)
+let test_a_refused_approval_redirects_to_the_callback () =
+  with_oauth_workspace (fun base_path ->
+    let redirect_uri = "http://127.0.0.1:43123/callback" in
+    let worker_bearer =
+      match Auth.create_token base_path ~agent_name:"scope-refused-worker" ~role:Masc_domain.Worker with
+      | Ok (token, _) -> token
+      | Error error -> fail (Masc_domain.masc_error_to_string error)
+    in
+    let client =
+      Auth_oauth.register_client
+        ~base_path
+        ~client_name:(Some "scope probe")
+        ~redirect_uris:[ redirect_uri ]
+      |> Result.get_ok
+    in
+    let body =
+      authorize_query
+        ~client_id:client.client_id
+        ~redirect_uri
+        ~challenge:(String.make 43 'a')
+        ~scope:"mcp:admin"
+        ~extra:
+          [ "bootstrap_token", [ worker_bearer ]
+          ; "confirm_admin", [ "yes" ]
+          ; "decision", [ "authorize" ]
+          ]
+        ()
+    in
+    match
+      Server_oauth_service.authorize_post
+        ~base_path
+        ~authority:(authority ())
+        ~fetch_client_metadata:no_document
+        ~body
+    with
+    | Ok (Server_oauth_service.Authorization_redirect location) ->
+      let callback = Uri.of_string location in
+      check (triple (option string) (option int) string)
+        "the refusal goes to the checked callback"
+        (Some "127.0.0.1", Some 43123, "/callback")
+        (Uri.host callback, Uri.port callback, Uri.path callback);
+      check (option string) "the refusal names invalid_scope" (Some "invalid_scope")
+        (Uri.get_query_param callback "error");
+      check (option string) "the refusal preserves state" (Some "cimd-state")
+        (Uri.get_query_param callback "state");
+      check (option string) "the refusal names the issuer (RFC 9207)"
+        (Some (Server_oauth_metadata.issuer (authority ())))
+        (Uri.get_query_param callback "iss");
+      check (option string) "the refusal carries no code" None
+        (Uri.get_query_param callback "code")
+    | Ok (Server_oauth_service.Authorization_form_error { message; _ }) ->
+      fail ("the refusal rendered a form error: " ^ message)
+    | Error error -> fail ("the refusal stayed off the callback: " ^ Auth_oauth.show_error error))
+;;
+
 let test_a_denial_redirects_only_to_this_computer () =
   with_oauth_workspace (fun base_path ->
     let fetched, fetch_client_metadata = serving claude_code_document in
@@ -964,6 +1023,10 @@ let () =
             "step-up names the scope an OAuth token lacks"
             `Quick
             test_step_up_names_the_scope_an_oauth_token_lacks
+        ; test_case
+            "a refused approval redirects to the callback"
+            `Quick
+            test_a_refused_approval_redirects_to_the_callback
         ; test_case
             "a denial redirects only to this computer"
             `Quick

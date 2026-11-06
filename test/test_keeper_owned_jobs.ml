@@ -51,6 +51,7 @@ type fixture =
   ; daemon_path : string
   ; kill_marker : string
   ; make_bundle : unit -> Masc.Keeper_tools_agent_core.tool_bundle
+  ; capability_surface : Masc.Keeper_capability_surface.t
   }
 
 let frozen_surface_with_observation ~observation ~tool_deny ~tool_descriptors ~base_path ~sandbox_profile =
@@ -174,7 +175,7 @@ let with_fixture ?fixture_base_path ?continuation_channel ?(parent_alias=false) 
       ?continuation_channel
       ~ctx_snapshot:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"owned job fixture")
       ~clock:(Eio.Stdenv.clock env) ~turn_ctx_cell:cell () in
-  let fixture = {base_path;configured_base_path;meta;cell;make_bundle;
+  let fixture = {base_path;configured_base_path;meta;cell;make_bundle;capability_surface=surface;
       control_path=Filename.concat base_path "control.json";
       daemon_path=Filename.concat base_path "daemon.json";
       kill_marker=Filename.concat base_path "kill-entered"} in
@@ -875,6 +876,26 @@ let composition_reference label json =
   | Tool_output.Invalid_normalized_artifact_ref {detail} ->
       failf "%s is invalid: %s; value=%s" label detail (Yojson.Safe.to_string json)
 
+(* A recipe frozen the way keeper_composition_run freezes one, for scenarios
+   that read the draft or replay it before or apart from a single run. *)
+let freeze_draft fixture recipe =
+  let execution, plan = match recipe with
+    | `Assoc fields ->
+      let execution = match List.assoc_opt "execution" fields with
+        | Some (`String "inline") -> Masc.Keeper_tool_composition_catalog.Inline
+        | Some (`String "async") -> Masc.Keeper_tool_composition_catalog.Async
+        | _ -> fail "fixture recipe names no execution mode" in
+      execution, `Assoc (List.remove_assoc "execution" fields)
+    | _ -> fail "fixture recipe is not an object" in
+  match Masc.Keeper_composition_draft.prepare ~base_path:fixture.configured_base_path
+          ~capability_surface:fixture.capability_surface ~keeper_name:fixture.meta.name ~execution plan with
+  | Ok draft -> draft
+  | Error error -> failf "fixture recipe did not freeze: %s"
+      (Yojson.Safe.to_string (Masc.Keeper_composition_draft.error_to_json error))
+
+let nested_calls_json draft =
+  List.map Masc.Keeper_composition_nested.call_to_json (Masc.Keeper_composition_draft.nested_calls draft)
+
 let composition_nodes fixture data =
   let reference = data |> member "execution_artifact" |> composition_reference "execution artifact" in
   let bytes = match Tool_blob_store.fetch (Tool_blob_store.create ~base_path:fixture.base_path) ~sha256:reference.sha256 with
@@ -965,7 +986,7 @@ value = { sha256 = %S }
       ~publication_recovery ~capability_surface:surface ~skill_activation_context:recorder
       ~ctx_snapshot:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"canonical child result fixture")
       ~clock:(Eio.Stdenv.clock env) ~turn_ctx_cell:fixture.cell () in
-  let fixture = {fixture with make_bundle} in
+  let fixture = {fixture with make_bundle; capability_surface = surface} in
   let entered,notify_entered = Eio.Promise.create () in
   let released,notify_released = Eio.Promise.create () in
   let latch_mutex = Stdlib.Mutex.create () and latch_condition = Condition.create () in
@@ -1028,9 +1049,7 @@ value = { sha256 = %S }
             "node",`String "await";"pointer",`String "/result_artifact/_blob/sha256"]]]]]];
     "exports",`List [`Assoc ["name",`String "child_result";"node",`String "consume";"pointer",`String "/content"]]] in
   let started = Mtime_clock.counter () in
-  let draft = with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"prepare-child-parent"
-      ~turn:41 "keeper_composition_prepare" recipe) in
-  let sha256 = draft |> member "draft" |> composition_reference "child parent draft" |> fun ref -> ref.sha256 in
+  let sha256 = (Masc.Keeper_composition_draft.reference (freeze_draft fixture recipe)).sha256 in
   let accepted = with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"run-child-parent"
       ~turn:41 "keeper_composition_run" (`Assoc ["sha256",`String sha256])) in
   let ok,first,entry = await_composition env fixture accepted in
@@ -1312,7 +1331,7 @@ pointer = "/artifacts/0/_blob/sha256"
     ~publication_recovery ~capability_surface:surface ~skill_activation_context:recorder
     ~ctx_snapshot:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"named producer refusal fixture")
     ~clock:(Eio.Stdenv.clock env) ~turn_ctx_cell:fixture.cell () in
-  let fixture = {fixture with make_bundle} in
+  let fixture = {fixture with make_bundle; capability_surface = surface} in
   let entered,notify_entered = Eio.Promise.create () in
   let released,notify_released = Eio.Promise.create () in
   let latch_mutex = Stdlib.Mutex.create () and latch_condition = Condition.create () in
@@ -1351,9 +1370,8 @@ pointer = "/artifacts/0/_blob/sha256"
           [`Assoc ["name",`String "sha256";"value",`Assoc ["kind",`String "output";
             "node",`String "await";"pointer",`String "/result_artifact/_blob/sha256"]]]]]];
     "exports",`List [`Assoc ["name",`String "child_result";"node",`String "consume";"pointer",`String "/content"]]] in
-  let prepared = with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"prepare-producer-parent"
-      ~turn:41 "keeper_composition_prepare" recipe) in
-  let sha256 = prepared |> member "draft" |> composition_reference "producer parent draft" |> fun ref -> ref.sha256 in
+  let prepared = freeze_draft fixture recipe in
+  let sha256 = Masc.Keeper_composition_draft.reference prepared |> fun ref -> ref.sha256 in
   let accepted = with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"run-producer-parent"
       ~turn:41 "keeper_composition_run" (`Assoc ["sha256",`String sha256])) in
   let ok,_first,entry = await_composition env fixture accepted in
@@ -1642,9 +1660,8 @@ let test_continuation_pulse_shares_declarations ~invalid_initial () =
   let recipe = `Assoc ["execution", `String "async"; "nodes", `List
       [`Assoc ["id", `String "await"; "tool", `String "keeper_job_result";
         "input", `Assoc ["kind", `String "literal"; "value", argument id]]]] in
-  let prepared = with_bundle fixture (fun bundle -> invoke fixture bundle
-      ~tool_use_id:"prepare-profile-round" ~turn:41 "keeper_composition_prepare" recipe) in
-  let draft = prepared |> member "draft" |> composition_reference "profile round draft" in
+  let prepared = freeze_draft fixture recipe in
+  let draft = Masc.Keeper_composition_draft.reference prepared in
   let original_requests = List.map (fun suffix ->
       let accepted = with_bundle fixture (fun bundle -> invoke fixture bundle
           ~tool_use_id:("run-profile-round-" ^ suffix) ~turn:41
@@ -1916,9 +1933,8 @@ let test_operator_resolves_permanent_continuation_mismatch () = with_fixture @@ 
       `Assoc ["id",`String "sibling";"tool",`String "keeper_artifact_read";
         "input",literal (`Assoc ["sha256",`String sibling.sha256]);"after",`List []]];
     "exports",`List [`Assoc ["name",`String "job";"node",`String "await";"pointer",`String "/job_id"]]] in
-  let prepared = with_bundle fixture (fun bundle -> invoke fixture bundle
-    ~tool_use_id:"prepare-permanent-resolution" ~turn:41 "keeper_composition_prepare" recipe) in
-  let draft = prepared |> member "draft" |> composition_reference "permanent resolution draft" in
+  let prepared = freeze_draft fixture recipe in
+  let draft = Masc.Keeper_composition_draft.reference prepared in
   let accepted = with_bundle fixture (fun bundle -> invoke fixture bundle
     ~tool_use_id:"run-permanent-resolution" ~turn:41 "keeper_composition_run" (`Assoc ["sha256",`String draft.sha256])) in
   let _,_,entry = await_composition env fixture accepted in
@@ -2036,9 +2052,8 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
            (`Assoc ["kind", `String "object"; "fields", `List
              [`Assoc ["name", `String "sha256"; "value", output]]]) ["await"]];
       "exports", `List [`Assoc ["name", `String "job"; "node", `String "await"; "pointer", `String "/job_id"]]] in
-  let prepared = with_bundle fixture (fun bundle -> invoke fixture bundle
-      ~tool_use_id:"prepare-wait" ~turn:41 "keeper_composition_prepare" recipe) in
-  let draft_reference = prepared |> member "draft" |> composition_reference "prepared draft" in
+  let prepared = freeze_draft fixture recipe in
+  let draft_reference = Masc.Keeper_composition_draft.reference prepared in
   let sha256 = draft_reference.sha256 in
   let draft_bytes = Tool_blob_store.fetch (Tool_blob_store.create ~base_path:fixture.base_path) ~sha256
     |> require "actual prepared draft bytes" |> function
@@ -2536,9 +2551,8 @@ let test_public_composition_wait_and_resume () = with_fixture @@ fun env initial
   let second_recipe = `Assoc ["execution", `String "async";
       "nodes", `List [second_node "await-second" "keeper_job_result"
         (second_literal (argument second_id)) []]] in
-  let second_prepared = with_bundle fixture (fun bundle -> invoke fixture bundle
-      ~tool_use_id:"prepare-wait-second" ~turn:61 "keeper_composition_prepare" second_recipe) in
-  let second_draft = second_prepared |> member "draft" |> composition_reference "second prepared draft" in
+  let second_prepared = freeze_draft fixture second_recipe in
+  let second_draft = Masc.Keeper_composition_draft.reference second_prepared in
   let second_accepted = with_bundle fixture (fun bundle -> invoke fixture bundle
       ~tool_use_id:"run-wait-second" ~turn:61 "keeper_composition_run"
       (`Assoc ["sha256", `String second_draft.sha256])) in
@@ -2829,9 +2843,8 @@ let test_historical_output_contract_refuses_current_resume () = with_fixture @@ 
   let recipe = `Assoc ["execution",`String "async";"nodes",`List
     [`Assoc ["id",`String "await";"tool",`String "keeper_job_result";
       "input",`Assoc ["kind",`String "literal";"value",argument id]]]] in
-  let prepared = with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"prepare-history"
-      ~turn:41 "keeper_composition_prepare" recipe) in
-  let current_reference = prepared |> member "draft" |> composition_reference "current canonical draft" in
+  let prepared = freeze_draft fixture recipe in
+  let current_reference = Masc.Keeper_composition_draft.reference prepared in
   let surface = frozen_surface ~base_path:fixture.base_path ~sandbox_profile:fixture.meta.sandbox_profile in
   let current_draft = Draft.load ~base_path:fixture.base_path ~capability_surface:surface
       ~keeper_name:keeper ~sha256:current_reference.sha256 |> require "canonical current draft plan" in
@@ -2945,9 +2958,8 @@ let test_cancelled_continuation_cannot_restart () =
       "nodes",`List [`Assoc ["id",`String "await";"tool",`String "keeper_job_result";
         "input",`Assoc ["kind",`String "literal";"value",argument id];"after",`List []]];
       "exports",`List [`Assoc ["name",`String "job";"node",`String "await";"pointer",`String "/job_id"]]] in
-    let prepared = with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"prepare-cancel"
-        ~turn:41 "keeper_composition_prepare" recipe) in
-    let sha256 = (prepared |> member "draft" |> composition_reference "cancellable draft").sha256 in
+    let prepared = freeze_draft fixture recipe in
+    let sha256 = (Masc.Keeper_composition_draft.reference prepared).sha256 in
     let accepted = with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"run-cancel"
         ~turn:41 "keeper_composition_run" (`Assoc ["sha256",`String sha256])) in
     let _, _, waiting_entry = await_composition env fixture accepted in
@@ -3440,9 +3452,8 @@ let test_completion_hint_resumes_original_dag () = with_fixture @@ fun env _init
            [`Assoc ["name",`String "sha256";"value",`Assoc
              ["kind",`String "output";"node",`String "await";
               "pointer",`String "/artifacts/0/_blob/sha256"]]]]]]] in
-  let prepared = with_bundle fixture (fun bundle -> invoke fixture bundle
-      ~tool_use_id:"prepare-hint" ~turn:41 "keeper_composition_prepare" recipe) in
-  let reference = prepared |> member "draft" |> composition_reference "actual completion hint draft" in
+  let prepared = freeze_draft fixture recipe in
+  let reference = Masc.Keeper_composition_draft.reference prepared in
   let accepted = with_bundle fixture (fun bundle -> invoke fixture bundle
       ~tool_use_id:"run-hint" ~turn:41 "keeper_composition_run" (`Assoc ["sha256",`String reference.sha256])) in
   let ok,waiting,waiting_entry = await_composition env fixture accepted in
@@ -3582,10 +3593,9 @@ let test_prepared_job_launch_and_continuation ~launch_after_result () = with_fix
         else key,value) fields)
     | _ -> fail "prepared job recipe is not an object" in
   let prepare_started = Mtime_clock.counter () in
-  let prepared = with_bundle fixture (fun bundle -> invoke fixture bundle
-      ~tool_use_id:"prepare-hint" ~turn:41 "keeper_composition_prepare" recipe) in
+  let prepared = freeze_draft fixture recipe in
   check bool "preparing a launch plan performs no backend operation" false (Sys.file_exists fixture.daemon_path);
-  let reference = prepared |> member "draft" |> composition_reference "actual completion hint draft" in
+  let reference = Masc.Keeper_composition_draft.reference prepared in
   let accepted = with_bundle fixture (fun bundle -> invoke fixture bundle
       ~tool_use_id:"run-hint" ~turn:41 "keeper_composition_run" (`Assoc ["sha256",`String reference.sha256])) in
   let ok,waiting,waiting_entry = await_composition env fixture accepted in
@@ -3618,7 +3628,8 @@ let test_prepared_job_launch_and_continuation ~launch_after_result () = with_fix
       [`Assoc ["id",`String "unsupported";"tool",`String tool;
         "input",`Assoc ["kind",`String "literal";"value",argument denied_job_id]]]] in
     with_bundle fixture (fun bundle ->
-      match invoke_raw bundle ~tool_use_id:("unsupported-" ^ tool) ~turn:41 "keeper_composition_prepare" unsupported with
+      match invoke_raw bundle ~tool_use_id:("unsupported-" ^ tool) ~turn:41 "keeper_composition_run"
+              (`Assoc ["recipe", unsupported]) with
       | Error _ -> () | Ok _ -> failf "prepared launch admission also admitted %s" tool))
     ["keeper_job_status";"keeper_job_cancel"];
   check int "refused status/cancel preparation performs no backend operation" before_refused_preparation (List.length (calls fixture));
@@ -3804,9 +3815,8 @@ let test_interrupted_prepared_launch_resumes_the_same_job keeper_turn_id () = wi
             ; "input", `Assoc
                 [ "kind", `String "literal"
                 ; "value", `Assoc ["argv", `List [`String "fixture-program"]] ] ] ] ] in
-  let prepared = with_bundle fixture (fun bundle -> invoke fixture bundle
-      ~tool_use_id:"prepare-interrupted" ~turn:41 "keeper_composition_prepare" recipe) in
-  let reference = prepared |> member "draft" |> composition_reference "interrupted launch draft" in
+  let prepared = freeze_draft fixture recipe in
+  let reference = Masc.Keeper_composition_draft.reference prepared in
   let capability_surface = frozen_surface ~base_path:fixture.base_path ~sandbox_profile:fixture.meta.sandbox_profile in
   let draft = Draft.load ~base_path:fixture.base_path ~capability_surface ~keeper_name:keeper
       ~sha256:reference.sha256 |> require "interrupted launch draft" in
@@ -4299,7 +4309,7 @@ pointer = "/artifacts/0/_blob/sha256"
       ~composition_result_delivery:delivery
       ~ctx_snapshot:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"nested owned-job fixture")
       ~clock:(Eio.Stdenv.clock env) ~turn_ctx_cell:fixture.cell () in
-  let fixture = {fixture with make_bundle} in
+  let fixture = {fixture with make_bundle; capability_surface = surface} in
   operation ~env ~fixture ~config ~surface ~reference ~runtime ~runtime_reads
     ~publication_recovery ~physical_turn_ref ~delivery ~recorder ~snapshot
 
@@ -4356,10 +4366,9 @@ let test_fixed_async_skill_child ?(child_failure=false) ?(dynamic_arguments=fals
   let started = Mtime_clock.counter () in
   let backend_calls () = if Sys.file_exists fixture.daemon_path then List.length (calls fixture) else 0 in
   let backend_before_prepare = backend_calls () in
-  let prepared = with_bundle fixture (fun bundle -> invoke fixture bundle
-      ~tool_use_id:"prepare-fixed-async-child" ~turn:41 "keeper_composition_prepare" recipe) in
+  let prepared = freeze_draft fixture recipe in
   check int "async child preparation has no backend effects" backend_before_prepare (backend_calls ());
-  let draft = prepared |> member "draft" |> composition_reference "fixed async child draft" in
+  let draft = Masc.Keeper_composition_draft.reference prepared in
   let accepted = with_bundle fixture (fun bundle -> invoke fixture bundle
       ~tool_use_id:"run-fixed-async-child" ~turn:41 "keeper_composition_run" (`Assoc ["sha256",`String draft.sha256])) in
   let ok,waiting,parent_entry = await_composition env fixture accepted in
@@ -4520,7 +4529,7 @@ let test_fixed_async_skill_child ?(child_failure=false) ?(dynamic_arguments=fals
     check_json "parent consumes exact completed dependency output" (`String expected_stdout)
       (completed |> member "exports" |> member "stdout" |> member "value");
   let completed_nodes = composition_nodes fixture completed in
-  let scope = prepared |> member "nested_calls" |> to_list |> List.hd |> member "scope" in
+  let scope = nested_calls_json prepared |> List.hd |> member "scope" in
   let submission_id = scope |> member "submission" |> to_string in
   (match export_selection with
    | Stdout_only -> ()
@@ -4579,9 +4588,8 @@ let test_upstream_arguments_reject_before_child_activation () =
       [`Assoc ["id",`String "arguments";"tool",`String "keeper_artifact_read";
         "input",`Assoc ["kind",`String "literal";"value",`Assoc ["sha256",`String blob.sha256]]];
        `Assoc ["id",`String "child";"skill_reference",Skill_reference.to_yojson reference;"input",input]]] in
-    let prepared = with_bundle fixture (fun bundle -> invoke fixture bundle
-        ~tool_use_id:("prepare-rejected-" ^ label) ~turn:41 "keeper_composition_prepare" recipe) in
-    let draft = prepared |> member "draft" |> composition_reference "deferred child arguments draft" in
+    let prepared = freeze_draft fixture recipe in
+    let draft = Masc.Keeper_composition_draft.reference prepared in
     let accepted = with_bundle fixture (fun bundle -> invoke fixture bundle
         ~tool_use_id:("run-rejected-" ^ label) ~turn:41 "keeper_composition_run" (`Assoc ["sha256",`String draft.sha256])) in
     let ok,_,_ = await_composition env fixture accepted in
@@ -4621,14 +4629,13 @@ let test_public_upstream_inline_arguments ~reject () =
        `Assoc ["id",`String "child";"skill_reference",Skill_reference.to_yojson reference;"input",input]];
       "exports",`List [`Assoc ["name",`String "stdout";"node",`String "child";"pointer",`String "/stdout"]]] in
   let started = Mtime_clock.counter () in
-  let prepared = with_bundle fixture (fun bundle -> invoke fixture bundle
-      ~tool_use_id:"prepare-public-upstream-inline" ~turn:41 "keeper_composition_prepare" recipe) in
+  let prepared = freeze_draft fixture recipe in
   let activations () = Ledger.load_existing ~config ~trace_id:fixture.meta.runtime.trace_id
       |> require "inline original activation authority"
       |> function None -> [] | Some ledger -> Ledger.activations ledger in
   check int "inline prepare never activates the child" 0 (List.length (activations ()));
   check int "inline prepare has no backend calls" backend_at_ready (List.length (calls fixture));
-  let draft = prepared |> member "draft" |> composition_reference "public upstream inline draft" in
+  let draft = Masc.Keeper_composition_draft.reference prepared in
   let result = with_bundle fixture (fun bundle -> invoke_raw bundle
       ~tool_use_id:"run-public-upstream-inline" ~turn:41 "keeper_composition_run" (`Assoc ["sha256",`String draft.sha256])) in
   (match reject,result with
@@ -4641,7 +4648,7 @@ let test_public_upstream_inline_arguments ~reject () =
        (completed |> member "exports" |> member "stdout" |> member "value");
      check int "valid inline arguments activate exactly one child" 1 (List.length (activations ()));
      check int "valid inline child binds its runtime once" 1 !runtime_reads;
-     let argument_id = prepared |> member "nested_calls" |> to_list |> List.hd
+     let argument_id = nested_calls_json prepared |> List.hd
        |> member "scope" |> member "argument_node" |> to_string in
      check_json "public inline evidence retains the actual validated input" (`Assoc ["job_id",`String id])
        (composition_nodes fixture completed |> composition_node argument_id |> member "input");
@@ -4761,9 +4768,8 @@ let test_native_child_acceptance_survives_physical_parent_loss () =
      `Assoc ["id",`String "sibling";"tool",`String "keeper_artifact_read";
        "input",`Assoc ["kind",`String "literal";"value",`Assoc ["sha256",`String sibling.sha256]]]];
     "exports",`List [`Assoc ["name",`String "stdout";"node",`String "child";"pointer",`String "/stdout"]]] in
-  let prepared = with_bundle fixture (fun bundle -> invoke fixture bundle ~tool_use_id:"physical-prepare"
-      ~turn:41 "keeper_composition_prepare" recipe) in
-  let draft = prepared |> member "draft" |> composition_reference "physical native draft" in
+  let prepared = freeze_draft fixture recipe in
+  let draft = Masc.Keeper_composition_draft.reference prepared in
   let run_id = Plan.Composition_run_id.fresh () in
   Eio.Process.run (Eio.Stdenv.process_mgr env)
     [Sys.executable_name;"--lose-native-parent-after-child-acceptance";fixture.base_path;draft.sha256;
@@ -4798,7 +4804,7 @@ let test_native_child_acceptance_survives_physical_parent_loss () =
         ~schedule:{planned_index=0;batch_index=0;batch_size=1;execution_mode=Concurrent}
         ~completion:Agent_core.Tool_contract.Continue_after_success)
       ~clock:(Eio.Stdenv.clock env) () in
-  let scope = prepared |> member "nested_calls" |> to_list |> List.hd |> member "scope" in
+  let scope = nested_calls_json prepared |> List.hd |> member "scope" in
   let submission_id = scope |> member "submission" |> to_string
   and result_id = scope |> member "result" |> to_string in
   let fault_continuation continuation fault =
@@ -5020,8 +5026,7 @@ let test_nested_skill_job_continuation ?(fault_after_acceptance=false) ?(dynamic
       (argument_nodes @ [`Assoc ["id",`String "child";"skill_reference",Skill_reference.to_yojson reference;child_input]]);
       "exports",`List [`Assoc ["name",`String "stdout";"node",`String "child";"pointer",`String "/stdout"]]] in
   let prepare_started = Mtime_clock.counter () in
-  let prepared = with_bundle fixture (fun bundle -> invoke fixture bundle
-      ~tool_use_id:"prepare-nested-job" ~turn:41 "keeper_composition_prepare" recipe) in
+  let prepared = freeze_draft fixture recipe in
   if dynamic_arguments then
     check int "dynamic inline prepare has no backend calls" backend_before_prepare (List.length (calls fixture))
   else check bool "nested prepare never launches a program" false (Sys.file_exists fixture.daemon_path);
@@ -5029,7 +5034,7 @@ let test_nested_skill_job_continuation ?(fault_after_acceptance=false) ?(dynamic
     |> require "preparation activation authority" in
   check int "nested preparation activates no child" 0
     (Option.fold ~none:0 ~some:(fun ledger -> List.length (Ledger.activations ledger)) before_activation);
-  let draft = prepared |> member "draft" |> composition_reference "nested owned-job draft" in
+  let draft = Masc.Keeper_composition_draft.reference prepared in
   let accepted = with_bundle fixture (fun bundle -> invoke fixture bundle
       ~tool_use_id:"run-nested-job" ~turn:41 "keeper_composition_run" (`Assoc ["sha256",`String draft.sha256])) in
   let ok,waiting,waiting_entry = await_composition env fixture accepted in
@@ -5167,12 +5172,12 @@ let test_nested_skill_job_continuation ?(fault_after_acceptance=false) ?(dynamic
   check int "nested recovery has zero backend calls after full result" ready_backend (List.length (calls fixture));
   check_json "parent exports original complete stdout" (`String stdout_bytes)
     (completed |> member "exports" |> member "stdout" |> member "value");
-  let mappings = prepared |> member "nested_calls" |> to_list |> List.hd |> member "scope" |> member "node_mapping" |> to_list in
+  let mappings = nested_calls_json prepared |> List.hd |> member "scope" |> member "node_mapping" |> to_list in
   let expanded name = mappings |> List.find (fun row -> row |> member "source" |> to_string = name)
     |> member "expanded" |> to_string in
   let waiting_nodes = composition_nodes fixture waiting and completed_nodes = composition_nodes fixture completed in
   let retained_node = if dynamic_arguments then
-      prepared |> member "nested_calls" |> to_list |> List.hd |> member "scope" |> member "argument_node" |> to_string
+      nested_calls_json prepared |> List.hd |> member "scope" |> member "argument_node" |> to_string
     else expanded "launch" in
   List.iter (fun node -> List.iter (fun field -> check_json ("nested original occurrence " ^ node ^ "/" ^ field)
       (composition_node node waiting_nodes |> member field)

@@ -1,8 +1,9 @@
 name = "keeper_composition_run"
 description = """
-Execute a composition from recipe or an exact prepared sha256. Use recipe with \
-the same execution/nodes/exports grammar as keeper_composition_prepare to validate, \
-freeze and run in one call. Use prepare first when you need to inspect the plan. \
+Execute a composition from recipe, or rerun or continue an exact frozen draft by \
+sha256. A recipe carries execution (inline or async), nodes, optional exports, \
+branch_failure_policy and skill; the server validates, freezes and runs it in one \
+call, and the result returns the draft reference. \
 Inline Read/Edit plans may overlap independent file leaves through their original \
 Keeper-owned producers. Output-dependent inputs and exact inline Skill arguments \
 bind file resources when ready. Conflicting files retain topological order; \
@@ -15,8 +16,15 @@ Inline recipes may use original file Write through its Serial handler, Gate and 
 publication recovery. Write has no resource-scoped admission or durable async replay. \
 Skill nodes use exact skill_reference, not the Skill's callable tool name in tool. \
 Their args or resolved tagged input must match the child's parameter object schema. \
+Copy the exact admitted reference and declared exports from Skill inventory. A child \
+exposes only named exports: for child alias child with export report, a parent output \
+template is {"kind":"output","node":"child","pointer":"/report"}. Copy the canonical \
+pointer from available_exports in an export rejection; do not guess fields. Child \
+definitions require inline mode; the enclosing recipe may be inline or async. \
+Durable async scopes admit static read-only leaves and keeper_job_start; feed its \
+/job_id output into keeper_job_result. \
 The server records the frozen draft and original invocation before effects; \
-prepared sha256 rechecks its Keeper and contracts. Inline drafts return \
+a draft sha256 rechecks its Keeper and contracts. Inline drafts return \
 execution results, including child scope/admission/disposition/exports in nested_scopes; \
 only children reaching an actual ready leaf activate. Blocked or refused children \
 remain visible, and independent exports may be available while the whole run fails. \
@@ -33,7 +41,9 @@ resume_run_id together with the same draft sha256. Completed nodes reuse their \
 recorded result and occurrence. A producer-owned keeper_job_result wait rechecks \
 the same job after its producer has committed complete outputs. A completed \
 job-start node retains its original result and occurrence. Unavailable evidence or unproven effects do not \
-authorize replay. Shared Skill publication is optional and separate."""
+authorize replay. Optional recipe.skill metadata freezes a reusable SKILL.md in the \
+same draft; validate and publish it by that draft's sha256 after checking execution \
+evidence. Shared Skill publication is optional and separate."""
 additional_properties = false
 defer_loading = true
 
@@ -42,19 +52,35 @@ name = "sha256"
 type = "string"
 min_length = 64
 max_length = 64
-description = "Exact sha256 from the durable draft reference returned by prepare."
+description = "Exact sha256 of a durable draft, from the draft reference a previous run returned."
 
 [[params]]
 name = "recipe"
 type = "object"
-description = "Fresh composition using the public prepare grammar, including execution. Validates and freezes before running; replaces sha256. Cannot resume a previous run."
+description = "Fresh composition: execution, nodes, optional exports, branch_failure_policy and skill. Validates and freezes before running; replaces sha256. Cannot resume a previous run."
+
+[[params.params]]
+name = "skill"
+type = "object"
+additional_properties = false
+description = "Optional reusable Skill identity and description, frozen with the exact plan. No package is published by run."
+
+[[params.params.params]]
+name = "package_id"
+type = "string"
+required = true
+
+[[params.params.params]]
+name = "description"
+type = "string"
+required = true
 
 [[params]]
 name = "resume_run_id"
 type = "string"
 min_length = 36
 max_length = 36
-description = "For explicit continuation only: original composition_run_id of a prepared async run whose previous request has canonically settled. Eligible recorded waits also resume through server maintenance. Omit for a fresh run."
+description = "For explicit continuation only: original composition_run_id of an async run whose previous request has canonically settled. Eligible recorded waits also resume through server maintenance. Omit for a fresh run."
 
 [[one_of]]
 required = ["sha256"]

@@ -225,7 +225,6 @@ val requires_async_controls : entry list -> bool
 
 val status_tool_name : string
 val cancel_tool_name : string
-val prepare_tool_name : string
 val run_tool_name : string
 
 val skill_tool_name : string

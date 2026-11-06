@@ -146,17 +146,15 @@ and node_asks_for_approval ~composition_plan_index node =
    place the name at all. Splitting that into two predicates is how one grows
    an arm the other does not have, and the gate then passes while the tool
    still asks with a reason nobody can act on. *)
-(* The control tools run unasked. Prepare validates and stores a read-only
-   plan without executing nodes; run executes only the prepared Keeper-bound
-   read-only plan, and each leaf keeps its own permissions; status reads a
+(* The control tools run unasked. Run validates and stores a Keeper-bound
+   plan, then executes it, and each leaf keeps its own permissions; status reads a
    composition request this keeper made; cancel ends one inside masc; the
    skill tool reads an instruction Skill this keeper already carries. The
    attached-tool search names the attached tools this keeper already holds
    and makes one of them callable; it reaches no service, and the call to the
    attached tool itself is what the Gate still decides. *)
 and undescribed_kind ~identity_tool_index ?composition_plan_index tool_name =
-  if String.equal tool_name Keeper_tool_composition_catalog.prepare_tool_name
-     || String.equal tool_name Keeper_tool_composition_catalog.run_tool_name
+  if String.equal tool_name Keeper_tool_composition_catalog.run_tool_name
      || String.equal tool_name Keeper_tool_composition_catalog.status_tool_name
      || String.equal tool_name Keeper_tool_composition_catalog.cancel_tool_name
      || String.equal tool_name Keeper_tool_composition_catalog.skill_tool_name

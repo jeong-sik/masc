@@ -550,7 +550,8 @@ let test_nested_draft_freezes_and_revalidates_recipe () =
   let open Yojson.Safe.Util in
   check bool "original exact recipe retained" true (Yojson.Safe.equal recipe (stored |> member "recipe"));
   check bool "prepared child mappings retained" true
-    (Yojson.Safe.equal (stored |> member "nested_calls") (Draft.preview draft |> member "nested_calls"));
+    (Yojson.Safe.equal (stored |> member "nested_calls")
+       (`List (List.map Nested.call_to_json (Draft.nested_calls draft))));
   let loaded = Draft.load ~base_path ~capability_surface:surface ~keeper_name:"fixture"
       ~sha256:(Draft.reference draft).sha256 |> require "load frozen nested recipe" in
   check int "load restores exact child provenance" 1 (List.length (Draft.nested_calls loaded));
@@ -606,8 +607,8 @@ pointer = "/profile"
 |}
 ;;
 
-let test_public_nested_prepare_run_records_only_admitted_children ?(execution=Masc.Keeper_tool_composition_catalog.Inline)
-    ?(single_call=false) ~reject_child () =
+let test_public_nested_run_records_only_admitted_children ?(execution=Masc.Keeper_tool_composition_catalog.Inline)
+    ?(check_refusals=false) ~reject_child () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let eio_snapshot = Eio_context.snapshot_state () in
@@ -688,7 +689,7 @@ let test_public_nested_prepare_run_records_only_admitted_children ?(execution=Ma
   let input = match recipe with `Assoc fields -> `Assoc (("execution", `String (Masc.Keeper_tool_composition_catalog.execution_mode_to_string execution)) :: fields)
     | _ -> fail "recipe object" in
   let open Yojson.Safe.Util in
-  let prepared = if single_call then (
+  if check_refusals then
     List.iteri (fun index rejected_input ->
       let accepted,_ = execute ("invalid-recipe-" ^ string_of_int index) Draft.run_tool_name rejected_input in
       check bool "ambiguous or continuing recipe is refused" false accepted;
@@ -706,17 +707,8 @@ let test_public_nested_prepare_run_records_only_admitted_children ?(execution=Ma
             "args",`Assoc [];"input",`Assoc ["kind",`String "literal";"value",`Assoc []]]]]]
       ; `Assoc ["recipe",`Assoc ["execution",`String "inline";"nodes",`List
           [`Assoc ["id",`String "bad";"tool",`String "keeper_lane_status";"args",`String "not an object"]]]] ];
-    None)
-    else (
-      let prepare_success,_,prepared = invoke "prepare-nested" Draft.prepare_tool_name input in
-      check bool "public prepare accepts nested grammar" true prepare_success;
-      check int "preparation is not activation" 0 !calls;
-      Some prepared) in
-  let run_input = match prepared with
-    | Some prepared -> `Assoc ["sha256",`String (prepared |> member "draft" |> decode_reference).sha256]
-    | None -> `Assoc ["recipe",input] in
   let success, accepted_content, accepted = invoke "run-nested" Draft.run_tool_name
-      run_input in
+      (`Assoc ["recipe",input]) in
   let draft_reference = accepted |> member "draft" |> decode_reference in
   let frozen_draft = read_document ~base_path draft_reference in
   check bool "frozen draft retains the original recipe" true
@@ -1062,8 +1054,8 @@ let test_public_nested_prepare_run_records_only_admitted_children ?(execution=Ma
 let test_shared_node_schema_preserves_call_shapes () =
   let surface, reference = fixture () in
   let field = Yojson.Safe.Util.member in
-  let schema = Masc.Keeper_composition_draft.prepare_schema.input_schema
-    |> field "properties" |> field "nodes" |> field "items" in
+  let schema = Masc.Keeper_composition_draft.run_schema.input_schema
+    |> field "properties" |> field "recipe" |> field "properties" |> field "nodes" |> field "items" in
   let base = ["id", `String "node"] in
   let ordinary = ["tool", `String "keeper_lane_status"] in
   let child = ["skill_reference", Skill_reference.to_yojson reference] in
@@ -1090,9 +1082,8 @@ let test_shared_node_schema_preserves_call_shapes () =
         "branch_failure_policy", `String "continue_independent"])
       |> require "advertised Tool and exact Skill nodes still compile"))
     [ordinary @ [args]; child @ [child_args]; child @ [child_input]];
-  Printf.printf "composition_schema node_json_bytes=%d prepare_json_bytes=%d run_json_bytes=%d canonical_compiler_changed=false\n%!"
+  Printf.printf "composition_schema node_json_bytes=%d run_json_bytes=%d canonical_compiler_changed=false\n%!"
     (String.length (Yojson.Safe.to_string schema))
-    (String.length (Yojson.Safe.to_string Masc.Keeper_composition_draft.prepare_schema.input_schema))
     (String.length (Yojson.Safe.to_string Masc.Keeper_composition_draft.run_schema.input_schema))
 ;;
 
@@ -1113,10 +1104,10 @@ let () = run "exact inline composition compiler"
         ; test_case "inline Write and exact children retain effect and durable refusal" `Quick
             test_inline_write_keeps_original_effect_and_durable_refusal
         ; test_case "frozen nested draft recipe and exact provenance" `Quick test_nested_draft_freezes_and_revalidates_recipe
-        ; test_case "public prepare/run admits exact children once and delivers through parent" `Quick
-            (test_public_nested_prepare_run_records_only_admitted_children ~reject_child:false)
+        ; test_case "public run admits exact children once and delivers through parent" `Quick
+            (test_public_nested_run_records_only_admitted_children ~reject_child:false)
         ; test_case "public admission failure keeps independent exports and blocked scopes" `Quick
-            (test_public_nested_prepare_run_records_only_admitted_children ~single_call:true ~reject_child:true)
+            (test_public_nested_run_records_only_admitted_children ~check_refusals:true ~reject_child:true)
         ; test_case "async parent binds original runtime and exact child results" `Quick
-            (test_public_nested_prepare_run_records_only_admitted_children ~single_call:true
+            (test_public_nested_run_records_only_admitted_children ~check_refusals:true
               ~execution:Masc.Keeper_tool_composition_catalog.Async ~reject_child:false) ] ]

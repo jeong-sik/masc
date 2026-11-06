@@ -98,8 +98,8 @@ The Keeper remains free to perform unrelated work while a request is pending.
 Long-running Tool, Connector, Scheduler, and Fusion activity becomes a Job.
 Keepers also own isolated Docker jobs (`keeper_job_start`, `keeper_job_status`,
 `keeper_job_output`, `keeper_job_cancel`, `keeper_job_list`) and prepared or
-named async tool compositions (`keeper_composition_prepare`,
-`keeper_composition_run`, `keeper_composition_status`,
+named async tool compositions (`keeper_composition_run`,
+`keeper_composition_status`,
 `keeper_composition_cancel`) stored under `.masc/keepers/<name>/jobs/`.
 Submitting a Job or async composition returns its durable handle, and owned-job
 waits can suspend only the requesting composition step or yield back to the

@@ -172,8 +172,7 @@ Supply the existing one-call grammar when the plan is ready:
 ```
 
 Existing files and real ownership still determine whether preparation succeeds.
-For an inspection before execution, use `keeper_composition_prepare`, then run
-its exact returned `sha256`. Preparing a draft performs no node effect.
+Freezing a draft performs no node effect.
 
 ## Before/After evidence
 

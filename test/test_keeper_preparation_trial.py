@@ -288,9 +288,8 @@ def malformed_final_evidence(args, root, head):
             calls = read((output / entry["path"]).parent / "tool-calls.json")
             parents = [row for row in calls if row["tool"] == "keeper_composition_run" and
                        row.get("execution_id") in turn["execution_ids"]]
-            require(len(parents) == 1 and set(parents[0]["input"]) == {"recipe"} and
-                    not any(row["tool"] == "keeper_composition_prepare" for row in calls),
-                    "fresh recipe execution still required a separate prepare call")
+            require(len(parents) == 1 and set(parents[0]["input"]) == {"recipe"},
+                    "fresh recipe execution did not run its recipe in one call")
         peer = read((output / entry["path"]).parent / "provider-events.json")
         check_http_observation((output / entry["path"]).parent, receipt,
                                [row for row in peer if row["kind"] == "synthetic_provider_received"])
@@ -409,7 +408,7 @@ def named_skill_reuse(args, root, head):
                         node["tool_use_id"] == row["tool_use_id"] and
                         node["tool_name"] == row["tool"] and node["input"] == row["input"]
                         for node in execution["nodes"]) for row in stdout_rows) and
-                    not any(row["tool"] in ("keeper_composition_prepare", "keeper_composition_run")
+                    not any(row["tool"] == "keeper_composition_run"
                             for row in calls), "named reuse required a new plan or lost physical parent ownership")
         peer = read(directory / "provider-events.json")
         check_http_observation(directory, receipt,

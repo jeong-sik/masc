@@ -2630,9 +2630,8 @@ status: reference
 **Composition**
 : Tool 노드의 실행 선후 관계와 결과 참조 등 구조를 검사한 실행 계획. 합성 Skill은
   허용된 계획을 `keeper_compose_<name>` Tool로 노출하며, 즉석(ad-hoc) 계획은
-  `keeper_composition_prepare`로 검증·동결해 durable draft 참조를 받은 뒤 그 `sha256`을
-  `keeper_composition_run`에 넘기거나, 같은 입력을 `keeper_composition_run`의 `recipe`에
-  넣어 한 호출로 검증·저장·실행한다. prepare만으로는 어떤 노드도 실행되지 않는다.
+  `keeper_composition_run`의 `recipe`에 넣어 한 호출로 검증·저장·실행한다. 결과의 draft
+  참조 `sha256`으로 같은 draft를 다시 실행하거나 이어 간다.
   - 주소: `execution`이 `async`이면 접수 응답이 durable `request_id`를 주고,
     `keeper_composition_status`·`keeper_composition_cancel`은 그 `request_id`로 조회·취소한다.
     `composition_run_id`는 그 실행의 논리 run id이며, 앞 요청이 확정적으로 끝난 뒤
@@ -3529,7 +3528,7 @@ status: reference
 
 **Composition Skill**
 : 본문의 `toml composition` fence가 도구 노드와 입력 연결을 선언하는 Skill.
-  검증된 계획이 `keeper_compose_<name>` 도구가 되며, 그 선언의 `execution = "async"`가 호출 방식을 정한다(호출 인자로 고르지 않는다). 비동기 선언의 호출은 접수 영수증을 돌려주며, 영수증은 durable `request_id`와 그 실행의 논리 id인 `composition_run_id`를 싣고, 이름 붙은 제출이면 `result_wait` 바인딩도 함께 준다. `keeper_composition_status`·`keeper_composition_cancel`은 그 `request_id`로 조회·취소하고, 결과는 `result_wait`를 `keeper_composition_result`의 `binding`에 그대로 넣어 읽는다. 응답에 `run_id`라는 이름의 핸들은 없다. 즉석(ad-hoc) 계획도 `keeper_composition_prepare`와 `keeper_composition_run`으로 실행할 수 있다. 실행기는 선언된 입력과
+  검증된 계획이 `keeper_compose_<name>` 도구가 되며, 그 선언의 `execution = "async"`가 호출 방식을 정한다(호출 인자로 고르지 않는다). 비동기 선언의 호출은 접수 영수증을 돌려주며, 영수증은 durable `request_id`와 그 실행의 논리 id인 `composition_run_id`를 싣고, 이름 붙은 제출이면 `result_wait` 바인딩도 함께 준다. `keeper_composition_status`·`keeper_composition_cancel`은 그 `request_id`로 조회·취소하고, 결과는 `result_wait`를 `keeper_composition_result`의 `binding`에 그대로 넣어 읽는다. 응답에 `run_id`라는 이름의 핸들은 없다. 즉석(ad-hoc) 계획도 `keeper_composition_run`의 `recipe`로 실행할 수 있다. 실행기는 선언된 입력과
   의존 관계를 따르며, 노드 사이의 새 모델 판단을 대신하지 않는다. 필요한 노드
   도구가 Keeper의 현재 표면에 없으면 합성 도구도 그 턴에 제공하지 않는다.
 

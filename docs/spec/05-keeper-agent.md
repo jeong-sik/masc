@@ -314,8 +314,8 @@ agent core Agent.run의 hook lifecycle에 keeper 동작을 주입:
 
 - **Deferred tool loading (`keeper_tool_search`)**: 지연 로드 대상 도구를 검색해
   현재 턴/세션의 모델 가시 도구 표면에 추가.
-- **Transient composition tools (`keeper_composition_prepare`,
-  `keeper_composition_run`, `keeper_composition_status`,
+- **Transient composition tools (`keeper_composition_run`,
+  `keeper_composition_status`,
   `keeper_composition_cancel`)**: 여러 도구를 DAG/파이프라인으로 묶는 prepared 및
   named composition 실행 및 상태 조회.
 - **Keeper-owned isolated job tools (`keeper_job_start`, `keeper_job_status`,

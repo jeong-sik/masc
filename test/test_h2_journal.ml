@@ -696,12 +696,11 @@ let test_public_run_resume_keeps_original_task () = with_workspace (fun env sw b
         ~pointer:(Plan.Json_pointer.of_string "/profile" |> require "public export pointer")]
       [lane] |> require "public lane plan" in
   let request = Request.to_yojson plan |> require "public canonical recipe" in
-  let preview = invoke ~turn:42 ~id:"prepare-public" Draft.prepare_tool_name
-      (match request with `Assoc fields -> `Assoc (("execution", `String "async") :: fields) | _ -> fail "recipe object") in
-  let open Yojson.Safe.Util in
-  let draft_reference = preview |> member "draft" |> decode_reference in
   let first = invoke ~turn:42 ~id:"public-original-run" Draft.run_tool_name
-      (`Assoc ["sha256", `String draft_reference.sha256]) in
+      (`Assoc ["recipe", (match request with `Assoc fields -> `Assoc (("execution", `String "async") :: fields)
+                          | _ -> fail "recipe object")]) in
+  let open Yojson.Safe.Util in
+  let draft_reference = first |> member "draft" |> decode_reference in
   let original_run = first |> member "composition_run_id" |> to_string in
   let original_artifact = first |> member "run_artifact" |> decode_reference in
   let first_request = first |> member "request_id" |> to_string in
@@ -744,12 +743,9 @@ let test_public_run_resume_keeps_original_task () = with_workspace (fun env sw b
       (member "answer_source_ids" row);
     check_json "the original leaf keeps its trace" (`String "original-trace") (member "trace_id" row);
     check_json "the original leaf keeps its physical Keeper turn" (`Int 1) (member "keeper_turn_id" row)) leaves;
-  let inline_preview = invoke ~turn:43 ~id:"prepare-inline-observation" Draft.prepare_tool_name
-      (match request with `Assoc fields -> `Assoc (("execution", `String "inline")::fields)
-       | _ -> fail "inline recipe object") in
-  let inline_reference = inline_preview |> member "draft" |> decode_reference in
   let inline = invoke ~turn:43 ~id:"inline-observation" Draft.run_tool_name
-      (`Assoc ["sha256",`String inline_reference.sha256]) in
+      (`Assoc ["recipe", (match request with `Assoc fields -> `Assoc (("execution", `String "inline")::fields)
+                          | _ -> fail "inline recipe object")]) in
   let inline_run = member "composition_run_id" inline in
   Call_log.flush_now ();
   let inline_rows = Call_log.read_recent ~keeper_name:keeper () |> require "inline result observations"

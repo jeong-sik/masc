@@ -1,4 +1,4 @@
-# Prepare and run exact Skill children
+# Run exact Skill children
 
 The source Skill detail views in Dashboard and TUI show retained async result
 handoffs and later action facts alongside the original activation. Inline result
@@ -19,8 +19,8 @@ own durable replay contract.
 
 `Keeper_composition_nested.compile` expands an exact, turn-frozen inline Skill
 into the existing typed plan and lowers an async Skill into native submission
-and canonical result nodes. An async child requires an async parent. The source `keeper_composition_prepare` schema now
-accepts this node alternative for task-specific drafts. Prepare freezes
+and canonical result nodes. An async child requires an async parent. The `keeper_composition_run` recipe schema
+accepts this node alternative for task-specific drafts. Freezing the recipe stores
 the original recipe, flattened plan, exact child references, normalized arguments,
 leaf/export mappings and tool contracts in one owned immutable manifest. Run
 recompiles the recipe against its current frozen surface and compares all recorded
@@ -162,13 +162,11 @@ settlement failure. The process-loss fixture includes an independently pending
 lower node alongside the original native child, including faults after a higher
 node's tool completed but before its observation committed.
 
-Call `keeper_composition_prepare` with `execution: "inline"` or `"async"`, the ordinary outer
-`nodes`, `exports` and matching `branch_failure_policy`, and exact child nodes of
-the form above. Pass the returned `draft.sha256` to `keeper_composition_run`.
-For immediate execution, pass that complete prepare input as
-`keeper_composition_run.recipe`. It freezes the same child references and
-records the original invocation before the existing executor admits children.
-Preparation records no child activation. Nested drafts currently omit `skill`
+Call `keeper_composition_run` with a `recipe` holding `execution: "inline"` or
+`"async"`, the ordinary outer `nodes`, `exports` and matching
+`branch_failure_policy`, and exact child nodes of the form above. It freezes the
+child references and records the original invocation before the existing
+executor admits children. Freezing records no child activation. Nested drafts currently omit `skill`
 publication metadata: publishing only their flattened plan would discard child
 identities. Named recursive catalog recipes still require their own grammar.
 An async parent freezes the original trace, turn, selected runtime, snapshot and

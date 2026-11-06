@@ -913,8 +913,7 @@ let test_composition_skill_joins_projection () =
     bool
     "named async work retains controls without exposing transient draft tools"
     false
-    (List.mem Catalog.prepare_tool_name expected_async
-     || List.mem Catalog.run_tool_name expected_async)
+    (List.mem Catalog.run_tool_name expected_async)
 ;;
 
 (* The entries of one published snapshot are projected once, and every

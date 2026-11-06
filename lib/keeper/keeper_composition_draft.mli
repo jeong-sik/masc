@@ -23,11 +23,9 @@ type error =
   | Nested_rejected of Keeper_composition_nested.error
   | Nested_publication_requires_catalog
 
-val prepare_tool_name : string
 val run_tool_name : string
 val error_to_json : error -> Yojson.Safe.t
 val failure_class : error -> Tool_result.tool_failure_class
-val prepare_schema : Masc_domain.tool_schema
 val run_schema : Masc_domain.tool_schema
 
 val without_recursive_refs : Yojson.Safe.t -> Yojson.Safe.t
@@ -65,15 +63,6 @@ val load
     and inputs before effects. A changed owner/surface/schema is a rejection,
     not a rebind of the old preview. *)
 
-val prepare_request
-  :  base_path:string
-  -> capability_surface:Keeper_capability_surface.t
-  -> keeper_name:string
-  -> Yojson.Safe.t
-  -> (t, error) result
-(** Validate the public prepare grammar, including execution mode, and freeze
-    the draft without dispatching or activating any node. *)
-
 val resolve_run_request
   :  base_path:string
   -> capability_surface:Keeper_capability_surface.t
@@ -81,7 +70,8 @@ val resolve_run_request
   -> Yojson.Safe.t
   -> (t, error) result
 (** Resolve exactly one public run source: load the referenced frozen draft,
-    or prepare and durably freeze a supplied [recipe] using [prepare_request].
+    or validate a supplied [recipe] (execution mode included) and durably
+    freeze it as a new draft without dispatching or activating any node.
     A recipe is a fresh invocation and cannot carry [resume_run_id]. This
     function never dispatches nodes; the caller must record the original run
     invocation before entering the ordinary executor. *)
@@ -127,11 +117,6 @@ val load_authored
   -> (authored_source, error) result
 (** Load only the exact Skill source frozen in this owned draft. A task-only
     draft or a different package identity is refused before publication. *)
-val preview : t -> Yojson.Safe.t
-(** Immutable draft metadata, including dependencies, exports and authored
-    source references. The public composition prepare boundary adds its
-    [schedule_preview] through {!Keeper_composition_draft_preview.preview}. *)
-
 val record_invocation
   :  base_path:string
   -> ?nested_activation:Keeper_skill_activation_recorder.bound_context

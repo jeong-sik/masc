@@ -2,7 +2,13 @@
     The index contains counts and one content-addressed reference, never queue
     bodies or a growing directory of pockets. Artifact pages use the existing
     in-process [keeper_artifact_read] surface in every sandbox/runtime. *)
+val filename_suffix : string
+(** [<keeper_name><filename_suffix>] is the index file in the config
+    [keepers/] directory. *)
 val path : keepers_dir:string -> keeper_name:string -> string
+val index_json_of_file : string -> (Yojson.Safe.t option, string) result
+(** The index in this file, decoded and written back in its canonical form.
+    An absent file is [Ok None]; a file that does not decode is [Error]. *)
 val publish : base_path:string -> keepers_dir:string -> keeper_name:string ->
   Keeper_librarian_context.snapshot -> (unit, string) result
 (** Publish after a successful context commit, on the Librarian IO worker.

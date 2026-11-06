@@ -123,7 +123,8 @@ let prompt_json (input : input) =
    nothing pending is not [empty] yet the prompt reads exactly like it.
    [render], the Keeper-facing view, still shows prior pockets. *)
 let shows_no_working_context (input : input) = input.sources = [] && input.unavailable = []
-let path ~keepers_dir ~keeper_id = Filename.concat keepers_dir (keeper_id ^ ".working-context.json")
+let filename_suffix = ".working-context.json"
+let path ~keepers_dir ~keeper_id = Filename.concat keepers_dir (keeper_id ^ filename_suffix)
 let decode json =
   let* fields = object_fields ["generation"; "revision"; "execution_basis"; "sources"; "pockets"] json in
   let* generation = nonempty (field "generation" fields) in
@@ -165,7 +166,8 @@ let load_with_snapshot_sha256 file =
   |> Result.map
        (Option.map (fun (snapshot, bytes) -> snapshot, digest bytes))
 let describe_error = function Unavailable detail -> detail | Invalid {detail; _} -> "invalid working context: " ^ detail
-let read ~keepers_dir ~keeper_id = load (path ~keepers_dir ~keeper_id) |> Result.map_error describe_error
+let read_file file = load file |> Result.map_error describe_error
+let read ~keepers_dir ~keeper_id = read_file (path ~keepers_dir ~keeper_id)
 let read_with_snapshot_sha256 ~keepers_dir ~keeper_id =
   load_with_snapshot_sha256 (path ~keepers_dir ~keeper_id)
   |> Result.map_error describe_error

@@ -10,8 +10,10 @@ type index =
   ; artifact : Tool_output.artifact_ref
   }
 
+let filename_suffix = ".working-context-recall.json"
+
 let path ~keepers_dir ~keeper_name =
-  Filename.concat keepers_dir (keeper_name ^ ".working-context-recall.json")
+  Filename.concat keepers_dir (keeper_name ^ filename_suffix)
 
 let index_json index =
   `Assoc
@@ -45,6 +47,8 @@ let read file =
   if not (Sys.file_exists file) then Ok None
   else try Result.map Option.some (index_of_json (Yojson.Safe.from_file file)) with
     | Sys_error detail | Yojson.Json_error detail -> Error detail
+
+let index_json_of_file file = Result.map (Option.map index_json) (read file)
 
 let with_current ~keepers_dir ~keeper_name (snapshot : Context.snapshot) publish =
   File_lock_eio.with_lock (Context.path ~keepers_dir ~keeper_id:keeper_name) (fun () ->

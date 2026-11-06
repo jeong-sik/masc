@@ -36,7 +36,12 @@ val select : input -> Yojson.Safe.t -> (pocket list, string) result
 val pockets_to_json : pocket list -> Yojson.Safe.t
 val snapshot_json : snapshot -> Yojson.Safe.t
 (** Exact decoded snapshot projection used by the Admin inventory endpoint. *)
+val filename_suffix : string
+(** [<keeper_id><filename_suffix>] is the snapshot file in the config
+    [keepers/] directory. *)
 val path : keepers_dir:string -> keeper_id:string -> string
+val read_file : string -> (snapshot option, string) result
+(** {!read} on a path. An absent file is [Ok None]. *)
 val read : keepers_dir:string -> keeper_id:string -> (snapshot option, string) result
 val read_with_snapshot_sha256 : keepers_dir:string -> keeper_id:string ->
   ((snapshot * string) option, string) result

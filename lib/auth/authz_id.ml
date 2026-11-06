@@ -6,6 +6,13 @@ type error =
   | Invalid_byte of { index : int }
   | Path_segment
 
+let error_to_string = function
+  | Empty -> "empty"
+  | Too_long -> "too long"
+  | Invalid_byte { index } -> Printf.sprintf "invalid byte at %d" index
+  | Path_segment -> "a path segment"
+;;
+
 module type S = sig
   type t
 

@@ -230,6 +230,13 @@ module Invites = Authz_invite_state
 
 let invite_id = id_of_string Authz_types.Invite_id.of_string "invite-1"
 
+(* A reduction that the store gave up, named by the record it was for. *)
+let held ?(aborted = String.make 64 'a') subject =
+  match Authz_record.Hash.of_hex aborted with
+  | Some aborted -> { S.aborted; subject }
+  | None -> Alcotest.fail "fixture digest refused"
+;;
+
 let invite_record ?(author = Authz_records.Author.Local_operator) ?(role = I.Admin) () =
   let event =
     I.Issued
@@ -443,7 +450,7 @@ let test_an_admission_that_is_refused () =
     "the identity google:111 is bound to user-1";
   (match
      S.step
-       (S.hold_revocations (invited ()) [ Authz_records.Subject.Invite invite_id ])
+       (S.hold_revocations (invited ()) [ held (Authz_records.Subject.Invite invite_id) ])
        (admission_record ~user_id:user ~identity:alice_identity ~invite:invite_id ())
    with
    | Error (S.Revocation_pending subject) ->
@@ -520,13 +527,34 @@ let test_an_admin_revokes_an_admin () =
      | Ok _ -> Alcotest.fail "the last Admin was revoked")
 ;;
 
+(* Each given-up reduction is its own block, so a record that closes one
+   leaves another of the same subject (design 8.3); the same reduction read
+   twice, at the entry and at the replay, is one block. *)
+let test_a_block_is_one_per_given_up_reduction () =
+  let invite = Authz_records.Subject.Invite invite_id in
+  let first = held invite in
+  let second = held ~aborted:(String.make 64 'b') invite in
+  let state = S.hold_revocations (invited ()) [ first; first ] in
+  Alcotest.(check int) "the same reduction twice" 1 (List.length state.S.revocation_pending);
+  let state = S.hold_revocations state [ second ] in
+  Alcotest.(check int) "another reduction of the subject" 2 (List.length state.S.revocation_pending);
+  let answer subject =
+    match S.revocation state subject with
+    | Authz_records.Revocation_state.Pending -> "pending"
+    | Authz_records.Revocation_state.Not_pending -> "clear"
+  in
+  Alcotest.(check string) "the held subject" "pending" (answer invite);
+  Alcotest.(check string) "another subject" "clear"
+    (answer (Authz_records.Subject.Invite (id_of_string Authz_types.Invite_id.of_string "invite-2")))
+;;
+
 (* The revocation of bob was given up, so bob writes nothing while the block
    stands, and alice is still an Admin. *)
 let test_a_principal_whose_revocation_was_given_up_writes_nothing () =
   let held =
     S.hold_revocations
       (two_admins ())
-      [ Authz_records.Subject.Principal (Authz_types.Principal.Human bob) ]
+      [ held (Authz_records.Subject.Principal (Authz_types.Principal.Human bob)) ]
   in
   match S.step held (admin_record ~by:bob ~user_id:user) with
   | Error (S.Revocation_pending subject) ->
@@ -742,6 +770,8 @@ let () =
       , [ Alcotest.test_case "an Admin revokes an Admin" `Quick test_an_admin_revokes_an_admin
         ; Alcotest.test_case "a blocked principal writes nothing" `Quick
             test_a_principal_whose_revocation_was_given_up_writes_nothing
+        ; Alcotest.test_case "one block per given-up reduction" `Quick
+            test_a_block_is_one_per_given_up_reduction
         ; Alcotest.test_case "an Admin invites a Member" `Quick test_an_admin_invites_a_member
         ; Alcotest.test_case "by mode" `Quick test_an_admin_assignment_by_mode
         ] )

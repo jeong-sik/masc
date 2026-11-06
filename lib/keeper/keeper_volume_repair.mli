@@ -105,3 +105,6 @@ val receipt_path : masc_dir:string -> keeper:string -> repair_id:string -> strin
 
 val write_receipt : masc_dir:string -> receipt -> (string, string) result
 (** Write the receipt atomically and return its path. *)
+
+val store_dirname : string
+(** The repair store directory below [<base>/.masc]. *)

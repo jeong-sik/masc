@@ -2,13 +2,10 @@
   RFC-0004 Phase A0.2 PR-1 — atdts round-trip PoC.
 
   Verifies that the atdts-generated readAgentStartedPayload accepts
-  the JSON shape that the OCaml-side Sse_event.agent_started emits
-  (verified byte-equal against runtime_event_bridge.wrap_event in
-  test/sse_event/test_sse_event.ml).
+  the payload that Keeper_event_bridge.native_event_to_json emits for an
+  AgentStarted event.
 
-  Scope: agent_started payload only.  Subsequent PRs verify the
-  remaining 15 event types (PR-3 of this phase) and add full envelope
-  parse against the wrap_envelope wire format.
+  Scope: agent_started payload only.
 */
 
 import { describe, expect, it } from 'vitest'

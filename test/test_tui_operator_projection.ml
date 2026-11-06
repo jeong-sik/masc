@@ -16,9 +16,9 @@ let string_option_to_json = function
   | Some value -> `String value
   | None -> `Null
 
-let approval_item_json ?(action_type = "namespace_pause")
+let approval_item_json ?(action_type = "broadcast")
     ?(target_type = "workspace") ?(target_id = None)
-    ?(delegated_tool = "masc_pause")
+    ?(delegated_tool = "masc_broadcast")
     ?(expires_at = Some "2026-08-21T12:15:00Z")
     ?(actor = "masc-tui") ?trace_id token =
   let trace_id = Option.value ~default:("trace-" ^ token) trace_id in
@@ -36,7 +36,7 @@ let approval_item_json ?(action_type = "namespace_pause")
     ]
 
 let default_items () =
-  [ approval_item_json "token-pause"
+  [ approval_item_json "token-broadcast"
   ; approval_item_json ~action_type:"keeper_probe"
       ~target_type:"keeper" ~target_id:(Some "keeper.one")
       ~delegated_tool:"masc_keeper_status" ~expires_at:None
@@ -77,13 +77,13 @@ let test_current_contract () =
         snapshot.aps_actor_filter;
       check bool "filter active" true snapshot.aps_filter_active;
       (match snapshot.aps_items with
-       | pause :: probe :: [] ->
-           check string "pause token" "token-pause" pause.ap_token;
-           check (option string) "workspace target id" None pause.ap_target_id;
-           check (option string) "pause expiry"
-             (Some "2026-08-21T12:15:00Z") pause.ap_expires_at;
+       | broadcast :: probe :: [] ->
+           check string "broadcast token" "token-broadcast" broadcast.ap_token;
+           check (option string) "workspace target id" None broadcast.ap_target_id;
+           check (option string) "broadcast expiry"
+             (Some "2026-08-21T12:15:00Z") broadcast.ap_expires_at;
            check string "payload" {|{"reason":"operator requested"}|}
-             (Yojson.Safe.to_string pause.ap_payload);
+             (Yojson.Safe.to_string broadcast.ap_payload);
            check (option string) "keeper target" (Some "keeper.one")
              probe.ap_target_id;
            check (option string) "nullable expiry" None probe.ap_expires_at
@@ -146,7 +146,7 @@ let test_fails_closed () =
         ()
     ; snapshot_json
         ~items:
-          [ approval_item_json "token-pause"
+          [ approval_item_json "token-broadcast"
           ; approval_item_json ~actor:"other-agent" "token-probe"
           ]
         ()
@@ -163,11 +163,11 @@ let test_fails_closed () =
     malformed
 
 let confirm_response ?(status = "ok") ?(decision = "confirm")
-    ?(token = "token-pause") ?trace_id ?tool_name ?(include_result = true)
+    ?(token = "token-broadcast") ?trace_id ?tool_name ?(include_result = true)
     ?executed_trace_id ?result_status () =
   let trace_id = Option.value ~default:("trace-" ^ token) trace_id in
   let executed_trace_id = Option.value ~default:trace_id executed_trace_id in
-  let tool_name = Option.value ~default:"masc_pause" tool_name in
+  let tool_name = Option.value ~default:"masc_broadcast" tool_name in
   let fields =
     [ Some ("status", `String status)
     ; Some ("trace_id", `String trace_id)
@@ -184,7 +184,7 @@ let confirm_response ?(status = "ok") ?(decision = "confirm")
   in
   `Assoc fields
 
-let decode_confirm ?(token = "token-pause") decision json =
+let decode_confirm ?(token = "token-broadcast") decision json =
   Projection.decode_confirm_response ~expected_token:token
     ~expected_decision:decision json
 
@@ -225,7 +225,7 @@ let test_confirm_response_status () =
     ; confirm_response ~decision:"deny" ()
     ; confirm_response ~token:"other-token" ()
     ; confirm_response ~trace_id:"other-trace"
-        ~executed_trace_id:"trace-token-pause" ()
+        ~executed_trace_id:"trace-token-broadcast" ()
     ; confirm_response ~tool_name:"masc_other" ()
     ; confirm_response ~include_result:false ()
     ]
@@ -361,7 +361,7 @@ let test_two_key_gate () =
   let armed =
     match
       Projection.approval_gate_transition ~inflight:false ~pending:None
-        ~token:"token-pause" ~decision:Projection.Confirm
+        ~token:"token-broadcast" ~decision:Projection.Confirm
     with
     | Projection.Gate_arm pending -> pending
     | Projection.Gate_blocked_inflight | Projection.Gate_submit ->
@@ -369,14 +369,14 @@ let test_two_key_gate () =
   in
   (match
      Projection.approval_gate_transition ~inflight:false ~pending:(Some armed)
-       ~token:"token-pause" ~decision:Projection.Confirm
+       ~token:"token-broadcast" ~decision:Projection.Confirm
    with
    | Projection.Gate_submit -> ()
    | Projection.Gate_blocked_inflight | Projection.Gate_arm _ ->
        fail "matching second key did not submit");
   (match
      Projection.approval_gate_transition ~inflight:false ~pending:(Some armed)
-       ~token:"token-pause" ~decision:Projection.Deny
+       ~token:"token-broadcast" ~decision:Projection.Deny
    with
    | Projection.Gate_arm pending ->
        check bool "opposite decision re-arms" true
@@ -385,7 +385,7 @@ let test_two_key_gate () =
        fail "opposite decision submitted");
   (match
      Projection.approval_gate_transition ~inflight:true ~pending:(Some armed)
-       ~token:"token-pause" ~decision:Projection.Confirm
+       ~token:"token-broadcast" ~decision:Projection.Confirm
    with
    | Projection.Gate_blocked_inflight -> ()
    | Projection.Gate_arm _ | Projection.Gate_submit ->
@@ -500,7 +500,7 @@ let test_workspace_bound_approval_listing () =
     | Ok snapshot -> snapshot
     | Error detail -> fail detail in
   check (list string) "response preserves original confirmation tokens"
-    ["token-pause"; "token-probe"] (List.map (fun item -> item.Projection.ap_token) snapshot.aps_items);
+    ["token-broadcast"; "token-probe"] (List.map (fun item -> item.Projection.ap_token) snapshot.aps_items);
   let flow = Projection.Flow.initial in
   let order, ticket = Projection.Listing_order.dispatch Projection.Listing_order.initial flow in
   let order, early = Projection.Listing_order.admit order flow ticket in

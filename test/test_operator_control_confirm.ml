@@ -28,12 +28,12 @@ let test_confirm_rejects_expired_token () =
                        ("confirm_token", `String "expired-token");
                        ("trace_id", `String "ops_expired");
                        ("actor", `String "operator");
-                       ("action_type", `String "namespace_pause");
+                       ("action_type", `String "broadcast");
                        ( "target_type"
                        , `String Operator_action_constants.workspace_target_type );
                        ("target_id", `Null);
                        ("payload", `Assoc []);
-                       ("delegated_tool", `String "masc_pause");
+                       ("delegated_tool", `String "masc_broadcast");
                        ("created_at", `String "2026-03-06T00:00:00Z");
                        ("expires_at", `String "2026-03-06T00:00:01Z");
                      ];
@@ -112,12 +112,12 @@ let test_confirm_rejects_unknown_decision () =
                        ("confirm_token", `String "live-token");
                        ("trace_id", `String "ops_unknown_decision");
                        ("actor", `String "operator");
-                       ("action_type", `String "namespace_pause");
+                       ("action_type", `String "broadcast");
                        ( "target_type"
                        , `String Operator_action_constants.workspace_target_type );
                        ("target_id", `Null);
                        ("payload", `Assoc []);
-                       ("delegated_tool", `String "masc_pause");
+                       ("delegated_tool", `String "masc_broadcast");
                        ("created_at", `String (iso_in_minutes (-5)));
                        ("expires_at", `String (iso_in_minutes 30));
                      ];

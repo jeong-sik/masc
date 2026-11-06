@@ -158,7 +158,7 @@ type forecast_slot =
 
 type forecast_rest =
   | Rest_serving
-  | Rest_resting of { release_at : float; walk_promotes_at_release : bool }
+  | Rest_resting of { release_at : float }
 
 type forecast_place =
   { walks_at : int
@@ -901,7 +901,7 @@ let input_map_rows (record : Turn_record.t) (provider_input : provider_input opt
 (* Keep the inspector's token readings on the shared column precision. *)
 let format_tokens = Masc_tui_message_layout.compact_count
 
-let forecast_schema = "masc.keeper.next-request-forecast.v6"
+let forecast_schema = "masc.keeper.next-request-forecast.v7"
 
 let nonnegative_float name = function
   | `Float value when Float.is_finite value && value >= 0. -> Ok value
@@ -978,11 +978,7 @@ let decode_forecast_rest = function
      | "resting" ->
        let* release_json = field "release_at" fields in
        let* release_at = nonnegative_float "rest.release_at" release_json in
-       let* promotes_json = field "walk_promotes_at_release" fields in
-       (match promotes_json with
-        | `Bool walk_promotes_at_release ->
-          Ok (Rest_resting { release_at; walk_promotes_at_release })
-        | _ -> Error "rest.walk_promotes_at_release is not a boolean")
+       Ok (Rest_resting { release_at })
      | other -> Error ("rest.kind is neither serving nor resting: " ^ other))
   | _ -> Error "rest is not an object"
 

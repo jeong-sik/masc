@@ -305,9 +305,8 @@ let keeper_failure_cause = function
    It is a reading beside [status], not part of it: a resting path is an
    expected state, not a fault.
 
-   No release time is published. For a quota the provider did not date, the
-   walk's release is [now] plus a fallback, so it moves on every read and
-   would show a time nobody stated. *)
+   No release time is published. For a rest the provider did not date, the
+   walk's release is MASC's own floor or cap, a time no provider stated. *)
 let runtime_path_rest_json ~now assignment_id =
   match Keeper_turn_driver.assignment_walk_rest ~now assignment_id with
   | Keeper_turn_driver.Walk_head_serving { runtime_id } ->

@@ -7,13 +7,18 @@ type walk_start =
   | Every_mark_demotes
 
 type policy =
-  | Keeper_walk of walk_start
-      (** Rate observations stand until an answer or their provider hint ends.
-          Other Keepers' failures demote, while a fresh recorder retries its
-          own marks. A deferred/one-shot walk demotes every failure. *)
+  | Keeper_walk of
+      { start : walk_start
+      ; rest_sec : retry_after:float option -> float
+      }
+      (** A rate observation demotes until [noted_at +. rest_sec ~retry_after]
+          and orders nothing after it (RFC-provider-path-rest §3.3,
+          2026-11-06). Other Keepers' failures demote, while a fresh recorder
+          retries its own marks. A deferred/one-shot walk demotes every
+          failure. *)
   | Rate_rest_only of { rest_sec : retry_after:float option -> float }
-      (** Exact/media calls read quota and the existing provider-path rest,
-          ignoring Fleet failed-attempt marks. The caller supplies its existing
+      (** Exact/media calls read quota and the same rate rest, ignoring Fleet
+          failed-attempt marks. In both walks the caller supplies its existing
           rest policy; this query invents no TTL or recorder. *)
 
 val order :

@@ -127,28 +127,36 @@ val resumed_head : deferred_runtime_lane -> string
 (** The head of {!resumed_walk_ids}: the runtime a turn resuming the hint
     dispatches first and shapes its request for. *)
 
+(** Who set the time a path's rest ends. [Stated_by_provider]: a usable
+    Retry-After, or a quota reset the provider stated in a refusal or a usage
+    read. [Bounded_by_masc]: a rest the provider gave no end, which MASC ends
+    at its throttle floor or hard-quota fallback cap. *)
+type release_basis =
+  | Stated_by_provider
+  | Bounded_by_masc
+
 (** Whether one runtime path is resting at a given instant
     (RFC-provider-path-rest §3.3). Read from the 429 candidate observation and
-    the quota window; a failed attempt is no rest (RFC-0458 §3.4).
-    [walk_promotes_at_release] is [true] when the walk order moves the path
-    ahead of the paths still told to rest at [release_at]: every rest on it was
-    stated by the provider. A failed attempt the path
-    also holds keeps it behind the paths with no evidence. An id the runtime
-    table cannot resolve is serving. *)
+    the quota window; a failed attempt is no rest (RFC-0458 §3.4). At
+    [release_at] the walk order moves the path ahead of the paths still told
+    to rest; a failed attempt the path also holds keeps it behind the paths
+    with no evidence. [release_basis] is who set the latest rest on the path,
+    the one [release_at] reads. An id the runtime table cannot resolve is
+    serving. *)
 type path_rest =
   | Path_serving
   | Path_resting of
       { release_at : float
-      ; walk_promotes_at_release : bool
+      ; release_basis : release_basis
       }
 
 val path_rest : now:float -> string -> path_rest
 
 (** What a walk dispatches first. [Walk_head_serving]: the head in walk order
     is not resting and takes the input. [Walk_waits_until]: the head rests; the
-    wait ends at the head's release, or at an earlier release of a later path
-    the walk order promotes at that moment, and [resting_runtime_id] owns that
-    release. *)
+    wait ends at the head's release, or at an earlier release of a later path,
+    which the walk order promotes at that moment, and [resting_runtime_id] owns
+    that release. *)
 type walk_rest =
   | Walk_head_serving of { runtime_id : string }
   | Walk_waits_until of
@@ -226,10 +234,9 @@ val assignment_walk_order :
 val assignment_walk_rest : now:float -> string -> walk_rest
 
 val assignment_next_dated_release : now:float -> string -> float option
-(** The earliest time after [now] at which a dated rest on the assignment's
-    fresh walk ends, if any. {!assignment_walk_rest} can change at that time
-    with no write. A rest that ends only when its provider answers has no
-    such time. *)
+(** The earliest time after [now] at which a rest on the assignment's fresh
+    walk ends, if any. {!assignment_walk_rest} can change at that time with no
+    write. *)
 
 (** The next dispatch after a failed turn (RFC-provider-path-rest §3.1),
     shared by the heartbeat cycle and the chat lane's deferred retry.

@@ -261,12 +261,25 @@ let fresh_walk_of = function
   | Fleet_keeper_turn recorder -> Fresh_walk_by recorder
   | One_shot_walk -> Every_mark_demotes
 
+(* How long a rate observation holds its path back: the provider's usable
+   wait, or the throttle floor (RFC-provider-path-rest §3.3). The walk order
+   and the path's release read this one rule, so a path rejoins its declared
+   place at the moment its rest ends, whether or not it answered since. *)
+let rate_limit_rest_sec ~retry_after =
+  Keeper_runtime_failure_route.path_rest_sec
+    ~cap_sec:Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec
+    ~retry_class:Keeper_runtime_failure_route.Rate_limited
+    ~retry_after_hint:retry_after
+
+let keeper_walk start =
+  Runtime_candidate_standing.Keeper_walk { start; rest_sec = rate_limit_rest_sec }
+
 let quota_ordered_runtime_ids ~now ~walk runtime_ids =
   (* Resolve once so both kinds of ordering evidence use the same catalog row. *)
   let resolved = List.map (fun id -> id, Runtime.get_runtime_by_id id) runtime_ids in
   let resolvable, unresolvable = List.partition (fun (_, rt) -> Option.is_some rt) resolved in
   let ordered = Runtime_candidate_standing.order ~now
-    ~policy:(Runtime_candidate_standing.Keeper_walk walk)
+    ~policy:(keeper_walk walk)
     ~quota_scope_of:(fun (_, rt) -> Option.map Runtime_instance.quota_scope_of_runtime rt)
     ~candidate_backpressure_of:(fun (_, rt) ->
       Option.map (fun (rt : Runtime_instance.t) -> rt.candidate_backpressure) rt)
@@ -329,11 +342,15 @@ let resumed_head lane =
   | Not_resumed -> lane.next_runtime_id
 ;;
 
+type release_basis =
+  | Stated_by_provider
+  | Bounded_by_masc
+
 type path_rest =
   | Path_serving
   | Path_resting of
       { release_at : float
-      ; walk_promotes_at_release : bool
+      ; release_basis : release_basis
       }
 
 type walk_rest =
@@ -353,22 +370,18 @@ type next_dispatch =
       ; basis : wait_basis
       }
 
-(* One store's rest on a runtime path. A rate limit ends at a fixed time: the
-   provider's stated wait, or the throttle floor after it was noted. A quota
-   window the provider or its usage read dated ends at that reset. A quota
-   observation names no time: only an answer on the scope ends it.
-   [walk_promotes_at_release] is whether the walk order holds the path back
-   only until that release (a time the provider stated) rather than until a
-   success. *)
+(* One store's rest on a runtime path, and who set the time it ends. A rate
+   limit ends at the provider's stated wait, or at the throttle floor after it
+   was noted. A quota window the provider or its usage read dated ends at that
+   reset. A quota observation ends at the fallback cap after it was noted. The
+   walk order holds the path back until exactly that time
+   (RFC-provider-path-rest §3.3). *)
 type path_rest_part =
-  | Rest_dated of
-      { release_at : float
-      ; walk_promotes_at_release : bool
-      }
-  | Rest_until_answered
+  { ends_at : float
+  ; set_by : release_basis
+  }
 
 let path_rest_parts ~now (runtime : Runtime_instance.t) =
-  let cap_sec = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec in
   let rate_limit_rest =
     match
       Runtime_candidate_backpressure.candidate_backpressure
@@ -381,66 +394,46 @@ let path_rest_parts ~now (runtime : Runtime_instance.t) =
             Some (Runtime_candidate_backpressure.Unknown_scope_rate_limit { noted_at; retry_after })
         ; failed_attempt = _
         } ->
-      let walk_promotes_at_release =
+      let set_by =
         match Keeper_runtime_failure_route.usable_retry_after retry_after with
-        | Some _ -> true
-        | None -> false
+        | Some _ -> Stated_by_provider
+        | None -> Bounded_by_masc
       in
-      [ Rest_dated
-          { release_at =
-              noted_at
-              +. Keeper_runtime_failure_route.path_rest_sec
-                   ~cap_sec
-                   ~retry_class:Keeper_runtime_failure_route.Rate_limited
-                   ~retry_after_hint:retry_after
-          ; walk_promotes_at_release
-          }
-      ]
+      [ { ends_at = noted_at +. rate_limit_rest_sec ~retry_after; set_by } ]
   in
   let quota_rest =
-    let scope = Runtime_instance.quota_scope_of_runtime runtime in
-    match Runtime_quota_window.active_until ~scope ~now with
-    | Some resets_at -> [ Rest_dated { release_at = resets_at; walk_promotes_at_release = true } ]
-    | None -> if Runtime_quota_window.is_exhausted ~scope ~now then [ Rest_until_answered ] else []
+    match
+      Runtime_quota_window.rest ~scope:(Runtime_instance.quota_scope_of_runtime runtime) ~now
+    with
+    | None -> []
+    | Some (Runtime_quota_window.Reset_stated resets_at) ->
+      [ { ends_at = resets_at; set_by = Stated_by_provider } ]
+    | Some (Runtime_quota_window.Observed_until rests_until) ->
+      [ { ends_at = rests_until; set_by = Bounded_by_masc } ]
   in
   rate_limit_rest @ quota_rest
 ;;
 
 (* When one runtime path is released, read from the same two stores the walk
-   order reads (RFC-provider-path-rest §3.3). The order holds a stated rest back
-   until the provider's own time, so at that release the walk promotes the path
-   again. It holds an unstated rest back until a success, so that release ends
-   only the wait, not the demotion. A stated time is preserved, so the wait
-   and the ordering evidence expire at the same provider boundary.
-   A quota observation carries no noted time and rests from [now]. A failed
+   order reads (RFC-provider-path-rest §3.3). The order holds every rest back
+   until exactly the time [path_rest_parts] gives it, so at the release the
+   walk promotes the path again, and the wait and the ordering evidence end at
+   the same moment. The latest rest gives the release and who set it. A failed
    attempt is not a rest: it demotes the path until the candidate answers and
    never makes a dispatch wait (RFC-0458 §3.4). *)
 let runtime_path_rest ~now (runtime : Runtime_instance.t) =
-  let cap_sec = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec in
-  let release = function
-    | Rest_dated { release_at; walk_promotes_at_release } -> release_at, walk_promotes_at_release
-    | Rest_until_answered ->
-      ( now
-        +. Keeper_runtime_failure_route.path_rest_sec
-             ~cap_sec
-             ~retry_class:Keeper_runtime_failure_route.Hard_quota
-             ~retry_after_hint:None
-      , false )
-  in
-  let rest =
+  let latest =
     List.fold_left
       (fun held part ->
-         let release_at, promotes = release part in
          match held with
-         | None -> Some (release_at, promotes)
-         | Some (held_at, held_promotes) ->
-           Some (Float.max held_at release_at, held_promotes && promotes))
+         | Some held when Float.compare held.ends_at part.ends_at >= 0 -> Some held
+         | Some _ | None -> Some part)
       None
       (path_rest_parts ~now runtime)
   in
-  match rest with
-  | Some (release_at, walk_promotes_at_release) when Float.compare now release_at < 0 ->
-    Path_resting { release_at; walk_promotes_at_release }
+  match latest with
+  | Some { ends_at; set_by } when Float.compare now ends_at < 0 ->
+    Path_resting { release_at = ends_at; release_basis = set_by }
   | Some _ | None -> Path_serving
 ;;
 
@@ -454,22 +447,20 @@ let path_rest ~now runtime_id =
 
 (* A walk dispatches its head first, so the head decides: a serving head takes
    the input now. A resting head waits for the first moment the walk's head can
-   serve: the head's own release, or an earlier release of a later path that
-   the walk order promotes at that moment. A later path whose release the order
-   does not follow stays behind the head and cannot shorten the wait. *)
+   serve: the head's own release, or an earlier release of a later path, which
+   the walk order promotes at that moment. *)
 let walk_rest ~now ~head ~later =
   match path_rest ~now head with
   | Path_serving -> Walk_head_serving { runtime_id = head }
-  | Path_resting { release_at = head_release_at; walk_promotes_at_release = _ } ->
+  | Path_resting { release_at = head_release_at; release_basis = _ } ->
     let release_at, resting_runtime_id =
       List.fold_left
         (fun ((earliest, _) as found) runtime_id ->
            match path_rest ~now runtime_id with
-           | Path_resting { release_at; walk_promotes_at_release = true }
+           | Path_resting { release_at; release_basis = _ }
              when Float.compare release_at earliest < 0 ->
              release_at, runtime_id
-           | Path_resting { release_at = _; walk_promotes_at_release = _ } | Path_serving ->
-             found)
+           | Path_resting { release_at = _; release_basis = _ } | Path_serving -> found)
         (head_release_at, head)
         later
     in
@@ -525,9 +516,8 @@ let assignment_walk_rest ~now assignment_id =
     Walk_head_serving { runtime_id = assignment_id }
 ;;
 
-(* The earliest moment after [now] at which a dated rest on this assignment's
-   walk ends. A rest that ends only when its provider answers has none. The
-   walk's shown rest can move at that moment without any write. *)
+(* The earliest moment after [now] at which a rest on this assignment's walk
+   ends. The walk's shown rest can move at that moment without any write. *)
 let assignment_next_dated_release ~now assignment_id =
   match assignment_walk_order ~now ~walk:Every_mark_demotes assignment_id with
   | Error (Assignment_missing | Catalog_unavailable _) -> None
@@ -539,12 +529,10 @@ let assignment_next_dated_release ~now assignment_id =
          | Some runtime -> path_rest_parts ~now runtime)
       order
     |> List.fold_left
-         (fun earliest part ->
-            match part with
-            | Rest_dated { release_at; walk_promotes_at_release = _ }
-              when Float.compare release_at now > 0 ->
-              Some (Option.fold earliest ~none:release_at ~some:(Float.min release_at))
-            | Rest_dated _ | Rest_until_answered -> earliest)
+         (fun earliest { ends_at; set_by = _ } ->
+            if Float.compare ends_at now > 0
+            then Some (Option.fold earliest ~none:ends_at ~some:(Float.min ends_at))
+            else earliest)
          None
 ;;
 
@@ -793,7 +781,7 @@ let attempt_runtime_candidates
     in
     Runtime_candidate_standing.order
       ~now:(Unix.gettimeofday ())
-      ~policy:(Runtime_candidate_standing.Keeper_walk Every_mark_demotes)
+      ~policy:(keeper_walk Every_mark_demotes)
       ~quota_scope_of ~candidate_backpressure_of
       dispatchable
     @ undispatchable
@@ -928,14 +916,14 @@ let attempt_runtime_candidates
            | None -> read_usage_after_account_refusal candidate)
         | Keeper_runtime_failure_route.Retry_after_observed
             { retry_class = Keeper_runtime_failure_route.Hard_quota; retry_after } ->
-          (* A spent quota that states no reset rests the scope until an
-             answer, and the walk does not promote a path at that release:
-             behind a head that rests for days, the walk waits for the head.
-             GLM's 1308 states its reset only in prose. The provider's
-             declared [usage-read] dates the rest, as after a 429 without a
-             wait. The refusal is recorded first, so a turn cancelled during
-             the read, and a walk that runs meanwhile, still see the path
-             rest; a dated window the read finds replaces that observation. A
+          (* A spent quota that states no reset rests the scope only to the
+             fallback cap, a time MASC set: the path comes back then and is
+             refused again while the window stays spent. GLM's 1308 states
+             its reset only in prose. The provider's declared [usage-read]
+             dates the rest, as after a 429 without a wait. The refusal is
+             recorded first, so a turn cancelled during the read, and a walk
+             that runs meanwhile, still see the path rest; a dated window
+             the read finds replaces that observation. A
              failed read leaves the observation, and the next refusal reads
              again. A payment refusal (402) names no usage window and is not
              read. *)
@@ -1323,9 +1311,7 @@ let dedupe_runtimes_preserve_order runtimes =
    that cannot answer yet. The resting candidate keeps its place in the lane,
    behind the serving ones, so a walk whose serving candidates all fail still
    reaches it, and at its release it leads image turns again. A quota
-   observation names no time and only an answer ends it, so it keeps the
-   candidate in the set, demoted: while a text-only lane head serves, an image
-   turn led by that candidate is the dispatch that can end the observation.
+   observation rests until the fallback cap after it was noted, the same way.
    A deferred lane offers no candidates: it dispatches the resumed walk
    ordered before pre-dispatch ([lane_candidate_ids] in [run_agent_turn]), so a
    decision that moved the head would be recorded as a reroute the walk never
@@ -1338,7 +1324,7 @@ let modality_reroute_candidates ~now ~walk ~deferred_runtime_lane ~first_candida
     dedupe_runtimes_preserve_order (first_candidate :: remaining_runtimes)
     |> Runtime_candidate_standing.order
          ~now
-         ~policy:(Runtime_candidate_standing.Keeper_walk walk)
+         ~policy:(keeper_walk walk)
          ~quota_scope_of:(fun (runtime : Runtime_instance.t) ->
            Some (Runtime_instance.quota_scope_of_runtime runtime))
          ~candidate_backpressure_of:(fun (runtime : Runtime_instance.t) ->
@@ -1346,10 +1332,7 @@ let modality_reroute_candidates ~now ~walk ~deferred_runtime_lane ~first_candida
     |> List.filter (fun runtime ->
       not
         (List.exists
-           (function
-             | Rest_dated { release_at; walk_promotes_at_release = _ } ->
-               Float.compare now release_at < 0
-             | Rest_until_answered -> false)
+           (fun { ends_at; set_by = _ } -> Float.compare now ends_at < 0)
            (path_rest_parts ~now runtime)))
 
 (* The media walk (every serving lane candidate that takes the media, live ones

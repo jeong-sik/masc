@@ -149,8 +149,8 @@ let test_a_candidate_cell_holds_the_observation_until_success () =
 ;;
 
 (* A 429 carrying [Retry-After: 0] names no wait, the same as a 429 with no
-   hint. The candidate stays demoted until it answers; the next read must not
-   put it back at the head of the walk. *)
+   hint: the cell holds it until the candidate answers, and the walk reads it
+   for the throttle floor, not for a zero-second wait. *)
 let test_a_zero_second_hint_holds_the_rate_limit_until_success () =
   let candidate =
     Runtime_candidate_backpressure.create_candidate

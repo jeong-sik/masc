@@ -324,3 +324,6 @@ val blob_status : t -> sha256:string -> blob_status
     some instant has an mtime after it. An invalid digest is [Stat_failed].
     It checks no directory ownership and is only an observation: a caller that
     removes a blob goes through {!delete}, which checks the owned path. *)
+
+val dirname : string
+(** The blob directory below [<base>/.masc]. *)

@@ -20,8 +20,10 @@ let write_file_content path content =
   Fs_compat.mkdir_p (Filename.dirname path);
   Fs_compat.save_file path content
 
+let current_task_filename = "current_task"
+
 let current_task_file (config : Workspace.config) =
-  Filename.concat (Workspace_utils.masc_dir config) "current_task"
+  Filename.concat (Workspace_utils.masc_dir config) current_task_filename
 
 (* The planning [current_task] path must be a file, but runtime state can be
    corrupted by external writers. Keep these helpers total for directory-shaped
@@ -30,8 +32,10 @@ let current_task_file (config : Workspace.config) =
 let is_directory_path path =
   try Sys.is_directory path with Sys_error _ -> false
 
+let trash_dirname = "_trash"
+
 let quarantine_dir_under_trash (config : Workspace.config) ~path ~op =
-  let trash_dir = Filename.concat (Workspace_utils.masc_dir config) "_trash" in
+  let trash_dir = Filename.concat (Workspace_utils.masc_dir config) trash_dirname in
   Fs_compat.mkdir_p trash_dir;
   let stamp =
     let t = Time_compat.now () in

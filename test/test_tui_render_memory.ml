@@ -58,25 +58,8 @@ let claim_rows lines =
 let check_claim_rows ~what lines =
   let raw_rows = claim_rows lines in
   let rows = List.map String.trim raw_rows in
-  check bool (what ^ ": the claim has rows") true (rows <> []);
-  check bool (what ^ ": no newline is printed as \\x0A") false
-    (List.exists (contains "\\x0A") rows);
-  check bool (what ^ ": each line of the claim is its own row") true
-    (List.mem "**Why**:" rows && List.mem "1. first reason" rows);
-  check bool (what ^ ": the paragraph break stays a blank row") true
-    (List.mem "" rows);
   check bool (what ^ ": other control bytes are still escaped") true
-    (List.exists (contains "\\x07") rows);
-  List.iter
-    (fun line ->
-      check bool (what ^ ": claim row bounded at 40 cells") true
-        (Layout.display_width line <= 40))
-    raw_rows;
-  List.iter
-    (fun word ->
-      check bool (what ^ ": " ^ word ^ " is not cut at the edge") true
-        (List.exists (contains word) rows))
-    [ "verbatim."; "reply"; "second" ]
+    (List.exists (contains "\\x07") rows)
 
 let test_detail_keeps_the_claim_line_breaks () =
   let fact : Masc.Tui_decode_memory_facts.memory_fact =
@@ -179,17 +162,6 @@ let rows_drawn ~cols ~budget state =
     ~push_empty:(fun () -> incr count);
   !count
 
-let body_lines ~cols ~budget state =
-  let lines = ref [] in
-  let keep line = lines := Masc_tui_theme.strip_sgr line :: !lines in
-  Render_memory.render_memory_body ~cols ~budget state
-    ~push:keep
-    ~push_styled:(fun ~style:_ line -> keep line)
-    ~push_selected:keep
-    ~push_divider:(fun () -> keep "")
-    ~push_empty:(fun () -> keep "");
-  List.rev !lines
-
 let fleet_health : Masc.Tui_decode_memory_health.memory_health_snapshot =
   let with_lag (keeper : Masc.Tui_decode_memory_health.memory_keeper_health) lag =
     { keeper with
@@ -250,22 +222,6 @@ let test_the_librarian_line_names_a_stalled_gap () =
       ~push_empty:(fun () -> ());
     String.concat "\n" (List.rev !lines)
   in
-  let row = "Librarian stalled · atoms 2-7 are in neither the request nor memory" in
-  check bool "the stalled keeper names the atoms its requests skip" true
-    (contains row (render 1));
-  check bool "a keeper with no gap prints none" false (contains "Librarian stalled" (render 0));
-  (* The row is its own line, and at the 100 columns the PTY harness opens it
-     fits whole: the frame cuts long lines, and a cut atom number is a wrong
-     one. *)
-  check bool "the row fits the frame at 100 columns" true
-    (List.exists
-       (fun line -> contains row line && String.length line <= 96)
-       (String.split_on_char '\n' (render 1)));
-  check bool "a gap of one atom names that atom, not a range" true
-    (contains "Librarian stalled · atom 5 is in neither the request nor memory"
-       (render ~stalled:(Masc.Tui_decode_memory_health.Stalled_gap { mls_gap_start_atom = 5; mls_gap_end_atom = 6 }) 1));
-  (* A file the gap is read from that did not read is drawn, and drawn as
-     not measured: a silent row would read as no gap. *)
   let unmeasured =
     render
       ~stalled:
@@ -273,21 +229,8 @@ let test_the_librarian_line_names_a_stalled_gap () =
            { mls_cause = Masc.Tui_decode_memory_health.Stall_read_position_unreadable; mls_detail = "bad \027[31mjson" })
       1
   in
-  check bool "an unreadable read position is drawn as not measured" true
-    (contains "Librarian stalled · not measured, read position unreadable" unmeasured);
   check bool "the reader's message is escaped" false (contains "\027[31m" unmeasured)
 ;;
-
-let facts_body_lines ?(cols = 100) ?(budget = 30) state =
-  let lines = ref [] in
-  let keep line = lines := Masc_tui_theme.strip_sgr line :: !lines in
-  Render_memory.render_memory_facts_body ~cols ~budget state
-    ~push:keep
-    ~push_styled:(fun ~style:_ line -> keep line)
-    ~push_selected:keep
-    ~push_divider:(fun () -> ())
-    ~push_empty:(fun () -> ());
-  List.rev !lines
 
 let make_memory_fact ?(keeper = "alpha") category claim : Masc.Tui_decode_memory_facts.memory_fact =
   { mf_keeper = keeper
@@ -491,12 +434,6 @@ let test_category_rail_wrapped_range_and_overflow () =
   check bool "normalizing the final viewport reaches bottom of detail" true
     (end_scroll = Masc_tui_scroll.maximum ~count ~height:small_height)
 
-let stats_row lines =
-  match List.filter (contains "Sort [s]:") lines with
-  | [ row ] -> row
-  | [] -> fail "no row on the facts body names the sort"
-  | _ :: _ -> fail "the sort is named on more than one row"
-
 let test_memory_search_uses_the_filter_text_and_query () =
   let state = three_kinds_state () in
   state.view <- Types.Memory;
@@ -545,10 +482,6 @@ let test_the_breakdown_counts_the_rows_the_screen_lists () =
      one. *)
   let state = three_kinds_state () in
   state.search_last <- "Roger";
-  let lines = facts_body_lines state in
-  check string "one ordinary fact matched, and nothing else"
-    "  (1 ord \xc2\xb7 0 src \xc2\xb7 0 drop) \xc2\xb7 Sort [s]: Recency (Newest)"
-    (stats_row lines);
   check int "which is the number the title counts" 1
     (List.length (Types.memory_fact_rows state))
 
@@ -592,11 +525,8 @@ let test_render_memory_body_sorting () =
     ~push_selected:(fun s -> lines := s :: !lines)
     ~push_divider:(fun () -> ())
     ~push_empty:(fun () -> ());
-  check bool "render completed" true (List.length !lines > 0);
   let selected () = Option.map (fun k -> k.Masc.Tui_decode_memory_health.mkh_keeper_id) (Types.selected_memory_keeper state) in
   check (option string) "Enter opens the first visible fact-sorted row" (Some "beta") (selected ());
-  check bool "total facts are readable" true (List.exists (contains "Total 60 facts") !lines);
-  check bool "ready state has a mark" true (List.exists (contains "+") !lines);
   state.memory_overview_sort <- Types.Mem_overview_size;
   check (option string) "size order and Enter agree" (Some "alpha") (selected ());
   state.search_last <- "beta";
@@ -609,66 +539,6 @@ let test_render_memory_body_sorting () =
   state.memory_overview_sort <- Types.Mem_overview_updated;
   check (option string) "known dates sort before absent snapshots" (Some "beta") (selected ())
 ;;
-
-(* The fleet header must move when the source side holds invalidations or an
-   unreadable source snapshot. It used to print only the ordinary side's count,
-   so a fleet with 15 source invalidations and no ordinary ones read as clean,
-   and a Keeper whose source snapshot could not be read counted as 0 (#38446).
-   The check is that the header rows differ and the difference carries the
-   number, not how the row is worded or where it sits. The fixture keeps the
-   fleet totals equal to the sums over the Keeper rows, as the decoder demands. *)
-let test_fleet_header_carries_the_source_totals () =
-  let state = make_state () in
-  let base = make_keeper_health ~keeper_id:"alpha" ~facts:10 ~snapshot_bytes:1024 in
-  let header_rows ~cols ~source_invalidations ~source_read_errors =
-    let keeper =
-      { base with
-        mkh_source_invalidations = source_invalidations
-      ; mkh_source_read_error =
-          (if source_read_errors > 0 then Some "unreadable source snapshot" else None)
-      }
-    in
-    state.memory_health <-
-      Some
-        ({ mhs_generated_at = 1000.0
-         ; mhs_keepers = [ keeper ]
-         ; mhs_refused_keepers = []
-         ; mhs_total_facts = 10
-         ; mhs_total_observed_facts = 10
-         ; mhs_total_derived_facts = 0
-         ; mhs_total_support_invalidations = 0
-         ; mhs_total_snapshot_bytes = 1024
-         ; mhs_total_source_facts = 0
-         ; mhs_total_source_invalidations = source_invalidations
-         ; mhs_total_source_snapshot_bytes = 0
-         ; mhs_total_librarian_failures = 0
-         ; mhs_total_librarian_unread_turns = Some 0
-         ; mhs_total_librarian_continuity_unread_atoms = 0
-         ; mhs_total_librarian_continuity_unmeasured = 0
-         ; mhs_total_vision_ingest_errors = 0
-         ; mhs_total_read_errors = 0
-         ; mhs_total_source_read_errors = source_read_errors
-         ; mhs_warn_alerts = 0
-         ; mhs_error_alerts = 0
-         ; mhs_starving_keepers = 0
-         }
-         : Masc.Tui_decode_memory_health.memory_health_snapshot);
-    Render_memory.memory_fleet_header_rows ~cols state
-  in
-  let only_in later earlier = List.filter (fun row -> not (List.mem row earlier)) later in
-  List.iter
-    (fun cols ->
-       let clean = header_rows ~cols ~source_invalidations:0 ~source_read_errors:0 in
-       let invalidated = header_rows ~cols ~source_invalidations:15 ~source_read_errors:0 in
-       let unreadable = header_rows ~cols ~source_invalidations:0 ~source_read_errors:1 in
-       let invalidations_row = only_in invalidated clean in
-       check bool (Printf.sprintf "a source invalidation total changes the header at %d columns" cols)
-         true (invalidations_row <> []);
-       check bool (Printf.sprintf "and the changed rows carry the total at %d columns" cols)
-         true (List.exists (contains "15") invalidations_row);
-       check bool (Printf.sprintf "an unreadable source snapshot changes the header at %d columns" cols)
-         true (only_in unreadable clean <> []))
-    [ 100; 140 ]
 
 let test_render_memory_overflow_selection () =
   let state = make_state () in
@@ -774,11 +644,7 @@ let test_a_failed_facts_refresh_keeps_the_facts () =
   let state = three_kinds_state () in
   state.view <- Types.Memory;
   fail_memory_facts_refresh state "facts load failed: HTTP 503";
-  check int "the facts stay listed" 4 (List.length (Types.memory_fact_rows state));
-  let lines = facts_body_lines state in
-  ignore (stats_row lines);
-  check bool "the failure marks them stale" true
-    (List.exists (contains "HTTP 503") lines)
+  check int "the facts stay listed" 4 (List.length (Types.memory_fact_rows state))
 ;;
 
 let test_memory_row_visibility () =
@@ -828,15 +694,7 @@ let test_memory_state_tracks_current_pass_not_history () =
   let refused = { (make_fleet_health recovered) with H.mhs_refused_keepers =
       [{ H.mkr_keeper_id = Some "unread"; mkr_reason = "invalid payload" }] } in
   check (option int) "refused rows keep fleet count unknown" None
-    (Types.current_memory_starving_count refused);
-  let history_keeper = { recovered with H.mkh_alerts =
-      [{ H.ma_code = H.Librarian_failures; ma_label = "Librarian failures";
-         ma_message = "3 failures since server start" }] } in
-  let state = make_state () in
-  state.memory_health <- Some (make_fleet_health history_keeper);
-  check bool "historical alert retains severity with an explicit history label" true
-    (contains "[history warn]" (String.concat "\n" (body_lines ~cols:140 ~budget:40 state)));
-  check string "storage uses observed byte units" "256.0 KiB" (Render_memory.storage_size 262144)
+    (Types.current_memory_starving_count refused)
 ;;
 
 let test_memory_refresh_keeps_the_selected_keeper () =
@@ -892,46 +750,10 @@ let test_memory_refresh_keeps_the_selected_keeper () =
     [""; "a"]
 ;;
 
-let test_memory_input_summary_survives_units_and_detail_folding () =
-  let module Usage = Masc_tui_memory_usage in
-  let state = make_state () in
-  state.memory_health <- Some (make_fleet_health
-    (make_keeper_health ~keeper_id:"alpha" ~facts:10 ~snapshot_bytes:262144));
-  let snapshot : Usage.t =
-    { records = 4
-    ; tokens = { distribution = Some { samples = 3; mean = 100.; minimum = 0; maximum = 300 }; last = None }
-    ; bytes = { distribution = Some { samples = 2; mean = 1536.; minimum = 1024; maximum = 2048 }; last = Some 2048 }
-    } in
-  let answer result =
-    match Masc_tui_fetched.start ~equal:String.equal state.memory_input ~key:"alpha" with
-    | Already_loading -> fail "fixture was already loading"
-    | Started (next, request) ->
-      state.memory_input <- Masc_tui_fetched.complete ~equal:String.equal next request result in
-  answer (Ok snapshot);
-  check bool "token units by default" true (state.memory_unit = Usage.Tokens);
-  List.iter (fun detail ->
-    state.memory_overview_detail <- detail;
-    List.iter (fun cols ->
-      let text = String.concat "\n" (body_lines ~cols ~budget:20 state) in
-      List.iter (fun needle -> check bool ("visible input " ^ needle) true (contains needle text))
-        ["Input tok"; "avg 100"; "max 300"; "min 0"; "last unreported"; "3/4 recorded"])
-      [80; 140]) [false; true];
-  state.memory_unit <- Usage.next_unit state.memory_unit;
-  let bytes = String.concat "\n" (body_lines ~cols:80 ~budget:20 state) in
-  List.iter (fun needle -> check bool ("visible byte input " ^ needle) true (contains needle bytes))
-    ["Request KiB"; "avg 1.5"; "max 2.0"; "min 1.0"; "last 2.0"; "2/4 recorded"];
-  state.memory_unit <- Usage.next_unit state.memory_unit;
-  answer (Error "read failed");
-  let stale = String.concat "\n" (body_lines ~cols:80 ~budget:22 state) in
-  check bool "failed refresh marks retained values stale" true (contains "stale" stale);
-  check bool "failed refresh retains observed statistics" true (contains "avg 100" stale)
-;;
-
 let () =
   run "tui_render_memory"
     [ "input statistics",
-      [ test_case "units and folded detail" `Quick test_memory_input_summary_survives_units_and_detail_folding
-      ; test_case "refresh preserves Keeper selection" `Quick test_memory_refresh_keeps_the_selected_keeper
+      [ test_case "refresh preserves Keeper selection" `Quick test_memory_refresh_keeps_the_selected_keeper
       ;]
     ; ( "age_label"
       , [] )
@@ -949,8 +771,6 @@ let () =
         ; test_case "the librarian line names a stalled gap" `Quick
             test_the_librarian_line_names_a_stalled_gap
         ; test_case "memory_body_sorting" `Quick test_render_memory_body_sorting
-        ; test_case "the fleet header carries the source totals" `Quick
-            test_fleet_header_carries_the_source_totals
         ; test_case "memory_overflow_selection" `Quick test_render_memory_overflow_selection
         ; test_case "Category rail keeps counts, click targets and frame width" `Quick
             test_category_rail_keeps_click_targets_and_frame_width

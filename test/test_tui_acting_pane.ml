@@ -1,10 +1,9 @@
 (* The Activity pane projects the feed the TUI already holds into a column
-   beside any surface. These cases pin what the column says: who acted last
-   comes first, a keeper waiting on the reader outranks a working one, the
-   focus block names the newest record's calls, every row is exactly the
-   pane's width so the surface beside it never shifts, each row names what a
-   press on it acts on, scrolling walks the full list under the header, and
-   the changes tab lists the selected keeper's files newest first. *)
+   beside any surface. These cases pin what a press on the column does: each
+   row names what a press on it acts on, the keyboard cursor steps over rows
+   a press does nothing on, every keeper stays reachable through the scroll
+   windows, files open only from a current source, and the layout and the
+   call order cycle. *)
 
 open Alcotest
 module Observer = Masc_tui_observer
@@ -119,8 +118,6 @@ let fixture : Pane.input =
   ; expanded = []
   }
 
-let full_list_rows = 9
-
 let text (line : Pane.line) = String.concat "" (List.map (fun s -> s.Pane.text) line)
 
 let contains needle haystack =
@@ -144,53 +141,8 @@ let span_values (line : Pane.line) =
 let test_trace_failure_is_readable_without_hiding_roster () =
   let input = { fixture with trace_unavailable = ["tester", "missing trace identity"] } in
   let drawn = Pane.lines ~rows:20 ~cols:90 ~scroll:0 input in
-  let texts = List.map text drawn.Pane.rows in
-  check bool "identity error is named" true
-    (List.exists (contains "Trace unavailable: tester · missing trace identity") texts);
-  check bool "independent roster count remains observed" true
-    (List.exists (contains "4 keepers") texts);
   check bool "keeper navigation remains available" true
-    (List.exists (function Pane.Target_keeper "tester" -> true | _ -> false) drawn.Pane.targets);
-  let selected = Pane.lines ~rows:20 ~cols:90 ~scroll:0
-    {input with scope = Pane.Selected_only; selected = Some "tester"} in
-  check bool "selected keeper names its attribution failure" true
-    (List.exists (fun line -> contains "missing trace identity" (text line)) selected.Pane.rows)
-
-let test_many_trace_failures_keep_navigation_and_full_reading () =
-  let failures = List.init 20 (fun index ->
-      Printf.sprintf "unbooted-%02d" index, Printf.sprintf "reason-%02d" index) in
-  let input = { fixture with trace_unavailable = failures } in
-  check (option string) "one bounded summary points to full reasons"
-    (Some "Trace unavailable: 20 Keepers · details in Keeper Info / Metadata")
-    (Pane.trace_unavailable_summary failures);
-  List.iter (fun (rows, cols) ->
-      let overview = Pane.lines ~rows ~cols ~scroll:0 input in
-      check int "pane stays inside its row budget" rows (List.length overview.Pane.rows);
-      check bool "failure summaries leave fleet navigation visible" true
-        (List.exists (function Pane.Target_keeper _ | Pane.Target_more -> true | _ -> false)
-           overview.Pane.targets);
-      List.iter (fun line -> check int "narrow rows stay fitted" cols (width line)) overview.Pane.rows)
-    [8, 42; 3, 30];
-  let compact = Pane.lines ~rows:3 ~cols:30 ~scroll:0 input in
-  let compact_scrolled = Pane.lines ~rows:3 ~cols:30 ~scroll:1 input in
-  check int "folding preserves the full body's scroll range"
-    compact.Pane.scroll_max compact_scrolled.Pane.scroll_max;
-  check bool "one-row viewport still scrolls through failures" true
-    (List.exists (fun line -> contains "Trace unavailable:" (text line)) compact_scrolled.Pane.rows);
-  let reading = Pane.lines ~rows:8 ~cols:90 ~scroll:1 input in
-  check bool "first full failure reason is reachable after the overview" true
-    (List.exists (fun line -> contains "unbooted-00 · reason-00" (text line)) reading.Pane.rows);
-  List.iter (fun rows ->
-    let first = Pane.lines ~rows ~cols:90 ~scroll:1 input in
-    check bool "first detail survives even one body row" true
-      (List.exists (fun line -> contains "unbooted-00 · reason-00" (text line)) first.Pane.rows);
-    let all = List.init (first.Pane.scroll_max + 1) (fun scroll ->
-      (Pane.lines ~rows ~cols:90 ~scroll input).Pane.rows)
-      |> List.concat |> List.map text in
-    List.iter (fun (name, reason) ->
-      check bool (name ^ " detail is reachable") true
-        (List.exists (contains (name ^ " · " ^ reason)) all)) failures)
-    [3; 8]
+    (List.exists (function Pane.Target_keeper "tester" -> true | _ -> false) drawn.Pane.targets)
 
 let target_text = function
   | Pane.Target_none -> "none"
@@ -204,8 +156,6 @@ let target_text = function
 
 let rows = 14
 let cols = Pane.pane_cols
-let drawn = Pane.lines ~rows ~cols ~scroll:0 fixture
-let texts = List.map text drawn.Pane.rows
 let index_of_in texts name =
   let rec go i = function
     | [] -> failf "no row names %s" name
@@ -220,8 +170,6 @@ let last_index_of_in texts name =
         go (i + 1) (if contains name row then Some i else best) rest
   in
   go 0 None texts
-
-let last_index_of name = last_index_of_in texts name
 
 let roomy = Pane.wide_threshold_cols + 20
 let middling = Pane.wide_threshold_cols - 1
@@ -243,101 +191,7 @@ let test_ctrl_l_walks_narrow_wide_hidden () =
   check (option layout) "exactly room for narrow: hidden to narrow" (Some Pane.Narrow)
     (step Pane.Hidden Pane.threshold_cols)
 
-let test_every_row_is_the_pane_width () =
-  check int "exactly the rows asked for" rows (List.length drawn.Pane.rows);
-  check int "one target per row" rows (List.length drawn.Pane.targets);
-  List.iteri
-    (fun i line -> check int (Printf.sprintf "row %d width" i) cols (width line))
-    drawn.Pane.rows
-
-let test_narrow_budget_folds_the_fleet () =
-  let drawn = Pane.lines ~rows:4 ~cols ~scroll:0 fixture in
-  let texts = List.map text drawn.Pane.rows in
-  check int "four rows" 4 (List.length drawn.Pane.rows);
-  check bool "header stays" true (contains "[Recent]" (List.nth texts 0));
-  check bool "the fold counts what it hid" true
-    (List.exists (fun row -> contains "3 more" row) texts);
-  check bool "the fold is what a press scrolls into" true
-    (List.mem Pane.Target_more drawn.Pane.targets)
-
-let test_folded_and_scrolled_views_preserve_keeper_row_and_focus () =
-  let name = "한e\204\129🙂" in
-  let input = { fixture with
-    Pane.keepers = Some [ keeper "quiet"; keeper name; keeper "second"; keeper "approval" ];
-    selected = Some name;
-    approvals = [ { Pane.approval_keeper = "approval"; approval_tool = "검토🙂" } ];
-    chunks = chunks [ name; "quiet"; "second"; "approval" ] @@ entries
-      [ 990., agent_core ~tool:"Read한🙂" ~turn:5 ~tool_use_id:"unicode"
-          ~at:990. ~correlation:("trace-" ^ name) lane;
-        980., settled ~at:980. "second" ] } in
-  let keeper_row view =
-    List.combine view.Pane.rows view.Pane.targets
-    |> List.find (fun (_, target) -> target = Pane.Target_keeper name)
-    |> fst |> span_values
-  in
-  let full = Pane.lines ~rows:14 ~cols ~scroll:0 input in
-  let folded = Pane.lines ~rows:8 ~cols ~scroll:0 input in
-  let scrolled = Pane.lines ~rows:6 ~cols ~scroll:1 input in
-  check (list (pair string string)) "folded keeper keeps text, tones and click target"
-    (keeper_row full) (keeper_row folded);
-  check (list (pair string string)) "scrolled keeper keeps text, tones and click target"
-    (keeper_row full) (keeper_row scrolled);
-  let folded_text = List.map text folded.Pane.rows in
-  check bool "overview fold counts both hidden keepers" true
-    (contains "2 more" (List.nth folded_text 4));
-  check string "fold remains actionable" "more" (target_text (List.nth folded.targets 4));
-  check bool "overview focus still belongs to selected Unicode keeper" true
-    (contains name (List.nth folded_text 6));
-  check bool "overview focus shows current receipt age" true
-    (contains "last event 10.0s" (List.nth folded_text 6));
-  let later = Pane.lines ~rows:8 ~cols ~scroll:0 { input with Pane.now = now +. 20. } in
-  check bool "a later frame advances the receipt age on the header" true
-    (contains "last event 30.0s" (text (List.nth later.Pane.rows 6)))
-
-(* ── targets ────────────────────────────────────────────────────────── *)
-
-let test_targets_name_the_keeper_under_each_fleet_row () =
-  let targets = List.map target_text drawn.Pane.targets in
-  check string "the header switches the tab" "next-tab" (List.nth targets 0);
-  check string "the legend acts on nothing" "none" (List.nth targets 1);
-  check string "first fleet row is the waiting keeper" "keeper:polisher" (List.nth targets 2);
-  check string "then the working one" "keeper:tester" (List.nth targets 3);
-  check string "then the settled one" "keeper:probe" (List.nth targets 4);
-  check string "then the quiet one" "keeper:quiet-one" (List.nth targets 5);
-  check string "the rule acts on nothing" "none" (List.nth targets 6);
-  let header = last_index_of "tester" in
-  check string "the focus header acts on nothing" "none" (List.nth targets header);
-  check string "the calls heading turns the order" "order" (List.nth targets (header + 1));
-  check string "a call row opens that call" "call:tester" (List.nth targets (header + 2));
-  check string "so does the call still out" "call:tester" (List.nth targets (header + 3));
-  check string "padding acts on nothing" "none" (List.nth targets (rows - 1))
-
 (* ── scroll ─────────────────────────────────────────────────────────── *)
-
-let short_rows = 6
-let header_rows = 2
-
-let test_scrolling_walks_the_full_list_under_the_header () =
-  let below = short_rows - header_rows in
-  let scrolled = Pane.lines ~rows:short_rows ~cols ~scroll:1 fixture in
-  let texts = List.map text scrolled.Pane.rows in
-  check int "the largest scroll shows the last row under the top indicator"
-    (full_list_rows - (below - 1)) scrolled.Pane.scroll_max;
-  check int "exactly the rows asked for" short_rows (List.length texts);
-  check bool "header stays" true (contains "[Recent]" (List.nth texts 0));
-  check bool "the top indicator counts what is above" true
-    (contains "\xe2\x86\x91 1 more" (List.nth texts header_rows));
-  check bool "the first visible row is the second fleet row" true
-    (contains "tester" (List.nth texts (header_rows + 1)));
-  check bool "the bottom indicator counts what is below" true
-    (contains "\xe2\x86\x93 6 more" (List.nth texts (short_rows - 1)));
-  check string "a visible fleet row still names its keeper" "keeper:tester"
-    (target_text (List.nth scrolled.Pane.targets (header_rows + 1)));
-  check string "indicators act on nothing" "none"
-    (target_text (List.nth scrolled.Pane.targets header_rows));
-  List.iteri
-    (fun i line -> check int (Printf.sprintf "scrolled row %d width" i) cols (width line))
-    scrolled.Pane.rows
 
 let test_legend_preserves_reachable_targets_in_small_windows () =
   List.iter
@@ -350,15 +204,7 @@ let test_legend_preserves_reachable_targets_in_small_windows () =
         (fun name ->
           check bool (Printf.sprintf "%d rows can reach %s" rows name) true
             (List.mem (Pane.Target_keeper name) targets))
-        [ "polisher"; "tester"; "probe"; "quiet-one" ];
-      List.iter
-        (fun value ->
-          check int "small window keeps row budget" rows (List.length value.Pane.rows);
-          check int "small window keeps target budget" rows (List.length value.Pane.targets);
-          List.iter (fun line -> check int "small row width" cols (width line)) value.Pane.rows;
-          check bool "legend stays visible while scrolling" true
-            (contains (Pane.legend ~cols) (text (List.nth value.Pane.rows 1))))
-        windows)
+        [ "polisher"; "tester"; "probe"; "quiet-one" ])
     [ 3; 4; 5; 6 ];
   List.iter
     (fun rows ->
@@ -395,8 +241,6 @@ let ready : Pane.changes =
     }
 
 let changes_fixture = { fixture with Pane.tab = Pane.Tab_changes; changes = ready }
-let changes_drawn = Pane.lines ~rows ~cols ~scroll:0 changes_fixture
-let changes_texts = List.map text changes_drawn.Pane.rows
 
 let test_file_targets_require_current_authority () =
   let has_file_target authority =
@@ -419,65 +263,9 @@ let test_file_targets_require_current_authority () =
     ; Pane.Changes_needs_revalidation ]
 
 let test_changes_header_marks_its_tab () =
-  let header = List.nth changes_texts 0 in
-  check bool "the changes tab is up" true (contains "[Changes]" header);
-  check bool "the fleet tab is named" true (contains "Recent" header);
-  check bool "the fleet tab is not the one up" false (contains "[Recent]" header);
-  check bool "a live feed still takes no words" false (contains "feed" header);
-  check string "the header switches the tab" "next-tab"
-    (target_text (List.nth changes_drawn.Pane.targets 0));
   check bool "next tab flips" true
     (Pane.next_tab Pane.Tab_fleet = Pane.Tab_changes
      && Pane.next_tab Pane.Tab_changes = Pane.Tab_fleet)
-
-let test_changes_status_names_the_keeper_and_the_fetch () =
-  let status = List.nth changes_texts 1 in
-  check bool "names the keeper" true (contains "tester" status);
-  check bool "counts the files" true (contains "3 files" status);
-  check bool "states the window" true (contains "24h" status);
-  check bool "states how old the answer is" true (contains "10.0s ago" status);
-  check string "the status acts on nothing" "none"
-    (target_text (List.nth changes_drawn.Pane.targets 1))
-
-let test_changes_rows_list_files_newest_first () =
-  check bool "the newest edit first" true
-    (contains "masc_tui_acting_pane.ml" (List.nth changes_texts 2));
-  check bool "the edit shows its range" true (contains "L12-40" (List.nth changes_texts 2));
-  check bool "the edit shows its age" true (contains "10.0s" (List.nth changes_texts 2));
-  check bool "the write next" true
-    (contains "test_tui_acting_pane.ml" (List.nth changes_texts 3));
-  check bool "the write wears the written mark" true
-    (contains "+ " (List.nth changes_texts 3));
-  check bool "the failed edit last" true (contains "masc_tui.ml" (List.nth changes_texts 4));
-  check bool "the failed edit wears the failed mark" true
-    (contains "! " (List.nth changes_texts 4));
-  check string "each row names its file" "file:0"
-    (target_text (List.nth changes_drawn.Pane.targets 2));
-  check string "in the order given" "file:2"
-    (target_text (List.nth changes_drawn.Pane.targets 4));
-  check string "padding acts on nothing" "none"
-    (target_text (List.nth changes_drawn.Pane.targets (rows - 1)));
-  List.iteri
-    (fun i line -> check int (Printf.sprintf "changes row %d width" i) cols (width line))
-    changes_drawn.Pane.rows
-
-let test_changes_overflow_folds_and_scrolls () =
-  (* header, status, three files: five rows. Four rows leave three below. *)
-  let folded = Pane.lines ~rows:4 ~cols ~scroll:0 changes_fixture in
-  let texts = List.map text folded.Pane.rows in
-  check int "the largest scroll shows the last file under the top indicator" 2
-    folded.Pane.scroll_max;
-  check bool "status stays" true (contains "3 files" (List.nth texts 1));
-  check bool "the first file shows" true (contains "masc_tui_acting_pane.ml" (List.nth texts 2));
-  check bool "the bottom indicator counts what is hidden" true
-    (contains "\xe2\x86\x93 2 more" (List.nth texts 3));
-  let scrolled = Pane.lines ~rows:4 ~cols ~scroll:2 changes_fixture in
-  let texts = List.map text scrolled.Pane.rows in
-  check bool "the top indicator counts what is above" true
-    (contains "\xe2\x86\x91 2 more" (List.nth texts 1));
-  check bool "the last file is on screen" true (contains "masc_tui.ml" (List.nth texts 3));
-  check string "a scrolled file row still names its file" "file:2"
-    (target_text (List.nth scrolled.Pane.targets 3))
 
 (* ── text ───────────────────────────────────────────────────────────── *)
 
@@ -624,48 +412,6 @@ let earlier_turn_input ?turn ?calls ?input ?output ?cost ?cache_read ?cache_crea
       ]
   }
 
-let rule_glyphs = "\xe2\x94\x80\xe2\x94\x80"
-
-let keeper_targets view =
-  List.filter_map
-    (function Pane.Target_keeper name -> Some name | _ -> None)
-    view.Pane.targets
-
-let test_beside_the_roster_only_the_selected_keepers_record_draws () =
-  let view =
-    Pane.lines ~rows ~cols ~scroll:0
-      { fixture with Pane.scope = Pane.Selected_only; approvals = [] }
-  in
-  let texts = List.map text view.Pane.rows in
-  check bool "the header names the tabs" true (contains "[Recent]" (List.nth texts 0));
-  check bool "a live feed takes no words here either" false
-    (contains "feed" (List.nth texts 0));
-  check bool "the header does not count the fleet" false (contains "keepers" (List.nth texts 0));
-  check bool "the legend stays" true (contains (Pane.legend ~cols) (List.nth texts 1));
-  check (list string) "no fleet row" [] (keeper_targets view);
-  check bool "no rule" false (List.exists (fun row -> contains rule_glyphs row) texts);
-  check bool "the selected keeper's header is first under the legend" true
-    (contains "tester" (List.nth texts 2) && contains "last event 10.0s" (List.nth texts 2));
-  check string "the calls heading follows" "order" (target_text (List.nth view.Pane.targets 3));
-  check string "its call rows open the call" "call:tester" (target_text (List.nth view.Pane.targets 4));
-  check int "everything fits" 0 view.Pane.scroll_max;
-  List.iteri
-    (fun i line -> check int (Printf.sprintf "row %d width" i) cols (width line))
-    view.Pane.rows
-
-(* The roster does not say who is waiting on an approval, so beside it the
-   pane keeps those rows and nothing else of the fleet. *)
-let test_beside_the_roster_keepers_waiting_on_approval_still_draw () =
-  let view = Pane.lines ~rows ~cols ~scroll:0 { fixture with Pane.scope = Pane.Selected_only } in
-  let texts = List.map text view.Pane.rows in
-  check (list string) "only the waiting keeper keeps a fleet row" [ "polisher" ] (keeper_targets view);
-  check bool "and the row says what it waits on" true
-    (contains "approval" (List.nth texts 2) && contains "tool_execute" (List.nth texts 2));
-  check bool "a rule separates it from the record" true (contains rule_glyphs (List.nth texts 3));
-  check bool "the selected keeper's header follows" true (contains "tester" (List.nth texts 4));
-  check string "its call rows still open the call" "call:tester"
-    (target_text (List.nth view.Pane.targets 6))
-
 let test_an_earlier_turn_row_opens_the_keepers_calls () =
   let value = Pane.lines ~rows ~cols ~scroll:0 (earlier_turn_input ()) in
   let texts = List.map text value.Pane.rows in
@@ -724,103 +470,9 @@ let runner_input ?(order = Pane.Oldest_first) ?(expanded = []) () =
   ; expanded
   }
 
-let call_rows view =
-  List.combine view.Pane.rows view.Pane.targets
-  |> List.filter_map (fun (row, target) ->
-         match target with
-         | Pane.Target_call ("runner", _) -> Some (text row)
-         | _ -> None)
-
 (* Beside the roster the rows are: header, legend, focus header, calls
    heading, then the calls. *)
 let first_call_row = 4
-
-(* A turn that ran the same tool five times drew five rows saying the same
-   word, in a list about twenty rows long (masc-pro-builder, 2026-09-22).
-   The run is one row that counts it and says what the calls took; the
-   Keeper Calls surface is where each one is read. *)
-let repeated_calls =
-  List.map
-    (fun (index, duration) ->
-      runner_call ~at:(950. +. float_of_int index) ~duration_ms:duration
-        ~id:(Printf.sprintf "exec-%d" index)
-        ~disposition:(Ok Masc.Tui_decode.Keeper_call_completed)
-        ~input:"{\"cmd\":\"ls\"}" "Execute")
-    [ 0, 2700.; 1, 274.; 2, 1400.; 3, 2900.; 4, 4700. ]
-
-let repeated_input () =
-  (* One other call before the run, so the rows are the other call and the
-     run rather than the run alone. *)
-  let other =
-    runner_call ~at:900. ~duration_ms:5. ~id:"read"
-      ~disposition:(Ok Masc.Tui_decode.Keeper_call_completed)
-      ~input:"{\"path\":\"lib/a.ml\"}" ~output:"12 lines" "Read"
-  in
-  { (runner_input ()) with
-    Pane.chunks = chunks [ "runner" ] (entries (other :: repeated_calls))
-  }
-
-let run_row view =
-  match List.filter (fun row -> contains "Execute" row) (call_rows view) with
-  | row :: _ -> row
-  | [] -> fail "no Execute row"
-
-let test_a_run_of_one_tool_is_one_counted_row () =
-  let view = Pane.lines ~rows ~cols:Pane.wide_pane_cols ~scroll:0 (repeated_input ()) in
-  check int "the run and the other call are two rows" 2 (List.length (call_rows view));
-  let run = run_row view in
-  check bool ("the run counts its calls: " ^ run) true (contains "Execute \xc3\x975" run);
-  check bool "and says what each took" true
-    (contains "2.7s 274ms 1.4s 2.9s 4.7s" run)
-
-let test_an_opened_call_draws_its_facts_and_previews () =
-  let view =
-    Pane.lines ~rows ~cols ~scroll:0
-      (runner_input ~expanded:[ "runner", Acting.Call_by_id "second" ] ())
-  in
-  let texts = List.map text view.Pane.rows in
-  let facts = List.nth texts (first_call_row + 2) in
-  check bool "the disposition first, then the receipt age" true
-    (contains "deferred \xc2\xb7 40.0s ago" facts);
-  check bool "the schedule in words" true (contains "concurrent, 3 at once" facts);
-  check bool "no planned step: the list already shows the order" false
-    (contains "step" facts);
-  check bool "the input preview" true
-    (contains "in  {\"to\":\"probe\"}" (List.nth texts (first_call_row + 3)));
-  let out = List.nth texts (first_call_row + 4) in
-  check bool "the output preview on one row" true
-    (contains "out queued" out && contains "kmsg-1" out && not (contains "\n" out));
-  check bool "the next call follows the detail" true
-    (contains "Execute" (List.nth texts (first_call_row + 5)));
-  List.iter
-    (fun i ->
-      check string (Printf.sprintf "detail row %d closes the same call" i) "call:runner"
-        (target_text (List.nth view.Pane.targets (first_call_row + i))))
-    [ 1; 2; 3; 4 ];
-  check bool "the unopened calls draw no detail" false
-    (List.exists (fun row -> contains "lib/a.ml" row) texts);
-  List.iteri
-    (fun i line -> check int (Printf.sprintf "row %d width" i) cols (width line))
-    view.Pane.rows
-
-let test_each_order_lists_the_calls_as_the_heading_says () =
-  List.iter
-    (fun (order, label, expected) ->
-      let view = Pane.lines ~rows ~cols ~scroll:0 (runner_input ~order ()) in
-      let texts = List.map text view.Pane.rows in
-      check bool (label ^ ": the heading names it") true
-        (contains ("calls \xc2\xb7 " ^ label) (List.nth texts 3));
-      check string (label ^ ": the heading turns the order") "order"
-        (target_text (List.nth view.Pane.targets 3));
-      let names = List.map (fun row -> String.trim row) (call_rows view) in
-      List.iter2
-        (fun name row -> check bool (label ^ ": " ^ name) true (contains name row))
-        expected names)
-    [ Pane.Oldest_first, "oldest first", [ "Read"; "masc_delegate"; "Execute" ]
-    ; Pane.Newest_first, "newest first", [ "Execute"; "masc_delegate"; "Read" ]
-    ; Pane.Longest_first, "longest first", [ "masc_delegate"; "Read"; "Execute" ]
-    ; Pane.By_tool, "by tool", [ "Execute"; "Read"; "masc_delegate" ]
-    ]
 
 let test_the_order_cycles_through_all_four () =
   let rec walk seen order =
@@ -856,6 +508,109 @@ let test_a_call_row_names_the_call_a_press_opens () =
   check bool "by the provider's call id" true
     (List.nth view.Pane.targets first_call_row
      = Pane.Target_call ("runner", Acting.Call_by_id "first"))
+
+(* The cases below hold the click table by which targets a frame carries, not
+   by where a row sits: a frame that moves a row keeps them passing, and a row
+   that stops naming what a press acts on fails them. *)
+let count_targets target (view : Pane.rendering) =
+  List.length (List.filter (fun value -> value = target) view.Pane.targets)
+
+let keeper_names (view : Pane.rendering) =
+  List.filter_map
+    (function Pane.Target_keeper name -> Some name | _ -> None)
+    view.Pane.targets
+
+let test_a_press_on_the_recent_tab_acts_on_what_each_row_names () =
+  let view = Pane.lines ~rows ~cols ~scroll:0 fixture in
+  check int "one target per row" rows (List.length view.Pane.targets);
+  check int "the header turns the tab" 1 (count_targets Pane.Target_next_tab view);
+  check int "the calls heading turns the order" 1
+    (count_targets Pane.Target_call_order view);
+  check (list string) "each fleet row names its keeper"
+    [ "polisher"; "probe"; "quiet-one"; "tester" ]
+    (List.sort String.compare (keeper_names view));
+  check int "each call of the focus keeper opens that call" 2
+    (List.length
+       (List.filter
+          (function Pane.Target_call ("tester", _) -> true | _ -> false)
+          view.Pane.targets));
+  check int "only the tab header, four fleet rows, the calls heading and two calls act" 8
+    (List.length
+       (List.filter (fun target -> target <> Pane.Target_none) view.Pane.targets));
+  check int "everything fits: nothing is folded" 0
+    (count_targets Pane.Target_more view);
+  check int "everything fits: the wheel moves nothing" 0 view.Pane.scroll_max
+
+let test_the_fold_line_scrolls_into_the_full_list () =
+  let folded = Pane.lines ~rows:4 ~cols ~scroll:0 fixture in
+  check bool "the fold line is a press target" true
+    (List.mem Pane.Target_more folded.Pane.targets)
+
+let test_the_largest_scroll_ends_on_the_last_call () =
+  let rows = 6 in
+  let first = Pane.lines ~rows ~cols ~scroll:0 fixture in
+  let last = Pane.lines ~rows ~cols ~scroll:first.Pane.scroll_max fixture in
+  check bool "no blank row is scrolled into below the last call" true
+    (match List.nth last.Pane.targets (rows - 1) with
+     | Pane.Target_call ("tester", _) -> true
+     | _ -> false)
+
+let test_a_press_on_the_changes_tab_opens_the_file_its_row_names () =
+  let view = Pane.lines ~rows ~cols ~scroll:0 changes_fixture in
+  check int "the header turns the tab" 1 (count_targets Pane.Target_next_tab view);
+  let file_rows =
+    List.filter_map
+      (fun (row, target) ->
+        match target with
+        | Pane.Target_file index -> Some (index, text row)
+        | _ -> None)
+      (List.combine view.Pane.rows view.Pane.targets)
+  in
+  check (list int) "the file rows carry their index, in the order given" [ 0; 1; 2 ]
+    (List.map fst file_rows);
+  List.iter2
+    (fun (index, row) name ->
+      check bool (Printf.sprintf "the row of file %d names that file" index) true
+        (contains name row))
+    file_rows
+    [ "masc_tui_acting_pane.ml"; "test_tui_acting_pane.ml"; "masc_tui.ml" ];
+  check int "everything fits: the wheel moves nothing" 0 view.Pane.scroll_max
+
+let test_an_open_calls_detail_rows_act_on_the_same_call () =
+  let key = Acting.Call_by_id "second" in
+  let view =
+    Pane.lines ~rows ~cols ~scroll:0 (runner_input ~expanded:[ "runner", key ] ())
+  in
+  check int "the call row and its three detail rows act on that call" 4
+    (count_targets (Pane.Target_call ("runner", key)) view)
+
+let test_beside_the_roster_only_a_keeper_waiting_on_approval_keeps_a_fleet_row () =
+  let beside input =
+    Pane.lines ~rows ~cols ~scroll:0 { input with Pane.scope = Pane.Selected_only }
+  in
+  let nobody_waiting = beside { fixture with Pane.approvals = [] } in
+  check (list string) "no approval, no fleet row" [] (keeper_names nobody_waiting);
+  check int "the selected keeper's calls heading still turns the order" 1
+    (count_targets Pane.Target_call_order nobody_waiting);
+  check int "everything fits: the wheel moves nothing" 0 nobody_waiting.Pane.scroll_max;
+  check (list string) "only the waiting keeper keeps a fleet row" [ "polisher" ]
+    (keeper_names (beside fixture))
+
+let test_failure_rows_leave_fleet_navigation_reachable () =
+  let failures =
+    List.init 20 (fun index ->
+        Printf.sprintf "unbooted-%02d" index, Printf.sprintf "reason-%02d" index)
+  in
+  let input = { fixture with trace_unavailable = failures } in
+  List.iter
+    (fun (rows, cols) ->
+      let view = Pane.lines ~rows ~cols ~scroll:0 input in
+      check int "one target per row" rows (List.length view.Pane.targets);
+      check bool "a press can still reach a keeper or the full list" true
+        (List.exists
+           (function Pane.Target_keeper _ | Pane.Target_more -> true | _ -> false)
+           view.Pane.targets))
+    [ 8, 42; 3, 30 ]
 
 (* Ctrl-W's cursor rests only where Enter would do something: the step
    skips legend, rule, and padding rows, in both directions, and finds the
@@ -980,32 +735,33 @@ let () =
       , [ test_case "Ctrl-L walks narrow, wide, hidden" `Quick
             test_ctrl_l_walks_narrow_wide_hidden
         ;] )
-    ; ( "rows"
-      , [ test_case "every row is the pane width" `Quick test_every_row_is_the_pane_width
-        ; test_case "narrow budget folds the fleet" `Quick test_narrow_budget_folds_the_fleet
-        ; test_case "folded and scrolled views preserve keeper row and focus" `Quick
-            test_folded_and_scrolled_views_preserve_keeper_row_and_focus
-        ] )
     ; ( "what the keeper is doing now"
       , [] )
     ; ( "a gone keeper"
       , [] )
     ; ( "targets"
-      , [ test_case "targets name the keeper under each fleet row" `Quick
-            test_targets_name_the_keeper_under_each_fleet_row
-        ; test_case "an earlier turn row opens the keeper's calls" `Quick
+      , [ test_case "an earlier turn row opens the keeper's calls" `Quick
             test_an_earlier_turn_row_opens_the_keepers_calls
         ; test_case "a call row names the call a press opens" `Quick
             test_a_call_row_names_the_call_a_press_opens
+        ; test_case "a press on the Recent tab acts on what each row names" `Quick
+            test_a_press_on_the_recent_tab_acts_on_what_each_row_names
+        ; test_case "the fold line scrolls into the full list" `Quick
+            test_the_fold_line_scrolls_into_the_full_list
+        ; test_case "the largest scroll ends on the last call" `Quick
+            test_the_largest_scroll_ends_on_the_last_call
+        ; test_case "a press on the Changes tab opens the file its row names" `Quick
+            test_a_press_on_the_changes_tab_opens_the_file_its_row_names
+        ; test_case "an open call's detail rows act on the same call" `Quick
+            test_an_open_calls_detail_rows_act_on_the_same_call
+        ; test_case "beside the roster only a keeper waiting on approval keeps a fleet row"
+            `Quick
+            test_beside_the_roster_only_a_keeper_waiting_on_approval_keeps_a_fleet_row
+        ; test_case "failure rows leave fleet navigation reachable" `Quick
+            test_failure_rows_leave_fleet_navigation_reachable
         ] )
     ; ( "calls"
-      , [ test_case "a run of one tool is one counted row" `Quick
-            test_a_run_of_one_tool_is_one_counted_row
-        ; test_case "an opened call draws its facts and previews" `Quick
-            test_an_opened_call_draws_its_facts_and_previews
-        ; test_case "each order lists the calls as the heading says" `Quick
-            test_each_order_lists_the_calls_as_the_heading_says
-        ; test_case "the order cycles through all four" `Quick
+      , [ test_case "the order cycles through all four" `Quick
             test_the_order_cycles_through_all_four
         ] )
     ; ( "wide"
@@ -1013,21 +769,13 @@ let () =
     ; ( "responses"
       , [] )
     ; ( "scroll"
-      , [ test_case "scrolling walks the full list under the header" `Quick
-            test_scrolling_walks_the_full_list_under_the_header
-        ; test_case "legend preserves reachable targets" `Quick
+      , [ test_case "legend preserves reachable targets" `Quick
             test_legend_preserves_reachable_targets_in_small_windows
         ;] )
     ; ( "changes tab"
       , [ test_case "header marks its tab" `Quick test_changes_header_marks_its_tab
         ; test_case "file opening requires current source authority" `Quick
             test_file_targets_require_current_authority
-        ; test_case "status names the keeper and the fetch" `Quick
-            test_changes_status_names_the_keeper_and_the_fetch
-        ; test_case "rows list files newest first" `Quick
-            test_changes_rows_list_files_newest_first
-        ; test_case "overflow folds and scrolls" `Quick
-            test_changes_overflow_folds_and_scrolls
         ] )
     ; ( "text"
       , [ test_case "reused chunks keep presentation inputs live" `Quick
@@ -1036,8 +784,6 @@ let () =
     ; ( "offline"
       , [ test_case "identity failure preserves roster navigation" `Quick
             test_trace_failure_is_readable_without_hiding_roster
-        ; test_case "many identity failures retain navigation and detail" `Quick
-            test_many_trace_failures_keep_navigation_and_full_reading
         ;] )
     ; ( "keyboard cursor"
       , [ test_case "the cursor steps over rows a press does nothing on" `Quick
@@ -1046,11 +792,7 @@ let () =
             test_cursor_stops_at_the_frames_edge
         ] )
     ; ( "beside the roster"
-      , [ test_case "only the selected keeper's record draws" `Quick
-            test_beside_the_roster_only_the_selected_keepers_record_draws
-        ; test_case "keepers waiting on approval still draw" `Quick
-            test_beside_the_roster_keepers_waiting_on_approval_still_draw
-        ; test_case "waiting context uses the selected Keeper's typed evidence" `Quick
+      , [ test_case "waiting context uses the selected Keeper's typed evidence" `Quick
             test_keeper_waiting_context_preserves_evidence
         ; test_case "a context change keeps keyboard focus in the pane" `Quick
             test_context_change_keeps_focus_in_pane

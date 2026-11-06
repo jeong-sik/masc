@@ -838,10 +838,6 @@ type workspace_state = {
   started_at: string;
   message_seq: int;
   active_agents: string list;
-  paused: bool; [@default false]  (** Global pause flag - when true, orchestrator won't spawn *)
-  pause_reason: string option; [@default None]  (** Reason for pause *)
-  paused_by: string option; [@default None]  (** Who paused the workspace *)
-  paused_at: string option; [@default None]  (** When paused *)
 } [@@deriving yojson { strict = false }, show]
 
 (** Backlog (task collection) *)

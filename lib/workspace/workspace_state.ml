@@ -1,9 +1,8 @@
-(** Workspace State - Workspace state I/O, sequence, and pause.
+(** Workspace State - Workspace state I/O and sequence.
 
     After responsibility split (Epic #7261 Step 5), this module retains:
     - State read/write/update with file locking
     - Sequence counter (next_seq)
-    - Pause state (is_paused, pause_info)
     - State recovery (recover_workspace_state)
     - Shared string utilities (String_util.option_trim, normalized_string_list)
 
@@ -64,13 +63,6 @@ let recover_workspace_state config json =
       |> Option.value ~default:defaults.started_at;
     message_seq = Safe_ops.json_int ~default:defaults.message_seq "message_seq" json;
     active_agents;
-    paused = Safe_ops.json_bool ~default:defaults.paused "paused" json;
-    pause_reason =
-      String_util.option_trim (Safe_ops.json_string_opt "pause_reason" json);
-    paused_by =
-      String_util.option_trim (Safe_ops.json_string_opt "paused_by" json);
-    paused_at =
-      String_util.option_trim (Safe_ops.json_string_opt "paused_at" json);
   }
 
 (* ============================================ *)
@@ -80,23 +72,6 @@ let recover_workspace_state config json =
 let write_state config state =
   let json = workspace_state_to_yojson state in
   write_json config (state_path config) json
-
-type state_read_error =
-  | State_document_error of Workspace_utils_ops.json_doc_error
-  | State_decode_error of string
-
-let state_read_error_to_string = function
-  | State_document_error error -> json_doc_error_to_string error
-  | State_decode_error detail -> "invalid workspace state: " ^ detail
-
-let read_state_strict config =
-  match read_json_doc config (state_path config) with
-  | Error error -> Error (State_document_error error)
-  | Ok None -> Ok None
-  | Ok (Some json) ->
-      workspace_state_of_yojson json
-      |> Result.map Option.some
-      |> Result.map_error (fun detail -> State_decode_error detail)
 
 let raw_snippet_max_bytes = 500
 
@@ -147,21 +122,6 @@ let update_state config f =
 let next_seq config =
   let state = update_state config (fun s -> { s with message_seq = s.message_seq + 1 }) in
   state.message_seq
-
-(* ============================================ *)
-(* Pause State                                  *)
-(* ============================================ *)
-
-let is_paused config =
-  let state = read_state config in
-  state.paused
-
-let pause_info config =
-  let state = read_state config in
-  if state.paused then
-    Some (state.paused_by, state.pause_reason, state.paused_at)
-  else
-    None
 
 (* Broadcast moved to Workspace_broadcast (exported via Workspace aggregator).
    Cannot re-export here — broadcast depends on next_seq, which would

@@ -81,7 +81,7 @@ let refusal_to_string = function
       (Authz_types.User_id.to_string user_id)
   | Accounts_off kind ->
     Printf.sprintf "the accounts are off, and no %s record is written while they are" (K.to_string kind)
-  | Kind_not_read kind -> Printf.sprintf "no layer of this server reads %s records" (K.to_string kind)
+  | Kind_not_read kind -> Printf.sprintf "no layer of this build reads %s records" (K.to_string kind)
   | Admission_behind_log { at_ms; latest_at_ms } ->
     Printf.sprintf
       "the admission is at %d ms, before a record of the log at %d ms: the clock went back"

@@ -179,10 +179,10 @@ let refusal_to_string = function
     "the authorization log made Multi_account and config.json does not ask for it; set \
      account_mode to \"Multi_account\""
   | Off_mode_not_supported ->
-    "the last mode event of the authorization log is Off, which this server cannot boot yet"
+    "the last mode event of the authorization log is Off, which this build cannot boot yet"
   | Reactivation_not_ready ->
     "config.json asks for Multi_account after an Off mode event; reactivation needs the \
-     recovery procedure, which this server does not have yet"
+     recovery procedure, which this build does not have yet"
   | Rewound_after_off ->
     "the last mode event is Off and the external store does not match the authorization log"
   | External_store_unreadable detail ->

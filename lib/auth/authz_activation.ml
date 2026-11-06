@@ -84,7 +84,7 @@ let error_to_string = function
 let asked ~base_path ~config_dir ~anonymous_mutations =
   let input = M.input ~base_path ~config_dir ~anonymous_mutations in
   match M.decide input with
-  | M.Stop M.Multi_account_not_activatable -> Ok ()
+  | M.Stop M.Activation_requested -> Ok ()
   | M.Boot_single_user ->
     (match input.B.settings with
      | B.Settings_read _ -> Error Not_asked
@@ -173,7 +173,7 @@ let active ~base_path ~config_dir ~anonymous_mutations =
   let input = M.input ~base_path ~config_dir ~anonymous_mutations in
   match M.decide input with
   | M.Stop (M.Multi_account_not_served B.Multi_account) -> Ok ()
-  | M.Boot_single_user | M.Stop M.Multi_account_not_activatable -> Error Not_activated
+  | M.Boot_single_user | M.Stop M.Activation_requested -> Error Not_activated
   | M.Stop
       ((M.Refuse _
        | M.Multi_account_not_served

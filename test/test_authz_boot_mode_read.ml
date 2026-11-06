@@ -88,14 +88,14 @@ let decision_label = function
   | Read.Boot_single_user -> "boot single user"
   | Read.Stop (Read.Refuse (first, rest)) ->
     "refuse: " ^ String.concat "; " (List.map B.refusal_to_string (first :: rest))
-  | Read.Stop Read.Multi_account_not_activatable -> "not activatable"
+  | Read.Stop Read.Activation_requested -> "activation requested"
   | Read.Stop (Read.Multi_account_not_served mode) -> "not served: " ^ B.mode_to_string mode
 ;;
 
 let refused = function
   | Read.Stop (Read.Refuse (first, rest)) -> Some (first, rest)
   | Read.Boot_single_user
-  | Read.Stop (Read.Multi_account_not_activatable | Read.Multi_account_not_served _) -> None
+  | Read.Stop (Read.Activation_requested | Read.Multi_account_not_served _) -> None
 ;;
 
 (* The first reason of a refusal, for the cases that care which check stopped
@@ -209,7 +209,7 @@ let test_nothing_set_up () =
     write_config dirs {|{"enabled":true,"require_token":true,"account_mode":"Single_user"}|};
     check_decision "Single_user" Read.Boot_single_user dirs;
     write_config dirs {|{"enabled":true,"require_token":true,"account_mode":"Multi_account"}|};
-    check_decision "row 5" (Read.Stop Read.Multi_account_not_activatable) dirs)
+    check_decision "row 5" (Read.Stop Read.Activation_requested) dirs)
 ;;
 
 let test_bootstrapped () =

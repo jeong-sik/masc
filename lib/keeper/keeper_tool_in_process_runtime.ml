@@ -1118,11 +1118,6 @@ let handle_surface_read_with_outcome ~config ~(meta : keeper_meta) ~args =
            in
            discord_tool_error ~code (Keeper_chat_history_page.error_to_string error)
          | Ok page ->
-           let notes =
-             Keeper_person_notes.notes
-               ~base_dir:config.Workspace.base_path
-               ~keeper_name:meta.name
-           in
            (* Task-1596: hand the read the same binding knowledge post gets,
               so an unbound connector label or a label matching no lane is
               refused with an error instead of a silent zero-row page. A
@@ -1146,60 +1141,13 @@ let handle_surface_read_with_outcome ~config ~(meta : keeper_meta) ~args =
                       discord = bound_discord_channels })
            in
            (match
-              Keeper_surface_read.respond ?bindings ~surface ~cursor ~notes page
+              Keeper_surface_read.respond ?bindings ~surface ~cursor page
             with
             | Ok body -> Keeper_tool_execution.success body
             | Error refusal ->
               Keeper_tool_execution.failure
                 ~class_:Tool_result.Policy_rejection
                 (Keeper_tool_shared_runtime.error_json refusal)))))
-;;
-
-let handle_person_note_set_with_outcome ~config ~(meta : keeper_meta) ~args =
-  let reject message =
-    Keeper_tool_execution.failure
-      ~class_:Tool_result.Workflow_rejection
-      (Yojson.Safe.to_string (`Assoc [ "error", `String message ]))
-  in
-  let speaker_id =
-    String.trim (Safe_ops.json_string ~default:"" "speaker_id" args)
-  in
-  if speaker_id = "" then
-    reject
-      "speaker_id is required. Use the id field from the keeper_surface_read roster."
-  else begin
-    (* Distinguish field-absent (LLM omission) from field-present-empty:
-       [json_string_opt] returns [None] when [note] is absent and [Some s] when
-       it is present (including ""). An explicit "" is the deliberate tombstone
-       that clears the note (RFC-0229 §3.1); an omitted [note] must be rejected,
-       not silently cleared. The prior [json_string ~default:""] collapsed both
-       to "", so a keeper that omitted [note] silently deleted an existing note
-       (AGENT_CORE anti-pattern #2: Unknown -> Permissive Default). The structural
-       dispatch-level gap (in-process dispatch skips required validation) is
-       tracked in #21875. *)
-    match Safe_ops.json_string_opt "note" args with
-    | None ->
-      reject
-        "note is required. Send an empty string to clear (tombstone) an existing note."
-    | Some note ->
-      Keeper_person_notes.set_note
-        ~base_dir:config.Workspace.base_path
-        ~keeper_name:meta.name
-        ~speaker_id
-        ~note
-        ();
-      Keeper_tool_execution.success
-        (Yojson.Safe.to_string
-           (`Assoc
-             [ "ok", `Bool true
-             ; "speaker_id", `String speaker_id
-             ; "cleared", `Bool (String.trim note = "")
-             ]))
-  end
-;;
-
-let handle_person_note_set ~config ~meta ~args =
-  (handle_person_note_set_with_outcome ~config ~meta ~args).raw_output
 ;;
 
 (* Slack bot token, resolved through the config boundary ({!Env_config_slack})

@@ -652,8 +652,6 @@
   test_keeper_degraded_retry_applied
   test_keeper_invalid_request_auto_recover
   test_keeper_surface_post
-  test_keeper_person_notes
-  test_keeper_person_note_set_handler
   test_keeper_chat_store_append_result
   test_keeper_chat_store_approval_summary
   test_fact_retention_reachability
@@ -994,8 +992,6 @@
   test_keeper_degraded_retry_applied
   test_keeper_invalid_request_auto_recover
   test_keeper_surface_post
-  test_keeper_person_notes
-  test_keeper_person_note_set_handler
   test_keeper_chat_store_append_result
   test_keeper_chat_store_approval_summary
   test_fact_retention_reachability

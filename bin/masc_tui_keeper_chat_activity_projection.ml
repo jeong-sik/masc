@@ -618,7 +618,6 @@ let handler_activity_kind handler =
   | Tool_wiki_read
   | Tool_surface_read
   | Tool_surface_post
-  | Tool_person_note_set
   | Tool_ide_annotate
   | Tool_voice_dispatch
   | Tool_task_dispatch

@@ -8,5 +8,4 @@ let max_rich_blocks = 50
 let surface_tools : Masc_domain.tool_schema list =
   [ Tool_shard_types_schemas_surface_toml.surface_read
   ; Tool_shard_types_schemas_surface_toml.surface_post
-  ; Tool_shard_types_schemas_surface_toml.person_note_set
   ]

@@ -143,7 +143,9 @@ let workspace =
     ; no_reference Keeper_efficiency.cache_dirname
     ; no_reference Keeper_volume_repair.store_dirname
     ; no_reference Keeper_ask_store.dirname
-    ; no_reference Keeper_person_notes.dirname
+    (* The person-notes store was deleted; a workspace that ran it still has the
+       directory, so the name stays a known writes-no-reference entry. *)
+    ; no_reference "keeper_person_notes"
     ; no_reference Keeper_microvm_shim_readiness.recovery_namespace
     ; no_reference Keeper_paused_work_disposition_receipt.store_dirname
     ; no_reference Keeper_secret_projection.secrets_dirname

@@ -126,7 +126,6 @@ type runtime_handler =
   | Tool_wiki_read
   | Tool_surface_read
   | Tool_surface_post
-  | Tool_person_note_set
   | Tool_ide_annotate
   | Tool_voice_dispatch
   | Tool_task_dispatch
@@ -261,7 +260,6 @@ let runtime_handler_to_string = function
   | Tool_wiki_read -> "tool_wiki_read"
   | Tool_surface_read -> "tool_surface_read"
   | Tool_surface_post -> "tool_surface_post"
-  | Tool_person_note_set -> "tool_person_note_set"
   | Tool_ide_annotate -> "tool_ide_annotate"
   | Tool_voice_dispatch -> "tool_voice_dispatch"
   | Tool_task_dispatch -> "tool_task_dispatch"
@@ -515,7 +513,6 @@ let descriptor
       | Tool_wiki_search
       | Tool_wiki_read
       | Tool_surface_read
-      | Tool_person_note_set
       | Tool_ide_annotate
       | Tool_voice_dispatch
       | Tool_task_dispatch
@@ -1328,7 +1325,6 @@ let shard_surface_schema name =
 
 let surface_read_schema = shard_surface_schema "keeper_surface_read"
 let surface_post_schema = shard_surface_schema "keeper_surface_post"
-let person_note_set_schema = shard_surface_schema "keeper_person_note_set"
 
 let workspace_memory_schema_source, workspace_memory_schema =
   base_schema_declared "keeper_workspace_memory_read"
@@ -2701,9 +2697,8 @@ let internal_descriptors : t list =
        ~name:"keeper_surface_read"
        ~description:surface_read_schema.description
        ~input_schema:surface_read_schema.input_schema
-       (* Concurrent: the local lane pages the chat store and person notes
-          through plain file reads (the person-notes Hashtbl is
-          function-local); the Discord lane issues one HTTP request per
+       (* Concurrent: the local lane pages the chat store through plain
+          file reads; the Discord lane issues one HTTP request per
           call through Discord_rest_client, whose only shared state is an
           Atomic request-sequence counter. *)
        ~ordinary_execution_mode:Concurrent
@@ -2719,15 +2714,6 @@ let internal_descriptors : t list =
       ~input_schema:surface_post_schema.input_schema
       ~policy:(write_in_process_policy ())
       ~handler:Tool_surface_post
-      ()
-  ; in_process_descriptor
-      ~keeper_model_projection:Internal_name
-      ~id:"keeper.person.note_set"
-      ~name:"keeper_person_note_set"
-      ~description:person_note_set_schema.description
-      ~input_schema:person_note_set_schema.input_schema
-      ~policy:(write_in_process_policy ())
-      ~handler:Tool_person_note_set
       ()
     (* ── IDE (RFC-0179 PR-3) ──────────────────────────────────── *)
     (* A memo is a comment inserted into a file, so the tool is a
@@ -3256,7 +3242,6 @@ let declared_loading descriptor =
   | Tool_wiki_read
   | Tool_surface_read
   | Tool_surface_post
-  | Tool_person_note_set
   | Tool_ide_annotate
   | Tool_voice_dispatch
   | Tool_task_dispatch
@@ -3410,7 +3395,6 @@ let prepared_leaf_admission descriptor =
         | Tool_wiki_read
         | Tool_surface_read
         | Tool_surface_post
-        | Tool_person_note_set
         | Tool_ide_annotate
         | Tool_voice_dispatch
         | Tool_task_dispatch

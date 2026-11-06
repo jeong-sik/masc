@@ -53,7 +53,7 @@ let producer_authorizes descriptor =
   | Keeper_tool_descriptor.Tool_constitution_read | Keeper_tool_descriptor.Tool_constitution_remove
   | Keeper_tool_descriptor.Tool_wiki_search | Keeper_tool_descriptor.Tool_wiki_read
   | Keeper_tool_descriptor.Tool_surface_read | Keeper_tool_descriptor.Tool_surface_post
-  | Keeper_tool_descriptor.Tool_person_note_set | Keeper_tool_descriptor.Tool_ide_annotate
+  | Keeper_tool_descriptor.Tool_ide_annotate
   | Keeper_tool_descriptor.Tool_voice_dispatch | Keeper_tool_descriptor.Tool_task_dispatch
   | Keeper_tool_descriptor.Tool_board_dispatch | Keeper_tool_descriptor.Tool_masc_task_dispatch
   | Keeper_tool_descriptor.Tool_masc_plan_dispatch | Keeper_tool_descriptor.Tool_masc_run_dispatch

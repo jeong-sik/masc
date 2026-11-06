@@ -20,7 +20,7 @@ let memoizes descriptor =
   | Tool_memory_search | Tool_memory_select | Tool_memory_retract | Tool_memory_write
   | Tool_constitution_write | Tool_constitution_read | Tool_constitution_remove
   | Tool_wiki_search | Tool_wiki_read | Tool_surface_read | Tool_surface_post
-  | Tool_person_note_set | Tool_ide_annotate | Tool_voice_dispatch | Tool_task_dispatch
+  | Tool_ide_annotate | Tool_voice_dispatch | Tool_task_dispatch
   | Tool_board_dispatch | Tool_masc_task_dispatch | Tool_masc_plan_dispatch
   | Tool_masc_run_dispatch | Tool_masc_agent_dispatch | Tool_masc_workspace_dispatch
   | Tool_masc_misc_dispatch | Tool_web_search | Tool_web_fetch | Tool_browser_tabs

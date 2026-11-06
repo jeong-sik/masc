@@ -170,7 +170,6 @@ let create_with_descriptors
                                          | Keeper_tool_descriptor.Tool_wiki_read
                                          | Keeper_tool_descriptor.Tool_surface_read
                                          | Keeper_tool_descriptor.Tool_surface_post
-                                         | Keeper_tool_descriptor.Tool_person_note_set
                                          | Keeper_tool_descriptor.Tool_ide_annotate
                                          | Keeper_tool_descriptor.Tool_voice_dispatch
                                          | Keeper_tool_descriptor.Tool_task_dispatch
@@ -245,7 +244,6 @@ let create_with_descriptors
       | Keeper_tool_descriptor.Tool_wiki_read
       | Keeper_tool_descriptor.Tool_surface_read
       | Keeper_tool_descriptor.Tool_surface_post
-      | Keeper_tool_descriptor.Tool_person_note_set
       | Keeper_tool_descriptor.Tool_ide_annotate
       | Keeper_tool_descriptor.Tool_voice_dispatch
       | Keeper_tool_descriptor.Tool_task_dispatch

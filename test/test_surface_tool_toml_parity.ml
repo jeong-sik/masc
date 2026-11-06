@@ -14,7 +14,6 @@ open Alcotest
 let expected =
   [ "keeper_surface_read"
   ; "keeper_surface_post"
-  ; "keeper_person_note_set"
   ]
 ;;
 

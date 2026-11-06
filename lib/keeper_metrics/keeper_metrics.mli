@@ -111,7 +111,6 @@ type t =
   | ChatStoreFailures
   | ChatJournalAuditMismatches
   | ChatTransportFailures
-  | PersonNoteStoreFailures
   | KeeperMaterializationFailures
   | ObservationQueryFailures
   | Agent_coreOnStop

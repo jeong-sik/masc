@@ -1,5 +1,5 @@
 (* Real Owner -> Keeper_turn -> Keeper_agent_run. The HTTP peer is a provider
-   fixture, not the server ingress. The in-process person-note tool performs
+   fixture, not the server ingress. The in-process constitution tool performs
    the durable effect; no guest sandbox is acquired. The empty-terminal case
    additionally follows the same message through durable Owner settlement. *)
 open Alcotest
@@ -21,10 +21,10 @@ let keeper_name = "ingress-native-proof"
 let session_id = "ingress-native-session"
 let model_id = "ingress-native-model"
 let runtime_id = "fixture.native"
-let tool_name = "keeper_person_note_set"
-let target_id = "ingress-note-call"
-let goal = "Remember the fixture person's note, then confirm it."
-let note = "The original request owns this note."
+let tool_name = "keeper_constitution_write"
+let target_id = "ingress-article-call"
+let goal = "Write the fixture norm into the constitution, then confirm it."
+let article_text = "The original request owns this norm."
 let speaker = Keeper_input_speaker.Person Keeper_input_speaker.Owner
 let require label = function Ok value -> value | Error _ -> fail (label ^ " failed")
 let operation_id = Keeper_chat_operation.Operation_id.of_string "ingress-native-operation"
@@ -57,7 +57,7 @@ let executable_sha256 () =
       | size -> loop (Agent_core_sha256.feed_bytes context ~off:0 ~len:size buffer) in
     loop Agent_core_sha256.empty)
 
-let emit_evidence ~root ~cut ~executable_sha256 ~note_rows ~target_tool_log_rows =
+let emit_evidence ~root ~cut ~executable_sha256 ~article_rows ~target_tool_log_rows =
   let json = `Assoc [
     "evidence", `String "keeper-ingress-native-restart";
     "case", `String (cut_name cut);
@@ -71,7 +71,7 @@ let emit_evidence ~root ~cut ~executable_sha256 ~note_rows ~target_tool_log_rows
     "ingress_calls", `Int (count root "ingress");
     "target_approval_calls", `Int (count root "approval");
     "target_ready_callbacks", `Int (count root "ready");
-    "target_note_rows", `Int note_rows;
+    "target_article_rows", `Int article_rows;
     "target_tool_log_rows", `Int target_tool_log_rows;
     "status", `String "all-assertions-passed"] in
   print_endline (Yojson.Safe.to_string json)
@@ -85,7 +85,7 @@ let tool_response id name args = response (`Assoc ["role", `String "assistant"; 
   "tool_calls", `List [`Assoc ["id", `String id; "type", `String "function";
     "function", `Assoc ["name", `String name; "arguments", `String (Yojson.Safe.to_string args)]]]]) "tool_calls"
 let final_response = response (`Assoc ["role", `String "assistant";
-  "content", `String "The original note is saved."]) "stop"
+  "content", `String "The original norm is saved."]) "stop"
 
 let target_result = function
   | Agent_core.Types.ToolResult {tool_use_id; _} -> String.equal tool_use_id target_id
@@ -130,24 +130,23 @@ let check_repetition (checkpoint : Agent_core.Checkpoint.t) =
   let observations = Keeper_repetition_snapshot.observations frame
       ~scope:(Keeper_execution_scope_id.direct_operation operation_id)
     |> require "original direct scope observations" in
-  check int "settled note contributes one direct repetition observation" 1
+  check int "settled article contributes one direct repetition observation" 1
     (List.length (List.filter (fun (observation : Keeper_repetition_snapshot.observation) ->
       String.equal observation.tool_name tool_name) observations))
 
 let effect_counts root =
-  let notes_path = Filename.concat (Filename.concat
-      (Common.masc_dir_from_base_path ~base_path:root) "keeper_person_notes") (keeper_name ^ ".jsonl") in
-  let note_rows = List.length (lines notes_path) in
+  let article_rows = List.length (lines (World_constitution_store.ledger_path ~base_path:root)) in
   let rows = Keeper_tool_call_log.read_recent ~keeper_name ~n:32 () |> require "committed tool log" in
   let target_tool_log_rows = List.length (List.filter (fun row ->
     Yojson.Safe.Util.member "tool_use_id" row = `String target_id) rows) in
-  note_rows, target_tool_log_rows
+  article_rows, target_tool_log_rows
 
 let check_effect_counts root =
-  let note_rows, target_tool_log_rows = effect_counts root in
-  check int "one durable note append, not a repeated overwrite" 1 note_rows;
-  check (list (pair string string)) "the original note persists" ["fixture-person", note]
-    (Keeper_person_notes.notes ~base_dir:root ~keeper_name);
+  let article_rows, target_tool_log_rows = effect_counts root in
+  check int "one durable article append, not a repeated write" 1 article_rows;
+  check (list (pair string string)) "the original article persists" [keeper_name, article_text]
+    (World_constitution_store.load_articles ~base_path:root |> require "constitution articles"
+     |> List.map (fun (article : World_constitution_types.t) -> article.author, article.text));
   check int "one committed target tool-call row" 1 target_tool_log_rows;
   check int "target approval pre-hook ran once" 1 (count root "approval");
   check int "target post-tool ready callback ran once" 1 (count root "ready")
@@ -221,7 +220,7 @@ let run_phase ?(empty_terminal = false) ~child ~cut root =
         record root "provider";
         if fresh then (`OK, match index with
           | 0 -> tool_response "ingress-load-call" "keeper_tool_search" (`Assoc ["names", `List [`String tool_name]])
-          | 1 -> tool_response target_id tool_name (`Assoc ["speaker_id", `String "fixture-person"; "note", `String note])
+          | 1 -> tool_response target_id tool_name (`Assoc ["text", `String article_text])
           | _ ->
             if empty_terminal then (
               let messages = Yojson.Safe.Util.(Yojson.Safe.from_string body |> member "messages" |> to_list) in
@@ -431,21 +430,21 @@ let test_restart cut () =
           (fun () -> Eio.Process.await process) with
       | `Exited code -> check int "hard process cut at the requested boundary" (exit_code cut) code
       | `Signaled signal -> failf "child died from signal %d" signal));
-    let note_rows, target_tool_log_rows = run_phase ~child:false ~cut root in
+    let article_rows, target_tool_log_rows = run_phase ~child:false ~cut root in
     check int "only two original requests and one final response" 3 (count root "provider");
     let executable_after = executable_sha256 () in
     check string "the child and parent used an unchanged executable" executable_before executable_after;
-    emit_evidence ~root ~cut ~executable_sha256:executable_after ~note_rows ~target_tool_log_rows)
+    emit_evidence ~root ~cut ~executable_sha256:executable_after ~article_rows ~target_tool_log_rows)
 
 let test_empty_terminal_completes_message_without_replay () =
   let root = Filename.temp_dir "keeper-ingress-empty-terminal-" "" in
   Fun.protect ~finally:(fun () ->
     Eio_main.run (fun env -> Eio.Path.rmtree ~missing_ok:true Eio.Path.(env#fs / root))) (fun () ->
-    let note_rows, target_tool_log_rows =
+    let article_rows, target_tool_log_rows =
       run_phase ~empty_terminal:true ~child:false ~cut:Settled_result root in
     check int "loader, target tool, then empty terminal" 3 (count root "provider");
     check int "one admitted message execution" 1 (count root "ingress");
-    check int "one durable tool effect" 1 note_rows;
+    check int "one durable tool effect" 1 article_rows;
     check int "one durable target tool log row" 1 target_tool_log_rows;
     let config = Workspace.default_config root in
     let path = Keeper_chat_operation_store.path_for_keeper

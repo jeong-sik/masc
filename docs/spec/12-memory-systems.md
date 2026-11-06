@@ -117,11 +117,6 @@ and no remembered relationship grants effect authority. A future typed
 per-actor recall filter requires evidence of actual cross-actor leakage; this
 change does not silently introduce one.
 
-`Keeper_person_notes` remains a deliberate, keeper-authored annotation for the
-surface roster (RFC-0229), not an automatic semantic-memory writer and not a
-second Memory OS authority. There is no automatic migration or synchronization
-between that UI annotation and current-memory claims.
-
 Assistant reply text is never parsed into goal, progress, future work,
 questions, constraints, or any other memory category. An ordinary reply may
 remain in agent core checkpoint history, but it cannot become durable MASC memory

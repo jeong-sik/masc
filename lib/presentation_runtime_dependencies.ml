@@ -1,5 +1,7 @@
+let runtime_tools_dirname = "runtime-tools"
+
 let environment_dir ~base_path =
-  Filename.concat (Filename.concat base_path Common.masc_dirname) "runtime-tools/presentation"
+  Filename.concat (Filename.concat base_path Common.masc_dirname) (Filename.concat runtime_tools_dirname "presentation")
 let parser_python ~base_path = Filename.concat (environment_dir ~base_path) "bin/python3"
 let parser_install_commands ~base_path =
   [["python3"; "-I"; "-m"; "venv"; "--copies"; environment_dir ~base_path];

@@ -204,3 +204,6 @@ val on_cas_retry_fn : (unit -> unit) Atomic.t
 
 (** Current number of tracked lock paths. *)
 val lock_count : unit -> int
+
+val lock_suffix : string
+(** What {!lock_file_path} appends to a path. *)

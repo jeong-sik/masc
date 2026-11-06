@@ -818,12 +818,9 @@ type account_msg =
 
 type observer_msg =
   | Observer_session_ready of string
-  | Observer_opened of {
-      session_id : string;
-      handshake : Sse_wire.observer_handshake option;
-    }
-  | Observer_received of string option * Masc_tui_observer.delivery list
-  | Observer_closed of Masc_tui_types.workspace_input_identity * (unit, Masc_tui_http.observer_error) result
+  | Observer_opened of unit ref * string * Sse_wire.observer_handshake option
+  | Observer_received of unit ref * (string option * Masc_tui_observer.delivery list)
+  | Observer_closed of unit ref * Masc_tui_types.workspace_input_identity * (unit, Masc_tui_http.observer_error) result
   | Observer_retry_due of workspace_authority * unit ref
   | Observer_recovery_ready of workspace_authority * unit ref * string option
   | Observer_recovery_identity of workspace_authority * unit ref * bool ref * string * string
@@ -1364,6 +1361,11 @@ let workspace_message_admitted state ~authority ~reading message =
   workspace_reply_admitted state ~authority ~reading
     ~kind:(if workspace_message_is_read message
       then Workspace_observation else Workspace_operation_outcome)
+
+let observer_stream_owned state expected =
+  match state.observer_stream_owner with
+  | Some current -> current == expected
+  | None -> false
 
 let observer_retry_owned state ~authority expected =
   authority = state.workspace_authority

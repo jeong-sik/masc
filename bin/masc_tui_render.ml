@@ -203,7 +203,7 @@ let render_overview (state : state) home =
                " · Keepers unlisted: " ^ Terminal_text.single_line detail
            | Not_listed -> " · Keepers not observed"
            | Listed ->
-               match overview.ov_unreadable_keepers with
+               match overview.ov_keeper_liveness.klc_unreadable with
                | 0 -> ""
                | count -> Printf.sprintf " · %d Keeper states unreadable" count)
   in

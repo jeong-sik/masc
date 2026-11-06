@@ -410,14 +410,15 @@ let activation_row value =
 let test_each_appending_write_announces_once () =
   with_session @@ fun config trace_id _session_dir ->
   let heard = ref [] in
-  Ledger.install_commit_observer (fun ~config:_ ~trace_id:changed ->
-    heard := Keeper_id.Trace_id.to_string changed :: !heard);
-  Fun.protect ~finally:(fun () -> Ledger.install_commit_observer (fun ~config:_ ~trace_id:_ -> ()))
+  let restore = Ledger.install_commit_observer
+      (fun ~config:_ ~keeper_name:_ ~trace_id:changed _ ->
+        heard := Keeper_id.Trace_id.to_string changed :: !heard) in
+  Fun.protect ~finally:restore
   @@ fun () ->
   let times n = List.init n (fun _ -> Keeper_id.Trace_id.to_string trace_id) in
-  let _ = ok "first record" (Ledger.record ~config ~trace_id (activation ())) in
+  let _ = ok "first record" (Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id (activation ())) in
   check (list string) "an activation announces" (times 1) !heard;
-  let _ = ok "repeat record" (Ledger.record ~config ~trace_id (activation ())) in
+  let _ = ok "repeat record" (Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id (activation ())) in
   check (list string) "an identical activation announces nothing" (times 1) !heard;
   let _ = ok "delivery" (deliver config trace_id [ "call-workspace-a" ]) in
   check (list string) "a delivery announces" (times 2) !heard;

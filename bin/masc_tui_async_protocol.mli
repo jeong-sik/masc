@@ -811,12 +811,9 @@ type account_msg =
 
 type observer_msg =
   | Observer_session_ready of string
-  | Observer_opened of {
-      session_id : string;
-      handshake : Sse_wire.observer_handshake option;
-    }
-  | Observer_received of string option * Masc_tui_observer.delivery list
-  | Observer_closed of Masc_tui_types.workspace_input_identity * (unit, Masc_tui_http.observer_error) result
+  | Observer_opened of unit ref * string * Sse_wire.observer_handshake option
+  | Observer_received of unit ref * (string option * Masc_tui_observer.delivery list)
+  | Observer_closed of unit ref * Masc_tui_types.workspace_input_identity * (unit, Masc_tui_http.observer_error) result
   | Observer_retry_due of workspace_authority * unit ref
   | Observer_recovery_ready of workspace_authority * unit ref * string option
   | Observer_recovery_identity of workspace_authority * unit ref * bool ref * string * string
@@ -966,6 +963,7 @@ val workspace_message_admitted :
 (** A stale read never re-enters a reconfirmed workspace. Admitted operation
     and chat receipts keep their original workspace authority. *)
 
+val observer_stream_owned : state -> unit ref -> bool
 val observer_retry_owned : state -> authority:workspace_authority -> unit ref -> bool
 val observer_recovery_owned : state -> authority:workspace_authority -> unit ref -> bool
 val observer_recovery_identity_owned :

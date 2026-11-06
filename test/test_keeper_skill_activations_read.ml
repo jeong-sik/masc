@@ -93,7 +93,7 @@ let record_one config (meta : Masc.Keeper_meta_contract.keeper_meta) ~call
     | Ok activation -> activation
     | Error _ -> fail "activation fixture rejected"
   in
-  match Ledger.record ~config ~trace_id:meta.runtime.trace_id activation with
+  match Ledger.record ~config ~keeper_name:meta.name ~trace_id:meta.runtime.trace_id activation with
   | Ok _ -> ()
   | Error error -> fail (Ledger.store_error_to_string error)
 
@@ -204,6 +204,26 @@ let test_a_used_catalog_skill_is_one_row () =
       (Printf.sprintf "expected one row for the one catalog skill used, got %d"
          (List.length rows))
 
+let test_production_usage_uses_cached_runtime () =
+  with_workspace @@ fun config ->
+  let reference = publish_catalog config in
+  let meta = persist_session config "analyst" in
+  record_one config meta ~call:"call-sample" reference;
+  let loads = ref 0 in
+  Server_skill_usage_runtime.For_testing.with_runtime
+    ~ledger_loader:(fun ~config ~trace_id ->
+      incr loads;
+      Ledger.load ~config ~trace_id)
+    (fun () ->
+      let first = member "usage" (Read.usage_json ~config ~keeper_name:"analyst") in
+      let second = member "usage" (Read.usage_json ~config ~keeper_name:"analyst") in
+      check int "one cold ledger load" 1 !loads;
+      check string "the first read is ready" "ready" (text "state" first);
+      check string "the warm read is ready" "ready" (text "state" second);
+      check int "one invocation in the warm projection" 1
+        (Yojson.Safe.Util.to_int
+          (member "invocations" (List.hd (Yojson.Safe.Util.to_list (member "rows" second))))))
+
 let () =
   run "keeper_skill_activations_read"
     [ ( "activations"
@@ -219,5 +239,7 @@ let () =
             test_a_read_ledger_without_a_ready_catalog_answers_no_catalog
         ; test_case "a used catalog skill is one row" `Quick
             test_a_used_catalog_skill_is_one_row
+        ; test_case "production usage uses the cached runtime" `Quick
+            test_production_usage_uses_cached_runtime
         ] )
     ]

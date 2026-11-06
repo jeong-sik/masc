@@ -11,10 +11,6 @@ let dashboard_request_timeout_s = 30.0
     endpoints for stale-while-revalidate caching. *)
 let standard_cache_ttl_s = 60.0
 
-(** Every planning projection cache key starts with this, whatever its
-    workspace. *)
-let planning_cache_prefix = "planning:"
-
 (** Deep dashboard surface cache TTL — 2 minutes. Used for mission
     and execution surfaces that involve multi-step compute. *)
 let deep_surface_cache_ttl_s = 120.0

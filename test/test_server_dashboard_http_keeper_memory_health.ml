@@ -1427,6 +1427,26 @@ let test_memory_health_reloads_only_the_changed_keeper () =
       Alcotest.(check int) "beta remains warm" 1 (read_count "beta"))
 ;;
 
+let test_row_health_reads_use_cache_and_invalidate () =
+  let base = fresh_dir "masc-memory-health-row-cache" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  ignore (write_snapshot ~keepers_dir ~keeper_id:"alpha" [fact "alpha one"]);
+  let attempts = ref 0 in
+  Health.For_testing.with_runtime
+    ~keeper_health:(fun ~config ~keepers_dir keeper_id ->
+      incr attempts;
+      Health.For_testing.keeper_health ~config ~keepers_dir keeper_id)
+    (fun () ->
+      ignore (Health.keeper_memory_health_row_http_json ~base_path:base ~keeper:"alpha");
+      ignore (Health.keeper_memory_health_row_http_json ~base_path:base ~keeper:"alpha");
+      Alcotest.(check int) "the row is cold once and then warm" 1 !attempts;
+      ignore (write_snapshot ~keepers_dir ~keeper_id:"alpha" [fact "alpha one"; fact "alpha two"]);
+      ignore (Health.keeper_memory_health_row_http_json ~base_path:base ~keeper:"alpha");
+      Alcotest.(check int) "only the committed row is refreshed" 2 !attempts;
+      ignore (Health.keeper_memory_health_row_http_json ~base_path:base ~keeper:"alpha");
+      Alcotest.(check int) "the refreshed row is warm" 2 !attempts)
+;;
+
 let test_failed_health_reads_are_retried () =
   let base = fresh_dir "masc-memory-health-retry" in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
@@ -1510,6 +1530,8 @@ let () =
     [ ( "current snapshot"
       , [ Alcotest.test_case "a write reloads only its own Keeper" `Quick
             test_memory_health_reloads_only_the_changed_keeper
+        ; Alcotest.test_case "row reads use cache and invalidate on writes" `Quick
+            test_row_health_reads_use_cache_and_invalidate
         ; Alcotest.test_case "failed health reads are retried" `Quick
             test_failed_health_reads_are_retried
         ; Alcotest.test_case "cold health read and commit do not deadlock" `Quick

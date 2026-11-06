@@ -3436,6 +3436,7 @@ let launch_msx_live_read (state : Masc_tui_types.state) ~mailbox =
     let request = { live_view = current_view; live_port = state.port } in
     let since = Masc_tui_machine_live.since state.msx_live in
     let expected_workspace = state.server_identity in
+    state.msx_live_owed <- Masc_tui_owed_read.started state.msx_live_owed;
     state.msx_live_in_flight <- Some request;
     launch_workspace_request state ~mailbox ~boundary_error:Fun.id
       ~deliver:(fun result -> Msx_msg (Msx_live_loaded (request, result)))
@@ -3529,6 +3530,7 @@ let launch_dos_live_poll (state : Masc_tui_types.state) ~mailbox =
   | Some pending when pending.live_view == current_view && pending.live_port = state.port -> ()
   | Some _ | None ->
     let request = { live_view = !msx_poll_view; live_port = state.port } in
+    state.dos_live_owed <- Masc_tui_owed_read.started state.dos_live_owed;
     state.dos_live_in_flight <- Some request;
     let since = Masc_tui_machine_live.since state.dos_live in
     launch_workspace_request state ~mailbox ~boundary_error:Fun.id
@@ -6200,6 +6202,16 @@ let launch_lane_addons ?target state ~mailbox request =
   else (
   state.lane_addons_generation <- state.lane_addons_generation + 1;
   let generation = state.lane_addons_generation in
+  (match request, target with
+   | Addons.Inspect, Addons.Read_detail (instance_id, incarnation) ->
+       state.lane_addons_owed <- Option.map (fun ((owner, epoch), owed) ->
+         if String.equal owner instance_id && String.equal epoch incarnation
+         then ((owner, epoch), Masc_tui_owed_read.started owed)
+         else ((owner, epoch), owed)) state.lane_addons_owed
+   | Addons.Inspect, (Addons.Read_screen | Addons.Read_installation_results _)
+   | (Addons.Attach _ | Addons.Observe _ | Addons.Detach _ | Addons.Slice _
+     | Addons.Evidence _ | Addons.Act _ | Addons.Action_status _
+     | Addons.Subscriptions _), _ -> ());
   state.lane_addons_reading <- (match request with
     | Addons.Inspect | Slice _ | Action_status _ -> Some generation
     | Attach _ | Observe _ | Detach _ | Evidence _ | Act _ | Subscriptions _ -> None);
@@ -7353,6 +7365,7 @@ let launch_lanes_load state ~mailbox =
   if state.standalone_lanes_inflight then ()
   else begin
     state.standalone_lanes_inflight <- true;
+    state.lanes_owed <- Masc_tui_owed_read.started state.lanes_owed;
     let host = server_peer_host in
     let port = state.port in
     state.standalone_lanes_generation <- state.standalone_lanes_generation + 1;
@@ -8387,6 +8400,104 @@ let owe_connectors_read state =
    §3.4). *)
 let owe_harness_read state =
   state.harness_owed <- Masc_tui_owed_read.changed state.harness_owed
+
+let launch_owed_machine_live state ~mailbox =
+  let launch machine visible owed in_flight set_owed launch_read =
+    if not visible || state.machine_source <> machine then set_owed Masc_tui_owed_read.settled
+    else begin
+      let owed = if Option.is_none in_flight then Masc_tui_owed_read.abandoned owed else owed in
+      set_owed owed;
+      if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) owed then launch_read state ~mailbox
+    end
+  in
+  launch Masc.Machine_lane.Msx (state.msx_open && not state.msx_menu_open)
+    state.msx_live_owed state.msx_live_in_flight
+    (fun owed -> state.msx_live_owed <- owed) launch_msx_live_read;
+  launch Masc.Machine_lane.Dos state.msx_open state.dos_live_owed state.dos_live_in_flight
+    (fun owed -> state.dos_live_owed <- owed) launch_dos_live_poll
+
+let launch_owed_browser_observation state ~mailbox =
+  match browser_lane_on_screen state with
+  | None -> state.browser_observation_owed <- Masc_tui_owed_read.settled
+  | Some view ->
+      let owed = match view.Browser_lane_view.load with
+        | Browser_lane_view.Loading _ -> state.browser_observation_owed
+        | Browser_lane_view.Idle -> Masc_tui_owed_read.succeeded state.browser_observation_owed
+        | Browser_lane_view.Failed _ ->
+            (match state.browser_observation_owed with
+             | Masc_tui_owed_read.Settled | Masc_tui_owed_read.Reading _ ->
+                 failed_read state.browser_observation_owed
+             | Masc_tui_owed_read.Owed _ | Masc_tui_owed_read.Waiting _ ->
+                 state.browser_observation_owed)
+        | Browser_lane_view.No_browser -> Masc_tui_owed_read.settled
+      in
+      state.browser_observation_owed <- owed;
+      if server_authority_ready state
+         && Masc_tui_owed_read.due ~now:(monotonic_now_s ()) owed
+         && Option.is_none !browser_pointer_press then begin
+        let viewport = if state.image_open then Option.map fst state.browser_viewport else None in
+        match Browser_lane_view.cadence_operation ?viewport view with
+        | Some operation ->
+            state.browser_observation_owed <- Masc_tui_owed_read.started owed;
+            launch_browser_lane state ~mailbox operation
+        | None -> state.browser_observation_owed <- Masc_tui_owed_read.abandoned owed
+      end
+
+let launch_owed_lanes state ~mailbox =
+  if state.view <> Lanes then
+    state.lanes_owed <- Masc_tui_owed_read.settled
+  else begin
+    if not state.standalone_lanes_inflight then
+      state.lanes_owed <- Masc_tui_owed_read.abandoned state.lanes_owed;
+    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) state.lanes_owed then
+      launch_lanes_load state ~mailbox
+  end
+
+let launch_owed_lane_addons state ~mailbox =
+  match state.lane_addons_owed with
+  | None -> ()
+  | Some ((owner, epoch), owed) ->
+      (match state.lane_addons with
+       | None -> state.lane_addons_owed <- None
+       | Some view ->
+           (match view.Masc_tui_lane_addons.screen with
+            | Masc_tui_lane_addons.Overview | Masc_tui_lane_addons.Detail _ ->
+                let matches =
+                  match view.Masc_tui_lane_addons.screen with
+                  | Masc_tui_lane_addons.Detail (open_id, incarnation) ->
+                      String.equal owner open_id && String.equal epoch incarnation
+                  | Masc_tui_lane_addons.Overview -> false
+                in
+                if not matches then state.lane_addons_owed <- None
+                else begin
+                  let busy =
+                    Option.is_some view.draft || Option.is_some view.document_key
+                    || Option.is_some view.action_menu || Option.is_some view.installer
+                    || Option.is_some view.subscription_panel || Option.is_some view.evidence_prompt
+                    || Option.is_some (Masc_tui_lane_addons.pending_action view)
+                  in
+                  if view.loading || busy then ()
+                  else begin
+                    let owed = Masc_tui_owed_read.abandoned owed in
+                    state.lane_addons_owed <- Some ((owner, epoch), owed);
+                    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) owed then
+                      launch_lane_addons state ~mailbox
+                        ~target:(Masc_tui_lane_addons.Read_detail (owner, epoch))
+                        Masc_tui_lane_addons.Inspect
+                  end
+                end))
+
+let owe_machine_live_read state machine =
+  let visible = match machine with
+    | Masc.Machine_lane.Msx -> state.msx_open && not state.msx_menu_open
+    | Masc.Machine_lane.Dos -> state.msx_open
+  in
+  if visible && state.machine_source = machine then
+    match machine with
+    | Masc.Machine_lane.Msx ->
+        state.msx_live_owed <- Masc_tui_owed_read.changed state.msx_live_owed
+    | Masc.Machine_lane.Dos ->
+        state.dos_live_owed <- Masc_tui_owed_read.changed state.dos_live_owed
 
 (* The fleet memory health reads on arrival, on a revalidation, when a row
    read cannot be merged, and again after a failed read (RFC-0487). *)
@@ -19211,12 +19322,12 @@ let launch_observer state ~(expected_workspace : Tui_decode.server_identity) ~ho
                 let instance_id = ref None in
                 let on_open handshake =
                   instance_id := Option.map (fun handshake -> handshake.Sse_wire.instance_id) handshake;
-                  enqueue_async mailbox (Observer_msg (Observer_opened { session_id; handshake }))
+                  enqueue_async mailbox (Observer_msg (Observer_opened (owner, session_id, handshake)))
                 in
                 let on_chunk chunk =
                   match Masc_tui_observer.feed reader chunk with
                   | [] -> ()
-                  | decoded -> enqueue_async mailbox (Observer_msg (Observer_received (!instance_id, decoded)))
+                  | decoded -> enqueue_async mailbox (Observer_msg (Observer_received (owner, (!instance_id, decoded))))
                 in
                 Masc_tui_http.observe_runtime_events_with_scopes ~machine ~browser ~clock
                   ~expected_base_path:expected_workspace.sid_base_path
@@ -19226,13 +19337,13 @@ let launch_observer state ~(expected_workspace : Tui_decode.server_identity) ~ho
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Masc_tui_http.Transport_failed (Printexc.to_string exn))
     in
-    enqueue_async mailbox (Observer_msg (Observer_closed (workspace, result)))
+    enqueue_async mailbox (Observer_msg (Observer_closed (owner, workspace, result)))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
       fork_workspace_job ~observation:true ~key:owner state ~sw run
   | None -> enqueue_async mailbox
-      (Observer_msg (Observer_closed (workspace, Error (Masc_tui_http.Transport_failed "Eio switch is unavailable"))))
+      (Observer_msg (Observer_closed (owner, workspace, Error (Masc_tui_http.Transport_failed "Eio switch is unavailable"))))
 
 (* Open only after server contact and workspace admission. Initial opens may
    follow a refresh; closed streams also have their own delayed retry. *)
@@ -23168,6 +23279,27 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           (fun panel -> Masc_tui_lane_subscriptions.loaded panel result) view.subscription_panel})
   | Lane_msg (Lane_addons_loaded (generation, target, result)) ->
       let showing = Option.is_some state.lane_addons in
+      (match target with
+       | Masc_tui_lane_addons.Read_detail (owner, epoch) ->
+           let owns_answer = Option.exists (fun (view : Masc_tui_lane_addons.t) ->
+             view.generation = generation
+             && view.screen = Detail (owner, epoch)) state.lane_addons
+           in
+           if owns_answer then
+             state.lane_addons_owed <- Option.map (fun ((owed_owner, owed_epoch), owed) ->
+               let next =
+                 if not (String.equal owner owed_owner && String.equal epoch owed_epoch) then owed
+                 else match result with
+                   | Ok reply when Option.is_some reply.lar_snapshot
+                       && Option.is_none reply.lar_diagnostic
+                       && (match reply.lar_inventory_read with
+                           | `Read | `Unchanged -> true
+                           | `Failed _ -> false) ->
+                       Masc_tui_owed_read.succeeded owed
+                   | Ok _ | Error _ -> failed_read owed
+               in
+               ((owed_owner, owed_epoch), next)) state.lane_addons_owed
+       | Masc_tui_lane_addons.Read_screen | Masc_tui_lane_addons.Read_installation_results _ -> ());
       map_lane_addons state (fun view ->
         if view.generation <> generation then view else
         if not (Masc_tui_lane_addons.read_still_wanted view ~showing target)
@@ -23722,7 +23854,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       apply_approvals_summary_load state ~listing_ticket ~expected_workspace request result
   | Observer_msg (Observer_session_ready session_id) ->
       state.mcp_session <- Some session_id
-  | Observer_msg (Observer_opened { session_id; handshake }) ->
+  | Observer_msg (Observer_opened (owner, session_id, handshake))
+    when Masc_tui_async_protocol.observer_stream_owned state owner ->
       let scope_replaced =
         match state.workspace_identity, state.observer_scope_binding with
         | Workspace_identity_match, Observer_scope_bound previous ->
@@ -23792,7 +23925,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             ~scoped_refresh_inflight:http_scoped_refresh_inflight
             ~scoped_refresh_followup ~mailbox end
       end
-  | Observer_msg (Observer_received (instance_id, decoded)) ->
+  | Observer_msg (Observer_received (owner, (instance_id, decoded)))
+    when Masc_tui_async_protocol.observer_stream_owned state owner ->
       let received = Unix.gettimeofday () in
       (* One reload per batch, however many turns it carries: the pane
          shows the whole history anyway, and the loader is generation-
@@ -24350,7 +24484,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           | Unconfirmed detail ->
               report_action state "error" (Printf.sprintf "task creation outcome for %s is unconfirmed: %s; use /task-inspect before /task-recover"
                 intent.keeper detail)))
-  | Observer_msg (Observer_closed (workspace, outcome)) ->
+  | Observer_msg (Observer_closed (owner, workspace, outcome)) ->
+      if Masc_tui_async_protocol.observer_stream_owned state owner then begin
       state.observer_stream_owner <- None;
       state.observer_machine <- None;
       state.observer_browser <- None;
@@ -24392,6 +24527,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       state.observer_retry_owner <- Some owner;
       schedule_observer_retry state ~mailbox owner;
       if was_opening then resume_fusion_after_observer_failure state ~mailbox
+      end
+  | Observer_msg ((Observer_opened _ | Observer_received _ | Observer_closed _)) -> ()
   | Observer_msg (Observer_retry_due (authority, expected)) ->
       if Masc_tui_async_protocol.observer_retry_owned state ~authority expected then
            (match state.workspace_identity, state.connection_status with
@@ -26891,6 +27028,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            if request.live_view == !msx_poll_view && request.live_port = state.port
               && state.msx_open && not state.msx_menu_open
               && state.machine_source = Masc.Machine_lane.Msx then begin
+             state.msx_live_owed <- (match result with
+               | Ok _ -> Masc_tui_owed_read.succeeded state.msx_live_owed
+               | Error _ -> failed_read state.msx_live_owed);
              (* [advance] answers [None] when the read changes nothing on
                 screen, and MSX carries no activity feed beside the picture,
                 so an unchanged read repaints nothing -- the DOS branch below
@@ -26932,6 +27072,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                    Error "live: a DOS read answered without an activity feed"
                | Error _ as error -> error
              in
+             state.dos_live_owed <- (match result with
+               | Ok _ -> Masc_tui_owed_read.succeeded state.dos_live_owed
+               | Error _ -> failed_read state.dos_live_owed);
              (* A failed read leaves [dos_activity] as it was -- the sidebar
                 keeps showing the last activity it had rather than flashing
                 empty on a read that did not answer at all. *)
@@ -28362,6 +28505,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       end
   | Lane_msg (Lane_inventory_loaded (generation, result)) ->
       state.standalone_lanes_inflight <- false;
+      state.lanes_owed <-
+        (match result with
+         | Ok _ -> Masc_tui_owed_read.succeeded state.lanes_owed
+         | Error _ -> failed_read state.lanes_owed);
       if generation = state.standalone_lanes_generation then (
         match result with
         | Ok snapshot ->
@@ -32899,6 +33046,7 @@ Use relative paths for resources already held in the package. -->
           state.machine_interaction <- Observe_machine;
           reconcile_observer_machine state ~host:server_peer_host ~port:state.port
             ~mailbox:async_messages;
+          launch_owed_machine_live state ~mailbox:async_messages;
           (* A presentation token is not a mutation barrier. Never start a
              checkpoint while our earlier tick may still be running. *)
           (match !msx_pending_poll with
@@ -42166,6 +42314,10 @@ Use relative paths for resources already held in the package. -->
 
       reconcile_observer_machine state ~host:server_peer_host ~port:state.port
         ~mailbox:async_messages;
+      launch_owed_machine_live state ~mailbox:async_messages;
+      launch_owed_lanes state ~mailbox:async_messages;
+      launch_owed_lane_addons state ~mailbox:async_messages;
+      launch_owed_browser_observation state ~mailbox:async_messages;
       launch_owed_memory_input state ~mailbox:async_messages;
       reconcile_context_inspector_part state ~mailbox:async_messages;
       if reconcile_live_context state ~mailbox:async_messages then

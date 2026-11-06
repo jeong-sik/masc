@@ -2170,6 +2170,19 @@ let test_observer_machine_only_follows_control () =
   Alcotest.(check bool) "a closed spectator owns no ticker" true
     (observer_machine_of_state state = None)
 
+let test_observer_messages_belong_to_current_stream () =
+  let open Masc_tui_types in
+  let state = create_state ~workspace:"observer-close" ~port:8935 ~refresh_interval:0. () in
+  let owner = ref () in
+  state.observer_stream_owner <- Some owner;
+  Alcotest.(check bool) "the current stream owns its messages" true
+    (Masc_tui_async_protocol.observer_stream_owned state owner);
+  Alcotest.(check bool) "a replaced stream rejects old messages" false
+    (Masc_tui_async_protocol.observer_stream_owned state (ref ()));
+  state.observer_stream_owner <- None;
+  Alcotest.(check bool) "a closed stream owns no later messages" false
+    (Masc_tui_async_protocol.observer_stream_owned state owner)
+
 let test_observer_retry_retires_with_workspace_read_authority () =
   let open Masc_tui_types in
   let state = create_state ~workspace:"observer-retry" ~local_base_path:"/workspace/a"
@@ -6757,6 +6770,8 @@ let () =
             test_concurrent_created_keepers_retain_individual_refresh_coverage
         ; Alcotest.test_case "observer machine only follows control" `Quick
             test_observer_machine_only_follows_control
+        ; Alcotest.test_case "observer messages belong to current stream" `Quick
+            test_observer_messages_belong_to_current_stream
         ; Alcotest.test_case "observer retry retires with workspace authority" `Quick
             test_observer_retry_retires_with_workspace_read_authority
         ; Alcotest.test_case "observer recovery belongs to unconfirmed workspace" `Quick

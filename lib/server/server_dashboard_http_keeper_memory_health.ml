@@ -823,9 +823,11 @@ let keeper_memory_health_row_http_json ~base_path ~keeper =
   let config = Workspace.default_config base_path in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   let generated_at = Time_compat.now () in
+  Stdlib.Mutex.protect health_cache_mutex (fun () ->
+    Hashtbl.replace health_base_paths (health_directory_identity keepers_dir) base_path);
   let row =
     if List.exists (String.equal keeper) (health_keeper_ids ~keepers_dir)
-    then keeper_health_entry_to_json (keeper_health ~config ~keepers_dir keeper)
+    then keeper_health_entry_to_json (cached_keeper_health ~config ~keepers_dir keeper)
     else `Null
   in
   `Assoc [ "schema", `String schema; "generated_at", `Float generated_at; "keeper", row ]

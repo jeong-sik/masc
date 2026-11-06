@@ -516,10 +516,6 @@ let write_state_result config state =
         %s: %s"
        recovery
        msg);
-  (* The planning projection and the Goal tree join each Goal with this
-     ledger's record. *)
-  Goal_projection_generation.advance ();
-  Goal_store.notify_projection_change config;
   Ok ()
 
 (* {1 Record operations}

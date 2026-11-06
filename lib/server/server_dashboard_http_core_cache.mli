@@ -3,10 +3,6 @@
 val dashboard_request_timeout_s : float
 val standard_cache_ttl_s : float
 
-val planning_cache_prefix : string
-(** Every planning projection cache key starts with this, whatever its
-    workspace. *)
-
 val deep_surface_cache_ttl_s : float
 val shell_surface_cache_ttl_s : float
 val freshness_slo_s : float

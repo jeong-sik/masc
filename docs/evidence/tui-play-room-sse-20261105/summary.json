@@ -1,0 +1,124 @@
+{
+  "schema": "masc.play-room-sse.evidence.v1",
+  "pr": 48678,
+  "native_stack": {
+    "number": 48679,
+    "parent_pr": 48677,
+    "parent_draft": true
+  },
+  "production_head": "dd115df84b56ad6e51b887497d0747d663dc2f2b",
+  "play_room_sse_transition_complete_for_this_scope": true,
+  "full_native_push_complete": false,
+  "browser_server_sampling_remaining": true,
+  "selected_green": {
+    "run_id": 42080641527,
+    "head_sha": "dd115df84b56ad6e51b887497d0747d663dc2f2b",
+    "status": "completed",
+    "conclusion": "success",
+    "suites": {
+      "test_play_room": {
+        "tests": 15,
+        "passed": true
+      },
+      "test_server_play_room_events": {
+        "tests": 11,
+        "passed": true
+      }
+    },
+    "log": "artifacts/play-room-sse-20261105/tool-lease-green-42080641527/ci-run-tests.log"
+  },
+  "tool_lease_red": {
+    "run_id": 42076439238,
+    "expected_machine": "dos",
+    "observed_machine": "msx",
+    "other_room_tests_passed": 14,
+    "presence_tests_passed": 11
+  },
+  "type_check": {
+    "run_id": 42080646716,
+    "head_sha": "dd115df84b56ad6e51b887497d0747d663dc2f2b",
+    "status": "completed",
+    "conclusion": "success"
+  },
+  "full_regression": {
+    "run_id": 42083311064,
+    "head_sha": "dd115df84b56ad6e51b887497d0747d663dc2f2b",
+    "suite_count": 29,
+    "status": "completed",
+    "conclusion": "success",
+    "all_suites_passed": true,
+    "targeted_ok_count": 29,
+    "failures_or_timeouts": 0,
+    "test_step_duration_seconds": 900,
+    "suite_runner_log": "artifacts/play-room-sse-20261105/full-42083311064/runner/ci-run-tests.log"
+  },
+  "native_proof": {
+    "run_id": 42083317803,
+    "source_sha": "dd115df84b56ad6e51b887497d0747d663dc2f2b",
+    "workflow_sha": "dd115df84b56ad6e51b887497d0747d663dc2f2b",
+    "status": "completed",
+    "conclusion": "success",
+    "behavior_passed": true,
+    "platform": "macos-arm64",
+    "artifact": "tui-macos-arm64-dd115df84b56ad6e51b887497d0747d663dc2f2b-42083317803",
+    "binary_sha256": "43cfa49cc7fb75a87254cd0c6a604880fc8d59528e156f4ab2bb5d826a94f65e",
+    "receipt_sha256_matches_local": true,
+    "embedded_build_commit_matches": true,
+    "installed_runtime_verified": false,
+    "visible_ui_verified": false,
+    "receipt": "artifacts/play-room-sse-20261105/native-42083317803/receipt.json"
+  },
+  "native_pty": {
+    "module": "test_tui_play_room_push",
+    "class": "PlayRoomPushTest",
+    "tests_run": 1,
+    "passed": true,
+    "duration_seconds": 9.100,
+    "observer_connections": 4,
+    "idle_observation_seconds": 2.4,
+    "requests": {
+      "open_play_read": 1,
+      "idle_additional_play_read": 0,
+      "changed_play_read": 1,
+      "trailing_play_read": 2,
+      "source_loss_play_read": 1,
+      "reconnect_play_read": 1,
+      "hidden_play_read": 0,
+      "leaving_play_leave": 1
+    },
+    "raw_counts": "docs/evidence/tui-play-room-sse-20261105/request-counts.json",
+    "log": "artifacts/play-room-sse-20261105/native-pty-42083317803.log"
+  },
+  "spectator_initial_scope_attachment": {
+    "bounded_initial_machine_reads": 2,
+    "periodic_polling": false,
+    "final_head_log_verified": true,
+    "native_pty_verified": true,
+    "tests_run": 1,
+    "duration_seconds": 12.619,
+    "responses": {
+      "open_msx_capture": 2,
+      "changed_msx_capture": 1,
+      "non_visible_dos_capture": 0,
+      "watch_legacy_tick": 0
+    },
+    "raw_counts": "docs/evidence/tui-play-room-sse-20261105/spectator-request-counts.json",
+    "log": "artifacts/play-room-sse-20261105/spectator-native-pty-42083317803.log",
+    "explanation": "Late Play scope attachment can preserve one trailing machine read after an incomplete initial replay; the final exact-source PTY confirmed that it stops at two."
+  },
+  "independent_review": {
+    "path": "docs/evidence/tui-play-room-sse-20261105/independent-review.json",
+    "reviewed_head": "dd115df84b56ad6e51b887497d0747d663dc2f2b",
+    "p0_p1_count": 0,
+    "p2_count": 0,
+    "p3_runtime_api_limitations": 1,
+    "source_ready": true,
+    "github_approval_head": "dd115df84b56ad6e51b887497d0747d663dc2f2b"
+  },
+  "actions_not_taken": {
+    "merge": true,
+    "rebase": true,
+    "production_install": true,
+    "user_runtime_config_change": true
+  }
+}

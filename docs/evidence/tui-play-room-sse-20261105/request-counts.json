@@ -1,0 +1,468 @@
+{
+  "schema": "masc.tui.pty-request-counts.v1",
+  "module": "test_tui_play_room_push",
+  "class": "PlayRoomPushTest",
+  "build_commit": "dd115df84b56ad6e51b887497d0747d663dc2f2b",
+  "test_passed": true,
+  "tests_run": 1,
+  "observer_connections": 4,
+  "requests": [
+    {
+      "phase": "changed",
+      "path": "/health",
+      "count": 1
+    },
+    {
+      "phase": "changed",
+      "path": "observer-play-event:msx:5358fd89cc3a8cf49a5ecab7351cc09b",
+      "count": 1
+    },
+    {
+      "phase": "changed",
+      "path": "play:read",
+      "count": 1
+    },
+    {
+      "phase": "hidden",
+      "path": "/api/v1/lanes",
+      "count": 1
+    },
+    {
+      "phase": "hidden",
+      "path": "/health",
+      "count": 1
+    },
+    {
+      "phase": "hidden",
+      "path": "observer-play-event:none:none",
+      "count": 2
+    },
+    {
+      "phase": "leaving",
+      "path": "/api/v1/dashboard/scheduled-automation",
+      "count": 1
+    },
+    {
+      "phase": "leaving",
+      "path": "/api/v1/keepers/turns",
+      "count": 1
+    },
+    {
+      "phase": "leaving",
+      "path": "/health",
+      "count": 1
+    },
+    {
+      "phase": "leaving",
+      "path": "observer-play:none:none",
+      "count": 1
+    },
+    {
+      "phase": "leaving",
+      "path": "observer:watch",
+      "count": 1
+    },
+    {
+      "phase": "leaving",
+      "path": "play:leave",
+      "count": 1
+    },
+    {
+      "phase": "open",
+      "path": "/api/v1/dashboard/scheduled-automation",
+      "count": 1
+    },
+    {
+      "phase": "open",
+      "path": "/api/v1/keepers/turns",
+      "count": 1
+    },
+    {
+      "phase": "open",
+      "path": "/api/v1/lanes",
+      "count": 1
+    },
+    {
+      "phase": "open",
+      "path": "/api/v1/stream/fleet",
+      "count": 2
+    },
+    {
+      "phase": "open",
+      "path": "/health",
+      "count": 3
+    },
+    {
+      "phase": "open",
+      "path": "live:msx_capture",
+      "count": 1
+    },
+    {
+      "phase": "open",
+      "path": "observer-play:msx",
+      "count": 1
+    },
+    {
+      "phase": "open",
+      "path": "observer-play:msx:5358fd89cc3a8cf49a5ecab7351cc09b",
+      "count": 1
+    },
+    {
+      "phase": "open",
+      "path": "observer:watch",
+      "count": 1
+    },
+    {
+      "phase": "open",
+      "path": "play:read",
+      "count": 1
+    },
+    {
+      "phase": "prime",
+      "path": "observer-play-event:none:none",
+      "count": 1
+    },
+    {
+      "phase": "reconnect",
+      "path": "/api/v1/dashboard/gate",
+      "count": 1
+    },
+    {
+      "phase": "reconnect",
+      "path": "/api/v1/dashboard/health-line",
+      "count": 1
+    },
+    {
+      "phase": "reconnect",
+      "path": "/api/v1/dashboard/scheduled-automation",
+      "count": 1
+    },
+    {
+      "phase": "reconnect",
+      "path": "/api/v1/gate/keepers",
+      "count": 1
+    },
+    {
+      "phase": "reconnect",
+      "path": "/api/v1/keepers/asks",
+      "count": 1
+    },
+    {
+      "phase": "reconnect",
+      "path": "/api/v1/keepers/turns",
+      "count": 2
+    },
+    {
+      "phase": "reconnect",
+      "path": "/api/v1/lanes",
+      "count": 1
+    },
+    {
+      "phase": "reconnect",
+      "path": "/api/v1/operator",
+      "count": 1
+    },
+    {
+      "phase": "reconnect",
+      "path": "/health",
+      "count": 7
+    },
+    {
+      "phase": "reconnect",
+      "path": "live:msx_capture",
+      "count": 1
+    },
+    {
+      "phase": "reconnect",
+      "path": "observer-play:msx",
+      "count": 1
+    },
+    {
+      "phase": "reconnect",
+      "path": "observer-play:msx:5358fd89cc3a8cf49a5ecab7351cc09b",
+      "count": 1
+    },
+    {
+      "phase": "reconnect",
+      "path": "observer:watch",
+      "count": 1
+    },
+    {
+      "phase": "reconnect",
+      "path": "play:read",
+      "count": 1
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/async-requests",
+      "count": 2
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/dashboard/gate",
+      "count": 3
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/dashboard/gate/keeper-settings",
+      "count": 2
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/dashboard/goals",
+      "count": 1
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/dashboard/health-line",
+      "count": 3
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/dashboard/planning",
+      "count": 1
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/dashboard/scheduled-automation",
+      "count": 3
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/gate/keepers",
+      "count": 4
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/keepers/asks",
+      "count": 5
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/keepers/tool-approval-mode",
+      "count": 2
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/keepers/tool-approvals",
+      "count": 3
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/keepers/turns",
+      "count": 5
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/operator",
+      "count": 6
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/stream/fleet",
+      "count": 2
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/verification/requests",
+      "count": 1
+    },
+    {
+      "phase": "setup",
+      "path": "/health",
+      "count": 22
+    },
+    {
+      "phase": "setup",
+      "path": "observer-play:none:none",
+      "count": 1
+    },
+    {
+      "phase": "setup",
+      "path": "observer:watch",
+      "count": 1
+    },
+    {
+      "phase": "source-loss",
+      "path": "/api/v1/dashboard/gate",
+      "count": 1
+    },
+    {
+      "phase": "source-loss",
+      "path": "/api/v1/dashboard/health-line",
+      "count": 1
+    },
+    {
+      "phase": "source-loss",
+      "path": "/api/v1/dashboard/scheduled-automation",
+      "count": 1
+    },
+    {
+      "phase": "source-loss",
+      "path": "/api/v1/gate/keepers",
+      "count": 1
+    },
+    {
+      "phase": "source-loss",
+      "path": "/api/v1/keepers/asks",
+      "count": 1
+    },
+    {
+      "phase": "source-loss",
+      "path": "/api/v1/keepers/turns",
+      "count": 1
+    },
+    {
+      "phase": "source-loss",
+      "path": "/api/v1/operator",
+      "count": 1
+    },
+    {
+      "phase": "source-loss",
+      "path": "/health",
+      "count": 6
+    },
+    {
+      "phase": "source-loss",
+      "path": "live:msx_capture",
+      "count": 1
+    },
+    {
+      "phase": "source-loss",
+      "path": "observer-play-event:msx:5358fd89cc3a8cf49a5ecab7351cc09b",
+      "count": 1
+    },
+    {
+      "phase": "source-loss",
+      "path": "play:read",
+      "count": 1
+    },
+    {
+      "phase": "trailing",
+      "path": "/health",
+      "count": 3
+    },
+    {
+      "phase": "trailing",
+      "path": "live:msx_capture",
+      "count": 1
+    },
+    {
+      "phase": "trailing",
+      "path": "observer-play-event:msx:5358fd89cc3a8cf49a5ecab7351cc09b",
+      "count": 4
+    },
+    {
+      "phase": "trailing",
+      "path": "play:read",
+      "count": 2
+    }
+  ],
+  "responses": [
+    {
+      "phase": "changed",
+      "path": "/health",
+      "count": 1
+    },
+    {
+      "phase": "changed",
+      "path": "play:read",
+      "count": 1
+    },
+    {
+      "phase": "hidden",
+      "path": "/api/v1/lanes",
+      "count": 1
+    },
+    {
+      "phase": "hidden",
+      "path": "/health",
+      "count": 1
+    },
+    {
+      "phase": "leaving",
+      "path": "/health",
+      "count": 1
+    },
+    {
+      "phase": "leaving",
+      "path": "play:leave",
+      "count": 1
+    },
+    {
+      "phase": "open",
+      "path": "/api/v1/lanes",
+      "count": 1
+    },
+    {
+      "phase": "open",
+      "path": "/health",
+      "count": 3
+    },
+    {
+      "phase": "open",
+      "path": "live:msx_capture",
+      "count": 1
+    },
+    {
+      "phase": "open",
+      "path": "play:read",
+      "count": 1
+    },
+    {
+      "phase": "reconnect",
+      "path": "/api/v1/lanes",
+      "count": 1
+    },
+    {
+      "phase": "reconnect",
+      "path": "/health",
+      "count": 7
+    },
+    {
+      "phase": "reconnect",
+      "path": "live:msx_capture",
+      "count": 1
+    },
+    {
+      "phase": "reconnect",
+      "path": "play:read",
+      "count": 1
+    },
+    {
+      "phase": "setup",
+      "path": "/health",
+      "count": 22
+    },
+    {
+      "phase": "source-loss",
+      "path": "/health",
+      "count": 6
+    },
+    {
+      "phase": "source-loss",
+      "path": "live:msx_capture",
+      "count": 1
+    },
+    {
+      "phase": "source-loss",
+      "path": "play:read",
+      "count": 1
+    },
+    {
+      "phase": "trailing",
+      "path": "/health",
+      "count": 3
+    },
+    {
+      "phase": "trailing",
+      "path": "live:msx_capture",
+      "count": 1
+    },
+    {
+      "phase": "trailing",
+      "path": "play:read",
+      "count": 2
+    }
+  ]
+}

@@ -1,0 +1,368 @@
+{
+  "schema": "masc.tui.pty-request-counts.v1",
+  "module": "test_tui_spectator_push",
+  "class": "SpectatorPushTest",
+  "build_commit": "dd115df84b56ad6e51b887497d0747d663dc2f2b",
+  "test_passed": true,
+  "tests_run": 1,
+  "observer_connections": 5,
+  "requests": [
+    {
+      "phase": "control",
+      "path": "/api/v1/dashboard/scheduled-automation",
+      "count": 1
+    },
+    {
+      "phase": "control",
+      "path": "/api/v1/keepers/turns",
+      "count": 1
+    },
+    {
+      "phase": "control",
+      "path": "/health",
+      "count": 1
+    },
+    {
+      "phase": "control",
+      "path": "observer-play:msx",
+      "count": 1
+    },
+    {
+      "phase": "control",
+      "path": "observer:msx",
+      "count": 1
+    },
+    {
+      "phase": "manual",
+      "path": "/api/v1/stream/fleet",
+      "count": 1
+    },
+    {
+      "phase": "manual",
+      "path": "/health",
+      "count": 1
+    },
+    {
+      "phase": "manual",
+      "path": "live:msx_capture",
+      "count": 1
+    },
+    {
+      "phase": "open",
+      "path": "/api/v1/dashboard/gate",
+      "count": 1
+    },
+    {
+      "phase": "open",
+      "path": "/api/v1/dashboard/health-line",
+      "count": 1
+    },
+    {
+      "phase": "open",
+      "path": "/api/v1/dashboard/scheduled-automation",
+      "count": 1
+    },
+    {
+      "phase": "open",
+      "path": "/api/v1/gate/keepers",
+      "count": 1
+    },
+    {
+      "phase": "open",
+      "path": "/api/v1/keepers/asks",
+      "count": 1
+    },
+    {
+      "phase": "open",
+      "path": "/api/v1/keepers/turns",
+      "count": 2
+    },
+    {
+      "phase": "open",
+      "path": "/api/v1/lanes",
+      "count": 2
+    },
+    {
+      "phase": "open",
+      "path": "/api/v1/operator",
+      "count": 1
+    },
+    {
+      "phase": "open",
+      "path": "/api/v1/stream/fleet",
+      "count": 1
+    },
+    {
+      "phase": "open",
+      "path": "/health",
+      "count": 10
+    },
+    {
+      "phase": "open",
+      "path": "live:msx_capture",
+      "count": 2
+    },
+    {
+      "phase": "open",
+      "path": "observer-play:msx",
+      "count": 1
+    },
+    {
+      "phase": "open",
+      "path": "observer:watch",
+      "count": 1
+    },
+    {
+      "phase": "push",
+      "path": "/health",
+      "count": 1
+    },
+    {
+      "phase": "push",
+      "path": "live:msx_capture",
+      "count": 1
+    },
+    {
+      "phase": "push",
+      "path": "observer-event-written",
+      "count": 2
+    },
+    {
+      "phase": "reconnect",
+      "path": "/api/v1/dashboard/gate",
+      "count": 1
+    },
+    {
+      "phase": "reconnect",
+      "path": "/api/v1/dashboard/health-line",
+      "count": 1
+    },
+    {
+      "phase": "reconnect",
+      "path": "/api/v1/dashboard/scheduled-automation",
+      "count": 1
+    },
+    {
+      "phase": "reconnect",
+      "path": "/api/v1/gate/keepers",
+      "count": 1
+    },
+    {
+      "phase": "reconnect",
+      "path": "/api/v1/keepers/asks",
+      "count": 1
+    },
+    {
+      "phase": "reconnect",
+      "path": "/api/v1/keepers/turns",
+      "count": 2
+    },
+    {
+      "phase": "reconnect",
+      "path": "/api/v1/lanes",
+      "count": 1
+    },
+    {
+      "phase": "reconnect",
+      "path": "/api/v1/operator",
+      "count": 1
+    },
+    {
+      "phase": "reconnect",
+      "path": "/health",
+      "count": 7
+    },
+    {
+      "phase": "reconnect",
+      "path": "live:msx_capture",
+      "count": 1
+    },
+    {
+      "phase": "reconnect",
+      "path": "observer-play:msx",
+      "count": 1
+    },
+    {
+      "phase": "reconnect",
+      "path": "observer:watch",
+      "count": 1
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/async-requests",
+      "count": 2
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/dashboard/gate",
+      "count": 4
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/dashboard/gate/keeper-settings",
+      "count": 2
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/dashboard/goals",
+      "count": 1
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/dashboard/health-line",
+      "count": 3
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/dashboard/planning",
+      "count": 1
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/dashboard/scheduled-automation",
+      "count": 3
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/gate/keepers",
+      "count": 4
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/keepers/asks",
+      "count": 5
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/keepers/tool-approval-mode",
+      "count": 2
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/keepers/tool-approvals",
+      "count": 3
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/keepers/turns",
+      "count": 5
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/operator",
+      "count": 6
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/stream/fleet",
+      "count": 2
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/verification/requests",
+      "count": 1
+    },
+    {
+      "phase": "setup",
+      "path": "/health",
+      "count": 24
+    },
+    {
+      "phase": "setup",
+      "path": "observer:watch",
+      "count": 1
+    },
+    {
+      "phase": "watch",
+      "path": "/api/v1/dashboard/scheduled-automation",
+      "count": 1
+    },
+    {
+      "phase": "watch",
+      "path": "/api/v1/keepers/turns",
+      "count": 1
+    },
+    {
+      "phase": "watch",
+      "path": "/health",
+      "count": 1
+    },
+    {
+      "phase": "watch",
+      "path": "observer-play:msx",
+      "count": 1
+    },
+    {
+      "phase": "watch",
+      "path": "observer:watch",
+      "count": 1
+    }
+  ],
+  "responses": [
+    {
+      "phase": "control",
+      "path": "/health",
+      "count": 1
+    },
+    {
+      "phase": "manual",
+      "path": "/health",
+      "count": 1
+    },
+    {
+      "phase": "manual",
+      "path": "live:msx_capture",
+      "count": 1
+    },
+    {
+      "phase": "open",
+      "path": "/api/v1/lanes",
+      "count": 2
+    },
+    {
+      "phase": "open",
+      "path": "/health",
+      "count": 10
+    },
+    {
+      "phase": "open",
+      "path": "live:msx_capture",
+      "count": 2
+    },
+    {
+      "phase": "push",
+      "path": "/health",
+      "count": 1
+    },
+    {
+      "phase": "push",
+      "path": "live:msx_capture",
+      "count": 1
+    },
+    {
+      "phase": "reconnect",
+      "path": "/api/v1/lanes",
+      "count": 1
+    },
+    {
+      "phase": "reconnect",
+      "path": "/health",
+      "count": 7
+    },
+    {
+      "phase": "reconnect",
+      "path": "live:msx_capture",
+      "count": 1
+    },
+    {
+      "phase": "setup",
+      "path": "/health",
+      "count": 24
+    },
+    {
+      "phase": "watch",
+      "path": "/health",
+      "count": 1
+    }
+  ]
+}

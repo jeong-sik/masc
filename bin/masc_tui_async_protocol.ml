@@ -145,8 +145,6 @@ type http_scoped_surface_results =
   (Masc.Tui_decode.server_identity, string) result http_scoped_surface_readings
 
 type http_surface_results = {
-  http_overview: (overview_snapshot, string) result option;
-      (** [None] when the visible surface did not ask for the briefing. *)
   http_quiz: (quiz_scorecard_snapshot, string) result option;
       (** [None] when the visible surface did not ask for the quiz rows. *)
   http_approvals: approval_observation option;
@@ -513,7 +511,6 @@ type voice_msg =
   | Voice_failed of { keeper : string; error : string }
 
 type http_msg =
-  | Http_overview_loaded of overview_preview
   (** Verified questions may settle their own read before the full bundle. *)
   | Http_asks_loaded of early_asks_observation
   | Http_approvals_loaded of early_approval_observation
@@ -861,6 +858,7 @@ type async_msg =
       string * int * (Measurement.t, string) result
   | Verification_msg of verification_msg
   | Harness_msg of harness_msg
+  | Overview_loaded of (overview_snapshot, string) result
   | Fusion_msg of fusion_msg
   | Memory_msg of memory_msg
   | Repository_msg of repository_msg
@@ -1106,6 +1104,7 @@ let rec workspace_message_is_read = function
   | Measurement_artifact_loaded _
   | Verification_msg (Verification_loaded _)
   | Harness_msg (Harness_loaded _)
+  | Overview_loaded _
   | Fusion_msg (Fusion_runs_loaded _
   | Fusion_detail_loaded _
   | Fusion_historical_detail_loaded _
@@ -1192,7 +1191,7 @@ let rec workspace_message_is_read = function
   | Voice_silent _
   | Voice_discarded _
   | Voice_failed _)
-  | Http_msg (Http_keeper_roster_loaded _ | Http_dataset_loaded _) | Http_surface_read_completed _ | Http_msg (Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _) | Ask_msg (Ask_answer_receipt_ready _) | Http_msg (Http_refresh_done _
+  | Http_msg (Http_keeper_roster_loaded _ | Http_dataset_loaded _) | Http_surface_read_completed _ | Http_msg (Http_initial_identity_read _ | Http_asks_loaded _ | Http_approvals_loaded _) | Ask_msg (Ask_answer_receipt_ready _) | Http_msg (Http_refresh_done _
   | Http_refresh_failed _)
   (* Not a reply: the refresh that recovered the identity tells the loop to
      read the confirm queue again. It belongs to that refresh, which is
@@ -1299,7 +1298,7 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Voice_msg (Voice_wizard_saved _ | Voice_agent_voices_loaded _ | Voice_agent_voice_saved _
   | Voice_wizard_probed _ | Voice_wizard_reread _ | Voice_config_loaded _ | Voice_calibrated _
   | Voice_level _ | Voice_transcribed _ | Voice_silent _ | Voice_discarded _ | Voice_failed _)
-  | Http_msg (Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _)
+  | Overview_loaded _ | Http_msg (Http_asks_loaded _ | Http_approvals_loaded _)
   | Ask_msg (Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _)
   | Http_msg (Http_keeper_roster_loaded _ | Http_dataset_loaded _) | Http_surface_read_completed _
   | Http_msg (Http_initial_identity_read _ | Http_refresh_done _ | Http_refresh_failed _)
@@ -1448,7 +1447,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Voice_agent_voices_loaded _ | Voice_agent_voice_saved _
     | Voice_wizard_probed (_, _) | Voice_wizard_reread (_, _)
     | Voice_config_loaded (_, _, _) | Voice_calibrated _ | Voice_level _ | Voice_transcribed _
-    | Voice_silent _ | Voice_discarded _ | Voice_failed _) | Http_msg (Http_keeper_roster_loaded _ | Http_dataset_loaded _) | Http_surface_read_completed _ | Http_msg (Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _) | Ask_msg (Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _) | Http_msg (Http_refresh_done _
+    | Voice_silent _ | Voice_discarded _ | Voice_failed _) | Http_msg (Http_keeper_roster_loaded _ | Http_dataset_loaded _) | Http_surface_read_completed _ | Http_msg (Http_initial_identity_read _ | Http_asks_loaded _ | Http_approvals_loaded _) | Ask_msg (Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _) | Http_msg (Http_refresh_done _
     | Http_refresh_failed (_, _, _)) | Approvals_msg (Approvals_listing_superseded
     | Approvals_summary_loaded (_, _, _, _)) | (Keeper_msg Keeper_composer_released)
     | Http_msg (Http_scoped_refresh_done (_, _, _)
@@ -1468,7 +1467,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Keeper_msg (Keeper_composite_loaded (_, _, _)) | Lane_msg (Lane_inventory_loaded (_, _)) | Clients_loaded (_, _)
     | Lane_msg (Lane_runs_loaded (_, _, _, _) | Lane_run_detail_loaded (_, _, _))
     | Measurement_artifact_loaded (_, _, _) | Verification_msg (Verification_loaded _)
-    | Harness_msg (Harness_loaded _) | Fusion_msg (Fusion_runs_loaded (_, _)
+    | Harness_msg (Harness_loaded _) | Overview_loaded _ | Fusion_msg (Fusion_runs_loaded (_, _)
     | Fusion_detail_loaded (_, _, _) | Fusion_historical_detail_loaded (_, _, _)
     | Fusion_launch_options_loaded (_, _) | Fusion_launched (_, _))
     | Memory_msg (Memory_recall_standing_loaded (_, _))
@@ -1597,7 +1596,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Voice_agent_voice_saved _ | Voice_wizard_probed (_, _)
   | Voice_wizard_reread (_, _) | Voice_config_loaded (_, _, _) | Voice_calibrated _ | Voice_level _
   | Voice_transcribed _ | Voice_silent _ | Voice_discarded _ | Voice_failed _)
-  | Http_msg (Http_keeper_roster_loaded _ | Http_dataset_loaded _) | Http_surface_read_completed _ | Http_msg (Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _) | Ask_msg (Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _) | Http_msg (Http_refresh_done _ | Http_refresh_failed (_, _, _))
+  | Http_msg (Http_keeper_roster_loaded _ | Http_dataset_loaded _) | Http_surface_read_completed _ | Http_msg (Http_initial_identity_read _ | Http_asks_loaded _ | Http_approvals_loaded _) | Ask_msg (Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _) | Http_msg (Http_refresh_done _ | Http_refresh_failed (_, _, _))
   | Approvals_msg (Approvals_listing_superseded | Approvals_summary_loaded (_, _, _, _))
   | (Keeper_msg Keeper_composer_released) | Http_msg (Http_scoped_refresh_done (_, _, _)
   | Http_scoped_refresh_failed (_, _, _, _, _, _)) | Board_msg (Board_post_refresh_done (_, _))
@@ -1614,7 +1613,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Lane_msg (Lane_inventory_loaded (_, _)) | Clients_loaded (_, _)
   | Lane_msg (Lane_runs_loaded (_, _, _, _) | Lane_run_detail_loaded (_, _, _))
   | Measurement_artifact_loaded (_, _, _) | Verification_msg (Verification_loaded _)
-  | Harness_msg (Harness_loaded _) | Fusion_msg (Fusion_runs_loaded (_, _)
+  | Harness_msg (Harness_loaded _) | Overview_loaded _ | Fusion_msg (Fusion_runs_loaded (_, _)
   | Fusion_detail_loaded (_, _, _) | Fusion_historical_detail_loaded (_, _, _)
   | Fusion_launch_options_loaded (_, _) | Fusion_launched (_, _))
   | Memory_msg (Memory_recall_standing_loaded (_, _))

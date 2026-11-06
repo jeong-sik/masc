@@ -133,8 +133,6 @@ type http_scoped_surface_results =
   (Masc.Tui_decode.server_identity, string) result http_scoped_surface_readings
 
 type http_surface_results = {
-  http_overview: (overview_snapshot, string) result option;
-      (** [None] when the visible surface did not ask for the briefing. *)
   http_quiz: (quiz_scorecard_snapshot, string) result option;
       (** [None] when the visible surface did not ask for the quiz rows. *)
   http_approvals: approval_observation option;
@@ -504,11 +502,8 @@ type voice_msg =
      rather than a silence: the microphone worked. *)
   | Voice_discarded of { keeper : string; reason : string }
   | Voice_failed of { keeper : string; error : string }
-  (** A verified read-only preview. It does not finish the full refresh or
-      grant workspace authority; the terminal bundle still owns both. *)
 
 type http_msg =
-  | Http_overview_loaded of overview_preview
   (** Verified questions may settle their own read before the full bundle. *)
   | Http_asks_loaded of early_asks_observation
   | Http_approvals_loaded of early_approval_observation
@@ -856,6 +851,7 @@ type async_msg =
       string * int * (Measurement.t, string) result
   | Verification_msg of verification_msg
   | Harness_msg of harness_msg
+  | Overview_loaded of (overview_snapshot, string) result
   | Fusion_msg of fusion_msg
   | Memory_msg of memory_msg
   | Repository_msg of repository_msg

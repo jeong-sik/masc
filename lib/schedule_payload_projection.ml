@@ -203,7 +203,13 @@ let set_keeper_wake_result_delivery ~payload ~channel =
    [result_delivery] already closes its own fields; this closes the body
    around it. *)
 let keeper_wake_body_fields =
-  [ "keeper_name"; "message"; "title"; "urgency"; "result_delivery" ]
+  [ "keeper_name"
+  ; "message"
+  ; "title"
+  ; "urgency"
+  ; "result_delivery"
+  ; Schedule_run_watch.watch_field
+  ]
 
 let unknown_keeper_wake_body_fields body =
   List.filter
@@ -227,6 +233,10 @@ let validate_keeper_wake_body body =
            (String.concat ", " keeper_wake_body_fields))
   in
   let* _ = result_delivery_of_body body in
+  let* _ =
+    Schedule_run_watch.watch_of_body body
+    |> Result.map_error (fun detail -> keeper_wake_kind ^ " " ^ detail)
+  in
   match assoc_string "keeper_name" body, assoc_string "message" body with
   | None, _ -> Error (keeper_wake_kind ^ " payload requires non-empty body.keeper_name")
   | _, None -> Error (keeper_wake_kind ^ " payload requires non-empty body.message")

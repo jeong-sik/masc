@@ -389,7 +389,13 @@ let stamped_kind : Schedule_payload_projection.known_kind -> string = function
    is stamped from the creating turn's continuation and a supplied one is not
    honoured. *)
 let keeper_wake_arg_names =
-  [ "keeper_name"; "message"; "title"; "urgency"; "allow_unregistered_keeper" ]
+  [ "keeper_name"
+  ; "message"
+  ; "title"
+  ; "urgency"
+  ; "allow_unregistered_keeper"
+  ; Schedule_run_watch.watch_field
+  ]
 let lane_act_arg_names = [ "installation_id"; "action" ]
 
 let given args name =
@@ -401,6 +407,15 @@ let given args name =
 let keeper_wake_payload_from_args args =
   let* keeper_name = required_string args "keeper_name" in
   let* message = required_string args "message" in
+  let* watch =
+    match string_opt args Schedule_run_watch.watch_field with
+    | None -> Ok []
+    | Some url ->
+      Schedule_run_watch.target_of_run_url url
+      |> Result.map (fun target ->
+        [ Schedule_run_watch.watch_field, Schedule_run_watch.target_to_yojson target ])
+      |> Result.map_error (fun detail -> Schedule_run_watch.watch_field ^ ": " ^ detail)
+  in
   let optional name = function
     | None -> []
     | Some value -> [ name, `String value ]
@@ -409,6 +424,7 @@ let keeper_wake_payload_from_args args =
     [ "keeper_name", `String keeper_name; "message", `String message ]
     @ optional "title" (string_opt args "title")
     @ optional "urgency" (string_opt args "urgency")
+    @ watch
   in
   Ok
     (`Assoc
@@ -460,6 +476,21 @@ let validate_known_payload_request ~payload =
   | Ok () -> Ok ()
   | Error rejection ->
     Error (Schedule_payload_projection.creation_rejection_message rejection)
+;;
+
+(* A run watch moves one due time to the moment its run completes. A recurring
+   schedule gets a new due time after every occurrence, so the watch would
+   speak for the first occurrence only. *)
+let validate_run_watch_recurrence ~payload ~recurrence =
+  match Schedule_run_watch.watch_of_payload payload, recurrence with
+  | Error detail, _ -> Error detail
+  | Ok None, _ | Ok (Some _), Schedule_domain.One_shot -> Ok ()
+  | ( Ok (Some _)
+    , (Schedule_domain.Interval _ | Schedule_domain.Daily _ | Schedule_domain.Cron _) ) ->
+    Error
+      (Schedule_run_watch.watch_field
+       ^ " needs recurrence_kind one_shot: a recurring schedule would wait for the run only \
+          before its first occurrence")
 ;;
 
 (* A keeper_wake schedule whose target has no durable metadata can never be
@@ -837,6 +868,7 @@ let handle_write ~action ~tool_name ~start_time ctx args =
                  create parser's one_shot default decide an update. *)
               Error (Refusal "schedule not found")))
     in
+    let* () = plain (validate_run_watch_recurrence ~payload ~recurrence) in
     let* requested_at =
       let* given = strict_number args "requested_at_unix" in
       (* NDT-OK: absent requested_at_unix means "schedule this from the tool

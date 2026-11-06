@@ -135,14 +135,14 @@ build their rejection from it.
 | `scene_read` | `BrowserRead mode=scene`/`regions` | yes | yes | yes, only the pages the task space manages |
 | `viewport_capture` | `BrowserRead mode=screenshot` | yes | yes | yes, only the pages the task space manages |
 | `element_inventory` | `BrowserRead mode=elements` | yes | yes | yes, only the pages the task space manages |
-| `document_source` | the `browser_document` Lane Add-on source | yes | yes | no |
+| `document_source` | the `browser_document` Lane Add-on source | yes | yes | yes, only the pages the task space manages |
 | `dom_interaction` | `click`, `fill`, `scroll`, `follow_link` | yes | yes | yes, on a native managed Page |
 | `point_click` | `click_at` | yes, the element's own `click()` | yes, a trusted pointer | yes, on a native managed Page, ego's mouse |
 | `trusted_button_click` | `click_at` with `button` `middle` or `secondary` | no | yes | yes, on a native managed Page |
 | `trusted_double_click` | `double_click`, `double_click_at` | no | yes | yes, on a native managed Page |
 | `trusted_keyboard` | `type_text`, `press_key` | no | yes | yes, on a native managed Page, ego's keyboard |
 | `touch_input` | `tap_at`, `swipe` | no | yes | no |
-| `viewport_resize` | `set_viewport` | no | yes | no |
+| `viewport_resize` | `set_viewport` | no | yes | yes, a CDP override on a native managed Page that lasts while the ego SDK process that set it runs |
 | `tab_history` | `back`, `forward`, `reload`, subject to the transport's Page authority | no | yes | yes, native managed Pages in the task space; back and forward through the page's CDP history |
 | `tab_navigation` | `BrowserGoto`, subject to the transport's Page authority | no | yes | yes, native managed Pages in the task space |
 | `tab_closing` | `close_tab`, subject to the transport's Page authority | no | yes | yes, only agent-created Pages; unknown-origin Pages use release_tab |
@@ -151,6 +151,7 @@ build their rejection from it.
 | `frame_read` | `BrowserRead` text, elements and frames modes with `framePath` (observed outer-to-inner iframe selectors); a dialog is not read this way | no | yes | no; ego reads frames through `accessibility_snapshot` (its snapshot holds iframe content, and a subtree rooted at the iframe's ref reads one frame) and acts in them through `snapshot_target_input` |
 | `download_listing` | `BrowserRead mode=downloads` with `tabId` | no | no, its downloads are the person's own | yes, the downloads a native managed Page started, saved in the worker's folder and returned as artifacts |
 | `file_upload` | `BrowserAct upload` with the Keeper's files | no | no | yes, one CSS-matched file input on a native managed Page, or with `opener` the one control whose click opens the page's file chooser; the connection keeps the copies until its space ends |
+| `environment_emulation` | `BrowserAct set_emulation`, `clear_emulation` | no | no | yes, CDP overrides of a native managed Page's location, locale (Intl only) and time zone while the ego SDK process that set them runs; a location also grants that origin geolocation in the ego profile |
 | `point_scroll` | `scroll_at` | yes | yes, a trusted wheel | yes, on a native managed Page, ego's wheel |
 | `trusted_hover` | `hover`, `hover_at` | no | yes | yes, on a native managed Page |
 | `trusted_drag` | `drag_to`, `drag` | no | yes | yes, zero duration on native managed Pages |

@@ -1,0 +1,2 @@
+[ego-browser:notice] Ego Lite update is available (current 0.6.2.7). Finish the current browser task, then ask the user before running `ego-browser upgrade`; re-read the ego-browser Skill afterward.
+{"step":"nextProcess","value":{"intlLocale":"ko","numberLocale":"ko","timeZone":"Asia/Seoul","dateString":"21:00:00 GMT+0900 (한국 표준시)","language":"ko-KR","geolocation":"prompt"}}

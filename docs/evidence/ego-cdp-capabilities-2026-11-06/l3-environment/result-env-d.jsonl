@@ -1,0 +1,7 @@
+[ego-browser:notice] Ego Lite update is available (current 0.6.2.7). Finish the current browser task, then ask the user before running `ego-browser upgrade`; re-read the ego-browser Skill afterward.
+{"step":"task Browser.grantPermissions","value":{"error":"'Browser.grantPermissions' wasn't found"}}
+{"step":"page Browser.setPermission","value":{}}
+{"step":"page Browser.grantPermissions","value":{}}
+{"step":"task Browser.getVersion","value":{"error":"'Browser.getVersion' wasn't found"}}
+{"step":"task Browser.resetPermissions","value":{"error":"'Browser.resetPermissions' wasn't found"}}
+{"step":"state","value":"granted"}

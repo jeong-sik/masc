@@ -18,10 +18,12 @@ let scope_segment = function
   | Server -> "servers"
 ;;
 
+let dirname = "connector_names"
+
 let names_dir base_dir =
   Filename.concat
     (Common.masc_dir_from_base_path ~base_path:base_dir)
-    "connector_names"
+    dirname
 ;;
 
 let names_path ~base_dir ~connector ~scope =

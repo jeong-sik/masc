@@ -28,3 +28,6 @@ val publish :
     are removed only when the caller invokes [release_sources] after its
     result manifest has been committed. Incomplete or failed
     captures remain private and do not produce a complete-output claim. *)
+
+val capture_dirname : string
+(** The directory {!capture_directory} names below [<base>/.masc]. *)

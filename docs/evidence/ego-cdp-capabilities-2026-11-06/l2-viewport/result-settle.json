@@ -1,0 +1,20 @@
+{
+ "spaceId": 25,
+ "natural": [
+  1548,
+  990
+ ],
+ "trials": 100,
+ "changed": 100,
+ "wrongSizeAfterChange": 0,
+ "msP50": 0,
+ "msP90": 63,
+ "msP99": 1074,
+ "msMax": 1074,
+ "idleClear": {
+  "changed": false,
+  "ms": 1035,
+  "w": 1548,
+  "h": 990
+ }
+}

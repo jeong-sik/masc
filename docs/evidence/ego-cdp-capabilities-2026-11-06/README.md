@@ -61,3 +61,4 @@ CDP 로 바꾼 설정은 바꾼 SDK 프로세스가 끝나면 모두 사라졌�
 ## 층별 확인
 
 - L1 read mode html: [l1-read-html/](l1-read-html/README.md)
+- L2 화면 크기: [l2-viewport/](l2-viewport/README.md)

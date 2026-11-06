@@ -350,8 +350,12 @@ let support backend operation = match backend with
       | Connected Browser_lane.Webdriver_bidi -> conditional ~action:"set_viewport" Interact
           [observed;"Requires exact clientId/tabId and expectedUrl; " ^ viewport_bounds ^ ". With neither, the browser's own size returns.";
            "The size is an override on that tab until it is restored, which this connection does for the tabs it sized when its session ends; read the screenshot or scene again afterward. This is the page viewport, not the browser window."]
+      | Connected Browser_lane.Ego_task_space -> conditional ~action:"set_viewport" Interact
+          [observed;"Requires exact clientId/tabId and expectedUrl; " ^ viewport_bounds ^ ". With neither, the browser's own size returns.";
+           "The size is a CDP override on that Page. It stays while the SDK process that set it runs; every answer's sdkProcessStartedAt names that process, and another value means the size is gone. Restoring waits up to 2 s for the page to resize before its receipt. The override invalidates snapshot refs (refsInvalidated): take a new snapshot, and read the screenshot or scene again. This is the page viewport, not the browser window.";
+           ego_agent_pages]
       | Connected Browser_lane.Web_extension -> Unsupported "WebExtension cannot set the page viewport; the selected tab must not be silently moved to another browser."
-      | Connected Browser_lane.Ego_task_space | Safari_unavailable -> missing)
+      | Safari_unavailable -> missing)
     | Touch -> (match backend with
       | Connected Browser_lane.Webdriver_bidi -> conditional ~action:"tap_at" Interact
           [observed;geometry;

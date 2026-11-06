@@ -162,6 +162,7 @@ let test_resize_viewport_table () =
   let reaches backend = match Cap.support backend Cap.Resize_viewport with
     | Cap.Available _ | Cap.Conditional _ -> true | Cap.Unsupported _ -> false in
   check bool "live BiDi sets the viewport" true (reaches (Cap.Connected Lane.Webdriver_bidi));
+  check bool "ego sets the page viewport through its CDP session" true (reaches (Cap.Connected Lane.Ego_task_space));
   check bool "the extension does not" false (reaches (Cap.Connected Lane.Web_extension));
   check bool "Safari does not" false (reaches Cap.Safari_unavailable)
 

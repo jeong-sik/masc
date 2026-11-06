@@ -205,13 +205,13 @@ class CutTurnTests(unittest.TestCase):
             ]
         )
 
-    def find(self, stop_at: float, recent: float, keeper: str = "a") -> tuple[list[m.CutTurn], int, int]:
+    def find(self, stop_at: float, recent: float, keeper: str = "a") -> m.Cuts:
         return m.find_cut_turns([(m.Stop(BASE + stop_at, keeper), 0)], self.turns(), recent)
 
     def test_the_cut_turn_is_the_turn_of_the_last_request_before_the_stop(self) -> None:
-        cut, no_recent, duplicates = self.find(310, 120)
-        self.assertEqual((len(cut), no_recent, duplicates), (1, 0, 0))
-        turn = cut[0]
+        cuts = self.find(310, 120)
+        self.assertEqual((len(cuts.first), cuts.repeats, cuts.no_recent, cuts.duplicates), (1, [], 0, 0))
+        turn = cuts.first[0]
         self.assertEqual((turn.keeper, turn.turn, turn.shutdown), ("a", 2, 0))
         self.assertEqual(turn.elapsed_s, 110.0)
         self.assertEqual(turn.stopped_at, BASE + 310)
@@ -219,58 +219,123 @@ class CutTurnTests(unittest.TestCase):
         self.assertEqual(turn.runtime_id, "new")
 
     def test_a_later_request_of_the_same_turn_is_the_resume_and_not_a_member(self) -> None:
-        turn = self.find(310, 120)[0][0]
+        turn = self.find(310, 120).first[0]
         self.assertEqual(turn.resume_gap_s, 90.0)
         self.assertEqual(turn.requests, 2)
 
     def test_the_recent_window_includes_its_edge(self) -> None:
-        self.assertEqual(len(self.find(310, 10)[0]), 1)
-        cut, no_recent, _ = self.find(310, 9.5)
-        self.assertEqual((cut, no_recent), ([], 1))
+        self.assertEqual(len(self.find(310, 10).first), 1)
+        missed = self.find(310, 9.5)
+        self.assertEqual((missed.first, missed.no_recent), ([], 1))
 
     def test_a_request_that_ends_just_after_the_stop_still_counts(self) -> None:
-        cut, _, _ = self.find(298, 120)
-        self.assertEqual(cut[0].turn, 2)
-        self.assertEqual(cut[0].requests, 2)
-        early, _, _ = self.find(294, 120)
-        self.assertEqual(early[0].turn, 2)
+        cuts = self.find(298, 120)
+        self.assertEqual(cuts.first[0].turn, 2)
+        self.assertEqual(cuts.first[0].requests, 2)
+        early = self.find(294, 120)
+        self.assertEqual(early.first[0].turn, 2)
         before_second = index([("a", request(100, 160, 1)), ("a", request(165, 170, 2))])
-        cut_far, _, _ = m.find_cut_turns([(m.Stop(BASE + 164, "a"), 0)], before_second, 120)
-        self.assertEqual(cut_far[0].turn, 1)
+        far = m.find_cut_turns([(m.Stop(BASE + 164, "a"), 0)], before_second, 120)
+        self.assertEqual(far.first[0].turn, 1)
 
     def test_a_request_that_starts_within_the_slack_is_not_a_resume(self) -> None:
         turns = index([("a", request(200, 230, 2)), ("a", request(312, 330, 2)), ("a", request(316, 340, 2))])
-        cut, _, _ = m.find_cut_turns([(m.Stop(BASE + 310, "a"), 0)], turns, 120)
-        self.assertEqual(cut[0].requests, 2)
-        self.assertEqual(cut[0].resume_gap_s, 6.0)
+        cuts = m.find_cut_turns([(m.Stop(BASE + 310, "a"), 0)], turns, 120)
+        self.assertEqual(cuts.first[0].requests, 2)
+        self.assertEqual(cuts.first[0].resume_gap_s, 6.0)
         none = index([("a", request(200, 230, 2)), ("a", request(315, 330, 2))])
-        cut_none, _, _ = m.find_cut_turns([(m.Stop(BASE + 310, "a"), 0)], none, 120)
-        self.assertEqual(cut_none[0].requests, 2)
-        self.assertIsNone(cut_none[0].resume_gap_s)
+        cuts_none = m.find_cut_turns([(m.Stop(BASE + 310, "a"), 0)], none, 120)
+        self.assertEqual(cuts_none.first[0].requests, 2)
+        self.assertIsNone(cuts_none.first[0].resume_gap_s)
 
     def test_several_stop_lines_for_one_turn_count_once(self) -> None:
         stops = [(m.Stop(BASE + 310, "a"), 0), (m.Stop(BASE + 311, "a"), 0)]
-        cut, no_recent, duplicates = m.find_cut_turns(stops, self.turns(), 120)
-        self.assertEqual((len(cut), no_recent, duplicates), (1, 0, 1))
-        self.assertEqual(cut[0].elapsed_s, 110.0)
+        cuts = m.find_cut_turns(stops, self.turns(), 120)
+        self.assertEqual((len(cuts.first), cuts.repeats, cuts.no_recent, cuts.duplicates), (1, [], 0, 1))
+        self.assertEqual(cuts.first[0].elapsed_s, 110.0)
 
     def test_a_keeper_without_requests_has_no_recent_request(self) -> None:
-        cut, no_recent, _ = self.find(310, 1800, keeper="nobody")
-        self.assertEqual((cut, no_recent), ([], 1))
+        cuts = self.find(310, 1800, keeper="nobody")
+        self.assertEqual((cuts.first, cuts.no_recent), ([], 1))
 
     def test_a_stop_before_the_first_request_has_no_recent_request(self) -> None:
-        cut, no_recent, _ = self.find(10, 1800)
-        self.assertEqual((cut, no_recent), ([], 1))
+        cuts = self.find(10, 1800)
+        self.assertEqual((cuts.first, cuts.no_recent), ([], 1))
 
     def test_the_turn_ids_of_different_keepers_do_not_mix(self) -> None:
         turns = index([("a", request(0, 10, 5)), ("b", request(20, 30, 5, input_tokens=999))])
-        cut, _, _ = m.find_cut_turns([(m.Stop(BASE + 12, "a"), 0)], turns, 60)
-        self.assertEqual((cut[0].requests, cut[0].input_tokens), (1, 100))
+        cuts = m.find_cut_turns([(m.Stop(BASE + 12, "a"), 0)], turns, 60)
+        self.assertEqual((cuts.first[0].requests, cuts.first[0].input_tokens), (1, 100))
 
     def test_elapsed_never_goes_below_zero(self) -> None:
         turns = index([("a", request(100, 102, 1))])
-        cut, _, _ = m.find_cut_turns([(m.Stop(BASE + 98, "a"), 0)], turns, 60)
-        self.assertEqual(cut[0].elapsed_s, 0.0)
+        cuts = m.find_cut_turns([(m.Stop(BASE + 98, "a"), 0)], turns, 60)
+        self.assertEqual(cuts.first[0].elapsed_s, 0.0)
+
+
+class RepeatCutTests(unittest.TestCase):
+    def turns(self) -> m.Turns:
+        return index(
+            [
+                ("a", request(200, 230, 2, input_tokens=300, uncached=30, output=7)),
+                ("a", request(240, 300, 2, input_tokens=400, uncached=40, output=8)),
+                ("a", request(400, 420, 2, input_tokens=500, uncached=50, output=9, runtime="again")),
+                ("a", request(500, 520, 2, input_tokens=600, uncached=60, output=10, runtime="again")),
+            ]
+        )
+
+    def cut(self, *stops: tuple[float, int]) -> m.Cuts:
+        return m.find_cut_turns([(m.Stop(BASE + at, "a"), shutdown) for at, shutdown in stops], self.turns(), 120)
+
+    def test_a_later_shutdown_that_cuts_a_resumed_turn_again_is_a_repeat_cut(self) -> None:
+        cuts = self.cut((310, 0), (530, 1))
+        self.assertEqual((len(cuts.first), len(cuts.repeats), cuts.no_recent, cuts.duplicates), (1, 1, 0, 0))
+        first, again = cuts.first[0], cuts.repeats[0]
+        self.assertEqual((first.shutdown, first.elapsed_s, first.requests, first.resume_gap_s), (0, 110.0, 2, 90.0))
+        self.assertEqual(
+            (again.keeper, again.turn, again.shutdown, again.stopped_at, again.elapsed_s, again.requests),
+            ("a", 2, 1, BASE + 530, 130.0, 2),
+        )
+        self.assertEqual((again.input_tokens, again.uncached_tokens, again.output_tokens), (1100, 110, 19))
+        self.assertEqual(again.runtime_id, "again")
+        self.assertIsNone(again.resume_gap_s)
+
+    def test_a_repeat_cut_that_is_followed_by_a_request_has_a_gap(self) -> None:
+        cuts = self.cut((310, 0), (430, 1))
+        self.assertEqual(cuts.repeats[0].requests, 1)
+        self.assertEqual(cuts.repeats[0].elapsed_s, 30.0)
+        self.assertEqual(cuts.repeats[0].resume_gap_s, 70.0)
+
+    def test_stop_lines_of_the_same_shutdown_stay_duplicates_after_a_repeat_cut(self) -> None:
+        cuts = self.cut((310, 0), (311, 0), (530, 1), (531, 1))
+        self.assertEqual((len(cuts.first), len(cuts.repeats), cuts.duplicates), (1, 1, 2))
+
+    def test_one_shutdown_cuts_a_turn_once_even_if_a_request_starts_between_its_stop_lines(self) -> None:
+        turns = index([("a", request(200, 230, 2)), ("a", request(320, 345, 2))])
+        cuts = m.find_cut_turns([(m.Stop(BASE + 310, "a"), 0), (m.Stop(BASE + 350, "a"), 0)], turns, 120)
+        self.assertEqual((len(cuts.first), cuts.repeats, cuts.duplicates), (1, [], 1))
+
+    def test_a_later_shutdown_without_a_new_request_is_a_duplicate(self) -> None:
+        cuts = self.cut((310, 0), (320, 1))
+        self.assertEqual((len(cuts.first), cuts.repeats, cuts.duplicates), (1, [], 1))
+
+    def test_a_third_cut_counts_only_the_requests_after_the_second(self) -> None:
+        cuts = self.cut((310, 0), (430, 1), (530, 2))
+        self.assertEqual([repeat.shutdown for repeat in cuts.repeats], [1, 2])
+        self.assertEqual([repeat.requests for repeat in cuts.repeats], [1, 1])
+        self.assertEqual([repeat.elapsed_s for repeat in cuts.repeats], [30.0, 30.0])
+
+    def test_the_boundary_between_two_cuts_is_the_previous_stop_plus_the_slack(self) -> None:
+        turns = index(
+            [
+                ("a", request(200, 230, 2)),
+                ("a", request(315, 318, 2)),
+                ("a", request(316, 340, 2)),
+            ]
+        )
+        cuts = m.find_cut_turns([(m.Stop(BASE + 310, "a"), 0), (m.Stop(BASE + 350, "a"), 1)], turns, 120)
+        self.assertEqual((cuts.first[0].requests, cuts.first[0].resume_gap_s), (2, 6.0))
+        self.assertEqual((cuts.repeats[0].requests, cuts.repeats[0].elapsed_s), (1, 34.0))
 
 
 class NumbersTests(unittest.TestCase):
@@ -293,6 +358,52 @@ class NumbersTests(unittest.TestCase):
         self.assertEqual(m.hours(5400), 1.5)
         self.assertEqual(m.hours(1), 0.0)
         self.assertEqual(m.hours(18), 0.005)
+
+    def test_share_rounds_to_four_places_and_needs_a_span(self) -> None:
+        self.assertEqual(m.share(1.0, 4.0), 0.25)
+        self.assertEqual(m.share(1.0, 3.0), 0.3333)
+        self.assertEqual(m.share(0.0, 4.0), 0.0)
+        self.assertIsNone(m.share(1.0, 0.0))
+
+    def test_cut_totals_sum_the_cuts_and_count_distinct_turns(self) -> None:
+        cuts = [
+            m.CutTurn("a", 1, 0, 0.0, 3600.0, None, 2, 100, 10, 5, "x"),
+            m.CutTurn("a", 1, 1, 0.0, 1800.0, None, 3, 200, 20, 6, "x"),
+            m.CutTurn("b", 1, 0, 0.0, 1800.0, None, 4, 400, 40, 7, "y"),
+        ]
+        self.assertEqual(
+            m.cut_totals(cuts),
+            {
+                "cuts": 3,
+                "turns": 2,
+                "elapsed_hours": 2.0,
+                "requests": 9,
+                "input_tokens": 700,
+                "uncached_input_tokens": 70,
+                "output_tokens": 18,
+            },
+        )
+
+    def test_cuts_per_turn_counts_turns_by_how_often_they_were_cut(self) -> None:
+        cuts = [
+            cut_turn(keeper="a", turn=1, shutdown=0),
+            cut_turn(keeper="a", turn=1, shutdown=1),
+            cut_turn(keeper="a", turn=2, shutdown=0),
+            cut_turn(keeper="b", turn=1, shutdown=0),
+            cut_turn(keeper="b", turn=1, shutdown=1),
+            cut_turn(keeper="b", turn=1, shutdown=2),
+        ]
+        self.assertEqual(m.cuts_per_turn(cuts), {"1": 1, "2": 1, "3": 1})
+        self.assertEqual(list(m.cuts_per_turn(cuts)), ["1", "2", "3"])
+        self.assertEqual(m.cuts_per_turn([]), {})
+
+    def test_loss_bounds_use_the_gap_or_the_elapsed_time_for_the_lower_bound(self) -> None:
+        cuts = [cut_turn(elapsed=3600.0, gap=1800.0), cut_turn(turn=2, elapsed=7200.0, gap=None)]
+        self.assertEqual(
+            m.loss_bounds(cuts, 36000.0),
+            {"lower_hours": 2.5, "lower_share": 0.25, "upper_hours": 3.5, "upper_share": 0.35},
+        )
+        self.assertEqual(m.loss_bounds([], 0.0), {"lower_hours": 0.0, "lower_share": None, "upper_hours": 0.0, "upper_share": None})
 
 
 class FinishShareTests(unittest.TestCase):
@@ -416,6 +527,105 @@ def cast_rows(value: object) -> list[dict[str, object]]:
     return cast(list[dict[str, object]], value)
 
 
+class UnresumedWithCallsTests(unittest.TestCase):
+    def test_counts_not_resumed_turns_with_a_call_after_the_stop_slack(self) -> None:
+        stop = BASE + 100
+        cut = [
+            cut_turn(keeper="a", turn=1, stopped_at=stop, gap=None),
+            cut_turn(keeper="a", turn=2, stopped_at=stop, gap=None),
+            cut_turn(keeper="a", turn=3, stopped_at=stop, gap=60.0),
+            cut_turn(keeper="a", turn=4, stopped_at=stop, gap=None),
+            cut_turn(keeper="b", turn=1, stopped_at=stop, gap=None),
+        ]
+        calls = {
+            ("a", 1): [m.ToolCall(stop + 6, "X", "f")],
+            ("a", 2): [m.ToolCall(stop + 5, "X", "f"), m.ToolCall(stop - 50, "X", "g")],
+            ("a", 3): [m.ToolCall(stop + 60, "X", "f")],
+            ("b", 1): [m.ToolCall(stop + 500, "X", "f"), m.ToolCall(stop + 900, "Y", "f")],
+        }
+        self.assertEqual(m.unresumed_with_calls(cut, calls), 2)
+        self.assertEqual(m.unresumed_with_calls([], calls), 0)
+
+
+class CarriedContextTests(unittest.TestCase):
+    STOP = BASE + 100.0
+
+    def cut(self, turn: int, gap: float | None = 60.0, keeper: str = "a") -> m.CutTurn:
+        return cut_turn(keeper=keeper, turn=turn, stopped_at=self.STOP, gap=gap)
+
+    def turn_requests(self, turn: int, first: int, last: int, after: int | None) -> list[tuple[str, m.Request]]:
+        rows = [("a", request(0, 10, turn, input_tokens=first)), ("a", request(20, 30, turn, input_tokens=last))]
+        if after is not None:
+            rows.append(("a", request(200, 210, turn, input_tokens=after)))
+        return rows
+
+    def test_the_share_is_the_growth_the_first_request_after_the_stop_still_carries(self) -> None:
+        rows = [
+            *self.turn_requests(1, 1000, 11000, 8000),
+            *self.turn_requests(2, 1000, 11000, 11000),
+            ("a", request(300, 310, 2, input_tokens=21000)),
+            *self.turn_requests(3, 1000, 11000, 2000),
+            *self.turn_requests(5, 1000, 6000, 8000),
+            *self.turn_requests(9, 1000, 11000, 9000),
+            *self.turn_requests(10, 1000, 11000, 3000),
+            *self.turn_requests(12, 1000, 11000, 8800),
+        ]
+        result = m.carried_context([self.cut(turn) for turn in (1, 2, 3, 5, 9, 10, 12)], index(rows))
+        self.assertEqual(
+            result,
+            {
+                "min_growth_tokens": 5000,
+                "turns": 7,
+                "retained_share": {"p10": 0.1, "p50": 0.78, "p90": 1.4},
+                "at_least_80_percent": 3,
+                "below_20_percent": 1,
+            },
+        )
+
+    def test_turns_without_enough_history_growth_or_a_later_request_are_left_out(self) -> None:
+        rows = [
+            *self.turn_requests(4, 1000, 5999, 6000),
+            *self.turn_requests(6, 1000, 11000, None),
+            ("a", request(0, 10, 7, input_tokens=1000)),
+            ("a", request(200, 210, 7, input_tokens=11000)),
+            *self.turn_requests(8, 1000, 11000, 11000),
+            *self.turn_requests(11, 11000, 1000, 5000),
+            ("a", request(200, 210, 13, input_tokens=11000)),
+        ]
+        cuts = [self.cut(4), self.cut(6), self.cut(7), self.cut(8, gap=None), self.cut(11), self.cut(13)]
+        result = m.carried_context(cuts, index(rows))
+        self.assertEqual((result["turns"], result["retained_share"]), (0, None))
+        self.assertEqual((result["at_least_80_percent"], result["below_20_percent"]), (0, 0))
+
+    def test_a_request_that_starts_within_the_slack_is_still_before_the_stop(self) -> None:
+        rows = [
+            ("a", request(0, 10, 1, input_tokens=1000)),
+            ("a", request(105, 110, 1, input_tokens=11000)),
+            ("a", request(106, 120, 1, input_tokens=11000)),
+        ]
+        result = m.carried_context([self.cut(1)], index(rows))
+        self.assertEqual((result["turns"], result["retained_share"]), (1, {"p10": 1.0, "p50": 1.0, "p90": 1.0}))
+        self.assertEqual(m.carried_context([self.cut(1)], index(rows[:2]))["turns"], 0)
+
+    def test_requests_are_ordered_by_start_and_the_other_keepers_are_ignored(self) -> None:
+        rows = [
+            ("a", request(10, 20, 1, input_tokens=7000)),
+            ("a", request(0, 40, 1, input_tokens=1000)),
+            ("a", request(200, 210, 1, input_tokens=11000)),
+            ("b", request(-5, 15, 1, input_tokens=99999)),
+        ]
+        result = m.carried_context([self.cut(1)], index(rows))
+        self.assertEqual((result["turns"], result["retained_share"]), (1, {"p10": 1.667, "p50": 1.667, "p90": 1.667}))
+
+    def test_the_window_counts_first_cuts_only(self) -> None:
+        rows = self.turn_requests(1, 1000, 11000, 11000)
+        first = [self.cut(1)]
+        again = [cut_turn(keeper="a", turn=1, shutdown=1, stopped_at=BASE + 25.0, gap=60.0)]
+        turns = index(rows)
+        block = m.window_block(60.0, m.Cuts(first, again, 0, 0), 2, turns, {}, [60.0], 8)
+        self.assertEqual(cast_dict(block["carried_context"])["turns"], 1)
+
+
 class BreakdownTests(unittest.TestCase):
     def test_largest_elapsed_first_then_name_and_top_limits_the_rows(self) -> None:
         cut = [
@@ -441,18 +651,47 @@ class WindowBlockTests(unittest.TestCase):
             cut_turn(keeper="c", turn=3, shutdown=1, elapsed=1800.0),
         ]
         turns = m.Turns({}, {}, {("a", 1): (0.0, 7200.0), ("b", 2): (0.0, 1800.0), ("c", 3): (0.0, 1800.0)})
-        block = m.window_block(60.0, cut, 0, 0, 2, turns, {}, [60.0], 8)
+        block = m.window_block(60.0, m.Cuts(cut, [], 0, 0), 2, turns, {}, [60.0], 8)
         self.assertEqual(block["cut_turns_per_shutdown"], {"p50": 1.0, "p90": 2.0, "max": 2.0})
         self.assertEqual(block["elapsed_hours_per_shutdown"], {"p50": 1.0, "p90": 2.0, "max": 2.0})
         self.assertEqual(block["shutdowns_with_cut_turn"], 2)
         self.assertEqual(block["share_of_turn_span"], 1.0)
 
     def test_an_empty_window_has_no_share(self) -> None:
-        block = m.window_block(60.0, [], 0, 0, 0, m.Turns({}, {}, {}), {}, [60.0], 8)
+        block = m.window_block(60.0, m.Cuts([], [], 0, 0), 0, m.Turns({}, {}, {}), {}, [60.0], 8)
         self.assertIsNone(block["share_of_turn_span"])
         self.assertEqual(block["cut_turns"], 0)
         self.assertEqual(block["by_keeper"], [])
         self.assertEqual(block["elapsed_minutes"], {"p50": 0.0, "p90": 0.0, "max": 0.0})
+        self.assertEqual(cast_dict(block["repeat_cuts"])["cuts"], 0)
+        self.assertIsNone(cast_dict(block["all_cuts"])["share_of_turn_span"])
+
+    def test_the_cut_turn_figures_leave_out_repeat_cuts_and_all_cuts_add_them(self) -> None:
+        first = [
+            cut_turn(keeper="a", turn=1, shutdown=0, elapsed=3600.0, gap=600.0),
+            cut_turn(keeper="b", turn=2, shutdown=0, elapsed=1200.0, gap=None),
+        ]
+        again = [cut_turn(keeper="a", turn=1, shutdown=2, elapsed=1800.0, gap=None)]
+        turns = m.Turns({}, {}, {("a", 1): (0.0, 30000.0), ("b", 2): (0.0, 6000.0)})
+        block = m.window_block(60.0, m.Cuts(first, again, 5, 7), 3, turns, {}, [60.0], 8)
+        self.assertEqual((block["cut_turns"], block["elapsed_hours"], block["share_of_turn_span"]), (2, 1.333, 0.1333))
+        self.assertEqual((block["duplicate_stop_lines"], block["no_recent_request"]), (7, 5))
+        self.assertEqual(block["shutdowns_with_cut_turn"], 1)
+        self.assertEqual(cast_dict(block["repeat_cuts"])["cuts"], 1)
+        self.assertEqual(cast_dict(block["repeat_cuts"])["elapsed_hours"], 0.5)
+        everything = cast_dict(block["all_cuts"])
+        self.assertEqual((everything["cuts"], everything["turns"], everything["shutdowns"]), (3, 2, 2))
+        self.assertEqual((everything["elapsed_hours"], everything["share_of_turn_span"]), (1.833, 0.1833))
+        self.assertEqual(everything["cuts_per_turn"], {"1": 1, "2": 1})
+        self.assertEqual(
+            everything["loss"],
+            {"lower_hours": 1.0, "lower_share": 0.1, "upper_hours": 2.0, "upper_share": 0.2},
+        )
+
+
+def cast_dict(value: object) -> dict[str, object]:
+    assert isinstance(value, dict)
+    return cast(dict[str, object], value)
 
 
 class InputFilesTests(unittest.TestCase):
@@ -541,6 +780,7 @@ class CommandLineTests(unittest.TestCase):
                 tool_row("k1", 7, 405, "Execute", "f1"),
                 tool_row("k1", 7, 410, "Execute", "f3"),
                 tool_row("k2", 3, 260, "Read", "f2"),
+                tool_row("k2", 3, 400, "Read", "f9"),
                 tool_row("k9", 1, 260, "Read", "f2"),
             ],
         )
@@ -588,6 +828,7 @@ class CommandLineTests(unittest.TestCase):
         self.assertEqual(window["resume_gap_hours_total"], m.hours(88))
         self.assertEqual(window["not_resumed_cut_turns"], 1)
         self.assertEqual(window["not_resumed_elapsed_hours"], m.hours(115))
+        self.assertEqual(window["not_resumed_with_calls_after_stop"], 1)
         self.assertEqual(
             window["repeated_calls"],
             {
@@ -602,6 +843,37 @@ class CommandLineTests(unittest.TestCase):
         self.assertEqual([row["keeper"] for row in window["by_keeper"]], ["k1", "k2"])
         self.assertEqual(window["by_runtime"], [{"runtime_id": "rt", "cut_turns": 2, "elapsed_hours": m.hours(367)}])
         self.assertEqual(window["cut_turns_per_shutdown"], {"p50": 2.0, "p90": 2.0, "max": 2.0})
+
+    def test_the_report_counts_a_turn_that_a_second_shutdown_cuts_again(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = pathlib.Path(tmp)
+            masc = base / ".masc"
+            write_lines(
+                masc / "logs" / f"system_log_{DAY}.jsonl",
+                [shutdown_row(105), stop_row("k1", 110), shutdown_row(305), stop_row("k1", 310)],
+            )
+            write_lines(
+                masc / "costs" / "2026-11" / "05.jsonl",
+                [cost_row("k1", 7, 100, 100_000), cost_row("k1", 7, 300, 100_000), cost_row("k1", 7, 500, 100_000)],
+            )
+            write_lines(masc / "tool_calls" / "2026-11" / "05.jsonl", [])
+            _, printed = self.run_main(
+                ["--base-path", str(base), "--from-date", DAY, "--to-date", DAY, "--recent-request-s", "600"]
+            )
+        (window,) = json.loads(printed)["windows"]
+        self.assertEqual((window["cut_turns"], window["duplicate_stop_lines"], window["elapsed_hours"]), (1, 0, m.hours(110)))
+        self.assertEqual(window["resume_gap_hours_total"], m.hours(90))
+        self.assertEqual(window["repeat_cuts"]["cuts"], 1)
+        self.assertEqual(window["repeat_cuts"]["elapsed_hours"], m.hours(110))
+        self.assertEqual(window["repeat_cuts"]["uncached_input_tokens"], 100)
+        everything = window["all_cuts"]
+        self.assertEqual((everything["cuts"], everything["turns"], everything["shutdowns"]), (2, 1, 2))
+        self.assertEqual((everything["elapsed_hours"], everything["share_of_turn_span"]), (m.hours(220), 0.44))
+        self.assertEqual(everything["cuts_per_turn"], {"2": 1})
+        self.assertEqual(
+            everything["loss"],
+            {"lower_hours": m.hours(180), "lower_share": 0.36, "upper_hours": m.hours(400), "upper_share": 0.8},
+        )
 
     def test_without_json_out_the_report_goes_to_stdout(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

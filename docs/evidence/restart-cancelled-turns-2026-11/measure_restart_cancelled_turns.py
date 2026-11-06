@@ -22,14 +22,40 @@ Definitions:
   `recent` seconds before the stop line (a request that finished up to 5 seconds after
   it counts, for clock slack). `recent` is a parameter and the report has one block per
   value, because the logs do not name the turn that was running.
-- duplicate stop lines: several stop lines can name the same cut turn. It counts once.
+- duplicate stop lines: several stop lines of one shutdown can name the same turn, and a
+  later shutdown can name a turn that has no request since its last cut. Neither is a new
+  cut, and each counts once as a duplicate.
+- repeat cut: a later shutdown cuts a turn again after it went on, meaning the turn has a
+  request that starts more than 5 seconds after its last cut. The turns of the first cuts
+  are the "cut turns" of the report, and every cut including the repeat ones is `all_cuts`.
 - no recent request: the stopped Keeper had no model request in the `recent` seconds
   before the stop line, so no turn is named.
-- elapsed: the stop time minus the start of the cut turn's first request (the request
-  finish time minus `request_latency_ms`). A turn that began before the first day of the
-  window is cut short on the left.
+- elapsed: the stop time minus the start of the first request of the cut (the request
+  finish time minus `request_latency_ms`). A repeat cut starts counting at the first request
+  after the previous cut. A turn that began before the first day of the window is cut short
+  on the left.
 - resumed: a request of the same turn starts more than 5 seconds after the stop. The gap
-  is the time from the stop to the start of that request.
+  is the time from the stop to the start of that request. A turn can also show tool calls
+  after the stop without a cost row, so `not_resumed_with_calls_after_stop` counts the
+  not resumed turns that have such a call.
+- loss bounds: the lower bound counts a resumed cut as its gap and a cut that was not
+  resumed as its elapsed time, which assumes the work done before a stop is used again. The
+  upper bound counts the elapsed time of every cut plus the gap of the resumed ones, which
+  assumes that work is done again. Neither counts the model request that was running at the
+  stop, because it has no cost row.
+- carried context: for a resumed cut turn with at least two requests before the stop whose
+  input grew by `CONTEXT_GROWTH_MIN_TOKENS` or more from its first request to its last one
+  before the stop, the share (first request after the stop - first request of the turn) /
+  (last request before the stop - first request of the turn) of input tokens. A share near 1
+  or above means the request after the restart carries what the turn had built up. A share
+  near 0 means it starts from the context the turn began with.
+- turn number: the runtime takes `total_turns + 1` at the start of a turn
+  (`lib/keeper/keeper_unified_turn.ml`) and raises `total_turns` when a turn ends in success
+  or failure and records its result (`keeper_unified_metrics_result.ml`,
+  `keeper_unified_metrics_failure.ml`, `keeper_turn_spend_commit.ml` under `lib/keeper/`). A
+  turn that a shutdown stops records nothing, so the next turn of that Keeper takes the same
+  number. "Resumed" therefore means the Keeper ran another turn after the restart. It does not
+  show that the stopped work went on.
 - repeated call: a tool call that starts after the stop and has the same tool and
   `input_fingerprint` as a call of the same turn that started before it.
 - turn span: the first request start to the last request end of a turn. It leaves out
@@ -80,6 +106,9 @@ DEFAULT_RECENT_S = (120.0, 600.0, 1800.0)
 DEFAULT_DRAIN_S = (60.0, 300.0, 900.0)
 DEFAULT_TOP = 8
 REPEATED_TOOLS_SHOWN = 5
+CONTEXT_GROWTH_MIN_TOKENS = 5000
+CARRIED_SHARE_HIGH = 0.8
+CARRIED_SHARE_LOW = 0.2
 SECONDS_PER_HOUR = 3600.0
 
 TurnKey = tuple[str, int]
@@ -122,6 +151,14 @@ class CutTurn:
     uncached_tokens: int
     output_tokens: int
     runtime_id: str
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class Cuts:
+    first: list[CutTurn]
+    repeats: list[CutTurn]
+    no_recent: int
+    duplicates: int
 
 
 @dataclasses.dataclass(slots=True)
@@ -283,10 +320,10 @@ def attribute(stops: Sequence[Stop], shutdowns: Sequence[float]) -> tuple[list[t
     return attributed, unattributed
 
 
-def find_cut_turns(
-    attributed: Sequence[tuple[Stop, int]], turns: Turns, recent_s: float
-) -> tuple[list[CutTurn], int, int]:
-    found: dict[TurnKey, CutTurn] = {}
+def find_cut_turns(attributed: Sequence[tuple[Stop, int]], turns: Turns, recent_s: float) -> Cuts:
+    first: dict[TurnKey, CutTurn] = {}
+    repeats: list[CutTurn] = []
+    latest: dict[TurnKey, CutTurn] = {}
     no_recent = 0
     duplicates = 0
     for stop, shutdown in attributed:
@@ -296,13 +333,23 @@ def find_cut_turns(
             no_recent += 1
             continue
         turn = requests[last].turn
-        if (stop.keeper, turn) in found:
+        key = (stop.keeper, turn)
+        previous = latest.get(key)
+        if previous is not None and previous.shutdown == shutdown:
             duplicates += 1
             continue
         same_turn = [request for request in requests if request.turn == turn]
-        members = [request for request in same_turn if request.start <= stop.at + CLOCK_SLACK_S]
+        members = [
+            request
+            for request in same_turn
+            if request.start <= stop.at + CLOCK_SLACK_S
+            and (previous is None or request.start > previous.stopped_at + CLOCK_SLACK_S)
+        ]
+        if not members:
+            duplicates += 1
+            continue
         later = [request.start for request in same_turn if request.start > stop.at + CLOCK_SLACK_S]
-        found[(stop.keeper, turn)] = CutTurn(
+        cut = CutTurn(
             keeper=stop.keeper,
             turn=turn,
             shutdown=shutdown,
@@ -315,7 +362,12 @@ def find_cut_turns(
             output_tokens=sum(request.output_tokens for request in members),
             runtime_id=requests[last].runtime_id,
         )
-    return list(found.values()), no_recent, duplicates
+        latest[key] = cut
+        if previous is None:
+            first[key] = cut
+        else:
+            repeats.append(cut)
+    return Cuts(list(first.values()), repeats, no_recent, duplicates)
 
 
 def quantile(sorted_values: Sequence[float], q: float) -> float:
@@ -381,6 +433,48 @@ def repeated_calls(
     }
 
 
+def unresumed_with_calls(cut: Sequence[CutTurn], calls: Mapping[TurnKey, Sequence[ToolCall]]) -> int:
+    return sum(
+        1
+        for turn in cut
+        if turn.resume_gap_s is None
+        and any(call.at > turn.stopped_at + CLOCK_SLACK_S for call in calls.get((turn.keeper, turn.turn), []))
+    )
+
+
+def carried_context(cut: Sequence[CutTurn], turns: Turns) -> dict[str, object]:
+    shares: list[float] = []
+    for turn in cut:
+        if turn.resume_gap_s is None:
+            continue
+        own = sorted(
+            (request for request in turns.by_agent.get(turn.keeper, []) if request.turn == turn.turn),
+            key=lambda request: request.start,
+        )
+        before = [request for request in own if request.start <= turn.stopped_at + CLOCK_SLACK_S]
+        after = [request for request in own if request.start > turn.stopped_at + CLOCK_SLACK_S]
+        if not before or not after:
+            continue
+        growth = before[-1].input_tokens - before[0].input_tokens
+        if growth < CONTEXT_GROWTH_MIN_TOKENS:
+            continue
+        shares.append((after[0].input_tokens - before[0].input_tokens) / growth)
+    ordered = sorted(shares)
+    return {
+        "min_growth_tokens": CONTEXT_GROWTH_MIN_TOKENS,
+        "turns": len(ordered),
+        "retained_share": {
+            "p10": round(quantile(ordered, 0.1), 3),
+            "p50": round(quantile(ordered, 0.5), 3),
+            "p90": round(quantile(ordered, 0.9), 3),
+        }
+        if ordered
+        else None,
+        "at_least_80_percent": sum(1 for share in ordered if share >= CARRIED_SHARE_HIGH),
+        "below_20_percent": sum(1 for share in ordered if share < CARRIED_SHARE_LOW),
+    }
+
+
 def hours(seconds: float) -> float:
     return round(seconds / SECONDS_PER_HOUR, 3)
 
@@ -409,17 +503,55 @@ def breakdown(cut: Sequence[CutTurn], key: str, top: int | None) -> list[dict[st
     ]
 
 
+def share(seconds: float, span_s: float) -> float | None:
+    return round(seconds / span_s, 4) if span_s > 0 else None
+
+
+def cut_totals(cuts: Sequence[CutTurn]) -> dict[str, object]:
+    return {
+        "cuts": len(cuts),
+        "turns": len({(cut.keeper, cut.turn) for cut in cuts}),
+        "elapsed_hours": hours(sum(cut.elapsed_s for cut in cuts)),
+        "requests": sum(cut.requests for cut in cuts),
+        "input_tokens": sum(cut.input_tokens for cut in cuts),
+        "uncached_input_tokens": sum(cut.uncached_tokens for cut in cuts),
+        "output_tokens": sum(cut.output_tokens for cut in cuts),
+    }
+
+
+def cuts_per_turn(cuts: Sequence[CutTurn]) -> dict[str, int]:
+    per_turn = Counter((cut.keeper, cut.turn) for cut in cuts)
+    return {str(times): count for times, count in sorted(Counter(per_turn.values()).items())}
+
+
+def loss_bounds(cuts: Sequence[CutTurn], span_s: float) -> dict[str, object]:
+    lower = upper = 0.0
+    for cut in cuts:
+        if cut.resume_gap_s is None:
+            lower += cut.elapsed_s
+            upper += cut.elapsed_s
+        else:
+            lower += cut.resume_gap_s
+            upper += cut.elapsed_s + cut.resume_gap_s
+    return {
+        "lower_hours": hours(lower),
+        "lower_share": share(lower, span_s),
+        "upper_hours": hours(upper),
+        "upper_share": share(upper, span_s),
+    }
+
+
 def window_block(
     recent_s: float,
-    cut: Sequence[CutTurn],
-    no_recent: int,
-    duplicates: int,
+    cuts: Cuts,
     shutdown_count: int,
     turns: Turns,
     calls: Mapping[TurnKey, Sequence[ToolCall]],
     waits_s: Sequence[float],
     top: int,
 ) -> dict[str, object]:
+    cut = cuts.first
+    all_cuts = [*cuts.first, *cuts.repeats]
     turn_span_s = sum(end - start for start, end in turns.spans.values())
     elapsed = sum(turn.elapsed_s for turn in cut)
     per_shutdown_count = [0.0] * shutdown_count
@@ -433,11 +565,11 @@ def window_block(
     return {
         "recent_request_s": recent_s,
         "cut_turns": len(cut),
-        "duplicate_stop_lines": duplicates,
-        "no_recent_request": no_recent,
+        "duplicate_stop_lines": cuts.duplicates,
+        "no_recent_request": cuts.no_recent,
         "shutdowns_with_cut_turn": len({turn.shutdown for turn in cut}),
         "elapsed_hours": hours(elapsed),
-        "share_of_turn_span": round(elapsed / turn_span_s, 4) if turn_span_s > 0 else None,
+        "share_of_turn_span": share(elapsed, turn_span_s),
         "elapsed_minutes": spread([turn.elapsed_s for turn in cut], 60.0),
         "cut_turns_per_shutdown": spread(per_shutdown_count, 1.0),
         "elapsed_hours_per_shutdown": spread(per_shutdown_elapsed, SECONDS_PER_HOUR),
@@ -451,10 +583,20 @@ def window_block(
         "resume_gap_hours_total": hours(sum(gaps)),
         "not_resumed_cut_turns": len(not_resumed),
         "not_resumed_elapsed_hours": hours(sum(turn.elapsed_s for turn in not_resumed)),
+        "not_resumed_with_calls_after_stop": unresumed_with_calls(cut, calls),
+        "carried_context": carried_context(cut, turns),
         "repeated_calls": repeated_calls(cut, calls),
         "finish_share_if_shutdown_waited": finish_shares(cut, turns.spans, waits_s),
         "by_keeper": breakdown(cut, "keeper", top),
         "by_runtime": breakdown(cut, "runtime_id", None),
+        "repeat_cuts": cut_totals(cuts.repeats),
+        "all_cuts": {
+            **cut_totals(all_cuts),
+            "shutdowns": len({turn.shutdown for turn in all_cuts}),
+            "share_of_turn_span": share(sum(turn.elapsed_s for turn in all_cuts), turn_span_s),
+            "cuts_per_turn": cuts_per_turn(all_cuts),
+            "loss": loss_bounds(all_cuts, turn_span_s),
+        },
     }
 
 
@@ -507,11 +649,11 @@ def measure(
     turns = index_requests(parsed)
     attributed, unattributed = attribute(stops, shutdowns)
     found = [find_cut_turns(attributed, turns, recent) for recent in recent_s]
-    wanted = {(turn.keeper, turn.turn) for cut, _, _ in found for turn in cut}
+    wanted = {(turn.keeper, turn.turn) for cuts in found for turn in cuts.first}
     calls = read_tool_calls(inputs.tool_calls, wanted, skipped)
     blocks = [
-        window_block(recent, cut, no_recent, duplicates, len(shutdowns), turns, calls, waits_s, top)
-        for recent, (cut, no_recent, duplicates) in zip(recent_s, found, strict=True)
+        window_block(recent, cuts, len(shutdowns), turns, calls, waits_s, top)
+        for recent, cuts in zip(recent_s, found, strict=True)
     ]
     return {
         "params": {

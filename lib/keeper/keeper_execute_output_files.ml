@@ -13,8 +13,10 @@ let error_code = function
   | Capture_failed _ -> "execute_output_capture_failed"
   | Persistence_failed _ -> "execute_output_externalization_failed"
 
+let capture_dirname = "execute_output"
+
 let capture_directory ~base_path =
-  Filename.concat (Common.masc_dir_from_base_path ~base_path) "execute_output"
+  Filename.concat (Common.masc_dir_from_base_path ~base_path) capture_dirname
 
 type publication =
   { fields : (string * Yojson.Safe.t) list

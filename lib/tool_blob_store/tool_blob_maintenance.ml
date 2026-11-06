@@ -845,7 +845,7 @@ let scan_decoded_keeper_files ~base_path ~scope references =
               (match decode path with
                | Ok None -> Ok current
                | Ok (Some json) -> references_in_json ~path ~line:1 current json
-               | Error detail -> Error (Durable_source_parse_failed { path; line = 1; detail }))
+               | Error reason -> Error (Durable_source_read_failed { path; reason }))
             | { Unix.st_kind =
                   Unix.S_DIR | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK
               ; _

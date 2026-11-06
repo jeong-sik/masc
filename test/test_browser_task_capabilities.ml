@@ -191,8 +191,9 @@ let test_select_option_table () =
 let test_list_windows_table () =
   let reaches backend = match Cap.support backend Cap.List_windows with
     | Cap.Available _ | Cap.Conditional _ -> true | Cap.Unsupported _ -> false in
+  check bool "ego names each tab's window" true (reaches (Cap.Connected Lane.Ego_task_space));
   List.iter (fun (label,backend) -> check bool (label ^ " does not") false (reaches backend))
-    ["ego",Cap.Connected Lane.Ego_task_space;"Safari",Cap.Safari_unavailable]
+    ["Safari",Cap.Safari_unavailable]
 
 (* The catalog claims on an Ego connection only what its peer does
    (Browser_lane.live_transport_serves Ego_task_space). Page operations retain
@@ -210,8 +211,8 @@ let test_ego_table () =
    | Cap.Available _|Cap.Conditional _|Cap.Unsupported _ -> fail "Ego HTML5 drop must use the selector-to-selector drag_to");
   let reachable = List.filter (fun operation -> match Cap.support backend operation with
     | Cap.Available _ | Cap.Conditional _ -> true | Cap.Unsupported _ -> false) Cap.operations in
-  check (list string) "reads, capture, the tab list, its own tabs, their history, input, touch, dialogs, uploads and downloads on them, their viewport size and environment, and the space handed to the operator and back"
-    ["list_tabs";"open_tab";"close_tab";"activate_tab";"navigate";"follow_link";"back";"forward";"reload";"stop_loading";"read_text";"read_html";"read_elements";"read_scene";"read_regions";"read_snapshot";"screenshot";"native_workflow";"click_snapshot_target";"fill_snapshot_target";
+  check (list string) "reads, capture, the tab list and its windows, its own tabs, their history, input, touch, dialogs, uploads and downloads on them, their viewport size and environment, and the space handed to the operator and back"
+    ["list_tabs";"open_tab";"close_tab";"activate_tab";"list_windows";"navigate";"follow_link";"back";"forward";"reload";"stop_loading";"read_text";"read_html";"read_elements";"read_scene";"read_regions";"read_snapshot";"screenshot";"native_workflow";"click_snapshot_target";"fill_snapshot_target";
      "hover_snapshot_target";"double_click_snapshot_target";"click";"double_click";"right_click";"middle_click";"hover";"pointer_drag";"html5_drop";"scroll_page";"scroll_at";
      "fill";"type_text";"press_key";"key_chord";"select_option";"read_dialog";"accept_dialog";"dismiss_dialog";"hand_off";"take_over";"space_status";"finish_space";"wait_for_control";"adopt_tab";"release_tab";"upload_file";"list_downloads";"resize_viewport";"touch";"emulate_environment"]
     (List.map Cap.operation_name reachable);

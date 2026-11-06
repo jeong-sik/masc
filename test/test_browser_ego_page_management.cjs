@@ -112,6 +112,28 @@ test('bare native inventory and direct answer never require blocked Page.info',a
   assert.equal(Object.hasOwn(result.value,'dialog'),false);
   assert.deepEqual(f.calls,['info','dismiss']);
 });
+test('native inventory takes each tab window from the browser and lists a tab it cannot place without one',async()=>{
+  const rows=[{label:'p1',targetId:'T1',openedBy:'agent',title:'a',url:'https://a.test/',active:true},
+    {label:undefined,targetId:'T9',openedBy:'unknown',title:'b',url:'https://b.test/',active:false},
+    {label:'p2',targetId:'T2',openedBy:'agent',title:'c',url:'https://c.test/',active:false},
+    {label:'p3',targetId:'T3',openedBy:'agent',title:'d',url:'https://d.test/',active:false}];
+  const windows={T1:{windowId:7,bounds:{width:800}},T2:{windowId:-1},T3:{windowId:'8'}};
+  const asked=[];
+  const task={tabs:async()=>rows,cdp:async(method,params)=>{
+    asked.push([method,params.targetId]);
+    if (!Object.hasOwn(windows,params.targetId)) throw Error('No target with given id');
+    return windows[params.targetId];
+  }};
+  const listed=[...await inventory(task)];
+  assert.deepEqual(listed.map(row=>row.windowId),[7,undefined,undefined,undefined]);
+  assert.deepEqual(listed.map(row=>Object.hasOwn(row,'windowId')),[true,false,false,false]);
+  assert.equal(Object.hasOwn(listed[0],'bounds'),false);
+  assert.equal(listed[1].label,null);
+  assert.deepEqual(asked,rows.map(row=>['Browser.getWindowForTarget',row.targetId]));
+  const withoutCdp=[...await inventory({tabs:async()=>rows})];
+  assert.deepEqual(withoutCdp.map(row=>row.targetId),['T1','T9','T2','T3']);
+  assert.equal(withoutCdp.some(row=>Object.hasOwn(row,'windowId')),false);
+});
 test('dialog answer validates fresh canonical identity before any watcher or method',async()=>{
   for(const mutate of [
     f=>{f.task.spaceId=21;},f=>{f.task.tabs=async()=>[];},

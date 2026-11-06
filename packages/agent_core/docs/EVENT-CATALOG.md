@@ -259,9 +259,10 @@ them into a final `Types.api_response`.
 | OpenAI `response.completed` | `MessageStop` |
 | Gemini `streamGenerateContent` chunks | Parsed per chunk by `gemini_chunk_to_events` (`streaming.ml`) into `ContentBlockStart` / `ContentBlockDelta(TextDelta\|ThinkingDelta)` / `MessageDelta` / `MessageStop` |
 
-`emit_synthetic_events` has no production callers (test-only fallback that
-synthesizes a pseudo-stream from a final `api_response`); it is not how any
-provider's live chunks are mapped.
+`emit_synthetic_events` synthesizes a pseudo-stream from a final
+`api_response`. `Pipeline` calls it only for a provider whose capabilities
+set `supports_native_streaming` to false; it is not how any provider's live
+chunks are mapped.
 
 SSE events **do not reach Event_bus**. They are consumed by the stream
 accumulator inside the provider API module, and only the final

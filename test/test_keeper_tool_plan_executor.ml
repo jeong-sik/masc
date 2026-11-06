@@ -986,7 +986,8 @@ let serial_order_fixture () =
   let parallel = canonical_descriptor "masc_board_stats" in
   let serial = canonical_descriptor "BrowserSession" in
   let session_input =
-    Plan.Json_template.literal (`Assoc [ "action", `String "status" ])
+    Plan.Json_template.literal
+      (`Assoc [ "action", `String "goal_status"; "goalId", `String "goal-probe" ])
   in
   let nodes =
     [ make_node ~tool_name:"keeper_lane_status" ~after:[] ~input:empty_input "producer"
@@ -1009,7 +1010,8 @@ let serial_chain_failure_fixture ~branch_failure_policy =
   let producer = canonical_descriptor "keeper_lane_status" in
   let serial = canonical_descriptor "BrowserSession" in
   let session_input =
-    Plan.Json_template.literal (`Assoc [ "action", `String "status" ])
+    Plan.Json_template.literal
+      (`Assoc [ "action", `String "goal_status"; "goalId", `String "goal-probe" ])
   in
   let nodes =
     [ make_node ~tool_name:"keeper_lane_status" ~after:[] ~input:empty_input "producer"

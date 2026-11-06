@@ -160,8 +160,7 @@ let with_eio_backend_and_dir f =
   let clock = Eio.Stdenv.clock env in
   let tmp_dir = make_test_dir "masc_eio" in
   let config =
-    { (Backend.default_config ()) with
-      base_path = tmp_dir
+    { Backend.base_path = tmp_dir
     ; node_id = "test"
     }
   in

@@ -37,8 +37,7 @@ let with_eio_backends f =
   let clock = Eio.Stdenv.clock env in
   let tmp_dir = make_test_dir "masc_lock_backlog" in
   let config =
-    { (Backend.default_config ()) with
-      base_path = tmp_dir
+    { Backend.base_path = tmp_dir
     ; node_id = "test-node"
     }
   in
@@ -379,8 +378,7 @@ let with_eio_alias_backends f =
   let tmp_dir = make_test_dir "masc_lock_alias" in
   let link = tmp_dir ^ ".link" in
   let config base_path =
-    { (Backend.default_config ()) with
-      base_path
+    { Backend.base_path
     ; node_id = "test-node"
     }
   in

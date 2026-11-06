@@ -585,7 +585,6 @@
   test_process_timeout_counter
   test_timeout_origin
   test_inference_utils
-  test_auth_ambiguous_lookup_9786
   test_auth_load_credential_of
   test_dashboard_harness_health
   test_keeper_timing
@@ -928,7 +927,6 @@
   test_process_timeout_counter
   test_timeout_origin
   test_inference_utils
-  test_auth_ambiguous_lookup_9786
   test_auth_load_credential_of
   test_dashboard_harness_health
   test_keeper_timing

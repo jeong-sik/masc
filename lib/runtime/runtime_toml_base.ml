@@ -1,7 +1,3 @@
-(** The parts of the Runtime TOML parser that every layer reader uses: the
-    error value and its accumulation helpers, the protocol-to-api-format
-    table and the transport extraction. *)
-
 type parse_error =
   { path : string
   ; message : string

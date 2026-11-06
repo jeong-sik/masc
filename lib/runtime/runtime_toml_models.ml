@@ -1,7 +1,3 @@
-(** Layer 2 of the Runtime TOML parser: the model tables. It reads each
-    model's capabilities, thinking-control format, sampling bounds, reasoning
-    effort and turn timeout. *)
-
 open Runtime_toml_base
 open Runtime_toml_providers
 

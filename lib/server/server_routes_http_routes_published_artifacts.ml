@@ -20,12 +20,6 @@ let error_response error =
        "recovery", `String "Read this artifact before retrying publication."] in
   `Assoc (("error", `String (Store.error_message error)) :: ("code", `String code) :: extra), status
 
-let respond ?cors ?(status = `OK) request reqd json =
-  let cors = match cors with Some headers -> headers | None -> public_read_cors_headers request in
-  Http.Response.json_value ~status
-    ~extra_headers:(["cache-control", "private, no-store"] @ cors)
-    json reqd
-
 let share_error_response error =
   let status, code, extra = match error with
     | Store.Share_invalid _ -> `Bad_request, "invalid_artifact_share", []
@@ -227,7 +221,7 @@ let set_share ~config ~body =
           "receipt", Share.receipt_to_json receipt; "current", Share.snapshot_to_json current] }
 
 let respond_operation ?cors request reqd response =
-  respond ?cors ~status:response.status request reqd response.json
+  respond_no_store_json_value ?cors ~status:response.status request reqd response.json
 
 let add_routes router =
   router

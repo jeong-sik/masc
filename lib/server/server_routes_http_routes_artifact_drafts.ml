@@ -22,11 +22,9 @@ let error_response error =
   | Commit_uncertain draft -> response `Service_unavailable "artifact_draft_commit_uncertain"
       ["target", Artifact_draft.target_to_json draft.target; "attempted_sequence", `Int draft.sequence;
        "recovery", `String "Read the shared draft before retrying the edit."]
-let respond ?cors ?(status = `OK) request reqd json =
-  let cors = match cors with Some headers -> headers | None -> public_read_cors_headers request in
-  Http.Response.json_value ~status
-    ~extra_headers:(["cache-control", "private, no-store"] @ cors) json reqd
-let refuse request reqd error = let json, status = error_response error in respond ~status request reqd json
+let refuse request reqd error =
+  let json, status = error_response error in
+  respond_no_store_json_value ~status request reqd json
 let checkpoint_error_response error =
   let conflict code extra =
     `Assoc (["error", `String (Store.checkpoint_error_message error); "code", `String code] @ extra), `Conflict in
@@ -92,7 +90,8 @@ let checkpoint ~config ~actor ~body =
         | Already_current view -> "already_current", view in
       `Assoc ["checkpoint", `String kind; "document", Store.view_to_json view], `OK
 
-let respond_result ?cors request reqd (json, status) = respond ?cors ~status request reqd json
+let respond_result ?cors request reqd (json, status) =
+  respond_no_store_json_value ?cors ~status request reqd json
 let add_routes router = router
   |> Server_route.prefix_get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/artifact-drafts/" (fun state _actor request reqd ->
     let base_path = (Mcp_server.workspace_config state).base_path in

@@ -5,13 +5,9 @@ module Draft = Artifact_draft
 module Store = Artifact_draft_store
 module Live = Artifact_draft_live
 open Result.Syntax
-let respond ?cors ?(status = `OK) request reqd json =
-  let cors = match cors with Some headers -> headers | None -> public_read_cors_headers request in
-  Http.Response.json_value ~status
-    ~extra_headers:(["cache-control", "private, no-store"] @ cors) json reqd
 let refuse request reqd error =
   let json, status = Server_routes_http_routes_artifact_drafts.error_response error in
-  respond ~status request reqd json
+  respond_no_store_json_value ~status request reqd json
 
 (* Each connection receives only its authenticated document room, never the
    global agent event stream. The promise is replaced under the room mutex, so
@@ -137,4 +133,4 @@ let add_routes router = router
     let cors = public_read_cors_headers request in
     Http.Request.read_body_async reqd (fun body ->
       let json, status = presence ~config ~actor ~body in
-      respond ~cors ~status request reqd json))
+      respond_no_store_json_value ~cors ~status request reqd json))

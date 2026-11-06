@@ -284,6 +284,14 @@ val respond_public_read_json_value :
   Httpun.Request.t -> Httpun.Reqd.t -> Yojson.Safe.t -> unit
 (** Structured public-read JSON responder. *)
 
+val respond_no_store_json_value :
+  ?cors:(string * Httpun.Headers.value) list ->
+  ?status:Httpun.Status.t ->
+  Httpun.Request.t -> Httpun.Reqd.t -> Yojson.Safe.t -> unit
+(** {!respond_public_read_json_value} for bodies that must not be cached:
+    adds [cache-control: private, no-store]. [cors] replaces the public-read
+    headers computed from the request. *)
+
 val auth_error_json : Masc_domain.masc_error -> string
 (** Render an auth error as the standard JSON envelope. *)
 

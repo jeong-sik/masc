@@ -870,6 +870,15 @@ let respond_public_read_json_value ?(status = `OK) request reqd value =
   Http_server_eio.Response.json_value ~status
     ~request ~extra_headers:(public_read_cors_headers request) value reqd
 
+let respond_no_store_json_value ?cors ?(status = `OK) request reqd value =
+  let cors =
+    match cors with
+    | Some headers -> headers
+    | None -> public_read_cors_headers request
+  in
+  Http_server_eio.Response.json_value ~status
+    ~extra_headers:(("cache-control", "private, no-store") :: cors) value reqd
+
 (* The 401/403 body carries the typed [auth_error_code] alongside the
    human-readable [error] string. Clients (dashboard keeper stream retry
    gate) dispatch on the typed code instead of substring-matching the

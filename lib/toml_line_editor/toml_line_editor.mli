@@ -66,7 +66,10 @@ val key_of_line : string -> string option
 
 val edit_table_scalar :
   string -> path:string -> key:string -> value:string option -> string
-(** Set or remove a scalar key inside [[path]]. *)
+(** Set or remove a scalar key inside [[path]]. A key the table does not hold
+    yet goes below its last value line, above the blank lines and comments
+    that trail the table; the other [edit_table_*] setters place one the same
+    way. *)
 
 val edit_table_multiline_array :
   string -> path:string -> key:string -> values:string list -> string
@@ -150,7 +153,8 @@ val upsert_table_array_entry
 
     Only the lines named in [fields] are written. Every other line in the entry —
     comments, blanks, fields not named — passes through unchanged, and a named
-    field the entry does not have yet is appended to the end of its body.
+    field the entry does not have yet goes below the entry's last value line,
+    above the blank lines and comments that trail the entry.
 
     A field whose value is [None] is dropped from the entry, the way
     {!edit_table_scalar} removes a key. Switching an endpoint from a hosted

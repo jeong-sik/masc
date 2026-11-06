@@ -542,10 +542,43 @@ let boolean_trailing_comment ~key opening =
   comment 0
 ;;
 
+(* Where lines for a key the table does not hold yet go: below the table's
+   last value line. The blank lines and comments after it stay where they are,
+   above the next header, which such a comment usually describes. A line inside
+   a multi-line value belongs to that value even when it looks like a comment or
+   is empty. A table with no value yet takes the lines below the comments
+   directly under its header. *)
+let insert_into_section section_lines block =
+  let blank_or_comment line =
+    let trimmed = String.trim line in
+    String.equal trimmed "" || Char.equal trimmed.[0] '#'
+  in
+  let rec last_value_line index state last = function
+    | [] -> last
+    | line :: rest ->
+      let last =
+        if is_structural state && blank_or_comment line then last else Some index
+      in
+      last_value_line (index + 1) (scan_line state line) last rest
+  in
+  let rec header_comments count = function
+    | line :: rest when not (String.equal (String.trim line) "") && blank_or_comment line ->
+      header_comments (count + 1) rest
+    | _ :: _ | [] -> count
+  in
+  let at =
+    match last_value_line 0 outside None section_lines with
+    | Some index -> index + 1
+    | None -> header_comments 0 section_lines
+  in
+  let before, after = split_at at section_lines in
+  before @ block @ after
+;;
+
 let replace_or_append_value section_lines ~key ~value =
   let line = value_line ~key ~value in
   match find_structural_index (has_key ~key) section_lines with
-  | None -> section_lines @ [ line ]
+  | None -> insert_into_section section_lines [ line ]
   | Some index ->
     let before, from_key = split_at index section_lines in
     (match from_key with
@@ -753,7 +786,7 @@ let edit_nested_bool content ~path ~key ~value =
       let candidate = if ancestor = [] then
           join_lines (assignment :: lines) ~trailing_newline
         else with_table content ~path:(path_text ancestor) ~on_missing:Fun.id
-          ~edit:(fun body -> body @ [assignment]) in
+          ~edit:(fun body -> insert_into_section body [assignment]) in
       if confirms candidate then Ok candidate else Error Unreachable_table
 ;;
 
@@ -772,7 +805,7 @@ let edit_table_float content ~path ~key ~value =
 let replace_or_append_multiline_array section_lines ~key ~values =
   let block = multiline_array_lines ~key ~values in
   match find_structural_index (has_key ~key) section_lines with
-  | None -> section_lines @ block
+  | None -> insert_into_section section_lines block
   | Some index ->
     let before, from_key = split_at index section_lines in
     (match from_key with

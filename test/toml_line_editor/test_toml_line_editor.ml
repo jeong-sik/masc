@@ -75,6 +75,41 @@ let test_float_edit_on_a_quoted_table () =
   Alcotest.(check bool) "no second provider table appended" false
     (has_line out "[providers.setup_x]")
 
+(* A comment above a header describes that header. A key the table does not
+   hold yet goes below the table's last value, so the blank line and the next
+   table's comment keep their place above [\[board\]]. *)
+let test_a_new_key_goes_below_the_last_value () =
+  let source = "[typesafeai]\nmemory_recall = true\n\n# board settings\n[board]\nmode = 1\n" in
+  let out =
+    Toml_line_editor.edit_table_scalar source ~path:"typesafeai"
+      ~key:"memory_recall_scope" ~value:(Some "all")
+  in
+  let lines = fst (Toml_line_editor.split_lines out) in
+  let index target =
+    match Toml_line_editor.find_index (String.equal target) lines with
+    | Some index -> index
+    | None -> Alcotest.failf "line not found: %s" target
+  in
+  Alcotest.(check int) "the new key sits right below the last value"
+    (index "memory_recall = true" + 1) (index {|memory_recall_scope = "all"|});
+  Alcotest.(check int) "the comment stays right above its header"
+    (index "[board]" - 1) (index "# board settings");
+  Alcotest.(check string) "the blank line stays between the two tables" ""
+    (List.nth lines (index "# board settings" - 1))
+
+(* The last line of a multi-line string can start with [#]. It is part of the
+   value, so the key goes after it, not inside the string. *)
+let test_a_new_key_goes_after_a_multiline_string () =
+  let source = "[t]\nprompt = \"\"\"\ntext\n# heading\"\"\"\n\n# next doc\n[next]\n" in
+  let out = Toml_line_editor.edit_table_scalar source ~path:"t" ~key:"k" ~value:(Some "v") in
+  match Otoml.Parser.from_string_result out with
+  | Error message -> Alcotest.failf "the result does not load: %s" message
+  | Ok document ->
+    Alcotest.(check (option string)) "the string keeps its last line" (Some "text\n# heading")
+      (Otoml.find_opt document Otoml.get_string [ "t"; "prompt" ]);
+    Alcotest.(check (option string)) "the key is in the table" (Some "v")
+      (Otoml.find_opt document Otoml.get_string [ "t"; "k" ])
+
 let test_multiline_array_edit_preserves_comments () =
   let out =
     Toml_line_editor.edit_table_multiline_array fixture ~path:"fusion.presets.trio"
@@ -1058,6 +1093,10 @@ let () =
         ; Alcotest.test_case "scalar remove" `Quick test_scalar_remove
         ; Alcotest.test_case "float edit on a quoted table" `Quick
             test_float_edit_on_a_quoted_table
+        ; Alcotest.test_case "a new key goes below the last value" `Quick
+            test_a_new_key_goes_below_the_last_value
+        ; Alcotest.test_case "a new key goes after a multi-line string" `Quick
+            test_a_new_key_goes_after_a_multiline_string
         ; Alcotest.test_case "multi-line array edit preserves comments" `Quick
             test_multiline_array_edit_preserves_comments
         ; Alcotest.test_case "scalar edit is table-scoped" `Quick

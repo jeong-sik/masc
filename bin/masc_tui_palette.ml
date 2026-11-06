@@ -434,6 +434,26 @@ let worktree_label (worktree : Masc.Tui_decode.git_worktree) =
     worktree.gw_name checkout
     (match flags with [] -> "" | flags -> "  " ^ String.concat " " flags)
 
+(* One Ctrl-G answer row: where the match is and what the line says. The
+   line starts at its first character that is not a space. The file shows
+   the indentation once the match is opened; in the row it only spends
+   cells the text needs, because the frame cuts the row at its right edge.
+   Tabs are expanded first, so a tab-indented line is trimmed the same as a
+   space-indented one. *)
+let search_match_label (found : Masc.Tui_decode.workspace_search_match) =
+  let expanded, _ =
+    Masc_tui_execute_terminal.expand_tabs ~column:0 found.wsm_text
+  in
+  let length = String.length expanded in
+  let rec first_visible index =
+    if index < length && Char.equal expanded.[index] ' ' then
+      first_visible (index + 1)
+    else index
+  in
+  let start = first_visible 0 in
+  Printf.sprintf "%s:%d  %s" found.wsm_path found.wsm_line
+    (String.sub expanded start (length - start))
+
 (* How an entry answers the query. [answer_order] is the ranking; it is
    written out so that adding an answer is a compile error here and not a
    position that depends on where the constructor was typed. *)
@@ -501,9 +521,8 @@ let palette_matches (state : state) =
         (match code_search_current state with
          | Some (_, (Masc_tui_fetched.Ready search | Masc_tui_fetched.Stale (search, _))) ->
              List.map (fun (found : Masc.Tui_decode.workspace_search_match) ->
-               Printf.sprintf "%s:%d  %s" found.wsm_path found.wsm_line
-                 (fst (Masc_tui_execute_terminal.expand_tabs ~column:0 found.wsm_text)),
-               Palette_code_search_match found) search.Masc.Tui_decode.wss_matches
+               search_match_label found, Palette_code_search_match found)
+               search.Masc.Tui_decode.wss_matches
          | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
                     | Masc_tui_fetched.Failed _))
          | None -> [])

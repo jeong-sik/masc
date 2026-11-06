@@ -133,9 +133,10 @@ MASC direct-provider HTTP 레인은 내부 재시도 루프가 없어 턴당 한
   (`Keeper_turn_driver.provider_rest_of_failure`).
   1. route 가 `Retry_after_observed { retry_class = Hard_quota; retry_after }` 이다.
   2. `usable_retry_after retry_after` 가 `Some` 이다. 값이 있고, 유한하고, 0보다 크다.
-     claude_code 레인은 status 가 `rejected` 인 rate-limit event 의 리셋 시각만
-     `retry_after` 로 준다. `allowed` event 의 시각은 아직 열린 창이 끝나는 때라서,
-     그 뒤의 429 는 시각이 없는 throttle 이다.
+     claude_code 레인은 rate-limit event 의 status 로 1과 2를 가른다.
+     - `rejected` 면 `Hard_quota` 이고, 그 event 의 리셋 시각이 `retry_after` 다.
+     - `allowed`·`allowed_warning` event 뒤의 429 와 event 없는 429 는 `Rate_limited` 다.
+       `allowed` event 의 시각은 아직 열린 창이 끝나는 때라서 쓰지 않는다.
   3. `next_dispatch_after_failure` 가 `Wait_until` 을 돌려준다. 쉬는 시각은 그
      `release_at` 이다. `Dispatch_now` 나 `None` 이면 쉬는 중이 아니다.
   4. 거절된 시도에 fence 가 없다. 효과를 냈거나 효과를 관측하지 못한 시도는

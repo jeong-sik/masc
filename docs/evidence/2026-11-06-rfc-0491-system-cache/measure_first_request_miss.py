@@ -1,7 +1,7 @@
 # pyright: strict
 """First-request cache misses by which System blocks changed (RFC-0491 §1.2, §6).
 
-usage: python3 -I measure_first_request_miss.py <base-path>/.masc <YYYY-MM/DD> [<end-iso>]
+usage: python3 -I measure_first_request_miss.py <base-path>/.masc <YYYY-MM/DD> [--start <iso>] [--end <iso>]
 
 Pairs consecutive turns of one Keeper from its turn records. A block whose
 digest differs between the two turns is a changed block; a different
@@ -13,6 +13,7 @@ write no `per_request` row, so their pairs count but join nothing.
 
 from __future__ import annotations
 
+import argparse
 import datetime
 import json
 import pathlib
@@ -80,15 +81,24 @@ def count(value: object) -> int:
     return value if isinstance(value, int) else 0
 
 
-def before(end: datetime.datetime | None, at: datetime.datetime | None) -> bool:
-    return at is not None and (end is None or at < end)
+@dataclass(frozen=True, slots=True)
+class Window:
+    start: datetime.datetime | None
+    end: datetime.datetime | None
+
+    def holds(self, at: datetime.datetime | None) -> bool:
+        return (
+            at is not None
+            and (self.start is None or self.start <= at)
+            and (self.end is None or at < self.end)
+        )
 
 
-def first_requests(costs: pathlib.Path, end: datetime.datetime | None) -> dict[tuple[str, object, object], FirstRequest]:
+def first_requests(costs: pathlib.Path, window: Window) -> dict[tuple[str, object, object], FirstRequest]:
     first: dict[tuple[str, object, object], FirstRequest] = {}
     for row in objects(costs):
         at = instant(row.get("timestamp"))
-        if row.get("usage_scope") != "per_request" or at is None or not before(end, at):
+        if row.get("usage_scope") != "per_request" or at is None or not window.holds(at):
             continue
         key = (str(row.get("agent")), row.get("trace_id"), row.get("keeper_turn_id"))
         seen = first.get(key)
@@ -97,9 +107,9 @@ def first_requests(costs: pathlib.Path, end: datetime.datetime | None) -> dict[t
     return first
 
 
-def turns(keeper: str, records: pathlib.Path, end: datetime.datetime | None) -> Iterator[Turn]:
+def turns(keeper: str, records: pathlib.Path, window: Window) -> Iterator[Turn]:
     for row in objects(records):
-        if not before(end, instant(row.get("ts"))):
+        if not window.holds(instant(row.get("ts"))):
             continue
         front_fields = as_json(row.get("model_input_front")) or {}
         digests: list[tuple[str, object]] = []
@@ -120,12 +130,16 @@ def changed(previous: Turn, current: Turn) -> tuple[str, ...]:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) not in (3, 4):
-        print(__doc__, file=sys.stderr)
-        return 2
-    base, day = pathlib.Path(argv[1]), argv[2]
-    end = instant(argv[3]) if len(argv) == 4 else None
-    first = first_requests(base / "costs" / f"{day}.jsonl", end)
+    parser = argparse.ArgumentParser(usage=__doc__)
+    parser.add_argument("base", type=pathlib.Path)
+    parser.add_argument("day")
+    parser.add_argument("--start", type=instant)
+    parser.add_argument("--end", type=instant)
+    args = parser.parse_args(argv[1:])
+    base = cast("pathlib.Path", args.base)
+    day = cast("str", args.day)
+    window = Window(cast("datetime.datetime | None", args.start), cast("datetime.datetime | None", args.end))
+    first = first_requests(base / "costs" / f"{day}.jsonl", window)
     pairs: Counter[Row] = Counter()
     joined: Counter[Row] = Counter()
     miss: Counter[Row] = Counter()
@@ -135,7 +149,7 @@ def main(argv: list[str]) -> int:
         if not records.is_file():
             continue
         previous: Turn | None = None
-        for turn in turns(keeper_dir.name, records, end):
+        for turn in turns(keeper_dir.name, records, window):
             if previous is not None:
                 row: Row = (changed(previous, turn), previous.front != turn.front)
                 pairs[row] += 1
@@ -146,7 +160,7 @@ def main(argv: list[str]) -> int:
                     sent[row] += request.input_tokens
             previous = turn
     total = sum(miss.values())
-    print(f"window {day} end={argv[3] if len(argv) == 4 else '-'}: pairs {pairs.total()}, joined {joined.total()}, first-request miss tokens {total:,}")
+    print(f"window {day} start={window.start or '-'} end={window.end or '-'}: pairs {pairs.total()}, joined {joined.total()}, first-request miss tokens {total:,}")
     print("| changed System blocks | front moved | pairs | joined | first-request miss tokens | share | miss rate |")
     print("|---|---|---|---|---|---|---|")
     for row, n in sorted(pairs.items(), key=lambda item: (item[0][0] == NO_CHANGE, -item[1])):

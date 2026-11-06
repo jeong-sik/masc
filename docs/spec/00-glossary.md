@@ -567,7 +567,7 @@ status: reference
 : 워크스페이스의 Keeper 이름을 `.masc/keepers/` 안의 영속 JSON 메타데이터에서 열거하는 기본 목록 읽기
   (`Keeper_meta_store.keeper_names_result`). 이름을 읽지 못하면 Keeper 수를 0으로 보지 않고 알 수 없는
   상태로 남긴다. fleet-health 응답은 `status=unavailable`, `keeper_count=null`, 읽기 실패 목록으로,
-  pause-status 응답은 오류로 투영한다. Fleet의 `running N/M`에서 쓰는 부팅 대상 수나 프로세스 생존 수가
+  `masc_pause_status` 응답은 오류로 투영한다. Fleet의 `running N/M`에서 쓰는 부팅 대상 수나 프로세스 생존 수가
   아니며, Board의 hearth별 게시물 수를 뜻하는 census와도 다르다.
   → [Keeper_meta_store](../../lib/keeper/keeper_meta_store.mli),
   [Server_routes_http_runtime_health_fleet](../../lib/server/server_routes_http_runtime_health_fleet.mli),

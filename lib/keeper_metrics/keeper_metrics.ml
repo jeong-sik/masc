@@ -25,7 +25,6 @@ type t =
   | SinceLastProgressSeconds
   | StreamProjectionEventCutoff
   | MetricEmitDropped
-  | ContextMaxObserved
   | TurnStarts
   | TurnReattempts
   | TurnRegressions
@@ -204,7 +203,6 @@ let to_string = function
   | StreamProjectionEventCutoff ->
     "masc_keeper_stream_projection_event_cutoff_total"
   | MetricEmitDropped -> "masc_keeper_metric_emit_dropped_total"
-  | ContextMaxObserved -> "masc_keeper_context_max_observed_total"
   | TurnStarts -> "masc_keeper_turn_starts_total"
   | TurnReattempts -> "masc_keeper_turn_reattempts_total"
   | TurnRegressions -> "masc_keeper_turn_regressions_total"
@@ -381,7 +379,7 @@ let collection = function
   | Turns | InputTokens | OutputTokens | CacheCreationTokens | CacheReadTokens | UsageAnomalies
   | TotalCostUsd | TurnScheduled | TurnCompleted | FailureRoute | IdleSeconds
   | InFlightElapsedSeconds | SinceLastProgressSeconds | StreamProjectionEventCutoff
-  | MetricEmitDropped | ContextMaxObserved | TurnStarts | TurnReattempts | TurnRegressions
+  | MetricEmitDropped | TurnStarts | TurnReattempts | TurnRegressions
   | TurnLatencyBucket | TurnLatencyByModelBucket | SupervisorSweepStarts
   | SupervisorLastSweepUnixtime | OperatorClear | ToolUnderusedAllowedCount | PathRejection
   | PathResolverIdentityMismatch | KeeperMetaOverlayDrift | HeartbeatSuccesses | HeartbeatFailures

@@ -25,11 +25,6 @@
 (** #10530: keeper completion-contract violations.
     Labels: keeper_name, kind \in \{passive,text_only\}. *)
 
-(** #9953: bucketed counter for observed [context_max] values.
-    Labels: [keeper, model_used, resolved_model_id,
-    context_max_bucket].  Bucket vocabulary:
-    [64k | 128k | 200k | 256k | 1m | other | zero]. *)
-
 (** Objective Keeper turn-attempt observer counters. Labels:
     [keeper].  Re-attempt = same turn id started again before
     the counter advanced; regression = turn id moved strictly

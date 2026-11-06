@@ -3,11 +3,11 @@
 `test/test_keeper_ingress_native_restart.ml` exercises the admitted direct-message
 entry through the real Owner, `Keeper_turn`, `Keeper_agent_run`, and native Core
 execution store. It uses a loopback HTTP provider and the real in-process
-`keeper_person_note_set` tool under a temporary workspace.
+`keeper_constitution_write` tool under a temporary workspace.
 
 The first provider response loads the deferred tool with `keeper_tool_search`.
-The second calls the note tool. The tool appends to the note journal, so a second
-execution would add another row even if its visible note text stayed unchanged.
+The second calls the constitution tool. The tool appends one article row to the
+constitution ledger, so a second execution would add another row.
 
 ## Interruption scenarios
 
@@ -19,7 +19,7 @@ Core journal contains that result before allowing the recovered invocation to ru
 
 After restart, the same operation enters the real Keeper turn. The test checks
 the original input and metadata, the loaded-tool receipt, one provider-visible
-ToolResult, one note append, one approval pre-hook invocation, and one committed
+ToolResult, one article append, one approval pre-hook invocation, and one committed
 tool log/ready callback. It also checks the recovered repetition observation and
 the final Owner receipt and acknowledgement. A wrong operation digest must be
 rejected without changing the retained execution authority.

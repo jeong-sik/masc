@@ -44,11 +44,15 @@ val diff_lexer_with : sub:(string -> segment list) -> string -> segment list
 val lexer_of_language : string -> (string -> segment list) option
 (** ["ocaml"|"ml"|"mli"], ["bash"|"sh"|"shell"|"zsh"], ["json"], and the
     other tags the implementation names. ["alphatex"] and ["atex"] both
-    select the alphaTex lexer. A ["diff"] fence reads whole
-    lines; ["diff:<lang>"] additionally lexes added and removed rows'
-    content with [<lang>]'s lexer. An unknown tag answers [None] and the
-    caller keeps the plain span — a guess at the grammar is colouring
-    as pretence. *)
+    select the alphaTex lexer. ["markdown"] and ["md"] read a document line
+    by line: headings, list and quote markers, code fences and table rule
+    rows take the bold type hue or the keyword hue, inline code is a string,
+    and a fence's body goes to the lexer its info string names. Only an HTML
+    comment is a comment, since the memo reader trusts that kind. A ["diff"]
+    fence reads whole lines; ["diff:<lang>"] additionally lexes added and
+    removed rows' content with [<lang>]'s lexer. An unknown tag answers
+    [None] and the caller keeps the plain span — a guess at the grammar is
+    colouring as pretence. *)
 
 val language_of_path : string -> string option
 (** The language a file's extension names, for extensions whose language has

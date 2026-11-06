@@ -1770,8 +1770,6 @@ interface KeeperHookIntrospection {
   slots: Record<string, KeeperHookSlot>
 }
 
-export type KeeperInputPolicy = 'small' | 'wide'
-
 /** What a successful config POST did to the running lane. Absent on GET. */
 export type KeeperConfigRuntimeSync = 'lane_restarted' | 'deferred_until_turn_end'
 
@@ -1807,7 +1805,6 @@ export interface KeeperConfig {
   runtime_sync?: KeeperConfigRuntimeSync
   config_transaction_warnings?: KeeperManifestWarning[]
   activation_mode: KeeperActivationMode
-  input_policy: KeeperInputPolicy
   max_context_override: number | null
   // The server's string, unnormalized. It is not a `SandboxProfile`: when the
   // response omits the field `normalizeKeeperConfig` writes the placeholder

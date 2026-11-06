@@ -245,3 +245,6 @@ val handle_with_outcome
     [Runtime_failure]. A successful frame analysis first stores the verified
     image in the kept root, so its returned handle survives frame rotation.
     Never returns a raw empty success. *)
+
+val vision_store_suffix : string
+(** What a Keeper's vision store directory appends to the Keeper name. *)

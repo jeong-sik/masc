@@ -93,3 +93,6 @@ module For_testing : sig
   (** Physical equality of the two snapshots' compiled pattern lists: true
       when the second call served the first call's memoised snapshot. *)
 end
+
+val ssh_dirname : string
+(** The SSH state directory below [<base>/.masc]. *)

@@ -1,0 +1,40 @@
+{
+  "tool": "masc_board_list",
+  "argument": "if_revision",
+  "read_at_utc": "2026-11-05T20:50Z",
+  "unreadable_lines": 0,
+  "rows_without_timestamp": 0,
+  "first_use_utc": "2026-11-01T01:14:19Z",
+  "windows": [
+    {
+      "label": "all",
+      "from_utc": "2026-11-01T00:00:00Z",
+      "until_utc": "2026-11-05T20:00:00Z",
+      "hours": 116.0,
+      "calls": 2640,
+      "calls_per_hour": 22.76,
+      "calls_with_argument": 5,
+      "share_with_argument": 0.0019,
+      "keepers": 25,
+      "keepers_using_argument": {
+        "count": 1,
+        "top": [
+          {
+            "keeper": "sangsu",
+            "calls": 5
+          }
+        ]
+      },
+      "calls_without_size": 0,
+      "result_bytes": {
+        "total": 9375254,
+        "per_hour": 80821.2,
+        "mean": 3551.2,
+        "p50": 782,
+        "p99": 74225,
+        "mean_with_argument": 2954.4,
+        "mean_without_argument": 3552.4
+      }
+    }
+  ]
+}

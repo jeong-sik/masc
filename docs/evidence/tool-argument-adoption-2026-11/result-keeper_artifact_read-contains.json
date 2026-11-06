@@ -1,0 +1,81 @@
+{
+  "tool": "keeper_artifact_read",
+  "argument": "contains",
+  "read_at_utc": "2026-11-05T20:55Z",
+  "unreadable_lines": 0,
+  "rows_without_timestamp": 0,
+  "first_use_utc": "2026-11-05T02:26:04Z",
+  "windows": [
+    {
+      "label": "before",
+      "from_utc": "2026-11-03T00:00:00Z",
+      "until_utc": "2026-11-05T02:19:09Z",
+      "hours": 50.32,
+      "calls": 688,
+      "calls_per_hour": 13.67,
+      "calls_with_argument": 0,
+      "share_with_argument": 0.0,
+      "keepers": 25,
+      "keepers_using_argument": {
+        "count": 0,
+        "top": []
+      },
+      "calls_without_size": 0,
+      "result_bytes": {
+        "total": 4278853,
+        "per_hour": 85034.3,
+        "mean": 6219.3,
+        "p50": 3288,
+        "p99": 16384,
+        "mean_with_argument": null,
+        "mean_without_argument": 6219.3
+      }
+    },
+    {
+      "label": "after",
+      "from_utc": "2026-11-05T02:19:09Z",
+      "until_utc": "2026-11-05T20:00:00Z",
+      "hours": 17.68,
+      "calls": 136,
+      "calls_per_hour": 7.69,
+      "calls_with_argument": 40,
+      "share_with_argument": 0.2941,
+      "keepers": 20,
+      "keepers_using_argument": {
+        "count": 8,
+        "top": [
+          {
+            "keeper": "kidsnote-incoming-dd-manager",
+            "calls": 16
+          },
+          {
+            "keeper": "kidsnote-slack-reader",
+            "calls": 10
+          },
+          {
+            "keeper": "context-reviewer",
+            "calls": 6
+          },
+          {
+            "keeper": "ocaml-agent-ic",
+            "calls": 3
+          },
+          {
+            "keeper": "code-reviewer-brother",
+            "calls": 2
+          }
+        ]
+      },
+      "calls_without_size": 0,
+      "result_bytes": {
+        "total": 631392,
+        "per_hour": 35710.5,
+        "mean": 4642.6,
+        "p50": 2566,
+        "p99": 16384,
+        "mean_with_argument": 755.0,
+        "mean_without_argument": 6262.4
+      }
+    }
+  ]
+}

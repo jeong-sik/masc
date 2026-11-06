@@ -399,6 +399,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
   let config = Mcp_server.workspace_config state in
   Server_keeper_build_maintenance.start ~sw ~clock ~config;
   Server_keeper_volume_maintenance.start ~sw ~clock ~config;
+  Server_tool_blob_sweep.start ~sw ~clock ~config;
   Server_provider_usage_history.install config;
   Lane_addon_runtime.register_skill_export_handler
     Server_skill_snapshot_runtime.publish_lane_skills;
@@ -609,6 +610,17 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
         ~on_deadline:(fun () ->
           Server_schedule_invalidation.announce
             ~base_path:(Mcp_server.workspace_config state).base_path));
+  (* A schedule created with [until_github_run] becomes due when its GitHub
+     run completes. This loop reads each watched run and moves the due time;
+     the runner above then wakes the Keeper. It keeps no state of its own: the
+     schedule row is the record of the watch. *)
+  fork_logged_fiber
+    ~sw
+    ~on_error:(log_server_fiber_crash "schedule_run_watch")
+    (fun () ->
+      Server_schedule_run_watch.run
+        ~clock
+        ~config:(Mcp_server.workspace_config state));
   (* Non-public registered tool usage log: durable JSONL observability. *)
   Tool_usage_log.init
     ~base_path:(Mcp_server.workspace_config state).base_path

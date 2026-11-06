@@ -96,6 +96,7 @@ let update
       ~now
       ~runner_tick_sec
       ?timing_update
+      ?expected_instance_id
       ~schedule_id
       ?requested_at
       ?expires_at
@@ -111,7 +112,9 @@ let update
     make_request ~schedule_id ?requested_at ?expires_at ~requested_by
       ~scheduled_by ~due_at ~payload ~source ?recurrence ()
   in
-  Schedule_store.update_request config ~authority ~now ~runner_tick_sec ?timing_update request |> map_store
+  Schedule_store.update_request config ~authority ~now ~runner_tick_sec ?timing_update
+    ?expected_instance_id request
+  |> map_store
 ;;
 
 let cancel config ~authority ~schedule_id ~cancelled_by ~reason ~withdraw_queued_wakes =

@@ -7,7 +7,6 @@
     for [Tool_shard.include Tool_shard_types]. *)
 
 include Tool_shard_types_enum_mirrors
-include Tool_shard_types_core
 include Tool_shard_types_schemas_base
 include Tool_shard_types_board_keeper_projection
 include Tool_shard_types_schemas_filesystem

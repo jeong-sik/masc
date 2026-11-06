@@ -642,25 +642,11 @@ let test_a_memo_projects_as_the_comment_line_the_file_received () =
    writes a blob's bytes into a file; [export] reads a file into the blob
    store. The action is a field of the call's input, so the handler alone
    cannot tell them apart, and the projection reads the action. *)
-let materialize_input ?(sha256 = String.make 64 'a') ?(bytes = 4096) () =
+let materialize_input ?(sha256 = String.make 64 'a') () =
   `Assoc
     [ ("action", `String "materialize")
     ; ("path", `String "out/poster.png")
-    ; ( "artifact"
-      , `Assoc
-          [ ( "blob"
-            , `Assoc
-                [ ( "_blob"
-                  , `Assoc
-                      [ ("sha256", `String sha256)
-                      ; ("bytes", `Int bytes)
-                      ; ("preview", `String "PNG")
-                      ; ("mime", `String "image/png")
-                      ] )
-                ] )
-          ; ("filename", `String "poster.png")
-          ; ("purpose", `String "Use in booklet")
-          ] )
+    ; ("artifact", `String sha256)
     ]
 ;;
 
@@ -671,9 +657,7 @@ let test_materialize_is_a_file_change () =
          (materialize_input ()))
   in
   match change.Change.kind with
-  | Change.Materialized { sha256; bytes } ->
-      check string "blob sha256" (String.make 64 'a') sha256;
-      check int "blob bytes" 4096 bytes
+  | Change.Materialized { sha256 } -> check string "blob sha256" (String.make 64 'a') sha256
   | Change.Edited _ | Change.Written _ | Change.Inserted _ -> fail "expected Materialized"
 ;;
 
@@ -682,10 +666,7 @@ let test_export_is_not_a_file_change () =
     classify
       (row ~descriptor_id:"keeper.artifact.transfer"
          (`Assoc
-            [ ("action", `String "export")
-            ; ("path", `String "src.ml")
-            ; ("purpose", `String "review")
-            ]))
+            [ ("action", `String "export"); ("path", `String "src.ml") ]))
   with
   | Change.Not_a_file_change -> ()
   | Change.File_change _ -> fail "export reads a file into the blob store; it writes none"
@@ -693,23 +674,14 @@ let test_export_is_not_a_file_change () =
 ;;
 
 let test_export_uses_the_handlers_request_contract () =
-  List.iter
-    (fun input ->
-       expect_malformed
-         "an export rejected by the handler is not a readable export"
-         (row ~descriptor_id:"keeper.artifact.transfer" input))
-    [ `Assoc
-        [ ("action", `String "export")
-        ; ("path", `String "src.ml")
-        ; ("purpose", `String "")
-        ]
-    ; `Assoc
-        [ ("action", `String "export")
-        ; ("path", `String "src.ml")
-        ; ("purpose", `String "review")
-        ; ("artifact", `Assoc [])
-        ]
-    ]
+  expect_malformed
+    "an export rejected by the handler is not a readable export"
+    (row ~descriptor_id:"keeper.artifact.transfer"
+       (`Assoc
+          [ ("action", `String "export")
+          ; ("path", `String "src.ml")
+          ; ("artifact", `String (String.make 64 'a'))
+          ]))
 ;;
 
 let test_materialize_unknown_action_is_unreadable () =

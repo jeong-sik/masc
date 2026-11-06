@@ -63,7 +63,7 @@ let write ~base_path revision bytes =
   Keeper_fs.save_bytes_durable_atomic ~ownership_root:base_path (path ~base_path revision) bytes
   |> Result.map_error (fun error -> {revision; detail = Keeper_fs.durable_write_error_to_string error})
 
-type stored_ledger = { revision : ledger; workspace : string * int * int }
+type stored_ledger = { revision : ledger; workspace : Fs_compat.Durable_file_identity.t }
 let stored_ledger_revision stored = stored.revision
 let stored_ledger_workspace stored = stored.workspace
 
@@ -71,8 +71,8 @@ let write_ledger ~base_path state =
   let bytes = ledger_bytes state in
   let revision = sha256 bytes in
   let observed = Fs_compat.with_owned_inventory_root base_path (fun root ->
-    let stat = Fs_compat.owned_inventory_root_stat root in
-    let workspace = Fs_compat.owned_inventory_root_path root, stat.Unix.st_dev, stat.Unix.st_ino in
+    let workspace = Fs_compat.Durable_file_identity.of_stat
+        ~path:(Fs_compat.owned_inventory_root_path root) (Fs_compat.owned_inventory_root_stat root) in
     Ok (workspace, write ~base_path (Ledger revision) bytes)) in
   let* workspace, written = observed |> Result.map_error (fun error ->
     {revision=Ledger revision; detail=Fs_compat.owned_regular_file_read_error_to_string error}) in

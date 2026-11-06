@@ -1,8 +1,5 @@
 type t =
-  | Export of {
-      path : string;
-      purpose : string;
-    }
+  | Export of { path : string }
   | Materialize of {
       path : string;
       artifact : Keeper_peer_artifact_ref.t;

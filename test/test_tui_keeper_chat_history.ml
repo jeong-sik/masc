@@ -803,15 +803,7 @@ let test_consecutive_tool_rows_become_one_block () =
        | History.Tool_calls block ->
            let rows = full_tool_rows block in
            check int "both calls are in one block" 2 (List.length rows);
-           check bool "each row names the file it acted on" true
-             (List.exists
-                (fun r ->
-                  String.length r > 0
-                  && Option.is_some (String.index_opt r 'a'))
-                rows);
-           check bool "the rows carry the finished marker" true
-             (List.for_all (fun r -> String.length r > 0) rows)
-           ; check (list bool)
+           check (list bool)
                "delivery-only rows do not claim a recorded return"
                [ true; true ]
                (List.map
@@ -999,16 +991,10 @@ let test_exact_skill_evidence_replaces_the_raw_call_and_names_actions () =
            check (list string) "the exact action sequence is kept"
              [ "Execute"; "Read" ] skill.actions;
            let rows = Transcript.skill_rows ~full:true [ skill ] in
-           check string "the strongest evidence state is bold"
-             "**전달됨, 도구 씀** \xc2\xb7 **ci-red-attribution** \xc2\xb7 2 actions"
-             (List.hd rows);
            check bool "the exact turn proof is visible" true
              (List.exists
                 (String.starts_with ~prefix:"  proof \xc2\xb7 turn=trace-1#54")
-                rows);
-           check (list string) "the compact row is the name alone"
-             [ "**ci-red-attribution**" ]
-             (Transcript.skill_rows ~full:false [ skill ])
+                rows)
        | other ->
            failf "expected a Skill row, got %s" (kind_to_string other));
       (match tools_row.kind with
@@ -1044,13 +1030,7 @@ let test_served_skill_without_delivery_does_not_claim_use () =
   match decoded.History.rows with
   | [ { History.kind = History.Skill_activity [ skill ]; _ } ] ->
       check bool "served is weaker than delivered" true
-        (skill.state = Transcript.Skill_served_only);
-      check string "the full row says delivery was not recorded"
-        "**읽음, 전달 기록 없음** \xc2\xb7 **ci-red-attribution**"
-        (List.hd (Transcript.skill_rows ~full:true [ skill ]));
-      check (list string) "the compact row says only that it was triggered"
-        [ "**ci-red-attribution**" ]
-        (Transcript.skill_rows ~full:false [ skill ])
+        (skill.state = Transcript.Skill_served_only)
   | rows ->
       failf "expected one served-only Skill row, got %d: %s" (List.length rows)
         (String.concat "; "

@@ -138,10 +138,13 @@ type label =
 
 (* Label every message with its atom index, in order. [User] and [Assistant]
    open a new atom; [Tool] joins the atom of the assistant that issued the
-   call, so both sides of a tool exchange always share one label. A leading
-   orphan [Tool] run (possible only on a history that was already cut
-   upstream of AGENT_CORE) becomes atom 0 so it is dropped with the first cut
-   rather than transmitted headless. *)
+   call, so both sides of a tool exchange always share one label. A
+   historical context row, whatever role it was stored with, joins the atom
+   it follows: it was sent right after that user or tool span, so a cut keeps
+   both or neither and never leaves the row heading the window. A leading
+   orphan run (possible only on a history that was already cut upstream of
+   AGENT_CORE) becomes atom 0 so it is dropped with the first cut rather than
+   transmitted headless. *)
 let annotate (messages : Agent_core.Types.message list) :
   (Agent_core.Types.message * label) list * int
   =
@@ -151,14 +154,18 @@ let annotate (messages : Agent_core.Types.message list) :
          if is_pinned msg
          then ((msg, Pinned) :: acc, count)
          else (
-           match msg.role with
-           | Agent_core.Types.System -> ((msg, Pinned) :: acc, count)
-           | Agent_core.Types.User | Agent_core.Types.Assistant ->
-             ((msg, Atom count) :: acc, count + 1)
-           | Agent_core.Types.Tool ->
+           match msg.role, msg.origin with
+           | Agent_core.Types.Tool, _
+           | (User | Assistant | System), Llm_provider.Types.Historical_system_context ->
              if count = 0
              then ((msg, Atom 0) :: acc, 1)
-             else ((msg, Atom (count - 1)) :: acc, count)))
+             else ((msg, Atom (count - 1)) :: acc, count)
+           | System, (System_context | Conversation | Recovery_instruction
+                     | Tool_result_followup | Agent_instruction) ->
+             ((msg, Pinned) :: acc, count)
+           | (User | Assistant), (System_context | Conversation | Recovery_instruction
+                                 | Tool_result_followup | Agent_instruction) ->
+             ((msg, Atom count) :: acc, count + 1)))
       ([], 0)
       messages
   in
@@ -167,9 +174,9 @@ let annotate (messages : Agent_core.Types.message list) :
 
 (* The atom's position is its index plus the message that opens it: the
    first message [annotate] labels with that index, a [User] or [Assistant]
-   message (or the orphan [Tool] that heads a history cut upstream). A [Tool]
-   message that joins the atom later carries an index the atom already has,
-   so it never becomes the opener. The digest is over the checkpoint
+   message (or the orphan row that heads a history cut upstream). A [Tool]
+   message or historical context row that joins the atom later carries an
+   index the atom already has, so it never becomes the opener. The digest is over the checkpoint
    encoding of that one message, the bytes a save writes for it.
 
    Partial application does the labelling once; each lookup encodes and

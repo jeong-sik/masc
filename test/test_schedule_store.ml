@@ -326,6 +326,72 @@ let test_update_refuses_only_a_changed_due_time_behind_the_clock () =
        (update_request config ~authority:Operator_authority ~runner_tick_sec ~now:500.0 future))
 ;;
 
+(* A caller that read a row and builds its replacement from it names the
+   instance it read. The store checks that under the lock that guards the
+   write, so an edit landing between the read and the write is not
+   overwritten. *)
+let test_update_conditional_on_the_instance_it_was_built_from () =
+  with_workspace
+  @@ fun config ->
+  let original = insert_ok config (make_request ~schedule_id:"conditional" ()) in
+  let replacement () = make_request ~schedule_id:original.schedule_id () in
+  let update ?expected_instance_id () =
+    update_request
+      config
+      ~authority:Operator_authority
+      ~runner_tick_sec
+      ~now:100.0
+      ?expected_instance_id
+      (replacement ())
+  in
+  let first =
+    store_ok
+      "the instance that was read"
+      (update ~expected_instance_id:original.schedule_instance_id ())
+  in
+  check
+    bool
+    "a new instance"
+    false
+    (String.equal original.schedule_instance_id first.schedule_instance_id);
+  let before = read_state config in
+  (match update ~expected_instance_id:original.schedule_instance_id () with
+   | Error (Stale_instance { schedule_id; expected; found }) ->
+     check string "the schedule" original.schedule_id schedule_id;
+     check string "the instance the update was built from" original.schedule_instance_id expected;
+     check string "the instance stored now" first.schedule_instance_id found
+   | Ok _ -> fail "an update built from a replaced instance was accepted"
+   | Error err -> fail (store_error_to_string err));
+  check int "the refusal does not bump" before.version (read_state config).version;
+  ignore (store_ok "without a condition" (update ()))
+;;
+
+(* The instance id is compared after the authority, so a caller that may not
+   change the row is told it may not, and is not told which instance is stored. *)
+let test_a_stale_instance_is_not_revealed_to_a_caller_without_authority () =
+  with_workspace
+  @@ fun config ->
+  let original = insert_ok config (make_request ~schedule_id:"not-yours" ()) in
+  let stranger =
+    Named_authority { name = "stranger"; wake_keeper_name = (fun _ -> None) }
+  in
+  match
+    update_request
+      config
+      ~authority:stranger
+      ~runner_tick_sec
+      ~now:100.0
+      ~expected_instance_id:"an-instance-nobody-stored"
+      (make_request ~schedule_id:original.schedule_id ())
+  with
+  | Error (Not_schedule_owner { caller; schedule_id; _ }) ->
+    check string "the refused caller" "stranger" caller;
+    check string "the schedule" original.schedule_id schedule_id
+  | Error (Stale_instance _) -> fail "the stored instance was revealed to a caller without authority"
+  | Error err -> fail (store_error_to_string err)
+  | Ok _ -> fail "a caller without authority replaced the schedule"
+;;
+
 (* A running schedule with no running wake is one of two facts: the wake was
    never written, or it already finished. The second means the delivery
    happened, so the error carries that wake. *)
@@ -2456,6 +2522,10 @@ let () =
             test_update_requires_an_existing_schedule;
           test_case "update refuses only a changed due time behind the clock" `Quick
             test_update_refuses_only_a_changed_due_time_behind_the_clock;
+          test_case "update is conditional on the instance it was built from" `Quick
+            test_update_conditional_on_the_instance_it_was_built_from;
+          test_case "a stale instance is not revealed without authority" `Quick
+            test_a_stale_instance_is_not_revealed_to_a_caller_without_authority;
           test_case "running wake missing says whether the wake finished" `Quick
             test_running_wake_missing_says_whether_the_wake_finished;
           test_case "a recurring occurrence is not settled by an earlier wake" `Quick

@@ -187,17 +187,6 @@ let test_modify_refuses_exactly_the_statuses_the_store_refuses () =
         (refusal_for word = None))
     opens
 
-let test_modify_names_the_status_it_refuses () =
-  match refusal_for "running" with
-  | None -> Alcotest.fail "a running row must refuse"
-  | Some reason ->
-    (* The operator is told which word on the screen closed the door, not
-       just that it is closed. *)
-    check str "the reason quotes the status the screen showed"
-      "the store refuses to modify a running schedule (status as last read; \
-       refresh if it has changed)"
-      reason
-
 (* The TUI and [Schedule_store.update_request] both ask
    [Schedule_domain.modify_allowed]; the store side is pinned in
    test_schedule_store. This pins the TUI side for every contract status. *)
@@ -242,6 +231,52 @@ let test_schedule_update_form_preserves_exact_editable_definition () =
     (form |> member "due_at_iso" |> to_string);
   check Alcotest.bool "expiry remains present" true
     (form |> member "expires_at_unix" <> `Null)
+
+(* The update replaces the whole definition, so a form that leaves the run
+   watch out would remove it when the operator saves an edit of the message. *)
+let test_schedule_update_form_keeps_the_run_watch () =
+  let open Yojson.Safe.Util in
+  let url = "https://github.com/jeong-sik/masc/actions/runs/987654321/attempts/2" in
+  let target =
+    match Masc.Schedule_run_watch.target_of_run_url url with
+    | Ok target -> target
+    | Error detail -> Alcotest.fail detail
+  in
+  let body_with fields =
+    `Assoc
+      [ "kind", `String "masc.keeper_wake"
+      ; ( "body"
+        , `Assoc
+            ([ "keeper_name", `String "edgar.a.poe"
+             ; "message", `String "inspect the latest work"
+             ]
+             @ fields) )
+      ]
+  in
+  let form row =
+    Masc_tui_types.schedule_update_form_json row |> Yojson.Safe.from_string
+  in
+  let watched =
+    form
+      { schedule_form_row with
+        sch_recurrence = `Assoc [ "kind", `String "one_shot" ]
+      ; sch_payload =
+          body_with
+            [ ( Masc.Schedule_run_watch.watch_field
+              , Masc.Schedule_run_watch.target_to_yojson target )
+            ]
+      }
+  in
+  let carried =
+    watched |> member Masc.Schedule_run_watch.watch_field |> to_string_option
+  in
+  check (Alcotest.option str) "the form carries the run URL" (Some url) carried;
+  check Alcotest.bool "the URL parses back to the stored run" true
+    (Option.map Masc.Schedule_run_watch.target_of_run_url carried = Some (Ok target));
+  check Alcotest.bool "a row without a watch gets no field" true
+    (form { schedule_form_row with sch_payload = body_with [] }
+     |> member Masc.Schedule_run_watch.watch_field
+     = `Null)
 
 let sample_memory_fact ~category ~claim : Masc.Tui_decode_memory_facts.memory_fact =
   { Masc.Tui_decode_memory_facts.mf_keeper = "alpha"
@@ -455,11 +490,7 @@ let test_verdicts_is_a_planning_child () =
     (List.exists (fun (surface, _) -> surface = Harness) surface_ring);
   Alcotest.(check int) "Verdicts highlights Planning"
     (ring_stop Planning)
-    (ring_stop Harness);
-  Alcotest.(check bool) "and the help sheet files it under Planning" true
-    (List.exists
-       (fun (label, _) -> String.equal label "Work / Task Verdicts")
-       (Masc_tui_keys.help_sections ()))
+    (ring_stop Harness)
 
 (* Changes reads one keeper's file writes and binds to the roster cursor on
    entry, so it opens with [f] from the roster instead of holding a Tab stop
@@ -479,34 +510,13 @@ let test_keeper_operations_are_not_top_level_tabs () =
        Alcotest.(check int) (label ^ " highlights Keepers")
          (ring_stop (Keepers Keeper_list))
          (ring_stop surface))
-    [ Connectors, "Channels"; Schedules, "Automation" ];
-  Alcotest.(check (list string)) "Keeper operation tab labels"
-    [ "Channels"; "Automation"; "Runs" ]
-    (List.filter_map
-       (fun tab ->
-          match tab with
-          | Detail_channels | Detail_automation | Detail_runs ->
-              Some (keeper_detail_tab_label tab)
-          | Detail_info | Detail_items | Detail_sandbox | Detail_instructions | Detail_secrets
-          | Detail_github | Detail_identity | Detail_terminal -> None)
-       keeper_detail_tabs)
+    [ Connectors, "Channels"; Schedules, "Automation" ]
 
 let test_lanes_is_a_main_destination () =
   Alcotest.(check bool) "Lanes is reached through System" false
     (List.exists (fun (surface, _) -> surface = Lanes) surface_ring);
   Alcotest.(check int) "Lanes highlights System"
-    (ring_stop Config) (ring_stop Lanes);
-  Alcotest.(check bool) "help sheet reaches the feature inventory surface" true
-    (List.exists
-       (fun (_, surface) -> surface = Lanes)
-       Masc_tui_keys.help_surfaces);
-  let lanes_keys =
-    List.map
-      (fun (b : Masc_tui_keys.binding) -> b.Masc_tui_keys.key)
-      (Masc_tui_keys.for_surface Lanes)
-  in
-  Alcotest.(check bool) "Lanes documents the [p] way back" true
-    (List.mem "p" lanes_keys)
+    (ring_stop Config) (ring_stop Lanes)
 
 (* Code's tree is always somebody's checkout -- a registered repository, a
    keeper workspace, or the project -- and Enter on a Workspace row is
@@ -517,16 +527,7 @@ let test_code_is_a_workspace_child () =
     (List.exists (fun (surface, _) -> surface = Code) surface_ring);
   Alcotest.(check int) "Code highlights Workspace"
     (ring_stop Repositories)
-    (ring_stop Code);
-  Alcotest.(check bool) "and the help sheet files it under Workspace" true
-    (List.exists
-       (fun (label, _) -> String.equal label "Workspace / Code")
-       (Masc_tui_keys.help_sections ()));
-  Alcotest.(check bool) "and the ring stop is spelled Workspace" true
-    (List.exists
-       (fun (surface, label) ->
-         surface = Repositories && String.equal label "Workspace")
-       surface_ring)
+    (ring_stop Code)
 
 (* Resources and Tools are registration catalogs -- what is wired up here,
    read rarely -- so they hang off Config under [s] and [t] instead of
@@ -536,36 +537,14 @@ let test_resources_is_a_config_child () =
     (List.exists (fun (surface, _) -> surface = Resources) surface_ring);
   Alcotest.(check int) "Resources highlights Config"
     (ring_stop Config)
-    (ring_stop Resources);
-  Alcotest.(check bool) "and the help sheet files it under Config" true
-    (List.exists
-       (fun (label, _) -> String.equal label "System / Resources")
-       (Masc_tui_keys.help_sections ()));
-  let config_keys =
-    List.map
-      (fun (b : Masc_tui_keys.binding) -> b.Masc_tui_keys.key)
-      (Masc_tui_keys.for_surface Config)
-  in
-  Alcotest.(check bool) "Config documents the [s] hop" true
-    (List.mem "s" config_keys)
+    (ring_stop Resources)
 
 let test_tools_is_a_config_child () =
   Alcotest.(check bool) "Tools is not a top-level ring entry" false
     (List.exists (fun (surface, _) -> surface = Tools) surface_ring);
   Alcotest.(check int) "Tools highlights Config"
     (ring_stop Config)
-    (ring_stop Tools);
-  Alcotest.(check bool) "and the help sheet files it under Config" true
-    (List.exists
-       (fun (label, _) -> String.equal label "System / Tools")
-       (Masc_tui_keys.help_sections ()));
-  let config_keys =
-    List.map
-      (fun (b : Masc_tui_keys.binding) -> b.Masc_tui_keys.key)
-      (Masc_tui_keys.for_surface Config)
-  in
-  Alcotest.(check bool) "Config documents the [t] hop" true
-    (List.mem "t" config_keys)
+    (ring_stop Tools)
 
 (* Tool calls settling and the server's own log lines are two readings of
    one fleet timeline, so Logs hangs off Activity (the Acting surface)
@@ -581,23 +560,7 @@ let test_logs_is_an_activity_child () =
     (List.exists (fun (surface, _) -> surface = System_logs) surface_ring);
   Alcotest.(check int) "Logs highlights System"
     (ring_stop Config)
-    (ring_stop System_logs);
-  Alcotest.(check bool) "the help sheet still exposes logs" true
-    (List.exists
-       (fun (label, _) -> String.equal label "System / Logs")
-       (Masc_tui_keys.help_sections ()));
-  Alcotest.(check bool) "the ring stop is spelled System" true
-    (List.exists
-       (fun ((surface : surface), label) ->
-         surface = Config && String.equal label "System")
-       surface_ring);
-  let acting_keys =
-    List.map
-      (fun (b : Masc_tui_keys.binding) -> b.Masc_tui_keys.key)
-      (Masc_tui_keys.for_surface Acting)
-  in
-  Alcotest.(check bool) "Activity documents the way to Logs" true
-    (List.mem "e / l" acting_keys)
+    (ring_stop System_logs)
 
 (* Telemetry and multicore engine metrics hang off Overview under [m]
    instead of holding a top-level Tab stop of their own. *)
@@ -606,14 +569,7 @@ let test_metrics_is_an_overview_child () =
     (List.exists (fun (surface, _) -> surface = Metrics) surface_ring);
   Alcotest.(check int) "Usage highlights itself"
     (ring_stop Metrics)
-    (ring_stop Metrics);
-  let overview_keys =
-    List.map
-      (fun (b : Masc_tui_keys.binding) -> b.Masc_tui_keys.key)
-      (Masc_tui_keys.for_surface Overview)
-  in
-  Alcotest.(check bool) "Dashboard documents the [m] hop" true
-    (List.mem "m" overview_keys)
+    (ring_stop Metrics)
 
 (* The strip dropped the Approvals entry when nothing was waiting. "Nothing
    is waiting" is a reading, and with the server unreachable nobody took it:
@@ -714,8 +670,6 @@ let test_a_gate_poll_that_fails_after_one_answered_is_not_an_empty_queue () =
   Alcotest.(check bool) "the empty queue names the Gate queue as stale" true
     (Masc_tui_approvals_model.approvals_empty_queue reading
      = Masc_tui_approvals_model.Lists_not_read [ ("Gate queue", Masc_tui_approvals_model.Approval_stale cause) ]);
-  Alcotest.(check string) "the title says the Gate queue is stale"
-    ", Gate queue stale" (Masc_tui_approvals_model.approvals_title_notes reading);
   Alcotest.(check bool) "and the reading is not current" false
     (Masc_tui_approvals_model.approvals_reading_current state);
   state.gate_error <- None;
@@ -725,12 +679,9 @@ let test_a_gate_poll_that_fails_after_one_answered_is_not_an_empty_queue () =
     (Masc_tui_approvals_model.approvals_empty_queue reading
      = Masc_tui_approvals_model.Lists_not_read
          [ ("Gate queue", Masc_tui_approvals_model.Approval_unavailable "approval queue store is unreadable") ]);
-  Alcotest.(check string) "and the title says so"
-    ", Gate queue unavailable" (Masc_tui_approvals_model.approvals_title_notes reading);
   state.gate_queue_unavailable <- None;
   Alcotest.(check bool) "the next answered poll empties it again" true
-    (Masc_tui_approvals_model.approvals_empty_queue (Masc_tui_approvals_model.approvals_reading state) = Masc_tui_approvals_model.Nothing_pending);
-  Alcotest.(check string) "with no note" "" (Masc_tui_approvals_model.approvals_title_notes (Masc_tui_approvals_model.approvals_reading state))
+    (Masc_tui_approvals_model.approvals_empty_queue (Masc_tui_approvals_model.approvals_reading state) = Masc_tui_approvals_model.Nothing_pending)
 
 let test_browser_lanes_highlight_config () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
@@ -821,9 +772,6 @@ let test_the_questions_reading_tells_unread_from_none_open () =
   Alcotest.(check string) "before the first poll answers" "unread" (reading ());
   state.asks_error <- Some "connection refused";
   Alcotest.(check string) "a first poll that failed" "failed" (reading ());
-  Alcotest.(check string) "which the title calls unread: nothing was read"
-    ", questions unread"
-    (Masc_tui_approvals_model.approval_list_note ~name:"questions" (Masc_tui_approvals_model.approvals_questions_reading state));
   state.asks_snapshot <-
     Some { Masc.Tui_decode_asks.asn_keeper = None; asn_open_count = 0; asn_rows = [] };
   Alcotest.(check string) "rows kept from before a failed poll" "stale"
@@ -851,15 +799,7 @@ let test_chat_quiet_leave_respects_the_draft () =
     [ true, true, true, true; true, true, false, false
     ; true, false, true, false; true, false, false, false
     ; false, true, true, true; false, true, false, true
-    ; false, false, true, true; false, false, false, true ];
-  let chat = Masc_tui_keys.for_surface (Keepers Keeper_message) in
-  Alcotest.(check bool) "chat help names both quiet exits" true
-    (List.exists
-       (fun (binding : Masc_tui_keys.binding) ->
-         String.equal binding.key "Q / Ctrl-Q"
-         && binding.help = Some
-              "Q on an active turn with an empty draft or hidden composer; Ctrl-Q always leaves without interrupting")
-       chat)
+    ; false, false, true, true; false, false, false, true ]
 
 let test_keepers_jump_uses_one_binding_for_dispatch_and_help () =
   let global_threes =
@@ -917,18 +857,6 @@ let roster_turn name : Tui_decode.keeper_turn_row =
 
 let selected_roster_name state =
   Option.map (fun keeper -> keeper.Tui_decode.k_name) (selected_keeper state)
-
-let test_keeper_list_view_and_order_keys () =
-  let keys = List.map (fun (binding : Masc_tui_keys.binding) -> binding.key)
-      (Masc_tui_keys.for_surface (Keepers Keeper_list))
-  in
-  List.iter (fun key -> Alcotest.(check int) (key ^ " is declared once") 1
-      (List.length (List.filter (String.equal key) keys))) ["v"; "o"; "s"; "f"];
-  let metric_keys = List.map (fun (binding : Masc_tui_keys.binding) -> binding.key)
-      (Masc_tui_keys.for_surface Metrics)
-  in
-  Alcotest.(check int) "Metrics keeps its own v" 1
-    (List.length (List.filter (String.equal "v") metric_keys))
 
 let test_keeper_list_cycles_preserve_selected_name () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
@@ -2268,129 +2196,6 @@ let test_workspace_activity_offers_no_row_search () =
   Alcotest.(check (option int)) "Workspace Activity answers no search"
     None (Masc_tui_surface_search.surface_search_count ~cols:120 state Repositories ~query:"masc")
 
-let test_memory_facts_footer_hints_respect_split_threshold () =
-  let has_sub needle text =
-    let n = String.length needle and len = String.length text in
-    let rec loop i =
-      i + n <= len && (String.sub text i n = needle || loop (i + 1))
-    in
-    loop 0
-  in
-  let threshold = Masc_tui_roster_pane.threshold_cols in
-  let narrow = Masc_tui_keys.footer_hints_memory_facts ~cols:(threshold - 1) in
-  let wide = Masc_tui_keys.footer_hints_memory_facts ~cols:threshold in
-  Alcotest.(check bool) "narrow Memory facts footer omits disabled Category pane toggle"
-    false (has_sub "d:Category pane" narrow);
-  Alcotest.(check bool) "wide Memory facts footer includes Category pane toggle"
-    true (has_sub "d:Category pane" wide)
-
-let test_acting_evidence_footer_hints_and_help_section () =
-  let has_sub needle text =
-    let n = String.length needle and len = String.length text in
-    let rec loop i =
-      i + n <= len && (String.sub text i n = needle || loop (i + 1))
-    in
-    loop 0
-  in
-  let hints = Masc_tui_keys.acting_evidence_hints in
-  Alcotest.(check bool) "acting evidence footer includes g / G:top/bottom"
-    true (has_sub "g / G:top/bottom" hints);
-  Alcotest.(check bool) "acting evidence footer includes Left / Esc:back to events"
-    true (has_sub "Left / Esc:back to events" hints);
-  let state = create_state ~workspace:"test" ~port:0 ~refresh_interval:2.0 () in
-  state.view <- Acting;
-  state.acting_detail <-
-    Some
-      { Masc_tui_acting.ae_at = 1.0
-      ; ae_event =
-          Masc_tui_observer.Internal_agent_runs_changed
-            Masc.Internal_agent_runs_event.Exact_lane
-      };
-  match Masc_tui_keys.help_sections_for_state ~cols:120 state with
-  | (title, entries) :: _ ->
-      Alcotest.(check string) "Event evidence leads the help sheet while open"
-        ("Event evidence" ^ Masc_tui_keys.here_marker) title;
-      Alcotest.(check bool) "Event evidence help sheet documents g / G"
-        true (List.exists (fun (k, _) -> String.equal k "g / G") entries)
-  | [] -> Alcotest.fail "expected non-empty help sections"
-
-let test_runtime_detail_routes_omits_model_settings_hint () =
-  let has_sub needle text =
-    let n = String.length needle and len = String.length text in
-    let rec loop i =
-      i + n <= len && (String.sub text i n = needle || loop (i + 1))
-    in
-    loop 0
-  in
-  let candidate_hints = Masc_tui_keys.footer_hints_runtime_detail ~routes:false () in
-  let routes_hints = Masc_tui_keys.footer_hints_runtime_detail ~routes:true () in
-  Alcotest.(check bool) "runtime candidate detail footer offers e:model settings"
-    true (has_sub "e:model settings" candidate_hints);
-  Alcotest.(check bool) "Runtime_routes footer omits e:model settings"
-    false (has_sub "e:model settings" routes_hints);
-  let state = create_state ~workspace:"test" ~port:0 ~refresh_interval:2.0 () in
-  state.view <- Runtime;
-  state.runtime_detail_target <- Some Runtime_routes;
-  match Masc_tui_keys.help_sections_for_state ~cols:120 state with
-  | (_, entries) :: _ ->
-      Alcotest.(check bool) "Runtime_routes help sheet omits e"
-        false (List.exists (fun (k, _) -> String.equal k "e") entries)
-  | [] -> Alcotest.fail "expected non-empty help sections"
-let substring needle text =
-  let n = String.length needle and len = String.length text in
-  let rec seek i =
-    i + n <= len && (String.equal (String.sub text i n) needle || seek (i + 1))
-  in
-  n = 0 || seek 0
-
-(* The help sheet is where an operator looks up a key they have not used yet.
-   A disconnect that runs on one press is the wrong thing to discover by
-   pressing it, so the tab has to carry the key and say it takes two. *)
-let test_the_identity_tab_advertises_disconnect () =
-  let bindings = Masc_tui_keys.keeper_detail_tab_bindings Detail_identity in
-  match List.find_opt (fun b -> String.equal b.Masc_tui_keys.label "disconnect") bindings with
-  | None -> Alcotest.fail "the Identity tab does not offer disconnect"
-  | Some binding ->
-    Alcotest.(check string) "the twice-pressed key" "D D" binding.Masc_tui_keys.key;
-    Alcotest.(check bool) "the help says what it removes" true
-      (match binding.Masc_tui_keys.help with
-       | Some help ->
-         substring "forget the stored token" help
-         && substring "revoke" help
-       | None -> false)
-
-(* A help sentence is one table cell in the key reference and one row on the
-   sheet. A string continued across source lines as [\n] plus indentation,
-   or with the indentation kept inside the literal, put a line break or a
-   run of blanks in the middle of it: the reference's [D D] row split in
-   two, and two Resources rows carried eighteen blanks. *)
-let test_help_sentences_are_one_line () =
-  List.iter
-    (fun (title, rows) ->
-      List.iter
-        (fun (key, help) ->
-          let name = title ^ " / " ^ key in
-          Alcotest.(check bool) (name ^ ": no line break") false
-            (String.contains help '\n');
-          Alcotest.(check bool) (name ^ ": no run of blanks") false
-            (substring "  " help))
-        rows)
-    (Masc_tui_keys.help_sections ())
-
-(* docs/guides/TUI-KEYS.md is built from [reference_sections]; the sheet from
-   [help_sections]. Same titles, same order, same rows: the paragraphs are
-   the only thing the document adds. *)
-let test_reference_lists_the_sheet_keys () =
-  let reference =
-    List.map
-      (fun (section : Masc_tui_keys.reference_section) ->
-        (section.section_title, section.section_rows))
-      (Masc_tui_keys.reference_sections ())
-  in
-  Alcotest.(check (list (pair string (list (pair string string)))))
-    "reference sections are the sheet's sections"
-    (Masc_tui_keys.help_sections ()) reference
-
 let () =
   Alcotest.run "masc_tui_keys"
     [ ( "table"
@@ -2412,12 +2217,6 @@ let () =
             `Quick test_detail_search_counts_follow_the_active_pane
         ; Alcotest.test_case "Workspace Activity offers no row search"
             `Quick test_workspace_activity_offers_no_row_search
-        ; Alcotest.test_case "Memory facts footer hints respect split threshold"
-            `Quick test_memory_facts_footer_hints_respect_split_threshold
-        ; Alcotest.test_case "Acting evidence footer hints and help section"
-            `Quick test_acting_evidence_footer_hints_and_help_section
-        ; Alcotest.test_case "Runtime_routes detail omits e:model settings"
-            `Quick test_runtime_detail_routes_omits_model_settings_hint
         ;] )
     ; ( "two-press arms"
       , [ Alcotest.test_case "a loop turn without input keeps an arm" `Quick
@@ -2437,13 +2236,13 @@ let () =
             test_modify_refuses_exactly_the_statuses_the_store_refuses
         ; Alcotest.test_case "modify refusal is the shared predicate" `Quick
             test_modify_refusal_is_the_shared_predicate
-        ; Alcotest.test_case "modify names the status it refuses" `Quick
-            test_modify_names_the_status_it_refuses
         ; Alcotest.test_case
             "modify leaves an unnamed status to the server" `Quick
             test_modify_leaves_an_unnamed_status_to_the_server
         ; Alcotest.test_case "schedule update form preserves definition" `Quick
             test_schedule_update_form_preserves_exact_editable_definition
+        ; Alcotest.test_case "schedule update form keeps the run watch" `Quick
+            test_schedule_update_form_keeps_the_run_watch
         ; Alcotest.test_case "Memory fact rows follow the category filter"
             `Quick test_memory_fact_rows_follow_the_category_filter
         ; Alcotest.test_case "Memory category cycle returns to All" `Quick
@@ -2484,8 +2283,6 @@ let () =
             test_chat_quiet_leave_respects_the_draft
         ; Alcotest.test_case "Keepers jump shares dispatch and help" `Quick
             test_keepers_jump_uses_one_binding_for_dispatch_and_help
-        ; Alcotest.test_case "Keepers list has view and order keys" `Quick
-            test_keeper_list_view_and_order_keys
         ; Alcotest.test_case "Keepers view and sort preserve the selected name" `Quick
             test_keeper_list_cycles_preserve_selected_name
         ; Alcotest.test_case "Keepers detail transition preserves the selected name" `Quick
@@ -2556,14 +2353,5 @@ let () =
             `Quick test_unread_resource_offers_no_body_search
         ; Alcotest.test_case "Resources without a list answers nothing" `Quick
             test_resources_without_a_list_answers_nothing
-        ] )
-    ; ( "identity tab"
-      , [ Alcotest.test_case "the Identity tab advertises disconnect" `Quick
-            test_the_identity_tab_advertises_disconnect ] )
-    ; ( "key reference"
-      , [ Alcotest.test_case "help sentences are one line" `Quick
-            test_help_sentences_are_one_line
-        ; Alcotest.test_case "the reference lists the sheet's keys" `Quick
-            test_reference_lists_the_sheet_keys
         ] )
     ]

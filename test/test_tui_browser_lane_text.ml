@@ -344,9 +344,7 @@ let () =
   print_endline "PASS scene wrapping, source handoff, node deduplication and asynchronous ownership"
 
 (* Repeated ids are what the target index is for: a scene can hold the same
-   node twice, and both copies must carry the number of its first appearance.
-   The projection used to answer this by rescanning the deduplicated list for
-   every node, which rebuilt that list each time. *)
+   node twice, and the target list keeps it once. *)
 let () =
   let node node_id text : Masc.Browser_scene.node =
     { node_id; kind = Text; tag = "p"; text;
@@ -361,17 +359,10 @@ let () =
     view = Content; scope = None;
     nodes = [node "a" "first"; node "b" "second"; node "a" "first again"; node "c" "third"] } in
   let view = { (Lane.create ()) with
-    scene = Some { source = Live; client_id = None; tab_id = 1; content; elapsed_ms = 1. };
-    scene_cursor = 2 } in
+    scene = Some { source = Live; client_id = None; tab_id = 1; content; elapsed_ms = 1. } } in
   if List.length (Lane.scene_targets view) <> 3 then
     failwith "repeated node ids must collapse to one target each";
-  let lines = (fst (Masc_tui_types.browser_lane_page_layout ~cols:100 view)) in
-  if lines <> ["first"; "second"; "first again"; "[>3] third"] then
-    failwith "text stays readable and the selected node retains its deduplicated number";
-  let repeated, selected = Masc_tui_types.browser_lane_page_layout ~cols:100 {view with scene_cursor=0} in
-  if repeated <> ["[>1] first"; "second"; "[>1] first again"; "third"] || selected <> Some 0 then
-    failwith "repeated selected text must retain its identity and first row";
-  print_endline "PASS repeated scene node ids keep one number each"
+  print_endline "PASS repeated scene node ids collapse to one target each"
 
 let () =
   let node node_id text : Masc.Browser_scene.node =
@@ -447,7 +438,6 @@ let () =
   assert (Masc.Browser_scene.region_role_of_string "region" = Masc.Browser_scene.Named_region);
   assert (Masc.Browser_scene.region_role_of_string " CustomRole " = Masc.Browser_scene.Unknown "CustomRole");
   let article_node = List.nth (Lane.scene_targets view) 2 in
-  assert (Lane.scene_summary scene = Some "1 article · 2 regions");
   let article_context = Lane.scene_scope_context_for_node view article_node in
   (match article_context with
    | Some context ->

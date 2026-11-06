@@ -1350,6 +1350,7 @@ let test_pending_settlements_replay_only_original_store_decision () =
          | Schedule_store.Schedule_not_due_candidate
          | Schedule_store.Running_attempt_superseded _
          | Schedule_store.Running_attempt_unavailable _
+         | Schedule_store.Stale_instance _
          | Schedule_store.Corrupt_ledger _ ) ->
        fail "fixture did not reach a real primary settlement write failure");
     Unix.rmdir staging;
@@ -1486,6 +1487,7 @@ let test_pending_read_error_does_not_block_unrelated_due_work () =
        | Schedule_store.Running_wake_settled _
        | Schedule_store.Schedule_not_due_candidate
        | Schedule_store.Running_attempt_superseded _
+       | Schedule_store.Stale_instance _
        | Schedule_store.Persistence_failed _
        | Schedule_store.Corrupt_ledger _ ) ->
      fail "legacy authority failure was hidden or cleared");

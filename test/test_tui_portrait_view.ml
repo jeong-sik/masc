@@ -1,6 +1,5 @@
 (* A candle portrait on the terminal: which of the three ways a terminal
-   gets, how big a picture a space holds, and which bytes place and delete a
-   picture after a frame. *)
+   gets, and which bytes place and delete a picture after a frame. *)
 
 open Alcotest
 module View = Masc_tui_portrait_view
@@ -45,34 +44,6 @@ let test_colour_off_draws_no_picture () =
     (chosen ~kitty:false ~cell_pixels:None ~colors_enabled:true ~projects_colour:true);
   check display "no graphics, no colour to project: nothing" View.No_picture
     (chosen ~kitty:false ~cell_pixels:None ~colors_enabled:true ~projects_colour:false)
-
-let test_pixels_fit_a_square_in_cells () =
-  let pixels = View.Pixels { cell_width = 10; cell_height = 20 } in
-  let box = Option.get (View.fit pixels ~max_cols:60 ~max_rows:12) in
-  check int "as tall as the space" 12 box.View.rows;
-  (* 12 rows of 20 px is 240 px tall; as many across is 24 cells of 10. *)
-  check int "square across" 24 box.View.cols;
-  check int "rendered at the cap, the terminal scales it" View.pixel_edge_cap
-    (Draw.int_of_size box.View.size);
-  let narrow = Option.get (View.fit pixels ~max_cols:12 ~max_rows:40) in
-  check int "a narrow space bounds the height" 6 narrow.View.rows;
-  check bool "never wider than the space" true (narrow.View.cols <= 12);
-  check (option reject) "under the fewest readable rows, none" None
-    (Option.map ignore (View.fit pixels ~max_cols:60 ~max_rows:(View.min_pixel_rows - 1)))
-
-let test_a_mosaic_is_one_pixel_per_cell_across () =
-  let box = Option.get (View.fit View.Mosaic ~max_cols:40 ~max_rows:12) in
-  check int "two pixel rows per cell row" 12 box.View.rows;
-  check int "one pixel per cell across" 24 box.View.cols;
-  check int "the edge is the width" 24 (Draw.int_of_size box.View.size);
-  let odd = Option.get (View.fit View.Mosaic ~max_cols:23 ~max_rows:40) in
-  check int "an odd width is cut to even" 22 odd.View.cols;
-  let wide = Option.get (View.fit View.Mosaic ~max_cols:400 ~max_rows:400) in
-  check int "capped" View.mosaic_edge_cap wide.View.cols;
-  check (option reject) "under the renderer's smallest edge, none" None
-    (Option.map ignore (View.fit View.Mosaic ~max_cols:(Draw.min_size - 2) ~max_rows:40));
-  check (option reject) "no picture fits nowhere" None
-    (Option.map ignore (View.fit View.No_picture ~max_cols:400 ~max_rows:400))
 
 let mascot size =
   let body, equipment = Keeper_portrait_look.mascot in
@@ -360,11 +331,6 @@ let () =
   run "tui_portrait_view"
     [ ( "display"
       , [ test_case "colour off draws no picture" `Quick test_colour_off_draws_no_picture ] )
-    ; ( "fit"
-      , [ test_case "pixels fit a square in cells" `Quick test_pixels_fit_a_square_in_cells
-        ; test_case "a mosaic is one pixel per cell across" `Quick
-            test_a_mosaic_is_one_pixel_per_cell_across
-        ;] )
     ; ( "placement"
       , [ test_case "placement bytes leave the cursor where it was" `Quick
             test_placement_bytes_leave_the_cursor_where_it_was

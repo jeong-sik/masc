@@ -545,6 +545,7 @@ let replay_settlement config ~clock (pending : pending_settlement) =
      | Schedule_store.Running_wake_settled _
      | Schedule_store.Schedule_not_due_candidate
      | Schedule_store.Running_attempt_unavailable _
+     | Schedule_store.Stale_instance _
      | Schedule_store.Persistence_failed _
      | Schedule_store.Corrupt_ledger _ -> keep failure)
 ;;

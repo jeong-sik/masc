@@ -724,6 +724,7 @@
   test_tool_schema_agent_core_boundary
   test_ocaml_north_star_task_lifecycle
   test_tool_blob_store
+  test_tool_blob_sweep
   test_tool_bridge_externalize
   test_artifacts_endpoint
   test_tool_output_washing_e2e
@@ -1068,6 +1069,7 @@
   test_tool_schema_agent_core_boundary
   test_ocaml_north_star_task_lifecycle
   test_tool_blob_store
+  test_tool_blob_sweep
   test_tool_bridge_externalize
   test_artifacts_endpoint
   test_tool_output_washing_e2e
@@ -3106,6 +3108,8 @@
 (include stanzas/test_keeper_context_isolation.inc)
 
 (include stanzas/test_keeper_turn_system.inc)
+(include stanzas/test_keeper_turn_start_history_roles.inc)
+(include stanzas/test_keeper_retained_results_turn_scoped_lane.inc)
 (include stanzas/test_keeper_turn_up_args.inc)
 (include stanzas/test_keeper_turn_up_create_response.inc)
 
@@ -3396,7 +3400,6 @@
 (include stanzas/test_runtime_official_client_write.inc)
 (include stanzas/test_runtime_cli_spawn_gate.inc)
 (include stanzas/test_server_scheduler_eintr.inc)
-(include stanzas/test_runtime_binding_auth_available.inc)
 (include stanzas/test_runtime_antigravity_home.inc)
 (include stanzas/test_runtime_antigravity_context.inc)
 (include stanzas/test_runtime_muse_msp.inc)
@@ -4888,11 +4891,6 @@
  (libraries alcotest masc masc_tui_types masc_tui_acting_pane masc_tui_fetched))
 
 (test
- (name test_tui_overview_cards)
- (modules test_tui_overview_cards)
- (libraries alcotest astring masc_tui_ansi masc_tui_overview_cards masc_tui_card masc_tui_message_layout masc_tui_theme))
-
-(test
  (name test_tui_card)
  (modules test_tui_card)
  (libraries alcotest masc_tui_card masc_tui_message_layout masc_tui_theme))
@@ -5076,6 +5074,7 @@
 
 (include stanzas/test_keeper_operator_note.inc)
 (include stanzas/test_keeper_arrived_stimuli.inc)
+(include stanzas/test_keeper_waiting_operations.inc)
 
 (include stanzas/test_keeper_memory_journal_projection.inc)
 
@@ -6001,7 +6000,7 @@
 (test
  (name test_workspace_memory_revision)
  (modules test_workspace_memory_revision)
- (libraries alcotest  masc.agent_core.digest yojson unix masc))
+ (libraries alcotest  masc.agent_core.digest yojson unix masc masc.fs_compat))
 
 (test
  (name test_keeper_memory_search_index)
@@ -7084,12 +7083,6 @@
  (libraries alcotest masc_test_deps masc agent_core))
 
 (test
- (name test_keeper_librarian_maintenance_capture)
- (modules test_keeper_librarian_maintenance_capture)
- (deps ../config/prompts/librarian.md)
- (libraries alcotest masc_test_deps masc agent_core))
-
-(test
  (name test_keeper_librarian_durable_execution)
  (modules test_keeper_librarian_durable_execution)
  (deps ../config/prompts/librarian.md
@@ -7235,3 +7228,13 @@
 (include stanzas/test_tui_context_msg.inc)
 (include stanzas/test_tui_fleet_msg.inc)
 (include stanzas/test_tui_original_msg.inc)
+
+(include stanzas/test_schedule_run_watch.inc)
+
+(include stanzas/test_schedule_run_watch_tick.inc)
+
+(include stanzas/test_server_github_run_reader.inc)
+
+(include stanzas/test_server_schedule_run_watch.inc)
+
+(include stanzas/test_schedule_tool_run_watch.inc)

@@ -222,11 +222,31 @@ let is_context_parts ~(role : Agent_core.Types.role) ~(origin : Agent_core.Types
   role=System && origin=Agent_instruction
   && List.assoc_opt "masc_retained_tool_results" metadata=Some (`Bool true)
 
-let is_context_message (message : Agent_core.Types.message) =
+let is_carrier (message : _ Llm_provider.Types.message_with) =
   is_context_parts ~role:message.role ~origin:message.origin ~metadata:message.metadata
 
-let is_wire_context_message (message : Llm_provider.Types.message) =
-  is_context_parts ~role:message.role ~origin:message.origin ~metadata:message.metadata
+let is_context_message (message : Agent_core.Types.message) = is_carrier message
+
+(* The caller query is the latest [User] row of [Conversation] origin, the
+   row [Message_origin_lowering.lower] anchors initial-system lanes on. Each
+   round of a turn keeps that row and everything before it, so a carrier
+   right after it sits inside the prefix the previous round's signed
+   reasoning was bound to, and that reasoning still replays. *)
+let place_carrier carrier messages =
+  let is_caller_query (message : _ Llm_provider.Types.message_with) =
+    match message.role, message.origin with
+    | Llm_provider.Types.User, Llm_provider.Types.Conversation -> true
+    | (System | Assistant | Tool), _
+    | User, (System_context | Historical_system_context | Recovery_instruction
+            | Tool_result_followup | Agent_instruction) -> false
+  in
+  let rec split later = function
+    | [] -> carrier :: later
+    | message :: earlier when is_caller_query message ->
+      List.rev_append (message :: earlier) (carrier :: later)
+    | message :: earlier -> split (message :: later) earlier
+  in
+  split [] (List.rev (List.filter (fun message -> not (is_carrier message)) messages))
 
 let acknowledge snapshot =
   List.fold_left (fun acc entry ->

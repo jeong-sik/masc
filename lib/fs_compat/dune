@@ -37,7 +37,8 @@
   blocking_write
   execution_context
   fd_write_all
-  atomic_orphan_size_class)
+  atomic_orphan_size_class
+  durable_file_identity)
  (private_modules
   capability_recovery_record
   capability_recovery_record_codec

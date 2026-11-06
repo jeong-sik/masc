@@ -1,29 +1,13 @@
-(** Dashboard_http_keeper — keepers_dashboard_json
-    rendering: per-keeper metrics series, conversation
-    history, memory bank, diagnostic
-    summaries, and the execution-trust + keeper-config
-    surfaces.
+(** Dashboard_http_keeper — the execution-trust dashboard surface and the
+    keeper counts, outcomes rollup and config snapshot the dashboard routes
+    read.
 
-    External surface (4 entries) — every dotted caller
-    reaches one of these and nothing else:
-    - {b dashboard producers}
-      ({!keepers_dashboard_json},
-      {!execution_trust_dashboard_json}) consumed by the
-      dashboard execution test and the dashboard HTTP
-      execution-surfaces facade.
-    - {b per-keeper runtime snapshot} ({!keeper_config_json})
-      consumed by [server_dashboard_http_keeper_api].
-    - {b outcomes rollup} ({!compute_outcomes_rollup})
-      consumed by [test/test_dashboard_harness_health].
-
-    Internal helpers stay private at this boundary
-    (everything else — see the 1700-line .ml.  Notably:
-    every per-section sub-renderer for metrics series /
-    message history / memory bank /
-    diagnostic summaries, the rollup sub-counters
-    ([succ_*] / [fail_*]), the model / capability /
-    backend resolvers, and the
-    [Keeper_transition_audit] adapters). *)
+    - {b dashboard producer} ({!execution_trust_dashboard_json}) consumed by
+      the dashboard HTTP execution-surfaces facade.
+    - {b per-keeper runtime snapshot} ({!keeper_config_json}) consumed by
+      [server_dashboard_http_keeper_api].
+    - {b outcomes rollup} ({!compute_outcomes_rollup}) consumed by
+      [test/test_dashboard_harness_health]. *)
 
 (** {1 Runtime re-exports for [Server_dashboard_http_core]}
 
@@ -66,22 +50,6 @@ val compute_outcomes_rollup :
 
 (** {1 Dashboard producers} *)
 
-val keepers_dashboard_json :
-  ?compact:bool -> Workspace.config -> Yojson.Safe.t
-(** Renders the full keepers dashboard envelope.  With
-    [~compact:true] (default [false]), per-keeper
-    payloads drop the deep history / memory-bank /
-    metrics-series sections and keep only the high-level
-     summary row used by the lightweight overview pane.
-
-     [current_gate] comes from one lock-consistent workspace approval-queue
-     snapshot, selecting the Keeper's newest pending admission by sequence.
-     Audit rows remain historical observations and cannot reopen a resolved
-     request. An unavailable or partially unreadable queue publishes a null
-     [current_gate] with an unavailable [approval_queue_state]; a confirmed
-     empty queue publishes the ready state. [approval_audit_state] separately
-     reports whether the historical audit read succeeded. *)
-
 val execution_trust_dashboard_json : Workspace.config -> Yojson.Safe.t
 (** Renders the execution-trust dashboard surface.  Folds
     every keeper's recent turns + capability metadata
@@ -119,17 +87,12 @@ val keeper_config_json :
     request path off the keeper-meta mutex (#3335). *)
 
 module For_test : sig
-  val current_gate_fields_for_workspace :
-    base_path:string -> keeper_name:string -> now_ts:float ->
-    (string * Yojson.Safe.t) list
-  (** The same current Gate projection used by {!keepers_dashboard_json},
-      reading the actual workspace queue snapshot. *)
-
   val keeper_row_after_worker_failure :
     Workspace.config -> name:string -> error:string -> Yojson.Safe.t
-  (** The row a keeper gets in [keepers_dashboard_json] and
-      [execution_trust_dashboard_json] after its worker raised [error]. It is
-      the degraded row when the meta is present and building it succeeds;
+  (** The row a keeper gets after its worker raised [error];
+      [execution_trust_dashboard_json] narrows it to the execution-trust
+      fields. It is the degraded row when the meta is present and building it
+      succeeds;
       otherwise a row carrying only the name and the errors (meta absent, not
       current or unreadable, or the degraded row itself raised). Never
       absent. *)

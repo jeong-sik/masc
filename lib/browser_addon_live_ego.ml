@@ -107,10 +107,12 @@ let session_loop ~socket = String.concat "\n" [
 (* A started process: [ask] sends one script and reads its answer, and
    stops the process with its group when it does not answer; [close] closes
    its socket, so a process that leaves its loop exits by itself, then stops
-   what is left. Both return once the process has ended. *)
+   what is left. Both return once the process has ended. [started_at] is when
+   it connected; what a script set through CDP lives as long as it does. *)
 type session_process = {
   ask : timeout_s:float option -> id:int -> string -> (string, Peer.run_failure) result;
-  close : unit -> unit }
+  close : unit -> unit;
+  started_at : float }
 type session = { sw : Eio.Switch.t; env : Eio_unix.Stdenv.base; command : string; socket : string;
   mutable current : session_process option; mutable next_id : int }
 
@@ -227,7 +229,7 @@ let start_session t ~timeout_s =
                 (try Eio.Flow.shutdown flow `All with Eio.Io _ -> ());
                 ignore (Eio.Time.with_timeout clock stop_grace_s (fun () -> Ok (Eio.Process.await process)));
                 stop () in
-              ignore (Eio.Promise.try_resolve set_ready (Ok {ask; close}));
+              ignore (Eio.Promise.try_resolve set_ready (Ok {ask; close; started_at = Eio.Time.now clock}));
               Eio.Promise.await stop_requested) with
         | () -> ()
         | exception (Eio.Io _ as exn) ->
@@ -267,6 +269,7 @@ let run_session t ~window_s script =
       | exception (Eio.Cancel.Cancelled _ as exn) -> t.current <- None; raise exn
 let runner t : Peer.runner = fun ~window_s script -> run_session t ~window_s:(Some window_s) script
 let native_runner t script = run_session t ~window_s:None script
+let sdk_process_started_at t = Option.map (fun process -> process.started_at) t.current
 
 (* The connection's end: the process leaves its loop once its socket closes. *)
 let end_session t = match t.current with
@@ -434,10 +437,11 @@ let run ?(on_lane_ended=fun () -> ()) ~env ~owner ~downloads (configuration : Br
               let result =
                 let* verb, args, actor = Live.decode command |> Result.map_error (fun detail -> Live.Before_effect detail) in
                 Peer.dispatch ~command_id:command.id peer ?actor ~verb args in
+              let stamped = Peer.with_session_state peer ~sdk_process_started_at:(sdk_process_started_at session) result in
               (* A refused delivery loses this one result. The server stopped
                  waiting for it, and its caller was told the outcome is
                  unknown; a connection that is gone fails the next poll. *)
-              (match Browser_addon_owner.deliver_live owner ~client_id ~id:command.id ~payload:(Live.payload (Peer.with_input_state peer result)) with
+              (match Browser_addon_owner.deliver_live owner ~client_id ~id:command.id ~payload:(Live.payload stamped) with
                | Ok () -> ()
                | Error detail ->
                  Log.Server.warn "browser Add-on ego result of command %s was not delivered: %s" command.id detail);

@@ -505,12 +505,18 @@ let read t args =
     | None -> Browser_page_script.text_cap None
     | Some (`Int cap) -> Browser_page_script.text_cap (Some cap)
     | Some _ -> Error Browser_page_script.text_cap_refused in
-  let* () = match field "includeHtml" args with
-    | None | Some (`Bool false) -> Ok ()
-    | Some (`Bool true) -> Error "an ego connection does not read the document source"
-    | Some _ -> Error "invalid includeHtml" in
-  let* id,page = evaluate t args ~step:"page.read" Browser_page_script.text (`Int cap) in
-  with_tab id page
+  match field "includeHtml" args with
+  | None | Some (`Bool false) ->
+    let* id,page = evaluate t args ~step:"page.read" Browser_page_script.text (`Int cap) in
+    with_tab id page
+  (* The document helper the other connections run: it drops HTML over 1 MiB
+     and says so, instead of returning a cut document. *)
+  | Some (`Bool true) ->
+    let* id,page = evaluate t args ~step:"page.document"
+        (Browser_page_script.parsed (Browser_lane.Document.runtime ^ "\nreturn browserDocument();")) `Null in
+    if Option.is_some (field "documentLoading" page) then Error Browser_page_script.document_loading_refused
+    else with_tab id page
+  | Some _ -> Error "invalid includeHtml"
 
 let elements t args =
   let* filter = Browser_page_script.elements_filter_of_json (fun key -> field key args) in
@@ -1258,14 +1264,20 @@ let dialog_receipt ~id ~verb ~unknown value =
     Error (Live.Outcome_unknown ("ego answered the input outside its answer frame; " ^ unknown))
 
 (* One run: the guard script checks that the page is the observed one and
-   refuses before any input if not, the input is sent, and the receipt script
-   reads where the page is. *)
-let guarded_input t ~id ~label ~deadline ~verb ~step ~guard ~input ~lines ~fields =
+   refuses before any effect if not, the input or effect is sent, and the
+   receipt script reads where the page is. *)
+(* How long a cleared viewport is waited for. On ego lite 0.6.2.7 a read right
+   after Emulation.clearDeviceMetricsOverride saw the old size 13 times in 100;
+   the size moved after at most 1,074 ms (p90 63 ms), polled every 10 ms
+   (docs/evidence/ego-cdp-capabilities-2026-11-06/l2-viewport). *)
+let viewport_restore_wait_ms = 2000
+
+let guarded_input t ~id ~label ~deadline ~verb ~step ~guard ~receipt ~input ~lines ~fields =
   let unknown = Printf.sprintf "read tab %d before another step" id in
   let response = run_step t ~window_s:(left t deadline) ~step
           ~args:(obj (["label",str label;"tabId",`Int id;"guard",str (page_function guard);
             "input",str (Yojson.Safe.to_string input);
-            "receipt",str (page_function Browser_interaction.pointer_receipt_script)] @ fields))
+            "receipt",str (page_function receipt)] @ fields))
           (String.concat "\n" ([
       page_call;
       "  const reason = " ^ message ^ ";";
@@ -1302,12 +1314,12 @@ let guarded_input t ~id ~label ~deadline ~verb ~step ~guard ~input ~lines ~field
        | Some (`String url), `Assoc fields ->
          receipt_of ~id ~verb (obj (("urlBefore",str url) :: fields))
          |> Result.map_error (fun detail -> Live.Outcome_unknown (detail ^ "; " ^ unknown))
-       | _ -> Error (Live.Outcome_unknown ("the input was sent and its guard or receipt lacks the page URL; " ^ unknown)))
+       | _ -> Error (Live.Outcome_unknown (verb ^ " was sent and its guard or receipt lacks the page URL; " ^ unknown)))
     | (Ok _ | Error _), Some (`String error), (Ok _ | Error _) -> Error (Live.Outcome_unknown (head error ^ "; " ^ unknown))
     | Error detail, Some `Null, _ | Ok _, Some `Null, Error detail ->
-      Error (Live.Outcome_unknown ("the input was sent and " ^ detail ^ "; " ^ unknown))
+      Error (Live.Outcome_unknown (verb ^ " was sent and " ^ detail ^ "; " ^ unknown))
     | (Ok _ | Error _), (None | Some _), (Ok _ | Error _) ->
-      Error (Live.Outcome_unknown ("ego answered the input outside its answer frame; " ^ unknown))
+      Error (Live.Outcome_unknown ("ego answered " ^ verb ^ " outside its answer frame; " ^ unknown))
 
 (* The DOM edits the shared script makes. It says itself whether it refused
    before any effect. *)
@@ -1689,10 +1701,36 @@ let interact ?actor t args =
   let pointer (viewport : Browser_lane.Pointer.viewport) point motion =
     let x, y = Browser_lane.Pointer.viewport_pixels viewport point in
     guarded_input t ~id ~label ~deadline ~verb ~step:"page.pointer" ~guard:Browser_interaction.pointer_guard_script
+      ~receipt:Browser_interaction.pointer_receipt_script
       ~input:(input ~expected_url action) ~lines:(motion_lines motion) ~fields:(["x",`Int x;"y",`Int y;cursor] @ motion_fields motion) in
   let keyboard chord =
     guarded_input t ~id ~label ~deadline ~verb ~step:"page.keyboard" ~guard:Browser_interaction.keyboard_guard_script
+      ~receipt:Browser_interaction.pointer_receipt_script
       ~input:(input ~expected_url action) ~lines:["        await page.keyboard.press(args.keys);"] ~fields:(keys_fields chord) in
+  (* The page viewport through the Page's CDP session. The override stays
+     while the SDK process that set it runs, across commands that reopen the
+     task space, moves and reloads; a new process starts without it, which
+     the answer's sdkProcessStartedAt tells (RFC-browser-ego-cdp-capabilities
+     §3.2). ego says raw CDP invalidates snapshot refs. A set size is the
+     page's size when the command returns; a cleared one is not always, so
+     the receipt waits until the size moves off the override, up to
+     [viewport_restore_wait_ms]. *)
+  let viewport size =
+    let metrics, lifetime = match size with
+      | Browser_lane.Fit {width;height} -> obj ["width",`Int width;"height",`Int height], ["lifetime",str "ego_sdk_process"]
+      | Browser_lane.Browser_default -> `Null, [] in
+    let* receipt = guarded_input t ~id ~label ~deadline ~verb ~step:"page.viewport" ~guard:Browser_interaction.url_guard_script
+      ~receipt:Browser_interaction.viewport_receipt_script
+      ~input:(input ~expected_url action) ~fields:["metrics",metrics;"restoreWaitMs",`Int viewport_restore_wait_ms]
+      ~lines:["        if (args.metrics === null) {";
+              "          const [width, height] = await page.evaluate(\"[innerWidth, innerHeight]\");";
+              "          await page.cdp(\"Emulation.clearDeviceMetricsOverride\", {});";
+              "          await page.evaluate(\"new Promise(resolve => { const start = performance.now(); const tick = () => innerWidth !== \" + JSON.stringify(width) + \" || innerHeight !== \" + JSON.stringify(height) + \" || performance.now() - start > \" + JSON.stringify(args.restoreWaitMs) + \" ? resolve(null) : setTimeout(tick, 10); tick(); })\");";
+              "        } else await page.cdp(\"Emulation.setDeviceMetricsOverride\", {width: args.metrics.width, height: args.metrics.height, deviceScaleFactor: 0, mobile: false});"] in
+    match receipt with
+    | `Assoc fields -> Ok (`Assoc (fields @ ("refsInvalidated",`Bool true) :: lifetime))
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+      Error (Live.Outcome_unknown (Printf.sprintf "the set_viewport receipt is not an object; read tab %d before another step" id)) in
   let on_target ~target operation = match expected_url with
     | Some _ -> native_input t ~id ~label ~cursor:cursor_text ~expected_url
         ~locator:(ego_locator target) ~reference:["target",Browser_lane.snapshot_target_to_json target] ~operation
@@ -1735,8 +1773,9 @@ let interact ?actor t args =
   | Browser_lane.Fill_target {target; text} -> on_target ~target (Target_fill text)
   | Browser_lane.Hover_target target -> on_target ~target Target_hover
   | Browser_lane.Double_click_target target -> on_target ~target Target_double_click
+  | Browser_lane.Set_viewport size -> viewport size
   | Browser_lane.Tap_at _ | Browser_lane.Swipe _
-  | Browser_lane.Set_zoom _ | Browser_lane.Set_viewport _ -> refused
+  | Browser_lane.Set_zoom _ -> refused
 
 (* The whole space goes to the operator for a step only a person can take;
    from then on the frame refuses every step until take_over. A handOff that
@@ -2060,10 +2099,14 @@ let dispatch ?command_id ?actor t ~verb args =
   | Ok (Error (Live.Before_effect _|Outcome_unknown _) as failure) -> failure
 
 (* What leaves the peer. A failure that is only a message becomes the observed
-   failure with the same effect phase, so its receipt can say where input stands. *)
-let with_input_state t result =
+   failure with the same effect phase, so its receipt can say where input
+   stands and which SDK process holds this connection's CDP settings. *)
+let with_session_state t ~sdk_process_started_at result =
+  let started = match sdk_process_started_at with Some at -> `Float at | None -> `Null in
   let stamp = function
-    | `Assoc fields -> `Assoc (("inputReadiness",str (Input.readiness_wire t.input)) :: List.remove_assoc "inputReadiness" fields)
+    | `Assoc fields -> `Assoc (("inputReadiness",str (Input.readiness_wire t.input))
+        :: ("sdkProcessStartedAt",started)
+        :: List.remove_assoc "sdkProcessStartedAt" (List.remove_assoc "inputReadiness" fields))
     | value -> value in
   match result with
   | Ok value -> Ok (stamp value)

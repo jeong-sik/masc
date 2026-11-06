@@ -227,9 +227,13 @@ let test_one_process_runs_the_connections_commands () =
           | [pid; count] -> pid, int_of_string count
           | _ -> failf "%s answered %S" script output)
         | Error failure -> failf "%s: %s" script (failure_name failure) in
+      let started_at () = Ego.sdk_process_started_at session in
+      check bool "no process has started before the first script" true (Option.is_none (started_at ()));
       let first, one = held "count" in
+      let first_started = started_at () in
       let again, two = held "count" in
       check string "one process runs both scripts" first again;
+      check bool "and both answer with its start time" true (Option.is_some first_started && started_at () = first_started);
       check (pair int int) "and keeps what it holds between them" (1, 2) (one, two);
       (match run ~window_s:5. "left" with
        | Ok output ->
@@ -242,8 +246,10 @@ let test_one_process_runs_the_connections_commands () =
       let started = Eio.Time.now clock in
       check string "a script past its window" "timed out" (kind ~window_s:3. "sleep");
       check bool "is stopped within its window" true (Eio.Time.now clock -. started < 3.5);
+      check bool "and no process runs after it" true (Option.is_none (started_at ()));
       let next, count = held "count" in
       check bool "the next script starts another process" true (next <> first);
+      check bool "which has another start time" true (Option.is_some (started_at ()) && started_at () <> first_started);
       check int "which holds nothing yet" 1 count;
       check string "an answer past the output limit" "output exceeded" (kind (Printf.sprintf "big %d" (Peer.output_limit_bytes + 1)));
       (match run "exit" with
@@ -572,12 +578,26 @@ let scenario mode =
         let shot = answered (issue (B.Page_capture {tab_id=1;options=None})) in
         check string "the screenshot" (Base64.encode_string "\137PNG\r\n\026\nfixture")
           Yojson.Safe.Util.(shot |> member "data" |> member "data" |> to_string);
+        (* The start time of the SDK process that ran a command changes from run
+           to run, so it is taken out before the rest is compared. *)
+        let process_and_rest label = function
+          | `Assoc ["ok",ok;"data",`Assoc (readiness :: ("sdkProcessStartedAt",`Float started) :: rest)] ->
+            started, Yojson.Safe.to_string (`Assoc ["ok",ok;"data",`Assoc (readiness :: rest)])
+          | payload -> failf "%s has no SDK process start time: %s" label (Yojson.Safe.to_string payload) in
+        let opened_at, opened = process_and_rest "a new tab"
+            (answered (issue (B.Page_act (B.Action.Open_tab "https://fixture.test/channel")))) in
         check string "a new tab" {|{"ok":true,"data":{"inputReadiness":"command_settled","tabId":2,"action":"open_tab","created":true,"url":"https://fixture.test/channel","title":"Opened","active":true}}|}
-          (Yojson.Safe.to_string (answered (issue (B.Page_act (B.Action.Open_tab "https://fixture.test/channel")))));
+          opened;
+        let moved_at, moved = process_and_rest "a move on it"
+            (answered (issue (B.Page_goto {url="https://fixture.test/next";tab_id=Some 2}))) in
         check string "a move on it" {|{"ok":true,"data":{"inputReadiness":"command_settled","tabId":2,"action":"goto","url":"https://fixture.test/next","title":"Moved"}}|}
-          (Yojson.Safe.to_string (answered (issue (B.Page_goto {url="https://fixture.test/next";tab_id=Some 2}))));
+          moved;
+        let clicked_at, clicked = process_and_rest "a click"
+            (answered (issue (B.Page_interact {tab_id=1;expected_url=Some "https://fixture.test/";frame_path=[];action=B.Click "#send"}))) in
         check string "a click" {|{"ok":true,"data":{"inputReadiness":"command_settled","tabId":1,"action":"click","selector":"#send","urlBefore":"https://fixture.test/","url":"https://fixture.test/","title":"Fixture"}}|}
-          (Yojson.Safe.to_string (answered (issue (B.Page_interact {tab_id=1;expected_url=Some "https://fixture.test/";frame_path=[];action=B.Click "#send"}))));
+          clicked;
+        check bool "one SDK process ran the three commands, and every answer says when it started" true
+          (opened_at = moved_at && moved_at = clicked_at);
         check string "where ego clicked, and the label beside its cursor names the actor"
           {|["#send", "MASC \u00b7 keeper/live-fixture \u00b7 click"]|} (read (Filename.concat root "clicked"));
         let workflow=ok (B.Native_workflow.of_json (`Assoc ["tabId",`Int 1;

@@ -154,9 +154,7 @@ let with_fixture ?(tool_deny = []) f =
            These are synthetic bytes, not a claim that a Keeper generated them. *)
         let blob = Tool_blob_store.put_durable store ~bytes:source_text
             ~mime:"application/octet-stream" in
-        Keeper_peer_artifact_ref.make ~blob ~filename:"SKILL.md"
-          ~purpose:"Validate a proposed Skill" |> require "artifact reference"
-        |> Keeper_peer_artifact_ref.to_json
+        Keeper_peer_artifact_ref.(to_json (of_blob blob))
       in
       let call args =
         let before_files = files base_path in
@@ -194,17 +192,16 @@ let failed code (result, data) =
   check bool "reason is preserved" true (String.length (string_field "message" data) > 0)
 ;;
 
-let valid kind artifact (result, data) =
+let valid kind ~source artifact (result, data) =
   check bool "completed static validation" true
     (result.Keeper_tool_execution.disposition = Tool_result.Completed ());
-  let blob = Yojson.Safe.Util.(artifact |> member "blob" |> member "_blob") in
-  let source = Yojson.Safe.Util.member "source" data in
+  let identity = Yojson.Safe.Util.member "source" data in
   check string "verdict names the exact source digest"
-    Yojson.Safe.Util.(member "sha256" blob |> to_string)
-    Yojson.Safe.Util.(member "sha256" source |> to_string);
+    (Yojson.Safe.Util.to_string artifact)
+    Yojson.Safe.Util.(member "sha256" identity |> to_string);
   check int "verdict names the exact source size"
-    Yojson.Safe.Util.(member "bytes" blob |> to_int)
-    Yojson.Safe.Util.(member "bytes" source |> to_int);
+    (String.length source)
+    Yojson.Safe.Util.(member "bytes" identity |> to_int);
   check bool "no artifact reference is echoed" true
     (Yojson.Safe.Util.member "artifact" data = `Null);
   check string "static only" "static" (string_field "validation" data);
@@ -214,13 +211,15 @@ let valid kind artifact (result, data) =
 ;;
 
 let test_instruction () = with_fixture @@ fun artifact call ->
-  let exported = artifact (instruction "proposed") in
-  call (args exported) |> valid "instruction" exported
+  let source = instruction "proposed" in
+  let exported = artifact source in
+  call (args exported) |> valid "instruction" ~source exported
 ;;
 
 let test_composition () = with_fixture @@ fun artifact call ->
-  let exported = artifact (composition "keeper_lane_status") in
-  call (args exported) |> valid "composition" exported;
+  let source = composition "keeper_lane_status" in
+  let exported = artifact source in
+  call (args exported) |> valid "composition" ~source exported;
   artifact (composition "nonexistent_tool") |> args |> call |> failed "composition_rejected"
 ;;
 
@@ -249,20 +248,14 @@ let test_size_limit () = with_fixture @@ fun artifact call ->
   check int "actual source size" (String.length source) Yojson.Safe.Util.(member "bytes" data |> to_int)
 ;;
 
+(* The reference is the sha256 alone, so it cannot claim a wrong size. What
+   is left to refuse is an address the store does not hold and a string that
+   is not an address. *)
 let test_reference_integrity () = with_fixture @@ fun artifact call ->
   let exported = artifact (instruction "proposed") in
-  let replace name value = function
-    | `Assoc fields -> `Assoc ((name, value) :: List.remove_assoc name fields)
-    | _ -> fail "object fixture expected"
-  in
-  let normalized = Yojson.Safe.Util.member "blob" exported in
-  let blob = Yojson.Safe.Util.member "_blob" normalized in
-  let with_blob blob = replace "blob" (replace "_blob" blob normalized) exported in
-  let actual_bytes = Yojson.Safe.Util.(member "bytes" blob |> to_int) in
-  let wrong_size = with_blob (replace "bytes" (`Int (actual_bytes + 1)) blob) in
-  call (args wrong_size) |> failed "artifact_read_failed";
-  let absent = with_blob (replace "sha256" (`String (String.make 64 '0')) blob) in
-  call (args absent) |> failed "artifact_read_failed"
+  call (args (`String (String.make 64 '0'))) |> failed "artifact_read_failed";
+  call (args (`String (String.uppercase_ascii (Yojson.Safe.Util.to_string exported))))
+  |> failed "invalid_skill_validation_request"
 ;;
 
 let () =

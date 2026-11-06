@@ -19,11 +19,12 @@ module Request_id = struct
       Printf.sprintf "%04d-%02d-%02d" (day.Unix.tm_year + 1900) (day.tm_mon + 1) day.tm_mday)
       (Random_id.uuid_v7_time_ms value)
 end
-type workspace = { path : string; device : int; inode : int }
+module Identity = Fs_compat.Durable_file_identity
+type workspace = Identity.t
 let observe_workspace ~base_path =
   Fs_compat.with_owned_inventory_root base_path (fun root ->
-    let stat = Fs_compat.owned_inventory_root_stat root in
-    Ok {path=Fs_compat.owned_inventory_root_path root; device=stat.Unix.st_dev; inode=stat.Unix.st_ino})
+    Ok (Identity.of_stat ~path:(Fs_compat.owned_inventory_root_path root)
+          (Fs_compat.owned_inventory_root_stat root)))
   |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string
 type destination = {
   installation_id : string; package_id : string; tool : string;
@@ -52,16 +53,10 @@ let text = function
   | _ -> Error "captured Curator record expects nonblank text"
 let optional_text = function `Null -> Ok None | value -> Result.map Option.some (text value)
 let boolean = function `Bool value -> Ok value | _ -> Error "captured Curator record expects a boolean"
-let integer = function `Int value -> Ok value | _ -> Error "captured Curator workspace expects an integer"
 let optional = Option.fold ~none:`Null ~some:(fun value -> `String value)
-let workspace_json w = `Assoc ["path",`String w.path;"device",`Int w.device;"inode",`Int w.inode]
+let workspace_json = Identity.to_json
 let workspace_of_json json =
-  let* f = fields ["path";"device";"inode"] json in
-  let* path = text (List.assoc "path" f) in
-  let* device = integer (List.assoc "device" f) in
-  let* inode = integer (List.assoc "inode" f) in
-  if Filename.is_relative path then Error "captured workspace path must be absolute"
-  else Ok {path;device;inode}
+  Identity.of_json json |> Result.map_error (fun detail -> "captured Curator workspace: " ^ detail)
 let destination_json d = `Assoc ["installation_id",`String d.installation_id;
   "package_id",`String d.package_id;"tool",`String d.tool;
   "source_revision",`String d.source_revision;"configuration_revision",`String d.configuration_revision]
@@ -162,14 +157,14 @@ let make ~request_id ~workspace ~destination ~prompt work =
   Ok {id=request_id;predecessor=None;workspace;destination;prompt;work=restored}
 let classification ~request_id ~workspace ~destination ~prompt ~ledger ~stored_ledger ~batch =
   let revision = Revision.stored_ledger_revision stored_ledger in
-  let* () = if Revision.stored_ledger_workspace stored_ledger = (workspace.path,workspace.device,workspace.inode)
+  let* () = if Identity.equal (Revision.stored_ledger_workspace stored_ledger) workspace
     then Ok () else Error "stored ledger belongs to another physical workspace" in
   let* () = if String.equal (Revision.ledger_sha256 revision) (Ledger.sha256 ledger) then Ok ()
     else Error "stored ledger receipt names another ledger state" in
   make ~request_id ~workspace ~destination ~prompt (Classification {ledger;revision;batch})
 let briefing ~request_id ~workspace ~destination ~prompt ~batch =
   make ~request_id ~workspace ~destination ~prompt (Briefing batch)
-let capture_schema = "workspace.memory.execution-capture.v4"
+let capture_schema = "workspace.memory.execution-capture.v5"
 (* The model input is stored once, inside [work]; the prompt is rendered again
    on restore and only its digest is kept. *)
 let to_json t = `Assoc ["schema",`String capture_schema;
@@ -182,7 +177,7 @@ let to_json t = `Assoc ["schema",`String capture_schema;
    from the capture, kept in the owner record, and checked against the
    capture on every restore. *)
 module Summary = struct
-  let schema = "workspace.memory.execution-summary.v1"
+  let schema = "workspace.memory.execution-summary.v2"
   type batch =
     | Classification of { up_to : Request.size; selected : Ledger.fact_ref list }
     | Briefing of { selected_count : int; prepared_state : string }
@@ -259,7 +254,7 @@ let restore_record ~workspace (retained : Owner.retained) =
     | `String value -> Result.map Option.some (Request_id.of_string value)
     | _ -> Error "captured predecessor must be a request ID or null" in
   let* original_workspace = workspace_of_json (List.assoc "workspace" f) in
-  let* () = if original_workspace = workspace then Ok () else Error "Curator request belongs to another physical workspace" in
+  let* () = if Identity.equal original_workspace workspace then Ok () else Error "Curator request belongs to another physical workspace" in
   let* destination = destination_of_json (List.assoc "destination" f) in
   let* () = if String.equal retained.scope scope && String.equal retained.request_id id_text
       && String.equal retained.installation_id destination.installation_id
@@ -373,7 +368,7 @@ let recoverable_successors ~workspace originals =
     | ((record, summary) as original : Owner.Record.t * Summary.t)::rest ->
       let id = Owner.Record.request_id record in
       if Originals.mem id records then Error "duplicate original Curator request ID"
-      else if summary.Summary.workspace <> workspace then Error "Curator request belongs to another physical workspace"
+      else if not (Identity.equal summary.Summary.workspace workspace) then Error "Curator request belongs to another physical workspace"
       else index (Originals.add id original records) rest in
   let* records = index Originals.empty originals in
   let rec ancestry seen ((record, summary) : Owner.Record.t * Summary.t) =

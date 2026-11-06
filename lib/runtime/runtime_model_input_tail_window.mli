@@ -86,9 +86,9 @@ val is_working_state : Agent_core.Types.message -> bool
 
 type label =
   | Pinned
-      (** Survives every cut: [System] entries, messages carrying
-          extra-system-context provenance, and the Librarian working state,
-          all re-assembled fresh each request. *)
+      (** Survives every cut: [System] entries other than historical
+          context, messages carrying extra-system-context provenance, and
+          the Librarian working state, all re-assembled fresh each request. *)
   | Atom of int  (** Zero-based index of the atom this message belongs to. *)
 
 val annotate
@@ -97,7 +97,9 @@ val annotate
 (** Label every message with its atom index, in order, and return the atom
     count. [User] and [Assistant] open a new atom; [Tool] joins the atom of the
     assistant that issued the call, so both sides of a tool exchange always
-    share one label.
+    share one label. A [Historical_system_context] row joins the atom it
+    follows, whatever role it was stored with, so a cut never keeps it
+    without the user or tool span it was sent after.
 
     Exported because the atom is now a shared unit of the projection pipeline
     rather than a private detail of the cut: a stage that runs before

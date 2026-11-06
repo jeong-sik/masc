@@ -54,6 +54,11 @@ type store_error =
   | Schedule_not_due_candidate
   | Running_attempt_superseded of { schedule_id : string }
   | Running_attempt_unavailable of { schedule_id : string; reason : string }
+  | Stale_instance of
+      { schedule_id : string
+      ; expected : string
+      ; found : string
+      }
   | Persistence_failed of string
   | Corrupt_ledger of
       { primary_err : string
@@ -213,6 +218,12 @@ let store_error_to_string = function
     Printf.sprintf "schedule %s running attempt was superseded" schedule_id
   | Running_attempt_unavailable { schedule_id; reason } ->
     Printf.sprintf "schedule %s running attempt authority unavailable: %s" schedule_id reason
+  | Stale_instance { schedule_id; expected; found } ->
+    Printf.sprintf
+      "schedule %s is now instance %s; the update was built from instance %s"
+      schedule_id
+      found
+      expected
   | Persistence_failed msg -> "schedule persistence failed: " ^ msg
   | Corrupt_ledger { primary_err; recovery_err } ->
     corrupt_message ~primary_err ~recovery_err
@@ -1165,7 +1176,7 @@ let authorize_mutation authority ~(current : schedule_request) ~target =
 ;;
 
 let update_request config ~authority ~now ~runner_tick_sec ?(timing_update = Replace_timing)
-    (request : Schedule_domain.schedule_request) =
+    ?expected_instance_id (request : Schedule_domain.schedule_request) =
   with_observed_mutation config (fun write_state ->
     let* state = load_for_mutation config in
     match find_schedule state ~schedule_id:request.schedule_id with
@@ -1173,6 +1184,19 @@ let update_request config ~authority ~now ~runner_tick_sec ?(timing_update = Rep
     | Some current ->
       let* () = authorize_mutation authority ~current ~target:current in
       let* () = authorize_mutation authority ~current ~target:request in
+      (* After authorization, so a caller that may not change the row does not
+         learn which instance it holds. *)
+      let* () =
+        match expected_instance_id with
+        | Some expected when not (String.equal expected current.schedule_instance_id) ->
+          Error
+            (Stale_instance
+               { schedule_id = request.schedule_id
+               ; expected
+               ; found = current.schedule_instance_id
+               })
+        | Some _ | None -> Ok ()
+      in
       if Schedule_domain.modify_allowed current.status
       then (
         let request = { request with

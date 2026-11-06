@@ -143,7 +143,7 @@ equivalent explicitly on every node that has one.
   and use **Edit source** to change it.
 - **Keeper draft:** write a proposed `SKILL.md` in the sandbox with `Write`, export
   it with `keeper_artifact_transfer` (`action="export"`), then pass the returned
-  `artifact` object and proposed directory name `package_id` to `keeper_skill_validate`.
+  `artifact` sha256 and proposed directory name `package_id` to `keeper_skill_validate`.
   This checks document and composition-plan rules; it does not execute or publish.
   Writing the draft does not update the catalog.
 - **Task-specific composition:** pass the structured prepare input as

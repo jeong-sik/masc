@@ -490,8 +490,7 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
           ("note", `String "tool matrix person note") ]
   | "keeper_tasks_list" -> `Assoc [ ("include_done", `Bool true) ]
   | "keeper_artifact_transfer" ->
-      `Assoc ["action", `String "export"; "path", `String "lib/sample.ml";
-        "purpose", `String "Inspect the matrix fixture source"]
+      `Assoc ["action", `String "export"; "path", `String "lib/sample.ml"]
   | "keeper_constitution_write" ->
       `Assoc ["text", `String "Record measured evidence with each result."]
   | "keeper_constitution_read" -> `Assoc []

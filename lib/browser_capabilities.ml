@@ -148,11 +148,9 @@ let support backend operation = match backend with
           Unsupported "Native stop_loading recovery requires an ego connection.")
     | Read_text -> read backend (invoke ~mode:"text" Read) []
     | Read_html -> (match backend with
-      | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) ->
-          conditional ~mode:"html" Read
+      | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi | Browser_lane.Ego_task_space) ->
+          read backend (invoke ~mode:"html" Read)
             [observed;"Explicit tabId, top document only; maxChars does not apply. The source is never cut: when the JSON reply would pass 1 MiB, html is null with htmlComplete false."]
-      | Connected Browser_lane.Ego_task_space ->
-          Unsupported "An ego connection does not return document source; read text, elements or a snapshot instead."
       | Safari_unavailable -> missing)
     | Read_elements -> read backend (invoke ~mode:"elements" Read) []
     | Read_scene -> read backend (invoke ~mode:"scene" Read) [observed;"Explicit tabId; viewport scene may be truncated. Geometry is not an occlusion guarantee."]
@@ -257,7 +255,9 @@ let support backend operation = match backend with
       | Connected Browser_lane.Web_extension -> conditional ~action:"set_zoom" Interact
           [observed;"Requires extension 0.8.0+, exact clientId/tabId, expectedUrl and factor 0.3–5. Uses measured browser zoom, never CSS scaling.";
            "Only automatic zoom mode is supported; per-origin scope may also affect and persist for same-origin tabs. Re-read the scene/screenshot afterward."]
-      | Connected (Browser_lane.Webdriver_bidi | Browser_lane.Ego_task_space) | Safari_unavailable -> missing)
+      | Connected Browser_lane.Ego_task_space ->
+          Unsupported "An ego connection has no browser zoom: CDP offers only a pinch scale, which is not the measured browser zoom set_zoom promises."
+      | Connected Browser_lane.Webdriver_bidi | Safari_unavailable -> missing)
     | Select_option -> (match backend with
       | Connected Browser_lane.Ego_task_space -> conditional ~action:"select_option" Interact
           [observed;"Pass value or distinct values ([] clears). Ego receives exact {value} objects and returns its native selected values. Disabled options are programmatically selectable. Native method failures are uncertain and are never replayed.";ego_agent_pages]
@@ -350,8 +350,12 @@ let support backend operation = match backend with
       | Connected Browser_lane.Webdriver_bidi -> conditional ~action:"set_viewport" Interact
           [observed;"Requires exact clientId/tabId and expectedUrl; " ^ viewport_bounds ^ ". With neither, the browser's own size returns.";
            "The size is an override on that tab until it is restored, which this connection does for the tabs it sized when its session ends; read the screenshot or scene again afterward. This is the page viewport, not the browser window."]
+      | Connected Browser_lane.Ego_task_space -> conditional ~action:"set_viewport" Interact
+          [observed;"Requires exact clientId/tabId and expectedUrl; " ^ viewport_bounds ^ ". With neither, the browser's own size returns.";
+           "The size is a CDP override on that Page. It stays while the SDK process that set it runs; every answer's sdkProcessStartedAt names that process, and another value means the size is gone. Restoring waits up to 2 s for the page to resize before its receipt. The override invalidates snapshot refs (refsInvalidated): take a new snapshot, and read the screenshot or scene again. This is the page viewport, not the browser window.";
+           ego_agent_pages]
       | Connected Browser_lane.Web_extension -> Unsupported "WebExtension cannot set the page viewport; the selected tab must not be silently moved to another browser."
-      | Connected Browser_lane.Ego_task_space | Safari_unavailable -> missing)
+      | Safari_unavailable -> missing)
     | Touch -> (match backend with
       | Connected Browser_lane.Webdriver_bidi -> conditional ~action:"tap_at" Interact
           [observed;geometry;

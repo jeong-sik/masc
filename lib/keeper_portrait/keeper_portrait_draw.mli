@@ -124,9 +124,6 @@ module For_testing : sig
   val eye_centres : Keeper_portrait_look.body -> (float * float) list
   val freckle_centres : Keeper_portrait_look.body -> (float * float) list
 
-  val mouth_centre : Keeper_portrait_look.body -> float * float
-  (** The middle of the mouth's centre line, shape units. *)
-
   val flame_box : Keeper_portrait_look.body -> float * float * float * float
   (** Left, top, right, bottom of everything a flicker can change, shape units. *)
 

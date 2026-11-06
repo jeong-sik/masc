@@ -1,0 +1,14 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>capability probe</title>
+<style>#pad { width: 400px; height: 200px; background: #ddd; }</style>
+<div id="pad">pad</div>
+<script>
+  window.__events = [];
+  const pad = document.getElementById('pad');
+  for (const kind of ['touchstart', 'touchend', 'pointerdown', 'pointerup', 'click']) {
+    pad.addEventListener(kind, (e) => window.__events.push({ kind, pointerType: e.pointerType || null, trusted: e.isTrusted }));
+  }
+  document.cookie = 'probe_cookie=1; path=/';
+  console.log('probe console line');
+</script>

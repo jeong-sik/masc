@@ -771,6 +771,50 @@ let test_extra_context_pinned () =
     (unchanged == padded_history)
 ;;
 
+(* The Anthropic lane stores each request's context carrier as a [System]
+   row of historical origin, right after the user or tool span it was sent
+   with. Such a row must leave the window with that span: pinned, every
+   carrier ever stored stays forever, and a cut that drops its user leaves it
+   heading the window, where the turn-scoped codec refuses it. *)
+let test_stored_historical_context_leaves_with_its_span () =
+  let historical i =
+    { (padded ~role:Types.System ~tag:(Printf.sprintf "historical-%d|" i) atom_bytes) with
+      origin = Types.Historical_system_context }
+  in
+  let history =
+    List.concat (List.init (4 * k) (fun i -> [ user i; historical i; assistant i ]))
+  in
+  let projected =
+    ok_exn ~what:"stored historical context" (project ~capacity_bytes:60_000 history)
+  in
+  let is_historical (m : Types.message) = m.origin = Types.Historical_system_context in
+  let index_after ~prefix (m : Types.message) =
+    let text = first_text [ m ] in
+    if String.starts_with ~prefix text
+    then (
+      let rest = String.sub text (String.length prefix) (String.length text - String.length prefix) in
+      Option.map (fun bar -> String.sub rest 0 bar) (String.index_opt rest '|'))
+    else None
+  in
+  Alcotest.(check bool) "the cut removed older context rows" true
+    (List.length (List.filter is_historical projected) < 4 * k);
+  let rec each_follows_its_user = function
+    | (previous : Types.message) :: (current :: _ as rest) ->
+      (not (is_historical current)
+       || (previous.role = Types.User
+           && Option.is_some (index_after ~prefix:"user-" previous)
+           && index_after ~prefix:"user-" previous = index_after ~prefix:"historical-" current))
+      && each_follows_its_user rest
+    | [ _ ] | [] -> true
+  in
+  Alcotest.(check bool) "every kept context row follows the user it was sent after" true
+    (each_follows_its_user projected);
+  Alcotest.(check bool) "no context row heads the window" false
+    (match List.filter (fun m -> not (is_preamble m)) projected with
+     | first :: _ -> is_historical first
+     | [] -> false)
+;;
+
 let test_pinned_bytes_are_charged_before_atoms () =
   (* Pinned messages cannot be dropped, so they are spent from the budget
      first. With the pinned block alone over capacity the projection refuses
@@ -1101,6 +1145,8 @@ let () =
             test_no_preamble_when_nothing_is_cut
         ; Alcotest.test_case "extra context pinned" `Quick
             test_extra_context_pinned
+        ; Alcotest.test_case "stored historical context leaves with its span" `Quick
+            test_stored_historical_context_leaves_with_its_span
         ; Alcotest.test_case "pinned bytes are charged before atoms" `Quick
             test_pinned_bytes_are_charged_before_atoms
         ; Alcotest.test_case "reservation exceeding capacity is typed" `Quick

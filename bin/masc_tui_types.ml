@@ -2989,6 +2989,19 @@ let schedule_update_form_json (row : schedule_row) =
     Option.bind row.sch_expires_at_iso Time_codec.parse_rfc3339_opt
     |> Option.fold ~none:[] ~some:(fun value -> [ "expires_at_unix", `Float value ])
   in
+  (* The update replaces the whole definition, so a form without the run watch
+     removes it on save. Creation refuses a body whose watch does not decode, so
+     only a hand-edited store file reaches the [Error] arm. *)
+  let run_watch =
+    match body with
+    | `Assoc fields ->
+        (match Masc.Schedule_run_watch.watch_of_body fields with
+         | Ok (Some target) ->
+             [ ( Masc.Schedule_run_watch.watch_field
+               , `String (Masc.Schedule_run_watch.target_url target) ) ]
+         | Ok None | Error _ -> [])
+    | _ -> []
+  in
   `Assoc
     ([ "schedule_id", `String row.sch_schedule_id
      ; "keeper_name", `String (schedule_json_string "keeper_name" body)
@@ -3003,7 +3016,7 @@ let schedule_update_form_json (row : schedule_row) =
      ; "source", `String row.sch_source
      ; "allow_unregistered_keeper", `Bool false
      ]
-     @ recurrence_fields @ expires)
+     @ run_watch @ recurrence_fields @ expires)
   |> Yojson.Safe.pretty_to_string
 
 let schedule_create_form_json () =
@@ -17691,7 +17704,7 @@ let workspace_activity_context_lines state ~cols =
         | Tui_decode.Fc_edited { replace_all; _ } -> if replace_all then "edit all" else "edit"
         | Fc_written _ -> "write"
         | Fc_inserted { line; _ } -> Printf.sprintf "insert at line %d" line
-        | Fc_materialized { sha256; bytes } -> Printf.sprintf "materialized %d bytes, SHA256 %s" bytes sha256 in
+        | Fc_materialized { sha256 } -> Printf.sprintf "materialized blob, SHA256 %s" sha256 in
       wrap "Repository" (match state.workspace_activity_repo with None -> "not selected" | Some id -> id)
       @ wrap "Path" path
       @ wrap "Keeper" change.fc_keeper

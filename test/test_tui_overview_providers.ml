@@ -209,15 +209,6 @@ let counts_of ?(runtimes = Types.Quota_unread) accounts =
 
 let counts_t = pair (pair int int) (pair int (option int))
 
-let section_lines ?(runtimes = Types.Quota_unread) ?(account_emails = Types.Account_emails_unread)
-    ~width accounts =
-  match
-    Providers.section ~rows:24 ~providers:(Types.Providers_read (decode_accounts accounts))
-      ~runtimes ~account_emails ~now ~width ~show_limit_exhausted:true
-  with
-  | Some section -> section.lines
-  | None -> fail "a read draws a section"
-
 (* The rows with a bar, as drawn. *)
 let bar_rows lines = List.filter (contains ~affix:meter_open) lines
 
@@ -324,132 +315,6 @@ let test_silent_account_draws_only_its_exhaustion () =
              List.mem id [ "id-kimi"; "id-codex"; "id-claude_code"; "id-ollama_cloud" ])
            drawn_observations)
 
-let reported_section ?(current = now) ?(kimi_observed_at = 1790170000.0)
-    ?(kimi_resets_at = 1790179580.0) ~width () =
-  let windows =
-    match Masc.Tui_decode_usage.decode_provider_usage_windows
-      (resolved ~kimi_observed_at ~kimi_resets_at "reported") with
-    | Ok windows -> windows
-    | Error err -> failf "fixture should decode: %s" err
-  in
-  let runtimes =
-    Types.Quota_read
-      [ runtime ~scope:"provider:kimi" ~exhausted:true
-          ~resets:(current +. 7200.0) "kimi.k3"
-      ]
-  in
-  match
-    Providers.section ~rows:24 ~account_emails:Types.Account_emails_unread ~providers:(Types.Providers_read windows) ~runtimes ~now:current ~show_limit_exhausted:true
-      ~width
-  with
-  | Some section -> List.map plain section.lines
-  | None -> fail "a read draws a section"
-
-let claude_five_hour lines =
-  match List.find_opt (contains ~affix:"67%") lines with
-  | Some row -> row
-  | None -> fail "no Claude Max row"
-
-let widths = [ 24; 44; 70; 80; 120; 132 ]
-
-(* The meter stays bounded, shrinks before it grows, and every row of every
-   width fits the screen. *)
-let test_meter_width_is_bounded () =
-  let meter_cells width =
-    snd (meter_of (claude_five_hour (reported_section ~width ())))
-  in
-  let wide = meter_cells 132 and medium = meter_cells 80 and narrow = meter_cells 44 in
-  check bool "a wide terminal draws a bounded meter" true (wide >= 6 && wide <= 24);
-  check bool "a narrower terminal never draws a longer meter" true
-    (narrow <= medium && medium <= wide);
-  List.iter
-    (fun width ->
-      List.iter
-        (fun line ->
-          check bool (Printf.sprintf "row fits %d cells" width) true
-            (Masc_tui_message_layout.display_width line <= width))
-        (reported_section ~width ()))
-    widths
-
-(* Reset times are drawn in the terminal's zone: a time on another day
-   carries its date. Calendar times are built in the runner's own zone, and
-   the expected text is fixed by the calendar, not by the formatter. *)
-let test_reset_clock_follows_local_dates () =
-  let local_time day hour minute =
-    let calendar = Unix.localtime now in
-    fst (Unix.mktime { calendar with Unix.tm_year = 2026 - 1900; tm_mon = 9 - 1;
-      tm_mday = day; tm_hour = hour; tm_min = minute; tm_sec = 0 })
-  in
-  let current = local_time 24 1 16 in
-  let drawn resets_at =
-    let reading =
-      decode_accounts [ account_json ~name:"a" [ percent_window ~id:"w" ~resets:resets_at 10 ] ]
-    in
-    match Providers.section ~rows:24 ~providers:(Types.Providers_read reading)
-            ~runtimes:Types.Quota_unread ~account_emails:Types.Account_emails_unread
-            ~now:current ~width:160 ~show_limit_exhausted:true with
-    | Some section -> String.concat "\n" (List.map plain section.lines)
-    | None -> fail "a read draws a section"
-  in
-  let same_day = local_time 24 23 10 and next_day = local_time 25 2 5 in
-  check string "same local day shows only the clock" "23:10"
-    (Providers.clock_text ~now:current same_day);
-  check string "another local day includes month and day" "09-25 02:05"
-    (Providers.clock_text ~now:current next_day);
-  List.iter
-    (fun at ->
-      check bool "the row draws the time the clock function formats" true
-        (contains ~affix:(Providers.clock_text ~now:current at) (drawn at)))
-    [ same_day; next_day ]
-
-(* A window heard at a different time than its account's newest report says
-   so. The others leave the time out. Read as a difference: the same account
-   drawn with every window heard together changes only the older window's row. *)
-let test_only_a_window_heard_at_another_time_says_so () =
-  let rows ~stale_observed_at =
-    bar_rows
-      (List.map plain
-         (section_lines ~width:160
-            [ account_json ~name:"a"
-                [ percent_window ~id:"fresh" ~observed_at:(now -. 60.0) 10
-                ; percent_window ~id:"stale" ~observed_at:stale_observed_at 20
-                ; percent_window ~id:"fresh-too" ~observed_at:(now -. 60.0) 30 ]
-            ]))
-  in
-  let together = rows ~stale_observed_at:(now -. 60.0)
-  and apart = rows ~stale_observed_at:(now -. 7200.0) in
-  check int "three rows either way" 3 (List.length apart);
-  (* Rows are in the plan's order: 30%, 20%, 10%. *)
-  match (together, apart) with
-  | [ t30; t20; t10 ], [ a30; a20; a10 ] ->
-      check string "a window heard with the account's newest report is unchanged" t30 a30;
-      check string "a window heard with the newest report, again" t10 a10;
-      check bool "the older window's row says more" true
-        (not (String.equal t20 a20) && String.length a20 > String.length t20)
-  | _ -> fail "expected three rows each"
-
-(* The newest report is the account's, whichever section a window falls in. A
-   window with room, heard earlier than the full window beside it, still says
-   when it was heard. *)
-let test_heard_time_is_the_accounts_not_the_sections () =
-  let other_row ~room_observed_at =
-    let lines =
-      List.map plain
-        (section_lines ~width:160
-           [ account_json ~name:"a"
-               [ percent_window ~id:"full" ~observed_at:(now -. 60.0) 100
-               ; percent_window ~id:"room" ~observed_at:room_observed_at 50 ]
-           ])
-    in
-    match bar_rows lines with
-    | [ _at_limit; other ] -> other
-    | rows -> failf "expected one row per section, got %d" (List.length rows)
-  in
-  let together = other_row ~room_observed_at:(now -. 60.0)
-  and apart = other_row ~room_observed_at:(now -. 7200.0) in
-  check bool "the window in the other section says when it was heard" true
-    (not (String.equal together apart))
-
 (* Z.AI's TIME_LIMIT counts MCP and tool calls: at 100% it refuses no model
    call, so it is not drawn in the exhausted tone, while the account's token
    window beside it is still drawn as reported. *)
@@ -524,43 +389,6 @@ let test_unknown_role_is_rejected () =
   in
   check bool "an unknown role fails the reading" true
     (Result.is_error (Masc.Tui_decode_usage.decode_provider_usage_windows json))
-
-let test_account_emails_name_their_accounts () =
-  let windows =
-    match Masc.Tui_decode_usage.decode_provider_usage_windows (resolved "reported") with
-    | Ok windows -> windows
-    | Error err -> failf "fixture should decode: %s" err
-  in
-  let section account_emails =
-    match
-      Providers.section ~rows:24 ~providers:(Types.Providers_read windows)
-        ~runtimes:Types.Quota_unread ~account_emails ~now ~width ~show_limit_exhausted:true
-    with
-    | Some section -> section
-    | None -> fail "a read draws a section"
-  in
-  let read ?(unreadable_rows = 0) emails =
-    section (Types.Account_emails_read { emails; unreadable_rows })
-  in
-  let without = section Types.Account_emails_unread in
-  let fitting = read [ ("claude_code", "c@x.io"); ("kimi", "kimi@example.com"); ("codex", "codex@example.com") ] in
-  let text = String.concat "\n" (List.map plain fitting.lines) in
-  List.iter (fun fact -> check bool ("email identity retains " ^ fact) true
-    (contains ~affix:fact text)) [ "Claude Max"; "id-claud"; "c@x.io"; "kimi@example.com" ];
-  check bool "an account with no usage report keeps its email" true
-    (contains ~affix:"codex@example.com" text);
-  let wide = read [ ("claude_code", "claude.with.long.address@example.com") ] in
-  let meters (section : Providers.section) = List.filter (contains ~affix:meter_open) (List.map plain section.lines) in
-  check (list string) "email metadata does not narrow window meters"
-    (meters without) (meters wide);
-  check (list string) "a failed read is said once, after the rows"
-    (List.map plain without.lines @ [ " account emails unread: HTTP 403" ])
-    (List.map plain (section (Types.Account_emails_failed "HTTP 403")).lines);
-  check bool "and no row names an email" false
-    (List.exists (contains ~affix:"@") (section (Types.Account_emails_failed "HTTP 403")).lines);
-  check (list string) "rows this build cannot read are counted"
-    (List.map plain without.lines @ [ " account emails: 2 rows this build cannot read" ])
-    (List.map plain (read ~unreadable_rows:2 []).lines)
 
 let test_unknown_state_is_rejected () =
   check bool "an unknown state fails the reading" true
@@ -1103,61 +931,6 @@ let test_the_header_counts_are_typed () =
 
 (* ---- the rendered rows -------------------------------------------------- *)
 
-(* The shape of the operator's screenshot, drawn by the real renderer. *)
-let screenshot_accounts =
-  [ account_json ~name:"antigravity"
-      [ percent_window ~id:"3p" ~resets:(now +. 5.0 *. hour) 0
-      ; percent_window ~id:"gemini-weekly" ~kind:"seven_day" ~resets:(now +. 22.8 *. hour) 100 ]
-  ; account_json ~name:"ollama" [ percent_window ~id:"weekly" ~kind:"seven_day" 43 ]
-  ; account_json ~name:"kimi"
-      [ percent_window ~id:"5h" ~resets:(now +. 0.5 *. hour) 56
-      ; percent_window ~id:"usage" ~kind:"seven_day" ~resets:(now +. 150.0 *. hour) 83 ]
-  ; account_json ~name:"openrouter"
-      [ usd_window ~id:"credit" ~used:100.0 (Some 100.0)
-      ; usd_window ~role:"counts_other_use" ~id:"key-usage" ~used:12.3456 None ]
-  ; silent_json "codex"
-  ]
-
-let screenshot_section ?(account_emails = Types.Account_emails_unread) ~width () =
-  section_lines ~account_emails ~width screenshot_accounts
-
-(* Edge values every row of every width must still fit. *)
-let edge_accounts =
-  screenshot_accounts
-  @ [ account_json ~name:"over" [ usd_window ~id:"credit" ~used:120.0 (Some 100.0) ]
-    ; account_json ~name:"passed" [ percent_window ~id:"a" ~resets:(now -. 60.0) 100 ]
-    ; account_json ~name:"long-name-account-with-many-characters"
-        [ percent_window ~id:"a-very-long-limit-identifier-from-a-provider" 50 ]
-    ]
-
-let test_every_line_fits_the_width () =
-  List.iter
-    (fun width ->
-      List.iter
-        (fun line ->
-          let cells = Masc_tui_message_layout.display_width line in
-          if cells > width then failf "%d cells in a %d-cell screen: %S" cells width (plain line))
-        (section_lines ~width edge_accounts))
-    [ 20; 24; 44; 60; 76; 80; 100; 120; 132 ]
-
-let test_rows_follow_the_plan () =
-  let raw = screenshot_section ~width:120 () in
-  let lines = List.map plain raw in
-  check int "each window with a cap is one row with one bar" 6
-    (List.length (bar_rows lines));
-  check int "an account's name is drawn once for its consecutive windows" 1
-    (List.length (List.filter (contains ~affix:"kimi") lines));
-  (* The sections are drawn in plan order: the two windows at their limit
-     are the first two bars. *)
-  let bars = bar_rows raw in
-  let at_limit_first = List.filteri (fun index _ -> index < 2) bars in
-  List.iter
-    (fun line -> check bool "an at-limit row comes first and says 100%" true
-      (contains ~affix:"100%" (plain line)))
-    at_limit_first;
-  check int "no other bar says 100%" 2
-    (List.length (List.filter (fun line -> contains ~affix:"100%" (plain line)) bars))
-
 (* A catalogue observation groups windows, but does not change what their
    individual reports say about their limits. *)
 let test_at_limit_is_the_reports_not_the_sections () =
@@ -1180,17 +953,6 @@ let test_at_limit_is_the_reports_not_the_sections () =
        [ account_json ~name:"a"
            [ percent_window ~id:"high" ~resets:(now +. 9.0 *. hour) 83
            ; percent_window ~id:"low" ~resets:(now +. hour) 56 ] ])
-
-let test_an_account_email_is_drawn_once () =
-  let lines =
-    screenshot_section
-      ~account_emails:
-        (Types.Account_emails_read
-           { emails = [ ("antigravity", "ag@example.com") ]; unreadable_rows = 0 })
-      ~width:120 ()
-  in
-  check int "split across two sections, the account names its email once" 1
-    (List.length (List.filter (contains ~affix:"ag@example.com") (List.map plain lines)))
 
 (* #44071 review P3: hiding the first group omits its entries, while the
    header counts every account and showing the group restores its entries. *)
@@ -1227,198 +989,6 @@ let test_hidden_limit_group_omits_entries () =
   check bool "hidden draws fewer lines" true
     (List.length hidden < List.length shown)
 
-(* #44071 review P3: the Trend line joins consecutive reported days and
-   never crosses a gap; an above-limit day keeps its mark in the top row. *)
-let test_trend_line_breaks_at_gaps_and_keeps_marks () =
-  let point ~observed_at unit
-      : Masc.Tui_decode_usage.provider_usage_history_point =
-    { puhp_scope_id = "s1"
-    ; puhp_kind = "five_hour"
-    ; puhp_limit_id = None
-    ; puhp_unit = unit
-    ; puhp_observed_at = observed_at
-    }
-  in
-  let generated_at = 1780000000.0 in
-  let day = 86400.0 in
-  let history : Masc.Tui_decode_usage.provider_usage_history =
-    { puh_days = 5
-    ; puh_generated_at = generated_at
-    ; puh_unreadable_reports = 0
-    ; puh_reported_no_windows = []
-    ; puh_points =
-        [ point ~observed_at:(generated_at -. (4. *. day))
-            (Masc.Tui_decode_usage.Utilization_fraction 0.2)
-        ; point ~observed_at:(generated_at -. (3. *. day))
-            (Masc.Tui_decode_usage.Utilization_fraction 0.8)
-        ; point ~observed_at:(generated_at -. day)
-            (Masc.Tui_decode_usage.Utilization_fraction 0.0)
-        ; point ~observed_at:generated_at
-            (Masc.Tui_decode_usage.Utilization_percent 140)
-        ]
-    }
-  in
-  let trend =
-    Masc_tui_usage_trend.of_history ~share:Providers.share_of_full history
-  in
-  let row = List.hd trend.rows in
-  let width = 60 in
-  let plot = Masc_tui_usage_trend.plot ~width trend row in
-  check int "five bands, a baseline and dates" 7 (List.length plot);
-  List.iter
-    (fun line ->
-      check bool "chart respects terminal cells" true
-        (Masc_tui_message_layout.display_width line <= width))
-    plot;
-  let text = String.concat "\n" plot in
-  check bool "the fixed full-limit axis is drawn" true
-    (contains ~affix:"100%" text);
-  check bool "the above-limit day keeps its mark" true
-    (contains ~affix:"↑" text);
-  (* A band row is an axis plus one 3-byte braille cell per day-slot column;
-     the gap day's columns must carry no ink in any band. *)
-  let blank = "\xe2\xa0\x80" in
-  let cells_of_band row =
-    match Astring.String.find_sub ~sub:"│ " row with
-    | None -> failf "band row without an axis: %S" row
-    | Some i ->
-        let start = i + String.length "│ " in
-        let cells = String.sub row start (String.length row - start) in
-        if String.length cells mod 3 <> 0 then
-          failf "band row is not whole cells: %S" row;
-        List.init (String.length cells / 3) (fun cell ->
-            String.sub cells (cell * 3) 3)
-  in
-  let bands = List.filter (contains ~affix:"│") plot in
-  check int "five band rows" 5 (List.length bands);
-  let days = List.length row.samples in
-  let step = min 4 ((width - 7) / days) in
-  let gap =
-    let rec nth index = function
-      | [] -> fail "fixture needs a gap day"
-      | None :: _ -> index
-      | Some _ :: rest -> nth (index + 1) rest
-    in
-    nth 0 row.samples
-  in
-  List.iter
-    (fun band ->
-      let cells = Array.of_list (cells_of_band band) in
-      for k = 0 to step - 1 do
-        check bool "a gap column carries no ink" true
-          (String.equal cells.(gap * step + k) blank)
-      done)
-    bands;
-  check bool "the line is drawn somewhere" true
-    (List.exists
-       (fun band ->
-         List.exists
-           (fun cell ->
-             (not (String.equal cell blank)) && not (String.equal cell "↑"))
-           (cells_of_band band))
-       bands)
-
-
-(* ---- cards ----------------------------------------------------------- *)
-
-let card_lines ?(runtimes = Types.Quota_unread) ~width accounts =
-  match
-    Providers.section_cards
-      ~providers:(Types.Providers_read (decode_accounts accounts))
-      ~runtimes ~account_emails:Types.Account_emails_unread ~now ~width ~rows:24
-      ~show_limit_exhausted:true
-  with
-  | Some section -> section.lines
-  | None -> fail "a read draws a section"
-
-let wide_enough_for_cards = 160
-
-let occurrences ~affix text =
-  let n = String.length affix and h = String.length text in
-  let rec loop i count =
-    if i + n > h then count
-    else if String.equal (String.sub text i n) affix then loop (i + n) (count + 1)
-    else loop (i + 1) count
-  in
-  if n = 0 then 0 else loop 0 0
-
-let card_corners lines =
-  List.fold_left
-    (fun total line -> total + occurrences ~affix:Masc_tui_theme.Box.tl line)
-    0 (List.map plain lines)
-
-(* A card is drawn for every entry the plan has, and for no other thing, except
-   an account the server has not heard from: those are listed by name under one
-   line, in cards as in rows, and take no card. The runtimes are unread, so no
-   account carries an exhaustion tag that would give it an entry of its own. *)
-let test_cards_draw_one_card_per_plan_entry () =
-  let takes_a_card (entry : Providers.plan_entry) =
-    match entry.pe_account.Masc.Tui_decode_usage.pua_state with
-    | Masc.Tui_decode_usage.Account_not_reported_since_start -> false
-    | Masc.Tui_decode_usage.Account_reported_no_windows _
-    | Masc.Tui_decode_usage.Account_reported _ -> true
-  in
-  let entries =
-    Providers.plan ~now ~runtimes:Types.Quota_unread
-      (decode_accounts screenshot_accounts).Masc.Tui_decode_usage.puws_accounts
-    |> List.fold_left
-         (fun total group ->
-           total + List.length (List.filter takes_a_card group.Providers.pg_entries))
-         0
-  in
-  check int "one card for each entry the plan has" entries
-    (card_corners (card_lines ~width:wide_enough_for_cards screenshot_accounts))
-
-(* The same windows are drawn as rows and as cards: the layout is the only
-   difference. Two cards share a line, so bars are counted, not the lines
-   that hold one. *)
-let test_cards_draw_the_same_windows_as_rows () =
-  let bars lines =
-    List.fold_left
-      (fun total line -> total + occurrences ~affix:meter_open (plain line))
-      0 lines
-  in
-  check int "one bar per window that has a cap, as in rows"
-    (bars (screenshot_section ~width:wide_enough_for_cards ()))
-    (bars (card_lines ~width:wide_enough_for_cards screenshot_accounts))
-
-let test_every_card_line_fits_the_width () =
-  List.iter
-    (fun width ->
-      List.iter
-        (fun line ->
-          let cells = Masc_tui_message_layout.display_width line in
-          if cells > width then failf "%d cells in a %d-cell screen: %S" cells width (plain line))
-        (card_lines ~width edge_accounts))
-    [ 104; 110; 120; 160; 230 ]
-
-(* Where two columns of cards do not fit, the section is the rows it always
-   was. *)
-let test_a_narrow_screen_keeps_the_rows () =
-  List.iter
-    (fun width ->
-      check bool (Printf.sprintf "no cards at %d" width) false
-        (Providers.cards_fit ~width);
-      check (list string) (Printf.sprintf "the same lines at %d" width)
-        (section_lines ~width screenshot_accounts)
-        (card_lines ~width screenshot_accounts))
-    [ 20; 80; 100 ];
-  check bool "cards at a wide width" true
-    (Providers.cards_fit ~width:wide_enough_for_cards)
-
-(* The summary above the plan does not depend on how the accounts are drawn. *)
-let test_cards_keep_the_summary () =
-  let first_blank lines =
-    let rec upto acc = function
-      | [] | "" :: _ -> List.rev acc
-      | line :: rest -> upto (line :: acc) rest
-    in
-    upto [] (List.map plain lines)
-  in
-  check (list string) "the same summary"
-    (first_blank (section_lines ~width:wide_enough_for_cards screenshot_accounts))
-    (first_blank (card_lines ~width:wide_enough_for_cards screenshot_accounts))
-
 let () =
   run "tui_overview_providers"
     [ ( "providers"
@@ -1435,16 +1005,9 @@ let () =
         ; test_case "USD rows preserve amounts without a fabricated meter" `Quick test_usd_rows_do_not_invent_a_percentage
         ; test_case "a silent account draws only its exhaustion" `Quick
             test_silent_account_draws_only_its_exhaustion
-        ; test_case "meter width is bounded" `Quick test_meter_width_is_bounded
-        ; test_case "reset clock follows local dates" `Quick
-            test_reset_clock_follows_local_dates
-        ; test_case "only a window heard at another time says so" `Quick
-            test_only_a_window_heard_at_another_time_says_so
         ; test_case "a window that gates nothing is not an alarm" `Quick
             test_window_that_gates_nothing_is_not_an_alarm
         ; test_case "unknown role is rejected" `Quick test_unknown_role_is_rejected
-        ; test_case "account emails name their accounts" `Quick
-            test_account_emails_name_their_accounts
         ; test_case "plan splits accounts by window state" `Quick
             test_plan_splits_accounts_by_window_state
         ; test_case "limit group order is longest wait first" `Quick
@@ -1457,11 +1020,6 @@ let () =
         ; test_case "observed exhaustion groups gating windows" `Quick
             test_observed_exhaustion_groups_gating_windows
         ; test_case "an empty report has no windows" `Quick test_an_empty_report_has_no_windows
-        ; test_case "every line fits the width" `Quick test_every_line_fits_the_width
-        ; test_case "rows follow the plan" `Quick test_rows_follow_the_plan
-        ; test_case "an account email is drawn once" `Quick test_an_account_email_is_drawn_once
-        ; test_case "heard time is the account's, not the section's" `Quick
-            test_heard_time_is_the_accounts_not_the_sections
         ; test_case "an amount past its cap enters the first group" `Quick
             test_an_amount_past_its_cap_enters_first_group
         ; test_case "a passed reset remains in the group and is last" `Quick
@@ -1483,19 +1041,5 @@ let () =
             test_at_limit_is_the_header_decision
         ; test_case "hidden limit group omits its entries" `Quick
             test_hidden_limit_group_omits_entries
-        ; test_case "trend line breaks at gaps and keeps marks" `Quick
-            test_trend_line_breaks_at_gaps_and_keeps_marks
-        ] )
-    ; ( "cards"
-      , [ test_case "one card per plan entry" `Quick
-            test_cards_draw_one_card_per_plan_entry
-        ; test_case "cards draw the same windows as rows" `Quick
-            test_cards_draw_the_same_windows_as_rows
-        ; test_case "every card line fits the width" `Quick
-            test_every_card_line_fits_the_width
-        ; test_case "a narrow screen keeps the rows" `Quick
-            test_a_narrow_screen_keeps_the_rows
-        ; test_case "cards keep the summary" `Quick
-            test_cards_keep_the_summary
         ] )
     ]

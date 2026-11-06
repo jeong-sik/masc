@@ -17,10 +17,7 @@ type kind =
       line : int;
       text : string;
     }
-  | Materialized of {
-      sha256 : string;
-      bytes : int;
-    }
+  | Materialized of { sha256 : string }
 
 type t = {
   at : float;
@@ -256,9 +253,7 @@ let kind_of_row ~(handler : Keeper_tool_descriptor.runtime_handler) row =
         Ok
           (Some
              ( keeper
-             , Materialized
-                 { sha256 = artifact.blob.sha256; bytes = artifact.blob.bytes }
-             )))
+             , Materialized { sha256 = (artifact :> string) } )))
   | Keeper_tool_descriptor.Tool_execute
   | Keeper_tool_descriptor.Tool_search_files
   | Keeper_tool_descriptor.Tool_read_file
@@ -547,9 +542,8 @@ let kind_to_json = function
   | Written { content } -> `Assoc [ ("kind", `String "write"); ("content", `String content) ]
   | Inserted { line; text } ->
       `Assoc [ ("kind", `String "insert"); ("line", `Int line); ("text", `String text) ]
-  | Materialized { sha256; bytes } ->
-      `Assoc
-        [ ("kind", `String "materialize"); ("sha256", `String sha256); ("bytes", `Int bytes) ]
+  | Materialized { sha256 } ->
+      `Assoc [ ("kind", `String "materialize"); ("sha256", `String sha256) ]
 
 let optional_json to_json = function None -> `Null | Some value -> to_json value
 

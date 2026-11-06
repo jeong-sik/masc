@@ -391,13 +391,16 @@ exception Event_queue_cycle_failed of string
    includes same-named lane/binding edits, not only the assignment label.
    A fresh success can also release an observed path without a config edit.
    Route-only waits with no stored rest retain their original deadline. *)
+(* The rest of the walk the next dispatch starts: the deferred suffix the loop
+   holds for this assignment, else a fresh walk of it. *)
+let next_walk_rest ~now ~assignment_id ~deferred_runtime_lane =
+  match deferred_runtime_lane with
+  | Some lane -> Keeper_turn_driver.deferred_lane_rest ~now lane
+  | None -> Keeper_turn_driver.assignment_walk_rest ~now assignment_id
+;;
+
 let provider_wait_interrupt
       ~keeper_name ~dispatch_snapshot ~assignment_id ~deferred_runtime_lane ~basis =
-  let walk_rest ~now =
-    match deferred_runtime_lane with
-    | Some lane -> Keeper_turn_driver.deferred_lane_rest ~now lane
-    | None -> Keeper_turn_driver.assignment_walk_rest ~now assignment_id
-  in
   fun ~now ->
     not
       (Runtime.same_keeper_dispatch dispatch_snapshot
@@ -405,9 +408,30 @@ let provider_wait_interrupt
     || (match basis with
         | Keeper_turn_driver.Failure_response -> false
         | Keeper_turn_driver.Observed_path_rest ->
-          match walk_rest ~now with
+          match next_walk_rest ~now ~assignment_id ~deferred_runtime_lane with
           | Keeper_turn_driver.Walk_head_serving _ -> true
           | Keeper_turn_driver.Walk_waits_until _ -> false)
+;;
+
+(* What a loop's first cycle waits for. A loop that starts -- a server
+   restart, keeper_up -- holds no failure of its own, so nothing would make it
+   wait, yet its stores can already rest the walk it sends next: a quota window
+   a provider stated before the restart, read back at boot
+   ([Runtime_quota_window_journal]). That is the wait the previous process's
+   loop was in. The first cycle takes it up the way the cycle after that
+   failure did, on the observed rest, so a change that frees the walk still
+   ends it ([provider_wait_interrupt]). On 2026-11-06 three Keepers resting
+   on stated quotas each sent one refused request after every boot. *)
+let start_path_wait ~now ~assignment_id ~deferred_runtime_lane =
+  match next_walk_rest ~now ~assignment_id ~deferred_runtime_lane with
+  | Keeper_turn_driver.Walk_head_serving _ -> None
+  | Keeper_turn_driver.Walk_waits_until { release_at; resting_runtime_id } ->
+    Some
+      (Wait_for_path_release
+         { release_at
+         ; waiting_on = resting_runtime_id
+         ; basis = Keeper_turn_driver.Observed_path_rest
+         })
 ;;
 
 
@@ -1562,6 +1586,9 @@ let run_heartbeat_loop
   let cadence_now () = Monotonic_deadline.elapsed_seconds cadence_clock in
   let periodic_cadence = ref (Keeper_keepalive_signal.Initial_due
       (float_of_int (max 0 proactive_warmup_sec))) in
+  (* Only the loop's first cycle reads [start_path_wait]; every later wait
+     follows the failed cycle that left it. *)
+  let first_cycle = ref true in
   let rec loop () =
     if Atomic.get stop
     then ()
@@ -1647,15 +1674,35 @@ let run_heartbeat_loop
             ~lifecycle:
               (Keeper_lifecycle_admission.admit_autonomous lifecycle_state)
         in
-        let admitted_turn =
-          match intake_admission with
-          | Intake_admitted -> true
-          | Intake_lifecycle_blocked _ -> false
+        let start_wait =
+          if not !first_cycle
+          then None
+          else (
+            first_cycle := false;
+            match intake_admission with
+            | Intake_lifecycle_blocked _ -> None
+            | Intake_admitted ->
+              let assignment_id = Keeper_meta_contract.runtime_id_of_meta meta_current in
+              start_path_wait ~now:now_ts ~assignment_id
+                ~deferred_runtime_lane:
+                  (Deferred_lane_slot.for_assignment deferred_runtime_lane_slot ~assignment_id))
         in
-        let lifecycle_blocked =
-          match intake_admission with
-          | Intake_lifecycle_blocked _ -> true
-          | Intake_admitted -> false
+        (match start_wait with
+         | Some (Wait_for_path_release { release_at; waiting_on; basis = _ }) ->
+           Log.Keeper.info
+             ~keeper_name:m.name
+             "%s: the loop starts while %s rests until %.0f; the first cycle takes \
+              no input and waits for it"
+             m.name
+             waiting_on
+             release_at
+         | Some (Continue_on_deferred_lane _) | None -> ());
+        (* A turn runs only when the lifecycle admits one and the walk it would
+           send is not already resting when the loop starts. *)
+        let admitted_turn =
+          match intake_admission, start_wait with
+          | Intake_admitted, None -> true
+          | Intake_admitted, Some _ | Intake_lifecycle_blocked _, _ -> false
         in
         (match intake_admission with
          | Intake_admitted -> ()
@@ -1716,7 +1763,7 @@ let run_heartbeat_loop
             { meta = meta_current
             ; cycle_status = Turn_cycle_completed
             ; stimuli_acked = false
-            ; after_failure = None
+            ; after_failure = start_wait
             })
           else (
             (* Cycle 43: KeeperHeartbeat.tla TurnComplete bracket — the
@@ -1778,11 +1825,11 @@ let run_heartbeat_loop
              ~keeper_name:m.name
              "%s: operator-interrupted cycle records no turn status or work-health refresh"
              m.name
-         | Record_turn_status _ when lifecycle_blocked -> ()
+         | Record_turn_status _ when not admitted_turn -> ()
          | Record_turn_status work_heartbeat_action ->
-             (* The registry tracks failure count as observation. A
-                lifecycle-blocked cycle did not run a turn and must not emit a
-                false [Turn_succeeded]. *)
+             (* The registry tracks failure count as observation. A cycle that
+                ran no turn -- lifecycle-blocked, or waiting out the rest its
+                loop started in -- must not emit a false [Turn_succeeded]. *)
              let turn_fail_count =
                Keeper_registry.get_turn_failures
                  ~base_path:ctx.config.base_path
@@ -1962,6 +2009,7 @@ module For_testing = struct
   ;;
 
   let after_failure = after_failure
+  let start_path_wait = start_path_wait
   let next_cycle_starts_now = next_cycle_starts_now
   let cycle_wake = cycle_wake
   let periodic_cadence_after_cycle = periodic_cadence_after_cycle

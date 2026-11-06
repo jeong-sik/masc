@@ -24,7 +24,7 @@ let request = function
 let resolve_source ~draft_context ~config ~package_id = function
   | Artifact artifact ->
     Keeper_peer_artifact.fetch ~config artifact
-    |> Result.map (fun text -> text, artifact.Keeper_peer_artifact_ref.filename)
+    |> Result.map (fun (fetched : Keeper_peer_artifact.fetched) -> fetched.content)
     |> Result.map_error (fun detail -> Artifact_read_failed detail)
   | Draft sha256 ->
     (match draft_context with
@@ -32,7 +32,7 @@ let resolve_source ~draft_context ~config ~package_id = function
      | Some (capability_surface, keeper_name) ->
        Keeper_composition_draft.load_authored ~base_path:config.Workspace.base_path
          ~capability_surface ~keeper_name ~package_id ~sha256
-       |> Result.map (fun source -> source.Keeper_composition_draft.source_text, "SKILL.md")
+       |> Result.map (fun source -> source.Keeper_composition_draft.source_text)
        |> Result.map_error (fun error -> Draft_rejected error))
 ;;
 
@@ -57,11 +57,11 @@ let failure ~class_ ~code ~message fields =
    this inline verdict with a blob marker whose preview is empty. Without the
    manifest every call failed as "tool output artifact storage failed"
    (#37493). *)
-let source_identity ~filename source_text =
+let source_identity source_text =
   `Assoc
     [ "sha256", `String Agent_core_sha256.(digest_string source_text |> to_hex)
     ; "bytes", `Int (String.length source_text)
-    ; "filename", `String filename
+    ; "filename", `String "SKILL.md"
     ]
 ;;
 
@@ -82,12 +82,11 @@ let handle ~descriptors ~draft_context ~config ~args =
        let class_ = Keeper_composition_draft.failure_class error in
        failure ~class_ ~code:"composition_draft_rejected"
          ~message:(Yojson.Safe.to_string detail) [ "draft_error", detail ]
-     | Ok (source_text, filename) ->
+     | Ok source_text ->
        let directory = Skill_reference.package_id_to_string package_id in
        let identity =
          [ "source"
-           , source_identity
-               ~filename source_text
+           , source_identity source_text
          ; "package_id", `String directory
          ; "validation", `String "static"
          ]

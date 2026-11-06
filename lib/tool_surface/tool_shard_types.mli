@@ -8,12 +8,6 @@ val fs_write_mode_enum_strings : string list
 (** Hand-mirrored from [Keeper_tool_filesystem_runtime.valid_fs_write_mode_strings]
     (#8490). *)
 
-(** {1 Schema selection} *)
-
-val select_named_schemas :
-  string list -> Masc_domain.tool_schema list -> Masc_domain.tool_schema list
-(** Pure: pick the named schemas (in input order) from the given pool. *)
-
 val base_tools : Masc_domain.tool_schema list
 (** Pure: base tool schemas (always-on tools every keeper sees). *)
 

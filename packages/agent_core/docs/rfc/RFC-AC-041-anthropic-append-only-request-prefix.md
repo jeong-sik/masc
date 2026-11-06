@@ -96,7 +96,7 @@
 
 **(3) 강등이 턴마다 오래된 도구 결과를 바꾼다.**
 
-- `Keeper_model_input_demotion` (`lib/keeper/keeper_model_input_demotion.mli:1-3`)은 오래된 도구 결과 본문을 blob 마커로 바꾼 사본을 공급자에 보낸다. 경계 `demote_before` 는 "마지막으로 끝난 턴의 끝"이고(`keeper_turn_driver_try_provider.ml:1543-1550`), 정책 `Small`(기본값, `keeper_input_policy.ml:2`)에서는 항상 적용된다. `Wide` 는 연속성에 따라 적용하지 않는다(1179-1189).
+- `Keeper_model_input_demotion` (`lib/keeper/keeper_model_input_demotion.mli:1-3`)은 오래된 도구 결과 본문을 blob 마커로 바꾼 사본을 공급자에 보낸다. 경계 `demote_before` 는 "마지막으로 끝난 턴의 끝"이다(`keeper_turn_driver_try_provider.ml:1543-1550`).
 - 모듈 설명(`keeper_model_input_demotion.mli` 의 `plan`)이 스스로 적는다. 경계가 움직이면 보내는 앞부분이 다시 쓰이고, 그래서 경계를 "턴마다 한 번" 움직이게 골랐다. 한 턴 안의 라운드 사이에서는 경계가 고정된다("pinned to the turn's seed").
 - 따라서 새 턴의 첫 요청에서 지난 턴의 큰 도구 결과(마커가 더 작아지는 것)가 마커로 바뀐다. 6번 규칙(§1.2)대로 이후 서명 블록이 무효다. 바뀐 도구 결과보다 뒤에 있는 서명 블록이 무효가 된다. 마커보다 작은 결과만 있는 턴은 바뀌지 않는다.
 - 크기 거절 뒤 재전송에서는 이번 턴의 도구 결과도 강등한다(`Current_turn_demoted`, #28845).

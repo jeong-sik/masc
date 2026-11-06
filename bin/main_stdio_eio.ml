@@ -69,6 +69,24 @@ let run_cmd cli_base_path =
   in
   Eio.Switch.on_release sw (fun () ->
     Server_startup_takeover.release_base_path_lease lease);
+  (* HIGH-RISK-UNREVIEWED: the stdio runtime opens a base path only after the
+     same account mode judgment as the HTTP boot, right after the BasePath
+     lease. MASC_ALLOW_ANONYMOUS_MUTATIONS configures the HTTP surface only;
+     the stdio runtime never reads it, so it reports none. *)
+  let single_user =
+    match
+      Authz_boot_mode_read.boot
+        ~base_path
+        ~config_dir:(Env_config_core.masc_config_dir_opt ())
+        ~anonymous_mutations:false
+    with
+    | Ok single_user -> single_user
+    | Error (first, rest) ->
+      Log.Server.error
+        "[FATAL] the account mode refuses this stdio boot: %s"
+        (String.concat "; " (first :: rest));
+      exit 1
+  in
   (* Complete the system-thread inventory before cancellation can release the
      process lease or owner initialization can start original writers. *)
   let original_inventory_started = Unix.gettimeofday () in
@@ -96,7 +114,7 @@ let run_cmd cli_base_path =
         ~sw
         ~runtime_sw
         ~env
-        ~base_path
+        ~single_user
         ~input_base_path:workspace.Workspace_root.requested
           (* The stdio runtime has no --accept-store-quarantine: a keeper store
              this build cannot decode makes it refuse, and the operator strips

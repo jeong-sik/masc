@@ -183,9 +183,13 @@ let messages (input : B.input) = function
     , high_water_detail input.high_water )
 ;;
 
+type single_user = Judged_single_user of string
+
+let single_user_base_path (Judged_single_user base_path) = base_path
+
 let boot ~base_path ~config_dir ~anonymous_mutations =
   let input = input ~base_path ~config_dir ~anonymous_mutations in
   match decide input with
-  | Boot_single_user -> Ok ()
+  | Boot_single_user -> Ok (Judged_single_user base_path)
   | Stop stop -> Error (messages input stop)
 ;;

@@ -634,6 +634,7 @@ stdin의 첫 바이트를 읽어 Content-Length 프레이밍 여부를 판단한
 
 - stdin에서 JSON-RPC 요청을 읽고, `mcp_server_eio.handle_request`로 처리한 후 stdout으로 응답을 쓴다.
 - 서버 상태 초기화는 HTTP 서버와 동일하게 `Server_runtime_bootstrap`를 통해 수행한다.
+- BasePath lease 를 잡은 뒤 HTTP 부팅과 같은 계정 모드 판정(`Authz_boot_mode_read.boot`)을 거친다. 단일 사용자가 아니면 부팅을 거절한다. `initialize_owner_state_blocking` 은 이 판정이 만든 값만 받는다.
 - Keeper bootstrap, background maintenance, board flush 등 모든 부트스트랩 절차를 거친다.
 
 ---

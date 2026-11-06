@@ -338,6 +338,8 @@ let refusal_name : Authz_state.refusal -> string = function
   | Authz_state.Accounts_off kind -> "Accounts_off " ^ R.Kind.to_string kind
   | Authz_state.Kind_not_read kind -> "Kind_not_read " ^ R.Kind.to_string kind
   | Authz_state.Admission_behind_log _ -> "Admission_behind_log"
+  | Authz_state.Closes_without_reduction -> "Closes_without_reduction"
+  | Authz_state.Closes_not_held _ -> "Closes_not_held"
 ;;
 
 let error_name : Z.error -> string = function
@@ -696,6 +698,7 @@ let a_locked_log_leaves_an_intent_that_the_next_commit_aborts () =
 module Invite_event = Authz_invite_event
 
 let invite_id = get (Authz_types.Invite_id.of_string "invite-1")
+let second_invite_id = get (Authz_types.Invite_id.of_string "invite-2")
 
 (* Each member has a namespace of their own, so a draft names it after the
    identity of the member. *)
@@ -968,10 +971,94 @@ let a_block_outlives_a_commit_that_fails_after_the_abort () =
       (admission_draft ~at_ms:(at_ms + 4)))
 ;;
 
+(* A commit of [timed] while another process holds the log: the intent is
+   written and the append is not. *)
+let fail_append zone dirs timed =
+  with_foreign_lock ~lock_path:(Fs_compat.private_jsonl_lock_path (log_file dirs)) (fun release ->
+    check_error "a commit while another process holds the log" "Record_not_appended Write_locked" zone timed;
+    release ())
+;;
+
+let revoke_draft_of ~invite_id ~at_ms =
+  match Invite_event.to_body (Invite_event.Revoked { invite_id }) with
+  | Ok body -> timed ~at_ms ~author:Author.Local_operator ~kind:R.Kind.Invite body
+  | Error error -> Alcotest.failf "fixture revocation refused: %s" (Authz_body.error_to_string error)
+;;
+
+(* A revocation made again after its append failed closes the blocks of the
+   tries before it (design 8.3). The first try finds the log locked. The
+   second gives it up, names it, and cannot write the log, which stops the
+   zone. After a restart the retry gives the second up and names both: the
+   gate reads the invitation clear, and so does the next restart. *)
+let a_retried_revocation_closes_its_blocks () =
+  (* The superuser writes to a file of mode 0400. *)
+  skip_for_superuser ();
+  with_dirs (fun dirs ->
+    let (_ : B.completed) = bootstrap dirs in
+    let zone = open_zone dirs in
+    let (_ : Z.committed) = commit_ok zone (invite_draft ()) in
+    let head = (Z.snapshot zone).Z.head in
+    let invitation = Subject.Invite invite_id in
+    let first = revoke_draft ~at_ms:(at_ms + 2) in
+    let first_digest = (record_at ~head first).R.hash in
+    fail_append zone dirs first;
+    let second = revoke_draft ~at_ms:(at_ms + 3) in
+    let second_intent =
+      { (revocation_intent ~head second) with
+        intended_next_record_digest = (R.closing (record_at ~head second) ~closes:[ first_digest ]).R.hash
+      }
+    in
+    Unix.chmod (log_file dirs) 0o400;
+    Fun.protect
+      ~finally:(fun () -> Unix.chmod (log_file dirs) 0o600)
+      (fun () ->
+        check_error "a second try that cannot write the log" "Record_not_appended Write_failed" zone second);
+    check_blocked
+      "two failed tries are two blocks"
+      [ "invite:invite-1"; "invite:invite-1" ]
+      (Z.snapshot zone).Z.state;
+    let zone = open_zone dirs in
+    check_gate "the invitation after the restart" "pending" zone invitation;
+    let retry = revoke_draft ~at_ms:(at_ms + 4) in
+    let retried = commit_ok zone retry in
+    check_settled "the retry gives the second try up" ("Abort " ^ intent_name second_intent) retried;
+    Alcotest.(check string)
+      "the record of the retry closes both tries"
+      (R.Hash.to_hex
+         (R.closing (record_at ~head retry) ~closes:[ first_digest; second_intent.S.intended_next_record_digest ])
+           .R.hash)
+      (R.Hash.to_hex retried.Z.record_hash);
+    check_gate "the invitation once the retry is in the log" "clear" zone invitation;
+    let opened = check_restart "a restart" dirs ~mode:on ~head:retried.Z.record_hash in
+    check_blocked "the replay closes both" [] opened.replay.Z.Replay.state)
+;;
+
+(* A reduction of another subject closes nothing: its record names no block,
+   and the invitation whose revocation failed stays blocked. *)
+let a_reduction_of_another_subject_leaves_the_block () =
+  with_dirs (fun dirs ->
+    let (_ : B.completed) = bootstrap dirs in
+    let zone = open_zone dirs in
+    let (_ : Z.committed) = commit_ok zone (invite_draft ()) in
+    let (_ : Z.committed) =
+      commit_ok zone (invite_draft ~at_ms:(at_ms + 2) ~invite_id:second_invite_id ~token:"token-2" ())
+    in
+    fail_append zone dirs (revoke_draft ~at_ms:(at_ms + 3));
+    let other = revoke_draft_of ~invite_id:second_invite_id ~at_ms:(at_ms + 4) in
+    let head = (Z.snapshot zone).Z.head in
+    let revoked = commit_ok zone other in
+    Alcotest.(check string)
+      "the record of the other revocation closes nothing"
+      (R.Hash.to_hex (record_at ~head other).R.hash)
+      (R.Hash.to_hex revoked.Z.record_hash);
+    check_gate "the invitation whose revocation failed" "pending" zone (Subject.Invite invite_id);
+    let opened = check_restart "a restart" dirs ~mode:on ~head:revoked.Z.record_hash in
+    check_blocked "the replay keeps the block" [ "invite:invite-1" ] opened.replay.Z.Replay.state)
+;;
+
 (* ---- Admin assignments ---- *)
 
 let second_admin = get (User_id.of_string "fedcba9876543210fedcba9876543210")
-let second_invite_id = get (Authz_types.Invite_id.of_string "invite-2")
 let third_invite_id = get (Authz_types.Invite_id.of_string "invite-3")
 
 let admin_revocation_draft ~by ~user_id ~at_ms =
@@ -1591,6 +1678,14 @@ let () =
             "a block outlives a commit that fails after the abort"
             `Quick
             a_block_outlives_a_commit_that_fails_after_the_abort
+        ; Alcotest.test_case
+            "a retried revocation closes its blocks"
+            `Quick
+            a_retried_revocation_closes_its_blocks
+        ; Alcotest.test_case
+            "a reduction of another subject leaves the block"
+            `Quick
+            a_reduction_of_another_subject_leaves_the_block
         ; Alcotest.test_case
             "an aborted Admin revocation starts after the admission"
             `Quick

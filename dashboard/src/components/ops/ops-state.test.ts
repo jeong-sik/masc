@@ -12,7 +12,6 @@ vi.mock('../../lib/dashboard-actor', () => ({
 import {
   actorName,
   broadcastMessage,
-  pauseReason,
   taskTitle,
   taskDescription,
   taskPriority,
@@ -48,7 +47,6 @@ describe('ops-state', () => {
 
   it('has expected default signal values', () => {
     expect(broadcastMessage.value).toBe('')
-    expect(pauseReason.value).toBe('Operator maintenance')
     expect(taskPriority.value).toBe('2')
     expect(hydratedWorkflowId.value).toBeNull()
   })

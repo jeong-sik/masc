@@ -1017,8 +1017,9 @@ let for_surface = function
       ; b Act "d" "Git changes"
           ~help:"show the selected repository's current working-tree changes"
       ; b Act "a" "add" ~help:"register a repository; opens $EDITOR"
-      ; b Act "Left / Esc" "back"
-          ~help:"leave Git changes, or return to Dashboard"
+      ; b Act "Esc" "back"
+          ~help:"return to Dashboard; inside Git changes, close the diff, \
+                 then Git changes (Left does the same there)"
       ; b Search "/" "find"
           ~help:"jump the cursor to a matching repository, or to a changed \
                  path while Git changes is open"
@@ -1627,6 +1628,31 @@ let work_tasks_bindings =
 
 let footer_hints_work_tasks = hints_of_bindings work_tasks_bindings
 
+(* The step Esc and Left take next on the Code surface. Both walk one ladder,
+   from the layer drawn on top down to the project tree; only Esc goes on from
+   the bottom rung to the ring parent. The two key arms in masc_tui.ml and the
+   footer read this one answer, so the footer cannot name Left where the
+   ladder has no step left for it. It used to be two copies of the ladder in
+   the arms and the words "Left / Esc" on every tree footer, which at the
+   project root named a key that did nothing. *)
+type code_back =
+  | Close_code_notes
+  | Close_code_diff
+  | Close_code_history
+  | Return_to_code_tree
+  | Climb_code_directory
+  | Climb_to_code_project
+  | Leave_code_for_workspace
+
+let code_back_step (state : state) =
+  if state.code_notes_open then Close_code_notes
+  else if state.code_diff_open then Close_code_diff
+  else if state.code_history_open then Close_code_history
+  else if state.code_focus_file = Right_pane then Return_to_code_tree
+  else if not (String.equal state.code_dir "") then Climb_code_directory
+  else if state.code_scope <> Code_scope_project then Climb_to_code_project
+  else Leave_code_for_workspace
+
 (* The Code surface's footer, which the renderer used to spell by hand. It
    named d, H, m and w and nothing else, so the three language-server keys
    never appeared on the screen they work on -- and neither did blame or the
@@ -1635,11 +1661,21 @@ let footer_hints_work_tasks = hints_of_bindings work_tasks_bindings
    overlay owns the pane, so the keys that act on the code underneath are
    dead while it is up, and the tree pane answers none of the file keys. *)
 type code_pane =
-  | Code_tree  (** the file list has focus *)
+  | Code_tree  (** the file list has focus below the project root *)
+  | Code_root  (** the file list has focus at the project root *)
   | Code_file  (** a file is open and nothing covers it *)
   | Code_diff
   | Code_notes  (** wrapped memo document is drawn over the file *)
   | Code_history  (** complete history document is drawn over the file *)
+
+let code_pane_of (state : state) =
+  if state.code_focus_file <> Right_pane then
+    if code_back_step state = Leave_code_for_workspace then Code_root
+    else Code_tree
+  else if state.code_notes_open then Code_notes
+  else if state.code_history_open then Code_history
+  else if state.code_diff_open then Code_diff
+  else Code_file
 
 let footer_hints_code_hover = hints_of_bindings
   [ b Navigate "j/k" "scroll"
@@ -1686,7 +1722,7 @@ let footer_hints_code ~pane =
   let overlay_keys = [ "Enter (history)" ] in
   let dead =
     match pane with
-    | Code_tree -> overlay_keys @ file_keys
+    | Code_tree | Code_root -> overlay_keys @ file_keys
     | Code_file -> overlay_keys
     | Code_diff -> overlay_keys @ ("Right / Enter" ::
         List.filter (fun key -> not (String.equal key "Shift-Left / Shift-Right")) file_keys)
@@ -1700,19 +1736,23 @@ let footer_hints_code ~pane =
   in
   let visible = for_surface Code
       |> List.filter (fun b -> not (List.mem b.key dead)) in
+  (* At the project root Left has no step left to take ([code_back_step]);
+     Esc alone goes on, to the ring parent. *)
+  let esc_alone b =
+    if String.equal b.key "Left / Esc" then { b with key = "Esc" } else b in
   let visible = match pane with
     | Code_diff ->
         let pan, others = List.partition
             (fun b -> String.equal b.key "Shift-Left / Shift-Right") visible in
         List.map (fun b -> { b with key = "Shift-←/→" }) pan
-        @ List.map (fun b ->
-            if String.equal b.key "Left / Esc" then { b with key = "Esc" } else b) others
+        @ List.map esc_alone others
+    | Code_root -> List.map esc_alone visible
     | Code_tree | Code_file | Code_notes | Code_history -> visible in
   visible
   |> List.map (fun b ->
        if String.equal b.key "j/k" then
          { b with label = (match pane with
-           | Code_tree -> "move"
+           | Code_tree | Code_root -> "move"
            | Code_file | Code_diff | Code_notes | Code_history -> "scroll") }
        else b)
   |> hints_of_bindings
@@ -1720,7 +1760,7 @@ let footer_hints_code ~pane =
       match pane with
       | Code_notes -> hints_of_bindings code_notes_bindings
       | Code_history -> hints_of_bindings code_history_bindings
-      | Code_tree | Code_file | Code_diff -> hints
+      | Code_tree | Code_root | Code_file | Code_diff -> hints
 
 (* The Runtime footer is the table's, with the two keys that depend on the
    reading on screen: [p] names where it goes from here, and [e] names the edit

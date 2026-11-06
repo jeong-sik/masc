@@ -218,12 +218,35 @@ val work_tasks_bindings : binding list
 val footer_hints_work_tasks : string
 (** {!work_tasks_bindings} as a footer. *)
 
+(** The step Esc and Left take next on the Code surface. *)
+type code_back =
+  | Close_code_notes
+  | Close_code_diff
+  | Close_code_history
+  | Return_to_code_tree
+  | Climb_code_directory
+  | Climb_to_code_project
+  | Leave_code_for_workspace
+      (** Nothing is left to close or climb. Esc goes on to the ring parent;
+          Left stays on the surface. *)
+
+val code_back_step : Masc_tui_types.state -> code_back
+(** One ladder for the Esc arm, the Left arm and the footer: notes, diff,
+    history, the open file, a directory, a keeper's or repository's root, and
+    last the project root. *)
+
 type code_pane =
-  | Code_tree  (** the file list has focus *)
+  | Code_tree  (** the file list has focus below the project root *)
+  | Code_root  (** the file list has focus at the project root *)
   | Code_file  (** a file is open and nothing covers it *)
   | Code_diff
   | Code_notes  (** wrapped memo document is drawn over the file *)
   | Code_history  (** complete history document is drawn over the file *)
+
+val code_pane_of : Masc_tui_types.state -> code_pane
+(** The pane the footer is drawn for. [Code_root] is exactly the state where
+    {!code_back_step} answers [Leave_code_for_workspace] with the tree focused,
+    so the footer names Left only where Left has a step to take. *)
 
 val footer_hints_code_hover : string
 (** Keys for the full hover reading over the current Code file. *)

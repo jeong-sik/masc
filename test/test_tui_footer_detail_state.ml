@@ -125,6 +125,17 @@ let scoped_keys =
   @ back_keys "Runtime"
       ~list:(Keys.footer_hints_runtime ~mode:Masc_tui_types.Runtime_lanes)
       ~detail:(Keys.footer_hints_runtime_detail ~ko:false ~routes:false ())
+  (* Repositories draws Git changes from a footer of its own; the repository
+     list under it has nothing for Left to close, so Esc alone returns to
+     Dashboard. *)
+  @ back_keys "Repositories"
+      ~list:(Keys.footer_hints Masc_tui_types.Repositories)
+      ~detail:Keys.footer_hints_git_changes
+  (* Code at the project root has no step for Left ([code_back_step]); a
+     directory down, Left climbs one. *)
+  @ back_keys "Code tree"
+      ~list:(Keys.footer_hints_code ~pane:Keys.Code_root)
+      ~detail:(Keys.footer_hints_code ~pane:Keys.Code_tree)
 
 let test_a_scoped_key_is_named_only_where_it_answers () =
   List.iter
@@ -157,6 +168,85 @@ let test_code_draft_keys_are_named_only_on_the_file_pane () =
         [ ("tree", Keys.Code_tree); ("diff", Keys.Code_diff) ])
     draft_keys
 
+(* The ladder Esc and Left walk on Code, and the footer pane drawn at each
+   rung. The tree footer names Left only where the ladder has a step for it,
+   and the project root is the one tree state where it has none, so the state
+   has to reach [Code_root] and no other. The names come from exhaustive
+   matches: a new rung or pane stops this file compiling until it is named. *)
+module T = Masc_tui_types
+
+let step_name = function
+  | Keys.Close_code_notes -> "close notes"
+  | Keys.Close_code_diff -> "close diff"
+  | Keys.Close_code_history -> "close history"
+  | Keys.Return_to_code_tree -> "return to tree"
+  | Keys.Climb_code_directory -> "climb directory"
+  | Keys.Climb_to_code_project -> "climb to project"
+  | Keys.Leave_code_for_workspace -> "leave for workspace"
+
+let pane_name = function
+  | Keys.Code_tree -> "tree"
+  | Keys.Code_root -> "root"
+  | Keys.Code_file -> "file"
+  | Keys.Code_diff -> "diff"
+  | Keys.Code_notes -> "notes"
+  | Keys.Code_history -> "history"
+
+let open_file (state : T.state) = state.T.code_focus_file <- T.Right_pane
+
+(* Opening a diff closes the history and closing a commit diff reopens it, and
+   the memo key is dead over a diff, so no state has two overlays open. *)
+let code_rungs =
+  [ ("the project root", (fun (_ : T.state) -> ()), "leave for workspace", "root")
+  ; ("a directory", (fun s -> s.T.code_dir <- "lib"), "climb directory", "tree")
+  ; ( "a keeper's root",
+      (fun s -> s.T.code_scope <- T.Code_scope_keeper "scout"),
+      "climb to project",
+      "tree" )
+  ; ( "a repository's root",
+      (fun s -> s.T.code_scope <- T.Code_scope_repo "masc"),
+      "climb to project",
+      "tree" )
+  ; ( "a directory in a keeper's tree",
+      (fun s ->
+        s.T.code_scope <- T.Code_scope_keeper "scout";
+        s.T.code_dir <- "lib"),
+      "climb directory",
+      "tree" )
+  ; ("an open file", open_file, "return to tree", "file")
+  ; ( "the history",
+      (fun s ->
+        open_file s;
+        s.T.code_history_open <- true),
+      "close history",
+      "history" )
+  ; ( "a diff",
+      (fun s ->
+        open_file s;
+        s.T.code_diff_open <- true),
+      "close diff",
+      "diff" )
+  ; ( "the notes",
+      (fun s ->
+        open_file s;
+        s.T.code_notes_open <- true),
+      "close notes",
+      "notes" )
+  ]
+
+let test_the_footer_pane_follows_the_ladder_rung () =
+  List.iter
+    (fun (name, edit, step, pane) ->
+      let state =
+        T.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+      in
+      edit state;
+      check string (name ^ ": the step Esc and Left take") step
+        (step_name (Keys.code_back_step state));
+      check string (name ^ ": the pane the footer is drawn for") pane
+        (pane_name (Keys.code_pane_of state)))
+    code_rungs
+
 let test_every_scoped_surface_is_named () =
   let named =
     List.map (fun (_, surface, _) -> surface) list_footer_refusals
@@ -180,6 +270,8 @@ let () =
             test_a_scoped_key_is_named_only_where_it_answers
         ; test_case "code draft keys are named only on the file pane" `Quick
             test_code_draft_keys_are_named_only_on_the_file_pane
+        ; test_case "the code footer pane follows the ladder rung" `Quick
+            test_the_footer_pane_follows_the_ladder_rung
         ; test_case "every scoped surface is named here" `Quick
             test_every_scoped_surface_is_named
         ] )

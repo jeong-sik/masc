@@ -1,0 +1,333 @@
+{
+  "schema": "masc.tui.pty-request-counts.v1",
+  "module": "test_tui_memory_push",
+  "class": "MemoryPushTest",
+  "build_commit": "473386e4609917d3129867a895637bb9ed969879",
+  "test_passed": true,
+  "tests_run": 1,
+  "observer_connections": 3,
+  "requests": [
+    {
+      "phase": "changed",
+      "path": "/api/v1/keepers/alpha/turn-records",
+      "count": 1
+    },
+    {
+      "phase": "changed",
+      "path": "/health",
+      "count": 2
+    },
+    {
+      "phase": "changed",
+      "path": "health",
+      "count": 1
+    },
+    {
+      "phase": "changed",
+      "path": "observer-event-written",
+      "count": 1
+    },
+    {
+      "phase": "hidden",
+      "path": "observer-event-written",
+      "count": 1
+    },
+    {
+      "phase": "leaving",
+      "path": "/api/v1/dashboard/gate",
+      "count": 1
+    },
+    {
+      "phase": "leaving",
+      "path": "/api/v1/keepers/asks",
+      "count": 1
+    },
+    {
+      "phase": "leaving",
+      "path": "/api/v1/operator",
+      "count": 1
+    },
+    {
+      "phase": "leaving",
+      "path": "/health",
+      "count": 3
+    },
+    {
+      "phase": "open",
+      "path": "/api/v1/keepers/alpha/turn-records",
+      "count": 1
+    },
+    {
+      "phase": "open",
+      "path": "/api/v1/stream/fleet",
+      "count": 1
+    },
+    {
+      "phase": "open",
+      "path": "/health",
+      "count": 2
+    },
+    {
+      "phase": "open",
+      "path": "health",
+      "count": 1
+    },
+    {
+      "phase": "reconnect",
+      "path": "/api/v1/dashboard/gate",
+      "count": 1
+    },
+    {
+      "phase": "reconnect",
+      "path": "/api/v1/dashboard/health-line",
+      "count": 2
+    },
+    {
+      "phase": "reconnect",
+      "path": "/api/v1/dashboard/scheduled-automation",
+      "count": 2
+    },
+    {
+      "phase": "reconnect",
+      "path": "/api/v1/gate/keepers",
+      "count": 2
+    },
+    {
+      "phase": "reconnect",
+      "path": "/api/v1/keepers/alpha/turn-records",
+      "count": 2
+    },
+    {
+      "phase": "reconnect",
+      "path": "/api/v1/keepers/asks",
+      "count": 2
+    },
+    {
+      "phase": "reconnect",
+      "path": "/api/v1/keepers/turns",
+      "count": 3
+    },
+    {
+      "phase": "reconnect",
+      "path": "/api/v1/operator",
+      "count": 3
+    },
+    {
+      "phase": "reconnect",
+      "path": "/api/v1/stream/fleet",
+      "count": 2
+    },
+    {
+      "phase": "reconnect",
+      "path": "/health",
+      "count": 11
+    },
+    {
+      "phase": "reconnect",
+      "path": "health",
+      "count": 2
+    },
+    {
+      "phase": "retry",
+      "path": "/api/v1/keepers/alpha/turn-records",
+      "count": 2
+    },
+    {
+      "phase": "retry",
+      "path": "/api/v1/stream/fleet",
+      "count": 1
+    },
+    {
+      "phase": "retry",
+      "path": "/health",
+      "count": 4
+    },
+    {
+      "phase": "retry",
+      "path": "health",
+      "count": 2
+    },
+    {
+      "phase": "retry",
+      "path": "observer-event-written",
+      "count": 1
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/async-requests",
+      "count": 2
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/dashboard/gate",
+      "count": 3
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/dashboard/gate/keeper-settings",
+      "count": 2
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/dashboard/goals",
+      "count": 1
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/dashboard/health-line",
+      "count": 3
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/dashboard/planning",
+      "count": 1
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/dashboard/scheduled-automation",
+      "count": 3
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/gate/keepers",
+      "count": 4
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/keepers/asks",
+      "count": 5
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/keepers/tool-approval-mode",
+      "count": 2
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/keepers/tool-approvals",
+      "count": 3
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/keepers/turns",
+      "count": 5
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/operator",
+      "count": 6
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/stream/fleet",
+      "count": 2
+    },
+    {
+      "phase": "setup",
+      "path": "/api/v1/verification/requests",
+      "count": 1
+    },
+    {
+      "phase": "setup",
+      "path": "/health",
+      "count": 22
+    },
+    {
+      "phase": "trailing",
+      "path": "/api/v1/keepers/alpha/turn-records",
+      "count": 2
+    },
+    {
+      "phase": "trailing",
+      "path": "/health",
+      "count": 4
+    },
+    {
+      "phase": "trailing",
+      "path": "health",
+      "count": 2
+    },
+    {
+      "phase": "trailing",
+      "path": "observer-event-written",
+      "count": 3
+    },
+    {
+      "phase": "unrelated",
+      "path": "/api/v1/keepers/turns",
+      "count": 1
+    },
+    {
+      "phase": "unrelated",
+      "path": "/api/v1/stream/fleet",
+      "count": 1
+    },
+    {
+      "phase": "unrelated",
+      "path": "observer-event-written",
+      "count": 1
+    }
+  ],
+  "responses": [
+    {
+      "phase": "changed",
+      "path": "/health",
+      "count": 2
+    },
+    {
+      "phase": "changed",
+      "path": "health",
+      "count": 1
+    },
+    {
+      "phase": "leaving",
+      "path": "/health",
+      "count": 3
+    },
+    {
+      "phase": "open",
+      "path": "/health",
+      "count": 2
+    },
+    {
+      "phase": "open",
+      "path": "health",
+      "count": 1
+    },
+    {
+      "phase": "reconnect",
+      "path": "/health",
+      "count": 11
+    },
+    {
+      "phase": "reconnect",
+      "path": "health",
+      "count": 2
+    },
+    {
+      "phase": "retry",
+      "path": "/health",
+      "count": 4
+    },
+    {
+      "phase": "retry",
+      "path": "health",
+      "count": 2
+    },
+    {
+      "phase": "setup",
+      "path": "/health",
+      "count": 22
+    },
+    {
+      "phase": "trailing",
+      "path": "/health",
+      "count": 4
+    },
+    {
+      "phase": "trailing",
+      "path": "health",
+      "count": 2
+    }
+  ]
+}

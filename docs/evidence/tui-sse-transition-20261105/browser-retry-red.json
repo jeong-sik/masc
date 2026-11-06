@@ -1,0 +1,22 @@
+{
+  "schema": "masc.tui.browser-retry-diagnostic.v1",
+  "captured_on": "2026-11-05",
+  "source": "8722e8f572d8bfa80964906497637529f28b7181",
+  "native_run": 41958171820,
+  "native_binary_sha256": "115d0b11c11cdae9cc73d3a70384a6ad9ede67ece17a3389a95a344532d4bdc6",
+  "pty_result": "FAIL: a failed Browser read was not retried",
+  "observations": [
+    { "now": 7.915, "owed_before_transition": "reading" },
+    { "now": 7.932, "retry_at": 9.915 },
+    { "now": 7.949, "retry_at": 11.932 },
+    { "now": 7.967, "retry_at": 15.949 },
+    { "now": 7.984, "retry_at": 23.967 },
+    { "now": 8.004, "retry_at": 37.984 },
+    { "now": 13.550, "retry_at": 43.550 }
+  ],
+  "interpretation": "The Failed load state re-entered failed_read on every main-loop iteration. Waiting was changed to Owed, then Reading, then failed again, advancing the backoff without a new HTTP response.",
+  "fix_source": "473386e4609917d3129867a895637bb9ed969879",
+  "fix_rule": "Only Settled/Reading enters the failure transition. Owed/Waiting keeps its schedule; no read starts while server authority is unavailable.",
+  "final_pty": "PASS: matching, one trailing read, failed-read retry, reconnect revalidation and hidden suppression",
+  "raw_log": "artifacts/tui-sse-lanes-20261104/preserved-aqilv8yy/.masc/logs/tui/session-80504-6deab0/system_log_2026-11-05.jsonl (local diagnostic capture; not a public claim)"
+}

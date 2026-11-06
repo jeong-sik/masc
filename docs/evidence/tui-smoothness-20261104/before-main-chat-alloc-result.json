@@ -1,0 +1,3707 @@
+{
+  "schema": "masc.tui.pty_observation.v1",
+  "binary": "/Users/dancer/me/workspace/yousleepwhen/masc/_build/default/bin/masc_tui.exe",
+  "started_at": "2026-11-04T10:31:10.016240+00:00",
+  "base_path": "/Users/dancer/me",
+  "port": 8935,
+  "scenario": "chat",
+  "rows": 55,
+  "cols": 200,
+  "phases": [
+    {
+      "name": "chat pageup",
+      "completed": true,
+      "key_writes": 80,
+      "next_output_samples": 80,
+      "keys_without_later_output": 0,
+      "output_chunks": 672,
+      "output_bytes": 655644,
+      "next_pty_output_ms": {
+        "p50": 24.561167025240138,
+        "p95": 434.7465830214787,
+        "max": 501.72695799847133
+      },
+      "write_samples": [
+        {
+          "name": "chat pageup",
+          "started": 183153.585687958,
+          "returned": 183153.585703541,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183153.618041416,
+          "returned": 183153.618061416,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183153.649406125,
+          "returned": 183153.649429,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183153.684387041,
+          "returned": 183153.684405041,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183153.7147785,
+          "returned": 183153.714794458,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183153.746724125,
+          "returned": 183153.746749625,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183153.777080583,
+          "returned": 183153.777098916,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183153.8103575,
+          "returned": 183153.810377875,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183153.841488666,
+          "returned": 183153.841507875,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183153.875559458,
+          "returned": 183153.875577333,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183153.906666416,
+          "returned": 183153.906683083,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183153.941414125,
+          "returned": 183153.941434875,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183153.974829916,
+          "returned": 183153.974849125,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183154.005886791,
+          "returned": 183154.005911458,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183154.040932416,
+          "returned": 183154.040950416,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183154.074003791,
+          "returned": 183154.074020916,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183154.109048708,
+          "returned": 183154.109067166,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183154.143367291,
+          "returned": 183154.143388333,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183154.175045833,
+          "returned": 183154.175069083,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183154.207442458,
+          "returned": 183154.207464083,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183154.239579375,
+          "returned": 183154.239598166,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183154.26978875,
+          "returned": 183154.269807333,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183154.30378125,
+          "returned": 183154.303836875,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183154.333868916,
+          "returned": 183154.33388575,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183154.365212625,
+          "returned": 183154.365252625,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183154.398918625,
+          "returned": 183154.398938,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183154.431486708,
+          "returned": 183154.431508291,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183154.464827291,
+          "returned": 183154.464852291,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183154.497355916,
+          "returned": 183154.497385125,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183154.532846916,
+          "returned": 183154.532875958,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183154.5644425,
+          "returned": 183154.564473458,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183154.59808075,
+          "returned": 183154.598101166,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183154.632060166,
+          "returned": 183154.632087041,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183154.664659208,
+          "returned": 183154.664686875,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183154.696198791,
+          "returned": 183154.696219041,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183154.727534416,
+          "returned": 183154.727551666,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183154.759706125,
+          "returned": 183154.759730916,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183154.792296416,
+          "returned": 183154.792319166,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183154.825939416,
+          "returned": 183154.825962791,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183154.856563833,
+          "returned": 183154.856587375,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183154.891093458,
+          "returned": 183154.891115,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183154.925425041,
+          "returned": 183154.925453375,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183154.958876708,
+          "returned": 183154.958897916,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183154.992205625,
+          "returned": 183154.992225583,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183155.025538083,
+          "returned": 183155.025556708,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183155.058261666,
+          "returned": 183155.05827725,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183155.088890458,
+          "returned": 183155.088921291,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183155.123406416,
+          "returned": 183155.123425166,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183155.158316916,
+          "returned": 183155.15833825,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183155.18931875,
+          "returned": 183155.189336833,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183155.222289958,
+          "returned": 183155.222313875,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183155.256952958,
+          "returned": 183155.256995041,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183155.289935083,
+          "returned": 183155.289955916,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183155.324745625,
+          "returned": 183155.32476575,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183155.355677541,
+          "returned": 183155.355695458,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183155.387983416,
+          "returned": 183155.388008958,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183155.422609916,
+          "returned": 183155.422634458,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183155.458041458,
+          "returned": 183155.458063875,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183155.4930925,
+          "returned": 183155.493117291,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183155.526023125,
+          "returned": 183155.526044416,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183155.56091525,
+          "returned": 183155.56094125,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183155.593294833,
+          "returned": 183155.59335775,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183155.62646775,
+          "returned": 183155.626492875,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183155.657171916,
+          "returned": 183155.657194791,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183155.690600583,
+          "returned": 183155.690621375,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183155.725649041,
+          "returned": 183155.725707916,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183155.758728541,
+          "returned": 183155.758755958,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183155.790708791,
+          "returned": 183155.790726875,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183155.825461916,
+          "returned": 183155.825483958,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183155.860517083,
+          "returned": 183155.860537208,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183155.894652,
+          "returned": 183155.894688833,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183155.929297166,
+          "returned": 183155.929327666,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183155.961645291,
+          "returned": 183155.961669208,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183155.995164666,
+          "returned": 183155.995208625,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183156.02788825,
+          "returned": 183156.027936166,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183156.059757625,
+          "returned": 183156.059795041,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183156.091039916,
+          "returned": 183156.091063833,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183156.125390416,
+          "returned": 183156.125413833,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183156.158530458,
+          "returned": 183156.158557666,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pageup",
+          "started": 183156.193342166,
+          "returned": 183156.193367041,
+          "bytes_written": 4
+        }
+      ]
+    },
+    {
+      "name": "chat pagedown",
+      "completed": true,
+      "key_writes": 80,
+      "next_output_samples": 58,
+      "keys_without_later_output": 22,
+      "output_chunks": 672,
+      "output_bytes": 656437,
+      "next_pty_output_ms": {
+        "p50": 6.600916007300839,
+        "p95": 37.357292021624744,
+        "max": 66.1327920097392
+      },
+      "write_samples": [
+        {
+          "name": "chat pagedown",
+          "started": 183156.626369666,
+          "returned": 183156.626401666,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183156.661101958,
+          "returned": 183156.661124541,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183156.695524291,
+          "returned": 183156.695546541,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183156.726479916,
+          "returned": 183156.726502708,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183156.758644833,
+          "returned": 183156.758666208,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183156.788698125,
+          "returned": 183156.788718583,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183156.827296541,
+          "returned": 183156.827312541,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183156.859676208,
+          "returned": 183156.859694833,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183156.894781083,
+          "returned": 183156.894795666,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183156.927611125,
+          "returned": 183156.927630375,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183156.96032825,
+          "returned": 183156.960350833,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183156.99488175,
+          "returned": 183156.994901416,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183157.0299365,
+          "returned": 183157.029958291,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183157.062610083,
+          "returned": 183157.062630458,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183157.097649416,
+          "returned": 183157.09767,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183157.128616791,
+          "returned": 183157.128647791,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183157.159791125,
+          "returned": 183157.159813583,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183157.1919585,
+          "returned": 183157.191974708,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183157.226298666,
+          "returned": 183157.226319625,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183157.261335458,
+          "returned": 183157.261355375,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183157.29263375,
+          "returned": 183157.292659625,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183157.324638875,
+          "returned": 183157.324658708,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183157.355963625,
+          "returned": 183157.355984375,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183157.389829458,
+          "returned": 183157.389851166,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183157.420374666,
+          "returned": 183157.420395166,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183157.453690291,
+          "returned": 183157.453707458,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183157.488727458,
+          "returned": 183157.488748375,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183157.523764375,
+          "returned": 183157.523782166,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183157.558627083,
+          "returned": 183157.558651083,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183157.593000791,
+          "returned": 183157.593019791,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183157.623274125,
+          "returned": 183157.623299791,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183157.658317833,
+          "returned": 183157.658335791,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183157.692112458,
+          "returned": 183157.692130166,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183157.723285458,
+          "returned": 183157.723305208,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183157.757598541,
+          "returned": 183157.7576155,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183157.791752791,
+          "returned": 183157.791773375,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183157.82597825,
+          "returned": 183157.825994,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183157.857283333,
+          "returned": 183157.857295166,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183157.89123925,
+          "returned": 183157.891257791,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183157.926063541,
+          "returned": 183157.926087291,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183157.957055916,
+          "returned": 183157.957073625,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183157.99030175,
+          "returned": 183157.990344208,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183158.022746916,
+          "returned": 183158.022766875,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183158.053582416,
+          "returned": 183158.0536015,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183158.088631333,
+          "returned": 183158.088652958,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183158.119351333,
+          "returned": 183158.119373083,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183158.150620291,
+          "returned": 183158.150654291,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183158.18395475,
+          "returned": 183158.183975083,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183158.216310125,
+          "returned": 183158.216328708,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183158.247982083,
+          "returned": 183158.248018458,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183158.284044291,
+          "returned": 183158.284063125,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183158.318618166,
+          "returned": 183158.318638125,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183158.349579583,
+          "returned": 183158.349597333,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183158.382241166,
+          "returned": 183158.382274041,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183158.416597791,
+          "returned": 183158.416619333,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183158.451291333,
+          "returned": 183158.451312125,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183158.48142775,
+          "returned": 183158.481451458,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183158.513493458,
+          "returned": 183158.513514791,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183158.548536583,
+          "returned": 183158.548557916,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183158.580543166,
+          "returned": 183158.580564625,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183158.611846416,
+          "returned": 183158.611868916,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183158.646290166,
+          "returned": 183158.646308791,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183158.681330291,
+          "returned": 183158.681349416,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183158.71308625,
+          "returned": 183158.713106958,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183158.744359625,
+          "returned": 183158.744379041,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183158.7793965,
+          "returned": 183158.7794135,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183158.814435416,
+          "returned": 183158.814456583,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183158.851935041,
+          "returned": 183158.851953541,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183158.886060791,
+          "returned": 183158.886090083,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183158.921292,
+          "returned": 183158.921309166,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183158.956330333,
+          "returned": 183158.956349916,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183158.987623541,
+          "returned": 183158.987653541,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183159.020129666,
+          "returned": 183159.020151166,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183159.053882833,
+          "returned": 183159.053903125,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183159.085091958,
+          "returned": 183159.085110791,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183159.11919725,
+          "returned": 183159.1192165,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183159.150911125,
+          "returned": 183159.150931791,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183159.185448166,
+          "returned": 183159.185472083,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183159.218388458,
+          "returned": 183159.218406375,
+          "bytes_written": 4
+        },
+        {
+          "name": "chat pagedown",
+          "started": 183159.250229791,
+          "returned": 183159.250248208,
+          "bytes_written": 4
+        }
+      ]
+    }
+  ],
+  "error": null,
+  "observation_options": {
+    "keys": 80,
+    "gap": 0.03,
+    "settle": 0.4,
+    "boot_wait": 2,
+    "chat_wait": 3,
+    "ready_timeout": 15,
+    "capture_screen": false
+  },
+  "observation_complete": false,
+  "scope": "next observed PTY output and application frame timings; no causal key response or physical display latency",
+  "server_before": {
+    "status": "ok",
+    "build": {
+      "release_version": "0.67.0",
+      "binary_version": "0.67.0",
+      "repo_version": "0.67.0",
+      "commit": "b4f546482049947bf84f346e8cf6a41ad73c39de",
+      "commit_source": "embedded",
+      "binary_commit": "b4f546482049947bf84f346e8cf6a41ad73c39de",
+      "binary_commit_source": "embedded",
+      "provenance_source": "self_observed",
+      "executable_sha256": "003a908731eb7bc7e52fedbc14f816cd526446fcc1f4d00d3e288209279c0507",
+      "binary_commit_unix_ts": 1793786359.0,
+      "binary_commit_age_seconds": 1911,
+      "repo_head_commit": "b4f54648204",
+      "repo_head_commit_source": "runtime_repo_head",
+      "repo_head_commit_unix_ts": 1793786359.0,
+      "repo_head_commit_age_seconds": 1911,
+      "executable_path": "/Users/dancer/me/workspace/yousleepwhen/masc/_build/default/bin/main_eio.exe",
+      "executable_dir": "/Users/dancer/me/workspace/yousleepwhen/masc/_build/default/bin",
+      "repo_root": "/Users/dancer/me/workspace/yousleepwhen/masc",
+      "runtime_instance_id": "01a1a60c-8570-7000-bc0f-6203eb93c9de",
+      "started_at": "2026-11-04T10:13:20Z",
+      "uptime_seconds": 1069
+    },
+    "paths": {
+      "cwd": "/Users/dancer/me/workspace/yousleepwhen/masc",
+      "effective_base_path": "/Users/dancer/me",
+      "effective_masc_root": "/Users/dancer/me/.masc",
+      "current_task_path": "/Users/dancer/me/.masc/current_task",
+      "current_task_shape": "regular",
+      "effective_has_masc_dir": true,
+      "roots_diverge": true,
+      "strict_mode_requested": false,
+      "startup_rejected": false,
+      "startup_abort_eligible": false,
+      "input_base_path": "/Users/dancer/me",
+      "env_masc_base_path": "/Users/dancer/me",
+      "resolution_source": "explicit_cli"
+    },
+    "scheduler": {
+      "pool_domains": 8,
+      "read_pool_domains": 2,
+      "pool_wait": {
+        "bucket_upper_ms": [
+          1.0,
+          2.0,
+          5.0,
+          10.0,
+          20.0,
+          50.0,
+          100.0,
+          200.0,
+          500.0,
+          1000.0,
+          2000.0,
+          5000.0,
+          10000.0
+        ],
+        "read": {
+          "wait": {
+            "count": 4143,
+            "sum_ms": 7535.06088,
+            "max_ms": 451.989041,
+            "buckets": [
+              4020,
+              28,
+              24,
+              10,
+              7,
+              13,
+              11,
+              21,
+              9,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "run": {
+            "count": 4143,
+            "sum_ms": 99102.849391,
+            "max_ms": 5337.992375,
+            "buckets": [
+              56,
+              134,
+              92,
+              1800,
+              1446,
+              409,
+              91,
+              45,
+              50,
+              16,
+              0,
+              3,
+              1,
+              0
+            ]
+          },
+          "abandoned": {
+            "count": 0,
+            "sum_ms": 0.0,
+            "max_ms": 0.0,
+            "buckets": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "wait_by_in_flight_workers": [
+            {
+              "count": 3828,
+              "sum_ms": 1288.778754,
+              "max_ms": 318.077333,
+              "buckets": [
+                3782,
+                19,
+                18,
+                2,
+                2,
+                0,
+                0,
+                3,
+                2,
+                0,
+                0,
+                0,
+                0,
+                0
+              ]
+            },
+            {
+              "count": 279,
+              "sum_ms": 3649.16396,
+              "max_ms": 209.815792,
+              "buckets": [
+                237,
+                7,
+                1,
+                0,
+                1,
+                7,
+                7,
+                16,
+                3,
+                0,
+                0,
+                0,
+                0,
+                0
+              ]
+            },
+            {
+              "count": 36,
+              "sum_ms": 2597.118166,
+              "max_ms": 451.989041,
+              "buckets": [
+                1,
+                2,
+                5,
+                8,
+                4,
+                6,
+                4,
+                2,
+                4,
+                0,
+                0,
+                0,
+                0,
+                0
+              ]
+            },
+            {
+              "count": 0,
+              "sum_ms": 0.0,
+              "max_ms": 0.0,
+              "buckets": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ]
+            }
+          ],
+          "run_declared_io": {
+            "count": 3549,
+            "sum_ms": 63811.644684,
+            "max_ms": 3296.760583,
+            "buckets": [
+              2,
+              4,
+              5,
+              1750,
+              1315,
+              336,
+              71,
+              35,
+              28,
+              2,
+              0,
+              1,
+              0,
+              0
+            ]
+          },
+          "run_declared_cpu": {
+            "count": 594,
+            "sum_ms": 35291.204707,
+            "max_ms": 5337.992375,
+            "buckets": [
+              54,
+              130,
+              87,
+              50,
+              131,
+              73,
+              20,
+              10,
+              22,
+              14,
+              0,
+              2,
+              1,
+              0
+            ]
+          },
+          "in_flight_workers": 0.0,
+          "by_name": [
+            {
+              "name": "Server_routes_http_keeper_stream.handle_keeper_turns_list",
+              "count": 3515,
+              "wait_sum_ms": 4001.186462,
+              "wait_max_ms": 451.105375,
+              "run_sum_ms": 59427.735682,
+              "run_max_ms": 874.83925,
+              "abandoned": 0
+            },
+            {
+              "name": "Server_dashboard_http.dashboard_scheduled_automation_http_json",
+              "count": 95,
+              "wait_sum_ms": 861.143455,
+              "wait_max_ms": 318.077333,
+              "run_sum_ms": 20455.743254,
+              "run_max_ms": 2756.735208,
+              "abandoned": 0
+            },
+            {
+              "name": "Masc__Verification.list_projected",
+              "count": 1,
+              "wait_sum_ms": 0.023375,
+              "wait_max_ms": 0.023375,
+              "run_sum_ms": 5337.992375,
+              "run_max_ms": 5337.992375,
+              "abandoned": 0
+            },
+            {
+              "name": "Server_dashboard_http_keeper_api.handle_keeper_get_subroutes",
+              "count": 16,
+              "wait_sum_ms": 2.277626,
+              "wait_max_ms": 1.399792,
+              "run_sum_ms": 3605.140292,
+              "run_max_ms": 2945.432083,
+              "abandoned": 0
+            },
+            {
+              "name": "Server_dashboard_http_keeper_api.cached_keeper_config_json",
+              "count": 1,
+              "wait_sum_ms": 0.024667,
+              "wait_max_ms": 0.024667,
+              "run_sum_ms": 3296.760583,
+              "run_max_ms": 3296.760583,
+              "abandoned": 0
+            },
+            {
+              "name": "Server_dashboard_http_keeper_chat_operations.handle_get",
+              "count": 398,
+              "wait_sum_ms": 432.428802,
+              "wait_max_ms": 150.859667,
+              "run_sum_ms": 2751.324703,
+              "run_max_ms": 40.527833,
+              "abandoned": 0
+            },
+            {
+              "name": "Server_routes_http_routes_channel_gate.respond_keeper_tool_json",
+              "count": 66,
+              "wait_sum_ms": 591.26937,
+              "wait_max_ms": 375.351167,
+              "run_sum_ms": 1161.829002,
+              "run_max_ms": 112.612584,
+              "abandoned": 0
+            },
+            {
+              "name": "Server_keeper_chat_history_read.cached_json",
+              "count": 6,
+              "wait_sum_ms": 0.142625,
+              "wait_max_ms": 0.040625,
+              "run_sum_ms": 892.221707,
+              "run_max_ms": 594.664834,
+              "abandoned": 0
+            },
+            {
+              "name": "Server_routes_http_routes_dashboard.add_routes.(fun)",
+              "count": 3,
+              "wait_sum_ms": 0.077167,
+              "wait_max_ms": 0.0385,
+              "run_sum_ms": 843.675167,
+              "run_max_ms": 476.339875,
+              "abandoned": 0
+            },
+            {
+              "name": "Server_dashboard_http.direct_goals_tree_payload",
+              "count": 1,
+              "wait_sum_ms": 0.042375,
+              "wait_max_ms": 0.042375,
+              "run_sum_ms": 768.717417,
+              "run_max_ms": 768.717417,
+              "abandoned": 0
+            },
+            {
+              "name": "Masc__Keeper_ask_answer_wake.observe_followup.read_actions.(fun)",
+              "count": 1,
+              "wait_sum_ms": 0.077542,
+              "wait_max_ms": 0.077542,
+              "run_sum_ms": 250.752458,
+              "run_max_ms": 250.752458,
+              "abandoned": 0
+            },
+            {
+              "name": "Server_dashboard_http_keeper_api.cached_keeper_composite_json",
+              "count": 1,
+              "wait_sum_ms": 0.0405,
+              "wait_max_ms": 0.0405,
+              "run_sum_ms": 95.896209,
+              "run_max_ms": 95.896209,
+              "abandoned": 0
+            },
+            {
+              "name": "Server_dashboard_http.dashboard_gate_http_json",
+              "count": 2,
+              "wait_sum_ms": 449.019583,
+              "wait_max_ms": 448.865583,
+              "run_sum_ms": 56.458916,
+              "run_max_ms": 33.050125,
+              "abandoned": 0
+            },
+            {
+              "name": "Masc__Keeper_ask_answer_wake.observe_followup.read_reactions.(fun)",
+              "count": 1,
+              "wait_sum_ms": 0.085625,
+              "wait_max_ms": 0.085625,
+              "run_sum_ms": 56.080625,
+              "run_max_ms": 56.080625,
+              "abandoned": 0
+            },
+            {
+              "name": "Server_dashboard_http.dashboard_scheduled_automation_query_http_json",
+              "count": 7,
+              "wait_sum_ms": 421.866083,
+              "wait_max_ms": 161.131208,
+              "run_sum_ms": 55.603418,
+              "run_max_ms": 12.828958,
+              "abandoned": 0
+            },
+            {
+              "name": "Server_keeper_chat_history_read.cached_json.retire_if_changed",
+              "count": 3,
+              "wait_sum_ms": 0.087624,
+              "wait_max_ms": 0.051833,
+              "run_sum_ms": 25.473459,
+              "run_max_ms": 21.569208,
+              "abandoned": 0
+            },
+            {
+              "name": "Server_dashboard_http_core_operator_snapshot_http.operator_snapshot_http_json.compute.(fun)",
+              "count": 20,
+              "wait_sum_ms": 775.078706,
+              "wait_max_ms": 451.989041,
+              "run_sum_ms": 9.094416,
+              "run_max_ms": 2.727125,
+              "abandoned": 0
+            },
+            {
+              "name": "Masc__Http_server_eio.Response.json_value_on_cpu",
+              "count": 3,
+              "wait_sum_ms": 0.0855,
+              "wait_max_ms": 0.054,
+              "run_sum_ms": 8.165124,
+              "run_max_ms": 3.189291,
+              "abandoned": 0
+            },
+            {
+              "name": "Dated_jsonl.map_tail_rows",
+              "count": 3,
+              "wait_sum_ms": 0.103793,
+              "wait_max_ms": 0.055417,
+              "run_sum_ms": 4.184584,
+              "run_max_ms": 1.921417,
+              "abandoned": 0
+            }
+          ]
+        },
+        "background": {
+          "wait": {
+            "count": 26993,
+            "sum_ms": 1487955.486957,
+            "max_ms": 3924.472666,
+            "buckets": [
+              11375,
+              964,
+              1582,
+              1614,
+              1997,
+              2932,
+              2511,
+              2299,
+              1387,
+              214,
+              41,
+              77,
+              0,
+              0
+            ]
+          },
+          "run": {
+            "count": 26990,
+            "sum_ms": 5293882.189046,
+            "max_ms": 181807.473,
+            "buckets": [
+              8023,
+              1488,
+              3473,
+              3444,
+              2685,
+              3530,
+              2362,
+              954,
+              476,
+              239,
+              113,
+              90,
+              33,
+              80
+            ]
+          },
+          "abandoned": {
+            "count": 0,
+            "sum_ms": 0.0,
+            "max_ms": 0.0,
+            "buckets": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "wait_by_in_flight_workers": [
+            {
+              "count": 6181,
+              "sum_ms": 17945.57109,
+              "max_ms": 373.121333,
+              "buckets": [
+                4603,
+                260,
+                452,
+                381,
+                271,
+                176,
+                23,
+                12,
+                3,
+                0,
+                0,
+                0,
+                0,
+                0
+              ]
+            },
+            {
+              "count": 3373,
+              "sum_ms": 18486.603837,
+              "max_ms": 634.725416,
+              "buckets": [
+                2376,
+                133,
+                258,
+                219,
+                170,
+                141,
+                46,
+                21,
+                7,
+                2,
+                0,
+                0,
+                0,
+                0
+              ]
+            },
+            {
+              "count": 2161,
+              "sum_ms": 9733.143445,
+              "max_ms": 387.367417,
+              "buckets": [
+                1605,
+                86,
+                146,
+                123,
+                98,
+                68,
+                20,
+                8,
+                7,
+                0,
+                0,
+                0,
+                0,
+                0
+              ]
+            },
+            {
+              "count": 15278,
+              "sum_ms": 1441790.168585,
+              "max_ms": 3924.472666,
+              "buckets": [
+                2791,
+                485,
+                726,
+                891,
+                1458,
+                2547,
+                2422,
+                2258,
+                1370,
+                212,
+                41,
+                77,
+                0,
+                0
+              ]
+            }
+          ],
+          "run_declared_io": {
+            "count": 8401,
+            "sum_ms": 4531836.709412,
+            "max_ms": 181807.473,
+            "buckets": [
+              3612,
+              726,
+              731,
+              637,
+              647,
+              702,
+              407,
+              315,
+              263,
+              132,
+              71,
+              55,
+              27,
+              76
+            ]
+          },
+          "run_declared_cpu": {
+            "count": 18589,
+            "sum_ms": 762045.479634,
+            "max_ms": 11410.528416,
+            "buckets": [
+              4411,
+              762,
+              2742,
+              2807,
+              2038,
+              2828,
+              1955,
+              639,
+              213,
+              107,
+              42,
+              35,
+              6,
+              4
+            ]
+          },
+          "in_flight_workers": 0.15,
+          "by_name": [
+            {
+              "name": "Masc__Keeper_librarian_durable_commit.io",
+              "count": 57,
+              "wait_sum_ms": 1092.340663,
+              "wait_max_ms": 717.71225,
+              "run_sum_ms": 2123988.203454,
+              "run_max_ms": 181807.473,
+              "abandoned": 0
+            },
+            {
+              "name": "Masc__Keeper_librarian_admission_owner.io",
+              "count": 1980,
+              "wait_sum_ms": 197096.897304,
+              "wait_max_ms": 3678.946208,
+              "run_sum_ms": 1792351.514703,
+              "run_max_ms": 157986.215708,
+              "abandoned": 0
+            },
+            {
+              "name": "Masc__Keeper_reaction_ledger.read_delivery_evidence",
+              "count": 10373,
+              "wait_sum_ms": 977266.880877,
+              "wait_max_ms": 3924.472666,
+              "run_sum_ms": 355069.529114,
+              "run_max_ms": 2017.304083,
+              "abandoned": 0
+            },
+            {
+              "name": "Dashboard_snapshot.refresh_loop.loop",
+              "count": 393,
+              "wait_sum_ms": 2903.105007,
+              "wait_max_ms": 345.714792,
+              "run_sum_ms": 224835.888126,
+              "run_max_ms": 11410.528416,
+              "abandoned": 0
+            },
+            {
+              "name": "Masc__Keeper_librarian_durable_execution.io",
+              "count": 573,
+              "wait_sum_ms": 29153.929926,
+              "wait_max_ms": 938.958292,
+              "run_sum_ms": 208171.308444,
+              "run_max_ms": 35101.49775,
+              "abandoned": 0
+            },
+            {
+              "name": "Server_routes_http_runtime.start_full_health_snapshot_refresh_loop.(fun)",
+              "count": 104,
+              "wait_sum_ms": 4901.148333,
+              "wait_max_ms": 2786.043791,
+              "run_sum_ms": 168488.978455,
+              "run_max_ms": 35462.575666,
+              "abandoned": 0
+            },
+            {
+              "name": "Masc__Keeper_librarian_durable_consumer.load_current_checkpoint",
+              "count": 142,
+              "wait_sum_ms": 4519.711048,
+              "wait_max_ms": 519.0195,
+              "run_sum_ms": 71272.871503,
+              "run_max_ms": 13107.0255,
+              "abandoned": 0
+            },
+            {
+              "name": "Masc__Keeper_checkpoint_store.offload_checkpoint_cpu",
+              "count": 643,
+              "wait_sum_ms": 4576.98284,
+              "wait_max_ms": 2230.707333,
+              "run_sum_ms": 40707.059838,
+              "run_max_ms": 3914.21925,
+              "abandoned": 0
+            },
+            {
+              "name": "Masc__Keeper_librarian_admission_commit.io",
+              "count": 163,
+              "wait_sum_ms": 1210.676255,
+              "wait_max_ms": 238.760666,
+              "run_sum_ms": 36831.165793,
+              "run_max_ms": 4524.171208,
+              "abandoned": 0
+            },
+            {
+              "name": "Server_librarian_addon_wake.install.run_discovery",
+              "count": 4,
+              "wait_sum_ms": 97.609875,
+              "wait_max_ms": 78.173875,
+              "run_sum_ms": 29457.460458,
+              "run_max_ms": 14613.942125,
+              "abandoned": 0
+            },
+            {
+              "name": "Keeper_tool_call_index.blocking",
+              "count": 47,
+              "wait_sum_ms": 632.369457,
+              "wait_max_ms": 151.148166,
+              "run_sum_ms": 19481.684542,
+              "run_max_ms": 1586.892875,
+              "abandoned": 0
+            },
+            {
+              "name": "Server_dashboard_http_execution_surfaces.start_execution_refresh_loop.compute",
+              "count": 15,
+              "wait_sum_ms": 63.898749,
+              "wait_max_ms": 40.158583,
+              "run_sum_ms": 19310.541166,
+              "run_max_ms": 5497.751208,
+              "abandoned": 0
+            },
+            {
+              "name": "Masc__Keeper_librarian_durable_consumer.read_positions",
+              "count": 748,
+              "wait_sum_ms": 37929.194273,
+              "wait_max_ms": 586.885917,
+              "run_sum_ms": 18983.155265,
+              "run_max_ms": 642.853875,
+              "abandoned": 0
+            },
+            {
+              "name": "Masc__Keeper_turn_driver.run_named.(fun)",
+              "count": 70,
+              "wait_sum_ms": 197.42575,
+              "wait_max_ms": 40.057542,
+              "run_sum_ms": 12599.840582,
+              "run_max_ms": 1379.279041,
+              "abandoned": 0
+            },
+            {
+              "name": "Server_dashboard_http_runtime_info.dashboard_tools_http_result",
+              "count": 17,
+              "wait_sum_ms": 78.394541,
+              "wait_max_ms": 58.932792,
+              "run_sum_ms": 10750.626832,
+              "run_max_ms": 3229.488417,
+              "abandoned": 0
+            },
+            {
+              "name": "dated_jsonl:root/verdicts",
+              "count": 480,
+              "wait_sum_ms": 26278.718295,
+              "wait_max_ms": 988.225417,
+              "run_sum_ms": 10593.576257,
+              "run_max_ms": 1401.139375,
+              "abandoned": 0
+            },
+            {
+              "name": "Operator_control_snapshot_tool_audit.cached_tool_audit_json",
+              "count": 884,
+              "wait_sum_ms": 21515.164004,
+              "wait_max_ms": 148.386541,
+              "run_sum_ms": 10272.825338,
+              "run_max_ms": 309.523209,
+              "abandoned": 0
+            },
+            {
+              "name": "Server_dashboard_http_execution_surfaces.compute_execution_trust_json",
+              "count": 16,
+              "wait_sum_ms": 129.784499,
+              "wait_max_ms": 109.44625,
+              "run_sum_ms": 10095.779916,
+              "run_max_ms": 4943.938458,
+              "abandoned": 0
+            },
+            {
+              "name": "Dated_jsonl.find_latest_decoded_from_channel.drive",
+              "count": 2080,
+              "wait_sum_ms": 23680.283094,
+              "wait_max_ms": 1341.021542,
+              "run_sum_ms": 9389.291514,
+              "run_max_ms": 574.5825,
+              "abandoned": 0
+            },
+            {
+              "name": "Operator_control_snapshot_trust.compact_keeper_runtime_trust_json",
+              "count": 1462,
+              "wait_sum_ms": 48278.100646,
+              "wait_max_ms": 150.444792,
+              "run_sum_ms": 9151.338959,
+              "run_max_ms": 109.73775,
+              "abandoned": 0
+            }
+          ]
+        }
+      },
+      "probe": "running",
+      "interval_ms": 100.0,
+      "window_s": 60.0,
+      "stall_threshold_ms": 1000.0,
+      "lag": {
+        "samples": 600,
+        "p50_ms": 1.1015419999999971,
+        "p95_ms": 2.240999999999993,
+        "p99_ms": 9.753333999999988,
+        "max_ms": 81.128375,
+        "mean_ms": 1.480855473333328,
+        "stalls": 0,
+        "over_50ms_count": 1,
+        "over_200ms_count": 0
+      }
+    },
+    "gc": {
+      "compactions": 0,
+      "heap_words": 827646758,
+      "live_words": 797844822,
+      "minor_heap_size": 4194304,
+      "space_overhead": 100,
+      "minor_collections": 10178,
+      "major_collections": 398,
+      "forced_major_collections": 0,
+      "minor_words": 106899121183.0,
+      "promoted_words": 2921844893.0,
+      "major_words": 145527328879.0
+    }
+  },
+  "binary_sha256_before": "30097752da2bea774d0ac48ecf2663c7ca9d74c601016cc37f01508b036999ae",
+  "load_before": [
+    11.572265625,
+    22.7900390625,
+    73.4697265625
+  ],
+  "pid": 40264,
+  "argv": [
+    "/Users/dancer/me/workspace/yousleepwhen/masc/_build/default/bin/masc_tui.exe",
+    "--base-path",
+    "/Users/dancer/me",
+    "--port",
+    "8935"
+  ],
+  "terminal_profile": {
+    "TERM": "xterm-256color",
+    "TERM_PROGRAM": "ghostty",
+    "MASC_CONFIG_DIR": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-sse-smooth-20261104/before-main-chat-alloc/client-config",
+    "MASC_TUI_SYNC": null,
+    "MASC_TUI_KITTY_KEYBOARD": null,
+    "MASC_TUI_TITLE": null
+  },
+  "client_config": {
+    "directory": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-sse-smooth-20261104/before-main-chat-alloc/client-config",
+    "opening": "overview",
+    "scope": "owned client defaults; user preferences and config-only Keeper declarations not copied"
+  },
+  "exit_code": 0,
+  "forced_kill": false,
+  "reader_error": null,
+  "input_writes": [
+    {
+      "name": "open Keepers",
+      "started": 183150.178818166,
+      "returned": 183150.178844208,
+      "bytes_written": 1
+    },
+    {
+      "name": "open selected Keeper chat",
+      "started": 183150.582166041,
+      "returned": 183150.582186375,
+      "bytes_written": 1
+    },
+    {
+      "name": "chat pageup",
+      "started": 183153.585687958,
+      "returned": 183153.585703541,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183153.618041416,
+      "returned": 183153.618061416,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183153.649406125,
+      "returned": 183153.649429,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183153.684387041,
+      "returned": 183153.684405041,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183153.7147785,
+      "returned": 183153.714794458,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183153.746724125,
+      "returned": 183153.746749625,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183153.777080583,
+      "returned": 183153.777098916,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183153.8103575,
+      "returned": 183153.810377875,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183153.841488666,
+      "returned": 183153.841507875,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183153.875559458,
+      "returned": 183153.875577333,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183153.906666416,
+      "returned": 183153.906683083,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183153.941414125,
+      "returned": 183153.941434875,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183153.974829916,
+      "returned": 183153.974849125,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183154.005886791,
+      "returned": 183154.005911458,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183154.040932416,
+      "returned": 183154.040950416,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183154.074003791,
+      "returned": 183154.074020916,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183154.109048708,
+      "returned": 183154.109067166,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183154.143367291,
+      "returned": 183154.143388333,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183154.175045833,
+      "returned": 183154.175069083,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183154.207442458,
+      "returned": 183154.207464083,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183154.239579375,
+      "returned": 183154.239598166,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183154.26978875,
+      "returned": 183154.269807333,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183154.30378125,
+      "returned": 183154.303836875,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183154.333868916,
+      "returned": 183154.33388575,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183154.365212625,
+      "returned": 183154.365252625,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183154.398918625,
+      "returned": 183154.398938,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183154.431486708,
+      "returned": 183154.431508291,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183154.464827291,
+      "returned": 183154.464852291,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183154.497355916,
+      "returned": 183154.497385125,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183154.532846916,
+      "returned": 183154.532875958,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183154.5644425,
+      "returned": 183154.564473458,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183154.59808075,
+      "returned": 183154.598101166,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183154.632060166,
+      "returned": 183154.632087041,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183154.664659208,
+      "returned": 183154.664686875,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183154.696198791,
+      "returned": 183154.696219041,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183154.727534416,
+      "returned": 183154.727551666,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183154.759706125,
+      "returned": 183154.759730916,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183154.792296416,
+      "returned": 183154.792319166,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183154.825939416,
+      "returned": 183154.825962791,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183154.856563833,
+      "returned": 183154.856587375,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183154.891093458,
+      "returned": 183154.891115,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183154.925425041,
+      "returned": 183154.925453375,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183154.958876708,
+      "returned": 183154.958897916,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183154.992205625,
+      "returned": 183154.992225583,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183155.025538083,
+      "returned": 183155.025556708,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183155.058261666,
+      "returned": 183155.05827725,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183155.088890458,
+      "returned": 183155.088921291,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183155.123406416,
+      "returned": 183155.123425166,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183155.158316916,
+      "returned": 183155.15833825,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183155.18931875,
+      "returned": 183155.189336833,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183155.222289958,
+      "returned": 183155.222313875,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183155.256952958,
+      "returned": 183155.256995041,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183155.289935083,
+      "returned": 183155.289955916,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183155.324745625,
+      "returned": 183155.32476575,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183155.355677541,
+      "returned": 183155.355695458,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183155.387983416,
+      "returned": 183155.388008958,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183155.422609916,
+      "returned": 183155.422634458,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183155.458041458,
+      "returned": 183155.458063875,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183155.4930925,
+      "returned": 183155.493117291,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183155.526023125,
+      "returned": 183155.526044416,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183155.56091525,
+      "returned": 183155.56094125,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183155.593294833,
+      "returned": 183155.59335775,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183155.62646775,
+      "returned": 183155.626492875,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183155.657171916,
+      "returned": 183155.657194791,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183155.690600583,
+      "returned": 183155.690621375,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183155.725649041,
+      "returned": 183155.725707916,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183155.758728541,
+      "returned": 183155.758755958,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183155.790708791,
+      "returned": 183155.790726875,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183155.825461916,
+      "returned": 183155.825483958,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183155.860517083,
+      "returned": 183155.860537208,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183155.894652,
+      "returned": 183155.894688833,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183155.929297166,
+      "returned": 183155.929327666,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183155.961645291,
+      "returned": 183155.961669208,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183155.995164666,
+      "returned": 183155.995208625,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183156.02788825,
+      "returned": 183156.027936166,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183156.059757625,
+      "returned": 183156.059795041,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183156.091039916,
+      "returned": 183156.091063833,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183156.125390416,
+      "returned": 183156.125413833,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183156.158530458,
+      "returned": 183156.158557666,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pageup",
+      "started": 183156.193342166,
+      "returned": 183156.193367041,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183156.626369666,
+      "returned": 183156.626401666,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183156.661101958,
+      "returned": 183156.661124541,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183156.695524291,
+      "returned": 183156.695546541,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183156.726479916,
+      "returned": 183156.726502708,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183156.758644833,
+      "returned": 183156.758666208,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183156.788698125,
+      "returned": 183156.788718583,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183156.827296541,
+      "returned": 183156.827312541,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183156.859676208,
+      "returned": 183156.859694833,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183156.894781083,
+      "returned": 183156.894795666,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183156.927611125,
+      "returned": 183156.927630375,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183156.96032825,
+      "returned": 183156.960350833,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183156.99488175,
+      "returned": 183156.994901416,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183157.0299365,
+      "returned": 183157.029958291,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183157.062610083,
+      "returned": 183157.062630458,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183157.097649416,
+      "returned": 183157.09767,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183157.128616791,
+      "returned": 183157.128647791,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183157.159791125,
+      "returned": 183157.159813583,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183157.1919585,
+      "returned": 183157.191974708,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183157.226298666,
+      "returned": 183157.226319625,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183157.261335458,
+      "returned": 183157.261355375,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183157.29263375,
+      "returned": 183157.292659625,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183157.324638875,
+      "returned": 183157.324658708,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183157.355963625,
+      "returned": 183157.355984375,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183157.389829458,
+      "returned": 183157.389851166,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183157.420374666,
+      "returned": 183157.420395166,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183157.453690291,
+      "returned": 183157.453707458,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183157.488727458,
+      "returned": 183157.488748375,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183157.523764375,
+      "returned": 183157.523782166,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183157.558627083,
+      "returned": 183157.558651083,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183157.593000791,
+      "returned": 183157.593019791,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183157.623274125,
+      "returned": 183157.623299791,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183157.658317833,
+      "returned": 183157.658335791,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183157.692112458,
+      "returned": 183157.692130166,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183157.723285458,
+      "returned": 183157.723305208,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183157.757598541,
+      "returned": 183157.7576155,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183157.791752791,
+      "returned": 183157.791773375,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183157.82597825,
+      "returned": 183157.825994,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183157.857283333,
+      "returned": 183157.857295166,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183157.89123925,
+      "returned": 183157.891257791,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183157.926063541,
+      "returned": 183157.926087291,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183157.957055916,
+      "returned": 183157.957073625,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183157.99030175,
+      "returned": 183157.990344208,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183158.022746916,
+      "returned": 183158.022766875,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183158.053582416,
+      "returned": 183158.0536015,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183158.088631333,
+      "returned": 183158.088652958,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183158.119351333,
+      "returned": 183158.119373083,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183158.150620291,
+      "returned": 183158.150654291,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183158.18395475,
+      "returned": 183158.183975083,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183158.216310125,
+      "returned": 183158.216328708,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183158.247982083,
+      "returned": 183158.248018458,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183158.284044291,
+      "returned": 183158.284063125,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183158.318618166,
+      "returned": 183158.318638125,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183158.349579583,
+      "returned": 183158.349597333,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183158.382241166,
+      "returned": 183158.382274041,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183158.416597791,
+      "returned": 183158.416619333,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183158.451291333,
+      "returned": 183158.451312125,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183158.48142775,
+      "returned": 183158.481451458,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183158.513493458,
+      "returned": 183158.513514791,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183158.548536583,
+      "returned": 183158.548557916,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183158.580543166,
+      "returned": 183158.580564625,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183158.611846416,
+      "returned": 183158.611868916,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183158.646290166,
+      "returned": 183158.646308791,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183158.681330291,
+      "returned": 183158.681349416,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183158.71308625,
+      "returned": 183158.713106958,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183158.744359625,
+      "returned": 183158.744379041,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183158.7793965,
+      "returned": 183158.7794135,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183158.814435416,
+      "returned": 183158.814456583,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183158.851935041,
+      "returned": 183158.851953541,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183158.886060791,
+      "returned": 183158.886090083,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183158.921292,
+      "returned": 183158.921309166,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183158.956330333,
+      "returned": 183158.956349916,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183158.987623541,
+      "returned": 183158.987653541,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183159.020129666,
+      "returned": 183159.020151166,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183159.053882833,
+      "returned": 183159.053903125,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183159.085091958,
+      "returned": 183159.085110791,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183159.11919725,
+      "returned": 183159.1192165,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183159.150911125,
+      "returned": 183159.150931791,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183159.185448166,
+      "returned": 183159.185472083,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183159.218388458,
+      "returned": 183159.218406375,
+      "bytes_written": 4
+    },
+    {
+      "name": "chat pagedown",
+      "started": 183159.250229791,
+      "returned": 183159.250248208,
+      "bytes_written": 4
+    }
+  ],
+  "total_output_chunks": 1507,
+  "total_output_bytes": 1448423,
+  "server_after": {
+    "status": "ok",
+    "build": {
+      "release_version": "0.67.0",
+      "binary_version": "0.67.0",
+      "repo_version": "0.67.0",
+      "commit": "b4f546482049947bf84f346e8cf6a41ad73c39de",
+      "commit_source": "embedded",
+      "binary_commit": "b4f546482049947bf84f346e8cf6a41ad73c39de",
+      "binary_commit_source": "embedded",
+      "provenance_source": "self_observed",
+      "executable_sha256": "003a908731eb7bc7e52fedbc14f816cd526446fcc1f4d00d3e288209279c0507",
+      "binary_commit_unix_ts": 1793786359.0,
+      "binary_commit_age_seconds": 1922,
+      "repo_head_commit": "b4f54648204",
+      "repo_head_commit_source": "runtime_repo_head",
+      "repo_head_commit_unix_ts": 1793786359.0,
+      "repo_head_commit_age_seconds": 1922,
+      "executable_path": "/Users/dancer/me/workspace/yousleepwhen/masc/_build/default/bin/main_eio.exe",
+      "executable_dir": "/Users/dancer/me/workspace/yousleepwhen/masc/_build/default/bin",
+      "repo_root": "/Users/dancer/me/workspace/yousleepwhen/masc",
+      "runtime_instance_id": "01a1a60c-8570-7000-bc0f-6203eb93c9de",
+      "started_at": "2026-11-04T10:13:20Z",
+      "uptime_seconds": 1081
+    },
+    "paths": {
+      "cwd": "/Users/dancer/me/workspace/yousleepwhen/masc",
+      "effective_base_path": "/Users/dancer/me",
+      "effective_masc_root": "/Users/dancer/me/.masc",
+      "current_task_path": "/Users/dancer/me/.masc/current_task",
+      "current_task_shape": "regular",
+      "effective_has_masc_dir": true,
+      "roots_diverge": true,
+      "strict_mode_requested": false,
+      "startup_rejected": false,
+      "startup_abort_eligible": false,
+      "input_base_path": "/Users/dancer/me",
+      "env_masc_base_path": "/Users/dancer/me",
+      "resolution_source": "explicit_cli"
+    },
+    "scheduler": {
+      "pool_domains": 8,
+      "read_pool_domains": 2,
+      "pool_wait": {
+        "bucket_upper_ms": [
+          1.0,
+          2.0,
+          5.0,
+          10.0,
+          20.0,
+          50.0,
+          100.0,
+          200.0,
+          500.0,
+          1000.0,
+          2000.0,
+          5000.0,
+          10000.0
+        ],
+        "read": {
+          "wait": {
+            "count": 4332,
+            "sum_ms": 7561.414507,
+            "max_ms": 451.989041,
+            "buckets": [
+              4203,
+              33,
+              24,
+              10,
+              8,
+              13,
+              11,
+              21,
+              9,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "run": {
+            "count": 4332,
+            "sum_ms": 101422.011096,
+            "max_ms": 5337.992375,
+            "buckets": [
+              68,
+              145,
+              102,
+              1848,
+              1535,
+              427,
+              92,
+              45,
+              50,
+              16,
+              0,
+              3,
+              1,
+              0
+            ]
+          },
+          "abandoned": {
+            "count": 0,
+            "sum_ms": 0.0,
+            "max_ms": 0.0,
+            "buckets": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "wait_by_in_flight_workers": [
+            {
+              "count": 3975,
+              "sum_ms": 1298.537673,
+              "max_ms": 318.077333,
+              "buckets": [
+                3926,
+                22,
+                18,
+                2,
+                2,
+                0,
+                0,
+                3,
+                2,
+                0,
+                0,
+                0,
+                0,
+                0
+              ]
+            },
+            {
+              "count": 320,
+              "sum_ms": 3653.419793,
+              "max_ms": 209.815792,
+              "buckets": [
+                276,
+                9,
+                1,
+                0,
+                1,
+                7,
+                7,
+                16,
+                3,
+                0,
+                0,
+                0,
+                0,
+                0
+              ]
+            },
+            {
+              "count": 37,
+              "sum_ms": 2609.457041,
+              "max_ms": 451.989041,
+              "buckets": [
+                1,
+                2,
+                5,
+                8,
+                5,
+                6,
+                4,
+                2,
+                4,
+                0,
+                0,
+                0,
+                0,
+                0
+              ]
+            },
+            {
+              "count": 0,
+              "sum_ms": 0.0,
+              "max_ms": 0.0,
+              "buckets": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+              ]
+            }
+          ],
+          "run_declared_io": {
+            "count": 3626,
+            "sum_ms": 64867.763766,
+            "max_ms": 3296.760583,
+            "buckets": [
+              2,
+              6,
+              6,
+              1786,
+              1341,
+              347,
+              72,
+              35,
+              28,
+              2,
+              0,
+              1,
+              0,
+              0
+            ]
+          },
+          "run_declared_cpu": {
+            "count": 706,
+            "sum_ms": 36554.24733,
+            "max_ms": 5337.992375,
+            "buckets": [
+              66,
+              139,
+              96,
+              62,
+              194,
+              80,
+              20,
+              10,
+              22,
+              14,
+              0,
+              2,
+              1,
+              0
+            ]
+          },
+          "in_flight_workers": 0.0,
+          "by_name": [
+            {
+              "name": "Server_routes_http_keeper_stream.handle_keeper_turns_list",
+              "count": 3583,
+              "wait_sum_ms": 4017.063132,
+              "wait_max_ms": 451.105375,
+              "run_sum_ms": 60328.613221,
+              "run_max_ms": 874.83925,
+              "abandoned": 0
+            },
+            {
+              "name": "Server_dashboard_http.dashboard_scheduled_automation_http_json",
+              "count": 95,
+              "wait_sum_ms": 861.143455,
+              "wait_max_ms": 318.077333,
+              "run_sum_ms": 20455.743254,
+              "run_max_ms": 2756.735208,
+              "abandoned": 0
+            },
+            {
+              "name": "Masc__Verification.list_projected",
+              "count": 1,
+              "wait_sum_ms": 0.023375,
+              "wait_max_ms": 0.023375,
+              "run_sum_ms": 5337.992375,
+              "run_max_ms": 5337.992375,
+              "abandoned": 0
+            },
+            {
+              "name": "Server_dashboard_http_keeper_chat_operations.handle_get",
+              "count": 496,
+              "wait_sum_ms": 442.093844,
+              "wait_max_ms": 150.859667,
+              "run_sum_ms": 3829.869077,
+              "run_max_ms": 41.3625,
+              "abandoned": 0
+            },
+            {
+              "name": "Server_dashboard_http_keeper_api.handle_keeper_get_subroutes",
+              "count": 21,
+              "wait_sum_ms": 2.389792,
+              "wait_max_ms": 1.399792,
+              "run_sum_ms": 3748.032793,
+              "run_max_ms": 2945.432083,
+              "abandoned": 0
+            },
+            {
+              "name": "Server_dashboard_http_keeper_api.cached_keeper_config_json",
+              "count": 1,
+              "wait_sum_ms": 0.024667,
+              "wait_max_ms": 0.024667,
+              "run_sum_ms": 3296.760583,
+              "run_max_ms": 3296.760583,
+              "abandoned": 0
+            },
+            {
+              "name": "Server_routes_http_routes_channel_gate.respond_keeper_tool_json",
+              "count": 75,
+              "wait_sum_ms": 591.488328,
+              "wait_max_ms": 375.351167,
+              "run_sum_ms": 1342.847044,
+              "run_max_ms": 112.612584,
+              "abandoned": 0
+            },
+            {
+              "name": "Server_keeper_chat_history_read.cached_json",
+              "count": 7,
+              "wait_sum_ms": 0.352333,
+              "wait_max_ms": 0.209708,
+              "run_sum_ms": 894.515665,
+              "run_max_ms": 594.664834,
+              "abandoned": 0
+            },
+            {
+              "name": "Server_routes_http_routes_dashboard.add_routes.(fun)",
+              "count": 3,
+              "wait_sum_ms": 0.077167,
+              "wait_max_ms": 0.0385,
+              "run_sum_ms": 843.675167,
+              "run_max_ms": 476.339875,
+              "abandoned": 0
+            },
+            {
+              "name": "Server_dashboard_http.direct_goals_tree_payload",
+              "count": 1,
+              "wait_sum_ms": 0.042375,
+              "wait_max_ms": 0.042375,
+              "run_sum_ms": 768.717417,
+              "run_max_ms": 768.717417,
+              "abandoned": 0
+            },
+            {
+              "name": "Masc__Keeper_ask_answer_wake.observe_followup.read_actions.(fun)",
+              "count": 1,
+              "wait_sum_ms": 0.077542,
+              "wait_max_ms": 0.077542,
+              "run_sum_ms": 250.752458,
+              "run_max_ms": 250.752458,
+              "abandoned": 0
+            },
+            {
+              "name": "Server_dashboard_http_keeper_api.cached_keeper_composite_json",
+              "count": 1,
+              "wait_sum_ms": 0.0405,
+              "wait_max_ms": 0.0405,
+              "run_sum_ms": 95.896209,
+              "run_max_ms": 95.896209,
+              "abandoned": 0
+            },
+            {
+              "name": "Server_dashboard_http.dashboard_scheduled_automation_query_http_json",
+              "count": 8,
+              "wait_sum_ms": 421.882916,
+              "wait_max_ms": 161.131208,
+              "run_sum_ms": 62.915252,
+              "run_max_ms": 12.828958,
+              "abandoned": 0
+            },
+            {
+              "name": "Server_dashboard_http.dashboard_gate_http_json",
+              "count": 2,
+              "wait_sum_ms": 449.019583,
+              "wait_max_ms": 448.865583,
+              "run_sum_ms": 56.458916,
+              "run_max_ms": 33.050125,
+              "abandoned": 0
+            },
+            {
+              "name": "Masc__Keeper_ask_answer_wake.observe_followup.read_reactions.(fun)",
+              "count": 1,
+              "wait_sum_ms": 0.085625,
+              "wait_max_ms": 0.085625,
+              "run_sum_ms": 56.080625,
+              "run_max_ms": 56.080625,
+              "abandoned": 0
+            },
+            {
+              "name": "Server_keeper_chat_history_read.cached_json.retire_if_changed",
+              "count": 4,
+              "wait_sum_ms": 0.100124,
+              "wait_max_ms": 0.051833,
+              "run_sum_ms": 26.845918,
+              "run_max_ms": 21.569208,
+              "abandoned": 0
+            },
+            {
+              "name": "Server_dashboard_http_core_operator_snapshot_http.operator_snapshot_http_json.compute.(fun)",
+              "count": 24,
+              "wait_sum_ms": 775.297998,
+              "wait_max_ms": 451.989041,
+              "run_sum_ms": 10.432082,
+              "run_max_ms": 2.727125,
+              "abandoned": 0
+            },
+            {
+              "name": "Masc__Http_server_eio.Response.json_value_on_cpu",
+              "count": 4,
+              "wait_sum_ms": 0.092708,
+              "wait_max_ms": 0.054,
+              "run_sum_ms": 10.307665,
+              "run_max_ms": 3.189291,
+              "abandoned": 0
+            },
+            {
+              "name": "Dated_jsonl.map_tail_rows",
+              "count": 4,
+              "wait_sum_ms": 0.119043,
+              "wait_max_ms": 0.055417,
+              "run_sum_ms": 5.555375,
+              "run_max_ms": 1.921417,
+              "abandoned": 0
+            }
+          ]
+        },
+        "background": {
+          "wait": {
+            "count": 27724,
+            "sum_ms": 1515864.230569,
+            "max_ms": 3924.472666,
+            "buckets": [
+              11632,
+              975,
+              1605,
+              1647,
+              2049,
+              3063,
+              2636,
+              2396,
+              1389,
+              214,
+              41,
+              77,
+              0,
+              0
+            ]
+          },
+          "run": {
+            "count": 27720,
+            "sum_ms": 5341619.671992,
+            "max_ms": 181807.473,
+            "buckets": [
+              8138,
+              1517,
+              3575,
+              3598,
+              2800,
+              3672,
+              2416,
+              967,
+              479,
+              240,
+              113,
+              90,
+              33,
+              82
+            ]
+          },
+          "abandoned": {
+            "count": 0,
+            "sum_ms": 0.0,
+            "max_ms": 0.0,
+            "buckets": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "wait_by_in_flight_workers": [
+            {
+              "count": 6286,
+              "sum_ms": 18075.052587,
+              "max_ms": 373.121333,
+              "buckets": [
+                4690,
+                261,
+                457,
+                390,
+                274,
+                176,
+                23,
+                12,
+                3,
+                0,
+                0,
+                0,
+                0,
+                0
+              ]
+            },
+            {
+              "count": 3426,
+              "sum_ms": 18538.95946,
+              "max_ms": 634.725416,
+              "buckets": [
+                2425,
+                134,
+                258,
+                220,
+                171,
+                142,
+                46,
+                21,
+                7,
+                2,
+                0,
+                0,
+                0,
+                0
+              ]
+            },
+            {
+              "count": 2183,
+              "sum_ms": 9739.663031,
+              "max_ms": 387.367417,
+              "buckets": [
+                1626,
+                86,
+                147,
+                123,
+                98,
+                68,
+                20,
+                8,
+                7,
+                0,
+                0,
+                0,
+                0,
+                0
+              ]
+            },
+            {
+              "count": 15829,
+              "sum_ms": 1469510.555491,
+              "max_ms": 3924.472666,
+              "buckets": [
+                2891,
+                494,
+                743,
+                914,
+                1506,
+                2677,
+                2547,
+                2355,
+                1372,
+                212,
+                41,
+                77,
+                0,
+                0
+              ]
+            }
+          ],
+          "run_declared_io": {
+            "count": 8443,
+            "sum_ms": 4565857.48225,
+            "max_ms": 181807.473,
+            "buckets": [
+              3635,
+              732,
+              734,
+              638,
+              648,
+              705,
+              408,
+              315,
+              265,
+              132,
+              71,
+              55,
+              27,
+              78
+            ]
+          },
+          "run_declared_cpu": {
+            "count": 19277,
+            "sum_ms": 775762.189742,
+            "max_ms": 11410.528416,
+            "buckets": [
+              4503,
+              785,
+              2841,
+              2960,
+              2152,
+              2967,
+              2008,
+              652,
+              214,
+              108,
+              42,
+              35,
+              6,
+              4
+            ]
+          },
+          "in_flight_workers": 0.2,
+          "by_name": [
+            {
+              "name": "Masc__Keeper_librarian_durable_commit.io",
+              "count": 60,
+              "wait_sum_ms": 1106.551538,
+              "wait_max_ms": 717.71225,
+              "run_sum_ms": 2137923.985079,
+              "run_max_ms": 181807.473,
+              "abandoned": 0
+            },
+            {
+              "name": "Masc__Keeper_librarian_admission_owner.io",
+              "count": 1984,
+              "wait_sum_ms": 197096.980387,
+              "wait_max_ms": 3678.946208,
+              "run_sum_ms": 1792381.099788,
+              "run_max_ms": 157986.215708,
+              "abandoned": 0
+            },
+            {
+              "name": "Masc__Keeper_reaction_ledger.read_delivery_evidence",
+              "count": 10983,
+              "wait_sum_ms": 1004707.690324,
+              "wait_max_ms": 3924.472666,
+              "run_sum_ms": 366140.94739,
+              "run_max_ms": 2017.304083,
+              "abandoned": 0
+            },
+            {
+              "name": "Masc__Keeper_librarian_durable_execution.io",
+              "count": 575,
+              "wait_sum_ms": 29153.961926,
+              "wait_max_ms": 938.958292,
+              "run_sum_ms": 227601.144737,
+              "run_max_ms": 35101.49775,
+              "abandoned": 0
+            },
+            {
+              "name": "Dashboard_snapshot.refresh_loop.loop",
+              "count": 399,
+              "wait_sum_ms": 2903.239591,
+              "wait_max_ms": 345.714792,
+              "run_sum_ms": 225750.221792,
+              "run_max_ms": 11410.528416,
+              "abandoned": 0
+            },
+            {
+              "name": "Server_routes_http_runtime.start_full_health_snapshot_refresh_loop.(fun)",
+              "count": 106,
+              "wait_sum_ms": 4920.818125,
+              "wait_max_ms": 2786.043791,
+              "run_sum_ms": 168728.870414,
+              "run_max_ms": 35462.575666,
+              "abandoned": 0
+            },
+            {
+              "name": "Masc__Keeper_librarian_durable_consumer.load_current_checkpoint",
+              "count": 143,
+              "wait_sum_ms": 4519.730298,
+              "wait_max_ms": 519.0195,
+              "run_sum_ms": 71272.928253,
+              "run_max_ms": 13107.0255,
+              "abandoned": 0
+            },
+            {
+              "name": "Masc__Keeper_checkpoint_store.offload_checkpoint_cpu",
+              "count": 660,
+              "wait_sum_ms": 4607.220381,
+              "wait_max_ms": 2230.707333,
+              "run_sum_ms": 41571.469337,
+              "run_max_ms": 3914.21925,
+              "abandoned": 0
+            },
+            {
+              "name": "Masc__Keeper_librarian_admission_commit.io",
+              "count": 163,
+              "wait_sum_ms": 1210.676255,
+              "wait_max_ms": 238.760666,
+              "run_sum_ms": 36831.165793,
+              "run_max_ms": 4524.171208,
+              "abandoned": 0
+            },
+            {
+              "name": "Server_librarian_addon_wake.install.run_discovery",
+              "count": 4,
+              "wait_sum_ms": 97.609875,
+              "wait_max_ms": 78.173875,
+              "run_sum_ms": 29457.460458,
+              "run_max_ms": 14613.942125,
+              "abandoned": 0
+            },
+            {
+              "name": "Keeper_tool_call_index.blocking",
+              "count": 48,
+              "wait_sum_ms": 632.392624,
+              "wait_max_ms": 151.148166,
+              "run_sum_ms": 19641.933542,
+              "run_max_ms": 1586.892875,
+              "abandoned": 0
+            },
+            {
+              "name": "Server_dashboard_http_execution_surfaces.start_execution_refresh_loop.compute",
+              "count": 15,
+              "wait_sum_ms": 63.898749,
+              "wait_max_ms": 40.158583,
+              "run_sum_ms": 19310.541166,
+              "run_max_ms": 5497.751208,
+              "abandoned": 0
+            },
+            {
+              "name": "Masc__Keeper_librarian_durable_consumer.read_positions",
+              "count": 750,
+              "wait_sum_ms": 37935.815773,
+              "wait_max_ms": 586.885917,
+              "run_sum_ms": 19069.478098,
+              "run_max_ms": 642.853875,
+              "abandoned": 0
+            },
+            {
+              "name": "Masc__Keeper_turn_driver.run_named.(fun)",
+              "count": 70,
+              "wait_sum_ms": 197.42575,
+              "wait_max_ms": 40.057542,
+              "run_sum_ms": 12599.840582,
+              "run_max_ms": 1379.279041,
+              "abandoned": 0
+            },
+            {
+              "name": "Server_dashboard_http_runtime_info.dashboard_tools_http_result",
+              "count": 17,
+              "wait_sum_ms": 78.394541,
+              "wait_max_ms": 58.932792,
+              "run_sum_ms": 10750.626832,
+              "run_max_ms": 3229.488417,
+              "abandoned": 0
+            },
+            {
+              "name": "dated_jsonl:root/verdicts",
+              "count": 480,
+              "wait_sum_ms": 26278.718295,
+              "wait_max_ms": 988.225417,
+              "run_sum_ms": 10593.576257,
+              "run_max_ms": 1401.139375,
+              "abandoned": 0
+            },
+            {
+              "name": "Operator_control_snapshot_tool_audit.cached_tool_audit_json",
+              "count": 884,
+              "wait_sum_ms": 21515.164004,
+              "wait_max_ms": 148.386541,
+              "run_sum_ms": 10272.825338,
+              "run_max_ms": 309.523209,
+              "abandoned": 0
+            },
+            {
+              "name": "Server_dashboard_http_execution_surfaces.compute_execution_trust_json",
+              "count": 16,
+              "wait_sum_ms": 129.784499,
+              "wait_max_ms": 109.44625,
+              "run_sum_ms": 10095.779916,
+              "run_max_ms": 4943.938458,
+              "abandoned": 0
+            },
+            {
+              "name": "Dated_jsonl.find_latest_decoded_from_channel.drive",
+              "count": 2084,
+              "wait_sum_ms": 23703.20426,
+              "wait_max_ms": 1341.021542,
+              "run_sum_ms": 9413.244016,
+              "run_max_ms": 574.5825,
+              "abandoned": 0
+            },
+            {
+              "name": "Operator_control_snapshot_trust.compact_keeper_runtime_trust_json",
+              "count": 1462,
+              "wait_sum_ms": 48278.100646,
+              "wait_max_ms": 150.444792,
+              "run_sum_ms": 9151.338959,
+              "run_max_ms": 109.73775,
+              "abandoned": 0
+            }
+          ]
+        }
+      },
+      "probe": "running",
+      "interval_ms": 100.0,
+      "window_s": 60.0,
+      "stall_threshold_ms": 1000.0,
+      "lag": {
+        "samples": 600,
+        "p50_ms": 1.0485419999999994,
+        "p95_ms": 2.8408749999999925,
+        "p99_ms": 13.820832999999991,
+        "max_ms": 81.128375,
+        "mean_ms": 1.690668249999995,
+        "stalls": 0,
+        "over_50ms_count": 3,
+        "over_200ms_count": 0
+      }
+    },
+    "gc": {
+      "compactions": 0,
+      "heap_words": 720028432,
+      "live_words": 680940838,
+      "minor_heap_size": 4194304,
+      "space_overhead": 100,
+      "minor_collections": 10294,
+      "major_collections": 402,
+      "forced_major_collections": 0,
+      "minor_words": 108018440274.0,
+      "promoted_words": 2942793228.0,
+      "major_words": 146804566039.0
+    }
+  },
+  "same_runtime": true,
+  "same_effective_base": true,
+  "binary_sha256_after": "30097752da2bea774d0ac48ecf2663c7ca9d74c601016cc37f01508b036999ae",
+  "same_binary": true,
+  "load_after": [
+    13.31591796875,
+    22.7958984375,
+    72.87939453125
+  ],
+  "observed_surfaces": [
+    "keeper-list",
+    "keeper-message",
+    "overview"
+  ],
+  "frame_samples": 792,
+  "omitted_sample_lines": [
+    "  stage samples retained=4096 omitted=6326 (caps: 4096 records, 512 Build frames)"
+  ],
+  "requested_surface_recorded": true
+}

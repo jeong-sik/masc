@@ -22,36 +22,6 @@
     gaps are visible as a scrapeable gauge, not only in message text.
     Labels: [keeper_name]. *)
 
-(** #10530: keeper completion-contract violations.
-    Labels: keeper_name, kind \in \{passive,text_only\}. *)
-
-(** Objective Keeper turn-attempt observer counters. Labels:
-    [keeper].  Re-attempt = same turn id started again before
-    the counter advanced; regression = turn id moved strictly
-    backwards (lost turn-state update symptom — #9733). *)
-
-(** #9943: per-keeper turn latency distribution.  Labels:
-    [keeper, bucket].  Bucket vocabulary:
-    [under_60s | 60-300s | 300-600s | 600-1200s | over_1200s]. *)
-
-(** #9933: per-keeper turn latency distribution split by effective
-    model/runtime surface.  Labels:
-    [keeper, channel, provider_kind, model_used, resolved_model_id,
-    runtime_profile, bucket]. *)
-
-(** P-DASH-01: provider cooldown skip counter.  Incremented when a
-    runtime is in provider cooldown and the keeper fail-opens to a
-    fallback runtime.  Labels: [keeper, from_runtime, to_runtime]. *)
-
-(** P-DASH-01: provider cooldown remaining seconds gauge.
-    Exposes the current cooldown duration so operators can see
-    which runtime is blocked and for how long.  Labels: [keeper, runtime]. *)
-
-(** P-DASH-13: provider block duration histogram.
-    Records the duration (in seconds) for which a provider is placed
-    in cooldown each time a cooldown is applied or extended.
-    Labels: [provider]. *)
-
 (** #10569 diagnostic: time spent waiting to acquire the board
     persist mutex.  High values point to writer-side contention:
     if N concurrent fibers serialize through this lock and any one
@@ -95,14 +65,6 @@ val metric_backend_mutex_acquire_sec : string
     Captures time spent in the write critical section, used together
     with [metric_backend_mutex_acquire_sec]. *)
 val metric_backend_mutex_held_sec : string
-
-(** P-DASH-02: turn queue depth gauge.  Semaphore waiter count
-    surfaced so operators can alert on queue pressure without log
-    parsing.  Labels: [keeper, channel]. *)
-
-(** #10125: supervisor sweep liveness counters.  See [otel_metric_store.ml]
-    for the rationale.  Counter increments on each Pulse start;
-    gauge advances on every successful beat. *)
 
 (** Counter for tool metric rows that SQLite could not persist. No labels. *)
 val metric_tool_metrics_persist_dropped : string
@@ -150,32 +112,6 @@ val metric_file_lock_table_cas_retries : string
     [env_var, reason] with reason in [invalid_float | negative_or_nan]. *)
 val metric_tool_keeper_cache_ttl_parse_failures : string
 
-(** Counter for cancellation-safe keeper turn-holder release bookkeeping
-    callbacks that could not complete. Labels: [op, kind] with
-    kind in [cancelled | exception]. *)
-
-(** P-DASH-02: gauge for keeper turn wait queue depth.
-    Labels: [channel] with [autonomous_queue] for the explicit autonomous
-    FIFO wait queue. Reactive turn depth is intentionally not inferred from
-    semaphore availability. *)
-
-(** #13387: per-keeper count of allowed tools that the diversity
-    analyzer classifies as unused or below threshold. Labels:
-    [keeper]. *)
-
-(** #13387: per-tool gauge for allowed keeper tools that are unused
-    or below threshold. Value is [1.0] when underused and [0.0]
-    otherwise. Labels: [keeper], [tool]. *)
-
-(** #10349: counter incremented whenever
-    [Keeper_alerting_path.resolve_keeper_read_path] rejects a
-    path.  Replaces the previous user-facing leak of resolver
-    allowed roots ([(roots=[<list>])] and
-    [(sandbox roots: [<list>])]) which became a side-channel
-    oracle for sibling sandboxes when keeper identity drifted
-    across contract/gate/FS-resolver layers. Label [kind="out_of_roots"]
-    records objective allowed-root containment failures. *)
-
 (** Total board signals that did not produce a wake decision for a
     running keeper ([masc_keeper_board_signal_no_wake_total]).
     Increments per (keeper, kind, audience) when typed-audience routing
@@ -190,49 +126,19 @@ val metric_cache_desync_cleared : string
 
 (** Runtime state synchronization failures: explicit pause/resume paths
     only. Local discovery refresh failures use
-    [metric_keeper_local_discovery_failures] so dashboards can attribute
+    [masc_keeper_local_discovery_failures_total] so dashboards can attribute
     distinct failure classes. *)
 
 (** Local discovery readiness failures observed during create/turn paths.
-    Separated from [metric_keeper_runtime_sync_failures] so dashboards do
+    Separated from [masc_keeper_runtime_sync_failures_total] so dashboards do
     not conflate runtime-state sync with discovery-refresh incompleteness. *)
-
-(** #10091: labelled [keeper, has_current_task, contract_status]
-    so fleet histograms can distinguish the active-task strict
-    path from the no-task path covered by #10031. *)
-
-(** #10474: counter incremented when a keeper's runtime has zero
-    tool-capable providers.  Labels: keeper, runtime. *)
-
-(** #10474: counter classifying each scheduled autonomous cycle outcome.
-    Labels: keeper, outcome=[tool_called|noop|error]. *)
-
-(** #12799 Total passive-loop detections: keeper completed N consecutive turns
-    using only passive read-only tools, violating the proactive contract.
-    Incremented once per loop episode (streak resets on any execution-progress
-    turn). Labels: [keeper]. *)
-
-(** #13362 Total completion-contract loops: keeper hit N consecutive
-    actionable completion-contract failures before making execution/completion
-    progress.  Incremented once per loop episode. Labels: [keeper, kind]. *)
-
-(** Goal-loop Observe counter for no-progress keeper loops. Emitted by the
-    passive/completion-contract loop detector when progress-signalling turns make no
-    execution or completion progress. Incremented once per loop episode.
-    Labels: [keeper_name]. *)
-
-(** Task-138 Current consecutive-idle streak per keeper. Resets to 0 on
-    the next execution/completion turn. Labels: [keeper]. *)
 
 (** Task-138 Unix timestamp of the most recent productive turn
     (execution/completion class) per keeper.  Reads as 0 until the
     keeper has produced anything in this process.  Labels: [keeper]. *)
 
-(** PR-B: counter incremented when [run_keeper_cycle] skips a turn
-    because the keeper's resolved runtime is ollama-only and the
-    [/api/ps] probe reports zero process_available slots.  Labelled
-    by [keeper] and [runtime] so dashboards can attribute starvation
-    to specific runtime profiles. *)
+(** Counter for persisted read-model entries dropped on read. Labels:
+    [surface] and [reason] ([Read_drop_reason.to_wire]). *)
 val metric_persistence_read_drops : string
 
 (** Goal-loop Observe counter for persistence UTF-8 repairs. No labels. *)

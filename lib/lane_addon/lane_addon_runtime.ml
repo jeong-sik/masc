@@ -4446,6 +4446,43 @@ let start_configuration_service ~config ~sw ~clock =
       m.configuration_nudge <- (fun () -> ()));
     Pulse.run ~sw pulse)
 
+(* RFC lane-addon-shutdown-detaches-native-instances §3. A native cleanup
+   descriptor is read by the binary that wrote it, so the next server finds a
+   Detached record and attaches without reading it. Configuration maintenance
+   stops first: a settled Detach nudges reconciliation, and an enabled
+   declaration would attach a replacement while this server stops. *)
+module Shutdown_detach = struct
+  type t = {
+    instance_id : string;
+    package_id : string;
+    settlement : (unit, string) result;
+    elapsed_s : float;
+  }
+end
+let detach_native_for_shutdown ~config = Eio_context.run_on_owner_domain (fun () ->
+  Option.iter (fun stop -> stop ())
+    (Hashtbl.find_opt configuration_services (Workspace.masc_dir config));
+  let m = manager config in
+  m.configuration_nudge <- (fun () -> ());
+  match Eio_context.get_root_switch_opt () with
+  | None -> Error "server background owner unavailable"
+  | Some sw ->
+      let started = Eio.Mutex.use_ro m.configuration_mutex (fun () ->
+        entries m |> List.filter_map (fun e ->
+          match e.package.execution with
+          | Container _ -> None
+          | Host_process _ when is_detached e.state -> None
+          | Host_process _ ->
+              let stopwatch = Monotonic_deadline.start () in
+              Some (e, stopwatch, detach_entry ~sw m e))) in
+      Ok (Eio.Fiber.List.map (fun ((e : entry), stopwatch, detaching) ->
+        let settlement = match detaching, await_settled e with
+          | Ok (_ : Yojson.Safe.t), settled -> settled
+          | Error message, Ok () -> Error ("cleanup settled, but its Detaching record was not written: " ^ message)
+          | Error _, (Error _ as failed) -> failed in
+        {Shutdown_detach.instance_id = e.instance_id; package_id = e.package.id; settlement;
+         elapsed_s = Monotonic_deadline.elapsed_seconds stopwatch}) started))
+
 (* RFC operator-quiz §4.6. An answer is a host event (§4.4, event 3); a worker
    that is down lists the question again when it starts and receives the
    answer then. *)

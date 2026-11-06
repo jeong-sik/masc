@@ -935,7 +935,7 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
             in
             Sse.broadcast (Yojson.Safe.from_string shutdown_data);
             Log.Server.info
-              "[Shutdown] Phase 1/4 NOTIFY: sent to %d SSE clients (%.2fs) [active conn: %d, ws: %d]"
+              "[Shutdown] Phase 1/5 NOTIFY: sent to %d SSE clients (%.2fs) [active conn: %d, ws: %d]"
               (Sse.client_count ())
               (Unix.gettimeofday () -. t_phase)
               (Server_mcp_transport_http_conn.active_session_count ())
@@ -944,7 +944,7 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
             Eio.Time.sleep clock shutdown_cfg.notify_delay_s;
             (* Phase 2: Run shutdown hooks with cleanup timeout *)
             let t_phase = Unix.gettimeofday () in
-            Log.Server.info "[Shutdown] Phase 2/4 HOOKS: starting (timeout=%.1fs)"
+            Log.Server.info "[Shutdown] Phase 2/5 HOOKS: starting (timeout=%.1fs)"
               shutdown_cfg.cleanup_timeout_s;
             (try
               Eio.Time.with_timeout_exn clock shutdown_cfg.cleanup_timeout_s
@@ -952,49 +952,67 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
             with
             | Eio.Time.Timeout ->
                 Log.Server.warn
-                  "[Shutdown] Phase 2/4 HOOKS: timeout after %.1fs, proceeding (total=%.1fs)"
+                  "[Shutdown] Phase 2/5 HOOKS: timeout after %.1fs, proceeding (total=%.1fs)"
                   shutdown_cfg.cleanup_timeout_s
                   (Unix.gettimeofday () -. t_shutdown_start)
             | Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->
                 Log.Server.warn
-                  "[Shutdown] Phase 2/4 HOOKS: failed after %.2fs: %s"
+                  "[Shutdown] Phase 2/5 HOOKS: failed after %.2fs: %s"
                   (Unix.gettimeofday () -. t_phase)
                   (Printexc.to_string exn));
             let now = Unix.gettimeofday () in
-            Log.Server.info "[Shutdown] Phase 2/4 HOOKS: done (%.2fs, total=%.1fs) [active conn: %d, ws: %d]"
+            Log.Server.info "[Shutdown] Phase 2/5 HOOKS: done (%.2fs, total=%.1fs) [active conn: %d, ws: %d]"
               (now -. t_phase)
               (now -. t_shutdown_start)
               (Server_mcp_transport_http_conn.active_session_count ())
               (Server_mcp_transport_ws.session_count ());
             (* Phase 3: Board flush with 2s timeout *)
             let t_phase = Unix.gettimeofday () in
-            Log.Server.info "[Shutdown] Phase 3/4 BOARD: flush starting (timeout=2.0s)";
+            Log.Server.info "[Shutdown] Phase 3/5 BOARD: flush starting (timeout=2.0s)";
             (try
               Eio.Time.with_timeout_exn clock 2.0
                 (fun () -> Board_dispatch.flush ())
             with
             | Eio.Time.Timeout ->
                 Log.Server.warn
-                  "[Shutdown] Phase 3/4 BOARD: timeout after 2.0s (total=%.1fs)"
+                  "[Shutdown] Phase 3/5 BOARD: timeout after 2.0s (total=%.1fs)"
                   (Unix.gettimeofday () -. t_shutdown_start)
             | Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->
                 Log.Server.warn
-                  "[Shutdown] Phase 3/4 BOARD: skipped after %.2fs: %s"
+                  "[Shutdown] Phase 3/5 BOARD: skipped after %.2fs: %s"
                   (Unix.gettimeofday () -. t_phase)
                   (Printexc.to_string exn));
             let now = Unix.gettimeofday () in
-            Log.Server.info "[Shutdown] Phase 3/4 BOARD: done (%.2fs, total=%.1fs) [active conn: %d, ws: %d]"
+            Log.Server.info "[Shutdown] Phase 3/5 BOARD: done (%.2fs, total=%.1fs) [active conn: %d, ws: %d]"
               (now -. t_phase)
               (now -. t_shutdown_start)
               (Server_mcp_transport_http_conn.active_session_count ())
               (Server_mcp_transport_ws.session_count ());
+            (* Phase 4: native Lane Add-on instances are detached by this
+               binary, which can read the cleanup descriptors it wrote. It has
+               no phase timeout: the process deadline watchdog bounds it, and
+               an instance it cuts short is recovered by the next server
+               (RFC lane-addon-shutdown-detaches-native-instances §3). *)
+            let t_phase = Unix.gettimeofday () in
+            Log.Server.info "[Shutdown] Phase 4/5 LANE: detaching native Lane Add-on instances";
+            (try Masc.Shutdown_hooks.run_lane_addon_shutdown () with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | exn ->
+                 Log.Server.warn
+                   "[Shutdown] Phase 4/5 LANE: failed after %.2fs: %s"
+                   (Unix.gettimeofday () -. t_phase)
+                   (Printexc.to_string exn));
+            let now = Unix.gettimeofday () in
+            Log.Server.info "[Shutdown] Phase 4/5 LANE: done (%.2fs, total=%.1fs)"
+              (now -. t_phase)
+              (now -. t_shutdown_start);
 
-            (* Phase 4: Return normally — Eio.Fiber.first will cancel
+            (* Phase 5: Return normally — Eio.Fiber.first will cancel
                run_server cleanly via Eio.Cancel.Cancelled. *)
             Log.Server.info
-              "[Shutdown] Phase 4/4 CANCEL: server cancel (total=%.1fs) [active conn: %d, ws: %d]"
+              "[Shutdown] Phase 5/5 CANCEL: server cancel (total=%.1fs) [active conn: %d, ws: %d]"
               (Unix.gettimeofday () -. t_shutdown_start)
               (Server_mcp_transport_http_conn.active_session_count ())
               (Server_mcp_transport_ws.session_count ());

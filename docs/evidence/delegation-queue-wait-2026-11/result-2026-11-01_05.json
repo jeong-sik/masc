@@ -321,47 +321,74 @@
       "hours": 1.1960395995113584
     }
   ],
+  "clock_check": {
+    "tolerance_s": 0.05,
+    "serial_pairs": 80437,
+    "overlap_if_ts_is_end": 0,
+    "overlap_if_ts_is_start": 13874
+  },
   "flag_replay": {
     "started": 502,
-    "flagged": 125,
-    "flagged_wait_hours": 21.9465797391865,
-    "flagged_share_of_wait_hours": 0.7115367252541115,
+    "flagged": 115,
+    "flagged_wait_hours": 21.834051421549585,
+    "flagged_share_of_wait_hours": 0.7078884105015963,
     "flagged_wait_s": {
-      "n": 125,
-      "p50": 171.85515999794006,
-      "p90": 1735.2473080158234,
+      "n": 115,
+      "p50": 223.19640517234802,
+      "p90": 1913.0554740428925,
       "p99": 4509.753265142441,
       "max": 6672.674216032028,
-      "hours": 21.9465797391865
+      "hours": 21.834051421549585
     },
     "unflagged_wait_s": {
-      "n": 377,
-      "p50": 0.026376008987426758,
+      "n": 387,
+      "p50": 0.025689125061035156,
       "p90": 13.240031003952026,
       "p99": 2202.2086248397827,
       "max": 4504.345392942429,
-      "hours": 8.897337321241697
+      "hours": 9.00986563887861
     },
     "thresholds": [
       {
         "threshold_s": 60.0,
-        "true_positive": 85,
-        "false_positive": 40,
-        "false_negative": 32,
-        "true_negative": 345,
-        "precision": 0.68,
-        "recall": 0.7264957264957265
+        "true_positive": 84,
+        "false_positive": 31,
+        "false_negative": 33,
+        "true_negative": 354,
+        "precision": 0.7304347826086957,
+        "recall": 0.717948717948718
       },
       {
         "threshold_s": 600.0,
         "true_positive": 33,
-        "false_positive": 92,
+        "false_positive": 82,
         "false_negative": 14,
-        "true_negative": 363,
-        "precision": 0.264,
+        "true_negative": 373,
+        "precision": 0.28695652173913044,
         "recall": 0.7021276595744681
       }
     ]
+  },
+  "boundary_replay": {
+    "flagged": 115,
+    "pickup_s": {
+      "n": 115,
+      "p50": 29.976508140563965,
+      "p90": 198.9955279827118,
+      "p99": 448.22737097740173,
+      "max": 784.7031190395355,
+      "hours": 2.27783618470033
+    },
+    "wait_hours": 21.834051421549585,
+    "replayed_wait_hours": 2.265850919418865,
+    "saved_hours": 19.568200502130722,
+    "saved_share_of_wait_hours": 0.6344265698741657,
+    "pickup_not_before_start": 1,
+    "long_waits": {
+      "n": 33,
+      "wait_hours": 18.150311117834516,
+      "replayed_wait_hours": 0.9470109032922321
+    }
   },
   "submit_queued_count": {
     "started": 502,

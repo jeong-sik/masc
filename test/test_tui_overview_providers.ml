@@ -1347,12 +1347,24 @@ let card_corners lines =
     (fun total line -> total + occurrences ~affix:Masc_tui_theme.Box.tl line)
     0 (List.map plain lines)
 
-(* A card is drawn for every entry the plan has, and for no other thing. *)
+(* A card is drawn for every entry the plan has, and for no other thing, except
+   an account the server has not heard from: those are listed by name under one
+   line, in cards as in rows, and take no card. The runtimes are unread, so no
+   account carries an exhaustion tag that would give it an entry of its own. *)
 let test_cards_draw_one_card_per_plan_entry () =
+  let takes_a_card (entry : Providers.plan_entry) =
+    match entry.pe_account.Masc.Tui_decode_usage.pua_state with
+    | Masc.Tui_decode_usage.Account_not_reported_since_start -> false
+    | Masc.Tui_decode_usage.Account_reported_no_windows _
+    | Masc.Tui_decode_usage.Account_reported _ -> true
+  in
   let entries =
     Providers.plan ~now ~runtimes:Types.Quota_unread
       (decode_accounts screenshot_accounts).Masc.Tui_decode_usage.puws_accounts
-    |> List.fold_left (fun total group -> total + List.length group.Providers.pg_entries) 0
+    |> List.fold_left
+         (fun total group ->
+           total + List.length (List.filter takes_a_card group.Providers.pg_entries))
+         0
   in
   check int "one card for each entry the plan has" entries
     (card_corners (card_lines ~width:wide_enough_for_cards screenshot_accounts))

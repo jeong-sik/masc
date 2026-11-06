@@ -11,7 +11,7 @@ every cell after it on that row.
 
 Usage:
     python3 scripts/capture-tui-screenshots.py \
-        --base-path "$MASC_BASE_PATH" --out docs/screenshots/tui/$(date -u +%Y-%m-%d)/surfaces
+        --base-path "$MASC_BASE_PATH" --out artifacts/screenshots/tui/$(date -u +%Y-%m-%d)/surfaces
 """
 
 from __future__ import annotations

@@ -1,0 +1,236 @@
+{
+  "params": {
+    "since": 1793958720.0,
+    "until": 1793971800.0
+  },
+  "turns": {
+    "counted": 307,
+    "bad_lines": 0,
+    "no_usage": 155,
+    "outside_window": 11
+  },
+  "requests_per_turn": {
+    "mean": 6.75,
+    "median": 5.0,
+    "p90": 15.0
+  },
+  "first_request": {
+    "turns": 307,
+    "hit_share_of_tokens": 0.5856,
+    "median_hit": 0.7363,
+    "share_of_turns_below_half": 0.3616
+  },
+  "first_request_by_gap": [
+    {
+      "gap": "<1m",
+      "turns": 141,
+      "hit_share_of_tokens": 0.6712,
+      "median_hit": 0.7688,
+      "share_of_turns_below_half": 0.2482
+    },
+    {
+      "gap": "1-5m",
+      "turns": 72,
+      "hit_share_of_tokens": 0.7662,
+      "median_hit": 0.809,
+      "share_of_turns_below_half": 0.0833
+    },
+    {
+      "gap": "5-10m",
+      "turns": 24,
+      "hit_share_of_tokens": 0.3019,
+      "median_hit": 0.0,
+      "share_of_turns_below_half": 0.75
+    },
+    {
+      "gap": "10-30m",
+      "turns": 18,
+      "hit_share_of_tokens": 0.0714,
+      "median_hit": 0.0,
+      "share_of_turns_below_half": 0.9444
+    },
+    {
+      "gap": "30-60m",
+      "turns": 5,
+      "hit_share_of_tokens": 0.0138,
+      "median_hit": 0.0,
+      "share_of_turns_below_half": 1.0
+    },
+    {
+      "gap": "unknown",
+      "turns": 47,
+      "hit_share_of_tokens": 0.3564,
+      "median_hit": 0.206,
+      "share_of_turns_below_half": 0.6383
+    }
+  ],
+  "by_model": [
+    {
+      "model": "claude-sonnet-5-5",
+      "requests_per_turn": {
+        "mean": 7.07,
+        "median": 5.0,
+        "p90": 15.0
+      },
+      "first_request": {
+        "turns": 231,
+        "hit_share_of_tokens": 0.5715,
+        "median_hit": 0.7455,
+        "share_of_turns_below_half": 0.3506
+      },
+      "first_request_by_gap": [
+        {
+          "gap": "<1m",
+          "turns": 106,
+          "hit_share_of_tokens": 0.6868,
+          "median_hit": 0.7748,
+          "share_of_turns_below_half": 0.217
+        },
+        {
+          "gap": "1-5m",
+          "turns": 62,
+          "hit_share_of_tokens": 0.7571,
+          "median_hit": 0.8086,
+          "share_of_turns_below_half": 0.0806
+        },
+        {
+          "gap": "5-10m",
+          "turns": 16,
+          "hit_share_of_tokens": 0.0,
+          "median_hit": 0.0,
+          "share_of_turns_below_half": 1.0
+        },
+        {
+          "gap": "10-30m",
+          "turns": 15,
+          "hit_share_of_tokens": 0.0,
+          "median_hit": 0.0,
+          "share_of_turns_below_half": 1.0
+        },
+        {
+          "gap": "30-60m",
+          "turns": 3,
+          "hit_share_of_tokens": 0.0,
+          "median_hit": 0.0,
+          "share_of_turns_below_half": 1.0
+        },
+        {
+          "gap": "unknown",
+          "turns": 29,
+          "hit_share_of_tokens": 0.3379,
+          "median_hit": 0.2318,
+          "share_of_turns_below_half": 0.6552
+        }
+      ]
+    },
+    {
+      "model": "glm-5.3",
+      "requests_per_turn": {
+        "mean": 3.58,
+        "median": 3.0,
+        "p90": 5.0
+      },
+      "first_request": {
+        "turns": 43,
+        "hit_share_of_tokens": 0.765,
+        "median_hit": 0.7921,
+        "share_of_turns_below_half": 0.093
+      },
+      "first_request_by_gap": [
+        {
+          "gap": "<1m",
+          "turns": 19,
+          "hit_share_of_tokens": 0.755,
+          "median_hit": 0.7908,
+          "share_of_turns_below_half": 0.1053
+        },
+        {
+          "gap": "1-5m",
+          "turns": 9,
+          "hit_share_of_tokens": 0.8414,
+          "median_hit": 0.8828,
+          "share_of_turns_below_half": 0.0
+        },
+        {
+          "gap": "5-10m",
+          "turns": 6,
+          "hit_share_of_tokens": 0.7622,
+          "median_hit": 0.8942,
+          "share_of_turns_below_half": 0.1667
+        },
+        {
+          "gap": "10-30m",
+          "turns": 1,
+          "hit_share_of_tokens": 0.885,
+          "median_hit": 0.885,
+          "share_of_turns_below_half": 0.0
+        },
+        {
+          "gap": "unknown",
+          "turns": 8,
+          "hit_share_of_tokens": 0.6847,
+          "median_hit": 0.7014,
+          "share_of_turns_below_half": 0.125
+        }
+      ]
+    },
+    {
+      "model": "glm-5.3-flash",
+      "requests_per_turn": {
+        "mean": 8.58,
+        "median": 7.0,
+        "p90": 21.0
+      },
+      "first_request": {
+        "turns": 33,
+        "hit_share_of_tokens": 0.4032,
+        "median_hit": 0.0113,
+        "share_of_turns_below_half": 0.7879
+      },
+      "first_request_by_gap": [
+        {
+          "gap": "<1m",
+          "turns": 16,
+          "hit_share_of_tokens": 0.5425,
+          "median_hit": 0.1421,
+          "share_of_turns_below_half": 0.625
+        },
+        {
+          "gap": "1-5m",
+          "turns": 1,
+          "hit_share_of_tokens": 0.0,
+          "median_hit": 0.0,
+          "share_of_turns_below_half": 1.0
+        },
+        {
+          "gap": "5-10m",
+          "turns": 2,
+          "hit_share_of_tokens": 0.2377,
+          "median_hit": 0.0,
+          "share_of_turns_below_half": 0.5
+        },
+        {
+          "gap": "10-30m",
+          "turns": 2,
+          "hit_share_of_tokens": 0.0,
+          "median_hit": 0.0,
+          "share_of_turns_below_half": 1.0
+        },
+        {
+          "gap": "30-60m",
+          "turns": 2,
+          "hit_share_of_tokens": 0.0467,
+          "median_hit": 0.0,
+          "share_of_turns_below_half": 1.0
+        },
+        {
+          "gap": "unknown",
+          "turns": 10,
+          "hit_share_of_tokens": 0.0228,
+          "median_hit": 0.0,
+          "share_of_turns_below_half": 1.0
+        }
+      ]
+    }
+  ]
+}

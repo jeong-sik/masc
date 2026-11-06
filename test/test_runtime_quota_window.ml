@@ -481,6 +481,25 @@ let test_a_window_the_reader_would_reject_is_not_written () =
   Alcotest.(check bool) "the store file was never created" false
     (Sys.file_exists (J.path ~base_path))
 
+(* A turn cancelled right after its refusal still keeps the window, and the
+   note does not raise from the store. *)
+let test_a_cancelled_turn_still_keeps_its_window () =
+  with_store @@ fun base_path ->
+  ignore (restart ~base_path ~now:0.0 : J.restore_report);
+  let noted =
+    Eio_main.run @@ fun _env ->
+    match
+      Eio.Cancel.sub (fun turn ->
+        Eio.Cancel.cancel turn (Failure "turn cancelled");
+        Q.note_exhausted ~scope:muse ~resets_at:2000.0)
+    with
+    | () -> "noted"
+    | exception Eio.Cancel.Cancelled _ -> "the note raised Cancelled"
+  in
+  Alcotest.(check string) "the note returns in a cancelled turn" "noted" noted;
+  Alcotest.(check int) "the window is kept across a restart" 1
+    (restart ~base_path ~now:1000.0).ahead
+
 let () =
   Alcotest.run
     "runtime_quota_window"
@@ -559,5 +578,7 @@ let () =
             test_an_unreadable_row_is_reported_and_not_taken
         ; Alcotest.test_case "a window the reader would reject is not written" `Quick
             test_a_window_the_reader_would_reject_is_not_written
+        ; Alcotest.test_case "a cancelled turn still keeps its window" `Quick
+            test_a_cancelled_turn_still_keeps_its_window
         ] )
     ]

@@ -67,6 +67,7 @@
  (modules test_tui_play_room)
  (libraries alcotest yojson masc masc_tui_play_room))
 (include stanzas/test_oidc_id_token_signature.inc)
+(include stanzas/test_oidc_google.inc)
 (include stanzas/test_keeper_chat_store_announces.inc)
 (include stanzas/test_keeper_memory_journal_announces.inc)
 (include stanzas/test_keeper_composite_cleared_before_announce.inc)

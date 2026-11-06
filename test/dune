@@ -754,7 +754,6 @@
   test_keeper_subprocess_registry
   test_telemetry_unified
   test_telemetry_unified_source
-  test_telemetry_error_occurred_wire_10358
   test_warn_root_causes
   test_keeper_identity_tool_search
   test_mid_turn_resume
@@ -1098,7 +1097,6 @@
   test_keeper_subprocess_registry
   test_telemetry_unified
   test_telemetry_unified_source
-  test_telemetry_error_occurred_wire_10358
   test_warn_root_causes
   test_keeper_identity_tool_search
   test_mid_turn_resume
@@ -1974,7 +1972,6 @@
   test_prompt_registry_defaults
   test_eval_calibration
   test_goal_tools
-  test_goal_upsert_fsm_bypass_10247
   test_goal_store
   test_keeper_goal_phase_projection
   test_string_util
@@ -2122,7 +2119,6 @@
   test_prompt_registry_defaults
   test_eval_calibration
   test_goal_tools
-  test_goal_upsert_fsm_bypass_10247
   test_goal_store
   test_keeper_goal_phase_projection
   test_string_util

@@ -792,7 +792,6 @@ Consumers: [lib/workspace_goals.ml](../../../lib/workspace_goals.ml),
 [lib/goal/goal_verification.ml](../../../lib/goal/goal_verification.ml).
 
 Scenarios: [test/test_goal_store.ml](../../../test/test_goal_store.ml),
-[test/test_goal_upsert_fsm_bypass_10247.ml](../../../test/test_goal_upsert_fsm_bypass_10247.ml),
 [test/test_goal_suspension.ml](../../../test/test_goal_suspension.ml),
 [test/test_goal_tools.ml](../../../test/test_goal_tools.ml). **Not executed in this
 audit.**

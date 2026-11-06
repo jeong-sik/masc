@@ -1635,9 +1635,23 @@ let test_counterpart_only_provider_capacity_refusal_is_source_preserving () =
     restart_actual_worker ~while_off:check_state fixture ~sw;
     check_free ();
     let appended="Counterpart appended after the refusal" in
-    Keeper_chat_store.append_user_message ~base_dir:fixture.base_path ~keeper_name
-      ~content:appended ~speaker ();
-    io (fun () -> official_turn fixture.config ~turn:3 ~time:(Time_compat.now () +. 20.));
+    (* The abandoned range ends at turn 2 (now+10): the later counterpart is
+       recorded after it, then the next official turn closes the later range. *)
+    let appended_time=Time_compat.now () +. 15. in
+    let appended_item : Keeper_external_attention.item = {
+      event_id=Keeper_external_attention.event_id_of_dedupe_key "appended-after-refusal";
+      dedupe_key="appended-after-refusal";keeper_name;
+      conversation={conversation_id="agent:appended-after-refusal";surface=Keeper_external_attention.Agent};
+      external_message=Some {surface=Keeper_external_attention.Agent;message_id="appended-message";reply_to_message_id=None};
+      source_label="agent";
+      actor={actor_id=Some "external";display_name=Some "External";authority=Keeper_chat_store.External};
+      urgency=Keeper_external_attention.Ambient;content_preview=appended;
+      content_ref=None;received_at=appended_time;metadata=[]} in
+    (match Keeper_external_attention.For_testing.record_with_clock
+       ~now:(fun () -> appended_time) ~base_path:fixture.base_path appended_item with
+     | `Recorded -> () | `Duplicate _ -> fail "the later counterpart was not recorded"
+     | `Error detail -> fail detail);
+    io (fun () -> official_turn fixture.config ~turn:3 ~time:(appended_time +. 10.));
     fixture.set_response (fun capture ->
       provider_inputs:= !provider_inputs @ [observations capture];
       `OK,F.openai_response (answer capture));
@@ -1650,10 +1664,6 @@ let test_counterpart_only_provider_capacity_refusal_is_source_preserving () =
        | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
        | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false);
     let _,_,fresh_counterparts=observations fresh_capture in
-    check (list string) "the later input's counterparts (length:head)" []
-      (List.map (fun (o:Keeper_counterpart_observation.t) ->
-        Printf.sprintf "%d:%s" (String.length o.content) (String.sub o.content 0 (min 40 (String.length o.content))))
-        fresh_counterparts);
     check bool "the later input carries the counterpart appended after the refusal" true
       (List.exists (fun (observation:Keeper_counterpart_observation.t) ->
         observation.content=appended) fresh_counterparts);

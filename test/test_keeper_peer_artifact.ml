@@ -215,7 +215,7 @@ let with_materialization f =
     Alcotest.(check int) "observe one byte beyond expected size" (String.length expected + 1) max_bytes;
     Result.map (fun bytes -> String.sub bytes 0 (min (String.length bytes) max_bytes)) !state in
   let invoke write = Keeper_peer_artifact.materialize ~base_path:base ~artifact ~path:"proof.bin"
-      ~fetch:(fun () -> Ok { Keeper_peer_artifact.blob; content = expected }) ~read
+      ~fetch:(fun () -> Keeper_peer_artifact.fetch ~config:(Workspace.default_config base) artifact) ~read
       ~write:(fun (written : Tool_output.artifact_ref) ->
         Alcotest.(check string) "the writer receives the named blob"
           (artifact :> string) written.sha256;
@@ -281,10 +281,19 @@ let completed result =
   | Tool_result.Deferred () | Tool_result.Failed _ -> Alcotest.fail result.raw_output
 ;;
 
+(* A materialize call names its blob by sha256 alone, which the blob GC does
+   not count, so each result has to carry the blob for the call's ledger row. *)
+let keeps_blob ~expected (result : Keeper_tool_execution.t) =
+  List.exists (fun (root : Tool_output.artifact_ref) ->
+    root.sha256 = Agent_core_sha256.(digest_string expected |> to_hex)) result.retained_artifacts
+;;
+
 let test_materialize_verifies_recipient_and_repeat_does_not_write () =
   with_materialization @@ fun ~base_path ~expected ~state ~reads:_ ~writes ~invoke ->
   let write () = state := Ok expected; Keeper_tool_execution.success_data (`Assoc ["ok", `Bool true]) in
-  completed (invoke write);
+  let written = invoke write in
+  completed written;
+  Alcotest.(check bool) "a verified write keeps the blob it wrote" true (keeps_blob ~expected written);
   let repeated = invoke write in
   completed repeated;
   check_projected_inline ~base_path ~expected repeated;
@@ -351,6 +360,17 @@ let test_materialize_transport_failure_does_not_launch_write () =
     (result.disposition = Tool_result.Failed Tool_result.Runtime_failure);
   Alcotest.(check bool) "this call did not mutate" true
     (result.failure_effect_disposition = Tool_result.Proven_pre_effect)
+;;
+
+let test_materialize_refused_target_keeps_the_blob () =
+  with_materialization @@ fun ~base_path:_ ~expected ~state ~reads:_ ~writes ~invoke ->
+  state := Error (Masc.Keeper_sandbox_read_backend.Not_a_file "proof.bin is a directory");
+  let result = invoke (fun () -> Alcotest.fail "must not write over a target that is not a file") in
+  Alcotest.(check int) "no write" 0 !writes;
+  Alcotest.(check bool) "refused before any effect" true
+    (result.disposition = Tool_result.Failed Tool_result.Workflow_rejection
+     && result.failure_effect_disposition = Tool_result.Proven_pre_effect);
+  Alcotest.(check bool) "the refusal keeps the blob it fetched" true (keeps_blob ~expected result)
 ;;
 
 let test_materialize_verification_loss_does_not_repeat_effect () =
@@ -439,9 +459,7 @@ let test_materialize_manifest_failure_keeps_effect_and_roots () =
   Alcotest.(check int) "no write is replayed for publication failure" 1 !writes;
   Alcotest.(check bool) "raw diagnostic identifies manifest persistence" true
     (String_util.contains_substring result.raw_output "manifest could not be stored");
-  Alcotest.(check bool) "artifact stays rooted" true
-    (List.exists (fun (root : Tool_output.artifact_ref) ->
-      root.sha256 = Agent_core_sha256.(digest_string expected |> to_hex)) result.retained_artifacts);
+  Alcotest.(check bool) "artifact stays rooted" true (keeps_blob ~expected result);
   Alcotest.(check bool) "no stale manifest binding" true (result.metadata = None);
   let receipt = Yojson.Safe.Util.member "result" (Option.get result.data) in
   Alcotest.(check bool) "unpublished exact verification remains inspectable" true
@@ -489,6 +507,7 @@ let () =
         ; Alcotest.test_case "Gate deferral remains authoritative" `Quick test_materialize_preserves_gate_deferral
         ; Alcotest.test_case "pre-effect failure remains authoritative" `Quick test_materialize_preserves_pre_effect_failure
         ; Alcotest.test_case "transport fault is not missing target" `Quick test_materialize_transport_failure_does_not_launch_write
+        ; Alcotest.test_case "a refused target keeps the fetched blob" `Quick test_materialize_refused_target_keeps_the_blob
         ; Alcotest.test_case "verification loss never replays write" `Quick test_materialize_verification_loss_does_not_repeat_effect
         ; Alcotest.test_case "writer authorization and artifact evidence survive reconciliation" `Quick test_materialize_preserves_original_writer_evidence
         ; Alcotest.test_case "manifest failure preserves effect phase and artifact roots" `Quick test_materialize_manifest_failure_keeps_effect_and_roots

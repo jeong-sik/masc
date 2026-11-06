@@ -887,7 +887,8 @@ let handle_keeper_delegate ?invocation_ref ~submitted_by ctx args =
   | Ok (acceptance, target_turn_age, blobs) ->
     (* The message names each artifact by sha256 alone, which the blob GC does
        not count as a reference. This call's ledger row keeps the blobs alive
-       until the receiver materializes them. *)
+       for as long as the ledger keeps the row (the operator retention
+       window), not until the receiver materializes them. *)
     tool_result_of_operation_acceptance ~extra:target_turn_age acceptance
     |> Tool_result.with_retained_artifacts blobs
   | Error error -> tool_result_of_handler_error error

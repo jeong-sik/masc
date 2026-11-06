@@ -58,8 +58,9 @@ let materialize ~base_path ~(artifact : Keeper_peer_artifact_ref.t) ~path ~fetch
   match fetch () with
   | Error detail -> failure ~blobs:[] ~effect_disposition:Tool_result.Proven_pre_effect detail
   | Ok { blob; content = expected } ->
-    (* From here on every result this call builds keeps the fetched blob alive:
-       the call names it by sha256 alone, which the blob GC does not count. *)
+    (* From here on every result this call builds, and a verified writer
+       success, keeps the fetched blob in this call's ledger row: the call
+       names it by sha256 alone, which the blob GC does not count. *)
     let blobs = [ blob ] in
     (* Read one byte past the expected length: a matching prefix is not proof
        that the recipient has exactly this artifact. The fetched string
@@ -91,7 +92,8 @@ let materialize ~base_path ~(artifact : Keeper_peer_artifact_ref.t) ~path ~fetch
             | Ok _ | Error _ -> result))
       | Tool_result.Completed () ->
         (match observe () with
-         | Ok actual when String.equal actual expected -> result
+         | Ok actual when String.equal actual expected ->
+           Keeper_tool_execution.with_retained_artifacts (blobs @ result.retained_artifacts) result
          | Ok _ ->
            failure ~blobs ?metadata:result.metadata ?write_result:result.data ~retained_artifacts:result.retained_artifacts
              ?file_change_evidence:result.file_change_evidence
@@ -111,6 +113,7 @@ let materialize ~base_path ~(artifact : Keeper_peer_artifact_ref.t) ~path ~fetch
             | Keeper_sandbox_read_backend.Read_refused detail) ->
       Keeper_tool_execution.failure ~class_:Tool_result.Workflow_rejection
         ~effect_disposition:Tool_result.Proven_pre_effect detail
+      |> Keeper_tool_execution.with_retained_artifacts blobs
     | Error (Keeper_sandbox_read_backend.Read_failed detail) ->
       failure ~blobs ~effect_disposition:Tool_result.Proven_pre_effect detail
 
@@ -146,8 +149,9 @@ let handle ~config ~meta ~turn_sandbox_factory ~write ~args =
           let blob = Tool_blob_store.put_durable
               (Tool_blob_store.create ~base_path:config.Workspace.base_path) ~bytes ~mime in
           (* The result names the blob by sha256 alone, which the blob GC does
-             not count as a reference. The ledger row of this call keeps it
-             alive through the retained artifact instead. *)
+             not count as a reference. This call's ledger row keeps it alive
+             through the retained artifact for as long as the ledger keeps the
+             row (the operator retention window). *)
           Tool_result.make_ok ~tool_name:"keeper_artifact_transfer" ~start_time:(Tool_timing.start ())
             ~data:(`Assoc ["artifact", Keeper_peer_artifact_ref.(to_json (of_blob blob))]) ()
           |> Keeper_tool_execution.of_tool_result

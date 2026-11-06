@@ -5462,7 +5462,7 @@ let test_agent_delegate_submits_owner_operation_without_waiting ?(with_artifact=
        check bool "agent submit returns acceptance" true (Tool_result.is_success result);
        (* The queued message names the artifact by sha256 alone, which the blob
           GC does not count; the delegate's own ledger row has to keep it. *)
-       check (list string) "delegate row keeps each named blob alive"
+       check (list string) "the delegate result retains each named blob for its ledger row"
          (match artifact with None -> [] | Some (_, artifact) -> [ (artifact :> string) ])
          (List.map (fun (blob : Tool_output.artifact_ref) -> blob.sha256)
             (Tool_result.retained_artifacts result));

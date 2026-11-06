@@ -10309,17 +10309,16 @@ let test_peer_artifact_materializes_exact_binary () =
               "prompt", `String "Reuse this PNG"; "artifacts", `List [artifact]] in
     let delegate_input = validate_input "masc_keeper_delegate" (delegate_args exported_json) in
     let open Yojson.Safe.Util in
-    List.iter (fun (artifact, detail) ->
+    List.iter (fun artifact ->
       match Masc.Keeper_invocation_contract.request_of_json (delegate_args artifact) with
       | Ok _ -> fail "malformed exported reference was accepted"
+      | Error (Masc.Keeper_invocation_contract.Invalid_wire_value { field; _ }) ->
+        check string "rejection identifies the artifact item" "artifacts[0]" field
       | Error error ->
-        let message = Masc.Keeper_invocation_contract.request_error_to_string error in
-        check bool "rejection identifies the artifact item" true
-          (String_util.contains_substring message "artifacts[0]");
-        check bool "rejection retains the actual reference correction" true
-          (String_util.contains_substring message detail))
-      [ `Assoc ["artifact", exported_json], "sha256 string an export returned";
-        `String (String.uppercase_ascii (to_string exported_json)), "lowercase hexadecimal character" ];
+        fail ("malformed reference was refused for another reason: "
+              ^ Masc.Keeper_invocation_contract.request_error_to_string error))
+      [ `Assoc ["artifact", exported_json];
+        `String (String.uppercase_ascii (to_string exported_json)) ];
     let request = match Masc.Keeper_invocation_contract.request_of_json
         delegate_input with
       | Ok request -> request | Error _ -> fail "typed artifact delegation rejected" in

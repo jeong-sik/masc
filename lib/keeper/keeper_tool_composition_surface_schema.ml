@@ -127,7 +127,6 @@ type 'evidence schema_tool_origin =
   | Declared_composition of 'evidence
   | Async_status
   | Async_cancel
-  | Transient_prepare
   | Transient_run
 
 let composition_schema_tool (entry : Catalog.entry) =
@@ -145,7 +144,7 @@ let schema_tool_origins ~include_drafts ~skill_compositions =
     if include_drafts || Catalog.requires_async_controls (List.map fst skill_compositions)
     then [Async_status; Async_cancel]
     else [] in
-  let drafts = if include_drafts then [Transient_prepare; Transient_run] else [] in
+  let drafts = if include_drafts then [Transient_run] else [] in
   compositions @ controls @ drafts
 ;;
 
@@ -156,7 +155,6 @@ let schema_tool_name_rows ?(include_drafts = true) ?(skill_compositions = []) ()
            Declared_composition evidence, Catalog.tool_name entry
        | Async_status -> Async_status, Catalog.status_tool_name
        | Async_cancel -> Async_cancel, Catalog.cancel_tool_name
-       | Transient_prepare -> Transient_prepare, Catalog.prepare_tool_name
        | Transient_run -> Transient_run, Catalog.run_tool_name)
 ;;
 
@@ -175,11 +173,6 @@ let schema_tool_rows ?(include_drafts = true) ?(skill_compositions = []) () =
              ~name:Catalog.cancel_tool_name
              ~description:Tool_schemas_composition_control.cancel_schema.description
              ~input_schema:Tool_schemas_composition_control.cancel_schema.input_schema
-       | Transient_prepare ->
-           Transient_prepare, schema_tool
-             ~name:Catalog.prepare_tool_name
-             ~description:Keeper_composition_draft.prepare_schema.description
-             ~input_schema:Keeper_composition_draft.prepare_schema.input_schema
        | Transient_run ->
            Transient_run, schema_tool
              ~name:Catalog.run_tool_name

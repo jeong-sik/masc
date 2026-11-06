@@ -31,7 +31,6 @@ type error =
   | Nested_rejected of Nested.error
   | Nested_publication_requires_catalog
 
-let prepare_tool_name = Catalog.prepare_tool_name
 let run_tool_name = Catalog.run_tool_name
 open Result.Syntax
 
@@ -82,7 +81,7 @@ let error_to_json = function
   | Skill_not_prepared -> `Assoc [ "kind", `String "skill_not_prepared" ]
   | Different_package -> `Assoc [ "kind", `String "different_package" ]
   | Different_keeper -> `Assoc [ "kind", `String "different_keeper" ]
-  | Capability_changed -> `Assoc [ "kind", `String "capability_changed"; "detail", `String "Prepare again against the current frozen tool and Skill surface." ]
+  | Capability_changed -> `Assoc [ "kind", `String "capability_changed"; "detail", `String "Run the recipe again against the current frozen tool and Skill surface." ]
 ;;
 
 (* The canonical plan grammar is a recursive JSON Schema: [$defs.template]
@@ -124,36 +123,46 @@ let rec without_recursive_refs = function
   | other -> other
 ;;
 
-let prepare_schema : Masc_domain.tool_schema =
-  let input_schema =
-    match Nested.input_schema |> without_recursive_refs with
-    | `Assoc fields ->
-      let properties = match List.assoc_opt "properties" fields with
-        | Some (`Assoc properties) -> properties | _ -> invalid_arg "canonical plan schema has no properties" in
-      let required = match List.assoc_opt "required" fields with
-        | Some (`List required) -> required | _ -> invalid_arg "canonical plan schema has no required fields" in
-      `Assoc (("properties", `Assoc
-          (("execution", `Assoc [ "type", `String "string"; "enum", `List [ `String "inline"; `String "async" ] ])
-           :: ("skill", (match Tool_schemas_composition_control.prepare_schema.input_schema with
-               | `Assoc schema_fields -> (match List.assoc_opt "properties" schema_fields with
-                   | Some (`Assoc schema_properties) -> List.assoc "skill" schema_properties
-                   | _ -> invalid_arg "prepare schema has no properties")
-               | _ -> invalid_arg "prepare schema is not an object")) :: properties))
-        :: ("required", `List (`String "execution" :: required))
-        :: List.remove_assoc "required" (List.remove_assoc "properties" fields))
-    | _ -> invalid_arg "canonical plan request schema is not an object"
-  in
-  { Tool_schemas_composition_control.prepare_schema with input_schema }
+let object_properties ~what = function
+  | `Assoc fields ->
+    (match List.assoc_opt "properties" fields with
+     | Some (`Assoc properties) -> properties
+     | _ -> invalid_arg (what ^ " has no properties"))
+  | _ -> invalid_arg (what ^ " is not an object")
+;;
+
+(* A recipe is the canonical plan grammar plus the execution mode bound into
+   its draft and the optional Skill identity that keeper_composition_run.toml
+   declares under [recipe]. *)
+let recipe_input_schema : Yojson.Safe.t =
+  let declared_recipe =
+    match List.assoc_opt "recipe"
+            (object_properties ~what:"run schema" Tool_schemas_composition_control.run_schema.input_schema) with
+    | Some recipe -> recipe
+    | None -> invalid_arg "run schema declares no recipe" in
+  let skill =
+    match List.assoc_opt "skill" (object_properties ~what:"run recipe schema" declared_recipe) with
+    | Some skill -> skill
+    | None -> invalid_arg "run recipe schema declares no skill" in
+  match Nested.input_schema |> without_recursive_refs with
+  | `Assoc fields ->
+    let properties = object_properties ~what:"canonical plan schema" (`Assoc fields) in
+    let required = match List.assoc_opt "required" fields with
+      | Some (`List required) -> required | _ -> invalid_arg "canonical plan schema has no required fields" in
+    `Assoc (("properties", `Assoc
+        (("execution", `Assoc [ "type", `String "string"; "enum", `List [ `String "inline"; `String "async" ] ])
+         :: ("skill", skill) :: properties))
+      :: ("required", `List (`String "execution" :: required))
+      :: List.remove_assoc "required" (List.remove_assoc "properties" fields))
+  | _ -> invalid_arg "canonical plan request schema is not an object"
 ;;
 
 let run_schema : Masc_domain.tool_schema =
   let schema = Tool_schemas_composition_control.run_schema in
   let input_schema = match schema.input_schema with
     | `Assoc fields ->
-      let properties = match List.assoc_opt "properties" fields with
-        | Some (`Assoc properties) -> properties
-        | _ -> invalid_arg "run schema has no properties" in
-      `Assoc (("properties", `Assoc (("recipe", prepare_schema.input_schema)
+      let properties = object_properties ~what:"run schema" schema.input_schema in
+      `Assoc (("properties", `Assoc (("recipe", recipe_input_schema)
         :: List.remove_assoc "recipe" properties)) :: List.remove_assoc "properties" fields)
     | _ -> invalid_arg "run schema is not an object" in
   { schema with input_schema }
@@ -362,21 +371,21 @@ let load ~base_path ~capability_surface ~keeper_name ~sha256 =
   load_with ~compile_plan:validate_plan ~admission_check:Exact_surface ~base_path ~capability_surface ~keeper_name ~sha256
 ;;
 
-let validate_request (schema : Masc_domain.tool_schema) input =
+let validate_request ~input_schema input =
   let* () = match input with
     | `Assoc fields ->
       let names = List.map fst fields in
       if List.length names = List.length (List.sort_uniq String.compare names) then Ok ()
       else Error (Malformed_draft "duplicate request field")
     | _ -> Ok () in
-  match Tool_input_contract.check_arguments ~contract:Tool_input_contract.Host_tool ~schema:(Some schema.input_schema)
-      ~name:schema.name ~args:input with
+  match Tool_input_contract.check_arguments ~contract:Tool_input_contract.Host_tool ~schema:(Some input_schema)
+      ~name:run_tool_name ~args:input with
   | Ok _ -> Ok ()
   | Error rejected -> Error (Malformed_draft rejected.message)
 ;;
 
-let prepare_request ~base_path ~capability_surface ~keeper_name input =
-  let* () = validate_request prepare_schema input in
+let prepare_recipe ~base_path ~capability_surface ~keeper_name input =
+  let* () = validate_request ~input_schema:recipe_input_schema input in
   match input with
   | `Assoc fields ->
     let* execution = match List.assoc_opt "execution" fields with
@@ -385,16 +394,16 @@ let prepare_request ~base_path ~capability_surface ~keeper_name input =
       | Some _ | None -> Error (Malformed_draft "execution must be inline or async") in
     prepare ~base_path ~capability_surface ~keeper_name ~execution
       (`Assoc (List.remove_assoc "execution" fields))
-  | _ -> Error (Malformed_draft "expected prepare object")
+  | _ -> Error (Malformed_draft "expected recipe object")
 ;;
 
 let resolve_run_request ~base_path ~capability_surface ~keeper_name input =
-  let* () = validate_request run_schema input in
+  let* () = validate_request ~input_schema:run_schema.input_schema input in
   match input with
   | `Assoc fields ->
     (match List.assoc_opt "sha256" fields, List.assoc_opt "recipe" fields with
      | Some (`String sha256), None -> load ~base_path ~capability_surface ~keeper_name ~sha256
-     | None, Some recipe -> prepare_request ~base_path ~capability_surface ~keeper_name recipe
+     | None, Some recipe -> prepare_recipe ~base_path ~capability_surface ~keeper_name recipe
      | Some _, Some _ | None, None | Some _, None ->
        Error (Malformed_draft "expected exactly one of draft sha256 or recipe"))
   | _ -> Error (Malformed_draft "expected run object")
@@ -454,28 +463,6 @@ let load_authored ~base_path ~capability_surface ~keeper_name ~package_id ~sha25
   | Some source when String.equal (Skill_reference.package_id_to_string package_id)
         (Skill_reference.package_id_to_string source.package_id) -> Ok source
   | Some _ -> Error Different_package
-;;
-
-let preview draft =
-  let layers = Plan.dependency_layers draft.plan |> List.map (fun nodes ->
-    `List (List.map (fun (node : Plan.node) -> `String (Plan.Node_id.to_string node.id)) nodes)) in
-  let skill = match draft.authored_source with
-    | None -> `Null
-    | Some source -> `Assoc
-        [ "package_id", `String (Skill_reference.package_id_to_string source.package_id)
-        ; "source", `Assoc
-            [ "sha256", `String Agent_core_sha256.(digest_string source.source_text |> to_hex)
-            ; "bytes", `Int (String.length source.source_text); "filename", `String "SKILL.md" ] ] in
-  `Assoc [ "draft", Tool_output.normalized_artifact_ref_to_json draft.reference
-         ; "nested_calls", Nested.calls_to_json draft.compiled
-         ; "skill", skill
-         ; "execution", `String (Catalog.execution_mode_to_string draft.execution)
-         ; "branch_failure_policy", `String (Plan.branch_failure_policy_to_string (Plan.branch_failure_policy draft.plan))
-         ; "dependency_layers", `List layers
-         ; "scheduling", `String "The executor dispatches ready nodes dynamically; these are dependency and descriptor groups, not fixed start times."
-         ; "exports", `List (List.map (fun (export : Plan.export) ->
-             `Assoc [ "name", `String export.name; "node", `String (Plan.Node_id.to_string export.node_id)
-                    ; "pointer", `String (Plan.Json_pointer.to_string export.pointer) ]) (Plan.exports draft.plan)) ]
 ;;
 
 let record_invocation ~base_path ?nested_activation ~composition_run_id ~invocation draft =

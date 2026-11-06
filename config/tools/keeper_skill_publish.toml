@@ -13,7 +13,7 @@ recording. Use the publication status and reference for the write outcome; do no
 republish solely to repair an audit. Before publishing, recheck the evidence for each reusable \
 claim and preserve its applicability and limits. Keep case-specific instructions \
 scoped to their case; a Skill does not override current authoritative state or \
-later explicit instructions. Pass source_text or draft_sha256 from a prepare \
+later explicit instructions. Pass source_text or draft_sha256 from a run \
 that froze skill metadata; the latter publishes those exact bytes after owner \
 and frozen-contract revalidation. Where completion authority is relevant, distinguish \
 Task verdicts from Goal human confirmation and allow explicitly reopened work. \

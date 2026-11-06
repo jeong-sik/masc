@@ -952,7 +952,7 @@ let test_draft_rejects_effects_and_bad_fixed_inputs () =
   | Error _ | Ok _ -> fail "invalid fixed input survived prepare"
 ;;
 
-let test_public_draft_run_preserves_one_execution_identity ?(observe = true) ?(single_call=false) () =
+let test_public_draft_run_preserves_one_execution_identity ?(observe = true) () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   with_draft_base @@ fun base_path ->
@@ -1014,32 +1014,13 @@ let test_public_draft_run_preserves_one_execution_identity ?(observe = true) ?(s
        | Tool_output.Invalid_artifact_manifest { detail } -> fail detail)
     | Ok None -> fail "advertised public draft artifact is absent"
     | Error error -> fail (Tool_blob_store.fetch_error_to_string error) in
-  let prepared = invoke "prepare-fixture" Draft.prepare_tool_name
-      (match draft_request with
-       | `Assoc fields -> `Assoc (("execution", `String "inline") :: fields)
-       | _ -> fail "fixture plan is not an object") in
   let open Yojson.Safe.Util in
-  let preview_node = match prepared |> member "schedule_preview" |> to_list with
-    | [ `List [ node ] ] -> node
-    | _ -> fail "public prepare lost its single-node schedule preview" in
-  check string "public preview keeps the admitted node" "lane"
-    (preview_node |> member "node_id" |> to_string);
-  let preview_schedule = preview_node |> member "schedule" in
-  check int "public preview keeps the canonical planned index" 0
-    (preview_schedule |> member "planned_index" |> to_int);
-  check int "public preview keeps the canonical batch index" 0
-    (preview_schedule |> member "batch_index" |> to_int);
-  check int "public preview keeps the descriptor batch size" 1
-    (preview_schedule |> member "batch_size" |> to_int);
-  check string "public preview keeps concurrent descriptor execution" "concurrent"
-    (preview_schedule |> member "execution_mode" |> to_string);
-  let draft_reference = prepared |> member "draft" |> decode_reference in
   let run_parent = "public-draft-run" in
   let result = invoke run_parent Draft.run_tool_name
-      (if single_call then `Assoc ["recipe",(match draft_request with
+      (`Assoc ["recipe",(match draft_request with
          | `Assoc fields -> `Assoc (("execution",`String "inline") :: fields)
-         | _ -> fail "fixture plan object")]
-       else `Assoc [ "sha256", `String draft_reference.sha256 ]) in
+         | _ -> fail "fixture plan object")]) in
+  let draft_reference = result |> member "draft" |> decode_reference in
   let run_reference = result |> member "run_artifact" |> decode_reference in
   let binding = document run_reference in
   let run_id = binding |> member "composition_run_id" |> to_string in
@@ -1248,9 +1229,9 @@ let test_causal_forks_keep_invocation_owned_history () =
 
 (* A provider that refuses recursive JSON Schemas rejects the whole request,
    not only a call to the tool that carries one (Muse: 400 "Recursive JSON
-   schemas ..."). The advertised prepare schema therefore holds no [$ref] and no
+   schemas ..."). The advertised recipe schema therefore holds no [$ref] and no
    [$defs] at any depth; the grammar is still checked by [plan_of_json]. *)
-let test_prepare_schema_has_no_recursive_references () =
+let test_recipe_schema_has_no_recursive_references () =
   let rec has_reference_keyword = function
     | `Assoc fields ->
       List.exists
@@ -1260,15 +1241,19 @@ let test_prepare_schema_has_no_recursive_references () =
     | `List items -> List.exists has_reference_keyword items
     | _ -> false
   in
-  let schema = Draft.prepare_schema.Masc_domain.input_schema in
-  Alcotest.(check bool)
-    "no $ref or $defs in the advertised prepare schema"
-    false
-    (has_reference_keyword schema);
   let member key = function
     | `Assoc fields -> List.assoc_opt key fields
     | _ -> None
   in
+  let schema =
+    match Option.bind (member "properties" Draft.run_schema.Masc_domain.input_schema) (member "recipe") with
+    | Some recipe -> recipe
+    | None -> Alcotest.fail "run schema has no recipe"
+  in
+  Alcotest.(check bool)
+    "no $ref or $defs in the advertised recipe schema"
+    false
+    (has_reference_keyword schema);
   (* Node fields are defined once on the shared node object; each [oneOf] row
      only names the fields it requires and forbids (#43452). *)
   let items =
@@ -1276,12 +1261,12 @@ let test_prepare_schema_has_no_recursive_references () =
     |> fun nodes -> Option.bind nodes (member "items")
     |> function
     | Some items -> items
-    | None -> Alcotest.fail "prepare schema has no node items"
+    | None -> Alcotest.fail "recipe schema has no node items"
   in
   let shared_properties =
     match member "properties" items with
     | Some properties -> properties
-    | None -> Alcotest.fail "prepare schema node items have no shared properties"
+    | None -> Alcotest.fail "recipe schema node items have no shared properties"
   in
   List.iter (fun field ->
     let field_type = Option.bind (member field shared_properties) (member "type") in
@@ -1294,7 +1279,7 @@ let test_prepare_schema_has_no_recursive_references () =
   let alternatives =
     match member "oneOf" items with
     | Some (`List (_ :: _ as alternatives)) -> alternatives
-    | _ -> Alcotest.fail "prepare schema has no node alternatives"
+    | _ -> Alcotest.fail "recipe schema has no node alternatives"
   in
   List.iteri (fun index alternative ->
     match member "required" alternative with
@@ -1308,8 +1293,8 @@ let test_prepare_schema_has_no_recursive_references () =
    schemas ..."), so the schemas a request advertises must hold no [$ref] and
    no [$defs] at any depth. This sweep over-approximates that wire set:
    [all_descriptors ()] unions public and private descriptors — a superset of
-   what one provider request carries — and the prepare/run projections ride
-   along (#43150 follow-up, task-2359). *)
+   what one provider request carries — and the run projection rides along
+   (#43150 follow-up, task-2359). *)
 let test_every_advertised_schema_holds_no_recursive_references () =
   let rec has_reference_keyword = function
     | `Assoc fields ->
@@ -1337,8 +1322,7 @@ let test_every_advertised_schema_holds_no_recursive_references () =
          (Printf.sprintf "composition projection %s holds no $ref or $defs" name)
          false
          (has_reference_keyword schema))
-    [ Draft.prepare_tool_name, Draft.prepare_schema.Masc_domain.input_schema
-    ; Draft.run_tool_name, Draft.run_schema.Masc_domain.input_schema ];
+    [ Draft.run_tool_name, Draft.run_schema.Masc_domain.input_schema ];
   (* Positive control: the detector must flag a deliberately recursive
      fixture, so an empty offender list can only mean a clean catalog. *)
   let recursive_fixture =
@@ -1469,7 +1453,7 @@ let () =
         ; test_case "public draft run keeps one execution identity and readable references" `Quick
             (test_public_draft_run_preserves_one_execution_identity ~observe:true)
         ; test_case "public draft run records its summary without optional turn context" `Quick
-            (test_public_draft_run_preserves_one_execution_identity ~observe:false ~single_call:true)
+            (test_public_draft_run_preserves_one_execution_identity ~observe:false)
         ; test_case "draft admits inline owned file write" `Quick test_draft_admits_inline_owned_file_write
         ; test_case "draft rejects effects and bad fixed inputs" `Quick test_draft_rejects_effects_and_bad_fixed_inputs
         ; test_case "export contract survives binding and durable encoding" `Quick test_export_contract_survives_public_authoring_and_binding
@@ -1548,9 +1532,9 @@ let () =
             `Quick
             test_failure_payload_keeps_cause_under_truncation
         ; test_case
-            "prepare schema advertises no recursive references"
+            "recipe schema advertises no recursive references"
             `Quick
-            test_prepare_schema_has_no_recursive_references
+            test_recipe_schema_has_no_recursive_references
         ; test_case
             "every advertised schema holds no recursive references"
             `Quick

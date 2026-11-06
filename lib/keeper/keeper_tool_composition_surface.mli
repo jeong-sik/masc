@@ -17,7 +17,6 @@ type 'evidence schema_tool_origin =
   | Declared_composition of 'evidence
   | Async_status
   | Async_cancel
-  | Transient_prepare
   | Transient_run
 
 type instruction_skill =

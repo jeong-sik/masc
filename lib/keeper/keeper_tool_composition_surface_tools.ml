@@ -518,14 +518,6 @@ let make_tools_with_authority
         , Tool_loading_declarations.required schema.name
         , model_projection)
       in
-      let prepare = make Draft.prepare_schema ~artifact_projection:Tool_output.Inline_with_reference
-        ~call_effect:(fun _ -> Agent_core.Tool.Read_only)
-        (fun ~start_time _execution_env input ->
-          match Draft.prepare_request ~base_path:config.base_path ~capability_surface ~keeper_name:meta.name input with
-          | Error error -> rejection ~tool_name:Draft.prepare_tool_name ~start_time error
-          | Ok draft ->
-            Tool_result.make_ok ~tool_name:Draft.prepare_tool_name ~start_time ~data:(Keeper_composition_draft_preview.preview draft) ()
-            |> Tool_result.with_retained_artifacts [ Draft.reference draft ]) in
       let run = make Draft.run_schema ~artifact_projection:Tool_output.Inline_with_structured_diagnostic
         ~call_effect:(fun _ -> Agent_core.Tool.Effect_possible)
         (fun ~start_time execution_env input ->
@@ -677,7 +669,7 @@ let make_tools_with_authority
                     | Error error -> bind_result ~composition_run_id ~run_reference (journal_rejection ~start_time error)
                     | Ok journal -> execute_run ~journal ~nested_activation ~composition_run_id ~run_reference ~parent_invocation ~turn_context ()))
       in
-      [ prepare; run ]
+      [ run ]
   in
   let composition_tools = composition_tools @ draft_tools in
   (* A keeper with no instruction skills gets no tool: an empty [Available]

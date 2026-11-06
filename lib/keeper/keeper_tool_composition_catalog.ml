@@ -1,7 +1,6 @@
 module Toml = Keeper_toml_loader
 module Plan = Keeper_tool_plan
 
-let prepare_tool_name = "keeper_composition_prepare"
 let run_tool_name = "keeper_composition_run"
 
 type expected_value =

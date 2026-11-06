@@ -1466,7 +1466,7 @@ let test_bundle_effect_contracts () =
 
 (* A provider that refuses recursive JSON Schemas rejects the whole request,
    not only a call to the tool that carries one (Muse: 400 "Recursive JSON
-   schemas are not currently supported"). keeper_composition_prepare was
+   schemas are not currently supported"). The composition recipe schema was
    advertised with a recursive [$defs] and [$ref] (#43137), and every Muse
    keeper that loaded that schema through its own tool search then failed each
    turn until the build with #43150 was running: one keeper made no successful
@@ -1496,10 +1496,10 @@ let rec has_schema_reference = function
 let test_no_tool_advertises_a_schema_reference () =
   with_bundle_tools
   @@ fun _config _meta _snapshot _plan_index _surface tools ->
-  check bool "the prepare control is in the bundle the gate walks" true
+  check bool "the run control is in the bundle the gate walks" true
     (List.exists
        (fun (tool : Agent_core.Tool.t) ->
-          String.equal tool.schema.name Keeper_composition_draft.prepare_tool_name)
+          String.equal tool.schema.name Keeper_composition_draft.run_tool_name)
        tools);
   List.iter
     (fun (tool : Agent_core.Tool.t) ->

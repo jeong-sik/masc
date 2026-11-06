@@ -206,6 +206,8 @@ type owner_family =
 
 원본이 없는 ID 는 `Unowned` 계약상 다시 허가되지 않는다. 그래서 두 단계로 지울 까닭이 없다. 이 pass 도 settlement barrier 와 workspace process lease 안에서 돈다.
 
+barrier 는 2·3 동안만 잡는다. 1 은 실행 증명을 통째로 읽어서 오래 걸린다(아래 13초). 그동안 settle 을 막을 까닭이 없다. 1 다음에 settle 된 원본은 2 에서 안 보인다. 그 원본의 ID 도 다시 허가되지 않으니 기록을 지워도 된다.
+
 실행 증명은 내용을 읽어야 요청 ID 를 안다. 11-06 운영 workspace 에서 Librarian·Curator 증명 7,000개(2.67GB)를 Python 으로 읽는 데 13초가 걸렸다. 같은 주 시작 로그에서 checkpoint sweep 은 p50 1.36초, 본문 inventory 는 p50 1.96초다(11-01~11-06, 61·48번). 그래서 이 절의 세기는 시작 단계에 넣지 않는다. 시작 정비(`Server_runtime_startup_maintenance.start_maintenance`)로 worker domain 에서 돌고, 끝나면 로그 한 줄을 남긴다. 세기는 아무것도 지우지 않아서 lease 와 barrier 를 잡지 않는다. L3 의 지우기는 이 절의 규칙대로 barrier 안에서 돈다.
 
 권한 검사와 같은 결정을 쓴다. `Server_workspace_memory_addon_validation.original_required` 와 `Server_librarian_addon_validation.original_required` 가 그 함수다. `authorize` 의 "원본 없음" 갈래가 이 함수를 부른다. Librarian package 는 namespace 밖 요청을 바로 `Unowned` 로 끝내고, namespace 안 요청도 원본이 없으면 `Unowned` 로 끝낸다. 그래서 package 하나로 답할 수 있다. 다른 package 의 namespace 요청은 세지 않는다. 그 기록은 지우지 않는 쪽으로 남는다.

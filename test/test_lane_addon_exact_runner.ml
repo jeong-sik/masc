@@ -1122,43 +1122,60 @@ let test_original_undispatched_cli_visit_order () =
     (Result.is_error (Receipt.of_json reversed))
 
 (* RFC-0498 §4.4: once the Curator original is settled, nothing owns the
-   Exact record and execution link its run left. *)
-module Census = Server_unowned_exact_census
-let census ~store package =
+   Exact record and execution link its run left. The sweep deletes them, and
+   a rerun gets the same refusal before and after. *)
+module Sweep = Server_unowned_exact_sweep
+let sweep ~store package =
   let declaration : Lane_addon_config.declaration =
-    { id=declaration_id; enabled=true; run_id="census"; manifest_path="/nonexistent/lane.toml";
+    { id=declaration_id; enabled=true; run_id="sweep"; manifest_path="/nonexistent/lane.toml";
       package; binding=`Null; revision="1"; source_revision="1"; source_path="/nonexistent/quiz.toml" } in
-  Census.run ~store ~declarations:[declaration]
+  Sweep.run ~store ~declarations:[declaration]
 
-let test_a_settled_curator_original_owns_no_exact_record () =
+let test_a_settled_curator_original_leaves_its_exact_files_to_the_sweep () =
   with_case (fun ~sw ~net ~clock ~base_path ~store ->
-    let counted package = match census ~store package with
-      | Ok report -> report | Error error -> fail (Census.error_to_string error) in
+    let swept package = match sweep ~store package with
+      | Ok report -> report | Error error -> fail (Sweep.error_to_string error) in
+    let files directory=
+      Sys.readdir (Filename.concat (Lane_addon_store.root store) directory) |> Array.length in
+    let records=Lane_addon_store.exact_request_directory ~declaration_id in
+    let links=Exact.proof_directory ~declaration_id in
     let capture,good,_=classification_capture ~base_path in
     retain_capture ~store capture;
     let request=get (Curator.request capture) in
     let server=F.start_server ~sw ~net ~clock (F.Reply (F.openai_response good)) in
     publish ~lane_id:"quiz/classification" ~base_path [{F.id="original-facts";base_url=server.base_url}];
     if answered_by (get (run_curator ~base_path ~store request)) = None then fail "the original must answer";
-    let live=counted curator_package in
-    check (pair int int) "the run left one Exact record and one execution link" (1,1) (live.exact_records,live.proofs);
-    check (pair int int) "the live original owns both" (0,0) (live.unowned_exact_records,live.unowned_proofs);
+    let live=swept curator_package in
+    check (pair int int) "the live original keeps its Exact record and execution link" (1,1)
+      (live.kept_exact_records,live.kept_proofs);
+    check (pair int int) "a live original loses nothing" (0,0) (live.removed_exact_records,live.removed_proofs);
     (match Owner.load ~store ~scope:Capture.scope ~request_id:request.request_id
            |> Result.map_error Owner.error_to_string |> get with
      | None -> fail "original host capture disappeared"
      | Some retained ->
        (match Owner.settle ~store ~date:"2026-11-06" (Owner.listed retained) with
         | Ok () -> () | Error error -> fail (Owner.settle_error_to_string error)));
-    let settled=counted curator_package in
-    check (pair int int) "the settled original owns neither" (1,1) (settled.unowned_exact_records,settled.unowned_proofs);
-    check int "a package that needs no original is not counted" 0 (counted package).exact_records;
-    let links=Filename.concat (Lane_addon_store.root store) (Exact.proof_directory ~declaration_id) in
-    let link=match Sys.readdir links with [|link|] -> link | _ -> fail "one execution link expected" in
-    let bytes=In_channel.with_open_bin (Filename.concat links link) In_channel.input_all in
-    Out_channel.with_open_bin (Filename.concat links (String.make 64 '0' ^ ".json"))
-      (fun channel -> Out_channel.output_string channel bytes);
-    check bool "a link under another request's name refuses the count" true
-      (Result.is_error (census ~store curator_package)))
+    let not_allowed () = match run_curator ~base_path ~store request with
+      | Ok (Exact.Final (Exact.Not_allowed _)) -> true
+      | Ok (Exact.Final _ | Exact.Not_final _) | Error _ -> false in
+    check bool "a rerun of the settled request is refused" true (not_allowed ());
+    check int "a package that needs no original is not swept" 0 (swept package).declarations;
+    let link_dir=Filename.concat (Lane_addon_store.root store) links in
+    let link=match Sys.readdir link_dir with [|link|] -> link | _ -> fail "one execution link expected" in
+    let misnamed=Filename.concat link_dir (String.make 64 '0' ^ ".json") in
+    Out_channel.with_open_bin misnamed (fun channel ->
+      Out_channel.output_string channel
+        (In_channel.with_open_bin (Filename.concat link_dir link) In_channel.input_all));
+    check bool "a link under another request's name refuses the sweep" true
+      (Result.is_error (sweep ~store curator_package));
+    check (pair int int) "a refused sweep deletes nothing" (1,2) (files records,files links);
+    Sys.remove misnamed;
+    let settled=swept curator_package in
+    check (pair int int) "the sweep deletes the unowned link and record" (1,1)
+      (settled.removed_proofs,settled.removed_exact_records);
+    check (pair int int) "no Exact file is left" (0,0) (files records,files links);
+    check bool "a rerun after the sweep is still refused" true (not_allowed ());
+    check int "no rerun reached the provider" 1 (F.post_count server))
 
 let () =
   run "lane add-on exact runner"
@@ -1216,5 +1233,5 @@ let () =
         ; test_case "real HTTP admission preserves trusted Standard" `Quick
             (test_http_flow_preserves_host_admission_class Agent_core.Llm_provider.Admission_class.Standard)
         ; test_case "worker names cannot select Background" `Quick test_worker_names_do_not_grant_background
-        ; test_case "a settled Curator original owns no Exact record" `Quick
-            test_a_settled_curator_original_owns_no_exact_record ] ) ]
+        ; test_case "a settled Curator original leaves its Exact files to the sweep" `Quick
+            test_a_settled_curator_original_leaves_its_exact_files_to_the_sweep ] ) ]

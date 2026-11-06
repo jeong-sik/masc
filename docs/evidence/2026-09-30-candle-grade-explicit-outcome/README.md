@@ -6,7 +6,7 @@ overall payout readiness. Acceptance thresholds remain unset.
 
 The current PR preserves the previous runtime Grade prompt. The revised
 evaluation-only candidate is in
-[`docs/testing/candle-grade-explicit-outcome-candidate`](../../testing/candle-grade-explicit-outcome-candidate/candle_appraiser_grade.md)
+[`docs/evidence/candle-grade-explicit-outcome-candidate`](../candle-grade-explicit-outcome-candidate/candle_appraiser_grade.md)
 and explicitly allows the inherent difficulty of one promised capability to
 raise its grade. That revised candidate has not been measured. The frozen
 prompts and measurements below describe the earlier candidate only, and do not

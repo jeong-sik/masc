@@ -370,6 +370,124 @@ let test_provider_context_retention () =
       Anthropic, Glm, true, true, false]
 ;;
 
+(* A Keeper hands Agent Core its request view: the carried history after
+   [Complete_common.transmitted_history], which on a turn-scoped Anthropic lane
+   also runs the context lowering. The carrier collection retains from that
+   view becomes history, so it keeps the User role it was created with. The
+   next request still opens with the bytes the signed thinking was bound to,
+   and that thinking is replayed. *)
+let test_turn_scoped_lane_retains_the_canonical_carrier () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let model = "claude-sonnet-5-5" in
+  let config =
+    Llm_provider.Provider_config.make ~kind:Anthropic ~model_id:model
+      ~base_url:"https://api.anthropic.com" ~max_tokens:4096 ~system_prompt:"keeper system"
+      ~model_capabilities_override:
+        { (Llm_provider.Capabilities.capabilities_of_kind Llm_provider.Provider_config.Anthropic)
+          with
+          Llm_provider.Capabilities.reasoning_replay_override =
+            Llm_provider.Capabilities.Force_turn_scoped_system_context_preserve_always }
+      ()
+  in
+  let captured = ref [] in
+  let signed_response (request : Llm_provider.Llm_transport.completion_request) =
+    captured := request :: !captured;
+    let content =
+      [ Llm_provider.Types.Thinking { signature = Some "fixture-signature"; content = "plan" }
+      ; Llm_provider.Types.Text "done" ]
+    in
+    let source =
+      Llm_provider.Reasoning_dialect.reasoning_source_for_provider_config request.config
+      |> Result.get_ok
+    in
+    let reasoning_prefix =
+      Llm_provider.Backend_anthropic.transmitted_reasoning_prefix ~config:request.config
+        ~messages:request.messages ~tools:request.tools ~response_content:content ()
+    in
+    Ok { (pipeline_response Types.EndTurn) with
+         content
+       ; telemetry = Some { Types.default_inference_telemetry with
+                            reasoning_source = Some source; reasoning_prefix } }
+  in
+  let transport =
+    Llm_provider.Llm_transport.custom
+      { Llm_provider.Llm_transport.complete_sync = (fun request ->
+          { Llm_provider.Llm_transport.response = signed_response request; latency_ms = Some 0 })
+      ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ request -> signed_response request) }
+  in
+  let hooks =
+    { Hooks.empty with before_turn_params = Some (function
+        | Hooks.BeforeTurnParams { turn; current_params; _ } ->
+          Hooks.AdjustParams
+            { current_params with
+              extra_system_context = Some (Printf.sprintf "world state %d" turn) }
+        | Hooks.BeforeTurn _ | Hooks.AfterTurn _ | Hooks.PreToolUse _ | Hooks.PostToolUse _
+        | Hooks.PostToolUseFailure _ | Hooks.OnStop _ | Hooks.OnError _ | Hooks.OnToolError _ ->
+          Hooks.Continue) }
+  in
+  let media_store = Agent_core.History.Memory_store.create () in
+  let request_view (messages : Types.message list) =
+    match Llm_provider.Complete_common.transmitted_history ~config messages with
+    | Error error ->
+      Error (Error.Internal (Llm_provider.Reasoning_history_projection.error_to_string error))
+    | Ok transmitted ->
+      Agent_core.History.to_wire_messages media_store transmitted
+      |> Result.map_error (fun error -> Error.Media error)
+  in
+  let agent =
+    Internal_agent.create ~media_store ~net:env#net ~model_input_projection:request_view
+      ~config:{ (Types.default_config ~model) with max_tokens = Some 64 }
+      ~options:{ Internal_agent.default_options with
+                 transport = Some transport; hooks; provider_config = Some config }
+      ()
+  in
+  let run () =
+    match run_pipeline_turn ~sw ~api_strategy:Internal_pipeline.Sync agent with
+    | Ok _ -> ()
+    | Error error -> Alcotest.fail (Error.to_string error)
+  in
+  Internal_agent.set_state agent
+    { (Internal_agent.state agent) with messages = [ Types.user_msg "first" ] };
+  run ();
+  (match
+     List.filter (fun (message : Types.message) ->
+       message.origin = Types.Historical_system_context)
+       (Internal_agent.state agent).messages
+   with
+   | [ carrier ] ->
+     Alcotest.(check bool) "the retained carrier keeps its canonical User role" true
+       (carrier.role = Types.User);
+     Alcotest.(check string) "the retained carrier holds the transmitted text"
+       "[system context] world state 0" (Types.text_of_content carrier.content)
+   | carriers ->
+     Alcotest.failf "expected one retained carrier, found %d" (List.length carriers));
+  Internal_agent.set_state agent
+    { (Internal_agent.state agent) with
+      messages = (Internal_agent.state agent).messages @ [ Types.user_msg "next" ] };
+  run ();
+  match !captured with
+  | [ second; first ] ->
+    let wire (request : Llm_provider.Llm_transport.completion_request) =
+      Llm_provider.Backend_anthropic.build_request ~config:request.config
+        ~messages:request.messages ~tools:request.tools ()
+      |> Yojson.Safe.from_string |> Yojson.Safe.Util.member "messages"
+      |> Yojson.Safe.Util.to_list |> List.map Yojson.Safe.to_string
+    in
+    Alcotest.(check (list string)) "the next request opens with the first request's bytes"
+      (wire first) (List.take (List.length first.messages) (wire second));
+    (match
+       Llm_provider.Backend_anthropic.retained_prefix_reasoning_indices ~config:second.config
+         ~tools:second.tools second.messages
+     with
+     | Ok (Some retained) ->
+       Alcotest.(check (list int)) "the first turn's signed thinking is replayed" [ 2 ] retained
+     | Ok None -> Alcotest.fail "the Anthropic lane binds reasoning to its request"
+     | Error error ->
+       Alcotest.fail (Llm_provider.Reasoning_history_projection.error_to_string error))
+  | requests -> Alcotest.failf "expected two provider requests, found %d" (List.length requests)
+;;
+
 let make_pipeline_test_agent ~net ~response =
   let transport = transport_returning response in
   let options =
@@ -5441,6 +5559,10 @@ let () =
             "provider context retention survives sync, checkpoint and stream"
             `Quick
             test_provider_context_retention
+        ; Alcotest.test_case
+            "turn-scoped lane retains the canonical carrier"
+            `Quick
+            test_turn_scoped_lane_retains_the_canonical_carrier
         ; Alcotest.test_case
             "effective provider config drives lifecycle without inferred cost"
             `Quick

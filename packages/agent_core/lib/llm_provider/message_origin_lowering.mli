@@ -33,9 +33,10 @@ type 'source lowered =
 (** Lowering reads roles, origins and block kinds, never media. *)
 type t = Types.media_source lowered
 
-(** [Turn_scoped_system_context] preserves context positions/content, lowers
-    typed current/historical context to native System, and requires a text-only
-    group after a native user and before an assistant or request end.
+(** [Turn_scoped_system_context] keeps every message, including its role, and
+    requires typed current/historical context to form a text-only group after a
+    native user and before an assistant or request end. Such context is native
+    System through {!anthropic_message_header}, not through its stored role.
 
     Initial-system policies consolidate controls into a single initial frame. Fresh system context and
     agent instructions are active. Historical system context is quoted data;

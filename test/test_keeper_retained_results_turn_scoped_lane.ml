@@ -53,7 +53,7 @@ let message ?(origin = Llm_provider.Types.Conversation) role text : Agent_core.T
    turn's context carrier as the turn-scoped lane transmits it. *)
 let wake_request =
   [ message Agent_core.Types.User "autonomous turn"
-  ; message ~origin:Llm_provider.Types.System_context Agent_core.Types.System
+  ; message ~origin:Llm_provider.Types.System_context Agent_core.Types.User
       "[system context] world state"
   ]
 ;;
@@ -154,7 +154,7 @@ let test_signed_reasoning_survives_the_next_round () =
   let first_round = Outbox.place_carrier carrier wake_request in
   let call = signed_tool_call ~config first_round in
   let stored_context =
-    message ~origin:Llm_provider.Types.Historical_system_context Agent_core.Types.System
+    message ~origin:Llm_provider.Types.Historical_system_context Agent_core.Types.User
       "[system context] world state"
   in
   let result =
@@ -172,7 +172,7 @@ let test_signed_reasoning_survives_the_next_round () =
       ; stored_context
       ; call
       ; result
-      ; message ~origin:Llm_provider.Types.System_context Agent_core.Types.System
+      ; message ~origin:Llm_provider.Types.System_context Agent_core.Types.User
           "[system context] world state after the call"
       ]
   in

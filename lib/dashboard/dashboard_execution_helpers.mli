@@ -92,9 +92,6 @@ val dashboard_fixture_name : ?fixture:string -> unit -> string option
 val execution_fixture_name : ?fixture:string -> unit -> string option
 val cap_string_list : ?limit:int -> string list -> string list
 
-(** {1 Health predicates} *)
-
-
 (** {1 Handoff envelope} *)
 
 val handoff_json :

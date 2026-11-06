@@ -92,8 +92,6 @@ type persisted_mutation_error =
   | Validation_error of string
   | Persistence_error of string
 
-(** {1 Markdown parsing} *)
-
 (** {1 Markdown directory} *)
 
 val set_markdown_dir : string -> unit

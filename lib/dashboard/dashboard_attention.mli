@@ -20,8 +20,6 @@ type attention_item = {
   suggested_tool : string;
 }
 
-(** {1 Severity helpers} *)
-
 (** {1 Collection} *)
 
 (** [collect ~now ~operator_tasks snapshots] scans for stuck agents and

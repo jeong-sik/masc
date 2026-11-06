@@ -100,8 +100,6 @@ val agent_card_json :
     card served from [/.well-known/agent.json].  This route is public
     discovery metadata; mutable operations still require normal tool auth. *)
 
-(** {1 Runtime subsystem helpers} *)
-
 (** {1 Health endpoints} *)
 
 val health_path_diagnostics :

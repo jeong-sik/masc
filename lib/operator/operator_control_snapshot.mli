@@ -49,8 +49,6 @@ include module type of struct
 end
 
 
-(** {1 Snapshot cache} *)
-
 (** {1 Snapshot view variant} *)
 
 type snapshot_view =

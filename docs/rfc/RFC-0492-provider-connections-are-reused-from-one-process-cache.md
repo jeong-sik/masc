@@ -1,9 +1,9 @@
 ---
 rfc: "0492"
 title: "provider 연결은 프로세스 캐시 하나에서 다시 쓰고, 다시 쓸지는 닫힌 판정 하나로 정한다"
-status: Draft
+status: Implemented
 created: 2026-11-05
-updated: 2026-11-05
+updated: 2026-11-06
 author: claude
 supersedes: []
 superseded_by: null
@@ -26,6 +26,23 @@ Keeper 의 provider 요청은 매번 새 TCP·TLS 연결을 열고, 응답을 �
 1. 서버 프로세스가 연결 캐시 하나를 루트 switch 위에 만든다. provider transport 는 그 캐시를 쓴다(§3.1).
 2. 연결을 캐시에 돌려놓을지 닫을지는 닫힌 합타입 `Reuse_verdict.t` 하나로 정한다. 지금은 세 곳이 서로 다른 규칙으로 정한다(§3.2).
 3. 다시 쓴 연결이 응답 전에 끊겨도 http_client 안에서 다시 보내지 않는다. 그 실패는 타입으로 위에 올린다(§3.3).
+
+## Implementation summary
+
+2~5층이 2026-11-05 main 에 병합됐고, 2026-11-06 01:03Z 에 부팅한 서버에 들어갔다.
+
+- #48898(2층): `Http_client_cache` 의 `Reuse_verdict` 와 `release` 가 연결을 돌려놓을지 응답과 본문 상태로 한 번에 정한다.
+- #48919(3층): `Provider_connection_cache_ref` 를 설치하고 `Runtime_agent.transport_for_provider` 에 배선했다. `/health?full=1` 이 `provider_connection_cache` 를 낸다.
+- #48936(4층): 꺼낸 연결의 출처와 연결 합타입을 두고, 다시 쓴 연결이 닫힌 수를 `closed_after_reuse` 로 나눠 센다.
+- #48990(5층): TTL 을 단조 시계로 재고, 연결마다 owner switch 를 두고, 전송층 EOF 뒤 취소를 취소로 올린다.
+
+시험은 `packages/agent_core/test/test_http_client_cache.ml`, `test_http_client_addresses.ml` 과 `test/test_provider_connection_cache_wiring.ml` 에 있다.
+
+§6 의 배포 뒤 값은 2026-11-06 05:36Z 부팅부터 1시간 38분 동안의 `provider_connection_cache` 다.
+
+- 연결을 다시 쓴 것이 565번, 새로 연 것이 61번이다. 재사용은 90.3% 다.
+- 실패로 닫은 연결 6개(`request_failed`)는 모두 다시 쓴 연결이다. 다시 쓴 연결의 1.1%, 새 연결의 0% 다.
+- 새 연결이 61번뿐이라, 두 비율의 차이가 다시 쓴 연결만의 실패인지는 이 수치로 가리지 못한다. 표본이 쌓이면 같은 필드로 다시 견준다.
 
 ## 1. 측정
 

@@ -1,9 +1,9 @@
 ---
 rfc: "0488"
 title: "GLM 의 이전 reasoning 은 모델 행이 지우라고 선언할 때만 지운다"
-status: Draft
+status: Implemented
 created: 2026-11-05
-updated: 2026-11-05
+updated: 2026-11-06
 author: claude
 supersedes: []
 superseded_by: null
@@ -26,6 +26,23 @@ GLM Keeper 의 run 첫 요청은 입력의 56.5% 를 캐시에서 못 읽는다.
 1. `clear_thinking` 필드를 지운다. 보존 여부는 `preserve_thinking` 하나가 정한다(§3.1).
 2. 모델 행이 보존 여부를 선언하지 않으면, GLM 요청에 `clear_thinking` 멤버를 싣지 않고 이미 보낸 reasoning 을 그대로 보낸다. endpoint 의 기본값이 적용된다(§3.2).
 3. 기본 설정(`config/runtime.toml`)의 GLM 행은 `preserve-thinking = true` 를 선언한다(§3.3).
+
+## Implementation summary
+
+세 층이 2026-11-05 main 에 병합됐고, 2026-11-06 01:03Z 에 부팅한 서버에 들어갔다.
+
+- #48707: `clear_thinking` 필드와 두 resolver 를 지웠다. `thinking.clear_thinking` 멤버는 `request_control_fields` 가 `preserve_thinking` 하나로 정한다(§3.2). 시험은 `packages/agent_core/test/test_glm_thinking_contract.ml`, `test_provider_agnostic_reasoning_replay.ml`, `test_backend_glm_coverage.ml` 과 `test/test_keeper_replay_checkpoint.ml` 에 있다.
+- #48714: 대시보드가 runtime 선언에서 사라진 clear thinking 두 키를 읽지 않는다.
+- #48722: 기본 설정 `config/runtime.toml` 의 GLM 행이 `preserve-thinking = true` 를 적는다(§3.3).
+
+§6 의 배포 뒤 측정은 아직 하지 않았다. 라이브 설정의 `glm-5.3-flash`·`glm-5-3`·`glm-5-2`·`glm-5-1` 행이 `preserve-thinking = false` 라서, 이전 턴의 reasoning 은 지금도 빠진다. 2026-11-06 01:03Z~07:20Z 시스템 로그의 `reasoning_replay_dropped` 는 3,889건이다.
+
+| 모델 | replay 정책 | 요청 | 뺀 reasoning 블록 |
+|---|---|---|---|
+| `glm-5.3-flash` | `Tool_call_assistant_messages_latest_user_turn` | 2,971 | 363,102 |
+| `glm-5.3` | `No_replay` | 918 | 105,063 |
+
+운영자가 그 줄을 지우거나 `true` 로 바꾼 시각부터 §6 대로 잰다.
 
 ## 1. 지금 동작
 

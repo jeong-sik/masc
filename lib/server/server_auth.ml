@@ -763,7 +763,6 @@ let http_status_of_auth_error = function
   | Masc_domain.Agent (Masc_domain.Agent_error.NotFound _) -> `Not_found
   | Masc_domain.Task
       (Masc_domain.Task_error.AlreadyClaimed _
-      | Masc_domain.Task_error.NotClaimed _
       | Masc_domain.Task_error.TransitionRejected _
       | Masc_domain.Task_error.InvalidState _
       | Masc_domain.Task_error.InvalidId _) -> `Bad_request

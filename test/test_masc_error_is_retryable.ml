@@ -28,7 +28,6 @@ let test_task_errors_non_retryable () =
          (E.Task
             (E.Task_error.AlreadyClaimed
                { task_id = "id"; by = "alice" }))));
-  assert (not (E.is_retryable (E.Task (E.Task_error.NotClaimed "id"))));
   assert (
     not (E.is_retryable (E.Task (E.Task_error.InvalidState "x"))));
   assert (not (E.is_retryable (E.Task (E.Task_error.InvalidId "y"))))

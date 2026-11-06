@@ -5,24 +5,7 @@ open Keeper_tool_shared_runtime
 open Result.Syntax
 open Keeper_tool_read_window
 open Keeper_tool_filesystem_guidance
-
-(* The write mode is defined once in [Keeper_tool_write_mode], shared with the
-   remote-lane handler; the names below keep this module's surface. *)
-type fs_write_mode = Keeper_tool_write_mode.t =
-  | Overwrite
-  | Append
-  | Patch
-
-type prepared_edit = Keeper_prepared_file.t
-type prepared_read = Keeper_prepared_file.t
-type prepared_write = Keeper_prepared_file.Write.t
-
-type edit_preparation_error =
-  | Edit_path_refused of Keeper_alerting_path.path_refusal
-  | Edit_resource_unavailable of string
-
-let fs_write_mode_to_string = Keeper_tool_write_mode.to_string
-let valid_fs_write_mode_strings = Keeper_tool_write_mode.valid_strings
+include Keeper_tool_filesystem_runtime_shared
 
 (** Read max_bytes clamp. [read_file_default_max_bytes] is the
     canonical default; [Tool_shard_limits.read_file_default_max_bytes]
@@ -50,8 +33,6 @@ let read_window_fetch_bytes ~max_bytes = function
   | { start_line = 1; max_lines = _ } -> max_bytes
   | _ -> read_file_max_max_bytes
 ;;
-
-let fs_guidance_text = Keeper_tool_filesystem_guidance.text
 
 (* Range violations are rejected loudly instead of being defaulted: a model
    that sent [limit=0] or [offset=-3] gets a payload naming the contract, so

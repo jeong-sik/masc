@@ -758,16 +758,14 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
             let workspace_root = Filename.concat panel_root "workspace" in
             let storage_root = Filename.concat panel_root "native" in
             Unix.mkdir workspace_root 0o700;
-            Unix.mkdir storage_root 0o700;
-            List.iter (fun part -> Unix.mkdir (Filename.concat storage_root part) 0o700)
-              ["data"; "cache"; "state"; "run"; "tmp"];
+            Runtime_muse_serve.ensure_storage_dirs storage_root;
             Ok (workspace_root, storage_root)
           with Unix.Unix_error (error, _, _) ->
             Error (Setup_failure ("cannot prepare Muse Code stateless storage: " ^ Unix.error_message error))))
     in
     (match
        Runtime_muse_serve.run_turn
-         ~storage_root
+         ~storage:(Runtime_muse_serve.Stateless storage_root)
          ?reasoning_effort:(Option.map Runtime_muse_msp.reasoning_effort_of_requested
            runtime.model.reasoning_effort)
          ~on_stream_event:(function

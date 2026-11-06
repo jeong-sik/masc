@@ -1502,8 +1502,28 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
       (match projected with Ok _ -> stream.finish_host_stop () | Error _ -> ());
       projected
     in
+    (* The host keeps its native files in this Keeper's own root
+       (RFC-0495 §2.2), not in the account home other Keepers share. A root
+       that cannot be prepared ends the turn before dispatch rather than
+       opening a session in it. *)
+    let prepare_storage () =
+      let* root = Keeper_official_client_paths.muse_storage_dir ~base_path ~keeper_name in
+      match
+        Eio_guard.run_in_systhread ~label:"muse keeper native storage" (fun () ->
+          Serve.ensure_storage_dirs root)
+      with
+      | () -> Ok (Serve.Keeper_owned root)
+      | exception Unix.Unix_error (error, operation, path) ->
+        Error (Printf.sprintf "%s %s: %s" operation path (Unix.error_message error))
+    in
     let run_client () =
       Eio.Switch.run (fun sw ->
+        let* storage =
+          prepare_storage ()
+          |> Result.map_error (fun detail ->
+            recovery_failure := Session_store.Pre_dispatch_failed;
+            internal_error ("Muse Code storage root setup failed: " ^ detail))
+        in
         let* (mcp_servers, bridge) =
           try Ok (
           match dynamic_tools with
@@ -1563,6 +1583,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
             (fun () ->
                `Runtime
                  (Serve.run_turn
+                    ~storage
                     ~session_mode
                     ~mcp_servers
                     ?reasoning_effort

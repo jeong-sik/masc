@@ -112,7 +112,7 @@ let handshake_and_session ~granted =
   handshake_and_session_with_mode ~granted ~approval_mode:Msp.Prompt_unmatched
 ;;
 
-let script_text ~capture steps =
+let script_text ~capture ~storage steps =
   let buffer = Buffer.create 1024 in
   let durable = ref [] in
   let retain frame =
@@ -159,10 +159,11 @@ let script_text ~capture steps =
           (fun (key, expected) ->
              line (Printf.sprintf "[ \"$%s\" = %s ] || exit 97" key (shell_quote expected)))
           [ "HOME", home
-          ; "XDG_DATA_HOME", Filename.concat home ".local/share"
-          ; "XDG_CACHE_HOME", Filename.concat home ".cache"
-          ; "XDG_STATE_HOME", Filename.concat home ".local/state"
-          ; "XDG_RUNTIME_DIR", Filename.concat home ".local/run"
+          ; "XDG_DATA_HOME", Filename.concat storage "data"
+          ; "XDG_CACHE_HOME", Filename.concat storage "cache"
+          ; "XDG_STATE_HOME", Filename.concat storage "state"
+          ; "XDG_RUNTIME_DIR", Filename.concat storage "run"
+          ; "TMPDIR", Filename.concat storage "tmp"
           ];
         line "[ -z \"${META_API_KEY+x}\" ] || exit 96";
         line "[ \"$TBH_CREDENTIAL_BACKEND\" = file ] || exit 93";
@@ -170,7 +171,6 @@ let script_text ~capture steps =
           (shell_quote (Filename.concat (Unix.realpath home) ".local/state/masc/muse-config")));
         line "[ -r \"$XDG_CONFIG_HOME/muse/auth.json\" ] || exit 94";
         line "[ -r \"$XDG_CONFIG_HOME/muse/settings.json\" ] || exit 94";
-        line "[ \"$TMPDIR\" = \"$XDG_CONFIG_HOME/tmp\" ] || exit 94";
         line "[ -d \"$TMPDIR\" ] || exit 94";
         if native_read then (
           line "[ \"$#\" = 2 ] || exit 95";
@@ -197,11 +197,16 @@ for line in sys.stdin:
   Buffer.contents buffer
 ;;
 
+let native_root dir = Filename.concat dir "native"
+let native_storage dir = Serve.Keeper_owned (native_root dir)
+
 let with_script steps f =
   let dir = Filename.temp_dir "masc-muse-serve-" "" in
   let capture = Filename.concat dir "requests.jsonl" in
+  let storage = native_root dir in
+  Serve.ensure_storage_dirs storage;
   Out_channel.with_open_bin (Filename.concat dir "serve") (fun output ->
-    output_string output (script_text ~capture steps));
+    output_string output (script_text ~capture ~storage steps));
   let requests () =
     if Sys.file_exists capture
     then
@@ -211,11 +216,7 @@ let with_script steps f =
       |> List.map Yojson.Safe.from_string
     else []
   in
-  Fun.protect
-    ~finally:(fun () ->
-      Array.iter (fun name -> Sys.remove (Filename.concat dir name)) (Sys.readdir dir);
-      Sys.rmdir dir)
-    (fun () -> f ~dir ~requests)
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree dir) (fun () -> f ~dir ~requests)
 ;;
 
 let config
@@ -234,11 +235,12 @@ let config
   }
 ;;
 
-let run_scripted ?model ?(workspace_root = "/w") ?session_mode ?account_home ?prepared_home ?mcp_servers ?on_session_ready ?on_prompt_sent ?on_stream_event ?native steps check_result =
+let run_scripted ?model ?(workspace_root = "/w") ?storage ?session_mode ?account_home ?prepared_home ?mcp_servers ?on_session_ready ?on_prompt_sent ?on_stream_event ?native steps check_result =
   with_script steps (fun ~dir ~requests ->
     Eio_main.run (fun env ->
       let result =
         Serve.run_turn
+          ~storage:(Option.value storage ~default:(native_storage dir))
           ?session_mode
           ?mcp_servers
           ?on_session_ready
@@ -399,6 +401,7 @@ let test_turn_start_receipt_is_the_line_the_host_read () =
       Eio_main.run (fun env ->
         match
           Serve.run_turn
+            ~storage:(native_storage dir)
             ~on_prompt_sent:(fun () -> incr sent)
             ~on_context_submission:(fun submission -> receipts := (submission, !sent) :: !receipts)
             ~mgr:(Eio.Stdenv.process_mgr env)
@@ -623,6 +626,29 @@ let test_prepared_home_is_bound_to_exact_selected_account () =
       (fun result _ -> match result with
        | Ok turn -> check (option string) "retarget cannot split child roots from auth" (Some "MASC_MUSE_OK") turn.text
        | Error error -> fail (Serve.error_to_string error)))
+;;
+
+(* A per-call root is removed once the call returns, so no session in it can
+   be resumed; a relative root would resolve against the server's cwd. Both
+   are refused before the host is spawned. *)
+let test_storage_that_cannot_hold_the_session_is_refused_before_spawn () =
+  let root = Filename.temp_dir "muse-storage-refusal-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
+    let spawn_marker = Filename.concat root "unexpected-spawn" in
+    let resume = Serve.Resume { session_id = "s-1"; expected_last_turn = Serve.Exactly None } in
+    List.iter
+      (fun (storage, session_mode) ->
+         run_scripted ~storage ~session_mode [ Mark_spawned spawn_marker ] (fun result requests ->
+           (match result with
+            | Error (Serve.Invalid_config _) -> ()
+            | Error error -> fail (Serve.error_to_string error)
+            | Ok _ -> fail "refused storage reached the client");
+           check int "nothing dispatched" 0 (List.length requests);
+           check bool "the host was never spawned" false (Sys.file_exists spawn_marker)))
+      [ Serve.Stateless root, resume
+      ; Serve.Stateless "relative-root", Serve.Start
+      ; Serve.Keeper_owned "relative-root", resume
+      ])
 ;;
 
 let test_invalid_account_home_is_refused () =
@@ -1657,6 +1683,7 @@ let test_run_turn_returns_when_the_owner_is_cancelled_while_the_host_exits () =
                   (fun () ->
                     let (_ : (Serve.turn_result, Serve.error) result) =
                       Serve.run_turn
+                        ~storage:(native_storage dir)
                         ~mgr:(Eio.Stdenv.process_mgr env)
                         ~clock
                         ~cwd:Eio.Path.(Eio.Stdenv.fs env / dir)
@@ -1725,6 +1752,7 @@ let an_approval_write_that_times_out_reports_the_turn_as_accepted ~tool_item_ope
       Eio_main.run (fun env ->
         match
           Serve.run_turn
+            ~storage:(native_storage dir)
             ~mgr:(Eio.Stdenv.process_mgr env)
             ~clock:(Eio.Stdenv.clock env)
             ~cwd:Eio.Path.(Eio.Stdenv.fs env / dir)
@@ -1755,6 +1783,7 @@ let test_a_session_start_write_that_times_out_reports_the_turn_as_not_accepted (
       Eio_main.run (fun env ->
         match
           Serve.run_turn
+            ~storage:(native_storage dir)
             ~mgr:(Eio.Stdenv.process_mgr env)
             ~clock:(Eio.Stdenv.clock env)
             ~cwd:Eio.Path.(Eio.Stdenv.fs env / dir)
@@ -1778,6 +1807,7 @@ let run_against_script steps ~config =
   with_script steps (fun ~dir ~requests:_ ->
     Eio_main.run (fun env ->
       Serve.run_turn
+        ~storage:(native_storage dir)
         ~mgr:(Eio.Stdenv.process_mgr env)
         ~clock:(Eio.Stdenv.clock env)
         ~cwd:Eio.Path.(Eio.Stdenv.fs env / dir)
@@ -1872,6 +1902,8 @@ let () =
         ; test_case "effective approval mode is verified before admission" `Quick test_session_approval_mode_is_verified_before_admission
         ; test_case "prepared HOME matches selected account" `Quick test_prepared_home_is_bound_to_exact_selected_account
         ; test_case "invalid account home is refused" `Quick test_invalid_account_home_is_refused
+        ; test_case "storage that cannot hold the session is refused before spawn" `Quick
+            test_storage_that_cannot_hold_the_session_is_refused_before_spawn
         ; test_case "non-durable host is refused before session admission" `Quick
             test_nondurable_handshake_never_begins_a_session
         ; test_case "absent durability admits the v1 durable host" `Quick

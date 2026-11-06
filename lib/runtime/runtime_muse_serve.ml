@@ -53,6 +53,10 @@ type session_mode =
   | Start
   | Resume of { session_id : string; expected_last_turn : resume_last_turn }
 
+type storage =
+  | Stateless of string
+  | Keeper_owned of string
+
 let same_turn_ending left right =
   match left, right with
   | Ended_completed, Ended_completed | Ended_uncompleted, Ended_uncompleted -> true
@@ -571,6 +575,20 @@ let child_environment_key_allowed = function
    platform, which is the only place Runtime_muse_home imports it from. *)
 let credential_backend_entry = "TBH_CREDENTIAL_BACKEND=file"
 
+let storage_environment =
+  [ "XDG_DATA_HOME", "data"; "XDG_CACHE_HOME", "cache"; "XDG_STATE_HOME", "state";
+    "XDG_RUNTIME_DIR", "run"; "TMPDIR", "tmp" ]
+;;
+
+let ensure_storage_dirs root =
+  List.iter
+    (fun path ->
+       match Unix.mkdir path 0o700 with
+       | () -> ()
+       | exception Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+    (root :: List.map (fun (_, part) -> Filename.concat root part) storage_environment)
+;;
+
 let client_environment ?storage_root account_home prepared_home =
   (* The configured spelling binds admission and session identity. The prepared
      physical root binds every child storage path to that credential generation,
@@ -611,11 +629,10 @@ let client_environment ?storage_root account_home prepared_home =
   let selected = match storage_root with
     | None -> selected
     | Some root ->
-      let roots = [ "XDG_DATA_HOME", "data"; "XDG_CACHE_HOME", "cache";
-                    "XDG_STATE_HOME", "state"; "XDG_RUNTIME_DIR", "run";
-                    "TMPDIR", "tmp" ] in
-      List.map (fun (key, part) -> key ^ "=" ^ Filename.concat root part) roots
-      @ List.filter (fun entry -> not (List.mem_assoc (env_key entry) roots)) selected
+      List.map (fun (key, part) -> key ^ "=" ^ Filename.concat root part) storage_environment
+      @ List.filter
+          (fun entry -> not (List.mem_assoc (env_key entry) storage_environment))
+          selected
   in
   Array.of_list (credential_backend_entry :: selected)
 ;;
@@ -1800,8 +1817,12 @@ let prepare_account_config config =
           as error) -> Error (Invalid_config (Runtime_muse_home.error_to_string error)))
 ;;
 
+let storage_root = function
+  | Stateless root | Keeper_owned root -> root
+;;
+
 let run_turn
-      ?storage_root
+      ~storage
       ?(session_mode = Start)
       ?(mcp_servers = [])
       ?reasoning_effort
@@ -1817,18 +1838,21 @@ let run_turn
       ~prompt
       ~images
   =
-  let* () = match storage_root, session_mode with
-    | Some _, Resume _ -> Error (Invalid_config "isolated stateless storage cannot resume")
-    | Some root, Start when Filename.is_relative root ->
-      Error (Invalid_config "isolated storage root must be absolute")
-    | Some _, Start | None, _ -> Ok () in
+  let* () =
+    if Filename.is_relative (storage_root storage)
+    then Error (Invalid_config "Muse Code storage root must be absolute")
+    else
+      match storage, session_mode with
+      | Stateless _, Resume _ -> Error (Invalid_config "isolated stateless storage cannot resume")
+      | Stateless _, Start | Keeper_owned _, (Start | Resume _) -> Ok ()
+  in
   let* () = validate_turn ~session_mode config ~workspace_root ~prompt ~images in
   let* () = validate_mcp_servers mcp_servers in
   let* config = prepare_account_config config in
   let* approval_mode = approval_mode_of_posture config.native in
   guard_idle_timeout (fun () ->
     with_spawned_client
-      ?storage_root
+      ~storage_root:(storage_root storage)
       ~on_subscription_usage:(fun usage ->
         emit_stream_event on_stream_event (Subscription_usage_observed usage))
       ~mgr ~clock ~cwd config (fun io ->

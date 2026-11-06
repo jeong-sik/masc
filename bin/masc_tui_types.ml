@@ -12038,27 +12038,31 @@ let ask_followup_owner_current (state : state) submission =
         && current.as_request == submission.as_request
     | None, _ | Some _, None -> false
 
-let begin_ask_followup_read (state : state) =
+let ask_followup_target (state : state) =
   match state.ask_answer_feedback with
   | Some (submission, feedback) when ask_followup_owner_current state submission ->
-      (* Only a Keeper's answer has a follow-up to read: the wake it
-         starts. An installation's answer starts its host request cycle. *)
       (match feedback.Masc_tui_ask_projection.af_asker, feedback.Masc_tui_ask_projection.af_receipt with
        | Masc.Tui_decode_asks.Ask_keeper keeper_name,
          Ok (Masc.Tui_decode_asks.Keeper_answer_receipt (Ask_answer_recorded _ | Ask_answer_already_recorded _)) ->
-           let reading, request = Snapshot_read.start ~intent:Snapshot_read.Poll state.ask_followup_read in
-           state.ask_followup_read <- reading;
-           Option.map (fun request ->
-             let previous = Option.bind state.ask_followup (fun (owner, reading) ->
-               if owner.as_request == submission.as_request then Some reading else None) in
-             state.ask_followup <- Some (submission, Masc_tui_ask_projection.begin_followup ~previous);
-             state.ask_followup_error <- None;
-             request, submission, keeper_name) request
+           Some (submission, keeper_name)
        | Masc.Tui_decode_asks.Ask_keeper _,
          (Ok (Masc.Tui_decode_asks.Keeper_answer_receipt (Ask_answer_written_unconfirmed _ | Ask_answer_refused _)
               | Masc.Tui_decode_asks.Installation_answer_receipt _) | Error _)
        | Masc.Tui_decode_asks.Ask_installation _, (Ok _ | Error _) -> None)
   | Some _ | None -> None
+
+let begin_ask_followup_read (state : state) =
+  match ask_followup_target state with
+  | Some (submission, keeper_name) ->
+      let reading, request = Snapshot_read.start ~intent:Snapshot_read.Poll state.ask_followup_read in
+      state.ask_followup_read <- reading;
+      Option.map (fun request ->
+        let previous = Option.bind state.ask_followup (fun (owner, reading) ->
+          if owner.as_request == submission.as_request then Some reading else None) in
+        state.ask_followup <- Some (submission, Masc_tui_ask_projection.begin_followup ~previous);
+        state.ask_followup_error <- None;
+        request, submission, keeper_name) request
+  | None -> None
 
 let current_ask_followup (state : state) =
   match state.ask_followup with

@@ -27,11 +27,7 @@ type health_result = {
 type config = {
   base_path : string;
   node_id : string;
-  pubsub_max_messages : int;
 }
-
-(** Fixed upper bound for in-memory pub/sub message delivery. *)
-val pubsub_max_messages : int
 
 (** Generate a node identifier of the form
     ["<hostname>-<pid>-<rand4hex>"], suitable for
@@ -42,8 +38,8 @@ val node_id_suffix_bytes : int
 
 val generate_node_id : unit -> string
 
-(** Default config rooted at [".masc"] with [pubsub_max_messages]. Node id
-    is generated fresh on each call. *)
+(** Default config rooted at [".masc"]. Node id is generated fresh on each
+    call. *)
 val default_config : unit -> config
 
 (** {1 Safety utilities} *)

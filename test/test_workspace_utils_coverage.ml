@@ -448,7 +448,6 @@ let make_test_config ~base_path : Workspace_utils.config =
   let backend_config : Backend_types.config = {
     base_path;
     node_id = "test-node";
-    pubsub_max_messages = 1000;
   } in
   let memory_backend = Backend.Memory.create () in
   {
@@ -504,7 +503,6 @@ let test_filesystem_read_json_doc_keeps_absence_apart () =
       let backend_config : Backend_types.config =
         { base_path = root
         ; node_id = "test-node"
-        ; pubsub_max_messages = 1000
         }
       in
       let cfg : Workspace_utils.config =

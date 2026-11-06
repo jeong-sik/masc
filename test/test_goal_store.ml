@@ -103,7 +103,6 @@ let with_goal_publication_backend backend_kind f =
       let backend_config : Backend_types.config =
         { base_path = Filename.concat dir Common.masc_dirname
         ; node_id = "goal-local-publication-test"
-        ; pubsub_max_messages = Backend_types.pubsub_max_messages
         }
       in
       let backend =

@@ -19,5 +19,9 @@ include Keeper_unified_metrics_json_support
 let append_decision_record = Keeper_unified_metrics_decision.append_decision_record
 let update_metrics_from_result = Keeper_unified_metrics_result.update_metrics_from_result
 let append_metrics_snapshot = Keeper_unified_metrics_snapshot.append_metrics_snapshot
+type unanswered_end = Keeper_unified_metrics_failure.unanswered_end =
+  | Failed_cycle
+  | Rested_cycle
+
 let update_metrics_from_failure = Keeper_unified_metrics_failure.update_metrics_from_failure
 let with_attempt_spend = Keeper_unified_metrics_failure.with_attempt_spend

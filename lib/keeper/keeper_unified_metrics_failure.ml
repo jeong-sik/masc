@@ -12,9 +12,14 @@ open Keeper_context_runtime
 include Keeper_unified_metrics_support
 include Keeper_unified_metrics_json_support
 
+type unanswered_end =
+  | Failed_cycle
+  | Rested_cycle
+
 let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
     ~(observation : Keeper_world_observation.world_observation)
     ~(reason : string)
+    ~(ended : unanswered_end)
     ?core_error
     () : keeper_meta =
   let now_ts = Time_compat.now () in
@@ -55,13 +60,21 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
         | None -> reason)
     | None -> reason
   in
+  (* A rest is not an error: the provider stated when its quota resets
+     (RFC-turn-failure-visible-stop §2.4). *)
+  let outcome, empty_preview =
+    match ended with
+    | Failed_cycle -> Proactive_error, "keeper cycle failed"
+    | Rested_cycle -> Proactive_rested, "keeper cycle rested"
+  in
+  let outcome_label = proactive_cycle_outcome_to_string outcome in
   if is_scheduled_autonomous_cycle then
     Otel_metric_store.inc_counter Keeper_metrics.(to_string ProactiveOutcome)
-      ~labels:[ ("keeper", meta.name); ("outcome", "error") ]
+      ~labels:[ ("keeper", meta.name); ("outcome", outcome_label) ]
       ();
   let preview =
     let trimmed = String.trim public_reason in
-    if trimmed = "" then "keeper cycle failed"
+    if trimmed = "" then empty_preview
     else short_preview trimmed
   in
   {
@@ -85,11 +98,11 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
           if is_scheduled_autonomous_cycle then now_ts
           else meta.runtime.proactive_rt.last_ts;
         last_outcome =
-          if is_scheduled_autonomous_cycle then Proactive_error
+          if is_scheduled_autonomous_cycle then outcome
           else meta.runtime.proactive_rt.last_outcome;
         last_reason =
           if is_scheduled_autonomous_cycle
-          then "unified:error:" ^ String.trim public_reason
+          then "unified:" ^ outcome_label ^ ":" ^ String.trim public_reason
           else meta.runtime.proactive_rt.last_reason;
         last_preview =
           if is_scheduled_autonomous_cycle then preview

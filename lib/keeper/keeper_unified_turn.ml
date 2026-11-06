@@ -1143,6 +1143,10 @@ let run_keeper_cycle
                       ~latency_ms
                       ~observation
                       ~reason:e_str
+                      ~ended:
+                        (match provider_rest with
+                         | Some _ -> Keeper_unified_metrics.Rested_cycle
+                         | None -> Keeper_unified_metrics.Failed_cycle)
                       ~core_error:err
                       ()
                   in

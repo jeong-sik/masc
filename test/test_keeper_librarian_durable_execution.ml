@@ -384,7 +384,10 @@ let assert_pending = function
   | Error error -> fail (Consumer.error_to_string error)
 let only_original fixture = match observed_originals fixture with
   | [record,capture] -> record,capture
-  | [] | _::_::_ -> fail "expected one strictly restored original history request"
+  | found -> fail (Printf.sprintf "expected one strictly restored original history request, found %d: %s"
+      (List.length found)
+      (String.concat "; " (List.map (fun ((record:Owner.retained),_) ->
+        Printf.sprintf "%s settled=%b" record.request_id (Option.is_some (Progress.settlement record.progress))) found)))
 let latest fixture capture = io (fun () ->
   let exact=Capture.request capture |> get in
   let schema=match exact.Lane_addon_exact.schema with Some schema -> schema | None -> fail "missing schema" in
@@ -1743,7 +1746,9 @@ let test_refusal_does_not_accept_a_different_equal_chat_row () =
     let equal_content_rows input=List.length (List.filter
       (fun (observation:Keeper_counterpart_observation.t) -> observation.content=content) input) in
     check int "the original input held the equal chat content once" 1 (equal_content_rows original_input);
-    check int "the later input holds the different row's equal content once" 1 (equal_content_rows witness_input);
+    check int (Printf.sprintf "the later input holds the different row's equal content once (contents: %s)"
+      (String.concat " | " (List.map (fun (o:Keeper_counterpart_observation.t) -> o.content) witness_input)))
+      1 (equal_content_rows witness_input);
     check bool "the same value does not establish the selected original row" false
       (Sources.counterpart_selection_covers ~original:(Sources.select_counterparts original_snapshot)
         ~witness:(Sources.select_counterparts witness_snapshot));

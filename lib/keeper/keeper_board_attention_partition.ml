@@ -37,8 +37,10 @@ let parse = Keeper_board_attention_partition_wire.parse
 let serialize = Keeper_board_attention_partition_wire.serialize
 let serialize_confirmations = Keeper_board_attention_partition_wire.serialize_confirmations
 
+let dirname = "board_attention_partitions"
+
 let directory ~base_path =
-  Filename.concat (Common.masc_dir_from_base_path ~base_path) "board_attention_partitions"
+  Filename.concat (Common.masc_dir_from_base_path ~base_path) dirname
 ;;
 
 let path ~base_path ~keeper_name =

@@ -34,7 +34,7 @@ let taken ?(nonce = "nonce-1") () =
   { T.nonce; code_verifier = "verifier-1"; invite = None; return_to = T.Local_path.root }
 ;;
 
-let answer ?(status = 200) ?(headers = []) body = Ok { X.status; headers; body }
+let answer ?(status = 200) ?(headers = []) body = Ok { Login_transport.status; headers; body }
 
 (* The keys of [V.jwks_both] whose kid is [kid]. *)
 let jwks_with_only kid =
@@ -53,9 +53,9 @@ let jwks_with_only kid =
 
 (* A transport that answers by URL and counts the GETs of each. *)
 type google =
-  { mutable discovery : (X.response, string) result
-  ; mutable jwks : (X.response, string) result
-  ; mutable token : (X.response, string) result
+  { mutable discovery : (Login_transport.response, string) result
+  ; mutable jwks : (Login_transport.response, string) result
+  ; mutable token : (Login_transport.response, string) result
   ; mutable gets : string list
   ; mutable posts : (string * (string * string) list * string) list
   }
@@ -69,8 +69,11 @@ let google () =
   }
 ;;
 
-let get g : X.get =
-  fun ~url ->
+(* Google's discovery document and JWKS need no header, so the exchange
+   sends none. *)
+let get g : Login_transport.get =
+  fun ~url ~headers ->
+  Alcotest.(check (list (pair string string))) "no headers" [] headers;
   g.gets <- url :: g.gets;
   if String.equal url Oidc_google.discovery_url
   then g.discovery
@@ -79,7 +82,7 @@ let get g : X.get =
   else Error ("no such URL: " ^ url)
 ;;
 
-let post g : X.post =
+let post g : Login_transport.post =
   fun ~url ~headers ~body ->
   g.posts <- (url, headers, body) :: g.posts;
   if String.equal url "https://oauth.example/token" then g.token else Error ("no such URL: " ^ url)

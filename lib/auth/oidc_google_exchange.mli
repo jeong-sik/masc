@@ -93,7 +93,11 @@ val endpoints : get:Login_transport.get -> cache -> now_ms:int -> (endpoints, er
     the state, the nonce, and the S256 challenge of the transaction. Only
     [openid] is asked for: the identity is [sub], and an email is not an
     identity key (design 5.1-4). *)
-val authorization_url : endpoints -> Client.t -> Oidc_login_transaction.started -> string
+val authorization_url
+  :  endpoints
+  -> Client.t
+  -> Oidc_login_transaction.google Oidc_login_transaction.started
+  -> string
 
 (** The identity of the person who came back with [code]: the token exchange
     with the verifier of [taken], the signature and expiry check at [now], and
@@ -109,5 +113,5 @@ val identity
   -> now_ms:int
   -> Client.t
   -> code:string
-  -> Oidc_login_transaction.taken
+  -> Oidc_login_transaction.google Oidc_login_transaction.taken
   -> (Authz_external_identity.t, error) result

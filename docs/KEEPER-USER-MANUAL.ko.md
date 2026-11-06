@@ -688,8 +688,8 @@ masc_keeper_down(name="reviewer")
 
 ## 하루가 도는 방식
 
-작업은 `todo` → `in_progress` → `awaiting_verification` 을 거쳐
-`done` / `dropped` / `blocked` 중 하나로 갑니다.
+작업은 `todo` → `claimed` → `in_progress` → `awaiting_verification` 을 거쳐
+`done` 이나 `cancelled` 로 끝납니다. 검증에서 반려되면 `in_progress` 로 돌아갑니다.
 
 1. 누군가 작업을 만듭니다. 내가 TUI 입력줄에서 `/task <제목>` 으로 만들거나,
    Keeper 가 `masc_add_task` 로 만듭니다.

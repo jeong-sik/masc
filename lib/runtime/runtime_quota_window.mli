@@ -10,8 +10,9 @@
     to the sink the server installs ({!set_stated_window_sink}), and the
     server reads those windows back before any Keeper walks
     ({!Runtime_quota_window_journal}), so a restart does not forget a reset
-    the provider stated. An observation without a reset is not passed on: the
-    next success clears it, and the sink does not see successes.
+    the provider stated. An observation without a reset is not passed on: it
+    ends at the cap after it was noted or at the next success, and the sink
+    sees neither.
 
     This module remembers that fact and lets candidate ordering act on it.
     It is an ordering preference, not an admission gate — a demoted
@@ -21,10 +22,13 @@
     windows are account-scoped.
 
     A window with a stated reset expires at that time, pruned lazily on read;
-    there is no background sweeper and no TTL knob.  Inventing a cooldown for
-    a provider that stated none would be a synthesized default, so
-    {!note_observed_exhausted} records the observation instead and claims no
-    end: it is cleared by the next success on the scope, not by a clock.
+    there is no background sweeper.  A provider that stated no reset gets no
+    invented one: {!note_observed_exhausted} records the observation, and it
+    rests the scope for the hard-quota fallback the operator declared
+    ([Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec], the same
+    bound the failed cycle already waits) from the moment it was noted. After
+    that the observation no longer orders anything; the next success on the
+    scope clears it sooner (RFC-provider-path-rest §3.3, 2026-11-06).
     Coarse HTTP 429 / Provider.RateLimit does not establish credential
     ownership; it belongs to {!Runtime_candidate_backpressure}'s candidate-only
     observation instead. RFC-0370 §3.3, RFC-0433. *)
@@ -85,18 +89,20 @@ val stated_window_of_json :
 
 val note_observed_exhausted : scope:scope -> unit
 (** Remember that [scope] answered a hard quota rejection without stating when
-    it resets.  No end time is claimed and none is invented: the record stands
-    until {!note_succeeded} clears it.  A scope that already has a stated
-    window still ahead keeps it — the provider's own answer says more than an
+    it resets.  No reset is claimed: the observation rests the scope from the
+    wall-clock moment of this call for the hard-quota fallback cap, or until
+    {!note_succeeded} clears it.  A scope that already has a stated window
+    still ahead keeps it — the provider's own answer says more than an
     observation; a stated window that has already passed names no rest and
     gives way.  A scope a usage read found spent without a reset
-    ({!note_read_without_reset}) keeps that answer. *)
+    ({!note_read_without_reset}) keeps that answer while its rest lasts; a
+    later refusal after it notes a new observation. *)
 
 val note_read_without_reset : scope:scope -> unit
 (** Remember that a usage read found [scope]'s gating window spent and stated
     no reset.  It rests the scope as {!note_observed_exhausted} does, and it
     answers the question that refusal leaves: {!answered_rest} reports it, so
-    another read is not asked for the same scope until a success clears it. *)
+    another read is not asked for the same scope while that rest lasts. *)
 
 val note_succeeded : scope:scope -> unit
 (** A call on [scope] got through, so an observation recorded by
@@ -105,11 +111,23 @@ val note_succeeded : scope:scope -> unit
     provider's answer about a time untrue. *)
 
 val is_exhausted : scope:scope -> now:float -> bool
-(** Whether ordering should hold [scope] back at [now] — a stated window that
-    has not passed, or an observation no success has cleared.  This is what
-    {!demote_order} asks; {!active_until} answers the narrower question of
-    when a stated window ends, and is [None] for an observation because an
-    observation names no time. *)
+(** Whether ordering should hold [scope] back at [now] — a stated window or
+    an observation whose rest has not passed.  This is what {!demote_order}
+    asks; {!active_until} answers the narrower question of when a stated
+    window ends, and is [None] for an observation because the provider named
+    no time. *)
+
+type rest =
+  | Reset_stated of float
+      (** A reset the provider stated, in a refusal or a usage read. *)
+  | Observed_until of float
+      (** An observation without a reset, resting until its noted moment plus
+          the hard-quota fallback cap. *)
+
+val rest : scope:scope -> now:float -> rest option
+(** When [scope]'s rest ends, and who set that time; [None] when nothing
+    rests it at [now].  It reads the same entry {!is_exhausted} reads, so the
+    two agree at every [now].  Passed entries are pruned on read. *)
 
 type answered_rest =
   | Stated_reset_ahead  (** a stated window that has not passed at [now] *)

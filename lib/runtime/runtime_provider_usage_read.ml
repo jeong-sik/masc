@@ -480,7 +480,7 @@ type account_refusal_read =
 
 (* The latest stated reset among the spent gating windows: every one of them
    refuses calls until it resets. A spent gating window that states no reset
-   keeps the scope resting until its next success, whatever the others say. *)
+   rests the scope on the hard-quota fallback, whatever the others say. *)
 (* The spent gating windows of one limit. Codex reads every metered limit
    ([rateLimitsByLimitId]) and a spent-usage refusal does not name the limit
    that refused the call, so spent windows of two limits cannot say how long
@@ -556,7 +556,7 @@ let rest_on_account_refusal_read ~scope ~observed_at read =
     | Spent_until resets_at when Float.compare resets_at observed_at <= 0 ->
       Log.Runtime_agent.info
         "provider usage read for %s states a spent window that reset at %.0f, not \
-         after the answer at %.0f: the scope rests until its next success"
+         after the answer at %.0f: the scope rests on the hard-quota fallback"
         (Runtime_quota_window.scope_to_string scope)
         resets_at
         observed_at;
@@ -569,7 +569,7 @@ let rest_on_account_refusal_read ~scope ~observed_at read =
    | Spent_without_reset -> Runtime_quota_window.note_read_without_reset ~scope
    | Spent_in_several_limits _ ->
      Log.Runtime_agent.info
-       "provider usage read for %s: %s; the scope rests until its next success"
+       "provider usage read for %s: %s; the scope rests on the hard-quota fallback"
        (Runtime_quota_window.scope_to_string scope)
        (account_refusal_read_to_string read);
      Runtime_quota_window.note_read_without_reset ~scope

@@ -1234,8 +1234,8 @@ let spent_route_candidates ~now route =
 ;;
 
 (* The first stated reset: the Keeper can dispatch again then. A candidate
-   whose provider stated no reset stays spent until it answers, so it adds no
-   time. *)
+   whose provider stated no reset adds no time: its rest ends at MASC's own
+   cap, and the provider may still refuse it then. *)
 let earliest_stated_reset spent =
   List.fold_left
     (fun earliest candidate ->

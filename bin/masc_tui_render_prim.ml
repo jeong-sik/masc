@@ -6082,7 +6082,7 @@ let split_summary_columns ~titled ~cols ~left_title ~left_rows ~right_title
     section left_title left_rows @ section right_title right_rows
   end
 
-let runtime_substrate_tab_strip (state : state) ~cols ~before ~after
+let runtime_substrate_tabs (state : state)
     ~(current : [ `Runtime_lanes | `Runtime_all | `Features | `Clients ]) =
   let ko = state.ui_language = Lang_ko in
   let lane_reading =
@@ -6122,19 +6122,47 @@ let runtime_substrate_tab_strip (state : state) ~cols ~before ~after
         | `Runtime_lanes | `Runtime_all | `Features -> string_of_int count)
       state.clients_surface
   in
-  tab_strip
-    ~width:(tab_strip_width ~cols ~before ~after)
-    ~press:pressable
-    [ ( tab_entry_label (if ko then "후보 순서" else "Candidate orders") lane_reading
-      , current = `Runtime_lanes
-      , Press_runtime_mode Runtime_lanes )
-    ; ( tab_entry_label (if ko then "전체 런타임" else "All runtimes") all_reading
-      , current = `Runtime_all
-      , Press_runtime_mode Runtime_all )
-    ; ( tab_entry_label (if ko then "기능" else "Features") feature_reading
-      , current = `Features
-      , Press_standalone_lanes )
-    ; ( tab_entry_label (if ko then "클라이언트" else "Clients") client_reading
-      , current = `Clients
-      , Press_surface Clients )
-    ]
+  [ ( tab_entry_label (if ko then "후보 순서" else "Candidate orders") lane_reading
+    , current = `Runtime_lanes
+    , Press_runtime_mode Runtime_lanes )
+  ; ( tab_entry_label (if ko then "전체 런타임" else "All runtimes") all_reading
+    , current = `Runtime_all
+    , Press_runtime_mode Runtime_all )
+  ; ( tab_entry_label (if ko then "기능" else "Features") feature_reading
+    , current = `Features
+    , Press_standalone_lanes )
+  ; ( tab_entry_label (if ko then "클라이언트" else "Clients") client_reading
+    , current = `Clients
+    , Press_surface Clients )
+  ]
+
+(* The title row of Runtime, Features and Clients: the title, the strip they
+   share, the pieces of [after] and the connection badge last. It is laid out
+   by [detail_heading] like the Activity row, so the badge stays whole, the
+   pieces of [after] are left out whole from the end, and the strip draws in
+   what they leave. The strip is whole or it is not drawn, and a strip that
+   draws nothing takes its separator with it. Each row used to hand the strip
+   the cells that were left after [after] and drew the row with [box_line],
+   which cut the badge when [after] alone was wider than the row.
+
+   [detail_heading] keeps the first piece of [after] and cuts it at its end
+   when it does not fit, which leaves a clock as "1…". A reading time is no
+   use cut, so an empty piece goes first: every real piece is then whole or
+   left out. *)
+let runtime_substrate_heading (state : state) ~cols ~title ~current ~after =
+  let tabs = runtime_substrate_tabs state ~current in
+  let cells text =
+    Masc_tui_message_layout.display_width (Masc_tui_theme.strip_sgr text)
+  in
+  let before = title ^ tab_strip_gap in
+  detail_heading ~cols
+    ~lead:
+      (Lead_strip
+         { floor = cells title
+         ; draw =
+             (fun width ->
+               let room = width - cells before in
+               if room < tab_strip_min_width tabs then title
+               else before ^ tab_strip ~width:room ~press:pressable tabs)
+         })
+    ~id:"" ~after:("" :: after) ~tail:(connection_badge state)

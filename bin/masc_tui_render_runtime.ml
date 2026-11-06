@@ -611,15 +611,10 @@ let render_runtime (state : state) =
           | Masc_tui_types.Runtime_lanes -> `Runtime_lanes
           | Masc_tui_types.Runtime_all -> `Runtime_all
         in
-        let title = screen_title (if ko then " MASC 시스템 / 런타임" else " MASC System / Runtime") in
-        let after =
-          Printf.sprintf "  %s%s  %s  %s" probe_status probe_read timestamp
-            (connection_badge state)
-        in
-        Printf.sprintf "%s  %s%s" title
-          (runtime_substrate_tab_strip state ~cols
-             ~before:(title ^ tab_strip_gap) ~after ~current)
-          after
+        runtime_substrate_heading state ~cols
+          ~title:(screen_title (if ko then " MASC 시스템 / 런타임" else " MASC System / Runtime"))
+          ~current
+          ~after:[ Printf.sprintf "  %s%s" probe_status probe_read; "  " ^ timestamp ]
   in
   let authority_rows = Masc_tui_types.runtime_authority_rows ~cols state in
   let selection_rows = runtime_selection_summary_for_viewport ~rows ~cols state in

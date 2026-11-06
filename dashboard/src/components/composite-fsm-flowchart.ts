@@ -1,8 +1,8 @@
 /**
  * CompositeFsmFlowchart (LT-16e)
  *
- * Static Mermaid rendering of the 4 orthogonal keeper FSM axes from
- * KeeperCompositeLifecycle.tla, side by side. Each subgraph is one
+ * Static Mermaid rendering of the 4 orthogonal keeper FSM axes (KSM,
+ * KTC, KDP, KCL), side by side. Each subgraph is one
  * region (Harel parallel region); the subgraphs do not share edges
  * because the axes are orthogonal by design — the invariants that
  * tie them together live in the matrix's top strip (LT-16b) and in

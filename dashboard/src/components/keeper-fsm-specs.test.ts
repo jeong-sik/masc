@@ -200,8 +200,8 @@ describe('buildTurnFsmSpec', () => {
     ]))
   })
 
-  // Drift guard: mirrors `lib/keeper/keeper_registry_types.ml:259-291`
-  // `module Turn_phase_transition`. Each GADT constructor is a valid
+  // Drift guard: mirrors `module Turn_phase_transition` in
+  // `lib/keeper_registry/keeper_registry_types_turn_phase.ml`. Each GADT constructor is a valid
   // turn_phase transition the OCaml runtime can take, and the FSM
   // visualization must list every one of them. If the OCaml GADT gains
   // or loses a constructor, this test fails until both sides are aligned.

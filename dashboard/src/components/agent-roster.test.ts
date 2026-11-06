@@ -138,7 +138,7 @@ describe('rosterStateNote — RFC-0135 §1.1 typed-state conditioning', () => {
 
   it('RFC §1.1 EXACT — blocker set BUT receipt is stale (execution_current=false) → 이전 차단', () => {
     // The exact 2026-05-19 lifecycle-worker scenario. Backend emits
-    // execution_current=false (`server_dashboard_http.ml:1061-1074`)
+    // execution_current=false (`composite_execution_current_for_runtime_state`)
     // when the latest receipt is from a prior turn while a newer live
     // turn is in progress (`receipt_at < live_started_at`). The blocker
     // class belongs to the prior turn — demoted to "이전 차단" so the

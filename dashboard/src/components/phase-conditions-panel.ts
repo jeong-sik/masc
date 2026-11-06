@@ -74,11 +74,11 @@ export function PhaseConditionsPanel({ diagnosis }: { diagnosis: PhaseDiagnosis 
       ? 'warn'
       : 'neutral'
 
-  // TLA invariant `phase_derivation_agreement` (KeeperCompositeLifecycle.tla;
-  // see lib/keeper/keeper_composite_observer.ml:599-602 phase_diagnosis_to_json):
+  // Invariant `phase_derivation_agreement` (`check_phase_derivation_agreement`
+  // and `phase_diagnosis_to_json` in lib/keeper/keeper_composite_observer.ml):
   // stored KSM phase must agree with `derive_phase(conditions)` for the
   // recorded condition vector. When the two strings disagree on this
-  // panel the spec invariant is *currently violated* — surface that
+  // panel the invariant is *currently violated* — surface that
   // visually with warn/bad tones instead of leaving both chips in
   // neutral/info (the prior layout required the operator to spot the
   // disagreement by string comparison).

@@ -47,8 +47,7 @@ const POLL_INTERVAL_MS = 10_000
  */
 export const FLEET_HISTORY_LEN = 30
 
-// Axis order is fixed by the TLA+ joint spec
-// (KeeperCompositeLifecycle.tla): KSM → KTC → KDP → KCL.
+// Axis order: KSM → KTC → KDP → KCL.
 // Keep it identical to TRANSITION_FIELDS so an operator scanning
 // left-to-right sees "lifecycle → turn → decision → runtime".
 const AXES: Array<{ key: LaneKey; label: string; acronym: string }> = [

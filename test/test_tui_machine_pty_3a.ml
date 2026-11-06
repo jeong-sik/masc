@@ -204,15 +204,6 @@ let raw_has raw needle =
     contains ~sub:needle text
   with _ -> false
 
-let expect_in_raw ~clock ~timeout_sec ~needle raw =
-  let deadline = Unix.gettimeofday () +. timeout_sec in
-  let rec loop () =
-    if Unix.gettimeofday () > deadline then Error "timeout"
-    else if raw_has raw needle then Ok ()
-    else ( Eio.Time.sleep clock 0.2; loop () )
-  in
-  loop ()
-
 let main env =
   if candidate_missing () then begin
     print_endline

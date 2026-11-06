@@ -218,17 +218,6 @@ let add_goal_linked_task ctx ~goal_id ~title =
   if not (Tool_result.is_success result) then
     failwith (Tool_result.message result)
 
-let keeper_transition ctx args =
-  match
-    Task.Tool.dispatch_for_keeper
-      ~created_by:ctx.Task.Tool.agent_name
-      ctx
-      ~name:"masc_transition"
-      ~args
-  with
-  | Some result -> result
-  | None -> failwith "Keeper transition dispatch returned None"
-
 let assert_goal_still_executing ctx ~goal_id =
   match Goal_store.find_goal ctx.Task.Tool.config ~goal_id with
   | Goal_store.Goal_found { phase = Goal_phase.Executing; _ } -> ()
@@ -279,13 +268,6 @@ let assert_task_claimed_by ctx agent_name =
   match (only_task ctx).Masc_domain.task_status with
   | Masc_domain.Claimed { assignee; _ } -> assert (assignee = agent_name)
   | _ -> failwith "expected task to be claimed"
-
-let assert_task_awaiting_verification_by ctx agent_name =
-  match (only_task ctx).Masc_domain.task_status with
-  | Masc_domain.AwaitingVerification { assignee; verification_id; _ } ->
-      assert (assignee = agent_name);
-      assert (verification_id <> "")
-  | _ -> failwith "expected task to be awaiting verification"
 
 let set_only_task_contract ctx contract =
   let config = ctx.Task.Tool.config in

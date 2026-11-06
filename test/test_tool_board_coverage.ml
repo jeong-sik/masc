@@ -75,19 +75,6 @@ let parse_create_response_json body =
 
 let sha256_hex text = Agent_core_sha256.(digest_string text |> to_hex)
 
-let source_snapshot_for_created_post json =
-  let open Yojson.Safe.Util in
-  let post_id = json |> member "id" |> to_string in
-  let updated_at = json |> member "updated_at" |> to_float in
-  let body = json |> member "body" |> to_string in
-  `Assoc
-    [ "post_id", `String post_id
-    ; "post_updated_at", `Float updated_at
-    ; "body_sha256", `String ("sha256:" ^ sha256_hex body)
-    ; "body_excerpt", `String body
-    ; "read_at", `Float (Time_compat.now ())
-    ]
-
 let make_keeper_meta ?(name = "judge-keeper") () : Keeper_meta_contract.keeper_meta =
   match
     Masc_test_deps.meta_of_json_fixture

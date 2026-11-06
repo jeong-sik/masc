@@ -959,10 +959,6 @@ let test_event_log_on_claim_done () =
 (* Heartbeat & Zombie Detection Tests                           *)
 (* ============================================================ *)
 
-let contains_heartbeat result =
-  has_legacy_result_prefix "\xF0\x9F\x92\x93" result
-  || str_contains (String.lowercase_ascii result) "heartbeat updated"
-
 let test_heartbeat_updates_lastseen () =
   with_test_env (fun config ->
     let _ = Workspace.bind_session config ~agent_name:"gemini" ~capabilities:[] () in
@@ -1454,9 +1450,6 @@ let test_xss_in_agent_name () =
 
 (* === Board Admin Tests === *)
 
-(* Use 3-part nicknames so join() preserves them as-is
-   (Nickname.is_generated_nickname requires 3+ dash-separated parts) *)
-let admin_keeper_agent = "admin-board-keeper"
 let test_agent_a = "agent-test-alpha"
 
 let find_task config task_id =

@@ -457,8 +457,6 @@ let explicit_metadata : (string * metadata) list =
        runtime serves, so it carries the same admin permission as the other
        fleet-wide mutations here. *)
     ("masc_prompt_override", admin_tool);
-    ("masc_pause", broadcast_tool);
-    ("masc_resume", broadcast_tool);
     ("masc_pause_status", read_state_tool);
     ("masc_run_get", broadcast_tool);
     ("masc_run_list", read_state_tool);

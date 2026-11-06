@@ -17,8 +17,8 @@
       original turn failure is preserved and no lifecycle state is inferred.
 
     - Any other [Error err] → DEBUG log + re-read meta (with
-      [metric_keeper_meta_read_failures] on read failure +
-      Site=none_after_failure or error_after_failure label).
+      [Keeper_metrics.MetaReadFailures] on read failure +
+      site=none_after_failure or error_after_failure label).
 
     - [Ok updated] → clear prior observational failure reason and return
       updated meta.

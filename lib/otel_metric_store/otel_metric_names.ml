@@ -17,80 +17,6 @@
     side. Consumers import [Otel_metric_store.<constant>] so the compiler
     catches typos. *)
 
-(* Keeper turn lifecycle (registered in init, incremented in
-   keeper_unified_turn.ml). *)
-
-(** #10530: keeper completion-contract violations (passive-only or
-    text-only turns rejected by the keeper agent loop).
-    Labels: keeper_name, kind \in \{passive,text_only\}. *)
-
-(* #10047: [append_metrics_snapshot] failures in [keeper_turn.ml] and
-   [keeper_unified_turn.ml] used to be log-only, masking state/metric
-   divergence. Surface as a counter so dashboards can alert on silent
-   metric drops and operators stop trusting metric jsonl as ground
-   truth when keepers are running. *)
-
-(* #9953: counter of observed [context_max] values labelled by
-   [keeper, model_used, resolved_model_id, context_max_bucket].
-   The bucket label collapses raw token counts into a small set
-   of strings ("64k" | "128k" | "200k" | "256k" | "1m" | "other"
-   | "zero") so the cardinality stays bounded.
-
-   Operators use this counter to detect drift: the same
-   ([model_used], [resolved_model_id]) pair should land in ONE
-   bucket; observing two buckets means the resolution path
-   produced different ceilings on different turns.  The 42% /
-   17% / 41% split for [claude_code:auto] reported in #9953 is
-   directly visible here as three counter rows. *)
-
-(* Objective Keeper turn-attempt observations. Each turn start
-   bumps [Keeper_metrics.(to_string TurnStarts)]; a re-start of the SAME
-   turn id (turn counter did not advance) bumps the dedicated
-   [Keeper_metrics.(to_string TurnReattempts)].  Operators alert on
-   [rate(masc_keeper_turn_reattempts_total[5m]) > 0] and pick
-   up repeated-turn pairs without grepping log lines. See also
-   [Keeper_metrics.(to_string TurnRegressions)] when the FSM moves to a
-   strictly LOWER turn id (very unusual; indicative of a lost
-   turn-state update, #9733). *)
-
-(* #9943: per-keeper turn-latency bucket counter.  Each completed
-   turn lands in exactly one [latency_bucket] label so a Otel_metric_store
-   query like
-     rate(masc_keeper_turn_latency_bucket_total{bucket="600-1200s"}[5m])
-   directly surfaces slow-turn keepers without needing the JSONL
-   ledger.  20-minute turns from provider_timeout exhaustion
-   (#9933, observed 1,204,542 ms = 20 min on a live Keeper
-   2026-04-24) appear in the [over_1200s] bucket and operators can
-   alert on its rate.  Existing [masc_llm_inference_duration_seconds]
-   histogram is labelled by [model] only (per-LLM-call latency); this
-   counter labels by [keeper] (per-turn latency) and uses bucket
-   strings instead of histogram observations so dashboards can group
-   counts directly. *)
-
-(* #9933 follow-up: per-turn latency buckets split by the effective
-   provider/model/runtime surface.  [Keeper_metrics.(to_string TurnLatencyBucket)]
-   tells operators which keeper is slow; this counter answers the next
-   operational question: which provider/runtime/profile is burning the
-   timeout budget.  Labels are bounded by fleet size, configured model
-   labels, configured runtimes, channel vocabulary, and the five bucket
-   names from [Keeper_unified_metrics.turn_latency_bucket]. *)
-
-(* P-DASH-01: provider cooldown skip counter.
-   When a runtime's provider is in cooldown and the keeper
-   fail-opens to a fallback runtime, increment this counter
-   so operators can see how often cooldown is triggering
-   runtime switches.  Labels: keeper, from_runtime, to_runtime. *)
-
-(* P-DASH-01: provider cooldown remaining seconds gauge.
-   Exposes the current cooldown duration so operators can see
-   which runtime is blocked and for how long without log parsing.
-   Labels: keeper, runtime. *)
-
-(* P-DASH-13: provider block duration histogram.
-   Records the duration (in seconds) for which a provider is placed
-   in cooldown each time a cooldown is applied or extended.
-   Labels: provider. *)
-
 (* #10569: board persist mutex acquire / held latency.  Recorded by
    [Board_core.with_persist_lock] so operators can distinguish
    queueing from syscall stall when masc_board_post / comment / vote
@@ -106,31 +32,6 @@ let metric_board_persist_lock_held_sec = "masc_board_persist_lock_held_sec"
    these histograms. Labels: [op]. *)
 let metric_backend_mutex_acquire_sec = "masc_backend_mutex_acquire_sec"
 let metric_backend_mutex_held_sec = "masc_backend_mutex_held_sec"
-
-(* P-DASH-02: turn queue depth gauge.  The live emission path surfaces queue
-   pressure directly so operators do not need to parse debug logs.
-   Labels: keeper, channel. *)
-
-(* #10125: keeper supervisor sweep observability.
-
-   The supervisor sweep is a Pulse loop that recovers crashed
-   keepers.  When the loop fails to start (or stops), the fleet
-   silently dies — keepers exit on runtime exhaustion and nobody
-   restarts them.  Observed 2026-04-24: 14 keepers dead, supervisor
-   "started" log line missing for 4h+ across a server restart.
-
-   Two metrics surface the sweep liveness directly so dashboards
-   can alert on absence instead of relying on a log grep:
-
-   - [Keeper_metrics.(to_string SupervisorSweepStarts)] — increments
-     once each time [start_supervisor_sweep] actually creates a
-     Pulse (i.e., once per process unless explicitly stopped).
-     If the counter does not advance after a server restart, the
-     supervisor never came up.
-   - [Keeper_metrics.(to_string SupervisorLastSweepUnixtime)] — gauge updated
-     on every successful sweep beat.  Operator alert:
-     [time() - masc_keeper_supervisor_last_sweep_unixtime > 90]
-     means the sweep is stalled (default sweep interval is 30s). *)
 
 (* Tool metric rows that SQLite could not persist. No labels (single source). *)
 let metric_tool_metrics_persist_dropped =
@@ -184,39 +85,6 @@ let metric_file_lock_table_cas_retries =
 let metric_tool_keeper_cache_ttl_parse_failures =
   Otel_metric_store_core.declare_counter "masc_tool_keeper_cache_ttl_parse_failures_total"
 
-(* #13387: keeper tool diversity gauges. The count gauge gives
-   dashboard/operator summaries a cheap per-keeper signal; the per-tool
-   gauge identifies exactly which allowed tools are available but unused
-   or below the diversity threshold. Labels:
-   - [keeper] for the count gauge
-   - [keeper, tool] for the per-tool gauge *)
-
-(* #10349: keeper FS path rejection counter.  Pre-fix the
-   user-facing read-path rejection strings carried the resolver's
-   view of allowed sandbox roots (for example [(roots=[<list>])]
-   and [(sandbox roots: [<list>])]) to the LLM.  Combined with
-   the keeper identity drift documented in the issue (turn 433:
-   contract emitted a stale Keeper/sandbox pair while the resolver
-   enumerated another Keeper's sandbox), the error became a
-   side-channel oracle for sibling sandboxes.
-
-   The leak lives strictly in the user-visible string; the
-   structured side-channel (Eio.traceln + this counter) keeps
-   the rejection observable for operators without echoing the
-   roots list back to the LLM.  Label [kind="out_of_roots"] means the
-   symlink-resolved candidate was outside every explicit allowed root. *)
-
-(* Retired RFC-0026 admission-router shadow metric name. Kept only for
-   historical Otel_metric_store compatibility; active keeper scheduling uses the
-   runtime lane and semaphore path. *)
-
-(* #10474: proactive cycle outcome counters.
-   [Keeper_metrics.(to_string NoToolProvider)] fires every time a keeper's
-   runtime has zero tool-capable providers, labelled by runtime so
-   the operator sees which runtime definition needs fixing.
-   [Keeper_metrics.(to_string ProactiveOutcome)] classifies every scheduled
-   autonomous cycle into tool_called | noop | error, giving a fleet-wide
-   health ratio in Grafana. *)
 let metric_cache_desync_cleared = Otel_metric_store_core.declare_counter "masc_cache_desync_cleared_total"
 let metric_persistence_read_drops = Otel_metric_store_core.declare_counter "masc_persistence_read_drops_total"
 let metric_persistence_utf8_repair = Otel_metric_store_core.declare_counter "masc_persistence_utf8_repair_total"

@@ -17,22 +17,20 @@ type t =
   | StreamProjectionEventCutoff
   | MetricEmitDropped
   | ContextMaxObserved
-  | TurnStarts
-  | TurnReattempts
-  | TurnRegressions
-  | TurnLatencyBucket
+    (* counter: context_max observations; labels keeper, model_used, resolved_model_id,
+       context_max_bucket *)
+  | TurnStarts (* counter: turn starts, by keeper *)
+  | TurnReattempts (* counter: turn starts that reuse the previous start's turn id, by keeper *)
+  | TurnRegressions (* counter: turn starts whose turn id is below the previous start's, by keeper *)
+  | TurnLatencyBucket (* counter: turns by keeper and latency bucket *)
   | TurnLatencyByModelBucket
-  | ProviderCooldownRemainingSec
-  | ProviderBlockDurationSec
-  | TurnQueueDepth
-  | SupervisorSweepStarts
-  | SupervisorLastSweepUnixtime
-  | TurnHolderBookkeepingFailures
-  | OperatorCompact
+    (* counter: TurnLatencyBucket with channel, provider_kind, model_used, resolved_model_id and
+       runtime_profile labels added *)
+  | SupervisorSweepStarts (* counter: supervisor sweep loops started, by base_path *)
+  | SupervisorLastSweepUnixtime (* gauge: unix time of the last supervisor sweep beat, by base_path *)
   | OperatorClear
-  | ToolUnderusedAllowedCount
-  | ToolUnderusedAllowed
-  | PathRejection
+  | ToolUnderusedAllowedCount (* gauge: allowed tools never called or called in under 1% of calls, by keeper *)
+  | PathRejection (* counter: keeper path rejections, by kind (one value per keeper_path_rejection constructor) *)
   | PathResolverIdentityMismatch
   | KeeperMetaOverlayDrift
   | HeartbeatSuccesses
@@ -66,8 +64,6 @@ type t =
   | TurnUpUpdateFailures
   | AgentToolDispatchRuntimeFailures
   | PromptFailures
-  | RunContextFailures
-  | SearchFilesFailures
   | TagDispatchFailures
   | TraceEmitFailures
   | TransitionAuditFailures
@@ -75,30 +71,21 @@ type t =
   | SessionCleanupFailures
   | ToolExecuteFailures
   | LifecycleDispatchRejections
-  | LifecycleTransactions
   | RecordingErrorDedup
   | PausedStatePersistErrors
-  | UnexpectedToolPartialTolerance
-  | ToolCallTotal
-  | ProfileConfigConflicts
   | Agent_coreTimeoutClassifications
-  | NoToolProvider
-  | ProactiveOutcome
+  | ProactiveOutcome (* counter: scheduled autonomous cycles, by keeper and outcome (tool_called, noop, error) *)
   | TaskLoadFailures
   | ToolSelectionFailures
   | ReconcileFailures
   | DecisionAuditFlushFailures
-  | Agent_coreCancel
-  | ClaimAutoProvision
   | WorkspaceInitFailures
   | PresenceSyncFailures
-  | StaleStormPaused
   | CycleExceptions
-  | SnapshotReadFailures
   | SnapshotWriteFailures
   | SseBroadcastFailures
   | WorkspaceHeartbeatFailures
-  | TurnMetricsSnapshotFailures
+  | TurnMetricsSnapshotFailures (* counter: post-cycle metrics snapshot write failures, by keeper and site *)
   | Agent_coreExecutionErrors
   | MemoryOsLibrarianFailures
   | MemoryActivityEmitFailures
@@ -122,7 +109,6 @@ type t =
   | MemoryLanePending
   | MemoryLaneInFlight
   | MemoryLaneLatestPending
-  | MemoryLaneExecutionSlotBusy
   | WriteMetaCycleFailures
   | MetricsSseFailures
   | ChatStoreFailures
@@ -144,18 +130,12 @@ type t =
   | RegistryOrphanThresholdBreached
   | RegistryInvalidEntry
   | StimulusConsumed
-  | UnsupportedStimulus
   | RestartAttempts
   | RestartOutcomes
-  | Agent_coreRunTimeout
   | RuntimeSelected
   | ToolUseFailure
-  | ToolNotAllowed
   | ReceiptUnmappedDisposition
-  | ExecuteNetworkUpgrade
-  | ExecuteLocalExecution
   | ProactiveSkip
-  | NoProgressStreak
   | UsageTrust
   | UsageAnomalyReason
   | ConfigEnvParseFailures
@@ -167,18 +147,13 @@ type t =
   | MemoryOsExplicitFactWrite
   | MemorySearch
   | RuntimeRequestWireBytes
-  | RuntimeHttpProbeJsonParseFailures
   | VisionAnalyze
   | VisionCandidateAttempts
   | VisionIngestEvictions
   | VisionIngestErrors
   | VisionDownscale
   | PromptSegmentBytes
-  | PromptTemplateRenderOutcome
-  | ToolCallParamCompleteness
   | KeeperTurnInstructionHash
-  | KeeperToolCallRetryLoop
-  | ShellIrEffectTotal
   | RawTraceSinkDegraded
   | RawTraceRetentionDeleted
   | RawTraceRetentionSkipped

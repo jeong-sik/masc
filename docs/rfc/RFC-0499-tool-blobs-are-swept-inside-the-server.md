@@ -148,7 +148,7 @@ mtime 으로 센 주별 증가는 09-21 주가 3.41GB 로 가장 크다. 10-05 �
 | 잠금 파일. private JSONL 잠금은 표시 바이트 `\xA5` 하나를 쓴다 | `gate/*.jsonl.lock` 2, `traces/*/skill-activation-events.jsonl.lock` 36 | 38 |
 | 실행 journal. `Execution_event_store` 의 `MACE` 프레임 이진 파일이다 | `keepers/*/request-executions/*/journal/events.v1.wal` 11,298, `traces/*/native-executions/*/events.v1.wal` 4,742 | 16,040 |
 | Keeper 폴더 안에 공식 CLI 가 쓰는 자기 홈 | `keepers/<k>/official-client-runtime/muse-storage/**` 956, `keepers/<k>/github-cli/*.yml` 54 | 1,010 |
-| macOS Finder 파일 | 트리 안 `.DS_Store` | 11 |
+| macOS Finder 파일 | 트리 안 `.DS_Store` | 12 |
 | 만드는 코드가 없는 파일 | `wire-capture/*/manual-*.sse.txt` | 1 |
 
 - 실행 journal 은 blob 을 가리킨다. 표시를 가진 WAL 이 `keepers` 725개, `traces` 230개다. `_blob` 객체를 가진 WAL 은 1,049개, 275개다. 바이트 검색으로 셌고 프레임은 풀지 않았다. 그래서 범위에서 뺄 수 없다.

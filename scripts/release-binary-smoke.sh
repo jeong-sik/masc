@@ -170,7 +170,7 @@ readme_subcmds=$(awk '
 
 drift=0
 for sub in $readme_subcmds; do
-  if ! echo "$actual_subcmds" | grep -qx "$sub"; then
+  if ! grep -qx "$sub" <<<"$actual_subcmds"; then
     echo "drift: README references '$sub' subcommand but binary --help lists no such command" >&2
     drift=1
   fi

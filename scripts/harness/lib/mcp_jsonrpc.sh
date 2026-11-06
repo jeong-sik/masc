@@ -296,7 +296,7 @@ mcp_jsonrpc_call() {
         return 0
       fi
 
-      if printf '%s' "$raw" | grep -Eq '^(retry:|id:|event:|data:)'; then
+      if grep -Eq '^(retry:|id:|event:|data:)' <<<"$raw"; then
         stderr_text="MCP SSE response did not contain JSON-RPC data"
         status=28
       else

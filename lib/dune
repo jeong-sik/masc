@@ -55,6 +55,20 @@
   keeper_board_attention_partition_types
   keeper_board_attention_partition_wire
   keeper_reaction_ledger_wire
+  keeper_checkpoint_store_history_files
+  keeper_checkpoint_store_decode
+  keeper_checkpoint_store_summary
+  keeper_checkpoint_store_lineage
+  keeper_checkpoint_store_load
+  keeper_checkpoint_store_session
+  keeper_checkpoint_store_canonical
+  keeper_checkpoint_store_ref_errors
+  keeper_checkpoint_store_installation
+  keeper_checkpoint_store_exact_snapshot
+  keeper_checkpoint_store_cas_save
+  keeper_checkpoint_store_retained
+  keeper_checkpoint_store_export
+  keeper_checkpoint_store_save
   keeper_sqlite_observation_io
   keeper_fs_durable_directory
   keeper_runtime_trust_snapshot_core)

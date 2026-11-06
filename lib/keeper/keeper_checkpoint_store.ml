@@ -5,9 +5,11 @@
     so that file I/O concerns do not mix with context types and
     pure operations.
 
-    @since keeper-ctx-split *)
+    The code lives in the [Keeper_checkpoint_store_*] modules included below.
+    Each include uses only the ones above it, and [keeper_checkpoint_store.mli]
+    is the interface callers see.
 
-open Printf
+    @since keeper-ctx-split *)
 
 include Keeper_checkpoint_store_history_files
 include Keeper_checkpoint_store_decode
@@ -23,12 +25,6 @@ include Keeper_checkpoint_store_cas_save
 include Keeper_checkpoint_store_retained
 include Keeper_checkpoint_store_export
 include Keeper_checkpoint_store_save
-
-(* ================================================================ *)
-(* AGENT_CORE Checkpoints                                                    *)
-(* ================================================================ *)
-
-module Objects = Agent_core.Checkpoint_objects
 
 module For_testing = struct
   module Inode_set = Set.Make (struct

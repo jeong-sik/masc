@@ -114,9 +114,6 @@ let known_canonical ~canonical_path
          ~canonical_path ~identity_before:(Some identity) ~objects:Objects_unchecked head;
        Ok (Some (known_of_summary summary)))
 
-(* The segments before [head]'s last one and every segment's bundles, read
-   from the last segment back, or the first segment that could not be read
-   whole. *)
 (* The objects the canonical names that the session does not hold. A head
    this process has seen whole names none; one only parsed is checked file
    by file, so the save that follows writes the missing ones again instead

@@ -117,27 +117,25 @@ val call_operator : config:Workspace.config -> access:Lane_addon_sources.access 
     detail or retained observation receives its arguments/result. The source
     credential must be [Operator_configuration]; caller strings confer no
     authority. Neither entrypoint starts or adopts a worker. *)
-type export_reading = { exports : tool_export list; unready : Lane_addon_unready.t list }
-(** The usable exports and, from the same read, every visible non-detached
-    installation that cannot serve now. A caller that finds no export for a
-    name reports its declaring [unready] installations instead of absence. *)
 type export_snapshot = {
   exports : tool_export list;
   conflicts : Lane_addon_tool_export.conflict list;
   unready : Lane_addon_unready.t list;
 }
+(** The usable exports, the names left out because they are claimed twice, and,
+    from the same read, every visible non-detached installation that cannot
+    serve now. A caller that finds no export for a name reports its conflict
+    or its declaring [unready] installations instead of absence. *)
 val tool_export_snapshot : config:Workspace.config -> access:Lane_addon_sources.access ->
   reserved:string list -> export_snapshot
-(** Live export snapshot with individual name conflicts quarantined. Public
-    tools only: the exports and unready installations of MCP tool packages.
-    Browser services are read with {!browser_service_reading}. *)
-val tool_export_reading : config:Workspace.config -> access:Lane_addon_sources.access ->
-  reserved:string list -> (export_reading, string) result
 (** Reads initialized live workers only; does not start or recover installations.
-    The caller supplies the complete reserved host namespace. Collisions fail
-    explicitly. Visibility follows verified caller authority; an installation
-    the caller cannot read is in neither list. Public tools only, as
-    {!tool_export_snapshot}. *)
+    The caller supplies the complete reserved host namespace. A name that two
+    visible installations export, or that a host tool already has, is left out
+    of [exports] and listed in [conflicts]; every other export stays usable.
+    Visibility follows verified caller authority; an installation the caller
+    cannot read is in no list. Public tools only: the exports and unready
+    installations of MCP tool packages. Browser services are read with
+    {!browser_service_reading}. *)
 val retain_tool_request_owner : config:Workspace.config -> access:Lane_addon_sources.access ->
   reserved:string list -> export:tool_export -> scope:string -> request_id:string -> summary:Yojson.Safe.t ->
   request:Yojson.Safe.t -> (unit, tool_call_error) result
@@ -233,9 +231,9 @@ val browser_services : config:Workspace.config -> access:Lane_addon_sources.acce
 (** The services of {!browser_service_reading}. *)
 val browser_export_reading : config:Workspace.config -> access:Lane_addon_sources.access -> tool_export list
 (** The exports of the browser services the caller may read. They are not
-    public tools: {!tool_export_snapshot} and {!tool_export_reading} leave
-    them out, so several browser installations may export one name. The
-    browser host calls one by the identity of the service it chose. *)
+    public tools: {!tool_export_snapshot} leaves them out, so several browser
+    installations may export one name. The browser host calls one by the
+    identity of the service it chose. *)
 type browser_service_status = Browser_ready of browser_service
   | Browser_refresh_needed of browser_service | Browser_unavailable | Browser_retired
 val browser_service_status : config:Workspace.config -> access:Lane_addon_sources.access ->

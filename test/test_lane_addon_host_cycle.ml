@@ -267,8 +267,8 @@ let test_submit_in_the_replacement_gap_is_not_sent_and_reaches_the_next_worker (
     (fun clock config _worker _state root ->
       let directory=Filename.concat root ".masc/config/lane-addons" in
       let source=Filename.concat directory "quiz.toml" in
-      let export ()=(Runtime.tool_export_reading ~config ~access:Lane_addon_sources.Operator_configuration ~reserved:[]
-        |> unwrap).exports |> List.find_opt (fun (export : Runtime.tool_export) -> export.tool.name="queue_question") in
+      let export ()=(Runtime.tool_export_snapshot ~config ~access:Lane_addon_sources.Operator_configuration ~reserved:[]).exports
+        |> List.find_opt (fun (export : Runtime.tool_export) -> export.tool.name="queue_question") in
       let submit export=Runtime.call_exported_tool_with_principal ~principal:(Some Lane_addon_call_context.Operator)
         ~config ~access:Lane_addon_sources.Operator_configuration ~reserved:[] ~export ~arguments:(`Assoc [])
         |> Result.map_error Lane_addon_submit_once.call_error_of_runtime in
@@ -566,8 +566,8 @@ export=["queue_question"]
          this request. There is no await_change, registry event or reconcile. *)
       await clock (fun () -> cycles config >= 1 && !(worker.observations) >= 1);
       let before = cycles config in
-      let export = match (Runtime.tool_export_reading ~config
-        ~access:Lane_addon_sources.Operator_configuration ~reserved:[] |> unwrap).exports with
+      let export = match (Runtime.tool_export_snapshot ~config
+        ~access:Lane_addon_sources.Operator_configuration ~reserved:[]).exports with
         | [export] -> export | _ -> fail "the original tool must be exported" in
       let reply = match Runtime.call_exported_tool ~config
         ~access:Lane_addon_sources.Operator_configuration ~reserved:[] ~export
@@ -590,7 +590,7 @@ let test_original_tool_destination_survives_replacement_and_reattachment () =
   let manifest = manifest ^ "[world.tools]\nexport=[\"queue_question\"]\n" in
   with_installation ~manifest ~exported_tool:(tool,invoke) (fun clock config _worker _state root ->
     let access = Lane_addon_sources.Operator_configuration in
-    let current () = match (Runtime.tool_export_reading ~config ~access ~reserved:[] |> unwrap).exports with
+    let current () = match (Runtime.tool_export_snapshot ~config ~access ~reserved:[]).exports with
       | [export] -> Some export | _ -> None in
     await clock (fun () -> Option.is_some (current ()));
     let original = Option.get (current ()) in
@@ -635,7 +635,7 @@ let test_capture_factory_uses_actual_live_declaration_before_any_rpc () =
   let manifest=manifest ^ "[world.tools]\nexport=[\"queue_question\"]\n" in
   with_installation ~manifest ~exported_tool:(tool,invoke) (fun clock config _worker _state _root ->
     let access=Lane_addon_sources.Operator_configuration in
-    let current ()=match (Runtime.tool_export_reading ~config ~access ~reserved:[] |> unwrap).exports with
+    let current ()=match (Runtime.tool_export_snapshot ~config ~access ~reserved:[]).exports with
       | [export] -> Some export | _ -> None in
     await clock (fun () -> Option.is_some (current ()));
     let export=Option.get (current ()) in
@@ -711,7 +711,7 @@ let test_category_edit_preserves_original_export_and_worker () =
   with_installation ~manifest:(categorized "analysis") ~exported_tool:(tool,invoke)
     (fun clock config _worker _state root ->
       let access = Lane_addon_sources.Operator_configuration in
-      let current () = match (Runtime.tool_export_reading ~config ~access ~reserved:[] |> unwrap).exports with
+      let current () = match (Runtime.tool_export_snapshot ~config ~access ~reserved:[]).exports with
         | [export] -> Some export | _ -> None in
       await clock (fun () -> Option.is_some (current ()));
       let original = Option.get (current ()) in

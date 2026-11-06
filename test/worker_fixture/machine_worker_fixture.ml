@@ -122,8 +122,8 @@ max_reply_bytes = %d
           |> Result.map_error R.error_to_string |> unwrap in
         let id = Yojson.Safe.Util.(attached |> member "instance_id" |> to_string) in
         let rec ready () =
-          match R.tool_export_reading ~config ~access:Masc.Lane_addon_sources.Unauthenticated ~reserved:[] with
-          | Ok reading when List.length reading.exports = List.length names -> () | _ -> Eio.Time.sleep clock 0.001; ready () in
+          let reading = R.tool_export_snapshot ~config ~access:Masc.Lane_addon_sources.Unauthenticated ~reserved:[] in
+          if List.length reading.exports = List.length names then () else (Eio.Time.sleep clock 0.001; ready ()) in
         ready ();
         (* Export listing precedes the first completed observation, and machine
            routes read a completed one: readiness must cover both, or the

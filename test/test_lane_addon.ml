@@ -355,8 +355,8 @@ let test_a_failed_installation_is_read_as_unready () = with_fixture (fun env _ c
     (match observed "masc_msx_step" with
      | Error (Runtime.Unready_installations ({reason=Failed _;_}, [])) -> true
      | Error (Runtime.Unready_installations _ | Not_yet_observed _ | Ambiguous_installations _) | Ok _ -> false);
-  let reading = unwrap (Runtime.tool_export_reading ~config
-    ~access:Lane_addon_sources.Unauthenticated ~reserved:[]) in
+  let reading = Runtime.tool_export_snapshot ~config
+    ~access:Lane_addon_sources.Unauthenticated ~reserved:[] in
   check Alcotest.int "a failed installation exports nothing" 0 (List.length reading.exports);
   (match reading.unready with
    | [unready] ->
@@ -370,8 +370,8 @@ let test_a_failed_installation_is_read_as_unready () = with_fixture (fun env _ c
   detach config id;
   await_unlisted clock config id;
   check bool "a detached installation is no longer unready" true
-    ((unwrap (Runtime.tool_export_reading ~config
-      ~access:Lane_addon_sources.Unauthenticated ~reserved:[])).unready = []))
+    ((Runtime.tool_export_snapshot ~config
+      ~access:Lane_addon_sources.Unauthenticated ~reserved:[]).unready = []))
 
 (* A caller learns which installation failed, never the host facts of why:
    its text is the same whatever the failure. The operator's text renders the
@@ -474,8 +474,8 @@ let test_a_failed_dos_installation_is_named_and_not_released () = with_fixture (
   let pass = Machine_controller_contract.(dos_tool_name Dos_pass) in
   let id = attach_exporting config dir "start-error" [pass] in
   await_phase clock config id "failed";
-  let unready = match (unwrap (Runtime.tool_export_reading ~config
-      ~access:Lane_addon_sources.Unauthenticated ~reserved:[])).unready with
+  let unready = match (Runtime.tool_export_snapshot ~config
+      ~access:Lane_addon_sources.Unauthenticated ~reserved:[]).unready with
     | [unready] -> unready
     | [] | _ :: _ :: _ -> fail "exactly the failed installation must be unready" in
   (match Machine_addon_host.call_shared ~principal:(Lane_addon_call_context.Host_actor "operator")
@@ -1888,13 +1888,12 @@ let test_broadcast_pending_commit_recovers_same_identity () =
 let test_tool_exports_bind_live_incarnations () = with_fixture (fun env sw config dir state ->
   let clock = Eio.Stdenv.clock env in
   let access = Lane_addon_sources.Operator_configuration in
-  let exports () = Runtime.tool_export_reading ~config ~access ~reserved:[]
-    |> Result.map (fun (reading : Runtime.export_reading) -> reading.exports) in
+  let exports () = (Runtime.tool_export_snapshot ~config ~access ~reserved:[]).exports in
   List.iter (fun name ->
     check bool (name ^ " is absent from the static MCP inventory") false (Config.is_raw_tool_name name);
     check bool (name ^ " has no static Keeper descriptor") true
       (Keeper_tool_descriptor.find_public name = None)) ["masc_msx_step"; "masc_dos_step"];
-  check Alcotest.int "no installation exposes nothing" 0 (List.length (unwrap (exports ())));
+  check Alcotest.int "no installation exposes nothing" 0 (List.length (exports ()));
   let attach_export ?(names = ["masc_msx_step"]) mode =
     let path = manifest dir mode in
     let original = In_channel.with_open_bin path In_channel.input_all in
@@ -1933,7 +1932,7 @@ let test_tool_exports_bind_live_incarnations () = with_fixture (fun env sw confi
   check Alcotest.int "disabled auth ignores stale bearer before attach" 0
     (List.length (listed ~auth_token:"unregistered-fixture-token" ()));
   let first = attach_export "good" in
-  await clock (fun () -> match exports () with Ok [_] -> true | _ -> false);
+  await clock (fun () -> match exports () with [_] -> true | _ -> false);
   await clock (fun () -> int "observation_seq" (instance config first) > 0);
   let cached () = unwrap (Runtime.observation_for_export ~config ~access ~name:"masc_msx_step"
     |> Result.map_error Runtime.export_refusal_message) in
@@ -1960,10 +1959,10 @@ let test_tool_exports_bind_live_incarnations () = with_fixture (fun env sw confi
     (member "isError" invoked_result <> `Bool true);
   check string "MCP preserves worker result content" first
     (invoked_result |> member "content" |> Yojson.Safe.Util.to_list |> List.hd |> text "text");
-  let handle = List.hd (unwrap (exports ())) in
+  let handle = List.hd (exports ()) in
   let descriptor = Keeper_lane_addon_descriptor.create handle in
   Gc.full_major ();
-  let observed_again = List.hd (unwrap (exports ())) in
+  let observed_again = List.hd (exports ()) in
   check bool "repeated live inventories retain the same owned export" true (handle == observed_again);
   check bool "repeated Keeper observations retain the same actual descriptor" true
     (descriptor == Keeper_lane_addon_descriptor.create observed_again);
@@ -2031,11 +2030,15 @@ let test_tool_exports_bind_live_incarnations () = with_fixture (fun env sw confi
     check bool "player cannot invoke a worker-only export" true (member "error" denied <> `Null));
   detach config invited;
   await_phase clock config invited "detached";
-  check bool "reserved host name rejects publication" true
-    (Result.is_error (Runtime.tool_export_reading ~config ~access ~reserved:["masc_msx_step"]));
+  let reserved_snapshot = Runtime.tool_export_snapshot ~config ~access ~reserved:["masc_msx_step"] in
+  check bool "a host tool name is left out of the exports" true
+    (reserved_snapshot.exports = []
+     && List.exists (fun (conflict : Lane_addon_tool_export.conflict) ->
+          conflict.name = "masc_msx_step"
+          && conflict.reason = Lane_addon_tool_export.Reserved_host_name) reserved_snapshot.conflicts);
   let second = attach_export "second" in
   await clock (fun () -> int "observation_seq" (instance config second) > 0);
-  check bool "ambiguous name rejects publication" true (Result.is_error (exports ()));
+  check Alcotest.int "a name two installations export is left out" 0 (List.length (exports ()));
   check bool "ambiguous name rejects an old handle" true (Result.is_error (call handle));
   let unrelated_name = "fixture_unrelated_export" in
   let reserved_name = "masc_board_stats" in
@@ -2049,6 +2052,10 @@ let test_tool_exports_bind_live_incarnations () = with_fixture (fun env sw confi
   let isolated = Keeper_lane_addon_runtime.snapshot ~config ~keeper_name:"fixture-keeper" in
   check (list string) "only conflicting names are quarantined" [unrelated_name]
     (List.map (fun (export : Lane_addon_tool_export.t) -> export.tool.name) isolated.exports);
+  let mcp_listed = request "tools/list"
+      (`Assoc ["names", `List [`String unrelated_name; `String "masc_msx_step"]])
+    |> member "result" |> member "tools" |> Yojson.Safe.Util.to_list |> List.map (text "name") in
+  check (list string) "MCP still lists the export nothing else claims" [unrelated_name] mcp_listed;
   check bool "duplicate name retains both installation identities" true
     (List.exists (fun (conflict : Lane_addon_tool_export.conflict) ->
        conflict.name = "masc_msx_step"
@@ -2088,15 +2095,15 @@ let test_tool_exports_bind_live_incarnations () = with_fixture (fun env sw confi
   check bool "detach notifies opted-in tool subscriptions" true (!changes <> []);
   check bool "MCP rejects detached tool call" true (member "error" (invoked ()) <> `Null);
   let replacement = attach_export "replacement" in
-  await clock (fun () -> match exports () with Ok [_] -> true | _ -> false);
+  await clock (fun () -> match exports () with [_] -> true | _ -> false);
   check bool "same-name replacement cannot receive old call" true (Result.is_error (call handle));
   check bool "new handle invokes replacement" true
-    (Result.is_ok (call (List.hd (unwrap (exports ())))));
+    (Result.is_ok (call (List.hd (exports ()))));
   detach config replacement;
   await_phase clock config replacement "detached";
   let uncertain = attach_export "export-error" in
   await clock (fun () -> int "observation_seq" (instance config uncertain) > 0);
-  let uncertain_handle = List.hd (unwrap (exports ())) in
+  let uncertain_handle = List.hd (exports ()) in
   let previous_seq = int "observation_seq" (instance config uncertain) in
   check bool "lost worker response preserves unknown outcome" true
     (match call uncertain_handle with Error (Runtime.Outcome_unknown _) -> true | _ -> false);
@@ -2109,9 +2116,9 @@ let test_tool_exports_bind_live_incarnations () = with_fixture (fun env sw confi
   detach config uncertain;
   await_phase clock config uncertain "detached";
   let cancelled = attach_export "export-hang" in
-  await clock (fun () -> match exports () with Ok [_] -> true | _ -> false);
+  await clock (fun () -> match exports () with [_] -> true | _ -> false);
   await clock (fun () -> int "observation_seq" (instance config cancelled) > 0);
-  let cancelled_handle = List.hd (unwrap (exports ())) in
+  let cancelled_handle = List.hd (exports ()) in
   Eio.Fiber.first
     (fun () -> ignore (call cancelled_handle))
     (fun () ->
@@ -2125,9 +2132,9 @@ let test_tool_exports_bind_live_incarnations () = with_fixture (fun env sw confi
   (* A call cancelled before it wrote anything to the worker, here held in its
      mediation, changed nothing there: the installation keeps serving. *)
   let unsent = attach_export "export-hang" in
-  await clock (fun () -> match exports () with Ok [_] -> true | _ -> false);
+  await clock (fun () -> match exports () with [_] -> true | _ -> false);
   await clock (fun () -> int "observation_seq" (instance config unsent) > 0);
-  let unsent_handle = List.hd (unwrap (exports ())) in
+  let unsent_handle = List.hd (exports ()) in
   let mediating, entered = Eio.Promise.create () in
   let never, _ = Eio.Promise.create () in
   let held ~release_controller:_ ~snapshot:_ ~invoke =
@@ -2142,17 +2149,17 @@ let test_tool_exports_bind_live_incarnations () = with_fixture (fun env sw confi
     (Hashtbl.mem state.stops unsent);
   check bool "and its export stays callable" true
     (match exports () with
-     | Ok [handle] -> Lane_addon_tool_export.equal_owner handle.owner unsent_handle.owner
-     | Ok _ | Error _ -> false);
+     | [handle] -> Lane_addon_tool_export.equal_owner handle.owner unsent_handle.owner
+     | [] | _ :: _ :: _ -> false);
   detach config unsent;
   await_phase clock config unsent "detached";
   (* A mediated call counts as written from its first RPC, the controller
      snapshot, so one cancelled after it stops the installation even though
      its tool call never went. *)
   let snapped = attach_export "export-hang" in
-  await clock (fun () -> match exports () with Ok [_] -> true | _ -> false);
+  await clock (fun () -> match exports () with [_] -> true | _ -> false);
   await clock (fun () -> int "observation_seq" (instance config snapped) > 0);
-  let snapped_handle = List.hd (unwrap (exports ())) in
+  let snapped_handle = List.hd (exports ()) in
   let snapshotted, mark_snapshotted = Eio.Promise.create () in
   let after_snapshot ~release_controller:_ ~snapshot ~invoke =
     ignore (snapshot ()); Eio.Promise.resolve mark_snapshotted (); Eio.Promise.await never; invoke None in
@@ -2166,8 +2173,8 @@ let test_tool_exports_bind_live_incarnations () = with_fixture (fun env sw confi
   check bool "a mediated call cancelled after its snapshot stops the installation" true
     (Hashtbl.mem state.stops snapped);
   let remote = attach_export "export-hang" in
-  await clock (fun () -> match exports () with Ok [_] -> true | _ -> false);
-  let remote_handle = List.hd (unwrap (exports ())) in
+  await clock (fun () -> match exports () with [_] -> true | _ -> false);
+  let remote_handle = List.hd (exports ()) in
   let cancel_remote, release_remote = Eio.Promise.create () in
   let cleanup_started, mark_cleanup_started = Eio.Promise.create () in
   let cleanup_allowed, release_cleanup = Eio.Promise.create () in
@@ -2208,7 +2215,7 @@ let test_http_caller_marker_stays_out_of_export_arguments () = with_fixture (fun
   let id = unwrap (dispatch config Runtime.Attach ["manifest_path",`String path;
     "run_id",`String "world";"binding",`Assoc ["sources",`List []]]) |> text "instance_id" in
   await clock (fun () ->
-    match Runtime.tool_export_reading ~config ~access ~reserved:[] with Ok {exports=[_];_} -> true | _ -> false);
+    match (Runtime.tool_export_snapshot ~config ~access ~reserved:[]).exports with [_] -> true | _ -> false);
   let server = Mcp_server_eio.For_testing.create_state ~base_path:config.base_path () in
   let metadata = `Assoc [
     "io.modelcontextprotocol/protocolVersion", `String "2026-07-28";
@@ -2267,7 +2274,7 @@ let test_machine_activity_applies_to_worker_calls () = with_fixture (fun env _sw
     "run_id",`String "activity";"binding",`Assoc ["sources",`List []]]) in
   let id = text "instance_id" attached in
   let access = Lane_addon_sources.Unauthenticated in
-  let exports () = (unwrap (Runtime.tool_export_reading ~config ~access ~reserved:[])).exports in
+  let exports () = (Runtime.tool_export_snapshot ~config ~access ~reserved:[]).exports in
   await (Eio.Stdenv.clock env) (fun () -> List.length (exports ()) = List.length names);
   let call name arguments =
     let export = List.find (fun (export : Runtime.tool_export) -> export.tool.name=name) (exports ()) in
@@ -2321,7 +2328,7 @@ let test_machine_export_host_admission () = with_fixture (fun env _sw config dir
     let id = unwrap (dispatch config Runtime.Attach ["manifest_path", `String path;
       "run_id", `String "world"; "binding", `Assoc ["sources", `List []]]) |> text "instance_id" in
     let access = Lane_addon_sources.Operator_configuration in
-    let exports () = (unwrap (Runtime.tool_export_reading ~config ~access ~reserved:[])).exports in
+    let exports () = (Runtime.tool_export_snapshot ~config ~access ~reserved:[]).exports in
     await clock (fun () -> List.length (exports ()) = 2);
     let call ~principal name arguments =
       let export = List.find (fun (export : Runtime.tool_export) -> export.tool.name = name) (exports ()) in
@@ -2380,7 +2387,7 @@ let export_bench env sw config state ~id ~observed =
   let clock = Eio.Stdenv.clock env in
   let access = Lane_addon_sources.Operator_configuration in
   let exports () = List.filter (fun (export : Runtime.tool_export) -> export.instance_id = id)
-    (unwrap (Runtime.tool_export_reading ~config ~access ~reserved:[])).exports in
+    (Runtime.tool_export_snapshot ~config ~access ~reserved:[]).exports in
   let call name arguments =
     let export = List.find (fun (export : Runtime.tool_export) -> export.tool.name = name) (exports ()) in
     Runtime.call_exported_tool ~config ~access ~reserved:[] ~export ~arguments in
@@ -2543,8 +2550,8 @@ let test_a_consumer_refused_during_a_call_captures_again () =
   (* Cancel before the first worker RPC, after a consumer has already seen
      the counted call as refreshing. No subsequent write or poll rescues it. *)
   let observed = producer_observes () in
-  let exports = unwrap (Runtime.tool_export_reading ~config
-    ~access:Lane_addon_sources.Operator_configuration ~reserved:[]) in
+  let exports = Runtime.tool_export_snapshot ~config
+    ~access:Lane_addon_sources.Operator_configuration ~reserved:[] in
   let write = List.find (fun (export : Runtime.tool_export) ->
     export.instance_id = producer && export.tool.name = declared_write) exports.exports in
   let entered, signal_entered = Eio.Promise.create () in

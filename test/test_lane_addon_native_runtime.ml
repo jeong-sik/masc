@@ -425,11 +425,7 @@ hooks = ["validate_input", "validate_output"]
   let id=attach "normal" in
   let original=selected id in
   let installation (export:R.tool_export)=export.instance_id=id in
-  check bool "the browser export is not a public tool" true
-    (match R.tool_export_reading ~config ~access ~reserved:[] with
-     | Ok reading -> not (List.exists installation reading.exports)
-     | Error _ -> false);
-  check bool "nor in the public export snapshot" false
+  check bool "the browser export is not a public tool" false
     (List.exists installation (R.tool_export_snapshot ~config ~access ~reserved:[]).exports);
   check bool "the browser host reads it by the service's identity" true
     (List.exists (fun (export:R.tool_export) -> installation export
@@ -454,8 +450,10 @@ hooks = ["validate_input", "validate_output"]
   check bool "a host tool named like the browser export leaves the browser host connected" true
     (Result.is_ok (Browser_addon_host.connect ~config ~access:Lane_addon_sources.Unauthenticated
       ~principal:Lane_addon_call_context.Operator ~reserved:[Browser_addon_tool.definition.name]));
-  check bool "nor makes the public reading collide" true
-    (Result.is_ok (R.tool_export_reading ~config ~access ~reserved:[Browser_addon_tool.definition.name]));
+  check bool "nor makes a public name conflict" false
+    (List.exists (fun (conflict : Lane_addon_tool_export.conflict) ->
+       conflict.name = Browser_addon_tool.definition.name)
+       (R.tool_export_snapshot ~config ~access ~reserved:[Browser_addon_tool.definition.name]).conflicts);
   check bool "public host uses selected input middleware" true
     (match Browser_addon_host.call host ~backend:Browser_lane.Backend.External_host ~arguments:(`Assoc ["actor",`String "forged"]) with
      | Error (R.Host_refusal (Lane_addon_call_context.Rejected _)) -> true | _ -> false);
@@ -491,9 +489,7 @@ hooks = ["validate_input", "validate_output"]
   wait clock (fun () -> inspect id |> member "phase" |> text "kind"="failed");
   let failed_installation (unready:Lane_addon_unready.t)=unready.instance_id=id in
   check bool "a failed browser installation is not named among public tools" false
-    (match R.tool_export_reading ~config ~access ~reserved:[] with
-     | Ok reading -> List.exists failed_installation reading.unready
-     | Error _ -> true);
+    (List.exists failed_installation (R.tool_export_snapshot ~config ~access ~reserved:[]).unready);
   check bool "the browser host still reads why it cannot serve" true
     (List.exists failed_installation (R.browser_service_reading ~config ~access).unready);
   check bool "temporary observation failure does not retire native client" true
@@ -906,8 +902,10 @@ max_reply_bytes = 65536
   let second=attach manifest [] in
   wait clock (fun () -> ready second);
   publish_client second;
-  check bool "two browser installations exporting one name leave the public tools readable" true
-    (Result.is_ok (R.tool_export_reading ~config ~access ~reserved:[]));
+  check bool "two browser installations exporting one name make no public conflict" false
+    (List.exists (fun (conflict : Lane_addon_tool_export.conflict) ->
+       conflict.name = Browser_addon_tool.definition.name)
+       (R.tool_export_snapshot ~config ~access ~reserved:[]).conflicts);
   check int "and the browser host reads both exports by identity" 2
     (List.length (List.filter (fun (export:R.tool_export) -> export.tool.name=Browser_addon_tool.definition.name)
       (R.browser_export_reading ~config ~access)));

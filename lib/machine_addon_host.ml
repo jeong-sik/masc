@@ -128,9 +128,11 @@ let host_tool_names () = List.map (fun (schema : Masc_domain.tool_schema) -> sch
 let call_shared ~principal ~config ~name ~arguments =
   let access = Lane_addon_sources.Unauthenticated in
   let reserved = host_tool_names () in
-  match Lane_addon_runtime.tool_export_reading ~config ~access ~reserved with
-  | Error detail -> Error (Lane_addon_runtime.Unavailable detail)
-  | Ok reading ->
+  let reading = Lane_addon_runtime.tool_export_snapshot ~config ~access ~reserved in
+  match List.find_opt (fun (conflict : Lane_addon_tool_export.conflict) ->
+    String.equal conflict.name name) reading.conflicts with
+  | Some conflict -> Error (Lane_addon_runtime.Unavailable (Lane_addon_tool_export.conflict_to_string conflict))
+  | None ->
       match List.find_opt (fun (export : Lane_addon_tool_export.t) ->
         String.equal export.tool.name name) reading.exports with
       | None -> Error (Lane_addon_runtime.Unavailable
@@ -150,9 +152,11 @@ let release_shared_controller ~events ~config ~holder ~by ~reason =
   let access = Lane_addon_sources.Unauthenticated in
   let reserved = host_tool_names () in
   let name = Machine_controller_contract.(dos_tool_name Dos_pass) in
-  match Lane_addon_runtime.tool_export_reading ~config ~access ~reserved with
-  | Error detail -> Error (Lane_addon_runtime.Unavailable detail)
-  | Ok reading ->
+  let reading = Lane_addon_runtime.tool_export_snapshot ~config ~access ~reserved in
+  match List.find_opt (fun (conflict : Lane_addon_tool_export.conflict) ->
+    String.equal conflict.name name) reading.conflicts with
+  | Some conflict -> Error (Lane_addon_runtime.Unavailable (Lane_addon_tool_export.conflict_to_string conflict))
+  | None ->
       match List.find_opt (fun (export : Lane_addon_tool_export.t) ->
         String.equal export.tool.name name) reading.exports with
       | None ->

@@ -324,8 +324,7 @@ let addon_exports_for_request ~profile ~auth_token state =
   let reserved = List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
       Config.raw_all_tool_schemas in
   let permitted ~agent_name ~principal access =
-    Lane_addon_runtime.tool_export_reading ~config ~access ~reserved
-    |> Result.map (fun (reading : Lane_addon_runtime.export_reading) ->
+      let reading = Lane_addon_runtime.tool_export_snapshot ~config ~access ~reserved in
       (* Retained tool metadata owns known permissions even when execution is
          supplied by an Add-on. Unknown package tools use the generic Lane
          action permission; package-provided annotations grant no role. *)
@@ -347,20 +346,23 @@ let addon_exports_for_request ~profile ~auth_token state =
         match List.filter permits unready.declared_tools with
         | [] -> None
         | declared_tools -> Some { unready with declared_tools }) reading.unready in
-      access, principal, reserved, ({ exports; unready } : Lane_addon_runtime.export_reading)) in
+      let conflicts = List.filter (fun (conflict : Lane_addon_tool_export.conflict) ->
+        permits conflict.name) reading.conflicts in
+      access, principal, reserved,
+      ({ exports; conflicts; unready } : Lane_addon_runtime.export_snapshot) in
   match profile with
   | Managed_agent | Operator_remote ->
       Ok (Lane_addon_sources.Unauthenticated, Lane_addon_call_context.Anonymous, reserved,
-        ({ exports = []; unready = [] } : Lane_addon_runtime.export_reading))
+        ({ exports = []; conflicts = []; unready = [] } : Lane_addon_runtime.export_snapshot))
   | Full | Seat ->
       match auth_token with
-      | None -> permitted ~agent_name:"anonymous" ~principal:Lane_addon_call_context.Anonymous
-          Lane_addon_sources.Unauthenticated
+      | None -> Ok (permitted ~agent_name:"anonymous" ~principal:Lane_addon_call_context.Anonymous
+          Lane_addon_sources.Unauthenticated)
       | Some token ->
           match Auth.find_credential_by_token config.base_path ~token with
           | Error _ when not (Auth.is_auth_enabled config.base_path) ->
-              permitted ~agent_name:"anonymous" ~principal:Lane_addon_call_context.Anonymous
-                Lane_addon_sources.Unauthenticated
+              Ok (permitted ~agent_name:"anonymous" ~principal:Lane_addon_call_context.Anonymous
+                Lane_addon_sources.Unauthenticated)
           | Error error -> Error (Masc_domain.masc_error_to_string error)
           | Ok credential ->
               let access = match credential.role with
@@ -374,7 +376,7 @@ let addon_exports_for_request ~profile ~auth_token state =
                 | Lane_addon_sources.Keeper keeper -> Lane_addon_call_context.Keeper keeper
                 | Operator_configuration | Unauthenticated ->
                     Lane_addon_call_context.Authenticated_agent credential.agent_name in
-              permitted ~agent_name:credential.agent_name ~principal access
+              Ok (permitted ~agent_name:credential.agent_name ~principal access)
 ;;
 
 (* The worker SDK still models 2025 tool execution hints and a legacy [icon].
@@ -412,7 +414,7 @@ let handle_list_tools_eio
   in
   match addon_exports_for_request ~profile ~auth_token state with
   | Error detail -> make_error_typed ~id Mcp_error_code.Invalid_request detail
-  | Ok (_, _, _, (reading : Lane_addon_runtime.export_reading)) ->
+  | Ok (_, _, _, (reading : Lane_addon_runtime.export_snapshot)) ->
   let tools =
     (TP.tool_schemas_for_profile ~include_hidden state profile
       |> List.map (fun (schema : Masc_domain.tool_schema) ->
@@ -1214,16 +1216,20 @@ let handle_request
                       let addon =
                         if Config.is_raw_tool_name name then Ok (None, None)
                         else addon_exports_for_request ~profile:call_profile ~auth_token state
-                          |> Result.map (fun (access, principal, reserved, (reading : Lane_addon_runtime.export_reading)) ->
+                          |> Result.map (fun (access, principal, reserved, (reading : Lane_addon_runtime.export_snapshot)) ->
                               Option.map (fun export -> access, principal, reserved, export)
                                 (List.find_opt (fun (export : Lane_addon_runtime.tool_export) ->
                                   String.equal export.tool.name name) reading.exports),
-                              Lane_addon_unready.summary (Lane_addon_unready.declaring ~name reading.unready)) in
+                              (match List.find_opt (fun (conflict : Lane_addon_tool_export.conflict) ->
+                                 String.equal conflict.name name) reading.conflicts with
+                               | Some conflict -> Some (Lane_addon_tool_export.conflict_to_string conflict)
+                               | None -> Lane_addon_unready.summary (Lane_addon_unready.declaring ~name reading.unready))) in
                       match addon with
                       | Error detail -> failed_tool_call_error ~tool_name:name Mcp_error_code.Invalid_request detail
                       | Ok (None, Some reason) ->
                           (* Like tools/list, the endpoint has no callable tool
-                             of this name; an installation that declares it
+                             of this name; a name claimed twice names its
+                             claimants, and an installation that declares it
                              and cannot serve now is named with why. *)
                           failed_tool_call_error ~tool_name:name Mcp_error_code.Method_not_found reason
                       | Ok (Some (access, principal, reserved, export), _) ->

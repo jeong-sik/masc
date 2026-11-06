@@ -517,6 +517,13 @@ scripts/measure-tool-efficiency.py --base-path <base> --from-date <배포 다음
 - 가장 큰 원인은 서버 재시작이에요. SIGTERM 은 68번이고, 그 60초 안에 `Turn_cancelled` 로 끝난 위임이 106개예요. 죽은 위임이 돈 시간은 중앙값 23분이고 합계 61.8시간이에요. 위임을 보낸 쪽은 "The operation was cancelled." 를 받아요. 이슈 #49289 에 측정과 후보를 적었고 코드는 바꾸지 않았어요. `Turn_cancelled` 가 owner 종료 의미로 `test_keeper_owner`·`test_keeper_wire_terminal` 에 굳어 있어서예요.
 - 나머지는 한도·쿼터 54, `auth status` 잘림 26, `provider_attempt_effect_fenced` 19, `reasoning_replay` 11, DNS 7 이에요.
 
+### 위임이 끝난 뒤 submitter 의 다음 턴
+
+- 11-05T00:00Z ~ 11-06T12:40Z 에 끝난(`succeeded`·`failed`) agent 채널 위임 중 submitter 가 받는 Keeper 와 다른 109건에서, 위임이 끝난 때부터 submitter 의 다음 턴이 시작되기까지를 쟀어요. 그 턴이 완료 알림이 시작한 턴인지는 확인하지 않아서 알림 전달의 상한이에요.
+- submitter 가 턴 사이에 있을 때 끝난 40건은 중앙값 1초, p90 4초, 최대 6,828초예요. 턴 안에 있을 때 끝난 69건(63%)은 중앙값 186초, p90 2,695초, 최대 7,014초예요. 일정 깨움이 턴 안의 Keeper 를 만났을 때(7건, 중앙값 165초)와 같은 모양이에요.
+- 저장소 밖의 임시 스크립트(Keeper 별 `chat-operations.sqlite3` 의 `operations` 와 `measure_lane_time.py` 의 `read_runs` 를 읽어요)로 센 값이라 다시 돌리는 명령이 아직 없어요.
+- Delegate 코드는 바꾸지 않았어요. 턴 안의 submitter 가 이 시간을 줄이려면 도구 호출 사이에 알림을 받아야 하는데, 그것은 알림 전달 규칙의 변경이라 RFC 가 먼저예요.
+
 ### 통계 API
 
 - `GET /api/v1/tool-metrics/series` 는 배포 서버에서 값을 줘요. 24시간 합계는 13,711호출이고, `tool_execute` 가 7,742호출로 기록된 시간의 96.4% 예요.

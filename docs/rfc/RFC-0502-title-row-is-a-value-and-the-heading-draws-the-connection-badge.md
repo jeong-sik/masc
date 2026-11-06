@@ -14,7 +14,7 @@ related: []
 
 ## 0. 요약
 
-- 좁은 터미널에서 제목 줄 끝의 연결 배지(`HTTP [connected]`)가 잘린다. 제목 줄 67줄을 읽었더니 5줄이 잘렸고(화면 4개), 6줄은 배지가 없다(화면 2개)(1.1).
+- 좁은 터미널에서 제목 줄 끝의 연결 배지(`HTTP [connected]`)가 잘린다. 제목 줄 124줄을 읽었더니 5줄이 잘렸고(화면 4개, 모두 56열이나 64열), 10줄은 배지가 없다(화면 2개, 읽은 다섯 크기 모두)(1.1).
 - 배지가 줄 끝에 있는 까닭은 `[workspace mismatch]`(서버가 다른 워크스페이스를 본다)를 어느 화면에서나 말하려는 것이다. 줄이 모자라면 프레임이 줄 끝을 자르므로 이 경고가 가장 먼저 잘린다(1.2).
 - 같은 원인을 네 번 고쳤다. 도구가 셋이다: `detail_heading`(#39712), `badge_row`(#44368), `compact_connection_badge`(#47384). #49045 는 `detail_heading` 을 한 번 더 불렀다(1.3). 화면 하나를 고치면 다음 화면이 남는다.
 - `connection_badge state` 는 55줄(14개 파일)에서 불린다. 14줄은 라벨 인자로 넘기고, 36줄은 화면이 제목 문자열에 직접 이어 붙인다(1.4).
@@ -27,8 +27,8 @@ related: []
 
 main 증명 빌드(`6ad837c7cac`, run 42154515127)를 시험용 서버에 붙여 두 가지를 읽었다.
 
-- 14화면 순회를 64x30 과 56x30 으로 읽었다(28줄).
-- 상세 화면 16곳을 64x30, 56x30, 72x30 으로 읽었다(48장). 제목 줄이 `MASC` 로 시작하지 않는 3곳(9장)은 세지 않았다. 남는 것이 39줄이다.
+- 14화면 순회를 64x30, 56x30, 80x24, 100x30 으로 읽었다(56줄).
+- 상세 화면 16곳을 72x30, 64x30, 56x30, 80x24, 100x30 으로 읽었다(80장). 제목 줄이 `MASC` 로 시작하지 않는 12장은 세지 않았다. 남는 것이 68줄이다.
 
 제목 줄은 화면 위쪽 여섯 줄 중 `MASC` 가 든 첫 줄이다. 배지가 `[낱말]` 로 끝나면 온전, `[` 뒤에 `]` 가 없거나 `…` 로 끝나면 잘림, 둘 다 아니면 없음으로 셌다. 시계는 `hh:mm:ss` 로 가렸다.
 
@@ -39,10 +39,10 @@ main 증명 빌드(`6ad837c7cac`, run 42154515127)를 시험용 서버에 붙여
 | Fusion 목록, 56x30 | `MASC Fusion (0 runs · 0 done)  hh:mm:ss  HTTP [conne…` | 잘림 |
 | Artifacts / Resources, 56x30 | `MASC Artifacts / Resources  hh:mm:ss  HTTP [connecte…` | 잘림 |
 | Workspace, 56x30 | `MASC Workspace (0)  hh:mm:ss  HTTP [connected] · ref…` | 진행 글만 잘림 |
-| Board 글 상세, 세 크기 모두 | `MASC Board  [p-7…2dbb499d]  #verification   0  💬0` | 없음 |
-| Task 검토 상세, 세 크기 모두 | `MASC 작업  목표  ▸작업 검토·1  작업 판정 ▸ details  task-002` | 없음 |
+| Board 글 상세, 다섯 크기 모두 | `MASC Board  [p-7…2dbb499d]  #verification   0  💬0` | 없음 |
+| Task 검토 상세, 다섯 크기 모두 | `MASC 작업  목표  ▸작업 검토·1  작업 판정 ▸ details  task-002` | 없음 |
 
-읽은 67줄 중 배지가 온전한 곳은 56줄이다. 잘린 곳은 5줄(화면 4개)이고, 배지가 없는 곳은 6줄(화면 2개)이다. 배지가 없는 두 화면은 세 크기 모두에서 화면 어디에도 `HTTP [` 가 없다.
+읽은 124줄(56 + 68) 중 배지가 온전한 곳은 109줄이다. 잘린 곳은 5줄(화면 4개)이고 모두 56열이나 64열이다. 80x24 와 100x30 에서는 잘린 줄이 없다. 배지가 없는 곳은 10줄(화면 2개)이고 다섯 크기 모두에서 같다. 배지가 없는 두 화면은 다섯 크기 모두에서 화면 어디에도 `HTTP [` 가 없다.
 
 이 빌드 뒤 main(`059ffb7d3e7`)까지 `bin/` 파일 13개가 바뀌었지만 `connection_badge`, `screen_title`, `detail_heading`, `surface_chrome`, `runtime_substrate_heading`, `pane_surface_title` 를 건드린 줄은 0줄이다(`git diff` 로 센 값). 이 RFC 의 줄 수와 함수 이름은 `059ffb7d3e7` 기준이다.
 
@@ -153,7 +153,7 @@ val screen_chrome :
 - 층이 많다. 36곳, 14개 파일이고 층은 열 개쯤이다.
 - 화면마다 제목 글을 `lead`, `id`, `after` 로 가르는 판단이 든다. 지금은 문자열 하나다.
 - `box_line` 으로 머리 줄을 직접 그리는 화면(19곳)은 `heading_row` 를 안 부르고 배지 없는 문자열을 그릴 수 있다. 배지를 문자열로 이어 붙이는 길은 막히지만 배지를 빼는 길은 타입이 못 막는다.
-- Board 글 상세와 Task 검토 상세에 배지가 생긴다. 줄이 모자라면 `after` 가 먼저 빠진다. 지금 이 두 화면이 배지를 빼는 것이 뜻이었는지는 코드에서 확인하지 못했다.
+- Board 글 상세와 Task 검토 상세에 배지가 생긴다. 줄이 모자라면 `after` 가 먼저 빠진다. 두 곳 모두 배지를 뺀 이유를 적은 주석이 없다. Task 검토 상세(`verification_detail_pane`)와 같은 파일의 판정 상세(`harness_detail_pane`)는 `~tail:(connection_badge state)` 로 배지를 붙인다. 빼려던 것인지는 코드만으로 알 수 없다.
 - 배지 자체가 줄보다 넓은 경우(1.2 의 산술)는 풀지 못한다. 열린 질문 4 이다.
 - 덮개 쪽에는 `surface_chrome` 이 남는다.
 
@@ -191,14 +191,14 @@ val screen_chrome :
 6. Runtime(6곳 중 Usage 넷을 뺀 둘).
 7. Verification(6곳).
 8. Work(3곳), Board(2곳), Connectors(2곳), Approvals(1곳), Chat(1곳), Activity(2곳), Repositories 목록(Workspace 화면, 2곳).
-9. 배지가 없는 Board 글 상세와 Task 검토 상세.
+9. 배지가 없는 Board 글 상세(`board_read_title`)와 Task 검토 상세(`verification_detail_pane`).
 10. 마지막: `connection_badge`·`usage_connection_badge` 를 `.mli` 에서 빼고 `Chrome_screen` 갈래를 지운다.
 
 층 수와 묶음은 파일 단위 추정이다. 층 1 을 만들 때 36곳의 `lead`·`id`·`after` 나눔을 표로 먼저 낸다.
 
 ## 6. 열린 질문
 
-1. 방향. 이 RFC(열 층쯤)와 A(잘리는 네 화면만 고치기) 중 어느 쪽인가. 이 RFC 를 제안한다. 같은 원인의 다섯 번째 고침이고, 배지가 없는 화면이 둘 있기 때문이다.
+1. 방향. 이 RFC(열 층쯤)와 A(잘리는 네 화면만 고치기) 중 어느 쪽인가. 이 RFC 를 제안한다. 같은 원인의 다섯 번째 고침이고, 배지가 없는 화면이 둘 있기 때문이다. A 는 잘림만 고치므로 이 둘은 다섯 크기 모두에서 배지 없이 남는다.
 2. chrome 을 화면용과 덮개용으로 나눌지, `title` 을 변형 타입(`Heading` 과 `Plain`)으로 둘지. 나누기를 제안한다. 변형 타입은 화면이 `Plain` 을 골라 배지를 빼는 길을 열어 둔다.
 3. 시계를 `after` 의 마지막 조각으로 통일할지, 꼬리에 둘지. Activity 는 지금 꼬리에 두므로 `after` 로 옮기면 Activity 의 시계가 줄이 모자랄 때 빠진다.
 4. 배지 자체가 줄보다 넓은 경우. Usage 의 `compact_connection_badge` 처럼 짧은 말로 바꾸는 규칙을 `heading_row` 에 넣을지, 이 RFC 밖에서 따로 할지. 넣으면 `detail_heading` 의 "꼬리는 줄이지 않는다"는 규칙이 "꼬리는 더 짧은 완전한 말로 바뀐다"로 바뀐다.

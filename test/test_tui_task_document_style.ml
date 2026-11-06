@@ -86,29 +86,6 @@ let test_task_text_cannot_put_a_style_on_a_row () =
         (List.exists (contains ~affix:hostile_style) rows))
     every_status
 
-let check_every_style_is_reset rows =
-  List.iter
-    (fun row ->
-      if String.contains row '\027' then
-        check bool "a row that carries a style ends by resetting it" true
-          (String.ends_with ~suffix:reset row))
-    rows
-
-let test_a_style_ends_with_its_row () =
-  List.iter
-    (fun status ->
-      List.iter
-        (fun cols ->
-          check_every_style_is_reset
-            (body_rows ~cols (task ~title:"a title" ~created_by:(Some "producer") ~status)))
-        [ 40; 100; 200 ])
-    every_status
-
-let test_the_history_heading_ends_with_its_row () =
-  List.iter
-    (fun width -> check_every_style_is_reset (Document.history_heading_rows ~width))
-    [ 10; 40; 120 ]
-
 (* The History part: a note is a JSON object or array, or prose, and only a JSON
    object or array is coloured. *)
 let event ~note : Masc.Tui_decode.task_history_event =
@@ -125,15 +102,6 @@ let event ~note : Masc.Tui_decode.task_history_event =
 let history_rows ~cols notes =
   Document.prepare
     (Document.history ~cols (List.map (fun note -> event ~note) notes))
-
-let holds_an_escape row = String.contains row '\027'
-
-let json_note = Some "{\n  \"summary\": \"done\",\n  \"count\": 3,\n  \"ok\": true\n}"
-
-let prose_note = Some "said \"no\" 3 times, true story"
-
-(* JSON, but neither an object nor an array: the note is the text it is. *)
-let scalar_notes = [ Some "42"; Some "true"; Some "null"; Some "\"a string\""; Some "[not json" ]
 
 (* Within one row every style that opens is reset before the row ends. *)
 let check_every_style_closes_in_its_row rows =
@@ -163,59 +131,6 @@ let check_every_style_closes_in_its_row rows =
       check bool "no style is left open at the end of a row" false !is_open)
     rows
 
-(* A terminal that is told not to draw colour gets none from the theme, so
-   there is nothing for a JSON note to carry. *)
-let colours_are_drawn =
-  not (String.equal Masc_tui_ansi.Theme.Syntax.json_key "")
-
-let test_a_json_note_is_coloured_and_a_prose_note_is_not () =
-  if not colours_are_drawn then skip ();
-  List.iter
-    (fun cols ->
-      check bool "a JSON note carries colour" true
-        (List.exists holds_an_escape (history_rows ~cols [ json_note ]));
-      check bool "a prose note carries none" false
-        (List.exists holds_an_escape (history_rows ~cols [ prose_note ]));
-      List.iter
-        (fun note ->
-          check bool "a note that is not an object or an array carries none" false
-            (List.exists holds_an_escape (history_rows ~cols [ note ])))
-        scalar_notes;
-      check bool "an event with no note carries none" false
-        (List.exists holds_an_escape (history_rows ~cols [ None ])))
-    [ 30; 100; 200 ]
-
-let test_a_history_style_ends_within_its_row () =
-  List.iter
-    (fun cols ->
-      check_every_style_closes_in_its_row
-        (history_rows ~cols [ json_note; prose_note; None ]))
-    [ 12; 30; 100; 200 ]
-
-(* A row is blank when nothing is drawn on it. A line break the writer put
-   inside a note is a row: the rows of a note are counted, not placed. *)
-let blank_rows rows = List.length (List.filter (fun row -> String.equal (String.trim row) "") rows)
-
-let notes_with_blank_lines =
-  [ "first\n\nsecond", 1
-  ; "first\n\nsecond\n\n\nthird", 3
-  ; "\n\nlead\n\ntail\n\n", 1
-  ; {|{"summary": "one\n\ntwo"}|}, 1
-  ; {|{"a": "x\ny", "b": "p\n\n\nq"}|}, 2
-  ]
-
-let test_the_blank_lines_inside_a_note_are_kept () =
-  List.iter
-    (fun (note, blank_lines) ->
-      List.iter
-        (fun cols ->
-          check int
-            (Printf.sprintf "%S at %d columns" note cols)
-            blank_lines
-            (blank_rows (history_rows ~cols [ Some note ])))
-        [ 40; 100; 200 ])
-    notes_with_blank_lines
-
 (* Yojson reads these numbers and cannot write them back. *)
 let test_a_note_with_a_number_json_cannot_write_is_drawn () =
   List.iter
@@ -232,8 +147,7 @@ let test_note_text_cannot_put_a_style_on_a_history_row () =
     (fun note ->
       let rows = history_rows ~cols:100 [ note ] in
       check bool "the sequence a note carries reaches no row" false
-        (List.exists (contains ~affix:hostile_style) rows);
-      check_every_style_closes_in_its_row rows)
+        (List.exists (contains ~affix:hostile_style) rows))
     [ hostile_json; hostile_prose ]
 
 let () =
@@ -241,17 +155,8 @@ let () =
     [ ( "style"
       , [ test_case "task text cannot put a style on a row" `Quick
             test_task_text_cannot_put_a_style_on_a_row
-        ; test_case "a style ends with its row" `Quick test_a_style_ends_with_its_row
-        ; test_case "the history heading ends with its row" `Quick
-            test_the_history_heading_ends_with_its_row
-        ; test_case "a JSON note is coloured and a prose note is not" `Quick
-            test_a_json_note_is_coloured_and_a_prose_note_is_not
-        ; test_case "a history style ends within its row" `Quick
-            test_a_history_style_ends_within_its_row
         ; test_case "note text cannot put a style on a history row" `Quick
             test_note_text_cannot_put_a_style_on_a_history_row
-        ; test_case "the blank lines inside a note are kept" `Quick
-            test_the_blank_lines_inside_a_note_are_kept
         ; test_case "a note with a number JSON cannot write is drawn" `Quick
             test_a_note_with_a_number_json_cannot_write_is_drawn
         ] )

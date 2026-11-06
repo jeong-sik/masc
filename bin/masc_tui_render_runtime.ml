@@ -1426,7 +1426,7 @@ let usage_lines ~cols ~rows (state : state) =
   | Usage_calls ->
       (match state.tool_series with
        | Tool_series_read calls ->
-           Masc_tui_usage_calls.lines ~width:(max 1 (framed_inner_width cols)) calls
+           Masc_tui_usage_calls.lines ~width:(max 1 (framed_inner_width cols)) ~rows calls
        | Tool_series_unread ->
            wrap_evidence
              (Masc_tui_usage_calls.note_lines ~days:state.provider_history_days

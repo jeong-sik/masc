@@ -654,6 +654,10 @@ section reads only while it is on screen, reads again a minute after each
 answer, and tries again after a failed read. The server answers from a cache
 that it refreshes in the background, so a read shows the store as of the read
 before it. The heading names the time of the answer the bars were drawn from.
+When the section is taller than the window, the legend takes one row and the
+blank rows between the parts go, so the table shows more of its rows; on a
+narrow window the legend and the heading take a shorter wording, and the
+heading keeps the time.
 
 Keeper rows show recorded 24-hour token and cost totals with the number of
 turns that reported each value and the number missing it. Transport delivery

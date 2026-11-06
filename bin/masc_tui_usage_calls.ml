@@ -138,15 +138,41 @@ let note_gap = 2
 let widest_load_bar = 24
 let narrowest_load_bar = 6
 
-let span_text = function
-  | Last_day -> "last 24 hours · per UTC hour"
-  | Last_week -> "7 UTC days · per UTC day"
-  | Last_fortnight -> "14 UTC days · per UTC day"
+let span_name = function
+  | Last_day -> "last 24 hours"
+  | Last_week -> "7 UTC days"
+  | Last_fortnight -> "14 UTC days"
 
-let heading t =
+let span_text window =
+  span_name window
+  ^
+  match width window with
+  | Series.Series_hour -> " · per UTC hour"
+  | Series.Series_day -> " · per UTC day"
+
+(* The first of the wordings that fits [cells]; the last one is cut to [cells]
+   when it does not fit either. *)
+let rec first_within ~cells wording rest =
+  match rest with
+  | [] -> Layout.take_cells wording cells
+  | next :: later ->
+      if Layout.display_width wording <= cells then wording
+      else first_within ~cells next later
+
+(* The longest wording that fits goes first. The time the numbers are from
+   stays in every wording: the answer can be a read behind the store, and this
+   time is what says by how much. *)
+let heading ~cells t =
   let as_of = Unix.gmtime t.series.Series.tsr_generated_at in
-  Printf.sprintf " Tool calls (%s) · as of %02d-%02d %02d:%02d UTC" (span_text t.window)
-    (as_of.Unix.tm_mon + 1) as_of.Unix.tm_mday as_of.Unix.tm_hour as_of.Unix.tm_min
+  let time =
+    Printf.sprintf "as of %02d-%02d %02d:%02d UTC" (as_of.Unix.tm_mon + 1)
+      as_of.Unix.tm_mday as_of.Unix.tm_hour as_of.Unix.tm_min
+  in
+  first_within ~cells
+    (Printf.sprintf " Tool calls (%s) · %s" (span_text t.window) time)
+    [ Printf.sprintf " Tool calls (%s) · %s" (span_name t.window) time;
+      Printf.sprintf " Tool calls · %s" time;
+      " " ^ time ]
 
 let note_lines ~days note =
   let span =
@@ -391,18 +417,46 @@ let table_lines ~cells t =
       in
       header :: List.mapi row readings
 
-let legend =
-  [ Theme.recede ()
-    ^ Printf.sprintf " Each row is scaled to its own largest bucket; %s = no call ran"
-        no_call_mark
-    ^ Ansi.reset;
-    Theme.recede ()
-    ^ " Red = every call in the bucket failed; the newest bucket is still open"
-    ^ Ansi.reset ]
+(* What the chart cannot say by itself, richest wording first, each wording
+   being its rows: every row has its own scale, what the dot is and what red
+   is. The newest bucket being open is left to the wording with room for it,
+   because the table marks that row [open] too. *)
+let legend_wordings =
+  [ [ Printf.sprintf "Each row is scaled to its own largest bucket; %s = no call ran"
+        no_call_mark;
+      "Red = every call in the bucket failed; the newest bucket is still open" ];
+    [ Printf.sprintf "Each row is scaled to its own max; %s = no call; red = every call failed"
+        no_call_mark ] ]
 
-let lines ~width:cells t =
+let legend_shortest =
+  Printf.sprintf "Own scale per row; %s = no call; red = all failed" no_call_mark
+
+(* The first wording with no more than [at_most] rows, all within [cells]. A
+   width that none of them fits gets the shortest one, cut. *)
+let legend ~cells ~at_most =
+  let room = max 0 (cells - String.length margin) in
+  let fits rows =
+    List.length rows <= at_most
+    && List.for_all (fun row -> Layout.display_width row <= room) rows
+  in
+  let rows =
+    match List.find_opt fits legend_wordings with
+    | Some rows -> rows
+    | None -> [ Layout.take_cells legend_shortest room ]
+  in
+  List.map (fun row -> Theme.recede () ^ margin ^ row ^ Ansi.reset) rows
+
+(* Two blank rows and a two-row legend are worth their rows while the section
+   fits. Taller than [rows], the legend takes one row and the blank rows go, so
+   the table shows more of its rows without a scroll. *)
+let lines ~width:cells ~rows t =
   let calls, failures, deferred = totals t.series.Series.tsr_buckets in
-  if calls = 0 then [ heading t; " No tool call ran in this window" ]
+  let heading = heading ~cells t in
+  if calls = 0 then [ heading; " No tool call ran in this window" ]
   else
-    (heading t :: totals_line ~calls ~failures ~deferred :: "" :: chart_lines ~cells t)
-    @ legend @ [ "" ] @ table_lines ~cells t
+    let top = [ heading; totals_line ~calls ~failures ~deferred ] in
+    let chart = chart_lines ~cells t in
+    let table = table_lines ~cells t in
+    let spaced = top @ [ "" ] @ chart @ legend ~cells ~at_most:2 @ [ "" ] @ table in
+    if List.length spaced <= rows then spaced
+    else top @ chart @ legend ~cells ~at_most:1 @ table

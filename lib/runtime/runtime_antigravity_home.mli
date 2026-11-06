@@ -1,7 +1,8 @@
 (** Persistent, operator-owned HOME layout for the official Antigravity CLI.
 
-    A stable Google OpenID issuer/subject reuses a private account generation,
-    keeping native OAuth refreshes even when source credentials rotate. A changed
+    The account a CLI login file names (see {!Runtime_antigravity_oauth_credential})
+    reuses a private account generation, keeping native OAuth refreshes even
+    when source credentials rotate or the CLI rewrites the file's shape. A changed
     selected principal publishes a fresh opaque generation so another account
     cannot reuse the prior account's HOME or session.
     Old in-flight generations remain intact. Turn-scoped MCP configuration is
@@ -18,10 +19,20 @@ type error =
       { path : string
       ; detail : string
       }
+  | Unrecognized_oauth_source of
+      { path : string
+      ; rejection : Runtime_antigravity_oauth_credential.rejection
+      }
+      (** The source file was read but matches no known CLI login shape. *)
   | Invalid_managed_oauth of
       { path : string
       ; detail : string
       }
+  | Unrecognized_managed_oauth of
+      { path : string
+      ; rejection : Runtime_antigravity_oauth_credential.rejection
+      }
+      (** A managed copy (file or login-keychain item) matches no known shape. *)
   | Settings_write_failed of
       { path : string
       ; detail : string
@@ -70,8 +81,8 @@ val prepare
     managed directory is an exact 0700 real directory owned by the effective user.
     [oauth_source] must be an effective-user-owned regular 0600 file reached
     without symbolic links. The private source is read under the preparation
-    lock before account directories are created. Native OAuth JSON must provide
-    a Google OpenID issuer/subject identity. A changed principal seeds a fresh
+    lock before account directories are created. The login file must name its
+    account in a known CLI shape. A changed principal seeds a fresh
     generation; token refreshes for the same principal preserve the existing
     effective-user-owned regular 0600 managed credential only when its principal
     still matches the generation record. A readable managed login-keychain item

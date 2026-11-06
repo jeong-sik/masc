@@ -1,7 +1,7 @@
 (** Explicit Antigravity account selection, never called by catalog inspection. *)
 type t
 type error = Private_home_unavailable | Sign_in_required | Unsafe_credential
-  | Command_failed | Invalid_catalog | Keychain_unavailable
+  | Unrecognized_credential | Command_failed | Invalid_catalog | Keychain_unavailable
 val error_message : error -> string
 val prepare : runtime_root:string -> account_id:string -> (t, error) result
 val prepare_from_credential_file : runtime_root:string -> account_id:string ->

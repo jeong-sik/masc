@@ -681,21 +681,36 @@ let with_fixture_sandbox
     Alcotest.fail (fixture_case_failure_message ~keeper_name ~body_failure ~detail)
 ;;
 
-(* Actual native credential shape, synthetic values only. The subject remains
-   stable when rotating access/refresh credentials and the OpenID timestamp. *)
-let antigravity_oauth_fixture ?(revision = "initial") subject =
+(* Actual native credential shapes, synthetic values only. [account] names
+   one account: its email stays the same when access/refresh credentials, the
+   OpenID timestamp and the CLI's file shape change. *)
+let antigravity_account_email account = account ^ "@example.test"
+
+let antigravity_token_fields ~revision account =
+  ["access_token", `String (account ^ ":" ^ revision);
+   "token_type", `String "Bearer"; "refresh_token", `String ("refresh:" ^ revision);
+   "expiry", `String (if revision = "initial" then "2000-01-01T00:00:00Z" else "2000-01-02T00:00:00Z")]
+
+(* agy 1.2.x: the sign-in OpenID [id_token]. *)
+let antigravity_oauth_fixture ?(revision = "initial") account =
   let encode json = Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet
       (Yojson.Safe.to_string json) in
   let id_token = encode (`Assoc ["alg", `String "RS256"; "typ", `String "JWT"])
     ^ "." ^ encode (`Assoc ["iss", `String "https://accounts.google.com";
-        "sub", `String subject; "aud", `String "synthetic-client";
+        "sub", `String account; "email", `String (antigravity_account_email account);
+        "aud", `String "synthetic-client";
         "iat", `Int (if revision = "initial" then 1 else 2)])
     ^ ".synthetic-signature" in
   Yojson.Safe.to_string (`Assoc ["auth_method", `String "synthetic-oauth";
-    "token", `Assoc ["access_token", `String (subject ^ ":" ^ revision);
-      "token_type", `String "Bearer"; "refresh_token", `String ("refresh:" ^ revision);
-      "expiry", `String (if revision = "initial" then "2000-01-01T00:00:00Z" else "2000-01-02T00:00:00Z")];
+    "token", `Assoc (antigravity_token_fields ~revision account);
     "id_token", `String id_token])
+;;
+
+(* agy 1.5.x: only the ID token's email, as [id_token_email]. *)
+let antigravity_id_token_email_fixture ?(revision = "initial") account =
+  Yojson.Safe.to_string (`Assoc ["auth_method", `String "synthetic-oauth";
+    "id_token_email", `String (antigravity_account_email account);
+    "token", `Assoc (antigravity_token_fields ~revision account @ ["expires_in", `Int 3599])])
 ;;
 
 (** Write [checkpoint] at [path] as the Keeper checkpoint store lays it out

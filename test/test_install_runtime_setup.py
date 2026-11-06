@@ -2073,7 +2073,8 @@ class CompiledRuntimeSetup(unittest.TestCase):
             original.write_text(json.dumps(dict(auth_method='synthetic-oauth',
                 token=dict(access_token='fixture', token_type='Bearer', refresh_token='fixture', expiry='2000-01-01T00:00:00Z'),
                 id_token=encode(dict(alg='RS256')) + '.' + encode(dict(iss='https://accounts.google.com',
-                    sub='saved-antigravity-fixture', aud='synthetic-client')) + '.synthetic-signature')))
+                    sub='saved-antigravity-fixture', email='saved-antigravity-fixture@example.test',
+                    aud='synthetic-client')) + '.synthetic-signature')))
             original.chmod(0o600)
             client = base / 'agy-fixture'
             catalog = dict(status='SUCCESS', num_turns=0, usage=dict(total_tokens=0),

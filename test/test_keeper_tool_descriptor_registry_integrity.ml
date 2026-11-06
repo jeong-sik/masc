@@ -1615,8 +1615,6 @@ let test_concurrent_execution_opt_ins_are_exact () =
     ; "keeper_tools_list"
     (* Reads the voice config and the agent's voice assignment. *)
     ; "keeper_voice_agent"
-    (* One bridge subprocess per call; script-path cache is mutex-guarded. *)
-    ; "keeper_webmcp_list"
     ; "keeper_wiki_read"
     ; "keeper_wiki_search"
     ; "keeper_workspace_memory_read"

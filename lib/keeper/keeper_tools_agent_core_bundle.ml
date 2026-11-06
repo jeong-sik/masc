@@ -858,7 +858,6 @@ let make_tool_bundle_for_descriptors_with_policy
     | Keeper_tool_descriptor.Tool_masc_schedule_dispatch
     | Keeper_tool_descriptor.Tool_keeper_composition_result_dispatch
     | Keeper_tool_descriptor.Tool_keeper_code_query_dispatch
-    | Keeper_tool_descriptor.Tool_keeper_webmcp_dispatch
     | Keeper_tool_descriptor.Tool_keeper_job_dispatch
     | Keeper_tool_descriptor.Tool_masc_keeper_dispatch
     | Keeper_tool_descriptor.Tool_masc_fusion_dispatch

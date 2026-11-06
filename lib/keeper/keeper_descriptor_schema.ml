@@ -29,7 +29,7 @@ let memoizes descriptor =
   | Tool_masc_agent_timeline_dispatch | Tool_masc_schedule_dispatch
   | Tool_keeper_job_dispatch
   | Tool_keeper_composition_result_dispatch | Tool_keeper_code_query_dispatch
-  | Tool_keeper_webmcp_dispatch | Tool_masc_keeper_dispatch | Tool_masc_fusion_dispatch
+  | Tool_masc_keeper_dispatch | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status | Tool_masc_fusion_decision | Tool_masc_file_dispatch
   | Tool_masc_wiki_dispatch | Tool_masc_local_runtime_dispatch
   | Tool_analyze_image | Tool_read_image -> true

@@ -40,32 +40,6 @@ let load_posts_source store =
 let test_default_ttl () =
   Alcotest.(check int) "default_ttl_hours is 0" 0 Limits.default_ttl_hours
 
-(* Issue #8392: schema enums for [visibility] must stay in sync with the
-   Variant SSOT. The witness function uses an exhaustive [match]: adding
-   a 5th constructor to [visibility] forces [visibility_to_string] to
-   fail compilation, and the count assertion below catches list/Variant
-   drift in [all_visibilities]. *)
-let test_visibility_witness_in_enum () =
-  let module C = Masc.Board_core_classify in
-  let witness s =
-    let actual = C.visibility_to_string s in
-    if not (List.mem actual C.valid_visibility_strings) then
-      Alcotest.failf "visibility_to_string %S not in valid_visibility_strings" actual
-  in
-  witness Public;
-  witness Unlisted;
-  witness Internal;
-  witness Direct;
-  Alcotest.(check int) "count" 4
-    (List.length C.valid_visibility_strings)
-
-let test_visibility_strings_complete () =
-  let strs = Masc.Board_core_classify.valid_visibility_strings in
-  List.iter (fun expected ->
-    Alcotest.(check bool) (Printf.sprintf "%s present" expected) true
-      (List.mem expected strs)
-  ) ["public"; "unlisted"; "internal"; "direct"]
-
 (* Issue #8449 PR A: Board_dispatch.sort_order schema enum SSOT.
    Witness covers all 5 variants; adding a 6th constructor will fail
    compilation in [sort_order_to_string]. *)
@@ -593,13 +567,6 @@ let () =
             (with_eio test_maybe_sweep_concurrent_schedules_once);
           Alcotest.test_case "maybe_sweep full inbox rolls back schedule" `Quick
             (with_eio test_maybe_sweep_full_inbox_rolls_back_schedule);
-        ] );
-      ( "visibility_ssot",
-        [
-          Alcotest.test_case "witness covers all 4 variants" `Quick
-            test_visibility_witness_in_enum;
-          Alcotest.test_case "all 4 strings present" `Quick
-            test_visibility_strings_complete;
         ] );
       ( "sort_order_ssot",
         [

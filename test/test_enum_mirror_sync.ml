@@ -616,6 +616,16 @@ let test_sub_board_access_advertised_values_decode () =
     ~advertised:(advertised_values_for ~property:"access")
 ;;
 
+(* Board visibility. [Board_core_classify.visibility_of_string] decodes it;
+   the schema writes the four strings by hand. *)
+let test_board_visibility_advertised_values_decode () =
+  check_every_advertised_value_decodes
+    ~label:"board visibility"
+    ~decodes:(fun v ->
+      Option.is_some (Masc.Board_core_classify.visibility_of_string v))
+    ~advertised:(advertised_values_for ~property:"visibility")
+;;
+
 let test_memory_search_source_mirror () =
   check_mirror_in_sync
     ~label:"memory_search_source_enum_strings"
@@ -785,6 +795,8 @@ let () =
         ; test_case "interact arguments match the schema" `Quick test_interact_arguments_match_the_schema
         ; test_case "sub_board access values decode" `Quick
             test_sub_board_access_advertised_values_decode
+        ; test_case "board visibility values decode" `Quick
+            test_board_visibility_advertised_values_decode
         ; test_case "owner lists are non-empty" `Quick test_owners_are_non_empty
         ; test_case "schemas publish enums" `Quick test_schema_set_is_non_empty
         ] )

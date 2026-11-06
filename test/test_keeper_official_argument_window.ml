@@ -61,9 +61,9 @@ let reader base_path =
           ~start_time:(Tool_timing.start ()) execution.raw_output
       | Tool_result.Deferred () -> fail "the canonical reader cannot defer")
 
-let source ?(input_policy=Keeper_input_policy.Small) ?(seed=Some raw_seed)
+let source ?(seed=Some raw_seed)
     ?(replay_prefix=Keeper_replay_prefix.unchanged) ?(turn_start=turn_start) base_path =
-  Host.create_argument_source ~input_policy ~base_path ~keeper_name:"official-arguments"
+  Host.create_argument_source ~base_path ~keeper_name:"official-arguments"
     ~seed ~replay_prefix ~turn_start
 let projection ?(history_prefix=[]) ?tools source base_path =
   let tools = match tools with None -> [reader base_path] | Some tools -> tools in
@@ -160,8 +160,7 @@ let test_declared_pinned_prefix_and_media_replay_keep_occurrence_coordinates () 
 
 let test_absent_authority_surface_and_open_seed_leave_arguments_verbatim () = with_base @@ fun base ->
   let cases =
-    [source ~input_policy:Keeper_input_policy.Wide base;
-     source ~seed:None base;
+    [source ~seed:None base;
      source ~turn_start:(Keeper_carried_front.Turn_boundary_unknown {reason="unreadable fixture"}) base] in
   List.iter (fun source ->
     let sent = project ?argument_projection:(projection source base) raw_history in

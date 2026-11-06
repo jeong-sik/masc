@@ -6535,7 +6535,7 @@ module Argument_start_fixture = struct
   let boundary messages = Keeper_carried_front.Turn_boundary
       {end_atom=snd (Runtime_model_input_tail_window.annotate messages)}
   let source ~base_path ~keeper_name seed =
-    Host.create_argument_source ~input_policy:Keeper_input_policy.Small ~base_path ~keeper_name
+    Host.create_argument_source ~base_path ~keeper_name
       ~seed:(Some seed) ~replay_prefix:Keeper_replay_prefix.unchanged ~turn_start:(boundary seed)
   let librarian_front _ : (Host.librarian_position, Agent_core.Error.t) result = Ok
       {point=Keeper_turn_driver_try_provider.Librarian_progress {end_atom=1};

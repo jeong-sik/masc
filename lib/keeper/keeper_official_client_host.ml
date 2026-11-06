@@ -804,20 +804,16 @@ type argument_source =
   ; mutable binding : argument_binding
   }
 
-let create_argument_source ~input_policy ~base_path ~keeper_name ~seed
-    ~replay_prefix ~turn_start =
-  match input_policy with
-  | Keeper_input_policy.Wide -> None
-  | Keeper_input_policy.Small ->
-    match seed,turn_start with
-    | Some raw_seed,Keeper_carried_front.Turn_boundary {end_atom}
-      when base_path<>"" && end_atom>0 ->
-      Some {base_path;keeper_name;raw_seed;
-            replay_prefix=Keeper_replay_prefix.history_only replay_prefix;completed_before=end_atom;
-            addresses=Keeper_model_input_demotion.create_address_memo ();
-            binding=Arguments_unbound}
-    | None,(Keeper_carried_front.Turn_boundary _ | Turn_boundary_unknown _)
-    | Some _,(Keeper_carried_front.Turn_boundary _ | Turn_boundary_unknown _) -> None
+let create_argument_source ~base_path ~keeper_name ~seed ~replay_prefix ~turn_start =
+  match seed,turn_start with
+  | Some raw_seed,Keeper_carried_front.Turn_boundary {end_atom}
+    when base_path<>"" && end_atom>0 ->
+    Some {base_path;keeper_name;raw_seed;
+          replay_prefix=Keeper_replay_prefix.history_only replay_prefix;completed_before=end_atom;
+          addresses=Keeper_model_input_demotion.create_address_memo ();
+          binding=Arguments_unbound}
+  | None,(Keeper_carried_front.Turn_boundary _ | Turn_boundary_unknown _)
+  | Some _,(Keeper_carried_front.Turn_boundary _ | Turn_boundary_unknown _) -> None
 ;;
 
 type argument_projection =

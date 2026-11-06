@@ -351,7 +351,6 @@ type try_provider_ctx =
             against the point, read unless a refusal in this turn supplies
             it. *)
   ; request_input : request_input
-  ; input_policy : Keeper_input_policy.t
   ; turn_boundary : Keeper_carried_front.turn_start
   ; carried_front_after_refusal : unit -> Keeper_carried_front.seed option
         (** The latest refusal's front, shared by every Agent Core candidate

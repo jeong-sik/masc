@@ -519,13 +519,11 @@ let run_keeper_cycle
                let dynamic_context_for_tools = Some (fun access ->
                  let tools = Keeper_request_tool_access.offered access in
                  Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-                   let own_recent_actions = match meta.input_policy, observation.own_recent_actions with
-                     | Keeper_input_policy.Small, Ok turns ->
-                       let own_recent_actions = Keeper_own_recent_actions.externalize_failures
-                         ~base_path:config.base_path ~keeper_name:meta.name
-                         ~policy:meta.input_policy ~tools turns in
-                       Ok own_recent_actions
-                     | Wide, _ | Small, Error _ -> observation.own_recent_actions in
+                   let own_recent_actions =
+                     Result.map
+                       (Keeper_own_recent_actions.externalize_failures
+                          ~base_path:config.base_path ~keeper_name:meta.name ~tools)
+                       observation.own_recent_actions in
                    (render_prompt ~workspace_memory_access:access own_recent_actions tools).world_partition)) in
                Eio.Fiber.yield ();
                let base_dir = session_base_dir config in

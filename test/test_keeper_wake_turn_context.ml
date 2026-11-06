@@ -430,12 +430,12 @@ let artifact_reader ~base_path =
       | Tool_result.Deferred () -> fail "artifact read unexpectedly deferred")
 ;;
 
-let test_small_failed_payloads_remain_retrievable () =
+let test_failed_payloads_remain_retrievable () =
   let open Masc in
   let module Actions = Masc.Keeper_own_recent_actions in
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs env#fs;
-  let base_path = Filename.temp_dir "small-action-payloads-" "" in
+  let base_path = Filename.temp_dir "action-payloads-" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) @@ fun () ->
   let reader = artifact_reader ~base_path in
   let payload = "{\"patch\":\"" ^ String.make 32000 'x' ^ "\"}" in
@@ -445,13 +445,11 @@ let test_small_failed_payloads_remain_retrievable () =
   let source = [action_turn 42 [failed; success]; action_turn 43 [{failed with source_position=2}]] in
   let render turns = user_message {base_observation with WO.own_recent_actions=Ok turns} in
   let original = render source in
-  let project ~base_path ~policy ~tools =
-    Actions.externalize_failures ~base_path ~keeper_name:"fixture" ~policy ~tools source in
-  check string "Wide keeps the complete briefing" original
-    (render (project ~base_path ~policy:Masc.Keeper_input_policy.Wide ~tools:[reader]));
+  let project ~base_path ~tools =
+    Actions.externalize_failures ~base_path ~keeper_name:"fixture" ~tools source in
   check string "missing reader keeps the complete briefing" original
-    (render (project ~base_path ~policy:Masc.Keeper_input_policy.Small ~tools:[]));
-  let projected = project ~base_path ~policy:Masc.Keeper_input_policy.Small ~tools:[reader] in
+    (render (project ~base_path ~tools:[]));
+  let projected = project ~base_path ~tools:[reader] in
   let projected_call = match projected with
     | [{Actions.turn_id=42;calls=[call; untouched]}; {turn_id=43;calls=[repeated]}] ->
       check bool "successful call is untouched" true (untouched = success);
@@ -496,7 +494,7 @@ let test_small_failed_payloads_remain_retrievable () =
   let blocked = Filename.concat base_path "blocked-store" in
   Out_channel.with_open_bin blocked (fun channel -> output_string channel "not a directory");
   check string "storage failure keeps the complete briefing" original
-    (render (project ~base_path:blocked ~policy:Masc.Keeper_input_policy.Small ~tools:[reader]))
+    (render (project ~base_path:blocked ~tools:[reader]))
 ;;
 
 let test_current_task_section_renders () =
@@ -1690,8 +1688,8 @@ let () =
             test_successful_call_arguments_are_not_replayed;
           test_case "a refused call keeps what was sent" `Quick
             test_refused_call_keeps_its_arguments;
-          test_case "Small failed payloads remain retrievable through the offered reader" `Quick
-            test_small_failed_payloads_remain_retrievable;
+          test_case "failed payloads remain retrievable through the offered reader" `Quick
+            test_failed_payloads_remain_retrievable;
           test_case "repeated refusals collapse into one digest row" `Quick
             test_failure_digest_dedupes_and_counts;
           test_case "unknown occurrences and interleaved failures retain source order" `Quick

@@ -2,13 +2,6 @@
 
 let ( let* ) = Result.bind
 
-let https_url url =
-  let uri = Uri.of_string url in
-  match Uri.scheme uri, Uri.host uri, Uri.query uri, Uri.fragment uri with
-  | Some "https", Some host, [], None when String.length host > 0 -> true
-  | _ -> false
-;;
-
 module Client = struct
   type t =
     { client_id : string
@@ -26,7 +19,7 @@ module Client = struct
     then Error Client_id_empty
     else if String.equal client_secret ""
     then Error Client_secret_empty
-    else if not (https_url redirect_uri)
+    else if not (Login_transport.is_https_url redirect_uri)
     then Error Redirect_uri_not_https
     else Ok { client_id; client_secret; redirect_uri }
   ;;
@@ -142,7 +135,7 @@ let endpoints_of_document body =
   | `Assoc members ->
     let url name =
       match string_member name members with
-      | Some url when https_url url -> Ok url
+      | Some url when Login_transport.is_https_url url -> Ok url
       | Some _ | None -> Error (Discovery_malformed name)
     in
     let* () =
@@ -177,26 +170,6 @@ let endpoints ~get cache ~now_ms =
     Ok endpoints
 ;;
 
-let is_unreserved = function
-  | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '-' | '.' | '_' | '~' -> true
-  | _ -> false
-;;
-
-(* Percent-encodes every byte that is not unreserved (RFC 3986 section 2.3),
-   which a query and an application/x-www-form-urlencoded body both read. *)
-let encode text =
-  let buffer = Buffer.create (String.length text) in
-  String.iter
-    (fun c ->
-      if is_unreserved c
-      then Buffer.add_char buffer c
-      else Buffer.add_string buffer (Printf.sprintf "%%%02X" (Char.code c)))
-    text;
-  Buffer.contents buffer
-;;
-
-let form pairs = String.concat "&" (List.map (fun (key, value) -> encode key ^ "=" ^ encode value) pairs)
-
 let authorization_url
   endpoints
   (client : Client.t)
@@ -204,7 +177,7 @@ let authorization_url
   =
   endpoints.authorization_endpoint
   ^ "?"
-  ^ form
+  ^ Login_transport.form
       [ "response_type", "code"
       ; "client_id", client.client_id
       ; "redirect_uri", client.redirect_uri
@@ -225,7 +198,7 @@ let json_members body =
 
 let id_token_of_code ~(post : Login_transport.post) endpoints (client : Client.t) ~code ~code_verifier =
   let body =
-    form
+    Login_transport.form
       [ "grant_type", "authorization_code"
       ; "code", code
       ; "client_id", client.client_id

@@ -476,7 +476,7 @@ aside.v2-status-tray .tray-action-link:hover {
   box-shadow: inset 0 -1px 0 var(--ss-brand);
 }
 
-/* Header action area (emergency stop, auth, connection, theme, build) */
+/* Header action area (auth, connection, theme, build) */
 .v2-shell-header .v2-header-actions {
   color: var(--ss-text-secondary);
 }

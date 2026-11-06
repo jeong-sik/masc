@@ -1411,6 +1411,15 @@ let test_for_provider_model_mistral_small () =
   | None -> Alcotest.fail "expected Some for mistral-small"
 ;;
 
+let test_for_provider_model_mistral_large_4 () =
+  match provider_model_capabilities "mistral" "mistral-large-4" with
+  | Some c ->
+    Alcotest.(check bool) "reasoning" true c.supports_reasoning;
+    Alcotest.(check (option int)) "1M context" (Some 1_000_000) c.max_context_tokens;
+    Alcotest.(check bool) "image input" true c.supports_image_input
+  | None -> Alcotest.fail "expected Some for mistral-large-4"
+;;
+
 let test_for_provider_model_command () =
   match provider_model_capabilities "cohere" "command-r-plus" with
   | Some c ->
@@ -1916,6 +1925,10 @@ let () =
             "mistral/mistral-small"
             `Quick
             test_for_provider_model_mistral_small
+        ; Alcotest.test_case
+            "mistral/mistral-large-4"
+            `Quick
+            test_for_provider_model_mistral_large_4
         ; Alcotest.test_case "cohere/command" `Quick test_for_provider_model_command
         ; Alcotest.test_case "xai/grok" `Quick test_for_provider_model_grok
         ] )

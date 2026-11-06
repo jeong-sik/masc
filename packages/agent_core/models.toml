@@ -2266,6 +2266,37 @@ supports_response_format_json = true
 supports_structured_output = true
 supports_native_streaming = true
 
+# Mistral Large 4 (v26.10, released 2026-10-06; Mistral retires Large 3 and
+# Medium 3.5 on 2026-10-31 and names Large 4 their alternative). Card checked
+# 2026-11-06: 1M context, multimodal with a 1.6B vision encoder, function
+# calling, structured outputs, prefix caching with cached input at 0.1x
+# ($0.7 input / $0.07 cached / $2.1 output per M tokens)
+# (https://docs.mistral.ai/models/mistral-large-4). The reasoning page names
+# mistral-large-4-0 as adjustable via reasoning_effort and documents "none"
+# and "high" for Mistral models
+# (https://docs.mistral.ai/studio/conversations/reasoning). ["none"] only,
+# same policy as mistral-small: the openai_chat_extended response parser is
+# not yet verified against Mistral's list-shaped ThinkChunk/TextChunk
+# message.content (#38564).
+[[models]]
+model_id = "mistral-large-4"
+base = "openai_chat_extended"
+accepted_reasoning_efforts = ["none"]
+provider_name = "mistral"
+max_context_tokens = 1000000
+input_per_million = 0.7
+output_per_million = 2.1
+cache_read_multiplier = 0.1
+supports_tools = true
+supports_tool_choice = true
+supports_reasoning = true
+thinking_control_format = "reasoning_effort"
+supports_response_format_json = true
+supports_structured_output = true
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
 # Cohere Command Models
 [[models]]
 model_id = "command-r-plus"

@@ -57,3 +57,7 @@ CDP 로 바꾼 설정은 바꾼 SDK 프로세스가 끝나면 모두 사라졌�
 - `egoAutomated.enable` 이 자동화를 다시 숨기는지. 명령은 오류 없이 돌아왔다.
 - `Network.enable` 이 사이트가 자동화를 알아채게 하는지.
 - 한 프로세스 안에서 `page.events()` 를 두 곳이 읽을 때 무엇이 남는지. 안내서는 `events()` 가 버퍼를 돌려주고 비운다고 적었다.
+
+## 층별 확인
+
+- L1 read mode html: [l1-read-html/](l1-read-html/README.md)

@@ -76,7 +76,7 @@ ego 의 page 세션은 사이트가 자동화를 알아채지 못하게 console 
 - 각 동작은 ego 연결의 기존 page 스크립트 틀(`on_page`) 안에서 `page.cdp` 나 `page.evaluate` 를 부른다. 새 프로세스 경로는 만들지 않는다.
 - 답의 모양은 Firefox 나 BiDi 의 같은 동작과 같게 한다. 다를 수밖에 없는 곳은 답에 그 사실을 적는다.
 - 효과가 있는 동작의 답에는 `refsInvalidated: true` 를 넣는다. 다음 ref 동작 전에 snapshot 을 다시 읽으라는 뜻이다.
-- 쓸 수 있는 문서 메서드가 있으면 그것을 먼저 쓴다. read_html 은 `page.evaluate` 로 `document.documentElement.outerHTML` 과 doctype 을 읽는다. 이 경우 ref 가 무효가 되지 않는다.
+- 쓸 수 있는 문서 메서드가 있으면 그것을 먼저 쓴다. read_html 은 CDP 를 부르지 않고 page 스크립트로 문서를 읽는다. 이 경우 ref 가 무효가 되지 않는다.
 
 ### 3.2 설정의 수명
 
@@ -96,7 +96,7 @@ Firefox 의 `block_requests` 설명("unblock_requests 까지 실패한다")은 e
 
 | 동작 | 결정 |
 |---|---|
-| read_html | `page.evaluate` 로 doctype 과 `outerHTML` 을 읽는다. 1 MiB 를 넘으면 다른 연결처럼 `html: null`, `htmlComplete: false` 로 답한다 |
+| read_html | 다른 연결이 쓰는 문서 함수(`Browser_lane.Document.runtime` 의 `browserDocument()`)를 그대로 돌린다. doctype 없이 `outerHTML` 을 준다. 1 MiB 를 넘으면 다른 연결처럼 `html: null`, `htmlComplete: false` 로 답한다 |
 | resize_viewport | `setDeviceMetricsOverride` 로 크기를 바꾸고, 빈 요청은 `clearDeviceMetricsOverride` 로 되돌린다. 범위는 BiDi 와 같은 100–4096 이다 |
 | touch (tap_at, swipe) | touch 흉내를 켠 뒤 `dispatchTouchEvent` 로 누르고 뗀다. swipe 는 `touchMove` 를 경유점마다 보낸다. `touchEnd` 의 답을 받지 못하면 mouse 와 같이 `inputReadiness: release_uncertain` 으로 답한다(RFC-browser-ego-input-lock) |
 | list_windows | `task.tabs()` 의 각 탭에 `Browser.getWindowForTarget` 을 불러 `windowId` 를 붙인다. 같은 windowId 는 같은 창이다 |
@@ -139,7 +139,7 @@ gh stack 한 스택에 층을 쌓는다. 층마다 기능 목록(`lib/browser_ca
 
 | 층 | 내용 | 확인 |
 |---|---|---|
-| L1 | read_html. page_zoom 을 이유 있는 `Unsupported` 로 바꿈 | 로컬 페이지에서 masc 도구로 html 을 읽어 doctype 과 바이트 수를 본다 |
+| L1 | read_html. page_zoom 을 이유 있는 `Unsupported` 로 바꿈 | masc 가 만드는 문서 스크립트를 ego SDK 로 로컬 페이지에서 돌려 `html` 바이트 수와 `htmlComplete` 를 본다([결과](../evidence/ego-cdp-capabilities-2026-11-06/l1-read-html/README.md)) |
 | L2 | `sdkProcess` 번호와 `lifetime` 필드. resize_viewport | 크기를 바꾸고 scene viewport 로 확인한다. 세션 프로세스를 바꾼 뒤 번호가 바뀌고 크기가 돌아오는지 본다 |
 | L3 | emulate_environment (D3 반영) | Intl locale·시간대를 읽는다 |
 | L4 | touch (tap_at, swipe) | 페이지가 기록한 pointerType 과 touch 이벤트를 본다 |

@@ -1,0 +1,35 @@
+{
+ "spaceId": 20,
+ "index.html": {
+  "lineBytes": 904,
+  "withinOutputLimit": true,
+  "answerJsonBytes": 804,
+  "htmlComplete": true,
+  "htmlUnavailableReason": null,
+  "htmlBytes": 582,
+  "htmlHead": "<html><head><meta charset=\"utf-8\">\n<titl",
+  "hasDocumentId": true,
+  "equalsOuterHTML": true
+ },
+ "near.html": {
+  "lineBytes": 810370,
+  "withinOutputLimit": true,
+  "answerJsonBytes": 657286,
+  "htmlComplete": true,
+  "htmlUnavailableReason": null,
+  "htmlBytes": 576086,
+  "htmlHead": "<html><head><meta charset=\"utf-8\"><title",
+  "hasDocumentId": true,
+  "equalsOuterHTML": true
+ },
+ "big.html": {
+  "lineBytes": 302,
+  "withinOutputLimit": true,
+  "answerJsonBytes": 223,
+  "htmlComplete": false,
+  "htmlUnavailableReason": "document_html_exceeds_1_mib",
+  "htmlBytes": null,
+  "htmlHead": null,
+  "hasDocumentId": true
+ }
+}

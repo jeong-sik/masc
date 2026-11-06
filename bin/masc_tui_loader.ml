@@ -1383,18 +1383,6 @@ let load_overview ~(host : string) ~(port : int) :
         Ok { ov_workspace_health; ov_keeper_listing; ov_keeper_liveness })
         json
 
-let memo_system_logs = json_memo ()
-
-(** Load the system log page from /api/v1/dashboard/logs. [level] is the
-    minimum-level floor in the route's lowercase spelling. *)
-let load_system_logs ~(host : string) ~(port : int) ?level ~(limit : int) () :
-    (system_log_snapshot, string) result =
-  match fetch_dashboard_logs ~host ~port ?level ~limit () with
-  | Error err -> Error ("system logs load failed: " ^ err)
-  | Ok json ->
-      decode_offloaded memo_system_logs ~name:"system.logs.decode_wait"
-        Tui_decode.decode_system_log_snapshot json
-
 let memo_tools_inventory = json_memo ()
 
 (** Load the registered tool inventory and, when selected, one Keeper's exact

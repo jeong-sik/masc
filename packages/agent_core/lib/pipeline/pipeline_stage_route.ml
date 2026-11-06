@@ -23,18 +23,51 @@ let binding_identity_error ?on_provider_failure detail =
   detailed.error
 ;;
 
-let validate_replay_continuity ?on_provider_failure ~source_change_policy ~tools_present ~provider_config messages =
-  match Llm_provider.Reasoning_history_projection.validate_replay_continuity_for_provider_config
+(* This stage refuses a request it will not dispatch: a missing output
+   ceiling or reservation, an unsupported measurement, an invalid prepared
+   request, a history the target must receive and cannot read. No provider
+   read it, so it is not an unknown provider refusal -- a consumer that
+   answers those by sending less would cut history for a request that never
+   left. [Attempt_rejected] says what happened: this binding cannot take it,
+   and another declared one may. *)
+let rejected_before_dispatch message =
+  Error.Api
+    (Llm_provider.Retry.InvalidRequest
+       { message; reason = Llm_provider.Retry.Attempt_rejected })
+;;
+
+(* A target that must receive foreign reasoning it cannot read refuses the
+   history, not its configuration: the producing source can still send it, so
+   the refusal is [Attempt_rejected] for this binding. The other refusals name
+   corrupt provenance or a strict caller policy and stay configuration
+   errors. *)
+let validate_replay_continuity
+      ?on_provider_failure ~binding ~source_change_policy ~tools_present ~provider_config messages =
+  let module Projection = Llm_provider.Reasoning_history_projection in
+  match Projection.validate_replay_continuity_for_provider_config
       ~source_change_policy ~boundary:(Provider_dispatch {tools_present}) provider_config messages with
   | Ok {disposition=Source_change_admitted drops;_} ->
     Llm_provider.Diag.info "pipeline_stage_route"
       "reasoning source change admitted: boundary=provider_dispatch excluded_message_count=%d" (List.length drops);
     Ok ()
   | Ok {disposition=(Preserve_reasoning | Caller_excluded_reasoning);_} -> Ok ()
-  | Error refusal ->
+  | Error (Projection.Required_reasoning_unreadable _ as refusal) ->
+    let detailed = Provider_failure_attribution.of_request_validation_error ~binding
+        (rejected_before_dispatch (Projection.error_to_string refusal)) in
+    notify_attribution on_provider_failure detailed.provider_failure;
+    Error detailed.error
+  | Error (( Projection.Invalid_control_lowering _
+           | Projection.Invalid_reasoning_target _
+           | Projection.Invalid_reasoning_source _
+           | Projection.Reasoning_source_on_non_assistant _
+           | Projection.Invalid_response_replay _
+           | Projection.Unbound_reasoning_artifact _
+           | Projection.Incompatible_reasoning_artifact _
+           | Projection.Invalid_reasoning_artifact_role _
+           | Projection.Unsupported_reasoning_block _ ) as refusal) ->
     let error = Error.Config (InvalidConfig
       {field="reasoning_replay";
-       detail=Llm_provider.Reasoning_history_projection.error_to_string refusal}) in
+       detail=Projection.error_to_string refusal}) in
     let detailed = Provider_failure_attribution.of_provider_configuration_error error in
     notify_attribution on_provider_failure detailed.provider_failure;
     Error detailed.error
@@ -45,18 +78,6 @@ let binding_identity_for_call agent provider_config =
     Binding_identity.transport_for_call ~injected:(Option.is_some agent.options.transport)
   in
   Binding_identity.of_provider_config ~transport provider_config
-;;
-
-(* This stage refuses a request it will not dispatch: a missing output
-   ceiling or reservation, an unsupported measurement, an invalid prepared
-   request. No provider read it, so it is not an unknown provider refusal --
-   a consumer that answers those by sending less would cut history for a
-   request that never left. [Attempt_rejected] says what happened: this
-   binding cannot take it, and another declared one may. *)
-let rejected_before_dispatch message =
-  Error.Api
-    (Llm_provider.Retry.InvalidRequest
-       { message; reason = Llm_provider.Retry.Attempt_rejected })
 ;;
 
 let input_capacity_error ~binding ~message ~constraint_ ~reason =
@@ -256,7 +277,7 @@ let dispatch_sync
     binding_identity_for_call agent provider_config
     |> Result.map_error (binding_identity_error ?on_provider_failure)
   in
-  let* () = validate_replay_continuity ?on_provider_failure ~provider_config
+  let* () = validate_replay_continuity ?on_provider_failure ~binding ~provider_config
     ~tools_present:(Llm_provider.Complete_common.request_tools_present ~config:provider_config ~tools)
     ~source_change_policy:agent.options.reasoning_source_change
     prep.Agent_turn.effective_messages in
@@ -411,7 +432,7 @@ let dispatch_stream
     binding_identity_for_call agent provider_config
     |> Result.map_error (binding_identity_error ?on_provider_failure)
   in
-  let* () = validate_replay_continuity ?on_provider_failure ~provider_config
+  let* () = validate_replay_continuity ?on_provider_failure ~binding ~provider_config
     ~tools_present:(Llm_provider.Complete_common.request_tools_present ~config:provider_config ~tools)
     ~source_change_policy:agent.options.reasoning_source_change
     prep.Agent_turn.effective_messages in

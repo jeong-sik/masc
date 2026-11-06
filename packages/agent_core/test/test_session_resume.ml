@@ -796,7 +796,8 @@ let test_binding_explicit_source_change () = with_net (fun net ->
           else Agent.Sync in
         (match Agent.Advanced.continue ~sw ~api_strategy
             ~on_tool_boundary:(fun _ -> Agent.Advanced.Continue) blocked with
-         | Error (Error.Config (Error.InvalidConfig {field="reasoning_replay";_})) -> ()
+         | Error (Error.Api (Llm_provider.Retry.InvalidRequest
+             {reason=Llm_provider.Retry.Attempt_rejected;_})) -> ()
          | Error error -> Alcotest.fail (Error.to_string error)
          | Ok _ -> Alcotest.fail "continuation must retain mandatory replay admission");
         Alcotest.(check int) "active foreign replay never reaches transport" 0 !calls);
@@ -815,6 +816,11 @@ let test_binding_explicit_source_change () = with_net (fun net ->
     ) [false;true]))
 ;;
 
+let anthropic_target () =
+  Binding_provider.make ~kind:Binding_provider.Anthropic ~model_id:"claude-sonnet-5-5"
+    ~base_url:"https://api.anthropic.com" ~max_tokens:64 ()
+;;
+
 let test_binding_source_change_respects_active_replay () =
   let original = binding_provider "https://original.example" in
   let foreign = { (binding_message (binding_source original)) with
@@ -830,9 +836,9 @@ let test_binding_source_change_respects_active_replay () =
       (Agent_core.History.to_wire_messages (Agent_core.History.Memory_store.create ()) history
        |> Result.get_ok) in
   let rejected = function
-    | Error (Binding_projection.Incompatible_reasoning_artifact {message_index=1;_}) -> ()
+    | Error (Binding_projection.Required_reasoning_unreadable {message_index=1;_}) -> ()
     | Error error -> Alcotest.fail (Binding_projection.error_to_string error)
-    | Ok _ -> Alcotest.fail "selected foreign reasoning must not be stripped" in
+    | Ok _ -> Alcotest.fail "required foreign reasoning must not be stripped" in
   rejected (validate target base);
   let control = { (Types.user_msg "system followup") with origin=Types.Agent_instruction } in
   rejected (validate target (base @ [control]));
@@ -845,6 +851,54 @@ let test_binding_source_change_respects_active_replay () =
   let request_tools = binding_provider ~model:"other-model"
       ~replay:Llm_provider.Capabilities.Force_preserve_with_request_tools "https://target.example" in
   rejected (validate request_tools (base @ [Types.user_msg "next query"]));
+  (* Anthropic selects every assistant but requires thinking back only in
+     the exchange the latest caller query opened (RFC-0507). *)
+  let anthropic = anthropic_target () in
+  rejected (validate anthropic base);
+  (* The refusal keeps the producer and the target apart, in that order. *)
+  (match validate anthropic base with
+   | Error (Binding_projection.Required_reasoning_unreadable {stored;target;_} as refusal) ->
+     Alcotest.(check bool) "the refusal carries the stored producer" true
+       (Binding_source.equal stored (binding_source original));
+     Alcotest.(check bool) "the refusal carries the target that cannot read it" true
+       (Binding_source.equal target (binding_source anthropic));
+     let message = Binding_projection.error_to_string refusal in
+     let names fragment =
+       let length = String.length fragment in
+       let rec from index =
+         index + length <= String.length message
+         && (String.equal (String.sub message index length) fragment || from (index + 1)) in
+       from 0 in
+     Alcotest.(check bool) "the refusal names the target it must go back to" true
+       (names "must go back to anthropic claude-sonnet-5-5");
+     Alcotest.(check bool) "the refusal names the provider change from stored to target" true
+       (names "provider openai_compat -> anthropic")
+   | Error error -> Alcotest.fail (Binding_projection.error_to_string error)
+   | Ok _ -> Alcotest.fail "required foreign reasoning must not be stripped");
+  rejected (validate anthropic (base @ [control]));
+  (* With no caller query in the history, all of it counts as the open
+     exchange, the same rule selection uses. *)
+  rejected (validate anthropic [control;foreign;result]);
+  (* The same model on another endpoint: the refusal names the endpoint only,
+     not a provider or model that did not change. *)
+  let other_endpoint = Binding_provider.make ~kind:Binding_provider.Anthropic
+      ~model_id:"claude-sonnet-5-5" ~base_url:"https://proxy.example" ~max_tokens:64 () in
+  let moved = {foreign with metadata=Binding_source.metadata (binding_source other_endpoint)} in
+  (match validate anthropic [Types.user_msg "inspect";moved;result] with
+   | Error (Binding_projection.Required_reasoning_unreadable _ as refusal) ->
+     Alcotest.(check string) "the refusal names only the endpoint"
+       "reasoning at history index 1 must go back to anthropic claude-sonnet-5-5, \
+        which cannot read it (stored source differs in endpoint)"
+       (Binding_projection.error_to_string refusal)
+   | Error error -> Alcotest.fail (Binding_projection.error_to_string error)
+   | Ok _ -> Alcotest.fail "an endpoint change inside the open exchange must be refused");
+  (match validate anthropic (base @ [Types.user_msg "next query"]) with
+   | Ok {disposition=Binding_projection.Source_change_admitted drops;_} ->
+     Alcotest.(check (list int)) "the finished foreign turn is a recorded drop" [1]
+       (List.map (fun (drop : Binding_projection.reasoning_replay_drop) -> drop.message_index) drops)
+   | Ok {disposition=(Preserve_reasoning | Caller_excluded_reasoning);_} ->
+     Alcotest.fail "the foreign drop must be reported"
+   | Error error -> Alcotest.fail (Binding_projection.error_to_string error));
   let current = {foreign with metadata=Binding_source.metadata (binding_source target)} in
   let history = base @ [Types.user_msg "next query";current;result] in
   (match validate target history with
@@ -916,7 +970,8 @@ let test_binding_source_change_uses_effective_request_tools () = with_net (fun n
           let outcome=if stream then Agent.run_stream ~sw ~on_event:ignore agent "new query"
             else Agent.run ~sw agent "new query" in
           (match blocked,outcome with
-           | true,Error (Error.Config (Error.InvalidConfig {field="reasoning_replay";_})) -> ()
+           | true,Error (Error.Api (Llm_provider.Retry.InvalidRequest
+               {reason=Llm_provider.Retry.Attempt_rejected;_})) -> ()
            | false,Ok _ -> ()
            | _,Error error -> Alcotest.fail (Error.to_string error)
            | true,Ok _ -> Alcotest.fail "foreign mandatory replay reached a tool-bearing request");
@@ -956,6 +1011,186 @@ let test_binding_source_change_rejects_invalid_provenance () = with_net (fun net
   ) invalid_messages)
 ;;
 
+(* The 11-06 lane move: Keepers moved onto Claude carried finished turns that
+   qwen, deepseek and glm produced, and every turn was refused before any
+   request left. Those turns now go out without the foreign reasoning and with
+   their text, tool calls and results; Claude's own thinking is not invented
+   (RFC-0507). *)
+let test_binding_anthropic_sends_finished_foreign_turns () = with_net (fun net ->
+  Eio.Switch.run (fun sw ->
+    let producers =
+      [ "qwen", binding_provider ~model:"qwen3.8-flash" "https://qwen.example"
+      ; "deepseek", binding_provider ~model:"deepseek-v4.1-flash" "https://deepseek.example"
+      ; "glm", binding_provider ~kind:Binding_provider.Glm ~model:"glm-5.3-flash"
+          "https://glm.example" ] in
+    let turn (name, provider) =
+      let source = binding_source provider in
+      let call_id = name ^ "-call" in
+      [ Types.user_msg ("ask " ^ name)
+      ; { (binding_message source) with
+          content=[Types.Thinking {content=name ^ "-tool-reasoning";signature=None};
+            Types.ToolUse {id=call_id;name="inspect";input=`Assoc []}] }
+      ; Types.tool_result_msg ~tool_use_id:call_id ~content:(name ^ "-result") ()
+      ; { (binding_message source) with
+          content=[Types.Thinking {content=name ^ "-answer-reasoning";signature=None};
+            Types.Text (name ^ "-answer")] } ] in
+    let history = List.concat_map turn producers in
+    let last_producer = snd (List.nth producers 2) in
+    let cp = binding_checkpoint last_producer history in
+    let before = Checkpoint.to_json cp in
+    let target = anthropic_target () in
+    let tool_calls = ref 0 in
+    let tool = Tool.create ~name:"inspect" ~description:"Inspect" ~parameters:[] (fun _ ->
+      incr tool_calls;Ok {Types.content="unexpected re-execution";content_blocks=None;_meta=None}) in
+    List.iter (fun stream ->
+      let requests = ref 0 in
+      let check_request (request : Llm_provider.Llm_transport.completion_request) =
+        incr requests;
+        let artifact = match Llm_provider.Complete_common.serialize_http_request ~stream
+            ~config:request.config ~messages:request.messages ~tools:request.tools with
+          | Ok artifact -> artifact
+          | Error _ -> Alcotest.fail "Anthropic request serialization failed" in
+        let open Yojson.Safe.Util in
+        let blocks = member "messages" (Yojson.Safe.from_string artifact.body) |> to_list
+          |> List.concat_map (fun message -> match member "content" message with
+            | `List blocks -> blocks | _ -> []) in
+        let typed kind = List.filter (fun block -> member "type" block = `String kind) blocks in
+        Alcotest.(check int) "no foreign reasoning reaches the Messages wire" 0
+          (List.length (typed "thinking" @ typed "redacted_thinking"));
+        Alcotest.(check (list string)) "every finished tool call is sent"
+          ["qwen-call";"deepseek-call";"glm-call"]
+          (List.map (fun block -> member "id" block |> to_string) (typed "tool_use"));
+        Alcotest.(check int) "every finished tool result is sent" 3
+          (List.length (typed "tool_result"));
+        Alcotest.(check bool) "finished answers are sent" true
+          (List.for_all (fun name -> List.exists (fun block ->
+            member "type" block = `String "text"
+            && member "text" block = `String (name ^ "-answer")) blocks)
+            ["qwen";"deepseek";"glm"])
+      in
+      let response = Provider_mock.text_response "continued" [] in
+      let transport = Llm_provider.Llm_transport.custom {
+        complete_sync=(fun request -> check_request request;{response=Ok response;latency_ms=Some 0});
+        complete_stream=(fun ?on_telemetry:_ ~on_event:_ request -> check_request request;Ok response)} in
+      let options = { (binding_options target) with transport=Some transport;
+        reasoning_source_change=Binding_projection.Exclude_unselected } in
+      let config = { (Types.default_config ~model:target.model_id) with max_tokens=Some 64 } in
+      let agent = Agent.resume ~media_store:(Agent_core.History.Memory_store.create ()) ~net
+          ~checkpoint:cp ~config ~options ~tools:[tool] () |> binding_resume_ok in
+      let outcome = if stream then Agent.run_stream ~sw ~on_event:ignore agent "next"
+        else Agent.run ~sw agent "next" in
+      (match outcome with Ok _ -> () | Error error -> Alcotest.fail (Error.to_string error));
+      Alcotest.(check int) "one request reaches the Anthropic transport" 1 !requests;
+      Alcotest.(check bool) "canonical foreign reasoning remains" true
+        (List.for_all2 (=) cp.messages
+           (List.take (List.length cp.messages) (Agent.state agent).messages));
+      Alcotest.(check bool) "checkpoint remains unchanged" true (before=Checkpoint.to_json cp))
+      [false;true];
+    Alcotest.(check int) "finished tool effects are never replayed" 0 !tool_calls))
+;;
+
+(* A caller query after an answered foreign tool call, with no assistant reply
+   in between, closes that exchange by the same rule selection uses
+   (RFC-0507 §3.2). The request goes out with the call and its result and
+   without the foreign reasoning. *)
+let test_binding_anthropic_sends_answered_foreign_tool_call () = with_net (fun net ->
+  Eio.Switch.run (fun sw ->
+    let qwen = binding_provider ~model:"qwen3.8-flash" "https://qwen.example" in
+    let answered = { (binding_message (binding_source qwen)) with
+      content=[Types.Thinking {content="qwen-reasoning";signature=None};
+        Types.ToolUse {id="answered-call";name="inspect";input=`Assoc []}] } in
+    let cp = binding_checkpoint qwen
+        [ Types.user_msg "inspect"; answered
+        ; Types.tool_result_msg ~tool_use_id:"answered-call" ~content:"answered-result" () ] in
+    let target = anthropic_target () in
+    let tool = Tool.create ~name:"inspect" ~description:"Inspect" ~parameters:[] (fun _ ->
+      Ok {Types.content="unexpected re-execution";content_blocks=None;_meta=None}) in
+    List.iter (fun stream ->
+      let requests = ref 0 in
+      let check_request (request : Llm_provider.Llm_transport.completion_request) =
+        incr requests;
+        let artifact = match Llm_provider.Complete_common.serialize_http_request ~stream
+            ~config:request.config ~messages:request.messages ~tools:request.tools with
+          | Ok artifact -> artifact
+          | Error _ -> Alcotest.fail "Anthropic request serialization failed" in
+        let open Yojson.Safe.Util in
+        let blocks = member "messages" (Yojson.Safe.from_string artifact.body) |> to_list
+          |> List.concat_map (fun message -> match member "content" message with
+            | `List blocks -> blocks | _ -> []) in
+        let typed kind = List.filter (fun block -> member "type" block = `String kind) blocks in
+        Alcotest.(check int) "the foreign reasoning is not sent" 0
+          (List.length (typed "thinking" @ typed "redacted_thinking"));
+        Alcotest.(check (list string)) "the answered tool call is sent" ["answered-call"]
+          (List.map (fun block -> member "id" block |> to_string) (typed "tool_use"));
+        Alcotest.(check (list string)) "its result is sent" ["answered-call"]
+          (List.map (fun block -> member "tool_use_id" block |> to_string) (typed "tool_result"));
+        Alcotest.(check bool) "the new caller query is sent" true
+          (List.exists (fun block ->
+             member "type" block = `String "text" && member "text" block = `String "next query")
+             blocks)
+      in
+      let response = Provider_mock.text_response "continued" [] in
+      let transport = Llm_provider.Llm_transport.custom {
+        complete_sync=(fun request -> check_request request;{response=Ok response;latency_ms=Some 0});
+        complete_stream=(fun ?on_telemetry:_ ~on_event:_ request -> check_request request;Ok response)} in
+      let options = { (binding_options target) with transport=Some transport;
+        reasoning_source_change=Binding_projection.Exclude_unselected } in
+      let config = { (Types.default_config ~model:target.model_id) with max_tokens=Some 64 } in
+      let agent = Agent.resume ~media_store:(Agent_core.History.Memory_store.create ()) ~net
+          ~checkpoint:cp ~config ~options ~tools:[tool] () |> binding_resume_ok in
+      let outcome = if stream then Agent.run_stream ~sw ~on_event:ignore agent "next query"
+        else Agent.run ~sw agent "next query" in
+      (match outcome with Ok _ -> () | Error error -> Alcotest.fail (Error.to_string error));
+      Alcotest.(check int) "one request reaches the Anthropic transport" 1 !requests)
+      [false;true]))
+;;
+
+(* A failover inside a tool-use exchange hands Claude a tool call it did not
+   reason about. The Messages wire needs that exchange's own thinking, which a
+   foreign producer cannot give, so no request leaves and the refusal tells the
+   lane to try another binding instead of naming a configuration fault. *)
+let test_binding_anthropic_refuses_open_foreign_exchange () = with_net (fun net ->
+  Eio.Switch.run (fun sw ->
+    let qwen = binding_provider ~model:"qwen3.8-flash" "https://qwen.example" in
+    let open_exchange = { (binding_message (binding_source qwen)) with
+      content=[Types.Thinking {content="qwen-reasoning";signature=None};
+        Types.ToolUse {id="open-call";name="inspect";input=`Assoc []}] } in
+    let cp = binding_checkpoint qwen
+        [ Types.user_msg "inspect"; open_exchange
+        ; Types.tool_result_msg ~tool_use_id:"open-call" ~content:"open-result" () ] in
+    let target = anthropic_target () in
+    List.iter (fun stream ->
+      let requests = ref 0 in
+      let response = Provider_mock.text_response "unexpected" [] in
+      let transport = Llm_provider.Llm_transport.custom {
+        complete_sync=(fun _ -> incr requests;{response=Ok response;latency_ms=Some 0});
+        complete_stream=(fun ?on_telemetry:_ ~on_event:_ _ -> incr requests;Ok response)} in
+      let options = { (binding_options target) with transport=Some transport;
+        reasoning_source_change=Binding_projection.Exclude_unselected } in
+      let config = { (Types.default_config ~model:target.model_id) with max_tokens=Some 64 } in
+      let agent = Agent.resume ~media_store:(Agent_core.History.Memory_store.create ()) ~net
+          ~checkpoint:cp ~config ~options () |> binding_resume_ok in
+      let api_strategy = if stream then Agent.Stream {on_event=ignore;on_telemetry=None}
+        else Agent.Sync in
+      (match Agent.Advanced.continue_detailed ~sw ~api_strategy
+          ~on_tool_boundary:(fun _ -> Agent.Advanced.Continue) agent with
+       | Error ({error=Error.Api (Llm_provider.Retry.InvalidRequest
+           {reason=Llm_provider.Retry.Attempt_rejected;_});provider_failure} : Agent.detailed_error) ->
+         (* The binding refused a request it would not send, so the failure
+            names that binding and request validation, not a configuration
+            with no binding. *)
+         (match provider_failure with
+          | Some {Provider_failure_attribution.evidence=Request_validation;binding=Some _;_} -> ()
+          | Some _ | None ->
+            Alcotest.fail "the refusal must be attributed to this binding's request validation")
+       | Error {error;_} -> Alcotest.fail (Error.to_string error)
+       | Ok _ -> Alcotest.fail "an open foreign exchange must not reach Anthropic");
+      Alcotest.(check int) "no request leaves" 0 !requests;
+      Alcotest.(check bool) "the open exchange stays canonical" true
+        ((Agent.state agent).messages = cp.messages))
+      [false;true]))
+;;
+
 (* ── Test runner ─────────────────────────────────────────────── *)
 
 let () =
@@ -967,6 +1202,9 @@ let () =
         test_case "source-change exclusion protects active replay and control boundaries" `Quick test_binding_source_change_respects_active_replay;
         test_case "source-change admission follows actual tools and hook suppression in both dispatch modes" `Quick test_binding_source_change_uses_effective_request_tools;
         test_case "source-change exclusion still rejects invalid provenance" `Quick test_binding_source_change_rejects_invalid_provenance;
+        test_case "Anthropic sends finished turns other providers produced" `Quick test_binding_anthropic_sends_finished_foreign_turns;
+        test_case "Anthropic sends an answered tool call before a new query" `Quick test_binding_anthropic_sends_answered_foreign_tool_call;
+        test_case "Anthropic refuses an open exchange another provider produced" `Quick test_binding_anthropic_refuses_open_foreign_exchange;
         test_case "same exact binding retains canonical history" `Quick test_binding_exact_resume;
         test_case "provider model and replay contract mismatch" `Quick test_binding_provider_model_and_contract_mismatch;
         test_case "restore reads no media" `Quick test_restore_reads_no_media;

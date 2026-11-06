@@ -47,6 +47,20 @@ type rotation_policy =
       difference still drops it. *)
 [@@deriving show, eq, yojson]
 
+(** Declared scope of the selected reasoning the target wire requires back.
+    Selection ({!replay_policy}) says what a request replays when it can;
+    this says what a request may not go without. Like {!rotation_policy} it
+    is the consuming request's decision and not a member of {!t}. *)
+type replay_obligation =
+  | Every_selected_message
+  (** The wire refuses or misreads a selected assistant message sent without
+      its reasoning, wherever it sits in the history. *)
+  | Open_exchange_messages
+  (** The wire requires reasoning back only for assistant messages after the
+      latest caller query: the exchange that query opened and the request
+      continues. A selected message before that query may go without its
+      reasoning. *)
+
 (** Source identity includes the original content carrier contract. This is a
     required persisted field; artifacts lacking it are not converted. *)
 type content_carrier = Canonical_blocks | Inline_chat_content

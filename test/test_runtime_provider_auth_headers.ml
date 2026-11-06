@@ -3056,8 +3056,8 @@ let test_runtime_trimmed_reasoning_boundary () =
               else Agent_core.Agent.Advanced.continue ~sw ~api_strategy
                 ~on_tool_boundary:(fun _ -> Agent_core.Agent.Advanced.Continue) agent in
             (match blocked, result with
-             | true, Error (Agent_core.Error.Config
-                 (Agent_core.Error.InvalidConfig {field="reasoning_replay";_})) -> ()
+             | true, Error (Agent_core.Error.Api (Llm_provider.Retry.InvalidRequest
+                 {reason=Llm_provider.Retry.Attempt_rejected;_})) -> ()
              | false, Ok (Agent_core.Agent.Advanced.Completed _) -> ()
              | _, Error error -> fail (Agent_core.Error.to_string error)
              | _, Ok (Agent_core.Agent.Advanced.Completed _

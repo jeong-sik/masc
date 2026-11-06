@@ -71,7 +71,10 @@ type options =
     (** Defaults to [Reject_incompatible]. [Exclude_unselected] admits a
         provider/model change without deleting canonical reasoning. Resume is
         provisional; dispatch requires each foreign artifact to be outside the
-        target's replay selection. Active mandatory reasoning stays protected. *)
+        target's replay obligation
+        ([Llm_provider.Reasoning_replay_contract.replay_obligation]). One
+        inside it is refused before dispatch as
+        [Api (InvalidRequest { reason = Attempt_rejected })]. *)
   ; stream_idle_timeout_s : float option
     (** Inter-line idle deadline applied to streaming HTTP responses.
         Threaded through {!Pipeline.stage_route} into

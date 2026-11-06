@@ -47,6 +47,11 @@ type error =
       ; stored : Types.Reasoning_source.t
       ; target : Types.Reasoning_source.t
       }
+  | Required_reasoning_unreadable of
+      { message_index : int
+      ; stored : Types.Reasoning_source.t
+      ; target : Types.Reasoning_source.t
+      }
   | Invalid_reasoning_artifact_role of { message_index : int }
   | Unsupported_reasoning_block of
       { message_index : int
@@ -73,6 +78,44 @@ let error_to_string = function
   | Incompatible_reasoning_artifact { message_index; stored; target } ->
     Printf.sprintf "stored reasoning source is incompatible at history index %d (%s -> %s)"
       message_index (Types.Reasoning_source.show stored) (Types.Reasoning_source.show target)
+  | Required_reasoning_unreadable { message_index; stored; target } ->
+    (* Name each dimension that differs. A same-model refusal across two
+       endpoints would otherwise read as one source refusing itself. Both
+       sources are taken apart field by field with no [_], so a new source
+       field stops the build here (warning 9) until it has a line below. *)
+    let { Types.Reasoning_source.provider_kind = stored_kind
+        ; provider_instance = stored_instance
+        ; canonical_model_id = stored_model
+        ; replay_contract = stored_contract
+        } = stored
+    in
+    let { Types.Reasoning_source.provider_kind = target_kind
+        ; provider_instance = target_instance
+        ; canonical_model_id = target_model
+        ; replay_contract = target_contract
+        } = target
+    in
+    let differences =
+      List.filter_map Fun.id
+        [ (if stored_kind = target_kind then None
+           else
+             Some
+               (Printf.sprintf "provider %s -> %s" (Provider_kind.to_string stored_kind)
+                  (Provider_kind.to_string target_kind)))
+        ; (if String.equal stored_model target_model then None
+           else Some (Printf.sprintf "model %s -> %s" stored_model target_model))
+        ; (if stored_instance = target_instance then None else Some "endpoint")
+        ; (if Reasoning_replay_contract.equal stored_contract target_contract then None
+           else Some "replay contract")
+        ]
+    in
+    Printf.sprintf
+      "reasoning at history index %d must go back to %s %s, which cannot read it \
+       (stored source differs in %s)"
+      message_index
+      (Provider_kind.to_string target_kind)
+      target_model
+      (String.concat ", " differences)
   | Invalid_reasoning_artifact_role { message_index } ->
     Printf.sprintf "stored reasoning is on a non-Assistant message at history index %d" message_index
   | Invalid_response_replay {message_index; detail} ->
@@ -285,7 +328,8 @@ let validate_replay_continuity_for_provider_config
     | Error detail -> Error (Invalid_reasoning_target detail)
     | Ok replay_capability ->
       let latest_user_message_index = find_latest_user_message_index classified in
-      let target_replay_policy = (Reasoning_dialect.for_provider_config config).replay_policy in
+      let target_dialect = Reasoning_dialect.for_provider_config config in
+      let target_replay_policy = target_dialect.replay_policy in
       let selected message_index (message : _ Types.message_with) =
         match replay_capability.contract.Reasoning_replay_contract.replay_policy with
         | Provider_opaque_state -> true
@@ -294,6 +338,18 @@ let validate_replay_continuity_for_provider_config
            | Tool_call_assistant_messages_latest_user_turn) as policy ->
           replay_selected policy ~message_index ~latest_user_message_index
             ~assistant_had_tool_call:(content_has_tool_use message.content)
+      in
+      (* Selection is what the request replays when it can; the obligation is
+         what it may not go without. Missing caller-boundary evidence keeps the
+         whole history inside the open exchange, as for selection. *)
+      let required message_index message =
+        selected message_index message
+        && (match Reasoning_dialect.replay_obligation target_dialect with
+            | Reasoning_replay_contract.Every_selected_message -> true
+            | Open_exchange_messages ->
+              (match latest_user_message_index with
+               | Some user_message_index -> message_index > user_message_index
+               | None -> true))
       in
       let caller_excluded = match config.preserve_thinking with
         | Some false ->
@@ -338,11 +394,11 @@ let validate_replay_continuity_for_provider_config
                  | Exclude_unselected ->
                    let admissible = match boundary with
                      | Checkpoint_restore -> true
-                     | Provider_dispatch _ -> not (selected message_index message) in
+                     | Provider_dispatch _ -> not (required message_index message) in
                    if admissible then
                      check ({message_index; reason=Incompatible_reasoning_source stored}
                        :: exclusions) rest
-                   else Error (Incompatible_reasoning_artifact
+                   else Error (Required_reasoning_unreadable
                      {message_index; stored; target=replay_capability.target}))
       in
       check [] classified)

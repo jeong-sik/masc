@@ -791,6 +791,30 @@ let rotation_policy dialect : Reasoning_replay_contract.rotation_policy =
      | Reasoning_effort -> Allow_endpoint_rotation)
 ;;
 
+(* What the target wire cannot do without, from the same typed wire fact.
+
+   The Anthropic Messages wire requires thinking back only inside the tool-use
+   turn in progress and lets a request omit earlier turns' thinking
+   (platform.claude.com/docs/en/build-with-claude/thinking, "Preserving
+   thinking blocks": Required within a tool-use turn, Allowed to omit prior
+   turns' thinking outside tool use; read 2026-11-06). Every other wire keeps
+   the whole selection: a missing reasoning field on a selected message is not
+   proven harmless there. *)
+let replay_obligation dialect : Reasoning_replay_contract.replay_obligation =
+  match dialect.toggle_wire with
+  | Anthropic_thinking -> Open_exchange_messages
+  | Gemini_thinking_config
+  | No_toggle
+  | Thinking_object _
+  | Thinking_object_adaptive
+  | Thinking_object_only
+  | Chat_template_kwargs
+  | Chat_template_token
+  | Ollama_think
+  | Reasoning_enabled
+  | Reasoning_effort -> Every_selected_message
+;;
+
 (* Artifact provenance is derived from the stable provider/model/transport
    shape. Request-local replay selection (for example [preserve_thinking] or the
    clear-thinking gate) is applied by [for_provider_config] at the consuming

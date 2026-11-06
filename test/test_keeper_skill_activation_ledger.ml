@@ -1708,11 +1708,6 @@ let test_cold_read_and_commit_do_not_deadlock () =
 let test_failed_append_notifies_and_invalidates_cache () =
   with_session @@ fun config trace_id session_dir ->
   let cold = ok "cold session" (Ledger.load ~config ~trace_id) in
-  let heard = ref [] in
-  let observer ~config:_ ~trace_id:changed = heard := changed :: !heard in
-  Ledger.install_commit_observer observer;
-  Fun.protect ~finally:(fun () -> Ledger.withdraw_commit_observer observer)
-  @@ fun () ->
   let loads = ref 0 in
   Server_skill_usage_runtime.For_testing.with_runtime
     ~ledger_loader:(fun ~config:_ ~trace_id:_ -> incr loads; Ok cold)
@@ -1720,11 +1715,23 @@ let test_failed_append_notifies_and_invalidates_cache () =
       let read () = ignore (Server_skill_usage_runtime.read_sessions ~config [ "alpha", trace_id ]) in
       read ();
       check int "the first read is cold" 1 !loads;
+      let heard = ref [] in
+      let loads_during_notification = ref [] in
+      let observer ~config:_ ~trace_id:changed =
+        heard := changed :: !heard;
+        loads_during_notification := !loads :: !loads_during_notification;
+        read ()
+      in
+      Ledger.install_commit_observer observer;
+      Fun.protect ~finally:(fun () -> Ledger.withdraw_commit_observer observer)
+      @@ fun () ->
       Fs_compat.mkdir_p (events_file session_dir);
       (match Ledger.record ~keeper_name:"alpha" ~config ~trace_id (activation ()) with
        | Ok _ -> fail "a directory accepted the event log"
        | Error _ -> ());
       check int "the attempted append notifies the legacy observer" 1 (List.length !heard);
+      check (list int) "the notification already sees the cold reload" [ 2 ]
+        (List.rev !loads_during_notification);
       read ();
       check int "the uncertain append invalidates the cached ledger" 2 !loads)
 ;;

@@ -341,11 +341,142 @@ let test_a_turn_record_prune_tells_its_keeper () =
     [ Unix.realpath runtime_keepers_dir, "largo" ] (List.rev !told)
 ;;
 
+let test_a_notification_reloads_the_warm_row () =
+  with_workspace
+  @@ fun ~config ~fleet_key:_ ~elsewhere:_ ~config_keepers_dir ~runtime_keepers_dir ~heard:_ ->
+  let module Current = Keeper_memory_os_current in
+  let module Types = Keeper_memory_os_types in
+  let module Health = Server_dashboard_http_keeper_memory_health in
+  let keeper = "largo" in
+  Fs_compat.mkdir_p config_keepers_dir;
+  Fs_compat.mkdir_p runtime_keepers_dir;
+  let source = { Current.kind = Current.Explicit_write; trace_id = "trace" } in
+  let ordinary_writes = ref 0 in
+  let write_ordinary () =
+    incr ordinary_writes;
+    let expected_revision =
+      match Current.read_for_keepers_dir ~keepers_dir:config_keepers_dir ~keeper_id:keeper with
+      | Ok None -> None
+      | Ok (Some snapshot) -> Some snapshot.revision
+      | Error detail -> fail detail
+    in
+    Current.replace ~keepers_dir:config_keepers_dir ~keeper_id:keeper ~expected_revision
+      ~now:(20. +. float_of_int !ordinary_writes) ~source
+      ~facts:[ Types.observed ~claim:("ordinary fact " ^ string_of_int !ordinary_writes)
+                 ~category:Types.Fact ~now:20.
+                 ~origin:{ kind = Types.Authored; trace_id = "trace" } ]
+      ()
+    |> require |> ignore
+  in
+  let attempts = ref 0 in
+  Health.For_testing.with_runtime
+    ~keeper_health:(fun ~config ~keepers_dir keeper_id ->
+      incr attempts;
+      Health.For_testing.keeper_health ~config ~keepers_dir keeper_id)
+    (fun () ->
+      write_ordinary ();
+      Eio.Switch.run (fun sw ->
+        Server_memory_health_broadcast.install ~sw ~config;
+        let read_row () =
+          ignore (Health.keeper_memory_health_row_http_json
+                    ~base_path:config.Workspace.base_path ~keeper)
+        in
+        read_row ();
+        check int "the row starts warm" 1 !attempts;
+        let observed_loads = ref [] in
+        let id = "memory-health-row-read-during-notification" in
+        Sse.subscribe_external ~runtime_authority:(Sse.runtime_authority_exn ~base_path:config.base_path)
+          ~id ~callback:(fun (event : Sse.external_event) ->
+            Option.iter
+              (fun changed ->
+                 if String.equal changed keeper then begin
+                   read_row ();
+                   observed_loads := !attempts :: !observed_loads
+                 end)
+              (memory_health_keeper event.ext_payload))
+          ();
+        Fun.protect ~finally:(fun () -> Sse.unsubscribe_external id) (fun () ->
+          let check_reload label write =
+            let before = !attempts in
+            write ();
+            check int (label ^ " reloads before the callback") (before + 1) (List.hd !observed_loads);
+            check int (label ^ " reloads once") (before + 1) !attempts
+          in
+          check_reload "Librarian progress" (fun () ->
+            match
+              Keeper_librarian_progress.write ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper
+                { Keeper_librarian_progress.position =
+                    { trace_id = "trace"; end_atom = 2; last_atom_digest = "d" }
+                ; boundary_lines_seen = 1
+                }
+            with
+            | Ok () -> ()
+            | Error error -> fail (Keeper_librarian_progress.write_error_to_string error));
+          check_reload "turn record" (fun () ->
+            let store = Keeper_types_support.keeper_turn_record_store config keeper in
+            Eio.Switch.on_release sw (fun () -> Dated_jsonl.prepare_for_directory_removal store);
+            Keeper_turn_record_writer.write ~request_observations:[] ~config ~keeper_name:keeper
+              ~agent_name:keeper ~turn_kind:Turn_record.Direct ~trace_id:"trace" ~absolute_turn:1
+              ~runtime_profile:"announce.fixture" ~selected_model:None ~finish_reason:None
+              ~context_window:None ~price_input_per_million:None ~price_output_per_million:None
+              ~request_latency_ms:None ~ttfrc_ms:None ~request_wire_observation:None
+              ~model_input_window:None ~response_observed_model_input:None ~raw_trace_run_ref:None
+              ~sampling:{ temperature = None; top_p = None; max_tokens = None; enable_thinking = None }
+              ~turn_output_tokens:None
+              ~usage:
+                { input_tokens = None
+                ; output_tokens = None
+                ; cache_creation_input_tokens = None
+                ; cache_read_input_tokens = None
+                ; scope = Runtime_usage_scope.Usage_scope_unavailable
+                ; input_provenance = None
+                }
+              ~execution_ids:[] ~blocks:[] ~input_components:None ~tool_surface_ref:None ());
+          check_reload "vision error" (fun () ->
+            let unreadable =
+              Agent_core.Types.Image
+                { media_type = "image/png"
+                ; source = Agent_core.Types.Stored (Agent_core.History.stored_of_raw "never put")
+                }
+            in
+            ignore
+              (Keeper_vision_ingest.evict_blocks ~base_path:config.Workspace.base_path
+                 ~media_store:(Agent_core.History.Memory_store.create ())
+                 ~mode:Keeper_vision_ingest.Store_only ~delegate:true ~keeper_name:keeper
+                 [ unreadable ]));
+          check_reload "unread ledger" (fun () ->
+            let messages =
+              [ Agent_core.Types.make_message ~role:Agent_core.Types.User
+                  [ Agent_core.Types.Text "unread original" ]
+              ]
+            in
+            let hole =
+              Keeper_librarian_unread.for_atom ~trace_id:"trace" ~history_start_boundary_line:1
+                ~atom:1 ~message_in_atom:0 ~messages
+                ~reasons:[ Keeper_librarian_input_refusal.Input_capacity ]
+              |> require
+            in
+            ignore
+              (Keeper_librarian_unread_ledger.archive ~keepers_dir:config_keepers_dir
+                 ~keeper_id:keeper [ hole ]
+               |> require));
+          check_reload "ordinary snapshot" write_ordinary;
+          check_reload "source-bound commit" (fun () ->
+            Keeper_memory_commit_notifications.notify_committed
+              { Keeper_memory_commit_notifications.keepers_dir = Unix.realpath config_keepers_dir
+              ; keeper_id = keeper
+              ; store = Keeper_memory_commit_notifications.Source_bound
+              ; revision = 3
+              }))))
+;;
+
 let () =
   run "memory_health_input_announce"
     [ ( "workspace"
       , [ test_case "writes under the workspace announce their Keeper" `Quick
             test_writes_under_the_workspace_announce_their_keeper
+        ; test_case "a notification reloads the warm row" `Quick
+            test_a_notification_reloads_the_warm_row
         ] )
     ; ( "stores"
       , [ test_case "each store write tells the signal once" `Quick

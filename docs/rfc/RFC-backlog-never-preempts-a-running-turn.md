@@ -3,10 +3,10 @@ rfc: "backlog-never-preempts-a-running-turn"
 title: "쌓인 대기열은 실행 중인 턴을 멈추지 않는다 — 끝낼 때는 Keeper 가 정한다"
 status: Draft
 created: 2026-10-29
-updated: 2026-10-29
-revision: 4
+updated: 2026-11-06
+revision: 5
 author: claude
-related: ["0441", "0377", "event-queue-admit-all-ready", "board-attention-asks-jev-once-per-event", "keeper-recall-reaches-the-turn"]
+related: ["0441", "0377", "event-queue-admit-all-ready", "board-attention-asks-jev-once-per-event", "keeper-recall-reaches-the-turn", "arrived-stimuli-reach-the-running-turn"]
 ---
 
 # RFC: 쌓인 대기열은 실행 중인 턴을 멈추지 않는다 — 끝낼 때는 Keeper 가 정한다
@@ -359,6 +359,13 @@ flowchart TD
   한 줄을 어느 층에 둘지는 정하지 않았다. 직접 턴에는 Namespace State 층이 없다(`keeper_direct_turn_context.ml:69-76`). 새 층은 공식 클라이언트가 다시 이어받을 때 매번 보낼지 바뀔 때만 보낼지를 `resend_on_resume` 에서 정해야 한다(`keeper_context_layers.ml:190-212`, 종류를 모두 적는 match).
   이번 스택은 구현하지 않았다. 범위가 크고, 풀의 입력과 출력, 한 줄의 자리는 1단계 뒤의 측정으로 정하는 편이 맞다.
 - 요약은 턴 시작에 한 번 만든다. 도구 경계마다 만들지 않는다. 경계마다 읽으면 모델 요청 수만큼 읽기가 늘고, 공식 클라이언트 중에는 Codex 말고 닿는 곳이 없다(1.7). 도는 중에 보고 싶으면 풀을 부른다. 드는 비용은 재지 않았다. **[확인 필요]**
+- **[구현]** 2026-11-06 에 도는 중 주입 길에 한 줄을 얹었다(`keeper_waiting_operations.ml`). 에이전트 코어 턴에서 도구 결과 뒤 요청마다, 소유자가 들고 있는 대기 중 대화 요청 개수가 지금까지 알린 값보다 크면 `Arrived_stimuli` 블록에 "대화 요청 N개가 대기 중이고 적어도 하나는 이 턴이 끝나면 시작한다"를 싣는다. 같은 개수는 다시 싣지 않고, 줄었다가 다시 늘면 다시 싣는다. 이 줄은 위 제안과 셋이 다르다.
+  - 종류별 개수와 가장 오래된 행의 나이 대신 대화 요청 개수 하나만 싣는다. 소유자의 projection(`Keeper_owner.operation_projection`)에 가장 오래된 admit 시각이 없다. 나이를 더하려면 저장소 쿼리와 projection 필드가 새로 필요해서 더하지 않았다. 대기 선택(이벤트 큐 행)은 `RFC-arrived-stimuli-reach-the-running-turn` 의 블록이 이미 보여 준다.
+  - 도구 경계마다 읽지 않는다는 위 결정의 이유는 읽기 비용이었다. 이 값은 소유자가 메모리에 들고 있는 immutable projection 이라(`Keeper_owner_registry.operation_projection`, 저장소 I/O 없음) 요청마다 저장소를 읽지 않는다. 읽는 시간은 재지 않았다. **[확인 필요]**
+  - 블록 id 는 `Arrived_stimuli` 를 같이 쓴다. 둘 다 첫 요청이 싣지 못한 소식이고, 새 id 하나는 파일 11개를 건드린다(`Prompt_block_id` 를 더한 커밋 기준).
+- **[측정]** 위임 대기가 이 줄이 줄이려는 일이다(2026-11-01~05 UTC, 위임 505개, #49039 의 스크립트와 README). 시작한 502개의 제출~시작 대기가 30.8시간이다. 제출 시각에 대상이 이미 도는 턴 안에 있던 115개가 그중 21.8시간(70.8%)이고, 이 115개가 대상의 다음 도구 반환에서 바로 시작했다면 줄 수 있는 상한이 19.6시간(전체 대기의 63.4%)이다. 만들어진 변경이 아니라 상한이다.
+  - 이 줄이 닿는 범위는 에이전트 코어 턴뿐이다. 115개를 막은 턴의 `runtime_profile` 로 나누면 `glm-coding.*`, `opencode_go.*`, `ollama_cloud.*`(`runtime.toml` 에서 모두 `openai-compatible-http`)인 것이 38개, 대기 10.5시간(깃발 켜진 대기의 48.0%), 상한 9.6시간(전체 대기의 31.1%)이다. `sonnet-500k-then-glm`, `go-deepseek-then-glm`, `go-mimo-then-glm` 같은 레인 이름인 71개(10.8시간, 49.2%)는 나누지 못했다. 원장이 레인 이름만 적고 어느 후보가 돌렸는지는 적지 않으며, 레인 안에 Claude Code 와 GLM 이 같이 있다. Claude Code·Codex·Muse 가 직접 막은 5개는 0.1시간이다. 스크립트 밖에서 센 값이고, 합계 19.57시간은 커밋된 스크립트의 값과 같다.
+  - 모델이 이 줄을 보고 턴을 일찍 끝내는지는 배포 전이라 재지 못했다. 블록이 프롬프트 캐시에 주는 비용도 재지 못했다. **[확인 필요]**
 
 ### 3.6 3단계 — Jev 가 묶고 순서를 정한다
 

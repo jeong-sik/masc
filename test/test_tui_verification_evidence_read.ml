@@ -227,7 +227,7 @@ let take_publication results shared round =
       (fun (ready : Protocol.async_msg Results.ready) ->
         {Protocol.ready_at_ns=ready.ready_at_ns;message=ready.message}))
 let original_reply state = function
-  | Protocol.Workspace_scoped (authority,reading,(Verification_evidence_loaded (request,result) as message)) ->
+  | Protocol.Workspace_scoped (authority,reading,(Verification_msg (Verification_evidence_loaded (request,result)) as message)) ->
       if Protocol.workspace_message_admitted state ~authority ~reading message
       then complete_verification_evidence_read state request result else false
   | _ -> fail "original evidence envelope lost"
@@ -235,7 +235,7 @@ let launch_evidence ?observe_job state results request perform =
   let envelope = Protocol.capture_workspace_message state in
   Results.launch ~key:request.ver_job ~observation:true ?observe_job state ~results
     ~boundary_error:(fun detail -> Failure.Launch_failure detail)
-    ~deliver:(fun result -> envelope (Protocol.Verification_evidence_loaded (request,result))) perform
+    ~deliver:(fun result -> envelope (Protocol.Verification_msg (Protocol.Verification_evidence_loaded (request,result)))) perform
 let released () =
   let promise,resolver = Eio.Promise.create () in
   let observe = function
@@ -257,7 +257,7 @@ let test_launch_failure_with_full_notifications () = with_root @@ fun base ->
   let request = start state key and results = Results.create () in
   Fun.protect ~finally:(fun () -> Results.close results) @@ fun () ->
   let shared = Eio.Stream.create 1 in
-  let notification = {Protocol.ready_at_ns=0L;message=Protocol.Harness_label_done (Ok "unrelated-original")} in
+  let notification = {Protocol.ready_at_ns=0L;message=Protocol.Harness_msg (Protocol.Harness_label_done (Ok "unrelated-original"))} in
   Eio.Stream.add shared notification;
   let forbidden = Filename.concat base "unstarted-resource-effect" in
   launch_evidence state results request (fun () ->

@@ -2238,7 +2238,7 @@ let test_observer_retry_retires_with_workspace_read_authority () =
   let reading = Some state.workspace_read_authority in
   let closed = Observer_closed_before_answer { reason = "closed"; at = 1. } in
   let owner = ref () in
-  let retry = Masc_tui_async_protocol.Observer_retry_due (authority, owner) in
+  let retry = Masc_tui_async_protocol.Observer_msg (Masc_tui_async_protocol.Observer_retry_due (authority, owner)) in
   state.observer <- closed;
   state.observer_retry_owner <- Some owner;
   Alcotest.(check bool) "closed stream owns its retry" true
@@ -2922,7 +2922,7 @@ let test_answer_receipt_survives_full_mailbox_and_worker_cancellation () =
             | None,None -> true | (Some _ | None),(Some _ | None) -> false)
         && P.workspace_message_admitted state ~authority ~reading inner);
      (match P.project_workspace_operation_reply state ~authority ~reading inner with
-      | P.Ask_answer_done (owner, saved, observed) ->
+      | P.Ask_msg (P.Ask_answer_done (owner, saved, observed)) ->
         Alcotest.(check bool) "retired GET is refused without discarding confirmed POST receipt" true
           (owner.as_request==original.as_request && saved=receipt && Result.is_error observed
            && ask_submission_inflight state owner)
@@ -2997,7 +2997,7 @@ let test_answer_receipt_survives_full_mailbox_and_worker_cancellation () =
   (match P.ask_answer_completion_message owner fact with
    | P.Workspace_scoped (authority,None,inner) ->
      (match P.project_workspace_operation_reply state ~authority ~reading:None inner with
-      | P.Ask_answer_done (_,saved,observed) ->
+      | P.Ask_msg (P.Ask_answer_done (_,saved,observed)) ->
         Alcotest.(check bool) "original unconfirmed reading cannot borrow a later confirmed scope" true
           (saved=receipt && Result.is_error observed)
       | _ -> Alcotest.fail "unconfirmed scope did not use operation projection")
@@ -4789,20 +4789,20 @@ let test_owned_results_progress_between_shared_queue_prefixes () =
     round := next;
     ready in
   let apply_owned (ready : P.async_msg P.mailed) = match ready.message with
-    | P.Ask_answer_receipt_ready owner ->
+    | P.Ask_msg (P.Ask_answer_receipt_ready owner) ->
         let held,fact = match take_ask_answer_receipt state owner with
           | Some observed -> observed | None -> Alcotest.fail "owned POST result was delivered twice" in
         Alcotest.(check bool) "read withdrawal retains the canonical POST without new feedback authority" true
           (held.as_request==owner.as_request && fact.result=receipt
            && Option.is_none (retain_ask_answer_feedback state held fact.result))
-    | P.Workspace_scoped (authority,reading,(P.Ask_answer_done (owner,_,_) as inner)) ->
+    | P.Workspace_scoped (authority,reading,(P.Ask_msg (P.Ask_answer_done (owner,_,_)) as inner)) ->
         Alcotest.(check bool) "captured identity withdrawal precedes terminal read admission" true
           (P.workspace_message_admitted state ~authority ~reading inner
            && match P.project_workspace_operation_reply state ~authority ~reading inner with
-             | P.Ask_answer_done (_,saved,observed) -> saved=receipt && Result.is_error observed
+             | P.Ask_msg (P.Ask_answer_done (_,saved,observed)) -> saved=receipt && Result.is_error observed
              | _ -> false);
         if owner.as_request==current.as_request then terminal_seen := true
-    | P.Runtime_form_save_changed (owner,status,_) ->
+    | P.Runtime_msg (P.Runtime_form_save_changed (owner,status,_)) ->
         let Workspace_authority generation = state.workspace_authority in
         state.workspace_authority <- Workspace_authority (generation+1);
         Alcotest.(check bool) "captured foreign form receipt grants no surface authority" true
@@ -4814,7 +4814,7 @@ let test_owned_results_progress_between_shared_queue_prefixes () =
           (owner.ksv_token==settings.ksv_token && status=settings_status
            && not (keeper_settings_save_current state owner)
            && apply_keeper_settings_save state owner status)
-    | P.Runtime_assignment_changed (owner,status,_) ->
+    | P.Runtime_msg (P.Runtime_assignment_changed (owner,status,_)) ->
         Alcotest.(check bool) "original assignment refusal retains its explicit choice after withdrawal" true
           (owner.ras_token==assignment.ras_token && status=assignment_status
            && owner.ras_runtime_id=Some "codex.example"
@@ -4879,13 +4879,13 @@ let test_operation_histories_keep_unfinished_and_recovery_owners () =
   let prepared = match prepare_runtime_form_save draft (runtime_form_reading ()) with
     | Ok prepared -> prepared | Error _ -> Alcotest.fail "original form preparation failed" in
   let apply (ready : P.async_msg P.mailed) = match ready.message with
-    | P.Runtime_form_save_changed (owner,status,_) ->
+    | P.Runtime_msg (P.Runtime_form_save_changed (owner,status,_)) ->
         Alcotest.(check bool) "form observation advances only its registered owner" true
           (apply_runtime_form_save state owner status)
     | P.Keeper_msg (P.Keeper_settings_save_changed (owner,status,_)) ->
         Alcotest.(check bool) "settings observation advances only its registered owner" true
           (apply_keeper_settings_save state owner status)
-    | P.Runtime_assignment_changed (owner,status,_) ->
+    | P.Runtime_msg (P.Runtime_assignment_changed (owner,status,_)) ->
         Alcotest.(check bool) "assignment observation advances only its registered owner" true
           (apply_runtime_assignment state owner status)
     | _ -> Alcotest.fail "unexpected configuration delivery" in

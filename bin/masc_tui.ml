@@ -1861,14 +1861,14 @@ let check_workspace_request ?schedule_form_action ?refresh_ticket
       Option.iter (fun action ->
         enqueue_async mailbox
           (Workspace_scoped (authority, None,
-            Schedule_form_authority_refused
-              { action; detail; workspace = workspace_input_identity_of_server identity })))
+            Schedule_msg (Schedule_form_authority_refused
+              { action; detail; workspace = workspace_input_identity_of_server identity }))))
         schedule_form_action;
       if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then
         enqueue_async mailbox
           (Workspace_scoped (authority, Some reading_authority,
-            Workspace_identity_unconfirmed
-              { detail; latest = reading; prior_contact; refresh_ticket }));
+            Workspace_msg (Workspace_identity_unconfirmed
+              { detail; latest = reading; prior_contact; refresh_ticket })));
       Error detail
     end
 
@@ -2045,7 +2045,7 @@ let launch_artifact_checks_load state ~mailbox =
       state.artifact_checks <- reading;
       let host = server_peer_host and port = state.port in
       launch_workspace_json_read state ~mailbox
-        ~deliver:(fun result -> Artifact_checks_loaded (request, result))
+        ~deliver:(fun result -> Artifact_msg (Artifact_checks_loaded (request, result)))
         (fun () ->
           let open Result.Syntax in
           let* json = Masc_tui_http.get_json ~host ~port ~path:"/api/v1/published-artifact-checks" in
@@ -2092,9 +2092,9 @@ let save_resource_source state ~mailbox prompt =
       let path = if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path else path in
       state.resource_save_prompt <- None;
       launch_workspace_request ~operation:true state ~mailbox ~boundary_error:Fun.id
-        ~cancelled:(Resource_exported (Masc_tui_resource_export.label prompt.rsp_document,
-          Error ("Save interrupted; the destination may contain complete or incomplete data. Inspect before retrying: " ^ path)))
-        ~deliver:(fun result -> Resource_exported (Masc_tui_resource_export.label prompt.rsp_document, result))
+        ~cancelled:(Resource_msg (Resource_exported (Masc_tui_resource_export.label prompt.rsp_document,
+          Error ("Save interrupted; the destination may contain complete or incomplete data. Inspect before retrying: " ^ path))))
+        ~deliver:(fun result -> Resource_msg (Resource_exported (Masc_tui_resource_export.label prompt.rsp_document, result)))
         (fun () ->
           let open Result.Syntax in
           let* () = resource_export_is_current state prompt in
@@ -2109,9 +2109,9 @@ let open_resource_in_dashboard state ~mailbox =
     let port = state.port in
     let url = Masc_tui_resource_export.dashboard_url ~host:server_peer_host ~port document in
     launch_workspace_request ~operation:true state ~mailbox ~boundary_error:Fun.id
-      ~cancelled:(Resource_exported (Masc_tui_resource_export.label document,
-        Error ("Browser opening interrupted; whether the browser opened is unknown: " ^ url)))
-      ~deliver:(fun result -> Resource_exported (Masc_tui_resource_export.label document, result))
+      ~cancelled:(Resource_msg (Resource_exported (Masc_tui_resource_export.label document,
+        Error ("Browser opening interrupted; whether the browser opened is unknown: " ^ url))))
+      ~deliver:(fun result -> Resource_msg (Resource_exported (Masc_tui_resource_export.label document, result)))
       (fun () ->
         if authority <> state.workspace_authority || reading != state.workspace_read_authority then
           Error "The workspace changed before opening this report"
@@ -2151,7 +2151,7 @@ let launch_artifact_check_change state ~mailbox =
       let host = server_peer_host and port = state.port in
       report_action state "system" "Saving confirmation; refresh follows the result";
       launch_workspace_request ~operation:true state ~mailbox ~boundary_error:Fun.id
-        ~deliver:(fun result -> Artifact_check_changed (request, result))
+        ~deliver:(fun result -> Artifact_msg (Artifact_check_changed (request, result)))
         (fun () -> Masc_tui_http.post_artifact_check ~credential ~expected_workspace
           ~host ~port ~request)
 
@@ -2196,8 +2196,8 @@ let launch_resource_share state ~mailbox ~report ~entry ~recovery ~dispatch_allo
          then Resource_share_unknown (context detail) else Resource_share_not_started detail in
        launch_workspace_result ~operation:true state ~mailbox
          ~boundary_error:failure
-         ~cancelled_by:(fun () -> Resource_share_changed (request, Error (failure "interrupted")))
-         ~deliver:(fun result -> Resource_share_changed (request, result))
+         ~cancelled_by:(fun () -> Resource_msg (Resource_share_changed (request, Error (failure "interrupted"))))
+         ~deliver:(fun result -> Resource_msg (Resource_share_changed (request, result)))
          (fun () ->
            (* The filesystem transaction and its lock belong to this worker, not
               to the input loop. A cancelled system-thread write may finish. *)
@@ -2274,8 +2274,8 @@ let begin_resource_share_recovery_lookup state ~mailbox =
     let path = artifact_share_journal_path origin in
     launch_workspace_result ~observation:true state ~mailbox
       ~boundary_error:Fun.id
-      ~cancelled:(Resource_share_recovery_loaded (request, Error "Recovery lookup interrupted"))
-      ~deliver:(fun result -> Resource_share_recovery_loaded (request, result))
+      ~cancelled:(Resource_msg (Resource_share_recovery_loaded (request, Error "Recovery lookup interrupted")))
+      ~deliver:(fun result -> Resource_msg (Resource_share_recovery_loaded (request, result)))
       (fun () ->
         let on_observed entries = List.iter (fun (entry : Artifact_share_pending.entry) ->
           if entry.masc_root = origin.wi_masc_root then record_resource_share_observation state entry) entries in
@@ -2841,7 +2841,7 @@ let launch_surface_tool_approval state ~mailbox ~keeper_name ~tool_call_id
      the Gate and operator-confirm decisions beside it. Take the same
      single-action slot so the header shows [submitting] at once and a repeat
      press during the trip is refused rather than answering the call twice.
-     Completion ([Surface_tool_approval_answered]) releases the slot. *)
+     Completion ([Keeper_tool_approval_answered]) releases the slot. *)
   match Approval.Flow.begin_action state.approval_flow with
   | Error `Already_inflight ->
       report_action state "system" "Approval action already in progress"
@@ -2863,21 +2863,21 @@ let launch_surface_tool_approval state ~mailbox ~keeper_name ~tool_call_id
           | exn -> Error (Printexc.to_string exn)
         in
         enqueue_async mailbox
-          (Surface_tool_approval_answered
-             (keeper_name, tool_call_id, approval_id, allow, result, generation))
+          (Keeper_msg (Keeper_tool_approval_answered
+             (keeper_name, tool_call_id, approval_id, allow, result, generation)))
       in
       match Eio_context.get_switch_opt () with
       | Some sw ->
           fork_workspace_job state ~sw run
       | None ->
           enqueue_async mailbox
-            (Surface_tool_approval_answered
+            (Keeper_msg (Keeper_tool_approval_answered
                ( keeper_name,
                  tool_call_id,
                  approval_id,
                  allow,
                  Error "Eio switch is unavailable",
-                 generation )))
+                 generation ))))
 
 (* Fetch the held tool calls for the Approvals surface. Its own fiber for the
    same reason every loader runs on one: a slow server costs the refresh, not
@@ -2951,13 +2951,13 @@ let launch_voice_wizard_probe state ~mailbox ~request message =
         ~timeout_sec:Masc_tui_http.voice_probe_timeout_sec
         ~host ~port ~path:"/api/v1/voice/probe/tts" ~body:payload)
     in
-    enqueue_async mailbox (Voice_wizard_probed (request, result))
+    enqueue_async mailbox (Voice_msg (Voice_wizard_probed (request, result)))
   in
   match Eio_context.get_switch_opt () with
   | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
   | None ->
     enqueue_async mailbox
-      (Voice_wizard_probed (request, Error "Eio switch is unavailable"))
+      (Voice_msg (Voice_wizard_probed (request, Error "Eio switch is unavailable")))
   end
 ;;
 
@@ -3001,13 +3001,13 @@ let launch_voice_wizard_reread state ~mailbox ~request =
          | Some revision -> Ok revision
          | None -> Error "the setup read named no revision")
     in
-    enqueue_async mailbox (Voice_wizard_reread (request, result))
+    enqueue_async mailbox (Voice_msg (Voice_wizard_reread (request, result)))
   in
   match Eio_context.get_switch_opt () with
   | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
   | None ->
     enqueue_async mailbox
-      (Voice_wizard_reread (request, Error "Eio switch is unavailable"))
+      (Voice_msg (Voice_wizard_reread (request, Error "Eio switch is unavailable")))
   end else suspend_voice_wizard_read state
 ;;
 
@@ -3166,14 +3166,14 @@ let launch_voice_wizard_save state ~mailbox
         | Masc_tui_http.Post_unanswered detail ->
           Masc_tui_voice_wizard_session.Save_unanswered_reply detail
       in
-      enqueue_async mailbox (Voice_wizard_saved (request, reply))
+      enqueue_async mailbox (Voice_msg (Voice_wizard_saved (request, reply)))
     in
     (match Eio_context.get_switch_opt () with
      (* Nothing was sent, so this is a refusal and not an unknown outcome. *)
      | None ->
        enqueue_async mailbox
-         (Voice_wizard_saved
-            (request, Masc_tui_voice_wizard_session.Save_refused "Eio switch is unavailable"))
+         (Voice_msg (Voice_wizard_saved
+            (request, Masc_tui_voice_wizard_session.Save_refused "Eio switch is unavailable")))
      | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon))
 ;;
 
@@ -3262,12 +3262,12 @@ let launch_voice_agent_voices state ~mailbox ~kind ~api_key_env =
       | Masc_tui_http.Post_refused message -> Error message
       | Masc_tui_http.Post_unanswered detail -> Error detail
     in
-    enqueue_async mailbox (Voice_agent_voices_loaded result)
+    enqueue_async mailbox (Voice_msg (Voice_agent_voices_loaded result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
   | None ->
-    enqueue_async mailbox (Voice_agent_voices_loaded (Error "Eio switch is unavailable"))
+    enqueue_async mailbox (Voice_msg (Voice_agent_voices_loaded (Error "Eio switch is unavailable")))
   end
 ;;
 
@@ -3314,12 +3314,12 @@ let launch_voice_agent_voice_save state ~mailbox
         | Masc_tui_http.Post_refused message -> Error message
         | Masc_tui_http.Post_unanswered detail -> Error detail
       in
-      enqueue_async mailbox (Voice_agent_voice_saved result)
+      enqueue_async mailbox (Voice_msg (Voice_agent_voice_saved result))
     in
     (match Eio_context.get_switch_opt () with
      | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
      | None ->
-       enqueue_async mailbox (Voice_agent_voice_saved (Error "Eio switch is unavailable")))
+       enqueue_async mailbox (Voice_msg (Voice_agent_voice_saved (Error "Eio switch is unavailable"))))
 ;;
 
 (* The input device captures open, read at boot from [tui].audio_input_device
@@ -3372,17 +3372,17 @@ let launch_voice_config_load state ~mailbox =
        answers three booleans and no identity, so a panel built only on it can
        say that a fallback exists and not which one. *)
     let setup = read_voice_setup ~host ~port in
-    enqueue_async mailbox (Voice_config_loaded (config, setup, device))
+    enqueue_async mailbox (Voice_msg (Voice_config_loaded (config, setup, device)))
   in
   match Eio_context.get_switch_opt () with
   | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
   | None ->
     enqueue_async
       mailbox
-      (Voice_config_loaded
+      (Voice_msg (Voice_config_loaded
          ( Error "Eio switch is unavailable"
          , Error "Eio switch is unavailable"
-         , None ))
+         , None )))
   end
 ;;
 
@@ -3399,7 +3399,7 @@ let launch_msx_live_read (state : Masc_tui_types.state) ~mailbox =
     let expected_workspace = state.server_identity in
     state.msx_live_in_flight <- Some request;
     launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-      ~deliver:(fun result -> Msx_live_loaded (request, result))
+      ~deliver:(fun result -> Msx_msg (Msx_live_loaded (request, result)))
       (fun () -> Masc_tui_http.fetch_machine_live ?expected_workspace ~host:server_peer_host
         ~port:request.live_port Masc.Machine_lane.Msx ~since)
 ;;
@@ -3429,7 +3429,7 @@ let rec launch_msx_poll (state : Masc_tui_types.state) ~mailbox =
       let since = Masc_tui_machine_live.since state.msx_live in
       msx_pending_poll := Poll_observing (request,refusal);
       launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-        ~deliver:(fun result -> Msx_activity_loaded (request,result))
+        ~deliver:(fun result -> Msx_msg (Msx_activity_loaded (request,result)))
         (fun () ->
           Result.map (fun activity -> activity,
             Masc_tui_http.fetch_machine_live ~host:server_peer_host ~port:request.poll_port Masc.Machine_lane.Msx ~since)
@@ -3463,23 +3463,23 @@ let rec launch_msx_poll (state : Masc_tui_types.state) ~mailbox =
           | exn -> Error (Printexc.to_string exn)
         in
         match admission with
-        | Error detail -> enqueue_async mailbox (Msx_tick_withdrawn (request, detail))
+        | Error detail -> enqueue_async mailbox (Msx_msg (Msx_tick_withdrawn (request, detail)))
         | Ok expected_workspace ->
           let frame =
             try Masc_tui_http.tick_msx ~expected_workspace ~host:server_peer_host ~port:request.poll_port with
             | Eio.Cancel.Cancelled _ as exn -> raise exn
             | exn -> Error (Printexc.to_string exn)
           in
-          enqueue_async mailbox (Msx_frame_loaded (request, frame))
+          enqueue_async mailbox (Msx_msg (Msx_frame_loaded (request, frame)))
       in
       (try
          match Eio_context.get_switch_opt () with
          | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
-         | None -> enqueue_async mailbox (Msx_tick_withdrawn (request, "Eio switch is unavailable"))
+         | None -> enqueue_async mailbox (Msx_msg (Msx_tick_withdrawn (request, "Eio switch is unavailable")))
        with
        | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exn -> enqueue_async mailbox
-           (Msx_tick_withdrawn (request, Printexc.to_string exn)))
+           (Msx_msg (Msx_tick_withdrawn (request, Printexc.to_string exn))))
 
 ;;
 
@@ -3594,7 +3594,7 @@ let launch_gate_snapshot_load ?(intent = Snapshot_read.Poll) state ~mailbox =
     (match intent with Snapshot_read.Poll -> "poll" | Snapshot_read.Refresh -> "refresh");
   Masc_tui_async_read.launch
     ~deliver:(fun result ->
-      enqueue_async mailbox (Gate_snapshot_loaded (request, expected_workspace, result)))
+      enqueue_async mailbox (Gate_msg (Gate_snapshot_loaded (request, expected_workspace, result))))
     (fun () ->
       let open Result.Syntax in
       let* () = probe_expected_workspace ~host ~port expected_workspace in
@@ -3642,19 +3642,19 @@ let launch_gate_resolve state ~mailbox ~approval_id ~approve ~reason =
           | exn -> Error (Printexc.to_string exn)
         in
         enqueue_async mailbox
-          (Gate_approval_resolved (approval_id, approve, expected_workspace, result, generation))
+          (Gate_msg (Gate_approval_resolved (approval_id, approve, expected_workspace, result, generation)))
       in
       match Eio_context.get_switch_opt () with
       | Some sw ->
           fork_workspace_job state ~sw run
       | None ->
           enqueue_async mailbox
-            (Gate_approval_resolved
+            (Gate_msg (Gate_approval_resolved
                ( approval_id,
                  approve,
                  expected_workspace,
                  Error "Eio switch is unavailable",
-                 generation )))
+                 generation ))))
 
 let launch_gate_auto_judge_retry state ~mailbox (pending : Tui_decode.gate_pending) =
   let enqueue_async = workspace_enqueue state in
@@ -3690,18 +3690,18 @@ let launch_gate_auto_judge_retry state ~mailbox (pending : Tui_decode.gate_pendi
               | exn -> Error (Printexc.to_string exn)
             in
             enqueue_async mailbox
-              (Gate_auto_judge_retried (pending.gp_id, expected_workspace, result, generation))
+              (Gate_msg (Gate_auto_judge_retried (pending.gp_id, expected_workspace, result, generation)))
           in
           match Eio_context.get_switch_opt () with
           | Some sw ->
               fork_workspace_job state ~sw run
           | None ->
               enqueue_async mailbox
-                (Gate_auto_judge_retried
+                (Gate_msg (Gate_auto_judge_retried
                    ( pending.gp_id,
                      expected_workspace,
                      Error "Eio switch is unavailable",
-                     generation )))
+                     generation ))))
 
 let launch_gate_mode_set state ~mailbox ~lane ~mode =
   let enqueue_async = workspace_enqueue state in
@@ -3723,14 +3723,14 @@ let launch_gate_mode_set state ~mailbox ~lane ~mode =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Gate_mode_set (lane, mode, result))
+    enqueue_async mailbox (Gate_msg (Gate_mode_set (lane, mode, result)))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
       fork_workspace_job state ~sw run
   | None ->
       enqueue_async mailbox
-        (Gate_mode_set (lane, mode, Error "Eio switch is unavailable"))
+        (Gate_msg (Gate_mode_set (lane, mode, Error "Eio switch is unavailable")))
 
 let launch_keeper_tool_modes_load state ~mailbox =
   if server_authority_ready state then
@@ -3906,7 +3906,7 @@ let reconcile_task_documents state ~mailbox =
         | Masc_tui_workspace_job.Cancellation_requested -> observe Cancellation_requested
         | Registration_released -> observe Registration_released)
       ~on_not_run:(fun () -> observe (Caller_observed Not_started)) state ~mailbox
-      ~boundary_error:Fun.id ~deliver:(fun result -> Task_document_prepared (request,result))
+      ~boundary_error:Fun.id ~deliver:(fun result -> Task_msg (Task_document_prepared (request,result)))
       (fun () -> Ok (Observation.run request.tdr_observation ~name (fun () ->
         Masc_tui_task_document.prepare key.tdk_input)))) started;
   started<>[] || List.length previous<>List.length current
@@ -3933,7 +3933,7 @@ let launch_tools_async_detail ?(force=false) state ~mailbox =
       let host = server_peer_host and port = state.port in
       let target = Masc_tui_fetched.request_key request.tad_ticket in
       launch_workspace_json_read ~key:request.tad_job state ~mailbox
-        ~deliver:(fun result -> Tools_async_detail_loaded (request,result))
+        ~deliver:(fun result -> Tools_msg (Tools_async_detail_loaded (request,result)))
         (fun () -> Masc_tui_http.fetch_async_request_detail ~host ~port ~target)
   end
 
@@ -3948,7 +3948,7 @@ let launch_tools_async_task_history ?(force=false) ?(older=false) state ~mailbox
       Option.iter (fun old -> Masc_tui_workspace_job.cancel_observation state ~key:old.thr_job) previous;
       let host=server_peer_host and port=state.port in
       launch_workspace_json_read ~key:request.thr_job state ~mailbox
-        ~deliver:(fun result -> Tools_async_task_history_loaded (request,result))
+        ~deliver:(fun result -> Tools_msg (Tools_async_task_history_loaded (request,result)))
         (fun () -> Masc_tui_http.fetch_task_history_page ~host ~port ~request:request.thr_page)
   end
 
@@ -3964,7 +3964,7 @@ let launch_tools_async_task ?(force=false) state ~mailbox =
        Option.iter (fun old -> Masc_tui_workspace_job.cancel_observation state ~key:old.atr_job) previous;
        let source=Masc_tui_fetched.request_key request.atr_ticket in
        launch_workspace_json_read ~key:request.atr_job state ~mailbox
-         ~deliver:(fun result -> Tools_async_task_body_loaded (request,result))
+         ~deliver:(fun result -> Tools_msg (Tools_async_task_body_loaded (request,result)))
          (fun () -> Masc_tui_http.fetch_original_task_detail ~host ~port ~task_id:source.ats_task_id ~previous:request.atr_previous));
     launch_tools_async_task_history ~force state ~mailbox
   end
@@ -3996,7 +3996,7 @@ let launch_tools_async_observation_load state ~mailbox =
             if generation = state.tools_async_request_generation then
               state.tools_async_observation_inflight <- false)
           state ~mailbox
-          ~deliver:(fun result -> Tools_async_observation_loaded (generation, result))
+          ~deliver:(fun result -> Tools_msg (Tools_async_observation_loaded (generation, result)))
           (fun () -> Masc_tui_http.fetch_async_request_observation ~host ~port)
 
 (* Starts the named Tools parts, beside the parts already in flight, and marks
@@ -4074,13 +4074,13 @@ let launch_tools_parts state ~mailbox parts =
           end;
           state.tools_inventory_owed <- start_owed_read ~for_another state.tools_inventory_owed;
           launch_workspace_json_read state ~mailbox
-            ~deliver:(fun result -> Tools_read_loaded (Tools_inventory_loaded { generation; keeper; result }))
+            ~deliver:(fun result -> Tools_msg (Tools_read_loaded (Tools_inventory_loaded { generation; keeper; result })))
             (fun () -> Masc_tui_loader.load_tools ~host ~port ?keeper ())
       | Tools_catalog_read ->
           state.tools_catalog_owed <- Masc_tui_owed_read.started state.tools_catalog_owed;
           launch_workspace_json_read state ~mailbox
-            ~deliver:(fun result -> Tools_read_loaded (Tools_catalog_loaded { generation = skill_generation;
-              result = Masc_tui_async_read.attribute Masc_tui_async_read.Skills_catalog result }))
+            ~deliver:(fun result -> Tools_msg (Tools_read_loaded (Tools_catalog_loaded { generation = skill_generation;
+              result = Masc_tui_async_read.attribute Masc_tui_async_read.Skills_catalog result })))
             (fun () -> Masc_tui_loader.load_skills_catalog ~host ~port)
       | Tools_activations_read ->
           (* The Activations pane draws the selected Keeper's ledger, which its
@@ -4107,7 +4107,7 @@ let launch_tools_parts state ~mailbox parts =
                  start_owed_read ~for_another state.tools_activations_owed;
                launch_workspace_json_read state ~mailbox
                  ~deliver:(fun result ->
-                   Tools_read_loaded (Tools_activations_loaded { generation; keeper; result }))
+                   Tools_msg (Tools_read_loaded (Tools_activations_loaded { generation; keeper; result })))
                  (fun () -> Masc_tui_loader.load_keeper_skill_activations ~host ~port ~keeper))
             keeper
       | Tools_usage_read keeper ->
@@ -4117,7 +4117,7 @@ let launch_tools_parts state ~mailbox parts =
             (Masc_tui_owed_read.started (keeper_skill_usage_owed state keeper));
           launch_workspace_json_read state ~mailbox
             ~deliver:(fun result ->
-              Tools_read_loaded (Tools_usage_loaded { generation = skill_generation; keeper; result }))
+              Tools_msg (Tools_read_loaded (Tools_usage_loaded { generation = skill_generation; keeper; result })))
             (fun () -> Masc_tui_loader.load_keeper_skill_usage ~host ~port ~keeper)
       | Tools_async_read -> launch_tools_async_observation_load state ~mailbox)
     parts
@@ -4200,7 +4200,7 @@ let launch_schedule_wake_history_load state ~mailbox ~schedule_id =
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn -> Error (Printexc.to_string exn)
         in
-        enqueue_async mailbox (Schedule_wake_history_loaded (schedule_id, result))
+        enqueue_async mailbox (Schedule_msg (Schedule_wake_history_loaded (schedule_id, result)))
       in
       (match Eio_context.get_switch_opt () with
        | Some sw ->
@@ -4209,8 +4209,8 @@ let launch_schedule_wake_history_load state ~mailbox ~schedule_id =
                `Stop_daemon)
        | None ->
            enqueue_async mailbox
-             (Schedule_wake_history_loaded
-                (schedule_id, Error "Eio switch is unavailable")))
+             (Schedule_msg (Schedule_wake_history_loaded
+                (schedule_id, Error "Eio switch is unavailable"))))
   end
 
 let launch_keeper_schedules_load ?page state ~mailbox ~keeper_name =
@@ -4288,7 +4288,7 @@ let launch_schedules_load ?(intent = Snapshot_read.Poll) ?page state ~mailbox =
   let port = state.port in
   Masc_tui_async_read.launch
     ~deliver:(fun result ->
-      enqueue_async mailbox (Schedules_loaded (request, result)))
+      enqueue_async mailbox (Schedule_msg (Schedules_loaded (request, result))))
     (capture_workspace_json_read state (fun () ->
       Masc_tui_loader.load_schedules ~host ~port ~cursor:page.sp_cursor))
 
@@ -4307,7 +4307,7 @@ let launch_schedule_agenda_load ?(intent = Snapshot_read.Poll) state ~mailbox =
         let port = state.port in
         Masc_tui_async_read.launch
           ~deliver:(fun result ->
-            enqueue_async mailbox (Schedules_loaded (Schedule_agenda_read ticket, result)))
+            enqueue_async mailbox (Schedule_msg (Schedules_loaded (Schedule_agenda_read ticket, result))))
           (capture_workspace_json_read state (fun () ->
             Masc_tui_loader.load_schedules ~host ~port ~cursor:None))
   end
@@ -4358,7 +4358,7 @@ let launch_chat_call_read state ~mailbox =
     let host=server_peer_host and port=state.port in
     let execution_id=Masc_tui_fetched.request_key request.ccr_ticket in
     launch_workspace_json_read ~key:request.ccr_job state ~mailbox
-      ~deliver:(fun result -> Chat_call_loaded (request,result))
+      ~deliver:(fun result -> Chat_msg (Chat_call_loaded (request,result)))
       (fun () -> Masc_tui_http.fetch_keeper_call ~host ~port
         ~keeper_name:request.ccr_origin.cco_keeper ~execution_id))
     (begin_chat_call_read state)
@@ -4388,7 +4388,7 @@ let launch_board_read state ~mailbox ~kind key =
     let host=server_peer_host and port=state.port in
     Option.iter (fun request ->
       launch_workspace_json_read ~key:(Masc_tui_board_reader.request_job request) state ~mailbox
-        ~deliver:(fun result -> Board_attachment_loaded (request,result))
+        ~deliver:(fun result -> Board_msg (Board_attachment_loaded (request,result)))
         (fun () ->
           let open Result.Syntax in
           let* bytes=Masc_tui_http.get_workspace_bytes ~host ~port
@@ -4410,7 +4410,7 @@ let prepare_board_read state ~mailbox ~cols =
        cancel_board_preparation state;
        state.board_reader <- reader;
        launch_workspace_result ~observation:true ~key:(Masc_tui_board_reader.preparation_job request) state ~mailbox
-         ~boundary_error:Fun.id ~deliver:(fun result -> Board_attachment_prepared (request,result))
+         ~boundary_error:Fun.id ~deliver:(fun result -> Board_msg (Board_attachment_prepared (request,result)))
          (fun () -> Masc_tui_response_decode.run ~name:"board.attachment.prepare_wait"
            (fun () -> Ok (Masc_tui_board_reader.prepare request))))
 
@@ -4442,13 +4442,13 @@ let use_board_read state ~mailbox ~action =
     let clear_pending () = Option.iter (fun attempt ->
       state.board_reader <- Masc_tui_board_reader.finish_original_open state.board_reader request attempt) attempt in
     let cancelled = Option.map (fun attempt ->
-      Board_attachment_saved (request,Ok (Board_image_open_failed (attempt,"Image opening cancelled")))) attempt in
+      Board_msg (Board_attachment_saved (request,Ok (Board_image_open_failed (attempt,"Image opening cancelled"))))) attempt in
     launch_workspace_result ~operation:true ?cancelled ~on_not_run:clear_pending state ~mailbox ~boundary_error:Fun.id
       ~deliver:(fun result ->
         let result=match attempt,result with
           | Some attempt,Error error -> Ok (Board_image_open_failed (attempt,error))
           | Some _,Ok _ | None,(Ok _ | Error _) -> result in
-        Board_attachment_saved (request,result))
+        Board_msg (Board_attachment_saved (request,result)))
       (fun () -> Eio_unix.run_in_systhread (fun () ->
         let prepare () =
         let kind=match attempt with None -> Ak_file | Some _ -> Ak_image in
@@ -4503,7 +4503,7 @@ let launch_goal_candle_load state ~mailbox goal_id =
       let host = server_peer_host and port = state.port in
       let expected_instance = Option.bind state.server_identity (fun identity -> identity.Tui_decode.sid_runtime_instance_id) in
       launch_workspace_json_read state ~mailbox
-        ~deliver:(fun result -> Goal_candle_loaded (request, result))
+        ~deliver:(fun result -> Goal_msg (Goal_candle_loaded (request, result)))
         (fun () ->
           let credential = Masc_tui_http.bind_credential () in
           let result = match expected_instance with
@@ -4527,7 +4527,7 @@ let launch_goal_timeline_load state ~mailbox goal_id =
   let host = server_peer_host in
   let port = state.port in
   launch_workspace_json_read state ~mailbox
-    ~deliver:(fun result -> Goal_timeline_loaded (request, result))
+    ~deliver:(fun result -> Goal_msg (Goal_timeline_loaded (request, result)))
     (fun () -> Masc_tui_http.fetch_goal_timeline ~host ~port ~goal_id)
   end
 
@@ -4541,7 +4541,7 @@ let launch_task_history_load ?(older=false) ?limit state ~mailbox task_id =
       Option.iter (fun old -> Masc_tui_workspace_job.cancel_observation state ~key:old.thr_job) previous;
       let host=server_peer_host and port=state.port in
       launch_workspace_json_read ~key:request.thr_job state ~mailbox
-        ~deliver:(fun result -> Task_history_loaded (request,result))
+        ~deliver:(fun result -> Task_msg (Task_history_loaded (request,result)))
         (fun () -> Masc_tui_http.fetch_task_history_page ~host ~port ~request:request.thr_page)
   end
 
@@ -4566,7 +4566,7 @@ let launch_task_cancel state ~mailbox ~authority ~identity ~task_id ~reason =
     ~boundary_error:(fun detail -> Task_cancel_unconfirmed detail)
     ~deliver:(fun result ->
       let outcome = match result with Ok outcome | Error outcome -> outcome in
-      Task_cancel_done (task_id, expected_workspace, outcome))
+      Task_msg (Task_cancel_done (task_id, expected_workspace, outcome)))
     (fun () ->
       match check_workspace_request state ~mailbox ~authority ~identity ~host ~port () with
       | Error detail -> Ok (Task_cancel_refused detail)
@@ -4662,7 +4662,7 @@ let launch_verification_evidence_load state ~mailbox key =
         ~boundary_error:(fun detail -> Verification_evidence_read.Launch_failure detail)
         ~deliver:(fun result ->
           log_verification_evidence_read request ~phase:"delivery_formed" ~outcome:(verification_evidence_outcome result);
-          Verification_evidence_loaded (request,result))
+          Verification_msg (Verification_evidence_loaded (request,result)))
         (fun () ->
           log_verification_evidence_read request ~phase:"caller_entered" ~outcome:"pending";
           try
@@ -4863,7 +4863,7 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
   let post_setup path body = Result.bind (check_workspace ()) (fun () ->
     Masc_tui_http.post_setup_json ~host ~port ~path ~body:(Yojson.Safe.to_string body)) in
   let login_path id = "/api/v1/setup/accounts/login/" ^ id in
-  let enqueue result = enqueue_async mailbox (Account_login_json (view, generation, action, result)) in
+  let enqueue result = enqueue_async mailbox (Account_msg (Account_login_json (view, generation, action, result))) in
   let start_job f = match Eio_context.get_switch_opt () with
     | None -> enqueue (Error "Login requires the TUI runtime.")
     | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () ->
@@ -4918,7 +4918,7 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
          | Ok _, None -> enqueue (Error "Login requires the TUI clock.")
          | Ok reference, Some clock ->
            let on_chunk, complete = Login.decoder ~integration_id:provider.id (fun event ->
-               enqueue_async mailbox (Account_login_event (view,generation,event))) in
+               enqueue_async mailbox (Account_msg (Account_login_event (view,generation,event)))) in
              let body=`Assoc (["integration_id",`String provider.id] @ (match reference with Some r->["account_ref",`String r] | None->[])) |> Yojson.Safe.to_string in
              let result = Result.bind (check_workspace ()) (fun () ->
                Masc_tui_http.post_setup_login_streaming ~clock ~host ~port ~body ~on_chunk) in
@@ -4965,7 +4965,7 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
     let body=`Assoc ["integration_id",`String provider.id;"revision",`String revision] |> Yojson.Safe.to_string in
     start_job (fun () ->
       let outcome=Masc_tui_http.post_json_outcome ~host ~port ~path:"/api/v1/setup/accounts/remove" ~body in
-      enqueue_async mailbox (Account_login_removal (view, generation, provider, login_store, outcome)))
+      enqueue_async mailbox (Account_msg (Account_login_removal (view, generation, provider, login_store, outcome))))
   | Refresh_removed _ ->
     view.phase<-Login.Loading; start_job (fun () -> enqueue (Masc_tui_http.get_json ~host ~port ~path:"/api/v1/setup/inventory"))
 
@@ -4999,7 +4999,7 @@ let launch_runtime_config_load ?(force=false) state ~mailbox =
           let ready_ns = Mtime_clock.elapsed_ns () in
           Log.Transport.info "tui_runtime_config_read generation=%d started_ns=%Ld ready_ns=%Ld phase=prepared outcome=%s"
             generation started_ns ready_ns (match result with Ok _ -> "source_loaded" | Error _ -> "read_failed");
-          Runtime_config_view_loaded (generation, requested_model, started_ns, ready_ns, result))
+          Runtime_msg (Runtime_config_view_loaded (generation, requested_model, started_ns, ready_ns, result)))
         (fun () -> Masc_tui_loader.load_runtime_config_snapshot ~host ~port)
   end
 
@@ -5169,7 +5169,7 @@ let launch_runtime_params_load state ~mailbox =
   let host = server_peer_host in
   let port = state.port in
   launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-    ~deliver:(fun result -> Runtime_params_loaded result)
+    ~deliver:(fun result -> Runtime_msg (Runtime_params_loaded result))
     (fun () -> Masc_tui_loader.load_runtime_params ~host ~port)
   end
 
@@ -5253,7 +5253,7 @@ let launch_preset_save state ~mailbox ~sink ~name ~description ~chat_input ~also
          workspace; the worker still checks its captured identity before send. *)
       Masc_tui_workspace_result.launch_session ~results:mailbox.workspace_results
         ~boundary_error
-        ~deliver:(fun result -> Preset_saved (pending, result))
+        ~deliver:(fun result -> Preset_msg (Preset_saved (pending, result)))
         (fun () ->
           match check_workspace_request state ~mailbox ~authority ~identity ~host ~port () with
           | Error detail -> Error (Preset_save_not_sent detail)
@@ -5304,7 +5304,7 @@ let launch_presets_load state ~mailbox =
   state.presets_error <- None;
   launch_preset_call state ~mailbox
     ~call:(fun ~host ~port -> Masc_tui_loader.load_presets ~host ~port)
-    ~wrap:(fun result -> Presets_listed (Preset_to_pane, result))
+    ~wrap:(fun result -> Preset_msg (Presets_listed (Preset_to_pane, result)))
   end
 
 let preset_rows_for_state state =
@@ -5331,7 +5331,7 @@ let ensure_preset_detail state ~mailbox =
      | Some request ->
        launch_preset_call state ~mailbox
          ~call:(fun ~host ~port -> Masc_tui_loader.load_preset_detail ~host ~port ~name)
-         ~wrap:(fun result -> Preset_detail_loaded (request, result)))
+         ~wrap:(fun result -> Preset_msg (Preset_detail_loaded (request, result))))
 ;;
 
 (* The catalog if one has landed, including the last good one after a failed
@@ -5701,17 +5701,17 @@ let launch_board_quarantine_requeue state ~mailbox ~keeper_name
       | exn -> Masc_tui_http.Post_unanswered (Printexc.to_string exn)
     in
     enqueue_async mailbox
-      (Board_quarantine_requeued (keeper_name, partition_id, outcome))
+      (Board_msg (Board_quarantine_requeued (keeper_name, partition_id, outcome)))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
     fork_workspace_job state ~sw run
   | None ->
     enqueue_async mailbox
-      (Board_quarantine_requeued
+      (Board_msg (Board_quarantine_requeued
          ( keeper_name
          , partition_id
-         , Masc_tui_http.Post_unanswered "Eio switch is unavailable" ))
+         , Masc_tui_http.Post_unanswered "Eio switch is unavailable" )))
 
 (* B is one operator action over the inventory snapshot, with a separate
    authenticated CAS command and audit row per candidate. Partial outcomes
@@ -5745,29 +5745,29 @@ let launch_board_quarantines_bulk_requeue state ~mailbox ~keeper_name items =
           | Masc_tui_http.Post_unanswered _ -> Masc_tui_board_quarantine.Uncertain)
         ~progress:(fun (counts : Masc_tui_board_quarantine.batch_counts) ->
           enqueue_async mailbox
-            (Board_quarantines_bulk_progress
+            (Board_msg (Board_quarantines_bulk_progress
                ( keeper_name
                , counts.attempted
                , counts.total
                , counts.accepted
                , counts.refused
-               , counts.uncertain )))
+               , counts.uncertain ))))
         items
     in
-    enqueue_async mailbox (Board_quarantines_bulk_requeued (keeper_name, outcomes))
+    enqueue_async mailbox (Board_msg (Board_quarantines_bulk_requeued (keeper_name, outcomes)))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
     fork_workspace_job state ~sw run
   | None ->
     enqueue_async mailbox
-      (Board_quarantines_bulk_requeued
+      (Board_msg (Board_quarantines_bulk_requeued
          ( keeper_name
          , List.map
              (fun (item : Masc.Keeper_board_attention_quarantine_command.inventory_item) ->
                 item.partition_id,
                 Masc_tui_http.Post_unanswered "Eio switch is unavailable")
-             items ))
+             items )))
 
 let settle_connector_unbind_offers state
     (snapshot : Masc.Tui_decode_connectors.connector_snapshot) =
@@ -5847,11 +5847,11 @@ let launch_connectors_load state ~mailbox =
         state.connectors_owed <- Masc_tui_owed_read.abandoned state.connectors_owed;
         connector_read_not_started state request)
       ~deliver:(fun result ->
-        Connectors_loaded (request,
-          Masc_tui_async_read.attribute Masc_tui_async_read.Connectors result))
+        Connectors_msg (Connectors_loaded (request,
+          Masc_tui_async_read.attribute Masc_tui_async_read.Connectors result)))
       (fun () -> Masc_tui_loader.load_connectors ~host ~port
         ~on_status:(fun snapshot ->
-          enqueue_status mailbox (Connectors_status_loaded (request, snapshot))))
+          enqueue_status mailbox (Connectors_msg (Connectors_status_loaded (request, snapshot)))))
 
 (* A binding write changed what the server holds. A load already in flight
    may have read before the write landed. Coalesce while status is pending;
@@ -5891,7 +5891,7 @@ let launch_connector_unbind_all state ~mailbox ~keeper_name targets =
              (target, outcome))
           targets
       in
-      enqueue_async mailbox (Connector_unbind_all_done { keeper_name; results })
+      enqueue_async mailbox (Connectors_msg (Connector_unbind_all_done { keeper_name; results }))
     in
     let not_sent detail =
       List.map (fun target -> (target, Masc_tui_connector_unbind.Failed detail))
@@ -5904,12 +5904,12 @@ let launch_connector_unbind_all state ~mailbox ~keeper_name targets =
          | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
          | exception exn ->
            enqueue_async mailbox
-             (Connector_unbind_all_done
-                { keeper_name; results = not_sent (Printexc.to_string exn) }))
+             (Connectors_msg (Connector_unbind_all_done
+                { keeper_name; results = not_sent (Printexc.to_string exn) })))
     | None ->
         enqueue_async mailbox
-          (Connector_unbind_all_done
-             { keeper_name; results = not_sent "Eio switch is unavailable" })
+          (Connectors_msg (Connector_unbind_all_done
+             { keeper_name; results = not_sent "Eio switch is unavailable" }))
   end
 
 let map_lane_addons state f =
@@ -5935,7 +5935,7 @@ let launch_lane_application state ~mailbox =
            state.lane_addons <- Some view;
            let host=server_peer_host and port=state.port in
            launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-             ~deliver:(fun result -> Lane_application_loaded (ticket,result))
+             ~deliver:(fun result -> Lane_msg (Lane_application_loaded (ticket,result)))
              (fun () -> Result.bind
                (Masc_tui_http.get_json ~host ~port ~path:"/api/v1/lane-addons")
                Addons.decode_configuration))
@@ -5975,7 +5975,7 @@ let launch_lane_package_catalog state ~mailbox directory =
       let query = match directory with None -> ""
         | Some path -> "?directory=" ^ Masc_tui_http.percent_encode_query_value path in
       launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-        ~deliver:(fun result -> Lane_package_catalog_loaded (generation,directory,result))
+        ~deliver:(fun result -> Lane_msg (Lane_package_catalog_loaded (generation,directory,result)))
         (fun () -> Masc_tui_http.get_json ~host ~port ~path:("/api/v1/lane-addons/package-catalog" ^ query)))
   end
 
@@ -5994,7 +5994,7 @@ let launch_lane_package_preview state ~mailbox path =
     state.lane_addons <- Some {view with generation;installer=Some installer;loading=true;error=None};
     let host=server_peer_host and port=state.port in
     launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-      ~deliver:(fun result -> Lane_package_preview_loaded (generation,path,result))
+      ~deliver:(fun result -> Lane_msg (Lane_package_preview_loaded (generation,path,result)))
       (fun () -> Masc_tui_http.get_json ~host ~port
         ~path:("/api/v1/lane-addons/package-preview?manifest_path=" ^ Masc_tui_http.percent_encode_query_value path)))
   end
@@ -6037,7 +6037,7 @@ let launch_lane_declaration state ~mailbox ~edit request =
             ~body:(Yojson.Safe.to_string (Document.write_json session)) in
       Document.decode_response request ~status ~body in
     launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-      ~deliver:(fun result -> Lane_declaration_loaded (generation, request, edit, create_directory, result))
+      ~deliver:(fun result -> Lane_msg (Lane_declaration_loaded (generation, request, edit, create_directory, result)))
       perform)
   end
 
@@ -6059,7 +6059,7 @@ let launch_lane_subscriptions state ~mailbox request =
       launch_workspace_request
         ~operation:(match request with Subs.Inspect -> false | Subs.Save _ -> true)
         state ~mailbox ~boundary_error:Fun.id
-        ~deliver:(fun result -> Lane_subscriptions_loaded (generation,result))
+        ~deliver:(fun result -> Lane_msg (Lane_subscriptions_loaded (generation,result)))
         (fun () -> Result.bind (Masc_tui_http.post_json ~host ~port
           ~path:"/api/v1/lane-addons/subscriptions"
           ~body:(Yojson.Safe.to_string (Subs.request_json request))) Subs.decode)
@@ -6255,7 +6255,7 @@ let launch_lane_addons ?target state ~mailbox request =
       | Attach _ | Observe _ | Detach _ | Evidence _ | Act _ | Subscriptions _ -> true)
     state ~mailbox
     ~boundary_error:(lane_addons_failure_for_request request)
-    ~deliver:(fun result -> Lane_addons_loaded (generation, target, result))
+    ~deliver:(fun result -> Lane_msg (Lane_addons_loaded (generation, target, result)))
     perform)
   end
 
@@ -6273,19 +6273,19 @@ let launch_browser_history state ~mailbox ~reload =
       let host = server_peer_host and port = state.port in
       if reload then
         launch_workspace_json_read state ~mailbox
-          ~deliver:(fun result -> Browser_history_list_loaded (generation, result))
+          ~deliver:(fun result -> Browser_msg (Browser_history_list_loaded (generation, result)))
           (fun () -> Masc_tui_http.fetch_keeper_calls ~host ~port
             ~keeper_name:history.keeper_name ~limit:100)
       else begin
         let enqueue_async = workspace_enqueue state in
-        let fetch () = Browser_history_page_loaded (generation,
+        let fetch () = Browser_msg (Browser_history_page_loaded (generation,
           match Browser_history.selected history with
           | None -> Error "No retained observations in these 100 recent tool calls"
-          | Some entry -> Masc_tui_http.fetch_browser_observation ~host ~port entry.artifact) in
+          | Some entry -> Masc_tui_http.fetch_browser_observation ~host ~port entry.artifact)) in
         let perform () =
           try fetch () with
           | Eio.Cancel.Cancelled _ as error -> raise error
-          | error -> Browser_history_page_loaded (generation,Error (Printexc.to_string error)) in
+          | error -> Browser_msg (Browser_history_page_loaded (generation,Error (Printexc.to_string error))) in
         (match Eio_context.get_switch_opt () with
          | None -> state.browser_history <- Some {history with content=List_failed "Eio switch is unavailable"}
          | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () ->
@@ -6379,33 +6379,33 @@ let launch_browser_lane state ~mailbox operation =
       in
       let perform () =
         match operation with
-        | Discover _ -> Browser_lane_clients_loaded
-            (generation, call (fun () -> Masc_tui_http.fetch_browser_lane_clients ~host ~port))
-        | Read | Read_refresh -> Browser_lane_loaded
-            (generation, call (fun () -> Masc_tui_http.fetch_browser_lane ~host ~port view))
-        | Scene_read tab_id -> Browser_lane_scene_loaded
-            (generation, call (fun () -> Masc_tui_http.fetch_browser_scene ~host ~port ~view ~tab_id ()))
-        | Scene_regions tab_id -> Browser_lane_scene_loaded
+        | Discover _ -> Browser_msg (Browser_lane_clients_loaded
+            (generation, call (fun () -> Masc_tui_http.fetch_browser_lane_clients ~host ~port)))
+        | Read | Read_refresh -> Browser_msg (Browser_lane_loaded
+            (generation, call (fun () -> Masc_tui_http.fetch_browser_lane ~host ~port view)))
+        | Scene_read tab_id -> Browser_msg (Browser_lane_scene_loaded
+            (generation, call (fun () -> Masc_tui_http.fetch_browser_scene ~host ~port ~view ~tab_id ())))
+        | Scene_regions tab_id -> Browser_msg (Browser_lane_scene_loaded
             (generation, call (fun () -> Masc_tui_http.fetch_browser_scene
-              ~scene_view:Browser_lane.Regions ~host ~port ~view ~tab_id ()))
-        | Scene_scroll {tab_id;expected_url;scene_view;scope;delta_y;_} -> Browser_lane_scene_loaded
+              ~scene_view:Browser_lane.Regions ~host ~port ~view ~tab_id ())))
+        | Scene_scroll {tab_id;expected_url;scene_view;scope;delta_y;_} -> Browser_msg (Browser_lane_scene_loaded
             (generation, call (fun () -> Result.bind
               (Masc_tui_http.scroll_browser_scene ~host ~port ~view ~tab_id
                  ~expected_url ~delta_y)
               (fun () -> Masc_tui_http.fetch_browser_scene
                  ?scope ~expected_url ~scene_view
-                 ~host ~port ~view ~tab_id ())))
-        | Scene_refresh {tab_id;scene_view;scope} -> Browser_lane_scene_loaded
+                 ~host ~port ~view ~tab_id ()))))
+        | Scene_refresh {tab_id;scene_view;scope} -> Browser_msg (Browser_lane_scene_loaded
             (generation, call (fun () -> Masc_tui_http.refresh_browser_scene
-              ~host ~port ~view ~tab_id ~scene_view ~scope))
-        | Scene_focus {tab_id;target} -> Browser_lane_scene_loaded
+              ~host ~port ~view ~tab_id ~scene_view ~scope)))
+        | Scene_focus {tab_id;target} -> Browser_msg (Browser_lane_scene_loaded
             (generation, call (fun () -> Masc_tui_http.fetch_browser_scene
-              ~scope:target ~host ~port ~view ~tab_id ()))
-        | Scene_click {tab_id;document_id;node_id;expected_url;scope} -> Browser_lane_scene_loaded
+              ~scope:target ~host ~port ~view ~tab_id ())))
+        | Scene_click {tab_id;document_id;node_id;expected_url;scope} -> Browser_msg (Browser_lane_scene_loaded
             (generation, call (fun () -> Result.bind
               (Masc_tui_http.click_browser_scene ~host ~port ~view ~tab_id ~document_id ~node_id ~expected_url)
-              (fun () -> Masc_tui_http.fetch_browser_scene ?scope ~host ~port ~view ~tab_id ())))
-        | Scene_follow {tab_id;document_id;node_id;expected_url} -> Browser_lane_follow_loaded
+              (fun () -> Masc_tui_http.fetch_browser_scene ?scope ~host ~port ~view ~tab_id ()))))
+        | Scene_follow {tab_id;document_id;node_id;expected_url} -> Browser_msg (Browser_lane_follow_loaded
             (generation, call (fun () ->
               match Masc_tui_http.follow_browser_scene
                   ~host ~port ~view ~tab_id ~document_id ~node_id ~expected_url with
@@ -6419,26 +6419,26 @@ let launch_browser_lane state ~mailbox operation =
                     Ok (receipt, Masc_tui_http.fetch_browser_scene
                       ?expected_url:(Some receipt.destination_url)
                       ?navigation_source:(Some receipt.navigation_source)
-                      ~host ~port ~view ~tab_id ())))
-        | Scene_follow_refresh {tab_id;guard;scene_view} -> Browser_lane_scene_loaded
+                      ~host ~port ~view ~tab_id ()))))
+        | Scene_follow_refresh {tab_id;guard;scene_view} -> Browser_msg (Browser_lane_scene_loaded
             (generation, call (fun () -> Masc_tui_http.fetch_browser_scene
               ~scene_view
               ~expected_url:guard.expected_url
               ~navigation_source:guard.navigation_source
-              ~host ~port ~view ~tab_id ()))
-        | Screenshot tab_id | Viewport_refresh {tab_id;_} | Viewport_cadence tab_id -> Browser_lane_screenshot_ready {
+              ~host ~port ~view ~tab_id ())))
+        | Screenshot tab_id | Viewport_refresh {tab_id;_} | Viewport_cadence tab_id -> Browser_msg (Browser_lane_screenshot_ready {
             generation; image_generation;
             result = call (fun () -> Masc_tui_http.fetch_browser_lane_screenshot
               ~host ~port ~view ~tab_id);
-          }
-        | Viewport_pointer {tab_id;expected_url;action} -> Browser_lane_screenshot_ready {
+          })
+        | Viewport_pointer {tab_id;expected_url;action} -> Browser_msg (Browser_lane_screenshot_ready {
             generation; image_generation;
             result = call (fun () -> Result.bind
               (Masc_tui_http.act_browser_viewport ~host ~port ~view ~tab_id ~expected_url ~action)
               (fun () -> Masc_tui_http.fetch_browser_lane_screenshot ~host ~port ~view ~tab_id));
-          }
-        | Open_session | Close_session | Goto _ -> Browser_lane_action_done
-            (generation, call (fun () -> Masc_tui_http.browser_lane_action ~host ~port ~source:view.source operation))
+          })
+        | Open_session | Close_session | Goto _ -> Browser_msg (Browser_lane_action_done
+            (generation, call (fun () -> Masc_tui_http.browser_lane_action ~host ~port ~source:view.source operation)))
       in
       (match Eio_context.get_switch_opt () with
        | Some sw ->
@@ -6447,8 +6447,8 @@ let launch_browser_lane state ~mailbox operation =
            if operation_is_refresh operation && view.source=Live then
              Eio.Fiber.fork_daemon ~sw (fun () ->
                Eio.Fiber.yield ();
-               enqueue_async mailbox (Browser_lane_clients_loaded
-                 (generation, call (fun () -> Masc_tui_http.fetch_browser_lane_clients ~host ~port)));
+               enqueue_async mailbox (Browser_msg (Browser_lane_clients_loaded
+                 (generation, call (fun () -> Masc_tui_http.fetch_browser_lane_clients ~host ~port))));
                `Stop_daemon);
            Eio.Fiber.fork_daemon ~sw (fun () ->
              let message = perform () in
@@ -6484,7 +6484,7 @@ let launch_runtime_surface_load state ~mailbox ~force =
       let host = server_peer_host in
       let port = state.port in
       launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-        ~deliver:(fun result -> Runtime_surface_loaded (generation, result))
+        ~deliver:(fun result -> Runtime_msg (Runtime_surface_loaded (generation, result)))
         (fun () -> Masc_tui_loader.load_runtime_surface ~host ~port ~force)
   end
 
@@ -6502,7 +6502,7 @@ let launch_repositories_load state ~mailbox =
         state.repositories_inflight <- false;
         state.repositories_owed <- Masc_tui_owed_read.abandoned state.repositories_owed)
       ~deliver:(fun result ->
-        enqueue_async mailbox (Repositories_loaded result))
+        enqueue_async mailbox (Repository_msg (Repositories_loaded result)))
       (fun () -> Masc_tui_loader.load_repositories ~host ~port)
   end
   end
@@ -6524,7 +6524,7 @@ let launch_memory_input_load state ~mailbox ~refresh =
           state.memory_input_owed <- Masc_tui_owed_read.started state.memory_input_owed;
           let host = server_peer_host and port = state.port in
           launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-            ~deliver:(fun result -> Memory_input_loaded (request, result))
+            ~deliver:(fun result -> Memory_msg (Memory_input_loaded (request, result)))
             (fun () -> Masc_tui_http.fetch_keeper_memory_input ~host ~port ~keeper_name:key)
   end
 
@@ -6541,7 +6541,7 @@ let launch_memory_health_load state ~mailbox =
     let host = server_peer_host in
     let port = state.port in
     launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-      ~deliver:(fun result -> Memory_loaded (Fleet_health_read result))
+      ~deliver:(fun result -> Memory_msg (Memory_loaded (Fleet_health_read result)))
       (fun () -> Masc_tui_loader.load_memory_health ~host ~port)
   end
 
@@ -6564,7 +6564,7 @@ let launch_owed_memory_health_row state ~mailbox =
         let host = server_peer_host in
         let port = state.port in
         launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-          ~deliver:(fun result -> Memory_loaded (Row_health_read { keeper; result }))
+          ~deliver:(fun result -> Memory_msg (Memory_loaded (Row_health_read { keeper; result })))
           (fun () -> Masc_tui_loader.load_memory_health_row ~host ~port ~keeper)
       end
 
@@ -6585,7 +6585,7 @@ let launch_memory_facts_read state ~mailbox ~key read =
       let enqueue_scoped = workspace_enqueue state in
       Masc_tui_async_read.launch
         ~deliver:(fun result ->
-          enqueue_scoped mailbox (Memory_facts_loaded (request, result)))
+          enqueue_scoped mailbox (Memory_msg (Memory_facts_loaded (request, result))))
         read
   end
 
@@ -6648,7 +6648,7 @@ let launch_repository_changes_load state ~mailbox ~scope =
   let port = state.port in
   Masc_tui_async_read.launch
     ~deliver:(fun result ->
-      enqueue_async mailbox (Repository_changes_loaded (scope, result)))
+      enqueue_async mailbox (Repository_msg (Repository_changes_loaded (scope, result))))
     (fun () ->
       match scope with
       | Tui_decode.Repository_change_project ->
@@ -6681,7 +6681,7 @@ let launch_repository_changes_diff_load state ~mailbox ~reader ~scope ~path =
   in
   Masc_tui_async_read.launch
     ~deliver:(fun result ->
-      enqueue_async mailbox (Repository_changes_diff_loaded (request, result)))
+      enqueue_async mailbox (Repository_msg (Repository_changes_diff_loaded (request, result))))
     (fun () ->
       Masc_tui_loader.load_git_diff ~host ~port ?repo ~keeper:None ~path
         ~against:(Masc_tui_http.Working_tree_against tree_diff_base_ref) ())
@@ -6831,11 +6831,11 @@ let launch_workspace_activity state ~mailbox ~repo_id =
         let result = Result.bind result (fun snapshot ->
           if String.equal snapshot.Tui_decode.ras_repo_id repo_id then Ok snapshot
           else Error "repository activity response names another repository") in
-        enqueue_async mailbox (Workspace_activity_loaded (request, result))
+        enqueue_async mailbox (Workspace_msg (Workspace_activity_loaded (request, result)))
       in
       match Eio_context.get_switch_opt () with
       | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
-      | None -> enqueue_async mailbox (Workspace_activity_loaded (request, Error "Eio switch is unavailable"))
+      | None -> enqueue_async mailbox (Workspace_msg (Workspace_activity_loaded (request, Error "Eio switch is unavailable")))
   end
 
 let launch_file_changes_load state ~mailbox ~keeper_name =
@@ -7056,7 +7056,7 @@ let launch_harness_load state ~mailbox =
         state.harness_inflight <- false;
         state.harness_owed <- Masc_tui_owed_read.abandoned state.harness_owed)
       ~deliver:(fun result ->
-        enqueue_async mailbox (Harness_loaded result))
+        enqueue_async mailbox (Harness_msg (Harness_loaded result)))
       (fun () -> Masc_tui_loader.load_harness ~host ~port)
   end
   end
@@ -7077,7 +7077,7 @@ let launch_fusion_runs_load ?(demand = Masc_tui_fusion_updates.Share) state ~mai
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn -> Error (Printexc.to_string exn)
         in
-        enqueue_async mailbox (Fusion_runs_loaded (request, result))
+        enqueue_async mailbox (Fusion_msg (Fusion_runs_loaded (request, result)))
       in
       (match Eio_context.get_switch_opt () with
        | Some sw ->
@@ -7086,8 +7086,8 @@ let launch_fusion_runs_load ?(demand = Masc_tui_fusion_updates.Share) state ~mai
                `Stop_daemon)
        | None ->
            enqueue_async mailbox
-             (Fusion_runs_loaded
-                (request, Error "Eio switch is unavailable")))
+             (Fusion_msg (Fusion_runs_loaded
+                (request, Error "Eio switch is unavailable"))))
 
 let launch_fusion_detail_load ?(demand = Masc_tui_fusion_updates.Share) state ~mailbox ~run_id =
   if server_authority_ready state then begin
@@ -7101,7 +7101,7 @@ let launch_fusion_detail_load ?(demand = Masc_tui_fusion_updates.Share) state ~m
       Masc_tui_loader.load_fusion_detail ~host ~port ~run_id) in
     Masc_tui_async_read.launch
       ~deliver:(fun result ->
-        enqueue_async mailbox (Fusion_detail_loaded (generation, run_id, result)))
+        enqueue_async mailbox (Fusion_msg (Fusion_detail_loaded (generation, run_id, result))))
       read
   end
 
@@ -7117,7 +7117,7 @@ let launch_fusion_historical_detail_load ?(demand = Masc_tui_fusion_updates.Shar
       Masc_tui_loader.load_fusion_historical_detail ~host ~port ~reference) in
     Masc_tui_async_read.launch
       ~deliver:(fun result ->
-        enqueue_async mailbox (Fusion_historical_detail_loaded (generation, reference, result)))
+        enqueue_async mailbox (Fusion_msg (Fusion_historical_detail_loaded (generation, reference, result))))
       read
   end
 
@@ -7148,7 +7148,7 @@ let launch_memory_recall_standing_load state ~mailbox =
     let port = state.port in
     Masc_tui_async_read.launch
       ~deliver:(fun result ->
-        enqueue_async mailbox (Memory_recall_standing_loaded (generation, result)))
+        enqueue_async mailbox (Memory_msg (Memory_recall_standing_loaded (generation, result))))
       (fun () -> Masc_tui_loader.load_memory_recall_standing ~host ~port)
   end
   else
@@ -7170,7 +7170,7 @@ let launch_fusion_launch_options_load state ~mailbox =
   let port = state.port in
   Masc_tui_async_read.launch
     ~deliver:(fun result ->
-      enqueue_async mailbox (Fusion_launch_options_loaded (generation, result)))
+      enqueue_async mailbox (Fusion_msg (Fusion_launch_options_loaded (generation, result))))
     (fun () -> Masc_tui_loader.load_fusion_launch_options ~host ~port)
 
   end
@@ -7185,7 +7185,7 @@ let start_fusion_run state ~mailbox ~(request : Masc_tui_fusion_launch.request) 
   let host = server_peer_host in
   let port = state.port in
   launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-    ~deliver:(fun result -> Fusion_launched (generation, result))
+    ~deliver:(fun result -> Fusion_msg (Fusion_launched (generation, result)))
     (fun () -> Masc_tui_loader.launch_fusion_run ~host ~port ~request)
 
 let launch_lanes_load state ~mailbox =
@@ -7198,8 +7198,8 @@ let launch_lanes_load state ~mailbox =
     state.standalone_lanes_generation <- state.standalone_lanes_generation + 1;
     let standalone_generation = state.standalone_lanes_generation in
     launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-      ~deliver:(fun result -> Lane_inventory_loaded (standalone_generation,
-        Masc_tui_async_read.attribute Masc_tui_async_read.Standalone_lanes result))
+      ~deliver:(fun result -> Lane_msg (Lane_inventory_loaded (standalone_generation,
+        Masc_tui_async_read.attribute Masc_tui_async_read.Standalone_lanes result)))
       (fun () -> Masc_tui_loader.load_lane_inventory ~host ~port)
   end
 
@@ -7227,7 +7227,7 @@ let launch_machine_activity_read state ~mailbox owner =
        let host = server_peer_host and port = state.port in
        let check = capture_workspace_check state ~mailbox in
        launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-         ~deliver:(fun result -> Machine_activity_read (request,result)) (fun () ->
+         ~deliver:(fun result -> Machine_msg (Machine_activity_read (request,result))) (fun () ->
            let document = Result.map (fun (reading : Masc_tui_runtime_config_view.reading) ->
              {Masc_tui_runtime_config_edit.path=reading.path;
               source_text=reading.source_text;source_revision=reading.metadata.source_revision})
@@ -7265,7 +7265,7 @@ let launch_machine_activity_save state ~mailbox session =
           | Error (Masc_tui_http.Runtime_config_conflict current) -> Activity.Conflict current
           | Error (Masc_tui_http.Runtime_config_save_refused detail) -> Activity.Refused detail
           | Error (Masc_tui_http.Runtime_config_save_unconfirmed detail) -> Activity.Unconfirmed detail in
-        Machine_activity_saved (request,result))
+        Machine_msg (Machine_activity_saved (request,result)))
       (fun () -> save_runtime_config_text ~prior_contact:Masc_tui_server_lifecycle.Server_reached state ~mailbox ~authority ~identity
         ~expected_source_path:write.expected_source_path ~expected_source_revision:write.expected_source_revision write.source_text)
 
@@ -7293,7 +7293,7 @@ let launch_exact_activity_read state ~mailbox owner =
        Masc_tui_types.put_exact_activity state session;
        let host = server_peer_host and port = state.port in
        launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-         ~deliver:(fun result -> Exact_activity_read (request,result)) (fun () ->
+         ~deliver:(fun result -> Exact_msg (Exact_activity_read (request,result))) (fun () ->
            Masc_tui_loader.load_runtime_config_view ~host ~port
            |> Result.map (fun (reading : Masc_tui_runtime_config_view.reading) ->
              {Masc_tui_runtime_config_edit.path=reading.path;source_text=reading.source_text;
@@ -7316,7 +7316,7 @@ let launch_exact_activity_save state ~mailbox session =
           | Error (Masc_tui_http.Runtime_config_conflict current) -> Activity.Conflict current
           | Error (Masc_tui_http.Runtime_config_save_refused detail) -> Activity.Refused detail
           | Error (Masc_tui_http.Runtime_config_save_unconfirmed detail) -> Activity.Unconfirmed detail in
-        Exact_activity_saved (request,result))
+        Exact_msg (Exact_activity_saved (request,result)))
       (fun () -> save_runtime_config_text ~prior_contact:Masc_tui_server_lifecycle.Server_reached state ~mailbox ~authority ~identity
         ~expected_source_path:write.expected_source_path ~expected_source_revision:write.expected_source_revision write.source_text)
 
@@ -7365,7 +7365,7 @@ let launch_lane_runs_load ?before state ~mailbox ~(lane : Lane_run_identity.t) =
   let port = state.port in
   Masc_tui_async_read.launch
     ~deliver:(fun result ->
-      enqueue_async mailbox (Lane_runs_loaded (lane, generation, before, result)))
+      enqueue_async mailbox (Lane_msg (Lane_runs_loaded (lane, generation, before, result))))
     (fun () -> Masc_tui_http.fetch_lane_runs ?before ~host ~port ~lane ())
   end
 
@@ -7378,7 +7378,7 @@ let launch_lane_run_detail_load state ~mailbox ~run_id =
   let port = state.port in
   Masc_tui_async_read.launch
     ~deliver:(fun result ->
-      enqueue_async mailbox (Lane_run_detail_loaded (run_id, generation, result)))
+      enqueue_async mailbox (Lane_msg (Lane_run_detail_loaded (run_id, generation, result))))
     (fun () -> Masc_tui_http.fetch_lane_run_detail ~host ~port ~run_id)
 
   end
@@ -7450,7 +7450,7 @@ let launch_verification_load state ~mailbox =
     let view = state.verification_view in
     let offset = state.verification_offset in
     launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-      ~deliver:(fun result -> Verification_loaded result)
+      ~deliver:(fun result -> Verification_msg (Verification_loaded result))
       (fun () -> Masc_tui_loader.load_verification ~host ~port ~limit:200 ~view ~offset)
   end
   end
@@ -8378,7 +8378,7 @@ let goto_surface ?(from_reference = false) state ~mailbox (destination : surface
     save_message_draft state;
     let was_focused = state.composer_focused in
     state.composer_focused <- false;
-    if was_focused then enqueue_async mailbox Surface_composer_released
+    if was_focused then enqueue_async mailbox (Keeper_msg Keeper_composer_released)
   end;
   if not from_reference then state.followed_from <- None;
   leave_browser_lane_for_surface state destination;
@@ -9065,7 +9065,7 @@ let launch_asks_read state ~mailbox =
        let host = server_peer_host and port = state.port in
        Masc_tui_async_read.launch
          ~deliver:(fun asks_result ->
-           enqueue_async mailbox (Asks_reloaded { asks_request; asks_result }))
+           enqueue_async mailbox (Ask_msg (Asks_reloaded { asks_request; asks_result })))
          (fun () -> Masc_tui_http.fetch_asks ~expected_workspace ~host ~port ());
        true)
 
@@ -10065,7 +10065,7 @@ let launch_runtime_catalog_load ?(intent=Snapshot_read.Poll) state ~mailbox =
         Log.Transport.info "tui_runtime_catalog request=%d started_ns=%Ld observed_ns=%Ld phase=%s"
           id request.rcr_started_ns (Mtime_clock.elapsed_ns ())
           (match result with Ok _ -> "received" | Error _ -> "failed");
-        enqueue_async mailbox (Runtime_catalog_loaded (request,result)) in
+        enqueue_async mailbox (Runtime_msg (Runtime_catalog_loaded (request,result))) in
       let run () =
         let result = try
           if runtime_catalog_request_current state request then Masc_tui_loader.load_runtime_resolved ~host ~port
@@ -10111,7 +10111,7 @@ let launch_context_inspector_load ?forecast state ~mailbox ~keeper_name =
   let run () =
     let publish reading =
       enqueue_async mailbox
-        (Context_inspector_loaded (generation, keeper_name, reading))
+        (Context_msg (Context_inspector_loaded (generation, keeper_name, reading)))
     in
     try
       match target with
@@ -10142,11 +10142,11 @@ let launch_context_inspector_load ?forecast state ~mailbox ~keeper_name =
           `Stop_daemon)
   | None ->
       enqueue_async mailbox
-        (Context_inspector_loaded
+        (Context_msg (Context_inspector_loaded
            ( generation
            , keeper_name
            , Masc_tui_context_inspector.Request_failed
-               "Eio switch is unavailable" ))
+               "Eio switch is unavailable" )))
   end
 
 let launch_context_inspector_part_load state ~mailbox request =
@@ -10161,7 +10161,7 @@ let launch_context_inspector_part_load state ~mailbox request =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Context_inspector_part_loaded (request, result))
+    enqueue_async mailbox (Context_msg (Context_inspector_part_loaded (request, result)))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -10178,8 +10178,8 @@ let launch_context_inspector_part_load state ~mailbox request =
           `Stop_daemon)
   | None ->
       enqueue_async mailbox
-        (Context_inspector_part_loaded
-           (request, Error "Eio switch is unavailable"))
+        (Context_msg (Context_inspector_part_loaded
+           (request, Error "Eio switch is unavailable")))
 
 (* Runs once per loop pass. The pane names the part it shows; when that is
    not the part held, the held one's read stops and the shown one is read.
@@ -10829,7 +10829,7 @@ let launch_runtime_lane_write ?replacement_selection state ~mailbox ~written wri
   state.runtime_lane_write <- Masc_tui_types.Lane_write_posting;
   state.runtime_lane_replacement_selection <- None;
   launch_workspace_request state ~mailbox ~boundary_error:Fun.id
-    ~deliver:(fun result -> Runtime_lane_slots_written (written, replacement_selection, result))
+    ~deliver:(fun result -> Runtime_msg (Runtime_lane_slots_written (written, replacement_selection, result)))
     (fun () -> write ~host ~port)
 
 ;;
@@ -11717,7 +11717,7 @@ let launch_task_creation_read state ~mailbox =
         | Original_evidence_query ticket -> Masc_tui_original_task_read.evidence_request_id ticket) in
     launch_workspace_result ~key:request.tcr_job ~observation:true state ~mailbox
       ~boundary_error:(fun detail -> Masc_tui_original_task_read.Read_failed detail)
-      ~deliver:(fun result -> Task_creation_read_done (request,result)) (fun () ->
+      ~deliver:(fun result -> Task_msg (Task_creation_read_done (request,result))) (fun () ->
         let open Result.Syntax in
         let workspace_error detail=Masc_tui_original_task_read.Workspace_unconfirmed detail in
         let* arguments=Masc_tui_original_task_read.arguments source in
@@ -11746,7 +11746,7 @@ let launch_original_task_read state ~mailbox =
         Masc_tui_http.fetch_original_task_inspection ~host ~port ~task_id) in
       launch_workspace_result ~key:request.tcr_job ~observation:true state ~mailbox
         ~boundary_error:(fun detail -> Masc_tui_original_task_read.Read_failed detail)
-        ~deliver:(fun result -> Original_task_read_done (request,result)) (fun () ->
+        ~deliver:(fun result -> Original_msg (Original_task_read_done (request,result))) (fun () ->
           match read () with
           | Error detail -> Error (Masc_tui_original_task_read.Read_failed detail)
           | Ok result -> result)) (begin_original_task_inspection state)
@@ -11762,7 +11762,7 @@ let launch_original_history_read state ~mailbox ~earlier ~limit =
         Masc_tui_http.fetch_original_task_history ~host ~port ~request:page) in
       launch_workspace_result ~key:request.tcr_job ~observation:true state ~mailbox
         ~boundary_error:(fun detail -> Masc_tui_original_task_read.Read_failed detail)
-        ~deliver:(fun result -> Original_task_history_done (request,result)) (fun () ->
+        ~deliver:(fun result -> Original_msg (Original_task_history_done (request,result))) (fun () ->
           read () |> Result.map_error (fun detail -> Masc_tui_original_task_read.Read_failed detail)))
     (begin_original_history_inspection state ~earlier ~limit)
 let original_evidence_failure = function
@@ -11783,7 +11783,7 @@ let launch_original_evidence_read state ~mailbox ~next =
         |> Result.map_error original_evidence_failure |> fun result -> Result.bind result Fun.id)) in
       launch_workspace_result ~key:request.tcr_job ~observation:true state ~mailbox
         ~boundary_error:(fun detail -> Masc_tui_original_task_read.Read_failed detail)
-        ~deliver:(fun result -> Original_task_evidence_done (request,result)) (fun () ->
+        ~deliver:(fun result -> Original_msg (Original_task_evidence_done (request,result))) (fun () ->
           match read () with
           | Error detail -> Error (Masc_tui_original_task_read.Workspace_unconfirmed detail)
           | Ok result -> result)) (begin_original_evidence_inspection state ~next)
@@ -11918,8 +11918,8 @@ let refresh_collab state ~mailbox owner =
       let expected_workspace = state.server_identity in
       launch_preset_call state ~mailbox
         ~call:(Masc_tui_http.list_play_invites ~expected_workspace)
-        ~wrap:(fun result -> Play_invites_listed (Play_collab_list read,
-          Result.bind result Tui_decode.decode_play_invites))
+        ~wrap:(fun result -> Play_msg (Play_invites_listed (Play_collab_list read,
+          Result.bind result Tui_decode.decode_play_invites)))
   | Some _ | None -> ()
 
 let refresh_current_collab state ~mailbox =
@@ -11952,10 +11952,10 @@ let launch_play_issue state ~mailbox ~sink ~name ~hours =
                 ~expected_base_path:request.change_workspace.wi_base_path
                 ~expected_masc_root:request.change_workspace.wi_masc_root ~host ~port ~name ~hours)
           | Ok _ | Error _ -> Ok (Masc_tui_http.Post_refused "Local workspace authority changed before dispatch"))
-        ~wrap:(fun result -> Play_invite_issued (request, sink,
+        ~wrap:(fun result -> Play_msg (Play_invite_issued (request, sink,
           match result with
           | Ok outcome -> decode_play_mutation Tui_decode.decode_play_invite_issued outcome
-          | Error detail -> play_request_failure state request detail));
+          | Error detail -> play_request_failure state request detail)));
       true
 
 let launch_play_revoke state ~mailbox ~sink ~name =
@@ -11976,13 +11976,13 @@ let launch_play_revoke state ~mailbox ~sink ~name =
                 ~expected_masc_root:request.change_workspace.wi_masc_root ~host ~port ~name)
           | Ok _ | Error _ -> Ok (Masc_tui_http.Revoke_other
               (Masc_tui_http.Post_refused "Local workspace authority changed before dispatch")))
-        ~wrap:(fun result -> Play_invite_revoked (request, sink, name,
+        ~wrap:(fun result -> Play_msg (Play_invite_revoked (request, sink, name,
           match result with
           | Ok Masc_tui_http.Revoke_absent -> Play_revoke_absent
           | Ok (Masc_tui_http.Revoke_release_failed detail) -> Play_revoke_release_failed detail
           | Ok (Masc_tui_http.Revoke_other outcome) ->
               Play_revoke_result (decode_play_mutation Tui_decode.decode_play_invite_revoked outcome)
-          | Error detail -> Play_revoke_result (play_request_failure state request detail)));
+          | Error detail -> Play_revoke_result (play_request_failure state request detail))));
       true
 
 let settle_retired_queue_inspections state =
@@ -12607,7 +12607,7 @@ let launch_play_room state ~mailbox request =
       Masc_tui_http.post_json_bound ~credential ~host ~port ~path:"/api/v1/play/room"
         ~body:(Yojson.Safe.to_string body)
       |> fun result -> Result.bind result Masc.Play_room.view_of_json)
-    ~wrap:(fun result -> Play_room_received (request, result))) state.server_identity
+    ~wrap:(fun result -> Play_msg (Play_room_received (request, result)))) state.server_identity
   end
 
 let poll_play_room state ~mailbox =
@@ -14200,7 +14200,7 @@ let prepare_resource_diagrams state ~mailbox ~geometry_stable ~worker_geometry_c
                                  end)) in
                              match result with
                              | Some (Some result) ->
-                                 deliver mailbox (Resource_diagram_ready (request,source,claim,result));
+                                 deliver mailbox (Resource_msg (Resource_diagram_ready (request,source,claim,result)));
                                  delivered := true
                              | Some None | None -> ())));
                `Stop_daemon))
@@ -14506,7 +14506,7 @@ let seek_in_chat state ~mailbox ~target ~restart =
       report_action state "system"
         (Terminal_text.single_line ("/find " ^ needle ^ " — searching conversation"));
       launch_keeper_message_search state plan ~deliver:(fun result ->
-        enqueue_async mailbox (Chat_search_finished (generation,restart,plan,result)))
+        enqueue_async mailbox (Chat_msg (Chat_search_finished (generation,restart,plan,result))))
 
 (* The Activity pane's cycle, narrow to wide to hidden, shared by Ctrl-L
    and [/activity]. Measured
@@ -15516,7 +15516,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
       Masc_tui_message_input.clear state.msg_input;
       launch_chat_command_read state ~mailbox ~label:"/preset"
         ~call:(fun ~host ~port -> Masc_tui_loader.load_presets ~host ~port)
-        ~wrap:(fun result -> Presets_listed (Preset_to_chat target, result))
+        ~wrap:(fun result -> Preset_msg (Presets_listed (Preset_to_chat target, result)))
   | Masc_tui_command.Preset_save_missing_name ->
       notice ~kind:Notice_failure "/preset save needs a name on the same line"
   | Masc_tui_command.Preset_save { name; description } ->
@@ -15571,7 +15571,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
       Masc_tui_message_input.clear state.msg_input;
       launch_chat_command_read state ~mailbox ~label:"/preset show"
         ~call:(fun ~host ~port -> Masc_tui_loader.load_preset_detail ~host ~port ~name)
-        ~wrap:(fun result -> Preset_contents_shown (Preset_to_chat target, result))
+        ~wrap:(fun result -> Preset_msg (Preset_contents_shown (Preset_to_chat target, result)))
   | Masc_tui_command.Preset_restore name ->
       if state.preset_busy || workspace_preset_save_pending state <> [] then
         notice ~kind:Notice_failure
@@ -15583,7 +15583,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
         (Printf.sprintf "restoring preset %s — the live state is autosaved first" name);
       launch_preset_call state ~mailbox
         ~call:(fun ~host ~port -> Masc_tui_loader.restore_preset ~host ~port ~name)
-        ~wrap:(fun result -> Preset_restored (Preset_to_chat target, result))
+        ~wrap:(fun result -> Preset_msg (Preset_restored (Preset_to_chat target, result)))
       end
   | Masc_tui_command.Preset_delete_missing_name ->
       notice ~kind:Notice_failure "/preset delete needs a name on the same line"
@@ -15598,7 +15598,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
       Masc_tui_message_input.clear state.msg_input;
       launch_preset_call state ~mailbox
         ~call:(fun ~host ~port -> Masc_tui_loader.delete_preset ~host ~port ~name)
-        ~wrap:(fun result -> Preset_deleted (Preset_to_chat target, result))
+        ~wrap:(fun result -> Preset_msg (Preset_deleted (Preset_to_chat target, result)))
       end
   | Masc_tui_command.Play_invalid reason ->
       notice ~kind:Notice_failure reason
@@ -15608,7 +15608,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
       launch_chat_command_read state ~mailbox ~label:"/play invites"
         ~call:(Masc_tui_http.list_play_invites ~expected_workspace)
         ~wrap:(fun result ->
-          Play_invites_listed (Play_chat_list target, Result.bind result Tui_decode.decode_play_invites))
+          Play_msg (Play_invites_listed (Play_chat_list target, Result.bind result Tui_decode.decode_play_invites)))
   | Masc_tui_command.Play_link requested_name ->
       Masc_tui_message_input.clear state.msg_input;
       (* The cards carry names made safe to draw, so the name typed is
@@ -16304,8 +16304,8 @@ let launch_approvals_summary_load state ~mailbox =
                 Masc_tui_async_read.launch
                   ~deliver:(fun result ->
                     enqueue_async mailbox
-                      (Approvals_summary_loaded
-                         (request, listing_ticket, expected_workspace, result)))
+                      (Approvals_msg (Approvals_summary_loaded
+                         (request, listing_ticket, expected_workspace, result))))
                   (fun () ->
                     let open Result.Syntax in
                     let check_identity ?prior_contact () =
@@ -16347,7 +16347,7 @@ let launch_pending_confirms_read state ~mailbox =
           Masc_tui_async_read.launch
             ~deliver:(fun result ->
               enqueue_async mailbox
-                (Approvals_summary_loaded (request, listing_ticket, expected_workspace, result)))
+                (Approvals_msg (Approvals_summary_loaded (request, listing_ticket, expected_workspace, result))))
             (fun () -> Masc_tui_loader.load_workspace_approvals ~expected_workspace ~host ~port);
           true
 
@@ -17413,7 +17413,7 @@ let launch_local_keeper_read state ~mailbox ~intent base_path =
   launch_local_source state ~mailbox ~intent ~source:Local_keepers
     ~read:(fun request -> Masc_tui_loader.read_local_keepers request.lwr_base_path)
     ~prepare:(fun _ reading -> reading)
-    ~message:(fun request result -> Local_keepers_read (request, result)) base_path
+    ~message:(fun request result -> Local_msg (Local_keepers_read (request, result))) base_path
 
 let launch_local_work_read state ~mailbox ~intent base_path =
   launch_local_source state ~mailbox ~intent ~source:Local_work
@@ -17421,7 +17421,7 @@ let launch_local_work_read state ~mailbox ~intent base_path =
       Masc_tui_loader.read_local_workspace
         ~fresh:(request.lwr_intent = Snapshot_read.Refresh) request.lwr_base_path)
     ~prepare:Masc_tui_loader.prepare_local_workspace
-    ~message:(fun request result -> Local_workspace_read (request, result)) base_path
+    ~message:(fun request result -> Local_msg (Local_workspace_read (request, result))) base_path
 
 let launch_local_workspace_read state ~mailbox ~intent base_path =
   launch_local_keeper_read state ~mailbox ~intent base_path;
@@ -18343,9 +18343,9 @@ let launch_ask_followup_load state ~mailbox =
           ~on_not_run:finish ~boundary_error:(fun detail -> Ask.Followup_read_failed detail)
           ~observe_job:(fun event -> Ask_followup_observation.emit read ~sources:None (Ask_followup_observation.Followup_job_event event))
           ~not_started:(fun detail -> Ask.Followup_not_started detail)
-          ~cancelled:(envelope (Ask_followup_finished (read,Error Ask.Followup_cancelled)))
-          ~progress:(fun (event,received_ns) -> envelope (Ask_followup_observed (read,event,received_ns)))
-          ~deliver:(fun result -> envelope (Ask_followup_finished (read,result)))
+          ~cancelled:(envelope (Ask_msg (Ask_followup_finished (read,Error Ask.Followup_cancelled))))
+          ~progress:(fun (event,received_ns) -> envelope (Ask_msg (Ask_followup_observed (read,event,received_ns))))
+          ~deliver:(fun result -> envelope (Ask_msg (Ask_followup_finished (read,result))))
           (fun publish -> Fun.protect ~finally:finish (fun () ->
             Ask_followup_observation.emit read ~sources:None Ask_followup_observation.Followup_worker_entered;
             let result=try match clock with
@@ -18744,7 +18744,7 @@ let launch_observer_recovery state ~origin ~host ~port ~mailbox =
         | Observer_existing_workspace expected -> expected.sid_base_path, expected.sid_masc_root
         | Observer_initial_workspace paths -> paths.lw_base_path, paths.lw_masc_root in
       let report session_id =
-        enqueue_async mailbox (Observer_recovery_ready (authority, owner, session_id)) in
+        enqueue_async mailbox (Observer_msg (Observer_recovery_ready (authority, owner, session_id))) in
       let report_existing session_id = match origin with
         | Observer_existing_workspace _ -> report session_id
         | Observer_initial_workspace _ -> () in
@@ -18764,9 +18764,9 @@ let launch_observer_recovery state ~origin ~host ~port ~mailbox =
                     ~session_id ~cursor:None
                     ~on_identity:(fun (handshake, identity) ->
                       enqueue_async mailbox
-                        (Observer_recovery_identity
+                        (Observer_msg (Observer_recovery_identity
                            (authority, owner, live, session_id, handshake.Sse_wire.instance_id,
-                            origin, identity)))
+                            origin, identity))))
                     ~on_open:(fun _ -> refusal_reported := false; report_existing (Some session_id))
                     ~on_chunk:(fun _ -> ()))
           with
@@ -18838,7 +18838,7 @@ let launch_observer state ~(expected_workspace : Tui_decode.server_identity) ~ho
         | Ok session_id ->
             (* The session is owned independently of the stream: a rejected
                handshake must not cause another initialize on every retry. *)
-            enqueue_async mailbox (Observer_session_ready session_id);
+            enqueue_async mailbox (Observer_msg (Observer_session_ready session_id));
             (
             match Eio_context.get_clock_opt () with
             | None -> Error (Masc_tui_http.Transport_failed "Eio clock is unavailable")
@@ -18847,12 +18847,12 @@ let launch_observer state ~(expected_workspace : Tui_decode.server_identity) ~ho
                 let instance_id = ref None in
                 let on_open handshake =
                   instance_id := Option.map (fun handshake -> handshake.Sse_wire.instance_id) handshake;
-                  enqueue_async mailbox (Observer_opened { session_id; handshake })
+                  enqueue_async mailbox (Observer_msg (Observer_opened { session_id; handshake }))
                 in
                 let on_chunk chunk =
                   match Masc_tui_observer.feed reader chunk with
                   | [] -> ()
-                  | decoded -> enqueue_async mailbox (Observer_received (!instance_id, decoded))
+                  | decoded -> enqueue_async mailbox (Observer_msg (Observer_received (!instance_id, decoded)))
                 in
                 Masc_tui_http.observe_runtime_events ~clock
                   ~expected_base_path:expected_workspace.sid_base_path
@@ -18862,13 +18862,13 @@ let launch_observer state ~(expected_workspace : Tui_decode.server_identity) ~ho
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Masc_tui_http.Transport_failed (Printexc.to_string exn))
     in
-    enqueue_async mailbox (Observer_closed (workspace, result))
+    enqueue_async mailbox (Observer_msg (Observer_closed (workspace, result)))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
       fork_workspace_job ~observation:true state ~sw run
   | None -> enqueue_async mailbox
-      (Observer_closed (workspace, Error (Masc_tui_http.Transport_failed "Eio switch is unavailable")))
+      (Observer_msg (Observer_closed (workspace, Error (Masc_tui_http.Transport_failed "Eio switch is unavailable"))))
 
 (* Open only after server contact and workspace admission. Initial opens may
    follow a refresh; closed streams also have their own delayed retry. *)
@@ -18908,7 +18908,7 @@ let schedule_observer_retry state ~mailbox owner =
            (* This is a control tick, not a source reading. Deliver it even
               while readiness is unconfirmed; its authority and token are
               checked before it can start another connection. *)
-           enqueue_async mailbox (Observer_retry_due (authority, owner)))
+           enqueue_async mailbox (Observer_msg (Observer_retry_due (authority, owner))))
        with
        | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exn -> unavailable (Printexc.to_string exn))
@@ -18928,7 +18928,7 @@ let launch_fleet_stream state ~expected_workspace ~host ~port ~mailbox =
     Fleet_stream_following Masc_tui_fleet_stream.Awaiting_first_reading;
   let run () =
     match Eio_context.get_clock_opt () with
-    | None -> enqueue_async mailbox (Fleet_stream_reader_ended "Eio clock is unavailable")
+    | None -> enqueue_async mailbox (Fleet_msg (Fleet_stream_reader_ended "Eio clock is unavailable"))
     | Some clock ->
         let reader = Masc_tui_fleet_stream.create () in
         let posted = ref Masc_tui_fleet_stream.Awaiting_first_reading in
@@ -18936,7 +18936,7 @@ let launch_fleet_stream state ~expected_workspace ~host ~port ~mailbox =
           let view = Masc_tui_fleet_stream.view reader in
           if view <> !posted then begin
             posted := view;
-            enqueue_async mailbox (Fleet_stream_view view)
+            enqueue_async mailbox (Fleet_msg (Fleet_stream_view view))
           end
         in
         let read_one_connection () =
@@ -18975,8 +18975,8 @@ let launch_fleet_stream state ~expected_workspace ~host ~port ~mailbox =
       fork_workspace_job ~observation:true state ~sw (fun () ->
         try run () with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> enqueue_async mailbox (Fleet_stream_reader_ended (Printexc.to_string exn)))
-  | None -> enqueue_async mailbox (Fleet_stream_reader_ended "Eio switch is unavailable")
+        | exn -> enqueue_async mailbox (Fleet_msg (Fleet_stream_reader_ended (Printexc.to_string exn))))
+  | None -> enqueue_async mailbox (Fleet_msg (Fleet_stream_reader_ended "Eio switch is unavailable"))
 
 (* The stream is opened only after a refresh confirmed the workspace, and it
    asks the server for that workspace, which the fleet read it replaced did
@@ -19264,9 +19264,9 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
     let on_initial_identity = if cold then
       Some (fun hir_identity ->
         let acknowledged, hir_acknowledge = Eio.Promise.create () in
-        enqueue_async mailbox (Http_initial_identity_read
+        enqueue_async mailbox (Http_msg (Http_initial_identity_read
           { hir_ticket = refresh_ticket; hir_authority = (!requests).hrr_authority;
-            hir_identity; hir_needs = needs; hir_surface_context=(!requests).hrr_surfaces; hir_acknowledge });
+            hir_identity; hir_needs = needs; hir_surface_context=(!requests).hrr_surfaces; hir_acknowledge }));
         let accepted = Eio.Promise.await acknowledged in
         Option.iter (fun admitted -> requests := admitted) accepted;
         accepted)
@@ -19277,55 +19277,55 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
         { hp_ticket = refresh_ticket; hp_authority = (!requests).hrr_authority; hp_event }) in
     let on_dataset = if early_sources then
       Some (fun ed_identity ed_dataset ->
-        enqueue_async mailbox (Http_dataset_loaded
+        enqueue_async mailbox (Http_msg (Http_dataset_loaded
           {ed_ticket=refresh_ticket;ed_authority=(!requests).hrr_authority;
-           ed_request=Surface_read_context.current (!requests).hrr_surfaces;ed_identity;ed_dataset}))
+           ed_request=Surface_read_context.current (!requests).hrr_surfaces;ed_identity;ed_dataset})))
       else None in
     let on_asks =
       if early_sources then
         Some (fun ea_identity ea_observation ->
-          enqueue_async mailbox (Http_asks_loaded
+          enqueue_async mailbox (Http_msg (Http_asks_loaded
             { ea_ticket = refresh_ticket; ea_authority = (!requests).hrr_authority;
-              ea_identity; ea_observation }))
+              ea_identity; ea_observation })))
       else None
     in
     let on_approvals =
       if early_sources then
         Some (fun eap_identity eap_observation ->
-          enqueue_async mailbox (Http_approvals_loaded
+          enqueue_async mailbox (Http_msg (Http_approvals_loaded
             { eap_ticket = refresh_ticket; eap_authority = (!requests).hrr_authority;
-              eap_identity; eap_observation }))
+              eap_identity; eap_observation })))
       else None
     in
     let on_roster =
       if early_sources then
         Some (fun er_identity er_observation ->
-          enqueue_async mailbox (Http_keeper_roster_loaded
-            {er_ticket=refresh_ticket;er_authority=(!requests).hrr_authority;er_identity;er_observation}))
+          enqueue_async mailbox (Http_msg (Http_keeper_roster_loaded
+            {er_ticket=refresh_ticket;er_authority=(!requests).hrr_authority;er_identity;er_observation})))
       else None in
     let on_overview =
       if state.view = Overview then
         Some (fun op_identity op_snapshot ->
-          enqueue_async mailbox (Http_overview_loaded
+          enqueue_async mailbox (Http_msg (Http_overview_loaded
             { op_ticket = refresh_ticket; op_authority = (!requests).hrr_authority;
-              op_identity; op_snapshot }))
+              op_identity; op_snapshot })))
       else None
     in
     let run_refresh () =
       let completed = try
           Masc_tui_credential_preparation.await_initial state.credential_preparation;
-          Http_refresh_done
+          Http_msg (Http_refresh_done
              (load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_dataset ~on_overview ~on_asks ~on_approvals ~on_roster ~ask_request ~roster_request
                 ~refresh_ticket ~host ~port ~approval_ticket
                 ~board_query
                 ~provider_history_days
                 ~system_log_level
-                ~needs)
+                ~needs))
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Http_refresh_failed
+      | exn -> Http_msg (Http_refresh_failed
           (Printf.sprintf "HTTP refresh failed: %s" (Printexc.to_string exn),
-           (!requests).hrr_approval, refresh_ticket)
+           (!requests).hrr_approval, refresh_ticket))
       in
       enqueue_async mailbox (Http_surface_read_completed ((!requests).hrr_surfaces, completed))
     in
@@ -19438,7 +19438,7 @@ let launch_goal_confirmation_read state ~mailbox ~goal_id =
              let host = server_peer_host and port = state.port in
              let workspace = Goal_confirmation.confirmation_workspace_of_identity expected_workspace in
              launch_workspace_request state ~mailbox ~boundary_error:(fun detail -> Goal_confirmation.Read_failed (None, detail))
-               ~deliver:(fun result -> Goal_confirmation_loaded (request, result))
+               ~deliver:(fun result -> Goal_msg (Goal_confirmation_loaded (request, result)))
                (fun () ->
                  let open Result.Syntax in
                  let credential = Masc_tui_http.bind_credential () in
@@ -19868,9 +19868,9 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
         in
         let* server_identity = probe () in
         let on_dataset ed_identity ed_dataset =
-          enqueue_async mailbox (Http_dataset_loaded
+          enqueue_async mailbox (Http_msg (Http_dataset_loaded
             {ed_ticket=refresh_ticket;ed_authority=authority;ed_request=surface_request;
-             ed_identity;ed_dataset}) in
+             ed_identity;ed_dataset})) in
         let readings = load_http_scoped_surface_reads ~on_progress:None ~on_dataset:(Some on_dataset) ~surface_request ~ask_request ~refresh_ticket
               ~server_identity:(Ok server_identity) ~host ~port
               ~approval_ticket ~board_query
@@ -19886,9 +19886,9 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
     in
     let run_refresh () =
       let completed = match read_refresh () with
-        | Ok results -> Http_scoped_refresh_done (authority, currency_authority, results)
-        | Error err -> Http_scoped_refresh_failed
-            (authority, err, approval_ticket, refresh_ticket, !latest_identity, surface_request) in
+        | Ok results -> Http_msg (Http_scoped_refresh_done (authority, currency_authority, results))
+        | Error err -> Http_msg (Http_scoped_refresh_failed
+            (authority, err, approval_ticket, refresh_ticket, !latest_identity, surface_request)) in
       enqueue_async mailbox (Http_surface_read_completed (surface_context, completed))
     in
     match Eio_context.get_switch_opt () with
@@ -20319,7 +20319,7 @@ let start_approval_decision state approval decision ~mailbox =
         | exn -> Error ("approvals reload failed: " ^ Printexc.to_string exn)
       in
       enqueue_async mailbox
-        (Approval_decision_done (approval, decision, result, generation, approvals))
+        (Approvals_msg (Approval_decision_done (approval, decision, result, generation, approvals)))
     in
     match Eio_context.get_switch_opt () with
     | Some sw -> fork_workspace_job state ~sw run_action
@@ -20985,8 +20985,8 @@ let start_goal_transition ?note ?retry_binding state ~mailbox ~(goal_id : string
       let host = server_peer_host in
       let port = state.port in
       launch_workspace_request ~operation:true state ~mailbox ~boundary_error:annotate_error
-        ~cancelled:(Goal_transition_done (goal_id, ticket, origin, Error (annotate_error "Request interrupted; its outcome is unknown. Inspect the Goal before retrying.")))
-        ~deliver:(fun result -> Goal_transition_done (goal_id, ticket, origin, Result.map (fun message -> message ^ proof_context) result))
+        ~cancelled:(Goal_msg (Goal_transition_done (goal_id, ticket, origin, Error (annotate_error "Request interrupted; its outcome is unknown. Inspect the Goal before retrying."))))
+        ~deliver:(fun result -> Goal_msg (Goal_transition_done (goal_id, ticket, origin, Result.map (fun message -> message ^ proof_context) result)))
         (fun () ->
           match
             Masc_tui_http.post_goal_transition ~expected_workspace
@@ -21064,9 +21064,9 @@ let handle_goal_confirmation_key state ~mailbox =
            let workspace_read_authority = state.workspace_read_authority in
            let expected_workspace = state.server_identity in
            launch_workspace_request ~operation:true state ~mailbox ~boundary_error:Fun.id
-             ~cancelled:(Goal_confirmation_submitted (goal_id, ticket, origin, receipt_authority, Error (annotate_error "request interrupted")))
-             ~deliver:(fun result -> Goal_confirmation_submitted (goal_id, ticket, origin, receipt_authority,
-               result |> Result.map (fun message -> message ^ proof_context) |> Result.map_error annotate_error))
+             ~cancelled:(Goal_msg (Goal_confirmation_submitted (goal_id, ticket, origin, receipt_authority, Error (annotate_error "request interrupted"))))
+             ~deliver:(fun result -> Goal_msg (Goal_confirmation_submitted (goal_id, ticket, origin, receipt_authority,
+               result |> Result.map (fun message -> message ^ proof_context) |> Result.map_error annotate_error)))
              (fun () ->
                let open Result.Syntax in
                let credential = Masc_tui_http.bind_credential () in
@@ -21230,7 +21230,7 @@ let start_schedule_cancel state ~mailbox ~(schedule_id : string) =
       | Error err -> Error err
       | Ok json -> Masc.Tui_decode.tool_envelope_outcome json
     in
-    enqueue_async mailbox (Schedule_cancel_done (schedule_id, result))
+    enqueue_async mailbox (Schedule_msg (Schedule_cancel_done (schedule_id, result)))
   in
   match Eio_context.get_switch_opt () with
   | Some sw -> fork_workspace_job state ~sw run_cancel
@@ -21287,11 +21287,11 @@ let start_verification_verdict state ~mailbox ~(task_id : string)
       | Error err -> Error err
       | Ok json -> Masc.Tui_decode.verification_verdict_outcome json
     in
-    enqueue_async mailbox (Verification_verdict_done result)
+    enqueue_async mailbox (Verification_msg (Verification_verdict_done result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw -> fork_workspace_job state ~sw run_verdict
-  | None -> enqueue_async mailbox (Verification_verdict_done (Error "Eio switch is unavailable"))
+  | None -> enqueue_async mailbox (Verification_msg (Verification_verdict_done (Error "Eio switch is unavailable")))
 
 (* The row under the Verification cursor, if the list has one. *)
 let verification_cursor_row state =
@@ -21415,8 +21415,8 @@ let export_verification_evidence state ~mailbox ~open_file =
       then Ok () else Error "Workspace changed before the evidence file operation" in
     report_action state "system" "선택한 증거 사본을 내려받는 중…";
     launch_workspace_request ~operation:true state ~mailbox ~boundary_error:Fun.id
-      ~cancelled:(Verification_evidence_exported (request, Error "File operation interrupted; a local copy or opened viewer may exist. Inspect before retrying."))
-      ~deliver:(fun result -> Verification_evidence_exported (request,result))
+      ~cancelled:(Verification_msg (Verification_evidence_exported (request, Error "File operation interrupted; a local copy or opened viewer may exist. Inspect before retrying.")))
+      ~deliver:(fun result -> Verification_msg (Verification_evidence_exported (request,result)))
       (fun () ->
         let open Result.Syntax in
         let* file = read () in
@@ -21696,12 +21696,12 @@ let handle_board_compose_key state ~mailbox ?restore ?reenter (key : string) : b
             let sent_draft = Buffer.contents state.board_draft in
             let request_id = ref () in
             let cancelled =
-              Board_comment_done
+              Board_msg (Board_comment_done
                 { request_id
                 ; post_id
                 ; sent_draft
                 ; result = Error "Board comment interrupted; outcome unknown; check the thread before retrying"
-                }
+                })
             in
             let on_not_run () =
               Masc_tui_board_updates.comment_launch_failed state ~request_id
@@ -21869,28 +21869,28 @@ let launch_voice_capture ?(calibrate = false) state ~mailbox ~keeper =
            from the panel opens the device the config names, not whatever the
            OS currently calls the default input. *)
         ?audio_device:(resolved_audio_input_device ~for_display:false)
-        ~on_level:(fun level -> enqueue_async mailbox (Voice_level { keeper; level }))
+        ~on_level:(fun level -> enqueue_async mailbox (Voice_msg (Voice_level { keeper; level })))
         ~should_stop:(fun () -> state.voice_stop_requested) () with
-    | Error error -> Voice_failed { keeper; error }
+    | Error error -> Voice_msg (Voice_failed { keeper; error })
     | Ok json ->
         (* Read the bridge's typed outcome rather than guessing from text. *)
         match Masc.Voice_bridge.capture_outcome_of_json json with
-        | Masc.Voice_bridge.Transcript { text; _ } -> Voice_transcribed { keeper; text }
+        | Masc.Voice_bridge.Transcript { text; _ } -> Voice_msg (Voice_transcribed { keeper; text })
         | Masc.Voice_bridge.Transcriber_returned_nothing { endpoint_id } ->
-          Voice_silent
+          Voice_msg (Voice_silent
             { keeper
             ; reason =
                 (match endpoint_id with
                  | Some endpoint -> "the transcriber (" ^ endpoint ^ ") returned no text"
                  | None -> "the transcriber returned no text")
-            }
-        | Masc.Voice_bridge.Nothing_heard { message } -> Voice_silent { keeper; reason = message }
+            })
+        | Masc.Voice_bridge.Nothing_heard { message } -> Voice_msg (Voice_silent { keeper; reason = message })
         | Masc.Voice_bridge.Discarded_recording { message } ->
-          Voice_discarded { keeper; reason = message }
+          Voice_msg (Voice_discarded { keeper; reason = message })
         | Masc.Voice_bridge.Unrecognized_status status ->
-          Voice_failed { keeper; error = "voice result carried an unknown status: " ^ status }
+          Voice_msg (Voice_failed { keeper; error = "voice result carried an unknown status: " ^ status })
         | Masc.Voice_bridge.Status_absent ->
-          Voice_failed { keeper; error = "voice result carried no status" }
+          Voice_msg (Voice_failed { keeper; error = "voice result carried no status" })
   in
   let run () =
     let msg =
@@ -21900,12 +21900,12 @@ let launch_voice_capture ?(calibrate = false) state ~mailbox ~keeper =
              key handler returns while it waits, but another capture must wait
              for this session's original terminal response. *)
           let floor = Masc.Voice_bridge.measure_noise_floor ~agent_id:keeper () in
-          enqueue_async mailbox (Voice_calibrated { keeper; floor });
+          enqueue_async mailbox (Voice_msg (Voice_calibrated { keeper; floor }));
           match state.voice_stop_requested with
           | Some Masc.Voice_bridge.Discard ->
-              Voice_discarded { keeper; reason = "microphone preparation discarded" }
+              Voice_msg (Voice_discarded { keeper; reason = "microphone preparation discarded" })
           | Some Masc.Voice_bridge.Keep_what_was_heard ->
-              Voice_silent { keeper; reason = "stopped during microphone preparation; no speech recorded" }
+              Voice_msg (Voice_silent { keeper; reason = "stopped during microphone preparation; no speech recorded" })
           | None ->
               (* The probe and its mailbox publication both yield. Turning
                  continuous mode off during either wait must not start a new
@@ -21913,12 +21913,12 @@ let launch_voice_capture ?(calibrate = false) state ~mailbox ~keeper =
                  Discard policy still owns speech already captured. *)
               (match state.voice_continuous with
                | Some active when String.equal active keeper -> capture floor
-               | Some _ | None -> Voice_silent
-                   {keeper; reason = "continuous mode stopped during microphone preparation"})
+               | Some _ | None -> Voice_msg (Voice_silent
+                   {keeper; reason = "continuous mode stopped during microphone preparation"}))
         end else capture inherited_floor
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Voice_failed { keeper; error = Printexc.to_string exn }
+      | exn -> Voice_msg (Voice_failed { keeper; error = Printexc.to_string exn })
     in
     enqueue_async mailbox msg
   in
@@ -22481,22 +22481,22 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           ignore (Masc_tui_types.take_keeper_roster_observation state observation)
         | Keeper_msg (Keeper_row_reloaded observation) ->
           ignore (Masc_tui_types.take_keeper_row_observation state observation)
-        | Gate_snapshot_loaded (request, _, _) ->
+        | Gate_msg (Gate_snapshot_loaded (request, _, _)) ->
           Log.Transport.debug "discarded Gate snapshot request=%d: workspace authority superseded"
             (Snapshot_read.request_id request)
         | Keeper_msg (Keeper_chat_dispatch_started (_, _, acknowledge)) ->
           ignore (Eio.Promise.try_resolve acknowledge false)
         | Keeper_msg (Keeper_chat_done (_, _, _, acknowledge)) ->
           ignore (Eio.Promise.try_resolve acknowledge ())
-        | Workspace_operation (Goal_transition_done (goal_id, ticket, workspace, result)) ->
+        | Workspace_operation (Goal_msg (Goal_transition_done (goal_id, ticket, workspace, result))) ->
           record_goal_action_receipt state ~goal_id ~ticket ~workspace result;
           report_action state "error" ("Goal " ^ goal_id ^ " from " ^ workspace
             ^ ": a request outcome arrived after workspace authority was withdrawn; inspect Work summary")
-        | Workspace_operation (Goal_confirmation_submitted (goal_id, ticket, workspace, authority, result)) ->
+        | Workspace_operation (Goal_msg (Goal_confirmation_submitted (goal_id, ticket, workspace, authority, result))) ->
           record_goal_action_receipt ~authority state ~goal_id ~ticket ~workspace result;
           report_action state "error" ("Goal " ^ goal_id ^ " from " ^ workspace
             ^ ": a confirmation outcome arrived after workspace authority was withdrawn; inspect Work summary")
-        | Workspace_operation (Resource_share_changed (request, result)) ->
+        | Workspace_operation (Resource_msg (Resource_share_changed (request, result))) ->
           if resource_share_is_owned state request then begin
             let read_key = finish_resource_share state request result in
             (match result with
@@ -22525,7 +22525,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                   else "The share request for " ^ request.share_report.id ^ " did not start or send: " ^ detail);
                  Option.iter (fun key -> launch_resources_read state ~mailbox ~key) read_key)
           end
-        | Play_invite_issued (request, _, Play_answered (Ok invite)) ->
+        | Play_msg (Play_invite_issued (request, _, Play_answered (Ok invite))) ->
           (match
              Masc_tui_play_card.make
                ~project:Masc_tui_play_card.project_for_terminal
@@ -22534,94 +22534,94 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            with
            | Ok card -> Masc_tui_types.retain_withdrawn_play_invite state request card
            | Error _ -> ())
-        | Play_invite_issued (_, _, Play_answered (Error _))
-        | Play_invite_issued (_, _, (Play_refused _ | Play_not_dispatched _ | Play_unanswered _))
-        | Approvals_listing_superseded | Surface_composer_released
-        | Chat_search_finished (_, _, _, _) | Workspace_scoped (_, _, _) | Workspace_operation _
-        | Chat_command_read_completed (_, _) | Workspace_identity_unconfirmed _
-        | Schedule_form_authority_refused _ | Lane_package_catalog_loaded (_, _, _)
-        | Lane_package_preview_loaded (_, _, _) | Keeper_msg (Keeper_queue_resume_confirmed (_, _, _, _)
+        | Play_msg (Play_invite_issued (_, _, Play_answered (Error _))
+        | Play_invite_issued (_, _, (Play_refused _ | Play_not_dispatched _ | Play_unanswered _)))
+        | (Approvals_msg Approvals_listing_superseded) | (Keeper_msg Keeper_composer_released)
+        | Chat_msg (Chat_search_finished (_, _, _, _)) | Workspace_scoped (_, _, _) | Workspace_operation _
+        | Chat_command_read_completed (_, _) | Workspace_msg (Workspace_identity_unconfirmed _)
+        | Schedule_msg (Schedule_form_authority_refused _) | Lane_msg (Lane_package_catalog_loaded (_, _, _)
+        | Lane_package_preview_loaded (_, _, _)) | Keeper_msg (Keeper_queue_resume_confirmed (_, _, _, _)
         | Keeper_queue_action_received _
-        | Keeper_queue_loaded (_, _, _, _)) | Lane_addons_loaded (_, _, _)
+        | Keeper_queue_loaded (_, _, _, _)) | Lane_msg (Lane_addons_loaded (_, _, _)
         | Lane_application_loaded (_, _) | Lane_subscriptions_loaded (_, _)
-        | Lane_declaration_loaded (_, _, _, _, _) | Keeper_msg (Keeper_deletions_loaded (_, _))
-        | Msx_tick_withdrawn (_, _) | Keeper_msg (Keeper_deletion_retry_done (_, _)) | Msx_frame_loaded (_, _)
-        | Msx_activity_loaded (_, _) | Msx_live_loaded (_, _) | Dos_live_loaded (_, _)
-        | Voice_wizard_saved (_, _) | Voice_agent_voices_loaded _ | Voice_agent_voice_saved _
+        | Lane_declaration_loaded (_, _, _, _, _)) | Keeper_msg (Keeper_deletions_loaded (_, _))
+        | Msx_msg (Msx_tick_withdrawn (_, _)) | Keeper_msg (Keeper_deletion_retry_done (_, _)) | Msx_msg (Msx_frame_loaded (_, _)
+        | Msx_activity_loaded (_, _) | Msx_live_loaded (_, _)) | Dos_live_loaded (_, _)
+        | Voice_msg (Voice_wizard_saved (_, _) | Voice_agent_voices_loaded _ | Voice_agent_voice_saved _
         | Voice_wizard_probed (_, _) | Voice_wizard_reread (_, _) | Voice_config_loaded (_, _, _)
-        | Voice_calibrated _ | Voice_level _ | Voice_transcribed _ | Voice_silent _ | Voice_discarded _ | Voice_failed _
-        | (Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _ | Http_refresh_done _) | Http_refresh_failed (_, _, _)
-        | Approvals_summary_loaded (_, _, _, _) | Http_scoped_refresh_done (_, _, _)
-        | Http_scoped_refresh_failed (_, _, _, _, _, _) | Board_post_refresh_done (_, _)
-        | Approval_decision_done (_, _, _, _, _) | Ask_answer_done (_, _, _)
+        | Voice_calibrated _ | Voice_level _ | Voice_transcribed _ | Voice_silent _ | Voice_discarded _ | Voice_failed _)
+        | (Http_msg (Http_keeper_roster_loaded _ | Http_dataset_loaded _) | Http_surface_read_completed _ | Http_msg (Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _) | Ask_msg (Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _) | Http_msg (Http_refresh_done _)) | Http_msg (Http_refresh_failed (_, _, _))
+        | Approvals_msg (Approvals_summary_loaded (_, _, _, _)) | Http_msg (Http_scoped_refresh_done (_, _, _)
+        | Http_scoped_refresh_failed (_, _, _, _, _, _)) | Board_msg (Board_post_refresh_done (_, _))
+        | Approvals_msg (Approval_decision_done (_, _, _, _, _)) | Ask_msg (Ask_answer_done (_, _, _))
         | Keeper_msg (Keeper_chat_stream_deltas (_, _) | Keeper_chat_stream_unavailable (_, _)
         | Keeper_run_next_done (_, _) | Keeper_observed_interrupt_done (_, _, _, _)
         | Keeper_chat_interrupt_done (_, _, _)) | (Keeper_msg (Keeper_chat_history_loaded (_, _, _) | Keeper_chat_first_page_loaded (_, _)))
         | Keeper_msg (Keeper_chat_copy_loaded (_, _, _) | Keeper_chat_operation_loaded _
         | Keeper_chat_journal_loaded _ | Keeper_native_tasks_loaded (_, _)
-        | Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _)) | Context_inspector_loaded (_, _, _)
-        | Context_inspector_part_loaded (_, _)
-        | Keeper_msg (Keeper_chat_older_loaded (_, _, _, _)) | Local_workspace_read (_, _) | Local_keepers_read (_, _) | Live_context_loaded (_, _, _) | (Keeper_msg (Keeper_logs_loaded _ | Keeper_execute_streamed _)) | Keeper_msg (Keeper_composite_loaded (_, _, _))
-        | Lane_inventory_loaded (_, _) | Clients_loaded (_, _) | Lane_runs_loaded (_, _, _, _)
-        | Lane_run_detail_loaded (_, _, _) | Measurement_artifact_loaded (_, _, _)
-        | Verification_loaded _ | Harness_loaded _ | Fusion_runs_loaded (_, _)
+        | Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _)) | Context_msg (Context_inspector_loaded (_, _, _)
+        | Context_inspector_part_loaded (_, _))
+        | Keeper_msg (Keeper_chat_older_loaded (_, _, _, _)) | Local_msg (Local_workspace_read (_, _) | Local_keepers_read (_, _)) | Live_context_loaded (_, _, _) | (Keeper_msg (Keeper_logs_loaded _ | Keeper_execute_streamed _)) | Keeper_msg (Keeper_composite_loaded (_, _, _))
+        | Lane_msg (Lane_inventory_loaded (_, _)) | Clients_loaded (_, _) | Lane_msg (Lane_runs_loaded (_, _, _, _)
+        | Lane_run_detail_loaded (_, _, _)) | Measurement_artifact_loaded (_, _, _)
+        | Verification_msg (Verification_loaded _) | Harness_msg (Harness_loaded _) | Fusion_msg (Fusion_runs_loaded (_, _)
         | Fusion_detail_loaded (_, _, _) | Fusion_historical_detail_loaded (_, _, _)
-        | Fusion_launch_options_loaded (_, _) | Fusion_launched (_, _)
-        | Memory_recall_standing_loaded (_, _) | Repositories_loaded _
-        | Workspace_activity_loaded (_, _) | Memory_loaded _ | Memory_input_loaded (_, _)
-        | Memory_facts_loaded (_, _) | Repository_changes_loaded (_, _)
-        | Repository_changes_diff_loaded (_, _) | File_changes_loaded (_, _)
+        | Fusion_launch_options_loaded (_, _) | Fusion_launched (_, _))
+        | Memory_msg (Memory_recall_standing_loaded (_, _)) | Repository_msg (Repositories_loaded _)
+        | Workspace_msg (Workspace_activity_loaded (_, _)) | Memory_msg (Memory_loaded _ | Memory_input_loaded (_, _)
+        | Memory_facts_loaded (_, _)) | Repository_msg (Repository_changes_loaded (_, _)
+        | Repository_changes_diff_loaded (_, _)) | File_changes_loaded (_, _)
         | Keeper_msg (Keeper_chat_file_changes_loaded (_, _, _)) | Git_diff_loaded (_, _)
-        | Browser_history_list_loaded (_, _) | Browser_history_page_loaded (_, _)
+        | Browser_msg (Browser_history_list_loaded (_, _) | Browser_history_page_loaded (_, _)
         | Browser_lane_clients_loaded (_, _) | Browser_lane_loaded (_, _)
         | Browser_lane_action_done (_, _) | Browser_lane_scene_loaded (_, _)
-        | Browser_lane_follow_loaded (_, _) | Browser_lane_screenshot_ready _
-        | Connectors_status_loaded (_, _) | Connectors_loaded (_, _) | Connector_unbind_all_done _ | Runtime_surface_loaded (_, _)
-        | Tools_read_loaded _ | Skill_evidence_loaded (_, _, _)
-        | (Tools_async_observation_loaded (_, _) | ((Tools_async_detail_loaded _ | Task_document_prepared _) | Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _)) | Runtime_lane_slots_written (_, _, _)
-        | Runtime_catalog_loaded (_, _) | Runtime_assignment_changed (_, _, _)
-        | Keeper_msg (Keeper_chat_approval_answered (_, _, _, _) | Keeper_tool_approvals_loaded (_, _, _)) | Asks_reloaded _
+        | Browser_lane_follow_loaded (_, _) | Browser_lane_screenshot_ready _)
+        | Connectors_msg (Connectors_status_loaded (_, _) | Connectors_loaded (_, _) | Connector_unbind_all_done _) | Runtime_msg (Runtime_surface_loaded (_, _))
+        | Tools_msg (Tools_read_loaded _) | Skill_evidence_loaded (_, _, _)
+        | (Tools_msg (Tools_async_observation_loaded (_, _)) | ((Tools_msg (Tools_async_detail_loaded _) | Task_msg (Task_document_prepared _)) | Tools_msg (Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _))) | Runtime_msg (Runtime_lane_slots_written (_, _, _)
+        | Runtime_catalog_loaded (_, _) | Runtime_assignment_changed (_, _, _))
+        | Keeper_msg (Keeper_chat_approval_answered (_, _, _, _) | Keeper_tool_approvals_loaded (_, _, _)) | Ask_msg (Asks_reloaded _)
         | Listen_prepared _ | Sent_image_ready _ | Image_render_ready _ | Keeper_msg (Keeper_turns_loaded _ | Keeper_waiting_loaded _
-        | Keeper_chat_control_received (_, _, _)) | Gate_approval_resolved (_, _, _, _, _)
-        | Gate_auto_judge_retried (_, _, _, _) | Gate_mode_set (_, _, _)
-        | Surface_tool_approval_answered (_, _, _, _, _, _) | Keeper_msg (Keeper_gate_settings_loaded _
+        | Keeper_chat_control_received (_, _, _)) | Gate_msg (Gate_approval_resolved (_, _, _, _, _)
+        | Gate_auto_judge_retried (_, _, _, _) | Gate_mode_set (_, _, _))
+        | Keeper_msg (Keeper_tool_approval_answered (_, _, _, _, _, _) | Keeper_gate_settings_loaded _
         | Keeper_tool_modes_loaded (_, _) | Keeper_tool_mode_set (_, _, _, _)
-        | Keeper_chat_dispatch_blocked (_, _)) | Runtime_form_save_changed _ | Keeper_msg (Keeper_settings_save_changed _ | Keeper_creation_changed _
+        | Keeper_chat_dispatch_blocked (_, _)) | Runtime_msg (Runtime_form_save_changed _) | Keeper_msg (Keeper_settings_save_changed _ | Keeper_creation_changed _
         | Keeper_action_done (_, _, _, _))
-        | (Board_publication_done _ | Board_comment_done _) | (Board_vote_done _ | Artifact_check_changed _) | Goal_transition_done _
-        | Goal_confirmation_submitted _ | Goal_confirmation_loaded (_, _) | Schedules_loaded (_, _)
-        | Schedule_wake_history_loaded (_, _) | Keeper_msg (Keeper_schedules_loaded (_, _))
-        | System_logs_loaded _ | Schedule_cancel_done (_, _) | Verification_verdict_done _
-        | Harness_label_done _ | Board_attachment_loaded _ | Board_attachment_prepared _ | Board_attachment_saved _ | Chat_call_loaded _ | Keeper_msg (Keeper_calls_loaded (_, _, _)) | Goal_timeline_loaded (_, _) | Goal_candle_loaded (_, _)
-        | Task_history_loaded (_, _) | Task_cancel_done (_, _, _)
-        | Verification_evidence_loaded (_, _) | Verification_evidence_exported _ | Keeper_msg (Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _)
+        | (Board_msg (Board_publication_done _ | Board_comment_done _)) | (Board_msg (Board_vote_done _) | Artifact_msg (Artifact_check_changed _)) | Goal_msg (Goal_transition_done _
+        | Goal_confirmation_submitted _ | Goal_confirmation_loaded (_, _)) | Schedule_msg (Schedules_loaded (_, _)
+        | Schedule_wake_history_loaded (_, _)) | Keeper_msg (Keeper_schedules_loaded (_, _))
+        | System_logs_loaded _ | Schedule_msg (Schedule_cancel_done (_, _)) | Verification_msg (Verification_verdict_done _)
+        | Harness_msg (Harness_label_done _) | Board_msg (Board_attachment_loaded _ | Board_attachment_prepared _ | Board_attachment_saved _) | Chat_msg (Chat_call_loaded _) | Keeper_msg (Keeper_calls_loaded (_, _, _)) | Goal_msg (Goal_timeline_loaded (_, _) | Goal_candle_loaded (_, _))
+        | Task_msg (Task_history_loaded (_, _) | Task_cancel_done (_, _, _))
+        | Verification_msg (Verification_evidence_loaded (_, _) | Verification_evidence_exported _) | Keeper_msg (Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _)
         | Keeper_items_loaded (_, _) | Keeper_sandbox_view_loaded (_, _)
-        | Keeper_sandbox_logs_loaded (_, _, _)) | Exact_activity_read (_, _)
-        | Exact_activity_saved (_, _)
-        | Machine_activity_read (_, _) | Machine_activity_saved (_, _)
-        | Runtime_config_view_loaded (_, _, _, _, _) | Runtime_params_loaded _
-        | Runtime_param_written (_, _) | Prompts_loaded (_, _)
-        | Keeper_msg (Keeper_board_quarantines_loaded (_, _)) | Board_quarantine_requeued (_, _, _)
+        | Keeper_sandbox_logs_loaded (_, _, _)) | Exact_msg (Exact_activity_read (_, _)
+        | Exact_activity_saved (_, _))
+        | Machine_msg (Machine_activity_read (_, _) | Machine_activity_saved (_, _))
+        | Runtime_msg (Runtime_config_view_loaded (_, _, _, _, _) | Runtime_params_loaded _
+        | Runtime_param_written (_, _)) | Prompts_loaded (_, _)
+        | Keeper_msg (Keeper_board_quarantines_loaded (_, _)) | Board_msg (Board_quarantine_requeued (_, _, _)
         | Board_quarantines_bulk_progress (_, _, _, _, _, _)
-        | Board_quarantines_bulk_requeued (_, _) | Presets_listed (_, _)
+        | Board_quarantines_bulk_requeued (_, _)) | Preset_msg (Presets_listed (_, _)
         | Preset_detail_loaded (_, _) | Preset_contents_shown (_, _) | Preset_saved (_, _)
-        | Preset_restored (_, _) | Preset_deleted (_, _) | Play_room_received (_, _)
-        | Play_invites_listed (_, _) | Play_invite_revoked (_, _, _, _)
-        | Librarian_input_loaded (_, _) | (Resources_listed _ | Artifact_checks_loaded _)
+        | Preset_restored (_, _) | Preset_deleted (_, _)) | Play_msg (Play_room_received (_, _)
+        | Play_invites_listed (_, _) | Play_invite_revoked (_, _, _, _))
+        | Librarian_input_loaded (_, _) | (Resource_msg (Resources_listed _) | Artifact_msg (Artifact_checks_loaded _))
         | Code_msg
             ( Code_draft_saved _ | Code_catalog_loaded (_, _) | Code_branches_loaded (_, _)
             | Code_worktrees_loaded (_, _) | Code_finder_file_loaded (_, _) | Code_entries_loaded (_, _)
             | Code_file_loaded (_, _, _) | Code_history_loaded (_, _) | Code_diff_loaded (_, _)
             | Code_blame_loaded (_, _) | Code_lsp_answered (_, _) )
         | Acting_pane_changes_loaded (_, _)
-        | Resource_exported _ | Resource_share_changed _ | Resource_share_recovery_loaded _ | Resource_read (_, _, _) | Resource_diagram_ready _ | Github_identity_view_loaded (_, _)
-        | Identity_providers_loaded (_, _, _) | Identity_switch_set (_, _, _, _)
+        | Resource_msg (Resource_exported _ | Resource_share_changed _ | Resource_share_recovery_loaded _ | Resource_read (_, _, _) | Resource_diagram_ready _) | Github_msg (Github_identity_view_loaded (_, _))
+        | Identity_msg (Identity_providers_loaded (_, _, _) | Identity_switch_set (_, _, _, _)
         | Identity_login_started (_, _) | Identity_refreshed (_, _) | Identity_app_saved (_, _, _)
-        | Identity_disconnected (_, _, _)
-        | Account_login_event (_, _, _) | Account_login_json (_, _, _, _)
-        | Account_login_removal (_, _, _, _, _) | Github_login_lines (_, _)
-        | Github_login_finished (_, _) | Github_token_saved (_, _) | Observer_session_ready _ | Observer_opened _
-        | Observer_received (_, _) | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_recovery_identity _ | Fleet_stream_view _ | Fleet_stream_reader_ended _ | Task_dispatch_completed _ | Task_creation_read_done _ | Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _ -> ())
+        | Identity_disconnected (_, _, _))
+        | Account_msg (Account_login_event (_, _, _) | Account_login_json (_, _, _, _)
+        | Account_login_removal (_, _, _, _, _)) | Github_msg (Github_login_lines (_, _)
+        | Github_login_finished (_, _) | Github_token_saved (_, _)) | Observer_msg (Observer_session_ready _ | Observer_opened _
+        | Observer_received (_, _) | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_recovery_identity _) | Fleet_msg (Fleet_stream_view _ | Fleet_stream_reader_ended _) | Task_msg (Task_dispatch_completed _ | Task_creation_read_done _) | Original_msg (Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _) -> ())
   | Chat_command_read_completed (ticket, message) ->
       if List.exists (fun (pending, _, _) -> pending == ticket) state.chat_command_reads then begin
         state.chat_command_reads <- List.filter (fun (pending, _, _) -> pending != ticket) state.chat_command_reads;
@@ -22631,7 +22631,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
   | Workspace_operation message ->
       apply_async_message ~input_pending ~image_input_pending state ~base_path ~http_refresh_inflight
         ~http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox message
-  | Workspace_identity_unconfirmed { detail; latest; prior_contact; refresh_ticket } ->
+  | Workspace_msg (Workspace_identity_unconfirmed { detail; latest; prior_contact; refresh_ticket }) ->
       if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then begin
       let authority = read_authority state in
       apply_refused_workspace_identity state ~mailbox ~detail (Some latest);
@@ -22645,13 +22645,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         ~before:authority;
       report_action state "error" detail
       end
-  | Schedule_form_authority_refused {action; detail; workspace} ->
+  | Schedule_msg (Schedule_form_authority_refused {action; detail; workspace}) ->
       (* Identity observation is delivered separately under its read epoch. *)
       state.schedule_form_refusal <- Some
         { sfr_action = action; sfr_detail = detail; sfr_at = Unix.gettimeofday ()
         ; sfr_workspace = workspace };
       report_action state "error" (action ^ ": " ^ detail)
-  | Lane_package_catalog_loaded (generation,directory,result) ->
+  | Lane_msg (Lane_package_catalog_loaded (generation,directory,result)) ->
       map_lane_addons state (fun view ->
         if view.generation<>generation then view else
         let response = Option.bind view.installer
@@ -22662,7 +22662,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             {view with loading=false;installer=Some installer;
               package_directory=Masc_tui_lane_installer.directory installer;
               error=Option.bind error lane_addons_detail_failure;scroll=0})
-  | Lane_package_preview_loaded (generation,path,result) ->
+  | Lane_msg (Lane_package_preview_loaded (generation,path,result)) ->
       map_lane_addons state (fun view ->
         if view.generation<>generation then view else
         let response = Option.bind view.installer
@@ -22782,10 +22782,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       end;
       refresh_queue_after_priority state ~mailbox ~keeper_name;
       drain_queued_message state ~base_path ~mailbox
-  | Lane_application_loaded (ticket,result) ->
+  | Lane_msg (Lane_application_loaded (ticket,result)) ->
       map_lane_addons state (fun view ->
         Masc_tui_lane_addons.finish_application_read view ticket result)
-  | Lane_subscriptions_loaded (generation,result) ->
+  | Lane_msg (Lane_subscriptions_loaded (generation,result)) ->
       (match state.lane_nested_read_resume with
        | Some (pending, _) when pending = generation -> state.lane_nested_read_resume <- None
        | Some _ | None -> ());
@@ -22793,7 +22793,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         if view.generation<>generation then view else
         {view with loading=false;subscription_panel=Option.map
           (fun panel -> Masc_tui_lane_subscriptions.loaded panel result) view.subscription_panel})
-  | Lane_addons_loaded (generation, target, result) ->
+  | Lane_msg (Lane_addons_loaded (generation, target, result)) ->
       let showing = Option.is_some state.lane_addons in
       map_lane_addons state (fun view ->
         if view.generation <> generation then view else
@@ -22858,7 +22858,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | (Ok {lar_action=Some {state=Confirmed; _ }; _ }, Some _)
        | (Ok {lar_action=Some {state=Failed_before_effect; _ }; _ }, Some _)
        | (Ok {lar_action=Some {state=Outcome_unknown; _ }; _ }, Some _) -> ())
-  | Lane_declaration_loaded (generation, request, edit, create_directory, result) ->
+  | Lane_msg (Lane_declaration_loaded (generation, request, edit, create_directory, result)) ->
       (match state.lane_nested_read_resume with
        | Some (pending, _) when pending = generation -> state.lane_nested_read_resume <- None
        | Some _ | None -> ());
@@ -22906,7 +22906,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
      each is dropped unless that capture is still the one in flight. The
      wizard's carry the number of the save they answer, dropped the same way
      once the session has closed, saved again, or changed the draft. *)
-  | Voice_wizard_saved (request, reply) ->
+  | Voice_msg (Voice_wizard_saved (request, reply)) ->
       Option.iter
         (fun session ->
           Option.iter
@@ -22929,7 +22929,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                   ())
             (Masc_tui_voice_wizard_session.voice_wizard_after_save session ~request reply))
         state.voice_wizard
-  | Voice_agent_voices_loaded result ->
+  | Voice_msg (Voice_agent_voices_loaded result) ->
       (match state.voice_agent_voices, result with
        (* The screen closed while the endpoint was being asked: its answer is
           about a screen nobody is reading. *)
@@ -22948,7 +22948,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                        | [] -> Some "the endpoint answered with no voices"
                        | _ :: _ -> None)
                   })
-  | Voice_agent_voice_saved result ->
+  | Voice_msg (Voice_agent_voice_saved result) ->
       (match state.voice_agent_voices, result with
        | None, (Ok _ | Error _) -> ()
        | Some session, Error message ->
@@ -22977,7 +22977,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                          | None -> "assigned")
                   };
            launch_voice_config_load state ~mailbox)
-  | Voice_wizard_probed (request, result) ->
+  | Voice_msg (Voice_wizard_probed (request, result)) ->
       Option.iter
         (fun session ->
           Option.iter
@@ -22985,14 +22985,14 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             (Masc_tui_voice_wizard_session.voice_wizard_after_probe session ~request
                (Result.map voice_wizard_probe_lines result)))
         state.voice_wizard
-  | Voice_wizard_reread (request, result) ->
+  | Voice_msg (Voice_wizard_reread (request, result)) ->
       Option.iter
         (fun session ->
           Option.iter
             (fun updated -> state.voice_wizard <- Some updated)
             (Masc_tui_voice_wizard_session.voice_wizard_after_reread session ~request result))
         state.voice_wizard
-  | Voice_config_loaded (result, setup, device) ->
+  | Voice_msg (Voice_config_loaded (result, setup, device)) ->
       state.voice_input_device <- device;
       (match result with
        | Ok json ->
@@ -23008,11 +23008,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | Error message ->
            state.voice_setup <- None;
            state.voice_setup_error <- Some message)
-  | Voice_calibrated { keeper; floor } ->
+  | Voice_msg (Voice_calibrated { keeper; floor }) ->
       ignore (observe_voice_calibration state ~keeper ~floor)
-  | Voice_level { keeper; level } ->
+  | Voice_msg (Voice_level { keeper; level }) ->
       ignore (observe_voice_level state ~keeper ~level)
-  | Voice_transcribed { keeper; text } ->
+  | Voice_msg (Voice_transcribed { keeper; text }) ->
       (match settle_voice_capture state ~keeper with
        | None | Some Voice_withdrawn -> ()
        | Some (Voice_current disposition) ->
@@ -23058,7 +23058,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               handle_composer_key state ~base_path ~mailbox Composer.send_key
             in
             ())))
-  | Voice_silent { keeper; reason } ->
+  | Voice_msg (Voice_silent { keeper; reason }) ->
       (match settle_voice_capture state ~keeper with
        | None | Some Voice_withdrawn -> ()
        | Some (Voice_current _) ->
@@ -23075,7 +23075,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         chat_notice state ~keeper_name:(Some keeper) ~kind:Notice_reply
           ("voice: " ^ reason);
         set_last_action state (Some ("voice: " ^ reason, Unix.gettimeofday ())))
-  | Voice_discarded { keeper; reason } ->
+  | Voice_msg (Voice_discarded { keeper; reason }) ->
       (match settle_voice_capture state ~keeper with
        | None | Some Voice_withdrawn -> ()
        | Some (Voice_current _) ->
@@ -23089,7 +23089,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         chat_notice state ~keeper_name:(Some keeper) ~kind:Notice_reply
           ("voice: " ^ reason);
         set_last_action state (Some ("voice: " ^ reason, Unix.gettimeofday ())))
-  | Voice_failed { keeper; error } ->
+  | Voice_msg (Voice_failed { keeper; error }) ->
       (match settle_voice_capture state ~keeper with
        | None | Some Voice_withdrawn -> ()
        | Some (Voice_current _) ->
@@ -23099,7 +23099,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         state.voice_continuous <- None;
         state.voice_floor <- None;
         report_voice_failure state ~keeper error)
-  | Http_overview_loaded preview ->
+  | Http_msg (Http_overview_loaded preview) ->
       Masc_tui_types.accept_overview_preview state preview
   | Http_surface_read_completed (context, completed) ->
       let request=Surface_read_context.current context in
@@ -23124,7 +23124,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           ~scoped_refresh_inflight:http_scoped_refresh_inflight
           ~scoped_refresh_followup ~mailbox
       end
-  | Http_dataset_loaded early ->
+  | Http_msg (Http_dataset_loaded early) ->
       let dataset = http_dataset_key early.ed_dataset in
       let source = Surface_read_order.dataset_source dataset in
       if Masc_tui_types.take_early_surface_dataset state
@@ -23149,7 +23149,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           (if http_dataset_received early.ed_dataset then "received" else "failed")
           board_posts_log
       end
-  | Http_initial_identity_read initial ->
+  | Http_msg (Http_initial_identity_read initial) ->
       (* The initial probe is recorded before its acknowledgement message.
          Drain before preserving/rebinding that ledger to the admitted owner. *)
       ignore (Masc_tui_types.drain_http_progress state);
@@ -23196,7 +23196,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               ~scoped_refresh_inflight:http_scoped_refresh_inflight
               ~scoped_refresh_followup ~before
           end)
-  | Http_approvals_loaded early ->
+  | Http_msg (Http_approvals_loaded early) ->
       if Masc_tui_types.can_admit_early_http_read state ~ticket:early.eap_ticket
           ~authority:early.eap_authority early.eap_identity
       then Option.iter (fun result ->
@@ -23208,7 +23208,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             (match result with Ok _ -> "received" | Error _ -> "failed"))
           state.http_refresh_started_ns)
         (take_approval_observation state early.eap_observation)
-  | Asks_reloaded observation -> apply_asks_observation state observation
+  | Ask_msg (Asks_reloaded observation) -> apply_asks_observation state observation
   | Keeper_msg (Keeper_roster_reloaded observation) ->
       Option.iter (fun result ->
         let previous_items = visible_item_revision state in
@@ -23243,7 +23243,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                 apply_keeper_roster_load state (Ok (roster, candle));
                 refresh_changed_keeper_items state ~mailbox ~roster_refreshed:false previous_items)
         (Masc_tui_types.take_keeper_row_observation state observation)
-  | Http_asks_loaded early ->
+  | Http_msg (Http_asks_loaded early) ->
       Option.iter (fun result ->
         apply_asks_read state result;
         Option.iter (fun started_ns ->
@@ -23253,7 +23253,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             (match result with Ok _ -> "received" | Error _ -> "failed"))
           state.http_refresh_started_ns)
         (Masc_tui_types.take_early_asks_observation state early)
-  | Http_keeper_roster_loaded early ->
+  | Http_msg (Http_keeper_roster_loaded early) ->
       Option.iter (fun result ->
         let previous_items = visible_item_revision state in
         apply_keeper_roster_load state result;
@@ -23269,9 +23269,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              refresh_changed_keeper_items state ~mailbox ~roster_refreshed:true previous_items;
              resolve_opening_chat state ~base_path ~mailbox))
         (Masc_tui_types.take_early_keeper_roster_observation state early)
-  | Http_refresh_done
+  | Http_msg (Http_refresh_done
       (Refresh_workspace_unconfirmed
-         { refresh_ticket; detail; unreachable; approval_ticket; latest_identity }) ->
+         { refresh_ticket; detail; unreachable; approval_ticket; latest_identity })) ->
       http_refresh_inflight := false;
       finish_observed_http_refresh state ~ticket:refresh_ticket;
       if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then begin
@@ -23289,7 +23289,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         ~port:state.port ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
         ~scoped_refresh_followup ~mailbox
-  | Http_refresh_done (Refresh_server_booting { refresh_ticket; identity; approval_ticket }) ->
+  | Http_msg (Http_refresh_done (Refresh_server_booting { refresh_ticket; identity; approval_ticket })) ->
       http_refresh_inflight := false;
       finish_observed_http_refresh state ~ticket:refresh_ticket;
       (* Nothing else was asked of a booting server, so nothing else follows:
@@ -23302,7 +23302,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         ~port:state.port ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
         ~scoped_refresh_followup ~mailbox
-  | Http_refresh_done (Refresh_surfaces results) ->
+  | Http_msg (Http_refresh_done (Refresh_surfaces results)) ->
       http_refresh_inflight := false;
       finish_observed_http_refresh state ~ticket:results.http_scoped.http_refresh_ticket;
       if Http_refresh_order.is_current state.http_refresh_order
@@ -23337,7 +23337,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          superseded before it could ever be drawn. The other approval
          sources relaunch above for the same reason; the count's own source
          re-reads here instead of sitting unread until the next cadence. *)
-      if identity_recovered then enqueue_async mailbox Approvals_listing_superseded;
+      if identity_recovered then enqueue_async mailbox (Approvals_msg Approvals_listing_superseded);
       open_observer_if_due state ~retry_closed:false
         ~host:(server_peer_host) ~port:state.port ~mailbox;
       open_fleet_stream_if_due state
@@ -23347,12 +23347,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         ~port:state.port ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
         ~scoped_refresh_followup ~mailbox
-  | Approvals_listing_superseded -> launch_approvals_summary_load state ~mailbox
-  | Approvals_summary_loaded (request, listing_ticket, expected_workspace, result) ->
+  | (Approvals_msg Approvals_listing_superseded) -> launch_approvals_summary_load state ~mailbox
+  | Approvals_msg (Approvals_summary_loaded (request, listing_ticket, expected_workspace, result)) ->
       apply_approvals_summary_load state ~listing_ticket ~expected_workspace request result
-  | Observer_session_ready session_id ->
+  | Observer_msg (Observer_session_ready session_id) ->
       state.mcp_session <- Some session_id
-  | Observer_opened { session_id; handshake } ->
+  | Observer_msg (Observer_opened { session_id; handshake }) ->
       let scope_replaced =
         match state.workspace_identity, state.observer_scope_binding with
         | Workspace_identity_match, Observer_scope_bound previous ->
@@ -23413,7 +23413,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             ~scoped_refresh_inflight:http_scoped_refresh_inflight
             ~scoped_refresh_followup ~mailbox
       end
-  | Observer_received (instance_id, decoded) ->
+  | Observer_msg (Observer_received (instance_id, decoded)) ->
       let received = Unix.gettimeofday () in
       (* One reload per batch, however many turns it carries: the pane
          shows the whole history anyway, and the loader is generation-
@@ -23936,15 +23936,15 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          | Approvals | Planning | Schedules | Verification | Harness
          | Repositories | Code | Changes | Connectors | Runtime | Config
          | Resources | Tools | System_logs -> ())
-  | Original_task_history_done (request,result) ->
+  | Original_msg (Original_task_history_done (request,result)) ->
       ignore (complete_original_history_inspection state request result)
-  | Original_task_evidence_done (request,result) ->
+  | Original_msg (Original_task_evidence_done (request,result)) ->
       ignore (complete_original_evidence_inspection state request result)
-  | Original_task_read_done (request,result) ->
+  | Original_msg (Original_task_read_done (request,result)) ->
       ignore (complete_original_task_inspection state request result)
-  | Task_creation_read_done (request,result) ->
+  | Task_msg (Task_creation_read_done (request,result)) ->
       ignore (complete_task_creation_inspection state request result)
-  | Task_dispatch_completed request ->
+  | Task_msg (Task_dispatch_completed request) ->
       (match take_task_dispatch_completion state request with
        | None -> ()
        | Some outcome ->
@@ -23968,7 +23968,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           | Unconfirmed detail ->
               report_action state "error" (Printf.sprintf "task creation outcome for %s is unconfirmed: %s; use /task-inspect before /task-recover"
                 intent.keeper detail)))
-  | Observer_closed (workspace, outcome) ->
+  | Observer_msg (Observer_closed (workspace, outcome)) ->
       state.schedules_agenda_freshness <- Masc_tui_agenda.Refresh_needed;
       let was_opening = state.observer = Observer_opening in
       let reason =
@@ -24007,7 +24007,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       state.observer_retry_owner <- Some owner;
       schedule_observer_retry state ~mailbox owner;
       if was_opening then resume_fusion_after_observer_failure state ~mailbox
-  | Observer_retry_due (authority, expected) ->
+  | Observer_msg (Observer_retry_due (authority, expected)) ->
       if Masc_tui_async_protocol.observer_retry_owned state ~authority expected then
            (match state.workspace_identity, state.connection_status with
             | (Workspace_identity_match | Workspace_identity_mismatch _), (Connected | Degraded) ->
@@ -24021,14 +24021,14 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             | (Workspace_identity_unread | Workspace_identity_match_unconfirmed _),
               (Connected | Degraded) ->
                 schedule_observer_retry state ~mailbox expected)
-  | Observer_recovery_ready (authority, owner, session_id) ->
+  | Observer_msg (Observer_recovery_ready (authority, owner, session_id)) ->
       if Masc_tui_async_protocol.observer_recovery_owned state ~authority owner then begin
         Option.iter (fun session_id -> state.mcp_session <- Some session_id) session_id;
         start_http_refresh state ~host:server_peer_host ~port:state.port ~intent:Revalidate
           ~refresh_inflight:http_refresh_inflight
           ~scoped_refresh_inflight:http_scoped_refresh_inflight ~scoped_refresh_followup ~mailbox
       end
-  | Observer_recovery_identity (authority, owner, live, session_id, instance, origin, attested) ->
+  | Observer_msg (Observer_recovery_identity (authority, owner, live, session_id, instance, origin, attested)) ->
       if Masc_tui_async_protocol.observer_recovery_identity_owned state
            ~authority ~owner ~live ~instance ~origin then begin
         (* The response attests the exact requested workspace and readiness;
@@ -24062,18 +24062,18 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           ~scoped_refresh_inflight:http_scoped_refresh_inflight ~scoped_refresh_followup
           ~before
       end
-  | Fleet_stream_view view ->
+  | Fleet_msg (Fleet_stream_view view) ->
       (* A view from a job that is no longer followed has no screen to go to. *)
       (match state.fleet_stream_reader with
        | Fleet_stream_following _ -> state.fleet_stream_reader <- Fleet_stream_following view
        | Fleet_stream_idle -> ())
-  | Fleet_stream_reader_ended detail ->
+  | Fleet_msg (Fleet_stream_reader_ended detail) ->
       (* The job reconnects by itself and ends only when withdrawn, so an end
          it reports is a failure of the job: say so, draw nothing more from
          it, and let the next refresh start another. *)
       Log.Transport.warn "tui_fleet_stream_reader_ended detail=%s" detail;
       state.fleet_stream_reader <- Fleet_stream_idle
-  | Http_refresh_failed (err, approval_ticket, refresh_ticket) ->
+  | Http_msg (Http_refresh_failed (err, approval_ticket, refresh_ticket)) ->
       http_refresh_inflight := false;
       finish_observed_http_refresh state ~ticket:refresh_ticket;
       if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then begin
@@ -24095,7 +24095,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         ~port:state.port ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
         ~scoped_refresh_followup ~mailbox
-  | Chat_search_finished (generation,restart,plan,result) ->
+  | Chat_msg (Chat_search_finished (generation,restart,plan,result)) ->
       if generation=Atomic.get state.msg_search_generation then begin
         let authority,keeper,needle=keeper_message_search_identity plan in
         if authority=state.workspace_authority && keeper_message_search_owned state plan
@@ -24109,9 +24109,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | None -> notice ~kind:Notice_reply
                    "/find source changed while searching; repeat /find to search the current conversation")
       end
-  | Surface_composer_released ->
+  | (Keeper_msg Keeper_composer_released) ->
       drain_queued_message state ~base_path ~mailbox
-  | Http_scoped_refresh_done (authority, currency_authority, results) ->
+  | Http_msg (Http_scoped_refresh_done (authority, currency_authority, results)) ->
       if authority = state.workspace_authority
          && Http_refresh_order.is_current state.http_refresh_order results.http_refresh_ticket then begin
       apply_http_scoped_refresh_success state ~currency_authority ~base_path ~mailbox
@@ -24123,7 +24123,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         ~port:state.port ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
         ~scoped_refresh_followup ~mailbox
-  | Http_scoped_refresh_failed (authority, err, approval_ticket, refresh_ticket, latest, request) ->
+  | Http_msg (Http_scoped_refresh_failed (authority, err, approval_ticket, refresh_ticket, latest, request)) ->
       let current_authority = authority = state.workspace_authority in
       let current_generation = Http_refresh_order.is_current state.http_refresh_order refresh_ticket in
       let latest_navigation = Surface_read_order.latest_navigation state.http_surface_reads request in
@@ -24142,7 +24142,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         ~port:state.port ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
         ~scoped_refresh_followup ~mailbox
-  | Board_post_refresh_done (request, result) ->
+  | Board_msg (Board_post_refresh_done (request, result)) ->
       let current = Board_detail.is_current state.board_detail request in
       Masc_tui_board_updates.apply_board_post_load state ~report_error:(add_event state "error") request result;
       if current then begin
@@ -24203,7 +24203,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               | Detail_info | Detail_items | Detail_secrets | Detail_github | Detail_identity
               | Detail_channels | Detail_automation | Detail_runs | Detail_terminal -> ()
       end
-  | Runtime_form_save_changed (request, status, observed_ns) ->
+  | Runtime_msg (Runtime_form_save_changed (request, status, observed_ns)) ->
       let attached = runtime_form_is_attached state request in
       let current = runtime_form_save_current state request in
       if apply_runtime_form_save state request status then begin
@@ -24403,7 +24403,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
         ~scoped_refresh_followup ~mailbox
       end
-  | Board_publication_done outcome ->
+  | Board_msg (Board_publication_done outcome) ->
       Masc_tui_board_updates.apply_publication state
         ~report:(report_action state)
         ~refresh:(fun () ->
@@ -24413,7 +24413,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             ~scoped_refresh_inflight:http_scoped_refresh_inflight
             ~scoped_refresh_followup ~mailbox)
         outcome
-  | Board_comment_done { request_id; post_id; sent_draft; result } ->
+  | Board_msg (Board_comment_done { request_id; post_id; sent_draft; result }) ->
       Masc_tui_board_updates.comment_done state ~request_id ~post_id ~sent_draft
         ~report:(report_action state)
         ~refresh:(fun () ->
@@ -24423,7 +24423,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             ~scoped_refresh_inflight:http_scoped_refresh_inflight
             ~scoped_refresh_followup ~mailbox)
         ~refresh_detail:(fun post_id -> owe_board_post_read state ~mailbox ~post_id) result
-  | Board_vote_done (target, result) ->
+  | Board_msg (Board_vote_done (target, result)) ->
       Masc_tui_board_updates.vote_done state ~report:(report_action state)
         ~refresh:(fun () ->
           start_http_refresh state ~host:server_peer_host
@@ -24433,7 +24433,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             ~scoped_refresh_followup ~mailbox)
         ~refresh_detail:(fun post_id -> owe_board_post_read state ~mailbox ~post_id)
         target result
-  | Goal_transition_done (goal_id, ticket, workspace, result) ->
+  | Goal_msg (Goal_transition_done (goal_id, ticket, workspace, result)) ->
       record_goal_action_receipt state ~goal_id ~ticket ~workspace result;
       let current = note_goal_action_result state ~goal_id ~ticket result in
       let label = "Goal " ^ goal_id ^ (if current then "" else " (earlier request)") ^ ": " in
@@ -24448,7 +24448,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              ~scoped_refresh_followup ~mailbox
        | Error err ->
            report_action state "error" (label ^ err))
-  | Goal_confirmation_submitted (goal_id, ticket, workspace, authority, result) ->
+  | Goal_msg (Goal_confirmation_submitted (goal_id, ticket, workspace, authority, result)) ->
       record_goal_action_receipt ~authority state ~goal_id ~ticket ~workspace result;
       (match state.goal_confirmation with
        | Goal_confirmation.Submitting (submitted_goal, read) when String.equal submitted_goal goal_id ->
@@ -24477,7 +24477,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            state.goal_confirmation_identity_refresh <- Some (goal_id, authority.ra_workspace);
            resume_goal_confirmation_identity_refresh state ~mailbox
        | Some _ | None -> ())
-  | Goal_confirmation_loaded (request, result) ->
+  | Goal_msg (Goal_confirmation_loaded (request, result)) ->
       (match state.goal_confirmation with
        | Goal_confirmation.Inspecting read ->
            let current = Goal_confirmation_read.is_current ~equal:String.equal read request in
@@ -24523,7 +24523,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                 launch_goal_confirmation_read state ~mailbox ~goal_id
             | _, _, (Some _ | None) -> ())
        | Goal_confirmation.Submitting _ -> ())
-  | Verification_evidence_exported (request, result) ->
+  | Verification_msg (Verification_evidence_exported (request, result)) ->
       let progress = Atomic.get request.vex_progress in
       let location = match progress with
         | Masc_tui_evidence_file.Not_started -> ""
@@ -24539,13 +24539,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       (match result with
        | Error detail -> report_action state "error" ("Evidence: " ^ detail ^ location)
        | Ok path -> report_action state "system" ("증거 사본 저장: " ^ path))
-  | Verification_evidence_loaded (request, result) ->
+  | Verification_msg (Verification_evidence_loaded (request, result)) ->
       let key = Masc_tui_fetched.request_key request.ver_ticket in
       let admitted = state.verification_detail_request_id = Some key.vek_request_id
         && complete_verification_evidence_read state request result in
       log_verification_evidence_read request
         ~phase:(if admitted then "applied" else "discarded") ~outcome:(verification_evidence_outcome result)
-  | Task_cancel_done (task_id, expected_workspace, result) ->
+  | Task_msg (Task_cancel_done (task_id, expected_workspace, result)) ->
       let refresh certainty =
         remember_task_followup state ~expected_workspace (Task_cancel_refresh { task_id; certainty });
         resume_task_followups state ~mailbox ~refresh_inflight:http_refresh_inflight
@@ -24561,9 +24561,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              (Printf.sprintf "task %s cancellation unconfirmed; checking its workspace: %s"
                 task_id detail);
            refresh Cancellation_unconfirmed)
-  | Goal_timeline_loaded (request, result) ->
+  | Goal_msg (Goal_timeline_loaded (request, result)) ->
       complete_goal_timeline_read state request result
-  | Goal_candle_loaded (request, result) ->
+  | Goal_msg (Goal_candle_loaded (request, result)) ->
       let current = Masc_tui_fetched.is_current ~equal:String.equal state.goal_candle request in
       let goal_id = Masc_tui_fetched.request_key request in
       let server_changed = match result with
@@ -24583,20 +24583,20 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            ~refresh_inflight:http_refresh_inflight ~scoped_refresh_inflight:http_scoped_refresh_inflight
            ~scoped_refresh_followup ~mailbox
        | Some _ | None -> ())
-  | Task_history_loaded (request, result) ->
+  | Task_msg (Task_history_loaded (request, result)) ->
       let task_id=Masc_tui_fetched.request_key request.thr_ticket in
       let followup =
         if task_history_request_in_scope state request
         then task_history_followup state request result else None in
       complete_task_history_read state request result;
       Option.iter (fun limit -> launch_task_history_load ~older:true ~limit state ~mailbox task_id) followup
-  | Board_attachment_loaded (request,result) ->
+  | Board_msg (Board_attachment_loaded (request,result)) ->
       if Option.is_some (current_board_reader state) then
         state.board_reader <- Masc_tui_board_reader.complete state.board_reader request result
-  | Board_attachment_prepared (request,result) ->
+  | Board_msg (Board_attachment_prepared (request,result)) ->
       if Option.is_some (current_board_reader state) then
         state.board_reader <- Masc_tui_board_reader.complete_preparation state.board_reader request result
-  | Board_attachment_saved (request,result) ->
+  | Board_msg (Board_attachment_saved (request,result)) ->
       (* The original workspace operation envelope admits this receipt.
          Closing or retiring its read view cannot revoke a completed save. *)
       (match result with
@@ -24664,7 +24664,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                                  | Ok (Unix.WEXITED 0) -> Board_image_open_finished (attempt,"opened " ^ name)
                                  | Ok (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) | Error _ ->
                                      Board_image_open_retry {attempt;prepared;opener} in
-                               deliver mailbox (Board_attachment_saved (request,Ok outcome));
+                               deliver mailbox (Board_msg (Board_attachment_saved (request,Ok outcome)));
                                `Stop_daemon)
                              with exn -> finish (); report_action state "error" (Printexc.to_string exn))))
               | Some (name,path), None ->
@@ -24677,7 +24677,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                   report_action state "system" (Masc_tui_attachment_action.describe_outcome outcome))
            else finish ()) target
        | Error error -> report_action state "error" error)
-  | Chat_call_loaded (request, result) ->
+  | Chat_msg (Chat_call_loaded (request, result)) ->
       ignore (complete_chat_call_read state request result)
   | Keeper_msg (Keeper_calls_loaded (generation, keeper_name, result)) -> (
       let still_current =
@@ -24805,7 +24805,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         Masc_tui_fetched.complete ~equal:Unit.equal state.prompts request result;
       state.prompts_cursor <-
         max 0 (min state.prompts_cursor (prompt_catalog_count_for_state state - 1))
-  | Presets_listed (sink, result) ->
+  | Preset_msg (Presets_listed (sink, result)) ->
       (match sink, result with
        | Preset_to_chat target, Ok snapshot ->
            chat_notice state ~keeper_name:target ~kind:Notice_reply
@@ -24841,7 +24841,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               at its end to a different place before the answer arrives. *)
            ensure_preset_detail state ~mailbox
        | Preset_to_pane, Error detail -> state.presets_error <- Some detail)
-  | Preset_contents_shown (sink, result) ->
+  | Preset_msg (Preset_contents_shown (sink, result)) ->
       (match sink, result with
        | Preset_to_chat target, Ok detail ->
            chat_notice state ~keeper_name:target ~kind:Notice_reply
@@ -24854,7 +24854,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           question nobody asked. *)
        | Preset_to_pane, Ok _ -> ()
        | Preset_to_pane, Error detail -> state.presets_error <- Some detail)
-  | Preset_detail_loaded (request, result) ->
+  | Preset_msg (Preset_detail_loaded (request, result)) ->
       (* Dropping an answer the cursor has moved past is [complete]'s job
          now, so this arm no longer has to remember to do it. *)
       state.preset_detail <-
@@ -24863,7 +24863,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       state.keeper_board_quarantines <-
         Masc_tui_fetched.complete ~equal:String.equal
           state.keeper_board_quarantines request result
-  | Board_quarantine_requeued (keeper_name, partition_id, outcome) ->
+  | Board_msg (Board_quarantine_requeued (keeper_name, partition_id, outcome)) ->
       state.board_quarantine_requeue_inflight <- None;
       let partition = Terminal_text.single_line partition_id in
       (match outcome with
@@ -24888,8 +24888,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | Some keeper when String.equal keeper.k_name keeper_name ->
            launch_keeper_board_quarantines state ~mailbox keeper_name
        | Some _ | None -> ())
-  | Board_quarantines_bulk_progress
-      (keeper_name, attempted, total, accepted, refused, unanswered) ->
+  | Board_msg (Board_quarantines_bulk_progress
+      (keeper_name, attempted, total, accepted, refused, unanswered)) ->
       if state.board_quarantine_requeue_inflight <> None then
         report_action state
           (if refused > 0 || unanswered > 0 then "error" else "system")
@@ -24897,7 +24897,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              "Board requeue %s: %d/%d attempted · %d accepted, %d refused, %d uncertain"
              (Terminal_text.single_line keeper_name) attempted total accepted
              refused unanswered)
-  | Board_quarantines_bulk_requeued (keeper_name, outcomes) ->
+  | Board_msg (Board_quarantines_bulk_requeued (keeper_name, outcomes)) ->
       state.board_quarantine_requeue_inflight <- None;
       let accepted, refused, unanswered =
         List.fold_left
@@ -24943,7 +24943,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | Some keeper when String.equal keeper.k_name keeper_name ->
            launch_keeper_board_quarantines state ~mailbox keeper_name
        | Some _ | None -> ())
-  | Preset_saved (original, result) ->
+  | Preset_msg (Preset_saved (original, result)) ->
       let pending = Option.value ~default:original
           (List.find_opt (fun request -> request.psp_token == original.psp_token)
              state.preset_save_pending) in
@@ -25018,7 +25018,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                (ui_text state ~ko:"프리셋 저장 알림을 확인하세요" ~en:"Check the preset save notice"));
           launch_presets_load state ~mailbox
         end
-  | Preset_restored (sink, result) ->
+  | Preset_msg (Preset_restored (sink, result)) ->
       (match sink, result with
        | Preset_to_chat target, Ok report ->
            (* What was applied and what was skipped, line by line, is the
@@ -25045,7 +25045,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | Preset_to_pane, Error detail ->
            state.preset_busy <- false;
            report_action state "error" (ui_text state ~ko:"프리셋 복원: " ~en:"Preset restore: " ^ detail))
-  | Preset_deleted (sink, result) ->
+  | Preset_msg (Preset_deleted (sink, result)) ->
       (* The list is read again after a failure too: a refusal says the
          list was stale, and an unanswered delete may have landed. *)
       (match sink, result with
@@ -25062,14 +25062,14 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            state.preset_busy <- false;
            report_action state "error" (ui_text state ~ko:"프리셋 삭제: " ~en:"Preset delete: " ^ detail);
            launch_presets_load state ~mailbox)
-  | Play_room_received (request, result) ->
+  | Play_msg (Play_room_received (request, result)) ->
       state.play_room <- Option.map (fun room ->
         let viewer, result = match result with
           | Ok (viewer, snapshot) -> Some viewer, Ok snapshot
           | Error detail -> None, Error detail in
         Masc_tui_play_room.receive ?viewer room request ~now:(Int64.to_float (Mtime_clock.elapsed_ns ()) /. 1e9) result) state.play_room;
       if state.msx_open && not state.msx_menu_open then render_spectator state
-  | Play_invites_listed (target, result) ->
+  | Play_msg (Play_invites_listed (target, result)) ->
       (match target with
        | Play_collab_list read ->
            state.collab <- Option.map (fun view -> Masc_tui_collab.listed view read result) state.collab
@@ -25098,7 +25098,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              (String.concat "\n"
                 (("Shared DOS play invites:" :: Masc_tui_collab.controller_summary pis_controller)
                  @ List.map row invites))))
-  | Play_invite_issued (request, target, result) ->
+  | Play_msg (Play_invite_issued (request, target, result)) ->
       let outcome = match result with
         | Play_answered (Ok _) | Play_refused _ | Play_not_dispatched _ -> Change_confirmed
         | Play_answered (Error _) | Play_unanswered _ -> Change_unknown in
@@ -25145,7 +25145,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       sync_collab_access state;
       refresh_current_collab state ~mailbox
       end
-  | Play_invite_revoked (request, target, requested_name, result) ->
+  | Play_msg (Play_invite_revoked (request, target, requested_name, result)) ->
       let outcome = match result with
         | Play_revoke_absent | Play_revoke_release_failed _
         | Play_revoke_result (Play_answered (Ok _) | Play_refused _ | Play_not_dispatched _) -> Change_confirmed
@@ -25220,7 +25220,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             state.prompts_librarian_input <- None;
             state.prompts_librarian_input_error <- Some detail
       end
-  | Runtime_params_loaded result -> (
+  | Runtime_msg (Runtime_params_loaded result) -> (
       state.runtime_params_loading <- false;
       match result with
       | Ok rows ->
@@ -25250,7 +25250,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           (* Reported, not swallowed into an empty list: empty means nothing is
              registered, which is a working state. *)
           state.runtime_params_error <- Some detail)
-  | Runtime_param_written (edit, result) ->
+  | Runtime_msg (Runtime_param_written (edit, result)) ->
       state.runtime_params_loading <- false;
       (match result with
        | Error detail -> state.runtime_params_notice <- Some (false, detail)
@@ -25258,11 +25258,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            if state.runtime_param_edit = edit then state.runtime_param_edit <- None;
            state.runtime_params_notice <- Some (true, notice);
            launch_runtime_params_load state ~mailbox)
-  | Machine_activity_read (request,result) ->
+  | Machine_msg (Machine_activity_read (request,result)) ->
       Option.iter (fun session ->
         Masc_tui_types.put_machine_activity state (Masc_tui_machine_activity.finish_read request result session))
         (Masc_tui_types.machine_activity_session state (Masc_tui_machine_activity.request_owner request))
-  | Machine_activity_saved (request,result) ->
+  | Machine_msg (Machine_activity_saved (request,result)) ->
       let module Activity = Masc_tui_machine_activity in
       let owner = Activity.request_owner request in
       (match Masc_tui_types.machine_activity_session state owner with
@@ -25274,11 +25274,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             launch_lanes_reread state ~mailbox
           | Activity.Conflict _ | Activity.Refused _ -> ())
        | None | Some _ -> ())
-  | Exact_activity_read (request,result) ->
+  | Exact_msg (Exact_activity_read (request,result)) ->
       Option.iter (fun session ->
         Masc_tui_types.put_exact_activity state (Masc_tui_exact_activity.finish_read request result session))
         (Masc_tui_types.exact_activity_session state (Masc_tui_exact_activity.request_owner request))
-  | Exact_activity_saved (request,result) ->
+  | Exact_msg (Exact_activity_saved (request,result)) ->
       let module Activity = Masc_tui_exact_activity in
       let owner = Activity.request_owner request in
       (match Masc_tui_types.exact_activity_session state owner with
@@ -25290,7 +25290,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             launch_lanes_reread state ~mailbox
           | Activity.Conflict _ | Activity.Refused _ | Activity.Unconfirmed _ -> ())
        | None | Some _ -> ())
-  | Runtime_config_view_loaded (generation, requested_model, started_ns, ready_ns, result) -> (
+  | Runtime_msg (Runtime_config_view_loaded (generation, requested_model, started_ns, ready_ns, result)) -> (
       let disposition = if generation <> state.runtime_config_generation then "superseded"
         else match state.runtime_config_read with `Loading true -> "followup" | `Loading false | `Idle -> "admitted" in
       Log.Transport.info
@@ -25401,12 +25401,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       Code_results.apply_diff state request result
   | Code_msg (Code_history_loaded (request, result)) ->
       Code_results.apply_history state request result
-  | Resources_listed (owner, result) ->
+  | Resource_msg (Resources_listed (owner, result)) ->
       withdraw_resource_diagram_pending state;
       Masc_tui_resources_updates.listed state ~owner result
-  | Artifact_checks_loaded (request, result) ->
+  | Artifact_msg (Artifact_checks_loaded (request, result)) ->
       Masc_tui_resources_updates.checks_loaded state request result
-  | Artifact_check_changed (request, result) ->
+  | Artifact_msg (Artifact_check_changed (request, result)) ->
       if Masc_tui_resources_updates.check_changed state request then begin
         (match result with
          | Ok _ -> report_action state "system" "Confirmation saved; reading shared state"
@@ -25414,7 +25414,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              ("Confirmation result requires refresh: " ^ detail));
         launch_artifact_checks_load state ~mailbox
       end
-  | Resource_exported (label, result) ->
+  | Resource_msg (Resource_exported (label, result)) ->
       (match result with
        | Ok detail ->
            report_action state "system" detail;
@@ -25425,7 +25425,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             | Some ((Masc_tui_resource_catalog.Report_revision _
                     | Masc_tui_resource_catalog.Mcp_uri _), _) | None -> ())
        | Error detail -> report_action state "error" (label ^ ": " ^ detail))
-  | Resource_share_changed (request, result) ->
+  | Resource_msg (Resource_share_changed (request, result)) ->
       if resource_share_is_owned state request then begin
         let read_key = finish_resource_share state request result in
         (match result with
@@ -25458,7 +25458,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                else "The share request for " ^ request.share_report.id ^ " did not start or send: " ^ detail);
              Option.iter (fun key -> launch_resources_read state ~mailbox ~key) read_key)
       end
-  | Resource_share_recovery_loaded (request, result) ->
+  | Resource_msg (Resource_share_recovery_loaded (request, result)) ->
       (match state.resource_share_recovery_lookup with
        | Some current when current.recovery_lookup_owner == request.recovery_lookup_owner ->
          state.resource_share_recovery_lookup <- None;
@@ -25517,7 +25517,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                    state.resource_share_uncertain_ids <- key :: state.resource_share_uncertain_ids;
                  show_recovery entry ~missing_journal:false))
        | Some _ | None -> ())
-  | Resource_read (request, result, journal) ->
+  | Resource_msg (Resource_read (request, result, journal)) ->
       withdraw_resource_diagram_pending state;
       let admitted = match state.resource_read_owner with
         | Some owner -> owner == request.Masc_tui_resource_catalog.owner
@@ -25561,40 +25561,40 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                public_copy_read_authority=state.workspace_read_authority;
                public_copy_origin=origin; public_copy_key=request.key })
       end
-  | Resource_diagram_ready (request,source,claim,result) ->
+  | Resource_msg (Resource_diagram_ready (request,source,claim,result)) ->
       let _,cols = get_terminal_size () in
       let _,height = Masc_tui_render_resources.document_viewport state
         ~rows:(surface_rows state) ~cols in
       Masc_tui_resource_document.settle_diagram ~claim
         ~cols:(resource_content_cols state ~cols) ~height state ~request ~source result
-  | Github_identity_view_loaded (request, result) ->
+  | Github_msg (Github_identity_view_loaded (request, result)) ->
       Masc_tui_identity_updates.github_view_loaded state request result
-  | Identity_switch_set (keeper_name, provider_id, enabled, result) ->
+  | Identity_msg (Identity_switch_set (keeper_name, provider_id, enabled, result)) ->
       Masc_tui_identity_updates.switch_set state ~keeper_name ~provider_id ~enabled
         ~report:(report_action state) ~notice:(present_identity_notice state)
         ~refresh:(fun keeper -> Masc_tui_identity_requests.launch_view state
           ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) keeper) result
-  | Identity_providers_loaded (request, result, attempts) ->
+  | Identity_msg (Identity_providers_loaded (request, result, attempts)) ->
       Masc_tui_identity_updates.providers_loaded state request
         ~report:(report_action state "error") ~now:(Unix.gettimeofday ()) ~attempts result
-  | Identity_login_started (request, result) ->
+  | Identity_msg (Identity_login_started (request, result)) ->
       Masc_tui_identity_updates.login_started state request ~now:(Unix.gettimeofday ())
         ~report:(report_action state) ~notice:(present_identity_notice state) result
-  | Identity_app_saved (keeper_name, provider_id, result) ->
+  | Identity_msg (Identity_app_saved (keeper_name, provider_id, result)) ->
       Masc_tui_identity_updates.app_saved ~keeper_name ~provider_id
         ~notice:(present_identity_notice state) result
-  | Identity_disconnected (keeper_name, provider_id, result) ->
+  | Identity_msg (Identity_disconnected (keeper_name, provider_id, result)) ->
       Masc_tui_identity_updates.disconnected state ~keeper_name ~provider_id
         ~notice:(present_identity_notice state)
         ~refresh:(fun keeper -> Masc_tui_identity_requests.launch_view state
           ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) keeper)
         (Result.map (Masc_tui_identity_model.disconnect_receipt_text ~provider_id) result)
-  | Identity_refreshed (keeper_name, result) ->
+  | Identity_msg (Identity_refreshed (keeper_name, result)) ->
       Masc_tui_identity_updates.refreshed state ~keeper_name
         ~report:(report_action state)
         ~refresh:(fun keeper -> Masc_tui_identity_requests.launch_view state
           ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) keeper) result
-  | Account_login_event (view, generation, event) ->
+  | Account_msg (Account_login_event (view, generation, event)) ->
       (match state.account_login with
        | Some current when current == view && view.generation = generation ->
          let action = Masc_tui_account_login.event ~generation view event in
@@ -25603,7 +25603,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            | Masc_tui_account_login.Output _ | Input_ready | Complete _ | Login_error -> ());
          launch_account_login_action state ~mailbox view action
        | Some _ | None -> ())
-  | Account_login_json (view, generation, action, result) ->
+  | Account_msg (Account_login_json (view, generation, action, result)) ->
       state.account_login_readings <- List.filter
         (fun (held, gen, _) -> held != view || gen <> generation) state.account_login_readings;
       (* A closed model save or activation still owns its receipt and refresh. Workspace
@@ -25681,7 +25681,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              | Login.Select_existing _ | Login.Start _ | Login.Prepare _ | Login.Preview_removal _
              | Login.Remove _ | Login.Refresh_removed _ | Login.Refresh_list _ -> view.recovery<-Login.Login_status; view.phase<-Login.Failed; view.notice<-message))
        | Some _ | None -> ())
-  | Account_login_removal (view, generation, provider, login_store, outcome) ->
+  | Account_msg (Account_login_removal (view, generation, provider, login_store, outcome)) ->
       (match state.account_login with
        | Some current when current == view && view.generation = generation ->
          let module Login = Masc_tui_account_login in
@@ -25698,13 +25698,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             view.recovery<-Login.Login_status; view.phase<-Login.Failed;
             view.notice<-"계정을 지웠는지 확인하지 못했습니다. r로 목록을 다시 읽으세요. " ^ detail)
        | Some _ | None -> ())
-  | Github_login_lines (keeper_name, lines) ->
+  | Github_msg (Github_login_lines (keeper_name, lines)) ->
       Masc_tui_github_ui.login_lines state ~keeper_name lines
-  | Github_login_finished (keeper_name, result) ->
+  | Github_msg (Github_login_finished (keeper_name, result)) ->
       Masc_tui_github_ui.login_finished ~keeper_name
         ~report:(fun level detail -> report_action state level detail)
         ~refresh:(fun keeper -> Masc_tui_identity_requests.launch_github_view state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) keeper) result
-  | Github_token_saved (keeper_name, result) ->
+  | Github_msg (Github_token_saved (keeper_name, result)) ->
       Masc_tui_github_ui.token_saved state ~keeper_name
         ~report:(fun level detail -> report_action state level detail)
         ~refresh:(fun keeper -> Masc_tui_identity_requests.launch_github_view state ~host:server_peer_host ~deliver:(workspace_enqueue state mailbox) keeper) result
@@ -25717,12 +25717,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           (Surface_read_order.request_id request) (Surface_read_order.started_ns request)
           (Mtime_clock.elapsed_ns ()) (Result.is_ok result)
       end
-  | Schedules_loaded (Schedule_agenda_read ticket, result) ->
+  | Schedule_msg (Schedules_loaded (Schedule_agenda_read ticket, result)) ->
       let current = Snapshot_read.is_current state.schedules_agenda_read ticket in
       apply_schedule_agenda_read state ticket result;
       if current then
         state.schedules_agenda_owed <- settled_schedule_read state.schedules_agenda_owed result
-  | Schedules_loaded (Schedule_page_read request, result) ->
+  | Schedule_msg (Schedules_loaded (Schedule_page_read request, result)) ->
       let current_agenda =
         Option.exists (Snapshot_read.is_current state.schedules_agenda_read)
           request.spr_agenda_ticket in
@@ -25732,7 +25732,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         state.schedules_page_owed <- settled_schedule_read state.schedules_page_owed result;
       if current_agenda then
         state.schedules_agenda_owed <- settled_schedule_read state.schedules_agenda_owed result
-  | Schedule_wake_history_loaded (schedule_id, result) ->
+  | Schedule_msg (Schedule_wake_history_loaded (schedule_id, result)) ->
       (* A history that arrived for a row the reader has left is not this
          pane's answer; dropping it is what keeps one schedule's attempts from
          being read as another's. *)
@@ -25760,7 +25760,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       apply_keeper_schedules_read state request result;
       if current then
         settle_keeper_schedules_read state ~keeper:request.kspr_detail.drr_keeper result
-  | Schedule_cancel_done (schedule_id, result) -> (
+  | Schedule_msg (Schedule_cancel_done (schedule_id, result)) -> (
       match result with
       | Ok message ->
           state.schedule_cancel_armed <- None;
@@ -25777,7 +25777,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           (* A refusal is new evidence for the operator's action. Reveal its
              first row even when the request was sent from the document end. *)
           if state.schedule_detail_id = Some schedule_id then state.schedule_scroll <- 0)
-  | Verification_verdict_done result -> (
+  | Verification_msg (Verification_verdict_done result) -> (
       match result with
       | Ok (message, noop) ->
           state.verification_verdict_armed <- None;
@@ -25798,7 +25798,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       | Error err ->
           state.verification_verdict_armed <- None;
           state.verification_verdict_error <- Some err)
-  | Harness_label_done result -> (
+  | Harness_msg (Harness_label_done result) -> (
       match result with
       | Ok message ->
           report_action state "system" ("Harness: " ^ message);
@@ -25807,24 +25807,24 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              feed is down. *)
           owe_harness_read state
       | Error err -> report_action state "error" ("Harness label: " ^ err))
-  | Approval_decision_done (approval, decision, result, generation, approvals) ->
+  | Approvals_msg (Approval_decision_done (approval, decision, result, generation, approvals)) ->
       apply_approval_decision_completion state generation approval decision
         result approvals
-  | Ask_followup_observed (read, event, received_ns) ->
+  | Ask_msg (Ask_followup_observed (read, event, received_ns)) ->
       let request=read.afr_request and submission=read.afr_submission in
       Option.iter (fun result ->
         Ask_followup_observation.emit read ~sources:(Masc_tui_types.current_ask_followup state)
           (Ask_followup_observation.Followup_source_applied (event,received_ns,Result.is_ok result)))
         (Masc_tui_types.take_ask_followup_event state request submission event)
-  | Ask_followup_finished (read, result) ->
+  | Ask_msg (Ask_followup_finished (read, result)) ->
       let request=read.afr_request and submission=read.afr_submission in
       Option.iter (fun result ->
         Ask_followup_observation.emit read ~sources:(Masc_tui_types.current_ask_followup state)
           (Ask_followup_observation.Followup_ui_settled result))
         (Masc_tui_types.finish_ask_followup_read state request submission result)
-  | Ask_answer_receipt_ready submission ->
+  | Ask_msg (Ask_answer_receipt_ready submission) ->
       apply_ask_answer_receipt state submission ~mailbox
-  | Ask_answer_done (submission, result, asks) ->
+  | Ask_msg (Ask_answer_done (submission, result, asks)) ->
       if ask_submission_inflight state submission then begin
         apply_ask_answer_receipt state submission ~mailbox;
         apply_ask_answer_completion state submission result asks;
@@ -26407,7 +26407,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              schedule_discarded_copy_cleanup ()
          | Ok (Remote_unfetched | Remote_png _ | Remote_native _ | Remote_bounded_source _ | Remote_cells _
               | Remote_busy _ | Remote_bounded_failure _ | Remote_native_failed _ | Remote_copy_failed _) | Error _ -> ())
-  | Msx_tick_withdrawn (request, detail) ->
+  | Msx_msg (Msx_tick_withdrawn (request, detail)) ->
       (match !msx_pending_poll with
        | Poll_pending pending when pending == request ->
            (* No POST was attempted, so this receipt releases the pending
@@ -26422,7 +26422,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              render_spectator state
            end
        | Poll_pending _ | Poll_ready _ | Poll_observing _ -> ())
-  | Msx_frame_loaded (request, result) ->
+  | Msx_msg (Msx_frame_loaded (request, result)) ->
       (match !msx_pending_poll with
        | Poll_pending pending when pending == request ->
            (* A scope change invalidates presentation, not knowledge of an
@@ -26490,7 +26490,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                   render_spectator state
                 end)
        | Poll_pending _ | Poll_ready _ | Poll_observing _ -> ())
-  | Msx_activity_loaded (request, result) ->
+  | Msx_msg (Msx_activity_loaded (request, result)) ->
       (match !msx_pending_poll with
        | Poll_observing (pending,refusal) when pending == request ->
            (* This read can recover a known refusal only. It never owns an
@@ -26532,7 +26532,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              render_spectator state
            end
        | Poll_observing _ | Poll_pending _ | Poll_ready _ -> ())
-  | Msx_live_loaded (request, result) ->
+  | Msx_msg (Msx_live_loaded (request, result)) ->
       (match state.msx_live_in_flight with
        | Some pending when pending == request ->
            state.msx_live_in_flight <- None;
@@ -26730,7 +26730,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | Error detail ->
            state.keeper_turns_owed <- failed_read state.keeper_turns_owed;
            refuse_keeper_turn_observation state detail)
-  | Gate_snapshot_loaded (request, expected_workspace, result) ->
+  | Gate_msg (Gate_snapshot_loaded (request, expected_workspace, result)) ->
       (match Snapshot_read.settle state.gate_snapshot_read request with
        | None -> ()
        | Some read ->
@@ -26752,7 +26752,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            state.gate_snapshot_authority <- None;
            state.gate_error <- Some detail
        end)
-  | Gate_approval_resolved (approval_id, approve, expected_workspace, result, generation) ->
+  | Gate_msg (Gate_approval_resolved (approval_id, approve, expected_workspace, result, generation)) ->
       (* Release the single-action slot [launch_gate_resolve] took, whatever the
          outcome, so the header stops drawing [submitting] and the next decision
          is admitted. [begin_action] serialises decisions, so this completion
@@ -26783,7 +26783,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            report_action state "error"
              (Printf.sprintf "Gate decision for %s failed: %s" approval_id
                 detail))
-  | Gate_auto_judge_retried (approval_id, expected_workspace, result, generation) ->
+  | Gate_msg (Gate_auto_judge_retried (approval_id, expected_workspace, result, generation)) ->
       let flow, owns_action =
         Approval.Flow.finish_action state.approval_flow generation
       in
@@ -26798,7 +26798,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            report_action state "error"
              (Printf.sprintf "Auto Judge retry for %s failed: %s" approval_id
                 detail))
-  | Gate_mode_set (lane, mode, result) ->
+  | Gate_msg (Gate_mode_set (lane, mode, result)) ->
       (match result with
        | Ok () ->
            report_action state "system"
@@ -26880,8 +26880,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | Error detail ->
            report_action state "error"
              (Printf.sprintf "could not set %s's gate: %s" keeper_name detail))
-  | Surface_tool_approval_answered
-      (keeper_name, tool_call_id, approval_id, allow, result, generation) ->
+  | Keeper_msg (Keeper_tool_approval_answered
+      (keeper_name, tool_call_id, approval_id, allow, result, generation)) ->
       (* Release the single-action slot [launch_surface_tool_approval] took, so
          the header clears [submitting] and the next decision is admitted. *)
       let flow, _owns_action =
@@ -26996,7 +26996,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              request.request_id detail);
         launch_keeper_waiting_load ~change:(Waiting_keepers [request.Keeper_chat.keeper_name]) state ~mailbox
       end
-  | Context_inspector_loaded (generation, keeper_name, reading) ->
+  | Context_msg (Context_inspector_loaded (generation, keeper_name, reading)) ->
       if
         state.context_inspector_open
         && generation = state.context_inspector_generation
@@ -27046,7 +27046,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Stale _ ) )
          | None -> ())
       end
-  | Context_inspector_part_loaded (request, result) ->
+  | Context_msg (Context_inspector_part_loaded (request, result)) ->
       (* An answer for a part the pane moved past is dropped by [complete]. *)
       state.context_inspector_part <-
         Masc_tui_fetched.complete
@@ -27417,7 +27417,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                (Keeper_chat.compact_request_id journal_id)
                (Keeper_chat.terminal_safe_text detail)));
       read_again ())
-  | Tools_read_loaded (Tools_inventory_loaded { generation; keeper = keeper_name; result }) ->
+  | Tools_msg (Tools_read_loaded (Tools_inventory_loaded { generation; keeper = keeper_name; result })) ->
       settle_tools_read state ~generation Tools_inventory_read;
       let selected_name = Option.map (fun (row : keeper) -> row.k_name) (selected_keeper state) in
       if generation = state.tools_request_generation
@@ -27455,7 +27455,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         match result with
         | Error detail -> report_action state "error" ("Skill evidence lookup failed: " ^ detail)
         | Ok json -> state.tools_skill_evidence <- Some (key, json))
-  | Tools_read_loaded (Tools_activations_loaded { generation; keeper; result }) ->
+  | Tools_msg (Tools_read_loaded (Tools_activations_loaded { generation; keeper; result })) ->
       settle_tools_read state ~generation Tools_activations_read;
       let selected_name = Option.map (fun (row : keeper) -> row.k_name) (selected_keeper state) in
       if generation = state.tools_request_generation
@@ -27468,7 +27468,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       | Error detail ->
           state.tools_activations_error <- Some { taf_keeper = keeper; taf_detail = detail };
           state.tools_activations_owed <- failed_read state.tools_activations_owed)
-  | Tools_read_loaded (Tools_usage_loaded { generation; keeper; result }) ->
+  | Tools_msg (Tools_read_loaded (Tools_usage_loaded { generation; keeper; result })) ->
       settle_tools_skill_read state ~generation (Tools_usage_read keeper);
       if generation = state.tools_skill_generation then begin
         record_keeper_skill_usage state ~keeper result;
@@ -27477,7 +27477,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            | Ok _ -> Masc_tui_owed_read.succeeded (keeper_skill_usage_owed state keeper)
            | Error _ -> failed_read (keeper_skill_usage_owed state keeper))
       end
-  | Tools_read_loaded (Tools_catalog_loaded { generation; result }) ->
+  | Tools_msg (Tools_read_loaded (Tools_catalog_loaded { generation; result })) ->
       settle_tools_skill_read state ~generation Tools_catalog_read;
       if generation = state.tools_skill_generation then (
       match result with
@@ -27488,7 +27488,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       | Error detail ->
           state.skills_catalog_error <- Some detail;
           state.tools_catalog_owed <- failed_read state.tools_catalog_owed)
-  | Tools_async_detail_loaded (request,result) ->
+  | Tools_msg (Tools_async_detail_loaded (request,result)) ->
       let current = tools_async_detail_current state request in
       complete_tools_async_detail state request result;
       (* A nested manifest the read could not fetch comes back inside an
@@ -27509,10 +27509,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                (Masc.Tui_decode_async_request.Observed
                  { Masc.Tui_decode_async_request.nested = Masc.Keeper_composition_observation.Invalid _; _ })
            | Error _ -> failed_read state.tools_async_detail_owed)
-  | Task_document_prepared (request,result) ->
+  | Task_msg (Task_document_prepared (request,result)) ->
       let _,terminal_cols=get_terminal_size () in
       complete_task_document state ~cols:(task_document_columns state ~terminal_cols) request result
-  | Tools_async_task_body_loaded (request,result) ->
+  | Tools_msg (Tools_async_task_body_loaded (request,result)) ->
       let current =
         tools_async_task_request_current state request state.tools_async_task_body_request
           state.tools_async_task_body
@@ -27523,15 +27523,15 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           (match result with
            | Ok _ -> Masc_tui_owed_read.succeeded state.tools_async_task_owed
            | Error _ -> failed_read state.tools_async_task_owed)
-  | Tools_async_task_history_loaded (request,result) ->
+  | Tools_msg (Tools_async_task_history_loaded (request,result)) ->
       complete_tools_async_task_history state request result
-  | Tools_async_observation_loaded (generation, result) ->
+  | Tools_msg (Tools_async_observation_loaded (generation, result)) ->
       if apply_tools_async_observation_result state ~generation result then
         state.async_requests_owed <-
           (match result with
            | Ok (Tui_decode.Async_ready _) -> Masc_tui_owed_read.succeeded state.async_requests_owed
            | Ok (Tui_decode.Async_unavailable _) | Error _ -> failed_read state.async_requests_owed)
-  | Runtime_lane_slots_written (written, replacement_selection, result) ->
+  | Runtime_msg (Runtime_lane_slots_written (written, replacement_selection, result)) ->
       (* Re-read the list the write changed rather than patching the local
          snapshot: a hand-applied edit and a rejected write look the same on
          screen. Lane edits wait for that re-read
@@ -27555,14 +27555,14 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                 launch_runtime_surface_load state ~mailbox ~force:true
             | Masc_tui_types.Standalone_lanes_list -> launch_lanes_reread state ~mailbox)
        | Error _ -> ())
-  | Runtime_catalog_loaded (request,result) ->
+  | Runtime_msg (Runtime_catalog_loaded (request,result)) ->
       let admitted = take_runtime_catalog_read state request result in
       Log.Transport.info "tui_runtime_catalog request=%d started_ns=%Ld admitted_ns=%Ld admitted=%b followup=%b"
         (Local_read_order.request_id request.rcr_request) request.rcr_started_ns (Mtime_clock.elapsed_ns ())
         admitted (Local_read_order.has_followup state.runtime_catalog_order);
       if admitted && Local_read_order.has_followup state.runtime_catalog_order then
         launch_runtime_catalog_load state ~mailbox
-  | Runtime_assignment_changed (request,status,observed_ns) ->
+  | Runtime_msg (Runtime_assignment_changed (request,status,observed_ns)) ->
       let current = runtime_assignment_current state request in
       if apply_runtime_assignment state request status then begin
         Log.Transport.info "tui_runtime_assignment keeper=%s started_ns=%Ld observed_ns=%Ld admitted_ns=%Ld phase=%s current_origin=%b"
@@ -27580,7 +27580,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                   launch_runtime_catalog_load ~intent:Snapshot_read.Refresh state ~mailbox
               | Assignment_not_sent _ | Assignment_refused _ -> ()
       end
-  | Browser_history_list_loaded (generation, result) ->
+  | Browser_msg (Browser_history_list_loaded (generation, result)) ->
       (match state.browser_history with
        | Some history when generation=state.browser_history_generation ->
          (match result with
@@ -27592,12 +27592,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               state.browser_history <- Some (Browser_history.select 0 entries history);
               launch_browser_history state ~mailbox ~reload:false)
        | _ -> ())
-  | Browser_history_page_loaded (generation, result) ->
+  | Browser_msg (Browser_history_page_loaded (generation, result)) ->
       (match state.browser_history with
        | Some history when generation=state.browser_history_generation ->
            state.browser_history <- Some (Browser_history.accept result history)
        | _ -> ())
-  | Browser_lane_clients_loaded (generation, result) ->
+  | Browser_msg (Browser_lane_clients_loaded (generation, result)) ->
       (match state.browser_lane with
        | None -> ()
        | Some view ->
@@ -27613,13 +27613,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            let operation = Browser_lane_view.discovery_continuation next in
            state.browser_lane <- Some (if read then Browser_lane_view.finish_discovery next else next);
            if read then launch_browser_lane state ~mailbox operation)
-  | Browser_lane_loaded (generation, result) ->
+  | Browser_msg (Browser_lane_loaded (generation, result)) ->
       state.browser_lane <- Option.map
         (Browser_lane_view.accept ~generation result) state.browser_lane
-  | Browser_lane_scene_loaded (generation, result) ->
+  | Browser_msg (Browser_lane_scene_loaded (generation, result)) ->
       state.browser_lane <- Option.map
         (Browser_lane_view.accept_scene ~generation result) state.browser_lane
-  | Browser_lane_follow_loaded (generation, result) ->
+  | Browser_msg (Browser_lane_follow_loaded (generation, result)) ->
       state.browser_lane <- Option.map
         (fun view ->
            match result with
@@ -27632,7 +27632,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                } in
                Browser_lane_view.accept_follow ~generation ~guard scene_result view)
         state.browser_lane
-  | Browser_lane_screenshot_ready { generation; image_generation; result } ->
+  | Browser_msg (Browser_lane_screenshot_ready { generation; image_generation; result }) ->
       (match state.browser_lane with
        | None -> ()
        | Some view ->
@@ -27668,7 +27668,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                  end
              | None, (Ok _ | Error _) | Some _, Error _ ->
                  if Option.is_some state.browser_viewport then close_image state)
-  | Browser_lane_action_done (generation, result) ->
+  | Browser_msg (Browser_lane_action_done (generation, result)) ->
       (match state.browser_lane with
        | Some view ->
            (match view.Browser_lane_view.load with
@@ -27697,7 +27697,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                     | Viewport_cadence _ | Viewport_pointer _ ))
             | Idle | No_browser | Failed _ -> ())
        | None -> ())
-  | Connector_unbind_all_done { keeper_name; results } ->
+  | Connectors_msg (Connector_unbind_all_done { keeper_name; results }) ->
       state.connector_unbind_all_inflight <- false;
       List.iter
         (fun ((_, outcome) as result) ->
@@ -27713,7 +27713,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          else "system")
         (Masc_tui_connector_unbind.summary ~keeper_name results);
       reload_connectors_after_write state ~mailbox
-  | Connectors_status_loaded (request, snapshot) ->
+  | Connectors_msg (Connectors_status_loaded (request, snapshot)) ->
       (match receive_connectors_status state request snapshot with
        | None -> ()
        | Some retirement ->
@@ -27722,7 +27722,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            (match retirement with
             | Connector_read.No_retirement -> ()
             | Retire _ -> launch_connectors_load state ~mailbox))
-  | Connectors_loaded (request, result) ->
+  | Connectors_msg (Connectors_loaded (request, result)) ->
       (match complete_connectors_read state request result with
        | None -> ()
        | Some completion -> begin
@@ -27747,7 +27747,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                       ~detail))
               pending)
       end)
-  | Runtime_surface_loaded (generation, result) ->
+  | Runtime_msg (Runtime_surface_loaded (generation, result)) ->
       let is_current = generation = state.runtime_surface_generation in
       (match state.runtime_surface_inflight with
        | Some inflight when inflight = generation ->
@@ -27791,9 +27791,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         state.runtime_surface_force_pending <- false;
         launch_runtime_surface_load state ~mailbox ~force:true
       end
-  | Workspace_activity_loaded (request, result) ->
+  | Workspace_msg (Workspace_activity_loaded (request, result)) ->
       apply_workspace_activity_read state request result
-  | Repositories_loaded result ->
+  | Repository_msg (Repositories_loaded result) ->
       state.repositories_inflight <- false;
       (match result with
       | Ok snapshot ->
@@ -27803,7 +27803,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       | Error detail ->
           state.repositories_owed <- failed_read state.repositories_owed;
           state.repositories_error <- Some detail)
-  | Memory_loaded (Fleet_health_read result) ->
+  | Memory_msg (Memory_loaded (Fleet_health_read result)) ->
       state.memory_health_inflight <- false;
       state.memory_health_owed <-
         (match result with
@@ -27818,7 +27818,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | Ok snapshot, (Some _ | None) -> apply_memory_health_snapshot state snapshot
        | Error detail, (Some _ | None) -> state.memory_health_error <- Some detail);
       owe_memory_input_read state
-  | Memory_loaded (Row_health_read { keeper; result }) ->
+  | Memory_msg (Memory_loaded (Row_health_read { keeper; result })) ->
       state.memory_health_inflight <- false;
       (* The row replaces the Keeper's row in the fleet answer, or removes it
          when the Keeper has none, and the totals are counted again
@@ -27855,7 +27855,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            state.memory_health_error <- Some detail;
            state.memory_health_owed <- failed_read state.memory_health_owed
        | None, Ok _ -> owe_memory_health_read state)
-  | Memory_input_loaded (request, result) ->
+  | Memory_msg (Memory_input_loaded (request, result)) ->
       (* An answer for a selection already left settles nothing; the read
          of the current selection does. *)
       if Masc_tui_fetched.is_current ~equal:String.equal state.memory_input request then
@@ -27865,13 +27865,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            | Error _ -> failed_read state.memory_input_owed);
       state.memory_input <-
         Masc_tui_fetched.complete ~equal:String.equal state.memory_input request result
-  | Memory_facts_loaded (request, result) ->
+  | Memory_msg (Memory_facts_loaded (request, result)) ->
       (* A late answer for a browser that closed, or for the keeper the reader
          already left, is dropped whole by [complete]. A failed refresh keeps
          the facts on screen and marks them stale. *)
       state.memory_facts <-
         Masc_tui_fetched.complete ~equal:String.equal state.memory_facts request result
-  | Repository_changes_loaded (scope, result) ->
+  | Repository_msg (Repository_changes_loaded (scope, result)) ->
       if
         state.repository_changes_open
         && Option.equal repository_change_scope_equal
@@ -27885,7 +27885,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              state.repository_changes_error <-
                Some "Git changes response belongs to a different workspace"
          | Error detail -> state.repository_changes_error <- Some detail)
-  | Repository_changes_diff_loaded (request, result) ->
+  | Repository_msg (Repository_changes_diff_loaded (request, result)) ->
       (* Each response belongs to one reader and one request incarnation, not
          to every open pane that happens to name the same relative path. *)
       (match request.rdr_reader with
@@ -28080,7 +28080,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                  ~now:(monotonic_now_s ())));
         launch_owed_keeper_composite state ~mailbox
       end
-  | Lane_inventory_loaded (generation, result) ->
+  | Lane_msg (Lane_inventory_loaded (generation, result)) ->
       state.standalone_lanes_inflight <- false;
       if generation = state.standalone_lanes_generation then (
         match result with
@@ -28129,7 +28129,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                 (min state.clients_surface_cursor
                    (List.length snapshot.Masc.Tui_decode.cls_clients - 1))
         | Error detail -> state.clients_surface_error <- Some detail)
-  | Lane_runs_loaded (lane, generation, before, result) ->
+  | Lane_msg (Lane_runs_loaded (lane, generation, before, result)) ->
       (match state.lanes_mode with
        | Lanes_run_list open_lane | Lanes_run_detail (open_lane, _)
          when Lane_run_identity.equal open_lane lane
@@ -28159,7 +28159,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                    Refresh supersedes every older response by generation. *)
                 state.lane_runs_error <- Some detail)
        | Lanes_run_list _ | Lanes_overview | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ -> ())
-  | Lane_run_detail_loaded (run_id, generation, result) ->
+  | Lane_msg (Lane_run_detail_loaded (run_id, generation, result)) ->
       (match state.lanes_mode with
        | Lanes_run_detail (_, open_run)
          when generation = state.lane_run_detail_generation
@@ -28175,7 +28175,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ | Lanes_overview | Lanes_run_list _ -> ())
   | Measurement_artifact_loaded (sha256, generation, result) ->
       accept_measurement_artifact state ~sha256 ~generation result
-  | Harness_loaded result ->
+  | Harness_msg (Harness_loaded result) ->
       state.harness_inflight <- false;
       (match result with
       | Ok snapshot ->
@@ -28202,39 +28202,39 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       | Error detail ->
           state.harness_owed <- failed_read state.harness_owed;
           state.harness_error <- Some detail)
-  | Fusion_runs_loaded (request, result) ->
+  | Fusion_msg (Fusion_runs_loaded (request, result)) ->
       (match Masc_tui_fusion_updates.runs_loaded state request result with
        | Reread when state.view = Fusion
                      || (state.view = Keepers Keeper_detail && state.detail_tab = Detail_runs) ->
            launch_fusion_runs_load state ~mailbox
        | Applied -> settle_fusion_retry state Masc_tui_fusion_updates.Runs result
        | Reread | Await_observer | Obsolete -> ())
-  | Fusion_detail_loaded (generation, run_id, result) ->
+  | Fusion_msg (Fusion_detail_loaded (generation, run_id, result)) ->
       (match Masc_tui_fusion_updates.detail_loaded state ~generation ~run_id result with
        | Reread when state.view = Fusion ->
            launch_fusion_detail_load state ~mailbox ~run_id
        | Applied -> settle_fusion_retry state Masc_tui_fusion_updates.Detail result
        | Reread | Await_observer | Obsolete -> ())
-  | Fusion_historical_detail_loaded (generation, reference, result) ->
+  | Fusion_msg (Fusion_historical_detail_loaded (generation, reference, result)) ->
       (match Masc_tui_fusion_updates.historical_detail_loaded state ~generation ~reference result with
        | Reread when state.view = Fusion ->
            launch_fusion_historical_detail_load state ~mailbox ~reference
        | Applied -> settle_fusion_retry state Masc_tui_fusion_updates.Historical result
        | Reread | Await_observer | Obsolete -> ())
-  | Fusion_launch_options_loaded (generation, result) ->
+  | Fusion_msg (Fusion_launch_options_loaded (generation, result)) ->
       Masc_tui_fusion_updates.launch_options_loaded state ~generation
         ~report:(report_action state "system") result
-  | Fusion_launched (generation, result) ->
+  | Fusion_msg (Fusion_launched (generation, result)) ->
       Masc_tui_fusion_updates.launched state ~generation
         ~report:(report_action state "system")
         ~refresh:(fun () -> launch_fusion_runs_load
           ~demand:Masc_tui_fusion_updates.After_change state ~mailbox) result
-  | Memory_recall_standing_loaded (generation, result) ->
+  | Memory_msg (Memory_recall_standing_loaded (generation, result)) ->
       Masc_tui_types.finish_memory_recall_standing_read state ~generation
         (match result with
          | Ok reading -> Masc_tui_memory_recall_form.Server_read reading
          | Error detail -> Masc_tui_memory_recall_form.Server_unavailable detail)
-  | Verification_loaded result ->
+  | Verification_msg (Verification_loaded result) ->
       state.verification_inflight <- false;
       if state.verification_refresh_after_inflight then begin
         state.verification_refresh_after_inflight <- false;
@@ -28280,7 +28280,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              look empty, which reads as "nothing is waiting". *)
           state.verification_owed <- failed_read state.verification_owed;
           state.verification_error <- Some detail)
-  | Local_workspace_read (request, result) ->
+  | Local_msg (Local_workspace_read (request, result)) ->
       (match observe_local_source state ~source:Local_work request result with
        | None -> ()
        | Some result ->
@@ -28289,7 +28289,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             | Ok reading -> Local_read_observation.apply request.lwr_observation
                 (Masc_tui_loader.apply_local_workspace state) reading);
            launch_local_source_followup state ~mailbox Local_work)
-  | Local_keepers_read (request, result) ->
+  | Local_msg (Local_keepers_read (request, result)) ->
       (match observe_local_source state ~source:Local_keepers request result with
        | None -> ()
        | Some result ->
@@ -30120,7 +30120,7 @@ let main
         | Error err -> Error err
         | Ok _json -> Ok described
       in
-      enqueue_async async_messages (Harness_label_done result)
+      enqueue_async async_messages (Harness_msg (Harness_label_done result))
     in
     with_async_switch state ~action:"Harness label" (fun sw ->
       fork_workspace_job state ~sw run)
@@ -30595,7 +30595,7 @@ let main
     if not state.runtime_params_loading then begin
       state.runtime_params_loading <- true;
       launch_workspace_request state ~mailbox:async_messages ~boundary_error:Fun.id
-        ~deliver:(fun result -> Runtime_param_written (edit, result))
+        ~deliver:(fun result -> Runtime_msg (Runtime_param_written (edit, result)))
         (fun () -> write ()
           |> Result.map (fun _ -> notice)
           |> Result.map_error (fun detail -> failure ^ detail))
@@ -39307,7 +39307,7 @@ Use relative paths for resources already held in the package. -->
                 report_action state "system" (name ^ ui_text state ~ko:" 복원 중 · 지금 상태는 먼저 저장됩니다" ~en:" restoring · current settings are backed up first");
                 launch_preset_call state ~mailbox:async_messages
                   ~call:(fun ~host ~port -> Masc_tui_loader.restore_preset ~host ~port ~name)
-                  ~wrap:(fun result -> Preset_restored (Preset_to_pane, result))
+                  ~wrap:(fun result -> Preset_msg (Preset_restored (Preset_to_pane, result)))
               end
               else begin
                 state.preset_armed <- Some (Restore_armed name);
@@ -39328,7 +39328,7 @@ Use relative paths for resources already held in the package. -->
                 report_action state "system" (name ^ ui_text state ~ko:" 삭제 중" ~en:" deleting");
                 launch_preset_call state ~mailbox:async_messages
                   ~call:(fun ~host ~port -> Masc_tui_loader.delete_preset ~host ~port ~name)
-                  ~wrap:(fun result -> Preset_deleted (Preset_to_pane, result))
+                  ~wrap:(fun result -> Preset_msg (Preset_deleted (Preset_to_pane, result)))
               end
               else begin
                 state.preset_armed <- Some (Delete_armed name);

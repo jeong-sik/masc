@@ -11,7 +11,7 @@ let launch_login state ~host ~deliver ~fork ~check keeper_name =
   let run () =
     match Eio_context.get_clock_opt () with
     | None ->
-      deliver (Github_login_finished (keeper_name, Error "Eio clock is unavailable"))
+      deliver (Github_msg (Github_login_finished (keeper_name, Error "Eio clock is unavailable")))
     | Some clock ->
       let reader = Masc_tui_sse_lines.create () in
       let flush_lines chunk =
@@ -36,7 +36,7 @@ let launch_login state ~host ~deliver ~fork ~check keeper_name =
           |> List.map Masc.Tui_terminal_text.sanitize_terminal_text
           |> List.filter (fun line -> String.trim line <> "")
         in
-        if lines <> [] then deliver (Github_login_lines (keeper_name, lines))
+        if lines <> [] then deliver (Github_msg (Github_login_lines (keeper_name, lines)))
       in
       let result =
         try
@@ -53,12 +53,12 @@ let launch_login state ~host ~deliver ~fork ~check keeper_name =
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (Printexc.to_string exn)
       in
-      deliver (Github_login_finished (keeper_name, result))
+      deliver (Github_msg (Github_login_finished (keeper_name, result)))
   in
   match Eio_context.get_switch_opt () with
   | Some sw -> fork ~sw run
   | None ->
-    deliver (Github_login_finished (keeper_name, Error "Eio switch is unavailable"))
+    deliver (Github_msg (Github_login_finished (keeper_name, Error "Eio switch is unavailable")))
 ;;
 
 let launch_token_save state ~host ~deliver ~fork ~check keeper_name token =
@@ -73,9 +73,9 @@ let launch_token_save state ~host ~deliver ~fork ~check keeper_name token =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    deliver (Github_token_saved (keeper_name, result))
+    deliver (Github_msg (Github_token_saved (keeper_name, result)))
   in
   match Eio_context.get_switch_opt () with
   | Some sw -> fork ~sw run
-  | None -> deliver (Github_token_saved (keeper_name, Error "Eio switch is unavailable"))
+  | None -> deliver (Github_msg (Github_token_saved (keeper_name, Error "Eio switch is unavailable")))
 ;;

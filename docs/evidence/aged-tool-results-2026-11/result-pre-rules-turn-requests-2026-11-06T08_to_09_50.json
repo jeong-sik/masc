@@ -1,0 +1,208 @@
+{
+  "params": {
+    "since": 1793952000.0,
+    "until": 1793958600.0
+  },
+  "turns": {
+    "counted": 95,
+    "bad_lines": 0,
+    "no_usage": 171,
+    "outside_window": 131
+  },
+  "requests_per_turn": {
+    "mean": 8.03,
+    "median": 5.0,
+    "p90": 20.0
+  },
+  "first_request": {
+    "turns": 95,
+    "hit_share_of_tokens": 0.4766,
+    "median_hit": 0.5716,
+    "share_of_turns_below_half": 0.4737
+  },
+  "first_request_by_gap": [
+    {
+      "gap": "<1m",
+      "turns": 44,
+      "hit_share_of_tokens": 0.5849,
+      "median_hit": 0.7256,
+      "share_of_turns_below_half": 0.25
+    },
+    {
+      "gap": "1-5m",
+      "turns": 19,
+      "hit_share_of_tokens": 0.7219,
+      "median_hit": 0.8278,
+      "share_of_turns_below_half": 0.1579
+    },
+    {
+      "gap": "5-10m",
+      "turns": 7,
+      "hit_share_of_tokens": 0.2841,
+      "median_hit": 0.0,
+      "share_of_turns_below_half": 0.8571
+    },
+    {
+      "gap": "10-30m",
+      "turns": 10,
+      "hit_share_of_tokens": 0.0365,
+      "median_hit": 0.0,
+      "share_of_turns_below_half": 1.0
+    },
+    {
+      "gap": "30-60m",
+      "turns": 1,
+      "hit_share_of_tokens": 0.4162,
+      "median_hit": 0.4162,
+      "share_of_turns_below_half": 1.0
+    },
+    {
+      "gap": "unknown",
+      "turns": 14,
+      "hit_share_of_tokens": 0.0176,
+      "median_hit": 0.0,
+      "share_of_turns_below_half": 1.0
+    }
+  ],
+  "by_model": [
+    {
+      "model": "claude-sonnet-5-5",
+      "requests_per_turn": {
+        "mean": 8.91,
+        "median": 6.0,
+        "p90": 22.0
+      },
+      "first_request": {
+        "turns": 69,
+        "hit_share_of_tokens": 0.4846,
+        "median_hit": 0.6474,
+        "share_of_turns_below_half": 0.4638
+      },
+      "first_request_by_gap": [
+        {
+          "gap": "<1m",
+          "turns": 27,
+          "hit_share_of_tokens": 0.6762,
+          "median_hit": 0.7623,
+          "share_of_turns_below_half": 0.1852
+        },
+        {
+          "gap": "1-5m",
+          "turns": 17,
+          "hit_share_of_tokens": 0.7409,
+          "median_hit": 0.8296,
+          "share_of_turns_below_half": 0.1176
+        },
+        {
+          "gap": "5-10m",
+          "turns": 5,
+          "hit_share_of_tokens": 0.0,
+          "median_hit": 0.0,
+          "share_of_turns_below_half": 1.0
+        },
+        {
+          "gap": "10-30m",
+          "turns": 7,
+          "hit_share_of_tokens": 0.0437,
+          "median_hit": 0.0,
+          "share_of_turns_below_half": 1.0
+        },
+        {
+          "gap": "30-60m",
+          "turns": 1,
+          "hit_share_of_tokens": 0.4162,
+          "median_hit": 0.4162,
+          "share_of_turns_below_half": 1.0
+        },
+        {
+          "gap": "unknown",
+          "turns": 12,
+          "hit_share_of_tokens": 0.0125,
+          "median_hit": 0.0,
+          "share_of_turns_below_half": 1.0
+        }
+      ]
+    },
+    {
+      "model": "glm-5.3",
+      "requests_per_turn": {
+        "mean": 4.75,
+        "median": 4.0,
+        "p90": 8.0
+      },
+      "first_request": {
+        "turns": 16,
+        "hit_share_of_tokens": 0.5743,
+        "median_hit": 0.7248,
+        "share_of_turns_below_half": 0.3125
+      },
+      "first_request_by_gap": [
+        {
+          "gap": "<1m",
+          "turns": 15,
+          "hit_share_of_tokens": 0.5351,
+          "median_hit": 0.7248,
+          "share_of_turns_below_half": 0.3333
+        },
+        {
+          "gap": "5-10m",
+          "turns": 1,
+          "hit_share_of_tokens": 0.9222,
+          "median_hit": 0.9222,
+          "share_of_turns_below_half": 0.0
+        }
+      ]
+    },
+    {
+      "model": "glm-5.3-flash",
+      "requests_per_turn": {
+        "mean": 7.2,
+        "median": 3.0,
+        "p90": 19.0
+      },
+      "first_request": {
+        "turns": 10,
+        "hit_share_of_tokens": 0.1089,
+        "median_hit": 0.0,
+        "share_of_turns_below_half": 0.8
+      },
+      "first_request_by_gap": [
+        {
+          "gap": "<1m",
+          "turns": 2,
+          "hit_share_of_tokens": 0.0972,
+          "median_hit": 0.0,
+          "share_of_turns_below_half": 0.5
+        },
+        {
+          "gap": "1-5m",
+          "turns": 2,
+          "hit_share_of_tokens": 0.382,
+          "median_hit": 0.0,
+          "share_of_turns_below_half": 0.5
+        },
+        {
+          "gap": "5-10m",
+          "turns": 1,
+          "hit_share_of_tokens": 0.0,
+          "median_hit": 0.0,
+          "share_of_turns_below_half": 1.0
+        },
+        {
+          "gap": "10-30m",
+          "turns": 3,
+          "hit_share_of_tokens": 0.0,
+          "median_hit": 0.0,
+          "share_of_turns_below_half": 1.0
+        },
+        {
+          "gap": "unknown",
+          "turns": 2,
+          "hit_share_of_tokens": 0.065,
+          "median_hit": 0.0,
+          "share_of_turns_below_half": 1.0
+        }
+      ]
+    }
+  ]
+}

@@ -577,3 +577,14 @@ let selected_search_match state =
     | Palette_code_file _ | Palette_code_location _ | Palette_code_branch _
     | Palette_code_worktree _))
   | None -> None
+
+type search_enter =
+  | Enter_opens of Masc.Tui_decode.workspace_search_match
+  | Enter_searches
+
+let search_enter state =
+  if not (code_search_answer_is_for_prompt state) then Enter_searches
+  else
+    match selected_search_match state with
+    | Some found -> Enter_opens found
+    | None -> Enter_searches

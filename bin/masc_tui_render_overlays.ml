@@ -381,6 +381,12 @@ let palette_count mode count =
   let singular, plural = palette_noun mode in
   Message_layout.count_noun ~plural count singular
 
+(* The search runs under the directory the Code pane had open (the server
+   passes it to git as a pathspec), so the overlay says which. The root of the
+   checkout is the default and needs no words. *)
+let search_place (origin : code_finder_origin) =
+  if String.equal origin.cfo_dir "" then None else Some origin.cfo_dir
+
 (* The [:] palette: a typed filter over every jump the strip and roster
    offer. The list is the same [Masc_tui_palette.palette_matches] the Enter key resolves, so
    what is highlighted is what will run. *)
@@ -425,7 +431,10 @@ let render_palette (state : state) =
     | Masc_tui_types.Palette_worktrees _ ->
         (" MASC Worktrees", "filter:", "close")
     | Masc_tui_types.Palette_search _ ->
-        (" MASC Search in files", "search:", "search/open")
+        (" MASC Search in files", "search:",
+         (match Masc_tui_palette.search_enter state with
+          | Masc_tui_palette.Enter_opens _ -> "open"
+          | Masc_tui_palette.Enter_searches -> "search"))
     | Masc_tui_types.Palette_locations offer ->
         let query = Masc_tui_fetched.request_key offer.clo_query in
         (Printf.sprintf " %s · %s" query.clq_question
@@ -491,18 +500,28 @@ let render_palette (state : state) =
                    (if String.equal listing.gbs_root "" then "workspace checkout"
                     else listing.gbs_root)
                    (if listing.gbs_truncated then " · newest only" else "") ])
-    | Palette_search _ ->
+    | Palette_search search_origin ->
         List.map Terminal_text.single_line
           (match code_search_current state with
-           | None -> [ "Type text, then Enter to search the checkout" ]
+           | None ->
+               [ Printf.sprintf "Type at least %d characters, then Enter to search %s"
+                   code_search_min_query_bytes
+                   (match search_place search_origin with
+                    | None -> "the checkout"
+                    | Some dir -> "under " ^ dir) ]
            | Some (key, Masc_tui_fetched.Loading) ->
                [ "Searching for " ^ key.css_query ^ "…" ]
            | Some (_, (Masc_tui_fetched.Failed detail | Masc_tui_fetched.Stale (_, detail))) ->
                [ detail ]
            | Some (_, Masc_tui_fetched.Ready search) ->
-               [ Printf.sprintf "%d matches%s"
-                   (List.length search.Tui_decode.wss_matches)
-                   (if search.wss_truncated then " · more exist, narrow the text" else "") ]
+               (* The count is on the line under this one; only what it cannot
+                  say is written here. *)
+               (match search.Tui_decode.wss_matches, search.wss_truncated with
+                | _, false -> []
+                | [], true -> [ "No match could be shown · narrow the text" ]
+                | shown, true ->
+                    [ Printf.sprintf "Only the first %d are shown · narrow the text"
+                        (List.length shown) ])
            | Some (_, Masc_tui_fetched.Absent) -> [])
     | Palette_locations offer ->
         if code_location_offer_current state offer then
@@ -553,11 +572,21 @@ let render_palette (state : state) =
           c.push "   Ask about this symbol in the file open on Code"
       | None ->
           c.push_styled ~style:(Theme.recede ())
-            (Printf.sprintf "   %s · %d/%d · %s"
+            (Printf.sprintf "   %s%s · %d/%d · %s"
               (palette_count state.palette_mode total)
+              (match state.palette_mode with
+               | Palette_search search_origin ->
+                   (match search_place search_origin with
+                    | None -> ""
+                    | Some dir -> " under " ^ Terminal_text.single_line dir)
+               | Palette_files _ | Palette_branches _ | Palette_worktrees _ | Palette_locations _
+               | Palette_jump | Palette_choice _ -> "")
               (if total = 0 then 0 else cursor + 1) total
               (match state.palette_mode with
-               | Palette_search _ -> "Enter searches the typed text"
+               | Palette_search _ ->
+                   (match Masc_tui_palette.search_enter state with
+                    | Masc_tui_palette.Enter_opens _ -> "Enter opens the match"
+                    | Masc_tui_palette.Enter_searches -> "Enter searches the typed text")
                | Palette_files _ | Palette_branches _ | Palette_worktrees _ | Palette_locations _
                | Palette_jump | Palette_choice _ ->
                    "type to filter"));

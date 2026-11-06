@@ -39,6 +39,8 @@ let check_frame ~max_reply_bytes capture =
     "Curator request arguments measure %d bytes; the receiving Add-on declares a %d-byte frame"
     bytes max_reply_bytes)
 
+let original_required (package : Lane_addon_types.package) = String.equal package.id package_id
+
 let authorize ~base_path ~store ~declaration_id ~(package : Lane_addon_types.package)
     (exact : Exact.request) =
   let undecided detail = Exact.Undecided {detail} in
@@ -46,7 +48,7 @@ let authorize ~base_path ~store ~declaration_id ~(package : Lane_addon_types.pac
     |> Result.map_error (fun error -> undecided (Owner.error_to_string error)) in
   match retained with
   | None ->
-    if String.equal package.id package_id
+    if original_required package
     then Error (Exact.Unowned {reason="Curator exact request has no original host capture"})
     else Ok (fun _ -> Ok ())
   | Some retained ->

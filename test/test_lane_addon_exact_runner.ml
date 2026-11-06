@@ -1139,6 +1139,45 @@ let test_original_undispatched_cli_visit_order () =
   check bool "an exhausted declaration set cannot hide reordered original failures" true
     (Result.is_error (Receipt.of_json reversed))
 
+(* RFC-0498 §4.4: once the Curator original is settled, nothing owns the
+   Exact record and execution link its run left. *)
+module Census = Server_unowned_exact_census
+let census ~store package =
+  let declaration : Lane_addon_config.declaration =
+    { id=declaration_id; enabled=true; run_id="census"; manifest_path="/nonexistent/lane.toml";
+      package; binding=`Null; revision="1"; source_revision="1"; source_path="/nonexistent/quiz.toml" } in
+  Census.run ~store ~declarations:[declaration]
+
+let test_a_settled_curator_original_owns_no_exact_record () =
+  with_case (fun ~sw ~net ~clock ~base_path ~store ->
+    let counted package = match census ~store package with
+      | Ok report -> report | Error error -> fail (Census.error_to_string error) in
+    let capture,good,_=classification_capture ~base_path in
+    retain_capture ~store capture;
+    let request=get (Curator.request capture) in
+    let server=F.start_server ~sw ~net ~clock (F.Reply (F.openai_response good)) in
+    publish ~lane_id:"quiz/classification" ~base_path [{F.id="original-facts";base_url=server.base_url}];
+    if answered_by (get (run_curator ~base_path ~store request)) = None then fail "the original must answer";
+    let live=counted curator_package in
+    check (pair int int) "the run left one Exact record and one execution link" (1,1) (live.exact_records,live.proofs);
+    check (pair int int) "the live original owns both" (0,0) (live.unowned_exact_records,live.unowned_proofs);
+    (match Owner.load ~store ~scope:Capture.scope ~request_id:request.request_id
+           |> Result.map_error Owner.error_to_string |> get with
+     | None -> fail "original host capture disappeared"
+     | Some retained ->
+       (match Owner.settle ~store ~date:"2026-11-06" (Owner.listed retained) with
+        | Ok () -> () | Error error -> fail (Owner.settle_error_to_string error)));
+    let settled=counted curator_package in
+    check (pair int int) "the settled original owns neither" (1,1) (settled.unowned_exact_records,settled.unowned_proofs);
+    check int "a package that needs no original is not counted" 0 (counted package).exact_records;
+    let links=Filename.concat (Lane_addon_store.root store) (Exact.proof_directory ~declaration_id) in
+    let link=match Sys.readdir links with [|link|] -> link | _ -> fail "one execution link expected" in
+    let bytes=In_channel.with_open_bin (Filename.concat links link) In_channel.input_all in
+    Out_channel.with_open_bin (Filename.concat links (String.make 64 '0' ^ ".json"))
+      (fun channel -> Out_channel.output_string channel bytes);
+    check bool "a link under another request's name refuses the count" true
+      (Result.is_error (census ~store curator_package)))
+
 let () =
   run "lane add-on exact runner"
     [ ( "runner"
@@ -1194,4 +1233,6 @@ let () =
             (test_http_flow_preserves_host_admission_class Agent_core.Llm_provider.Admission_class.Background)
         ; test_case "real HTTP admission preserves trusted Standard" `Quick
             (test_http_flow_preserves_host_admission_class Agent_core.Llm_provider.Admission_class.Standard)
-        ; test_case "worker names cannot select Background" `Quick test_worker_names_do_not_grant_background ] ) ]
+        ; test_case "worker names cannot select Background" `Quick test_worker_names_do_not_grant_background
+        ; test_case "a settled Curator original owns no Exact record" `Quick
+            test_a_settled_curator_original_owns_no_exact_record ] ) ]

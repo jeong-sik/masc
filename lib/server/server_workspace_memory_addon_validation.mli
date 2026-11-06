@@ -15,6 +15,9 @@ val classification_submit_bytes : request_id:Workspace_memory_execution_capture.
 val check_frame : max_reply_bytes:int -> Workspace_memory_execution_capture.t -> (unit, string) result
 (** Refuse a capture whose [submit] arguments exceed the receiving Add-on's
     declared frame. *)
+val original_required : Lane_addon_types.package -> bool
+(** Every request [package] sends needs a Curator original with its ID.
+    {!authorize} ends a request without one as [Unowned]. *)
 val authorize : base_path:string -> store:Lane_addon_store.t -> declaration_id:string ->
   package:Lane_addon_types.package -> Lane_addon_exact.request ->
   (Lane_addon_exact.output_validator, Lane_addon_exact.authority_refusal) result

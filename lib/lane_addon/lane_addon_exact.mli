@@ -296,6 +296,14 @@ val read_latest_original_execution : store:Lane_addon_store.t -> declaration_id:
     Missing evidence remains unproven. This read performs no effect and grants
     no retry, partition, worker delivery, Memory or ACK authority. Offload the
     complete blocking scope in Eio contexts. *)
+val proof_directory : declaration_id:string -> string
+(** The Store directory below {!Lane_addon_store.root} that holds the original
+    execution link of every request [declaration_id] ran. *)
+val proof_request_id : declaration_id:string -> file_name:string -> Yojson.Safe.t ->
+  (string, string) result
+(** The original request ID of the link stored as [file_name] in
+    {!proof_directory}. [Error] when the link names no request, or names one
+    whose link has another file name. Checks nothing else in the link. *)
 val observe_retained : store:Lane_addon_store.t -> declaration_id:string ->
   schema:Yojson.Safe.t -> request -> (retained_observation, string) result
 (** Read only the original host Exact record under the caller's workspace

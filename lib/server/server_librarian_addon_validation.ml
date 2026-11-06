@@ -106,11 +106,13 @@ let authorize_floor_step ~base_path ~store ~declaration_id ~(package:Lane_addon_
     }) in
     restore () |> Result.map_error undecided)
 
+let original_required (package : Lane_addon_types.package) = String.equal package.id Capture.package_id
+
 let authorize ~base_path ~store ~declaration_id ~(package : Lane_addon_types.package)
     (request : Exact.request) =
   match Namespace.of_request_id request.request_id with
   | Namespace.Other ->
-    if package.id=Capture.package_id then Error (Exact.Unowned {reason="Librarian exact request lacks its original host identity"})
+    if original_required package then Error (Exact.Unowned {reason="Librarian exact request lacks its original host identity"})
     else Ok None
   | History scope -> authorize_history ~base_path ~store ~declaration_id ~package request scope
   | Floor_step scope -> authorize_floor_step ~base_path ~store ~declaration_id ~package request scope

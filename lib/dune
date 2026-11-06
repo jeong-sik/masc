@@ -32,6 +32,7 @@
   keeper_msg_async_recovery
   keeper_msg_async_lifecycle
   keeper_msg_async_submit
+  keeper_msg_async_query
   keeper_memory_os_current_types
   keeper_memory_os_receipt_selection
   keeper_memory_os_support_core

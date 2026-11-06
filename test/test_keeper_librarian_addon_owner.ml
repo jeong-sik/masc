@@ -839,6 +839,95 @@ let test_purge_joins_provider_after_memory_unit_returned ()=with_fixture (fun ~s
           ~declaration_id:"librarian" ~schema exact |> get) with
        | Lane_addon_exact.No_completed_latest -> true | Completed_latest _ -> false)))
 
+(* RFC-0500. One original whose provider call is open, cut by a purge.
+   [before_cut] sees the retained host attempt fields before the cut, so no
+   host pass can recover the attempt in between. Later provider calls answer. *)
+let with_cut_original fixture ~before_cut k =
+  let arrived,signal=Eio.Promise.create () and release,unblock=Eio.Promise.create () in
+  let hold=Atomic.make true in
+  fixture.set_response (fun capture ->
+    if Atomic.get hold then (ignore (Eio.Promise.try_resolve signal ());Eio.Promise.await release);
+    `OK,F.openai_response (answer (fun _ -> true) capture));
+  Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve unblock ())) (fun () ->
+    (match run_worker fixture with Worker.Pending _ -> ()
+     | Disabled | Idle | Recheck_new_input | Settled _ | Addon_unattached _ | Unavailable _ ->
+       fail "the first provider call must still be open");
+    Eio.Promise.await arrived;
+    let record,capture=match observed_originals fixture with [original] -> original
+      | [] | _::_::_ -> fail "expected the one original whose provider call is open" in
+    let exact=Capture.request capture |> get in
+    io (fun () ->
+      let fields=match Store.load_exact_request fixture.store ~declaration_id:"librarian" ~request_id:exact.request_id |> get with
+        | Some (`Assoc fields) -> fields
+        | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) | None ->
+          fail "expected the retained host request" in
+      match before_cut fields with
+      | None -> ()
+      | Some fields -> Store.save_exact_request fixture.store ~declaration_id:"librarian"
+          ~request_id:exact.request_id (`Assoc fields) |> get);
+    Atomic.set hold false;
+    (match Memory_lane.with_librarian_purge ~base_path:fixture.base_path ~keeper_name (fun () -> ()) with
+     | Ok () -> () | Error error -> fail (Memory_lane.purge_cancel_error_to_string error));
+    k record)
+let archived fixture (record:Owner.retained)=
+  let owner=io (fun () -> original_owner fixture.base_path fixture.keepers_dir) in
+  let date=Capture.minted_on record.request_id |> get in
+  io (fun () -> Owner.settled ~store:fixture.store ~scope:(Capture.scope owner) ~date
+    ~request_id:record.request_id |> owned)
+let listed fixture (record:Owner.retained)=
+  List.exists (fun ((current:Owner.retained),_) -> current.request_id=record.request_id) (observed_originals fixture)
+(* The attempt a stopped server leaves: started by another incarnation, with
+   no outcome and no proof. *)
+let stopped_incarnation="0123456789abcdef0123456789abcdef"
+let started_by_stopped_server fields=
+  let attempts=match List.assoc_opt "attempts" fields with
+    | Some (`List attempts) -> attempts
+    | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) | None ->
+      fail "expected the host attempt history" in
+  let earlier=match List.rev attempts with
+    | `Assoc ["started",`String started_by]::earlier when started_by<>stopped_incarnation -> List.rev earlier
+    | [] | _::_ -> fail "the open attempt must be started by this process with no outcome" in
+  Some (List.map (fun (key,value) -> key,
+    if key="attempts" then `List (earlier @ [`Assoc ["started",`String stopped_incarnation]]) else value) fields)
+
+let test_interrupted_original_is_prepared_again ()=with_fixture (fun ~sw:_ fixture ->
+  with_cut_original fixture ~before_cut:started_by_stopped_server (fun record ->
+    let posts=F.post_count fixture.server in
+    drive_until fixture settled |> assert_settled;
+    check bool "the interrupted original moved to the settled archive" true (archived fixture record);
+    check bool "the scope no longer lists the interrupted original" false (listed fixture record);
+    check bool "a new provider call judged the same part" true (F.post_count fixture.server>posts);
+    check (list string) "the new judgment commits the candidates" ["Durable A";"Durable B"]
+      (io (fun () -> claims fixture.keepers_dir));
+    check int "every candidate is acknowledged" 0
+      (io (fun () -> List.length (pending_rows fixture.keepers_dir)))))
+
+let test_cut_original_keeps_its_part_waiting ()=with_fixture (fun ~sw:_ fixture ->
+  with_cut_original fixture ~before_cut:(fun _ -> None) (fun record ->
+    let posts=F.post_count fixture.server in
+    let rec until_refused ()=
+      let before= !(fixture.deliveries) in
+      (match run_worker fixture with Worker.Pending _ -> ()
+       | Disabled | Idle | Recheck_new_input | Settled _ | Addon_unattached _ | Unavailable _ ->
+         fail "a cut original must keep its part waiting");
+      match observed_originals fixture with
+      | [current,_] when current.request_id=record.request_id ->
+        (match Progress.phase current.progress with
+         | Progress.Rejected {stage=Progress.Execution;_} -> ()
+         | Captured | Admission_wait _ | Dispatch_pending _ -> await_delivery fixture ~after:before;until_refused ()
+         | Judged _ | Committing _ | Commit_unknown _ | Finished _ | Conflicted _
+         | Rejected {stage=Progress.Before_dispatch;_} | Subdividing _ | Subdivided _ ->
+           fail "a cut original reaches only an execution refusal")
+      | [] | _::_ -> fail "the cut original must stay the part's only execution" in
+    until_refused ();
+    (match run_worker fixture with Worker.Pending _ -> ()
+     | Disabled | Idle | Recheck_new_input | Settled _ | Addon_unattached _ | Unavailable _ ->
+       fail "a refused cut original must keep its part waiting");
+    check bool "the cut original stays in its scope" true (listed fixture record);
+    check bool "the cut original is not archived" false (archived fixture record);
+    check int "no provider call follows the cut" posts (F.post_count fixture.server);
+    check int "no candidate is acknowledged" 2 (io (fun () -> List.length (pending_rows fixture.keepers_dir)))))
+
 let test_forged_worker_finished_cannot_commit_without_host_proof ()=with_fixture (fun ~sw:_ fixture ->
   let arrived,signal=Eio.Promise.create () and release,unblock=Eio.Promise.create () in
   fixture.set_response (fun capture ->
@@ -1622,6 +1711,8 @@ let () =
   test_case "configuration wake preserves queued Keepers despite a corrupt global original inventory" `Quick
     test_configuration_wake_keeps_queued_keeper_when_global_inventory_is_invalid;
   test_case "purge joins the actual provider after the Memory unit returned Pending" `Quick test_purge_joins_provider_after_memory_unit_returned;
+  test_case "an original a stopped server interrupted settles and its part is judged again" `Quick test_interrupted_original_is_prepared_again;
+  test_case "an original this process cut keeps its part waiting with no new provider call" `Quick test_cut_original_keeps_its_part_waiting;
   test_case "forged worker Finished cannot commit without original host execution proof" `Quick test_forged_worker_finished_cannot_commit_without_host_proof;
   test_case "mismatched retained final cannot borrow real original host proof" `Quick test_mismatched_retained_judgment_cannot_borrow_host_proof;
   test_case "admission confirms a final the host never retained" `Quick test_admission_confirms_a_final_the_host_never_retained;

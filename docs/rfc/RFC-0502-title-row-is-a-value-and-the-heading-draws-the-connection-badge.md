@@ -14,10 +14,10 @@ related: []
 
 ## 0. 요약
 
-- 좁은 터미널에서 제목 줄 끝의 연결 배지(`HTTP [connected]`)가 잘린다. 제목 줄 124줄을 읽었더니 5줄이 잘렸고(화면 4개, 모두 56열이나 64열), 10줄은 배지가 없다(화면 2개, 읽은 다섯 크기 모두)(1.1).
+- 좁은 터미널에서 제목 줄 끝의 연결 배지(`HTTP [connected]`)가 잘린다. 제목 줄 136줄을 읽었더니 5줄이 잘렸고(화면 4개, 모두 56열이나 64열), 15줄은 배지가 없다(화면 3개, 읽은 다섯 크기 모두)(1.1).
 - 배지가 줄 끝에 있는 까닭은 `[workspace mismatch]`(서버가 다른 워크스페이스를 본다)를 어느 화면에서나 말하려는 것이다. 줄이 모자라면 프레임이 줄 끝을 자르므로 이 경고가 가장 먼저 잘린다(1.2).
 - 같은 원인을 네 번 고쳤다. 도구가 셋이다: `detail_heading`(#39712), `badge_row`(#44368), `compact_connection_badge`(#47384). #49045 는 `detail_heading` 을 한 번 더 불렀다(1.3). 화면 하나를 고치면 다음 화면이 남는다.
-- `connection_badge state` 는 55줄(14개 파일)에서 불린다. 14줄은 라벨 인자로 넘기고, 36줄은 화면이 제목 문자열에 직접 이어 붙인다(1.4).
+- `connection_badge state` 는 50줄(14개 파일)에서 불린다. 14줄은 라벨 인자로 넘기고, 32줄은 화면이 제목 문자열에 직접 이어 붙인다(1.4).
 - 제안: 제목 줄을 `heading` 값으로 만든다. `heading` 에는 배지 칸이 없다. 배지는 `heading` 을 그리는 함수가 `state` 에서 만들어 줄 끝에 붙인다. 마지막 층에서 `connection_badge` 를 `.mli` 에서 지운다.
 - 줄이 모자랄 때의 순서는 지금 `detail_heading` 이 정한 그대로다. 이 RFC 는 순서를 바꾸지 않는다. 순서를 거치지 않고 지나가는 길을 막는다.
 
@@ -28,9 +28,9 @@ related: []
 main 증명 빌드(`6ad837c7cac`, run 42154515127)를 시험용 서버에 붙여 두 가지를 읽었다.
 
 - 14화면 순회를 64x30, 56x30, 80x24, 100x30 으로 읽었다(56줄).
-- 상세 화면 16곳을 72x30, 64x30, 56x30, 80x24, 100x30 으로 읽었다(80장). 제목 줄이 `MASC` 로 시작하지 않는 12장은 세지 않았다. 남는 것이 68줄이다.
+- 상세 화면 16곳을 72x30, 64x30, 56x30, 80x24, 100x30 으로 읽었다(80줄).
 
-제목 줄은 화면 위쪽 여섯 줄 중 `MASC` 가 든 첫 줄이다. 배지가 `[낱말]` 로 끝나면 온전, `[` 뒤에 `]` 가 없거나 `…` 로 끝나면 잘림, 둘 다 아니면 없음으로 셌다. 시계는 `hh:mm:ss` 로 가렸다.
+제목 줄은 맨 위 화면 탭 줄 밑에서 글이 있는 첫 줄이다. `MASC` 로 시작하지 않는 줄도 센다. Keeper 상세는 `Keepers ▸ imp` 로 시작하고, System ▸ Params 는 좁은 폭에서 탭 줄이 앞을 잘라 `9:런타임` 으로 시작한다. 배지 `HTTP [낱말]` 이 있고 잘리지 않았으면 온전(뒤에 진행 글이 이어져도 같다), `[` 뒤에 `]` 가 없거나 `…` 로 끝나면 잘림, 둘 다 아니면 없음으로 셌다. 시계는 `hh:mm:ss` 로 가렸다.
 
 | 읽은 곳 | 제목 줄 | 배지 |
 | --- | --- | --- |
@@ -41,8 +41,9 @@ main 증명 빌드(`6ad837c7cac`, run 42154515127)를 시험용 서버에 붙여
 | Workspace, 56x30 | `MASC Workspace (0)  hh:mm:ss  HTTP [connected] · ref…` | 진행 글만 잘림 |
 | Board 글 상세, 다섯 크기 모두 | `MASC Board  [p-7…2dbb499d]  #verification   0  💬0` | 없음 |
 | Task 검토 상세, 다섯 크기 모두 | `MASC 작업  목표  ▸작업 검토·1  작업 판정 ▸ details  task-002` | 없음 |
+| Keeper 상세, 다섯 크기 모두 | `Keepers ▸ imp  ▸Info  Items  Sandbox  Settings  7›` (56열) | 없음 |
 
-읽은 124줄(56 + 68) 중 배지가 온전한 곳은 109줄이다. 잘린 곳은 5줄(화면 4개)이고 모두 56열이나 64열이다. 80x24 와 100x30 에서는 잘린 줄이 없다. 배지가 없는 곳은 10줄(화면 2개)이고 다섯 크기 모두에서 같다. 배지가 없는 두 화면은 다섯 크기 모두에서 화면 어디에도 `HTTP [` 가 없다.
+읽은 136줄(56 + 80) 중 배지가 온전한 곳은 116줄이다. 잘린 곳은 5줄(화면 4개)이고 모두 56열이나 64열이다. 80x24 와 100x30 에서는 잘린 줄이 없다. 배지가 없는 곳은 15줄(화면 3개)이고 다섯 크기 모두에서 같다. 배지가 없는 세 화면은 다섯 크기 모두에서 화면 어디에도 `HTTP [` 가 없다.
 
 이 빌드 뒤 main(`059ffb7d3e7`)까지 `bin/` 파일 13개가 바뀌었지만 `connection_badge`, `screen_title`, `detail_heading`, `surface_chrome`, `runtime_substrate_heading`, `pane_surface_title` 를 건드린 줄은 0줄이다(`git diff` 로 센 값). 이 RFC 의 줄 수와 함수 이름은 `059ffb7d3e7` 기준이다.
 
@@ -82,18 +83,18 @@ main 증명 빌드(`6ad837c7cac`, run 42154515127)를 시험용 서버에 붙여
 
 ### 1.4 화면이 직접 이어 붙이는 곳
 
-`connection_badge state` 는 `bin/` 의 55줄에서 불린다. 스크립트로 줄이 든 정의 하나의 글을 훑어 갈랐다(파서가 아니라서 "읽어 볼 곳"을 가리킨다).
+`connection_badge state` 는 `bin/` 의 50줄에서 불린다. 단어 경계를 두고 센 값이라 `usage_connection_badge state` 와 `compact_connection_badge state` 5줄은 뺐다. 스크립트로 줄이 든 정의 하나의 글을 훑어 갈랐다(파서가 아니라서 "읽어 볼 곳"을 가리킨다).
 
 | 무리 | 줄 | 뜻 |
 | --- | ---: | --- |
 | 라벨 인자(`~tail`·`~badge`)로 넘김 | 14 | 배지가 줄 끝에 온전히 남는 도구를 거친다 |
 | 화면이 `box_line` 으로 직접 그리는 머리 줄 | 19 | 제목 문자열에 배지를 이어 붙인다 |
-| `surface_chrome ~title` 에 문자열로 넘김 | 16 | 위와 같고 프레임이 줄 끝을 자른다 |
+| `surface_chrome ~title` 에 문자열로 넘김 | 12 | 위와 같고 프레임이 줄 끝을 자른다 |
 | 공용 제목 함수 | 2 | `pane_surface_title`(Code, Resources), `config_pane_title`(Config) |
-| 배지 함수의 가족 | 3 | `usage_connection_badge`, `compact_connection_badge`, `coordinator_status_row` |
+| 배지 함수의 가족 | 2 | `usage_connection_badge`, `coordinator_status_row` |
 | 분류 못 함 | 1 | `system_logs_status` |
 
-이어 붙이는 36줄(19 + 16 + 1)과 공용 제목 함수 2곳이 이 RFC 의 대상이다. 1.1 에서 잘린 네 화면은 세 무리에 모두 있다: Memory 와 Workspace 목록은 `surface_chrome ~title`, Fusion 목록은 직접 그리는 줄, Resources 는 공용 제목 함수다.
+이어 붙이는 32줄(19 + 12 + 1)과 공용 제목 함수 2곳이 이 RFC 의 대상이다. Usage 화면(`render_metrics`)은 `usage_connection_badge` 와 `compact_connection_badge` 를 불러서 이 표에 안 든다. 열린 질문 4 가 정한다. 1.1 에서 잘린 네 화면은 세 무리에 모두 있다: Memory 와 Workspace 목록은 `surface_chrome ~title`, Fusion 목록은 직접 그리는 줄, Resources 는 공용 제목 함수다.
 
 ## 2. 제안
 
@@ -123,6 +124,7 @@ val screen_chrome :
 ```
 
 - `screen_chrome` 은 `~title:string` 대신 `~heading` 을 받는다. 화면은 배지 없는 제목 줄을 고를 수 없다.
+- 제목 줄은 `screen_chrome` 안에서 `heading_row` 로 그린다. 사이드바가 있으면 `cols` 에서 사이드바 폭을 뺀 값으로 그린다. 호출자가 `heading_row` 를 미리 그려 넘기는 길은 없다.
 - 화면용 호출이 모두 옮겨 가면 `surface_chrome` 에서 `Chrome_screen` 갈래를 지운다. 덮개 호출(`~frame:Chrome_overlay`)은 문자열 제목 그대로 남는다.
 - 화면이 `surface_chrome` 을 안 거치고 `box_line` 으로 머리 줄을 직접 그리는 곳(19줄)은 `box_line buf cols (heading_row state ~cols heading)` 를 쓴다.
 
@@ -145,15 +147,15 @@ val screen_chrome :
 장점
 
 - 배지를 자를 수 있는 길이 없어진다. 화면은 배지를 문자열로 만지지 않고, 줄이 모자랄 때의 규칙은 `detail_heading` 한 곳에 있다.
-- 배지가 없던 화면(1.1 의 두 곳)도 `screen_chrome` 으로 옮기면 배지가 생긴다.
+- 배지가 없던 화면(1.1 의 세 곳)도 `heading` 으로 옮기면 배지가 생긴다.
 - 새 화면이 `screen_chrome` 을 쓰면 `heading` 을 만들어야 하고, 배지를 빼먹을 수 없다.
 
 단점
 
-- 층이 많다. 36곳, 14개 파일이고 층은 열 개쯤이다.
+- 층이 많다. 32곳, 14개 파일이고 층은 열 개쯤이다.
 - 화면마다 제목 글을 `lead`, `id`, `after` 로 가르는 판단이 든다. 지금은 문자열 하나다.
 - `box_line` 으로 머리 줄을 직접 그리는 화면(19곳)은 `heading_row` 를 안 부르고 배지 없는 문자열을 그릴 수 있다. 배지를 문자열로 이어 붙이는 길은 막히지만 배지를 빼는 길은 타입이 못 막는다.
-- Board 글 상세와 Task 검토 상세에 배지가 생긴다. 줄이 모자라면 `after` 가 먼저 빠진다. 두 곳 모두 배지를 뺀 이유를 적은 주석이 없다. Task 검토 상세(`verification_detail_pane`)와 같은 파일의 판정 상세(`harness_detail_pane`)는 `~tail:(connection_badge state)` 로 배지를 붙인다. 빼려던 것인지는 코드만으로 알 수 없다.
+- Board 글 상세, Task 검토 상세, Keeper 상세에 배지가 생긴다. 줄이 모자라면 `after` 가 먼저 빠진다. Keeper 상세는 탭 줄이 줄 폭을 다 쓰고 있어서(`tab_strip_width ~after:""`) 배지가 들어가면 탭 줄이 배지 폭만큼 줄어든다. 세 곳 모두 배지를 뺀 이유를 적은 주석이 없다. Task 검토 상세(`verification_detail_pane`)와 같은 파일의 판정 상세(`harness_detail_pane`)는 `~tail:(connection_badge state)` 로 배지를 붙인다. 빼려던 것인지는 코드만으로 알 수 없다.
 - 배지 자체가 줄보다 넓은 경우(1.2 의 산술)는 풀지 못한다. 열린 질문 4 이다.
 - 덮개 쪽에는 `surface_chrome` 이 남는다.
 
@@ -161,18 +163,18 @@ val screen_chrome :
 
 | | 하는 일 | 장점 | 단점 |
 | --- | --- | --- | --- |
-| A | 잘리는 네 화면만 `detail_heading` 으로 옮긴다(#49045 와 같은 방식) | 층이 네 개이고 빨리 끝난다 | 같은 원인의 다섯 번째 고침이다. 나머지 이어 붙인 곳과 새 화면이 같은 길로 간다. 배지 없는 두 화면은 그대로다 |
+| A | 잘리는 네 화면만 `detail_heading` 으로 옮긴다(#49045 와 같은 방식) | 층이 네 개이고 빨리 끝난다 | 같은 원인의 다섯 번째 고침이다. 나머지 이어 붙인 곳과 새 화면이 같은 길로 간다. 배지 없는 세 화면은 그대로다 |
 | B | CI 에서 `connection_badge state` 글자를 막는다 | 바뀌는 줄이 적다 | 글자 검사다. 다른 이름으로 감싸면 지나간다. 잘림이 아니라 이름을 막는다 |
 | C | 프레임이 줄 끝의 `[…]` 를 알아보고 자르지 않는다 | 화면을 안 고친다 | 글자 모양으로 배지를 알아보는 분류기다. 색 코드 사이에서 괄호를 찾아야 하고, Board 글 id `[p-7…2dbb499d]` 도 걸린다 |
-| D | 배지만 추상 타입 `Badge.t` 로 만들고 제목은 문자열로 둔다 | 바뀌는 곳이 적다 | 제목에 붙일 때 문자열이 필요해서 `Badge.to_string` 이 생긴다. 배지를 빼먹는 화면(1.1 의 두 곳)은 못 막는다 |
+| D | 배지만 추상 타입 `Badge.t` 로 만들고 제목은 문자열로 둔다 | 바뀌는 곳이 적다 | 제목에 붙일 때 문자열이 필요해서 `Badge.to_string` 이 생긴다. 배지를 빼먹는 화면(1.1 의 세 곳)은 못 막는다 |
 
 ## 4. 바뀌는 것과 하지 않는 것
 
 바뀌는 것
 
 - `masc_tui_render_prim.ml`·`.mli`: `heading`, `heading_row`, `screen_chrome`. 마지막 층에서 `connection_badge`·`usage_connection_badge` 를 지운다.
-- 제목 줄을 그리는 화면 파일 14개의 36곳과 공용 제목 함수 2곳.
-- 사용자에게 보이는 것: 잘리던 5줄이 온전해지고, 배지가 없던 두 화면에 배지가 생긴다.
+- 제목 줄을 그리는 화면 파일 14개의 32곳과 공용 제목 함수 2곳.
+- 사용자에게 보이는 것: 잘리던 5줄이 온전해지고, 배지가 없던 세 화면에 배지가 생긴다.
 
 하지 않는 것
 
@@ -180,6 +182,7 @@ val screen_chrome :
 - 본문, 푸터, 키.
 - 화면 배치 시험.
 - Usage 의 짧은 말 배지(`compact_connection_badge`)는 옮기지 않는다. 열린 질문 4 가 정한 뒤에 한다.
+- 덮개(`Chrome_overlay`)는 바꾸지 않는다. 덮개가 열려 있는 동안은 화면 머리가 가려져서 덮개 위에서는 `[workspace mismatch]` 가 안 보인다. 이 RFC 는 그 경우를 다루지 않는다.
 
 ## 5. 층
 
@@ -188,17 +191,17 @@ val screen_chrome :
 3. Code·Resources(`pane_surface_title`).
 4. Keepers(4곳).
 5. Lanes(Clients 를 포함한 3곳).
-6. Runtime(6곳 중 Usage 넷을 뺀 둘).
+6. Runtime(2곳).
 7. Verification(6곳).
 8. Work(3곳), Board(2곳), Connectors(2곳), Approvals(1곳), Chat(1곳), Activity(2곳), Repositories 목록(Workspace 화면, 2곳).
-9. 배지가 없는 Board 글 상세(`board_read_title`)와 Task 검토 상세(`verification_detail_pane`).
+9. 배지가 없는 Board 글 상세(`board_read_title`), Task 검토 상세(`verification_detail_pane`), Keeper 상세(`render_keeper_detail` 의 탭 줄). 이 층 전에 세 화면을 만든 쪽에 배지를 뺀 뜻이 있었는지 묻는다.
 10. 마지막: `connection_badge`·`usage_connection_badge` 를 `.mli` 에서 빼고 `Chrome_screen` 갈래를 지운다.
 
-층 수와 묶음은 파일 단위 추정이다. 층 1 을 만들 때 36곳의 `lead`·`id`·`after` 나눔을 표로 먼저 낸다.
+층 수와 묶음은 파일 단위 추정이다. 층 1 을 만들 때 32곳의 `lead`·`id`·`after` 나눔을 표로 먼저 낸다.
 
 ## 6. 열린 질문
 
-1. 방향. 이 RFC(열 층쯤)와 A(잘리는 네 화면만 고치기) 중 어느 쪽인가. 이 RFC 를 제안한다. 같은 원인의 다섯 번째 고침이고, 배지가 없는 화면이 둘 있기 때문이다. A 는 잘림만 고치므로 이 둘은 다섯 크기 모두에서 배지 없이 남는다.
+1. 방향. 이 RFC(열 층쯤)와 A(잘리는 네 화면만 고치기) 중 어느 쪽인가. 이 RFC 를 제안한다. 같은 원인의 다섯 번째 고침이고, 배지가 없는 화면이 셋 있기 때문이다. A 는 잘림만 고치므로 이 셋은 다섯 크기 모두에서 배지 없이 남는다.
 2. chrome 을 화면용과 덮개용으로 나눌지, `title` 을 변형 타입(`Heading` 과 `Plain`)으로 둘지. 나누기를 제안한다. 변형 타입은 화면이 `Plain` 을 골라 배지를 빼는 길을 열어 둔다.
 3. 시계를 `after` 의 마지막 조각으로 통일할지, 꼬리에 둘지. Activity 는 지금 꼬리에 두므로 `after` 로 옮기면 Activity 의 시계가 줄이 모자랄 때 빠진다.
 4. 배지 자체가 줄보다 넓은 경우. Usage 의 `compact_connection_badge` 처럼 짧은 말로 바꾸는 규칙을 `heading_row` 에 넣을지, 이 RFC 밖에서 따로 할지. 넣으면 `detail_heading` 의 "꼬리는 줄이지 않는다"는 규칙이 "꼬리는 더 짧은 완전한 말로 바뀐다"로 바뀐다.

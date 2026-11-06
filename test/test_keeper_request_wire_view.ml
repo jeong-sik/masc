@@ -66,6 +66,7 @@ let view ~front history : Try_provider.request_view =
     ~to_wire:(Agent_core.History.to_wire_message (Agent_core.History.Memory_store.create ()))
     ~provider_config
     ~measure_message_bytes
+    ~measure_wire_bytes:(Masc.Keeper_model_input_wire_bytes.measurer ~config:provider_config)
     ~accepted:None ~front
     ~history_digest_at:(Window.atom_opening_digest history)
     ~current_turn_results:Try_provider.Current_turn_verbatim

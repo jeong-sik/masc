@@ -112,12 +112,41 @@ let bind_completed_arguments ~completed_before ~seed ~replay_prefix messages =
   bind_messages 0 Occurrences.empty labelled messages
 ;;
 
-type payload_kind = Result_body | Call_arguments
+(* Where one stored body sits in its block. A [ToolResult] has its [content],
+   and one whose [content_blocks] is [Some] also has each [Text] block, named
+   by its index among the blocks. Which of them reaches the wire depends on the
+   provider encoder, so every one is a body of its own (RFC-0363 §3.1.2). *)
+type payload_kind =
+  | Result_body
+  | Result_text_block of int
+  | Call_arguments
 
 let payload_mime = function
-  | Result_body -> "text/plain"
+  | Result_body | Result_text_block _ -> "text/plain"
   | Call_arguments -> "application/json"
 ;;
+
+let compare_payload_kind left right =
+  match left, right with
+  | Result_body, Result_body | Call_arguments, Call_arguments -> 0
+  | Result_text_block left, Result_text_block right -> Int.compare left right
+  | Result_body, (Result_text_block _ | Call_arguments)
+  | Result_text_block _, Call_arguments -> -1
+  | Result_text_block _, Result_body
+  | Call_arguments, (Result_body | Result_text_block _) -> 1
+;;
+
+(* One body: the block it belongs to and its place in that block. A result
+   has one slot for [content] and one for each demoted [Text] block. *)
+type slot = occurrence * payload_kind
+
+module Slots = Map.Make (struct
+  type t = slot
+
+  let compare (left_occurrence, left_kind) (right_occurrence, right_kind) =
+    let c = compare_occurrence left_occurrence right_occurrence in
+    if c <> 0 then c else compare_payload_kind left_kind right_kind
+end)
 
 type pending =
   { occurrence : occurrence
@@ -138,26 +167,58 @@ type materialize_outcome =
   ; reverted : int
   }
 
-(* A body is demotable only in the shape the provider encoder actually
-   serializes. [content_blocks = Some] makes [content] dead weight that is
-   never emitted (agent_core api_common.ml: the [Some] arm maps the blocks and
-   drops [content]), so rewriting it would free nothing while the caller
-   credited a saving — an under-estimate, which is the direction that lets a
-   materialized request exceed the cap. [Invalid_marker] is marker-shaped
-   content that failed to parse; storing it would give a corrupt payload a
-   permanent content address, so it is left untouched and stays visible. A
-   body shorter than [min_bytes] is left as it is before any of that is read. *)
-let demotable_body ~min_bytes (block : Agent_core.Types.content_block) =
+(* [Invalid_marker] is marker-shaped text that failed to parse; storing it
+   would give a corrupt payload a permanent content address, so it is left
+   untouched and stays visible. *)
+let demotable_text text =
+  match Tool_output.decode_from_agent_core text with
+  | Tool_output.Not_marker -> true
+  | Tool_output.Decoded _ | Tool_output.Invalid_marker _ -> false
+;;
+
+(* The [Text] blocks of a result's [content_blocks], each with its index. A
+   result's blocks hold text and media only: every producer builds them from
+   MCP text, image and audio content or from a built-in tool's text and image,
+   so no [ToolResult] nests inside one. *)
+let inner_texts blocks =
+  List.concat
+    (List.mapi
+       (fun index (inner : Agent_core.Types.content_block) ->
+          match inner with
+          | Agent_core.Types.Text text -> [ index, text ]
+          | Agent_core.Types.Thinking _ | Agent_core.Types.ReasoningDetails _
+          | Agent_core.Types.RedactedThinking _ | Agent_core.Types.ToolUse _
+          | Agent_core.Types.ToolResult _ | Agent_core.Types.Image _
+          | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> [])
+       blocks)
+;;
+
+(* The text one result carries on one lane: [content], or with [Some] the
+   longer of [content] and the sum of its [Text] blocks. [min_bytes] checks
+   the whole result, as it checks a result whose blocks are [None], so a
+   result whose text is split over small blocks is as large as its sum. *)
+let result_text_bytes ~content texts =
+  max (String.length content)
+    (List.fold_left (fun sum (_index, text) -> sum + String.length text) 0 texts)
+;;
+
+(* The text bodies of a block that some provider encoder serializes: a
+   result's [content], and with [Some] each of its [Text] blocks. Which of
+   them a given provider sends is the lane's measure to say ([plan]). Each is
+   a candidate once the result reaches [min_bytes]. An image, document or
+   audio block has no marker form and keeps its place. *)
+let demotable_bodies ~min_bytes (block : Agent_core.Types.content_block) =
   match block with
-  | Agent_core.Types.ToolResult { content; content_blocks = None; _ }
-    ->
-    if String.length content < min_bytes
-    then None
+  | Agent_core.Types.ToolResult { content; content_blocks; _ } ->
+    let texts = Option.fold ~none:[] ~some:inner_texts content_blocks in
+    if result_text_bytes ~content texts < min_bytes
+    then []
     else
-      (match Tool_output.decode_from_agent_core content with
-       | Tool_output.Not_marker -> Some content
-       | Tool_output.Decoded _ | Tool_output.Invalid_marker _ -> None)
-  | Agent_core.Types.ToolResult { content_blocks = Some _; _ }
+      (if demotable_text content then [ Result_body, content ] else [])
+      @ List.filter_map
+          (fun (index, text) ->
+             if demotable_text text then Some (Result_text_block index, text) else None)
+          texts
   | Agent_core.Types.Text _
   | Agent_core.Types.Thinking _
   | Agent_core.Types.ReasoningDetails _
@@ -165,21 +226,57 @@ let demotable_body ~min_bytes (block : Agent_core.Types.content_block) =
   | Agent_core.Types.ToolUse _
   | Agent_core.Types.Image _
   | Agent_core.Types.Document _
-  | Agent_core.Types.Audio _ -> None
+  | Agent_core.Types.Audio _ -> []
 ;;
 
-let with_reference (block : Agent_core.Types.content_block) reference =
+(* The block with its [index]-th tool-result block replaced; [None] when the
+   block has no such slot. *)
+let with_result_block index replacement (block : Agent_core.Types.content_block) =
   match block with
-  | Agent_core.Types.ToolResult fields ->
-    Agent_core.Types.ToolResult
-      { fields with content = Tool_output.encode_for_agent_core (Tool_output.Stored reference) }
-  | Agent_core.Types.ToolUse fields ->
-    Agent_core.Types.ToolUse
-      { fields with input = Tool_output.normalized_artifact_ref_to_json reference }
-  | (Agent_core.Types.Text _ | Agent_core.Types.Thinking _
-    | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
-    | Agent_core.Types.Image _ | Agent_core.Types.Document _
-    | Agent_core.Types.Audio _) as other -> other
+  | Agent_core.Types.ToolResult ({ content_blocks = Some blocks; _ } as fields)
+    when index < List.length blocks ->
+    Some
+      (Agent_core.Types.ToolResult
+         { fields with
+           content_blocks =
+             Some (List.mapi (fun at inner -> if Int.equal at index then replacement else inner) blocks)
+         })
+  | Agent_core.Types.ToolResult { content_blocks = Some _ | None; _ }
+  | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
+  | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
+  | Agent_core.Types.ToolUse _ | Agent_core.Types.Image _
+  | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> None
+;;
+
+(* The block with its tool-result [content] replaced; [None] when the block
+   is not a tool result. *)
+let with_result_content content (block : Agent_core.Types.content_block) =
+  match block with
+  | Agent_core.Types.ToolResult fields -> Some (Agent_core.Types.ToolResult { fields with content })
+  | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
+  | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
+  | Agent_core.Types.ToolUse _ | Agent_core.Types.Image _
+  | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> None
+;;
+
+(* The block with the slot [kind] names holding [reference]; [None] when the
+   block has no such slot. [plan] names only slots it read from the same
+   block. *)
+let with_reference kind (block : Agent_core.Types.content_block) reference =
+  let marker () = Tool_output.encode_for_agent_core (Tool_output.Stored reference) in
+  match kind with
+  | Result_body -> with_result_content (marker ()) block
+  | Result_text_block index -> with_result_block index (Agent_core.Types.Text (marker ())) block
+  | Call_arguments ->
+    (match block with
+     | Agent_core.Types.ToolUse fields ->
+       Some
+         (Agent_core.Types.ToolUse
+            { fields with input = Tool_output.normalized_artifact_ref_to_json reference })
+     | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
+     | Agent_core.Types.ReasoningDetails _ | Agent_core.Types.RedactedThinking _
+     | Agent_core.Types.ToolResult _ | Agent_core.Types.Image _
+     | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> None)
 ;;
 
 (* Addressing and planning use the same preview, MIME and byte count. Fixed
@@ -190,8 +287,18 @@ let planned_reference ~kind ~sha256 ~bytes =
   |> Result.to_option
 ;;
 
+(* Whether a marker in one body made the lane's request smaller. A body the
+   lane does not send leaves its bytes equal, and a marker longer than the
+   body once the lane has escaped both makes them grow; neither is kept. A
+   measure the lane refused keeps nothing. *)
+let shrinks_on_the_wire ~before ~after =
+  match before, after with
+  | Some before, Some after -> after < before
+  | Some (_ : int), None | None, (Some _ | None) -> false
+;;
+
 let plan ?(completed_arguments = Occurrences.empty) ?(min_result_bytes = 0)
-    ~measure_message_bytes ~demote_before messages =
+    ~measure_message_bytes ~measure_wire_bytes ~demote_before messages =
   let labelled, _atom_count = Runtime_model_input_tail_window.annotate messages in
   if demote_before <= 0 && Occurrences.is_empty completed_arguments
   then { messages; pending = [] }
@@ -217,35 +324,68 @@ let plan ?(completed_arguments = Occurrences.empty) ?(min_result_bytes = 0)
              let content =
                List.mapi
                  (fun block_index block ->
-                    let payload =
+                    let payloads =
                       match Occurrences.find_opt (message_index, block_index) completed_arguments with
-                      | Some (original, bytes) when original == block -> Some (Call_arguments, bytes)
+                      | Some (original, bytes) when original == block -> [ Call_arguments, bytes ]
                       | Some _ | None ->
-                        if aged
-                        then
-                          Option.map (fun bytes -> Result_body, bytes)
-                            (demotable_body ~min_bytes:min_result_bytes block)
-                        else None
+                        if aged then demotable_bodies ~min_bytes:min_result_bytes block else []
                     in
-                    match payload with
-                    | None -> block
-                    | Some (kind, body) ->
-                      (* A bounded, distinct lookup token for this plan, not a
-                         content address. All digest hex digits encode with
-                         equal width. Physical block identity remains the
-                         authority when materializing the token. *)
-                      let placeholder_sha256 =
+                    (* A bounded, distinct lookup token for this plan, not a
+                       content address. All digest hex digits encode with
+                       equal width. A [Text] block's token opens with [f],
+                       which a whole block's never does, so the two never
+                       share a token. Physical block identity remains the
+                       authority when materializing the token. *)
+                    let placeholder_sha256 = function
+                      | Result_body | Call_arguments ->
                         Printf.sprintf "%032x%032x" message_index block_index
-                      in
-                      (match planned_reference ~kind ~sha256:placeholder_sha256 ~bytes:body with
-                       | None -> block
-                       | Some reference ->
-                         let placeholder = with_reference block reference in
-                         staged :=
-                           { occurrence = message_index, block_index
-                           ; original = block; placeholder; placeholder_sha256
-                           ; bytes = body; kind } :: !staged;
-                         placeholder))
+                      | Result_text_block index ->
+                        Printf.sprintf "f%021x%021x%021x" message_index block_index index
+                    in
+                    (* A result body is kept as a marker only when the lane's
+                       request for this block alone shrinks with it, each body
+                       measured on top of the ones already kept: the lane
+                       decides which bodies it sends and how often it escapes
+                       them. Arguments are the whole input and keep the
+                       per-message comparison alone. *)
+                    let wire_bytes candidate =
+                      measure_wire_bytes { message with content = [ candidate ] }
+                    in
+                    let placeholder, _wire, planned =
+                      List.fold_left
+                        (fun ((current, wire, planned) as unchanged) (kind, body) ->
+                           let token = placeholder_sha256 kind in
+                           match
+                             Option.bind
+                               (planned_reference ~kind ~sha256:token ~bytes:body)
+                               (with_reference kind current)
+                           with
+                           | None -> unchanged
+                           | Some candidate ->
+                             (match kind with
+                              | Call_arguments -> candidate, wire, (kind, body, token) :: planned
+                              | Result_body | Result_text_block _ ->
+                                let before = Lazy.force wire in
+                                let after = wire_bytes candidate in
+                                if shrinks_on_the_wire ~before ~after
+                                then candidate, Lazy.from_val after, (kind, body, token) :: planned
+                                else unchanged))
+                        (block, lazy (wire_bytes block), [])
+                        payloads
+                    in
+                    match planned with
+                    | [] -> block
+                    | _ :: _ ->
+                      staged :=
+                        List.rev_append
+                          (List.rev_map
+                             (fun (kind, body, token) ->
+                                { occurrence = message_index, block_index
+                                ; original = block; placeholder; placeholder_sha256 = token
+                                ; bytes = body; kind })
+                             planned)
+                          !staged;
+                      placeholder)
                  message.content
              in
              if !staged = []
@@ -277,12 +417,15 @@ type memo_entry =
   ; address : Tool_blob_store.addressed
   }
 
-type address_memo = (occurrence, memo_entry) Hashtbl.t
+type address_memo = (slot, memo_entry) Hashtbl.t
 
 let create_address_memo () = Hashtbl.create 64
 
 module Sha256_map = Map.Make (String)
 
+(* The entries whose placeholder is this exact block. A result carries one
+   placeholder marker per demoted body, its [content] and each demoted [Text]
+   block, so it has one entry per body; a call has at most one. *)
 let pending_lookup pending =
     let placeholders =
       List.fold_left
@@ -296,33 +439,54 @@ let pending_lookup pending =
         Sha256_map.empty
         pending
     in
-    let planned_entry (block : Agent_core.Types.content_block) =
-      let reference =
+    let marker_reference text =
+      match Tool_output.decode_from_agent_core text with
+      | Tool_output.Not_marker | Tool_output.Invalid_marker _ -> None
+      | Tool_output.Decoded reference -> Some reference
+    in
+    let planned_entries (block : Agent_core.Types.content_block) =
+      let references =
         match block with
-        | Agent_core.Types.ToolResult { content; content_blocks = None; _ } ->
-          (match Tool_output.decode_from_agent_core content with
-           | Tool_output.Not_marker | Tool_output.Invalid_marker _ -> None
-           | Tool_output.Decoded reference -> Some reference)
+        | Agent_core.Types.ToolResult { content; content_blocks; _ } ->
+          let inner_references =
+            match content_blocks with
+            | None -> []
+            | Some blocks ->
+              List.filter_map
+                (fun (inner : Agent_core.Types.content_block) ->
+                   match inner with
+                   | Agent_core.Types.Text text -> marker_reference text
+                   | Agent_core.Types.Thinking _ | Agent_core.Types.ReasoningDetails _
+                   | Agent_core.Types.RedactedThinking _ | Agent_core.Types.ToolUse _
+                   | Agent_core.Types.ToolResult _ | Agent_core.Types.Image _
+                   | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> None)
+                blocks
+          in
+          Option.to_list (marker_reference content) @ inner_references
         | Agent_core.Types.ToolUse { input; _ } ->
           (match Tool_output.normalized_artifact_ref_of_json input with
            | Tool_output.Not_normalized_artifact_ref
-           | Tool_output.Invalid_normalized_artifact_ref _ -> None
-           | Tool_output.Decoded_normalized_artifact_ref reference -> Some reference)
-        | Agent_core.Types.ToolResult { content_blocks = Some _; _ }
+           | Tool_output.Invalid_normalized_artifact_ref _ -> []
+           | Tool_output.Decoded_normalized_artifact_ref reference -> [ reference ])
         | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
         | Agent_core.Types.RedactedThinking _ | Agent_core.Types.ReasoningDetails _
         | Agent_core.Types.Image _ | Agent_core.Types.Document _
-        | Agent_core.Types.Audio _ -> None
+        | Agent_core.Types.Audio _ -> []
       in
-      Option.bind reference (fun reference ->
-        match Sha256_map.find_opt reference.Tool_output.sha256 placeholders with
-        | Some entries ->
-          List.find_opt (fun (entry : pending) -> block == entry.placeholder) entries
-        | None -> None)
+      List.concat_map
+        (fun reference ->
+           match Sha256_map.find_opt reference.Tool_output.sha256 placeholders with
+           | Some entries ->
+             List.filter (fun (entry : pending) -> block == entry.placeholder) entries
+           | None -> [])
+        references
     in
-    planned_entry
+    planned_entries
 ;;
 
+(* Outcomes are kept per block: every entry of one block shares its
+   occurrence, original and placeholder, and the materialized block holds all
+   of its slots at once. *)
 type materialized_replay =
   (Agent_core.Types.content_block * Agent_core.Types.content_block) Occurrences.t
 
@@ -333,9 +497,9 @@ let capture_materialized ~pending ~before ~after =
     | [], [] -> Some outcomes
     | block :: before, replacement :: after ->
       (match lookup block with
-       | Some entry ->
+       | entry :: _ ->
          blocks (Occurrences.add entry.occurrence (entry.original, replacement) outcomes) before after
-       | None -> if block = replacement then blocks outcomes before after else None)
+       | [] -> if block = replacement then blocks outcomes before after else None)
     | [], _ :: _ | _ :: _, [] -> None
   in
   let rec messages outcomes before after =
@@ -358,8 +522,8 @@ let replay_materialized captured ~pending messages =
   List.map (fun (message : Agent_core.Types.message) ->
     let content = List.map (fun block ->
       match lookup block with
-      | None -> block
-      | Some entry ->
+      | [] -> block
+      | entry :: _ ->
         (match Option.bind captured (Occurrences.find_opt entry.occurrence) with
          | Some (original, replacement) when original == entry.original -> replacement
          | Some _ | None -> entry.original)) message.content in
@@ -370,64 +534,83 @@ let materialize ~store ~addresses ~pending messages =
   if pending = []
   then { messages; reverted = 0 }
   else (
-    let planned_entry = pending_lookup pending in
+    let planned_entries = pending_lookup pending in
+    let slot_of (entry : pending) = entry.occurrence, entry.kind in
     let address_of (entry : pending) =
-      match Hashtbl.find_opt addresses entry.occurrence with
+      match Hashtbl.find_opt addresses (slot_of entry) with
       | Some memo when memo.original == entry.original -> Some memo.address
       | Some _ | None -> None
     in
     (* Only retained placeholders need addressing. The queue is keyed by
-       occurrence, so even repeated IDs with equal previews stay independent.
+       slot, so even repeated IDs with equal previews stay independent, and
+       so do the [Text] blocks of one result.
        Hashing stays in the CPU pool; writes remain on the owning fiber. *)
     let queued =
       List.fold_left
         (fun acc (message : Agent_core.Types.message) ->
            List.fold_left
              (fun acc block ->
-                match planned_entry block with
-                | None -> acc
-                | Some entry ->
-                  (match address_of entry with
-                   | Some _ -> acc
-                   | None -> Occurrences.add entry.occurrence entry acc))
+                List.fold_left
+                  (fun acc entry ->
+                     match address_of entry with
+                     | Some _ -> acc
+                     | None -> Slots.add (slot_of entry) entry acc)
+                  acc
+                  (planned_entries block))
              acc
              message.content)
-        Occurrences.empty
+        Slots.empty
         messages
     in
     List.iter
-      (fun (occurrence, memo) -> Hashtbl.replace addresses occurrence memo)
-      (match Occurrences.fold (fun _ entry acc -> entry :: acc) queued [] with
+      (fun (slot, memo) -> Hashtbl.replace addresses slot memo)
+      (match Slots.fold (fun _ entry acc -> entry :: acc) queued [] with
        | [] -> []
        | _ :: _ as to_address ->
          Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
            List.map
              (fun (entry : pending) ->
-                entry.occurrence,
+                slot_of entry,
                 { original = entry.original
                 ; address = Tool_blob_store.address store ~bytes:entry.bytes ~mime:(payload_mime entry.kind)
                 })
              to_address));
+    (* A placeholder's block is built again from its original, with a real
+       marker in each slot whose body was written. A slot whose write failed
+       is never touched, so it keeps the original body and the result's other
+       slots keep the markers that were written. [plan] read every slot from
+       this same original, so a slot it cannot find again is a broken plan. *)
     let reverted = ref 0 in
+    let written (entry : pending) current reference =
+      match with_reference entry.kind current reference with
+      | Some block -> block
+      | None ->
+        invalid_arg
+          "Keeper_model_input_demotion.materialize: a planned slot is not in its original block"
+    in
     let messages =
       List.map
         (fun (message : Agent_core.Types.message) ->
            let content =
              List.map
                (fun block ->
-                  match planned_entry block with
-                  | None -> block
-                  | Some entry ->
-                    (match address_of entry with
-                     | None ->
-                       incr reverted;
-                       entry.original
-                     | Some address ->
-                       (match Tool_blob_store.put_addressed address with
-                        | Tool_output.Stored reference -> with_reference block reference
-                        | exception Sys_error _ ->
-                          incr reverted;
-                          entry.original)))
+                  match planned_entries block with
+                  | [] -> block
+                  | (first : pending) :: _ as entries ->
+                    List.fold_left
+                      (fun current (entry : pending) ->
+                         match address_of entry with
+                         | None ->
+                           incr reverted;
+                           current
+                         | Some address ->
+                           (match Tool_blob_store.put_addressed address with
+                            | Tool_output.Stored reference -> written entry current reference
+                            | exception Sys_error _ ->
+                              incr reverted;
+                              current))
+                      first.original
+                      entries)
                message.content
            in
            { message with content })

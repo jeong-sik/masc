@@ -130,7 +130,8 @@ let test_a_refused_seed_moves_the_turns_front_to_the_turn_boundary () =
           in
           let composed =
             Try_provider.For_testing.compose_carried_model_input
-              ?continuity ~measure_message_bytes:(fun _ -> 1) ~accepted:None ~front
+              ?continuity ~measure_message_bytes:(fun _ -> 1) ~measure_wire_bytes:(fun _ -> None)
+              ~accepted:None ~front
               ~history_digest_at:digest_at ~current_turn_results:Try_provider.Current_turn_verbatim ~base_path:""
               ~turn_boundary:(Front.Turn_boundary { end_atom = boundary })
               history
@@ -267,7 +268,8 @@ let librarian_turn ?(refusal = overflow) ?(refuses = fun ~atoms:_ -> false)
       ~attempt:(fun () ->
         let composed =
           Try_provider.For_testing.compose_carried_model_input
-            ~continuity ~measure_message_bytes:(fun _ -> 1) ~front:None
+            ~continuity ~measure_message_bytes:(fun _ -> 1) ~measure_wire_bytes:(fun _ -> None)
+            ~front:None
             ~accepted:(match !held with Some _ as held -> held | None -> accepted)
             ~history_digest_at:digest_at ~current_turn_results:Try_provider.Current_turn_verbatim
             ~base_path:""

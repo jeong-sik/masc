@@ -887,6 +887,7 @@ module For_testing : sig
     ?completed_arguments:Keeper_model_input_demotion.completed_arguments ->
     ?finished_turn_results:finished_turn_results ->
     measure_message_bytes:(Agent_core.Types.message -> int) ->
+    measure_wire_bytes:(Agent_core.Types.message -> int option) ->
     front:Keeper_carried_front.seed option ->
     accepted:Keeper_carried_front.seed option ->
     history_digest_at:(int -> string option) ->
@@ -903,6 +904,7 @@ module For_testing : sig
     ?tools:Yojson.Safe.t list ->
     provider_config:Agent_core.Llm_provider.Provider_config.t ->
     measure_message_bytes:(Agent_core.Types.message -> int) ->
+    measure_wire_bytes:(Agent_core.Types.message -> int option) ->
     front:Keeper_carried_front.seed option ->
     accepted:Keeper_carried_front.seed option ->
     history_digest_at:(int -> string option) ->
@@ -923,7 +925,9 @@ module For_testing : sig
   (** Whether [demoted], the refused range composed under
       {!Current_turn_demoted}, carries fewer bytes than [refused], both
       measured with the plan's placeholders: the refused request's atom count
-      when it does, [None] when there is nothing to demote in it. *)
+      when it does, [None] when there is nothing to demote in it. A body the
+      lane's encoder does not send is never demoted, so fewer bytes here are
+      fewer on that lane's wire. *)
 
   val carried_front :
     ledger:Keeper_model_input_ledger.t option ref ->

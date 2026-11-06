@@ -1129,12 +1129,12 @@ let applied_demote_before ~base_path ~demote_before =
   if String.equal base_path "" then 0 else demote_before
 ;;
 
-let demotion_plan ?completed_arguments ?min_result_bytes ~measure_message_bytes ~base_path
-      ~demote_before messages =
+let demotion_plan ?completed_arguments ?min_result_bytes ~measure_message_bytes
+      ~measure_wire_bytes ~base_path ~demote_before messages =
   if String.equal base_path ""
   then { Keeper_model_input_demotion.messages; pending = [] }
   else Keeper_model_input_demotion.plan ?completed_arguments ?min_result_bytes
-      ~measure_message_bytes ~demote_before messages
+      ~measure_message_bytes ~measure_wire_bytes ~demote_before messages
 ;;
 
 (* Where a request's carried range opens (RFC keeper-context-window-in-tokens
@@ -1313,6 +1313,7 @@ let compose_carried_model_input
       ?completed_arguments
       ?(finished_turn_results = Finished_turns_verbatim)
       ~measure_message_bytes
+      ~measure_wire_bytes
       ~(front : Keeper_carried_front.seed option)
       ~(accepted : Keeper_carried_front.seed option)
       ~(history_digest_at : int -> string option)
@@ -1347,10 +1348,11 @@ let compose_carried_model_input
        | Finished_turns_as_markers ->
          let finished = finished_turn_atoms ~atom_count:history_atom_count turn_boundary in
          ( demotion_plan ~min_result_bytes:aged_result_min_bytes ~measure_message_bytes
+             ~measure_wire_bytes
              ~base_path ~demote_before:finished messages
          , applied_demote_before ~base_path ~demote_before:finished ))
     | Current_turn_demoted { refused_atom_count } ->
-      ( demotion_plan ?completed_arguments ~measure_message_bytes ~base_path
+      ( demotion_plan ?completed_arguments ~measure_message_bytes ~measure_wire_bytes ~base_path
           ~demote_before:refused_atom_count messages
       , applied_demote_before ~base_path ~demote_before:refused_atom_count )
   in
@@ -1381,9 +1383,12 @@ let compose_carried_model_input
 (* Whether demoting the refused request's tool results changes it: the same
    range composed under [Current_turn_demoted], against the range it composed,
    both measured with the plan's placeholders, which no stored marker exceeds.
-   Fewer bytes means the resend differs from the refused request; equal means
-   there is nothing to demote in it. The answer is the refused request's atom
-   count, the boundary the demotion moves past. *)
+   Fewer bytes means the resend differs from the refused request on this
+   lane's wire too: a result body leaves as a marker only when this lane's
+   encoder sends fewer bytes with it ([Keeper_model_input_demotion.plan]), so
+   a body the lane does not send never counts. Equal means there is nothing
+   to demote in it. The answer is the refused request's atom count, the
+   boundary the demotion moves past. *)
 let current_turn_demotion ~(refused : composed) ~(demoted : composed) =
   if demoted.transmitted_bytes < refused.transmitted_bytes
   then Some refused.history_atom_count
@@ -1437,6 +1442,7 @@ let unchecked_request_view
       ?finished_turn_results
       ~provider_config
       ~measure_message_bytes
+      ~measure_wire_bytes
       ~front
       ~accepted
       ~history_digest_at
@@ -1452,6 +1458,7 @@ let unchecked_request_view
       compose_carried_model_input
         ?continuity ?completed_arguments ?finished_turn_results
         ~measure_message_bytes
+        ~measure_wire_bytes
         ~front
         ~accepted
         ~history_digest_at
@@ -1507,13 +1514,14 @@ let carried_source_indices ~messages (view : request_view) =
 
 let request_view
       ?continuity ?completed_arguments ?finished_turn_results
-      ?(tools = []) ~provider_config ~measure_message_bytes ~front ~accepted
-      ~history_digest_at ~current_turn_results ~base_path
+      ?(tools = []) ~provider_config ~measure_message_bytes ~measure_wire_bytes ~front
+      ~accepted ~history_digest_at ~current_turn_results ~base_path
       ~turn_boundary ~materialize ~to_wire messages =
   let open Result.Syntax in
   let build ?(materialize = materialize) completed_arguments =
     unchecked_request_view ~tools ?continuity ?completed_arguments ?finished_turn_results
-      ~provider_config ~measure_message_bytes ~front ~accepted ~history_digest_at
+      ~provider_config ~measure_message_bytes ~measure_wire_bytes ~front ~accepted
+      ~history_digest_at
       ~current_turn_results ~base_path ~turn_boundary ~materialize
       ~to_wire messages
   in
@@ -1740,6 +1748,13 @@ let bounded_model_input_projection
   let measure_message_bytes =
     memoize_message_measurement (Keeper_context_core.message_measurer ())
   in
+  (* This attempt's own encoder, which decides whether a marker makes a
+     result smaller on the wire this lane sends (RFC-0363 §3.1.2). Memoized
+     for the same reason and with the same safety: every request of the
+     attempt asks it about the same aged results. *)
+  let measure_wire_bytes =
+    memoize_message_measurement (Keeper_model_input_wire_bytes.measurer ~config:provider_config)
+  in
   (* Scoped to the attempt for the same reason and with the same safety: once
      a size refusal demotes, every later request of this attempt demotes the
      same refused atoms, and addressing one is a
@@ -1910,6 +1925,7 @@ let bounded_model_input_projection
         ~tools:prefix_tools
         ~provider_config
         ~measure_message_bytes
+        ~measure_wire_bytes
         ~front
         ~accepted
         ~history_digest_at
@@ -1972,6 +1988,7 @@ let bounded_model_input_projection
                compose_carried_model_input
                  ?continuity:(input_continuity ctx.request_input) ?completed_arguments
                  ~measure_message_bytes
+                 ~measure_wire_bytes
                  ~front
                  ~accepted
                  ~history_digest_at

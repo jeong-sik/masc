@@ -41,7 +41,7 @@ let resume_has_carrier (delivery : Host.resume_delivery) messages =
     (Host.encode_history_message (carrier messages))
 let compose ?accepted continuity history =
   Driver.For_testing.compose_carried_model_input ~continuity ~measure_message_bytes:measure
-    ~front:None ~accepted ~history_digest_at:(Window.atom_opening_digest history)
+    ~measure_wire_bytes:(fun _ -> None) ~front:None ~accepted ~history_digest_at:(Window.atom_opening_digest history)
     ~current_turn_results:Driver.Current_turn_verbatim ~base_path:(Filename.get_temp_dir_name ())
     ~turn_boundary:(Front.Turn_boundary {end_atom=2}) history
 

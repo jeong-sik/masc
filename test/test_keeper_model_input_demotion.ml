@@ -29,6 +29,10 @@ let measure_message_bytes (m : Types.message) =
     (Yojson.Safe.to_string (Masc.Keeper_context_core.message_to_json m))
 ;;
 
+(* The stored JSON as a lane's own measure: one JSON escape over every body
+   the result holds. Tests that name no provider plan against it. *)
+let stored_wire_bytes (m : Types.message) = Some (measure_message_bytes m)
+
 let tool_message ?(content_blocks = None) ~id body : Types.message =
   { origin = Llm_provider.Types.Conversation;  role = Types.Tool
   ; content =
@@ -93,7 +97,7 @@ let this_turns_results_survive_the_boundary () =
       ~message_index:(List.length earlier)
   in
   let planned =
-    Demotion.plan ~measure_message_bytes ~demote_before messages
+    Demotion.plan ~measure_wire_bytes:stored_wire_bytes ~measure_message_bytes ~demote_before messages
   in
   let transmitted = markers planned.Demotion.messages in
   Alcotest.(check int)
@@ -120,7 +124,7 @@ let a_turn_that_produced_nothing_demotes_everything_before_it () =
       ~message_index:(List.length messages)
   in
   let planned =
-    Demotion.plan ~measure_message_bytes ~demote_before messages
+    Demotion.plan ~measure_wire_bytes:stored_wire_bytes ~measure_message_bytes ~demote_before messages
   in
   Alcotest.(check int)
     "the seeded history is all earlier work"
@@ -157,10 +161,10 @@ let a_split_atom_at_the_boundary_never_gets_demoted_half () =
     true
     (demote_before_1 <> demote_before_2);
   let planned_1 =
-    Demotion.plan ~measure_message_bytes ~demote_before:demote_before_1 messages_request_1
+    Demotion.plan ~measure_wire_bytes:stored_wire_bytes ~measure_message_bytes ~demote_before:demote_before_1 messages_request_1
   in
   let planned_2 =
-    Demotion.plan ~measure_message_bytes ~demote_before:demote_before_2 messages_request_2
+    Demotion.plan ~measure_wire_bytes:stored_wire_bytes ~measure_message_bytes ~demote_before:demote_before_2 messages_request_2
   in
   Alcotest.(check int)
     "request 1 has nothing demotable at the disputed atom yet"
@@ -187,7 +191,7 @@ let a_split_atom_at_the_boundary_never_gets_demoted_half () =
    draft, where the bound was stated as a flat 200-300 bytes. *)
 let short_aged_result_uses_exact_preview () =
   let messages = history_with_tool_bodies [String.make 700 'a'] in
-  let planned = Demotion.plan ~measure_message_bytes ~demote_before:1 messages in
+  let planned = Demotion.plan ~measure_wire_bytes:stored_wire_bytes ~measure_message_bytes ~demote_before:1 messages in
   Alcotest.(check int) "short result selects a smaller planned reference" 1
     (List.length planned.Demotion.pending);
   Alcotest.(check bool) "reference shrinks provider-bound message" true
@@ -198,7 +202,7 @@ let short_aged_result_uses_exact_preview () =
 let bound_holds_for body_label body =
   let store = Tool_blob_store.create ~base_path:(Filename.temp_dir "demote" "") in
   let messages = history_with_tool_bodies [ body ] in
-  let planned = Demotion.plan ~measure_message_bytes ~demote_before:1 messages in
+  let planned = Demotion.plan ~measure_wire_bytes:stored_wire_bytes ~measure_message_bytes ~demote_before:1 messages in
   match planned.Demotion.pending with
   | [] ->
     (* Not demoted: the only admissible reason is that the placeholder did not
@@ -247,7 +251,7 @@ let bound_holds_for body_label body =
 let demotion_actually_happens () =
   let body = String.make 4000 'a' in
   let messages = history_with_tool_bodies [ body ] in
-  let planned = Demotion.plan ~measure_message_bytes ~demote_before:1 messages in
+  let planned = Demotion.plan ~measure_wire_bytes:stored_wire_bytes ~measure_message_bytes ~demote_before:1 messages in
   Alcotest.(check int)
     "a 4KB ASCII tool body is demoted"
     1
@@ -280,27 +284,6 @@ let bound_is_sound () =
   bound_holds_for "newlines" (String.concat "\n" (List.init 800 (fun i -> string_of_int i)))
 ;;
 
-(* --- 2. content_blocks = Some is excluded (§6 test 3) ------------------ *)
-
-(* When [content_blocks] is [Some], the provider encoder emits the blocks and
-   never serializes [content]. Demoting it would free nothing while the plan
-   credited a saving — an under-estimate, the direction that lets a
-   materialized request exceed the cap. *)
-let structured_results_are_not_demoted () =
-  let body = String.make 4000 'a' in
-  let blocks = Some [ Types.Text "structured" ] in
-  let messages = [ assistant "call"; tool_message ~content_blocks:blocks ~id:"c0" body ] in
-  let planned = Demotion.plan ~measure_message_bytes ~demote_before:1 messages in
-  Alcotest.(check int)
-    "structured tool result yields no pending demotion"
-    0
-    (List.length planned.Demotion.pending);
-  Alcotest.(check (list string))
-    "its body is untouched"
-    [ body ]
-    (markers planned.Demotion.messages)
-;;
-
 (* --- 3. Invalid markers are excluded (§6 test 4) ----------------------- *)
 
 (* A marker-shaped payload that fails to parse must not be stored: giving a
@@ -317,7 +300,7 @@ let invalid_markers_are_not_demoted () =
    | Tool_output.Not_marker | Tool_output.Decoded _ ->
      Alcotest.fail "fixture must decode as Invalid_marker");
   let messages = history_with_tool_bodies [ corrupt ] in
-  let planned = Demotion.plan ~measure_message_bytes ~demote_before:1 messages in
+  let planned = Demotion.plan ~measure_wire_bytes:stored_wire_bytes ~measure_message_bytes ~demote_before:1 messages in
   Alcotest.(check int)
     "corrupt marker yields no pending demotion"
     0
@@ -333,7 +316,7 @@ let stored_results_are_not_demoted_again () =
       (Tool_blob_store.put store ~bytes:(String.make 4000 'a') ~mime:"text/plain")
   in
   let messages = history_with_tool_bodies [ marker ] in
-  let planned = Demotion.plan ~measure_message_bytes ~demote_before:1 messages in
+  let planned = Demotion.plan ~measure_wire_bytes:stored_wire_bytes ~measure_message_bytes ~demote_before:1 messages in
   Alcotest.(check int)
     "an existing marker is not demoted again"
     0
@@ -349,7 +332,7 @@ let each_marker_stores_its_own_body () =
   let bodies = List.init 40 (fun i -> Printf.sprintf "result %d:" i ^ String.make 4000 'a') in
   let messages = history_with_tool_bodies bodies in
   let planned =
-    Demotion.plan ~measure_message_bytes ~demote_before:(List.length bodies) messages
+    Demotion.plan ~measure_wire_bytes:stored_wire_bytes ~measure_message_bytes ~demote_before:(List.length bodies) messages
   in
   Alcotest.(check int)
     "every aged body is planned"
@@ -405,6 +388,347 @@ let with_demotion_store f =
     (fun () -> f (Tool_blob_store.create ~base_path))
 ;;
 
+(* --- 2. content_blocks = Some: each text body leaves (RFC-0363 §3.1.2) --- *)
+
+(* An MCP result as Keepers store it: [content] is the plain copy of its
+   text, and the blocks hold the text and a screenshot. *)
+let screenshot () =
+  Types.Image
+    { media_type = "image/png"; source = stored_source ~media_type:"image/png" "aW1hZ2U=" }
+;;
+
+let structured_result ~id ~content blocks =
+  tool_message ~content_blocks:(Some blocks) ~id content
+;;
+
+(* The [content] and blocks of a message holding one structured result. *)
+let result_parts (message : Types.message) =
+  match message.content with
+  | [ Types.ToolResult { content; content_blocks = Some blocks; _ } ] -> content, blocks
+  | _ -> Alcotest.fail "expected one result with content_blocks = Some"
+;;
+
+let inner_text (block : Types.content_block) =
+  match block with
+  | Types.Text text -> text
+  | Types.Thinking _ | Types.ReasoningDetails _ | Types.RedactedThinking _
+  | Types.ToolUse _ | Types.ToolResult _ | Types.Image _ | Types.Document _
+  | Types.Audio _ -> Alcotest.fail "expected a Text block"
+;;
+
+(* Every text body a message's results hold: each [content], then the [Text]
+   blocks of a structured result. *)
+let result_texts (message : Types.message) =
+  List.concat_map
+    (fun (block : Types.content_block) ->
+       match block with
+       | Types.ToolResult { content; content_blocks = None; _ } -> [ content ]
+       | Types.ToolResult { content; content_blocks = Some blocks; _ } ->
+         content
+         :: List.filter_map
+              (fun (inner : Types.content_block) ->
+                 match inner with
+                 | Types.Text text -> Some text
+                 | Types.Thinking _ | Types.ReasoningDetails _ | Types.RedactedThinking _
+                 | Types.ToolUse _ | Types.ToolResult _ | Types.Image _ | Types.Document _
+                 | Types.Audio _ -> None)
+              blocks
+       | Types.Text _ | Types.Thinking _ | Types.ReasoningDetails _
+       | Types.RedactedThinking _ | Types.ToolUse _ | Types.Image _ | Types.Document _
+       | Types.Audio _ -> [])
+    message.content
+;;
+
+(* [content] and each [Text] block leave as markers; the image stays, the
+   same block in the same place. *)
+let structured_result_demotes_each_text_body () =
+  let content = String.make 4_000 'q' in
+  let image = screenshot () in
+  let blocks =
+    [ Types.Text (String.make 4_000 'r'); image; Types.Text (String.make 3_000 's') ]
+  in
+  let messages = [ assistant "call"; structured_result ~id:"c0" ~content blocks ] in
+  let planned = Demotion.plan ~measure_wire_bytes:stored_wire_bytes ~measure_message_bytes ~demote_before:1 messages in
+  Alcotest.(check int) "content and both Text blocks are planned" 3
+    (List.length planned.Demotion.pending);
+  let planned_content, planned_blocks = result_parts (List.nth planned.Demotion.messages 1) in
+  Alcotest.(check bool) "content leaves as a marker" true (Tool_output.is_marker planned_content);
+  (match planned_blocks with
+   | [ first; kept; second ] ->
+     Alcotest.(check bool) "the first Text block leaves as a marker" true
+       (Tool_output.is_marker (inner_text first));
+     Alcotest.(check bool) "the image is the same block" true (kept == image);
+     Alcotest.(check bool) "the second Text block leaves as a marker" true
+       (Tool_output.is_marker (inner_text second))
+   | _ -> Alcotest.fail "the result keeps its three blocks");
+  Alcotest.(check bool) "the durable source is untouched" true
+    (result_parts (List.nth messages 1) = (content, blocks))
+;;
+
+(* The whole result shrinks under the measurer, but Anthropic sends only the
+   blocks: a short [Text] block that became a marker would grow there. *)
+let a_text_block_shorter_than_its_marker_stays () =
+  let long = String.make 9_000 'w' in
+  let short = "pressed Enter" in
+  let messages =
+    [ assistant "call"
+    ; structured_result ~id:"k0" ~content:(long ^ short) [ Types.Text long; Types.Text short ]
+    ]
+  in
+  let planned = Demotion.plan ~measure_wire_bytes:stored_wire_bytes ~measure_message_bytes ~demote_before:1 messages in
+  Alcotest.(check int) "content and the long Text block are planned" 2
+    (List.length planned.Demotion.pending);
+  let planned_content, planned_blocks = result_parts (List.nth planned.Demotion.messages 1) in
+  Alcotest.(check bool) "content leaves as a marker" true (Tool_output.is_marker planned_content);
+  match planned_blocks with
+  | [ first; second ] ->
+    Alcotest.(check bool) "the long Text block leaves as a marker" true
+      (Tool_output.is_marker (inner_text first));
+    Alcotest.(check string) "the short Text block stays" short (inner_text second)
+  | _ -> Alcotest.fail "the result keeps its two blocks"
+;;
+
+let structured_cycle ~id ~content blocks =
+  [ { (assistant "") with
+      content = [ Types.ToolUse { id; name = "screenshot"; input = `Assoc [] } ] }
+  ; structured_result ~id ~content blocks
+  ]
+;;
+
+let longest_run c text =
+  let best = ref 0 in
+  let run = ref 0 in
+  String.iter
+    (fun at ->
+       if Char.equal at c
+       then (
+         incr run;
+         best := max !best !run)
+       else run := 0)
+    text;
+  !best
+;;
+
+(* The lanes a structured result can go out on, each with its own encoder:
+   OpenAI chat, Responses, Anthropic, Gemini, Ollama and GLM. *)
+let structured_lanes =
+  let open Agent_core.Llm_provider in
+  let lane name ?request_path kind build =
+    let config = Provider_config.make ~kind ~model_id:"structured-result-fixture"
+        ~base_url:"http://localhost" ?request_path ~max_tokens:4096 () in
+    let encode messages =
+      match Agent_core.History.to_wire_messages test_media_store messages with
+      | Ok messages -> build ~config ~messages ()
+      | Error error -> Alcotest.fail (Agent_core.Error.to_string (Agent_core.Error.Media error)) in
+    name, Masc.Keeper_model_input_wire_bytes.measurer ~config, encode in
+  [ lane "openai chat" Provider_config.OpenAI_compat
+      (fun ~config ~messages () -> Backend_openai.build_request ~config ~messages ())
+  ; lane "responses" ~request_path:"/v1/responses" Provider_config.OpenAI_compat
+      (fun ~config ~messages () -> Backend_openai_responses.build_request ~config ~messages ())
+  ; lane "anthropic" Provider_config.Anthropic
+      (fun ~config ~messages () -> Backend_anthropic.build_request ~config ~messages ())
+  ; lane "gemini" Provider_config.Gemini
+      (fun ~config ~messages () -> Backend_gemini.build_request ~config ~messages ())
+  ; lane "ollama" Provider_config.Ollama
+      (fun ~config ~messages () -> Backend_ollama.build_request ~config ~messages ())
+  ; lane "glm" Provider_config.Glm
+      (fun ~config ~messages () -> Backend_glm.build_request ~config ~messages ())
+  ]
+;;
+
+(* Each lane plans against its own encoder, and its request never grows: a
+   body the lane sends leaves as a marker, and one it does not send, or one
+   whose marker is longer once the lane has escaped both, stays. The
+   fixtures cover a result with an image and one without, ASCII and
+   quote-heavy bodies. *)
+let structured_bodies_leave_every_provider_wire () = with_demotion_store @@ fun store ->
+  let content = String.make 4_000 'q' in
+  let wire fixture blocks =
+    let messages = structured_cycle ~id:"shot" ~content blocks in
+    List.iter
+      (fun (lane, measure_wire_bytes, encode) ->
+         let name = fixture ^ ", " ^ lane in
+         let planned = Demotion.plan ~measure_wire_bytes ~measure_message_bytes ~demote_before:1 messages in
+         Alcotest.(check bool) (name ^ ": the lane chooses a body") true
+           (planned.Demotion.pending <> []);
+         let outcome = Demotion.materialize ~store ~addresses:(Demotion.create_address_memo ())
+             ~pending:planned.Demotion.pending planned.Demotion.messages in
+         Alcotest.(check int) (name ^ ": a healthy store reverts nothing") 0 outcome.Demotion.reverted;
+         let source = encode messages in
+         let sent = encode outcome.Demotion.messages in
+         Alcotest.(check bool) (name ^ ": the source request carries a body") true
+           (max (longest_run 'q' source) (longest_run 'r' source) >= String.length content);
+         Alcotest.(check bool) (name ^ ": content does not reach the wire") true
+           (longest_run 'q' sent < String.length content);
+         Alcotest.(check bool) (name ^ ": the Text block does not reach the wire") true
+           (longest_run 'r' sent < String.length content);
+         Alcotest.(check bool) (name ^ ": the request does not grow") true
+           (String.length sent < String.length source);
+         Alcotest.(check bool) (name ^ ": materialized wire fits planned wire") true
+           (String.length sent <= String.length (encode planned.Demotion.messages)))
+      structured_lanes
+  in
+  wire "with an image" [ Types.Text (String.make 4_000 'r'); screenshot () ];
+  wire "text only" [ Types.Text (String.make 4_000 'r') ];
+  wire "quotes and backslashes" [ Types.Text (String.make 4_000 'r' ^ String.concat "" (List.init 500 (fun _ -> "\"\\\n"))) ]
+;;
+
+(* 433 Korean syllables, 1,299 bytes. [%S] writes the preview's 198 bytes as
+   [\ddd], so the marker is 1,116 bytes under one JSON escape, shorter than
+   the body's 1,301, and 1,514 under two, longer than the body's 1,299. The
+   lanes that send the blocks as one JSON string keep the body; Anthropic,
+   which escapes once, takes the marker; Gemini sends [content] only. *)
+let a_short_korean_block_stays_on_lanes_that_escape_twice () = with_demotion_store @@ fun store ->
+  let korean = String.concat "" (List.init 433 (fun _ -> "\234\176\128")) in
+  Alcotest.(check int) "the body is 1,299 bytes" 1_299 (String.length korean);
+  let messages = structured_cycle ~id:"ko" ~content:"" [ Types.Text korean ] in
+  let chosen measure_wire_bytes =
+    List.length
+      (Demotion.plan ~measure_wire_bytes ~measure_message_bytes ~demote_before:1 messages).Demotion.pending
+  in
+  Alcotest.(check int) "one JSON escape takes the marker" 1 (chosen stored_wire_bytes);
+  List.iter
+    (fun (lane, measure_wire_bytes, encode) ->
+       let expected =
+         List.assoc lane
+           [ "openai chat", 0; "responses", 0; "anthropic", 1; "gemini", 0; "ollama", 0; "glm", 0 ]
+       in
+       Alcotest.(check int) (lane ^ ": bodies chosen") expected (chosen measure_wire_bytes);
+       let planned = Demotion.plan ~measure_wire_bytes ~measure_message_bytes ~demote_before:1 messages in
+       let outcome = Demotion.materialize ~store ~addresses:(Demotion.create_address_memo ())
+           ~pending:planned.Demotion.pending planned.Demotion.messages in
+       Alcotest.(check bool) (lane ^ ": the request does not grow") true
+         (String.length (encode outcome.Demotion.messages) <= String.length (encode messages)))
+    structured_lanes
+;;
+
+(* A stored reference is not stored again and a corrupt marker stays
+   visible, inside the blocks as in [content]. Both are longer than a marker
+   of their own, so only the marker check keeps them: the stored preview is
+   Korean, which [%S] writes as four bytes per byte. *)
+let structured_markers_are_left_as_they_are () = with_demotion_store @@ fun store ->
+  let stored =
+    Tool_output.encode_for_agent_core
+      (Tool_blob_store.put store ~bytes:(String.concat "" (List.init 2_000 (fun _ -> "가")))
+         ~mime:"text/plain")
+  in
+  let stored_block = Types.Text stored in
+  let corrupt_block =
+    Types.Text (Tool_output.marker_prefix ^ " sha256=not-a-digest bytes=x " ^ String.make 4_000 'x' ^ "]")
+  in
+  let messages =
+    [ assistant "call"
+    ; structured_result ~id:"c0" ~content:(String.make 4_000 'q')
+        [ stored_block; corrupt_block; Types.Text (String.make 4_000 'r') ]
+    ]
+  in
+  let planned = Demotion.plan ~measure_wire_bytes:stored_wire_bytes ~measure_message_bytes ~demote_before:1 messages in
+  Alcotest.(check int) "only the plain bodies are planned" 2 (List.length planned.Demotion.pending);
+  match snd (result_parts (List.nth planned.Demotion.messages 1)) with
+  | [ first; second; third ] ->
+    Alcotest.(check bool) "the stored reference is the same block" true (first == stored_block);
+    Alcotest.(check bool) "the corrupt marker is the same block" true (second == corrupt_block);
+    Alcotest.(check bool) "the plain Text block leaves as a marker" true
+      (Tool_output.is_marker (inner_text third))
+  | _ -> Alcotest.fail "the result keeps its three blocks"
+;;
+
+(* Two lanes that send one body of a structured result each: Gemini sends
+   [content] of a text-only result, Anthropic its [Text] blocks. Each counts
+   that body alone, so a plan against it chooses that body alone. *)
+let content_lane (message : Types.message) =
+  Some (String.length (fst (result_parts message)))
+;;
+
+let blocks_lane (message : Types.message) =
+  Some
+    (List.fold_left
+       (fun sum (inner : Types.content_block) ->
+          match inner with
+          | Types.Text text -> sum + String.length text
+          | Types.Thinking _ | Types.ReasoningDetails _ | Types.RedactedThinking _
+          | Types.ToolUse _ | Types.ToolResult _ | Types.Image _ | Types.Document _
+          | Types.Audio _ -> sum)
+       0
+       (snd (result_parts message)))
+;;
+
+(* A body whose write fails keeps its original text, and the result's other
+   body keeps the marker that was written. A first, healthy write of one body
+   alone, planned against a lane that sends only that body, puts it in the
+   store; the blocked store then skips that address and fails the other. *)
+let one_failed_write ~written_lane ~failed_body () = with_demotion_store @@ fun store ->
+  let content = String.make 5_000 'q' in
+  let text = String.make 3_000 'r' in
+  let image = screenshot () in
+  let messages = [ assistant "call"; structured_result ~id:"c0" ~content [ Types.Text text; image ] ] in
+  let addresses = Demotion.create_address_memo () in
+  let one =
+    Demotion.plan ~measure_wire_bytes:written_lane ~measure_message_bytes ~demote_before:1 messages
+  in
+  Alcotest.(check int) "the lane chooses one body" 1 (List.length one.Demotion.pending);
+  let first = Demotion.materialize ~store ~addresses ~pending:one.Demotion.pending
+      one.Demotion.messages in
+  Alcotest.(check int) "that body is written" 0 first.Demotion.reverted;
+  let both = Demotion.plan ~measure_wire_bytes:stored_wire_bytes ~measure_message_bytes ~demote_before:1 messages in
+  Alcotest.(check int) "both bodies are planned" 2 (List.length both.Demotion.pending);
+  let blocked = Filename.temp_file "demote-structured-blocked" "" in
+  Fun.protect ~finally:(fun () -> Sys.remove blocked) @@ fun () ->
+  let outcome =
+    Demotion.materialize ~store:(Tool_blob_store.create ~base_path:blocked) ~addresses
+      ~pending:both.Demotion.pending both.Demotion.messages
+  in
+  Alcotest.(check int) "only the other body failed" 1 outcome.Demotion.reverted;
+  let sent_content, sent_blocks = result_parts (List.nth outcome.Demotion.messages 1) in
+  match sent_blocks, failed_body with
+  | [ sent_text; kept ], `Text ->
+    Alcotest.(check string) "content keeps the reference that was written" content
+      (fetch_body store sent_content);
+    Alcotest.(check string) "the failed Text block is its original" text (inner_text sent_text);
+    Alcotest.(check bool) "the image is the same block" true (kept == image)
+  | [ sent_text; kept ], `Content ->
+    Alcotest.(check string) "the failed content is its original" content sent_content;
+    Alcotest.(check string) "the Text block keeps the reference that was written" text
+      (fetch_body store (inner_text sent_text));
+    Alcotest.(check bool) "the image is the same block" true (kept == image)
+  | ([] | [ _ ] | _ :: _ :: _ :: _), (`Text | `Content) ->
+    Alcotest.fail "the result keeps its two blocks"
+;;
+
+let a_failed_text_write_keeps_the_written_content =
+  one_failed_write ~written_lane:content_lane ~failed_body:`Text
+;;
+
+let a_failed_content_write_keeps_the_written_text =
+  one_failed_write ~written_lane:blocks_lane ~failed_body:`Content
+;;
+
+(* Each body is stored as its own blob, and a second plan over the same
+   source replays what the first wrote. *)
+let structured_bodies_are_stored_and_replayed () = with_demotion_store @@ fun store ->
+  let content = String.make 4_000 'q' in
+  let first = String.make 4_000 'r' in
+  let second = String.make 3_000 's' in
+  let messages =
+    [ assistant "call"
+    ; structured_result ~id:"c0" ~content [ Types.Text first; screenshot (); Types.Text second ]
+    ]
+  in
+  let planned = Demotion.plan ~measure_wire_bytes:stored_wire_bytes ~measure_message_bytes ~demote_before:1 messages in
+  let outcome = Demotion.materialize ~store ~addresses:(Demotion.create_address_memo ())
+      ~pending:planned.Demotion.pending planned.Demotion.messages in
+  Alcotest.(check int) "a healthy store reverts nothing" 0 outcome.Demotion.reverted;
+  Alcotest.(check (list string)) "each marker opens its own body" [ content; first; second ]
+    (List.map (fetch_body store) (result_texts (List.nth outcome.Demotion.messages 1)));
+  let captured = Demotion.capture_materialized ~pending:planned.Demotion.pending
+      ~before:planned.Demotion.messages ~after:outcome.Demotion.messages in
+  Alcotest.(check bool) "the outcome is captured" true (Option.is_some captured);
+  let again = Demotion.plan ~measure_wire_bytes:stored_wire_bytes ~measure_message_bytes ~demote_before:1 messages in
+  Alcotest.(check bool) "the second plan sends what the first wrote" true
+    (Demotion.replay_materialized captured ~pending:again.Demotion.pending again.Demotion.messages
+     = outcome.Demotion.messages)
+;;
+
 let repeated_id_bodies () =
   let prefix = String.make Tool_blob_store.preview_max 'p' in
   [prefix ^ String.make 4000 'a'; prefix ^ String.make 4000 'b']
@@ -417,7 +741,7 @@ let repeated_ids_keep_distinct_payloads () = with_demotion_store @@ fun store ->
    | Ok () -> ()
    | Error error ->
      Alcotest.fail (Masc.Keeper_transcript_unit.show_provider_transcript_error error));
-  let planned = Demotion.plan ~measure_message_bytes ~demote_before:2 messages in
+  let planned = Demotion.plan ~measure_wire_bytes:stored_wire_bytes ~measure_message_bytes ~demote_before:2 messages in
   let outcome = Demotion.materialize ~store ~addresses:(Demotion.create_address_memo ())
       ~pending:planned.pending planned.messages in
   Alcotest.(check int) "both occurrences were planned" 2 (List.length planned.pending);
@@ -432,7 +756,7 @@ let repeated_ids_keep_distinct_payloads () = with_demotion_store @@ fun store ->
 let cut_repeated_id_stores_only_retained_payload () = with_demotion_store @@ fun store ->
   let bodies = repeated_id_bodies () in
   let messages = List.concat_map (closed_cycle ~id:"reused") bodies in
-  let planned = Demotion.plan ~measure_message_bytes ~demote_before:2 messages in
+  let planned = Demotion.plan ~measure_wire_bytes:stored_wire_bytes ~measure_message_bytes ~demote_before:2 messages in
   let projection, _ = Window.project_from_atom ~measure_message_bytes ~first_atom:1 planned.messages in
   let outcome = Demotion.materialize ~store ~addresses:(Demotion.create_address_memo ())
       ~pending:planned.pending projection.messages in
@@ -446,7 +770,7 @@ let memo_revalidates_rewritten_source () = with_demotion_store @@ fun store ->
   let addresses = Demotion.create_address_memo () in
   let project body =
     let source = closed_cycle ~id:"reused" body in
-    let planned = Demotion.plan ~measure_message_bytes ~demote_before:1 source in
+    let planned = Demotion.plan ~measure_wire_bytes:stored_wire_bytes ~measure_message_bytes ~demote_before:1 source in
     Demotion.materialize ~store ~addresses ~pending:planned.pending planned.messages
   in
   let bodies = repeated_id_bodies () in
@@ -458,7 +782,7 @@ let memo_revalidates_rewritten_source () = with_demotion_store @@ fun store ->
 
 let unplanned_marker_does_not_bind_by_text () = with_demotion_store @@ fun store ->
   let source = closed_cycle ~id:"reused" (String.make 4000 'a') in
-  let planned = Demotion.plan ~measure_message_bytes ~demote_before:1 source in
+  let planned = Demotion.plan ~measure_wire_bytes:stored_wire_bytes ~measure_message_bytes ~demote_before:1 source in
   let marker = List.hd (markers planned.messages) in
   (* This is a distinct block with byte-identical marker text and the same
      tool ID, not the placeholder owned by the plan. *)
@@ -475,7 +799,7 @@ let failed_write_restores_each_original_block () =
   let base_path = Filename.temp_file "demote-blocked" "" in
   Fun.protect ~finally:(fun () -> Sys.remove base_path) @@ fun () ->
   let messages = List.concat_map (closed_cycle ~id:"reused") (repeated_id_bodies ()) in
-  let planned = Demotion.plan ~measure_message_bytes ~demote_before:2 messages in
+  let planned = Demotion.plan ~measure_wire_bytes:stored_wire_bytes ~measure_message_bytes ~demote_before:2 messages in
   let outcome = Demotion.materialize ~store:(Tool_blob_store.create ~base_path)
       ~addresses:(Demotion.create_address_memo ()) ~pending:planned.pending planned.messages in
   Alcotest.(check int) "both failed writes are counted" 2 outcome.reverted;
@@ -537,7 +861,7 @@ let completed_arguments_restore_through_reader () =
   let request = List.map (fun message ->
     Masc.Keeper_context_core.message_of_json (Masc.Keeper_context_core.message_to_json message)) seed in
   let completed_arguments = bind_arguments ~completed_before:2 ~seed request in
-  let planned = Demotion.plan ~completed_arguments ~measure_message_bytes ~demote_before:0 request in
+  let planned = Demotion.plan ~measure_wire_bytes:stored_wire_bytes ~completed_arguments ~measure_message_bytes ~demote_before:0 request in
   Alcotest.(check int) "both repeated-ID argument occurrences are planned" 2 (List.length planned.pending);
   let outcome = Demotion.materialize ~store ~addresses:(Demotion.create_address_memo ())
       ~pending:planned.pending planned.messages in
@@ -588,7 +912,7 @@ let argument_seed_never_expands_after_recovery () =
   let later = admitted @ argument_cycle ~id:"new" (long_arguments "this turn") in
   (* Even a result resend through the complete later history cannot promote
      the interrupted seed or this turn's new arguments. *)
-  let planned = Demotion.plan ~completed_arguments ~measure_message_bytes ~demote_before:99 later in
+  let planned = Demotion.plan ~measure_wire_bytes:stored_wire_bytes ~completed_arguments ~measure_message_bytes ~demote_before:99 later in
   match argument_inputs planned.messages with
   | first :: rest ->
     ignore (argument_reference first);
@@ -608,10 +932,10 @@ let arguments_require_the_complete_cycle_before_boundary () =
    | Ok () -> ()
    | Error error -> Alcotest.fail (Masc.Keeper_transcript_unit.show_provider_transcript_error error));
   let completed_arguments = bind_arguments ~completed_before:1 ~seed seed in
-  let planned = Demotion.plan ~completed_arguments ~measure_message_bytes ~demote_before:0 seed in
+  let planned = Demotion.plan ~measure_wire_bytes:stored_wire_bytes ~completed_arguments ~measure_message_bytes ~demote_before:0 seed in
   Alcotest.(check int) "opener before boundary is insufficient without closer" 0 (List.length planned.pending);
   let completed_arguments = bind_arguments ~completed_before:2 ~seed seed in
-  let planned = Demotion.plan ~completed_arguments ~measure_message_bytes ~demote_before:0 seed in
+  let planned = Demotion.plan ~measure_wire_bytes:stored_wire_bytes ~completed_arguments ~measure_message_bytes ~demote_before:0 seed in
   Alcotest.(check int) "whole completed cycle is eligible" 1 (List.length planned.pending)
 ;;
 
@@ -641,14 +965,14 @@ let media_projection_binds_actual_argument_positions () =
   let replay_prefix = Masc.Keeper_replay_prefix.media_degraded
       ~canonical_prefix:canonical ~dispatch_prefix:stripped in
   let completed_arguments = bind_arguments ~replay_prefix ~completed_before:1 ~seed:canonical stripped in
-  let planned = Demotion.plan ~completed_arguments ~measure_message_bytes ~demote_before:0 stripped in
+  let planned = Demotion.plan ~measure_wire_bytes:stored_wire_bytes ~completed_arguments ~measure_message_bytes ~demote_before:0 stripped in
   Alcotest.(check int) "removed preceding Image shifts ToolUse but retains eligibility" 1
     (List.length planned.pending);
   (* A later independently rebuilt value at the same position has no frozen
      source identity, even if it happens to be structurally equal. *)
   let rewritten = List.map (fun message -> Masc.Keeper_context_core.message_of_json
       (Masc.Keeper_context_core.message_to_json message)) stripped in
-  let later = Demotion.plan ~completed_arguments ~measure_message_bytes ~demote_before:0 rewritten in
+  let later = Demotion.plan ~measure_wire_bytes:stored_wire_bytes ~completed_arguments ~measure_message_bytes ~demote_before:0 rewritten in
   Alcotest.(check int) "replaced source cannot use frozen eligibility" 0 (List.length later.pending)
 ;;
 
@@ -656,7 +980,7 @@ let argument_cut_and_failed_store_preserve_occurrences () = with_demotion_store 
   let inputs = [long_arguments "first"; long_arguments "second"] in
   let seed = List.concat_map (argument_cycle ~id:"reused") inputs in
   let completed_arguments = bind_arguments ~completed_before:2 ~seed seed in
-  let planned = Demotion.plan ~completed_arguments ~measure_message_bytes ~demote_before:0 seed in
+  let planned = Demotion.plan ~measure_wire_bytes:stored_wire_bytes ~completed_arguments ~measure_message_bytes ~demote_before:0 seed in
   let projection, _ = Window.project_from_atom ~measure_message_bytes ~first_atom:1 planned.messages in
   let outcome = Demotion.materialize ~store ~addresses:(Demotion.create_address_memo ())
       ~pending:planned.pending projection.messages in
@@ -688,7 +1012,7 @@ let arguments_obey_each_provider_wire_bound () = with_demotion_store @@ fun stor
       | Ok messages -> build ~config ~messages ()
       | Error error -> Alcotest.fail (Agent_core.Error.to_string (Agent_core.Error.Media error)) in
     let measure_message_bytes message = String.length (encode [message]) in
-    let planned = Demotion.plan ~completed_arguments ~measure_message_bytes ~demote_before:0 seed in
+    let planned = Demotion.plan ~measure_wire_bytes:stored_wire_bytes ~completed_arguments ~measure_message_bytes ~demote_before:0 seed in
     Alcotest.(check int) "actual wire selects argument demotion" 1 (List.length planned.pending);
     let outcome = Demotion.materialize ~store ~addresses:(Demotion.create_address_memo ())
         ~pending:planned.pending planned.messages in
@@ -779,6 +1103,7 @@ let signed_argument_view ?frozen_arguments ?materialize ~base_path ~store ~confi
     ~to_wire:(Agent_core.History.to_wire_message (Agent_core.History.Memory_store.create ()))
     ?completed_arguments
     ~tools:signed_argument_tools ~provider_config:config ~measure_message_bytes
+    ~measure_wire_bytes:(Masc.Keeper_model_input_wire_bytes.measurer ~config)
     ~front:(Some { Masc.Keeper_carried_front.first_atom = 0
       ; front = Model_input_front.At_atom first_digest
       ; source = Masc.Keeper_carried_front.Ledger })
@@ -871,7 +1196,7 @@ let signed_prefix_can_reproduce_already_demoted_arguments () =
   let input = long_arguments "already transmitted as an argument artifact" in
   let prefix = signed_user "inspect stored earlier work" :: argument_cycle ~id:"earlier" input in
   let arguments = bind_arguments ~completed_before:2 ~seed:prefix prefix in
-  let planned = Demotion.plan ~completed_arguments:arguments ~measure_message_bytes ~demote_before:0 prefix in
+  let planned = Demotion.plan ~measure_wire_bytes:stored_wire_bytes ~completed_arguments:arguments ~measure_message_bytes ~demote_before:0 prefix in
   let transmitted = (Demotion.materialize ~store ~addresses:(Demotion.create_address_memo ())
       ~pending:planned.pending planned.messages).messages in
   let original_reference = List.hd (argument_inputs transmitted) in
@@ -1050,7 +1375,7 @@ let materialize_addresses_each_body_once_per_attempt () =
   let addresses = Demotion.create_address_memo () in
   let materialize () =
     let planned =
-      Demotion.plan ~measure_message_bytes ~demote_before:(List.length bodies) messages
+      Demotion.plan ~measure_wire_bytes:stored_wire_bytes ~measure_message_bytes ~demote_before:(List.length bodies) messages
     in
     Demotion.materialize
       ~store
@@ -1130,7 +1455,7 @@ let raw_cut_retained_atoms_are_verbatim () =
   let old_body = String.make 4000 'a' in
   let retained_body = String.make 4000 'b' in
   let messages = history_with_tool_bodies [ old_body; retained_body ] in
-  let planned = Demotion.plan ~measure_message_bytes ~demote_before:1 messages in
+  let planned = Demotion.plan ~measure_wire_bytes:stored_wire_bytes ~measure_message_bytes ~demote_before:1 messages in
   Alcotest.(check int)
     "only the atom below the raw cut is demoted"
     1
@@ -1174,7 +1499,7 @@ let plan_honours_a_monotonic_boundary () =
       Alcotest.fail (Window.budget_error_to_string error)
     | Ok raw ->
       let planned =
-        Demotion.plan
+        Demotion.plan ~measure_wire_bytes:stored_wire_bytes
           ~measure_message_bytes
           ~demote_before:raw.dropped_atoms
           messages
@@ -1302,7 +1627,7 @@ let projection_reuses_candidate_measurements () =
     .memoize_message_measurement measured
   in
   let planned =
-    Demotion.plan ~measure_message_bytes ~demote_before:max_int messages
+    Demotion.plan ~measure_wire_bytes:stored_wire_bytes ~measure_message_bytes ~demote_before:max_int messages
   in
   Alcotest.(check int)
     "fixture creates one candidate per aged tool result"
@@ -1357,6 +1682,7 @@ let compose ~base_path ~front ~current_turn_results ~turn_end messages =
   in
   Try_provider.For_testing.compose_carried_model_input
     ~measure_message_bytes
+    ~measure_wire_bytes:stored_wire_bytes
     ~accepted:None ~front:
       (Some
          { Masc.Keeper_carried_front.first_atom = front
@@ -1659,12 +1985,14 @@ let current_batch ~id_prefix ~fill sizes =
        sizes
 ;;
 
-let compose_from_the_oldest_atom ?completed_arguments ?finished_turn_results ~base_path
-      ~current_turn_results ~turn_boundary messages =
+let compose_from_the_oldest_atom ?completed_arguments ?finished_turn_results
+      ?(measure_wire_bytes = stored_wire_bytes) ~base_path ~current_turn_results ~turn_boundary
+      messages =
   Try_provider.For_testing.compose_carried_model_input
     ?completed_arguments
     ?finished_turn_results
     ~measure_message_bytes
+    ~measure_wire_bytes
     ~accepted:None ~front:
       (Some
          { Masc.Keeper_carried_front.first_atom = 0
@@ -1777,6 +2105,40 @@ let a_sent_result_stays_as_sent_when_the_turn_boundary_moves () =
 let as_markers = Try_provider.Finished_turns_as_markers
 
 let finished_turns_through end_atom = Masc.Keeper_carried_front.Turn_boundary { end_atom }
+
+(* A result whose long [content] goes out on Gemini and whose [Text] blocks
+   are each shorter than a marker. Anthropic sends only the blocks, so a
+   marker in [content] would change nothing it sends: nothing is chosen, and
+   a size refusal on Anthropic has nothing to resend. Under the stored JSON,
+   which counts both, the same result would have asked for a resend that
+   carries the same blocks. *)
+let a_body_the_lane_does_not_send_asks_for_no_resend () =
+  let anthropic =
+    match List.find_opt (fun (lane, _, _) -> String.equal lane "anthropic") structured_lanes with
+    | Some (_, measure, _) -> measure
+    | None -> Alcotest.fail "the anthropic lane is listed"
+  in
+  let short = String.make 200 't' in
+  let messages =
+    structured_cycle ~id:"long" ~content:(String.make 9_000 'q') [ Types.Text short; Types.Text short ]
+    @ [ assistant "this turn" ]
+  in
+  let base_path = Filename.temp_dir "demote" "" in
+  let refused_atom_count = snd (Window.annotate messages) in
+  let compose ~measure_wire_bytes current_turn_results =
+    compose_from_the_oldest_atom ~measure_wire_bytes ~base_path ~current_turn_results
+      ~turn_boundary:(finished_turns_through 0) messages
+  in
+  let resend measure_wire_bytes =
+    Try_provider.For_testing.current_turn_demotion
+      ~refused:(compose ~measure_wire_bytes Try_provider.Current_turn_verbatim)
+      ~demoted:
+        (compose ~measure_wire_bytes (Try_provider.Current_turn_demoted { refused_atom_count }))
+  in
+  Alcotest.(check (option int)) "anthropic: no resend" None (resend anthropic);
+  Alcotest.(check (option int)) "the stored JSON would resend" (Some refused_atom_count)
+    (resend stored_wire_bytes)
+;;
 
 (* The composition's messages with their markers written to a store under
    [base_path], the way one provider attempt sends them. *)
@@ -1932,6 +2294,62 @@ let results_below_the_floor_stay_in_the_prompt () =
     (List.exists (String.equal (List.nth bodies 1)) carried);
   Alcotest.(check bool) "one byte over the floor leaves" false
     (List.exists (String.equal (List.nth bodies 2)) carried)
+;;
+
+(* The floor checks the whole result, as it checks a string result: a result
+   whose text is split over small blocks is as large as their sum. *)
+let structured_bodies_below_the_floor_stay_in_the_prompt () =
+  let floor = Try_provider.For_testing.aged_result_min_bytes in
+  let under = String.make (floor - 1) 'u' in
+  let at = String.make floor 'v' in
+  let first_half = String.make (floor / 2) 'h' and second_half = String.make (floor / 2) 'i' in
+  let result ~id body = structured_result ~id ~content:body [ Types.Text body ] in
+  let earlier =
+    [ assistant "call 0"; result ~id:"under" under; assistant "call 1"; result ~id:"at" at
+    ; assistant "call 2"
+    ; structured_result ~id:"split" ~content:"" [ Types.Text first_half; Types.Text second_half ]
+    ]
+  in
+  let messages = earlier @ [ assistant "this turn" ] in
+  let turn_start =
+    Window.first_atom_at_or_after messages ~message_index:(List.length earlier)
+  in
+  let base_path = Filename.temp_dir "demote" "" in
+  let composed =
+    compose_from_the_oldest_atom ~finished_turn_results:as_markers ~base_path
+      ~current_turn_results:Try_provider.Current_turn_verbatim
+      ~turn_boundary:(finished_turns_through turn_start) messages
+  in
+  Alcotest.(check int) "both bodies at the floor and both halves of the split result are planned" 4
+    (List.length composed.Try_provider.planned.Demotion.pending);
+  let carried = List.concat_map result_texts (materialized ~base_path composed) in
+  Alcotest.(check int) "one byte under the floor, both bodies stay" 2
+    (List.length (List.filter (String.equal under) carried));
+  Alcotest.(check bool) "at the floor, neither body stays" false
+    (List.exists (String.equal at) carried);
+  Alcotest.(check bool) "two halves that reach the floor together leave as markers" false
+    (List.exists (fun text -> String.equal text first_half || String.equal text second_half) carried)
+;;
+
+(* The stuck shape of msx-retro-mania on 2026-11-06: every result of the
+   refused turn was an MCP result with blocks, so the refusal found nothing
+   to demote and the same request was refused again. *)
+let a_refusal_demotes_structured_results () =
+  let earlier = history_with_tool_bodies [ "tick"; "tock" ] in
+  let newest =
+    assistant "screens"
+    :: List.init 4 (fun i ->
+      let body = String.make 9_000 (letter i) in
+      structured_result ~id:(Printf.sprintf "shot-%d" i) ~content:body
+        [ Types.Text body; screenshot () ])
+  in
+  let messages = earlier @ newest in
+  let turn_end =
+    Window.first_atom_at_or_after messages ~message_index:(List.length earlier)
+  in
+  Alcotest.(check (option int)) "the refused range has results to demote" (Some 3)
+    (demotion_after_refusal ~base_path:(Filename.temp_dir "demote" "") ~front:2 ~turn_end
+       messages)
 ;;
 
 (* The cache property the rule is priced on. A result is rewritten once, on
@@ -2099,7 +2517,7 @@ let plan_keeps_results_below_the_floor () =
   in
   let changed ?min_result_bytes () =
     let planned =
-      Demotion.plan ?min_result_bytes ~measure_message_bytes ~demote_before:max_int messages
+      Demotion.plan ~measure_wire_bytes:stored_wire_bytes ?min_result_bytes ~measure_message_bytes ~demote_before:max_int messages
     in
     List.map2 (fun before after -> before <> after) messages planned.Demotion.messages
   in
@@ -2146,6 +2564,7 @@ let a_front_the_history_shrank_under_starts_over () =
   let composed =
     Try_provider.For_testing.compose_carried_model_input
       ~measure_message_bytes
+      ~measure_wire_bytes:stored_wire_bytes
       ~accepted:None ~front:
         (Some
            { Masc.Keeper_carried_front.first_atom = 3_100
@@ -2175,6 +2594,7 @@ let a_front_that_opens_with_another_message_starts_over () =
   let composed =
     Try_provider.For_testing.compose_carried_model_input
       ~measure_message_bytes
+      ~measure_wire_bytes:stored_wire_bytes
       ~accepted:None ~front:
         (Some
            { Masc.Keeper_carried_front.first_atom = 1
@@ -2223,10 +2643,6 @@ let () =
         ] )
     ; ( "exclusions"
       , [ Alcotest.test_case
-            "content_blocks = Some is not demoted"
-            `Quick
-            structured_results_are_not_demoted
-        ; Alcotest.test_case
             "invalid markers are not demoted"
             `Quick
             invalid_markers_are_not_demoted
@@ -2242,6 +2658,30 @@ let () =
             "raw-cut-retained atoms keep their bodies"
             `Quick
             raw_cut_retained_atoms_are_verbatim
+        ] )
+    ; ( "structured_results"
+      , [ Alcotest.test_case "content and each Text block are demoted" `Quick
+            structured_result_demotes_each_text_body
+        ; Alcotest.test_case "a Text block shorter than its marker stays" `Quick
+            a_text_block_shorter_than_its_marker_stays
+        ; Alcotest.test_case "no provider wire carries a demoted body" `Quick
+            structured_bodies_leave_every_provider_wire
+        ; Alcotest.test_case "a short Korean block stays on lanes that escape twice" `Quick
+            a_short_korean_block_stays_on_lanes_that_escape_twice
+        ; Alcotest.test_case "a body the lane does not send asks for no resend" `Quick
+            a_body_the_lane_does_not_send_asks_for_no_resend
+        ; Alcotest.test_case "markers inside the blocks are left as they are" `Quick
+            structured_markers_are_left_as_they_are
+        ; Alcotest.test_case "a failed Text write keeps the written content" `Quick
+            a_failed_text_write_keeps_the_written_content
+        ; Alcotest.test_case "a failed content write keeps the written Text block" `Quick
+            a_failed_content_write_keeps_the_written_text
+        ; Alcotest.test_case "each body is stored and replayed" `Quick
+            structured_bodies_are_stored_and_replayed
+        ; Alcotest.test_case "the finished-turn floor counts the whole result" `Quick
+            structured_bodies_below_the_floor_stay_in_the_prompt
+        ; Alcotest.test_case "a refusal demotes structured results" `Quick
+            a_refusal_demotes_structured_results
         ] )
     ; ( "stability"
       , [ Alcotest.test_case

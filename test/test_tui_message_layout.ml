@@ -460,6 +460,22 @@ let test_truncate_middle () =
         (Layout.display_width s <= col))
     [ 1; 2; 3; 4; 5; 6; 7; 8; 9; 10 ]
 
+(* A count names its noun in the number the count asks for: the singular at
+   one and only at one, the plural at zero and at every count above. The
+   plural is the singular with an "s" unless the caller names another. *)
+let test_count_noun_is_singular_only_at_one () =
+  for count = 0 to 120 do
+    let one = count = 1 in
+    check string
+      (Printf.sprintf "a regular noun at %d" count)
+      (Printf.sprintf "%d %s" count (if one then "line" else "lines"))
+      (Layout.count_noun count "line");
+    check string
+      (Printf.sprintf "an irregular noun at %d" count)
+      (Printf.sprintf "%d %s" count (if one then "branch" else "branches"))
+      (Layout.count_noun ~plural:"branches" count "branch")
+  done
+
 (* A duration or an age that is not a span reads as nothing. NaN and the
    infinities have no [int_of_float], so they must not reach the ladder. *)
 let test_a_span_that_is_not_a_number_reads_as_nothing () =
@@ -531,6 +547,8 @@ let () =
         ; test_case "an ASCII text is not kept" `Quick test_an_ascii_text_is_not_kept
         ; test_case "truncate_middle preserves unpadded fit and wide scalar boundaries" `Quick
             test_truncate_middle
+        ; test_case "count_noun is singular only at one" `Quick
+            test_count_noun_is_singular_only_at_one
         ] );
       ( "spans"
       , [ test_case "a span that is not a number reads as nothing" `Quick

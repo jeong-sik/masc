@@ -13,8 +13,8 @@ node e2e/design-parity-extra-ui.mjs overview:overview keepers:keepers monitor:mo
 
 The probe renders both pages, collects the class of every *visible* element,
 drops Tailwind utilities and state modifiers, and reports what only the live side
-has. It does not judge — a live backend legitimately has connection state, an
-emergency stop and empty states that a mock cannot model. It produces the list.
+has. It does not judge — a live backend legitimately has connection state and
+empty states that a mock cannot model. It produces the list.
 
 Twelve surfaces, 2026-08-22: **257 distinct components render only on the live
 side.** Most are per-surface detail. The ones that recur are below.
@@ -23,7 +23,6 @@ side.** Most are per-surface detail. The ones that recur are below.
 
 | Component | Why it exists |
 |---|---|
-| `.emergency-stop-control` (8 surfaces) | A real operator control. The mock has no fleet to stop. |
 | `.status-text`, `.time-ago` | Live data formatting; the mock's strings are frozen. |
 | `.v2-mobile-operator-target` | Touch-target sizing, guarded by `mobile-bottom-reserve.test.ts`. |
 | `.skip-link`, `.sr-only` | Keyboard and screen-reader affordances a static mock never needed. |
@@ -62,8 +61,8 @@ does nothing still costs a nesting level in every measurement.
 ### `.v2-top-ops`
 
 The operational cluster in the top bar. The design's top bar carries four chips;
-the live one adds connection state, an emergency stop, a verification badge, a
-version badge and the tweaks control. `keeper-v2/ops-cluster.css` already exists
+the live one adds connection state, a verification badge, a version badge and
+the tweaks control. `keeper-v2/ops-cluster.css` already exists
 to harmonise it to the statchip shape, and `V2-RESKIN-PROGRESS.md` records that
 deleting these would be capability loss. Listed for completeness, not as a cut.
 

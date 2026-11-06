@@ -3,7 +3,7 @@
 // Every other probe here asks "does the dashboard have what the design has".
 // This asks the reverse: which components are on screen that the mock never
 // draws. Some are real capability the mock could not model — a live backend has
-// connection state, an emergency stop, a version badge. Some are leftovers. The
+// connection state, a version badge. Some are leftovers. The
 // probe does not judge; it produces the list to review.
 import { chromium } from 'playwright'
 

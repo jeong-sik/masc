@@ -124,7 +124,6 @@ module String_opt_knob = struct
     | Imessage_self_chat_guid
     | Imessage_poll_interval_sec
     | Imessage_cursor_path
-    | Voice_realtime_ws_url
   [@@deriving enumerate]
 
   let spec = function
@@ -153,11 +152,6 @@ module String_opt_knob = struct
       , "(derived)"
       , "channel"
       , "Where the last delivered message ROWID is kept" )
-    | Voice_realtime_ws_url ->
-      ( "MASC_VOICE_REALTIME_WS_URL"
-      , "(none)"
-      , "transport"
-      , "WebSocket endpoint for the realtime voice bridge" )
   ;;
 
   let env_name t = let n, _, _, _ = spec t in n

@@ -1166,11 +1166,6 @@
  masc.agent_core mcp_protocol))
 
 (test
- (name test_voice_session_manager)
- (modules test_voice_session_manager)
- (libraries masc_test_deps eio_main unix))
-
-(test
  (name test_keeper_tool_execute_stream_close)
  (modules test_keeper_tool_execute_stream_close)
  (libraries masc_test_deps))

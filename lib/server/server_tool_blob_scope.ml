@@ -131,7 +131,9 @@ let workspace =
     ; no_reference Tool_misc_web_fetch.artifacts_dirname
     ; no_reference Voice_bridge_core.audio_dirname
     ; no_reference Voice_config.filename
-    ; no_reference Voice_session_manager.sessions_dirname
+    (* The voice session store was deleted; a workspace that ran it still has the
+       directory, so the name stays a known writes-no-reference entry. *)
+    ; no_reference "voice_sessions"
     ; no_reference Keeper_board_attention_candidate.dirname
     ; no_reference Keeper_board_attention_partition.dirname
     ; no_reference Keeper_connector_names.dirname

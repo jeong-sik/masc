@@ -16,9 +16,6 @@ type voice_command =
   | Speak
   | Listen
   | Agent
-  | Sessions
-  | Session_start
-  | Session_end
 
 (** Canonical enumeration. Must list every constructor of
     [voice_command]; adding a variant without appending here is the
@@ -26,15 +23,12 @@ type voice_command =
     [test_voice_command_descriptor_parity], which compares this list
     against the registered [keeper_voice_*] descriptors. *)
 let all_commands : voice_command list =
-  [ Speak; Listen; Agent; Sessions; Session_start; Session_end ]
+  [ Speak; Listen; Agent ]
 
 let command_to_string = function
   | Speak -> "keeper_voice_speak"
   | Listen -> "keeper_voice_listen"
   | Agent -> "keeper_voice_agent"
-  | Sessions -> "keeper_voice_sessions"
-  | Session_start -> "keeper_voice_session_start"
-  | Session_end -> "keeper_voice_session_end"
 
 (** Derived from [all_commands] + [command_to_string] so that adding a
     variant requires only the [command_to_string] branch + the
@@ -260,89 +254,32 @@ let append_assoc_fields json fields =
   | `Assoc existing -> `Assoc (existing @ fields)
   | other -> `Assoc (("voice_config", other) :: fields)
 
-let requested_conversation_mode ~(args : Yojson.Safe.t) =
-  match
-    Safe_ops.json_string_opt "conversation_mode" args
-    |> Option.map (fun raw -> String.lowercase_ascii (String.trim raw))
-  with
-  | None | Some "" | Some "turn_based" | Some "turn-based" ->
-    Ok Voice_session_manager.Turn_based
-  | Some ("realtime" | "realtime_bridge" | "realtime-bridge") ->
-    (match Voice_session_manager.realtime_bridge_endpoint () with
-     | Some endpoint -> Ok (Voice_session_manager.Realtime_bridge { endpoint })
-     | None ->
-       Error
-         ( Tool_result.Runtime_failure
-         , Tool_args.error_response_with
-             [ "message", `String "voice realtime bridge unavailable"
-             ; "error", `String "voice_realtime_bridge_unavailable"
-             ; "requested_conversation_mode", `String "realtime_bridge"
-             ; "required_env", `String Voice_session_manager.realtime_bridge_env
-             ; "fallback_conversation_mode", `String "turn_based"
-             ; "fallback_tool", `String "keeper_voice_session_start"
-             ] ))
-  | Some mode ->
-    Error
-      ( Tool_result.Workflow_rejection
-      , Tool_args.error_response_with
-          [ "message", `String "invalid voice conversation_mode"
-          ; "error", `String "invalid_voice_conversation_mode"
-          ; "conversation_mode", `String mode
-          ; ( "accepted_modes"
-            , `List [ `String "turn_based"; `String "realtime_bridge" ] )
+(* How a voice turn travels. Operator speech is transcribed into a normal
+   keeper text turn; keeper speech leaves through keeper_voice_speak as a TTS
+   clip the dashboard fetches by token. *)
+let voice_loop_json =
+  `Assoc
+    [ ( "operator_input"
+      , `Assoc
+          [ "capture", `String "dashboard_microphone_or_audio_upload"
+          ; "server_route", `String "POST /api/v1/voice/transcribe"
+          ; "handoff", `String "transcribed_text_enters_normal_keeper_turn"
           ] )
+    ; ( "keeper_output"
+      , `Assoc
+          [ "tool", `String "keeper_voice_speak"
+          ; "delivery", `String "tts_audio_clip"
+          ; ( "browser_route"
+            , `String ("GET " ^ Masc_network_defaults.voice_audio_path "<token>") )
+          ] )
+    ]
 
-let voice_agent_capability_fields ~(meta : keeper_meta) =
-  let mgr = Keeper_voice_local.get_session_manager () in
-  let active_session = Voice_session_manager.get_session mgr ~agent_id:meta.name in
-  let session_active =
-    match active_session with
-    | Some session -> Voice_session_manager.session_is_active session
-    | None -> false
-  in
-  let active_mode =
-    match active_session with
-    | Some session -> Voice_session_manager.session_conversation_mode session
-    | None -> Voice_session_manager.Turn_based
-  in
-  let realtime_endpoint = Voice_session_manager.realtime_bridge_endpoint () in
-  let realtime_configured = Option.is_some realtime_endpoint in
-  [ ( "conversation_mode"
-    , `String (Voice_session_manager.string_of_conversation_mode active_mode) )
-  ; ( "transport_mode"
-    , `String (Voice_session_manager.transport_mode_of_conversation_mode active_mode) )
-  ; ( "realtime_supported"
-    , `Bool (realtime_configured || Voice_session_manager.realtime_supported active_mode) )
-  ; ( "realtime_bridge"
-    , Voice_session_manager.realtime_bridge_public_json ?endpoint:realtime_endpoint () )
-  ; ( "available_conversation_modes"
-    , `List
-        ([ `String "turn_based" ]
-         @ if realtime_configured then [ `String "realtime_bridge" ] else []) )
-  ; ( "voice_loop"
-    , Voice_session_manager.voice_loop_json
-        ~session_active
-        active_mode )
-  ; "session_active", `Bool session_active
-  ; ( "active_session"
-    , match active_session with
-      | Some session -> Voice_session_manager.session_to_json session
-      | None -> `Null )
+let voice_agent_capability_fields =
+  [ "voice_loop", voice_loop_json
   ; ( "input_modes"
     , `List [ `String "browser_record_transcribe"; `String "server_microphone_listen" ] )
   ; ( "output_modes"
     , `List [ `String "tts_audio_clip"; `String "local_playback_if_configured" ] )
-  ; ( "session_control_tools"
-    , `List
-        [ `String "keeper_voice_session_start"
-        ; `String "keeper_voice_speak"
-        ; `String "keeper_voice_listen"
-        ; `String "keeper_voice_session_end"
-        ] )
-  ; ( "realtime_gap"
-    , `String
-        "No full-duplex live audio stream is bound to keeper turns; speech input \
-         is transcribed into text before the normal keeper turn." )
   ]
 
 let handle_agent_with_outcome ~(meta : keeper_meta) =
@@ -350,7 +287,7 @@ let handle_agent_with_outcome ~(meta : keeper_meta) =
   | Ok json ->
     Keeper_tool_execution.success
       (Yojson.Safe.to_string
-         (append_assoc_fields json (voice_agent_capability_fields ~meta)))
+         (append_assoc_fields json voice_agent_capability_fields))
   | Error err ->
     Keeper_tool_execution.failure
       ~class_:Tool_result.Runtime_failure
@@ -358,45 +295,6 @@ let handle_agent_with_outcome ~(meta : keeper_meta) =
          [ "agent_id", `String meta.name
          ; "message", `String err
          ])
-
-let handle_sessions_with_outcome () =
-  let mgr = Keeper_voice_local.get_session_manager () in
-  let sessions = Voice_session_manager.list_sessions mgr in
-  Keeper_tool_execution.success
-    (Yojson.Safe.to_string
-       (`Assoc
-           [ "session_count", `Int (List.length sessions)
-           ; "sessions", `List (List.map Voice_session_manager.session_to_json sessions)
-           ]))
-
-let handle_session_start_with_outcome ~(meta : keeper_meta) ~(args : Yojson.Safe.t) =
-  let voice =
-    Safe_ops.json_string_opt "voice" args
-    |> Option.map String.trim
-    |> function
-    | Some s when s <> "" -> Some s
-    | _ -> None
-  in
-  match requested_conversation_mode ~args with
-  | Error (class_, response) -> Keeper_tool_execution.failure ~class_ response
-  | Ok conversation_mode ->
-    let mgr = Keeper_voice_local.get_session_manager () in
-    let session =
-      Voice_session_manager.start_session mgr ~agent_id:meta.name ?voice
-        ~conversation_mode ()
-    in
-    Keeper_tool_execution.success
-      (Yojson.Safe.to_string (Voice_session_manager.session_to_json session))
-
-let handle_session_end_with_outcome ~(meta : keeper_meta) =
-  let mgr = Keeper_voice_local.get_session_manager () in
-  let ended = Voice_session_manager.end_session mgr ~agent_id:meta.name in
-  Keeper_tool_execution.success
-    (Yojson.Safe.to_string
-       (`Assoc
-           [ "status", `String (if ended then "ended" else "no_active_session")
-           ; "agent_id", `String meta.name
-           ]))
 
 let handle_with_outcome
       ~(config : Workspace.config)
@@ -411,9 +309,6 @@ let handle_with_outcome
     handle_speak_with_outcome ~config ~meta ~authorize_external_effect ~args
   | Listen -> handle_listen_with_outcome ~meta ~args ()
   | Agent -> handle_agent_with_outcome ~meta
-  | Sessions -> handle_sessions_with_outcome ()
-  | Session_start -> handle_session_start_with_outcome ~meta ~args
-  | Session_end -> handle_session_end_with_outcome ~meta
 
 let handle_voice_tool_with_outcome
       ~(config : Workspace.config)

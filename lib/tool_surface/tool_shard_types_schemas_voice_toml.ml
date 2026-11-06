@@ -1,4 +1,4 @@
-(** The six voice tools, read from [config/tools/keeper_voice_*.toml] (RFC
+(** The three voice tools, read from [config/tools/keeper_voice_*.toml] (RFC
     prompts-and-tool-definitions-outside-ocaml §2.2).
 
     Each value is decoded once at module initialization. A missing file or a
@@ -15,6 +15,3 @@ let schema_of_name = Tool_definition_embedded.schema
 let speak = schema_of_name "keeper_voice_speak"
 let listen = schema_of_name "keeper_voice_listen"
 let agent = schema_of_name "keeper_voice_agent"
-let sessions = schema_of_name "keeper_voice_sessions"
-let session_start = schema_of_name "keeper_voice_session_start"
-let session_end = schema_of_name "keeper_voice_session_end"

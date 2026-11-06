@@ -258,12 +258,6 @@ let ensure_keeper_claim fixture =
     (Masc.Workspace.claim_next_r fixture.config
        ~agent_name:fixture.meta.name ())
 
-let ensure_voice_session fixture =
-  let mgr = Masc.Keeper_voice_local.get_session_manager () in
-  ignore
-    (Masc.Voice_session_manager.start_session mgr ~agent_id:fixture.meta.name
-       ~voice:"tool-matrix" ())
-
 let ensure_board_comment fixture =
   let body =
     Generic.execute_tool_ok fixture.generic ~name:"masc_board_comment"
@@ -338,7 +332,6 @@ let prepare_keeper_name fixture name =
       [ "keeper_task_done" ]
   then
     ensure_keeper_claim fixture;
-  if name = "keeper_voice_session_end" then ensure_voice_session fixture;
   (* keeper_memory_search: needle "tool matrix memory needle" is already
      in ctx_snapshot from fixture creation (line ~128). No mutation needed. *)
   ignore (name = "keeper_memory_search")
@@ -354,9 +347,7 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
   | "keeper_candle_balance"
   | "keeper_candle_catalog"
   | "keeper_task_claim"
-  | "keeper_voice_agent"
-  | "keeper_voice_sessions"
-  | "keeper_voice_session_end" ->
+  | "keeper_voice_agent" ->
       `Assoc []
   | "keeper_candle_purchase" ->
       `Assoc [ "item", `String "glasses" ]
@@ -473,8 +464,6 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
       `Assoc [ ("message", `String "tool matrix hello") ]
   | "keeper_voice_listen" ->
       `Assoc [ ("timeout_seconds", `Float 1.0) ]
-  | "keeper_voice_session_start" ->
-      `Assoc [ ("session_name", `String "tool-matrix") ]
   | "keeper_wiki_search" ->
       `Assoc [ ("query", `String "tool matrix") ]
   | "keeper_wiki_read" ->

@@ -15,9 +15,6 @@ let expected =
   [ "keeper_voice_speak"
   ; "keeper_voice_listen"
   ; "keeper_voice_agent"
-  ; "keeper_voice_sessions"
-  ; "keeper_voice_session_start"
-  ; "keeper_voice_session_end"
   ]
 ;;
 

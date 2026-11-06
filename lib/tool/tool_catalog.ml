@@ -590,9 +590,6 @@ let explicit_metadata : (string * metadata) list =
     ("keeper_voice_speak", keeper_shard_write);
     ("keeper_voice_listen", keeper_shard_write);
     ("keeper_voice_agent", keeper_shard_read);
-    ("keeper_voice_sessions", keeper_shard_read);
-    ("keeper_voice_session_start", keeper_shard_write);
-    ("keeper_voice_session_end", keeper_shard_write);
     ("keeper_tasks_audit", keeper_shard_read);
     ("keeper_broadcast", keeper_shard_write);
     ("keeper_task_create", keeper_shard_add_task);

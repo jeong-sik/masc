@@ -322,6 +322,9 @@ let refusal_name : Authz_state.refusal -> string = function
   | Authz_state.Revocation_pending _ -> "Revocation_pending"
   | Authz_state.Admin_assignment_unreadable _ -> "Admin_assignment_unreadable"
   | Authz_state.Admin_assignment _ -> "Admin_assignment"
+  | Authz_state.Principal_unreadable _ -> "Principal_unreadable"
+  | Authz_state.Principal_event _ -> "Principal_event"
+  | Authz_state.Author_inactive _ -> "Author_inactive"
   | Authz_state.Accounts_off kind -> "Accounts_off " ^ R.Kind.to_string kind
   | Authz_state.Kind_not_read kind -> "Kind_not_read " ^ R.Kind.to_string kind
 ;;
@@ -998,6 +1001,66 @@ let an_aborted_admin_revocation_starts_after_the_admission () =
       (admin_revocation_draft ~by:first_admin ~user_id:first_admin ~at_ms:(at_ms + 7)))
 ;;
 
+(* ---- principal records ---- *)
+
+let principal_draft ~by ~at_ms event : Z.draft =
+  match Authz_principal_event.to_body event with
+  | Ok body -> { Z.at_ms; author = Author.Authenticated (Principal.Human by); kind = R.Kind.Principal; body }
+  | Error _ -> Alcotest.fail "fixture principal event refused"
+;;
+
+(* Two Admins through two Admin invitations, written at [at_ms + 1] to
+   [at_ms + 4]. *)
+let admit_two_admins zone =
+  let (_ : Z.committed) = commit_ok zone (invite_draft ()) in
+  let (_ : Z.committed) =
+    commit_ok zone (invite_draft ~at_ms:(at_ms + 2) ~invite_id:second_invite_id ~token:"token-2" ())
+  in
+  let (_ : Z.committed) = commit_ok zone (admission_draft ~at_ms:(at_ms + 3)) in
+  let (_ : Z.committed) =
+    commit_ok
+      zone
+      (admission_draft_of ~person:second_admin ~sub:"222" ~invite_id:second_invite_id ~at_ms:(at_ms + 4))
+  in
+  ()
+;;
+
+(* A disable and a deletion go through the store as intents with their answers,
+   and a restart reads both back. *)
+let a_disable_and_a_deletion_survive_a_restart () =
+  with_dirs (fun dirs ->
+    let (_ : B.completed) = bootstrap dirs in
+    let zone = open_zone dirs in
+    admit_two_admins zone;
+    let disabled =
+      commit_ok
+        zone
+        (principal_draft ~by:first_admin ~at_ms:(at_ms + 5) (Authz_principal_event.Disabled { user_id = second_admin }))
+    in
+    check_settled "nothing to close" "Nothing_to_settle" disabled;
+    let opened = check_restart "after the disable" dirs ~mode:on ~head:disabled.Z.record_hash in
+    check_store "after the disable" opened ~pending:None ~last_committed:disabled.Z.record_hash ~aborted:[];
+    Alcotest.(check bool)
+      "the replay has the second Admin disabled"
+      false
+      (Authz_principal_state.is_active opened.replay.Z.Replay.state.Authz_state.principals second_admin);
+    let deleted =
+      commit_ok
+        zone
+        (principal_draft
+           ~by:first_admin
+           ~at_ms:(at_ms + 6)
+           (Authz_principal_event.Deleted
+              { user_id = second_admin; identity = get (Authz_external_identity.google ~sub:"222") }))
+    in
+    let opened = check_restart "after the deletion" dirs ~mode:on ~head:deleted.Z.record_hash in
+    check_store "after the deletion" opened ~pending:None ~last_committed:deleted.Z.record_hash ~aborted:[];
+    Alcotest.(check bool)
+      "the replay has the second Admin deleted"
+      true
+      (Authz_principal_state.is_deleted opened.replay.Z.Replay.state.Authz_state.principals second_admin))
+;;
+
 let a_refused_invite_writes_nothing () =
   with_dirs (fun dirs ->
     let (_ : B.completed) = bootstrap dirs in
@@ -1459,6 +1522,10 @@ let () =
             "an aborted Admin revocation starts after the admission"
             `Quick
             an_aborted_admin_revocation_starts_after_the_admission
+        ; Alcotest.test_case
+            "a disable and a deletion survive a restart"
+            `Quick
+            a_disable_and_a_deletion_survive_a_restart
         ] )
     ; ( "refusals"
       , [ Alcotest.test_case "refused records write nothing" `Quick refused_records_write_nothing

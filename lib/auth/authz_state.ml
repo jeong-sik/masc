@@ -40,6 +40,9 @@ type refusal =
   | Revocation_pending of Authz_records.Subject.t
   | Admin_assignment_unreadable of Authz_admin_event.error
   | Admin_assignment of Authz_principal_state.revocation_refusal
+  | Principal_unreadable of Authz_principal_event.error
+  | Principal_event of Authz_principal_state.principal_refusal
+  | Author_inactive of Authz_types.User_id.t
   | Accounts_off of K.t
   | Kind_not_read of K.t
 
@@ -63,6 +66,13 @@ let refusal_to_string = function
   | Admin_assignment_unreadable error ->
     "the Admin assignment record cannot be read: " ^ Authz_admin_event.error_to_string error
   | Admin_assignment refusal -> Authz_principal_state.revocation_refusal_to_string refusal
+  | Principal_unreadable error ->
+    "the principal record cannot be read: " ^ Authz_principal_event.error_to_string error
+  | Principal_event refusal -> Authz_principal_state.principal_refusal_to_string refusal
+  | Author_inactive user_id ->
+    Printf.sprintf
+      "the principal %s is disabled or deleted, and writes nothing"
+      (Authz_types.User_id.to_string user_id)
   | Accounts_off kind ->
     Printf.sprintf "the accounts are off, and no %s record is written while they are" (K.to_string kind)
   | Kind_not_read kind -> Printf.sprintf "no layer of this server reads %s records" (K.to_string kind)
@@ -152,16 +162,20 @@ let admission state ~workspace_id (record : R.t) =
          })
 ;;
 
+(* A human whose revocation the store gave up (design 8.3). *)
+let held state user_id =
+  is_pending state (Authz_records.Subject.Principal (Authz_types.Principal.Human user_id))
+;;
+
 (* An Admin assignment that ends lowers the role epoch of its principal
    (design 8.1), so the store takes a [Revoke] on that principal. *)
 let admin_assignment state (record : R.t) =
   match Authz_admin_event.of_body record.R.body with
   | Error error -> Error (Admin_assignment_unreadable error)
   | Ok (Authz_admin_event.Revoked { user_id; cause = _ } as event) ->
-    let held id =
-      is_pending state (Authz_records.Subject.Principal (Authz_types.Principal.Human id))
-    in
-    (match Authz_principal_state.revoke_admin state.principals ~author:record.R.author ~held event with
+    (match
+       Authz_principal_state.revoke_admin state.principals ~author:record.R.author ~held:(held state) event
+     with
      | Error refusal -> Error (Admin_assignment refusal)
      | Ok principals ->
        Ok
@@ -173,6 +187,33 @@ let admin_assignment state (record : R.t) =
                   ; subject = Authz_records.Subject.Principal (Authz_types.Principal.Human user_id)
                   })
          })
+;;
+
+(* A disable and a deletion end what the principal may do, so each is an intent
+   on the principal (design 8.1, principal_epoch). An enable gives back what a
+   disable took, raises no epoch, and has none: a log restored from before it
+   leaves the principal disabled. *)
+let principal_event state (record : R.t) =
+  match Authz_principal_event.of_body record.R.body with
+  | Error error -> Error (Principal_unreadable error)
+  | Ok event ->
+    (match
+       Authz_principal_state.apply_event state.principals ~author:record.R.author ~held:(held state) event
+     with
+     | Error refusal -> Error (Principal_event refusal)
+     | Ok principals ->
+       let subject =
+         Authz_records.Subject.Principal
+           (Authz_types.Principal.Human (Authz_principal_event.user_id event))
+       in
+       let change authz_event = Some (Authz_external_store.Change.Authz { event = authz_event; subject }) in
+       let high_water =
+         match event with
+         | Authz_principal_event.Disabled _ -> change Authz_external_store.Change.Disable
+         | Authz_principal_event.Deleted _ -> change Authz_external_store.Change.Delete
+         | Authz_principal_event.Enabled _ -> None
+       in
+       Ok { state = { state with principals }; high_water })
 ;;
 
 (* Every kind but a mode event is matched with the mode, so the branch of a
@@ -188,6 +229,8 @@ let read state (record : R.t) =
   | K.Admission, Authz_mode_state.Off _ -> Error (Accounts_off K.Admission)
   | K.Admin_assignment, Authz_mode_state.Multi_account _ -> admin_assignment state record
   | K.Admin_assignment, Authz_mode_state.Off _ -> Error (Accounts_off K.Admin_assignment)
+  | K.Principal, Authz_mode_state.Multi_account _ -> principal_event state record
+  | K.Principal, Authz_mode_state.Off _ -> Error (Accounts_off K.Principal)
   | ( ( K.Runtime_grant
       | K.Delegate_policy
       | K.Principal
@@ -204,7 +247,6 @@ let read state (record : R.t) =
     , Authz_mode_state.Not_bootstrapped -> Error (Before_bootstrap kind)
   | ( ( K.Runtime_grant
       | K.Delegate_policy
-      | K.Principal
       | K.Internal_service_credential
       | K.Permission_revocation
       | K.Trigger_evidence
@@ -215,14 +257,29 @@ let read state (record : R.t) =
     , (Authz_mode_state.Multi_account _ | Off _) -> Error (Kind_not_read kind)
 ;;
 
+(* A deleted principal, or one that is there and not active. A person who has
+   not joined yet is neither, and writes their own admission. *)
+let inactive principals user_id =
+  Authz_principal_state.is_deleted principals user_id
+  || (Option.is_some (Authz_principal_state.find principals user_id)
+      && not (Authz_principal_state.is_active principals user_id))
+;;
+
 (* A principal whose revocation the store gave up writes nothing (design 8.3):
    an Admin whose assignment was being revoked neither invites nor revokes
-   another Admin while the block stands. *)
-let blocked_author state (author : Authz_records.Author.t) =
+   another Admin while the block stands. A disabled or deleted principal writes
+   nothing either (design 4.1). *)
+let author_refusal state (author : Authz_records.Author.t) =
   match author with
   | Authz_records.Author.Authenticated principal ->
     let subject = Authz_records.Subject.Principal principal in
-    if is_pending state subject then Some subject else None
+    if is_pending state subject
+    then Some (Revocation_pending subject)
+    else (
+      match principal with
+      | Authz_types.Principal.Human user_id when inactive state.principals user_id ->
+        Some (Author_inactive user_id)
+      | Authz_types.Principal.Human _ | Authz_types.Principal.Service _ -> None)
   | Authz_records.Author.Local_operator
   | Authz_records.Author.System_cron
   | Authz_records.Author.System_maintenance
@@ -230,8 +287,8 @@ let blocked_author state (author : Authz_records.Author.t) =
 ;;
 
 let apply state (record : R.t) =
-  match blocked_author state record.R.author with
-  | Some subject -> Error (Revocation_pending subject)
+  match author_refusal state record.R.author with
+  | Some refusal -> Error refusal
   | None -> read state record
 ;;
 

@@ -6,7 +6,9 @@ module User_map = Map.Make (User_id)
 module Namespace_map = Map.Make (Account_home_namespace)
 module Identity = Authz_external_identity
 
-type status = Active
+type status =
+  | Active
+  | Disabled
 
 type principal =
   { identity : Identity.t
@@ -16,18 +18,20 @@ type principal =
 type membership =
   { workspace_id : Workspace_id.t
   ; account_home_namespace : Account_home_namespace.t
-  ; status : status
   }
 
 (* [by_identity] and [by_namespace] name, for each bound identity and each
    namespace given, the principal it belongs to. The maps grow together in
-   [admit]; [admins] also shrinks in [revoke_admin]. *)
+   [admit]. A deletion takes the principal, its identity, its membership, and
+   its assignment out, and puts its id in [deleted]; its namespace stays given.
+   [admins] holds the assignments in force; an Admin acts only while Active. *)
 type t =
   { by_id : principal User_map.t
   ; by_identity : User_id.t Identity.Map.t
   ; memberships : membership User_map.t
   ; by_namespace : User_id.t Namespace_map.t
   ; admins : User_id.Set.t
+  ; deleted : User_id.Set.t
   }
 
 let empty =
@@ -36,6 +40,7 @@ let empty =
   ; memberships = User_map.empty
   ; by_namespace = Namespace_map.empty
   ; admins = User_id.Set.empty
+  ; deleted = User_id.Set.empty
   }
 ;;
 
@@ -43,7 +48,19 @@ let find t user_id = User_map.find_opt user_id t.by_id
 let find_identity t identity = Identity.Map.find_opt identity t.by_identity
 let find_membership t user_id = User_map.find_opt user_id t.memberships
 let find_namespace t namespace = Namespace_map.find_opt namespace t.by_namespace
-let is_admin t user_id = User_id.Set.mem user_id t.admins
+let is_deleted t user_id = User_id.Set.mem user_id t.deleted
+
+let is_active t user_id =
+  match find t user_id with
+  | Some { status = Active; identity = _ } -> true
+  | Some { status = Disabled; identity = _ } | None -> false
+;;
+
+let is_admin t user_id = User_id.Set.mem user_id t.admins && is_active t user_id
+
+(* Design 5.1-5: an installation with Admins keeps one that acts. An Admin that
+   is held writes nothing (design 8.3), so it does not act. *)
+let an_admin_remains ~held t = User_id.Set.exists (fun id -> is_active t id && not (held id)) t.admins
 
 type refusal =
   | Author_is_not_the_person of
@@ -133,6 +150,7 @@ let admit
          User_map.mem user_id t.by_id, find_identity t identity, find_namespace t namespace
        with
        | true, (None | Some _), (None | Some _) -> Error (User_id_taken user_id)
+       | false, (None | Some _), (None | Some _) when is_deleted t user_id -> Error (User_id_taken user_id)
        | false, Some bound, (None | Some _) -> Error (Identity_bound { identity; user_id = bound })
        | false, None, (None | Some _) when not (Workspace_id.equal given workspace_id) ->
          Error (Workspace_differs { given; workspace_id })
@@ -149,10 +167,11 @@ let admit
            ; memberships =
                User_map.add
                  user_id
-                 { workspace_id; account_home_namespace = namespace; status = Active }
+                 { workspace_id; account_home_namespace = namespace }
                  t.memberships
            ; by_namespace = Namespace_map.add namespace user_id t.by_namespace
            ; admins
+           ; deleted = t.deleted
            }
          in
          Ok { principals; invites; role }))
@@ -171,9 +190,10 @@ let revocation_refusal_to_string = function
     Printf.sprintf "%s is the last Admin, so the assignment stays" (User_id.to_string user_id)
 ;;
 
-let author_is_an_admin t (author : Author.t) =
+(* An Admin that acts: active, and not held by a revocation the store gave up. *)
+let author_is_an_admin ~held t (author : Author.t) =
   match author with
-  | Author.Authenticated (Principal.Human id) -> is_admin t id
+  | Author.Authenticated (Principal.Human id) -> is_admin t id && not (held id)
   | Author.Authenticated (Principal.Service _)
   | Author.Local_operator
   | Author.System_cron
@@ -182,13 +202,79 @@ let author_is_an_admin t (author : Author.t) =
 ;;
 
 let revoke_admin t ~author ~held (Authz_admin_event.Revoked { user_id; cause = _ }) =
-  if not (author_is_an_admin t author)
+  if not (author_is_an_admin ~held t author)
   then Error (Revoker_is_not_an_admin author)
-  else if not (is_admin t user_id)
+  else if not (User_id.Set.mem user_id t.admins)
   then Error (Not_an_admin user_id)
   else (
-    let admins = User_id.Set.remove user_id t.admins in
-    if User_id.Set.exists (fun id -> not (held id)) admins
-    then Ok { t with admins }
-    else Error (Last_admin user_id))
+    let after = { t with admins = User_id.Set.remove user_id t.admins } in
+    if an_admin_remains ~held after then Ok after else Error (Last_admin user_id))
 ;;
+
+type principal_refusal =
+  | Writer_is_not_an_admin of Author.t
+  | No_principal of User_id.t
+  | Already_disabled of User_id.t
+  | Not_disabled of User_id.t
+  | Identity_differs of
+      { user_id : User_id.t
+      ; identity : Identity.t
+      }
+  | Would_leave_no_admin of User_id.t
+
+let principal_refusal_to_string = function
+  | Writer_is_not_an_admin author ->
+    Printf.sprintf "%s is not an Admin, and only an Admin disables, enables, or deletes a principal" (author_label author)
+  | No_principal user_id -> Printf.sprintf "there is no principal %s" (User_id.to_string user_id)
+  | Already_disabled user_id -> Printf.sprintf "%s is disabled already" (User_id.to_string user_id)
+  | Not_disabled user_id -> Printf.sprintf "%s is not disabled" (User_id.to_string user_id)
+  | Identity_differs { user_id; identity } ->
+    Printf.sprintf
+      "the deletion of %s names the identity %s, which is not the one it is bound to"
+      (User_id.to_string user_id)
+      (Identity.to_string identity)
+  | Would_leave_no_admin user_id ->
+    Printf.sprintf "%s is the last Admin that acts, so it stays" (User_id.to_string user_id)
+;;
+
+(* The author is an Admin that acts, so one acted before the event, and an
+   event that leaves none is refused, as a revocation is. *)
+let keep_an_admin ~held user_id after =
+  if an_admin_remains ~held after then Ok after else Error (Would_leave_no_admin user_id)
+;;
+
+let set_status t user_id (principal : principal) status =
+  { t with by_id = User_map.add user_id { principal with status } t.by_id }
+;;
+
+let apply_event t ~author ~held (event : Authz_principal_event.t) =
+  if not (author_is_an_admin ~held t author)
+  then Error (Writer_is_not_an_admin author)
+  else (
+    let user_id = Authz_principal_event.user_id event in
+    match find t user_id, event with
+    | ( None
+      , ( Authz_principal_event.Disabled _
+        | Authz_principal_event.Enabled _
+        | Authz_principal_event.Deleted _ ) ) -> Error (No_principal user_id)
+    | Some { status = Disabled; _ }, Authz_principal_event.Disabled _ -> Error (Already_disabled user_id)
+    | Some ({ status = Active; _ } as principal), Authz_principal_event.Disabled _ ->
+      keep_an_admin ~held user_id (set_status t user_id principal Disabled)
+    | Some { status = Active; _ }, Authz_principal_event.Enabled _ -> Error (Not_disabled user_id)
+    | Some ({ status = Disabled; _ } as principal), Authz_principal_event.Enabled _ ->
+      Ok (set_status t user_id principal Active)
+    | Some { identity = bound; _ }, Authz_principal_event.Deleted { identity; user_id = _ }
+      when not (Identity.equal bound identity) -> Error (Identity_differs { user_id; identity })
+    | Some { identity; _ }, Authz_principal_event.Deleted _ ->
+      keep_an_admin
+        ~held
+        user_id
+        { t with
+          by_id = User_map.remove user_id t.by_id
+        ; by_identity = Identity.Map.remove identity t.by_identity
+        ; memberships = User_map.remove user_id t.memberships
+        ; admins = User_id.Set.remove user_id t.admins
+        ; deleted = User_id.Set.add user_id t.deleted
+        })
+;;
+

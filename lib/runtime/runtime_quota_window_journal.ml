@@ -42,14 +42,20 @@ let settlement_failed ~path ~operation failure =
   Log.Runtime.warn "provider quota window %s; descriptor settlement failed path=%s: %s"
     operation path (Fs_compat.private_jsonl_operation_failure_to_string failure)
 
+(* A window is written only as a row [read] takes back. A reset that is not a
+   finite number, or an empty scope name, would otherwise sit in the file and
+   be rejected on every boot. *)
 let append ~path (window : Q.stated_window) =
-  let line = Yojson.Safe.to_string (Q.stated_window_to_json window) ^ "\n" in
   let failed detail =
     Log.Runtime.warn
       "provider quota window for %s until %.0f is not kept across restarts: path=%s: %s"
       (Q.scope_to_string window.scope) window.resets_at path detail
   in
-  match Fs_compat.append_private_jsonl_durable_locked_result path line with
+  let row = Q.stated_window_to_json window in
+  match Q.stated_window_of_json row with
+  | Error error -> failed (Q.stated_window_decode_error_to_string error)
+  | Ok _ ->
+  match Fs_compat.append_private_jsonl_durable_locked_result path (Yojson.Safe.to_string row ^ "\n") with
   | Fs_compat.Private_file_succeeded () -> ()
   | Fs_compat.Private_file_succeeded_with_cleanup_failure { value = (); cleanup_failure } ->
     settlement_failed ~path ~operation:"append committed" cleanup_failure
@@ -60,7 +66,6 @@ let append ~path (window : Q.stated_window) =
       (Printf.sprintf "%s; descriptor settlement also failed: %s"
          (Fs_compat.private_jsonl_append_error_to_string error)
          (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
-  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception Sys_error message -> failed message
   | exception Unix.Unix_error (code, fn, arg) ->
     failed (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code))

@@ -286,8 +286,10 @@ let of_json json =
 
 (* Store *)
 
+let dirname = "workspace-memory"
+
 let directory ~base_path =
-  Filename.concat (Filename.concat base_path Common.masc_dirname) "workspace-memory"
+  Filename.concat (Filename.concat base_path Common.masc_dirname) dirname
 
 let path ~base_path = Filename.concat (directory ~base_path) "ledger.json"
 

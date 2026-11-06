@@ -157,3 +157,6 @@ val apply : t -> selected:pending_fact list -> assignment list -> (t, apply_erro
     fact can be changed. Repeated or missing decisions, invalid references,
     and a fact already assigned in the ledger are errors. The caller persists
     the returned ledger atomically; [apply] itself has no effects. *)
+
+val dirname : string
+(** The ledger directory below [<base>/.masc]. *)

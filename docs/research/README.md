@@ -9,7 +9,17 @@ See the [storage guide](../guides/WORKSPACE-STORAGE.md) for output locations.
 
 | Date | Record |
 | --- | --- |
+| — | [TUI frame cost and terminal output: prior art and what applies to masc](tui-frame-cost-and-terminal-output-prior-art-20261104.md) |
 | — | [Extreme TUI/server performance: measured baseline and next decisions](extreme-performance-20261030.md) |
+| 2026-11-06 | [Keepers list: past failure, current state, next attempt](2026-11-06-keepers-list-past-now-next.md) |
+| 2026-11-02 | [Typed model capability presets](2026-11-02-typed-model-capability-presets.md) |
+| 2026-11-02 | [Strict JSON provider admission](2026-11-02-strict-json-provider-admission.md) |
+| 2026-11-02 | [Startup catalog fixtures must reach admission](2026-11-02-startup-catalog-fixture-admission.md) |
+| 2026-11-02 | [Native account selection retained through execution](2026-11-02-native-account-selection.md) |
+| 2026-11-02 | [Explicit TOML provider capability policy](2026-11-02-explicit-provider-capability-policy.md) |
+| 2026-11-02 | [Complete catalog publication](2026-11-02-catalog-snapshot-publication.md) |
+| 2026-11-02 | [Catalog publication authority](2026-11-02-catalog-publication.md) |
+| 2026-11-01 | [Skills authoring, composition and observation](2026-11-01-skills-authoring-and-observation.md) |
 | 2026-11-01 | [Keeper System Prompt 크기와 prefix cache](2026-11-01-keeper-prompt-cache.md) |
 | 2026-10-29 | [Queue layout comparison: candidate and observation protocol](2026-10-29-tui-queue-layout-comparison.md) |
 | 2026-10-29 | [TUI: information priority needs a matching input owner](2026-10-29-tui-panel-input-observation.md) |

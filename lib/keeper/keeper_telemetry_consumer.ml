@@ -5,9 +5,8 @@
     an OTel counter for dashboard visibility.
 
     Payloads are intentionally not persisted here: the same bus is fully
-    persisted by {!Keeper_event_bridge} into [.masc/agent-core-events/] (the
-    store {!Telemetry_unified} actually reads), so a second write-only
-    copy under [data/harness-telemetry/] was removed (2026-07-20).
+    persisted by {!Keeper_event_bridge} into [.masc/agent-core-events/], the
+    store {!Telemetry_unified} reads.
 
     MASC deliberately does not deserialize provider/model-bearing AGENT_CORE
     telemetry; concrete runtime identity belongs to AGENT_CORE.

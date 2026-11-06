@@ -706,9 +706,6 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
         tick ()
       in
       tick ());
-  (* Board_listener removed: filesystem-first principle.
-     JSONL path emits SSE directly via Board_dispatch.emit_board_sse_event.
-     PG path also uses Board_dispatch, making the pg_notify relay redundant. *)
   fork_logged_fiber
     ~sw
     ~on_error:(log_server_fiber_crash "maintenance_cleanup")

@@ -224,11 +224,7 @@ val agent_speak :
     an empty string standing in for one would reach providers as
     [model_id ""].
 
-    This is the only speak path: the former fire-and-forget
-    [enqueue_agent_speak] queue was removed after the 2026-06-10 voice
-    repeat incident (schema promised blocking semantics while the
-    implementation returned [status="queued"] immediately, so keepers
-    re-spoke the same content every sub-turn). *)
+    This is the only speak path. *)
 
 val get_agent_voice :
   agent_id:string -> (Yojson.Safe.t, string) result

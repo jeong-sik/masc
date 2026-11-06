@@ -20,6 +20,7 @@
   keeper_tool_execution_journal_types
   keeper_tool_execution_journal_json
   keeper_tool_execution_journal_model
+  keeper_tool_execution_journal_state_decode
   keeper_unified_prompt_event_fields
   keeper_msg_async_types
   keeper_msg_async_record

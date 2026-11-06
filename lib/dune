@@ -116,6 +116,7 @@
   keeper_chat_store_redaction
   keeper_chat_store_row_codec
   keeper_chat_store_delivery_rules
+  keeper_chat_store_provenance_index
   keeper_runtime_trust_snapshot_core)
  (libraries
   masc.sse_queue_inventory

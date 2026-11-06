@@ -17,30 +17,6 @@
     of plan C3 is to make the calls with the shared HTTP client, bounded by
     {!Login_transport.max_answer_bytes} and a timeout. *)
 
-(** The client of this installation at Google. The secret is in no function
-    out of it: it is only sent in the token request. *)
-module Client : sig
-  type t
-
-  type error =
-    | Client_id_empty
-    | Client_secret_empty
-    | Redirect_uri_not_https
-        (** Not an [https] URL with a host and no query or fragment. A
-            multi-account login runs on [https] only: its cookies are
-            [__Host-], which needs [Secure]. *)
-
-  val make
-    :  client_id:string
-    -> client_secret:string
-    -> redirect_uri:string
-    -> (t, error) result
-
-  val error_to_string : error -> string
-  val client_id : t -> string
-  val redirect_uri : t -> string
-end
-
 (** The addresses that the discovery document gives, each an [https] URL with
     a host and no query or fragment. *)
 type endpoints = private
@@ -92,7 +68,7 @@ val endpoints : get:Login_transport.get -> cache -> now_ms:int -> (endpoints, er
     identity key (design 5.1-4). *)
 val authorization_url
   :  endpoints
-  -> Client.t
+  -> Login_client.t
   -> Oidc_login_transaction.google Oidc_login_transaction.started
   -> string
 
@@ -108,7 +84,7 @@ val identity
   -> cache
   -> now:Ptime.t
   -> now_ms:int
-  -> Client.t
+  -> Login_client.t
   -> code:string
   -> Oidc_login_transaction.google Oidc_login_transaction.taken
   -> (Authz_external_identity.t, error) result

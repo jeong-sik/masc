@@ -2265,9 +2265,9 @@ let runtime_verification_timeout_s = 120.0
 
 let verify_runtime_execution runtime timeout_s =
   Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
-    let private_path = Filename.concat (Filename.get_temp_dir_name ())
-      ("masc-runtime-verify-" ^ Random_id.hex ~bytes:16) in
-    Unix.mkdir private_path 0o700;
+    (* macOS TMPDIR sits under the /var -> /private/var symlink, and an
+       Antigravity runtime root must be its own realpath. *)
+    let private_path = Filename.temp_dir "masc-runtime-verify-" "" |> Unix.realpath in
     Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree private_path);
     (* The env and clock a provider request reads are installed inside; the
        verification's own bound is the command's [timeout_s]. *)

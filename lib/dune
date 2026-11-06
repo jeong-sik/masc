@@ -6,6 +6,7 @@
  (private_modules
   fusion_decision_event
   hitl_summary_flow_outcome
+  hitl_summary_flow_prepare
   keeper_attempt_request_evidence
   keeper_composition_child_exports
   keeper_librarian_message_floor

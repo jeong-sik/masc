@@ -296,7 +296,7 @@ let try_with_mutex path f =
       | Eio_guard.Eio_fiber -> Eio.Cancel.protect f
       | Eio_guard.Non_eio -> f ()))
 
-let lock_suffix = ".lock"
+let lock_suffix = Fs_compat.lock_suffix
 let lock_file_path path = path ^ lock_suffix
 
 (** Run [f] while holding both the per-path {!Cross_context_mutex} and an

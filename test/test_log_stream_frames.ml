@@ -19,8 +19,8 @@ let query ?(limit = 3) () : Server_logs_query.t =
   ; module_filter = module_name
   ; since_seq = None
   ; before_seq = None
-  ; category_filter = None
-  ; exclude_category = None
+  ; categories = None
+  ; exclude_categories = None
   }
 
 let push ?(module_name = module_name) message = Log.emit Log.Warn ~module_name message

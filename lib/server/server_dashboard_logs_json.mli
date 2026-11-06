@@ -9,8 +9,8 @@ val build
   -> module_filter:string
   -> since_seq:int option
   -> before_seq:int option
-  -> category_filter:string option
-  -> exclude_category:string list option
+  -> categories:Log.category_selector list option
+  -> exclude_categories:Log.category_selector list option
   -> ring_bounds:Log.Ring.bounds
   -> Log.Ring.entry list
   -> Yojson.Safe.t

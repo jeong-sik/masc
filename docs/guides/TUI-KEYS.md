@@ -39,6 +39,7 @@ The command palette is `:`.
 | `j/k` | move between decision links and conversations |
 | `Enter` | open the selected destination; never approve |
 | `p` | approvals and questions |
+| `g` | the operator quiz's Results: scorecard windows and wrong-answer notes |
 | `;` | held calls, questions, Goal confirmations and task owner routes |
 | `m` | account windows and Keeper usage |
 | `s` | phrases, arrangements and recorded takes; no Keeper or score required |

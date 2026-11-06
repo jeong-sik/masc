@@ -123,8 +123,6 @@ Rule of thumb: **defer hard-gating until at least 2 Phase 3 PRs have moved the f
 
 ## 10. References
 
-- `docs/audit/TLA-SPECS-GAP-AUDIT-2026-04*.md` — Q-P0-2 chain (Phase 3 closure in #12188)
-- `docs/audit/TLA-PPX-ADOPTION-AUDIT-2026-04.md` — runtime-side PPX adoption (PR #12143 MERGED)
 - `tools/ocaml_boundary_audit/main.ml` — typed-tree boundary ratchet
 
 *Process doc / 2026-04-30 / source: Q-P0-2 + Q-P0-3 closure observations + 3 new-domain chains*

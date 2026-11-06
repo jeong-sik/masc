@@ -50,9 +50,16 @@ val retained_stop : store:Lane_addon_store.t ->
     change the Addon's semantic configuration (for example its [run_id]).
     That explicit reconfiguration permits a fresh attempt, not a claim that
     provider capacity improved. Unknown, opaque and mixed failures retain
-    their existing policy. No Memory/cursor/ACK effect is authorized. *)
+    their existing policy. A refusal carrying [Progress.settlement] is released: its range was
+    abandoned by {!Keeper_librarian_durable_commit.settle_refused}. No
+    Memory/cursor/ACK effect is authorized here. *)
 
 val request_id : t -> string
+val original : t -> Lane_addon_tool_request_owner.retained * Keeper_librarian_durable_request.t
+val diagnosis : t -> Yojson.Safe.t option
+(** The typed record of what settling this stop abandons and applies. [Some] only
+    for a permanent counterpart-input capacity refusal; every other stop reason
+    keeps blocking its destination until its own policy releases it. *)
 val preserves_completed :
   settled:inventory ->
   record:Lane_addon_tool_request_owner.retained ->

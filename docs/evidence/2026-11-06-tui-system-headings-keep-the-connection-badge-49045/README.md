@@ -1,8 +1,8 @@
 # The Runtime, Features and Clients headings keep the connection badge whole
 
-PR #49045, layer 15 of stack #48922. The title row of three System screens joined its parts by hand (title, tab strip, reading time, connection badge). When the parts after the tab strip were wider than the row, the tab strip got no cells and the frame cut the row at its end, and the end of the row is the connection badge.
+PR #49045 of stack #48922. The title row of three System screens joined its parts by hand (title, tab strip, reading time, connection badge). When the parts after the tab strip were wider than the row, the tab strip got no cells and the frame cut the row at its end, and the end of the row is the connection badge.
 
-Before is the proof build of layer 14 (code commit `d1569dc589c`, run 42138077129). After is the proof build of this layer's code up to its last code commit (`ce423e3db49`, run 42147433996); the evidence commit that carries this README comes after it and changes no code. The branch was rebased onto a newer `main` after that build; the same last code commit is `fcc8a25662f` on the branch now, with the same changed lines. Both ran against a fixture server. Each screen was read at six terminal sizes, a few seconds after the screen opened. The Runtime probe state on screen in those reads was `일부 실패 / 최신`.
+Before is the proof build of the stack head before this PR (code commit `d1569dc589c`, run 42138077129). After is the proof build of this PR's code up to its last code commit (`ce423e3db49`, run 42147433996); the evidence commit that carries this README comes after it and changes no code. The branch was rebased onto a newer `main` after that build; the changed lines are the same. Both ran against a fixture server. Each screen was read at six terminal sizes, a few seconds after the screen opened. The Runtime probe state on screen in those reads was `일부 실패 / 최신`.
 
 ## The title rows on the screen
 
@@ -168,7 +168,7 @@ The badge `HTTP [connected]` is whole on every after row of the three screens at
 
 ## The stale Runtime state at 80 columns
 
-The 14-screen tour of the layer 14 proof build (80x24) showed the Runtime probe as `일부 실패 / 이전 관측`. The row was cut inside the badge:
+The 14-screen tour of the earlier proof build (80x24) showed the Runtime probe as `일부 실패 / 이전 관측`. The row was cut inside the badge:
 
 ```text
 MASC 시스템 / 런타임    일부 실패 / 이전 관측  관측 10:20:38  HTTP [connecte…
@@ -242,7 +242,7 @@ This layer adds no test. `docs/constitution.xml` rules out tests of TUI layout a
 
 ## Not changed
 
-- Other rows that join `connection_badge state` by hand: `rg -c 'connection_badge state' bin/*.ml` counts 55 lines in 14 files on this layer's head. Some of them go through `detail_heading` already. This README does not claim any of the others is cut.
+- Other rows that join `connection_badge state` by hand: `rg -c 'connection_badge state' bin/*.ml` counts 55 lines in 14 files on this PR's head. Some of them go through `detail_heading` already. This README does not claim any of the others is cut.
 
 - The `None` branches of the three headings use `title_missing_reading`, a short fixed text.
 

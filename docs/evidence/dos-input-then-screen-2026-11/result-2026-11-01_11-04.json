@@ -1,0 +1,104 @@
+{
+  "by_profile": {
+    "claude_code_b6e72ff9.claude-fable-5-1_ea234d3e": {
+      "calls": 8,
+      "followed_by_screen": 8,
+      "gap_hours": 0.01,
+      "gap_p50_s": 2.9,
+      "gap_p90_s": 31.2,
+      "screen_in_next_request": 8,
+      "screen_result_bytes": 753292,
+      "with_frame": 0
+    },
+    "deepseek-then-sonnet-glm-muse": {
+      "calls": 12,
+      "followed_by_screen": 11,
+      "gap_hours": 0.88,
+      "gap_p50_s": 239.7,
+      "gap_p90_s": 510.3,
+      "screen_in_next_request": 11,
+      "screen_result_bytes": 1049302,
+      "with_frame": 0
+    },
+    "glm-coding.glm-5.3-flash": {
+      "calls": 383,
+      "followed_by_screen": 235,
+      "gap_hours": 5.75,
+      "gap_p50_s": 20.8,
+      "gap_p90_s": 234.9,
+      "screen_in_next_request": 235,
+      "screen_result_bytes": 21947138,
+      "with_frame": 0
+    },
+    "go-qwen-flash-then-glm": {
+      "calls": 245,
+      "followed_by_screen": 111,
+      "gap_hours": 1.31,
+      "gap_p50_s": 27.8,
+      "gap_p90_s": 68.8,
+      "screen_in_next_request": 111,
+      "screen_result_bytes": 10233230,
+      "with_frame": 0
+    },
+    "ollama_cloud.ollama-cloud-deepseek-v4-1-flash": {
+      "calls": 1624,
+      "followed_by_screen": 1238,
+      "gap_hours": 3.81,
+      "gap_p50_s": 8.8,
+      "gap_p90_s": 19.8,
+      "screen_in_next_request": 1238,
+      "screen_result_bytes": 116161344,
+      "with_frame": 0
+    },
+    "opencode_go.opencode-go-qwen-flash": {
+      "calls": 197,
+      "followed_by_screen": 104,
+      "gap_hours": 0.69,
+      "gap_p50_s": 20.8,
+      "gap_p90_s": 37.7,
+      "screen_in_next_request": 104,
+      "screen_result_bytes": 9652230,
+      "with_frame": 0
+    }
+  },
+  "by_tool": {
+    "masc_dos_press": {
+      "calls": 2074,
+      "followed_by_screen": 1490,
+      "gap_hours": 10.82,
+      "gap_p50_s": 10.4,
+      "gap_p90_s": 38.6,
+      "screen_in_next_request": 1490,
+      "screen_result_bytes": 139329344,
+      "with_frame": 0
+    },
+    "masc_dos_step": {
+      "calls": 272,
+      "followed_by_screen": 189,
+      "gap_hours": 1.39,
+      "gap_p50_s": 12.4,
+      "gap_p90_s": 47.9,
+      "screen_in_next_request": 189,
+      "screen_result_bytes": 18020704,
+      "with_frame": 0
+    },
+    "masc_dos_type": {
+      "calls": 123,
+      "followed_by_screen": 28,
+      "gap_hours": 0.24,
+      "gap_p50_s": 10.5,
+      "gap_p90_s": 30.2,
+      "screen_in_next_request": 28,
+      "screen_result_bytes": 2446488,
+      "with_frame": 0
+    }
+  },
+  "dos_calls": 4704,
+  "dos_calls_by_keeper": {
+    "msx-retro-mania": 4704
+  },
+  "from": "2026-11-01",
+  "screen_calls": 1940,
+  "to": "2026-11-04",
+  "unreadable_lines": 0
+}

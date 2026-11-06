@@ -2,7 +2,8 @@
 
 This package owns a DOS machine in a separate stdio MCP worker. Attached
 `masc_dos_*` tools expose the machine; `lane_observe` publishes owned screen
-context. Screen calls return PNG image blocks and structured observations.
+context. Screen calls return PNG image blocks and structured observations,
+and so do step, press, click and type calls asked with `include_frame`.
 The declared `skills` directory supplies DOS play instructions.
 
 The host uses private `lane_call`, controller snapshot and conditional release

@@ -55,6 +55,14 @@ Read `masc_dos_screen` for the PNG before choosing another input. If the visible
 transition still needs time, use `masc_dos_step` with `until_ready: false` without
 repeating the key.
 
+When a read of the screen follows the input anyway, pass `include_frame: true`
+to `masc_dos_step`, `masc_dos_press`, `masc_dos_click` or `masc_dos_type`. The
+answer then also carries the PNG of the screen the call left, the image
+`masc_dos_screen` returns, so there is no second call between the input and the
+read. Without it the answer has no image. An input that is refused carries no
+image. If the input landed and the frame could not be captured, the answer says
+so in one text line: read `masc_dos_screen` and do not send the input again.
+
 The default remains `until_ready: true`. Its batch continuation uses the same
 limited settling observation, so do not chain keys across an unobserved screen
 change. `keys_pressed` is the delivered prefix length; the remaining suffix

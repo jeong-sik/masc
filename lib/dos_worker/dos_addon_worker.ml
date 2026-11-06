@@ -8,6 +8,20 @@ let response ?(extra_content = []) result : S.tool_result =
   ; structured_content = Some (Tool_result.data result)
   ; _meta = Lane_addon_tool_result.metadata result }
 
+let png_content png =
+  S.ImageContent {type_="image"; data=Base64.encode_string png; mime_type="image/png"; annotations=None}
+
+(* The calls that move the machine by input can answer with the screen they
+   leave ([include_frame=true]), so a caller that reads the frame after every
+   input does not spend a second call, and a model request, on it. Off unless
+   asked: an input that no read follows adds no PNG to the caller's context.
+   [masc_dos_screen] has its own [include_frame], on by default. *)
+let frame_after_input = function
+  | Controller.Dos_step | Controller.Dos_press | Controller.Dos_click | Controller.Dos_type -> true
+  | Controller.Dos_load | Controller.Dos_eject | Controller.Dos_pass | Controller.Dos_meta
+  | Controller.Dos_inventory | Controller.Dos_screen | Controller.Dos_peek | Controller.Dos_save
+  | Controller.Dos_restore -> false
+
 let json_response data : S.tool_result =
   { content = [S.TextContent {type_="text";text=Yojson.Safe.to_string data;annotations=None}];
     is_error=Some false;structured_content=Some data;_meta=None }
@@ -140,13 +154,27 @@ let create ~base_path () =
              | _, None -> Ok false
              | None, Some _ | Some _, Some _ -> Error "invalid DOS controller release admission") in
     Ok (actor, released_controller) in
+  (* The input has already moved the machine when this runs, so a frame that
+     cannot be captured is said in the answer and does not turn the call into a
+     failure: the caller would repeat an input that landed. *)
+  let frame_blocks () =
+    let missing reason = S.TextContent {type_="text"; annotations=None;
+      text="include_frame: the input was applied and the frame is missing (" ^ reason
+        ^ "). Read it with masc_dos_screen."} in
+    match Machine.capture_png () with
+    | Ok {png; _} -> [png_content png]
+    | Error (Machine.Lane error) -> [missing (Dos_lane.error_to_string error)]
+    | Error (Machine.Encode message) -> [missing message] in
   let invoke ~released_controller ~actor ~tool ~arguments =
     let result = Machine.dispatch ~base_path ~agent:actor ~tool ~arguments in
     let result = match result with
       | Tool_result.Failed failure when released_controller ->
           Tool_result.Failed {failure with effect_disposition=Tool_result.Proven_post_effect}
       | (Tool_result.Completed _ | Tool_result.Deferred _ | Failed _) as result -> result in
-    response result in
+    match result with
+    | Tool_result.Completed _ when frame_after_input tool && Tool_args.get_bool arguments "include_frame" false ->
+        response ~extra_content:(frame_blocks ()) result
+    | Tool_result.Completed _ | Tool_result.Deferred _ | Tool_result.Failed _ -> response result in
   let screen ~arguments () =
     let tool_name = Controller.dos_tool_name Controller.Dos_screen
     and start_time = Tool_timing.start () in
@@ -193,8 +221,7 @@ let create ~base_path () =
     | Error (Machine.Encode message) ->
         failure Controller.Screen_encode_failed (Machine.image_capture_failed ~tool_name ~start_time message)
     | Ok {observation; width; height; png} ->
-        response ~extra_content:[S.ImageContent {type_="image"; data=Base64.encode_string png;
-          mime_type="image/png"; annotations=None}]
+        response ~extra_content:[png_content png]
           (Machine.of_lane ~base_path ~tool_name ~start_time
             ~extra:(Machine.png_fields ~width ~height ~png @ [Machine.core_field] @ pad observation) (Ok observation)) in
   let schemas = schemas () in

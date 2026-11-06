@@ -9,7 +9,7 @@ By default each character runs to an empty-poll/unchanged-screen observation, \
 which does not prove a final prompt. until_ready=false injects only the first \
 character and runs the requested steps unless the program exits. The call \
 stops at 4000000 machine steps in total; keys_pressed says how many entered \
-the BIOS ring, and the remaining suffix is unsent."""
+the BIOS ring, and the remaining suffix is unsent. include_frame=true returns the screen after the last character."""
 additional_properties = false
 
 defer_loading = true
@@ -34,3 +34,9 @@ name = "until_ready"
 type = "boolean"
 description = "Stop at the empty-poll/unchanged-screen observation. False sends only the first character, then runs steps without early settling. Default true."
 default = true
+
+[[params]]
+name = "include_frame"
+type = "boolean"
+description = "true adds the screen this call leaves as a PNG, as masc_dos_screen returns it, so reading it takes no second call. Default false."
+default = false

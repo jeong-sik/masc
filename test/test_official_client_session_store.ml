@@ -622,6 +622,98 @@ let test_terminal_identity_switch_starts_fresh () =
       fail "terminal client switch inherited the old external session")
 ;;
 
+let forgotten_label = function
+  | Same_client session_ids -> "same:" ^ String.concat "," session_ids
+  | Other_client { client_kind; runtime_id; session_ids } ->
+    Printf.sprintf "other:%s:%s:%s"
+      (Keeper_semantic_execution.official_client_kind_to_string client_kind)
+      runtime_id (String.concat "," session_ids)
+;;
+
+(* RFC-0501 §2.1 on the store's own transitions, not on hand-built phases:
+   a resume keeps the settled thread, a moved surface drops it at the claim,
+   a revert names it again, a transient release drops the thread the run
+   had opened, and a record of another runtime says whose thread it was. *)
+let test_forgotten_sessions_follows_the_store_transitions () =
+  with_workspace "masc-official-client-store-forgotten-" (fun base_path ->
+    let keeper_name = "forgotten" in
+    let forgotten before after = forgotten_label (forgotten_sessions ~before:(Some before) ~after) in
+    let claimed =
+      claim_new ~base_path ~keeper_name ~client_kind:Codex ~runtime_id:"codex.default"
+        ~owner_epoch ~at:1.0
+    in
+    let active =
+      mark_active ~base_path ~keeper_name ~expected:claimed ~session_id:"thread-1"
+        ~updated_at:2.0
+      |> Result.get_ok
+    in
+    let starting =
+      mark_turn_starting ~base_path ~keeper_name ~expected:active ~session_id:"thread-1"
+        ~updated_at:3.0
+      |> Result.get_ok
+    in
+    let inflight =
+      mark_turn_started ~base_path ~keeper_name ~expected:starting ~session_id:"thread-1"
+        ~turn_id:"turn-1" ~turn_count:starting.turn_count ~updated_at:4.0
+      |> Result.get_ok
+    in
+    let settled =
+      settle ~base_path ~keeper_name ~expected:inflight ~session_id:"thread-1"
+        ~turn_id:"turn-1" ~updated_at:5.0
+      |> Result.get_ok
+    in
+    check string "no earlier record" "same:" (forgotten_label (forgotten_sessions ~before:None ~after:claimed));
+    check string "settling the same thread" "same:" (forgotten inflight settled);
+    let resumed =
+      claim ~base_path ~keeper_name ~expected:(Some settled) ~client_kind:Codex ~owner_epoch
+        ~runtime_id:"codex.default" ~tool_surface_sha256:empty_surface ~updated_at:6.0
+      |> Result.get_ok
+    in
+    check string "resume keeps the settled thread" "same:" (forgotten settled resumed);
+    let restored =
+      revert_claim ~base_path ~keeper_name ~expected:resumed ~restore:settled ~reverted_at:7.0
+      |> Result.get_ok
+    in
+    let moved_surface = String.map (fun c -> if c = 'a' then 'b' else c) empty_surface in
+    let moved =
+      claim ~base_path ~keeper_name ~expected:(Some restored) ~client_kind:Codex ~owner_epoch
+        ~runtime_id:"codex.default" ~tool_surface_sha256:moved_surface ~updated_at:8.0
+      |> Result.get_ok
+    in
+    check string "moved surface drops the settled thread" "same:thread-1" (forgotten restored moved);
+    let reverted =
+      revert_claim ~base_path ~keeper_name ~expected:moved ~restore:restored ~reverted_at:9.0
+      |> Result.get_ok
+    in
+    check string "a revert names it again" "same:" (forgotten restored reverted);
+    let moved =
+      claim ~base_path ~keeper_name ~expected:(Some reverted) ~client_kind:Codex ~owner_epoch
+        ~runtime_id:"codex.default" ~tool_surface_sha256:moved_surface ~updated_at:10.0
+      |> Result.get_ok
+    in
+    let opened =
+      mark_active ~base_path ~keeper_name ~expected:moved ~session_id:"thread-2"
+        ~updated_at:11.0
+      |> Result.get_ok
+    in
+    let released =
+      release_transient ~base_path ~keeper_name ~expected:opened ~failure:Pre_dispatch_failed
+        ~released_at:12.0
+      |> Result.get_ok
+    in
+    check string "release drops the opened thread" "same:thread-2" (forgotten opened released);
+    check string "the run's first record still names the settled one" "same:thread-1"
+      (forgotten reverted released);
+    let switched =
+      claim ~base_path ~keeper_name ~expected:(Some released) ~client_kind:Claude_code
+        ~owner_epoch ~runtime_id:"claude-code.sonnet" ~tool_surface_sha256:(String.make 64 'b')
+        ~updated_at:13.0
+      |> Result.get_ok
+    in
+    check string "another runtime's thread" "other:codex:codex.default:thread-1"
+      (forgotten settled switched))
+;;
+
 let test_restart_recovery_and_transient_release () =
   List.iter (fun failure ->
   check bool "release classification is transient" true (failure_disposition failure = Transient);
@@ -2590,6 +2682,8 @@ let () =
             "terminal identity switch starts fresh"
             `Quick
             test_terminal_identity_switch_starts_fresh
+        ; test_case "forgotten sessions follows the store transitions" `Quick
+            test_forgotten_sessions_follows_the_store_transitions
         ; test_case
             "restart recovery and transient release"
             `Quick

@@ -458,6 +458,15 @@ val read_rate_limits :
     thread/start or turn/start. The windows are for the operator projection;
     the app-server's schema says clients must not infer recovery from them. *)
 
+val delete_threads :
+  mgr:_ Eio.Process.mgr -> clock:_ Eio.Time.clock -> cwd:Eio.Fs.dir_ty Eio.Path.t ->
+  config -> string list -> ((string * (unit, error) result) list, error) result
+(** [initialize] followed by one [thread/delete] per id, in order, without
+    account/read. The app-server removes the thread's rollout and state rows.
+    [Error] means the client did not start or the handshake failed; otherwise
+    each id carries its own answer, the app-server's refusal kept whole
+    (RFC-0501 §2.2). *)
+
 type context_submission_method =
   | Thread_start
   | Thread_resume

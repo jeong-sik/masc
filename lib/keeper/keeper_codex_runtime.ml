@@ -271,6 +271,51 @@ let read_usage_after_quota_refusal ~keeper_name ~quota_scope ~clock ~cwd config 
       "Codex usage not read after a quota refusal: background scheduling failed"
 ;;
 
+(* RFC-0501 §2.2. Every state the run passed through is compared with the
+   final one, not each state with the next: a revert after a setup refusal
+   names again the thread the claim had dropped, and that thread stays. *)
+let forgotten_threads ~keeper_name ~visited ~final =
+  List.fold_left
+    (fun thread_ids before ->
+      match
+        Keeper_official_client_session_store.forgotten_sessions
+          ~before:(Some before) ~after:final
+      with
+      | Keeper_official_client_session_store.Same_client forgotten ->
+        List.fold_left
+          (fun thread_ids id ->
+            if List.exists (String.equal id) thread_ids then thread_ids
+            else thread_ids @ [ id ])
+          thread_ids forgotten
+      | Other_client { session_ids = []; _ } -> thread_ids
+      | Other_client { client_kind; runtime_id; session_ids } ->
+        Log.Keeper.warn ~keeper_name
+          "Codex thread delete not sent for %d thread(s) of %s runtime %s"
+          (List.length session_ids)
+          (Keeper_semantic_execution.official_client_kind_to_string client_kind)
+          runtime_id;
+        thread_ids)
+    [] visited
+;;
+
+let delete_forgotten_threads ~keeper_name ~mgr ~clock ~cwd config = function
+  | [] -> ()
+  | thread_ids ->
+    (match Runtime_codex_app_server.delete_threads ~mgr ~clock ~cwd config thread_ids with
+     | Error error ->
+       Log.Keeper.warn ~keeper_name "Codex thread delete for %d thread(s) failed: %s"
+         (List.length thread_ids) (Runtime_codex_app_server.error_to_string error)
+     | Ok results ->
+       List.iter
+         (function
+           | thread_id, Ok () ->
+             Log.Keeper.info ~keeper_name "Codex thread %s deleted" thread_id
+           | thread_id, Error error ->
+             Log.Keeper.warn ~keeper_name "Codex thread %s delete failed: %s" thread_id
+               (Runtime_codex_app_server.error_to_string error))
+         results)
+;;
+
 (* The newest request: the context it occupied, in the inclusive convention
    [Runtime_observation.request_context] uses (OpenAI's input count already
    includes the cached prefix), and its output, final once the frame for
@@ -1404,6 +1449,11 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
         Error error
     in
     let session_state = ref claimed_session in
+    let visited_sessions = ref (Option.to_list stored_session @ [ claimed_session ]) in
+    let set_session next =
+      visited_sessions := !visited_sessions @ [ next ];
+      session_state := next
+    in
     let recovery_failure =
       ref Keeper_official_client_session_store.Transport_interrupted
     in
@@ -1415,7 +1465,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
     let update_session label transition =
       match transition !session_state with
       | Ok next ->
-        session_state := next;
+        set_session next;
         Ok ()
       | Error detail ->
         recovery_failure := Keeper_official_client_session_store.State_persistence_failed;
@@ -1442,7 +1492,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
              ~required_at:(Time_compat.now ())
          with
          | Ok recovery ->
-           session_state := recovery;
+           set_session recovery;
            Ok ()
          | Error detail -> Error detail)
     in
@@ -1464,7 +1514,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
                 ~released_at:(Time_compat.now ())
             with
             | Ok released ->
-              session_state := released;
+              set_session released;
               Ok ()
             | Error detail -> Error detail))
       | Ambiguous | Fatal -> require_recovery detail
@@ -1519,7 +1569,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
          | Error detail ->
            Error (internal_error ("Codex host-stop settlement failed: " ^ detail))
          | Ok settled ->
-           session_state := settled;
+           set_session settled;
            on_session_settled settled;
            let* result = projected in
            on_results_ready (Some (Keeper_client_tool_outbox.pending_consumption [tool_outbox]));
@@ -1722,7 +1772,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
                ~reverted_at:(Time_compat.now ())
            with
            | Ok restored ->
-             session_state := restored;
+             set_session restored;
              recovery_failure := Keeper_official_client_session_store.Pre_dispatch_failed;
              Error (codex_error_to_core_error error)
            | Error detail ->
@@ -1842,7 +1892,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
              ~updated_at:(Time_compat.now ())
          with
          | Ok settled ->
-           session_state := settled;
+           set_session settled;
            on_session_settled settled;
            Ok ()
          | Error detail ->
@@ -1902,6 +1952,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
         finish_raw_error ~keeper_name raw_trace_run error;
         Error error
     in
+    let outcome =
     (match turn_result with
      | Ok _ -> turn_result
      | Error original_error ->
@@ -1915,6 +1966,15 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
                   "Codex turn failed and recovery state persistence also failed: original=%s recovery=%s"
                original_detail
                recovery_detail))))
+    in
+    (* After the store settled, so a refused delete cannot change the turn:
+       the store no longer names these threads and no run resumes them. *)
+    delete_forgotten_threads ~keeper_name
+      ~mgr:(Posix_spawn_process_mgr.foreground_mgr ~clock
+        ~grace_seconds:Process_eio.child_exit_grace_seconds)
+      ~clock ~cwd:process_cwd client_config
+      (forgotten_threads ~keeper_name ~visited:!visited_sessions ~final:!session_state);
+    outcome
 ;;
 
 

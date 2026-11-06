@@ -926,7 +926,7 @@ let parse_subscription result =
     | _ -> protocol_error stage "account must be an object or null"
 ;;
 
-let probe_protocol io =
+let initialize_protocol io =
   send_control_request
     io
     ~id:1
@@ -944,6 +944,27 @@ let probe_protocol io =
   let* initialize = await_response io ~id:1 ~method_:"initialize" in
   let* user_agent = parse_initialize initialize in
   send_notification io "initialized";
+  Ok user_agent
+;;
+
+(* thread/delete removes a persisted thread's rollout and its state rows; it
+   needs no account, so no account/read is sent. Each id gets its own answer:
+   one refusal does not stop the rest. *)
+let thread_delete_protocol thread_ids io =
+  let* _user_agent = initialize_protocol io in
+  Ok
+    (List.mapi
+       (fun index thread_id ->
+          let id = 2 + index in
+          let stage = "thread/delete" in
+          send_control_request io ~id ~method_:stage
+            ~params:(`Assoc [ "threadId", `String thread_id ]);
+          thread_id, Result.map ignore (await_response io ~id ~method_:stage))
+       thread_ids)
+;;
+
+let probe_protocol io =
+  let* user_agent = initialize_protocol io in
   send_control_request
     io
     ~id:2
@@ -3147,7 +3168,9 @@ let validate_turn ?(dynamic_tools = []) ?(thread_mode = Start) ~cwd config ~prom
   |> Result.map (fun _ -> ())
 ;;
 
-let probe_metadata ~mgr ~clock ~cwd config protocol =
+let subscription_probe_label = "subscription probe"
+
+let probe_metadata ~label ~mgr ~clock ~cwd config protocol =
   let result =
     let* () = validate_process_config config in
     let* _ = native_cwd cwd in
@@ -3168,24 +3191,30 @@ let probe_metadata ~mgr ~clock ~cwd config protocol =
     | exn -> Error (Spawn_failed (Printexc.to_string exn))
   in
   (match result with
-   | Ok _ -> Log.Runtime_agent.info "Codex app-server subscription probe completed"
+   | Ok _ -> Log.Runtime_agent.info "Codex app-server %s completed" label
    | Error error ->
      Log.Runtime_agent.warn
-       "Codex app-server subscription probe failed (kind=%s)"
+       "Codex app-server %s failed (kind=%s)"
+       label
        (error_kind error));
   result
 ;;
 
+let delete_threads ~mgr ~clock ~cwd config thread_ids =
+  probe_metadata ~label:"thread delete" ~mgr ~clock ~cwd config
+    (thread_delete_protocol thread_ids)
+;;
+
 let probe_subscription ~mgr ~clock ~cwd config =
-  probe_metadata ~mgr ~clock ~cwd config probe_protocol
+  probe_metadata ~label:subscription_probe_label ~mgr ~clock ~cwd config probe_protocol
 ;;
 
 let list_models ~mgr ~clock ~cwd config =
-  probe_metadata ~mgr ~clock ~cwd config model_list_protocol
+  probe_metadata ~label:subscription_probe_label ~mgr ~clock ~cwd config model_list_protocol
 ;;
 
 let read_rate_limits ~mgr ~clock ~cwd config =
-  probe_metadata ~mgr ~clock ~cwd config rate_limits_read_protocol
+  probe_metadata ~label:subscription_probe_label ~mgr ~clock ~cwd config rate_limits_read_protocol
 ;;
 
 let run_turn ?(dynamic_tools = []) ?(on_undelivered_tool_result = fun _ -> Error "No durable owner is configured for the undelivered tool result") ?(on_tool_response_confirmed = fun ~call_id:_ -> ()) ?reasoning_effort ?(thread_mode = Start) ~mgr ~clock ~cwd

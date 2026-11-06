@@ -1633,6 +1633,46 @@ let reconcile_context plan ~expected ~snapshot_sha256 =
      | Error (Canonical_context_changed | Context_frontier_missing) ->
        { previous_settlement = None; turn_count = 1; required_tool_surface_sha256 = None })
 
+type forgotten =
+  | Same_client of string list
+  | Other_client of
+      { client_kind : client_kind
+      ; runtime_id : string
+      ; session_ids : string list
+      }
+
+let settlement_sessions = function
+  | None -> []
+  | Some { session_id; turn_id = _ } -> [ session_id ]
+
+let phase_sessions = function
+  | Ready -> []
+  | Start { owner_epoch = _; previous_settlement } -> settlement_sessions previous_settlement
+  | Active { owner_epoch = _; session_id; previous_settlement }
+  | Turn_inflight { owner_epoch = _; session_id; turn_id = _; previous_settlement } ->
+    session_id :: settlement_sessions previous_settlement
+  | Recovery_required { observed_session_id; previous_settlement; _ } ->
+    Option.to_list observed_session_id @ settlement_sessions previous_settlement
+  | Settled { session_id; turn_id = _ } -> [ session_id ]
+
+let forgotten_sessions ~before ~after =
+  match before with
+  | None -> Same_client []
+  | Some before ->
+    let named = phase_sessions after.phase in
+    let session_ids =
+      List.fold_left
+        (fun forgotten id ->
+           if List.exists (String.equal id) named || List.exists (String.equal id) forgotten
+           then forgotten
+           else forgotten @ [ id ])
+        []
+        (phase_sessions before.phase)
+    in
+    if before.client_kind = after.client_kind && String.equal before.runtime_id after.runtime_id
+    then Same_client session_ids
+    else Other_client { client_kind = before.client_kind; runtime_id = before.runtime_id; session_ids }
+
 let context_admission_error_to_string = function
   | Context_frontier_missing ->
     "context_frontier_missing: retained vendor conversation has no canonical context provenance; unchanged history cannot be verified"

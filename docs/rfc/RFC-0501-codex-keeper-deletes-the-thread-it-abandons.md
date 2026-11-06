@@ -120,12 +120,15 @@ val forgotten_sessions : before:t option -> after:t -> forgotten
 
 ```ocaml
 val delete_threads :
-  mgr:_ Eio.Process.mgr -> clock:_ Eio.Time.clock -> config -> string list ->
-  (string * (unit, error) result) list
+  mgr:_ Eio.Process.mgr -> clock:_ Eio.Time.clock -> cwd:Eio.Fs.dir_ty Eio.Path.t ->
+  config -> string list -> ((string * (unit, error) result) list, error) result
 ```
 
+바깥 `Error` 는 app-server 를 띄우지 못했거나 `initialize` 가 실패한 경우다. 안쪽 목록은 id 마다 `thread/delete` 의 답이다.
+
 - 턴과 같은 계정 home 으로 app-server 를 띄우고 `initialize` 뒤 id 마다 `thread/delete` 를 보낸다. `account/read` 는 보내지 않는다.
-- `Keeper_codex_runtime` 은 claim 과 release 에서 2.1 의 `Same_client` id 를 모은다. `run_turn` 이 돌아온 뒤, 결과와 상관없이 한 번 부른다. 모은 id 가 없으면 부르지 않는다.
+- `Keeper_codex_runtime` 은 턴이 지나간 기록(불러온 기록, claim, 그 뒤 전이마다)을 모두 모은다. 턴이 끝나면 모은 기록 하나하나를 마지막 기록과 2.1 로 견주고, `Same_client` id 를 한 목록으로 합친다. 한 전이와 바로 다음 전이를 견주지 않는다. 설정 단계에서 거절되면 `revert_claim` 이 claim 이 잊은 thread 를 다시 담는데, 이 thread 는 지우면 안 된다.
+- `run_turn` 이 돌아오고 기록을 정리한 뒤, 결과와 상관없이 한 번 부른다. 모은 id 가 없으면 부르지 않는다. 취소로 끝난 턴은 예외를 다시 올리므로 지우지 않는다.
 - 결과는 Keeper 로그에 id 마다 한 줄씩 남긴다. 성공이거나, 오류의 code 와 message 그대로다.
 - `-32600 no rollout found` 를 "이미 없음"으로 따로 나누지 않는다. `-32600` 은 invalid request 일반 코드이고, 둘을 가르는 것은 message 문자열뿐이다. 문자열로 분류하지 않는다. 배포 뒤에는 로그 줄을 code·message 별로 센다.
 - 실패해도 턴 결과는 바꾸지 않는다. 기록이 이미 그 id 를 잊었으니 이어 갈 길이 없다.
@@ -191,7 +194,7 @@ runtime id 나 client 종류가 바뀌면 옛 thread 는 다른 계정 home 이�
 | 층 | 내용 | 확인 |
 | --- | --- | --- |
 | L1 | 이 RFC | 리뷰 |
-| L2 | `forgotten_sessions`(2.1), `delete_threads` 와 Keeper 턴 뒤 호출(2.2) | type-check. 시험: 1.3 의 두 길에서 낸 id 가 턴 뒤 `thread/delete` 로 나가고, 거절돼도 턴 결과가 그대로다. runtime id 가 바뀐 기록은 `Other_client` 가 되고 `thread/delete` 를 보내지 않는다 |
+| L2 | `forgotten_sessions`(2.1), `delete_threads` 와 Keeper 턴 뒤 호출(2.2) | type-check. 시험: 기록의 실제 전이(resume, 바뀐 도구 면 claim, revert, release, client 전환)에서 2.1 이 내는 id, 그리고 `thread/delete` 가 id 마다 답을 따로 낸다(하나는 성공, 하나는 `-32600`). 삭제는 턴 결과를 다 계산한 뒤 `unit` 을 돌려주는 함수가 하므로 거절이 턴 결과를 바꿀 길이 없다 |
 | L3 | `Ephemeral`, `~thread_mode` 필수(2.3) | type-check. 시험: `Ephemeral` 이 `"ephemeral": true` 를 보낸다. 배포 전에 실제 app-server 에서 ephemeral thread 가 `dynamicTools` 를 받는지 확인 |
 | L4 | changelog `Fresh state required`, 운영자 절차(2.5) | `changelog-fragments.py check`, 임시 home 복사본에서 절차 확인 |
 

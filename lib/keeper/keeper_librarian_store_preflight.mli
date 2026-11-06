@@ -1,3 +1,11 @@
+type purpose = Admission_execution | Admission_part | Admission_partition
+  | History_execution | Floor_execution | Admission_gate | History_gate | Floor_gate
+val purpose : string -> purpose option
+(** The Librarian record kind a scope belongs to, asked of each producer's
+    own scope predicate, gates first: a floor step scope's prefix also starts
+    a floor step gate scope (#49021). [None] is a scope no Librarian producer
+    owns. *)
+
 (** Current-only Librarian original payload inspection. Every retained record,
     including historical gates, is checked in its captured namespace. The
     supplied port reads verified parent/body snapshots; no Current, live-owner,

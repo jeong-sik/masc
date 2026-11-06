@@ -22,7 +22,12 @@
       bring a time from before it, and no other commit appends between the read
       and the append. An admission is judged against the expiry of its
       invitation with that time, and {!Authz_state} refuses one before a record
-      it has read ({!Authz_state.Admission_behind_log}).
+      it has read ({!Authz_state.Admission_behind_log}). A reduction whose
+      change the state holds a block of is a retry (design 8.3): the record is
+      built again with those blocks in its [closes] ({!Authz_state.closable},
+      {!Authz_record.closing}) and read again, so the intent and the hash cover
+      them and a replay closes the same blocks. The caller does not fill
+      [closes].
     + It writes the settlement of the first step: [Committed] for a promoted
       intent, [Aborted_intent] for an aborted one. Before an abort it asks
       {!Authz_log.confirm_end} whether the log still ends where the intent
@@ -39,7 +44,9 @@
       is written, because a write that fails may still have written the line.
       A commit that fails after that point leaves the block in place. A replay starts each block after the
       record its intent began at, as the writer did, and a block whose record
-      the log no longer holds starts once the log is read.
+      the log no longer holds starts once the log is read. A replay closes a
+      block at the record that names it, so a log cut back to before that
+      record holds the block again.
 
     Each step writes only when the steps before it passed, so a commit that is
     refused in the first two steps writes nothing, and the settlement waits for
@@ -106,19 +113,23 @@ module Replay : sig
     { state : Authz_state.t
     ; probe : Authz_high_water.Probe.t
     ; head : Authz_record.head
-    ; unreached : (Authz_record.Hash.t * Authz_records.Subject.t) list
-          (** The blocks of given-up reductions whose record the replay has not
-              read yet. *)
+    ; unreached : (Authz_record.Hash.t * Authz_state.held) list
+          (** The blocks of given-up reductions, each with the head its intent
+              began at, that the replay has not reached yet. *)
     }
 
   (** Over an empty log, for a store in the given state. *)
   val init : Authz_external_store.State.t -> t
 
-  (** The fold function for {!Authz_log.open_at_start}. *)
+  (** The fold function for {!Authz_log.open_at_start}. A block that the
+      replay has not reached starts before a record that closes it: the
+      writer that wrote that record held the block from its start. *)
   val step : t -> Authz_record.t -> (t, Authz_state.refusal) result
 
   (** The replay once the log is read: the blocks it has not reached start
-      too. A start reads the state of this. *)
+      too, and so does the block of a reduction whose intent is still pending
+      and that the next entry gives up (design 8.2-3), as the writer held it
+      when its append failed. A start reads the state of this. *)
   val finish : t -> t
 end
 
@@ -162,6 +173,33 @@ val open_at_start
   -> (t, open_error) result
 
 val snapshot : t -> snapshot
+
+(** What the gate reads for [revocation_pending(subject)] (design 8.3). *)
+type revocation =
+  | Known of Authz_records.Revocation_state.t
+      (** [Pending] while the published state holds a reduction of the
+          subject. A reduction whose record did not append is held from the
+          failed commit on, not from the next entry, and from the start when
+          the zone opens with its intent still pending. *)
+  | Unknown_log_stopped of Authz_log.stop
+      (** The log is stopped: its head is not trusted and no commit runs, so
+          the zone cannot say whether a reduction was given up
+          ([AuthorizationUncertain], plan B2). *)
+  | Unknown_store_stopped of Authz_external_store.stop
+      (** The external store is stopped, with the same consequence. *)
+  | Unknown_files_disagree of
+      { first : Authz_high_water.reason
+      ; rest : Authz_high_water.reason list
+      }
+      (** The store and the log disagree ({!Authz_high_water.Mismatch}): the
+          log went back, or was replaced. Every commit is refused
+          ({!Uncertain}), so the same consequence (design 8.2-4 and 8.2-5). *)
+  | Unknown_store_holds_no_answer
+      (** The store holds no answer for a bootstrapped log: it was emptied, or
+          is not the store of this log. Every commit is refused
+          ({!Store_holds_no_answer}), so the same consequence. *)
+
+val revocation : t -> Authz_records.Subject.t -> revocation
 
 (** The record to append. Its seq and previous hash come from the head, and its
     time from the clock of the zone. *)
@@ -231,7 +269,8 @@ type error =
       (** The intent, when the record has one, is in the store. When the error
           stopped the log, the next start reads whether the record is in it.
           Otherwise it is not, and the next commit or install aborts the
-          intent. *)
+          intent. The subject of a reduction is blocked in the published state
+          from this failure on (design 8.3). *)
   | Answer_not_written of
       { record_hash : Authz_record.Hash.t
       ; error : Authz_external_store.append_error

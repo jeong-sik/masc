@@ -311,8 +311,10 @@ let () =
        then print_endline "dry-run: nothing written (pass --apply to persist)"
        else (
          let lease =
-           let lease_dir = (Host_config.host ()).base_path_lease_dir in
-           match Server_startup_takeover.acquire_base_path_lock ~run_dir:lease_dir base_path with
+           match
+             Server_startup_takeover.acquire_owner_lease
+               (Host_config.host ()).base_path_lease_root base_path
+           with
            | Server_startup_takeover.Base_path_acquired lease -> lease
            | Base_path_already_owned { owner; _ } ->
              error

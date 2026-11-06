@@ -1,11 +1,10 @@
 import { fetchLaneInventory, type LaneInventoryRow } from '../api/lane-inventory'
 import { readMachineActivity, writeMachineActivity, type MachineActivityLane } from './machine-lane-activity'
 import { announceMachineLaneObservationChanged } from './machine-lane-observation'
-import { laneActivitySessions, type LaneActivityObservation, type LaneActivitySession } from './lane-activity-session'
+import { laneActivitySessions, type LaneActivityObservation } from './lane-activity-session'
 
 /** Server activity from the lane inventory, read apart from the file. */
 type MachineObservation = { activity: Extract<LaneInventoryRow['state'], { kind: 'machine' }>['activity']; at: number }
-export type MachineLaneActivitySession = LaneActivitySession<MachineActivityLane, MachineObservation>
 
 async function observe(lane: MachineActivityLane): Promise<LaneActivityObservation<MachineObservation>> {
   const inventory = await fetchLaneInventory()

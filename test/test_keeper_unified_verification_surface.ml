@@ -5,8 +5,14 @@ module UM = Masc.Keeper_unified_metrics
 
 (* A System with no amendments, as a turn without a basis issues it. *)
 let system_of_text text =
-  Masc.Keeper_turn_system.issue ~base_path:"" ~keeper_name:"" ~lane:Masc.Keeper_turn_system.Without_basis
-    ~render:(fun (_ : Masc.World_constitution_types.t list) -> text) ~current:[]
+  match
+    Masc.Keeper_turn_system.issue ~held:None ~lane:Masc.Keeper_turn_system.Without_basis
+      ~render:(fun (_ : Masc.World_constitution_types.t list) -> text) ~current:[]
+      ~at:{ Masc.World_constitution_store.end_offset = 0; digest = "" }
+      ~articles_at:(fun (_ : Masc.World_constitution_store.position) -> Ok None)
+  with
+  | Ok (system, (_ : Masc.Keeper_turn_system.held)) -> system
+  | Error () -> Alcotest.fail "a turn without a basis reads no ledger"
 
 (* Use the same embedded prompt assets as runtime bootstrap, in an isolated
    directory. Catalog initialization resolves a registered directory or the

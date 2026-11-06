@@ -725,6 +725,12 @@ let skill_run_history_lines state (evidence : Masc.Tui_decode_skill_evidence.ski
         ["older", 1; "newer", -1]
 ;;
 
+let request_selection_prefix = "Request: "
+
+let skill_selection_prefix state =
+  Printf.sprintf "Skill %d/%d: " (state.tools_skill_cursor + 1)
+    (List.length (tools_skill_profiles state))
+
 let tools_selection_line ~cols state =
   match state.tools_skill_source_picker with
   | Some picker -> Printf.sprintf "New %s · choose a save location"
@@ -734,13 +740,13 @@ let tools_selection_line ~cols state =
     (match state.tools_async_selection with
      | None -> "Async request: none"
      | Some target -> Masc_tui_message_layout.fit_middle
-         (Masc_tui_frame.inner_width ~cols) ("Request: " ^ Terminal_text.single_line target.request_id))
+         (Masc_tui_frame.inner_width ~cols)
+         (request_selection_prefix ^ Terminal_text.single_line target.request_id))
   else
   let text = match selected_tools_skill_profile state with
     | None -> "Skill: none"
     | Some profile ->
-        let prefix = Printf.sprintf "Skill %d/%d: " (state.tools_skill_cursor + 1)
-            (List.length (tools_skill_profiles state)) in
+        let prefix = skill_selection_prefix state in
         prefix ^ Masc_tui_message_layout.fit_middle
           (max 1 (Masc_tui_frame.inner_width ~cols
                   - Masc_tui_message_layout.display_width prefix))
@@ -748,26 +754,38 @@ let tools_selection_line ~cols state =
   in
   text
 
-let tools_selection_document state =
+(* The selection row above the document cuts the middle of a name that does
+   not fit the row. The document names the selection again only then, so a
+   name that fits is on screen once and a cut name can still be read whole. *)
+let tools_selection_document ~cols state =
+  let named_again ~selection_row ~title =
+    if Masc_tui_message_layout.display_width selection_row
+       > Masc_tui_frame.inner_width ~cols
+    then [title] else [] in
   if state.tools_pane=Tools_async then
     (match state.tools_async_selection with
-     | None -> [Ansi.dim," 선택한 비동기 요청 없음"]
-     | Some target -> [Ansi.bold," 요청: " ^ Terminal_text.single_line target.request_id;
-         Ansi.dim," 원래 요청자: " ^ Terminal_text.single_line target.submitted_by
-           ^ " · 대상 Keeper: " ^ Terminal_text.single_line target.keeper_name])
+     | None -> []
+     | Some target ->
+         let request_id = Terminal_text.single_line target.request_id in
+         named_again ~selection_row:(request_selection_prefix ^ request_id)
+           ~title:(Ansi.bold, " 요청: " ^ request_id)
+         @ [Ansi.dim," 원래 요청자: " ^ Terminal_text.single_line target.submitted_by
+              ^ " · 대상 Keeper: " ^ Terminal_text.single_line target.keeper_name])
   else
   match selected_tools_skill_profile state with
-  | None -> [Ansi.dim, "Action Skill: none"]
+  | None -> []
   | Some profile ->
       let reference = profile.esp_reference in
-      [ Ansi.bold, "Action Skill: " ^ Terminal_text.single_line profile.esp_name
-      ; Ansi.dim, "Source: " ^ Terminal_text.single_line
-          (Skill_reference.identity_source_id_to_string reference.identity)
-      ; Ansi.dim, "Package: " ^ Terminal_text.single_line
-          (Skill_reference.identity_package_id_to_string reference.identity)
-      ; Ansi.dim, "Revision: " ^ Terminal_text.single_line
-          (Skill_reference.content_revision_to_string reference.content_revision)
-      ]
+      let name = Terminal_text.single_line profile.esp_name in
+      named_again ~selection_row:(skill_selection_prefix state ^ name)
+        ~title:(Ansi.bold, "Action Skill: " ^ name)
+      @ [ Ansi.dim, "Source: " ^ Terminal_text.single_line
+            (Skill_reference.identity_source_id_to_string reference.identity)
+        ; Ansi.dim, "Package: " ^ Terminal_text.single_line
+            (Skill_reference.identity_package_id_to_string reference.identity)
+        ; Ansi.dim, "Revision: " ^ Terminal_text.single_line
+            (Skill_reference.content_revision_to_string reference.content_revision)
+        ]
 
 let skill_source_picker_prefix summary =
   [ Ansi.bold, " Choose the writable source for this package"
@@ -2171,7 +2189,7 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
     (Printf.sprintf " Unpublished %s draft retained for %s · %s:resume in editor"
       (if draft.scd_composition then "Composition" else "Instruction") draft.scd_source_id
       (if draft.scd_composition then "C" else "c"))) (skill_create_drafts_for_current_workspace state) in
-  let prefix=tools_selection_document state @ drafts @ reading_lines @ error_lines @ explanation in
+  let prefix=tools_selection_document ~cols state @ drafts @ reading_lines @ error_lines @ explanation in
   if state.tools_pane=Tools_async && state.tools_async_detail_open && Option.is_some state.tools_async_task_source then
     wrap prefix @ pane_lines
   else wrap (prefix @ pane_lines)

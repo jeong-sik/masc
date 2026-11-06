@@ -378,6 +378,14 @@ let test_actual_happy_path ()=with_fixture (fun ~sw:_ fixture ->
         (observed_originals fixture) in
       check (list json) "actual Store restoration uses original prompt policy despite current cap changes" before after))
 
+let test_pass_without_new_input_after_commit_is_idle ()=with_fixture (fun ~sw:_ fixture ->
+  drive_until fixture settled |> assert_settled;
+  let posts=F.post_count fixture.server in
+  check bool "a pass with no new input over finished parts reports Idle" true
+    (match run_worker fixture with Worker.Idle -> true
+     | Disabled | Recheck_new_input | Settled _ | Pending _ | Addon_unattached _ | Unavailable _ -> false);
+  check int "the idle pass starts no provider call" posts (F.post_count fixture.server))
+
 let test_unchanged_deferred_does_not_remint ()=with_fixture (fun ~sw:_ fixture ->
   fixture.set_response (fun capture -> `OK,F.openai_response (answer (fun _ -> false) capture));
   drive_original_terminal fixture;
@@ -1692,6 +1700,7 @@ let () =
   test_case "enabled empty absorption captures and replays without unused policy" `Quick test_enabled_empty_absorptions_need_no_guidance;
   test_case "absorbing admission captures both context policies" `Quick test_absorbing_admission_captures_both_context_policies;
   test_case "actual Memory lane, worker, HTTP, domain validation and receipt-backed ACK" `Quick test_actual_happy_path;
+  test_case "a pass with no new input after the commit is Idle" `Quick test_pass_without_new_input_after_commit_is_idle;
   test_case "unchanged semantic deferral preserves the same original" `Quick test_unchanged_deferred_does_not_remint;
   test_case "new tail rejudges the complete old sparse gap against current Memory" `Quick test_gap_and_new_tail_are_rejudged_together;
   test_case "original host answer recovers locally while Addon is Off" `Quick test_retained_host_terminal_commits_off;

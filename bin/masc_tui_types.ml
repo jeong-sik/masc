@@ -6299,11 +6299,28 @@ type code_location_offer = {
   clo_locations : Masc.Tui_decode.lsp_location list;
 }
 
+(* What one content search asks: the directory it started from, the text and
+   its case rule. Two searches are the same read only when all four agree, so a
+   late answer for an older query cannot fill a newer one. *)
+type code_search_key = {
+  css_scope : code_workspace_scope;
+  css_dir : string;
+  css_query : string;
+  css_ignore_case : bool;
+}
+
+let code_search_key_equal left right =
+  left.css_scope = right.css_scope
+  && String.equal left.css_dir right.css_dir
+  && String.equal left.css_query right.css_query
+  && Bool.equal left.css_ignore_case right.css_ignore_case
+
 type palette_mode =
   | Palette_jump
   | Palette_files of code_finder_origin
   | Palette_branches of code_finder_origin
   | Palette_worktrees of code_finder_origin
+  | Palette_search of code_finder_origin
   | Palette_locations of code_location_offer
   | Palette_choice of {
       choice_question : string;  (* "hover", "definition", "references" *)
@@ -10941,6 +10958,8 @@ type state = {
   (* The worktree list of the repository that owns the key's directory. *)
   mutable code_worktrees:
     (code_workspace_scope * string, Tui_decode.git_worktrees) Masc_tui_fetched.t;
+  (* The content search's answer for the key it was asked with. *)
+  mutable code_search: (code_search_key, Tui_decode.workspace_search) Masc_tui_fetched.t;
   mutable code_cursor: int;
   (* The open file's lexed rows, keyed by its path. One value rather than a
      pair of options: the pair could not say "reading", so a file being
@@ -14938,6 +14957,7 @@ let suspend_workspace_readings state =
   state.code_finder_file <- Masc_tui_fetched.suspend state.code_finder_file;
   state.code_branches <- Masc_tui_fetched.suspend state.code_branches;
   state.code_worktrees <- Masc_tui_fetched.suspend state.code_worktrees;
+  state.code_search <- Masc_tui_fetched.suspend state.code_search;
   state.code_navigation <- None;
   state.code_file <- Masc_tui_fetched.suspend state.code_file;
   state.code_history <- Masc_tui_fetched.suspend state.code_history;
@@ -17794,6 +17814,7 @@ let set_code_scope state scope =
     state.code_finder_file <- Masc_tui_fetched.clear state.code_finder_file;
     state.code_branches <- Masc_tui_fetched.clear state.code_branches;
     state.code_worktrees <- Masc_tui_fetched.clear state.code_worktrees;
+    state.code_search <- Masc_tui_fetched.clear state.code_search;
     state.code_navigation <- None;
     state.code_lsp_query <- Masc_tui_fetched.clear state.code_lsp_query;
     state.code_location_offer <- None;
@@ -20488,6 +20509,7 @@ let create_state
   code_catalog = Masc_tui_fetched.initial;
   code_branches = Masc_tui_fetched.initial;
   code_worktrees = Masc_tui_fetched.initial;
+  code_search = Masc_tui_fetched.initial;
   code_finder_file = Masc_tui_fetched.initial;
   code_cursor = 0;
   code_file = Masc_tui_fetched.initial;
@@ -20848,11 +20870,12 @@ let close_code_finder (state : state) =
   (match state.palette_mode with
    | Palette_locations _ ->
        state.code_lsp_query <- Masc_tui_fetched.clear state.code_lsp_query
-   | Palette_files _ | Palette_branches _ | Palette_worktrees _ | Palette_jump | Palette_choice _ -> ());
+   | Palette_files _ | Palette_branches _ | Palette_worktrees _ | Palette_search _ | Palette_jump | Palette_choice _ -> ());
   state.code_catalog <- Masc_tui_fetched.clear state.code_catalog;
   state.code_finder_file <- Masc_tui_fetched.clear state.code_finder_file;
   state.code_branches <- Masc_tui_fetched.clear state.code_branches;
   state.code_worktrees <- Masc_tui_fetched.clear state.code_worktrees;
+  state.code_search <- Masc_tui_fetched.clear state.code_search;
   state.code_location_offer <- None;
   state.palette_open <- false;
   state.palette_mode <- Palette_jump;
@@ -20865,7 +20888,7 @@ let code_finder_catalog (state : state) =
       Masc_tui_fetched.view_for ~equal:code_scope_path_equal state.code_catalog
         ~key:(origin.cfo_scope, origin.cfo_dir)
   | Palette_files _ | Palette_branches _ | Palette_worktrees _ | Palette_locations _ | Palette_jump
-  | Palette_choice _ -> Masc_tui_fetched.Absent
+  | Palette_choice _ | Palette_search _ -> Masc_tui_fetched.Absent
 
 (* The branch list the open branch palette asked for. The palette's owner must
    still be current: a list read for another directory is not shown here. *)
@@ -20874,8 +20897,22 @@ let code_branches_view (state : state) =
   | Palette_branches origin when code_finder_current state origin ->
       Masc_tui_fetched.view_for ~equal:code_scope_path_equal state.code_branches
         ~key:(origin.cfo_scope, origin.cfo_dir)
-  | Palette_branches _ | Palette_worktrees _ | Palette_files _ | Palette_locations _ | Palette_jump
+  | Palette_branches _ | Palette_worktrees _ | Palette_files _ | Palette_search _ | Palette_locations _ | Palette_jump
   | Palette_choice _ -> Masc_tui_fetched.Absent
+
+(* The search the open search palette asked last, with what became of it. The
+   palette's owner must still be current and the key must name the directory
+   the palette opened in: a search asked elsewhere is not shown here. *)
+let code_search_current (state : state) =
+  match state.palette_mode with
+  | Palette_search origin when code_finder_current state origin ->
+      (match Masc_tui_fetched.current state.code_search with
+       | Some (key, observation)
+         when key.css_scope = origin.cfo_scope && String.equal key.css_dir origin.cfo_dir ->
+           Some (key, observation)
+       | Some _ | None -> None)
+  | Palette_search _ | Palette_files _ | Palette_locations _ | Palette_jump
+  | Palette_choice _ | Palette_branches _ | Palette_worktrees _ -> None
 
 (* Opens the branch palette over the Code pane, in the directory and over the
    file it is looking at. *)
@@ -20900,7 +20937,8 @@ let code_worktrees_view (state : state) =
       Masc_tui_fetched.view_for ~equal:code_scope_path_equal state.code_worktrees
         ~key:(origin.cfo_scope, origin.cfo_dir)
   | Palette_worktrees _ | Palette_branches _ | Palette_files _ | Palette_locations _
-  | Palette_jump | Palette_choice _ -> Masc_tui_fetched.Absent
+  | Palette_jump
+  | Palette_choice _ | Palette_search _ -> Masc_tui_fetched.Absent
 
 (* Opens the worktree palette over the Code pane, in the directory and over the
    file it is looking at. *)
@@ -20916,6 +20954,41 @@ let open_code_worktrees (state : state) =
       ; cfo_file = Masc_tui_fetched.current_request state.code_file
       };
   state.palette_open <- true
+
+(* The server refuses a query under two bytes. Asking first would only bring
+   that refusal back, so the palette says it before sending. *)
+let code_search_min_query_bytes = 2
+
+(* Smart case: a query with an uppercase ASCII letter is case sensitive, any
+   other is not. The rule is the palette's, so one typed text always means the
+   same read. *)
+let code_search_ignores_case query =
+  not (String.exists (fun c -> c >= 'A' && c <= 'Z') query)
+
+(* Opens the search palette over the Code pane, in the directory and over the
+   file it is looking at, with nothing asked yet. *)
+let open_code_search (state : state) =
+  state.code_navigation <- None;
+  close_code_finder state;
+  state.palette_mode <-
+    Palette_search
+      { cfo_workspace = state.workspace_authority
+      ; cfo_reading = state.workspace_read_authority
+      ; cfo_scope = state.code_scope
+      ; cfo_dir = state.code_dir
+      ; cfo_file = Masc_tui_fetched.current_request state.code_file
+      };
+  state.palette_open <- true
+
+(* Enter in the search palette chooses a match only when the answer on screen
+   is for exactly the text in the prompt. Any other text is a new search. *)
+let code_search_answer_is_for_prompt (state : state) =
+  match code_search_current state with
+  | Some (key, (Masc_tui_fetched.Ready _ | Masc_tui_fetched.Stale (_, _))) ->
+      String.equal key.css_query state.palette_query
+      && Bool.equal key.css_ignore_case (code_search_ignores_case state.palette_query)
+  | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Failed _))
+  | None -> false
 
 let code_listing_view (state : state) =
   Masc_tui_fetched.view_for ~equal:code_scope_path_equal state.code_listing

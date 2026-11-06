@@ -79,12 +79,12 @@ Otherwise `o` discovers and binds the server's work choice before requesting one
 open. A stale discovery cannot consume that open continuation or replace a later
 manual selection.
 
-Press `A` in the picker for explicit Stagehand Chromium and native automation
-overrides used in troubleshooting. Within advanced mode, `l` / `a` / `c` select
-the live / automation / stagehand source directly. These are implementation
-choices, not additional browser brands. The native automation session remains
-labelled generically when the server does not report its browser brand. Safari
-is not currently an implemented browser choice.
+Press `A` in the picker for the native automation override used in
+troubleshooting. Within advanced mode, `l` / `a` select the live / automation
+source directly. These are implementation choices, not additional browser
+brands. The native automation session remains labelled generically when the
+server does not report its browser brand. Safari is not currently an
+implemented browser choice.
 
 The current browser is marked; choosing it again retains the current tab and
 scroll. Switching to another browser clears old page and screenshot references.
@@ -347,7 +347,7 @@ before another pointer action can execute.
 See [setup and Keeper usage](../design/browser-lane-examples.md).
 
 All Lanes shows each Browser row from its browser Add-on alone: the clients the
-live worker last published, or whether the automation or Stagehand executor is
+live worker last published, or whether the automation executor is
 registered. With no observation the row says why: no browser Add-on serves the
 lane (not set up), every one that serves it is switched off (off), one is
 declared on and its worker is not running (waiting), or the declarations could

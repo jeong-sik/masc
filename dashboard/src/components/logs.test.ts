@@ -44,6 +44,17 @@ function logData(
   }
 }
 
+// Stands in for the route's category filter: keeps the rows whose category,
+// or 'uncategorized' for none, the request names.
+function serverFiltered(rows: readonly LogEntry[]) {
+  return vi.fn((request: { readonly categories?: readonly string[] }) => {
+    const categories = request.categories
+    return Promise.resolve(logData(categories === undefined
+      ? rows
+      : rows.filter(row => categories.includes(row.category ?? 'uncategorized'))))
+  })
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void
   const promise = new Promise<T>(innerResolve => {
@@ -413,7 +424,7 @@ describe('LogViewer Code links', () => {
     expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&session_id=sess-nested&operation_id=op-nested&worker_run_id=wr-nested&q=turn-8')
   })
   it('filters rows by kind chips and keeps kind-aware details for toolbar view', async () => {
-    const fetchLogs = vi.fn().mockResolvedValue(logData([
+    const fetchLogs = serverFiltered([
         entry({
           seq: 1,
           timestamp: '2026-05-14T00:00:00Z',
@@ -456,7 +467,7 @@ describe('LogViewer Code links', () => {
             trigger: 'wake',
           },
         }),
-      ]))
+      ])
 
     const { LogViewer } = await loadLogs(fetchLogs)
     const { container } = render(h(LogViewer, {}))
@@ -562,12 +573,12 @@ describe('LogViewer Code links', () => {
     expect(unclassifiedRow.querySelector('.lg-code')?.textContent).toBe('{\n "ok": true\n}')
   })
 
-  it('kind chip clicks yield the same rows as the server category filter', async () => {
-    // The chips are the only classification control (the category dropdown is
-    // gone). Each kind is a projection of the producer's typed category, so a
-    // chip click must surface exactly the rows the server `?category=` filter
-    // would for that kind's categories — no more, no less.
-    const fetchLogs = vi.fn().mockResolvedValue(logData([
+  it('kind chips ask the server for the kind\'s categories', async () => {
+    // The chips are the only classification control. Each kind is a
+    // projection of the producer's typed category, and a chip sends that
+    // kind's categories as the route's `?category=` list, so a rare kind is
+    // chosen from the whole ring rather than the rows already held.
+    const fetchLogs = serverFiltered([
         entry({ seq: 1, module: 'keeper_tool', category: 'tool', message: 'tool event' }),
         entry({ seq: 2, module: 'keeper_turn', category: 'turn', message: 'turn event' }),
         entry({ seq: 3, module: 'keeper_fsm', category: 'fsm', message: 'fsm event' }),
@@ -576,24 +587,28 @@ describe('LogViewer Code links', () => {
         entry({ seq: 6, module: 'keeper_directive', category: 'directive', message: 'directive event' }),
         entry({ seq: 7, module: 'keeper_broadcast', category: 'broadcast', message: 'broadcast event' }),
         entry({ seq: 8, module: 'keeper_routine', category: 'routine', message: 'routine event' }),
-      ]))
+      ])
+    const lastCategories = () => (fetchLogs.mock.lastCall?.[0] as { readonly categories?: readonly string[] })
+      .categories
 
     const { LogViewer } = await loadLogs(fetchLogs)
     const { container } = render(h(LogViewer, {}))
 
     await waitFor(() => expect(container.textContent).toContain('tool event'))
 
-    // tool kind == server ?category=tool (single category).
+    expect(lastCategories()).toBeUndefined()
+
     const toolChip = container.querySelector('[data-testid="logs-filter-tool"]') as HTMLButtonElement
     await act(async () => { fireEvent.click(toolChip) })
+    await waitFor(() => expect(lastCategories()).toEqual(['tool']))
     await waitFor(() => expect(container.textContent).toContain('tool event'))
     expect(container.textContent).not.toContain('turn event')
     expect(container.textContent).not.toContain('fsm event')
     expect(container.textContent).not.toContain('lifecycle event')
 
-    // lifecycle kind == server ?category=lifecycle|fsm|heartbeat (three categories).
     const lifecycleChip = container.querySelector('[data-testid="logs-filter-lifecycle"]') as HTMLButtonElement
     await act(async () => { fireEvent.click(lifecycleChip) })
+    await waitFor(() => expect(lastCategories()).toEqual(['fsm', 'lifecycle', 'heartbeat']))
     await waitFor(() => expect(container.textContent).toContain('fsm event'))
     expect(container.textContent).toContain('lifecycle event')
     expect(container.textContent).toContain('heartbeat event')
@@ -603,16 +618,16 @@ describe('LogViewer Code links', () => {
     expect(container.textContent).not.toContain('broadcast event')
     expect(container.textContent).not.toContain('routine event')
 
-    // approval kind == server ?category=directive|boundary.
     const approvalChip = container.querySelector('[data-testid="logs-filter-approval"]') as HTMLButtonElement
     await act(async () => { fireEvent.click(approvalChip) })
+    await waitFor(() => expect(lastCategories()).toEqual(['directive', 'boundary']))
     await waitFor(() => expect(container.textContent).toContain('directive event'))
     expect(container.textContent).not.toContain('fsm event')
     expect(container.textContent).not.toContain('tool event')
 
-    // broadcast kind == server ?category=broadcast (single category).
     const broadcastChip = container.querySelector('[data-testid="logs-filter-broadcast"]') as HTMLButtonElement
     await act(async () => { fireEvent.click(broadcastChip) })
+    await waitFor(() => expect(lastCategories()).toEqual(['broadcast']))
     await waitFor(() => expect(container.textContent).toContain('broadcast event'))
     expect(container.textContent).not.toContain('directive event')
     expect(container.textContent).not.toContain('routine event')

@@ -66,7 +66,7 @@ let launch_branches state ~host ~deliver =
                    ~expected_workspace ~host ~port ~path:origin.cfo_dir ()))
     | Palette_branches _, None ->
         Masc_tui_loader.report_action state "error" "Branches have no workspace identity"
-    | (Palette_files _ | Palette_worktrees _ | Palette_locations _ | Palette_jump | Palette_choice _), (Some _ | None) ->
+    | (Palette_files _ | Palette_worktrees _ | Palette_search _ | Palette_locations _ | Palette_jump | Palette_choice _), (Some _ | None) ->
         ()
   end
 
@@ -93,8 +93,45 @@ let launch_worktrees state ~host ~deliver =
     | Palette_worktrees _, None ->
         Masc_tui_loader.report_action state "error" "Worktrees have no workspace identity"
     | (Palette_files _ | Palette_branches _ | Palette_locations _ | Palette_jump
-      | Palette_choice _), (Some _ | None) -> ()
+      | Palette_search _ | Palette_choice _), (Some _ | None) -> ()
   end
+
+(* Sends the text in the search prompt as one content search over the checkout
+   of the directory the palette opened in. The key carries the directory, text
+   and case rule, so an answer to older text cannot fill this one. *)
+let launch_search state ~host ~deliver =
+  match state.palette_mode, state.server_identity with
+  | Palette_search origin, Some expected_workspace
+      when state.palette_open && code_finder_current state origin ->
+      let query = state.palette_query in
+      if String.length query < code_search_min_query_bytes then
+        Masc_tui_loader.report_action state "error"
+          (Printf.sprintf "Search needs at least %d characters" code_search_min_query_bytes)
+      else begin
+        let key = { css_scope = origin.cfo_scope; css_dir = origin.cfo_dir
+                  ; css_query = query
+                  ; css_ignore_case = code_search_ignores_case query } in
+        match Masc_tui_fetched.start ~equal:code_search_key_equal state.code_search ~key with
+        | Masc_tui_fetched.Already_loading -> ()
+        | Masc_tui_fetched.Started (reading, request) ->
+            state.code_search <- reading;
+            state.palette_cursor <- 0;
+            let port = state.port in
+            let keeper, repo = code_scope_axes_of origin.cfo_scope in
+            Masc_tui_async_read.launch
+              ~deliver:(fun result -> deliver (Masc_tui_code_results.Code_search_loaded (request, result)))
+              (fun () -> Masc_tui_http.fetch_workspace_search ?keeper ?repo
+                  ~expected_workspace ~host ~port ~path:key.css_dir ~query:key.css_query
+                  ~ignore_case:key.css_ignore_case ())
+      end
+  | Palette_search _, Some _ ->
+      (* Confirmed workspace, but the file or directory the palette opened over
+         has changed since. *)
+      Masc_tui_loader.report_action state "error"
+        "The search no longer matches the file open on Code; Esc, then Ctrl-G opens it again"
+  | (Palette_search _ | Palette_files _ | Palette_locations _ | Palette_jump
+    | Palette_choice _ | Palette_branches _ | Palette_worktrees _), (Some _ | None) ->
+      Masc_tui_loader.report_action state "error" "Search needs a confirmed workspace"
 
 let open_found_file state ~host ~deliver ~path =
   match state.palette_mode, code_finder_catalog state, state.server_identity with
@@ -112,7 +149,7 @@ let open_found_file state ~host ~deliver ~path =
              ~deliver:(fun result -> deliver (Masc_tui_code_results.Code_finder_file_loaded (request, result)))
              (fun () -> Masc_tui_http.fetch_workspace_file ?keeper ?repo
                  ~expected_workspace ~host ~port ~path ()))
-  | (Palette_files _ | Palette_branches _ | Palette_worktrees _ | Palette_locations _ | Palette_jump
+  | (Palette_files _ | Palette_branches _ | Palette_worktrees _ | Palette_search _ | Palette_locations _ | Palette_jump
     | Palette_choice _),
     (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Ready _
     | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _), (Some _ | None) -> ()

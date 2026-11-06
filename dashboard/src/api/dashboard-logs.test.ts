@@ -56,7 +56,7 @@ describe('fetchLogs', () => {
       level: 'INFO',
       sinceSeq: 10,
       beforeSeq: 20,
-      category: 'tool',
+      categories: ['routine', 'uncategorized'],
       excludeCategories: ['fsm', 'routine'],
     }), {
       getUnknown: path => {
@@ -67,7 +67,7 @@ describe('fetchLogs', () => {
         expect(params.get('level')).toBe('INFO')
         expect(params.get('since_seq')).toBe('10')
         expect(params.get('before_seq')).toBe('20')
-        expect(params.get('category')).toBe('tool')
+        expect(params.get('category')).toBe('routine,uncategorized')
         expect(params.get('exclude_category')).toBe('fsm,routine')
         return Effect.succeed(currentWire)
       },

@@ -1387,7 +1387,7 @@ let test_prune_compares_comment_by_parent_post_id () =
     1
     (ok
        "prune"
-       (A.prune_consumed_behind_cursor ~base_path ~keeper_name:"alpha" (10.0, Some "post-m")));
+       (A.prune_consumed_behind_cursor ~base_path ~keeper_name:"alpha" ~open_partition_candidates:[] (10.0, Some "post-m")));
   Alcotest.(check bool)
     "the comment on the later post survives"
     true
@@ -1455,8 +1455,18 @@ let test_prune_consumed_behind_cursor () =
   List.iter
     (fun one -> ignore (record ~base_path one : A.candidate))
     [ behind; ahead; pending; without_coordinate ];
+  Alcotest.(check int)
+    "a consumed row whose partition is still open stays"
+    0
+    (ok
+       "prune with the row's partition open"
+       (A.prune_consumed_behind_cursor
+          ~base_path
+          ~keeper_name:"alpha"
+          ~open_partition_candidates:[ behind.candidate_id ]
+          (50.0, None)));
   let pruned =
-    ok "prune behind cursor" (A.prune_consumed_behind_cursor ~base_path ~keeper_name:"alpha" (50.0, None))
+    ok "prune behind cursor" (A.prune_consumed_behind_cursor ~base_path ~keeper_name:"alpha" ~open_partition_candidates:[] (50.0, None))
   in
   Alcotest.(check int) "one consumed row behind the cursor was pruned" 1 pruned;
   let survivors =
@@ -1473,7 +1483,7 @@ let test_prune_consumed_behind_cursor () =
   Alcotest.(check int)
     "pruning again changes nothing"
     0
-    (ok "idempotent prune" (A.prune_consumed_behind_cursor ~base_path ~keeper_name:"alpha" (50.0, None)))
+    (ok "idempotent prune" (A.prune_consumed_behind_cursor ~base_path ~keeper_name:"alpha" ~open_partition_candidates:[] (50.0, None)))
 ;;
 
 let () =

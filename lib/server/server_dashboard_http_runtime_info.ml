@@ -2351,5 +2351,3 @@ let dashboard_tools_http_json ?keeper ?timing config =
   | Dashboard_snapshot.Tools_ready json
   | Dashboard_snapshot.Tools_error json -> json
 ;;
-
-let dashboard_perf_http_json = Server_dashboard_http_perf.dashboard_perf_http_json

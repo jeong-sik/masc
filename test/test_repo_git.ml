@@ -755,8 +755,10 @@ let test_grep_at_reads_a_checkout () =
       Unix.mkdir (Filename.concat source "lib") 0o755;
       write_file (Filename.concat source "lib/a file.ml") "first\nNeedle here\nlast\n";
       write_file (Filename.concat source "top.txt") "a needle at the top\n--flag needle\n";
-      write_file (Filename.concat source ".gitignore") "ignored.txt\n";
+      write_file (Filename.concat source ".gitignore") "ignored.txt\nforced.txt\n";
+      write_file (Filename.concat source "forced.txt") "tracked despite an ignore rule\n";
       git [ "add"; "lib/a file.ml"; "top.txt"; ".gitignore" ];
+      git [ "add"; "--force"; "--"; "forced.txt" ];
       git [ "commit"; "-m"; "files" ];
       write_file (Filename.concat source "untracked.txt") "needle untracked\n";
       write_file (Filename.concat source "ignored.txt") "needle ignored\n";
@@ -775,6 +777,9 @@ let test_grep_at_reads_a_checkout () =
       Alcotest.(check (list string)) "ignore_case adds the capitalised row, and never an ignored file"
         [ "lib/a file.ml"; "top.txt"; "top.txt"; "untracked.txt" ]
         (List.sort String.compare (paths (search ~ignore_case:true "needle")));
+      Alcotest.(check (list string)) "a tracked file stays searchable when an ignore rule matches it"
+        [ "forced.txt" ]
+        (paths (search "despite an ignore rule"));
       Alcotest.(check (list string)) "a pathspec limits the search to that directory"
         [ "lib/a file.ml" ]
         (paths (search ~pathspec:"lib" ~ignore_case:true "needle"));

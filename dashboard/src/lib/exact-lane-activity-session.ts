@@ -1,9 +1,7 @@
 import { readExactActivity, writeExactActivity, type ExactActivityLane } from './exact-lane-activity'
 import { modelSetupResumeState, resumeSavedModelSetup } from './model-setup-resume'
 import { announceExactLaneObservationChanged } from './exact-lane-observation'
-import { laneActivitySessions, type LaneActivitySession } from './lane-activity-session'
-
-export type ExactLaneActivitySession = LaneActivitySession<ExactActivityLane, never>
+import { laneActivitySessions } from './lane-activity-session'
 
 const exact = laneActivitySessions<ExactActivityLane>({
   key: lane => lane.laneId,

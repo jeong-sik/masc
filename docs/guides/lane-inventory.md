@@ -24,7 +24,7 @@ maintained list.
 | Selection kind | Identity fields | Existing management destination |
 | --- | --- | --- |
 | `exact` | `lane_id` | Standalone lane detail, slot editor and retained runs |
-| `browser` | `lane` (`live`, `automation`, `stagehand`) | That Browser backend |
+| `browser` | `lane` (`live`, `automation`) | That Browser backend |
 | `machine` | `machine` (`msx`, `dos`) | That shared machine |
 | `declaration` | `source_path` | The actual installation file, including invalid TOML |
 | `manual_instance` | `instance_id`, `incarnation` | That exact manual Add-on instance |

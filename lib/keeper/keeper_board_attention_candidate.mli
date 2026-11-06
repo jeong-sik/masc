@@ -440,6 +440,7 @@ val record_and_wake :
 val prune_consumed_behind_cursor :
   base_path:string ->
   keeper_name:string ->
+  open_partition_candidates:string list ->
   float * string option ->
   (int, string) result
 (** Rewrite the ledger without the Consumed rows whose Board signal the
@@ -447,6 +448,8 @@ val prune_consumed_behind_cursor :
     compares (signal kind and creation coordinate), so a removed row can never
     be re-minted by replay. Consumed rows ahead of the cursor, rows without a
     replay coordinate (reactions, votes), and every other status stay. A
-    ledger with rejected rows is never rewritten. Returns the number of
-    removed rows, [0] when nothing changed. *)
+    Consumed row named in [open_partition_candidates] also stays: its
+    partition is not yet Settled or Abandoned, and settling or blocking that
+    partition reads the row. A ledger with rejected rows is never rewritten.
+    Returns the number of removed rows, [0] when nothing changed. *)
 

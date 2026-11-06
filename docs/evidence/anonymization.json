@@ -6,8 +6,6 @@
   "files": [
     "CHANGELOG.md",
     "docs/TUI-GUIDE.md",
-    "docs/audits/20260907-six-hour-runtime/health-0440.json",
-    "docs/audits/20260907-six-hour-runtime/shell-light-probe.json",
     "docs/audits/keeper-fleet-waiting-audit-20260902.md",
     "docs/design/2026-08-27-external-service-effects-bypass-the-gate.html",
     "docs/design/keeper-feature-state-matrix-2026-08-13.html",
@@ -64,7 +62,6 @@
     "limitation": "OCR has recognition limits; absence of detected text is not a mathematical guarantee about every pixel."
   },
   "artifact_reference_updates": [
-    "docs/evidence/keeper-goal-verifier-matrix-2026-08-21.json",
-    "docs/screenshots/dashboard/2026-09-04/README.md"
+    "docs/evidence/keeper-goal-verifier-matrix-2026-08-21.json"
   ]
 }

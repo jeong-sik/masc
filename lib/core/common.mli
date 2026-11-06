@@ -24,6 +24,10 @@ val masc_dirname : string
     Call sites MUST reference this constant (or {!masc_dir_from_base_path})
     rather than inlining the literal — see #9571. *)
 
+val owner_lease_dirname : string
+(** Directory beside [<base_path>/.masc] that holds the BasePath owner lease
+    when no lease root is configured. Value is [".masc-owner"]. *)
+
 val browser_lane_dirname : string
 (** The browser lane's directory under the MASC directory: its token, the
     BiDi host's record and lock, the launcher, the automation drivers'

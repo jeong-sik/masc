@@ -26,7 +26,7 @@ implementations. This inventory includes them. The file census is complete for
 its stated baseline and production scope; semantic review is selective and
 continues. Consulted files below do not imply complete audits of those files.
 
-The [earlier Godfile audit](../godfiles-20261008/README.md) remains historical
+The [earlier Godfile audit](../../evidence/godfiles-20261008/README.md) remains historical
 evidence. Its counts and open/closed claims must not be carried forward as live
 state. At the initial inventory observation, Memory OS PRs #43347, #43348
 and #43353 were open Draft members of stack #43349 with source review only.

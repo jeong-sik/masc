@@ -32,14 +32,31 @@
     before the bootstrap, and the workspace of the bootstrap reaches a layer
     only from a branch that has one. *)
 
+(** A reduction that the external store gave up (design 8.3). Its subject
+    stays blocked until a record names [aborted] in its [closes]; the zone
+    holds one per given-up intent, so two reductions of one subject are closed
+    apart. *)
+type held = private
+  { aborted : Authz_record.Hash.t
+        (** The [intended_next_record_digest] of the intent given up. *)
+  ; event : Authz_external_store.Change.authz_event
+  ; subject : Authz_records.Subject.t
+        (** The change of the intent given up is [Authz { event; subject }]. *)
+  }
+
+(** The block of an intent, if its change
+    {!Authz_external_store.Change.is_reduction}. A block is made only here, so
+    every block is of a reduction, which a retry of it can close. *)
+val held_of_intent : Authz_external_store.intent -> held option
+
 type t = private
   { mode : Authz_mode_state.t
   ; invites : Authz_invite_state.t  (** Plan B3c-1. *)
   ; principals : Authz_principal_state.t  (** Plan B3c-2. *)
-  ; revocation_pending : Authz_records.Subject.t list
-        (** The subjects of reductions whose intent the external store gave up
-            (design 8.3). No record adds one: the writer zone does, from the
-            store ({!hold_revocations}). *)
+  ; revocation_pending : held list
+        (** The reductions whose intent the external store gave up (design
+            8.3). No record adds one: the writer zone does, from the store
+            ({!hold_revocations}). A record removes those it closes. *)
   ; latest_at_ms : int option
         (** The latest [at_ms] of the records read. [None] before the first. *)
   }
@@ -49,10 +66,20 @@ val empty : t
 (** Blocks the subjects of reductions that the store gave up: an
     [Aborted_intent] whose change {!Authz_external_store.Change.is_reduction}.
     Design 8.3 blocks such a subject at the gate, without a record, until a
-    record that names the aborted intent closes it. No layer writes that record
-    yet, so a subject stays blocked. A revoked invitation that is blocked cannot
-    be spent, which is what its revocation was for. *)
-val hold_revocations : t -> Authz_records.Subject.t list -> t
+    record that names the aborted intent closes it: a record that makes the
+    same change again, with the digests of {!closable} in its [closes]. A
+    revoked invitation that is blocked cannot be spent, which is what its
+    revocation was for. A reduction already held is held once. *)
+val hold_revocations : t -> held list -> t
+
+(** The [aborted] digests of the held reductions whose change is this one:
+    what a record that makes the change closes (design 8.3, a retry). Empty for
+    a change that reduces nothing. *)
+val closable : t -> Authz_external_store.Change.t -> Authz_record.Hash.t list
+
+(** [Pending] while a reduction of [subject] is held (design 8.3,
+    [revocation_pending(subject)]). *)
+val revocation : t -> Authz_records.Subject.t -> Authz_records.Revocation_state.t
 
 type refusal =
   | Before_bootstrap of Authz_record.Kind.t
@@ -89,6 +116,11 @@ type refusal =
           time is: a clock that ran ahead and came back holds no revocation,
           disable, or [off] until it catches up. It holds every admission until
           then, and nothing lifts that early. *)
+  | Closes_without_reduction
+      (** The record has [closes], and the change it makes reduces nothing. *)
+  | Closes_not_held of Authz_record.Hash.t
+      (** The record closes this digest, and no held reduction of the change it
+          makes has it. *)
 
 val refusal_to_string : refusal -> string
 

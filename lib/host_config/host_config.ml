@@ -25,6 +25,11 @@ type test_mode_kind =
   | Production
 [@@deriving show, eq]
 
+type base_path_lease_root =
+  | Beside_base_path
+  | Lease_dir_override of string
+[@@deriving show, eq]
+
 type t =
   { cred_root : string
   ; host_bash : string
@@ -36,7 +41,7 @@ type t =
   ; test_mode : test_mode_kind
   ; log_dir : string
   ; run_dir : string
-  ; base_path_lease_dir : string
+  ; base_path_lease_root : base_path_lease_root
   ; policy_dir : string
   ; base_path : string option
   ; base_path_raw : string option
@@ -54,6 +59,14 @@ let coreutils_defaults =
   ; tail = "/usr/bin/tail"
   ; wc = "/usr/bin/wc"
   }
+;;
+
+let base_path_lease_dir_env_key = "MASC_BASE_PATH_LEASE_DIR"
+
+let base_path_lease_root_of_env get_opt =
+  match get_opt base_path_lease_dir_env_key with
+  | Some dir -> Lease_dir_override dir
+  | None -> Beside_base_path
 ;;
 
 let host () =
@@ -90,8 +103,7 @@ let host () =
        else Production)
   ; log_dir = tmp
   ; run_dir = tmp
-  ; base_path_lease_dir =
-      Option.value (get_opt "MASC_BASE_PATH_LEASE_DIR") ~default:tmp
+  ; base_path_lease_root = base_path_lease_root_of_env get_opt
   ; policy_dir = tmp
   ; base_path =
       (* RFC-0085 PR-9 — base_path field carries the *normalised* value
@@ -204,8 +216,7 @@ let resolve ?base_path () =
     ; test_mode
     ; log_dir = tmp
     ; run_dir = tmp
-    ; base_path_lease_dir =
-        Option.value (get_opt "MASC_BASE_PATH_LEASE_DIR") ~default:tmp
+    ; base_path_lease_root = base_path_lease_root_of_env get_opt
     ; policy_dir = tmp
     ; base_path =
         get_opt Env_config_core.base_path_env_key

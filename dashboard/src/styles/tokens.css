@@ -395,32 +395,12 @@ code, kbd, samp, pre, .mono { font-family: var(--font-mono); }
 /* Utilities */
 .tnum { font-variant-numeric: tabular-nums; }
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.clamp-2 {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .muted { color: var(--fg-3); }
 .dim { color: var(--fg-2); }
 
 /* Status dot — 6px solid, used in rows & KPI */
 .dot { display: inline-block; width: 6px; height: 6px; border-radius: var(--radius-circle); vertical-align: middle; }
 .dot-ok { background: var(--ok); }
-.dot-warn { background: var(--warn); }
-.dot-err { background: var(--err); }
-.dot-info { background: var(--info); }
-.dot-idle { background: var(--idle); }
-.dot-stalled { background: var(--stalled); }
-.dot-running { background: var(--brass-1); box-shadow: 0 0 6px rgb(var(--brass-glow) / .6); }
-
-/* Keeper dot — glowing, used in presence / blame attribution */
-.dot-k-nick    { background: var(--k-nick);    box-shadow: 0 0 5px rgb(var(--k-nick-glow) / .6); }
-.dot-k-masc    { background: var(--k-masc);    box-shadow: 0 0 5px rgb(var(--k-masc-glow) / .6); }
-.dot-k-sangsu  { background: var(--k-sangsu);  box-shadow: 0 0 5px rgb(var(--k-sangsu-glow) / .6); }
-.dot-k-qa      { background: var(--k-qa);      box-shadow: 0 0 5px rgb(var(--k-qa-glow) / .6); }
-.dot-k-rama    { background: var(--k-rama);    box-shadow: 0 0 5px rgb(var(--k-rama-glow) / .6); }
 
 /* Label — small-caps lock-up used on every panel title */
 .label {

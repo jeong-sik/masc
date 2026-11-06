@@ -6,7 +6,7 @@ Time is machine execution steps, including idle wait clocks. By default, stops w
 overlaps unchanged screen memory between samples. This can happen during a \
 game transition; settled does not prove a final prompt. until_ready=false \
 runs the machine-step budget unless the program exits and always reports \
-settled=false. Returns settled, steps_run, instructions_run, elapsed_cycles and input_requests."""
+settled=false. Returns settled, steps_run, instructions_run, elapsed_cycles and input_requests; include_frame=true adds the screen."""
 additional_properties = false
 
 defer_loading = true
@@ -24,3 +24,9 @@ name = "until_ready"
 type = "boolean"
 description = "Stop at the empty-poll/unchanged-screen observation, as described above. Default true."
 default = true
+
+[[params]]
+name = "include_frame"
+type = "boolean"
+description = "true adds the screen this call leaves as a PNG, as masc_dos_screen returns it, so reading it takes no second call. Default false."
+default = false

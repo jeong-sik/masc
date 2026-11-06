@@ -20,6 +20,14 @@ prunable. The list carries names only, never host paths. Type to filter by name.
 At most 500 worktrees are listed and the palette says when more exist. The list
 is read-only: Enter and Esc both return to Code.
 
+Ctrl-G searches file contents in that same checkout. Type the text (at least
+two characters) and press Enter to search; the text is matched literally, not
+as a pattern, and is case insensitive unless it has an uppercase letter. Up and
+Down move over the matches, and Enter opens the selected one at its line. Typing
+different text and pressing Enter searches again. At most 200 matches are shown
+and the palette says when more exist. Esc closes the search and keeps the
+original file.
+
 `D` asks for a definition on the cursor line. `B` returns through the locations
 left by definition jumps and successful finder selections. A location includes
 the workspace scope, directory, file, cursor, vertical and horizontal offsets,

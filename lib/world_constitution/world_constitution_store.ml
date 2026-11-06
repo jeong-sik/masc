@@ -199,3 +199,34 @@ let load_articles ~base_path =
   | Error _ as error -> error
   | Ok None -> Ok []
   | Ok (Some contents) -> Ok (parse_with ~keep_history:false contents).articles
+
+type position = {
+  end_offset : int;
+  digest : string;
+}
+
+let position_of contents =
+  { end_offset = String.length contents;
+    digest = Agent_core_sha256.(digest_string contents |> to_hex) }
+
+let load_held ~base_path =
+  match read_contents ~base_path with
+  | Error _ as error -> error
+  | Ok contents ->
+    let contents = Option.value contents ~default:"" in
+    Ok ((parse_with ~keep_history:false contents).articles, position_of contents)
+
+(* Appends never rewrite a byte already written, so the first [end_offset]
+   bytes of the ledger now are the ledger [position] read, exactly when they
+   still hash to its digest. *)
+let load_articles_at ~base_path (position : position) =
+  match read_contents ~base_path with
+  | Error _ as error -> error
+  | Ok contents ->
+    let contents = Option.value contents ~default:"" in
+    if position.end_offset < 0 || position.end_offset > String.length contents then Ok None
+    else
+      let prefix = String.sub contents 0 position.end_offset in
+      if String.equal (position_of prefix).digest position.digest
+      then Ok (Some (parse_with ~keep_history:false prefix).articles)
+      else Ok None

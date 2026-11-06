@@ -597,12 +597,16 @@ let announce_wait_for_previous_owner ~base_path owner =
         Nothing is signalled from here; stopping this process ends the wait."
        base_path recorded)
 
-let acquire_base_path_lock ~previous_owner ~run_dir base_path =
+let acquire_base_path_lock ~previous_owner ~lease_root base_path =
   let acquired =
-    match previous_owner with
-    | Refuse_previous_owner ->
+    match
+      Server_startup_takeover.lease_run_dir lease_root ~base_path, previous_owner
+    with
+    | Error rejection, (Refuse_previous_owner | Wait_for_previous_owner) ->
+      Server_startup_takeover.Base_path_rejected rejection
+    | Ok run_dir, Refuse_previous_owner ->
       Server_startup_takeover.acquire_base_path_lock ~run_dir base_path
-    | Wait_for_previous_owner ->
+    | Ok run_dir, Wait_for_previous_owner ->
       (match
          Server_startup_takeover.acquire_base_path_lock_after_owner_exits ~run_dir
            ~on_wait:(announce_wait_for_previous_owner ~base_path) base_path
@@ -703,9 +707,9 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
      | Workspace_root.Recorded _ -> ())
   in
   let masc_dir = Filename.concat canonical_base_path Common.masc_dirname in
-  let lease_dir = (Host_config.host ()).base_path_lease_dir in
   let base_path_lease =
-    acquire_base_path_lock ~previous_owner ~run_dir:lease_dir canonical_base_path
+    acquire_base_path_lock ~previous_owner
+      ~lease_root:(Host_config.host ()).base_path_lease_root canonical_base_path
   in
   (* The lease has established the canonical .masc boundary. OCaml read its
      event-directory environment before entering ML, so the default needs a
@@ -833,6 +837,23 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
        report.unprotected_files report.unprotected_logical_bytes report.protected_digests
        (original_inventory_elapsed ()) in
      if report.unprotected_files > 0 then Log.Server.warn "%s" message else Log.Server.info "%s" message);
+  (* RFC-0498 layer one: what the settled-archive pass would delete, counted
+     under the same lease before any settle can run. *)
+  let census_started = Unix.gettimeofday () in
+  (match Server_settled_original_census.run_at_startup ~base_path:canonical_base_path with
+   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+   | exception _ ->
+     Log.Server.warn "[Startup] settled original census unavailable elapsed_s=%.3f"
+       (Unix.gettimeofday () -. census_started)
+   | Error error ->
+     Log.Server.warn "[Startup] settled original census elapsed_s=%.3f: %s"
+       (Unix.gettimeofday () -. census_started) (Server_settled_original_census.error_to_string error)
+   | Ok report ->
+     Log.Server.info
+       "[Startup] settled original census: live_records=%d named_ids=%d archived_records=%d archived_record_bytes=%Ld unnamed_records=%d unnamed_record_bytes=%Ld archived_bodies=%d archived_body_bytes=%Ld elapsed_s=%.3f"
+       report.live_records report.named_ids report.archived_records report.archived_record_bytes
+       report.unnamed_records report.unnamed_record_bytes report.archived_bodies report.archived_body_bytes
+       (Unix.gettimeofday () -. census_started));
   (* Only the server samples. Sampling starts before [Eio_main.run] so the
      executor pool, which the main domain spawns while sampling, shares the
      profile and the boot-time loads are in the tables. The rate is a tenth
@@ -2265,9 +2286,9 @@ let runtime_verification_timeout_s = 120.0
 
 let verify_runtime_execution runtime timeout_s =
   Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
-    let private_path = Filename.concat (Filename.get_temp_dir_name ())
-      ("masc-runtime-verify-" ^ Random_id.hex ~bytes:16) in
-    Unix.mkdir private_path 0o700;
+    (* macOS TMPDIR sits under the /var -> /private/var symlink, and an
+       Antigravity runtime root must be its own realpath. *)
+    let private_path = Filename.temp_dir "masc-runtime-verify-" "" |> Unix.realpath in
     Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree private_path);
     (* The env and clock a provider request reads are installed inside; the
        verification's own bound is the command's [timeout_s]. *)

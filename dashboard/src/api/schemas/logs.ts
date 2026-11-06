@@ -19,6 +19,13 @@ const LogCategorySchema = Schema.Literal(
   'broadcast',
 )
 
+// One choice in the route's category filter: a category, or the entries that
+// carry none.
+const LogCategorySelectorSchema = Schema.Union(
+  LogCategorySchema,
+  Schema.Literal('uncategorized'),
+)
+
 const LogDetailsSchema = Schema.Record({
   key: Schema.String,
   value: Schema.Unknown,
@@ -56,8 +63,8 @@ const LogsQueryWireSchema = Schema.Struct({
   module: Schema.String,
   since_seq: Schema.OptionFromNullOr(Schema.NonNegativeInt),
   before_seq: Schema.OptionFromNullOr(Schema.NonNegativeInt),
-  category: Schema.OptionFromNullOr(LogCategorySchema),
-  exclude_category: Schema.OptionFromNullOr(Schema.Array(LogCategorySchema)),
+  category: Schema.OptionFromNullOr(Schema.Array(LogCategorySelectorSchema)),
+  exclude_category: Schema.OptionFromNullOr(Schema.Array(LogCategorySelectorSchema)),
 })
 
 // Live-window bounds of the log ring (server #29011). `dropped_before` true
@@ -155,6 +162,8 @@ const LogsValidatedWireSchema = LogsWireSchema.pipe(
 export type LogLevel = Schema.Schema.Type<typeof LogLevelSchema>
 export type LogSource = Schema.Schema.Type<typeof LogSourceSchema>
 export type LogCategory = Schema.Schema.Type<typeof LogCategorySchema>
+export type LogCategorySelector = Schema.Schema.Type<typeof LogCategorySelectorSchema>
+export const LOG_CATEGORIES: readonly LogCategory[] = LogCategorySchema.literals
 
 export interface LogEntry {
   readonly seq: number

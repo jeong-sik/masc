@@ -325,8 +325,10 @@ let save_action_with ~sync_parent t ~instance_id ~request_id json =
 let save_action = save_action_with ~sync_parent:sync_parent_directory
 (* Keyed by the declaration id, not the instance id: an attach mints a new
    instance id, and a restarted worker must find what the host retained. *)
+let exact_request_directory ~declaration_id =
+  Filename.concat exact_requests_directory (digest declaration_id)
 let exact_request_path ~declaration_id ~request_id =
-  Filename.concat exact_requests_directory (Filename.concat (digest declaration_id) (digest request_id ^ ".json"))
+  Filename.concat (exact_request_directory ~declaration_id) (digest request_id ^ ".json")
 let save_exact_request t ~declaration_id ~request_id json =
   save_record_with ~sync_parent:sync_parent_directory t (exact_request_path ~declaration_id ~request_id) json
 let tool_request_owner_path ~scope ~request_id =
@@ -997,8 +999,9 @@ let tool_request_body_inventory_all t =
     let* result = result in
     match result with None -> Ok [] | Some value -> Ok value)
 
+let host_result_directory ~instance_id = Filename.concat "host-results" (digest instance_id)
 let host_result_path ~instance_id ~request_id =
-  Filename.concat "host-results" (Filename.concat (digest instance_id) (digest request_id ^ ".json"))
+  Filename.concat (host_result_directory ~instance_id) (digest request_id ^ ".json")
 let save_host_result t ~instance_id ~request_id json =
   write t (host_result_path ~instance_id ~request_id) (Yojson.Safe.to_string json)
 let load_host_result t ~instance_id ~request_id =

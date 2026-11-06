@@ -396,6 +396,7 @@ let kind_labels_are_the_names_on_disk () =
     ; "mode_event"
     ; "invite"
     ; "admission"
+    ; "admin_assignment"
     ]
     (List.map R.Kind.to_string R.Kind.all)
 ;;
@@ -539,6 +540,76 @@ let no_identifier_character_needs_an_escape () =
   Alcotest.(check bool) "some bytes are accepted" true (!accepted > 0)
 ;;
 
+(* ---- a record that closes given-up reductions ---- *)
+
+let hex_of letter = String.make 64 letter
+
+let digest letter =
+  match R.Hash.of_hex (hex_of letter) with
+  | Some hash -> hash
+  | None -> Alcotest.fail "fixture digest refused"
+;;
+
+let first_record = List.nth chain 0
+let closed = R.closing first_record ~closes:[ digest 'b'; digest 'a'; digest 'b' ]
+let closed_line = R.to_line closed
+let closes_member = {|,"closes":["|} ^ hex_of 'a' ^ {|","|} ^ hex_of 'b' ^ {|"]|}
+
+(* [closes] is written in ascending order and each digest once, after the body,
+   under the hash. A record that closes nothing is the line [make] writes. *)
+let a_closing_record_reads_back () =
+  Alcotest.(check bool)
+    "the member after the body"
+    true
+    (contains ~sub:(closes_member ^ {|,"hash":|}) closed_line);
+  (match R.of_line ~head:R.genesis closed_line with
+   | Ok record ->
+     Alcotest.(check (list string))
+       "the digests read back"
+       [ hex_of 'a'; hex_of 'b' ]
+       (List.map R.Hash.to_hex record.R.closes);
+     Alcotest.(check string) "the same line" closed_line (R.to_line record)
+   | Error error -> Alcotest.failf "not read back: %s" (R.decode_error_to_string error));
+  Alcotest.(check bool) "the hash covers closes" false (R.Hash.equal closed.R.hash first_record.R.hash);
+  Alcotest.(check string)
+    "closing nothing"
+    first_line
+    (R.to_line (R.closing first_record ~closes:[]))
+;;
+
+(* Each line carries a correct hash over its own text, so the shape of
+   [closes] is the only thing wrong with it. *)
+let closes_line_tests =
+  let case name line expected =
+    Alcotest.test_case name `Quick (fun () -> expect_decode_error ~head:R.genesis line expected)
+  in
+  let with_closes member = resign (replace_once ~line:closed_line ~old:closes_member ~by:member) in
+  [ case "an empty list" (with_closes {|,"closes":[]|}) R.Unexpected_shape
+  ; case
+      "out of order"
+      (with_closes ({|,"closes":["|} ^ hex_of 'b' ^ {|","|} ^ hex_of 'a' ^ {|"]|}))
+      R.Non_canonical
+  ; case
+      "a digest twice"
+      (with_closes ({|,"closes":["|} ^ hex_of 'a' ^ {|","|} ^ hex_of 'a' ^ {|"]|}))
+      R.Non_canonical
+  ; case "not hex" (with_closes {|,"closes":["abc"]|}) R.Invalid_closes
+  ; case "a number" (with_closes {|,"closes":[1]|}) R.Invalid_closes
+  ; case
+      "before the body"
+      (resign
+         (replace_once
+            ~line:(replace_once ~line:closed_line ~old:closes_member ~by:"")
+            ~old:{|,"body":|}
+            ~by:(closes_member ^ {|,"body":|})))
+      R.Unexpected_shape
+  ; case
+      "a digest changed"
+      (replace_once ~line:closed_line ~old:(hex_of 'b') ~by:(hex_of 'c'))
+      R.Hash_mismatch
+  ]
+;;
+
 let () =
   Alcotest.run
     "authz_record"
@@ -569,6 +640,8 @@ let () =
             `Quick
             no_identifier_character_needs_an_escape
         ] )
+    ; ( "a record that closes"
+      , Alcotest.test_case "read back" `Quick a_closing_record_reads_back :: closes_line_tests )
     ; ( "a signed line with a body that is not plain"
       , Alcotest.test_case
           "half of a surrogate pair that cannot be read"

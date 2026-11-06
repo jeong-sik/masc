@@ -1040,7 +1040,7 @@ let test_actual_followup_structured_sink_and_export () = with_answer @@ fun base
   let exported=Server_dashboard_logs_json.build ~config ~limit:Log.Ring.capacity
     ~level_filter:"info" ~applied_level:Log.Info ~min_level:(Log.level_to_int Log.Info)
     ~module_filter:"Transport" ~since_seq:(Some since_seq) ~before_seq:None
-    ~category_filter:(Some "lifecycle") ~exclude_category:None ~ring_bounds:(Log.Ring.bounds ()) entries in
+    ~categories:(Some [Log.Category Log.Lifecycle]) ~exclude_categories:None ~ring_bounds:(Log.Ring.bounds ()) entries in
   let decoded=Masc.Tui_decode.decode_system_log_snapshot exported |> require in
   let module Logs=Masc_tui_system_logs in
   state.system_logs <- Logs.apply Logs.Server (Ok decoded) state.system_logs;
@@ -1059,7 +1059,7 @@ let test_actual_followup_structured_sink_and_export () = with_answer @@ fun base
   let late_frame=Server_dashboard_logs_json.build ~config ~limit:Log.Ring.capacity
     ~level_filter:"info" ~applied_level:Log.Info ~min_level:(Log.level_to_int Log.Info)
     ~module_filter:"" ~since_seq:(Some since_seq) ~before_seq:None
-    ~category_filter:None ~exclude_category:None ~ring_bounds:(Log.Ring.bounds ()) late_entries in
+    ~categories:None ~exclude_categories:None ~ring_bounds:(Log.Ring.bounds ()) late_entries in
   let late_server=Masc.Tui_decode.decode_system_log_snapshot late_frame |> require in
   state.system_logs <- Logs.apply Server (Ok late_server) state.system_logs;
   check bool "late actual server frame cannot replace client data, filters or detail target" true
@@ -1073,7 +1073,7 @@ let test_actual_followup_structured_sink_and_export () = with_answer @@ fun base
   let empty_frame=Server_dashboard_logs_json.build ~config ~limit:Log.Ring.capacity
     ~level_filter:"debug" ~applied_level:Log.Debug ~min_level:(Log.level_to_int Log.Debug)
     ~module_filter:"" ~since_seq:None ~before_seq:(Some 0)
-    ~category_filter:None ~exclude_category:None ~ring_bounds:(Log.Ring.bounds ()) empty_entries in
+    ~categories:None ~exclude_categories:None ~ring_bounds:(Log.Ring.bounds ()) empty_entries in
   let empty=Masc.Tui_decode.decode_system_log_snapshot empty_frame |> require in
   check bool "actual empty server page carries no invented latest sequence" true
     (empty.sys_entries=[] && empty.sys_latest_seq=None);

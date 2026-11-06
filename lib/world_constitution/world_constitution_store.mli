@@ -101,3 +101,23 @@ val load_articles : base_path:string -> (World_constitution_types.t list, read_e
     stay small, so an ordinary load must not build it: the per-turn prompt
     build renders articles and would otherwise retain every past article and
     removal reason on every turn. A missing file is no articles. *)
+
+(** Which ledger bytes a read folded: their length and SHA-256. *)
+type position = {
+  end_offset : int;
+  digest : string;
+}
+
+val load_held :
+  base_path:string ->
+  (World_constitution_types.t list * position, read_error) result
+(** {!load_articles} and the position of the bytes it folded. *)
+
+val load_articles_at :
+  base_path:string ->
+  position ->
+  (World_constitution_types.t list option, read_error) result
+(** The articles the world held when the ledger ended at [position]. The
+    ledger only grows, so those are the fold of its first [end_offset] bytes
+    now; [None] when those bytes no longer hash to [position]'s digest, or the
+    ledger is shorter. Folds without the history, as {!load_articles} does. *)

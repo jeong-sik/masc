@@ -618,7 +618,7 @@ checks cover decoding and refresh ownership; installed and rendered TUI
 behavior remain unverified.
 
 The Dashboard's Browser callers and Spaces view also displays the same worker's
-server-owned Automation and Stagehand session observations. These are separate
+server-owned Automation session observations. These are separate
 from connected personal browsers. Availability, executor registration and session
 state retain their published values; registration does not mean the session is
 open, and an unknown session is not shown as closed. Retained worker observations

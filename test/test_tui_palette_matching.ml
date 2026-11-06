@@ -600,7 +600,8 @@ let test_an_installation_that_asked_has_one_results_row () =
            | Palette_gate_mode _ | Palette_chat _ | Palette_task _ | Palette_task_creation _
            | Palette_board_hearth _ | Palette_board_post _ | Palette_lsp _
            | Palette_code_file _ | Palette_code_location _
-           | Palette_code_branch _ | Palette_code_worktree _ ) -> None)
+           | Palette_code_branch _ | Palette_code_worktree _
+           | Palette_code_search_match _ ) -> None)
       (palette_entries state) in
   Alcotest.(check (list string)) "nothing seen, nothing offered" [] (results state);
   state.asks_snapshot <- Some { Asks.asn_keeper = None; asn_open_count = 3;

@@ -50,6 +50,25 @@ let category_of_string_opt s : category option =
   | "broadcast" -> Some Broadcast
   | _ -> None
 
+type category_selector =
+  | Category of category
+  | Uncategorized
+
+let category_selector_to_string = function
+  | Category category -> category_to_string category
+  | Uncategorized -> "uncategorized"
+
+let category_selector_of_string_opt s =
+  match String.lowercase_ascii (String.trim s) with
+  | "uncategorized" -> Some Uncategorized
+  | name -> Option.map (fun category -> Category category) (category_of_string_opt name)
+
+let selects selector (category : category option) =
+  match selector, category with
+  | Uncategorized, None -> true
+  | Category wanted, Some actual -> wanted = actual
+  | Uncategorized, Some _ | Category _, None -> false
+
 (** Current log level (Atomic for thread safety in OCaml 5) *)
 let current_level = Atomic.make 1 (* Info = 1 *)
 
@@ -884,8 +903,8 @@ module Ring = struct
       ?since_seq
       ?before_seq
       ?(order = `Newest_first)
-      ?category_filter
-      ?exclude_category
+      ?categories
+      ?exclude_categories
       () : entry list =
     let t = Atomic.get total in
     if t = 0 then []
@@ -917,27 +936,16 @@ module Ring = struct
           String.lowercase_ascii e.module_name =
           String.lowercase_ascii module_filter in
         let category_ok =
-          match category_filter with
+          match categories with
           | None -> true
-          | Some filter ->
-              let filter_lower = String.lowercase_ascii filter in
-              if String.equal filter_lower "uncategorized" then
-                Option.is_none e.category
-              else
-                match e.category with
-                | Some c -> String.equal (category_to_string c) filter_lower
-                | None -> false
+          | Some selectors ->
+              List.exists (fun selector -> selects selector e.category) selectors
         in
         let exclude_ok =
-          match exclude_category with
+          match exclude_categories with
           | None -> true
-          | Some cats ->
-              match e.category with
-              | None -> true
-              | Some c ->
-                  let c_lower = String.lowercase_ascii (category_to_string c) in
-                  not (List.exists (fun ex ->
-                    String.equal c_lower (String.lowercase_ascii ex)) cats)
+          | Some selectors ->
+              not (List.exists (fun selector -> selects selector e.category) selectors)
         in
         if level_ok && module_ok && category_ok && exclude_ok then begin
           entries := e :: !entries;

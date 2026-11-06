@@ -22,14 +22,12 @@ import { SurfaceCard } from './common/card'
 const MAX_EVENT_ROWS = 5
 const MAX_AUDIT_ROWS = 5
 
-/** Pure: the aggregated channel stats for a connector. Prefers the
-    connector's own observed_channel aggregation; falls back to the
-    matching row in the gate status channel list. */
+/** Pure: the aggregated channel stats for a connector: the matching row in
+    the gate status channel list. */
 export function channelStatsFor(
   connector: GateConnectorInfo | null,
   gate: GateStatusData | null,
 ): ChannelInfo | null {
-  if (connector?.observed_channel) return connector.observed_channel
   const channel = connector?.channel ?? ''
   if (!channel || !gate) return null
   return gate.channels.find(c => c.channel === channel) ?? null

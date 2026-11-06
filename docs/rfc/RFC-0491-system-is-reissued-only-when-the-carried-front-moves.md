@@ -124,21 +124,25 @@ related: ["0442", "goal-observations-leave-the-system-prompt", "0488"]
 
 ### 3.2 조항은 System 을 만든 때의 것을 쓴다
 
-Keeper 마다 두 값을 프로세스 메모리에 든다. System 을 만들 때 쓴 조항 목록과 그 System 의 digest 다. 턴의 System 은 이렇게 고른다.
+System 을 만든 조항을 기준점이라 한다. 기준점은 두 값이다. 그 조항을 읽은 조항 원장의 위치(바이트 길이와 그 바이트의 SHA-256)와, 그 조항으로 렌더한 System 의 digest 다. 원장은 덧붙이기만 하므로, 그 위치의 조항은 지금 원장의 앞 바이트를 접어서 다시 얻는다. 앞 바이트의 digest 가 다르면 얻지 못한 것으로 본다(`World_constitution_store.load_articles_at`).
+
+Keeper 세션은 기준점을 runtime 마다 하나씩 든다. 앞부분을 runtime 마다 견주기 때문이다. 턴의 System 은 이렇게 고른다.
 
 | 조건 | System | 끝 문맥 `Constitution_amendments` |
 |---|---|---|
-| 이번 턴 첫 요청의 예상 앞부분이 그 runtime 의 직전 요청 앞부분과 같고, 든 조항으로 렌더한 System 의 digest 가 든 digest 와 같다 | 든 조항으로 렌더한 것 | 지금 조항과 든 조항의 차이 |
-| 그 밖: 앞부분이 다르다, 직전 요청이 없다, 지시문이나 `keeper.md` 가 바뀌었다, 든 값이 없다 | 지금 조항으로 렌더하고 두 값을 새로 든다 | 없음 |
+| 이번 턴 첫 요청의 예상 앞부분이 그 runtime 의 직전 요청 앞부분과 같고, 그 runtime 의 기준점 조항으로 렌더한 System 의 digest 가 기준점의 digest 와 같다 | 기준점 조항으로 렌더한 것 | 지금 조항과 기준점 조항의 차이 |
+| 그 밖: 앞부분이 다르다, 직전 요청이 없다, 지시문이나 `keeper.md` 가 바뀌었다, 기준점이 없다, 원장 앞 바이트가 바뀌었다 | 지금 조항으로 렌더하고 그 runtime 의 기준점을 새로 둔다 | 없음 |
 
 - 둘째 줄의 지시문 수정은 그 턴에 바로 반영된다. 그 턴은 어차피 System 바이트가 달라져 캐시가 깨지므로, 조항도 지금 것으로 맞춘다.
-- 차이는 조항 id 로 낸다. 추가된 조항은 id 와 본문을, 지운 조항은 id 를 적는다. 본문은 `World_constitution_render` 와 같은 escape 를 거친다.
+- 차이는 System 이 렌더하는 조항 id 와 본문으로 낸다. 추가된 조항은 id 와 본문을, 지운 조항은 id 를 적는다. 원장은 들고 있는 id 를 다시 추가하면 그 자리에서 고친 것으로 접는다(`World_constitution_store.apply`). 그래서 본문이 바뀐 조항은 옛 줄을 지우고 새 줄을 더한 것으로 낸다. 본문은 `World_constitution_render` 와 같은 escape 를 거친다.
 - 견주는 앞부분은 직전 요청의 것이다. provider 캐시에 남은 것은 직전 요청의 System 과 그 앞부분부터의 기록이다(§1.2). System 을 만든 때의 앞부분과 견주면, 턴 중간에 앞부분이 움직인 다음 턴은 캐시가 맞을 자리에서 System 을 다시 만든다.
 - 직전 요청의 앞부분은 (Keeper, runtime, session) 원장 `Keeper_model_input_ledger.Table` 이 든 값이다. 원장이 지금 기록을 덮지 않으면(`holds` 가 아니면) 직전 요청이 없는 것으로 본다.
 - 예상 앞부분은 `Keeper_next_request_forecast.carry` 로 구한다. 이 함수는 `Keeper_turn_driver_try_provider.choose_range_start` 와 `project_range_start` 를 그대로 거친다. 입력은 턴 driver 가 첫 요청에서 읽는 것과 같다. 원장 front(없으면 turn record seed), Librarian continuity, 턴 시작점, 이번 턴의 기록이다.
 - 실제 요청의 앞부분으로는 고르지 못한다. Agent Core 는 요청마다 System 을 먼저 정하고(`packages/agent_core/lib/pipeline/pipeline_stage_prepare.ml:207-213`), 그 뒤 `prepare_turn_for_agent`(같은 파일 236행)가 부르는 projection 이 앞부분을 정한다. System 은 턴마다 한 번 만들고, 그 턴의 모든 lane·시도·round 가 같이 쓴다.
 - 예상과 실제가 다를 수 있다. 크기 거절로 앞부분이 턴 경계로 옮겨지거나 다른 lane 으로 넘어갈 때다. 그 요청은 어차피 기록 캐시를 놓친다. 조항은 System 과 끝 문맥을 합쳐 늘 지금 것이 실린다. 예상은 캐시가 맞을지만 정하고, 무엇이 실리는지는 정하지 않는다.
-- 든 값은 저장하지 않는다. 조항 원장과 Keeper 지시문이 SSOT 이고, 든 값은 그 투영이다. 서버가 다시 뜨면 첫 턴은 지금 조항으로 만든다. 그 사이 조항이 바뀌었으면 그 턴 한 번 캐시가 깨진다.
+- 기준점은 세션 checkpoint 의 context(`Agent_core.Context` 의 Session scope, 키 `keeper_turn_system`)에 둔다. 이번 턴이 낸 System 의 기준점과 runtime 별 기준점을 같이 적는다. 다음 턴은 불러온 checkpoint 에서 읽는다. 조항 본문은 적지 않고 원장 위치만 적으니, 조항 원장과 Keeper 지시문이 그대로 SSOT 다. 기준점은 그 투영이다.
+- native 이어가기는 재시작 등으로 끊긴 direct 턴을 seed 가 기록한 System 으로 다시 보낸다. seed 의 checkpoint context 에 그 System 의 기준점이 있으므로, 그 조항과 지금 조항의 차이를 다시 내서 블록으로 보낸다. 기록된 System 의 digest 가 기준점과 다르거나 기준점이 없으면 어느 조항으로 만들었는지 모르므로 블록 없이 보낸다.
+- 한 턴의 walk 는 맨 앞 runtime 으로 경로를 정한다. 같은 walk 의 다음 후보도 같은 System 과 블록을 받는다. Claude Code 는 실행마다 System 을 넘기고, Codex 는 resume 에서 System 이 바뀌었으면 다시 보낸다. 그래서 둘 다 블록이 고치는 System 을 든다. 블록의 줄 하나하나는 받는 System 이 무엇이든 지금 세계에 대해 맞다.
 
 `Constitution_amendments` 는 `Prompt_block_id` 블록이다. world state 의 layer 가 아니다. world state 는 턴이 System 을 고르기 전에 렌더되고, 조항 차이는 System 을 고를 때 정해지기 때문이다. §3.1 의 `Completion_authority` 블록처럼 같은 턴의 뒤 round 에도 싣는다. 든 조항으로 만든 System 과 그 차이는 한 값으로 다녀서, 차이 없이 그 System 만 쓰는 호출자는 생기지 않는다.
 
@@ -156,19 +160,24 @@ Keeper 마다 두 값을 프로세스 메모리에 든다. System 을 만들 때
 - **조항 원장 쓰기를 모아서 늦춘다.** 하지 않는다. 원장은 일어난 일을 적는 곳이다. 쓰기를 늦추는 장치는 행동을 통제하는 gate 가 된다.
 - **System 을 만든 때의 앞부분과 견준다.** 하지 않는다. 턴 중간에 앞부분이 움직이면 캐시에는 움직인 앞부분부터의 기록이 남는다. 다음 턴 첫 요청이 그 앞부분에서 열리면 캐시가 맞을 자리인데, 만든 때의 앞부분과는 달라서 System 을 다시 만들고 캐시를 깬다.
 - **Agent Core 가 앞부분을 정한 뒤 System 을 고르게 순서를 바꾼다.** 하지 않는다. System 은 턴의 lane·시도·round 가 같이 쓰는 값이다. agent_core 의 prepare 순서를 바꾸면 모든 provider 경로가 바뀐다. 예상 앞부분으로 같은 결정을 턴 시작에 낸다.
-- **System 기준점을 턴 기록에 저장한다.** 하지 않는다. 턴 기록에 새 필드가 생기고, 그 필드 없이도 durable truth 는 손상되지 않는다. 프로세스 메모리로 충분하다. 재시작 뒤 한 번 깨지는 비용은 §5 에 적는다.
+- **기준점을 프로세스 메모리에 둔다.** 하지 않는다. native 이어가기는 seed 가 기록한 System 을 다시 보낸다. 재시작으로 프로세스 메모리가 비면 그 System 이 어느 조항으로 만들어졌는지 모른다. 그러면 옛 조항 System 이 차이 블록 없이 나간다(#49004 리뷰 F1). 기준점은 그 System 과 같은 checkpoint 에 있어야 한다.
+- **기준점에 조항 본문을 적는다.** 하지 않는다. 11-06 원장의 조항 34개를 JSON 으로 적으면 기준점 하나가 14,762B 다. checkpoint 중앙값은 7,907B 다(최근 세션 42개). runtime 마다 하나씩이면 checkpoint 가 몇 배로 커진다. 원장 위치로 적으면 이번 턴 기준점이 186B, runtime 하나가 226B 다.
+- **System 기준점을 턴 기록에 저장한다.** 하지 않는다. native 이어가기는 checkpoint 를 복원한다. 턴 기록에 두면 seed 와 기준점이 다른 곳에서 따로 쓰인다.
 - **provider 캐시 breakpoint 로 System 을 따로 캐시한다.** 해당 없다. Z.AI 문서는 캐시가 설정 없이 걸린다고 쓰고, opencode Go 문서에는 breakpoint 가 없다(§1.4).
 
 ## 5. 영향
 
 - 조항이 바뀐 뒤 범위 앞부분이 움직일 때까지, Keeper 는 System 의 옛 조항과 끝 문맥의 차이를 함께 읽는다. 11-05 범위 앞부분은 턴 쌍의 11.0% 에서 움직였다. 평균 9턴쯤 뒤에 System 이 지금 조항으로 다시 만들어진다.
 - 끝 문맥은 요청마다 차이 바이트만큼 커진다. 조항 하나는 300~500B 다.
-- 서버 재시작 뒤 첫 턴은 지금 조항으로 만든다. 직전 System 을 만든 뒤 조항이 바뀌었으면 그 턴의 첫 요청이 기록 전체를 다시 읽는다. 지금은 조항이 바뀔 때마다 모든 Keeper 가 그렇다.
-- official client Keeper 는 §3.1 의 authority 를 지금과 같은 자리에서 받는다. §3.2·§3.3 의 System 기준점은 에이전트 코어 경로만 바꾼다. official client 는 vendor 세션이 System 을 따로 쥔다.
+- 서버가 다시 떠도 첫 턴은 불러온 checkpoint 의 기준점을 읽는다. 예상 앞부분이 같으면 기준점 System 을 다시 보낸다. 재시작 뒤 캐시가 실제로 맞는지는 배포 뒤 원장으로 잰다.
+- checkpoint 마다 기준점이 실린다. runtime 둘을 쓰는 세션은 680B 다(이번 턴 기준점 186B, runtime 마다 226B).
+- 턴을 준비할 때 원장을 읽는다. 기준점을 쓰는 턴은 원장을 한 번 더 읽고 앞 바이트의 SHA-256 을 계산한다. 11-06 원장은 43,236B 다.
+- official client Keeper 는 §3.1 의 authority 를 지금과 같은 자리에서 받는다. §3.2·§3.3 의 System 기준점은 walk 맨 앞이 에이전트 코어인 턴만 바꾼다. official client 가 맨 앞인 턴은 지금 조항으로 만들고 runtime 별 기준점을 건드리지 않는다.
 
 ## 6. 검증
 
 - 시험: `assemble_request_context` 가 `Completion_authority` 를 System 이 아닌 블록으로 내고, 뒤 round 에도 같은 블록을 싣는다. official Start 의 System 과 carrier 에는 그 블록이 없고, Start prompt 앞과 Resume 마다 carrier span 증명과 함께 실린다. 조항이 바뀐 턴에서 범위 앞부분이 같으면 System 바이트가 같고 차이 layer 가 생긴다. 앞부분이 다르면 System 이 지금 조항을 담고 차이 layer 가 없다. 지시문이 바뀌면 System 이 바로 바뀐다.
+- 시험: native 이어가기가 재시작 뒤에도 seed checkpoint 의 기준점으로 차이 블록을 낸다. 기준점이 없는 seed 는 블록 없이 기록된 System 을 보낸다. 두 runtime 을 번갈아 쓰는 세션은 runtime 마다 자기 기준점을 받는다. 원장 위치는 그 뒤 덧붙인 조항과 제자리 수정에도 같은 조항을 돌려주고, 앞 바이트가 바뀌면 아무것도 돌려주지 않는다.
 - 배포 뒤: §1.1 과 같은 방법으로 "앞부분 그대로, System 바뀜" 쌍과 그 몫을 다시 센다. 기대값은 `completion_authority` 쌍 0, 조항 추가로 바뀐 `keeper_instructions` 쌍 0 이다. 지시문 수정과 배포로 바뀐 쌍은 남는다.
 
 ## 7. 층

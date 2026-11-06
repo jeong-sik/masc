@@ -218,17 +218,6 @@
   --v2-shell-transition: 220ms var(--ease);
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   HEADER — StyleSeed TopBar
-   ═══════════════════════════════════════════════════════════════ */
-
-.v2-app .v2-shell-header {
-  /* TopBar is a single horizontal band on a white card. */
-  background: var(--ss-card);
-  border-bottom: 1px solid var(--ss-border);
-  box-shadow: var(--ss-shadow-card);
-}
-
 /* Crumb treatment from StyleSeed: uppercase, wide tracking, muted. */
 .v2-app .v2-header-crumb {
   letter-spacing: 0.08em;
@@ -420,11 +409,6 @@
    SHELL LAYOUT — rail + main content scroll contracts
    ═══════════════════════════════════════════════════════════════ */
 
-.v2-app .v2-shell-stage {
-  /* Row layout by default: fixed-width rail + flex main content. */
-  flex-direction: row;
-}
-
 .v2-app .v2-stage {
   /* Ensure the stage itself can shrink below its content size so the
      inner scroll container receives a definite height. */
@@ -452,34 +436,11 @@
    RESPONSIVE
    ═══════════════════════════════════════════════════════════════ */
 
-@media (max-width: 1100px) {
-  .v2-app .v2-shell-stage {
-    flex-direction: column;
-  }
-
-  /* Keep the rail collapsed to a compact top strip on tablet so the main
-     content still has room. The rail becomes a horizontal band with its
-     own internal vertical scroll if the nav list is tall. */
-  .v2-app #dashboard-side-rail.v2-shell-rail {
-    width: auto;
-    max-height: 260px;
-    overflow-y: auto;
-  }
-}
-
 @media (max-width: 900px) {
-  .v2-app #dashboard-side-rail.v2-shell-rail {
-    height: 100vh;
-    max-height: none;
-  }
 
   .v2-app .v2-shell-tabs,
   .v2-app .v2-desktop-header-only {
     display: none;
-  }
-
-  .v2-app .v2-mobile-bottom-bar {
-    display: flex;
   }
 
   .v2-app .dashboard-main-scroll {
@@ -487,12 +448,6 @@
   }
 
   .v2-app .v2-header-actions .v2-statchip {
-    display: none;
-  }
-}
-
-@media (min-width: 901px) {
-  .v2-app .v2-mobile-bottom-bar {
     display: none;
   }
 }

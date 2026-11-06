@@ -50,6 +50,15 @@ type prepare_error =
       (** A prompt slot the base system prompt needs is missing or fails to
           render (partial asset sync, operator edit). The turn is refused
           with this typed reason instead of crashing the cycle. *)
+  | Turn_system_unreadable of string
+      (** The loaded checkpoint's session context holds a malformed
+          {!Keeper_turn_system.held} entry. *)
+
+(** A native continuation's seed System and the runtime its call runs on. *)
+type recorded_system =
+  { runtime_id : string
+  ; text : string
+  }
 
 val build_base_system_prompt :
      config:Workspace.config
@@ -72,6 +81,7 @@ val prepare_run_context :
   -> ?temperature:float
   -> ?shared_context:Agent_core.Context.t
   -> ?checkpoint:Agent_core.Checkpoint.t
+  -> ?recorded_system:recorded_system
   -> unit
   -> (run_context, prepare_error) result
 (** Resolve [temperature] as the caller fallback; a temperature declared by the
@@ -86,7 +96,10 @@ val prepare_run_context :
     whether the System may keep its last articles: for an Agent Core head
     the range the first request carries is predicted over the loaded
     history ({!Keeper_next_request_forecast.first_request}), and
-    {!Keeper_turn_system.issue} decides. *)
+    {!Keeper_turn_system.issue} decides over what the loaded checkpoint's
+    session context holds. With [recorded_system] the turn resends those
+    bytes ({!Keeper_turn_system.resend}). Either way the result is written
+    into [shared_context], the context the turn's checkpoints persist. *)
 
 (** Whether the turn starts from a checkpoint it loaded. *)
 val loaded_checkpoint_present : run_context -> bool

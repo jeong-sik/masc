@@ -464,7 +464,6 @@
   display: none;
 }
 
-.v2-board-surface .bd-mobile-state-template,
 .v2-board-surface .bd-mobile-compose-tool {
   flex: none;
   width: 32px;
@@ -480,14 +479,12 @@
   transition: 0.13s;
 }
 
-.v2-board-surface .bd-mobile-state-template:not(:disabled):hover,
 .v2-board-surface .bd-mobile-compose-tool:not(:disabled):hover {
   border-color: var(--volt-dim);
   color: var(--volt-strong);
   background: var(--volt-wash);
 }
 
-.v2-board-surface .bd-mobile-state-template:disabled,
 .v2-board-surface .bd-mobile-compose-tool:disabled {
   opacity: 0.45;
   cursor: not-allowed;
@@ -684,42 +681,6 @@
   color: var(--text-primary);
   line-height: 1.6;
   margin-top: 3px;
-}
-
-.v2-board-surface .bd-mention-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 9px; /* prototype surfaces.css:358 */
-  padding: 9px 10px; /* prototype surfaces.css:358 */
-  border-radius: var(--radius-sm);
-  background: var(--bg-card);
-  border: 1px solid var(--border-soft);
-  cursor: pointer;
-  transition: 0.13s;
-}
-
-.v2-board-surface .bd-mention-row:hover {
-  border-color: var(--border-highlight);
-}
-
-.v2-board-surface .bd-mention-row .txt {
-  font-size: 11.5px;
-  color: var(--text-mid);
-  line-height: 1.5;
-  min-width: 0;
-}
-
-.v2-board-surface .bd-mention-row .txt b {
-  color: var(--text-bright);
-  font-weight: 600;
-}
-
-.v2-board-surface .bd-mention-row .ts {
-  margin-left: auto;
-  flex: none;
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  color: var(--text-dim);
 }
 
 /* Mention inbox compact panel overrides */
@@ -926,8 +887,7 @@
   }
 
   .v2-board-surface .bd-mobile-queue,
-  .v2-board-surface .bd-react,
-  .v2-board-surface .bd-category-pagination button {
+  .v2-board-surface .bd-react {
     min-height: var(--mobile-touch-target-min);
   }
 
@@ -1185,10 +1145,6 @@
 
   .v2-board-surface .bd-mobile-draft-tray .cdraft.voice {
     max-width: 100%;
-  }
-
-  .v2-board-surface .bd-mobile-draft-tray .cdraft-wave {
-    min-width: 54px;
   }
 
   .v2-board-surface .bd-mobile-draft-tray .cdraft-tx {

@@ -628,9 +628,92 @@ let test_the_listing_declares_the_reads () =
             (Option.bind listed.annotations (fun annotations -> annotations.S.read_only_hint)))
       C.all_of_dos_tool)
 
+let frames (result : S.tool_result) =
+  List.filter_map (function
+    | S.ImageContent {mime_type; data; _} -> Some (mime_type, data)
+    | S.TextContent _ | S.AudioContent _ | S.ResourceContent _ | S.ResourceLinkContent _ -> None)
+    result.content
+
+let png_signature = "\137PNG\r\n\026\n"
+
+(* mov ah,0; int 16h; jmp back: takes every key and never exits, so one
+   machine serves the four input tools in turn. *)
+let key_loop_com = "\xb4\x00\xcd\x16\xeb\xfa"
+
+(* An input call returns the screen it leaves when asked with include_frame,
+   and only then: the same call without it, or with it false, answers as it
+   did before. The structured answer is the same either way, so a caller that
+   reads only the data is not affected by the frame. *)
+let test_an_input_call_returns_the_screen_only_when_asked () =
+  let base_path = Filename.temp_dir "dos-addon-worker-frame-" "" in
+  let setup () =
+    let programs = Filename.concat (dos_of ~base_path) "programs" in
+    mkdir_p programs;
+    write_file (Filename.concat programs "keys.com") key_loop_com in
+  with_worker_after ~base_path setup (fun client () ->
+    let call, _snapshot = worker_call client in
+    let loaded = call ~controller:free "masc_dos_load" (`Assoc ["program", `String "keys.com"]) in
+    check bool "the key loop boots" false (loaded.is_error = Some true);
+    let holder = {C.observed_holder = Some "fixture"; release = None; handoff_target = None} in
+    let inputs = [
+      "masc_dos_step", ["steps", `Int 1000];
+      "masc_dos_press", ["keys", `List [`String "a"]];
+      "masc_dos_type", ["text", `String "ab"];
+      "masc_dos_click", ["x", `Int 1; "y", `Int 1] ] in
+    List.iter (fun (name, arguments) ->
+      let ask extra = call ~controller:holder name (`Assoc (arguments @ extra)) in
+      let plain = ask [] in
+      let off = ask ["include_frame", `Bool false] in
+      let on = ask ["include_frame", `Bool true] in
+      check bool (name ^ " answers") true
+        (List.for_all (fun (answer : S.tool_result) -> answer.is_error <> Some true) [plain; off; on]);
+      check int (name ^ " carries no frame by default") 0 (List.length (frames plain));
+      check int (name ^ " carries no frame when include_frame is false") 0 (List.length (frames off));
+      (match frames on with
+       | [mime_type, data] ->
+           check string (name ^ " frame type") "image/png" mime_type;
+           check bool (name ^ " frame is a PNG") true
+             (String.starts_with ~prefix:png_signature (Base64.decode_exn data))
+       | other -> fail (Printf.sprintf "%s with include_frame=true carries %d frames, expected 1"
+           name (List.length other)));
+      let keys answer = List.sort String.compare (List.map fst
+        (Yojson.Safe.Util.to_assoc (data answer))) in
+      check (list string) (name ^ " structured answer has the same fields with the frame")
+        (keys plain) (keys on)) inputs;
+    let refused = call ~controller:holder "masc_dos_press"
+      (`Assoc ["keys", `List [`String "no-such-key"]; "include_frame", `Bool true]) in
+    check bool "an unknown key is refused" true (refused.is_error = Some true);
+    check int "a refused input carries no frame" 0 (List.length (frames refused)))
+
+(* The four input tools and the screen list include_frame; no other machine
+   tool does. A tool whose listing gains the parameter without the worker
+   reading it would take the argument and drop it. *)
+let test_the_input_tools_list_include_frame () =
+  let base_path = Filename.temp_dir "dos-addon-worker-frame-listing-" "" in
+  with_worker ~base_path (fun client ->
+    let call, _snapshot = worker_call client in
+    check bool "a tool that does not list include_frame refuses it" true
+      ((call "masc_dos_meta" (`Assoc ["include_frame", `Bool true])).is_error = Some true);
+    let listed = unwrap (Client.list_tools_all client) in
+    let lists_include_frame (tool : S.tool) =
+      match Yojson.Safe.Util.(tool.input_schema |> member "properties" |> member "include_frame") with
+      | `Null -> false
+      | _ -> true in
+    let machine_tools = List.filter (fun (tool : S.tool) ->
+      List.exists (fun machine_tool -> String.equal (C.dos_tool_name machine_tool) tool.name)
+        C.all_of_dos_tool) listed in
+    check (list string) "include_frame is listed by the screen and the four input tools"
+      ["masc_dos_click"; "masc_dos_press"; "masc_dos_screen"; "masc_dos_step"; "masc_dos_type"]
+      (List.sort String.compare (List.map (fun (tool : S.tool) -> tool.name)
+        (List.filter lists_include_frame machine_tools))))
+
 let () = run "DOS standalone Add-on worker"
   ["stdio", [test_case "host admission, handoff, recovery and PNG" `Quick test_stdio_controller;
              test_case "the listing declares the reads" `Quick test_the_listing_declares_the_reads;
+             test_case "an input call returns the screen only when asked" `Quick
+               test_an_input_call_returns_the_screen_only_when_asked;
+             test_case "the input tools list include_frame" `Quick
+               test_the_input_tools_list_include_frame;
              test_case "a handler exception does not end the worker" `Quick
                test_a_handler_exception_does_not_end_the_worker;
              test_case "a core exception while booting is a completed load" `Quick

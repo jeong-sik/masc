@@ -31,6 +31,7 @@ import {
   entryDetails,
   logDisplayKind,
   type LogDisplayKind,
+  logKindCategories,
 } from './log-classification'
 import {
   openIdeContextRouteLink,
@@ -69,11 +70,11 @@ const appliedModuleFilter = signal('')
 const autoRefresh = signal(true)
 const DEFAULT_LOG_LIMIT = 200
 const logLimit = signal(DEFAULT_LOG_LIMIT)
-// Client-side display-kind filter for the primary toolbar chips
+// Display-kind filter for the primary toolbar chips
 // (전체/Tool/Turn/Lifecycle/Approval/Broadcast). The chips are the only
 // classification control: each kind is a projection of the producer's typed
-// category (see log-classification.ts), so a chip click yields exactly the
-// rows the server category filter would for the kind's categories.
+// category (see log-classification.ts), and a chip sends that kind's
+// categories to the server, so the slice is chosen from the whole ring.
 const kindFilter = signal<LogDisplayKind | ''>('')
 const hideFsmTransitions = signal(false)
 const expandedLogSeq = signal<number | null>(null)
@@ -440,6 +441,7 @@ function baseLogsRequest(): LogsRequest {
     limit: logLimit.value,
     level: levelFilter.value,
     module: appliedModuleFilter.value || undefined,
+    categories: kindFilter.value === '' ? undefined : logKindCategories(kindFilter.value),
     excludeCategories: hideFsmTransitions.value ? ['fsm'] : undefined,
   }
 }
@@ -881,6 +883,7 @@ export function LogViewer() {
     const unsubscribeModule = appliedModuleFilter.subscribe(restart)
     const unsubscribeLimit = logLimit.subscribe(restart)
     const unsubscribeHideFsm = hideFsmTransitions.subscribe(restart)
+    const unsubscribeKind = kindFilter.subscribe(restart)
     const unsubscribeAutoRefresh = autoRefresh.subscribe(restart)
 
     return () => {
@@ -891,6 +894,7 @@ export function LogViewer() {
       unsubscribeModule()
       unsubscribeLimit()
       unsubscribeHideFsm()
+      unsubscribeKind()
       unsubscribeAutoRefresh()
       logResource.cancel()
     }
@@ -925,11 +929,6 @@ export function LogViewer() {
   const currentFilterLabel =
     LOG_KIND_FILTERS.find(filter => filter.value === kindFilter.value)?.label
     ?? '전체'
-  // kindFilter is a preact signal: reading .value subscribes this render,
-  // so a plain derivation recomputes on kind change without a memo dep.
-  const visibleEntries = kindFilter.value === ''
-    ? logEntries
-    : logEntries.filter(entry => logDisplayKind(entry) === kindFilter.value)
   let emptyMessage = '조건에 맞는 로그 없음'
   if (logLoading) emptyMessage = '로그를 불러오는 중...'
   else if (kindFilter.value !== '') emptyMessage = '해당하는 이벤트 없음'
@@ -1090,7 +1089,7 @@ export function LogViewer() {
           <span></span>
         </div>
 
-        ${visibleEntries.length === 0
+        ${logEntries.length === 0
           ? html`
               <div class="lg-empty" role="status">
                 ${emptyMessage}
@@ -1098,7 +1097,7 @@ export function LogViewer() {
             `
           : html`
               <${VirtualList}
-                items=${visibleEntries}
+                items=${logEntries}
                 estimatedItemHeight=${ESTIMATED_LOG_ROW_HEIGHT}
                 overscan=${6}
                 getKey=${(entry: LogEntry) => String(entry.seq)}

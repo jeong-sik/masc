@@ -99,7 +99,7 @@ bin/
 
 lib/                             subsystem modules and libraries
 ├── keeper/                      Keeper runtime, turn loop, tools, chat channels
-├── server/                      HTTP routes, MCP transport, sidecars, gateways
+├── server/                      HTTP routes, MCP transport, gateways
 ├── workspace/                   tasks, claims, goals, board, verification
 ├── runtime/, runtime_model/     provider catalog, lanes, assignments
 ├── gate/, keeper_approval/      approval lanes and the Gate queue

@@ -1,0 +1,17 @@
+{
+  "tool": "masc_status",
+  "argument": "if_revision",
+  "read_at_utc": "2026-11-05T20:57Z",
+  "unreadable_lines": 0,
+  "rows_without_timestamp": 0,
+  "first_use_utc": null,
+  "windows": [
+    {
+      "label": "all",
+      "from_utc": "2026-11-01T00:00:00Z",
+      "until_utc": "2026-11-05T20:00:00Z",
+      "hours": 116.0,
+      "calls": 0
+    }
+  ]
+}

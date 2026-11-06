@@ -176,8 +176,6 @@ let autonomy_entries =
 
 let dashboard_entries =
   [
-    entry ~default:"(none)" "MASC_BENCHMARK_RESULTS_DIR"
-      "Benchmark results directory override; None when unset";
     entry ~default:"(none)" "MASC_DASHBOARD_CACHE_MAX_ENTRIES"
       "Dashboard cache max entries (clamped 16-512)";
     entry ~default:"48" "MASC_DASHBOARD_EXECUTION_REFRESH_TIMEOUT_S"
@@ -325,8 +323,11 @@ let path_entries =
       "Fail-fast on base path resolution issues";
     entry ~default:"(none)" Env_config_core.config_dir_env_key
       "Config directory override; None when unset";
-    entry ~default:"(host temp directory)" "MASC_BASE_PATH_LEASE_DIR"
-      "Cross-process BasePath ownership lease directory";
+    entry
+      ~default:(Filename.concat "<base path>" Common.owner_lease_dirname)
+      "MASC_BASE_PATH_LEASE_DIR"
+      "Cross-process BasePath ownership lease directory; every process of a \
+       BasePath must be given the same value";
   ]
 
 let session_entries =

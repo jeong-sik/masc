@@ -14,7 +14,11 @@ let prepare ~runtime_root ~account_id =
   |> Result.map_error (fun _ -> Private_home_unavailable)
 let prepare_from_credential_file ~runtime_root ~account_id ~oauth_source =
   Runtime_antigravity_home.prepare ~runtime_root ~owner_leaf:account_id ~oauth_source
-  |> Result.map_error (fun _ -> Unsafe_credential)
+  |> Result.map_error (function
+    | Runtime_antigravity_home.Invalid_oauth_source _ -> Unsafe_credential
+    | Invalid_runtime_root _ | Invalid_owner_leaf _ | Unsafe_directory _ | Invalid_managed_oauth _
+    | Settings_write_failed _ | Mcp_config_write_failed _ | Mcp_config_cleanup_failed _ ->
+      Private_home_unavailable)
 let home_dir = Runtime_antigravity_home.home_dir
 let environment home = Runtime_antigravity.official_client_environment ~home_dir:(home_dir home) ()
 let private_file path =

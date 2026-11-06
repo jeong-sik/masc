@@ -87,15 +87,7 @@ function mkConnector(overrides?: Partial<Record<string, unknown>>): GateConnecto
 }
 
 describe('connector-flow pure helpers', () => {
-  it('channelStatsFor prefers the connector observed_channel aggregation', () => {
-    const connector = mkConnector({
-      observed_channel: { channel: 'discord', message_count: 99 },
-    })
-    const stats = channelStatsFor(connector, mkGate())
-    expect(stats?.message_count).toBe(99)
-  })
-
-  it('channelStatsFor falls back to the gate channel row, null when absent', () => {
+  it('channelStatsFor reads the gate channel row, null when absent', () => {
     const connector = mkConnector()
     expect(channelStatsFor(connector, mkGate())?.message_count).toBe(12)
     expect(channelStatsFor(connector, mkGate({ channels: [] }))).toBeNull()

@@ -728,19 +728,44 @@ let submit_agent_operation
          (Keeper_owner_registry.command_error_to_string error))
 ;;
 
-let tool_result_of_operation_acceptance (acceptance : Keeper_owner.operation_acceptance) =
+(* Whole seconds the target Keeper's live turn has run. A queued operation starts
+   after that turn ends, so this is what the submitter can learn about the wait.
+   The turn's age is a fact read from the registry, and the field only shows it:
+   whether to wait, cancel or send the work to another Keeper stays with the caller. *)
+let turn_age_seconds ~now ~started_at = Float.to_int (Float.max 0.0 (now -. started_at))
+
+(* No field while the target is between turns or is not registered, so a result
+   without it means the target is idle. *)
+let target_turn_age_fields ~now ~base_path ~keeper_name =
+  match Keeper_registry.get ~base_path keeper_name with
+  | None -> []
+  | Some entry ->
+    (match Keeper_composite_observer.live_turn_observation entry with
+     | None -> []
+     | Some observation ->
+       [ ( "target_turn_age_s"
+         , `Int
+             (turn_age_seconds ~now ~started_at:observation.Keeper_registry.started_at) )
+       ])
+;;
+
+let tool_result_of_operation_acceptance
+      ?(extra = [])
+      (acceptance : Keeper_owner.operation_acceptance)
+  =
   tool_result_ok_data
     (`Assoc
-       [ "operation_id",
-         `String
-           (Keeper_owner.Chat_operation.Operation_id.to_string
-              acceptance.operation.operation_id)
-       ; "state",
-         `String
-           (Keeper_owner.Chat_operation.state_to_string acceptance.operation.state)
-       ; "queued_count", `Int acceptance.queued_count
-       ; "existing", `Bool acceptance.existing
-       ])
+       ([ "operation_id",
+          `String
+            (Keeper_owner.Chat_operation.Operation_id.to_string
+               acceptance.operation.operation_id)
+        ; "state",
+          `String
+            (Keeper_owner.Chat_operation.state_to_string acceptance.operation.state)
+        ; "queued_count", `Int acceptance.queued_count
+        ; "existing", `Bool acceptance.existing
+        ]
+        @ extra))
 ;;
 
 let submit_keeper_msg ?continuation_channel ~submitted_by ctx message =
@@ -834,20 +859,33 @@ let handle_keeper_delegate ?invocation_ref ~submitted_by ctx args =
       | [] -> Keeper_invocation_contract.prompt request
       | _ -> Keeper_invocation_contract.prompt request ^ "\n\nExported peer artifacts (materialize with keeper_artifact_transfer into your own relative path):\n"
           ^ Yojson.Safe.to_string (`List (List.map Keeper_peer_artifact_ref.to_json references)) in
-    submit_agent_operation
-      ?operation_id_raw:(Option.map operation_id_of_invocation_ref invocation_ref)
-      ?continuation_channel:
-        (delegate_continuation_channel ~config:ctx.config ~submitted_by)
-      ~submitted_by
-      ~keeper_name:(Keeper_invocation_contract.target_name request)
-      ~message
-      ~user_blocks:[]
-      ~turn_instructions:None
-      ~surface_context:None
-      ~attachments:[]
-      ctx
+    let keeper_name = Keeper_invocation_contract.target_name request in
+    (* Read before the submit. A target that is idle starts this operation at once,
+       and that turn is not a wait the submitter needs to hear about. *)
+    let target_turn_age =
+      target_turn_age_fields
+        ~now:(Time_compat.now ())
+        ~base_path:ctx.config.base_path
+        ~keeper_name
+    in
+    let* acceptance =
+      submit_agent_operation
+        ?operation_id_raw:(Option.map operation_id_of_invocation_ref invocation_ref)
+        ?continuation_channel:
+          (delegate_continuation_channel ~config:ctx.config ~submitted_by)
+        ~submitted_by
+        ~keeper_name
+        ~message
+        ~user_blocks:[]
+        ~turn_instructions:None
+        ~surface_context:None
+        ~attachments:[]
+        ctx
+    in
+    Ok (acceptance, target_turn_age)
   with
-  | Ok acceptance -> tool_result_of_operation_acceptance acceptance
+  | Ok (acceptance, target_turn_age) ->
+    tool_result_of_operation_acceptance ~extra:target_turn_age acceptance
   | Error error -> tool_result_of_handler_error error
 ;;
 
@@ -1058,6 +1096,13 @@ let keeper_delegate_status_body ~(config : Workspace.config) ~caller args =
                     ~keeper_name ~delivery_key ~outcome_ref
               in
               `Assoc (fields @ [ "completed_reply", reply ])
+            | Keeper_owner.Chat_operation.Queued, `Assoc fields ->
+              `Assoc
+                (fields
+                 @ target_turn_age_fields
+                     ~now:(Time_compat.now ())
+                     ~base_path:config.base_path
+                     ~keeper_name)
             | ( Keeper_owner.Chat_operation.Queued
               | Keeper_owner.Chat_operation.Running _
               | Keeper_owner.Chat_operation.Failed _

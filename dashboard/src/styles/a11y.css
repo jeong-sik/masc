@@ -73,12 +73,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .sigil.heartbeat { animation: none; }
-  .pulse-working { animation: none; }
-  .pipeline-stage-node.active.stage-thinking .pipeline-stage-dot { animation: none; }
   .pipeline-stage-badge.stage-thinking { animation: none; }
-  [class*="avatar-pulse-glow"] { animation: none; }
-  [style*="workingPulse"] { animation: none; }
-  [style*="keeperPulse"] { animation: none; }
   [style*="activityFadeIn"] { animation: none; }
 
   /* Tailwind animation utilities */

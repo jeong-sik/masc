@@ -170,6 +170,26 @@ let startup_sweep_microvm_guests (state : Mcp_server.server_state) =
       outcomes
 ;;
 
+(* RFC-0498 §4.4. The links are read whole (about 2.7GB on 2026-11-06), so
+   the count takes a worker domain instead of holding back readiness. *)
+let startup_count_unowned_exact (state : Mcp_server.server_state) =
+  let config = Mcp_server.workspace_config state in
+  match
+    Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+      Server_unowned_exact_census.run_for_workspace config)
+  with
+  | Error error ->
+    Log.Server.warn "[Startup] %s" (Server_unowned_exact_census.error_to_string error)
+  | Ok report ->
+    Log.Server.info
+      "[Startup] unowned Exact census: declarations=%d live_originals=%d exact_records=%d \
+       exact_record_bytes=%Ld unowned_exact_records=%d unowned_exact_record_bytes=%Ld \
+       proofs=%d proof_bytes=%Ld unowned_proofs=%d unowned_proof_bytes=%Ld"
+      report.declarations report.live_originals report.exact_records
+      report.exact_record_bytes report.unowned_exact_records report.unowned_exact_record_bytes
+      report.proofs report.proof_bytes report.unowned_proofs report.unowned_proof_bytes
+;;
+
 (* [typesafeai].excluded_keepers names keepers by name, so a misspelt name
    excludes nobody and looks as if it did. The keepers of a base path are
    declared by <keepers_dir>/<name>.toml; each excluded name with no such
@@ -262,11 +282,12 @@ let report_unarmed_typesafeai_destinations () =
     (Typesafeai_config.unarmed_destinations ())
 ;;
 
-type task = Jsonl_retention | Microvm_guest_sweep
+type task = Jsonl_retention | Microvm_guest_sweep | Unowned_exact_census
 
 let task_name = function
   | Jsonl_retention -> "jsonl_prune"
   | Microvm_guest_sweep -> "microvm_guest_sweep"
+  | Unowned_exact_census -> "unowned_exact_census"
 
 let start_maintenance ~sw ~task ~run =
   Eio.Fiber.fork ~sw (fun () ->

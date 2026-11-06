@@ -195,6 +195,7 @@ let decode_error_name : R.decode_error -> string = function
   | R.Unknown_kind _ -> "Unknown_kind"
   | R.Invalid_author -> "Invalid_author"
   | R.Invalid_hash -> "Invalid_hash"
+  | R.Invalid_closes -> "Invalid_closes"
   | R.Seq_mismatch { expected; actual } ->
     Printf.sprintf "Seq_mismatch expected=%d actual=%d" expected actual
   | R.Previous_hash_mismatch -> "Previous_hash_mismatch"

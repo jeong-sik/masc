@@ -74,11 +74,21 @@ let test_the_front_is_the_same_only_at_the_same_atom_and_message () =
     (System.front ~digest_at ~first_atom:2 ~previous:None)
 ;;
 
-let basis_of ~render current =
-  match System.decide ~front:System.No_previous_request ~basis:None ~render ~current with
-  | System.From_current { basis; _ } -> basis
-  | System.From_basis _ -> Alcotest.fail "no previous request renders the current articles"
+(* An in-memory ledger: each article list read is a position, and reading a
+   position back gives the list. *)
+let ledger_reads : (string, Types.t list) Hashtbl.t = Hashtbl.create 8
+
+let at_of articles : World_constitution_store.position =
+  let digest = String.concat "," (List.map (fun (a : Types.t) -> Types.Article_id.to_string a.id) articles) in
+  Hashtbl.replace ledger_reads digest articles;
+  { end_offset = List.length articles; digest }
 ;;
+
+let articles_at (position : World_constitution_store.position) =
+  Ok (Hashtbl.find_opt ledger_reads position.digest)
+;;
+
+let basis_of ~render current = System.basis ~articles:current ~at:(at_of current) ~system:(render current)
 
 (* (a) An article written while the front holds: the System is the bytes the
    basis rendered, and the amendments carry the new article. *)
@@ -91,7 +101,7 @@ let test_an_added_article_keeps_the_system_and_names_the_article () =
       ~current:[ kept; written ]
   with
   | System.From_current _ -> Alcotest.fail "a held front keeps the basis"
-  | System.From_basis { text; amendments } ->
+  | System.From_basis { text; amendments; basis = _ } ->
     Alcotest.(check string) "the System is the basis rendering" (render [ kept ]) text;
     (match amendments with
      | None -> Alcotest.fail "the written article is an amendment"
@@ -106,7 +116,7 @@ let test_the_same_articles_keep_the_system_with_no_amendments () =
   let basis = basis_of ~render [ kept ] in
   match System.decide ~front:System.Same_front ~basis:(Some basis) ~render ~current:[ kept ] with
   | System.From_current _ -> Alcotest.fail "a held front keeps the basis"
-  | System.From_basis { text; amendments } ->
+  | System.From_basis { text; amendments; basis = _ } ->
     Alcotest.(check string) "the System is unchanged" (render [ kept ]) text;
     Alcotest.(check bool) "no amendments" true (Option.is_none amendments)
 ;;
@@ -162,7 +172,7 @@ let test_a_removed_article_is_named_by_its_id () =
   let basis = basis_of ~render [ kept; taken_back ] in
   match System.decide ~front:System.Same_front ~basis:(Some basis) ~render ~current:[ kept ] with
   | System.From_current _ -> Alcotest.fail "a held front keeps the basis"
-  | System.From_basis { text; amendments } ->
+  | System.From_basis { text; amendments; basis = _ } ->
     Alcotest.(check string) "the System still holds the taken-back article"
       (render [ kept; taken_back ]) text;
     (match amendments with
@@ -174,19 +184,29 @@ let test_a_removed_article_is_named_by_its_id () =
        Alcotest.(check string) "nothing was added" "" (Render.added_lines amendments))
 ;;
 
-let issue ~base_path ~lane current =
-  System.issue ~base_path ~keeper_name:"turn-system" ~lane ~render ~current
+let agent_core ?(runtime_id = "fixture.agent") front = System.Agent_core { runtime_id; front }
+
+let ok = function
+  | Ok value -> value
+  | Error () -> Alcotest.fail "the in-memory ledger does not fail"
 ;;
 
-(* The basis lives in process memory between turns: the first turn stores it,
-   the next turn with a held front sends the same bytes and the block. *)
+let issue ?held ~lane current =
+  ok (System.issue ~held ~lane ~render ~current ~at:(at_of current) ~articles_at)
+;;
+
+let resend ~held ~runtime_id ~current recorded =
+  ok (System.resend ~held ~runtime_id ~current ~articles_at recorded)
+;;
+
+(* A session's checkpoint carries what the first turn issued; the next turn
+   with a held front sends the same bytes and the block. *)
 let test_a_later_turn_sends_the_stored_basis_and_the_block () =
-  let base_path = "issue-keeps-the-basis" in
   let kept = article "open before you record" in
   let written = article "cite the ledger row, not the frame" in
-  let first = issue ~base_path ~lane:(System.Agent_core System.No_previous_request) [ kept ] in
+  let first, held = issue ~lane:(agent_core System.No_previous_request) [ kept ] in
   Alcotest.(check bool) "the first System has no amendments" true (Option.is_none first.amendments);
-  let next = issue ~base_path ~lane:(System.Agent_core System.Same_front) [ kept; written ] in
+  let next, (_ : System.held) = issue ~held ~lane:(agent_core System.Same_front) [ kept; written ] in
   Alcotest.(check string) "the System bytes are the first turn's" first.text next.text;
   match next.amendments with
   | None -> Alcotest.fail "the written article rides the end context"
@@ -198,20 +218,17 @@ let test_a_later_turn_sends_the_stored_basis_and_the_block () =
 ;;
 
 let test_a_moved_front_replaces_the_basis () =
-  let base_path = "issue-replaces-the-basis" in
   let first_article = article "open before you record" in
   let second_article = article "cite the ledger row, not the frame" in
   let third_article = article "name the file you read" in
-  let (_ : System.t) =
-    issue ~base_path ~lane:(System.Agent_core System.No_previous_request) [ first_article ]
-  in
-  let moved =
-    issue ~base_path ~lane:(System.Agent_core System.Moved_front) [ first_article; second_article ]
+  let (_ : System.t), held = issue ~lane:(agent_core System.No_previous_request) [ first_article ] in
+  let moved, held =
+    issue ~held ~lane:(agent_core System.Moved_front) [ first_article; second_article ]
   in
   Alcotest.(check string) "the moved front renders the current articles"
     (render [ first_article; second_article ]) moved.text;
-  let next =
-    issue ~base_path ~lane:(System.Agent_core System.Same_front)
+  let next, (_ : System.held) =
+    issue ~held ~lane:(agent_core System.Same_front)
       [ first_article; second_article; third_article ]
   in
   Alcotest.(check string) "the next held front keeps the moved turn's System" moved.text next.text;
@@ -224,30 +241,49 @@ let test_a_moved_front_replaces_the_basis () =
       (contains ~sub:(Types.Article_id.to_string third_article.id) block)
 ;;
 
-let test_two_base_paths_keep_their_own_basis () =
-  let kept = article "open before you record" in
-  let written = article "cite the ledger row, not the frame" in
-  let (_ : System.t) =
-    issue ~base_path:"world-one" ~lane:(System.Agent_core System.No_previous_request) [ kept ]
-  in
-  let other = issue ~base_path:"world-two" ~lane:(System.Agent_core System.Same_front) [ kept; written ] in
-  Alcotest.(check string) "another world has no basis to keep" (render [ kept; written ]) other.text;
-  Alcotest.(check bool) "and no amendments" true (Option.is_none other.amendments)
-;;
-
-(* (g) An official client's vendor session holds its own System: the turn
-   renders the current articles and leaves the keeper's basis alone. *)
-let test_an_official_client_turn_neither_reads_nor_writes_the_basis () =
-  let base_path = "official-client-leaves-the-basis" in
+(* The front is compared per runtime, and so is the basis: a session that
+   alternates two Agent Core runtimes sends each the System it last issued
+   to that runtime. *)
+let test_each_runtime_keeps_the_basis_it_was_issued () =
   let kept = article "open before you record" in
   let written = article "cite the ledger row, not the frame" in
   let later = article "name the file you read" in
-  let first = issue ~base_path ~lane:(System.Agent_core System.No_previous_request) [ kept ] in
-  let official = issue ~base_path ~lane:System.Without_basis [ kept; written ] in
+  let on_a = agent_core ~runtime_id:"fixture.a" and on_b = agent_core ~runtime_id:"fixture.b" in
+  let first_a, held = issue ~lane:(on_a System.No_previous_request) [ kept ] in
+  let first_b, held = issue ~held ~lane:(on_b System.No_previous_request) [ kept; written ] in
+  Alcotest.(check string) "a runtime with no request renders the current articles"
+    (render [ kept; written ]) first_b.text;
+  let next_a, held = issue ~held ~lane:(on_a System.Same_front) [ kept; written; later ] in
+  Alcotest.(check string) "runtime a still gets its own System" first_a.text next_a.text;
+  Alcotest.(check bool) "with both articles written since in the block" true
+    (Option.fold ~none:false
+       ~some:(fun block ->
+         contains ~sub:(Types.Article_id.to_string written.id) block
+         && contains ~sub:(Types.Article_id.to_string later.id) block)
+       next_a.amendments);
+  let next_b, (_ : System.held) = issue ~held ~lane:(on_b System.Same_front) [ kept; written; later ] in
+  Alcotest.(check string) "runtime b gets the System it was issued" first_b.text next_b.text;
+  match next_b.amendments with
+  | None -> Alcotest.fail "the article written after b's System rides the end context"
+  | Some block ->
+    Alcotest.(check bool) "b's block does not repeat what b's System holds" false
+      (contains ~sub:(Types.Article_id.to_string written.id) block)
+;;
+
+(* (g) An official client's vendor session holds its own System: the turn
+   renders the current articles and leaves the runtime bases alone. *)
+let test_an_official_client_turn_neither_reads_nor_writes_the_basis () =
+  let kept = article "open before you record" in
+  let written = article "cite the ledger row, not the frame" in
+  let later = article "name the file you read" in
+  let first, held = issue ~lane:(agent_core System.No_previous_request) [ kept ] in
+  let official, held = issue ~held ~lane:System.Without_basis [ kept; written ] in
   Alcotest.(check string) "the official client gets the current articles"
     (render [ kept; written ]) official.text;
   Alcotest.(check bool) "with no amendments" true (Option.is_none official.amendments);
-  let next = issue ~base_path ~lane:(System.Agent_core System.Same_front) [ kept; written; later ] in
+  let next, (_ : System.held) =
+    issue ~held ~lane:(agent_core System.Same_front) [ kept; written; later ]
+  in
   Alcotest.(check string) "the Agent Core basis is the one before the official turn" first.text
     next.text;
   match next.amendments with
@@ -257,20 +293,106 @@ let test_an_official_client_turn_neither_reads_nor_writes_the_basis () =
       (contains ~sub:(Types.Article_id.to_string written.id) block)
 ;;
 
-let test_other_bytes_carry_no_amendments () =
-  let base_path = "with-bytes" in
+(* A basis names its articles by the ledger bytes they were read from. When
+   the ledger no longer begins with those bytes, which articles the System
+   was rendered with is not known, so it is rendered with the current ones. *)
+let test_a_basis_whose_ledger_bytes_changed_is_not_used () =
   let kept = article "open before you record" in
   let written = article "cite the ledger row, not the frame" in
-  let (_ : System.t) =
-    issue ~base_path ~lane:(System.Agent_core System.No_previous_request) [ kept ]
-  in
-  let issued = issue ~base_path ~lane:(System.Agent_core System.Same_front) [ kept; written ] in
+  let (_ : System.t), held = issue ~lane:(agent_core System.No_previous_request) [ kept ] in
+  Hashtbl.remove ledger_reads (at_of [ kept ]).digest;
+  let next, (_ : System.held) = issue ~held ~lane:(agent_core System.Same_front) [ kept; written ] in
+  Alcotest.(check string) "the System takes the current articles" (render [ kept; written ]) next.text;
+  Alcotest.(check bool) "with no amendments" true (Option.is_none next.amendments)
+;;
+
+let test_other_bytes_carry_no_amendments () =
+  let kept = article "open before you record" in
+  let written = article "cite the ledger row, not the frame" in
+  let (_ : System.t), held = issue ~lane:(agent_core System.No_previous_request) [ kept ] in
+  let issued, (_ : System.held) = issue ~held ~lane:(agent_core System.Same_front) [ kept; written ] in
   let same = System.with_bytes ~issued issued.text in
   Alcotest.(check bool) "the issued bytes keep their amendments" true
     (Option.equal String.equal issued.amendments same.amendments && Option.is_some same.amendments);
   let recorded = System.with_bytes ~issued "a recorded System" in
   Alcotest.(check string) "other bytes are sent as they are" "a recorded System" recorded.text;
   Alcotest.(check bool) "with no amendments" true (Option.is_none recorded.amendments)
+;;
+
+(* A native continuation resends its seed's System. The seed's checkpoint
+   says which articles rendered those bytes, so the block names what changed
+   since, even after the process that issued them is gone. *)
+let test_a_resent_system_names_what_changed_since_its_seed () =
+  let kept = article "open before you record" in
+  let written = article "cite the ledger row, not the frame" in
+  let later = article "name the file you read" in
+  let (_ : System.t), held = issue ~lane:(agent_core System.No_previous_request) [ kept ] in
+  let seeded, seed_held = issue ~held ~lane:(agent_core System.Same_front) [ kept; written ] in
+  let resent, resent_held =
+    resend ~held:(Some seed_held) ~runtime_id:"fixture.fallback"
+      ~current:[ kept; written; later ] seeded.text
+  in
+  Alcotest.(check string) "the recorded bytes are sent" seeded.text resent.text;
+  (match resent.amendments with
+   | None -> Alcotest.fail "the articles written since the seed's System ride the end context"
+   | Some block ->
+     Alcotest.(check bool) "the article the seed's block named" true
+       (contains ~sub:(Types.Article_id.to_string written.id) block);
+     Alcotest.(check bool) "and the one written after the seed" true
+       (contains ~sub:(Types.Article_id.to_string later.id) block));
+  match resent_held with
+  | None -> Alcotest.fail "the resent turn keeps what the seed held"
+  | Some resent_held ->
+    let next, (_ : System.held) =
+      issue ~held:resent_held
+        ~lane:(agent_core ~runtime_id:"fixture.fallback" System.Same_front)
+        [ kept; written; later ]
+    in
+    Alcotest.(check string) "the runtime that ran the call next gets the bytes it was sent"
+      seeded.text next.text
+;;
+
+let test_a_resent_system_of_unknown_provenance_has_no_block () =
+  let kept = article "open before you record" in
+  let written = article "cite the ledger row, not the frame" in
+  let (_ : System.t), held = issue ~lane:(agent_core System.No_previous_request) [ kept ] in
+  let unrecorded, (_ : System.held option) =
+    resend ~held:None ~runtime_id:"fixture.agent" ~current:[ kept; written ] (render [ kept ])
+  in
+  Alcotest.(check bool) "a seed with nothing held sends no block" true
+    (Option.is_none unrecorded.amendments);
+  let other, (_ : System.held option) =
+    resend ~held:(Some held) ~runtime_id:"fixture.agent" ~current:[ kept; written ]
+      "bytes no held basis rendered"
+  in
+  Alcotest.(check string) "the recorded bytes are sent" "bytes no held basis rendered" other.text;
+  Alcotest.(check bool) "with no block" true (Option.is_none other.amendments)
+;;
+
+(* What a turn writes is what the next turn reads back from the session
+   context; a malformed entry is refused, not read as nothing. *)
+let test_the_session_context_reads_back_what_was_written () =
+  let kept = article "open before you record \"quoted\" </norms>" in
+  let written = article "cite the ledger row, not the frame" in
+  let first, held = issue ~lane:(agent_core System.No_previous_request) [ kept ] in
+  let context = Agent_core.Context.create_sync () in
+  Alcotest.(check bool) "an empty context holds nothing" true
+    (match System.read context with Ok None -> true | Ok (Some _) | Error _ -> false);
+  System.write context held;
+  let read_back =
+    match System.read context with
+    | Ok (Some held) -> held
+    | Ok None -> Alcotest.fail "the written entry is read back"
+    | Error detail -> Alcotest.fail detail
+  in
+  let next, (_ : System.held) =
+    issue ~held:read_back ~lane:(agent_core System.Same_front) [ kept; written ]
+  in
+  Alcotest.(check string) "the read-back basis renders the first System" first.text next.text;
+  Agent_core.Context.set_scoped context Agent_core.Context.Session "keeper_turn_system"
+    (`Assoc [ "issued", `Null ]);
+  Alcotest.(check bool) "a malformed entry is an error" true
+    (match System.read context with Error _ -> true | Ok (Some _ | None) -> false)
 ;;
 
 (* The System a prepared turn sends ({!Keeper_run_context.prepare_run_context}):
@@ -450,23 +572,58 @@ let read_by_librarian world ~end_atom =
     |> unwrap
 ;;
 
-let prepare ?(instructions = "keeper fixture instructions") world ~runtime_id =
+(* The checkpoint a dispatched turn leaves: its history with the context the
+   turn wrote, which is what the next turn loads. *)
+let checkpoint_of_turn (ctx : Keeper_run_context.run_context) =
+  match ctx.resume_agent_core_checkpoint with
+  | Some checkpoint ->
+    { checkpoint with
+      Agent_core.Checkpoint.system_prompt = Some ctx.system.text
+    ; context = Agent_core.Context.copy ctx.shared_context
+    }
+  | None -> Alcotest.fail "the fixture session has a saved checkpoint"
+;;
+
+let save world checkpoint =
+  match
+    Keeper_checkpoint_store.save_agent_core_classified
+      ~boundary:Agent_core.Checkpoint_objects.Turn_closes
+      ~session_dir:(Keeper_types_support.keeper_session_dir world.config world.trace_id)
+      ~history_retained:0 checkpoint
+  with
+  | Ok _ -> ()
+  | Error detail -> Alcotest.fail detail
+;;
+
+let prepare_context ?(instructions = "keeper fixture instructions") ?checkpoint ?recorded_system
+      world ~runtime_id =
   let profile_defaults =
     { Keeper_types_profile_defaults.empty_keeper_profile_defaults with
       Keeper_types_profile_defaults.instructions = Some instructions
     }
   in
+  let shared_context =
+    Option.map (fun (cp : Agent_core.Checkpoint.t) -> Agent_core.Context.copy cp.context) checkpoint
+  in
   match
     Keeper_run_context.prepare_run_context ~config:world.config ~meta:world.meta
       ~profile_defaults ~base_dir:(Keeper_types_support.session_base_dir_ world.config)
-      ~runtime_id ()
+      ~runtime_id ?shared_context ?checkpoint ?recorded_system ()
   with
-  | Ok ctx -> ctx.Keeper_run_context.system
+  | Ok ctx -> ctx
   | Error (Keeper_run_context.Checkpoint_unread error) ->
     Alcotest.fail (Keeper_checkpoint_store.checkpoint_load_error_to_string error)
   | Error (Keeper_run_context.Base_prompt_unavailable error) ->
     Alcotest.fail (Keeper_run_context.base_prompt_error_to_string error)
-  | Error (Keeper_run_context.Prompt_unrenderable detail) -> Alcotest.fail detail
+  | Error (Keeper_run_context.Prompt_unrenderable detail)
+  | Error (Keeper_run_context.Turn_system_unreadable detail) -> Alcotest.fail detail
+;;
+
+(* A prepared turn that is dispatched: its checkpoint is saved. *)
+let prepare ?instructions world ~runtime_id =
+  let ctx = prepare_context ?instructions world ~runtime_id in
+  save world (checkpoint_of_turn ctx);
+  ctx.Keeper_run_context.system
 ;;
 
 let holds (system : System.t) (held : Types.t) = contains ~sub:(Render.articles [ held ]) system.text
@@ -577,6 +734,55 @@ let test_an_official_client_turn_takes_the_current_articles () =
     (Option.fold ~none:false ~some:(contains ~sub:(Render.articles [ written ])) next.amendments)
 ;;
 
+(* F1 of the #49004 review: a direct turn sent the kept System and its block,
+   then the server stopped before the native call finished. The restarted
+   process holds nothing in memory; the continuation resends the seed's bytes
+   and reads, from the seed's checkpoint, the articles that rendered them. *)
+let test_a_native_continuation_after_a_restart_keeps_the_block () =
+  with_world ~keeper_name:"turn-system-native" @@ fun world ->
+  let kept = write_article world "open before you record" in
+  observe_request world ~runtime_id:agent_core_runtime;
+  let (_ : System.t) = prepare world ~runtime_id:agent_core_runtime in
+  let written = write_article world "cite the ledger row, not the frame" in
+  let seeded = prepare_context world ~runtime_id:agent_core_runtime in
+  Alcotest.(check bool) "the seeded turn sent the kept System" true
+    (holds seeded.system kept && not (holds seeded.system written));
+  let seed = checkpoint_of_turn seeded in
+  let later = write_article world "name the file you read" in
+  let resumed =
+    prepare_context world ~runtime_id:agent_core_runtime ~checkpoint:seed
+      ~recorded_system:{ Keeper_run_context.runtime_id = agent_core_runtime; text = seeded.system.text }
+  in
+  Alcotest.(check string) "the continuation sends the recorded bytes" seeded.system.text
+    resumed.system.text;
+  match resumed.system.amendments with
+  | None -> Alcotest.fail "the articles the recorded System lacks ride the end context"
+  | Some block ->
+    Alcotest.(check bool) "the article written before the seed" true
+      (contains ~sub:(Render.articles [ written ]) block);
+    Alcotest.(check bool) "and the one written after it" true
+      (contains ~sub:(Render.articles [ later ]) block)
+;;
+
+(* A seed from before its session context named its System renders with the
+   articles of that moment; which ones is not known, so no block is sent. *)
+let test_a_native_continuation_without_a_recorded_basis_sends_no_block () =
+  with_world ~keeper_name:"turn-system-native-unrecorded" @@ fun world ->
+  let (_ : Types.t) = write_article world "open before you record" in
+  let seeded = prepare_context world ~runtime_id:agent_core_runtime in
+  let seed =
+    { (checkpoint_of_turn seeded) with Agent_core.Checkpoint.context = Agent_core.Context.create_sync () }
+  in
+  let (_ : Types.t) = write_article world "cite the ledger row, not the frame" in
+  let resumed =
+    prepare_context world ~runtime_id:agent_core_runtime ~checkpoint:seed
+      ~recorded_system:{ Keeper_run_context.runtime_id = agent_core_runtime; text = seeded.system.text }
+  in
+  Alcotest.(check string) "the continuation sends the recorded bytes" seeded.system.text
+    resumed.system.text;
+  Alcotest.(check bool) "with no block" true (Option.is_none resumed.system.amendments)
+;;
+
 let () =
   Alcotest.run "keeper_turn_system"
     [ ( "front"
@@ -602,12 +808,20 @@ let () =
             test_a_later_turn_sends_the_stored_basis_and_the_block
         ; Alcotest.test_case "a moved front replaces the basis" `Quick
             test_a_moved_front_replaces_the_basis
-        ; Alcotest.test_case "two base paths keep their own basis" `Quick
-            test_two_base_paths_keep_their_own_basis
+        ; Alcotest.test_case "each runtime keeps the basis it was issued" `Quick
+            test_each_runtime_keeps_the_basis_it_was_issued
         ; Alcotest.test_case "(g) an official client turn leaves the basis" `Quick
             test_an_official_client_turn_neither_reads_nor_writes_the_basis
+        ; Alcotest.test_case "a basis whose ledger bytes changed is not used" `Quick
+            test_a_basis_whose_ledger_bytes_changed_is_not_used
         ; Alcotest.test_case "other bytes carry no amendments" `Quick
             test_other_bytes_carry_no_amendments
+        ; Alcotest.test_case "a resent System names what changed since its seed" `Quick
+            test_a_resent_system_names_what_changed_since_its_seed
+        ; Alcotest.test_case "a resent System of unknown provenance has no block" `Quick
+            test_a_resent_system_of_unknown_provenance_has_no_block
+        ; Alcotest.test_case "the session context reads back what was written" `Quick
+            test_the_session_context_reads_back_what_was_written
         ] )
     ; ( "prepared turn"
       , [ Alcotest.test_case "(a)(d) a written article keeps the System" `Quick
@@ -622,6 +836,10 @@ let () =
             test_a_taken_back_article_is_named_in_the_prepared_block
         ; Alcotest.test_case "(g) an official client takes the current articles" `Quick
             test_an_official_client_turn_takes_the_current_articles
+        ; Alcotest.test_case "a native continuation after a restart keeps the block" `Quick
+            test_a_native_continuation_after_a_restart_keeps_the_block
+        ; Alcotest.test_case "a native continuation without a recorded basis sends no block" `Quick
+            test_a_native_continuation_without_a_recorded_basis_sends_no_block
         ] )
     ]
 ;;

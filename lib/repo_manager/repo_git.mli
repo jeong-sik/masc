@@ -308,6 +308,8 @@ val grep_at :
     files under [pathspec] (a literal path relative to [local_path]; [""] is the
     whole repository). [pattern] is never a regular expression and never an
     option. No match is [Ok {gr_matches = []; _}]; Git failing or timing out is an
-    [Error _]. At most 20 matches per file are read. The caller remains
+    [Error _]. At most 20 matches per file are read. Rows are in path, then
+    line order. Tracked files are read whether or not an ignore rule matches
+    them. The caller remains
     responsible for proving that [local_path] is the requested scope's
     repository root and for dropping paths the operator may not read. *)

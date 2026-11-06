@@ -1731,39 +1731,6 @@ export function InlineSelectRow({
   `
 }
 
-export function InlineTextRow({
-  label,
-  value,
-  placeholder,
-  hint,
-  onChange,
-  dirty = false,
-}: {
-  label: string
-  value: string
-  placeholder?: string
-  hint?: string
-  onChange: (v: string) => void
-  dirty?: boolean
-}) {
-  return html`
-    <div class="kcf-inline-row py-2.5 px-4 rounded-[var(--r-4)] border ${dirty ? 'border-l-4 border-l-[var(--color-accent-fg)] border-card-border/50' : 'border-card-border/50'} bg-card/20 mb-2 v2-monitoring-row">
-      <div class="flex items-center justify-between gap-3">
-        <span class="text-sm font-medium text-text-muted">${label}${dirty ? html`<span class="ml-2 text-2xs text-[var(--color-accent-fg)] font-semibold">●</span>` : null}</span>
-        <input
-          type="text"
-          aria-label=${label}
-          placeholder=${placeholder ?? ''}
-          class="kcf-inline-control w-48 text-sm bg-card/60 border border-card-border rounded-[var(--r-1)] px-3 py-1.5 text-text-strong"
-          value=${value}
-          onInput=${(event: Event) => onChange((event.target as HTMLInputElement).value)}
-        />
-      </div>
-      ${hint ? html`<div class="mt-1 text-2xs text-text-dim">${hint}</div>` : null}
-    </div>
-  `
-}
-
 // ── Edit field components ────────────────────────────────
 
 function updateDraft(field: keyof EditDraft, value: string) {

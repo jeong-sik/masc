@@ -20,6 +20,10 @@ type base_path_lock_rejection =
       { path : string
       ; kind : Unix.file_kind
       }
+  | Run_directory_creation_failed of
+      { path : string
+      ; reason : string
+      }
   | Run_directory_untrusted_owner of
       { path : string
       ; effective_uid : int
@@ -109,6 +113,11 @@ let base_path_lock_rejection_to_string = function
       "host run directory is not a directory path=%s kind=%s"
       path
       (Fs_compat.file_kind_to_string kind)
+  | Run_directory_creation_failed { path; reason } ->
+    Printf.sprintf
+      "BasePath owner lease root creation failed path=%s error=%s"
+      path
+      reason
   | Run_directory_untrusted_owner { path; effective_uid; observed_uid } ->
     Printf.sprintf
       "host run directory owner is outside the process/system trust boundary path=%s effective_uid=%d observed_uid=%d"
@@ -214,6 +223,30 @@ let close_acquisition_fd ~operation ~path ~context fd =
 
 let private_lease_directory_permissions = 0o700
 let private_lease_directory_prefix = "masc-base-path-leases-v1"
+
+(* HIGH-RISK-UNREVIEWED: makes the directory every process of a BasePath
+   trusts for its owner lease.
+   Beside [.masc], not in it: a Fresh state that deletes [.masc] state while
+   an owner runs must not take that owner's lease with it. *)
+let lease_run_dir (root : Host_config.base_path_lease_root) ~base_path =
+  match root with
+  | Lease_dir_override dir -> Ok dir
+  | Beside_base_path ->
+    (match Unix.realpath base_path with
+     | exception Unix.Unix_error (error, _, _) ->
+       Error
+         (Base_path_canonicalization_failed
+            { base_path; reason = Unix.error_message error })
+     | canonical_base_path ->
+       let dir = Filename.concat canonical_base_path Common.owner_lease_dirname in
+       (match Unix.mkdir dir private_lease_directory_permissions with
+        | () -> Ok dir
+        | exception Unix.Unix_error (Unix.EEXIST, _, _) -> Ok dir
+        | exception Unix.Unix_error (error, _, _) ->
+          Error
+            (Run_directory_creation_failed
+               { path = dir; reason = Unix.error_message error })))
+;;
 
 let base_path_lease_directory ~run_dir ~owner_uid =
   Filename.concat
@@ -1083,6 +1116,12 @@ let acquire_base_path_lock ~run_dir base_path =
     ~before_commit_identity_check:(fun () -> ())
     ~before_runtime_identity_check:(fun () -> ())
     ~run_dir base_path
+;;
+
+let acquire_owner_lease root base_path =
+  match lease_run_dir root ~base_path with
+  | Error rejection -> Base_path_rejected rejection
+  | Ok run_dir -> acquire_base_path_lock ~run_dir base_path
 ;;
 
 type base_path_wait_refusal =

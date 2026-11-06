@@ -608,77 +608,8 @@
   word-break: break-word;
 }
 
-.ti-code pre .jk {
-  color: var(--color-accent-fg);
-}
-
 .ti-code pre .js {
   color: var(--color-status-ok);
-}
-
-/* ── Structured tool card (transcript) ── */
-.ti-tool {
-  border: 1px solid var(--color-border-default);
-  /* prototype .ti-tool (inspector.css:78): --radius-sm (4px). */
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-}
-
-.ti-tool-h {
-  display: flex;
-  align-items: center;
-  /* prototype .ti-tool-h (inspector.css:79): gap 9px, padding 9px 12px,
-     background --bg-panel-alt. --color-bg-hover maps to the lighter
-     --bg-card-hover; pin the literals + --color-bg-panel-alt. */
-  gap: 9px;
-  padding: 9px 12px;
-  background: var(--color-bg-panel-alt);
-}
-
-.ti-tool-h .seq {
-  font-family: var(--font-mono);
-  /* prototype .ti-tool-h .seq (inspector.css:80): 9.5px. */
-  font-size: 9.5px;
-  color: var(--color-fg-disabled);
-}
-
-.ti-tool-h .tnm {
-  font-family: var(--font-mono);
-  /* prototype .ti-tool-h .tnm (inspector.css:81): 12.5px. */
-  font-size: 12.5px;
-  color: var(--color-fg-primary);
-}
-
-.ti-tool-h .pill {
-  font-family: var(--font-ui);
-  /* prototype .ti-tool-h .pill (inspector.css:82): 9px, padding 2px 7px. */
-  font-size: var(--fs-9);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  padding: 2px 7px;
-  border-radius: var(--radius-pill);
-}
-
-.ti-tool-h .pill.ok {
-  color: var(--color-status-ok);
-  border: 1px solid rgb(var(--color-status-ok-glow) / .4);
-}
-
-.ti-tool-h .pill.bad {
-  color: var(--color-status-err);
-  border: 1px solid rgb(var(--color-status-err-glow) / .4);
-}
-
-.ti-tool-h .lat {
-  margin-left: auto;
-  font-family: var(--font-mono);
-  /* prototype .ti-tool-h .lat (inspector.css:85): 11px. */
-  font-size: var(--fs-11);
-  color: var(--color-fg-disabled);
-}
-
-.ti-tool-b {
-  padding: 10px 12px;
 }
 
 /* ── Role-tinted transcript message ── */

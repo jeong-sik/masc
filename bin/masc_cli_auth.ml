@@ -11,7 +11,7 @@ let with_lease ~base_path f =
   | exception Unix.Unix_error (error, _, _) ->
     Error (Printf.sprintf "the base path %s is not reachable: %s" base_path (Unix.error_message error))
   | base_path ->
-    (match T.acquire_base_path_lock ~run_dir:(Host_config.host ()).base_path_lease_dir base_path with
+    (match T.acquire_owner_lease (Host_config.host ()).base_path_lease_root base_path with
      | T.Base_path_already_owned { owner; lock_path } ->
        Error (T.base_path_contention_message ~base_path ~lock_path owner)
      | T.Base_path_rejected rejection -> Error (T.base_path_lock_rejection_to_string rejection)

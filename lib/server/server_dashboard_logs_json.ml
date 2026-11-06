@@ -17,6 +17,15 @@ let store_path ~masc_root =
        (Log.format_utc_date_of (Unix.gettimeofday ())))
 ;;
 
+let selectors_json = function
+  | None -> `Null
+  | Some selectors ->
+    `List
+      (List.map
+         (fun selector -> `String (Log.category_selector_to_string selector))
+         selectors)
+;;
+
 let build
       ~(config : Workspace.config)
       ~limit
@@ -26,8 +35,8 @@ let build
       ~module_filter
       ~since_seq
       ~before_seq
-      ~category_filter
-      ~exclude_category
+      ~categories
+      ~exclude_categories
       ~(ring_bounds : Log.Ring.bounds)
       (entries : Log.Ring.entry list)
   : Yojson.Safe.t
@@ -70,11 +79,8 @@ let build
              ; "module", `String module_filter
              ; "since_seq", Json_util.int_option_to_yojson since_seq
              ; "before_seq", Json_util.int_option_to_yojson before_seq
-             ; "category", Json_util.string_opt_to_json category_filter
-             ; ( "exclude_category"
-               , match exclude_category with
-                 | None -> `Null
-                 | Some xs -> `List (List.map (fun x -> `String x) xs) )
+             ; "category", selectors_json categories
+             ; "exclude_category", selectors_json exclude_categories
              ] )
        ; "returned", `Int (List.length entries)
        ; "latest_seq", Json_util.int_option_to_yojson (entry_seq_json newest)

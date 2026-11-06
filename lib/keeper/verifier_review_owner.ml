@@ -272,7 +272,8 @@ let known_observations = function
       | `Assoc fields when List.sort String.compare (List.map fst fields)=["fact";"runtime_id"] ->
         (match List.assoc "fact" fields,List.assoc "runtime_id" fields with
          | `String "reply_received",`String id when String.trim id<>"" -> Ok (true,failed)
-         | _ -> Error "invalid retained reviewer reply observation")
+         | `String "cancelled",`String id when String.trim id<>"" -> Ok (reached,id::failed)
+         | _ -> Error "invalid retained reviewer reply or cancellation observation")
       | `Assoc fields when List.sort String.compare (List.map fst fields)=["error_category";"fact";"runtime_id"] ->
         (match List.assoc "fact" fields,List.assoc "runtime_id" fields,List.assoc "error_category" fields with
          | `String "before_dispatch",`String id,`String category when String.trim id<>"" && String.trim category<>"" ->

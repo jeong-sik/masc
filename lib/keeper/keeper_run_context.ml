@@ -48,6 +48,12 @@ type prepare_error =
   | Checkpoint_unread of Keeper_checkpoint_store.checkpoint_load_error
   | Base_prompt_unavailable of base_prompt_error
   | Prompt_unrenderable of string
+  | Turn_system_unreadable of string
+
+type recorded_system =
+  { runtime_id : string
+  ; text : string
+  }
 
 let build_base_system_prompt
       ~(config : Workspace.config)
@@ -93,32 +99,45 @@ let first_request_lane ~config ~(meta : keeper_meta) ~runtime_id history =
          Keeper_next_request_forecast.first_request ~keeper_name ~trace_id ~runtime_id:head reads
        in
        Keeper_turn_system.Agent_core
-         (Keeper_turn_system.front
-            ~digest_at:reads.Keeper_next_request_forecast.digest_at
-            ~first_atom:carried.Keeper_next_request_forecast.first_atom
-            ~previous:ledger_front))
+         { runtime_id = head
+         ; front =
+             Keeper_turn_system.front
+               ~digest_at:reads.Keeper_next_request_forecast.digest_at
+               ~first_atom:carried.Keeper_next_request_forecast.first_atom
+               ~previous:ledger_front
+         })
 
 (* The System this turn sends: the same namespace and articles
    {!build_base_system_prompt} reads, rendered as {!Keeper_turn_system.issue}
-   decides. *)
-let issue_system ~config ~profile_defaults ~(meta : keeper_meta) ~runtime_id history =
+   decides, or a native continuation's recorded bytes as
+   {!Keeper_turn_system.resend} gives them. [held] is what the loaded
+   checkpoint's session context recorded. *)
+let issue_system ~config ~profile_defaults ~(meta : keeper_meta) ~runtime_id ~held
+      ?recorded_system history =
   let open Result.Syntax in
   let* workspace_root =
     Keeper_workspace_namespace.resolve ~config ~meta ~profile_defaults
     |> Result.map_error (fun detail -> Workspace_unavailable detail)
   in
-  let* current =
-    World_constitution_store.load_articles ~base_path:config.Workspace.base_path
+  let base_path = config.Workspace.base_path in
+  let* current, at =
+    World_constitution_store.load_held ~base_path
     |> Result.map_error (fun error -> Constitution_unreadable error)
   in
-  Ok
-    ( workspace_root
-    , Keeper_turn_system.issue
-        ~base_path:config.Workspace.base_path
-        ~keeper_name:meta.name
-        ~lane:(first_request_lane ~config ~meta ~runtime_id history)
-        ~render:(Keeper_unified_prompt.render_system_prompt ~workspace_root ~meta ~profile_defaults)
-        ~current )
+  let articles_at = World_constitution_store.load_articles_at ~base_path in
+  let* system, held =
+    (match recorded_system with
+     | Some { runtime_id; text } ->
+       Keeper_turn_system.resend ~held ~runtime_id ~current ~articles_at text
+     | None ->
+       Keeper_turn_system.issue ~held
+         ~lane:(first_request_lane ~config ~meta ~runtime_id history)
+         ~render:(Keeper_unified_prompt.render_system_prompt ~workspace_root ~meta ~profile_defaults)
+         ~current ~at ~articles_at
+       |> Result.map (fun (system, held) -> system, Some held))
+    |> Result.map_error (fun error -> Constitution_unreadable error)
+  in
+  Ok (workspace_root, system, held)
 
 let prepare_run_context
       ~(config : Workspace.config)
@@ -129,6 +148,7 @@ let prepare_run_context
       ?temperature
       ?shared_context
       ?checkpoint
+      ?recorded_system
       ()
   =
   let open Result.Syntax in
@@ -202,15 +222,26 @@ let prepare_run_context
     resolution.Config_dir_resolver.config_root.path
   in
   let runtime_config_path = Runtime.config_path () in
-  let* workspace_root, system =
+  let* held =
+    match ctx_opt with
+    | None -> Ok None
+    | Some loaded ->
+      Keeper_turn_system.read (Keeper_context_core.agent_core_context_of_context loaded)
+      |> Result.map_error (fun detail -> Turn_system_unreadable detail)
+  in
+  let* workspace_root, system, held =
     (* Prompt rendering raises [Invalid_argument] when a slot is missing or
        fails to render; that is a typed refusal here, not a crashed cycle. *)
     (try
-       issue_system ~config ~profile_defaults ~meta ~runtime_id
+       issue_system ~config ~profile_defaults ~meta ~runtime_id ~held ?recorded_system
          (Option.fold ~none:[] ~some:Keeper_context_runtime.messages_of_context ctx_opt)
        |> Result.map_error (fun error -> Base_prompt_unavailable error)
      with Invalid_argument detail -> Error (Prompt_unrenderable detail))
   in
+  (* The context the turn's checkpoints persist names the System this turn
+     issued, so the next turn and a native continuation of this one read it
+     back with the history it was sent with. *)
+  Option.iter (Keeper_turn_system.write shared_context) held;
   (* 4. Create or restore working context, re-apply current prompt *)
   let base_ctx =
     match ctx_opt with

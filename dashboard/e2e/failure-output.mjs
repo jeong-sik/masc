@@ -3,7 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { chromium } from 'playwright'
 
 const origin = process.argv[2] ?? 'http://127.0.0.1:5197'
-const evidence = process.argv[3] ?? '../docs/audits/godfiles-20261008/failure-output'
+const evidence = process.argv[3] ?? '../docs/evidence/godfiles-20261008/failure-output'
 await mkdir(evidence, { recursive: true })
 const browser = await chromium.launch({ headless: true })
 try {

@@ -995,6 +995,55 @@ let grep_result_of_z_output ~max_matches output =
   if max_matches < 1 then Stdlib.Error "git grep needs max_matches of at least 1"
   else take [] 0 false 0
 
+(* [--untracked] does not mean "also the untracked files" on every Git: on
+   git 2.54 it applies the ignore rules to tracked paths too and drops a
+   tracked file that a .gitignore pattern matches, which older Git kept. The
+   tracked files are therefore read by a run without [--untracked], and the
+   non-ignored untracked ones by a run with it. *)
+type grep_scope = Tracked | Untracked_not_ignored
+
+let grep_scope_args = function
+  | Tracked -> []
+  | Untracked_not_ignored -> [ "--untracked"; "--exclude-standard" ]
+
+let grep_in_scope ~timeout_sec ~local_path ~pathspec ~pattern ~ignore_case ~max_matches scope =
+  let args =
+    [ "--no-optional-locks"; "--literal-pathspecs"; "grep"; "-n"; "-I"; "-z"
+    ; "-F"; "--no-color" ]
+    @ grep_scope_args scope
+    @ [ "-m"; string_of_int grep_max_matches_per_file ]
+    @ (if ignore_case then [ "-i" ] else [])
+    @ [ "-e"; pattern ]
+    @ (if String.equal pathspec "" then [] else [ "--"; pathspec ])
+  in
+  let status, stdout, stderr =
+    Process_eio.run_argv_with_status_split
+      ~env:(merge_env read_only_git_env)
+      ~timeout_sec
+      ("git" :: "-C" :: local_path :: args)
+  in
+  match status with
+  | Unix.WEXITED 0 -> grep_result_of_z_output ~max_matches stdout
+  | Unix.WEXITED 1 when String.equal (String.trim stderr) "" ->
+      (* git grep exits 1 when nothing matched; that is an answer. *)
+      Stdlib.Ok { gr_matches = []; gr_truncated = false }
+  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+      Stdlib.Error (git_failure_detail args status stdout stderr)
+
+(* A tracked, non-ignored file is in both runs with the same rows; one copy of
+   each path and line is kept. *)
+let join_grep_results ~max_matches (tracked : grep_result) (untracked : grep_result) =
+  let by_path_and_line left right =
+    match String.compare left.gm_path right.gm_path with
+    | 0 -> Int.compare left.gm_line right.gm_line
+    | order -> order
+  in
+  let joined = List.sort_uniq by_path_and_line (tracked.gr_matches @ untracked.gr_matches) in
+  { gr_matches = List.filteri (fun index _ -> index < max_matches) joined
+  ; gr_truncated =
+      tracked.gr_truncated || untracked.gr_truncated || List.length joined > max_matches
+  }
+
 let grep_at
     ?(timeout_sec = inspection_timeout_sec)
     ~local_path
@@ -1006,25 +1055,10 @@ let grep_at
   =
   if String.equal pattern "" then Stdlib.Error "git grep needs a non-empty pattern"
   else
-    let args =
-      [ "--no-optional-locks"; "--literal-pathspecs"; "grep"; "-n"; "-I"; "-z"
-      ; "-F"; "--no-color"; "--untracked"; "--exclude-standard"; "-m"
-      ; string_of_int grep_max_matches_per_file
-      ]
-      @ (if ignore_case then [ "-i" ] else [])
-      @ [ "-e"; pattern ]
-      @ (if String.equal pathspec "" then [] else [ "--"; pathspec ])
-    in
-    let status, stdout, stderr =
-      Process_eio.run_argv_with_status_split
-        ~env:(merge_env read_only_git_env)
-        ~timeout_sec
-        ("git" :: "-C" :: local_path :: args)
-    in
-    match status with
-    | Unix.WEXITED 0 -> grep_result_of_z_output ~max_matches stdout
-    | Unix.WEXITED 1 when String.equal (String.trim stderr) "" ->
-        (* git grep exits 1 when nothing matched; that is an answer. *)
-        Stdlib.Ok { gr_matches = []; gr_truncated = false }
-    | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
-        Stdlib.Error (git_failure_detail args status stdout stderr)
+    let search = grep_in_scope ~timeout_sec ~local_path ~pathspec ~pattern ~ignore_case ~max_matches in
+    match search Tracked with
+    | Stdlib.Error _ as failure -> failure
+    | Stdlib.Ok tracked ->
+        (match search Untracked_not_ignored with
+         | Stdlib.Error _ as failure -> failure
+         | Stdlib.Ok untracked -> Stdlib.Ok (join_grep_results ~max_matches tracked untracked))

@@ -161,52 +161,6 @@ export interface DashboardMissionBriefingResponse {
   last_error?: string | null
 }
 
-export interface DashboardProofWorkerRunEvidence {
-  worker_run_id: string
-  session_id?: string | null
-  operation_id?: string | null
-  trace_ref?: Record<string, unknown> | null
-  evidence_session_id?: string | null
-  result_status?: string | null
-  checkpoint_ref?: string | null
-  tool_trace_refs?: string[]
-  raw_evidence_refs?: string[]
-  worker_name?: string | null
-  status?: string | null
-  mode?: string | null
-  wait_mode?: string | null
-  trace_capability?: string | null
-  trace_evidence_status?: string | null
-  trace_validated?: boolean | null
-  validation_failures?: string[]
-  success?: boolean | null
-  requested_worker_class?: string | null
-  requested_worker_size?: string | null
-  requested_runtime?: string | null
-  requested_model?: string | null
-  tool_surface_status?: string | null
-  tool_surface_source?: string | null
-  tool_surface_names?: string[]
-  tool_surface_masc_names?: string[]
-  tool_surface_shell_names?: string[]
-  tool_surface_count?: number | null
-  resolved_runtime?: string | null
-  resolved_model?: string | null
-  routing_reason?: string | null
-  tool_names?: string[]
-  tool_call_count?: number | null
-  output_preview?: string | null
-  record_count?: number | null
-  assistant_block_count?: number | null
-  final_text?: string | null
-  stop_reason?: string | null
-  failure_reason?: string | null
-  error?: string | null
-  proof_evidence_status?: string | null
-  evidence_refs?: string[]
-  ts_iso?: string | null
-}
-
 export interface OperatorNamespaceSnapshot {
   project?: string
 }

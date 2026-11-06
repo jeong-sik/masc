@@ -47,7 +47,8 @@ let lsp_query () : Types.code_lsp_query =
 let is_write : Code.msg -> bool = function
   | Code.Code_draft_saved _ -> true
   | Code.Code_catalog_loaded _ | Code.Code_branches_loaded _
-  | Code.Code_worktrees_loaded _ | Code.Code_finder_file_loaded _
+  | Code.Code_worktrees_loaded _ | Code.Code_search_loaded _
+  | Code.Code_finder_file_loaded _
   | Code.Code_entries_loaded _ | Code.Code_file_loaded _
   | Code.Code_history_loaded _ | Code.Code_diff_loaded _
   | Code.Code_blame_loaded _ | Code.Code_lsp_answered _ -> false
@@ -57,6 +58,14 @@ let answers () =
   [ "catalog", Code.Code_catalog_loaded (scoped (), unread)
   ; "branches", Code.Code_branches_loaded (scoped (), unread)
   ; "worktrees", Code.Code_worktrees_loaded (scoped (), unread)
+  ; ( "search"
+    , Code.Code_search_loaded
+        ( request
+            { Types.css_scope = Types.Code_scope_project
+            ; css_dir = "src"
+            ; css_query = "needle"
+            ; css_ignore_case = false }
+        , unread ) )
   ; "finder file", Code.Code_finder_file_loaded (scoped (), unread)
   ; "entries", Code.Code_entries_loaded (scoped (), unread)
   ; "draft saved", Code.Code_draft_saved (save_request (), Draft.Save_uncertain "no reply")

@@ -134,5 +134,4 @@ export function ConnectorConfigForm({connectorId}: {connectorId:string}) {
       </${SurfaceCard}>
     `
 }
-export function resetConnectorConfigState() { openPanels.value = {} }
 export function openConnectorConfig(id:string) { openPanels.value = {...openPanels.value, [id]:true} }

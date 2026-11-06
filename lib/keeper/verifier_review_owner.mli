@@ -21,6 +21,9 @@
 
 type store = Lane_addon_store.t
 
+val scope : string
+(** The one owner scope every verifier review original is retained in. *)
+
 type retain_error =
   | Original_invalid of string
       (** The original could not be serialised for storage. *)

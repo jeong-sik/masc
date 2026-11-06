@@ -5,6 +5,10 @@ type authorization = {
   before_dispatch : Lane_addon_exact.dispatch_guard;
   with_execution : Lane_addon_exact.execution_scope;
 }
+val original_required : Lane_addon_types.package -> bool
+(** Every request [package] sends needs a Librarian original with its ID.
+    {!authorize} ends one outside the Librarian namespaces as [Unowned] at
+    once, and a namespaced one without its original the same way. *)
 val authorize : base_path:string -> store:Lane_addon_store.t -> declaration_id:string ->
   package:Lane_addon_types.package -> Lane_addon_exact.request ->
   (authorization option, Lane_addon_exact.authority_refusal) result

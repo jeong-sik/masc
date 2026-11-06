@@ -20,7 +20,6 @@
       {!dashboard_runtime_probe_http_json},
       {!dashboard_runtime_probe_payload_json_of_runtimes},
       {!runtime_inventory_json},
-      {!dashboard_perf_http_json},
       {!dashboard_tools_http_json}).
     - {b runtime probe test seams}
       ({!set_dashboard_runtime_probe_runner_for_tests},
@@ -43,9 +42,7 @@
     Internal helpers stay private at this boundary:
     local string/list helpers, runtime probe cache state,
     git rev-parse cache state, and JSON sub-renderers used
-    by the surface entries above.  The
-    {!dashboard_perf_http_json} implementation delegates to
-    [Server_dashboard_http_perf]. *)
+    by the surface entries above. *)
 
 (** {1 Runtime resolution} *)
 
@@ -147,11 +144,6 @@ val runtime_inventory_json : unit -> Yojson.Safe.t
     infer defaults outside the Runtime SSOT. The envelope includes
     [assignment_status] so operators can see explicit keeper-runtime
     assignment blast radius without the dashboard parsing TOML independently. *)
-
-val dashboard_perf_http_json : Workspace.config -> Yojson.Safe.t
-(** Renders the dashboard performance envelope (build
-    identity, runtime / workspace commits, system clock
-    skew, etc). *)
 
 val dashboard_tools_http_result :
   ?keeper:string ->

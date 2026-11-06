@@ -508,126 +508,6 @@
   padding: 4px 0;
 }
 
-/* ── Binding editor (v2 source) ─────────────────────────────────────────── */
-.cn-be {
-  border: 1px solid var(--border-main);
-  border-radius: var(--radius-sm);
-  padding: 10px 12px;
-  margin-bottom: 8px;
-  background: var(--bg-card);
-  transition: opacity 0.14s;
-}
-
-.cn-be.off {
-  opacity: 0.5;
-}
-
-.cn-be-main {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.cn-be-chn {
-  flex: 1;
-  min-width: 0;
-  font-size: var(--fs-12);
-  padding: 6px 8px;
-  background: var(--bg-sunken);
-  color: var(--text-bright);
-  border: 1px solid var(--border-main);
-  border-radius: var(--radius-xs);
-  outline: none;
-}
-
-.cn-be-chn:focus {
-  border-color: var(--volt-dim);
-}
-
-.cn-be-arr {
-  color: var(--text-dim);
-  flex: none;
-}
-
-.cn-be-kp {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: none;
-}
-
-.cn-be-sel {
-  font-size: var(--fs-12);
-  padding: 6px 8px;
-  background: var(--bg-sunken);
-  color: var(--text-bright);
-  border: 1px solid var(--border-main);
-  border-radius: var(--radius-xs);
-  outline: none;
-  cursor: pointer;
-}
-
-.cn-be-sel:focus {
-  border-color: var(--volt-dim);
-}
-
-.cn-be-del {
-  flex: none;
-  width: 24px;
-  height: 24px;
-  border-radius: var(--radius-xs);
-  border: 1px solid var(--border-main);
-  background: transparent;
-  color: var(--text-dim);
-  cursor: pointer;
-  font-size: var(--fs-11);
-  transition: 0.14s;
-}
-
-.cn-be-del:hover {
-  border-color: color-mix(in oklab, var(--status-bad) 45%, transparent);
-  color: var(--status-bad);
-}
-
-.cn-be-opts {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-top: 8px;
-}
-
-.cn-be-dir {
-  display: inline-flex;
-  border: 1px solid var(--border-main);
-  border-radius: var(--radius-xs);
-  overflow: hidden;
-}
-
-.cn-dir-b {
-  font-family: var(--font-ui);
-  font-size: 10.5px;
-  padding: 4px 10px;
-  background: transparent;
-  border: 0;
-  color: var(--text-dim);
-  cursor: pointer;
-  transition: 0.14s;
-}
-
-.cn-dir-b:not(:last-child) {
-  border-right: 1px solid var(--border-main);
-}
-
-.cn-dir-b:hover {
-  color: var(--text-mid);
-}
-
-.cn-dir-b.on {
-  background: var(--volt-wash);
-  color: var(--volt);
-}
-
 /* Toggle used by the binding editor direction control. */
 .set-toggle {
   width: 38px;
@@ -990,65 +870,10 @@
   white-space: nowrap;
 }
 
-.cn-set-input {
-  font-family: var(--font-mono);
-  font-size: var(--fs-12);
-  padding: 8px 10px;
-  background: var(--bg-sunken);
-  color: var(--text-primary);
-  border: 1px solid var(--border-main);
-  border-radius: var(--radius-sm);
-  outline: none;
-  width: min(230px, 100%);
-}
-
-.cn-set-input.short {
-  width: 150px;
-}
-
-.cn-set-input:focus {
-  border-color: var(--volt-dim);
-  box-shadow: 0 0 0 2px var(--volt-wash);
-}
-
 .cn-set-path {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.cn-set-seg {
-  display: inline-flex;
-  border: 1px solid var(--border-main);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-}
-
-.cn-set-seg-b {
-  font-family: var(--font-mono);
-  font-size: var(--fs-11);
-  padding: 6px 12px;
-  background: transparent;
-  color: var(--text-dim);
-  border: 0;
-  border-left: 1px solid var(--border-main);
-  cursor: pointer;
-  transition: 0.14s;
-  white-space: nowrap;
-}
-
-.cn-set-seg-b:first-child {
-  border-left: 0;
-}
-
-.cn-set-seg-b:hover {
-  color: var(--text-mid);
-  background: var(--bg-card);
-}
-
-.cn-set-seg-b.on {
-  color: var(--volt-ink);
-  background: var(--volt);
 }
 
 .cn-set-add {
@@ -1068,23 +893,6 @@
 .cn-set-add:hover {
   border-color: var(--volt-dim);
   color: var(--volt);
-}
-
-.cn-test-btn {
-  font-family: var(--font-ui);
-  font-size: var(--fs-11);
-  padding: 6px 12px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-main);
-  background: var(--bg-card);
-  color: var(--text-mid);
-  cursor: pointer;
-  transition: 0.14s;
-}
-
-.cn-test-btn:hover {
-  border-color: var(--volt-dim);
-  color: var(--volt-strong);
 }
 
 /* ── Empty / placeholder states ─────────────────────────────────────────── */

@@ -77,7 +77,7 @@ Harness → Planning (`v` 순환), Changes → Keepers (`f`). **Harness 와 Chan
 적었고 Memory 가 빠졌으며 Harness·Changes 를 링에 넣어 놨다. 이 PR 에서 고친다.
 
 화면 캡처 자동화(scripts/capture-tui-screenshots.py)는 18개 중 5개 화면만
-찍는다(docs/screenshots/tui/*/surfaces/ — 01-overview, 02-keepers, 03-lanes,
+찍는다(artifacts/screenshots/tui/*/surfaces/ — 01-overview, 02-keepers, 03-lanes,
 05-approvals, 06-acting). 롱테일 화면은 회귀 증거조차 없다.
 
 ## 2. 문제 정의 — 운영자 질문과 현재 응답 위치

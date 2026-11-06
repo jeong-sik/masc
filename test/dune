@@ -548,7 +548,6 @@
   test_channel_gate_imessage_state
   test_dashboard
   test_dashboard_librarian_metric
-  test_dashboard_perf
   test_dashboard_tool_host_events
   test_dashboard_nav_event
   test_server_dashboard_http_keeper_memory_health
@@ -893,7 +892,6 @@
   test_channel_gate_imessage_state
   test_dashboard
   test_dashboard_librarian_metric
-  test_dashboard_perf
   test_dashboard_tool_host_events
   test_dashboard_nav_event
   test_server_dashboard_http_keeper_memory_health
@@ -2650,11 +2648,6 @@
  (libraries masc_test_deps))
 
 (executable
- (name tool_matrix_manifest)
- (modules tool_matrix_manifest)
- (libraries masc_test_deps keeper_tool_matrix_cases_lib))
-
-(executable
  (name tool_matrix_case_runner)
  (modules tool_matrix_case_runner)
  (libraries masc_test_deps keeper_tool_matrix_cases_lib))
@@ -3145,6 +3138,8 @@
 (include stanzas/test_keeper_identity_drift_counter.inc)
 
 (include stanzas/test_keeper_composite_live_turn_surface.inc)
+
+(include stanzas/test_keeper_delegate_target_turn.inc)
 
 (include stanzas/test_keeper_runtime_manifest_completeness.inc)
 
@@ -4769,7 +4764,8 @@
  (deps
   test_skill_activation_schema_agreement.py
   skill_activation_event_log_fixture.py
-  ../lib/keeper/keeper_skill_activation_ledger.ml
+  ../lib/keeper/keeper_skill_activation_ledger_encode.ml
+  ../lib/keeper/keeper_skill_activation_ledger_events.ml
   ../scripts/harness/workload/skill_activation_events.py)
  (action
   (run python3 %{dep:test_skill_activation_schema_agreement.py})))
@@ -6076,6 +6072,11 @@
  (name test_lane_addon_original_body_inventory)
  (modules test_lane_addon_original_body_inventory)
  (libraries alcotest yojson masc masc.fs_compat masc.string_util unix))
+
+(test
+ (name test_server_settled_original_census)
+ (modules test_server_settled_original_census)
+ (libraries alcotest yojson masc masc.server unix))
 
 (test
  (name test_workspace_memory_execution_capture)

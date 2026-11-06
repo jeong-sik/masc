@@ -38,6 +38,7 @@ let protect ~module_name ~finally_label ~finally f =
       Printexc.raise_with_backtrace ex bt
 
 let masc_dirname = ".masc"
+let owner_lease_dirname = ".masc-owner"
 let browser_lane_dirname = "browser-lane"
 let searxng_dirname = "searxng"
 let browser_lane_token_name = "token"

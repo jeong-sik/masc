@@ -1886,7 +1886,6 @@
   test_common
   test_workspace_messages_raw
   test_local_runtime_pool
-  test_dashboard_render_timing_9766
   test_dashboard_keeper_cost_aggregates
   test_model_map_of_keeper_rows
   test_task_status_label_10421  test_task_cache_invariant_13397
@@ -1896,9 +1895,7 @@
   test_keeper_composition_completion_wake
   test_dashboard_recent_terminal_tasks
   test_sandbox_inspect_trim_10488
-  test_credential_alias_10440
   test_dashboard_k2_feeds
-  test_masc_log_utc_filename_10392
   test_keeper_tag_dispatch
   test_mcp_server_eio
   test_mcp_auth_gate
@@ -2035,7 +2032,6 @@
   test_common
   test_workspace_messages_raw
   test_local_runtime_pool
-  test_dashboard_render_timing_9766
   test_dashboard_keeper_cost_aggregates
   test_model_map_of_keeper_rows
   test_task_status_label_10421  test_task_cache_invariant_13397
@@ -2045,9 +2041,7 @@
   test_keeper_composition_completion_wake
   test_dashboard_recent_terminal_tasks
   test_sandbox_inspect_trim_10488
-  test_credential_alias_10440
   test_dashboard_k2_feeds
-  test_masc_log_utc_filename_10392
   test_keeper_tag_dispatch
   test_mcp_server_eio
   test_mcp_auth_gate

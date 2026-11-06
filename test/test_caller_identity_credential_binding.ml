@@ -68,7 +68,7 @@ let test_prefix_sharing_owner_is_not_rewritable () =
 (* The live workspace lookup, as a stub: no [dashboard.json] record exists,
    so the prefix scan returns the first record sharing the "dashboard-"
    prefix. Injecting it pins the ordering between the guard and the lookup,
-   which is the part that decides what reaches [Auth.authorize_tool_v2]. *)
+   which is the part that decides what reaches [Auth.authorize_tool]. *)
 let live_alias_scan = function
   | "dashboard" | "dashboard-admin" -> "dashboard-admin-deft-cobra"
   | "beta" -> "keeper-beta-agent"

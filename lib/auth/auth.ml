@@ -180,103 +180,6 @@ let verify_workspace_secret config ~cached_hash secret : bool =
      | Ok content -> constant_time_string_equal hash (String.trim content))
 ;;
 
-let check_permission config ~agent_name ~token ~permission : (unit, masc_error) result =
-  let auth_cfg = load_auth_config config in
-  if not auth_cfg.enabled
-  then
-    (* Auth disabled - allow everything *)
-    Ok ()
-  else if
-    match token with
-    | Some raw ->
-      verify_workspace_secret config ~cached_hash:auth_cfg.workspace_secret_hash raw
-    | None -> false
-  then (
-    (* Recovery grace: presenting the workspace secret proves possession of
-       the root credential minted at [enable_auth] time, so the caller can
-       always regain admin access (prevents BUG-025's circular permission
-       deadlock if the bootstrap admin's own token has expired/been lost).
-       The previous version of this branch matched [agent_name] against
-       [read_initial_admin] with no proof of possession at all — any
-       unauthenticated caller could self-declare that name via a plain
-       request header and be granted Admin outright. *)
-    ignore permission;
-    Ok ())
-  else if
-    match token with
-    | Some raw -> verify_internal_keeper_token config ~token:raw
-    | None -> false
-  then
-    if has_permission Worker permission
-    then Ok ()
-    else
-      Error
-        (Auth
-           (Auth_error.Forbidden
-              { agent = agent_name; action = permission_to_string permission }))
-  else (
-    match verify_optional_token config ~agent_name ~token with
-    | Error e -> Error e
-    | Ok (Some cred) ->
-      if has_permission cred.role permission
-      then Ok ()
-      else
-        Error
-          (Auth
-             (Auth_error.Forbidden
-                { agent = agent_name; action = permission_to_string permission }))
-    | Ok None ->
-      if not auth_cfg.require_token
-      then
-        (* Optional-token mode: anonymous callers are always treated as
-             non-admin workers. *)
-        if has_permission Worker permission
-        then Ok ()
-        else
-          Error
-            (Auth
-               (Auth_error.Forbidden
-                  { agent = agent_name; action = permission_to_string permission }))
-      else Error (Auth (Auth_error.Unauthorized
-        { reason = Missing_token; message = "Token required" })))
-;;
-
-(** Tool auth is always strict: the catalog owns every callable tool name and
-    its typed permission. Unregistered names are denied regardless of prefix. *)
-let is_tool_auth_strict_enabled () = true
-
-let unknown_tool_class tool_name =
-  if String.trim tool_name = "" then "empty" else "external"
-;;
-
-let record_strict_unknown_tool_denial ~agent_name ~tool_name =
-  Auth_metric_store.inc_counter
-    Auth_metric_store.metric_auth_strict_unknown_tool_denials
-    ~labels:[ "agent_name", agent_name; "tool_class", unknown_tool_class tool_name ]
-    ()
-;;
-
-(** Check permission for a tool call *)
-let authorize_tool config ~agent_name ~token ~tool_name : (unit, masc_error) result =
-  match Tool_catalog.registered_metadata tool_name with
-  | Some metadata ->
-    check_permission
-      config
-      ~agent_name
-      ~token
-      ~permission:metadata.required_permission
-  | None ->
-    let () = record_strict_unknown_tool_denial ~agent_name ~tool_name in
-    Error
-      (Auth
-         (Auth_error.Forbidden
-            { agent = agent_name; action = "use unregistered tool: " ^ tool_name }))
-;;
-
-(* ============================================ *)
-(* Unified policy-based authorization (v2)      *)
-(* ============================================ *)
-
 (** Resolve the effective role for an agent from auth context.
     Returns Error for invalid tokens (no silent downgrade). *)
 let resolve_role_with_auth_config config ~auth_cfg ~agent_name ~token
@@ -289,7 +192,12 @@ let resolve_role_with_auth_config config ~auth_cfg ~agent_name ~token
     | Some raw ->
       verify_workspace_secret config ~cached_hash:auth_cfg.workspace_secret_hash raw
     | None -> false
-  then Ok Admin (* Recovery grace via workspace secret possession; see check_permission *)
+  then
+    (* Recovery grace: presenting the workspace secret proves possession of
+       the root credential minted at [enable_auth] time, so the caller can
+       always regain admin access when the bootstrap admin's own token has
+       expired or been lost (BUG-025's circular permission deadlock). *)
+    Ok Admin
   else if
     match token with
     | Some raw -> verify_internal_keeper_token config ~token:raw
@@ -303,7 +211,9 @@ let resolve_role_with_auth_config config ~auth_cfg ~agent_name ~token
       if auth_cfg.require_token
       then Error (Auth (Auth_error.Unauthorized
         { reason = Missing_token; message = "Token required" }))
-      else Ok Worker)
+      else
+        (* Optional-token mode: anonymous callers are non-admin workers. *)
+        Ok Worker)
 ;;
 
 let resolve_role config ~agent_name ~token : (agent_role, masc_error) result =
@@ -311,6 +221,32 @@ let resolve_role config ~agent_name ~token : (agent_role, masc_error) result =
   resolve_role_with_auth_config config ~auth_cfg ~agent_name ~token
 ;;
 
+let check_permission config ~agent_name ~token ~permission : (unit, masc_error) result =
+  match resolve_role config ~agent_name ~token with
+  | Error e -> Error e
+  | Ok role ->
+    if has_permission role permission
+    then Ok ()
+    else
+      Error
+        (Auth
+           (Auth_error.Forbidden
+              { agent = agent_name; action = permission_to_string permission }))
+;;
+
+let unknown_tool_class tool_name =
+  if String.trim tool_name = "" then "empty" else "external"
+;;
+
+let record_strict_unknown_tool_denial ~agent_name ~tool_name =
+  Auth_metric_store.inc_counter
+    Auth_metric_store.metric_auth_strict_unknown_tool_denials
+    ~labels:[ "agent_name", agent_name; "tool_class", unknown_tool_class tool_name ]
+    ()
+;;
+
+(** Each registered tool requires its catalog-owned typed permission; every
+    unregistered name is forbidden, whatever its prefix. *)
 let authorize_tool_for_role ~agent_name ~role ~tool_name : (unit, masc_error) result =
   match Tool_catalog.registered_metadata tool_name with
   | Some metadata ->
@@ -325,25 +261,14 @@ let authorize_tool_for_role ~agent_name ~role ~tool_name : (unit, masc_error) re
             { agent = agent_name; action = "use unregistered tool: " ^ tool_name }))
 ;;
 
-(** Role-based tool authorization.
-    Resolves the caller role and enforces generic internal-tool access.
-    Invalid/expired tokens are rejected (not silently downgraded).
-
-    Each registered tool requires its catalog-owned typed permission; every
-    unregistered name is forbidden. *)
-let authorize_tool_v2 config ~agent_name ~token ~tool_name : (unit, masc_error) result =
+(** Resolves the caller role, then checks it against the tool's catalog
+    permission. Invalid/expired tokens are rejected (not silently
+    downgraded). *)
+let authorize_tool config ~agent_name ~token ~tool_name : (unit, masc_error) result =
   match resolve_role config ~agent_name ~token with
   | Error e -> Error e
   | Ok role -> authorize_tool_for_role ~agent_name ~role ~tool_name
 ;;
-
-(* ============================================ *)
-(* Workspace secret                                  *)
-(* ============================================ *)
-
-(* [verify_workspace_secret] now lives earlier in this file, above
-   [check_permission], since the bootstrap/recovery grace branch there
-   depends on it. *)
 
 (* ============================================ *)
 (* High-level auth operations                   *)

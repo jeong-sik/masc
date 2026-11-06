@@ -382,7 +382,7 @@ let test_removed_admin_field_fails_closed_through_authorization () =
           "authorization fails closed"
           true
           (Result.is_error
-             (Auth.authorize_tool_v2
+             (Auth.authorize_tool
                 dir
                 ~agent_name:"stale-admin"
                 ~token:(Some raw_token)
@@ -1292,7 +1292,7 @@ let test_authorize_known_keeper_tool_strict_worker_allowed () =
   | Ok () -> ()
   | Error e -> fail (Masc_domain.masc_error_to_string e)
 
-let test_authorize_tool_v2_known_keeper_tool_strict_worker_allowed () =
+let test_authorize_tool_for_role_known_keeper_tool_strict_worker_allowed () =
   (match Tool_catalog.registered_metadata "masc_browser_session" with
    | Some metadata ->
      check bool "browser lifecycle requires write authority" true
@@ -1312,7 +1312,7 @@ let test_authorize_tool_v2_known_keeper_tool_strict_worker_allowed () =
   | Ok () -> ()
   | Error e -> fail (Masc_domain.masc_error_to_string e)
 
-let test_authorize_tool_v2_unknown_internal_denied () =
+let test_authorize_tool_for_role_unknown_internal_denied () =
   let result =
     Auth.authorize_tool_for_role ~agent_name:"worker_agent"
       ~role:Masc_domain.Worker ~tool_name:"masc_unlisted_tool"
@@ -1322,7 +1322,7 @@ let test_authorize_tool_v2_unknown_internal_denied () =
   | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
   | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
 
-let test_authorize_tool_v2_enforces_catalog_permission () =
+let test_authorize_tool_for_role_enforces_catalog_permission () =
   List.iter
     (fun tool_name ->
        (match
@@ -1345,26 +1345,13 @@ let test_authorize_tool_v2_enforces_catalog_permission () =
     [ "masc_start"; "masc_keeper_up"; "masc_keeper_reset"; "masc_keeper_down" ]
 ;;
 
-let test_authorize_tool_v2_unknown_keeper_prefix_strict_denied () =
+let test_authorize_tool_for_role_unknown_keeper_prefix_strict_denied () =
   let result =
     Auth.authorize_tool_for_role ~agent_name:"keeper-delta-agent"
       ~role:Masc_domain.Worker ~tool_name:"keeper_totally_fake"
   in
   match result with
   | Ok () -> fail "unknown keeper_* prefix should not bypass strict auth"
-  | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
-  | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
-
-let test_tool_auth_strict_env_cannot_disable_fail_closed () =
-  let result =
-    with_env "MASC_TOOL_AUTH_STRICT" "0" (fun () ->
-        check bool "strict mode remains enabled" true
-          (Auth.is_tool_auth_strict_enabled ());
-        Auth.authorize_tool_for_role ~agent_name:"worker"
-          ~role:Masc_domain.Worker ~tool_name:"external_totally_fake")
-  in
-  match result with
-  | Ok () -> fail "MASC_TOOL_AUTH_STRICT=0 must deny unknown external tools"
   | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
   | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
 
@@ -1496,16 +1483,14 @@ let () =
         `Quick test_authorize_retired_dotted_tool_prefixes_strict_denied;
       test_case "strict known keeper tool allows worker"
         `Quick test_authorize_known_keeper_tool_strict_worker_allowed;
-      test_case "strict v2 known keeper tool allows worker"
-        `Quick test_authorize_tool_v2_known_keeper_tool_strict_worker_allowed;
-      test_case "strict v2 unknown internal tool denied"
-        `Quick test_authorize_tool_v2_unknown_internal_denied;
-      test_case "strict v2 catalog permission enforced"
-        `Quick test_authorize_tool_v2_enforces_catalog_permission;
-      test_case "strict v2 fake keeper prefix denied"
-        `Quick test_authorize_tool_v2_unknown_keeper_prefix_strict_denied;
-      test_case "tool auth strict env cannot disable fail-closed"
-        `Quick test_tool_auth_strict_env_cannot_disable_fail_closed;
+      test_case "strict known keeper tool allows worker"
+        `Quick test_authorize_tool_for_role_known_keeper_tool_strict_worker_allowed;
+      test_case "strict unknown internal tool denied"
+        `Quick test_authorize_tool_for_role_unknown_internal_denied;
+      test_case "strict catalog permission enforced"
+        `Quick test_authorize_tool_for_role_enforces_catalog_permission;
+      test_case "strict fake keeper prefix denied"
+        `Quick test_authorize_tool_for_role_unknown_keeper_prefix_strict_denied;
     ];
     "enable_disable", [
       test_case "enable/disable auth" `Quick test_enable_disable_auth;

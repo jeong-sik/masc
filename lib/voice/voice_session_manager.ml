@@ -241,8 +241,10 @@ let session_of_json json =
 
 (** {1 Creation} *)
 
+let sessions_dirname = "voice_sessions"
+
 let create ~config_path =
-  let session_dir = Filename.concat config_path "voice_sessions" in
+  let session_dir = Filename.concat config_path sessions_dirname in
   {
     state = Atomic.make { sessions = Session_by_agent.empty };
     session_dir;

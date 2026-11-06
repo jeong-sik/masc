@@ -490,11 +490,13 @@ let clip_extension = function
   | Mp3 -> ".mp3"
   | Wav -> ".wav"
 
+let audio_dirname = "audio"
+
 let clip_content_type = function
   | Mp3 -> "audio/mpeg"
   | Wav -> "audio/wav"
 
-let audio_dir () = Filename.concat (masc_base_dir ()) "audio"
+let audio_dir () = Filename.concat (masc_base_dir ()) audio_dirname
 
 (* The clip a token names, and the format it turned out to be stored in.
 

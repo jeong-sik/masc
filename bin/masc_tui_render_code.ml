@@ -712,7 +712,10 @@ let render_code (state : state) =
                                String.concat "" (List.map span segments))
                        | None -> (
                            let text =
-                             Terminal_text.single_line row.gdr_text
+                             Terminal_text.single_line
+                               (fst
+                                  (Masc_tui_execute_terminal.expand_tabs
+                                     ~column:0 row.gdr_text))
                            in
                            match row.gdr_kind with
                            | Gd_removed ->

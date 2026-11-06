@@ -214,3 +214,9 @@ module For_testing : sig
      Yojson.Safe.t ->
      (Workspace_utils.write_json_commit, string) result)
 end
+
+val mention_outbox_dirname : string
+(** The mention outbox directory below [<base>/.masc]. *)
+
+val mention_outbox_quarantine_dirname : string
+(** The mention outbox quarantine directory below [<base>/.masc]. *)

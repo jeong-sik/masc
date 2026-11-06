@@ -84,6 +84,15 @@ def call_row(keeper: str, turn: int, ts: float, duration_ms: float = 0.0, kind: 
     return {"record_kind": kind, "keeper": keeper, "keeper_turn_id": turn, "ts": ts, "duration_ms": duration_ms}
 
 
+def serial_row(
+    keeper: str, turn: int, ts: float, duration_ms: float, mode: str = "serial", size: object = 1
+) -> dict[str, object]:
+    row = call_row(keeper, turn, ts, duration_ms)
+    row["execution_mode"] = mode
+    row["batch_size"] = size
+    return row
+
+
 def submit_row(
     operation_id: object, queued_count: object, ts: float, keeper: str = "sender", output: object = None
 ) -> dict[str, object]:
@@ -422,14 +431,15 @@ def read_spans(
 
 
 class SpansTests(unittest.TestCase):
-    def test_a_turn_runs_from_its_first_call_to_the_end_of_its_last(self) -> None:
+    def test_a_turn_runs_from_the_start_of_its_earliest_call_to_the_return_of_its_latest(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             base = pathlib.Path(raw)
             write_ledger(
                 base,
                 [
                     call_row("a", 1, 100.0, 2000.0),
-                    call_row("a", 1, 110.0, 500.0),
+                    call_row("a", 1, 110.0, 20000.0),
+                    call_row("a", 1, 105.0, 500.0),
                     call_row("a", 2, 300.0, 0.0),
                     call_row("b", 1, 100.0, 0.0),
                     call_row("a", 3, 400.0, 0.0, kind="note"),
@@ -437,9 +447,9 @@ class SpansTests(unittest.TestCase):
             )
             skipped = m.Skipped()
             spans = read_spans(base, [DAY], frozenset({"a"}), skipped)
-            self.assertEqual(spans, {"a": [(100.0, 110.5), (300.0, 300.0)]})
+            self.assertEqual(spans, {"a": [(90.0, 110.0), (300.0, 300.0)]})
 
-    def test_a_negative_duration_does_not_end_a_span_before_its_start(self) -> None:
+    def test_a_negative_duration_does_not_start_a_span_after_its_return(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             base = pathlib.Path(raw)
             write_ledger(base, [call_row("a", 1, 100.0, -5000.0)])
@@ -498,6 +508,191 @@ class SpansTests(unittest.TestCase):
             spans = read_spans(base, [DAY], frozenset({"a"}), skipped)
             self.assertEqual(spans, {"a": [(100.0, 100.0), (200.0, 200.0)]})
             self.assertEqual(skipped.bad_lines, 2)
+
+
+class ReturnsTests(unittest.TestCase):
+    def test_returns_are_the_sorted_ts_of_the_usable_calls_of_the_target_keepers(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            base = pathlib.Path(raw)
+            no_turn = call_row("a", 9, 50.0)
+            del no_turn["keeper_turn_id"]
+            write_ledger(
+                base,
+                [
+                    call_row("a", 1, 110.0, 5000.0),
+                    call_row("a", 1, 100.0),
+                    call_row("a", 2, 300.0),
+                    call_row("b", 1, 50.0),
+                    call_row("a", 3, 400.0, kind="note"),
+                    no_turn,
+                ],
+            )
+            ledger = m.read_ledger(base, [DAY], frozenset({"a"}), m.Skipped())
+            self.assertEqual(ledger.returns, {"a": [100.0, 110.0, 300.0]})
+
+
+class SingleSerialTests(unittest.TestCase):
+    def test_a_serial_call_of_batch_size_one_is_single(self) -> None:
+        self.assertTrue(m.is_single_serial(serial_row("a", 1, 1.0, 0.0)))
+
+    def test_a_concurrent_call_is_not_single(self) -> None:
+        self.assertFalse(m.is_single_serial(serial_row("a", 1, 1.0, 0.0, mode="concurrent")))
+
+    def test_a_serial_call_in_a_larger_batch_is_not_single(self) -> None:
+        self.assertFalse(m.is_single_serial(serial_row("a", 1, 1.0, 0.0, size=2)))
+
+    def test_a_missing_mode_or_a_missing_or_boolean_batch_size_is_not_single(self) -> None:
+        no_size = serial_row("a", 1, 1.0, 0.0)
+        del no_size["batch_size"]
+        no_mode = serial_row("a", 1, 1.0, 0.0)
+        del no_mode["execution_mode"]
+        self.assertFalse(m.is_single_serial(no_size))
+        self.assertFalse(m.is_single_serial(no_mode))
+        self.assertFalse(m.is_single_serial(serial_row("a", 1, 1.0, 0.0, size=True)))
+
+
+class ClockCheckTests(unittest.TestCase):
+    def test_a_long_call_followed_too_soon_overlaps_only_when_ts_is_the_start(self) -> None:
+        block = m.clock_check({("a", 1): [(100.0, 20.0), (105.0, 1.0)]})
+        self.assertEqual(block["serial_pairs"], 1)
+        self.assertEqual((block["overlap_if_ts_is_end"], block["overlap_if_ts_is_start"]), (0, 1))
+
+    def test_a_call_that_began_before_the_previous_one_returned_overlaps_only_when_ts_is_the_end(self) -> None:
+        block = m.clock_check({("a", 1): [(100.0, 0.0), (105.0, 10.0)]})
+        self.assertEqual((block["overlap_if_ts_is_end"], block["overlap_if_ts_is_start"]), (1, 0))
+
+    def test_calls_are_paired_in_ts_order(self) -> None:
+        block = m.clock_check({("a", 1): [(105.0, 1.0), (100.0, 20.0)]})
+        self.assertEqual(
+            (block["serial_pairs"], block["overlap_if_ts_is_end"], block["overlap_if_ts_is_start"]), (1, 0, 1)
+        )
+
+    def test_every_neighbour_pair_of_a_turn_counts_once(self) -> None:
+        self.assertEqual(m.clock_check({("a", 1): [(100.0, 0.0), (200.0, 0.0), (300.0, 0.0)]})["serial_pairs"], 2)
+
+    def test_calls_of_different_turns_and_keepers_are_not_paired(self) -> None:
+        block = m.clock_check({("a", 1): [(100.0, 20.0)], ("a", 2): [(105.0, 1.0)], ("b", 1): [(106.0, 1.0)]})
+        self.assertEqual(block["serial_pairs"], 0)
+
+    def test_the_tolerance_forgives_a_smaller_overlap_and_not_a_larger_one_under_the_end_reading(self) -> None:
+        inside = m.clock_check({("a", 1): [(100.0, 0.0), (110.0, 10.04)]})
+        outside = m.clock_check({("a", 1): [(100.0, 0.0), (110.0, 10.06)]})
+        self.assertEqual((inside["overlap_if_ts_is_end"], outside["overlap_if_ts_is_end"]), (0, 1))
+
+    def test_the_tolerance_forgives_a_smaller_overlap_and_not_a_larger_one_under_the_start_reading(self) -> None:
+        inside = m.clock_check({("a", 1): [(100.0, 20.0), (119.96, 0.0)]})
+        outside = m.clock_check({("a", 1): [(100.0, 20.0), (119.94, 0.0)]})
+        self.assertEqual((inside["overlap_if_ts_is_start"], outside["overlap_if_ts_is_start"]), (0, 1))
+
+    def test_no_calls_report_zero_pairs_and_the_tolerance(self) -> None:
+        self.assertEqual(
+            m.clock_check({}),
+            {"tolerance_s": m.CLOCK_TOLERANCE_S, "serial_pairs": 0, "overlap_if_ts_is_end": 0, "overlap_if_ts_is_start": 0},
+        )
+
+    def test_only_single_serial_calls_of_the_target_keepers_are_paired_when_the_ledger_is_read(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            base = pathlib.Path(raw)
+            write_ledger(
+                base,
+                [
+                    serial_row("a", 1, 100.0, 20000.0),
+                    serial_row("a", 1, 105.0, 1000.0),
+                    serial_row("a", 1, 106.0, 50000.0, mode="concurrent"),
+                    serial_row("a", 1, 107.0, 90000.0, size=3),
+                    serial_row("a", 2, 100.0, 0.0),
+                    serial_row("b", 1, 100.0, 20000.0),
+                    serial_row("b", 1, 105.0, 1000.0),
+                ],
+            )
+            ledger = m.read_ledger(base, [DAY], frozenset({"a"}), m.Skipped())
+            self.assertEqual(
+                ledger.clock_check,
+                {"tolerance_s": m.CLOCK_TOLERANCE_S, "serial_pairs": 1, "overlap_if_ts_is_end": 0, "overlap_if_ts_is_start": 1},
+            )
+
+
+class NextReturnTests(unittest.TestCase):
+    returns: m.Returns = {"k": [10.0, 20.0, 30.0]}
+
+    def test_the_first_return_at_or_after_the_instant(self) -> None:
+        self.assertEqual(m.next_return(self.returns, "k", 15.0), 20.0)
+        self.assertEqual(m.next_return(self.returns, "k", 20.0), 20.0)
+        self.assertEqual(m.next_return(self.returns, "k", 5.0), 10.0)
+        self.assertEqual(m.next_return(self.returns, "k", 30.0), 30.0)
+
+    def test_an_instant_after_the_last_return_raises(self) -> None:
+        with self.assertRaises(IndexError):
+            m.next_return(self.returns, "k", 30.1)
+
+
+class BoundaryReplayTests(unittest.TestCase):
+    spans: m.Spans = {"busy": [(0.0, 5000.0)]}
+    returns: m.Returns = {"busy": [500.0, 2000.0, 5000.0]}
+
+    def replay(self) -> dict[str, object]:
+        found = [
+            delegation(100.0, 800.0, target="busy", operation_id="saves-300"),
+            delegation(1000.0, 1030.0, target="busy", operation_id="starts-before-the-return"),
+            delegation(2500.0, 5200.0, target="busy", operation_id="saves-200"),
+            delegation(1500.0, 2000.0, target="busy", operation_id="starts-at-the-return"),
+            delegation(3000.0, 3650.0, target="busy", operation_id="long-but-starts-first"),
+            delegation(6000.0, 6650.0, target="busy", operation_id="outside-a-turn"),
+            delegation(100.0, None, 120.0, target="busy", state="cancelled", operation_id="never-started"),
+        ]
+        return m.boundary_replay(found, self.spans, self.returns)
+
+    def test_only_the_started_delegations_inside_a_turn_have_a_pickup(self) -> None:
+        block = self.replay()
+        self.assertEqual(block["flagged"], 5)
+        self.assertEqual(cast(dict[str, object], block["pickup_s"])["n"], 5)
+
+    def test_the_pickup_is_the_time_to_the_next_return_of_the_target(self) -> None:
+        pickup = cast(dict[str, object], self.replay()["pickup_s"])
+        self.assertEqual(pickup["p50"], 1000.0)
+        self.assertEqual(pickup["max"], 2500.0)
+        self.assertAlmostEqual(cast(float, pickup["hours"]), 6400.0 / 3600.0)
+
+    def test_the_replayed_wait_is_the_smaller_of_the_wait_and_the_pickup(self) -> None:
+        block = self.replay()
+        self.assertAlmostEqual(cast(float, block["wait_hours"]), 4580.0 / 3600.0)
+        self.assertAlmostEqual(cast(float, block["replayed_wait_hours"]), 4080.0 / 3600.0)
+        self.assertAlmostEqual(cast(float, block["saved_hours"]), 500.0 / 3600.0)
+
+    def test_the_saving_is_shared_out_over_the_wait_of_every_started_delegation(self) -> None:
+        self.assertAlmostEqual(cast(float, self.replay()["saved_share_of_wait_hours"]), 500.0 / 5230.0)
+
+    def test_a_delegation_that_started_at_or_before_the_next_return_gains_nothing(self) -> None:
+        self.assertEqual(self.replay()["pickup_not_before_start"], 3)
+
+    def test_the_long_waits_are_reported_apart(self) -> None:
+        long_waits = cast(dict[str, object], self.replay()["long_waits"])
+        self.assertEqual(long_waits["n"], 3)
+        self.assertAlmostEqual(cast(float, long_waits["wait_hours"]), 4050.0 / 3600.0)
+        self.assertAlmostEqual(cast(float, long_waits["replayed_wait_hours"]), 3550.0 / 3600.0)
+
+    def test_a_wait_exactly_at_the_long_threshold_is_long(self) -> None:
+        found = [delegation(100.0, 100.0 + m.LONG_WAIT_S, target="busy")]
+        block = m.boundary_replay(found, self.spans, self.returns)
+        self.assertEqual(cast(dict[str, object], block["long_waits"])["n"], 1)
+
+    def test_a_call_that_returns_at_the_submit_instant_picks_the_delegation_up_at_once(self) -> None:
+        block = m.boundary_replay([delegation(500.0, 900.0, target="busy")], self.spans, self.returns)
+        self.assertEqual(cast(dict[str, object], block["pickup_s"])["max"], 0.0)
+        self.assertAlmostEqual(cast(float, block["saved_hours"]), 400.0 / 3600.0)
+
+    def test_nothing_started_gives_no_share(self) -> None:
+        block = m.boundary_replay([], self.spans, self.returns)
+        self.assertEqual(block["flagged"], 0)
+        self.assertIsNone(block["saved_share_of_wait_hours"])
+        self.assertEqual(cast(dict[str, object], block["pickup_s"])["n"], 0)
+
+    def test_spans_and_returns_that_disagree_raise_instead_of_skipping_the_delegation(self) -> None:
+        found = [delegation(100.0, 800.0, target="busy")]
+        with self.assertRaises(KeyError):
+            m.boundary_replay(found, self.spans, {})
+        with self.assertRaises(IndexError):
+            m.boundary_replay(found, self.spans, {"busy": [50.0]})
 
 
 class SubmitCountReadTests(unittest.TestCase):
@@ -618,7 +813,8 @@ class MeasureTests(unittest.TestCase):
         write_ledger(
             base,
             [
-                call_row("busy", 1, at(1), 1_000_000.0),
+                serial_row("busy", 1, at(1, 16, 40), 1_000_000.0),
+                serial_row("busy", 1, at(1, 17, 0), 1_000.0),
                 submit_row("flagged", 1, at(1, 0, 10)),
                 submit_row("unflagged", 2, at(5)),
             ],
@@ -642,6 +838,18 @@ class MeasureTests(unittest.TestCase):
         replay = cast(dict[str, object], self.result()["flag_replay"])
         self.assertEqual(replay["started"], 3)
         self.assertEqual(replay["flagged"], 1)
+
+    def test_the_boundary_replay_picks_up_at_the_next_tool_return_of_the_target(self) -> None:
+        block = cast(dict[str, object], self.result()["boundary_replay"])
+        self.assertEqual(block["flagged"], 1)
+        self.assertEqual(cast(dict[str, object], block["pickup_s"])["max"], 990.0)
+        self.assertAlmostEqual(cast(float, block["saved_hours"]), 200.0 / 3600.0)
+
+    def test_the_clock_check_of_the_serial_calls_is_reported(self) -> None:
+        self.assertEqual(
+            self.result()["clock_check"],
+            {"tolerance_s": m.CLOCK_TOLERANCE_S, "serial_pairs": 1, "overlap_if_ts_is_end": 0, "overlap_if_ts_is_start": 1},
+        )
 
     def test_the_params_and_skips_are_reported(self) -> None:
         result = self.result()

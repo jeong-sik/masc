@@ -9,7 +9,10 @@ Reads two stores under `<base-path>/.masc` and never writes to them:
   `completed_at`. The Keeper whose database holds a row is the target of that operation.
 - `tool_calls/YYYY-MM/DD.jsonl` and its `DD.NNN.jsonl` segments: rows with
   `record_kind == "tool_call"`. The fields used are `ts`, `keeper`, `keeper_turn_id`, `tool`,
-  `output` and `duration_ms`.
+  `output` and `duration_ms`. `ts` is the instant the row was written, after the call returned
+  (`Keeper_tool_call_log.log_call` takes it while building the row and receives `duration_ms` as
+  an argument), so a call ran from `ts - duration_ms` to `ts`. The `clock_check` block of the
+  result tests that reading on the rows it reads.
 
 Definitions:
 
@@ -22,10 +25,11 @@ Definitions:
   started (cancelled while queued) has no queue wait.
 - run: `completed_at - started_at` of a delegation that started and finished.
 - long wait: a queue wait of at least `LONG_WAIT_S` seconds.
-- turn span: for one target Keeper and one `keeper_turn_id`, from the first `ts` of its tool calls
-  to the last `ts` plus `duration_ms`. The ledger holds only tool calls, so a span starts at a
-  turn's first call and ends at its last one. The model time before the first call and after the
-  last one is outside it, and the spans are a lower bound of the time the target spent in turns.
+- turn span: for one target Keeper and one `keeper_turn_id`, from the earliest start (`ts` minus
+  `duration_ms`) of its tool calls to the latest `ts`. The ledger holds only tool calls, so a span
+  starts when a turn's first call began and ends when its last call returned. The model time
+  before the first call and after the last one is outside it, and the spans are a lower bound of
+  the time the target spent in turns.
   A tool-call row of a target Keeper without a usable `ts` or `keeper_turn_id` is counted under
   `unusable_rows`. A day of the window without any ledger file is listed under `missing_days`.
 - target in a turn: the instant `created_at` lies inside a span of the target Keeper. This
@@ -34,6 +38,15 @@ Definitions:
 - flag replay: for each threshold of `FLAG_THRESHOLDS_S`, the delegations with a queue wait at
   or above it count as positive. True positive: flagged and positive. False positive: flagged and
   not positive. False negative: not flagged and positive.
+- clock check: two consecutive calls of one turn that ran alone and in order (`execution_mode`
+  `serial`, `batch_size` 1) cannot overlap. The pairs that overlap when `ts` is read as the end
+  of a call and when it is read as the start are counted, with a tolerance of `CLOCK_TOLERANCE_S`.
+- return: the `ts` of a tool-call row, the instant a tool result came back to the turn.
+- boundary replay: for the delegations that started and whose target was in a turn at
+  `created_at`, the pickup is the time from `created_at` to the first return of the target at or
+  after it. The replayed wait is the smaller of the real wait and the pickup. The saved time is
+  an upper bound for a pickup at a tool-result boundary: it assumes the target starts the
+  operation at that instant and that the run takes as long as it did. No built change does that.
 - submit count: the `queued_count` in the result of the `masc_keeper_delegate` call that created
   the operation, read from the `output` of that tool call and joined by `operation_id`. It counts
   the operations that are queued, so the turn the target is running is not in it. A call whose
@@ -71,6 +84,7 @@ FLAG_THRESHOLDS_S = (60.0, LONG_WAIT_S)
 DEFAULT_TOP = 8
 DELEGATE_TOOL = "masc_keeper_delegate"
 QUEUED_COUNT_CAP = 3
+CLOCK_TOLERANCE_S = 0.05
 SECONDS_PER_HOUR = 3600.0
 SECONDS_PER_DAY = 86400.0
 OPERATIONS_QUERY = (
@@ -198,12 +212,16 @@ def read_objects(path: pathlib.Path, skipped: Skipped) -> Iterator[dict[str, obj
 
 
 Spans = dict[str, list[tuple[float, float]]]
+Returns = dict[str, list[float]]
+TurnKey = tuple[str, int | str]
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class Ledger:
     spans: Spans
+    returns: Returns
     submit_counts: dict[str, int]
+    clock_check: dict[str, object]
 
 
 def parse_submit(row: dict[str, object]) -> tuple[str, int] | None:
@@ -225,11 +243,44 @@ def parse_submit(row: dict[str, object]) -> tuple[str, int] | None:
     return operation_id, count
 
 
+def is_single_serial(row: dict[str, object]) -> bool:
+    """A call that ran alone and in order, so the next call of its turn began after it returned."""
+    size = row.get("batch_size")
+    return row.get("execution_mode") == "serial" and not isinstance(size, bool) and size == 1
+
+
+def clock_check(serial: dict[TurnKey, list[tuple[float, float]]]) -> dict[str, object]:
+    """Count the consecutive single serial calls of one turn that overlap under each reading of `ts`.
+
+    Each call is `(ts, seconds)`. Under "ts is the end" the next call began at `ts - seconds`,
+    which must not be before the previous `ts`. Under "ts is the start" the next `ts` must not be
+    before the previous `ts + seconds`.
+    """
+    pairs = overlap_if_end = overlap_if_start = 0
+    for calls in serial.values():
+        ordered = sorted(calls)
+        for (first_ts, first_seconds), (second_ts, second_seconds) in zip(ordered, ordered[1:]):
+            pairs += 1
+            if second_ts - second_seconds < first_ts - CLOCK_TOLERANCE_S:
+                overlap_if_end += 1
+            if second_ts < first_ts + first_seconds - CLOCK_TOLERANCE_S:
+                overlap_if_start += 1
+    return {
+        "tolerance_s": CLOCK_TOLERANCE_S,
+        "serial_pairs": pairs,
+        "overlap_if_ts_is_end": overlap_if_end,
+        "overlap_if_ts_is_start": overlap_if_start,
+    }
+
+
 def read_ledger(
     base_path: pathlib.Path, days: Sequence[datetime.date], keepers: frozenset[str], skipped: Skipped
 ) -> Ledger:
-    """Per target Keeper, the sorted spans of its turns, and the submit count of each delegation."""
-    bounds: dict[tuple[str, int | str], list[float]] = {}
+    """Per target Keeper, the sorted spans of its turns and the sorted instants its tool calls
+    returned, the submit count of each delegation, and the clock check of its serial calls."""
+    bounds: dict[TurnKey, list[float]] = {}
+    returns: dict[str, list[float]] = defaultdict(list)
+    serial: dict[TurnKey, list[tuple[float, float]]] = defaultdict(list)
     submits: dict[str, tuple[float, int]] = {}
     for day in days:
         files = tool_call_files(base_path, day)
@@ -254,16 +305,22 @@ def read_ledger(
                     skipped.unusable_rows += 1
                     continue
                 duration = as_float(row.get("duration_ms")) or 0.0
-                end = ts + max(0.0, duration) / 1000.0
-                span = bounds.setdefault((keeper, turn), [ts, end])
-                span[0] = min(span[0], ts)
-                span[1] = max(span[1], end)
+                seconds = max(0.0, duration) / 1000.0
+                start = ts - seconds
+                span = bounds.setdefault((keeper, turn), [start, ts])
+                span[0] = min(span[0], start)
+                span[1] = max(span[1], ts)
+                returns[keeper].append(ts)
+                if is_single_serial(row):
+                    serial[(keeper, turn)].append((ts, seconds))
     spans: Spans = defaultdict(list)
     for (keeper, _), (start, end) in bounds.items():
         spans[keeper].append((start, end))
     return Ledger(
         spans={keeper: sorted(found) for keeper, found in spans.items()},
+        returns={keeper: sorted(found) for keeper, found in returns.items()},
         submit_counts={operation_id: count for operation_id, (_, count) in submits.items()},
+        clock_check=clock_check(serial),
     )
 
 
@@ -273,6 +330,17 @@ def in_turn(spans: Spans, keeper: str, instant: float) -> bool:
     # still cover it; the spans after the instant cannot.
     started = bisect.bisect_right(found, (instant, math.inf))
     return any(end >= instant for _, end in found[:started])
+
+
+def next_return(returns: Returns, keeper: str, instant: float) -> float:
+    """The first instant at or after `instant` when a tool call of `keeper` returned.
+
+    Call it for an instant that `in_turn` accepted. The end of the span that covers the instant
+    is itself a return, so one exists; if the spans and the returns did not come from the same
+    rows this raises instead of skipping the delegation.
+    """
+    found = returns[keeper]
+    return found[bisect.bisect_left(found, instant)]
 
 
 def rank_quantile(sorted_values: Sequence[float], q: float) -> float:
@@ -391,6 +459,37 @@ def flag_replay(delegations: Sequence[Delegation], spans: Spans, thresholds: Seq
     }
 
 
+def boundary_replay(delegations: Sequence[Delegation], spans: Spans, returns: Returns) -> dict[str, object]:
+    """What a pickup at the target's next tool return would have saved, as an upper bound.
+
+    Only the delegations that started and whose target was in a turn at `created_at` have a
+    pickup. Its replayed wait is the smaller of the real wait and the pickup.
+    """
+    started = [delegation for delegation in delegations if delegation.queue_wait is not None]
+    all_wait_hours = sum(cast(float, delegation.queue_wait) for delegation in started) / SECONDS_PER_HOUR
+    cases = [
+        (cast(float, delegation.queue_wait), next_return(returns, delegation.target, delegation.created_at) - delegation.created_at)
+        for delegation in started
+        if in_turn(spans, delegation.target, delegation.created_at)
+    ]
+    long_cases = [(wait, pickup) for wait, pickup in cases if wait >= LONG_WAIT_S]
+    saved_hours = sum(wait - min(wait, pickup) for wait, pickup in cases) / SECONDS_PER_HOUR
+    return {
+        "flagged": len(cases),
+        "pickup_s": spread([pickup for _, pickup in cases]),
+        "wait_hours": sum(wait for wait, _ in cases) / SECONDS_PER_HOUR,
+        "replayed_wait_hours": sum(min(wait, pickup) for wait, pickup in cases) / SECONDS_PER_HOUR,
+        "saved_hours": saved_hours,
+        "saved_share_of_wait_hours": saved_hours / all_wait_hours if all_wait_hours > 0 else None,
+        "pickup_not_before_start": sum(1 for wait, pickup in cases if pickup >= wait),
+        "long_waits": {
+            "n": len(long_cases),
+            "wait_hours": sum(wait for wait, _ in long_cases) / SECONDS_PER_HOUR,
+            "replayed_wait_hours": sum(min(wait, pickup) for wait, pickup in long_cases) / SECONDS_PER_HOUR,
+        },
+    }
+
+
 def queued_count_label(count: int) -> str:
     return f"{QUEUED_COUNT_CAP}+" if count >= QUEUED_COUNT_CAP else str(count)
 
@@ -446,7 +545,9 @@ def measure(base_path: pathlib.Path, first: datetime.date, last: datetime.date, 
         "all": wait_block(delegations),
         "by_day": {day: wait_block(found) for day, found in sorted(per_day.items())},
         "by_target": by_target(delegations, top),
+        "clock_check": ledger.clock_check,
         "flag_replay": flag_replay(delegations, ledger.spans, FLAG_THRESHOLDS_S),
+        "boundary_replay": boundary_replay(delegations, ledger.spans, ledger.returns),
         "submit_queued_count": submit_block(delegations, ledger.submit_counts),
         "skipped": dataclasses.asdict(skipped),
     }

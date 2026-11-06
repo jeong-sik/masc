@@ -1,6 +1,12 @@
-open Keeper_types
+(** Filesystem runtime handlers for descriptor-backed Read/Edit/Write tools.
+
+    The code lives in the [Keeper_tool_filesystem_runtime_*] modules included
+    below, in dependency order: a module reads the ones above it and none below
+    it. What stays in this file is [handle_file_write_content_with_outcome],
+    [For_testing], and the functions that prepare and run a write or an edit.
+    [Keeper_tool_filesystem_runtime_test_seams] holds the keys that
+    [For_testing] binds. *)
 open Keeper_meta_contract
-open Keeper_types_profile
 open Keeper_tool_shared_runtime
 open Result.Syntax
 open Keeper_tool_read_window

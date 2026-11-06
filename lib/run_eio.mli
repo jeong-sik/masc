@@ -79,3 +79,6 @@ val get :
 (** List all runs under {!runs_dir} as
     [{"count": N, "runs": [...]}]. *)
 val list : Workspace_utils.config -> Yojson.Safe.t
+
+val runs_dirname : string
+(** The directory runs sit in below [<base>/.masc]. *)

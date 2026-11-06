@@ -1,11 +1,5 @@
 (** Metrics snapshot append helper for unified keeper cycles. *)
 
-val latency_runtime_profile : string option -> string
-(** The [runtime_profile] label of the latency-by-model counter: the id of the
-    runtime that answered, or {!Runtime_answerer.Not_observed}'s label for a
-    turn with no runtime observation. It never names the Keeper's assigned
-    lane. *)
-
 val append_metrics_snapshot :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->

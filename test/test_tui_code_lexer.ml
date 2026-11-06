@@ -555,6 +555,30 @@ let test_markdown_hands_a_fence_body_to_its_language () =
     ]
     (spans "markdown" "1. step\n   ```sh")
 
+(* A Markdown fence inside Markdown keeps its body plain. Reading it as
+   Markdown again hands the rest of the text to one more level for every
+   opener, so the cost grows with the square of the openers. *)
+let test_markdown_does_not_read_a_markdown_fence_again () =
+  List.iter
+    (fun tag ->
+      check seg
+        (Printf.sprintf "a %s fence's body is not read as markdown" tag)
+        [ ("```" ^ tag, Masc_tui_code_lexer.kind_keyword)
+        ; ("# not a heading", Masc_tui_code_lexer.kind_code)
+        ; ("```", Masc_tui_code_lexer.kind_keyword)
+        ]
+        (spans "markdown" ("```" ^ tag ^ "\n# not a heading\n```")))
+    [ "md"; "markdown" ];
+  check seg "a diff of markdown inside markdown reads by line"
+    [ ("```diff:md", Masc_tui_code_lexer.kind_keyword)
+    ; ("+# not a heading", Masc_tui_code_lexer.kind_diff_added)
+    ; ("```", Masc_tui_code_lexer.kind_keyword)
+    ]
+    (spans "markdown" "```diff:md\n+# not a heading\n```");
+  check seg "markdown outside a fence is still markdown"
+    [ ("# a heading", Masc_tui_code_lexer.kind_type) ]
+    (spans "md" "# a heading")
+
 let test_markdown_marks_quotes_rules_and_table_rows () =
   check seg "a nested quote marks each > and leaves the words alone"
     [ (">", Masc_tui_code_lexer.kind_keyword)
@@ -676,6 +700,27 @@ let test_every_lexer_finishes_on_awkward_fragments () =
     ();
   Alcotest.(check bool) "every lexer answered" true true
 
+(* The fragments above are short, so they cannot show a cost that grows with
+   the text. This one is long: a file of unclosed ```md openers, 72 KB. Before
+   a Markdown fence stopped being read as Markdown again, this input took
+   18.5 s on an M3 Max; a linear read takes milliseconds, so the bound only
+   has to tell those two apart. *)
+let test_a_pile_of_unclosed_markdown_fences_finishes_quickly () =
+  let openers = 12_000 in
+  let text = String.concat "" (List.init openers (fun _ -> "```md\n")) in
+  match Masc_tui_code_lexer.lexer_of_language "markdown" with
+  | None -> Alcotest.fail "no lexer for markdown"
+  | Some lex ->
+      in_flight := Printf.sprintf "markdown on %d unclosed md fences" openers;
+      let started = Sys.time () in
+      let segments = lex text in
+      let seconds = Sys.time () -. started in
+      check Alcotest.string "no byte is lost or added" text
+        (String.concat "" (List.map fst segments));
+      Alcotest.(check bool)
+        (Printf.sprintf "finished in %.2f s, under 5 s" seconds)
+        true (seconds < 5.0)
+
 let () =
   start_the_watchdog ();
   Alcotest.run "masc_tui_code_lexer"
@@ -787,6 +832,10 @@ let () =
             test_markdown_reads_front_matter_as_yaml
         ; Alcotest.test_case "no byte is lost or added" `Quick
             test_markdown_never_loses_or_adds_a_byte
+        ; Alcotest.test_case "a markdown fence is not read as markdown again"
+            `Quick test_markdown_does_not_read_a_markdown_fence_again
+        ; Alcotest.test_case "unclosed markdown fences finish quickly" `Quick
+            test_a_pile_of_unclosed_markdown_fences_finishes_quickly
         ] )
     ; ( "paths"
       , [ Alcotest.test_case "the extension table names only lexed languages"

@@ -1520,7 +1520,11 @@ let markdown_lexer_with ~sub text =
   line (front_matter ());
   runs_segments runs
 
-let rec lexer_of_language (tag : string) =
+(* [within_markdown] is true while the tag of a fence inside a Markdown
+   document is being resolved. That fence's body is not read as Markdown
+   again: every level would hand the rest of the text to the next, and a
+   file of unclosed ```md openers would cost time quadratic in its size. *)
+let rec lexer_in ~within_markdown (tag : string) =
   let tag = String.lowercase_ascii (String.trim tag) in
   match String.index_opt tag ':' with
   | Some colon
@@ -1535,7 +1539,7 @@ let rec lexer_of_language (tag : string) =
       match sub with
       | "" | "diff" | "patch" -> Some diff_lexer
       | sub -> (
-          match lexer_of_language sub with
+          match lexer_in ~within_markdown sub with
           | Some sub_lexer -> Some (diff_lexer_with ~sub:sub_lexer)
           | None -> Some diff_lexer))
   | Some _ | None -> (
@@ -1553,8 +1557,12 @@ let rec lexer_of_language (tag : string) =
           Some c_like_lexer
       | "python" | "py" -> Some python_lexer
       | "alphatex" | "atex" -> Some alphatex_lexer
-      | "markdown" | "md" -> Some (markdown_lexer_with ~sub:lexer_of_language)
+      | "markdown" | "md" ->
+          if within_markdown then None
+          else Some (markdown_lexer_with ~sub:(lexer_in ~within_markdown:true))
       | _ -> None)
+
+let lexer_of_language tag = lexer_in ~within_markdown:false tag
 
 
 (* The extension decides the language. Only extensions whose language has a

@@ -47,7 +47,9 @@ val lexer_of_language : string -> (string -> segment list) option
     select the alphaTex lexer. ["markdown"] and ["md"] read a document line
     by line: headings, list and quote markers, code fences and table rule
     rows take the bold type hue or the keyword hue, inline code is a string,
-    and a fence's body goes to the lexer its info string names. Only an HTML
+    and a fence's body goes to the lexer its info string names, except that a
+    Markdown fence inside Markdown keeps its body plain: reading it again
+    would cost time quadratic in the number of unclosed openers. Only an HTML
     comment is a comment, since the memo reader trusts that kind. A ["diff"]
     fence reads whole lines; ["diff:<lang>"] additionally lexes added and
     removed rows' content with [<lang>]'s lexer. An unknown tag answers

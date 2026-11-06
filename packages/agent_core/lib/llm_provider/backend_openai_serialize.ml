@@ -727,12 +727,13 @@ let ollama_native_user_message ~modality_priority content : Yojson.Safe.t option
              ~block:"image"
              source
          | Document { media_type; _ } ->
-           (* agent-core boundary — documents used to be appended to [images] "so vision
-              models can attempt to process them as pages". The server has no
-              way to tell the two apart, so that was a silent modality change.
-              [ollama_messages_of_history] rejects documents at admission
-              because the native wire declares [Document_unrepresentable];
-              reaching this arm means a caller bypassed admission. *)
+           (* agent-core boundary — a document is never appended to [images]
+              "so vision models can attempt to process them as pages": the
+              server has no way to tell the two apart, so that would be a
+              silent modality change. [ollama_messages_of_history] rejects
+              documents at admission because the native wire declares
+              [Document_unrepresentable]; reaching this arm means a caller
+              bypassed admission. *)
            invalid_arg
              (Printf.sprintf
                 "Backend_openai_serialize.ollama_native_user_message: document block \

@@ -16,19 +16,14 @@
 
 (** What a heartbeat did. Only [Heartbeat_updated] means the agent's
     [last_seen] was written; the other two mean the call did nothing and are
-    not evidence that the workspace is writable.
-
-    This was a status string, and both readers got it wrong. The MCP handler
-    tested the first three bytes for a warning sign no branch here ever
-    emits — so every heartbeat reported success. The keeper's
-    work-as-heartbeat refresher treated any call that did not raise as a live
-    workspace, which a missing agent file satisfies. *)
+    not evidence that the workspace is writable. A call that returns without
+    raising proves nothing either: a missing agent file returns normally. *)
 type heartbeat_outcome =
   | Heartbeat_updated of string  (** resolved agent name *)
   | Agent_file_invalid of string  (** resolved agent name *)
   | Agent_not_found of string  (** requested agent name *)
 
-(** The status string the outcome used to be, byte for byte. *)
+(** The outcome as the status string the heartbeat tool replies with. *)
 val heartbeat_message : heartbeat_outcome -> string
 
 (** Update the agent's [last_seen] timestamp on disk.

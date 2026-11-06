@@ -47,12 +47,8 @@ type lookup_root =
   | Producer_tree of string list
   | Producer_root_absent of { root : string }
 
-(* Both outcomes carry the reviewer's stated reason. [Approve] used to be
-   nullary, and the parser below read [reason] and then dropped it, so an
-   approval reached the ledger as a bare token while a rejection arrived with
-   its argument. [Goal_verification_agent] had to re-read the reason out of the
-   tool call through a ref to commit a goal proof at all; carrying it here is
-   what that workaround was standing in for. The string may be empty — the
+(* Both outcomes carry the reviewer's stated reason, so an approval reaches the
+   ledger with its argument, as a rejection does. The string may be empty — the
    schema asks for one on both outcomes but only [Reject] refuses without it,
    and turning an approval into a failure is a gate this does not add. *)
 type verdict =

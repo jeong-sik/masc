@@ -353,14 +353,11 @@ let accept_inbound ~resolved_binding ~dispatch_for_delivery ~base_dir ~team_id ~
       ; metadata
       }
     in
-    (* [user_name] stays an option from here down. It used to be collapsed to
-       [user_id] and then wrapped back into [Some], which reads as "Slack told
-       us this person is called U09L0RHPW7P".
-
-       The comment above called that rendering-only. It is not: the value
-       reaches [display_name], the durable chat row's [speaker_name], and the
-       pane, where an id sits in the place a name goes. 12 of one person's 24
-       messages arrived that way -- the same human, named half the time.
+    (* [user_name] stays an option from here down. Collapsing it to [user_id]
+       and wrapping it back into [Some] would read as "Slack told us this
+       person is called U09L0RHPW7P": the value reaches [display_name], the
+       durable chat row's [speaker_name], and the pane, where an id sits in the
+       place a name goes.
 
        [display_name] is already [string option], so absence has a place to
        live. Only the gate's [channel_user_name] needs a string, and that one

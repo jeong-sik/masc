@@ -334,9 +334,8 @@ val valid_dashboard_slice : string -> bool
 
 val dashboard_slice_for_sse_type : string -> string option
 (** {!Masc.Dashboard_event_slices.slice_for_sse_type}, under the
-    name this transport routes with.  The two used to be
-    separate lists here and drifted apart for a day after
-    #27027; the slice names are now that table's image. *)
+    name this transport routes with; the slice names are that table's
+    image. *)
 
 val client_buffer_limit_bytes : unit -> int
 (** Resolved client-buffer threshold (in bytes) used by

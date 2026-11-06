@@ -447,10 +447,9 @@ let handle_list_tools_eio
           (Option.map (fun value -> `String value) next_cursor)
       @ Mcp_server.(cache_hint_fields live_state_cache_hint)
     in
-    (* [ListToolsResult] is as closed as [Tool]: the usage counters used to be
-       result members, and the paging pair sat under an unprefixed [_meta] key
-       that a later spec key could claim. Both now live under this server's own
-       prefix. *)
+    (* [ListToolsResult] is as closed as [Tool], so the usage counters and the
+       paging pair are not result members: both live in [_meta] under this
+       server's own prefix, where a later spec key cannot claim them. *)
     let meta_fields =
       Mcp_server.(
         meta_field

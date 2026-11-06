@@ -99,11 +99,8 @@ let lane_policies =
         ]
     ; terminal_events = [ Keeper_runtime_manifest.Turn_finished ]
     }
-    (* The dispatch that used to be asserted on a separate "provider" lane is
-       asserted here. Runtime_routed opens a candidate attempt and
-       Runtime_completed / Runtime_failed closes it, which is the boundary the
-       retired provider_attempt_started / provider_attempt_finished pair
-       described.
+    (* The dispatch is asserted here. Runtime_routed opens a candidate attempt
+       and Runtime_completed / Runtime_failed closes it.
 
        The assertion is on presence, not on count: Runtime_routed is appended
        per candidate, so a turn carries 1-6 of them (median 2 over the live

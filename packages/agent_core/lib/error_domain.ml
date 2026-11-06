@@ -196,11 +196,10 @@ let provider_to_error : provider_error -> Error.t = function
   | `Empty_completion (provider, stop_reason, detail) ->
     Error.Provider (Llm_provider.Error.EmptyCompletion { provider; stop_reason; detail })
   | `Provider_timeout (phase, msg) -> Error.Api (Retry.Timeout { message = msg; phase })
-  (* The provider rides along so the round trip does not have to invent one.
-     It used to be dropped here and reconstructed as the literal "unknown",
-     which is how a stalled stream reached the route stage naming no provider
-     while every other surface named it. An API-level timeout genuinely has no
-     provider, and says so by converting back to the API error it came from. *)
+  (* The provider rides along so the round trip does not have to invent one: a
+     stalled stream reaches the route stage naming its provider, like every
+     other surface. An API-level timeout genuinely has no provider, and says so
+     by converting back to the API error it came from. *)
   | `Streaming_timeout (phase, msg, Some provider) ->
     Error.Provider
       (Llm_provider.Error.Timeout

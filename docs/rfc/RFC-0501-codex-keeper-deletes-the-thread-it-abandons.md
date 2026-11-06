@@ -188,9 +188,9 @@ runtime id 나 client 종류가 바뀌면 옛 thread 는 다른 계정 home 이�
 | 모듈 | 바뀌는 것 |
 | --- | --- |
 | `Keeper_official_client_session_store` | `forgotten` 타입과 `forgotten_sessions` 추가 |
-| `Runtime_codex_app_server` | `delete_threads` 추가, `thread_mode` 에 `Ephemeral`, `~thread_mode` 필수, `thread_is_ephemeral` 삭제 |
-| `Keeper_codex_runtime` | claim·release 에서 잊은 id 를 모으고 턴 뒤 `delete_threads` |
-| `Fusion_official_client`, `Keeper_capability_probe`, `Runtime_verification` | `~thread_mode` 를 넘긴다 |
+| `Runtime_codex_app_server` | `delete_threads` 추가, `thread = Ephemeral \| Persistent of thread_mode` 추가, `run_turn`·`validate_turn` 의 `~thread` 필수, `thread_is_ephemeral` 상수 삭제 |
+| `Keeper_codex_runtime` | 턴이 지나간 기록을 모아 마지막 기록과 견주고, 잊은 id 를 턴 뒤 `delete_threads` 로 지운다. `~thread:(Persistent thread_mode)` 를 넘긴다 |
+| `Fusion_official_client`, `Keeper_capability_probe`, `Runtime_verification` | `~thread:Ephemeral` 을 넘긴다 |
 
 ## 4. 하지 않는 것
 

@@ -21,3 +21,8 @@ val register_all : unit -> unit
 val enforce_visible_tag_coverage : unit -> unit
 (** Startup invariant: raises [Failure] if any LLM-visible schema lacks a
     dispatch tag. *)
+
+val reserved_tool_names : unit -> string list
+(** Every tool name an Add-on export must not take: the schema names of
+    [Config.raw_all_tool_schemas] and every name a Keeper descriptor
+    registers, sorted and deduplicated. *)

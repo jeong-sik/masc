@@ -262,3 +262,12 @@ let enforce_visible_tag_coverage () =
     in
     Log.Server.error "%s" msg;
     failwith msg
+
+(** Every tool name an Add-on export must not take: the schema names of
+    [Config.raw_all_tool_schemas] and every name a Keeper descriptor
+    registers. *)
+let reserved_tool_names () =
+  List.map (fun (schema : Masc_domain.tool_schema) -> schema.name) Config.raw_all_tool_schemas
+  @ (Keeper_tool_descriptor.all_descriptors ()
+     |> List.concat_map Keeper_tool_descriptor.registered_names)
+  |> List.sort_uniq String.compare

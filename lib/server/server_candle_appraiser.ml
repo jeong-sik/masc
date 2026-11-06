@@ -4,11 +4,6 @@ module Exact = Lane_addon_exact
 module Runs = Exact_lane_run_registry
 open Result.Syntax
 let tool_name = "candle_appraise"
-let reserved_names () =
-  List.map (fun (schema : Masc_domain.tool_schema) -> schema.name) Config.raw_all_tool_schemas
-  @ (Keeper_tool_descriptor.all_descriptors ()
-     |> List.concat_map Keeper_tool_descriptor.registered_names)
-  |> List.sort_uniq String.compare
 let resolve ~config ~reserved =
   let snapshot = Lane_addon_runtime.tool_export_snapshot ~config
     ~access:Lane_addon_sources.Operator_configuration ~reserved in
@@ -23,9 +18,13 @@ let resolve ~config ~reserved =
         (Lane_addon_unready.declaring ~name:tool_name snapshot.unready) with
       | Some reason -> reason
       | None -> "No attached Add-on provides candle_appraise")
-let available ~config () = Result.map (fun _ -> ()) (resolve ~config ~reserved:(reserved_names ()))
+let available ~config () =
+  Result.map (fun _ -> ())
+    (resolve ~config ~reserved:(Unified_tool_registry.reserved_tool_names ()))
 let declaration_change_probe ~config () =
-  let current () = resolve ~config ~reserved:(reserved_names ()) |> Result.to_option in
+  let current () =
+    resolve ~config ~reserved:(Unified_tool_registry.reserved_tool_names ())
+    |> Result.to_option in
   let previous = ref (current ()) in
   fun () -> match current () with
     | None -> false
@@ -186,7 +185,7 @@ let run_with ~registry ~base_path ~retain ~call ~identity request =
       reject ~slot:None ~code:"candle_appraisal_request_id_reused"
         (A.Execution_rejected "Candle appraisal request ID already belongs to different input") (Exact.final_to_json final)
 let run ~config ~identity request =
-  let reserved = reserved_names () in
+  let reserved = Unified_tool_registry.reserved_tool_names () in
   let* export = resolve ~config ~reserved |> Result.map_error (fun detail -> A.Transport_unavailable detail) in
   let call ~arguments = Lane_addon_runtime.call_exported_tool_with_principal
     ~principal:(Some Lane_addon_call_context.Operator) ~config

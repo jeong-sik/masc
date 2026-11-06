@@ -7276,3 +7276,5 @@
 (include stanzas/test_task_history_page_cursor.inc)
 
 (include stanzas/test_list_util.inc)
+
+(include stanzas/test_tui_code_msg.inc)

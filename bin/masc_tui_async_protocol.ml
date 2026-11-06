@@ -277,6 +277,48 @@ type memory_health_read =
       ; result : (Masc.Tui_decode_memory_health.memory_health_row_answer, string) result
       }
 
+(* The Code pane's answers, carried in [async_msg] by one constructor,
+   [Code_msg]. One variant takes at most 244 constructors with arguments,
+   so answers that belong together share one (#48617). *)
+type code_msg =
+  (* The scope travels with the directory. Without it a reply names a
+     relative path, which two scopes can both have, and the handler had no
+     way to tell a late answer for the scope just left from an answer for the
+     scope now open (#33946). *)
+  | Code_catalog_loaded of
+      (code_workspace_scope * string) Masc_tui_fetched.request
+      * (Masc.Tui_decode.workspace_file_catalog, string) result
+  | Code_branches_loaded of
+      (code_workspace_scope * string) Masc_tui_fetched.request
+      * (Masc.Tui_decode.git_branches, string) result
+  | Code_worktrees_loaded of
+      (code_workspace_scope * string) Masc_tui_fetched.request
+      * (Masc.Tui_decode.git_worktrees, string) result
+  | Code_finder_file_loaded of
+      (code_workspace_scope * string) Masc_tui_fetched.request
+      * (Masc.Tui_decode.workspace_file_source, string) result
+  | Code_entries_loaded of
+      (code_workspace_scope * string) Masc_tui_fetched.request
+      * (Masc.Tui_decode.workspace_tree_node list, string) result
+  | Code_draft_saved of code_save_request * Masc_tui_code_draft.outcome
+  | Code_file_loaded of code_file_load_intent * string Masc_tui_fetched.request * (Masc.Tui_decode.workspace_file_source, string) result
+  | Code_history_loaded of
+      (code_workspace_scope * string) Masc_tui_fetched.request
+      * (Masc_tui_types.code_history_listing, string) result
+  | Code_diff_loaded of
+      Masc_tui_types.code_diff_target Masc_tui_fetched.request
+      * (Masc.Tui_decode.git_diff, string) result
+  (* The path the margin describes; stamped so a late answer cannot caption
+     another file. *)
+  | Code_blame_loaded of
+      string Masc_tui_fetched.request
+      * (Masc.Tui_decode.blame_block list, string) result
+  (* The path the note anchored to; success re-reads the listing. *)
+  (* (question, symbol, answer) — the note the pane shows names both. *)
+  | Code_lsp_answered of
+      Masc_tui_types.code_lsp_query Masc_tui_fetched.request
+      * (Masc.Tui_decode.lsp_answer, string) result
+
 type async_msg =
   | Chat_search_finished of int * bool * Masc_tui_render_chat.chat_search_plan
       * (Masc_tui_render_chat.chat_search_work * Masc_tui_render_chat.chat_search_match, string) result
@@ -481,8 +523,6 @@ type async_msg =
       int * (Masc.Tui_decode_memory_recall.memory_recall_reading, string) result
   | Repositories_loaded of (Masc.Tui_decode.repository_snapshot, string) result
   | Workspace_activity_loaded of string Masc_tui_fetched.request * (workspace_activity_read, string) result
-  (* A fleet read and a one-Keeper row read share this constructor: the
-     message type is at the compiler's limit of non-constant constructors. *)
   | Memory_loaded of memory_health_read
   | Memory_input_loaded of string Masc_tui_fetched.request
       * (Masc_tui_memory_usage.t, string) result
@@ -766,49 +806,13 @@ type async_msg =
       * (Masc.Published_artifact_check.t, string) result
   | Resources_listed of
       unit ref * (Masc_tui_resource_catalog.listing, string) result
-  (* The scope travels with the directory. Without it a reply names a
-     relative path, which two scopes can both have, and the handler had no
-     way to tell a late answer for the scope just left from an answer for the
-     scope now open (#33946). *)
-  | Code_catalog_loaded of
-      (code_workspace_scope * string) Masc_tui_fetched.request
-      * (Masc.Tui_decode.workspace_file_catalog, string) result
-  | Code_branches_loaded of
-      (code_workspace_scope * string) Masc_tui_fetched.request
-      * (Masc.Tui_decode.git_branches, string) result
-  | Code_worktrees_loaded of
-      (code_workspace_scope * string) Masc_tui_fetched.request
-      * (Masc.Tui_decode.git_worktrees, string) result
-  | Code_finder_file_loaded of
-      (code_workspace_scope * string) Masc_tui_fetched.request
-      * (Masc.Tui_decode.workspace_file_source, string) result
-  | Code_entries_loaded of
-      (code_workspace_scope * string) Masc_tui_fetched.request
-      * (Masc.Tui_decode.workspace_tree_node list, string) result
-  | Code_draft_saved of code_save_request * Masc_tui_code_draft.outcome
-  | Code_file_loaded of code_file_load_intent * string Masc_tui_fetched.request * (Masc.Tui_decode.workspace_file_source, string) result
-  | Code_history_loaded of
-      (code_workspace_scope * string) Masc_tui_fetched.request
-      * (Masc_tui_types.code_history_listing, string) result
-  | Code_diff_loaded of
-      Masc_tui_types.code_diff_target Masc_tui_fetched.request
-      * (Masc.Tui_decode.git_diff, string) result
+  | Code_msg of code_msg
   (* The Activity pane's Changes tab: the selected keeper's recorded file
      changes, stamped with the request so an answer for a keeper the
      cursor has left is dropped. *)
   | Acting_pane_changes_loaded of
       Masc_tui_types.acting_pane_key Masc_tui_fetched.request
       * (Masc.Tui_decode.file_change_snapshot, string) result
-  (* The path the margin describes; stamped so a late answer cannot caption
-     another file. *)
-  | Code_blame_loaded of
-      string Masc_tui_fetched.request
-      * (Masc.Tui_decode.blame_block list, string) result
-  (* The path the note anchored to; success re-reads the listing. *)
-  (* (question, symbol, answer) — the note the pane shows names both. *)
-  | Code_lsp_answered of
-      Masc_tui_types.code_lsp_query Masc_tui_fetched.request
-      * (Masc.Tui_decode.lsp_answer, string) result
   | Resource_exported of string * (string, string) result
   | Resource_share_changed of Masc_tui_types.resource_share_request * (Masc_tui_types.resource_share_outcome, Masc_tui_types.resource_share_failure) result
   | Resource_share_recovery_loaded of Masc_tui_types.resource_share_recovery_lookup * (Masc_tui_artifact_share_pending.entry option, string) result
@@ -972,7 +976,7 @@ end = struct
 end
 
 let rec workspace_message_is_read = function
-  | Code_draft_saved _ | Board_attachment_saved _ | Resource_exported _ | Resource_share_changed _ | Verification_evidence_exported _ -> false
+  | Code_msg (Code_draft_saved _) | Board_attachment_saved _ | Resource_exported _ | Resource_share_changed _ | Verification_evidence_exported _ -> false
   | (Keeper_logs_loaded _ | Keeper_execute_streamed _) -> true
   | Chat_search_finished _ -> true
   | Workspace_scoped (_, _, message)
@@ -1095,14 +1099,12 @@ let rec workspace_message_is_read = function
   | Play_invites_listed _
   | Librarian_input_loaded _
   | (Resources_listed _ | Artifact_checks_loaded _)
-  | Code_entries_loaded _
-  | Code_catalog_loaded _ | Code_branches_loaded _ | Code_worktrees_loaded _ | Code_finder_file_loaded _
-  | Code_file_loaded _
-  | Code_history_loaded _
-  | Code_diff_loaded _
+  | Code_msg
+      ( Code_entries_loaded _
+      | Code_catalog_loaded _ | Code_branches_loaded _ | Code_worktrees_loaded _ | Code_finder_file_loaded _
+      | Code_file_loaded _ | Code_history_loaded _ | Code_diff_loaded _
+      | Code_blame_loaded _ | Code_lsp_answered _ )
   | Acting_pane_changes_loaded _
-  | Code_blame_loaded _
-  | Code_lsp_answered _
   | Resource_read _ | Resource_share_recovery_loaded _ | Resource_diagram_ready _
   | Github_identity_view_loaded _
   | Identity_providers_loaded _
@@ -1275,10 +1277,12 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Preset_detail_loaded _ | Preset_contents_shown _ | Preset_saved _ | Preset_restored _
   | Preset_deleted _ | Play_room_received _ | Play_invites_listed _ | Play_invite_issued _
   | Play_invite_revoked _ | Librarian_input_loaded _ | Artifact_checks_loaded _
-  | Artifact_check_changed _ | Resources_listed _ | Code_catalog_loaded _ | Code_branches_loaded _ | Code_worktrees_loaded _
-  | Code_finder_file_loaded _ | Code_entries_loaded _ | Code_draft_saved _ | Code_file_loaded _
-  | Code_history_loaded _ | Code_diff_loaded _ | Acting_pane_changes_loaded _
-  | Code_blame_loaded _ | Code_lsp_answered _ | Resource_exported _ | Resource_share_changed _
+  | Artifact_check_changed _ | Resources_listed _
+  | Code_msg
+      ( Code_catalog_loaded _ | Code_branches_loaded _ | Code_worktrees_loaded _
+      | Code_finder_file_loaded _ | Code_entries_loaded _ | Code_draft_saved _ | Code_file_loaded _
+      | Code_history_loaded _ | Code_diff_loaded _ | Code_blame_loaded _ | Code_lsp_answered _ )
+  | Acting_pane_changes_loaded _ | Resource_exported _ | Resource_share_changed _
   | Github_identity_view_loaded _ | Identity_providers_loaded _ | Identity_switch_set _
   | Identity_login_started _ | Identity_refreshed _ | Identity_app_saved _
   | Identity_disconnected _ | Account_login_event _ | Account_login_json _
@@ -1432,11 +1436,13 @@ let retired_operation_observation state ~authority ~reading message =
     | Play_room_received (_, _) | Play_invites_listed (_, _)
     | Play_invite_issued (_, _, _) | Play_invite_revoked (_, _, _, _)
     | Librarian_input_loaded (_, _) | (Resources_listed _ | Artifact_checks_loaded _)
-    | Code_draft_saved _ | Board_attachment_saved _ | Code_catalog_loaded _ | Code_branches_loaded _ | Code_worktrees_loaded _ | Code_finder_file_loaded _
-    | Code_entries_loaded (_, _) | Code_file_loaded (_, _, _)
-    | Code_history_loaded (_, _) | Code_diff_loaded (_, _)
-    | Acting_pane_changes_loaded (_, _) | Code_blame_loaded (_, _)
-    | Code_lsp_answered (_, _) | Resource_exported _ | Resource_share_changed _ | Resource_share_recovery_loaded _ | Resource_read (_, _, _) | Resource_diagram_ready _
+    | Code_msg
+        ( Code_draft_saved _ | Code_catalog_loaded _ | Code_branches_loaded _ | Code_worktrees_loaded _
+        | Code_finder_file_loaded _ | Code_entries_loaded (_, _) | Code_file_loaded (_, _, _)
+        | Code_history_loaded (_, _) | Code_diff_loaded (_, _) | Code_blame_loaded (_, _)
+        | Code_lsp_answered (_, _) )
+    | Board_attachment_saved _ | Acting_pane_changes_loaded (_, _)
+    | Resource_exported _ | Resource_share_changed _ | Resource_share_recovery_loaded _ | Resource_read (_, _, _) | Resource_diagram_ready _
     | Github_identity_view_loaded (_, _) | Identity_providers_loaded (_, _, _)
     | Identity_switch_set (_, _, _, _) | Identity_login_started (_, _)
     | Identity_refreshed (_, _) | Identity_app_saved (_, _, _)
@@ -1570,11 +1576,13 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Play_room_received (_, _) | Play_invites_listed (_, _)
   | Play_invite_issued (_, _, _) | Play_invite_revoked (_, _, _, _)
   | Librarian_input_loaded (_, _) | (Resources_listed _ | Artifact_checks_loaded _)
-  | Code_draft_saved _ | Board_attachment_saved _ | Code_catalog_loaded _ | Code_branches_loaded _ | Code_worktrees_loaded _ | Code_finder_file_loaded _
-  | Code_entries_loaded (_, _) | Code_file_loaded (_, _, _)
-  | Code_history_loaded (_, _) | Code_diff_loaded (_, _)
-  | Acting_pane_changes_loaded (_, _) | Code_blame_loaded (_, _)
-  | Code_lsp_answered (_, _) | Resource_exported _ | Resource_share_changed _ | Resource_share_recovery_loaded _ | Resource_read (_, _, _) | Resource_diagram_ready _
+  | Code_msg
+      ( Code_draft_saved _ | Code_catalog_loaded _ | Code_branches_loaded _ | Code_worktrees_loaded _
+      | Code_finder_file_loaded _ | Code_entries_loaded (_, _) | Code_file_loaded (_, _, _)
+      | Code_history_loaded (_, _) | Code_diff_loaded (_, _) | Code_blame_loaded (_, _)
+      | Code_lsp_answered (_, _) )
+  | Board_attachment_saved _ | Acting_pane_changes_loaded (_, _)
+  | Resource_exported _ | Resource_share_changed _ | Resource_share_recovery_loaded _ | Resource_read (_, _, _) | Resource_diagram_ready _
   | Github_identity_view_loaded (_, _) | Identity_providers_loaded (_, _, _)
   | Identity_switch_set (_, _, _, _) | Identity_login_started (_, _)
   | Identity_refreshed (_, _) | Identity_app_saved (_, _, _)

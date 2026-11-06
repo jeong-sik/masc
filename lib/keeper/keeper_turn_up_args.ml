@@ -13,7 +13,6 @@ type parsed_args = {
   name : string;
   runtime_id_opt : string option;
   activation_mode_opt : Keeper_activation_mode.t option;
-  input_policy_opt : Keeper_input_policy.t option;
   mention_targets_opt : string list option;
   board_interests_opt : string list option;
   max_context_override_opt : int option;
@@ -241,7 +240,6 @@ let known_turn_up_args =
   [ "name"
   ; "runtime_id"
   ; "activation_mode"
-  ; "input_policy"
   ; "mention_targets"
   ; "board_interests"
   ; "max_context_override"
@@ -398,18 +396,6 @@ let parse
     match activation_mode_result with
     | Error message -> Error (tool_result_error ~class_:Tool_result.Policy_rejection message)
     | Ok activation_mode_opt ->
-    let input_policy_result =
-      match Json_util.assoc_member_opt "input_policy" args with
-      | None -> Ok None
-      | Some (`String raw) ->
-        (match Keeper_input_policy.of_string raw with
-         | Some policy -> Ok (Some policy)
-         | None -> Error "input_policy must be small or wide")
-      | Some _ -> Error "input_policy must be a string"
-    in
-    match input_policy_result with
-    | Error message -> Error (tool_result_error ~class_:Tool_result.Policy_rejection message)
-    | Ok input_policy_opt ->
     match parse_sandbox_image_patch args with
     | Error message -> Error (tool_result_error ~class_:Tool_result.Policy_rejection message)
     | Ok sandbox_image_patch ->
@@ -450,7 +436,6 @@ let parse
         ; network_mode = network_mode_opt
         ; mention_targets = mention_targets_opt
         ; board_interests = board_interests_opt
-        ; input_policy = input_policy_opt
         ; activation_mode = activation_mode_opt
         ; sandbox_image = sandbox_image_patch
         ; microvm_backend = microvm_backend_patch
@@ -671,7 +656,6 @@ let parse
       name;
       runtime_id_opt;
       activation_mode_opt;
-      input_policy_opt;
       mention_targets_opt;
       board_interests_opt;
       max_context_override_opt;

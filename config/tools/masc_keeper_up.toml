@@ -131,12 +131,6 @@ enum = ["manual", "on_demand", "autonomous"]
 description = "Owner activation and initiative: manual never starts the owner by itself, and queued work waits until an operator starts it; on_demand restores an owner without spontaneous cycles; autonomous restores an owner and permits spontaneous cycles. Pause and shutdown still apply."
 
 [[params]]
-name = "input_policy"
-type = "string"
-enum = ["small", "wide"]
-description = "Agent Core history: small references completed tool output; wide retains bodies. Default small; token cap is separate."
-
-[[params]]
 name = "max_context_override"
 type = "integer"
 description = """

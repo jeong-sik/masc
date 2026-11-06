@@ -163,7 +163,6 @@ type toml_field_patch =
   ; network_mode : network_mode option
   ; mention_targets : string list option
   ; board_interests : string list option
-  ; input_policy : Keeper_input_policy.t option
   ; activation_mode : Keeper_activation_mode.t option
   ; sandbox_image : string option option
   ; microvm_backend : Keeper_microvm_backend.t option option

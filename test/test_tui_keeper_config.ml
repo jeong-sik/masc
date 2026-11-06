@@ -12,7 +12,6 @@ let observed =
         }
       },
       "activation_mode": "autonomous",
-      "input_policy": "small",
       "max_context_override": null,
       "sandbox_profile": "docker",
       "remote_endpoint": null,
@@ -42,7 +41,6 @@ let test_editor_starts_from_observed_values () =
     ; "mention_targets"
     ; "board_interests"
     ; "activation_mode"
-    ; "input_policy"
     ; "max_context_override"
     ; "sandbox_profile"
     ; "remote_endpoint"
@@ -297,15 +295,6 @@ let test_patch_contains_only_changed_fields () =
       Alcotest.(check string) "one changed field"
         {|{"expected_config_revision":{"manifest":{"state":"sha256","value":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"runtime_assignment":{"state":"runtime_config_present","source_revision":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","assignment":{"state":"assigned","runtime_id":"codex_subscription.gpt-5.6-sol"}}},"activation_mode":"manual"}|}
         (Yojson.Safe.to_string patch)
-
-let test_input_policy_patch () =
-  match patch_of_edit ~before:observed ~after:(`Assoc ["input_policy", `String "wide"]) with
-  | Error refusal -> Alcotest.fail (edit_refusal_to_string refusal)
-  | Ok patch ->
-      Alcotest.(check string) "policy change is editable" "wide"
-        (Yojson.Safe.Util.member "input_policy" patch |> Yojson.Safe.Util.to_string);
-      Alcotest.(check bool) "capacity remains unchanged" false
-        (List.mem "max_context_override" (assoc_keys patch))
 
 let test_deleted_field_means_unchanged () =
   match patch_of_edit ~before:observed ~after:(`Assoc []) with
@@ -824,8 +813,7 @@ let test_deferred_runtime_sync_is_named_in_the_status () =
 let () =
   Alcotest.run "tui keeper config"
     [ ( "projection"
-      , [ Alcotest.test_case "input policy patch" `Quick test_input_policy_patch
-        ; Alcotest.test_case "complete remote sandbox selection" `Quick test_remote_sandbox_selection
+      , [ Alcotest.test_case "complete remote sandbox selection" `Quick test_remote_sandbox_selection
         ; Alcotest.test_case "observed editor stem" `Quick
             test_editor_starts_from_observed_values
         ; Alcotest.test_case "multiline instructions survive editing" `Quick

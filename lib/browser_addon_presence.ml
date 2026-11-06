@@ -87,7 +87,7 @@ let published_or_not = function
        | Error detail -> Withheld (Observation_unreadable detail))
 
 (* Each installation supplies its own observation. Live identities are merged
-   only after duplicate client/Space checks; owned backends stay unambiguous. *)
+   only after duplicate client/Space checks. *)
 let lane reading lane =
   let read = List.filter_map (fun (observed : Lane_addon_runtime.browser_observation) ->
     if Browser_lane.Backend.lane observed.backend = lane
@@ -96,9 +96,7 @@ let lane reading lane =
   let workers = List.map (fun (backend, read) -> backend, match read with
     | Published published -> Some published | Unpublished | Withheld _ -> None) read in
   if List.exists (fun (_, published) -> Option.is_some published) workers
-  then Observed (Browser_addon_observation.merge
-                   ~among:(List.map (fun (observed : Lane_addon_runtime.browser_observation) ->
-                     observed.backend) reading.observations) workers)
+  then Observed (Browser_addon_observation.merge workers)
   else match List.find_map (fun (_, read) -> match read with
       | Withheld reason -> Some reason | Published _ | Unpublished -> None) read with
     | Some reason -> Unavailable reason

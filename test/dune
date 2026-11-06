@@ -3146,6 +3146,8 @@
 
 (include stanzas/test_keeper_composite_live_turn_surface.inc)
 
+(include stanzas/test_keeper_delegate_target_turn.inc)
+
 (include stanzas/test_keeper_runtime_manifest_completeness.inc)
 
 (include stanzas/test_keeper_runtime_manifest_clock_separation.inc)

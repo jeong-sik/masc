@@ -47,6 +47,8 @@ module Kind : sig
     | Runtime_grant
     | Delegate_policy
     | Principal
+      (** A human principal is disabled, enabled, or deleted (design 4.1 and
+          5.1-5, plan B3c-5). The body is that of {!Authz_principal_event}. *)
     | Internal_service_credential
     | Permission_revocation
     | Trigger_evidence

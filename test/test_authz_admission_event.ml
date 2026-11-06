@@ -18,7 +18,13 @@ let user = get (User_id.of_string "0123456789abcdef0123456789abcdef")
 let invite = get (Invite_id.of_string "invite-1")
 let google_alice = get (X.google ~sub:"110169484474386276334")
 let github_alice = get (X.github ~user_id:583231)
-let admission identity = { A.user_id = user; identity; invite_id = invite }
+let membership =
+  { A.workspace_id = get (Workspace_id.of_string "workspace-1")
+  ; account_home_namespace = get (Account_home_namespace.of_string "c0ffee00c0ffee00c0ffee00c0ffee00")
+  }
+;;
+
+let admission identity = { A.user_id = user; identity; invite_id = invite; membership }
 
 let to_body_exn to_body value =
   match to_body value with
@@ -87,7 +93,7 @@ let bytes_of_an_identity () =
 let bytes_of_an_admission () =
   Alcotest.(check string)
     "google"
-    ({|{"user_id":"0123456789abcdef0123456789abcdef","identity":{"provider":"google","sub":"110169484474386276334"},"invite_id":"invite-1"}|})
+    ({|{"user_id":"0123456789abcdef0123456789abcdef","identity":{"provider":"google","sub":"110169484474386276334"},"invite_id":"invite-1","membership":{"workspace_id":"workspace-1","account_home_namespace":"c0ffee00c0ffee00c0ffee00c0ffee00"}}|})
     (Authz_body.to_string (to_body_exn A.to_body (admission google_alice)))
 ;;
 
@@ -110,11 +116,19 @@ let error_name : A.error -> string = function
   | A.Invalid_identity X.Wrong_members -> "identity wrong members"
   | A.Invalid_identity (X.Invalid error) -> "invalid identity: " ^ identity_error_name error
   | A.Invalid_invite_id _ -> "invalid invite id"
+  | A.Invalid_workspace_id _ -> "invalid workspace id"
+  | A.Invalid_account_home_namespace _ -> "invalid account home namespace"
 ;;
 
 let body ?(user_id = `String "user-1") ?(identity = `Assoc [ "provider", `String "github"; "user_id", `Int 1 ])
-    ?(invite_id = `String "invite-1") () =
-  `Assoc [ "user_id", user_id; "identity", identity; "invite_id", invite_id ]
+    ?(invite_id = `String "invite-1") ?(workspace_id = `String "workspace-1")
+    ?(namespace = `String "ns-1") () =
+  `Assoc
+    [ "user_id", user_id
+    ; "identity", identity
+    ; "invite_id", invite_id
+    ; "membership", `Assoc [ "workspace_id", workspace_id; "account_home_namespace", namespace ]
+    ]
 ;;
 
 let refusals =
@@ -134,6 +148,13 @@ let refusals =
   ; "a Google sub with a space", body ~identity:(`Assoc [ "provider", `String "google"; "sub", `String "a b" ]) (), "invalid identity: google sub invalid byte 1"
   ; "an invite id that is a path segment", body ~invite_id:(`String "..") (), "invalid invite id"
   ; "a bad user id comes before a bad identity", body ~user_id:(`String "") ~identity:(`Assoc []) (), "invalid user id"
+  ; "no membership", `Assoc [ "user_id", `String "u"; "identity", `Assoc [ "provider", `String "github"; "user_id", `Int 1 ]; "invite_id", `String "i" ], "wrong members"
+  ; "a membership with its members in another order", `Assoc [ "user_id", `String "u"; "identity", `Assoc [ "provider", `String "github"; "user_id", `Int 1 ]; "invite_id", `String "i"; "membership", `Assoc [ "account_home_namespace", `String "n"; "workspace_id", `String "w" ] ], "wrong members"
+  ; "a namespace that is a number", body ~namespace:(`Int 1) (), "wrong members"
+  ; "an empty workspace id", body ~workspace_id:(`String "") (), "invalid workspace id"
+  ; "a namespace that is a path segment", body ~namespace:(`String "..") (), "invalid account home namespace"
+  ; "a namespace with a capital letter", body ~namespace:(`String "ns-A") (), "invalid account home namespace"
+  ; "a bad invite id comes before a bad workspace", body ~invite_id:(`String "") ~workspace_id:(`String "") (), "invalid invite id"
   ]
 ;;
 
@@ -144,6 +165,23 @@ let a_body_that_is_not_an_admission_is_refused () =
       | Ok _ -> Alcotest.failf "%s was read as an admission" name
       | Error error -> Alcotest.(check string) name expected (error_name error))
     refusals
+;;
+
+(* Two names that differ only in case would name one directory on a file system
+   that does not tell case apart, so a namespace has no capital letter. *)
+let a_namespace_has_no_capital_letter () =
+  let index_of text =
+    match Account_home_namespace.of_string text with
+    | Ok (_ : Account_home_namespace.t) -> None
+    | Error (Authz_id.Invalid_byte { index }) -> Some index
+    | Error (Authz_id.Empty | Authz_id.Too_long | Authz_id.Path_segment) ->
+      Alcotest.failf "%s refused for another reason" text
+  in
+  Alcotest.(check (option int)) "lower case" None (index_of "ns-alice");
+  Alcotest.(check (option int)) "a capital first" (Some 0) (index_of "Ns-alice");
+  Alcotest.(check (option int)) "a capital later" (Some 3) (index_of "ns-Alice");
+  Alcotest.(check (option int)) "a space before a capital" (Some 2) (index_of "ns Alice");
+  Alcotest.(check (option int)) "a capital before a space" (Some 0) (index_of "Ns alice")
 ;;
 
 (* ---- the admission in a record ---- *)
@@ -181,6 +219,7 @@ let () =
       , [ Alcotest.test_case "bytes" `Quick bytes_of_an_admission
         ; Alcotest.test_case "reads back" `Quick an_admission_reads_back
         ; Alcotest.test_case "refusals" `Quick a_body_that_is_not_an_admission_is_refused
+        ; Alcotest.test_case "no capital in a namespace" `Quick a_namespace_has_no_capital_letter
         ] )
     ; "record", [ Alcotest.test_case "who writes it" `Quick only_an_authenticated_principal_writes_one ]
     ]

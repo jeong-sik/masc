@@ -122,7 +122,7 @@ let invite state (record : R.t) =
    the role epoch of that principal (design 8.1). A log restored from before the
    admission would open the token again, so every admission is a [Grant] on the
    principal it makes, and the restored log disagrees with the store. *)
-let admission state (record : R.t) =
+let admission state ~workspace_id (record : R.t) =
   match Authz_admission_event.of_body record.R.body with
   | Error error -> Error (Admission_unreadable error)
   | Ok event when is_pending state (Authz_records.Subject.Invite event.Authz_admission_event.invite_id) ->
@@ -132,6 +132,7 @@ let admission state (record : R.t) =
        Authz_principal_state.admit
          state.principals
          ~invites:state.invites
+         ~workspace_id
          ~author:record.R.author
          ~at_ms:record.R.at_ms
          event
@@ -183,7 +184,7 @@ let read state (record : R.t) =
     mode_event state record
   | K.Invite, Authz_mode_state.Multi_account _ -> invite state record
   | K.Invite, Authz_mode_state.Off _ -> Error (Accounts_off K.Invite)
-  | K.Admission, Authz_mode_state.Multi_account _ -> admission state record
+  | K.Admission, Authz_mode_state.Multi_account workspace_id -> admission state ~workspace_id record
   | K.Admission, Authz_mode_state.Off _ -> Error (Accounts_off K.Admission)
   | K.Admin_assignment, Authz_mode_state.Multi_account _ -> admin_assignment state record
   | K.Admin_assignment, Authz_mode_state.Off _ -> Error (Accounts_off K.Admin_assignment)

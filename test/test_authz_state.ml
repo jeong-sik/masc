@@ -353,7 +353,13 @@ let admission_record ?author ?(at_ms = at_ms) ~user_id ~identity ~invite () =
     | Some author -> author
     | None -> Authz_records.Author.Authenticated (Authz_types.Principal.Human user_id)
   in
-  match Adm.to_body { Adm.user_id; identity; invite_id = invite } with
+  let membership =
+    { Adm.workspace_id = workspace
+    ; account_home_namespace =
+        id_of_string Authz_types.Account_home_namespace.of_string ("ns-" ^ Authz_types.User_id.to_string user_id)
+    }
+  in
+  match Adm.to_body { Adm.user_id; identity; invite_id = invite; membership } with
   | Error _ -> Alcotest.fail "fixture admission refused"
   | Ok body ->
     (match R.make ~head:R.genesis ~at_ms ~author ~kind:K.Admission ~body with

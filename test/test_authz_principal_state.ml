@@ -43,9 +43,22 @@ let invites =
 
 let as_person user_id = Author.Authenticated (Principal.Human user_id)
 
-let admit ?author ?(at_ms = at_ms) ?(invites = invites) t ~user_id ~identity ~invite_id =
+let workspace = get (Workspace_id.of_string "workspace-1")
+
+(* Each person gets the namespace named after them unless a case says. *)
+let admit ?author ?(at_ms = at_ms) ?(invites = invites) ?(workspace_id = workspace) ?namespace t ~user_id
+    ~identity ~invite_id =
   let author = Option.value author ~default:(as_person user_id) in
-  P.admit t ~invites ~author ~at_ms { A.user_id; identity; invite_id }
+  let account_home_namespace =
+    get (Account_home_namespace.of_string (Option.value namespace ~default:("ns-" ^ User_id.to_string user_id)))
+  in
+  P.admit
+    t
+    ~invites
+    ~workspace_id:workspace
+    ~author
+    ~at_ms
+    { A.user_id; identity; invite_id; membership = { A.workspace_id; account_home_namespace } }
 ;;
 
 let admitted_ok = function
@@ -73,6 +86,16 @@ let an_admission_makes_an_admin () =
     (Some "alice")
     (Option.map User_id.to_string (P.find_identity principals (google "111")));
   Alcotest.(check bool) "an Admin" true (P.is_admin principals alice);
+  (match P.find_membership principals alice with
+   | Some { P.workspace_id; account_home_namespace; status = P.Active } ->
+     Alcotest.(check string) "the workspace" "workspace-1" (Workspace_id.to_string workspace_id);
+     Alcotest.(check string) "the namespace" "ns-alice" (Account_home_namespace.to_string account_home_namespace)
+   | None -> Alcotest.fail "no membership was made");
+  Alcotest.(check (option string))
+    "the namespace names the member"
+    (Some "alice")
+    (Option.map User_id.to_string
+       (P.find_namespace principals (get (Account_home_namespace.of_string "ns-alice"))));
   Alcotest.(check bool) "nobody else" false (P.is_admin principals bob);
   (match I.find spent first with
    | Some { I.status = I.Consumed by; _ } ->
@@ -137,7 +160,21 @@ let what_is_refused () =
   check_refused
     "an identity bound before"
     "the identity google:111 is bound to alice"
-    (admit principals ~invites:spent ~user_id:bob ~identity:(google "111") ~invite_id:second)
+    (admit principals ~invites:spent ~user_id:bob ~identity:(google "111") ~invite_id:second);
+  check_refused
+    "another workspace"
+    "the admission names the workspace workspace-2, and the installation is workspace-1"
+    (admit
+       principals
+       ~invites:spent
+       ~workspace_id:(get (Workspace_id.of_string "workspace-2"))
+       ~user_id:bob
+       ~identity:(google "222")
+       ~invite_id:second);
+  check_refused
+    "a namespace given before"
+    "the account home namespace ns-alice was given to alice"
+    (admit principals ~invites:spent ~namespace:"ns-alice" ~user_id:bob ~identity:(google "222") ~invite_id:second)
 ;;
 
 (* Each case fails two checks, and the earlier check in the order of {!P.admit}
@@ -169,6 +206,8 @@ let refusals_are_told_apart () =
       ; P.Invitation (I.Invitation_expired { invite_id = first; expires_at_ms; at_ms })
       ; P.User_id_taken alice
       ; P.Identity_bound { identity = google "111"; user_id = alice }
+      ; P.Workspace_differs { given = workspace; workspace_id = workspace }
+      ; P.Namespace_taken { namespace = get (Account_home_namespace.of_string "ns-alice"); user_id = alice }
       ]
   in
   Alcotest.(check int) "every refusal reads differently" (List.length texts)

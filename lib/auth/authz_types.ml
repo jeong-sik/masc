@@ -8,6 +8,32 @@ module Grant_id = Authz_id.Make ()
 module Policy_id = Authz_id.Make ()
 module Workspace_id = Authz_id.Make ()
 module Invite_id = Authz_id.Make ()
+module Account_home_namespace = struct
+  module Id = Authz_id.Make ()
+  include Id
+
+  let first_capital s =
+    Seq.find_map
+      (fun (index, byte) ->
+        match byte with
+        | 'A' .. 'Z' -> Some index
+        | _ -> None)
+      (String.to_seqi s)
+  ;;
+
+  (* The checks keep the order of [Authz_id]: emptiness and length first, then
+     the first byte outside this alphabet, which is the earlier of the two
+     scans. A path segment has no capital letter. *)
+  let of_string s =
+    match Id.of_string s, first_capital s with
+    | Ok id, None -> Ok id
+    | Ok (_ : Id.t), Some index -> Error (Authz_id.Invalid_byte { index })
+    | Error (Authz_id.Invalid_byte { index }), Some capital ->
+      Error (Authz_id.Invalid_byte { index = Int.min index capital })
+    | ( Error ((Authz_id.Empty | Authz_id.Too_long | Authz_id.Path_segment | Authz_id.Invalid_byte _) as error)
+      , (None | Some _) ) -> Error error
+  ;;
+end
 
 module Principal = struct
   type t =

@@ -32,6 +32,14 @@ type principal = private
   ; status : status
   }
 
+(** The membership that an admission makes in the workspace of the
+    installation (design 4.1, plan B3c-4). *)
+type membership = private
+  { workspace_id : Authz_types.Workspace_id.t
+  ; account_home_namespace : Authz_types.Account_home_namespace.t
+  ; status : status
+  }
+
 type t
 
 val empty : t
@@ -39,6 +47,11 @@ val find : t -> Authz_types.User_id.t -> principal option
 
 (** The principal an identity is bound to. *)
 val find_identity : t -> Authz_external_identity.t -> Authz_types.User_id.t option
+
+val find_membership : t -> Authz_types.User_id.t -> membership option
+
+(** The member a namespace was given to. *)
+val find_namespace : t -> Authz_types.Account_home_namespace.t -> Authz_types.User_id.t option
 
 (** Whether the principal has an Admin assignment that is in force. *)
 val is_admin : t -> Authz_types.User_id.t -> bool
@@ -55,6 +68,15 @@ type refusal =
       { identity : Authz_external_identity.t
       ; user_id : Authz_types.User_id.t  (** The principal it is bound to. *)
       }
+  | Workspace_differs of
+      { given : Authz_types.Workspace_id.t
+      ; workspace_id : Authz_types.Workspace_id.t  (** The workspace of the installation. *)
+      }
+  | Namespace_taken of
+      { namespace : Authz_types.Account_home_namespace.t
+      ; user_id : Authz_types.User_id.t  (** The member it was given to. *)
+      }
+      (** Two members never share the directory of their account homes. *)
 
 val refusal_to_string : refusal -> string
 
@@ -64,13 +86,16 @@ type admitted =
   ; role : Authz_invite_event.role  (** The role of the invitation. *)
   }
 
-(** What one admission record does. [at_ms] is the time of the record, which
+(** What one admission record does. [workspace_id] is the workspace of the
+    installation. [at_ms] is the time of the record, which
     {!Authz_invite_state.consume} compares with the expiry of the invitation.
     The checks run in this order, and the first that fails is the result: the
-    author, the invitation, the user id, the identity. *)
+    author, the invitation, the user id, the identity, the workspace, the
+    namespace. *)
 val admit
   :  t
   -> invites:Authz_invite_state.t
+  -> workspace_id:Authz_types.Workspace_id.t
   -> author:Authz_records.Author.t
   -> at_ms:int
   -> Authz_admission_event.t

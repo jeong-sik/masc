@@ -13,6 +13,14 @@ module Policy_id : Authz_id.S
 module Workspace_id : Authz_id.S
 module Invite_id : Authz_id.S
 
+(** The name of the directory, inside a workspace, that holds the provider
+    account homes of one member (design 4.1 and 5.4). Its alphabet is that of
+    {!Authz_id} without the capital letters: the file system may not tell case
+    apart (APFS does not by default), and two names that differ only in case
+    would name one directory. [of_string] refuses a capital letter with
+    [Invalid_byte]. *)
+module Account_home_namespace : Authz_id.S
+
 module Principal : sig
   type t =
     | Human of User_id.t

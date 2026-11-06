@@ -659,7 +659,7 @@
 - A Muse Keeper keeps its host session after the host compacts it. A resume is checked against the host's last ended turn, named by its id in `lastTurn` of `session/resume`, instead of the completed-turn count, which the host counts again from each compaction boundary; a compaction no longer costs a failed turn and a fresh session (#48054).
 - The TUI Board list reads again when a newer refresh drops the answer of the read made on entering the Board, and keeps its owed read when one `/health` probe fails, as Planning does (#48081).
 - The TUI wraps the Context partial-read failure notice to the window width instead of overflowing (#47931) (#48085).
-- A Librarian claim with no cited items fails absorption instead of being absorbed (#47933) (#48086).
+- The Librarian absorb gate fails the judgment for an absorbing claim that has no citation entry, instead of reading it as citing nothing; a claim whose entry is empty is still judged (#47933) (#48086).
 - An account/read refusal keeps a settled Codex session's prior settlement (#48016) (#48112).
 - An ego step whose bound Space did not open (`taskSpace` itself threw) now
   reads ego's task space list once: a Space ego no longer lists is answered

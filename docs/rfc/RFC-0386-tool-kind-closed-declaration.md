@@ -11,7 +11,7 @@ related: ["0378", "0179"]
 
 ## 1. 결정
 
-Keeper 툴 하나가 "단일 실행 단위인지, 합성/배치 실행 단위인지" 를 닫힌
+Keeper 툴 하나가 "단일 실행 단위인지, 합성 실행 단위인지" 를 닫힌
 합타입으로 선언한다. 타입은 `Keeper_tool_descriptor.tool_kind` 다.
 
 ```ocaml
@@ -19,7 +19,6 @@ type tool_kind =
   | Atomic_tool              (* 한 호출 = 한 capability 실행 *)
   | Composition_tool         (* 카탈로그 고정 plan, inline 실행 *)
   | Async_composition_tool   (* durable async 합성 + status/cancel 컨트롤 *)
-  | Batch_plan_tool          (* 모델 정의 plan을 하나의 DAG 로 실행 *)
 ```
 
 실행 기계는 새로 만들지 않는다. 이미 존재하는 것들을 이 분류가 가리킬
@@ -31,20 +30,21 @@ type tool_kind =
   `Keeper_tool_plan_executor`
 - `lib/keeper/keeper_tool_composition_catalog.ml` — TOML 카탈로그
   (Inline / Async), `keeper_tool_composition_surface.ml` 의
-  `keeper_plan_execute`, `keeper_composition_status`, `keeper_composition_cancel`
+  `keeper_composition_status`, `keeper_composition_cancel`
 
 `execution` 필드(`Ordinary Serial/Concurrent | Terminal`) 와 직교하는
 축이다. `execution` 은 호출이 "어떻게" 실행되는지, `tool_kind` 는 호출이
 "무엇을" 담고 있는지를 분류한다.
 
-constitution feature_surface 용어와의 1:1 매핑:
+constitution feature_surface 용어와의 매핑:
 
 | feature_surface | tool_kind | 코드 대응물 |
 |---|---|---|
 | Multitools | `Composition_tool` | 카탈로그 `keeper_compose_*` (inline) |
 | AsyncTools | `Async_composition_tool` | async 카탈로그 엔트리 + `keeper_composition_status` / `keeper_composition_cancel` |
-| Batch Tools | `Batch_plan_tool` | `keeper_plan_execute` |
 | (기본) | `Atomic_tool` | 나머지 모든 descriptor-backed 툴 |
+
+feature_surface 의 Batch Tools 에 대응하는 `tool_kind` 는 없다.
 
 ## 2. 배경
 
@@ -63,8 +63,6 @@ discovery 전용 분류라 실행 의미를 얹을 수 없다. 이 RFC 가 그 �
   `execution : Inline | Async` 에서 타이프드하게 유도한다
   (Inline → `Composition_tool`, Async → `Async_composition_tool`).
   `status_tool_kind` / `cancel_tool_kind` 는 `Async_composition_tool` 다.
-- `Keeper_tool_composition_surface.plan_execute_tool_kind` —
-  `Batch_plan_tool`.
 
 parse 는 strict 하다. `tool_kind_of_string` 은 알 수 없는 문자열을
 `Error` 로 거부하며, 어떤 폴백 분류도 하지 않는다.
@@ -77,7 +75,7 @@ parse 는 strict 하다. `tool_kind_of_string` 은 알 수 없는 문자열을
    `discovery_fields` 가 `"tool_kind"` 필드를 실는다(현재 전부
    `"atomic"`).
 2. **composition surface 툴** — `keeper_compose_*`,
-   `keeper_plan_execute`, `keeper_composition_status/cancel` 은 TOML
+   `keeper_composition_status/cancel` 은 TOML
    카탈로그에서 구체화되는 `Agent_core.Tool.t` 이며 Keeper descriptor
    registry 에 속하지 않는다(`Keeper_tool_descriptor_resolution` 이
    `None` 을 반환). 따라서 descriptor route evidence 경로는 이 툴들을
@@ -100,14 +98,12 @@ parse 는 strict 하다. `tool_kind_of_string` 은 알 수 없는 문자열을
 
 `test/test_keeper_tool_kind.ml`:
 
-- 4개 생성자의 `tool_kind_to_string` / `tool_kind_of_string` 왕복과 문자열
+- 3개 생성자의 `tool_kind_to_string` / `tool_kind_of_string` 왕복과 문자열
   유일성.
 - unknown 문자열 거부(fail-closed).
 - 전체 descriptor 가 `Atomic_tool` 을 선언하고 route/discovery evidence 에
   `"tool_kind": "atomic"` 이 실리는지.
-- 카탈로그 inline/async 엔트리와 status/cancel 컨트롤,
-  `keeper_plan_execute` 의 kind 태깅.
+- 카탈로그 inline/async 엔트리와 status/cancel 컨트롤의 kind 태깅.
 - composition surface 툴의 실제 관측 경로: status/cancel 결과 payload 에
-  `"tool_kind": "async_composition"` 이 실리고, composition/batch_plan 툴
-  호출의 route evidence 에 각각 `"composition"` / `"batch_plan"` 이
-  나타나는지.
+  `"tool_kind": "async_composition"` 이 실리고, composition 툴 호출의
+  route evidence 에 `"composition"` 이 나타나는지.

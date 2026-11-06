@@ -5,6 +5,13 @@
     decode, and a directory that cannot be listed are errors, never an empty
     answer, because a payout that read nothing would pay nobody. *)
 
+val linked_task_ids :
+  Workspace_utils_backend_setup.config -> goal_id:string -> (string list, string) result
+(** The Tasks the Goal links, read from the primary link registry only. [Error]
+    when the registry cannot be read, or when its primary file is gone while a
+    recovery copy remains. The registry lists only Goals that have links, so a
+    Goal missing from it has none. *)
+
 val lookups :
   Workspace_utils_backend_setup.config
   -> goal_id:string

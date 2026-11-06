@@ -57,6 +57,10 @@ module Kind : sig
     | Mode_event
       (** A change of the mode of the installation (design 5.1). The body is
           that of {!Authz_mode_event}. *)
+    | Invite
+      (** The issue or the revocation of an invitation to join the
+          installation (design 5.1-2b). The body is that of
+          {!Authz_invite_event}. *)
 
   val all : t list
   val to_string : t -> string
@@ -66,8 +70,12 @@ end
 (** Whether [author] may write a record of this kind (design 6.3).
     [Runtime_grant], [Delegate_policy], [Principal],
     [Internal_service_credential], and [Permission_revocation] need an
-    authenticated principal. Each system author writes only its own records,
-    and the local operator writes only recovery records and mode events. *)
+    authenticated principal. Each system author writes only its own records.
+    The local operator writes recovery records, mode events, and invites, and an
+    authenticated principal writes invites too: the first Admin is invited by
+    the local operator and every later one by an Admin. Which authenticated
+    principal may invite is a question of the state, so {!Authz_state} answers
+    it. *)
 val admits : Kind.t -> Author.t -> bool
 
 (** Where the next record goes: its position and the hash it must carry. *)

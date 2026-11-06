@@ -38,6 +38,7 @@ module Kind = struct
     | Migration_diagnostic
     | Local_recovery
     | Mode_event
+    | Invite
 
   let all =
     [ Runtime_grant
@@ -51,6 +52,7 @@ module Kind = struct
     ; Migration_diagnostic
     ; Local_recovery
     ; Mode_event
+    ; Invite
     ]
   ;;
 
@@ -66,6 +68,7 @@ module Kind = struct
     | Migration_diagnostic -> "migration_diagnostic"
     | Local_recovery -> "local_recovery"
     | Mode_event -> "mode_event"
+    | Invite -> "invite"
   ;;
 
   let of_string label = List.find_opt (fun kind -> String.equal (to_string kind) label) all
@@ -87,7 +90,9 @@ let writer_of : Author.t -> writer = function
   | Author.System_migration -> Migration
 ;;
 
-(* Design 6.3. The local operator writes recovery records and mode events. A
+(* Design 6.3. The local operator writes recovery records, mode events, and
+   invites. An invite is also written by an authenticated principal; which one
+   may is for the state to say ({!Authz_state}), as it needs the Admins. A
    mode event is a [Fresh_bootstrap], which design 6.3 gives to the local
    operator, or an [Off] or a [Reactivate], whose writer the design leaves to
    the layer that switches the mode (F3). That layer adds a kind if the writer
@@ -102,6 +107,7 @@ let writers : Kind.t -> writer list = function
   | Kind.Lease_terminal_evidence | Kind.Preauthorized_expiry -> [ Maintenance ]
   | Kind.Migration_diagnostic -> [ Migration ]
   | Kind.Local_recovery | Kind.Mode_event -> [ Host_operator ]
+  | Kind.Invite -> [ Host_operator; Authenticated_principal ]
 ;;
 
 let admits kind author = List.mem (writer_of author) (writers kind)

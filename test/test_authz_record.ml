@@ -39,6 +39,7 @@ let writers_of =
     ; Migration_diagnostic, [ "system migration" ]
     ; Local_recovery, [ "local operator" ]
     ; Mode_event, [ "local operator" ]
+    ; Invite, "local operator" :: authenticated
     ]
 ;;
 
@@ -67,6 +68,7 @@ let ordinal = function
   | R.Kind.Migration_diagnostic -> 8
   | R.Kind.Local_recovery -> 9
   | R.Kind.Mode_event -> 10
+  | R.Kind.Invite -> 11
 ;;
 
 let kinds_are_all_listed () =
@@ -388,6 +390,7 @@ let kind_labels_are_the_names_on_disk () =
     ; "migration_diagnostic"
     ; "local_recovery"
     ; "mode_event"
+    ; "invite"
     ]
     (List.map R.Kind.to_string R.Kind.all)
 ;;

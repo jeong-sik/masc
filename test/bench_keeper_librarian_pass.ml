@@ -444,14 +444,6 @@ let settled_on fixture ~date (record:Owner.retained) =
 let settle_only fixture ~date (record:Owner.retained) =
   io (fun () -> Owner.settle ~store:fixture.store ~date (Owner.listed record))
   |> Result.map_error Owner.settle_error_to_string |> get
-(* A settled original as the archive holds it: its progress, and the request
-   body its record names. *)
-let archived fixture ~date (record:Owner.retained) =
-  let read path=io (fun () -> Yojson.Safe.from_file (Filename.concat (Store.root fixture.store) path)) in
-  let stored=read (Store.tool_request_archive_record_path ~scope:record.scope ~date ~request_id:record.request_id) in
-  Progress.of_json (member "progress" stored) |> get,
-  read (Store.tool_request_archive_body_path ~scope:record.scope ~date
-    ~request_digest:(Yojson.Safe.Util.to_string (member "request_digest" stored)))
 let assert_unattached = function
   | Error error ->
     check bool "attachment is a blocked original publication" true (Consumer.publication_unfinished error);

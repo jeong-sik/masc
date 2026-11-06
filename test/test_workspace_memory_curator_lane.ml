@@ -94,14 +94,6 @@ let find_original store request_id=
   match List.find_opt (fun original -> original.stored_id=request_id) (every_original store) with
   | Some original -> original
   | None -> fail "an original is in neither its scope nor the settled archive"
-(* The request an original names, read from its scope or from the archive. *)
-let request_of store request_id=
-  match owned (Owner.load ~store ~scope:Capture.scope ~request_id) with
-  | Some retained -> retained.Owner.request
-  | None -> match List.find_opt (fun (_,json) -> text json "request_id"=request_id) (settled_records store) with
-    | None -> fail "an original is in neither its scope nor the settled archive"
-    | Some (date,json) -> Yojson.Safe.from_file (Filename.concat (Store.root store)
-        (Store.tool_request_archive_body_path ~scope:Capture.scope ~date ~request_digest:(text json "request_digest")))
 let await clock condition=Eio.Time.with_timeout_exn clock F.fixture_wait_seconds (fun () ->
   let rec loop ()=if condition () then () else (Eio.Fiber.yield ();loop ()) in loop ())
 let await_owner clock base_path condition=
@@ -808,7 +800,6 @@ let test_finished_identity_readded_after_observed_removal ()=
     check bool "new original reaches a confirmed domain commit" true (is_finished fresh.Owner.progress);
     let retained=find_original store original.request_id in
     check json "completed original progress stays unchanged" progress (Progress.to_json retained.stored_progress);
-    check json "completed original capture stays unchanged" original.request (request_of store original.request_id);
     check int "only new classification and synthesis call the provider" (calls+2) (F.post_count server))
 let test_a_pass_reads_no_body_of_an_observed_finished_original ()=
   let claim="A source finished and observed before the next pass"
@@ -860,9 +851,10 @@ let test_finished_chains_move_out_of_the_scope_by_their_root_date ()=
       let request_digest=text json "request_digest" in
       check string "a settled root is under the UTC date its ID was minted"
         (get (Capture.Request_id.minted_on (get (Capture.Request_id.of_string (text json "request_id"))))) date;
-      check bool "its body moved with it" true
-        (Sys.file_exists (path (Store.tool_request_archive_body_path ~scope:Capture.scope ~date ~request_digest)));
-      check bool "and is no longer beside the scope" false
+      check (list string) "its day keeps no body" ["records"]
+        (Sys.readdir (path (Filename.concat Store.tool_request_archive_directory
+          (Filename.concat (Store.digest Capture.scope) date))) |> Array.to_list);
+      check bool "and its body is no longer beside the scope" false
         (Sys.file_exists (path (Store.tool_request_body_path ~scope:Capture.scope ~request_digest))))
       (settled_records store))
 let test_discovery_finishes_a_chain_whose_settle_stopped_partway ()=
@@ -871,6 +863,9 @@ let test_discovery_finishes_a_chain_whose_settle_stopped_partway ()=
     (fun ~sw ~clock ~base_path ~config ~store ~source:_ ~declaration:_ ~server:_ ~urls:_ ~mode:_ ~delivery:_ ->
     await clock (fun () -> (Runtime.tool_export_snapshot ~config ~access:Lane_addon_sources.Operator_configuration ~reserved:[]).exports<>[]);
     let parent=seed_size_refusal store (capture_classification config) in
+    let path relative=Filename.concat (Store.root store) relative in
+    let live_body=path (Store.tool_request_body_path ~scope:Capture.scope ~request_digest:parent.request_digest) in
+    let parent_body=Fs_compat.load_file live_body in
     let settled_under request_id=List.find_map (fun (date,json) ->
         if text json "request_id"=request_id then Some date else None) (settled_records store) in
     Curator.start ~sw ~config;
@@ -887,22 +882,18 @@ let test_discovery_finishes_a_chain_whose_settle_stopped_partway ()=
       | Finished _ | Conflicted _ | Rejected _ | Subdividing _ -> fail "the refused root was not narrowed" in
     let date=Option.get (settled_under parent.request_id) in
     check (option string) "the child is under its root's date" (Some date) (settled_under child);
-    let path relative=Filename.concat (Store.root store) relative in
     let live_record=path (Filename.concat "tool-request-owners"
         (Filename.concat (Store.digest Capture.scope) (Store.digest parent.request_id ^ ".json"))) in
     let settled_record=path (Store.tool_request_archive_record_path ~scope:Capture.scope ~date ~request_id:parent.request_id) in
-    let live_body=path (Store.tool_request_body_path ~scope:Capture.scope ~request_digest:parent.request_digest)
-    and settled_body=path (Store.tool_request_archive_body_path ~scope:Capture.scope ~date
-        ~request_digest:parent.request_digest) in
     (* What a settle interrupted after the child and before its parent leaves:
        the child under the date, the parent still in the scope. *)
-    let interrupt ()=Unix.rename settled_record live_record;Unix.rename settled_body live_body in
+    let interrupt ()=Unix.rename settled_record live_record;write live_body parent_body in
     interrupt ();
     let discovered=Consumer.discover ~config |> consumed in
     check bool "discovery does not list the parent" false
       (List.exists (fun (original:Consumer.original) -> Owner.Record.request_id original.record=parent.request_id) discovered);
     check bool "the parent's record is under the date again" true (Sys.file_exists settled_record);
-    check bool "and its body" true (Sys.file_exists settled_body && not (Sys.file_exists live_body));
+    check bool "and its body is removed" false (Sys.file_exists live_body);
     (* A child in neither place is a broken link, not an interrupted settle. *)
     interrupt ();
     Sys.remove (path (Store.tool_request_archive_record_path ~scope:Capture.scope ~date ~request_id:child));

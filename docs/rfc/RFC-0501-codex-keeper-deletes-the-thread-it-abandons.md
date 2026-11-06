@@ -142,15 +142,28 @@ val delete_threads :
 
 ```ocaml
 type thread_mode =
-  | Ephemeral
   | Start
   | Resume of { thread_id : string }
+
+type thread =
+  | Ephemeral
+  | Persistent of thread_mode
 ```
 
-- `?thread_mode` 기본값을 없애고 `~thread_mode` 를 필수로 한다. 호출처마다 고른다.
-- `Fusion_official_client`, `Keeper_capability_probe` 는 `Ephemeral` 을 넘긴다. `thread/start` 에 `"ephemeral": true` 를 보낸다.
-- `Runtime_verification` 은 실행 폴더 안 `codex-home` 을 쓴다. `Ephemeral` 로 바꿔도 그 폴더의 수명은 바뀌지 않는다. 이 RFC 는 `Ephemeral` 만 넘긴다.
+- `run_turn` 과 `validate_turn` 의 `?thread_mode` 를 없애고 `~thread` 를 필수로 한다. 호출처마다 고른다.
+- `Keeper_codex_runtime` 은 `Persistent thread_mode` 를 넘긴다. Keeper 가 들고 다니는 `thread_mode` 는 그대로다. `Ephemeral` 을 `thread_mode` 에 넣으면 Keeper 의 `thread_mode` match 12곳에 일어나지 않는 갈래가 생긴다. 그래서 감싸는 타입을 따로 둔다.
+- `Fusion_official_client`, `Keeper_capability_probe`, `Runtime_verification` 은 `Ephemeral` 을 넘긴다. `thread/start` 에 `"ephemeral": true` 를 보낸다. `Persistent Start` 는 `false` 를, `Resume` 은 이 필드를 보내지 않는다.
+- `Runtime_verification` 은 실행 폴더 안 `codex-home` 을 쓴다. `Ephemeral` 로 바꿔도 그 폴더의 수명은 바뀌지 않는다.
 - `thread_is_ephemeral` 상수는 지운다. 값은 생성자가 정한다.
+
+11-06 에 codex-cli 0.166.0 으로 확인했다. 빈 임시 `CODEX_HOME` 과 로컬 모의 Responses 서버를 썼다. 실제 계정과 모델은 쓰지 않았다. 동적 도구 하나(`masc/probe_echo`)를 넘기고 턴 하나를 끝까지 돌렸다.
+
+| `ephemeral` | `thread/start` 답의 `path` | 모델 요청의 도구 목록 | `sessions/` rollout | `state_5` `threads` 행 | `thread_history_1.sqlite` |
+| --- | --- | --- | --- | --- | --- |
+| `true` | null | `masc/probe_echo` 있음 | 0개 | 0 | 없음 |
+| `false` | 있음 | `masc/probe_echo` 있음 | 1개 | 1 | turns 1, items 2 |
+
+두 경우 모두 `thread/tokenUsage/updated` 와 `turn/completed` 가 왔다. `Fusion_official_client` 가 읽는 thread 사용량 알림은 `Ephemeral` 에서도 온다.
 
 ### 2.4 client 나 계정이 바뀐 thread
 
@@ -175,9 +188,9 @@ runtime id 나 client 종류가 바뀌면 옛 thread 는 다른 계정 home 이�
 | 모듈 | 바뀌는 것 |
 | --- | --- |
 | `Keeper_official_client_session_store` | `forgotten` 타입과 `forgotten_sessions` 추가 |
-| `Runtime_codex_app_server` | `delete_threads` 추가, `thread_mode` 에 `Ephemeral`, `~thread_mode` 필수, `thread_is_ephemeral` 삭제 |
-| `Keeper_codex_runtime` | claim·release 에서 잊은 id 를 모으고 턴 뒤 `delete_threads` |
-| `Fusion_official_client`, `Keeper_capability_probe`, `Runtime_verification` | `~thread_mode` 를 넘긴다 |
+| `Runtime_codex_app_server` | `delete_threads` 추가, `thread = Ephemeral \| Persistent of thread_mode` 추가, `run_turn`·`validate_turn` 의 `~thread` 필수, `thread_is_ephemeral` 상수 삭제 |
+| `Keeper_codex_runtime` | 턴이 지나간 기록을 모아 마지막 기록과 견주고, 잊은 id 를 턴 뒤 `delete_threads` 로 지운다. `~thread:(Persistent thread_mode)` 를 넘긴다 |
+| `Fusion_official_client`, `Keeper_capability_probe`, `Runtime_verification` | `~thread:Ephemeral` 을 넘긴다 |
 
 ## 4. 하지 않는 것
 
@@ -195,7 +208,7 @@ runtime id 나 client 종류가 바뀌면 옛 thread 는 다른 계정 home 이�
 | --- | --- | --- |
 | L1 | 이 RFC | 리뷰 |
 | L2 | `forgotten_sessions`(2.1), `delete_threads` 와 Keeper 턴 뒤 호출(2.2) | type-check. 시험: 기록의 실제 전이(resume, 바뀐 도구 면 claim, revert, release, client 전환)에서 2.1 이 내는 id, 그리고 `thread/delete` 가 id 마다 답을 따로 낸다(하나는 성공, 하나는 `-32600`). 삭제는 턴 결과를 다 계산한 뒤 `unit` 을 돌려주는 함수가 하므로 거절이 턴 결과를 바꿀 길이 없다 |
-| L3 | `Ephemeral`, `~thread_mode` 필수(2.3) | type-check. 시험: `Ephemeral` 이 `"ephemeral": true` 를 보낸다. 배포 전에 실제 app-server 에서 ephemeral thread 가 `dynamicTools` 를 받는지 확인 |
+| L3 | `thread = Ephemeral \| Persistent of thread_mode`, `~thread` 필수(2.3) | type-check. 시험: `Ephemeral` 은 `"ephemeral": true`, `Persistent Start` 는 `false`, `Resume` 은 필드 없음. 실제 app-server 확인은 2.3 의 표 |
 | L4 | changelog `Fresh state required`, 운영자 절차(2.5) | `changelog-fragments.py check`, 임시 home 복사본에서 절차 확인 |
 
 배포 뒤 확인: Codex Keeper 가 다시 돌면 계정 home 의 rollout 수가 Codex Keeper 수 근처에 머무는지 본다. 로그의 `thread/delete` 결과 줄 수와 실패 수를 센다.

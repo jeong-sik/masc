@@ -43,7 +43,6 @@ let stderr_chunk_bytes = 4096
 let stderr_tail_bytes = 4096
 let max_wire_line_bytes = 8 * 1024 * 1024
 let approval_policy = "never"
-let thread_is_ephemeral = false
 
 let client_version = Runtime_build_version.current
 
@@ -91,6 +90,15 @@ type image_input = Runtime_official_client_tool.image_input =
 type thread_mode =
   | Start
   | Resume of { thread_id : string }
+
+type thread =
+  | Ephemeral
+  | Persistent of thread_mode
+
+let thread_is_ephemeral = function
+  | Ephemeral -> true
+  | Persistent (Start | Resume _) -> false
+;;
 
 (* The per-turn counts the app-server reports on thread/tokenUsage/updated,
    its [last] breakdown. OpenAI counting: [input_tokens] already includes the
@@ -2512,7 +2520,7 @@ let history_item (message : history_message) =
 ;;
 
 let run_protocol io (config : config) ~on_undelivered_tool_result ~on_tool_response_confirmed ~protocol_cwd ~dynamic_tools ~reasoning_effort
-    ~thread_mode ~history ~developer_context ~prompt ~images ~on_thread_ready ~on_turn_starting ~on_turn_dispatched ~on_prompt_sent
+    ~thread ~history ~developer_context ~prompt ~images ~on_thread_ready ~on_turn_starting ~on_turn_dispatched ~on_prompt_sent
     ~on_turn_started ~on_stream_event ~on_reasoning_effort_resolved =
   send_control_request io ~id:1 ~method_:"initialize"
     ~params:
@@ -2558,8 +2566,8 @@ let run_protocol io (config : config) ~on_undelivered_tool_result ~on_tool_respo
      Pin the advertised default when no model was configured, so thread/start
      and the admitted account metadata name the same model. Resume creates no
      new thread and still admits against the model returned by thread/resume. *)
-  let* start_admission = match thread_mode, requested with
-    | Start, Some effort ->
+  let* start_admission = match thread, requested with
+    | (Ephemeral | Persistent Start), Some effort ->
         admission ~model:(Option.value ~default:"<account default>" config.model) (fun () ->
           let* rows, next_request_id = read_model_pages io ~include_hidden:true ~request_id:4 in
           let selected = List.filter (fun row -> match config.model with
@@ -2570,17 +2578,17 @@ let run_protocol io (config : config) ~on_undelivered_tool_result ~on_tool_respo
             | [] | _::_ -> protocol_error "model/list" "selected model has no unique advertised reasoning metadata" in
           let* effective = resolve_reasoning_effort row effort in
           Ok (Some (row.model, effective, next_request_id)))
-    | Start, None | Resume _, _ -> Ok None in
+    | (Ephemeral | Persistent Start), None | Persistent (Resume _), _ -> Ok None in
   let selected_model = match start_admission with
     | Some (model,_,_) -> Some model | None -> config.model in
   let thread_request, thread_fields, resumed =
-    match thread_mode with
-    | Start ->
+    match thread with
+    | Ephemeral | Persistent Start ->
       ( Start_thread
       , ([ "cwd", `String protocol_cwd
          ; "approvalPolicy", `String approval_policy
          ; "permissions", `String permissions_profile
-         ; "ephemeral", `Bool thread_is_ephemeral
+         ; "ephemeral", `Bool (thread_is_ephemeral thread)
          ]
          @ optional_field "model" selected_model
          @ optional_field "developerInstructions" config.developer_instructions
@@ -2589,7 +2597,7 @@ let run_protocol io (config : config) ~on_undelivered_tool_result ~on_tool_respo
          | [] -> []
          | tools -> [ "dynamicTools", `List (List.map dynamic_tool_spec tools) ])
       , false )
-    | Resume { thread_id } ->
+    | Persistent (Resume { thread_id }) ->
       ( Resume_thread
       (* [excludeTurns]: the reply is read for the thread id and the model only
          (parse_thread_response). Without it Codex returns every past turn in
@@ -2613,15 +2621,17 @@ let run_protocol io (config : config) ~on_undelivered_tool_result ~on_tool_respo
   in
   let thread_method = context_submission_method_label (context_request_method thread_request) in
   send_context_request io thread_request ~id:3
-    ~thread_id:(match thread_mode with Start -> None | Resume { thread_id } -> Some thread_id)
+    ~thread_id:(match thread with
+      | Ephemeral | Persistent Start -> None
+      | Persistent (Resume { thread_id }) -> Some thread_id)
     ~params:(`Assoc thread_fields);
-  let* thread = await_response io ~id:3 ~method_:thread_method in
-  let* thread_id, model = parse_thread_response ~stage:thread_method thread in
+  let* thread_reply = await_response io ~id:3 ~method_:thread_method in
+  let* thread_id, model = parse_thread_response ~stage:thread_method thread_reply in
   let* () =
-    match thread_mode with
-    | Start -> Ok ()
-    | Resume { thread_id = expected } when String.equal expected thread_id -> Ok ()
-    | Resume { thread_id = expected } ->
+    match thread with
+    | Ephemeral | Persistent Start -> Ok ()
+    | Persistent (Resume { thread_id = expected }) when String.equal expected thread_id -> Ok ()
+    | Persistent (Resume { thread_id = expected }) ->
       protocol_error
         thread_method
         (Printf.sprintf
@@ -2645,7 +2655,7 @@ let run_protocol io (config : config) ~on_undelivered_tool_result ~on_tool_respo
     on_reasoning_effort_resolved ~model ~requested ~effective:reasoning_effort;
     Ok ()) in
   let messages_to_inject =
-    (match thread_mode with Start -> history | Resume _ -> [])
+    (match thread with Ephemeral | Persistent Start -> history | Persistent (Resume _) -> [])
     @ List.map (fun text -> { role = Developer; text }) developer_context
   in
   let turn_request_id =
@@ -3040,7 +3050,7 @@ let with_spawned_client ?(on_context_submission = fun _ -> ()) ~mgr ~clock ~cwd 
 ;;
 
 let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~on_undelivered_tool_result ~on_tool_response_confirmed ~dynamic_tools ~on_context_submission
-    ~reasoning_effort ~thread_mode ~history ~developer_context ~prompt ~images ~on_thread_ready
+    ~reasoning_effort ~thread ~history ~developer_context ~prompt ~images ~on_thread_ready
     ~on_turn_starting ~on_turn_dispatched ~on_prompt_sent ~on_turn_started ~on_stream_event
     ~on_reasoning_effort_resolved =
   with_spawned_client ~on_context_submission
@@ -3061,7 +3071,7 @@ let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~on_undelivered_tool_resul
       ~dynamic_tools
       ~reasoning_effort
       ~on_reasoning_effort_resolved
-      ~thread_mode
+      ~thread
       ~history
       ~developer_context
       ~prompt
@@ -3125,16 +3135,16 @@ let validate_process_config config =
   else Ok ()
 ;;
 
-let validate_config config ~cwd ~thread_mode ~prompt =
+let validate_config config ~cwd ~thread ~prompt =
   let* () = validate_process_config config in
   if String.trim prompt = ""
   then Error (Invalid_config "prompt must not be empty")
   else
     let* cwd = native_cwd cwd in
-    match thread_mode with
-    | Resume { thread_id } when String.equal (String.trim thread_id) "" ->
+    match thread with
+    | Persistent (Resume { thread_id }) when String.equal (String.trim thread_id) "" ->
       Error (Invalid_config "resume thread_id must not be empty")
-    | Start | Resume _ -> Ok cwd
+    | Ephemeral | Persistent (Start | Resume _) -> Ok cwd
 ;;
 
 let validate_dynamic_tools tools =
@@ -3151,11 +3161,11 @@ let validate_dynamic_tools tools =
   loop [] tools
 ;;
 
-let validate_turn_input ~dynamic_tools ~thread_mode ~cwd config ~prompt ~images =
+let validate_turn_input ~dynamic_tools ~thread ~cwd config ~prompt ~images =
   match Runtime_official_client_tool.validate_image_inputs images with
   | Error detail -> Error (Invalid_config detail)
   | Ok () ->
-  match validate_config config ~cwd ~thread_mode ~prompt with
+  match validate_config config ~cwd ~thread ~prompt with
   | Error _ as error -> error
   | Ok protocol_cwd ->
     (match validate_dynamic_tools dynamic_tools with
@@ -3163,8 +3173,8 @@ let validate_turn_input ~dynamic_tools ~thread_mode ~cwd config ~prompt ~images 
      | Ok () -> Ok protocol_cwd)
 ;;
 
-let validate_turn ?(dynamic_tools = []) ?(thread_mode = Start) ~cwd config ~prompt ~images =
-  validate_turn_input ~dynamic_tools ~thread_mode ~cwd config ~prompt ~images
+let validate_turn ?(dynamic_tools = []) ~thread ~cwd config ~prompt ~images =
+  validate_turn_input ~dynamic_tools ~thread ~cwd config ~prompt ~images
   |> Result.map (fun _ -> ())
 ;;
 
@@ -3217,7 +3227,7 @@ let read_rate_limits ~mgr ~clock ~cwd config =
   probe_metadata ~label:subscription_probe_label ~mgr ~clock ~cwd config rate_limits_read_protocol
 ;;
 
-let run_turn ?(dynamic_tools = []) ?(on_undelivered_tool_result = fun _ -> Error "No durable owner is configured for the undelivered tool result") ?(on_tool_response_confirmed = fun ~call_id:_ -> ()) ?reasoning_effort ?(thread_mode = Start) ~mgr ~clock ~cwd
+let run_turn ?(dynamic_tools = []) ?(on_undelivered_tool_result = fun _ -> Error "No durable owner is configured for the undelivered tool result") ?(on_tool_response_confirmed = fun ~call_id:_ -> ()) ?reasoning_effort ~thread ~mgr ~clock ~cwd
     ?(history = [])
     ?(developer_context = [])
     ?(on_context_submission = fun _ -> ())
@@ -3242,7 +3252,7 @@ let run_turn ?(dynamic_tools = []) ?(on_undelivered_tool_result = fun _ -> Error
     on_turn_started ~thread_id ~turn_id
   in
   let result =
-    match validate_turn_input ~dynamic_tools ~thread_mode ~cwd config ~prompt ~images with
+    match validate_turn_input ~dynamic_tools ~thread ~cwd config ~prompt ~images with
     | Error _ as error -> error
     | Ok protocol_cwd ->
       (* Eight keepers starting a turn in the same second produced eight
@@ -3251,9 +3261,10 @@ let run_turn ?(dynamic_tools = []) ?(on_undelivered_tool_result = fun _ -> Error
          this entry point holds before [on_thread_ready] fires. *)
       Log.Runtime_agent.info
         "Codex app-server subscription turn starting thread=%s model=%s"
-        (match thread_mode with
-         | Start -> "new"
-         | Resume { thread_id } -> thread_id)
+        (match thread with
+         | Ephemeral -> "ephemeral"
+         | Persistent Start -> "new"
+         | Persistent (Resume { thread_id }) -> thread_id)
         (match config.model with
          | Some model -> model
          | None -> "-");
@@ -3271,7 +3282,7 @@ let run_turn ?(dynamic_tools = []) ?(on_undelivered_tool_result = fun _ -> Error
               ~on_context_submission
               ~reasoning_effort
               ~on_reasoning_effort_resolved
-              ~thread_mode
+              ~thread
               ~history
               ~developer_context
               ~prompt

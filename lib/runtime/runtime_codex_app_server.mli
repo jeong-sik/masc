@@ -81,6 +81,14 @@ type thread_mode =
   | Start
   | Resume of { thread_id : string }
 
+type thread =
+  | Ephemeral
+  (** [thread/start] with [ephemeral: true]. Codex writes no rollout file, no
+      [threads] row and no turn history for it, so no later call can resume
+      it. For a caller that never continues the conversation (RFC-0501 2.3). *)
+  | Persistent of thread_mode
+  (** A thread on disk: [Start] opens one that a later [Resume] continues. *)
+
 (* The per-turn counts the app-server reports on thread/tokenUsage/updated,
    its [last] breakdown. OpenAI counting: [input_tokens] already includes the
    cached prefix and [output_tokens] already includes reasoning, the same
@@ -420,7 +428,7 @@ val refused_for_spent_usage : error -> bool
 
 val validate_turn :
   ?dynamic_tools:dynamic_tool list ->
-  ?thread_mode:thread_mode ->
+  thread:thread ->
   cwd:Eio.Fs.dir_ty Eio.Path.t ->
   config ->
   prompt:string ->
@@ -519,7 +527,7 @@ val run_turn :
      are not confirmed because Codex can synthesize indistinguishable failures.
      This witnesses client receipt, not final model-input consumption. *)
   ?reasoning_effort:Llm_provider.Reasoning_effort.t ->
-  ?thread_mode:thread_mode ->
+  thread:thread ->
   mgr:_ Eio.Process.mgr ->
   clock:_ Eio.Time.clock ->
   cwd:Eio.Fs.dir_ty Eio.Path.t ->

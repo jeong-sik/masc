@@ -547,6 +547,7 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
              (match
                 Runtime_codex_app_server.run_turn
                   ~dynamic_tools
+                  ~thread:Runtime_codex_app_server.Ephemeral
                   ?reasoning_effort
                   ~mgr
                   ~clock

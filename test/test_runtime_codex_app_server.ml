@@ -398,7 +398,8 @@ let with_fixture_sequence ?capture_path first_lines second_lines f =
     (fun () -> f path)
 ;;
 
-let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_tools = []) ?model ?reasoning_effort ?thread_mode ?(history = [])
+let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_tools = []) ?model ?reasoning_effort
+    ?(thread = Runtime_codex_app_server.Persistent Runtime_codex_app_server.Start) ?(history = [])
     ?(developer_context = []) ?developer_instructions ?context_window ?(cwd = "/tmp")
     ?(timeout_s = 2.0) ?admission_timeout_s ?(no_turn_deadline = false)
     ?on_thread_ready ?on_thread_ready_delay_s ?on_turn_started_delay_s ?on_stream_event
@@ -455,7 +456,7 @@ let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_to
       ~dynamic_tools
       ?on_undelivered_tool_result
       ?reasoning_effort
-      ?thread_mode
+      ~thread
       ~history
       ~developer_context
       ~on_thread_ready
@@ -855,6 +856,7 @@ let test_dispatch_validation_is_process_free () =
   Eio_main.run (fun env ->
     match
       Runtime_codex_app_server.validate_turn
+        ~thread:(Runtime_codex_app_server.Persistent Runtime_codex_app_server.Start)
         ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
         config
         ~prompt:"fixture"
@@ -871,6 +873,7 @@ let test_invalid_context_window_is_process_free () =
       let config = { (Runtime_codex_app_server.default_config ()) with
         context_window = Some tokens } in
       match Runtime_codex_app_server.validate_turn
+        ~thread:(Runtime_codex_app_server.Persistent Runtime_codex_app_server.Start)
         ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp") config
         ~prompt:"fixture" ~images:[] with
       | Error (Runtime_codex_app_server.Invalid_config "context_window must be positive") -> ()
@@ -1422,7 +1425,7 @@ let test_rpc_input_capacity_data () =
 ;;
 
 let test_developer_context_preserves_authority_and_history () =
-  List.iter (fun (thread_mode, expected_roles) ->
+  List.iter (fun (thread, expected_roles) ->
     let capture_path = Filename.temp_file "masc-codex-context-" ".jsonl" in
     Fun.protect ~finally:(fun () -> Sys.remove capture_path) (fun () ->
       with_fixture ~capture_path ~inject_items:true
@@ -1431,7 +1434,7 @@ let test_developer_context_preserves_authority_and_history () =
         ; {|{"id":5,"result":{"turn":{"id":"turn-1"}}}|}
         ; item_completed; turn_completed ]
         (fun path ->
-          match run_fixture ~thread_mode
+          match run_fixture ~thread
             ~developer_instructions:"stable policy"
             ~developer_context:["current fact"]
             ~history:[{ Runtime_codex_app_server.role = User; text = "prior history" }]
@@ -1445,16 +1448,22 @@ let test_developer_context_preserves_authority_and_history () =
               let open Yojson.Safe.Util in
               let request method_ = List.find (fun j -> member "method" j = `String method_) requests
                 |> member "params" in
-              let thread_method = match thread_mode with
-                | Runtime_codex_app_server.Start -> "thread/start"
-                | Resume _ -> "thread/resume" in
+              let thread_method = match thread with
+                | Runtime_codex_app_server.Ephemeral | Persistent Start -> "thread/start"
+                | Persistent (Resume _) -> "thread/resume" in
               check string "stable policy remains separate" "stable policy"
                 (request thread_method |> member "developerInstructions" |> to_string);
               check string "only a resume asks Codex to leave the past turns out"
-                (match thread_mode with
-                 | Runtime_codex_app_server.Start -> "null"
-                 | Resume _ -> "true")
+                (match thread with
+                 | Runtime_codex_app_server.Ephemeral | Persistent Start -> "null"
+                 | Persistent (Resume _) -> "true")
                 (Yojson.Safe.to_string (request thread_method |> member "excludeTurns"));
+              check string "only an ephemeral start asks Codex to keep nothing on disk"
+                (match thread with
+                 | Runtime_codex_app_server.Ephemeral -> "true"
+                 | Persistent Start -> "false"
+                 | Persistent (Resume _) -> "null")
+                (Yojson.Safe.to_string (request thread_method |> member "ephemeral"));
               let items = request "thread/inject_items" |> member "items" |> to_list in
               check (list string) "context retains developer authority; resume omits history"
                 expected_roles (List.map (fun j -> member "role" j |> to_string) items);
@@ -1463,8 +1472,9 @@ let test_developer_context_preserves_authority_and_history () =
                 (last |> member "content" |> to_list |> List.hd |> member "text" |> to_string);
               check string "user prompt unchanged" "current question"
                 (request "turn/start" |> member "input" |> to_list |> List.hd |> member "text" |> to_string))))
-    [ Runtime_codex_app_server.Start, ["user"; "developer"]
-    ; Resume { thread_id = "thread-1" }, ["developer"] ]
+    [ Runtime_codex_app_server.Ephemeral, ["user"; "developer"]
+    ; Persistent Start, ["user"; "developer"]
+    ; Persistent (Resume { thread_id = "thread-1" }), ["developer"] ]
 ;;
 
 let test_history_is_injected_before_turn () =
@@ -1556,6 +1566,7 @@ let test_unsupported_image_media_type_is_rejected ?(media_type="image/tiff") ?(b
     in
     match
       Runtime_codex_app_server.validate_turn
+        ~thread:(Runtime_codex_app_server.Persistent Runtime_codex_app_server.Start)
         ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
         config
         ~prompt:"x"
@@ -1901,7 +1912,7 @@ let test_content_free_context_submission () =
     Fun.protect ~finally:(fun () -> Sys.remove capture) @@ fun () ->
     let start=match thread_mode with Client.Start -> true | Client.Resume _ -> false in
     with_fixture ~capture_path:capture ~inject_items:start (if start then injected else success) (fun path ->
-      let result=run_fixture ~thread_mode ~history ~prompt:escaped ~developer_instructions:escaped
+      let result=run_fixture ~thread:(Client.Persistent thread_mode) ~history ~prompt:escaped ~developer_instructions:escaped
           ~dynamic_tools:[tool]
           ~on_context_submission:(fun event -> observed:=event :: !observed) path in
       check bool "context-bearing transport completes" true (Result.is_ok result);
@@ -2159,7 +2170,7 @@ let test_issuer_assembly_links_to_completed_slots () =
     let images = if is_start then [] else
       [{Client.media_type="image/png";base64_data="aGVsbG8="}] in
     with_fixture ~capture_path:capture success (fun path ->
-      let result=run_fixture ~thread_mode:mode ~images
+      let result=run_fixture ~thread:(Client.Persistent mode) ~images
         ~developer_instructions:(if is_start then Link.text projection else "base")
         ~prompt:(if is_start then "GOAL" else Link.text projection)
         ~on_context_submission:(fun observation -> events:=observation :: !events) path in
@@ -2235,7 +2246,7 @@ let test_issuer_assembly_links_to_completed_slots () =
      "invalid subset",Client.Start,invalid_subset,0,0,[],"unavailable",["invalid_subset","rendered_carrier"]];
   let events=ref [] in
   with_fixture ~close_before_turn:true success (fun path ->
-    let result = run_fixture ~thread_mode:(Client.Resume {thread_id="thread-1"})
+    let result = run_fixture ~thread:(Client.Persistent (Resume {thread_id="thread-1"}))
       ~prompt:(String.make 1_100_000 'x')
       ~on_context_submission:(fun event -> events:=event :: !events) path in
     match result with
@@ -2361,7 +2372,7 @@ let test_account_reasoning_effort_admission () =
        {|{"id":7,"result":{"turn":{"id":"turn-1"}}}|}; item_completed; turn_completed]
       (fun path ->
         let outcome = run_fixture ~reasoning_effort:Llm_provider.Reasoning_effort.Ultra
-          ~thread_mode:(Runtime_codex_app_server.Resume {thread_id="thread-1"})
+          ~thread:(Runtime_codex_app_server.Persistent (Resume {thread_id="thread-1"}))
           ~developer_context:["current account context"] path in
         (match outcome with Ok result -> check bool "resumed successfully" true result.resumed
           | Error error -> fail (Runtime_codex_app_server.error_to_string error));
@@ -2713,7 +2724,7 @@ let test_thread_resume_skips_history_injection () =
     (fun path ->
        match
          run_fixture
-           ~thread_mode:(Runtime_codex_app_server.Resume { thread_id = "thread-1" })
+           ~thread:(Runtime_codex_app_server.Persistent (Resume { thread_id = "thread-1" }))
            ~history
            path
        with
@@ -2748,7 +2759,7 @@ let test_thread_resume_sends_dynamic_tools () =
             match
               run_fixture
                 ~dynamic_tools:[ tool ]
-                ~thread_mode:(Runtime_codex_app_server.Resume { thread_id = "thread-1" })
+                ~thread:(Runtime_codex_app_server.Persistent (Resume { thread_id = "thread-1" }))
                 path
             with
             | Error error -> fail (Runtime_codex_app_server.error_to_string error)
@@ -2880,7 +2891,7 @@ let test_thread_resume_rejects_identity_mismatch () =
     (fun path ->
        match
          run_fixture
-           ~thread_mode:(Runtime_codex_app_server.Resume { thread_id = "thread-1" })
+           ~thread:(Runtime_codex_app_server.Persistent (Resume { thread_id = "thread-1" }))
            path
        with
        | Error (Runtime_codex_app_server.Protocol_error _) -> ()
@@ -3758,6 +3769,7 @@ let test_worker_encoding_wait_is_bounded () =
                     timeout_s = None }
                 in
                 let outcome = Runtime_codex_app_server.run_turn
+                    ~thread:(Runtime_codex_app_server.Persistent Runtime_codex_app_server.Start)
                     ~mgr:(Eio.Stdenv.process_mgr env) ~clock
                     ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
                     ~on_prompt_sent:(fun () -> incr sent)
@@ -3872,6 +3884,7 @@ let test_no_deadline_keeps_admission_bounded () =
           }
         in
         Runtime_codex_app_server.run_turn
+          ~thread:(Runtime_codex_app_server.Persistent Runtime_codex_app_server.Start)
           ~mgr:(Eio.Stdenv.process_mgr env)
           ~clock
           ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
@@ -3906,6 +3919,7 @@ let test_no_deadline_begins_after_turn_dispatch () =
              }
            in
            Runtime_codex_app_server.run_turn
+             ~thread:(Runtime_codex_app_server.Persistent Runtime_codex_app_server.Start)
              ~mgr:(Eio.Stdenv.process_mgr env)
              ~clock:(Eio.Stdenv.clock env)
              ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
@@ -4015,6 +4029,7 @@ let test_callback_timeout_origin_is_preserved_without_deadline () =
              }
            in
            Runtime_codex_app_server.run_turn
+             ~thread:(Runtime_codex_app_server.Persistent Runtime_codex_app_server.Start)
              ~mgr:(Eio.Stdenv.process_mgr env)
              ~clock:(Eio.Stdenv.clock env)
              ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
@@ -4038,6 +4053,7 @@ let test_operator_interrupt_callback_keeps_typed_cause () =
           let config = { (Runtime_codex_app_server.default_config ()) with
             cli_path = path; timeout_s = None } in
           Runtime_codex_app_server.run_turn
+            ~thread:(Runtime_codex_app_server.Persistent Runtime_codex_app_server.Start)
             ~mgr:(Eio.Stdenv.process_mgr env)
             ~clock:(Eio.Stdenv.clock env)
             ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
@@ -9506,6 +9522,7 @@ let test_live_chatgpt_subscription () =
           }
         in
         Runtime_codex_app_server.run_turn
+          ~thread:(Runtime_codex_app_server.Persistent Runtime_codex_app_server.Start)
           ~mgr:(Eio.Stdenv.process_mgr env)
           ~clock:(Eio.Stdenv.clock env)
           ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
@@ -9549,6 +9566,7 @@ let test_live_dynamic_tool_subscription () =
           }
         in
         Runtime_codex_app_server.run_turn
+          ~thread:(Runtime_codex_app_server.Persistent Runtime_codex_app_server.Start)
           ~mgr:(Eio.Stdenv.process_mgr env)
           ~clock:(Eio.Stdenv.clock env)
           ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
@@ -9589,7 +9607,7 @@ let test_live_developer_context_comparison () =
           match Runtime_codex_app_server.run_turn
               ~mgr:(Eio.Stdenv.process_mgr env) ~clock:(Eio.Stdenv.clock env)
               ~cwd:Eio.Path.(Eio.Stdenv.fs env / Filename.get_temp_dir_name ())
-              ~thread_mode:!thread_mode ~developer_context config
+              ~thread:(Runtime_codex_app_server.Persistent !thread_mode) ~developer_context config
               ~prompt:"Return the current marker." ~images:[] with
           | Error error -> fail (Runtime_codex_app_server.error_to_string error)
           | Ok result ->
@@ -9635,6 +9653,7 @@ let test_live_history_injection_subscription () =
           }
         in
         Runtime_codex_app_server.run_turn
+          ~thread:(Runtime_codex_app_server.Persistent Runtime_codex_app_server.Start)
           ~mgr:(Eio.Stdenv.process_mgr env)
           ~clock:(Eio.Stdenv.clock env)
           ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")

@@ -185,13 +185,15 @@ let config_keepers =
       { suffix = Keeper_librarian_context.filename_suffix
       ; decode =
           (fun path ->
-             Keeper_librarian_context.read_file path
+             Keeper_librarian_context.read_committed_file path
              |> Result.map (Option.map Keeper_librarian_context.snapshot_json))
       }
-    (* The recall index names the artifact that recall fetches. *)
-  ; M.Decoded_keeper_files
+    (* The recall index names the published context. The current recall pin
+       and the dated recall history own it, and recall publishes it again
+       from the committed working context when it is gone. *)
+  ; M.Keeper_files
       { suffix = Keeper_librarian_context_recall.filename_suffix
-      ; decode = Keeper_librarian_context_recall.index_json_of_file
+      ; reason = M.Repairable_pointer
       }
   ; finder_metadata
   ; unpublished_writes

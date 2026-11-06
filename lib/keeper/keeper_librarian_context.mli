@@ -40,8 +40,10 @@ val filename_suffix : string
 (** [<keeper_id><filename_suffix>] is the snapshot file in the config
     [keepers/] directory. *)
 val path : keepers_dir:string -> keeper_id:string -> string
-val read_file : string -> (snapshot option, string) result
-(** {!read} on a path. An absent file is [Ok None]. *)
+val read_committed_file : string -> (snapshot option, string) result
+(** The committed snapshot in this file. An absent file and bytes that do not
+    decode are [Ok None]: {!read_for_update} quarantines such bytes and
+    rebuilds from the original inputs. A read failure is [Error]. *)
 val read : keepers_dir:string -> keeper_id:string -> (snapshot option, string) result
 val read_with_snapshot_sha256 : keepers_dir:string -> keeper_id:string ->
   ((snapshot * string) option, string) result

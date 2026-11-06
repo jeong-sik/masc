@@ -48,8 +48,6 @@ let read file =
   else try Result.map Option.some (index_of_json (Yojson.Safe.from_file file)) with
     | Sys_error detail | Yojson.Json_error detail -> Error detail
 
-let index_json_of_file file = Result.map (Option.map index_json) (read file)
-
 let with_current ~keepers_dir ~keeper_name (snapshot : Context.snapshot) publish =
   File_lock_eio.with_lock (Context.path ~keepers_dir ~keeper_id:keeper_name) (fun () ->
     match Context.read ~keepers_dir ~keeper_id:keeper_name with

@@ -166,8 +166,14 @@ let load_with_snapshot_sha256 file =
   |> Result.map
        (Option.map (fun (snapshot, bytes) -> snapshot, digest bytes))
 let describe_error = function Unavailable detail -> detail | Invalid {detail; _} -> "invalid working context: " ^ detail
-let read_file file = load file |> Result.map_error describe_error
-let read ~keepers_dir ~keeper_id = read_file (path ~keepers_dir ~keeper_id)
+let read ~keepers_dir ~keeper_id = load (path ~keepers_dir ~keeper_id) |> Result.map_error describe_error
+(* Bytes that do not decode are no committed snapshot: [read_for_update]
+   quarantines them and rebuilds from the original inputs. *)
+let read_committed_file file =
+  match load file with
+  | Ok snapshot -> Ok snapshot
+  | Error (Invalid _) -> Ok None
+  | Error (Unavailable detail) -> Error detail
 let read_with_snapshot_sha256 ~keepers_dir ~keeper_id =
   load_with_snapshot_sha256 (path ~keepers_dir ~keeper_id)
   |> Result.map_error describe_error

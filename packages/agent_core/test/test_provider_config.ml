@@ -1773,6 +1773,36 @@ let test_mistral_small_declares_none_reasoning_effort () =
             (cfg Reasoning_effort.High))))
 ;;
 
+(* Mistral Large 4 (v26.10) is adjustable via reasoning_effort per the
+   reasoning page, with the same plain-string ("none") vs chunk-list ("high")
+   content split as mistral-small (#38564). The row declares ["none"] under
+   the same policy: plain-string requests are admitted, unverified levels are
+   refused before dispatch. *)
+let test_mistral_large_4_declares_none_reasoning_effort () =
+  with_repository_model_catalog (fun () ->
+    let cfg effort =
+      Provider_config.make
+        ~kind:OpenAI_compat
+        ~provider_id:"mistral"
+        ~model_id:"mistral-large-4"
+        ~base_url:"https://api.mistral.ai/v1"
+        ~reasoning_effort:effort
+        ()
+    in
+    (match Provider_config.validate_reasoning_effort_request_typed (cfg Reasoning_effort.None_) with
+     | Ok () -> ()
+     | Error rejection ->
+       Alcotest.failf
+         "mistral-large-4 should accept none: %s"
+         (Provider_config.reasoning_effort_request_rejection_to_message rejection));
+    check_bool
+      "mistral-large-4 refuses high until chunk-list response parsing is verified"
+      true
+      (Result.is_error
+         (Provider_config.validate_reasoning_effort_request_typed
+            (cfg Reasoning_effort.High))))
+;;
+
 let test_validate_output_schema_openai_unscoped_catalog_not_inferred () =
   with_repository_model_catalog (fun () ->
     let cfg =
@@ -3190,6 +3220,10 @@ let () =
             "mistral-small declares none reasoning effort"
             `Quick
             test_mistral_small_declares_none_reasoning_effort
+        ; Alcotest.test_case
+            "mistral-large-4 declares none reasoning effort"
+            `Quick
+            test_mistral_large_4_declares_none_reasoning_effort
         ; Alcotest.test_case
             "reasoning effort undeclared fails closed"
             `Quick

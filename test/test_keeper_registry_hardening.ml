@@ -38,19 +38,6 @@ let make_meta name =
   | Error e -> failwith ("make_meta failed: " ^ e)
 ;;
 
-let make_goal_reconciler_meta () =
-  match
-    Masc_test_deps.meta_of_json_fixture
-      (`Assoc
-        [ "name", `String "goal-reconciler"
-        ; "trace_id", `String "trace-goal-reconciler"
-        ; "activation_mode", `String "manual"
-        ])
-  with
-  | Ok meta -> meta
-  | Error detail -> failwith ("goal reconciler meta failed: " ^ detail)
-;;
-
 let write_text_file path content =
   let oc = open_out path in
   Fun.protect

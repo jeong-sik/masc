@@ -195,12 +195,6 @@ let ensure_git_repo repo =
   if not (Sys.file_exists (Filename.concat repo ".git")) then
     git_ok ~cwd:repo [ "init"; "-q" ]
 
-let docker_image_available image =
-  let cmd =
-    Printf.sprintf "docker image inspect %s > /dev/null 2>&1" (Filename.quote image)
-  in
-  Sys.command cmd = 0
-
 let make_meta ~name ~sandbox () =
   let fields =
     [
@@ -677,15 +671,6 @@ let tool_execute_typed_env_wrapper_args ~cwd =
       ("timeout_sec", `Float 5.0);
     ]
 
-
-let check_typed_validation_error needle raw =
-  (match parse_bool_field raw "ok" with
-   | Some true -> Alcotest.failf "typed command unexpectedly succeeded: %s" raw
-   | Some false | None -> ());
-  Alcotest.(check (option bool)) "typed response" (Some true)
-    (parse_bool_field raw "typed");
-  Alcotest.(check bool) "validation error surfaced" true
-    (response_mentions raw "error" needle)
 
 (* A Remote_ssh caller resolves its endpoint from the keeper's declaration
    before the turn factory's profile is compared, so the Remote_ssh cases of

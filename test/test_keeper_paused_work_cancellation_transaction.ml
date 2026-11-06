@@ -142,18 +142,6 @@ let check_released = function
   | None -> Alcotest.fail "new cancellation did not acquire a lifecycle reservation"
 ;;
 
-let check_replayed_without_reservation = function
-  | None -> ()
-  | Some release ->
-    Alcotest.failf
-      "committed replay acquired a lifecycle reservation: %s"
-      (match release with
-       | Keeper_lifecycle_reservation.Released -> "released"
-       | Keeper_lifecycle_reservation.Release_missing -> "release_missing"
-       | Keeper_lifecycle_reservation.Release_not_owner owner ->
-         "release_not_owner: " ^ Keeper_lifecycle_reservation.snapshot_to_string owner)
-;;
-
 let check_resume_released = function
   | Keeper_lifecycle_reservation.Released -> ()
   | Keeper_lifecycle_reservation.Release_missing ->

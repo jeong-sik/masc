@@ -140,22 +140,6 @@ let publish_lane ?(requires_api_keys = []) ?(cli_slot_ids = []) fixtures =
       : Runtime_exact_output_registry.t)
 ;;
 
-let check_same_provenance label
-      (expected : Exact_flow.attempt_provenance)
-      (actual : Exact_flow.attempt_provenance)
-  =
-  Alcotest.(check string) (label ^ " slot") expected.slot_id actual.slot_id;
-  Alcotest.(check string) (label ^ " call") expected.call_id actual.call_id;
-  Alcotest.(check string)
-    (label ^ " plan fingerprint")
-    expected.plan_fingerprint
-    actual.plan_fingerprint;
-  Alcotest.(check string)
-    (label ^ " request hash")
-    expected.request_body_sha256
-    actual.request_body_sha256
-;;
-
 let partition_history ~base_path ~keeper_name =
   Partition.ledger_path ~base_path ~keeper_name
   |> Fs_compat.load_file

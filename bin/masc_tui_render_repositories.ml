@@ -546,8 +546,7 @@ let change_row_summary (change : Masc.Tui_decode.file_change) =
     | Masc.Tui_decode.Fc_inserted { text; _ } -> Terminal_text.preview_line text
     | Masc.Tui_decode.Fc_written { content } ->
       Printf.sprintf "(wrote %d bytes)" (String.length content)
-    | Masc.Tui_decode.Fc_materialized { bytes; _ } ->
-      Printf.sprintf "(materialized %d bytes)" bytes
+    | Masc.Tui_decode.Fc_materialized _ -> "(materialized blob)"
   in
   match file_change_evidence_label change.fc_line_evidence with
   | None -> content
@@ -649,7 +648,7 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
         (* The call names the blob, not its bytes, so the log has no text to
            show. Saying so is the difference between an empty diff and a
            change that wrote nothing. *)
-        [ turn; "  the log holds the blob's coordinates, not its bytes" ]
+        [ turn; "  the log holds the blob's identity, not its bytes" ]
   in
   let notes =
     match file_change_evidence_label change.fc_line_evidence with

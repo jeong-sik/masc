@@ -7236,10 +7236,7 @@ type file_change_kind =
       line : int;
       text : string;
     }
-  | Fc_materialized of {
-      sha256 : string;
-      bytes : int;
-    }
+  | Fc_materialized of { sha256 : string }
 
 type file_change = {
   fc_at : float;
@@ -7332,8 +7329,7 @@ let decode_file_change_kind json =
       Ok (Fc_inserted { line; text })
   | "materialize" ->
       let* sha256 = required_string_field json "sha256" in
-      let* bytes = required_int_field json "bytes" in
-      Ok (Fc_materialized { sha256; bytes })
+      Ok (Fc_materialized { sha256 })
   | other -> Error (Printf.sprintf "unknown file change kind %S" other)
 
 let validate_line_evidence_contract

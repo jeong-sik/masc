@@ -17691,7 +17691,7 @@ let workspace_activity_context_lines state ~cols =
         | Tui_decode.Fc_edited { replace_all; _ } -> if replace_all then "edit all" else "edit"
         | Fc_written _ -> "write"
         | Fc_inserted { line; _ } -> Printf.sprintf "insert at line %d" line
-        | Fc_materialized { sha256; bytes } -> Printf.sprintf "materialized %d bytes, SHA256 %s" bytes sha256 in
+        | Fc_materialized { sha256 } -> Printf.sprintf "materialized blob, SHA256 %s" sha256 in
       wrap "Repository" (match state.workspace_activity_repo with None -> "not selected" | Some id -> id)
       @ wrap "Path" path
       @ wrap "Keeper" change.fc_keeper

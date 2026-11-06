@@ -428,29 +428,11 @@ val handle_analyze_image_with_outcome
   -> unit
   -> Keeper_tool_execution.t
 
-(** RFC-0182 §3.1 — [handle_masc_keeper] is the descriptor-projection
-    cluster handler for the [masc_keeper_*] ctx-free tool surface.
+(** RFC-0182 §3.1 — descriptor-projection cluster handler for the
+    [masc_keeper_*] ctx-free tool surface.
     Dispatches via [Keeper_dispatch_ref] registered by [Keeper_tool_surface] at
     module load.  Receives [meta] so callers like [masc_keeper_status]
     can resolve the "self" target when the [name] argument is empty. *)
-val handle_masc_keeper
-  :  publication_recovery_provider:
-       Keeper_publication_recovery_availability.provider
-  -> ?sw:Eio.Switch.t
-  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
-  -> ?proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t
-  -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
-  -> ?mcp_session_id:string
-  -> ?continuation_channel:Keeper_continuation_channel.t
-  -> ?gate_context:(unit -> Keeper_gate.causal_context)
-  -> ?gate_grant:Keeper_gate.cycle_grant
-  -> config:Workspace.config
-  -> meta:Keeper_meta_contract.keeper_meta
-  -> name:string
-  -> args:Yojson.Safe.t
-  -> unit
-  -> string
-
 val handle_masc_keeper_with_outcome
   :  publication_recovery_provider:
        Keeper_publication_recovery_availability.provider

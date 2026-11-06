@@ -3,7 +3,9 @@ description = """
 Read your Keeper chat operation by exact target and operation_id. The result \
 carries the operation id, its state with the times it reached, the failure \
 facts of a failed operation and, after success, completed_reply. The request \
-you submitted is not repeated.
+you submitted is not repeated. While the operation is queued and the target \
+Keeper is inside a turn, the result also carries target_turn_age_s, the \
+seconds that turn has run.
 
 For a succeeded operation, completed_reply returns the original full assistant \
 reply for its exact outcome_ref, or an explicit unavailable reason. Queue \

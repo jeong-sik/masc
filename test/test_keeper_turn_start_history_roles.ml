@@ -40,8 +40,8 @@ let message ?(origin = Llm_provider.Types.Conversation) role content : Agent_cor
   { origin; role; content; name = None; tool_call_id = None; metadata = [] }
 ;;
 
-(* The rows one Anthropic-lane turn leaves: the caller, the carrier the
-   collection retained before the response, one tool round and the answer. *)
+(* A saved history whose [Historical_system_context] row has the System role:
+   the caller, that row, one tool round and the answer. *)
 let saved_history =
   let open Agent_core.Types in
   [ message User [ Text "autonomous turn" ]

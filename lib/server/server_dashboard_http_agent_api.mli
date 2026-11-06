@@ -44,6 +44,11 @@ val tool_name_param : string option -> (string option, string) Result.t
     whitespace. The response cache trims every value of a request, so a name
     that trimming would change is refused instead of read as another name. *)
 
+val series_tool_filter : string option -> (string option, string) Result.t
+(** {!tool_name_param}, then the internal name of the tool. The store keys its
+    rows by internal name, so [Execute] reads as [tool_execute]. An internal or
+    unknown name is unchanged. *)
+
 val agent_activity_http_json :
   config:Masc.Workspace.config -> hours:float -> Yojson.Safe.t
 (** Per-agent tool-call rollup for [GET /api/v1/agent-activity], cached per

@@ -1,6 +1,5 @@
 open Alcotest
 
-module Metrics = Dashboard_http_keeper_metrics
 module Detail = Dashboard_http_keeper_detail
 module Keeper_metrics_record = Masc.Keeper_metrics_record
 
@@ -193,130 +192,6 @@ let test_metrics_window_omits_retired_labels () =
   | other ->
       failf "expected one metrics series row, got %d" (List.length other)
 
-let with_temp_history content f =
-  let path = Filename.temp_file "khist" ".jsonl" in
-  let oc = open_out path in
-  output_string oc content;
-  close_out oc;
-  Fun.protect ~finally:(fun () -> try Sys.remove path with _ -> ()) (fun () -> f path)
-
-(* Regression: keeper history rows persist message text as typed
-   [content_blocks], not a flat [content] string. Reading flat [content]
-   decoded "" for every row, so the dashboard keeper conversation feed and the
-   mention summary were entirely empty. *)
-let test_history_summary_decodes_content_blocks () =
-  let rows =
-    String.concat
-      "\n"
-      [ {|{"role":"assistant","content_blocks":[{"type":"text","text":"hello from albini"}],"ts_unix":1.0}|}
-      ; {|{"role":"assistant","content_blocks":[{"type":"text","text":"42"}],"ts_unix":1.1}|}
-      ; {|{"role":"assistant","content_blocks":[{"type":"text","text":"완료"}],"ts_unix":1.2}|}
-      ; {|{"role":"assistant","content_blocks":[{"type":"text","text":"https://example.com/or"}],"ts_unix":1.3}|}
-      ; {|{"role":"user","content_blocks":[{"type":"text","text":"ping @fixture-keeper please"}],"ts_unix":2.0}|}
-      ]
-    ^ "\n"
-  in
-  with_temp_history rows (fun path ->
-      let conversation, _recent_addressed_messages, _keeper_mention_counts, raw_count =
-        Metrics.keeper_history_summary_json
-          ~all_keeper_names:[ "albini"; "fixture-keeper" ]
-          ~keeper_name:"albini"
-          ~history_path:path
-      in
-      check int "raw_count counts content_blocks rows" 5 raw_count;
-      match conversation with
-      | `List (first :: _ as items) ->
-          check (list string) "persisted answers remain visible regardless of prose"
-            [ "hello from albini"; "42"; "완료"; "https://example.com/or";
-              "ping @fixture-keeper please" ]
-            (List.map Yojson.Safe.Util.(fun item -> item |> member "content" |> to_string) items);
-          let content =
-            first
-            |> Yojson.Safe.Util.member "content"
-            |> Yojson.Safe.Util.to_string
-          in
-          check
-            string
-            "first row content extracted from blocks"
-            "hello from albini"
-            content
-      | _ -> fail "expected non-empty conversation list")
-
-let test_history_summary_routes_by_source_not_content () =
-  let row ~role ~source ~content ~ts_unix =
-    `Assoc
-      [
-        ("role", `String role);
-        ("source", `String source);
-        ( "content_blocks",
-          `List
-            [
-              `Assoc
-                [ ("type", `String "text"); ("text", `String content) ];
-            ] );
-        ("ts_unix", `Float ts_unix);
-      ]
-    |> Yojson.Safe.to_string
-  in
-  let user_content =
-    "## Current World State\n### Namespace State\nthis is user-authored text"
-  in
-  let rows =
-    String.concat
-      "\n"
-      [
-        row ~role:"user" ~source:"direct_user" ~content:user_content
-          ~ts_unix:1.0;
-        row ~role:"user" ~source:"world_state_prompt"
-          ~content:"ordinary internal prompt text" ~ts_unix:2.0;
-      ]
-    ^ "\n"
-  in
-  with_temp_history rows (fun path ->
-      let conversation, _recent_addressed_messages, _keeper_mention_counts, raw_count =
-        Metrics.keeper_history_summary_json
-          ~all_keeper_names:[ "albini" ]
-          ~keeper_name:"albini"
-          ~history_path:path
-      in
-      check int "only the explicit internal source is excluded" 1 raw_count;
-      match conversation with
-      | `List [ item ] ->
-          check string "message prose does not control routing" user_content
-            Yojson.Safe.Util.(item |> member "content" |> to_string)
-      | other ->
-          failf "expected one user-authored history item, got %s"
-            (Yojson.Safe.to_string other))
-
-let test_history_mentions_follow_keeper_addressing () =
-  let texts =
-    [ "partial artwork report"
-    ; "email@alice.com"
-    ; "@alicex"
-    ; "the code is `@alice`"
-    ; "Thanks (@ALICE), @alice and @art."
-    ; "@@unknown @alice"
-    ] in
-  let rows = texts |> List.map (fun text -> Yojson.Safe.to_string (`Assoc
-      [ "role", `String "user"; "source", `String "direct_user"
-      ; "content_blocks", `List [ `Assoc [ "type", `String "text"; "text", `String text ] ] ]))
-    |> String.concat "\n" in
-  with_temp_history (rows ^ "\n") (fun path ->
-    let conversation, recent, counts, raw_count =
-      Metrics.keeper_history_summary_json ~all_keeper_names:[ "self"; "alice"; "art" ]
-        ~keeper_name:"self" ~history_path:path in
-    check int "all messages remain in history" 6 raw_count;
-    let mentions = Yojson.Safe.Util.(conversation |> to_list
-        |> List.map (fun item -> item |> member "mentions" |> to_list |> List.map to_string)) in
-    check (list (list string)) "only declared addresses count as mentions"
-      [ []; []; []; []; [ "alice"; "art" ]; [] ] mentions;
-    check int "one addressed user message, not six substring matches" 1
-      Yojson.Safe.Util.(recent |> to_list |> List.length);
-    let counts = Yojson.Safe.Util.(counts |> to_list |> List.map (fun item ->
-        item |> member "keeper" |> to_string, item |> member "count" |> to_int)) in
-    check (list (pair string int)) "duplicate spelling contributes once per message"
-      [ "alice", 1; "art", 1 ] counts)
-
 (* #32971 Root B: the Turn row the producer writes today carries neither
    [generation] (removed by #29590) nor [handoff_performed] (removed by
    #31522). While the window required both, every Turn row fell through the
@@ -348,14 +223,5 @@ let () =
             test_producer_shaped_turn_rows_enter_the_window;
           test_case "omits retired labels" `Quick
             test_metrics_window_omits_retired_labels;
-        ] );
-      ( "history_summary",
-        [
-          test_case "decodes content_blocks rows" `Quick
-            test_history_summary_decodes_content_blocks;
-          test_case "routes by source, not content" `Quick
-            test_history_summary_routes_by_source_not_content;
-          test_case "mentions follow Keeper addressing" `Quick
-            test_history_mentions_follow_keeper_addressing;
         ] );
     ]

@@ -309,7 +309,6 @@ module Http : LOGGER
 module Server : LOGGER
 module TaskState : LOGGER
 module KeeperExec : LOGGER
-module LocalWorker : LOGGER
 module Harness : LOGGER
 module Candle : LOGGER
 

@@ -100,18 +100,6 @@ end
 
 (** {1 Local MODEL Server Configuration} *)
 
-(** Local MODEL runtime config (llama-server / any OpenAI-compatible backend).
-    Environment variables retain the LLAMA_ prefix for backward compatibility. *)
-module Local_runtime = struct
-  (** OpenAI-compatible local MODEL server URL *)
-  let server_url =
-    get_string ~default:Masc_network_defaults.local_llm_default_url "LLAMA_SERVER_URL"
-
-  (** Default worker model override for the local runtime. *)
-  let worker_model_opt () =
-    Sys.getenv_opt "LLAMA_WORKER_MODEL" |> trim_opt
-end
-
 module Ollama = struct
   let server_url =
     get_string ~default:Masc_network_defaults.ollama_default_url "OLLAMA_SERVER_URL"
@@ -382,18 +370,6 @@ module Rate_bucket = struct
 
   (** Per-agent burst capacity. Default: 50. *)
   let agent_burst = get_int ~default:50 "MASC_AGENT_RATE_BURST"
-end
-
-(** {1 Worker / Local Runtime Configuration} *)
-
-module Worker = struct
-  (** Enable local runtime debug logging. Default: false. *)
-  let local_runtime_debug =
-    get_bool ~default:false "MASC_LOCAL_RUNTIME_DEBUG"
-
-  (** Local runtime cooldown (seconds). *)
-  let local_runtime_cooldown_sec_opt () =
-    Sys.getenv_opt "MASC_LOCAL_RUNTIME_COOLDOWN_SEC" |> trim_opt
 end
 
 (** {1 AGENT_CORE SSE Bridge Configuration} *)

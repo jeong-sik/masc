@@ -1,0 +1,11 @@
+Error: task.listTabs: A browser permission prompt for location access has appeared.
+The user now controls this task space. Wait for the user to handle the prompt.
+Resume only after the user confirms, using takeOverTaskSpace(spaceId).
+    at buildEgoError (file:////[eval1]:461:19)
+    at invokeEgo (file:////[eval1]:483:15)
+    at async Object.listTabs (file:////[eval1]:18840:24)
+    at async #reconcilePages (file:////[eval1]:19338:22)
+    at async file:////[eval1]:19122:38
+    at async file:////[eval1]:17604:28
+
+ego's nodejs process exited with code 1.

@@ -1,0 +1,20 @@
+[ego-browser:notice] Ego Lite update is available (current 0.6.2.7). Finish the current browser task, then ask the user before running `ego-browser upgrade`; re-read the ego-browser Skill afterward.
+{"zone":"Asia/Calcutta","error":null,"seen":{"locale":"ko","timeZone":"Asia/Calcutta","offset":-330}}
+{"zone":"Asia/Kolkata","error":null,"seen":{"locale":"ko","timeZone":"Asia/Calcutta","offset":-330}}
+{"zone":"US/Eastern","error":null,"seen":{"locale":"ko","timeZone":"America/New_York","offset":300}}
+{"zone":"asia/seoul","error":null,"seen":{"locale":"ko","timeZone":"America/New_York","offset":300}}
+{"zone":"UTC","error":null,"seen":{"locale":"ko","timeZone":"UTC","offset":0}}
+{"zone":"Etc/GMT+5","error":null,"seen":{"locale":"ko","timeZone":"Etc/GMT+5","offset":300}}
+{"zone":"Mars/Olympus","error":null,"seen":{"locale":"ko","timeZone":"Etc/GMT+5","offset":300}}
+{"zone":"Europe/Paris","error":null,"seen":{"locale":"ko","timeZone":"Europe/Paris","offset":-60}}
+{"zone":"Mars/Olympus","error":null,"seen":{"locale":"ko","timeZone":"Europe/Paris","offset":-60}}
+{"zone":"","error":null,"seen":{"locale":"ko","timeZone":"Asia/Seoul","offset":-540}}
+{"locale":"fr-fr","error":null,"seen":{"locale":"fr-FR","timeZone":"Asia/Seoul","offset":-540}}
+{"locale":"en","error":null,"seen":{"locale":"en","timeZone":"Asia/Seoul","offset":-540}}
+{"locale":"zh-Hant-TW","error":null,"seen":{"locale":"zh-Hant-TW","timeZone":"Asia/Seoul","offset":-540}}
+{"locale":"sr-Latn","error":null,"seen":{"locale":"sr-Latn","timeZone":"Asia/Seoul","offset":-540}}
+{"locale":"x-bad","error":"Invalid locale name","seen":{"locale":"sr-Latn","timeZone":"Asia/Seoul","offset":-540}}
+{"locale":"123","error":"Invalid locale name","seen":{"locale":"sr-Latn","timeZone":"Asia/Seoul","offset":-540}}
+{"locale":"","error":null,"seen":{"locale":"ko","timeZone":"Asia/Seoul","offset":-540}}
+{"locale":"de-DE","error":null,"seen":{"locale":"de-DE","timeZone":"Asia/Seoul","offset":-540}}
+{"cleared":{"locale":"ko","timeZone":"Asia/Seoul","offset":-540}}

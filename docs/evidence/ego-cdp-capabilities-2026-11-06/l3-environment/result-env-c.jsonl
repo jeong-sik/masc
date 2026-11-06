@@ -1,0 +1,16 @@
+[ego-browser:notice] Ego Lite update is available (current 0.6.2.7). Finish the current browser task, then ask the user before running `ego-browser upgrade`; re-read the ego-browser Skill afterward.
+{"step":"space","at":"2026-11-06T06:17:08.928Z","value":27}
+{"step":"gotoOld","at":"2026-11-06T06:17:09.053Z","value":{}}
+{"step":"oldOrigin","at":"2026-11-06T06:17:09.077Z","value":{"url":"http://127.0.0.1:18768/index.html","language":"ko-KR","languages":["ko-KR","ko","en-US","en"],"intlLocale":"ko","timeZone":"Asia/Seoul","offsetMinutes":-540,"geolocation":"granted"}}
+{"step":"gotoFresh","at":"2026-11-06T06:17:09.159Z","value":{}}
+{"step":"before","at":"2026-11-06T06:17:09.162Z","value":{"url":"http://127.0.0.1:18769/index.html","language":"ko-KR","languages":["ko-KR","ko","en-US","en"],"intlLocale":"ko","timeZone":"Asia/Seoul","offsetMinutes":-540,"geolocation":"prompt"}}
+{"step":"setPermission","at":"2026-11-06T06:17:09.162Z","value":{"error":"'Browser.setPermission' wasn't found"}}
+{"step":"afterGrant","at":"2026-11-06T06:17:09.165Z","value":{"url":"http://127.0.0.1:18769/index.html","language":"ko-KR","languages":["ko-KR","ko","en-US","en"],"intlLocale":"ko","timeZone":"Asia/Seoul","offsetMinutes":-540,"geolocation":"prompt"}}
+{"step":"geolocationOverride","at":"2026-11-06T06:17:09.167Z","value":{}}
+{"step":"localeOverride","at":"2026-11-06T06:17:09.170Z","value":{}}
+{"step":"timezoneOverride","at":"2026-11-06T06:17:09.172Z","value":{}}
+{"step":"acceptLanguage","at":"2026-11-06T06:17:09.175Z","value":{}}
+{"step":"afterOverrides","at":"2026-11-06T06:17:09.181Z","value":{"url":"http://127.0.0.1:18769/index.html","language":"fr-FR","languages":["fr-FR"],"intlLocale":"fr-FR","timeZone":"America/New_York","offsetMinutes":300,"geolocation":"prompt"}}
+{"step":"reload","at":"2026-11-06T06:17:09.261Z","value":{}}
+{"step":"afterReload","at":"2026-11-06T06:17:09.263Z","value":{"url":"http://127.0.0.1:18769/index.html","language":"fr-FR","languages":["fr-FR"],"intlLocale":"fr-FR","timeZone":"America/New_York","offsetMinutes":300,"geolocation":"prompt"}}
+{"step":"reopen","at":"2026-11-06T06:17:09.266Z","value":{"spaceId":27,"sameProcessState":"fr-FR America/New_York"}}

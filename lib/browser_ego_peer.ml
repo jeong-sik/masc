@@ -923,6 +923,136 @@ let reload t id =
       moved_page_answer;
       "  }" ]))
 
+(* Location, locale and time zone go through the Page's CDP session, as the
+   viewport does (RFC-browser-ego-cdp-capabilities §3.3). The page's own Intl
+   first names the time zone and locale it would take: Chromium answers an
+   unknown or differently cased time zone with no error and keeps the old
+   one (ego lite 0.6.2.7), so a name the page does not know is refused before
+   anything changes, and the zone the page reports afterwards must be the one
+   sent. The locale override changes Intl only; navigator.language and
+   Accept-Language stay. A location also grants the page's origin geolocation
+   with Browser.setPermission, which ego takes on a Page session and refuses
+   on the task's; the grant covers every tab of that origin in the operator's
+   ego profile. Overrides and grant end with the SDK process that set them
+   (sdkProcessStartedAt); clearing restores the overrides and leaves the
+   grant. *)
+let emulation_script = {js|async function(page, args, reason) {
+  const read = () => page.evaluate(`(async () => ({
+    origin: location.origin,
+    locale: Intl.DateTimeFormat().resolvedOptions().locale,
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    geolocationPermission: (await navigator.permissions.query({name: "geolocation"})).state
+  }))()`);
+  let before;
+  try { before = await read(); }
+  catch (error) { return {ok: false, before: true, error: "the page could not be read before emulation: " + reason(error)}; }
+  const applied = [];
+  const stop = (step, error, observed) => applied.length === 0 && observed === null
+    ? {ok: false, before: true, error: step + ": " + error}
+    : {ok: true, value: {applied, failed: {step, error}, before, observed}};
+  const steps = [];
+  let canonical = {};
+  if (args.clear) {
+    steps.push(["geolocation", "Emulation.clearGeolocationOverride", {}],
+      ["locale", "Emulation.setLocaleOverride", {}],
+      ["timezone", "Emulation.setTimezoneOverride", {timezoneId: ""}]);
+  } else {
+    try {
+      canonical = await page.evaluate(`(() => {
+        const zone = ${JSON.stringify(args.timezone)}, locale = ${JSON.stringify(args.locale)}, out = {};
+        if (zone !== null) {
+          try { out.timezone = new Intl.DateTimeFormat("en-US", {timeZone: zone}).resolvedOptions().timeZone; }
+          catch (error) { out.timezoneError = String(error && error.message || error); }
+        }
+        if (locale !== null) {
+          try { out.locale = Intl.getCanonicalLocales(locale)[0]; }
+          catch (error) { out.localeError = String(error && error.message || error); }
+        }
+        return out;
+      })()`);
+    } catch (error) { return {ok: false, before: true, error: "the page could not check the locale and time zone: " + reason(error)}; }
+    if (canonical.timezoneError !== undefined)
+      return {ok: false, before: true, error: "the page knows no time zone " + JSON.stringify(args.timezone) + ": " + canonical.timezoneError};
+    if (canonical.localeError !== undefined)
+      return {ok: false, before: true, error: "the page takes no locale " + JSON.stringify(args.locale) + ": " + canonical.localeError};
+    if (canonical.locale !== undefined) steps.push(["locale", "Emulation.setLocaleOverride", {locale: canonical.locale}]);
+    if (canonical.timezone !== undefined) steps.push(["timezone", "Emulation.setTimezoneOverride", {timezoneId: canonical.timezone}]);
+    if (args.geolocation !== null) {
+      if (before.origin !== "null")
+        steps.push(["geolocation_grant", "Browser.setPermission",
+          {permission: {name: "geolocation"}, setting: "granted", origin: before.origin}]);
+      steps.push(["geolocation", "Emulation.setGeolocationOverride", {latitude: args.geolocation.latitude,
+        longitude: args.geolocation.longitude, accuracy: args.geolocation.accuracy}]);
+    }
+  }
+  for (const [step, method, params] of steps) {
+    try { await page.cdp(method, params); applied.push(step); }
+    catch (error) { return stop(step, reason(error), null); }
+  }
+  let observed;
+  try { observed = await read(); }
+  catch (error) { return stop("observe", reason(error), null); }
+  if (canonical.timezone !== undefined && observed.timeZone !== canonical.timezone)
+    return stop("timezone", "the page reports " + observed.timeZone + " after the override to " + canonical.timezone, observed);
+  return {ok: true, value: {applied, before, observed,
+    geolocationGrant: applied.includes("geolocation_grant") ? before.origin : null,
+    emulated: args.clear ? null : {locale: canonical.locale ?? null, timezone: canonical.timezone ?? null,
+      geolocation: args.geolocation}}};
+}|js}
+
+let emulation_note = function
+  | `Set -> "a page that already read its location, language or time zone keeps what it read; reload to see the new ones. \
+      The locale changes Intl only, not navigator.language or Accept-Language. \
+      Overrides and a geolocation grant last until the ego SDK process that set them ends (sdkProcessStartedAt changes); \
+      the grant covers every tab of that origin in the ego profile and stays after clear_emulation"
+  | `Clear -> "clearing restores the location, locale and time zone overrides only; \
+      a geolocation grant stays until the ego SDK process that gave it ends (sdkProcessStartedAt changes)"
+
+let emulation_receipt ~id ~action ~kind value =
+  let unknown detail = Error (Live.Outcome_unknown (Printf.sprintf
+    "%s; the %s may have changed tab %d: read its environment before another emulation step" detail action id)) in
+  match value with
+  | `Assoc fields ->
+    let answered extra = `Assoc ((("action",str action) :: ("tabId",`Int id) :: fields) @ extra) in
+    (match List.assoc_opt "failed" fields, List.assoc_opt "applied" fields with
+     | None, Some (`List _) ->
+       let cleared = match kind with
+         | `Set -> []
+         | `Clear -> ["cleared",`Bool true;"permissionsUnchanged",`Bool true] in
+       Ok (answered (cleared @ ["lifetime",str "ego_sdk_process";"localeScope",str "intl_only";
+         "note",str (emulation_note kind)]))
+     | Some (`Assoc failed), Some (`List applied) ->
+       let* message = match List.assoc_opt "step" failed, List.assoc_opt "error" failed with
+         | Some (`String step), Some (`String error) -> Ok (step ^ ": " ^ error)
+         | (None | Some _), (None | Some _) -> unknown "ego answered a failed emulation step without its step and error" in
+       (match applied with
+        | [] -> Error (Live.Observed_failure {disposition=Live.Uncertain; message; receipt=answered []})
+        | _ :: _ -> Error (Live.Partial_failure {tab_id=id; message; receipt=answered []}))
+     | (None | Some _), (None | Some _) -> unknown "ego answered an emulation receipt without its applied steps")
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> unknown "the emulation receipt is not an object"
+
+let emulate t id emulation =
+  let* label = label_of t id in
+  let interaction, action, kind, request = match emulation with
+    | Some ({Browser_lane.Action.geolocation; locale; timezone} as emulation) ->
+      let text = function Some value -> str value | None -> `Null in
+      Browser_lane.Action.Set_emulation emulation, "set_emulation", `Set,
+      ["clear",`Bool false;"locale",text locale;"timezone",text timezone;
+       "geolocation",(match geolocation with
+         | Some {Browser_lane.Action.latitude; longitude; accuracy_m} ->
+           obj ["latitude",`Float latitude;"longitude",`Float longitude;"accuracy",`Float accuracy_m]
+         | None -> `Null)]
+    | None -> Browser_lane.Action.Clear_emulation, "clear_emulation", `Clear, ["clear",`Bool true] in
+  let unknown = Printf.sprintf "the %s may have changed tab %d: read its environment before another emulation step" action id in
+  match run_step t ~window_s:(tab_window id interaction) ~step:"page.emulation"
+      ~args:(obj (("label",str label) :: ("tabId",`Int id) :: request)) (String.concat "\n" [
+      "  const reason = " ^ message ^ ";";
+      unblocked_managed_page;
+      "    emit(await (" ^ emulation_script ^ ")(task.page(args.label), args, reason));";
+      "  }" ]) with
+  | Error failure -> Error (effect_failure ~unknown failure)
+  | Ok value -> emulation_receipt ~id ~action ~kind value
+
 (* ego's Page API has no back or forward, so the step goes through the
    page's CDP session: it reads the tab's history, refuses before acting when
    there is no entry that way, moves to the entry, and waits until the tab's
@@ -1939,6 +2069,10 @@ let act ?actor t args =
     upload t tab_id ~selector ~paths
   | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Upload {target = Browser_lane.Action.Chooser_opener opener; paths}}) ->
     choose_files ?actor t tab_id ~opener ~paths
+  | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Set_emulation emulation}) ->
+    emulate t tab_id (Some emulation)
+  | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Clear_emulation}) ->
+    emulate t tab_id None
 
 let workflow ?actor t args =
   let pre result = Result.map_error (fun detail -> Live.Before_effect detail) result in

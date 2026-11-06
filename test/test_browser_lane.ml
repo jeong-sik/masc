@@ -254,7 +254,8 @@ let verb_asking_for : Lane.live_capability -> Lane.verb = Lane.(function
   | Operator_handoff -> Page_act (Action.Control Action.Hand_off)
     | Page_management -> Page_act (Action.Control (Action.Adopt_tab {tab_id=2;label=None}))
   | Download_listing -> Page_downloads {tab_id=2}
-  | File_upload -> Page_act (Action.On_tab {tab_id=2;frame_path=[];interaction=Action.Upload {target=Action.File_input "#file";paths=["/tmp/note.txt"]}}))
+  | File_upload -> Page_act (Action.On_tab {tab_id=2;frame_path=[];interaction=Action.Upload {target=Action.File_input "#file";paths=["/tmp/note.txt"]}})
+  | Environment_emulation -> Page_act (Action.On_tab {tab_id=2;frame_path=[];interaction=Action.Set_emulation {geolocation=None;locale=Some "fr-FR";timezone=None}}))
 
 let capability = testable
   (fun ppf value -> Format.pp_print_string ppf (Lane.live_capability_to_wire value)) ( = )
@@ -263,9 +264,9 @@ let test_transport_table () =
   let unserved transport = List.filter (fun capability ->
     not (Lane.live_transport_serves transport capability)) Lane.all_of_live_capability in
   check (list capability) "the extension has no pointer the browser trusts"
-    Lane.[Accessibility_snapshot; Snapshot_target_input; Native_workflow; Page_recovery; Trusted_hover; Trusted_drag; Trusted_double_click; Trusted_button_click; Touch_input; Trusted_keyboard; Viewport_resize; Tab_history; Tab_navigation; Tab_closing; Tab_creation; Dialog_read; Dialog_answer; Frame_read; Operator_handoff; Page_management; Download_listing; File_upload] (unserved Lane.Web_extension);
-  check (list capability) "the BiDi peer has no ego snapshot, browser zoom, hand-off, download list or upload"
-    Lane.[Accessibility_snapshot; Snapshot_target_input; Native_workflow; Page_recovery; Browser_zoom; Dialog_read; Operator_handoff; Page_management; Download_listing; File_upload] (unserved Lane.Webdriver_bidi);
+    Lane.[Accessibility_snapshot; Snapshot_target_input; Native_workflow; Page_recovery; Trusted_hover; Trusted_drag; Trusted_double_click; Trusted_button_click; Touch_input; Trusted_keyboard; Viewport_resize; Tab_history; Tab_navigation; Tab_closing; Tab_creation; Dialog_read; Dialog_answer; Frame_read; Operator_handoff; Page_management; Download_listing; File_upload; Environment_emulation] (unserved Lane.Web_extension);
+  check (list capability) "the BiDi peer has no ego snapshot, browser zoom, hand-off, download list, upload or environment emulation"
+    Lane.[Accessibility_snapshot; Snapshot_target_input; Native_workflow; Page_recovery; Browser_zoom; Dialog_read; Operator_handoff; Page_management; Download_listing; File_upload; Environment_emulation] (unserved Lane.Webdriver_bidi);
   check (list capability) "the ego connection has no touch, zoom or frame reads"
     Lane.[Touch_input; Browser_zoom; Frame_read]
     (unserved Lane.Ego_task_space);
@@ -676,10 +677,39 @@ let test_action_context_arguments () =
      valid "upload" ["selector",`String "input";"paths",`List []];
      valid "upload" ["selector",`String "input";"paths",`List [`String "/file\n/other"]]]
 
+let test_emulation_arguments () =
+  let parse fields = Lane.Action.parse (`Assoc (["action",`String "set_emulation";"tabId",`Int 1] @ fields)) in
+  check bool "a locale alone parses" true (Result.is_ok (parse ["locale",`String "ko-KR"]));
+  check bool "a location takes the default accuracy" true
+    (match parse ["latitude",`Int 37;"longitude",`Float 127.] with
+     | Ok (Lane.Action.On_tab {interaction=Lane.Action.Set_emulation {geolocation=Some {accuracy_m;_};_};_}) ->
+       accuracy_m = Lane.Action.default_accuracy_m
+     | Ok _ | Error _ -> false);
+  List.iter (fun (label, fields) -> check bool label true (Result.is_error (parse fields)))
+    [ "nothing to set", []
+    ; "latitude without longitude", ["latitude",`Float 1.]
+    ; "latitude out of range", ["latitude",`Float 91.;"longitude",`Float 0.]
+    ; "longitude out of range", ["latitude",`Float 0.;"longitude",`Float 181.]
+    ; "accuracy without a location", ["accuracyMeters",`Float 5.;"locale",`String "ko"]
+    ; "accuracy above the cap", ["latitude",`Float 0.;"longitude",`Float 0.;"accuracyMeters",`Float 10001.]
+    ; "zero accuracy", ["latitude",`Float 0.;"longitude",`Float 0.;"accuracyMeters",`Float 0.]
+    ; "a locale with spaces", ["locale",`String "not a locale"]
+    ; "a timezone with a quote", ["timezone",`String "Asia/\"Seoul"]
+    ; "a frame path", ["locale",`String "ko-KR";"framePath",`List [`String "iframe"]] ];
+  check bool "clear takes nothing else" true
+    (Result.is_error (Lane.Action.parse (`Assoc ["action",`String "clear_emulation";"tabId",`Int 1;"locale",`String "ko-KR"])));
+  let emulation : Lane.Action.emulation = {geolocation=Some {latitude=37.5;longitude=127.;accuracy_m=25.};
+    locale=Some "ko-KR"; timezone=Some "Asia/Seoul"} in
+  List.iter (fun interaction ->
+    let round = Lane.Action.On_tab {tab_id=1;frame_path=[];interaction} in
+    check bool "emulation survives the wire" true (Lane.Action.parse (Lane.Action.to_json round) = Ok round))
+    [Lane.Action.Set_emulation emulation; Lane.Action.Clear_emulation]
+
 let () = run "browser client routing" ["ownership", [
   test_case "native Page management retains exact tab binding" `Quick test_native_page_management_contract;
   test_case "actions are parsed before effects" `Quick test_action_parser;
   test_case "context and file arguments are explicit" `Quick test_action_context_arguments;
+  test_case "emulation arguments are parsed before effects" `Quick test_emulation_arguments;
   test_case "native Space wait keeps SDK ownership and options" `Quick test_native_control_wait_contract;
   test_case "reads retain caller, scope and settled results" `Quick test_read_activity;
   test_case "agent activity follows queue ownership and cleanup" `Quick test_agent_activity;

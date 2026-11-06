@@ -1,0 +1,10 @@
+[ego-browser:notice] Ego Lite update is available (current 0.6.2.7). Finish the current browser task, then ask the user before running `ego-browser upgrade`; re-read the ego-browser Skill afterward.
+{"step":"notifications 18769 in a new process","at":"2026-11-06T06:18:12.665Z","value":"prompt"}
+{"step":"goto 18770","at":"2026-11-06T06:18:12.750Z","value":{}}
+{"step":"setPermission","at":"2026-11-06T06:18:12.752Z","value":{}}
+{"step":"override","at":"2026-11-06T06:18:12.754Z","value":{}}
+{"step":"state","at":"2026-11-06T06:18:12.755Z","value":"granted"}
+{"step":"position","at":"2026-11-06T06:18:12.758Z","value":{"latitude":37.5665,"longitude":126.978,"accuracy":25}}
+{"step":"reset","at":"2026-11-06T06:18:12.760Z","value":{}}
+{"step":"clearOverride","at":"2026-11-06T06:18:12.762Z","value":{}}
+{"step":"stateAfterReset","at":"2026-11-06T06:18:12.763Z","value":"prompt"}

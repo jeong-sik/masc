@@ -1,0 +1,14 @@
+[ego-browser:notice] Ego Lite update is available (current 0.6.2.7). Finish the current browser task, then ask the user before running `ego-browser upgrade`; re-read the ego-browser Skill afterward.
+{"step":"newProcess 18769","value":{"url":"http://127.0.0.1:18769/index.html","geolocation":"prompt","notifications":"prompt","camera":"prompt","microphone":"prompt"}}
+{"step":"resetPermissions","value":{}}
+{"step":"afterReset 18769","value":{"url":"http://127.0.0.1:18769/index.html","geolocation":"prompt","notifications":"prompt","camera":"prompt","microphone":"prompt"}}
+{"step":"goto 18768","value":{}}
+{"step":"afterReset 18768","value":{"url":"http://127.0.0.1:18768/index.html","geolocation":"granted","notifications":"prompt","camera":"prompt","microphone":"prompt"}}
+{"step":"goto 18770","value":{}}
+{"step":"before 18770","value":{"url":"http://127.0.0.1:18770/index.html","geolocation":"prompt","notifications":"prompt","camera":"prompt","microphone":"prompt"}}
+{"step":"setPermission 18770","value":{}}
+{"step":"afterSet 18770","value":{"url":"http://127.0.0.1:18770/index.html","geolocation":"granted","notifications":"prompt","camera":"prompt","microphone":"prompt"}}
+{"step":"setPermission no origin","value":{}}
+{"step":"afterNoOrigin 18770","value":{"url":"http://127.0.0.1:18770/index.html","geolocation":"granted","notifications":"denied","camera":"prompt","microphone":"prompt"}}
+{"step":"goto 18769","value":{}}
+{"step":"afterNoOrigin 18769","value":{"url":"http://127.0.0.1:18769/index.html","geolocation":"prompt","notifications":"denied","camera":"prompt","microphone":"prompt"}}

@@ -1,0 +1,19 @@
+[ego-browser:notice] Ego Lite update is available (current 0.6.2.7). Finish the current browser task, then ask the user before running `ego-browser upgrade`; re-read the ego-browser Skill afterward.
+{"step":"goto","value":{}}
+{"step":"baseline","value":{"intlLocale":"ko","numberLocale":"ko","timeZone":"Asia/Seoul","dateString":"21:00:00 GMT+0900 (한국 표준시)","language":"ko-KR","geolocation":"prompt"}}
+{"step":"setLocale fr-FR","value":{}}
+{"step":"setLocale de-DE while fr-FR","value":{}}
+{"step":"setTimezone New_York","value":{}}
+{"step":"setTimezone Paris while New_York","value":{}}
+{"step":"afterSecond","value":{"intlLocale":"de-DE","numberLocale":"de-DE","timeZone":"Europe/Paris","dateString":"13:00:00 GMT+0100 (Mitteleuropäische Normalzeit)","language":"ko-KR","geolocation":"prompt"}}
+{"step":"setTimezone bad","value":{}}
+{"step":"setLocale bad","value":{}}
+{"step":"afterBad","value":{"intlLocale":"zz-ZZ","numberLocale":"zz-ZZ","timeZone":"Europe/Paris","dateString":"13:00:00 GMT+0100 (GMT+01:00)","language":"ko-KR","geolocation":"prompt"}}
+{"step":"clearLocale","value":{}}
+{"step":"clearTimezone","value":{}}
+{"step":"clearGeolocation","value":{}}
+{"step":"afterClear","value":{"intlLocale":"ko","numberLocale":"ko","timeZone":"Asia/Seoul","dateString":"21:00:00 GMT+0900 (한국 표준시)","language":"ko-KR","geolocation":"prompt"}}
+{"step":"clearAgain","value":[{},{}]}
+{"step":"set for next process","value":[{},{},{}]}
+{"step":"beforeExit","value":{"intlLocale":"ja-JP","numberLocale":"ja-JP","timeZone":"Asia/Tokyo","dateString":"21:00:00 GMT+0900 (日本標準時)","language":"ko-KR","geolocation":"granted"}}
+{"step":"otherPage same origin","value":{"error":"page label not found: p2. Managed Pages in task space 28: p1. task.page(label) only refers to an existing Page; create one with await task.newPage()"}}

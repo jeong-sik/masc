@@ -134,7 +134,7 @@ let reply_policy = function
      | Action.On_tab {interaction;_} ->
        (match interaction with
         | Action.Upload _ -> Executor_owned
-        | Action.Accept_dialog _ | Action.Dismiss_dialog
+        | Action.Set_emulation _ | Action.Clear_emulation | Action.Accept_dialog _ | Action.Dismiss_dialog
         | Action.Back | Action.Forward | Action.Reload | Action.Stop_loading | Action.Close_tab -> Reply_window))
   | Tabs_list | Page_read _ | Page_document _ | Page_downloads _
   | Page_capture _ | Page_scene _ | Page_snapshot _ | Page_interact _
@@ -150,7 +150,7 @@ let ego_reply_policy = function
      | Action.Open_tab _ -> Executor_owned
      | Action.On_tab {interaction=(Action.Reload|Action.Stop_loading);_} -> Executor_owned
      | (Action.Open_window _ | Action.Control _
-       | Action.On_tab {interaction=(Action.Upload _
+       | Action.On_tab {interaction=(Action.Upload _ | Action.Set_emulation _ | Action.Clear_emulation
          | Action.Accept_dialog _ | Action.Dismiss_dialog
          | Action.Back | Action.Forward | Action.Close_tab);_}) -> reply_policy (Page_act action))
   | Page_interact {action;_} ->
@@ -458,6 +458,7 @@ type live_capability =
   | Page_management
   | Download_listing
   | File_upload
+  | Environment_emulation
 [@@deriving enumerate]
 
 let live_capability_to_wire = function
@@ -494,6 +495,7 @@ let live_capability_to_wire = function
   | Frame_read -> "frame_read"
   | Download_listing -> "download_listing"
   | File_upload -> "file_upload"
+  | Environment_emulation -> "environment_emulation"
 ;;
 
 let live_capability_of_wire raw =
@@ -541,6 +543,7 @@ let live_capability = function
   | Page_downloads _ -> Download_listing
   | Page_context { mode = `Dialog; _ } -> Dialog_read
   | Page_act (Action.On_tab {interaction = Action.Upload _; _}) -> File_upload
+  | Page_act (Action.On_tab {interaction = (Action.Set_emulation _ | Action.Clear_emulation); _}) -> Environment_emulation
 ;;
 
 
@@ -628,8 +631,8 @@ let live_transport_of_string = function
    moves and closes only the pages an agent opened there. It hands its space
    to the operator and takes it back, lists downloads saved into the worker's
    own folder, sets files on their file inputs from the worker's upload
-   copies, and sets a page's viewport through a CDP override that lasts as
-   long as the ego SDK process;
+   copies, and sets a page's viewport, location, locale and time zone
+   through CDP overrides that last as long as the ego SDK process;
    test_browser_ego_peer holds its column to what Browser_ego_peer does. *)
 let live_transport_serves transport capability =
   match transport, capability with
@@ -641,18 +644,19 @@ let live_transport_serves transport capability =
   | Web_extension, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_button_click | Touch_input
                     | Trusted_keyboard | Tab_creation | Viewport_resize | Tab_history | Tab_navigation
                     | Tab_closing | Dialog_read | Dialog_answer | Frame_read | Accessibility_snapshot | Snapshot_target_input | Native_workflow | Page_recovery
-                    | Operator_handoff | Page_management | Download_listing | File_upload) -> false
+                    | Operator_handoff | Page_management | Download_listing | File_upload
+                    | Environment_emulation) -> false
   | Webdriver_bidi, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_button_click | Touch_input
                     | Trusted_keyboard | Tab_creation | Viewport_resize | Tab_history | Tab_navigation
                     | Tab_closing | Dialog_answer | Frame_read) -> true
   | Webdriver_bidi, (Dialog_read | Browser_zoom | Accessibility_snapshot | Snapshot_target_input | Native_workflow | Page_recovery | Operator_handoff | Page_management | Download_listing
-                    | File_upload) -> false
+                    | File_upload | Environment_emulation) -> false
   | Ego_task_space, (Tab_listing | Text_read | Document_source | Element_inventory | Viewport_capture | Scene_read
                     | Tab_creation | Tab_navigation | Tab_closing | Dom_interaction | Point_click
                     | Point_scroll | Trusted_hover | Trusted_double_click | Trusted_button_click
                     | Trusted_drag | Trusted_keyboard | Tab_history | Accessibility_snapshot | Dialog_read | Dialog_answer
                     | Snapshot_target_input | Native_workflow | Page_recovery | Operator_handoff | Page_management | Download_listing | File_upload | Tab_activation
-                    | Viewport_resize) -> true
+                    | Viewport_resize | Environment_emulation) -> true
   | Ego_task_space, (Touch_input | Browser_zoom | Frame_read) -> false
 ;;
 

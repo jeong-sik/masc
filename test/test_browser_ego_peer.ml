@@ -1158,6 +1158,78 @@ let test_viewport_is_a_cdp_override_on_the_page () =
   reply := answered (obj ["guard",page_summary;"receipt",size 1548 990;"error",str "Emulation.setDeviceMetricsOverride failed"]);
   check string "a CDP failure leaves the size unknown" "unknown" (failure_kind (resize (Lane.Fit {width=800;height=600})))
 
+(* Location, locale and time zone are CDP overrides on an ego Page. The
+   peer sends what was asked with the label it names, passes the page's own
+   before and after through, and says the overrides end with the SDK process
+   and that the locale reaches Intl only. A step that stopped after another
+   took effect is partial; a refusal the script made before any change is
+   before effect. *)
+let test_emulation_is_a_cdp_override_on_the_page () =
+  let asked = ref [] in
+  let reply = ref (refused "no reply set") in
+  let peer = opened (fun sent ->
+    asked := sent :: !asked;
+    match sent.step with
+    | "tabs.list" -> answered tabs
+    | "page.emulation" -> !reply
+    | other -> failf "unexpected emulation step %s" other) in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  let environment ~locale ~zone ~permission = obj ["origin",str "https://app.slack.com";"locale",str locale;
+    "timeZone",str zone;"geolocationPermission",str permission] in
+  let emulate interaction = dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction})) in
+  let seoul = Lane.Action.Set_emulation {geolocation=Some {latitude=37.5665;longitude=126.978;accuracy_m=25.};
+    locale=Some "fr-FR";timezone=Some "America/New_York"} in
+  reply := answered (obj ["applied",`List [str "locale";str "timezone";str "geolocation_grant";str "geolocation"];
+    "before",environment ~locale:"ko" ~zone:"Asia/Seoul" ~permission:"prompt";
+    "observed",environment ~locale:"fr-FR" ~zone:"America/New_York" ~permission:"granted";
+    "geolocationGrant",str "https://app.slack.com";"emulated",`Null]);
+  (match emulate seoul with
+   | Ok receipt ->
+     check string "the action" "set_emulation" (text (field "action" receipt));
+     check int "the tab" 1 (Yojson.Safe.Util.to_int (field "tabId" receipt));
+     check string "what the page reports afterwards" "America/New_York" (text (field "timeZone" (field "observed" receipt)));
+     check string "the origin the grant covers" "https://app.slack.com" (text (field "geolocationGrant" receipt));
+     check string "the overrides live with the SDK process" "ego_sdk_process" (text (field "lifetime" receipt));
+     check string "the locale reaches Intl only" "intl_only" (text (field "localeScope" receipt))
+   | other -> failf "set_emulation was %s" (failure_kind other));
+  let sent = List.hd !asked in
+  check string "the Page it names" "p1" (text (field "label" sent.args));
+  check string "what it asks for" {|{"latitude":37.5665,"longitude":126.978,"accuracy":25.0}|}
+    (Yojson.Safe.to_string (field "geolocation" sent.args));
+  check (pair string string) "the locale and time zone as asked" ("fr-FR", "America/New_York")
+    (text (field "locale" sent.args), text (field "timezone" sent.args));
+  check bool "a set is not a clear" true (field "clear" sent.args = `Bool false);
+  reply := answered (obj ["applied",`List [str "geolocation";str "locale";str "timezone"];
+    "before",environment ~locale:"fr-FR" ~zone:"America/New_York" ~permission:"granted";
+    "observed",environment ~locale:"ko" ~zone:"Asia/Seoul" ~permission:"granted";
+    "geolocationGrant",`Null;"emulated",`Null]);
+  (match emulate Lane.Action.Clear_emulation with
+   | Ok receipt ->
+     check string "the action" "clear_emulation" (text (field "action" receipt));
+     check bool "cleared, with the grant left" true
+       (field "cleared" receipt = `Bool true && field "permissionsUnchanged" receipt = `Bool true)
+   | other -> failf "clear_emulation was %s" (failure_kind other));
+  check bool "a clear asks for nothing else" true
+    (let args = (List.hd !asked).args in field "clear" args = `Bool true && field "locale" args = `Null);
+  reply := answered (obj ["applied",`List [str "timezone"];
+    "failed",obj ["step",str "timezone";"error",str "the page reports Asia/Seoul after the override to America/New_York"];
+    "before",environment ~locale:"ko" ~zone:"Asia/Seoul" ~permission:"prompt";
+    "observed",environment ~locale:"ko" ~zone:"Asia/Seoul" ~permission:"prompt"]);
+  (match emulate (Lane.Action.Set_emulation {geolocation=None;locale=None;timezone=Some "America/New_York"}) with
+   | Error (Live.Partial_failure {tab_id; message; _}) ->
+     check int "the tab it stopped on" 1 tab_id;
+     check bool "it names the step and what the page said" true
+       (contains message "timezone: the page reports Asia/Seoul")
+   | other -> failf "a time zone the page did not take was %s" (failure_kind other));
+  reply := refused "the page knows no time zone \"Mars/Olympus\": Invalid time zone specified: Mars/Olympus";
+  check bool "a name the page does not know is refused before any change" true
+    (contains (before_effect "an unknown zone" (emulate (Lane.Action.Set_emulation {geolocation=None;locale=None;timezone=Some "Mars/Olympus"})))
+       "Mars/Olympus");
+  reply := answered (obj ["before",`Null]);
+  check string "a receipt without its steps leaves the change unknown" "unknown" (failure_kind (emulate Lane.Action.Clear_emulation));
+  let unmanaged = dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id=2;frame_path=[];interaction=seoul})) in
+  check string "an operator tab is refused before any change" "before effect" (failure_kind unmanaged)
+
 (* What leaves the peer says where input stands and which SDK process ran
    it, failures included. *)
 let test_every_answer_carries_the_input_state () =
@@ -1276,6 +1348,7 @@ let test_the_scripts_parse_as_modules () =
     | "page.downloads" -> answered (obj ["since",`Null;"rows",`List []])
     | "page.upload" -> answered (obj ["error",`Null;"dialog",`Null;"tab",`Null])
     | "page.choose_files" -> answered (obj ["error",`Null;"dialog",`Null;"tab",`Null])
+    | "page.emulation" -> answered (obj ["applied",`List [];"before",`Null;"observed",`Null])
     | _ -> page_answer ~label:"p1" (obj ["url",str "u"]) in
   let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:directory with
     | Ok peer -> peer | Error detail -> fail detail in
@@ -1305,13 +1378,15 @@ let test_the_scripts_parse_as_modules () =
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Dismiss_dialog});
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Upload {target=Lane.Action.File_input "#file";paths=[upload_file]}});
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Upload {target=Lane.Action.Chooser_opener "#attach";paths=[upload_file]}});
+      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Set_emulation {geolocation=Some {latitude=1.;longitude=2.;accuracy_m=10.};locale=Some "fr-FR";timezone=Some "UTC"}});
+      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Clear_emulation});
       (* Known-unavailable raw drag is refused before the runner. *)
       Live.Page_interact, interact_args (Lane.Drag {from={x=0.25;y=0.5};to_={x=0.75;y=0.5};viewport;via=[];duration_ms=0}) ];
   check (result unit string) "finish" (Ok ()) (Peer.finish peer);
   check (list string) "every step"
     ["space.open";"tabs.list";"page.read";"page.document";"page.elements";"page.scene";"page.snapshot";"page.downloads";"page.capture";
      "page.open";"page.goto";"page.target";"page.pointer";"page.pointer";"page.pointer";"page.keyboard";"page.input";"page.target_input";"page.viewport";
-     "page.close";"page.reload";"page.stop_loading";"page.history";"page.dialog";"page.dialog";"page.upload";"page.choose_files";"space.finish"]
+     "page.close";"page.reload";"page.stop_loading";"page.history";"page.dialog";"page.dialog";"page.upload";"page.choose_files";"page.emulation";"page.emulation";"space.finish"]
     (List.rev_map fst !scripts);
   List.iter (fun (step, script) ->
     let file = Filename.concat directory (step ^ ".mjs") in
@@ -1388,6 +1463,7 @@ let test_the_peer_serves_what_the_lane_table_says () =
     | "space.adopt_tab" -> answered (obj ["label",str "adopted";"targetId",str "T9";"openedBy",str "unknown"])
     | "page.downloads" -> answered (obj ["since",`Null;"rows",`List []])
     | "page.upload" -> answered (obj ["error",`Null;"dialog",`Null;"tab",`Null])
+    | "page.emulation" -> answered (obj ["applied",`List [str "locale"];"before",`Null;"observed",`Null])
     | "page.target" -> answered resolved
     | "page.pointer" | "page.keyboard" | "page.viewport" -> input_answer ()
     | "page.input" -> dom_answer (obj ["action",str "fill"])
@@ -1434,7 +1510,8 @@ let test_the_peer_serves_what_the_lane_table_says () =
     | Operator_handoff -> Page_act (Action.Control Action.Hand_off)
     | Page_management -> Page_act (Action.Control (Action.Adopt_tab {tab_id=2;label=None}))
     | Download_listing -> Page_downloads {tab_id=1}
-    | File_upload -> Page_act (Action.On_tab {tab_id=1;frame_path=[];interaction=Action.Upload {target=Action.File_input "#file";paths=[upload_file]}})) in
+    | File_upload -> Page_act (Action.On_tab {tab_id=1;frame_path=[];interaction=Action.Upload {target=Action.File_input "#file";paths=[upload_file]}})
+    | Environment_emulation -> Page_act (Action.On_tab {tab_id=1;frame_path=[];interaction=Action.Set_emulation {geolocation=None;locale=Some "fr-FR";timezone=None}})) in
   List.iter (fun capability ->
     let name = Lane.live_capability_to_wire capability in
     let asked = verb_asking_for capability in
@@ -4002,6 +4079,7 @@ let () =
       test_case "a gesture refused before its press keeps input" `Quick test_a_gesture_refused_before_its_press_keeps_input;
       test_case "every answer carries the input state" `Quick test_every_answer_carries_the_input_state;
       test_case "an ego viewport is a CDP override on its Page" `Quick test_viewport_is_a_cdp_override_on_the_page;
+      test_case "ego location, locale and time zone are CDP overrides on its Page" `Quick test_emulation_is_a_cdp_override_on_the_page;
       test_case "a dialog-interrupted workflow stays uncertain until a new click settles, without replay" `Quick test_dialog_interrupted_workflow_stays_uncertain_until_a_new_click_settles;
       test_case "native workflows retain input ownership after a lost result" `Quick test_native_workflow_pointer_ownership;
       test_case "a workflow that never held input keeps the previous readiness" `Quick test_a_workflow_that_never_held_input_keeps_the_previous_readiness;

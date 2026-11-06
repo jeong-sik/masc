@@ -1,0 +1,8 @@
+Error: A browser permission prompt for location access has appeared.
+The user now controls this task space. Wait for the user to handle the prompt.
+Resume only after the user confirms, using takeOverTaskSpace(spaceId).
+    at buildEgoError (file:////[eval1]:461:19)
+    at stopForUserControl (file:////[eval1]:9065:28)
+    at probeUserControlReason (file:////[eval1]:9043:13)
+
+ego's nodejs process exited with code 1.

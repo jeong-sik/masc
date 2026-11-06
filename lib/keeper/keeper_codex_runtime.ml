@@ -1359,7 +1359,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
       match
         Runtime_codex_app_server.validate_turn
           ~dynamic_tools
-          ~thread_mode
+          ~thread:(Runtime_codex_app_server.Persistent thread_mode)
           ~cwd:process_cwd
           client_config
           ~prompt
@@ -1659,7 +1659,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
                  ~hook_name:"codex_reasoning_effort" ~hook_decision:"admitted"
                  ~hook_detail:(Yojson.Safe.to_string (`Assoc [
                    "model", `String model; "requested", wire requested; "effective", wire effective])) ()))) raw_trace_run)
-         ~thread_mode
+         ~thread:(Runtime_codex_app_server.Persistent thread_mode)
          ~history
          ~developer_context
          ~on_undelivered_tool_result:

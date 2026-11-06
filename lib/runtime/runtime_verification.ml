@@ -1003,6 +1003,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
         (match
            Runtime_codex_app_server.run_turn
              ~dynamic_tools:[ tool ]
+             ~thread:Runtime_codex_app_server.Ephemeral
              ?reasoning_effort
              ~mgr
              ~clock

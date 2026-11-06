@@ -1,0 +1,25 @@
+[ego-browser:notice] Ego Lite update is available (current 0.6.2.7). Finish the current browser task, then ask the user before running `ego-browser upgrade`; re-read the ego-browser Skill afterward.
+{"step":"space","at":"2026-11-06T12:50:50.746Z","value":42}
+{"step":"goto","at":"2026-11-06T12:50:50.854Z","value":{}}
+{"step":"a.before","at":"2026-11-06T12:50:50.868Z","value":{"blocked":"ok","blockedQuery":"ok","subdomain":"ok","other":"ok","inQuery":"ok","self":"ok"}}
+{"step":"a.block","at":"2026-11-06T12:50:50.870Z","value":{}}
+{"step":"a.after","at":"2026-11-06T12:50:50.878Z","value":{"blocked":"failed: Failed to fetch","blockedQuery":"failed: Failed to fetch","subdomain":"ok","other":"ok","inQuery":"ok","self":"ok"}}
+{"step":"a.frameSame","at":"2026-11-06T12:50:50.887Z","value":"loaded"}
+{"step":"a.frameCross","at":"2026-11-06T12:50:50.926Z","value":"loaded"}
+{"step":"a.frameFetch","at":"2026-11-06T12:50:50.941Z","value":{"sameBlocked":"failed: Failed to fetch","sameOther":"ok","crossBlocked":"ok","crossOther":"ok"}}
+{"step":"b.block","at":"2026-11-06T12:50:50.943Z","value":{}}
+{"step":"b.after","at":"2026-11-06T12:50:50.951Z","value":{"blocked":"ok","blockedQuery":"ok","subdomain":"ok","other":"failed: Failed to fetch","inQuery":"ok","self":"ok"}}
+{"step":"c.block","at":"2026-11-06T12:50:50.952Z","value":{}}
+{"step":"c.reload","at":"2026-11-06T12:50:51.030Z","value":{}}
+{"step":"c.afterReload","at":"2026-11-06T12:50:51.040Z","value":{"blocked":"failed: Failed to fetch","blockedQuery":"failed: Failed to fetch","subdomain":"ok","other":"failed: Failed to fetch","inQuery":"ok","self":"ok"}}
+{"step":"d.gotoBlocked","at":"2026-11-06T12:50:51.124Z","value":{}}
+{"step":"d.gotoBlockedDefaultPort","at":"2026-11-06T12:50:51.192Z","value":{"error":"page.goto failed: net::ERR_CONNECTION_REFUSED"}}
+{"step":"d.gotoUnblockedDefaultPort","at":"2026-11-06T12:50:51.267Z","value":{"error":"page.goto failed: net::ERR_CONNECTION_REFUSED"}}
+{"step":"d.back","at":"2026-11-06T12:50:51.346Z","value":{}}
+{"step":"e.clear","at":"2026-11-06T12:50:51.348Z","value":{}}
+{"step":"e.after","at":"2026-11-06T12:50:51.358Z","value":{"blocked":"ok","blockedQuery":"ok","subdomain":"ok","other":"ok","inQuery":"ok","self":"ok"}}
+{"step":"f.blockUrls","at":"2026-11-06T12:50:51.359Z","value":{}}
+{"step":"f.after","at":"2026-11-06T12:50:51.363Z","value":{"blocked":"failed: Failed to fetch","blockedQuery":"failed: Failed to fetch","subdomain":"ok","other":"ok","inQuery":"failed: Failed to fetch","self":"ok"}}
+{"step":"f.clear","at":"2026-11-06T12:50:51.364Z","value":{}}
+{"step":"f.afterClear","at":"2026-11-06T12:50:51.373Z","value":{"blocked":"ok","blockedQuery":"ok","subdomain":"ok","other":"ok","inQuery":"ok","self":"ok"}}
+{"step":"finish","at":"2026-11-06T12:50:51.376Z","value":{"spaceId":42,"closedSpace":true,"keptManagedLabels":[],"closedManagedLabels":["p1"],"preservedUnmanagedCount":0}}

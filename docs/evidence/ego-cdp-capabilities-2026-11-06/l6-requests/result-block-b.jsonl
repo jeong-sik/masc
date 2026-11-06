@@ -1,0 +1,23 @@
+[ego-browser:notice] Ego Lite update is available (current 0.6.2.7). Finish the current browser task, then ask the user before running `ego-browser upgrade`; re-read the ego-browser Skill afterward.
+{"step":"space","at":"2026-11-06T12:51:31.587Z","value":43}
+{"step":"goto","at":"2026-11-06T12:51:31.684Z","value":{}}
+{"step":"enable","at":"2026-11-06T12:51:31.686Z","value":{}}
+{"step":"drain","at":"2026-11-06T12:51:31.686Z","value":{"events":94,"failures":[]}}
+{"step":"g.block","at":"2026-11-06T12:51:31.688Z","value":{}}
+{"step":"g.explicit","at":"2026-11-06T12:51:31.690Z","value":"failed: Failed to fetch"}
+{"step":"g.default","at":"2026-11-06T12:51:31.691Z","value":"failed: Failed to fetch"}
+{"step":"g.freeDefault","at":"2026-11-06T12:51:31.694Z","value":"failed: Failed to fetch"}
+{"step":"g.why","at":"2026-11-06T12:51:31.694Z","value":{"events":6,"failures":[{"url":"http://blocked.localhost:18773/x.txt","errorText":"","blockedReason":"inspector"},{"url":"http://blocked.localhost/x.txt","errorText":"","blockedReason":"inspector"},{"url":"http://free.localhost/x.txt","errorText":"net::ERR_CONNECTION_REFUSED","blockedReason":null}]}}
+{"step":"h.block","at":"2026-11-06T12:51:31.697Z","value":{}}
+{"step":"h.explicit","at":"2026-11-06T12:51:31.701Z","value":"ok"}
+{"step":"h.default","at":"2026-11-06T12:51:31.702Z","value":"failed: Failed to fetch"}
+{"step":"h.why","at":"2026-11-06T12:51:31.703Z","value":{"events":7,"failures":[{"url":"http://blocked.localhost/x.txt","errorText":"","blockedReason":"inspector"}]}}
+{"step":"i.block","at":"2026-11-06T12:51:31.704Z","value":{}}
+{"step":"i.goto","at":"2026-11-06T12:51:31.804Z","value":{}}
+{"step":"i.where","at":"2026-11-06T12:51:31.806Z","value":{"url":"http://blocked.localhost:18773/x.txt","title":""}}
+{"step":"i.text","at":"2026-11-06T12:51:31.808Z","value":"hello\n"}
+{"step":"i.why","at":"2026-11-06T12:51:31.808Z","value":{"events":15,"failures":[{"url":"http://blocked.localhost:18773/favicon.ico","errorText":"","blockedReason":"inspector"}]}}
+{"step":"i.back","at":"2026-11-06T12:51:31.884Z","value":{}}
+{"step":"clear","at":"2026-11-06T12:51:31.887Z","value":{}}
+{"step":"disable","at":"2026-11-06T12:51:31.888Z","value":{}}
+{"step":"finish","at":"2026-11-06T12:51:31.891Z","value":{"spaceId":43,"closedSpace":true,"keptManagedLabels":[],"closedManagedLabels":["p1"],"preservedUnmanagedCount":0}}

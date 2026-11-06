@@ -1,0 +1,14 @@
+[ego-browser:notice] Ego Lite update is available (current 0.6.2.7). Finish the current browser task, then ask the user before running `ego-browser upgrade`; re-read the ego-browser Skill afterward.
+{"step":"space","at":"2026-11-06T13:02:18.691Z","value":45}
+{"step":"goto1","at":"2026-11-06T13:02:18.881Z","value":{}}
+{"step":"goto2","at":"2026-11-06T13:02:18.962Z","value":{}}
+{"step":"m.blockA","at":"2026-11-06T13:02:18.969Z","value":{"ok":true,"value":{"blocked":["a.localhost"]}}}
+{"step":"m.blockB","at":"2026-11-06T13:02:18.970Z","value":{"ok":true,"value":{"blocked":["a.localhost","b.localhost"]}}}
+{"step":"m.p1","at":"2026-11-06T13:02:18.982Z","value":{"a":"blocked","b":"blocked","c":"ok"}}
+{"step":"m.p2","at":"2026-11-06T13:02:18.995Z","value":{"a":"ok","b":"ok","c":"ok"}}
+{"step":"n.gotoOtherSite","at":"2026-11-06T13:02:19.079Z","value":{}}
+{"step":"n.p1","at":"2026-11-06T13:02:19.084Z","value":{"a":"blocked","b":"blocked","c":"ok"}}
+{"step":"o.unblock","at":"2026-11-06T13:02:19.085Z","value":{"ok":true,"value":{"unblocked":2}}}
+{"step":"o.p1","at":"2026-11-06T13:02:19.107Z","value":{"a":"ok","b":"ok","c":"ok"}}
+{"step":"o.unblockAgain","at":"2026-11-06T13:02:19.109Z","value":{"ok":true,"value":{"unblocked":0}}}
+{"step":"finish","at":"2026-11-06T13:02:19.111Z","value":{"spaceId":45,"closedSpace":true,"keptManagedLabels":[],"closedManagedLabels":["p1","p2"],"preservedUnmanagedCount":0}}

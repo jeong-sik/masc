@@ -42,8 +42,6 @@ type exact_completion_artifact =
   ; measurement_request : exact_completion_measurement_request
   }
 
-let generation_serializer_invocations = Atomic.make 0
-
 let supports_completion_request_measurement =
   Count_tokens_sync.supports_completion_request_measurement
 ;;
@@ -98,7 +96,6 @@ let freeze_exact_completion_artifact
           ~tools:request.tools
           ()
       in
-      Atomic.incr generation_serializer_invocations;
       match generation_artifact_result with
       | Error error -> Error (Output_token_resolution_failed error)
       | Ok generation_artifact ->
@@ -187,9 +184,3 @@ let measure_exact_completion_request
     |> Result.map (fun input_count ->
       { input_count; output_token_receipt = request.output_token_receipt })
 ;;
-
-module For_testing = struct
-  let generation_serializer_invocation_count () =
-    Atomic.get generation_serializer_invocations
-  ;;
-end

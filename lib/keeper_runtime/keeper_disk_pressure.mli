@@ -24,7 +24,3 @@ val note_exception : ?site:string -> exn -> unit
 val reset_for_tests : unit -> unit
 val observation_fields : unit -> (string * Yojson.Safe.t) list
 val snapshot_json : ?now:float -> masc_root:string -> unit -> Yojson.Safe.t
-
-module For_testing : sig
-  val reset : unit -> unit
-end

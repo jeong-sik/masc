@@ -125,29 +125,6 @@ let unseen ~seen ~latest =
   List.length (List.filter (fun (line : line) -> line.seq > newest_seen) latest)
 ;;
 
-let tab_width = 8
-
-let expand_tabs ~column text =
-  let pieces = String.split_on_char '\t' text in
-  let last_index = List.length pieces - 1 in
-  let buffer = Buffer.create (String.length text + tab_width) in
-  let _, column =
-    List.fold_left
-      (fun (index, column) piece ->
-         Buffer.add_string buffer piece;
-         let column = column + Masc_tui_message_layout.display_width piece in
-         if index < last_index
-         then (
-           let padding = tab_width - (column mod tab_width) in
-           Buffer.add_string buffer (String.make padding ' ');
-           index + 1, column + padding)
-         else index + 1, column)
-      (0, column)
-      pieces
-  in
-  Buffer.contents buffer, column
-;;
-
 type 'snapshot hold =
   | Following
   | Paused of { frozen : 'snapshot; back : int }

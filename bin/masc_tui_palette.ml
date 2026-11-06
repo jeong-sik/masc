@@ -442,7 +442,7 @@ let worktree_label (worktree : Masc.Tui_decode.git_worktree) =
    space-indented one. *)
 let search_match_label (found : Masc.Tui_decode.workspace_search_match) =
   let expanded, _ =
-    Masc_tui_execute_terminal.expand_tabs ~column:0 found.wsm_text
+    Masc_tui_message_layout.expand_tabs ~column:0 found.wsm_text
   in
   let length = String.length expanded in
   let rec first_visible index =

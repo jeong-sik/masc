@@ -73,17 +73,6 @@ val tagged : row list -> bool
 val unseen : seen:line list -> latest:line list -> int
 (** How many rows of [latest] are newer than every row of [seen]. *)
 
-val tab_width : int
-(** Cells between tab stops. *)
-
-val expand_tabs : column:int -> string -> string * int
-(** The text with each tab replaced by the spaces that reach the next tab
-    stop, counting cells the way the pane draws them, and the column the
-    text ends at. [column] is where the text starts, so a row cut into
-    runs by its colours keeps one set of stops. A terminal does this itself;
-    drawn as a control byte a tab would read as [\x09] in the middle of a
-    table. *)
-
 (** {1 Following and paused} *)
 
 (** What the reader is looking at. [Following] draws the newest rows of

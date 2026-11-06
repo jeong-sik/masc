@@ -155,23 +155,6 @@ let test_unseen_counts_rows_past_the_newest_one_seen () =
     (T.unseen ~seen:[] ~latest:seen);
   check Alcotest.int "nothing arrived" 0 (T.unseen ~seen ~latest:[])
 
-(* A tab in output is a distance, not a character: it lands on the next stop
-   whatever is before it, and the stops belong to the row, not to a run. *)
-let test_a_tab_lands_on_the_next_stop () =
-  let expanded ?(column = 0) text = T.expand_tabs ~column text in
-  let check_expanded label (text, column) result =
-    check (Alcotest.pair Alcotest.string Alcotest.int) label (text, column) result in
-  check_expanded "no tab is no change" ("abc", 3) (expanded "abc");
-  check_expanded "a tab after one cell" ("a       b", 9) (expanded "a\tb");
-  check_expanded "a tab on a stop goes a whole stop" ("        x", 9) (expanded "\tx");
-  check_expanded "the row's column carries into a run" ("     ", 8)
-    (expanded ~column:3 "\t");
-  check_expanded "two tabs" ("a       b       c", 17) (expanded "a\tb\tc");
-  check_expanded "a trailing tab" ("ab      ", 8) (expanded "ab\t");
-  check_expanded "a wide character fills two cells" ("\xea\xb0\x80      b", 9)
-    (expanded "\xea\xb0\x80\tb");
-  check Alcotest.int "the stops are eight cells apart" 8 T.tab_width
-
 (* The reading is a string here; the tab keeps its snapshot. *)
 let reading = Alcotest.option Alcotest.string
 
@@ -282,8 +265,6 @@ let () =
             test_rows_need_a_tag_only_when_commands_interleave
         ; Alcotest.test_case "unseen counts rows past the newest one seen" `Quick
             test_unseen_counts_rows_past_the_newest_one_seen
-        ; Alcotest.test_case "a tab lands on the next stop" `Quick
-            test_a_tab_lands_on_the_next_stop
         ] )
     ; ( "hold"
       , [ Alcotest.test_case "scrolling up keeps the reading that was on screen" `Quick

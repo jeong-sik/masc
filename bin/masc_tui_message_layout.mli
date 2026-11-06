@@ -514,6 +514,17 @@ val drop_cells : string -> int -> string
     its right stay aligned. The horizontal-scroll counterpart of
     [fit_width]'s right-edge cut. *)
 
+val tab_width : int
+(** Cells between tab stops. *)
+
+val expand_tabs : column:int -> string -> string * int
+(** The text with each tab replaced by the spaces that reach the next tab
+    stop, counting cells the way the pane draws them, and the column the
+    text ends at. [column] is where the text starts, so a row cut into
+    runs by its colours keeps one set of stops. A terminal does this itself;
+    drawn as a control byte a tab would read as [\x09] in the middle of a
+    table. *)
+
 val url_begins_at : string -> int -> bool
 (** Whether an [http://] or [https://] address starts at this byte index. *)
 

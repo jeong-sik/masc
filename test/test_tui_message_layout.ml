@@ -280,6 +280,23 @@ let test_a_rendered_body_is_escaped_before_it_is_rendered () =
   check (list string) "and it decides the rows"
     [ "# title"; {|\x1B[31mred|}; "last" ] rows
 
+(* A tab in output is a distance, not a character: it lands on the next stop
+   whatever is before it, and the stops belong to the row, not to a run. *)
+let test_a_tab_lands_on_the_next_stop () =
+  let expanded ?(column = 0) text = Layout.expand_tabs ~column text in
+  let check_expanded label (text, column) result =
+    check (pair string int) label (text, column) result in
+  check_expanded "no tab is no change" ("abc", 3) (expanded "abc");
+  check_expanded "a tab after one cell" ("a       b", 9) (expanded "a\tb");
+  check_expanded "a tab on a stop goes a whole stop" ("        x", 9) (expanded "\tx");
+  check_expanded "the row's column carries into a run" ("     ", 8)
+    (expanded ~column:3 "\t");
+  check_expanded "two tabs" ("a       b       c", 17) (expanded "a\tb\tc");
+  check_expanded "a trailing tab" ("ab      ", 8) (expanded "ab\t");
+  check_expanded "a wide character fills two cells" ("\xea\xb0\x80      b", 9)
+    (expanded "\xea\xb0\x80\tb");
+  check int "the stops are eight cells apart" 8 Layout.tab_width
+
 let timeline_bucket ?(is_dst = false) hour : Layout.timeline_bucket =
   { tb_year = 2026
   ; tb_month = 9
@@ -568,6 +585,8 @@ let () =
             test_a_body_still_escapes_what_a_line_carries
         ; test_case "a rendered body is escaped before it is rendered" `Quick
             test_a_rendered_body_is_escaped_before_it_is_rendered
+        ; test_case "a tab lands on the next stop" `Quick
+            test_a_tab_lands_on_the_next_stop
         ; test_case "a second walk pays for what it newly reaches" `Quick
             test_a_second_walk_pays_for_what_it_newly_reaches
         ; test_case "one frame renders capacity + 1 markdown entries once" `Quick

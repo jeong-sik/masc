@@ -1095,7 +1095,7 @@ let terminal_drawing (state : state) ~width =
           let _, runs =
             List.fold_left
               (fun (column, expanded) (run : Masc_tui_sgr_text.run) ->
-                 let text, column = Execute_terminal.expand_tabs ~column run.text in
+                 let text, column = Message_layout.expand_tabs ~column run.text in
                  column, { run with text } :: expanded)
               (0, []) line in
           List.rev runs in

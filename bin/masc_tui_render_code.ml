@@ -88,7 +88,7 @@ let code_draft_rows state ~cols =
         | Diff.Removed text -> "- ", Theme.Syntax.diff_removed_bg, text
         | Diff.Added text -> "+ ", Theme.Syntax.diff_added_bg, text in
       Terminal_text.single_line
-        (fst (Masc_tui_execute_terminal.expand_tabs ~column:0 text))
+        (fst (Message_layout.expand_tabs ~column:0 text))
       |> Message_layout.split_cells
         ~max_cells:(max 1 (framed_inner_width cols - 4))
       |> List.map (fun text -> style ^ marker ^ text ^ Ansi.reset)) in
@@ -745,7 +745,7 @@ let render_code (state : state) =
                            let text =
                              Terminal_text.single_line
                                (fst
-                                  (Masc_tui_execute_terminal.expand_tabs
+                                  (Message_layout.expand_tabs
                                      ~column:0 row.gdr_text))
                            in
                            match row.gdr_kind with

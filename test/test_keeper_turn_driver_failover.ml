@@ -338,6 +338,9 @@ thinking-support = true
 preserve-thinking = true
 streaming = true
 
+[models.reasoning_big.capabilities]
+thinking-control-format = "reasoning-enabled"
+
 [models.non_reasoning]
 api-name = "non-reasoning"
 max-context = 200000

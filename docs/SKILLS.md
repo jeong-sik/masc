@@ -249,7 +249,7 @@ inline Composition 은 호출 응답에서 노드별 결과를 확인한다. asy
 ### 합성 본문은 Keeper 에게 안 보인다
 
 `keeper_compose_<name>` 도구 설명은 fence 안 `[[compositions]] description` 이 전부다
-(`lib/keeper/keeper_tool_composition_surface.ml` `entry_description`). 입력 스키마에는
+(`lib/keeper/keeper_tool_composition_surface_schema.ml` `entry_description`). 입력 스키마에는
 `[[compositions.params]]` 의 `description` 이 실린다. fence 밖 본문은 사람만 읽는다.
 `keeper_skill` 의 Available 목록에는 지시 스킬만 오르므로 합성 본문을 열 경로도 없다.
 

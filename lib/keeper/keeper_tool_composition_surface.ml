@@ -1,3 +1,10 @@
+(* The items live in the Keeper_tool_composition_surface_* modules, included in
+   the order below. Each module reads only the ones above it: the refusal and
+   Skill types with the schema-only tool rows, the tool-call log rows, the
+   plan execution steps, the status and cancel controls, the instruction Skill
+   tool, the run outcome judgements, the asynchronous worker and submission,
+   the continuation resume, and the tool list. *)
+
 include Keeper_tool_composition_surface_schema
 include Keeper_tool_composition_surface_observation
 include Keeper_tool_composition_surface_execution
@@ -7,14 +14,8 @@ include Keeper_tool_composition_surface_outcome
 include Keeper_tool_composition_surface_async
 include Keeper_tool_composition_surface_resume
 include Keeper_tool_composition_surface_tools
-module Catalog = Keeper_tool_composition_catalog
-module Executor = Keeper_tool_plan_executor
-module Journal = Keeper_tool_execution_journal
-module Plan = Keeper_tool_plan
-module Activation_ledger = Keeper_skill_activation_ledger
-open Keeper_tool_composition_projection
 
-open Result.Syntax
+open Keeper_tool_composition_projection
 
 module For_testing = struct
   type nonrec recovery_decision = continuation_recovery =

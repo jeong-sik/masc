@@ -139,7 +139,7 @@ Task Skill도 실행 projection과 prompt에서 unavailable이며 admission 전�
   `keeper_compose_<name>` 도구. activation recorder는 도구 이름에서 reference를 역추론하지
   않는다.
 - 지시 스킬 → `keeper_skill` 도구 하나(`make_instruction_skill_tool`,
-  `keeper_tool_composition_surface.ml`). 본문은 이 도구가 서빙한다(#30635 이후
+  `keeper_tool_composition_surface_instruction_skill.ml`). 본문은 이 도구가 서빙한다(#30635 이후
   파일시스템 프로비저닝 불필요).
 
 #### 턴 준비 재사용과 준비 단계 관측

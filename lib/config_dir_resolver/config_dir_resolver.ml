@@ -214,13 +214,15 @@ let config_signature_exists config_dir =
   && (existing_file runtime_toml
      || existing_dir prompts || existing_dir keepers)
 
+let config_dirname = "config"
+
 let base_path_config_root ~cwd base_path =
   let base_path =
     base_path
     |> Env_config_core.normalize_masc_base_path_input
     |> absolute_path_from ~cwd
   in
-  Filename.concat (Common.masc_dir_from_base_path ~base_path) "config"
+  Filename.concat (Common.masc_dir_from_base_path ~base_path) config_dirname
 
 let environment_for_workspace ~cwd ~base_path ~env =
   let base_path =
@@ -396,7 +398,8 @@ let candle_toml_path_for_base_path ~base_path =
     (resolve_for_base_path ~base_path).config_root.path
     candle_toml_filename
 
-let keeper_toml_filename name = name ^ ".toml"
+let keeper_toml_suffix = ".toml"
+let keeper_toml_filename name = name ^ keeper_toml_suffix
 
 let keeper_toml_path_for_base_path ~base_path name =
   Filename.concat
@@ -482,11 +485,15 @@ let masc_root ~base_path =
 let auth_dir ~base_path =
   Common.auth_dir_from_base_path ~base_path
 
+let credentials_dirname = "credentials"
+
 let credentials_dir ~base_path =
-  Filename.concat (masc_root ~base_path) "credentials"
+  Filename.concat (masc_root ~base_path) credentials_dirname
+
+let runtime_dirname = "runtime"
 
 let agent_runtime_dir ~base_path =
-  Filename.concat (masc_root ~base_path) "runtime/agent"
+  Filename.concat (Filename.concat (masc_root ~base_path) runtime_dirname) "agent"
 
 let repos_dirname = "repos"
 
@@ -498,25 +505,34 @@ let repos_dir ~base_path = Filename.concat (masc_root ~base_path) repos_dirname
    be resolved a second time. *)
 let repos_relative_path ~id = Filename.concat (Filename.concat Common.masc_dirname repos_dirname) id
 
+let tmp_dirname = "tmp"
+
 let tmp_dir ~base_path =
-  Filename.concat (masc_root ~base_path) "tmp"
+  Filename.concat (masc_root ~base_path) tmp_dirname
+
+let locks_dirname = "locks"
 
 let locks_dir ~base_path =
-  Filename.concat (masc_root ~base_path) "locks"
+  Filename.concat (masc_root ~base_path) locks_dirname
+
+let constitution_dirname = "constitution"
 
 let constitution_dir ~base_path =
-  Filename.concat (masc_root ~base_path) "constitution"
+  Filename.concat (masc_root ~base_path) constitution_dirname
+
+let microvm_dirname = "microvm"
 
 let microvm_shim_dir ~base_path =
-  Filename.concat (Filename.concat (masc_root ~base_path) "microvm") "shim"
+  Filename.concat (Filename.concat (masc_root ~base_path) microvm_dirname) "shim"
 
 let microvm_identity_dir ~base_path ~backend =
-  Filename.concat (Filename.concat (Filename.concat (masc_root ~base_path) "microvm") "identity") backend
+  Filename.concat (Filename.concat (Filename.concat (masc_root ~base_path) microvm_dirname) "identity") backend
 
 let microvm_agent_socket_dir ~base_path =
-  Filename.concat (Filename.concat (masc_root ~base_path) "microvm") "agent"
+  Filename.concat (Filename.concat (masc_root ~base_path) microvm_dirname) "agent"
 
-let wiki_dir ~base_path = Filename.concat (masc_root ~base_path) "wiki"
+let wiki_dirname = "wiki"
+let wiki_dir ~base_path = Filename.concat (masc_root ~base_path) wiki_dirname
 
 let event_queue_bulk_backups_dir ~base_path =
   Filename.concat (masc_root ~base_path) "event-queue-bulk-backups"

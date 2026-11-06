@@ -299,3 +299,33 @@ val log_resolution : ?context:string -> unit -> unit
 val source_to_string : source -> string
 val status_to_string : status -> string
 val to_json : resolution -> Yojson.Safe.t
+
+val config_dirname : string
+(** The config directory {!base_path_config_root} names below [<base>/.masc]. *)
+
+val credentials_dirname : string
+(** The directory {!credentials_dir} names below [<base>/.masc]. *)
+
+val tmp_dirname : string
+(** The directory {!tmp_dir} names below [<base>/.masc]. *)
+
+val locks_dirname : string
+(** The directory {!locks_dir} names below [<base>/.masc]. *)
+
+val constitution_dirname : string
+(** The directory {!constitution_dir} names below [<base>/.masc]. *)
+
+val wiki_dirname : string
+(** The directory {!wiki_dir} names below [<base>/.masc]. *)
+
+val runtime_dirname : string
+(** The directory {!agent_runtime_dir} sits in below [<base>/.masc]. *)
+
+val microvm_dirname : string
+(** The directory the microvm paths sit in below [<base>/.masc]. *)
+
+val repos_dirname : string
+(** The repository mirror directory below [<base>/.masc]. *)
+
+val keeper_toml_suffix : string
+(** What {!keeper_toml_filename} appends to a Keeper name. *)

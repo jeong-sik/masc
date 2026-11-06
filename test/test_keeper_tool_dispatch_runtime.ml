@@ -391,28 +391,6 @@ let outcome_label = function
   | Tool_result.Deferred () -> "deferred"
   | Tool_result.Failed _ -> "failure"
 
-let tool_call_detail_of_execution tool_name
-      (result : KET.executed_tool_result)
-  : Masc.Keeper_agent_result.tool_call_detail
-  =
-  let execution_outcome =
-    match result.disposition with
-    | Tool_result.Completed () -> Tool_result.Ok
-    | Tool_result.Deferred () -> Tool_result.Ok
-    | Tool_result.Failed _ -> Tool_result.Error
-  in
-  { tool_name
-  ; provider = "test"
-  ; execution_outcome
-  ; typed_outcome = None
-  ; latency_ms = 1.0
-  ; task_id = None
-  ; route_evidence = None
-  ; input_fingerprint = None
-  ; output_fingerprint = None
-  }
-;;
-
 let non_empty_lines text =
   String.split_on_char '\n' text
   |> List.map String.trim

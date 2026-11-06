@@ -96,12 +96,6 @@ let git_fixture path arguments =
     failf "local Git fixture failed: %s" detail
 ;;
 
-let masc_codebase () =
-  match Agent_observation.canonical_url_of_remote masc_remote with
-  | Some slug -> slug
-  | None -> fail "test remote must produce a canonical IDE codebase slug"
-;;
-
 let with_env name value f =
   let previous = Sys.getenv_opt name in
   Fun.protect

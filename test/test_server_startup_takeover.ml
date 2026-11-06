@@ -61,14 +61,6 @@ let stop_process pid =
     (try Unix.kill pid Sys.sigkill with _ -> ());
   ignore (waitpid_nointr pid)
 
-let base_path_lock_path ~run_dir base_path =
-  (* The v2 lease file of this directory: the path an acquire/release cycle
-     leaves behind. Kept for the full-digest assertion in the digest test;
-     file-planting fixtures use [For_testing.lease_path] instead. *)
-  Server_startup_takeover.For_testing.lease_path
-    ~run_dir:(Unix.realpath run_dir)
-    ~canonical_base_path:(Unix.realpath base_path)
-
 (* macOS answers realpath with two different strings for one directory:
    /private/tmp/X and /System/Volumes/Data/private/tmp/X are the same inode
    (hole-finder task-2206, run 37813366033). The lease must name the

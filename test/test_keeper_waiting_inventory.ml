@@ -166,17 +166,6 @@ let external_attention_item ~keeper_name index : Keeper_external_attention.item 
   }
 ;;
 
-let record_external_attention_exn config ~keeper_name index =
-  match
-    Keeper_external_attention.record
-      ~base_path:config.Workspace_utils_backend_setup.base_path
-      (external_attention_item ~keeper_name index)
-  with
-  | `Recorded -> ()
-  | `Duplicate _ -> failf "duplicate external attention item: %d" index
-  | `Error err -> fail ("external attention record failed: " ^ err)
-;;
-
 let create_schedule_exn ?(payload = schedule_payload) config ~schedule_id ~scheduled_by =
   match
     Schedule_service.create

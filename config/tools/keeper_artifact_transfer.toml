@@ -1,8 +1,8 @@
 name = "keeper_artifact_transfer"
 description = """
-Export your sandbox file as a durable binary artifact, or materialize one back.
+Pass a sandbox file to another Keeper by sha256, or write one you received.
 
-Export returns the artifact's sha256. Pass it through masc_keeper_delegate artifacts. Bytes move inside the runtime, never through model base64. Materialize uses the existing filesystem write authority."""
+export reads the file at path and returns {"artifact": "<sha256>"}. Put that string in masc_keeper_delegate artifacts or keeper_skill_validate artifact. materialize writes the bytes of artifact to path, replacing a different file there. The bytes never pass through the model."""
 additional_properties = false
 
 defer_loading = true
@@ -16,6 +16,7 @@ enum = ["export", "materialize"]
 name = "path"
 type = "string"
 required = true
+description = "Absolute or sandbox-relative file path: the file to export, or where materialize writes."
 [[params]]
 name = "artifact"
 type = "string"

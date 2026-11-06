@@ -7279,3 +7279,4 @@
 
 (include stanzas/test_tui_code_msg.inc)
 (include stanzas/test_tui_context_msg.inc)
+(include stanzas/test_tui_fleet_msg.inc)

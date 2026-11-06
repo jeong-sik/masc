@@ -265,10 +265,9 @@ type memory_health_read =
 
 (* The answers of one domain share one type named after it, and [async_msg]
    carries that type in one constructor: [keeper_msg] in [Keeper_msg]. A
-   domain whose module applies its own answers declares the type there:
-   [Code_msg] carries [Masc_tui_code_results.msg], and [Context_msg] carries
-   [Masc_tui_context_results.msg]. One variant takes at most 244
-   constructors with arguments (#48617). A domain with a single answer
+   domain whose module applies its own answers declares the type there, as
+   [Code_msg] carries [Masc_tui_code_results.msg]. One variant takes at most
+   244 constructors with arguments (#48617). A domain with a single answer
    keeps it in [async_msg], and so does a constructor that carries another
    [async_msg]. *)
 
@@ -826,10 +825,6 @@ type observer_msg =
   | Observer_recovery_identity of workspace_authority * unit ref * bool ref * string * string
       * observer_recovery_origin * Sse_wire.observer_identity
 
-type fleet_msg =
-  | Fleet_stream_view of Masc_tui_fleet_stream.view
-  | Fleet_stream_reader_ended of string
-
 type original_msg =
   | Original_task_read_done of Masc_tui_types.task_inspection_request
       * (Masc_tui_original_task_read.task_snapshot, Masc_tui_original_task_read.error) result
@@ -933,7 +928,7 @@ type async_msg =
   | Identity_msg of identity_msg
   | Account_msg of account_msg
   | Observer_msg of observer_msg
-  | Fleet_msg of fleet_msg
+  | Fleet_msg of Masc_tui_fleet_results.msg
   | Original_msg of original_msg
 
 (* Every async result carries the instant it was ready, so the loop can say

@@ -1728,7 +1728,13 @@ let footer_hints_code ~pane =
   let dead =
     match pane with
     | Code_tree | Code_root -> overlay_keys @ file_keys
-    | Code_file -> overlay_keys
+    | Code_file ->
+        (* The arm behind Right and Enter opens a tree row or answers the
+           history overlay. With the file pane focused and nothing over it, it
+           ends in [()]. The row named the key anyway, and the fitter never
+           drops the Enter atom, so a key that does nothing kept its place in
+           every narrow file footer. *)
+        "Right / Enter" :: overlay_keys
     | Code_diff -> overlay_keys @ ("Right / Enter" ::
         List.filter (fun key -> not (String.equal key "Shift-Left / Shift-Right")) file_keys)
     | Code_notes -> "Right / Enter" :: overlay_keys @ file_keys

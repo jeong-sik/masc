@@ -154,6 +154,12 @@ let scoped_keys =
   @ back_keys "Code tree"
       ~list:(Keys.footer_hints_code ~pane:Keys.Code_root)
       ~detail:(Keys.footer_hints_code ~pane:Keys.Code_tree)
+  (* Right and Enter open a tree row. An open file has nothing under them, so
+     the file pane's footer is the tree's without that key. *)
+  @ [ ( "Code Right / Enter",
+        Keys.footer_hints_code ~pane:Keys.Code_tree,
+        Keys.footer_hints_code ~pane:Keys.Code_file,
+        [ "Right / Enter" ] ) ]
 
 let test_a_scoped_key_is_named_only_where_it_answers () =
   List.iter

@@ -422,23 +422,19 @@ describe('shouldSuppressFloatingChrome', () => {
     expect(shouldSuppressFloatingChrome({
       currentTab: 'overview',
       keeperDetailMode: false,
-      mobileDrawerOpen: false,
     })).toBe(true)
     expect(shouldSuppressFloatingChrome({
       currentTab: 'connectors',
       keeperDetailMode: false,
-      mobileDrawerOpen: false,
     })).toBe(true)
     expect(shouldSuppressFloatingChrome({
       currentTab: 'logs',
       keeperDetailMode: false,
-      mobileDrawerOpen: false,
     })).toBe(true)
     // monitoring joined V2_PRIMARY_SURFACE_IDS in #23578 (Monitor in the v2 rail).
     expect(shouldSuppressFloatingChrome({
       currentTab: 'monitoring',
       keeperDetailMode: false,
-      mobileDrawerOpen: false,
     })).toBe(true)
   })
 
@@ -448,17 +444,10 @@ describe('shouldSuppressFloatingChrome', () => {
     expect(shouldSuppressFloatingChrome({
       currentTab: 'command',
       keeperDetailMode: false,
-      mobileDrawerOpen: false,
     })).toBe(true)
     expect(shouldSuppressFloatingChrome({
       currentTab: 'lab',
       keeperDetailMode: false,
-      mobileDrawerOpen: false,
-    })).toBe(true)
-    expect(shouldSuppressFloatingChrome({
-      currentTab: 'overview',
-      keeperDetailMode: false,
-      mobileDrawerOpen: true,
     })).toBe(true)
   })
 })

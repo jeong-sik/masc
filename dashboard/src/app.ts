@@ -14,7 +14,6 @@ import { html } from 'htm/preact'
 import { ArtifactDraftSessionProvider } from './components/published-artifacts/artifact-draft-session'
 import { useEffect } from 'preact/hooks'
 import { lazy, Suspense } from 'preact/compat'
-import { signal } from '@preact/signals'
 import { persistentSignal } from './lib/persistent-signal'
 import { isImeComposing } from './lib/keyboard'
 import { route, initRouter } from './router'
@@ -77,18 +76,15 @@ const sidebarCollapsed = persistentSignal<boolean>({
   key: 'dashboard:sidebar-collapsed',
   defaultValue: true,
 })
-const mobileMenuOpen = signal(false)
 
 export function shouldSuppressFloatingChrome({
   currentTab,
   keeperDetailMode,
-  mobileDrawerOpen,
 }: {
   currentTab: TabId
   keeperDetailMode: boolean
-  mobileDrawerOpen: boolean
 }): boolean {
-  return keeperDetailMode || mobileDrawerOpen || isPrimaryDashboardSurface(currentTab)
+  return keeperDetailMode || isPrimaryDashboardSurface(currentTab)
 }
 
 // The keeper-v2 primary shell keeps its operational summary in the top bar and
@@ -272,11 +268,9 @@ export function App() {
   const mobileKeeperPane = isMobile && keeperDetailMode ? keeperMobilePane.value : null
   const mobileKeeperReadingMode = mobileKeeperPane === 'chat'
   const focusMode = dashboardFocusMode.value
-  const mobileDrawerOpen = isMobile && mobileMenuOpen.value
   const suppressFloatingChrome = shouldSuppressFloatingChrome({
     currentTab,
     keeperDetailMode,
-    mobileDrawerOpen,
   })
   const compactChromeMode = shouldUseCompactDashboardChrome({
     widgetSoloMode,

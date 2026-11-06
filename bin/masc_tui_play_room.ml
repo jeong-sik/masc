@@ -34,8 +34,8 @@ let suspend t =
 let is_read request = match request.operation with
   | Read _ -> true
   | Say _ | Leave -> false
-(* A retired read may already have joined or renewed the server membership,
-   so it keeps the presence that a later inactive poll must release. *)
+(* Preserve the inactive Leave obligation even though Read itself does not
+   create or renew membership. *)
 let retire_read t = match t.pending with
   | Some {operation = Read _; _} -> {t with pending = None; next_read = 0.; joined = true}
   | Some {operation = Say _ | Leave; _} | None -> t

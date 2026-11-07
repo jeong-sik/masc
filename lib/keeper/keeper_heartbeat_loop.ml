@@ -1091,10 +1091,6 @@ let run_keepalive_unified_turn
           obs
       in
       let turn_decision = scheduling.turn_decision in
-      (* Manual reconcile blocker check removed — keepers no longer get
-         stuck behind sticky blockers. Failed turns record evidence via
-         Keeper_registry; recovery is autonomous (next turn's observation)
-         or operator-driven (board/keeper_chat), not blocker-driven. *)
       let should_run_turn =
         should_run_turn_after_event_intake
           ~scheduled:scheduling.should_run_turn

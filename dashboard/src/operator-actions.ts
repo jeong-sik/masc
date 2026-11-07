@@ -1,5 +1,4 @@
 import {
-  confirmOperatorAction,
   extractApiError,
   fetchOperatorDigest,
   fetchOperatorSnapshot,
@@ -189,45 +188,6 @@ export async function dispatchOperatorAction(
       actor: request.actor,
       action_type: request.action_type,
       target_label: targetLabelOf(request),
-      outcome: 'error',
-      message,
-    })
-    throw err
-  } finally {
-    operatorActionBusy.value = false
-  }
-}
-
-export async function confirmOperatorPendingAction(
-  actor: string,
-  confirmToken: string,
-  decision: 'confirm' | 'deny' = 'confirm',
-  options: ActionRefreshOptions = {},
-): Promise<OperatorActionResult> {
-  operatorActionBusy.value = true
-  operatorError.value = null
-  operatorErrorStatus.value = null
-  try {
-    const result = await confirmOperatorAction(actor, confirmToken, decision)
-    appendLog({
-      actor,
-      action_type: decision,
-      target_label: confirmToken,
-      outcome: 'confirmed',
-      message: logMessageFromResult(result),
-      tool_name: result.tool_name,
-    })
-    await refreshAfterAction(options)
-    return result
-  } catch (err) {
-    const summary = extractApiError(err, 'operator 확인 실패')
-    const message = summary.message
-    operatorError.value = message
-    operatorErrorStatus.value = summary.status
-    appendLog({
-      actor,
-      action_type: decision,
-      target_label: confirmToken,
       outcome: 'error',
       message,
     })

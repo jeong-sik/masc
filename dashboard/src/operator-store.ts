@@ -17,5 +17,4 @@ export {
   refreshOperatorSnapshot,
   refreshOperatorWorkspaceDigest,
   dispatchOperatorAction,
-  confirmOperatorPendingAction,
 } from './operator-actions'

@@ -1,11 +1,11 @@
 // Operator action result schema — schema-at-boundary for
-// `POST /api/v1/operator/action` and `/api/v1/operator/confirm`.
+// `POST /api/v1/operator/action`.
 //
 // `status` is the only always-present field (backend contract).
-// `confirm_required` / `confirm_token` drive the two-step confirm
-// flow. `preview`, `result`, and `executed_action`
-// are truly opaque — callers render them via JSON pretty-print without
-// branching on shape, so they stay as `unknown()`.
+// `confirm_required` marks a preview that still waits for a confirmation;
+// callers read it to tell a preview from an executed action. `preview`,
+// `result`, and `executed_action` are truly opaque — callers render them via
+// JSON pretty-print without branching on shape, so they stay as `unknown()`.
 //
 // Uses the shared `SchemaDriftError` base landed in #7732.
 

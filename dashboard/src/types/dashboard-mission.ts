@@ -311,7 +311,7 @@ export interface OperatorActionLogEntry {
   actor: string
   action_type: string
   target_label: string
-  outcome: 'preview' | 'executed' | 'confirmed' | 'error'
+  outcome: 'preview' | 'executed' | 'error'
   message: string
   tool_name?: string
 }

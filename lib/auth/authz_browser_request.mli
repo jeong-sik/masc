@@ -69,6 +69,11 @@ type refusal =
 
 val refusal_to_string : refusal -> string
 
+(** [true] for the refusals of a request without a working session (401);
+    [false] for those of a request whose origin or CSRF token is wrong (403).
+    A refusal for the origin or the token keeps the session of the browser. *)
+val is_unauthenticated : refusal -> bool
+
 type verdict =
   | No_session
       (** The request has no session cookie; the other credentials decide

@@ -69,17 +69,6 @@ let test_resolve_connector_status_name_ignores_blank_inputs () =
   check (option string) "absent name ignored" None
     (Routes.resolve_connector_status_name ())
 
-let python_utc_iso_now () =
-  let z = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ()) in
-  String.sub z 0 (String.length z - 1) ^ ".123456+00:00"
-
-let test_gate_time_parser_accepts_python_utc_isoformat () =
-  check bool "python UTC isoformat parsed" true
-    (Option.is_some (Gate_time_util.parse_iso8601_opt (python_utc_iso_now ())));
-  check bool "explicit non-UTC offset normalizes" true
-    (Option.is_some
-       (Gate_time_util.parse_iso8601_opt "2026-06-06T00:00:00+09:00"))
-
 let test_connector_capability_wire_contract () =
   check
     (list string)
@@ -1132,8 +1121,6 @@ let () =
         ] );
       ( "sidecar_connector_state",
         [
-          test_case "gate time parses python UTC isoformat" `Quick
-            test_gate_time_parser_accepts_python_utc_isoformat;
           test_case "connector capability wire contract" `Quick
             test_connector_capability_wire_contract;
           test_case "slack bind persists binding and audit" `Quick

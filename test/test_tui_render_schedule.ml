@@ -274,10 +274,6 @@ let test_consecutive_identical_events_fold_to_one_row () =
   check (list (pair string int)) "empty stays empty" []
     (Schedule.collapse_consecutive ~key:Fun.id [])
 
-type cell_edge =
-  | Left_edge
-  | Right_edge
-
 let test_capped_page_cannot_report_an_empty_store () =
   check bool "a capped page is not an empty store" true
     (Schedule.classify_keeper_schedule_absence ~truncated:true ~shown:20

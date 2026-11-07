@@ -60,12 +60,6 @@ let shim_error_code = "remote_ssh_shim_error"
 let default_base_path = "/usr/local/bin:/usr/bin:/bin"
 let default_payload_path = String.split_on_char ':' default_base_path
 
-let denylist_exact =
-  [ "PATH"; "HOME"; "LD_PRELOAD"; "LD_LIBRARY_PATH"; "BASH_ENV"; "ENV" ]
-
-let denylisted_env_name name =
-  List.mem name denylist_exact || String.starts_with ~prefix:"DYLD_" name
-
 (* These names are authored by the SSH runner for every request. They do not
    belong to the endpoint's caller-controlled env allowlist: without them the
    preflight can prove a Keeper identity that the payload can never use. *)
@@ -172,7 +166,7 @@ let synthesize_env ~path ~endpoint_env ~base_env ~allowlist ~request_env =
   let set env (k, v) = (k, v) :: List.remove_assoc k env in
   let upsert env (k, v) =
     if (List.mem k runtime_env_allowlist || List.mem k allowlist)
-       && not (denylisted_env_name k)
+       && not (Exec_ssh_protocol.denylisted_env_name k)
     then set env (k, v)
     else env in
   List.fold_left upsert (List.fold_left set base endpoint_env) request_env

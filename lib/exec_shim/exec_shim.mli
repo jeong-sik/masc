@@ -84,21 +84,16 @@ val resolve_program :
     process's own [PATH], not the [PATH] in the environment it is given, so a
     tool that lives only in a [path=] directory was never found. *)
 
-val denylisted_env_name : string -> bool
-(** [true] for names never accepted from the wire: [PATH], [HOME],
-    [LD_PRELOAD], [LD_LIBRARY_PATH], [BASH_ENV], [ENV], and every name
-    with the [DYLD_] prefix.  Matching is case-sensitive; [PATH] from the
-    wire is dropped even when it appears in the endpoint allowlist. *)
-
 type endpoint_env = private (string * string) list
 (** The environment an endpoint's operator declares for every payload, read
     from the file the shim config's [env_file=] names: what a person logged in
     on that host runs with and the minimal base env does not carry (a venv's
     [VIRTUAL_ENV], a CUDA [LD_LIBRARY_PATH]).  It is endpoint-resident like
-    [path=], so {!denylisted_env_name} does not apply to it: an operator may
-    declare [LD_LIBRARY_PATH].  [PATH] is refused — [path=] is also the list
-    {!resolve_program} searches, and one source keeps the payload's [PATH]
-    and that search the same.  Built only by {!parse_env_file}.
+    [path=], so {!Exec_ssh_protocol.denylisted_env_name} does not apply to it:
+    an operator may declare [LD_LIBRARY_PATH].  [PATH] is refused — [path=]
+    is also the list {!resolve_program} searches, and one source keeps the
+    payload's [PATH] and that search the same.  Built only by
+    {!parse_env_file}.
 
     In a boxed run ([observe], [guest_local]) [HOME] and [TMPDIR] are the
     run's scratch directory ({!scratch_env}) whatever the file declares.

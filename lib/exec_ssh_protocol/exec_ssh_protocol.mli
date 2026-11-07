@@ -110,6 +110,15 @@ val keeper_git_author_env_names : string list
 val keeper_git_author_env : keeper_name:string -> (string * string) list
 (** {!keeper_git_author_env_names}, each paired with [keeper_name]. *)
 
+val denylisted_env_name : string -> bool
+(** [true] for names never accepted from the wire: [PATH], [HOME],
+    [LD_PRELOAD], [LD_LIBRARY_PATH], [BASH_ENV], [ENV], and every name
+    with the [DYLD_] prefix.  Matching is case-sensitive; [PATH] from the
+    wire is dropped even when it appears in the endpoint allowlist.  The
+    shim applies this test to the environment it receives and is the
+    authority; the host applies the same test, so these names do not cross
+    the wire at all. *)
+
 val default_scratch_root : string
 (** [/tmp]: where a shim makes a boxed request's scratch when its config
     names no [scratch_root]. Shared with the microvm boot, which mounts the

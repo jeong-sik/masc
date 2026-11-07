@@ -109,6 +109,13 @@ let keeper_git_author_env ~keeper_name =
   List.map (fun name -> name, keeper_name) keeper_git_author_env_names
 ;;
 
+let denylisted_env_name name =
+  List.mem
+    name
+    [ "PATH"; "HOME"; "LD_PRELOAD"; "LD_LIBRARY_PATH"; "BASH_ENV"; "ENV" ]
+  || String.starts_with ~prefix:"DYLD_" name
+;;
+
 let default_scratch_root = "/tmp"
 
 let mode_to_string = function

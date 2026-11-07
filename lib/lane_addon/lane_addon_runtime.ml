@@ -866,7 +866,7 @@ let log_cleanup_failure instance_id package_id resource failure =
   Log.Misc.warn "Lane Add-on cleanup was not confirmed for instance %s (package %s, resource %s): %s"
     instance_id package_id (Option.fold ~none:"none" ~some:Lifecycle.resource_to_string resource) (Lifecycle.failure_to_string failure)
 
-let stop_entry ~sw ~backend m e =
+let rec stop_entry ~sw ~backend m e =
   if not e.cleanup_running then
     let cleanup = match e.connection, e.authority with
       | Some c, _ -> Some (Some c.worker.resource, c.worker.stop)
@@ -882,13 +882,13 @@ let stop_entry ~sw ~backend m e =
         Eio.Switch.check sw;
         e.cleanup_running <- true;
         fork_isolated ~sw (fun () ->
-          Fun.protect
+          (match Fun.protect
             ~finally:(fun () ->
               (* Every way out of the cleanup passes here, a raised log call or
-                 a cancellation included, because Detach waits on this flag and
-                 [fork_isolated] swallows the exception. The finally only sets
-                 the flag and wakes the waiters. It does not yield and cannot
-                 raise, so it cannot replace the exception it follows. *)
+                 a cancellation included, because Detach waits on this flag.
+                 The finally only sets the flag and wakes the waiters. It does
+                 not yield and cannot raise, so it cannot replace the exception
+                 it follows. *)
               e.cleanup_running <- false;
               Eio.Condition.broadcast e.changed)
             (fun () ->
@@ -919,8 +919,23 @@ let stop_entry ~sw ~backend m e =
                      resource (Some (Lifecycle.failure_detail failure)));
               (match persist m e with Ok () -> () | Error message ->
                 e.state <- fail_state e (Lifecycle.Persistence_failed ("cleanup state persistence: " ^ message)));
-              wake_dependents m e);
-          release_detached m e)
+              wake_dependents m e)
+           with
+           | () -> ()
+           | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+           | exception exn ->
+               Log.Misc.error "Lane Add-on cleanup of instance %s raised after its verdict: %s"
+                 e.instance_id (Printexc.to_string exn));
+          release_detached m e;
+          (* A cleanup that is not cancelled writes Detached or Failed before
+             it can yield or raise, and only detach_entry writes Detaching. So
+             Detaching here means a Detach came after the verdict, while the
+             log, the event or the binding write yielded, saw the flag still
+             set and started nothing. Its Detaching state is answered by the
+             cleanup it asked for, or its wait for a settled state never ends. *)
+          match e.state with
+          | Lifecycle.Detaching _ -> stop_entry ~sw ~backend m e
+          | Lifecycle.Attached | Lifecycle.Observing | Lifecycle.Failed _ | Lifecycle.Detached _ -> ())
 let namespace e seq output =
   let prefix value = e.instance_id ^ "/" ^ string_of_int seq ^ "/" ^ value in
   { output with rows = List.map (fun (row : row) -> { row with

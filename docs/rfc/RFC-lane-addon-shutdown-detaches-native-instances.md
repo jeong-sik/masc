@@ -143,4 +143,3 @@ container 는 고르지 않아요. 정리 권한이 engine label 이라 바이�
 - container instance 의 종료 처리.
 - Keeper 정지가 HOOKS 3초를 넘기는 문제(11-06 08:52Z 6.61초).
 - stdio 서버(`bin/main_stdio_eio.ml`)의 종료. 이 서버에는 프로세스 watchdog 이 없어요. 기다림에 끝이 없어서 연결하지 않아요.
-- API `Detach` 의 경쟁 조건(#49359). 정리 fiber 가 `Failed` 를 쓰고 끝나기 전에 `detach_entry` 가 `Detaching` 으로 덮을 수 있어요. 그러면 `stop_entry`(832행)는 아무것도 하지 않고 `await_settled` 는 끝나지 않아요. 원래 있던 문제예요. 종료에서는 3초 상한이 끊어요.

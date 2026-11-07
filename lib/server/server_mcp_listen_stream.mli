@@ -17,7 +17,7 @@ val serve :
   subscription_id:Yojson.Safe.t ->
   filter:Mcp_transport_protocol.subscription_filter ->
   headers:Httpun.Headers.t ->
-  Httpun.Reqd.t ->
+  Http_reqd.t ->
   unit
 (** [serve ... reqd] answers [reqd] with the stream and returns when it ends:
     the client is gone, accepted no frame within [stalled_after_s], or let

@@ -7,8 +7,8 @@ val route : string -> target option
 val permission : Masc_domain.permission
 
 val handle_get :
-  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> target -> unit
+  Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> target -> unit
 
 val handle_post :
-  Mcp_server.server_state -> actor:string -> Httpun.Request.t -> Httpun.Reqd.t ->
+  Mcp_server.server_state -> actor:string -> Httpun.Request.t -> Http_reqd.t ->
   target -> string -> unit

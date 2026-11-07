@@ -3139,6 +3139,25 @@ let schedule_rows_read_queue_of ~keepers rows =
     (fun row -> List.exists (fun keeper -> List.mem keeper keepers) (schedule_row_queue_keepers row))
     rows
 
+let schedule_row_unsettled row =
+  match row.sch_occurrence.Tui_schedule_observation.stage with
+  | Queued | Queued_at _ | Missing | Turn_started | Turn_ended | Consumed
+  | Settling _ | Transferring _ | Unknown _ | Dispatching -> true
+  | No_occurrence | Dispatch_failed _ | Completed | Cancelled _ -> false
+;;
+
+let schedule_row_due_time row =
+  let at =
+    if schedule_row_unsettled row then
+      row.sch_occurrence.Tui_schedule_observation.due_at_iso
+    else
+      match row.sch_next_due_at_iso with
+      | Some _ as at -> at
+      | None -> row.sch_due_at_iso
+  in
+  Option.bind at Time_codec.parse_rfc3339_opt
+;;
+
 (* The declaration's next firing and its last delivered occurrence are
    separate clocks. A one-shot marked Succeeded can still be queued. *)
 let chat_schedule_entries ~keeper_name snapshot =
@@ -3151,11 +3170,7 @@ let chat_schedule_entries ~keeper_name snapshot =
     | Ok (Scheduled | Due | Running) -> true
     | Ok (Succeeded | Failed | Cancelled | Expired) -> false
     | Error _ -> true in
-  let unsettled row =
-    match row.sch_occurrence.Tui_schedule_observation.stage with
-    | Queued | Queued_at _ | Missing | Turn_started | Turn_ended | Consumed | Settling _ | Transferring _ | Unknown _
-    | Dispatching -> true
-    | No_occurrence | Dispatch_failed _ | Completed | Cancelled _ -> false in
+  let unsettled = schedule_row_unsettled in
   let observed row =
     match row.sch_reaction_latest_at_iso, row.sch_last_wake_started_at_iso with
     | Some at, _ | None, Some at -> Time_codec.parse_rfc3339_opt at
@@ -3173,10 +3188,7 @@ let chat_schedule_entries ~keeper_name snapshot =
     |> List.stable_sort (fun left right -> Option.compare Float.compare (observed right) (observed left))
     |> List.take 1 in
   let selected = List.filter (fun row -> active row || unsettled row) rows @ latest_result in
-  let due row =
-    let at = if unsettled row then row.sch_occurrence.Tui_schedule_observation.due_at_iso
-      else match row.sch_next_due_at_iso with Some _ as at -> at | None -> row.sch_due_at_iso in
-    Option.bind at Time_codec.parse_rfc3339_opt in
+  let due = schedule_row_due_time in
   let priority row =
     match row.sch_runner_hold with
     | Some _ -> 0

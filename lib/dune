@@ -162,22 +162,16 @@
   ws-direct-eio
   unix
   threads
-  logs
-  optint
   re
   ptime
   re.str
-  str
   re.pcre
   masc.markup_document
   masc.watched_work
   masc.keeper_sandbox_image
   masc.build_commit
-  mirage-crypto
-  mirage-crypto-ec
   mirage-crypto-pk
   x509
-  mirage-crypto-rng
   mirage-crypto-rng.unix
   cstruct
   masc.agent_core.digest
@@ -212,17 +206,13 @@
   masc.tool_projection
   masc.keeper_client_tool_outbox_codec
   masc.browser_lane
-  masc.slack_lane
-  masc.machine_live_publication
   masc.machine_configuration
   masc.lane_addon_tool_result masc.lane_addon_call_context
   masc.native_addon_lease
   masc.resource_requirement
   masc.tool_input_contract
   masc.machine_input_history masc.machine_controller_contract masc.msx_tool
-  masc.machine_checkpoint
   masc.tool_metrics_store
-  masc.crypto_rng
   masc.time_codec
   masc.sse_wire
   masc_schedule
@@ -238,7 +228,6 @@
   masc.otel_dispatch_hook
   masc.telemetry_coverage_gap
   masc.telemetry_unified_source
-  masc.telemetry_unified
   masc.voice_config
   masc.voice_runtime_overlay
   masc.voice_bridge_core
@@ -268,7 +257,6 @@
   masc.keeper_operation_identity
   masc.keeper_chat_operations
   masc.keeper_execution_scope
-  masc.runtime_model
   masc.runtime
   masc.runtime_toml_namespace
   masc.browser_configuration
@@ -277,16 +265,12 @@
   masc.egress_proxy_decision
   masc.egress_proxy_net
   masc.toml_line_editor
-  masc.provider_tool_support
   masc.auth
   masc.fd_accountant
   masc.model_inference_metrics
   masc.types_boundary
   masc.trajectory
   masc.host_config
-  masc.briefing_compactors
-  masc.dashboard_eval_feed
-  masc.dashboard_tla_specs
   masc.sse_event
   masc.tool_call_quality_benchmark
   masc.tool_catalog_surfaces
@@ -298,16 +282,12 @@
   uri
   tls
   tls-eio
-  domain-name
   ca-certs
-  pbrt
   masc.monotonic_deadline
   mtime
   mtime.clock
   mtime.clock.os
   uuidm
-  zstd
-  dune-build-info
   masc.build_version
   time_compat
   fs_compat
@@ -329,7 +309,6 @@
   masc.keeper_tool_call_index
   masc_process
   masc.masc_exec
-  masc.masc_exec_bash_parser
   masc.masc_exec_command_gate
   exec_ssh_protocol
   masc_board
@@ -341,7 +320,6 @@
   masc_workspace
   masc_goal
   masc_candle
-  masc_candle_config
   masc_candle_runtime
   zarith
   masc_turn
@@ -349,9 +327,7 @@
   masc.masc_tool_surface
   masc.otel_metrics
   masc.config
-  masc.workspace_connection
   masc.agent_observation
-  masc.ide
   masc.ide_memo
   masc.dashboard_utils
   masc.tool_schemas

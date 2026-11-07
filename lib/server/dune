@@ -49,12 +49,10 @@
   masc.masc_process
   masc.sse_wire
   masc.agent_observation
-  masc.browser_configuration
   masc.machine_configuration
   masc.browser_lane
   masc.slack_lane
   masc.machine_live_publication
-  masc.machine_action_feed
   ;; The LSP client the IDE proxy drives. Extracted out of this library so a
   ;; Keeper tool in [masc] can reach a language server too (RFC
   ;; a-language-server-the-keeper-can-ask §3.2).
@@ -102,19 +100,13 @@
   sqlite3
   unix
   threads
-  logs
   optint
   re
   re.str
-  str
   re.pcre
-  mirage-crypto
-  mirage-crypto-ec
-  mirage-crypto-rng
   mirage-crypto-rng.unix
   cstruct
   masc.agent_core.digest
-  eqaf
   ocaml-protoc-plugin
   masc_proto
   grpc-direct
@@ -129,7 +121,6 @@
   gluten-eio
   gluten
   ipaddr
-  fmt
   cohttp
   cohttp-eio
   masc.agent_core
@@ -139,7 +130,6 @@
   masc.tool_types
   masc.time_codec
   masc.attribution
-  masc.exec_policy
   masc.keeper_registry
   masc.keeper_checkpoint_ref
   masc.keeper_metrics
@@ -152,28 +142,20 @@
   masc.voice_setup
   masc.voice_config
   masc.voice_runtime_overlay
-  masc.runtime_model
   masc.runtime
   masc.runtime_toml_namespace
   masc.model_inference_metrics
   masc.auth
   masc.json_field
-  masc.types_boundary
   masc.trajectory
-  masc.keeper_tooling
   masc.keeper_tool_call_index
   masc.host_config
-  masc.briefing_compactors
   masc.dashboard_eval_feed
-  masc.sse_event
-  masc.tool_call_quality_benchmark
   masc.telemetry_coverage_gap
   masc.telemetry_unified
   masc.discovery_cache
-  masc.local_runtime_pool
   masc.keeper_contract
   masc.keeper_efficiency
-  masc.tool_catalog_surfaces
   masc.config_dir_resolver
   masc.skill_snapshot
   masc.skill_config
@@ -183,16 +165,11 @@
   fpath
   tls
   tls-eio
-  domain-name
   ca-certs
-  pbrt
-  masc.monotonic_deadline
   mtime
   mtime.clock
   mtime.clock.os
   uuidm
-  zstd
-  dune-build-info
   time_compat
   fs_compat
   dated_jsonl
@@ -202,16 +179,12 @@
   masc_types
   masc_core
   masc_gate
-  masc_pulse
   masc_compression
   masc.keeper_portrait
   masc_eio_context
   masc_cancel_safe
   masc_backend
   masc_process
-  masc.masc_exec
-  masc.masc_exec_bash_parser
-  masc.masc_exec_command_gate
   masc_board
   masc.board_handlers
   masc.board_tool_adapter
@@ -219,7 +192,6 @@
   masc_random_id
   masc_workspace
   masc_goal
-  masc_turn
   masc.masc_tool_dispatch
   masc.config
   masc.ide
@@ -235,9 +207,7 @@
   opentelemetry.client
   ambient-context
   ambient-context-eio
-  masc.shared_types
   masc.repo_manager
-  masc.parse_outcome
   masc.otel_genai
   masc.otel_dispatch_hook
   masc.otel_spans

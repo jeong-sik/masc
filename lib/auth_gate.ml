@@ -48,9 +48,9 @@ let is_unauthenticated = function
   | Unreadable _
   | Legacy_credential_forbidden
   | Mcp_oauth_token_not_bound
-  | Session_refused _
   | Pat_refused _
   | Service_credential_refused _ -> true
+  | Session_refused refusal -> Authz_browser_request.is_unauthenticated refusal
   | Permission_denied _
   | Pat_admin_permission _
   | Pat_scope_lacks _

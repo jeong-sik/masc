@@ -432,19 +432,7 @@ let callback t provider ~transaction_cookie ~query =
 
 (* ---- sign-out and session ---- *)
 
-let request_failure = function
-  | Q.Query_credential
-  | Q.Session_and_bearer
-  | Q.Not_a_session_cookie
-  | Q.Session_refused
-      ( Bs.Unknown
-      | Bs.Ended
-      | Bs.Expired
-      | Bs.Secret_differs
-      | Bs.Revocation_pending
-      | Bs.Principal_inactive (_ : Authz_types.User_id.t) ) -> Unauthorized
-  | Q.Cross_origin | Q.Origin_missing | Q.Csrf_missing | Q.Csrf_differs -> Forbidden
-;;
+let request_failure refusal = if Q.is_unauthenticated refusal then Unauthorized else Forbidden
 
 (* A cookie that does not act is of no use to the browser. A refusal for the
    origin or the token keeps the cookie: a request that another page made

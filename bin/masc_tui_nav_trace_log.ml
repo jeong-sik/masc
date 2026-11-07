@@ -14,6 +14,13 @@ type phase =
   | Writing
   | Stopped
 
+(* What a frame shows with the header clock set aside: its rows and where the
+   cursor sits. *)
+type screen =
+  { rows : string list
+  ; cursor : Masc_tui_frame_presenter.cursor
+  }
+
 type live =
   { path : string
   ; max_lines : int
@@ -23,6 +30,8 @@ type live =
   ; mutable lines : int
   ; mutable previous_surface : string option
   ; mutable pressed : string option
+  ; mutable arriving : screen option
+  ; mutable previous_screen : screen option
   }
 
 type t =
@@ -42,6 +51,8 @@ let create ~path ~max_lines ~clock =
     ; lines = 0
     ; previous_surface = None
     ; pressed = None
+    ; arriving = None
+    ; previous_screen = None
     }
 ;;
 
@@ -106,6 +117,41 @@ let note_input t input =
      | No_input -> ())
 ;;
 
+let note_screen t (frame : Masc_tui_frame_presenter.frame) =
+  match t with
+  | Off -> ()
+  | On live ->
+    live.arriving
+    <- Some
+         { rows =
+             List.map
+               Masc_tui_nav_trace.without_clock
+               frame.Masc_tui_frame_presenter.lines
+         ; cursor = frame.Masc_tui_frame_presenter.cursor
+         }
+;;
+
+let same_screen (a : screen) (b : screen) =
+  List.equal String.equal a.rows b.rows && a.cursor = b.cursor
+;;
+
+(* The presenter calls a frame new when any byte of it moved, and the header
+   clock moves every second. A differential repaint whose rows match the frame
+   before once the clock is set aside shows nothing new. A repaint of no rows
+   moved only the cursor, and a whole-screen repaint was asked for (a resize,
+   an invalidation), so those two keep their result. *)
+let unchanged_but_for_the_clock ~before ~now result =
+  match result with
+  | Masc_tui_frame_presenter.Unchanged -> result
+  | Masc_tui_frame_presenter.Presented Masc_tui_frame_presenter.Whole_screen
+  | Masc_tui_frame_presenter.Presented (Masc_tui_frame_presenter.Rows []) -> result
+  | Masc_tui_frame_presenter.Presented (Masc_tui_frame_presenter.Rows (_ :: _)) ->
+    (match before, now with
+     | Some before, Some now when same_screen before now ->
+       Masc_tui_frame_presenter.Unchanged
+     | Some _, Some _ | Some _, None | None, Some _ | None, None -> result)
+;;
+
 let note_frame t ~surface ~result =
   match t with
   | Off -> ()
@@ -114,6 +160,10 @@ let note_frame t ~surface ~result =
     announced := "";
     let key = live.pressed in
     live.pressed <- None;
+    let now = live.arriving in
+    live.arriving <- None;
+    let result = unchanged_but_for_the_clock ~before:live.previous_screen ~now result in
+    live.previous_screen <- now;
     let advertised =
       match key with
       | Some _ -> Masc_tui_footer.advertised_key_atoms hints

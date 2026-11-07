@@ -42,6 +42,16 @@ val announce : string -> unit
     no field for it. [note_frame] reads what the last footer line announced
     and forgets it, so a frame that draws no footer announces nothing. *)
 
+val note_screen : t -> Masc_tui_frame_presenter.frame -> unit
+(** The frame the next [note_frame] is about, kept until then. The presenter
+    calls a frame new when any byte of it moved, and the header clock moves
+    every second, so a key pressed after the second turned read as one that
+    drew something. [note_frame] compares this frame with the one before it
+    through [Masc_tui_nav_trace.without_clock]; a differential repaint that
+    differs only in the clock counts as [Unchanged]. A repaint of no rows (only
+    the cursor moved) and a whole-screen repaint keep their result, and so does
+    a [note_frame] that no [note_screen] came before. *)
+
 val note_frame :
   t -> surface:string -> result:Masc_tui_frame_presenter.present_result -> unit
 (** A frame of [surface] was presented, with this result. Writes the surface

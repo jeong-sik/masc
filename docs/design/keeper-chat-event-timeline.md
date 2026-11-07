@@ -229,7 +229,7 @@ claim current default CLI child-body exposure.
   type, including `Internal`, `Tool`, and `Unrecognized`. Classifying those as
   answer, tool output, or thinking needs authoritative vendor payload semantics.
 - GLM Coding: [`runtime.toml`](../../config/runtime.toml),
-  [`streaming.ml`](../../packages/agent_core/lib/llm_provider/streaming.ml)
+  [`openai_stream.ml`](../../packages/agent_core/lib/llm_provider/openai_stream.ml)
   (`project_openai_chunk`).
 - Chat projection: [`keeper_chat_agent_core_stream_bridge.ml`](../../lib/keeper/keeper_chat_agent_core_stream_bridge.ml).
   Native start/end observations remain separate from MASC execution receipts.

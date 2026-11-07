@@ -14,6 +14,7 @@
   ollama_stream
   gemini_stream
   responses_stream
+  openai_stream
   model_catalog_embedded
   provider_http_codec
   tool_result_projection

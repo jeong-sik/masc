@@ -10,4 +10,4 @@
 (test
  (name test_login_allowlist_routes)
  (modules test_login_allowlist_routes)
- (libraries masc_test_deps))
+ (libraries masc_test_deps ptime))

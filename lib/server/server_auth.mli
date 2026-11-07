@@ -62,6 +62,13 @@ val request_carries_auth_credential : Httpun.Request.t -> bool
 val observer_sse_auth_token_from_request : Httpun.Request.t -> string option
 (** Combined header-or-query lookup for the SSE observer endpoint. *)
 
+val request_carries_query_credential : Httpun.Request.t -> bool
+(** Whether the request carries a credential in its query string where the
+    server reads one: the [token] of an observer stream ([/mcp] with
+    [sse_kind=observer], [/events/presence]) or of the IDE LSP upgrade. An
+    empty token counts. Multi-account mode reads none of them
+    ([Authz_browser_request.request.query_credential]). *)
+
 val ide_lsp_upgrade_path : string
 
 val play_page_path : string

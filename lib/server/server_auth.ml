@@ -148,18 +148,26 @@ let play_page_path = Play_invite.play_path
    token query parameter, the same admission the observer streams above
    use. A credential header still wins, and only that exact path reads the
    query. *)
+let ide_lsp_query_token request =
+  match request.Httpun.Request.meth with
+  | `GET
+    when String.equal (Http_server_eio.Request.path request) ide_lsp_upgrade_path ->
+      query_param request "token"
+  | _ -> None
+
 let token_bound_auth_token_from_request request =
   match request_auth_credential_from_request request with
   | Parsed_credential token -> Some token
   | Malformed_credential _ -> None
-  | Absent_credential ->
-      (match request.Httpun.Request.meth with
-       | `GET
-         when String.equal
-                (Http_server_eio.Request.path request)
-                ide_lsp_upgrade_path ->
-           trim_opt (query_param request "token")
-       | _ -> None)
+  | Absent_credential -> trim_opt (ide_lsp_query_token request)
+
+(* The two places the server reads a credential from a query string. A token
+   that is there counts even when it is empty, as an empty header does. *)
+let request_carries_query_credential request =
+  (match observer_sse_query_credential_from_request request with
+   | Parsed_credential _ | Malformed_credential _ -> true
+   | Absent_credential -> false)
+  || Option.is_some (ide_lsp_query_token request)
 
 let agent_from_request request =
   let hdr key = Httpun.Headers.get request.Httpun.Request.headers key in

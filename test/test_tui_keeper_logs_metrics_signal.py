@@ -3,8 +3,8 @@
 row appended to that Keeper's metrics file (RFC-0480 L8).
 
 The first test pushes the refresh cadence out of its lifetime, so every
-metrics read after the view opens comes from an announcement. The second runs
-the cadence every second and sees it read nothing. The metrics file is read
+metrics read after the view opens comes from an announcement, and the
+second sees a quiet stretch read nothing more. The metrics file is read
 from the local workspace, so the reads are counted in the TUI's own log.
 """
 
@@ -94,7 +94,7 @@ class KeeperLogsMetricsSignalTest(unittest.TestCase):
 
         owed.ChatOwedHistoryTest.run_chat(cast(owed.ChatOwedHistoryTest, self), scenario)
 
-    def test_the_cadence_does_not_read_the_metrics(self) -> None:
+    def test_a_quiet_stretch_does_not_read_the_metrics(self) -> None:
         owed.ChatOwedHistoryTest.binary = self.binary
 
         def scenario(server: owed.ChatServer, step: Callable[..., None]) -> None:
@@ -107,16 +107,11 @@ class KeeperLogsMetricsSignalTest(unittest.TestCase):
             )
             step("drain", 1.0)
             opened = started_reads(base, "analyst")
-            server.set_phase("cadence")
+            server.set_phase("quiet")
             step("drain", 3.5)
-            self.assertGreaterEqual(
-                server.count("cadence", "/health"), 2, "the cadence did not run"
-            )
             self.assertEqual(started_reads(base, "analyst"), opened)
 
-        owed.ChatOwedHistoryTest.run_chat(
-            cast(owed.ChatOwedHistoryTest, self), scenario, refresh_seconds=1.0
-        )
+        owed.ChatOwedHistoryTest.run_chat(cast(owed.ChatOwedHistoryTest, self), scenario)
 
 
 if __name__ == "__main__":

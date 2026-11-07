@@ -1,4 +1,6 @@
-# tinker-trainer
+# tinker-trainer (experimental)
+
+This revision `0.1.0` package and its external post-training path are **experimental**. See the [integration guide](../../docs/guides/tinker-integration.md) for opt-in requirements, failure symptoms, examples and removal.
 
 Derives post-training datasets (SFT `cross_entropy` and RLVR `importance_sampling` / `ppo` / `cispo` / `dro` / `gspo`), observes Tinker training runs, and gates sampler checkpoint promotion (`tinker://<run-id>:train:0/sampler_weights/<step>`) from MASC's verifiable domain signals.
 

@@ -3,7 +3,7 @@ rfc: "tui-operator-workbench"
 title: "TUI 작업대 — 모든 화면에 같은 클릭·스크롤·복사·추이 부품을 쓴다"
 status: Draft
 created: 2026-09-26
-updated: 2026-11-06
+updated: 2026-11-07
 author: dancer + claude
 supersedes: []
 superseded_by: null
@@ -571,7 +571,7 @@ Goal `goal-tui-operator-stats-20261106`(이슈 #49175)의 질문 6개가 지금 
 
 - 도구 호출·실패·p95 의 시간 칸은 서버를 바꾸지 않고 `tool-metrics/series` 로 그린다. 이 조회는 시간 또는 일 칸(`bucket=hour|day`), 최대 31일(`max_window_days`), `utc_offset_min` 을 받고, 칸마다 `call_count`·`failure_count`·`p50_ms`·`p95_ms`·`max_ms` 를 준다. 호출이 없는 칸은 `p95_ms` 가 없다(`lib/tool_metrics_store/tool_metrics_series.mli`).
 - 그래서 위의 `usage/series` 는 토큰과 비용 두 계열만 맡는다. 호출·실패·p95 는 뺀다.
-- 구현 순서는 S5-3a(Usage 에 도구 호출·실패·p95 추이 구간, 서버 변경 없음), S5-2(`usage/series` 토큰·비용), S5-3b(토큰·비용 추이를 같은 차트로)다.
+- 구현 순서는 S5-3a(Usage 에 도구 호출·실패·p95 추이 구간, 서버 변경 없음), S5-3c(Dashboard 의 24시간 도구 호출 줄, 서버 변경 없음, §6.4), S5-2(`usage/series` 토큰·비용), S5-3b(토큰·비용 추이를 같은 차트로)다.
 - S5-3a 의 자리는 Usage 의 `v` 로 도는 구간 목록 끝에 `Calls` 를 더하는 것이다(Plan, Trend, Keepers, Calls). `V` 로 거꾸로 돌게 해서 Dashboard 에서 `m`, `V` 두 번에 닿는다. 범위는 Trend 가 쓰는 `w`(1·7·14일)를 그대로 쓴다. 1일은 시간 칸 24개이고 7·14일은 일 칸이다. Keepers 의 토큰·비용·Keeper별 사용은 지금처럼 `m`, `v`, `v` 세 번이다.
 
 ### 6.4 Dashboard 에 올리는 것
@@ -581,6 +581,16 @@ measured-home RFC 의 Dashboard 에 다음 세 줄만 더한다.
 - `Awaiting you N` — Work 로 가는 링크
 - 계정마다 사용 비율이 가장 높은 창 하나 — Usage 로 가는 링크
 - 24h 턴 수 스파크라인과 14일 완료 Task 막대 — Usage › 추이로 가는 링크
+
+세 번째 줄은 턴 수 시리즈가 아직 없어서(`usage/series` 는 토큰·비용만 맡는다, §6.3.1) 도구 호출로 먼저 올린다(S5-3c).
+
+- 줄 하나에 지난 24시간(UTC 시간 칸 24개)의 호출 수 스파크라인과 합계·실패 수를 둔다. 예: `Tool calls 24h  ▁▂▃▅▇▆▄▃▂▁▁▁▂▃▄▅▅▄▃▂▂▁▁▂  1,712 · 9 failed`.
+- 값은 Usage › Calls 가 읽는 `tool-metrics/series` 와 같은 조회다. Dashboard 는 Usage 의 `w` 창과 상관없이 24시간 칸을 따로 읽는다. 그래서 `w` 가 1일일 때만 두 화면의 합계가 같고, 7·14일이면 Usage 가 더 긴 창을 합친다. 줄 앞의 `24h` 가 이 차이를 보여 준다. 서버는 바꾸지 않는다.
+- 읽기 전·읽는 중·읽기 실패·호출 0건은 숫자 대신 글(`reading…`, `unavailable`, `no calls`)로 보인다. 0 으로 채우지 않는다.
+- 줄을 누르면 Usage › Calls 로 간다.
+- 턴 수 스파크라인과 14일 완료 Task 막대는 `usage/series`(S5-2)가 생긴 뒤 같은 자리에 더한다.
+
+지금 Dashboard 에서 최근 24시간의 활동을 세는 줄은 `Work: N currently done in the last 24h` 하나뿐이다. 120x35 에서는 마지막 카드와 푸터 사이 16줄이 비어 있고 80x24 에서는 5줄이 비어 있다(2026-11-07, main `995fad9dd66` 의 증명 빌드, Goal·Task 40개가 든 고정 데이터). 한 줄은 80x24 의 빈 줄 안에 들어간다.
 
 ## 7. 이름 정리 (Glossary 같이 고침)
 
@@ -651,7 +661,10 @@ measured-home RFC 의 Dashboard 에 다음 세 줄만 더한다.
 |---|---|
 | S5-1 | 계정 화면(§6.2)과 막대 하나(§5.8). #38801 의 타입에 필요한 것만 더함 |
 | S5-2 | 서버 `usage/series` 조회와 날짜별 계산 저장 |
-| S5-3 | 추이 차트와 범위 키, Dashboard 세 줄 |
+| S5-3a | Usage 의 Calls 구간(도구 호출·실패·p95 추이). 서버 변경 없음 |
+| S5-3c | Dashboard 의 24시간 도구 호출 줄(§6.4). 서버 변경 없음 |
+| S5-3b | 토큰·비용 추이를 같은 차트로(S5-2 뒤) |
+| S5-4 | Dashboard 의 `Awaiting you N`, 계정별 최고 창, 턴 수 스파크라인과 완료 Task 막대 |
 
 ### S6 — 틀린 값 바로잡기 (독립, main 기준, Keeper 에게 나눠 줄 수 있음)
 

@@ -30,14 +30,19 @@ let is_prefix ~equal prefix xs = Option.is_some (strip_prefix ~equal prefix xs)
 let take_last n xs =
   if n <= 0 then []
   else
-    let len = List.length xs in
-    if len <= n then xs
-    else
-      let rec drop k ys =
-        if k <= 0 then ys
-        else
-          match ys with
-          | [] -> []
-          | _ :: tl -> drop (k - 1) tl
+    let rec advance k ptr =
+      if k <= 0 then Some ptr
+      else match ptr with [] -> None | _ :: tl -> advance (k - 1) tl
+    in
+    match advance n xs with
+    | None -> xs
+    | Some lead ->
+      let rec slide lead trail =
+        match lead with
+        | [] -> trail
+        | _ :: tl_lead ->
+          (match trail with
+           | [] -> []
+           | _ :: tl_trail -> slide tl_lead tl_trail)
       in
-      drop (len - n) xs
+      slide lead xs

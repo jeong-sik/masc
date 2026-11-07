@@ -118,9 +118,13 @@ let sample_of_decision_line line =
      | _ -> None)
 ;;
 
+(* [Error] is a log that exists but could not be read. A missing log and a log
+   with no turns in the window are [Ok] with no samples: the keeper has no turns
+   to show. An unreadable log says nothing about its turns, so the caller must
+   not turn it into an empty pulse. *)
 let read_tail_window_samples ~now ~window_seconds path =
   if not (Fs_compat.file_exists path)
-  then [], false
+  then Ok ([], false)
   else (
     match
       Keeper_memory.read_file_tail_lines_with_completion
@@ -128,7 +132,12 @@ let read_tail_window_samples ~now ~window_seconds path =
         ~max_bytes:1048576
         ~max_lines:1000
     with
-    | Error _ -> [], false
+    | Error exn_class ->
+      Keeper_memory.record_memory_recall_read_error
+        ~site:"keeper_turn_pulse_seed"
+        path
+        exn_class;
+      Error exn_class
     | Ok (lines, completion) ->
       let window_start = now -. window_seconds in
       let reversed_lines = List.rev lines in
@@ -148,7 +157,7 @@ let read_tail_window_samples ~now ~window_seconds path =
         | Keeper_memory.Partial_last_line -> true
         | Keeper_memory.Complete -> false
       in
-      collect [] truncated_input reversed_lines)
+      Ok (collect [] truncated_input reversed_lines))
 ;;
 
 let seed_from_decision_log ?(now = Time_compat.now ()) ~config ~keeper_name () =
@@ -156,23 +165,25 @@ let seed_from_decision_log ?(now = Time_compat.now ()) ~config ~keeper_name () =
   let primary_path = Keeper_types_support.keeper_decision_log_path config keeper_name in
   let rotated_path = primary_path ^ ".1" in
   let window_seconds = 12.0 *. 3600.0 in
-  let primary_samples, primary_trunc =
-    read_tail_window_samples ~now ~window_seconds primary_path
-  in
-  let rotated_samples, rotated_trunc =
-    read_tail_window_samples ~now ~window_seconds rotated_path
-  in
-  let combined_samples = primary_samples @ rotated_samples in
-  let file_truncated = primary_trunc || rotated_trunc in
-  let is_truncated =
-    file_truncated || List.length combined_samples > max_samples_per_keeper
-  in
-  let bounded =
-    if List.length combined_samples > max_samples_per_keeper
-    then take max_samples_per_keeper combined_samples
-    else combined_samples
-  in
-  seed ~base_path ~keeper_name ~samples:bounded ~truncated:is_truncated ()
+  let primary = read_tail_window_samples ~now ~window_seconds primary_path in
+  let rotated = read_tail_window_samples ~now ~window_seconds rotated_path in
+  match primary, rotated with
+  | Ok (primary_samples, primary_trunc), Ok (rotated_samples, rotated_trunc) ->
+    let combined_samples = primary_samples @ rotated_samples in
+    let file_truncated = primary_trunc || rotated_trunc in
+    let is_truncated =
+      file_truncated || List.length combined_samples > max_samples_per_keeper
+    in
+    let bounded =
+      if List.length combined_samples > max_samples_per_keeper
+      then take max_samples_per_keeper combined_samples
+      else combined_samples
+    in
+    seed ~base_path ~keeper_name ~samples:bounded ~truncated:is_truncated ()
+  | Error _, Ok _ | Ok _, Error _ | Error _, Error _ ->
+    (* Either log is unreadable, so the window is not known. The pulse stays
+       unseeded and [get] keeps returning [None]. *)
+    ()
 ;;
 
 let seed_all_from_decision_logs ?(now = Time_compat.now ()) ~config () =

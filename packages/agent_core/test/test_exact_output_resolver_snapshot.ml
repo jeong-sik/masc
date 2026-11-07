@@ -261,17 +261,6 @@ let check_observation_is_coherent label observation =
     observation.receipt_identity
 ;;
 
-let functional_observation observation =
-  ( observation.snapshot_generation
-  , observation.selected_generation
-  , observation.selected_identity
-  , observation.provenance_generation
-  , observation.provenance_identity
-  , observation.receipt_generation
-  , observation.receipt_identity
-  , observation.plan_fingerprint )
-;;
-
 let string_contains ~haystack ~needle =
   let haystack_length = String.length haystack in
   let needle_length = String.length needle in

@@ -70,18 +70,6 @@ let gemini_url_of ?api_key:_ ~stream () =
   if stream then base ^ "?alt=sse" else base
 ;;
 
-let mk_response
-      ?(id = "r1")
-      ?(model = "m1")
-      ?(stop_reason = Types.EndTurn)
-      ?(content = [ Types.Text "ok" ])
-      ?usage
-      ()
-  : Types.api_response
-  =
-  { id; model; unreadable_tool_uses = []; stop_reason; content; usage; telemetry = None }
-;;
-
 (* ═══════════════════════════════════════════════════
    1. Complete — Gemini URL construction
    ═══════════════════════════════════════════════════ *)

@@ -2,8 +2,6 @@
 
 open Agent_core
 
-let eio_run f = Eio_main.run f
-
 (* ── Test helpers ────────────────────────────────────────────── *)
 
 let make_record

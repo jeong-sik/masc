@@ -35,15 +35,6 @@ let stateful_handler call_count _conn _req body =
   Cohttp_eio.Server.respond_string ~status:`OK ~body:response_body ()
 ;;
 
-let sequence_handler responses _conn _req body =
-  let _ = Eio.Buf_read.(of_flow ~max_size:(1024 * 1024) body |> take_all) in
-  match !responses with
-  | response_body :: rest ->
-    responses := rest;
-    Cohttp_eio.Server.respond_string ~status:`OK ~body:response_body ()
-  | [] -> Cohttp_eio.Server.respond_string ~status:`OK ~body:(text_body "done") ()
-;;
-
 let text_only_handler _conn _req body =
   let _ = Eio.Buf_read.(of_flow ~max_size:(1024 * 1024) body |> take_all) in
   Cohttp_eio.Server.respond_string ~status:`OK ~body:(text_body "hello") ()

@@ -62,6 +62,9 @@ type prompt_resolution = Types.prompt_resolution = {
   has_override: bool;
 }
 
+let prompt_resolution_to_yojson = Types.prompt_resolution_to_yojson
+let prompt_resolution_of_yojson = Types.prompt_resolution_of_yojson
+
 type persisted_mutation_error =
   | Validation_error of string
   | Persistence_error of string

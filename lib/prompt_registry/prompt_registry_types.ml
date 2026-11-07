@@ -60,3 +60,63 @@ let prompt_source_to_string = function
   | File -> "file"
   | Missing -> "missing"
 
+let prompt_source_of_string = function
+  | "override" -> Some Override
+  | "file" -> Some File
+  | "missing" -> Some Missing
+  | _ -> None
+
+let prompt_resolution_members =
+  [ "effective"; "source"; "file_value"; "override_value"; "file_path";
+    "file_exists"; "has_override" ]
+
+let prompt_resolution_to_yojson (p : prompt_resolution) : Yojson.Safe.t =
+  `Assoc
+    [ ("effective", `String p.effective);
+      ("source", `String (prompt_source_to_string p.source));
+      ("file_value", Json_util.string_opt_to_json p.file_value);
+      ("override_value", Json_util.string_opt_to_json p.override_value);
+      ("file_path", Json_util.string_opt_to_json p.file_path);
+      ("file_exists", `Bool p.file_exists);
+      ("has_override", `Bool p.has_override) ]
+
+let prompt_resolution_of_yojson (json : Yojson.Safe.t) =
+  let ( let* ) = Result.bind in
+  let invalid detail = Error ("prompt resolution " ^ detail) in
+  match json with
+  | `Assoc members
+    when List.sort String.compare (List.map fst members)
+         = List.sort String.compare prompt_resolution_members ->
+    let text key =
+      match List.assoc key members with
+      | `String value -> Ok value
+      | _ -> invalid (key ^ " expects text")
+    in
+    let text_or_null key =
+      match List.assoc key members with
+      | `Null -> Ok None
+      | `String value -> Ok (Some value)
+      | _ -> invalid (key ^ " expects text or null")
+    in
+    let flag key =
+      match List.assoc key members with
+      | `Bool value -> Ok value
+      | _ -> invalid (key ^ " expects a boolean")
+    in
+    let* effective = text "effective" in
+    let* source_word = text "source" in
+    let* source =
+      match prompt_source_of_string source_word with
+      | Some source -> Ok source
+      | None -> invalid "source is not override, file or missing"
+    in
+    let* file_value = text_or_null "file_value" in
+    let* override_value = text_or_null "override_value" in
+    let* file_path = text_or_null "file_path" in
+    let* file_exists = flag "file_exists" in
+    let* has_override = flag "has_override" in
+    Ok { effective; source; file_value; override_value; file_path;
+         file_exists; has_override }
+  | _ ->
+    invalid "has unknown, duplicate or missing members"
+

@@ -541,6 +541,79 @@ let test_a_directory_scan_reads_prompt_files_anew () =
         (Prompt_registry.get_prompt "test.edit.note"))
 ;;
 
+let override_resolution =
+  { Prompt_registry.effective = "override text";
+    source = Prompt_registry.Override;
+    file_value = Some "file text";
+    override_value = Some "override text";
+    file_path = Some "/prompts/keeper.md";
+    file_exists = true;
+    has_override = true }
+
+let file_resolution =
+  { Prompt_registry.effective = "file text";
+    source = Prompt_registry.File;
+    file_value = Some "file text";
+    override_value = None;
+    file_path = Some "/prompts/keeper.md";
+    file_exists = true;
+    has_override = false }
+
+let missing_resolution =
+  { Prompt_registry.effective = "";
+    source = Prompt_registry.Missing;
+    file_value = None;
+    override_value = None;
+    file_path = None;
+    file_exists = false;
+    has_override = false }
+
+(* An inactive file can be empty beneath an effective override. *)
+let blank_file_resolution =
+  { override_resolution with Prompt_registry.file_value = Some "" }
+
+let test_resolution_json_round_trip () =
+  let open Alcotest in
+  List.iter
+    (fun resolution ->
+      check bool "decoding what was written gives the record back" true
+        (Prompt_registry.prompt_resolution_of_yojson
+           (Prompt_registry.prompt_resolution_to_yojson resolution)
+         = Ok resolution))
+    [ override_resolution; file_resolution; missing_resolution;
+      blank_file_resolution ];
+  check string "members keep their order and the source its word"
+    {|{"effective":"file text","source":"file","file_value":"file text","override_value":null,"file_path":"/prompts/keeper.md","file_exists":true,"has_override":false}|}
+    (Yojson.Safe.to_string
+       (Prompt_registry.prompt_resolution_to_yojson file_resolution))
+;;
+
+let test_resolution_json_refuses () =
+  let open Alcotest in
+  let members =
+    match Prompt_registry.prompt_resolution_to_yojson file_resolution with
+    | `Assoc members -> members
+    | _ -> fail "a resolution is written as an object"
+  in
+  let with_member key value =
+    `Assoc
+      (List.map (fun (k, v) -> if k = key then (k, value) else (k, v)) members)
+  in
+  let refused label json =
+    check bool label true
+      (Result.is_error (Prompt_registry.prompt_resolution_of_yojson json))
+  in
+  refused "not an object" (`List []);
+  refused "a missing member" (`Assoc (List.remove_assoc "file_path" members));
+  refused "an extra member" (`Assoc (("extra", `Null) :: members));
+  refused "a repeated member" (`Assoc (("effective", `String "again") :: members));
+  refused "an unknown source word" (with_member "source" (`String "Override"));
+  refused "a source that is not text" (with_member "source" (`Int 1));
+  refused "effective that is not text" (with_member "effective" `Null);
+  refused "file_exists that is not a boolean"
+    (with_member "file_exists" (`String "true"))
+;;
+
 let () =
   let open Alcotest in
   run "Prompt_registry_defaults"
@@ -1358,5 +1431,12 @@ let () =
                      | Some (`List items) -> List.length items
                      | _ -> -1)
               | _ -> fail "unexpected prompt JSON");
+        ] );
+      ( "resolution_json",
+        [
+          test_case "a resolution reads back as written" `Quick
+            test_resolution_json_round_trip;
+          test_case "an object that is not exactly a resolution is refused"
+            `Quick test_resolution_json_refuses;
         ] );
     ]

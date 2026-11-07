@@ -9,28 +9,10 @@ let fields expected = function
 let value name fields = List.assoc name fields
 let text = function `String value -> Ok value | _ -> Error "Original history request expects text"
 let integer = function `Int value -> Ok value | _ -> Error "Original history request expects an integer"
-let boolean = function `Bool value -> Ok value | _ -> Error "Original history request expects a boolean"
-let optional encode = Option.fold ~none:`Null ~some:encode
-let option decode = function `Null -> Ok None | json -> let+ value=decode json in Some value
 let hash text = Agent_core_sha256.(to_hex (digest_string text))
-let prompt_json (p:Prompt_registry.prompt_resolution) = `Assoc [
-  "effective",`String p.effective;"source",`String (Prompt_registry.prompt_source_to_string p.source);
-  "file_value",optional (fun text -> `String text) p.file_value;
-  "override_value",optional (fun text -> `String text) p.override_value;
-  "file_path",optional (fun text -> `String text) p.file_path;
-  "file_exists",`Bool p.file_exists;"has_override",`Bool p.has_override]
+let prompt_json = Prompt_registry.prompt_resolution_to_yojson
 let prompt_of_json json =
-  let* f=fields ["effective";"source";"file_value";"override_value";"file_path";"file_exists";"has_override"] json in
-  let* effective=text (value "effective" f) in
-  let* source=text (value "source" f) in
-  let* source=match source with "file" -> Ok Prompt_registry.File | "override" -> Ok Prompt_registry.Override
-    | "missing" -> Ok Prompt_registry.Missing | _ -> Error "Unknown original history prompt source" in
-  let* file_value=option text (value "file_value" f) in
-  let* override_value=option text (value "override_value" f) in
-  let* file_path=option text (value "file_path" f) in
-  let* file_exists=boolean (value "file_exists" f) in
-  let+ has_override=boolean (value "has_override" f) in
-  {Prompt_registry.effective;source;file_value;override_value;file_path;file_exists;has_override}
+  Result.map_error (fun detail -> "Original history request: " ^ detail) (Prompt_registry.prompt_resolution_of_yojson json)
 type frozen = {parsing_now:float;policy:Runtime.durable_policy;rule_prompt:Prompt_registry.prompt_resolution;
   prompt:Prompt_registry.prompt_resolution;rendered_prompt_sha256:string;output_schema:Yojson.Safe.t}
 (* The substitutions and the rendered prompt repeat the input, so they are

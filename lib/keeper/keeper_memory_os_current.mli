@@ -738,14 +738,24 @@ type disposition_basis =
 
 type disposition_error =
   | Basis_superseded of t option
+  | Destination_absent of { memory_id : string; current : t option }
   | Disposition_store_failed of string
 (** [Basis_superseded current] is produced under the write locks, after earlier
     publication recovery, before planning or any new disposition effect. The
     returned locked snapshot is observation data, not execution authority.
+    [Destination_absent] is produced at the same point, after planning and
+    before any new disposition effect, when the planned next Memory would not
+    hold [memory_id], one of the [required_memory_ids] the decision writes
+    into. [current] is the locked snapshot the plan started from. The same
+    input can never pass this check against the same snapshot, so it is a
+    definite refusal, not an unknown outcome (#46372).
     [Disposition_store_failed] does not establish absence of a publication. *)
 
+val disposition_error_to_string : disposition_error -> string
+(** The message [apply_disposition] reports for each refusal. *)
+
 val apply_disposition_guarded
-  :  expected_basis:disposition_basis
+  :  ?expected_basis:disposition_basis
   -> ?on_committed:(disposition -> unit)
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?dropped_statements:Keeper_memory_os_types.dropped_statement list
@@ -763,11 +773,14 @@ val apply_disposition_guarded
   -> new_claims:Keeper_memory_os_types.fact list
   -> unit
   -> (disposition, disposition_error) result
-(** Same disposition transaction as [apply_disposition], requiring its complete
-    original basis and preserving a typed refusal. A basis mismatch is never
-    classified by matching a storage error string. Earlier publication recovery
-    can precede this refusal; callers must reread their actual receipts before
-    concluding that their original publication has no effects. *)
+(** Same disposition transaction as [apply_disposition], preserving each
+    definite refusal as its own constructor. With [expected_basis] a basis
+    mismatch is [Basis_superseded]; without it the basis is not compared, as in
+    [apply_disposition], and a missing required destination is still
+    [Destination_absent]. Neither is classified by matching a storage error
+    string. Earlier publication recovery can precede either refusal; callers
+    must reread their actual receipts before concluding that their original
+    publication has no effects. *)
 
 val apply_disposition
   :  ?expected_basis:disposition_basis

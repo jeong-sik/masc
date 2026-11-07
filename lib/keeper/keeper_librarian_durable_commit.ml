@@ -448,6 +448,16 @@ let publish_with ~before_settlement ~store ~config ~request ~(original : Owner.r
           | Error detail | Ok (Error (Current.Disposition_store_failed detail)) ->
             let* _,_=event record (Progress.Commit_uncertain (`Assoc ["detail",`String detail])) in
             pending detail
+          | Ok (Error (Current.Destination_absent _ as refusal)) ->
+            (* The basis above matched, so only this decision's own plan can
+               drop a destination it writes into; the refusal seen live comes
+               from explicit admission, not from here (#46372). Ending here
+               needs a successor rule of its own: [check_supersession] requires
+               a different basis, which this refusal never has, so it stays on
+               the retry path. *)
+            let detail=Current.disposition_error_to_string refusal in
+            let* _,_=event record (Progress.Commit_uncertain (`Assoc ["detail",`String detail])) in
+            pending detail
           | Ok (Ok _) ->
             let detail="Original history disposition returned without its actual range receipts" in
             let* _,_=event record (Progress.Commit_uncertain (`Assoc ["detail",`String detail])) in

@@ -193,6 +193,8 @@ let chat_journal_rows ~(context : Chat_theme.body_context) ~width lines =
                 if String.equal opening "" then text else opening ^ text ^ closing)
               pieces))
 
+(* One frozen preview provider serves measurement and drawing. Search passes
+   this same provider to its mapping and suffix measurement closures. *)
 let preview_snapshot lookup =
   let previews=Hashtbl.create 4 in
   fun url -> match Hashtbl.find_opt previews url with
@@ -244,12 +246,6 @@ let cached_chat_markdown_with_preview ~preview ~link_previews_mode ~theme =
   in
   body_rows @ journal
 
-
-let cached_chat_markdown ~link_previews_mode ~theme =
-  (* One frozen preview provider serves measurement and drawing. Search passes
-     this same provider to its mapping and suffix measurement closures. *)
-  cached_chat_markdown_with_preview
-    ~preview:(preview_snapshot Masc_tui_link_preview.get_preview) ~link_previews_mode ~theme
 
 type mapped_chat_body = { mapped_rows : string list; runs : Search.run list; unavailable : bool }
 
@@ -1988,9 +1984,6 @@ let polled_turn_output_with_anchors (state : state) ~keeper_name ~role_label_col
         ; _
         }
     | None -> []
-
-let polled_turn_output_entries state ~keeper_name ~role_label_column =
-  polled_turn_output_with_anchors state ~keeper_name ~role_label_column |> List.map snd
 
 (* One conversation's layout entries, reused per message across a change of
    the conversation.

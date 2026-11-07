@@ -140,21 +140,10 @@ val chat_tail_entries :
 (** Pending inputs with delivery state in their labels and original text in
     their bodies, preceded by the pending-section status entry. *)
 
-val polled_turn_output_entries :
-  Masc_tui_types.state -> keeper_name:string -> role_label_column:int ->
-  Message_layout.entry list
-(** A polled output excerpt and its separate observation status. Empty when
-    the journal already supplies the turn's text. *)
-
 val chat_body_with_previews :
   preview:(string -> Masc_tui_link_preview.og_preview) ->
   mode:[ `Rich | `Compact | `Off ] -> entry:Message_layout.entry ->
   width:int -> string
-
-val cached_chat_markdown :
-  link_previews_mode:[ `Rich | `Compact | `Off ] ->
-  theme:Masc_tui_ansi.Chat_theme.snapshot -> entry:Message_layout.entry ->
-  width:int -> string list
 
 val keeper_message_clock : float -> string
 (** The wall-clock stamp the live heading prints, so a test can locate the

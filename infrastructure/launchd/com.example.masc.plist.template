@@ -54,12 +54,8 @@
     <dict>
         <key>PATH</key>
         <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>
-        <key>MASC_MCP_PORT</key>
-        <string>8935</string>
         <key>MASC_BASE_PATH</key>
         <string>__BASE_PATH__</string>
-        <key>MASC_AUTO_RESPOND</key>
-        <string>true</string>
         <key>SSL_CERT_FILE</key>
         <string>/opt/homebrew/etc/ca-certificates/cert.pem</string>
         <key>SSL_CERT_DIR</key>

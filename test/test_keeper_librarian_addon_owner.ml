@@ -419,6 +419,63 @@ let test_gap_and_new_tail_are_rejudged_together ()=with_fixture (fun ~sw:_ fixtu
   check int "the new decision ACKs only its original complete candidates" 0
     (io (fun () -> List.length (pending_rows fixture.keepers_dir))))
 
+(* #46372: the answer revises a Memory another writer removes before the
+   commit. The locked plan refuses the revised claim, so the destination the
+   answer writes into is absent. The original must end Conflicted after one
+   attempt, not retry the same input, and the queue judges the candidate again
+   against the Memory that refused it. *)
+let test_absent_destination_ends_the_original_and_is_judged_again ()=
+  with_fixture ~initial:["a","Durable A"] (fun ~sw:_ fixture ->
+  let source={Current.kind=Current.Librarian;trace_id="absent-destination"} in
+  let seeded=memory_action fixture (fun () -> io (fun () ->
+    Current.replace ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name ~expected_revision:None
+      ~now:50. ~source ~facts:[fact "Earlier version of A"] () |> get)) in
+  let revising capture =
+    let rows=Queue.candidates (Capture.batch capture) in
+    `Assoc ["memory",`Assoc ["new_claims",`List [`Assoc ["claim",`String "Durable A";"category",`String "fact";
+        "board_post_id",`Null;"board_comment_id",`Null;"supersedes",`String "m1";"absorbs",`List [];
+        "evidence",`Assoc ["conversation",`List [];"tools",`List [];"counterpart",`Bool false;"task_contexts",`Bool false]]];
+      "dropped",`List [`Assoc ["memory_id",`String "m1";"reason",`String "Revised by the candidate"]];
+      "working_state",`Null;"working_contexts",`List []];
+      "candidates",`List (List.map (fun (row:Queue.candidate) -> `Assoc ["request_id",`String row.request_id;
+        "outcome",`String "incorporated";"memory_claim",`String row.fact.claim;
+        "reason",`String "The candidate revises the captured Memory."]) rows);
+      "change_support",`List (List.map (fun (row:Queue.candidate) -> `String row.request_id) rows)] in
+  let judged=ref [] in
+  fixture.set_response (fun capture ->
+    let current=match (Capture.input capture).Keeper_librarian.current with
+      | None -> [] | Some state -> List.map (fun (f:Types.fact) -> f.claim) state.facts in
+    judged:=current :: !judged;
+    match current with
+    | ["Earlier version of A"] ->
+      (* Another writer removes the revised source while the answer is out. *)
+      io (fun () -> Current.replace ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name
+        ~expected_revision:(Some seeded.revision) ~now:60. ~source ~facts:[] () |> get |> ignore);
+      `OK,F.openai_response (revising capture)
+    | _ -> `OK,F.openai_response (answer (fun _ -> true) capture));
+  drive_original_terminal fixture;
+  let first=match observed_originals fixture with [record,_] -> record
+    | [] | _::_::_ -> fail "expected one original execution" in
+  let uncertain=List.exists (function Progress.Commit_uncertain _ -> true
+    | Dispatch_intended | Admission_declined _ | Execution_observed _ | Judgment_retained _
+    | Preparation_intended _ | Preparation_observed _ | Replacement_intended _ | Replacement_observed _
+    | Commit_intended _ | Commit_retry_observed _ | Commit_observed _ | Commit_conflicted _ | Refused _
+    | Refusal_settled _ | Successor_intended _ | Successor_observed _ | Observer _ -> false)
+    (Progress.events first.Owner.progress) in
+  check bool "the refused destination records no uncertain commit" false uncertain;
+  (match Progress.phase first.progress with
+   | Progress.Conflicted (_,conflict) ->
+     ignore (Commit.destination_absent_of_json first conflict |> get)
+   | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+   | Finished _ | Rejected _ | Subdividing _ | Subdivided _ -> fail "the original did not end Conflicted");
+  check int "the refused candidate stays queued" 1 (io (fun () -> List.length (pending_rows fixture.keepers_dir)));
+  drive_until fixture settled |> assert_settled;
+  check bool "the replacement is judged against the Memory that refused the first answer" true
+    (List.mem [] !judged);
+  check (list string) "the candidate enters Memory from the second answer" ["Durable A"]
+    (io (fun () -> claims fixture.keepers_dir));
+  check int "the second answer ACKs the candidate" 0 (io (fun () -> List.length (pending_rows fixture.keepers_dir))))
+
 let latest_execution fixture capture=io (fun () ->
   let exact=Capture.request capture |> get in
   let schema=match exact.Lane_addon_exact.schema with Some schema -> schema
@@ -1702,6 +1759,8 @@ let () =
   test_case "a pass with no new input after the commit is Idle" `Quick test_pass_without_new_input_after_commit_is_idle;
   test_case "unchanged semantic deferral preserves the same original" `Quick test_unchanged_deferred_does_not_remint;
   test_case "new tail rejudges the complete old sparse gap against current Memory" `Quick test_gap_and_new_tail_are_rejudged_together;
+  test_case "an absent destination ends the original once and its candidate is judged again" `Quick
+    test_absent_destination_ends_the_original_and_is_judged_again;
   test_case "original host answer recovers locally while Addon is Off" `Quick test_retained_host_terminal_commits_off;
   test_case "actual output limit followed by HTTP 413 retains mixed diagnosis" `Quick
     test_actual_output_limit_then_capacity_keeps_both_causes;

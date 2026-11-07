@@ -4,6 +4,7 @@ module Current = Keeper_memory_os_current
 module Owner = Lane_addon_tool_request_owner
 module Progress = Lane_addon_request_progress
 module Exact = Lane_addon_exact
+module Commit = Keeper_librarian_admission_commit
 let ( let* ) = Result.bind
 let ( let+ ) result f = Result.map f result
 let require condition detail = if condition then Ok () else Error detail
@@ -409,16 +410,27 @@ let terminal_witness ~store ~owner ~inventory ~committed reference =
          match proposal with
          | Keeper_librarian_runtime.Deferred -> Ok (capture,"semantic_deferred",authority)
          | Accepted accepted ->
-           let* commit=match Progress.phase record.progress with
-             | Progress.Finished commit -> Ok commit
-             | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
-             | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ ->
-               Error "Accepted original work has not completed its Memory transaction" in
-           let* ()=require (accepted.explicit_candidate_ids<>[] &&
-             List.for_all (fun id -> List.mem id committed) accepted.explicit_candidate_ids)
-             "Finished original admission has no exact committed candidate proof" in
-           Ok (capture,"committed_frontier",`Assoc ["answer",authority;"commit",commit_json commit;
-             "accepted_candidates",`List (List.map candidate_json accepted.explicit_candidate_ids)])) in
+           (match Progress.phase record.progress with
+            | Progress.Finished commit ->
+              let* ()=require (accepted.explicit_candidate_ids<>[] &&
+                List.for_all (fun id -> List.mem id committed) accepted.explicit_candidate_ids)
+                "Finished original admission has no exact committed candidate proof" in
+              Ok (capture,"committed_frontier",`Assoc ["answer",authority;"commit",commit_json commit;
+                "accepted_candidates",`List (List.map candidate_json accepted.explicit_candidate_ids)])
+            | Conflicted (commit,conflict) ->
+              (* The locked plan refused a destination of this answer before any
+                 effect (#46372), so none of its candidates entered Memory and
+                 every one stays a gap the replacement judges again. *)
+              let* memory_id=Commit.destination_absent_of_json record conflict in
+              let* ()=require (List.mem memory_id accepted.required_memory_ids)
+                "Conflicted original admission names a Memory its answer does not write into" in
+              let* ()=require (not (List.exists (fun id -> List.mem id committed) accepted.explicit_candidate_ids))
+                "Conflicted original admission has a committed candidate proof" in
+              Ok (capture,"destination_absent_frontier",`Assoc ["answer",authority;"commit",commit_json commit;
+                "conflict",conflict])
+            | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+            | Rejected _ | Subdividing _ | Subdivided _ ->
+              Error "Accepted original work has not completed its Memory transaction")) in
   let evidence=`Assoc ["kind",`String kind;
     "capture_digest",`String (Lane_addon_store.digest (Yojson.Safe.to_string (ordered (Capture.to_json capture))));
     "original_revision",optional (fun n -> `Int n) (Capture.expected_revision capture);

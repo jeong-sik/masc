@@ -120,8 +120,8 @@ let assign_tail blocks ~from_atom ~delta =
   in
   match after with
   | [] -> blocks
-  | first :: _ ->
-    let last = List.nth after (List.length after - 1) in
+  | first :: rest ->
+    let last = List.fold_left (fun _ b -> b) first rest in
     before
     @ [ { block_first_atom = first.block_first_atom
         ; block_end_atom = last.block_end_atom
@@ -142,8 +142,8 @@ let merge_reformed blocks ~changed_from ~measured_end ~delta =
   let before, after = List.partition (fun b -> b.block_end_atom <= changed_from) blocks in
   match after with
   | [] -> blocks, false
-  | first :: _ ->
-    let last = List.nth after (List.length after - 1) in
+  | first :: rest ->
+    let last = List.fold_left (fun _ b -> b) first rest in
     (* Blocks past [measured_end] are the appended atoms [delta] measures. *)
     let reformed = List.filter (fun b -> b.block_first_atom < measured_end) after in
     let weighed =

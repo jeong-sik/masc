@@ -808,7 +808,35 @@ let parse_openai_sse_chunk ~streaming_reasoning data_str : openai_sse_parse_resu
                  openai_choice_provider_error ~raw:data_str choice
                | Some (`List (choice :: _)) ->
                  let delta = choice |> member "delta" in
-                 let delta_content = delta |> member "content" |> to_string_option in
+                 (* Streaming answers from chunk-list models (mistral-large-4,
+                    recorded live 2026-11-06, #49352) carry the whole answer
+                    inside delta.content as chunk objects: thinking fragments
+                    under thinking[].text and the visible text in text chunks,
+                    with no plain-string delta at all. Split by member shape,
+                    the same structural read the non-streaming parser uses. *)
+                 let delta_content, content_chunk_thinking =
+                   match delta |> member "content" with
+                   | `String text -> (Some text, None)
+                   | `List blocks ->
+                     let text =
+                       blocks
+                       |> List.filter_map Backend_openai_parse.text_of_openai_content_block
+                       |> String.concat ""
+                     in
+                     let thinking =
+                       Backend_openai_parse.chunk_list_thinking_of_openai_content
+                         (`List blocks)
+                     in
+                     let visible =
+                       if Api_common.string_is_blank text then None else Some text
+                     in
+                     let trace =
+                       if Api_common.string_is_blank thinking then None else Some thinking
+                     in
+                     (visible, trace)
+                   | `Assoc _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null ->
+                     (None, None)
+                 in
                  let delta_refusal = Stop_reason_wire.refusal_of_json (delta |> member "refusal") in
                  let declared_delta_field field =
                    match delta |> member field |> to_string_option with
@@ -881,6 +909,16 @@ let parse_openai_sse_chunk ~streaming_reasoning data_str : openai_sse_parse_resu
                     Openai_undeclared_reasoning_member
                       { declared; member; raw = data_str }
                   | Reasoning_delta_read (delta_reasoning, delta_reasoning_details) ->
+                    (* Chunk-list thinking is its own named source beside the
+                       declared delta field: the two never meet on one wire
+                       today, and if they ever do both texts belong to the
+                       trace, declared field first. *)
+                    let delta_reasoning =
+                      match content_chunk_thinking with
+                      | None -> delta_reasoning
+                      | Some thinking ->
+                        Some (Option.value delta_reasoning ~default:"" ^ thinking)
+                    in
                     (match delta_refusal, parse_openai_delta_tool_calls delta with
                      | Error (), _ ->
                        openai_parse_failed ~raw:data_str "malformed_openai_sse_payload:refusal_not_string"
@@ -1796,7 +1834,7 @@ let%test "minimax-m3 declares inline reasoning without losing its reasoning stre
     let inline =
       match caps.Capabilities.content_inline_reasoning with
       | Capabilities.Think_tags | Capabilities.Think_tags_with_chat_replay -> true
-      | Capabilities.No_content_inline_reasoning -> false
+      | Capabilities.No_content_inline_reasoning | Capabilities.Content_chunks -> false
     in
     let stream_intact =
       match (Reasoning_dialect.of_capabilities caps).streaming with

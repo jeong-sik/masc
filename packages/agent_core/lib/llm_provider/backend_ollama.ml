@@ -456,7 +456,7 @@ let parse_ollama_response ?(content_inline_reasoning = Capabilities.No_content_i
       ; content =
           thinking_blocks
           @ (match content_inline_reasoning with
-             | Capabilities.No_content_inline_reasoning ->
+             | Capabilities.No_content_inline_reasoning | Capabilities.Content_chunks ->
                  if Api_common.string_is_blank text_content then [] else [ Text text_content ]
              | Capabilities.Think_tags | Capabilities.Think_tags_with_chat_replay ->
                  let split = Inline_reasoning_split.create () in

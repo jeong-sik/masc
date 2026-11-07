@@ -130,7 +130,8 @@ let base_of_capabilities (caps : Capabilities.capabilities) =
     | Split_reasoning_fields -> Reasoning_split
   in
   let content_carrier = match caps.content_inline_reasoning with
-    | Think_tags_with_chat_replay -> Reasoning_replay_contract.Inline_chat_content
+    | Think_tags_with_chat_replay | Content_chunks ->
+      Reasoning_replay_contract.Inline_chat_content
     | No_content_inline_reasoning | Think_tags -> Reasoning_replay_contract.Canonical_blocks in
   let default = { default with sampling_policy = sampling_policy_of_capabilities caps;content_carrier } in
   match caps.thinking_control_format with

@@ -101,7 +101,8 @@ let reasoning_content_blocks_of_message_result msg =
         | None -> Ok []))
 ;;
 
-let text_of_openai_content_block = function
+let text_of_openai_content_block (block : Yojson.Safe.t) : string option =
+  match block with
   | `String s -> Some s
   | `Assoc fields ->
     (match List.assoc_opt "text" fields with
@@ -117,6 +118,44 @@ let text_content_of_openai_content = function
   | `List blocks ->
     blocks |> List.filter_map text_of_openai_content_block |> String.concat ""
   | `Assoc _ | `Int _ | `Intlit _ | `Float _ | `Bool _ -> ""
+;;
+
+(* Mistral Large 4 (and mistral-small at effort "high", #38564) answer with a
+   list-shaped message.content of chunk objects. A ThinkChunk carries its text
+   inside a "thinking" array of {type:text} items and has no top-level "text"
+   member, so [text_of_openai_content_block] reads nothing from it -- the
+   visible answer survives alone. The chunk's own text is the reasoning trace.
+   Reading by member shape, not by the "type" string, mirrors how the text
+   block reader works and keeps this a structural parse. *)
+let thinking_text_of_openai_content_block (block : Yojson.Safe.t) : string option =
+  match block with
+  | `Assoc fields ->
+    (match List.assoc_opt "thinking" fields with
+     | Some (`List items) ->
+       let text =
+         items
+         |> List.filter_map
+              (fun (item : Yojson.Safe.t) ->
+                 match item with
+                 | `Assoc item_fields ->
+                   (match List.assoc_opt "text" item_fields with
+                    | Some (`String s) -> Some s
+                    | Some (`Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
+                    | None -> None)
+                 | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None)
+         |> String.concat ""
+       in
+       if Api_common.string_is_blank text then None else Some text
+     | Some (`Assoc _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) | None
+       -> None)
+  | `String _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None
+;;
+
+let chunk_list_thinking_of_openai_content (content : Yojson.Safe.t) : string =
+  match content with
+  | `List blocks ->
+    blocks |> List.filter_map thinking_text_of_openai_content_block |> String.concat ""
+  | `String _ | `Assoc _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> ""
 ;;
 
 let parse_tool_call_string_field ~tool_index ~field json =
@@ -408,6 +447,16 @@ let parse_openai_response_result_json_raw
     let* thinking_blocks =
       reasoning_content_blocks_of_message_result msg |> Result.map_error unreadable_response
     in
+    (* Reasoning that arrived as ThinkChunk objects inside message.content
+       joins the same [Thinking] channel as reasoning_content: one trace, one
+       type. It reads regardless of the row's inline-reasoning declaration
+       because the chunk shape is the wire's own statement, not a policy. *)
+    let thinking_blocks =
+      let chunk_thinking = chunk_list_thinking_of_openai_content (msg |> member "content") in
+      if Api_common.string_is_blank chunk_thinking then thinking_blocks
+      else
+        thinking_blocks @ [ Thinking { signature = None; content = chunk_thinking } ]
+    in
     (* Models declaring [Think_tags] (e.g. GLM served through ollama-cloud,
        Qwen3 chat-template runtimes) embed part of their reasoning inside
        [message.content] itself. Feed the complete string through the same
@@ -424,7 +473,7 @@ let parse_openai_response_result_json_raw
         List.map (function
           | Inline_reasoning_split.Text text -> Text text
           | Inline_reasoning_split.Reasoning content -> Thinking { signature = None; content }) pieces
-      | Capabilities.No_content_inline_reasoning ->
+      | Capabilities.No_content_inline_reasoning | Capabilities.Content_chunks ->
         if Api_common.string_is_blank text_content then [] else [ Text text_content ]
     in
     let content = thinking_blocks @ inline_content_blocks @ tool_blocks in
@@ -434,8 +483,11 @@ let parse_openai_response_result_json_raw
         Inline_content_replay.make ~content ~raw_content
           ~block_indices:(List.mapi (fun index _ -> List.length thinking_blocks + index) inline_content_blocks)
         |> Result.map Option.some |> Result.map_error unreadable_response
-      | (Capabilities.No_content_inline_reasoning | Capabilities.Think_tags
-        | Capabilities.Think_tags_with_chat_replay), _ -> Ok None
+      | ( Capabilities.No_content_inline_reasoning
+        | Capabilities.Think_tags
+        | Capabilities.Think_tags_with_chat_replay
+        | Capabilities.Content_chunks )
+        , _ -> Ok None
     in
     let telemetry = match telemetry_of_openai_json json, inline_content_replay with
       | None, None -> None

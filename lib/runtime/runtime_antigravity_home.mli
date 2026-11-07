@@ -147,7 +147,7 @@ val prepare_native_tools
     credentials. A refusal leaves the published settings unchanged.
     Every posture names the masc tool schema folder and denies the config
     folder and the token file by exact path (RFC-0490 2.2). Until L3,
-    [Native_none] also keeps [read_file(*)], so its schema allow remains
+    [Native_none] also keeps the all-files [read_file] deny, so its schema allow remains
     shadowed and no read becomes an Ask. Its workspace root denies remain
     for L3, and a root that holds the HOME is refused.
     Read posture denies commands and writes; full permits sandboxed effects.

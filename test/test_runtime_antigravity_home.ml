@@ -650,8 +650,9 @@ let test_native_permissions_match_posture_and_workspace () =
   let workspace = Filename.concat runtime_root "workspace" in
   Unix.mkdir workspace 0o700;
   let paths = Runtime_antigravity_home.For_testing.paths home in
-  (* RFC-0490 2.2: every posture reads the lazily loaded masc tools' schema
-     folder and denies the bridge bearer's folder and the token by name. *)
+  (* RFC-0490 2.2: every posture names the lazily loaded masc tools' schema
+     folder and the two secret paths. Native_none keeps its all-files deny
+     until L3, so it cannot read that folder before the hook. *)
   let schema_allow =
     "read_file(" ^ Filename.concat (Filename.dirname paths.settings_path) "mcp/masc" ^ ")" in
   let secret_denies =

@@ -145,9 +145,11 @@ let host_result_text_bytes ~content = function
          | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _
          | Image _ | Document _ | Audio _ -> sum) 0 blocks)
 
-(* Whether [text] is shorter in the receipt as its marker. The marker is planned
-   without hashing, and the body is counted before JSON escaping, which only
-   lengthens it: a body this keeps inline was never longer than its marker. *)
+(* Whether [text] goes as its marker: the marker's serialized length against the
+   body's raw length, with the marker planned without hashing. JSON escaping only
+   lengthens the body, so a replaced body never made the receipt longer. A body
+   kept inline may still serialize longer than its marker would, because its
+   escaping is not counted; before escaping it is no longer than one marker. *)
 let host_marker_is_shorter text =
   match Tool_output.make_artifact_ref ~sha256:planned_sha256 ~bytes:(String.length text)
           ~preview:(Tool_blob_store.make_preview text) ~mime:host_text_mime with

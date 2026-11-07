@@ -344,8 +344,10 @@ let refusal_name : Authz_state.refusal -> string = function
   | Authz_state.Canceller_is_not_an_admin _ -> "Canceller_is_not_an_admin"
   | Authz_state.Cancel_not_held _ -> "Cancel_not_held"
   | Authz_state.Cancel_subject_differs _ -> "Cancel_subject_differs"
-  | Authz_state.Canceller_issued_the_invitation _ -> "Canceller_issued_the_invitation"
+  | Authz_state.Canceller_owns_the_subject _ -> "Canceller_owns_the_subject"
   | Authz_state.Cancel_owner_unknown _ -> "Cancel_owner_unknown"
+  | Authz_state.Registration_unreadable _ -> "Registration_unreadable"
+  | Authz_state.Registration _ -> "Registration"
 ;;
 
 let error_name : Z.error -> string = function
@@ -1263,7 +1265,7 @@ let an_eligible_admin_lifts_a_block_and_a_log_cut_back_holds_it_again () =
     check_gate "after the failed revocation" "pending" zone invitation;
     check_error
       "the owner of the invitation"
-      "Refused Canceller_issued_the_invitation"
+      "Refused Canceller_owns_the_subject"
       zone
       (cancel_draft ~by:first_admin ~aborted ~subject:invitation ~at_ms:(at_ms + 7));
     check_gate "after the refused cancel" "pending" zone invitation;

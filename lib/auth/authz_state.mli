@@ -54,6 +54,7 @@ type t = private
   { mode : Authz_mode_state.t
   ; invites : Authz_invite_state.t  (** Plan B3c-1. *)
   ; principals : Authz_principal_state.t  (** Plan B3c-2. *)
+  ; registrations : Authz_registration_state.t  (** Plan C2d. *)
   ; revocation_pending : held list
         (** The reductions whose intent the external store gave up (design
             8.3). No record adds one: the writer zone does, from the store
@@ -138,15 +139,18 @@ type refusal =
       ; named : Authz_records.Subject.t  (** The subject the cancel names. *)
       ; held : Authz_records.Subject.t  (** The subject of the held reduction. *)
       }
-  | Canceller_issued_the_invitation of Authz_records.Subject.t
-      (** The canceller issued the invitation that is the subject, which makes
-          them its owner, or the one the principal that is the subject joined
-          through, which makes them its original approver (design 4.1). *)
+  | Canceller_owns_the_subject of Authz_records.Subject.t
+      (** The canceller issued the invitation or wrote the registration that is
+          the subject, which makes them its owner, or issued the invitation the
+          principal that is the subject joined through, which makes them its
+          original approver (design 4.1). *)
   | Cancel_owner_unknown of Authz_records.Subject.t
-      (** No invitation stands behind the subject, so this layer cannot tell
-          its owner or its approver, and no Admin is known to be eligible. A
-          block of a grant, a credential, a runtime, or a service stays until
-          the layer that reads them. *)
+      (** No invitation or registration stands behind the subject, so this
+          layer cannot tell its owner or its approver, and no Admin is known to
+          be eligible. A block of a grant, a credential, a runtime, or a service
+          stays until the layer that reads them. *)
+  | Registration_unreadable of Authz_registration_event.error
+  | Registration of Authz_registration_state.refusal
 
 val refusal_to_string : refusal -> string
 
@@ -162,7 +166,10 @@ val refusal_to_string : refusal -> string
     of an Admin assignment is a [Revoke] on its principal, a disable a
     [Disable], and a deletion a [Delete]. An enable has none: a log restored
     from before it leaves the principal disabled. A cancel has none either: a
-    log restored from before it brings the block back. *)
+    log restored from before it brings the block back. A registration has
+    none, as a log restored from before it keeps the identity out, and its
+    removal is a [Revoke] of the registration, so the entry does not come back
+    open (plan C2d). *)
 type applied =
   { state : t
   ; high_water : Authz_external_store.Change.t option

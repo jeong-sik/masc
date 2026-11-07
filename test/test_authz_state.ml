@@ -62,7 +62,8 @@ let other_kinds =
       && kind <> K.Admission
       && kind <> K.Admin_assignment
       && kind <> K.Principal
-      && kind <> K.Revocation_cancel)
+      && kind <> K.Revocation_cancel
+      && kind <> K.Registration)
     K.all
 
 let mode = Alcotest.testable (fun fmt m -> Format.pp_print_string fmt (Mode.to_string m)) Mode.equal
@@ -935,7 +936,7 @@ let test_the_issuer_behind_the_subject_does_not_cancel () =
   let invite_held = held ~aborted:(String.make 64 'b') (Authz_records.Subject.Invite fourth_invite) in
   let bob_held = held ~aborted:(String.make 64 'c') (principal_subject bob) in
   let state = S.hold_revocations (three_admins ()) [ carol_held; invite_held ] in
-  let refused subject = S.refusal_to_string (S.Canceller_issued_the_invitation subject) in
+  let refused subject = S.refusal_to_string (S.Canceller_owns_the_subject subject) in
   Alcotest.(check string)
     "user approved carol"
     (refused (principal_subject carol))
@@ -1044,6 +1045,127 @@ let test_what_a_record_names () =
     (hex_list (S.closed_by (record_by ~author:(human bob) K.Revocation_cancel (body_of_json (`Assoc [])))))
 ;;
 
+(* ---- the allowlist ---- *)
+
+module Reg = Authz_registration_event
+module Regs = Authz_registration_state
+
+let first_registration = id_of_string Authz_types.Registration_id.of_string "registration-1"
+let registration_subject = Authz_records.Subject.Registration first_registration
+let dana_identity = identity_of "444"
+
+let registration_record ~by event =
+  match Reg.to_body event with
+  | Error _ -> Alcotest.fail "fixture registration refused"
+  | Ok body -> record_by ~author:(human by) K.Registration body
+;;
+
+let registered_by ~by identity =
+  registration_record ~by (Reg.Registered { registration_id = first_registration; identity })
+;;
+
+let removed_by ~by = registration_record ~by (Reg.Removed { registration_id = first_registration })
+
+let intent_word = function
+  | Ok { S.high_water = None; state = (_ : S.t) } -> "no intent"
+  | Ok { S.high_water = Some change; state = (_ : S.t) } -> Authz_external_store.Change.to_string change
+  | Error refusal -> S.refusal_to_string refusal
+;;
+
+let open_word state identity =
+  match Regs.find_open state.S.registrations identity with
+  | None -> "none"
+  | Some (id, { Regs.registrar; _ }) ->
+    Authz_types.Registration_id.to_string id ^ " by " ^ Authz_types.User_id.to_string registrar
+;;
+
+(* A registration raises no epoch and has no intent. Its removal is a [Revoke]
+   of the registration, so a log restored from before it disagrees with the
+   store (plan C2d). Any Admin removes it. *)
+let test_an_admin_registers_and_removes () =
+  let state = three_admins () in
+  Alcotest.(check string)
+    "a registration"
+    "no intent"
+    (intent_word (S.apply state (registered_by ~by:user dana_identity)));
+  let state = step_ok state (registered_by ~by:user dana_identity) in
+  Alcotest.(check string) "open" "registration-1 by user-1" (open_word state dana_identity);
+  Alcotest.(check string)
+    "a removal by another Admin"
+    "revoke of registration:registration-1"
+    (intent_word (S.apply state (removed_by ~by:bob)));
+  let state = step_ok state (removed_by ~by:bob) in
+  Alcotest.(check string) "removed" "none" (open_word state dana_identity)
+;;
+
+(* The state says who is an Admin and which identities are bound. The identity
+   of a deleted principal is free again, so an Admin registers it. *)
+let test_a_registration_that_is_refused () =
+  let state = three_admins () in
+  let stranger = id_of_string Authz_types.User_id.of_string "user-9" in
+  Alcotest.(check string)
+    "a principal that never joined"
+    (S.refusal_to_string
+       (S.Registration (Regs.Author_is_not_an_admin (Authz_types.Principal.Human stranger))))
+    (intent_word (S.apply state (registered_by ~by:stranger dana_identity)));
+  Alcotest.(check string)
+    "the identity of user"
+    (S.refusal_to_string (S.Registration Regs.Identity_bound))
+    (intent_word (S.apply state (registered_by ~by:bob alice_identity)));
+  Alcotest.(check string)
+    "a removal of nothing"
+    (S.refusal_to_string (S.Registration (Regs.Not_registered first_registration)))
+    (intent_word (S.apply state (removed_by ~by:bob)));
+  Alcotest.(check string)
+    "an unreadable body"
+    "Registration_unreadable"
+    (match S.apply state (record_by ~author:(human bob) K.Registration (body_of_json (`Assoc []))) with
+     | Error (S.Registration_unreadable _) -> "Registration_unreadable"
+     | other -> step_label (Result.map (fun { S.state; high_water = _ } -> state) other));
+  let deleted =
+    step_ok state (principal_record ~by:user (Pe.Deleted { user_id = bob; identity = identity_of "222" }))
+  in
+  Alcotest.(check string)
+    "the identity of a deleted principal"
+    "no intent"
+    (intent_word (S.apply deleted (registered_by ~by:user (identity_of "222"))))
+;;
+
+let test_a_registration_by_mode () =
+  (match S.step S.empty (registered_by ~by:user dana_identity) with
+   | Error (S.Before_bootstrap K.Registration) -> ()
+   | other -> Alcotest.failf "before the bootstrap: %s" (step_label other));
+  match S.step (step_ok (three_admins ()) (mode_record M.Off workspace)) (registered_by ~by:user dana_identity) with
+  | Error (S.Accounts_off K.Registration) -> ()
+  | other -> Alcotest.failf "with the accounts off: %s" (step_label other)
+;;
+
+(* A removal whose intent the store gave up blocks the registration (design
+   8.3). The Admin who wrote the registration owns it, so another Admin lifts
+   the block, and the registration stays open. *)
+let test_the_registrar_does_not_cancel_the_block_of_a_removal () =
+  let state = step_ok (three_admins ()) (registered_by ~by:user dana_identity) in
+  let removal_held = held registration_subject in
+  let state = S.hold_revocations state [ removal_held ] in
+  Alcotest.(check string) "blocked" "pending" (revocation_word state registration_subject);
+  Alcotest.(check string)
+    "user wrote it"
+    (S.refusal_to_string (S.Canceller_owns_the_subject registration_subject))
+    (cancel_word state (cancel_record ~author:(human user) removal_held));
+  Alcotest.(check string)
+    "bob lifts it"
+    "lifted"
+    (cancel_word state (cancel_record ~author:(human bob) removal_held));
+  let lifted = step_ok state (cancel_record ~author:(human bob) removal_held) in
+  Alcotest.(check string) "still open" "registration-1 by user-1" (open_word lifted dana_identity);
+  Alcotest.(check string)
+    "a block of a registration never written"
+    (S.refusal_to_string (S.Cancel_owner_unknown registration_subject))
+    (cancel_word
+       (S.hold_revocations (three_admins ()) [ removal_held ])
+       (cancel_record ~author:(human bob) removal_held))
+;;
+
 let () =
   Alcotest.run
     "authz_state"
@@ -1092,6 +1214,13 @@ let () =
         ; Alcotest.test_case "refused" `Quick test_a_cancel_that_is_refused
         ; Alcotest.test_case "by mode" `Quick test_a_cancel_by_mode
         ; Alcotest.test_case "what a record names" `Quick test_what_a_record_names
+        ] )
+    ; ( "allowlist"
+      , [ Alcotest.test_case "register and remove" `Quick test_an_admin_registers_and_removes
+        ; Alcotest.test_case "refused" `Quick test_a_registration_that_is_refused
+        ; Alcotest.test_case "by mode" `Quick test_a_registration_by_mode
+        ; Alcotest.test_case "the registrar behind a block" `Quick
+            test_the_registrar_does_not_cancel_the_block_of_a_removal
         ] )
     ; ( "principal records"
       , [ Alcotest.test_case "disable, enable, delete" `Quick test_a_principal_record

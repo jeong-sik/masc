@@ -91,9 +91,9 @@ let test_denylist_names () =
     (List.assoc_opt "HOME" env)
 
 let test_denylisted_predicate () =
-  List.iter (fun n -> check bool n true (Exec_shim.denylisted_env_name n))
+  List.iter (fun n -> check bool n true (Exec_ssh_protocol.denylisted_env_name n))
     [ "PATH"; "HOME"; "LD_PRELOAD"; "LD_LIBRARY_PATH"; "BASH_ENV"; "ENV"; "DYLD_X" ];
-  List.iter (fun n -> check bool n false (Exec_shim.denylisted_env_name n))
+  List.iter (fun n -> check bool n false (Exec_ssh_protocol.denylisted_env_name n))
     [ "FOO"; "DYLD"; "path"; "HOMEBREW_PREFIX"; "ENVIRONMENT" ]
 
 (* {1 kill policy} *)

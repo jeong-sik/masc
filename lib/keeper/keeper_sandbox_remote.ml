@@ -489,15 +489,10 @@ let env_name entry =
     Ok (String.sub entry 0 i, String.sub entry (i + 1) (String.length entry - i - 1))
 ;;
 
-(* The shim re-applies this denylist and remains the authority. Dropping the
-   same names here prevents values which can influence dynamic linking or
-   command lookup from crossing the wire in the first place. *)
-let wire_denied_env_name name =
-  List.mem name
-    [ "PATH"; "HOME"; "LD_PRELOAD"; "LD_LIBRARY_PATH"; "BASH_ENV"; "ENV" ]
-  || String.starts_with ~prefix:"DYLD_" name
-;;
-
+(* The shim applies [Exec_ssh_protocol.denylisted_env_name] again and remains
+   the authority. Dropping the same names here prevents values which can
+   influence dynamic linking or command lookup from crossing the wire in the
+   first place. *)
 let wire_env t env =
   let rec loop acc = function
     | [] -> Ok (List.rev acc)
@@ -507,7 +502,7 @@ let wire_env t env =
         |> Result.map_error (fun detail ->
           Printf.sprintf "%s: %s" (code t "env_invalid") detail)
       in
-      if wire_denied_env_name name
+      if Exec_ssh_protocol.denylisted_env_name name
       then loop acc rest
       else if List.mem name t.env_allowlist
       then loop ((name, value) :: acc) rest

@@ -367,9 +367,6 @@ val agent_rl_key_of_request : Httpun.Request.t -> string option
     a structured auth error via [respond_auth_error].  All combinators
     apply per-agent rate limiting after successful auth. *)
 
-val is_public_read_path : String.t -> bool
-(** [true] when [path] is on the public-read allowlist. *)
-
 val authorize_read_request :
   base_path:string -> Httpun.Request.t -> (unit, Masc_domain.masc_error) result
 (** Check read-tier auth. *)

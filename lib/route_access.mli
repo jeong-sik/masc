@@ -41,9 +41,7 @@ type self_authenticated_reason =
 
 (** What a [Public_read] route asks for when strict auth is on. *)
 type strict_reading =
-  | Credential_when_strict
-      (** A read credential. Strict auth still opens such a route when its
-          path is on the public-read list ([Server_auth.is_public_read_path]). *)
+  | Credential_when_strict  (** A read credential, as [Read_auth] asks for. *)
   | Open_when_strict  (** Nothing: the route stays open, as on the default configuration. *)
 
 type t =

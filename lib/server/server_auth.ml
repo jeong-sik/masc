@@ -1029,57 +1029,6 @@ let check_agent_rate_limit ~quota request reqd =
         Error ()
       end
 
-let is_public_published_artifact_read_path path =
-  let raw_path =
-    match String.index_opt path '?' with
-    | Some i -> String.sub path 0 i
-    | None -> path
-  in
-  let prefix = "/api/v1/published-artifacts/" in
-  let prefix_len = String.length prefix in
-  String.length raw_path > prefix_len
-  && String.starts_with ~prefix raw_path
-  && Published_artifact.valid_id
-       (String.sub raw_path prefix_len (String.length raw_path - prefix_len))
-
-(** Public read access - no auth required (dashboard, health) *)
-let is_public_read_path path =
-  String.equal path "/health"
-  (* Issue #8403: derive probe whitelist from Server_health_paths SSOT
-     so adding/renaming a probe automatically refreshes the auth filter
-     instead of leaking an auth-required probe through. *)
-  || Server_health_paths.is_public path
-  || String.equal path "/api/v1/gate/health"
-  || String.equal path "/api/v1/gate/status"
-  || String.equal path "/api/v1/gate/connectors"
-  || String.equal path "/api/v1/gate/connector/status"
-  || String.equal path "/api/v1/gate/events"
-  || String.equal path "/"
-  || String.equal path "/dashboard"
-  || String.equal path "/dashboard/"
-  || String.equal path "/favicon.ico"
-  || String.equal path "/favicon.svg"
-  || String.equal path play_page_path
-  (* What an agent handed the link reads to join: addresses and tool schemas,
-     no token and no workspace state (RFC play-link-for-the-shared-machine §2.7). *)
-  || String.equal path Play_invite.agent_guide_path
-  || String.starts_with ~prefix:"/dashboard/" path
-  (* The cartridge inventory the TUI load menu reads before it can pick a
-     game (RFC-0439 §3.7): file names under <.masc>/msx/carts, not workspace
-     state. Loading a game stays a write, gated like the MSX tools. *)
-  || String.equal path "/api/v1/msx/carts"
-  || String.starts_with ~prefix:"/static/" path
-  || String.starts_with ~prefix:"/graphiql/" path
-  (* Voice TTS audio clips: unguessable token filenames act as the
-     capability, and the browser <audio> element cannot send a bearer
-     token in its request headers. *)
-  || String.starts_with ~prefix:Masc_network_defaults.voice_audio_path_prefix
-       path
-  (* Capability-addressed published artifact links: 128-bit random
-     artifact-<32hex> IDs allow external read-only sharing without
-     exposing the catalog listing (/api/v1/published-artifacts). *)
-  || is_public_published_artifact_read_path path
-
 let resolve_agent_name_for_auth ~base_path request ~token :
     (string option, Masc_domain.masc_error) result =
   resolve_agent_name_for_auth_raw ~base_path request ~token
@@ -1333,9 +1282,7 @@ let rec with_public_read handler request reqd =
   match ready_server_state () with
   | None -> respond_not_initialized request reqd
   | Some state ->
-      let strict = http_auth_strict_enabled () in
-      let path = Http_server_eio.Request.path request in
-      if strict && not (is_public_read_path path) then
+      if http_auth_strict_enabled () then
         with_read_auth handler request reqd
       else
         with_read_workspace_precondition state handler request reqd

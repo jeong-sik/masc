@@ -22,7 +22,29 @@ val make
   -> redirect_uri:string
   -> (t, error) result
 
+type loopback_error =
+  | Loopback_client_id_empty
+  | Loopback_client_secret_empty
+  | Port_out_of_range  (** Not in 1 to 65535. *)
+  | Path_not_plain  (** Not [/] and then letters, digits, [-], [.], [_], [~] and [/]. *)
+
+(** A client whose redirect is [http://127.0.0.1:<port><path>], for the
+    localhost preview of the plan (its preview scope) and nothing else. The
+    host is not an argument, so the provider can only send the browser back
+    to this computer. GitHub takes such a loopback redirect on any port
+    (its documentation, "Loopback redirect urls"). Chromium keeps a
+    [__Host-] cookie on [http://127.0.0.1] (measured 2026-11-08, Chromium
+    148); other browsers were not checked. The server builds its clients
+    with {!of_environment}, which keeps the [https] rule. *)
+val loopback
+  :  client_id:string
+  -> client_secret:string
+  -> port:int
+  -> path:string
+  -> (t, loopback_error) result
+
 val error_to_string : error -> string
+val loopback_error_to_string : loopback_error -> string
 
 type environment_error =
   | Secret_variable_unset of string

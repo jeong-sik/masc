@@ -36,8 +36,8 @@ Vibe 제품 표면을 감싸는 official-client lane 이 필요하다. 이 RFC �
 
 - lane 종류는 **command transport**(공식 CLI 감싸기)다. 새 HTTP codec 을
   만들지 않는다. 단 "masc 는 프로세스 조종·관측만 한다"는 초판 문장은 옳지
-  않았다: 참조 구현 claude_code lane 자체가 stream_event 15-생성자 코덱,
-  MCP 도구 브리지, resume 세션을 소유한다. 소유 경계는 같은 선에 선다.
+  않았다: 참조 구현 claude_code lane 자체가 stream_event 코덱, MCP 도구
+  브리지, resume 세션을 소유한다. 소유 경계는 같은 선에 선다.
 - **masc 가 소유하는 계약** — programmatic 표면의 소비 계약(work-with-cli.md
   Programmatic mode):
   - `--output json`(종료 시 메시지 배열) / `--output streaming`(메시지별 한 줄)
@@ -47,6 +47,10 @@ Vibe 제품 표면을 감싸는 official-client lane 이 필요하다. 이 RFC �
   - exit code 0-3 의 typed 분류(0 완료 / 1 시작 실패 / 2 모델 API·런타임
     실패 / 3 한도·중단·거절).
   - 세션 재개: `-p --continue`·`-p --resume SESSION_ID`(문서화된 표면).
+  - 도구 브리지: claude_code lane 이 MCP 브리지를 소유하듯, Vibe 도
+    MCP servers 표면이 문서화돼 있다(vibe/code/cli/mcp-servers.md) — masc
+    도구를 CLI 의 MCP 설정으로 주입하는 브리지를 채택할지는 첫 층 실측
+    항목으로 미룬다(연구 문서 §6).
 - **착수 조건**: 무인 호출의 존재는 문서로 확정됐다(연구 §3). 구현 Task 의
   첫 층은 우리 계정에서의 **호출 계약 실측**이다 — `--output json`/`streaming`
   프레임과 `export.json` 을 fixture 로 촬영해 필드 수준 계약을 문서화한다.
@@ -62,8 +66,10 @@ Vibe 제품 표면을 감싸는 official-client lane 이 필요하다. 이 RFC �
 ### 2.2 자격 증명 — CLI 소유, masc 는 준비 상태만 관측
 
 - 브라우저 로그인 자격 증명의 저장·수명·갱신은 Vibe CLI 소유다. masc 는
-  `vibe /whoami`(또는 동등한 비출력 명령) 로 "로그인 됨/플랜"만 읽어 lane
-  준비 상태로 노출한다. 토큰 파일을 직접 읽거나 재발급하지 않는다.
+  로그인 됨/플랜 준비 상태만 읽어 lane 상태로 노출한다. 단 `vibe /whoami`
+  는 문서상 세션 내 slash 명령이다 — 무인 준비 검사에 쓸 argv 형태가
+  있는지는 첫 층 실측 항목이고(연구 §6), 실측된 형태로만 노출한다. 토큰
+  파일을 직접 읽거나 재발급하지 않는다.
 - 다계정: Vibe CLI 의 profile 기능(config.toml `[[providers]]`, api-keys
   페이지의 profile)이 있는지 실측 뒤 #49200 C2a 계열(계정 스택)에 합류
   여부를 정한다. 이 RFC 는 단일 계정만 약속한다.

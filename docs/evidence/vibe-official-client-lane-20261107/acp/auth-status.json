@@ -1,0 +1,7 @@
+{
+  "authenticated": true,
+  "authState": "os_keyring",
+  "signOutAvailable": true,
+  "customDomain": null,
+  "customDomainLocked": false
+}

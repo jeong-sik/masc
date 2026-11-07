@@ -873,7 +873,7 @@ let test_search_caps_the_answer_and_says_so () =
 let workspace_http_response ?(meth = "GET") ?(body = "") ?token ~router target =
   let output = Buffer.create 1024 in
   let connection = Httpun.Server_connection.create (fun reqd ->
-    Masc.Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd) in
+    Masc.Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) (Masc.Http_reqd.of_httpun reqd)) in
   let authorization = match token with None -> "" | Some token -> "Authorization: Bearer " ^ token ^ "\r\n" in
   let raw = Printf.sprintf "%s %s HTTP/1.0\r\nHost: localhost\r\n%sContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s"
       meth target authorization (String.length body) body in

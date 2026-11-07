@@ -41,5 +41,4 @@ let of_wire_exact = function
   | _ -> None
 ;;
 
-let of_core_error_wire wire = Agent_core_error { wire; timeout = None }
 let of_core_error ~wire ~timeout = Agent_core_error { wire; timeout }

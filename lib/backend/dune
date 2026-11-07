@@ -9,7 +9,6 @@
  (flags
   (:standard -w +4 -w +33 -w +37))
  (libraries
-  masc_types
   masc_core
   masc.masc_random_id
   masc.watched_work
@@ -17,9 +16,7 @@
   masc_process
   masc_compression
   masc_log
-  masc_eio_context
   time_compat
-  fs_compat
   yojson
   unix
   eio

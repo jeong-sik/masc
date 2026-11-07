@@ -543,29 +543,6 @@ let build_embed_request ~token ~channel_id ~content ?embeds () =
   let body = Yojson.Safe.to_string (`Assoc fields) in
   (url, headers, body)
 
-let build_edit_embed_request ~token ~channel_id ~message_id
-      ~content ?embeds () =
-  let url =
-    Printf.sprintf
-      "%s/channels/%s/messages/%s"
-      api_base (snowflake_to_string channel_id) (snowflake_to_string message_id)
-  in
-  let headers =
-    ("Content-Type", "application/json") :: auth_headers ~token
-  in
-  let fields =
-    match content with
-    | "" | " " -> []
-    | c -> [ ("content", `String c) ]
-  in
-  let fields =
-    match embeds with
-    | None | Some [] -> fields
-    | Some es -> ("embeds", `List (List.map embed_to_json es)) :: fields
-  in
-  let body = Yojson.Safe.to_string (`Assoc fields) in
-  (url, headers, body)
-
 let send_embed_message ?clock
     ?(timeout_sec = Masc_http_client.default_request_timeout_sec)
     ~token ~channel_id ~content ?embeds () =

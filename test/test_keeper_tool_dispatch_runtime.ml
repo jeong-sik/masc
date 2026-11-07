@@ -5553,24 +5553,18 @@ let test_frozen_surface_lists_and_searches_operator_only_tool () =
   in
   check bool "complete inventory list completes" true
     (list_result.disposition = Tool_result.Completed ());
-  let descriptor =
-    Yojson.Safe.Util.(
-      parse_json list_result.raw_output
-      |> member "descriptor_surface"
-      |> to_list)
-    |> List.find_opt (fun row ->
-      String.equal
-        "masc_keeper_up"
-        Yojson.Safe.Util.(row |> member "internal_name" |> to_string))
-    |> function
-    | Some row -> row
-    | None -> fail "operator-only Tool is absent from keeper_tools_list"
+  let inventory = parse_json list_result.raw_output in
+  let tool_names_filed_under availability =
+    match Yojson.Safe.Util.(inventory |> member "tools" |> member availability) with
+    | `Null -> []
+    | `List rows ->
+      List.map (fun row -> Yojson.Safe.Util.(row |> member "name" |> to_string)) rows
+    | _ -> fail ("keeper_tools_list filed " ^ availability ^ " as a non-list")
   in
-  check string "operator-only list availability"
-    "not_model_invocable"
-    Yojson.Safe.Util.(descriptor |> member "availability" |> to_string);
-  check int "operator-only list has no active names" 0
-    Yojson.Safe.Util.(descriptor |> member "active_names" |> to_list |> List.length);
+  check bool "operator-only Tool is listed under its availability" true
+    (List.mem "masc_keeper_up" (tool_names_filed_under "not_model_invocable"));
+  check bool "operator-only Tool is not listed as active" false
+    (List.mem "masc_keeper_up" (tool_names_filed_under "active"));
   let search_result =
     Masc.Keeper_tool_in_process_runtime.handle_capability_search
       ~capability_surface

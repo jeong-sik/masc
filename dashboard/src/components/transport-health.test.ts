@@ -18,6 +18,7 @@ import {
   sseTone,
   transportTone,
   grpcTone,
+  httpsTone,
   websocketTone,
   http2Tone,
   staleTone,
@@ -46,6 +47,21 @@ function sampleResponse(overrides?: Partial<Record<string, unknown>>) {
       accept_errors_total: 0,
       rate_limit_responses_total: 0,
       rate_limit_responses: [],
+      last_accept_unix: 1_775_000_000,
+      last_accept_age_seconds: 0,
+      last_error: null,
+    },
+    https_listener: {
+      status: 'listening',
+      port: 8938,
+      certificate: { source: 'self_signed', not_after: '2027-11-08T00:00:00Z' },
+      active_connections: 1,
+      accepted_total: 3,
+      alpn_h2_total: 2,
+      alpn_http1_total: 1,
+      alpn_none_total: 0,
+      handshake_failures_total: 0,
+      accept_errors_total: 0,
       last_accept_unix: 1_775_000_000,
       last_accept_age_seconds: 0,
       last_error: null,
@@ -209,6 +225,24 @@ describe('TransportHealthPanel', () => {
     expect(container.textContent).toContain('cached_surface')
     expect(container.textContent).toContain('cache fresh')
     expect(container.textContent).toContain('last ok 2026-04-15T10:00:00Z')
+  })
+
+  it('renders the HTTPS listener card from the payload', async () => {
+    const fetchTransportHealth = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleResponse())
+
+    const { TransportHealthPanel } = await loadComponentWithApi({
+      fetchTransportHealth,
+      lastEvent: signal(null),
+    })
+
+    render(html`<${TransportHealthPanel} />`, container)
+    await flushUi()
+
+    expect(container.textContent).toContain('HTTPS')
+    expect(container.textContent).toContain(':8938 활성')
+    expect(container.textContent).toContain('자체 서명')
+    expect(container.textContent).toContain('만료 2027-11-08T00:00:00Z')
+    expect(container.textContent).toContain('2 / 1')
   })
 
   it('renders an initializing producer failure as an operator alert', async () => {
@@ -721,6 +755,21 @@ describe('sseTone', () => {
     expect(sseTone(makeData({ summary: { ...makeData().summary, queue_pressure: 'high' } }))).toBe('bad')
     expect(sseTone(makeData({ summary: { ...makeData().summary, queue_pressure: 'watch' } }))).toBe('warn')
     expect(sseTone(makeData())).toBe('ok')
+  })
+})
+
+describe('httpsTone', () => {
+  it('is ok while listening', () => {
+    expect(httpsTone(makeData())).toBe('ok')
+  })
+  it('is warn when the listener is off or not started', () => {
+    expect(httpsTone(makeData({ https_listener: { ...makeData().https_listener, status: 'off' } }))).toBe('warn')
+    expect(httpsTone(makeData({ https_listener: { ...makeData().https_listener, status: 'not_started' } }))).toBe('warn')
+  })
+  it('is bad when the port could not be bound or the loop stopped', () => {
+    expect(httpsTone(makeData({ https_listener: { ...makeData().https_listener, status: 'bind_failed' } }))).toBe('bad')
+    expect(httpsTone(makeData({ https_listener: { ...makeData().https_listener, status: 'stopped' } }))).toBe('bad')
+    expect(httpsTone(makeData({ https_listener: { ...makeData().https_listener, status: 'accept_error' } }))).toBe('bad')
   })
 })
 

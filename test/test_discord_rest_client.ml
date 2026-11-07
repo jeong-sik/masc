@@ -444,34 +444,6 @@ let test_build_embed_request_embeds_included () =
   | _ -> fail "expected Assoc"
 
 (* ---------------------------------------------------------------- *)
-(* build_edit_embed_request                                          *)
-(* ---------------------------------------------------------------- *)
-
-let test_build_edit_embed_request_url_targets_message () =
-  let url, _, _ =
-    R.build_edit_embed_request ~token:"t" ~channel_id:(sf "1")
-      ~message_id:(sf "9") ~content:"hi" ~embeds:[] ()
-  in
-  check string "URL targets message"
-    "https://discord.com/api/v10/channels/1/messages/9" url
-
-let test_build_edit_embed_request_embeds_and_content () =
-  let embed : R.embed =
-    { title = "Done"; description = Some "Done"; url = None; color = 0x2ECC71
-    ; image = None; fields = [] }
-  in
-  let _, _, body =
-    R.build_edit_embed_request ~token:"t" ~channel_id:(sf "1")
-      ~message_id:(sf "2") ~content:"ok" ~embeds:[embed] ()
-  in
-  let json = Yojson.Safe.from_string body in
-  match json with
-  | `Assoc fields ->
-      check bool "has content" true (List.mem_assoc "content" fields);
-      check bool "has embeds" true (List.mem_assoc "embeds" fields)
-  | _ -> fail "expected Assoc"
-
-(* ---------------------------------------------------------------- *)
 (* split_at_codepoint / chunk_by_codepoint / truncate_to_limit       *)
 (* ---------------------------------------------------------------- *)
 
@@ -600,12 +572,6 @@ let () =
             test_build_embed_request_empty_content_omits_field
         ; test_case "embeds included in body" `Quick
             test_build_embed_request_embeds_included
-        ] )
-    ; ( "build_edit_embed_request"
-      , [ test_case "URL targets channel/message" `Quick
-            test_build_edit_embed_request_url_targets_message
-        ; test_case "embeds and content both present" `Quick
-            test_build_edit_embed_request_embeds_and_content
         ] )
     ; ( "codepoint_chunking"
       , [ test_case "Korean split head/tail valid UTF-8 on boundary" `Quick

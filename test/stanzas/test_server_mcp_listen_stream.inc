@@ -6,4 +6,4 @@
 (test
  (name test_server_mcp_listen_stream)
  (modules test_server_mcp_listen_stream)
- (libraries masc_server masc.mcp_transport_protocol alcotest eio eio.mock httpun bigstringaf str))
+ (libraries masc masc_server masc.mcp_transport_protocol alcotest eio eio.mock httpun bigstringaf str))

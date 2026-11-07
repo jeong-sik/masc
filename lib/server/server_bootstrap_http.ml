@@ -50,8 +50,16 @@ let listen_socket ~sw ~net ~address (config : Http.config) =
   Eio.Net.listen net ~sw ~reuse_addr:true ~backlog:config.listen_backlog addr
 ;;
 
+(* The HTTPS listener of one boot (RFC-0512 D6); see the interface. *)
+type https_listener =
+  { https_port : int
+  ; tls : Tls.Config.server
+  ; certificate_source : Https_listener_metrics.certificate_source
+  }
+
 let print_startup_banner
       ~(config : Http.config)
+      ~https
       ~resolved_base
       ~base_path
       ~masc_dir
@@ -73,6 +81,13 @@ let print_startup_banner
   Printf.printf "   GET  /api/v1/activity/events → Activity replay API\n%!";
   Printf.printf "   GET  /api/v1/activity/graph → Activity graph snapshot\n%!";
   Printf.printf "   GET  /health → Health check\n%!";
+  (match https with
+   | None -> ()
+   | Some { https_port; certificate_source; tls = _ } ->
+     Printf.printf
+       "   HTTPS :%d → TLS 1.3, ALPN h2 + http/1.1 (%s certificate)\n%!"
+       https_port
+       (Https_listener_metrics.certificate_source_to_string certificate_source));
   if Env_config.Transport.grpc_enabled ()
   then
     Printf.printf
@@ -105,10 +120,10 @@ let with_cleanups_on_release ~sw cleanups =
       cleanups)
 ;;
 
-let on_connection_release conn_sw ~mode ~listener_tag flow =
+let on_connection_release conn_sw ~record_closed ~listener_tag flow =
   with_cleanups_on_release ~sw:conn_sw
     [
-      (fun () -> Transport_metrics.record_http_connection_closed ~mode);
+      record_closed;
       (fun () ->
          try Eio.Flow.close flow with
          | Eio.Cancel.Cancelled _ as e -> raise e
@@ -157,50 +172,67 @@ let h1_request_handler request_handler client_addr (reqd : Httpun.Reqd.t Gluten.
   with_request_lane (Httpun.Reqd.request reqd.Gluten.Reqd.reqd).meth (fun () ->
     request_handler client_addr reqd)
 
-let serve ~sw ~clock ~socket ~addr_label ~request_handler =
-  let mode = "h1" in
-  (* Stable listener identity: the [h1 host:port] tag lets error log lines
-     name *which* listener emitted them when a process runs multiple HTTP
-     servers. [server_h2_gateway] tags its own the same way. *)
-  let listener_tag = Printf.sprintf "%s %s" mode addr_label in
-  let mark_stopped = register_listener_lifecycle ~sw ~mode in
-  let is_cancelled exn =
-    match exn with
-    | Eio.Cancel.Cancelled _ -> true
-    | _ -> false
+let h1_error_handler _client_addr ?request:_ error respond =
+  let msg =
+    match error with
+    | `Exn exn -> Printexc.to_string exn
+    | `Bad_request -> "Bad request"
+    | `Bad_gateway -> "Bad gateway"
+    | `Internal_server_error -> "Internal server error"
   in
+  let body = respond (Httpun.Headers.of_list [ "content-type", "text/plain" ]) in
+  Httpun.Body.Writer.write_string body msg;
+  Httpun.Body.Writer.close body
+;;
+
+let serve_h1_connection ~sw ~request_handler client_addr flow =
+  let conn_handler =
+    Httpun_eio.Server.create_connection_handler
+      ~sw
+      ~request_handler:(h1_request_handler request_handler)
+      ~error_handler:h1_error_handler
+  in
+  conn_handler client_addr flow
+;;
+
+let shared_h2_resources () =
+  Http_h2_response_ledger.create
+    ~max_pending_bytes:(H2_response_limits.max_pending_bytes ())
+;;
+
+let record_cleartext_accept ~mode latency_s =
+  Transport_metrics.record_http_accept ~mode;
+  Transport_metrics.record_http_accept_latency ~mode latency_s
+;;
+
+(* One accept loop. [record_accept latency_s] runs after every accepted
+   connection and [record_accept_error error] after a failed accept, which
+   is followed by a backoff sleep; [on_stop ()] runs once when the loop ends
+   by cancellation. [serve_connection ~conn_sw client_addr flow] runs in a
+   fiber of its own whose release records the close and closes the flow. *)
+let run_accept_loop
+      ~sw
+      ~clock
+      ~socket
+      ~listener_tag
+      ~record_accept
+      ~record_accept_error
+      ~record_closed
+      ~on_stop
+      serve_connection
+  =
+  let stopped = Atomic.make false in
+  let stop () = if Atomic.compare_and_set stopped false true then on_stop () in
   let rec accept_loop backoff_s =
     try
       let accept_start = Unix.gettimeofday () in
       let flow, client_addr = Eio.Net.accept ~sw socket in
       disable_nagle flow;
-      let accept_latency = Unix.gettimeofday () -. accept_start in
-      Transport_metrics.record_http_accept ~mode;
-      Transport_metrics.record_http_accept_latency ~mode accept_latency;
+      record_accept (Unix.gettimeofday () -. accept_start);
       Eio.Fiber.fork ~sw (fun () ->
         Eio.Switch.run ~name:listener_tag (fun conn_sw ->
-          on_connection_release conn_sw ~mode ~listener_tag flow;
-          try
-            let conn_handler =
-              Httpun_eio.Server.create_connection_handler
-                ~sw:conn_sw
-                ~request_handler:(h1_request_handler request_handler)
-                ~error_handler:(fun _client_addr ?request:_ error respond ->
-                  let msg =
-                    match error with
-                    | `Exn exn -> Printexc.to_string exn
-                    | `Bad_request -> "Bad request"
-                    | `Bad_gateway -> "Bad gateway"
-                    | `Internal_server_error -> "Internal server error"
-                  in
-                  let body =
-                    respond (Httpun.Headers.of_list [ "content-type", "text/plain" ])
-                  in
-                  Httpun.Body.Writer.write_string body msg;
-                  Httpun.Body.Writer.close body)
-            in
-            conn_handler client_addr flow
-          with
+          on_connection_release conn_sw ~record_closed ~listener_tag flow;
+          try serve_connection ~conn_sw client_addr flow with
           | Eio.Cancel.Cancelled _ as e -> raise e
           | exn ->
             Log.Misc.error "[%s] connection error: %s"
@@ -208,30 +240,48 @@ let serve ~sw ~clock ~socket ~addr_label ~request_handler =
       accept_loop 0.05
     with
     | Eio.Cancel.Cancelled _ as e ->
-      mark_stopped ();
+      stop ();
       raise e
     | exn ->
-      if is_cancelled exn
-      then mark_stopped ()
-      else (
-        let error = Printexc.to_string exn in
-        Transport_metrics.record_http_accept_error ~mode ~error;
-        Log.Misc.error "[%s] accept error: %s" listener_tag error;
-        (try Eio.Time.sleep clock backoff_s with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | exn ->
-           Log.Misc.warn "[%s] backoff sleep: %s"
-             listener_tag (Printexc.to_string exn));
-        accept_loop (Float.min 2.0 (backoff_s *. 1.5)))
+      let error = Printexc.to_string exn in
+      record_accept_error error;
+      Log.Misc.error "[%s] accept error: %s" listener_tag error;
+      (try Eio.Time.sleep clock backoff_s with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+         Log.Misc.warn "[%s] backoff sleep: %s"
+           listener_tag (Printexc.to_string exn));
+      accept_loop (Float.min 2.0 (backoff_s *. 1.5))
   in
   accept_loop 0.05
+;;
+
+let serve ~sw ~clock ~socket ~addr_label ~request_handler =
+  let mode = "h1" in
+  (* Stable listener identity: the [h1 host:port] tag lets error log lines
+     name *which* listener emitted them when a process runs multiple HTTP
+     servers. *)
+  let listener_tag = Printf.sprintf "%s %s" mode addr_label in
+  let mark_stopped = register_listener_lifecycle ~sw ~mode in
+  run_accept_loop
+    ~sw
+    ~clock
+    ~socket
+    ~listener_tag
+    ~record_accept:(record_cleartext_accept ~mode)
+    ~record_accept_error:(fun error ->
+      Transport_metrics.record_http_accept_error ~mode ~error)
+    ~record_closed:(fun () -> Transport_metrics.record_http_connection_closed ~mode)
+    ~on_stop:mark_stopped
+    (fun ~conn_sw client_addr flow ->
+      serve_h1_connection ~sw:conn_sw ~request_handler client_addr flow)
 ;;
 
 exception Request_without_header_block
 
 let serve_h2_connection
       ?(streams = Server_h2_stream_registry.create ())
-      ?(resources = Server_h2_response_resources.create
+      ?(resources = Http_h2_response_ledger.create
           ~max_pending_bytes:(H2_response_limits.max_pending_bytes ()))
       ~sw
       ~h2_request_handler
@@ -263,7 +313,7 @@ let serve_h2_connection
           | Some stream_id ->
             Server_h2_stream_registry.dispatch streams ~sw:request_sw ~stream_id reqd
               (fun stream_sw ->
-                Server_h2_response_resources.with_request resources ~sw:stream_sw
+                Http_h2_response_ledger.with_request resources ~sw:stream_sw
                   (fun () ->
                     try
                       with_request_lane (H2.Reqd.request reqd).meth (fun () ->
@@ -276,159 +326,184 @@ let serve_h2_connection
 ;;
 
 let serve_h2 ~sw ~clock ~socket ~addr_label ~h2_request_handler ~h2_error_handler =
-  let resources = Server_h2_response_resources.create
-    ~max_pending_bytes:(H2_response_limits.max_pending_bytes ()) in
+  let resources = shared_h2_resources () in
   let mode = "h2" in
   let listener_tag = Printf.sprintf "%s %s" mode addr_label in
   let mark_stopped = register_listener_lifecycle ~sw ~mode in
-  let is_cancelled exn =
-    match exn with
-    | Eio.Cancel.Cancelled _ -> true
-    | _ -> false
-  in
   Log.Server.info "[%s] h2c mode activated (MASC_USE_H2=1)" listener_tag;
-  let rec accept_loop backoff_s =
-    try
-      let accept_start = Unix.gettimeofday () in
-      let flow, client_addr = Eio.Net.accept ~sw socket in
-      disable_nagle flow;
-      let accept_latency = Unix.gettimeofday () -. accept_start in
-      Transport_metrics.record_http_accept ~mode;
-      Transport_metrics.record_http_accept_latency ~mode accept_latency;
-      Eio.Fiber.fork ~sw (fun () ->
-        Eio.Switch.run ~name:listener_tag (fun conn_sw ->
-          on_connection_release conn_sw ~mode ~listener_tag flow;
-          try
-            serve_h2_connection
-              ~resources
-              ~sw:conn_sw
-              ~h2_request_handler
-              ~h2_error_handler
-              client_addr
-              flow
-          with
-          | Eio.Cancel.Cancelled _ as e -> raise e
-          | exn ->
-            Log.Misc.error "[%s] connection error: %s"
-              listener_tag (Printexc.to_string exn)));
-      accept_loop 0.05
-    with
-    | Eio.Cancel.Cancelled _ as e ->
-      mark_stopped ();
-      raise e
-    | exn ->
-      if is_cancelled exn
-      then mark_stopped ()
-      else (
-        let error = Printexc.to_string exn in
-        Transport_metrics.record_http_accept_error ~mode ~error;
-        Log.Misc.error "[%s] accept error: %s" listener_tag error;
-        (try Eio.Time.sleep clock backoff_s with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | exn ->
-           Log.Misc.warn "[%s] backoff sleep: %s"
-             listener_tag (Printexc.to_string exn));
-        accept_loop (Float.min 2.0 (backoff_s *. 1.5)))
-  in
-  accept_loop 0.05
+  run_accept_loop
+    ~sw
+    ~clock
+    ~socket
+    ~listener_tag
+    ~record_accept:(record_cleartext_accept ~mode)
+    ~record_accept_error:(fun error ->
+      Transport_metrics.record_http_accept_error ~mode ~error)
+    ~record_closed:(fun () -> Transport_metrics.record_http_connection_closed ~mode)
+    ~on_stop:mark_stopped
+    (fun ~conn_sw client_addr flow ->
+      serve_h2_connection
+        ~resources
+        ~sw:conn_sw
+        ~h2_request_handler
+        ~h2_error_handler
+        client_addr
+        flow)
 ;;
 
 (** Accept loop with automatic HTTP/1.1 vs HTTP/2 detection.
     Detection suspends until the stream identifies a protocol. The returned
     socket replays the inspected prefix to httpun-eio or h2-eio. *)
 let serve_auto ~sw ~clock ~socket ~addr_label ~request_handler ~h2_request_handler ~h2_error_handler =
-  let resources = Server_h2_response_resources.create
-    ~max_pending_bytes:(H2_response_limits.max_pending_bytes ()) in
+  let resources = shared_h2_resources () in
   let mode = "auto" in
   let listener_tag = Printf.sprintf "%s %s" mode addr_label in
   let mark_stopped = register_listener_lifecycle ~sw ~mode in
-  let is_cancelled exn =
-    match exn with
-    | Eio.Cancel.Cancelled _ -> true
-    | _ -> false
-  in
   Log.Server.info "[%s] HTTP auto-detect mode: HTTP/1.1 + HTTP/2 h2c on same port"
     listener_tag;
   let h2_count = Atomic.make 0 in
   let h1_count = Atomic.make 0 in
-  let stats_logged = Atomic.make false in
-  let log_stats () =
-    Log.Server.info "[%s] stats: h2=%d h1=%d"
-      listener_tag
-      (Atomic.get h2_count)
-      (Atomic.get h1_count)
-  in
-  let rec accept_loop backoff_s =
-    try
-      let accept_start = Unix.gettimeofday () in
-      let flow, client_addr = Eio.Net.accept ~sw socket in
-      disable_nagle flow;
-      let accept_latency = Unix.gettimeofday () -. accept_start in
-      Transport_metrics.record_http_accept ~mode;
-      Transport_metrics.record_http_accept_latency ~mode accept_latency;
-      Eio.Fiber.fork ~sw (fun () ->
-        Eio.Switch.run ~name:listener_tag (fun conn_sw ->
-          on_connection_release conn_sw ~mode ~listener_tag flow;
-          try
-            match Http_protocol_detect.detect flow with
-            | Ok (Http_protocol_detect.Http2, detected_flow) ->
-              ignore (Atomic.fetch_and_add h2_count 1);
+  run_accept_loop
+    ~sw
+    ~clock
+    ~socket
+    ~listener_tag
+    ~record_accept:(record_cleartext_accept ~mode)
+    ~record_accept_error:(fun error ->
+      Transport_metrics.record_http_accept_error ~mode ~error)
+    ~record_closed:(fun () -> Transport_metrics.record_http_connection_closed ~mode)
+    ~on_stop:(fun () ->
+      Log.Server.info "[%s] stats: h2=%d h1=%d"
+        listener_tag (Atomic.get h2_count) (Atomic.get h1_count);
+      mark_stopped ())
+    (fun ~conn_sw client_addr flow ->
+      match Http_protocol_detect.detect flow with
+      | Ok (Http_protocol_detect.Http2, detected_flow) ->
+        ignore (Atomic.fetch_and_add h2_count 1);
+        serve_h2_connection
+          ~resources
+          ~sw:conn_sw
+          ~h2_request_handler
+          ~h2_error_handler
+          client_addr
+          detected_flow
+      | Ok (Http_protocol_detect.Http1, detected_flow) ->
+        ignore (Atomic.fetch_and_add h1_count 1);
+        serve_h1_connection ~sw:conn_sw ~request_handler client_addr detected_flow
+      | Error msg ->
+        Log.Misc.debug "[%s] protocol detect skipped: %s" listener_tag msg)
+;;
+
+(* {1 HTTPS listener (RFC-0512 D6)} *)
+
+let https_listener_of_env ~base_path ~bind_host =
+  match Env_config.Transport.https_port () with
+  | None -> Ok None
+  | Some https_port ->
+    (match Ptime.of_float_s (Unix.gettimeofday ()) with
+     | None -> Error "the clock is not a representable time"
+     | Some now ->
+       (match
+          Server_tls_material.load_or_generate
+            ~now
+            ~base_path
+            ~bind_host
+            ~cert_file:(Env_config.Transport.tls_cert_file ())
+            ~key_file:(Env_config.Transport.tls_key_file ())
+        with
+        | Error error -> Error (Server_tls_material.error_to_string error)
+        | Ok material ->
+          (match Server_tls_material.tls_config material with
+           | Error reason -> Error reason
+           | Ok tls ->
+             Https_listener_metrics.configure
+               ~port:https_port
+               ~certificate:
+                 { Https_listener_metrics.source = material.source
+                 ; not_after = material.not_after
+                 };
+             Ok (Some { https_port; tls; certificate_source = material.source }))))
+;;
+
+let listen_https_socket ~sw ~net ~address ~config https =
+  match https with
+  | None -> None
+  | Some listener ->
+    (match listen_socket ~sw ~net ~address { config with Http.port = listener.https_port } with
+     | socket -> Some (listener, socket)
+     | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+     | exception exn ->
+       let error = Printexc.to_string exn in
+       Https_listener_metrics.record_bind_failure ~error;
+       Log.Server.error
+         "[tls %s:%d] bind failed, HTTPS stays off until the next boot: %s"
+         config.Http.host
+         listener.https_port
+         error;
+       None)
+;;
+
+let handshake_failed ~listener_tag client_addr reason =
+  Https_listener_metrics.record_handshake_failure ();
+  Log.Http.debug
+    "[%s] TLS handshake with %s ended: %s"
+    listener_tag
+    (Format.asprintf "%a" Eio.Net.Sockaddr.pp client_addr)
+    reason
+;;
+
+let serve_tls ~sw ~clock ~socket ~addr_label ~tls ~request_handler ~h2_request_handler ~h2_error_handler =
+  let resources = shared_h2_resources () in
+  let listener_tag = Printf.sprintf "tls %s" addr_label in
+  Https_listener_metrics.record_started ();
+  Eio.Switch.on_release sw Https_listener_metrics.record_stopped;
+  Log.Server.info "[%s] HTTPS: TLS 1.3, ALPN h2 and http/1.1" listener_tag;
+  run_accept_loop
+    ~sw
+    ~clock
+    ~socket
+    ~listener_tag
+    ~record_accept:(fun latency_s ->
+      Https_listener_metrics.record_accept ();
+      Transport_metrics.record_http_accept_latency ~mode:"tls" latency_s)
+    ~record_accept_error:(fun error -> Https_listener_metrics.record_accept_error ~error)
+    ~record_closed:Https_listener_metrics.record_connection_closed
+    ~on_stop:Https_listener_metrics.record_stopped
+    (fun ~conn_sw client_addr flow ->
+      match Tls_eio.server_of_flow tls flow with
+      | exception Tls_eio.Tls_alert alert ->
+        handshake_failed ~listener_tag client_addr
+          (Printf.sprintf "alert %s" (Tls.Packet.alert_type_to_string alert))
+      | exception Tls_eio.Tls_failure failure ->
+        handshake_failed ~listener_tag client_addr
+          (Format.asprintf "%a" Tls.Engine.pp_failure failure)
+      | exception End_of_file ->
+        handshake_failed ~listener_tag client_addr "peer closed before the handshake completed"
+      | session ->
+        (match Tls_eio.epoch session with
+         | Error () ->
+           handshake_failed ~listener_tag client_addr "no active session after the handshake"
+         | Ok epoch ->
+           let socket = Tls_stream_socket.wrap session in
+           (match epoch.Tls.Core.alpn_protocol with
+            | Some protocol when String.equal protocol Server_tls_material.alpn_h2 ->
+              Https_listener_metrics.record_negotiated Alpn_h2;
               serve_h2_connection
                 ~resources
                 ~sw:conn_sw
                 ~h2_request_handler
                 ~h2_error_handler
                 client_addr
-                detected_flow
-            | Ok (Http_protocol_detect.Http1, detected_flow) ->
-              ignore (Atomic.fetch_and_add h1_count 1);
-              let conn_handler =
-                Httpun_eio.Server.create_connection_handler
-                  ~sw:conn_sw
-                  ~request_handler:(h1_request_handler request_handler)
-                  ~error_handler:(fun _client_addr ?request:_ error respond ->
-                    let msg =
-                      match error with
-                      | `Exn exn -> Printexc.to_string exn
-                      | `Bad_request -> "Bad request"
-                      | `Bad_gateway -> "Bad gateway"
-                      | `Internal_server_error -> "Internal server error"
-                    in
-                    let body =
-                      respond (Httpun.Headers.of_list [ "content-type", "text/plain" ])
-                    in
-                    Httpun.Body.Writer.write_string body msg;
-                    Httpun.Body.Writer.close body)
-              in
-              conn_handler client_addr detected_flow
-            | Error msg ->
-              Log.Misc.debug "[%s] protocol detect skipped: %s" listener_tag msg
-          with
-          | Eio.Cancel.Cancelled _ as e -> raise e
-          | exn ->
-            Log.Misc.error "[%s] connection error: %s"
-              listener_tag (Printexc.to_string exn)));
-      accept_loop 0.05
-    with
-    | Eio.Cancel.Cancelled _ as e ->
-      if Atomic.compare_and_set stats_logged false true then log_stats ();
-      mark_stopped ();
-      raise e
-    | exn ->
-      if is_cancelled exn
-      then (
-        if Atomic.compare_and_set stats_logged false true then log_stats ();
-        mark_stopped ())
-      else (
-        let error = Printexc.to_string exn in
-        Transport_metrics.record_http_accept_error ~mode ~error;
-        Log.Misc.error "[%s] accept error: %s" listener_tag error;
-        (try Eio.Time.sleep clock backoff_s with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | exn ->
-           Log.Misc.warn "[%s] backoff sleep: %s"
-             listener_tag (Printexc.to_string exn));
-        accept_loop (Float.min 2.0 (backoff_s *. 1.5)))
-  in
-  accept_loop 0.05
+                socket
+            | Some protocol when String.equal protocol Server_tls_material.alpn_http1 ->
+              Https_listener_metrics.record_negotiated Alpn_http1;
+              serve_h1_connection ~sw:conn_sw ~request_handler client_addr socket
+            | None ->
+              Https_listener_metrics.record_negotiated Alpn_none;
+              serve_h1_connection ~sw:conn_sw ~request_handler client_addr socket
+            | Some protocol ->
+              (* The library settles only on a protocol the configuration
+                 offered, so this is a library fault, not a client choice. *)
+              handshake_failed ~listener_tag client_addr
+                (Printf.sprintf "ALPN %S was not offered" protocol))))
 ;;

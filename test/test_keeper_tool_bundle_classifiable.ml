@@ -995,27 +995,27 @@ let test_tools_list_reads_the_supplied_capability_surface () =
     run_tool ~tool_use_id:"bundle-capability-surface" tool (`Assoc [])
     |> decode_tool_json ~base_path:config.base_path
   in
-  let expected =
+  let expected_text =
     Keeper_tool_shared_runtime.keeper_tools_list_json_for_surface
       ~capability_surface
-    |> Yojson.Safe.from_string
   in
   check string "production bundle uses the exact supplied surface"
-    (Yojson.Safe.to_string expected)
+    (Yojson.Safe.to_string (Yojson.Safe.from_string expected_text))
     (Yojson.Safe.to_string observed);
-  let read =
-    Yojson.Safe.Util.(observed |> member "descriptor_surface" |> to_list)
-    |> List.find_opt (fun descriptor ->
-      String.equal
-        "agent.read_file"
-        Yojson.Safe.Util.(descriptor |> member "id" |> to_string))
+  (* The full descriptor rows of this surface were 292,804 bytes, above every
+     lane's inline ceiling, so the model only ever read a blob marker. *)
+  check bool "the whole inventory fits the smallest lane inline ceiling" true
+    (String.length expected_text <= Common.max_tool_result_wire_bytes);
+  let active_tool_names =
+    Yojson.Safe.Util.(observed |> member "tools" |> member "active" |> to_list)
+    |> List.map (fun row -> Yojson.Safe.Util.(row |> member "name" |> to_string))
   in
-  match read with
-  | None -> fail "complete inventory omitted Read"
-  | Some descriptor ->
-    check string "a model-visible Tool is active in the frozen surface"
-      "active"
-      Yojson.Safe.Util.(descriptor |> member "availability" |> to_string);
+  if not (List.mem "Read" active_tool_names)
+  then fail "complete inventory omitted Read from the active Tools"
+  else (
+    check string "the inventory names the frozen surface it was built from"
+      (Keeper_capability_surface.digest capability_surface)
+      Yojson.Safe.Util.(observed |> member "surface_digest" |> to_string);
     let search_tool =
       match
         List.find_opt
@@ -1068,7 +1068,7 @@ let test_tools_list_reads_the_supplied_capability_surface () =
         (`Assoc ["query",`String "\"gate-inline\" OR \"gate-async\"";"syntax",`String "fts5"]) in
     check bool "explicit FTS preserves both matching Skill invocations" true
       (List.mem ("gate-inline",`String "keeper_compose_gate-inline") expressions &&
-       List.mem ("gate-async",`String "keeper_compose_gate-async") expressions)
+       List.mem ("gate-async",`String "keeper_compose_gate-async") expressions))
 ;;
 
 let run_composition_tool ?expected_failure (tool : Agent_core.Tool.t) =

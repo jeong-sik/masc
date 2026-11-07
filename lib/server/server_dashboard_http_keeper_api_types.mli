@@ -210,7 +210,7 @@ val respond_error :
   ?status:Httpun.Status.t ->
   ?request:Httpun.Request.t ->
   ?ok:bool ->
-  Httpun.Reqd.t ->
+  Http_reqd.t ->
   string ->
   unit
 (** [respond_error ?status ?request ?ok reqd message] answers [reqd] with

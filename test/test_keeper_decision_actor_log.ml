@@ -86,7 +86,7 @@ let dispatch_post ~sw ~clock ~state ~token ~path ~body =
     let response_buf = Buffer.create 1024 in
     let conn =
       Httpun.Server_connection.create (fun reqd ->
-        Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd)
+        Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) (Http_reqd.of_httpun reqd))
     in
     let request_str =
       Printf.sprintf

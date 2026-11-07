@@ -76,7 +76,6 @@
   eio.unix
   unix
   yojson
-  uuidm
    masc.agent_core.digest
   optint))
 
@@ -92,7 +91,4 @@
   fs_compat_internal
   eio
   eio.unix
-  unix
-  yojson
-  uuidm
-   masc.agent_core.digest))
+  uuidm))

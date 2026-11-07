@@ -714,6 +714,7 @@ let test_fleet_route_attests_its_admitted_workspace env =
       Masc.Fleet_stream_hub.note_degraded hub ~since:10. Masc.Fleet_stream.Scan_failed;
       let handler reqd =
         let request = Httpun.Reqd.request reqd in
+        let reqd = Masc.Http_reqd.of_httpun reqd in
         Server_auth.with_read_workspace_precondition state
           (fun _ _ reqd ->
              Server_routes_http_routes_fleet_stream.serve ~sw ~clock
@@ -808,7 +809,7 @@ let test_registered_fleet_route_replaces_its_scope env =
         let router = Server_routes_http_routes_fleet_stream.add_routes ~sw ~clock
             (Masc.Http_server_eio.Router.create ()) in
         let handler reqd =
-          Masc.Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd in
+          Masc.Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) (Masc.Http_reqd.of_httpun reqd) in
         with_server env ~handler (fun ~port ->
           let query = Uri.add_query_params' (Uri.of_string "")
               [ "expected_base_path", Unix.realpath workspace
@@ -886,6 +887,7 @@ let test_mcp_rejects_duplicate_cursors_before_registration env =
     } in
   let handler reqd =
     let request = Httpun.Reqd.request reqd in
+    let reqd = Masc.Http_reqd.of_httpun reqd in
     Server_request_authority.with_current authority (fun () ->
       Transport.handle_get_mcp ~deps ~sse_kind:Masc.Sse.Observer request reqd) in
   List.iter (fun cursors ->
@@ -932,6 +934,7 @@ let test_mcp_rejects_unknown_machine_and_non_observer_machine env =
     List.iter (fun (target, sse_kind, expected_status) ->
       let handler reqd =
         let request = Httpun.Reqd.request reqd in
+        let reqd = Masc.Http_reqd.of_httpun reqd in
         Server_request_authority.with_current authority (fun () ->
           Transport.handle_get_mcp ~deps ~sse_kind request reqd) in
       with_server env ~handler (fun ~port ->
@@ -986,6 +989,7 @@ let test_mcp_observer_refuses_foreign_and_retired_workspaces env =
       } in
     let handler reqd =
       let request = Httpun.Reqd.request reqd in
+      let reqd = Masc.Http_reqd.of_httpun reqd in
       Server_request_authority.with_current authority (fun () ->
         Transport.handle_get_mcp ~deps ~sse_kind:Masc.Sse.Observer request reqd)
     in
@@ -1063,7 +1067,8 @@ let test_retired_observer_close_keeps_successor env =
         ["content-type", "text/event-stream"; "connection", "close"] in
     let response =
       Server_sse_response.respond ~clock:(Eio.Stdenv.clock env)
-        ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s reqd
+        ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
+        (Masc.Http_reqd.of_httpun reqd)
         (Httpun.Response.create ~headers `OK)
     in
     let info = Conn.make_sse_conn ~session_id ~client_id:!opened ~response () in
@@ -1163,6 +1168,7 @@ let test_play_observer_reconnect_keeps_replacement_presence env =
         } in
       let handler reqd =
         let request = Httpun.Reqd.request reqd in
+        let reqd = Masc.Http_reqd.of_httpun reqd in
         Server_request_authority.with_current authority (fun () ->
           Transport.handle_get_mcp ~deps ~sse_kind:Masc.Sse.Observer request reqd) in
       let auth = Masc_test_deps.make_sse_auth workspace "play-observer" in
@@ -1464,6 +1470,7 @@ let test_mcp_future_cursor_resets_before_live_delivery env =
         } in
       let handler reqd =
         let request = Httpun.Reqd.request reqd in
+        let reqd = Masc.Http_reqd.of_httpun reqd in
         Server_request_authority.with_current authority (fun () ->
           Transport.handle_get_mcp ~deps ~sse_kind:Masc.Sse.Observer request reqd) in
       with_server env ~handler (fun ~port ->

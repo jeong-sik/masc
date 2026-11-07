@@ -163,7 +163,7 @@ val handle_keeper_chat_stream :
   submitted_by:string ->
   Mcp_server.server_state ->
   Httpun.Request.t ->
-  Httpun.Reqd.t ->
+  Http_reqd.t ->
   keeper_chat_stream_request ->
   unit
 (** Drives the [POST /api/keeper/chat-stream] SSE response

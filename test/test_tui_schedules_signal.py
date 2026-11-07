@@ -4,9 +4,8 @@ announces that the schedules changed, and again after a failed read
 (RFC-0480 L8).
 
 The refresh cadence is pushed out of the test's lifetime, so every read
-after the workspace is admitted comes from an announcement or a failed read.
-One case runs the cadence every second and checks that it does not read
-them.
+after the workspace is admitted comes from an announcement or a failed
+read, and a quiet stretch reads nothing.
 """
 
 import os
@@ -128,18 +127,13 @@ class SchedulesSignalTest(unittest.TestCase):
 
         self.run_schedules(scenario)
 
-    def test_the_cadence_does_not_read_the_schedules(self) -> None:
+    def test_a_quiet_stretch_does_not_read_the_schedules(self) -> None:
         def scenario(server: SchedulesServer, step: Callable[..., None]) -> None:
-            server.set_phase("cadence")
-            with server.condition:
-                health_before = server.health_reads
+            server.set_phase("quiet")
             step("drain", 3.5)
-            with server.condition:
-                cadence_passes = server.health_reads - health_before
-            self.assertGreaterEqual(cadence_passes, 2, "the cadence did not run")
-            self.assertEqual(server.count("cadence", SCHEDULES_PATH), 0)
+            self.assertEqual(server.count("quiet", SCHEDULES_PATH), 0)
 
-        self.run_schedules(scenario, refresh_seconds=1.0)
+        self.run_schedules(scenario)
 
     def test_failed_schedule_reads_are_read_again_with_growing_waits(self) -> None:
         def scenario(server: SchedulesServer, step: Callable[..., None]) -> None:

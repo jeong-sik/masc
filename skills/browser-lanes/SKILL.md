@@ -171,8 +171,10 @@ live 인증 화면을 연결 오류 때문에 별도 API·수집 버퍼로 대�
 선택 과정은 브라우저를 열거나 탭을 이동하지 않는다. 불가능한 조합은 입력 전
 `required_browser_actions_unavailable`와 후보별 `missingActions`로 거절한다.
 
-응답 `browserCapabilities.operations`의 tool/action/mode와 constraints를 읽고
-`browserSelection`의 구체 lane/clientId를 이후 모든 호출에 유지한다. 이미 관측한
+응답 `browserCapabilities.operations`의 tool/action/mode를 읽고
+`browserSelection`의 구체 lane/clientId를 이후 모든 호출에 유지한다. constraints는
+`requiredActions`에 준 기능의 행에만 붙는다. 다른 기능의 constraints는 그 기능을
+`requiredActions`에 넣고 같은 lane/clientId로 BrowserTabs를 다시 불러 읽는다. 이미 관측한
 탭에는 기능을 이유로 다른 브라우저를 선택하지 않는다. Conditional은 구현된
 기능의 조건이며 현재 포커스/권한/버전이나 효과 성공을 보장하지 않는다. Safari는
 현재 어댑터가 없고, 페이지 줌과 네이티브 타이핑을 한 브라우저에서 모두 요구하는

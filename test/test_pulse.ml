@@ -26,7 +26,6 @@ let () = test "create returns not-alive engine" (fun () ->
     ~consumers:[]
   in
   assert (not (Pulse.is_alive t));
-  assert (Pulse.last_beat t = None);
   let s = Pulse.stats t in
   assert (s.total_beats = 0)
 )
@@ -165,56 +164,6 @@ let () = test "should_act filters beats" (fun () ->
     !seen
 )
 
-(* ── Test: add/remove consumer dynamically ─────────────────── *)
-
-let () = test "add and remove consumer dynamically" (fun () ->
-  Eio_main.run @@ fun env ->
-  let clock = Eio.Stdenv.clock env in
-  let late_count = ref 0 in
-  let t = Pulse.create
-    ~clock
-    ~rhythm:{ Pulse.base_s = 0.05; min_s = 0.03; max_s = 1.0; quiet = (1, 6) }
-    ~consumers:[]
-  in
-  Eio.Switch.run @@ fun sw ->
-  Pulse.run ~sw t;
-  Eio.Time.sleep clock 0.1;
-  (* Add consumer after engine started *)
-  let late_consumer = (module struct
-    let name = "late-joiner"
-    let should_act _b = true
-    let on_beat _b =
-      incr late_count;
-      Ok ()
-  end : Pulse.Consumer) in
-  Pulse.add_consumer t late_consumer;
-  Eio.Time.sleep clock 0.15;
-  (* Remove it *)
-  let removed = Pulse.remove_consumer t "late-joiner" in
-  assert removed;
-  let count_at_remove = !late_count in
-  Eio.Time.sleep clock 0.15;
-  Pulse.shutdown t;
-  Eio.Time.sleep clock 0.1;
-  (* Should have been called at least once *)
-  if count_at_remove < 1 then
-    failwith "late-joiner was never called";
-  (* Should not increase after removal *)
-  if !late_count > count_at_remove + 1 then
-    failwith (Printf.sprintf "late-joiner called after removal: before=%d after=%d"
-      count_at_remove !late_count)
-)
-
-(* ── Test: default_rhythm values ───────────────────────────── *)
-
-let () = test "default_rhythm has sane values" (fun () ->
-  let r = Pulse.default_rhythm in
-  assert (r.base_s = 60.0);
-  assert (r.min_s = 30.0);
-  assert (r.max_s = 300.0);
-  assert (r.quiet = (1, 6))
-)
-
 (* ── Test: stats accuracy ──────────────────────────────────── *)
 
 let () = test "stats tracks beats and nudges" (fun () ->
@@ -326,8 +275,7 @@ let () = test "quiet_hour_boundary" (fun () ->
 
 let () = test "effective_interval_normal" (fun () ->
   let eff = Pulse.For_testing.effective_interval_at in
-  let r = Pulse.default_rhythm in
-  (* base=60, min=30, max=300, quiet=(1,6) *)
+  let r = { Pulse.base_s = 60.0; min_s = 30.0; max_s = 300.0; quiet = (1, 6) } in
   (* hour=12: not quiet → base=60 → clamp(30, 300, 60) = 60 *)
   let v_normal = eff ~hour:12 r in
   assert (v_normal = 60.0);
@@ -412,55 +360,6 @@ let () = test "failing consumer remains active" (fun () ->
   Eio.Time.sleep clock 0.1;
   assert (!fail_count >= 5);
   assert (!ok_count >= 5)
-)
-
-(* ── Test: set_rhythm updates interval ────────────────────── *)
-
-let () = test "set_rhythm changes interval" (fun () ->
-  Eio_main.run @@ fun env ->
-  let clock = Eio.Stdenv.clock env in
-  let t = Pulse.create
-    ~clock
-    ~rhythm:{ Pulse.base_s = 100.0; min_s = 50.0; max_s = 200.0; quiet = (0, 0) }
-    ~consumers:[]
-  in
-  Eio.Switch.run @@ fun sw ->
-  Pulse.run ~sw t;
-  Eio.Time.sleep clock 0.05;  (* startup beat *)
-  let before = (Pulse.stats t).total_beats in
-  (* Switch to fast rhythm via set_rhythm *)
-  Pulse.set_rhythm t { Pulse.base_s = 0.05; min_s = 0.03; max_s = 1.0; quiet = (0, 0) };
-  (* Nudge to break the current long sleep and pick up new rhythm *)
-  Pulse.nudge t ~reason:"rhythm-changed";
-  Eio.Time.sleep clock 0.4;
-  let after = (Pulse.stats t).total_beats in
-  Pulse.shutdown t;
-  Eio.Time.sleep clock 0.1;
-  (* Rhythm beats should have accumulated from the fast interval *)
-  let gained = after - before in
-  if gained < 3 then
-    failwith (Printf.sprintf "expected >=3 beats after set_rhythm, got %d" gained)
-)
-
-(* ── Test: get_rhythm returns current value ──────────────── *)
-
-let () = test "get_rhythm returns current rhythm" (fun () ->
-  Eio_main.run @@ fun env ->
-  let clock = Eio.Stdenv.clock env in
-  let t = Pulse.create
-    ~clock
-    ~rhythm:Pulse.default_rhythm
-    ~consumers:[]
-  in
-  let r = Pulse.get_rhythm t in
-  assert (r.base_s = 60.0);
-  assert (r.min_s = 30.0);
-  Pulse.set_rhythm t { Pulse.base_s = 15.0; min_s = 10.0; max_s = 60.0; quiet = (2, 5) };
-  let r2 = Pulse.get_rhythm t in
-  assert (r2.base_s = 15.0);
-  assert (r2.min_s = 10.0);
-  assert (r2.max_s = 60.0);
-  assert (r2.quiet = (2, 5))
 )
 
 (* ── Test: concurrent shutdown does not raise ──────────────── *)

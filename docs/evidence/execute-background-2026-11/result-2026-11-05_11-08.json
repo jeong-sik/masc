@@ -1,0 +1,30 @@
+{
+  "delegation_overlap": {
+    "delegations": 288,
+    "inside": 1,
+    "remaining_sec": [
+      13.1
+    ]
+  },
+  "execute_all": {
+    "calls": 26733,
+    "hours": 67.79
+  },
+  "sleep_polls": {
+    "calls": 159,
+    "hours": 18.68,
+    "keepers": [
+      "github-pr-checker",
+      "pr-updater"
+    ]
+  },
+  "timeout_exit": {
+    "calls": 34,
+    "hours": 2.86
+  },
+  "window": {
+    "long_sec": 60.0,
+    "since": "2026-11-05T00:00:00",
+    "until": "2026-11-08T00:00:00"
+  }
+}

@@ -72,7 +72,7 @@ let dispatch_post ?(path = "/api/v1/keepers/tool-approval-mode") ?body_override 
     let response_buf = Buffer.create 1024 in
     let conn =
       Httpun.Server_connection.create (fun reqd ->
-        Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd)
+        Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) (Masc.Http_reqd.of_httpun reqd))
     in
     let body = match body_override with Some body -> body | None -> Printf.sprintf {|{"name":%S,"mode":%S}|} keeper mode in
     let request_str =

@@ -1061,7 +1061,6 @@ let child_tool_name (child : async_child) = child.tool_name
 let child_input (child : async_child) = child.input
 let child_input_schema (child : async_child) = child.input_schema
 let child_plan child = child.declared_plan
-let compiled_children plan = plan.children
 
 let next_plan_identity = Atomic.make 0
 
@@ -1657,8 +1656,6 @@ type execution_error =
       { node_id : Node_id.t
       ; tool_name : string
       }
-
-let output_node_id output = output.node_id
 
 let validate_output plan ~run_id ~node_id value =
   match node_in_plan plan node_id with

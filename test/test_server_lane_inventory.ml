@@ -246,7 +246,7 @@ let http_read ~sw ~clock ~state token =
     Fun.protect ~finally:Server_auth.clear_server_state (fun () ->
       let output = Buffer.create 1024 in
       let connection = Httpun.Server_connection.create (fun reqd ->
-        Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd) in
+        Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) (Http_reqd.of_httpun reqd)) in
       let request = Printf.sprintf
         "GET /api/v1/lanes HTTP/1.1\r\nHost: 127.0.0.1:8935\r\nOrigin: http://127.0.0.1:8935\r\n%s\r\n"
         (match token with None -> "" | Some token -> "Authorization: Bearer " ^ token ^ "\r\n") in
@@ -318,7 +318,7 @@ let h2_read ~sw ~clock ~state token =
   Server_auth.publish_server_state state;
   Fun.protect ~finally:(fun () -> Server_auth.For_testing.restore_server_state previous) (fun () ->
     let server_flow,client_flow = Eio_unix.Net.socketpair_stream ~sw () in
-    let gateway = Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:clock) ~trust_policy ~sw ~clock ~server_start_time:0. in
+    let gateway = Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:clock) ~trust_policy in
     let server = Eio.Fiber.fork_promise ~sw (fun () -> Eio.Switch.run (fun conn_sw ->
       Server_bootstrap_http.serve_h2_connection ~sw:conn_sw ~h2_request_handler:gateway
         ~h2_error_handler:(Server_h2_gateway.make_error_handler ())

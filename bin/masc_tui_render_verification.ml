@@ -147,7 +147,7 @@ let render_verification_list (state : state) =
           ~error:state.verification_error
       with
       | Page_failed -> page_failed_note
-      | Page_unread -> page_unread_note
+      | Page_unread -> page_unread_note_while ~reading:state.verification_inflight
       | Page_empty -> "  (nothing waiting on a verdict)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;
@@ -788,7 +788,7 @@ let render_harness_list (state : state) =
     let empty =
       match empty_page_of ~snapshot:state.harness ~error:state.harness_error with
       | Page_failed -> page_failed_note
-      | Page_unread -> page_unread_note
+      | Page_unread -> page_unread_note_while ~reading:state.harness_inflight
       | Page_empty -> "  (no verdicts recorded)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;

@@ -1,0 +1,76 @@
+{
+  "above_ceiling_after_lower_bound": {
+    "16384": {
+      "bytes": 79512,
+      "calls": 3
+    },
+    "32768": {
+      "bytes": 32923,
+      "calls": 1
+    },
+    "65536": {
+      "bytes": 0,
+      "calls": 0
+    }
+  },
+  "above_ceiling_before": {
+    "16384": {
+      "bytes": 21460956,
+      "calls": 71
+    },
+    "32768": {
+      "bytes": 21348475,
+      "calls": 67
+    },
+    "65536": {
+      "bytes": 21348475,
+      "calls": 67
+    }
+  },
+  "budget_bytes": 32000,
+  "calls": 753,
+  "calls_with_a_line_above_cap": 69,
+  "cap_bytes": 2000,
+  "error_detail_cut": {
+    "bytes_after": 32923,
+    "bytes_before": 1041248,
+    "calls": 1
+  },
+  "files_of_lines_above_cap": {
+    "": 60,
+    "/masc-work/wkbl-front/work/tools_list.json": 2,
+    "/masc-work/wkbl-front/work/wkbl/evidence/task-1840/after-prod/after.jsonl": 1,
+    "/masc-work/wkbl-front/work/wkbl/evidence/task-1840/before-prod/before.jsonl": 1,
+    "/masc-work/wkbl-growth/evidence/task-3215/tools_surface.json": 3
+  },
+  "keepers_with_a_line_above_cap": {
+    "wkbl-data": 11,
+    "wkbl-front": 48,
+    "wkbl-growth": 10
+  },
+  "line_bytes": {
+    "max": 291236,
+    "p50": 84,
+    "p90": 218,
+    "p99": 282960
+  },
+  "line_cut": {
+    "bytes_after_lower_bound": 202312,
+    "bytes_after_upper_bound": 2222007,
+    "bytes_before": 20401456,
+    "calls": 69
+  },
+  "lines_above_cap": 80,
+  "matched_lines": 3745,
+  "readable_calls": 642,
+  "reserialized_size_equals_result_bytes": 641,
+  "result_bytes": 22716952,
+  "unreadable": {
+    "cut_excerpt": 111
+  },
+  "window": {
+    "ledger_files": 12,
+    "since": "2026-11-06T09:52:00+00:00",
+    "until": "2026-11-07T09:52:00+00:00"
+  }
+}

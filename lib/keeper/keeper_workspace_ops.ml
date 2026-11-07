@@ -10,10 +10,7 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_tool_shared_runtime
 
-include Keeper_workspace_ops_setup
-
-(* TEL-OK: handler rename only; [render_completed_process_result] records
-   command history and failure telemetry through Keeper_workspace_ops_setup. *)
+(* TEL-OK: handler rename only. *)
 let handle_tool_search_files_with_read_authority
       ~read_authority
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)

@@ -106,6 +106,36 @@ const HttpListenerSchema = Schema.Struct({
 
 export type HttpListener = Schema.Schema.Type<typeof HttpListenerSchema>
 
+const HttpsCertificateSchema = Schema.Struct({
+  source: Schema.Literal('configured', 'self_signed'),
+  not_after: Schema.String,
+})
+
+const HttpsListenerSchema = Schema.Struct({
+  status: Schema.Literal(
+    'off',
+    'not_started',
+    'bind_failed',
+    'listening',
+    'stopped',
+    'accept_error',
+  ),
+  port: Schema.OptionFromNullOr(NonNegativeIntegerSchema),
+  certificate: Schema.OptionFromNullOr(HttpsCertificateSchema),
+  active_connections: NonNegativeIntegerSchema,
+  accepted_total: NonNegativeIntegerSchema,
+  alpn_h2_total: NonNegativeIntegerSchema,
+  alpn_http1_total: NonNegativeIntegerSchema,
+  alpn_none_total: NonNegativeIntegerSchema,
+  handshake_failures_total: NonNegativeIntegerSchema,
+  accept_errors_total: NonNegativeIntegerSchema,
+  last_accept_unix: Schema.OptionFromNullOr(NonNegativeNumberSchema),
+  last_accept_age_seconds: Schema.OptionFromNullOr(NonNegativeNumberSchema),
+  last_error: Schema.OptionFromNullOr(Schema.String),
+})
+
+export type HttpsListener = Schema.Schema.Type<typeof HttpsListenerSchema>
+
 const StreamableHttpSchema = Schema.Struct({
   endpoint: Schema.Literal('/mcp'),
   observer_stream: Schema.Literal('/mcp?sse_kind=observer'),
@@ -147,6 +177,7 @@ const ProjectionDiagnosticsSchema = Schema.Struct({
 
 const TransportHealthReadySchema = Schema.Struct({
   http_listener: HttpListenerSchema,
+  https_listener: HttpsListenerSchema,
   summary: SummarySchema,
   sse: SseOuterSchema,
   grpc: GrpcSchema,

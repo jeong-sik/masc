@@ -72,10 +72,6 @@ let keeper_default_write_root ~(config : Workspace.config) ~(meta : keeper_meta)
   keeper_playground_root ~config ~meta
 ;;
 
-let keeper_default_read_root ~(config : Workspace.config) ~(meta : keeper_meta) =
-  keeper_playground_root ~config ~meta
-;;
-
 (* #23469 (task-1733): observation partitions must interpret keeper-relative
    tool paths against the same root the file tools resolve against — the
    keeper's playground sandbox — never the server base path. Unlike
@@ -311,7 +307,33 @@ let shell_readonly_limit args =
   max 1 (min 200 (Safe_ops.json_int ~default:40 "limit" args))
 ;;
 
-let lines_to_json ?(limit = max_int) ?(max_bytes = 32_000) (text : string) : Yojson.Safe.t
+let search_result_max_bytes = 32_000
+
+(* Longest one returned line may be before it is cut. The byte budget below
+   keeps the first line whatever its size, so a file stored as one line (a
+   minified JSON dump) came back whole. From 2026-11-06T09:52Z to
+   11-07T09:52Z, 67 Grep calls each carried one 285 KB matched line: 21.3 MB,
+   13.0% of the day's tool result bytes, and every result was above the
+   65,536-byte inline ceiling of every lane, so the Keeper held a blob marker.
+   The other 4,980 matched lines in that window: 4,967 were at most 2,000
+   bytes. See docs/evidence/grep-long-lines-2026-11. *)
+let default_max_line_bytes = 2_000
+
+let cut_to_bytes ~max_bytes text =
+  let length = String.length text in
+  if length <= max_bytes
+  then text
+  else (
+    let kept = String_util.utf8_prefix ~max_bytes text in
+    Printf.sprintf "%s...[cut: %d of %d bytes kept]" kept (String.length kept) length)
+;;
+
+let lines_to_json
+      ?(limit = max_int)
+      ?(max_bytes = search_result_max_bytes)
+      ?(max_line_bytes = default_max_line_bytes)
+      (text : string)
+  : Yojson.Safe.t
   =
   let all_nonempty =
     String.split_on_char '\n' text
@@ -322,6 +344,12 @@ let lines_to_json ?(limit = max_int) ?(max_bytes = 32_000) (text : string) : Yoj
     if total > limit
     then take limit all_nonempty, total - limit
     else all_nonempty, 0
+  in
+  (* A line longer than the whole budget would still pass as the first one,
+     so each line is cut to at most the budget before it is counted. *)
+  let max_line_bytes = min max_line_bytes max_bytes in
+  let truncated_by_limit =
+    List.map (cut_to_bytes ~max_bytes:max_line_bytes) truncated_by_limit
   in
   (* Byte-budget: accumulate lines until max_bytes is reached.
      This prevents 200 long lines from producing 500KB+ JSON arrays
@@ -435,41 +463,13 @@ let keeper_tools_list_json ~(meta : keeper_meta) =
        ])
 ;;
 
+(* The full rows of a 203 Tool and 52 Skill surface were 292,804 bytes, above
+   every lane's inline ceiling (16,384 to 65,536), so all 53 calls between
+   2026-11-06T09:52Z and 11-07T09:52Z reached the model as a blob marker and a
+   200 character preview. The inventory lists names and availability, 9,888
+   bytes for the same surface. *)
 let keeper_tools_list_json_for_surface ~capability_surface =
-  let descriptors = Keeper_capability_surface.descriptors capability_surface in
-  let active_name_set, _ = active_descriptor_names_for_descriptors descriptors in
-  let descriptor_surface =
-    Keeper_capability_surface.tool_capabilities capability_surface
-    |> List.map (fun (capability : Keeper_capability_surface.tool_capability) ->
-      `Assoc
-        (Keeper_tool_descriptor.discovery_fields capability.descriptor
-         @ [ ( "active_names"
-             , Json_util.json_string_list
-                 (descriptor_active_names active_name_set capability.descriptor) )
-           ; ( "availability"
-             , `String
-                 (Keeper_capability_surface.capability_availability_to_string
-                    capability.availability) )
-           ]
-         @ Keeper_capability_surface.availability_detail_fields
-             capability.availability))
-  in
-  let skills =
-    Keeper_capability_surface.skill_capabilities capability_surface
-    |> List.map Keeper_capability_surface.skill_capability_to_yojson
-  in
-  Yojson.Safe.to_string
-    (`Assoc
-       [ "schema", `String "masc.keeper.capability_surface.v1"
-          ; ( "skill_snapshot_revision"
-            , `String
-                (Keeper_capability_surface.skill_snapshot_revision capability_surface
-                 |> Skill_catalog_snapshot.snapshot_revision_to_string) )
-          ; ( "surface_digest"
-            , `String (Keeper_capability_surface.digest capability_surface) )
-       ; "descriptor_surface", `List descriptor_surface
-       ; "skills", `List skills
-       ])
+  Yojson.Safe.to_string (Keeper_capability_surface.inventory_to_yojson capability_surface)
 ;;
 
 let keeper_capability_search_json_for_surface ~capability_surface ~query =

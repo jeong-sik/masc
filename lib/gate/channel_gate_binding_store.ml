@@ -151,11 +151,6 @@ let read_json_file_result path =
         | Unix.Unix_error (code, fn, arg) ->
           Error (unix_error_message path fn arg code))
 
-let read_json_file_opt path =
-  match read_json_file_result path with
-  | Ok json -> json
-  | Error _ -> None
-
 module String_set = Set.Make (String)
 
 let normalize_bindings_json (json : Yojson.Safe.t) :

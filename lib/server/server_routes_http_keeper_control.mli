@@ -5,7 +5,7 @@
     [Server_routes_http_routes_dashboard]. *)
 
 val handle_keeper_tool_approval :
-  actor:string -> Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+  actor:string -> Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> unit
 (** Drives [POST /api/v1/keepers/tool-approval].
 
     [actor] is the authenticated caller (task-1662): the decision outlives
@@ -23,7 +23,7 @@ val handle_keeper_tool_approval :
     listening for it. *)
 
 val handle_keeper_turns_list :
-  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+  Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> unit
 (** Drives [GET /api/v1/keepers/turns].
 
     One row per registered keeper naming whether a turn is running right now
@@ -37,7 +37,7 @@ val handle_keeper_turns_list :
     selects payload volume and never replaces the exact Owner token check. *)
 
 val handle_keeper_tool_approvals_list :
-  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+  Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> unit
 (** Drives [GET /api/v1/keepers/tool-approvals].
 
     Projects every held tool call from the shared approval registry:
@@ -50,7 +50,7 @@ val handle_keeper_tool_approvals_list :
     sees it, so it rides with the question. *)
 
 val handle_keeper_tool_approval_mode_get :
-  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+  Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> unit
 (** Drives [GET /api/v1/keepers/tool-approval-mode]: the keepers moved off
     the default stance, as
     [{overrides: [{keeper, mode}], default:"auto", restore_error}]. A keeper
@@ -61,7 +61,7 @@ val handle_keeper_tool_approval_mode_get :
 
 val handle_keeper_tool_approval_mode_set :
   actor:string ->
-  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+  Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> unit
 (** Drives [POST /api/v1/keepers/tool-approval-mode]. Reads
     [{"name", "mode"}] where mode is ["auto"] or ["yolo"], validates the
     keeper is registered, and persists the stance the approval gate
@@ -70,12 +70,12 @@ val handle_keeper_tool_approval_mode_set :
     recorded in the change log and the persisted row. *)
 
 val handle_keeper_run_next :
-  Mcp_server.server_state -> actor:string -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+  Mcp_server.server_state -> actor:string -> Httpun.Request.t -> Http_reqd.t -> unit
 (** Prioritize the authenticated caller's exact queued operation, then signal
     only the observed current turn. Existing inputs and other queue order stay intact. *)
 
 val handle_keeper_turn_interrupt :
-  actor:string -> Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+  actor:string -> Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> unit
 (** Drives [POST /api/v1/keepers/turn/interrupt].
     Accepts an [interrupt_token] from the turns listing to signal only the
     observed switch. A changed or repeated token is declined without touching

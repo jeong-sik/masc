@@ -1140,7 +1140,7 @@ let render_lane_run_list (state : state) ~(lane : Lane_run_identity.t) =
         empty_page_of ~snapshot:state.lane_runs ~error:state.lane_runs_error
       with
       | Page_failed -> page_failed_note
-      | Page_unread -> page_unread_note
+      | Page_unread -> page_unread_note_while ~reading:state.lane_runs_loading
       | Page_empty -> "  (no retained runs for this lane)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;
@@ -2317,7 +2317,7 @@ let render_clients (state : state) =
     let empty =
       match empty_page_of ~snapshot:state.clients_surface ~error:state.clients_surface_error with
       | Page_failed -> page_failed_note
-      | Page_unread -> page_unread_note
+      | Page_unread -> page_unread_note_while ~reading:state.clients_surface_inflight
       | Page_empty -> "  (nobody attached)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;

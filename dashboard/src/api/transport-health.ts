@@ -9,6 +9,7 @@ import {
   type HotSession,
   type HttpListener,
   type HttpRateLimitResponse,
+  type HttpsListener,
   type TransportHealthData,
   type TransportHealthSnapshot,
   type TransportHealthSchemaDriftError,
@@ -18,6 +19,7 @@ export type {
   HotSession,
   HttpListener,
   HttpRateLimitResponse,
+  HttpsListener,
   TransportHealthData,
   TransportHealthSnapshot,
 }

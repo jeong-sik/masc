@@ -182,27 +182,27 @@ val handle_post_mcp :
   deps:deps ->
   ?profile:tool_profile ->
   Httpun.Request.t ->
-  Httpun.Reqd.t ->
+  Http_reqd.t ->
   unit
 val handle_get_mcp :
   deps:deps ->
   ?profile:tool_profile ->
   ?sse_kind:Sse.session_kind ->
   Httpun.Request.t ->
-  Httpun.Reqd.t ->
+  Http_reqd.t ->
   unit
 val handle_get_operator_mcp :
-  deps:deps -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+  deps:deps -> Httpun.Request.t -> Http_reqd.t -> unit
 val handle_delete_mcp :
   deps:deps ->
   ?profile:tool_profile ->
   Httpun.Request.t ->
-  Httpun.Reqd.t ->
+  Http_reqd.t ->
   unit
 val handle_ag_ui_events :
-  deps:deps -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+  deps:deps -> Httpun.Request.t -> Http_reqd.t -> unit
 val handle_presence_events :
-  deps:deps -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+  deps:deps -> Httpun.Request.t -> Http_reqd.t -> unit
 
 module For_testing : sig
   val with_ping_interval : float -> (unit -> 'a) -> 'a

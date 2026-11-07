@@ -144,29 +144,29 @@ val handle_get_mcp :
   ?profile:Server_mcp_transport_http.tool_profile ->
   ?sse_kind:Sse.session_kind ->
   Httpun.Request.t ->
-  Httpun.Reqd.t ->
+  Http_reqd.t ->
   unit
 
 val handle_get_operator_mcp :
-  Httpun.Request.t -> Httpun.Reqd.t -> unit
+  Httpun.Request.t -> Http_reqd.t -> unit
 
 val handle_post_mcp :
   ?profile:Server_mcp_transport_http.tool_profile ->
   Httpun.Request.t ->
-  Httpun.Reqd.t ->
+  Http_reqd.t ->
   unit
 
 val handle_delete_mcp :
   ?profile:Server_mcp_transport_http.tool_profile ->
   Httpun.Request.t ->
-  Httpun.Reqd.t ->
+  Http_reqd.t ->
   unit
 
 val handle_ag_ui_events :
-  Httpun.Request.t -> Httpun.Reqd.t -> unit
+  Httpun.Request.t -> Http_reqd.t -> unit
 
 val handle_presence_events :
-  Httpun.Request.t -> Httpun.Reqd.t -> unit
+  Httpun.Request.t -> Http_reqd.t -> unit
 
 (** {1 Misc helpers} *)
 
@@ -184,7 +184,7 @@ val mcp_transport_http_deps :
 val respond_cached_read :
   ?compress:bool ->
   request:Httpun.Request.t ->
-  reqd:Httpun.Reqd.t ->
+  reqd:Http_reqd.t ->
   cache_key:string ->
   ttl:float ->
   Yojson.Safe.t Pool_work.t ->

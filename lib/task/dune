@@ -43,8 +43,6 @@
   masc.activity_graph
    masc.agent_core.digest
   base64
-  masc_random_id
-  masc.config
   masc_types
   masc_core
   masc_log

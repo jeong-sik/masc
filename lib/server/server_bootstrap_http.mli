@@ -38,16 +38,46 @@ val listen_socket :
     the listening-socket resource owned by the supplied switch.
     [address] is the one {!make_http_config} wrote into [config]. *)
 
+(** The HTTPS listener of one boot (RFC-0512 D6): its port, the TLS
+    configuration built from {!Server_tls_material}, and where the
+    certificate came from. *)
+type https_listener =
+  { https_port : int
+  ; tls : Tls.Config.server
+  ; certificate_source : Https_listener_metrics.certificate_source
+  }
+
+val https_listener_of_env :
+  base_path:string -> bind_host:string -> (https_listener option, string) result
+(** [Ok None] when [MASC_HTTPS_PORT] is 0. Otherwise loads or generates the
+    certificate ({!Server_tls_material.load_or_generate}) and records it in
+    {!Https_listener_metrics}. [Error] is the reason the listener cannot
+    exist, for the operator; the caller refuses the boot with it. *)
+
+val listen_https_socket :
+  sw:Eio.Switch.t ->
+  net:[> `Network | `Platform of [> `Generic ] as 'a ] Eio.Resource.t ->
+  address:Ipaddr.t ->
+  config:Http_server_eio.config ->
+  https_listener option ->
+  (https_listener * 'a Eio.Net.listening_socket_ty Eio.Resource.t) option
+(** Binds [address:https_port] like {!listen_socket}. A bind failure is
+    recorded as {!Https_listener_metrics.Bind_failed}, logged, and answered
+    with [None]: the cleartext listener still serves and HTTPS stays off
+    until the next boot. *)
+
 val print_startup_banner :
   config:Http_server_eio.config ->
+  https:https_listener option ->
   resolved_base:string ->
   base_path:string ->
   masc_dir:string ->
   path_diagnostics:Server_base_path_diagnostics.t ->
   unit
-(** [print_startup_banner ~config ~resolved_base ~base_path
+(** [print_startup_banner ~config ~https ~resolved_base ~base_path
       ~masc_dir ~path_diagnostics] prints the MASC server startup
-    banner to stdout (host:port, base paths, optional diagnostics).
+    banner to stdout (host:port, the HTTPS port when the listener exists,
+    base paths, optional diagnostics).
     Pinned at the contract seam — operator log scrapers parse the
     "MASC MCP Server listening on http://" line. *)
 
@@ -83,7 +113,7 @@ val serve :
 
 val serve_h2_connection :
   ?streams:Server_h2_stream_registry.t ->
-  ?resources:Server_h2_response_resources.t ->
+  ?resources:Http_h2_response_ledger.t ->
   sw:Eio.Switch.t ->
   h2_request_handler:(request_sw:Eio.Switch.t -> Eio.Net.Sockaddr.stream -> H2.Reqd.t -> unit) ->
   h2_error_handler:
@@ -134,3 +164,24 @@ val serve_auto :
     default serve loop so existing HTTP/1.1 clients keep working
     while H2-capable clients can upgrade.  [addr_label] is
     embedded as [[auto <addr_label>]] in error logs. *)
+
+val serve_tls :
+  sw:Eio.Switch.t ->
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  socket:[> [> `Generic | `Unix ] Eio.Net.listening_socket_ty ] Eio.Resource.t ->
+  addr_label:string ->
+  tls:Tls.Config.server ->
+  request_handler:(Eio.Net.Sockaddr.stream -> Httpun.Reqd.t Gluten.Reqd.t -> unit) ->
+  h2_request_handler:(request_sw:Eio.Switch.t -> Eio.Net.Sockaddr.stream -> H2.Reqd.t -> unit) ->
+  h2_error_handler:
+    (Eio.Net.Sockaddr.stream -> ?request:H2.Request.t -> H2.Server_connection.error -> (H2.Headers.t -> H2.Body.Writer.t) -> unit) ->
+  unit
+(** [serve_tls] is the HTTPS accept loop (RFC-0512 D6). Every accepted
+    connection runs the TLS handshake with [tls]; the ALPN result picks the
+    connection handler: [h2] runs {!serve_h2_connection} with a payload
+    capacity shared by this listener's HTTP/2 connections, [http/1.1] and no
+    ALPN run httpun. A handshake that ends in an alert, a protocol failure or
+    a closed peer is counted in {!Https_listener_metrics} and logged at
+    debug. The listener's state is {!Https_listener_metrics}, never the
+    cleartext listener's {!Transport_metrics} mode. [addr_label] is embedded
+    as [[tls <addr_label>]] in log lines. *)

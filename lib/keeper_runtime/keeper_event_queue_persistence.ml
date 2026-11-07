@@ -1111,10 +1111,6 @@ let load_with_read_errors ~projection ~base_path ~keeper_name =
     }
 ;;
 
-let load_snapshot_with_errors ~base_path ~keeper_name =
-  load_with_read_errors ~projection:State.pending ~base_path ~keeper_name
-;;
-
 let load_selections_with_errors ~base_path ~keeper_name =
   load_with_read_errors ~projection:State.pending_selections ~base_path ~keeper_name
 ;;

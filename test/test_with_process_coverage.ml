@@ -80,13 +80,6 @@ let test_stress_no_leak () =
        before after)
     true (after <= before + 2)
 
-let test_drain_to_buffer () =
-  let buf, _ =
-    WP.with_process_args_in "/bin/echo" [| "/bin/echo"; "ab" |]
-      WP.drain_to_buffer
-  in
-  check string "buffer contents" "ab\n" (Buffer.contents buf)
-
 let test_process_guard_wraps_helpers () =
   let depth = Atomic.make 0 in
   let high_water = Atomic.make 0 in
@@ -126,8 +119,6 @@ let () =
       ( "happy_path",
         [
           test_case "echo returns stdout" `Quick test_happy_path;
-          test_case "drain_to_buffer fills buffer" `Quick
-            test_drain_to_buffer;
         ] );
       ( "guard",
         [ test_case "process guard wraps helpers" `Quick

@@ -1,7 +1,5 @@
 open Alcotest
 
-module Helpers = Server_h2_gateway_helpers
-
 type response = { status : int; headers : (string * string) list; body : string }
 
 let asset_body = String.concat "" (List.init 1000 (fun _ -> "export const text = '한글🙂';\n"))
@@ -133,8 +131,8 @@ let test_h1 encoding () = with_assets @@ fun () ->
     Eio.Fiber.fork_daemon ~sw:conn_sw (fun () ->
       Httpun_eio.Server.create_connection_handler ~sw:conn_sw
         ~request_handler:(fun _ wrapped ->
-          let reqd = wrapped.Gluten.Reqd.reqd in
-          let request = Httpun.Reqd.request reqd in
+          let request = Httpun.Reqd.request wrapped.Gluten.Reqd.reqd in
+          let reqd = Masc.Http_reqd.of_gluten wrapped in
           if String.equal path slow_path then Eio.Promise.resolve start ();
           Server_routes_http_pages.serve_dashboard_static
             ("assets/" ^ Filename.basename path) request reqd;
@@ -167,15 +165,13 @@ let test_h2 encoding () = with_assets @@ fun () ->
   with_occupied_pool @@ fun ~sw ~release ->
   let started, start = Eio.Promise.create () in
   let finished, finish = Eio.Promise.create () in
-  let handler ~request_sw:_ _ reqd =
-    let request = H2.Reqd.request reqd in
-    let path = request.target in
+  let handler ~request_sw _ h2_reqd =
+    let path = (H2.Reqd.request h2_reqd).target in
     if String.equal path slow_path then Eio.Promise.resolve start ();
-    let httpun_request = Httpun.Request.create
-      ~headers:(Httpun.Headers.of_list (H2.Headers.to_list request.headers)) `GET path in
-    check bool "actual dashboard asset route matched" true
-      (Server_h2_gateway_routes_extra.dispatch ~h2_reqd:reqd ~httpun_request
-        ~cors:[] ~path ~config:None ~gate:(fun f -> f ()) `GET);
+    let reqd = Masc.Http_reqd.of_h2 ~stream_sw:request_sw
+      ~ledger:(Masc.Http_h2_response_ledger.current_exn ()) h2_reqd in
+    Server_routes_http_pages.serve_dashboard_static
+      ("assets/" ^ Filename.basename path) (Masc.Http_reqd.request reqd) reqd;
     if String.equal path slow_path then Eio.Promise.resolve finish () in
   let server_flow, client_flow = Eio_unix.Net.socketpair_stream ~sw () in
   let server = Eio.Fiber.fork_promise ~sw (fun () ->

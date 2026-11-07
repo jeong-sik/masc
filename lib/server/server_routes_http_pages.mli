@@ -62,20 +62,20 @@ val fresh_graphql_csp_nonce : unit -> string
     the per-request nonce. *)
 
 val serve_graphiql_asset :
-  string -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+  string -> Httpun.Request.t -> Http_reqd.t -> unit
 (** Serves a GraphiQL static asset by name (CSS / JS /
     favicon).  404s on miss. *)
 
 val serve_playground_asset :
-  string -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+  string -> Httpun.Request.t -> Http_reqd.t -> unit
 (** Serves a GraphQL Playground static asset by name. *)
 
-val handle_graphql : Httpun.Request.t -> Httpun.Reqd.t -> unit
+val handle_graphql : Httpun.Request.t -> Http_reqd.t -> unit
 (** Dispatches [GET /graphql] (Playground HTML) and
     [POST /graphql] (query execution) to their
     respective internal handlers. *)
 
-val handle_post_graphql : Httpun.Request.t -> Httpun.Reqd.t -> unit
+val handle_post_graphql : Httpun.Request.t -> Http_reqd.t -> unit
 (** Handles [POST /graphql] body — invokes the GraphQL
     schema, threads {!get_server_state_result} for
     request context, and surfaces 503 with
@@ -117,11 +117,11 @@ val favicon_svg : string
 (** {1 Legacy dashboard handlers} *)
 
 val serve_dashboard_index :
-  Httpun.Request.t -> Httpun.Reqd.t -> unit
+  Httpun.Request.t -> Http_reqd.t -> unit
 (** Serves the legacy dashboard's [index.html]. *)
 
 val serve_dashboard_static :
-  string -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+  string -> Httpun.Request.t -> Http_reqd.t -> unit
 (** Serves a dashboard static asset by name. Negotiated compression may
     suspend on the CPU pool; the response is written on the calling fiber. *)
 
@@ -141,6 +141,6 @@ val server_state_error_json : string -> string
 
 (** {1 Misc} *)
 
-val serve_favicon : Httpun.Request.t -> Httpun.Reqd.t -> unit
+val serve_favicon : Httpun.Request.t -> Http_reqd.t -> unit
 (** Serves [/favicon.svg] (inline SVG bytes from
     {!favicon_svg}). *)

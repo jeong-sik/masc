@@ -101,7 +101,7 @@ let handle_ag_ui_events ~deps request reqd =
                       Log.Server.debug "ag-ui SSE runtime unavailable for session %s: %s"
                         session_id msg;
                       Sse.unregister_if_current session_id client_id;
-                      Httpun.Reqd.respond_with_string reqd response ""
+                      Http_reqd.respond_with_string reqd response ""
                   | Ok runtime ->
                   let response =
                     Server_sse_response.respond ~clock:runtime.clock
@@ -233,7 +233,7 @@ let handle_presence_events ~deps request reqd =
                 "presence SSE runtime unavailable for session %s: %s"
                 session_id msg;
               Sse.unregister_if_current session_id client_id;
-              Httpun.Reqd.respond_with_string reqd response ""
+              Http_reqd.respond_with_string reqd response ""
           | Ok runtime ->
           let response =
             Server_sse_response.respond ~clock:runtime.clock

@@ -2,7 +2,6 @@
  (names
   test_exec_types
   test_bash_parser
-  test_bash_history
   test_exec_buffer
   test_shell_ir_oracle
   test_exec_dispatch_docker_streaming
@@ -14,16 +13,13 @@
  (libraries
   masc_exec
   masc_exec_bash_parser
-  masc_exec_command_gate
   masc_process
   masc_core
-  masc_config
   alcotest
   eio
   eio_main
   yojson
-  unix
-  re)
+  unix)
  (deps
   (glob_files fixtures/shell_ir_oracle/*.json)))
 

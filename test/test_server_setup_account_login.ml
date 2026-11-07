@@ -4,7 +4,7 @@ open Masc
 let request router ~token ~method_ ~path ~body =
   let output = Buffer.create 512 in
   let connection = Httpun.Server_connection.create (fun reqd ->
-    Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd) in
+    Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) (Http_reqd.of_httpun reqd)) in
   let authorization = match token with None -> "" | Some token -> "Authorization: Bearer " ^ token ^ "\r\n" in
   let wire = Printf.sprintf "%s %s HTTP/1.1\r\nHost: localhost\r\n%sContent-Length: %d\r\n\r\n%s"
     method_ path authorization (String.length body) body in

@@ -5,7 +5,7 @@
 open Alcotest
 
 module Identity = Masc.Keeper_github_identity
-module Resources = Server_h2_response_resources
+module Resources = Masc.Http_h2_response_ledger
 module Registry = Server_h2_stream_registry
 
 type capacity = Exact_frame | One_byte_short
@@ -138,8 +138,7 @@ let with_gateway capacity run =
                 ~bind_host:"localhost" ~bind_port:8935 ~explicit_base_url:None
                 |> Result.map_error Server_request_authority.trust_policy_error_to_string
                 |> require in
-              let gateway = Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:(Eio.Stdenv.clock env)) ~trust_policy ~sw
-                ~clock:(Eio.Stdenv.clock env) ~server_start_time:0. in
+              let gateway = Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:(Eio.Stdenv.clock env)) ~trust_policy in
               let escaped = ref [] in
               let login_closed, close_login = Eio.Promise.create () in
               let sibling_closed, close_sibling = Eio.Promise.create () in
@@ -147,7 +146,8 @@ let with_gateway capacity run =
                 if String.equal (H2.Reqd.request reqd).target "/sibling" then (
                   Eio.Switch.on_release request_sw (fun () ->
                     Eio.Promise.resolve close_sibling ());
-                  Server_h2_gateway_helpers.h2_respond_text reqd "alive"
+                  Masc.Http_server_eio.Response.text "alive"
+                    (Masc.Http_reqd.of_h2 ~stream_sw:request_sw ~ledger:(Resources.current_exn ()) reqd)
                 ) else (
                   Eio.Switch.on_release request_sw (fun () ->
                     Eio.Promise.resolve close_login ());

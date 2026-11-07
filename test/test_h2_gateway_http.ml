@@ -1,0 +1,604 @@
+(** HTTP/2 requests run the HTTP/1.1 route table through the shared ingress.
+    These tests drive the real adapter over an h2c connection against the
+    production route table and against small tables, and check that a request
+    gets the answer the table's registration kind gives it. *)
+
+open Alcotest
+
+(* Public reads answer 503 until the server state is marked ready. *)
+let () = Masc.Server_startup_state.mark_state_ready () |> Result.get_ok
+
+let rec remove_tree path =
+  if Sys.is_directory path then (
+    Array.iter (fun name -> remove_tree (Filename.concat path name)) (Sys.readdir path);
+    Unix.rmdir path)
+  else Sys.remove path
+
+let with_gateway ?(on_routes = fun _ -> ()) ?(with_runtime = fun ~env:_ ~sw:_ run -> run ()) ~make_routes run =
+  let base_path = Filename.temp_dir "h2-gateway-" "" in
+  let previous_state = Server_auth.For_testing.snapshot_server_state () in
+  Fun.protect ~finally:(fun () ->
+    Masc.Board_dispatch.reset_for_test ();
+    Masc.Board.reset_global_for_test ();
+    Server_auth.For_testing.restore_server_state previous_state;
+    remove_tree base_path) (fun () ->
+    Eio_main.run @@ fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 10.0 @@ fun () ->
+    Eio.Switch.run @@ fun sw ->
+    Eio_context.with_test_env ~net:(Eio.Stdenv.net env)
+      ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw
+      (fun () ->
+        let state = Masc.Mcp_server.For_testing.create_state ~base_path in
+        ignore (Masc.Workspace.init (Masc.Mcp_server.workspace_config state) ~agent_name:None);
+        Auth.save_auth_config base_path
+          { Masc_domain.default_auth_config with enabled = true; require_token = true };
+        let player =
+          match Auth.create_token base_path ~agent_name:"guest" ~role:Masc_domain.Player with
+          | Ok (token, _) -> token
+          | Error error -> fail (Masc_domain.masc_error_to_string error)
+        in
+        (* A Player holds only CanPlayMachine (#39707): strict Public_read
+           paths demand CanReadState, so positive read assertions use this
+           Worker token while Player assertions lock the designed refusal. *)
+        let reader =
+          match Auth.create_token base_path ~agent_name:"reader" ~role:Masc_domain.Worker with
+          | Ok (token, _) -> token
+          | Error error -> fail (Masc_domain.masc_error_to_string error)
+        in
+        Server_auth.For_testing.restore_server_state (Some state);
+        let trust_policy =
+          match
+            Server_request_authority.make_trust_policy
+              ~bind_host:"localhost" ~bind_port:8935 ~explicit_base_url:None
+          with
+          | Ok policy -> policy
+          | Error error -> fail (Server_request_authority.trust_policy_error_to_string error)
+        in
+        let clock = Eio.Stdenv.clock env in
+        let routes = make_routes ~sw ~clock in
+        on_routes routes;
+        let handler =
+          Server_h2_gateway.make_request_handler ~trust_policy ~routes
+        in
+        let server_flow, client_flow = Eio_unix.Net.socketpair_stream ~sw () in
+        let server = Eio.Fiber.fork_promise ~sw (fun () ->
+          Eio.Switch.run @@ fun conn_sw ->
+          Server_bootstrap_http.serve_h2_connection ~sw:conn_sw
+            ~h2_request_handler:handler
+            ~h2_error_handler:(Server_h2_gateway.make_error_handler ())
+            (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321)) server_flow) in
+        let closing = ref false in
+        let client = H2_eio.Client.create_connection ~sw
+          ~error_handler:(fun _ -> if not !closing then fail "H2 connection error") client_flow in
+        Fun.protect ~finally:(fun () ->
+          closing := true;
+          Eio.Flow.shutdown client_flow `All) (fun () -> with_runtime ~env ~sw (fun () -> run ~player ~reader client));
+        Eio.Promise.await_exn server))
+
+let request_with_headers ?token ?(extra_headers = []) ~meth client path =
+  let result, resolve = Eio.Promise.create () in
+  let headers = [":authority", "localhost:8935"]
+    @ (match token with None -> [] | Some token -> ["authorization", "Bearer " ^ token])
+    @ extra_headers in
+  let req = H2.Request.create ~scheme:"http" meth path ~headers:(H2.Headers.of_list headers) in
+  let writer = H2_eio.Client.request client ~flush_headers_immediately:true req
+    ~error_handler:(fun _ -> if not (Eio.Promise.is_resolved result) then
+      Eio.Promise.resolve resolve (Error "stream failed"))
+    ~response_handler:(fun response reader ->
+      let bytes = Buffer.create 256 in
+      let rec read () = H2.Body.Reader.schedule_read reader
+        ~on_eof:(fun () -> Eio.Promise.resolve resolve
+          (Ok (H2.Status.to_code response.status, H2.Headers.to_list response.headers, Buffer.contents bytes)))
+        ~on_read:(fun chunk ~off ~len ->
+          Buffer.add_string bytes (Bigstringaf.substring chunk ~off ~len); read ()) in
+      read ()) in
+  H2.Body.Writer.close writer;
+  match Eio.Promise.await result with Ok response -> response | Error detail -> fail detail
+
+let request ?token ~meth client path =
+  let status, _, body = request_with_headers ?token ~meth client path in
+  status, body
+
+let status ?token ~meth client path = fst (request ?token ~meth client path)
+
+let production ~sw ~clock = Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock
+
+let strict value run =
+  Masc_test_deps.with_process_env "MASC_HTTP_AUTH_STRICT" value run
+
+(* A route registered as [Public_read] asks for a credential under strict auth
+   on HTTP/2 as on HTTP/1.1. *)
+let test_public_read_follows_the_router () =
+  with_gateway ~make_routes:production (fun ~player:_ ~reader:_ client ->
+    strict None (fun () ->
+      check int "agent card, default config" 200
+        (status ~meth:`GET client "/.well-known/agent.json"));
+    strict (Some "1") (fun () ->
+      check int "agent card, strict config" 401
+        (status ~meth:`GET client "/.well-known/agent.json");
+      check int "agent-card.json, strict config" 401
+        (status ~meth:`GET client "/.well-known/agent-card.json");
+      check int "a route that is Always_public stays open" 200
+        (status ~meth:`GET client "/health")))
+
+let test_token_permission_follows_the_router () =
+  with_gateway ~make_routes:production (fun ~player ~reader:_ client ->
+    check int "no credential" 401 (status ~meth:`GET client "/api/v1/lanes");
+    check int "a Player token lacks the CanAdmin the router records" 403
+      (status ~token:player ~meth:`GET client "/api/v1/lanes"))
+
+(* The keepers prefix is [Subpath_dispatch]: the table holds no kind for its
+   sub-routes, so the handler checks the token itself. *)
+let test_subpath_routes_check_the_token_themselves () =
+  with_gateway ~make_routes:production (fun ~player:_ ~reader:_ client ->
+    check int "github identity needs a credential" 401
+      (status ~meth:`GET client "/api/v1/keepers/someone/github-identity"))
+
+(* [namespace-truth] was an alias only HTTP/2 served. *)
+let test_a_path_the_router_lacks_is_not_found () =
+  with_gateway ~make_routes:production (fun ~player:_ ~reader:_ client ->
+    check int "namespace-truth" 404
+      (status ~meth:`GET client "/api/v1/dashboard/namespace-truth"));
+  with_gateway
+    ~make_routes:(fun ~sw:_ ~clock:_ -> Masc.Http_server_eio.Router.create ())
+    (fun ~player:_ ~reader:_ client ->
+      check int "an empty table" 404 (status ~meth:`GET client "/health"));
+  with_gateway
+    ~make_routes:(fun ~sw:_ ~clock:_ ->
+      Masc.Http_server_eio.Router.create ()
+      |> Server_route.post Server_route.Always_public "/health" (fun _request _reqd -> ()))
+    (fun ~player:_ ~reader:_ client ->
+      check int "a method the table lacks" 405 (status ~meth:`GET client "/health"))
+
+let test_fusion_workspace_admission () =
+  with_gateway ~make_routes:production (fun ~player ~reader:_ client ->
+    strict None (fun () ->
+      let state = match Server_auth.For_testing.snapshot_server_state () with
+        | Some state -> state | None -> fail "fixture server has no workspace" in
+      let config = Masc.Mcp_server.workspace_config state in
+      let base = Unix.realpath config.base_path in
+      let root = Unix.realpath (Masc.Workspace.masc_dir config) in
+      let target path fields = Uri.with_query (Uri.of_string path) fields |> Uri.to_string in
+      let expected = [ "expected_base_path", [ base ]; "expected_masc_root", [ root ] ] in
+      let foreign = [ "expected_base_path", [ base ^ "/foreign" ]; "expected_masc_root", [ root ] ] in
+      let receipt = Masc.Workspace.read_precondition_admission_header in
+      let read path fields = request_with_headers ~token:player ~meth:`GET client (target path fields) in
+      Masc.Board.reset_global_for_test ();
+      Masc.Board_dispatch.reset_for_test ();
+      Result.get_ok (Masc.Board_dispatch.init_jsonl ~base_path:base
+        ~recipient_lookup:Masc.Recipient_lookup.none_declared ());
+      let post = match Masc.Board_dispatch.create_post ~author:"fixture" ~content:"original"
+          ~post_kind:Masc.Board.System_post () with
+        | Ok post -> post
+        | Error error -> fail (Masc.Board.Post_publication_failure.to_string error) in
+      let code, headers, _ = read "/api/v1/dashboard/fusion-runs" expected in
+      check int "bound list succeeds" 200 code;
+      check bool "bound list attests workspace" true (List.mem receipt headers);
+      let code, headers, _ = read "/api/v1/dashboard/fusion-runs" foreign in
+      check int "foreign list is refused before projection" 409 code;
+      check bool "foreign list has no admission receipt" false (List.mem receipt headers);
+      let code, _, _ = read "/api/v1/dashboard/fusion-runs" [ "expected_base_path", [ base ] ] in
+      check int "partial workspace precondition is refused" 400 code;
+      let code, headers, _ = read "/api/v1/dashboard/fusion-runs/unknown" expected in
+      check int "bound missing detail remains a 404" 404 code;
+      check bool "bound detail attests workspace" true (List.mem receipt headers);
+      let code, _, _ = read "/api/v1/dashboard/fusion-runs/unknown" foreign in
+      check int "foreign detail is refused before lookup" 409 code;
+      let code, headers, _ = read "/api/v1/dashboard/fusion-runs" [] in
+      check int "unbound legacy list remains available" 200 code;
+      check bool "unbound list is not attested" false (List.mem receipt headers);
+      let board = "/api/v1/board/" ^ Masc.Board.Post_id.to_string post.id ^ "?format=flat" in
+      let board_target fields = Uri.with_query (Uri.of_string board) (("format", ["flat"]) :: fields) |> Uri.to_string in
+      let read_board fields = request_with_headers ~meth:`GET client (board_target fields) in
+      let code, headers, _ = read_board expected in
+      check int "bound Board original is readable" 200 code;
+      check bool "bound Board original attests workspace" true (List.mem receipt headers);
+      let code, headers, _ = read_board foreign in
+      check int "foreign Board original is refused before lookup" 409 code;
+      check bool "foreign Board original has no receipt" false (List.mem receipt headers);
+      let code, _, _ = read board expected in
+      check int "optional reaction actor still rejects the Player token" 403 code;
+      let code, _, _ = read board foreign in
+      check int "foreign workspace is refused before reaction auth, as on HTTP/1.1" 409 code;
+      strict (Some "1") (fun () ->
+        let code, _, _ = read_board expected in
+        check int "strict mode still requires authentication" 401 code)))
+
+let test_physical_skill_turn_evidence () =
+  with_gateway ~make_routes:production (fun ~player ~reader client ->
+    let state = match Server_auth.For_testing.snapshot_server_state () with
+      | Some state -> state | None -> fail "fixture server has no workspace" in
+    let config = Masc.Mcp_server.workspace_config state in
+    let module Ledger = Masc.Keeper_skill_activation_ledger in
+    let fixture = Yojson.Safe.from_file "fixtures/skill-ledger-async-actions.json" in
+    let canonical = match Ledger.of_projection_yojson fixture with
+      | Ok ledger -> ledger | Error error -> fail (Ledger.decode_error_code error) in
+    let origin = Ledger.session_id canonical in
+    let origin_dir = Masc.Keeper_fs.keeper_session_dir config (Keeper_id.Trace_id.to_string origin) in
+    Unix.mkdir origin_dir 0o700;
+    let activations = Ledger.activations canonical in
+    List.iter (fun activation -> match Ledger.record ~keeper_name:"skill-keeper-fixture" ~config ~trace_id:origin activation with
+      | Ok _ -> () | Error error -> fail (Ledger.store_error_to_string error)) activations;
+    List.iter (fun delivery -> match Ledger.observe_async_result_delivery ~keeper_name:"skill-keeper-fixture" ~config ~trace_id:origin
+        ~expected_activations:activations delivery with
+      | Ok _ -> () | Error error -> fail (Ledger.store_error_to_string error))
+      (Ledger.async_result_deliveries canonical);
+    List.iter (fun action -> match Ledger.observe_async_action ~keeper_name:"skill-keeper-fixture" ~config ~trace_id:origin action with
+      | Ok _ -> () | Error error -> fail (Ledger.store_error_to_string error)) (Ledger.async_actions canonical);
+    let path = "/api/v1/dashboard/skill-activations/physical-turn" in
+    let target ?(workspace = []) turn =
+      Uri.with_query (Uri.of_string path) (("turn_ref", [ turn ]) :: workspace) |> Uri.to_string in
+    let base = Unix.realpath config.base_path in
+    let root = Unix.realpath (Masc.Workspace.masc_dir config) in
+    let matching = [ "expected_base_path", [ base ]; "expected_masc_root", [ root ] ] in
+    let foreign = [ "expected_base_path", [ base ^ "/foreign" ]; "expected_masc_root", [ root ] ] in
+    let admission = Masc.Workspace.read_precondition_admission_header in
+    let receiving = "new-physical-trace#73" in
+    strict None (fun () ->
+      let code, body = request ~meth:`GET client path in
+      check int "missing reference is a client error, not an unimplemented route" 400 code;
+      check string "same missing-reference response as HTTP/1" "turn_ref query param is required"
+        Yojson.Safe.Util.(Yojson.Safe.from_string body |> member "error" |> to_string);
+      List.iter (fun invalid ->
+        check int ("invalid physical turn is refused by the owner: " ^ invalid) 400
+          (status ~meth:`GET client (target invalid)))
+        [ "not-a-turn"; "trace#0"; "trace#-1"; "   #1" ]);
+    strict (Some "1") (fun () ->
+      check int "strict Public_read still requires a credential" 401
+        (status ~meth:`GET client (target receiving));
+      check int "a Player token lacks the CanReadState a strict Public_read requires" 403
+        (status ~token:player ~meth:`GET client (target receiving));
+      let code, headers, body = request_with_headers ~token:reader ~meth:`GET client (target receiving) in
+      check int "authenticated physical lookup is served over H2" 200 code;
+      check bool "unbound lookup has no workspace admission receipt" false (List.mem admission headers);
+      let json = Yojson.Safe.from_string body in
+      let expected = match Server_skill_physical_turn.project_string ~config receiving with
+        | Ok json -> json | Error detail -> fail detail in
+      check bool "same scoped owner projection as HTTP/1" true (Yojson.Safe.equal expected json);
+      let open Yojson.Safe.Util in
+      check string "exact physical turn survives transport" receiving (json |> member "turn_ref" |> to_string);
+      let origins = json |> member "origins" |> to_list in
+      check int "finds the cross-trace original ledger" 1 (List.length origins);
+      let observed = List.hd origins in
+      check int "keeps both physical handoffs" 2
+        (observed |> member "async_result_deliveries" |> to_list |> List.length);
+      check int "keeps all physical action links" 3
+        (observed |> member "async_actions" |> to_list |> List.length);
+      let code, headers, body = request_with_headers ~token:reader ~meth:`GET client
+        (target ~workspace:matching receiving) in
+      check int "matching workspace serves physical evidence" 200 code;
+      check bool "matching workspace is attested" true (List.mem admission headers);
+      check bool "workspace binding preserves the scoped evidence" true
+        (Yojson.Safe.equal json (Yojson.Safe.from_string body));
+      let code, headers, _ = request_with_headers ~token:reader ~meth:`GET client
+        (target ~workspace:foreign receiving) in
+      check int "foreign workspace is refused before projection" 409 code;
+      check bool "foreign workspace is not attested" false (List.mem admission headers);
+      let code, headers, _ = request_with_headers ~token:reader ~meth:`GET client
+        (target ~workspace:[ "expected_base_path", [ base ] ] receiving) in
+      check int "partial workspace binding is refused" 400 code;
+      check bool "partial workspace is not attested" false (List.mem admission headers);
+      let code, headers, _ = request_with_headers ~token:reader ~meth:`GET client
+        (target ~workspace:matching "trace#0") in
+      check int "matched workspace still rejects an invalid physical turn" 400 code;
+      check bool "matched workspace remains attested on owner rejection" true (List.mem admission headers);
+      let code, body = request ~token:reader ~meth:`GET client (target "new-physical-trace#74") in
+      check int "adjacent physical turn remains readable" 200 code;
+      check int "adjacent turn does not borrow the original's evidence" 0
+        (Yojson.Safe.from_string body |> member "origins" |> to_list |> List.length)))
+
+let test_goal_tree_bound_read_bypasses_stale_cache () =
+  let captured_routes = ref None in
+  with_gateway ~on_routes:(fun routes -> captured_routes := Some routes) ~make_routes:production (fun ~player ~reader:_ client ->
+    strict None (fun () ->
+      let state = match Server_auth.For_testing.snapshot_server_state () with
+        | Some state -> state | None -> fail "fixture server has no workspace" in
+      let config = Masc.Mcp_server.workspace_config state in
+      let base = Unix.realpath config.base_path in
+      let root = Unix.realpath (Masc.Workspace.masc_dir config) in
+      let target base_path = Uri.with_query (Uri.of_string "/api/v1/dashboard/goals")
+          [ "expected_base_path", [ base_path ]; "expected_masc_root", [ root ] ] |> Uri.to_string in
+      let code, headers, _ = request_with_headers ~token:player ~meth:`GET client "/api/v1/dashboard/goals" in
+      check int "unbound cache can be primed" 200 code;
+      check bool "unbound read does not claim a direct observation" false
+        (List.mem Masc.Server_utils.goal_tree_direct_read_header headers);
+      let goal = match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:"after cached tree"
+          ~metric:"measurement" ~target_value:"1" () with
+        | Ok (goal, `created, _) -> goal
+        | Ok (_, `updated _, _) -> fail "fixture unexpectedly updated a Goal"
+        | Error error -> fail (Goal_store.write_error_to_string error) in
+      let routes = match !captured_routes with Some routes -> routes | None -> fail "missing H1 routes" in
+      let authority = match Server_request_authority.of_host_port ~host:"localhost" ~port:8935 with
+        | Ok authority -> authority | Error `Malformed -> fail "invalid fixture authority" in
+      let h1_read ?(accept_encoding = "") path =
+        let response = Buffer.create 1024 in
+        let conn = Httpun.Server_connection.create (fun reqd ->
+          Server_request_authority.with_current authority (fun () ->
+            Masc.Http_server_eio.Router.dispatch routes (Httpun.Reqd.request reqd) (Masc.Http_reqd.of_httpun reqd))) in
+        let request = Printf.sprintf
+            "GET %s HTTP/1.0\r\nHost: localhost:8935\r\nAuthorization: Bearer %s\r\nIf-None-Match: *\r\n%s\r\n"
+            path player accept_encoding in
+        let bytes = Bigstringaf.of_string ~off:0 ~len:(String.length request) request in
+        ignore (Httpun.Server_connection.read_eof conn bytes ~off:0 ~len:(Bigstringaf.length bytes));
+        let rec drain () = match Httpun.Server_connection.next_write_operation conn with
+          | `Write iovecs ->
+            let count = List.fold_left (fun count (iov : Bigstringaf.t Httpun.IOVec.t) ->
+              Buffer.add_string response (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len);
+              count + iov.len) 0 iovecs in
+            Httpun.Server_connection.report_write_result conn (`Ok count);
+            drain ()
+          | `Yield ->
+            let ready, resolve = Eio.Promise.create () in
+            Httpun.Server_connection.yield_writer conn (fun () -> Eio.Promise.resolve resolve ());
+            Eio.Promise.await ready;
+            drain ()
+          | `Close _ -> Buffer.contents response in
+        drain () in
+      let h1 = h1_read (target base) in
+      let h1_headers = String.lowercase_ascii h1 in
+      check bool "H1 conditional bound read returns a full body" true
+        (String_util.contains_substring h1 " 200 " && String_util.contains_substring h1 goal.id);
+      check bool "H1 attests its workspace and direct generation" true
+        (String_util.contains_substring h1_headers "x-masc-workspace-read: matched-v1"
+         && String_util.contains_substring h1_headers "x-masc-goal-tree-read: direct-v1"
+         && String_util.contains_substring h1_headers "cache-control: private, no-store");
+      let h1_gzip = h1_read ~accept_encoding:"Accept-Encoding: gzip\r\n" (target base) |> String.lowercase_ascii in
+      check bool "H1 negotiates compression without a 304" true
+        (String_util.contains_substring h1_gzip " 200 "
+         && String_util.contains_substring h1_gzip "content-encoding: gzip"
+         && String_util.contains_substring h1_gzip "cache-control: private, no-store");
+      let h1_wildcard = h1_read ~accept_encoding:"Accept-Encoding: zstd;q=0, *;q=1\r\n" (target base) |> String.lowercase_ascii in
+      check bool "H1 wildcard does not re-enable forbidden zstd" true
+        (String_util.contains_substring h1_wildcard " 200 "
+         && String_util.contains_substring h1_wildcard "content-encoding: gzip"
+         && not (String_util.contains_substring h1_wildcard "content-encoding: zstd"));
+      List.iter (fun fields ->
+        let h1 = h1_read ~accept_encoding:fields (target base) |> String.lowercase_ascii in
+        check bool "H1 combines repeated encoding fields" true
+          (String_util.contains_substring h1 " 200 "
+           && String_util.contains_substring h1 "content-encoding: gzip"
+           && not (String_util.contains_substring h1 "content-encoding: zstd")))
+        [ "Accept-Encoding: zstd;q=0\r\nAccept-Encoding: *;q=1\r\n";
+          "Accept-Encoding: *;q=1\r\nAccept-Encoding: zstd;q=0\r\n" ];
+      let h1_foreign = h1_read ~accept_encoding:"Accept-Encoding: zstd;q=0\r\nAccept-Encoding: *;q=1\r\n"
+          (target (base ^ "/foreign")) |> String.lowercase_ascii in
+      check bool "H1 refuses foreign workspace before direct generation" true
+        (String_util.contains_substring h1_foreign " 409 "
+         && not (String_util.contains_substring h1_foreign "x-masc-goal-tree-read: direct-v1")
+         && not (String_util.contains_substring h1_foreign "content-encoding: zstd"));
+      let code, headers, body = request_with_headers ~token:player
+          ~extra_headers:[ "if-none-match", "*"; "origin", "http://localhost:8935" ]
+          ~meth:`GET client (target base) in
+      check int "bound read succeeds" 200 code;
+      check bool "bound read attests the workspace" true
+        (List.mem Masc.Workspace.read_precondition_admission_header headers);
+      check bool "bound read attests direct generation" true
+        (List.mem Masc.Server_utils.goal_tree_direct_read_header headers);
+      check bool "bound response is not cacheable" true (List.mem ("cache-control", "private, no-store") headers);
+      check bool "CORS exposes the direct-read receipt" true
+        (List.exists (fun (name, value) -> String.equal name "access-control-expose-headers"
+          && String_util.contains_substring (String.lowercase_ascii value) "x-masc-goal-tree-read") headers);
+      let tree = Yojson.Safe.Util.(body |> Yojson.Safe.from_string |> member "tree" |> to_list) in
+      check bool "bound response reads the committed Goal" true
+        (List.exists (fun row -> Yojson.Safe.Util.(row |> member "id" |> to_string) = goal.id) tree);
+      let code, headers, compressed = request_with_headers ~token:player
+          ~extra_headers:[ "accept-encoding", "gzip" ] ~meth:`GET client (target base) in
+      check int "compressed bound read succeeds" 200 code;
+      check bool "H2 negotiates gzip" true (List.mem ("content-encoding", "gzip") headers);
+      check bool "gzip body is smaller than the identity representation" true
+        (String.length compressed < String.length body);
+      let code, headers, _ = request_with_headers ~token:player
+          ~extra_headers:[ "accept-encoding", "zstd;q=0, *;q=1" ] ~meth:`GET client (target base) in
+      check int "wildcard bound read succeeds" 200 code;
+      check bool "H2 wildcard does not re-enable forbidden zstd" true
+        (List.mem ("content-encoding", "gzip") headers && not (List.mem ("content-encoding", "zstd") headers));
+      List.iter (fun extra_headers ->
+        let code, headers, _ = request_with_headers ~token:player ~extra_headers ~meth:`GET client (target base) in
+        check int "repeated-field bound read succeeds" 200 code;
+        check bool "H2 combines repeated encoding fields" true
+          (List.mem ("content-encoding", "gzip") headers && not (List.mem ("content-encoding", "zstd") headers)))
+        [ [ "accept-encoding", "zstd;q=0"; "accept-encoding", "*;q=1" ];
+          [ "accept-encoding", "*;q=1"; "accept-encoding", "zstd;q=0" ] ];
+      let code, headers, _ = request_with_headers ~token:player
+          ~extra_headers:[ "accept-encoding", "zstd;q=0"; "accept-encoding", "*;q=1" ]
+          ~meth:`GET client (target (base ^ "/foreign")) in
+      check int "foreign workspace is refused" 409 code;
+      check bool "refusal does not attest a direct read" false
+        (List.mem Masc.Server_utils.goal_tree_direct_read_header headers);
+      check bool "H2 refusal honors repeated encoding fields" false
+        (List.mem ("content-encoding", "zstd") headers);
+      strict (Some "1") (fun () ->
+        let code, headers, _ = request_with_headers ~meth:`GET client (target base) in
+        check int "strict authentication is still required" 401 code;
+        check bool "authentication refusal has no direct-read receipt" false
+          (List.mem Masc.Server_utils.goal_tree_direct_read_header headers));
+      let old_scope = Masc.Mcp_server.workspace_scope state in
+      Masc.Mcp_server.set_workspace_config state config |> Result.get_ok;
+      check bool "same-path replacement invalidates the captured scope" false
+        (Server_dashboard_http.goal_tree_scope_current state old_scope)))
+
+let test_bound_goal_timeout_answers_while_read_pool_is_busy () =
+  let routes = ref None in
+  let runtime = ref None in
+  let with_runtime ~env ~sw run =
+    let was_ready = Eio_guard.is_ready () in
+    Eio_guard.enable ();
+    let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+    let clock = Eio_mock.Clock.make () in
+    Domain_pool_ref.set pool;
+    Domain_pool_ref.set_read pool;
+    Fun.protect ~finally:(fun () ->
+      Domain_pool_ref.clear_for_tests ();
+      if not was_ready then Eio_guard.disable ()) (fun () ->
+      Executor_pool_ref.For_testing.with_pool (Domain_pool.executor_pool pool) (fun () ->
+        Executor_pool_ref.For_testing.with_read_pool (Domain_pool.executor_pool pool) (fun () ->
+          Dashboard_cache.For_testing.with_default_clock clock (fun () ->
+            let occupied, mark_occupied = Eio.Promise.create () in
+            let release, release_worker = Eio.Promise.create () in
+            let blocker = Eio.Fiber.fork_promise ~sw (fun () ->
+              Pool_lane.with_read (fun () ->
+                Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
+                  Eio.Promise.resolve mark_occupied (); Eio.Promise.await release))) in
+            Eio.Promise.await occupied;
+            runtime := Some (env, sw, clock);
+            Fun.protect ~finally:(fun () -> Eio.Cancel.protect (fun () ->
+              Eio.Promise.resolve release_worker ();
+              Eio.Promise.await_exn blocker)) run)))) in
+  with_gateway ~on_routes:(fun value -> routes := Some value) ~with_runtime ~make_routes:production
+    (fun ~player ~reader:_ client -> strict None (fun () ->
+      let env, sw, clock = match !runtime with
+        | Some runtime -> runtime | None -> fail "fixture runtime missing" in
+      let routes = match !routes with Some routes -> routes | None -> fail "fixture routes missing" in
+      let state = match Server_auth.For_testing.snapshot_server_state () with
+        | Some state -> state | None -> fail "fixture server missing" in
+      let config = Masc.Mcp_server.workspace_config state in
+      let target_for base = Uri.with_query (Uri.of_string "/api/v1/dashboard/goals")
+        [ "expected_base_path", [base];
+          "expected_masc_root", [Unix.realpath (Masc.Workspace.masc_dir config)] ] |> Uri.to_string in
+      let target = target_for (Unix.realpath config.base_path) in
+      let read_with_timeout ?(after_expiry = fun () -> ()) request =
+        let pending = Eio.Fiber.fork_promise ~sw request in
+        let rec expire_when_armed () =
+          if not (Eio_mock.Clock.try_advance clock) then begin
+            Eio.Time.sleep (Eio.Stdenv.clock env) 0.001;
+            expire_when_armed ()
+          end in
+        expire_when_armed ();
+        after_expiry ();
+        Eio.Promise.await_exn pending in
+      let status, headers, _ = read_with_timeout (fun () ->
+        request_with_headers ~token:player
+          ~extra_headers:["accept-encoding", "zstd;q=0"; "accept-encoding", "*;q=1"] ~meth:`GET client target) in
+      check int "H2 sends timeout before the worker is released" 504 status;
+      check bool "H2 timeout uses the negotiated encoding" true
+        (List.mem ("content-encoding", "gzip") headers && not (List.mem ("content-encoding", "zstd") headers));
+      let authority = match Server_request_authority.of_host_port ~host:"localhost" ~port:8935 with
+        | Ok authority -> authority | Error `Malformed -> fail "invalid fixture authority" in
+      let h1_request ?(origin = "") ?(path = target) () =
+        let output = Buffer.create 256 in
+        let conn = Httpun.Server_connection.create (fun reqd ->
+          Server_request_authority.with_current authority (fun () ->
+            Masc.Http_server_eio.Router.dispatch routes (Httpun.Reqd.request reqd) (Masc.Http_reqd.of_httpun reqd))) in
+        let request = Printf.sprintf
+          "GET %s HTTP/1.0\r\nHost: localhost:8935\r\nAuthorization: Bearer %s\r\nAccept-Encoding: zstd;q=0\r\nAccept-Encoding: *;q=1\r\n%s\r\n"
+          path player origin in
+        let bytes = Bigstringaf.of_string ~off:0 ~len:(String.length request) request in
+        ignore (Httpun.Server_connection.read_eof conn bytes ~off:0 ~len:(Bigstringaf.length bytes));
+        let rec drain () = match Httpun.Server_connection.next_write_operation conn with
+          | `Write iovecs ->
+            let count = List.fold_left (fun count (iov : Bigstringaf.t Httpun.IOVec.t) ->
+              Buffer.add_string output (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len);
+              count + iov.len) 0 iovecs in
+            Httpun.Server_connection.report_write_result conn (`Ok count);
+            drain ()
+          | `Yield ->
+            let ready, resolve = Eio.Promise.create () in
+            Httpun.Server_connection.yield_writer conn (fun () -> Eio.Promise.resolve resolve ());
+            Eio.Promise.await ready;
+            drain ()
+          | `Close _ -> Buffer.contents output in
+        drain () in
+      let h1 = read_with_timeout (fun () -> h1_request ()) |> String.lowercase_ascii in
+      check bool "H1 sends timeout before the worker is released" true (String_util.contains_substring h1 " 504 ");
+      check bool "H1 timeout uses the negotiated encoding" true
+        (String_util.contains_substring h1 "content-encoding: gzip"
+         && not (String_util.contains_substring h1 "content-encoding: zstd"));
+      let foreign = Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 2. (fun () ->
+        h1_request ~path:(target_for (Unix.realpath config.base_path ^ "/foreign")) ())
+        |> String.lowercase_ascii in
+      check bool "H1 initial refusal does not queue behind the busy pool" true
+        (String_util.contains_substring foreign " 409 "
+         && not (String_util.contains_substring foreign "content-encoding: zstd"));
+      let replace_scope () = Masc.Mcp_server.set_workspace_config state config |> Result.get_ok in
+      let status, headers, _ = read_with_timeout ~after_expiry:replace_scope (fun () ->
+        request_with_headers ~token:player ~extra_headers:["accept-encoding", "zstd;q=0";
+          "accept-encoding", "*;q=1"; "origin", "https://attacker.invalid"]
+          ~meth:`GET client target) in
+      check int "H2 refuses a scope changed during a read" 409 status;
+      check bool "H2 refusal carries no admission receipt" false
+        (List.mem Masc.Workspace.read_precondition_admission_header headers);
+      check bool "H2 changed-scope refusal honors repeated encoding fields" false
+        (List.mem ("content-encoding", "zstd") headers);
+      check bool "H2 refusal does not reflect an untrusted origin" false
+        (List.exists (fun (name, _) -> String.equal name "access-control-allow-origin") headers);
+      let h1 = read_with_timeout ~after_expiry:replace_scope
+        (fun () -> h1_request ~origin:"Origin: https://attacker.invalid\r\n" ()) |> String.lowercase_ascii in
+      check bool "H1 refuses a scope changed during a read" true (String_util.contains_substring h1 " 409 ");
+      check bool "H1 refusal carries no admission receipt" false
+        (String_util.contains_substring h1 "x-masc-workspace-read: matched-v1");
+      check bool "H1 changed-scope refusal honors repeated encoding fields" false
+        (String_util.contains_substring h1 "content-encoding: zstd");
+      check bool "H1 refusal does not reflect an untrusted origin" false
+        (String_util.contains_substring h1 "access-control-allow-origin:")))
+
+(* Strict auth opens a request without a credential only when the route it
+   reaches asks for none: [Always_public] or [Public_read Open_when_strict].
+   The open paths are spelled as clients send them, so renaming a shared
+   constant cannot move both sides. The browser <audio> element cannot send a
+   bearer token, so the voice clip's file name is its capability, and a shared
+   artifact link carries its id. The closed paths are guarded on HTTP/1; if one
+   opened under strict auth, the H1/H2 parity tests would compare two open
+   doors and prove nothing. *)
+let test_strict_auth_opens_a_path_by_its_kind () =
+  let module Router = Masc.Http_server_eio.Router in
+  let captured = ref None in
+  with_gateway ~on_routes:(fun routes -> captured := Some routes) ~make_routes:production
+    (fun ~player:_ ~reader:_ _client -> ());
+  let routes = match !captured with Some routes -> routes | None -> fail "no routes" in
+  let opens_when_strict path =
+    match Router.resolve routes (Httpun.Request.create `GET path) with
+    | `Matched (route : Router.route) ->
+      (match route.access with
+       | Always_public | Public_read Open_when_strict -> true
+       | Public_read Credential_when_strict | Read_auth | Permission _ | Token_permission _
+       | Private_token_permission _ | Tool _ | Tool_observation _ | Tool_actor _
+       | Self_authenticated _ -> false)
+    | `Method_not_allowed | `Not_found -> false
+  in
+  let artifact = "artifact-" ^ String.make 32 'a' in
+  let sha256 = String.make 64 'a' in
+  List.iter
+    (fun (path, expected) -> check bool path expected (opens_when_strict path))
+    [ "/api/v1/voice/audio/abc123", true
+    ; "/api/v1/published-artifacts/" ^ artifact, true
+    ; "/play", true
+    ; "/play/agent.md", true
+    ; "/play/x", false
+    ; "/api/v1/voice/config", false
+    ; "/api/v1/published-artifacts", false
+    ; "/api/v1/published-artifact-checks", false
+    ; "/api/v1/artifacts/" ^ sha256, false
+    ; "/api/v1/artifacts-evil/" ^ sha256, false
+    ; "/api/v1/artifact-bytes/" ^ sha256, false
+    ; "/graphql", false
+    ; "/api/v1/dashboard/workspace", false
+    ; "/api/v1/status", false
+    ; "/api/v1/openapi.json", false
+    ; "/api/v1/gate/connector/names", false
+    ; "/api/v1/board/curation", false
+    ; "/api/v1/board/hearths", false
+    ; "/api/v1/board/sub-boards", false
+    ; "/api/v1/board/sub-boards/some-board", false
+    ; "/api/v1/board/karma/ledger", false
+    ; "/api/v1/karma", false
+    ]
+
+let () =
+  run "H2 gateway"
+    [ ( "one table"
+      , [ test_case "public read follows the router" `Quick test_public_read_follows_the_router
+        ; test_case "token permission follows the router" `Quick
+            test_token_permission_follows_the_router
+        ; test_case "subpath routes check the token themselves" `Quick
+            test_subpath_routes_check_the_token_themselves
+        ; test_case "a path the router lacks is not found" `Quick
+            test_a_path_the_router_lacks_is_not_found
+        ; test_case "Fusion workspace admission" `Quick test_fusion_workspace_admission
+        ; test_case "physical Skill turn evidence" `Quick test_physical_skill_turn_evidence
+        ; test_case "bound Goal tree bypasses stale cache" `Quick test_goal_tree_bound_read_bypasses_stale_cache
+        ; test_case "bound Goal timeout answers while read pool is busy" `Quick test_bound_goal_timeout_answers_while_read_pool_is_busy
+        ; test_case "strict auth opens a path by its kind" `Quick
+            test_strict_auth_opens_a_path_by_its_kind
+        ] )
+    ]

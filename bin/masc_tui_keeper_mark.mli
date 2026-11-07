@@ -19,6 +19,9 @@ val activity_glyph : Masc_tui_keeper_list_model.activity -> string
     belongs to a held call alone; a failed attempt in an open turn has its own
     mark. *)
 
+val attempt_glyph : string
+(** The mark beside an attempt node in the secondary-row attempt chain. *)
+
 val badge_glyph : Masc_tui_keeper_list_model.badge -> string
 (** The mark beside a secondary activity badge; the badge always keeps its
     own text label and count where applicable. *)

@@ -456,3 +456,33 @@ last, `rtev_fibers` for how long each fiber ran between suspends and what it
 resumed from and suspended on. Run them in the same window as the probe;
 the readings in RFC-main-domain-scheduler-latency section 8.7 were taken
 that way.
+
+## Same requests over HTTP/1.1 and HTTP/2 (`http_multiplex_probe.py`)
+
+`http_multiplex_probe.py` owns one server from an installed binary (or
+attaches with `--base-url`) and sends the same requests over three client
+shapes: HTTP/1.1 with six connections (the per-origin cap browsers apply),
+HTTP/1.1 with one connection per in-flight request, and HTTP/2 prior knowledge
+on one connection. Scenarios: `serial` (one request at a time), `burst` (C in
+flight), `download` (the dashboard bundle, four at once) and `sse` (S fleet
+streams held open). It runs under `uv` so the HTTP/2 client library lives in
+an ephemeral environment:
+
+```bash
+uv run scripts/harness/perf/http_multiplex_probe.py \
+  --binary ~/.local/bin/masc --assets-dir ~/me/assets \
+  --output artifacts/http-multiplex/$(date -u +%Y%m%dT%H%M%SZ)
+uv run scripts/harness/perf/summarize_http_multiplex.py artifacts/http-multiplex/<run>
+```
+
+The owned server runs the release-evidence runtime fixture with Keepers,
+gRPC and WebSocket off and a client token bucket the probe cannot empty
+(`MASC_RATE_LIMIT`/`MASC_RATE_BURST` 1,000,000; the defaults of 100/s and
+150 would answer 429 to a burst of 600). `--assets-dir` points at a built
+`assets/` root with `dashboard/`; without it the dashboard routes answer 503
+and the download scenario is skipped. The loopback dashboard dev-token is used
+and never written. Results are `identity.json` (binary digest, build commit,
+listener mode, versions) and `results.json` (one row per scenario, transport
+and repeat). The transport order rotates per repeat. Numbers are loopback
+values on one host; the before/after comparison needs the same scenarios and
+the same host.

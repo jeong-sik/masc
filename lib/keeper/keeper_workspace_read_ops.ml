@@ -8,7 +8,6 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_tool_shared_runtime
-open Keeper_workspace_ops_setup
 
 (* Ripgrep input validation for arguments that can be checked without
    crossing the execution boundary. Regex/glob semantics stay with the
@@ -219,10 +218,16 @@ let try_handle_with_authority
                     | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> false
                   in
                   let trimmed_out = String.trim out in
+                  (* rg exits 2 when any file fails to open while others matched, and
+                     its whole output lands here. One such call carried 1.04 MB
+                     (2026-11-07, pattern ".*" over a shared tree). *)
                   let error_detail =
                     if is_ok || String.equal trimmed_out ""
                     then []
-                    else [ "error_detail", `String trimmed_out ]
+                    else
+                      [ ( "error_detail"
+                        , `String (cut_to_bytes ~max_bytes:search_result_max_bytes trimmed_out) )
+                      ]
                   in
                   let payload =
                     `Assoc

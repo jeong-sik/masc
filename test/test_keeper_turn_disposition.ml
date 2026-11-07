@@ -50,7 +50,8 @@ let test_round_trip_lossy_payloads () =
       , D.Provider_error (Code.Provider_runtime_error "p_500")
       , "p_500" )
     ; ( "Provider_error/Sdk payload"
-      , D.Provider_error (Code.of_core_error_wire "api_error_overloaded")
+      , D.Provider_error
+          (Code.of_core_error ~wire:"api_error_overloaded" ~timeout:None)
       , "api_error_overloaded" )
     ]
   in
@@ -78,8 +79,9 @@ let runtime_codes_to_projection : (string * Code.t * D.t) list =
     , D.Provider_error (Code.Provider_runtime_error "p") )
   ; "Fiber", Code.Fiber_unresolved, D.Provider_error Code.Fiber_unresolved
   ; ( "Sdk"
-    , Code.of_core_error_wire "api_error_server:502"
-    , D.Provider_error (Code.of_core_error_wire "api_error_server:502") )
+    , Code.of_core_error ~wire:"api_error_server:502" ~timeout:None
+    , D.Provider_error
+        (Code.of_core_error ~wire:"api_error_server:502" ~timeout:None) )
   ]
 ;;
 

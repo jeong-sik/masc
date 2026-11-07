@@ -23,16 +23,32 @@ val error_to_string : error -> string
 
 (** {1 export.json} *)
 
-(** [export.json] [outcome]. Observed values: [finished], [usage_error],
-    [infrastructure_failure], [deadline], [token_limit], [turn_limit]. *)
+(** [export.json] [outcome]. The arms are the [RunOutcome] taxonomy of
+    Vibe 3.1.0 ([vibe/app_server/run_export.py]), which the [vibe -p]
+    process writes through. Observed in the retained runs: [finished],
+    [usage_error], [infrastructure_failure], [deadline], [token_limit],
+    [turn_limit]; the others are read from that source. *)
 type outcome =
   | Finished
   | Usage_error
+  | Config_error
   | Infrastructure_failure
-  | Deadline
-  | Token_limit
   | Turn_limit
+  | Token_limit
+  | Price_limit
+  | Deadline
+  | Terminated
+  | Length
+  | Refusal
+  | Aborted
+      (** The server on the other end of [--agent-socket] ended the run. *)
   | Unrecognized_outcome of string
+
+val exit_code_of_outcome : outcome -> int option
+(** The process exit code Vibe gives each outcome: [0] finished; [1] the run
+    could not start as asked ([usage_error], [config_error]); [2]
+    infrastructure failed; [3] the agent stopped without finishing, on a
+    limit or a refusal; [4] aborted. [None] for an unrecognized outcome. *)
 
 (** [export.json] [stop_reason] when it is not [null]. Observed values:
     [interrupted], [limit]. *)

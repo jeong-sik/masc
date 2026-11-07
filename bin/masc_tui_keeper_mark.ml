@@ -40,6 +40,8 @@ let activity_glyph : Masc_tui_keeper_list_model.activity -> string = function
   | Offline -> "\xc3\x97" (* × *)
   | Unknown -> unread_glyph
 
+let attempt_glyph = "\xe2\x9c\x97" (* ✗: an attempt failed *)
+
 let badge_glyph : Masc_tui_keeper_list_model.badge -> string = function
   | Badge_read_error -> "!"
   | Badge_waiting_unavailable -> "!"
@@ -106,4 +108,6 @@ let column_legend =
        how long ago · cause · the runtime that ended it · candidates tried" )
   ; "Mode " ^ letters activation_letter activations, words activation_word activations
   ; "S " ^ letters sandbox_letter sandboxes, "sandbox: " ^ words sandbox_word sandboxes
+  ; ( "쉬는 중"
+    , "resting path: relative duration (제공자 stated / 상한 bounded); ▹ prefixes next candidate after turn failure" )
   ]

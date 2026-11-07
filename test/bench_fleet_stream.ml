@@ -150,7 +150,7 @@ let sse =
                  ~ping_interval_s
                  ~stalled_after_s
                  ~max_queued_events:queue_bound
-                 gluten_reqd.Gluten.Reqd.reqd);
+                 (Masc.Http_reqd.of_gluten gluten_reqd));
            `Stop_daemon);
          port)
   ; read =

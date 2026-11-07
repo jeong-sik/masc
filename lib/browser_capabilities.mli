@@ -34,6 +34,8 @@ val missing_operations : backend -> operation list -> operation list
 (** Conditional operations are implemented with the catalog's listed
     constraints. This does not establish session readiness or effect success. *)
 val catalog : backend -> entry list
-val to_json : backend -> Yojson.Safe.t
+val to_json : backend -> constraints_for:operation list -> Yojson.Safe.t
 (** Includes unavailable families rather than advertising blanket browser
-    automation. No arbitrary JavaScript/debug-protocol escape hatch is exposed. *)
+    automation. No arbitrary JavaScript/debug-protocol escape hatch is exposed.
+    A Conditional row lists its constraints only when its operation is in
+    [constraints_for]; every other row keeps its status and invocation. *)

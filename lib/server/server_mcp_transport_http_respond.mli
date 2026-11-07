@@ -3,7 +3,7 @@
 
     All public factories take a {!Server_mcp_transport_http_types.deps}
     capability record (origin extraction + CORS headers + auth checks)
-    and an [Httpun.Reqd.t] one-shot continuation.  None of the factories
+    and an [Http_reqd.t] one-shot continuation.  None of the factories
     raise; each writes a single response and the caller is expected to
     finish handling the request.
 
@@ -37,7 +37,7 @@ val json_headers :
 val respond_not_ready :
   deps:Server_mcp_transport_http_types.deps ->
   Httpun.Request.t ->
-  Httpun.Reqd.t ->
+  Http_reqd.t ->
   unit
 (** [respond_not_ready ~deps request reqd] writes a JSON-RPC 2.0 error
     response with code [-32002], HTTP status [503 Service Unavailable],
@@ -56,7 +56,7 @@ val respond_sse_register_error :
   deps:Server_mcp_transport_http_types.deps ->
   origin:string ->
   protocol_version:string ->
-  Httpun.Reqd.t ->
+  Http_reqd.t ->
   string ->
   unit
 (** [respond_sse_register_error ~deps ~origin ~protocol_version reqd msg]
@@ -73,7 +73,7 @@ val respond_sse_rate_limited :
   protocol_version:string ->
   reason:Sse_reject_reason.t ->
   retry_after_s:float ->
-  Httpun.Reqd.t ->
+  Http_reqd.t ->
   unit
 (** [respond_sse_rate_limited ~deps ~origin ~session_id
     ~protocol_version ~reason ~retry_after_s reqd] writes a JSON
@@ -108,7 +108,7 @@ val error_body :
     object suitable for either a stand-alone response body or
     embedding in an SSE batch / multi-response array. Splitting it
     out makes the wire shape diffable and testable without
-    instantiating an [Httpun.Reqd.t].
+    instantiating an [Http_reqd.t].
 
     Defaults: [id = `Null] (per JSON-RPC 2.0 §5.1), no [data] field.
 
@@ -122,7 +122,7 @@ val respond_mcp_error :
   deps:Server_mcp_transport_http_types.deps ->
   request_authority:Server_request_authority.authority ->
   Httpun.Request.t ->
-  Httpun.Reqd.t ->
+  Http_reqd.t ->
   session_id:string ->
   protocol_version:string ->
   code:Mcp_error_code.t ->
@@ -205,7 +205,7 @@ val respond_mcp_auth_error :
   request_authority:Server_request_authority.authority ->
   endpoint:string ->
   Httpun.Request.t ->
-  Httpun.Reqd.t ->
+  Http_reqd.t ->
   session_id:string ->
   protocol_version:string ->
   Server_mcp_transport_http_types.auth_failure ->

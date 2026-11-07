@@ -97,8 +97,8 @@ let with_fixture run =
             Eio.Switch.run (fun conn_sw ->
               let handler = Httpun_eio.Server.create_connection_handler ~sw:conn_sw
                 ~request_handler:(fun _ (incoming : Httpun.Reqd.t Gluten.Reqd.t) ->
-                  let reqd = incoming.Gluten.Reqd.reqd in
-                  let request = Httpun.Reqd.request reqd in
+                  let request = Httpun.Reqd.request incoming.Gluten.Reqd.reqd in
+                  let reqd = Masc.Http_reqd.of_gluten incoming in
                   Server_request_authority.with_current authority (fun () ->
                     Http.Router.dispatch router request reqd))
                 ~error_handler:(fun _ ?request:_ _error respond ->

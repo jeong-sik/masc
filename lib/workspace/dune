@@ -60,7 +60,6 @@
   masc_backend
   masc_eio_context
   masc_process
-  masc.masc_exec
   ; #27397: the evidence snapshot cap is the Read ceiling, read from the leaf
   masc_tool_types
   ; #27143: the day-file layout has one owner; this module used to rebuild it
@@ -81,15 +80,12 @@
   time_compat
   fs_compat
   yojson
-  otoml
   unix
   re
   re.str
   re.pcre
   eio
   eio.unix
-  uri
-  uuidm
   base64
    masc.agent_core.digest
   masc_random_id)

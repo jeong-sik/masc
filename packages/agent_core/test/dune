@@ -37,12 +37,12 @@
 (executable
  (name openrouter_live_proof)
  (modules openrouter_live_proof)
- (libraries agent_core_test_deps agent_core llm_provider eio eio_main yojson))
+ (libraries agent_core_test_deps llm_provider eio eio_main yojson))
 
 (executable
  (name anthropic_live_proof)
  (modules anthropic_live_proof)
- (libraries agent_core_test_deps agent_core llm_provider eio eio_main yojson))
+ (libraries agent_core_test_deps agent_core llm_provider eio eio_main))
 
 (executable
  (name capability_resolution_dump)
@@ -363,7 +363,7 @@
 (test
  (name test_execution_codec_executor)
  (modules test_execution_codec_executor)
- (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main)
+ (libraries agent_core_test_deps agent_core alcotest eio_main)
  (flags
   (:standard -alias-deps))
  (deps ../models.toml)
@@ -393,7 +393,7 @@
 (test
  (name test_agent_ambient_execution)
  (modules test_agent_ambient_execution)
- (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main)
+ (libraries agent_core_test_deps agent_core alcotest eio_main)
  (flags
   (:standard -alias-deps))
  (deps ../models.toml)
@@ -441,7 +441,7 @@
  (name test_provider_complete)
  (modules test_provider_complete)
  (deps ../models.toml)
- (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main))
+ (libraries agent_core_test_deps llm_provider alcotest eio_main))
 
 (test
  (name test_output_token_receipt)
@@ -522,41 +522,41 @@
 (test
  (name test_sse_budget_anchor)
  (modules test_sse_budget_anchor)
- (libraries agent_core_test_deps agent_core llm_provider alcotest eio.mock))
+ (libraries agent_core_test_deps llm_provider alcotest eio.mock))
 
 ; A slot granted as a waiter's deadline passes is owned, not dropped: the
 ; mock clock orders the timer's wake-up ahead of the grant's.
 (test
  (name test_slot_scheduler_deadline_ownership)
  (modules test_slot_scheduler_deadline_ownership)
- (libraries agent_core_test_deps agent_core llm_provider alcotest eio.mock))
+ (libraries agent_core_test_deps llm_provider alcotest eio.mock))
 
 ; How a freed slot is shared between Priority and Standard waiters.
 (test
  (name test_slot_scheduler_priority)
  (modules test_slot_scheduler_priority)
- (libraries agent_core_test_deps agent_core llm_provider alcotest eio.mock))
+ (libraries agent_core_test_deps llm_provider alcotest eio.mock))
 
 ; Changing a scheduler's allowance while slots are held and waiters queue.
 (test
  (name test_slot_scheduler_reconfigure)
  (modules test_slot_scheduler_reconfigure)
- (libraries agent_core_test_deps agent_core llm_provider alcotest eio.mock))
+ (libraries agent_core_test_deps llm_provider alcotest eio.mock))
 
 (test
  (name test_slot_scheduler_queue_watch)
  (modules test_slot_scheduler_queue_watch)
- (libraries agent_core_test_deps agent_core llm_provider alcotest eio.mock))
+ (libraries agent_core_test_deps llm_provider alcotest eio.mock))
 
 (test
  (name test_under_deadline)
  (modules test_under_deadline)
- (libraries agent_core_test_deps agent_core llm_provider alcotest eio.mock))
+ (libraries agent_core_test_deps llm_provider alcotest eio.mock))
 
 (test
  (name test_tls_config_cache)
  (modules test_tls_config_cache)
- (libraries agent_core_test_deps agent_core llm_provider alcotest))
+ (libraries agent_core_test_deps llm_provider alcotest))
 
 (test
  (name test_llm_provider_cov)
@@ -616,7 +616,7 @@
 (test
  (name test_full_pipeline_cov)
  (modules test_full_pipeline_cov)
- (libraries agent_core_test_deps agent_core alcotest cohttp-eio eio eio_main unix yojson))
+ (libraries agent_core_test_deps agent_core alcotest cohttp-eio eio eio_main yojson))
 
 (test
  (name test_event_integration)
@@ -631,28 +631,28 @@
 (tests
  (names test_runtime_store_unit test_runtime_types)
  (modules test_runtime_store_unit test_runtime_types)
- (libraries agent_core_test_deps agent_core alcotest eio eio_main unix yojson)
+ (libraries agent_core_test_deps agent_core alcotest eio_main unix yojson)
  (action
   (run %{test})))
 
 (test
  (name test_streaming_cut_cleanup)
  (modules test_streaming_cut_cleanup)
- (libraries agent_core_test_deps agent_core llm_provider alcotest eio eio_main))
+ (libraries agent_core_test_deps llm_provider alcotest eio eio_main))
 
 ; Loopback listeners that accept and stay silent: the phase before the
 ; response headers must end at a budget, TLS handshake included.
 (test
  (name test_stream_pre_header_budget)
  (modules test_stream_pre_header_budget)
- (libraries agent_core_test_deps agent_core llm_provider alcotest cstruct eio eio_main))
+ (libraries agent_core_test_deps llm_provider alcotest cstruct eio eio_main))
 
 ; A loopback listener that accepts and stays silent: the sync path ends the
 ; wait for the response headers at the provider's connect budget.
 (test
  (name test_complete_sync_connect_budget)
  (modules test_complete_sync_connect_budget)
- (libraries agent_core_test_deps agent_core llm_provider alcotest cstruct eio eio_main))
+ (libraries agent_core_test_deps llm_provider alcotest cstruct eio eio_main))
 
 (test
  (name test_otel_tracer_fiber)
@@ -725,7 +725,7 @@
 (test
  (name test_agent_input_request)
  (modules test_agent_input_request)
- (libraries agent_core_base yojson alcotest)
+ (libraries agent_core_base alcotest)
  (flags (:standard -open Agent_core_base)))
 
 (test

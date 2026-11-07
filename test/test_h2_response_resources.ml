@@ -1,5 +1,5 @@
 open Alcotest
-module Resources = Server_h2_response_resources
+module Resources = Masc.Http_h2_response_ledger
 module Registry = Server_h2_stream_registry
 
 type lane = {mutable pending:string}
@@ -66,7 +66,7 @@ let with_session ~capacity handler test =
             let id=int_of_string (H2.Reqd.request reqd).target in
             Registry.dispatch registry ~sw ~stream_id:(id*2-1) reqd
               (fun stream_sw -> Resources.with_request resources ~sw:stream_sw
-                (fun () -> handler id reqd))) in
+                (fun () -> handler id ~stream_sw reqd))) in
         let client=H2.Client_connection.create
           ~config:{H2.Config.default with initial_window_size=65535l}
           ~error_handler:(fun _ -> fail "connection error") () in
@@ -125,7 +125,7 @@ let whole_payload=String.init 131070 (fun n -> Char.chr (97+n mod 26))
 
 let test_whole_response_and_scope_release () =
   let lease_seen=ref None in
-  let handler _ reqd =
+  let handler _ ~stream_sw:_ reqd =
     let lease=Resources.reserve (Resources.current_exn ()) ~bytes:(String.length whole_payload)
       |> Result.get_ok in
     lease_seen:=Some lease;
@@ -149,41 +149,6 @@ let test_whole_response_and_scope_release () =
     request session 3;
     check string "same connection reuses released capacity" whole_payload (read_all session 3))
 
-let test_stream_overflow_is_explicit_and_other_stream_progresses () =
-  let streams=Hashtbl.create 2 in
-  let frame=String.make 8192 'e' in
-  let handler id reqd =
-    let writer=H2.Reqd.respond_with_streaming ~flush_headers_immediately:true reqd
-      (H2.Response.create `OK) in
-    let stream=Resources.stream writer in
-    Hashtbl.add streams id stream;
-    check bool "initial frame enqueued" true (Resources.offer stream frame);
-    Resources.run stream in
-  with_session ~capacity:131072 handler (fun resources session ->
-    request session 1;
-    until session (fun () -> Hashtbl.mem streams 1 && Hashtbl.mem session.responses 1);
-    let stream=Hashtbl.find streams 1 in
-    (* Models the actual shared publisher lock: no fiber switch/network wait
-       is allowed while offering notifications. *)
-    let mutex=Stdlib.Mutex.create () in
-    Stdlib.Mutex.lock mutex;
-    Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock mutex) (fun () ->
-      while Resources.offer stream frame do () done);
-    check bool "overflow closes the producer" true (Resources.is_closed stream);
-    until session (fun () -> !(session.resets)>0 && Resources.pending_bytes resources=0);
-    check int "overflow is a stream error" 1 !(session.errors);
-    request session 2;
-    until session (fun () -> Hashtbl.mem streams 2 && Hashtbl.mem session.responses 2);
-    let healthy=Hashtbl.find streams 2 in
-    check bool "another stream can accept an event" true (Resources.offer healthy "next");
-    let response=Hashtbl.find session.responses 2 in
-    until session (fun () ->
-      read_once response;
-      Buffer.length response.body=String.length frame+4);
-    check string "healthy subscriber keeps event order" (frame^"next") (Buffer.contents response.body);
-    reset session 2;
-    until session (fun () -> Resources.pending_bytes resources=0))
-
 let test_scope_cleanup_and_late_flush_are_idempotent () =
   Eio_main.run (fun _ -> Eio.Switch.run (fun outer ->
     let resources=Resources.create ~max_pending_bytes:10 in
@@ -202,8 +167,48 @@ let test_scope_cleanup_and_late_flush_are_idempotent () =
       Resources.release lease;
       check int "explicit release returns the capacity" 0 (Resources.pending_bytes resources))))
 
+module Writer = Masc.Http_reqd.Body_writer
+
+let test_stream_overflow_resets_and_sibling_progresses () =
+  let streams=Hashtbl.create 2 in
+  let frame=String.make 8192 'e' in
+  let handler id ~stream_sw reqd =
+    let handle=Masc.Http_reqd.of_h2 ~stream_sw ~ledger:(Resources.current_exn ()) reqd in
+    let writer=Masc.Http_reqd.respond_with_streaming ~flush_headers_immediately:true handle
+      (Httpun.Response.create `OK) in
+    Hashtbl.add streams id writer;
+    Writer.write_string writer frame;
+    check bool "initial frame accepted" false (Writer.is_closed writer) in
+  with_session ~capacity:131072 handler (fun resources session ->
+    request session 1;
+    until session (fun () -> Hashtbl.mem streams 1 && Hashtbl.mem session.responses 1);
+    let writer=Hashtbl.find streams 1 in
+    (* Models the shared publisher lock: no fiber switch or network wait while
+       frames are offered. *)
+    let mutex=Stdlib.Mutex.create () in
+    Stdlib.Mutex.lock mutex;
+    Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock mutex) (fun () ->
+      while not (Writer.is_closed writer) do Writer.write_string writer frame done);
+    let outcome=ref None in
+    Writer.flush writer (fun answer -> outcome:=Some answer);
+    check bool "flush after the refusal answers closed at once" true (!outcome=Some `Closed);
+    until session (fun () -> !(session.resets)>0 && Resources.pending_bytes resources=0);
+    check int "overflow is a stream error" 1 !(session.errors);
+    request session 2;
+    until session (fun () -> Hashtbl.mem streams 2 && Hashtbl.mem session.responses 2);
+    let healthy=Hashtbl.find streams 2 in
+    Writer.write_string healthy "next";
+    check bool "another stream can accept a frame" false (Writer.is_closed healthy);
+    let response=Hashtbl.find session.responses 2 in
+    until session (fun () ->
+      read_once response;
+      Buffer.length response.body=String.length frame+4);
+    check string "healthy subscriber keeps frame order" (frame^"next") (Buffer.contents response.body);
+    reset session 2;
+    until session (fun () -> Resources.pending_bytes resources=0))
+
 let () = run "H2 response resource boundary"
   ["transport",[
     test_case "whole response, slow consumption and reset reuse" `Quick test_whole_response_and_scope_release;
-    test_case "subscription overflow resets without blocking siblings" `Quick test_stream_overflow_is_explicit_and_other_stream_progresses;
+    test_case "overflow resets the stream and siblings progress" `Quick test_stream_overflow_resets_and_sibling_progresses;
     test_case "scope cleanup and late flush do not double release" `Quick test_scope_cleanup_and_late_flush_are_idempotent]]

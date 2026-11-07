@@ -100,14 +100,14 @@ val mutation_route : string -> mutation_route option
 val handle_get
   :  Mcp_server.server_state
   -> Httpun.Request.t
-  -> Httpun.Reqd.t
+  -> Http_reqd.t
   -> get_route
   -> unit
 
 val handle_mutation
   :  Mcp_server.server_state
   -> Httpun.Request.t
-  -> Httpun.Reqd.t
+  -> Http_reqd.t
   -> mutation_route
   -> string
   -> unit

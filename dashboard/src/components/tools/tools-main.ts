@@ -162,6 +162,10 @@ export function Tools() {
           onClick=${() => { activeView.value = 'executor' }}>도구 실행기<//>
       </div>
       ${activeView.value === 'executor' ? html`<${ToolExecutor} />` : html`<div>
+      <${SectionCard} label="도구 실행 통계" class="section v2-lab-panel mb-4">
+        <${ToolSeriesPanel} />
+      <//>
+
       <${ConfigResolutionPanel}
         resolution=${configResolutionWarming ? undefined : configResolution}
         runtimeResolution=${runtimeResolutionWarming ? undefined : runtimeResolution}
@@ -246,10 +250,6 @@ export function Tools() {
             `
           : null}
         <${ToolMetrics} data=${usage} />
-      <//>
-
-      <${SectionCard} label="도구 실행 통계" class="section v2-lab-panel mb-4">
-        <${ToolSeriesPanel} />
       <//>
       ${data?.generated_at
         ? html`<div class="flex flex-wrap gap-x-3 gap-y-2 mt-3 text-[var(--color-fg-muted)] text-xs">

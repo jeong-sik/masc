@@ -36,15 +36,10 @@ val keeper_default_write_root
   -> meta:Keeper_meta_contract.keeper_meta
   -> string
 
-val keeper_default_read_root
-  :  config:Workspace.config
-  -> meta:Keeper_meta_contract.keeper_meta
-  -> string
-
 (** [keeper_observation_sandbox_root ~config ~meta] is the keeper's
     playground sandbox root anchored at the normalised project root.
     Pure path computation for the observation write path — unlike
-    {!keeper_default_read_root} it never creates the sandbox bundle. *)
+    [keeper_playground_root] it never creates the sandbox bundle. *)
 val keeper_observation_sandbox_root
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
@@ -145,10 +140,29 @@ val shell_readonly_limit : Yojson.Safe.t -> int
 
 (** Clamp [args.max_bytes] to [256..100000] (default 4000) for
     the structured [cat] read operation. *)
+(** Total payload [lines_to_json] keeps by default, and the size an
+    [rg] error text is cut to. *)
+val search_result_max_bytes : int
+
+(** [cut_to_bytes ~max_bytes text] is [text] when it fits. Otherwise it is
+    the longest prefix of at most [max_bytes] bytes that ends on a UTF-8
+    boundary, followed by [...[cut: K of N bytes kept]] with the kept and
+    original sizes. *)
+val cut_to_bytes : max_bytes:int -> string -> string
+
 (** Project [text] to a JSON array of lines, capped by [limit]
     lines and [max_bytes] total payload. The omitted-tail line
-    surfaces a hint for the LLM to narrow its search. *)
-val lines_to_json : ?limit:int -> ?max_bytes:int -> string -> Yojson.Safe.t
+    surfaces a hint for the LLM to narrow its search.
+
+    A line longer than [max_line_bytes] (default 2,000, never above
+    [max_bytes]) goes through {!cut_to_bytes}. One line therefore adds at
+    most [max_line_bytes] plus the cut note, instead of its whole length. *)
+val lines_to_json
+  :  ?limit:int
+  -> ?max_bytes:int
+  -> ?max_line_bytes:int
+  -> string
+  -> Yojson.Safe.t
 
 (** Build the [text_fallback] response for a voice agent that
     chose to emit text instead of audio. *)

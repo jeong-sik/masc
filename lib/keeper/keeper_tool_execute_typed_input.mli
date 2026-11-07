@@ -69,12 +69,16 @@ type execute_input = {
   source : source;
   cwd : string option;
   timeout_sec : float option;
+  background : bool;
 }
 (** [cwd] applies to the command. [timeout_sec] is the caller's explicit
     execution boundary. Absence is not unbounded: this module leaves the
     field alone, and {!Keeper_tool_execute_input.typed_input_timeout_budget}
     resolves [None] to {!Keeper_tool_execute_input.default_timeout_sec},
-    which every dispatch route applies. *)
+    which every dispatch route applies. [background] is the caller's
+    [run_in_background]: the dispatcher starts the command on the server and
+    returns at once. The command, [cwd] and [timeout_sec] mean the same in
+    both modes. *)
 
 type validation_error =
   | Empty_argv
@@ -98,6 +102,11 @@ val of_json : Yojson.Safe.t -> (execute_input, string) result
     shell. Both together and any other field are rejected here; the refusal
     lists the accepted fields. No compatibility normalization is applied at
     parse time. *)
+
+val requests_background : Yojson.Safe.t -> bool
+(** [true] iff {!of_json} accepts the arguments and they set
+    [run_in_background] to [true]. Arguments {!of_json} refuses are [false]
+    here, so the foreground handler answers them with its own error. *)
 
 val validate : execute_input -> (unit, validation_error) result
 (** Run all structural checks against [input].  Returns [Ok ()] on

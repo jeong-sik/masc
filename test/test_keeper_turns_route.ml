@@ -14,7 +14,7 @@ let request_response ~handle ~request =
   let output = Buffer.create 512 in
   let connection =
     Httpun.Server_connection.create (fun reqd ->
-        handle (Httpun.Reqd.request reqd) reqd)
+        handle (Httpun.Reqd.request reqd) (Http_reqd.of_httpun reqd))
   in
   let input = Bigstringaf.of_string ~off:0 ~len:(String.length request) request in
   ignore

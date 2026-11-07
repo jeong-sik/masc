@@ -870,7 +870,7 @@ let test_event_operator_uses_exact_source_refs_across_unrelated_enqueues () =
           state
           ~actor:"event-source-ref-test"
           (Httpun.Reqd.request reqd)
-          reqd
+          (Masc.Http_reqd.of_httpun reqd)
           ~keeper_name
           body)
     in
@@ -2668,13 +2668,13 @@ let test_gate_mode_change_json_separates_saved_mode_from_recovery () =
     }
   in
   let json recovery =
-    Server_routes_http_routes_dashboard.For_testing.gate_mode_change_json
+    Server_routes_http_routes_keeper_gate.For_testing.gate_mode_change_json
       change
       recovery
   in
   let completed =
     json
-      (Server_routes_http_routes_dashboard.For_testing.Recovery_completed
+      (Server_routes_http_routes_keeper_gate.For_testing.Recovery_completed
          { Masc.Keeper_gate.started_ids = [ "approval-1" ]
          ; queued = 1
          ; failures = []
@@ -2691,7 +2691,7 @@ let test_gate_mode_change_json_separates_saved_mode_from_recovery () =
     (completed |> member "recovery_failure_count" |> to_int);
   let partial =
     json
-      (Server_routes_http_routes_dashboard.For_testing.Recovery_completed
+      (Server_routes_http_routes_keeper_gate.For_testing.Recovery_completed
          { Masc.Keeper_gate.started_ids = [ "approval-2" ]
          ; queued = 1
          ; failures =
@@ -2743,7 +2743,7 @@ let test_gate_mode_change_json_separates_saved_mode_from_recovery () =
     (completed |> member "recovery_blockers" |> to_list |> List.length);
   let failed =
     json
-      (Server_routes_http_routes_dashboard.For_testing.Recovery_failed
+      (Server_routes_http_routes_keeper_gate.For_testing.Recovery_failed
          "judge worker unavailable")
   in
   check string "failed status" "failed"
@@ -2753,7 +2753,7 @@ let test_gate_mode_change_json_separates_saved_mode_from_recovery () =
   check int "failed started" 0 (failed |> member "started" |> to_int);
   check int "failed queued" 0 (failed |> member "queued" |> to_int);
   let not_requested =
-    json Server_routes_http_routes_dashboard.For_testing.Recovery_not_requested
+    json Server_routes_http_routes_keeper_gate.For_testing.Recovery_not_requested
   in
   check string "not requested status" "not_requested"
     (not_requested |> member "recovery_status" |> to_string);
@@ -4707,7 +4707,7 @@ let test_tools_prepared_selector_scope_and_keeper_contract () =
 let tools_h1_wire_response ?body ~router ~headers target =
   let output = Buffer.create 4096 in
   let connection = Httpun.Server_connection.create (fun reqd ->
-    Lib.Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd) in
+    Lib.Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) (Masc.Http_reqd.of_httpun reqd)) in
   let method_name, meth, body, body_headers = match body with
     | None -> "GET", `GET, "", []
     | Some body -> "POST", `POST, body,
@@ -4897,7 +4897,7 @@ let tools_h2_wire_response ~handler ~headers target =
    cache keeps as a computed page. *)
 let test_h2_cached_payload_timeout_is_504 () =
   with_test_env @@ fun ~env:_ ~sw ~config:_ ->
-  let resources=Server_h2_response_resources.create
+  let resources=Masc.Http_h2_response_ledger.create
     ~max_pending_bytes:H2_response_limits.default_max_pending_bytes in
   let payload origin json =
     { Dashboard_cache.json
@@ -4908,10 +4908,12 @@ let test_h2_cached_payload_timeout_is_504 () =
     }
   in
   let read payload =
-    Server_h2_response_resources.with_request resources ~sw (fun () ->
+    Masc.Http_h2_response_ledger.with_request resources ~sw (fun () ->
     tools_h2_wire_response
-      ~handler:(fun reqd ->
-        Server_h2_gateway_helpers.h2_respond_cached_payload reqd payload)
+      ~handler:(fun h2_reqd ->
+        let reqd = Masc.Http_reqd.of_h2 ~stream_sw:sw
+          ~ledger:(Masc.Http_h2_response_ledger.current_exn ()) h2_reqd in
+        Server_cached_read_http.respond ~request:(Masc.Http_reqd.request reqd) reqd payload)
       ~headers:[] "/cached")
   in
   let envelope =
@@ -4978,10 +4980,9 @@ let test_tools_routes_serve_prepared_http_representations () =
       ~bind_host:"localhost" ~bind_port:8935 ~explicit_base_url:None with
       | Ok policy -> policy
       | Error error -> fail (Server_request_authority.trust_policy_error_to_string error) in
-    let h2_handler = Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:(Eio.Stdenv.clock env)) ~trust_policy ~sw ~request_sw:sw
-      (* A real client address: the handler charges the per-client-IP bucket
-         with it, which is the limit H2 was missing. *)
-      ~clock:(Eio.Stdenv.clock env) ~server_start_time:0.
+    let h2_handler = Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:(Eio.Stdenv.clock env)) ~trust_policy ~request_sw:sw
+      (* A real client address: the shared ingress charges the per-client-IP
+         bucket with it on HTTP/2 as on HTTP/1.1. *)
       (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321)) in
     let request_headers = [ "origin", "http://localhost:8935";
       "authorization", "Bearer " ^ token ] in
@@ -5046,8 +5047,7 @@ let test_tools_routes_serve_prepared_http_representations () =
        the request, so comparing consecutive reads of it is timing-dependent. *)
     let check_first_h2_charge label headers target expected_status =
       let client_addr = `Unix (Filename.basename config.base_path ^ "-" ^ label) in
-      let handler = Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:(Eio.Stdenv.clock env)) ~trust_policy ~sw ~request_sw:sw
-        ~clock:(Eio.Stdenv.clock env) ~server_start_time:0. client_addr in
+      let handler = Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:(Eio.Stdenv.clock env)) ~trust_policy ~request_sw:sw client_addr in
       let rl_key = Masc.Rate_limit.key_of_sockaddr client_addr in
       let before = Masc.Rate_limit.remaining_global ~key:rl_key in
       let status, _, _ = tools_h2_wire_response ~handler ~headers target in
@@ -5485,8 +5485,8 @@ let test_execution_routes_serve_prepared_http_representations () =
     ~bind_host:"localhost" ~bind_port:8935 ~explicit_base_url:None with
     | Ok policy -> policy
     | Error error -> fail (Server_request_authority.trust_policy_error_to_string error) in
-  let handler = Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:clock) ~trust_policy ~sw ~request_sw:sw ~clock
-    ~server_start_time:0. (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321)) in
+  let handler = Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:clock) ~trust_policy ~request_sw:sw
+    (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321)) in
   List.iter (fun (protocol, send) ->
     List.iter (fun encoding ->
       let headers = ("accept-encoding", encoding) :: request_headers in
@@ -5503,10 +5503,7 @@ let test_execution_routes_serve_prepared_http_representations () =
         let vary = List.filter_map (fun (name, value) -> if name = "vary" then Some value else None)
           headers |> String.concat "," in
         check bool (protocol ^ " encoding varies") true
-          (String_util.contains_substring vary "Accept-Encoding");
-        if protocol = "H2" then
-          check bool (protocol ^ " origin still varies") true
-            (String_util.contains_substring vary "Origin")
+          (String_util.contains_substring vary "Accept-Encoding")
       in
       check_headers reply_headers;
       let decoded = match encoding with
@@ -6569,7 +6566,7 @@ let post_config ?(inject_revision = true) ~sw ~clock ~state ~name body =
   let connection =
     Httpun.Server_connection.create (fun reqd ->
       Keeper_config_post.handle_keeper_config_post
-        ~sw ~clock state "dashboard-test" (Httpun.Reqd.request reqd) reqd body)
+        ~sw ~clock state "dashboard-test" (Httpun.Reqd.request reqd) (Masc.Http_reqd.of_httpun reqd) body)
   in
   let request =
     Printf.sprintf "POST /api/v1/keepers/%s/config HTTP/1.1\r\nHost: x\r\n\r\n" name
@@ -6606,7 +6603,7 @@ let post_to_handler ~target handle body =
   let output = Buffer.create 512 in
   let connection =
     Httpun.Server_connection.create (fun reqd ->
-      handle (Httpun.Reqd.request reqd) reqd body)
+      handle (Httpun.Reqd.request reqd) (Masc.Http_reqd.of_httpun reqd) body)
   in
   let request = Printf.sprintf "POST %s HTTP/1.1\r\nHost: x\r\n\r\n" target in
   let input = Bigstringaf.of_string ~off:0 ~len:(String.length request) request in
@@ -6752,7 +6749,7 @@ let config_refusal_response ~name refusal =
   let connection =
     Httpun.Server_connection.create (fun reqd ->
       Keeper_config_post.For_testing.respond_config_refusal
-        ~request:(Httpun.Reqd.request reqd) reqd ~name ~refusal ~receipt:None)
+        ~request:(Httpun.Reqd.request reqd) (Masc.Http_reqd.of_httpun reqd) ~name ~refusal ~receipt:None)
   in
   let request = "POST /api/v1/keepers/test/config HTTP/1.1\r\nHost: x\r\n\r\n" in
   let input = Bigstringaf.of_string ~off:0 ~len:(String.length request) request in

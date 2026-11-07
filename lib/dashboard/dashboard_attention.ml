@@ -136,15 +136,33 @@ let collect ~(now : float) ~(operator_tasks : Operator_task_attention.item list)
     (fun a b -> compare (severity_order a.severity) (severity_order b.severity))
     items
 
-(** Format attention items as content lines for a dashboard section. *)
+(** Format attention items as content lines for a dashboard section. Items
+    are sorted by severity, so neighbours often share one suggested action. A
+    run of items with the same action lists it once, after the run, with the
+    number of items above it when there is more than one. *)
 let format_items (items : attention_item list) : string list =
+  let runs =
+    List.fold_right
+      (fun item runs ->
+        match runs with
+        | [] -> [ (item.suggested_tool, [ item ]) ]
+        | (tool, members) :: later ->
+          if String.equal tool item.suggested_tool
+          then (tool, item :: members) :: later
+          else (item.suggested_tool, [ item ]) :: runs)
+      items []
+  in
   List.concat_map
-    (fun item ->
-      [
-        Printf.sprintf "%s %s" (severity_icon item.severity) item.summary;
-        Printf.sprintf "    -> %s" item.suggested_tool;
-      ])
-    items
+    (fun (tool, members) ->
+      let count = List.length members in
+      List.map
+        (fun item -> Printf.sprintf "%s %s" (severity_icon item.severity) item.summary)
+        members
+      @ [ (if count > 1
+           then Printf.sprintf "    -> %s (%d items above)" tool count
+           else Printf.sprintf "    -> %s" tool)
+        ])
+    runs
 
 (** One-line summary for compact mode. *)
 let compact_summary (items : attention_item list) : string =

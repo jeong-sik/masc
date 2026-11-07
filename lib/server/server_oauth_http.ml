@@ -20,12 +20,12 @@ let read_oauth_body request reqd callback =
     ~max_bytes:Server_oauth_service.max_request_body_bytes
     ~on_body:callback
     ~on_error:(function
-      | `Too_large _ ->
+      | Http.Request.Too_large _ ->
         respond_oauth_error
           request
           reqd
           (Auth_oauth.Invalid_request "request body is too large")
-      | `Internal exn ->
+      | Http.Request.Internal exn ->
         respond_oauth_error request reqd (Auth_oauth.Store_error (Printexc.to_string exn)))
 ;;
 
@@ -40,7 +40,7 @@ let respond_redirect location reqd =
            ])
       `Found
   in
-  Httpun.Reqd.respond_with_string reqd response ""
+  Http_reqd.respond_with_string reqd response ""
 ;;
 
 let authority_opt () =

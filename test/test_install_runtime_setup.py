@@ -2289,7 +2289,7 @@ base_url = "https://voice.fixture.invalid/v1"
                 result = self.configure(base, '--voice', name)
                 self.assertEqual(result.returncode, 1, result.stderr)
                 self.assertIn(f'say has no voice named "{name}"', result.stderr)
-                self.assertIn('Nothing was written.', result.stderr)
+                self.assertIn('nothing was written', result.stderr)
                 self.assertEqual(runtime.read_bytes(), before)
         # say matches names without regard to case, so the check does too.
         with self.workspace() as (base, runtime):

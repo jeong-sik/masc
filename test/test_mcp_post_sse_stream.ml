@@ -26,8 +26,8 @@ let with_server env ~handler body =
     in
     Eio.Fiber.fork_daemon ~sw (fun () ->
       Server_bootstrap_http.serve ~sw ~clock ~socket ~addr_label:"POST SSE test"
-        ~request_handler:(fun _addr (reqd : Httpun.Reqd.t Gluten.Reqd.t) ->
-          handler reqd.Gluten.Reqd.reqd);
+        ~request_handler:(fun _addr (gluten_reqd : Httpun.Reqd.t Gluten.Reqd.t) ->
+          handler gluten_reqd);
       `Stop_daemon);
     Eio.Switch.run (fun pool_sw ->
       Masc_http_client.with_scoped_pool ~sw:pool_sw ~env (fun () -> body ~port)))
@@ -90,8 +90,9 @@ let post_handler ~workspace (runtime : Server_mcp_transport_http.runtime) =
     ; verify_seat_mcp_auth = admit
     }
   in
-  fun reqd ->
-    let request = Httpun.Reqd.request reqd in
+  fun (gluten_reqd : Httpun.Reqd.t Gluten.Reqd.t) ->
+    let request = Httpun.Reqd.request gluten_reqd.Gluten.Reqd.reqd in
+    let reqd = Masc.Http_reqd.of_gluten gluten_reqd in
     Server_request_authority.with_current authority (fun () ->
       Server_mcp_transport_http.handle_post_mcp ~deps request reqd)
 ;;

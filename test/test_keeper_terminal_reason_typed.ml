@@ -1221,7 +1221,9 @@ max-concurrent = 1
              ~pending_board_events:(Some []) ~config ~meta in
            let result = { (run_result ~stop_reason ()) with
              runtime_id = "test_provider.test_model";
-             turn_outcome = Masc.Keeper_turn_outcome.of_stop_reason stop_reason } in
+             turn_outcome =
+               Masc.Keeper_turn_outcome.of_result_surface
+                 ~response_text:"done" stop_reason } in
            let execution = Masc.Keeper_execution_outcome.create
              ~lane:Masc.Keeper_execution_outcome.Direct result in
            let Masc.Keeper_unified_turn_success.Completed updated =
@@ -1390,7 +1392,9 @@ max-concurrent = 1
            let usage = { Agent_core.Types.zero_api_usage with input_tokens = 100; output_tokens = 10 } in
            let result = { (run_result ~stop_reason ~usage ()) with
              runtime_id = "test_provider.test_model";
-             turn_outcome = Masc.Keeper_turn_outcome.of_stop_reason stop_reason } in
+             turn_outcome =
+               Masc.Keeper_turn_outcome.of_result_surface
+                 ~response_text:"done" stop_reason } in
            let execution = Masc.Keeper_execution_outcome.create
              ~lane:Masc.Keeper_execution_outcome.Direct result in
            let handle () =

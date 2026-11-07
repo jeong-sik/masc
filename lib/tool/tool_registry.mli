@@ -41,10 +41,7 @@ val record_call_if_known :
 (** Returns retained immutable per-tool observations. Later recording or reset
     does not change returned values. Different tools are sampled separately. *)
 val get_stats : unit -> (string * call_stats) list
-val get_top_n : int -> (string * call_stats) list
-val get_never_called : string list -> string list
 val total_calls : unit -> int
-val distinct_tools_called : unit -> int
 
 (** {1 Lifecycle} *)
 

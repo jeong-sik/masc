@@ -234,11 +234,14 @@ let restamp ~tool_name ~start_time : Tool_result.result -> Tool_result.result = 
   | Failed data -> Tool_result.Failed {data with tool_name;duration_ms=Tool_timing.elapsed_ms start_time}
 let project ~base_path ~keeper_name ~started request (receipt:Host.receipt) =
   let annotate=Browser_binding.annotate receipt.binding in
-  let capability_fields=["browserCapabilities",C.to_json (Browser_binding.backend receipt.binding);
+  let capability_fields=["browserCapabilities",C.to_json (Browser_binding.backend receipt.binding)
+      ~constraints_for:request.required_actions;
     "requiredActions",`List (List.map (fun action -> `String (C.operation_name action)) request.required_actions)] in
+  (* The browser selection and the tabs come first, so a reader that stops early
+     has what the next call needs. *)
   let with_capabilities = function
-    | `Assoc fields -> Ok (`Assoc (capability_fields @ List.filter
-        (fun (key,_) -> not (List.mem key ["browserCapabilities";"requiredActions"])) fields))
+    | `Assoc fields -> Ok (`Assoc (List.filter
+        (fun (key,_) -> not (List.mem key ["browserCapabilities";"requiredActions"])) fields @ capability_fields))
     | _ -> Error "browser inventory response must be an object" in
   let data value = Result.map (fun data -> data,None) value in
   match request.projection with

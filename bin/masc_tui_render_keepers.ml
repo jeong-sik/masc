@@ -279,27 +279,52 @@ let keeper_waiting_detail (row : Keeper_list_model.row) =
   | Keeper_list_model.Waiting_observed { kwr_waiting_on = []; _ }
   | Keeper_list_model.Waiting_unobserved | Keeper_list_model.Waiting_unavailable -> None
 
-(* The resting path the Keeper's next dispatch waits on, with the time the
-   walk releases. Only a phase that takes turns waits on it; a stopped or
-   paused Keeper's path rest says nothing about it. *)
-let keeper_path_rest_detail (row : Keeper_list_model.row) =
+(* The resting path or next step the Keeper's next dispatch waits on.
+   Matches [Tui_decode.keeper_path_rest] with no wildcards.
+   [Stated_by_provider] vs [Bounded_by_masc] distinguishes whether the reset
+   time came from the provider or is MASC's upper bound.
+   Times are rendered as relative spans via [Message_layout.span_text]; if
+   already in the past, time is omitted.
+   [▹] is attached only when the previous turn failed ([Trail_failed]).
+   This piece sits at the very end of DETAIL to maintain right = next. *)
+let keeper_next_text ?now (row : Keeper_list_model.row) =
   match row.reading.Keeper_control.liveness with
   | Keeper_control.Present runtime
-    when Tui_decode.keeper_phase_executes_turns runtime.Tui_decode.kr_phase -> (
-      match runtime.Tui_decode.kr_runtime_path_rest with
-      | Ok
-          (Some
-             (Tui_decode.Path_rest_resting { runtime_id; release_at; release_basis = _ })) ->
-          Some
-            (Printf.sprintf "쉬는 중 ~%s (%s)"
-               (Terminal_text.short_timestamp_of_unix release_at)
-               (Terminal_text.single_line runtime_id))
-      | Ok (Some (Tui_decode.Path_rest_serving _)) | Ok None -> None
-      | Error detail -> Some ("쉼 읽기 실패: " ^ Terminal_text.single_line detail))
+    when Tui_decode.keeper_phase_executes_turns runtime.Tui_decode.kr_phase ->
+      let is_failed =
+        match Keeper_list_model.trail_of_row row with
+        | Keeper_trail.Trail_failed _ -> true
+        | Keeper_trail.Trail_sound -> false
+      in
+      let with_mark text = if is_failed then "▹ " ^ text else text in
+      (match runtime.Tui_decode.kr_runtime_path_rest with
+       | Ok None -> None
+       | Ok (Some (Tui_decode.Path_rest_serving { runtime_id })) ->
+           if is_failed then Some ("▹ " ^ Terminal_text.single_line runtime_id)
+           else None
+       | Ok (Some (Tui_decode.Path_rest_resting { runtime_id; release_at; release_basis })) ->
+           let now_val = match now with Some t -> t | None -> Unix.gettimeofday () in
+           let time_clause =
+             if release_at > now_val then " ~" ^ Message_layout.span_text (release_at -. now_val)
+             else ""
+           in
+           let basis_word =
+             match release_basis with
+             | Tui_decode.Stated_by_provider -> "제공자"
+             | Tui_decode.Bounded_by_masc -> "상한"
+           in
+           let text =
+             Printf.sprintf "쉬는 중%s (%s · %s)"
+               time_clause
+               (Terminal_text.single_line runtime_id)
+               basis_word
+           in
+           Some (with_mark text)
+       | Error detail -> Some ("쉼 읽기 실패: " ^ Terminal_text.single_line detail))
   | Keeper_control.Present _ | Keeper_control.Absent | Keeper_control.Unobserved
   | Keeper_control.Invalid _ -> None
 
-let keeper_detail_text (row : Keeper_list_model.row) =
+let keeper_detail_text ?now (row : Keeper_list_model.row) =
   let approval =
     Option.map
       (fun (approval : Tui_decode.keeper_tool_approval) ->
@@ -319,8 +344,8 @@ let keeper_detail_text (row : Keeper_list_model.row) =
   in
   List.map keeper_badge_text (Keeper_list_model.badges_of_row row)
   @ List.filter_map Fun.id
-      [ approval; questions; keeper_path_rest_detail row; keeper_waiting_detail row
-      ; keeper_task_detail row; health ]
+      [ approval; questions; keeper_waiting_detail row
+      ; keeper_task_detail row; health; keeper_next_text ?now row ]
   |> String.concat " · "
 
 (* The DETAIL cell. When the RUNTIME column is not drawn, the sentence about
@@ -328,8 +353,8 @@ let keeper_detail_text (row : Keeper_list_model.row) =
    The text is fitted as plain text, so a cut mark takes the colour of the text
    it cuts. A sentence that fills the cell is fitted together with the rest, so
    the rest it pushes out is still marked by the cut. *)
-let keeper_detail_cell ~width ~failure_context row =
-  let rest = keeper_detail_text row in
+let keeper_detail_cell ?now ~width ~failure_context row =
+  let rest = keeper_detail_text ?now row in
   match failure_context with
   | None -> Theme.recede () ^ fit_width rest width ^ Ansi.reset
   | Some sentence ->
@@ -411,23 +436,97 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
          " " ^ keeper_runtime_cell ~width:columns.kcol_runtime ?failure_context runtime
        else "")
     ; " "
-    ; keeper_detail_cell ~width:columns.kcol_task
+    ; keeper_detail_cell ~now ~width:columns.kcol_task
         ~failure_context:
           (Render_schedule.keeper_failure_context_for_detail
              ~show_runtime:columns.kcol_show_runtime failure_context)
         row
     ]
 
-let keeper_secondary_row_content ~inner (row : Keeper_list_model.row) =
+let format_attempt_node (a : Masc_tui_keeper_trail.attempt) =
+  let fault_clause =
+    match a.fault with
+    | Some w when not (String.equal w "") -> " · " ^ w
+    | _ -> ""
+  in
+  let mark = Masc_tui_keeper_mark.attempt_glyph in
+  mark ^ " " ^ Terminal_text.single_line a.runtime_id ^ fault_clause
+
+let render_attempt_chain ~max_cells (attempts : Masc_tui_keeper_trail.attempt list) =
+  match attempts with
+  | [] -> None
+  | _ ->
+      let sep = " › " in
+      let sep_len = Message_layout.display_width sep in
+      let rev_attempts = List.rev attempts in
+      let rec fit acc omitted remaining_cells = function
+        | [] -> (acc, omitted)
+        | a :: rest ->
+            let node = format_attempt_node a in
+            let node_cells = Message_layout.display_width node in
+            let cost = if acc = [] then node_cells else node_cells + sep_len in
+            let omit_cost =
+              if rest <> [] then
+                Message_layout.display_width (Printf.sprintf "+%d › " (List.length rest))
+              else 0
+            in
+            if remaining_cells >= cost + omit_cost then
+              fit (node :: acc) omitted (remaining_cells - cost) rest
+            else
+              (acc, List.length (a :: rest))
+      in
+      let fitted, omitted_count = fit [] 0 max_cells rev_attempts in
+      if fitted = [] then None
+      else
+        let prefix =
+          if omitted_count > 0 then Printf.sprintf "+%d%s" omitted_count sep else ""
+        in
+        let chain = prefix ^ String.concat sep fitted in
+        Some (Theme.warn () ^ chain ^ Ansi.reset)
+
+(* The cells the detail keeps beside the attempt chain, after the separator. *)
+let attempt_detail_floor_cells = 10
+
+let keeper_secondary_row_content ?now ~inner (row : Keeper_list_model.row) =
   let indent_cells = Render_schedule.keeper_marker_width + 2 in
+  let available = max 0 (inner - indent_cells) in
+  let runtime =
+    match row.reading.Keeper_control.liveness with
+    | Keeper_control.Present r -> Some r
+    | Keeper_control.Absent | Keeper_control.Unobserved | Keeper_control.Invalid _ -> None
+  in
+  let attempts = Masc_tui_keeper_trail.attempts_of_runtime runtime in
   let detail =
-    match keeper_detail_text row with
+    match keeper_detail_text ?now row with
     | "" -> Masc_tui_theme.Glyph.no_value
     | text -> text
   in
-  String.make indent_cells ' ' ^ Theme.recede ()
-  ^ fit_width detail (max 0 (inner - indent_cells))
-  ^ Ansi.reset
+  let has_detail = not (String.equal detail Masc_tui_theme.Glyph.no_value) in
+  let sep = "  ·  " in
+  let sep_cells = Message_layout.display_width sep in
+  (* The chain drops its older attempts to leave the detail a floor of cells.
+     Only when the last attempt does not fit beside that floor does the chain
+     take the whole row, and the detail is left out. *)
+  let content =
+    let beside_detail =
+      if has_detail then
+        render_attempt_chain
+          ~max_cells:(available - sep_cells - attempt_detail_floor_cells)
+          attempts
+      else None
+    in
+    match beside_detail with
+    | Some chain ->
+        let chain_cells = Message_layout.display_width chain in
+        chain ^ Theme.recede () ^ sep
+        ^ fit_width detail (available - chain_cells - sep_cells)
+        ^ Ansi.reset
+    | None -> (
+        match render_attempt_chain ~max_cells:available attempts with
+        | Some chain -> fit_width chain available
+        | None -> Theme.recede () ^ fit_width detail available ^ Ansi.reset)
+  in
+  String.make indent_cells ' ' ^ content
 
 (* The subtractions over the fleet's name lists. They answer different
    questions and only one of them is about being stopped: a keeper the fleet
@@ -914,6 +1013,24 @@ let render_keeper_list (state : state) =
   let has_failing_keeper =
     List.exists (fun row -> failure_sentence_cells row > 0) model_rows
   in
+  let widest_detail =
+    List.fold_left
+      (fun widest (row : Keeper_list_model.row) ->
+        let failure_width = failure_sentence_cells row in
+        let next_width =
+          match keeper_next_text ~now:now_unix row with
+          | None -> 0
+          | Some text ->
+            let task_w =
+              match keeper_task_detail row with
+              | None -> 0
+              | Some t -> Message_layout.display_width t + 3
+            in
+            task_w + Message_layout.display_width text
+        in
+        max widest (max failure_width next_width))
+      0 model_rows
+  in
   let widest_runtime =
     List.fold_left
       (fun widest (row : Keeper_list_model.row) ->
@@ -934,7 +1051,8 @@ let render_keeper_list (state : state) =
       ~runtime_visible:(match state.keeper_list_layout with
         | Keeper_list_model.Detailed -> true
         | Keeper_list_model.Compact | Keeper_list_model.Grouped -> false)
-      ~prioritize_runtime:has_failing_keeper ~inner_width:inner ~widest_runtime ()
+      ~prioritize_runtime:has_failing_keeper ~inner_width:inner
+      ~widest_runtime ~widest_detail ()
   in
   box_line_styled buf cols ~style:(Theme.recede ()) (keeper_column_header columns);
 
@@ -1092,7 +1210,7 @@ let render_keeper_list (state : state) =
           emit primary;
           (* Only the detailed layout draws the second row, so only it builds one. *)
           (match state.keeper_list_layout with
-           | Keeper_list_model.Detailed -> emit (keeper_secondary_row_content ~inner row)
+           | Keeper_list_model.Detailed -> emit (keeper_secondary_row_content ~now:now_unix ~inner row)
            | Keeper_list_model.Compact | Keeper_list_model.Grouped -> ()))
     entries_window;
 

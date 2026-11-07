@@ -4,12 +4,12 @@
    that keeps the default window got a 200 carrying only the first 65535
    bytes. Every case runs a real H2 exchange in memory, an h2 client
    connection pumped against a server connection whose handler answers
-   through the gateway helpers, so what is checked is what a peer sees on the
-   wire. *)
+   through the shared [Response] functions on an HTTP/2 handle, so what is
+   checked is what a peer sees on the wire. *)
 
 open Alcotest
 
-module Helpers = Server_h2_gateway_helpers
+module Response = Masc.Http_server_eio.Response
 
 (* The window every stream starts with until the peer's SETTINGS change it
    (RFC 9113 6.9.2). h2's own client default advertises 2^27, which hides the
@@ -60,9 +60,9 @@ let transfer lane next_write report_write read =
 let exchange ?error_handler
     ?(capacity=H2_response_limits.default_max_pending_bytes) ~handler target =
   Eio_main.run (fun _ -> Eio.Switch.run (fun sw ->
-  let resources=Server_h2_response_resources.create
+  let resources=Masc.Http_h2_response_ledger.create
     ~max_pending_bytes:capacity in
-  Server_h2_response_resources.with_request resources ~sw (fun () ->
+  Masc.Http_h2_response_ledger.with_request resources ~sw (fun () ->
   let status = ref None in
   let headers = ref H2.Headers.empty in
   let body = Buffer.create response_size in
@@ -96,7 +96,12 @@ let exchange ?error_handler
         consume ())
   in
   H2.Body.Writer.close writer;
-  let server = H2.Server_connection.create ?error_handler handler in
+  let server =
+    H2.Server_connection.create ?error_handler (fun h2_reqd ->
+      handler
+        (Masc.Http_reqd.of_h2 ~stream_sw:sw
+           ~ledger:(Masc.Http_h2_response_ledger.current_exn ()) h2_reqd))
+  in
   let to_server = { pending = "" } in
   let to_client = { pending = "" } in
   let rec pump () =
@@ -133,9 +138,7 @@ let payload =
 let test_response_over_the_window_arrives_whole () =
   let reply =
     exchange
-      ~handler:(fun reqd ->
-        Helpers.h2_respond_bytes ~content_type:"application/octet-stream" reqd
-          payload)
+      ~handler:(Response.bytes ~content_type:"application/octet-stream" payload)
       "/large"
   in
   check int "answered" 200 reply.status;
@@ -147,18 +150,18 @@ let test_response_over_the_window_arrives_whole () =
    nothing to wait for and the stream still has to end. *)
 let test_empty_response_still_ends_its_stream () =
   let reply =
-    exchange ~handler:(fun reqd -> Helpers.h2_respond_text reqd "") "/empty"
+    exchange ~handler:(Response.text "") "/empty"
   in
   check int "answered" 200 reply.status;
   check string "no body" "" reply.body
 
 let test_capacity_refusal_precedes_success_headers () =
   let reply = exchange ~capacity:3
-    ~handler:(fun reqd -> Helpers.h2_respond_bytes
-      ~content_type:"application/javascript" ~compress:false
-      ~extra_headers:["content-encoding","gzip";"etag","source-revision";
+    ~handler:(Response.bytes
+      ~content_type:"application/javascript"
+      ~headers:["content-encoding","gzip";"etag","source-revision";
         "cache-control","public, max-age=31536000";
-        "access-control-allow-origin","*"] reqd "four") "/asset.js" in
+        "access-control-allow-origin","*"] "four") "/asset.js" in
   check int "capacity refusal is explicit" 503 reply.status;
   check string "no unreserved payload" "" reply.body;
   check (option string) "no source encoding" None (H2.Headers.get reply.headers "content-encoding");
@@ -170,8 +173,7 @@ let test_capacity_refusal_precedes_success_headers () =
 
 let test_exact_capacity_preserves_whole_body () =
   let reply = exchange ~capacity:response_size
-    ~handler:(fun reqd -> Helpers.h2_respond_bytes
-      ~content_type:"application/octet-stream" reqd payload) "/exact" in
+    ~handler:(Response.bytes ~content_type:"application/octet-stream" payload) "/exact" in
   check int "exact capacity admitted" 200 reply.status;
   check string "whole body survives flow control" payload reply.body
 
@@ -181,7 +183,7 @@ let test_error_payload_cannot_exceed_capacity () =
   let reply = Fun.protect ~finally:Console_sink.For_testing.reset (fun () ->
     exchange ~capacity:1
       ~error_handler:(Server_h2_gateway.make_error_handler () ())
-      ~handler:(fun reqd -> H2.Reqd.report_exn reqd (Failure payload)) "/over-capacity") in
+      ~handler:(fun reqd -> Masc.Http_reqd.report_exn reqd (Failure payload)) "/over-capacity") in
   check int "error status preserved" 500 reply.status;
   check string "no unreserved diagnostic" "" reply.body
 
@@ -199,7 +201,7 @@ let test_error_handler_body_arrives_whole () =
     Fun.protect ~finally:Console_sink.For_testing.reset (fun () ->
       exchange
         ~error_handler:(Server_h2_gateway.make_error_handler () ())
-        ~handler:(fun reqd -> H2.Reqd.report_exn reqd (Failure payload))
+        ~handler:(fun reqd -> Masc.Http_reqd.report_exn reqd (Failure payload))
         "/boom")
   in
   check int "answered as an internal error" 500 reply.status;

@@ -1033,7 +1033,7 @@ let start_upgrade_heartbeat ?sw ?clock session_id session =
              | Eio.Cancel.Cancelled _ as e -> raise e
              | exn ->
                send_failed := true;
-               (match Http_server_eio.Late_response.classify_write_failure exn with
+               (match Http_reqd.Late_response.classify_write_failure exn with
                 | Some _ ->
                   Log.Server.debug
                     "[ws-upgrade] session %s heartbeat skipped (writer closed during \
@@ -1155,13 +1155,13 @@ let ws_upgrade_accept (request : Httpun.Request.t) : (string, string) result =
   | _ -> Error "websocket upgrade request did not pass RFC 6455 §4.2.1 scrutiny"
 
 let respond_and_drive_upgrade
-    ~(upgrade : Gluten.impl -> unit)
-    ~(reqd : Httpun.Reqd.t)
+    ~(upgrade : Http_reqd.upgrade)
+    ~(reqd : Http_reqd.t)
     ~(max_message : int)
     ~(max_frame : int)
     ~(handler : Ws_wsd.t -> Ws_endpoint.handlers)
   : (unit, string) result =
-  let request = Httpun.Reqd.request reqd in
+  let request = Http_reqd.request reqd in
   match ws_upgrade_accept request with
   | Error _ as e -> e
   | Ok accept ->
@@ -1175,11 +1175,11 @@ let respond_and_drive_upgrade
     (* Sends the 101 on the reqd, then the callback attaches the post-101
        socket: a ws-direct Endpoint (Server role) packaged as a Gluten.impl,
        drop-in for the former Httpun_ws.Server_connection. RFC-0287 §4.1. *)
-    Httpun.Reqd.respond_with_upgrade reqd headers (fun () ->
+    upgrade.Http_reqd.switch_protocols headers (fun () ->
       let endpoint =
         Ws_endpoint.create Ws_endpoint.Server ~max_message ~max_frame handler
       in
-      upgrade (Ws_direct_gluten.impl endpoint));
+      upgrade.Http_reqd.drive (Ws_direct_gluten.impl endpoint));
     Ok ()
 
 (** Handle an HTTP/1.1 [GET /ws] upgrade on the main HTTP origin using
@@ -1195,8 +1195,8 @@ let upgrade_connection
     ?sw
     ?clock
     ?(on_message = fun _session_id _text -> ())
-    ~(upgrade : Gluten.impl -> unit)
-    (reqd : Httpun.Reqd.t)
+    ~(upgrade : Http_reqd.upgrade)
+    (reqd : Http_reqd.t)
   : (unit, string) result =
   respond_and_drive_upgrade ~upgrade ~reqd
     ~max_message:(max_inbound_message_bytes ())

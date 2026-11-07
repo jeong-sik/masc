@@ -69,17 +69,6 @@ let test_resolve_connector_status_name_ignores_blank_inputs () =
   check (option string) "absent name ignored" None
     (Routes.resolve_connector_status_name ())
 
-let python_utc_iso_now () =
-  let z = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ()) in
-  String.sub z 0 (String.length z - 1) ^ ".123456+00:00"
-
-let test_gate_time_parser_accepts_python_utc_isoformat () =
-  check bool "python UTC isoformat parsed" true
-    (Option.is_some (Gate_time_util.parse_iso8601_opt (python_utc_iso_now ())));
-  check bool "explicit non-UTC offset normalizes" true
-    (Option.is_some
-       (Gate_time_util.parse_iso8601_opt "2026-06-06T00:00:00+09:00"))
-
 let test_connector_capability_wire_contract () =
   check
     (list string)
@@ -742,7 +731,7 @@ let dispatch_gate_route ~sw ~clock state token target_path =
     let response_buf = Buffer.create 1024 in
     let conn =
       Httpun.Server_connection.create (fun reqd ->
-        Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd)
+        Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) (Masc.Http_reqd.of_httpun reqd))
     in
     let request_str =
       Printf.sprintf
@@ -1033,7 +1022,7 @@ let test_keeper_status_http_502_dispatch_failure () =
           Httpun.Server_connection.create (fun reqd ->
             Server_request_authority.with_current (loopback_request_authority ()) (fun () ->
               let args = `Assoc [ ("name", `String "analyst"); ("tail_order", `String "invalid_order_value") ] in
-              Routes.respond_keeper_tool_json ~sw ~clock state req reqd ~tool_name:"masc_keeper_status" ~args))
+              Routes.respond_keeper_tool_json ~sw ~clock state req (Masc.Http_reqd.of_httpun reqd) ~tool_name:"masc_keeper_status" ~args))
         in
         let request_str = Printf.sprintf "GET /api/v1/gate/keeper-status?name=valid_keeper HTTP/1.1\r\nHost: 127.0.0.1:8935\r\nOrigin: http://127.0.0.1:8935\r\nAuthorization: Bearer %s\r\n\r\n" token in
         let bytes = Bigstringaf.of_string ~off:0 ~len:(String.length request_str) request_str in
@@ -1132,8 +1121,6 @@ let () =
         ] );
       ( "sidecar_connector_state",
         [
-          test_case "gate time parses python UTC isoformat" `Quick
-            test_gate_time_parser_accepts_python_utc_isoformat;
           test_case "connector capability wire contract" `Quick
             test_connector_capability_wire_contract;
           test_case "slack bind persists binding and audit" `Quick

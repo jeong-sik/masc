@@ -106,16 +106,20 @@ llms.txt 색인을 `headless|continuous|github|ci|automation` 키워드로 걸�
 - 일부만 채운 것:
   - 1: `export.json` 최상위 칸 목록과 출력 원소를 fixture 로 남겼다. 칸 단위
     스키마 문서는 아직 없다.
-  - 2: 저장 위치(keychain 항목)만 봤다.
+  - 2: 저장 위치(keychain 항목), `vibe-acp` 소스의 자격 증명 순서(env →
+    `~/.vibe/.env` → keyring), `vibe -p` 의 env > keychain(m4)을 봤다. 수명·갱신은
+    보지 못했다.
   - 3: env API 키 경로의 402 만 봤다.
   - 4: 모델 별칭 목록만 봤다.
   - 5: `ask` agent 의 거절 모양과 `--disabled-tools` 한 이름만 봤다.
-  - 6: `-p "/whoami"` 한 형태만 해 봤고 쓸 수 없었다.
-- 못 채운 것: 7. 콘솔 두 막대의 수치는 재지 않았다. 같은 시각의 API 402 와 Vibe
-  성공이라는 대비 하나만 있다.
+  - 7: Vibe 호출이 `vibe-acp` `_account/read` 의 Vibe 몫 계량기를 올리는 것을 한 번
+    봤다(RFC §4.2). API 쪽 계량기와의 관계는 재지 않았다.
+  - 6: 모델 호출 없는 형태는 `vibe-acp` 의 `_auth/status`·`_account/read` 다
+    (RFC §4.2). `-p "/whoami"` 는 쓸 수 없고, `vibe` 의 하위 명령은 `mcp`·`config`·
+    `update` 뿐이다. 만료·취소된 키의 `unauthorized` 응답은 보지 못했다.
 
-기록은 `docs/evidence/vibe-official-client-lane-20261107/` 에 있다. 해석은 RFC §4.1 에
-있다.
+기록은 `docs/evidence/vibe-official-client-lane-20261107/` 에 있다. 해석은 RFC §4.1·§4.2
+에 있다.
 
 1. programmatic 호출의 실측: `--output json`/`streaming` 프레임의 필드 수준
    스키마와 `export.json` 스키마는 문서가 개요만 적는다 — 우리 계정에서

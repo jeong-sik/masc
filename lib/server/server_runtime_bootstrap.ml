@@ -1701,6 +1701,16 @@ let run ~sw ~runtime_sw ~env ~address ~port ~base_path ?input_base_path ?on_read
   Rate_limit.start_global_cleanup_loop ~sw ~clock;
   (* 1. HTTP socket first — Railway healthcheck can reach /health immediately *)
   let config = Server_bootstrap_http.make_http_config ~address ~port in
+  (* RFC-0512 D6: the certificate is loaded or generated before anything
+     binds, so a configuration the listener cannot use refuses the boot. *)
+  let https =
+    match
+      Server_bootstrap_http.https_listener_of_env ~base_path ~bind_host:config.host
+    with
+    | Ok https -> https
+    | Error reason ->
+      raise (Env_config_core.Config_error ("HTTPS listener: " ^ reason))
+  in
   (* The listener identity comes only from the effective CLI/bootstrap config
      above.  A public identity is additional trust only when the operator
      explicitly configured MASC_HTTP_BASE_URL; deriving it again from env
@@ -2007,7 +2017,7 @@ let run ~sw ~runtime_sw ~env ~address ~port ~base_path ?input_base_path ?on_read
         ; startup_banner = (fun () ->
             boot_stage "listening_banner.begin";
             let workspace_config = Mcp_server.workspace_config state in
-            Server_bootstrap_http.print_startup_banner ~config
+            Server_bootstrap_http.print_startup_banner ~config ~https
               ~resolved_base:workspace_config.base_path ~base_path
               ~masc_dir:(Workspace.masc_dir workspace_config)
               ~path_diagnostics:activated_owner.path_diagnostics;
@@ -2146,8 +2156,8 @@ let run ~sw ~runtime_sw ~env ~address ~port ~base_path ?input_base_path ?on_read
     `Stop_daemon);
 
   (* 3. Start serving -- /health responds before init completes *)
-  let run_serving ~sw ~socket ~routes:_ ~request_handler ~h2_request_handler
-      ~h2_error_handler =
+  let run_serving ~sw ~socket ~https_listener ~routes:_ ~request_handler
+      ~h2_request_handler ~h2_error_handler =
     Eio.Promise.resolve publish_listener_bound ();
     (* The listener is bound. Persist only the desired connection, not readiness. *)
     (match Workspace_connection.port config.port with
@@ -2155,6 +2165,13 @@ let run ~sw ~runtime_sw ~env ~address ~port ~base_path ?input_base_path ?on_read
      | Ok port -> (match Workspace_connection.save ~base_path ~port with
        | Ok () -> () | Error error -> Log.Server.warn "%s" (Workspace_connection.error_message error)));
     let addr_label = Printf.sprintf "%s:%d" config.host config.port in
+    Option.iter
+      (fun ((https : Server_bootstrap_http.https_listener), https_socket) ->
+        Eio.Fiber.fork ~sw (fun () ->
+          Server_bootstrap_http.serve_tls ~sw ~clock ~socket:https_socket
+            ~addr_label:(Printf.sprintf "%s:%d" config.host https.https_port)
+            ~tls:https.tls ~request_handler ~h2_request_handler ~h2_error_handler))
+      https_listener;
     match http_mode with
     | `H2_only ->
       Server_bootstrap_http.serve_h2 ~sw ~clock ~socket ~addr_label
@@ -2181,6 +2198,9 @@ let run ~sw ~runtime_sw ~env ~address ~port ~base_path ?input_base_path ?on_read
           let socket =
             Server_bootstrap_http.listen_socket ~sw:serving_sw ~net ~address config
           in
+          let https_listener =
+            Server_bootstrap_http.listen_https_socket ~sw:serving_sw ~net ~address ~config https
+          in
           let routes =
             make_routes ~port:config.port ~host:config.host ~sw:serving_sw ~clock
           in
@@ -2188,39 +2208,32 @@ let run ~sw ~runtime_sw ~env ~address ~port ~base_path ?input_base_path ?on_read
             make_request_handler ~trust_policy:request_trust_policy routes
           in
           let h2_request_handler =
-            make_h2_request_handler
-              ~trust_policy:request_trust_policy
-              ~routes
-              ~sw:serving_sw
-              ~clock
-              ~server_start_time
+            make_h2_request_handler ~trust_policy:request_trust_policy ~routes
           in
           let h2_error_handler = make_h2_error_handler () in
           run_serving
             ~sw:serving_sw
             ~socket
+            ~https_listener
             ~routes
             ~request_handler
             ~h2_request_handler
             ~h2_error_handler))))
   else (
     let socket = Server_bootstrap_http.listen_socket ~sw ~net ~address config in
+    let https_listener = Server_bootstrap_http.listen_https_socket ~sw ~net ~address ~config https in
     let routes = make_routes ~port:config.port ~host:config.host ~sw ~clock in
     let request_handler =
       make_request_handler ~trust_policy:request_trust_policy routes
     in
     let h2_request_handler =
-      make_h2_request_handler
-        ~trust_policy:request_trust_policy
-        ~routes
-        ~sw
-        ~clock
-        ~server_start_time
+      make_h2_request_handler ~trust_policy:request_trust_policy ~routes
     in
     let h2_error_handler = make_h2_error_handler () in
     run_serving
       ~sw
       ~socket
+      ~https_listener
       ~routes
       ~request_handler
       ~h2_request_handler

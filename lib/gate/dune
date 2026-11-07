@@ -61,9 +61,7 @@
   bigstringaf
   ws-direct-core
   ws-direct-eio
-  mirage-crypto-rng
   mirage-crypto-rng.unix
-  base64
   re
   ; existing
   ; Health_status: channel health is published on the shared vocabulary, not
@@ -73,7 +71,6 @@
   masc_core
   masc.time_codec
   masc.crypto_rng
-  masc_pulse
   masc.http_client
   masc.masc_log
   otel_metric_store

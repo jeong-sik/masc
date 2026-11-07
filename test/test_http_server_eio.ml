@@ -510,7 +510,7 @@ let request_tests =
 let test_response_empty_includes_content_length_zero () =
   let reqd_ref = ref None in
   let conn =
-    Httpun.Server_connection.create (fun reqd -> reqd_ref := Some reqd)
+    Httpun.Server_connection.create (fun reqd -> reqd_ref := Some (Masc.Http_reqd.of_httpun reqd))
   in
   let request = "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n" in
   let len = String.length request in
@@ -674,7 +674,7 @@ let serve_json_over_wire ?(worker_pool = false) ?if_none_match ?(headers = []) ?
       let response_buf = Buffer.create 1024 in
       let conn =
         Httpun.Server_connection.create (fun reqd ->
-          respond ~request:(Httpun.Reqd.request reqd) body reqd)
+          respond ~request:(Httpun.Reqd.request reqd) body (Masc.Http_reqd.of_httpun reqd))
       in
       let headers =
         let base = ("host", "127.0.0.1") :: headers in
@@ -797,12 +797,12 @@ let test_json_lazy_matching_tag_skips_body_evaluation () =
     let test_body = "{\"lazy\":\"evaluated\"}" in
     let etag = Response.weak_etag_value test_body in
     let conn =
-      Httpun.Server_connection.create (fun reqd ->
+      Httpun.Server_connection.create (fun raw ->
         Response.json_lazy
-          ~request:(Httpun.Reqd.request reqd)
+          ~request:(Httpun.Reqd.request raw)
           ~etag
           (fun () -> body_called := true; test_body)
-          reqd)
+          (Masc.Http_reqd.of_httpun raw))
     in
     let headers = [ ("host", "127.0.0.1"); ("if-none-match", etag) ] in
     let request =
@@ -869,12 +869,12 @@ let test_json_lazy_unmatched_tag_evaluates_body () =
     let test_body = "{\"lazy\":\"evaluated\"}" in
     let etag = Response.weak_etag_value test_body in
     let conn =
-      Httpun.Server_connection.create (fun reqd ->
+      Httpun.Server_connection.create (fun raw ->
         Response.json_lazy
-          ~request:(Httpun.Reqd.request reqd)
+          ~request:(Httpun.Reqd.request raw)
           ~etag
           (fun () -> body_called := true; test_body)
-          reqd)
+          (Masc.Http_reqd.of_httpun raw))
     in
     let headers = [ ("host", "127.0.0.1"); ("if-none-match", "W/\"mismatched\"") ] in
     let request =
@@ -942,13 +942,13 @@ let test_json_lazy_preserves_extra_headers_and_matches_wildcard () =
     let etag = Response.weak_etag_value test_body in
     let extra_headers = [ ("access-control-allow-origin", "*"); ("x-custom", "preserved") ] in
     let conn =
-      Httpun.Server_connection.create (fun reqd ->
+      Httpun.Server_connection.create (fun raw ->
         Response.json_lazy
           ~extra_headers
-          ~request:(Httpun.Reqd.request reqd)
+          ~request:(Httpun.Reqd.request raw)
           ~etag
           (fun () -> body_called := true; test_body)
-          reqd)
+          (Masc.Http_reqd.of_httpun raw))
     in
     let headers = [ ("host", "127.0.0.1"); ("if-none-match", Printf.sprintf "W/\"old\", %s, W/\"other\"" etag) ] in
     let request =
@@ -1029,7 +1029,7 @@ let test_json_worker_yields_to_caller ~queued respond () =
       begin
       Eio.Promise.await occupied;
       let reqd_ref = ref None in
-      let conn = Httpun.Server_connection.create (fun reqd -> reqd_ref := Some reqd) in
+      let conn = Httpun.Server_connection.create (fun reqd -> reqd_ref := Some (Masc.Http_reqd.of_httpun reqd)) in
       let head = "GET / HTTP/1.1\r\nHost: localhost\r\nAccept-Encoding: gzip\r\n\r\n" in
       let bytes = Bigstringaf.of_string head ~off:0 ~len:(String.length head) in
       let consumed = Httpun.Server_connection.read conn bytes ~off:0 ~len:(String.length head) in
@@ -1071,7 +1071,7 @@ let test_json_worker_cancelled_before_write respond () =
       begin
         Eio.Promise.await occupied;
         let reqd_ref = ref None in
-        let conn = Httpun.Server_connection.create (fun reqd -> reqd_ref := Some reqd) in
+        let conn = Httpun.Server_connection.create (fun reqd -> reqd_ref := Some (Masc.Http_reqd.of_httpun reqd)) in
         let head = "GET / HTTP/1.1\r\nHost: localhost\r\nAccept-Encoding: gzip\r\n\r\n" in
         let bytes = Bigstringaf.of_string head ~off:0 ~len:(String.length head) in
         let consumed = Httpun.Server_connection.read conn bytes ~off:0 ~len:(String.length head) in
@@ -1127,7 +1127,7 @@ let worker_json_responders =
           worker_json_body) reqd)
   ; "HTML", (fun reqd ->
       Response.html_cached ~etag:"snapshot"
-        ~request:(Httpun.Reqd.request reqd) worker_json_body reqd)
+        ~request:(Masc.Http_reqd.request reqd) worker_json_body reqd)
   ]
 
 let test_json_worker_wire_parity () =
@@ -1283,7 +1283,7 @@ let test_late_response_classifies_invalid_state_failure () =
   let exn =
     Failure "httpun.Reqd.respond_with_string: invalid state, response already written"
   in
-  match Late_response.classify_write_failure exn with
+  match Masc.Http_reqd.Late_response.classify_write_failure exn with
   | Some msg ->
     Alcotest.(check bool) "preserves the original message" true (String.length msg > 0);
     Alcotest.(check bool)
@@ -1295,7 +1295,7 @@ let test_late_response_classifies_invalid_state_failure () =
 
 let test_late_response_classifies_closed_writer_failure () =
   match
-    Late_response.classify_write_failure (Failure "cannot write to closed writer")
+    Masc.Http_reqd.Late_response.classify_write_failure (Failure "cannot write to closed writer")
   with
   | Some msg ->
     Alcotest.(check string)
@@ -1313,7 +1313,7 @@ let test_late_response_does_not_classify_cancellation () =
   Alcotest.(check (option string))
     "Cancelled is not a late-response failure"
     None
-    (Late_response.classify_write_failure cancelled)
+    (Masc.Http_reqd.Late_response.classify_write_failure cancelled)
 ;;
 
 let test_late_response_ignores_unrelated_failures () =
@@ -1331,7 +1331,7 @@ let test_late_response_ignores_unrelated_failures () =
        Alcotest.(check (option string))
          label
          None
-         (Late_response.classify_write_failure exn))
+         (Masc.Http_reqd.Late_response.classify_write_failure exn))
     cases
 ;;
 

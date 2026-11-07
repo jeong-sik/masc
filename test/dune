@@ -2903,8 +2903,7 @@
 (include stanzas/test_play_pad.inc)
 (include stanzas/test_play_pad_routes.inc)
 (include stanzas/test_server_route.inc)
-(include stanzas/test_server_h2_route_gate.inc)
-(include stanzas/test_h2_route_gate_http.inc)
+(include stanzas/test_h2_gateway_http.inc)
 (include stanzas/test_play_invite.inc)
 (include stanzas/test_play_invite_routes.inc)
 (include stanzas/test_pool_body_limit.inc)
@@ -3366,6 +3365,7 @@
 (include stanzas/test_runtime_codex_app_server.inc)
 (include stanzas/test_keeper_codex_tool_outbox_wake.inc)
 (include stanzas/test_keeper_agent_core_result_outbox.inc)
+(include stanzas/test_keeper_execute_background.inc)
 (include stanzas/test_keeper_host_result_retention.inc)
 (include stanzas/test_keeper_result_producer_liveness.inc)
 (include stanzas/test_runtime_claude_code.inc)
@@ -3378,6 +3378,7 @@
 (include stanzas/test_runtime_antigravity_context.inc)
 (include stanzas/test_runtime_muse_msp.inc)
 (include stanzas/test_runtime_vibe_headless.inc)
+(include stanzas/test_runtime_vibe_cli.inc)
 (include stanzas/test_runtime_muse_serve.inc)
 (include stanzas/test_runtime_muse_serve_config.inc)
 (include stanzas/test_runtime_muse_home.inc)
@@ -4461,7 +4462,7 @@
 (test
  (name test_tui_keeper_trail)
  (modules test_tui_keeper_trail)
- (libraries alcotest masc masc.masc_types masc.keeper_runtime agent_core masc_tui_keeper_trail))
+ (libraries alcotest masc masc.masc_types masc.keeper_runtime agent_core masc.agent_core.llm_provider masc_tui_keeper_trail))
 
 (test
  (name test_tui_keeper_columns)
@@ -5806,6 +5807,7 @@
  (libraries alcotest masc.dashboard masc.masc_types yojson  masc.agent_core.digest))
 
 (include stanzas/test_h2_json_worker.inc)
+(include stanzas/test_https_listener.inc)
 (include stanzas/test_h2_request_fibers.inc)
 (include stanzas/test_h2_oauth_request_fibers.inc)
 (include stanzas/test_dashboard_asset_worker.inc)

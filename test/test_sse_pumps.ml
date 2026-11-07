@@ -20,7 +20,7 @@ let open_info ?(client_id = 0) ~clock ~stalled_after_s session_id =
   | None -> fail "the in-memory connection parsed no request"
   | Some reqd ->
     let response =
-      Server_sse_response.respond ~clock ~stalled_after_s reqd (Httpun.Response.create `OK)
+      Server_sse_response.respond ~clock ~stalled_after_s (Masc.Http_reqd.of_httpun reqd) (Httpun.Response.create `OK)
     in
     connection, Conn.make_sse_conn ~session_id ~client_id ~response ()
 ;;

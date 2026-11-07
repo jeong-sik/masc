@@ -84,7 +84,7 @@ let form_of body = pairs (Uri.query_of_encoded body)
 
 let respond reqd { R.status; headers; body } =
   let headers = headers @ [ "content-length", string_of_int (String.length body) ] in
-  Httpun.Reqd.respond_with_string
+  Http_reqd.respond_with_string
     reqd
     (Httpun.Response.create
        ~headers:(Httpun.Headers.of_list headers)
@@ -104,9 +104,9 @@ let with_body reqd f =
     ~max_bytes:max_request_bytes
     ~on_body:f
     ~on_error:(function
-      | `Too_large max_bytes ->
+      | Http.Request.Too_large max_bytes ->
         Http.Response.text ~status:`Payload_too_large (Http.Request.too_large_body max_bytes) reqd
-      | `Internal exn ->
+      | Http.Request.Internal exn ->
         Log.Misc.warn "login_http: the request body was not read: %s" (Printexc.to_string exn);
         Http.Response.internal_error "the request body was not read" reqd)
 ;;

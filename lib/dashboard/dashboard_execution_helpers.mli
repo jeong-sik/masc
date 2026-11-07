@@ -16,8 +16,7 @@
     current execution projection.
 
     Internal helpers stay private at this boundary
-    ([all_agent_statuses] / [valid_agent_status_strings]
-    re-exports, the every-other-let
+    ([all_agent_statuses] re-export, the every-other-let
     accumulator helpers consumed only inside
     [is_health_at_risk] / [option_or_else] /
     [string_list_json] / [latest_iso_timestamp] /

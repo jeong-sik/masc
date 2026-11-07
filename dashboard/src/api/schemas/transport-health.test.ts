@@ -23,6 +23,21 @@ const currentWire = {
     last_accept_age_seconds: 0.25,
     last_error: null,
   },
+  https_listener: {
+    status: 'listening',
+    port: 8938,
+    certificate: { source: 'self_signed', not_after: '2027-11-08T00:00:00Z' },
+    active_connections: 1,
+    accepted_total: 3,
+    alpn_h2_total: 2,
+    alpn_http1_total: 1,
+    alpn_none_total: 0,
+    handshake_failures_total: 0,
+    accept_errors_total: 0,
+    last_accept_unix: 1_775_000_000,
+    last_accept_age_seconds: 0,
+    last_error: null,
+  },
   summary: {
     primary_path: 'streamable_http',
     queue_pressure: 'steady',
@@ -130,6 +145,8 @@ describe('decodeTransportHealthData', () => {
     })
     expect(result.streamable_http.auth_rejects_total).toBe(4)
     expect(result.http2.listener_mode).toBe('auto')
+    expect(result.https_listener.status).toBe('listening')
+    expect(Option.getOrNull(result.https_listener.port)).toBe(8938)
     expect(result.projection_diagnostics.source).toBe('cached_surface')
   })
 

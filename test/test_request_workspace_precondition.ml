@@ -273,14 +273,15 @@ let http1_reply raw =
     { status; headers; body = String.sub raw (head_end + 4) (String.length raw - head_end - 4) }
 ;;
 
-(* The HTTP/1.1 entry runs [guard_http1] in front of routing; a route here
+(* The HTTP/1.1 entry runs [guard] in front of routing; a route here
    answers 404, as the HTTP/2 gateway's fallback does. *)
 let http1_exchange ~env:_ headers =
   let output = Buffer.create 512 in
   let connection =
     Httpun.Server_connection.create (fun reqd ->
       let request = Httpun.Reqd.request reqd in
-      Guard.guard_http1 ~path:(Http.Request.path request) request reqd ~admitted:(fun () ->
+      let reqd = Http_reqd.of_httpun reqd in
+      Guard.guard ~path:(Http.Request.path request) request reqd ~admitted:(fun () ->
         Http.Response.json_value ~status:`Not_found (`Assoc [ "routed", `Bool true ]) reqd))
   in
   let raw_request =
@@ -328,10 +329,7 @@ let h2_exchange ~env headers =
   let handler =
     Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:(Eio.Stdenv.clock env))
       ~trust_policy
-      ~sw
       ~request_sw:sw
-      ~clock:(Eio.Stdenv.clock env)
-      ~server_start_time:0.
       (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321))
   in
   let response = ref None in

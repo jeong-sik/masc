@@ -78,7 +78,3 @@ val to_short_tag : t -> string
 (** Stable wire-format tag.  Returns one of:
     ["fd_exhaustion"], ["disk_exhaustion"], ["permission_denied"],
     ["connection_refused"], ["timeout"], ["other"]. *)
-
-val to_raw_text : t -> string
-(** Display text.  Named variants return their short tag; [Other s]
-    returns [s] verbatim. *)

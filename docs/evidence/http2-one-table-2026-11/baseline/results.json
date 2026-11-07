@@ -1,0 +1,2210 @@
+[
+  {
+    "body_bytes": [
+      16740,
+      16741,
+      16742
+    ],
+    "concurrency": 1,
+    "errors": [],
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "latency": {
+      "max_ms": 28.241542,
+      "min_ms": 1.877708,
+      "n": 100,
+      "p50_ms": 2.604667,
+      "p95_ms": 10.674834,
+      "p99_ms": 26.80475
+    },
+    "latency_all": {
+      "max_ms": 28.241542,
+      "min_ms": 1.877708,
+      "n": 100,
+      "p50_ms": 2.604667,
+      "p95_ms": 10.674834,
+      "p99_ms": 26.80475
+    },
+    "ok": 100,
+    "path": "/health",
+    "repeat": 0,
+    "requests": 100,
+    "requests_per_s": 249.57621459609155,
+    "scenario": "serial",
+    "statuses": [
+      200
+    ],
+    "transport": "h1-6",
+    "wall_s": 0.400679208,
+    "warmup": {
+      "error": null,
+      "http_version": "HTTP/1.1",
+      "latency_ms": 9.113291,
+      "status": 200
+    }
+  },
+  {
+    "body_bytes": [
+      16735,
+      16736,
+      16737
+    ],
+    "concurrency": 100,
+    "errors": [],
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "latency": {
+      "max_ms": 1419.610959,
+      "min_ms": 8.348958,
+      "n": 600,
+      "p50_ms": 210.121833,
+      "p95_ms": 831.958875,
+      "p99_ms": 1147.356375
+    },
+    "latency_all": {
+      "max_ms": 1419.610959,
+      "min_ms": 8.348958,
+      "n": 600,
+      "p50_ms": 210.121833,
+      "p95_ms": 831.958875,
+      "p99_ms": 1147.356375
+    },
+    "ok": 600,
+    "path": "/health",
+    "repeat": 0,
+    "requests": 600,
+    "requests_per_s": 331.24343257793083,
+    "scenario": "burst",
+    "statuses": [
+      200
+    ],
+    "transport": "h1-6",
+    "wall_s": 1.811356667,
+    "warmup": {
+      "error": null,
+      "http_version": "HTTP/1.1",
+      "latency_ms": 3.248709,
+      "status": 200
+    }
+  },
+  {
+    "body_bytes": [
+      227
+    ],
+    "concurrency": 1,
+    "errors": [],
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "latency": {
+      "max_ms": 5.387833,
+      "min_ms": 0.737083,
+      "n": 100,
+      "p50_ms": 0.983166,
+      "p95_ms": 2.2355,
+      "p99_ms": 3.973916
+    },
+    "latency_all": {
+      "max_ms": 5.387833,
+      "min_ms": 0.737083,
+      "n": 100,
+      "p50_ms": 0.983166,
+      "p95_ms": 2.2355,
+      "p99_ms": 3.973916
+    },
+    "ok": 100,
+    "path": "/favicon.svg",
+    "repeat": 0,
+    "requests": 100,
+    "requests_per_s": 829.1000314825864,
+    "scenario": "serial",
+    "statuses": [
+      200
+    ],
+    "transport": "h1-6",
+    "wall_s": 0.120612708,
+    "warmup": {
+      "error": null,
+      "http_version": "HTTP/1.1",
+      "latency_ms": 6.912125,
+      "status": 200
+    }
+  },
+  {
+    "body_bytes": [
+      227
+    ],
+    "concurrency": 100,
+    "errors": [],
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "latency": {
+      "max_ms": 1173.588208,
+      "min_ms": 7.994209,
+      "n": 600,
+      "p50_ms": 192.720792,
+      "p95_ms": 623.503125,
+      "p99_ms": 947.217291
+    },
+    "latency_all": {
+      "max_ms": 1173.588208,
+      "min_ms": 7.994209,
+      "n": 600,
+      "p50_ms": 192.720792,
+      "p95_ms": 623.503125,
+      "p99_ms": 947.217291
+    },
+    "ok": 600,
+    "path": "/favicon.svg",
+    "repeat": 0,
+    "requests": 600,
+    "requests_per_s": 392.0554216078242,
+    "scenario": "burst",
+    "statuses": [
+      200
+    ],
+    "transport": "h1-6",
+    "wall_s": 1.530395875,
+    "warmup": {
+      "error": null,
+      "http_version": "HTTP/1.1",
+      "latency_ms": 1.781292,
+      "status": 200
+    }
+  },
+  {
+    "body_bytes_each": [
+      878726
+    ],
+    "concurrency": 4,
+    "errors": [],
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "latency": {
+      "max_ms": 11.552959,
+      "min_ms": 10.627041,
+      "n": 4,
+      "p50_ms": 10.825667,
+      "p95_ms": 11.552959,
+      "p99_ms": 11.552959
+    },
+    "megabytes_per_s": 283.45332513137595,
+    "ok": 4,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 0,
+    "scenario": "download",
+    "statuses": [
+      200
+    ],
+    "total_bytes": 3514904,
+    "transport": "h1-6",
+    "wall_s": 0.012400292
+  },
+  {
+    "bytes_total": 4242,
+    "errors": [
+      "PoolTimeout: "
+    ],
+    "established": 6,
+    "established_ms": {
+      "max_ms": 17.288208,
+      "min_ms": 16.504792,
+      "n": 6,
+      "p50_ms": 16.829917,
+      "p95_ms": 17.288208,
+      "p99_ms": 17.288208
+    },
+    "first_frame_ms": {
+      "max_ms": 17.308667,
+      "min_ms": 16.53675,
+      "n": 6,
+      "p50_ms": 16.854083,
+      "p95_ms": 17.308667,
+      "p99_ms": 17.308667
+    },
+    "frames_per_stream": {
+      "max_ms": 2.0,
+      "min_ms": 2.0,
+      "n": 6,
+      "p50_ms": 2.0,
+      "p95_ms": 2.0,
+      "p99_ms": 2.0
+    },
+    "hold_s": 32.0,
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "path": "/api/v1/stream/fleet",
+    "repeat": 0,
+    "sample_events": [
+      "id: 1\ndata: {\"event\":\"snapshot\",\"schema\":1,\"revision\":1,\"measured_at\":1794044597",
+      ": keepalive\n\n"
+    ],
+    "scenario": "sse",
+    "statuses": [
+      200
+    ],
+    "streams": 50,
+    "transport": "h1-6"
+  },
+  {
+    "body_bytes": [
+      16746,
+      16747,
+      16748
+    ],
+    "concurrency": 1,
+    "errors": [],
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "latency": {
+      "max_ms": 14.622125,
+      "min_ms": 2.317459,
+      "n": 100,
+      "p50_ms": 3.565875,
+      "p95_ms": 5.726875,
+      "p99_ms": 7.134792
+    },
+    "latency_all": {
+      "max_ms": 14.622125,
+      "min_ms": 2.317459,
+      "n": 100,
+      "p50_ms": 3.565875,
+      "p95_ms": 5.726875,
+      "p99_ms": 7.134792
+    },
+    "ok": 100,
+    "path": "/health",
+    "repeat": 0,
+    "requests": 100,
+    "requests_per_s": 254.89575082410983,
+    "scenario": "serial",
+    "statuses": [
+      200
+    ],
+    "transport": "h1",
+    "wall_s": 0.39231725,
+    "warmup": {
+      "error": null,
+      "http_version": "HTTP/1.1",
+      "latency_ms": 7.332875,
+      "status": 200
+    }
+  },
+  {
+    "body_bytes": [
+      16725,
+      16729,
+      16730
+    ],
+    "concurrency": 100,
+    "errors": [],
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "latency": {
+      "max_ms": 6104.02625,
+      "min_ms": 23.68975,
+      "n": 600,
+      "p50_ms": 649.752166,
+      "p95_ms": 3589.889875,
+      "p99_ms": 4621.468041
+    },
+    "latency_all": {
+      "max_ms": 6104.02625,
+      "min_ms": 23.68975,
+      "n": 600,
+      "p50_ms": 649.752166,
+      "p95_ms": 3589.889875,
+      "p99_ms": 4621.468041
+    },
+    "ok": 600,
+    "path": "/health",
+    "repeat": 0,
+    "requests": 600,
+    "requests_per_s": 96.39228512258428,
+    "scenario": "burst",
+    "statuses": [
+      200
+    ],
+    "transport": "h1",
+    "wall_s": 6.224564541,
+    "warmup": {
+      "error": null,
+      "http_version": "HTTP/1.1",
+      "latency_ms": 4.588208,
+      "status": 200
+    }
+  },
+  {
+    "body_bytes": [
+      227
+    ],
+    "concurrency": 1,
+    "errors": [],
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "latency": {
+      "max_ms": 22.175666,
+      "min_ms": 0.964292,
+      "n": 100,
+      "p50_ms": 2.064375,
+      "p95_ms": 11.457541,
+      "p99_ms": 15.678042
+    },
+    "latency_all": {
+      "max_ms": 22.175666,
+      "min_ms": 0.964292,
+      "n": 100,
+      "p50_ms": 2.064375,
+      "p95_ms": 11.457541,
+      "p99_ms": 15.678042
+    },
+    "ok": 100,
+    "path": "/favicon.svg",
+    "repeat": 0,
+    "requests": 100,
+    "requests_per_s": 265.50605121478975,
+    "scenario": "serial",
+    "statuses": [
+      200
+    ],
+    "transport": "h1",
+    "wall_s": 0.37663925,
+    "warmup": {
+      "error": null,
+      "http_version": "HTTP/1.1",
+      "latency_ms": 2.50025,
+      "status": 200
+    }
+  },
+  {
+    "body_bytes": [
+      227
+    ],
+    "concurrency": 100,
+    "errors": [],
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "latency": {
+      "max_ms": 4159.879375,
+      "min_ms": 20.769792,
+      "n": 600,
+      "p50_ms": 473.256875,
+      "p95_ms": 2358.571041,
+      "p99_ms": 3283.556834
+    },
+    "latency_all": {
+      "max_ms": 4159.879375,
+      "min_ms": 20.769792,
+      "n": 600,
+      "p50_ms": 473.256875,
+      "p95_ms": 2358.571041,
+      "p99_ms": 3283.556834
+    },
+    "ok": 600,
+    "path": "/favicon.svg",
+    "repeat": 0,
+    "requests": 600,
+    "requests_per_s": 128.919147675842,
+    "scenario": "burst",
+    "statuses": [
+      200
+    ],
+    "transport": "h1",
+    "wall_s": 4.654079792,
+    "warmup": {
+      "error": null,
+      "http_version": "HTTP/1.1",
+      "latency_ms": 7.578916,
+      "status": 200
+    }
+  },
+  {
+    "body_bytes_each": [
+      878726
+    ],
+    "concurrency": 4,
+    "errors": [],
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "latency": {
+      "max_ms": 17.32125,
+      "min_ms": 14.227667,
+      "n": 4,
+      "p50_ms": 14.89625,
+      "p95_ms": 17.32125,
+      "p99_ms": 17.32125
+    },
+    "megabytes_per_s": 194.9439314293308,
+    "ok": 4,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 0,
+    "scenario": "download",
+    "statuses": [
+      200
+    ],
+    "total_bytes": 3514904,
+    "transport": "h1",
+    "wall_s": 0.018030333
+  },
+  {
+    "bytes_total": 35350,
+    "errors": [],
+    "established": 50,
+    "established_ms": {
+      "max_ms": 40.735083,
+      "min_ms": 35.489167,
+      "n": 50,
+      "p50_ms": 38.033667,
+      "p95_ms": 40.533167,
+      "p99_ms": 40.735083
+    },
+    "first_frame_ms": {
+      "max_ms": 40.750083,
+      "min_ms": 35.5225,
+      "n": 50,
+      "p50_ms": 38.053917,
+      "p95_ms": 40.548542,
+      "p99_ms": 40.750083
+    },
+    "frames_per_stream": {
+      "max_ms": 2.0,
+      "min_ms": 2.0,
+      "n": 50,
+      "p50_ms": 2.0,
+      "p95_ms": 2.0,
+      "p99_ms": 2.0
+    },
+    "hold_s": 32.0,
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "path": "/api/v1/stream/fleet",
+    "repeat": 0,
+    "sample_events": [
+      "id: 1\ndata: {\"event\":\"snapshot\",\"schema\":1,\"revision\":1,\"measured_at\":1794044630",
+      ": keepalive\n\n"
+    ],
+    "scenario": "sse",
+    "statuses": [
+      200
+    ],
+    "streams": 50,
+    "transport": "h1"
+  },
+  {
+    "body_bytes": [
+      16746,
+      16747,
+      16748
+    ],
+    "concurrency": 1,
+    "errors": [],
+    "http_versions": [
+      "HTTP/2"
+    ],
+    "latency": {
+      "max_ms": 41.594458,
+      "min_ms": 3.435166,
+      "n": 100,
+      "p50_ms": 5.869042,
+      "p95_ms": 18.531459,
+      "p99_ms": 28.781084
+    },
+    "latency_all": {
+      "max_ms": 41.594458,
+      "min_ms": 3.435166,
+      "n": 100,
+      "p50_ms": 5.869042,
+      "p95_ms": 18.531459,
+      "p99_ms": 28.781084
+    },
+    "ok": 100,
+    "path": "/health",
+    "repeat": 0,
+    "requests": 100,
+    "requests_per_s": 131.00061996567402,
+    "scenario": "serial",
+    "statuses": [
+      200
+    ],
+    "transport": "h2c",
+    "wall_s": 0.763355166,
+    "warmup": {
+      "error": null,
+      "http_version": "HTTP/2",
+      "latency_ms": 20.650041,
+      "status": 200
+    }
+  },
+  {
+    "body_bytes": [
+      16738,
+      16741,
+      16743
+    ],
+    "concurrency": 100,
+    "errors": [],
+    "http_versions": [
+      "HTTP/2"
+    ],
+    "latency": {
+      "max_ms": 417.091667,
+      "min_ms": 60.442084,
+      "n": 600,
+      "p50_ms": 231.217375,
+      "p95_ms": 389.162917,
+      "p99_ms": 413.454125
+    },
+    "latency_all": {
+      "max_ms": 417.091667,
+      "min_ms": 60.442084,
+      "n": 600,
+      "p50_ms": 231.217375,
+      "p95_ms": 389.162917,
+      "p99_ms": 413.454125
+    },
+    "ok": 600,
+    "path": "/health",
+    "repeat": 0,
+    "requests": 600,
+    "requests_per_s": 412.7250589488495,
+    "scenario": "burst",
+    "statuses": [
+      200
+    ],
+    "transport": "h2c",
+    "wall_s": 1.453752291,
+    "warmup": {
+      "error": null,
+      "http_version": "HTTP/2",
+      "latency_ms": 9.688459,
+      "status": 200
+    }
+  },
+  {
+    "body_bytes": [
+      227
+    ],
+    "concurrency": 1,
+    "errors": [],
+    "http_versions": [
+      "HTTP/2"
+    ],
+    "latency": {
+      "max_ms": 32.675791,
+      "min_ms": 1.512959,
+      "n": 100,
+      "p50_ms": 2.311584,
+      "p95_ms": 4.6065,
+      "p99_ms": 7.017292
+    },
+    "latency_all": {
+      "max_ms": 32.675791,
+      "min_ms": 1.512959,
+      "n": 100,
+      "p50_ms": 2.311584,
+      "p95_ms": 4.6065,
+      "p99_ms": 7.017292
+    },
+    "ok": 100,
+    "path": "/favicon.svg",
+    "repeat": 0,
+    "requests": 100,
+    "requests_per_s": 340.85893041876227,
+    "scenario": "serial",
+    "statuses": [
+      200
+    ],
+    "transport": "h2c",
+    "wall_s": 0.2933765,
+    "warmup": {
+      "error": null,
+      "http_version": "HTTP/2",
+      "latency_ms": 7.519833,
+      "status": 200
+    }
+  },
+  {
+    "body_bytes": [
+      227
+    ],
+    "concurrency": 100,
+    "errors": [],
+    "http_versions": [
+      "HTTP/2"
+    ],
+    "latency": {
+      "max_ms": 405.243833,
+      "min_ms": 58.721208,
+      "n": 600,
+      "p50_ms": 195.714709,
+      "p95_ms": 387.219916,
+      "p99_ms": 400.075416
+    },
+    "latency_all": {
+      "max_ms": 405.243833,
+      "min_ms": 58.721208,
+      "n": 600,
+      "p50_ms": 195.714709,
+      "p95_ms": 387.219916,
+      "p99_ms": 400.075416
+    },
+    "ok": 600,
+    "path": "/favicon.svg",
+    "repeat": 0,
+    "requests": 600,
+    "requests_per_s": 459.51325970658064,
+    "scenario": "burst",
+    "statuses": [
+      200
+    ],
+    "transport": "h2c",
+    "wall_s": 1.305729459,
+    "warmup": {
+      "error": null,
+      "http_version": "HTTP/2",
+      "latency_ms": 10.567166,
+      "status": 200
+    }
+  },
+  {
+    "body_bytes_each": [
+      878726
+    ],
+    "concurrency": 4,
+    "errors": [],
+    "http_versions": [
+      "HTTP/2"
+    ],
+    "latency": {
+      "max_ms": 138.815709,
+      "min_ms": 86.630459,
+      "n": 4,
+      "p50_ms": 99.687708,
+      "p95_ms": 138.815709,
+      "p99_ms": 138.815709
+    },
+    "megabytes_per_s": 25.069114547956715,
+    "ok": 4,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 0,
+    "scenario": "download",
+    "statuses": [
+      200
+    ],
+    "total_bytes": 3514904,
+    "transport": "h2c",
+    "wall_s": 0.140208542
+  },
+  {
+    "bytes_total": 0,
+    "errors": [
+      "status 404"
+    ],
+    "established": 0,
+    "established_ms": {
+      "n": 0
+    },
+    "first_frame_ms": {
+      "n": 0
+    },
+    "frames_per_stream": {
+      "n": 0
+    },
+    "hold_s": 32.0,
+    "http_versions": [
+      "HTTP/2"
+    ],
+    "path": "/api/v1/stream/fleet",
+    "repeat": 0,
+    "sample_events": [],
+    "scenario": "sse",
+    "statuses": [
+      404
+    ],
+    "streams": 50,
+    "transport": "h2c"
+  },
+  {
+    "body_bytes": [
+      16748,
+      16749,
+      16750
+    ],
+    "concurrency": 1,
+    "errors": [],
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "latency": {
+      "max_ms": 33.750833,
+      "min_ms": 2.863125,
+      "n": 100,
+      "p50_ms": 4.373417,
+      "p95_ms": 11.726041,
+      "p99_ms": 33.113708
+    },
+    "latency_all": {
+      "max_ms": 33.750833,
+      "min_ms": 2.863125,
+      "n": 100,
+      "p50_ms": 4.373417,
+      "p95_ms": 11.726041,
+      "p99_ms": 33.113708
+    },
+    "ok": 100,
+    "path": "/health",
+    "repeat": 1,
+    "requests": 100,
+    "requests_per_s": 155.35258588309622,
+    "scenario": "serial",
+    "statuses": [
+      200
+    ],
+    "transport": "h1",
+    "wall_s": 0.643697042,
+    "warmup": {
+      "error": null,
+      "http_version": "HTTP/1.1",
+      "latency_ms": 6.1715,
+      "status": 200
+    }
+  },
+  {
+    "body_bytes": [
+      16749,
+      16750,
+      16752
+    ],
+    "concurrency": 100,
+    "errors": [],
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "latency": {
+      "max_ms": 7379.976667,
+      "min_ms": 33.668916,
+      "n": 600,
+      "p50_ms": 725.561333,
+      "p95_ms": 5564.41225,
+      "p99_ms": 7065.424458
+    },
+    "latency_all": {
+      "max_ms": 7379.976667,
+      "min_ms": 33.668916,
+      "n": 600,
+      "p50_ms": 725.561333,
+      "p95_ms": 5564.41225,
+      "p99_ms": 7065.424458
+    },
+    "ok": 600,
+    "path": "/health",
+    "repeat": 1,
+    "requests": 600,
+    "requests_per_s": 68.85916050842219,
+    "scenario": "burst",
+    "statuses": [
+      200
+    ],
+    "transport": "h1",
+    "wall_s": 8.713437625,
+    "warmup": {
+      "error": null,
+      "http_version": "HTTP/1.1",
+      "latency_ms": 10.553042,
+      "status": 200
+    }
+  },
+  {
+    "body_bytes": [
+      227
+    ],
+    "concurrency": 1,
+    "errors": [],
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "latency": {
+      "max_ms": 10.017958,
+      "min_ms": 0.698042,
+      "n": 100,
+      "p50_ms": 0.846875,
+      "p95_ms": 1.147333,
+      "p99_ms": 2.982458
+    },
+    "latency_all": {
+      "max_ms": 10.017958,
+      "min_ms": 0.698042,
+      "n": 100,
+      "p50_ms": 0.846875,
+      "p95_ms": 1.147333,
+      "p99_ms": 2.982458
+    },
+    "ok": 100,
+    "path": "/favicon.svg",
+    "repeat": 1,
+    "requests": 100,
+    "requests_per_s": 971.1208848169833,
+    "scenario": "serial",
+    "statuses": [
+      200
+    ],
+    "transport": "h1",
+    "wall_s": 0.102973792,
+    "warmup": {
+      "error": null,
+      "http_version": "HTTP/1.1",
+      "latency_ms": 1.802416,
+      "status": 200
+    }
+  },
+  {
+    "body_bytes": [
+      227
+    ],
+    "concurrency": 100,
+    "errors": [],
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "latency": {
+      "max_ms": 1901.361708,
+      "min_ms": 11.185417,
+      "n": 600,
+      "p50_ms": 216.125917,
+      "p95_ms": 1023.3295,
+      "p99_ms": 1327.293667
+    },
+    "latency_all": {
+      "max_ms": 1901.361708,
+      "min_ms": 11.185417,
+      "n": 600,
+      "p50_ms": 216.125917,
+      "p95_ms": 1023.3295,
+      "p99_ms": 1327.293667
+    },
+    "ok": 600,
+    "path": "/favicon.svg",
+    "repeat": 1,
+    "requests": 600,
+    "requests_per_s": 273.63303963092164,
+    "scenario": "burst",
+    "statuses": [
+      200
+    ],
+    "transport": "h1",
+    "wall_s": 2.192717666,
+    "warmup": {
+      "error": null,
+      "http_version": "HTTP/1.1",
+      "latency_ms": 1.6225,
+      "status": 200
+    }
+  },
+  {
+    "body_bytes_each": [
+      878726
+    ],
+    "concurrency": 4,
+    "errors": [],
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "latency": {
+      "max_ms": 12.863833,
+      "min_ms": 11.049125,
+      "n": 4,
+      "p50_ms": 11.650333,
+      "p95_ms": 12.863833,
+      "p99_ms": 12.863833
+    },
+    "megabytes_per_s": 261.0577890036931,
+    "ok": 4,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 1,
+    "scenario": "download",
+    "statuses": [
+      200
+    ],
+    "total_bytes": 3514904,
+    "transport": "h1",
+    "wall_s": 0.013464084
+  },
+  {
+    "bytes_total": 35350,
+    "errors": [],
+    "established": 50,
+    "established_ms": {
+      "max_ms": 36.397958,
+      "min_ms": 30.896291,
+      "n": 50,
+      "p50_ms": 33.396041,
+      "p95_ms": 36.048333,
+      "p99_ms": 36.397958
+    },
+    "first_frame_ms": {
+      "max_ms": 36.662791,
+      "min_ms": 30.928708,
+      "n": 50,
+      "p50_ms": 33.412166,
+      "p95_ms": 36.592958,
+      "p99_ms": 36.662791
+    },
+    "frames_per_stream": {
+      "max_ms": 2.0,
+      "min_ms": 2.0,
+      "n": 50,
+      "p50_ms": 2.0,
+      "p95_ms": 2.0,
+      "p99_ms": 2.0
+    },
+    "hold_s": 32.0,
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "path": "/api/v1/stream/fleet",
+    "repeat": 1,
+    "sample_events": [
+      "id: 1\ndata: {\"event\":\"snapshot\",\"schema\":1,\"revision\":1,\"measured_at\":1794044696",
+      ": keepalive\n\n"
+    ],
+    "scenario": "sse",
+    "statuses": [
+      200
+    ],
+    "streams": 50,
+    "transport": "h1"
+  },
+  {
+    "body_bytes": [
+      16799,
+      16800,
+      16801
+    ],
+    "concurrency": 1,
+    "errors": [],
+    "http_versions": [
+      "HTTP/2"
+    ],
+    "latency": {
+      "max_ms": 80.775125,
+      "min_ms": 2.607041,
+      "n": 100,
+      "p50_ms": 9.966417,
+      "p95_ms": 32.549292,
+      "p99_ms": 51.018083
+    },
+    "latency_all": {
+      "max_ms": 80.775125,
+      "min_ms": 2.607041,
+      "n": 100,
+      "p50_ms": 9.966417,
+      "p95_ms": 32.549292,
+      "p99_ms": 51.018083
+    },
+    "ok": 100,
+    "path": "/health",
+    "repeat": 1,
+    "requests": 100,
+    "requests_per_s": 69.54345331404546,
+    "scenario": "serial",
+    "statuses": [
+      200
+    ],
+    "transport": "h2c",
+    "wall_s": 1.437949875,
+    "warmup": {
+      "error": null,
+      "http_version": "HTTP/2",
+      "latency_ms": 78.865416,
+      "status": 200
+    }
+  },
+  {
+    "body_bytes": [
+      16791,
+      16792,
+      16793
+    ],
+    "concurrency": 100,
+    "errors": [],
+    "http_versions": [
+      "HTTP/2"
+    ],
+    "latency": {
+      "max_ms": 618.430333,
+      "min_ms": 87.723084,
+      "n": 600,
+      "p50_ms": 329.778583,
+      "p95_ms": 501.563875,
+      "p99_ms": 616.48375
+    },
+    "latency_all": {
+      "max_ms": 618.430333,
+      "min_ms": 87.723084,
+      "n": 600,
+      "p50_ms": 329.778583,
+      "p95_ms": 501.563875,
+      "p99_ms": 616.48375
+    },
+    "ok": 600,
+    "path": "/health",
+    "repeat": 1,
+    "requests": 600,
+    "requests_per_s": 292.53715770410014,
+    "scenario": "burst",
+    "statuses": [
+      200
+    ],
+    "transport": "h2c",
+    "wall_s": 2.0510215,
+    "warmup": {
+      "error": null,
+      "http_version": "HTTP/2",
+      "latency_ms": 13.234083,
+      "status": 200
+    }
+  },
+  {
+    "body_bytes": [
+      227
+    ],
+    "concurrency": 1,
+    "errors": [],
+    "http_versions": [
+      "HTTP/2"
+    ],
+    "latency": {
+      "max_ms": 44.471375,
+      "min_ms": 1.425042,
+      "n": 100,
+      "p50_ms": 3.823375,
+      "p95_ms": 10.359375,
+      "p99_ms": 39.130208
+    },
+    "latency_all": {
+      "max_ms": 44.471375,
+      "min_ms": 1.425042,
+      "n": 100,
+      "p50_ms": 3.823375,
+      "p95_ms": 10.359375,
+      "p99_ms": 39.130208
+    },
+    "ok": 100,
+    "path": "/favicon.svg",
+    "repeat": 1,
+    "requests": 100,
+    "requests_per_s": 191.1708233177744,
+    "scenario": "serial",
+    "statuses": [
+      200
+    ],
+    "transport": "h2c",
+    "wall_s": 0.523092375,
+    "warmup": {
+      "error": null,
+      "http_version": "HTTP/2",
+      "latency_ms": 9.725166,
+      "status": 200
+    }
+  },
+  {
+    "body_bytes": [
+      227
+    ],
+    "concurrency": 100,
+    "errors": [],
+    "http_versions": [
+      "HTTP/2"
+    ],
+    "latency": {
+      "max_ms": 445.42,
+      "min_ms": 57.788833,
+      "n": 600,
+      "p50_ms": 234.675792,
+      "p95_ms": 387.584708,
+      "p99_ms": 419.430875
+    },
+    "latency_all": {
+      "max_ms": 445.42,
+      "min_ms": 57.788833,
+      "n": 600,
+      "p50_ms": 234.675792,
+      "p95_ms": 387.584708,
+      "p99_ms": 419.430875
+    },
+    "ok": 600,
+    "path": "/favicon.svg",
+    "repeat": 1,
+    "requests": 600,
+    "requests_per_s": 413.6283415872972,
+    "scenario": "burst",
+    "statuses": [
+      200
+    ],
+    "transport": "h2c",
+    "wall_s": 1.450577583,
+    "warmup": {
+      "error": null,
+      "http_version": "HTTP/2",
+      "latency_ms": 8.152542,
+      "status": 200
+    }
+  },
+  {
+    "body_bytes_each": [
+      878726
+    ],
+    "concurrency": 4,
+    "errors": [],
+    "http_versions": [
+      "HTTP/2"
+    ],
+    "latency": {
+      "max_ms": 105.701875,
+      "min_ms": 85.583834,
+      "n": 4,
+      "p50_ms": 86.668042,
+      "p95_ms": 105.701875,
+      "p99_ms": 105.701875
+    },
+    "megabytes_per_s": 32.58642980008509,
+    "ok": 4,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 1,
+    "scenario": "download",
+    "statuses": [
+      200
+    ],
+    "total_bytes": 3514904,
+    "transport": "h2c",
+    "wall_s": 0.107864041
+  },
+  {
+    "bytes_total": 0,
+    "errors": [
+      "status 404"
+    ],
+    "established": 0,
+    "established_ms": {
+      "n": 0
+    },
+    "first_frame_ms": {
+      "n": 0
+    },
+    "frames_per_stream": {
+      "n": 0
+    },
+    "hold_s": 32.0,
+    "http_versions": [
+      "HTTP/2"
+    ],
+    "path": "/api/v1/stream/fleet",
+    "repeat": 1,
+    "sample_events": [],
+    "scenario": "sse",
+    "statuses": [
+      404
+    ],
+    "streams": 50,
+    "transport": "h2c"
+  },
+  {
+    "body_bytes": [
+      16810,
+      16811,
+      16812
+    ],
+    "concurrency": 1,
+    "errors": [],
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "latency": {
+      "max_ms": 30.590542,
+      "min_ms": 3.937416,
+      "n": 100,
+      "p50_ms": 7.864125,
+      "p95_ms": 17.39675,
+      "p99_ms": 23.813916
+    },
+    "latency_all": {
+      "max_ms": 30.590542,
+      "min_ms": 3.937416,
+      "n": 100,
+      "p50_ms": 7.864125,
+      "p95_ms": 17.39675,
+      "p99_ms": 23.813916
+    },
+    "ok": 100,
+    "path": "/health",
+    "repeat": 1,
+    "requests": 100,
+    "requests_per_s": 107.66239069906845,
+    "scenario": "serial",
+    "statuses": [
+      200
+    ],
+    "transport": "h1-6",
+    "wall_s": 0.928829458,
+    "warmup": {
+      "error": null,
+      "http_version": "HTTP/1.1",
+      "latency_ms": 6.354958,
+      "status": 200
+    }
+  },
+  {
+    "body_bytes": [
+      16815,
+      16816,
+      16817
+    ],
+    "concurrency": 100,
+    "errors": [],
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "latency": {
+      "max_ms": 1951.715833,
+      "min_ms": 11.055834,
+      "n": 600,
+      "p50_ms": 320.271209,
+      "p95_ms": 944.811791,
+      "p99_ms": 1325.113375
+    },
+    "latency_all": {
+      "max_ms": 1951.715833,
+      "min_ms": 11.055834,
+      "n": 600,
+      "p50_ms": 320.271209,
+      "p95_ms": 944.811791,
+      "p99_ms": 1325.113375
+    },
+    "ok": 600,
+    "path": "/health",
+    "repeat": 1,
+    "requests": 600,
+    "requests_per_s": 245.45946855700558,
+    "scenario": "burst",
+    "statuses": [
+      200
+    ],
+    "transport": "h1-6",
+    "wall_s": 2.444395417,
+    "warmup": {
+      "error": null,
+      "http_version": "HTTP/1.1",
+      "latency_ms": 15.1885,
+      "status": 200
+    }
+  },
+  {
+    "body_bytes": [
+      227
+    ],
+    "concurrency": 1,
+    "errors": [],
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "latency": {
+      "max_ms": 5.51925,
+      "min_ms": 0.809042,
+      "n": 100,
+      "p50_ms": 1.247167,
+      "p95_ms": 2.530542,
+      "p99_ms": 4.611584
+    },
+    "latency_all": {
+      "max_ms": 5.51925,
+      "min_ms": 0.809042,
+      "n": 100,
+      "p50_ms": 1.247167,
+      "p95_ms": 2.530542,
+      "p99_ms": 4.611584
+    },
+    "ok": 100,
+    "path": "/favicon.svg",
+    "repeat": 1,
+    "requests": 100,
+    "requests_per_s": 657.9259407112276,
+    "scenario": "serial",
+    "statuses": [
+      200
+    ],
+    "transport": "h1-6",
+    "wall_s": 0.151992791,
+    "warmup": {
+      "error": null,
+      "http_version": "HTTP/1.1",
+      "latency_ms": 2.295667,
+      "status": 200
+    }
+  },
+  {
+    "body_bytes": [
+      227
+    ],
+    "concurrency": 100,
+    "errors": [],
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "latency": {
+      "max_ms": 1159.90225,
+      "min_ms": 8.997417,
+      "n": 600,
+      "p50_ms": 199.936042,
+      "p95_ms": 634.374709,
+      "p99_ms": 965.376709
+    },
+    "latency_all": {
+      "max_ms": 1159.90225,
+      "min_ms": 8.997417,
+      "n": 600,
+      "p50_ms": 199.936042,
+      "p95_ms": 634.374709,
+      "p99_ms": 965.376709
+    },
+    "ok": 600,
+    "path": "/favicon.svg",
+    "repeat": 1,
+    "requests": 600,
+    "requests_per_s": 365.91398414235516,
+    "scenario": "burst",
+    "statuses": [
+      200
+    ],
+    "transport": "h1-6",
+    "wall_s": 1.639729625,
+    "warmup": {
+      "error": null,
+      "http_version": "HTTP/1.1",
+      "latency_ms": 1.931125,
+      "status": 200
+    }
+  },
+  {
+    "body_bytes_each": [
+      878726
+    ],
+    "concurrency": 4,
+    "errors": [],
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "latency": {
+      "max_ms": 21.606584,
+      "min_ms": 16.278375,
+      "n": 4,
+      "p50_ms": 19.538583,
+      "p95_ms": 21.606584,
+      "p99_ms": 21.606584
+    },
+    "megabytes_per_s": 155.1063599757295,
+    "ok": 4,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 1,
+    "scenario": "download",
+    "statuses": [
+      200
+    ],
+    "total_bytes": 3514904,
+    "transport": "h1-6",
+    "wall_s": 0.02266125
+  },
+  {
+    "bytes_total": 4242,
+    "errors": [
+      "PoolTimeout: "
+    ],
+    "established": 6,
+    "established_ms": {
+      "max_ms": 27.065167,
+      "min_ms": 23.607084,
+      "n": 6,
+      "p50_ms": 23.9425,
+      "p95_ms": 27.065167,
+      "p99_ms": 27.065167
+    },
+    "first_frame_ms": {
+      "max_ms": 27.270417,
+      "min_ms": 24.631417,
+      "n": 6,
+      "p50_ms": 24.715667,
+      "p95_ms": 27.270417,
+      "p99_ms": 27.270417
+    },
+    "frames_per_stream": {
+      "max_ms": 2.0,
+      "min_ms": 2.0,
+      "n": 6,
+      "p50_ms": 2.0,
+      "p95_ms": 2.0,
+      "p99_ms": 2.0
+    },
+    "hold_s": 32.0,
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "path": "/api/v1/stream/fleet",
+    "repeat": 1,
+    "sample_events": [
+      "id: 1\ndata: {\"event\":\"snapshot\",\"schema\":1,\"revision\":1,\"measured_at\":1794044732",
+      ": keepalive\n\n"
+    ],
+    "scenario": "sse",
+    "statuses": [
+      200
+    ],
+    "streams": 50,
+    "transport": "h1-6"
+  },
+  {
+    "body_bytes": [
+      16817,
+      16818,
+      16819
+    ],
+    "concurrency": 1,
+    "errors": [],
+    "http_versions": [
+      "HTTP/2"
+    ],
+    "latency": {
+      "max_ms": 106.424375,
+      "min_ms": 3.091042,
+      "n": 100,
+      "p50_ms": 7.875542,
+      "p95_ms": 24.467875,
+      "p99_ms": 77.029708
+    },
+    "latency_all": {
+      "max_ms": 106.424375,
+      "min_ms": 3.091042,
+      "n": 100,
+      "p50_ms": 7.875542,
+      "p95_ms": 24.467875,
+      "p99_ms": 77.029708
+    },
+    "ok": 100,
+    "path": "/health",
+    "repeat": 2,
+    "requests": 100,
+    "requests_per_s": 85.17721294191738,
+    "scenario": "serial",
+    "statuses": [
+      200
+    ],
+    "transport": "h2c",
+    "wall_s": 1.174022917,
+    "warmup": {
+      "error": null,
+      "http_version": "HTTP/2",
+      "latency_ms": 17.65925,
+      "status": 200
+    }
+  },
+  {
+    "body_bytes": [
+      16799,
+      16800,
+      16801
+    ],
+    "concurrency": 100,
+    "errors": [],
+    "http_versions": [
+      "HTTP/2"
+    ],
+    "latency": {
+      "max_ms": 1980.738167,
+      "min_ms": 106.229458,
+      "n": 600,
+      "p50_ms": 955.610708,
+      "p95_ms": 1679.338,
+      "p99_ms": 1851.428833
+    },
+    "latency_all": {
+      "max_ms": 1980.738167,
+      "min_ms": 106.229458,
+      "n": 600,
+      "p50_ms": 955.610708,
+      "p95_ms": 1679.338,
+      "p99_ms": 1851.428833
+    },
+    "ok": 600,
+    "path": "/health",
+    "repeat": 2,
+    "requests": 600,
+    "requests_per_s": 97.72158328822604,
+    "scenario": "burst",
+    "statuses": [
+      200
+    ],
+    "transport": "h2c",
+    "wall_s": 6.139892333,
+    "warmup": {
+      "error": null,
+      "http_version": "HTTP/2",
+      "latency_ms": 352.374333,
+      "status": 200
+    }
+  },
+  {
+    "body_bytes": [
+      227
+    ],
+    "concurrency": 1,
+    "errors": [],
+    "http_versions": [
+      "HTTP/2"
+    ],
+    "latency": {
+      "max_ms": 182.425584,
+      "min_ms": 2.284667,
+      "n": 100,
+      "p50_ms": 5.534042,
+      "p95_ms": 38.847,
+      "p99_ms": 162.894542
+    },
+    "latency_all": {
+      "max_ms": 182.425584,
+      "min_ms": 2.284667,
+      "n": 100,
+      "p50_ms": 5.534042,
+      "p95_ms": 38.847,
+      "p99_ms": 162.894542
+    },
+    "ok": 100,
+    "path": "/favicon.svg",
+    "repeat": 2,
+    "requests": 100,
+    "requests_per_s": 78.00233419957031,
+    "scenario": "serial",
+    "statuses": [
+      200
+    ],
+    "transport": "h2c",
+    "wall_s": 1.282012917,
+    "warmup": {
+      "error": null,
+      "http_version": "HTTP/2",
+      "latency_ms": 322.640667,
+      "status": 200
+    }
+  },
+  {
+    "body_bytes": [
+      227
+    ],
+    "concurrency": 100,
+    "errors": [],
+    "http_versions": [
+      "HTTP/2"
+    ],
+    "latency": {
+      "max_ms": 1785.7965,
+      "min_ms": 75.034875,
+      "n": 600,
+      "p50_ms": 612.693334,
+      "p95_ms": 1691.031334,
+      "p99_ms": 1739.618375
+    },
+    "latency_all": {
+      "max_ms": 1785.7965,
+      "min_ms": 75.034875,
+      "n": 600,
+      "p50_ms": 612.693334,
+      "p95_ms": 1691.031334,
+      "p99_ms": 1739.618375
+    },
+    "ok": 600,
+    "path": "/favicon.svg",
+    "repeat": 2,
+    "requests": 600,
+    "requests_per_s": 129.4409760748089,
+    "scenario": "burst",
+    "statuses": [
+      200
+    ],
+    "transport": "h2c",
+    "wall_s": 4.635317333,
+    "warmup": {
+      "error": null,
+      "http_version": "HTTP/2",
+      "latency_ms": 10.418292,
+      "status": 200
+    }
+  },
+  {
+    "body_bytes_each": [
+      878726
+    ],
+    "concurrency": 4,
+    "errors": [],
+    "http_versions": [
+      "HTTP/2"
+    ],
+    "latency": {
+      "max_ms": 399.7405,
+      "min_ms": 381.442709,
+      "n": 4,
+      "p50_ms": 386.260459,
+      "p95_ms": 399.7405,
+      "p99_ms": 399.7405
+    },
+    "megabytes_per_s": 8.748673799234998,
+    "ok": 4,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 2,
+    "scenario": "download",
+    "statuses": [
+      200
+    ],
+    "total_bytes": 3514904,
+    "transport": "h2c",
+    "wall_s": 0.401764208
+  },
+  {
+    "bytes_total": 0,
+    "errors": [
+      "status 404"
+    ],
+    "established": 0,
+    "established_ms": {
+      "n": 0
+    },
+    "first_frame_ms": {
+      "n": 0
+    },
+    "frames_per_stream": {
+      "n": 0
+    },
+    "hold_s": 32.0,
+    "http_versions": [
+      "HTTP/2"
+    ],
+    "path": "/api/v1/stream/fleet",
+    "repeat": 2,
+    "sample_events": [],
+    "scenario": "sse",
+    "statuses": [
+      404
+    ],
+    "streams": 50,
+    "transport": "h2c"
+  },
+  {
+    "body_bytes": [
+      16821,
+      16822,
+      16823
+    ],
+    "concurrency": 1,
+    "errors": [],
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "latency": {
+      "max_ms": 152.177708,
+      "min_ms": 3.011833,
+      "n": 100,
+      "p50_ms": 6.372917,
+      "p95_ms": 55.57625,
+      "p99_ms": 110.40125
+    },
+    "latency_all": {
+      "max_ms": 152.177708,
+      "min_ms": 3.011833,
+      "n": 100,
+      "p50_ms": 6.372917,
+      "p95_ms": 55.57625,
+      "p99_ms": 110.40125
+    },
+    "ok": 100,
+    "path": "/health",
+    "repeat": 2,
+    "requests": 100,
+    "requests_per_s": 72.39209076592732,
+    "scenario": "serial",
+    "statuses": [
+      200
+    ],
+    "transport": "h1-6",
+    "wall_s": 1.381366375,
+    "warmup": {
+      "error": null,
+      "http_version": "HTTP/1.1",
+      "latency_ms": 5.056292,
+      "status": 200
+    }
+  },
+  {
+    "body_bytes": [
+      16808,
+      16809,
+      16810
+    ],
+    "concurrency": 100,
+    "errors": [],
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "latency": {
+      "max_ms": 4255.121084,
+      "min_ms": 11.074083,
+      "n": 600,
+      "p50_ms": 608.544584,
+      "p95_ms": 2482.586542,
+      "p99_ms": 3453.779625
+    },
+    "latency_all": {
+      "max_ms": 4255.121084,
+      "min_ms": 11.074083,
+      "n": 600,
+      "p50_ms": 608.544584,
+      "p95_ms": 2482.586542,
+      "p99_ms": 3453.779625
+    },
+    "ok": 600,
+    "path": "/health",
+    "repeat": 2,
+    "requests": 600,
+    "requests_per_s": 106.653870572284,
+    "scenario": "burst",
+    "statuses": [
+      200
+    ],
+    "transport": "h1-6",
+    "wall_s": 5.625674875,
+    "warmup": {
+      "error": null,
+      "http_version": "HTTP/1.1",
+      "latency_ms": 5.635375,
+      "status": 200
+    }
+  },
+  {
+    "body_bytes": [
+      227
+    ],
+    "concurrency": 1,
+    "errors": [],
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "latency": {
+      "max_ms": 214.094417,
+      "min_ms": 1.587958,
+      "n": 100,
+      "p50_ms": 3.858625,
+      "p95_ms": 22.353292,
+      "p99_ms": 155.515584
+    },
+    "latency_all": {
+      "max_ms": 214.094417,
+      "min_ms": 1.587958,
+      "n": 100,
+      "p50_ms": 3.858625,
+      "p95_ms": 22.353292,
+      "p99_ms": 155.515584
+    },
+    "ok": 100,
+    "path": "/favicon.svg",
+    "repeat": 2,
+    "requests": 100,
+    "requests_per_s": 80.3446760248412,
+    "scenario": "serial",
+    "statuses": [
+      200
+    ],
+    "transport": "h1-6",
+    "wall_s": 1.244637541,
+    "warmup": {
+      "error": null,
+      "http_version": "HTTP/1.1",
+      "latency_ms": 126.120959,
+      "status": 200
+    }
+  },
+  {
+    "body_bytes": [
+      227
+    ],
+    "concurrency": 100,
+    "errors": [],
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "latency": {
+      "max_ms": 3413.487875,
+      "min_ms": 11.352583,
+      "n": 600,
+      "p50_ms": 602.069709,
+      "p95_ms": 1833.443625,
+      "p99_ms": 2494.779209
+    },
+    "latency_all": {
+      "max_ms": 3413.487875,
+      "min_ms": 11.352583,
+      "n": 600,
+      "p50_ms": 602.069709,
+      "p95_ms": 1833.443625,
+      "p99_ms": 2494.779209
+    },
+    "ok": 600,
+    "path": "/favicon.svg",
+    "repeat": 2,
+    "requests": 600,
+    "requests_per_s": 127.95378876923269,
+    "scenario": "burst",
+    "statuses": [
+      200
+    ],
+    "transport": "h1-6",
+    "wall_s": 4.689192917,
+    "warmup": {
+      "error": null,
+      "http_version": "HTTP/1.1",
+      "latency_ms": 40.833959,
+      "status": 200
+    }
+  },
+  {
+    "body_bytes_each": [
+      878726
+    ],
+    "concurrency": 4,
+    "errors": [],
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "latency": {
+      "max_ms": 189.778083,
+      "min_ms": 133.780667,
+      "n": 4,
+      "p50_ms": 158.439625,
+      "p95_ms": 189.778083,
+      "p99_ms": 189.778083
+    },
+    "megabytes_per_s": 18.340328007175746,
+    "ok": 4,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 2,
+    "scenario": "download",
+    "statuses": [
+      200
+    ],
+    "total_bytes": 3514904,
+    "transport": "h1-6",
+    "wall_s": 0.191648917
+  },
+  {
+    "bytes_total": 4236,
+    "errors": [
+      "PoolTimeout: "
+    ],
+    "established": 6,
+    "established_ms": {
+      "max_ms": 23.819,
+      "min_ms": 23.066041,
+      "n": 6,
+      "p50_ms": 23.4875,
+      "p95_ms": 23.819,
+      "p99_ms": 23.819
+    },
+    "first_frame_ms": {
+      "max_ms": 24.3435,
+      "min_ms": 23.872041,
+      "n": 6,
+      "p50_ms": 24.237833,
+      "p95_ms": 24.3435,
+      "p99_ms": 24.3435
+    },
+    "frames_per_stream": {
+      "max_ms": 2.0,
+      "min_ms": 2.0,
+      "n": 6,
+      "p50_ms": 2.0,
+      "p95_ms": 2.0,
+      "p99_ms": 2.0
+    },
+    "hold_s": 32.0,
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "path": "/api/v1/stream/fleet",
+    "repeat": 2,
+    "sample_events": [
+      "id: 1\ndata: {\"event\":\"snapshot\",\"schema\":1,\"revision\":1,\"measured_at\":1794044799",
+      ": keepalive\n\n"
+    ],
+    "scenario": "sse",
+    "statuses": [
+      200
+    ],
+    "streams": 50,
+    "transport": "h1-6"
+  },
+  {
+    "body_bytes": [
+      16814,
+      16816,
+      16817
+    ],
+    "concurrency": 1,
+    "errors": [],
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "latency": {
+      "max_ms": 125.368125,
+      "min_ms": 2.82975,
+      "n": 100,
+      "p50_ms": 6.347167,
+      "p95_ms": 56.527417,
+      "p99_ms": 83.643209
+    },
+    "latency_all": {
+      "max_ms": 125.368125,
+      "min_ms": 2.82975,
+      "n": 100,
+      "p50_ms": 6.347167,
+      "p95_ms": 56.527417,
+      "p99_ms": 83.643209
+    },
+    "ok": 100,
+    "path": "/health",
+    "repeat": 2,
+    "requests": 100,
+    "requests_per_s": 68.68753211962084,
+    "scenario": "serial",
+    "statuses": [
+      200
+    ],
+    "transport": "h1",
+    "wall_s": 1.455868291,
+    "warmup": {
+      "error": null,
+      "http_version": "HTTP/1.1",
+      "latency_ms": 8.855,
+      "status": 200
+    }
+  },
+  {
+    "body_bytes": [
+      16793,
+      16797,
+      16798
+    ],
+    "concurrency": 100,
+    "errors": [],
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "latency": {
+      "max_ms": 14272.457667,
+      "min_ms": 27.017,
+      "n": 600,
+      "p50_ms": 1649.498959,
+      "p95_ms": 8501.128167,
+      "p99_ms": 11084.258584
+    },
+    "latency_all": {
+      "max_ms": 14272.457667,
+      "min_ms": 27.017,
+      "n": 600,
+      "p50_ms": 1649.498959,
+      "p95_ms": 8501.128167,
+      "p99_ms": 11084.258584
+    },
+    "ok": 600,
+    "path": "/health",
+    "repeat": 2,
+    "requests": 600,
+    "requests_per_s": 35.586575714595305,
+    "scenario": "burst",
+    "statuses": [
+      200
+    ],
+    "transport": "h1",
+    "wall_s": 16.860290375,
+    "warmup": {
+      "error": null,
+      "http_version": "HTTP/1.1",
+      "latency_ms": 14.439667,
+      "status": 200
+    }
+  },
+  {
+    "body_bytes": [
+      227
+    ],
+    "concurrency": 1,
+    "errors": [],
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "latency": {
+      "max_ms": 47.363292,
+      "min_ms": 1.039458,
+      "n": 100,
+      "p50_ms": 2.571583,
+      "p95_ms": 11.723583,
+      "p99_ms": 44.624125
+    },
+    "latency_all": {
+      "max_ms": 47.363292,
+      "min_ms": 1.039458,
+      "n": 100,
+      "p50_ms": 2.571583,
+      "p95_ms": 11.723583,
+      "p99_ms": 44.624125
+    },
+    "ok": 100,
+    "path": "/favicon.svg",
+    "repeat": 2,
+    "requests": 100,
+    "requests_per_s": 195.87565820268816,
+    "scenario": "serial",
+    "statuses": [
+      200
+    ],
+    "transport": "h1",
+    "wall_s": 0.510527959,
+    "warmup": {
+      "error": null,
+      "http_version": "HTTP/1.1",
+      "latency_ms": 4.378167,
+      "status": 200
+    }
+  },
+  {
+    "body_bytes": [
+      227
+    ],
+    "concurrency": 100,
+    "errors": [],
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "latency": {
+      "max_ms": 14181.070375,
+      "min_ms": 32.741542,
+      "n": 600,
+      "p50_ms": 1523.647875,
+      "p95_ms": 6355.191333,
+      "p99_ms": 8620.158625
+    },
+    "latency_all": {
+      "max_ms": 14181.070375,
+      "min_ms": 32.741542,
+      "n": 600,
+      "p50_ms": 1523.647875,
+      "p95_ms": 6355.191333,
+      "p99_ms": 8620.158625
+    },
+    "ok": 600,
+    "path": "/favicon.svg",
+    "repeat": 2,
+    "requests": 600,
+    "requests_per_s": 39.49165973581182,
+    "scenario": "burst",
+    "statuses": [
+      200
+    ],
+    "transport": "h1",
+    "wall_s": 15.193081375,
+    "warmup": {
+      "error": null,
+      "http_version": "HTTP/1.1",
+      "latency_ms": 6.808416,
+      "status": 200
+    }
+  },
+  {
+    "body_bytes_each": [
+      878726
+    ],
+    "concurrency": 4,
+    "errors": [],
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "latency": {
+      "max_ms": 25.703125,
+      "min_ms": 21.236291,
+      "n": 4,
+      "p50_ms": 21.533833,
+      "p95_ms": 25.703125,
+      "p99_ms": 25.703125
+    },
+    "megabytes_per_s": 102.48417640460586,
+    "ok": 4,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 2,
+    "scenario": "download",
+    "statuses": [
+      200
+    ],
+    "total_bytes": 3514904,
+    "transport": "h1",
+    "wall_s": 0.034297041
+  },
+  {
+    "bytes_total": 35350,
+    "errors": [],
+    "established": 50,
+    "established_ms": {
+      "max_ms": 248.063792,
+      "min_ms": 239.275584,
+      "n": 50,
+      "p50_ms": 243.655209,
+      "p95_ms": 247.843584,
+      "p99_ms": 248.063792
+    },
+    "first_frame_ms": {
+      "max_ms": 249.152042,
+      "min_ms": 239.314834,
+      "n": 50,
+      "p50_ms": 243.673792,
+      "p95_ms": 249.013375,
+      "p99_ms": 249.152042
+    },
+    "frames_per_stream": {
+      "max_ms": 2.0,
+      "min_ms": 2.0,
+      "n": 50,
+      "p50_ms": 2.0,
+      "p95_ms": 2.0,
+      "p99_ms": 2.0
+    },
+    "hold_s": 32.0,
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "path": "/api/v1/stream/fleet",
+    "repeat": 2,
+    "sample_events": [
+      "id: 1\ndata: {\"event\":\"snapshot\",\"schema\":1,\"revision\":1,\"measured_at\":1794044869",
+      ": keepalive\n\n"
+    ],
+    "scenario": "sse",
+    "statuses": [
+      200
+    ],
+    "streams": 50,
+    "transport": "h1"
+  }
+]

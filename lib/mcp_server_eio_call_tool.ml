@@ -744,13 +744,24 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   let telemetry_failure_class =
     Option.map (fun (failure_class, _detail) -> failure_class) failure_observation
   in
+  (* #49485: model-facing schemas carry public names ("Execute", not
+     "tool_execute"), but the by_tool counter keys on this name — refused
+     keeper-runtime calls used to land in their own public-name rows with
+     zero successes. Normalize to the canonical internal name (the telemetry
+     SSOT, cf. keeper_tools_agent_core_bundle) so every attempt on the same
+     tool counts under one key. Unresolvable names (e.g. masc_* tools on
+     the public MCP surface) come back unchanged. *)
+  let telemetry_tool_name =
+    Keeper_tool_descriptor_resolution.canonical_tool_name name
+  in
   (* Track tool call in telemetry (controlled by MASC_TELEMETRY_ENABLED) *)
   let telemetry_enabled = Env_config_core.telemetry_enabled () in
   if telemetry_enabled then
     (match state.Mcp_server.fs with
      | Some fs ->
          (try Telemetry_eio.track_tool_called ~fs config
-                ~tool_name:name ~agent_id:agent_name ~success ~duration_ms
+                ~tool_name:telemetry_tool_name ~agent_id:agent_name ~success
+                ~duration_ms
                 ~source:(Tool_registry.string_of_source source)
                 ?session_id:telemetry_session_id
                 ?operation_id:telemetry_operation_id

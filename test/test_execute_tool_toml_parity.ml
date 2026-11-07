@@ -52,7 +52,7 @@ let test_the_published_list_is_the_one_execute_tool () =
 
 (* Properties are serialized in [[params]] file order, and that order is the
    order a model reads them in. *)
-let test_properties_are_the_six_fields_in_order () =
+let test_properties_are_the_seven_fields_in_order () =
   let properties =
     match member execute_schema.input_schema "properties" with
     | `Assoc fields -> List.map fst fields
@@ -61,7 +61,14 @@ let test_properties_are_the_six_fields_in_order () =
   check
     (list string)
     "properties in order"
-    [ "argv"; "command"; "shell"; "cwd"; "timeout_sec"; "intent" ]
+    [ "argv"
+    ; "command"
+    ; "shell"
+    ; "cwd"
+    ; "timeout_sec"
+    ; "intent"
+    ; "run_in_background"
+    ]
     properties;
   check
     bool
@@ -131,9 +138,9 @@ let () =
             `Quick
             test_the_published_list_is_the_one_execute_tool
         ; test_case
-            "properties are the six fields in order"
+            "properties are the seven fields in order"
             `Quick
-            test_properties_are_the_six_fields_in_order
+            test_properties_are_the_seven_fields_in_order
         ; test_case "oneOf is argv xor command" `Quick test_one_of_is_argv_xor_command
         ; test_case
             "serialized schema carries no retired name"

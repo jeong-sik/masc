@@ -263,6 +263,7 @@ let make_health_probe_fields ?timing ?(listener = "http/1.1") ?full_health_url
       ("protocol", protocol_json ~listener);
       ("transport", transport_json ~request_authority request);
       ("http_listener", Transport_metrics.http_listener_json ());
+      ("https_listener", Https_listener_metrics.json ());
       ("paths", Server_base_path_diagnostics.to_yojson path_diagnostics);
       ( "internal_mcp_auth"
       , measure_health_phase timing Server_timing.Health_internal_auth (fun () ->
@@ -558,6 +559,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
     ("protocol", protocol_json ~listener);
     ("transport", transport_json ~request_authority request);
     ("http_listener", Transport_metrics.http_listener_json ());
+    ("https_listener", Https_listener_metrics.json ());
     ("paths", Server_base_path_diagnostics.to_yojson path_diagnostics);
     ( "internal_mcp_auth"
     , internal_mcp_auth_json ~base_path:path_diagnostics.effective_base_path );
@@ -2086,4 +2088,4 @@ let options_handler request reqd =
     Httpun.Headers.of_list (("content-length", "0") :: cors)
   in
   let response = Httpun.Response.create ~headers `No_content in
-  Httpun.Reqd.respond_with_string reqd response ""
+  Http_reqd.respond_with_string reqd response ""

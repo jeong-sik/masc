@@ -20,7 +20,7 @@ let dispatch ~sw ~clock ~state ~token ?body target =
     Server_auth.publish_server_state state;
     let output = Buffer.create 4096 in
     let connection = Httpun.Server_connection.create (fun reqd ->
-      Masc.Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd) in
+      Masc.Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) (Masc.Http_reqd.of_httpun reqd)) in
     let meth, payload = match body with None -> "GET", "" | Some json -> "POST", Yojson.Safe.to_string json in
     let raw = Printf.sprintf
         "%s %s HTTP/1.1\r\nHost: 127.0.0.1:8935\r\nOrigin: http://127.0.0.1:8935\r\n\

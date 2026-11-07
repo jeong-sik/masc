@@ -266,7 +266,7 @@ let render_repository_list (state : state) =
         if shown = 0 then
           [match empty_page_of ~snapshot:state.repositories ~error:state.repositories_error with
            | Page_failed -> page_failed_note
-           | Page_unread -> page_unread_note
+           | Page_unread -> page_unread_note_while ~reading:state.repositories_inflight
            | Page_empty -> "(no repositories registered)"]
         else List.init content_height (fun i ->
           let idx = i + scroll in

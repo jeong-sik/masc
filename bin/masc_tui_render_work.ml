@@ -746,7 +746,10 @@ let render_planning_list (state : state) =
         | Some err ->
             box_line buf cols (data_unreliable_row ~cols err)
         | None ->
-            box_line buf cols (Ansi.dim ^ page_unread_note ^ Ansi.reset));
+            let reading =
+              List.mem Surface_read_order.Planning (surface_reads_pending state) in
+            box_line buf cols
+              (Ansi.dim ^ page_unread_note_while ~reading ^ Ansi.reset));
        for _ = 1 to rows - count_frame_lines buf - tail_rows do
          box_empty buf cols
        done
@@ -1723,7 +1726,8 @@ let render_schedule_list (state : state) =
         | Some err ->
             c.push (data_unreliable_row ~cols err)
         | None ->
-            c.push (Ansi.dim ^ page_unread_note ^ Ansi.reset))
+            let reading = Snapshot_read.in_flight state.schedules_read in
+            c.push (Ansi.dim ^ page_unread_note_while ~reading ^ Ansi.reset))
    | Some snapshot ->
        let warning_rows =
          match schedule_source_warning state with

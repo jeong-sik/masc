@@ -55,9 +55,16 @@ val note_lines : days:int -> string -> string list
     before the first read and when a read failed. A number of days the section
     does not draw is named by its days. *)
 
-val lines : width:int -> t -> string list
+val lines : width:int -> rows:int -> t -> string list
 (** The section as styled rows, none wider than [width] cells: a heading, the
-    window's totals, a bar for calls, failed calls and p95, and a table of the
-    same numbers with the newest bucket first. A bucket in which no call ran
-    draws [·] and no latency, never zero. A bucket is red only when every call
-    in it failed. *)
+    window's totals, a bar for calls, failed calls and p95, a legend, and a
+    table of the same numbers with the newest bucket first. A bucket in which
+    no call ran draws [·] and no latency, never zero. A bucket is red only when
+    every call in it failed.
+
+    The heading and the legend take the longest wording that fits [width]; the
+    heading always keeps the time the numbers are from. [rows] is the room the
+    screen has for the section. While the section fits in it, blank rows
+    separate its parts and the legend may take two rows. When it is taller, the
+    legend takes one row and the blank rows go, so the table shows more of its
+    rows before the reader has to scroll. *)

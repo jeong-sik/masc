@@ -13,9 +13,6 @@ type t =
 val to_string : t -> string
 
 val all_custom_events : t list
-(** Custom + phase-derived. Subscribe to this whole list to avoid
-    silently missing half the supervisor stream. *)
-val all_event_names : string list
 
 (** {1 Unified lifecycle event sum type (#8856)}
 

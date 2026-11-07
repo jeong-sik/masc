@@ -8,7 +8,12 @@
 open Alcotest
 let () = Masc.Server_startup_state.mark_state_ready () |> Result.get_ok
 
-module Helpers = Server_h2_gateway_helpers
+module Response = Masc.Http_server_eio.Response
+module Request = Masc.Http_server_eio.Request
+
+let reqd_of_h2 ~sw h2_reqd =
+  Masc.Http_reqd.of_h2 ~stream_sw:sw
+    ~ledger:(Masc.Http_h2_response_ledger.current_exn ()) h2_reqd
 module Mcp_error_code = Masc.Mcp_error_code
 
 (* The request's :authority and the gateway's trust policy name the same
@@ -197,10 +202,11 @@ let check_next_body session delivered =
 
 (* Records what the body reader handed over and answers 200, so a case tells a
    delivered body from a refused one and checks how much arrived. *)
-let ceiling_handler ~sw delivered reqd =
-  Helpers.h2_read_body ~sw reqd (fun body ->
+let ceiling_handler ~sw delivered h2_reqd =
+  let reqd = reqd_of_h2 ~sw h2_reqd in
+  Request.read_body_async reqd (fun body ->
     delivered := Some (String.length body);
-    Helpers.h2_respond_text reqd "delivered")
+    Response.text "delivered" reqd)
 
 (* Nothing is sent after the headers. A reader that waited for the declared
    bytes would stall the exchange. *)
@@ -289,10 +295,12 @@ let test_malformed_headers_preserve_next_post headers ~clock sw =
   let deliveries = ref 0 in
   let seen_status = ref None in
   let seen_error = ref None in
-  let handler reqd = Helpers.h2_read_body ~sw reqd (fun body ->
-    incr deliveries;
-    delivered := Some (String.length body);
-    Helpers.h2_respond_text reqd "delivered") in
+  let handler h2_reqd =
+    let reqd = reqd_of_h2 ~sw h2_reqd in
+    Request.read_body_async reqd (fun body ->
+      incr deliveries;
+      delivered := Some (String.length body);
+      Response.text "delivered" reqd) in
   let session = create_session ~clock ~config:continuity_config ~handler () in
   let writer, reply = open_request session ~headers
     ~on_response_headers:(fun response -> seen_status := Some (H2.Status.to_code response.status))
@@ -326,12 +334,13 @@ let test_stream_error_prevents_body_delivery ~at_eof ~clock sw =
   let delivered = ref None in
   let deliveries = ref 0 in
   let current = ref None in
-  let handler reqd =
-    current := Some reqd;
-    Helpers.h2_read_body ~sw reqd (fun body ->
+  let handler h2_reqd =
+    current := Some h2_reqd;
+    let reqd = reqd_of_h2 ~sw h2_reqd in
+    Request.read_body_async reqd (fun body ->
       incr deliveries;
       delivered := Some (String.length body);
-      Helpers.h2_respond_text reqd "delivered") in
+      Response.text "delivered" reqd) in
   let session = create_session ~clock ~config:continuity_config ~handler () in
   let writer, reply = open_request session "/upload" in
   if at_eof then send_whole continuity_body writer
@@ -355,12 +364,13 @@ let test_reset_after_eof_prevents_body_delivery ~clock sw =
   let delivered = ref None in
   let deliveries = ref 0 in
   let current = ref None in
-  let handler reqd =
-    current := Some reqd;
-    Helpers.h2_read_body ~sw reqd (fun body ->
+  let handler h2_reqd =
+    current := Some h2_reqd;
+    let reqd = reqd_of_h2 ~sw h2_reqd in
+    Request.read_body_async reqd (fun body ->
       incr deliveries;
       delivered := Some (String.length body);
-      Helpers.h2_respond_text reqd "delivered") in
+      Response.text "delivered" reqd) in
   let session = create_session ~clock ~config:continuity_config
     ~handler () in
   let writer, _reply = open_request session "/upload" in
@@ -431,8 +441,7 @@ let with_gateway_and_switch ?(prepare_workspace=Fun.id) f =
             };
           let handler =
             Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:(Eio.Stdenv.clock env))
-              ~trust_policy:(trust_policy ()) ~sw ~request_sw:sw
-              ~clock:(Eio.Stdenv.clock env) ~server_start_time:0.
+              ~trust_policy:(trust_policy ()) ~request_sw:sw
               (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321))
           in
           f ~base_path ~clock:(Eio.Stdenv.clock env) ~sw handler))
@@ -724,7 +733,7 @@ let test_oauth_scope_refusal_preserves_request_ids () =
   in
   let public_handler =
     Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:clock)
-      ~trust_policy:public_policy ~sw ~request_sw:sw ~clock ~server_start_time:0.
+      ~trust_policy:public_policy ~request_sw:sw
       (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321))
   in
   let public_session = create_session ~clock ~handler:public_handler () in

@@ -133,9 +133,8 @@ let test_h1 encoding () = with_assets @@ fun () ->
     Eio.Fiber.fork_daemon ~sw:conn_sw (fun () ->
       Httpun_eio.Server.create_connection_handler ~sw:conn_sw
         ~request_handler:(fun _ wrapped ->
-          let reqd = wrapped.Gluten.Reqd.reqd in
-          let request = Httpun.Reqd.request reqd in
-          let reqd = Masc.Http_reqd.of_httpun reqd in
+          let request = Httpun.Reqd.request wrapped.Gluten.Reqd.reqd in
+          let reqd = Masc.Http_reqd.of_gluten wrapped in
           if String.equal path slow_path then Eio.Promise.resolve start ();
           Server_routes_http_pages.serve_dashboard_static
             ("assets/" ^ Filename.basename path) request reqd;

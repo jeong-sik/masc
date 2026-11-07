@@ -285,7 +285,7 @@ let main env =
       let h = Httpun.Headers.remove h "if-none-match" in
       let h = Httpun.Headers.remove h "if-modified-since" in
       { request with Httpun.Request.headers = h } in
-    let dispatch_authorised reqd request =
+    let dispatch_authorised (gluten_reqd : Httpun.Reqd.t Gluten.Reqd.t) request =
       let request = strip_conditionals request in
       let classified =
         List.find_map
@@ -301,8 +301,8 @@ let main env =
       (match classified with
        | Some request_authority ->
          Server_request_authority.with_current request_authority (fun () ->
-           Masc.Http_server_eio.Router.dispatch router request (Masc.Http_reqd.of_httpun reqd);
-           (match Httpun.Reqd.response reqd with
+           Masc.Http_server_eio.Router.dispatch router request (Masc.Http_reqd.of_gluten gluten_reqd);
+           (match Httpun.Reqd.response gluten_reqd.Gluten.Reqd.reqd with
             | Some resp ->
               log "http done %s -> %d" request.Httpun.Request.target
                 (Httpun.Status.to_code resp.Httpun.Response.status)
@@ -310,7 +310,7 @@ let main env =
        | None ->
          Masc.Http_server_eio.Response.json_value ~status:`Bad_request
            (`Assoc [ "error_code", `String "request_authority_untrusted" ])
-           (Masc.Http_reqd.of_httpun reqd))
+           (Masc.Http_reqd.of_gluten gluten_reqd))
     in
     (* Live-read orchestration state, owned by the request handler. *)
     let live_seen = ref 0 in
@@ -395,9 +395,8 @@ let main env =
               (Masc.Lane_addon_runtime.error_to_string e))
        | [] -> log "dos wake: no exports")
     in
-    let serve_connection _addr gluten_reqd =
-      let reqd = gluten_reqd.Gluten.Reqd.reqd in
-      let request = Httpun.Reqd.request reqd in
+    let serve_connection _addr (gluten_reqd : Httpun.Reqd.t Gluten.Reqd.t) =
+      let request = Httpun.Reqd.request gluten_reqd.Gluten.Reqd.reqd in
       let target = request.Httpun.Request.target in
       log "http request: %s" target;
       if contains ~sub:"/api/v1/lane-addons/live" target then begin
@@ -444,7 +443,7 @@ let main env =
           Eio.Time.sleep clock 5.0;
           log "live #1: releasing the stale pre-advance answer now";
           stale_released := true;
-          Masc.Http_server_eio.Response.json ~status:`OK stale (Masc.Http_reqd.of_httpun reqd)
+          Masc.Http_server_eio.Response.json ~status:`OK stale (Masc.Http_reqd.of_gluten gluten_reqd)
           (* The held connection has been answered; the handler must not fall
              through to dispatch (a second respond would corrupt it). *)
         end
@@ -457,10 +456,10 @@ let main env =
            | Error e -> log "live #%d probe: read error: %s" n e
            | Ok json ->
              log "live #%d probe: %s" n (Yojson.Safe.to_string json));
-          dispatch_authorised reqd request
+          dispatch_authorised gluten_reqd request
         end
       end
-      else dispatch_authorised reqd request
+      else dispatch_authorised gluten_reqd request
     in
     Eio.Fiber.fork ~sw (fun () ->
       Server_bootstrap_http.serve ~sw ~clock ~socket ~addr_label:"tui-3a"

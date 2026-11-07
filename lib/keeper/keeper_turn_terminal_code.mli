@@ -59,10 +59,7 @@ val of_wire_exact : string -> t option
 (** Wrap an [Agent_core.Error.t] wire string produced by
     [Keeper_agent_error.terminal_reason_code_of_core_error] /
     [agent_error_terminal_reason_code] /
-    [api_error_terminal_reason_code]. Returns [Agent_core_error s] verbatim;
-    [to_wire] reproduces [s] byte-for-byte. *)
-val of_core_error_wire : string -> t
-
-(** Like {!of_core_error_wire} but with the typed timeout observation the
-    producer derived from the original error. The wire stays verbatim. *)
+    [api_error_terminal_reason_code], with the typed timeout observation the
+    producer derived from the original error. The wire stays verbatim:
+    [to_wire] reproduces it byte-for-byte. *)
 val of_core_error : wire:string -> timeout:agent_core_timeout option -> t

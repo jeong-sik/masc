@@ -57,11 +57,6 @@ val turn_ref_wire_key : string
     ({!Keeper_turn} reply_json) and the consumer
     ({!turn_ref_of_reply_payload}) so the wire name cannot drift. *)
 
-val of_stop_reason : Runtime_agent.stop_reason -> t
-(** Stop-reason-only classifier. [Completed] may carry model output. Use
-    {!of_result_surface} at payload production sites where the actual
-    [response_text] is available. *)
-
 val of_result_surface : response_text:string -> Runtime_agent.stop_reason -> t
 (** Classify the reply-surface contract for a completed keeper run.
     [Completed] with blank [response_text] is [No_visible_reply], not

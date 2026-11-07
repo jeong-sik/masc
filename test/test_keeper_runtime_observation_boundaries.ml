@@ -193,7 +193,7 @@ let test_wire_only_api_timeout_does_not_invent_evidence () =
   let terminal =
     Keeper_turn_terminal.of_disposition
       (Keeper_turn_disposition.Provider_error
-         (Keeper_turn_terminal_code.of_core_error_wire "api_error_timeout"))
+         (Keeper_turn_terminal_code.of_core_error ~wire:"api_error_timeout" ~timeout:None))
   in
   check_registry_observation terminal ~core_error:None
     ~expected:KPB.No_timeout_observed
@@ -203,7 +203,9 @@ let test_wire_only_provider_timeout_keeps_its_known_phase () =
   let terminal =
     Keeper_turn_terminal.of_disposition
       (Keeper_turn_disposition.Provider_error
-         (Keeper_turn_terminal_code.of_core_error_wire "provider_error_timeout:queue"))
+         (Keeper_turn_terminal_code.of_core_error
+            ~wire:"provider_error_timeout:queue"
+            ~timeout:None))
   in
   check_registry_observation terminal ~core_error:None
     ~expected:

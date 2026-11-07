@@ -171,11 +171,6 @@ export interface SSEEvent {
   name?: string
   context_ratio?: number
   ts_unix?: number
-  from_model?: string
-  to_model?: string
-  before_tokens?: number
-  after_tokens?: number
-  saved_tokens?: number
   // Waiting-inventory invalidation queue kind. The event carries no rows or
   // revision ID; consumers re-read the authoritative projection.
   queue_kind?: 'chat_operation' | 'event_queue' | 'approval_count' | 'approval_detail'

@@ -1,0 +1,4 @@
+{"step":"space","at":"2026-11-07T05:22:03.351Z","value":9}
+{"step":"b1.goto","at":"2026-11-07T05:22:03.470Z","value":{}}
+{"step":"b1.fire","at":"2026-11-07T05:22:03.479Z","value":{"ok":3,"failed":0}}
+{"step":"b1.exit","at":"2026-11-07T05:22:03.779Z","value":"left the space open with the buffer undrained"}

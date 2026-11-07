@@ -108,7 +108,7 @@ CDP 로 바꾼 설정(화면 크기, 터치 흉내, 언어·시간대·위치, �
 | read_storage | 페이지가 `page.evaluate` 로 자기 URL 과 localStorage·sessionStorage 키 이름, IndexedDB 이름을 읽는다. 그 URL 로 `Network.getCookies({urls})` 를 불러, 그 탭의 최상위 문서가 보는 쿠키의 이름·도메인·경로·secure·httpOnly·sameSite·expiry 만 준다. URL 없이 부르면 다른 site frame 의 주소에 걸린 쿠키까지 온다. 그 frame 도 보지 못하는 쿠키다. 쿠키 값은 SDK 프로세스 안에서 버리고, 저장소 값은 읽지 않는다. 한도는 지워진 Firefox 와 같다(쿠키 200, 이름 100, 이름 200자)(L7 측정) |
 | emulate_environment | locale·timezone·좌표를 `Emulation.*Override` 로 건다. locale 은 Intl 만 바뀐다는 것을 답에 적는다. 좌표를 주면 지워진 Firefox 처럼 그 origin 에 위치 권한도 준다(§4 D3). 권한은 `page.cdp("Browser.setPermission")` 로 준다. task 세션에는 이 명령이 없다. 그 권한은 ego 프로필에서 같은 origin 의 모든 탭에 걸리고, 덮어쓰기와 함께 SDK 프로세스가 끝나면 사라진다. 시간대는 모르는 이름에도 CDP 오류가 없어서, 페이지의 Intl 로 이름을 먼저 고치고 덮어쓴 뒤 다시 읽는다 |
 | intercept_network | `Network.setBlockedURLs` 의 `urlPatterns` 에 호스트마다 `*://<host>:*/*` 하나를 넣는다. 이 패턴은 기본 포트와 다른 포트에 모두 맞고, 다른 호스트나 질의 문자열 안의 호스트에는 맞지 않는다. deprecated `urls` 는 질의 문자열 안의 호스트까지 막아서 쓰지 않는다. 하위 도메인은 따로 적어야 한다는 지워진 Firefox 의 규칙을 그대로 둔다. setBlockedURLs 는 목록을 통째로 바꾼다. 그래서 SDK 프로세스 안에 Page label 마다 막은 호스트를 두고, 부를 때마다 합친 목록을 보낸다. 막히는 것은 그 Page 와 같은 origin frame 의 하위 요청뿐이다. 이동과 다른 site frame 의 요청은 막히지 않아서 답과 설명에 적는다(L6 측정) |
-| read_network | 아래 §3.4 |
+| read_network | 탭을 명시한 ego 연결에서만 읽는다. ego 가 이미 모은 event 를 아래 §3.4 의 함수로 읽어, 요청마다 method·주소·시각·헤더 이름·상태를 준다. `Network.enable` 은 부르지 않는다(L8 측정) |
 | page_zoom | 붙이지 않는다. CDP 에는 브라우저 확대가 없고 핀치 배율만 있다. masc 의 확대 계약은 "측정한 브라우저 확대, CSS 배율은 쓰지 않음" 이다. `missing` 을 이유를 적은 `Unsupported` 로 바꾼다 |
 | read_console | 한 명령 안에서 숨김을 끄고, 읽고, 되돌린다(§4 D1) |
 | write_storage | `Network.setCookie`·`deleteCookies` 로 지워진 Firefox 와 같은 규칙을 따른다. 답에 운영자 프로필의 쿠키가 바뀐다고 적는다(§4 D2) |
@@ -116,18 +116,29 @@ CDP 로 바꾼 설정(화면 크기, 터치 흉내, 언어·시간대·위치, �
 
 ### 3.4 network 기록
 
-`page.events()` 는 SDK 프로세스의 버퍼를 돌려주고 비운다. workflow 의 `events` 단계도 같은 버퍼를 비운다.
-두 곳이 따로 읽으면 서로의 이벤트를 가져간다.
+`page.events()` 는 SDK 프로세스의 버퍼를 돌려주고 비운다. workflow 의 `events` 단계와 native 입력도 같은 버퍼를 비운다.
+여러 곳이 따로 읽으면 서로의 event 를 가져간다.
 
-그래서 ego session 스크립트 안에 버퍼를 읽는 함수를 하나만 둔다.
+L8 에서 잰 버퍼의 모양은 이렇다([결과](../evidence/ego-cdp-capabilities-2026-11-06/l8-network/README.md)).
 
-- 그 함수는 `page.events()` 를 부르고, `Network.*` 이벤트를 페이지별 network 기록에 옮긴다. 나머지는 workflow `events` 에 돌려준다.
-- network 기록은 지워진 Firefox 와 같이 오래된 것부터 200개를 남기고, 넘친 개수를 `dropped` 에 적는다.
-- 주소의 질의 값은 `REDACTED` 로 바꾼다. 헤더는 이름만 남기고, 쿠키와 본문은 넣지 않는다.
-- 기록은 `Network.enable` 을 처음 부른 때부터 시작한다. 답의 `watchingSince` 에 그 시각과 `sdkProcessStartedAt` 을 적는다. 프로세스가 바뀌면 기록도 새로 시작한다.
-- workflow `events` 설명의 "not a full history" 는 그대로 맞다. 여기에 "Network 이벤트는 read_network 로 간다" 를 더한다.
+- ego 의 Page session 은 Network 와 Page domain 이 이미 켜져 있다. `Network.enable` 없이 `Network.*` event 가 쌓인다. `Network.enable` 은 `{}` 로 답하고 바꾸는 것이 없다.
+- 버퍼는 Page label 마다 하나다. `task.page(label)` 이 다른 객체를 줘도 같은 버퍼다.
+- 버퍼는 SDK 프로세스 안에 있다. 새 프로세스는 앞 프로세스가 모은 것을 보지 못한다.
+- 최근 10,000개만 남고 오래된 것은 소리 없이 빠진다.
+- 팝업의 첫 문서 요청과 다른 site frame 안의 요청은 버퍼에 없을 때가 많다.
 
-`Network.enable` 이 사이트에 자동화를 드러내는지는 재지 않았다. 구현 층에서 먼저 잰다.
+그래서 ego session 스크립트 안에 버퍼를 읽는 함수를 하나만 둔다(`lib/browser_ego_page_events.ml`).
+
+- `page.events()` 를 부르는 곳은 이 함수뿐이다. `Network.*` event 는 Page label 마다의 network 기록에 옮기고, 나머지는 다음 workflow `events` 단계나 native 입력이 가져갈 때까지 남긴다. 남기는 것도 최근 10,000개까지다.
+- workflow `events` 는 이제 `Network.*` event 를 주지 않는다. `ExtraInfo` event 에 든 헤더 원문과 쿠키 값도 그래서 나가지 않는다.
+- network 기록은 지워진 Firefox 와 같이 200개까지 남기고, 넘쳐 빠진 개수를 `dropped` 에 적는다.
+- 요청의 상태는 pending, responded, completed, failed 넷이다. 본문을 읽지 않은 fetch 는 `loadingFinished` 가 오지 않아서 responded 로 남는다.
+- 주소는 사용자 정보와 fragment 를 빼고, 질의 값을 `REDACTED` 로 바꾸고, 경로를 500 바이트에서 자른다. 자를 때 `%` 이스케이프 가운데에서 자르지 않는다. 경로에 든 토큰은 남을 수 있다.
+- 헤더는 이름만 64개까지 남기고 전체 개수를 같이 준다. 쿠키와 본문은 넣지 않는다.
+- 모양이 다른 `Network.*` event 는 버리고 개수와 마지막 이유를 `malformedEvents` 에 적는다. 버퍼가 가득 찬 채 읽힌 횟수는 `fullBufferReads` 에 적는다.
+- masc 는 답을 다시 해석해서 만든다. 질의 값·사용자 정보·fragment 가 남은 주소나 모르는 필드가 있으면 거절한다.
+- 답의 `sdkProcessStartedAt` 이 기록을 모은 SDK 프로세스를 가리킨다. 프로세스가 바뀌면 기록도 새로 시작한다.
+- `Network.enable` 전후로 페이지가 보는 값(`navigator.webdriver`, console stack getter, plugins, `window.chrome` 키, window 키 개수)은 같았다.
 
 ### 3.5 정리로 지워진 동작
 
@@ -163,7 +174,7 @@ gh stack 한 스택에 층을 쌓는다. 층마다 기능 목록(`lib/browser_ca
 | L5 | list_windows | 탭마다 windowId 를 본다([결과](../evidence/ego-cdp-capabilities-2026-11-06/l5-windows/README.md)) |
 | L6 | intercept_network (D5) | 차단한 호스트의 fetch 실패와 풀린 뒤 성공을 본다([결과](../evidence/ego-cdp-capabilities-2026-11-06/l6-requests/README.md)) |
 | L7 | read_storage (D5) | 쿠키 이름과 저장소 키 이름. 값이 없는지 본다([결과](../evidence/ego-cdp-capabilities-2026-11-06/l7-storage/README.md)) |
-| L8 | events 버퍼 함수 하나와 read_network (D5) | workflow `events` 와 read_network 를 번갈아 불러 이벤트가 사라지지 않는지 본다 |
+| L8 | events 버퍼 함수 하나와 read_network (D5) | workflow `events` 와 read_network 를 번갈아 불러 이벤트가 사라지지 않는지 본다([결과](../evidence/ego-cdp-capabilities-2026-11-06/l8-network/README.md)) |
 | L9 | read_console (D1·D5) | 페이지가 쓴 줄과 되돌린 뒤 숨김 상태 |
 | L10 | create_window·close_window | 새 창 탭의 label 과 관리 여부를 먼저 잰다 |
 | L11 | write_storage (D2·D5) | 시험 origin 에 쿠키를 쓰고 지운 뒤 이름 목록 |

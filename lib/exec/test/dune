@@ -2,7 +2,6 @@
  (names
   test_exec_types
   test_bash_parser
-  test_bash_history
   test_exec_buffer
   test_shell_ir_oracle
   test_exec_dispatch_docker_streaming

@@ -8,7 +8,6 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_tool_shared_runtime
-open Keeper_workspace_ops_setup
 
 (* Ripgrep input validation for arguments that can be checked without
    crossing the execution boundary. Regex/glob semantics stay with the

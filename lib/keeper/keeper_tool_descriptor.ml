@@ -990,8 +990,7 @@ let public_descriptors =
       ~description:Tool_schemas_filesystem_files.search_files.description
       ~input_schema:Tool_schemas_filesystem_files.search_files.input_schema
       (* Concurrent: each call spawns its own rg process through the sandbox
-         backend; the only shared write is the bash-history audit line, a
-         single O_APPEND write with no fiber yield inside it. *)
+         backend. *)
       ~ordinary_execution_mode:Concurrent
       ~policy:
         (policy

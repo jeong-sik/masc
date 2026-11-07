@@ -2418,9 +2418,9 @@ let act ?actor t args =
     emulate t tab_id (Some emulation)
   | Ok (Browser_lane.Action.On_tab {tab_id; interaction = Browser_lane.Action.Clear_emulation}) ->
     emulate t tab_id None
-  | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Block_requests hosts}) ->
+  | Ok (Browser_lane.Action.On_tab {tab_id; interaction = Browser_lane.Action.Block_requests hosts}) ->
     block_requests t tab_id (Some hosts)
-  | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Unblock_requests}) ->
+  | Ok (Browser_lane.Action.On_tab {tab_id; interaction = Browser_lane.Action.Unblock_requests}) ->
     block_requests t tab_id None
 
 let workflow ?actor t args =

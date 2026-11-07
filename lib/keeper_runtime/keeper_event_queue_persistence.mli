@@ -214,14 +214,11 @@ val discover_keeper_names_with_durable_state :
     Dangling file links remain candidates for the authoritative reader to
     reject. Inspection failures are retained in [read_error], alongside any
     successfully discovered keepers. *)
-val load_snapshot_with_errors :
-  base_path:string -> keeper_name:string -> snapshot_with_errors
-
 val load_selections_with_errors :
   base_path:string -> keeper_name:string -> selections_with_errors
-(** {!load_snapshot_with_errors} projected through
-    {!Keeper_event_queue_state.pending_selections}: the same durable read and
-    the same typed read errors, keeping each entry's [admitted_revision]. *)
+(** The durable queue read with typed read errors, projected through
+    [Keeper_event_queue_state.pending_selections]; each entry keeps its
+    [admitted_revision]. *)
 
 val observe_state_result :
   base_path:string ->
@@ -238,7 +235,7 @@ val observe_state_result :
 val observe_snapshot_with_errors :
   base_path:string -> keeper_name:string -> snapshot_with_errors
 (** Read-only operator projection of the pending queue. Unlike
-    {!load_snapshot_with_errors}, this observer never acquires the canonical
+    [load_selections_with_errors], this observer never acquires the canonical
     queue-owner transaction lock and never checkpoints or compacts the
     transition WAL. It accepts only two identical full-state observations, so
     a concurrent snapshot/WAL generation change is an explicit read error

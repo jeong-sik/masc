@@ -901,7 +901,7 @@ let execute_with_tool_use_id
              release must run on every exit — including the cancellation an
              acquire delivers after completing under its default
              [~protect:true]. *)
-          Fun.protect release (fun () ->
+          Fun.protect ~finally:release (fun () ->
             if exclusive then Exclusive_gate.acquire_exclusive gate
             else Exclusive_gate.acquire_shared gate;
             if halted () then ()

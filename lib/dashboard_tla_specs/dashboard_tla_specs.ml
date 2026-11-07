@@ -285,12 +285,12 @@ let tlc_entry_to_json e : Yojson.Safe.t =
     ; "cfg_name", `String e.cfg_name
     ; "category", `String e.category
     ; "status", `String (tlc_status_to_string e.status)
-    ; "states_explored", Json_util.int_option_to_yojson e.states_explored
-    ; "distinct_states", Json_util.int_option_to_yojson e.distinct_states
-    ; "diameter", Json_util.int_option_to_yojson e.diameter
+    ; "states_explored", Json_util.int_opt_to_json e.states_explored
+    ; "distinct_states", Json_util.int_opt_to_json e.distinct_states
+    ; "diameter", Json_util.int_opt_to_json e.diameter
     ; "last_run_at", option_time_json e.last_run_at
-    ; "violation", Json_util.string_option_to_yojson e.violation
-    ; "log_path", Json_util.string_option_to_yojson e.log_path
+    ; "violation", Json_util.string_opt_to_json e.violation
+    ; "log_path", Json_util.string_opt_to_json e.log_path
     ]
 ;;
 

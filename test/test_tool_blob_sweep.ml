@@ -254,6 +254,33 @@ let test_private_jsonl_lock_does_not_end_the_scan () =
       let first = observe_ok ~base_path in
       Alcotest.(check int) "the named blob is live" 0 first.candidates)
 
+(* 2026-11-06: twelve Finder files sat inside keepers/, traces/ and
+   skill-composition-evidence-v1/. The scope excluded one only as a direct
+   entry, so the scan read the ones below a store as records. *)
+let test_finder_file_below_a_store_does_not_end_the_scan () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      forget_marks ();
+      let kept = put store "output a gate journal row names" in
+      let gate = Filename.concat (Common.masc_dir_from_base_path ~base_path) "gate" in
+      let journal = Filename.concat gate "late-approval.log.jsonl" in
+      Fs_compat.mkdir_p gate;
+      let row =
+        Yojson.Safe.to_string
+          (`Assoc [ "output_ref", `String (O.encode_for_agent_core (O.Stored kept)) ])
+        ^ "\n"
+      in
+      (match Fs_compat.append_private_jsonl_durable_stable_result journal row with
+       | Ok _ -> ()
+       | Error error ->
+         Alcotest.failf "append failed: %s"
+           (Fs_compat.private_jsonl_transaction_error_to_string error));
+      Out_channel.with_open_bin
+        (Filename.concat gate Tool_blob_maintenance.finder_metadata_name)
+        (fun channel -> Out_channel.output_string channel "\000\000\000\001Bud1");
+      let first = observe_ok ~base_path in
+      Alcotest.(check int) "the named blob is live" 0 first.candidates)
+
 let () =
   Alcotest.run "tool_blob_sweep"
     [ ( "sweep"
@@ -271,5 +298,7 @@ let () =
             test_unclassified_entry_leaves_nothing_deletable
         ; Alcotest.test_case "private JSONL lock does not end the scan" `Quick
             test_private_jsonl_lock_does_not_end_the_scan
+        ; Alcotest.test_case "finder file below a store does not end the scan" `Quick
+            test_finder_file_below_a_store_does_not_end_the_scan
         ] )
     ]

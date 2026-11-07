@@ -31,6 +31,8 @@ type mode =
   | Observe_only
   | Delete_previous_candidates
 
+let finder_metadata_name = ".DS_Store"
+
 type error =
   | Durable_source_stat_failed of
       { path : string
@@ -922,6 +924,9 @@ let scan_live_references ~base_path ~scope =
         (* A lock holds no record. A private JSONL lock holds one ready
            marker byte, which no row codec decodes. *)
         else if Fs_compat.is_lock_name basename
+        then Ok references
+        (* The Finder writes it in any directory it opens below a store. *)
+        else if String.equal basename finder_metadata_name
         then Ok references
         else if Common.is_tool_call_read_index_file basename
         then Ok references

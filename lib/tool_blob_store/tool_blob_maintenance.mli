@@ -41,7 +41,7 @@
     scans are required. Registered sources must decode as JSON documents,
     JSONL rows, or exact canonical marker rows; blank rows carry no references.
     A lock file below a store ({!Fs_compat.is_lock_name}) holds no record and
-    is not read.
+    is not read. Nor is a Finder file ({!finder_metadata_name}) below one.
     An undecodable row, malformed reference, scan failure, or candidate-store
     failure aborts visibly before deletion. Parse failure leaves the previous
     candidate snapshot intact. An unlink failure is reported during deletion;
@@ -54,6 +54,12 @@
 type mode =
   | Observe_only
   | Delete_previous_candidates
+
+val finder_metadata_name : string
+(** [.DS_Store], the name the macOS Finder writes in any directory it opens.
+    No MASC module writes it. A scope excludes it by this name
+    ([Finder_metadata]), and a scan does not read a file of this name below a
+    store. *)
 
 type error =
   | Durable_source_stat_failed of

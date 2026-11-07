@@ -279,6 +279,18 @@ let serve ~sw ~clock ~socket ~addr_label ~request_handler =
 
 exception Request_without_header_block
 
+(* RFC 9113 §8.4 deprecates server push and browsers stopped accepting it, so
+   no H2 connection advertises it. h2's [read_buffer_size] is the
+   SETTINGS_MAX_FRAME_SIZE the server announces ([H2.Config.to_settings]). *)
+let h2_config () =
+  { H2.Config.default with
+    enable_server_push = false
+  ; max_concurrent_streams = Int32.of_int (H2_response_limits.max_concurrent_streams ())
+  ; initial_window_size = Int32.of_int (H2_response_limits.initial_window_size ())
+  ; read_buffer_size = H2_response_limits.max_frame_size ()
+  }
+;;
+
 let serve_h2_connection
       ?(streams = Server_h2_stream_registry.create ())
       ?(resources = Http_h2_response_ledger.create
@@ -305,8 +317,7 @@ let serve_h2_connection
         Eio.Fiber.await_cancel ()))
     (fun () ->
       let request_sw = Eio.Promise.await request_scope in
-      let config = {H2.Config.default with max_concurrent_streams=
-        Int32.of_int (H2_response_limits.max_concurrent_streams ())} in
+      let config = h2_config () in
       H2_eio.Server.create_connection_handler ~sw ~config
         ~request_handler:(fun addr reqd ->
           match Server_h2_frame_tap.request_stream frames with

@@ -16400,20 +16400,40 @@ let reconcile_system_log_stream state ~mailbox =
    read starts on the next iteration, which draws nothing until an answer or a
    key arrives. The page kept saying "press r" while its read ran. The loop
    takes this before its launches and again just before it picks the frame,
-   and asks for a frame when it moved, wherever in between the read started. *)
+   and asks for a frame when it moved, wherever in between the read started.
+
+   The facts are named. Twelve positions in two nested tuples left a new fact
+   to be added by counting slots, and a reader could not tell which slot was
+   which without the render site open beside it. *)
+type reads_in_flight =
+  { rif_clients : bool
+  ; rif_lane_runs : bool
+  ; rif_runtime : int option
+  ; rif_harness : bool
+  ; rif_verification : bool
+  ; rif_memory_health : bool
+  ; rif_repositories : bool
+  ; rif_system_log : bool
+  ; rif_schedules : bool
+  ; rif_fusion_runs : bool
+  ; rif_memory_facts : bool
+  ; rif_status_sources : Surface_read_order.source list
+  }
+
 let reads_in_flight (state : state) =
-  ( ( state.clients_surface_inflight
-    , state.lane_runs_loading
-    , state.runtime_surface_inflight
-    , state.harness_inflight
-    , state.verification_inflight
-    , state.memory_health_inflight
-    , state.repositories_inflight )
-  , ( Option.is_some state.system_log_stream
-    , Snapshot_read.in_flight state.schedules_read
-    , view_is_loading (Masc_tui_fusion_model.fusion_runs_view state)
-    , view_is_loading (memory_facts_view state)
-    , surface_reads_pending state ) )
+  { rif_clients = state.clients_surface_inflight
+  ; rif_lane_runs = state.lane_runs_loading
+  ; rif_runtime = state.runtime_surface_inflight
+  ; rif_harness = state.harness_inflight
+  ; rif_verification = state.verification_inflight
+  ; rif_memory_health = state.memory_health_inflight
+  ; rif_repositories = state.repositories_inflight
+  ; rif_system_log = Option.is_some state.system_log_stream
+  ; rif_schedules = Snapshot_read.in_flight state.schedules_read
+  ; rif_fusion_runs = view_is_loading (Masc_tui_fusion_model.fusion_runs_view state)
+  ; rif_memory_facts = view_is_loading (memory_facts_view state)
+  ; rif_status_sources = surface_reads_pending state
+  }
 
 (* A frame or an ending of the job that is current lands on the server page; a
    message from a job since replaced is dropped. *)

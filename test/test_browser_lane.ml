@@ -267,7 +267,7 @@ let test_transport_table () =
   let unserved transport = List.filter (fun capability ->
     not (Lane.live_transport_serves transport capability)) Lane.all_of_live_capability in
   check (list capability) "the ego connection serves every listed capability"
-    Lane.[] (unserved Lane.Ego_task_space);
+    [] (unserved Lane.Ego_task_space);
   check bool "native Ego activation uses SDK execution ownership" true
     (Lane.ego_reply_policy (Lane.Page_interact {tab_id=1;expected_url=Some "https://example.org/";action=Lane.Activate_tab})=Lane.Executor_owned);
   List.iter (fun capability ->

@@ -143,10 +143,6 @@ let dashboard_memory_http_payload ?config request : Dashboard_cache.cached_paylo
     ()
 ;;
 
-let dashboard_memory_http_json ?config request : Yojson.Safe.t =
-  (dashboard_memory_http_payload ?config request).json
-;;
-
 
 (** Read the resolved-history page bounds. [?limit=<rows>] caps the returned
     decisions and [?window=<minutes>] caps how far back they may be dated,

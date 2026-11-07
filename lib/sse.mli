@@ -208,10 +208,6 @@ val broadcast_to_with_commit
     This callback is not a receipt for external subscribers. [Presence_only]
     and [Runtime_presence] are rejected because presence is not replayable. *)
 
-val broadcast_encoded_to : broadcast_target -> Sse_wire.encoded_json -> unit
-(** {!broadcast_to} of [encoded.json], its frame written from [encoded.text]
-    so the value is not encoded again under the fan-out lock. *)
-
 val broadcast_encoded_to_with_receipts :
   broadcast_target -> on_fanout:(int -> unit) -> on_committed:(int -> unit) ->
   Sse_wire.encoded_json -> unit

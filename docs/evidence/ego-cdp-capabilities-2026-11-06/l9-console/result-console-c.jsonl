@@ -1,0 +1,21 @@
+{"step":"space","at":"2026-11-07T07:16:06.550Z","value":{"spaceId":17,"name":"masc-l9-console-c","ownership":"agent"}}
+{"step":"c1.goto","at":"2026-11-07T07:16:06.651Z","value":{}}
+{"step":"c1.read","at":"2026-11-07T07:16:06.962Z","value":{"entries":["console log load-line 7 Object","console warning load-warn","console error load-error","javascript error Uncaught Error: load-uncaught\n    at http://127.","javascript error Uncaught (in promise) Error: load-rejected\n    a"],"dropped":0,"malformed":{"count":0,"last":null},"hiding":{"offMs":8,"restored":true}}}
+{"step":"c2.readAgain","at":"2026-11-07T07:16:06.965Z","value":{"entries":["console log load-line 7 Object","console warning load-warn","console error load-error","javascript error Uncaught Error: load-uncaught\n    at http://127.","javascript error Uncaught (in promise) Error: load-rejected\n    a"],"dropped":0,"malformed":{"count":0,"last":null},"hiding":{"offMs":3,"restored":true}}}
+{"step":"c3.say","at":"2026-11-07T07:16:06.966Z","value":2}
+{"step":"c3.rawEvents","at":"2026-11-07T07:16:07.168Z","value":[]}
+{"step":"c4.readThenPageEvents","at":"2026-11-07T07:16:07.172Z","value":{"entries":7,"pending":[]}}
+{"step":"c5.nativeTypingState","at":"2026-11-07T07:16:07.177Z","value":["load-line 7 Object","load-warn","load-error","Uncaught Error: load-unc","Uncaught (in promise) Er","c3-0","c3-1"]}
+{"step":"c6.lines","at":"2026-11-07T07:16:07.177Z","value":true}
+{"step":"c8.args","at":"2026-11-07T07:16:07.179Z","value":true}
+{"step":"c9.throw","at":"2026-11-07T07:16:07.179Z","value":true}
+{"step":"c6.read","at":"2026-11-07T07:16:07.492Z","value":[{"type":"console","level":"log","head":"가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가","bytes":3999,"textCut":true,"timestamp":1794035767177},{"type":"console","level":"log","head":"args 5 true null undefined 5n NaN Object Array(2) () => 1 Symbol(s)","bytes":67,"textCut":false,"timestamp":1794035767178},{"type":"console","level":"log","head":"%s fmt x","bytes":8,"textCut":false,"timestamp":1794035767178},{"type":"javascript","level":"error","head":"Uncaught Error: c9-uncaught\n    at <anonymous>:2:56","bytes":51,"textCut":false,"timestamp":1794035767179},{"type":"javascript","level":"error","head":"Uncaught c9-string","bytes":18,"textCut":false,"timestamp":1794035767179},{"type":"javascript","level":"error","head":"Uncaught (in promise) Error: c9-rejected\n    at <anonymous>:2:104\n    at __egoPa","bytes":133,"textCut":false,"timestamp":1794035767179}]}
+{"step":"c7.say","at":"2026-11-07T07:16:07.501Z","value":1500}
+{"step":"c7.read","at":"2026-11-07T07:16:07.518Z","value":{"count":200,"dropped":800,"first":"c7-1300","last":"c7-1499"}}
+{"step":"c10.say","at":"2026-11-07T07:16:07.522Z","value":true}
+{"step":"c10.read","at":"2026-11-07T07:16:07.566Z","value":{"count":84,"dropped":916,"answerUnits":2023267}}
+{"step":"c11.reload","at":"2026-11-07T07:16:07.638Z","value":{}}
+{"step":"c11.frames","at":"2026-11-07T07:16:07.963Z","value":["load-line 7 Object","load-warn","load-error","Uncaught Error: load-uncaught\n    at htt","Uncaught (in promise) Error: load-reject","frame-line 127.0.0.1:18776"]}
+{"step":"c12.busy","at":"2026-11-07T07:16:10.968Z","value":{"ms":2803,"hiding":{"offMs":2803,"restored":true},"ok":true}}
+{"step":"c13.network","at":"2026-11-07T07:16:14.183Z","value":["http://127.0.0.1:18776/x?token=REDACTED completed"]}
+{"step":"z.finish","at":"2026-11-07T07:16:14.187Z","value":{"spaceId":17,"closedSpace":true,"keptManagedLabels":[],"closedManagedLabels":["p1"],"preservedUnmanagedCount":0}}

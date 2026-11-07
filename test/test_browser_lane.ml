@@ -256,7 +256,8 @@ let verb_asking_for : Lane.live_capability -> Lane.verb = Lane.(function
   | Environment_emulation -> Page_act (Action.On_tab {tab_id=2;interaction=Action.Set_emulation {geolocation=None;locale=Some "fr-FR";timezone=None}})
   | Request_blocking -> Page_act (Action.On_tab {tab_id=2;interaction=Action.Block_requests ["ads.example.com"]})
   | Storage_listing -> Page_cookies {tab_id=2}
-  | Request_listing -> Page_network {tab_id=2})
+  | Request_listing -> Page_network {tab_id=2}
+  | Console_reading -> Page_console {tab_id=2})
 
 let capability = testable
   (fun ppf value -> Format.pp_print_string ppf (Lane.live_capability_to_wire value)) ( = )

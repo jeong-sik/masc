@@ -1327,6 +1327,30 @@ let network_log t args =
          "    emit(log.failed === undefined ? {ok: true, value: log} : {ok: false, error: log.failed});" ])) in
   Page_events.receipt ~tab value
 
+(* The tab's console (RFC-browser-ego-cdp-capabilities §3.3 read_console).
+   The step turns ego's console hiding off, replays what the browser kept of
+   the document's console and turns the hiding back on (Browser_ego_console).
+   A failure after the hiding came back on changed nothing; one that may have
+   left it off is an unknown outcome until the next console read or a new
+   SDK process. *)
+let console_read t args =
+  let refuse message = Error (Live.Before_effect message) in
+  let* tab = match field "tabId" args with
+    | Some (`Int tab) -> Ok tab
+    | Some _ | None -> refuse "a console is read for one tab; give its tabId" in
+  let* label = Result.map_error (fun message -> Live.Before_effect message) (target t args) in
+  let unknown = Printf.sprintf "ego's console hiding for tab %d may still be off; it comes back with the next console read \
+    or when the ego SDK process ends (sdkProcessStartedAt changes)" tab in
+  match run_step t ~window_s:read_window_s ~step:"page.console" ~args:(obj ["label",label])
+      (on_page (String.concat "\n" [
+         Page_events.script;
+         Browser_ego_console.script ~answer_units:answer_limit_units;
+         "    const reason = " ^ message ^ ";";
+         "    emit(await mascConsoleRead(page, reason));" ])) with
+  | Error failure -> Error (effect_failure ~unknown failure)
+  | Ok value ->
+    Result.map_error (fun detail -> Live.Outcome_unknown (detail ^ "; " ^ unknown)) (Browser_ego_console.receipt ~tab value)
+
 (* ego's Page API has no back or forward, so the step goes through the
    page's CDP session: it reads the tab's history, refuses before acting when
    there is no entry that way, moves to the entry, and waits until the tab's
@@ -2527,6 +2551,7 @@ let dispatch_raw ?actor t ~verb args =
   | Page_downloads -> pre (downloads t args)
   | Page_cookies -> pre (storage_names t args)
   | Page_network -> pre (network_log t args)
+  | Page_console -> console_read t args
   | Page_act -> act ?actor t args
   | Page_interact -> interact ?actor t args
   | Page_native_workflow -> workflow ?actor t args
@@ -2542,7 +2567,7 @@ let admit_after_finish t ~verb args =
         | Ok (Open_tab _|Control (Hand_off|Take_over|Wait_for_control _|Adopt_tab _|Release_tab _)|On_tab _)
         | Error _ -> Error (Live.Before_effect "Space completion is terminal or uncertain; former Page/control work is refused; use space_status to reconcile"))
     | Tabs_list|Page_read|Page_elements|Page_scene|Page_capture|Page_goto|Page_context|Page_snapshot
-    | Page_downloads|Page_cookies|Page_network|Page_interact|Page_native_workflow ->
+    | Page_downloads|Page_cookies|Page_network|Page_console|Page_interact|Page_native_workflow ->
       Error (Live.Before_effect "Space completion is terminal or uncertain; former Page work is refused; use space_status to reconcile")
 
 let dispatch ?command_id ?actor t ~verb args =

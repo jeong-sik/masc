@@ -1,0 +1,7 @@
+{"step":"space","at":"2026-11-07T06:48:07.890Z","value":{"spaceId":16,"name":"masc-l9-console-b","ownership":"agent"}}
+{"step":"b2.firstEvents","at":"2026-11-07T06:48:07.892Z","value":0}
+{"step":"b2.say","at":"2026-11-07T06:48:07.893Z","value":2}
+{"step":"b2.liveWithoutEnable","at":"2026-11-07T06:48:08.095Z","value":[]}
+{"step":"b2.cycleWithoutDisable","at":"2026-11-07T06:48:08.101Z","value":[]}
+{"step":"b2.cycleWithDisable","at":"2026-11-07T06:48:08.107Z","value":["load-line","load-warn","load-error","b1-0","b1-1","b2-0","b2-1"]}
+{"step":"z.finish","at":"2026-11-07T06:48:08.110Z","value":{"spaceId":16,"closedSpace":true,"keptManagedLabels":[],"closedManagedLabels":["p1","p2"],"preservedUnmanagedCount":0}}

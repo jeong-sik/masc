@@ -120,15 +120,6 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
 
 // ── Inference Telemetry Panel ────────────────────────────
 
-function healthStatusColor(status: string | undefined): string {
-  switch (status) {
-    case 'healthy': return 'var(--color-status-ok)'
-    case 'degraded': return 'var(--color-status-warn)'
-    case 'unhealthy': return 'var(--color-status-err)'
-    default: return 'var(--color-fg-disabled)'
-  }
-}
-
 export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
   const series = keeper.metrics_series ?? []
   const telemetryPoints = series.filter(
@@ -153,20 +144,12 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
 
   const lastFp = series[series.length - 1]?.inference_telemetry?.system_fingerprint
 
-  const providerHealth = keeper.provider_health
-
   return html`
     <div class="mb-5 v2-monitoring-panel">
       <div class="flex items-center gap-2 mb-2">
         <span class="text-2xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">추론 텔레메트리</span>
         <${MutedSpan}>${telemetryPoints.length}개 지점</${MutedSpan}>
         ${lastFp ? html`<span class="text-3xs px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-disabled)] font-mono">${lastFp}</span>` : null}
-        ${providerHealth ? html`
-          <span class="ml-auto inline-flex items-center gap-1.5 text-2xs px-2 py-0.5 rounded-full border" style=${`border-color:${healthStatusColor(providerHealth.status)}33;background:${healthStatusColor(providerHealth.status)}11;color:${healthStatusColor(providerHealth.status)}`}>
-            <span class="inline-block w-1.5 h-1.5 rounded-full" style=${`background:${healthStatusColor(providerHealth.status)}`}></span>
-            runtime — ${providerHealth.status}
-          </span>
-        ` : null}
       </div>
       <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 v2-monitoring-row">
         ${wallSummary.observed > 0 ? html`

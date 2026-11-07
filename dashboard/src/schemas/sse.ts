@@ -174,8 +174,6 @@ const STRING_FIELDS = new Set([
   'keeper_id',
   'event_type',
   'name',
-  'from_model',
-  'to_model',
   'trigger',
   'reason',
   'prev_phase',
@@ -216,9 +214,6 @@ const STRING_FIELDS = new Set([
 const NUMBER_FIELDS = new Set([
   'context_ratio',
   'ts_unix',
-  'before_tokens',
-  'after_tokens',
-  'saved_tokens',
   'revision',
   'duration_ms',
   'turn',

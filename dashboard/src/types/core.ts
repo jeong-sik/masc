@@ -46,8 +46,6 @@ export interface Agent {
   emoji?: string
   koreanName?: string
   model?: string
-  preferredHours?: number[]
-  peakHour?: number
   synthetic?: boolean
 }
 
@@ -420,16 +418,6 @@ export interface KeeperMetricPoint {
   runtime_id?: string | null
   runtime_outcome?: string | null
   runtime_attempt_count?: number | null
-}
-
-export interface ProviderHealth {
-  provider: string
-  model: string
-  status: 'healthy' | 'degraded' | 'unhealthy'
-  ttfrc_ms_ewma: number
-  timeout_count_5m: number
-  prefill_ms_ewma: number
-  last_updated: number
 }
 
 export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
@@ -1427,7 +1415,6 @@ export interface Keeper {
   last_model_used?: string
   next_model_hint?: string | null
   runtime_id?: string | null
-  runtime_ref?: RuntimeRef | null
   runtime_canonical?: string | null
   selected_runtime_canonical?: string | null
   status: string
@@ -1466,7 +1453,6 @@ export interface Keeper {
   last_proactive_ago_s?: number
   last_proactive_reason?: string | null
   last_proactive_preview?: string | null
-  last_drift_reason?: string | null
   drift_count_total?: number
   runtime_warning_ctx_ratio?: number | null
   trust?: KeeperTrustSummary | null
@@ -1510,14 +1496,12 @@ export interface Keeper {
   tool_audit_at?: string | null
   conversation_tail_count?: number
   addressed_message_count?: number
-  keeper_mention_counts?: Array<{ keeper: string; count: number }>
   metrics_window?: MetricsWindow
   // Metrics time-series (from backend metrics_series)
   metrics_series?: KeeperMetricPoint[]
   inventory?: string[]
   relationships?: Record<string, string>
   supervisor_diagnostics?: KeeperSupervisorDiagnostics
-  provider_health?: ProviderHealth | null
   outcomes?: KeeperOutcomes
   conditions?: KeeperConditions
 }
@@ -1625,7 +1609,6 @@ interface KeeperConfigExecution {
   selected_runtime_id: string
   selected_runtime_canonical: string
   runtime_options: string[]
-  runtime_ref?: RuntimeRef | null
 }
 
 
@@ -1668,11 +1651,6 @@ export interface KeeperConfigRevisionUnavailable {
 export type KeeperConfigRevisionState =
   | KeeperConfigRevision
   | KeeperConfigRevisionUnavailable
-
-export interface RuntimeRef {
-  group: string
-  item: string | null
-}
 
 export interface KeeperConfigRuntimeTrust {
   disposition?: string | null

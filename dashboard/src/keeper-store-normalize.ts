@@ -19,7 +19,6 @@ import type {
   KeeperTrustTerminalReason,
   PipelineStage,
   PromptTelemetry,
-  ProviderHealth,
   SandboxProfile,
 } from './types'
 import { toSandboxProfile } from './types'
@@ -35,16 +34,6 @@ import {
 } from './lib/keeper-runtime-state'
 import { normalizeStopCause } from './lib/stop-cause'
 import { normalizeKeeperDiagnostic } from './keeper-state'
-import type { RuntimeRef } from './types'
-
-/** Normalize a raw runtime_ref JSON object into a typed RuntimeRef. */
-function normalizeRuntimeRef(raw: unknown): RuntimeRef | null {
-  if (!isRecord(raw)) return null
-  const group = asString(raw.group)
-  if (!group) return null
-  const item = asString(raw.item) ?? null
-  return { group, item }
-}
 
 export function normalizeKeeperContextMetricsUnavailable(
   raw: unknown,
@@ -683,7 +672,6 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
             }
           : undefined
 
-      const providerHealth: ProviderHealth | null = null
       const runtimeBlockerClass = asKeeperRuntimeBlockerClass(row.runtime_blocker_class)
       const runtimeBlockerSummary = asString(row.runtime_blocker_summary) ?? null
       const trust = normalizeKeeperTrust(row.runtime_trust ?? row.trust)
@@ -729,7 +717,6 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         last_model_used: undefined,
         next_model_hint: null,
         runtime_id: asString(row.runtime_id) ?? null,
-        runtime_ref: normalizeRuntimeRef(row.runtime_ref),
         runtime_canonical: asString(row.runtime_canonical) ?? asString(row.selected_runtime_canonical) ?? null,
         selected_runtime_canonical: asString(row.selected_runtime_canonical) ?? null,
         declaration_only: row.declaration_only === true,
@@ -812,7 +799,6 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         addressed_message_count: asNumber(row.addressed_message_count),
         metrics_series: metricsSeries.length > 0 ? metricsSeries : undefined,
         metrics_window: metricsWindow,
-        provider_health: providerHealth,
       }
     })
     .filter((row): row is Keeper => row !== null)

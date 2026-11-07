@@ -72,7 +72,7 @@ let test_deferred_inventory_and_selected_search () = with_base (fun base_path ->
                          "Walrus tournament standings changed."] in
   Ledger.save ~base_path database |> require;
   let open Yojson.Safe.Util in
-  let inventory = View.inventory ~base_path |> require in
+  let inventory = View.inventory ~base_path () |> require in
   Alcotest.(check int) "inventory counts retained claims" 2
     (inventory |> member "claim_count" |> to_int);
   Alcotest.(check bool) "inventory has no claim bodies" true
@@ -158,6 +158,36 @@ let test_resolved_snapshot_serves_many_ids_without_rereading () = with_base (fun
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "fresh source resolution hid authoritative corruption")
 
+let test_inventory_representation () = with_base (fun base_path ->
+  let open Yojson.Safe.Util in
+  let missing = View.inventory ~now:1794037335.0 ~base_path () |> require in
+  Alcotest.(check string) "missing schema" "workspace.memory.inventory.v1"
+    (missing |> member "schema" |> to_string);
+  Alcotest.(check string) "missing status" "missing"
+    (missing |> member "status" |> to_string);
+  Alcotest.(check (list string)) "missing has no other keys"
+    ["generated_at"; "schema"; "status"]
+    (match missing with `Assoc fields -> List.sort String.compare (List.map fst fields) | _ -> []);
+  let database = ledger ["First claim"; "Second claim"] in
+  Ledger.save ~base_path database |> require;
+  let available = View.inventory ~now:1794037335.0 ~base_path () |> require in
+  Alcotest.(check string) "available schema" "workspace.memory.inventory.v1"
+    (available |> member "schema" |> to_string);
+  Alcotest.(check string) "available status" "available"
+    (available |> member "status" |> to_string);
+  Alcotest.(check int) "claim count" 2
+    (available |> member "claim_count" |> to_int);
+  Alcotest.(check int) "excluded count" 0
+    (available |> member "excluded_count" |> to_int);
+  Alcotest.(check string) "briefing status pending" "pending"
+    (available |> member "briefing" |> member "status" |> to_string);
+  Alcotest.(check bool) "briefing building null" true
+    (available |> member "briefing" |> member "building" = `Null);
+  Fs_compat.save_file (Filename.concat (Ledger.directory ~base_path) "ledger.json") "{broken";
+  match View.inventory ~base_path () with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "corrupt ledger answered successful inventory")
+
 let () = Alcotest.run "workspace memory ledger view"
   [ "summary consistency",
     [ Alcotest.test_case "atomic replacement never mixes versions" `Quick
@@ -166,6 +196,8 @@ let () = Alcotest.run "workspace memory ledger view"
         test_summary_does_not_hide_missing_or_corrupt_ledger;
       Alcotest.test_case "inventory defers bodies and search selects context" `Quick
         test_deferred_inventory_and_selected_search;
+      Alcotest.test_case "inventory representation matches schema" `Quick
+        test_inventory_representation;
       Alcotest.test_case "short Korean and ASCII queries remain retrievable" `Quick
         test_short_queries_remain_retrievable;
       Alcotest.test_case "index failure preserves matches without filler" `Quick

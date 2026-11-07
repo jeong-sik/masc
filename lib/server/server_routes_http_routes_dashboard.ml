@@ -2474,6 +2474,19 @@ let add_routes ~sw ~clock router =
              | Ok json -> `OK, json
              | Error detail -> `Service_unavailable, `Assoc ["error", `String detail] in
            Http.Response.json_value ~status ~request:req json reqd)
+  |> Server_route.get (Server_route.Permission Masc_domain.CanReadState) "/api/v1/dashboard/workspace-memory-inventory" (fun state req reqd ->
+           let base_path = (Mcp_server.workspace_config state).base_path in
+           match Workspace_memory_ledger.observe ~base_path with
+           | Workspace_memory_ledger.Unavailable detail ->
+             Http.Response.json_value ~status:`Service_unavailable ~request:req
+               (`Assoc [ "error", `String detail ]) reqd
+           | Workspace_memory_ledger.Missing | Workspace_memory_ledger.Available _ ->
+             let cache_key = "workspace_memory_inventory:" ^ base_path in
+             respond_cached_read ~request:req ~reqd ~cache_key ~ttl:standard_cache_ttl_s
+               (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+                 match Workspace_memory_ledger_view.inventory ~base_path () with
+                 | Ok json -> json
+                 | Error detail -> `Assoc [ "error", `String detail ])))
   |> Server_route.get (Server_route.Permission Masc_domain.CanReadState) "/api/v1/dashboard/workspace-memory-context" (fun state req reqd ->
            let base_path = (Mcp_server.workspace_config state).base_path in
            let json = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->

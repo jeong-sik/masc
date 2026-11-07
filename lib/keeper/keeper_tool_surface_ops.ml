@@ -314,10 +314,13 @@ let keeper_failure_cause = function
 let runtime_path_rest_json ~now assignment_id =
   match Keeper_turn_driver.assignment_walk_rest ~now assignment_id with
   | Keeper_turn_driver.Walk_head_serving { runtime_id } ->
-    `Assoc [ "status", `String "serving"; "runtime_id", `String runtime_id ]
+    `Assoc
+      [ "status", `String Keeper_turn_driver.walk_rest_serving_wire
+      ; "runtime_id", `String runtime_id
+      ]
   | Keeper_turn_driver.Walk_waits_until { release_at; release_basis; resting_runtime_id } ->
     `Assoc
-      [ "status", `String "resting"
+      [ "status", `String Keeper_turn_driver.walk_rest_resting_wire
       ; "runtime_id", `String resting_runtime_id
       ; "release_at", `Float release_at
       ; "release_basis", `String (Keeper_turn_driver.release_basis_to_wire release_basis)

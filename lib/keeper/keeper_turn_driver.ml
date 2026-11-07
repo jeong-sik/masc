@@ -346,16 +346,21 @@ type release_basis =
   | Stated_by_provider
   | Bounded_by_masc
 
+let release_bases = [ Stated_by_provider; Bounded_by_masc ]
+
 let release_basis_to_wire = function
   | Stated_by_provider -> "stated_by_provider"
   | Bounded_by_masc -> "bounded_by_masc"
 ;;
 
-let release_basis_of_wire = function
-  | "stated_by_provider" -> Some Stated_by_provider
-  | "bounded_by_masc" -> Some Bounded_by_masc
-  | _ -> None
+(* Read back through the spellings [release_basis_to_wire] writes, so the
+   two cannot disagree on one. *)
+let release_basis_of_wire wire =
+  List.find_opt (fun basis -> String.equal (release_basis_to_wire basis) wire) release_bases
 ;;
+
+let walk_rest_serving_wire = "serving"
+let walk_rest_resting_wire = "resting"
 
 type path_rest =
   | Path_serving

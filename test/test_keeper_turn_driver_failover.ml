@@ -4457,7 +4457,32 @@ let test_a_deferred_suffix_waits_only_while_its_walk_head_rests () =
           false
       in
       Alcotest.(check bool) "a failed cycle whose walk head rests waits for the path"
-        true waits_for_the_path))
+        true waits_for_the_path;
+      (* A later path that releases at the same moment as the head does not
+         serve sooner, so the head still names the wait. Each path's quota
+         scope gets the same stated reset, so both rest until one instant. *)
+      reset_quota_lane_rests ();
+      List.iter
+        (fun id ->
+           Runtime_quota_window.note_exhausted
+             ~scope:(Option.get (Runtime.quota_scope_of_runtime_id id))
+             ~resets_at:(now +. 60.))
+        both_shared;
+      Alcotest.(check string) "a later path releasing with the head leaves the head named"
+        "resting shared_a.test_model for 60s (stated_by_provider)"
+        (describe (Driver.deferred_lane_rest ~now (quota_lane_suffix both_shared)))))
+;;
+
+(* The roster row and the forecast write a basis and the TUI reads it back. *)
+let test_a_release_basis_reads_back_from_its_own_spelling () =
+  List.iter
+    (fun basis ->
+       let wire = Driver.release_basis_to_wire basis in
+       Alcotest.(check bool) (wire ^ " reads back") true
+         (Driver.release_basis_of_wire wire = Some basis))
+    [ Driver.Stated_by_provider; Driver.Bounded_by_masc ];
+  Alcotest.(check bool) "another spelling is no basis" true
+    (Driver.release_basis_of_wire "Stated_by_provider" = None)
 ;;
 
 let test_provider_resets_outlive_the_fallback_cap () =
@@ -7809,6 +7834,8 @@ let () =
             test_a_deferred_suffix_waits_only_while_its_walk_head_rests;
           Alcotest.test_case "provider resets outlive the fallback cap" `Quick
             test_provider_resets_outlive_the_fallback_cap;
+          Alcotest.test_case "a release basis reads back from its own spelling" `Quick
+            test_a_release_basis_reads_back_from_its_own_spelling;
           Alcotest.test_case "the list row says serving when no path rests" `Quick
             test_the_list_row_says_serving_when_no_path_rests;
           Alcotest.test_case "the list row says resting when every path is out of quota" `Quick

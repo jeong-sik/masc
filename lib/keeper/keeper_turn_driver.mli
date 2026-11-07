@@ -140,7 +140,16 @@ val release_basis_to_wire : release_basis -> string
     row and the next-request forecast send. *)
 
 val release_basis_of_wire : string -> release_basis option
-(** The inverse of {!release_basis_to_wire}; [None] for any other string. *)
+(** The inverse of {!release_basis_to_wire}, read through the same
+    spellings; [None] for any other string. *)
+
+val walk_rest_serving_wire : string
+(** The [status] the roster row's [runtime_path_rest] gives a
+    {!Walk_head_serving} walk. The server writes it and the TUI reads it. *)
+
+val walk_rest_resting_wire : string
+(** The [status] the roster row's [runtime_path_rest] gives a
+    {!Walk_waits_until} walk. The server writes it and the TUI reads it. *)
 
 (** Whether one runtime path is resting at a given instant
     (RFC-provider-path-rest §3.3). Read from the 429 candidate observation and

@@ -125,20 +125,26 @@ let is_ascii_space = function
   | _ -> false
 
 let query_tokens query =
-  let buf = Buffer.create 16 in
-  let out = ref [] in
-  let flush () =
-    if Buffer.length buf > 0
-    then begin
-      out := Buffer.contents buf :: !out;
-      Buffer.clear buf
-    end
+  let len = String.length query in
+  let rec skip_spaces i =
+    if i < len && is_ascii_space (String.unsafe_get query i)
+    then skip_spaces (i + 1)
+    else i
   in
-  String.iter
-    (fun c -> if is_ascii_space c then flush () else Buffer.add_char buf c)
-    query;
-  flush ();
-  List.rev !out
+  let rec scan_token i =
+    if i < len && not (is_ascii_space (String.unsafe_get query i))
+    then scan_token (i + 1)
+    else i
+  in
+  let rec loop i acc =
+    let start = skip_spaces i in
+    if start >= len then List.rev acc
+    else
+      let stop = scan_token start in
+      let token = String.sub query start (stop - start) in
+      loop stop (token :: acc)
+  in
+  loop 0 []
 
 let is_ascii_alnum_or_utf8_byte = function
   | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' -> true
@@ -255,7 +261,8 @@ let equals_ci a b =
 let replace_substring ~needle ~by haystack =
   let hay_len = String.length haystack in
   let needle_len = String.length needle in
-  if needle_len = 0 || needle_len > hay_len then haystack
+  if needle_len = 0 || needle_len > hay_len || not (contains_substring haystack needle)
+  then haystack
   else
     let buf = Buffer.create hay_len in
     let rec match_at i j =
@@ -436,27 +443,68 @@ let first_line text =
   | None -> text
 
 let first_nonblank_line text =
-  String.split_on_char '\n' text |> List.find_map trim_nonempty
+  let len = String.length text in
+  let rec scan start =
+    if start >= len then None
+    else
+      let next_nl = match String.index_from_opt text start '\n' with
+        | Some i -> i
+        | None -> len
+      in
+      let line = String.sub text start (next_nl - start) in
+      match trim_nonempty line with
+      | Some _ as found -> found
+      | None -> scan (next_nl + 1)
+  in
+  scan 0
 
 (* XML 1.0 entity escape.  Order matters: [&] first so that the
    ampersands introduced by the other replacements are not
    double-escaped. *)
 let escape_xml s =
-  s
-  |> replace_substring ~needle:"&" ~by:"&amp;"
-  |> replace_substring ~needle:"<" ~by:"&lt;"
-  |> replace_substring ~needle:">" ~by:"&gt;"
-  |> replace_substring ~needle:"\"" ~by:"&quot;"
-  |> replace_substring ~needle:"'" ~by:"&apos;"
+  let len = String.length s in
+  let rec needs_escape i =
+    if i >= len then false
+    else match String.unsafe_get s i with
+      | '&' | '<' | '>' | '"' | '\'' -> true
+      | _ -> needs_escape (i + 1)
+  in
+  if not (needs_escape 0) then s
+  else
+    let buf = Buffer.create (len + 16) in
+    for i = 0 to len - 1 do
+      match String.unsafe_get s i with
+      | '&' -> Buffer.add_string buf "&amp;"
+      | '<' -> Buffer.add_string buf "&lt;"
+      | '>' -> Buffer.add_string buf "&gt;"
+      | '"' -> Buffer.add_string buf "&quot;"
+      | '\'' -> Buffer.add_string buf "&apos;"
+      | c -> Buffer.add_char buf c
+    done;
+    Buffer.contents buf
 
 let compact_text ?(max_len = 160) raw =
   let normalized =
-    String.trim raw
-    |> String.split_on_char '\n'
-    |> List.map String.trim
-    |> List.filter (fun v -> v <> "")
-    |> String.concat " "
-    |> String.trim
+    if not (String.contains raw '\n') then String.trim raw
+    else
+      let len = String.length raw in
+      let buf = Buffer.create (min len max_len) in
+      let rec scan_line start =
+        if start >= len then ()
+        else
+          let stop = match String.index_from_opt raw start '\n' with
+            | Some i -> i
+            | None -> len
+          in
+          let line = String.trim (String.sub raw start (stop - start)) in
+          if line <> "" then begin
+            if Buffer.length buf > 0 then Buffer.add_char buf ' ';
+            Buffer.add_string buf line
+          end;
+          if stop < len then scan_line (stop + 1)
+      in
+      scan_line 0;
+      Buffer.contents buf
   in
   if normalized = "" then ""
   else utf8_safe ~max_bytes:((max_len - 1) + 3) ~suffix:"…" normalized |> to_string

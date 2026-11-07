@@ -261,11 +261,7 @@ let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Mas
      and what the journal last said. A count the durable drain could not take prints
      as "unread ?" rather than as zero. *)
   let librarian = k.mkh_librarian in
-  let unread_lag =
-    match librarian.mlh_unread_atom_turns, librarian.mlh_unread_official_turns with
-    | Some atoms, Some official -> Some (atoms + official)
-    | Some _, None | None, Some _ | None, None -> None
-  in
+  let unread_lag = Masc_tui_keeper_memory_reading.unread_lag librarian in
   let unread =
     match unread_lag with
     | Some behind -> Printf.sprintf "unread %d" behind

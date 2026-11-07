@@ -4496,6 +4496,17 @@
   masc_tui_keeper_axis))
 
 (test
+ (name test_tui_keeper_memory_reading)
+ (modules test_tui_keeper_memory_reading)
+ (libraries
+  alcotest
+  masc
+  masc.masc_types
+  masc_tui_types
+  masc_tui_keeper_axis_cell
+  masc_tui_keeper_memory_reading))
+
+(test
  (name test_tui_editor)
  (modules test_tui_editor)
  (libraries alcotest unix masc_tui_editor))

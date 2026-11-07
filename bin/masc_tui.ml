@@ -16399,7 +16399,8 @@ let reconcile_system_log_stream state ~mailbox =
    that opens a page is drawn before that page's first read starts, and the
    read starts on the next iteration, which draws nothing until an answer or a
    key arrives. The page kept saying "press r" while its read ran. The loop
-   compares this around its launches and asks for a frame when it moved. *)
+   takes this before its launches and again just before it picks the frame,
+   and asks for a frame when it moved, wherever in between the read started. *)
 let reads_in_flight (state : state) =
   ( ( state.clients_surface_inflight
     , state.lane_runs_loading
@@ -33784,8 +33785,6 @@ Use relative paths for resources already held in the package. -->
       launch_owed_pushed_reads state ~refresh_inflight:http_scoped_refresh_inflight
         ~full_refresh_inflight:http_refresh_inflight ~scoped_refresh_followup
         ~mailbox:async_messages;
-      if reads_in_flight state <> reads_before then
-        Render_schedule.request render_schedule Render_schedule.Background;
       (* The Fusion launch form outlives nothing: whatever moved the surface
          -- a key, the Activity pane's mouse handler, or an async message
          that jumps to a Keeper chat -- it is gone before this iteration
@@ -42434,6 +42433,8 @@ Use relative paths for resources already held in the package. -->
         || granted_search_paste in
       reconcile_task_detail_scroll state;
       reconcile_tools_task_scroll state;
+      if reads_in_flight state <> reads_before then
+        Render_schedule.request render_schedule Render_schedule.Background;
       let terminal_rows, _ = get_terminal_size () in
       let frame_choice = Masc_tui_render.frame_choice state ~terminal_rows ~terminal_cols:(snd (Masc_tui_ansi.get_terminal_size ())) ~now:(Unix.gettimeofday ()) in
       let owned_frame = match frame_choice with

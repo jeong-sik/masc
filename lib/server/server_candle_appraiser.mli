@@ -6,6 +6,9 @@ val declaration_change_probe : config:Workspace.config -> unit -> (unit -> bool)
 (** Changes of a usable export's worker generation release scheduling rejection.
     Absence retains the last observed generation. Retained terminal judgments
     are still read under their original request ID, never dispatched anew. *)
+val scope : string
+(** The tool request scope Candle retains its appraisal intents under. Candle
+    reads them back by request ID only and keeps no summary of them. *)
 val run : config:Workspace.config -> Candle_appraisal.runner
 (** Every return still reads the original worker result and validates the full
     domain decision. Rereading an identical durable terminal receipt preserves

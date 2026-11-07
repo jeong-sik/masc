@@ -835,7 +835,14 @@ let an_admin_admission_has_an_intent () =
     let person = get (User_id.of_string "0123456789abcdef0123456789abcdef") in
     let identity = get (Authz_external_identity.google ~sub:"111") in
     let body =
-      match Authz_admission_event.to_body { Authz_admission_event.user_id = person; identity; invite_id; membership = zone_membership ~sub:"111" } with
+      match
+        Authz_admission_event.to_body
+          { Authz_admission_event.user_id = person
+          ; identity
+          ; through = Authz_admission_event.Invite invite_id
+          ; membership = zone_membership ~sub:"111"
+          }
+      with
       | Ok body -> body
       | Error _ -> Alcotest.fail "fixture admission refused"
     in
@@ -866,7 +873,11 @@ let admission_draft_of ~person ~sub ~invite_id ~at_ms =
   let identity = get (Authz_external_identity.google ~sub) in
   match
     Authz_admission_event.to_body
-      { Authz_admission_event.user_id = person; identity; invite_id; membership = zone_membership ~sub }
+      { Authz_admission_event.user_id = person
+      ; identity
+      ; through = Authz_admission_event.Invite invite_id
+      ; membership = zone_membership ~sub
+      }
   with
   | Ok body ->
     timed ~at_ms ~author:(Author.Authenticated (Principal.Human person)) ~kind:R.Kind.Admission body

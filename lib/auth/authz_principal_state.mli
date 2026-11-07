@@ -6,11 +6,12 @@
     (plan B3c-2, design 4.1 and 5.1-3). {!Authz_state} keeps one of these as its
     field.
 
-    {b Admission.} One record spends an open invitation, binds an identity, and
-    makes a principal ({!admit}). Its author is the person who joins, signed in
-    as the principal the record makes, so the record names no one else. An
-    invitation with the role [Admin] makes the person an Admin in the same
-    record.
+    {b Admission.} One record spends an open invitation or an open
+    registration of the allowlist, binds an identity, and makes a principal
+    ({!admit}). Its author is the person who joins, signed in as the principal
+    the record makes, so the record names no one else. An invitation with the
+    role [Admin] makes the person an Admin in the same record; a registration
+    makes a Member (plan C2d).
 
     {b Uniqueness.} A user id names one principal, and an identity is bound to
     one principal. A second admission with either is refused, which is the 409
@@ -77,6 +78,7 @@ type refusal =
       }
       (** The author of an admission is not the principal it makes. *)
   | Invitation of Authz_invite_state.consume_refusal
+  | Registration of Authz_registration_state.consume_refusal
   | User_id_taken of Authz_types.User_id.t
   | Identity_bound of
       { identity : Authz_external_identity.t
@@ -96,19 +98,25 @@ val refusal_to_string : refusal -> string
 
 type admitted =
   { principals : t
-  ; invites : Authz_invite_state.t  (** With the invitation spent. *)
-  ; role : Authz_invite_event.role  (** The role of the invitation. *)
+  ; invites : Authz_invite_state.t  (** With the invitation spent, if it came through one. *)
+  ; registrations : Authz_registration_state.t
+        (** With the open registration of the identity spent: the one it came
+            through, or the one an invitation admission spends too. *)
+  ; role : Authz_invite_event.role
+        (** The role of the invitation, or [Member] through a registration. *)
   }
 
 (** What one admission record does. [workspace_id] is the workspace of the
     installation. [at_ms] is the time of the record, which
     {!Authz_invite_state.consume} compares with the expiry of the invitation.
     The checks run in this order, and the first that fails is the result: the
-    author, the invitation, the user id, the identity, the workspace, the
-    namespace. *)
+    author, the invitation or the registration, the user id, the identity, the
+    workspace, the namespace. A registration is spent only for the identity it
+    was written for ({!Authz_registration_state.consume}). *)
 val admit
   :  t
   -> invites:Authz_invite_state.t
+  -> registrations:Authz_registration_state.t
   -> workspace_id:Authz_types.Workspace_id.t
   -> author:Authz_records.Author.t
   -> at_ms:int

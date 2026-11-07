@@ -9,6 +9,8 @@ module I = Authz_invite_state
 module P = Authz_principal_state
 module X = Authz_external_identity
 module A = Authz_admission_event
+module G = Authz_registration_state
+module GE = Authz_registration_event
 
 let get = function
   | Ok value -> value
@@ -45,8 +47,18 @@ let as_person user_id = Author.Authenticated (Principal.Human user_id)
 let workspace = get (Workspace_id.of_string "workspace-1")
 
 (* Each person gets the namespace named after them unless a case says. *)
-let admit ?author ?(at_ms = at_ms) ?(invites = invites) ?(workspace_id = workspace) ?namespace t ~user_id
-    ~identity ~invite_id =
+let admit_through
+  ?author
+  ?(at_ms = at_ms)
+  ?(invites = invites)
+  ?(registrations = G.empty)
+  ?(workspace_id = workspace)
+  ?namespace
+  t
+  ~user_id
+  ~identity
+  through
+  =
   let author = Option.value author ~default:(as_person user_id) in
   let account_home_namespace =
     get (Account_home_namespace.of_string (Option.value namespace ~default:("ns-" ^ User_id.to_string user_id)))
@@ -54,10 +66,25 @@ let admit ?author ?(at_ms = at_ms) ?(invites = invites) ?(workspace_id = workspa
   P.admit
     t
     ~invites
+    ~registrations
     ~workspace_id:workspace
     ~author
     ~at_ms
-    { A.user_id; identity; invite_id; membership = { A.workspace_id; account_home_namespace } }
+    { A.user_id; identity; through; membership = { A.workspace_id; account_home_namespace } }
+;;
+
+let admit ?author ?at_ms ?invites ?registrations ?workspace_id ?namespace t ~user_id ~identity ~invite_id =
+  admit_through
+    ?author
+    ?at_ms
+    ?invites
+    ?registrations
+    ?workspace_id
+    ?namespace
+    t
+    ~user_id
+    ~identity
+    (A.Invite invite_id)
 ;;
 
 let admitted_ok = function
@@ -74,7 +101,7 @@ let check_refused label expected result =
 let alice_in () = admitted_ok (admit P.empty ~user_id:alice ~identity:(google "111") ~invite_id:first)
 
 let an_admission_makes_an_admin () =
-  let { P.principals; invites = spent; role } = alice_in () in
+  let { P.principals; invites = spent; role; registrations = (_ : G.t) } = alice_in () in
   Alcotest.(check string) "the role of the invitation" "admin" (E.role_label role);
   (match P.find principals alice with
    | Some { P.identity; status = P.Active } ->
@@ -195,6 +222,96 @@ let the_order_of_the_checks () =
     (admit principals ~invites:spent ~user_id:alice ~identity:(google "111") ~invite_id:second)
 ;;
 
+(* ---- the allowlist ---- *)
+
+let registration = get (Registration_id.of_string "registration-1")
+
+(* An Admin registered google:333. *)
+let registered =
+  match
+    G.apply
+      G.empty
+      ~author:(as_person alice)
+      ~is_admin:(fun _ -> true)
+      ~is_bound:(fun _ -> false)
+      (GE.Registered { registration_id = registration; identity = google "333" })
+  with
+  | Ok registrations -> registrations
+  | Error refusal -> Alcotest.failf "fixture registration refused: %s" (G.refusal_to_string refusal)
+;;
+
+let registration_status registrations =
+  match G.find registrations registration with
+  | Some { G.status = G.Open; _ } -> "open"
+  | Some { G.status = G.Removed; _ } -> "removed"
+  | Some { G.status = G.Consumed by; _ } -> "spent by " ^ User_id.to_string by
+  | None -> "none"
+;;
+
+(* A registration makes a Member and spends the entry; the invitations stay as
+   they were (plan C2d). *)
+let a_registration_admits_a_member () =
+  let { P.principals; invites = after; registrations = spent; role } =
+    admitted_ok
+      (admit_through
+         P.empty
+         ~registrations:registered
+         ~user_id:bob
+         ~identity:(google "333")
+         (A.Registration registration))
+  in
+  Alcotest.(check string) "a Member" "member" (E.role_label role);
+  Alcotest.(check bool) "not an Admin" false (P.is_admin principals bob);
+  Alcotest.(check (option string))
+    "the identity names the principal"
+    (Some "bob")
+    (Option.map User_id.to_string (P.find_identity principals (google "333")));
+  Alcotest.(check string) "the entry" "spent by bob" (registration_status spent);
+  (match I.find after first with
+   | Some { I.status = I.Open; _ } -> ()
+   | Some _ | None -> Alcotest.fail "an invitation changed");
+  check_refused
+    "another identity"
+    (G.consume_refusal_to_string (G.Identity_differs registration))
+    (admit_through
+       P.empty
+       ~registrations:registered
+       ~user_id:bob
+       ~identity:(google "444")
+       (A.Registration registration));
+  check_refused
+    "an entry never written"
+    (G.consume_refusal_to_string (G.Registration_not_found registration))
+    (admit_through P.empty ~user_id:bob ~identity:(google "333") (A.Registration registration))
+;;
+
+(* An invitation admission spends the open entry of its identity too, so the
+   registration admission that comes after it is a conflict, which the login
+   answers with 409 (design 5.1-3). *)
+let an_invitation_spends_the_open_entry () =
+  let { P.principals; invites = spent_invites; registrations = spent; role } =
+    admitted_ok
+      (admit P.empty ~registrations:registered ~user_id:alice ~identity:(google "333") ~invite_id:first)
+  in
+  Alcotest.(check string) "the role of the invitation" "admin" (E.role_label role);
+  Alcotest.(check string) "the entry" "spent by alice" (registration_status spent);
+  check_refused
+    "the registration after it"
+    (G.consume_refusal_to_string (G.Registration_consumed registration))
+    (admit_through
+       principals
+       ~invites:spent_invites
+       ~registrations:spent
+       ~user_id:bob
+       ~identity:(google "333")
+       (A.Registration registration));
+  let { P.registrations = untouched; _ } =
+    admitted_ok
+      (admit P.empty ~registrations:registered ~user_id:alice ~identity:(google "111") ~invite_id:first)
+  in
+  Alcotest.(check string) "the entry of another identity" "open" (registration_status untouched)
+;;
+
 let refusals_are_told_apart () =
   let texts =
     List.map
@@ -208,6 +325,10 @@ let refusals_are_told_apart () =
       ; P.Identity_bound { identity = google "111"; user_id = alice }
       ; P.Workspace_differs { given = workspace; workspace_id = workspace }
       ; P.Namespace_taken { namespace = get (Account_home_namespace.of_string "ns-alice"); user_id = alice }
+      ; P.Registration (G.Registration_not_found registration)
+      ; P.Registration (G.Registration_removed registration)
+      ; P.Registration (G.Registration_consumed registration)
+      ; P.Registration (G.Identity_differs registration)
       ]
   in
   Alcotest.(check int) "every refusal reads differently" (List.length texts)
@@ -438,6 +559,8 @@ let () =
         ; Alcotest.test_case "refused" `Quick what_is_refused
         ; Alcotest.test_case "the order of the checks" `Quick the_order_of_the_checks
         ; Alcotest.test_case "refusals told apart" `Quick refusals_are_told_apart
+        ; Alcotest.test_case "through a registration" `Quick a_registration_admits_a_member
+        ; Alcotest.test_case "an invitation spends the entry" `Quick an_invitation_spends_the_open_entry
         ] )
     ; ( "admin assignment"
       , [ Alcotest.test_case "revokes another" `Quick an_admin_revokes_another

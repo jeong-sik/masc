@@ -24,7 +24,9 @@ let membership =
   }
 ;;
 
-let admission identity = { A.user_id = user; identity; invite_id = invite; membership }
+let registration = get (Registration_id.of_string "registration-1")
+
+let admission ?(through = A.Invite invite) identity = { A.user_id = user; identity; through; membership }
 
 let to_body_exn to_body value =
   match to_body value with
@@ -93,18 +95,47 @@ let bytes_of_an_identity () =
 let bytes_of_an_admission () =
   Alcotest.(check string)
     "google"
-    ({|{"user_id":"0123456789abcdef0123456789abcdef","identity":{"provider":"google","sub":"110169484474386276334"},"invite_id":"invite-1","membership":{"workspace_id":"workspace-1","account_home_namespace":"c0ffee00c0ffee00c0ffee00c0ffee00"}}|})
-    (Authz_body.to_string (to_body_exn A.to_body (admission google_alice)))
+    ({|{"user_id":"0123456789abcdef0123456789abcdef","identity":{"provider":"google","sub":"110169484474386276334"},"through":{"type":"invite","id":"invite-1"},"membership":{"workspace_id":"workspace-1","account_home_namespace":"c0ffee00c0ffee00c0ffee00c0ffee00"}}|})
+    (Authz_body.to_string (to_body_exn A.to_body (admission google_alice)));
+  Alcotest.(check string)
+    "through a registration"
+    ({|{"user_id":"0123456789abcdef0123456789abcdef","identity":{"provider":"github","user_id":583231},"through":{"type":"registration","id":"registration-1"},"membership":{"workspace_id":"workspace-1","account_home_namespace":"c0ffee00c0ffee00c0ffee00c0ffee00"}}|})
+    (Authz_body.to_string
+       (to_body_exn A.to_body (admission ~through:(A.Registration registration) github_alice)))
 ;;
 
 let an_admission_reads_back () =
   List.iter
-    (fun identity ->
-      let t = admission identity in
-      match A.of_body (to_body_exn A.to_body t) with
-      | Ok back -> Alcotest.(check bool) (X.to_string identity) true (A.equal t back)
-      | Error error -> Alcotest.failf "refused: %s" (A.error_to_string error))
-    [ google_alice; github_alice; get (X.google ~sub:(String.make 255 '~')) ]
+    (fun through ->
+      List.iter
+        (fun identity ->
+          let t = admission ~through identity in
+          match A.of_body (to_body_exn A.to_body t) with
+          | Ok back -> Alcotest.(check bool) (X.to_string identity) true (A.equal t back)
+          | Error error -> Alcotest.failf "refused: %s" (A.error_to_string error))
+        [ google_alice; github_alice; get (X.google ~sub:(String.make 255 '~')) ])
+    [ A.Invite invite; A.Registration registration ]
+;;
+
+(* The way in is a member of the equality: an invitation and a registration
+   with the same id text are two admissions. *)
+let the_way_in_tells_admissions_apart () =
+  let same_text = A.Registration (get (Registration_id.of_string "invite-1")) in
+  Alcotest.(check bool) "itself" true (A.equal (admission google_alice) (admission google_alice));
+  Alcotest.(check bool)
+    "a registration with the id text of the invite"
+    false
+    (A.equal (admission google_alice) (admission ~through:same_text google_alice));
+  Alcotest.(check bool)
+    "another registration"
+    false
+    (A.equal
+       (admission ~through:(A.Registration registration) google_alice)
+       (admission ~through:(A.Registration (get (Registration_id.of_string "registration-2"))) google_alice));
+  Alcotest.(check bool)
+    "another invite"
+    false
+    (A.equal (admission google_alice) (admission ~through:(A.Invite (get (Invite_id.of_string "invite-2"))) google_alice))
 ;;
 
 let error_name : A.error -> string = function
@@ -115,18 +146,20 @@ let error_name : A.error -> string = function
   | A.Invalid_identity (X.Unknown_provider label) -> Printf.sprintf "unknown provider %S" label
   | A.Invalid_identity X.Wrong_members -> "identity wrong members"
   | A.Invalid_identity (X.Invalid error) -> "invalid identity: " ^ identity_error_name error
+  | A.Unknown_through label -> Printf.sprintf "unknown way in %S" label
   | A.Invalid_invite_id _ -> "invalid invite id"
+  | A.Invalid_registration_id _ -> "invalid registration id"
   | A.Invalid_workspace_id _ -> "invalid workspace id"
   | A.Invalid_account_home_namespace _ -> "invalid account home namespace"
 ;;
 
 let body ?(user_id = `String "user-1") ?(identity = `Assoc [ "provider", `String "github"; "user_id", `Int 1 ])
-    ?(invite_id = `String "invite-1") ?(workspace_id = `String "workspace-1")
+    ?(way = `String "invite") ?(invite_id = `String "invite-1") ?(workspace_id = `String "workspace-1")
     ?(namespace = `String "ns-1") () =
   `Assoc
     [ "user_id", user_id
     ; "identity", identity
-    ; "invite_id", invite_id
+    ; "through", `Assoc [ "type", way; "id", invite_id ]
     ; "membership", `Assoc [ "workspace_id", workspace_id; "account_home_namespace", namespace ]
     ]
 ;;
@@ -135,9 +168,18 @@ let refusals =
   [ "null", `Null, "not an object"
   ; "a list", `List [], "not an object"
   ; "an empty object", `Assoc [], "wrong members"
-  ; "members in another order", `Assoc [ "invite_id", `String "i"; "user_id", `String "u"; "identity", `Assoc [] ], "wrong members"
+  ; "members in another order", `Assoc [ "through", `Assoc [ "type", `String "invite"; "id", `String "i" ]; "user_id", `String "u"; "identity", `Assoc [] ], "wrong members"
+  ; "the invite id of the body before", `Assoc [ "user_id", `String "u"; "identity", `Assoc []; "invite_id", `String "i"; "membership", `Assoc [ "workspace_id", `String "w"; "account_home_namespace", `String "n" ] ], "wrong members"
+  ; "a way in that is a string", `Assoc [ "user_id", `String "u"; "identity", `Assoc []; "through", `String "invite"; "membership", `Assoc [ "workspace_id", `String "w"; "account_home_namespace", `String "n" ] ], "wrong members"
+  ; "a way in with its members in another order", `Assoc [ "user_id", `String "u"; "identity", `Assoc []; "through", `Assoc [ "id", `String "i"; "type", `String "invite" ]; "membership", `Assoc [ "workspace_id", `String "w"; "account_home_namespace", `String "n" ] ], "wrong members"
+  ; "a way in with no id", `Assoc [ "user_id", `String "u"; "identity", `Assoc []; "through", `Assoc [ "type", `String "invite" ]; "membership", `Assoc [ "workspace_id", `String "w"; "account_home_namespace", `String "n" ] ], "wrong members"
+  ; "a way in that is not a label", body ~way:(`String "request") (), {|unknown way in "request"|}
+  ; "a way in label in another case", body ~way:(`String "Invite") (), {|unknown way in "Invite"|}
+  ; "a way in label that is a number", body ~way:(`Int 1) (), "wrong members"
+  ; "an empty registration id", body ~way:(`String "registration") ~invite_id:(`String "") (), "invalid registration id"
+  ; "a bad identity comes before a bad way in", body ~identity:(`Assoc []) ~way:(`String "request") (), "identity wrong members"
   ; "an identity that is a string", body ~identity:(`String "google:1") (), "wrong members"
-  ; "another member", `Assoc [ "user_id", `String "u"; "identity", `Assoc []; "invite_id", `String "i"; "role", `String "admin" ], "wrong members"
+  ; "another member", `Assoc [ "user_id", `String "u"; "identity", `Assoc []; "through", `Assoc [ "type", `String "invite"; "id", `String "i" ]; "role", `String "admin" ], "wrong members"
   ; "an empty user id", body ~user_id:(`String "") (), "invalid user id"
   ; "an empty identity", body ~identity:(`Assoc []) (), "identity wrong members"
   ; "an unknown provider", body ~identity:(`Assoc [ "provider", `String "gitlab"; "user_id", `Int 1 ]) (), {|unknown provider "gitlab"|}
@@ -148,8 +190,8 @@ let refusals =
   ; "a Google sub with a space", body ~identity:(`Assoc [ "provider", `String "google"; "sub", `String "a b" ]) (), "invalid identity: google sub invalid byte 1"
   ; "an invite id that is a path segment", body ~invite_id:(`String "..") (), "invalid invite id"
   ; "a bad user id comes before a bad identity", body ~user_id:(`String "") ~identity:(`Assoc []) (), "invalid user id"
-  ; "no membership", `Assoc [ "user_id", `String "u"; "identity", `Assoc [ "provider", `String "github"; "user_id", `Int 1 ]; "invite_id", `String "i" ], "wrong members"
-  ; "a membership with its members in another order", `Assoc [ "user_id", `String "u"; "identity", `Assoc [ "provider", `String "github"; "user_id", `Int 1 ]; "invite_id", `String "i"; "membership", `Assoc [ "account_home_namespace", `String "n"; "workspace_id", `String "w" ] ], "wrong members"
+  ; "no membership", `Assoc [ "user_id", `String "u"; "identity", `Assoc [ "provider", `String "github"; "user_id", `Int 1 ]; "through", `Assoc [ "type", `String "invite"; "id", `String "i" ] ], "wrong members"
+  ; "a membership with its members in another order", `Assoc [ "user_id", `String "u"; "identity", `Assoc [ "provider", `String "github"; "user_id", `Int 1 ]; "through", `Assoc [ "type", `String "invite"; "id", `String "i" ]; "membership", `Assoc [ "account_home_namespace", `String "n"; "workspace_id", `String "w" ] ], "wrong members"
   ; "a namespace that is a number", body ~namespace:(`Int 1) (), "wrong members"
   ; "an empty workspace id", body ~workspace_id:(`String "") (), "invalid workspace id"
   ; "a namespace that is a path segment", body ~namespace:(`String "..") (), "invalid account home namespace"
@@ -218,6 +260,7 @@ let () =
     ; ( "admission"
       , [ Alcotest.test_case "bytes" `Quick bytes_of_an_admission
         ; Alcotest.test_case "reads back" `Quick an_admission_reads_back
+        ; Alcotest.test_case "the way in" `Quick the_way_in_tells_admissions_apart
         ; Alcotest.test_case "refusals" `Quick a_body_that_is_not_an_admission_is_refused
         ; Alcotest.test_case "no capital in a namespace" `Quick a_namespace_has_no_capital_letter
         ] )

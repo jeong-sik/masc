@@ -53,6 +53,12 @@ let is_conflict = function
         | Authz_invite_state.Invitation_not_issued _
         | Authz_invite_state.Invitation_revoked _
         | Authz_invite_state.Invitation_expired _ -> false)
+     | Principals.Registration consume ->
+       (match consume with
+        | Authz_registration_state.Registration_consumed _ -> true
+        | Authz_registration_state.Registration_not_found _
+        | Authz_registration_state.Registration_removed _
+        | Authz_registration_state.Identity_differs _ -> false)
      | Principals.Identity_bound _ -> true
      | Principals.Author_is_not_the_person _
      | Principals.User_id_taken _
@@ -85,14 +91,14 @@ let drawn of_string draw = Result.map_error (fun error -> Id_not_drawn error) (o
 
 (* One try: draw the ids, check the admission on [snapshot], then commit it.
    [`Again] is a refusal that a new draw or a new snapshot can lift. *)
-let try_admission zone ~(snapshot : Authz_zone.snapshot) ~now_ms ~draw ~identity ~invite_id ~workspace_id =
+let try_admission zone ~(snapshot : Authz_zone.snapshot) ~now_ms ~draw ~identity ~through ~workspace_id =
   let state = snapshot.state in
   let* user_id = drawn User_id.of_string draw in
   let* account_home_namespace = drawn Account_home_namespace.of_string draw in
   let event =
     { Authz_admission_event.user_id
     ; identity
-    ; invite_id
+    ; through
     ; membership = { workspace_id; account_home_namespace }
     }
   in
@@ -101,6 +107,7 @@ let try_admission zone ~(snapshot : Authz_zone.snapshot) ~now_ms ~draw ~identity
     Principals.admit
       state.principals
       ~invites:state.invites
+      ~registrations:state.registrations
       ~workspace_id
       ~author
       ~at_ms:(now_ms ())
@@ -111,6 +118,7 @@ let try_admission zone ~(snapshot : Authz_zone.snapshot) ~now_ms ~draw ~identity
   | Error
       ((Principals.Author_is_not_the_person _
        | Principals.Invitation _
+       | Principals.Registration _
        | Principals.Identity_bound _
        | Principals.Workspace_differs _) as refusal) -> Error (Admission_refused refusal)
   | Ok { Principals.role; _ } ->
@@ -144,7 +152,16 @@ let admission zone ~now_ms ~draw ~identity ~invite =
          (match Authz_mode_state.workspace state.mode with
           | None -> Error Not_bootstrapped
           | Some workspace_id ->
-            let* result = try_admission zone ~snapshot ~now_ms ~draw ~identity ~invite_id ~workspace_id in
+            let* result =
+              try_admission
+                zone
+                ~snapshot
+                ~now_ms
+                ~draw
+                ~identity
+                ~through:(Authz_admission_event.Invite invite_id)
+                ~workspace_id
+            in
             (match result with
              | `Done outcome -> Ok outcome
              | `Again last -> if left > 1 then go (left - 1) else Error last)))

@@ -61,8 +61,7 @@ val ask_followup_frame_json :
       drives the per-request SSE stream.
 
     Internal helpers stay private at this boundary
-    (~10 internal lets — [contains_casefold],
-    [get_origin] / [cors_headers] adapter helpers,
+    (~10 internal lets — [get_origin] / [cors_headers] adapter helpers,
     [keeper_chat_stream_*] sub-renderers + per-event
     framing and connector-context helpers). *)
 

@@ -1422,9 +1422,7 @@ let test_fusion_completed_stimulus_is_supported () =
 ;;
 
 (* Drift guard: [stimulus_kind_of_string] must stay the inverse of
-   [stimulus_kind_to_string] for every closed-sum variant, and reject unknowns.
-   Pairs with the exhaustive match in [note_stimulus_kind] so a new variant
-   cannot silently fall back to [unsupported]. *)
+   [stimulus_kind_to_string] for every closed-sum variant, and reject unknowns. *)
 let test_stimulus_kind_string_roundtrip () =
   let roundtrips k =
     match

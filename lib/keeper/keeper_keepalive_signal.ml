@@ -139,10 +139,10 @@ let post_wakeup_signal ~(wakeup : bool Atomic.t) = ignore wakeup
 (* SubmitTask: an external
    producer (operator directive in this case) attaches a task_id to the
    keeper's [current_task_id]. The post-action invariant is that the
-   meta carries the assigned id after [persist_directive_meta_update]
-   returns. The honest path is trivially true; the guard catches a
-   regression where someone updates [persist_directive_meta_update] to
-   skip the [current_task_id] field or persist a different id. *)
+   meta carries the assigned id after [apply_owner_meta] returns. The
+   honest path is trivially true; the guard catches a regression where
+   someone updates [apply_owner_meta] to skip the [current_task_id]
+   field or persist a different id. *)
 let post_submit_task ~(meta : keeper_meta) ~(task_id : Keeper_id.Task_id.t) =
   ignore meta; ignore task_id
   [@@fsm_guard "meta.current_task_id = Some task_id"]

@@ -9,10 +9,9 @@
     tests only.
 
     Internal helpers stay private at this boundary
-    ([log_mcp_exn], [int_of_env_default],
-    [classify_tool_failure_severity], [status_of_result],
+    ([log_mcp_exn], [status_of_result],
     [structured_content_of_result],
-    [nonempty_string_opt], [json_nonempty_string_opt],
+    [nonempty_string_opt],
     [runtime_mcp_keeper_error_preview],
     [runtime_mcp_keeper_tool_call_sse_payload],
     [runtime_mcp_masc_root],

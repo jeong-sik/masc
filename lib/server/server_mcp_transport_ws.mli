@@ -59,8 +59,7 @@
     [dashboard_delta_payload_text_for_parsed] /
     [dashboard_delta_seq_notification] /
     [send_dashboard_delta_frame] /
-    [send_dashboard_delta_for_parsed] /
-    [send_dashboard_delta_for_sse], [env_cache_ttl_s],
+    [send_dashboard_delta_for_parsed], [env_cache_ttl_s],
     [client_buffer_limit_cache] /
     [client_buffer_limit_bytes],
     [dashboard_ack_stale_threshold_cache] /
@@ -68,14 +67,10 @@
     [session_is_backpressured],
     [max_inbound_frame_bytes] /
     [max_inbound_message_bytes],
-    [classify_inbound_frame_size] /
-    [classify_inbound_message_size],
     [slice_index_enabled_cache] /
     [slice_index_enabled],
     [__test_reset_env_caches],
-    [read_payload_string], [inbound_accumulate], [read_data_frame],
-    [send_to_session],
-    [broadcast_ws]). *)
+    [send_to_session]). *)
 
 (** {1 Session record} *)
 

@@ -152,14 +152,25 @@ let scoped_keys =
   (* Code at the project root has no step for Left ([code_back_step]); a
      directory down, Left climbs one. *)
   @ back_keys "Code tree"
-      ~list:(Keys.footer_hints_code ~pane:Keys.Code_root)
-      ~detail:(Keys.footer_hints_code ~pane:Keys.Code_tree)
+      ~list:(Keys.footer_hints_code ~pane:(Keys.Code_root Keys.File_current))
+      ~detail:(Keys.footer_hints_code ~pane:(Keys.Code_tree Keys.File_current))
   (* Right and Enter open a tree row. An open file has nothing under them, so
      the file pane's footer is the tree's without that key. *)
   @ [ ( "Code Right / Enter",
-        Keys.footer_hints_code ~pane:Keys.Code_tree,
+        Keys.footer_hints_code ~pane:(Keys.Code_tree Keys.File_current),
         Keys.footer_hints_code ~pane:Keys.Code_file,
-        [ "Right / Enter" ] ) ]
+        [ "Right / Enter" ] )
+    (* [h] and [l] move focus between the tree and a file, and only while a
+       file read is current ([Keys.code_file_is_current]); with none the
+       dispatcher ends in [()]. *)
+    ; ( "Code h/l below the project root",
+        Keys.footer_hints_code ~pane:(Keys.Code_tree Keys.File_current),
+        Keys.footer_hints_code ~pane:(Keys.Code_tree Keys.No_file),
+        [ "h/l" ] )
+    ; ( "Code h/l at the project root",
+        Keys.footer_hints_code ~pane:(Keys.Code_root Keys.File_current),
+        Keys.footer_hints_code ~pane:(Keys.Code_root Keys.No_file),
+        [ "h/l" ] ) ]
 
 let test_a_scoped_key_is_named_only_where_it_answers () =
   List.iter
@@ -189,7 +200,7 @@ let test_code_draft_keys_are_named_only_on_the_file_pane () =
             (pane_name ^ " pane does not name " ^ key)
             false
             (names_item (Keys.footer_hints_code ~pane) key))
-        [ ("tree", Keys.Code_tree); ("diff", Keys.Code_diff) ])
+        [ ("tree", Keys.Code_tree Keys.File_current); ("diff", Keys.Code_diff) ])
     draft_keys
 
 (* The ladder Esc and Left walk on Code, and the footer pane drawn at each
@@ -209,8 +220,8 @@ let step_name = function
   | Keys.Leave_code_for_workspace -> "leave for workspace"
 
 let pane_name = function
-  | Keys.Code_tree -> "tree"
-  | Keys.Code_root -> "root"
+  | Keys.Code_tree _ -> "tree"
+  | Keys.Code_root _ -> "root"
   | Keys.Code_file -> "file"
   | Keys.Code_diff -> "diff"
   | Keys.Code_notes -> "notes"
@@ -271,6 +282,27 @@ let test_the_footer_pane_follows_the_ladder_rung () =
         (pane_name (Keys.code_pane_of state)))
     code_rungs
 
+(* [code_pane_of] and the dispatcher's [h] / [l] arm read one predicate, so the
+   tree footer drops the pair exactly while the keys end in [()]: until a file
+   read starts, and not after. *)
+let test_the_tree_names_h_l_once_a_file_read_is_current () =
+  let state = T.create_state ~workspace:"test" ~port:8935 () in
+  let names_h_l () =
+    names_item (Keys.footer_hints_code ~pane:(Keys.code_pane_of state)) "h/l"
+  in
+  check bool "no file read is current at first" false
+    (Keys.code_file_is_current state);
+  check bool "the tree footer drops h/l" false (names_h_l ());
+  (match
+     Masc_tui_fetched.start ~equal:String.equal state.T.code_file
+       ~key:"src/a.ml"
+   with
+   | Masc_tui_fetched.Started (reading, _) -> state.T.code_file <- reading
+   | Masc_tui_fetched.Already_loading ->
+       fail "a fresh file reported a read in flight");
+  check bool "a started read is current" true (Keys.code_file_is_current state);
+  check bool "the tree footer names h/l" true (names_h_l ())
+
 let test_every_scoped_surface_is_named () =
   let named =
     List.map (fun (_, surface, _) -> surface) list_footer_refusals
@@ -297,6 +329,8 @@ let () =
             test_code_draft_keys_are_named_only_on_the_file_pane
         ; test_case "the code footer pane follows the ladder rung" `Quick
             test_the_footer_pane_follows_the_ladder_rung
+        ; test_case "the tree names h/l once a file read is current" `Quick
+            test_the_tree_names_h_l_once_a_file_read_is_current
         ; test_case "every scoped surface is named here" `Quick
             test_every_scoped_surface_is_named
         ] )

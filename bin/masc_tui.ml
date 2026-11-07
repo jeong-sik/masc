@@ -38949,7 +38949,7 @@ Use relative paths for resources already held in the package. -->
                            | Board_read_split -> true
                            | Board_read_wide | Board_read_one_pane -> false)
                        | Board_list | Board_compose -> false)
-                  | Code -> Option.is_some (Masc_tui_fetched.current_key state.code_file)
+                  | Code -> Masc_tui_keys.code_file_is_current state
                   | Overview | Acting | Metrics
                   | Keepers (Keeper_list | Keeper_logs | Keeper_calls | Keeper_message
                              | Keeper_runtime_pick)
@@ -38966,9 +38966,7 @@ Use relative paths for resources already held in the package. -->
                  | Board_list | Board_compose -> ())
             | Keepers Keeper_detail -> state.keeper_detail_focus <- focus
             | Resources -> state.resource_focus <- focus
-            | Code
-              when Option.is_some (Masc_tui_fetched.current_key state.code_file)
-                   ->
+            | Code when Masc_tui_keys.code_file_is_current state ->
                 state.code_focus_file <- focus
             | Overview | Acting | Metrics
             | Keepers (Keeper_list | Keeper_logs | Keeper_calls | Keeper_message

@@ -1665,9 +1665,22 @@ let code_back_step (state : state) =
    sheet already reads, and narrowed to what the current mode answers: an
    overlay owns the pane, so the keys that act on the code underneath are
    dead while it is up, and the tree pane answers none of the file keys. *)
+type code_file_presence =
+  | No_file
+  | File_current
+
+(* [h] and [l] move focus between the tree and a file, and only while a file
+   read is current -- loading, shown or failed. With none there is no pane to
+   move to and the keys end in [()]. The dispatcher and the footer both read
+   this answer, so the pair is named exactly where it answers. *)
+let code_file_is_current (state : state) =
+  Option.is_some (Masc_tui_fetched.current_key state.code_file)
+
 type code_pane =
-  | Code_tree  (** the file list has focus below the project root *)
-  | Code_root  (** the file list has focus at the project root *)
+  | Code_tree of code_file_presence
+      (** the file list has focus below the project root *)
+  | Code_root of code_file_presence
+      (** the file list has focus at the project root *)
   | Code_file  (** a file is open and nothing covers it *)
   | Code_diff
   | Code_notes  (** wrapped memo document is drawn over the file *)
@@ -1675,8 +1688,9 @@ type code_pane =
 
 let code_pane_of (state : state) =
   if state.code_focus_file <> Right_pane then
-    if code_back_step state = Leave_code_for_workspace then Code_root
-    else Code_tree
+    let file = if code_file_is_current state then File_current else No_file in
+    if code_back_step state = Leave_code_for_workspace then Code_root file
+    else Code_tree file
   else if state.code_notes_open then Code_notes
   else if state.code_history_open then Code_history
   else if state.code_diff_open then Code_diff
@@ -1727,7 +1741,14 @@ let footer_hints_code ~pane =
   let overlay_keys = [ "Enter (history)" ] in
   let dead =
     match pane with
-    | Code_tree | Code_root -> overlay_keys @ file_keys
+    | Code_tree file | Code_root file ->
+        (* With no file read current, [h] and [l] have no pane to move to
+           ([code_file_is_current]), and the row named them on the first
+           screen of Code. *)
+        let pane_keys = match file with
+          | No_file -> [ "h/l" ]
+          | File_current -> [] in
+        overlay_keys @ file_keys @ pane_keys
     | Code_file ->
         (* The arm behind Right and Enter opens a tree row or answers the
            history overlay. With the file pane focused and nothing over it, it
@@ -1757,13 +1778,13 @@ let footer_hints_code ~pane =
             (fun b -> String.equal b.key "Shift-Left / Shift-Right") visible in
         List.map (fun b -> { b with key = "Shift-←/→" }) pan
         @ List.map esc_alone others
-    | Code_root -> List.map esc_alone visible
-    | Code_tree | Code_file | Code_notes | Code_history -> visible in
+    | Code_root _ -> List.map esc_alone visible
+    | Code_tree _ | Code_file | Code_notes | Code_history -> visible in
   visible
   |> List.map (fun b ->
        if String.equal b.key "j/k" then
          { b with label = (match pane with
-           | Code_tree | Code_root -> "move"
+           | Code_tree _ | Code_root _ -> "move"
            | Code_file | Code_diff | Code_notes | Code_history -> "scroll") }
        else b)
   |> hints_of_bindings
@@ -1771,7 +1792,7 @@ let footer_hints_code ~pane =
       match pane with
       | Code_notes -> hints_of_bindings code_notes_bindings
       | Code_history -> hints_of_bindings code_history_bindings
-      | Code_tree | Code_root | Code_file | Code_diff -> hints
+      | Code_tree _ | Code_root _ | Code_file | Code_diff -> hints
 
 (* The Runtime footer is the table's, with the two keys that depend on the
    reading on screen: [p] names where it goes from here, and [e] names the edit

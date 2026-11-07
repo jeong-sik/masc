@@ -333,43 +333,13 @@ let verify_base_path_lease_owner base_path owner_pid =
         owner_pid
 ;;
 
-let run_under_base_path_lease base_path command =
-  match command with
-  | [] -> errorf "lease-run requires a command"
-  | _ :: _ ->
-    (match
-       Server_startup_takeover.acquire_owner_lease
-         (Host_config.host ()).base_path_lease_root base_path
-     with
-     | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
-      let pid = Server_startup_takeover.base_path_owner_pid owner in
-       errorf
-         "workspace writer lease is already owned base_path=%s pid=%s"
-         base_path
-         (match pid with
-          | Some value -> string_of_int value
-          | None -> "unknown")
-     | Server_startup_takeover.Base_path_rejected rejection ->
-       errorf
-         "workspace writer lease rejected base_path=%s: %s"
-         base_path
-         (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
-     | Server_startup_takeover.Base_path_acquired lease ->
-       let status =
-         Fun.protect
-           ~finally:(fun () ->
-             Server_startup_takeover.release_base_path_lease lease)
-           (fun () -> run_child command (environment_for_lease_child ()))
-       in
-       let* status = status in
-       Stdlib.exit (child_exit_code status))
-;;
-
-let run_tool_blob_maintenance base_path delete_previous_candidates =
+(* The Workspace writer lease of [base_path], or the reason it is not ours. *)
+let acquire_base_path_lease base_path =
   match
     Server_startup_takeover.acquire_owner_lease
       (Host_config.host ()).base_path_lease_root base_path
   with
+  | Server_startup_takeover.Base_path_acquired lease -> Ok lease
   | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
     let pid = Server_startup_takeover.base_path_owner_pid owner in
     errorf
@@ -383,46 +353,71 @@ let run_tool_blob_maintenance base_path delete_previous_candidates =
       "workspace writer lease rejected base_path=%s: %s"
       base_path
       (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
-  | Server_startup_takeover.Base_path_acquired lease ->
-    Fun.protect
-      ~finally:(fun () ->
-        Server_startup_takeover.release_base_path_lease lease)
-      (fun () ->
-         match Unix.realpath base_path with
-         | exception exn ->
-           errorf
-             "workspace BasePath canonicalization failed base_path=%s: %s"
-             base_path
-             (Printexc.to_string exn)
-         | canonical_base_path ->
-           let mode =
-             if delete_previous_candidates
-             then Tool_blob_maintenance.Delete_previous_candidates
-             else Tool_blob_maintenance.Observe_only
-           in
-           (match
-              Tool_blob_maintenance.run ~scope:Server_tool_blob_scope.scope
-                ~base_path:canonical_base_path
-                ~mode
-            with
-            | Error error ->
-              errorf
-                "tool blob maintenance failed base_path=%s: %s"
-                canonical_base_path
-                (Tool_blob_maintenance.error_to_string error)
-            | Ok report ->
-              Yojson.Safe.to_channel
-                stdout
-                (`Assoc
-                  [ "base_path", `String canonical_base_path
-                  ; "live_references", `Int report.live_references
-                  ; "blobs_observed", `Int report.blobs_observed
-                  ; "candidates_recorded", `Int report.candidates_recorded
-                  ; "deleted", `Int report.deleted
-                  ]);
-              output_char stdout '\n';
-              flush stdout;
-              Ok ()))
+;;
+
+(* [run ()] while the lease is held. The lease is released when [run] returns
+   or raises. *)
+let with_base_path_lease base_path run =
+  let* lease = acquire_base_path_lease base_path in
+  Fun.protect
+    ~finally:(fun () -> Server_startup_takeover.release_base_path_lease lease)
+    run
+;;
+
+(* [run canonical_base_path] while the lease is held, with [base_path] resolved
+   to its real path first. *)
+let with_canonical_base_path_lease base_path run =
+  with_base_path_lease base_path (fun () ->
+    match Unix.realpath base_path with
+    | exception exn ->
+      errorf
+        "workspace BasePath canonicalization failed base_path=%s: %s"
+        base_path
+        (Printexc.to_string exn)
+    | canonical_base_path -> run canonical_base_path)
+;;
+
+let run_under_base_path_lease base_path command =
+  match command with
+  | [] -> errorf "lease-run requires a command"
+  | _ :: _ ->
+    let* status =
+      with_base_path_lease base_path (fun () ->
+        run_child command (environment_for_lease_child ()))
+    in
+    Stdlib.exit (child_exit_code status)
+;;
+
+let run_tool_blob_maintenance base_path delete_previous_candidates =
+  with_canonical_base_path_lease base_path (fun canonical_base_path ->
+    let mode =
+      if delete_previous_candidates
+      then Tool_blob_maintenance.Delete_previous_candidates
+      else Tool_blob_maintenance.Observe_only
+    in
+    (match
+       Tool_blob_maintenance.run ~scope:Server_tool_blob_scope.scope
+         ~base_path:canonical_base_path
+         ~mode
+     with
+     | Error error ->
+       errorf
+         "tool blob maintenance failed base_path=%s: %s"
+         canonical_base_path
+         (Tool_blob_maintenance.error_to_string error)
+     | Ok report ->
+       Yojson.Safe.to_channel
+         stdout
+         (`Assoc
+           [ "base_path", `String canonical_base_path
+           ; "live_references", `Int report.live_references
+           ; "blobs_observed", `Int report.blobs_observed
+           ; "candidates_recorded", `Int report.candidates_recorded
+           ; "deleted", `Int report.deleted
+           ]);
+       output_char stdout '\n';
+       flush stdout;
+       Ok ()))
 ;;
 
 (* #39331 milestone B: the reference-based sweep for every Keeper's kept
@@ -432,126 +427,99 @@ let run_tool_blob_maintenance base_path delete_previous_candidates =
    store whose scan cannot complete is reported and makes the command fail;
    the sweep itself deletes nothing in that store. *)
 let run_vision_kept_maintenance base_path =
-  match
-    Server_startup_takeover.acquire_owner_lease
-      (Host_config.host ()).base_path_lease_root base_path
-  with
-  | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
-    let pid = Server_startup_takeover.base_path_owner_pid owner in
-    errorf
-      "workspace writer lease is already owned base_path=%s pid=%s"
-      base_path
-      (match pid with
-       | Some value -> string_of_int value
-       | None -> "unknown")
-  | Server_startup_takeover.Base_path_rejected rejection ->
-    errorf
-      "workspace writer lease rejected base_path=%s: %s"
-      base_path
-      (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
-  | Server_startup_takeover.Base_path_acquired lease ->
-    Fun.protect
-      ~finally:(fun () -> Server_startup_takeover.release_base_path_lease lease)
-      (fun () ->
-         match Unix.realpath base_path with
-         | exception exn ->
-           errorf
-             "workspace BasePath canonicalization failed base_path=%s: %s"
-             base_path
-             (Printexc.to_string exn)
-         | canonical_base_path ->
-           let consumer_paths =
-             Tool_blob_maintenance.consumer_paths Server_tool_blob_scope.scope
-               ~base_path:canonical_base_path
-           in
-           let keepers_dir =
-             Config_dir_resolver.keepers_dir_for_base_path
-               ~base_path:canonical_base_path
-           in
-           let* vision_dirs =
-             match Sys.readdir keepers_dir with
-             | exception Sys_error reason ->
-               errorf "keepers dir unreadable path=%s: %s" keepers_dir reason
-             | entries ->
-               Ok
-                 (Array.to_list entries
-                  |> List.filter (fun name -> Filename.check_suffix name ".vision")
-                  |> List.sort String.compare
-                  |> List.map (fun name -> Filename.concat keepers_dir name))
-           in
-           let reports =
-             List.map
-               (fun dir ->
-                  let keeper = Filename.basename dir in
-                  keeper, dir, Multimodal.Vision_kept_maintenance.run ~consumer_paths ~dir)
-               vision_dirs
-           in
-           let failed =
-             List.filter_map
-               (fun (keeper, dir, result) ->
-                  match result with
-                  | Ok _ -> None
-                  | Error error ->
-                    Some
-                      (Printf.sprintf
-                         "%s (%s): %s"
-                         keeper
-                         dir
-                         (Multimodal.Vision_kept_maintenance.error_to_string error)))
-               reports
-           in
-           if failed <> []
-           then
-             errorf
-               "vision kept maintenance failed: %s"
-               (String.concat "; " failed)
-           else begin
-             Yojson.Safe.to_channel
-               stdout
-               (`Assoc
-                 [ "base_path", `String canonical_base_path
-                 ; ( "stores"
-                   , `List
-                       (List.map
-                          (fun (keeper, dir, result) ->
-                             match result with
-                             | Ok (report : Multimodal.Vision_kept_maintenance.report) ->
-                               `Assoc
-                                 [ "keeper", `String keeper
-                                 ; "dir", `String dir
-                                 ; "scanned", `Int report.scanned
-                                 ; "live", `Int report.live
-                                 ; ( "candidates_recorded"
-                                   , `Int report.candidates_recorded
-                                   )
-                                 ; "deleted", `Int report.deleted
-                                 ; ( "reclaimed_bytes"
-                                   , `Intlit
-                                       (Int64.to_string report.reclaimed_bytes)
-                                   )
-                                 ; "remaining_count", `Int report.remaining_count
-                                 ; ( "remaining_bytes"
-                                   , `Intlit
-                                       (Int64.to_string report.remaining_bytes)
-                                   )
-                                 ]
-                             | Error error ->
-                               `Assoc
-                                 [ "keeper", `String keeper
-                                 ; "dir", `String dir
-                                 ; ( "error"
-                                   , `String
-                                       (Multimodal.Vision_kept_maintenance.error_to_string
-                                          error)
-                                   )
-                                 ])
-                          reports)
-                   )
-                 ]);
-             output_char stdout '\n';
-             flush stdout;
-             Ok ()
-           end)
+  with_canonical_base_path_lease base_path (fun canonical_base_path ->
+    let consumer_paths =
+      Tool_blob_maintenance.consumer_paths Server_tool_blob_scope.scope
+        ~base_path:canonical_base_path
+    in
+    let keepers_dir =
+      Config_dir_resolver.keepers_dir_for_base_path
+        ~base_path:canonical_base_path
+    in
+    let* vision_dirs =
+      match Sys.readdir keepers_dir with
+      | exception Sys_error reason ->
+        errorf "keepers dir unreadable path=%s: %s" keepers_dir reason
+      | entries ->
+        Ok
+          (Array.to_list entries
+           |> List.filter (fun name -> Filename.check_suffix name ".vision")
+           |> List.sort String.compare
+           |> List.map (fun name -> Filename.concat keepers_dir name))
+    in
+    let reports =
+      List.map
+        (fun dir ->
+           let keeper = Filename.basename dir in
+           keeper, dir, Multimodal.Vision_kept_maintenance.run ~consumer_paths ~dir)
+        vision_dirs
+    in
+    let failed =
+      List.filter_map
+        (fun (keeper, dir, result) ->
+           match result with
+           | Ok _ -> None
+           | Error error ->
+             Some
+               (Printf.sprintf
+                  "%s (%s): %s"
+                  keeper
+                  dir
+                  (Multimodal.Vision_kept_maintenance.error_to_string error)))
+        reports
+    in
+    if failed <> []
+    then
+      errorf
+        "vision kept maintenance failed: %s"
+        (String.concat "; " failed)
+    else begin
+      Yojson.Safe.to_channel
+        stdout
+        (`Assoc
+          [ "base_path", `String canonical_base_path
+          ; ( "stores"
+            , `List
+                (List.map
+                   (fun (keeper, dir, result) ->
+                      match result with
+                      | Ok (report : Multimodal.Vision_kept_maintenance.report) ->
+                        `Assoc
+                          [ "keeper", `String keeper
+                          ; "dir", `String dir
+                          ; "scanned", `Int report.scanned
+                          ; "live", `Int report.live
+                          ; ( "candidates_recorded"
+                            , `Int report.candidates_recorded
+                            )
+                          ; "deleted", `Int report.deleted
+                          ; ( "reclaimed_bytes"
+                            , `Intlit
+                                (Int64.to_string report.reclaimed_bytes)
+                            )
+                          ; "remaining_count", `Int report.remaining_count
+                          ; ( "remaining_bytes"
+                            , `Intlit
+                                (Int64.to_string report.remaining_bytes)
+                            )
+                          ]
+                      | Error error ->
+                        `Assoc
+                          [ "keeper", `String keeper
+                          ; "dir", `String dir
+                          ; ( "error"
+                            , `String
+                                (Multimodal.Vision_kept_maintenance.error_to_string
+                                   error)
+                            )
+                          ])
+                   reports)
+            )
+          ]);
+      output_char stdout '\n';
+      flush stdout;
+      Ok ()
+    end)
 ;;
 
 (* task-2187 (H5): the same reference-based sweep for every Keeper's stored
@@ -559,99 +527,72 @@ let run_vision_kept_maintenance base_path =
    failure rule as [vision-kept-maintenance]: a directory whose scan cannot
    complete fails the command and deletes nothing in that directory. *)
 let run_media_reading_maintenance base_path =
-  match
-    Server_startup_takeover.acquire_owner_lease
-      (Host_config.host ()).base_path_lease_root base_path
-  with
-  | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
-    let pid = Server_startup_takeover.base_path_owner_pid owner in
-    errorf
-      "workspace writer lease is already owned base_path=%s pid=%s"
-      base_path
-      (match pid with
-       | Some value -> string_of_int value
-       | None -> "unknown")
-  | Server_startup_takeover.Base_path_rejected rejection ->
-    errorf
-      "workspace writer lease rejected base_path=%s: %s"
-      base_path
-      (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
-  | Server_startup_takeover.Base_path_acquired lease ->
-    Fun.protect
-      ~finally:(fun () -> Server_startup_takeover.release_base_path_lease lease)
-      (fun () ->
-         match Unix.realpath base_path with
-         | exception exn ->
-           errorf
-             "workspace BasePath canonicalization failed base_path=%s: %s"
-             base_path
-             (Printexc.to_string exn)
-         | canonical_base_path ->
-           let module M = Masc.Keeper_media_reading_maintenance in
-           let masc_dir =
-             Common.masc_dir_from_base_path ~base_path:canonical_base_path
-           in
-           (* One scan of the durable consumers serves every keeper directory. *)
-           (match
-              ( M.keeper_dirs ~masc_dir
-              , Tool_blob_maintenance.live_references
-                  ~scope:Server_tool_blob_scope.scope
-                  ~base_path:canonical_base_path )
-            with
-            | Error error, _ ->
-              errorf "media reading store unreadable: %s" (M.error_to_string error)
-            | Ok _, Error error ->
-              errorf
-                "durable reference scan failed base_path=%s: %s"
-                canonical_base_path
-                (Tool_blob_maintenance.error_to_string error)
-            | Ok dirs, Ok live ->
-              let reports =
-                List.map (fun dir -> Filename.basename dir, dir, M.run ~live ~dir) dirs
-              in
-              let failed =
-                List.filter_map
-                  (fun (keeper, dir, result) ->
-                     match result with
-                     | Ok _ -> None
-                     | Error error ->
-                       Some (Printf.sprintf "%s (%s): %s" keeper dir (M.error_to_string error)))
-                  reports
-              in
-              if failed <> []
-              then errorf "media reading maintenance failed: %s" (String.concat "; " failed)
-              else begin
-                Yojson.Safe.to_channel
-                  stdout
-                  (`Assoc
-                    [ "base_path", `String canonical_base_path
-                    ; ( "stores"
-                      , `List
-                          (List.filter_map
-                             (fun (keeper, dir, result) ->
-                                match result with
-                                | Error _ -> None
-                                | Ok (report : M.report) ->
-                                  Some
-                                    (`Assoc
-                                      [ "keeper", `String keeper
-                                      ; "dir", `String dir
-                                      ; "scanned", `Int report.scanned
-                                      ; "live", `Int report.live
-                                      ; "candidates_recorded", `Int report.candidates_recorded
-                                      ; "deleted", `Int report.deleted
-                                      ; ( "reclaimed_bytes"
-                                        , `Intlit (Int64.to_string report.reclaimed_bytes) )
-                                      ; "remaining_count", `Int report.remaining_count
-                                      ; ( "remaining_bytes"
-                                        , `Intlit (Int64.to_string report.remaining_bytes) )
-                                      ]))
-                             reports) )
-                    ]);
-                output_char stdout '\n';
-                flush stdout;
-                Ok ()
-              end))
+  with_canonical_base_path_lease base_path (fun canonical_base_path ->
+    let module M = Masc.Keeper_media_reading_maintenance in
+    let masc_dir =
+      Common.masc_dir_from_base_path ~base_path:canonical_base_path
+    in
+    (* One scan of the durable consumers serves every keeper directory. *)
+    (match
+       ( M.keeper_dirs ~masc_dir
+       , Tool_blob_maintenance.live_references
+           ~scope:Server_tool_blob_scope.scope
+           ~base_path:canonical_base_path )
+     with
+     | Error error, _ ->
+       errorf "media reading store unreadable: %s" (M.error_to_string error)
+     | Ok _, Error error ->
+       errorf
+         "durable reference scan failed base_path=%s: %s"
+         canonical_base_path
+         (Tool_blob_maintenance.error_to_string error)
+     | Ok dirs, Ok live ->
+       let reports =
+         List.map (fun dir -> Filename.basename dir, dir, M.run ~live ~dir) dirs
+       in
+       let failed =
+         List.filter_map
+           (fun (keeper, dir, result) ->
+              match result with
+              | Ok _ -> None
+              | Error error ->
+                Some (Printf.sprintf "%s (%s): %s" keeper dir (M.error_to_string error)))
+           reports
+       in
+       if failed <> []
+       then errorf "media reading maintenance failed: %s" (String.concat "; " failed)
+       else begin
+         Yojson.Safe.to_channel
+           stdout
+           (`Assoc
+             [ "base_path", `String canonical_base_path
+             ; ( "stores"
+               , `List
+                   (List.filter_map
+                      (fun (keeper, dir, result) ->
+                         match result with
+                         | Error _ -> None
+                         | Ok (report : M.report) ->
+                           Some
+                             (`Assoc
+                               [ "keeper", `String keeper
+                               ; "dir", `String dir
+                               ; "scanned", `Int report.scanned
+                               ; "live", `Int report.live
+                               ; "candidates_recorded", `Int report.candidates_recorded
+                               ; "deleted", `Int report.deleted
+                               ; ( "reclaimed_bytes"
+                                 , `Intlit (Int64.to_string report.reclaimed_bytes) )
+                               ; "remaining_count", `Int report.remaining_count
+                               ; ( "remaining_bytes"
+                                 , `Intlit (Int64.to_string report.remaining_bytes) )
+                               ]))
+                      reports) )
+             ]);
+         output_char stdout '\n';
+         flush stdout;
+         Ok ()
+       end))
 ;;
 
 let handoff_base_path_lease
@@ -663,53 +604,36 @@ let handoff_base_path_lease
   match prepare_command with
   | [] -> errorf "lease-handoff requires a preparation command"
   | _ ->
-    (match
-       Server_startup_takeover.acquire_owner_lease
-         (Host_config.host ()).base_path_lease_root base_path
-     with
-     | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
-      let pid = Server_startup_takeover.base_path_owner_pid owner in
-       errorf
-         "workspace writer lease is already owned base_path=%s pid=%s"
-         base_path
-         (match pid with
-          | Some value -> string_of_int value
-          | None -> "unknown")
-     | Server_startup_takeover.Base_path_rejected rejection ->
-       errorf
-         "workspace writer lease rejected base_path=%s: %s"
-         base_path
-         (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
-     | Server_startup_takeover.Base_path_acquired lease ->
-       let release () = Server_startup_takeover.release_base_path_lease lease in
-       (match run_child prepare_command (environment_for_lease_child ()) with
-        | Error _ as error ->
-          release ();
-          error
-        | Ok prepare_status ->
-          let prepare_exit_code = child_exit_code prepare_status in
-          if prepare_exit_code <> 0
-          then (
-            release ();
-            Stdlib.exit prepare_exit_code)
-          else (
-            match Server_startup_takeover.prepare_base_path_lease_exec_handoff lease with
-            | Error rejection ->
+    let* lease = acquire_base_path_lease base_path in
+    let release () = Server_startup_takeover.release_base_path_lease lease in
+    (match run_child prepare_command (environment_for_lease_child ()) with
+     | Error _ as error ->
+       release ();
+       error
+     | Ok prepare_status ->
+       let prepare_exit_code = child_exit_code prepare_status in
+       if prepare_exit_code <> 0
+       then (
+         release ();
+         Stdlib.exit prepare_exit_code)
+       else (
+         match Server_startup_takeover.prepare_base_path_lease_exec_handoff lease with
+         | Error rejection ->
+           release ();
+           errorf
+             "workspace writer lease handoff rejected base_path=%s: %s"
+             base_path
+             (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
+         | Ok () ->
+           let arguments = Array.of_list (next_executable :: next_arguments) in
+           let environment = environment_without_lease_owner () |> Array.of_list in
+           (try Unix.execve next_executable arguments environment with
+            | exn ->
               release ();
               errorf
-                "workspace writer lease handoff rejected base_path=%s: %s"
-                base_path
-                (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
-            | Ok () ->
-              let arguments = Array.of_list (next_executable :: next_arguments) in
-              let environment = environment_without_lease_owner () |> Array.of_list in
-              (try Unix.execve next_executable arguments environment with
-               | exn ->
-                 release ();
-                 errorf
-                   "deployment runtime handoff failed executable=%s: %s"
-                   next_executable
-                   (Printexc.to_string exn)))))
+                "deployment runtime handoff failed executable=%s: %s"
+                next_executable
+                (Printexc.to_string exn))))
 ;;
 
 let signal_files =
@@ -1472,34 +1396,10 @@ let cut_run_registries_report ~execute reports =
    it must not run under a live server. The lease is the same one
    [tool-blob-maintenance] takes for its own destructive pass. *)
 let cut_run_registries base_path ~execute =
-  if not execute
-  then cut_run_registries_report ~execute (scan_run_registries base_path ~execute)
-  else (
-    match
-      Server_startup_takeover.acquire_owner_lease
-        (Host_config.host ()).base_path_lease_root base_path
-    with
-    | Server_startup_takeover.Base_path_already_owned { owner; _ } ->
-      let pid = Server_startup_takeover.base_path_owner_pid owner in
-      errorf
-        "workspace writer lease is already owned base_path=%s pid=%s"
-        base_path
-        (match pid with
-         | Some value -> string_of_int value
-         | None -> "unknown")
-    | Server_startup_takeover.Base_path_rejected rejection ->
-      errorf
-        "workspace writer lease rejected base_path=%s: %s"
-        base_path
-        (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
-    | Server_startup_takeover.Base_path_acquired lease ->
-      Fun.protect
-        ~finally:(fun () ->
-          Server_startup_takeover.release_base_path_lease lease)
-        (fun () ->
-           cut_run_registries_report
-             ~execute
-             (scan_run_registries base_path ~execute)))
+  let report () =
+    cut_run_registries_report ~execute (scan_run_registries base_path ~execute)
+  in
+  if execute then with_base_path_lease base_path report else report ()
 ;;
 
 let execute_cut =

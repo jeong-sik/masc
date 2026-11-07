@@ -2,7 +2,7 @@
 
 (** Flush in-memory tool usage stats to disk for persistence across restarts.
     Reads the keeper entry via [Keeper_registry.get]; writes JSON atomically.
-    Increments [metric_keeper_tool_usage_flush_failures] on I/O failure. *)
+    Increments [masc_keeper_tool_usage_flush_failures_total] on I/O failure. *)
 val flush : base_path:string -> string -> unit
 
 (** Mark a keeper as needing a flush. Called on every tool use instead

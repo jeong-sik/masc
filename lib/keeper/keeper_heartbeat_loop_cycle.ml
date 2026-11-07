@@ -8,7 +8,7 @@
     for the keepalive loop:
 
     - Fatal environment errors (Eio switch/net unavailable) → ERROR
-      log + [metric_keeper_heartbeat_failures] tick (phase=
+      log + [masc_keeper_heartbeat_failures_total] tick (phase=
       fatal_environment) + [Keeper_registry.set_failure_reason
       Exception] + raises [Keeper_registry.Keeper_fiber_crash] for
       the supervisor to handle.

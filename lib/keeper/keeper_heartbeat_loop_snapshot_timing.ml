@@ -8,7 +8,7 @@
       snapshot iff the configured [~snapshot_interval_sec] has elapsed
       since [!last_snapshot_ts]. Write failures degrade gracefully:
       cancellation re-raises, other [exn] increment
-      [metric_keeper_snapshot_write_failures] and log ERROR.
+      [masc_keeper_snapshot_write_failures_total] and log ERROR.
       [last_snapshot_ts] is bumped to [now_ts] even on failure to
       avoid retry storms.
 

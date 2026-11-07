@@ -1632,9 +1632,12 @@ type original_capture =
   | Original_retained of dynamic_tool_result * Keeper_client_tool_outbox.host_delivery
   | Original_unavailable of { original : dynamic_tool_result; detail : string }
 
-let retain_original_result producer ~bodies ~invocation ~call_id ~tool_name ~input
+(* A retained receipt is a result of a vendor turn that ended, re-read on every
+   later request, so its text bodies go as markers from the ended-turn floor. *)
+let retain_original_result producer ~invocation ~call_id ~tool_name ~input
     (original : dynamic_tool_result) =
-  let* response = Keeper_client_tool_outbox.host_response producer ~bodies
+  let* response = Keeper_client_tool_outbox.host_response producer
+      ~min_result_bytes:Keeper_turn_driver_try_provider.aged_result_min_bytes
       ~success:original.success ~content:original.content
       ~content_blocks:original.content_blocks in
   Keeper_client_tool_outbox.retain_host_result_with_delivery producer
@@ -1647,7 +1650,7 @@ let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_app
     ~(hooks : Agent_core.Hooks.hooks) ~event_bus ~context_injector
     ~terminal_effect_state ~terminal_error ~pre_tool_rejects ~raw_trace_run
     ~next_dynamic_invocation_index ~on_tool_boundary ~on_result_handoff ~result_producer
-    ~receipt_bodies (tool : Agent_core.Tool.t) =
+    (tool : Agent_core.Tool.t) =
   { name = tool.schema.name
   ; description = tool.schema.description
   ; input_schema = Yojson.Safe.Util.member "input_schema" (Agent_core.Tool.schema_to_json tool)
@@ -1694,7 +1697,7 @@ let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_app
           | Original_unseen, Some producer ->
             Eio.Cancel.protect (fun () ->
               let saved = try
-                  retain_original_result producer ~bodies:receipt_bodies ~invocation ~call_id
+                  retain_original_result producer ~invocation ~call_id
                     ~tool_name:tool.schema.name ~input original
                 with exn ->
                   if Keeper_operator_interrupt.is_operator_interrupt exn then raise exn;
@@ -2059,14 +2062,6 @@ let dynamic_tools ~result_scope ?base_path ~content_transport ~accepts_image_inp
         producer |> Result.map Option.some
         |> Result.map_error (config_error ~field:"tool_result_producer") in
     let next_dynamic_invocation_index = Atomic.make 0 in
-    (* A retained receipt is a result of a vendor turn that ended, re-read on
-       every later request, so its text bodies follow the rule for ended-turn
-       results: markers for a Keeper that can read them back. *)
-    let receipt_bodies = match Keeper_recovery_transmission.require_reader tools with
-      | Ok () -> Keeper_client_tool_outbox.Host_bodies_as_markers
-          {min_result_bytes=Keeper_turn_driver_try_provider.aged_result_min_bytes}
-      | Error Keeper_recovery_transmission.Source_reader_unavailable ->
-        Keeper_client_tool_outbox.Host_bodies_verbatim in
     Ok
       (List.map
          (dynamic_tool_of_agent_core
@@ -2089,8 +2084,7 @@ let dynamic_tools ~result_scope ?base_path ~content_transport ~accepts_image_inp
             ~next_dynamic_invocation_index
             ~on_tool_boundary
             ~on_result_handoff
-            ~result_producer
-            ~receipt_bodies)
+            ~result_producer)
          tools, result_producer)
 ;;
 

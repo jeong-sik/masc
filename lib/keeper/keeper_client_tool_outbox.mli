@@ -71,18 +71,8 @@ val retain_host_result :
     nonnegative physical invocation index assigned by this host projection;
     a client may reuse [call_id] for a later physical invocation. *)
 
-type host_bodies =
-  | Host_bodies_verbatim
-      (** Every text body stays as the tool returned it. For a Keeper without
-          the artifact reader, which could not read a marker back. *)
-  | Host_bodies_as_markers of { min_result_bytes : int }
-      (** A result carrying at least [min_result_bytes] bytes of text, the
-          longer of [content] and the sum of its [Text] blocks, keeps each
-          text body as its blob marker when the marker is shorter in the
-          receipt's JSON. A body that is a marker already stays as it is. *)
-
 val host_response :
-  host_producer -> bodies:host_bodies -> success:bool -> content:string ->
+  host_producer -> min_result_bytes:int -> success:bool -> content:string ->
   content_blocks:Llm_provider.Types.content_block list option ->
   (Yojson.Safe.t, string) result
 (** The [response] of one host receipt: [success], [content] and
@@ -90,18 +80,28 @@ val host_response :
 
     {!context_message} puts every retained receipt into one text message, and
     each later request of the Keeper carries it until a completed turn
-    acknowledges it. A base64 payload inside that text reaches the model as
-    text, not as an image. So an image, document or audio block with a
-    [Base64] source holds the blob address of its bytes instead:
-    [{"type":_,"media_type":_,"artifact":_}], with [artifact] in
-    {!Tool_output.normalized_artifact_ref_to_json} form. [Url] and [File_id]
-    sources keep the provider shape. Text bodies follow [bodies].
+    acknowledges it. No window cuts that message, so the receipt names large
+    bytes by blob address instead of holding them.
+
+    - An image, document or audio block with a [Base64] source becomes
+      [{"type":_,"media_type":_,"artifact":_}]: the decoded bytes, under
+      {!Tool_output.normalized_artifact_ref_to_json}. A base64 payload inside
+      text reaches the model as text, not as media. A payload that does not
+      decode keeps its exact string under [undecodable_base64], with the
+      decoder's [detail]. [Url] and [File_id] sources keep the provider
+      shape.
+    - When the result carries at least [min_result_bytes] bytes of text, the
+      longer of [content] and the sum of its [Text] blocks, each text body
+      that is shorter as its blob marker becomes that marker. A marker already
+      in the result stays as it is. This holds for a Keeper without the
+      artifact reader too: it sees the marker's preview, where the whole
+      bodies would keep growing a message nothing bounds.
 
     Each blob is written with {!Tool_blob_store.put_durable_reuse}, because
     the receipt outlives the process and names the bytes. Blob maintenance
     keeps them live through these reserved reference forms, which it reads
-    inside receipt payloads too. A failed write or a base64 payload that does
-    not decode returns [Error], and nothing is written to the outbox. *)
+    inside receipt payloads too. A failed blob write returns [Error], and
+    nothing is written to the outbox. *)
 
 val load : base_path:string -> keeper_name:string -> (snapshot, string) result
 (** Read exact committed results, excluding host producers whose kernel lease

@@ -111,18 +111,27 @@ let retain_host_result producer ~invocation_index ~call_id ~tool_name ~arguments
   |> Result.map (fun _ -> ())
 
 (* Receipts are re-read as one system text on every request until a completed
-   turn ACKs them. #49634: one ended vendor turn left 248 receipts, 11.8 MB of
-   JSON, 8.5 MB of it screenshot PNG base64 and the rest text bodies of about
-   5 to 12 KB each; the request was refused on every turn. *)
-type host_bodies =
-  | Host_bodies_verbatim
-  | Host_bodies_as_markers of { min_result_bytes : int }
-
+   turn ACKs them, and nothing cuts that text to a window. #49634: one ended
+   vendor turn left 248 receipts, 11.8 MB of JSON, 8.5 MB of it screenshot PNG
+   base64 and the rest text bodies of about 5 to 12 KB each; the request was
+   refused on every turn. *)
 let host_text_mime = "text/plain"
 
-let json_string_bytes text = String.length (Yojson.Safe.to_string (`String text))
+(* The blob label of receipt media. The tool's media type could name the
+   artifact manifest type, which blob maintenance expands and parses; the
+   block keeps the tool's [media_type]. *)
+let host_media_mime = "application/octet-stream"
+
+(* Every SHA-256 digest has this many hex digits, so a marker planned with this
+   placeholder is exactly as long as the real one. *)
+let planned_sha256 = String.make (2 * Agent_core_sha256.digest_size) '0'
 
 let host_marker reference = Tool_output.encode_for_agent_core (Tool_output.Stored reference)
+
+let host_put store ~bytes ~mime =
+  match Tool_blob_store.put_durable_reuse store ~bytes ~mime with
+  | reference -> Ok reference
+  | exception Sys_error detail -> Error detail
 
 (* The text one result carries, as Keeper_model_input_demotion measures it:
    [content], or the longer of [content] and the sum of its [Text] blocks. *)
@@ -136,43 +145,60 @@ let host_result_text_bytes ~content = function
          | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _
          | Image _ | Document _ | Audio _ -> sum) 0 blocks)
 
-(* [text] as its blob marker when the marker is shorter in the receipt's JSON.
-   The planned marker is the real one, digest included, so a body that stays
-   inline writes no blob. A marker already names its bytes; marker-shaped text
-   that does not parse stays visible rather than getting a permanent address,
-   as in Keeper_model_input_demotion. *)
-let host_text_body store text =
+(* Whether [text] is shorter in the receipt as its marker. The marker is planned
+   without hashing, and the body is counted before JSON escaping, which only
+   lengthens it: a body this keeps inline was never longer than its marker. *)
+let host_marker_is_shorter text =
+  match Tool_output.make_artifact_ref ~sha256:planned_sha256 ~bytes:(String.length text)
+          ~preview:(Tool_blob_store.make_preview text) ~mime:host_text_mime with
+  | Ok planned ->
+    Ok (String.length (Yojson.Safe.to_string (`String (host_marker planned)))
+        < String.length text)
+  | Error error -> Error (Tool_output.make_error_to_string error)
+
+(* [text] as its blob marker when that is shorter. [stored] holds the markers
+   this response wrote, so a body that [content] and a [Text] block share is
+   hashed and written once. A marker already names its bytes; marker-shaped
+   text that does not parse stays visible rather than getting a permanent
+   address, as in Keeper_model_input_demotion. *)
+let host_text_body store ~stored text =
   match Tool_output.decode_from_agent_core text with
   | Tool_output.Decoded _ | Tool_output.Invalid_marker _ -> Ok text
   | Tool_output.Not_marker ->
-    let* planned =
-      Tool_output.make_artifact_ref ~sha256:Agent_core_sha256.(digest_string text |> to_hex)
-        ~bytes:(String.length text) ~preview:(Tool_blob_store.make_preview text)
-        ~mime:host_text_mime
-      |> Result.map_error Tool_output.make_error_to_string in
-    if json_string_bytes (host_marker planned) >= json_string_bytes text then Ok text
-    else
-      match Tool_blob_store.put_durable_reuse store ~bytes:text ~mime:host_text_mime with
-      | reference -> Ok (host_marker reference)
-      | exception Sys_error detail -> Error detail
+    match List.find_map (fun (body, marker) ->
+        if String.equal body text then Some marker else None) !stored with
+    | Some marker -> Ok marker
+    | None ->
+      let* shorter = host_marker_is_shorter text in
+      if not shorter then Ok text
+      else
+        let* reference = host_put store ~bytes:text ~mime:host_text_mime in
+        let marker = host_marker reference in
+        stored := (text, marker) :: !stored;
+        Ok marker
 
+(* A payload that does not decode is refused on its way to the vendor
+   (Runtime_official_client_tool) and the model is told so. The receipt keeps
+   the exact string the tool returned, by address, and the decoder's reason. *)
 let host_media store ~kind ~media_type encoded =
-  let* raw = Base64.decode encoded
-    |> Result.map_error (fun (`Msg detail) -> kind ^ " " ^ media_type ^ " is not base64: " ^ detail) in
-  match Tool_blob_store.put_durable_reuse store ~bytes:raw
-          ~mime:(Tool_blob_media_store.blob_mime media_type) with
-  | reference ->
-    Ok (`Assoc ["type", `String kind; "media_type", `String media_type;
-                "artifact", Tool_output.normalized_artifact_ref_to_json reference])
-  | exception Sys_error detail -> Error detail
+  let named field reference extra =
+    `Assoc (["type", `String kind; "media_type", `String media_type;
+             field, Tool_output.normalized_artifact_ref_to_json reference] @ extra) in
+  match Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () -> Base64.decode encoded) with
+  | Ok raw ->
+    let* reference = host_put store ~bytes:raw ~mime:host_media_mime in
+    Ok (named "artifact" reference [])
+  | Error (`Msg detail) ->
+    let* reference = host_put store ~bytes:encoded ~mime:host_text_mime in
+    Ok (named "undecodable_base64" reference ["detail", `String detail])
 
-let host_response producer ~bodies ~success ~content ~content_blocks =
+let host_response producer ~min_result_bytes ~success ~content ~content_blocks =
   let store = Tool_blob_store.create ~base_path:producer.base_path in
-  let text_body = match bodies with
-    | Host_bodies_as_markers {min_result_bytes}
-      when host_result_text_bytes ~content content_blocks >= min_result_bytes ->
-      host_text_body store
-    | Host_bodies_as_markers _ | Host_bodies_verbatim -> Result.ok in
+  let stored = ref [] in
+  let text_body =
+    if host_result_text_bytes ~content content_blocks >= min_result_bytes
+    then host_text_body store ~stored
+    else Result.ok in
   let provider_json block =
     Agent_core.Checkpoint.wire_content_block_to_json_result
       ~scope:"official_client_original_tool_result" block

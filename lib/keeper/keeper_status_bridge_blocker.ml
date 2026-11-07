@@ -36,6 +36,9 @@ let runtime_blocker_class_to_string = function
   | Blocked_by_operator_interrupt -> "operator_interrupt"
 ;;
 
+(* Forcing [summary] may perform a durable-store read: the turn-failure arm
+   reads the newest execution receipt at render time, not at surface build
+   time.  Consumers that only need the class or signature stay unforced. *)
 type runtime_blocker_surface =
   { blocker_class : runtime_blocker_class
   ; summary : string Lazy.t

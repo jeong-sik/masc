@@ -357,6 +357,44 @@ let test_shared_context_preserves_each_retained_result () = with_workspace (fun 
   check (list string) "producing context changes no durable acknowledgements" ids
     (Outbox.receipt_ids (load base_path)))
 
+let test_carrier_names_media_by_identity () = with_workspace (fun base_path ->
+  let raw = String.init 3000 (fun index -> Char.chr (index mod 256)) in
+  let encoded = Base64.encode_string raw in
+  let stored = Agent_core.History.stored_of_raw raw in
+  let image = Llm_provider.Types.Image {media_type="image/png";source=Llm_provider.Types.Base64 encoded} in
+  let terminal_error = ref None in
+  let tool = project ~base_path ~stop:(Some stop) ~terminal_error (fun _ ->
+    Ok {Agent_core.Types.content="screenshot taken";content_blocks=Some [image];_meta=None}) in
+  ignore (tool.call ~call_id:"host-image-call" (`Assoc []));
+  let items = match Runtime_official_client_tool.project_content Codex
+      ~content:"screenshot taken" ~content_blocks:(Some [image]) with
+    | Ok items -> items | Error detail -> fail detail in
+  get (Outbox.retain ~base_path ~keeper_name
+    {thread_id="vendor-thread";turn_id="vendor-turn";call_id="codex-image-call";
+     tool_name="Screenshot";arguments=`Assoc [];
+     response=`Assoc ["id",`Int 9; "result",`Assoc ["success",`Bool true; "contentItems",`List items]]});
+  let snapshot = load base_path in
+  let session = get (Keeper_official_client_session_store.path ~base_path ~keeper_name) in
+  let directory = Filename.concat (Filename.dirname session) "undelivered-tools" in
+  let read_receipts () = List.map (fun id ->
+    Yojson.Safe.to_string (Yojson.Safe.from_file (Filename.concat directory (id ^ ".json"))))
+    (Outbox.receipt_ids snapshot) in
+  let before = read_receipts () in
+  check int "host and Codex receipts are both retained" 2 (List.length before);
+  List.iter (fun receipt -> check bool "each retained receipt keeps the base64 payload" true
+    (String_util.contains_substring receipt encoded)) before;
+  let context = String.concat "\n" (Outbox.developer_context snapshot) in
+  check bool "the carrier holds no base64 payload" false
+    (String_util.contains_substring context encoded);
+  let identity = Printf.sprintf {|"media_type":"image/png","bytes":%d,"content_sha256":"%s"|}
+      stored.bytes stored.sha256 in
+  let rec count from found = match String_util.find_substring ~pos:from context identity with
+    | Some index -> count (index + String.length identity) (found + 1)
+    | None -> found in
+  check int "both receipts name the image by its decoded length and digest" 2 (count 0 0);
+  check (list string) "projecting the carrier leaves the receipt files unchanged" before
+    (read_receipts ()))
+
 let test_ambiguous_receipt_shape_is_not_shared () =
   let payload = `String (String.make 4096 'x') in
   let rows = List.init 4 (fun index ->
@@ -588,6 +626,7 @@ let () = run "Original official-client host result retention"
     test_case "screenshot receipt names its bytes by blob address" `Quick test_screenshot_receipt_names_bytes_by_address;
     test_case "source identity deduplicates exact originals across mixed producers" `Quick test_producer_identity_and_vendor_coexistence;
     test_case "shared context preserves retained originals in order" `Quick test_shared_context_preserves_each_retained_result;
+    test_case "carrier names retained media by identity" `Quick test_carrier_names_media_by_identity;
     test_case "ambiguous receipt shape remains individual" `Quick test_ambiguous_receipt_shape_is_not_shared;
     test_case "small shared JSON does not expand context" `Quick test_small_shared_json_does_not_expand_context;
     test_case "unique results remain individual" `Quick test_unique_results_remain_individual;

@@ -113,6 +113,11 @@ val receipt_ids : snapshot -> string list
     and provider execution cell numbers are not receipt identities. *)
 val contains_receipt : snapshot -> receipt_id:string -> bool
 val developer_context : snapshot -> string list
+(** The retained receipts as model-facing text, in snapshot order. Base64
+    media in a response is shown by its identity
+    ({!Keeper_client_tool_outbox_media.carrier_row}); every other receipt value
+    is carried losslessly. *)
+
 val context_message : snapshot -> Agent_core.Types.message option
 (** A separately identified result-data carrier for official Start and Resume
     and Agent Core's final model-input projection.

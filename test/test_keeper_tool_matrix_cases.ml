@@ -37,7 +37,6 @@ and fixture = {
   generic : Generic.fixture;
   config : Masc.Workspace.config;
   meta : Masc.Keeper_meta_contract.keeper_meta;
-  ctx_snapshot : Keeper_types.working_context;
   tools : Agent_core.Tool.t list;
   cleanup : unit -> unit;
 }
@@ -226,7 +225,7 @@ let make_fixture
          (Masc.Workspace.bind_session config ~agent_name:("keeper-" ^ meta.name)
             ~capabilities:[] ())
    | Fresh | Init_only -> ());
-  { generic; config; meta; ctx_snapshot; tools = bundle.tools; cleanup = bundle.cleanup }
+  { generic; config; meta; tools = bundle.tools; cleanup = bundle.cleanup }
 
 let find_tool fixture name =
   let by_name tool_name =
@@ -331,10 +330,7 @@ let prepare_keeper_name fixture name =
     List.mem name
       [ "keeper_task_done" ]
   then
-    ensure_keeper_claim fixture;
-  (* keeper_memory_search: needle "tool matrix memory needle" is already
-     in ctx_snapshot from fixture creation (line ~128). No mutation needed. *)
-  ignore (name = "keeper_memory_search")
+    ensure_keeper_claim fixture
 
 let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
   let name = schema.name in

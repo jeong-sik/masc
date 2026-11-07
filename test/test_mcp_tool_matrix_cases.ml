@@ -58,7 +58,6 @@ type fixture = {
   mutable board_post_id : string option;
   mutable keeper_name : string option;
   mutable verification_id : string option;
-  mutable handover_id : string option;
   mutable wiki_topic : string option;
   mutable code_file_path : string option;
   mutable goal_id : string option;
@@ -381,7 +380,6 @@ let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
       board_post_id = None;
       keeper_name = None;
       verification_id = None;
-      handover_id = None;
       wiki_topic = None;
       code_file_path = None;
       goal_id = None;

@@ -17,21 +17,6 @@ type node_status =
   (* Generic / fallback *)
   | Observed | Workspace | Unset
 
-(** {1 Span status}
-
-    Separate lifecycle from {!node_status}.
-
-    @since 7182 *)
-type span_status =
-  | Span_open | Span_completed | Span_released | Span_cancelled
-  | Span_ended
-
-val span_status_to_string : span_status -> string
-
-(** Strict parser: returns [None] on unknown wire so callers can react
-    explicitly (drop / fallback / route). See #8605. *)
-val span_status_of_string_opt : string -> span_status option
-
 (** Closed activity kinds whose payload describes one executed tool. Producers,
     reducers, and timeline readers share this type rather than maintaining
     independent string lists. *)
@@ -95,20 +80,6 @@ type graph_edge = {
   meta : Yojson.Safe.t;
 }
 
-type agent_span_kind = Task_span
-
-(** The span's [kind] on the wire. *)
-val agent_span_kind_to_string : agent_span_kind -> string
-
-type agent_span = {
-  agent : string;
-  start_ms : int;
-  end_ms : int;
-  span_kind : agent_span_kind;
-  label : string;
-  span_status : span_status;
-}
-
 (** {1 Constructors and defaults} *)
 
 val entity : kind:string -> string -> entity_ref
@@ -128,8 +99,6 @@ val event_of_yojson : Yojson.Safe.t -> event option
 val graph_node_to_yojson : graph_node -> Yojson.Safe.t
 
 val graph_edge_to_yojson : graph_edge -> Yojson.Safe.t
-
-val agent_span_to_yojson : agent_span -> Yojson.Safe.t
 
 (** {1 Utilities} *)
 

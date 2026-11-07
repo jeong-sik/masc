@@ -20,27 +20,6 @@ let node_status_to_string = function
   | Posted -> "posted" | Discussed -> "discussed"
   | Observed -> "observed" | Workspace -> "workspace" | Unset -> ""
 
-(** Span status: separate from node_status (different lifecycle).
-    @since 7182 *)
-type span_status =
-  | Span_open | Span_completed | Span_released | Span_cancelled
-  | Span_ended
-
-let span_status_to_string = function
-  | Span_open -> "open" | Span_completed -> "completed"
-  | Span_released -> "released" | Span_cancelled -> "cancelled"
-  | Span_ended -> "ended"
-
-(** Strict parser. Returns [None] on unknown wire so callers can react
-    explicitly (drop / fallback / route). See #8605. *)
-let span_status_of_string_opt = function
-  | "open" -> Some Span_open
-  | "completed" -> Some Span_completed
-  | "released" -> Some Span_released
-  | "cancelled" -> Some Span_cancelled
-  | "ended" -> Some Span_ended
-  | _ -> None
-
 type tool_execution_event_kind =
   | External_tool_called
   | Keeper_in_turn_tool_executed
@@ -121,21 +100,6 @@ type graph_edge = {
   active : bool;
   last_event_at : string;
   meta : Yojson.Safe.t;
-}
-
-type agent_span_kind = Task_span
-
-let agent_span_kind_to_string = function
-  | Task_span -> "task"
-;;
-
-type agent_span = {
-  agent : string;
-  start_ms : int;
-  end_ms : int;
-  span_kind : agent_span_kind;
-  label : string;
-  span_status : span_status;
 }
 
 let entity ~kind id = { kind; id }
@@ -368,15 +332,5 @@ let graph_edge_to_yojson (value : graph_edge) =
       ("last_event_at", `String value.last_event_at);
       ("meta", value.meta);
     ]
-
-let agent_span_to_yojson (s : agent_span) =
-  `Assoc [
-    ("agent", `String s.agent);
-    ("start_ms", `Int s.start_ms);
-    ("end_ms", `Int s.end_ms);
-    ("kind", `String (agent_span_kind_to_string s.span_kind));
-    ("label", `String s.label);
-    ("status", `String (span_status_to_string s.span_status));
-  ]
 
 let now_ts_ms () = int_of_float (Time_compat.now () *. 1000.0)

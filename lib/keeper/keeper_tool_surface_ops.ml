@@ -369,7 +369,9 @@ let keeper_list_row_json ~runtime_class config name =
       let failing_since =
         match registry_entry with
         | Some { Keeper_registry.phase = Failing; failing_since = Some at; _ } -> `Float at
-        | _ -> `Null
+        | Some { Keeper_registry.phase = Failing; failing_since = None; _ } -> `Null
+        | Some { Keeper_registry.phase = (Offline | Running | Draining | Paused | Stopped | Crashed | Restarting); _ } -> `Null
+        | None -> `Null
       in
       let runtime_blocker =
         Option.bind registry_entry (fun entry ->

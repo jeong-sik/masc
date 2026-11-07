@@ -3,17 +3,7 @@
     All hardcoded network defaults live here. Other modules reference
     these constants instead of inlining magic strings/numbers.
 
-    The [local_llm_default_url] follows the same env override chain that AGENT_CORE
-    discovery uses before falling back to the current local runtime URL.
-
     @since 2.241.0 *)
-
-let nonempty_env name =
-  match Sys.getenv_opt name with
-  | Some value ->
-      let trimmed = String.trim value in
-      if trimmed <> "" then Some trimmed else None
-  | None -> None
 
 (** Default port for Ollama (OpenAI-compatible at /v1). *)
 let ollama_default_port = 11434
@@ -49,13 +39,6 @@ let ollama_api_generate_path = "/api/generate"
     score questions answered with probabilities). Ollama Cloud serves the
     same path under https://ollama.com. *)
 let ollama_systemone_path = "/v1/systemone"
-
-(** Default URL for the local OpenAI-compatible runtime.
-    Override order: AGENT_CORE_LOCAL_LLM_URL -> local runtime. *)
-let local_llm_default_url =
-  match nonempty_env "AGENT_CORE_LOCAL_LLM_URL" with
-  | Some value -> value
-  | None -> ollama_default_url
 
 (** Default port for the MASC HTTP server. *)
 let masc_http_default_port = 8935

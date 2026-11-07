@@ -65,11 +65,28 @@ let nullable_field stage fields name decode =
 type outcome =
   | Finished
   | Usage_error
+  | Config_error
   | Infrastructure_failure
-  | Deadline
-  | Token_limit
   | Turn_limit
+  | Token_limit
+  | Price_limit
+  | Deadline
+  | Terminated
+  | Length
+  | Refusal
+  | Aborted
   | Unrecognized_outcome of string
+
+(* [RunOutcome.exit_code] in vibe/app_server/run_export.py, 3.1.0. *)
+let exit_code_of_outcome = function
+  | Finished -> Some 0
+  | Usage_error | Config_error -> Some 1
+  | Infrastructure_failure -> Some 2
+  | Turn_limit | Token_limit | Price_limit | Deadline | Terminated | Length | Refusal ->
+    Some 3
+  | Aborted -> Some 4
+  | Unrecognized_outcome _ -> None
+;;
 
 type stop_reason =
   | Interrupted
@@ -105,10 +122,16 @@ let export_schema_version = 1
 let outcome_of_wire = function
   | "finished" -> Finished
   | "usage_error" -> Usage_error
+  | "config_error" -> Config_error
   | "infrastructure_failure" -> Infrastructure_failure
-  | "deadline" -> Deadline
-  | "token_limit" -> Token_limit
   | "turn_limit" -> Turn_limit
+  | "token_limit" -> Token_limit
+  | "price_limit" -> Price_limit
+  | "deadline" -> Deadline
+  | "terminated" -> Terminated
+  | "length" -> Length
+  | "refusal" -> Refusal
+  | "aborted" -> Aborted
   | other -> Unrecognized_outcome other
 ;;
 

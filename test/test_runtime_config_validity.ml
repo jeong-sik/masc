@@ -7431,9 +7431,9 @@ max-context = 1024
 [local.sample]
 [runtime]
 default = "local.sample"
-[browser.live.bidi]
-firefox = "/fixture/firefox"
-profile = "/fixture/profile"
+[browser.live.ego]
+command = "/fixture/ego-browser"
+space = "fixture"
 [machines.msx]
 enabled = %b
 [machines.dos]

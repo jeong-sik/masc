@@ -924,8 +924,8 @@ let validate_tool_request () =
     | Some Workspace_curator -> Masc.Workspace_memory_execution_capture.check_retained record
     | Some Verifier_review -> Masc.Verifier_review_owner.check_retained record
     | Some Goal_proof_review -> Masc.Goal_verifier_worker.check_retained record
-    (* The HITL judge and Candle appraisal scopes are not read here yet
-       (#49587). *)
+    (* Candle appraisal originals, which Candle reads by ID only, and scopes
+       no consumer of this build writes still pass here (#49587). *)
     | None -> Ok ()
 ;;
 

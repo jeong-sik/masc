@@ -706,7 +706,7 @@ let test_workspace_http_permissions_and_checkpoint_parser () = with_base (fun ba
         let connection = Httpun.Server_connection.create (fun reqd ->
           let request = Httpun.Reqd.request reqd in
           let reqd = Masc.Http_reqd.of_httpun reqd in
-          Server_workspace_precondition.guard_http1 ~path:(Http.Request.path request) request reqd
+          Server_workspace_precondition.guard ~path:(Http.Request.path request) request reqd
             ~admitted:(fun () -> Http.Router.dispatch router request reqd)) in
         let authorization = match bearer with
           | None -> "" | Some token -> "Authorization: Bearer " ^ token ^ "\r\n" in

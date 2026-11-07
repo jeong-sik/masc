@@ -98,8 +98,7 @@ let with_gateway ?(runtime = false) ?resources ?(zero_window = false) run =
                   |> Server_routes_http_routes_artifact_draft_live.add_routes
                   |> Server_routes_http_routes_verification.add_routes
                   |> Server_routes_http_routes_dashboard.add_routes ~sw ~clock:(Eio.Stdenv.clock env) in
-                let handler = Server_h2_gateway.make_request_handler ~routes:router ~trust_policy ~sw
-                  ~clock:(Eio.Stdenv.clock env) ~server_start_time:0. in
+                let handler = Server_h2_gateway.make_request_handler ~routes:router ~trust_policy in
                 let server_flow, client_flow = Eio_unix.Net.socketpair_stream ~sw () in
                 let server = Eio.Fiber.fork_promise ~sw (fun () ->
                   Eio.Switch.run (fun conn_sw ->
@@ -136,7 +135,7 @@ let h1_request gateway ~meth ~path ~headers ~body =
     let request = Httpun.Reqd.request reqd in
     let reqd = Masc.Http_reqd.of_httpun reqd in
     Server_request_authority.with_current gateway.authority (fun () ->
-      Server_workspace_precondition.guard_http1 ~path:(Http.Request.path request) request reqd
+      Server_workspace_precondition.guard ~path:(Http.Request.path request) request reqd
         ~admitted:(fun () -> match request.Httpun.Request.meth with
           | `OPTIONS -> Server_routes_http_runtime.options_handler request reqd
           | _ -> Http.Router.dispatch gateway.router request reqd))) in

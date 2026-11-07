@@ -24,7 +24,6 @@
   mtime
   mtime.clock.os
   masc.crypto_rng
-  masc.http_client
   masc.masc_log
   masc.masc_core
   masc.config))

@@ -1,0 +1,22 @@
+{
+  "status": "ready",
+  "plan": {
+    "kind": "chat",
+    "name": "<plan name, not kept>",
+    "title": "<plan title, not kept>"
+  },
+  "planOffer": null,
+  "rateLimitAction": null,
+  "teleportEligible": "<bool>",
+  "teleportAction": null,
+  "apiKey": {
+    "preview": "<key suffix, not kept>",
+    "scope": "vibe",
+    "accessScope": "personal_and_shared"
+  },
+  "budget": {
+    "usagePercentage": "<number>",
+    "resetAt": "<timestamp>",
+    "paygEnabled": "<bool>"
+  }
+}

@@ -1,0 +1,62 @@
+[
+  {
+    "id": "user-turn-c765dc1e1ad22e1276d72156c815f8e5-1",
+    "sessionId": "58be5032-6382-b4bb-84f6-78ae64e5d60b",
+    "turnId": "turn-c765dc1e1ad22e1276d72156c815f8e5",
+    "inputEntryId": null,
+    "createdAt": 1794053842889,
+    "updatedAt": 1794053842889,
+    "generationStatus": "completed",
+    "relatedEntryId": null,
+    "type": "message",
+    "role": "user",
+    "content": [
+      {
+        "type": "text",
+        "text": "Write the numbers from 1 to 300, one per line."
+      }
+    ],
+    "source": "turn_start",
+    "userDisplayContent": null,
+    "outcome": null
+  },
+  {
+    "id": "reasoning-b04c673d-f56e-5864-8751-61cf03ccfc73-0",
+    "sessionId": "58be5032-6382-b4bb-84f6-78ae64e5d60b",
+    "turnId": "turn-c765dc1e1ad22e1276d72156c815f8e5",
+    "inputEntryId": "user-turn-c765dc1e1ad22e1276d72156c815f8e5-1",
+    "createdAt": 1794053851261,
+    "updatedAt": 1794053851261,
+    "generationStatus": "completed",
+    "relatedEntryId": null,
+    "type": "reasoning",
+    "text": "The user wants me to write numbers from 1 to 300, one per line. This is a simple task. I should write this to a file in the scratchpad or just output it? The request says \"Write the numbers\" — likely they want a file or just the output. Given the context, I'll write it to a file in the scratchpad and also could just produce it. Let me write to a file since \"write\" implies creating content. Actually, simplest: generate the content and write to a file in the scratchpad, then confirm. Or just output in the response. The instruction says \"Write the numbers from 1 to 300, one per line.\" I'll create a file numbers.txt in the scratchpad and mention it. But maybe they just want the text in the reply. To be safe, I'll write the file and also it's 300 lines — putting 300 lines in chat is long but acceptable? The guidance says keep responses concise. Writing to a file is cleaner. Let me generate via run_typescript and write to scratchpad.",
+    "summary": [],
+    "outcome": {
+      "type": "committed"
+    }
+  },
+  {
+    "id": "assistant-b04c673d-f56e-5864-8751-61cf03ccfc73",
+    "sessionId": "58be5032-6382-b4bb-84f6-78ae64e5d60b",
+    "turnId": "turn-c765dc1e1ad22e1276d72156c815f8e5",
+    "inputEntryId": "user-turn-c765dc1e1ad22e1276d72156c815f8e5-1",
+    "createdAt": 1794053851261,
+    "updatedAt": 1794053851261,
+    "generationStatus": "completed",
+    "relatedEntryId": null,
+    "type": "message",
+    "role": "assistant",
+    "content": [
+      {
+        "type": "text",
+        "text": "I'll generate the numbers and save them to a file in the scratchpad."
+      }
+    ],
+    "source": "harness",
+    "userDisplayContent": null,
+    "outcome": {
+      "type": "committed"
+    }
+  }
+]

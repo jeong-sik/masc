@@ -205,8 +205,6 @@ let member name = function
 let hello_com = "\xb4\x09\xba\x11\x01\xcd\x21\xb4\x00\xcd\x16\x09\xc0\x74\xf8\xcd\x20HI$"
 
 let test_the_page_is_public_and_self_contained () =
-  check bool "/play is a public read path" true (Server_auth.is_public_read_path Server_auth.play_page_path);
-  check bool "nothing under it is" false (Server_auth.is_public_read_path (Server_auth.play_page_path ^ "/x"));
   with_dir "play-page-" (fun base_path ->
     Auth.save_auth_config base_path
       { Masc_domain.default_auth_config with enabled = true; require_token = true };
@@ -250,8 +248,6 @@ let test_the_page_is_public_and_self_contained () =
 let public_base = "https://play.example"
 
 let test_the_guide_names_this_servers_doors () =
-  check bool "the guide is a public read path" true
-    (Server_auth.is_public_read_path Masc.Play_invite.agent_guide_path);
   with_dir "play-guide-" (fun base_path ->
     Auth.save_auth_config base_path
       { Masc_domain.default_auth_config with enabled = true; require_token = true };

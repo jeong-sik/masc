@@ -16462,18 +16462,28 @@ let apply_provider_history_load state { phr_days = days; phr_requested_at; phr_r
     | Error reason -> state.provider_history <- Provider_history_error reason
   end
 
-(* A reply to a period the operator has since left is dropped. A failed read
+(* A reply to a window the screen has since left is dropped: the operator
+   cycled the period, or moved between Calls and the Dashboard, which draw
+   different windows ([tool_series_days]). A failed read
    replaces the last good one, as the history's does: bars drawn from a read
    that stopped arriving would be buckets nobody observed this refresh. An
    answer sets the moment the series is owed again; a failure leaves the owed
    read to try again after its wait ([settle_pushed_dataset]). *)
 let apply_tool_series_load state { tsl_days = days; tsl_result = result } =
-  if days = state.provider_history_days then
+  if Some days = Masc_tui_types.tool_series_days state then begin
     match result with
     | Ok calls ->
         state.tool_series <- Tool_series_read calls;
         Masc_tui_types.note_tool_series_read state ~now:(monotonic_now_s ())
     | Error reason -> state.tool_series <- Tool_series_error reason
+  end else
+    (* The reply is for a window the screen has left, and the read it was
+       settled as answered nothing for the window the screen draws now: a
+       move from Calls to the Dashboard while Calls' read was out leaves the
+       Dashboard with no reading and no read on the way. That window is owed
+       (a screen that draws no series drops the debt in
+       [launch_owed_pushed_reads]). *)
+    owe_pushed_read state Surface_read_source.Tool_series
 
 (* A failed read replaces the last good one, as the quota reading does: goals
    drawn after the read that listed them stopped arriving would be rows nobody
@@ -16838,7 +16848,7 @@ let load_http_keeper_surfaces ~on_progress ~on_asks ~on_roster ~ask_request ~ros
              observation)) roster_request)
 
 let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~ask_request ~refresh_ticket ~server_identity ~host ~port ~approval_ticket ~board_query
-    ~provider_history_days
+    ~provider_history_days ~tool_series_days
     ~(needs : Masc_tui_types.surface_needs) : unit http_scoped_surface_readings =
   let publish_bound ~dataset load =
     match server_identity, Fs_compat.execution_context () with
@@ -16954,25 +16964,29 @@ let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~as
         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
         | exception exn -> Error (Printexc.to_string exn))
   in
+  (* The window is the screen's, taken when the read was dispatched. A screen
+     that draws no series has nothing to read. *)
   let read_tool_series () =
-    when_needed ~source:Surface_read_order.Tool_series
-      ~dataset:(fun load -> Dataset_tool_series load)
-      ~outcome:(fun load -> Http_refresh_progress.of_result load.tsl_result)
-      needs.needs_tool_series (fun () ->
-      let tsl_result =
-        match Masc_tui_usage_calls.window_of_days provider_history_days with
-        | None ->
-            Error (Printf.sprintf "Calls has no window of %d days" provider_history_days)
-        | Some window ->
-            (match Masc_tui_loader.load_tool_series ~host ~port
-                     ~width:(Masc_tui_usage_calls.width window)
-                     ~since_hours:(Masc_tui_usage_calls.since_hours window) with
-             | Ok series -> Masc_tui_usage_calls.of_series window series
-             | Error reason -> Error reason
-             | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-             | exception exn -> Error (Printexc.to_string exn))
-      in
-      { tsl_days = provider_history_days; tsl_result })
+    match tool_series_days with
+    | None -> None
+    | Some days ->
+        when_needed ~source:Surface_read_order.Tool_series
+          ~dataset:(fun load -> Dataset_tool_series load)
+          ~outcome:(fun load -> Http_refresh_progress.of_result load.tsl_result)
+          needs.needs_tool_series (fun () ->
+          let tsl_result =
+            match Masc_tui_usage_calls.window_of_days days with
+            | None -> Error (Printf.sprintf "Calls has no window of %d days" days)
+            | Some window ->
+                (match Masc_tui_loader.load_tool_series ~host ~port
+                         ~width:(Masc_tui_usage_calls.width window)
+                         ~since_hours:(Masc_tui_usage_calls.since_hours window) with
+                 | Ok series -> Masc_tui_usage_calls.of_series window series
+                 | Error reason -> Error reason
+                 | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+                 | exception exn -> Error (Printexc.to_string exn))
+          in
+          { tsl_days = days; tsl_result })
   in
   (* These reads consume the same dispatch snapshot and none needs a sibling's
      result. The enclosing request verifies identity after all its readers
@@ -17023,7 +17037,7 @@ let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~as
   }
 
 let load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_dataset ~on_asks ~on_approvals ~on_roster ~ask_request ~roster_request ~refresh_ticket ~host ~port ~approval_ticket ~board_query
-    ~provider_history_days
+    ~provider_history_days ~tool_series_days
     ~(needs : Masc_tui_types.surface_needs) =
   (* A process can disappear and another bind the same endpoint between two
      successful ticks. The compact /health identity is therefore revalidated
@@ -17091,7 +17105,7 @@ let load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_da
                 load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~ask_request:None ~refresh_ticket
                   ~server_identity:http_server_identity
                   ~host ~port ~approval_ticket:None
-                  ~board_query ~provider_history_days
+                  ~board_query ~provider_history_days ~tool_series_days
                   ~needs:{ needs with needs_asks = false; needs_keeper_roster = false }))
     in
     let identity_after = observe_http_reader ~on_progress
@@ -18727,9 +18741,10 @@ let current_surface_needs state =
   let needs =
     Masc_tui_types.surface_needs ~about_open:state.about_open
       ~keeper_pane_drawn:(not (Masc_tui_render.acting_pane_suppressed state)) state.view in
-  (* Calls is a section of Usage, not a surface, so it asks here: opening it
-     reads the series, leaving it stops reading. *)
-  { needs with needs_tool_series = Masc_tui_types.usage_calls_drawn state }
+  (* Calls is a section of Usage, not a surface, and the Dashboard's line
+     shares its series, so what is drawn asks here: opening either reads the
+     series, leaving both stops reading. *)
+  { needs with needs_tool_series = Masc_tui_types.tool_series_drawn state }
 
 (* The reads a full refresh tick sends beside its surface bundle. They go out
    while the bundle is still on the wire, so a bundle that moves the read
@@ -19664,6 +19679,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
     let board_query = board_query state in
     let surface_context=Surface_read_context.capture ~needs ~board_query surface_request in
     let provider_history_days = state.provider_history_days in
+    let tool_series_days = Masc_tui_types.tool_series_days state in
     log_http_surface_read_started state ~full_refresh_running:true surface_context;
     (* The side reads -- the ask follow-up and the identity logins this TUI
        is waiting on -- start after workspace admission, either the cold
@@ -19729,7 +19745,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
              (load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_dataset ~on_asks ~on_approvals ~on_roster ~ask_request ~roster_request
                 ~refresh_ticket ~host ~port ~approval_ticket
                 ~board_query
-                ~provider_history_days
+                ~provider_history_days ~tool_series_days
                 ~needs))
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -19754,7 +19770,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
                (load_http_surfaces ~surface_request ~on_initial_identity:None ~on_progress:None ~on_dataset:None ~on_asks:None ~on_approvals:None ~on_roster:None ~ask_request ~roster_request
                   ~refresh_ticket ~host ~port ~approval_ticket
                   ~board_query
-                ~provider_history_days
+                ~provider_history_days ~tool_series_days
                 ~needs));
         log_http_surface_read_finished state surface_context
   end
@@ -20238,6 +20254,7 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
     let board_query = board_query state in
     let surface_context=Surface_read_context.capture ~needs ~board_query surface_request in
     let provider_history_days = state.provider_history_days in
+    let tool_series_days = Masc_tui_types.tool_series_days state in
     log_http_surface_read_started state ~full_refresh_running:!full_refresh_inflight surface_context;
     let approval_ticket =
       if not needs.needs_operator_approvals then None
@@ -20282,7 +20299,7 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
         let readings = load_http_scoped_surface_reads ~on_progress:None ~on_dataset:(Some on_dataset) ~surface_request ~ask_request ~refresh_ticket
               ~server_identity:(Ok server_identity) ~host ~port
               ~approval_ticket ~board_query
-              ~provider_history_days
+              ~provider_history_days ~tool_series_days
               ~needs in
         let* confirmed_identity = probe () in
         Ok { readings with http_scoped_server_identity = Ok confirmed_identity }

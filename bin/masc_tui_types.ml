@@ -4523,9 +4523,10 @@ type surface_needs = {
   needs_provider_history : bool;
   needs_overview_goals : bool;
   needs_account_emails : bool;
-  (* The tool-call series Usage's Calls section draws. A surface cannot ask for
-     it: Usage is one surface and Calls one of its sections, so the loop sets
-     it from the open section ([usage_calls_drawn]). *)
+  (* The tool-call series Usage's Calls section and the Dashboard's line draw.
+     A surface cannot ask for it: Usage is one surface and Calls one of its
+     sections, and the two screens draw different windows, so the loop sets it
+     from what is drawn ([tool_series_drawn]). *)
   needs_tool_series : bool;
   (* The operator quiz's scorecard and review rows, read through the lane
      add-on inventory endpoint. Feeds only the Home quiz line. *)
@@ -18513,25 +18514,55 @@ let usage_calls_drawn (state : state) =
   state.view = Metrics && state.usage_section = Usage_calls
   && not state.usage_telemetry_open
 
+(* The days of the series the screen draws, [None] while it draws none. Usage's
+   Calls follows the window [w] cycles. The Dashboard's line is the last day
+   whatever that window holds (RFC-tui-operator-workbench §6.4), so one
+   reading serves one screen at a time and a screen that wants the other
+   window reads again ([take_tool_series_due]). *)
+let tool_series_days (state : state) =
+  if usage_calls_drawn state then Some state.provider_history_days
+  else if state.view = Overview then
+    Some (Masc_tui_usage_calls.days Masc_tui_usage_calls.Last_day)
+  else None
+
+(* The series is on screen: Calls, or the Dashboard's line. *)
+let tool_series_drawn (state : state) = Option.is_some (tool_series_days state)
+
 (* A read of the series answered at [now]: it is owed again after
    [Masc_tui_usage_calls.reread_s]. *)
 let note_tool_series_read (state : state) ~now =
   state.tool_series_reread_at <- Some (now +. Masc_tui_usage_calls.reread_s)
 
-(* Whether the series is owed because its time has come, once per moment. While
-   Calls is not drawn the moment is dropped instead: arriving on Calls reads the
-   series, and a moment kept from before would owe a second read right behind
-   that one. *)
+(* Whether the series is owed, once per moment. It is owed when its time has
+   come, and when the reading holds the other screen's window: Calls and the
+   Dashboard draw different windows and the surface-needs delta cannot see a
+   move between them, because both need the series. That reading is dropped,
+   so the screen says it is reading instead of drawing a window it did not
+   ask for. While no screen draws the series the moment is dropped: arriving
+   on one reads the series, and a moment kept from before would owe a second
+   read right behind that one. *)
 let take_tool_series_due (state : state) ~now =
-  if not (usage_calls_drawn state) then begin
-    state.tool_series_reread_at <- None;
-    false
-  end else
-    match state.tool_series_reread_at with
-    | Some at when at <= now ->
+  match tool_series_days state with
+  | None ->
+      state.tool_series_reread_at <- None;
+      false
+  | Some days ->
+      let holds_other_window =
+        match state.tool_series with
+        | Tool_series_read calls ->
+            Masc_tui_usage_calls.days calls.Masc_tui_usage_calls.window <> days
+        | Tool_series_unread | Tool_series_error _ -> false
+      in
+      if holds_other_window then begin
+        state.tool_series <- Tool_series_unread;
         state.tool_series_reread_at <- None;
         true
-    | Some _ | None -> false
+      end else
+        match state.tool_series_reread_at with
+        | Some at when at <= now ->
+            state.tool_series_reread_at <- None;
+            true
+        | Some _ | None -> false
 
 let usage_history_reading (state : state) =
   match state.usage_scope_id, state.provider_history with

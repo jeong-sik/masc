@@ -374,6 +374,93 @@ let test_a_period_change_and_a_withdrawn_workspace_drop_the_moment () =
   withdraw_usage_workspace state;
   check bool "a withdrawn workspace drops it" true (state.tool_series_reread_at = None)
 
+(* A day of idle hours, cut to the window the way a read does. *)
+let day_of_calls () =
+  let hour = 3600.0 in
+  let first = 1793750400.0 in
+  let series =
+    { Series.tsr_generated_at = first +. (25.0 *. hour)
+    ; tsr_width = Series.Series_hour
+    ; tsr_utc_offset_min = 0
+    ; tsr_buckets =
+        List.init 25 (fun index ->
+          { Series.tsb_start = first +. (float_of_int index *. hour)
+          ; tsb_activity = Series.Series_idle })
+    }
+  in
+  match Calls.of_series Calls.Last_day series with
+  | Ok calls -> calls
+  | Error reason -> failf "the day was refused: %s" reason
+
+let test_a_window_and_its_days_name_each_other () =
+  List.iter
+    (fun window ->
+      check bool "the days name the window" true
+        (Calls.window_of_days (Calls.days window) = Some window))
+    [ Calls.Last_day; Calls.Last_week; Calls.Last_fortnight ]
+
+let test_the_dashboard_draws_the_last_day_whatever_the_period_holds () =
+  let state = state () in
+  state.view <- Overview;
+  List.iter
+    (fun days ->
+      state.provider_history_days <- days;
+      check (option int) "the Dashboard's line is the last day" (Some 1)
+        (tool_series_days state);
+      check bool "so the series is drawn" true (tool_series_drawn state))
+    [ 1; 7; 14 ];
+  state.view <- Metrics;
+  state.usage_section <- Usage_calls;
+  state.provider_history_days <- 7;
+  check (option int) "Calls follows the period" (Some 7) (tool_series_days state);
+  state.usage_telemetry_open <- true;
+  check (option int) "the Telemetry panel draws no series" None (tool_series_days state);
+  state.usage_telemetry_open <- false;
+  state.usage_section <- Usage_trend;
+  check (option int) "another section draws none" None (tool_series_days state);
+  state.view <- Board;
+  check (option int) "another surface draws none" None (tool_series_days state);
+  check bool "so no series is drawn" false (tool_series_drawn state)
+
+let test_moving_between_calls_and_the_dashboard_rereads_the_other_window () =
+  let state = state () in
+  state.provider_history_days <- 14;
+  state.view <- Metrics;
+  state.usage_section <- Usage_calls;
+  state.tool_series <- Tool_series_read (fortnight_of_calls ());
+  note_tool_series_read state ~now:100.0;
+  check bool "Calls owes nothing before its time" false
+    (take_tool_series_due state ~now:100.0);
+  check bool "and keeps the window it asked for" true
+    (state.tool_series <> Tool_series_unread);
+  state.view <- Overview;
+  check bool "the Dashboard owes the series at once" true
+    (take_tool_series_due state ~now:100.0);
+  check bool "the fortnight is dropped, not drawn as the day" true
+    (state.tool_series = Tool_series_unread);
+  check bool "owed once for that move" false (take_tool_series_due state ~now:100.0);
+  state.tool_series <- Tool_series_read (day_of_calls ());
+  note_tool_series_read state ~now:200.0;
+  check bool "the Dashboard keeps a reading of its own window" false
+    (take_tool_series_due state ~now:200.0);
+  state.view <- Metrics;
+  check bool "Calls on 14 days owes the series at once" true
+    (take_tool_series_due state ~now:200.0);
+  check bool "the day is dropped, not drawn as the fortnight" true
+    (state.tool_series = Tool_series_unread)
+
+let test_a_one_day_period_serves_calls_and_the_dashboard_with_one_reading () =
+  let state = state () in
+  state.provider_history_days <- 1;
+  state.view <- Metrics;
+  state.usage_section <- Usage_calls;
+  state.tool_series <- Tool_series_read (day_of_calls ());
+  state.view <- Overview;
+  check bool "the Dashboard owes nothing" false (take_tool_series_due state ~now:1e9);
+  state.view <- Metrics;
+  check bool "nor does Calls on its way back" false (take_tool_series_due state ~now:1e9);
+  check bool "the reading is kept" true (state.tool_series <> Tool_series_unread)
+
 let () = run "usage account continuity"
   ["scope", [test_case "exact source identity" `Quick test_exact_scope_filters_both_sources;
              test_case "refresh and window continuity" `Quick test_refresh_does_not_choose_another_account;
@@ -390,4 +477,8 @@ let () = run "usage account continuity"
              test_case "a moved workspace rereads an unread series" `Quick test_a_moved_workspace_rereads_an_unread_series_only_while_it_is_drawn;
              test_case "the series is owed once a period after its answer" `Quick test_the_series_is_owed_once_a_period_after_its_answer;
              test_case "the moment is dropped while Calls is not drawn" `Quick test_the_moment_is_dropped_while_calls_is_not_drawn;
-             test_case "a period change and a withdrawn workspace drop the moment" `Quick test_a_period_change_and_a_withdrawn_workspace_drop_the_moment]]
+             test_case "a period change and a withdrawn workspace drop the moment" `Quick test_a_period_change_and_a_withdrawn_workspace_drop_the_moment;
+             test_case "a window and its days name each other" `Quick test_a_window_and_its_days_name_each_other;
+             test_case "the Dashboard draws the last day whatever the period holds" `Quick test_the_dashboard_draws_the_last_day_whatever_the_period_holds;
+             test_case "moving between Calls and the Dashboard rereads the other window" `Quick test_moving_between_calls_and_the_dashboard_rereads_the_other_window;
+             test_case "a one day period serves Calls and the Dashboard with one reading" `Quick test_a_one_day_period_serves_calls_and_the_dashboard_with_one_reading]]

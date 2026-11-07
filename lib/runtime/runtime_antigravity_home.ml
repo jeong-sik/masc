@@ -243,28 +243,93 @@ let ensure_private_child parent leaf =
   ensure_private_child_with_sync ~sync_parent:sync_directory parent leaf
 ;;
 
-(* Permissions are the security boundary. Plan mode merely adds an instruction.
+let mcp_server_name = "masc"
+
+(* agy reads these characters as pattern syntax inside a rule, so a path that
+   holds one would widen or break the rule that names it. *)
+let has_permission_pattern_syntax path =
+  String.exists (function '*' | '?' | '[' | ']' | '(' | ')' -> true | _ -> false) path
+;;
+
+(* The three managed paths a policy names besides the workspaces (RFC-0490
+   2.2). agy lists a lazily loaded tool by name and keeps its arguments in
+   [<appDataDir>/mcp/<server>/<tool>.json]; the config folder holds
+   [mcp_config.json] with the bridge bearer; the token file is the account
+   credential. *)
+type policy_paths =
+  { schema_dir : string
+  ; config_dir : string
+  ; token_path : string
+  }
+
+let policy_paths (t : t) =
+  let app_data_dir = Filename.dirname t.settings_path in
+  let paths =
+    { schema_dir = Filename.concat (Filename.concat app_data_dir "mcp") mcp_server_name
+    ; config_dir = Filename.dirname t.mcp_config_path
+    ; token_path = t.oauth_path
+    }
+  in
+  match
+    List.find_opt has_permission_pattern_syntax
+      [ paths.schema_dir; paths.config_dir; paths.token_path ]
+  with
+  | Some path ->
+    Error (Unsafe_directory { path; detail = "managed HOME contains permission-pattern syntax" })
+  | None -> Ok paths
+;;
+
+(* [path] lies at or below [root]. Both are canonical, so whole path
+   components compare; [/a/b] does not hold [/a/bc]. *)
+let path_is_within ~root path =
+  let parts value = String.split_on_char '/' value |> List.filter (fun part -> part <> "") in
+  let rec holds = function
+    | [], _ -> true
+    | root_part :: root_rest, part :: rest -> String.equal root_part part && holds (root_rest, rest)
+    | _ :: _, [] -> false
+  in
+  holds (parts root, parts path)
+;;
+
+(* HIGH-RISK-UNREVIEWED: this table is the antigravity lane's permission
+   boundary (RFC-0490 2.2). Plan mode merely adds an instruction.
    Directory arguments (without glob suffixes) are recursive CLI grants:
-   https://antigravity.google/docs/permissions?tab=cli . *)
-(* Do not emit a wildcard command grant: agy 1.2.11 uses it for both sandboxed and
-   unsandboxed execution, and rejects the former [unsandboxed] action. With
-   --sandbox, the vendor's implicit grant covers sandboxed commands; an escape
-   remains Ask, which print mode cannot approve. Read posture denies both. *)
-let native_settings_json ~posture ~workspaces =
+   https://antigravity.google/docs/permissions?tab=cli .
+   - Deny beats allow. Every posture names the schema folder and the two
+     secret paths. Until L3, Native_none also keeps the all-files read deny,
+     so its schema allow stays shadowed and no read can become an Ask. L3
+     removes the broad deny to open the schema folder. A denied read fails
+     only that call; a read no rule matches is an Ask, which print mode
+     refuses by ending the run.
+   - agy allows reads inside the workspace (cwd and --add-dir) when no rule
+     matches. Native_none keeps each workspace root denied for when L3
+     removes the broader rule.
+   - agy's own appDataDir boundary already refuses the token file. That rule
+     is undocumented and agy updates itself, so the token keeps its own deny;
+     login still works with it (RFC-0490 measurement 8b).
+   - Do not emit a wildcard command grant: agy 1.2.11 uses it for both
+     sandboxed and unsandboxed execution, and rejects the former [unsandboxed]
+     action. With --sandbox, the vendor's implicit grant covers sandboxed
+     commands; an escape remains Ask, which print mode cannot approve. Read
+     posture denies both. *)
+let native_settings_json ~policy ~posture ~workspaces =
   let read = List.map (fun path -> "read_file(" ^ path ^ ")") workspaces in
   let write = List.map (fun path -> "write_file(" ^ path ^ ")") workspaces in
   let allow, deny = match (posture : Runtime_native_tools.posture) with
-    | Native_none -> [], ["read_file(*)"; "write_file(*)"; "command(*)"]
+    | Native_none -> [], "read_file(*)" :: (read @ ["write_file(*)"; "command(*)"])
     | Native_read -> read, ["write_file(*)"; "command(*)"]
     | Native_full -> read @ write, [] in
   let strings values = `List (List.map (fun value -> `String value) values) in
   `Assoc ["permissions", `Assoc
-    ["allow", strings ("mcp(masc/*)" :: allow);
-     "deny", strings (deny @ ["read_url(*)"; "execute_url(*)"])]]
+    ["allow", strings
+       (("mcp(" ^ mcp_server_name ^ "/*)") :: ("read_file(" ^ policy.schema_dir ^ ")") :: allow);
+     "deny", strings
+       (("read_file(" ^ policy.config_dir ^ ")") :: ("read_file(" ^ policy.token_path ^ ")")
+        :: deny @ ["read_url(*)"; "execute_url(*)"])]]
 ;;
 
-let settings_json () =
-  native_settings_json ~posture:Runtime_native_tools.Native_none ~workspaces:[]
+let settings_json policy =
+  native_settings_json ~policy ~posture:Runtime_native_tools.Native_none ~workspaces:[]
 ;;
 
 let write_private_file ~make_error path contents =
@@ -293,11 +358,13 @@ let write_private_file ~make_error path contents =
        Error (make_error path (unix_error_detail error fn arg)))
 ;;
 
-let write_private_settings path =
+let write_private_settings (home : t) =
+  let open Result.Syntax in
+  let* policy = policy_paths home in
   write_private_file
     ~make_error:(fun path detail -> Settings_write_failed { path; detail })
-    path
-    (settings_json () |> Yojson.Safe.pretty_to_string)
+    home.settings_path
+    (settings_json policy |> Yojson.Safe.pretty_to_string)
 ;;
 
 let load_private_oauth_file ~make_error path =
@@ -924,7 +991,7 @@ let prepare_account ~runtime_root ~owner_leaf ~oauth_source =
 
 let prepare ~runtime_root ~owner_leaf ~oauth_source =
   with_prepared_account ~runtime_root ~owner_leaf ~oauth_source (fun home ->
-    let* () = write_private_settings home.settings_path in
+    let* () = write_private_settings home in
     Ok home)
 ;;
 
@@ -933,7 +1000,7 @@ let prepare_for_login ~runtime_root ~owner_leaf =
     let* home_dir = prepare_owner_directory ~runtime_root ~owner_leaf in
     prepare_home_storage ~home_dir ~oauth_seed:None) in
   let home = home_with_keychain ~runtime_root paths in
-  let* () = write_private_settings home.settings_path in
+  let* () = write_private_settings home in
   Ok home
 ;;
 
@@ -949,7 +1016,7 @@ let canonical_workspace path =
       let canonical = Unix.realpath path in
       if not (String.equal path canonical || String.equal path (canonical ^ "/"))
       then Error (Unsafe_directory {path; detail="native workspace must not traverse symbolic links"})
-      else if String.exists (function '*' | '?' | '[' | ']' | '(' | ')' -> true | _ -> false) canonical
+      else if has_permission_pattern_syntax canonical
       then Error (Unsafe_directory {path; detail="native workspace contains permission-pattern syntax"})
       else Ok canonical
   with Unix.Unix_error (error, fn, arg) ->
@@ -1017,10 +1084,23 @@ let prepare_native_tools t ~posture ~workspace ~additional_workspaces =
       let* rest = validate rest in
       Ok (path :: rest) in
   let* additional_workspaces = validate additional_workspaces in
+  (* A Native_none root that held the HOME would shadow the schema allow with
+     its own deny, and its auto-allowed reads would reach the HOME's other
+     files. *)
+  let* () = match (posture : Runtime_native_tools.posture) with
+    | Native_none ->
+      (match
+         List.find_opt (fun root -> path_is_within ~root t.home_dir) (cwd :: additional_workspaces)
+       with
+       | Some root ->
+         Error (Unsafe_directory { path = root; detail = "a Native_none workspace holds the managed HOME" })
+       | None -> Ok ())
+    | Native_read | Native_full -> Ok () in
+  let* policy = policy_paths t in
   let* () = write_private_file
     ~make_error:(fun path detail -> Settings_write_failed {path; detail})
     t.settings_path
-    (native_settings_json ~posture ~workspaces:(cwd :: additional_workspaces)
+    (native_settings_json ~policy ~posture ~workspaces:(cwd :: additional_workspaces)
      |> Yojson.Safe.pretty_to_string) in
   Ok cwd
 ;;
@@ -1108,8 +1188,7 @@ module For_testing = struct
     }
   ;;
 
-  let settings_json = settings_json
-  let native_settings_json = native_settings_json
+  let settings_json t = Result.map settings_json (policy_paths t)
   let security_environment = security_environment
   let replace_keychain = replace_keychain
 end

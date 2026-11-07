@@ -1323,9 +1323,13 @@ prompt = sys.stdin.read()
 assert "runtime_readiness_challenge" in prompt
 home = Path(os.environ["HOME"])
 settings = json.loads((home / ".gemini/antigravity-cli/settings.json").read_text())
-assert settings["permissions"]["allow"] == ["mcp(masc/*)"]
+assert settings["permissions"]["allow"] == ["mcp(masc/*)", "read_file(" + str(home / ".gemini/antigravity-cli/mcp/masc") + ")"]
 assert "command(*)" in settings["permissions"]["deny"]
 assert "read_file(*)" in settings["permissions"]["deny"]
+assert os.getcwd() == str(home / "native-workspace")
+assert "read_file(" + os.getcwd() + ")" in settings["permissions"]["deny"]
+assert "read_file(" + str(home / ".gemini/config") + ")" in settings["permissions"]["deny"]
+assert "read_file(" + str(home / ".gemini/antigravity-cli/antigravity-oauth-token") + ")" in settings["permissions"]["deny"]
 config = json.loads((home / ".gemini/config/mcp_config.json").read_text())
 assert list(config["mcpServers"]) == ["masc"]
 server = config["mcpServers"]["masc"]

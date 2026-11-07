@@ -97,7 +97,11 @@ import json, os
 with open(os.path.join(os.environ["HOME"], ".gemini/antigravity-cli/settings.json")) as f:
     permissions = json.load(f)["permissions"]
 cwd = os.getcwd()
-assert permissions["allow"] == ["mcp(masc/*)", "read_file(" + cwd + ")"]
+home = os.environ["HOME"]
+assert permissions["allow"] == ["mcp(masc/*)", "read_file(" + home + "/.gemini/antigravity-cli/mcp/masc)", "read_file(" + cwd + ")"]
+assert "read_file(*)" not in permissions["deny"]
+assert "read_file(" + home + "/.gemini/config)" in permissions["deny"]
+assert "read_file(" + home + "/.gemini/antigravity-cli/antigravity-oauth-token)" in permissions["deny"]
 assert "write_file(*)" in permissions["deny"]
 assert "command(*)" in permissions["deny"]
 assert "unsandboxed(*)" not in permissions["deny"]

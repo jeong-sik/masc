@@ -623,17 +623,23 @@ let probe_antigravity_invocation ~sw ~net ~secure_random ~mgr ~clock ~fs ~base_p
              let seen = ref [] in
              let probe_tool = recording_dynamic_tool ~schema ~seen in
              let runtime_root = Common.masc_dir_from_base_path ~base_path in
+             (* The probe runs in the HOME's own empty folder. [base_path] would
+                make every Keeper's account files under [.masc] its workspace,
+                which agy reads without a rule (RFC-0490 2.2). *)
              (match
-                Runtime_antigravity_home.prepare
+                Runtime_antigravity_home.prepare_native
                   ~runtime_root
                   ~owner_leaf:antigravity_probe_owner_leaf
                   ~oauth_source:exec.oauth_source
+                  ~posture:Runtime_native_tools.Native_none
+                  ~workspace:Runtime_antigravity_home.Private_workspace
+                  ~additional_workspaces:[]
               with
               | Error error ->
                 Error
                   (Antigravity_home_unavailable
                      (Runtime_antigravity_home.error_to_string error))
-              | Ok home ->
+              | Ok (home, native_cwd) ->
                 (* Released with the switch so a probe cannot leave a live MCP
                    URL in a HOME the next probe reuses. *)
                 Eio.Switch.on_release sw (fun () ->
@@ -646,7 +652,7 @@ let probe_antigravity_invocation ~sw ~net ~secure_random ~mgr ~clock ~fs ~base_p
                     ~sw
                     ~net
                     ~secure_random
-                    ~server_name:"masc"
+                    ~server_name:Runtime_antigravity_home.mcp_server_name
                     ~tool_specs:(fun () -> [ mcp_tool_spec probe_tool ])
                     ~tool_execution_mode:(fun ~name ~arguments ->
                       if String.equal name probe_tool.name then Some (probe_tool.execution_mode arguments)
@@ -680,7 +686,7 @@ let probe_antigravity_invocation ~sw ~net ~secure_random ~mgr ~clock ~fs ~base_p
                  | Ok () ->
                    let config : Runtime_antigravity.config =
                      { cli_path = exec.cli_path
-                     ; cwd = base_path
+                     ; cwd = native_cwd
                      ; add_dirs = []
                      ; model = exec.model
                      ; agent = exec.agent
@@ -702,7 +708,7 @@ let probe_antigravity_invocation ~sw ~net ~secure_random ~mgr ~clock ~fs ~base_p
                         ~home_dir:(Runtime_antigravity_home.home_dir home)
                         ~mgr
                         ~clock
-                        ~cwd:Eio.Path.(fs / base_path)
+                        ~cwd:Eio.Path.(fs / native_cwd)
                         config
                         ~prompt
                     with

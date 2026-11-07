@@ -9,11 +9,15 @@ let run ~secure_random ~net ~mgr ~clock ~cwd ~directory ~oauth_source ~config ~t
     if not created then Error Private_home_unavailable else (
       (* Registered first: subprocess/listener releases run before HOME cleanup. *)
       Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree runtime_root);
-      match Runtime_antigravity_home.prepare ~runtime_root ~owner_leaf:"readiness" ~oauth_source with
+      (* The turn runs in the HOME's own empty folder, not in [cwd], which
+         holds the HOME itself (RFC-0490 2.2). *)
+      match Runtime_antigravity_home.prepare_native ~runtime_root ~owner_leaf:"readiness" ~oauth_source
+          ~posture:Runtime_native_tools.Native_none ~workspace:Runtime_antigravity_home.Private_workspace
+          ~additional_workspaces:[] with
       | Error _ -> Error Private_home_unavailable
-      | Ok home ->
+      | Ok (home, native_cwd) ->
         let bridge = Runtime_official_client_mcp_http.start ~sw ~net ~secure_random
-          ~server_name:"masc"
+          ~server_name:Runtime_antigravity_home.mcp_server_name
           ~tool_specs:(fun () -> [`Assoc [
             "name", `String tool.Runtime_official_client_tool.name;
             "description", `String tool.description; "inputSchema", tool.input_schema]])
@@ -31,5 +35,5 @@ let run ~secure_random ~net ~mgr ~clock ~cwd ~directory ~oauth_source ~config ~t
         | Error _ -> Error Private_home_unavailable
         | Ok () ->
           Runtime_antigravity.run_turn ~home_dir:(Runtime_antigravity_home.home_dir home)
-            ~mgr ~clock ~cwd config ~prompt
+            ~mgr ~clock ~cwd:Eio.Path.(cwd / native_cwd) { config with cwd = native_cwd } ~prompt
           |> Result.map_error (fun error -> Client_error error)))

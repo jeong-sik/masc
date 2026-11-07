@@ -77,9 +77,21 @@ let test_prepares_private_home_with_oauth_seed () =
     "settings contract"
     true
     (Yojson.Safe.equal
-       (Runtime_antigravity_home.For_testing.settings_json ())
+       (Runtime_antigravity_home.For_testing.settings_json layout |> require_ok)
        (Yojson.Safe.from_file paths.settings_path));
-  (match Runtime_antigravity_home.For_testing.settings_json () with
+  (let open Yojson.Safe.Util in
+   let permissions = Yojson.Safe.from_file paths.settings_path |> member "permissions" in
+   let rules field = permissions |> member field |> to_list |> List.map to_string in
+   check (list string) "default row grants masc tools and their schema folder"
+     [ "mcp(masc/*)"
+     ; "read_file(" ^ Filename.concat (Filename.dirname paths.settings_path) "mcp/masc" ^ ")" ]
+     (rules "allow");
+   check (list string) "default row denies the secrets by name, all reads, effects and network"
+     [ "read_file(" ^ Filename.dirname paths.mcp_config_path ^ ")"
+     ; "read_file(" ^ paths.oauth_path ^ ")"
+     ; "read_file(*)"; "write_file(*)"; "command(*)"; "read_url(*)"; "execute_url(*)" ]
+     (rules "deny"));
+  (match Runtime_antigravity_home.For_testing.settings_json layout |> require_ok with
    | `Assoc fields ->
      check
        bool
@@ -102,6 +114,29 @@ let test_prepares_private_home_with_oauth_seed () =
     (Fs_compat.load_file oauth_source);
   check bool "MCP capability is not persisted by HOME preparation" false
     (Sys.file_exists paths.mcp_config_path)
+;;
+
+(* A managed path that held pattern syntax would widen or break the rule
+   naming it, so the HOME is refused before any policy is written. *)
+let test_pattern_syntax_in_managed_home_is_refused () =
+  with_temp_root @@ fun root ->
+  let runtime_root = Filename.concat root "wild*root" in
+  Unix.mkdir runtime_root 0o700;
+  let source = Filename.concat root "source" in
+  write_file ~mode:0o600 source (Masc_test_deps.antigravity_oauth_fixture "synthetic");
+  match Runtime_antigravity_home.prepare ~runtime_root ~owner_leaf:"native-policy" ~oauth_source:source with
+  | Error (Runtime_antigravity_home.Unsafe_directory { detail; _ }) ->
+    check string "refusal names the pattern syntax" "managed HOME contains permission-pattern syntax" detail;
+    let rec settings_files dir =
+      Sys.readdir dir |> Array.to_list |> List.concat_map (fun name ->
+        let path = Filename.concat dir name in
+        match (Unix.lstat path).Unix.st_kind with
+        | Unix.S_DIR -> settings_files path
+        | _ -> if String.equal name "settings.json" then [ path ] else [])
+    in
+    check (list string) "no policy was written" [] (settings_files runtime_root)
+  | Error error -> fail (Runtime_antigravity_home.error_to_string error)
+  | Ok _ -> fail "a HOME whose path holds a glob character was prepared"
 ;;
 
 let test_keeper_account_switch_preserves_each_refreshed_home () =
@@ -682,11 +717,19 @@ let test_native_permissions_match_posture_and_workspace () =
       ~oauth_source:source |> require_ok in
   let workspace = Filename.concat runtime_root "workspace" in
   Unix.mkdir workspace 0o700;
+  let paths = Runtime_antigravity_home.For_testing.paths home in
+  (* RFC-0490 2.2: every posture names the lazily loaded masc tools' schema
+     folder and the two secret paths. Native_none keeps its all-files deny
+     until L3, so it cannot read that folder before the hook. *)
+  let schema_allow =
+    "read_file(" ^ Filename.concat (Filename.dirname paths.settings_path) "mcp/masc" ^ ")" in
+  let secret_denies =
+    [ "read_file(" ^ Filename.dirname paths.mcp_config_path ^ ")"
+    ; "read_file(" ^ paths.oauth_path ^ ")" ] in
   let check_policy posture expected_allow expected_deny =
     let cwd = Runtime_antigravity_home.prepare_native_tools home ~additional_workspaces:[] ~posture
         ~workspace:(Runtime_antigravity_home.Shared_workspace workspace) |> require_ok in
     check string "native cwd is the actual granted directory" workspace cwd;
-    let paths = Runtime_antigravity_home.For_testing.paths home in
     let open Yojson.Safe.Util in
     let settings = Yojson.Safe.from_file paths.settings_path |> member "permissions" in
     let rules field = settings |> member field |> to_list |> List.map to_string in
@@ -695,17 +738,44 @@ let test_native_permissions_match_posture_and_workspace () =
     check bool "no workspace-wide root read" false
       (List.mem ("read_file(" ^ runtime_root ^ ")") (rules "allow"));
     check bool "no all-files read" false (List.mem "read_file(*)" (rules "allow"));
+    (match posture with
+     | Runtime_native_tools.Native_none ->
+       check bool "Native_none keeps the all-files deny until the hook lands" true
+         (List.mem "read_file(*)" (rules "deny"))
+     | Native_read | Native_full ->
+       check bool "post-hook postures do not shadow the schema allow" false
+         (List.mem "read_file(*)" (rules "deny")));
     check bool "no command grant can authorize sandbox escape" false
       (List.mem "command(*)" (rules "allow"));
     check bool "no unsupported unsandboxed rule" false
       (List.mem "unsandboxed(*)" (rules "deny")) in
   let network_denies = ["read_url(*)"; "execute_url(*)"] in
+  (* Until L3, the all-files deny keeps an unmatched read from becoming an
+     Ask. The workspace deny remains for when L3 removes the broader rule. *)
+  check_policy Runtime_native_tools.Native_none
+    ["mcp(masc/*)"; schema_allow]
+    (secret_denies @ ["read_file(*)"; "read_file(" ^ workspace ^ ")"; "write_file(*)"; "command(*)"] @ network_denies);
   check_policy Runtime_native_tools.Native_read
-    ["mcp(masc/*)"; "read_file(" ^ workspace ^ ")"]
-    (["write_file(*)"; "command(*)"] @ network_denies);
+    ["mcp(masc/*)"; schema_allow; "read_file(" ^ workspace ^ ")"]
+    (secret_denies @ ["write_file(*)"; "command(*)"] @ network_denies);
   check_policy Runtime_native_tools.Native_full
-    ["mcp(masc/*)"; "read_file(" ^ workspace ^ ")";
-     "write_file(" ^ workspace ^ ")"] network_denies;
+    ["mcp(masc/*)"; schema_allow; "read_file(" ^ workspace ^ ")";
+     "write_file(" ^ workspace ^ ")"] (secret_denies @ network_denies);
+  (* The runtime root itself is refused by the runtime-root rule before the
+     HOME rule is reached, so a root that holds the HOME but not the runtime
+     root is the HOME's parent folder. *)
+  let before_refusal = Fs_compat.load_file paths.settings_path in
+  let home_holder = Filename.dirname (Runtime_antigravity_home.home_dir home) in
+  (match Runtime_antigravity_home.prepare_native_tools home ~additional_workspaces:[]
+           ~posture:Runtime_native_tools.Native_none
+           ~workspace:(Runtime_antigravity_home.Shared_workspace home_holder) with
+   | Error (Runtime_antigravity_home.Unsafe_directory { path; detail }) ->
+     check string "refused root" home_holder path;
+     check string "refusal names the HOME" "a Native_none workspace holds the managed HOME" detail
+   | Error error -> fail (Runtime_antigravity_home.error_to_string error)
+   | Ok _ -> fail "a Native_none workspace holding the HOME was granted");
+  check string "a refused root leaves the published policy as it was" before_refusal
+    (Fs_compat.load_file paths.settings_path);
   with_temp_root @@ fun operator_root ->
   let extra = Filename.concat operator_root "operator-extra" in
   Unix.mkdir extra 0o700;
@@ -1605,6 +1675,8 @@ let () =
             test_native_permissions_match_posture_and_workspace
         ; test_case "native roots never overlap the runtime root" `Quick
             test_native_roots_never_overlap_the_runtime_root
+        ; test_case "pattern syntax in the managed HOME is refused" `Quick
+            test_pattern_syntax_in_managed_home_is_refused
         ; test_case "Keeper account selection and refresh" `Quick
             test_keeper_account_switch_preserves_each_refreshed_home
         ; test_case "corrupt generation refuses without reseed" `Quick

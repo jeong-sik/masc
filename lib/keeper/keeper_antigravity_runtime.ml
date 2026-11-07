@@ -120,12 +120,10 @@ let home_error_to_core_error error =
     (Runtime_antigravity_home.error_to_string error)
 ;;
 
-(* Antigravity sends a tool's schema to the model only when the MCP config
-   marks it [eager]. For a tool without that mark the model has to read a
-   schema file first, and a masc home denies [read_file]
-   ({!Runtime_official_client_mcp_http.mcp_config_json}), so such a tool
-   would be called without its schema. Every tool is therefore eager on this
-   lane, whatever its declared [loading]. *)
+(* Antigravity sends a tool's schema to the model up front only when the MCP
+   config marks it [eager] ({!Runtime_official_client_mcp_http.mcp_config_json}).
+   Every tool is eager on this lane, whatever its declared [loading];
+   RFC-0490 L4 removes the mark. *)
 let eager_tool_names (tools : Host.dynamic_tool list) =
   List.map (fun (tool : Host.dynamic_tool) -> tool.name) tools
 ;;
@@ -1060,7 +1058,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
               ~sw
               ~net:(Eio.Stdenv.net env)
               ~secure_random:(Eio.Stdenv.secure_random env)
-              ~server_name:"masc"
+              ~server_name:Runtime_antigravity_home.mcp_server_name
               ~tool_specs:(fun () -> List.map tool_spec dynamic_tools)
               ~tool_execution_mode:(fun ~name ~arguments ->
                 find_tool dynamic_tools name |> Option.map (fun (tool : Host.dynamic_tool) ->

@@ -149,7 +149,7 @@ agy 의 지연 목록에는 이름만 있다. 인자는 `<appDataDir>/mcp/<serve
 | 층 | 내용 | 확인 |
 | --- | --- | --- |
 | L1 | 이 RFC 와 근거 | 리뷰 |
-| L2 | settings 표(2.2), probe·readiness 의 cwd | 자세별 settings JSON 시험(allow·deny 경로, `Native_read`·`Native_full` 은 `read_file(*)` 없음, `Native_none` 은 L3 전까지 유지, `Native_none` workspace 루트 deny, HOME 을 품은 루트 거부). 일회용 HOME 에서 schema 읽힘·설정 폴더 거절·토큰 경로 거절·workspace 읽기 거절 실측. 같은 경로를 `..`·symlink·상대 경로로 적은 읽기도 거절되는지 실측 |
+| L2 | settings 표(2.2), probe·readiness 의 cwd | 자세별 settings JSON 시험(allow·deny 경로, `Native_read`·`Native_full` 은 `read_file(*)` 없음, `Native_none` 은 L3 전까지 유지, `Native_none` workspace 루트 deny, HOME 을 품은 루트 거부). 일회용 HOME 에서 `Native_read`·`Native_full`의 schema 읽힘·`Native_none`의 `read_file(*)` 유지·설정 폴더 거절·토큰 경로 거절·workspace 읽기 거절 실측. 같은 경로를 `..`·symlink·상대 경로로 적은 읽기도 거절되는지 실측 |
 | L2b | agy 자동 업데이트 끄기(2.4) | 환경 시험: home 이 있든 없든 환경에 `AGY_CLI_DISABLE_AUTO_UPDATE=true` 가 한 번만 있다. 일회용 HOME 에서 `updater/` 폴더가 생기지 않는다 |
 | L3 | hook 실행 파일 `masc-antigravity-path-hook`(2.3)과 `hooks.json` 게시 | hook 판정 시험(허용 루트 안·밖, symlink 탈출, 계약 밖 입력, 경로 없는 도구). 서버 옆에 실행 파일이 없으면 home 준비가 실패한다. 일회용 HOME 에서 결정 없는 출력의 모양, 허용 밖 읽기 뒤 턴이 이어지는지, `write_file`·`edit_file` 의 경로 인자 이름 실측 |
 | L4 | eager 제거(2.1), readiness·probe 를 지연 길로 | type-check. readiness 가 `call_mcp_tool` 로 통과 |

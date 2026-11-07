@@ -124,7 +124,6 @@
   cohttp
   cohttp-eio
   masc.agent_core
-  masc.agent_core.base
   masc.agent_core.llm_provider
   masc_schedule
   masc.tool_types

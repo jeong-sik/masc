@@ -49,6 +49,12 @@ def health_payload() -> dict:
         "added": 1,
         "removed": 0,
         "snapshot_present": True,
+        "age_bins": {
+            "under_hour": 1,
+            "under_day": 0,
+            "under_week": 0,
+            "older": 0,
+        },
         "context_cycle": context_cycle,
         "librarian": librarian,
         "librarian_failures": 0,
@@ -64,7 +70,7 @@ def health_payload() -> dict:
         "alerts": [],
     }
     return {
-        "schema": "keeper.memory_os.current_health.v8",
+        "schema": "keeper.memory_os.current_health.v9",
         "generated_at": 1.0,
         "execution": {
             "schema": "keeper.memory_execution_availability.v1",

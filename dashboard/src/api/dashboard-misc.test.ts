@@ -15,7 +15,7 @@ import {
 
 function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
   return {
-    schema: 'keeper.memory_os.current_health.v8',
+    schema: 'keeper.memory_os.current_health.v9',
     generated_at: 1_700_000_000,
     keepers: [{
       keeper_id: 'healthy',
@@ -29,6 +29,12 @@ function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
       added: 1,
       removed: 2,
       snapshot_present: true,
+      age_bins: {
+        under_hour: 1,
+        under_day: 1,
+        under_week: 1,
+        older: 1,
+      },
       context_cycle: { saved: null, saved_read_error: null, read_position: null, read_position_read_error: null, rewriting_through: null, unread: { snapshot: { kind: 'available', messages: [] }, memory: { kind: 'available', messages: [] } }, prepared: null, synthesis: null },
       librarian: {
         state: 'drained',
@@ -64,6 +70,7 @@ function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
       added: 0,
       removed: 0,
       snapshot_present: false,
+      age_bins: null,
       context_cycle: { saved: null, saved_read_error: null, read_position: null, read_position_read_error: null, rewriting_through: null, unread: { snapshot: { kind: 'available', messages: [] }, memory: { kind: 'available', messages: [] } }, prepared: null, synthesis: null },
       librarian: {
         state: 'drained',
@@ -128,7 +135,7 @@ function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
 
 function starvingKeeperPayload(): KeeperMemoryHealthResponse {
   return {
-    schema: 'keeper.memory_os.current_health.v8',
+    schema: 'keeper.memory_os.current_health.v9',
     generated_at: 1_700_000_000,
     keepers: [{
       keeper_id: 'starving',
@@ -142,6 +149,7 @@ function starvingKeeperPayload(): KeeperMemoryHealthResponse {
       added: 0,
       removed: 0,
       snapshot_present: false,
+      age_bins: null,
       context_cycle: { saved: null, saved_read_error: null, read_position: null, read_position_read_error: null, rewriting_through: null, unread: { snapshot: { kind: 'available', messages: [] }, memory: { kind: 'available', messages: [] } }, prepared: null, synthesis: null },
       librarian: {
         state: 'drained',
@@ -370,13 +378,19 @@ describe('fetchKeeperMemoryHealth', () => {
 
     const response = await fetchKeeperMemoryHealth()
 
-    expect(response.schema).toBe('keeper.memory_os.current_health.v8')
+    expect(response.schema).toBe('keeper.memory_os.current_health.v9')
     expect(response.keepers[0]).toMatchObject({
       keeper_id: 'healthy',
       revision: 7,
       updated_at: 1_699_999_900,
       facts: 4,
       snapshot_bytes: 512,
+      age_bins: {
+        under_hour: 1,
+        under_day: 1,
+        under_week: 1,
+        older: 1,
+      },
     })
     expect(response.keepers[1]?.read_error).toBe('invalid current snapshot')
     expect(response.keepers[1]?.updated_at).toBeNull()

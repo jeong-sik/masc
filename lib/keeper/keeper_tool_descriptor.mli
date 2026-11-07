@@ -219,6 +219,12 @@ val sandbox_to_string : sandbox -> string
 
 
 val runtime_handler_to_string : runtime_handler -> string
+
+(** The retained export a Lane Add-on handler calls into. Every handler the
+    host implements itself answers [None]; a new handler is classified here
+    and nowhere else. *)
+val lane_addon_export : runtime_handler -> Lane_addon_tool_export.t option
+
 val tool_kind_to_string : tool_kind -> string
 
 (** Strict parse of {!tool_kind_to_string} output. Unknown strings are an

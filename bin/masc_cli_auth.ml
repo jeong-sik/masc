@@ -138,11 +138,12 @@ let draw_bytes = 32
    before it routes (Server_request_authority). *)
 let preview_handler ~trust_policy router (_ : Eio.Net.Sockaddr.stream) gluten_reqd =
   let reqd = gluten_reqd.Gluten.Reqd.reqd in
+  let neutral_reqd = Masc.Http_reqd.of_gluten gluten_reqd in
   let request = Httpun.Reqd.request reqd in
   match Server_request_authority.classify_http1_request ~trust_policy request with
   | Server_request_authority.Single authority ->
     Server_request_authority.with_current authority (fun () ->
-      Masc.Http_server_eio.Router.dispatch router request reqd)
+      Masc.Http_server_eio.Router.dispatch router request neutral_reqd)
   | Server_request_authority.Missing
   | Server_request_authority.Multiple
   | Server_request_authority.Malformed
@@ -150,7 +151,7 @@ let preview_handler ~trust_policy router (_ : Eio.Net.Sockaddr.stream) gluten_re
     Masc.Http_server_eio.Response.text
       ~status:`Bad_request
       (Printf.sprintf "the Host of the request is not %s" preview_host)
-      reqd
+      neutral_reqd
 ;;
 
 let serve_preview ~base_path ~store ~port github =

@@ -19,6 +19,7 @@ module Upload_lease = Browser_upload_lease
 module Document = Browser_document
 module Capture = Browser_capture_options
 module Lane_name = Browser_lane_name
+module Backend = Browser_backend
 
 (* Shared default for ordinary browser transport requests, in core and workers. *)
 let default_timeout_sec = 20.

@@ -526,16 +526,30 @@ let load_prompts_from_directory dir =
    here would stop the first override written in an unpinned process.
    The pin is re-read under the mutex: a pin that landed between the scan
    and the commit wins and the scan is dropped. *)
-let dune_sourceroot_markdown_dir =
-  lazy
-    (match Sys.getenv_opt "DUNE_SOURCEROOT" with
-    | None -> None
-    | Some root ->
-        let dir = Filename.concat (Filename.concat root "config") "prompts" in
-        if Sys.file_exists dir && Sys.is_directory dir then Some dir else None)
+(* Memo on first ask. The probe is deterministic (env + filesystem check),
+   so racing memo writers store the same value; concurrent askers never sit
+   on a [Lazy] cell, which [Lazy.force] from concurrent fibers can make
+   raise [Lazy.Undefined] or block the domain (audit 8/8 #49747 category 1). *)
+let dune_sourceroot_markdown_dir_cache : string option Atomic.t = Atomic.make None
+
+let dune_sourceroot_markdown_dir () =
+  match Atomic.get dune_sourceroot_markdown_dir_cache with
+  | None ->
+    let computed =
+      match Sys.getenv_opt "DUNE_SOURCEROOT" with
+      | None -> None
+      | Some root ->
+          let dir = Filename.concat (Filename.concat root "config") "prompts" in
+          if Sys.file_exists dir && Sys.is_directory dir then Some dir else None
+    in
+    (* The probe is deterministic, so a racing memo writer stores the same
+       value. *)
+    Atomic.set dune_sourceroot_markdown_dir_cache computed;
+    computed
+  | memo -> memo
 
 let pin_dune_sourceroot_markdown_dir () =
-  match Lazy.force dune_sourceroot_markdown_dir with
+  match dune_sourceroot_markdown_dir () with
   | None -> None
   | Some dir ->
       let registrations = scan_prompt_directory dir in

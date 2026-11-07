@@ -10,6 +10,11 @@ module Runtime_id : Authz_id.S
 module Provider_account_id : Authz_id.S
 module Grant_id : Authz_id.S
 module Policy_id : Authz_id.S
+
+(** The id of a browser session (plan C3). The cookie carries it with the
+    secret of the session; the log names the session by it. *)
+module Session_id : Authz_id.S
+
 module Workspace_id : Authz_id.S
 module Invite_id : Authz_id.S
 

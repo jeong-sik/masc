@@ -10,8 +10,8 @@ status: reference
 | Team | Server |
 | Maps to | `lib/server/`, `lib/sse.ml`, `lib/transport.ml`, `lib/http_server_eio.ml`, `lib/mcp_server_eio*.ml`, `bin/main_eio.ml`, `bin/main_stdio_eio.ml` |
 | Dependencies | 02-types-and-invariants |
-| Modules | 61 |
-| LOC | ~17,700 |
+| Modules | `lib/server/` and the files in Maps to are the inventory SSOT |
+| LOC | Derived from the source tree, not duplicated here |
 
 ---
 
@@ -233,7 +233,7 @@ type tool_profile =
 
 ## 5. SSE Event Streaming
 
-**소스**: `lib/sse.ml` (474 LOC)
+**소스**: `lib/sse.ml`
 
 ### 5.1 동시성 모델
 
@@ -431,7 +431,7 @@ HTTP/1.1 입구와 HTTP/2 gateway 는 rate limit 과 MCP origin 검사 다음, �
 
 ## 7. Authentication
 
-**소스**: `lib/auth/auth.ml` (435 LOC), `lib/server/server_auth.ml` (491 LOC)
+**소스**: `lib/auth/auth.ml`, `lib/server/server_auth.ml`
 
 ### 7.1 인증 모델
 
@@ -521,7 +521,7 @@ client는 허용한다. 로컬 Vite cross-port는 명시된 loopback dev-origin 
 
 ## 8. HTTP/2 Gateway
 
-**소스**: `lib/server/server_h2_gateway.ml` (740 LOC) + helpers/routes (814 LOC)
+**소스**: `lib/server/server_h2_gateway.ml` + helpers/routes
 
 ### 8.1 활성화
 
@@ -556,7 +556,7 @@ Cloudflare tunnel origin은 cleartext h2(h2c)를 지원하지 않는다. 따라�
 
 ## 9. WebSocket Transport
 
-**소스**: `lib/server/server_mcp_transport_ws.ml` (160 LOC)
+**소스**: `lib/server/server_mcp_transport_ws.ml`
 
 ### 9.1 활성화
 
@@ -618,7 +618,7 @@ Protobuf 바이너리를 gRPC 프레이밍으로 전송. 타입은 `proto/masc_w
 
 ## 12. Stdio Transport
 
-**소스**: `bin/main_stdio_eio.ml` (50 LOC), `lib/mcp_server_eio.ml` (`run_stdio`), `lib/mcp_server_eio_protocol.ml` (`detect_mode`)
+**소스**: `bin/main_stdio_eio.ml`, `lib/mcp_server_eio.ml` (`run_stdio`), `lib/mcp_server_eio_protocol.ml` (`detect_mode`)
 
 ### 12.1 Protocol Detection
 
@@ -714,7 +714,7 @@ sequenceDiagram
 
 ## 14. Server Bootstrap
 
-**소스**: `lib/server/server_runtime_bootstrap.ml` (688 LOC)
+**소스**: `lib/server/server_runtime_bootstrap.ml`
 
 부트스트랩 순서 (`run_server` -> `Server_runtime_bootstrap.run`):
 
@@ -831,50 +831,48 @@ sequenceDiagram
 
 ### 18.1 Core Server (lib/)
 
-| Module | LOC | 역할 |
-|--------|-----|------|
-| `mcp_server_eio.ml` | 220 | JSON-RPC 핸들러 조립 (include 기반) |
-| `mcp_server_eio_protocol.ml` | 637 | initialize/ping/tools 메서드 디스패치 |
-| `mcp_server_eio_execute.ml` | 587 | 도구 실행 엔진 |
-| `mcp_server_eio_call_tool.ml` | 361 | 도구 호출 래퍼 |
-| `mcp_server_eio_tool_profile.ml` | 508 | Profile별 도구 필터링 |
-| `mcp_server_eio_resource.ml` | 335 | MCP Resource/Prompt 핸들러 |
-| `server_routes_http_routes_dashboard.ml` | - | Keeper Gate dashboard routes |
-| `sse.ml` | 474 | SSE event registry + broadcast |
-| `sse_workspace_filter.ml` | 63 | Workspace별 SSE 필터링 |
-| `keeper_event_bridge.ml` | - | Agent Core Event_bus -> SSE 이벤트 브릿지 |
-| `transport.ml` | 674 | 프로토콜 바인딩 추상화 + OpenAPI 생성 |
-| `http_server_eio.ml` | 675 | httpun-eio 래퍼 (Router, Compression) |
-| `auth.ml` | 435 | 인증/인가 코어 |
+| Module | 역할 |
+|--------|------|
+| `mcp_server_eio.ml` | JSON-RPC 핸들러 조립 (include 기반) |
+| `mcp_server_eio_protocol.ml` | initialize/ping/tools 메서드 디스패치 |
+| `mcp_server_eio_execute.ml` | 도구 실행 엔진 |
+| `mcp_server_eio_call_tool.ml` | 도구 호출 래퍼 |
+| `mcp_server_eio_tool_profile.ml` | Profile별 도구 필터링 |
+| `mcp_server_eio_resource.ml` | MCP Resource/Prompt 핸들러 |
+| `server_routes_http_routes_dashboard.ml` | Keeper Gate dashboard routes |
+| `sse.ml` | SSE event registry + broadcast |
+| `keeper_event_bridge.ml` | Agent Core Event_bus -> SSE 이벤트 브릿지 |
+| `transport.ml` | 프로토콜 바인딩 추상화 + OpenAPI 생성 |
+| `http_server_eio.ml` | httpun-eio 래퍼 (Router, Compression) |
+| `auth.ml` | 인증/인가 코어 |
 
 ### 18.2 Server Sub-library (lib/server/)
 
-| Module | LOC | 역할 |
-|--------|-----|------|
-| `server_runtime_bootstrap.ml` | 688 | 서버 부트스트랩 전체 |
-| `server_mcp_transport_http.ml` | 924 | HTTP MCP 트랜스포트 통합 |
-| `server_mcp_transport_http_mcp_handlers.ml` | 451 | POST/GET/DELETE /mcp 핸들러 |
-| `server_mcp_transport_http_session.ml` | 225 | MCP 세션 상태 관리 |
+| Module | 역할 |
+|--------|------|
+| `server_runtime_bootstrap.ml` | 서버 부트스트랩 전체 |
+| `server_mcp_transport_http.ml` | HTTP MCP 트랜스포트 통합 |
+| `server_mcp_transport_http_session.ml` | MCP 세션 상태 관리 |
 | `server_mcp_transport_http_conn.ml` | SSE 연결 registry + rate limiter |
-| `server_mcp_transport_http_headers.ml` | 204 | HTTP 헤더 유틸리티 |
-| `server_mcp_transport_http_protocol.ml` | 135 | 프로토콜 버전/세션 유효성 |
-| `server_h2_gateway.ml` | 740 | HTTP/2 게이트웨이 (전체 라우팅) |
-| `server_h2_gateway_routes_extra.ml` | 171 | H2 추가 라우트 |
-| `server_mcp_transport_ws.ml` | 160 | WebSocket 트랜스포트 |
-| `server_auth.ml` | 491 | HTTP 레벨 인증/권한 |
-| `server_routes_http.ml` | 17 | 라우트 조립 진입점 |
-| `server_dashboard_http.ml` | 566 | Dashboard API 핸들러 |
-| `server_utils.ml` | 120 | 공용 유틸리티 |
+| `server_mcp_transport_http_headers.ml` | HTTP 헤더 유틸리티 |
+| `server_mcp_transport_http_protocol.ml` | 프로토콜 버전/세션 유효성 |
+| `server_h2_gateway.ml` | HTTP/2 게이트웨이 (전체 라우팅) |
+| `server_h2_gateway_routes_extra.ml` | H2 추가 라우트 |
+| `server_mcp_transport_ws.ml` | WebSocket 트랜스포트 |
+| `server_auth.ml` | HTTP 레벨 인증/권한 |
+| `server_routes_http.ml` | 라우트 조립 진입점 |
+| `server_dashboard_http.ml` | Dashboard API 핸들러 |
+| `server_utils.ml` | 공용 유틸리티 |
 
 ### 18.3 gRPC
 
-| Module | LOC | 역할 |
-|--------|-----|------|
-| `lib/server/masc_grpc_types.ml` | 596 | gRPC 메시지 타입 (protobuf wire format) |
-| `lib/server/masc_grpc_service.ml` | 417 | gRPC 서비스 핸들러 |
-| `lib/server/masc_grpc_server.ml` | 67 | gRPC 서버 시작 |
-| `lib/server/masc_grpc_client.ml` | 150 | gRPC 클라이언트 |
-| `lib/config/masc_grpc_transport.ml` | 24 | 트랜스포트 선택 로직 |
+| Module | 역할 |
+|--------|------|
+| `lib/server/masc_grpc_types.ml` | gRPC 메시지 타입 (protobuf wire format) |
+| `lib/server/masc_grpc_service.ml` | gRPC 서비스 핸들러 |
+| `lib/server/masc_grpc_server.ml` | gRPC 서버 시작 |
+| `lib/server/masc_grpc_client.ml` | gRPC 클라이언트 |
+| `lib/config/masc_grpc_transport.ml` | 트랜스포트 선택 로직 |
 
 ---
 

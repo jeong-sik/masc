@@ -1381,7 +1381,7 @@ let render_memory_body ~cols ~budget (state : state)
         empty_page_of ~snapshot:state.memory_health ~error:state.memory_health_error
       with
       | Page_failed -> page_failed_note
-      | Page_unread -> page_unread_note
+      | Page_unread -> page_unread_note_while ~reading:state.memory_health_inflight
       | Page_empty when query <> "" ->
         Printf.sprintf "  (no keepers matching \"%s\" \xe2\x80\x94 Esc clears filter)"
           (Terminal_text.single_line query)
@@ -1662,7 +1662,8 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
        | (Page_failed, Category_all) | (Page_failed, Category_ordinary _)
        | (Page_failed, Category_source) | (Page_failed, Category_dropped) -> page_failed_note
        | (Page_unread, Category_all) | (Page_unread, Category_ordinary _)
-       | (Page_unread, Category_source) | (Page_unread, Category_dropped) -> page_unread_note
+       | (Page_unread, Category_source) | (Page_unread, Category_dropped) ->
+           page_unread_note_while ~reading:(view_is_loading (memory_facts_view state))
        | Page_empty, Category_all ->
            (* [total] counts rows filtered by [memory_search_query], so the
               note reads the same value; the store is not empty just because

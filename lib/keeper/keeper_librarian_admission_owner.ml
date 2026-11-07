@@ -331,8 +331,12 @@ let frontier ~store ~owner inventory =
              ~parent:part ~execution_id:original.record.request_id),Queue.split (Parts.batch part) with
             | Ok _,None -> continue (source original part)
             | (Ok _ | Error _),(None | Some _) -> Ok None)
+         (* Only a destination-absent conflict can end an admission here, and
+            discovery validated it, so its candidates are gaps the frontier
+            hands to a replacement root (#46372). *)
+         | Conflicted _ -> continue (source original part)
          | Captured | Admission_wait _ | Dispatch_pending _ | Commit_unknown _
-         | Conflicted _ | Subdividing _ | Subdivided _ -> Ok None) in
+         | Subdividing _ | Subdivided _ -> Ok None) in
   all [] (Parts.runnable inventory.parts)
 let retain_root ~store ~config ~reserved ~owner ?supersession batch =
   with_destination ~config ~reserved (fun destination ->

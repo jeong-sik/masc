@@ -24,7 +24,15 @@ val validate : store:Lane_addon_store.t ->
     Commit phases require the complete original chain;
     a pending evaluation remains pending. Missing proof
     cannot mint a replacement gate or execute another judgment. Finished also
-    requires matching actual committed candidate receipts. *)
+    requires matching actual committed candidate receipts. Conflicted requires
+    its exact destination-absent conflict, a destination the proposal writes
+    into, and no committed candidate receipt. *)
+val destination_absent_of_json : Lane_addon_tool_request_owner.retained ->
+  Yojson.Safe.t -> (string, string) Stdlib.result
+(** The Memory identity an original admission's conflict names, when the
+    conflict is the canonical destination-absent evidence of that exact
+    execution. [settle] records it when the locked Memory plan refuses a
+    destination of the accepted proposal before any effect (#46372). *)
 val settle : store:Lane_addon_store.t ->
   owner:Keeper_librarian_admission_capture.owner ->
   capture:Keeper_librarian_admission_capture.t ->

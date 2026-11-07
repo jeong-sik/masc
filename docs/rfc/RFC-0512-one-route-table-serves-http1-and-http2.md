@@ -27,7 +27,7 @@ HTTP/1.1 경로는 `Http_server_eio.Router` 에 394곳(36파일)이 등록돼 �
 이 RFC 는 둘을 같이 한다.
 
 1. 핸들러가 받는 응답 손잡이를 `Httpun.Reqd.t` 에서 masc 소유 닫힌 합타입 `Http_reqd.t`(`Http1 | Http2`)로 바꾼다. 요청 값 타입(`Httpun.Request.t`, `Status`, `Headers`, `Response`)은 그대로 공유한다. 등록 394곳의 몸통은 거의 그대로다. HTTP/2 어댑터는 `H2.Request.t` 를 `Httpun.Request.t` 로 바꿔 같은 `Router.dispatch` 를 부른다. 손 등록 96갈래와 `Server_h2_route_gate`, `_routes_extra`, `_artifact_routes` 는 지운다.
-2. 8937 포트에 TLS 1.3 리스너를 더한다(tls-eio). ALPN 목록은 `h2`, `http/1.1` 이고 협상 결과로 h2 또는 httpun 연결 핸들러를 고른다. 인증서는 TOML 로 받고 없으면 자체 서명(x509)을 만든다. 8935 cleartext(HTTP/1.1 + h2c `Auto`)는 그대로 둔다.
+2. 8938 포트에 TLS 1.3 리스너를 더한다(tls-eio). ALPN 목록은 `h2`, `http/1.1` 이고 협상 결과로 h2 또는 httpun 연결 핸들러를 고른다. 인증서는 TOML 로 받고 없으면 자체 서명(x509)을 만든다. 8935 cleartext(HTTP/1.1 + h2c `Auto`)는 그대로 둔다.
 3. h2 엔진을 RFC 9113 대로 맞춘다. server push 를 끄고, 응답의 connection 전용 헤더를 떼고, flow-control 창과 프레임 크기를 TOML 로 둔다.
 4. 전·후를 같은 벤치(`scripts/harness/perf/http_multiplex_probe.py`)로 재서 `docs/evidence/http2-one-table-2026-11/` 에 남긴다. 구조 목표는 손 등록 갈래 0개, 전송별 경로 차이 0건이다. 성능 숫자 목표는 미리 정하지 않고 측정값으로 보고한다.
 
@@ -38,7 +38,7 @@ HTTP/1.1 경로는 `Http_server_eio.Router` 에 394곳(36파일)이 등록돼 �
 - D3. **진입 절차는 하나다.** `bin/main_eio.ml` 의 HTTP/1.1 전처리(클라이언트 IP 토큰 버킷, agent 토큰 버킷, origin 분류, `Server_request_authority.with_current`, `Server_workspace_precondition` 검사, `Router.dispatch`)를 `lib/server/server_http_ingress.ml` 로 옮기고 두 어댑터가 같은 함수를 부른다. 전송 라벨(메트릭 `protocol`, `auth_refusal_response ~protocol`, 로그)은 `request.version`(`{major=2; minor=0}` 은 H2)에서 읽는다.
 - D4. **HTTP/2 어댑터는 연결 층만 남긴다.** `serve_h2_connection`(stream registry, request fiber, frame tap), `Server_h2_response_resources`(ledger), `classify_h2_request`(`:scheme`, `:authority` 검사)가 남는다. 어댑터가 만드는 `Httpun.Request.t` 는 `:path` 를 target 으로, `:authority` 를 `host` 헤더로 옮긴다. 그래서 canonical host 리다이렉트가 HTTP/2 에서도 돈다(#46676 의 둘째 항목). 지우는 것: 게이트웨이 96갈래, `h2_gate_*`, `with_h2_*`, `h2_respond_*`, `h2_read_body*`, `serve_subscriptions_listen_h2`, `server_h2_route_gate.ml/.mli`, `server_h2_gateway_routes_extra.ml`, `server_h2_artifact_routes.ml`, `Server_auth` 의 h2 전용 응답자. 호환용 reader·래퍼는 만들지 않는다.
 - D5. **WebSocket 경로는 HTTP/2 에서 426 이다.** `Router.dispatch ?upgrade` 에 H2 어댑터는 `upgrade` 를 주지 않는다(지금 동작). h2 포크에 RFC 8441 extended CONNECT 가 생기면 별 RFC 로 한다.
-- D6. **TLS·ALPN 리스너.** `Env_config.Transport` 에 `https_port`(TOML `transport.https_port`, 환경 `MASC_HTTPS_PORT`, 기본 8937, 0 이면 끔), `tls_cert_file`, `tls_key_file`(TOML `transport.tls_cert_file`·`transport.tls_key_file`, PEM 경로)을 둔다. 둘 다 비어 있으면 부팅 때 `<base-path>/.masc/tls/server.{crt,key}` 를 x509 로 만든다(자체 서명, SAN `localhost`·`127.0.0.1`·bind host, 유효 1년, 만료 30일 전부터 재생성). 하나만 있으면 부팅을 거부한다. `Tls.Config.server ~alpn_protocols:["h2"; "http/1.1"]` 로 받고 `Tls_eio.epoch` 의 ALPN 결과로 핸들러를 고른다. ALPN 이 없으면 HTTP/1.1 이다. TLS flow 는 `Eio.Flow.two_way` 라 `Http_protocol_detect.Replay` 와 같은 `Eio.Net.Pi.stream_socket` 어댑터로 gluten 에 넘긴다. RNG 는 `Mirage_crypto_rng_unix.use_default ()` 로 부팅 때 켠다. TLS 1.3 만 받는다.
+- D6. **TLS·ALPN 리스너.** `Env_config.Transport` 에 `https_port`(TOML `transport.https_port`, 환경 `MASC_HTTPS_PORT`, 기본 8938, 0 이면 끔), `tls_cert_file`, `tls_key_file`(TOML `transport.tls_cert_file`·`transport.tls_key_file`, PEM 경로)을 둔다. 둘 다 비어 있으면 부팅 때 `<base-path>/.masc/tls/server.{crt,key}` 를 x509 로 만든다(자체 서명, SAN `localhost`·`127.0.0.1`·bind host, 유효 1년, 만료 30일 전부터 재생성). 하나만 있으면 부팅을 거부한다. `Tls.Config.server ~alpn_protocols:["h2"; "http/1.1"]` 로 받고 `Tls_eio.epoch` 의 ALPN 결과로 핸들러를 고른다. ALPN 이 없으면 HTTP/1.1 이다. 8937 은 쓰지 않는다: standalone WebSocket 리스너의 기본값(`MASC_WS_PORT`, `lib/config/env_config_snapshot.ml`, `start-masc.sh` 의 포트 검사)이라 기본 구성에서 두 리스너가 한 포트를 잡게 된다. 기본 포트 표: 8935 HTTP/1.1+h2c, 8936 gRPC, 8937 WebSocket, 8938 HTTPS. TLS flow 는 `Eio.Flow.two_way` 라 `Http_protocol_detect.Replay` 와 같은 `Eio.Net.Pi.stream_socket` 어댑터로 gluten 에 넘긴다. RNG 는 `Mirage_crypto_rng_unix.use_default ()` 로 부팅 때 켠다. TLS 1.3 만 받는다.
 - D7. **h2 엔진 설정.** `H2.Config` 의 `enable_server_push = false`. `initial_window_size`·`max_frame_size` 는 TOML `transport.h2_initial_window_size`·`transport.h2_max_frame_size`(환경 `MASC_H2_INITIAL_WINDOW_SIZE`·`MASC_H2_MAX_FRAME_SIZE`)로 두고 기존 `transport.h2_max_concurrent_streams`·`transport.h2_max_pending_response_bytes` 옆에 등록한다. 기본값은 S5 의 측정으로 정한다. 측정 전까지는 라이브러리 기본(65,535·16,384)이다.
 - D8. **측정.** 바꾸기 전 값은 `baseline/`, 바꾼 뒤 값은 같은 도구·같은 호스트로 `after/` 에 둔다(HTTP/1.1, h2c, TLS 위 h2). 구조 목표: `rg -c '"/' lib/server/server_h2_gateway.ml` 가 0, A1 `scripts/auth-route-baseline/` 비교에서 HTTP/1.1 과 HTTP/2 의 상태 코드 차이 0건. 성능은 보고하되 목표 숫자를 미리 적지 않는다. "빨라졌다" 는 기준선 대비 수치가 있을 때만 쓴다.
 - D9. **코드는 이 RFC 가 받아들여진 뒤에 쓴다.** 층은 §8 에 있다.
@@ -51,7 +51,7 @@ cleartext 8935 (지금과 같음)
     PRI * HTTP/2.0 서문 → h2 연결 핸들러
     아니면            → httpun 연결 핸들러 (읽은 바이트는 Replay 로 되돌림)
 
-https 8937 (새로움)
+https 8938 (새로움)
   accept → TCP_NODELAY → Tls_eio.server_of_flow (ALPN 목록 h2, http/1.1)
     epoch.alpn_protocol = Some "h2" → h2 연결 핸들러
     그 밖                          → httpun 연결 핸들러
@@ -110,11 +110,11 @@ piaf 0.2.0 은 HTTP/1.1·HTTP/2·TLS 를 한 API 로 주지만 핸들러가 `Res
 
 ## 4. 운영자에게 보이는 변화
 
-- 새 포트 8937 이 열린다. 끄려면 `transport.https_port = 0`. `MASC_HTTPS_PORT` 로도 바꿀 수 있다.
+- 새 포트 8938 이 열린다. 끄려면 `transport.https_port = 0`. `MASC_HTTPS_PORT` 로도 바꿀 수 있다.
 - `<base-path>/.masc/tls/server.crt`·`server.key` 가 생긴다(운영자 인증서를 TOML 에 적지 않았을 때). 자체 서명이라 브라우저가 경고한다. 경고 없이 쓰려면 mkcert 인증서 경로를 `transport.tls_cert_file`·`transport.tls_key_file` 에 적는다.
-- Cloudflare 터널로 HTTP/2 를 쓰려면 운영자가 `config.yml` 의 `service` 를 `https://127.0.0.1:8937` 로 바꾸고 `originRequest.http2Origin: true` 와 `noTLSVerify: true`(또는 `caPool`)를 적는다. 이 RFC 는 그 파일을 건드리지 않는다. 절차는 `docs/guides/https-and-http2.md` 에 적는다.
+- Cloudflare 터널로 HTTP/2 를 쓰려면 운영자가 `config.yml` 의 `service` 를 `https://127.0.0.1:8938` 로 바꾸고 `originRequest.http2Origin: true` 와 `noTLSVerify: true`(또는 `caPool`)를 적는다. 이 RFC 는 그 파일을 건드리지 않는다. 절차는 `docs/guides/https-and-http2.md` 에 적는다.
 - `/health` `http_listener` 에 `https` 섹션(`port`, `alpn` 별 연결 수, `tls_source: configured | self_signed`)이 생긴다. `Transport_metrics` 의 `mode` 라벨에 `tls` 가 더해진다. 대시보드 transport-health 카드가 그것을 보인다.
-- TOML 키 4개가 생긴다: `transport.https_port`, `transport.tls_cert_file`, `transport.tls_key_file`, `transport.h2_initial_window_size`, `transport.h2_max_frame_size`(마지막 둘은 S5).
+- TOML 키 5개가 생긴다: `transport.https_port`, `transport.tls_cert_file`, `transport.tls_key_file`, `transport.h2_initial_window_size`, `transport.h2_max_frame_size`(마지막 둘은 S5).
 - HTTP/2 응답이 바뀌는 곳: 손 등록에 없던 경로가 HTTP/1.1 과 같은 답을 준다(fleet 스트림 200 등). 게이트웨이에만 있던 별명 경로가 있으면 404 가 된다. A1 비교로 목록을 만들어 S3 PR 본문에 적는다.
 
 ## 5. 측정
@@ -123,7 +123,7 @@ piaf 0.2.0 은 HTTP/1.1·HTTP/2·TLS 를 한 API 로 주지만 핸들러가 `Res
 - 후(S5 끝에): 같은 인자로 `after/`. 전송 `h1-6`, `h1`, `h2c` 에 TLS 리스너의 `h2` 를 더한다.
 - 비교할 것: SSE 50개가 h2·h2c 에서 50개 열리는지. burst req/s·p99 가 HTTP/1.1 에서 기준선보다 나빠지지 않았는지(회귀 검사). h2 다운로드 MB/s 가 curl 기준 h1 의 0.84 배에서 어디로 갔는지. 한 요청 왕복에서 h2c 의 2~3 ms 추가 비용이 어디로 갔는지.
 - 전송별 경로 차이: `scripts/auth-route-baseline/run.sh` 를 S3 전·후에 돌려 `compare.py` 차이 0건.
-- 브라우저: DevTools Network 의 Protocol 열이 `h2` 인 스크린샷, 대시보드 한 탭의 연결 수(`lsof -nP -iTCP:8935,8937`) 전·후.
+- 브라우저: DevTools Network 의 Protocol 열이 `h2` 인 스크린샷, 대시보드 한 탭의 연결 수(`lsof -nP -iTCP:8935,8938`) 전·후.
 
 ## 6. 열린 질문
 

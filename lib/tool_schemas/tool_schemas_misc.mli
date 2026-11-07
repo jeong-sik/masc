@@ -10,8 +10,6 @@
     the config category enum matches its owner] checks it against
     [Env_config_snapshot.valid_config_category_strings]. *)
 
-(** {1 Enum string mirrors (SSOT)} *)
-
 (** {1 Tool schema list} *)
 
 type control_operation =

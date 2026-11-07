@@ -634,7 +634,7 @@ let test_dashboard_history_autonomous_rows_carry_id () =
     ~turn_kind:Turn_record.Autonomous
     ~raw_trace_run_ref:(Some (run_ref ~path ~worker_run_id ~start_seq:1));
   match
-    Server_dashboard_http_keeper_api.keeper_chat_history_json config keeper_name
+    Server_dashboard_http_keeper_chat_history.keeper_chat_history_json config keeper_name
   with
   | Ok (`List rows) ->
     Alcotest.(check int) "one autonomous row in history" 1 (List.length rows);
@@ -683,7 +683,7 @@ let test_transcript_rows_keep_stream_contract () =
             ])
        ^ "\n"));
   match
-    Server_dashboard_http_keeper_api.keeper_chat_history_json config keeper_name
+    Server_dashboard_http_keeper_chat_history.keeper_chat_history_json config keeper_name
   with
   | Ok (`List rows) ->
     Alcotest.(check int) "one direct row in history" 1 (List.length rows);
@@ -724,7 +724,7 @@ let test_failed_exact_run_never_caches_empty_history () =
   Alcotest.(check int) "best-effort activity reader retains its skip behavior" 0
     (Keeper_autonomous_turn_source.load_recent ~config ~keeper_name () |> List.length);
   write_lines path lines;
-  match Server_dashboard_http_keeper_api.keeper_chat_history_json config keeper_name with
+  match Server_dashboard_http_keeper_chat_history.keeper_chat_history_json config keeper_name with
   | Ok (`List [ _ ]) -> ()
   | Ok _ -> Alcotest.fail "repaired exact run did not return its autonomous row"
   | Error error -> Alcotest.fail (Server_keeper_chat_history_read.error_to_string error)

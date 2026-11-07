@@ -3,7 +3,7 @@ open Result.Syntax
 type source = Artifact of Keeper_peer_artifact_ref.t | Draft of string
 
 type source_error =
-  | Artifact_read_failed of string
+  | Artifact_fetch_failed of Keeper_peer_artifact.fetch_error
   | Draft_rejected of Keeper_composition_draft.error
   | Frozen_surface_required
 
@@ -25,7 +25,7 @@ let resolve_source ~draft_context ~config ~package_id = function
   | Artifact artifact ->
     Keeper_peer_artifact.fetch ~config artifact
     |> Result.map (fun (fetched : Keeper_peer_artifact.fetched) -> fetched.content)
-    |> Result.map_error (fun detail -> Artifact_read_failed detail)
+    |> Result.map_error (fun error -> Artifact_fetch_failed error)
   | Draft sha256 ->
     (match draft_context with
      | None -> Error Frozen_surface_required
@@ -72,8 +72,12 @@ let handle ~descriptors ~draft_context ~config ~args =
       ~message []
   | Ok (source, package_id) ->
     (match resolve_source ~draft_context ~config ~package_id source with
-     | Error (Artifact_read_failed message) ->
-       failure ~class_:Tool_result.Runtime_failure ~code:"artifact_read_failed" ~message []
+     | Error (Artifact_fetch_failed error) ->
+       let code = match error with
+         | Keeper_peer_artifact.Absent _ -> "artifact_not_found"
+         | Keeper_peer_artifact.Unreadable _ -> "artifact_read_failed" in
+       failure ~class_:(Keeper_peer_artifact.fetch_error_class error) ~code
+         ~message:(Keeper_peer_artifact.fetch_error_to_string error) []
      | Error Frozen_surface_required ->
        failure ~class_:Tool_result.Policy_rejection ~code:"frozen_surface_required"
          ~message:"Prepared Skill validation requires the caller's frozen surface" []

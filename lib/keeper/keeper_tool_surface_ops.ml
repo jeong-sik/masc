@@ -853,7 +853,9 @@ let handle_keeper_delegate ?invocation_ref ~submitted_by ctx args =
       let* blobs = result in
       Keeper_peer_artifact.fetch ~config:ctx.config reference
       |> Result.map (fun (fetched : Keeper_peer_artifact.fetched) -> fetched.blob :: blobs)
-      |> message_error ~class_:Tool_result.Runtime_failure) (Ok []) references in
+      |> Result.map_error (fun error ->
+        Message_error (Keeper_peer_artifact.fetch_error_class error,
+                       Keeper_peer_artifact.fetch_error_to_string error))) (Ok []) references in
     let message = match references with
       | [] -> Keeper_invocation_contract.prompt request
       | _ -> Keeper_invocation_contract.prompt request ^ "\n\nExported peer artifacts (materialize with keeper_artifact_transfer into your own relative path):\n"

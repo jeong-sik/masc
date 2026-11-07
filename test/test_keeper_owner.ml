@@ -5449,6 +5449,52 @@ let test_agent_delegate_submits_owner_operation_without_waiting ?(with_artifact=
          | Some (_, artifact), `Assoc fields -> `Assoc (("artifacts", `List [Keeper_peer_artifact_ref.to_json artifact]) :: fields)
          | None, args -> args
          | Some _, _ -> fail "invalid test arguments" in
+       (* A well-formed sha256 the store does not hold names nothing to hand
+          over, so the current state refuses it before anything is queued. *)
+       (match artifact with
+        | None -> ()
+        | Some _ ->
+          let absent =
+            `Assoc
+              [ "target", `Assoc [ "kind", `String "keeper"; "name", `String meta.name ]
+              ; "prompt", `String "inspect owner state"
+              ; "artifacts", `List [ `String (String.make 64 '0') ]
+              ]
+          in
+          let refused =
+            Keeper_tool_surface_ops.handle_keeper_delegate
+              ~submitted_by:"agent-operation-caller" ctx absent
+          in
+          check bool "an absent artifact is a workflow rejection" true
+            (Tool_result.failure_class refused = Some Tool_result.Workflow_rejection);
+          check bool "the refusal names the absent sha256" true
+            (String_util.contains_substring (Tool_result.message refused) (String.make 64 '0'));
+          (* A blob the store holds with other bytes is the store's fault. *)
+          let store = Tool_blob_store.create ~base_path in
+          let damaged : Tool_output.artifact_ref =
+            Tool_blob_store.put_durable store ~bytes:"damaged export"
+              ~mime:"application/octet-stream"
+          in
+          let file =
+            Filename.concat
+              (Filename.concat (Tool_blob_store.root_dir store) (String.sub damaged.sha256 0 2))
+              damaged.sha256
+          in
+          Unix.unlink file;
+          Out_channel.with_open_bin file (fun channel ->
+            Out_channel.output_string channel "other bytes");
+          let unreadable =
+            `Assoc
+              [ "target", `Assoc [ "kind", `String "keeper"; "name", `String meta.name ]
+              ; "prompt", `String "inspect owner state"
+              ; "artifacts", `List [ Keeper_peer_artifact_ref.(to_json (of_blob damaged)) ]
+              ]
+          in
+          check bool "a damaged artifact is a runtime failure" true
+            (Tool_result.failure_class
+               (Keeper_tool_surface_ops.handle_keeper_delegate
+                  ~submitted_by:"agent-operation-caller" ctx unreadable)
+             = Some Tool_result.Runtime_failure));
        let result =
          Keeper_tool_surface_ops.handle_keeper_delegate
            ~invocation_ref

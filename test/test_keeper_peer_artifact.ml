@@ -373,6 +373,44 @@ let test_materialize_refused_target_keeps_the_blob () =
   Alcotest.(check bool) "the refusal keeps the blob it fetched" true (keeps_blob ~expected result)
 ;;
 
+(* The sha256 is the whole request. A blob the store does not hold is a
+   request the current state does not admit; a blob it holds with other bytes
+   is the store's fault. Neither reaches the recipient. *)
+let materialize_without_recipient ~base_path artifact =
+  Keeper_peer_artifact.materialize ~base_path ~artifact ~path:"proof.bin"
+    ~fetch:(fun () -> Keeper_peer_artifact.fetch ~config:(Workspace.default_config base_path) artifact)
+    ~read:(fun ~max_bytes:_ -> Alcotest.fail "a failed fetch reads no recipient")
+    ~write:(fun _ -> Alcotest.fail "a failed fetch writes nothing")
+;;
+
+let test_materialize_of_an_absent_blob_is_a_workflow_rejection () =
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> remove_tree base_path) @@ fun () ->
+  let absent = match Masc.Keeper_peer_artifact_ref.of_json (`String (String.make 64 '0')) with
+    | Ok artifact -> artifact
+    | Error detail -> Alcotest.fail detail in
+  let result = materialize_without_recipient ~base_path absent in
+  Alcotest.(check bool) "an absent blob is refused before any effect" true
+    (result.disposition = Tool_result.Failed Tool_result.Workflow_rejection
+     && result.failure_effect_disposition = Tool_result.Proven_pre_effect)
+;;
+
+let test_materialize_of_a_corrupt_blob_is_a_runtime_failure () =
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> remove_tree base_path) @@ fun () ->
+  let store = Tool_blob_store.create ~base_path in
+  let blob : Tool_output.artifact_ref =
+    Tool_blob_store.put_durable store ~bytes:"exported" ~mime:"application/octet-stream" in
+  let file = Filename.concat (Filename.concat (Tool_blob_store.root_dir store)
+      (String.sub blob.sha256 0 2)) blob.sha256 in
+  Unix.unlink file;
+  Out_channel.with_open_bin file (fun channel -> Out_channel.output_string channel "corrupted");
+  let result = materialize_without_recipient ~base_path (Masc.Keeper_peer_artifact_ref.of_blob blob) in
+  Alcotest.(check bool) "a blob with other bytes fails in the runtime before any effect" true
+    (result.disposition = Tool_result.Failed Tool_result.Runtime_failure
+     && result.failure_effect_disposition = Tool_result.Proven_pre_effect)
+;;
+
 let test_materialize_verification_loss_does_not_repeat_effect () =
   with_materialization @@ fun ~base_path ~expected ~state ~reads:_ ~writes ~invoke ->
   let result = invoke (fun () ->
@@ -511,6 +549,12 @@ let () =
         ; Alcotest.test_case "verification loss never replays write" `Quick test_materialize_verification_loss_does_not_repeat_effect
         ; Alcotest.test_case "writer authorization and artifact evidence survive reconciliation" `Quick test_materialize_preserves_original_writer_evidence
         ; Alcotest.test_case "manifest failure preserves effect phase and artifact roots" `Quick test_materialize_manifest_failure_keeps_effect_and_roots
+        ] )
+    ; ( "blob fetch"
+      , [ Alcotest.test_case "an absent blob is a workflow rejection" `Quick
+            test_materialize_of_an_absent_blob_is_a_workflow_rejection
+        ; Alcotest.test_case "a corrupt blob is a runtime failure" `Quick
+            test_materialize_of_a_corrupt_blob_is_a_runtime_failure
         ] )
     ]
 ;;

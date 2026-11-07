@@ -247,7 +247,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 | C2d | 입장 (a) allowlist(2026-11-06 사용자 결정으로 C2a에서 떼어 C2b 뒤에 둔다). Admin이 `External_identity.t`를 등록하고 지우는 사건, 등록된 신원의 첫 로그인이 입장 레코드 하나로 User를 만드는 갈래(초대 대신 등록 항목을 가리킨다)다. 입장은 §5.1-3의 같은 구역에서 같은 신원의 User가 있는지 보고, 있으면 409다. 등록을 지우는 사건은 intent를 쓰고, 등록은 쓰지 않는다(아래 C2d 범위, 2026-11-06 사용자 결정). 삭제된 principal의 신원을 등록하면 `previously_deleted`를 보인다(§5.1-6). 등록한 신원은 purge 대상이 아닌 `authz.jsonl`에 남는다. masc Admin은 개인 Gmail의 `sub`를 미리 알 수 없어서, Google 쪽은 주로 삭제된 신원을 다시 들일 때 쓴다. GitHub 숫자 `id`는 공개 API로 알 수 있다. 시험 벡터에 등록 안 된 신원의 거절, 등록을 지운 뒤의 로그인 거절, 같은 신원의 등록 입장과 초대 입장이 겹친 경우(409), 삭제된 신원의 재등록을 넣는다. | §5.1 | B3, C2a, C2b |
 | C2c | 2단계. 입장 요청(c). 도메인 정책(`oidc.admission_request_domains`)이 있으면 미등록 `(iss, sub)`의 입장 요청 조건(`hd`·`email_verified`)과 입장 요청 기록·Admin 승인(§5.1-2c, §5.1-7)을 함께 낸다. 입장 요청의 개수 상한과 상한을 넘었을 때의 동작, 만료 시간, 종단 요청의 보존 기간을 이 층에서 정한다. 시험 벡터에 `hd` 없음, `hd` 불일치, `email_verified=false`, 정책 아래에서 (a)나 (b)로 들어오는 `hd` 없는 사용자의 로그인 허용, `hd` 대소문자(`A.com`), 승인 때 요청의 도메인이 정책에 없거나 정책이 비어 있는 경우(승인 거부), `Pending` 중 재로그인(새 요청 없음), 두 Admin의 동시 승인(409)과 승인·거절이 겹친 경우(User가 생긴 쪽이 이김), (a)나 (b)로 User가 생긴 뒤 같은 `(iss, sub)`의 `Pending`이 `Superseded`로 읽히고 승인 대기 목록에 나오지 않는 경우, 거절 뒤 재로그인(새 요청 없음)과 (a)로의 입장, 만료된 요청의 승인 거부와 새 요청 허용, 시계가 되감겨 `Expired`가 `Pending`으로 돌아와도 승인 검사가 같은 시계를 쓰는 경우, 이미 입장한 요청에 거절을 누르면 409, 승인된 요청의 User 삭제 뒤 승인 대기 목록에 되살아나지 않는 경우와 새 요청 허용, `Superseded`였던 요청의 User 삭제 뒤 `previously_deleted`와 함께 `Pending`으로 보이는 경우, 복원으로 요청 저장소가 뒤처져 `Pending`이 남은 경우(User가 있으면 승인 대기 목록에 나오지 않는다), `previously_deleted` 표지가 있는 `(iss, sub)`의 입장 요청 화면, `Disabled` 등록 사용자의 로그인(정책 면제가 §4.1 Disabled 규칙을 덮지 않는다), 만료됐거나 취소된 초대 token을 넣는다. | §5.1, §5.2 | C2a, C6 |
 | C3 | Google·GitHub 로그인 HTTP 경로(`POST /auth/oidc/start`, `GET /auth/oidc/callback`, `POST /auth/github/start`, `GET /auth/github/callback`, 비공개 데이터가 없는 200 HTML 완료 화면, `Masc_http_client` 연결), 로그아웃, 세션 조회, Admin allowlist 경로. 경로 등록은 구역을 받는 함수 하나이고 S1이 부팅에서 연 구역으로 부른다. 브라우저 세션 레코드(발급 뒤 7일). 다계정에서 `__Host-` 세션·transaction 쿠키, 세션에 결속한 CSRF 토큰, 출처 검사, cookie와 Bearer가 함께 오면 거부, 원격 query credential 차단(아래 C3 범위). | §5.2, §5.3 | A2, C2a, C2b, C2d |
-| C4 | scoped PAT와 Service credential 레코드(principal + `Pat_scope`), 새 `Auth_gate.decide`로 HTTP strict와 MCP 호출자 token 해석 통합, 다계정에서 caller alias 유지·workspace secret(HTTP 복구 grace 포함, `auth.ml:216`)·auth disabled 경로 제거, `agent_credential` 읽기 거부. `Mcp_oauth_token`은 C5 전까지 Reject. C3의 요청 검사 함수를 요청 경로에 건다. WS/SSE·MCP transport를 세션이나 PAT에 결속하고(`__Host-masc_mcp_session`), 폐기 때 닫는다(2026-11-07 C3에서 옮김). | §5.3 | A2, A3, A4d, C3 |
+| C4 | scoped PAT와 Service credential 레코드(principal + `Pat_scope`), 다계정 요청을 판정하는 새 `Auth_gate.decide`, 다계정에서 caller alias 유지·workspace secret(HTTP 복구 grace 포함, `auth.ml:185`)·auth disabled 경로를 쓰지 않음, `agent_credential` 읽기 거부. `Mcp_oauth_token`은 C5 전까지 Reject. C3의 요청 검사 함수를 요청 경로에 건다. WS/SSE·MCP transport를 세션이나 PAT에 결속하고(`__Host-masc_mcp_session`), 폐기 때 닫는다(2026-11-07 C3에서 옮김). Single_user 요청은 지금 함수가 판정한다. 세부는 표 아래 C4 범위다. | §5.3 | A2, A3, A4d, C3 |
 | C5 | MCP OAuth 승인을 OIDC session에 결속한다. OAuth 스택(#46336, #46337, #46340, #46343, #46356, #46379)이 main에 들어간 뒤에만 연다. 결속 전에는 C4의 Reject가 그대로다. | §5.3 | C3, C4, OAuth 스택 병합 |
 | C6 | Dashboard 화면(이슈 #46828). 다계정에서만 켜지고 `Single_user`의 bearer 방식은 그대로다. ① 인증이 필요한 요청이 거부되면 Google·GitHub 로그인 화면으로 보내고, 다계정에서는 저장한 bearer를 `Authorization`에 붙이지 않는다. ② 초대 링크 화면. fragment의 초대 token을 폼 POST로 보낸다(설계 §5.1-4). ③ Admin의 초대 발급·취소와 allowlist 등록 화면. 삭제된 principal의 신원에는 `previously_deleted`를 함께 보인다. 입장 대기 화면과 입장 요청 목록은 C2c와 함께 2단계다. 서버 API와 응답 형태는 C2a·C2b·C2d·C3가 정하고 이 층은 호출만 한다. 시험은 화면 문구나 행 순서가 아니라 상태 전이로 한다(요청 거부 → 로그인 이동, 초대 소비 → 세션 발급, 초대 취소 → 소비 거부). 20k token을 넘으면 ①②와 ③으로 쪼갠다. | §5.1, §5.2 | C2a, C2b, C2d, C3 |
 
@@ -423,6 +423,55 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
   - C3-6·7: secret이 틀린 쿠키, 만료된 세션, Disable된 principal의 세션, cookie와 bearer가 함께 온 요청, Origin 없는 POST, CSRF 불일치, 원격 query credential.
   - C3-8: 시험이 Google과 GitHub을 흉내 내고 구역을 직접 연다. 다른 흐름의 transaction 쿠키는 401, callback이 기존 세션을 끊음, 같은 초대의 동시 소비는 409, 거절 화면에 token과 secret이 없음.
 - 하지 않는 것: `Auth_gate.decide`와 요청 경로 연결(C4), MCP OAuth 결속(C5), 화면(C6), 경로 등록과 HTTP/2(S1).
+
+**C4 범위** (다계정 credential 판정, 2026-11-07)
+
+- 사용자 결정(2026-11-07).
+  - `Auth_gate.decide`는 다계정 요청만 판정한다. Single_user 요청은 지금 함수가 그대로 판정한다. 그래서 C4 동안 Single_user 서버의 인증 동작은 바뀌지 않는다. 두 모드를 한 함수로 합치는 일은 Single_user의 legacy 경로를 지울 때 한다(설계 §5.3을 고쳤다).
+  - Service credential(`Internal_service_credential`)은 호스트 CLI가 `Local_operator`로 발급하고 폐기한다. Keeper가 다계정에서 쓰는 credential이다(설계 §6.3을 고쳤다).
+  - scoped PAT는 본인이 브라우저 세션으로 부르는 HTTP 경로가 본인 작성으로 발급하고 폐기한다. C4는 그 경로의 답까지 만든다. 화면은 C6이 만든다.
+- 지금 있는 것(main `3519bd8c658`).
+  - HTTP 판정은 `Server_auth`의 함수 아홉 개다. `ensure_strict_http_token_auth`(:37), `dashboard_actor_resolution_for_request`(:470), `authorize_permission_request`(:1108), `authorize_read_request`(:1129), `authorize_tool_request_with_actor`(:1132), `request_credential_standing`(:1167), `authorize_tool_request`(:1199), `authorize_token_bound_permission_request`(:1208), `authorize_optional_token_bound_permission_request`(:1247)다. credential은 `request_auth_credential_from_request`(:62)가 `Authorization: Bearer`와 `x-masc-internal-token`에서 읽는다. token이 없으면 actor 이름을 header와 query(`x-masc-agent` 등)에서 받는다.
+  - MCP 판정은 `verify_mcp_auth_unscoped`(:242)와 그 변형(seat, authority, observer stream, operator), WS의 `verify_dashboard_token`, stdio(`mcp_server_eio.ml`), 프로토콜의 `require_auth`(`mcp_server_eio_protocol.ml:61`)다. 호출자 이름은 `Mcp_server_eio_caller_identity.resolve`가 정한다. token 해석이 실패해도 경고만 남기고 alias를 쓴다(`resolve_auth_fallback_agent_name`, `:157`).
+  - 역할은 `Auth.resolve_role_with_auth_config`(`auth.ml:185`)가 정한다. auth disabled와 workspace secret(HTTP recovery grace)은 Admin이다. Keeper 내부 token은 Worker다. 그 밖에는 `agent_credential`의 role이다.
+  - 다계정 부팅은 `Authz_boot_mode_read.decide`(`:149`)가 멈춘다. 부팅은 auth disabled, `require_token=false`, 익명 mutation 설정도 거부한다(`authz_boot_mode.ml`). 판정한 모드는 요청 시점 코드로 넘어가지 않는다.
+  - `Pat_scope`와 `Pat_binding`은 `Authz_types`에 있고 §6.2 판정(`Authz_decision`)만 쓴다. Kind `Internal_service_credential`은 있지만 본문이 없고 상태가 읽지 않는다. principal 사건은 Human만 다룬다. PAT Kind와 `Auth_gate`는 없다.
+  - 브라우저 세션 요청 검사는 `Authz_browser_request.check`(C3-7)다. 아직 요청 경로에 걸리지 않았다.
+  - strict 설정에서 경로가 열리는지는 A4d 뒷부분(스택 #49656) 뒤에 `Route_access` 종류 하나가 정한다. C4는 그 위에 쌓는다.
+- credential 표시.
+  - 요청에서 credential을 하나 읽는다. 닫힌 합타입이다. 없음, 세션 쿠키, PAT, Service credential, MCP OAuth token, legacy bearer(workspace secret, `agent_credential`, Keeper 내부 token), query credential, 둘 이상, 읽지 못함.
+  - 새 token은 종류 접두사, ID, secret을 든다. 레코드는 secret의 digest만 든다. 서버는 ID로 레코드를 찾고 digest를 `Eqaf.equal`로 비교한다. 새 형식이 아닌 bearer는 legacy로 읽는다.
+- 판정 `Auth_gate.decide`.
+  - credential 표시, 경로의 `Route_access.t`, 구역 상태, 시각을 받는다. `Allow`나 `Reject of 사유`를 돌려준다. `Log_only`는 없다. Single_user가 이 함수를 쓰지 않아서 타입에 두지 않는다.
+  - `Allow`는 인증 투영(principal, auth_binding, `Pat_scope`)을 든다. auth_binding은 세션·PAT·Service credential의 ID다. Service credential의 `Pat_scope`는 `Not_pat`이다. 범위는 grant와 DelegatePolicy가 정한다(설계 §5.3).
+  - 자격이 필요 없는 종류(`Always_public`, `Public_read Open_when_strict`)는 credential 없이 연다. 그 밖의 종류는 경로 종류마다 다계정 처분을 표로 정한다. Admin은 `Admin_assignment`에서만 온다.
+  - 거절 사유. legacy bearer는 `Legacy_credential_forbidden`이다. MCP OAuth token은 C5 전까지 Reject다. query credential과 세션 쿠키·bearer 동시 제시는 401이다(C3-7). 폐기됐거나 만료된 PAT·Service credential과 Disable된 principal도 Reject다.
+  - Actor_hint(agent query·header, `x-masc-keeper-name`)는 신원을 바꾸지 않는다. Service credential에 다른 service hint가 오면 Reject다.
+- 레코드.
+  - Kind `Pat`(새 종류)와 `Internal_service_credential`의 본문이다. 사건은 발급과 폐기다. 발급은 ID, principal, secret digest, 범위를 든다. PAT의 principal은 Human이고 `Pat_scope`를 든다. Service credential의 principal은 `Service(service_id)`다.
+  - PAT는 그 PAT의 Human이 쓴다. Service credential은 `Local_operator`가 쓴다.
+  - 폐기는 그 credential을 subject로 한 `Revoke` intent를 쓴다(설계 §8.1 `auth_binding_epoch`, §8.2). 복원이 폐기를 되감으면 끊은 credential이 다시 살아나기 때문이다.
+  - PAT 만료는 `Pat_scope.expires_at`이다. 레코드에 따로 쓰지 않고 읽을 때 거절한다.
+  - Service principal은 Service credential의 첫 발급이 만든다. Service principal의 Disable과 삭제 사건은 이 층에 없다. 끊는 일은 credential 폐기로 한다.
+- 층. C4-1~5는 C3처럼 한 층에 하나씩 더한다.
+  - C4-1 PAT·Service credential ID, token 형식, 사건 본문.
+  - C4-2 Kind `Pat`와 `Internal_service_credential` 작성자 규칙. 상태는 아직 `Kind_not_read`로 거절한다.
+  - C4-3 Subject `Pat`·`Service_credential`과 설계 §4.5·§8.2 문장.
+  - C4-4 두 credential의 상태(목록, 폐기, 만료).
+  - C4-5 `Authz_state`가 두 Kind를 읽는다.
+  - C4-6 발급·인증·폐기(`lib/auth`).
+  - C4-7 credential 표시 읽기(HTTP 요청에서 닫힌 합타입으로).
+  - C4-8 `Auth_gate.decide`와 경로 종류별 처분 표.
+  - C4-9 Service credential CLI(발급, 폐기, 목록). token은 발급할 때 한 번만 보인다.
+  - C4-10 PAT 경로의 답(발급, 폐기, 목록). 세션과 CSRF를 검사하고, 범위를 명시해야 발급한다. C3-9처럼 HTTP 없는 답과 서버 연결을 나눈다.
+  - C4-11 MCP 호출자. 다계정에서는 token 해석이 실패하면 alias를 쓰지 않고 Reject한다.
+  - C4-12 WS/SSE와 MCP transport를 인증한 세션·PAT에 결속하고 폐기 때 닫는다(C3에서 옮긴 일). `__Host-masc_mcp_session`도 여기서 만든다.
+- 시험.
+  - C4-4·5: 남의 PAT 폐기 거절, 두 번 폐기 거절, 만료, 폐기의 intent.
+  - C4-6·7: secret이 틀린 token, 폐기된 token, Disable된 principal, legacy bearer, 둘 이상의 credential, query credential.
+  - C4-8: 경로 종류와 credential 표시의 모든 쌍. credential이 없으면 자격이 필요한 모든 종류가 Reject한다(설계 §5.3의 다계정 개시 조건).
+  - C4-11: token 해석 실패, Actor_hint와 다른 service.
+- 하지 않는 것: Single_user 경로 바꾸기, MCP OAuth 결속(C5), 화면(C6), 경로 등록·HTTP/2 갈래·부팅에서 모드 넘기기(S1), Service principal의 Disable·삭제, legacy 호출자를 Service credential로 옮기는 일(S1 전 개시 증거에서 목록으로 센다).
 
 ### D. 소유권과 실행 게이트
 

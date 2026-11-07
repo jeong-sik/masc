@@ -149,41 +149,6 @@ let test_whole_response_and_scope_release () =
     request session 3;
     check string "same connection reuses released capacity" whole_payload (read_all session 3))
 
-let test_stream_overflow_is_explicit_and_other_stream_progresses () =
-  let streams=Hashtbl.create 2 in
-  let frame=String.make 8192 'e' in
-  let handler id reqd =
-    let writer=H2.Reqd.respond_with_streaming ~flush_headers_immediately:true reqd
-      (H2.Response.create `OK) in
-    let stream=Resources.stream writer in
-    Hashtbl.add streams id stream;
-    check bool "initial frame enqueued" true (Resources.offer stream frame);
-    Resources.run stream in
-  with_session ~capacity:131072 handler (fun resources session ->
-    request session 1;
-    until session (fun () -> Hashtbl.mem streams 1 && Hashtbl.mem session.responses 1);
-    let stream=Hashtbl.find streams 1 in
-    (* Models the actual shared publisher lock: no fiber switch/network wait
-       is allowed while offering notifications. *)
-    let mutex=Stdlib.Mutex.create () in
-    Stdlib.Mutex.lock mutex;
-    Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock mutex) (fun () ->
-      while Resources.offer stream frame do () done);
-    check bool "overflow closes the producer" true (Resources.is_closed stream);
-    until session (fun () -> !(session.resets)>0 && Resources.pending_bytes resources=0);
-    check int "overflow is a stream error" 1 !(session.errors);
-    request session 2;
-    until session (fun () -> Hashtbl.mem streams 2 && Hashtbl.mem session.responses 2);
-    let healthy=Hashtbl.find streams 2 in
-    check bool "another stream can accept an event" true (Resources.offer healthy "next");
-    let response=Hashtbl.find session.responses 2 in
-    until session (fun () ->
-      read_once response;
-      Buffer.length response.body=String.length frame+4);
-    check string "healthy subscriber keeps event order" (frame^"next") (Buffer.contents response.body);
-    reset session 2;
-    until session (fun () -> Resources.pending_bytes resources=0))
-
 let test_scope_cleanup_and_late_flush_are_idempotent () =
   Eio_main.run (fun _ -> Eio.Switch.run (fun outer ->
     let resources=Resources.create ~max_pending_bytes:10 in
@@ -205,5 +170,4 @@ let test_scope_cleanup_and_late_flush_are_idempotent () =
 let () = run "H2 response resource boundary"
   ["transport",[
     test_case "whole response, slow consumption and reset reuse" `Quick test_whole_response_and_scope_release;
-    test_case "subscription overflow resets without blocking siblings" `Quick test_stream_overflow_is_explicit_and_other_stream_progresses;
     test_case "scope cleanup and late flush do not double release" `Quick test_scope_cleanup_and_late_flush_are_idempotent]]

@@ -20,9 +20,11 @@ RFC 는 `docs/rfc/RFC-vibe-official-client-lane.md` 로 간다.
 
 ## 2. Vibe Code 의 인증 — 두 갈래
 
-- **브라우저 계정 로그인(기본)**: "The flow provisions and stores credentials
-  for you, so no API key is needed" (api-keys-profiles.md). CLI 가 계정 세션
-  자격 증명을 로컬에 저장해 쓴다. 저장 위치·수명·갱신 절차는 문서에 없다 —
+- **브라우저 계정 로그인**: "Browser-based sign-in is enabled by default
+  when your config targets a model with a Mistral provider" — 조건절까지가
+  원문이다(api-keys-profiles.md). "The flow provisions and stores credentials
+  for you, so no API key is needed". CLI 가 계정 세션 자격 증명을 로컬에 저장해
+  쓴다. 저장 위치·수명·갱신 절차는 문서에 없다 —
   미확인 사실로 남긴다(구현 시 `vibe /whoami`·파일 관찰로 실측).
 - **API 키(선택)**: 같은 키가 Free/유료 플랜/PAYG 에서 동작. 이 경로는
   La Plateforme API 와 같은 계량을 쓴다.
@@ -95,5 +97,10 @@ llms.txt 색인을 `headless|continuous|github|ci|automation` 키워드로 걸�
    구분, 출력 프레임).
 4. CLI 내장 모델 목록과 각 모델의 thinking 수준; `off`/`none` 수용 여부
    (API wire 의 none 거부 실측과 다를 수 있다).
-5. 콘솔 두 막대의 정확한 의미(사용량/잔여) — 화면만으로는 표기 방향이
+5. MCP 도구 표면: CLI 에 MCP servers 문서가 있다(vibe/code/cli/mcp-servers.md).
+   masc 도구를 CLI 의 MCP 설정으로 주입할지(브리지 채택) 첫 층 실측에서
+   정한다.
+6. 준비 검사 형태: `vibe /whoami` 는 문서상 세션 내 slash 명령이다 — 무인
+   argv 형태가 있는지 첫 층에서 확인한다.
+7. 콘솔 두 막대의 정확한 의미(사용량/잔여) — 화면만으로는 표기 방향이
    애매하다(첫 값이 사용량임은 Vibe US$0/US$300 으로 추정).

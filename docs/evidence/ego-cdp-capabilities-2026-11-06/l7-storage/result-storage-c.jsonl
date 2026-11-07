@@ -1,0 +1,16 @@
+{"step":"space","at":"2026-11-07T02:19:17.319Z","value":6}
+{"step":"c.precheck","at":"2026-11-07T02:19:17.382Z","value":[]}
+{"step":"c.setFrameCookie","at":"2026-11-07T02:19:17.479Z","value":{}}
+{"step":"c.goto","at":"2026-11-07T02:19:17.566Z","value":{}}
+{"step":"c.seed","at":"2026-11-07T02:19:17.590Z","value":true}
+{"step":"c.addFrame","at":"2026-11-07T02:19:17.604Z","value":true}
+{"step":"c.http","at":"2026-11-07T02:19:17.610Z","value":{"ms":5,"leaks":[],"total":4,"cookies":[{"name":"masc_l7_js","domain":"127.0.0.1","path":"/","secure":false,"httpOnly":false},{"name":"masc_l7_http","domain":"127.0.0.1","path":"/","secure":false,"httpOnly":true,"sameSite":"Strict"},{"name":"masc_l7_persist","domain":"127.0.0.1","path":"/","secure":false,"httpOnly":false,"expiry":1794018557}],"cookieKeys":["domain","expiry","httpOnly","name","path","sameSite","secure"],"storage":{"origin":"http://127.0.0.1:18774","localStorage":{"count":107,"truncated":true,"listed":100,"longestKey":200,"first":["masc_l7_many_078","masc_l7_many_077"]},"sessionStorage":{"count":1,"keys":["masc_l7_session"],"truncated":false},"indexedDb":{"count":1,"names":["masc_l7_db"],"truncated":false}}}}
+{"step":"c.dataGoto","at":"2026-11-07T02:19:17.695Z","value":{}}
+{"step":"c.data","at":"2026-11-07T02:19:17.701Z","value":{"ms":6,"leaks":[],"total":0,"cookies":[],"cookieKeys":[],"storage":{"origin":"null","localStorage":{"error":"SecurityError"},"sessionStorage":{"error":"SecurityError"},"indexedDb":{"error":"SecurityError"}}}}
+{"step":"c.blankGoto","at":"2026-11-07T02:19:17.773Z","value":{}}
+{"step":"c.blank","at":"2026-11-07T02:19:17.776Z","value":{"ms":3,"leaks":[],"total":0,"cookies":[],"cookieKeys":[],"storage":{"origin":"null","localStorage":{"error":"SecurityError"},"sessionStorage":{"error":"SecurityError"},"indexedDb":{"error":"SecurityError"}}}}
+{"step":"z.cleanStorage","at":"2026-11-07T02:19:17.789Z","value":true}
+{"step":"z.deleteCookies","at":"2026-11-07T02:19:17.810Z","value":["masc_l7_frame@localhost/","masc_l7_http@127.0.0.1/","masc_l7_js@127.0.0.1/","masc_l7_persist@127.0.0.1/","masc_l7_sub@127.0.0.1/sub"]}
+{"step":"z.after","at":"2026-11-07T02:19:17.811Z","value":[]}
+{"step":"z.storageAfter","at":"2026-11-07T02:19:17.813Z","value":{"local":0,"idb":0}}
+{"step":"z.finish","at":"2026-11-07T02:19:17.816Z","value":{"spaceId":6,"closedSpace":true,"keptManagedLabels":[],"closedManagedLabels":["p1","p2"],"preservedUnmanagedCount":0}}

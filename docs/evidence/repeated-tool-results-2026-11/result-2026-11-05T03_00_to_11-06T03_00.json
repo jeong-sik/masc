@@ -496,6 +496,239 @@
       "p90": 0.0125,
       "p99": 0.0213,
       "max": 0.025
+    },
+    "distance": {
+      "repeats": 27,
+      "repeat_bytes": 130278,
+      "to_first_messages": {
+        "p50": 8,
+        "p90": 20,
+        "p99": 40,
+        "max": 40
+      },
+      "bytes_between_first": {
+        "p50": 14405,
+        "p90": 54114,
+        "p99": 251370,
+        "max": 251370
+      },
+      "to_previous_messages": {
+        "p50": 6,
+        "p90": 16,
+        "p99": 40,
+        "max": 40
+      },
+      "rank": {
+        "p50": 2,
+        "p90": 3,
+        "p99": 4,
+        "max": 4
+      },
+      "by_keeper": [
+        {
+          "keeper": "wkbl-data",
+          "repeats": 11,
+          "repeat_bytes": 52589,
+          "to_first_messages": {
+            "p50": 10,
+            "p90": 16,
+            "p99": 20,
+            "max": 20
+          },
+          "bytes_between_first": {
+            "p50": 9197,
+            "p90": 28649,
+            "p99": 33602,
+            "max": 33602
+          },
+          "to_previous_messages": {
+            "p50": 4,
+            "p90": 16,
+            "p99": 16,
+            "max": 16
+          },
+          "rank": {
+            "p50": 2,
+            "p90": 3,
+            "p99": 4,
+            "max": 4
+          }
+        },
+        {
+          "keeper": "masc-productor-owner",
+          "repeats": 2,
+          "repeat_bytes": 32768,
+          "to_first_messages": {
+            "p50": 6,
+            "p90": 8,
+            "p99": 8,
+            "max": 8
+          },
+          "bytes_between_first": {
+            "p50": 35660,
+            "p90": 54114,
+            "p99": 54114,
+            "max": 54114
+          },
+          "to_previous_messages": {
+            "p50": 2,
+            "p90": 6,
+            "p99": 6,
+            "max": 6
+          },
+          "rank": {
+            "p50": 2,
+            "p90": 3,
+            "p99": 3,
+            "max": 3
+          }
+        },
+        {
+          "keeper": "kidsnote-slack-reader",
+          "repeats": 6,
+          "repeat_bytes": 16263,
+          "to_first_messages": {
+            "p50": 6,
+            "p90": 40,
+            "p99": 40,
+            "max": 40
+          },
+          "bytes_between_first": {
+            "p50": 8257,
+            "p90": 73770,
+            "p99": 73770,
+            "max": 73770
+          },
+          "to_previous_messages": {
+            "p50": 6,
+            "p90": 40,
+            "p99": 40,
+            "max": 40
+          },
+          "rank": {
+            "p50": 2,
+            "p90": 2,
+            "p99": 2,
+            "max": 2
+          }
+        },
+        {
+          "keeper": "kidsnote-incoming-dd-manager",
+          "repeats": 5,
+          "repeat_bytes": 14201,
+          "to_first_messages": {
+            "p50": 12,
+            "p90": 40,
+            "p99": 40,
+            "max": 40
+          },
+          "bytes_between_first": {
+            "p50": 25927,
+            "p90": 251370,
+            "p99": 251370,
+            "max": 251370
+          },
+          "to_previous_messages": {
+            "p50": 12,
+            "p90": 40,
+            "p99": 40,
+            "max": 40
+          },
+          "rank": {
+            "p50": 2,
+            "p90": 2,
+            "p99": 2,
+            "max": 2
+          }
+        },
+        {
+          "keeper": "wkbl-web-leader",
+          "repeats": 1,
+          "repeat_bytes": 10051,
+          "to_first_messages": {
+            "p50": 4,
+            "p90": 4,
+            "p99": 4,
+            "max": 4
+          },
+          "bytes_between_first": {
+            "p50": 21168,
+            "p90": 21168,
+            "p99": 21168,
+            "max": 21168
+          },
+          "to_previous_messages": {
+            "p50": 4,
+            "p90": 4,
+            "p99": 4,
+            "max": 4
+          },
+          "rank": {
+            "p50": 2,
+            "p90": 2,
+            "p99": 2,
+            "max": 2
+          }
+        },
+        {
+          "keeper": "goo-yang-bong",
+          "repeats": 1,
+          "repeat_bytes": 3214,
+          "to_first_messages": {
+            "p50": 4,
+            "p90": 4,
+            "p99": 4,
+            "max": 4
+          },
+          "bytes_between_first": {
+            "p50": 5005,
+            "p90": 5005,
+            "p99": 5005,
+            "max": 5005
+          },
+          "to_previous_messages": {
+            "p50": 4,
+            "p90": 4,
+            "p99": 4,
+            "max": 4
+          },
+          "rank": {
+            "p50": 2,
+            "p90": 2,
+            "p99": 2,
+            "max": 2
+          }
+        },
+        {
+          "keeper": "code-reviewer-father",
+          "repeats": 1,
+          "repeat_bytes": 1192,
+          "to_first_messages": {
+            "p50": 0,
+            "p90": 0,
+            "p99": 0,
+            "max": 0
+          },
+          "bytes_between_first": {
+            "p50": 0,
+            "p90": 0,
+            "p99": 0,
+            "max": 0
+          },
+          "to_previous_messages": {
+            "p50": 0,
+            "p90": 0,
+            "p99": 0,
+            "max": 0
+          },
+          "rank": {
+            "p50": 2,
+            "p90": 2,
+            "p99": 2,
+            "max": 2
+          }
+        }
+      ]
     }
   },
   "ledger": {

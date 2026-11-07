@@ -249,6 +249,94 @@
       "p90": 0.0,
       "p99": 0.0021,
       "max": 0.0202
+    },
+    "distance": {
+      "repeats": 3,
+      "repeat_bytes": 18668,
+      "to_first_messages": {
+        "p50": 2,
+        "p90": 4,
+        "p99": 4,
+        "max": 4
+      },
+      "bytes_between_first": {
+        "p50": 3700,
+        "p90": 7629,
+        "p99": 7629,
+        "max": 7629
+      },
+      "to_previous_messages": {
+        "p50": 2,
+        "p90": 4,
+        "p99": 4,
+        "max": 4
+      },
+      "rank": {
+        "p50": 2,
+        "p90": 2,
+        "p99": 2,
+        "max": 2
+      },
+      "by_keeper": [
+        {
+          "keeper": "wkbl-front",
+          "repeats": 2,
+          "repeat_bytes": 11079,
+          "to_first_messages": {
+            "p50": 2,
+            "p90": 2,
+            "p99": 2,
+            "max": 2
+          },
+          "bytes_between_first": {
+            "p50": 3700,
+            "p90": 3700,
+            "p99": 3700,
+            "max": 3700
+          },
+          "to_previous_messages": {
+            "p50": 2,
+            "p90": 2,
+            "p99": 2,
+            "max": 2
+          },
+          "rank": {
+            "p50": 2,
+            "p90": 2,
+            "p99": 2,
+            "max": 2
+          }
+        },
+        {
+          "keeper": "masc-productor-owner",
+          "repeats": 1,
+          "repeat_bytes": 7589,
+          "to_first_messages": {
+            "p50": 4,
+            "p90": 4,
+            "p99": 4,
+            "max": 4
+          },
+          "bytes_between_first": {
+            "p50": 7629,
+            "p90": 7629,
+            "p99": 7629,
+            "max": 7629
+          },
+          "to_previous_messages": {
+            "p50": 4,
+            "p90": 4,
+            "p99": 4,
+            "max": 4
+          },
+          "rank": {
+            "p50": 2,
+            "p90": 2,
+            "p99": 2,
+            "max": 2
+          }
+        }
+      ]
     }
   },
   "ledger": {

@@ -49,7 +49,7 @@ class Fixture:
         sha, size = self.blob(raw) if store else (hashlib.sha256(raw).hexdigest(), len(raw))
         return entry(index, "tool", sha, size, media)
 
-    def batch(self, index: int, results: Sequence[tuple[str, str]], store: bool = True) -> dict[str, object]:
+    def batch(self, index: int, results: Sequence[tuple[str, str | None]], store: bool = True) -> dict[str, object]:
         """One tool message that holds a block per (content, call id), like a batch of parallel calls."""
         blocks = [{"type": "tool_result", "tool_use_id": call_id, "content": content} for content, call_id in results]
         raw = json.dumps({"role": "tool", "origin": "conversation", "content_blocks": blocks, "tool_call_id": results[0][1]}).encode("utf-8")
@@ -424,6 +424,146 @@ class RequestViewTest(TempCase):
         _, skipped = run_requests(self.fixture)
         self.assertEqual(skipped.bad_lines, 2)
         self.assertEqual(skipped.bad_message_entries, 1)
+
+
+class DistanceTest(TempCase):
+    def repeats_of(self, tally: repeats.Tally) -> list[repeats.Repeat]:
+        return [repeat for _, _, repeat in tally.repeats]
+
+    def test_a_repeat_records_its_distance_to_the_first_result_and_to_the_previous_one(self) -> None:
+        body = "d" * 3000
+        messages = [
+            text_entry(0, "user"),
+            self.fixture.tool(1, body, "c1"),
+            text_entry(2, "assistant", 40),
+            self.fixture.tool(3, body, "c2"),
+            text_entry(4, "assistant", 60),
+            self.fixture.tool(5, body, "c3"),
+        ]
+        self.fixture.request("k", messages)
+        tally, _ = run_requests(self.fixture)
+        second, third = self.repeats_of(tally)
+        between_third = 40 + int(messages[3]["artifact"]["bytes"]) + 60  # type: ignore[index]
+        self.assertEqual((second.to_first, second.to_previous, second.bytes_between, second.rank, second.call_id), (2, 2, 40, 2, "c2"))
+        self.assertEqual((third.to_first, third.to_previous, third.bytes_between, third.rank, third.call_id), (4, 2, between_third, 3, "c3"))
+
+    def test_the_previous_result_is_the_nearest_equal_one_and_not_a_different_text(self) -> None:
+        a, b = "a" * 3000, "b" * 3000
+        messages = [
+            text_entry(0, "user"),
+            self.fixture.tool(1, a, "c1"),
+            self.fixture.tool(2, b, "c2"),
+            self.fixture.tool(3, a, "c3"),
+            self.fixture.tool(4, b, "c4"),
+            self.fixture.tool(5, a, "c5"),
+        ]
+        self.fixture.request("k", messages)
+        tally, _ = run_requests(self.fixture)
+        found = {repeat.call_id: repeat for repeat in self.repeats_of(tally)}
+        self.assertEqual({call: (repeat.to_first, repeat.to_previous, repeat.rank) for call, repeat in found.items()},
+                         {"c3": (2, 2, 2), "c4": (2, 2, 2), "c5": (4, 2, 3)})
+
+    def test_two_results_of_one_message_are_zero_apart(self) -> None:
+        self.fixture.request("k", [text_entry(0, "user"), self.fixture.batch(1, [("e" * 3000, "c1"), ("e" * 3000, "c2")])])
+        tally, _ = run_requests(self.fixture)
+        (only,) = self.repeats_of(tally)
+        self.assertEqual((only.to_first, only.to_previous, only.bytes_between, only.rank), (0, 0, 0, 2))
+
+    def test_a_repeat_in_the_next_message_has_nothing_between_it_and_the_first(self) -> None:
+        self.fixture.request("k", [text_entry(0, "user"), self.fixture.tool(1, "n" * 3000, "c1"), self.fixture.tool(2, "n" * 3000, "c2")])
+        tally, _ = run_requests(self.fixture)
+        (only,) = self.repeats_of(tally)
+        self.assertEqual((only.to_first, only.bytes_between), (1, 0))
+
+    def test_distances_restart_with_each_turn(self) -> None:
+        body = "t" * 3000
+        messages = [
+            self.fixture.user(0),
+            self.fixture.tool(1, body, "c1"),
+            self.fixture.user(2),
+            self.fixture.tool(3, body, "c2"),
+            text_entry(4, "assistant"),
+            self.fixture.tool(5, body, "c3"),
+        ]
+        self.fixture.request("k", messages)
+        tally, _ = run_requests(self.fixture)
+        (only,) = self.repeats_of(tally)
+        self.assertEqual((only.call_id, only.to_first, only.rank), ("c3", 2, 2))
+
+    def test_the_answer_match_measures_the_same_distances(self) -> None:
+        messages = [text_entry(0, "user"), self.fixture.tool(1, "a" * 3000 + "1", "call_a"), text_entry(2, "assistant", 30), self.fixture.tool(3, "a" * 3000 + "2", "call_b")]
+        self.fixture.request("k", messages)
+        self.fixture.ledger("06.jsonl", [call_row(keeper="k", session="trace-1", call_id=call_id, fingerprint="same", ts=BASE_TS + n) for n, call_id in enumerate(("call_a", "call_b"))])
+        tally, _ = run_requests(self.fixture, answers=True)
+        (only,) = self.repeats_of(tally)
+        self.assertEqual((only.to_first, only.to_previous, only.bytes_between, only.rank), (2, 2, 30, 2))
+
+    def test_a_call_that_several_requests_carry_is_counted_once_in_the_report(self) -> None:
+        messages = [text_entry(0, "user"), self.fixture.tool(1, "m" * 3000, "c1"), self.fixture.tool(2, "m" * 3000, "c2")]
+        self.fixture.request("k", messages, captured_at=BASE_TS)
+        self.fixture.request("k", messages, captured_at=BASE_TS + 10)
+        self.fixture.request("k", messages, captured_at=BASE_TS + 20, trace="trace-2")
+        tally, _ = run_requests(self.fixture)
+        block = repeats.report(tally, 3, "by_hour", ledger=False)
+        self.assertEqual(block["repeat_count"], 3)
+        self.assertEqual(block["distance"]["repeats"], 2)  # type: ignore[index]
+
+    def test_a_repeat_that_cannot_be_named_is_counted_each_time(self) -> None:
+        messages = [text_entry(0, "user"), self.fixture.tool(1, "m" * 3000, "c1"), self.fixture.tool(2, "m" * 3000, "c2")]
+        self.fixture.request("k", messages, trace=None)
+        self.fixture.request("k", messages, captured_at=BASE_TS + 10, trace=None)
+        tally, _ = run_requests(self.fixture)
+        self.assertEqual(repeats.report(tally, 3, "by_hour", ledger=False)["distance"]["repeats"], 2)  # type: ignore[index]
+
+    def test_a_call_is_counted_once_per_keeper(self) -> None:
+        messages = [text_entry(0, "user"), self.fixture.tool(1, "m" * 3000, "c1"), self.fixture.tool(2, "m" * 3000, "c2")]
+        self.fixture.request("a", messages)
+        self.fixture.request("b", messages)
+        tally, _ = run_requests(self.fixture)
+        block = repeats.report(tally, 3, "by_hour", ledger=False)["distance"]
+        self.assertEqual(block["repeats"], 2)  # type: ignore[index]
+        self.assertEqual(sorted(item["keeper"] for item in block["by_keeper"]), ["a", "b"])  # type: ignore[index]
+
+    def test_a_repeat_without_a_call_id_is_in_the_report_each_time(self) -> None:
+        messages = [text_entry(0, "user"), self.fixture.batch(1, [("u" * 3000, None), ("u" * 3000, None)])]
+        self.fixture.request("k", messages)
+        self.fixture.request("k", messages, captured_at=BASE_TS + 10)
+        tally, _ = run_requests(self.fixture)
+        self.assertEqual(repeats.report(tally, 3, "by_hour", ledger=False)["distance"]["repeats"], 2)  # type: ignore[index]
+
+    def test_the_first_request_that_carries_a_call_gives_its_distance(self) -> None:
+        early = [text_entry(0, "user"), self.fixture.tool(1, "m" * 3000, "c1"), self.fixture.tool(2, "m" * 3000, "c2")]
+        late = [text_entry(0, "user"), self.fixture.tool(1, "m" * 3000, "c1"), text_entry(2, "assistant", 20), self.fixture.tool(3, "m" * 3000, "c2")]
+        self.fixture.request("k", early, captured_at=BASE_TS)
+        self.fixture.request("k", late, captured_at=BASE_TS + 10)
+        tally, _ = run_requests(self.fixture)
+        block = repeats.report(tally, 3, "by_hour", ledger=False)
+        self.assertEqual(block["distance"]["to_first_messages"]["max"], 1)  # type: ignore[index]
+
+    def test_the_report_gives_quantiles_per_keeper_ranked_by_repeat_bytes(self) -> None:
+        tally = repeats.Tally()
+        tally.repeats.extend(
+            [
+                ("small", "t1", repeats.Repeat(2000, 2, 2, 10, 2, "a")),
+                ("big", "t2", repeats.Repeat(5000, 10, 2, 900, 2, "b")),
+                ("big", "t2", repeats.Repeat(5000, 30, 2, 2900, 3, "c")),
+            ]
+        )
+        block = repeats.report(tally, 1, "by_hour", ledger=False)["distance"]
+        self.assertEqual(block["repeats"], 3)  # type: ignore[index]
+        self.assertEqual(block["repeat_bytes"], 12000)  # type: ignore[index]
+        self.assertEqual(block["to_first_messages"], {"p50": 10, "p90": 30, "p99": 30, "max": 30})  # type: ignore[index]
+        self.assertEqual(block["bytes_between_first"]["max"], 2900)  # type: ignore[index]
+        self.assertEqual(block["rank"], {"p50": 2, "p90": 3, "p99": 3, "max": 3})  # type: ignore[index]
+        self.assertEqual([item["keeper"] for item in block["by_keeper"]], ["big"])  # type: ignore[index]
+        self.assertEqual(block["by_keeper"][0]["to_first_messages"]["max"], 30)  # type: ignore[index]
+
+    def test_an_empty_tally_has_zero_distances_and_the_ledger_has_none(self) -> None:
+        block = repeats.report(repeats.Tally(), 3, "by_hour", ledger=False)["distance"]
+        self.assertEqual(block["repeats"], 0)  # type: ignore[index]
+        self.assertEqual(block["to_first_messages"], {"p50": 0, "p90": 0, "p99": 0, "max": 0})  # type: ignore[index]
+        self.assertEqual(block["by_keeper"], [])  # type: ignore[index]
+        self.assertNotIn("distance", repeats.report(repeats.Tally(), 3, "by_day", ledger=True))
 
 
 class AnswerMatchTest(TempCase):

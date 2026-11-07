@@ -36,6 +36,13 @@ jsonl_retention_days = 30
 # Slow consumers within capacity retain whole responses without an idle timeout.
 h2_max_concurrent_streams = 100
 h2_max_pending_response_bytes = 67108864
+# HTTPS listener (RFC-0512 D6): TLS 1.3 with ALPN h2 and http/1.1 on one
+# port. 0 turns the listener off. Without tls_cert_file and tls_key_file the
+# server serves a self-signed pair from <base-path>/.masc/tls/ and makes a new
+# one within 30 days of its expiry. Set both file keys or neither.
+https_port = 8938
+# tls_cert_file = "/path/to/server.crt"
+# tls_key_file = "/path/to/server.key"
 
 [skills]
 # The Skill resource read bound is not configured here: it is the shared

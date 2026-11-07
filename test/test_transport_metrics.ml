@@ -456,6 +456,7 @@ let test_transport_health_json () =
     "transport-health exact top-level keys"
     [ "summary"
     ; "http_listener"
+    ; "https_listener"
     ; "sse"
     ; "grpc"
     ; "websocket"

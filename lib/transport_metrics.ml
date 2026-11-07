@@ -382,7 +382,7 @@ let ensure_accept_latency_registered () =
         "Time spent in Eio.Net.accept before a new TCP connection is handed to the \
          accept loop.  A rising value signals fiber scheduling starvation — keeper turns \
          or other long-running fibers not yielding back to the scheduler.  Labels: mode \
-         (h1|h2|auto)."
+         (h1|h2|auto|tls)."
       ())
 ;;
 
@@ -692,6 +692,7 @@ let transport_health_json () =
   in
   `Assoc
     [ "http_listener", http_listener_json ()
+    ; "https_listener", Https_listener_metrics.json ()
     ; ( "summary"
       , `Assoc
           [ "primary_path", `String (primary_path_kind_to_string primary_path)

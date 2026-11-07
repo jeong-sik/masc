@@ -12,6 +12,7 @@ import {
   fetchTransportHealth,
   isTransportHealthReady,
   type HotSession,
+  type HttpsListener,
   type TransportHealthData,
   type TransportHealthError,
   type TransportHealthSnapshot,
@@ -258,6 +259,41 @@ export function http2Tone(data: TransportHealthData): StatusTone {
   return data.http2.multiplex_ready ? 'ok' : 'warn'
 }
 
+export function httpsTone(data: TransportHealthData): StatusTone {
+  switch (data.https_listener.status) {
+    case 'listening':
+      return 'ok'
+    case 'off':
+    case 'not_started':
+      return 'warn'
+    case 'bind_failed':
+    case 'stopped':
+    case 'accept_error':
+      return 'bad'
+  }
+}
+
+export function httpsEyebrow(listener: HttpsListener): string {
+  return Option.match(listener.port, {
+    onNone: () => '비활성',
+    onSome: (port) => listener.status === 'listening' ? `:${port} 활성` : `:${port} ${listener.status}`,
+  })
+}
+
+export function httpsCertificateLabel(listener: HttpsListener): string {
+  return Option.match(listener.certificate, {
+    onNone: () => '없음',
+    onSome: (certificate) => certificate.source === 'self_signed' ? '자체 서명' : '설정 파일',
+  })
+}
+
+export function httpsCertificateExpiry(listener: HttpsListener): string | undefined {
+  return Option.match(listener.certificate, {
+    onNone: () => undefined,
+    onSome: (certificate) => `만료 ${certificate.not_after}`,
+  })
+}
+
 export function staleTone(staleTotal: number): StatusTone {
   if (staleTotal === 0) return 'ok'
   if (staleTotal < 3) return 'warn'
@@ -388,8 +424,9 @@ function TransportHealthContent({ data }: { data: TransportHealthSnapshot }) {
   const grpcStatus = grpcTone(data)
   const wsStatus = websocketTone(data)
   const h2Status = http2Tone(data)
+  const httpsStatus = httpsTone(data)
   const agentStatus = agentPoolTone(data)
-  const hasAnyBadTransport = [sseStatus, grpcStatus, wsStatus, h2Status, agentStatus].includes('bad')
+  const hasAnyBadTransport = [sseStatus, grpcStatus, wsStatus, h2Status, httpsStatus, agentStatus].includes('bad')
   const truthLine = transportTruthLine(data)
 
   return html`
@@ -443,6 +480,7 @@ function TransportHealthContent({ data }: { data: TransportHealthSnapshot }) {
             <${TransportStatusBadge} status=${grpcStatus} label="gRPC" />
             <${TransportStatusBadge} status=${wsStatus} label="WS" />
             <${TransportStatusBadge} status=${h2Status} label="HTTP" />
+            <${TransportStatusBadge} status=${httpsStatus} label="HTTPS" />
           </span>
         </summary>
         <div class="p-4">
@@ -505,6 +543,24 @@ function TransportHealthContent({ data }: { data: TransportHealthSnapshot }) {
                 <${MetricRow} label="POST" value=${data.streamable_http.endpoint} />
                 <${MetricRow} label="옵저버 스트림" value=${data.streamable_http.observer_stream} />
                 <${MetricRow} label="프레즌스 스트림" value=${data.streamable_http.presence_stream} />
+              </div>
+            <//>
+
+            <${SectionCard} label="HTTPS" status=${httpsStatus} eyebrow=${httpsEyebrow(data.https_listener)}>
+              <div class="divide-y divide-card-border/50">
+                <${MetricRow} label="리스너" value=${data.https_listener.status} />
+                <${MetricRow}
+                  label="인증서"
+                  value=${httpsCertificateLabel(data.https_listener)}
+                  sub=${httpsCertificateExpiry(data.https_listener)}
+                />
+                <${MetricRow} label="활성 연결" value=${data.https_listener.active_connections} />
+                <${MetricRow}
+                  label="ALPN h2 / http1.1"
+                  value=${`${data.https_listener.alpn_h2_total} / ${data.https_listener.alpn_http1_total}`}
+                  sub=${`ALPN 없음 ${data.https_listener.alpn_none_total}`}
+                />
+                <${MetricRow} label="핸드셰이크 실패" value=${data.https_listener.handshake_failures_total} />
               </div>
             <//>
 

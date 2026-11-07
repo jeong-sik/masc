@@ -165,6 +165,9 @@
   fpath
   tls
   tls-eio
+  x509
+  ptime
+  masc.crypto_rng
   ca-certs
   mtime
   mtime.clock

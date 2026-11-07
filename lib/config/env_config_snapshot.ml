@@ -146,6 +146,16 @@ let transport_entries =
        masc_ws_slice_fanout_skipped_total advances per skip. RFC #10119 \
        Phase 2. Set to false for emergency rollback only.";
     Env_config_runtime.Transport.h2_snapshot_entry;
+    entry ~default:"8938" "MASC_HTTPS_PORT"
+      "HTTPS listener port: TLS 1.3 with ALPN h2 and http/1.1 on one port. \
+       0 turns the listener off.";
+    entry ~default:"(none)" "MASC_TLS_CERT_FILE"
+      "PEM certificate chain for the HTTPS listener. Unset, the server uses a \
+       self-signed pair under <base-path>/.masc/tls and generates it when \
+       missing or within 30 days of expiry.";
+    entry ~default:"(none)" "MASC_TLS_KEY_FILE"
+      "PEM private key for MASC_TLS_CERT_FILE. Set both or neither; one \
+       without the other refuses boot.";
     entry ~default:"240" "MASC_STARTUP_WATCHDOG_SEC"
       "Startup watchdog timeout (seconds)";
     Masc_grpc_transport.snapshot_entry;

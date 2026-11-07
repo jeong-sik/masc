@@ -2,7 +2,7 @@
    multi-account installation and prints the one link that lets the first
    Admin in. *)
 
-(** [masc auth bootstrap] and [masc auth invite]. *)
+(** [masc auth bootstrap], [masc auth invite] and [masc auth preview]. *)
 
 (** [masc auth bootstrap]: activates a multi-account installation on a base
     path where no server runs (design 5.1-1, 8.4, plan B3d-1).
@@ -27,3 +27,27 @@ val bootstrap : base_path:string -> external_store:string -> int
     {!bootstrap} first, and prints its link once. For a first invitation that
     expired before it was spent, or whose link was lost. Same exit codes. *)
 val invite : base_path:string -> int
+
+(** The environment variable that holds the client secret of the GitHub OAuth
+    App of {!preview}: [MASC_GITHUB_CLIENT_SECRET]. *)
+val github_client_secret_env : string
+
+(** 8940, a port the server does not take: [masc serve] listens on 8935. *)
+val default_preview_port : int
+
+(** [masc auth preview]: serves the localhost preview of multi-account login
+    on [http://127.0.0.1:<port>] until the process ends (plan, preview scope
+    P3).
+
+    It goes on only where {!invite} would: a boot finds [Multi_account] with
+    an external store that matches the log. It holds the BasePath lease while
+    it runs, so no server runs on the base path meanwhile. It serves the login
+    routes and the routes of {!Server_login_http.add_preview_routes}, and no
+    Keeper, Runtime, MCP or Board route. The GitHub client is
+    {!Login_client.loopback} with [github_client_id] and the secret of
+    {!github_client_secret_env}, whose value is printed nowhere.
+
+    Returns [1] with the reason on standard error when it cannot start, and
+    [0] when the listener stops. *)
+val preview : base_path:string -> port:int -> github_client_id:string -> int
+

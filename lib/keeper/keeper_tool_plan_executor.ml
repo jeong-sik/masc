@@ -284,7 +284,11 @@ module Exclusive_gate = struct
   ;;
 
   let acquire_shared gate =
-    Eio.Mutex.use_rw ~protect:false gate.mutex (fun () ->
+    (* [~protect:true]: [await] can cancel, and a cancelled acquire still
+       unlocks the mutex and completes the acquisition, so the caller's
+       [Fun.protect] release balances it. The old [~protect:false] form
+       poisoned the mutex: a cancelled [await] left it locked forever. *)
+    Eio.Mutex.use_rw ~protect:true gate.mutex (fun () ->
       while gate.writer || gate.waiting_writers > 0 do
         Eio.Condition.await gate.changed gate.mutex
       done;
@@ -293,7 +297,7 @@ module Exclusive_gate = struct
 
   let release_shared gate =
     let underflow =
-      Eio.Mutex.use_rw ~protect:false gate.mutex (fun () ->
+      Eio.Mutex.use_rw ~protect:true gate.mutex (fun () ->
         gate.readers <- gate.readers - 1;
         if gate.readers = 0 then Eio.Condition.broadcast gate.changed;
         gate.readers < 0)
@@ -302,24 +306,23 @@ module Exclusive_gate = struct
   ;;
 
   let acquire_exclusive gate =
-    Eio.Mutex.use_rw ~protect:false gate.mutex (fun () ->
+    (* [~protect:true]: cancellation is delivered after the acquisition
+       completes and the mutex unlocks, so the caller's [Fun.protect] release
+       always balances this acquire. The internal cancelled handler of the
+       old [~protect:false] form could repair the gate counters but could
+       never unlock the mutex it no longer held. *)
+    Eio.Mutex.use_rw ~protect:true gate.mutex (fun () ->
       gate.waiting_writers <- gate.waiting_writers + 1;
-      (try
-         while gate.writer || gate.readers > 0 do
-           Eio.Condition.await gate.changed gate.mutex
-         done;
-         gate.writer <- true;
-         gate.waiting_writers <- gate.waiting_writers - 1
-       with
-       | Eio.Cancel.Cancelled _ as exn ->
-         gate.waiting_writers <- gate.waiting_writers - 1;
-         Eio.Condition.broadcast gate.changed;
-         raise exn))
+      while gate.writer || gate.readers > 0 do
+        Eio.Condition.await gate.changed gate.mutex
+      done;
+      gate.writer <- true;
+      gate.waiting_writers <- gate.waiting_writers - 1)
   ;;
 
   let release_exclusive gate =
     let released_without_writer =
-      Eio.Mutex.use_rw ~protect:false gate.mutex (fun () ->
+      Eio.Mutex.use_rw ~protect:true gate.mutex (fun () ->
         let missing = not gate.writer in
         gate.writer <- false;
         Eio.Condition.broadcast gate.changed;
@@ -891,26 +894,30 @@ let execute_with_tool_use_id
               {scheduled with schedule = {scheduled.schedule with
                 execution_mode = Agent_core.Tool_contract.Serial; batch_size = 1}}
             | Some _ | None -> scheduled in
-          if exclusive then Exclusive_gate.acquire_exclusive gate
-          else Exclusive_gate.acquire_shared gate;
           let release () =
             if exclusive then Exclusive_gate.release_exclusive gate
             else Exclusive_gate.release_shared gate in
-          if halted () then (release (); skip ())
-          else (
-            let dispatch = match ready_files, binding with
-              | Some ready, Some binding -> ready.dispatch binding
-              | None, _ | Some _, None -> dispatch in
-            let settlement = execute_one ~plan ~run_id ~input
-                ~tool_use_id_for_node ~dispatch ?launch_invocation_of ?admit_node
-                ?dispatch_compiled ?journal ?observe_node_result scheduled in
-            let ticket = Atomic.fetch_and_add tick 1 in
-            release ();
-            (match settlement.cause with
-             | Some _ -> mark_blocked node_id; mark_failed node_id ticket
-             | None -> ());
-            let _, resolve = find_outcome node_id in
-            Eio.Promise.resolve resolve (Wave_settled (settlement, ticket)))))
+          (* The gate is held across [execute_one], which suspends, so the
+             release must run on every exit — including the cancellation an
+             acquire delivers after completing under its default
+             [~protect:true]. *)
+          Fun.protect release (fun () ->
+            if exclusive then Exclusive_gate.acquire_exclusive gate
+            else Exclusive_gate.acquire_shared gate;
+            if halted () then ()
+            else (
+              let dispatch = match ready_files, binding with
+                | Some ready, Some binding -> ready.dispatch binding
+                | None, _ | Some _, None -> dispatch in
+              let settlement = execute_one ~plan ~run_id ~input
+                  ~tool_use_id_for_node ~dispatch ?launch_invocation_of ?admit_node
+                  ?dispatch_compiled ?journal ?observe_node_result scheduled in
+              let ticket = Atomic.fetch_and_add tick 1 in
+              (match settlement.cause with
+               | Some _ -> mark_blocked node_id; mark_failed node_id ticket
+               | None -> ());
+              let _, resolve = find_outcome node_id in
+              Eio.Promise.resolve resolve (Wave_settled (settlement, ticket))))))
     in
     Eio.Fiber.all (List.map (fun node () -> run_node node) nodes);
     let wave_results =

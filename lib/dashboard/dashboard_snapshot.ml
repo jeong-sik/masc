@@ -42,8 +42,7 @@ type t = {
   activity_events_default : Yojson.Safe.t;
   (* RFC-0201 Step 1 — see [.mli] for contract. *)
   activity_graph_default : Yojson.Safe.t;
-  activity_swimlane_default : Yojson.Safe.t;
-  (* RFC-0201 Step 2 + 3 — see [.mli] for contract.  Returned as-is to
+  (* RFC-0201 Step 2 — see [.mli] for contract.  Returned as-is to
      default-shape callers; results are aggregated and not sliceable. *)
 }
 
@@ -335,9 +334,9 @@ let refresh_loop
              | None -> `Null))
     in
     let activity_defaults =
-      (* RFC-0201 / RFC-0204: compute all three default activity projections
-         (events, graph, swimlane) in a single pass over the recent events store,
-         avoiding 3x redundant re-parsing and scanning on every 10s tick. *)
+      (* RFC-0201 / RFC-0204: compute both default activity projections
+         (events, graph) in a single pass over the recent events store,
+         avoiding 2x redundant re-parsing and scanning on every 10s tick. *)
       cached_activity_defaults ~ttl:10.0 ~cache:activity_defaults_cache
         "activity_defaults" (fun () ->
         Activity_graph.default_projections config)
@@ -351,7 +350,6 @@ let refresh_loop
       telemetry_summary;
       activity_events_default = activity_defaults.events_default;
       activity_graph_default = activity_defaults.graph_default;
-      activity_swimlane_default = activity_defaults.swimlane_default;
     }
   in
   let rec loop () =
@@ -387,8 +385,7 @@ let publish_for_test t = Atomic.set slot (Some t)
 let make_for_test ~config ~shell ?(shell_light = `Null) ~tools ~namespace_truth
       ~telemetry_summary
       ?(activity_events_default = `Null)
-      ?(activity_graph_default = `Null)
-      ?(activity_swimlane_default = `Null) () =
+      ?(activity_graph_default = `Null) () =
   {
     generated_at = Unix.gettimeofday ();
     shell;
@@ -398,7 +395,6 @@ let make_for_test ~config ~shell ?(shell_light = `Null) ~tools ~namespace_truth
     telemetry_summary;
     activity_events_default;
     activity_graph_default;
-    activity_swimlane_default;
   }
 ;;
 

@@ -800,13 +800,6 @@ let add_routes ~sw ~clock router =
          let json = activity_graph_http_json ~state req in
          Http.Response.json_value json reqd
        )
-  |> Server_route.get Server_route.Public_read "/api/v1/activity/swimlane" (fun state req reqd ->
-         let json =
-           Server_activity_http.swimlane_http_json
-             ~deps:activity_http_deps ~state req
-         in
-         Http.Response.json_value json reqd
-       )
   |> Server_route.get Server_route.Public_read "/api/v1/runtime/params" (fun _state _req reqd ->
          let params = Runtime_params.registry () in
          let meta_to_json = function

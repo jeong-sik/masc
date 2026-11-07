@@ -134,13 +134,11 @@ let test_activity_defaults_cache_retains_last_good () =
   let dummy1 : Activity_graph.default_projections =
     { events_default = `String "e1"
     ; graph_default = `String "g1"
-    ; swimlane_default = `String "s1"
     }
   in
   let dummy2 : Activity_graph.default_projections =
     { events_default = `String "e2"
     ; graph_default = `String "g2"
-    ; swimlane_default = `String "s2"
     }
   in
   let first = refresh (fun () -> incr calls; dummy1) in

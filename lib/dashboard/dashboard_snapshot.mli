@@ -65,11 +65,6 @@ type t = private {
       Non-default queries (kinds filter, alternate [limit] /
       [timeline_limit], [since]) fall through to the synchronous
       compute path.  [`Null] before first refresh-fiber publish. *)
-  activity_swimlane_default : Yojson.Safe.t;
-  (** RFC-0201 Step 3.  [Activity_graph.agent_spans_json] computed
-      against the dashboard panel's default query ([limit=500],
-      [since_ms=None]).  Same as-is return contract as
-      [activity_graph_default]. *)
 }
 
 val current : unit -> t option
@@ -115,7 +110,6 @@ val make_for_test :
   telemetry_summary:Yojson.Safe.t ->
   ?activity_events_default:Yojson.Safe.t ->
   ?activity_graph_default:Yojson.Safe.t ->
-  ?activity_swimlane_default:Yojson.Safe.t ->
   unit ->
   t
 (** Test-only constructor.  Outside tests, snapshots are produced only

@@ -336,10 +336,6 @@ let test_page_provenance_survives_document_projection () =
       =List.map (field "egoPage") (Yojson.Safe.Util.to_list rows));
   check bool "document read retains its Space binding" true
     (field "browserSpace" result=Lane.ego_space_to_json space);
-  let info={info with transport=Lane.Ego_task_space;space=Some {Browser_lane.id=61;name="fixture Space"}} in
-  let other=Masc.Browser_binding.of_browser selected (Masc.Browser_selection.Connected info) in
-  check bool "Page provenance cannot masquerade as another transport" true
-    (Result.is_error (Surface.project_read plan ~binding:other ~started:0L ~page:(Some page)));
   List.iter (fun context ->
     check bool "malformed Page context is refused" true (Result.is_error (Surface.ego_page_of_json context)))
     [obj ["label",str "p1";"targetId",str "T1";"openedBy",str "user"];

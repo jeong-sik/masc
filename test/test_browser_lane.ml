@@ -202,13 +202,15 @@ let test_disconnect_releases_waiter () = with_clients (fun sw connect ->
 let test_sources_and_live_policy () = with_clients (fun _ connect ->
   let client = connect Lane.Ego_lite in
   check bool "missing transport UUID rejected" true (Result.is_error (Lane.client_id_of_string ""));
-  (* A download list is ego work; a BiDi connection is refused as a
-     selection, with nothing queued. *)
-  check bool "a BiDi download listing is refused as a selection" true
-    (Lane.issue_for_actor ~actor:None ~target:(target client.client_id) ~verb:(Lane.Page_downloads {tab_id=2})
-       ~timeout_sec:0.1
+  (* No ego connection sends touch input; a touch is refused as a selection,
+     with nothing queued. *)
+  let tap = Lane.Page_interact {tab_id=2; expected_url=Some "https://example.org";
+    action=Lane.Tap_at {point={x=0.5;y=0.5};
+      viewport={document_id="observed-page"; width=800.; height=600.; scroll_x=0.; scroll_y=0.}}} in
+  check bool "a touch is refused as a selection" true
+    (Lane.issue_for_actor ~actor:None ~target:(target client.client_id) ~verb:tap ~timeout_sec:0.1
      = Error (Lane.Transport_unsupported
-         {client_id=client.client_id; transport=client.transport; capability=Lane.Download_listing})))
+         {client_id=client.client_id; transport=client.transport; capability=Lane.Touch_input})))
 
 (* One live verb for each capability, so a capability added to the lane has
    to be given a verb here before this file's table checks pass. *)

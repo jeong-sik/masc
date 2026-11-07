@@ -320,10 +320,14 @@ let test_multi_worker_inventory () =
 let test_ego_user_owned_inventory () =
   let module I=Masc.Browser_connection_inventory in
   let member=Yojson.Safe.Util.member in
+  (* A healthy client's task space is observed present, as an automatic choice
+     needs. *)
   let observation instance_id clients unavailable : I.observation =
+    let presence = (present clients).live_space_presence in
     {instance_id;published={Masc.Browser_addon_observation.clients;
-      space_presence=[];client_rows=List.map (fun (client:Lane.client_info) ->
-        Masc.Browser_addon_observation.publish_client client ~space_observation:None ~space_presence:None) clients;
+      space_presence=presence;client_rows=List.map (fun (client:Lane.client_info) ->
+        Masc.Browser_addon_observation.publish_client client ~space_observation:None
+          ~space_presence:(List.assoc_opt client.client_id presence)) clients;
       unavailable}} in
   let refusal=Masc.Browser_addon_observation.Ego_user_owned_name
     {space="masc-keepers";ids=[1];observed_at=1793617161.} in

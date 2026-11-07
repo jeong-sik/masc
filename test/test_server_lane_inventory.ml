@@ -516,7 +516,7 @@ revision = "1"
 title = "Browser"
 runtime = "host_process"
 service = "browser"
-browser_backend = "owned_firefox"
+browser_backend = "ego"
 command = ["masc-browser-addon-worker"]
 contributions = ["observe"]
 [resources]
@@ -585,27 +585,27 @@ max_reply_bytes = 4096
    its own sources. *)
 let browser_rows_follow_the_declarations () = with_fixture (fun _env _sw config root directory ->
   let browser = Filename.concat root "browser.toml" in
-  write browser {|id = "browser-firefox"
+  write browser {|id = "browser-ego"
 revision = "1"
 title = "Browser"
 runtime = "host_process"
 service = "browser"
-browser_backend = "owned_firefox"
+browser_backend = "ego"
 command = ["masc-browser-addon-worker"]
 contributions = ["observe"]
 [resources]
 max_reply_bytes = 4096
 |};
-  let path = Filename.concat directory "browser-firefox.toml" in
+  let path = Filename.concat directory "browser-ego.toml" in
   let reading lane =
     let id = Lane_id.to_wire (Lane_id.Builtin (Lane_id.Browser lane)) in
     match List.find_opt (fun row -> text "id" row = id)
             (values "rows" (Inventory.snapshot ~config |> Inventory.to_json)) with
     | Some row -> text "kind" (member "addon" (member "state" row))
     | None -> failf "no %s row" id in
-  write path (declaration browser "browser-firefox");
+  write path (declaration browser "browser-ego");
   check string "a live source declared on waits for its worker" "not_running" (reading Browser_lane.Lane_name.Live);
-  write path ("enabled = false\n" ^ declaration browser "browser-firefox");
+  write path ("enabled = false\n" ^ declaration browser "browser-ego");
   check string "switching its declaration off turns the lane off" "off" (reading Browser_lane.Lane_name.Live))
 
 let () = run "operator lane inventory" ["read boundaries",[

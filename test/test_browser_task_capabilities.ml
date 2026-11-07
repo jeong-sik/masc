@@ -46,8 +46,12 @@ let with_browsers run = Eio_main.run (fun env ->
     run ~ego;
     List.iter (fun info -> check bool "choosing a browser sends it no command" true
       (Lane.take_command ~client_info:info ~window_sec:0.001=Ok None)) [ego]))
+(* An ego connection is chosen only while its task space is observed present. *)
 let snapshot () : Selection.snapshot =
-  {live_activity=Lane.Enabled;live_clients=Lane.connected_clients ();live_space_presence=[]}
+  let clients=Lane.connected_clients () in
+  {live_activity=Lane.Enabled;live_clients=clients;
+   live_space_presence=List.filter_map (fun (info:Lane.client_info) -> Option.map (fun (space:Lane.ego_space) ->
+     info.client_id,{Masc.Browser_ego_space_observation.space_id=space.id;observed_at=0.;state=Present}) info.space) clients}
 let automatic ?(verb=Lane.Tabs_list) names =
   Selection.choose ~required_actions:(operations names) ~verb ~bound:false
     ~snapshot:(snapshot ()) Selection.Automatic
@@ -206,10 +210,10 @@ let test_ego_table () =
    | Cap.Available _|Cap.Conditional _|Cap.Unsupported _ -> fail "Ego HTML5 drop must use the selector-to-selector drag_to");
   let reachable = List.filter (fun operation -> match Cap.support backend operation with
     | Cap.Available _ | Cap.Conditional _ -> true | Cap.Unsupported _ -> false) Cap.operations in
-  check (list string) "reads, capture, the tab list, its own tabs, their history, input, frames, dialogs, uploads and downloads on them, their viewport size and environment, and the space handed to the operator and back"
+  check (list string) "reads, capture, the tab list, its own tabs, their history, input, dialogs, uploads and downloads on them, their viewport size and environment, and the space handed to the operator and back"
     ["list_tabs";"open_tab";"close_tab";"activate_tab";"navigate";"follow_link";"back";"forward";"reload";"stop_loading";"read_text";"read_html";"read_elements";"read_scene";"read_regions";"read_snapshot";"screenshot";"native_workflow";"click_snapshot_target";"fill_snapshot_target";
      "hover_snapshot_target";"double_click_snapshot_target";"click";"double_click";"right_click";"middle_click";"hover";"pointer_drag";"html5_drop";"scroll_page";"scroll_at";
-     "fill";"type_text";"press_key";"key_chord";"select_option";"read_frames";"frame_interaction";"read_dialog";"accept_dialog";"dismiss_dialog";"hand_off";"take_over";"space_status";"finish_space";"wait_for_control";"adopt_tab";"release_tab";"upload_file";"list_downloads";"resize_viewport";"emulate_environment"]
+     "fill";"type_text";"press_key";"key_chord";"select_option";"read_dialog";"accept_dialog";"dismiss_dialog";"hand_off";"take_over";"space_status";"finish_space";"wait_for_control";"adopt_tab";"release_tab";"upload_file";"list_downloads";"resize_viewport";"emulate_environment"]
     (List.map Cap.operation_name reachable);
   List.iter (fun operation -> match Cap.support backend operation with
     | Cap.Conditional {constraints=_::_;_} -> ()

@@ -172,14 +172,15 @@ let dispatch_failure_boundary () =
      | exception Eio.Cancel.Cancelled _ -> true
      | _ -> false)
 
-(* The service adds the answering client and its transport to [data] and writes
-   fields in its own order. A result belongs to the request that asked for it by
-   what the lane answered, so compare without the decoration and with sorted keys. *)
+(* The service adds the answering connection (client, transport and ego Space)
+   to [data] and writes fields in its own order. A result belongs to the request
+   that asked for it by what the lane answered, so compare without the
+   decoration and with sorted keys. *)
 let rec normalized = function
   | `Assoc fields ->
     let fields = List.map (function
       | "data", `Assoc data ->
-        "data", `Assoc (List.filter (fun (key, _) -> key <> "clientId" && key <> "transport") data)
+        "data", `Assoc (List.filter (fun (key, _) -> not (List.mem key B.connection_field_names)) data)
       | field -> field) fields in
     `Assoc (List.sort (fun (a, _) (b, _) -> String.compare a b)
       (List.map (fun (key, value) -> key, normalized value) fields))

@@ -292,25 +292,6 @@ let plan ~find_ego (request : request) =
       ; versions
       }
 
-let replan previous =
-  let path = previous.store.path in
-  let* observation, configuration = observe previous.store in
-  let existing = configuration.Browser_configuration.live_ego in
-  let* () = validated ~path ~existing ~table:previous.table ~set:previous.set observation.source_text in
-  (* Another table of this run may have been written since the plan, not this
-     one: a table that changed meanwhile is another writer's, and the plan's
-     decisions were made without it. *)
-  let* () =
-    if Option.equal Browser_configuration.equal_live_ego existing previous.existing
-    then Ok ()
-    else Error Configuration_changed
-  in
-  Ok
-    { previous with
-      revision = Runtime_table_edit.revision_of_observation observation
-    ; existing
-    }
-
 (* The store commits the text as it is at that moment: the revision the plan
    was made from is compared again, and what the edit produces is read back
    before it is committed. *)

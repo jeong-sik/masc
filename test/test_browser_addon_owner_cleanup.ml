@@ -50,7 +50,9 @@ let scenario () =
        | Ok (B.Live_client attached) ->
          (match attached.liveness with B.Worker_held -> true | B.Polled _ -> false)
        | Error _ -> false);
-    (* A second connection this worker runs, on the other transport. *)
+    (* The first connection ends, as one whose ego Space went missing does, and
+       keeps its cleanup; a second connection of the same transport attaches. *)
+    Owner.disconnect_live owner client_id;
     let ego_id=ok (B.client_id_of_string "0b000000-0000-4000-8000-000000000008") in
     let ego:B.client_info={client_id=ego_id;browser=B.Ego_lite;version="fixture";
       engine_version="fixture";transport=B.Ego_task_space;space=Some {B.id=51;name="cleanup Space"}} in

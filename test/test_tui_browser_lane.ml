@@ -388,8 +388,8 @@ let test_client_activity_preserves_connection () =
       (not read && not (selected_client_available lost) && lost.selected_tab=None
        && lost.reading=None && lost.scroll=0 && lost.selected_client=running_view.selected_client
        && not (browser_choice_selected running_view (Connected_browser replacement))))
-    [{firefox with client_id=other.client_id}; {firefox with browser=Ego_lite};
-     {firefox with transport=Browser_lane.Ego_task_space; space=Some {id=51;name="fixture Space"}}]
+    [{firefox with client_id=other.client_id};
+     {firefox with space=Some {id=51;name="fixture Space"}}]
 
 let test_client_connection_ownership () =
   let discover t = { t with load = Loading (20, Discover Read_after_discovery) } in

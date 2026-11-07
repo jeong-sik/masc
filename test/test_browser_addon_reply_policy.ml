@@ -1,4 +1,4 @@
-(* Actual exported-tool -> owner -> live connection wait policy. The BiDi
+(* Actual exported-tool -> owner -> live connection wait policy. The ego
    connection is scripted and the Eio clock is virtual; no browser, network or
    provider runs. The window is measured on the virtual clock and the deadline
    on the process clock, so elapsed time is compared within a millisecond.
@@ -88,8 +88,8 @@ let policy_at_the_actual_tool_boundary () =
         "goto accepts a 30-second reply", goto, 30., true, 30.;
         "action retains its longer window", open_tab, 30., true, 30.;
         "ordinary read keeps its original window", read, 30., false, 20.;
-        "goto expires when its original window ends", goto, 46., false, 45.;
-        "action still expires after its own window", open_tab, 61., false, 60.;
+        "goto waits for its executor past the reply window", goto, 46., true, 46.;
+        "an action waits for its executor past its own window", open_tab, 61., true, 61.;
         "ordinary read accepts a timely reply", read, 19., true, 19.;
       ]))
 

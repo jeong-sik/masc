@@ -431,10 +431,12 @@ let test_lane_addon_surface_binds_incarnation_and_deny () =
        Masc.Lane_addon_tool_export.equal_owner
          attached.Masc.Lane_addon_tool_export.owner first.Masc.Lane_addon_tool_export.owner
      | None -> false);
-  check bool "no registered descriptor answers an export" true
-    (List.for_all
+  check (list string) "registered descriptors that answer an export" []
+    (List.filter_map
        (fun registered ->
-          Tool_descriptor.lane_addon_export registered.Tool_descriptor.runtime_handler = None)
+          Option.map
+            (fun _ -> registered.Tool_descriptor.internal_name)
+            (Tool_descriptor.lane_addon_export registered.Tool_descriptor.runtime_handler))
        (Tool_descriptor.all_descriptors ()));
   let forged = { descriptor with description = "forged" } in
   check bool "same identity does not admit a forged descriptor" false (Surface.admits surface forged);

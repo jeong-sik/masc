@@ -112,7 +112,7 @@ class PlayRoomPushTest(unittest.TestCase):
             step("wait", lambda: room.response_count("open", lane_fixture.LANES) >= 1,
                  "Lanes did not open")
             step("drain", 0.3)
-            step("keys", "jjjjjjjjj\r")
+            step("keys", "\r")
             step("wait", lambda: room.response_count("open", "play:read") == 1,
                  "the Play room did not complete its initial read")
             step("drain", 2.4)

@@ -125,6 +125,7 @@
   keeper_chat_store_history_window
   keeper_chat_store_transcript_rows
   keeper_chat_store_transcript_load
+  keeper_chat_store_approval_lifecycle
   keeper_runtime_trust_snapshot_core)
  (libraries
   masc.sse_queue_inventory

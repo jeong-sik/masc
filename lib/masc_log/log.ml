@@ -168,17 +168,53 @@ let init_from_env () =
   | Some s -> set_level_from_string s
   | None -> ()
 
+let format_localtime tm =
+  let year = tm.Unix.tm_year + 1900 in
+  if year >= 0 && year <= 9999 then begin
+    let buf = Bytes.create 19 in
+    let yq = year / 100 in
+    let yr = year - (yq * 100) in
+    Bytes.unsafe_set buf 0 (Char.unsafe_chr (48 + (yq / 10)));
+    Bytes.unsafe_set buf 1 (Char.unsafe_chr (48 + (yq mod 10)));
+    Bytes.unsafe_set buf 2 (Char.unsafe_chr (48 + (yr / 10)));
+    Bytes.unsafe_set buf 3 (Char.unsafe_chr (48 + (yr mod 10)));
+    Bytes.unsafe_set buf 4 '-';
+    let mon = tm.Unix.tm_mon + 1 in
+    Bytes.unsafe_set buf 5 (Char.unsafe_chr (48 + (mon / 10)));
+    Bytes.unsafe_set buf 6 (Char.unsafe_chr (48 + (mon mod 10)));
+    Bytes.unsafe_set buf 7 '-';
+    let day = tm.Unix.tm_mday in
+    Bytes.unsafe_set buf 8 (Char.unsafe_chr (48 + (day / 10)));
+    Bytes.unsafe_set buf 9 (Char.unsafe_chr (48 + (day mod 10)));
+    Bytes.unsafe_set buf 10 ' ';
+    let hour = tm.Unix.tm_hour in
+    Bytes.unsafe_set buf 11 (Char.unsafe_chr (48 + (hour / 10)));
+    Bytes.unsafe_set buf 12 (Char.unsafe_chr (48 + (hour mod 10)));
+    Bytes.unsafe_set buf 13 ':';
+    let min = tm.Unix.tm_min in
+    Bytes.unsafe_set buf 14 (Char.unsafe_chr (48 + (min / 10)));
+    Bytes.unsafe_set buf 15 (Char.unsafe_chr (48 + (min mod 10)));
+    Bytes.unsafe_set buf 16 ':';
+    let sec = tm.Unix.tm_sec in
+    Bytes.unsafe_set buf 17 (Char.unsafe_chr (48 + (sec / 10)));
+    Bytes.unsafe_set buf 18 (Char.unsafe_chr (48 + (sec mod 10)));
+    Bytes.unsafe_to_string buf
+  end else
+    Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d"
+      year
+      (tm.Unix.tm_mon + 1)
+      tm.Unix.tm_mday
+      tm.Unix.tm_hour
+      tm.Unix.tm_min
+      tm.Unix.tm_sec
+;;
+
 (** Get current timestamp *)
 let timestamp () =
   let t = Time_compat.now () in
   let tm = Unix.localtime t in
-  Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d"
-    (tm.Unix.tm_year + 1900)
-    (tm.Unix.tm_mon + 1)
-    tm.Unix.tm_mday
-    tm.Unix.tm_hour
-    tm.Unix.tm_min
-    tm.Unix.tm_sec
+  format_localtime tm
+;;
 
 (** ISO 8601 timestamp for JSON *)
 let timestamp_iso () = Time_codec.rfc3339_of_unix (Time_compat.now ())

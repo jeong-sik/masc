@@ -9,7 +9,7 @@ type policy =
   | Preserve_positions
     (** Anthropic without turn-scoped context: every message, historical
         context included, at its position. *)
-  | Omit_historical_context
+  | Omit_historical_system_context
     (** Every other provider's default: every message at its position except
         [Historical_system_context], which an Anthropic turn left in the
         history and this request does not send. *)

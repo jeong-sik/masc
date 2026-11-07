@@ -2866,12 +2866,12 @@ let test_other_providers_omit_historical_context () =
     | Error error -> Alcotest.fail (Lower.error_to_string error)
   in
   check_bool "an OpenAI-compatible request omits historical context" true
-    (policy openai = Lower.Omit_historical_context);
+    (policy openai = Lower.Omit_historical_system_context);
   check_bool "a Kimi request omits it although Kimi speaks Anthropic Messages" true
-    (policy kimi = Lower.Omit_historical_context);
+    (policy kimi = Lower.Omit_historical_system_context);
   check_bool "an Anthropic request keeps it in place" true
     (policy anthropic = Lower.Preserve_positions);
-  (match Lower.lower Lower.Omit_historical_context history with
+  (match Lower.lower Lower.Omit_historical_system_context history with
    | Error error -> Alcotest.fail (Lower.error_to_string error)
    | Ok lowered ->
      Alcotest.(check (list int)) "the other messages keep their canonical coordinates"

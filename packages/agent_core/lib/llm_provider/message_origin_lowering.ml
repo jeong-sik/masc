@@ -2,7 +2,7 @@ open Types
 
 type policy =
   | Preserve_positions
-  | Omit_historical_context
+  | Omit_historical_system_context
   | Turn_scoped_system_context
   | Initial_system_native_tools
   | Initial_system_tool_response_media
@@ -42,7 +42,7 @@ let error_to_string = function
    3.2), so a lane switch does not resend each past Anthropic turn's context. *)
 let preserve_policy = function
   | Provider_config.Anthropic -> Preserve_positions
-  | Provider_config.(Kimi | OpenAI_compat | Ollama | Gemini | Glm) -> Omit_historical_context
+  | Provider_config.(Kimi | OpenAI_compat | Ollama | Gemini | Glm) -> Omit_historical_system_context
 ;;
 
 let policy_for_provider_config (config : Provider_config.t) =
@@ -83,7 +83,7 @@ let is_turn_scoped_context policy (message : _ Types.message_with) =
   match policy, message.origin with
   | Turn_scoped_system_context, (System_context | Historical_system_context) -> true
   | Turn_scoped_system_context, (Conversation | Recovery_instruction | Tool_result_followup | Agent_instruction)
-  | (Preserve_positions | Omit_historical_context | Initial_system_native_tools
+  | (Preserve_positions | Omit_historical_system_context | Initial_system_native_tools
     | Initial_system_tool_response_media), _ -> false
 ;;
 
@@ -103,7 +103,7 @@ let anthropic_message_header policy message =
 
 let validate_turn_scoped_contexts policy messages =
   match policy with
-  | Preserve_positions | Omit_historical_context | Initial_system_native_tools
+  | Preserve_positions | Omit_historical_system_context | Initial_system_native_tools
   | Initial_system_tool_response_media -> Ok ()
   | Turn_scoped_system_context ->
     let rec group index = function
@@ -137,7 +137,7 @@ let lower policy messages =
   match policy with
   | Preserve_positions ->
     Ok {messages; source_indices = List.mapi (fun index _ -> index) messages}
-  | Omit_historical_context ->
+  | Omit_historical_system_context ->
     let kept =
       List.filter (fun (_, (message : _ Types.message_with)) ->
         match message.origin with
@@ -285,7 +285,7 @@ let encode_user_boundary policy ~(message : Types.message) wire =
       | _ :: _ -> Error Invalid_user_frame
     in
     loop [] wire
-  | (Preserve_positions | Omit_historical_context | Turn_scoped_system_context), _, _
+  | (Preserve_positions | Omit_historical_system_context | Turn_scoped_system_context), _, _
   | (Initial_system_native_tools | Initial_system_tool_response_media), (System | Assistant | Tool), _
   | (Initial_system_native_tools | Initial_system_tool_response_media), User,
       (System_context | Historical_system_context | Recovery_instruction | Agent_instruction) ->
@@ -302,7 +302,7 @@ let prepend_system_prompt policy ~system_prompt messages =
       Ok (`Assoc ["role", `String "system"; "content", `String prompt] :: messages)
     in
     match policy, messages with
-    | (Preserve_positions | Omit_historical_context | Turn_scoped_system_context), _
+    | (Preserve_positions | Omit_historical_system_context | Turn_scoped_system_context), _
     | (Initial_system_native_tools | Initial_system_tool_response_media), [] -> prepend ()
     | (Initial_system_native_tools | Initial_system_tool_response_media), first :: rest ->
       (match first with

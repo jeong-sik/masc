@@ -231,7 +231,7 @@ exception Request_without_header_block
 
 let serve_h2_connection
       ?(streams = Server_h2_stream_registry.create ())
-      ?(resources = Server_h2_response_resources.create
+      ?(resources = Http_h2_response_ledger.create
           ~max_pending_bytes:(H2_response_limits.max_pending_bytes ()))
       ~sw
       ~h2_request_handler
@@ -263,7 +263,7 @@ let serve_h2_connection
           | Some stream_id ->
             Server_h2_stream_registry.dispatch streams ~sw:request_sw ~stream_id reqd
               (fun stream_sw ->
-                Server_h2_response_resources.with_request resources ~sw:stream_sw
+                Http_h2_response_ledger.with_request resources ~sw:stream_sw
                   (fun () ->
                     try
                       with_request_lane (H2.Reqd.request reqd).meth (fun () ->
@@ -276,7 +276,7 @@ let serve_h2_connection
 ;;
 
 let serve_h2 ~sw ~clock ~socket ~addr_label ~h2_request_handler ~h2_error_handler =
-  let resources = Server_h2_response_resources.create
+  let resources = Http_h2_response_ledger.create
     ~max_pending_bytes:(H2_response_limits.max_pending_bytes ()) in
   let mode = "h2" in
   let listener_tag = Printf.sprintf "%s %s" mode addr_label in
@@ -337,7 +337,7 @@ let serve_h2 ~sw ~clock ~socket ~addr_label ~h2_request_handler ~h2_error_handle
     Detection suspends until the stream identifies a protocol. The returned
     socket replays the inspected prefix to httpun-eio or h2-eio. *)
 let serve_auto ~sw ~clock ~socket ~addr_label ~request_handler ~h2_request_handler ~h2_error_handler =
-  let resources = Server_h2_response_resources.create
+  let resources = Http_h2_response_ledger.create
     ~max_pending_bytes:(H2_response_limits.max_pending_bytes ()) in
   let mode = "auto" in
   let listener_tag = Printf.sprintf "%s %s" mode addr_label in

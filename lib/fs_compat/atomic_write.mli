@@ -332,75 +332,10 @@ module Capability_write_for_testing : sig
         ; release_failure : exn option
         }
 
-  type cleanup_body =
-    | Return_cleanup_value of string
-    | Raise_cleanup_body of exn
-    | Cancel_cleanup_body of exn
-
-  type observed_cleanup_failure =
-    { exception_ : exn
-    ; backtrace : Printexc.raw_backtrace
-    }
-
-  type cleanup_evidence =
-    | Cleanup_returned of string
-    | Cleanup_failed_without_cancellation of
-        { body : observed_cleanup_failure option
-        ; cleanup : observed_cleanup_failure
-        }
-    | Cancellation_primary_with_cleanup_failure of
-        { body : observed_cleanup_failure option
-        ; cancellation : observed_cleanup_failure
-        ; cleanup : observed_cleanup_failure
-        }
-    | Body_failure_during_cancellation of
-        { body : observed_cleanup_failure
-        ; cancellation : observed_cleanup_failure
-        }
-    | Cancellation_primary of observed_cleanup_failure
-    | Cleanup_boundary_raised of observed_cleanup_failure
-
-  type single_borrow_evidence =
-    | Single_borrow_balance of
-        { during_borrow : int
-        ; after_release : int
-        ; close_completed : bool
-        }
-    | Single_borrow_rejected
-    | Single_borrow_invariant of invariant_violation
-    | Single_borrow_raised of observed_cleanup_failure
-
-  and invariant_violation =
-    | Borrow_count_underflow
-    | Borrow_count_overflow
-    | Closing_without_active_borrows
-    | Closed_with_active_borrows of int
-    | Closed_without_drain_signal
-    | Drain_signal_already_resolved
-    | Discovery_settled_twice
-    | Discovery_finished_outside_running
-    | Owner_inventory_owner_not_running of string
-    | Reconciliation_owner_not_running of string
-    | Owner_generation_settled_twice of string
-    | Owner_generation_settled_before_terminal of string
-    | Health_counter_underflow
-    | Health_counter_overflow
-    | Cleanup_body_outcome_lost
-
   val run_publication_recovery_resource_scope
     :  callback:resource_scope_callback
     -> release_failure:exn option
     -> resource_scope_evidence
-
-  val run_publication_recovery_cleanup_boundary
-    :  body:cleanup_body
-    -> cleanup_failure:exn option
-    -> cleanup_evidence
-
-  val single_publication_recovery_borrow_balance
-    :  registry:Publication_recovery_access.registry
-    -> owner:string
-    -> (single_borrow_evidence, Publication_recovery_access.lane_open_error) result
 
   val publication_recovery_stage_name : Uuidm.t -> string
 

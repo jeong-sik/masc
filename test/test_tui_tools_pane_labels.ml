@@ -61,7 +61,8 @@ let tools_state () =
     Some { Masc.Tui_decode_tools.ts_tools = []
          ; ts_count = 0
          ; ts_freshness = Masc.Tui_decode_tools.Settled
-         ; ts_effective = None };
+         ; ts_effective = None
+         ; ts_usage = None };
   state.tools_activations <-
     Some
       (Activations_read

@@ -1706,13 +1706,40 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
     match state.tools_inventory with
     | None ->
         [ Theme.warn (), " Registered Catalog — no inventory reading" ]
-    | Some _ ->
+    | Some { Masc.Tui_decode_tools.ts_usage; _ } ->
     let registered_rows = Tool_tree.rows registered_tools in
+    let surfaces_text (tool : Masc.Tui_decode_tools.tool_entry) =
+      Terminal_text.single_line
+        (match tool.tl_surfaces with
+         | [] -> "none"
+         | names -> String.concat ", " names)
+    in
+    let layout =
+      Tool_table.catalog_layout ~width:(Masc_tui_frame.inner_width ~cols)
+        ~surfaces_cells:
+          (List.fold_left
+             (fun widest tool ->
+               max widest
+                 (Masc_tui_message_layout.display_width (surfaces_text tool)))
+             0 registered_tools)
+    in
+    (* A tool the server has no row for was not called; with no per-tool
+       counts at all, nothing is known about any tool. *)
+    let usage_of name =
+      match ts_usage with
+      | None -> Tool_table.Usage_unread
+      | Some rows -> (
+          match Masc.Tui_decode_tools.tool_usage_for rows ~name with
+          | None -> Tool_table.Never_called
+          | Some { Masc.Tui_decode_tools.tu_calls; tu_failures; tu_p95_ms; _ } ->
+              Tool_table.Called
+                { calls = tu_calls; failures = tu_failures; p95_ms = tu_p95_ms })
+    in
     let heading =
       [ Ansi.bold,
         Printf.sprintf " Registered Catalog — %s"
           (Masc_tui_message_layout.count_noun (List.length registered_tools) "tool");
-        Ansi.dim, Tool_table.catalog_tool_header ]
+        Ansi.dim, Tool_table.catalog_tool_header layout ]
     in
     heading
     @ List.map
@@ -1725,11 +1752,6 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
               Ansi.bold,
               Printf.sprintf "    %s (%d)" (Terminal_text.single_line name) count
           | Tool_tree.Tool tool ->
-              let surfaces =
-                match tool.Masc.Tui_decode_tools.tl_surfaces with
-                | [] -> "none"
-                | names -> String.concat ", " names
-              in
               (* The name is what an operator scans a hundred rows for, so it
                  keeps the terminal's own weight and the two columns that
                  answer about it are dimmed behind it. Dimming the whole row --
@@ -1743,10 +1765,11 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
                 if tool.tl_surfaces = [] then (Theme.warn ()) else Ansi.dim
               in
               ( Masc_tui_theme.tone Masc_tui_theme.Normal,
-                Tool_table.catalog_tool_line ~metadata
+                Tool_table.catalog_tool_line layout ~metadata
                   ~name:(Terminal_text.single_line (Masc.Tool_display.list_label tool.tl_name))
                   ~direct:(if tool.tl_direct_call then "yes" else "no")
-                  ~surfaces:(Terminal_text.single_line surfaces) ))
+                  ~usage:(usage_of tool.tl_name)
+                  ~surfaces:(surfaces_text tool) ))
         registered_rows
     end
   in

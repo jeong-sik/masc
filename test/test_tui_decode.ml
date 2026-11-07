@@ -3175,7 +3175,7 @@ let tool_entry_json ?(surfaces = [ "public_mcp" ]) ?(direct = `Bool true) () =
     ; ("surfaces", `List (List.map (fun s -> `String s) surfaces))
     ]
 
-let tool_snapshot_json ?effective tools =
+let tool_snapshot_json ?effective ?(usage = `Assoc []) tools =
   `Assoc
     [ ("generated_at", `String "2026-08-23T09:00:00Z")
     ; ("config_resolution", `Assoc [])
@@ -3186,9 +3186,32 @@ let tool_snapshot_json ?effective tools =
           ; ("tools", `List tools)
           ; ("surface_summary", `Assoc [])
           ] )
-    ; ("tool_usage", `Assoc [])
+    ; ("tool_usage", usage)
     ; ( "effective_keeper_surface"
       , Option.value ~default:`Null effective )
+    ]
+
+(* One [tool_usage.by_tool] row as the server writes it: counted under the
+   internal name, with the public names the model sees the tool under. *)
+let tool_usage_row_json ?(public_names = []) ?(p95 = `Float 12.5) ~calls
+    ~failures name =
+  `Assoc
+    [ ("name", `String name)
+    ; ("public_names", `List (List.map (fun n -> `String n) public_names))
+    ; ("call_count", `Int calls)
+    ; ("p50_ms", `Float 3.0)
+    ; ("p95_ms", p95)
+    ; ("p99_ms", `Float 40.0)
+    ; ("mean_ms", `Float 5.0)
+    ; ("success_count", `Int (calls - failures))
+    ; ("failure_count", `Int failures)
+    ]
+
+let tool_usage_json rows =
+  `Assoc
+    [ ("total_calls", `Int 0)
+    ; ("distinct_tools_called", `Int (List.length rows))
+    ; ("by_tool", `List rows)
     ]
 
 let test_decode_tool_snapshot_reads_the_live_shape () =
@@ -3206,6 +3229,124 @@ let test_decode_tool_snapshot_reads_the_live_shape () =
            Alcotest.(check bool) "callable directly" true
              t.Masc.Tui_decode_tools.tl_direct_call
        | ts -> Alcotest.failf "expected one tool, got %d" (List.length ts))
+
+let decode_tool_usage_rows usage =
+  match
+    Masc.Tui_decode_tools.decode_tool_snapshot (tool_snapshot_json ~usage [])
+  with
+  | Ok snapshot -> Ok snapshot.Masc.Tui_decode_tools.ts_usage
+  | Error err -> Error err
+
+let test_decode_tool_usage_reads_the_rows () =
+  let usage =
+    tool_usage_json
+      [ tool_usage_row_json ~public_names:[ "Read" ] ~calls:31533
+          ~failures:1193 ~p95:(`Float 2389.5) "tool_read_file"
+      ; tool_usage_row_json ~p95:`Null ~calls:3 ~failures:3 "masc_dos_screen"
+      ]
+  in
+  match decode_tool_usage_rows usage with
+  | Ok
+      (Some
+        [ { Masc.Tui_decode_tools.tu_name = "tool_read_file"
+          ; tu_public_names = [ "Read" ]
+          ; tu_calls = 31533
+          ; tu_failures = 1193
+          ; tu_p95_ms = Some p95
+          }
+        ; { Masc.Tui_decode_tools.tu_name = "masc_dos_screen"
+          ; tu_public_names = []
+          ; tu_calls = 3
+          ; tu_failures = 3
+          ; tu_p95_ms = None
+          }
+        ]) ->
+      Alcotest.(check (float 0.001)) "p95 in milliseconds" 2389.5 p95
+  | Ok _ -> Alcotest.fail "the rows did not decode as the server wrote them"
+  | Error err -> Alcotest.failf "decode failed: %s" err
+
+(* The warming placeholder sends the totals and no [by_tool]. Reading that as
+   an empty list would say no tool was ever called. *)
+let test_decode_tool_usage_without_by_tool_is_no_reading () =
+  let placeholder =
+    `Assoc [ ("total_calls", `Int 12); ("distinct_tools_called", `Int 2) ]
+  in
+  (match decode_tool_usage_rows placeholder with
+   | Ok None -> ()
+   | Ok (Some _) -> Alcotest.fail "totals without by_tool are not a reading"
+   | Error err -> Alcotest.failf "decode failed: %s" err);
+  (* A server that built a report and called nothing sends an empty list,
+     which is an answer. *)
+  match decode_tool_usage_rows (tool_usage_json []) with
+  | Ok (Some []) -> ()
+  | Ok _ -> Alcotest.fail "an empty by_tool is a reading of no calls"
+  | Error err -> Alcotest.failf "decode failed: %s" err
+
+let test_decode_tool_usage_refuses_a_malformed_row () =
+  let refused label ~field usage =
+    match decode_tool_usage_rows usage with
+    | Error err ->
+        Alcotest.(check bool) (label ^ " names " ^ field) true
+          (Astring.String.is_infix ~affix:field err)
+    | Ok _ -> Alcotest.failf "%s should not decode" label
+  in
+  refused "a count that is a string" ~field:"call_count"
+    (tool_usage_json
+       [ `Assoc
+           [ ("name", `String "tool_read_file")
+           ; ("call_count", `String "many")
+           ; ("failure_count", `Int 0)
+           ]
+       ]);
+  refused "a negative failure count" ~field:"failure_count"
+    (tool_usage_json
+       [ tool_usage_row_json ~calls:1 ~failures:(-1) "tool_read_file" ]);
+  refused "by_tool that is not a list" ~field:"by_tool"
+    (`Assoc [ ("by_tool", `String "none") ])
+
+let usage_row ?(public_names = []) ?(failures = 0) name calls =
+  { Masc.Tui_decode_tools.tu_name = name
+  ; tu_public_names = public_names
+  ; tu_calls = calls
+  ; tu_failures = failures
+  ; tu_p95_ms = None
+  }
+
+(* The catalog lists a public name as an entry of its own, and the server
+   counts only under the internal name. *)
+let test_tool_usage_for_finds_the_row_a_public_name_belongs_to () =
+  let rows =
+    [ usage_row ~public_names:[ "Read" ] "tool_read_file" 31533
+    ; usage_row "masc_board_post" 7
+    ]
+  in
+  let calls name =
+    Option.map
+      (fun row -> row.Masc.Tui_decode_tools.tu_calls)
+      (Masc.Tui_decode_tools.tool_usage_for rows ~name)
+  in
+  Alcotest.(check (option int)) "the internal name" (Some 31533)
+    (calls "tool_read_file");
+  Alcotest.(check (option int)) "the public name" (Some 31533) (calls "Read");
+  Alcotest.(check (option int)) "another tool's row" (Some 7)
+    (calls "masc_board_post");
+  Alcotest.(check (option int)) "a tool nobody called" None (calls "Write")
+
+(* Calls made as [Execute] itself were counted in a row of that name. The
+   internal tool's row lists [Execute] too, and taking it would show the
+   entry [Execute] the other tool's calls and drop its own. *)
+let test_tool_usage_for_prefers_the_row_named_exactly () =
+  let internal = usage_row ~public_names:[ "Execute" ] "tool_execute" 356882 in
+  let spelled = usage_row ~failures:1741 "Execute" 1741 in
+  let calls rows =
+    Option.map
+      (fun row -> row.Masc.Tui_decode_tools.tu_calls)
+      (Masc.Tui_decode_tools.tool_usage_for rows ~name:"Execute")
+  in
+  Alcotest.(check (option int)) "named row listed second" (Some 1741)
+    (calls [ internal; spelled ]);
+  Alcotest.(check (option int)) "named row listed first" (Some 1741)
+    (calls [ spelled; internal ])
 
 let skill_snapshot_json ?(rejections = []) ?(shadows = []) () =
   `Assoc
@@ -14360,6 +14501,16 @@ let () =
           test_decode_tool_snapshot_reads_the_live_shape;
         Alcotest.test_case "keeps the warming flag" `Quick
           test_decode_tool_snapshot_keeps_the_warming_flag;
+        Alcotest.test_case "usage rows keep calls, failures and p95" `Quick
+          test_decode_tool_usage_reads_the_rows;
+        Alcotest.test_case "usage without by_tool is no reading" `Quick
+          test_decode_tool_usage_without_by_tool_is_no_reading;
+        Alcotest.test_case "usage refuses a malformed row" `Quick
+          test_decode_tool_usage_refuses_a_malformed_row;
+        Alcotest.test_case "a public name finds its tool's usage row" `Quick
+          test_tool_usage_for_finds_the_row_a_public_name_belongs_to;
+        Alcotest.test_case "an exactly named usage row comes first" `Quick
+          test_tool_usage_for_prefers_the_row_named_exactly;
         Alcotest.test_case "a tool projected nowhere" `Quick
           test_decode_tool_projected_nowhere;
         Alcotest.test_case "absent direct-call is off" `Quick

@@ -268,16 +268,46 @@ type skill_activation_projection =
       sap_detail : string;
     }
 
+(** What the server counted about one tool's calls, from
+    [tool_usage.by_tool]. The counts cover the retained snapshot and the
+    current process. *)
+type tool_usage_row = {
+  tu_name : string;
+      (** The internal name the calls were counted under. *)
+  tu_public_names : string list;
+      (** The names a model sees this tool under, when it has any: [tool_execute]
+          lists [Execute]. *)
+  tu_calls : int;
+  tu_failures : int;
+  tu_p95_ms : float option;
+      (** [None] when the server sent no 95th percentile for this tool. *)
+}
+
 type tool_snapshot = {
   ts_tools : tool_entry list;
   ts_count : int;
   ts_freshness : inventory_freshness;
       (** Whether the count above is an answer. *)
   ts_effective : effective_tool_surface option;
+  ts_usage : tool_usage_row list option;
+      (** One row per tool called at least once. [None] when the envelope
+          carried no per-tool counts: the warming placeholder has totals and no
+          [by_tool]. A tool with no row in a [Some] reading was not called,
+          which is a different answer. *)
 }
 
 val decode_tool_snapshot : Yojson.Safe.t -> (tool_snapshot, string) result
-(** Reads [tool_inventory] out of the /dashboard/tools envelope. *)
+(** Reads [tool_inventory] and [tool_usage.by_tool] out of the
+    /dashboard/tools envelope. *)
+
+val tool_usage_for : tool_usage_row list -> name:string -> tool_usage_row option
+(** The row for the tool the catalog lists as [name]. The server counts under
+    the internal name, and the catalog lists public names as entries of their
+    own, so [Read] has no row named [Read]: it is the row of [tool_read_file],
+    which lists [Read] among its public names. A row named [name] comes first:
+    when calls were counted under the public spelling itself, that row and
+    the internal tool's row both fit [Execute], and the entry [Execute] reports
+    the calls made as [Execute]. *)
 
 val skill_activation_keeper : skill_activation_projection -> string
 (** The Keeper a projection is for. *)

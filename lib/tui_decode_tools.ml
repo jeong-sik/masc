@@ -144,11 +144,20 @@ type skill_activation_projection =
       ; sap_detail : string
       }
 
+type tool_usage_row = {
+  tu_name : string;
+  tu_public_names : string list;
+  tu_calls : int;
+  tu_failures : int;
+  tu_p95_ms : float option;
+}
+
 type tool_snapshot = {
   ts_tools : tool_entry list;
   ts_count : int;
   ts_freshness : inventory_freshness;
   ts_effective : effective_tool_surface option;
+  ts_usage : tool_usage_row list option;
 }
 
 let decode_tool_entry json =
@@ -1108,10 +1117,41 @@ let decode_skills_catalog json =
     | unknown ->
       Error (Printf.sprintf "unknown state %S" unknown)
 
+let decode_tool_usage_row json =
+  let* tu_name = required_string_field json "name" in
+  let* tu_public_names = decode_string_name_list json "public_names" in
+  let* tu_calls = required_nonnegative_int_field json "call_count" in
+  let* tu_failures = required_nonnegative_int_field json "failure_count" in
+  let* tu_p95_ms = optional_float_field json "p95_ms" in
+  Ok { tu_name; tu_public_names; tu_calls; tu_failures; tu_p95_ms }
+
+(* [tool_usage] is the server's whole call report; the catalog needs the
+   per-tool rows. The warming placeholder sends the totals and no [by_tool],
+   and that is no reading rather than a report of no calls. *)
+let decode_tool_usage json =
+  let* usage = optional_object_field json "tool_usage" in
+  match usage with
+  | None -> Ok None
+  | Some usage -> (
+      match member "by_tool" usage with
+      | `Null -> Ok None
+      | `List rows ->
+          Result.map Option.some
+            (decode_list "tool_usage.by_tool" decode_tool_usage_row rows)
+      | bad -> field_type_error "tool_usage.by_tool" "an array" bad)
+
+let tool_usage_for rows ~name =
+  match List.find_opt (fun row -> String.equal row.tu_name name) rows with
+  | Some _ as exact -> exact
+  | None ->
+      List.find_opt
+        (fun row -> List.exists (String.equal name) row.tu_public_names)
+        rows
+
 let decode_tool_snapshot json =
   (* The tools envelope carries config and runtime resolution beside the
-     inventory; this reads the inventory and leaves the rest to the dashboard,
-     which has room to show it. *)
+     inventory; this reads the inventory and the per-tool call counts and
+     leaves the rest to the dashboard, which has room to show it. *)
   let* inventory = required_object_field json "tool_inventory" in
   let* tools_json = required_list_field inventory "tools" in
   let* ts_tools = decode_list "tools" decode_tool_entry tools_json in
@@ -1133,11 +1173,13 @@ let decode_tool_snapshot json =
         Result.map Option.some (decode_effective_tool_surface value)
     | bad -> field_type_error "effective_keeper_surface" "an object or null" bad
   in
+  let* ts_usage = decode_tool_usage json in
   Ok
     { ts_tools
     ; ts_count
     ; ts_freshness
     ; ts_effective
+    ; ts_usage
     }
 
 let skill_activation_keeper = function

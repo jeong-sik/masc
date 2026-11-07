@@ -40,8 +40,8 @@ import {
 // operator intent in two visually identical lines — e.g.
 //   주의 사유 · 런타임 근거 확인 필요
 //   다음 액션 · 런타임 근거 확인
-// Backend emits them as separate fields (lib/keeper/keeper_status_bridge.ml:727-742
-// and the fd_pressure / runtime_trust_snapshot peer sites), and we keep
+// Backend emits them as separate fields (lib/keeper/keeper_status_bridge.ml
+// and lib/keeper/keeper_runtime_trust_snapshot.ml), and we keep
 // the pairing here in dashboard so other consumers that *do* want both
 // (e.g. timeline reconstruction) are unaffected. Adding a new arm to
 // either union without considering the pair is safe — the predicate

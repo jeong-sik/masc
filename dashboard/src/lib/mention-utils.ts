@@ -1,5 +1,5 @@
 // Shared mention utilities — SSOT for keeper mention UI logic.
-// Used by composer-v2.ts and quick-intervene.ts.
+// Used by composer-v2.ts, board-surface.ts and use-operator-mention-context.ts.
 
 export interface OnlineKeeper {
   name: string

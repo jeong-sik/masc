@@ -7,7 +7,8 @@ import { transitionType, badgeTone } from "./keeper-state-diagram"
 // which is covered by `keeper-store-normalize.test.ts`. The two unmapped
 // cases this file previously asserted (passthrough of unknown phase, null
 // for falsy inputs) become the caller's fallback (`?? raw`) responsibility
-// at the two render sites (keeper-state-diagram.ts:290, 292).
+// at the two render sites (the `prev_phase` and `new_phase` cells in
+// keeper-state-diagram.ts).
 
 describe("transitionType", () => {
   it("extracts type from object", () => {

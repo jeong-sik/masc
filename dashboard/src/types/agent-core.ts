@@ -16,9 +16,10 @@ interface AgentCoreAgentEventBase {
 
 // `phase` is the keeper FSM phase at emit time. Backend emits the
 // lowercase wire form via `Keeper_state_machine.phase_to_string`
-// (lib/runtime/runtime_events.ml:170–179); the factory in
-// `agent-core-runtime-store.ts` normalizes it to the canonical PascalCase
-// `KeeperPhase` so consumers don't carry around two casing forms.
+// (`publish_keeper_lifecycle` in lib/keeper/keeper_event_publisher.ml);
+// the factory in `agent-core-runtime-store.ts` normalizes it to the
+// canonical PascalCase `KeeperPhase` so consumers don't carry around two
+// casing forms.
 // `null` means either the lifecycle event genuinely had no phase
 // (e.g. a `Custom_event` with `phase = None`) or the wire value
 // didn't match any known variant — both cases collapse to the same

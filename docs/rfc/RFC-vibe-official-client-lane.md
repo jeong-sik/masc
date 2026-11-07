@@ -30,7 +30,8 @@ official-client lane 후보의 종류·자격 증명·계약·관측·실패 처
   metric 이름과 콘솔 막대만으로 included allowance 나 limit 분리를 확정하지 않는다.
 - 인증 분리: Vibe CLI 는 브라우저 계정 로그인으로 자격 증명을 provisioning
   하며 API 키 없이 유료 플랜에서 동작한다(문서 근거). setup 경로는 기록하지
-  않았지만 keychain 자격 증명은 Vibe scope 키였다(§4.2). 제3자가 구독 pool 에 닿는 공개
+  않았지만 Vibe 는 keychain 자격 증명을 `chat` 플랜 키로 읽었다(§4.2, scope 는 Vibe
+  소스의 표로 이끌어 낸 값이다). 제3자가 구독 pool 에 닿는 공개
   엔드포인트는 없다.
 - 자세한 출처와 미확인 목록:
   `docs/research/vibe-official-client-lane-20261107.md` §1–§6.

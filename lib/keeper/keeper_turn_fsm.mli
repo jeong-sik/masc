@@ -2,9 +2,8 @@
 
     Re-exports the pure FSM surface (states, reasons, [classify_transition],
     labels, TLA symbols) via [include module type of Turn_fsm], and adds the
-    keeper-coupled tail: [require_active_state] (its [@@fsm_guard] expansion
-    references [Keeper_fsm_guard_runtime]) and [emit_transition] (telemetry /
-    audit / metrics). Dependency direction is Keeper -> Turn.
+    keeper-coupled tail: [emit_transition] (telemetry / audit / metrics).
+    Dependency direction is Keeper -> Turn.
 
     Formal contract for the pure core: [specs/keeper-turn-fsm/KeeperTurnFSM.tla]
     (verified by [test_keeper_turn_fsm_tla_parity]). *)

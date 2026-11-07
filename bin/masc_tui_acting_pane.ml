@@ -11,8 +11,7 @@ module Terminal_text = Masc_tui_ansi.Terminal_text
    reading is four columns -- state 10, tool 12, calls 5, tokens 9 -- at
    exactly 36, and a done row's tokens are one summed figure: [2.00M] for
    123 calls of 999.9k in and 999.9k out. No slack: anything added to a done
-   reading has to take width from another column.
-   [test_widest_done_reading_fits_whole] is what says so. The age of the
+   reading has to take width from another column. The age of the
    newest event is one fact and sits on the focus header, not here.
 
    The token parts -- in and out, and the input's new and cached parts when
@@ -552,8 +551,7 @@ let record_glyph = function
    "no events" 9 in a 10-cell state column, whose last cell is the gap to
    the next -- without it the state word and a tool name ran together;
    "tool_execute" 12; "999+" 4 under a 5-cell "calls" heading;
-   "999.9k" 6 under a 9-cell "tokens". Widening one has to narrow another,
-   and [test_widest_done_reading_fits_whole] fails when the sum drifts. *)
+   "999.9k" 6 under a 9-cell "tokens". Widening one has to narrow another. *)
 let state_cells = 10
 let tool_cells = 12
 let calls_cells = 5

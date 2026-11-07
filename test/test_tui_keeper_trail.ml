@@ -248,15 +248,15 @@ let test_attempts_of_runtime_extracts_ordered_candidates_and_terminal () =
   let failure_a : Evidence.failure =
     { attempt = 0
     ; runtime_id = "provider.runtime-a"
-    ; dispatch = Masc.Runtime_attempt_dispatch.Dispatched
+    ; dispatch = Runtime_attempt_dispatch.Dispatched
     ; failure = { cause = Request_failure.Provider_rate_limited "throttled" }
-    ; api_candidate_fault = Some (Evidence.Api_candidate_fault.Binding Evidence.Api_candidate_fault.Rate_limit)
+    ; api_candidate_fault = Some (Llm_provider.Candidate_fault.Binding Llm_provider.Candidate_fault.Rate_limit)
     }
   in
   let failure_b : Evidence.failure =
     { attempt = 1
     ; runtime_id = "provider.runtime-b"
-    ; dispatch = Masc.Runtime_attempt_dispatch.Dispatched
+    ; dispatch = Runtime_attempt_dispatch.Dispatched
     ; failure = { cause = Request_failure.Provider_network "timeout" }
     ; api_candidate_fault = None
     }
@@ -287,7 +287,7 @@ let test_attempts_of_runtime_walk_no_terminal () =
     ; runtime_id = "provider.runtime-a"
     ; dispatch = Runtime_attempt_dispatch.Dispatched
     ; failure = { cause = Request_failure.Provider_server "overloaded" }
-    ; api_candidate_fault = Some Evidence.Api_candidate_fault.Capacity
+    ; api_candidate_fault = Some Llm_provider.Candidate_fault.Capacity
     }
   in
   let failure_b : Evidence.failure =

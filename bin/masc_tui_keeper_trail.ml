@@ -201,23 +201,24 @@ type attempt =
 
 let fault_word = function
   | None -> None
-  | Some Evidence.Api_candidate_fault.Unattributed -> Some "unattributed"
-  | Some Evidence.Api_candidate_fault.Unknown_after_dispatch -> Some "uncertain"
-  | Some Evidence.Api_candidate_fault.Local_admission -> Some "admission"
-  | Some (Evidence.Api_candidate_fault.Binding binding) ->
+  | Some Llm_provider.Candidate_fault.Unattributed -> Some "unattributed"
+  | Some Llm_provider.Candidate_fault.Unknown_after_dispatch -> Some "uncertain"
+  | Some Llm_provider.Candidate_fault.Local_admission -> Some "admission"
+  | Some (Llm_provider.Candidate_fault.Binding binding) ->
       match binding with
-      | Evidence.Api_candidate_fault.Credential -> Some "credential"
-      | Evidence.Api_candidate_fault.Account_access -> Some "account access"
-      | Evidence.Api_candidate_fault.Account -> Some "account"
-      | Evidence.Api_candidate_fault.Model_absent -> Some "model absent"
-      | Evidence.Api_candidate_fault.Rate_limit -> Some "rate limit"
-      | Evidence.Api_candidate_fault.Capacity -> Some "capacity"
-      | Evidence.Api_candidate_fault.Server -> Some "server"
-      | Evidence.Api_candidate_fault.Window -> Some "context window"
-      | Evidence.Api_candidate_fault.Body_limit -> Some "body limit"
-      | Evidence.Api_candidate_fault.Admission -> Some "admission"
-      | Evidence.Api_candidate_fault.Deadline -> Some "deadline"
-      | Evidence.Api_candidate_fault.Output_dialect -> Some "dialect"
+      | Llm_provider.Candidate_fault.Credential -> Some "credential"
+      | Llm_provider.Candidate_fault.Account_access -> Some "account access"
+      | Llm_provider.Candidate_fault.Account -> Some "account"
+      | Llm_provider.Candidate_fault.Model_absent -> Some "model absent"
+      | Llm_provider.Candidate_fault.Rate_limit -> Some "rate limit"
+      | Llm_provider.Candidate_fault.Capacity -> Some "capacity"
+      | Llm_provider.Candidate_fault.Server -> Some "server"
+      | Llm_provider.Candidate_fault.Window -> Some "context window"
+      | Llm_provider.Candidate_fault.Body_limit -> Some "body limit"
+      | Llm_provider.Candidate_fault.Admission -> Some "admission"
+      | Llm_provider.Candidate_fault.Deadline -> Some "deadline"
+      | Llm_provider.Candidate_fault.Output_dialect -> Some "dialect"
+      | Llm_provider.Candidate_fault.Refusal_unread -> Some "unread"
 
 let attempts_of_runtime (runtime : Decode.keeper_runtime option) : attempt list =
   match runtime with

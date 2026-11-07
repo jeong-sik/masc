@@ -4493,7 +4493,8 @@
   masc_tui_types
   masc_tui_agenda
   masc_tui_keeper_axis_cell
-  masc_tui_keeper_axis))
+  masc_tui_keeper_axis
+  masc_tui_keeper_memory_reading))
 
 (test
  (name test_tui_keeper_memory_reading)

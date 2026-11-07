@@ -209,7 +209,7 @@ let render_fusion_list (state : state) =
         empty_page_of ~snapshot ~error:failure
       with
       | Page_failed -> page_failed_note
-      | Page_unread -> page_unread_note
+      | Page_unread -> page_unread_note_while ~reading:(view_is_loading reading)
       | Page_empty ->
           if Option.is_some replay_warning then "  No readable retained runs; see startup read warning above"
           else "  (no retained Fusion runs)"

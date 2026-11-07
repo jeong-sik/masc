@@ -20523,6 +20523,14 @@ let page_reading_note = "  (reading\xe2\x80\xa6)"
 let page_unread_note_while ~reading =
   if reading then page_reading_note else page_unread_note
 
+(* [reading] for a pane whose reading is a [Masc_tui_fetched] view: asked, with
+   no answer to show yet. *)
+let view_is_loading view =
+  match view with
+  | Masc_tui_fetched.Loading -> true
+  | Masc_tui_fetched.Absent | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Stale _
+  | Masc_tui_fetched.Failed _ -> false
+
 (* The sources the status line names after "reading": reads dispatched for the
    surface on screen that have not answered yet. Dispatch is intent until the
    workspace identity is confirmed, so nothing is named before that. The line

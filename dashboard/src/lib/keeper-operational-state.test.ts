@@ -186,7 +186,7 @@ describe('deriveKeeperOperationalState — offline branch', () => {
 describe('deriveKeeperOperationalState — stuck branch (RFC-0135 §1.1 root)', () => {
   it('blocker AND execution_current=true ⇒ stuck (receipt is current)', () => {
     // execution_current=true means the receipt matches the *current* live
-    // turn (server_dashboard_http.ml:1061-1074) — the blocker is meaningful.
+    // turn (`composite_execution_current_for_runtime_state`) — the blocker is meaningful.
     // attention=blocked here because runtime_attention.blocked=true (kind/
     // attention orthogonality covered in the §13 axis-extension suite).
     const state = deriveKeeperOperationalState({

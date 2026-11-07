@@ -12,7 +12,8 @@
 //
 // Discriminant invariants (RFC-0135 §2 conditioning matrix). The
 // `execution_current` semantics are anchored at
-// `lib/server/server_dashboard_http.ml:1061-1074`:
+// `composite_execution_current_for_runtime_state` in
+// `lib/server/server_dashboard_http_composite_claims.ml`:
 //
 //   `execution_current = true`  — receipt either (a) does not exist, or
 //      (b) is not from a stale live turn (`receipt_at >= live_started_at`).

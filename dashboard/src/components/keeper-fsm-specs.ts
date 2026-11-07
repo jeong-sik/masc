@@ -7,7 +7,7 @@ import { toKeeperPhase } from '../keeper-store-normalize'
 
 
 // ================================================================
-// Composite Lifecycle (RFC-0003 KeeperCompositeLifecycle.tla)
+// Composite Lifecycle (RFC-0003)
 // ================================================================
 //
 // Compound graph: five parent clusters (one per sub-FSM) each containing
@@ -66,9 +66,10 @@ const TURN_FSM_STATE_ALIASES: Readonly<Record<string, KeeperTurnFsmState>> = {
   awaiting_tool: 'awaiting_tool_result',
 }
 
-// 23 canonical turn_phase transitions. Mirrors the GADT enumeration in
-// `lib/keeper/keeper_registry_types.ml:259-291 module Turn_phase_transition`
-// (RFC-0072 Phase 4b/5). Every constructor on the GADT corresponds to one
+// 19 canonical turn_phase transitions. Mirrors the GADT enumeration in
+// `module Turn_phase_transition` in
+// `lib/keeper_registry/keeper_registry_types_turn_phase.ml` (RFC-0072
+// Phase 4b/5). Every constructor on the GADT corresponds to one
 // edge here; adding a new constructor in OCaml must be paired with a new
 // edge in this list, otherwise the dashboard visualization hides a real
 // transition the runtime can take. The previous list omitted the four
@@ -146,9 +147,9 @@ export function buildCompositeFsmSpec(params: CompositeFsmParams): FsmGraphSpec 
   ]
 
   // Edges left empty by design: the compound visual encodes "what sub-FSMs
-  // are simultaneously active". Cross-cluster causality lives in the TLA+
-  // spec (see KeeperCompositeLifecycle.tla join actions) and the invariants
-  // panel — drawing inter-cluster arrows here would overstate the coupling.
+  // are simultaneously active". Cross-cluster causality lives in the
+  // invariants panel — drawing inter-cluster arrows here would overstate the
+  // coupling.
   const edges: FsmEdge[] = []
 
   return {

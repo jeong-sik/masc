@@ -286,6 +286,40 @@ let each_kind_of_route_judges_the_request () =
       rows)
 ;;
 
+(* The who-am-I route of the localhost preview reads the same gate. *)
+let the_preview_whoami_names_the_principal () =
+  with_credentials (fun state c ->
+    let answer presented =
+      let { Login_routes.status; body; headers = _ } =
+        Auth_preview.whoami state ~now_ms:start_ms (request presented)
+      in
+      let json = Yojson.Safe.from_string body in
+      let field name = Yojson.Safe.Util.member name json in
+      match status with
+      | Login_routes.Ok_200 ->
+        Printf.sprintf
+          "200 %s %s by %s"
+          (Yojson.Safe.Util.to_string (field "role"))
+          (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "kind" (field "principal")))
+          (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "kind" (field "binding")))
+      | other ->
+        Printf.sprintf
+          "%d %s"
+          (Login_routes.status_code other)
+          (Yojson.Safe.Util.to_string (field "error"))
+    in
+    let legacy = "Bearer " ^ String.make 64 'f' in
+    List.iter
+      (fun (label, presented, expected) ->
+        Alcotest.(check string) label expected (answer presented))
+      [ "Admin session", Cookie c.admin_session, "200 admin human by session"
+      ; "Member session", Cookie c.member_session, "200 worker human by session"
+      ; "service", Bearer c.service, "200 worker service by service_credential"
+      ; "nothing", Nothing, "401 " ^ G.reason_to_string G.Credential_required
+      ; "legacy bearer", Bearer legacy, "401 " ^ G.reason_to_string G.Legacy_credential_forbidden
+      ])
+;;
+
 let () =
   Alcotest.run
     "auth_gate"
@@ -294,6 +328,10 @@ let () =
             "each kind of route judges the request"
             `Quick
             each_kind_of_route_judges_the_request
+        ; Alcotest.test_case
+            "the preview whoami names the principal"
+            `Quick
+            the_preview_whoami_names_the_principal
         ] )
     ]
 ;;

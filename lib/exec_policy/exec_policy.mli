@@ -6,7 +6,6 @@
 
 type block_reason =
   | Empty_command
-  | Chain_or_redirect
   | Injection
   | Process_substitution
   | Unsafe_redirect
@@ -17,10 +16,7 @@ type block_reason =
     failure the bare variant tag is returned and the miss is logged. *)
 val block_reason_to_string : block_reason -> string
 
-type parse_mode = Strict | Tool_execute
-
-val parse_string_to_ir :
-  mode:parse_mode -> string -> (Masc_exec.Shell_ir.t, block_reason) result
+val parse_string_to_ir : string -> (Masc_exec.Shell_ir.t, block_reason) result
 
 val validate_command_tool_execute :
   ?allow_pipes:bool ->

@@ -387,7 +387,7 @@ let validate_docker_dispatch_context
       ~(cmd : string)
       ()
   =
-  match Exec_policy.parse_string_to_ir ~mode:Tool_execute cmd with
+  match Exec_policy.parse_string_to_ir cmd with
   | Error reason ->
     Error
       (Printf.sprintf
@@ -402,7 +402,7 @@ let validate_docker_dispatch_context
         let validation_cmd =
           rewrite_docker_command_paths_for_host_validation ~config ~meta cmd
         in
-        match Exec_policy.parse_string_to_ir ~mode:Tool_execute validation_cmd with
+        match Exec_policy.parse_string_to_ir validation_cmd with
         | Ok validation_ir ->
           Keeper_tooling.Execute_shell_ir.validate_paths
             ~workdir:cwd

@@ -592,30 +592,6 @@ let register_discovered ~base_path =
         let* () = write_all ~base_path (existing @ registered) in
         Ok registered)
 
-let strip_trailing_slash path =
-  let length = String.length path in
-  if length > 0 && Char.equal path.[length - 1] '/' then
-    String.sub path 0 (length - 1)
-  else path
-
-let is_path_prefix ~prefix path =
-  let prefix = strip_trailing_slash prefix in
-  let prefix_length = String.length prefix in
-  if prefix_length = 0 then false
-  else if String.length path = prefix_length && String.equal path prefix then true
-  else
-    String.length path > prefix_length
-    && String.equal (String.sub path 0 prefix_length) prefix
-    && Char.equal path.[prefix_length] '/'
-
-let rel_under_path ~prefix path =
-  let prefix = strip_trailing_slash prefix in
-  let prefix_length = String.length prefix in
-  if String.length path = prefix_length then ""
-  else
-    String.sub path (prefix_length + 1)
-      (String.length path - prefix_length - 1)
-
 let find_url_by_id ~base_path id =
   let* repositories = load_all ~base_path in
   Ok
@@ -627,32 +603,3 @@ let find_url_by_id ~base_path id =
      | Some repository when not (String.equal repository.url "") ->
        Some repository.url
      | Some _ | None -> None)
-
-let find_repo_by_path_prefix ~base_path path =
-  let* repositories = load_all ~base_path in
-  let candidates =
-    List.filter_map
-      (fun (repository : repository) ->
-        let repository_path = local_path ~base_path repository in
-        if is_path_prefix ~prefix:repository_path path then
-          Some
-            ( repository,
-              repository_path,
-              rel_under_path ~prefix:repository_path path )
-        else None)
-      repositories
-  in
-  let longest =
-    match candidates with
-    | [] -> None
-    | first :: rest ->
-      Some
-        (List.fold_left
-           (fun ((_, best_path, _) as best)
-                ((_, candidate_path, _) as candidate) ->
-             if String.length candidate_path > String.length best_path then
-               candidate
-             else best)
-           first rest)
-  in
-  Ok (Option.map (fun (repository, _, rel) -> (repository, rel)) longest)

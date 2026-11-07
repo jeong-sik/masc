@@ -3191,6 +3191,58 @@ let test_read_lane_still_rejects_exit_1 () =
   | Ok _ -> Alcotest.fail "exit 1 must not be ok when ok_exit_codes = [0]"
   | Error _ -> ()
 
+(* The Grep lane accepts rg's exit 2. rg prints the reason on stderr, and an
+   accepted exit used to return stdout alone: a search of a missing path came
+   back as exit 2 with an empty output. *)
+let rg_error_line = "rg: work/missing.ml: No such file or directory (os error 2)\n"
+
+let test_accepted_nonzero_exit_keeps_stderr () =
+  let outcome =
+    Masc_exec.Sandbox_target.Ran
+      { output_files = None; status = Unix.WEXITED 2; stdout = ""; stderr = rg_error_line }
+  in
+  match
+    Keeper_sandbox_read_backend.classify_read_outcome ~lane:"remote_ssh"
+      ~endpoint_name:"guest" ~ok_exit_codes:[ 0; 1; 2 ] ~max_bytes:4096 outcome
+  with
+  | Ok (Unix.WEXITED 2, output) ->
+    Alcotest.(check bool) "the error text reaches the caller" true
+      (String_util.contains_substring output "No such file or directory")
+  | Ok _ -> Alcotest.fail "the exit status changed"
+  | Error message -> Alcotest.failf "exit 2 is accepted here, got: %s" message
+
+let test_accepted_nonzero_exit_cut_keeps_the_error () =
+  let stdout = String.make 200 'm' in
+  let outcome =
+    Masc_exec.Sandbox_target.Ran
+      { output_files = None; status = Unix.WEXITED 2; stdout; stderr = rg_error_line }
+  in
+  match
+    Keeper_sandbox_read_backend.classify_read_outcome ~lane:"remote_ssh"
+      ~endpoint_name:"guest" ~ok_exit_codes:[ 0; 1; 2 ] ~max_bytes:64 outcome
+  with
+  | Ok (_, output) ->
+    Alcotest.(check int) "the cut still applies" 64 (String.length output);
+    Alcotest.(check bool) "the error text survives the cut" true
+      (String_util.contains_substring output "No such file or directory")
+  | Error message -> Alcotest.failf "exit 2 is accepted here, got: %s" message
+
+let test_exit_zero_returns_stdout_alone () =
+  let outcome =
+    Masc_exec.Sandbox_target.Ran
+      { output_files = None
+      ; status = Unix.WEXITED 0
+      ; stdout = "a.ml:1:match\n"
+      ; stderr = "ssh: a warning\n"
+      }
+  in
+  match
+    Keeper_sandbox_read_backend.classify_read_outcome ~lane:"remote_ssh"
+      ~endpoint_name:"guest" ~ok_exit_codes:[ 0; 1; 2 ] ~max_bytes:4096 outcome
+  with
+  | Ok (_, output) -> Alcotest.(check string) "stdout only" "a.ml:1:match\n" output
+  | Error message -> Alcotest.failf "exit 0 should be Ok, got: %s" message
+
 let test_complete_binary_failure_has_safe_diagnostic () =
   let script = "#!/bin/sh\ncase \"$1\" in info|image) printf '[]\\n'; exit 0;; run) printf '\\377PNG'; exit 1;; *) exit 2;; esac\n" in
   with_fake_docker script (fun () ->
@@ -3492,6 +3544,12 @@ let run_tests ~clock ~fs () =
           Alcotest.test_case "complete binary failure diagnostics are UTF8 safe" `Quick test_complete_binary_failure_has_safe_diagnostic;
           Alcotest.test_case "read lane still rejects exit 1" `Quick
             test_read_lane_still_rejects_exit_1;
+          Alcotest.test_case "accepted non-zero exit keeps stderr" `Quick
+            test_accepted_nonzero_exit_keeps_stderr;
+          Alcotest.test_case "accepted non-zero exit cut keeps the error" `Quick
+            test_accepted_nonzero_exit_cut_keeps_the_error;
+          Alcotest.test_case "exit 0 returns stdout alone" `Quick
+            test_exit_zero_returns_stdout_alone;
         ] );
       ( "defined but never registered until task-1768",
           [ Alcotest.test_case "run command scrubs sensitive env" `Quick test_run_command_scrubs_sensitive_env

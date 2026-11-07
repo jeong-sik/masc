@@ -1,6 +1,6 @@
 // MASC Dashboard — Attribution REST client (Layer 4).
 //
-// Reads from the in-process ring buffer in `lib/dashboard/dashboard_attribution.ml`
+// Reads from the in-process ring buffer in `lib/dashboard_attribution.ml`
 // via /api/v1/attribution/{recent,summary}. Plain types — no valibot schema yet
 // because the envelope is frozen at the OCaml side (Attribution.to_yojson) and
 // the dashboard is the only consumer.

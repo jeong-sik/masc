@@ -151,7 +151,7 @@ let read_tail_window_samples ~now ~window_seconds path =
       collect [] truncated_input reversed_lines)
 ;;
 
-let seed_from_decision_log ?(now = Time_compat.now ()) ~config ~keeper_name =
+let seed_from_decision_log ?(now = Time_compat.now ()) ~config ~keeper_name () =
   let base_path = config.Workspace.base_path in
   let primary_path = Keeper_types_support.keeper_decision_log_path config keeper_name in
   let rotated_path = primary_path ^ ".1" in
@@ -175,10 +175,10 @@ let seed_from_decision_log ?(now = Time_compat.now ()) ~config ~keeper_name =
   seed ~base_path ~keeper_name ~samples:bounded ~truncated:is_truncated ()
 ;;
 
-let seed_all_from_decision_logs ?(now = Time_compat.now ()) ~config =
+let seed_all_from_decision_logs ?(now = Time_compat.now ()) ~config () =
   match Keeper_meta_store.keeper_names_result config with
   | Ok names ->
-    List.iter (fun keeper_name -> seed_from_decision_log ~now ~config ~keeper_name) names
+    List.iter (fun keeper_name -> seed_from_decision_log ~now ~config ~keeper_name ()) names
   | Error _ -> ()
 ;;
 

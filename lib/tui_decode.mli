@@ -767,7 +767,8 @@ type keeper_rest_basis = Keeper_turn_driver.release_basis =
     wait on a resting runtime path, read from the walk the heartbeat waits on.
     [runtime_id] is the path that serves, or the one whose release ends the
     wait. [release_at] is when the walk releases, a Unix time fixed when the
-    rest was noted. *)
+    rest was noted. It is finite and [Unix.localtime] converts it, so the
+    list can draw it. *)
 type keeper_path_rest =
   | Path_rest_serving of { runtime_id : string }
   | Path_rest_resting of

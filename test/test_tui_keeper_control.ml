@@ -1382,6 +1382,9 @@ let test_roster_decodes_the_walk_rest_beside_the_row () =
     ; "a resting walk without a release is an error", resting [ stated ]
     ; "a release that is not a number is an error", resting [ release_at (`String "soon"); stated ]
     ; "a release that is not finite is an error", resting [ release_at (`Float infinity); stated ]
+    ; "a release that is not a number at all is an error", resting [ release_at (`Float nan); stated ]
+    ; ( "a finite release no local calendar holds is an error"
+      , resting [ release_at (`Float 1e300); stated ] )
     ; "a resting walk without a basis is an error", resting [ release_at (`Float 1_790_000_000.) ]
     ; ( "an unknown basis is an error"
       , resting [ release_at (`Float 1_790_000_000.); "release_basis", `String "guessed" ] )

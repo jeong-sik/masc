@@ -12,10 +12,10 @@
 
 ## 어떻게 쟀나
 
-- main: 증명 빌드 run 42371514152. 코드 커밋은 `28979ad8bec`(세 PR 의 바탕 main)이에요. 산출물 `masc-tui` 의 sha256 은 `dba21538d9c386321961d9330ae4e5cf09d7437616783b7cf0f116212fc5ece7` 이고 `--build-commit` 이 코드 커밋과 같아요.
-- #49736: 증명 빌드 run 42371483573. 코드 커밋은 `74e3c85461c`이에요. #49736 의 코드 위에 #49720 의 코드가 같이 있어요. sha256 은 `fc72fa7abda8a2d6b162ac40e4cc1ce577fd0a3d39b4dfc578e8fcc95dc90ab3` 이고 `--build-commit` 이 같아요.
-- #49792: 증명 빌드 run 42373806717. 코드 커밋은 `f026159feea`이에요. 세 PR 의 코드가 모두 있어요. sha256 은 `324040ddb784043a4d6f443cd5ee9c24f76b7336c8d0cb7462201ca70ed3fde7` 이고 `--build-commit` 이 같아요.
-- 세 빌드 모두 run 이 성공했어요. 각 PR 의 머리는 이 코드 커밋 위에 변경 기록(`changelog.d`)을 더하고, #49792 는 이 폴더도 더해요. #49720 의 코드만 쌓은 빌드는 따로 만들지 않았어요. 이미지에는 빌드 커밋이 안 찍혀요.
+- main: 증명 빌드 run 42371514152. 빌드한 커밋은 `28979ad8bec`(세 PR 의 바탕 main)이에요. 산출물 `masc-tui` 의 sha256 은 `dba21538d9c386321961d9330ae4e5cf09d7437616783b7cf0f116212fc5ece7` 이고 `--build-commit` 이 빌드한 커밋과 같아요.
+- #49736: 증명 빌드 run 42371483573. 빌드한 커밋은 `74e3c85461c`(#49736 의 코드 커밋)이에요. #49720 의 코드가 같이 있어요. sha256 은 `fc72fa7abda8a2d6b162ac40e4cc1ce577fd0a3d39b4dfc578e8fcc95dc90ab3` 이고 `--build-commit` 이 같아요.
+- #49792: 증명 빌드 run 42376966663. 빌드한 커밋은 `dc2f36925e2`이에요. 마지막 코드 커밋 `11a7dbf2c92` 위에 이 폴더의 첫 판만 더한 커밋이라 코드는 같고, 세 PR 의 코드가 모두 있어요. sha256 은 `66a1e96ad837d885c727074ffcf580717cc060a91d887aea9409963bdaa8e075` 이고 `--build-commit` 이 같아요.
+- 세 빌드 모두 run 이 성공했어요. #49720 과 #49736 의 머리는 빌드한 커밋 위에 변경 기록(`changelog.d`)만 더해요. #49720 의 코드만 쌓은 빌드는 따로 만들지 않았어요. 이미지에는 빌드 커밋이 안 찍혀요.
 - 일회용 워크스페이스에 키퍼·글·작업을 몇 개 심은 서버를 띄우고, 그 앞에 중계를 뒀어요. 중계는 서버가 보내는 조각마다 2.5초 붙잡고, 요청이 나가고 답이 온 시각을 적어요. tmux 100x30 에서 TUI 를 열었어요.
 - 팔레트(`:` 뒤 `go <화면>`)로 화면을 열고, Enter 를 보낸 때부터 0.4·1.5·3·5·9초에 화면 글자를 읽었어요. 표의 `press r` 은 그 표본에 `(not loaded yet — press r)` 줄이 있었다는 뜻이고, `reading…` 은 `(reading…)` 줄이 있었다는 뜻이에요. `-` 는 둘 다 없었다는 뜻이에요.
 - 세 번 나눠 돌렸어요. 첫째는 Task Review 와 Workspace 를 막 켠 TUI 에서 처음 여는 묶음이에요. 둘째는 Repositories, Fusion, System 네 곳, Memory 로 일곱 화면이에요. 셋째는 23개 화면을 차례로 여는 순회예요. 순회에서는 앞서 연 화면이 읽어 둔 값 때문에 줄이 안 보이는 화면이 있어서, 화면마다 첫째, 둘째, 셋째 순서로 처음 나온 묶음의 값을 썼어요.
@@ -27,7 +27,7 @@ main 은 세 PR 의 바탕이고, #49792 는 세 PR 의 코드가 모두 있는 
 
 | 화면 | 채우는 요청 (나간 때 → 답한 때, 초) | main: 0.4 · 1.5 · 3 · 5 · 9초 | #49792: 0.4 · 1.5 · 3 · 5 · 9초 |
 | --- | --- | --- | --- |
-| Work | +2.5 → +5.0 | press r · press r · press r · press r · - | reading… · reading… · reading… · - · - |
+| Work | +2.5 → +5.0 | press r · press r · press r · press r · - | reading… · reading… · reading… · reading… · - |
 | Schedules | +0.0 → +2.5 | press r · press r · - · - · - | reading… · reading… · - · - · - |
 | Clients | +0.0 → +2.5 | press r · press r · - · - · - | reading… · reading… · - · - · - |
 | Task Verdicts | +0.0 → +2.5 | press r · press r · - · - · - | reading… · reading… · - · - · - |
@@ -40,7 +40,7 @@ main 은 세 PR 의 바탕이고, #49792 는 세 PR 의 코드가 모두 있는 
 | Memory | +2.5 → +5.0 | press r · press r · press r · press r · - | reading… · reading… · reading… · reading… · - |
 | Workspace | +0.1 → +2.6 | press r · press r · - · - · - | reading… · reading… · - · - · - |
 
-표본 60칸 중 `press r` 줄이 main 은 30칸이고 #49792 는 0칸이에요. `(reading…)` 줄은 #49792 에서 29칸이에요. Connectors 는 줄 자체를 없앴어요(바로 위 안내가 이미 `Reading connectors…` 라고 말해요). 위 열두 화면 밖의 18개 화면은 `press r` 줄이 main 에서 0칸, #49792 에서 0칸이에요. 순회 중에는 앞서 연 화면 때문에 값이 이미 읽혀 있던 화면도 섞여 있어서, 이 칸은 다른 화면에 줄이 새로 생기지 않았다는 확인으로만 읽어 주세요.
+표본 60칸 중 `press r` 줄이 main 은 30칸이고 #49792 는 0칸이에요. `(reading…)` 줄은 #49792 에서 30칸이에요. Connectors 는 줄 자체를 없앴어요(바로 위 안내가 이미 `Reading connectors…` 라고 말해요). 위 열두 화면 밖의 18개 화면은 `press r` 줄이 main 에서 0칸, #49792 에서 0칸이에요. 순회 중에는 앞서 연 화면 때문에 값이 이미 읽혀 있던 화면도 섞여 있어서, 이 칸은 다른 화면에 줄이 새로 생기지 않았다는 확인으로만 읽어 주세요.
 
 ## main 과 #49736
 
@@ -61,14 +61,16 @@ main 은 세 PR 의 바탕이고, #49792 는 세 PR 의 코드가 모두 있는 
 | Memory | +2.5 → +5.0 | press r · press r · press r · press r · - | reading… · reading… · reading… · reading… · - |
 | Workspace | +0.1 → +2.6 | press r · press r · - · - · - | reading… · reading… · - · - · - |
 
-Logs 의 스트림 요청은 Enter 뒤 0.03초에 나가는데, #49736 은 0.1·0.25·0.4초에 `press r`, 0.6초부터 `(reading…)` 을 그려요. 읽기가 Enter 를 처리한 반복에서 첫 화면을 고른 뒤에 시작하고, 다음 화면이 그려질 때까지 줄이 예전 그대로예요. 같은 화면을 더 촘촘한 시각으로 읽은 값이에요(같은 중계, 첫 방문).
+Logs 와 Clients 의 읽기 요청은 Enter 뒤 0.03초와 0.02초에 나가요. 같은 화면을 더 촘촘한 시각으로, 막 켠 TUI 에서 처음 열어 읽었어요(같은 중계). #49736 은 요청이 나간 뒤에도 Logs 는 0.6초까지, Clients 는 1.3초까지 `press r` 이에요. Enter 로 연 화면이 먼저 그려지고 읽기는 그다음에 시작해요. 그 뒤로는 키나 답이 올 때까지 화면을 다시 그리지 않아서 줄이 예전 그대로예요.
 
 | 빌드 | 화면 | 0.1초 | 0.25초 | 0.4초 | 0.6초 | 0.9초 | 1.3초 | 2초 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| #49736 | Logs | press r | press r | press r | reading… | reading… | reading… | reading… |
+| #49736 | Logs | press r | press r | press r | press r | reading… | reading… | reading… |
+| #49736 | Clients | press r | press r | press r | press r | press r | press r | reading… |
 | #49792 | Logs | reading… | reading… | reading… | reading… | reading… | reading… | reading… |
+| #49792 | Clients | reading… | reading… | reading… | reading… | reading… | reading… | reading… |
 
-#49792 는 읽기가 시작되면 화면을 다시 그리게 해요. #49792 는 0.1초부터 `(reading…)` 이에요.
+#49792 는 읽기가 시작되면 화면을 다시 그리게 해요. 두 화면 모두 0.1초부터 2초까지 모든 표본이 `(reading…)` 이에요.
 
 ## 서버가 없을 때
 

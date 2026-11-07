@@ -565,9 +565,16 @@ path = "/api/tags"
 # [mlx_server.mlx-served-model]
 # max-concurrent = 1
 #
-# Thinking Machines Tinker (tinker.thinkingmachines.dev). OpenAI-compatible HTTP
-# surface for Inkling, Qwen3.8, GLM-5.3-Flash and fine-tuned LoRA sampler
-# checkpoints (`tinker://<run-id>:train:0/sampler_weights/<step>`).
+# Thinking Machines Tinker (tinker.thinkingmachines.dev) is hosted, not
+# self-hosted. It sits in this region so the same gate parses it.
+# OpenAI-compatible inference (Beta) for Inkling, Qwen3.8, GLM-5.3-Flash and
+# fine-tuned LoRA sampler checkpoints
+# (`tinker://<run-id>:train:0/sampler_weights/<step>`). The AGENT_CORE catalog
+# has the provider row and the thinkingmachines/Inkling-2-Small row, so this
+# binding states no capability. The 65,536-token window, the reasoning ladder
+# and the missing structured output all come from the row. A `tinker://`
+# checkpoint has no catalog row, so its model table carries its own
+# capabilities block (docs/guides/tinker-integration.md).
 # [providers.tinker]
 # display-name = "Thinking Machines Tinker"
 # protocol = "openai-compatible-http"
@@ -584,26 +591,10 @@ path = "/api/tags"
 #
 # [models.tinker-inkling-2-small]
 # api-name = "thinkingmachines/Inkling-2-Small"
-# max-context = 262144
 # tools-support = true
 # thinking-support = true
 # streaming = true
 # reasoning-effort = "high"
-#
-# [models.tinker-inkling-2-small.capabilities]
-# supports-tool-choice = true
-# supports-named-tool-choice = true
-# supports-required-tool-choice = true
-# supports-parallel-tool-calls = true
-# thinking-control-format = "reasoning-effort"
-# accepted-reasoning-efforts = ["none", "minimal", "low", "medium", "high", "xhigh"]
-# reasoning-streaming-format = "delta:reasoning_content"
-# supports-response-format-json = true
-# supports-structured-output = true
-# supports-image-input = true
-# supports-audio-input = true
-# supports-multimodal-inputs = true
-# supports-system-prompt = true
 #
 # [tinker.tinker-inkling-2-small]
 # max-concurrent = 4

@@ -1885,6 +1885,93 @@ let test_mistral_large_4_replays_chunks_not_reasoning_content () =
       (assistant |> member "reasoning_content" = `Null))
 ;;
 
+(* Inkling 2 Small on Tinker (#49654). The ladder leaves "none" out: the
+   endpoint takes it, but on long librarian prompts the model still reasoned
+   (p50 7,238 characters), so "none" is not an off switch and a caller that
+   asks for no thinking is refused before dispatch. *)
+let test_tinker_inkling_2_small_declares_thinking_ladder () =
+  with_repository_model_catalog (fun () ->
+    let cfg effort =
+      Provider_config.make
+        ~kind:OpenAI_compat
+        ~provider_id:"tinker"
+        ~model_id:"thinkingmachines/Inkling-2-Small"
+        ~base_url:"https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1"
+        ~reasoning_effort:effort
+        ()
+    in
+    List.iter
+      (fun (name, effort) ->
+         match Provider_config.validate_reasoning_effort_request_typed (cfg effort) with
+         | Ok () -> ()
+         | Error rejection ->
+           Alcotest.failf
+             "Inkling-2-Small should accept %s: %s"
+             name
+             (Provider_config.reasoning_effort_request_rejection_to_message rejection))
+      [ "minimal", Reasoning_effort.Minimal
+      ; "low", Reasoning_effort.Low
+      ; "medium", Reasoning_effort.Medium
+      ; "high", Reasoning_effort.High
+      ; "xhigh", Reasoning_effort.XHigh
+      ];
+    check_bool
+      "Inkling-2-Small refuses none because none does not stop its reasoning"
+      true
+      (Result.is_error
+         (Provider_config.validate_reasoning_effort_request_typed
+            (cfg Reasoning_effort.None_))))
+;;
+
+(* Tinker answers 200 to json_schema and json_object and applies neither
+   (#49654), so the row declares no structured output. A provider-schema
+   request is refused before dispatch. A JSON-syntax exact output still
+   reaches the row, with the schema in the prompt and local validation. *)
+let test_tinker_inkling_2_small_refuses_provider_schema () =
+  with_repository_model_catalog (fun () ->
+    let cfg =
+      Provider_config.make
+        ~kind:OpenAI_compat
+        ~provider_id:"tinker"
+        ~model_id:"thinkingmachines/Inkling-2-Small"
+        ~base_url:"https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1"
+        ~response_format:(Types.JsonSchema (Types.Raw_schema (`Assoc [ "type", `String "object" ])))
+        ()
+    in
+    match Provider_config.validate_output_schema_request cfg with
+    | Error msg ->
+      check_string
+        "rejection reason"
+        "model thinkingmachines/Inkling-2-Small does not advertise native structured output"
+        msg
+    | Ok () -> Alcotest.fail "Inkling-2-Small must not take a provider-schema request")
+;;
+
+(* An exact-output slot binds only to a provider row and a model row of the
+   catalog (Exact_output_catalog_binding.resolve_exact). A runtime.toml-only
+   declaration is left out of the exact registry at boot. These rows let a
+   Lane Add-on's exact output name the Tinker model as a slot. *)
+let test_tinker_inkling_2_small_binds_as_exact_target () =
+  match List.find_opt Sys.file_exists [ "models.toml"; "../models.toml" ] with
+  | None -> Alcotest.fail "models.toml not found for the exact binding test"
+  | Some path ->
+    (match Model_catalog.load_file path with
+     | Error msg -> Alcotest.failf "failed to load %s: %s" path msg
+     | Ok catalog ->
+       (match
+          Exact_output_catalog_binding.resolve_exact
+            ~catalog
+            ~provider_ref:"tinker"
+            ~model_id:"thinkingmachines/Inkling-2-Small"
+        with
+        | Error _ -> Alcotest.fail "tinker/Inkling-2-Small must bind as an exact target"
+        | Ok (_provider, model) ->
+          Alcotest.(check (option int))
+            "the bound row carries the 64K window"
+            (Some 65_536)
+            model.max_context_tokens))
+;;
+
 let test_validate_output_schema_openai_unscoped_catalog_not_inferred () =
   with_repository_model_catalog (fun () ->
     let cfg =
@@ -3310,6 +3397,18 @@ let () =
             "mistral-large-4 replays chunks not reasoning content"
             `Quick
             test_mistral_large_4_replays_chunks_not_reasoning_content
+        ; Alcotest.test_case
+            "tinker Inkling-2-Small declares the thinking ladder"
+            `Quick
+            test_tinker_inkling_2_small_declares_thinking_ladder
+        ; Alcotest.test_case
+            "tinker Inkling-2-Small refuses a provider-schema request"
+            `Quick
+            test_tinker_inkling_2_small_refuses_provider_schema
+        ; Alcotest.test_case
+            "tinker Inkling-2-Small binds as an exact target"
+            `Quick
+            test_tinker_inkling_2_small_binds_as_exact_target
         ; Alcotest.test_case
             "reasoning effort undeclared fails closed"
             `Quick

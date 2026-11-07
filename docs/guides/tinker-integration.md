@@ -4,7 +4,7 @@ This integration is **experimental**. The provider template and the `tinker-trai
 
 MASC integrates with **Thinking Machines Lab's Tinker API** (`https://tinker-docs.thinkingmachines.ai/tinker/`) and the **Inkling** model family (`thinkingmachines/Inkling-2-Small`, `thinkingmachines/Inkling`, `Qwen/Qwen3.8-27B`, `zai-org/GLM-5.3-Flash:peft:262144`) using **loose coupling**:
 
-1. **Inference (`config/runtime.toml`)**: Uses MASC's existing `openai-compatible-http` provider protocol with zero OCaml core changes.
+1. **Inference (`packages/agent_core/models.toml` + `config/runtime.toml`)**: The AGENT_CORE catalog has the `tinker` provider row and the `thinkingmachines/Inkling-2-Small` model row. `runtime.toml` binds them over the existing `openai-compatible-http` protocol. No OCaml code changes.
 2. **Dataset Derivation & Checkpoint Gate (`addons/tinker-trainer/`)**: Runs as a network-isolated MASC Lane Add-on (`--network none`) that joins Keeper execution receipts, Task/Goal Verifier verdicts, and Board Karma into SFT/RLVR datasets and gates checkpoint promotion.
 3. **Host-side Post-Training Runner (`scripts/tinker/tinker_runner.py`)**: Executes shifted-token `forward_backward`, `optim_step`, `save_weights_for_sampler`, and optional `save_state` calls on the host when `TINKER_API_KEY` is present, or runs in `--mode dry-run` offline.
 
@@ -12,7 +12,7 @@ MASC integrates with **Thinking Machines Lab's Tinker API** (`https://tinker-doc
 
 ## 1. Enabling Tinker & Inkling Inference in `runtime.toml`
 
-`config/runtime.toml` includes a ready-to-uncomment template for `[providers.tinker]` and `[models.tinker-inkling-2-small]` (covered by `test_self_hosted_templates_resolve_when_enabled` in `test/test_runtime_config_validity.ml`).
+The catalog row is the only place the model's facts are written: its window, its reasoning ladder, and what the endpoint does with `response_format`, tool choice and images. `config/runtime.toml` includes a ready-to-uncomment binding for `[providers.tinker]` and `[models.tinker-inkling-2-small]` that states none of those facts. `test_tinker_template_binds_the_catalog_row` in `test/test_runtime_config_validity.ml` checks that the binding resolves to the catalog row.
 
 ### Step 1: Set `TINKER_API_KEY`
 
@@ -22,7 +22,7 @@ Set the key in the environment of the MASC server process, through its service m
 export TINKER_API_KEY="tml-..."
 ```
 
-### Step 2: Enable `[providers.tinker]` and Inkling profiles in `<resolved-config-root>/runtime.toml`
+### Step 2: Enable `[providers.tinker]` and the Inkling binding in `<resolved-config-root>/runtime.toml`
 
 ```toml
 [providers.tinker]
@@ -39,79 +39,66 @@ key = "TINKER_API_KEY"
 [providers.tinker.healthcheck]
 path = "/models"
 
-# Default Keeper turn profile (reasoning_effort = "high" -> Inkling effort ~0.90)
 [models.tinker-inkling-2-small]
 api-name = "thinkingmachines/Inkling-2-Small"
-max-context = 262144
 tools-support = true
 thinking-support = true
 streaming = true
 reasoning-effort = "high"
-
-[models.tinker-inkling-2-small.capabilities]
-supports-tool-choice = true
-supports-named-tool-choice = true
-supports-required-tool-choice = true
-supports-parallel-tool-calls = true
-thinking-control-format = "reasoning-effort"
-accepted-reasoning-efforts = ["none", "minimal", "low", "medium", "high", "xhigh"]
-reasoning-streaming-format = "delta:reasoning_content"
-supports-response-format-json = true
-supports-structured-output = true
-supports-image-input = true
-supports-audio-input = true
-supports-multimodal-inputs = true
-supports-system-prompt = true
 
 [tinker.tinker-inkling-2-small]
 max-concurrent = 4
-
-# Fast non-thinking profile for exact-output gates (reasoning_effort = "none" -> effort 0.00)
-[models.tinker-inkling-2-small-none]
-api-name = "thinkingmachines/Inkling-2-Small"
-max-context = 262144
-tools-support = true
-thinking-support = false
-streaming = true
-reasoning-effort = "none"
-
-[models.tinker-inkling-2-small-none.capabilities]
-supports-tool-choice = true
-supports-named-tool-choice = true
-supports-required-tool-choice = true
-supports-parallel-tool-calls = true
-thinking-control-format = "reasoning-effort"
-accepted-reasoning-efforts = ["none", "minimal", "low", "medium", "high", "xhigh"]
-supports-response-format-json = true
-supports-structured-output = true
-supports-image-input = true
-supports-audio-input = true
-supports-multimodal-inputs = true
-supports-system-prompt = true
-
-[tinker.tinker-inkling-2-small-none]
-max-concurrent = 8
 ```
+
+Do not add a `[models.tinker-inkling-2-small.capabilities]` block that copies the row. A runtime `accepted-reasoning-efforts` replaces the catalog ladder, so a copied ladder that lists `none` brings back the value the row leaves out.
+
+The row declares the following. The behaviour was measured on 2026-11-07 (`docs/research/2026-11-07-tinker-inkling-exact-lane-feasibility.md`).
+
+| Fact | Row | What a request sees |
+| --- | --- | --- |
+| Window | 65,536 tokens, prompt plus `max_tokens` | An exact-output request that does not fit is refused before dispatch (`measured_context_window_exceeded`). The endpoint answers an overflow with HTTP 400 and `{"detail": ...}`. The 256K window belongs to the separate ID `thinkingmachines/Inkling-2-Small:peft:262144`, which has no catalog row. |
+| Reasoning ladder | `minimal`, `low`, `medium`, `high`, `xhigh` | `none` is refused before dispatch. The endpoint accepts it, but the model still reasoned on long prompts. An omitted effort means 0.9. Reasoning arrives on `reasoning_content` and is billed as completion tokens. |
+| `response_format` | Neither JSON mode nor native schema | The endpoint answers 200 to `json_schema` and `json_object` and applies neither. A provider-schema request is refused before dispatch. |
+| Tool choice | Tool calls, `required`, parallel calls | A named `tool_choice` is refused before dispatch, because it is neither documented nor measured. |
+| Image input | Not declared | An image is replaced by a text block naming what was dropped. The model page lists vision, but the OpenAI-compatible page documents no image input. |
 
 ### Step 3: Select the slot and restart MASC
 
-The example creates the slot IDs `tinker.tinker-inkling-2-small` and `tinker.tinker-inkling-2-small-none`. Select only the intended slot in the target Keeper or lane configuration; adding the tables does not replace existing selections. The runtime catalog is loaded at process startup, so restart the MASC server after editing `runtime.toml`. A running server does not hot-reload the new provider, model or checkpoint row.
+The example creates the slot ID `tinker.tinker-inkling-2-small`. Select it in the target Keeper or lane configuration; adding the tables does not replace existing selections. The runtime catalog is loaded at process startup, so restart the MASC server after editing `runtime.toml`. A running server does not hot-reload the new provider, model or checkpoint row.
+
+### Using Inkling-2-Small on an exact-output lane
+
+An exact-output slot binds only to a catalog provider row and model row. `tinker.tinker-inkling-2-small` can therefore be a slot, and a `tinker://` checkpoint cannot. Every exact-output lane MASC ships asks for JSON syntax: the schema travels in the prompt, and MASC parses and validates the reply before accepting it. The missing structured output does not keep the row off these lanes.
+
+Append `"tinker.tinker-inkling-2-small"` to the lane's `slots` list, such as `[runtime.exact_output_lanes.<lane>]` or `[runtime.addon_exact_lanes.<addon>.<output>]`, and restart. An exact lane sends the binding's `reasoning-effort`. In the 2026-11-07 replay, `low` gave 17 of 17 valid librarian replies. Board agreement stayed below its pass line at every effort tried.
 
 ### Hot-Swapping a Fine-Tuned Checkpoint (`tinker://...`)
 
-When `save_weights_for_sampler` produces a checkpoint URI, bind it as a new model row without deploying a separate inference server. Restart MASC to load that row as described above:
+When `save_weights_for_sampler` produces a checkpoint URI, bind it as a new model row without deploying a separate inference server. A `tinker://` URI has no catalog row, so its runtime table is the whole declaration and needs its own capabilities block. The block below copies what the `thinkingmachines/Inkling-2-Small` row declares; a checkpoint's own behaviour was not measured. Declare the window of the base the run trained on: 65,536 for `thinkingmachines/Inkling-2-Small`, 262,144 for `thinkingmachines/Inkling-2-Small:peft:262144`. Restart MASC to load the row:
 
 ```toml
-[models.tinker-inkling-masc-rlvr]
-api-name = "tinker://89d55c89-5591-5f19-9f22-5e3451af980d:train:0/sampler_weights/000001"
-max-context = 262144
+[models.tinker-inkling-ckpt]
+api-name = "tinker://<run-id>:train:0/sampler_weights/<step>"
+max-context = 65536
 tools-support = true
 thinking-support = true
 streaming = true
 reasoning-effort = "high"
-# (copy [models.tinker-inkling-2-small.capabilities] block)
 
-[tinker.tinker-inkling-masc-rlvr]
+[models.tinker-inkling-ckpt.capabilities]
+thinking-control-format = "reasoning-effort-default-on"
+accepted-reasoning-efforts = ["minimal", "low", "medium", "high", "xhigh"]
+reasoning-streaming-format = "delta:reasoning_content"
+supports-tool-choice = true
+supports-required-tool-choice = true
+supports-parallel-tool-calls = true
+supports-named-tool-choice = false
+supports-response-format-json = false
+supports-structured-output = false
+supports-image-input = false
+supports-multimodal-inputs = false
+
+[tinker.tinker-inkling-ckpt]
 max-concurrent = 4
 ```
 
@@ -285,7 +272,7 @@ To remove the installation instead, call `masc_lane_detach` with `{"instance_id"
 
 ### Stop inference and host training
 
-First move every Keeper and lane selection away from `tinker.tinker-inkling-2-small`, `tinker.tinker-inkling-2-small-none` and any `tinker://` checkpoint slot. Then comment or remove the Tinker provider/credential/healthcheck tables, all Tinker model/capability tables—including `tinker://` profiles—and their `[tinker.<model>]` rows, and restart MASC. Removing only `[providers.tinker]` while leaving a selected model is not a clean disable. Detaching the add-on does not change these runtime rows, and removing the runtime rows does not stop a separately invoked host runner.
+First move every Keeper and lane selection away from `tinker.tinker-inkling-2-small` and any `tinker://` checkpoint slot. Then comment or remove the Tinker provider/credential/healthcheck tables, all Tinker model tables and the capability tables of `tinker://` profiles, and their `[tinker.<model>]` rows, and restart MASC. Removing only `[providers.tinker]` while leaving a selected model is not a clean disable. Detaching the add-on does not change these runtime rows, and removing the runtime rows does not stop a separately invoked host runner.
 
 The host runner is a one-shot command, so stop invoking it rather than looking for an add-on worker to detach. Remove `TINKER_API_KEY` from the service environment only when no remaining Tinker consumer needs it. Local detachment and TOML edits do not delete remote training runs or `tinker://` checkpoints; manage those through Tinker separately.
 
@@ -293,9 +280,15 @@ The host runner is a one-shot command, so stop invoking it rather than looking f
 
 ## 6. Pricing & Model Selection Reference
 
-| Model ID | Architecture | Context | Prefill (Cached) | Sample | Train | Exportable LoRA Weights |
+Training & sampling prices in USD per million tokens, "as of October 19, 2026" on the [Tinker pricing page](https://thinkingmachines.ai/tinker/pricing/). Context, size and type come from [Models & Pricing](https://tinker-docs.thinkingmachines.ai/tinker/models/models_and_pricing/). Both were checked on 2026-11-07. Only `thinkingmachines/Inkling-2-Small` has an AGENT_CORE catalog row.
+
+| Model ID | Total / active params | Type | Context | Prefill (cached) | Sample | Train |
 | --- | --- | --- | --- | --- | --- | --- |
-| `thinkingmachines/Inkling-2-Small` | 594B / 17B MoE | 262,144 | $0.30/M ($0.03/M) | $1.00/M | $1.50/M | Cloud-hosted (`tinker://...`) |
-| `thinkingmachines/Inkling` | 1T / 32B MoE | 262,144 | $1.00/M | $3.00/M | $3.00/M | Cloud-hosted (`tinker://...`) |
-| `Qwen/Qwen3.8-27B` | 27B Dense | 262,144 | $0.54/M | $1.36/M | $1.63/M | Yes (`save_weights_external`) |
-| `zai-org/GLM-5.3-Flash:peft:262144` | 35B / 3.6B MoE | 262,144 | $0.22/M | $0.54/M | $0.65/M | Yes (`save_weights_external`) |
+| `thinkingmachines/Inkling-2-Small` | 594B / 17B MoE | Hybrid + Vision | 64K | $0.30 ($0.03) | $1.00 | $1.50 |
+| `thinkingmachines/Inkling-2-Small:peft:262144` | 594B / 17B MoE | Hybrid + Vision | 256K | $0.30 ($0.03) | $1.00 | $3.00 |
+| `thinkingmachines/Inkling` | 975B / 41B MoE | Hybrid + Audio + Vision | 64K | $1.87 ($0.374) | $4.68 | $5.61 |
+| `Qwen/Qwen3.8-27B` | 27B / 27B dense | Hybrid + Vision | 64K | $0.6975 ($0.1395) | $5.595 | $4.103 |
+| `Qwen/Qwen3.8-27B:peft:262144` | 27B / 27B dense | Hybrid + Vision | 256K | $0.6975 ($0.1395) | $5.595 | $7.46 |
+| `zai-org/GLM-5.3-Flash:peft:262144` | 320B / 18B MoE | Reasoning | 256K | $0.84 ($0.168) | $2.11 | $5.58 |
+
+The Models & Pricing page does not say which models export LoRA weights. Check `save_weights_external` support for a model before relying on it (§3.4).

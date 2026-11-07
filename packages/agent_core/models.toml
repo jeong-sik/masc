@@ -2307,6 +2307,61 @@ supports_multimodal_inputs = true
 supports_image_input = true
 supports_native_streaming = true
 
+# Thinking Machines Inkling 2 Small on Tinker's OpenAI-compatible inference
+# endpoint (Beta, intended for "testing, evaluation, and internal tools":
+# https://tinker-docs.thinkingmachines.ai/tinker/compatible-apis/openai/).
+# Models & Pricing, checked 2026-11-07
+# (https://tinker-docs.thinkingmachines.ai/tinker/models/models_and_pricing/):
+# 64K window on this base id (the 256K window is the separate id
+# thinkingmachines/Inkling-2-Small:peft:262144), 594B total / 17B active MoE,
+# Hybrid + Vision without audio. This id is priced in the training & sampling
+# table, "as of October 19, 2026": $0.30 prefill / $0.03 cached prefill /
+# $1.00 sample per M tokens (https://thinkingmachines.ai/tinker/pricing/).
+# Measured live 2026-11-07 (#49654):
+# - The window is 65,536 tokens, counted as prompt plus max_tokens. Overflow
+#   is a 400 whose body is {"detail": "..."}.
+# - Reasoning arrives on reasoning_content, streamed before the content, and
+#   is billed inside completion_tokens.
+# - An omitted reasoning_effort means 0.9 (documented), so thinking is on by
+#   default.
+# - "none" is accepted but does not stop the reasoning on long prompts: the
+#   librarian replay reasoned for a p50 of 7,238 characters at "none". It is
+#   left off the ladder, so a caller that must not think is refused before
+#   dispatch instead of receiving a reply it believes is thinking-free.
+# - response_format json_schema (strict) and json_object answer 200 and are
+#   not applied: with either one the reply ignored the schema and matched the
+#   reply and token counts of the same request without the field. Both flags
+#   are false. A JSON-syntax exact output still reaches this row: the prompt
+#   carries the schema and the reply is parsed and validated locally.
+# - tool_choice "required" was honoured, and one reply carried two tool calls.
+#   A named tool_choice is neither documented nor measured, so it is refused
+#   before dispatch.
+# - The model page lists vision, but the OpenAI-compatible page documents no
+#   image input and none was measured. An image sent to this row is replaced
+#   by a text block naming what was dropped.
+[[models]]
+model_id = "thinkingmachines/Inkling-2-Small"
+base = "openai_chat"
+provider_name = "tinker"
+accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh"]
+supports_reasoning = true
+thinking_control_format = "reasoning_effort_default_on"
+reasoning_streaming_format = "delta:reasoning_content"
+max_context_tokens = 65536
+input_per_million = 0.3
+output_per_million = 1.0
+cache_read_multiplier = 0.1
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = true
+supports_parallel_tool_calls = true
+supports_named_tool_choice = false
+supports_response_format_json = false
+supports_structured_output = false
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
 # Cohere Command Models
 [[models]]
 model_id = "command-r-plus"
@@ -2962,6 +3017,16 @@ base_url = "https://api.mistral.ai/v1"
 request_path = "/chat/completions"
 auth = "api-key"
 capabilities_base = "mistral"
+
+# Thinking Machines Tinker, OpenAI-compatible inference (Beta). The key is the
+# Tinker API key, sent as the bearer token the OpenAI SDK sends.
+[[providers]]
+id = "tinker"
+kind = "openai_compat"
+base_url = "https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1"
+request_path = "/chat/completions"
+auth = "api-key"
+capabilities_base = "openai_chat"
 
 [[providers]]
 id = "cohere"

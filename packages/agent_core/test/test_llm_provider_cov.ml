@@ -1408,6 +1408,17 @@ let test_for_provider_model_mistral_large_4 () =
   | None -> Alcotest.fail "expected Some for mistral-large-4"
 ;;
 
+let test_for_provider_model_tinker_inkling_2_small () =
+  match provider_model_capabilities "tinker" "thinkingmachines/Inkling-2-Small" with
+  | Some c ->
+    Alcotest.(check bool) "reasoning" true c.supports_reasoning;
+    Alcotest.(check (option int)) "64K context" (Some 65_536) c.max_context_tokens;
+    Alcotest.(check bool) "json_schema is not applied" false c.supports_structured_output;
+    Alcotest.(check bool) "json_object is not applied" false c.supports_response_format_json;
+    Alcotest.(check bool) "image input is not declared" false c.supports_image_input
+  | None -> Alcotest.fail "expected Some for tinker/Inkling-2-Small"
+;;
+
 let test_for_provider_model_command () =
   match provider_model_capabilities "cohere" "command-r-plus" with
   | Some c ->
@@ -1917,6 +1928,10 @@ let () =
             "mistral/mistral-large-4"
             `Quick
             test_for_provider_model_mistral_large_4
+        ; Alcotest.test_case
+            "tinker/Inkling-2-Small"
+            `Quick
+            test_for_provider_model_tinker_inkling_2_small
         ; Alcotest.test_case "cohere/command" `Quick test_for_provider_model_command
         ; Alcotest.test_case "xai/grok" `Quick test_for_provider_model_grok
         ] )

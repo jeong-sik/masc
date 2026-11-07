@@ -47,6 +47,7 @@ let serve env ~sw ~router ~posts =
       ~request_handler:(fun _ (request : Httpun.Reqd.t Gluten.Reqd.t) ->
         let reqd = request.Gluten.Reqd.reqd in
         let request = Httpun.Reqd.request reqd in
+        let reqd = Masc.Http_reqd.of_httpun reqd in
         if request.meth = `POST && String.equal request.target "/api/v1/tools/masc_board_post"
         then incr posts;
         Server_request_authority.with_current authority (fun () ->

@@ -370,7 +370,7 @@ let make_test_response ~clock =
   let bs = Bigstringaf.of_string request ~off:0 ~len in
   ignore (Httpun.Server_connection.read conn bs ~off:0 ~len);
   let reqd = Option.get !reqd_ref in
-  Server_sse_response.respond ~clock ~stalled_after_s:test_stalled_after_s reqd
+  Server_sse_response.respond ~clock ~stalled_after_s:test_stalled_after_s (Masc.Http_reqd.of_httpun reqd)
     (Httpun.Response.create `OK)
 
 let make_test_sse_conn ~clock ?(session_id = "test") () =

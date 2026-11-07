@@ -99,6 +99,7 @@ let with_fixture run =
                 ~request_handler:(fun _ (incoming : Httpun.Reqd.t Gluten.Reqd.t) ->
                   let reqd = incoming.Gluten.Reqd.reqd in
                   let request = Httpun.Reqd.request reqd in
+                  let reqd = Masc.Http_reqd.of_httpun reqd in
                   Server_request_authority.with_current authority (fun () ->
                     Http.Router.dispatch router request reqd))
                 ~error_handler:(fun _ ?request:_ _error respond ->

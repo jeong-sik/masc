@@ -42,6 +42,7 @@ type press_target =
   | Press_ui_language
   | Press_runtime_mode of runtime_mode
   | Press_standalone_lanes
+  | Press_usage_calls
   | Press_context_tab of Masc_tui_context_inspector.tab
   | Press_keeper_row of string
   | Press_chat_call of workspace_authority * unit ref * string * string
@@ -59,7 +60,7 @@ let press_changes_the_surface = function
   | Press_surface _ | Press_ring_edge _ | Press_keeper_tab _
   | Press_config_pane _ | Press_metrics_section _ | Press_tools_pane _
   | Press_memory_category _ | Press_theme_filter _ | Press_ui_language | Press_runtime_mode _
-  | Press_standalone_lanes | Press_keeper_row _ | Press_lane_row _ | Press_chat_call _ ->
+  | Press_standalone_lanes | Press_usage_calls | Press_keeper_row _ | Press_lane_row _ | Press_chat_call _ ->
       true
   | Press_context_tab _ | Press_queue_selected _ | Press_input_rejection _
   | Press_quit_confirmation _ | Press_notice_fragment _ -> false
@@ -69,6 +70,7 @@ let press_is_interactive = function
   | Press_surface _ | Press_ring_edge _ | Press_keeper_tab _ | Press_config_pane _
   | Press_metrics_section _ | Press_tools_pane _ | Press_memory_category _
   | Press_theme_filter _ | Press_ui_language | Press_runtime_mode _ | Press_standalone_lanes
+  | Press_usage_calls
   | Press_context_tab _ | Press_keeper_row _ | Press_chat_call _ | Press_lane_row _
   | Press_queue_selected _ -> true
 
@@ -168,7 +170,7 @@ let presented_queue_selection zones =
     | Press_queue_selected selected -> Some selected
     | Press_surface _ | Press_ring_edge _ | Press_keeper_tab _ | Press_config_pane _
     | Press_metrics_section _ | Press_tools_pane _ | Press_memory_category _
-    | Press_theme_filter _ | Press_ui_language | Press_runtime_mode _ | Press_standalone_lanes
+    | Press_theme_filter _ | Press_ui_language | Press_runtime_mode _ | Press_standalone_lanes | Press_usage_calls
     | Press_context_tab _ | Press_keeper_row _ | Press_chat_call _ | Press_lane_row _
     | Press_input_rejection _ | Press_quit_confirmation _ | Press_notice_fragment _ -> None)
 
@@ -193,7 +195,7 @@ let presented_fragment_sources ~rows ~cols complete =
             | Press_ring_edge _ | Press_keeper_tab _ | Press_config_pane _
             | Press_metrics_section _ | Press_tools_pane _ | Press_memory_category _
             | Press_theme_filter _ | Press_ui_language | Press_runtime_mode _
-            | Press_standalone_lanes | Press_context_tab _ | Press_keeper_row _
+            | Press_standalone_lanes | Press_usage_calls | Press_context_tab _ | Press_keeper_row _
             | Press_chat_call _ | Press_lane_row _ | Press_queue_selected _ -> false) complete in
         if List.length expected > 1 && List.for_all Fun.id (List.mapi visible expected)
         then Some source else None
@@ -201,7 +203,7 @@ let presented_fragment_sources ~rows ~cols complete =
     | Press_surface _ | Press_ring_edge _ | Press_keeper_tab _ | Press_config_pane _
     | Press_metrics_section _ | Press_tools_pane _ | Press_memory_category _
     | Press_theme_filter _ | Press_ui_language | Press_runtime_mode _
-    | Press_standalone_lanes | Press_context_tab _ | Press_keeper_row _
+    | Press_standalone_lanes | Press_usage_calls | Press_context_tab _ | Press_keeper_row _
     | Press_chat_call _ | Press_lane_row _ | Press_queue_selected _ -> None)
 
 let presented_input_rejection ~rows ~cols zones =
@@ -216,7 +218,7 @@ let presented_input_rejection ~rows ~cols zones =
     | Press_input_rejection _ | Press_surface _ | Press_ring_edge _ | Press_keeper_tab _
     | Press_config_pane _ | Press_metrics_section _ | Press_tools_pane _
     | Press_memory_category _ | Press_theme_filter _ | Press_ui_language
-    | Press_runtime_mode _ | Press_standalone_lanes | Press_context_tab _
+    | Press_runtime_mode _ | Press_standalone_lanes | Press_usage_calls | Press_context_tab _
     | Press_keeper_row _ | Press_chat_call _ | Press_lane_row _ | Press_queue_selected _
     | Press_quit_confirmation _ | Press_notice_fragment _ -> None) in
   match single with
@@ -240,7 +242,7 @@ let presented_quit_confirmation ~rows ~cols zones =
     | Press_ring_edge _ | Press_keeper_tab _ | Press_config_pane _
     | Press_metrics_section _ | Press_tools_pane _ | Press_memory_category _
     | Press_theme_filter _ | Press_ui_language | Press_runtime_mode _
-    | Press_standalone_lanes | Press_context_tab _ | Press_keeper_row _
+    | Press_standalone_lanes | Press_usage_calls | Press_context_tab _ | Press_keeper_row _
     | Press_chat_call _ | Press_lane_row _ | Press_queue_selected _ | Press_notice_fragment _ -> None) in
   match single with
   | Some _ -> single

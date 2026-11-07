@@ -29,6 +29,7 @@ type press_target =
   | Press_ui_language
   | Press_runtime_mode of Masc_tui_types.runtime_mode
   | Press_standalone_lanes
+  | Press_usage_calls  (** The Dashboard's tool call line: Usage on its Calls section. *)
   | Press_context_tab of Masc_tui_context_inspector.tab
   | Press_keeper_row of string  (** a Keepers list row, by Keeper name *)
   | Press_chat_call of Masc_tui_types.workspace_authority * unit ref * string * string

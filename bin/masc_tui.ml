@@ -19105,6 +19105,12 @@ let press_marked_target state ~mailbox (target : press_target) =
         enter_runtime_mode state ~mailbox mode
   | Press_standalone_lanes ->
       if state.view <> Lanes then enter_standalone_lanes state ~mailbox
+  | Press_usage_calls ->
+      (* [m] then [V]: Usage, on the section the pressed line summarises. *)
+      state.usage_section <- Usage_calls;
+      state.usage_telemetry_open <- false;
+      reset_metrics_scroll state;
+      if state.view <> Metrics then goto_surface state ~mailbox Metrics
   | Press_context_tab tab ->
       if tab <> state.context_inspector_tab then
         enter_context_inspector_tab state tab

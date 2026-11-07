@@ -232,17 +232,18 @@ let render_overview (state : state) home =
   let work = " " ^ String.concat work_separator work_items in
   (* The last day of tool calls, whatever window Usage's [w] holds
      ([tool_series_days]). A reading that is missing says so in words, never as
-     a count of zero. *)
+     a count of zero. A press on the line opens Usage on its Calls section. *)
   let tool_calls_line ~cells =
     let window = Masc_tui_usage_calls.Last_day in
-    match state.tool_series with
-    | Tool_series_read calls when calls.Masc_tui_usage_calls.window = window ->
-        Masc_tui_usage_calls.summary_line ~cells calls
-    | Tool_series_read _ | Tool_series_unread ->
-        Masc_tui_usage_calls.summary_note ~cells window "reading…"
-    | Tool_series_error reason ->
-        Masc_tui_usage_calls.summary_note ~cells window
-          ("unavailable: " ^ Terminal_text.single_line reason)
+    pressable Press_usage_calls
+      (match state.tool_series with
+       | Tool_series_read calls when calls.Masc_tui_usage_calls.window = window ->
+           Masc_tui_usage_calls.summary_line ~cells calls
+       | Tool_series_read _ | Tool_series_unread ->
+           Masc_tui_usage_calls.summary_note ~cells window "reading…"
+       | Tool_series_error reason ->
+           Masc_tui_usage_calls.summary_note ~cells window
+             ("unavailable: " ^ Terminal_text.single_line reason))
   in
   surface_chrome ~overflow:Fits ?sidebar state ~terminal_rows ~cols:full_cols ~surface_key:"overview"
     ~title:(overview_header state ~cols)

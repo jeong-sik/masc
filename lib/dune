@@ -38,6 +38,7 @@
   keeper_tool_filesystem_runtime_write_target
   keeper_tool_filesystem_runtime_write_types
   keeper_tool_filesystem_runtime_test_seams
+  keeper_tool_filesystem_runtime_created_directory
   keeper_tool_execution_journal_types
   keeper_tool_execution_journal_json
   keeper_tool_execution_journal_model

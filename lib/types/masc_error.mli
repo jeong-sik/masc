@@ -3,8 +3,6 @@
 include module type of Rate_limit_types
 
 val default_rate_limit : rate_limit_config
-val rate_limit_config_to_yojson : rate_limit_config -> Yojson.Safe.t
-val rate_limit_config_of_yojson : Yojson.Safe.t -> (rate_limit_config, string) result
 val limit_for_category : rate_limit_config -> rate_limit_category -> int
 val category_for_tool : string -> rate_limit_category
 val category_for_tool_opt : string -> rate_limit_category option

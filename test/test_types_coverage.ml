@@ -1453,66 +1453,6 @@ let test_default_rate_limit_multipliers () =
   check (float 0.01) "admin" 2.0 c.admin_multiplier
 
 (* ============================================================
-   rate_limit_config_to/of_yojson Tests
-   ============================================================ *)
-
-let test_rate_limit_config_to_yojson () =
-  let c : Masc_domain.rate_limit_config = {
-    per_minute = 60;
-    burst_allowed = 10;
-    priority_agents = ["claude"; "gemini"];
-    worker_multiplier = 1.0;
-    admin_multiplier = 2.0;
-    broadcast_per_minute = 30;
-    task_ops_per_minute = 100;
-  } in
-  let json = Masc_domain.rate_limit_config_to_yojson c in
-  match json with
-  | `Assoc fields ->
-    check bool "has per_minute" true (List.mem_assoc "per_minute" fields);
-    check bool "has priority_agents" true (List.mem_assoc "priority_agents" fields)
-  | _ -> fail "expected Assoc"
-
-let test_rate_limit_config_of_yojson_ok () =
-  let json = `Assoc [
-    ("per_minute", `Int 120);
-    ("burst_allowed", `Int 20);
-    ("priority_agents", `List [`String "admin"]);
-    ("worker_multiplier", `Float 1.5);
-    ("admin_multiplier", `Float 3.0);
-    ("broadcast_per_minute", `Int 60);
-    ("task_ops_per_minute", `Int 200);
-  ] in
-  match Masc_domain.rate_limit_config_of_yojson json with
-  | Ok c ->
-    check int "per_minute" 120 c.per_minute;
-    check int "broadcast_per_minute" 60 c.broadcast_per_minute
-  | Error e -> fail ("expected Ok: " ^ e)
-
-let test_rate_limit_config_of_yojson_defaults () =
-  let json = `Assoc [] in
-  match Masc_domain.rate_limit_config_of_yojson json with
-  | Ok c ->
-    check int "default per_minute" 10 c.per_minute
-  | Error e -> fail ("expected Ok with defaults: " ^ e)
-
-let test_rate_limit_config_of_yojson_rejects_wrong_field_type () =
-  let json = `Assoc [ "per_minute", `String "120" ] in
-  match Masc_domain.rate_limit_config_of_yojson json with
-  | Error message ->
-    check bool "field is named" true
-      (String_util.contains_substring message "rate_limit.per_minute")
-  | Ok _ -> fail "wrongly typed rate-limit field silently used the default"
-
-let test_rate_limit_config_of_yojson_rejects_mixed_agent_array () =
-  let json = `Assoc [ "priority_agents", `List [ `String "admin"; `Int 7 ] ] in
-  match Masc_domain.rate_limit_config_of_yojson json with
-  | Error message ->
-    check bool "element index is named" true
-      (String_util.contains_substring message "priority_agents[1]")
-  | Ok _ -> fail "wrongly typed priority-agent element was silently dropped"
-
-(* ============================================================
    tool_result_to_yojson Tests
    ============================================================ *)
 
@@ -1900,15 +1840,6 @@ let () =
       test_case "per_minute" `Quick test_default_rate_limit_per_minute;
       test_case "burst" `Quick test_default_rate_limit_burst;
       test_case "multipliers" `Quick test_default_rate_limit_multipliers;
-    ];
-    "rate_limit_config_yojson", [
-      test_case "to_yojson" `Quick test_rate_limit_config_to_yojson;
-      test_case "of_yojson ok" `Quick test_rate_limit_config_of_yojson_ok;
-      test_case "of_yojson defaults" `Quick test_rate_limit_config_of_yojson_defaults;
-      test_case "of_yojson rejects wrong type" `Quick
-        test_rate_limit_config_of_yojson_rejects_wrong_field_type;
-      test_case "of_yojson rejects mixed array" `Quick
-        test_rate_limit_config_of_yojson_rejects_mixed_agent_array;
     ];
     "tool_result", [
       test_case "to_yojson success" `Quick test_tool_result_to_yojson_success;

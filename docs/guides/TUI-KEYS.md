@@ -840,9 +840,10 @@ or completion.
 
 | Keys | What it does |
 |---|---|
-| `HEALTH` | keepalive / turn history |
+| `NOW` | what the keeper is doing at this moment |
+| `AGE` | time since it last moved: the open turn's latest update, else the later of its last turn and the start of its wait |
 | `LIFECYCLE` | the keeper process |
-| `TURN` | open turn's run time, else time since the last turn |
+| `◂` | a failing keeper's last failure, in place of its runtime or first in DETAIL: how long ago · cause · the runtime that ended it · candidates tried |
 | `Mode M/D/A` | manual / on demand / autonomous |
 | `S D/M/R` | sandbox: docker / microvm / remote_ssh |
 

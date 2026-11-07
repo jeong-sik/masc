@@ -28,6 +28,7 @@ MASC의 cohttp 기본 User-Agent(`ocaml-cohttp/v6.2.1`)로 보낸 `GET /models`�
 | R | 2026-11-07 07:15:54 ~ 07:20:22 | `replay_tinker.py --out <dir>` | 2026-09 데이터셋 librarian 17건, board 20건을 effort none·low·medium으로 재생 (111건) |
 | O | 2026-11-07 09:02:44 ~ 09:04:11 | `replay_masc_off.py --out <dir> --efforts low --lanes librarian,board --budget 0.5` | R의 low를 MASC exact 요청 모양으로 다시 재생 (37건) |
 | L | 2026-11-07 09:06:45 ~ 09:07:46 | `replay_masc_off.py --out <dir> --efforts low --lanes librarian --budget 0.3 --max-tokens 8192 --no-temperature` | O의 librarian을 라이브 바인딩 후보 값으로 다시 재생 (17건) |
+| A | 2026-11-07 17:21:42 ~ 17:28:11 | `replay_addon_exact.py --out <dir> --budget 1.0` | keeper-librarian Lane Add-on에 남은 실제 요청을 L과 같은 모양으로 재생 (admission 86건, durable 8건) |
 
 R의 입력과 채점기는 `~/me/.masc/benchmarks/local-llm-2026-09/`에서 읽기만 했다.
 `datasets/librarian.jsonl`, `datasets/board.jsonl`, `replay_exact.py`의 `parse_json`·`score_librarian`·`score_board`·`LANE_MAX_TOKENS`다.
@@ -56,11 +57,32 @@ keeper-librarian Add-on의 두 출력은 레인 `max_output_tokens`를 적지 �
 L은 O가 끝나고 약 3분 뒤에 같은 librarian 프롬프트를 다시 보냈다.
 O·L의 요청 모양은 `f8dbd356759`의 코드와 대조했다.
 
+A는 keeper-librarian Lane Add-on이 남긴 요청 기록을 입력으로 썼다.
+`~/me/.masc/lane-addons/exact-requests/`에서 읽기만 했다.
+declaration이 `keeper-librarian`이고 최종 상태가 `answered`인 기록 94건을 모두 골랐다.
+기록 파일의 수정 시각은 2026-11-03T09:37Z~2026-11-07T17:21Z다.
+이 기록에는 회사 쪽 Keeper 요청도 들어 있다. 운영자가 2026-11-07에 Tinker로 보내도 된다고 정했다.
+행의 `key`는 기록 `digest`의 앞 16자다. 행에는 요청과 답 원문이 없다.
+
+A의 요청 모양은 L과 같다. 기록에 남은 메시지(모두 user)에 스키마 지시를 마지막 user 메시지로 덧붙였다.
+스키마는 기록에 남은 요청 스키마다. temperature는 싣지 않았다. `max_tokens`는 8,192, effort는 `low`다.
+4건씩 동시에 보냈다.
+비교 대상은 기록에 남은 최종 답이다. 그 답을 낸 슬롯은 GLM 68건, ollama 14건, opencode 11건, Claude Haiku 1건이다.
+A의 유효 조건은 네 가지다. HTTP 200, `finish_reason=stop`, 답이 JSON 하나, 기록 스키마 검증(Draft 2020-12) 통과다.
+admission은 여기에 더해 프롬프트의 후보 ID를 빠짐없이 한 번씩 다뤄야 한다.
+A의 MASC 경로 대조 기준은 `cc630d4f224`다.
+
 통과선은 요청을 보내기 전에 `replay_tinker.py`의 `PASS`에 적었다.
 
 - librarian: 17건 모두 유효. 모든 현재 기억 ID를 정확히 한 번 처분해야 유효하다.
 - board: 클라우드가 기록한 판정과 일치율 0.9 이상. 오류와 계약 위반은 불일치로 센다.
 - board 몰림 지연: 5건 이상 묶음의 요청별 지연 p50이 42초 이하.
+
+A의 통과선은 보내기 전에 `replay_addon_exact.py`의 `PASS`에 적었다.
+실행 전에 잰 스크립트 sha256은 올린 사본과 같다.
+
+- A admission: 창 안에 든 요청 중 유효 비율 0.95 이상. 창을 넘어 400을 받은 요청은 분모에서 뺀다.
+- A durable: 창 안에 든 요청이 모두 유효.
 
 ## 파일
 
@@ -77,6 +99,10 @@ O·L의 요청 모양은 `f8dbd356759`의 코드와 대조했다.
 | `replay-masc-live-rows.jsonl` | `artifacts/tinker/replay-masc-live-shape-20261107T090645Z/rows.jsonl` | `0f08f9bc8eccf00709e134b9c4ca6e98fdcd7c3bed50e09c763582e33de33930` | 그대로 |
 | `replay-masc-live-summary.json` | 같은 폴더 `summary.json` | `3696dcfc7f83008832e3b36506076b7fda26c1d96b2f2e34fb33c6a119bae659` | 그대로 |
 | `replay_masc_off.py` | `artifacts/tinker/replay_masc_off.py` | `0aabe27949b3d429f38f6158edb18daf6c80e0b784753f6614cb9dae3b173e48` | 재현용 사본. 두 군데가 다르다. 1단계 스크립트를 같은 폴더의 `replay_tinker.py`에서 읽고, docstring에 두 옵션 설명을 더했다. 실행한 원본은 `artifacts/tinker/replay_tinker.py`를 읽었고, 그 파일과 이 폴더의 사본은 sha256이 같다. 올린 사본의 sha256은 `45d3ef5061933baba4d81a1a5888c4b9e5e5ef2c5545d8c77c7bb2d01129b661`이다 |
+| `replay-addon-rows.jsonl` | `artifacts/tinker/addon-replay-20261107T172142Z/rows.jsonl` | `fd0e926344c739e4ef4af7691f2c283e37cd29ef091f8311b8a844aa341a0d75` | 그대로. 스크립트가 요청과 답 원문을 행에 쓰지 않는다 |
+| `replay-addon-summary.json` | 같은 폴더 `summary.json` | `3b043238b53358a418edfc7609b4d38420d865cc16abd63dc83dfe27d4090d8f` | 그대로 |
+| `replay_addon_exact.py` | `artifacts/tinker/replay_addon_exact.py` | `2d3fd3a84cb0523025ac0128c39e117ac61b3290304fa862aed54f5fe1e4f6b3` | 그대로. 실행 전에 잰 sha256과 같다 |
+| `replay_addon_breakdown.py` | — | — | 실행 뒤에 쓴 분해 스크립트. `replay-addon-rows.jsonl`만 읽는다. sha256은 `1e85072adf9eb9e21686fd4047833d18dca25c1ec0acf5fdedb0f4f2c4805ea7`이다 |
 
 `artifacts/` 원본은 이 저장소에 넣지 않은 로컬 작업 출력이다.
 
@@ -130,13 +156,48 @@ O와 L (`replay-masc-off-summary.json`, `replay-masc-live-summary.json`), effort
 - L에서는 prompt 토큰의 99.7%가 캐시로 보고됐다. O와 같은 프롬프트를 3분 뒤에 보냈기 때문이다.
   그래서 L의 비용은 대표값이 아니다.
 
+A (`replay-addon-summary.json`, 분해는 `replay_addon_breakdown.py`):
+
+| 출력 | 요청 | 창 넘침 400 | 창 안 | 유효 | 유효 비율 | 통과선 | 지연 p50·p90 | prompt p50 | 비용 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| admission | 86 | 24 | 62 | 50 | **0.806** | 0.95 미달 | 9.21·20.27초 | 42,834 토큰 | $0.886 |
+| durable | 8 | 4 | 4 | 4 | 1.0 | 통과 | 7.14·8.26초 | 48,374 토큰 | $0.051 |
+
+- 창 넘침 400을 받은 prompt는 admission 65,577~101,897 토큰, durable 66,147~113,670 토큰이었다.
+  28건 모두 본문에서 W와 같은 `N prompt tokens + 8192 max_tokens > 65536` 문장을 읽었다.
+  400은 0.34~1.49초 만에 왔다. 스크립트는 400의 비용을 0으로 셌다. 청구서와는 맞춰 보지 않았다.
+- admission 창 안 62건 중 유효가 아닌 12건은 이렇다.
+  - 7건은 prompt가 62,045~65,188 토큰이었다. `finish_reason=length`이고, prompt와 completion 토큰의 합이 모두 정확히 65,536이었다.
+    Tinker는 prompt가 창 안이면 prompt+`max_tokens`가 창을 넘어도 받는다. 답은 창 끝에서 잘린다.
+  - 1건은 completion 8,192 토큰에서 잘렸다. prompt는 35,083 토큰이었다.
+  - 2건은 스키마는 지켰지만 후보 일부를 빠뜨렸다.
+  - 1건은 스키마 위반(`additionalProperties`)이다.
+  - 1건은 Cloudflare HTTP 520이었다.
+- 스키마를 지킨 admission 52건은 처분 규칙 다섯 가지를 모두 지켰다.
+  규칙은 ID 실재, absorbs와 dropped·supersedes 겹침 없음, 흡수 ID 한 번, supersedes ⊆ dropped, category 모양이다.
+- 스키마를 지킨 admission 52건의 후보 73개 중 53개(0.73)가 기록 답과 같은 결정이었다.
+  기록 답은 진실이 아니라 당시 슬롯이 낸 답이다.
+- 유효한 admission 50건의 새 claim은 40개였다. 같은 요청의 기록 답은 46개였다.
+  새 claim이 0개인 답은 13건이었고, 기록 답은 6건이었다.
+- durable 유효 4건 중 3건은 새 claim이 0개였다. 같은 요청의 기록 답은 3·1·2·0개였다.
+  빈 답도 유효로 센다. 그래서 durable 통과는 답이 쓸모 있다는 근거가 되지 못한다.
+- durable completion은 127~1,174 토큰이었다. 같은 요청의 기록 답 출력은 5,658~26,628 토큰이었다.
+- 실행 뒤 분해(통과선 아님): prompt가 57,344 토큰(65,536 − 8,192) 이하인 admission은 52건이다.
+  그중 유효는 48건(0.923)이다. 창 영향을 빼도 0.95 아래다.
+- 총비용은 $0.9367이다. 예산 $1.0에 걸려 멈추지 않았다.
+
 ## 확인하지 않은 범위
 
 - 설정마다 한 번만 돌렸다. temperature 0에서 같은 답이 다시 나오는지는 보지 않았다. O와 L도 한 번씩이다.
 - 표본이 작다(librarian 17, board 20). 일치율 차이 0.1은 board 2건이다.
-- 데이터셋은 2026-09 모양이다. librarian 프롬프트 p50이 64KB인데,
-  2026-11-07 라이브 librarian 입력 p50은 12.9KB였다. 지금 프롬프트로는 다시 재지 않았다.
-- MASC 런타임으로 보낸 요청은 없다. R의 요청 모양은 MASC exact 레인과 다르다. O·L은 그 모양을 스크립트로 따라 했다.
+- R·O·L의 데이터셋은 2026-09 모양이다. librarian 프롬프트 p50이 64KB인데,
+  2026-11-07 core `librarian_exact` 레인 입력 p50은 12.9KB였다. 그 레인의 지금 프롬프트로는 다시 재지 않았다.
+  A가 잰 것은 Lane Add-on 요청이다. core 레인과는 다른 요청이다.
+- MASC 런타임으로 보낸 요청은 없다. R의 요청 모양은 MASC exact 레인과 다르다. O·L·A는 그 모양을 스크립트로 따라 했다.
   슬롯·폴백·검증 경로는 돌리지 않았다.
+- A도 한 번만 돌렸다. durable은 창 안 표본이 4건이다.
+- A의 행에는 후보별 결정을 남기지 않았다. 결정이 어느 쪽으로 갈렸는지는 다시 돌려야 안다.
+- A의 유효 조건은 라이브 librarian 검사의 일부만 따라 했다.
+  라이브 검사(`validate_admission_proposal`)는 답의 기억 상태까지 본다. 그래서 A의 유효 50건이 라이브에서 모두 통과한다고 볼 수는 없다.
 - Beta 엔드포인트의 한도는 문서에 숫자가 없다. 동시 8건 넘는 부하는 재지 않았다.
-- `:peft:262144` ID는 창 크기만 쟀다.
+- `:peft:262144` ID는 창 크기만 쟀다. A에는 쓰지 않았다.

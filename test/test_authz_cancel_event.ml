@@ -30,6 +30,7 @@ let subjects =
   ; Subject.Principal (Principal.Human (get (User_id.of_string "alice")))
   ; Subject.Principal (Principal.Service (get (Service_id.of_string "keeper-1")))
   ; Subject.Runtime (get (Runtime_id.of_string "runtime-1"))
+  ; Subject.Session (get (Session_id.of_string "session-1"))
   ; invite
   ; Subject.Registration (get (Registration_id.of_string "registration-1"))
   ]
@@ -117,6 +118,24 @@ let a_cancel_reads_back () =
     (C.equal
        { C.aborted; subject = registration "registration-1" }
        { C.aborted; subject = registration "registration-2" });
+  (* The text of a subject is what a refusal names, so each is pinned. *)
+  Alcotest.(check (list string))
+    "the text of each subject"
+    [ "grant:grant-1"
+    ; "credential:account-1"
+    ; "principal:human:alice"
+    ; "principal:service:keeper-1"
+    ; "runtime:runtime-1"
+    ; "session:session-1"
+    ; "invite:invite-1"
+    ; "registration:registration-1"
+    ]
+    (List.map Subject.to_string subjects);
+  let session text = Subject.Session (get (Session_id.of_string text)) in
+  Alcotest.(check bool)
+    "another session"
+    false
+    (C.equal { C.aborted; subject = session "session-1" } { C.aborted; subject = session "session-2" });
   List.iteri
     (fun i a ->
       List.iteri

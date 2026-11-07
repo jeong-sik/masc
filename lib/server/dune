@@ -90,7 +90,6 @@
   masc.voice_bridge_core
   yojson
   otoml
-  ptime
   base64
   graphql
   graphql_parser

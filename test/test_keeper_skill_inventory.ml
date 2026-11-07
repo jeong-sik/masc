@@ -199,15 +199,6 @@ let test_literal_and_expression_search () =
     fail "empty literal query was not rejected"
 ;;
 
-let tool_capability_with_availability surface availability =
-  Masc.Keeper_capability_surface.tool_capabilities surface
-  |> List.find_opt (fun (capability : Masc.Keeper_capability_surface.tool_capability) ->
-    capability.availability = availability)
-  |> function
-  | Some capability -> capability
-  | None -> fail "Tool capability with requested availability is absent"
-;;
-
 let test_valid_instruction_and_exact_reference () =
   let config = parse_config (config_text (source_row ~id:"only" ~path:"skills")) in
   let frozen =

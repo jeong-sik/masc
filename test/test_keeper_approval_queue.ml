@@ -993,19 +993,6 @@ let check_visible_update label expected = function
   | Error error -> Alcotest.fail (Masc.Keeper_approval_queue_result.exact_attempt_error_to_string error)
 ;;
 
-let expect_summary_rejection label = function
-  | Error
-      (Masc.Keeper_approval_queue_result.Summary_transition_rejected
-        (Masc.Keeper_approval_queue_result.Summary_exact_attempt_bound _)) ->
-    ()
-  | Error error ->
-    Alcotest.failf
-      "%s returned the wrong rejection: %s"
-      label
-      (Masc.Keeper_approval_queue_result.summary_transition_error_to_string error)
-  | Ok _ -> Alcotest.failf "%s accepted an execution-uncertain entry" label
-;;
-
 let exact_summary ?(context_summary = "Exact attempt summary") model_run_id :
     Rule_types.hitl_context_summary
   =

@@ -245,42 +245,6 @@ let scheduled_wake_stimulus ~occurrence ~arrived_at : Q.stimulus =
   }
 ;;
 
-(* What someone else sent this Keeper, as the queue holds it. Intake consumes
-   it without reading another store. *)
-let workspace_message_stimulus ~id ~arrived_at : Q.stimulus =
-  let message : Q.workspace_message =
-    { wmsg_request_id = id; wmsg_from = "peer-keeper" }
-  in
-  { Q.post_id = Q.workspace_message_post_id message
-  ; urgency = Q.Immediate
-  ; arrived_at
-  ; payload = Q.Workspace_message message
-  }
-;;
-
-(* The answer to a request this Keeper made itself. *)
-let delegate_completed_stimulus ~id ~arrived_at : Q.stimulus =
-  { Q.post_id = id
-  ; urgency = Q.Immediate
-  ; arrived_at
-  ; payload =
-      Q.Delegate_completed
-        { dc_operation_id = id
-        ; dc_keeper = "original-delegate"
-        ; dc_terminal = Q.Delegate_replied "delegate result"
-        }
-  }
-;;
-
-(* The receipt is a SHA256 pointer into the Keeper's tool outbox. *)
-let tool_result_stimulus ~receipt ~arrived_at : Q.stimulus =
-  { Q.post_id = "keeper-tool-result:" ^ receipt
-  ; urgency = Q.Immediate
-  ; arrived_at
-  ; payload = Q.Tool_result_ready receipt
-  }
-;;
-
 let approve_grant_exn ~base_path ~keeper_name ~request =
   let approval_id =
     match
@@ -356,9 +320,6 @@ let with_ctx keeper_name f =
   in
   f ~base_path ~keeper_name ~meta ~ctx
 ;;
-
-(* A free-slot listener, so an Owner is able to reserve the next slot. *)
-let slot_released ~keeper_name:_ = ()
 
 (* The Owner a source turn asks about chat readiness. *)
 let start_owner ~(ctx : _ Keeper_types_profile.context) ~base_path ~meta

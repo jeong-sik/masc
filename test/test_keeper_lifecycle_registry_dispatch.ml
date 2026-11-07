@@ -87,16 +87,6 @@ let write_keeper_instructions ~base_dir name body =
     (Filename.concat (keepers_dir_of ~base_dir) (name ^ ".toml"))
     [ "[keeper]"; Printf.sprintf "instructions = %S" body ]
 
-let write_keeper_meta_json config (meta : Keeper_meta_contract.keeper_meta) =
-  write_json
-    (Keeper_types_profile.keeper_meta_path config meta.name)
-    (Keeper_meta_json.meta_to_json meta)
-
-let write_keeper_meta_json_for_name config name (meta : Keeper_meta_contract.keeper_meta) =
-  write_json
-    (Keeper_types_profile.keeper_meta_path config name)
-    (Keeper_meta_json.meta_to_json meta)
-
 let test_runtime_toml =
   {|
 [runtime]
@@ -135,17 +125,6 @@ let ensure_test_runtime =
           match Runtime.init_default ~config_path:path with
           | Ok () -> initialized := true
           | Error msg -> fail msg))
-
-let persistence_read_drop_total ~surface ~reason =
-  P.metric_value_or_zero P.metric_persistence_read_drops
-    ~labels:[("surface", surface); ("reason", reason)]
-    ()
-
-let check_persistence_read_drop_delta ~surface ~reason ~before ~delta =
-  check (float 0.0001)
-    (Printf.sprintf "%s/%s persistence read drops" surface reason)
-    (before +. float_of_int delta)
-    (persistence_read_drop_total ~surface ~reason)
 
 let make_keeper_meta ?(name = "keeper-lifecycle-test")
     ?(trace_id = "trace-keeper-lifecycle") () =

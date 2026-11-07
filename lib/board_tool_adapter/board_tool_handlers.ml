@@ -1,35 +1,16 @@
 open Masc_board_handlers
 
 
-(** Board_tool_handlers — non-post mutating / read handlers and the
-    shared agent-lookup / SOUL-evolution callbacks.
+(** Board_tool_handlers — non-post mutating / read handlers.
 
     Hosts the vote / search / profile / reaction / hearths / stats /
-    delete / board_cleanup handlers along with the
-    [agent_lookup_hook] / [evolution_hook] state. Post handlers live in
+    delete / board_cleanup handlers. Post handlers live in
     {!Board_tool_post}, sub-board handlers in {!Board_tool_sub_board},
     curation handlers in {!Board_tool_curation}.
 
     Stage 10 split of lib/board_tool_adapter/board_tool.ml. *)
 
 open Tool_args
-
-(** {1 Agent lookup callback} *)
-
-(** Set once at server startup for optional agent-to-agent feedback hooks. *)
-let agent_lookup_hook : (string -> bool) option Atomic.t = Atomic.make None
-
-let set_agent_lookup f = Atomic.set agent_lookup_hook (Some f)
-let set_agent_lookup_none () = Atomic.set agent_lookup_hook None
-
-(** Check whether [name] is a registered agent. Uses the registry
-    lookup ([Workspace.is_agent_session_bound]) when available via
-    [agent_lookup_hook]; returns [false] when no hook is installed. *)
-let is_agent name =
-  match Atomic.get agent_lookup_hook with
-  | Some lookup -> lookup name
-  | None -> false
-;;
 
 let agent_id_arg ~field args =
   let raw = get_string args field "" |> String.trim in
@@ -163,17 +144,6 @@ let resolve_board_post_kind (raw_kind : string option)
   | None -> Ok Board.Human_post
 ;;
 
-(** {1 SOUL Evolution callback} *)
-
-(** Registered at startup to break dependency cycle. *)
-type evolution_callback =
-  { get_primary_value : string -> string option
-  ; record_feedback : name:string -> dimension:string -> is_positive:bool -> unit
-  }
-
-let evolution_hook : evolution_callback option Atomic.t = Atomic.make None
-let register_evolution_callback cb = Atomic.set evolution_hook (Some cb)
-
 (** {1 Vote / stats / search handlers} *)
 
 (* RFC-0189 PR-1b.1 — handlers in this module return the typed
@@ -208,46 +178,15 @@ let handle_vote ~tool_name ~start_time args =
        (match Board_dispatch.vote ~voter ~post_id ~direction with
         | Ok new_score ->
           let arrow = if direction = Board.Up then "↑" else "↓" in
-          (* SOUL Evolution via callback (breaks compile-time dependency cycle). *)
-          let evolution_msg =
-            match Atomic.get evolution_hook with
-            | None -> "" (* Not initialized yet. *)
-            | Some cb ->
-              (match Board_dispatch.get_post ~post_id with
-               | Ok post ->
-                 let author = Board.Agent_id.to_string post.author in
-                 (* Agent-only evolution: 에이전트끼리만 서로 진화시킴. *)
-                 if is_agent voter && is_agent author
-                 then (
-                   let dimension =
-                     match cb.get_primary_value author with
-                     | Some pv -> pv
-                     | None -> "Creativity"
-                   in
-                   let is_positive = direction = Board.Up in
-                   cb.record_feedback ~name:author ~dimension ~is_positive;
-                   Printf.sprintf
-                     " [%s evolved: %s %s]"
-                     author
-                     dimension
-                     (if is_positive then "+0.01" else "-0.01"))
-                 else ""
-               | Error e ->
-                 Log.Misc.warn
-                   "[ToolBoard] get_reputation_evolution failed: %s"
-                   (Board_tool_format.board_error_to_string e);
-                 "")
-          in
           Tool_result.make_ok
             ~tool_name
             ~start_time
             ~data:
               (`String
                  (Printf.sprintf
-                    "%s Vote recorded. New score: %+d%s"
+                    "%s Vote recorded. New score: %+d"
                     arrow
-                    new_score
-                    evolution_msg))
+                    new_score))
             ()
         | Error (Board.Already_voted _) ->
           (* Idempotent: same-direction duplicate vote is a no-op success.

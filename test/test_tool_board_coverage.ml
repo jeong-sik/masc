@@ -174,23 +174,6 @@ let test_board_error_to_string () =
     "comment_not_found names the comment producer" true
     (String_util.contains_substring s3 "masc_board_comment")
 
-let test_is_agent () =
-  with_eio @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  cleanup ();
-  (* is_agent uses agent_lookup_hook — returns false when no hook installed *)
-  Alcotest.(check bool) "no hook = not agent" false
-    (Board_tool.is_agent "alice");
-  (* Install a mock hook that recognises "alice" *)
-  Board_tool.set_agent_lookup (fun name -> name = "alice");
-  Fun.protect ~finally:Board_tool.set_agent_lookup_none (fun () ->
-    Alcotest.(check bool) "registered agent" true
-      (Board_tool.is_agent "alice");
-    Alcotest.(check bool) "unregistered agent" false
-      (Board_tool.is_agent "unknown");
-    Alcotest.(check bool) "empty = not agent" false
-      (Board_tool.is_agent ""))
-
 (* Pins the input -> output mapping exactly, in both renderers. The predecessors
    ([format_timestamp_relative] / [format_ttl_remaining]) read
    [Time_compat.now ()] inside a [float -> string] signature, so the same post
@@ -3596,7 +3579,6 @@ let () =
           Alcotest.test_case "visibility_of_string" `Quick test_visibility_of_string;
           Alcotest.test_case "sort_order_of_string" `Quick test_sort_order_of_string;
           Alcotest.test_case "board_error_to_string" `Quick test_board_error_to_string;
-          Alcotest.test_case "is_agent" `Quick test_is_agent;
           Alcotest.test_case "format_timestamp_absolute" `Quick test_format_timestamp_absolute;
           Alcotest.test_case "board actor identity is registry backed"
             `Quick test_board_actor_identity_is_registry_backed;

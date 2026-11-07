@@ -6014,7 +6014,13 @@ let test_decode_memory_health_reads_the_librarian_position_beside_the_cut () =
                 ; ("removed", `Int 0)
                 ; ("snapshot_present", `Bool true)
                 ; ("updated_at", `Float 1700000000.)
-                ; ("age_bins", `Null)
+                ; ( "age_bins"
+                  , `Assoc
+                      [ ("under_hour", `Int 0)
+                      ; ("under_day", `Int 0)
+                      ; ("under_week", `Int 0)
+                      ; ("older", `Int 0)
+                      ] )
                 ; ("context_cycle", context_cycle)
                 ; ( "librarian"
                   , `Assoc

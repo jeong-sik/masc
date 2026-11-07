@@ -594,43 +594,66 @@ let keeper_group_heading_style = function
   | Keeper_list_model.Inactive -> Theme.recede ()
   | Keeper_list_model.Unobserved -> Theme.warn ()
 
-(* A chip with a count takes the colour of its group, the one the group
-   heading of the grouped list has; a zero stays in the dim colour of the row.
-   The row is drawn dim, so the chip puts the dim colour back after itself.
-   Style bytes are zero-width to [display_width], so the fit below is the same
-   with or without them. *)
-let count_chip group count text =
-  count,
-  if count > 0 then keeper_group_heading_style group ^ text ^ Ansi.reset ^ Theme.recede ()
-  else text
+(* A chip of the count row, in two lengths: [long] is "! 2 attention", [short]
+   is "! 2". A chip with a count takes the colour of its group, the one the
+   group heading of the grouped list has; a zero stays in the dim colour of the
+   row. The row is drawn dim, so the chip puts the dim colour back after
+   itself. Style bytes are zero-width to [display_width], so the fit below is
+   the same with or without them. *)
+type count_chip =
+  { count : int
+  ; long : string
+  ; short : string
+  }
 
-(* The chips of the count row that fit [room] cells, each a count and its text
-   in the order they are drawn. When the row is too short for all of them,
-   the chips with a count stay and the zeros take what is left, front to
-   back. When the chips with a count are too long for the row on their own,
-   they are returned as they are and [join_fitting] leaves out the ones that
-   do not fit whole. A zero says nothing is there. At 80 columns the five
-   zeros fit and the "? 3 unknown" behind them did not, so a list of three
-   Keepers sat under a row of zeros. *)
+let count_chip group glyph count label =
+  let paint text =
+    if count > 0 then keeper_group_heading_style group ^ text ^ Ansi.reset ^ Theme.recede ()
+    else text
+  in
+  { count
+  ; long = paint (Printf.sprintf "%s %d %s" glyph count label)
+  ; short = paint (Printf.sprintf "%s %d" glyph count)
+  }
+
+(* The texts of the count row that fit [room] cells, in the order they are
+   drawn. When the row is too short for all the chips, the chips with a count
+   stay and the zeros take what is left, front to back. A zero says nothing is
+   there. At 80 columns the five zeros fit and the "? 3 unknown" behind them
+   did not, so a list of three Keepers sat under a row of zeros. When the chips
+   with a count are too long on their own, the last ones give up their word
+   first ("○ 5 inactive" becomes "○ 5"), so the first chips keep their names
+   and no count is cut. Only when every count is short and still too long does
+   [join_fitting] leave out the ones that do not fit whole. *)
 let count_chips_that_fit ~sep ~room chips =
   let sep_cells = Message_layout.display_width sep in
-  (* A chip and the separator in front of it. A row has one separator fewer
-     than it has chips, hence the start below zero. *)
-  let cost (_, text) = sep_cells + Message_layout.display_width text in
-  let held chips = List.fold_left (fun cells chip -> cells + cost chip) (- sep_cells) chips in
-  let nonzero (count, _) = count > 0 in
+  (* A text and the separator in front of it. A row has one separator fewer
+     than it has texts, hence the start below zero. *)
+  let cost text = sep_cells + Message_layout.display_width text in
+  let held texts = List.fold_left (fun cells text -> cells + cost text) (- sep_cells) texts in
+  let long chip = chip.long in
+  let nonzero chip = chip.count > 0 in
   let counted = List.filter nonzero chips in
-  if held chips <= room then chips
-  else if held counted > room then counted
+  if held (List.map long chips) <= room then List.map long chips
+  else if held (List.map long counted) > room then
+    let kept = List.length counted in
+    let short_tail given_up =
+      List.mapi (fun i chip -> if i >= kept - given_up then chip.short else chip.long) counted
+    in
+    let rec fewest_words given_up =
+      let texts = short_tail given_up in
+      if given_up >= kept || held texts <= room then texts else fewest_words (given_up + 1)
+    in
+    fewest_words 1
   else
     let rec fill left = function
       | [] -> []
-      | ((count, _) as chip) :: later ->
-          if count > 0 then chip :: fill left later
-          else if cost chip <= left then chip :: fill (left - cost chip) later
-          else List.filter nonzero later
+      | chip :: later ->
+          if nonzero chip then chip.long :: fill left later
+          else if cost chip.long <= left then chip.long :: fill (left - cost chip.long) later
+          else List.map long (List.filter nonzero later)
     in
-    fill (room - held counted) chips
+    fill (room - held (List.map long counted)) chips
 
 (* The frame cuts a row from the right. The counts are what a narrow screen
    needs, so they lead and the layout and sort name trail. An item that does
@@ -646,23 +669,17 @@ let keeper_view_summary ~cells rows layout sort =
     | Keeper_list_model.Compact | Keeper_list_model.Detailed ->
         let counts : Keeper_list_model.group_counts = Keeper_list_model.group_counts rows in
         let chips =
-          [ count_chip Keeper_list_model.Attention counts.attention_rows
-              (Printf.sprintf "! %d attention" counts.attention_rows)
-          ; count_chip Keeper_list_model.Failing counts.failing_rows
-              (Printf.sprintf "%s %d failing" failing_glyph counts.failing_rows)
-          ; count_chip Keeper_list_model.Active counts.active_rows
-              (Printf.sprintf "\xe2\x96\xb6 %d active" counts.active_rows)
-          ; count_chip Keeper_list_model.Waiting counts.waiting_rows
-              (Printf.sprintf "\xe2\x97\x8c %d waiting" counts.waiting_rows)
-          ; count_chip Keeper_list_model.Inactive counts.inactive_rows
-              (Printf.sprintf "\xe2\x97\x8b %d inactive" counts.inactive_rows)
-          ; count_chip Keeper_list_model.Unobserved counts.unobserved_rows
-              (Printf.sprintf "? %d unknown" counts.unobserved_rows)
+          [ count_chip Keeper_list_model.Attention "!" counts.attention_rows "attention"
+          ; count_chip Keeper_list_model.Failing failing_glyph counts.failing_rows "failing"
+          ; count_chip Keeper_list_model.Active "\xe2\x96\xb6" counts.active_rows "active"
+          ; count_chip Keeper_list_model.Waiting "\xe2\x97\x8c" counts.waiting_rows "waiting"
+          ; count_chip Keeper_list_model.Inactive "\xe2\x97\x8b" counts.inactive_rows "inactive"
+          ; count_chip Keeper_list_model.Unobserved "?" counts.unobserved_rows "unknown"
           ]
         in
-        let whole = List.map snd chips @ [ mode ] in
+        let whole = List.map (fun chip -> chip.long) chips @ [ mode ] in
         if Message_layout.display_width (String.concat sep whole) <= room then whole
-        else List.map snd (count_chips_that_fit ~sep ~room chips)
+        else count_chips_that_fit ~sep ~room chips
   in
   lead ^ Message_layout.join_fitting ~sep ~cells:room texts
 

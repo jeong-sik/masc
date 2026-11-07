@@ -98,9 +98,11 @@ module For_testing : sig
   val fusion_run_list_response :
     registry:Fusion_run_registry.t -> Yojson.Safe.t
 
-  val skill_delete_audit_of_outcome :
-    Server_skill_editor.delete_outcome -> Audit_log.outcome * Yojson.Safe.t
-  (** The [skill_delete] audit row the delete route writes for any delete that
-      went through ([Deleted_and_published] or [Deleted_but_unpublished]),
-      built from the outcome alone. *)
+  type gate_mode_recovery =
+    | Recovery_completed of Keeper_gate.operator_recovery_report
+    | Recovery_failed of string
+    | Recovery_not_requested
+
+  val gate_mode_change_json :
+    Keeper_gate_mode.change -> gate_mode_recovery -> Yojson.Safe.t
 end

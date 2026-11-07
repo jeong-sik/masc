@@ -16,7 +16,7 @@ masc 의 스킬은 파일 하나로 선언되는 능력이다. `runtime.toml`의
 Librarian이 남기는 `validated_approach`·`lesson`과 `absorbs`는 Memory OS의 Fact를
 바꾼다. SKILL.md나 composition을 발행하지 않는다. 현재 Skill은 선언된 source의
 파일을 읽어 발행하며, TUI·Dashboard의 생성·저장은 `CanAdmin` 편집기 API를 쓴다
-(`Server_skill_editor`, `Server_routes_http_routes_dashboard`). Keeper는
+(`Server_skill_editor`, `Server_routes_http_routes_skills`). Keeper는
 `keeper_skill_publish`로 새 Skill을 직접 발행한다(아래).
 
 Keeper는 새 `SKILL.md`를 `keeper_artifact_transfer`로 export한 뒤, 반환된

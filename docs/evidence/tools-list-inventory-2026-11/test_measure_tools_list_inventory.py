@@ -60,6 +60,25 @@ class InventoryTest(unittest.TestCase):
         self.assertEqual(list(tools), ["not_model_invocable", "active"])
         self.assertEqual(inventory.row_names(tools), ["b", "c", "a", "d"])
 
+    def test_a_row_is_named_by_the_name_the_keeper_calls_the_tool_by(self) -> None:
+        stored = surface(
+            [
+                tool("shown", "active", internal_name="callable", keeper_model_projection="internal_name"),
+                tool("Read", "active", internal_name="tool_read_file", keeper_model_projection="preferred_public_name"),
+                tool("masc_hidden", "not_model_invocable", internal_name="masc_hidden_x", keeper_model_projection="operator_only"),
+                tool(
+                    "masc_add_task",
+                    "not_model_invocable",
+                    internal_name="masc_add_task_x",
+                    keeper_model_projection="transport_alias",
+                    transport_alias_of="keeper_task_create",
+                ),
+            ],
+            [],
+        )
+        tools = section(inventory.inventory_of(stored), "tools")
+        self.assertEqual(inventory.row_names(tools), ["callable", "Read", "masc_hidden", "masc_add_task"])
+
     def test_a_transport_alias_names_the_tool_it_projects(self) -> None:
         stored = surface([tool("masc_add_task", "not_model_invocable", transport_alias_of="keeper_task_create"), tool("Read", "active")], [])
         tools = section(inventory.inventory_of(stored), "tools")

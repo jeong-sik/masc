@@ -59,4 +59,4 @@ python3 docs/evidence/tools-list-inventory-2026-11/measure_tools_list_inventory.
 python3 -m unittest discover -s docs/evidence/tools-list-inventory-2026-11
 ```
 
-`inventory_of` 는 OCaml `inventory_to_yojson` 을 저장된 행에 옮긴 것이에요. 합성 표면으로 분류 순서, 별칭, 거부 사유, 스킬 이름, 창 거르기, 읽지 못한 호출을 확인하는 시험 11개예요.
+`inventory_of` 는 OCaml `inventory_to_yojson` 을 저장된 행에 옮긴 것이에요. 합성 표면으로 분류 순서, 도구 행 이름(Keeper 가 부르는 이름), 별칭, 거부 사유, 스킬 이름, 창 거르기, 읽지 못한 호출을 확인하는 시험 12개예요. 저장된 표면 12종의 도구 행 2,354개 중 `public_name` 과 `internal_name` 이 다른 156개는 모두 `preferred_public_name` 이라서 행 이름은 `public_name` 그대로고, 결과 JSON 은 바뀌지 않아요.

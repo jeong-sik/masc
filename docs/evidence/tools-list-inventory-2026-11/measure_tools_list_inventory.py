@@ -15,8 +15,9 @@ Definitions:
   text after the JSON object (a failure note) is ignored. Otherwise `output` is a string the ledger keeps cut
   to a few KB, which counts only when it parses as a whole surface.
 - inventory: the result `Keeper_capability_surface.inventory_to_yojson` (lib/keeper/keeper_capability_surface.ml)
-  gives for the same frozen surface. `inventory_of` ports it onto the stored rows: a Tool row keeps `public_name`
-  as `name`, `transport_alias_of` and the availability's detail field, a Skill row keeps its name, `kind`,
+  gives for the same frozen surface. `inventory_of` ports it onto the stored rows: a Tool row keeps the name the
+  Keeper calls it by as `name` (`internal_name` when `keeper_model_projection` is `internal_name`, `public_name`
+  otherwise), `transport_alias_of` and the availability's detail field, a Skill row keeps its name, `kind`,
   `tool_name` and the detail field, and both are filed under their `availability` in first-seen order. The
   size is the compact UTF-8 JSON `Yojson.Safe.to_string` writes.
 - window bytes: the sum of `result_bytes` over every `tool_call` line of the window, any tool.
@@ -119,9 +120,14 @@ def detail_fields(row: Json) -> list[tuple[str, object]]:
     return [(key, row[key]) for key in ("sandbox_refusal", "outside_node_tools") if key in row]
 
 
+def tool_name(row: Json) -> object:
+    """Port of `tool_inventory_name`: `internal_name` for a Tool projected by it, `public_name` for every other projection."""
+    return row.get("internal_name") if row.get("keeper_model_projection") == "internal_name" else row.get("public_name")
+
+
 def tool_row(row: Json) -> Json:
     """Port of `tool_inventory_row`. `transport_alias_of` exists in a stored row only for a transport alias."""
-    fields: list[tuple[str, object]] = [("name", row.get("public_name"))]
+    fields: list[tuple[str, object]] = [("name", tool_name(row))]
     if "transport_alias_of" in row:
         fields.append(("transport_alias_of", row["transport_alias_of"]))
     return dict(fields + detail_fields(row))
@@ -285,7 +291,7 @@ def summarize(calls: Iterator[Call]) -> Json:
         skills = rows_of(call.surface, "skills")
         tool_rows += len(tools)
         skill_rows += len(skills)
-        tool_rows_kept = tool_rows_kept and Counter(map(str, row_names(inventory["tools"]))) == Counter(str(row.get("public_name")) for row in tools)
+        tool_rows_kept = tool_rows_kept and Counter(map(str, row_names(inventory["tools"]))) == Counter(str(tool_name(row)) for row in tools)
         skill_rows_kept = skill_rows_kept and Counter(map(str, row_names(inventory["skills"]))) == Counter(str(skill_name(row)) for row in skills)
         for row in tools:
             old_tool_keys.update(row)

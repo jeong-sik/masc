@@ -709,9 +709,20 @@ let digest surface =
   Agent_core_sha256.(digest_string canonical |> to_hex)
 ;;
 
+(* The name the Keeper calls the Tool by, as [Keeper_tool_descriptor.keeper_model_names]
+   gives it. A Tool with no Keeper-facing name (operator only, or an alias of
+   another Tool) is listed by its public name. *)
+let tool_inventory_name (descriptor : Keeper_tool_descriptor.t) =
+  match descriptor.Keeper_tool_descriptor.keeper_model_projection with
+  | Keeper_tool_descriptor.Internal_name -> descriptor.Keeper_tool_descriptor.internal_name
+  | Keeper_tool_descriptor.Preferred_public_name
+  | Keeper_tool_descriptor.Operator_only
+  | Keeper_tool_descriptor.Transport_alias _ -> descriptor.Keeper_tool_descriptor.public_name
+;;
+
 let tool_inventory_row (capability : tool_capability) =
   `Assoc
-    ([ "name", `String capability.descriptor.Keeper_tool_descriptor.public_name ]
+    ([ "name", `String (tool_inventory_name capability.descriptor) ]
      @ (match capability.descriptor.Keeper_tool_descriptor.keeper_model_projection with
         | Keeper_tool_descriptor.Transport_alias { projected_by } ->
           [ "transport_alias_of", `String projected_by ]

@@ -3,8 +3,7 @@
 `scripts/install-local-build.sh` retains build output after installation, so the
 next build can reuse `_build`. Installed binaries and browser hosts have separate
 copies. Successful and failed installations both preserve artifacts and test
-output. The former `--keep-build` option has been removed; retention is now the
-default and requires no flag.
+output.
 
 To reclaim this checkout's build storage, first export any logs and evidence
 that must survive, and confirm no installed destination or workspace lives in

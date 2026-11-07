@@ -188,7 +188,3 @@ let snapshot_json ?now ~masc_root () =
      ]
      @ observation_fields ())
 ;;
-
-module For_testing = struct
-  let reset = reset_for_tests
-end

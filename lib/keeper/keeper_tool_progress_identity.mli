@@ -36,7 +36,3 @@ end
     are reverified on every walk; without [base_path], declarations are ignored. *)
 val digest_history_pairs :
   ?base_path:string -> History_memo.t -> history_pair list -> io_fingerprints option list
-
-module For_testing : sig
-
-end

@@ -449,6 +449,3 @@ let digest_history_pairs ?base_path (memo : History_memo.t) pairs =
   Atomic.set memo.History_memo.digests next;
   answers
 ;;
-
-module For_testing = struct
-end

@@ -53,7 +53,3 @@ val measure_exact_completion_request
   -> ( completion_request_measurement
        , 'callback_error completion_request_dispatch_error )
        result
-
-module For_testing : sig
-  val generation_serializer_invocation_count : unit -> int
-end

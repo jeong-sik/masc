@@ -1712,13 +1712,6 @@ let self_hosted_template_cases =
     , false
     , false
     , false )
-  ; ( "tinker.tinker-inkling-2-small"
-    , 262144
-      (* Thinking Machines Tinker OpenAI-compatible surface for Inkling-2-Small
-         and fine-tuned tinker://.../sampler_weights/<step> checkpoints *)
-    , true
-    , true
-    , true )
   ]
 ;;
 
@@ -1750,6 +1743,33 @@ let test_self_hosted_templates_resolve_when_enabled () =
             check bool (runtime_id ^ " parallel tool calls") parallel_calls
               caps.supports_parallel_tool_calls))
     self_hosted_template_cases
+;;
+
+(* Tinker shares the uncommented region but is hosted and has AGENT_CORE
+   catalog rows, so its template states no capability. The binding has to land
+   on the catalog row, which is the opposite of what the self-hosted cases
+   above check. *)
+let test_tinker_template_binds_the_catalog_row () =
+  with_deployment_agent_core_model_catalog @@ fun _catalog ->
+  with_uncommented_seed ~marker:self_hosted_example_marker
+  @@ fun runtimes ->
+  let runtime_id = "tinker.tinker-inkling-2-small" in
+  match
+    List.find_opt
+      (fun (rt : Runtime_instance.t) -> String.equal rt.Runtime_instance.id runtime_id)
+      runtimes
+  with
+  | None -> failf "uncommenting the example did not produce runtime %s" runtime_id
+  | Some runtime ->
+    (match
+       Llm_provider.Provider_config.capabilities_for_config_model
+         (agent_core_provider_config runtime)
+     with
+     | None -> failf "%s must resolve the catalog row" runtime_id
+     | Some caps ->
+       check (option int) (runtime_id ^ " context") (Some 65_536) caps.max_context_tokens;
+       check bool (runtime_id ^ " structured output") false
+         caps.supports_structured_output)
 ;;
 
 (* The three official clients ship as live declarations now — they were
@@ -7673,6 +7693,8 @@ let () =
             test_repo_runtime_toml_declares_no_clamped_max_context;
           test_case "self-hosted server templates resolve when enabled" `Quick
             test_self_hosted_templates_resolve_when_enabled;
+          test_case "tinker template binds the catalog row" `Quick
+            test_tinker_template_binds_the_catalog_row;
           test_case "official-client declarations load" `Quick
             test_official_client_declarations_load;
           test_case

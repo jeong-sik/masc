@@ -144,64 +144,10 @@ let create_with_descriptors
     tool_deny <> []
     && List.exists
          (fun name ->
-           let lane_addon = match descriptor.Keeper_tool_descriptor.runtime_handler with
-             | Tool_lane_addon _ -> true | Keeper_tool_descriptor.Tool_execute
-                                         | Keeper_tool_descriptor.Tool_search_files
-                                         | Keeper_tool_descriptor.Tool_read_file
-                                         | Keeper_tool_descriptor.Tool_edit_file
-                                         | Keeper_tool_descriptor.Tool_write_file
-                                         | Keeper_tool_descriptor.Tool_lane_status
-                                         | Keeper_tool_descriptor.Tool_tools_list
-                                         | Keeper_tool_descriptor.Tool_capability_search
-                                         | Keeper_tool_descriptor.Tool_context_status
-                                         | Keeper_tool_descriptor.Tool_peer_artifact
-                                         | Keeper_tool_descriptor.Tool_artifact_read
-                                         | Keeper_tool_descriptor.Tool_skill_validate
-                                         | Keeper_tool_descriptor.Tool_artifact_draft | Keeper_tool_descriptor.Tool_artifact_publish | Keeper_tool_descriptor.Tool_skill_publish
-                                         | Keeper_tool_descriptor.Tool_workspace_memory_read
-                                         | Keeper_tool_descriptor.Tool_memory_search
-                                         | Keeper_tool_descriptor.Tool_memory_select
-                                         | Keeper_tool_descriptor.Tool_memory_retract
-                                         | Keeper_tool_descriptor.Tool_memory_write
-                                         | Keeper_tool_descriptor.Tool_constitution_write
-                                         | Keeper_tool_descriptor.Tool_constitution_read
-                                         | Keeper_tool_descriptor.Tool_constitution_remove
-                                         | Keeper_tool_descriptor.Tool_wiki_search
-                                         | Keeper_tool_descriptor.Tool_wiki_read
-                                         | Keeper_tool_descriptor.Tool_surface_read
-                                         | Keeper_tool_descriptor.Tool_surface_post
-                                         | Keeper_tool_descriptor.Tool_ide_annotate
-                                         | Keeper_tool_descriptor.Tool_voice_dispatch
-                                         | Keeper_tool_descriptor.Tool_task_dispatch
-                                         | Keeper_tool_descriptor.Tool_board_dispatch
-                                         | Keeper_tool_descriptor.Tool_masc_task_dispatch
-                                         | Keeper_tool_descriptor.Tool_masc_plan_dispatch
-                                         | Keeper_tool_descriptor.Tool_masc_run_dispatch
-                                         | Keeper_tool_descriptor.Tool_masc_agent_dispatch
-                                         | Keeper_tool_descriptor.Tool_masc_workspace_dispatch
-                                         | Keeper_tool_descriptor.Tool_masc_misc_dispatch
-                                         | Keeper_tool_descriptor.Tool_web_search
-                                         | Keeper_tool_descriptor.Tool_web_fetch
-                                         | Keeper_tool_descriptor.Tool_browser_tabs
-                                         | Keeper_tool_descriptor.Tool_browser_read
-                                         | Keeper_tool_descriptor.Tool_browser_session
-                                         | Keeper_tool_descriptor.Tool_browser_goto
-                                         | Keeper_tool_descriptor.Tool_browser_act
-                                         | Keeper_tool_descriptor.Tool_browser_interact
-                                         | Keeper_tool_descriptor.Tool_masc_agent_timeline_dispatch
-                                         | Keeper_tool_descriptor.Tool_masc_schedule_dispatch
-                                         | Keeper_tool_descriptor.Tool_keeper_composition_result_dispatch
-                                         | Keeper_tool_descriptor.Tool_keeper_code_query_dispatch
-                                         | Keeper_tool_descriptor.Tool_keeper_job_dispatch
-                                         | Keeper_tool_descriptor.Tool_masc_keeper_dispatch
-                                         | Keeper_tool_descriptor.Tool_masc_fusion_dispatch
-                                         | Keeper_tool_descriptor.Tool_masc_fusion_status
-                                         | Keeper_tool_descriptor.Tool_masc_fusion_decision
-                                         | Keeper_tool_descriptor.Tool_masc_file_dispatch
-                                         | Keeper_tool_descriptor.Tool_masc_wiki_dispatch
-                                         | Keeper_tool_descriptor.Tool_masc_local_runtime_dispatch
-                                         | Keeper_tool_descriptor.Tool_analyze_image
-                                         | Keeper_tool_descriptor.Tool_read_image -> false in
+           let lane_addon =
+             Option.is_some
+               (Keeper_tool_descriptor.lane_addon_export
+                  descriptor.Keeper_tool_descriptor.runtime_handler) in
            List.exists (Keeper_tool_deny.matches ~lane_addon ~name) tool_deny)
          (Keeper_tool_descriptor.keeper_model_names descriptor)
   in

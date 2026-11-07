@@ -425,6 +425,17 @@ let test_lane_addon_surface_binds_incarnation_and_deny () =
   let descriptor = match Surface.find_descriptor_by_name surface "machine_screen" with
     | Some descriptor -> descriptor | None -> fail "attached export missing" in
   check bool "exact descriptor is admitted" true (Surface.admits surface descriptor);
+  check bool "the handler of an attached export answers that export" true
+    (match Tool_descriptor.lane_addon_export descriptor.runtime_handler with
+     | Some attached ->
+       Masc.Lane_addon_tool_export.equal_owner
+         attached.Masc.Lane_addon_tool_export.owner first.Masc.Lane_addon_tool_export.owner
+     | None -> false);
+  check bool "no registered descriptor answers an export" true
+    (List.for_all
+       (fun registered ->
+          Tool_descriptor.lane_addon_export registered.Tool_descriptor.runtime_handler = None)
+       (Tool_descriptor.all_descriptors ()));
   let forged = { descriptor with description = "forged" } in
   check bool "same identity does not admit a forged descriptor" false (Surface.admits surface forged);
   let denied = capability_surface ~lane_addon_exports:[first] ~tool_deny:["addon:machine_screen"] frozen in

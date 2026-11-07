@@ -40,7 +40,7 @@ let request_response ~handle ~request =
 ;;
 
 let turns_response ~state =
-  request_response ~handle:(Server_routes_http_keeper_stream.handle_keeper_turns_list state)
+  request_response ~handle:(Server_routes_http_keeper_control.handle_keeper_turns_list state)
     ~request:"GET /api/v1/keepers/turns HTTP/1.1\r\nHost: x\r\n\r\n"
 ;;
 
@@ -278,7 +278,7 @@ let test_interrupt_rejects_invalid_or_conflicting_identity () =
   with_test_state (fun ~sw:_ ~config:_ ~state ->
     List.iter (fun body ->
       let response = post_response
-        ~handle:(Server_routes_http_keeper_stream.handle_keeper_turn_interrupt ~actor:"turns-route-test" state) body in
+        ~handle:(Server_routes_http_keeper_control.handle_keeper_turn_interrupt ~actor:"turns-route-test" state) body in
       Alcotest.(check bool) "bad identity is rejected before any cancellation" true
         (String_util.contains_substring response "400 Bad Request"))
       [ "{"; {|{"name":"alpha","interrupt_token":null}|}
@@ -341,7 +341,7 @@ let test_owned_turn_survives_bound_read_refusal_and_recovery () =
           (String.concat "" (List.map (fun (key,value) -> key ^ ": " ^ value ^ "\r\n") headers)) in
       let wire = request_response ~request:raw ~handle:(fun request reqd ->
         Server_auth.with_read_workspace_precondition !served
-          Server_routes_http_keeper_stream.handle_keeper_turns_list request reqd) in
+          Server_routes_http_keeper_control.handle_keeper_turns_list request reqd) in
       Ok (client_response request wire) in
     let poll () =
       let reply, complete = Eio.Promise.create () in
@@ -433,7 +433,7 @@ let test_run_next_ownership_and_started_boundary () =
          | None -> []
          | Some ids -> ["priority_predecessors",`List (List.map (fun id -> `String id) ids)])) in
     let post ?predecessors id = post_response
-      ~handle:(Server_routes_http_keeper_stream.handle_keeper_run_next state ~actor:"masc-tui")
+      ~handle:(Server_routes_http_keeper_control.handle_keeper_run_next state ~actor:"masc-tui")
       (request ?predecessors id) in
     Alcotest.(check bool) "other producer is forbidden" true (String_util.contains_substring (post "other-first") "403 Forbidden");
     Alcotest.(check (list string)) "forbidden action changes nothing" ["other-first";"mine"] (order ());

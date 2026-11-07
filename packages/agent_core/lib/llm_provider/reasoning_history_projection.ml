@@ -424,7 +424,8 @@ let project
     Result.bind (validate_and_classify messages) (fun canonical ->
       match control_lowering with
       | Message_origin_lowering.Preserve_positions -> Ok canonical
-      | Initial_system_native_tools | Initial_system_tool_response_media | Turn_scoped_system_context ->
+      | Omit_historical_system_context | Initial_system_native_tools | Initial_system_tool_response_media
+      | Turn_scoped_system_context ->
         Result.bind
           (Message_origin_lowering.lower control_lowering messages
            |> Result.map_error (fun error -> Invalid_control_lowering error))

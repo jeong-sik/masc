@@ -1,8 +1,18 @@
 (** Request-only lowering of typed controls at provider boundaries.
     Canonical messages are never mutated. No source is inferred from text. *)
 
+(** How a request carries the context rows Agent Core stored. An Anthropic
+    request keeps history-retained context in place so its prefix only grows
+    (RFC-AC-041 section 3.2); every other provider sends only the current
+    context. *)
 type policy =
   | Preserve_positions
+    (** Anthropic without turn-scoped context: every message, historical
+        context included, at its position. *)
+  | Omit_historical_system_context
+    (** Every other provider's default: every message at its position except
+        [Historical_system_context], which an Anthropic turn left in the
+        history and this request does not send. *)
   | Turn_scoped_system_context
   | Initial_system_native_tools
   | Initial_system_tool_response_media

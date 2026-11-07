@@ -2668,13 +2668,13 @@ let test_gate_mode_change_json_separates_saved_mode_from_recovery () =
     }
   in
   let json recovery =
-    Server_routes_http_routes_dashboard.For_testing.gate_mode_change_json
+    Server_routes_http_routes_keeper_gate.For_testing.gate_mode_change_json
       change
       recovery
   in
   let completed =
     json
-      (Server_routes_http_routes_dashboard.For_testing.Recovery_completed
+      (Server_routes_http_routes_keeper_gate.For_testing.Recovery_completed
          { Masc.Keeper_gate.started_ids = [ "approval-1" ]
          ; queued = 1
          ; failures = []
@@ -2691,7 +2691,7 @@ let test_gate_mode_change_json_separates_saved_mode_from_recovery () =
     (completed |> member "recovery_failure_count" |> to_int);
   let partial =
     json
-      (Server_routes_http_routes_dashboard.For_testing.Recovery_completed
+      (Server_routes_http_routes_keeper_gate.For_testing.Recovery_completed
          { Masc.Keeper_gate.started_ids = [ "approval-2" ]
          ; queued = 1
          ; failures =
@@ -2743,7 +2743,7 @@ let test_gate_mode_change_json_separates_saved_mode_from_recovery () =
     (completed |> member "recovery_blockers" |> to_list |> List.length);
   let failed =
     json
-      (Server_routes_http_routes_dashboard.For_testing.Recovery_failed
+      (Server_routes_http_routes_keeper_gate.For_testing.Recovery_failed
          "judge worker unavailable")
   in
   check string "failed status" "failed"
@@ -2753,7 +2753,7 @@ let test_gate_mode_change_json_separates_saved_mode_from_recovery () =
   check int "failed started" 0 (failed |> member "started" |> to_int);
   check int "failed queued" 0 (failed |> member "queued" |> to_int);
   let not_requested =
-    json Server_routes_http_routes_dashboard.For_testing.Recovery_not_requested
+    json Server_routes_http_routes_keeper_gate.For_testing.Recovery_not_requested
   in
   check string "not requested status" "not_requested"
     (not_requested |> member "recovery_status" |> to_string);

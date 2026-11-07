@@ -1,7 +1,7 @@
 (** Server_activity_http — HTTP entry points for the activity
-    graph (events / graph / swimlane).
+    graph (events / graph).
 
-    Three JSON-bodied dispatchers (events / graph / swimlane) +
+    Two JSON-bodied dispatchers (events / graph) +
     one helper ({!parse_since_ms}) for [since=...] query params. *)
 
 (** {1 Capability injection} *)
@@ -39,14 +39,14 @@ val slice_default_events_to_limit :
 
 (** {1 JSON dispatchers}
 
-    All three take [~deps ~state request] and return a
+    Both take [~deps ~state request] and return a
     {!Yojson.Safe.t} body.  Query-param contracts:
 
     - [kinds] / [kind]: comma-separated event-kind filter (both
       accepted; results unioned + deduped).
     - [after_seq] (events only): integer floor, defaults to [0].
     - [limit]: per-handler clamp (see each function's contract).
-    - [since=Xm|Xh|Xd] (graph / swimlane only): relative window
+    - [since=Xm|Xh|Xd] (graph only): relative window
       in minutes / hours / days; missing or unparseable -> no
       since filter. *)
 
@@ -69,13 +69,3 @@ val graph_http_json :
     the requested [(kinds, limit, timeline_limit, since_ms)].
     Limit clamps: main [\[50, 2000\]] (default 500), timeline
     [\[10, 200\]] (default 80). *)
-
-val swimlane_http_json :
-  deps:deps ->
-  state:Mcp_server.server_state ->
-  Httpun.Request.t ->
-  Yojson.Safe.t
-(** [swimlane_http_json] returns
-    {!Activity_graph.agent_spans_json} for the requested
-    [(limit, since_ms)].  Limit clamp: [\[1, 2000\]] (default
-    500). *)

@@ -160,39 +160,3 @@ let graph_http_json ~deps ~state request =
       in
       Activity_graph.graph_json (Mcp_server.workspace_config state) ~kinds ~limit
         ~timeline_limit ?since_ms ())
-
-let swimlane_http_json ~deps ~state request =
-
-  let limit =
-    deps.int_query_param request "limit" ~default:500
-    |> Server_utils.clamp ~min_v:1 ~max_v:2000
-  in
-  let since_raw =
-    deps.query_param request "since" |> Option.value ~default:""
-  in
-  (* RFC-0201 Step 3.  Snapshot shape: [limit=500], [since_raw=""]
-     — exact match required (aggregated result not sliceable). *)
-  let is_default_query = limit = 500 && since_raw = "" in
-  let snapshot_hit =
-    if is_default_query then
-      match Dashboard_snapshot.current () with
-      | Some snap when snap.activity_swimlane_default <> `Null ->
-        Some snap.activity_swimlane_default
-      | _ -> None
-    else None
-  in
-  match snapshot_hit with
-  | Some json -> json
-  | None ->
-    (* RFC-0201 Step 5 — cache wrap retired (see events_http_json). *)
-    Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-      let since_ms =
-        match parse_since_ms since_raw with
-        | Some delta_ms ->
-            let now_ms = int_of_float (Time_compat.now () *. 1000.0) in
-            Some (now_ms - delta_ms)
-        | None -> None
-      in
-      Activity_graph.agent_spans_json (Mcp_server.workspace_config state) ~limit
-        ?since_ms ())
-

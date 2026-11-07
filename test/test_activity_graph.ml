@@ -697,25 +697,6 @@ let emit_n config n =
 
 (* Strips the wall-clock [generated_at_iso] field so two [json_response]
    calls made moments apart can be compared for structural equality. *)
-(* An empty swimlane reports [time_range] as now..now
-   (activity_graph.ml:1280), so two calls over the same events differ by
-   however long apart they ran -- 3 ms in the run that sent this here.
-
-   Only the case whose fixture opens no span needs this. The case above it
-   emits task.claimed and task.done, so its range is derived from those
-   events and comparing it is worth something; it keeps comparing it. Here
-   the range carries nothing but the clock, and [spans] and [window] stay
-   compared either way. *)
-let strip_swimlane_time_range json =
-  match json with
-  | `Assoc fields ->
-    `Assoc
-      (List.map
-         (fun (k, v) -> if String.equal k "time_range" then (k, `Null) else (k, v))
-         fields)
-  | other -> other
-;;
-
 let strip_generated_at_iso json =
   match json with
   | `Assoc fields ->
@@ -1081,7 +1062,6 @@ let test_default_projections_no_longer_build_the_aggregate () =
       emit_n config 10;
       ignore (Activity_graph.json_response config ~after_seq:0 ~limit:1000 ());
       ignore (Activity_graph.graph_json config ~limit:500 ~timeline_limit:80 ());
-      ignore (Activity_graph.agent_spans_json config ~limit:500 ());
       ignore (Activity_graph.default_projections config);
       check int "unfiltered projections build no aggregate" 0
         (Activity_graph.For_testing.all_events_rebuild_count ());
@@ -1114,18 +1094,12 @@ let test_default_projections_single_pass_matches_individual_outputs () =
       let expected_graph =
         Activity_graph.graph_json config ~kinds:[] ~limit:500 ~timeline_limit:80 ()
       in
-      let expected_swimlane =
-        Activity_graph.agent_spans_json config ~limit:500 ()
-      in
       check string "events_default matches structurally"
         (Yojson.Safe.to_string (strip_generated_at_iso expected_events))
         (Yojson.Safe.to_string (strip_generated_at_iso single.events_default));
       check string "graph_default matches structurally"
         (Yojson.Safe.to_string (strip_generated_at_iso expected_graph))
         (Yojson.Safe.to_string (strip_generated_at_iso single.graph_default));
-      check string "swimlane_default matches structurally"
-        (Yojson.Safe.to_string expected_swimlane)
-        (Yojson.Safe.to_string single.swimlane_default);
       let nodes_len json =
         Yojson.Safe.Util.member "nodes" json
         |> Yojson.Safe.Util.to_list |> List.length
@@ -1137,14 +1111,7 @@ let test_default_projections_single_pass_matches_individual_outputs () =
         |> Yojson.Safe.Util.to_list |> List.length
       in
       check int "graph edges count matches" (edges_len expected_graph)
-        (edges_len single.graph_default);
-      let spans_len json =
-        Yojson.Safe.Util.member "spans" json
-        |> Yojson.Safe.Util.to_list |> List.length
-      in
-      check bool "spans are non-empty" true (spans_len expected_swimlane > 0);
-      check int "swimlane spans count matches" (spans_len expected_swimlane)
-        (spans_len single.swimlane_default))
+        (edges_len single.graph_default))
 
 let test_default_projections_single_pass_slices_tail_when_exceeding_500 () =
   with_config (fun config ->
@@ -1159,27 +1126,19 @@ let test_default_projections_single_pass_slices_tail_when_exceeding_500 () =
       let expected_graph =
         Activity_graph.graph_json config ~kinds:[] ~limit:500 ~timeline_limit:80 ()
       in
-      let expected_swimlane =
-        Activity_graph.agent_spans_json config ~limit:500 ()
-      in
       check string "events_default matches structurally"
         (Yojson.Safe.to_string (strip_generated_at_iso expected_events))
         (Yojson.Safe.to_string (strip_generated_at_iso single.events_default));
       check string "graph_default matches structurally"
         (Yojson.Safe.to_string (strip_generated_at_iso expected_graph))
         (Yojson.Safe.to_string (strip_generated_at_iso single.graph_default));
-      check string "swimlane_default matches structurally"
-        (Yojson.Safe.to_string (strip_swimlane_time_range expected_swimlane))
-        (Yojson.Safe.to_string (strip_swimlane_time_range single.swimlane_default));
       let count_from json =
         Yojson.Safe.Util.member "count" json |> Yojson.Safe.Util.to_int
       in
       check int "events count is 600" 600 (count_from single.events_default);
       (* [window_meta] emits [events_shown] (activity_graph.ml:874). Nothing in
-         lib or dashboard emits [events_analyzed], so this read got null and
-         [to_int] raised. The swimlane comparison above stopped the case
-         before reaching it until #34412, which is why a read of a field no
-         producer writes went unnoticed. *)
+         lib or dashboard emits [events_analyzed], so a read of that field
+         got null and [to_int] raised. *)
       let events_shown json =
         json
         |> Yojson.Safe.Util.member "window"

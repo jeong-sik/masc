@@ -1312,7 +1312,6 @@ let agent_spans_json config ?(limit = 500) ?since_ms () =
 type default_projections = {
   events_default : Yojson.Safe.t;
   graph_default : Yojson.Safe.t;
-  swimlane_default : Yojson.Safe.t;
 }
 
 let default_projections config : default_projections =
@@ -1331,10 +1330,7 @@ let default_projections config : default_projections =
     build_graph_json ~events:events_500 ~events_store_total:total ~limit:500
       ~timeline_limit:80 ~kinds:[] ()
   in
-  let swimlane_default =
-    build_agent_spans_json ~events:events_500 ~events_store_total:total ~limit:500
-  in
-  { events_default; graph_default; swimlane_default }
+  { events_default; graph_default }
 ;;
 
 module For_testing = struct

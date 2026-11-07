@@ -31,20 +31,20 @@ let candle_purchase = schema_of_name "keeper_candle_purchase"
 let candle_equip = schema_of_name "keeper_candle_equip"
 let candle_gift = schema_of_name "keeper_candle_gift"
 
-let dos_load = schema_of_name "masc_dos_load"
-let dos_meta = schema_of_name "masc_dos_meta"
-let dos_inventory = schema_of_name "masc_dos_inventory"
-let dos_eject = schema_of_name "masc_dos_eject"
-let dos_screen = schema_of_name "masc_dos_screen"
 let dos_step = schema_of_name "masc_dos_step"
 let dos_press = schema_of_name "masc_dos_press"
-let dos_click = schema_of_name "masc_dos_click"
 let dos_type = schema_of_name "masc_dos_type"
-let dos_peek = schema_of_name "masc_dos_peek"
 let play_room = schema_of_name "masc_play_room"
 let dos_pass = schema_of_name "masc_dos_pass"
-let dos_save = schema_of_name "masc_dos_save"
-let dos_restore = schema_of_name "masc_dos_restore"
+
+(* Every DOS tool's definition is read here, at module initialization, so a
+   tool added to [Machine_controller_contract.dos_tool] without its TOML
+   refuses the boot. Only the four the HTTP routes name keep a value. *)
+let () =
+  List.iter
+    (fun tool -> ignore (schema_of_name (Machine_controller_contract.dos_tool_name tool)))
+    Machine_controller_contract.all_of_dos_tool
+;;
 
 let lane_attach = schema_of_name "masc_lane_attach"
 let lane_declaration_read = schema_of_name "masc_lane_declaration_read"

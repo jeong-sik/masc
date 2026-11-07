@@ -70,6 +70,11 @@ let test_query_param_target () =
   check_opt "encoded space and bang" (Some "hello world!") (Masc.Server_utils.query_param req_encoded "q");
   check_opt "encoded plus" (Some "a+b") (Masc.Server_utils.query_param req_encoded "cat");
 
+  let req_plus_space = make_req "/search?q=hello+world&v=a;b&lim%69t=5#frag" in
+  check_opt "plus to space" (Some "hello world") (Masc.Server_utils.query_param req_plus_space "q");
+  check_opt "semicolon preserved" (Some "a;b") (Masc.Server_utils.query_param req_plus_space "v");
+  check_opt "encoded key" (Some "5") (Masc.Server_utils.query_param req_plus_space "limit");
+
   check_opt "from target direct" (Some "50") (Masc.Server_utils.query_param_from_target "/foo?limit=50" "limit")
 
 let test_typed_query_params () =

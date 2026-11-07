@@ -2,40 +2,61 @@
 (** Parse query param from request target *)
 let goal_tree_direct_read_header = "x-masc-goal-tree-read", "direct-v1"
 
+let plus_to_space s =
+  if String.contains s '+' then
+    String.map (function '+' -> ' ' | c -> c) s
+  else s
+
+let decode_query_component s =
+  Uri.pct_decode (plus_to_space s)
+
 let query_param_from_target target key =
   match String.index_opt target '?' with
   | None -> None
   | Some qpos ->
     let tlen = String.length target in
+    let end_pos =
+      match String.index_from_opt target (qpos + 1) '#' with
+      | Some hpos -> hpos
+      | None -> tlen
+    in
     let klen = String.length key in
     let rec scan pos =
-      if pos >= tlen then None
+      if pos >= end_pos then None
       else
         let next_delim =
           let rec find_delim i =
-            if i >= tlen then tlen
+            if i >= end_pos then end_pos
             else match String.unsafe_get target i with
-            | '&' | ';' -> i
+            | '&' -> i
             | _ -> find_delim (i + 1)
           in
           find_delim pos
         in
-        let key_match =
-          if pos + klen <= next_delim
-             && String.sub target pos klen = key
-             && (pos + klen = next_delim || String.unsafe_get target (pos + klen) = '=')
-          then true
-          else false
+        let eq_idx =
+          let rec find_eq i =
+            if i >= next_delim then None
+            else if String.unsafe_get target i = '=' then Some i
+            else find_eq (i + 1)
+          in
+          find_eq pos
         in
-        if key_match then begin
-          let val_start = pos + klen in
-          if val_start = next_delim then Some ""
+        let raw_klen = match eq_idx with Some i -> i - pos | None -> next_delim - pos in
+        let key_match =
+          if raw_klen = klen && String.sub target pos klen = key then true
           else
-            let v_start = val_start + 1 in
+            let raw_key = String.sub target pos raw_klen in
+            String.equal (decode_query_component raw_key) key
+        in
+        if key_match then
+          match eq_idx with
+          | None -> Some ""
+          | Some eq ->
+            let v_start = eq + 1 in
             let v_len = next_delim - v_start in
             let raw_val = String.sub target v_start v_len in
-            Some (Uri.pct_decode raw_val)
-        end else
+            Some (decode_query_component raw_val)
+        else
           scan (next_delim + 1)
     in
     scan (qpos + 1)

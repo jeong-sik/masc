@@ -39,7 +39,8 @@ val child_environment : string array -> string array
 (** The entries of an environment that a Vibe child may see: the names on a
     fixed list (home, user, locale, terminal, temp dirs, TLS certificates,
     proxies, XDG dirs). [MISTRAL_API_KEY] and every other provider or
-    [VIBE_*] variable are not on it. *)
+    [VIBE_*] variable are not on it. A proxy URL passes as it is, user info
+    included. *)
 
 val argv : config -> output_dir:string -> prompt_file:string -> string list
 (** The command line for one call. *)

@@ -30,16 +30,9 @@ val minted_on : string -> (string, string) result
 val observe_record_owner : base_path:string -> keepers_dir:string ->
   Lane_addon_tool_request_owner.retained -> (owner, string) result
 
-type destination = {
-  installation_id : string;
-  package_id : string;
-  tool : string;
-  source_revision : string;
-  configuration_revision : string;
-}
+type destination = Lane_addon_captured_destination.t
 val package_id : string
 val tool : string
-val destination_json : destination -> Yojson.Safe.t
 val destination_of_json : Yojson.Safe.t -> (destination, string) result
 (** Field-exact. Requires a configured installation and this tool's package and tool. *)
 type t

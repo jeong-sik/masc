@@ -33,13 +33,7 @@ val keeper_id : owner -> string
 val base_path : owner -> string
 val keepers_dir : owner -> string
 
-type destination = {
-  installation_id : string;
-  package_id : string;
-  tool : string;
-  source_revision : string;
-  configuration_revision : string;
-}
+type destination = Lane_addon_captured_destination.t
 type t
 val scope : owner -> string
 val is_scope : string -> bool

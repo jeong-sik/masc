@@ -5,6 +5,7 @@ module Current = Keeper_memory_os_current
 module Judgment = Keeper_memory_admission_judgment
 module Types = Keeper_memory_os_types
 module Owner = Lane_addon_tool_request_owner
+module Destination = Lane_addon_captured_destination
 let ( let* ) = Result.bind
 let ( let+ ) result f = Result.map f result
 
@@ -113,7 +114,7 @@ let observe_owner ~base_path ~keepers_dir ~keeper_id =
   if schema<>1 || epoch<>String.trim epoch then Error "Invalid original Memory incarnation epoch"
   else Ok {workspace;keepers;keeper_id=canonical_keeper;epoch;queue_generation}
 
-type destination = {installation_id:string;package_id:string;tool:string;source_revision:string;configuration_revision:string}
+type destination = Destination.t
 let owner_hash owner = scope_hash (scope_identity owner)
 let scope_prefix="keeper-librarian-execution-"
 let is_scope value=String.starts_with ~prefix:scope_prefix value
@@ -146,17 +147,7 @@ let observe_record_owner ~base_path ~keepers_dir (retained:Owner.retained) =
     then Ok () else Error "Original request has another physical execution scope" in
   let* owner=observe_owner ~base_path ~keepers_dir ~keeper_id:original_owner.keeper_id in
   let* ()=owner_matches_json owner owner_json in Ok owner
-let destination_json destination = `Assoc ["installation_id",`String destination.installation_id;
-  "package_id",`String destination.package_id;"tool",`String destination.tool;
-  "source_revision",`String destination.source_revision;"configuration_revision",`String destination.configuration_revision]
-let destination_of_json json =
-  let* fields=object_fields ["installation_id";"package_id";"tool";"source_revision";"configuration_revision"] json in
-  let* installation_id=nonblank (value "installation_id" fields) in
-  let* package_id=nonblank (value "package_id" fields) in
-  let* tool=nonblank (value "tool" fields) in
-  let* source_revision=nonblank (value "source_revision" fields) in
-  let+ configuration_revision=nonblank (value "configuration_revision" fields) in
-  {installation_id;package_id;tool;source_revision;configuration_revision}
+let destination_of_json = Destination.of_json ~context:"Original Librarian capture destination"
 
 let input_json = Keeper_librarian_input_capture.to_json
 let check_pending_input (input:L.input) =
@@ -278,7 +269,7 @@ let expected_revision capture=capture.revision
 let now capture=capture.parsing_now
 let to_json capture = `Assoc ["schema",`Int 2;"kind",`String "execution";
   "request_id",`String capture.id;"parent_part_id",`String capture.parent;"owner",owner_to_json capture.owner;
-  "destination",destination_json capture.destination;
+  "destination",Destination.to_json capture.destination;
   "candidate_ids",`List (List.map candidate_json (Queue.candidate_ids capture.original_batch));
   "batch_text",`String capture.batch_text;"input_text",`String capture.input_text;
   "expected_revision",optional (fun revision -> `Int revision) capture.revision;
@@ -317,7 +308,7 @@ let validate capture =
 let create ~request_id ~parent_part_id ~owner ~destination ~batch ~input ~expected_revision ~now
     ~retirement ~preparation =
   let* ()=check_pending_input input in
-  let* destination=destination_of_json (destination_json destination) in
+  let* destination=destination_of_json (Destination.to_json destination) in
   let batch_text=Yojson.Safe.to_string (Queue.batch_to_json batch)
   and input_text=Yojson.Safe.to_string (input_json input)
   and retirement_text=Yojson.Safe.to_string (retirement_json retirement) in

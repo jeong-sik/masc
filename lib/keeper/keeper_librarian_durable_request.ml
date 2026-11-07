@@ -2,6 +2,7 @@ module Source = Keeper_librarian_durable_capture
 module Memory = Keeper_memory_os_current
 module Runtime = Keeper_librarian_runtime
 module Owner = Lane_addon_tool_request_owner
+module Destination = Lane_addon_captured_destination
 module Exact = Lane_addon_exact
 module Progress = Lane_addon_request_progress
 module Final = Keeper_librarian_original_final
@@ -114,26 +115,16 @@ let minted_on id =
   let+ time_ms=Random_id.uuid_v7_time_ms nonce in
   Jsonl_writer.day_key ~ts:(Int64.to_float time_ms /. 1000.)
 
-type destination = {installation_id:string;package_id:string;tool:string;
-  source_revision:string;configuration_revision:string}
+type destination = Destination.t
 let package_id = Keeper_librarian_addon.package_id
 let tool = Keeper_librarian_addon.tool Keeper_librarian_addon.Durable
-let destination_json (destination:destination) = `Assoc [
-  "installation_id",`String destination.installation_id;"package_id",`String destination.package_id;
-  "tool",`String destination.tool;"source_revision",`String destination.source_revision;
-  "configuration_revision",`String destination.configuration_revision]
 let destination_of_json json =
-  let* f=fields ["installation_id";"package_id";"tool";"source_revision";"configuration_revision"] json in
-  let* installation_id=nonblank (value "installation_id" f) in
-  let* actual_package=nonblank (value "package_id" f) in
-  let* actual_tool=nonblank (value "tool" f) in
-  let* source_revision=nonblank (value "source_revision" f) in
-  let* configuration_revision=nonblank (value "configuration_revision" f) in
-  let* installation=Owner.installation_of_id installation_id in
+  let* destination=Destination.of_json ~context:"Original history request destination" json in
+  let* installation=Owner.installation_of_id destination.installation_id in
   let* ()=match installation with Owner.Configuration _ -> Ok ()
     | Manual _ -> Error "Original history requires a configured installation" in
-  let+ ()=require (actual_package=package_id && actual_tool=tool) "Original history package/tool differs" in
-  {installation_id;package_id=actual_package;tool=actual_tool;source_revision;configuration_revision}
+  let+ ()=require (destination.package_id=package_id && destination.tool=tool) "Original history package/tool differs" in
+  destination
 let preparation_json = Question.to_json
 let preparation_of_json ~source_input json =
   let* ({Question.parsing_now;policy;rule_prompt;prompt;output_schema;_} as frozen)=Question.of_json json in
@@ -169,7 +160,7 @@ let source capture=capture.source
 let preparation capture=capture.preparation
 let to_json capture = `Assoc ["schema",`Int 2;"kind",`String "completed-history-execution";
   "request_id",`String capture.id;"owner",owner_to_json capture.owner;
-  "destination",destination_json capture.destination;"source_text",`String capture.source_text;
+  "destination",Destination.to_json capture.destination;"source_text",`String capture.source_text;
   "predecessor",predecessor_json capture.predecessor;
   "preparation",preparation_json capture.preparation]
 let header_fields json = fields ["schema";"kind";"request_id";"owner";"destination";"source_text";"predecessor";"preparation"] json
@@ -198,7 +189,7 @@ let confirm_source_root capture =
   require (actual=capture.owner.runtime)
     "Original history source came from another physical runtime/output root"
 let create ?predecessor ~request_id ~owner ~destination ~source ~(preparation:Runtime.durable_preparation) () =
-  let* destination=destination_of_json (destination_json destination) in
+  let* destination=destination_of_json (Destination.to_json destination) in
   let source_text=Yojson.Safe.to_string (Source.to_json source) in
   let* source=Source.of_json (Source.to_json source) |> Result.map_error Source.error_to_string in
   let* ()=require (preparation.source_input=Source.input source)

@@ -12,6 +12,11 @@ type outcome =
   | Closed
   | Stalled
 
+let target_path target =
+  match String.index_opt target '?' with
+  | Some idx -> String.sub target 0 idx
+  | None -> target
+
 let respond ~clock ~stalled_after_s ?flush_headers_immediately reqd response =
   let closed, resolve_closed = Eio.Promise.create () in
   { writer = Httpun.Reqd.respond_with_streaming ?flush_headers_immediately reqd response
@@ -19,7 +24,7 @@ let respond ~clock ~stalled_after_s ?flush_headers_immediately reqd response =
   ; resolve_closed
   ; stall = (fun () -> Eio.Time.sleep clock stalled_after_s)
   ; stalled_after_s
-  ; path = Uri.path (Uri.of_string (Httpun.Reqd.request reqd).target)
+  ; path = target_path (Httpun.Reqd.request reqd).target
   }
 ;;
 

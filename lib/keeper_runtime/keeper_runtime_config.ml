@@ -620,6 +620,14 @@ let first_rejecting_reader () =
          Some (toml_key, message))
     Keeper_runtime_setting_registry.toml_settings
 
+(* Serializes [load_and_apply_document]'s snapshot→apply→validate→rollback
+   section: two concurrent reloads would otherwise interleave their applies
+   and a snapshot-based rollback could clobber the other's writes.  The
+   sequence has no suspension points, so cross-domain readers can observe
+   applied-but-rolled-back values only in the tiny preemptive window; one
+   reload at a time closes the writer-vs-writer race completely. *)
+let apply_sequence_mutex = Eio.Mutex.create ()
+
 let load_and_apply_document ~base_path =
   let path = toml_path ~base_path in
   if not (Sys.file_exists path) then
@@ -641,48 +649,49 @@ let load_and_apply_document ~base_path =
              ; message = Printf.sprintf "%s: %s: %s" path issue.key issue.detail
              }
          | None ->
-           let stored_before =
-             List.map
-               (fun (_, env_name) -> env_name, Config_boot_overrides.get_opt env_name)
-               key_to_env
-           in
-           let count =
-             List.fold_left
-               (fun acc pair -> if apply_one doc pair then acc + 1 else acc)
-               0
-               key_to_env
-           in
-           (* The readers see the file's values only once the store holds them. *)
-           (match first_rejecting_reader () with
-            | Some (toml_key, message) ->
-              (* A file that did not load fed nothing: the store, the shadow
-                 registry and the applied time stay as the other failures
-                 above leave them. *)
-              List.iter
-                (fun (env_name, stored) ->
-                   match stored with
-                   | Some value -> Config_boot_overrides.set env_name value
-                   | None -> Config_boot_overrides.clear env_name)
-                stored_before;
-              Result.Error
-                { kind = Validate
-                ; message = Printf.sprintf "%s: %s: %s" path toml_key message
-                }
-            | None ->
-              Hashtbl.clear toml_shadow;
-              List.iter
-                (fun (toml_key, env_name) ->
-                   (* Populate shadow registry for every known key that has a
-                      TOML value, regardless of whether env preempts it. *)
-                   match List.assoc_opt toml_key doc with
-                   | None -> ()
-                   | Some v ->
-                     (match value_to_string v with
-                      | None -> ()
-                      | Some _ -> Hashtbl.replace toml_shadow env_name v))
-                key_to_env;
-              Atomic.set last_applied_at (Some (Time_compat.now ()));
-              Ok count))
+           Eio_guard.with_mutex apply_sequence_mutex (fun () ->
+             let stored_before =
+               List.map
+                 (fun (_, env_name) -> env_name, Config_boot_overrides.get_opt env_name)
+                 key_to_env
+             in
+             let count =
+               List.fold_left
+                 (fun acc pair -> if apply_one doc pair then acc + 1 else acc)
+                 0
+                 key_to_env
+             in
+             (* The readers see the file's values only once the store holds them. *)
+             (match first_rejecting_reader () with
+              | Some (toml_key, message) ->
+                (* A file that did not load fed nothing: the store, the shadow
+                   registry and the applied time stay as the other failures
+                   above leave them. *)
+                List.iter
+                  (fun (env_name, stored) ->
+                     match stored with
+                     | Some value -> Config_boot_overrides.set env_name value
+                     | None -> Config_boot_overrides.clear env_name)
+                  stored_before;
+                Result.Error
+                  { kind = Validate
+                  ; message = Printf.sprintf "%s: %s: %s" path toml_key message
+                  }
+              | None ->
+                Hashtbl.clear toml_shadow;
+                List.iter
+                  (fun (toml_key, env_name) ->
+                     (* Populate shadow registry for every known key that has a
+                        TOML value, regardless of whether env preempts it. *)
+                     match List.assoc_opt toml_key doc with
+                     | None -> ()
+                     | Some v ->
+                       (match value_to_string v with
+                        | None -> ()
+                        | Some _ -> Hashtbl.replace toml_shadow env_name v))
+                  key_to_env;
+                Atomic.set last_applied_at (Some (Time_compat.now ()));
+                Ok count)))
 
 let load_and_apply ~base_path : (int, load_failure) result =
   (* First, so the validation below and every later read of these names leave

@@ -588,6 +588,7 @@ measured-home RFC 의 Dashboard 에 다음 세 줄만 더한다.
 - 값은 Usage › Calls 가 읽는 `tool-metrics/series` 와 같은 조회다. Dashboard 는 Usage 의 `w` 창과 상관없이 24시간 칸을 따로 읽는다. 그래서 `w` 가 1일일 때만 두 화면의 합계가 같고, 7·14일이면 Usage 가 더 긴 창을 합친다. 줄 앞의 `24h` 가 이 차이를 보여 준다. 서버는 바꾸지 않는다.
 - 읽기 전·읽는 중·읽기 실패·호출 0건은 숫자 대신 글(`reading…`, `unavailable`, `no calls`)로 보인다. 0 으로 채우지 않는다.
 - 줄을 누르면 Usage › Calls 로 간다.
+- 첫 층(#49692)은 줄과 읽기까지다. Calls 와 Dashboard 는 읽어 둔 시리즈 하나(`state.tool_series`)를 나눠 쓰고 읽을 창은 그린 화면이 정한다(`tool_series_days`: Calls 는 `w` 값, Dashboard 는 1일). 두 화면 모두 시리즈가 필요해서 화면을 옮겨도 읽기를 시키는 surface-needs 차이가 생기지 않는다. 그래서 읽어 둔 창이 지금 화면의 창과 다르면 읽어 둔 것을 버리고 한 번 다시 읽는다(`take_tool_series_due`). 누르기는 `Press_*` 대상을 새로 만들어야 해서 다음 층이다.
 - 턴 수 스파크라인과 14일 완료 Task 막대는 `usage/series`(S5-2)가 생긴 뒤 같은 자리에 더한다.
 
 지금 Dashboard 에서 최근 24시간의 활동을 세는 줄은 `Work: N currently done in the last 24h` 하나뿐이다. 120x35 에서는 마지막 카드와 푸터 사이 16줄이 비어 있고 80x24 에서는 5줄이 비어 있다(2026-11-07, main `995fad9dd66` 의 증명 빌드, Goal·Task 40개가 든 고정 데이터). 한 줄은 80x24 의 빈 줄 안에 들어간다.

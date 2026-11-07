@@ -591,6 +591,58 @@ let test_the_public_read_list_opens_no_credential_route () =
   in
   check (list string) "credential routes the list opens" [] opened
 
+(* Strict auth opens a request without a credential only when the route it
+   reaches asks for none: [Always_public] or [Public_read Open_when_strict].
+   The open paths are spelled as clients send them, so renaming a shared
+   constant cannot move both sides. The browser <audio> element cannot send a
+   bearer token, so the voice clip's file name is its capability, and a shared
+   artifact link carries its id. The closed paths are guarded on HTTP/1; if one
+   opened under strict auth, the H1/H2 parity tests would compare two open
+   doors and prove nothing. *)
+let test_strict_auth_opens_a_path_by_its_kind () =
+  let module Router = Masc.Http_server_eio.Router in
+  let captured = ref None in
+  with_gateway ~on_routes:(fun routes -> captured := Some routes) ~make_routes:production
+    (fun ~player:_ ~reader:_ _client -> ());
+  let routes = match !captured with Some routes -> routes | None -> fail "no routes" in
+  let opens_when_strict path =
+    match Router.resolve routes (Httpun.Request.create `GET path) with
+    | `Matched (route : Router.route) ->
+      (match route.access with
+       | Always_public | Public_read Open_when_strict -> true
+       | Public_read Credential_when_strict | Read_auth | Permission _ | Token_permission _
+       | Private_token_permission _ | Tool _ | Tool_observation _ | Tool_actor _
+       | Self_authenticated _ -> false)
+    | `Method_not_allowed | `Not_found -> false
+  in
+  let artifact = "artifact-" ^ String.make 32 'a' in
+  let sha256 = String.make 64 'a' in
+  List.iter
+    (fun (path, expected) -> check bool path expected (opens_when_strict path))
+    [ "/api/v1/voice/audio/abc123", true
+    ; "/api/v1/published-artifacts/" ^ artifact, true
+    ; "/play", true
+    ; "/play/agent.md", true
+    ; "/play/x", false
+    ; "/api/v1/voice/config", false
+    ; "/api/v1/published-artifacts", false
+    ; "/api/v1/published-artifact-checks", false
+    ; "/api/v1/artifacts/" ^ sha256, false
+    ; "/api/v1/artifacts-evil/" ^ sha256, false
+    ; "/api/v1/artifact-bytes/" ^ sha256, false
+    ; "/graphql", false
+    ; "/api/v1/dashboard/workspace", false
+    ; "/api/v1/status", false
+    ; "/api/v1/openapi.json", false
+    ; "/api/v1/gate/connector/names", false
+    ; "/api/v1/board/curation", false
+    ; "/api/v1/board/hearths", false
+    ; "/api/v1/board/sub-boards", false
+    ; "/api/v1/board/sub-boards/some-board", false
+    ; "/api/v1/board/karma/ledger", false
+    ; "/api/v1/karma", false
+    ]
+
 let () =
   run "H2 route gate"
     [ ( "gate"
@@ -609,5 +661,7 @@ let () =
         ; test_case "bound Goal timeout answers while read pool is busy" `Quick test_bound_goal_timeout_answers_while_read_pool_is_busy
         ; test_case "the public-read list opens no credential route" `Quick
             test_the_public_read_list_opens_no_credential_route
+        ; test_case "strict auth opens a path by its kind" `Quick
+            test_strict_auth_opens_a_path_by_its_kind
         ] )
     ]

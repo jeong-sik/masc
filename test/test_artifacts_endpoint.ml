@@ -46,22 +46,6 @@ let test_valid_sha256 () =
   Alcotest.(check bool) "empty" false (A.is_valid_sha256 "")
 
 let test_artifact_bytes_require_operator_auth () =
-  let sha256 = String.make 64 'a' in
-  Alcotest.(check bool)
-    "artifact route is not public"
-    false
-    (Server_auth.is_public_read_path
-       ("/api/v1/artifacts/" ^ sha256));
-  Alcotest.(check bool)
-    "prefix-confusable route is not public"
-    false
-    (Server_auth.is_public_read_path
-       ("/api/v1/artifacts-evil/" ^ sha256));
-  Alcotest.(check bool)
-    "raw byte route is not public"
-    false
-    (Server_auth.is_public_read_path
-       ("/api/v1/artifact-bytes/" ^ sha256));
   Alcotest.(check bool)
     "route authority is CanAdmin"
     true

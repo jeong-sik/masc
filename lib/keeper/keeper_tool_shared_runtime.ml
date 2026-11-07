@@ -311,7 +311,33 @@ let shell_readonly_limit args =
   max 1 (min 200 (Safe_ops.json_int ~default:40 "limit" args))
 ;;
 
-let lines_to_json ?(limit = max_int) ?(max_bytes = 32_000) (text : string) : Yojson.Safe.t
+let search_result_max_bytes = 32_000
+
+(* Longest one returned line may be before it is cut. The byte budget below
+   keeps the first line whatever its size, so a file stored as one line (a
+   minified JSON dump) came back whole. From 2026-11-06T09:52Z to
+   11-07T09:52Z, 67 Grep calls each carried one 285 KB matched line: 21.3 MB,
+   13.0% of the day's tool result bytes, and every result was above the
+   65,536-byte inline ceiling of every lane, so the Keeper held a blob marker.
+   The other 4,980 matched lines in that window: 4,967 were at most 2,000
+   bytes. See docs/evidence/grep-long-lines-2026-11. *)
+let default_max_line_bytes = 2_000
+
+let cut_to_bytes ~max_bytes text =
+  let length = String.length text in
+  if length <= max_bytes
+  then text
+  else (
+    let kept = String_util.utf8_prefix ~max_bytes text in
+    Printf.sprintf "%s...[cut: %d of %d bytes kept]" kept (String.length kept) length)
+;;
+
+let lines_to_json
+      ?(limit = max_int)
+      ?(max_bytes = search_result_max_bytes)
+      ?(max_line_bytes = default_max_line_bytes)
+      (text : string)
+  : Yojson.Safe.t
   =
   let all_nonempty =
     String.split_on_char '\n' text
@@ -322,6 +348,12 @@ let lines_to_json ?(limit = max_int) ?(max_bytes = 32_000) (text : string) : Yoj
     if total > limit
     then take limit all_nonempty, total - limit
     else all_nonempty, 0
+  in
+  (* A line longer than the whole budget would still pass as the first one,
+     so each line is cut to at most the budget before it is counted. *)
+  let max_line_bytes = min max_line_bytes max_bytes in
+  let truncated_by_limit =
+    List.map (cut_to_bytes ~max_bytes:max_line_bytes) truncated_by_limit
   in
   (* Byte-budget: accumulate lines until max_bytes is reached.
      This prevents 200 long lines from producing 500KB+ JSON arrays

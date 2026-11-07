@@ -108,14 +108,14 @@ let test_actual_view_inventory_roundtrip () =
   let base_path = Filename.temp_dir "test-tui-decode-wm-" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
     (* 1. Missing ledger *)
-    let missing_json = View.inventory ~now:1794037335.0 ~base_path |> require in
+    let missing_json = View.inventory ~now:1794037335.0 ~base_path () |> require in
     (match Decode.decode_inventory missing_json with
      | Ok (Decode.Missing { generated_at }) ->
        Alcotest.(check (float 0.001)) "missing generated_at matches" 1794037335.0 generated_at
      | _ -> Alcotest.fail "failed to decode actual View.inventory missing output");
     (* 2. Empty saved ledger *)
     Ledger.save ~base_path Ledger.empty |> require;
-    let available_json = View.inventory ~now:1794037335.0 ~base_path |> require in
+    let available_json = View.inventory ~now:1794037335.0 ~base_path () |> require in
     match Decode.decode_inventory available_json with
     | Ok (Decode.Available inv) ->
       Alcotest.(check int) "claims 0" 0 inv.claim_count;

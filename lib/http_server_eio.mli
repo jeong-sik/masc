@@ -470,6 +470,12 @@ module Router : sig
       :  (state -> Httpun.Request.t -> Httpun.Reqd.t -> unit)
       -> request_handler
 
+    (** [with_public_read] without the strict-auth check: the route stays open
+        when strict auth is on. *)
+    val with_public_read_open_when_strict
+      :  (state -> Httpun.Request.t -> Httpun.Reqd.t -> unit)
+      -> request_handler
+
     val with_read_auth
       :  (state -> Httpun.Request.t -> Httpun.Reqd.t -> unit)
       -> request_handler
@@ -532,12 +538,22 @@ module Router : sig
     type _ auth =
       | Always_public : request_handler auth
       | Public_read : state_handler auth
-      | Public_read_on_canonical_host : { port : int } -> state_handler auth
-          (** [Public_read] behind the canonical-host redirect: a request for a
+          (** Asks for a read credential when strict auth is on
+              ([Route_access.Credential_when_strict]). *)
+      | Public_read_open_when_strict : state_handler auth
+          (** Stays open when strict auth is on
+              ([Route_access.Open_when_strict]). *)
+      | Public_read_on_canonical_host :
+          { port : int
+          ; when_strict : Route_access.strict_reading
+          }
+          -> state_handler auth
+          (** A public read behind the canonical-host redirect: a request for a
               loopback alias is redirected before the server's readiness, the
-              workspace precondition or the credential is looked at. The route
-              records the same access as [Public_read]; only the order of the
-              two checks differs. *)
+              workspace precondition or the credential is looked at.
+              [when_strict] picks the public read as the two kinds above do,
+              and the route records the same access; only the order of the two
+              checks differs. *)
       | Read_auth : state_handler auth
       | Permission : Masc_domain.permission -> state_handler auth
       | Token_permission : Masc_domain.permission -> token_handler auth

@@ -35,12 +35,23 @@ let kinds : (string * (Router.t -> Router.t) * Route_access.t) list =
   ; ( "public_read"
     , Server_route.get Server_route.Public_read "/x" state_handler
     , Route_access.Public_read Route_access.Credential_when_strict )
+  ; ( "public_read_open_when_strict"
+    , Server_route.get Server_route.Public_read_open_when_strict "/x" state_handler
+    , Route_access.Public_read Route_access.Open_when_strict )
   ; ( "public_read_on_canonical_host"
     , Server_route.get
-        (Server_route.Public_read_on_canonical_host { port = 8935 })
+        (Server_route.Public_read_on_canonical_host
+           { port = 8935; when_strict = Route_access.Credential_when_strict })
         "/x"
         state_handler
     , Route_access.Public_read Route_access.Credential_when_strict )
+  ; ( "public_read_on_canonical_host_open_when_strict"
+    , Server_route.get
+        (Server_route.Public_read_on_canonical_host
+           { port = 8935; when_strict = Route_access.Open_when_strict })
+        "/x"
+        state_handler
+    , Route_access.Public_read Route_access.Open_when_strict )
   ; ( "read_auth"
     , Server_route.get Server_route.Read_auth "/x" state_handler
     , Route_access.Read_auth )
@@ -339,10 +350,25 @@ let dispatch_kinds =
           public_path
           (Server_auth.with_public_read (on_state "public_read_on_public_path"))
           r )
+  ; ( "public_read_open_when_strict"
+    , (fun r ->
+        Server_route.get
+          Server_route.Public_read_open_when_strict
+          "/public_read_open_when_strict"
+          (on_state "public_read_open_when_strict")
+          r)
+    , fun r ->
+        Server_route.get
+          Server_route.Always_public
+          "/public_read_open_when_strict"
+          (Server_auth.with_public_read_open_when_strict
+             (on_state "public_read_open_when_strict"))
+          r )
   ; ( "public_read_on_canonical_host"
     , (fun r ->
         Server_route.get
-          (Server_route.Public_read_on_canonical_host { port = 8935 })
+          (Server_route.Public_read_on_canonical_host
+             { port = 8935; when_strict = Route_access.Credential_when_strict })
           "/public_read_on_canonical_host"
           (on_state "public_read_on_canonical_host")
           r)
@@ -359,6 +385,26 @@ let dispatch_kinds =
                     (on_state "public_read_on_canonical_host")
                     req
                     reqd)
+               request
+               reqd)
+          r )
+  ; ( "public_read_on_canonical_host_open_when_strict"
+    , (fun r ->
+        Server_route.get
+          (Server_route.Public_read_on_canonical_host
+             { port = 8935; when_strict = Route_access.Open_when_strict })
+          "/public_read_on_canonical_host_open_when_strict"
+          (on_state "public_read_on_canonical_host_open_when_strict")
+          r)
+    , fun r ->
+        Server_route.get
+          Server_route.Always_public
+          "/public_read_on_canonical_host_open_when_strict"
+          (fun request reqd ->
+             Server_canonical_host.with_canonical_loopback_host
+               ~port:8935
+               (Server_auth.with_public_read_open_when_strict
+                  (on_state "public_read_on_canonical_host_open_when_strict"))
                request
                reqd)
           r )
@@ -545,14 +591,18 @@ let with_authentication ~strict f =
 
 (* The status each kind answers with no credential, with a Worker token and with
    an Admin token. Both routers must agree, and these are what they agree on.
-   Only [Public_read] off the public list changes with strict auth: strict
-   makes it ask for a read credential, as [Read_auth] does. *)
+   Only a public read that asks for a credential under strict auth and is off
+   the public list changes with strict auth: strict makes it ask for a read
+   credential, as [Read_auth] does. The kinds that stay open when strict answer
+   200 either way. *)
 let expected_status ~strict =
   [ "always_public", (200, 200, 200)
   ; "self_authenticated", (200, 200, 200)
   ; "public_read_on_public_path", (200, 200, 200)
   ; "public_read", if strict then 401, 200, 200 else 200, 200, 200
   ; "public_read_on_canonical_host", if strict then 401, 200, 200 else 200, 200, 200
+  ; "public_read_open_when_strict", (200, 200, 200)
+  ; "public_read_on_canonical_host_open_when_strict", (200, 200, 200)
   ; "read_auth", (401, 200, 200)
   ; "permission", (401, 403, 200)
   ; "token_permission", (401, 403, 200)
@@ -645,9 +695,15 @@ let location_of response = List.assoc_opt "location" response.headers
 let page_routes () =
   Router.create ()
   |> Server_route.get
-       (Server_route.Public_read_on_canonical_host { port = 8935 })
+       (Server_route.Public_read_on_canonical_host
+          { port = 8935; when_strict = Route_access.Credential_when_strict })
        "/page"
        (on_state "page")
+  |> Server_route.get
+       (Server_route.Public_read_on_canonical_host
+          { port = 8935; when_strict = Route_access.Open_when_strict })
+       "/open_page"
+       (on_state "open_page")
   |> Server_route.get Server_route.Public_read "/plain" (on_state "plain")
 ;;
 
@@ -664,6 +720,11 @@ let test_alias_host_is_redirected_while_the_server_is_not_ready () =
   let routes = page_routes () in
   check_redirected "alias host" (dispatch ~host:"localhost" routes "/page") ~target:"/page";
   check int "canonical host" 503 (dispatch routes "/page").status;
+  check_redirected
+    "open when strict, alias host"
+    (dispatch ~host:"localhost" routes "/open_page")
+    ~target:"/open_page";
+  check int "open when strict, canonical host" 503 (dispatch routes "/open_page").status;
   check int "Public_read alone, alias host" 503 (dispatch ~host:"localhost" routes "/plain").status
 ;;
 

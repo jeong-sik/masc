@@ -5,6 +5,7 @@ module Wrappers = struct
   type state = Mcp_server.server_state
 
   let with_public_read = Server_auth.with_public_read
+  let with_public_read_open_when_strict = Server_auth.with_public_read_open_when_strict
   let with_read_auth = Server_auth.with_read_auth
   let with_permission_auth = Server_auth.with_permission_auth
   let with_token_permission_auth = Server_auth.with_token_permission_auth

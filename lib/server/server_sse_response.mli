@@ -1,7 +1,7 @@
-(** One HTTP/1.1 server-sent-events response (RFC-0493 §3.1).
+(** One server-sent-events response (RFC-0493 §3.1) on a {!Http_reqd.t}.
 
-    A frame is written only by {!send}. [send] returns once httpun has handed
-    the frame to the socket, once the response has closed, or once
+    A frame is written only by {!send}. [send] returns once the transport has
+    handed the frame to the socket, once the response has closed, or once
     [stalled_after_s] has passed. A client that stops reading therefore holds
     each sending fiber at its send, and the bytes the server keeps for that
     client are at most one send per sending fiber. A pump's send carries the
@@ -31,7 +31,7 @@ val respond :
   clock:_ Eio.Time.clock ->
   stalled_after_s:float ->
   ?flush_headers_immediately:bool ->
-  Httpun.Reqd.t ->
+  Http_reqd.t ->
   Httpun.Response.t ->
   t
 (** [respond ~clock ~stalled_after_s reqd response] starts the streaming

@@ -49,41 +49,6 @@ let get_raw_trace_files ?session_root ~session_id () =
     |> fun paths -> Ok paths
 ;;
 
-let list_sessions ?session_root () =
-  let* store = make_store ?session_root () in
-  let root = Runtime_store.sessions_dir store in
-  if not (Sys.file_exists root)
-  then Ok []
-  else
-    root
-    |> Sys.readdir
-    |> Array.to_list
-    |> List.sort String.compare
-    |> List.fold_left
-         (fun acc session_id ->
-            let* rev = acc in
-            let path = Runtime_store.session_path store session_id in
-            if Sys.is_directory (Runtime_store.session_dir store session_id)
-            then (
-              match Runtime_store.load_session store session_id with
-              | Ok session ->
-                Ok
-                  ({ session_id = session.session_id
-                   ; title = session.title
-                   ; tag = session.tag
-                   ; goal = session.goal
-                   ; updated_at = session.updated_at
-                   ; phase = session.phase
-                   ; participant_count = List.length session.participants
-                   ; path
-                   }
-                   :: rev)
-              | Error _ -> Ok rev)
-            else Ok rev)
-         (Ok [])
-    |> Result.map List.rev
-;;
-
 let get_session ?session_root session_id =
   let* store = make_store ?session_root () in
   Runtime_store.load_session store session_id

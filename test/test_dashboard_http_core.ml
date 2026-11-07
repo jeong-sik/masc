@@ -870,7 +870,7 @@ let test_event_operator_uses_exact_source_refs_across_unrelated_enqueues () =
           state
           ~actor:"event-source-ref-test"
           (Httpun.Reqd.request reqd)
-          reqd
+          (Masc.Http_reqd.of_httpun reqd)
           ~keeper_name
           body)
     in
@@ -4707,7 +4707,7 @@ let test_tools_prepared_selector_scope_and_keeper_contract () =
 let tools_h1_wire_response ?body ~router ~headers target =
   let output = Buffer.create 4096 in
   let connection = Httpun.Server_connection.create (fun reqd ->
-    Lib.Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd) in
+    Lib.Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) (Masc.Http_reqd.of_httpun reqd)) in
   let method_name, meth, body, body_headers = match body with
     | None -> "GET", `GET, "", []
     | Some body -> "POST", `POST, body,
@@ -6569,7 +6569,7 @@ let post_config ?(inject_revision = true) ~sw ~clock ~state ~name body =
   let connection =
     Httpun.Server_connection.create (fun reqd ->
       Keeper_config_post.handle_keeper_config_post
-        ~sw ~clock state "dashboard-test" (Httpun.Reqd.request reqd) reqd body)
+        ~sw ~clock state "dashboard-test" (Httpun.Reqd.request reqd) (Masc.Http_reqd.of_httpun reqd) body)
   in
   let request =
     Printf.sprintf "POST /api/v1/keepers/%s/config HTTP/1.1\r\nHost: x\r\n\r\n" name
@@ -6606,7 +6606,7 @@ let post_to_handler ~target handle body =
   let output = Buffer.create 512 in
   let connection =
     Httpun.Server_connection.create (fun reqd ->
-      handle (Httpun.Reqd.request reqd) reqd body)
+      handle (Httpun.Reqd.request reqd) (Masc.Http_reqd.of_httpun reqd) body)
   in
   let request = Printf.sprintf "POST %s HTTP/1.1\r\nHost: x\r\n\r\n" target in
   let input = Bigstringaf.of_string ~off:0 ~len:(String.length request) request in
@@ -6752,7 +6752,7 @@ let config_refusal_response ~name refusal =
   let connection =
     Httpun.Server_connection.create (fun reqd ->
       Keeper_config_post.For_testing.respond_config_refusal
-        ~request:(Httpun.Reqd.request reqd) reqd ~name ~refusal ~receipt:None)
+        ~request:(Httpun.Reqd.request reqd) (Masc.Http_reqd.of_httpun reqd) ~name ~refusal ~receipt:None)
   in
   let request = "POST /api/v1/keepers/test/config HTTP/1.1\r\nHost: x\r\n\r\n" in
   let input = Bigstringaf.of_string ~off:0 ~len:(String.length request) request in

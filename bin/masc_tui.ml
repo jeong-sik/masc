@@ -307,8 +307,13 @@ let runtime_config_row_near rows ~direction ~target =
   match rows with
   | [] -> 0
   | first :: _ when direction >= 0 ->
-      Option.value ~default:(List.hd (List.rev rows))
-        (List.find_opt (fun row -> row >= target) rows)
+      (* [Option.value ~default:(List.hd (List.rev rows))] evaluates the
+         default eagerly, so it reversed the whole row list on every call
+         even when the find succeeded. The last row is only needed when no
+         row sits at or beyond the target. *)
+      (match List.find_opt (fun row -> row >= target) rows with
+       | Some row -> row
+       | None -> List.hd (List.rev rows))
   | first :: _ ->
       List.fold_left
         (fun selected row -> if row <= target then row else selected)

@@ -1260,12 +1260,7 @@ let checkpoint_info ~path =
           match Unix.stat path with
           | exception _ -> None, None
           | stats ->
-            let tm = Unix.gmtime stats.st_mtime in
-            let utc =
-              Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-                (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
-                tm.tm_hour tm.tm_min tm.tm_sec in
-            Some stats.st_mtime, Some utc in
+            Some stats.st_mtime, Some (Time_codec.rfc3339_of_unix stats.st_mtime) in
         Ok
           { exists = true
           ; version

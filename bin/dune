@@ -1557,10 +1557,16 @@
  (libraries masc masc.keeper_types masc.masc_workspace masc.masc_random_id masc_tui_credential yojson))
 
 (library
+ (name masc_tui_keeper_trail)
+ (wrapped false)
+ (modules masc_tui_keeper_trail)
+ (libraries masc masc.masc_types masc.keeper_runtime agent_core))
+
+(library
  (name masc_tui_keeper_list_model)
  (wrapped false)
  (modules masc_tui_keeper_list_model)
- (libraries masc masc.masc_types masc_tui_keeper_control))
+ (libraries masc masc.masc_types masc_tui_keeper_control masc_tui_keeper_trail))
 
 (library
  (name masc_tui_keeper_selection)
@@ -2724,6 +2730,7 @@
   masc_tui_numbered_list
   masc_tui_chat_portrait
   masc_tui_keeper_list_model
+  masc_tui_keeper_trail
   masc_tui_lane_standing
   masc_tui_async_protocol
   masc_tui_board_requests

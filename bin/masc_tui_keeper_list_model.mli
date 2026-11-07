@@ -130,6 +130,11 @@ val holds_awaiting_verification : verification_holders -> keeper_name:string -> 
 val primary_activity_of_row : row -> activity
 val badges_of_row : row -> badge list
 val group_of_row : row -> attention
+val trail_of_row : row -> Masc_tui_keeper_trail.trail
+(** What the row last failed at. [Trail_failed] exactly when its health reading
+    is failing. A row without a human decision is in the [Failing] group when
+    its trail is failed, and also when its activity is [Attempt_failed]; that
+    second kind has no failure sentence unless its health is failing too. *)
 val order_rows : layout:layout -> sort:sort -> row list -> row list
 (** Grouped layout orders groups first and applies [sort] within each group.
     The same order is used for drawing, navigation, and search. *)

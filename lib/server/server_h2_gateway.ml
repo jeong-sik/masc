@@ -297,7 +297,8 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
             h2_respond_agent_rate_limited h2_reqd ~rl_key;
             Error ())
     in
-    let with_h2_public_read h2_reqd f =
+    (* HIGH-RISK-UNREVIEWED: decides whether an HTTP/2 public read needs a credential under strict auth. *)
+    let with_h2_public_read ~when_strict h2_reqd f =
       let with_initialized_state f =
         match ready_server_state () with
         | Some state -> f state
@@ -307,7 +308,12 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
               ~status:(not_initialized_status :> H2.Status.t)
               ~extra_headers:(not_initialized_headers @ cors)
       in
-      if http_auth_strict_enabled () && not (is_public_read_path path)
+      let needs_credential =
+        match (when_strict : Route_access.strict_reading) with
+        | Open_when_strict -> false
+        | Credential_when_strict -> http_auth_strict_enabled () && not (is_public_read_path path)
+      in
+      if needs_credential
       then
         with_initialized_state (fun state ->
           match
@@ -394,7 +400,8 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
       match Result.bind (Lazy.force route_access) Server_h2_route_gate.plan with
       | Error refusal -> h2_respond_gate_refusal h2_reqd refusal
       | Ok Server_h2_route_gate.Open -> f ()
-      | Ok Server_h2_route_gate.Public_read -> with_h2_public_read h2_reqd (fun _state -> f ())
+      | Ok (Server_h2_route_gate.Public_read when_strict) ->
+          with_h2_public_read ~when_strict h2_reqd (fun _state -> f ())
       | Ok Server_h2_route_gate.Read_auth -> with_h2_read_auth h2_reqd (fun _state -> f ())
       | Ok (Server_h2_route_gate.Token_permission permission) ->
           with_h2_token_permission_auth h2_reqd ~permission (fun _state _actor -> f ())
@@ -404,7 +411,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
       match Result.bind (Lazy.force route_access) Server_h2_route_gate.plan with
       | Error refusal -> h2_respond_gate_refusal h2_reqd refusal
       | Ok Server_h2_route_gate.Open -> with_server_state h2_reqd f
-      | Ok Server_h2_route_gate.Public_read -> with_h2_public_read h2_reqd f
+      | Ok (Server_h2_route_gate.Public_read when_strict) -> with_h2_public_read ~when_strict h2_reqd f
       | Ok Server_h2_route_gate.Read_auth -> with_h2_read_auth h2_reqd f
       | Ok (Server_h2_route_gate.Token_permission permission) ->
           with_h2_token_permission_auth h2_reqd ~permission (fun state _actor -> f state)
@@ -452,8 +459,8 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
       ; with_public = (fun f ->
           match Result.bind (Lazy.force route_access) Server_h2_route_gate.plan with
           | Error refusal -> h2_respond_gate_refusal h2_reqd refusal
-          | Ok Server_h2_route_gate.Public_read ->
-            with_h2_public_read h2_reqd (fun state ->
+          | Ok (Server_h2_route_gate.Public_read when_strict) ->
+            with_h2_public_read ~when_strict h2_reqd (fun state ->
               with_h2_workspace_read state (fun headers ->
                 match authorize_optional_token_bound_permission_request
                         ~base_path:(Mcp_server.workspace_config state).base_path

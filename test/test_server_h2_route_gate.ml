@@ -10,7 +10,8 @@ let admin = Masc_domain.CanAdmin
 
 let gate_outcome = function
   | Ok Gate.Open -> "open"
-  | Ok Gate.Public_read -> "public_read"
+  | Ok (Gate.Public_read Route_access.Credential_when_strict) -> "public_read"
+  | Ok (Gate.Public_read Route_access.Open_when_strict) -> "public_read_open_when_strict"
   | Ok Gate.Read_auth -> "read_auth"
   | Ok (Gate.Token_permission p) ->
     "token_permission:" ^ Masc_domain.permission_to_string p
@@ -28,7 +29,14 @@ let actor_outcome = function
 (* kind, what the arm without an actor gets, what the arm with an actor gets *)
 let expected : (string * Route_access.t * string * string) list =
   [ "always_public", Route_access.Always_public, "open", "refused:actor_not_provided"
-  ; "public_read", Route_access.Public_read, "public_read", "refused:actor_not_provided"
+  ; ( "public_read"
+    , Route_access.Public_read Route_access.Credential_when_strict
+    , "public_read"
+    , "refused:actor_not_provided" )
+  ; ( "public_read open when strict"
+    , Route_access.Public_read Route_access.Open_when_strict
+    , "public_read_open_when_strict"
+    , "refused:actor_not_provided" )
   ; "read_auth", Route_access.Read_auth, "read_auth", "refused:actor_not_provided"
   ; ( "token_permission"
     , Route_access.Token_permission admin

@@ -39,11 +39,19 @@ type self_authenticated_reason =
           the path after the prefix ([/api/v1/keepers/]). The kinds of its
           sub-routes are not in the route table. *)
 
+(** What a [Public_read] route asks for when strict auth is on. *)
+type strict_reading =
+  | Credential_when_strict
+      (** A read credential. Strict auth still opens such a route when its
+          path is on the public-read list ([Server_auth.is_public_read_path]). *)
+  | Open_when_strict  (** Nothing: the route stays open, as on the default configuration. *)
+
 type t =
   | Always_public  (** Open on every configuration, strict auth included. *)
-  | Public_read
-      (** Open on the default configuration; strict auth asks for a read
-          credential unless the path is on the public-read list. *)
+  | Public_read of strict_reading
+      (** Open on the default configuration, with the server state, its
+          readiness and the workspace precondition; under strict auth it asks
+          for what [strict_reading] says. *)
   | Read_auth
   | Permission of Masc_domain.permission
   | Token_permission of Masc_domain.permission

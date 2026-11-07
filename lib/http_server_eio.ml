@@ -882,8 +882,8 @@ module Router = struct
 
     let access : type h. h auth -> Route_access.t = function
       | Always_public -> Route_access.Always_public
-      | Public_read -> Route_access.Public_read
-      | Public_read_on_canonical_host _ -> Route_access.Public_read
+      | Public_read -> Route_access.Public_read Route_access.Credential_when_strict
+      | Public_read_on_canonical_host _ -> Route_access.Public_read Route_access.Credential_when_strict
       | Read_auth -> Route_access.Read_auth
       | Permission permission -> Route_access.Permission permission
       | Token_permission permission -> Route_access.Token_permission permission

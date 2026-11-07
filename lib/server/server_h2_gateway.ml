@@ -311,7 +311,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
       let needs_credential =
         match (when_strict : Route_access.strict_reading) with
         | Open_when_strict -> false
-        | Credential_when_strict -> http_auth_strict_enabled () && not (is_public_read_path path)
+        | Credential_when_strict -> http_auth_strict_enabled ()
       in
       if needs_credential
       then
@@ -347,9 +347,9 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
         | Error err -> h2_respond_auth_error h2_reqd err)
     in
     (* H2 counterpart of [Server_auth.with_read_auth]: authorize on every
-       request, with no [http_auth_strict_enabled] / [is_public_read_path]
-       precondition. [with_h2_public_read] applies those preconditions and is
-       therefore NOT interchangeable — a route the H1 side guards with
+       request, with no [http_auth_strict_enabled] precondition.
+       [with_h2_public_read] applies that precondition and is therefore NOT
+       interchangeable — a route the H1 side guards with
        [with_read_auth] must use this one, or the same path enforces different
        authorization depending on which transport the client negotiated. *)
     let with_h2_read_auth h2_reqd f =
@@ -1122,8 +1122,8 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
          ───────────────────────────────────────────────────────────────────── *)
       (* Both arms carry the same read gate the H1 route applies
          (server_routes_http_routes_frontend.ml wraps GET and POST /graphql in
-         [with_read_auth]). /graphql is not in [is_public_read_path], so an
-         unauthenticated caller must be rejected on either transport. *)
+         [with_read_auth]), so an unauthenticated caller must be rejected on
+         either transport. *)
       | `GET, (("/api/v1/lane-addons/package-catalog" | "/api/v1/lane-addons/package-preview") as package_path) ->
           h2_gate_state h2_reqd (fun state ->
             let module Packages = Server_routes_http_routes_lane_addons in
@@ -1680,9 +1680,9 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/openapi.json" ->
-          (* HTTP/1 wraps this in Server_auth.with_public_read and the path is
-             not in the public-read allowlist, so strict mode answers 401
-             there; this arm used to answer the document (#28161). *)
+          (* HTTP/1 registers this as a public read that asks for a credential
+             under strict auth, so strict mode answers 401 there; this arm
+             used to answer the document (#28161). *)
           h2_gate_state h2_reqd (fun _state ->
             let resolved_host = Server_request_authority.host request_authority in
             let resolved_port =

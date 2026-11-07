@@ -302,14 +302,8 @@ let on_string name : Server_route.token_handler =
   fun _state given _request reqd -> answer ("ran " ^ name ^ " given " ^ given) reqd
 ;;
 
-(* Where a kind is registered. [Public_read] is also registered on a path of
-   [Server_auth.is_public_read_path], because under strict HTTP auth it only stays
-   open there, and that is what tells it from [Read_auth]. *)
-let public_path = "/api/v1/gate/status"
-
-let path_of = function
-  | "public_read_on_public_path" -> public_path
-  | name -> "/" ^ name
+(* Where a kind is registered. *)
+let path_of name = "/" ^ name
 ;;
 
 (* Every kind with its path, the registration under test, and the same wrapper
@@ -340,15 +334,6 @@ let dispatch_kinds =
           Server_route.Always_public
           "/public_read"
           (Server_auth.with_public_read (on_state "public_read"))
-          r )
-  ; ( "public_read_on_public_path"
-    , (fun r ->
-        Server_route.get Server_route.Public_read public_path (on_state "public_read_on_public_path") r)
-    , fun r ->
-        Server_route.get
-          Server_route.Always_public
-          public_path
-          (Server_auth.with_public_read (on_state "public_read_on_public_path"))
           r )
   ; ( "public_read_open_when_strict"
     , (fun r ->
@@ -591,14 +576,13 @@ let with_authentication ~strict f =
 
 (* The status each kind answers with no credential, with a Worker token and with
    an Admin token. Both routers must agree, and these are what they agree on.
-   Only a public read that asks for a credential under strict auth and is off
-   the public list changes with strict auth: strict makes it ask for a read
-   credential, as [Read_auth] does. The kinds that stay open when strict answer
+   Only a public read that asks for a credential under strict auth changes with
+   strict auth: strict makes it ask for a read credential, as [Read_auth] does.
+   The kinds that stay open when strict answer
    200 either way. *)
 let expected_status ~strict =
   [ "always_public", (200, 200, 200)
   ; "self_authenticated", (200, 200, 200)
-  ; "public_read_on_public_path", (200, 200, 200)
   ; "public_read", if strict then 401, 200, 200 else 200, 200, 200
   ; "public_read_on_canonical_host", if strict then 401, 200, 200 else 200, 200, 200
   ; "public_read_open_when_strict", (200, 200, 200)

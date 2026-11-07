@@ -6,7 +6,7 @@
 
 ## 0. 요약
 
-- masc 는 한 포트(8935)에서 HTTP/1.1(httpun-eio)과 HTTP/2 h2c(h2-eio)를 같이 받는다. 경로 표는 둘이다. HTTP/1.1 은 `Http_server_eio.Router` 에 등록하고(36파일 394곳), HTTP/2 는 `Server_h2_gateway` 의 `match (meth, path)` 82갈래와 `_routes_extra` 의 14갈래가 다시 적는다. 격리 서버에 h2c 로 `/api/v1/stream/fleet` 을 열면 404 가 온다. HTTP/1.1 로는 200 이다(§1.3).
+- masc 는 한 포트(8935)에서 HTTP/1.1(httpun-eio)과 HTTP/2 h2c(h2-eio)를 같이 받는다. 경로 표는 둘이다. HTTP/1.1 은 `Http_server_eio.Router` 에 등록하고(36파일 394곳. 세는 명령: `git grep -c -E 'Server_route\.(get|post|put|delete|patch|prefix_[a-z_]+|add|ws_get)' f8dbd356759 -- 'lib/**/*.ml'` 의 합. `.mli` 의 1곳은 뺀다), HTTP/2 는 `Server_h2_gateway` 의 `match (meth, path)` 82갈래와 `_routes_extra` 의 14갈래가 다시 적는다. 격리 서버에 h2c 로 `/api/v1/stream/fleet` 을 열면 404 가 온다. HTTP/1.1 로는 200 이다(§1.3).
 - 라이브 서버 로그 687개 파일, 리스너 통계 줄 126개를 합치면 h2 연결 1개, h1 연결 403,566개다(09:43Z 집계). HTTP/2 는 있지만 아무도 안 쓴다. 리스너에 TLS 가 없고, 브라우저는 ALPN 으로만 HTTP/2 를 고르며, Cloudflare 터널은 HTTPS origin 에만 HTTP/2 를 보내기 때문이다(§3).
 - 생태계에는 필요한 부품이 다 있다. tls 2.1.2 와 tls-eio 2.1.2 가 TLS 1.3 과 ALPN 협상을 하고, x509 1.0.6 이 자체 서명 인증서를 만들며, h2 0.13.0(사용자 포크)과 httpun 0.2.0 이 같은 Eio 소켓 위에서 돈다. 없는 것은 HTTP/3·QUIC 와 WebSocket over HTTP/2(RFC 8441)다(§2).
 - piaf 0.2.0 은 HTTP/1.1·HTTP/2·TLS 를 한 서버 API 로 주지만 핸들러가 응답을 반환하는 모델이라 지금의 콜백·스트리밍(RFC-0493 SSE) 모델과 맞지 않는다. ALPN 분기 코드만 참고한다(§2.4).
@@ -98,7 +98,7 @@ rg -o --no-filename 'stats: h2=[0-9]+ h1=[0-9]+' ~/me/.masc/logs/*.log
 
 ### 2.4 둘 다 하는 서버: piaf
 
-piaf 0.2.0 `Server.Config` 가 `max_http_version`, `h2c_upgrade`, `allow_insecure` 를 가진다(piaf.mli 274~278·780~798줄). TLS 위 ALPN 으로 HTTP/2 를 고르고 h2c Upgrade 도 한다. 그러나 핸들러가 `Request.t -> Response.t` 를 반환하는 모델이다. masc 는 핸들러가 `Reqd.t` 를 받아 스트리밍 writer 를 직접 몰고(RFC-0493 의 flush 대기), 등록 383곳이 그 모양이다. piaf 로 바꾸면 그 의미를 버리거나 다시 감싸야 한다. piaf 는 쓰지 않고 ALPN 분기 코드만 참고한다.
+piaf 0.2.0 `Server.Config` 가 `max_http_version`, `h2c_upgrade`, `allow_insecure` 를 가진다(piaf.mli 274~278·780~798줄). TLS 위 ALPN 으로 HTTP/2 를 고르고 h2c Upgrade 도 한다. 그러나 핸들러가 `Request.t -> Response.t` 를 반환하는 모델이다. masc 는 핸들러가 `Reqd.t` 를 받아 스트리밍 writer 를 직접 몰고(RFC-0493 의 flush 대기), 등록 394곳이 그 모양이다. piaf 로 바꾸면 그 의미를 버리거나 다시 감싸야 한다. piaf 는 쓰지 않고 ALPN 분기 코드만 참고한다.
 
 ### 2.5 WebSocket·gRPC
 

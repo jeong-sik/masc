@@ -29578,30 +29578,45 @@ let main
   let request_interrupt _ =
     Masc_tui_exit_signals.request_interrupt exit_signals
   in
-  let rec suspend _ =
-    (* The shell has the terminal while this process is stopped. It does not
-       read mouse reports, so the wheel would print as characters at its
-       prompt and a drag would not select. Tracking is a terminal mode, not
-       part of the alternate screen, so leaving that screen does not clear it. *)
+  (* The terminal goes to another program for a while and comes back: the
+     shell while Ctrl-Z has this process stopped, an [$EDITOR], a player. Every
+     such trip is this one pair, so a mode taken at session start cannot be
+     missed by one of them.
+
+     Handing off turns mouse reporting off. The program that has the terminal
+     does not read the reports: a shell prints a wheel turn as characters, and
+     an editor that never asked for the mouse receives them as keystrokes. The
+     mode belongs to the terminal, not to the alternate screen, so leaving that
+     screen does not clear it.
+
+     Taking back retakes the alternate screen first. [hand_off_terminal] gave
+     it up so the other program could use the main one, and a frame painted on
+     the main screen lands on the user's shell history and stays there after
+     the session ends. Mouse reporting then comes back unless F2 gave the mouse
+     to the terminal -- an editor that turns reporting off when it exits would
+     otherwise leave the wheel dead -- and every row is painted again.
+     [enable_bracketed_paste] flushes. *)
+  let hand_off_terminal () =
     output_string stdout mouse_tracking_disable;
     flush stdout;
-    restore_terminal ();
+    restore_terminal ()
+  in
+  let take_back_terminal () =
+    apply_raw_mode new_term;
+    Frame_presenter.setup frame_presenter ~write:(output_string stdout)
+      ~flush:(fun () -> flush stdout);
+    if Atomic.get mouse_tracking_on then
+      output_string stdout mouse_tracking_enable;
+    enable_bracketed_paste ();
+    request_full_repaint 0
+  in
+  let rec suspend _ =
+    hand_off_terminal ();
     Sys.set_signal Sys.sigtstp Sys.Signal_default;
     Fun.protect
       ~finally:(fun () ->
         Sys.set_signal Sys.sigtstp (Sys.Signal_handle suspend);
-        apply_raw_mode new_term;
-        (* restore_terminal above gave the alternate screen back so the shell
-           was usable while stopped. Take it again before the repaint, or the
-           frame lands on top of whatever the user did meanwhile. *)
-        Frame_presenter.setup frame_presenter ~write:(output_string stdout)
-          ~flush:(fun () -> flush stdout);
-        (* F2 hands the mouse back to the terminal; a stop in that state
-           continues in it. [enable_bracketed_paste] flushes. *)
-        if Atomic.get mouse_tracking_on then
-          output_string stdout mouse_tracking_enable;
-        enable_bracketed_paste ();
-        request_full_repaint 0)
+        take_back_terminal ())
       (fun () -> Unix.kill (Unix.getpid ()) Sys.sigtstp)
   in
   (* The snapshot is still applied before terminal ownership, setting-dependent
@@ -29694,23 +29709,13 @@ let main
     | Runtime | Config | Resources | Code | Tools | System_logs ->
         selected_surface_reference state
   in
-  (* Shared by every $EDITOR round-trip below (gate rejection here, the
-     Keeper-settings flows further down): re-arm raw mode and repaint after
-     the child editor exits. Defined before its first use — the gate
-     rejection flow landed above the Keeper-settings section that
-     originally carried this definition. *)
-  let reenter_terminal () =
-    apply_raw_mode new_term;
-    enable_bracketed_paste ();
-    request_full_repaint 0
-  in
   let edit_code_draft () =
     match Code_results.prepare_draft state with
     | Error detail -> report_action state "error" detail
     | Ok draft ->
       let suffix = Filename.extension (Masc_tui_code_draft.address draft).path in
       let suffix = if String.equal suffix "" then ".txt" else suffix in
-      (match Masc_tui_editor.roundtrip ~restore:restore_terminal ~reenter:reenter_terminal
+      (match Masc_tui_editor.roundtrip ~restore:hand_off_terminal ~reenter:take_back_terminal
           ~suffix (Masc_tui_code_draft.text draft) with
        | Error abort -> report_editor_abort state ~action:"Code draft" abort
        | Ok text -> match Code_results.edit_draft state draft text with
@@ -29725,8 +29730,8 @@ let main
     | Some _ -> (
       let stem = "{\n  \"reason\": \"\"\n}\n" in
       match
-        Masc_tui_editor.roundtrip ~restore:restore_terminal
-          ~reenter:reenter_terminal stem
+        Masc_tui_editor.roundtrip ~restore:hand_off_terminal
+          ~reenter:take_back_terminal stem
       with
       | Error abort -> report_editor_abort state ~action:"Gate rejection" abort
       | Ok body -> (
@@ -30160,16 +30165,12 @@ let main
   install_terminal_probe_publisher input_reader ~publish:apply_terminal_observation;
 
   let restore_music_terminal () =
-    output_string stdout (mouse_tracking_disable ^ bracketed_paste_disable);
+    output_string stdout bracketed_paste_disable;
     if Terminal_profile.kitty_keyboard terminal_profile then
       output_string stdout Masc_tui_csi.disable_kitty_keyboard;
-    flush stdout;
-    restore_terminal () in
+    hand_off_terminal () in
   let reenter_music_terminal () =
-    reenter_terminal ();
-    Frame_presenter.setup frame_presenter ~write:(output_string stdout)
-      ~flush:(fun () -> flush stdout);
-    output_string stdout mouse_tracking_enable;
+    take_back_terminal ();
     if Terminal_profile.kitty_keyboard terminal_profile then
       output_string stdout Masc_tui_csi.enable_kitty_keyboard;
     flush stdout in
@@ -30198,9 +30199,9 @@ let main
   (* ── Keeper settings over $EDITOR (#29684) ─────────────────────
      The editor itself is the confirmation step: an exit other than 0
      leaves the settings untouched, so these flows skip Keeper_control's
-     arming gate. The terminal handshake around the child is the pair
-     [suspend] already runs around Ctrl-Z. [reenter_terminal] lives above
-     the gate-rejection flow, the earliest $EDITOR round-trip. *)
+     arming gate. The terminal handshake around the child is
+     [hand_off_terminal] and [take_back_terminal], the pair [suspend] runs
+     around Ctrl-Z. *)
   (* An empty object is the honest starting point for a partial patch: the
      config route applies only the fields present in the body, and the TUI
      has no view of the current settings to prefill from -- showing a
@@ -30224,8 +30225,8 @@ let main
         ("no $EDITOR set; export EDITOR to " ^ action ^ " here")
     | Some _ -> (
       match
-        Masc_tui_editor.roundtrip ~restore:restore_terminal
-          ~reenter:reenter_terminal stem
+        Masc_tui_editor.roundtrip ~restore:hand_off_terminal
+          ~reenter:take_back_terminal stem
       with
       | Error abort -> report_editor_abort state ~action abort
       | Ok body -> (
@@ -30566,8 +30567,8 @@ let main
         | Some _ -> (
             let stem = "{\n  \"reason\": \"\"\n}\n" in
             match
-              Masc_tui_editor.roundtrip ~restore:restore_terminal
-                ~reenter:reenter_terminal stem
+              Masc_tui_editor.roundtrip ~restore:hand_off_terminal
+                ~reenter:take_back_terminal stem
             with
             | Error abort -> report_editor_abort state ~action:"overrule" abort
             | Ok body -> (
@@ -30617,8 +30618,8 @@ let main
         | Some _ -> (
             let stem = "{\n  \"reason\": \"\"\n}\n" in
             match
-              Masc_tui_editor.roundtrip ~restore:restore_terminal
-                ~reenter:reenter_terminal stem
+              Masc_tui_editor.roundtrip ~restore:hand_off_terminal
+                ~reenter:take_back_terminal stem
             with
             | Error abort -> report_editor_abort state ~action:"reject" abort
             | Ok body -> (
@@ -30664,8 +30665,8 @@ let main
               ^ "\n"
             in
             match
-              Masc_tui_editor.roundtrip ~restore:restore_terminal
-                ~reenter:reenter_terminal stem
+              Masc_tui_editor.roundtrip ~restore:hand_off_terminal
+                ~reenter:take_back_terminal stem
             with
             | Error abort -> report_editor_abort state ~action:"cancel" abort
             | Ok body -> (
@@ -30736,8 +30737,8 @@ let main
         (match Addons.selected_document view with
          | None -> ()
          | Some session ->
-             match Masc_tui_editor.roundtrip ~restore:restore_terminal
-               ~reenter:reenter_terminal ~suffix:".toml" session.text with
+             match Masc_tui_editor.roundtrip ~restore:hand_off_terminal
+               ~reenter:take_back_terminal ~suffix:".toml" session.text with
              | Error abort -> map_lane_addons state (fun view ->
                  {view with error=lane_addons_input_failure (Masc_tui_editor.abort_detail abort ^ "; TOML draft retained")})
              | Ok text -> map_lane_addons state (fun view ->
@@ -30789,8 +30790,8 @@ let main
     | None, _ | _, None -> report_action state "error" "config identity not loaded yet; r to reload"
     | Some workspace, Some reading ->
       let session = runtime_config_working_session reading in
-      (match Masc_tui_editor.roundtrip ~restore:restore_terminal
-          ~reenter:reenter_terminal ~suffix:".toml" session.text with
+      (match Masc_tui_editor.roundtrip ~restore:hand_off_terminal
+          ~reenter:take_back_terminal ~suffix:".toml" session.text with
        | Error abort -> report_editor_abort state ~action:"runtime.toml"
            ~cancelled:"runtime.toml unchanged; any earlier draft is retained" abort
        | Ok edited ->
@@ -31085,7 +31086,7 @@ Use relative paths for resources already held in the package. -->
     match Masc_tui_editor.editor_command () with
     | None -> report_action state "error" "Set $EDITOR to author a Skill document"
     | Some _ ->
-      (match Masc_tui_editor.roundtrip ~restore:restore_terminal ~reenter:reenter_terminal
+      (match Masc_tui_editor.roundtrip ~restore:hand_off_terminal ~reenter:take_back_terminal
           ~suffix:".md" source_text with
        | Error abort -> report_editor_abort state ~action:"Skill creation" abort
        | Ok source_text ->
@@ -31176,7 +31177,7 @@ Use relative paths for resources already held in the package. -->
         `Assoc ["submitted_by",`String target.submitted_by;"request_id",`String target.request_id;
           "keeper_name",`String target.keeper_name]
       | None -> `Assoc ["submitted_by",`String "";"request_id",`String "";"keeper_name",`String ""] in
-    match Masc_tui_editor.roundtrip ~restore:restore_terminal ~reenter:reenter_terminal
+    match Masc_tui_editor.roundtrip ~restore:hand_off_terminal ~reenter:take_back_terminal
         ~suffix:".json" (Yojson.Safe.pretty_to_string target ^ "\n") with
     | Error abort -> report_editor_abort state ~action:"Original async request lookup" abort
     | Ok text ->
@@ -31262,8 +31263,8 @@ Use relative paths for resources already held in the package. -->
           | Some _ ->
             (match
                Masc_tui_editor.roundtrip
-                 ~restore:restore_terminal
-                 ~reenter:reenter_terminal
+                 ~restore:hand_off_terminal
+                 ~reenter:take_back_terminal
                  ~suffix:".md"
                  loaded.sel_source_text
              with
@@ -31400,8 +31401,8 @@ Use relative paths for resources already held in the package. -->
           "no $EDITOR set; export EDITOR to edit prompts here"
       | Some _ -> (
         match
-          Masc_tui_editor.roundtrip ~restore:restore_terminal
-            ~reenter:reenter_terminal row.Tui_decode.pr_effective
+          Masc_tui_editor.roundtrip ~restore:hand_off_terminal
+            ~reenter:take_back_terminal row.Tui_decode.pr_effective
         with
         | Error abort ->
           report_editor_abort state
@@ -31455,8 +31456,8 @@ Use relative paths for resources already held in the package. -->
     (* The same frozen snapshot supplies the editor text and guarded patch. *)
     let rec edit_round ?prior_reason stem =
       match
-        Masc_tui_editor.roundtrip ~restore:restore_terminal
-          ~reenter:reenter_terminal ~suffix:(Masc_tui_keeper_config.editor_suffix format) stem
+        Masc_tui_editor.roundtrip ~restore:hand_off_terminal
+          ~reenter:take_back_terminal ~suffix:(Masc_tui_keeper_config.editor_suffix format) stem
       with
       | Error abort ->
           report_editor_abort state
@@ -31556,8 +31557,8 @@ Use relative paths for resources already held in the package. -->
             ~default:Masc.Keeper_turn_up_args.creation_stem
       in
       match
-        Masc_tui_editor.roundtrip ~restore:restore_terminal
-          ~reenter:reenter_terminal stem
+        Masc_tui_editor.roundtrip ~restore:hand_off_terminal
+          ~reenter:take_back_terminal stem
       with
       | Error abort -> report_editor_abort state ~action:"create" abort
       | Ok declaration -> (
@@ -31630,8 +31631,8 @@ Use relative paths for resources already held in the package. -->
             "" ]
       in
       match
-        Masc_tui_editor.roundtrip ~restore:restore_terminal
-          ~reenter:reenter_terminal stem
+        Masc_tui_editor.roundtrip ~restore:hand_off_terminal
+          ~reenter:take_back_terminal stem
       with
       | Error abort -> report_editor_abort state ~action:"add" abort
       | Ok declaration -> (
@@ -31682,8 +31683,8 @@ Use relative paths for resources already held in the package. -->
         ("no $EDITOR set; export EDITOR to " ^ action ^ " a schedule here")
     | Some _ ->
       (match
-         Masc_tui_editor.roundtrip ~restore:restore_terminal
-           ~reenter:reenter_terminal stem
+         Masc_tui_editor.roundtrip ~restore:hand_off_terminal
+           ~reenter:take_back_terminal stem
        with
        | Error Masc_tui_editor.Cancelled ->
            report_editor_abort state ~action Masc_tui_editor.Cancelled
@@ -36181,12 +36182,12 @@ Use relative paths for resources already held in the package. -->
                                (Printf.sprintf "opened %s in Neovim" path)
                          | Error detail -> report_action state "error" detail)
                      | Masc_tui_editor_jump.Terminal_handoff { editor } ->
-                         restore_terminal ();
+                         hand_off_terminal ();
                          let command =
                            Printf.sprintf "%s %s" editor (Filename.quote path)
                          in
                          let _ : Unix.process_status = Unix.system command in
-                         reenter_terminal ();
+                         take_back_terminal ();
                          report_action state "system"
                            (Printf.sprintf "closed %s" path))
             | _ -> ())
@@ -38498,7 +38499,7 @@ Use relative paths for resources already held in the package. -->
               as this comment always claimed. *)
            let handled =
              handle_board_compose_key state ~mailbox:async_messages
-               ~restore:restore_terminal ~reenter:reenter_terminal k
+               ~restore:hand_off_terminal ~reenter:take_back_terminal k
            in
            if not handled then
              (match k with
@@ -41536,13 +41537,13 @@ Use relative paths for resources already held in the package. -->
                              terminal and this surface stands down until it
                              exits -- the same handoff the settings round-trip
                              makes. *)
-                          restore_terminal ();
+                          hand_off_terminal ();
                           let command =
                             Printf.sprintf "%s +%d %s" editor line
                               (Filename.quote path)
                           in
                           let _ : Unix.process_status = Unix.system command in
-                          reenter_terminal ();
+                          take_back_terminal ();
                           report_action state "system"
                             (Printf.sprintf "closed %s:%d" path line))))
        | Some ("a" | "A") when state.view = Planning

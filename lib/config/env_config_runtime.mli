@@ -46,12 +46,6 @@ module Sse_connect_guard : sig
   end
 end
 
-(** {1 Tempo (polling interval)} *)
-
-module Tempo : sig
-  val default_interval_seconds : float
-end
-
 (** {1 Cache} *)
 
 module Cache : sig

@@ -914,6 +914,12 @@ let render_keeper_list (state : state) =
   let has_failing_keeper =
     List.exists (fun row -> failure_sentence_cells row > 0) model_rows
   in
+  let widest_detail =
+    List.fold_left
+      (fun widest (row : Keeper_list_model.row) ->
+        max widest (failure_sentence_cells row))
+      0 model_rows
+  in
   let widest_runtime =
     List.fold_left
       (fun widest (row : Keeper_list_model.row) ->
@@ -924,7 +930,7 @@ let render_keeper_list (state : state) =
           | Keeper_control.Absent | Keeper_control.Unobserved
           | Keeper_control.Invalid _ -> None
         in
-        max widest (max (failure_sentence_cells row) (keeper_runtime_cells runtime)))
+        max widest (keeper_runtime_cells runtime))
       0 model_rows
   in
   let columns =
@@ -934,7 +940,8 @@ let render_keeper_list (state : state) =
       ~runtime_visible:(match state.keeper_list_layout with
         | Keeper_list_model.Detailed -> true
         | Keeper_list_model.Compact | Keeper_list_model.Grouped -> false)
-      ~prioritize_runtime:has_failing_keeper ~inner_width:inner ~widest_runtime ()
+      ~prioritize_runtime:has_failing_keeper ~inner_width:inner
+      ~widest_runtime ~widest_detail ()
   in
   box_line_styled buf cols ~style:(Theme.recede ()) (keeper_column_header columns);
 

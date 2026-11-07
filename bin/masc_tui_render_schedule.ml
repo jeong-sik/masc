@@ -180,7 +180,7 @@ let keeper_columns_used_width columns =
    ([antigravity_subscription.claude-opus-4-6-thinking]), so every long id was
    elided while the slack the row had left went on to the task column -- 49
    cells of it, for an id this file's own note calls short by construction. *)
-let allocate_keeper_columns ?(runtime_visible = true) ~prioritize_runtime ~inner_width ~widest_runtime () =
+let allocate_keeper_columns ?(runtime_visible = true) ?(widest_detail = 0) ~prioritize_runtime ~inner_width ~widest_runtime () =
   let inner_width = max 0 inner_width in
   let show_flags = inner_width >= keeper_flags_minimum_inner_width in
   let show_runtime = runtime_visible && inner_width >= keeper_runtime_minimum_inner_width in
@@ -212,6 +212,9 @@ let allocate_keeper_columns ?(runtime_visible = true) ~prioritize_runtime ~inner
       let taken = min budget available in
       taken, available - taken
     in
+    let detail_ceiling = max keeper_minimum_task_width widest_detail in
+    let detail_budget = detail_ceiling - keeper_minimum_task_width in
+    let detail_growth, slack = take detail_budget slack in
     let name_budget = keeper_maximum_name_width - keeper_minimum_name_width in
     let runtime_ceiling = max keeper_minimum_runtime_width widest_runtime in
     let runtime_budget = runtime_ceiling - keeper_minimum_runtime_width in
@@ -230,7 +233,7 @@ let allocate_keeper_columns ?(runtime_visible = true) ~prioritize_runtime ~inner
     { base with
       kcol_name = base.kcol_name + name_growth
     ; kcol_runtime = base.kcol_runtime + runtime_growth
-    ; kcol_task = base.kcol_task + slack
+    ; kcol_task = base.kcol_task + detail_growth + slack
     }
 
 type waiting_group_layout = {

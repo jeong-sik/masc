@@ -2904,26 +2904,88 @@ let test_native_context_placement_and_removed_assistant () =
   let text_assistant = message Assistant [Text "answer"] in
   let valid history = Result.is_ok (Lower.lower policy history) in
   check_bool "context group may end the request" true (valid [caller;context;context]);
-  List.iter (fun (label,history) -> check_bool label false (valid history))
-    ["no leading context",[context;caller]
-    ;"no context after an assistant",[caller;text_assistant;context]
-    ;"no context before another caller",[caller;context;caller]
-    ;"no context between tool use and result",
-       [caller;message Assistant [ToolUse {id="call-1";name="inspect";input=`Assoc []}];context;message Tool [tool_result "call-1"]]
-    ;"no nontext context",[caller;{context with content=[RedactedThinking "opaque"]}]];
+  (* A group the composition cannot place inside its own turn is spent — the
+     wire clears it at the next user message — so lowering drops it and the
+     canonical coordinates of the surviving rows stay (#49549). *)
+  let lowered history = match Lower.lower policy history with
+    | Ok lowered -> lowered.Lower.messages, lowered.Lower.source_indices
+    | Error error -> Alcotest.fail (Lower.error_to_string error)
+  in
+  List.iter
+    (fun (label, history, kept_messages, kept_indices) ->
+       let messages, indices = lowered history in
+       Alcotest.(check (list string)) label kept_messages
+         (List.map (fun (message : Types.message) ->
+            match message.content with
+            | [Types.Text text] -> text
+            | _ -> "?") messages);
+       Alcotest.(check (list int)) (label ^ " coordinates") kept_indices indices)
+    [ "spent leading context lowers away", [context; caller], ["caller"], [1]
+    ; "context after an assistant lowers away", [caller; text_assistant; context],
+      ["caller"; "answer"], [0; 1]
+    ; "context before another caller lowers away", [caller; context; caller],
+      ["caller"; "caller"], [0; 2]
+    ; "context between tool use and result lowers away",
+      [ caller
+      ; message Assistant [ToolUse {id="call-1";name="inspect";input=`Assoc []}]
+      ; context
+      ; message Tool [tool_result "call-1"] ],
+      ["caller"; "?"; "?"], [0; 1; 3] ];
+  check_bool "carried nontext context still refused" false
+    (valid [caller; {context with content=[RedactedThinking "opaque"]}]);
   let config = native_context_config () in
   let unbound = with_source (source_for_config config) Assistant
       [Thinking {content="unbound";signature=Some "synthetic"}] in
   let history = [caller;context;unbound;caller] in
-  (match Backend_anthropic.retained_prefix_reasoning_indices ~config ~tools:[] history with
-   | Error (Reasoning_history_projection.Invalid_control_lowering _) -> ()
-   | _ -> Alcotest.fail "removing an empty assistant must revalidate context placement");
-  check_bool "invalid post-filter transcript cannot stamp a response" true
+  (* The removed assistant spends the context row; the request lowers it away
+     instead of refusing, so the stamp readers answer over the transcript the
+     wire really sends. *)
+  check_bool "spent context after a removed assistant keeps reporting indices" true
+    (Result.is_ok (Backend_anthropic.retained_prefix_reasoning_indices ~config ~tools:[] history));
+  check_bool "spent context after a removed assistant still stamps a response" true
     (Backend_anthropic.transmitted_reasoning_prefix ~config ~messages:history ~tools:[]
-       ~response_content:[Text "answer"] () = None);
+       ~response_content:[Thinking {content="answer";signature=Some "synthetic"}] () <> None);
   let empty_assistant = message Assistant [Thinking {content="orphan";signature=Some "synthetic"}] in
   check_bool "removed assistant leaves no phantom header" true
     ((fold ~head:[] [caller;empty_assistant]).final_digest = (fold ~head:[] [caller]).final_digest)
+;;
+
+(* The wedge of #49549: a lane switch left a context row the next user
+   message had already cleared, and every retry rebuilt the same refused
+   request. The wire drops the spent row and keeps the current carrier. *)
+let test_spent_context_row_does_not_refuse_the_request () =
+  let open Yojson.Safe.Util in
+  let config = native_context_config () in
+  let instruction = message ~origin:Agent_instruction User [Text "working state"] in
+  let spent = message ~origin:System_context System [Text "residue from the prior lane"] in
+  let caller = message User [Text "start the turn"] in
+  let fresh = message ~origin:System_context User [Text "current context"] in
+  let body =
+    Backend_anthropic.build_request ~config ~messages:[instruction; spent; caller; fresh] ()
+  in
+  let rows = Yojson.Safe.from_string body |> member "messages" |> to_list in
+  let row_texts row =
+    match member "content" row with
+    | `String text -> [text]
+    | `List parts ->
+      List.filter_map (fun part -> match member "text" part with
+        | `String text -> Some text | _ -> None) parts
+    | _ -> []
+  in
+  let all_texts = List.concat_map row_texts rows in
+  check_bool "the spent row is not on the wire" false
+    (List.mem "residue from the prior lane" all_texts);
+  check_bool "the current carrier stays" true
+    (List.mem "current context" all_texts);
+  let carrier_row =
+    List.find_opt (fun row ->
+       List.mem "current context" (row_texts row) && member "role" row = `String "system")
+      rows
+  in
+  check_bool "the carrier row carries clear_at" true
+    (match carrier_row with
+     | Some row -> member "clear_at" row = `String "next_user_message"
+     | None -> false)
 ;;
 
 let () =
@@ -2936,6 +2998,8 @@ let () =
             test_native_context_stored_role_is_not_on_the_wire
         ; Alcotest.test_case "native context validates post-filter placement" `Quick
             test_native_context_placement_and_removed_assistant
+        ; Alcotest.test_case "a spent context row does not refuse the request" `Quick
+            test_spent_context_row_does_not_refuse_the_request
         ; Alcotest.test_case "other providers omit historical context" `Quick
             test_other_providers_omit_historical_context
         ; Alcotest.test_case "initial System preserves the native caller boundary" `Quick

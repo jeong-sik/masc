@@ -617,9 +617,35 @@ let verify_prefix_binding ~policy ~head messages =
     messages
 ;;
 
+(* A spent context group leaving the request is an anomaly with a producer
+   somewhere upstream — the wire still sends, but the operator reads here
+   that it happened, where and how much (#49549). *)
+let observe_spent_context_lowered ~stage ~before ~after =
+  if after < before then
+    Diag.info "anthropic" "%s"
+      (Yojson.Safe.to_string
+         (`Assoc
+            [ "event", `String "spent_context_lowered"
+            ; "stage", `String stage
+            ; "dropped_rows", `Int (before - after)
+            ; "carried_rows", `Int after
+            ]))
+;;
+
 (* The serializer and read-only callers share both merge and prefix verification.
-   Source groups name input occurrences, including repeated identical records. *)
-let prefix_bound_history ~policy ~tools (config : Provider_config.t) projected_messages =
+   Source groups name input occurrences, including repeated identical records.
+   Spent context groups leave before the merge: the wire never carries them
+   and the prefix chain hashes what the request sends. A group the prefix
+   fold itself spends — an assistant removal that leaves a row unanswerable —
+   lowers away after the fold, in the wrapper below and at the serializer's
+   own boundary, so every reader sees the transcript the wire sends (#49549). *)
+let merged_prefix_history ~policy ~tools (config : Provider_config.t) projected_messages =
+  let lowered =
+    Message_origin_lowering.drop_expired_turn_scoped_contexts policy projected_messages
+  in
+  observe_spent_context_lowered ~stage:"pre_merge"
+    ~before:(List.length projected_messages) ~after:(List.length lowered);
+  let projected_messages = lowered in
   let merged =
     Api_common.merge_tool_result_followup_user_messages_with_source_indices projected_messages
   in
@@ -630,9 +656,23 @@ let prefix_bound_history ~policy ~tools (config : Provider_config.t) projected_m
     | Provider_config.Kimi | Provider_config.OpenAI_compat | Provider_config.Ollama
     | Provider_config.Gemini | Provider_config.Glm -> None
   in
+  merged, verdict
+;;
+
+let prefix_bound_history ~policy ~tools (config : Provider_config.t) projected_messages =
+  let merged, verdict = merged_prefix_history ~policy ~tools config projected_messages in
   let actual_messages = match verdict with
     | Some verdict -> verdict.Reasoning_history_projection.messages
     | None -> List.map fst merged in
+  (* The prefix fold can spend a group the pre-merge pass kept — an assistant
+     removal that leaves a context row unanswerable. The read-only callers
+     read the transcript the wire sends, so they lower the same rows away and
+     the validation below still fails on real corruption: a carried context
+     row that is not representable as system text, or one wearing an
+     assistant or tool role. *)
+  let actual_messages =
+    Message_origin_lowering.drop_expired_turn_scoped_contexts policy actual_messages
+  in
   Result.map (fun () -> merged, verdict)
     (Message_origin_lowering.validate_turn_scoped_contexts policy actual_messages)
 ;;
@@ -748,9 +788,7 @@ let build_request_payload
   in
   let policy = control_policy config in
   let merged, prefix_verdict =
-    match prefix_bound_history ~policy ~tools config projected_messages with
-    | Ok history -> history
-    | Error error -> invalid_arg ("Backend_anthropic.build_request: " ^ Message_origin_lowering.error_to_string error)
+    merged_prefix_history ~policy ~tools config projected_messages
   in
   (* Prefix binding runs on the merged list the wire serializes: only the
      Anthropic kind verifies here. Its thinking toggle always resolves
@@ -770,6 +808,22 @@ let build_request_payload
       verdict.Reasoning_history_projection.messages)
     | None -> List.map fst merged
   in
+  (* The prefix fold can spend a group the pre-merge pass could not see: an
+     assistant removal that leaves a context row unanswerable. The wire drops
+     what it cannot legally carry instead of refusing — a refused request
+     repeats identically on every retry and stops the lane (#49549) — and the
+     validation below still fails on real corruption, like a context row that
+     is not representable as system text. *)
+  let lowered =
+    Message_origin_lowering.drop_expired_turn_scoped_contexts policy messages
+  in
+  observe_spent_context_lowered ~stage:"post_fold"
+    ~before:(List.length messages) ~after:(List.length lowered);
+  let messages = lowered in
+  (match Message_origin_lowering.validate_turn_scoped_contexts policy messages with
+   | Ok () -> ()
+   | Error error ->
+     invalid_arg ("Backend_anthropic.build_request: " ^ Message_origin_lowering.error_to_string error));
   (match config.kind, caps.supports_assistant_prefill, List.rev messages with
    | Provider_config.Anthropic, false, { role = Assistant; _ } :: _ ->
      invalid_arg

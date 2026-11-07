@@ -133,6 +133,47 @@ let validate_turn_scoped_contexts policy messages =
     loop None 0 messages
 ;;
 
+(* A turn-scoped context row is current only inside its own turn: after the
+   user span that opened the turn and before the assistant response that
+   answers it. The wire's own [clear_at = next_user_message] states this
+   scope, so a row the composition cannot place that way is spent — a later
+   user message already cleared it — and a request drops it instead of
+   refusing, because a refused request repeats identically on every retry
+   and stops the lane (#49549). A group the wire can carry keeps its place
+   and its prefix. Placement is read from native roles, so a group followed
+   by a tool-result span is as spent as one followed by a fresh caller. *)
+let keep_placed_turn_scoped_contexts policy indexed_messages =
+  match policy with
+  | Preserve_positions | Omit_historical_system_context | Initial_system_native_tools
+  | Initial_system_tool_response_media -> indexed_messages
+  | Turn_scoped_system_context ->
+    let rec loop kept_rev previous = function
+      | [] -> List.rev kept_rev
+      | (index, (message : _ Types.message_with)) :: rest
+        when is_turn_scoped_context policy message ->
+        let rec group run = function
+          | (next_index, (next : _ Types.message_with)) :: more
+            when is_turn_scoped_context policy next -> group ((next_index, next) :: run) more
+          | remaining -> List.rev run, remaining
+        in
+        let run, remaining = group [index, message] rest in
+        let answered = match remaining with
+          | [] -> true
+          | (_, next) :: _ -> native_role policy next = Native_assistant
+        in
+        if answered && previous = Some Native_user
+        then loop (List.rev_append run kept_rev) previous remaining
+        else loop kept_rev previous remaining
+      | indexed :: rest ->
+        loop (indexed :: kept_rev) (Some (native_role policy (snd indexed))) rest
+    in
+    loop [] None indexed_messages
+;;
+
+let drop_expired_turn_scoped_contexts policy messages =
+  List.map snd (keep_placed_turn_scoped_contexts policy (List.mapi (fun index message -> index, message) messages))
+;;
+
 let lower policy messages =
   match policy with
   | Preserve_positions ->
@@ -152,9 +193,14 @@ let lower policy messages =
        [anthropic_message_header] derives from policy and origin, so the wire
        and the creation-prefix digest do not read the role. The lowered list
        is also the request view a caller hands Agent Core, which retains the
-       transmitted carrier as history: a role rewritten here would be stored. *)
+       transmitted carrier as history: a role rewritten here would be stored.
+       A spent group — one the composition cannot place inside its own turn —
+       lowers away before validation, so a leftover row refuses no request. *)
+    let kept = keep_placed_turn_scoped_contexts policy
+        (List.mapi (fun index message -> index, message) messages) in
+    let messages = List.map snd kept in
     Result.map (fun () ->
-      {messages; source_indices=List.mapi (fun index _ -> index) messages})
+      {messages; source_indices=List.map fst kept})
       (validate_turn_scoped_contexts policy messages)
   | Initial_system_native_tools | Initial_system_tool_response_media ->
     let latest_caller =

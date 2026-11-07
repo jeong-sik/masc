@@ -5,6 +5,7 @@ module Commit = Keeper_librarian_admission_commit
 module Gate_journal = Keeper_librarian_admission_gate
 module Gate = Keeper_librarian_absorb_gate
 module Owner = Lane_addon_tool_request_owner
+module Destination = Lane_addon_captured_destination
 module Progress = Lane_addon_request_progress
 module Exact = Lane_addon_exact
 module Runtime = Lane_addon_runtime
@@ -29,24 +30,18 @@ let unattached ~config ~reserved =
   match Keeper_librarian_addon.resolve ~config ~reserved Keeper_librarian_addon.Admission with
   | Error Keeper_librarian_addon.Unattached -> true
   | Ok _ | Error (Unready _ | Export_conflict _ | Wrong_package _ | Manual_installation) -> false
-let destination (value : Runtime.tool_request_destination) : Capture.destination = {
-  installation_id=value.installation_id;package_id=value.package_id;tool=value.tool;
-  source_revision=value.source_revision;configuration_revision=value.configuration_revision}
-let same_destination (left : Capture.destination) (right : Capture.destination) =
-  left.installation_id=right.installation_id && left.package_id=right.package_id
-  && left.tool=right.tool && left.configuration_revision=right.configuration_revision
 let with_destination ~config ~reserved publish =
   let* export=resolve ~config ~reserved in
   Runtime.with_tool_request_destination ~config ~reserved ~export
     ~access:Lane_addon_sources.Operator_configuration ~publish:(fun actual ->
-      let actual=destination actual in
+      let actual=Destination.of_runtime actual in
       if actual.package_id<>Capture.package_id || actual.tool<>Capture.tool
       then Error (Runtime.Host_refusal (Lane_addon_call_context.Rejected "Librarian requires its configured package/tool"))
       else match publish actual with Ok value -> Ok value | Error detail -> Error (Runtime.Unavailable detail))
   |> Result.map_error runtime_error
 let admit ~config ~reserved ~destination:expected ~publish =
   with_destination ~config ~reserved (fun actual ->
-    let* ()=require (same_destination actual expected) "Original Librarian semantic configuration changed" in
+    let* ()=require (Destination.same_semantic actual expected) "Original Librarian semantic configuration changed" in
     io publish)
 let check_owner owner = io (fun () ->
   let* actual=Capture.observe_owner ~base_path:(Capture.base_path owner)
@@ -132,8 +127,8 @@ let new_capture ~config ~reserved ~owner part =
   let* capture=Runtime.capture_tool_request_owner ~config ~reserved ~export
     ~access:Lane_addon_sources.Operator_configuration ~scope:(Capture.scope owner) ~request_id
     ~capture:(fun actual ->
-      let destination=destination actual in
-      let* ()=require (same_destination destination (Parts.destination part))
+      let destination=Destination.of_runtime actual in
+      let* ()=require (Destination.same_semantic destination (Parts.destination part))
         "Original candidate part belongs to another semantic configuration" in
       let* capture=Capture.create ~request_id ~parent_part_id:(Parts.part_id part) ~owner ~destination
         ~batch:(Parts.batch part) ~input ~expected_revision ~now ~retirement ~preparation in
@@ -146,7 +141,7 @@ let call ~config ~reserved ~expected ~(original : Owner.retained) ~arguments =
   match resolve ~config ~reserved with
   | Error detail -> Error (Lane_addon_submit_once.Not_sent (Dispatch.Unavailable detail))
   | Ok export -> Runtime.call_captured_tool_request ~config ~reserved ~export
-    ~access:Lane_addon_sources.Operator_configuration ~installation_id:expected.Capture.installation_id
+    ~access:Lane_addon_sources.Operator_configuration ~installation_id:expected.Destination.installation_id
     ~package_id:expected.package_id ~tool:expected.tool ~configuration_revision:expected.configuration_revision
     ~original ~arguments |> Result.map_error Lane_addon_submit_once.call_error_of_runtime
 
@@ -159,7 +154,7 @@ type part_result =
 let source original part = Parts.Original_execution {
   part_id=Parts.part_id part;execution_id=original.record.request_id}
 let local_admit actual ~destination:expected ~publish =
-  let* ()=require (same_destination actual expected) "Original Librarian semantic configuration changed" in
+  let* ()=require (Destination.same_semantic actual expected) "Original Librarian semantic configuration changed" in
   publish ()
 let partition ~store ~config ~reserved ~owner part evidence =
   let id ()=Capture.fresh_request_id owner in

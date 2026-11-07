@@ -6,6 +6,7 @@ module Input = Keeper_librarian_input_capture
 module Machine = Keeper_librarian_message_floor.Machine
 module Unread = Keeper_librarian_unread
 module Owner = Lane_addon_tool_request_owner
+module Destination = Lane_addon_captured_destination
 let ( let* ) = Result.bind
 let ( let+ ) result f = Result.map f result
 let require condition detail = if condition then Ok () else Error detail
@@ -92,7 +93,7 @@ let context_of_json json =
   {Runtime.previous_state;unread_messages}
 let to_json step = `Assoc ["schema",`Int 1;"kind",`String "completed-history-floor-step";
   "request_id",`String step.id;"owner",Durable.owner_to_json step.owner;
-  "destination",Durable.destination_json step.destination;"transaction_id",`String step.transaction_id;
+  "destination",Destination.to_json step.destination;"transaction_id",`String step.transaction_id;
   "range",link_json step.range;
   "previous",(match step.previous with None -> `Null | Some link -> link_json link);
   "position",`Int step.position;"sources",`List (List.map Unread.source_to_json step.sources);
@@ -183,7 +184,7 @@ let decode ~owner ~digest json =
   let+ digest=match digest with Some digest -> Ok digest | None -> Owner.request_digest json in
   {draft with digest}
 let create ~request_id ~owner ~destination ~transaction_id ~range ~previous ~(question:Machine.question) ~step () =
-  let* destination=Durable.destination_of_json (Durable.destination_json destination) in
+  let* destination=Durable.destination_of_json (Destination.to_json destination) in
   let draft={id=request_id;owner;destination;transaction_id;range;previous;position=question.position;
     sources=question.sources;step;digest=""} in
   let* ()=validate draft in

@@ -2,6 +2,7 @@ module Capture = Keeper_librarian_admission_capture
 module Queue = Keeper_memory_admission_queue
 module Current = Keeper_memory_os_current
 module Owner = Lane_addon_tool_request_owner
+module Destination = Lane_addon_captured_destination
 module Progress = Lane_addon_request_progress
 module Exact = Lane_addon_exact
 let ( let* ) = Result.bind
@@ -44,20 +45,12 @@ let is_scope value = String.starts_with ~prefix:scope_prefix value
 let is_partition_scope value = String.starts_with ~prefix:partition_scope_prefix value
 let scope owner = scope_prefix ^ owner_hash owner
 let partition_scope owner = partition_scope_prefix ^ owner_hash owner
-let destination_json (d:Capture.destination) = `Assoc [
-  "installation_id",`String d.installation_id;"package_id",`String d.package_id;
-  "tool",`String d.tool;"source_revision",`String d.source_revision;
-  "configuration_revision",`String d.configuration_revision]
 let destination_of_json json =
-  let* f=fields ["installation_id";"package_id";"tool";"source_revision";"configuration_revision"] json in
-  let* installation_id=text (value "installation_id" f) in
-  let* installation=Owner.installation_of_id installation_id in
+  let* destination=Destination.of_json ~context:"Original Librarian part destination" json in
+  let* installation=Owner.installation_of_id destination.installation_id in
   let* ()=match installation with Owner.Configuration _ -> Ok () | Owner.Manual _ -> Error "Original Librarian part requires configured installation" in
-  let* package_id=text (value "package_id" f) in let* tool=text (value "tool" f) in
-  let* source_revision=text (value "source_revision" f) in
-  let* configuration_revision=text (value "configuration_revision" f) in
-  let+ ()=require (package_id=Capture.package_id && tool=Capture.tool) "Original Librarian part destination changed" in
-  {Capture.installation_id;package_id;tool;source_revision;configuration_revision}
+  let+ ()=require (destination.package_id=Capture.package_id && destination.tool=Capture.tool) "Original Librarian part destination changed" in
+  destination
 let candidate_json (id:Current.explicit_candidate_id) = `Assoc [
   "queue_generation",`String id.queue_generation;"request_id",`String id.request_id;
   "sequence",`Int id.sequence;"input_sha256",`String id.input_sha256]
@@ -138,7 +131,7 @@ let predecessor (part:part)=part.predecessor
 let original_through (part:part)=part.through
 let to_json (part:part) : Yojson.Safe.t = `Assoc ["schema",`Int 1;"kind",`String "candidate_part";
   "part_id",`String part.id;"owner",Capture.owner_to_json part.owner;
-  "destination",destination_json part.destination;
+  "destination",Destination.to_json part.destination;
   "predecessor",optional (fun id -> `String id) part.predecessor;
   "original_through",`Int part.through;"supersession",optional supersession_json part.supersession;
   "candidate_ids",`List (List.map candidate_json (Queue.candidate_ids part.original_batch));
@@ -159,7 +152,7 @@ let decode_part ~owner json =
   let part={id;owner;destination;original_batch;predecessor;through;supersession} in
   let+ ()=equal json (to_json part) "Noncanonical original candidate part" in part
 let check_record ~scope ~id ~destination (record:Owner.retained) =
-  require (record.scope=scope && record.request_id=id && record.installation_id=destination.Capture.installation_id
+  require (record.scope=scope && record.request_id=id && record.installation_id=destination.Destination.installation_id
     && record.package_id=destination.package_id && record.tool=destination.tool) "Original part differs from retained owner binding"
 let decode_record ~owner (record:Owner.retained) =
   let* part=decode_part ~owner record.request in
@@ -227,7 +220,7 @@ let original_capture ~store ~owner ~inventory ~(parent:part) execution_id =
   let* original=match original with Some original -> Ok original | None -> Error "Original parent execution is missing" in
   let* capture=Capture.restore ~owner ~load_parent:(load_parent inventory) original in
   let* ()=require (Capture.parent_part_id capture=parent.id) "Size proof belongs to another candidate part" in
-  let* ()=equal (destination_json (Capture.destination capture)) (destination_json parent.destination) "Size proof destination differs" in
+  let* ()=equal (Destination.to_json (Capture.destination capture)) (Destination.to_json parent.destination) "Size proof destination differs" in
   let* request=Capture.request capture in
   let* schema=match request.Exact.schema with Some schema -> Ok schema | None -> Error "Original Librarian execution schema missing" in
   let+ declaration_id=declaration_id (Capture.destination capture) in
@@ -316,8 +309,8 @@ let check_children (parent:part) (partition:partition_record) =
     "Invalid original partition child ownership" in
   let* expected_left,expected_right=match Queue.split parent.original_batch with
     | Some pair -> Ok pair | None -> Error "Singleton original part cannot split" in
-  let* ()=equal (destination_json parent.destination) (destination_json partition.left.destination) "Left child destination changed" in
-  let* ()=equal (destination_json parent.destination) (destination_json partition.right.destination) "Right child destination changed" in
+  let* ()=equal (Destination.to_json parent.destination) (Destination.to_json partition.left.destination) "Left child destination changed" in
+  let* ()=equal (Destination.to_json parent.destination) (Destination.to_json partition.right.destination) "Right child destination changed" in
   let* ()=equal (Queue.batch_to_json expected_left) (Queue.batch_to_json partition.left.original_batch) "Left child is not original ordered split" in
   equal (Queue.batch_to_json expected_right) (Queue.batch_to_json partition.right.original_batch) "Right child is not original ordered split"
 let validate_part_payload ~owner record = Result.map (fun _ -> ()) (decode_record ~owner record)

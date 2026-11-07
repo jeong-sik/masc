@@ -5989,6 +5989,11 @@
  (libraries alcotest yojson masc masc.fs_compat unix))
 
 (test
+ (name test_lane_addon_captured_destination)
+ (modules test_lane_addon_captured_destination)
+ (libraries alcotest yojson masc))
+
+(test
  (name test_lane_addon_original_body_inventory)
  (modules test_lane_addon_original_body_inventory)
  (libraries alcotest yojson masc masc.fs_compat masc.string_util unix))

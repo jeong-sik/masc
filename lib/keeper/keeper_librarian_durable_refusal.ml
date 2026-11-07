@@ -1,5 +1,6 @@
 module Request = Keeper_librarian_durable_request
 module Retained = Lane_addon_tool_request_owner
+module Destination = Lane_addon_captured_destination
 module Progress = Lane_addon_request_progress
 module Exact = Lane_addon_exact
 module Runtime = Keeper_librarian_runtime
@@ -178,7 +179,7 @@ let diagnosis stop = match stop.refusal with
   | Official_progress_boundary_missing _ | Committed_official_range_mismatch
   | Official_range_stopped _ | Fragment_store_unreadable _ | Fragment_line_unreadable _ -> None
 let blocks_destination stops current =
-  List.find_map (fun stop -> if Edge.same_destination current stop.destination
+  List.find_map (fun stop -> if Destination.same_semantic current stop.destination
     then Some stop.refusal else None) stops
 let blocked ~config ~reserved = function
   | [] -> None

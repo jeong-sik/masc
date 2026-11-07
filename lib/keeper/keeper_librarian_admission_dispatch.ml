@@ -1,5 +1,6 @@
 module Capture = Keeper_librarian_admission_capture
 module Owner = Lane_addon_tool_request_owner
+module Destination = Lane_addon_captured_destination
 module Exact = Lane_addon_exact
 module Runtime = Lane_addon_runtime
 module Submit = Lane_addon_submit_once
@@ -52,9 +53,7 @@ let confirm_destination ~config ~reserved ~(destination : Capture.destination) =
   Runtime.with_tool_request_destination ~config
     ~access:Lane_addon_sources.Operator_configuration ~reserved ~export
     ~publish:(fun (actual : Runtime.tool_request_destination) ->
-      if actual.installation_id = destination.installation_id
-         && actual.package_id = destination.package_id && actual.tool = destination.tool
-         && actual.configuration_revision = destination.configuration_revision
+      if Destination.same_semantic (Destination.of_runtime actual) destination
       then Ok ()
       else Error (Runtime.Host_refusal (Lane_addon_call_context.Rejected
         "Fresh admission destination differs from its original semantic configuration")))

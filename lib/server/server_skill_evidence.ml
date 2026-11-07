@@ -10,9 +10,7 @@ let composition_scope_to_string = function
 
 let request_of_string body =
   let open Result.Syntax in
-  try
-    match Yojson.Safe.from_string body with
-    | `Assoc fields ->
+  Result.bind (Server_json_object_body.fields body) (fun fields ->
       let names = List.map fst fields in
       if List.length names <> List.length (List.sort_uniq String.compare names)
          || not (List.for_all (fun name -> List.mem name [ "reference"; "composition_run_id" ]) names)
@@ -28,9 +26,7 @@ let request_of_string body =
             |> Result.map Option.some
             |> Result.map_error (fun _ -> "composition_run_id must be UUIDv7")
           | Some _ -> Error "composition_run_id must be UUIDv7" in
-        Ok (reference, run_id)
-    | _ -> Error "JSON object body required"
-  with Yojson.Json_error detail -> Error ("invalid json: " ^ detail)
+        Ok (reference, run_id))
 ;;
 
 let composition_evidence ~config ~composition_run_id reference =

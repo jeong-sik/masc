@@ -2817,7 +2817,6 @@ let fetch_runtime_probe ~(host : string) ~(port : int) ~(force : bool) :
 
 type runtime_config_commit_receipt = Masc_tui_runtime_config_receipt.t
 let decode_runtime_config_commit_receipt = Masc_tui_runtime_config_receipt.decode
-let runtime_config_commit_receipt_summary = Masc_tui_runtime_config_receipt.summary
 
 (** POST /api/v1/runtime/config/assignment — point a keeper at a runtime.
     [runtime_id = None] clears the explicit assignment back to the default. *)

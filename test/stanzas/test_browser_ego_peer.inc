@@ -2,7 +2,7 @@
  (name test_browser_ego_peer)
  (modules test_browser_ego_peer)
  (libraries masc masc.browser_lane masc.browser_configuration masc.string_util alcotest yojson base64 unix)
- (deps test_browser_ego_raw_type.cjs))
+ (deps test_browser_ego_raw_type.cjs browser_ego_page_events_source.cjs ../lib/browser_ego_page_events.ml))
 
 (test
  (name test_browser_ego_input_release)
@@ -40,6 +40,11 @@
  (action (run node %{dep:test_browser_ego_takeover.cjs})))
 
 (rule
+ (alias runtest-test_browser_ego_page_events)
+ (deps test_browser_ego_page_events.cjs browser_ego_page_events_source.cjs ../lib/browser_ego_page_events.ml)
+ (action (run node --test %{dep:test_browser_ego_page_events.cjs})))
+
+(rule
  (alias runtest-test_browser_ego_recovery)
  (deps test_browser_ego_recovery.cjs ../lib/browser_ego_recovery.ml)
  (action (run node --test %{dep:test_browser_ego_recovery.cjs})))
@@ -48,6 +53,7 @@
  (name runtest)
  (deps
   (alias runtest-test_browser_ego_recovery)
+  (alias runtest-test_browser_ego_page_events)
   (alias runtest-ego-takeover-js)
   (alias runtest-test_browser_ego_target)
   (alias runtest-test_browser_ego_upload)

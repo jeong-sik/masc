@@ -10,7 +10,7 @@ let finalize ~socket ~client ~store ~name ~arguments ~principal ~result =
   else
   let* route,verb=Browser_addon_tool.command arguments in
   match verb with
-  | B.Tabs_list|Page_read _|Page_document _|Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _
+  | B.Tabs_list|Page_read _|Page_document _|Page_cookies _|Page_network _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _
   | Page_goto _|Page_elements _|Page_act _
   | Page_context _ -> Ok result
   | Page_downloads _ ->

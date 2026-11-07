@@ -1417,6 +1417,94 @@ let test_storage_names_withhold_every_value () =
   check string "a read without a tab is refused" "before effect" (failure_kind (dispatch peer Live.Page_cookies (obj [])));
   check int "and neither runs a script" runs (List.length !asked)
 
+(* A page.network answer as mascNetworkLog emits it, with one row of each
+   state (L8 evidence c). *)
+let network_row ?(url="http://127.0.0.1:18775/x?tag=REDACTED&token=REDACTED") ?(cut=false) ?(state=["state",str "pending"]) () =
+  obj (["method",str "GET";"url",str url;"urlCut",`Bool cut;"timestamp",`Int 1794029599447;
+        "requestHeaders",obj ["names",`List [str "X-Masc-L8";str "Referer"];"total",`Int 2]] @ state)
+let network_answer ?(rows=[network_row ()]) ?(malformed=obj ["count",`Int 0;"last",`Null]) () =
+  obj ["requests",`List rows;"dropped",`Int 0;"malformedEvents",malformed;"fullBufferReads",`Int 0]
+let response_headers = "responseHeaders",obj ["names",`List [str "Content-Type"];"total",`Int 1]
+
+(* The answer is rebuilt from what was parsed: a row whose address keeps a
+   user, a fragment or a query value, or a field the script does not name, is
+   refused instead of passed on. *)
+let test_network_log_rebuilds_every_row () =
+  let asked = ref [] in
+  let reply = ref (refused "no reply set") in
+  let peer = opened (fun sent ->
+    asked := sent :: !asked;
+    match sent.step with
+    | "tabs.list" -> answered tabs
+    | "page.network" -> !reply
+    | other -> failf "unexpected network step %s" other) in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  let read ?(tab_id=1) () = dispatch peer Live.Page_network (obj ["tabId",`Int tab_id]) in
+  let rows = [
+    network_row ();
+    network_row ~state:["state",str "responded";"status",`Int 200;"mimeType",str "text/plain";response_headers] ();
+    network_row ~state:["state",str "completed";"status",`Int 302;"mimeType",str "";"bytesReceived",`Int 171;response_headers] ();
+    network_row ~state:["state",str "failed";"error",str "blocked: inspector"] ();
+    network_row ~url:"data:" ~cut:true () ] in
+  reply := answered (network_answer ~rows ());
+  (match read () with
+   | Ok answer ->
+     check int "the tab" 1 (Yojson.Safe.Util.to_int (field "tabId" answer));
+     check (list string) "every row as the script answered it"
+       (List.map Yojson.Safe.to_string rows)
+       (List.map Yojson.Safe.to_string (Yojson.Safe.Util.to_list (field "requests" answer)));
+     check string "the counts" {|{"count":0,"last":null}|} (Yojson.Safe.to_string (field "malformedEvents" answer))
+   | other -> failf "the network read was %s" (failure_kind other));
+  check string "the Page it names" "p1" (text (field "label" (List.hd !asked).args));
+  reply := answered (network_answer ~rows:[]
+    ~malformed:(obj ["count",`Int 2;"last",str "Network.loadingFinished: finished without a response or encodedDataLength"]) ());
+  (match read () with
+   | Ok answer -> check int "malformed events are counted" 2 (Yojson.Safe.Util.to_int (field "count" (field "malformedEvents" answer)))
+   | other -> failf "a log with malformed events was %s" (failure_kind other));
+  List.iter (fun (label, value) ->
+    reply := answered value;
+    check string label "before effect" (failure_kind (read ())))
+    ["a query value is refused", network_answer ~rows:[network_row ~url:"http://a.test/x?token=secret" ()] ();
+     "a user in the address is refused", network_answer ~rows:[network_row ~url:"http://user:pw@a.test/x" ()] ();
+     "a fragment is refused", network_answer ~rows:[network_row ~url:"http://a.test/x#t" ()] ();
+     "a scheme-only address not marked cut is refused", network_answer ~rows:[network_row ~url:"data:" ()] ();
+     "header values instead of names are refused",
+       network_answer ~rows:[obj ["method",str "GET";"url",str "http://a.test/";"urlCut",`Bool false;"timestamp",`Int 1;
+         "requestHeaders",obj ["Cookie",str "secret"];"state",str "pending"]] ();
+     "more header names than the total is refused",
+       network_answer ~rows:[obj ["method",str "GET";"url",str "http://a.test/";"urlCut",`Bool false;"timestamp",`Int 1;
+         "requestHeaders",obj ["names",`List [str "a";str "b"];"total",`Int 1];"state",str "pending"]] ();
+     "a state the script does not name is refused", network_answer ~rows:[network_row ~state:["state",str "done"] ()] ();
+     "a completed row without its byte count is refused",
+       network_answer ~rows:[network_row ~state:["state",str "completed";"status",`Int 200;"mimeType",str "";response_headers] ()] ();
+     "a malformed count without its reason is refused", network_answer ~malformed:(obj ["count",`Int 1;"last",`Null]) ();
+     "more rows than the log keeps is refused",
+       network_answer ~rows:(List.init (Masc.Browser_ego_page_events.requests_limit + 1) (fun _ -> network_row ())) ();
+     "an answer with more fields is refused",
+       (match network_answer () with `Assoc fields -> obj (fields @ ["extra",`Null]) | other -> other)];
+  reply := failed "the tab's network log was not read: ego returned a non-array event buffer";
+  check string "a drain that threw is a failed read" "before effect" (failure_kind (read ()));
+  let runs = List.length !asked in
+  check string "an operator tab is refused" "before effect" (failure_kind (read ~tab_id:2 ()));
+  check string "a read without a tab is refused" "before effect" (failure_kind (dispatch peer Live.Page_network (obj [])));
+  check int "and neither runs a script" runs (List.length !asked)
+
+(* ego's buffer empties on every drain, so one shared drain reads it and the
+   step scripts that need events call it (RFC-browser-ego-cdp-capabilities
+   §3.4). *)
+let test_one_drain_reads_the_event_buffer () =
+  let count text part =
+    let width = String.length part in
+    let rec from index found =
+      if index + width > String.length text then found
+      else from (index + 1) (if String.sub text index width = part then found + 1 else found) in
+    from 0 0 in
+  check int "the shared drain reads ego's buffer once" 1 (count Masc.Browser_ego_page_events.script ".events()");
+  List.iter (fun (name, script) ->
+    check int (name ^ " never reads ego's buffer itself") 0 (count script ".events()");
+    check bool (name ^ " drains through mascPageEvents") true (contains script "mascPageEvents(page)"))
+    ["the workflow", Masc.Browser_ego_workflow.script; "native typing", Masc.Browser_ego_raw_type.script]
+
 (* What leaves the peer says where input stands and which SDK process ran
    it, failures included. *)
 let test_every_answer_carries_the_input_state () =
@@ -1534,6 +1622,7 @@ let test_the_scripts_parse_as_modules () =
         "tab",obj ["url",str observed_url;"title",str "Slack"]])
     | "page.downloads" -> answered (obj ["since",`Null;"rows",`List []])
     | "page.cookies" -> answered (storage_answer ())
+    | "page.network" -> answered (network_answer ())
     | "page.upload" -> answered (obj ["error",`Null;"dialog",`Null;"tab",`Null])
     | "page.choose_files" -> answered (obj ["error",`Null;"dialog",`Null;"tab",`Null])
     | "page.emulation" -> answered (obj ["applied",`List [];"before",`Null;"observed",`Null])
@@ -1549,6 +1638,7 @@ let test_the_scripts_parse_as_modules () =
       Live.Page_snapshot, obj ["tabId",`Int 1;"maxChars",`Int 1000;"scope",str "subtree";"root",str "@12"];
       Live.Page_downloads, obj ["tabId",`Int 1];
       Live.Page_cookies, obj ["tabId",`Int 1];
+      Live.Page_network, obj ["tabId",`Int 1];
       Live.Page_capture, obj ["tabId",`Int 1];
       Live.Page_act, act_args (Lane.Action.Open_tab "https://example.test/");
       Live.Page_goto, obj ["tabId",`Int 1;"url",str "https://example.test/"];
@@ -1577,7 +1667,7 @@ let test_the_scripts_parse_as_modules () =
       Live.Page_interact, interact_args (Lane.Drag {from={x=0.25;y=0.5};to_={x=0.75;y=0.5};viewport;via=[];duration_ms=0}) ];
   check (result unit string) "finish" (Ok ()) (Peer.finish peer);
   check (list string) "every step"
-    ["space.open";"tabs.list";"page.read";"page.document";"page.elements";"page.scene";"page.snapshot";"page.downloads";"page.cookies";"page.capture";
+    ["space.open";"tabs.list";"page.read";"page.document";"page.elements";"page.scene";"page.snapshot";"page.downloads";"page.cookies";"page.network";"page.capture";
      "page.open";"page.goto";"page.target";"page.pointer";"page.pointer";"page.pointer";"page.keyboard";"page.input";"page.target_input";"page.viewport";"page.touch";"page.touch";
      "page.close";"page.reload";"page.stop_loading";"page.history";"page.dialog";"page.dialog";"page.upload";"page.choose_files";"page.emulation";"page.emulation";"page.block_requests";"page.block_requests";"space.finish"]
     (List.rev_map fst !scripts);
@@ -1604,6 +1694,9 @@ let test_the_scripts_parse_as_modules () =
       check bool "the cookies are listed for the URL the page answered" true
         (contains script "Network.getCookies" && contains script "{urls: [seen.url]}");
       check bool "and the value is dropped in the SDK process" false (contains script "cookie.value")
+    | "page.network" ->
+      check bool "the log is read through the shared drain" true
+        (contains script "mascNetworkLog(page)" && contains script Masc.Browser_ego_page_events.script)
     | _ -> ())
     !scripts
 
@@ -1673,6 +1766,7 @@ let test_the_peer_serves_what_the_lane_table_says () =
     | "space.adopt_tab" -> answered (obj ["label",str "adopted";"targetId",str "T9";"openedBy",str "unknown"])
     | "page.downloads" -> answered (obj ["since",`Null;"rows",`List []])
     | "page.cookies" -> answered (storage_answer ())
+    | "page.network" -> answered (network_answer ())
     | "page.upload" -> answered (obj ["error",`Null;"dialog",`Null;"tab",`Null])
     | "page.emulation" -> answered (obj ["applied",`List [str "locale"];"before",`Null;"observed",`Null])
     | "page.block_requests" -> answered (obj ["blocked",`List [str "ads.example.com"]])
@@ -1723,7 +1817,8 @@ let test_the_peer_serves_what_the_lane_table_says () =
     | File_upload -> Page_act (Action.On_tab {tab_id=1;interaction=Action.Upload {target=Action.File_input "#file";paths=[upload_file]}})
     | Environment_emulation -> Page_act (Action.On_tab {tab_id=1;interaction=Action.Set_emulation {geolocation=None;locale=Some "fr-FR";timezone=None}})
     | Request_blocking -> Page_act (Action.On_tab {tab_id=1;interaction=Action.Block_requests ["ads.example.com"]})
-    | Storage_listing -> Page_cookies {tab_id=1}) in
+    | Storage_listing -> Page_cookies {tab_id=1}
+    | Request_listing -> Page_network {tab_id=1}) in
   List.iter (fun capability ->
     let name = Lane.live_capability_to_wire capability in
     let asked = verb_asking_for capability in
@@ -4269,6 +4364,8 @@ let () =
       test_case "ego location, locale and time zone are CDP overrides on its Page" `Quick test_emulation_is_a_cdp_override_on_the_page;
       test_case "ego request blocking is a CDP setting on its Page" `Quick test_request_blocking_is_a_cdp_setting_on_the_page;
       test_case "ego storage names withhold every value" `Quick test_storage_names_withhold_every_value;
+      test_case "ego network log rebuilds every row" `Quick test_network_log_rebuilds_every_row;
+      test_case "one drain reads the ego event buffer" `Quick test_one_drain_reads_the_event_buffer;
       test_case "a dialog-interrupted workflow stays uncertain until a new click settles, without replay" `Quick test_dialog_interrupted_workflow_stays_uncertain_until_a_new_click_settles;
       test_case "native workflows retain input ownership after a lost result" `Quick test_native_workflow_pointer_ownership;
       test_case "a workflow that never held input keeps the previous readiness" `Quick test_a_workflow_that_never_held_input_keeps_the_previous_readiness;

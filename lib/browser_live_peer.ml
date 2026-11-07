@@ -3,7 +3,7 @@ type disposition = Not_started | Uncertain
 type failure = Before_effect of string | Partial_failure of partial_failure | Outcome_unknown of string
   | Observed_failure of { disposition : disposition; message : string; receipt : Yojson.Safe.t }
 type verb = Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact | Page_act
-  | Page_goto | Page_context | Page_snapshot | Page_downloads | Page_cookies | Page_native_workflow
+  | Page_goto | Page_context | Page_snapshot | Page_downloads | Page_cookies | Page_network | Page_native_workflow
 [@@deriving enumerate]
 let verb_to_wire = function
   | Browser_info -> "browser.info" | Tabs_list -> "tabs.list" | Page_read -> "page.read"
@@ -11,6 +11,7 @@ let verb_to_wire = function
   | Page_native_workflow -> "page.native_workflow"
   | Page_interact -> "page.interact" | Page_act -> "page.act" | Page_goto -> "page.goto" | Page_context -> "page.context"
   | Page_snapshot -> "page.snapshot" | Page_downloads -> "page.downloads" | Page_cookies -> "page.cookies"
+  | Page_network -> "page.network"
 let verb_of_wire s = List.find_opt (fun v -> String.equal (verb_to_wire v) s) all_of_verb
 open Result.Syntax
 let decode (issued : Browser_lane.issued) =

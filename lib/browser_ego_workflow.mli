@@ -1,6 +1,8 @@
 (** Fixed SDK call loop used only with a decoded native workflow. Caller Page
     source is data for Ego's browser expression channel; the Node/host process
-    never executes it. Ego owns locator/actionability/waits. *)
+    never executes it. Ego owns locator/actionability/waits. Its events step
+    drains with [mascPageEvents]; the step includes
+    [Browser_ego_page_events.script]. *)
 val script : string
 
 val native_error_script : string

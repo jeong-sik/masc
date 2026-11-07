@@ -30,7 +30,7 @@ let required_actions args = match args with
 (* The [mode] argument of BrowserRead, read once. The top-level reads take
    the page as a whole; [dialog] reads a live connection's open dialog. The tool schema's enum names the same values. *)
 type top_level_read =
-  [ `Text | `Html | `Elements | `Scene | `Regions | `Snapshot | `Screenshot | `Downloads | `Cookies ]
+  [ `Text | `Html | `Elements | `Scene | `Regions | `Snapshot | `Screenshot | `Downloads | `Cookies | `Network ]
 [@@deriving enumerate]
 
 type read_mode = [ top_level_read | `Dialog ] [@@deriving enumerate]
@@ -45,6 +45,7 @@ let read_mode_to_string : read_mode -> string = function
   | `Screenshot -> "screenshot"
   | `Downloads -> "downloads"
   | `Cookies -> "cookies"
+  | `Network -> "network"
   | `Dialog -> "dialog"
 ;;
 
@@ -72,7 +73,7 @@ let retain_read_result ~base_path ~tool_name ~start_time args result =
   let retained = match read_mode_of_args args with
     | Ok `Scene -> Browser_observation.retain ~base_path ~view:Browser_lane.Content result
     | Ok `Regions -> Browser_observation.retain ~base_path ~view:Browser_lane.Regions result
-    | Ok (`Text | `Html | `Elements | `Snapshot | `Screenshot | `Downloads | `Cookies | `Dialog) | Error _ -> Ok result in
+    | Ok (`Text | `Html | `Elements | `Snapshot | `Screenshot | `Downloads | `Cookies | `Network | `Dialog) | Error _ -> Ok result in
   match retained with
   | Ok result -> result
   | Error detail ->

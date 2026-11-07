@@ -134,7 +134,7 @@ let script = {js|async function nativeTypeWindow(task, page, binding, index, tex
     need(Object.keys(await cdp('add_binding','addBinding','Runtime.addBinding',
       {name:slot.bindingName,executionContextName:slot.worldName})).length === 0);
     capture.phase='bootstrap_events';
-    const bootstrap=nativeEvents(await page.events());capture.setup.events=bootstrap;
+    const bootstrap=nativeEvents(await mascPageEvents(page));capture.setup.events=bootstrap;
     const contexts=[];
     for (let position=0;position<bootstrap.length;position++) {
       const event=bootstrap[position];
@@ -171,7 +171,7 @@ let script = {js|async function nativeTypeWindow(task, page, binding, index, tex
     need(answer === undefined);
     await marker('end_marker','endReply',end);
     capture.phase='interval_events';
-    const interval=nativeEvents(await page.events());capture.events=interval;
+    const interval=nativeEvents(await mascPageEvents(page));capture.events=interval;
     const starts=[],ends=[];
     for (let position=0;position<interval.length;position++) {
       const event=interval[position];

@@ -15,7 +15,7 @@ type operation =
   | Read_frames | Frame_interaction | Read_dialog | Accept_dialog | Dismiss_dialog
   | Hand_off | Take_over | Space_status | Finish_space | Wait_for_control | Adopt_tab | Release_tab
   | Upload_file | List_downloads | Page_zoom | Resize_viewport | Touch
-  | Read_clipboard | Write_clipboard | Emulate_environment | Intercept_network | Read_storage
+  | Read_clipboard | Write_clipboard | Emulate_environment | Intercept_network | Read_storage | Read_network
 type tool = Tabs | Read | Interact | Act | Session | Goto
 type invocation = { tool : tool; action : string option; mode : string option }
 type support = Available of invocation

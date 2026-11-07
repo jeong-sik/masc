@@ -10,8 +10,9 @@ const script = name => fs.readFileSync(path.join(__dirname, '../lib/', name), 'u
 // is a stand-in; these cases make no real browser/runtime claims.
 const nativeErrorSource = fs.readFileSync(path.join(__dirname, '../lib/browser_ego_workflow.ml'), 'utf8')
   .split('let native_error_script = {js|')[1].split('|js}')[0];
-const run = vm.runInNewContext(nativeErrorSource + '\n' + script('browser_ego_raw_type.ml') + '\n('
-  + script('browser_ego_workflow.ml') + ')');
+const pageEvents = require('./browser_ego_page_events_source.cjs')();
+const run = vm.runInNewContext(nativeErrorSource + '\n' + pageEvents + '\n' + script('browser_ego_raw_type.ml') + '\n('
+  + script('browser_ego_workflow.ml') + ')', {URL});
 const sentinel = 'PRIVATE_WORKFLOW_NATIVE_HEADER_SENTINEL';
 async function scenario(mode) {
   const calls = [], queues = new Map();

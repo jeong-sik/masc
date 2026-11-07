@@ -246,8 +246,8 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 | C2b | GitHub 로그인(설계 §5.2.1). OAuth App의 code + PKCE(S256) + `state`이고, code를 서버에서 client secret으로 바꾼 access token으로 `GET /user`를 한 번 읽어 숫자 `id`를 `External_identity.Github`로 결속한다. scope 없이 요청하고 access token은 저장하지 않는다. `login`과 email은 표시 자료다. 입장은 (b)다. (a)는 C2d가 두 흐름에 함께 더하고, (c)는 없다. 시험은 고정한 응답을 내는 전송 함수로 하고 GitHub에 접속하지 않는다(아래 C2b 범위). 시험 벡터에 `state` 불일치, 토큰 교환 오류 응답, `GET /user` 실패와 `id` 없는 응답, 같은 사람의 Google·GitHub 로그인이 서로 다른 principal로 남는 경우(계정 링크 금지, 설계 §5.1-5), 만료됐거나 취소된 초대 token을 넣는다. | §5.1, §5.2.1 | A2, B3, C2a |
 | C2d | 입장 (a) allowlist(2026-11-06 사용자 결정으로 C2a에서 떼어 C2b 뒤에 둔다). Admin이 `External_identity.t`를 등록하고 지우는 사건, 등록된 신원의 첫 로그인이 입장 레코드 하나로 User를 만드는 갈래(초대 대신 등록 항목을 가리킨다)다. 입장은 §5.1-3의 같은 구역에서 같은 신원의 User가 있는지 보고, 있으면 409다. 등록을 지우는 사건은 intent를 쓰고, 등록은 쓰지 않는다(아래 C2d 범위, 2026-11-06 사용자 결정). 삭제된 principal의 신원을 등록하면 `previously_deleted`를 보인다(§5.1-6). 등록한 신원은 purge 대상이 아닌 `authz.jsonl`에 남는다. masc Admin은 개인 Gmail의 `sub`를 미리 알 수 없어서, Google 쪽은 주로 삭제된 신원을 다시 들일 때 쓴다. GitHub 숫자 `id`는 공개 API로 알 수 있다. 시험 벡터에 등록 안 된 신원의 거절, 등록을 지운 뒤의 로그인 거절, 같은 신원의 등록 입장과 초대 입장이 겹친 경우(409), 삭제된 신원의 재등록을 넣는다. | §5.1 | B3, C2a, C2b |
 | C2c | 2단계. 입장 요청(c). 도메인 정책(`oidc.admission_request_domains`)이 있으면 미등록 `(iss, sub)`의 입장 요청 조건(`hd`·`email_verified`)과 입장 요청 기록·Admin 승인(§5.1-2c, §5.1-7)을 함께 낸다. 입장 요청의 개수 상한과 상한을 넘었을 때의 동작, 만료 시간, 종단 요청의 보존 기간을 이 층에서 정한다. 시험 벡터에 `hd` 없음, `hd` 불일치, `email_verified=false`, 정책 아래에서 (a)나 (b)로 들어오는 `hd` 없는 사용자의 로그인 허용, `hd` 대소문자(`A.com`), 승인 때 요청의 도메인이 정책에 없거나 정책이 비어 있는 경우(승인 거부), `Pending` 중 재로그인(새 요청 없음), 두 Admin의 동시 승인(409)과 승인·거절이 겹친 경우(User가 생긴 쪽이 이김), (a)나 (b)로 User가 생긴 뒤 같은 `(iss, sub)`의 `Pending`이 `Superseded`로 읽히고 승인 대기 목록에 나오지 않는 경우, 거절 뒤 재로그인(새 요청 없음)과 (a)로의 입장, 만료된 요청의 승인 거부와 새 요청 허용, 시계가 되감겨 `Expired`가 `Pending`으로 돌아와도 승인 검사가 같은 시계를 쓰는 경우, 이미 입장한 요청에 거절을 누르면 409, 승인된 요청의 User 삭제 뒤 승인 대기 목록에 되살아나지 않는 경우와 새 요청 허용, `Superseded`였던 요청의 User 삭제 뒤 `previously_deleted`와 함께 `Pending`으로 보이는 경우, 복원으로 요청 저장소가 뒤처져 `Pending`이 남은 경우(User가 있으면 승인 대기 목록에 나오지 않는다), `previously_deleted` 표지가 있는 `(iss, sub)`의 입장 요청 화면, `Disabled` 등록 사용자의 로그인(정책 면제가 §4.1 Disabled 규칙을 덮지 않는다), 만료됐거나 취소된 초대 token을 넣는다. | §5.1, §5.2 | C2a, C6 |
-| C3 | Google·GitHub 로그인 HTTP 경로(`POST /auth/oidc/start`, `GET /auth/oidc/callback`, `POST /auth/github/start`, `GET /auth/github/callback`, 비공개 데이터가 없는 200 HTML 완료 화면, `Masc_http_client` 연결). 경로 등록은 구역을 받는 함수 하나이고 S1이 부팅에서 연 구역으로 부른다. 다계정에서 `__Host-` 세션·transaction·mcp 쿠키, 세션에 결속한 CSRF 토큰, 출처 검사, cookie와 Bearer가 함께 오면 거부, WS/SSE 결속과 폐기 때 닫기, 원격 query credential 차단. | §5.2, §5.3 | A2, C2a, C2b |
-| C4 | scoped PAT와 Service credential 레코드(principal + `Pat_scope`), 새 `Auth_gate.decide`로 HTTP strict와 MCP 호출자 token 해석 통합, 다계정에서 caller alias 유지·workspace secret(HTTP 복구 grace 포함, `auth.ml:216`)·auth disabled 경로 제거, `agent_credential` 읽기 거부. `Mcp_oauth_token`은 C5 전까지 Reject. | §5.3 | A2, A3, A4d, C3 |
+| C3 | Google·GitHub 로그인 HTTP 경로(`POST /auth/oidc/start`, `GET /auth/oidc/callback`, `POST /auth/github/start`, `GET /auth/github/callback`, 비공개 데이터가 없는 200 HTML 완료 화면, `Masc_http_client` 연결), 로그아웃, 세션 조회, Admin allowlist 경로. 경로 등록은 구역을 받는 함수 하나이고 S1이 부팅에서 연 구역으로 부른다. 브라우저 세션 레코드(발급 뒤 7일). 다계정에서 `__Host-` 세션·transaction 쿠키, 세션에 결속한 CSRF 토큰, 출처 검사, cookie와 Bearer가 함께 오면 거부, 원격 query credential 차단(아래 C3 범위). | §5.2, §5.3 | A2, C2a, C2b, C2d |
+| C4 | scoped PAT와 Service credential 레코드(principal + `Pat_scope`), 새 `Auth_gate.decide`로 HTTP strict와 MCP 호출자 token 해석 통합, 다계정에서 caller alias 유지·workspace secret(HTTP 복구 grace 포함, `auth.ml:216`)·auth disabled 경로 제거, `agent_credential` 읽기 거부. `Mcp_oauth_token`은 C5 전까지 Reject. C3의 요청 검사 함수를 요청 경로에 건다. WS/SSE·MCP transport를 세션이나 PAT에 결속하고(`__Host-masc_mcp_session`), 폐기 때 닫는다(2026-11-07 C3에서 옮김). | §5.3 | A2, A3, A4d, C3 |
 | C5 | MCP OAuth 승인을 OIDC session에 결속한다. OAuth 스택(#46336, #46337, #46340, #46343, #46356, #46379)이 main에 들어간 뒤에만 연다. 결속 전에는 C4의 Reject가 그대로다. | §5.3 | C3, C4, OAuth 스택 병합 |
 | C6 | Dashboard 화면(이슈 #46828). 다계정에서만 켜지고 `Single_user`의 bearer 방식은 그대로다. ① 인증이 필요한 요청이 거부되면 Google·GitHub 로그인 화면으로 보내고, 다계정에서는 저장한 bearer를 `Authorization`에 붙이지 않는다. ② 초대 링크 화면. fragment의 초대 token을 폼 POST로 보낸다(설계 §5.1-4). ③ Admin의 초대 발급·취소와 allowlist 등록 화면. 삭제된 principal의 신원에는 `previously_deleted`를 함께 보인다. 입장 대기 화면과 입장 요청 목록은 C2c와 함께 2단계다. 서버 API와 응답 형태는 C2a·C2b·C2d·C3가 정하고 이 층은 호출만 한다. 시험은 화면 문구나 행 순서가 아니라 상태 전이로 한다(요청 거부 → 로그인 이동, 초대 소비 → 세션 발급, 초대 취소 → 소비 거부). 20k token을 넘으면 ①②와 ③으로 쪼갠다. | §5.1, §5.2 | C2a, C2b, C2d, C3 |
 
@@ -369,6 +369,61 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
   - C2d-8: 삭제된 신원을 다시 등록하면 `previously_deleted`가 보인다.
 - 하지 않는 것: HTTP 경로(C3), 화면(C6), 입장 요청(C2c), Google `sub`를 email로 찾기.
 
+**C3 범위** (로그인 HTTP 경로와 브라우저 세션, 2026-11-07)
+
+- 사용자 결정(2026-11-07).
+  - 브라우저 세션은 `authz.jsonl` 레코드다. 발급과 폐기를 레코드로 쓴다. 서버가 다시 시작해도 로그인이 남는다.
+  - 세션은 발급하고 7일 뒤 끝난다. 쓰는 동안 늘리지 않는다.
+- 지금 있는 것.
+  - 로그인 흐름은 `Google_login_flow`(C2a-5)와 `Github_login_flow`(C2b-3c)다. 둘 다 start와 callback을 내고 쿠키는 보지 않는다. transaction 저장소(`Oidc_login_transaction`)는 흐름을 가린다. 다른 흐름이 시작한 transaction은 `Other_flow`로 거절한다.
+  - 세션 레코드는 없다. `Authz_records.Auth_binding_status`(Active·Revoked) 타입만 있다.
+  - 경로는 `Http_server_eio`의 router에 `Server_route.get`·`post`로 단다(`lib/server/server_routes_http.ml:15-47`). 로그인 전에 오는 경로의 접근 표시는 `Self_authenticated Oauth_protocol`이다. 선례는 Keeper OAuth callback이다(`server_keeper_oauth_http.ml:30-39, 216`). HTML은 `Http.Response.html`로 낸다.
+  - HTTP/2는 router의 `dispatch`를 거치지 않는다. `server_h2_gateway.ml`에 경로마다 손으로 쓴 갈래가 있고, 갈래가 없는 경로는 404다(`:2084-2085`).
+  - 쿠키는 `get_cookie_value`(`server_mcp_transport_http_session.ml:654-664`)가 읽는다. 쓰는 곳은 `mcp-session-id` 하나다(`server_mcp_transport_http_headers.ml:336-339`).
+  - 바깥 HTTPS는 `Masc_http_client.get_response_sync`·`post_response_sync`다. 이것을 `Login_transport.get`·`post`로 바꾸는 서버 함수는 없다.
+  - 서버는 S1 전에 구역을 쥐지 않는다. 다계정 부팅은 `Authz_boot_mode_read.decide`가 멈춘다. 그래서 이 층의 경로는 시험이 구역을 열고 router에 달아 부른다.
+- 세션 레코드.
+  - Kind `Session`. 쓰는 이는 인증된 Human이다.
+  - 사건은 `Issued { session_id; user_id; secret_digest; replaces }`와 `Revoked { session_id }`다. `secret_digest`는 쿠키 secret의 SHA-256이다. secret은 쿠키에만 있고 레코드와 로그에 싣지 않는다.
+  - 발급은 그 세션의 `user_id`가 쓴다. `replaces`는 callback이 받은 기존 세션이다. 새 발급과 옛 세션 폐기가 레코드 하나라서 한 번에 일어난다(설계 §5.2). 옛 세션은 다른 사람의 것이어도 된다. 서버는 쿠키의 secret을 맞춰 본 세션만 `replaces`에 넣는다.
+  - 폐기는 그 세션의 `user_id`가 쓴다(로그아웃). Admin이 남의 세션을 끊는 길은 principal `Disable`이다. 세션을 읽을 때 principal이 Active인지 본다.
+  - 폐기와 `replaces`가 있는 발급은 끊는 세션을 subject로 한 `Revoke` intent를 쓴다(설계 §8.1 `auth_binding_epoch`, §8.2). 복원이 폐기를 되감으면 끊은 세션이 다시 살아나기 때문이다. `replaces`가 없는 발급은 intent를 쓰지 않는다. 되감기면 그 세션이 사라져 로그아웃될 뿐이다.
+  - 만료는 레코드에 쓰지 않는다. 발급 레코드의 `at_ms`에 7일을 더한 시각이 지나면 읽을 때 거절한다.
+  - Subject `Session of session_id`(설계 §4.5).
+- 쿠키와 요청 검사.
+  - 쿠키 둘은 설계 §5.2의 속성을 따른다. `__Host-masc_session`의 값은 session ID와 secret이다. secret은 OS CSPRNG의 32바이트다. 서버는 ID로 세션을 찾고 digest를 `Eqaf.equal`로 비교한다.
+  - CSRF token은 저장하지 않고 secret에서 만든다(용도 이름을 붙인 SHA-256). 쿠키가 HttpOnly라서 화면은 secret을 읽지 못한다. 화면은 `GET /auth/session`의 답에서 CSRF token을 받는다.
+  - 요청 검사는 함수 하나다. 다계정에서 세션 쿠키와 bearer가 함께 오면 401이다. 세션 쿠키가 있는 GET·HEAD 밖의 요청은 Origin이 같은 출처이고 CSRF 헤더가 맞아야 한다. Origin이 없으면 거절한다. 원격 query credential(`token`, `sse_kind=observer`, IDE LSP)은 다계정에서 401이다.
+  - 이 함수를 요청 경로에 거는 일은 C4의 `Auth_gate.decide`가 한다.
+- 경로. 등록 함수 하나가 구역, transaction 저장소, 두 login client, 전송, 시계, 뽑기를 받는다. S1이 부팅에서 부른다.
+  - `POST /auth/oidc/start`, `POST /auth/github/start`. 폼으로 초대 token(선택)과 `return_to`를 받는다. 같은 출처 Origin을 요구한다. 남의 초대 token을 담은 로그인을 피해자 브라우저에서 시작시키지 못하게 하려는 것이다. transaction ID를 `__Host-masc_oidc_txn`에 싣고 인가 URL로 303을 보낸다.
+  - `GET /auth/oidc/callback`, `GET /auth/github/callback`. transaction 쿠키만 인증 입력이다. 다른 흐름의 transaction은 401이다.
+    - 입장 판정이 로그인이면 세션을 발급한다. 맞춰 본 기존 세션은 `replaces`로 같이 끊는다.
+    - 답은 비공개 데이터가 없는 200 HTML 완료 화면이다. 거절은 일반 문구의 HTML이고, 409(`Authz_login.is_conflict`)와 401·403·503을 가린다.
+    - transaction 쿠키는 어느 답에서나 지운다.
+  - `POST /auth/logout`. CSRF 검사를 받고, 폐기를 쓰고, 세션 쿠키를 지운다.
+  - `GET /auth/session`. 세션의 `user_id`, 끝나는 시각, CSRF token을 JSON으로 낸다. 캐시하지 않는다.
+  - Admin allowlist 경로 `POST /api/v1/auth/allowlist`, `DELETE /api/v1/auth/allowlist/<id>`. 세션과 CSRF를 검사하고 Admin인지 본 뒤 `Authz_allowlist.register`·`remove`(C2d-8)를 부른다.
+  - 전송은 `Masc_http_client`를 `Login_transport`로 바꾸는 서버 함수다.
+- 층. C3-1~5는 C2d처럼 한 층에 하나씩 더한다.
+  - C3-1 session ID와 사건 본문.
+  - C3-2 Kind `Session`. 상태는 아직 `Kind_not_read`로 거절한다.
+  - C3-3 Subject `Session`과 설계 §4.5·§5.2·§8.2 문장.
+  - C3-4 세션 상태.
+  - C3-5 `Authz_state`가 Kind를 읽는다.
+  - C3-6 세션 발급·인증·폐기와 CSRF token(`lib/auth`).
+  - C3-7 쿠키와 요청 검사 함수.
+  - C3-8 전송 연결과 로그인 경로(start·callback·logout·session, 완료 화면).
+  - C3-9 Admin allowlist 경로. C2d가 main에 들어간 뒤 쌓는다.
+- 옮긴 것.
+  - WS/SSE의 세션 결속과 폐기 때 닫기는 C4로 옮긴다. 연결은 C4의 `Auth_gate.decide`가 요청을 세션으로 인증한 뒤에야 세션을 안다. C3에 두면 아무도 채우지 않는 필드가 남는다. `__Host-masc_mcp_session`도 transport 결속과 함께 C4가 만든다.
+  - 경로를 `make_routes`에 다는 일과 HTTP/2 갈래는 S1이 한다. S1 전에는 서버에 구역이 없다.
+- 시험.
+  - C3-4·5: 남의 세션 폐기 거절, 두 번 폐기 거절, 끝난 세션을 `replaces`로 받지 않음, 폐기와 `replaces` 발급의 intent, 7일 만료.
+  - C3-6·7: secret이 틀린 쿠키, 만료된 세션, Disable된 principal의 세션, cookie와 bearer가 함께 온 요청, Origin 없는 POST, CSRF 불일치, 원격 query credential.
+  - C3-8: 시험이 Google과 GitHub을 흉내 내고 구역을 직접 연다. 다른 흐름의 transaction 쿠키는 401, callback이 기존 세션을 끊음, 같은 초대의 동시 소비는 409, 거절 화면에 token과 secret이 없음.
+- 하지 않는 것: `Auth_gate.decide`와 요청 경로 연결(C4), MCP OAuth 결속(C5), 화면(C6), 경로 등록과 HTTP/2(S1).
+
 ### D. 소유권과 실행 게이트
 
 | 층 | 결과 | 설계 | 선행 |
@@ -391,7 +446,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 
 | 층 | 결과 | 설계 | 선행 |
 |---|---|---|---|
-| S1 | 부팅이 `Multi_account_not_served` 거부를 거두고 다계정 로그를 서빙한다. 활성화 전 요청(§5.1 표 5행)의 거부는 남는다(B3d). `masc auth bootstrap`의 도움말·성공 문구와 5행 부팅 문구(`Activation_requested`)에서 서버가 부팅을 멈춘다는 문장을 고친다. 부팅이 구역(`Authz_zone.open_at_start`)을 열어 쥐고, 그 구역을 C2a~C4의 다계정 경로와 D1~D4의 실행 게이트에 넘긴다. 설치 기록이 없거나 로그가 없거나 비었을 때 구역의 열기가 무엇을 돌려줄지, `Multi_account_uncertain`에서 무엇을 서빙할지 이 층이 정한다. 설계 §11.1의 1단계 개시 증거를 이 층에서 모은다. | §5.1, §8.2, §11.1 | B3, C4, C6, D4 |
+| S1 | 부팅이 `Multi_account_not_served` 거부를 거두고 다계정 로그를 서빙한다. 활성화 전 요청(§5.1 표 5행)의 거부는 남는다(B3d). `masc auth bootstrap`의 도움말·성공 문구와 5행 부팅 문구(`Activation_requested`)에서 서버가 부팅을 멈춘다는 문장을 고친다. 부팅이 구역(`Authz_zone.open_at_start`)을 열어 쥐고, 그 구역을 C2a~C4의 다계정 경로와 D1~D4의 실행 게이트에 넘긴다. C3의 로그인 경로를 `make_routes`에 달고, 같은 경로의 HTTP/2 갈래를 `server_h2_gateway.ml`에 더한다(HTTP/2는 router의 `dispatch`를 거치지 않아 갈래가 없으면 404다). 설치 기록이 없거나 로그가 없거나 비었을 때 구역의 열기가 무엇을 돌려줄지, `Multi_account_uncertain`에서 무엇을 서빙할지 이 층이 정한다. 설계 §11.1의 1단계 개시 증거를 이 층에서 모은다. | §5.1, §8.2, §11.1 | B3, C4, C6, D4 |
 
 - S1이 1단계의 맨 끝인 까닭: 계정 층 없이 부팅하면 여러 사람이 소유한 기록을 한 사용자처럼 서빙하기 때문에 이 거부가 있다(`Authz_boot_mode_read`). 그 계정 층의 마지막이 D4다. D1이 소유권을, D2~D4가 실행 진입마다 인가를 검사하고, D3이 lane마다 다른 owner의 account-home을 읽지 못하는 증거를 남긴다. 그 전에 거부를 거두면 C4를 통과한 사용자가 다른 사람의 Runtime과 Keeper를 쓴다.
 - S1 전에는 다계정 설치로 서버가 뜨지 않는다. C2a~D4의 코드는 시험이 구역을 직접 열어 부르고, 실제 서버에서 로그인부터 Keeper 실행까지 잇는 확인은 S1에서 처음 한다.

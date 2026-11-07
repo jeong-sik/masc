@@ -53,7 +53,7 @@ let refused store = match Census.run ~store with
 let check_one_unnamed_of_two (report : Census.report) =
   Alcotest.(check int) "both settled records are counted" 2 report.archived_records;
   Alcotest.(check int) "only the record no live record names is unnamed" 1 report.unnamed_records;
-  Alcotest.(check int) "each settled record left its body" 2 report.archived_bodies
+  Alcotest.(check int) "a settle removes the body instead of archiving it" 0 report.archived_bodies
 
 (* Server_workspace_memory_addon.finish_settling asks for a Subdivided
    successor. *)

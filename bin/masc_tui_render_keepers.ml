@@ -393,22 +393,42 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
     ~now ~frame ~yolo ~selected (row : Keeper_list_model.row) =
   let keeper = row.keeper in
   let activity = Keeper_list_model.primary_activity_of_row row in
-  let status_color = keeper_activity_style activity in
-  let glyph =
-    match activity with
-    | Preparing | Running -> Masc_tui_answering.running_glyph ~frame
-    | Held_call | Question | Confirmation | Attempt_failed | Streaming | Async_working _
-    | Deferred | Tool_waiting | Model_waiting | Delegate_result | Verifying | External_waiting
-    | Idle | Paused | Offline | Unknown -> Masc_tui_keeper_mark.activity_glyph activity
-  in
-  let name =
-    Message_layout.fit_middle columns.kcol_name
-      (Terminal_text.single_line keeper.Tui_decode.k_name)
-  in
   let runtime =
     match row.reading.Keeper_control.liveness with
     | Keeper_control.Present runtime -> Some runtime
     | Keeper_control.Absent | Keeper_control.Unobserved | Keeper_control.Invalid _ -> None
+  in
+  let operator_disposition =
+    match runtime with
+    | Some { kr_operator_disposition = Ok (Some (disp, _)); _ }
+      when Masc.Keeper_execution_receipt.needs_operator_broadcast disp
+           && activity <> Held_call && activity <> Question && activity <> Confirmation ->
+        Some disp
+    | _ -> None
+  in
+  let status_color =
+    match operator_disposition with
+    | Some _ -> Theme.bad ()
+    | None -> keeper_activity_style activity
+  in
+  let glyph =
+    match operator_disposition with
+    | Some _ -> Masc_tui_keeper_mark.activity_glyph Held_call
+    | None ->
+      (match activity with
+       | Preparing | Running -> Masc_tui_answering.running_glyph ~frame
+       | Held_call | Question | Confirmation | Attempt_failed | Streaming | Async_working _
+       | Deferred | Tool_waiting | Model_waiting | Delegate_result | Verifying | External_waiting
+       | Idle | Paused | Offline | Unknown -> Masc_tui_keeper_mark.activity_glyph activity)
+  in
+  let status_word =
+    match operator_disposition with
+    | Some disp -> Masc_tui_keeper_mark.operator_disposition_word disp
+    | None -> keeper_activity_word activity
+  in
+  let name =
+    Message_layout.fit_middle columns.kcol_name
+      (Terminal_text.single_line keeper.Tui_decode.k_name)
   in
   let failure_context =
     keeper_row_trail_sentence ~age:(keeper_trail_age ~now) row
@@ -425,7 +445,7 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
     ; (if yolo then Theme.bad () ^ name ^ Ansi.reset else name)
     ; " "
     ; status_color ^ glyph ^ " "
-      ^ Message_layout.fit_width (keeper_activity_word activity)
+      ^ Message_layout.fit_width status_word
           (Render_schedule.keeper_status_width - 2)
       ^ Ansi.reset
     ; (if columns.kcol_show_flags then " " ^ keeper_flag_cell runtime else "")

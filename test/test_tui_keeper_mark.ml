@@ -42,12 +42,31 @@ let test_the_column_legend_explains_every_letter_the_cell_draws () =
     (mode_letters @ sandbox_letters);
   List.iter
     (fun header -> check_bool ("the legend names " ^ header) true (contains keys header))
-    [ Mark.now_header; Mark.age_header; "LIFECYCLE"; Mark.failing_glyph; "Mode"; "S "; Mark.(badge_glyph Badge_schedule); "mem" ]
+    [ Mark.now_header; Mark.age_header; "LIFECYCLE"; Mark.failing_glyph; "Mode"; "S "; Mark.(badge_glyph Badge_schedule); "mem"; "사람 몫" ]
+
+let test_operator_disposition_words () =
+  let kinds =
+    [ Masc.Keeper_execution_receipt.Disp_operator_action_required
+    ; Masc.Keeper_execution_receipt.Disp_effect_review_required
+    ; Masc.Keeper_execution_receipt.Disp_unknown
+    ]
+  in
+  let words = List.map Mark.operator_disposition_word kinds in
+  check_int "each operator disposition kind has its distinct word" 3
+    (List.length (List.sort_uniq String.compare words));
+  Alcotest.(check string) "operator action required is 사람 몫" "사람 몫"
+    (Mark.operator_disposition_word Disp_operator_action_required);
+  Alcotest.(check string) "effect review required is 효과 확인" "효과 확인"
+    (Mark.operator_disposition_word Disp_effect_review_required);
+  Alcotest.(check string) "unknown is 분류 안 됨" "분류 안 됨"
+    (Mark.operator_disposition_word Disp_unknown)
 
 let () =
   Alcotest.run "tui_keeper_mark"
     [ ( "marks"
       , [ Alcotest.test_case "the column legend explains every letter" `Quick
             test_the_column_legend_explains_every_letter_the_cell_draws
+        ; Alcotest.test_case "operator disposition words are declared" `Quick
+            test_operator_disposition_words
         ] )
     ]

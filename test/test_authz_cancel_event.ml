@@ -31,6 +31,7 @@ let subjects =
   ; Subject.Principal (Principal.Service (get (Service_id.of_string "keeper-1")))
   ; Subject.Runtime (get (Runtime_id.of_string "runtime-1"))
   ; invite
+  ; Subject.Registration (get (Registration_id.of_string "registration-1"))
   ]
 ;;
 
@@ -108,7 +109,24 @@ let a_cancel_reads_back () =
     false
     (C.equal
        { C.aborted; subject = invite }
-       { C.aborted; subject = Subject.Invite (get (Invite_id.of_string "invite-2")) })
+       { C.aborted; subject = Subject.Invite (get (Invite_id.of_string "invite-2")) });
+  let registration text = Subject.Registration (get (Registration_id.of_string text)) in
+  Alcotest.(check bool)
+    "another allowlist entry"
+    false
+    (C.equal
+       { C.aborted; subject = registration "registration-1" }
+       { C.aborted; subject = registration "registration-2" });
+  List.iteri
+    (fun i a ->
+      List.iteri
+        (fun j b ->
+          Alcotest.(check bool)
+            (Subject.to_string a ^ " and " ^ Subject.to_string b)
+            (i = j)
+            (Subject.equal a b))
+        subjects)
+    subjects
 ;;
 
 let error_name : C.error -> string = function

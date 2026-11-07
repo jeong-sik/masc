@@ -86,7 +86,11 @@ end
 
 (** What a revocation or intent is about (design 4.5). [Invite] is the token of
     an invitation, which lets its holder in until it expires or is revoked
-    (design 5.1-4), so its revocation is an intent like that of a credential. *)
+    (design 5.1-4), so its revocation is an intent like that of a credential.
+    [Registration] is an entry of the allowlist, which lets its identity in
+    until it is removed or spent (plan C2d), so its removal is one too. The
+    subject is the id of the entry, not the identity: the identity is only in
+    the records of the log (design 4.1). *)
 module Subject : sig
   type t =
     | Grant of Grant_id.t
@@ -94,6 +98,7 @@ module Subject : sig
     | Principal of Principal.t
     | Runtime of Runtime_id.t
     | Invite of Invite_id.t
+    | Registration of Registration_id.t
 
   val equal : t -> t -> bool
   val to_string : t -> string

@@ -245,6 +245,8 @@ let subject_text = function
     {|{"type":"principal","principal":|} ^ Authz_record.principal_text principal ^ "}"
   | Subject.Runtime id -> {|{"type":"runtime","id":|} ^ literal (Runtime_id.to_string id) ^ "}"
   | Subject.Invite id -> {|{"type":"invite","id":|} ^ literal (Invite_id.to_string id) ^ "}"
+  | Subject.Registration id ->
+    {|{"type":"registration","id":|} ^ literal (Registration_id.to_string id) ^ "}"
 ;;
 
 let change_text = function
@@ -315,6 +317,10 @@ let subject_of_json = function
     Option.map (fun id -> Subject.Runtime id) (Result.to_option (Runtime_id.of_string id))
   | `Assoc [ ("type", `String "invite"); ("id", `String id) ] ->
     Option.map (fun id -> Subject.Invite id) (Result.to_option (Invite_id.of_string id))
+  | `Assoc [ ("type", `String "registration"); ("id", `String id) ] ->
+    Option.map
+      (fun id -> Subject.Registration id)
+      (Result.to_option (Registration_id.of_string id))
   | _ -> None
 ;;
 

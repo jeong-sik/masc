@@ -34,7 +34,7 @@ val ask_followup_frame_json :
     actual source; serializing a frame does not certify stream completion. *)
 
 val handle_keeper_ask_answer :
-  actor:string -> Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+  actor:string -> Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> unit
 (** Drives [POST /api/v1/keepers/ask-answer].
 
     Reads [{"name", "ask_id", "answers": [{"question_id", "response"}], ...}]
@@ -61,7 +61,7 @@ val handle_keeper_ask_answer :
 
 val handle_keeper_asks_list :
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+  Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> unit
 (** Drives [GET /api/v1/keepers/asks?name=<keeper>&include_resolved=<bool>].
 
     Without [name] this covers the whole fleet and every row names the Keeper

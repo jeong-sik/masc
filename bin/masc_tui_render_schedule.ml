@@ -212,7 +212,10 @@ let allocate_keeper_columns ?(runtime_visible = true) ?(widest_detail = 0) ~prio
       let taken = min budget available in
       taken, available - taken
     in
-    let detail_ceiling = max keeper_minimum_task_width widest_detail in
+    let detail_ceiling =
+      if show_runtime then keeper_minimum_task_width
+      else max keeper_minimum_task_width widest_detail
+    in
     let detail_budget = detail_ceiling - keeper_minimum_task_width in
     let detail_growth, slack = take detail_budget slack in
     let name_budget = keeper_maximum_name_width - keeper_minimum_name_width in

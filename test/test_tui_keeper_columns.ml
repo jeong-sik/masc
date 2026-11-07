@@ -58,6 +58,16 @@ let test_detail_floor_reserves_failure_sentence_width_before_name_expansion () =
   Alcotest.(check bool) "total used width fits available inner width" true
     (Masc_tui_render_schedule.keeper_columns_used_width protected <= 80)
 
+let test_wide_view_allocates_runtime_column_for_failure_sentence () =
+  let cols =
+    Masc_tui_render_schedule.allocate_keeper_columns
+      ~runtime_visible:true ~prioritize_runtime:true
+      ~inner_width:140 ~widest_runtime:31 ~widest_detail:31 ()
+  in
+  Alcotest.(check bool) "runtime column is shown on wide screen" true cols.kcol_show_runtime;
+  Alcotest.(check int) "runtime column expands to fit failure sentence width" 31 cols.kcol_runtime;
+  Alcotest.(check bool) "name column keeps maximum or expands" true (cols.kcol_name >= 16)
+
 let () =
   Alcotest.run "tui_keeper_columns"
     [ ( "column allocation"
@@ -69,5 +79,7 @@ let () =
             test_hidden_runtime_preserves_failure_context_in_detail
         ; Alcotest.test_case "detail floor reserves failure sentence width before name expansion" `Quick
             test_detail_floor_reserves_failure_sentence_width_before_name_expansion
+        ; Alcotest.test_case "wide view allocates runtime column for failure sentence" `Quick
+            test_wide_view_allocates_runtime_column_for_failure_sentence
         ] )
     ]

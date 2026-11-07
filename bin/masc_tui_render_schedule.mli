@@ -89,9 +89,11 @@ val allocate_keeper_columns :
   keeper_columns
 (** Divide the box's inner width across the roster columns. Columns drop from
     the right as the terminal narrows; the keeper's name and its status never
-    drop. When [widest_detail] is supplied, that floor is reserved for the
-    detail column from slack before name or runtime expand, ensuring failure
-    sentences are not clipped by name growth.
+    drop. Slack above the minimum goes to the name, up to the widest name worth
+    reading whole, unless a failure context asks the runtime column to take
+    priority. When [widest_detail] is supplied and runtime is hidden, that floor
+    is reserved for the detail column from slack before name expands, ensuring
+    failure sentences are not clipped on narrow viewports.
     [runtime_visible] defaults to [true]. When it is [false], the runtime cell
     is absent and its width is available to the other columns. *)
 

@@ -930,7 +930,7 @@ let render_keeper_list (state : state) =
           | Keeper_control.Absent | Keeper_control.Unobserved
           | Keeper_control.Invalid _ -> None
         in
-        max widest (keeper_runtime_cells runtime))
+        max widest (max (failure_sentence_cells row) (keeper_runtime_cells runtime)))
       0 model_rows
   in
   let columns =

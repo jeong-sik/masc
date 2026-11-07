@@ -66,7 +66,9 @@ let coverage_gaps masc_root =
          (Safe_ops.json_string ~default:"" "source" gap))
 
 let latest_coverage_gap gaps =
-  List.rev gaps |> List.find_opt (fun _ -> true)
+  (* The last element without building a reversed copy: fold keeps the most
+     recent gap as it walks, [None] only for an empty list. *)
+  List.fold_left (fun _ latest -> Some latest) None gaps
 
 (* Was re-typed here; the kit owns it (#27157). coverage_gap_recovered goes
    with it — this file only ever called it through active_coverage_gaps. *)

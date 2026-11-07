@@ -14,14 +14,12 @@ on:
   workflow_dispatch: {}
   pull_request:
     paths:
-      - 'lib/**/*.ml'
-      - 'lib/**/*.mli'
-      - 'bin/**/*.ml'
-      - 'bin/**/*.mli'
-      - 'test/**/*.ml'
-      - 'test/**/*.mli'
-      - 'test/**/*.inc'
-      - 'test/**/dune'
+      # The root `dune` file builds every tracked directory, so sources are
+      # matched repository-wide. A list of directories missed packages/,
+      # tools/ and benchmarks/ (#48323).
+      - '**/*.ml'
+      - '**/*.mli'
+      - '**/*.inc'
       - '**/dune'
       - 'dune-project'
       - '*.opam'
@@ -29,6 +27,9 @@ on:
       # Include this file so a change to the workflow itself is checked
       # by the workflow itself; otherwise such a PR gets no check-run.
       - '.github/workflows/pr-type-check.yml'
+      # docs/evidence keeps .ml snapshots as data. No dune file under docs/
+      # builds them, so a docs-only PR needs no type-check.
+      - '!docs/**'
 
 permissions:
   contents: read

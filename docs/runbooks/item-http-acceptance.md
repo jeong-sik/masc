@@ -50,7 +50,7 @@ with those inputs. It does not prove Keeper lifecycle creation, model-driven
 purchase/equipment decisions, a real earned payout, or production rollout.
 The same explicit Item capture first runs the existing eight portrait/Item TUI scenarios against the compiled TUI, checking its embedded source SHA. These exercise preview, short panes, roster revisions, account failure and workspace authority with synthetic HTTP fixtures; they do not prove a live TUI account or earned payout. Additional browser fixture evidence comes from the separate Dashboard workflow.
 
-The macOS target runs natively on `macos-14`, using the Release workflow's
+The macOS target runs natively on `macos-15`, using the Release workflow's
 OCaml dependencies and build flags. Its runtime artifact also records the
 server's dynamic-library dependencies. These raw probe binaries rely on the
 runner's native libraries; they are not the relocatable Release package.

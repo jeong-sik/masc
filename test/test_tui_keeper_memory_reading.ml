@@ -33,6 +33,7 @@ let make_keeper_health
   ; mkh_added = added
   ; mkh_removed = removed
   ; mkh_snapshot_present = true
+  ; mkh_age_bins = None
   ; mkh_context_cycle =
       { mcc_saved = None
       ; mcc_saved_unreadable = false

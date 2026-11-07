@@ -193,7 +193,7 @@ let bind_downloads t ~actor ~route ~verb answer = match verb,answer with
             | Ok data -> Ok (B.Answered (`Assoc (List.map (fun (key,value) -> key,(if key="data" then data else value)) fields)))
             | Error detail -> Ok (B.Refused ("download transfer preparation failed: " ^ detail)))
        | (Some _|None),(Some _|None),(Some _|None),(Some _|None) -> answer)
-  | (B.Tabs_list|Page_read _|Page_document _|Page_downloads _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _
+  | (B.Tabs_list|Page_read _|Page_document _|Page_downloads _|Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _
     | Page_goto _|Page_elements _|Page_act _
     |Page_context _),
     (Ok (B.Answered _|Lane_absent|Timed_out|Refused _|Rejected_before_effect _)|Error _) -> answer
@@ -204,7 +204,7 @@ let issue t ~incarnation ~upload_admission ~route ~verb ~actor ~timeout_sec ~onl
         Error (refusal "downloads require the original host caller and attached artifact broker")
     | B.Page_act (B.Action.On_tab {interaction=B.Action.Upload _;_}),Ordinary ->
         Error (refusal "upload requires its private host snapshot grant")
-    | (B.Tabs_list|Page_read _|Page_document _|Page_downloads _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _
+    | (B.Tabs_list|Page_read _|Page_document _|Page_downloads _|Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _
       | Page_goto _|Page_elements _
       |Page_act (Open_tab _|Control _|On_tab {interaction=Close_tab|Back|Forward|Reload|Stop_loading|Accept_dialog _|Dismiss_dialog|Set_emulation _|Clear_emulation|Block_requests _|Unblock_requests;_})
       |Page_context _),(Ordinary|Scoped_upload)
@@ -219,7 +219,7 @@ let issue t ~incarnation ~upload_admission ~route ~verb ~actor ~timeout_sec ~onl
           (match verb with
            | B.Page_act action -> B.Action.is_take_over action
            | B.Tabs_list
-           |B.Page_read _|B.Page_document _|B.Page_downloads _
+           |B.Page_read _|B.Page_document _|B.Page_downloads _|B.Page_cookies _
            | B.Page_capture _|B.Page_scene _|B.Page_snapshot _
            |B.Page_native_workflow _|B.Page_interact _|B.Page_goto _|B.Page_elements _
            |B.Page_context _ -> false)
@@ -277,7 +277,7 @@ let issue t ~incarnation ~upload_admission ~route ~verb ~actor ~timeout_sec ~onl
          W.Issue_result (if only_if_idle then
            match verb with
            | B.Page_document {tab_id} -> B.issue_document_if_idle ~target ~tab_id ~timeout_sec
-           | B.Tabs_list|Page_read _|Page_downloads _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _
+           | B.Tabs_list|Page_read _|Page_downloads _|Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _
            | Page_goto _|Page_elements _|Page_act _
            | Page_context _ ->
              Ok (B.Rejected_before_effect "idle admission supports document reads only")

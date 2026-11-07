@@ -62,6 +62,13 @@ type viewport_size = Fit of { width : int; height : int } | Browser_default
 let viewport_side_min_px = 100
 let viewport_side_max_px = 4096
 
+(* What a cookie and storage read lists: at most this many cookies, with
+   their total, and this many web storage keys or IndexedDB names per area,
+   with their count. A name the page chose is cut at [storage_name_chars]. *)
+let storage_cookies_limit = 200
+let storage_names_limit = 100
+let storage_name_chars = 200
+
 type option_selection = Single_option of string | Multiple_options of string list
 
 type interaction = Activate_tab | Click of string | Fill of { selector : string; text : string }
@@ -118,6 +125,10 @@ type verb =
   | Page_read of { tab_id : int option; max_chars : int option }
   | Page_document of { tab_id : int }
   | Page_downloads of { tab_id : int }
+  (* The names and attributes of the cookies the tab's top document sees, and
+     its web storage keys and IndexedDB database names; never a value (an
+     ego task space). *)
+  | Page_cookies of { tab_id : int }
   | Page_capture of { tab_id : int; options : Capture.t option }
   | Page_scene of { tab_id : int; max_chars : int; view : scene_view; scope : node_ref option }
   (* The connection's own accessibility snapshot of a page, with the refs its
@@ -135,7 +146,7 @@ type verb =
 let reply_timeout_sec = function
   | Page_goto _ -> 45.
   | Page_act action -> Action.reply_timeout_sec action
-  | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_capture _
+  | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_cookies _ | Page_capture _
   | Page_scene _ | Page_snapshot _ | Page_interact _ | Page_native_workflow _ | Page_elements _ | Page_context _ -> default_timeout_sec
 
 type reply_policy = Reply_window | Executor_owned
@@ -151,7 +162,7 @@ let reply_policy = function
         | Action.Set_emulation _ | Action.Clear_emulation | Action.Block_requests _ | Action.Unblock_requests
         | Action.Accept_dialog _ | Action.Dismiss_dialog
         | Action.Back | Action.Forward | Action.Reload | Action.Stop_loading | Action.Close_tab -> Reply_window))
-  | Tabs_list | Page_read _ | Page_document _ | Page_downloads _
+  | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_cookies _
   | Page_capture _ | Page_scene _ | Page_snapshot _ | Page_interact _
   | Page_goto _ | Page_elements _ | Page_context _ -> Reply_window
 
@@ -183,7 +194,7 @@ let ego_reply_policy = function
      | Set_viewport _ | Double_click_at _ | Type_text _
      | Press_key _ | Scroll _ | Hover_at _ | Tap_at _ | Swipe _ | Click_at _
      | Scroll_at _ | Drag _ | Follow_link _ | Click_node _ | Fill_node _ -> Reply_window)
-  | (Tabs_list | Page_read _ | Page_document _ | Page_downloads _
+  | (Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_cookies _
     | Page_scene _ | Page_snapshot _
     | Page_native_workflow _
     | Page_elements _ | Page_context _) as verb -> reply_policy verb
@@ -193,7 +204,7 @@ let ego_reply_policy = function
 let elements_filter = function
   | Page_elements { filter; _ } -> filter
   | Page_context _
-  | Tabs_list | Page_read _ | Page_document _ | Page_downloads _
+  | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_cookies _
   | Page_capture _ | Page_scene _ | Page_snapshot _ | Page_interact _ | Page_native_workflow _
   | Page_goto _ | Page_act _ -> unfiltered_elements
 ;;
@@ -203,6 +214,7 @@ let verb_to_string = function
   | Page_read _ -> "page.read"
   | Page_document _ -> "page.document"
   | Page_downloads _ -> "page.downloads"
+  | Page_cookies _ -> "page.cookies"
   | Page_capture _ -> "page.capture"
   | Page_scene _ -> "page.scene"
   | Page_snapshot _ -> "page.snapshot"
@@ -390,6 +402,8 @@ let verb_json = function
       "args", `Assoc ["tabId", `Int tab_id; "includeHtml", `Bool true]]
   | Page_downloads {tab_id} ->
     `Assoc ["verb",`String "page.downloads";"args",`Assoc ["tabId",`Int tab_id]]
+  | Page_cookies {tab_id} ->
+    `Assoc ["verb",`String "page.cookies";"args",`Assoc ["tabId",`Int tab_id]]
   | Page_scene {tab_id;max_chars;view;scope} ->
     `Assoc ["verb",`String "page.scene";"args",scene_args ~tab_id ~max_chars ~view ~scope]
   | Page_snapshot {tab_id;max_chars;scope} ->
@@ -423,7 +437,7 @@ let verb_json = function
      may run there at all? Readers and explicit-tab interactions are
      supported. *)
 let verb_is_read = function
-  | Tabs_list | Page_read _ | Page_document _ | Page_elements _ | Page_capture _ | Page_scene _ | Page_snapshot _ | Page_context _ | Page_downloads _ -> true
+  | Tabs_list | Page_read _ | Page_document _ | Page_elements _ | Page_capture _ | Page_scene _ | Page_snapshot _ | Page_context _ | Page_downloads _ | Page_cookies _ -> true
   | Page_goto _ | Page_act _ | Page_interact _ | Page_native_workflow _ -> false
 
 (* What the live lane asks of the operator's browser, named by what the
@@ -464,6 +478,7 @@ type live_capability =
   | File_upload
   | Environment_emulation
   | Request_blocking
+  | Storage_listing
 [@@deriving enumerate]
 
 let live_capability_to_wire = function
@@ -500,6 +515,7 @@ let live_capability_to_wire = function
   | File_upload -> "file_upload"
   | Environment_emulation -> "environment_emulation"
   | Request_blocking -> "request_blocking"
+  | Storage_listing -> "storage_listing"
 ;;
 
 let live_capability_of_wire raw =
@@ -543,6 +559,7 @@ let live_capability = function
   | Page_goto _ -> Tab_navigation
   | Page_act (Action.On_tab {interaction = (Action.Accept_dialog _ | Action.Dismiss_dialog); _}) -> Dialog_answer
   | Page_downloads _ -> Download_listing
+  | Page_cookies _ -> Storage_listing
   | Page_context _ -> Dialog_read
   | Page_act (Action.On_tab {interaction = Action.Upload _; _}) -> File_upload
   | Page_act (Action.On_tab {interaction = (Action.Set_emulation _ | Action.Clear_emulation); _}) -> Environment_emulation
@@ -579,7 +596,7 @@ let activity_rejection_message = function
 (* The same check against an activity the caller observed, such as the one a
    worker reported in its snapshot. *)
 let activity_rejection_with ~activity lane = function
-  | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_capture _
+  | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_cookies _ | Page_capture _
   | Page_scene _ | Page_snapshot _ | Page_interact _ | Page_native_workflow _ | Page_goto _ | Page_elements _
   | Page_act _ | Page_context _ ->
     match activity with
@@ -622,8 +639,9 @@ let live_transport_of_string = function
    own folder, sets files on their file inputs from the worker's upload
    copies, and sets a page's viewport, location, locale and time zone, and
    the hosts its subresource requests may not reach, through CDP settings
-   that last as long as the ego SDK process. It taps
-   and swipes with CDP touch events and no touch emulation;
+   that last as long as the ego SDK process. It lists the names of the
+   cookies, web storage keys and IndexedDB databases a page sees, never a
+   value. It taps and swipes with CDP touch events and no touch emulation;
    test_browser_ego_peer holds its column to what Browser_ego_peer does. *)
 let live_transport_serves transport capability =
   match transport, capability with
@@ -632,7 +650,7 @@ let live_transport_serves transport capability =
                     | Point_scroll | Trusted_hover | Trusted_double_click | Trusted_button_click
                     | Trusted_drag | Trusted_keyboard | Tab_history | Accessibility_snapshot | Dialog_read | Dialog_answer
                     | Snapshot_target_input | Native_workflow | Page_recovery | Operator_handoff | Page_management | Download_listing | File_upload | Tab_activation
-                    | Viewport_resize | Environment_emulation | Request_blocking | Touch_input) -> true
+                    | Viewport_resize | Environment_emulation | Request_blocking | Storage_listing | Touch_input) -> true
 ;;
 
 let live_transports_serving capability =
@@ -704,7 +722,7 @@ let settled_activity_of_json = function
   | _ -> Error "invalid settled browser activity"
 let activity_scope = function
   | Page_native_workflow workflow -> Some workflow.tab_id
-  | Page_interact {tab_id;_} | Page_document {tab_id} | Page_downloads {tab_id}
+  | Page_interact {tab_id;_} | Page_document {tab_id} | Page_downloads {tab_id} | Page_cookies {tab_id}
   | Page_capture {tab_id;_}
   | Page_scene {tab_id;_} | Page_snapshot {tab_id;_} | Page_context {tab_id;_}
   | Page_act (Action.Control (Action.Adopt_tab {tab_id;_}|Action.Release_tab tab_id))
@@ -720,7 +738,7 @@ let activity_name = function
   | Page_act (Action.Control (Action.Release_tab _)) -> "release_tab"
   | Page_interact {action;_} -> interaction_verb action
   | Page_native_workflow _ -> "workflow"
-  | (Tabs_list|Page_read _|Page_document _|Page_downloads _
+  | (Tabs_list|Page_read _|Page_document _|Page_downloads _|Page_cookies _
     |Page_capture _|Page_scene _|Page_snapshot _|Page_goto _
     |Page_elements _|Page_act (Action.Open_tab _|Control (Hand_off|Take_over)|On_tab _)
     |Page_context _) as verb -> verb_to_string verb

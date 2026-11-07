@@ -1351,6 +1351,72 @@ let test_request_blocking_is_a_cdp_setting_on_the_page () =
     (failure_kind (act ~tab_id:2 (Lane.Action.Block_requests ["ads.example.com"])));
   check int "and runs no script" runs (List.length !asked)
 
+(* A page.cookies answer: the cookies, their total and the page's storage
+   names, as storage_names_script emits them. *)
+let storage_answer ?(cookies=[]) ?total ?(local=obj ["count",`Int 1;"keys",`List [str "theme"];"truncated",`Bool false]) () =
+  obj ["cookies",`List cookies;"total",`Int (Option.value total ~default:(List.length cookies));
+       "storage",obj ["origin",str "https://app.slack.com";"localStorage",local;
+                      "sessionStorage",obj ["error",str "SecurityError"];"indexedDb",obj ["unsupported",`Bool true]]]
+
+(* The answer is rebuilt from what was parsed: a cookie value, or any field
+   the script does not name, is refused instead of passed on. *)
+let test_storage_names_withhold_every_value () =
+  let asked = ref [] in
+  let reply = ref (refused "no reply set") in
+  let peer = opened (fun sent ->
+    asked := sent :: !asked;
+    match sent.step with
+    | "tabs.list" -> answered tabs
+    | "page.cookies" -> !reply
+    | other -> failf "unexpected storage step %s" other) in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  let read ?(tab_id=1) () = dispatch peer Live.Page_cookies (obj ["tabId",`Int tab_id]) in
+  let plain_fields = ["name",str "theme";"domain",str "app.slack.com";"path",str "/";"secure",`Bool false;"httpOnly",`Bool false] in
+  let plain = obj plain_fields in
+  let session = obj ["name",str "d";"domain",str ".slack.com";"path",str "/";"secure",`Bool true;"httpOnly",`Bool true;
+    "sameSite",str "Lax";"expiry",`Int 1794018557] in
+  reply := answered (storage_answer ~cookies:[session;plain] ());
+  (match read () with
+   | Ok answer ->
+     check int "the tab" 1 (Yojson.Safe.Util.to_int (field "tabId" answer));
+     check (list string) "each cookie's name and the attributes that scope it"
+       (List.map Yojson.Safe.to_string [session;plain])
+       (List.map Yojson.Safe.to_string (Yojson.Safe.Util.to_list (field "cookies" answer)));
+     check int "how many the page sees" 2 (Yojson.Safe.Util.to_int (field "total" answer));
+     check bool "cookie values are withheld" true (field "valuesWithheld" answer = `Bool true);
+     check bool "storage values are withheld" true (field "storageValuesWithheld" answer = `Bool true);
+     check string "the storage names as the page answered them"
+       (Yojson.Safe.to_string (field "storage" (storage_answer ()))) (Yojson.Safe.to_string (field "storage" answer))
+   | other -> failf "the storage read was %s" (failure_kind other));
+  let sent = List.hd !asked in
+  check string "the Page it names" "p1" (text (field "label" sent.args));
+  check string "the limits it sends" {|{"cookies":200,"names":100,"nameChars":200,"indexedDbWaitMs":2000}|}
+    (Yojson.Safe.to_string (field "limits" sent.args));
+  reply := answered (storage_answer ~cookies:(List.init 200 (fun _ -> plain)) ~total:250 ());
+  (match read () with
+   | Ok answer ->
+     check int "the first 200 cookies" 200 (List.length (Yojson.Safe.Util.to_list (field "cookies" answer)));
+     check int "with the total past them" 250 (Yojson.Safe.Util.to_int (field "total" answer))
+   | other -> failf "a long cookie list was %s" (failure_kind other));
+  List.iter (fun (label, value) ->
+    reply := answered value;
+    check string label "before effect" (failure_kind (read ())))
+    ["a cookie with its value is refused", storage_answer ~cookies:[obj (plain_fields @ ["value",str "secret"])] ();
+     "a sameSite the browser does not name is refused", storage_answer ~cookies:[obj (plain_fields @ ["sameSite",str "lax"])] ();
+     "fewer cookies than the total explains is refused", storage_answer ~cookies:[plain] ~total:2 ();
+     "more keys than the count is refused",
+       storage_answer ~local:(obj ["count",`Int 1;"keys",`List [str "a";str "b"];"truncated",`Bool false]) ();
+     "a cut the count does not explain is refused",
+       storage_answer ~local:(obj ["count",`Int 1;"keys",`List [str "a"];"truncated",`Bool true]) ();
+     "an answer with more fields is refused",
+       (match storage_answer () with `Assoc fields -> obj (fields @ ["extra",`Null]) | other -> other)];
+  reply := failed "Network.getCookies failed: CDP request timed out";
+  check string "a CDP call that threw is a failed read" "before effect" (failure_kind (read ()));
+  let runs = List.length !asked in
+  check string "an operator tab is refused" "before effect" (failure_kind (read ~tab_id:2 ()));
+  check string "a read without a tab is refused" "before effect" (failure_kind (dispatch peer Live.Page_cookies (obj [])));
+  check int "and neither runs a script" runs (List.length !asked)
+
 (* What leaves the peer says where input stands and which SDK process ran
    it, failures included. *)
 let test_every_answer_carries_the_input_state () =
@@ -1467,6 +1533,7 @@ let test_the_scripts_parse_as_modules () =
     | "page.target_input" -> answered (obj ["urlBefore",str observed_url;"receipt",obj [];"error",`Null;
         "tab",obj ["url",str observed_url;"title",str "Slack"]])
     | "page.downloads" -> answered (obj ["since",`Null;"rows",`List []])
+    | "page.cookies" -> answered (storage_answer ())
     | "page.upload" -> answered (obj ["error",`Null;"dialog",`Null;"tab",`Null])
     | "page.choose_files" -> answered (obj ["error",`Null;"dialog",`Null;"tab",`Null])
     | "page.emulation" -> answered (obj ["applied",`List [];"before",`Null;"observed",`Null])
@@ -1481,6 +1548,7 @@ let test_the_scripts_parse_as_modules () =
       Live.Page_scene, obj ["tabId",`Int 1];
       Live.Page_snapshot, obj ["tabId",`Int 1;"maxChars",`Int 1000;"scope",str "subtree";"root",str "@12"];
       Live.Page_downloads, obj ["tabId",`Int 1];
+      Live.Page_cookies, obj ["tabId",`Int 1];
       Live.Page_capture, obj ["tabId",`Int 1];
       Live.Page_act, act_args (Lane.Action.Open_tab "https://example.test/");
       Live.Page_goto, obj ["tabId",`Int 1;"url",str "https://example.test/"];
@@ -1509,7 +1577,7 @@ let test_the_scripts_parse_as_modules () =
       Live.Page_interact, interact_args (Lane.Drag {from={x=0.25;y=0.5};to_={x=0.75;y=0.5};viewport;via=[];duration_ms=0}) ];
   check (result unit string) "finish" (Ok ()) (Peer.finish peer);
   check (list string) "every step"
-    ["space.open";"tabs.list";"page.read";"page.document";"page.elements";"page.scene";"page.snapshot";"page.downloads";"page.capture";
+    ["space.open";"tabs.list";"page.read";"page.document";"page.elements";"page.scene";"page.snapshot";"page.downloads";"page.cookies";"page.capture";
      "page.open";"page.goto";"page.target";"page.pointer";"page.pointer";"page.pointer";"page.keyboard";"page.input";"page.target_input";"page.viewport";"page.touch";"page.touch";
      "page.close";"page.reload";"page.stop_loading";"page.history";"page.dialog";"page.dialog";"page.upload";"page.choose_files";"page.emulation";"page.emulation";"page.block_requests";"page.block_requests";"space.finish"]
     (List.rev_map fst !scripts);
@@ -1532,6 +1600,10 @@ let test_the_scripts_parse_as_modules () =
       check bool "a block is a URLPattern on the Page's CDP session" true
         (contains script "Network.setBlockedURLs" && contains script "urlPatterns" && contains script ":*/*");
       check bool "with no glob that also matches a URL carrying the host in its query" false (contains script "urls:")
+    | "page.cookies" ->
+      check bool "the cookies are listed for the URL the page answered" true
+        (contains script "Network.getCookies" && contains script "{urls: [seen.url]}");
+      check bool "and the value is dropped in the SDK process" false (contains script "cookie.value")
     | _ -> ())
     !scripts
 
@@ -1600,6 +1672,7 @@ let test_the_peer_serves_what_the_lane_table_says () =
     | "space.hand_off" -> answered (obj ["spaceId",`Int 51;"spaceName",str "masc"])
     | "space.adopt_tab" -> answered (obj ["label",str "adopted";"targetId",str "T9";"openedBy",str "unknown"])
     | "page.downloads" -> answered (obj ["since",`Null;"rows",`List []])
+    | "page.cookies" -> answered (storage_answer ())
     | "page.upload" -> answered (obj ["error",`Null;"dialog",`Null;"tab",`Null])
     | "page.emulation" -> answered (obj ["applied",`List [str "locale"];"before",`Null;"observed",`Null])
     | "page.block_requests" -> answered (obj ["blocked",`List [str "ads.example.com"]])
@@ -1649,7 +1722,8 @@ let test_the_peer_serves_what_the_lane_table_says () =
     | Download_listing -> Page_downloads {tab_id=1}
     | File_upload -> Page_act (Action.On_tab {tab_id=1;interaction=Action.Upload {target=Action.File_input "#file";paths=[upload_file]}})
     | Environment_emulation -> Page_act (Action.On_tab {tab_id=1;interaction=Action.Set_emulation {geolocation=None;locale=Some "fr-FR";timezone=None}})
-    | Request_blocking -> Page_act (Action.On_tab {tab_id=1;interaction=Action.Block_requests ["ads.example.com"]})) in
+    | Request_blocking -> Page_act (Action.On_tab {tab_id=1;interaction=Action.Block_requests ["ads.example.com"]})
+    | Storage_listing -> Page_cookies {tab_id=1}) in
   List.iter (fun capability ->
     let name = Lane.live_capability_to_wire capability in
     let asked = verb_asking_for capability in
@@ -4194,6 +4268,7 @@ let () =
       test_case "an ego viewport is a CDP override on its Page" `Quick test_viewport_is_a_cdp_override_on_the_page;
       test_case "ego location, locale and time zone are CDP overrides on its Page" `Quick test_emulation_is_a_cdp_override_on_the_page;
       test_case "ego request blocking is a CDP setting on its Page" `Quick test_request_blocking_is_a_cdp_setting_on_the_page;
+      test_case "ego storage names withhold every value" `Quick test_storage_names_withhold_every_value;
       test_case "a dialog-interrupted workflow stays uncertain until a new click settles, without replay" `Quick test_dialog_interrupted_workflow_stays_uncertain_until_a_new_click_settles;
       test_case "native workflows retain input ownership after a lost result" `Quick test_native_workflow_pointer_ownership;
       test_case "a workflow that never held input keeps the previous readiness" `Quick test_a_workflow_that_never_held_input_keeps_the_previous_readiness;

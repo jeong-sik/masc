@@ -254,7 +254,8 @@ let verb_asking_for : Lane.live_capability -> Lane.verb = Lane.(function
   | Download_listing -> Page_downloads {tab_id=2}
   | File_upload -> Page_act (Action.On_tab {tab_id=2;interaction=Action.Upload {target=Action.File_input "#file";paths=["/tmp/note.txt"]}})
   | Environment_emulation -> Page_act (Action.On_tab {tab_id=2;interaction=Action.Set_emulation {geolocation=None;locale=Some "fr-FR";timezone=None}})
-  | Request_blocking -> Page_act (Action.On_tab {tab_id=2;interaction=Action.Block_requests ["ads.example.com"]}))
+  | Request_blocking -> Page_act (Action.On_tab {tab_id=2;interaction=Action.Block_requests ["ads.example.com"]})
+  | Storage_listing -> Page_cookies {tab_id=2})
 
 let capability = testable
   (fun ppf value -> Format.pp_print_string ppf (Lane.live_capability_to_wire value)) ( = )

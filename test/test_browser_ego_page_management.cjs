@@ -166,6 +166,64 @@ test('request blocks add up per Page label, lift together, and stay as they were
   assert.equal((await run(page,{label:'p1',hosts:null},reason)).value.unblocked,0);
   assert.deepEqual([...(await run(page,{label:'p2',hosts:['d.example']},reason)).value.blocked],['d.example']);
 });
+test('storage names drop every cookie value, list cookies for the page URL, and cut long lists',async()=>{
+  const run=script('storage_names_script');
+  const limits={cookies:2,names:2,nameChars:5,indexedDbWaitMs:50};
+  const plain=value=>JSON.parse(JSON.stringify(value));
+  const reason=error=>String(error && error.message || error);
+  const store=keys=>({length:keys.length,key:index=>keys[index] ?? null});
+  // The page function runs in a context of its own, as it would in the page.
+  const pageOf=({databases=async()=>[{name:'db-one'},{name:'db-two'},{name:'db-three'}],cookies,evaluateFails=false,cdpFails=false}={})=>{
+    const sent=[];
+    const globals={location:{href:'https://app.example/x?q=1',origin:'https://app.example'},
+      localStorage:store(['alphabet','beta','gamma']),
+      // An opaque origin's storage throws when it is used.
+      sessionStorage:{get length(){ throw {name:'SecurityError'}; }},
+      setTimeout,clearTimeout,indexedDB:databases===null ? undefined : {databases}};
+    globals.window=globals;
+    const page={
+      evaluate:async(fn,arg)=>{
+        if (evaluateFails) throw Error('Execution context was destroyed');
+        return vm.runInNewContext('('+fn.toString()+')',globals)(arg);
+      },
+      cdp:async(method,params)=>{
+        sent.push([method,plain(params)]);
+        if (cdpFails) throw Error('CDP request timed out');
+        return cookies===undefined ? {cookies:[
+          {name:'a',value:'SECRET',domain:'app.example',path:'/',secure:true,httpOnly:true,session:false,expires:1794018557.7,sameSite:'Lax',size:7,priority:'Medium'},
+          {name:'b',value:'SECRET',domain:'app.example',path:'/',secure:false,httpOnly:false,session:true,expires:-1,size:7},
+          {name:'c',value:'SECRET',domain:'app.example',path:'/',secure:false,httpOnly:false,session:true,expires:-1,size:7}]} : cookies;
+      }};
+    return {page,sent};
+  };
+  const f=pageOf();
+  const read=plain(await run(f.page,{label:'p1',limits},reason));
+  assert.equal(read.ok,true);
+  assert.equal(JSON.stringify(read).includes('SECRET'),false);
+  assert.deepEqual(f.sent,[['Network.getCookies',{urls:['https://app.example/x?q=1']}]]);
+  assert.deepEqual(read.value.cookies,[
+    {name:'a',domain:'app.example',path:'/',secure:true,httpOnly:true,sameSite:'Lax',expiry:1794018557},
+    {name:'b',domain:'app.example',path:'/',secure:false,httpOnly:false}]);
+  assert.equal(read.value.total,3);
+  assert.deepEqual(read.value.storage,{origin:'https://app.example',
+    localStorage:{count:3,keys:['alpha','beta'],truncated:true},
+    sessionStorage:{error:'Secur'},
+    indexedDb:{count:3,names:['db-on','db-tw'],truncated:true}});
+  const silent=plain(await run(pageOf({databases:()=>new Promise(()=>{})}).page,{label:'p1',limits},reason));
+  assert.deepEqual(silent.value.storage.indexedDb,{error:'timeout'});
+  const none=plain(await run(pageOf({databases:null}).page,{label:'p1',limits},reason));
+  assert.deepEqual(none.value.storage.indexedDb,{unsupported:true});
+  const gone=pageOf({evaluateFails:true});
+  const unread=await run(gone.page,{label:'p1',limits},reason);
+  assert.equal(unread.ok,false);
+  assert.match(unread.error,/storage names were not read: Execution context was destroyed/);
+  assert.deepEqual(gone.sent,[]);
+  const lost=await run(pageOf({cdpFails:true}).page,{label:'p1',limits},reason);
+  assert.equal(lost.ok,false);
+  assert.match(lost.error,/Network.getCookies failed: CDP request timed out/);
+  const odd=await run(pageOf({cookies:{cookies:null}}).page,{label:'p1',limits},reason);
+  assert.equal(odd.ok,false);
+});
 test('dialog answer validates fresh canonical identity before any watcher or method',async()=>{
   for(const mutate of [
     f=>{f.task.spaceId=21;},f=>{f.task.tabs=async()=>[];},

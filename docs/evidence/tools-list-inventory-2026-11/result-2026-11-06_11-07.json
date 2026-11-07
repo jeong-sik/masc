@@ -1,0 +1,81 @@
+{
+  "above_ceiling_after": {
+    "16384": 0,
+    "32768": 0,
+    "65536": 0
+  },
+  "above_ceiling_before": {
+    "16384": 53,
+    "32768": 53,
+    "65536": 53
+  },
+  "calls": 53,
+  "distinct_surfaces": 12,
+  "every_skill_name_kept_once_per_surface": true,
+  "every_tool_name_kept_once_per_surface": true,
+  "groups_of_the_largest_inventory": {
+    "skills": {
+      "active": 52
+    },
+    "tools": {
+      "active": 163,
+      "not_model_invocable": 36,
+      "refused_by_sandbox": 4
+    }
+  },
+  "inventory_bytes": {
+    "max": 9888,
+    "min": 8623,
+    "p50": 9655
+  },
+  "inventory_bytes_after": 513467,
+  "keepers": {
+    "wkbl-data": 9,
+    "wkbl-front": 32,
+    "wkbl-growth": 12
+  },
+  "readable_calls": 53,
+  "result_bytes_before": 15122836,
+  "skill_row_keys_after": [
+    "kind",
+    "name",
+    "tool_name"
+  ],
+  "skill_rows_in_surfaces": 2749,
+  "tool_row_keys_after": [
+    "name",
+    "sandbox_refusal",
+    "transport_alias_of"
+  ],
+  "tool_row_keys_before": [
+    "active_names",
+    "availability",
+    "backend",
+    "capability_id",
+    "composable_output",
+    "description",
+    "examples",
+    "execution",
+    "executor",
+    "id",
+    "input_schema_source",
+    "internal_name",
+    "keeper_model_projection",
+    "policy",
+    "public_name",
+    "runtime_handler",
+    "sandbox",
+    "sandbox_refusal",
+    "schema_shape",
+    "tool_kind",
+    "transport_alias_of"
+  ],
+  "tool_rows_in_surfaces": 10445,
+  "unreadable": {},
+  "window": {
+    "ledger_files": 13,
+    "since": "2026-11-06T09:52:00+00:00",
+    "until": "2026-11-07T09:52:00+00:00"
+  },
+  "window_result_bytes_any_tool": 163694795
+}

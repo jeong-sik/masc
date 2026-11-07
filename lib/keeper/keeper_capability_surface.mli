@@ -139,6 +139,14 @@ val digest : t -> string
 (** SHA-256 of the ordered, typed Tool and Skill capability projection. The
     separately exposed Skill snapshot revision is not digest material. *)
 
+val inventory_to_yojson : t -> Yojson.Safe.t
+(** The complete inventory as [keeper_tools_list] returns it: every Tool and
+    Skill row by name, filed under its availability name, with the fields that
+    availability carries ({!availability_detail_fields}), the Tool's
+    [transport_alias_of] and the Skill's [kind]. Descriptions, schemas and
+    invocation names are not listed; {!candidate_to_yojson} carries them for
+    the matches of capability search. *)
+
 val capability_availability_to_string : capability_availability -> string
 
 val availability_detail_fields : capability_availability -> (string * Yojson.Safe.t) list

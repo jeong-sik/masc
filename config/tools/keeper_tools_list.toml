@@ -1,7 +1,9 @@
 name = "keeper_tools_list"
 description = """
-List the complete Tool and Skill capability inventory frozen for this Keeper \
-turn, including operator-only and unavailable entries with their typed \
-availability. This is capability introspection, not connector content lookup. \
-Use keeper_capability_search to retrieve lexically relevant candidates."""
+List every name in the Tool and Skill capability inventory frozen for this \
+Keeper turn, filed under its typed availability (active, not_model_invocable, \
+refused_by_sandbox and the rest), including operator-only and unavailable \
+entries. Rows carry names and reasons, not descriptions or schemas: \
+keeper_capability_search returns those for a name or phrase. This is \
+capability introspection, not connector content lookup."""
 additional_properties = false

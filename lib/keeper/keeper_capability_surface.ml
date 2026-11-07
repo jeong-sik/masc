@@ -708,3 +708,81 @@ let digest surface =
   in
   Agent_core_sha256.(digest_string canonical |> to_hex)
 ;;
+
+(* The name the Keeper calls the Tool by, as [Keeper_tool_descriptor.keeper_model_names]
+   gives it. A Tool with no Keeper-facing name (operator only, or an alias of
+   another Tool) is listed by its public name. *)
+let tool_inventory_name (descriptor : Keeper_tool_descriptor.t) =
+  match descriptor.Keeper_tool_descriptor.keeper_model_projection with
+  | Keeper_tool_descriptor.Internal_name -> descriptor.Keeper_tool_descriptor.internal_name
+  | Keeper_tool_descriptor.Preferred_public_name
+  | Keeper_tool_descriptor.Operator_only
+  | Keeper_tool_descriptor.Transport_alias _ -> descriptor.Keeper_tool_descriptor.public_name
+;;
+
+let tool_inventory_row (capability : tool_capability) =
+  `Assoc
+    ([ "name", `String (tool_inventory_name capability.descriptor) ]
+     @ (match capability.descriptor.Keeper_tool_descriptor.keeper_model_projection with
+        | Keeper_tool_descriptor.Transport_alias { projected_by } ->
+          [ "transport_alias_of", `String projected_by ]
+        | Keeper_tool_descriptor.Preferred_public_name
+        | Keeper_tool_descriptor.Internal_name
+        | Keeper_tool_descriptor.Operator_only -> [])
+     @ availability_detail_fields capability.availability)
+;;
+
+let skill_inventory_row (capability : skill_capability) =
+  let kind_fields =
+    match capability.identity with
+    | Exact_skill (Keeper_skill_inventory.Valid valid) ->
+      skill_kind_to_fields valid.kind
+    | Exact_skill (Keeper_skill_inventory.Invalid _) -> [ "kind", `String "invalid" ]
+    | Missing_configured_skill_name _ -> [ "kind", `String "missing_configured" ]
+  in
+  `Assoc
+    ([ "name", `String (skill_name capability.identity) ]
+     @ kind_fields
+     @ availability_detail_fields capability.availability)
+;;
+
+(* Rows filed under their availability name; groups and rows keep the order
+   in which the surface lists them. *)
+let group_by_availability rows =
+  List.fold_left
+    (fun groups (availability, row) ->
+       let key = capability_availability_to_string availability in
+       if List.mem_assoc key groups
+       then
+         List.map
+           (fun (group, members) ->
+              if String.equal group key then group, row :: members else group, members)
+           groups
+       else groups @ [ key, [ row ] ])
+    []
+    rows
+  |> List.map (fun (key, members) -> key, `List (List.rev members))
+;;
+
+let inventory_to_yojson surface =
+  `Assoc
+    [ "schema", `String "masc.keeper.capability_inventory.v1"
+    ; ( "skill_snapshot_revision"
+      , `String
+          (Skill_catalog_snapshot.snapshot_revision_to_string
+             surface.skill_snapshot_revision) )
+    ; "surface_digest", `String (digest surface)
+    ; ( "tools"
+      , `Assoc
+          (surface.tool_capabilities
+           |> List.map (fun (capability : tool_capability) ->
+             capability.availability, tool_inventory_row capability)
+           |> group_by_availability) )
+    ; ( "skills"
+      , `Assoc
+          (surface.skill_capabilities
+           |> List.map (fun (capability : skill_capability) ->
+             capability.availability, skill_inventory_row capability)
+           |> group_by_availability) )
+    ]
+;;

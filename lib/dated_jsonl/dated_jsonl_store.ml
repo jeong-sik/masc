@@ -209,8 +209,32 @@ type dated_path =
 
 let dated_path location ~ts =
   let year, month, day = Jsonl_writer.utc_calendar_day ~ts in
-  let month_dir = Printf.sprintf "%04d-%02d" year month in
-  let day_file = Printf.sprintf "%02d.jsonl" day in
+  let month_dir =
+    if year >= 0 && year <= 9999 then begin
+      let b = Bytes.create 7 in
+      let yq = year / 100 in
+      let yr = year - (yq * 100) in
+      Bytes.unsafe_set b 0 (Char.unsafe_chr (48 + (yq / 10)));
+      Bytes.unsafe_set b 1 (Char.unsafe_chr (48 + (yq mod 10)));
+      Bytes.unsafe_set b 2 (Char.unsafe_chr (48 + (yr / 10)));
+      Bytes.unsafe_set b 3 (Char.unsafe_chr (48 + (yr mod 10)));
+      Bytes.unsafe_set b 4 '-';
+      Bytes.unsafe_set b 5 (Char.unsafe_chr (48 + (month / 10)));
+      Bytes.unsafe_set b 6 (Char.unsafe_chr (48 + (month mod 10)));
+      Bytes.unsafe_to_string b
+    end else
+      Printf.sprintf "%04d-%02d" year month
+  in
+  let day_file =
+    if day >= 0 && day <= 99 then begin
+      let b = Bytes.create 8 in
+      Bytes.unsafe_set b 0 (Char.unsafe_chr (48 + (day / 10)));
+      Bytes.unsafe_set b 1 (Char.unsafe_chr (48 + (day mod 10)));
+      Bytes.blit_string ".jsonl" 0 b 2 6;
+      Bytes.unsafe_to_string b
+    end else
+      Printf.sprintf "%02d.jsonl" day
+  in
   let path = Filename.concat (Filename.concat location.dir month_dir) day_file in
   { base_dir = location.dir; month_dir; day_file; path }
 

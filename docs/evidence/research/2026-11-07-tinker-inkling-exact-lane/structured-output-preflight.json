@@ -1,0 +1,44 @@
+{
+ "json_schema": {
+  "status": 200,
+  "wall_s": 1.7,
+  "format": "json_schema",
+  "max_tokens": 256,
+  "finish_reason": "stop",
+  "prompt_tokens": 27,
+  "cached_tokens": 0,
+  "completion_tokens": 49,
+  "reasoning_chars": 0,
+  "cost_usd": 5.7e-05,
+  "content_head": "The sea is a vast and beautiful place that invites us to relax and explore. Whether you are watching the waves roll in or feeling the cool breeze on your face, it always brings a sense of peace and wo",
+  "matches_schema": false
+ },
+ "json_object": {
+  "status": 200,
+  "wall_s": 1.29,
+  "format": "json_object",
+  "max_tokens": 256,
+  "finish_reason": "stop",
+  "prompt_tokens": 27,
+  "cached_tokens": 0,
+  "completion_tokens": 49,
+  "reasoning_chars": 0,
+  "cost_usd": 5.7e-05,
+  "content_head": "The sea is a vast and beautiful place that invites us to relax and explore. Whether you are watching the waves roll in or feeling the cool breeze on your face, it always brings a sense of peace and wo",
+  "matches_schema": false
+ },
+ "none": {
+  "status": 200,
+  "wall_s": 1.19,
+  "format": "none",
+  "max_tokens": 256,
+  "finish_reason": "stop",
+  "prompt_tokens": 27,
+  "cached_tokens": 0,
+  "completion_tokens": 49,
+  "reasoning_chars": 0,
+  "cost_usd": 5.7e-05,
+  "content_head": "The sea is a vast and beautiful place that invites us to relax and explore. Whether you are watching the waves roll in or feeling the cool breeze on your face, it always brings a sense of peace and wo",
+  "matches_schema": false
+ }
+}

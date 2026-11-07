@@ -11,6 +11,7 @@ See the [storage guide](../guides/WORKSPACE-STORAGE.md) for output locations.
 | --- | --- |
 | — | [TUI frame cost and terminal output: prior art and what applies to masc](tui-frame-cost-and-terminal-output-prior-art-20261104.md) |
 | — | [Extreme TUI/server performance: measured baseline and next decisions](extreme-performance-20261030.md) |
+| 2026-11-07 | [Tinker·Inkling 2 Small: exact 레인 실측과 학습으로 갈 수 있는 범위](2026-11-07-tinker-inkling-exact-lane-feasibility.md) |
 | 2026-11-06 | [Keepers list: past failure, current state, next attempt](2026-11-06-keepers-list-past-now-next.md) |
 | 2026-11-02 | [Typed model capability presets](2026-11-02-typed-model-capability-presets.md) |
 | 2026-11-02 | [Strict JSON provider admission](2026-11-02-strict-json-provider-admission.md) |

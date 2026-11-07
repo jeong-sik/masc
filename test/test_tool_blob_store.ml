@@ -1346,6 +1346,37 @@ let test_maintenance_outbox_payloads_are_tool_data () =
        marker.sha256,"outbox reserved marker"])
 ;;
 
+(* A host receipt names its image and its large text by blob address
+   (Keeper_client_tool_outbox.host_response). Those addresses own the bytes
+   while the receipt waits for a completed turn. *)
+let test_maintenance_keeps_host_receipt_blob_addresses () =
+  with_temp_dir (fun base_path ->
+    let module Outbox = Masc.Keeper_client_tool_outbox in
+    let require = function Ok value -> value | Error detail -> Alcotest.fail detail in
+    let store = B.create ~base_path in
+    let image = "\x89PNG\r\n\x1a\nreceipt image bytes" in
+    let text = String.make 4096 'r' in
+    let producer = require (Outbox.host_producer ~base_path ~keeper_name:"reviewer"
+        ~runtime_label:"host fixture" ~turn_count:1) in
+    let response = require (Outbox.host_response producer
+        ~bodies:(Outbox.Host_bodies_as_markers {min_result_bytes=0}) ~success:true ~content:text
+        ~content_blocks:(Some [Llm_provider.Types.Image {media_type="image/png";
+          source=Llm_provider.Types.Base64 (Base64.encode_string image)}])) in
+    require (Outbox.retain_host_result producer ~invocation_index:0 ~call_id:"host-call"
+      ~tool_name:"fixture" ~arguments:`Null ~response);
+    let unnamed = B.put_durable store ~bytes:"bytes no receipt names" ~mime:"text/plain" in
+    let first = maintenance_ok ~base_path ~mode:M.Delete_previous_candidates in
+    Alcotest.(check int) "only the unnamed bytes become a candidate" 1 first.candidates_recorded;
+    let second = maintenance_ok ~base_path ~mode:M.Delete_previous_candidates in
+    Alcotest.(check int) "only the unnamed bytes are collected" 1 second.deleted;
+    Alcotest.(check (option string)) "unnamed bytes are gone" None
+      (fetch_ok store ~sha256:unnamed.sha256);
+    List.iter (fun bytes ->
+      Alcotest.(check (option string)) "receipt-named bytes survive" (Some bytes)
+        (fetch_ok store ~sha256:Agent_core_sha256.(digest_string bytes |> to_hex)))
+      [image; text])
+;;
+
 let test_maintenance_outbox_opacity_requires_complete_receipt_authority () =
   let module Codec = Keeper_client_tool_outbox_codec in
   List.iter (fun shape -> with_temp_dir (fun base_path ->
@@ -2886,6 +2917,8 @@ let () =
             test_maintenance_opaque_payloads_preserve_fail_closed_boundaries;
           Alcotest.test_case "maintenance treats validated outbox payloads as tool data" `Quick
             test_maintenance_outbox_payloads_are_tool_data;
+          Alcotest.test_case "maintenance keeps the blob addresses a host receipt names" `Quick
+            test_maintenance_keeps_host_receipt_blob_addresses;
           Alcotest.test_case "maintenance outbox opacity requires complete receipt authority" `Quick
             test_maintenance_outbox_opacity_requires_complete_receipt_authority;
           Alcotest.test_case "maintenance opaque outbox payloads preserve reserved reference failures" `Quick

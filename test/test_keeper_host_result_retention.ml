@@ -43,6 +43,68 @@ let load base_path = get (Outbox.load ~base_path ~keeper_name)
 let returned () = Ok {Agent_core.Types.content=marker;
   content_blocks=Some [Llm_provider.Types.Text "original-block-bytes"];_meta=None}
 
+let reader base_path =
+  let schema = Keeper_runtime_schemas_toml.artifact_read in
+  Tool_bridge.agent_core_tool_of_masc_with_execution_env ~base_path
+    ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
+    ~model_projection:(fun () -> Tool_output.bounded_inline_model_projection)
+    ~name:schema.name ~description:schema.description ~input_schema:schema.input_schema
+    (fun _ args ->
+      let execution = Keeper_artifact_read.handle ~base_path ~args in
+      match execution.disposition with
+      | Tool_result.Completed () -> Tool_result.make_ok ~tool_name:schema.name
+          ~start_time:(Tool_timing.start ()) ?data:execution.data ()
+      | Tool_result.Failed class_ -> Tool_result.make_err ~tool_name:schema.name ~class_
+          ~start_time:(Tool_timing.start ()) execution.raw_output
+      | Tool_result.Deferred () -> fail "the canonical reader cannot defer")
+
+(* The masc_dos_screen result of #49634: a few KB of text and a PNG. Every
+   later request re-reads a retained receipt, so it names the bytes by blob
+   address and the store holds them. A Keeper without the artifact reader
+   keeps its text, which it could not read back from a marker; its image
+   still goes by address, because base64 inside text is not an image. *)
+let test_screenshot_receipt_names_bytes_by_address () = List.iter (fun with_reader ->
+  with_workspace (fun base_path ->
+    let screen = String.concat " " (List.init 512 (Printf.sprintf "cell-%03d")) in
+    let png = "\x89PNG\r\n\x1a\n" ^ String.make 4096 '\x07' in
+    let payload = Base64.encode_string png in
+    let tool = Agent_core.Tool.create ~name:"Screenshot" ~description:"Return the screen"
+        ~parameters:[] (fun _ -> Ok {Agent_core.Types.content=screen;
+          content_blocks=Some [Llm_provider.Types.Text screen;
+            Llm_provider.Types.Image {media_type="image/png";
+              source=Llm_provider.Types.Base64 payload}];_meta=None}) in
+    let tools = if with_reader then [tool; reader base_path] else [tool] in
+    let terminal_error = ref None in
+    let screenshot = match Host.dynamic_tools ~result_scope:None ~base_path
+        ~content_transport:Runtime_official_client_tool.Mcp ~accepts_image_input:true
+        ~tool_approval:None ~runtime_label:"host-result-fixture" ~keeper_name ~turn_count:7
+        ~tools ~loading_plan:Host.All_on_demand ~hooks:Agent_core.Hooks.empty
+        ~event_bus:None ~context_injector:None ~context:(Some (Agent_core.Context.create_sync ()))
+        ~terminal_effect_state:(fun () -> Keeper_tools_agent_core.Terminal_effect_open)
+        ~terminal_error ~pre_tool_rejects:(ref []) ~on_tool_boundary:(fun ~tool_name:_ -> Ok None)
+        ~raw_trace_run:None () with
+      | Ok (screenshot :: _, _) -> screenshot
+      | Ok ([], _) -> fail "the screenshot tool is projected"
+      | Error error -> fail (Agent_core.Error.to_string error) in
+    ignore (screenshot.call ~call_id:"screen-call" (`Assoc []));
+    check (option string) "retention reports no failure" None !terminal_error;
+    let pending = load base_path in
+    check int "the result is retained" 1 (List.length (Outbox.receipt_ids pending));
+    let context = String.concat "\n" (Outbox.developer_context pending) in
+    let contains = String_util.contains_substring context in
+    let address bytes = Agent_core_sha256.(digest_string bytes |> to_hex) in
+    let store = Tool_blob_store.create ~base_path in
+    let held bytes = match Tool_blob_store.fetch store ~sha256:(address bytes) with
+      | Ok held -> held
+      | Error error -> fail (Tool_blob_store.fetch_error_to_string error) in
+    check bool "no base64 payload rides in the receipt" false (contains payload);
+    check bool "the receipt names the image by its address" true (contains (address png));
+    check (option string) "the store holds the image bytes" (Some png) (held png);
+    check bool "text stays inline only without the reader" (not with_reader) (contains screen);
+    if with_reader then
+      check (option string) "the store holds the text bytes" (Some screen) (held screen)))
+  [true; false]
+
 let test_stop_retains_before_transport_return () = with_workspace (fun base_path ->
   let terminal_error = ref None and effects = ref 0 in
   let before = load base_path in
@@ -523,6 +585,7 @@ let () = run "Original official-client host result retention"
     test_case "MCP reused string id keeps each physical invocation" `Quick test_mcp_reused_string_id_keeps_physical_invocations;
     test_case "host invocation index schema is strict" `Quick test_host_invocation_index_validation;
     test_case "original that reads back different creates no receipt" `Quick test_original_that_reads_back_different_creates_no_receipt;
+    test_case "screenshot receipt names its bytes by blob address" `Quick test_screenshot_receipt_names_bytes_by_address;
     test_case "source identity deduplicates exact originals across mixed producers" `Quick test_producer_identity_and_vendor_coexistence;
     test_case "shared context preserves retained originals in order" `Quick test_shared_context_preserves_each_retained_result;
     test_case "ambiguous receipt shape remains individual" `Quick test_ambiguous_receipt_shape_is_not_shared;

@@ -732,7 +732,7 @@ type finished_turn_results =
   | Finished_turns_as_markers
       (** A result of turns that ended, in an atom before the turn boundary
           and never the newest atom, goes as its externalized marker when its
-          body is at least [For_testing.aged_result_min_bytes] bytes. The
+          body is at least {!aged_result_min_bytes} bytes. The
           same result is the same marker on every later request, so it changes
           once, on the first request after its turn ended
           (RFC-tool-results-age-out-of-context). An unknown turn boundary
@@ -742,6 +742,12 @@ val finished_turn_results_for : reader_available:bool -> finished_turn_results
 (** {!Finished_turns_as_markers} for a Keeper that can read markers back
     ([reader_available]); {!Finished_turns_verbatim} for a Keeper without the
     reader. *)
+
+val aged_result_min_bytes : int
+(** The least text, in bytes, of a result of an ended turn that goes as its
+    marker; a smaller result stays readable in the prompt. A retained
+    official-client receipt is a result of an ended vendor turn and uses the
+    same floor ([Keeper_client_tool_outbox.Host_bodies_as_markers]). *)
 
 val current_turn_demotion_sequence :
   same_run_retry_authorized:(unit -> bool) ->

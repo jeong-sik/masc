@@ -1,6 +1,6 @@
 # HTTP/1.1 과 HTTP/2 h2c 기준선 (경로 표 통합·TLS 리스너 전)
 
-2026-11-07 09:43Z ~ 09:52Z, 설치된 바이너리 `~/.local/bin/masc` 0.68.0, build-commit `6afc364dd901726af020c84d491f33b139477d78`, sha256 `87e13646e1e41b9785441e33b808a59bf4de8cb5b9ba2fe4a1af4e843c842ae7`. 조사 문서는 `docs/research/2026-11-07-http-transport-stack.md`, 결정은 RFC-0511 이다. 이 묶음은 바꾸기 전 값이다. 바꾼 뒤 값은 같은 도구로 재서 `../after/` 에 둔다.
+2026-11-07 09:43Z ~ 09:52Z, 설치된 바이너리 `~/.local/bin/masc` 0.68.0, build-commit `6afc364dd901726af020c84d491f33b139477d78`, sha256 `87e13646e1e41b9785441e33b808a59bf4de8cb5b9ba2fe4a1af4e843c842ae7`. 조사 문서는 `docs/research/2026-11-07-http-transport-stack.md`, 결정은 RFC-0512 이다. 이 묶음은 바꾸기 전 값이다. 바꾼 뒤 값은 같은 도구로 재서 `../after/` 에 둔다.
 
 ## 조건
 

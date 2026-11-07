@@ -27,6 +27,22 @@ let error_to_string = function
   | Redirect_uri_not_https -> "the redirect URI is not an https URL with a host and no query or fragment"
 ;;
 
+type environment_error =
+  | Secret_variable_unset of string
+  | Client_refused of error
+
+let environment_error_to_string = function
+  | Secret_variable_unset name -> Printf.sprintf "the environment variable %s is not set" name
+  | Client_refused error -> error_to_string error
+;;
+
+let of_environment ~getenv ~client_id ~redirect_uri ~client_secret_env =
+  match getenv client_secret_env with
+  | None -> Error (Secret_variable_unset client_secret_env)
+  | Some client_secret ->
+    make ~client_id ~client_secret ~redirect_uri |> Result.map_error (fun error -> Client_refused error)
+;;
+
 let client_id t = t.client_id
 let redirect_uri t = t.redirect_uri
 

@@ -69,6 +69,6 @@ python3 docs/evidence/artifact-read-misses-2026-11/measure_artifact_read_misses.
   --json-out docs/evidence/artifact-read-misses-2026-11/result-2026-11-01_11-06.json
 ```
 
-원장 파일은 UTC 날짜로 잘려 있어요. `--since`·`--until` 은 `ts` 로 거르고, 옵션이 없으면 `--from-date` 0시부터 `--to-date` 24시까지예요. 원본 기록은 `~/me/.masc/keepers/*/raw-traces/*.jsonl` 에서 `answer_sha256=<64자리 16진수>` 를 모두 모아 대조해요(약 5초).
+원장 파일은 UTC 날짜로 잘려 있어요. `--since`·`--until` 은 `ts` 로 거르고, 옵션이 없으면 `--from-date` 0시부터 `--to-date` 24시까지예요. 원본 기록은 `~/me/.masc/keepers/*/raw-traces/*.jsonl` 에서 `answer_sha256=<64자리 16진수>` 를 모두 모아 대조해요(약 5초). 파일 목록을 만든 뒤 읽기 전에 지워진 원본 기록 파일은 건너뛰고 결과 JSON 의 `files.raw_traces_vanished` 로 세요. 전에는 `FileNotFoundError` 로 끝났어요.
 
-시험: `python3 -m unittest discover -s docs/evidence/artifact-read-misses-2026-11` (25개). 점검용 변형 24개 중 23개를 시험이 잡았어요. 살아남은 하나는 `answer_sha256=` 를 포함하는 파일만 정규식에 넘기는 사전 거름의 문자열을 바꾼 것이고 결과가 같아요.
+시험: `python3 -m unittest discover -s docs/evidence/artifact-read-misses-2026-11` (26개). 점검용 변형 24개 중 23개를 시험 25개가 잡았어요. 살아남은 하나는 `answer_sha256=` 를 포함하는 파일만 정규식에 넘기는 사전 거름의 문자열을 바꾼 것이고 결과가 같아요. 26번째 시험(지워진 파일을 세고 계속 가는지)은 변형 점검에 넣지 않았어요.

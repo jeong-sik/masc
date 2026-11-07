@@ -1,0 +1,160 @@
+{
+  "calls": 20399,
+  "failed": 193,
+  "tools": [
+    {
+      "tool": "masc_board_post_get",
+      "calls": 1383,
+      "failed": 49
+    },
+    {
+      "tool": "Grep",
+      "calls": 753,
+      "failed": 29
+    },
+    {
+      "tool": "Execute",
+      "calls": 8959,
+      "failed": 24
+    },
+    {
+      "tool": "keeper_artifact_read",
+      "calls": 176,
+      "failed": 13
+    },
+    {
+      "tool": "Edit",
+      "calls": 290,
+      "failed": 12
+    },
+    {
+      "tool": "BrowserRead",
+      "calls": 1074,
+      "failed": 10
+    },
+    {
+      "tool": "masc_schedule_get",
+      "calls": 43,
+      "failed": 8
+    },
+    {
+      "tool": "Read",
+      "calls": 289,
+      "failed": 6
+    },
+    {
+      "tool": "masc_board_comment",
+      "calls": 385,
+      "failed": 5
+    },
+    {
+      "tool": "BrowserGoto",
+      "calls": 18,
+      "failed": 5
+    },
+    {
+      "tool": "keeper_artifact_transfer",
+      "calls": 44,
+      "failed": 4
+    },
+    {
+      "tool": "BrowserTabs",
+      "calls": 43,
+      "failed": 3
+    }
+  ],
+  "signatures": [
+    {
+      "tool": "masc_board_post_get",
+      "signature": "comment_offset N names no comment of p-<hex>: the thread now has N comments, at offsets N-N. Start again from ",
+      "failed": 42,
+      "keepers": 1,
+      "turns": 27
+    },
+    {
+      "tool": "Edit",
+      "signature": "{\"error\":\"old_string not found in file. Patch did not match anything. Re-Read the file and copy old_string fro",
+      "failed": 12,
+      "keepers": 2,
+      "turns": 10
+    },
+    {
+      "tool": "keeper_artifact_read",
+      "signature": "{\"ok\":false,\"error\":\"invalid_artifact_read\",\"message\":\"artifact does not exist\"}",
+      "failed": 10,
+      "keepers": 7,
+      "turns": 8
+    },
+    {
+      "tool": "BrowserRead",
+      "signature": "selected_client_disconnected",
+      "failed": 8,
+      "keepers": 1,
+      "turns": 7
+    },
+    {
+      "tool": "Execute",
+      "signature": "{\"error\":\"remote_ssh_disk_low: endpoint apple-review-pangyo available_kib=N minimum_kib=N\",\"typed\":true,\"cmd\":",
+      "failed": 8,
+      "keepers": 2,
+      "turns": 3
+    },
+    {
+      "tool": "masc_schedule_get",
+      "signature": "{\"message\":\"schedule not found\",\"masc.tool_disposition\":\"failed\",\"failure_class\":\"workflow_rejection\",\"next_mo",
+      "failed": 8,
+      "keepers": 2,
+      "turns": 5
+    },
+    {
+      "tool": "masc_board_post_get",
+      "signature": "Post not found: p-<hex>. Use an id masc_board_list or masc_board_search returns; a guessed id fails here.",
+      "failed": 4,
+      "keepers": 3,
+      "turns": 4
+    },
+    {
+      "tool": "BrowserGoto",
+      "signature": "{\"message\":\"This tab or document belongs to a browser. Repeat its observed lane and clientId.\",\"masc.tool_disp",
+      "failed": 3,
+      "keepers": 3,
+      "turns": 3
+    },
+    {
+      "tool": "Execute",
+      "signature": "{\"error\":\"remote_ssh_disk_low: endpoint apple-review-anyang available_kib=N minimum_kib=N\",\"typed\":true,\"cmd\":",
+      "failed": 3,
+      "keepers": 1,
+      "turns": 1
+    },
+    {
+      "tool": "Execute",
+      "signature": "{\"error\":\"remote_ssh_disk_low: endpoint apple-review-be available_kib=N minimum_kib=N\",\"typed\":true,\"cmd\":\"bas",
+      "failed": 3,
+      "keepers": 1,
+      "turns": 2
+    },
+    {
+      "tool": "Execute",
+      "signature": "{\"error\":\"remote_ssh_disk_low: endpoint apple-review-be available_kib=N minimum_kib=N\",\"typed\":true,\"cmd\":\"gh ",
+      "failed": 3,
+      "keepers": 1,
+      "turns": 3
+    },
+    {
+      "tool": "keeper_artifact_transfer",
+      "signature": "{\"message\":\"Exported artifact <hex> is absent\",\"masc.tool_disposition\":\"failed\",\"failure_class\":\"workflow_reje",
+      "failed": 3,
+      "keepers": 3,
+      "turns": 3
+    }
+  ],
+  "skipped": {
+    "bad_lines": 0
+  },
+  "window": {
+    "since": "2026-11-06T09:52:00+00:00",
+    "until": "2026-11-07T09:52:00+00:00",
+    "files": 12
+  }
+}

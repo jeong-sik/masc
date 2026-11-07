@@ -2,6 +2,7 @@ open Types
 
 type policy =
   | Preserve_positions
+  | Omit_historical_context
   | Turn_scoped_system_context
   | Initial_system_native_tools
   | Initial_system_tool_response_media
@@ -34,7 +35,17 @@ let error_to_string = function
     Printf.sprintf "turn-scoped context at history index %d must precede an assistant or end the request" message_index
 ;;
 
-let policy_for_provider_config config =
+(* An Anthropic turn leaves its context in the history as
+   [Historical_system_context] (Pipeline stores it for that kind only), and an
+   Anthropic request sends the row back in place so its prefix only grows.
+   Every other provider sends only the current context (RFC-AC-041 section
+   3.2), so a lane switch does not resend each past Anthropic turn's context. *)
+let preserve_policy = function
+  | Provider_config.Anthropic -> Preserve_positions
+  | Provider_config.(Kimi | OpenAI_compat | Ollama | Gemini | Glm) -> Omit_historical_context
+;;
+
+let policy_for_provider_config (config : Provider_config.t) =
   let declared =
     match Provider_config.capabilities_for_config_model config with
     | Some {Capabilities.reasoning_replay_override=Force_initial_system_latest_user_turn_tool_calls;_} -> `Initial
@@ -45,7 +56,7 @@ let policy_for_provider_config config =
     | None -> `Preserve
   in
   match declared, Provider_http_codec.of_config config with
-  | `Preserve, _ -> Ok Preserve_positions
+  | `Preserve, _ -> Ok (preserve_policy config.kind)
   | `Initial, (Openai_chat | Glm_chat) -> Ok Initial_system_tool_response_media
   | `Initial, Ollama_chat -> Ok Initial_system_native_tools
   | `Turn_scoped, Anthropic_messages -> Ok Turn_scoped_system_context
@@ -72,7 +83,8 @@ let is_turn_scoped_context policy (message : _ Types.message_with) =
   match policy, message.origin with
   | Turn_scoped_system_context, (System_context | Historical_system_context) -> true
   | Turn_scoped_system_context, (Conversation | Recovery_instruction | Tool_result_followup | Agent_instruction)
-  | (Preserve_positions | Initial_system_native_tools | Initial_system_tool_response_media), _ -> false
+  | (Preserve_positions | Omit_historical_context | Initial_system_native_tools
+    | Initial_system_tool_response_media), _ -> false
 ;;
 
 type native_role = Native_user | Native_assistant | Native_system
@@ -91,7 +103,8 @@ let anthropic_message_header policy message =
 
 let validate_turn_scoped_contexts policy messages =
   match policy with
-  | Preserve_positions | Initial_system_native_tools | Initial_system_tool_response_media -> Ok ()
+  | Preserve_positions | Omit_historical_context | Initial_system_native_tools
+  | Initial_system_tool_response_media -> Ok ()
   | Turn_scoped_system_context ->
     let rec group index = function
       | (message : _ Types.message_with) :: rest when is_turn_scoped_context policy message ->
@@ -124,6 +137,16 @@ let lower policy messages =
   match policy with
   | Preserve_positions ->
     Ok {messages; source_indices = List.mapi (fun index _ -> index) messages}
+  | Omit_historical_context ->
+    let kept =
+      List.filter (fun (_, (message : _ Types.message_with)) ->
+        match message.origin with
+        | Historical_system_context -> false
+        | Conversation | System_context | Recovery_instruction | Tool_result_followup
+        | Agent_instruction -> true)
+        (List.mapi (fun index message -> index, message) messages)
+    in
+    Ok {messages = List.map snd kept; source_indices = List.map fst kept}
   | Turn_scoped_system_context ->
     (* Context keeps its canonical role. Its native System role is the header
        [anthropic_message_header] derives from policy and origin, so the wire
@@ -262,7 +285,7 @@ let encode_user_boundary policy ~(message : Types.message) wire =
       | _ :: _ -> Error Invalid_user_frame
     in
     loop [] wire
-  | (Preserve_positions | Turn_scoped_system_context), _, _
+  | (Preserve_positions | Omit_historical_context | Turn_scoped_system_context), _, _
   | (Initial_system_native_tools | Initial_system_tool_response_media), (System | Assistant | Tool), _
   | (Initial_system_native_tools | Initial_system_tool_response_media), User,
       (System_context | Historical_system_context | Recovery_instruction | Agent_instruction) ->
@@ -279,7 +302,7 @@ let prepend_system_prompt policy ~system_prompt messages =
       Ok (`Assoc ["role", `String "system"; "content", `String prompt] :: messages)
     in
     match policy, messages with
-    | (Preserve_positions | Turn_scoped_system_context), _
+    | (Preserve_positions | Omit_historical_context | Turn_scoped_system_context), _
     | (Initial_system_native_tools | Initial_system_tool_response_media), [] -> prepend ()
     | (Initial_system_native_tools | Initial_system_tool_response_media), first :: rest ->
       (match first with

@@ -866,7 +866,7 @@ let log_cleanup_failure instance_id package_id resource failure =
   Log.Misc.warn "Lane Add-on cleanup was not confirmed for instance %s (package %s, resource %s): %s"
     instance_id package_id (Option.fold ~none:"none" ~some:Lifecycle.resource_to_string resource) (Lifecycle.failure_to_string failure)
 
-let stop_entry ~sw ~backend m e =
+let rec stop_entry ~sw ~backend m e =
   if not e.cleanup_running then
     let cleanup = match e.connection, e.authority with
       | Some c, _ -> Some (Some c.worker.resource, c.worker.stop)
@@ -920,7 +920,15 @@ let stop_entry ~sw ~backend m e =
               (match persist m e with Ok () -> () | Error message ->
                 e.state <- fail_state e (Lifecycle.Persistence_failed ("cleanup state persistence: " ^ message)));
               wake_dependents m e);
-          release_detached m e)
+          release_detached m e;
+          (* Every way through the cleanup leaves Detached or Failed. A Detach
+             that came after the verdict, while the log, the event or the
+             binding write yielded, saw the flag still set and started nothing.
+             Its Detaching state is answered by the cleanup it asked for, or
+             its wait for a settled state never ends. *)
+          match e.state with
+          | Lifecycle.Detaching _ -> stop_entry ~sw ~backend m e
+          | Lifecycle.Attached | Lifecycle.Observing | Lifecycle.Failed _ | Lifecycle.Detached _ -> ())
 let namespace e seq output =
   let prefix value = e.instance_id ^ "/" ^ string_of_int seq ^ "/" ^ value in
   { output with rows = List.map (fun (row : row) -> { row with

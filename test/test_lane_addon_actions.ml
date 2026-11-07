@@ -546,6 +546,63 @@ let test_worker_ending_during_the_commit_stays_failed () = with_fixture (fun clo
     check string "a worker that ended during the binding write stays failed" "failed" (phase ());
     detach clock fixture id))
 
+(* An operator call whose outcome is unknown retires the instance and starts
+   its cleanup, which the worker refuses once. A Detach that lands while that
+   refusal is being written finds the cleanup still running and starts none.
+   The cleanup that ends starts the one the Detach asked for, so the Detach
+   returns with the instance detached instead of waiting for good. *)
+let test_detach_during_a_refused_cleanup_write_runs_its_own_cleanup () = with_fixture (fun clock fixture ->
+  let stops = ref 0 and refused = Atomic.make false and entered = Atomic.make false in
+  let gate = Mutex.create () and opened = Condition.create () and released = ref false in
+  let refusing_once (c : Runtime.For_testing.connection) = {c with
+    operator_schema = (fun () -> Some (obj ["type",str "object"]));
+    call_operator = (fun ~admit:_ ~arguments:_ -> Error Runtime.Operator_outcome_unknown);
+    stop = (fun () ->
+      incr stops;
+      if !stops = 1 then (
+        Atomic.set refused true;
+        Error (Masc.Lane_addon_lifecycle.Cleanup_unconfirmed "cleanup refused"))
+      else c.stop ())} in
+  let base = backend fixture in
+  let start ~sw ~state_owner ~instance_id ~installation_id ~package ~binding ~on_authority
+      ~is_live_instance ~on_created =
+    base.start ~sw ~state_owner ~instance_id ~installation_id ~package ~binding ~on_authority
+      ~is_live_instance ~on_created:(fun c -> on_created (refusing_once c))
+    |> Result.map refusing_once in
+  (* Runs on the offload system thread, so it blocks with a system mutex. Only
+     the write of the refused cleanup's verdict is held back. *)
+  let writer ~store ~instance_id json =
+    if text "kind" (member "phase" json) = "failed"
+       && Atomic.compare_and_set refused true false then (
+      Atomic.set entered true;
+      Mutex.lock gate;
+      while not !released do Condition.wait opened gate done;
+      Mutex.unlock gate);
+    Store.save_binding_staged store ~instance_id json in
+  Runtime.For_testing.with_backend {base with start} (fun () ->
+  Runtime.For_testing.with_binding_writer writer (fun () ->
+    let id = attach clock fixture ~acting:false in
+    let phase () = text "kind" (member "phase" (inspect fixture id)) in
+    (match Runtime.call_operator ~config:fixture.config
+       ~access:Lane_addon_sources.Operator_configuration ~instance_id:id
+       ~expected_incarnation:id ~arguments:(obj []) with
+     | Error Runtime.Operator_outcome_unknown -> ()
+     | Error (Runtime.Operator_unavailable | Runtime.Operator_rejected) | Ok _ ->
+         fail "the operator call must end with an unknown outcome");
+    await clock (fun () -> Atomic.get entered);
+    let detached = ref None in
+    Eio.Fiber.both
+      (fun () -> detached := Some (dispatch fixture Runtime.Detach ["instance_id",str id]))
+      (fun () ->
+        await clock (fun () -> phase () = "detaching");
+        Mutex.lock gate; released := true; Condition.broadcast opened; Mutex.unlock gate);
+    (match !detached with
+     | Some (Ok _) -> ()
+     | Some (Error detail) -> fail ("the Detach must report its own cleanup: " ^ detail)
+     | None -> fail "the Detach did not return");
+    await clock (fun () -> phase () = "detached");
+    check int "the refused cleanup, then the one the Detach asked for" 2 !stops)))
+
 let test_confirmed_receipt_requires_result () = with_fixture (fun clock fixture ->
   let id = attach clock fixture ~acting:true in
   let request_id = "retained-confirmation" in
@@ -974,6 +1031,7 @@ let () = run "Lane action workflow" ["canonical request identity",[
   test_case "observation rename failure preserves sequence and unknown action without replay" `Quick test_observation_publication_keeps_sequence_and_action_uncertainty;
   test_case "binding publication commits the held observation without rewriting it" `Quick test_binding_publication_commits_the_held_observation;
   test_case "a worker ending during the commit's binding write stays failed" `Quick test_worker_ending_during_the_commit_stays_failed;
+  test_case "a Detach during a refused cleanup's write runs its own cleanup" `Quick test_detach_during_a_refused_cleanup_write_runs_its_own_cleanup;
   test_case "persisted confirmation requires its received result without replay" `Quick test_confirmed_receipt_requires_result;
   test_case "queued receipt, normalized dedup and retained output" `Quick test_one_request_one_effect;
   test_case "identity, schema and actor before effect" `Quick test_validation_precedes_effect;

@@ -3756,12 +3756,12 @@ let add_routes ~sw ~clock router =
 
   (* What one Keeper is waiting on a human for. *)
   |> Server_route.get (Server_route.Tool { tool_name = "masc_ask_status" }) "/api/v1/keepers/asks" (fun state request reqd ->
-         handle_keeper_asks_list ~clock state request reqd)
+         Server_routes_http_keeper_asks.handle_keeper_asks_list ~clock state request reqd)
 
   (* Answers a Keeper's question. The operator may be at any surface; the
      log settles concurrent submissions on first write. *)
   |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_ask" }) "/api/v1/keepers/ask-answer" (fun state actor request reqd ->
-         handle_keeper_ask_answer ~actor state request reqd)
+         Server_routes_http_keeper_asks.handle_keeper_ask_answer ~actor state request reqd)
 
   (* Lists the tool calls keepers are holding, so a wait whose owning stream
      watcher is gone can still be answered instead of only timing out

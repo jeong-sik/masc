@@ -461,6 +461,28 @@ let test_is_lowercase_sha256_hex () =
   Alcotest.(check bool) "empty rejected" false
     (String_util.is_lowercase_sha256_hex "")
 
+let test_bool_of_word () =
+  List.iter
+    (fun word ->
+       check (option bool) (word ^ " is true") (Some true) (SU.bool_of_word word))
+    [ "1"; "true"; "yes"; "on" ];
+  List.iter
+    (fun word ->
+       check (option bool) (word ^ " is false") (Some false)
+         (SU.bool_of_word word))
+    [ "0"; "false"; "no"; "off" ];
+  check (option bool) "upper case" (Some true) (SU.bool_of_word "TRUE");
+  check (option bool) "mixed case" (Some false) (SU.bool_of_word "oFf");
+  check (option bool) "surrounding whitespace" (Some true)
+    (SU.bool_of_word " \t yes\n");
+  check (option bool) "empty is None" None (SU.bool_of_word "");
+  check (option bool) "blank is None" None (SU.bool_of_word " \t ");
+  List.iter
+    (fun word ->
+       check (option bool) (word ^ " is not a boolean word") None
+         (SU.bool_of_word word))
+    [ "y"; "n"; "t"; "f"; "2"; "-1"; "enabled"; "disabled"; "truee"; "ye s" ]
+
 let test_is_valid_utf8_basic () =
   check bool "ascii" true (String_util.is_valid_utf8 "abc");
   check bool "empty" true (String_util.is_valid_utf8 "");
@@ -736,6 +758,9 @@ let () =
       ( "sha256_hex",
         [ test_case "canonical spelling test" `Quick
             test_is_lowercase_sha256_hex ] );
+      ( "bool_of_word",
+        [ test_case "eight words, case, padding, unknown words" `Quick
+            test_bool_of_word ] );
       ( "utf8_boundary",
         [ test_case "is_valid_utf8 basics" `Quick test_is_valid_utf8_basic;
           test_case "Korean 50-byte cut regression" `Quick

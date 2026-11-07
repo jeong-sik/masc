@@ -495,10 +495,7 @@ let get_env_int_logged name ~default =
       default
 
 let parse_bool_string s =
-  match String.lowercase_ascii (String.trim s) with
-  | "1" | "true" | "yes" | "on" -> Some true
-  | "0" | "false" | "no" | "off" | "" -> Some false
-  | _ -> None
+  if String.trim s = "" then Some false else String_util.bool_of_word s
 
 let get_env_bool_logged name ~default =
   match Sys.getenv_opt name with

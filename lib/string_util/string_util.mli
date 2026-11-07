@@ -183,3 +183,11 @@ val is_lowercase_sha256_hex : string -> bool
 (** Whether [value] is exactly 64 lowercase hex characters — the canonical
     stored spelling of a SHA-256 across config revisions. The one
     definition; a surface that restates the triple guard drifts silently. *)
+
+val bool_of_word : string -> bool option
+(** [bool_of_word s] reads the boolean spellings an operator writes in an
+    environment variable, a header or a config value. After trimming
+    whitespace and lowercasing ASCII, ["1"], ["true"], ["yes"] and ["on"] are
+    [Some true]; ["0"], ["false"], ["no"] and ["off"] are [Some false]. Any
+    other input, the empty string included, is [None], so each caller decides
+    what "unset" and "unrecognized" mean for its flag. *)

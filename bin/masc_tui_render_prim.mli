@@ -104,7 +104,8 @@ val reader_after_wheel :
   Masc.Tui_mouse_protocol.wheel_direction ->
   Masc_tui_types.clamped_scroll option
 (** Where one wheel notch leaves a reader, given its position now: one row, as
-    [j] / [k] move it. [None] for the scrolls the wheel reaches as a key. *)
+    [j] / [k] move it. [None] for the scrolls the wheel reaches as a key, and
+    for the Parameters document when it cannot move that way. *)
 
 val navigation_rows : int
 

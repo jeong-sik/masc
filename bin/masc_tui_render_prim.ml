@@ -135,7 +135,10 @@ let clamped_scroll_now (state : state) = function
   | Harness_detail_scroll _ -> Harness_detail_scroll state.harness_detail_scroll
   | Fusion_detail_scroll _ -> Fusion_detail_scroll state.fusion_scroll
   | Runtime_detail_scroll _ -> Runtime_detail_scroll state.runtime_detail_scroll
-  | Runtime_params_scroll _ -> Runtime_params_scroll state.config_scroll
+  | Runtime_params_scroll _ ->
+      Runtime_params_scroll
+        { scroll = state.config_scroll;
+          max_scroll = state.runtime_params_max_scroll }
   | System_log_detail_scroll _ ->
       System_log_detail_scroll (system_logs_page state).lp_detail_scroll
   | Planning_detail_scroll _ | Planning_confirmation_scroll _ ->
@@ -174,7 +177,8 @@ let clamped_scroll_now (state : state) = function
 
    [reader] is the reader's position now ([clamped_scroll_now]), not as a
    frame drew it: notches and keys that arrive between two frames each move
-   it. [None] for the scrolls the wheel reaches another way. Listed one by one
+   it. [None] for the scrolls the wheel reaches another way, and for a reader
+   with no row left to move to that way. Listed one by one
    so a new reader is a compile error here, not a notch that quietly moves a
    list. *)
 let reader_after_wheel (reader : clamped_scroll)
@@ -195,7 +199,18 @@ let reader_after_wheel (reader : clamped_scroll)
   | Harness_detail_scroll value -> Some (Harness_detail_scroll (step value))
   | Fusion_detail_scroll value -> Some (Fusion_detail_scroll (step value))
   | Runtime_detail_scroll value -> Some (Runtime_detail_scroll (step value))
-  | Runtime_params_scroll value -> Some (Runtime_params_scroll (step value))
+  (* The list is on screen beside the document. The document takes the notch
+     while it can move that way; at its ends, and when it fits whole, the
+     notch reaches the list as the key. *)
+  | Runtime_params_scroll { scroll; max_scroll } ->
+      let from = min scroll max_scroll in
+      let moved =
+        match direction with
+        | Masc.Tui_mouse_protocol.Wheel_down -> min max_scroll (from + 1)
+        | Masc.Tui_mouse_protocol.Wheel_up -> max 0 (from - 1)
+      in
+      if moved = from then None
+      else Some (Runtime_params_scroll { scroll = moved; max_scroll })
   | System_log_detail_scroll value -> Some (System_log_detail_scroll (step value))
   | Planning_detail_scroll value | Planning_confirmation_scroll (value, _) ->
       Some (Planning_detail_scroll (step value))

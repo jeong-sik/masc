@@ -22,6 +22,7 @@ type t =
   ; invites : Authz_invite_state.t
   ; principals : Authz_principal_state.t
   ; registrations : Authz_registration_state.t
+  ; sessions : Authz_session_state.t
   ; revocation_pending : held list
   ; latest_at_ms : int option
   }
@@ -31,6 +32,7 @@ let empty =
   ; invites = Authz_invite_state.empty
   ; principals = Authz_principal_state.empty
   ; registrations = Authz_registration_state.empty
+  ; sessions = Authz_session_state.empty
   ; revocation_pending = []
   ; latest_at_ms = None
   }
@@ -104,6 +106,8 @@ type refusal =
   | Cancel_owner_unknown of Authz_records.Subject.t
   | Registration_unreadable of Authz_registration_event.error
   | Registration of Authz_registration_state.refusal
+  | Session_unreadable of Authz_session_event.error
+  | Session of Authz_session_state.refusal
 
 let refusal_to_string = function
   | Before_bootstrap kind ->
@@ -170,6 +174,9 @@ let refusal_to_string = function
   | Registration_unreadable error ->
     "the registration record cannot be read: " ^ Authz_registration_event.error_to_string error
   | Registration refusal -> Authz_registration_state.refusal_to_string refusal
+  | Session_unreadable error ->
+    "the session record cannot be read: " ^ Authz_session_event.error_to_string error
+  | Session refusal -> Authz_session_state.refusal_to_string refusal
 ;;
 
 type applied =
@@ -386,7 +393,12 @@ let owner_of_issuer = function
    identity, so the invitation is read first: it is the way the person came
    in. The first stage has no manager, and the beneficiary is the subject or
    the person an open invitation or registration is for, who has not joined
-   and writes nothing. Nobody stands behind any other subject yet. *)
+   and writes nothing. Nobody stands behind any other subject yet.
+
+   Nobody cancels the block of a session (plan C3): the session does not act
+   while it is blocked, its owner closes the block by signing out again, and a
+   new sign-in of the browser closes it by ending the session. Lifting it would
+   only bring back a session that its owner meant to end. *)
 let owner_behind state = function
   | Authz_records.Subject.Invite invite_id ->
     Option.map
@@ -453,6 +465,38 @@ let cancel state (record : R.t) =
      | Authz_records.Author.System_migration -> Error (Canceller_is_not_an_admin record.R.author))
 ;;
 
+(* A sign-out, and a sign-in that ends the session its browser held, end a
+   session, which raises auth_binding_epoch (design 8.1). So each is a [Revoke]
+   intent on the session it ends: a log restored from before it disagrees with
+   the store, and the session does not act again. A sign-in that ends nothing
+   takes no intent: cut back, the session is gone and its browser signs in
+   again. *)
+let session state (record : R.t) =
+  match Authz_session_event.of_body record.R.body with
+  | Error error -> Error (Session_unreadable error)
+  | Ok event ->
+    (match
+       Authz_session_state.apply
+         state.sessions
+         ~author:record.R.author
+         ~at_ms:record.R.at_ms
+         ~is_active:(Authz_principal_state.is_active state.principals)
+         event
+     with
+     | Error refusal -> Error (Session refusal)
+     | Ok sessions ->
+       let ended session_id =
+         Some (C.Authz { event = C.Revoke; subject = Authz_records.Subject.Session session_id })
+       in
+       let high_water =
+         match event with
+         | Authz_session_event.Issued { replaces = Some replaced; _ } -> ended replaced
+         | Authz_session_event.Issued { replaces = None; _ } -> None
+         | Authz_session_event.Revoked { session_id } -> ended session_id
+       in
+       Ok { state = { state with sessions }; high_water })
+;;
+
 (* Every kind but a mode event is matched with the mode, so the branch of a
    kind says what a record of it means before the bootstrap, and a layer gets
    the workspace of the bootstrap only from a branch that has one. *)
@@ -472,6 +516,8 @@ let read state (record : R.t) =
   | K.Revocation_cancel, Authz_mode_state.Off _ -> Error (Accounts_off K.Revocation_cancel)
   | K.Registration, Authz_mode_state.Multi_account _ -> registration state record
   | K.Registration, Authz_mode_state.Off _ -> Error (Accounts_off K.Registration)
+  | K.Session, Authz_mode_state.Multi_account _ -> session state record
+  | K.Session, Authz_mode_state.Off _ -> Error (Accounts_off K.Session)
   | ( ( K.Runtime_grant
       | K.Delegate_policy
       | K.Principal
@@ -497,8 +543,7 @@ let read state (record : R.t) =
       | K.Lease_terminal_evidence
       | K.Preauthorized_expiry
       | K.Migration_diagnostic
-      | K.Local_recovery
-      | K.Session ) as kind )
+      | K.Local_recovery ) as kind )
     , (Authz_mode_state.Multi_account _ | Off _) -> Error (Kind_not_read kind)
 ;;
 

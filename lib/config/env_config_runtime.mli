@@ -85,8 +85,6 @@ end
 (** {1 Voice bridge} *)
 
 module Voice : sig
-  val default_host : string
-  val default_port : int
   val http_request_timeout_sec : float
   val audio_test_tone_timeout_sec : float
 end

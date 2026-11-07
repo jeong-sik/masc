@@ -123,12 +123,6 @@ end
 (** {1 Voice Bridge Configuration} *)
 
 module Voice = struct
-  (** Default Voice MCP server host *)
-  let default_host = Masc_network_defaults.masc_http_default_host
-
-  (** Default Voice MCP server port *)
-  let default_port = 8936
-
   (** Voice MCP HTTP request budget (seconds).
 
       Wraps two [run_voice_status] sites at [voice_bridge.ml:82,139]

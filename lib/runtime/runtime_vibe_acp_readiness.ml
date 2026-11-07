@@ -45,13 +45,15 @@ type account =
   }
 
 type readiness =
-  { auth : auth_status
-  ; account : account
-  }
+  | Not_signed_in of auth_state
+  | Signed_in of
+      { auth_state : auth_state
+      ; account : account
+      }
 
 type not_ready =
   | Not_authenticated of auth_state
-  | Credential_not_from_keyring of auth_state
+  | Credential_not_keyring of auth_state
   | Account_not_ready of account_status
   | Key_not_vibe_scope of key_scope option
   | Budget_used_up of budget
@@ -61,6 +63,8 @@ type budget_knowledge =
   | Unknown
 
 type error =
+  | Workdir_not_absolute of string
+  | Invalid_timeout of float
   | Spawn_failed of string
   | Timed_out of { after_s : float }
   | Rpc_error of
@@ -145,43 +149,46 @@ let key_scope_to_string = function
 
 (* HIGH-RISK-UNREVIEWED: decides which stored credential a lane call may
    spend; needs a human review before a Keeper is assigned to the lane. *)
-let verdict { auth; account } =
-  let reasons =
-    List.concat
-      [ (if auth.authenticated then [] else [ Not_authenticated auth.auth_state ])
-      ; (match auth.auth_state with
-         | Os_keyring -> []
-         | ( Signed_out
-           | Auth_not_required
-           | Vibe_home_env_file
-           | Process_env
-           | Unsupported_provider
-           | Unrecognized_auth_state _ ) as state ->
-           if auth.authenticated then [ Credential_not_from_keyring state ] else [])
-      ; (match account.status with
-         | Ready -> []
-         | (Missing_key | Unauthorized | Unavailable | Unrecognized_account_status _) as
-           status -> [ Account_not_ready status ])
-      ; (match account.key_scope with
-         | Some Vibe -> []
-         | (Some (Workspace | Codestral | Unrecognized_key_scope _) | None) as scope ->
-           [ Key_not_vibe_scope scope ])
-      ; (match account.budget with
-         | Some budget when budget.usage_percentage >= budget_full_percentage ->
-           [ Budget_used_up budget ]
-         | Some _ | None -> [])
-      ]
-  in
-  match reasons, account.budget with
-  | [], Some budget -> Ok (Known budget)
-  | [], None -> Ok Unknown
-  | _ :: _, (Some _ | None) -> Error reasons
+let verdict = function
+  | Not_signed_in auth_state -> Error [ Not_authenticated auth_state ]
+  | Signed_in { auth_state; account } ->
+    let reasons =
+      List.concat
+        [ (match auth_state with
+           | Os_keyring -> []
+           | ( Signed_out
+             | Auth_not_required
+             | Vibe_home_env_file
+             | Process_env
+             | Unsupported_provider
+             | Unrecognized_auth_state _ ) as state -> [ Credential_not_keyring state ])
+        ; (match account.status with
+           | Ready -> []
+           | (Missing_key | Unauthorized | Unavailable | Unrecognized_account_status _) as
+             status -> [ Account_not_ready status ])
+        ; (match account.key_scope with
+           | Some Vibe -> []
+           | (Some (Workspace | Codestral | Unrecognized_key_scope _) | None) as scope ->
+             [ Key_not_vibe_scope scope ])
+        ; (* Written as "not below" so a NaN refuses instead of passing. *)
+          (match account.budget with
+           | Some budget when not (budget.usage_percentage < budget_full_percentage) ->
+             [ Budget_used_up budget ]
+           | Some _ | None -> [])
+        ]
+    in
+    (match reasons, account.budget with
+     | [], Some budget -> Ok (Known budget)
+     | [], None -> Ok Unknown
+     | _ :: _, (Some _ | None) -> Error reasons)
 ;;
 
 let not_ready_to_string = function
   | Not_authenticated state -> "Vibe is not signed in: " ^ auth_state_to_string state
-  | Credential_not_from_keyring state ->
-    "Vibe uses a key from " ^ auth_state_to_string state ^ ", not the keyring credential"
+  | Credential_not_keyring state ->
+    "Vibe's credential state is "
+    ^ auth_state_to_string state
+    ^ "; the lane takes the os_keyring credential only"
   | Account_not_ready status -> "Vibe account is " ^ account_status_to_string status
   | Key_not_vibe_scope scope -> "Vibe key scope is " ^ key_scope_to_string scope
   | Budget_used_up budget ->
@@ -192,6 +199,9 @@ let not_ready_to_string = function
 ;;
 
 let error_to_string = function
+  | Workdir_not_absolute workdir -> Printf.sprintf "workdir %S is not absolute" workdir
+  | Invalid_timeout timeout_s ->
+    Printf.sprintf "timeout_s %g is not a positive finite number" timeout_s
   | Spawn_failed detail -> "vibe-acp did not start: " ^ detail
   | Timed_out { after_s } -> Printf.sprintf "vibe-acp did not answer within %gs" after_s
   | Rpc_error { meth; code = Some code; message } ->
@@ -283,7 +293,8 @@ let decode_account json =
   Ok { status = account_status_of_string status; plan_kind; key_scope; budget }
 ;;
 
-(* The end of the child's stderr, redacted, for a child that stopped early. *)
+(* The end of the child's stderr, kept while it runs. A read error ends the
+   drain like EOF does: the tail is a diagnostic, not part of the answer. *)
 let drain_stderr flow buffer =
   let chunk = Cstruct.create stderr_read_chunk_bytes in
   let rec loop () =
@@ -297,6 +308,7 @@ let drain_stderr flow buffer =
         Buffer.add_string buffer kept);
       loop ()
     | exception End_of_file -> ()
+    | exception Eio.Io (_, _) -> ()
   in
   loop ()
 ;;
@@ -314,18 +326,31 @@ let request id meth params =
   ^ "\n"
 ;;
 
+(* How one step of the exchange failed. [Child_gone] becomes
+   [Process_exited] only after the child is reaped, so its stderr tail is
+   read once the child has stopped writing it. *)
+type step_failure =
+  | Child_gone
+  | Failed of error
+
+let protocol stage detail = Error (Failed (Protocol_error { stage; detail }))
+let decoded result = Result.map_error (fun error -> Failed error) result
+
 (* One response: skip notifications, refuse a request from the agent (none is
    expected before a prompt) or an answer to another id. *)
-let rec await_response reader ~stderr ~id ~meth =
+let rec await_response reader ~id ~meth =
   match Eio.Buf_read.line reader with
-  | exception End_of_file -> Error (Process_exited { stderr_tail = stderr_tail stderr })
+  | exception End_of_file -> Error Child_gone
+  | exception Eio.Buf_read.Buffer_limit_exceeded ->
+    protocol meth (Printf.sprintf "a line is longer than %d bytes" max_line_bytes)
   | line ->
     (match Yojson.Safe.from_string line with
-     | exception Yojson.Json_error detail -> fail meth ("unreadable line: " ^ detail)
+     | exception Yojson.Json_error detail -> protocol meth ("unreadable line: " ^ detail)
      | message ->
        (match field "id" message, field "method" message with
-        | None, Some _ -> await_response reader ~stderr ~id ~meth
-        | Some _, Some (`String request) -> fail meth ("unexpected agent request " ^ request)
+        | None, Some _ -> await_response reader ~id ~meth
+        | Some _, Some (`String request) ->
+          protocol meth ("unexpected agent request " ^ request)
         | Some (`Int answered), None when answered = id ->
           (match field "error" message, field "result" message with
            | Some error, _ ->
@@ -334,23 +359,26 @@ let rec await_response reader ~stderr ~id ~meth =
                | Some (`Int code) -> Some code
                | Some _ | None -> None
              in
-             let message =
+             let text =
                match field "message" error with
                | Some (`String text) -> text
                | Some _ | None -> Yojson.Safe.to_string error
              in
-             Error (Rpc_error { meth; code; message })
+             Error
+               (Failed (Rpc_error { meth; code; message = Secret_patterns.redact_text text }))
            | None, Some result -> Ok result
-           | None, None -> fail meth "response has neither result nor error")
-        | Some other, _ -> fail meth ("answer to another id " ^ Yojson.Safe.to_string other)
-        | None, None -> fail meth "message has neither id nor method"))
+           | None, None -> protocol meth "response has neither result nor error")
+        | Some other, _ -> protocol meth ("answer to another id " ^ Yojson.Safe.to_string other)
+        | None, None -> protocol meth "message has neither id nor method"))
 ;;
 
-let exchange ~stdin ~reader ~stderr ~workdir =
+(* A signed-out Vibe refuses [session/new], so the exchange stops after
+   [_auth/status] when it says [authenticated=false]. *)
+let exchange ~stdin ~reader ~workdir =
   let call id meth params =
     match Eio.Flow.copy_string (request id meth params) stdin with
-    | () -> await_response reader ~stderr ~id ~meth
-    | exception Eio.Io (_, _) -> Error (Process_exited { stderr_tail = stderr_tail stderr })
+    | () -> await_response reader ~id ~meth
+    | exception Eio.Io (_, _) -> Error Child_gone
   in
   let* _ =
     call
@@ -358,72 +386,108 @@ let exchange ~stdin ~reader ~stderr ~workdir =
       "initialize"
       (`Assoc [ "protocolVersion", `Int protocol_version; "clientCapabilities", `Assoc [] ])
   in
-  let* auth = Result.bind (call 2 "_auth/status" (`Assoc [])) decode_auth_status in
-  let* session =
-    call 3 "session/new" (`Assoc [ "cwd", `String workdir; "mcpServers", `List [] ])
+  let* auth =
+    Result.bind (call 2 "_auth/status" (`Assoc [])) (fun json ->
+      decoded (decode_auth_status json))
   in
-  let* session_id = required_string ~stage:"session/new" "sessionId" session in
-  let* account =
-    Result.bind
-      (call 4 "_account/read" (`Assoc [ "sessionId", `String session_id ]))
-      decode_account
-  in
-  Ok { auth; account }
+  if not auth.authenticated
+  then Ok (Not_signed_in auth.auth_state)
+  else
+    let* session =
+      call 3 "session/new" (`Assoc [ "cwd", `String workdir; "mcpServers", `List [] ])
+    in
+    let* session_id = decoded (required_string ~stage:"session/new" "sessionId" session) in
+    let* account =
+      Result.bind
+        (call 4 "_account/read" (`Assoc [ "sessionId", `String session_id ]))
+        (fun json -> decoded (decode_account json))
+    in
+    Ok (Signed_in { auth_state = auth.auth_state; account })
 ;;
 
-(* Closing stdin ends vibe-acp (it exited 0 on EOF in both measured runs);
+let close_stdin stdin =
+  try Eio.Flow.close stdin with
+  | Eio.Io (_, _) -> ()
+;;
+
+let kill proc =
+  Eio.Process.signal proc Sys.sigkill;
+  ignore (Eio.Process.await proc : Eio.Process.exit_status)
+;;
+
+(* Closing stdin ends vibe-acp (it exited 0 on EOF in every measured run);
    one that does not exit within the grace is killed. *)
 let stop ~clock proc stdin =
-  (try Eio.Flow.close stdin with
-   | Eio.Io (_, _) -> ());
+  close_stdin stdin;
   match Eio.Time.with_timeout clock exit_grace_s (fun () -> Ok (Eio.Process.await proc)) with
   | Ok _ -> ()
-  | Error `Timeout ->
-    Eio.Process.signal proc Sys.sigkill;
-    ignore (Eio.Process.await proc : Eio.Process.exit_status)
+  | Error `Timeout -> kill proc
 ;;
 
-let read ~mgr ~clock ~cwd ~cli_path ~timeout_s () =
-  match Eio.Path.native cwd with
-  | None -> Error (Spawn_failed "cwd has no native path")
-  | Some workdir ->
-    Eio.Switch.run (fun sw ->
-      let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
-      let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
-      let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
-      match
-        Eio.Process.spawn
-          ~sw
-          mgr
-          ~cwd
-          ~env:(Runtime_vibe_cli.child_environment (Unix.environment ()))
-          ~stdin:stdin_r
-          ~stdout:stdout_w
-          ~stderr:stderr_w
-          [ cli_path ]
-      with
-      (* Eio raises [Eio.Io] for a missing executable, [Unix_error] for a
-         pipe or fork failure, and [Failure] with the child's own report for
-         a setup step (fchdir, dup2, execve) that failed after the fork. *)
-      | exception ((Eio.Io _ | Unix.Unix_error _ | Failure _) as exn) ->
-        Error (Spawn_failed (Printexc.to_string exn))
-      | proc ->
-        Eio.Flow.close stdin_r;
-        Eio.Flow.close stdout_w;
-        Eio.Flow.close stderr_w;
-        let stderr = Buffer.create stderr_read_chunk_bytes in
-        Eio.Fiber.fork_daemon ~sw (fun () ->
-          drain_stderr stderr_r stderr;
-          `Stop_daemon);
-        let reader = Eio.Buf_read.of_flow ~max_size:max_line_bytes stdout_r in
-        let result =
-          match
-            Eio.Time.with_timeout clock timeout_s (fun () ->
-              Ok (exchange ~stdin:stdin_w ~reader ~stderr ~workdir))
+let valid_timeout timeout_s = Float.is_finite timeout_s && timeout_s > 0.0
+
+let spawn ~sw ~mgr ~cwd ~cli_path =
+  let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
+  let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
+  let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
+  let proc =
+    Eio.Process.spawn
+      ~sw
+      mgr
+      ~cwd
+      ~env:(Runtime_vibe_cli.child_environment (Unix.environment ()))
+      ~stdin:stdin_r
+      ~stdout:stdout_w
+      ~stderr:stderr_w
+      [ cli_path ]
+  in
+  Eio.Flow.close stdin_r;
+  Eio.Flow.close stdout_w;
+  Eio.Flow.close stderr_w;
+  proc, stdin_w, stdout_r, stderr_r
+;;
+
+let read ~mgr ~clock ~fs ~workdir ~cli_path ~timeout_s () =
+  if Filename.is_relative workdir
+  then Error (Workdir_not_absolute workdir)
+  else if not (valid_timeout timeout_s)
+  then Error (Invalid_timeout timeout_s)
+  else
+    Eio.Switch.run
+    @@ fun sw ->
+    match spawn ~sw ~mgr ~cwd:Eio.Path.(fs / workdir) ~cli_path with
+    (* Eio raises [Eio.Io] for a missing executable or a pipe it could not
+       make, [Unix_error] for a fork failure, and [Failure] with the child's
+       own report for a setup step (fchdir, dup2, execve) that failed after
+       the fork. *)
+    | exception ((Eio.Io _ | Unix.Unix_error _ | Failure _) as exn) ->
+      Error (Spawn_failed (Printexc.to_string exn))
+    | proc, stdin, stdout, stderr_flow ->
+      let stderr = Buffer.create stderr_read_chunk_bytes in
+      let stderr_drained, drained = Eio.Promise.create () in
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+        drain_stderr stderr_flow stderr;
+        Eio.Promise.resolve drained ();
+        `Stop_daemon);
+      let reader = Eio.Buf_read.of_flow ~max_size:max_line_bytes stdout in
+      let outcome =
+        Eio.Time.with_timeout clock timeout_s (fun () ->
+          Ok (exchange ~stdin ~reader ~workdir))
+      in
+      (match outcome with
+       | Ok _ -> stop ~clock proc stdin
+       | Error `Timeout ->
+         close_stdin stdin;
+         kill proc);
+      (match outcome with
+       | Ok (Ok readiness) -> Ok readiness
+       | Ok (Error (Failed error)) -> Error error
+       | Ok (Error Child_gone) ->
+         (match
+            Eio.Time.with_timeout clock exit_grace_s (fun () ->
+              Ok (Eio.Promise.await stderr_drained))
           with
-          | Ok result -> result
-          | Error `Timeout -> Error (Timed_out { after_s = timeout_s })
-        in
-        stop ~clock proc stdin_w;
-        result)
+          | Ok () | Error `Timeout -> ());
+         Error (Process_exited { stderr_tail = stderr_tail stderr })
+       | Error `Timeout -> Error (Timed_out { after_s = timeout_s }))
 ;;

@@ -23,7 +23,6 @@
   masc.tool_types
   masc.keeper_registry
   masc.keeper_runtime
-  masc.runtime_model
   masc.runtime
   masc.config_dir_resolver
   time_compat

@@ -18,6 +18,6 @@
   keeper_state_machine_types)
  (flags
   (:standard -w +33))
- (libraries eio uuidm yojson masc.attribution masc_log masc_core)
+ (libraries eio uuidm yojson masc.attribution masc_core)
  (preprocess
   (pps ppx_tla)))

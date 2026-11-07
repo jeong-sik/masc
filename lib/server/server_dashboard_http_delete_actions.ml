@@ -983,7 +983,7 @@ let handle_keeper_lifecycle_completion config operation = function
   | Keeper_shutdown_types.Dashboard_keeper_purged ->
     handle_dashboard_keeper_purge_completion config operation
   | Supervisor_cleaned as action ->
-    Keeper_supervisor_cleanup.handle_completion config operation action
+    Keeper_supervisor_cleanup.handle_completion operation action
 ;;
 
 let close_optional_string json field =

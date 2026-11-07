@@ -147,7 +147,7 @@ let prepare ~upload_paths tool json =
             Ok (B.Action.On_tab {target with interaction=Upload {target=upload;paths}})
         | On_tab {interaction=Upload _;_},None -> Error "upload requires an authoritative Keeper file context"
         | (Open_tab _|Control _|On_tab {interaction=(Back|Forward|Reload
-            |Close_tab|Stop_loading|Accept_dialog _|Dismiss_dialog|Set_emulation _|Clear_emulation|Block_requests _|Unblock_requests);_}),(None|Some _) -> Ok action in
+            |Close_tab|Stop_loading|Accept_dialog _|Dismiss_dialog|Set_cookie _|Delete_cookie _|Set_emulation _|Clear_emulation|Block_requests _|Unblock_requests);_}),(None|Some _) -> Ok action in
       let* request=Legacy.tool_request json in
       let* ()=match action,request.route with
         | (B.Action.Open_tab _|Control _),Browser_selection.Exact (B.Live_route None)

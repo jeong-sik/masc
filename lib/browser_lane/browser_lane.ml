@@ -167,7 +167,7 @@ let reply_policy = function
      | Action.On_tab {interaction;_} ->
        (match interaction with
         | Action.Upload _ -> Executor_owned
-        | Action.Set_emulation _ | Action.Clear_emulation | Action.Block_requests _ | Action.Unblock_requests
+        | Action.Set_cookie _ | Action.Delete_cookie _ | Action.Set_emulation _ | Action.Clear_emulation | Action.Block_requests _ | Action.Unblock_requests
         | Action.Accept_dialog _ | Action.Dismiss_dialog
         | Action.Back | Action.Forward | Action.Reload | Action.Stop_loading | Action.Close_tab -> Reply_window))
   | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_cookies _ | Page_network _ | Page_console _
@@ -184,7 +184,8 @@ let ego_reply_policy = function
      | Action.Open_tab _ -> Executor_owned
      | Action.On_tab {interaction=(Action.Reload|Action.Stop_loading);_} -> Executor_owned
      | (Action.Control _
-       | Action.On_tab {interaction=(Action.Upload _ | Action.Set_emulation _ | Action.Clear_emulation
+       | Action.On_tab {interaction=(Action.Upload _ | Action.Set_cookie _ | Action.Delete_cookie _
+         | Action.Set_emulation _ | Action.Clear_emulation
          | Action.Block_requests _ | Action.Unblock_requests | Action.Accept_dialog _ | Action.Dismiss_dialog
          | Action.Back | Action.Forward | Action.Close_tab);_}) -> reply_policy (Page_act action))
   | Page_interact {action;_} ->
@@ -495,6 +496,7 @@ type live_capability =
   | Storage_listing
   | Request_listing
   | Console_reading
+  | Cookie_writing
 [@@deriving enumerate]
 
 let live_capability_to_wire = function
@@ -534,6 +536,7 @@ let live_capability_to_wire = function
   | Storage_listing -> "storage_listing"
   | Request_listing -> "request_listing"
   | Console_reading -> "console_reading"
+  | Cookie_writing -> "cookie_writing"
 ;;
 
 let live_capability_of_wire raw =
@@ -584,6 +587,7 @@ let live_capability = function
   | Page_act (Action.On_tab {interaction = Action.Upload _; _}) -> File_upload
   | Page_act (Action.On_tab {interaction = (Action.Set_emulation _ | Action.Clear_emulation); _}) -> Environment_emulation
   | Page_act (Action.On_tab {interaction = (Action.Block_requests _ | Action.Unblock_requests); _}) -> Request_blocking
+  | Page_act (Action.On_tab {interaction = (Action.Set_cookie _ | Action.Delete_cookie _); _}) -> Cookie_writing
 ;;
 
 
@@ -662,7 +666,9 @@ let live_transport_of_string = function
    that last as long as the ego SDK process. It lists the names of the
    cookies, web storage keys and IndexedDB databases a page sees, never a
    value, the requests a page made, with no header value, cookie, body
-   or query value, and what a page wrote to its console. It taps and swipes with CDP touch events and no touch emulation;
+   or query value, and what a page wrote to its console. It sets and
+   deletes a page's cookies in the operator's ego profile. It taps and
+   swipes with CDP touch events and no touch emulation;
    test_browser_ego_peer holds its column to what Browser_ego_peer does. *)
 let live_transport_serves transport capability =
   match transport, capability with
@@ -671,7 +677,8 @@ let live_transport_serves transport capability =
                     | Point_scroll | Trusted_hover | Trusted_double_click | Trusted_button_click
                     | Trusted_drag | Trusted_keyboard | Tab_history | Accessibility_snapshot | Dialog_read | Dialog_answer
                     | Snapshot_target_input | Native_workflow | Page_recovery | Operator_handoff | Page_management | Download_listing | File_upload | Tab_activation
-                    | Viewport_resize | Environment_emulation | Request_blocking | Storage_listing | Request_listing | Console_reading | Touch_input) -> true
+                    | Viewport_resize | Environment_emulation | Request_blocking | Storage_listing | Request_listing | Console_reading
+                    | Cookie_writing | Touch_input) -> true
 ;;
 
 let live_transports_serving capability =

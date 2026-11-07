@@ -1,0 +1,23 @@
+{"step":"space","at":"2026-11-07T08:20:18.123Z","value":{"spaceId":20,"name":"masc-l11-cookies-b","ownership":"agent"}}
+{"step":"b0.goto","at":"2026-11-07T08:20:18.274Z","value":{}}
+{"step":"b1.fromA","at":"2026-11-07T08:20:18.276Z","value":["masc_l11_b 127.0.0.1 /"]}
+{"step":"b1.request","at":"2026-11-07T08:20:18.404Z","value":["masc_l11_b=vb"]}
+{"step":"b2.set","at":"2026-11-07T08:20:18.409Z","value":["masc_l11_b 127.0.0.1 /","masc_l11_p 127.0.0.1 /","masc_l11_p 127.0.0.1 /sub"]}
+{"step":"b2.deleteRootPath","at":"2026-11-07T08:20:18.415Z","value":{}}
+{"step":"b2.after","at":"2026-11-07T08:20:18.416Z","value":["masc_l11_b 127.0.0.1 /","masc_l11_p 127.0.0.1 /sub"]}
+{"step":"b3.longPath","at":"2026-11-07T08:20:18.418Z","value":{"error":"Sanitizing cookie failed"}}
+{"step":"b3.path1024","at":"2026-11-07T08:20:18.420Z","value":{"success":true}}
+{"step":"b3.longName","at":"2026-11-07T08:20:18.422Z","value":{"success":true}}
+{"step":"b3.nameValue4096","at":"2026-11-07T08:20:18.423Z","value":{"success":true}}
+{"step":"b3.listed","at":"2026-11-07T08:20:18.424Z","value":["masc_l11_b 127.0.0.1 /","masc_l11_nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn 127.0.0.1 /","masc_l11_nv 127.0.0.1 /"]}
+{"step":"b4.goto","at":"2026-11-07T08:20:18.506Z","value":"http://a.l11.localhost:18777/page"}
+{"step":"b4.set","at":"2026-11-07T08:20:18.512Z","value":{"host":{"success":true},"parent":{"success":true},"parent2":{"success":true},"listed":["masc_l11_dom .l11.localhost /","masc_l11_host a.l11.localhost /"]}}
+{"step":"b4.page","at":"2026-11-07T08:20:18.558Z","value":["masc_l11_dom=d","masc_l11_host=h"]}
+{"step":"b4.deleteParentNoDot","at":"2026-11-07T08:20:18.561Z","value":{}}
+{"step":"b4.afterNoDot","at":"2026-11-07T08:20:18.563Z","value":["masc_l11_dom .l11.localhost /","masc_l11_host a.l11.localhost /"]}
+{"step":"b4.deleteParentDot","at":"2026-11-07T08:20:18.567Z","value":{}}
+{"step":"b4.afterDot","at":"2026-11-07T08:20:18.568Z","value":["masc_l11_host a.l11.localhost /"]}
+{"step":"b4.deleteParentByUrl","at":"2026-11-07T08:20:18.570Z","value":{}}
+{"step":"b4.afterUrl","at":"2026-11-07T08:20:18.572Z","value":["masc_l11_host a.l11.localhost /"]}
+{"step":"z.clean","at":"2026-11-07T08:20:19.591Z","value":{"deleted":["masc_l11_host a.l11.localhost /","masc_l11_nnnnnnnnnnnnnnn 127.0.0.1 /","masc_l11_lp 127.0.0.1 /ppppppppppp","masc_l11_b 127.0.0.1 /","masc_l11_nv 127.0.0.1 /","masc_l11_p 127.0.0.1 /sub"],"after":[]}}
+{"step":"z.finish","at":"2026-11-07T08:20:19.595Z","value":{"spaceId":20,"closedSpace":true,"keptManagedLabels":[],"closedManagedLabels":["p1"],"preservedUnmanagedCount":0}}

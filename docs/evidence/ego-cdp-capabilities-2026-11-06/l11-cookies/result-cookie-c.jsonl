@@ -1,0 +1,30 @@
+{"step":"space","at":"2026-11-07T08:53:09.998Z","value":{"spaceId":23,"name":"masc-l11-cookies-c","ownership":"agent"}}
+{"step":"c0.goto","at":"2026-11-07T08:53:10.096Z","value":{}}
+{"step":"c0.before","at":"2026-11-07T08:53:10.099Z","value":[]}
+{"step":"c1.set","at":"2026-11-07T08:53:10.108Z","value":{"ok":true,"value":{"name":"masc_l11_c1","domain":"127.0.0.1","path":"/","secure":false,"httpOnly":false,"session":true,"replaced":false}}}
+{"step":"c2.again","at":"2026-11-07T08:53:10.114Z","value":{"ok":true,"value":{"name":"masc_l11_c1","domain":"127.0.0.1","path":"/","secure":false,"httpOnly":false,"session":true,"replaced":true}}}
+{"step":"c3.attributes","at":"2026-11-07T08:53:10.119Z","value":{"ok":true,"value":{"name":"masc_l11_c3","domain":"127.0.0.1","path":"/","secure":true,"httpOnly":true,"sameSite":"Strict","session":false,"expiry":1794045190,"replaced":false}}}
+{"step":"c4.page","at":"2026-11-07T08:53:10.120Z","value":["masc_l11_c1=v2"]}
+{"step":"c4.request","at":"2026-11-07T08:53:10.125Z","value":["masc_l11_c1=v2","masc_l11_c3=v-masc_l11_c3"]}
+{"step":"c5.subPath","at":"2026-11-07T08:53:10.132Z","value":{"ok":true,"value":{"name":"masc_l11_c5","domain":"127.0.0.1","path":"/sub","secure":false,"httpOnly":false,"session":true,"replaced":false}}}
+{"step":"c5.listedSub","at":"2026-11-07T08:53:10.133Z","value":["masc_l11_c1 127.0.0.1 /","masc_l11_c3 127.0.0.1 /","masc_l11_c5 127.0.0.1 /sub"]}
+{"step":"c6.delete","at":"2026-11-07T08:53:10.143Z","value":{"ok":true,"value":{"deleted":[{"domain":"127.0.0.1","path":"/"}]}}}
+{"step":"c7.prepare","at":"2026-11-07T08:53:10.153Z","value":["masc_l11_c3 127.0.0.1 /","masc_l11_two 127.0.0.1 /","masc_l11_two 127.0.0.1 /page","masc_l11_c3 127.0.0.1 /","masc_l11_c5 127.0.0.1 /sub","masc_l11_two 127.0.0.1 /","masc_l11_two 127.0.0.1 /sub"]}
+{"step":"c7.delete","at":"2026-11-07T08:53:10.167Z","value":{"ok":true,"value":{"deleted":[{"domain":"127.0.0.1","path":"/page"},{"domain":"127.0.0.1","path":"/"}]}}}
+{"step":"c7.after","at":"2026-11-07T08:53:10.170Z","value":["masc_l11_c3 127.0.0.1 /","masc_l11_c3 127.0.0.1 /","masc_l11_c5 127.0.0.1 /sub","masc_l11_two 127.0.0.1 /sub"]}
+{"step":"c8.nobody","at":"2026-11-07T08:53:10.175Z","value":{"ok":true,"value":{"deleted":[]}}}
+{"step":"c9.noneInsecure","at":"2026-11-07T08:53:10.179Z","value":{"ok":false,"before":true,"error":"the browser refused the cookie (Network.setCookie answered success false), as it does for SameSite=None without Secure; nothing was written"}}
+{"step":"c10.semicolon","at":"2026-11-07T08:53:10.184Z","value":{"ok":false,"before":true,"error":"Network.setCookie failed: Sanitizing cookie failed"}}
+{"step":"c11.hostPrefix","at":"2026-11-07T08:53:10.189Z","value":{"ok":false,"before":true,"error":"Network.setCookie failed: Sanitizing cookie failed"}}
+{"step":"c11.listed","at":"2026-11-07T08:53:10.191Z","value":["masc_l11_c3 127.0.0.1 /"]}
+{"step":"c12.blank","at":"2026-11-07T08:53:10.264Z","value":{"ok":false,"before":true,"error":"cookies are written for a page at an http or https address; this tab is at a about: address"}}
+{"step":"c13.goto","at":"2026-11-07T08:53:10.348Z","value":"http://a.l11.localhost:18777/page"}
+{"step":"c13.set","at":"2026-11-07T08:53:10.355Z","value":{"host":{"ok":true,"value":{"name":"masc_l11_c13","domain":"a.l11.localhost","path":"/","secure":false,"httpOnly":false,"session":true,"replaced":false}},"listed":["masc_l11_c13 .l11.localhost /","masc_l11_c13 a.l11.localhost /"]}}
+{"step":"c13.replaceBesideDomain","at":"2026-11-07T08:53:10.359Z","value":{"ok":true,"value":{"name":"masc_l11_c13","domain":"a.l11.localhost","path":"/","secure":false,"httpOnly":false,"session":true,"replaced":true}}}
+{"step":"c13.delete","at":"2026-11-07T08:53:10.372Z","value":{"ok":true,"value":{"deleted":[{"domain":"a.l11.localhost","path":"/"},{"domain":".l11.localhost","path":"/"}]}}}
+{"step":"c13.after","at":"2026-11-07T08:53:10.373Z","value":[]}
+{"step":"c14.goto","at":"2026-11-07T08:53:10.454Z","value":{}}
+{"step":"c14.busy1","at":"2026-11-07T08:53:13.472Z","value":{"setMs":2806,"set":{"ok":true,"value":{"name":"masc_l11_busy","domain":"127.0.0.1","path":"/","secure":false,"httpOnly":false,"session":true,"replaced":false}},"deleteMs":8,"deleted":{"ok":true,"value":{"deleted":[{"domain":"127.0.0.1","path":"/"}]}}}}
+{"step":"c14.busy2","at":"2026-11-07T08:53:19.489Z","value":{"setMs":2802,"set":{"ok":true,"value":{"name":"masc_l11_busy","domain":"127.0.0.1","path":"/","secure":false,"httpOnly":false,"session":true,"replaced":false}},"deleteMs":8,"deleted":{"ok":true,"value":{"deleted":[{"domain":"127.0.0.1","path":"/"}]}}}}
+{"step":"z.clean","at":"2026-11-07T08:53:22.808Z","value":{"deleted":["masc_l11_c3 127.0.0.1 /","masc_l11_c5 127.0.0.1 /sub","masc_l11_two 127.0.0.1 /sub"],"after":[]}}
+{"step":"z.finish","at":"2026-11-07T08:53:22.813Z","value":{"spaceId":23,"closedSpace":true,"keptManagedLabels":[],"closedManagedLabels":["p1"],"preservedUnmanagedCount":0}}

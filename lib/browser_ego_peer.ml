@@ -1110,6 +1110,27 @@ let request_block_receipt ~id ~action ~kind ~unknown value =
   | (`Block | `Unblock), _ ->
     Error (Live.Outcome_unknown ("ego answered a request block receipt of another shape; " ^ unknown))
 
+(* Cookie writes (Browser_ego_cookie_write) change the operator's ego
+   profile and never answer a value. *)
+let cookie_write t id interaction =
+  let* label = label_of t id in
+  let step, args, unknown, receipt = match interaction with
+    | `Set (cookie : Browser_lane.Action.cookie) ->
+      "page.set_cookie", Browser_ego_cookie_write.set_args ~label ~tab:id cookie,
+      Browser_ego_cookie_write.unknown_set ~tab:id ~name:cookie.name, Browser_ego_cookie_write.set_receipt ~tab:id ~cookie
+    | `Delete name ->
+      "page.delete_cookie", Browser_ego_cookie_write.delete_args ~label ~tab:id ~name,
+      Browser_ego_cookie_write.unknown_delete ~tab:id ~name, Browser_ego_cookie_write.delete_receipt ~tab:id ~name in
+  let action = match interaction with
+    | `Set cookie -> Browser_lane.Action.Set_cookie cookie | `Delete name -> Browser_lane.Action.Delete_cookie name in
+  match run_step t ~window_s:(tab_window id action) ~step ~args (String.concat "\n" [
+      "  const reason = " ^ message ^ ";";
+      unblocked_managed_page;
+      "    emit(await (" ^ Browser_ego_cookie_write.script ^ ")(task.page(args.label), args, reason));";
+      "  }" ]) with
+  | Error failure -> Error (effect_failure ~unknown failure)
+  | Ok value -> Result.map_error (fun detail -> Live.Outcome_unknown (detail ^ "; " ^ unknown)) (receipt value)
+
 let block_requests t id hosts =
   let* label = label_of t id in
   let interaction, action, kind, wire = match hosts with
@@ -1192,14 +1213,8 @@ let storage_names_script = {js|async function(page, args, reason) {
       indexedDb: seen.indexedDb}}};
 }|js}
 
-type same_site = Same_site_strict | Same_site_lax | Same_site_none
-let same_site_to_wire = function
-  | Same_site_strict -> "Strict" | Same_site_lax -> "Lax" | Same_site_none -> "None"
-let same_site_of_wire = function
-  | "Strict" -> Some Same_site_strict | "Lax" -> Some Same_site_lax | "None" -> Some Same_site_none
-  | _ -> None
 type listed_cookie = { cookie_name : string; cookie_domain : string; cookie_path : string; cookie_secure : bool;
-  cookie_http_only : bool; cookie_same_site : same_site option; cookie_expiry : int option }
+  cookie_http_only : bool; cookie_same_site : Browser_lane.Action.same_site option; cookie_expiry : int option }
 type listed_names = { names_held : int; names_listed : string list; names_truncated : bool }
 type storage_area = Area_names of listed_names | Area_unreadable of string
 type database_listing = Database_names of listed_names | Databases_unsupported | Databases_unreadable of string
@@ -1223,7 +1238,7 @@ let listed_cookie = function
        Some (`Bool cookie_http_only) ->
        let* cookie_same_site = match List.assoc_opt "sameSite" fields with
          | None -> Ok None
-         | Some (`String wire) -> (match same_site_of_wire wire with Some value -> Ok (Some value) | None -> refused ())
+         | Some (`String wire) -> (match Browser_lane.Action.same_site_of_wire wire with Some value -> Ok (Some value) | None -> refused ())
          | Some _ -> refused () in
        let* cookie_expiry = match List.assoc_opt "expiry" fields with
          | None -> Ok None
@@ -1266,7 +1281,7 @@ let database_listing_json = function
 let listed_cookie_json {cookie_name; cookie_domain; cookie_path; cookie_secure; cookie_http_only; cookie_same_site; cookie_expiry} =
   obj (["name",str cookie_name;"domain",str cookie_domain;"path",str cookie_path;"secure",`Bool cookie_secure;
         "httpOnly",`Bool cookie_http_only]
-    @ Option.to_list (Option.map (fun value -> "sameSite",str (same_site_to_wire value)) cookie_same_site)
+    @ Option.to_list (Option.map (fun value -> "sameSite",str (Browser_lane.Action.same_site_to_wire value)) cookie_same_site)
     @ Option.to_list (Option.map (fun seconds -> "expiry",`Int seconds) cookie_expiry))
 
 (* The answer is rebuilt from what was parsed, so a field the script did not
@@ -2421,6 +2436,10 @@ let act ?actor t args =
     block_requests t tab_id (Some hosts)
   | Ok (Browser_lane.Action.On_tab {tab_id; interaction = Browser_lane.Action.Unblock_requests}) ->
     block_requests t tab_id None
+  | Ok (Browser_lane.Action.On_tab {tab_id; interaction = Browser_lane.Action.Set_cookie cookie}) ->
+    cookie_write t tab_id (`Set cookie)
+  | Ok (Browser_lane.Action.On_tab {tab_id; interaction = Browser_lane.Action.Delete_cookie name}) ->
+    cookie_write t tab_id (`Delete name)
 
 let workflow ?actor t args =
   let pre result = Result.map_error (fun detail -> Live.Before_effect detail) result in

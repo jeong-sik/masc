@@ -129,7 +129,12 @@ let run ~source ~step ~idle ~clock ~ping_interval_s ~send =
     if source.stopped ()
     then Source_stopped
     else (
-      match (send (String.concat "" (List.rev frames)) : Server_sse_response.outcome) with
+      let payload =
+        match frames with
+        | [ frame ] -> frame
+        | _ -> String.concat "" (List.rev frames)
+      in
+      match (send payload : Server_sse_response.outcome) with
       | Written -> if last then Finished else serve ()
       | Closed -> Client_gone
       | Stalled -> Stalled)

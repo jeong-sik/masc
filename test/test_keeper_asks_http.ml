@@ -15,7 +15,7 @@ let connection_patience_s = 10.0
 let wire_raw_response ~clock ?(meth=`GET) ?(body="") ?(http_version="HTTP/1.1") ~router target =
   let output = Buffer.create 4096 in
   let connection = Httpun.Server_connection.create (fun reqd ->
-    Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd) in
+    Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) (Http_reqd.of_httpun reqd)) in
   let raw = Printf.sprintf "%s %s %s\r\nHost: localhost:8935\r\nContent-Length: %d\r\n\r\n%s"
       (Httpun.Method.to_string meth) target http_version (String.length body) body in
   let input = Bigstringaf.of_string ~off:0 ~len:(String.length raw) raw in

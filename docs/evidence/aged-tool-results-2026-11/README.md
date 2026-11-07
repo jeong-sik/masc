@@ -268,7 +268,7 @@ python3 -m unittest discover -s docs/evidence/aged-tool-results-2026-11
 
 - 나머지 `result-rewrite-cost-*` 세 파일은 `--since 2026-11-04T12:00:00`과 `--exclude-keeper msx-retro-mania`를 바꿔 끼워서 만들어요.
 - `measure_aged_rewrite_cost.py`는 `--from-date`를 `--since`보다 하루 앞에 둬요. 창 앞의 요청이 있어야 어떤 결과가 이미 늙었는지 알아요.
-- `measure_turn_requests.py`는 턴 파일을 수정 시각으로 골라요. 창이 끝난 뒤에도 파일이 늘어서 `no_usage`와 `outside_window`는 나중에 돌리면 커져요.
+- `measure_turn_requests.py`는 턴 파일을 수정 시각으로 골라요. 창이 끝난 뒤에도 파일이 늘어서 `no_usage`와 `outside_window`는 나중에 돌리면 커져요. 스캔하는 동안 지워진 턴 파일은 읽지 않고 `vanished_files`로 세요(11-07에 오래된 턴 파일이 지워지는 중에 돌리다 `FileNotFoundError`로 죽은 적이 있어요).
 
 - `--marker-bytes`, `--threshold`(여러 번), `--headline-threshold`로 마커 크기와 문턱을 바꿔요. 줄어드는 몫의 요청별 분포와 Keeper별 표는 `--headline-threshold`의 값으로 계산해요.
 - 규칙을 코드에 넣은 뒤에는 같은 명령을 새 요청에 돌려요. "현재 턴보다 앞선 도구 결과의 몫"이 0에 가까워졌는지가 바뀐 코드를 확인하는 값이에요.

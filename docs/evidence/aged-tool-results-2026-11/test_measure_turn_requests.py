@@ -15,6 +15,7 @@ import sys
 import tempfile
 import unittest
 from typing import cast
+from unittest import mock
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
@@ -262,6 +263,27 @@ class LoadTest(unittest.TestCase):
     def test_a_missing_store_has_no_turns(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             self.assertEqual(turns.load(pathlib.Path(folder), None, turns.Skipped()), [])
+
+    def test_a_file_deleted_after_it_was_listed_is_counted_and_not_read(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            base = pathlib.Path(folder)
+            write_turn(base, "a", "first", turn_lines("t", 1, 100.0, [(0, 1, 0)]), mtime=500.0)
+            doomed = write_turn(base, "a", "second", turn_lines("t", 2, 200.0, [(0, 1, 0)]), mtime=600.0)
+            skipped = turns.Skipped()
+            files = turns.turn_files(base, None, skipped)
+            # Yielding `first` means the folder is listed, so `second` is already on the list.
+            self.assertEqual(next(files)[1].name, "first.jsonl")
+            doomed.unlink()
+            self.assertEqual(list(files), [])
+        self.assertEqual(skipped.vanished_files, 1)
+
+    def test_a_file_deleted_between_the_check_and_the_read_is_counted(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            base = pathlib.Path(folder)
+            skipped = turns.Skipped()
+            with mock.patch.object(turns, "turn_files", return_value=iter([("a", base / "gone.jsonl")])):
+                self.assertEqual(turns.load(base, None, skipped), [])
+        self.assertEqual(skipped.vanished_files, 1)
 
 
 class CommandLineTest(unittest.TestCase):

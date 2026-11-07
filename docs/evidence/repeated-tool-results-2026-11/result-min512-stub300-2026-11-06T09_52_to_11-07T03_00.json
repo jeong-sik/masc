@@ -418,6 +418,181 @@
       "p90": 0.0,
       "p99": 0.3715,
       "max": 0.4927
+    },
+    "distance": {
+      "repeats": 2647,
+      "repeat_bytes": 5944159,
+      "to_first_messages": {
+        "p50": 148,
+        "p90": 506,
+        "p99": 754,
+        "max": 806
+      },
+      "bytes_between_first": {
+        "p50": 291558,
+        "p90": 857055,
+        "p99": 1289664,
+        "max": 1483947
+      },
+      "to_previous_messages": {
+        "p50": 2,
+        "p90": 4,
+        "p99": 6,
+        "max": 140
+      },
+      "rank": {
+        "p50": 61,
+        "p90": 244,
+        "p99": 375,
+        "max": 401
+      },
+      "by_keeper": [
+        {
+          "keeper": "kidsnote-incoming-dd-manager",
+          "repeats": 832,
+          "repeat_bytes": 3580012,
+          "to_first_messages": {
+            "p50": 132,
+            "p90": 334,
+            "p99": 460,
+            "max": 476
+          },
+          "bytes_between_first": {
+            "p50": 395788,
+            "p90": 1067675,
+            "p99": 1424264,
+            "max": 1483947
+          },
+          "to_previous_messages": {
+            "p50": 2,
+            "p90": 6,
+            "p99": 6,
+            "max": 36
+          },
+          "rank": {
+            "p50": 45,
+            "p90": 128,
+            "p99": 166,
+            "max": 170
+          }
+        },
+        {
+          "keeper": "masc-productor-owner",
+          "repeats": 1659,
+          "repeat_bytes": 1300493,
+          "to_first_messages": {
+            "p50": 186,
+            "p90": 586,
+            "p99": 774,
+            "max": 806
+          },
+          "bytes_between_first": {
+            "p50": 274101,
+            "p90": 802017,
+            "p99": 1071794,
+            "max": 1117925
+          },
+          "to_previous_messages": {
+            "p50": 2,
+            "p90": 2,
+            "p99": 6,
+            "max": 140
+          },
+          "rank": {
+            "p50": 88,
+            "p90": 279,
+            "p99": 385,
+            "max": 401
+          }
+        },
+        {
+          "keeper": "e-masc-the-leader",
+          "repeats": 146,
+          "repeat_bytes": 992717,
+          "to_first_messages": {
+            "p50": 24,
+            "p90": 128,
+            "p99": 180,
+            "max": 184
+          },
+          "bytes_between_first": {
+            "p50": 53996,
+            "p90": 358207,
+            "p99": 506380,
+            "max": 517822
+          },
+          "to_previous_messages": {
+            "p50": 4,
+            "p90": 4,
+            "p99": 8,
+            "max": 8
+          },
+          "rank": {
+            "p50": 7,
+            "p90": 33,
+            "p99": 46,
+            "max": 47
+          }
+        },
+        {
+          "keeper": "github-pr-checker",
+          "repeats": 8,
+          "repeat_bytes": 59858,
+          "to_first_messages": {
+            "p50": 4,
+            "p90": 8,
+            "p99": 8,
+            "max": 8
+          },
+          "bytes_between_first": {
+            "p50": 4838,
+            "p90": 27313,
+            "p99": 27313,
+            "max": 27313
+          },
+          "to_previous_messages": {
+            "p50": 2,
+            "p90": 4,
+            "p99": 4,
+            "max": 4
+          },
+          "rank": {
+            "p50": 2,
+            "p90": 4,
+            "p99": 4,
+            "max": 4
+          }
+        },
+        {
+          "keeper": "wkbl-front",
+          "repeats": 2,
+          "repeat_bytes": 11079,
+          "to_first_messages": {
+            "p50": 2,
+            "p90": 2,
+            "p99": 2,
+            "max": 2
+          },
+          "bytes_between_first": {
+            "p50": 3700,
+            "p90": 3700,
+            "p99": 3700,
+            "max": 3700
+          },
+          "to_previous_messages": {
+            "p50": 2,
+            "p90": 2,
+            "p99": 2,
+            "max": 2
+          },
+          "rank": {
+            "p50": 2,
+            "p90": 2,
+            "p99": 2,
+            "max": 2
+          }
+        }
+      ]
     }
   },
   "ledger": {
@@ -698,11 +873,11 @@
   "skipped": {
     "bad_lines": 0,
     "bad_message_entries": 0,
-    "outside_window": 180980,
+    "outside_window": 183284,
     "missing_blobs": 0,
     "unreadable_blobs": 0,
-    "other_records": 200,
-    "unkeyed_calls": 2186,
+    "other_records": 204,
+    "unkeyed_calls": 2215,
     "unmatched_results": 0
   }
 }

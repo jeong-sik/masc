@@ -421,6 +421,123 @@
       "p90": 0.0,
       "p99": 0.0022,
       "max": 0.0293
+    },
+    "distance": {
+      "repeats": 13,
+      "repeat_bytes": 94628,
+      "to_first_messages": {
+        "p50": 4,
+        "p90": 8,
+        "p99": 140,
+        "max": 140
+      },
+      "bytes_between_first": {
+        "p50": 5527,
+        "p90": 27313,
+        "p99": 157311,
+        "max": 157311
+      },
+      "to_previous_messages": {
+        "p50": 2,
+        "p90": 4,
+        "p99": 140,
+        "max": 140
+      },
+      "rank": {
+        "p50": 2,
+        "p90": 3,
+        "p99": 4,
+        "max": 4
+      },
+      "by_keeper": [
+        {
+          "keeper": "github-pr-checker",
+          "repeats": 8,
+          "repeat_bytes": 59858,
+          "to_first_messages": {
+            "p50": 4,
+            "p90": 8,
+            "p99": 8,
+            "max": 8
+          },
+          "bytes_between_first": {
+            "p50": 4838,
+            "p90": 27313,
+            "p99": 27313,
+            "max": 27313
+          },
+          "to_previous_messages": {
+            "p50": 2,
+            "p90": 4,
+            "p99": 4,
+            "max": 4
+          },
+          "rank": {
+            "p50": 2,
+            "p90": 4,
+            "p99": 4,
+            "max": 4
+          }
+        },
+        {
+          "keeper": "masc-productor-owner",
+          "repeats": 3,
+          "repeat_bytes": 23691,
+          "to_first_messages": {
+            "p50": 4,
+            "p90": 140,
+            "p99": 140,
+            "max": 140
+          },
+          "bytes_between_first": {
+            "p50": 7629,
+            "p90": 157311,
+            "p99": 157311,
+            "max": 157311
+          },
+          "to_previous_messages": {
+            "p50": 4,
+            "p90": 140,
+            "p99": 140,
+            "max": 140
+          },
+          "rank": {
+            "p50": 2,
+            "p90": 2,
+            "p99": 2,
+            "max": 2
+          }
+        },
+        {
+          "keeper": "wkbl-front",
+          "repeats": 2,
+          "repeat_bytes": 11079,
+          "to_first_messages": {
+            "p50": 2,
+            "p90": 2,
+            "p99": 2,
+            "max": 2
+          },
+          "bytes_between_first": {
+            "p50": 3700,
+            "p90": 3700,
+            "p99": 3700,
+            "max": 3700
+          },
+          "to_previous_messages": {
+            "p50": 2,
+            "p90": 2,
+            "p99": 2,
+            "max": 2
+          },
+          "rank": {
+            "p50": 2,
+            "p90": 2,
+            "p99": 2,
+            "max": 2
+          }
+        }
+      ]
     }
   },
   "ledger": {
@@ -701,11 +818,11 @@
   "skipped": {
     "bad_lines": 0,
     "bad_message_entries": 0,
-    "outside_window": 174004,
+    "outside_window": 175547,
     "missing_blobs": 0,
     "unreadable_blobs": 0,
-    "other_records": 200,
-    "unkeyed_calls": 2186,
+    "other_records": 204,
+    "unkeyed_calls": 2215,
     "unmatched_results": 0
   }
 }

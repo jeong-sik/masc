@@ -41,6 +41,14 @@ Definitions:
   points at the first result. The default is the text size of an existing marker, 348 bytes
   being the most common size in the stored requests, so a stub is assumed not to be smaller.
   Earlier-turn repeats are counted apart and save nothing here.
+- distance (stored request): for a same-turn repeat, `to_first` is the number of messages from
+  the first result of the turn with the same text to the repeat, `to_previous` the same to the
+  nearest earlier result with that text, `bytes_between_first` the prompt bytes of the messages
+  strictly between the repeat and the first result, and `rank` is 2 for the second time the text
+  appears in the turn. Two results of one message are 0 messages and 0 bytes apart. The report
+  counts a call once, by keeper, session and `tool_use_id`, in the first request that carries it,
+  because every later request of a long turn carries it again and would weigh it once for each.
+  A repeat without a session or a `tool_use_id` is counted each time.
 - repeated result (ledger): a row with `record_kind == "tool_call"` and `result_bytes` of at
   least `--min-bytes` whose `output_fingerprint` equals the one of an earlier row with the
   same keeper, `session_id` and `keeper_turn_id`. Rows before `--since` still count as
@@ -63,6 +71,8 @@ Limits:
   request view skips a message with media.
 - A blob that the blob sweep deleted is counted in `missing_blobs` and its message is not
   compared, so the request view then undercounts.
+- The distance is measured in the request as sent. When the tail window cut the first result away,
+  a repeat is measured from the first result that request still carries.
 
 Usage:
     python3 docs/evidence/repeated-tool-results-2026-11/measure_repeated_results.py \
@@ -114,6 +124,18 @@ class Stored:
     captured_at: float
     fixed_bytes: int
     messages: tuple[Message, ...]
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class Repeat:
+    """A same-turn repeat found in one stored request; the distances are in messages of that request."""
+
+    size: int
+    to_first: int
+    to_previous: int
+    bytes_between: int
+    rank: int
+    call_id: str | None
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -189,6 +211,8 @@ class Tally:
     by_period: dict[str, Bucket] = dataclasses.field(default_factory=new_buckets)
     # Stored requests only: the saved share of each request.
     request_shares: list[float] = dataclasses.field(default_factory=list[float])
+    # Stored requests only: every same-turn repeat with the keeper and session of its request.
+    repeats: list[tuple[str, str | None, Repeat]] = dataclasses.field(default_factory=list[tuple[str, str | None, Repeat]])
 
     def add(
         self,
@@ -363,19 +387,24 @@ def repeated_results(
     params: Params,
     skipped: Skipped,
     answer_of: Callable[[str], str | None] | None,
-) -> tuple[list[int], list[int]]:
-    """Sizes of the results that repeat an earlier one: of the same turn, and of an earlier turn only.
+) -> tuple[list[Repeat], list[int]]:
+    """The results that repeat an earlier one: of the same turn, and the sizes of those of an earlier turn only.
 
     `answer_of` maps a call id to the ledger fingerprint of its answer; None compares the texts."""
-    this_turn: set[str] = set()
-    earlier_turns: set[str] = set()
-    same: list[int] = []
-    earlier: list[int] = []
+    prefix = [0]
     for message in messages:
+        prefix.append(prefix[-1] + message.size)
+    first_at: dict[str, int] = {}
+    last_at: dict[str, int] = {}
+    times: dict[str, int] = {}
+    earlier_turns: set[str] = set()
+    same: list[Repeat] = []
+    earlier: list[int] = []
+    for position, message in enumerate(messages):
         if message.role == "user":
             if starts_turn(base_path, message, skipped):
-                earlier_turns |= this_turn
-                this_turn = set()
+                earlier_turns.update(first_at)
+                first_at, last_at, times = {}, {}, {}
             continue
         if message.role != "tool" or message.has_media or message.sha is None or message.size < params.min_bytes:
             continue
@@ -390,12 +419,18 @@ def repeated_results(
                 if identity is None:
                     skipped.unmatched_results += 1
                     continue
-            if identity in this_turn:
-                same.append(len(encoded))
+            if identity in first_at:
+                origin = first_at[identity]
+                times[identity] += 1
+                between = prefix[position] - prefix[origin + 1] if position > origin else 0
+                same.append(Repeat(len(encoded), position - origin, position - last_at[identity], between, times[identity], result.call_id))
+                last_at[identity] = position
                 continue
             if identity in earlier_turns:
                 earlier.append(len(encoded))
-            this_turn.add(identity)
+            first_at[identity] = position
+            last_at[identity] = position
+            times[identity] = 1
     return same, earlier
 
 
@@ -412,10 +447,12 @@ def replay_requests(
             skipped.outside_window += 1
             continue
         answer_of = None if fingerprints is None else answer_lookup(fingerprints, request)
-        sizes, earlier_sizes = repeated_results(base_path, request.messages, params, skipped, answer_of)
+        found, earlier_sizes = repeated_results(base_path, request.messages, params, skipped, answer_of)
+        sizes = [repeat.size for repeat in found]
         prompt = sum(message.size for message in request.messages) + request.fixed_bytes
         period = period_of(request.captured_at, "%Y-%m-%dT%H")
         tally.add(request.keeper, None, period, prompt, sizes, params.stub_bytes, earlier_sizes)
+        tally.repeats.extend((request.keeper, request.trace, repeat) for repeat in found)
         tally.request_shares.append(sum(max(0, size - params.stub_bytes) for size in sizes) / prompt if prompt > 0 else 0.0)
     return tally
 
@@ -525,6 +562,49 @@ def top_blocks(label: str, buckets: dict[str, Bucket], top: int, with_earlier: b
     return [{label: name, **bucket_block(bucket, with_earlier)} for name, bucket in ranked]
 
 
+def spread(values: Sequence[int]) -> dict[str, int]:
+    ordered = sorted(values)
+    return {**{name: int(quantile(ordered, q)) for name, q in QUANTILES}, "max": ordered[-1] if ordered else 0}
+
+
+def counted_once(repeats: Sequence[tuple[str, str | None, Repeat]]) -> list[tuple[str, Repeat]]:
+    """Each call of a session once, in the first request that carries it; a repeat that cannot be
+    named by session and call id is kept every time."""
+    seen: set[tuple[str, str, str]] = set()
+    kept: list[tuple[str, Repeat]] = []
+    for keeper, trace, repeat in repeats:
+        if trace is not None and repeat.call_id is not None:
+            key = (keeper, trace, repeat.call_id)
+            if key in seen:
+                continue
+            seen.add(key)
+        kept.append((keeper, repeat))
+    return kept
+
+
+def distance_block(repeats: Sequence[Repeat]) -> dict[str, object]:
+    return {
+        "repeats": len(repeats),
+        "repeat_bytes": sum(repeat.size for repeat in repeats),
+        "to_first_messages": spread([repeat.to_first for repeat in repeats]),
+        "bytes_between_first": spread([repeat.bytes_between for repeat in repeats]),
+        "to_previous_messages": spread([repeat.to_previous for repeat in repeats]),
+        "rank": spread([repeat.rank for repeat in repeats]),
+    }
+
+
+def distance_report(tally: Tally, top: int) -> dict[str, object]:
+    kept = counted_once(tally.repeats)
+    grouped: dict[str, list[Repeat]] = {}
+    for keeper, repeat in kept:
+        grouped.setdefault(keeper, []).append(repeat)
+    ranked = sorted(grouped.items(), key=lambda item: (-sum(repeat.size for repeat in item[1]), item[0]))[:top]
+    return {
+        **distance_block([repeat for _, repeat in kept]),
+        "by_keeper": [{"keeper": keeper, **distance_block(repeats)} for keeper, repeats in ranked],
+    }
+
+
 def report(tally: Tally, top: int, period_label: str, ledger: bool) -> dict[str, object]:
     """`count` is requests or calls and `bytes` is prompt bytes or result bytes."""
     with_earlier = not ledger
@@ -542,6 +622,7 @@ def report(tally: Tally, top: int, period_label: str, ledger: bool) -> dict[str,
             **{name: round(quantile(ordered, q), 4) for name, q in QUANTILES},
             "max": round(ordered[-1], 4) if ordered else 0.0,
         }
+        result["distance"] = distance_report(tally, top)
     return result
 
 

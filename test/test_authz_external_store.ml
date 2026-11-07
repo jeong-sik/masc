@@ -35,7 +35,8 @@ let workspace = get (Workspace_id.of_string "workspace-1")
 let other_workspace = get (Workspace_id.of_string "workspace-2")
 let invite = Subject.Invite (get (Invite_id.of_string "invite-1"))
 let registration = Subject.Registration (get (Registration_id.of_string "registration-1"))
-let subjects = [ grant; credential; runtime; human; service; invite; registration ]
+let session = Subject.Session (get (Session_id.of_string "session-1"))
+let subjects = [ grant; credential; runtime; session; human; service; invite; registration ]
 let authz event subject = C.Authz { event; subject }
 let mode event workspace_id = C.Mode { event; workspace_id }
 
@@ -289,6 +290,11 @@ let lines_are_pinned () =
      ^ {|{"type":"authz","event":"revoke","subject":{"type":"registration","id":"registration-1"}}}|})
     (pending (authz C.Revoke registration));
   check
+    "an intent about a browser session"
+    (intent_prefix "intent_pending"
+     ^ {|{"type":"authz","event":"revoke","subject":{"type":"session","id":"session-1"}}}|})
+    (pending (authz C.Revoke session));
+  check
     "an intent about the mode"
     (intent_prefix "intent_pending"
      ^ {|{"type":"mode","event":"fresh_bootstrap","workspace_id":"workspace-1"}}|})
@@ -370,8 +376,8 @@ let check_reads_back label state entry =
 
 let every_change_reads_back () =
   Alcotest.(check int)
-    "eight authorization events with seven subjects each, and three mode events"
-    59
+    "eight authorization events with eight subjects each, and three mode events"
+    67
     (List.length all_changes);
   with_path (fun path ->
     let store, _, _ = open_ok ~path in

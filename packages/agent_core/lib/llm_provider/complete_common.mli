@@ -174,3 +174,23 @@ val http_error_diagnostic_body
   -> code:int
   -> body:string
   -> string
+
+(** A refusal (a non-2xx answer) read by the wire codec that received it, while
+    the provider identity is still known. The sync and stream completion seams
+    and the Exact_output execution seam all read a refusal through this one
+    rule, so the same body gets the same class on every path.
+
+    GLM states its condition in its envelope's documented [code]
+    ({!Backend_glm.provider_failure_of_glm_error}): a spent usage window
+    answers [429], which the status alone reads as a rate limit, and a window
+    refusal answers [400]. A promoted quota keeps the wait the refusal stated
+    ([Retry.resolve_retry_after] over its body and [Retry-After] header). A
+    code that names no typed failure, a body that did not arrive in the
+    caller's window, and every other codec keep the refusal as it came.
+
+    Pass the body as the provider sent it: a redacted copy may no longer parse
+    as the envelope. Redact only what is shown or logged. *)
+val provider_refusal
+  :  http_codec:Provider_http_codec.t
+  -> Http_client.http_error
+  -> Http_client.http_error

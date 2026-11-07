@@ -57,18 +57,24 @@ val classify_glm_error : code:string -> glm_error_class
 val http_code_of_glm_error_class : glm_error_class -> int
 
 (** Parse glm's structured error envelope from a raw response body.
-    [None] when the body is not JSON or carries no error object. Used by the
-    streaming path to classify a non-200 rejection by its documented [code]
-    field before provider identity is erased (agent-core boundary). *)
+    [None] when the body is not JSON or carries no error object. Every seam
+    reads a non-200 rejection by its documented [code] field through
+    {!Complete_common.provider_refusal}, before provider identity is erased
+    (agent-core boundary). *)
 val check_glm_error : string -> glm_error option
 
 (** The typed failure a GLM provider error is promoted to, or [None] when its
     class keeps the HTTP path. [Glm_context_overflow] becomes
-    [Context_overflow], [Glm_quota_exceeded] becomes [Hard_quota]. The sync
-    and stream completion seams and the Exact_output execution seam all read
-    GLM envelopes through this one rule, so the same body is classified the
-    same way on every path. *)
-val provider_failure_of_glm_error : glm_error -> Http_client.http_error option
+    [Context_overflow], [Glm_quota_exceeded] becomes [Hard_quota] carrying
+    [retry_after], the wait the response itself stated (its [Retry-After]
+    header or body hint), [None] when it stated none. The sync and stream
+    completion seams and the Exact_output execution seam all read GLM
+    envelopes through this one rule, so the same body is classified the same
+    way on every path. *)
+val provider_failure_of_glm_error
+  :  retry_after:float option
+  -> glm_error
+  -> Http_client.http_error option
 
 (** Build a Glm chat completion request body.
     Delegates to {!Backend_openai.build_request} and injects

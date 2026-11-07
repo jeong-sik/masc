@@ -998,6 +998,40 @@ let http_error_diagnostic_body
       (sanitize_url_for_log url)
 ;;
 
+let provider_refusal ~(http_codec : Provider_http_codec.t) (refusal : Http_client.http_error) =
+  match http_codec with
+  | Provider_http_codec.Glm_chat ->
+    (match refusal with
+     | Http_client.HttpError { body = Http_client.Received body; retry_after_header; code = _ }
+       ->
+       let envelope =
+         (* [Yojson.Safe.Util] raises on a body whose [error] is not an object
+            (a bare string, a number); such a body names no code. *)
+         try Backend_glm.check_glm_error body with
+         | Yojson.Safe.Util.Type_error _ -> None
+       in
+       (* The wait the refusal stated travels with the promoted failure, as
+          [Retry.classify_error] carries it on the status path. *)
+       let retry_after = Retry.resolve_retry_after ~body ~header:retry_after_header in
+       (match Option.bind envelope (Backend_glm.provider_failure_of_glm_error ~retry_after) with
+        | Some failure -> failure
+        | None -> refusal)
+     (* Only a body that arrived carries the envelope's code; a refusal whose
+        body the caller's window cut has none to read and keeps the class the
+        status alone supports. *)
+     | Http_client.HttpError { body = Http_client.Not_received_in_window; _ }
+     | Http_client.NetworkError _
+     | Http_client.TimeoutError _
+     | Http_client.AcceptRejected _
+     | Http_client.ProviderTerminal _
+     | Http_client.ProviderFailure _ -> refusal)
+  | Provider_http_codec.Anthropic_messages
+  | Provider_http_codec.Openai_chat
+  | Provider_http_codec.Openai_responses
+  | Provider_http_codec.Ollama_chat
+  | Provider_http_codec.Gemini_generate_content -> refusal
+;;
+
 let%test "http_error_diagnostic_body preserves non-empty provider body" =
   let config =
     Provider_config.make

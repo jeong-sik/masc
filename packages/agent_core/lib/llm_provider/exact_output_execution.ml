@@ -206,25 +206,11 @@ let execute_once_with_evidence ~net ~clock ?on_phase plan =
        | Http_client.Not_received_in_window -> None
      in
      let provider_error =
-       let refusal = Http_client.HttpError
-         { code = raw.status; body = receipt.body_receipt;
-           retry_after_header = raw.retry_after_header } in
-       match Exact_output_plan.response_codec plan, receipt.body_receipt with
-       | Provider_http_codec.Glm_chat, Http_client.Received body ->
-         let envelope =
-           try Backend_glm.check_glm_error body with
-           | Yojson.Safe.Util.Type_error _ -> None
-         in
-         (* The rule the sync and stream seams read a GLM envelope by: a
-            window refusal becomes [Context_overflow] and a quota code
-            (1113, 1304, 1308-1311, 1313) becomes [Hard_quota]. Reading only
-            the window here left a spent quota, which GLM sends as a 429,
-            classified as a rate limit on this path alone. *)
-         (match Option.bind envelope Backend_glm.provider_failure_of_glm_error with
-          | Some failure -> failure
-          | None -> refusal)
-       | (Provider_http_codec.Glm_chat, Http_client.Not_received_in_window)
-       | ((Provider_http_codec.Anthropic_messages | (Provider_http_codec.Openai_chat | (Provider_http_codec.Openai_responses | (Provider_http_codec.Ollama_chat | Provider_http_codec.Gemini_generate_content)))), _) -> refusal
+       Complete_common.provider_refusal
+         ~http_codec:(Exact_output_plan.response_codec plan)
+         (Http_client.HttpError
+            { code = raw.status; body = receipt.body_receipt;
+              retry_after_header = raw.retry_after_header })
      in
      error ?raw_response (response_received_receipt raw.status)
        (Provider_error provider_error)

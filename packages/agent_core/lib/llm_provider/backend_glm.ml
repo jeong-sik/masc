@@ -46,10 +46,12 @@ type glm_error =
     - 1300: policy block (terminal)
     - 1301: unsafe content (terminal)
     - 1302,1303,1305,1312: rate/load limit
-    - 1304,1308,1310: quota exhausted. 1304 is not in the docs.z.ai or
-      docs.bigmodel.cn code tables (checked 2026-09-24); its only record
-      here is the inline test naming it a daily limit.
-    - 1309,1311,1313: subscription/plan (quota)
+    - 1308,1310: a spent usage window (docs.z.ai and docs.bigmodel.cn,
+      checked 2026-11-06)
+    - 1316-1321: a spent 5-hour or 7-day usage window that extra usage
+      cannot cover (docs.z.ai, checked 2026-11-06)
+    - 1309,1311,1313,1314: subscription/plan (quota). 1314 is an expired
+      enterprise package (docs.z.ai, checked 2026-11-06)
     - 1230,1234,500: server error *)
 let classify_glm_error ~code : glm_error_class =
   match code with
@@ -65,8 +67,19 @@ let classify_glm_error ~code : glm_error_class =
   | "1120"
   | "1220" -> Glm_auth_error
   | "1302" | "1303" | "1305" | "1312" -> Glm_rate_limited
-  | "1113" | "1304" | "1308" | "1309" | "1310" | "1311" | "1313" ->
-    Glm_quota_exceeded
+  | "1113"
+  | "1308"
+  | "1309"
+  | "1310"
+  | "1311"
+  | "1313"
+  | "1314"
+  | "1316"
+  | "1317"
+  | "1318"
+  | "1319"
+  | "1320"
+  | "1321" -> Glm_quota_exceeded
   | "1230" | "1234" | "500" -> Glm_server_error
   | "1300"
   | "1301"
@@ -212,11 +225,14 @@ let check_glm_error body : glm_error option =
    envelope by. A class that names a typed failure is promoted while the
    provider identity is still known; every other class keeps the HTTP path.
    A context overflow carries no token limit in the envelope. Arrears, an
-   exhausted package, an expired plan or a spent usage window (1113, 1304,
-   1308-1311, 1313) take the hard-quota route; 1308 and 1310 state their
-   reset time only inside the message prose, which is not parsed, so the
-   failure carries no retry_after. *)
-let provider_failure_of_glm_error (error : glm_error) : Http_client.http_error option =
+   exhausted package, an expired plan or a spent usage window (1113,
+   1308-1311, 1313, 1314, 1316-1321) take the hard-quota route. The usage
+   window codes state their reset only inside the message prose, which is not
+   parsed; the failure carries only the wait the response stated elsewhere
+   ([retry_after]), and the provider's declared usage read dates the reset. *)
+let provider_failure_of_glm_error ~retry_after (error : glm_error)
+  : Http_client.http_error option
+  =
   match error.error_class with
   | Glm_context_overflow ->
     Some
@@ -225,7 +241,7 @@ let provider_failure_of_glm_error (error : glm_error) : Http_client.http_error o
   | Glm_quota_exceeded ->
     Some
       (Http_client.ProviderFailure
-         { kind = Http_client.Hard_quota { retry_after = None }
+         { kind = Http_client.Hard_quota { retry_after }
          ; message =
              (match error.code with
               | Some code -> Printf.sprintf "Glm error %s: %s" code error.message
@@ -242,7 +258,7 @@ let%test "glm quota envelopes promote to hard quota" =
           (Printf.sprintf {|{"error":{"code":"%s","message":"quota"}}|} code)
       with
       | Some error ->
-        (match provider_failure_of_glm_error error with
+        (match provider_failure_of_glm_error ~retry_after:None error with
          | Some
              (Http_client.ProviderFailure
                 { kind = Http_client.Hard_quota { retry_after = None }; _ }) -> true
@@ -268,12 +284,13 @@ let%test "glm quota envelopes promote to hard quota" =
                 ; _
                 }) -> false)
       | None -> false)
-    [ "1113"; "1304"; "1308"; "1309"; "1310"; "1311"; "1313" ]
+    [ "1113"; "1308"; "1309"; "1310"; "1311"; "1313"; "1314"; "1316"; "1317"
+    ; "1318"; "1319"; "1320"; "1321" ]
 ;;
 
 let%test "glm rate limit keeps the http path" =
   match check_glm_error {|{"error":{"code":"1305","message":"busy"}}|} with
-  | Some error -> Option.is_none (provider_failure_of_glm_error error)
+  | Some error -> Option.is_none (provider_failure_of_glm_error ~retry_after:None error)
   | None -> false
 ;;
 
@@ -658,8 +675,8 @@ let%test "classify auth from code 1001" =
   classify_glm_error ~code:"1001" = Glm_auth_error
 ;;
 
-let%test "classify quota from code 1304 (daily limit)" =
-  classify_glm_error ~code:"1304" = Glm_quota_exceeded
+let%test "code 1304, absent from both code tables, names no quota" =
+  classify_glm_error ~code:"1304" <> Glm_quota_exceeded
 ;;
 
 let%test "classify quota from code 1308 (usage limit)" =

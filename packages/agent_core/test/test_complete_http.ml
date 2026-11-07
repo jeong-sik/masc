@@ -117,6 +117,7 @@ let start_mock_server
       ?capture_path
       ?capture_headers
       ?on_request
+      ?response_headers
       response_body
   =
   let port = fresh_port () in
@@ -135,7 +136,8 @@ let start_mock_server
     (match clock with
      | Some clk when delay_sec > 0.0 -> Eio.Time.sleep clk delay_sec
      | _ -> ());
-    Cohttp_eio.Server.respond_string ~status ~body:response_body ()
+    let headers = Option.map Cohttp.Header.of_list response_headers in
+    Cohttp_eio.Server.respond_string ?headers ~status ~body:response_body ()
   in
   let socket =
     Eio.Net.listen
@@ -622,6 +624,171 @@ let test_complete_http_empty_error_body_has_context () =
     | Error _ -> fail "expected HttpError"
   with
   | Exit -> ()
+;;
+
+(* ── complete: GLM refusal read by its documented code ── *)
+
+(* The body Z.AI's coding endpoint sent with HTTP 429 when the 5-hour usage
+   window was spent (system log, 2026-10-30 to 2026-11-06; the reset time is
+   the test's). Only [code] is read; the prose carries the reset. *)
+let glm_refusal_body code =
+  Printf.sprintf
+    {|{"error":{"code":"%s","message":"Usage limit reached for 5 hour. Your limit will reset at 2026-11-06 14:20:44"}}|}
+    code
+;;
+
+type completion_seam =
+  | Sync_seam
+  | Stream_seam
+
+let glm_config base_url =
+  Provider_config.make
+    ~kind:Provider_config.Glm
+    ~model_id:"glm-5.1"
+    ~base_url
+    ~request_path:"/chat/completions"
+    ~temperature:0.0
+    ~max_tokens:100
+    ()
+;;
+
+(* What one refusal answered with [status] and [body] becomes on [seam]. *)
+let refusal_on
+      ?(config_of = glm_config)
+      ?(status = `Too_many_requests)
+      ?response_headers
+      ~seam
+      body
+  =
+  Eio_main.run
+  @@ fun env ->
+  let seen = ref "no answer" in
+  (try
+     Eio.Switch.run
+     @@ fun sw ->
+     let url = start_mock_server ~sw ~net:env#net ~status ?response_headers body in
+     let config = config_of url in
+     let result =
+       match seam with
+       | Sync_seam ->
+         (Complete.complete ~sw ~net:env#net ~config ~messages ()).Completion_outcome.result
+       | Stream_seam ->
+         (Complete.complete_stream ~sw ~net:env#net ~config ~messages ~on_event:(fun _ -> ()) ())
+           .Completion_outcome.result
+     in
+     seen
+     := (match result with
+         | Error
+             (Http_client.ProviderFailure
+                { kind = Http_client.Hard_quota { retry_after = None }; _ }) ->
+           "hard quota without a stated reset"
+         | Error
+             (Http_client.ProviderFailure
+                { kind = Http_client.Hard_quota { retry_after = Some seconds }; _ }) ->
+           Printf.sprintf "hard quota resting %.0fs" seconds
+         | Error
+             (Http_client.ProviderFailure { kind = Http_client.Context_overflow _; _ }) ->
+           "context overflow"
+         | Error (Http_client.HttpError { code; _ }) -> Printf.sprintf "HTTP %d" code
+         | Error
+             ( Http_client.NetworkError _ | Http_client.TimeoutError _
+             | Http_client.AcceptRejected _ | Http_client.ProviderTerminal _
+             | Http_client.ProviderFailure _ ) -> "another failure"
+         | Ok _ -> "an answer");
+     Eio.Switch.fail sw Exit
+   with
+   | Exit -> ());
+  !seen
+;;
+
+let both_seams = [ Sync_seam; Stream_seam ]
+
+let seam_label = function
+  | Sync_seam -> "sync"
+  | Stream_seam -> "stream"
+;;
+
+(* 2026-11-06: the sync seam returned GLM's spent 5-hour window (code 1308) as
+   an HTTP 429, so MASC rested GLM as a throttle with no stated end and a
+   chain whose head rested for days could not wait for GLM's own reset. The
+   stream seam did the same for a refusal that arrived before any body. *)
+let test_glm_spent_usage_window_is_a_hard_quota_on_both_seams () =
+  List.iter
+    (fun seam ->
+       List.iter
+         (fun code ->
+            check
+              string
+              (Printf.sprintf "%s: documented usage-window code %s" (seam_label seam) code)
+              "hard quota without a stated reset"
+              (refusal_on ~seam (glm_refusal_body code)))
+         [ "1308"; "1310"; "1314"; "1316"; "1317"; "1318"; "1319"; "1320"; "1321" ];
+       (* A URL and an [@] in the same body: the sync seam's diagnostic copy
+          redacts URL userinfo, which can cut across the JSON. The envelope is
+          read from the body as sent. *)
+       check
+         string
+         (Printf.sprintf "%s: the envelope is read before redaction" (seam_label seam))
+         "hard quota without a stated reset"
+         (refusal_on
+            ~seam
+            {|{"error":{"message":"see https://z.ai","code":"1308"},"x":"a@b"}|}))
+    both_seams
+;;
+
+(* A refusal that states its wait keeps it after promotion, as the status path
+   keeps it for a rate limit. *)
+let test_glm_hard_quota_keeps_the_stated_wait () =
+  List.iter
+    (fun seam ->
+       check
+         string
+         (Printf.sprintf "%s: Retry-After survives the promotion" (seam_label seam))
+         "hard quota resting 18000s"
+         (refusal_on ~seam ~response_headers:[ "retry-after", "18000" ] (glm_refusal_body "1308")))
+    both_seams
+;;
+
+(* 1261 is GLM's window refusal, sent as a 400. *)
+let test_glm_window_refusal_is_a_context_overflow_on_both_seams () =
+  List.iter
+    (fun seam ->
+       check
+         string
+         (Printf.sprintf "%s: code 1261" (seam_label seam))
+         "context overflow"
+         (refusal_on
+            ~seam
+            ~status:`Bad_request
+            {|{"error":{"code":"1261","message":"Prompt exceeds max length"}}|}))
+    both_seams
+;;
+
+(* A throttle (1302), a code the table does not list, a body without a code,
+   and a GLM body answered by a non-GLM codec keep the class the status alone
+   gives. *)
+let test_glm_throttle_and_unknown_codes_keep_the_status () =
+  List.iter
+    (fun seam ->
+       List.iter
+         (fun (label, body) ->
+            check
+              string
+              (Printf.sprintf "%s: %s" (seam_label seam) label)
+              "HTTP 429"
+              (refusal_on ~seam body))
+         [ "code 1302 is a throttle", glm_refusal_body "1302"
+         ; "an undocumented code names nothing", glm_refusal_body "1399"
+         ; "1304, in neither Z.AI code table, names nothing", glm_refusal_body "1304"
+         ; "a body without a code names nothing", {|{"error":{"message":"busy"}}|}
+         ; "a bare error string names nothing", {|{"error":"busy"}|}
+         ];
+       check
+         string
+         (Printf.sprintf "%s: an OpenAI-compatible codec reads no GLM code" (seam_label seam))
+         "HTTP 429"
+         (refusal_on ~config_of:make_openai_config ~seam (glm_refusal_body "1308")))
+    both_seams
 ;;
 
 (* ── complete: Openai compat ─────────────────────────── *)
@@ -4957,6 +5124,22 @@ let () =
             "empty http error body has context"
             `Quick
             test_complete_http_empty_error_body_has_context
+        ; test_case
+            "glm spent usage window is a hard quota on both seams"
+            `Quick
+            test_glm_spent_usage_window_is_a_hard_quota_on_both_seams
+        ; test_case
+            "glm hard quota keeps the stated wait"
+            `Quick
+            test_glm_hard_quota_keeps_the_stated_wait
+        ; test_case
+            "glm window refusal is a context overflow on both seams"
+            `Quick
+            test_glm_window_refusal_is_a_context_overflow_on_both_seams
+        ; test_case
+            "glm throttle and unknown codes keep the status"
+            `Quick
+            test_glm_throttle_and_unknown_codes_keep_the_status
         ; test_case "openai ok" `Quick test_complete_openai_ok
         ; test_case
             "openai responses sync ok"

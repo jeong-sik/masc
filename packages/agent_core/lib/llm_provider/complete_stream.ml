@@ -1218,13 +1218,16 @@ let complete_stream_http
             body_logic ())
           ())
       with
-      | (Error (Http_client.HttpError _) as e) | (Error (Http_client.NetworkError _) as e)
-      | (Error (Http_client.TimeoutError _) as e) | (Error (Http_client.AcceptRejected _) as e)
-      | (Error (Http_client.ProviderTerminal _) as e) | (Error (Http_client.ProviderFailure _) as e) ->
+      | Error
+          (( Http_client.HttpError _ | Http_client.NetworkError _
+           | Http_client.TimeoutError _ | Http_client.AcceptRejected _
+           | Http_client.ProviderTerminal _ | Http_client.ProviderFailure _ ) as err) ->
         (* Agent Core contract: transport-level error before body_logic ran (or
-           before its publish). Idempotent via summary_published. *)
+           before its publish). Idempotent via summary_published. A non-200
+           status arrives here, before any body logic, so the codec reads the
+           refusal here too ([Complete_common.provider_refusal]). *)
         publish_summary ~terminal:(Telemetry_event.Terminal_error "transport_error") ();
-        e
+        Error (Complete_common.provider_refusal ~http_codec err)
       | Ok (Ok resp) ->
         let latency_ms = latency_ms_int latency_counter in
         (* Ollama done-chunk usage overrides the accumulated report; without a
@@ -1300,44 +1303,11 @@ let complete_stream_http
         publish_summary ~terminal:(Telemetry_event.Terminal_error "timeout_error") ();
         Error err
       | Ok (Error err) ->
-        (* agent-core boundary: a glm request rejection arrives as a non-200 whose body is
-           glm's structured error envelope. Promote a context overflow or a
-           quota exhaustion to its typed [ProviderFailure] here, while the
-           provider identity is still known — downstream classification
-           ([Retry.classify_error]) is provider-agnostic and would read the
-           status alone: an overflow as [InvalidRequest], cutting consumers off
-           from compaction/shrink recovery, and a quota exhaustion's 429 as a
-           rate limit. The promotion parses the envelope's documented [code]
-           field ([Backend_glm.check_glm_error]), never message prose, through
-           the same rule the sync seam uses
-           ([Backend_glm.provider_failure_of_glm_error]). *)
-        let err =
-          match http_codec with
-          | Provider_http_codec.Glm_chat ->
-            (match err with
-             (* Only a body that arrived carries the envelope's code; a
-                refusal whose body the caller's window cut has none to read
-                and keeps the classification the status alone supports. *)
-             | Http_client.HttpError { body = Http_client.Received body; _ } ->
-               (match
-                  Option.bind
-                    (Backend_glm.check_glm_error body)
-                    Backend_glm.provider_failure_of_glm_error
-                with
-                | Some failure -> failure
-                | None -> err)
-             | Http_client.HttpError { body = Http_client.Not_received_in_window; _ }
-             | Http_client.NetworkError _
-             | Http_client.TimeoutError _
-             | Http_client.AcceptRejected _
-             | Http_client.ProviderTerminal _
-             | Http_client.ProviderFailure _ -> err)
-          | Provider_http_codec.Anthropic_messages
-          | Provider_http_codec.Openai_chat
-          | Provider_http_codec.Openai_responses
-          | Provider_http_codec.Gemini_generate_content
-          | Provider_http_codec.Ollama_chat -> err
-        in
+        (* agent-core boundary: downstream classification
+           ([Retry.classify_error]) is provider-agnostic and reads the status
+           alone, so the codec reads the refusal here while the provider
+           identity is still known ([Complete_common.provider_refusal]). *)
+        let err = Complete_common.provider_refusal ~http_codec err in
         let terminal =
           match !terminal_state with
           | (Telemetry_event.Terminal_error _ | Telemetry_event.Terminal_cancelled) as

@@ -138,6 +138,7 @@ type memory_keeper_health = {
   mkh_added : int;
   mkh_removed : int;
   mkh_snapshot_present : bool;
+  mkh_age_bins : Keeper_memory_age_bins.t option;
   mkh_context_cycle : memory_context_cycle;
   mkh_librarian : memory_librarian_health;
   mkh_librarian_failures : int;
@@ -486,6 +487,7 @@ let decode_memory_keeper_health json =
       ; "added"
       ; "removed"
       ; "snapshot_present"
+      ; "age_bins"
       ; "context_cycle"
       ; "librarian"
       ; "librarian_failures"
@@ -525,6 +527,26 @@ let decode_memory_keeper_health json =
        && Option.fold ~none:true ~some:(fun ts -> Float.is_finite ts && ts >= 0.) mkh_updated_at
     then Ok ()
     else Error "memory updated_at must describe a readable snapshot"
+  in
+  let* mkh_read_error = optional_string json "read_error" in
+  let* mkh_age_bins =
+    match member "age_bins" json with
+    | `Null ->
+      if mkh_snapshot_present && Option.is_none mkh_read_error
+      then Error "age_bins must be present when snapshot is readable"
+      else Ok None
+    | bins_json ->
+      let* bins =
+        match Keeper_memory_age_bins.of_json bins_json with
+        | Ok b -> Ok b
+        | Error err -> Error ("invalid age_bins: " ^ err)
+      in
+      let* () =
+        if Keeper_memory_age_bins.total bins = mkh_facts
+        then Ok ()
+        else Error "age_bins sum disagrees with total facts"
+      in
+      Ok (Some bins)
   in
   let* mkh_context_cycle = decode_memory_context_cycle json in
   let* mkh_librarian = decode_memory_librarian_health json in
@@ -566,7 +588,6 @@ let decode_memory_keeper_health json =
     then Ok ()
     else Error "vision ingest error total disagrees with its reasons"
   in
-  let* mkh_read_error = optional_string json "read_error" in
   let* mkh_source_revision = required_int_field json "source_revision" in
   let* mkh_source_facts = required_int_field json "source_facts" in
   let* mkh_source_invalidations =
@@ -621,6 +642,7 @@ let decode_memory_keeper_health json =
     ; mkh_added
     ; mkh_removed
     ; mkh_snapshot_present
+    ; mkh_age_bins
     ; mkh_context_cycle
     ; mkh_librarian
     ; mkh_librarian_failures
@@ -685,7 +707,7 @@ let decode_memory_health_snapshot json =
   in
   let* schema = required_string_field json "schema" in
   let* () =
-    if String.equal schema "keeper.memory_os.current_health.v8"
+    if String.equal schema "keeper.memory_os.current_health.v9"
     then Ok ()
     else Error ("unsupported memory health schema: " ^ schema)
   in
@@ -950,7 +972,7 @@ let decode_memory_health_row ~keeper json =
   in
   let* schema = required_string_field json "schema" in
   let* () =
-    if String.equal schema "keeper.memory_os.current_health.v8"
+    if String.equal schema "keeper.memory_os.current_health.v9"
     then Ok ()
     else Error ("unsupported memory health schema: " ^ schema)
   in

@@ -35,6 +35,7 @@ Definitions:
 
 Cached tokens are provider-reported tokens, not bytes. The files are chosen by their
 modification time, which is never earlier than the start of the turn they record.
+A file that is deleted after the scan listed it is counted in `vanished_files` and not read.
 
 Usage:
     python3 docs/evidence/aged-tool-results-2026-11/measure_turn_requests.py \
@@ -87,6 +88,7 @@ class Skipped:
     bad_lines: int = 0
     no_usage: int = 0
     outside_window: int = 0
+    vanished_files: int = 0
 
 
 def as_int(value: object) -> int | None:
@@ -145,20 +147,30 @@ def parse_turn(keeper: str, lines: Sequence[str], skipped: Skipped) -> Turn | No
     return Turn(keeper, trace, number, started, ended, model, tuple(usage[scope] for scope in sorted(usage)))
 
 
-def turn_files(base_path: pathlib.Path, since: float | None) -> Iterator[tuple[str, pathlib.Path]]:
+def turn_files(base_path: pathlib.Path, since: float | None, skipped: Skipped) -> Iterator[tuple[str, pathlib.Path]]:
     root = base_path / ".masc" / "keeper_turn_events"
     if not root.is_dir():
         return
     for folder in sorted(root.iterdir()):
         for path in sorted(folder.glob("*.jsonl")):
-            if since is None or path.stat().st_mtime >= since:
+            try:
+                modified = path.stat().st_mtime
+            except FileNotFoundError:
+                skipped.vanished_files += 1
+                continue
+            if since is None or modified >= since:
                 yield folder.name, path
 
 
 def load(base_path: pathlib.Path, since: float | None, skipped: Skipped) -> list[Turn]:
     turns: list[Turn] = []
-    for keeper, path in turn_files(base_path, since):
-        turn = parse_turn(keeper, path.read_text(encoding="utf-8", errors="replace").splitlines(), skipped)
+    for keeper, path in turn_files(base_path, since, skipped):
+        try:
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except FileNotFoundError:
+            skipped.vanished_files += 1
+            continue
+        turn = parse_turn(keeper, lines, skipped)
         if turn is not None:
             turns.append(turn)
     return turns
